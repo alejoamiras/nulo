@@ -48,14 +48,43 @@ contract PortalReinitTest is Test {
         assertEq(portal.l2Bridge(), bridge, "first init sets l2Bridge");
         assertEq(portal.rollupVersion(), 1, "first init derives rollup version");
 
-        // Second init — by ANY caller — reverts on the guard (the F-001 fix; canonical allowed it).
+        // Re-init — even by the initializer — reverts on the once-guard (canonical allowed it).
         FakeRegistry evil = new FakeRegistry(address(new FakeRollup()));
-        vm.prank(address(0xBAD));
         vm.expectRevert(NuloTokenPortalShim.AlreadyInitialized.selector);
+        portal.initialize(address(evil), address(0xDEAD), bytes32(uint256(0x6666)));
+
+        // A non-initializer caller is rejected before the once-guard even matters.
+        vm.prank(address(0xBAD));
+        vm.expectRevert(NuloTokenPortalShim.NotInitializer.selector);
         portal.initialize(address(evil), address(0xDEAD), bytes32(uint256(0x6666)));
 
         // State is unchanged after the rejected re-init.
         assertEq(portal.underlying(), usdc, "underlying unchanged after rejected re-init");
         assertEq(portal.l2Bridge(), bridge, "l2Bridge unchanged after rejected re-init");
+    }
+
+    /// F-001 front-run regression: the deploy and initialize are separate transactions, so an
+    /// attacker watching the mempool can try to bind THEIR registry first (whose fake outbox would
+    /// drain every deposit). The deployer-only initializer guard must reject them while the honest
+    /// initialize still succeeds afterwards.
+    function test_F001_initialize_frontRun_reverts() public {
+        NuloTokenPortalShim portal = new NuloTokenPortalShim();
+        address usdc = address(0xA11CE);
+        bytes32 bridge = bytes32(uint256(0x1111));
+
+        // Attacker front-runs the FIRST initialize with their own registry.
+        FakeRegistry evilReg = new FakeRegistry(address(new FakeRollup()));
+        vm.prank(address(0xBAD));
+        vm.expectRevert(NuloTokenPortalShim.NotInitializer.selector);
+        portal.initialize(address(evilReg), usdc, bytes32(uint256(0xAAAA)));
+
+        // Nothing bound by the rejected front-run.
+        assertEq(portal.registry(), address(0), "front-run must not bind a registry");
+
+        // The honest initializer (the deploying EOA == this test contract) still succeeds.
+        FakeRegistry honestReg = new FakeRegistry(address(new FakeRollup()));
+        portal.initialize(address(honestReg), usdc, bridge);
+        assertEq(portal.underlying(), usdc, "honest init sets underlying");
+        assertEq(portal.l2Bridge(), bridge, "honest init sets l2Bridge");
     }
 }

@@ -18,11 +18,26 @@ bridge-core 227/227 under vitest.
 2. if the poisoned address were ever published, becomes full custodian: their fake rollup
    supplies both inbox and outbox, so `withdraw` releases every deposited token to them.
 
-Proven end-to-end in `test_FA_portalInitFrontRun_bricksAndDrains` (PoC includes the drain).
+Proven end-to-end in `test_FA_portalInitFrontRun_bricksAndDrains` (PoC includes the drain); the
+same test now asserts the attack reverts, and `PortalReinit.t.sol` covers it at shim level.
 
 Operational mitigations already present reduce this to griefing in practice: the conductor
 pre-checks `l2Bridge == 0` before init and STOPs on drift, and the address is published only
-after init + readbacks. **Fix (Arc 2): move initialization into the constructor.**
+after init + readbacks.
+
+**Fix (Arc 2): a deployer-pinned initializer, NOT constructor-init.** The constructor records
+`msg.sender` as the immutable `initializer` and `initialize` reverts `NotInitializer` for anyone
+else. Constructor-init was the originally approved shape and was declined during implementation:
+the portal would need the L2 bridge address as a constructor argument, but that address is
+derived FROM the deployed portal address. It is feasible under direct EOA CREATE, where the
+address is nonce-predictable before broadcast, but it would have restructured both conductors
+mid-flight for no additional security over the guard.
+
+Accepted trade-off, signed off by the owner: the fix converts a front-run risk into a liveness
+one. If the deploying key becomes unavailable between the deploy and the initialize transaction,
+the portal is permanently unusable — there is no owner transfer or rescue path for
+`initializer`. The conductors' journal-based resume already assumes a deploy can span a gap, so
+this is a real operational constraint, not a theoretical one: resume with the same key.
 
 ## M-1 — MEDIUM: `_validateRoute` accepts a route it cannot settle
 

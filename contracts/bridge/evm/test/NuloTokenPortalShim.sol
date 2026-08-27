@@ -26,6 +26,7 @@ interface IRegistryMin {
 
 contract NuloTokenPortalShim {
     error AlreadyInitialized();
+    error NotInitializer();
 
     address public registry;
     address public underlying;
@@ -34,9 +35,16 @@ contract NuloTokenPortalShim {
     address public outbox;
     address public inbox;
     uint256 public rollupVersion;
+    address public immutable initializer;
 
-    /// Mirrors NuloTokenPortal.initialize: the guard on line 1, then the registry->rollup double-cast.
+    constructor() {
+        initializer = msg.sender;
+    }
+
+    /// Mirrors NuloTokenPortal.initialize: deployer-only guard, then init-once guard, then the
+    /// registry->rollup double-cast.
     function initialize(address _registry, address _underlying, bytes32 _l2Bridge) external {
+        if (msg.sender != initializer) revert NotInitializer();
         if (registry != address(0)) revert AlreadyInitialized();
 
         registry = _registry;

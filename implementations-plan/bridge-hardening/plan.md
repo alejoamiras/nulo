@@ -31,13 +31,17 @@ donations, reentrancy posture, sole-consumer invariant, recipient-committed clai
   upstream portal in-project.
 - Gate: hermetic `forge test` green (50+ pass); RPC-gated tests follow the `vm.skip` convention.
 
-### Arc 2 — H-1 fix: constructor-init portal (`fix`)
-- `NuloTokenPortal`: initialization moves into the constructor; `initialize` deleted. Any
-  bytecode change regenerates `upstream/NuloTokenPortal.build.json` + the runtime-code-hash pin.
-- Deploy conductors (`deploy-bridge-mainnet.ts` group 2, `deploy-bridge-testnet.ts`) pass init
-  args at deploy; the separate init tx + its pre-check go away.
+### Arc 2 — H-1 fix: deployer-only initializer guard (`fix`)
+- DEVIATION from the approved constructor-init, discovered during implementation: a portal
+  constructor would need the L2 bridge address, but that address is deterministically derived
+  FROM the deployed portal address (bridge ctor args = [proxy, portal]) — circular. The
+  equivalent fix: the constructor pins `msg.sender` as an immutable `initializer`, and
+  `initialize` reverts `NotInitializer` for anyone else. The front-run dies; both conductors'
+  two-phase flow survives unchanged.
+- Bytecode changed → `FORKED_PORTAL_KECCAK` + `PORTAL_PIN` + `NuloTokenPortal.build.json`
+  regenerated via `build-portal-artifact.ts`; conductors gained a same-key resume note.
 - Regression proof: `ContentHash.t.sol` + Noir keystone stay green UNTOUCHED (message hashes are
-  storage-independent).
+  storage-independent); [F-A] PoC flipped to assert the attack now reverts.
 
 ### Arc 3 — M-1 fix: delta-driven settlement (`fix`)
 - `UniswapFuelSwap._settle` Cases A/B/C → accumulate per-hop `(currency, int128)` deltas from

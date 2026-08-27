@@ -20,22 +20,21 @@ import { fileURLToPath } from "node:url"
 import { keccak256 } from "viem"
 import { resolveBin, run } from "./run"
 
-/** keccak256 of upstream/NuloTokenPortal.sol (the reviewed fork source). Re-pinned after the
- *  monorepo restructure repathed ONE header-comment line inside the fork
- *  (`packages/bridge-evm/…` → `contracts/bridge/evm/…`) without regenerating this pin —
- *  diff reviewed: comment-only, zero code change. */
-export const FORKED_PORTAL_KECCAK = "0x1820c1ab1da9ffcd9e443350639e803a8019f624a8e967bc2dd86e8ec21f96b8"
+/** keccak256 of upstream/NuloTokenPortal.sol (the reviewed fork source). Re-pinned for the
+ *  F-001 hardening: the fork gained a deployer-only initializer guard (constructor-pinned
+ *  immutable) on top of the init-once guard — closes the front-run of the FIRST initialize
+ *  (deploy and initialize are separate transactions). Diff reviewed: guard + error + header
+ *  comments only; deposit/withdraw bodies untouched. */
+export const FORKED_PORTAL_KECCAK = "0x5e81eaad47a3ccf2827635d0dc19c7abb218926112594009e56cd104b2bbdd95"
 
 /** Creation/runtime code hashes + solc version of the reviewed fork build. Regenerated for the
- *  5.0.0-rc.2 l1-contracts toolchain (the fork's `@aztec` interface imports now resolve against
- *  rc.2; the fork source itself is unchanged beyond the repathed header comment). The candidate
- *  smoke's deposit→claim round-trip is the empirical proof of the rc.2 portal semantics.
- *  Re-validated live on the 5.0.0 network (Etherscan-verified + candidate smoke) without a
- *  recompile — the artifact provenance stays the rc.2 toolchain deliberately. */
+ *  F-001 hardening (deployer-only initializer guard added to the init-once guard; same 0.8.30
+ *  l1-contracts toolchain). The candidate smoke's deposit→claim round-trip is the empirical proof
+ *  of the portal semantics post-guard. */
 export const PORTAL_PIN = {
 	solc: "0.8.30",
-	initCodeHash: "0x7886020a18cdd8d5b6dea0bfb94e2edbdf7d5e4927094f3a17b7022840b4d26e",
-	runtimeCodeHash: "0x851a507b53399339973c204767e4bddbaae2ecf4499cb4df1f40a54cd3963ca6",
+	initCodeHash: "0x5cd282db90ecdc2f8ed3992a0c36f22eb69e9f98ad262bd8abb06a25476411e1",
+	runtimeCodeHash: "0x7c7606cda9c2c7907a1abe2827b2c799fea571fa4edc3d11b07a4eaaf069b5d2",
 } as const
 
 const here = dirname(fileURLToPath(import.meta.url))
