@@ -17,7 +17,15 @@ export const ACCOUNT_STATE_CAPS = {
 	maxSendersPerNetwork: 64,
 	maxContractsPerNetwork: 32,
 	// UTF-16 code units of the serialized slice (not bytes — a cheap, still-hard bound).
-	maxSliceCodeUnits: 32 * 1024 * 1024,
+	// Sized for headroom, not for the payload we happen to produce: the slice stores a full
+	// contract artifact PER NETWORK, so canonical contracts (HandshakeRegistry, AuthRegistry,
+	// PrivateFPC) are duplicated once per network and dominate it — a 3-network profile measured
+	// 33.8M of which ~35% was those duplicates, which crossed the old 32MiB bound the moment
+	// upstream added HandshakeRegistry to the preloaded set. Deduplicating or omitting
+	// re-registerable canonical contracts would reclaim that, but it requires knowing which ones
+	// the wallet can always rebuild locally (handshake/auth registry tracking) — deliberately not
+	// attempted here. This stays a hard ceiling on attacker-controlled input; only the number moved.
+	maxSliceCodeUnits: 64 * 1024 * 1024,
 	maxErrorMessageLength: 200,
 } as const
 
