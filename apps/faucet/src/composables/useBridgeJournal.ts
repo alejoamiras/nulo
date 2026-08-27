@@ -24,7 +24,9 @@ import { computed, ref } from "vue"
 import { BRIDGE, FUEL_PORTAL, L1_PORTAL } from "@/contracts/bridge-deployments"
 import { SYNC_TARGET_MARGIN_BLOCKS } from "@/lib/bridge-steps"
 import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
+import { isReceiptRecordMismatch } from "@/lib/fuel-claim-state"
 import { dropPhaseClock } from "@/lib/phase-clock"
+import { withOperation } from "./useOpsInFlight"
 
 // Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
 // Secrets, envelopes, signatures, and keys must never reach this log.
@@ -50,7 +52,17 @@ export const isMsgNotReady = (msg: string): boolean =>
 export const isMsgConsumed = (msg: string): boolean =>
 	/No non-nullified L1 to L2 message found|message has already been nullified/i.test(msg)
 
-export type Attention = "mismatch" | "tampered" | "unseal-failed" | "stale" | "stale-deployment" | "unknown-outcome" | "error"
+export type Attention =
+	| "mismatch"
+	| "tampered"
+	| "unseal-failed"
+	| "stale"
+	| "stale-deployment"
+	/** Terminal: the L1 receipt can't supply this record's fuel data. Retrying repeats the same
+	 *  immutable failure, so the card must not offer one — only a restore recovers it. */
+	| "receipt-mismatch"
+	| "unknown-outcome"
+	| "error"
 
 /** The live narration of what is happening RIGHT NOW for a record - engine steps plus the flows'
  *  L1/L2 legs. Ephemeral display state only - never persisted, never an input to completion logic. */
@@ -519,7 +531,10 @@ function completeWithdraw(rec: WithdrawJournalRecord | undefined, consumeTxHash?
  */
 export async function runDepositClaim(id: string, opts: { interactive?: boolean } = {}): Promise<void> {
 	try {
-		await runDepositClaimInner(id, opts)
+		// withOperation wraps EACH spawned continuation (this is the single entry point for card
+		// retries, resumeSessionWork, and the fuel claim leg) — never the void dispatcher, which
+		// would release the switch gate immediately (plan D-28).
+		await withOperation(() => runDepositClaimInner(id, opts))
 	} catch (e) {
 		surfaceRunFailure(id, e)
 	}
@@ -545,11 +560,22 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 		if (!guardDeployment(rec)) return
 		if (!deps.claim || !deps.claimReceiptStatus) throw new Error("Journal deps not connected")
 
-		// Pre-click recipient guard (private): the claim mints a NOTE to rec.recipient - never claim
-		// when a different Aztec account is connected.
+		// Pre-click recipient guard (ALL deposit claims — post-impl audit HIGH-1): the claim acts
+		// for rec.recipient; it must never run while a DIFFERENT Aztec account is active, or the
+		// chip shows B while an action executes for A. Private claims additionally mint a NOTE to
+		// the recipient. Auto-resume respects the same rule: a mismatched record waits with a
+		// mismatch card until its account is active again.
 		const aztec = deps.connectedAztec?.() ?? null
-		if (rec.isPrivate && aztec && rec.recipient && aztec.toLowerCase() !== rec.recipient.toLowerCase()) {
-			setRuntime(id, { attention: "mismatch", note: `This private deposit claims to ${rec.recipient}. Connect that Aztec account.` })
+		// Fail-CLOSED (codex residual): no known active account is treated like a mismatch —
+		// never run a claim on the hope that the right account happens to be connected. A
+		// non-string/empty recipient (tampered localStorage) is refused the same way instead of
+		// bypassing the compare and failing deep in address parsing.
+		const recipientOk = typeof rec.recipient === "string" && rec.recipient.length > 0
+		if (!aztec || !recipientOk || aztec.toLowerCase() !== rec.recipient.toLowerCase()) {
+			setRuntime(id, {
+				attention: "mismatch",
+				note: `This deposit claims to ${rec.recipient}. Switch to that Aztec account to claim.`,
+			})
 			return
 		}
 
@@ -573,7 +599,14 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 		// was sent — without this recovery every retry would bail here forever while a confirmed
 		// L1 deposit sits stranded with no L2 claim (user money). Without a txHash the flow is
 		// genuinely still pre-send: bail and let it (or a later click) re-enter.
-		if (!rec.leafIndex) {
+		// A fueled record whose EVENT-DERIVED fuel fields are missing is chain-recoverable by the same
+		// receipt, but the gate above only ever fired on a missing TOKEN leaf — so those records never
+		// got rehydrated. They must, because the private ladder now fails closed without them rather
+		// than silently falling through to the public one. Guarded on the dep + tx hash so the bail
+		// below stays reachable only from the original missing-leaf path.
+		const fuelFieldsRecoverable =
+			rec.schema === 2 && !!rec.depositTxHash && !!deps.recoverDepositLeg && (!rec.fuel?.received || !rec.fuel?.leafIndex)
+		if (!rec.leafIndex || fuelFieldsRecoverable) {
 			if (!rec.depositTxHash || !deps.recoverDepositLeg) {
 				log("no leafIndex yet - the deposit leg is still running", id)
 				return
@@ -583,8 +616,8 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 			try {
 				outcome = await deps.recoverDepositLeg(rec)
 			} catch (e) {
-				const msg = humanizeWalletError(e instanceof Error ? e.message : String(e))
-				setRuntime(id, { attention: "error", note: msg })
+				const raw = e instanceof Error ? e.message : String(e)
+				setRuntime(id, { attention: isReceiptRecordMismatch(raw) ? "receipt-mismatch" : "error", note: humanizeWalletError(raw) })
 				return
 			}
 			if (outcome === "pending") {
@@ -850,7 +883,7 @@ async function recordMessageConsumed(rec: DepositJournalRecord): Promise<boolean
  *  re-prompting; otherwise the proven-wait → witness → ONE L1 consume runs on the L1 lane. */
 export async function runWithdrawConsume(id: string): Promise<void> {
 	try {
-		await runWithdrawConsumeInner(id)
+		await withOperation(() => runWithdrawConsumeInner(id))
 	} catch (e) {
 		surfaceRunFailure(id, e)
 	}

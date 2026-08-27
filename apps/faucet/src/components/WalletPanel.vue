@@ -3,7 +3,8 @@ import { computed } from "vue"
 import { truncateName } from "@/composables/createAztecWalletSession"
 import { useWalletConnection } from "@/composables/useWalletConnection"
 import { TESTIDS } from "@/lib/testids"
-import { AddressDisplay, Button } from "@nulo/design"
+import { Button, Icon } from "@nulo/design"
+import AccountSwitcher from "./AccountSwitcher.vue"
 import VerificationModal from "./VerificationModal.vue"
 
 const {
@@ -35,6 +36,8 @@ const connectLabel = computed(() => {
 			return "Verify in wallet"
 		case "capability-approval":
 			return "Approve permissions in wallet"
+		case "choosing-account":
+			return "Choose your account"
 		case "error":
 			return "Retry connection"
 		default:
@@ -67,19 +70,11 @@ function openInstall() {
 
 <template>
 	<section class="panel" :data-testid="TESTIDS.status" :data-status="status">
-		<div v-if="status === 'connected' && selectedAccount" class="chip">
-			<span class="label">Aztec</span>
-			<AddressDisplay :address="selectedAccount" :data-testid="TESTIDS.account" />
-			<button
-				class="disconnect"
-				type="button"
-				aria-label="Disconnect"
-				:data-testid="TESTIDS.btnDisconnect"
-				@click="disconnect"
-			>
-				✕
-			</button>
-		</div>
+		<AccountSwitcher
+			v-if="status === 'connected' && selectedAccount"
+			:address-testid="TESTIDS.account"
+			:disconnect-testid="TESTIDS.btnDisconnect"
+		/>
 
 		<div v-else-if="showSettingUp" class="morph" :data-testid="TESTIDS.settingUp">
 			<Button loading disabled>Setting up session…</Button>
@@ -118,23 +113,25 @@ function openInstall() {
 
 		<div v-else class="connect">
 			<div v-if="showConnectButton && showSplitConnect" class="split">
-				<Button :data-testid="TESTIDS.btnConnect" @click="onClick">
+				<Button size="large" :data-testid="TESTIDS.btnConnect" @click="onClick">
 					Connect {{ shortPreferredName }}
 				</Button>
 				<Button
 					class="caret"
+					size="large"
 					aria-label="Choose a different wallet"
 					:data-testid="TESTIDS.btnSwitchWallet"
 					@click="switchWallet"
 				>
-					▾
+					<Icon name="chevron" size="16" color="inverse" />
 				</Button>
 			</div>
 			<Button
 				v-else-if="showConnectButton"
+				size="large"
 				:class="{ denied: status === 'error' }"
 				:loading="status === 'discovering'"
-				:disabled="status === 'discovering' || status === 'choosing'"
+				:disabled="status === 'discovering' || status === 'choosing' || status === 'choosing-account'"
 				:data-testid="TESTIDS.btnConnect"
 				@click="onClick"
 			>
@@ -155,34 +152,6 @@ function openInstall() {
 	display: inline-flex;
 	flex-direction: column;
 	gap: 12px;
-}
-
-.chip {
-	display: inline-flex;
-	align-items: center;
-	gap: 10px;
-	padding: 8px 12px;
-	border: 1px solid var(--nulo-outline);
-}
-
-.chip .label {
-	color: var(--txt-secondary);
-	font: 500 11px/1 var(--font-mono);
-	letter-spacing: 0.12em;
-	text-transform: uppercase;
-}
-
-.disconnect {
-	color: var(--txt-secondary);
-	font: 600 12px/1 var(--font-mono);
-	cursor: pointer;
-	background: transparent;
-	border: none;
-	padding: 2px 4px;
-}
-
-.disconnect:hover {
-	color: var(--red);
 }
 
 .no-wallet {

@@ -280,6 +280,9 @@ describe("faucet smoke", () => {
 		await flushPromises()
 		await flushPromises()
 
+		// Disconnect moved into the account menu (multi-account switcher) — open it from the chip.
+		expect(wrapper.find(`[data-testid="${TESTIDS.accountChip}"]`).exists()).toBe(true)
+		await wrapper.get(`[data-testid="${TESTIDS.accountChip}"]`).trigger("click")
 		expect(wrapper.find(`[data-testid="${TESTIDS.btnDisconnect}"]`).exists()).toBe(true)
 		await wrapper.get(`[data-testid="${TESTIDS.btnDisconnect}"]`).trigger("click")
 		await flushPromises()

@@ -13,9 +13,14 @@ import { computed, ref, watch } from "vue"
 
 /** Composables */
 import { useBridgeJournal } from "@/composables/useBridgeJournal"
+import { useBridgeWallet } from "@/composables/useBridgeWallet"
+import { useOpsInFlight } from "@/composables/useOpsInFlight"
+import { switchActiveAccount } from "@/composables/useWalletConnection"
 
 /** Utils */
 import { assetDecimals, assetSymbol } from "@/lib/asset-label"
+import { decideStandaloneFuelRecovery } from "@/lib/fuel-claim-state"
+import { isTerminalAttention } from "@/lib/bridge-steps"
 import { useNow } from "@/lib/clock"
 import { IS_MAINNET } from "@/lib/network"
 import { formatBigInt } from "@/lib/format"
@@ -52,6 +57,53 @@ watch(discardArmed, (armed) => {
 
 const rt = computed(() => journal.runtime.value[props.record.id] ?? {})
 
+// ── Account attribution (Options 1+2 follow-up) ─────────────────────────────
+// Deposits persist their Aztec-side account (`recipient`); withdraws only persist recipientL1,
+// so withdraw cards carry no account tag by design (and their FINISH is an L1 action the
+// account guard deliberately ignores).
+const bridgeWallet = useBridgeWallet()
+const { busy: opsBusy } = useOpsInFlight()
+
+function shortAddr(a: string): string {
+	return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a
+}
+
+const acct = computed(() => {
+	if (props.record.direction !== "deposit") return null
+	const addr = (props.record as DepositJournalRecord).recipient
+	// The journal is persisted state (localStorage) — a tampered record can carry a non-string
+	// recipient; rendering must never crash on it (codex labels-round MED).
+	if (typeof addr !== "string" || addr.length === 0) return null
+	const lower = addr.toLowerCase()
+	const granted = bridgeWallet.accounts.value.find((a) => a.address.toLowerCase() === lower)
+	return {
+		addr,
+		/** Canonical grant address — selectAccount() matches exact strings, never record casing. */
+		canonical: granted?.address ?? null,
+		alias: granted?.alias || null,
+		active: (bridgeWallet.selectedAccount.value ?? "").toLowerCase() === lower,
+	}
+})
+
+/** Option 2: deposit claim actions are account-guarded — when the record belongs to ANOTHER
+ *  granted account, offer the one-click switch instead of bouncing off the guard's note. A
+ *  recipient that is NOT in the current grant keeps the normal action (the engine's mismatch
+ *  guard explains why it refuses). */
+const offerSwitch = computed(() => {
+	const a = acct.value
+	// Status gate (codex labels-round MED): selectAccount() rejects unless connected — a switch
+	// button during setting-up/error states would be an enabled no-op.
+	return bridgeWallet.status.value === "connected" && !!a && !a.active && a.canonical !== null
+})
+const switchLabel = computed(() => {
+	const a = acct.value
+	return a ? `SWITCH TO ${(a.alias ?? shortAddr(a.addr)).toUpperCase()}` : ""
+})
+function onSwitchAccount() {
+	const canonical = acct.value?.canonical
+	if (canonical) switchActiveAccount(canonical)
+}
+
 // A DIRECT Fuel record (assetKind "fee-juice") IS Fee Juice — no token leg. Its `fuel` block mirrors the
 // amount, so the token-bridge surfaces (the AZLO amount line, the "+FJ" add-on, "CLAIM WITHOUT FUEL") would
 // double-count or mislabel it. Branch those off this flag; swap-fuel + token records are unaffected (codex LOW).
@@ -87,13 +139,22 @@ function onClaimWithoutFuel() {
 // fjwc claim nor landed standalone - offer to claim it now (sponsored, safe to retry; a
 // reverting "already claimed" just clears the affordance). Closes both stranding paths the
 // post-impl audit flagged.
-const fuelRecoverable = computed(() => {
-	// Fueled BRIDGES only: a direct-Fuel record's completion IS its gas claim, so the affordance would
-	// falsely offer a re-claim on every completed fuel card in the history.
-	if (isFuel.value) return false
-	const f = fuel.value
-	return f !== undefined && !!f.received && props.record.completedAt !== undefined && f.consumed !== true && f.standaloneClaimed !== true
-})
+// Shared with `claimFuelStandalone`'s own guard, so the affordance and the action can never disagree.
+const fuelRecovery = computed(() =>
+	decideStandaloneFuelRecovery({
+		isPrivate: props.record.isPrivate,
+		isFeeJuiceAsset: isFuel.value,
+		schema: props.record.schema,
+		completedAt: props.record.completedAt,
+		fuel: fuel.value,
+	}),
+)
+const fuelRecoverable = computed(() => fuelRecovery.value === "offer")
+/** Private bridge whose private-claim metadata is incomplete: its gas state is genuinely unknown and
+ *  the public recovery must not be offered — so say so rather than showing nothing. Deliberately
+ *  advertises no action: this renders only on COMPLETED records, which re-run no claim, so any
+ *  "retry" advice here would be false. */
+const privateFuelUnknown = computed(() => fuelRecovery.value === "private-unknown")
 const fuelRecovering = ref(false)
 const fuelRecoverError = ref<string | null>(null)
 
@@ -134,14 +195,16 @@ const attention = computed(() => rt.value.attention)
 // Every attention except a deployment mismatch is retryable: the runs re-validate all guards
 // idempotently, so pressing CLAIM/FINISH after fixing the cause (switching accounts, etc.) is
 // exactly the recovery path - hiding the button stranded those states until a reload.
-const actionable = computed(() => attention.value !== "stale-deployment")
+const actionable = computed(() => !isTerminalAttention(attention.value))
 
 /** Guidance for an IDLE card only: while the engine drives (busy) the rail narrates live, and a
  *  done card's stamp says everything - a parallel stage line would just repeat them. */
 /** Guidance for an IDLE card only: while the engine drives (busy) the rail narrates live, and a
  *  done card's stamp says everything - a parallel stage line would just repeat them. */
 const stageLabel = computed(() => {
-	if (rt.value.busy || stage.value === "done") return null
+	// A terminal record has no CLAIM/FINISH button, so guidance telling the user to press one would
+	// point at something that isn't there.
+	if (rt.value.busy || stage.value === "done" || isTerminalAttention(attention.value)) return null
 	const r = props.record
 	if (r.direction === "deposit") {
 		switch (stage.value) {
@@ -254,10 +317,20 @@ function onDiscard() {
 	>
 		<p v-if="stage === 'done'" class="stamp">{{ record.direction === "deposit" ? "BRIDGED ✓" : "RELEASED ✓" }}</p>
 		<header class="row">
-			<span class="dir">{{ record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM" }}</span>
-			<span class="amt">{{ amountDisplay }} {{ amountSymbol }}<span v-if="fuelAmount && !isFuel" class="amt-fuel">{{ fuelAmount }}</span></span>
-			<span class="tag" :class="{ private: record.isPrivate }">{{ record.isPrivate ? "PRIVATE" : "PUBLIC" }}</span>
-			<span class="age">{{ age }}</span>
+			<span class="meta">
+				<span class="dir">{{ record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM" }}</span>
+				<span class="amt">{{ amountDisplay }} {{ amountSymbol }}<span v-if="fuelAmount && !isFuel" class="amt-fuel">{{ fuelAmount }}</span></span>
+				<span class="tag" :class="{ private: record.isPrivate }">{{ record.isPrivate ? "PRIVATE" : "PUBLIC" }}</span>
+				<span
+					v-if="acct"
+					class="acct"
+					:class="{ other: !acct.active }"
+					:title="acct.addr"
+					:data-testid="TESTIDS.journalAccount"
+				>{{ acct.alias ?? shortAddr(acct.addr) }}<span v-if="acct.alias" class="acct-addr">{{ shortAddr(acct.addr) }}</span></span>
+			</span>
+			<span class="trail">
+				<span class="age">{{ age }}</span>
 			<button
 				v-if="stage === 'done'"
 				type="button"
@@ -279,9 +352,22 @@ function onDiscard() {
 			>
 				⤓
 			</button>
+			</span>
 		</header>
 		<div v-if="fuelRecoverable" class="fuel-recover">
 			<button
+				v-if="offerSwitch"
+				type="button"
+				class="action switch"
+				:disabled="opsBusy"
+				:title="opsBusy ? 'Finish the current operation to switch.' : `This gas belongs to ${acct?.addr}.`"
+				:data-testid="TESTIDS.journalSwitchAccount"
+				@click="onSwitchAccount"
+			>
+				{{ switchLabel }}
+			</button>
+			<button
+				v-else
 				type="button"
 				class="action"
 				:disabled="fuelRecovering"
@@ -293,6 +379,11 @@ function onDiscard() {
 			</button>
 			<span v-if="fuelRecoverError" class="fuel-recover-err">{{ fuelRecoverError }}</span>
 		</div>
+
+		<p v-if="privateFuelUnknown" class="private-fuel-unknown" :data-testid="TESTIDS.journalPrivateFuelUnknown">
+			This private bridge's gas data is incomplete, so its gas state can't be confirmed. Your tokens
+			arrived. Public gas recovery doesn't apply to private bridges.
+		</p>
 
 		<BridgePhaseRail v-if="stage !== 'done'" :record="record" compact />
 
@@ -313,7 +404,18 @@ function onDiscard() {
 
 		<div class="actions">
 			<button
-				v-if="showClaim"
+				v-if="showClaim && offerSwitch"
+				type="button"
+				class="action switch"
+				:disabled="opsBusy"
+				:title="opsBusy ? 'Finish the current operation to switch.' : `This deposit claims to ${acct?.addr}.`"
+				:data-testid="TESTIDS.journalSwitchAccount"
+				@click="onSwitchAccount"
+			>
+				{{ switchLabel }}
+			</button>
+			<button
+				v-if="showClaim && !offerSwitch"
 				type="button"
 				class="action"
 				:data-testid="TESTIDS.journalClaim"
@@ -331,7 +433,7 @@ function onDiscard() {
 				{{ attention === "unknown-outcome" || attention === "error" ? "RETRY" : "FINISH" }}
 			</button>
 			<button
-				v-if="showClaimWithoutFuel"
+				v-if="showClaimWithoutFuel && !offerSwitch"
 				type="button"
 				class="action"
 				:data-testid="TESTIDS.journalClaimWithoutFuel"
@@ -391,6 +493,25 @@ function onDiscard() {
 	gap: 10px;
 }
 
+/* Only the metadata wraps. Age + the corner control travel as one trailing group pinned right, so a
+   header that spills to a second line can't strand the download icon there alone. */
+.meta {
+	display: flex;
+	align-items: baseline;
+	gap: 10px;
+	flex-wrap: wrap;
+	min-width: 0;
+	flex: 1;
+}
+
+.trail {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-left: auto;
+	flex: none;
+}
+
 .dir {
 	font: 700 13px/1 var(--font-mono);
 	color: var(--txt-primary);
@@ -421,10 +542,44 @@ function onDiscard() {
 	border-color: var(--nulo-accent);
 }
 
+.acct {
+	font: 600 10px/1 var(--font-mono);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--txt-secondary);
+	border: 1px solid var(--nulo-border);
+	padding: 3px 6px;
+	max-width: 24ch;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.acct-addr {
+	margin-left: 6px;
+	font-weight: 500;
+	opacity: 0.8;
+}
+
+.acct.other {
+	color: var(--sand);
+	border-color: var(--sand);
+}
+
+.action.switch {
+	color: var(--sand);
+	border-color: var(--sand);
+}
+
 .age {
-	margin-left: auto;
 	font: 500 11px/1 var(--font-mono);
 	color: var(--txt-secondary);
+}
+
+.private-fuel-unknown {
+	margin: 0;
+	color: var(--yellow);
+	font: 500 11.5px/1.5 var(--font-mono);
 }
 
 .stage {

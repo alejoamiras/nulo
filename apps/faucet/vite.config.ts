@@ -9,6 +9,7 @@ import { nodePolyfills } from "vite-plugin-node-polyfills"
 import { resolvePackageAsset } from "@nulo/resolve-asset"
 import { nuloComponentsPlugin } from "./scripts/components-plugin"
 import { type FaucetTarget, TESTNET_TARGET } from "./src/lib/network-targets"
+import { deriveAllowedPreviewHosts } from "./src/lib/preview-hosts"
 
 const COOP_COEP_HEADERS = {
 	"Cross-Origin-Opener-Policy": "same-origin",
@@ -31,7 +32,7 @@ const FAUCET_DEV_PORT = Number(process.env.FAUCET_DEV_PORT) || 5176
  * faucet serves the chain the wallet expects, and `target`/`manifestDigest` let
  * CI prove the right per-target manifest shipped.
  */
-function buildMetaPlugin(target: FaucetTarget, manifestJson: string, allowedPreviewHost?: string): Plugin {
+function buildMetaPlugin(target: FaucetTarget, manifestJson: string, allowedPreviewHosts: readonly string[] = []): Plugin {
 	const pkg = JSON.parse(readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8")) as { version: string }
 	let buildId = ""
 	let root = process.cwd()
@@ -70,7 +71,7 @@ function buildMetaPlugin(target: FaucetTarget, manifestJson: string, allowedPrev
 				target: target.key,
 				chainId: target.walletChainId,
 				manifestDigest,
-				...(allowedPreviewHost ? { allowedPreviewHost } : {}),
+				...(allowedPreviewHosts.length > 0 ? { allowedPreviewHosts } : {}),
 			}
 			writeFileSync(resolve(root, outDir, "build.json"), `${JSON.stringify(meta, null, 2)}\n`)
 			// The active manifest is inlined into the bundle at build; the OTHER target's raw JSON must
@@ -141,14 +142,15 @@ function headersPlugin(target: FaucetTarget): Plugin {
  */
 export function makeFaucetConfig(target: FaucetTarget): UserConfig {
 	const manifestJson = readManifest(target)
-	// Cloudflare Pages PR previews: a preview is a PROD build served at <hash>.<project>.pages.dev,
-	// which the exact-host integrity layer would refuse. Bake the EXACT preview hostname from CF's
-	// build env (CF_PAGES_URL) — never a *.pages.dev wildcard — and ONLY for testnet builds of a
-	// non-production branch: mainnet artifacts never accept an alternate host (codex bug-bash r1).
-	const cfPagesUrl = process.env.CF_PAGES_URL
-	const cfBranch = process.env.CF_PAGES_BRANCH
-	const allowedPreviewHost =
-		target.key === "testnet" && cfPagesUrl && cfBranch && cfBranch !== "dev" ? new URL(cfPagesUrl).hostname : undefined
+	// Cloudflare Pages PR previews: a preview is a PROD build served at TWO hostnames — the
+	// per-commit <hash>.<project>.pages.dev (CF_PAGES_URL) AND the branch alias. Both are baked
+	// as EXACT strings (never a *.pages.dev wildcard — codex bug-bash r1), and ONLY for testnet
+	// builds of a non-production branch: mainnet artifacts never accept an alternate host.
+	const allowedPreviewHosts = deriveAllowedPreviewHosts({
+		targetKey: target.key,
+		cfPagesUrl: process.env.CF_PAGES_URL,
+		cfBranch: process.env.CF_PAGES_BRANCH,
+	})
 	return defineConfig({
 		server: {
 			port: FAUCET_DEV_PORT,
@@ -163,7 +165,7 @@ export function makeFaucetConfig(target: FaucetTarget): UserConfig {
 		define: {
 			"import.meta.env.VITE_FAUCET_TARGET": JSON.stringify(target.key),
 			"import.meta.env.VITE_BRIDGE_MANIFEST_JSON": JSON.stringify(manifestJson),
-			"import.meta.env.VITE_ALLOWED_PREVIEW_HOST": JSON.stringify(allowedPreviewHost ?? ""),
+			"import.meta.env.VITE_ALLOWED_PREVIEW_HOSTS": JSON.stringify(allowedPreviewHosts.join(",")),
 		},
 		resolve: {
 			alias: [
@@ -194,7 +196,7 @@ export function makeFaucetConfig(target: FaucetTarget): UserConfig {
 				// shims. Without these the bundle throws ReferenceError before mount.
 				globals: { Buffer: true, global: true, process: true },
 			}),
-			buildMetaPlugin(target, manifestJson, allowedPreviewHost),
+			buildMetaPlugin(target, manifestJson, allowedPreviewHosts),
 			headersPlugin(target),
 		],
 	})

@@ -9,7 +9,7 @@ interface ImportMetaEnv {
 	/** The per-target bridge manifest JSON, `define`d at build (unset ⇒ static testnet import). */
 	readonly VITE_BRIDGE_MANIFEST_JSON?: string
 	/** The EXACT CF Pages preview hostname baked at build (testnet previews only; "" otherwise). */
-	readonly VITE_ALLOWED_PREVIEW_HOST?: string
+	readonly VITE_ALLOWED_PREVIEW_HOSTS?: string
 }
 
 interface ImportMeta {

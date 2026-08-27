@@ -1,7 +1,7 @@
 import type { DepositJournalRecord, WithdrawJournalRecord } from "@nulo/bridge-core"
 import { describe, expect, it } from "vitest"
 import type { RecordRuntime } from "@/composables/useBridgeJournal"
-import { stepperPhases } from "./bridge-steps"
+import { isTerminalAttention, stepperPhases } from "./bridge-steps"
 
 const DEPLOY = { chainId: 11155111, portal: "0xportal", bridge: "0xbridge" }
 
@@ -295,5 +295,18 @@ describe("stepperPhases - confirm quiet flip (landed)", () => {
 	it("withdraw CONFIRM (an L1 wait) never carries landed", () => {
 		const confirm = stepperPhases(wd({ consumeTxHash: "0xk" }), { confirmLandedTxHash: "0xk" }).find((p) => p.key === "confirm")
 		expect(confirm?.landed).toBeUndefined()
+	})
+})
+
+describe("isTerminalAttention", () => {
+	it("is true only for attentions no retry can clear", () => {
+		expect(isTerminalAttention("stale-deployment")).toBe(true)
+		expect(isTerminalAttention("receipt-mismatch")).toBe(true)
+	})
+
+	it("leaves every retryable attention (and the absent one) actionable", () => {
+		for (const a of ["error", "unknown-outcome", "mismatch", "tampered", "unseal-failed", "stale", undefined]) {
+			expect(isTerminalAttention(a)).toBe(false)
+		}
 	})
 })

@@ -31,6 +31,7 @@ import {
 import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
 import { useBridgeWallet } from "./useBridgeWallet"
 import { useL1Wallet } from "./useL1Wallet"
+import { withOperation } from "./useOpsInFlight"
 
 // Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
 const log = (...args: unknown[]) => console.log("[bridge:withdraw]", ...args)
@@ -303,5 +304,7 @@ export function useWithdrawFlow() {
 		{ immediate: true },
 	)
 
-	return { busy, error, withdraw, journal }
+	// withOperation: an account-sensitive prompt/send span — while it runs, account switching is
+	// blocked (useOpsInFlight, plan D-8/D-19).
+	return { busy, error, withdraw: (...args: Parameters<typeof withdraw>) => withOperation(() => withdraw(...args)), journal }
 }

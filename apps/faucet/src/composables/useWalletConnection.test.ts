@@ -100,6 +100,16 @@ vi.mock("@/contracts/private-fpc", () => ({
 }))
 
 import { extractGrantedAccounts, useWalletConnection, __resetWalletConnectionForTests } from "./useWalletConnection"
+import { __resetOpsInFlightForTests, withOperation } from "./useOpsInFlight"
+import { __resetToastsForTests, useToast } from "./useToast"
+import { nextTick } from "vue"
+
+// Full-length canonical addresses: the hardened parser round-trips AztecAddress.fromStringUnsafe,
+// which requires 32-byte hex (short fakes are rejected as malformed grant entries).
+const ADDR_MAIN = `0x${"a1b2c3".padStart(64, "0")}`
+const ADDR_A = `0x${"aaa".padStart(64, "0")}`
+const ADDR_B = `0x${"bbb".padStart(64, "0")}`
+const ADDR_ABC = `0x${"abc".padStart(64, "0")}`
 
 function makeWallet(grantedAccounts: Array<{ alias?: string; item?: string }> = []) {
 	return {
@@ -125,7 +135,7 @@ function makePending(opts: { verificationHash?: string; confirmReturns?: unknown
 		verificationHash: opts.verificationHash ?? "deadbeef",
 		confirm: vi.fn(async () => {
 			if (opts.confirmThrows) throw opts.confirmThrows
-			return opts.confirmReturns ?? makeWallet([{ alias: "Main", item: "0xa1b2c3" }])
+			return opts.confirmReturns ?? makeWallet([{ alias: "Main", item: ADDR_MAIN }])
 		}),
 		cancel: vi.fn(async () => {}),
 	}
@@ -180,15 +190,15 @@ describe("useWalletConnection", () => {
 	})
 
 	it("confirmVerification() runs the capability handshake and lands in 'connected'", async () => {
-		const wallet = makeWallet([{ alias: "Main", item: "0xa1b2c3" }])
+		const wallet = makeWallet([{ alias: "Main", item: ADDR_MAIN }])
 		const pending = makePending({ confirmReturns: wallet })
 		mockEstablishSecureChannel.mockResolvedValue(pending)
 		const c = useWalletConnection()
 		await connectAndPick(c)
 		await c.confirmVerification()
 		expect(c.status.value).toBe("connected")
-		expect(c.selectedAccount.value).toBe("0xa1b2c3")
-		expect(c.accounts.value).toEqual([{ address: "0xa1b2c3", alias: "Main" }])
+		expect(c.selectedAccount.value).toBe(ADDR_MAIN)
+		expect(c.accounts.value).toEqual([{ address: ADDR_MAIN, alias: "Main" }])
 		// 7 = the combined faucet + bridge set (dripper, usdc, eth, proxy, token, bridge) + the PrivateFPC
 		// (pre-registered so the no-fuel-claim private Fee-Juice balance read works under 5.0.1).
 		expect(wallet.registerContract).toHaveBeenCalledTimes(7)
@@ -238,7 +248,7 @@ describe("useWalletConnection", () => {
 			() => {
 				throw new Error("Capability denied")
 			},
-			async () => ({ granted: [{ type: "accounts", accounts: [{ alias: "Main", item: "0xabc" }] }] }),
+			async () => ({ granted: [{ type: "accounts", accounts: [{ alias: "Main", item: ADDR_ABC }] }] }),
 		]
 		const wallet = {
 			requestCapabilities: vi.fn(async () => {
@@ -256,7 +266,7 @@ describe("useWalletConnection", () => {
 		expect(c.status.value).toBe("error")
 		await c.retryCapabilities()
 		expect(c.status.value).toBe("connected")
-		expect(c.selectedAccount.value).toBe("0xabc")
+		expect(c.selectedAccount.value).toBe(ADDR_ABC)
 	})
 
 	it("disconnect() calls provider.disconnect and resets state to idle", async () => {
@@ -327,15 +337,78 @@ describe("extractGrantedAccounts", () => {
 				{
 					type: "accounts",
 					accounts: [
-						{ alias: "Main", item: { toString: () => "0xaaa" } },
-						{ alias: "Saver", item: "0xbbb" },
+						{ alias: "Main", item: { toString: () => ADDR_A } },
+						{ alias: "Saver", item: ADDR_B },
 					],
 				},
 			],
 		})
 		expect(out).toEqual([
-			{ address: "0xaaa", alias: "Main" },
-			{ address: "0xbbb", alias: "Saver" },
+			{ address: ADDR_A, alias: "Main" },
+			{ address: ADDR_B, alias: "Saver" },
 		])
+	})
+})
+
+describe("switch gating during operations (D-18 wiring: session gate reads useOpsInFlight)", () => {
+	beforeEach(() => {
+		localStorage.clear()
+		__resetWalletConnectionForTests()
+		__resetOpsInFlightForTests()
+	})
+
+	it("selectAccount rejects while a tracked operation span is open, succeeds after it closes", async () => {
+		const wallet = makeWallet([
+			{ alias: "Main", item: ADDR_MAIN },
+			{ alias: "Saver", item: ADDR_B },
+		])
+		const pending = makePending({ confirmReturns: wallet })
+		mockEstablishSecureChannel.mockResolvedValue(pending)
+		const c = useWalletConnection()
+		await connectAndPick(c)
+		await c.confirmVerification()
+		expect(c.status.value).toBe("choosing-account")
+		await c.confirmAccountChoice(ADDR_MAIN)
+		expect(c.status.value).toBe("connected")
+
+		let release: () => void = () => {}
+		const span = withOperation(() => new Promise<void>((res) => (release = res)))
+		expect(c.selectAccount(ADDR_B)).toBe(false) // blocked mid-operation, at the session boundary
+		expect(c.selectedAccount.value).toBe(ADDR_MAIN)
+		release()
+		await span
+		expect(c.selectAccount(ADDR_B)).toBe(true)
+		expect(c.selectedAccount.value).toBe(ADDR_B)
+	})
+})
+
+describe("selection-notice toasts (D-25/D-29: single module-level owner, exactly once)", () => {
+	beforeEach(() => {
+		localStorage.clear()
+		__resetWalletConnectionForTests()
+		__resetToastsForTests()
+	})
+
+	it("auto-remembered and truncation notices each toast exactly once and drain the queue", async () => {
+		const c = useWalletConnection()
+		const { toasts } = useToast()
+		c.accounts.value = [
+			{ address: ADDR_MAIN, alias: "Main" },
+			{ address: ADDR_B, alias: "Saver" },
+		]
+		c.selectionNotices.value = [
+			{ key: 0, kind: "auto-remembered", alias: "Main", address: ADDR_MAIN },
+			{ key: 1, kind: "grant-truncated", hiddenCount: 4 },
+		]
+		await nextTick()
+		expect(toasts.value.map((t) => t.text)).toEqual([
+			"Using account Main",
+			"Your wallet granted more accounts than the app can show — using the first 2 (4 hidden).",
+		])
+		expect(c.selectionNotices.value).toEqual([]) // drained by the single owner
+
+		// The drain itself must not re-fire (empty-list retrigger is a no-op).
+		await nextTick()
+		expect(toasts.value).toHaveLength(2)
 	})
 })
