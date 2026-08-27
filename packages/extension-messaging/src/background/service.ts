@@ -3,6 +3,7 @@ import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { BaseService } from "../core/base-service"
 import { isTrustedInternalSender } from "../core/sender-auth"
+import { summarizeMessage } from "../core/envelope-summary"
 import type { ResponseContentLike } from "../core/base-client"
 import { MessageType, type EventMessage, type RequestMessage } from "../messages"
 
@@ -65,7 +66,7 @@ export abstract class Service<TRequests extends MethodsMap, TEvents extends Even
 
 	private readonly onMessage = (message: RequestMessage<TRequests>, client: chrome.runtime.Port) => {
 		if (message?.type !== MessageType.Request || !message.content) {
-			this.logWarn("Invalid message received", message)
+			this.logWarn("Invalid message received", summarizeMessage(message))
 			return
 		}
 		void this.handleRequest(message.content, client)

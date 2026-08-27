@@ -6,6 +6,7 @@ import { awaitInitialized } from "./initialization"
 import type { ResponseContentLike } from "./base-client"
 import { ValidationError } from "../errors"
 import { unwrapParams } from "../utils"
+import { summarizeContent } from "./envelope-summary"
 
 /** The request envelope's `content` the dispatcher reads. `method` is a
  *  PropertyKey (the typed envelope's `keyof TRequests`); it is String()-ed
@@ -92,13 +93,13 @@ export abstract class BaseService<TRequests extends MethodsMap, TEvents extends 
 			requestId <= 0 ||
 			(!this.rpcMethods.has(methodName) && !this.frameworkRpcMethods.has(methodName))
 		) {
-			this.logWarn("Invalid request received", content)
+			this.logWarn("Invalid request received", summarizeContent(content))
 			return
 		}
 		if (typeof wrappedParams !== "object" || wrappedParams === null) {
 			// Valid requestId + method but malformed params. Reply with a clean
 			// error so the client rejects immediately instead of hanging.
-			this.logWarn("Invalid request params", content)
+			this.logWarn("Invalid request params", summarizeContent(content))
 			await this.sendResponse({ requestId, ...buildErrorResponseContent(new ValidationError("Invalid request params")) }, ctx)
 			return
 		}

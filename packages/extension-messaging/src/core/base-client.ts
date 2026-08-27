@@ -6,6 +6,7 @@ import { decodeResult } from "./decode"
 import { wrapParams } from "../utils"
 import { CLIENT_DISCONNECTED_MESSAGE, remoteErrorFromResponseContent, RpcDisconnectedError, RpcTimeoutError } from "../errors"
 import type { RequestTerminalStatus } from "./terminal-status"
+import { summarizeContent } from "./envelope-summary"
 
 /**
  * Shared request-correlator core for both transport clients (popup↔SW Port and
@@ -193,7 +194,7 @@ export abstract class BaseServiceClient<TRequests extends MethodsMap, TEvents ex
 	protected handleResponse(content: ResponseContentLike): void {
 		const entry = this.pending.get(content.requestId)
 		if (!entry) {
-			this.logWarn("Invalid response received", content)
+			this.logWarn("Invalid response received", summarizeContent(content))
 			return
 		}
 		if (content.error !== undefined || content.errorPayload !== undefined) {

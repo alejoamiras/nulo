@@ -2,6 +2,7 @@ import type { ILogger } from "@nulo/wallet-core/logger"
 import { getRandomHex } from "@nulo/wallet-core/utils"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { BaseServiceClient, type RequestErrorMeta, type TerminalRecord } from "../core/base-client"
+import { summarizeMessage } from "../core/envelope-summary"
 import { MessageType } from "../messages"
 import type { EventMessage, ResponseMessage } from "./messages"
 import { type RequestTelemetry, type TelemetrySink, LoggingTelemetrySink } from "./telemetry"
@@ -71,14 +72,16 @@ export abstract class ServiceClient<
 			message.from !== this.service ||
 			!message.content
 		) {
-			this.logWarn("Invalid message received", message)
+			this.logWarn("Invalid message received", summarizeMessage(message))
 			return
 		}
 		if (message.type === MessageType.Response) {
 			this.handleResponse(message.content)
 		} else {
 			const { event, payload } = message.content
-			this.logDebug("Event received", event, payload)
+			// The payload is every balance, profile, tx and transfer object in the wallet; the
+			// event name is the whole diagnostic value.
+			this.logDebug("Event received", event)
 			this.handleEvent(event, payload)
 		}
 	}
