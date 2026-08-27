@@ -128,9 +128,14 @@ export const UNCLASSIFIED_ERROR_MESSAGE = "The wallet could not process the requ
  * and routing it through the unclassified fall-through would replace it with the constant above —
  * privacy preserved, but the dApp left unable to tell "reconnect" from any other failure.
  *
- * EIP-1193 4900 ("Disconnected") is correct here precisely because it makes dApp libraries tear
- * down session state: the session really is gone. That is the opposite of `RpcDisconnectedError`
- * above, which is transient and deliberately avoids 4900.
+ * EIP-1193 4900 ("Disconnected") is the semantically correct code — the provider genuinely cannot
+ * service further requests on this session — and it is the opposite of `RpcDisconnectedError`
+ * above, which is transient and deliberately avoids it.
+ *
+ * What 4900 does NOT do here is drive the dApp's `onDisconnect`: the installed SDK wraps the whole
+ * envelope in `new Error(JSON.stringify(error))`, so a generic library never sees `err.code`. The
+ * `terminateSession()` call that follows this response is what actually triggers reconnection. The
+ * code carries the meaning; the teardown carries the behavior.
  */
 export const SESSION_INVALID_ERROR: WalletResponse["error"] = {
 	code: 4900,

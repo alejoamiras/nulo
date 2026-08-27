@@ -56,6 +56,7 @@ import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-me
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import {
 	describeExternalId,
+	describeWireMethod,
 	type DispatchHooks,
 	DiscoveryQueue,
 	isDiscoveryExpired,
@@ -359,7 +360,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 							logger.log(
 								"wallet-sdk-bg",
 								LogLevel.Warn,
-								`Dropping message for ${key}: session failed/lost establishment validation`,
+								`Dropping message for session ${describeExternalId(key)}: failed/lost establishment validation`,
 							)
 							return
 						}
@@ -825,7 +826,7 @@ async function handleWalletMessage(
 		logger.log(
 			"wallet-sdk",
 			LogLevel.Error,
-			`Method ${message.type} failed for session ${describeExternalId(session.sessionId)}`,
+			`Method ${describeWireMethod(message.type)} failed for session ${describeExternalId(session.sessionId)}`,
 			response.error,
 		)
 
@@ -846,7 +847,7 @@ async function handleWalletMessage(
 		logger.log(
 			"wallet-sdk",
 			LogLevel.Warn,
-			`Suppressing ${message.type} response for session ${describeExternalId(session.sessionId)}: profile switched mid-dispatch`,
+			`Suppressing ${describeWireMethod(message.type)} response for session ${describeExternalId(session.sessionId)}: profile switched mid-dispatch`,
 		)
 		return
 	}
@@ -854,10 +855,8 @@ async function handleWalletMessage(
 	try {
 		await handler.sendResponse(session.sessionId, response)
 	} catch (sendError) {
-		logger.log(
-			"wallet-sdk",
-			LogLevel.Error,
-			`Failed to send response for ${message.type}: ${sendError instanceof Error ? sendError.message : String(sendError)}`,
-		)
+		// The error goes as an OBJECT, not interpolated: this is an internal transport failure worth
+		// diagnosing, and passing it whole lets the logger's projection scrub and cap it.
+		logger.log("wallet-sdk", LogLevel.Error, `Failed to send response for ${describeWireMethod(message.type)}`, sendError)
 	}
 }
