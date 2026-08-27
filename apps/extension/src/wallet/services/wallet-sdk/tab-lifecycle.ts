@@ -67,7 +67,9 @@ export function wireTabLifecycle(deps: TabLifecycleDeps): void {
 						deps.logger.log(
 							"wallet-sdk",
 							LogLevel.Info,
-							`Tab ${tabId} navigated to ${newOrigin}, terminating session ${session.sessionId}`,
+							// The destination origin is browsing history, and this fires on every dApp-tab
+							// navigation. The session id already identifies which connection was dropped.
+							`Tab ${tabId} navigated cross-origin, terminating session ${session.sessionId}`,
 						)
 						deps.terminateSession(session.sessionId)
 					}

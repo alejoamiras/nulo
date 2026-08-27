@@ -382,7 +382,8 @@ export async function batchedViewSimulation(
 					LogLevel.Error,
 					"Failed to decode fast-arm simulation results",
 					tuple.returnTypes,
-					values,
+					// Arity, never the values: these are private call returns.
+					{ returnValueCount: values.length },
 					getErrorMessage(error),
 				)
 			}
@@ -408,7 +409,14 @@ export async function batchedViewSimulation(
 			try {
 				decoded[i] = decodeFromAbi(types, values)
 			} catch (error) {
-				logger?.log(LOG_SOURCE, LogLevel.Error, "Failed to decode simulation results", types, values, getErrorMessage(error))
+				logger?.log(
+					LOG_SOURCE,
+					LogLevel.Error,
+					"Failed to decode simulation results",
+					types,
+					{ returnValueCount: values.length },
+					getErrorMessage(error),
+				)
 			}
 		}
 	}
@@ -421,7 +429,14 @@ export async function batchedViewSimulation(
 		try {
 			decoded[i] = decodeFromAbi(types, values)
 		} catch (error) {
-			logger?.log(LOG_SOURCE, LogLevel.Error, "Failed to decode utility simulation results", types, values, getErrorMessage(error))
+			logger?.log(
+				LOG_SOURCE,
+				LogLevel.Error,
+				"Failed to decode utility simulation results",
+				types,
+				{ returnValueCount: Array.isArray(values) ? values.length : 0 },
+				getErrorMessage(error),
+			)
 		}
 		encoded[i] = values
 	}

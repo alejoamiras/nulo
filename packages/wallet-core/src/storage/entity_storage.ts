@@ -15,9 +15,6 @@ export type MinimalStorageArea = {
 	remove(keys: string | string[]): Promise<void>
 }
 
-/** Maximum chars of a malformed payload preserved in the parse-failure log. */
-export const PARSE_FAILURE_PREVIEW_MAX = 200
-
 export class EntityStorage<T> {
 	private readonly storage: MinimalStorageArea
 	private readonly root: string
@@ -87,7 +84,12 @@ export class EntityStorage<T> {
 		try {
 			parsed = JSON.parse(raw as string)
 		} catch (err) {
-			const preview = typeof raw === "string" ? raw.slice(0, PARSE_FAILURE_PREVIEW_MAX) : String(raw)
+			// The row is whatever was stored under this root — profile ciphertext, contact PII,
+			// transaction detail, or attacker-supplied backup content — and this message is a
+			// pre-formatted string, which the logger's redaction cannot reach inside. Size and type
+			// diagnose the real failure modes here (a truncated write, a non-string value); the
+			// bytes themselves never did.
+			const shape = typeof raw === "string" ? `string(${raw.length} chars)` : `[${typeof raw}]`
 			const msg = err instanceof Error ? err.message : String(err)
 			// B-23: KEEP the malformed row — the read path never deletes by id. The
 			// old fire-and-forget `remove(fullKey)` raced a concurrent valid write: a
@@ -99,9 +101,7 @@ export class EntityStorage<T> {
 			// unreadable row (return undefined) and leave deletion to an explicitly
 			// serialized repair path — see the purge-hardening follow-up — exactly as
 			// the validation-failure branch below already does.
-			console.error(
-				`EntityStorage[${this.root}]: row "${fullKey}" is malformed — KEEPING (not deleting) — ${msg} — payload preview: ${preview}`,
-			)
+			console.error(`EntityStorage[${this.root}]: row "${fullKey}" is malformed — KEEPING (not deleting) — ${msg} — payload ${shape}`)
 			return undefined
 		}
 		if (!this.parse) {

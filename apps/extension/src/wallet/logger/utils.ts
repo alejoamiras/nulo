@@ -1,4 +1,5 @@
 import { type ILogger, type Log, LogLevel } from "."
+import { scrubUrls } from "@/utils/scrub-urls"
 
 export class DummyLogger implements ILogger {
 	log() {}
@@ -129,36 +130,6 @@ const SECRET_KEY_SUFFIX = /secretkey$/i
  * the whole diagnostic value, and the origin carries it.
  */
 const URL_KEYS: ReadonlySet<string> = new Set(["rpcUrl", "submittedEndpointUrl", "endpointUrl"])
-
-/**
- * URL-ish runs in free text. Covers `ws://`/`wss://` (the Aztec node transport) alongside http(s):
- * an endpoint carrying an API key is just as credential-bearing over a socket as over HTTP.
- *
- * The character class deliberately allows `[` and `]` so an IPv6 authority (`http://[::1]:8080/…`)
- * matches WHOLE — excluding them truncated the match at the bracket and left the credential-bearing
- * path sitting in the message. Trailing punctuation is trimmed afterwards instead.
- *
- * Protocol-relative `//host/path` is NOT matched: it is indistinguishable from a comment or a
- * doubled path separator in free text, and mangling those was worse than the rare miss.
- */
-const URL_LIKE = /\b(?:https?|wss?):\/\/[^\s'"<>]+/gi
-
-/** Sentence punctuation that follows a URL far more often than it belongs to one. */
-const TRAILING_PUNCTUATION = /[).,;:!?}]+$/
-
-/** Reduce any URL in free text to scheme + host; userinfo, path and query go with it. */
-function scrubUrls(text: string): string {
-	return text.replace(URL_LIKE, (candidate) => {
-		const trailing = candidate.match(TRAILING_PUNCTUATION)?.[0] ?? ""
-		const url = trailing ? candidate.slice(0, -trailing.length) : candidate
-		try {
-			const { protocol, host } = new URL(url)
-			return `${protocol}//${host}${trailing}`
-		} catch {
-			return `[url]${trailing}`
-		}
-	})
-}
 
 function toOrigin(value: unknown): unknown {
 	if (typeof value !== "string") return `[${typeof value}]`

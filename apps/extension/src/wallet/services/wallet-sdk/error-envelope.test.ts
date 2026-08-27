@@ -148,4 +148,32 @@ describe("duplicate-initialization envelope reachability (N-15)", () => {
 		expect(thrown).not.toBeInstanceOf(DuplicateInitializationError)
 		expect(toWalletResponseError(thrown)).toBe("plain boom")
 	})
+
+	// This string is handed to an arbitrary dApp — the only path here that leaves the machine.
+	describe("fall-through scrubbing", () => {
+		test("strips an API key embedded in an endpoint URL", () => {
+			const out = toWalletResponseError(new Error("fetch failed: https://eth.example.com/v2/SECRET-KEY-123?apiKey=abc"))
+
+			expect(out).not.toContain("SECRET-KEY-123")
+			expect(out).not.toContain("apiKey=abc")
+			expect(out).toContain("https://eth.example.com")
+		})
+
+		test("strips userinfo credentials", () => {
+			const out = toWalletResponseError(new Error("connect failed to https://user:hunter2@node.example.com/rpc"))
+
+			expect(out).not.toContain("hunter2")
+		})
+
+		test("caps an unbounded internal message", () => {
+			const out = toWalletResponseError(new Error("x".repeat(10_000)))
+
+			expect((out as string).length).toBeLessThanOrEqual(200)
+		})
+
+		test("leaves an ordinary message untouched", () => {
+			expect(toWalletResponseError(new Error("plain boom"))).toBe("plain boom")
+			expect(toWalletResponseError("not an error")).toBe("not an error")
+		})
+	})
 })

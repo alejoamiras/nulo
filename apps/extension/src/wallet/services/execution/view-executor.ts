@@ -124,7 +124,15 @@ export class ViewExecutor {
 		try {
 			return decodeFromAbi(fn.returnTypes, result)
 		} catch (error) {
-			this.deps.logError("Failed to decode simulation results", fn.returnTypes, result, getErrorMessage(error))
+			// `result` is the decoded return of a call executed under the user's own account scope —
+			// live private contract state. The expected types and the arity are what diagnose a
+			// decode mismatch; the values are the leak.
+			this.deps.logError(
+				"Failed to decode simulation results",
+				fn.returnTypes,
+				{ returnValueCount: Array.isArray(result) ? result.length : 0 },
+				getErrorMessage(error),
+			)
 			return result as AbiDecoded
 		}
 	}

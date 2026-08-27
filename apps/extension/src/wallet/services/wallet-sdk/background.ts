@@ -55,7 +55,7 @@ import { DappSessionService, AccessLevel } from "@/wallet/services/dapp-session/
 import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { type DispatchHooks, DiscoveryQueue, isDiscoveryExpired, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
-import { jsonStringify, getErrorMessage, KeyedLock } from "@nulo/wallet-core/utils"
+import { getErrorMessage, KeyedLock } from "@nulo/wallet-core/utils"
 import { approveOrRollbackDiscoverySession } from "./discovery-approval"
 import { failQueuedIfUnclaimed, tryCreateQueuedJournal } from "./queued-journal"
 import { chainSendTxWithVouching } from "./queued-wait-vouching"
@@ -210,7 +210,9 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 						logger.log(
 							"wallet-sdk-bg",
 							LogLevel.Debug,
-							`Rejected content-script message from subframe (frameId=${sender.frameId}, tab.url=${sender.tab?.url}, sender.url=${sender.url}) — F-001 defense-in-depth`,
+							// The tab and sender URLs are the user's browsing history, and any subframe on any
+							// page can trigger this line. The frame identity is what diagnoses the rejection.
+							`Rejected content-script message from subframe (frameId=${sender.frameId}, tabId=${sender.tab?.id}) — F-001 defense-in-depth`,
 						)
 						return undefined
 					}
@@ -806,10 +808,10 @@ async function handleWalletMessage(
 		// unit-tested in isolation; everything not recognised collapses to a
 		// string, preserving the original wire contract.
 		response.error = toWalletResponseError(error)
-		// `response.error` may be an object now — stringify for the log line so
-		// logs don't read "[object Object]".
-		const logMsg = typeof response.error === "string" ? response.error : jsonStringify(response.error)
-		logger.log("wallet-sdk", LogLevel.Error, `Method ${message.type} failed for ${session.origin}: ${logMsg}`)
+		// Pass the error as an OBJECT, never pre-stringified: a finished string is opaque to the
+		// logger's redaction, so interpolating it here would smuggle whatever the error carries
+		// (endpoint URLs, argument values) straight into the log store.
+		logger.log("wallet-sdk", LogLevel.Error, `Method ${message.type} failed for ${session.origin}`, response.error)
 
 		if (hooks?.queuedJournalId) {
 			await failQueuedIfUnclaimed(operationJournal, hooks.queuedJournalId, getErrorMessage(error), logger)
