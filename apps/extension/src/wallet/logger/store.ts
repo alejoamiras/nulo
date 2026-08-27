@@ -9,6 +9,8 @@ export class LoggerStore implements ILoggerStore {
 	private logs: CircularBufferIterable<Log>
 	private nextId = 1
 	private flushTimer?: ReturnType<typeof setTimeout>
+	/** The write a fired flush is currently performing; a purge must be ordered after it. */
+	private flushInFlight?: Promise<void>
 	private persistEnabled: boolean
 
 	private readonly config: IConfig
@@ -29,8 +31,14 @@ export class LoggerStore implements ILoggerStore {
 		return this.logs.get(count, fromId ?? 0)
 	}
 
+	/**
+	 * Clearing must drop the persisted copy too. Emptying only the ring buffer left `nulo:logs`
+	 * intact, so the next worker restart rehydrated everything the user had just cleared — the
+	 * "Clear logs" button appeared to work and didn't.
+	 */
 	public clear(): void {
 		this.logs.clear()
+		void this.purgePersisted()
 	}
 
 	public log(source: string, level: LogLevel, ...data: unknown[]): void {
@@ -106,12 +114,17 @@ export class LoggerStore implements ILoggerStore {
 		if (this.flushTimer) return
 		this.flushTimer = setTimeout(() => {
 			this.flushTimer = undefined
-			try {
-				const items = this.logs.items().slice(-2000)
-				chrome.storage.session.set({ "nulo:logs": items })
-			} catch {
-				// Session storage may not be available
-			}
+			// Tracked, not fire-and-forget: cancelling the TIMER cannot stop a write that has
+			// already begun, and an unawaited `set()` landing after a purge would recreate the very
+			// key the purge just removed.
+			this.flushInFlight = (async () => {
+				try {
+					const items = this.logs.items().slice(-2000)
+					await chrome.storage.session.set({ "nulo:logs": items })
+				} catch {
+					// Session storage may not be available
+				}
+			})()
 		}, 2000)
 	}
 
@@ -132,12 +145,17 @@ export class LoggerStore implements ILoggerStore {
 		await this.purgePersisted()
 	}
 
-	/** Drop the persisted copy and cancel any in-flight flush that would recreate it. */
+	/**
+	 * Drop the persisted copy. Cancels a pending flush and — crucially — waits for one that has
+	 * already started, so the removal is ordered AFTER any write that could otherwise land on top
+	 * of it and resurrect the key.
+	 */
 	private async purgePersisted(): Promise<void> {
 		if (this.flushTimer) {
 			clearTimeout(this.flushTimer)
 			this.flushTimer = undefined
 		}
+		await this.flushInFlight
 		try {
 			await chrome.storage.session.remove("nulo:logs")
 		} catch {

@@ -203,6 +203,19 @@ describe("LoggerStore", () => {
 			store.clear()
 			expect(store.get(10)).toHaveLength(0)
 		})
+
+		test("also drops the persisted copy, so a restart cannot resurrect it", async () => {
+			// Emptying only the ring buffer left `nulo:logs` intact and rehydrate() brought the
+			// cleared entries straight back — the button looked like it worked.
+			const session = mockSessionStorage()
+			const store = new LoggerStore(mockConfig(true, true))
+			store.log("a", LogLevel.Error, "msg")
+
+			store.clear()
+			await new Promise((r) => setTimeout(r, 0))
+
+			expect(session.remove).toHaveBeenCalledWith("nulo:logs")
+		})
 	})
 
 	describe("circular buffer behavior", () => {
@@ -297,6 +310,31 @@ describe("LoggerStore", () => {
 			store.log("a", LogLevel.Error, "after opt-out")
 			vi.advanceTimersByTime(5000)
 			expect(session.set).toHaveBeenCalledTimes(1)
+		})
+
+		test("a flush that ALREADY STARTED cannot resurrect the key after a purge", async () => {
+			// Cancelling the timer cannot stop a write already in progress; the purge has to be
+			// ordered after it, or `set()` lands on top of `remove()`.
+			const session = mockSessionStorage()
+			let resolveSet: () => void = () => {}
+			session.set.mockImplementation(() => new Promise<void>((r) => (resolveSet = r)))
+
+			const config = mockConfig(false, true)
+			const store = new LoggerStore(config)
+			store.log("a", LogLevel.Error, "queued")
+
+			vi.advanceTimersByTime(2500) // the flush FIRES and its set() is now pending
+			expect(session.set).toHaveBeenCalledTimes(1)
+			expect(session.remove).not.toHaveBeenCalled()
+
+			config.onUpdate.invoke({ key: "developerMode", value: false })
+			await Promise.resolve()
+			// The purge must still be waiting on the in-flight write.
+			expect(session.remove).not.toHaveBeenCalled()
+
+			resolveSet()
+			await vi.runAllTimersAsync()
+			expect(session.remove).toHaveBeenCalledWith("nulo:logs")
 		})
 
 		test("a pending flush cannot recreate the file after opt-out", async () => {

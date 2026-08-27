@@ -311,11 +311,13 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		await Promise.all([
 			// Settle log retention the moment the real config is known: the LoggerStore was built
 			// at module scope on schema defaults, and rehydrate() has already restored the previous
-			// lifecycle's entries unconditionally.
+			// lifecycle's entries unconditionally. `finally` so a REJECTED load still settles it —
+			// the config is then defaults, retention reads off, and the safe action (purge) runs;
+			// the rejection still propagates and vetoes the boot exactly as before.
 			config
 				.load()
-				.then(() => logger.applyRetentionPolicy())
-				.then(() => logger.log("wallet", LogLevel.Info, "Config loaded")),
+				.then(() => logger.log("wallet", LogLevel.Info, "Config loaded"))
+				.finally(() => logger.applyRetentionPolicy()),
 			BarretenbergSync.initSingleton({ wasmPath: process.env.BB_WASM_PATH })
 				.then(() => logger.log("wallet", LogLevel.Info, "Barretenberg initialized"))
 				.catch((err) => {

@@ -50,7 +50,9 @@ vi.mock("@nulo/wallet-core/migration", async (importOriginal) => ({
 import { createWalletRuntime } from "./runtime"
 import type { ConfigStore } from "./config"
 
-const noopLogger = { log: () => {} } as unknown as LoggerStore
+// `applyRetentionPolicy` is on the boot path (chained off `config.load()`), so the fake must carry
+// it or every start() test dies on an unrelated TypeError.
+const noopLogger = { log: () => {}, applyRetentionPolicy: async () => {} } as unknown as LoggerStore
 
 /** Minimal chrome.storage-shaped area backed by a Map — enough for the
  *  schema-status writes. */
