@@ -20,33 +20,63 @@ AZTEC_HOME="${AZTEC_HOME:-$HOME/.aztec/versions/5.0.1}"
 NARGO="$AZTEC_HOME/bin/aztec-nargo"
 [ -x "$NARGO" ] || { echo "aztec-nargo not found at $NARGO" >&2; exit 1; }
 
-TXE_PORT="${TXE_PORT:-8080}"
-TXE_PKG_DIR="${TXE_PKG_DIR:-$(mktemp -d)}"
+# Port is per-run, not fixed: many agents share this host, and a hardcoded 8080 either collides
+# with another run or — worse — silently reuses ITS server and reports results from a foreign
+# oracle. Ask the kernel for a free port unless the caller pins one.
+if [ -z "${TXE_PORT:-}" ]; then
+  TXE_PORT="$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')"
+fi
+# Cache the @aztec/txe install across runs; a fresh mktemp each time re-downloaded it every run.
+TXE_PKG_DIR="${TXE_PKG_DIR:-$HOME/.cache/nulo-txe/5.0.1}"
 mkdir -p "$TXE_PKG_DIR"
+TXE_PID=""
+
+# Tear down ONLY the server this script started. A run that reused a caller-supplied port leaves
+# that server alone; `pkill -f txe` would kill another agent's oracle mid-suite.
+cleanup() {
+  [ -n "$TXE_PID" ] && kill "$TXE_PID" 2>/dev/null
+  return 0
+}
+trap cleanup EXIT INT TERM
 
 # ── 1. Stage dependency artifacts into token_bridge/target/ ──────────────────────────
 cp "$here/token_minter_proxy/target/token_minter_proxy-TokenMinterProxy.json" "$tb/target/"
-cp "$tb/target/token_bridge_contract-TokenBridge.json" "$tb/target/token_bridge_contract-TokenBridge.json" 2>/dev/null || true
-TOKEN_ARTIFACT="$repo_root/node_modules/@aztec-foundation/aztec-standards/artifacts/target/token_contract-Token.json"
-[ -f "$TOKEN_ARTIFACT" ] || { echo "Token artifact missing — run bun install at repo root." >&2; exit 1; }
+# Resolved through bridge-core's declared dependency, not $repo_root/node_modules: this repo
+# uses bun's isolated linker, so there is no hoisted root node_modules to look in.
+TOKEN_ARTIFACT="$repo_root/packages/bridge-core/node_modules/@aztec-foundation/aztec-standards/artifacts/target/token_contract-Token.json"
+[ -f "$TOKEN_ARTIFACT" ] || { echo "Token artifact missing at $TOKEN_ARTIFACT — run bun install." >&2; exit 1; }
 cp "$TOKEN_ARTIFACT" "$tb/target/token_contract-Token.json"
 
-# ── 2. Ensure a TXE server is up (installing @aztec/txe locally if needed) ───────────
-if ! curl -sf "http://127.0.0.1:$TXE_PORT" >/dev/null 2>&1; then
+# TXE speaks JSON-RPC and does not answer a bare GET, so `curl -sf` reports failure even once
+# it is serving. Probe the TCP socket instead — the original HTTP probe never succeeded, which
+# only went unnoticed because the wait loop fell through and ran the suite anyway.
+txe_up() { (exec 3<>"/dev/tcp/127.0.0.1/$TXE_PORT") 2>/dev/null; }
+
+# ── 2. Start our own TXE server ─────────────────────────────────────────────────────
+if txe_up; then
+  echo "reusing the TXE server already listening on :$TXE_PORT (caller-pinned)"
+else
   echo "starting TXE server on :$TXE_PORT ..."
   if [ ! -f "$TXE_PKG_DIR/node_modules/@aztec/txe/dest/bin/index.js" ]; then
     (cd "$TXE_PKG_DIR" && bun add @aztec/txe@5.0.1 >/dev/null 2>&1)
   fi
   # NOTE: run under NODE, not bun — native lmdb bindings crash under bun.
-  (cd "$TXE_PKG_DIR" && NODE_OPTIONS="--max-old-space-size=8192" \
-    node node_modules/@aztec/txe/dest/bin/index.js > txe.log 2>&1 &)
-  for _ in $(seq 1 20); do
-    curl -sf "http://127.0.0.1:$TXE_PORT" >/dev/null 2>&1 && break
+  (cd "$TXE_PKG_DIR" && TXE_PORT="$TXE_PORT" NODE_OPTIONS="--max-old-space-size=8192" \
+    node node_modules/@aztec/txe/dest/bin/index.js > "txe-$TXE_PORT.log" 2>&1 &
+   echo $! > "$TXE_PKG_DIR/txe-$TXE_PORT.pid")
+  TXE_PID="$(cat "$TXE_PKG_DIR/txe-$TXE_PORT.pid" 2>/dev/null)"
+  for _ in $(seq 1 60); do
+    txe_up && break
     sleep 1
   done
+  txe_up || {
+    echo "TXE server never came up on :$TXE_PORT — see $TXE_PKG_DIR/txe-$TXE_PORT.log" >&2
+    exit 1
+  }
 fi
 
 # ── 3. Run the suite ────────────────────────────────────────────────────────────────
 export NARGO_FOREIGN_CALL_TIMEOUT=1200000
 cd "$tb"
-exec "$NARGO" test --force --oracle-resolver "http://127.0.0.1:$TXE_PORT" "$@"
+# Not exec: that would replace this shell and skip the EXIT trap, orphaning the TXE server.
+"$NARGO" test --force --oracle-resolver "http://127.0.0.1:$TXE_PORT" "$@"
