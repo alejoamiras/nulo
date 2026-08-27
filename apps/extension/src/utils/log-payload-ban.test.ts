@@ -235,7 +235,15 @@ function stripNoise(line: string, state: LexState): { code: string; state: LexSt
 }
 
 /** Keywords after which a `/` can only begin a regex literal, never divide. */
-const REGEX_PRECEDING_KEYWORDS = /\b(?:return|typeof|instanceof|in|of|case|do|else|yield|await|new|delete|void)$/
+const REGEX_PRECEDING_KEYWORDS = /\b(?:return|throw|typeof|instanceof|in|of|case|do|else|yield|await|new|delete|void)$/
+
+/**
+ * A trailing `!` that is TypeScript's postfix non-null assertion rather than logical NOT.
+ *
+ * `value! / total` divides; `!/re/.test(x)` does not. What separates them is whether the `!`
+ * follows a value.
+ */
+const POSTFIX_NON_NULL = /[\w$)\]"'`]!$/
 
 /**
  * Whether a `/` at the end of `preceding` opens a regex literal rather than dividing.
@@ -250,6 +258,7 @@ function startsRegex(preceding: string): boolean {
 	const trimmed = preceding.replace(/\s+$/, "")
 	if (trimmed === "") return true
 	if (trimmed.endsWith("++") || trimmed.endsWith("--")) return false
+	if (POSTFIX_NON_NULL.test(trimmed)) return false
 	if (REGEX_PRECEDING_KEYWORDS.test(trimmed)) return true
 	return "(,=:[!&|?{};+-*%~^<>".includes(trimmed.slice(-1))
 }
@@ -271,25 +280,21 @@ function skipRegex(line: string, start: number): number {
 }
 
 /**
- * How many lines past a log-call opener still count as that call's arguments.
+ * Lines belonging to the log call opened at `start`, up to its balanced closing paren.
  *
- * Ten real multi-line log calls already exist under `wallet/services/**`, and their interpolations
- * sit on continuation lines — a line-at-a-time scan sees the opener without a `${…}` and the
- * argument without a call, so it reports nothing.
- */
-const MAX_CALL_WINDOW_LINES = 12
-
-/**
- * Lines belonging to the log call opened at `start`, up to the balanced closing paren.
+ * Ten real multi-line log calls already exist under `wallet/services/**`, and their payloads sit
+ * on continuation lines — a line-at-a-time scan sees the opener without a `${…}` and the argument
+ * without a call, so it reports nothing.
  *
- * Counted over `stripNoise`d text, so a paren in a comment or a string cannot close the window
- * early — the failure mode that would silently drop the payload line from the scan. When the
- * balance never resolves inside the cap the window runs to the cap, which over-scans: a loud false
- * positive rather than the silent false negative this test exists to prevent.
+ * There is deliberately NO line cap. A cap large enough to look safe still truncates a
+ * Biome-formatted call with a long metadata object, silently dropping every argument past it —
+ * and a truncated window fails CLOSED-eyed, which is the one direction this test cannot afford.
+ * Running to EOF on unbalanced input is the acceptable opposite: it over-scans loudly, and
+ * unbalanced source fails typecheck and lint long before it reaches here.
  */
 function callWindow(code: string[], start: number, from: number): number {
 	let depth = 0
-	for (let i = start; i < code.length && i - start < MAX_CALL_WINDOW_LINES; i++) {
+	for (let i = start; i < code.length; i++) {
 		// Only the log call's OWN parens count. Anything to its left on the opener line belongs to
 		// whatever produced the receiver — `getLogger({…}).log(` closes a paren before the call
 		// even starts, which used to cancel the opener and collapse the window to one line.
@@ -299,7 +304,7 @@ function callWindow(code: string[], start: number, from: number): number {
 		}
 		if (depth <= 0) return i
 	}
-	return Math.min(start + MAX_CALL_WINDOW_LINES - 1, code.length - 1)
+	return code.length - 1
 }
 
 /**
@@ -555,6 +560,40 @@ describe("log-payload ban (static)", () => {
 		])
 		expect(offenders).toHaveLength(1)
 		expect(offenders[0]).toContain("x.ts:5")
+	})
+
+	test("a long call is not truncated — the window has no line cap", () => {
+		const metadata = Array.from({ length: 10 }, (_, n) => `\t\tfield${n}: value${n},`)
+		const offenders = findLoggedSecrets([
+			{
+				path: "packages/wallet-core/src/x.ts",
+				content: ["this.logWarn(", '\t"failed",', "\t{", ...metadata, "\t},", "\tpassword,", ")"].join("\n"),
+			},
+		])
+		expect(offenders).toHaveLength(1)
+		expect(offenders[0]).toContain("x.ts:15")
+	})
+
+	test("a regex after `throw` is a regex, not a division", () => {
+		const offenders = findLoggedSecrets([
+			{
+				path: "packages/wallet-core/src/x.ts",
+				content: ["console.warn(function matcher() {", "\tthrow /\\)/", "}, password)"].join("\n"),
+			},
+		])
+		expect(offenders).toHaveLength(1)
+	})
+
+	test("a division after TypeScript's non-null assertion is a division", () => {
+		const offenders = findLoggedSecrets([
+			{ path: "packages/wallet-core/src/x.ts", content: "console.warn(value! / total, password, /retry/)" },
+		])
+		expect(offenders).toHaveLength(1)
+	})
+
+	test("a leading `!` before a regex is still logical NOT", () => {
+		const offenders = findLoggedSecrets([{ path: "packages/wallet-core/src/x.ts", content: "console.warn(!/re)/.test(x), password)" }])
+		expect(offenders).toHaveLength(1)
 	})
 
 	test("a regex after `return` is a regex, not a division", () => {
