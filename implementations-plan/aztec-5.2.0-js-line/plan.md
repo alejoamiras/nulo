@@ -525,6 +525,17 @@ PR-0**. Original ask texts kept below for context:
   provenance: registry signature + npm publish attestation + SLSA v1 binding the tarball to
   `alejoamiras/aztec-accelerator@acb3d317` built by `publish-testnet.yml` on a GitHub-hosted
   runner (verified before exempting). Follow-up removal PR is a Phase 6 deliverable.
+- **D12b — recalibrated 64 → 40 MiB (codex audit, 2026-08-27)**: the first raise picked 64 MiB,
+  which a fresh codex pass showed was two-ways wrong — see `audit-codex-slice-cap.md`. 64 MiB
+  EQUALS `MAX_BACKUP_FILE_BYTES`, so the whole-file cap always tripped first and the slice cap
+  stopped being a bound (worse for encrypted backups, whose base64 envelope caps plaintext at
+  ~48MiB); and the export-time warning derives as 80% of the cap, so doubling it moved the
+  threshold to 53.7M — above the 33.8M we actually ship — silently disabling the early signal
+  added during the very diagnosis that motivated the raise. 40MiB keeps the cap binding under
+  both ceilings and puts today's payload at 80.6%, so the warning fires now. The pre-audit
+  hypothesis that the raise would shift failures from clean rejection to late deadline-partials
+  was WRONG and is recorded as such: the oversize path already ran after `finalizeRestore`, so
+  the old behavior was equally partial.
 - **D12 — account-state slice cap 32 → 64 MiB (owner, 2026-08-27)**: the bump pushed a
   3-network backup 0.29% past the 32 MiB cap, degrading full-backup import (two CI shards red).
   Measured cause: the slice stores a full contract artifact PER NETWORK, so canonical contracts
