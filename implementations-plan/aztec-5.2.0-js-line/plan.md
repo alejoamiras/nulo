@@ -242,18 +242,22 @@ evidence + bb version recorded + size delta printed; layers: prover-ON local-san
    `BRIDGE_MANIFEST=public/testnet-bridge.json bun run --cwd apps/faucet verify:deployments`
    (opt-in manifest lane, `apps/faucet/scripts/verify-deployments.ts:146`).
 4. `bun run test:e2e` (smoke; sandbox-free).
-5. **Full local network suite prover-ON, fallback-proof** (final-pass Critical 1): accelerator-
-   server 2.0.0 up, then `VITE_NULO_ACCELERATOR_REQUIRED=1 bun run e2e:agent` — the required-
-   mode build makes silent WASM fallback IMPOSSIBLE for the whole suite, not just the canary
-   (machine solo — the suite mass-fails under concurrent load; single re-run for known-flake
-   fingerprints only, logged). This is the native-proof gate for the fee flows
-   (private-fee-juice boundary) and the passkey canary — capture per-fee-flow `/prove`
-   evidence from the server log (CI's fee shard is proverless-STUB post-split — it produces NO
-   real proofs, so this local run is the ONLY real-proof coverage of the fee flows).
+5. **Prover-ON, fallback-proof — SCOPE REVISED (owner, 2026-08-26)**: the original step ran the
+   FULL local network suite prover-ON. The owner cut that ("our CI runs the tests faster than
+   you"), making CI the authority for the suite. What remains local is only what CI's own config
+   proves it CANNOT cover: `pr-network-e2e.yml` sets `proverless: true` on both fee lanes (the
+   `fee-methods` heavy job and the general shard pool carrying `tx-sendTx-feePayer`), and its one
+   real-proving lane (`shard_label: "canary"`) runs three unrelated files — so the fee flows have
+   ZERO real-proof coverage in CI by design. Local residue, with accelerator-server 2.0.0 up and
+   a `VITE_NULO_ACCELERATOR_REQUIRED=1` build (silent WASM fallback impossible): the
+   frozen-account canary, plus `fee-methods.test.ts` + `tx-sendTx-feePayer.test.ts` as the entire
+   real-proof gate for the private-fee-juice boundary. Capture `/prove` evidence from the server
+   log; zero successful proofs voids the run. Everything else: CI.
 
 **Validation gate** — commands: steps 1–5; pass criteria: all exit 0; verify:deployments rows
-all `[OK]` in BOTH lanes; suite green with fee-flow `/prove` evidence; re-diff verdicts logged
-per file; layers: build + smoke + full prover-ON local-sandbox e2e. Log: `lessons/phase-4.md`.
+all `[OK]` in BOTH lanes; the local prover-ON residue green WITH `/prove` + `Proving succeeded`
+evidence quoted; the CI network suite green on the PR; re-diff verdicts logged per file; layers:
+build + smoke + targeted prover-ON local e2e + CI network suite. Log: `lessons/phase-4.md`.
 
 ## Phase 5 ✓ — Remaining CI wiring
 

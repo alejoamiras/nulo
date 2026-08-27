@@ -126,3 +126,26 @@ copied logic against upstream 5.2.0 sources, independent of the accelerator's ow
    verification cycles where one would have done.
 5. `setsid nohup script.sh` silently no-ops when the script isn't executable — use `bash <script>`.
 6. Don't over-filter a long-run log; losing the error text costs a whole re-run.
+
+## Fee-flow prover-ON coverage (2026-08-27, post cap-raise)
+
+Ran the two fee files against a live accelerator-server 2.0.0 with a
+`VITE_NULO_ACCELERATOR_REQUIRED=1` build (silent WASM fallback impossible):
+
+    fee-methods.test.ts + tx-sendTx-feePayer.test.ts
+    FEE_E2E_RC=0 — Test Files 2 passed (2), Tests 6 passed (6)
+    3× "Received /prove request" → 3× "Proving succeeded", 0 failures
+    "Requested Aztec version version=5.2.0"; bb 5.2.0 downloaded + integrity-verified
+    circuits: SchnorrAccount:entrypoint, private_kernel_init, MultiCallEntrypoint:entrypoint
+
+**Why this run exists even though the owner redirected heavy suites to CI:** CI cannot
+produce it. `pr-network-e2e.yml` sets `proverless: true` on BOTH fee lanes — the dedicated
+`fee-methods` heavy job (line 186) and the general shard pool that carries
+`tx-sendTx-feePayer` (line 165) — and the only real-proving lane (`shard_label: "canary"`)
+runs three unrelated files. So the fee flows have ZERO real-proof coverage in CI by design,
+and this local pair is the entire real-proof gate for the private-fee-juice boundary.
+
+The general "CI is the authority for heavy suites" rule still holds; the carve-out is narrow
+and mechanical: **run locally only what CI's own config proves it cannot cover.** Two files,
+~20 minutes — not the 71-file suite. Check `proverless:` in the workflow before assuming a
+green CI lane proved anything about native proving.
