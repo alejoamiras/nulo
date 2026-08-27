@@ -47,7 +47,7 @@ export abstract class Service<TRequests extends MethodsMap, TEvents extends Even
 
 	private readonly onMessage = (message: RequestMessage<TRequests>) => {
 		if (message?.type !== MessageType.Request || !message.from || !message.content) {
-			this.logWarn("Invalid message received", summarizeMessage(message))
+			this.logWarn("Invalid message received", summarizeMessage(message, this.isRegisteredName))
 			return
 		}
 		void this.handleRequest(message.content, message.from)

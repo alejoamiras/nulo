@@ -66,7 +66,7 @@ export abstract class Service<TRequests extends MethodsMap, TEvents extends Even
 
 	private readonly onMessage = (message: RequestMessage<TRequests>, client: chrome.runtime.Port) => {
 		if (message?.type !== MessageType.Request || !message.content) {
-			this.logWarn("Invalid message received", summarizeMessage(message))
+			this.logWarn("Invalid message received", summarizeMessage(message, this.isRegisteredName))
 			return
 		}
 		void this.handleRequest(message.content, client)
