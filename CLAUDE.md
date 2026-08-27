@@ -114,9 +114,9 @@ to log something sensitive.
   **A finished string is opaque to it** — `` `k=${x}` ``
   can never be redacted — and neither can `"k=" + x` or a bare `x` string argument. This is
   enforced by `apps/extension/src/utils/log-payload-ban.test.ts`, which scans the extension app
-  AND every package it compiles in (`extension-messaging`, `wallet-bridge`, `wallet-core`,
-  `wallet-crypto`, `aztec-runtime` — the transport layer logs the most dangerous payloads there
-  is), and fails CI listing every offending `file:line`. Its known false-negative is textual
+  plus every `packages/*/src` (enumerated at runtime, so a new package is covered the day it
+  exists — the transport layer logs the most dangerous payloads there is), and fails CI listing
+  every offending `file:line`. Its known false-negative is textual
   (aliasing and indirection defeat it), stated in its own header. Its denied names are imported
   FROM `REDACTED_KEYS`/`URL_KEYS`, so the two lists cannot drift; an arity read
   (`authWitnesses.length`) is deliberately allowed, being the idiom this policy asks for.

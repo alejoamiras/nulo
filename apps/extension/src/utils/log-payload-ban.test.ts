@@ -34,11 +34,17 @@ const REPO_ROOT = join(__dirname, "..", "..", "..", "..")
  */
 const SCAN_ROOTS = [
 	"apps/extension/src",
-	"packages/extension-messaging/src",
-	"packages/wallet-bridge/src",
-	"packages/wallet-core/src",
-	"packages/wallet-crypto/src",
-	"packages/aztec-runtime/src",
+	// Enumerated, not listed: a new workspace package is covered the day it exists, with nothing
+	// to remember. A hardcoded list had already fallen behind by three packages.
+	...readdirSync(join(REPO_ROOT, "packages"))
+		.map((name) => `packages/${name}/src`)
+		.filter((rel) => {
+			try {
+				return statSync(join(REPO_ROOT, rel)).isDirectory()
+			} catch {
+				return false
+			}
+		}),
 ]
 
 const SCANNED_EXT = /\.(ts|js|vue)$/
@@ -181,6 +187,25 @@ function stripNoise(line: string, state: LexState): { code: string; state: LexSt
 			out += interp.length > 0 ? ch : " "
 			continue
 		}
+		// Comments and regex literals are code-context constructs, so they must be recognised the
+		// same way inside a `${…}` body as outside it — an unbalanced `)` in either would otherwise
+		// close the scan window early and hide the payload behind it.
+		if (ch === "/" && next === "/") {
+			out += " ".repeat(line.length - i)
+			break
+		}
+		if (ch === "/" && next === "*") {
+			inBlock = true
+			out += "  "
+			i++
+			continue
+		}
+		if (ch === "/" && startsRegex(out)) {
+			const end = skipRegex(line, i)
+			out += " ".repeat(end - i)
+			i = end - 1
+			continue
+		}
 		if (interp.length > 0) {
 			const frame = interp[interp.length - 1]
 			if (ch === '"' || ch === "'" || ch === "`") {
@@ -199,16 +224,6 @@ function stripNoise(line: string, state: LexState): { code: string; state: LexSt
 			out += ch
 			continue
 		}
-		if (ch === "/" && next === "/") {
-			out += " ".repeat(line.length - i)
-			break
-		}
-		if (ch === "/" && next === "*") {
-			inBlock = true
-			out += "  "
-			i++
-			continue
-		}
 		if (ch === '"' || ch === "'" || ch === "`") {
 			quote = ch
 			out += ch
@@ -217,6 +232,35 @@ function stripNoise(line: string, state: LexState): { code: string; state: LexSt
 		out += ch
 	}
 	return { code: out, state: { inBlockComment: inBlock, quote, interp } }
+}
+
+/**
+ * Whether a `/` at the end of `preceding` opens a regex literal rather than dividing.
+ *
+ * The distinction is genuinely ambiguous in JS without a full parser; this reads the last
+ * significant character, which is how every lightweight tokenizer does it. Getting it wrong in the
+ * division direction leaves the old behaviour (the `/` is kept, harmless); getting it wrong in the
+ * regex direction blanks a short span — again harmless, since only delimiters are being counted.
+ */
+function startsRegex(preceding: string): boolean {
+	const last = preceding.replace(/\s+$/, "").slice(-1)
+	return last === "" || "(,=:[!&|?{};+-*%~^<>".includes(last)
+}
+
+/** Index just past the closing `/` of the regex literal starting at `start`. */
+function skipRegex(line: string, start: number): number {
+	let inClass = false
+	for (let i = start + 1; i < line.length; i++) {
+		const ch = line[i]
+		if (ch === "\\") {
+			i++
+			continue
+		}
+		if (ch === "[") inClass = true
+		else if (ch === "]") inClass = false
+		else if (ch === "/" && !inClass) return i + 1
+	}
+	return line.length
 }
 
 /**
@@ -292,13 +336,32 @@ function occurrences(code: string): Array<{ name: string; index: number }> {
  * versions of this scanner ended up porous — the check inverts: any occurrence that is not a key
  * is a hazard.
  */
+/**
+ * The innermost bracket enclosing `index`, or `""` at top level.
+ *
+ * A comma alone cannot tell an object property from an argument or an array element — which is
+ * how `console.warn("failed", password, err)` and `[safe, password]` both read as safe. The
+ * enclosing bracket is what disambiguates them, and `${` is tracked as its own kind so an
+ * interpolation is never mistaken for an object literal.
+ */
+function enclosingBracket(code: string, index: number): string {
+	const stack: string[] = []
+	for (let i = 0; i < index; i++) {
+		const ch = code[i]
+		if (ch === "{") stack.push(code[i - 1] === "$" ? "${" : "{")
+		else if (ch === "(" || ch === "[") stack.push(ch)
+		else if (ch === "}" || ch === ")" || ch === "]") stack.pop()
+	}
+	return stack.length > 0 ? stack[stack.length - 1] : ""
+}
+
 function isObjectKey(code: string, index: number, name: string): boolean {
+	if (enclosingBracket(code, index) !== "{") return false
 	const before = code.slice(0, index).replace(/\s+$/, "")
 	const after = code.slice(index + name.length).replace(/^\s+/, "")
-	// `${password}` wears the same braces as `{ password }` and means the opposite thing.
-	const opensObject = (before.endsWith("{") && !before.endsWith("${")) || before.endsWith(",")
+	const opensProperty = before.endsWith("{") || before.endsWith(",")
 	const closesProperty = after.startsWith(":") || after.startsWith("}") || after.startsWith(",")
-	return opensObject && closesProperty
+	return opensProperty && closesProperty
 }
 
 /**
@@ -314,18 +377,19 @@ function isArityRead(code: string, index: number, name: string): boolean {
 }
 
 /**
- * The denied name this log call flattens, or null.
+ * Every denied name this log call flattens, with its offset into `window`.
  *
- * `code` is already noise-stripped, so a quoted `"password"` outside an interpolation is gone;
+ * Evaluated over the WHOLE call, never a line at a time: an object literal argument routinely
+ * opens on one line and holds its properties on the next, so a per-line view would see
+ * `password,` with no enclosing brace and read the one safe shape as a violation.
+ *
+ * `window` is already noise-stripped, so a quoted `"password"` outside an interpolation is gone;
  * inside one, `blankComparisonLiterals` removes comparison literals while keeping bracket-access
  * keys, so `${profile.type === "password"}` is quiet and `${row["master-key"]}` is not.
  */
-function hazards(code: string): string | null {
-	const cleaned = blankComparisonLiterals(code)
-	for (const { name, index } of occurrences(cleaned)) {
-		if (!isObjectKey(cleaned, index, name) && !isArityRead(cleaned, index, name)) return name
-	}
-	return null
+function hazards(window: string): Array<{ name: string; index: number }> {
+	const cleaned = blankComparisonLiterals(window)
+	return occurrences(cleaned).filter(({ name, index }) => !isObjectKey(cleaned, index, name) && !isArityRead(cleaned, index, name))
 }
 
 /** Returns `file:line` for every log call flattening a sensitive identifier into its message. */
@@ -345,10 +409,10 @@ function findLoggedSecrets(files: Array<{ path: string; content: string }>): str
 		for (let i = 0; i < code.length; i++) {
 			if (!LOG_CALL.test(code[i])) continue
 			const end = callWindow(code, i)
-			for (let j = i; j <= end; j++) {
-				const hit = hazards(code[j])
-				if (!hit) continue
-				const offense = `${path}:${j + 1} → ${hit} flattened into a log string`
+			const window = code.slice(i, end + 1).join("\n")
+			for (const { name, index } of hazards(window)) {
+				const line = i + window.slice(0, index).split("\n").length
+				const offense = `${path}:${line} → ${name} flattened into a log string`
 				if (!reported.has(offense)) {
 					reported.add(offense)
 					offenders.push(offense)
@@ -417,6 +481,48 @@ describe("log-payload ban (static)", () => {
 	test("catches the `*SecretKey` family the runtime redactor covers by suffix", () => {
 		const offenders = findLoggedSecrets([
 			{ path: "apps/extension/src/wallet/services/foo/service.ts", content: "this.logWarn(`k=${deployerSecretKey}`)" },
+		])
+		expect(offenders).toHaveLength(1)
+	})
+
+	test("catches a MIDDLE positional argument — a comma is not object context", () => {
+		const offenders = findLoggedSecrets([{ path: "packages/wallet-core/src/x.ts", content: 'console.warn("failed", password, err)' }])
+		expect(offenders).toHaveLength(1)
+	})
+
+	test("catches an array element between other elements", () => {
+		const offenders = findLoggedSecrets([
+			{ path: "packages/wallet-core/src/x.ts", content: 'console.warn("failed", [safe, password, err])' },
+		])
+		expect(offenders).toHaveLength(1)
+	})
+
+	test("a multi-line object literal argument is still the safe shape", () => {
+		// The enclosing-bracket check has to see the whole call: the `{` opens on one line and the
+		// property sits on the next, so a per-line view would read this as a bare argument.
+		const offenders = findLoggedSecrets([
+			{ path: "packages/wallet-core/src/x.ts", content: ["this.logWarn('failed', {", "\tpassword,", "\tattempt,", "})"].join("\n") },
+		])
+		expect(offenders).toEqual([])
+	})
+
+	test("a comment inside an interpolation cannot close the window early", () => {
+		const offenders = findLoggedSecrets([
+			{
+				path: "packages/wallet-core/src/x.ts",
+				content: ["this.logWarn(", "\t`prefix ${foo // legacy default)", "\t}`,", "\t`key=${masterKey}`,", ")"].join("\n"),
+			},
+		])
+		expect(offenders).toHaveLength(1)
+		expect(offenders[0]).toContain("masterKey")
+	})
+
+	test("a regex literal's parens are not counted", () => {
+		const offenders = findLoggedSecrets([
+			{
+				path: "packages/wallet-core/src/x.ts",
+				content: ["this.logWarn(", "\t/\\)/.test(value) ? 'a' : 'b',", "\t`key=${masterKey}`,", ")"].join("\n"),
+			},
 		])
 		expect(offenders).toHaveLength(1)
 	})
