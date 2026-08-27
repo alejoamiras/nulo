@@ -170,3 +170,27 @@ unconstrained fn exit_to_l1_public_insufficient_balance_rejected() {
         TokenBridge::at(bridge).exit_to_l1_public(recipient, minted + 1, aztec::protocol::address::EthAddress::zero(), NONCE),
     );
 }
+
+/// Same property on the private path, where the burn nullifies notes rather than decrementing a
+/// public balance. Both exits enqueue their withdraw message, so a burn that does not actually
+/// destroy the value is what would let one balance be exited twice.
+#[test(should_fail_with = "Balance too low")]
+unconstrained fn exit_to_l1_private_insufficient_balance_rejected() {
+    let (mut env, _admin, _proxy, token, bridge) = utils::setup();
+    let user = env.create_contract_account();
+    let minted: u128 = 100_000;
+    let recipient = aztec::protocol::address::EthAddress::from_field(0xCAFE);
+
+    utils::fund_private(env, user, minted, 8675309, bridge);
+
+    add_private_authwit_from_call(
+        env,
+        user,
+        _proxy,
+        Token::at(token).burn_private(user, minted + 1, NONCE),
+    );
+    env.call_private(
+        user,
+        TokenBridge::at(bridge).exit_to_l1_private(recipient, minted + 1, aztec::protocol::address::EthAddress::zero(), NONCE),
+    );
+}

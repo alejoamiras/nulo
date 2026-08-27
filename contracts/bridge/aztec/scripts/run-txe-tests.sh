@@ -22,9 +22,18 @@ NARGO="$AZTEC_HOME/bin/aztec-nargo"
 
 # Port is per-run, not fixed: many agents share this host, and a hardcoded 8080 either collides
 # with another run or — worse — silently reuses ITS server and reports results from a foreign
-# oracle. Ask the kernel for a free port unless the caller pins one.
+# oracle.
+#
+# Asking the kernel for a free port and releasing it leaves a window in which another process
+# can take it, so retry the whole claim-and-bind rather than trusting one probe. The retry is
+# what makes this safe, not the probe itself.
+pick_free_port() {
+  node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{const p=s.address().port;s.close(()=>console.log(p))})'
+}
+PORT_PINNED=1
 if [ -z "${TXE_PORT:-}" ]; then
-  TXE_PORT="$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')"
+  PORT_PINNED=0
+  TXE_PORT="$(pick_free_port)"
 fi
 # Cache the @aztec/txe install across runs; a fresh mktemp each time re-downloaded it every run.
 TXE_PKG_DIR="${TXE_PKG_DIR:-$HOME/.cache/nulo-txe/5.0.1}"
@@ -53,23 +62,38 @@ cp "$TOKEN_ARTIFACT" "$tb/target/token_contract-Token.json"
 txe_up() { (exec 3<>"/dev/tcp/127.0.0.1/$TXE_PORT") 2>/dev/null; }
 
 # ── 2. Start our own TXE server ─────────────────────────────────────────────────────
-if txe_up; then
+if [ "$PORT_PINNED" = "1" ] && txe_up; then
   echo "reusing the TXE server already listening on :$TXE_PORT (caller-pinned)"
 else
-  echo "starting TXE server on :$TXE_PORT ..."
   if [ ! -f "$TXE_PKG_DIR/node_modules/@aztec/txe/dest/bin/index.js" ]; then
     (cd "$TXE_PKG_DIR" && bun add @aztec/txe@5.0.1 >/dev/null 2>&1)
   fi
-  # NOTE: run under NODE, not bun — native lmdb bindings crash under bun.
-  (cd "$TXE_PKG_DIR" && TXE_PORT="$TXE_PORT" NODE_OPTIONS="--max-old-space-size=8192" \
-    node node_modules/@aztec/txe/dest/bin/index.js > "txe-$TXE_PORT.log" 2>&1 &
-   echo $! > "$TXE_PKG_DIR/txe-$TXE_PORT.pid")
-  TXE_PID="$(cat "$TXE_PKG_DIR/txe-$TXE_PORT.pid" 2>/dev/null)"
-  for _ in $(seq 1 60); do
-    txe_up && break
-    sleep 1
+  # Retry the whole claim-and-bind: another process can take the port between our probe
+  # releasing it and the server binding it. Only an unpinned port may be re-picked — a caller
+  # who named a port gets one attempt and a clear failure.
+  started=0
+  for attempt in 1 2 3; do
+    echo "starting TXE server on :$TXE_PORT (attempt $attempt) ..."
+    # NOTE: run under NODE, not bun — native lmdb bindings crash under bun. `exec` so $! is the
+    # server itself rather than a subshell that exits and orphans it.
+    (cd "$TXE_PKG_DIR" && TXE_PORT="$TXE_PORT" NODE_OPTIONS="--max-old-space-size=8192" \
+      exec node node_modules/@aztec/txe/dest/bin/index.js > "$TXE_PKG_DIR/txe-$TXE_PORT.log" 2>&1) &
+    TXE_PID=$!
+    for _ in $(seq 1 60); do
+      txe_up && break
+      kill -0 "$TXE_PID" 2>/dev/null || break   # died early — stop waiting, read the log
+      sleep 1
+    done
+    if txe_up && kill -0 "$TXE_PID" 2>/dev/null; then
+      started=1
+      break
+    fi
+    cleanup
+    TXE_PID=""
+    [ "$PORT_PINNED" = "1" ] && break
+    TXE_PORT="$(pick_free_port)"
   done
-  txe_up || {
+  [ "$started" = "1" ] || {
     echo "TXE server never came up on :$TXE_PORT — see $TXE_PKG_DIR/txe-$TXE_PORT.log" >&2
     exit 1
   }
