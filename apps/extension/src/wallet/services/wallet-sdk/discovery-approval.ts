@@ -1,6 +1,6 @@
 import type { PendingDiscovery } from "@aztec/wallet-sdk/extension/handlers"
 import type { PendingVerificationEntry } from "./pending-verification"
-import { isDiscoveryExpired } from "@nulo/wallet-bridge"
+import { describeExternalId, isDiscoveryExpired } from "@nulo/wallet-bridge"
 import { type ILogger, LogLevel } from "@nulo/wallet-core/logger"
 
 /**
@@ -38,17 +38,17 @@ export async function approveOrRollbackDiscoverySession(args: {
 	if (isDiscoveryExpired(discovery)) {
 		try {
 			await deleteSession(sessionId)
-		} catch (rollbackError) {
+		} catch {
 			// A concurrent disconnect may have already removed the row — the
 			// rejection below still stands, so swallow and log.
-			logger.log(
-				"wallet-sdk",
-				LogLevel.Warn,
-				`Failed to roll back expired discovery session ${sessionId}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
-			)
+			logger.log("wallet-sdk", LogLevel.Warn, `Failed to roll back expired discovery session ${describeExternalId(sessionId)}`)
 		}
 		rejectDiscovery(discovery.requestId)
-		logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (expired during session creation): request ${discovery.requestId}`)
+		logger.log(
+			"wallet-sdk",
+			LogLevel.Warn,
+			`Discovery rejected (expired during session creation): request ${describeExternalId(discovery.requestId)}`,
+		)
 		return false
 	}
 
@@ -61,7 +61,11 @@ export async function approveOrRollbackDiscoverySession(args: {
 	pendingVerification.set(discovery.requestId, { at: Date.now(), profileId: approverProfileId, tabId: discovery.tabId })
 	if (!approveDiscovery(discovery.requestId)) {
 		pendingVerification.delete(discovery.requestId)
-		logger.log("wallet-sdk", LogLevel.Warn, `Discovery approve did not land (already gone): request ${discovery.requestId}`)
+		logger.log(
+			"wallet-sdk",
+			LogLevel.Warn,
+			`Discovery approve did not land (already gone): request ${describeExternalId(discovery.requestId)}`,
+		)
 		return false
 	}
 	return true

@@ -1,3 +1,4 @@
+import { describeExternalId } from "./external-id"
 import type { BackgroundConnectionHandler, PendingDiscovery } from "@aztec/wallet-sdk/extension/handlers"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
@@ -104,7 +105,7 @@ export class DiscoveryQueue {
 				this.logger.log(
 					"wallet-sdk",
 					LogLevel.Info,
-					`Discovery skipped (${!discovery ? "gone" : discovery.status}): ${entry.requestId}`,
+					`Discovery skipped (${!discovery ? "gone" : discovery.status}): ${describeExternalId(entry.requestId)}`,
 				)
 				continue
 			}
@@ -113,7 +114,7 @@ export class DiscoveryQueue {
 			// can await a popup) may itself push a later one past the window.
 			if (isDiscoveryExpired(discovery)) {
 				this.handler.rejectDiscovery(discovery.requestId)
-				this.logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (stale): request ${entry.requestId}`)
+				this.logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (stale): request ${describeExternalId(entry.requestId)}`)
 				continue
 			}
 

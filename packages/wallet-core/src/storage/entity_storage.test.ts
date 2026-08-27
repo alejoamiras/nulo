@@ -143,7 +143,7 @@ describe("EntityStorage", () => {
 
 			expect(await strict.get("bad2")).toBeUndefined()
 
-			const logged = errorSpy.mock.calls.map((c) => String(c[0])).join("\n")
+			const logged = errorSpy.mock.calls.map((c: unknown[]) => String(c[0])).join("\n")
 			expect(logged).not.toContain("SUPER-SECRET-NAME")
 		})
 

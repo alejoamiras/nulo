@@ -8,6 +8,7 @@ import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { ILogger } from "../../logger"
 import { LogLevel } from "../../logger"
 import { isPendingVerificationStale, type PendingVerificationEntry } from "./pending-verification"
+import { describeExternalId } from "@nulo/wallet-bridge"
 
 /** The Nulo chain id derived from a session/discovery's `chainInfo` (chainId ^ version). */
 export function chainInfoToChainId(obj: { chainInfo: { chainId: Fr | string; version: Fr | string } }): number {
@@ -84,7 +85,7 @@ export async function handleSessionEstablished(
 			deps.logger.log(
 				"wallet-sdk-bg",
 				LogLevel.Warn,
-				`Session ${session.sessionId} established on chain ${chainId} on a stale approval — terminating`,
+				`Session ${describeExternalId(session.sessionId)} established on chain ${chainId} on a stale approval — terminating`,
 			)
 			deps.terminateSession(session.sessionId)
 			return false
@@ -96,7 +97,7 @@ export async function handleSessionEstablished(
 			deps.logger.log(
 				"wallet-sdk-bg",
 				LogLevel.Warn,
-				`Session ${session.sessionId} on chain ${chainId} has no DappSession — terminating to honor revocation`,
+				`Session ${describeExternalId(session.sessionId)} on chain ${chainId} has no DappSession — terminating to honor revocation`,
 			)
 			deps.terminateSession(session.sessionId)
 			return false
@@ -108,7 +109,7 @@ export async function handleSessionEstablished(
 			deps.logger.log(
 				"wallet-sdk-bg",
 				LogLevel.Warn,
-				`Session ${session.sessionId} on chain ${chainId} runs under profile ${dappSession.profileId} but was approved under ${marker.profileId} — terminating`,
+				`Session ${describeExternalId(session.sessionId)} on chain ${chainId} runs under profile ${dappSession.profileId} but was approved under ${marker.profileId} — terminating`,
 			)
 			deps.terminateSession(session.sessionId)
 			return false
@@ -123,7 +124,7 @@ export async function handleSessionEstablished(
 			deps.logger.log(
 				"wallet-sdk-bg",
 				LogLevel.Warn,
-				`Session ${session.sessionId} terminated during validation — skipping establishment`,
+				`Session ${describeExternalId(session.sessionId)} terminated during validation — skipping establishment`,
 			)
 			return false
 		}
@@ -135,7 +136,11 @@ export async function handleSessionEstablished(
 		// be stamped and must not pop a verify window. (The stamp wiring also
 		// self-compensates; see `stampSessionProfileGuarded`.)
 		if (!deps.isSessionLive(session.sessionId)) {
-			deps.logger.log("wallet-sdk-bg", LogLevel.Warn, `Session ${session.sessionId} terminated during establishment — not stamping`)
+			deps.logger.log(
+				"wallet-sdk-bg",
+				LogLevel.Warn,
+				`Session ${describeExternalId(session.sessionId)} terminated during establishment — not stamping`,
+			)
 			return false
 		}
 		// Bind the live channel to its owning profile — consumed by the dispatch
@@ -161,7 +166,7 @@ export async function handleSessionEstablished(
 		deps.logger.log(
 			"wallet-sdk-bg",
 			LogLevel.Warn,
-			`onSessionEstablished failed for session ${session.sessionId} on chain ${chainId} — terminating: ${getErrorMessage(err)}`,
+			`onSessionEstablished failed for session ${describeExternalId(session.sessionId)} on chain ${chainId} — terminating: ${getErrorMessage(err)}`,
 		)
 		deps.terminateSession(session.sessionId)
 		return false

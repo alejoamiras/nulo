@@ -54,7 +54,14 @@ import type { DiscoveryParams } from "@/wallet/services/dapp-interaction/spec"
 import { DappSessionService, AccessLevel } from "@/wallet/services/dapp-session/service"
 import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
-import { type DispatchHooks, DiscoveryQueue, isDiscoveryExpired, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
+import {
+	describeExternalId,
+	type DispatchHooks,
+	DiscoveryQueue,
+	isDiscoveryExpired,
+	type SessionContext,
+	WalletSdkDispatcher,
+} from "@nulo/wallet-bridge"
 import { getErrorMessage, KeyedLock } from "@nulo/wallet-core/utils"
 import { approveOrRollbackDiscoverySession } from "./discovery-approval"
 import { failQueuedIfUnclaimed, tryCreateQueuedJournal } from "./queued-journal"
@@ -431,7 +438,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				logger.log(
 					"wallet-sdk-bg",
 					LogLevel.Info,
-					`Terminating live session ${match.sessionId} on chain ${chainId} — dApp access revoked`,
+					`Terminating live session ${describeExternalId(match.sessionId)} on chain ${chainId} — dApp access revoked`,
 				)
 				handler.terminateSession(match.sessionId)
 			}
@@ -463,11 +470,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 					logger.log("wallet-sdk", LogLevel.Warn, "Wallet locked mid-drain, stopping")
 					return false
 				}
-				logger.log(
-					"wallet-sdk",
-					LogLevel.Info,
-					`Processing queued discovery: ${discovery.origin} (requestId: ${discovery.requestId})`,
-				)
+				logger.log("wallet-sdk", LogLevel.Info, `Processing queued discovery: request ${describeExternalId(discovery.requestId)}`)
 				await handleDiscovery(
 					discovery,
 					handler,
@@ -479,7 +482,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 					discoveryQueue,
 					logger,
 				)
-				logger.log("wallet-sdk", LogLevel.Info, `Queued discovery processed: request ${discovery.requestId}`)
+				logger.log("wallet-sdk", LogLevel.Info, `Queued discovery processed: request ${describeExternalId(discovery.requestId)}`)
 				return true
 			})
 		} else {
@@ -542,7 +545,11 @@ async function handleDiscovery(
 	const rejectIfExpired = (): boolean => {
 		if (isDiscoveryExpired(discovery)) {
 			handler.rejectDiscovery(discovery.requestId)
-			logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (past Nulo's 55s freshness cutoff): request ${discovery.requestId}`)
+			logger.log(
+				"wallet-sdk",
+				LogLevel.Warn,
+				`Discovery rejected (past Nulo's 55s freshness cutoff): request ${describeExternalId(discovery.requestId)}`,
+			)
 			return true
 		}
 		return false
@@ -579,7 +586,7 @@ async function handleDiscovery(
 			logger.log(
 				"wallet-sdk",
 				LogLevel.Info,
-				`Discovery auto-approved (existing session): request ${discovery.requestId} chain=${chainId}`,
+				`Discovery auto-approved (existing session): request ${describeExternalId(discovery.requestId)} chain=${chainId}`,
 			)
 			return
 		}
@@ -611,14 +618,14 @@ async function handleDiscovery(
 				logger.log(
 					"wallet-sdk",
 					LogLevel.Info,
-					`Discovery auto-approved (pending popup resolved): ${discovery.origin} chain=${chainId}`,
+					`Discovery auto-approved (pending popup resolved): request ${describeExternalId(discovery.requestId)} chain=${chainId}`,
 				)
 			} else {
 				handler.rejectDiscovery(discovery.requestId)
 				logger.log(
 					"wallet-sdk",
 					LogLevel.Info,
-					`Discovery rejected (pending popup resolved without session): ${discovery.origin} chain=${chainId}`,
+					`Discovery rejected (pending popup resolved without session): request ${describeExternalId(discovery.requestId)} chain=${chainId}`,
 				)
 			}
 			return
@@ -634,7 +641,7 @@ async function handleDiscovery(
 			logger.log(
 				"wallet-sdk",
 				LogLevel.Warn,
-				`Discovery rejected (popup cap): ${discovery.origin} [origin=${originPopups}, global=${pendingDiscoveryPromises.size}]`,
+				`Discovery rejected (popup cap) [origin=${originPopups}, global=${pendingDiscoveryPromises.size}]`,
 			)
 			return
 		}
@@ -662,7 +669,7 @@ async function handleDiscovery(
 			const result = await dappInteractionService.discover(params, discovery.requestId)
 			if (!result.approved) {
 				handler.rejectDiscovery(discovery.requestId)
-				logger.log("wallet-sdk", LogLevel.Info, `Discovery denied: request ${discovery.requestId}`)
+				logger.log("wallet-sdk", LogLevel.Info, `Discovery denied: request ${describeExternalId(discovery.requestId)}`)
 				return
 			}
 
@@ -702,7 +709,11 @@ async function handleDiscovery(
 				logger,
 			})
 			if (approved) {
-				logger.log("wallet-sdk", LogLevel.Info, `Discovery approved: request ${discovery.requestId} chain=${chainId}`)
+				logger.log(
+					"wallet-sdk",
+					LogLevel.Info,
+					`Discovery approved: request ${describeExternalId(discovery.requestId)} chain=${chainId}`,
+				)
 			}
 		} finally {
 			resolvePopup!()
@@ -711,7 +722,7 @@ async function handleDiscovery(
 	} catch {
 		// User rejected or popup was closed
 		handler.rejectDiscovery(discovery.requestId)
-		logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected for request ${discovery.requestId}`)
+		logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected for request ${describeExternalId(discovery.requestId)}`)
 	}
 }
 
@@ -811,7 +822,12 @@ async function handleWalletMessage(
 		// Pass the error as an OBJECT, never pre-stringified: a finished string is opaque to the
 		// logger's redaction, so interpolating it here would smuggle whatever the error carries
 		// (endpoint URLs, argument values) straight into the log store.
-		logger.log("wallet-sdk", LogLevel.Error, `Method ${message.type} failed for session ${session.sessionId}`, response.error)
+		logger.log(
+			"wallet-sdk",
+			LogLevel.Error,
+			`Method ${message.type} failed for session ${describeExternalId(session.sessionId)}`,
+			response.error,
+		)
 
 		if (hooks?.queuedJournalId) {
 			await failQueuedIfUnclaimed(operationJournal, hooks.queuedJournalId, getErrorMessage(error), logger)
@@ -830,7 +846,7 @@ async function handleWalletMessage(
 		logger.log(
 			"wallet-sdk",
 			LogLevel.Warn,
-			`Suppressing ${message.type} response for session ${session.sessionId}: profile switched mid-dispatch`,
+			`Suppressing ${message.type} response for session ${describeExternalId(session.sessionId)}: profile switched mid-dispatch`,
 		)
 		return
 	}
