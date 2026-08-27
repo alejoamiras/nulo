@@ -172,9 +172,11 @@ function toOrigin(value: unknown): unknown {
 /**
  * Error-like brands whose `name`/`message` are non-enumerable, so the generic walk yields `{}`.
  *
- * `DOMException` is not an `Error` and reports its own tag — WebAuthn failures arrive as one and
- * are logged verbatim during passkey ceremonies and backup export, so omitting it silently
- * discarded exactly the diagnosis those paths exist to produce.
+ * `DOMException` carries a DISTINCT object tag rather than `[object Error]`, so a single-tag check
+ * missed it. WebAuthn failures arrive as one and are logged verbatim during passkey ceremonies and
+ * backup export, so omitting it silently discarded exactly the diagnosis those paths exist to
+ * produce. Every other error brand reachable here — including `WalletError`, Aztec simulation
+ * errors and `AggregateError` — reports `[object Error]` and is already covered.
  */
 const ERROR_TAGS: ReadonlySet<string> = new Set(["[object Error]", "[object DOMException]"])
 
