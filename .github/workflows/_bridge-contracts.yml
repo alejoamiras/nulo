@@ -88,6 +88,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # setup-aztec shells out to bun, so it has to be on PATH before that step runs.
+      - uses: ./.github/actions/setup-bun
+
       - uses: ./.github/actions/setup-aztec
 
       # Pure-library crates only: they need no TXE oracle, so they run unattended here.
