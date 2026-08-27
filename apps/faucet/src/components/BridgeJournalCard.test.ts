@@ -423,6 +423,41 @@ describe("BridgeJournalCard — account attribution (Options 1+2)", () => {
 		expect(w.find(sel(TESTIDS.journalClaim)).exists()).toBe(true)
 	})
 
+	// The user-reported bug: a private bridge showed CLAIM YOUR GAS, and clicking it failed
+	// confusingly. Private fuel pays for the completing tx itself, and the recovery ladder is
+	// public + sponsored — which private records must never touch (L11).
+	const FUEL = { amount: "1", secret: "0xs", secretHashHex: "0xsh", minOutput: "1", received: "1000000000000000000", leafIndex: "7" }
+
+	it("a WELL-FORMED completed private record offers nothing and says nothing (its fuel is spent)", () => {
+		const w = mountCard(
+			deposit({ isPrivate: true, recipient: "0xaztec", completedAt: Date.now(), fuel: { ...FUEL, bridgeSecretSalt: "0xsalt" } }),
+		)
+		expect(w.find(sel(TESTIDS.journalClaimGas)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.journalPrivateFuelUnknown)).exists()).toBe(false)
+	})
+
+	it("a private record with INCOMPLETE metadata still offers no recovery, but surfaces the unknown state", () => {
+		const w = mountCard(deposit({ isPrivate: true, recipient: "0xaztec", completedAt: Date.now(), fuel: FUEL }))
+		expect(w.find(sel(TESTIDS.journalClaimGas)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.journalPrivateFuelUnknown)).exists()).toBe(true)
+	})
+
+	it("the PUBLIC twin still offers recovery — the gate is privacy-scoped, not a blanket removal", () => {
+		const w = mountCard(deposit({ isPrivate: false, recipient: "0xaztec", completedAt: Date.now(), fuel: FUEL }))
+		expect(w.find(sel(TESTIDS.journalClaimGas)).exists()).toBe(true)
+		expect(w.find(sel(TESTIDS.journalPrivateFuelUnknown)).exists()).toBe(false)
+	})
+
+	it("account attribution still applies to private cards: another account's CLAIMABLE private record redirects to switch", () => {
+		// Exercised on a CLAIMABLE record with an OTHER recipient — on a completed one there is no
+		// claim action to redirect, so asserting the switch there would prove nothing either way.
+		const w = mountCard(deposit({ isPrivate: true, recipient: OTHER, leafIndex: "1", fuel: FUEL }))
+		expect(w.find(sel(TESTIDS.journalSwitchAccount)).exists()).toBe(true)
+		expect(w.find(sel(TESTIDS.journalClaim)).exists()).toBe(false)
+		// Not completed ⇒ the gas affordance is out of scope here (pinned by the completed cases).
+		expect(w.find(sel(TESTIDS.journalClaimGas)).exists()).toBe(false)
+	})
+
 	it("withdraw cards carry no account tag and FINISH is never redirected", () => {
 		walletSelected.value = OTHER // some other account active — irrelevant to withdraws
 		const w = mountCard(withdraw({ exitBlock: 1 }))

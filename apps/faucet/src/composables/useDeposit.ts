@@ -55,8 +55,10 @@ import {
 	FUEL_FEE_MARGIN,
 	PRIVATE_ATTEMPT_STALE_MS,
 	decideFuelClaim,
+	decideFuelLadder,
 	decideNoFuelClaimGate,
 	decidePrivateFuelClaim,
+	decideStandaloneFuelRecovery,
 	isPrivateFuelInsufficiency,
 } from "@/lib/fuel-claim-state"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
@@ -227,6 +229,19 @@ export async function claimFuelStandalone(id: string): Promise<void> {
 	const rec = useBridgeJournal().records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
 	const fuel = rec?.fuel
 	if (!rec || !fuel?.received || !fuel.leafIndex) throw new Error("This bridge has no fuel to claim.")
+	// Same source as the card's affordance, so the button and this guard can never disagree. The
+	// ladder below is public + sponsored, which L11 forbids for private records — and their FJ is
+	// bound to the PrivateFPC, so it could not match one anyway.
+	if (
+		decideStandaloneFuelRecovery({
+			isPrivate: rec.isPrivate,
+			isFeeJuiceAsset: assetKindOf(rec) === "fee-juice",
+			completedAt: rec.completedAt,
+			fuel,
+		}) !== "offer"
+	) {
+		throw new Error("Private gas is claimed as part of the private bridge; standalone recovery is unavailable.")
+	}
 	// Post-impl audit HIGH-1/HIGH-2: the claim acts for rec.recipient — refuse under a different
 	// (or unknown — fail-closed) active account, and run the wallet send inside a tracked
 	// operation span.
@@ -404,6 +419,15 @@ export function ensureDepositJournalDeps(): void {
 			// PRIVATE fuel (Option A — codex 019ec69a): a fully SEPARATE path. The fee is ALWAYS the
 			// Wonderland PrivateFPC method (feePayer=FPC); recovery retries ONLY that method. It NEVER
 			// touches the public sponsored/fjwc/standalone ladder below — the L11 privacy invariant.
+			// L11 structural fence: a private FUELED record reaches the private ladder or stops here. It
+			// must never fall through to the public/sponsored ladder below — that claims the FJ in a
+			// publicly-visible tx and deanonymizes the bridge. Incomplete metadata (legacy, partially
+			// restored, tampered) is exactly the fall-through that used to happen silently.
+			if (decideFuelLadder({ isPrivate: rec.isPrivate, fuel }) === "private-incomplete") {
+				return stop(
+					"This private bridge is missing the data needed to claim its gas privately (an older or partially restored record). Restore it from its backup file to recover that data - the public gas recovery is deliberately unavailable for private bridges.",
+				)
+			}
 			if (rec.isPrivate && fuel?.received && fuel.leafIndex && fuel.bridgeSecretSalt) {
 				const fb = fuel
 				const fuelReceived = BigInt(fuel.received)

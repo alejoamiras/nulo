@@ -19,6 +19,7 @@ import { switchActiveAccount } from "@/composables/useWalletConnection"
 
 /** Utils */
 import { assetDecimals, assetSymbol } from "@/lib/asset-label"
+import { decideStandaloneFuelRecovery } from "@/lib/fuel-claim-state"
 import { useNow } from "@/lib/clock"
 import { IS_MAINNET } from "@/lib/network"
 import { formatBigInt } from "@/lib/format"
@@ -137,13 +138,19 @@ function onClaimWithoutFuel() {
 // fjwc claim nor landed standalone - offer to claim it now (sponsored, safe to retry; a
 // reverting "already claimed" just clears the affordance). Closes both stranding paths the
 // post-impl audit flagged.
-const fuelRecoverable = computed(() => {
-	// Fueled BRIDGES only: a direct-Fuel record's completion IS its gas claim, so the affordance would
-	// falsely offer a re-claim on every completed fuel card in the history.
-	if (isFuel.value) return false
-	const f = fuel.value
-	return f !== undefined && !!f.received && props.record.completedAt !== undefined && f.consumed !== true && f.standaloneClaimed !== true
-})
+// Shared with `claimFuelStandalone`'s own guard, so the affordance and the action can never disagree.
+const fuelRecovery = computed(() =>
+	decideStandaloneFuelRecovery({
+		isPrivate: props.record.isPrivate,
+		isFeeJuiceAsset: isFuel.value,
+		completedAt: props.record.completedAt,
+		fuel: fuel.value,
+	}),
+)
+const fuelRecoverable = computed(() => fuelRecovery.value === "offer")
+/** Private bridge whose private-claim metadata is incomplete: its gas state is genuinely unknown and
+ *  the public recovery must not be offered — so say so rather than showing nothing. */
+const privateFuelUnknown = computed(() => fuelRecovery.value === "private-unknown")
 const fuelRecovering = ref(false)
 const fuelRecoverError = ref<string | null>(null)
 
@@ -363,6 +370,11 @@ function onDiscard() {
 			<span v-if="fuelRecoverError" class="fuel-recover-err">{{ fuelRecoverError }}</span>
 		</div>
 
+		<p v-if="privateFuelUnknown" class="private-fuel-unknown" :data-testid="TESTIDS.journalPrivateFuelUnknown">
+			This private bridge's gas data is incomplete, so its gas state can't be confirmed. The public gas
+			recovery doesn't apply to private bridges - restore this bridge from its backup file if you kept one.
+		</p>
+
 		<BridgePhaseRail v-if="stage !== 'done'" :record="record" compact />
 
 		<p v-if="stageLabel" class="stage" :data-testid="TESTIDS.journalStage">{{ stageLabel }}</p>
@@ -535,6 +547,12 @@ function onDiscard() {
 	margin-left: auto;
 	font: 500 11px/1 var(--font-mono);
 	color: var(--txt-secondary);
+}
+
+.private-fuel-unknown {
+	margin: 0;
+	color: var(--yellow);
+	font: 500 11.5px/1.5 var(--font-mono);
 }
 
 .stage {

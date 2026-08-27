@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest"
 import {
-	decideFuelClaim,
-	decideNoFuelClaimGate,
-	decidePrivateFuelClaim,
-	type FuelClaimEvidence,
-	isPrivateFuelInsufficiency,
 	MANUAL_OFFER_THRESHOLD,
 	PRIVATE_FUEL_INSUFFICIENCY_MSG,
+	decideFuelClaim,
+	decideFuelLadder,
+	decideNoFuelClaimGate,
+	decidePrivateFuelClaim,
+	decideStandaloneFuelRecovery,
+	isPrivateFuelInsufficiency,
+	type FuelClaimEvidence,
 	type PrivateFuelClaimEvidence,
 } from "./fuel-claim-state"
 
@@ -194,5 +196,68 @@ describe("decideNoFuelClaimGate (unblock-only, fail-closed; wallet picks the met
 	it("a KNOWN balance with gas overrides the other read failing (no false unverifiable)", () => {
 		expect(decideNoFuelClaimGate({ privateFeeJuice: 200n, publicFeeJuice: null })).toBe("allow")
 		expect(decideNoFuelClaimGate({ privateFeeJuice: null, publicFeeJuice: 200n })).toBe("allow")
+	})
+})
+
+describe("decideFuelLadder — the L11 privacy fence", () => {
+	const complete = { received: "1000", leafIndex: "7", bridgeSecretSalt: "0xsalt" }
+
+	it("a well-formed private fueled record routes to the private ladder", () => {
+		expect(decideFuelLadder({ isPrivate: true, fuel: complete })).toBe("private")
+	})
+
+	it("public records use the public ladder", () => {
+		expect(decideFuelLadder({ isPrivate: false, fuel: complete })).toBe("public")
+	})
+
+	it("a private record with NO fuel is unaffected — it never bridged FJ", () => {
+		expect(decideFuelLadder({ isPrivate: true, fuel: undefined })).toBe("public")
+	})
+
+	// The regression the audit demanded: a private fueled record must NEVER reach the public /
+	// sponsored ladder, whichever piece of claim metadata is missing (legacy, partially restored,
+	// tampered). Before the fence these fell through and could claim the FJ in a public tx.
+	it.each([
+		["missing salt (the legacy shape)", { received: "1000", leafIndex: "7" }],
+		["missing leafIndex", { received: "1000", bridgeSecretSalt: "0xsalt" }],
+		["missing received", { leafIndex: "7", bridgeSecretSalt: "0xsalt" }],
+		["empty fuel block", {}],
+	])("private + %s fails closed, never public", (_label, fuel) => {
+		expect(decideFuelLadder({ isPrivate: true, fuel })).toBe("private-incomplete")
+	})
+})
+
+describe("decideStandaloneFuelRecovery — one source for the card and the action", () => {
+	const base = { isPrivate: false, isFeeJuiceAsset: false, completedAt: 1 }
+	const fuel = { received: "1000", leafIndex: "7" }
+
+	it("offers recovery for a completed PUBLIC record with unsettled fuel", () => {
+		expect(decideStandaloneFuelRecovery({ ...base, fuel })).toBe("offer")
+	})
+
+	it.each([
+		["no fuel block", { ...base, fuel: undefined }],
+		["a direct-Fuel record (its completion IS the gas claim)", { ...base, isFeeJuiceAsset: true, fuel }],
+		["an unfinished claim (retried by the normal action)", { ...base, completedAt: undefined, fuel }],
+		["fuel already consumed", { ...base, fuel: { ...fuel, consumed: true } }],
+		["fuel already recovered standalone", { ...base, fuel: { ...fuel, standaloneClaimed: true } }],
+	])("offers nothing for %s", (_label, input) => {
+		expect(decideStandaloneFuelRecovery(input)).toBe("none")
+	})
+
+	it("a well-formed completed PRIVATE record is settled — silence, not an affordance", () => {
+		// Its FJ paid for the tx that completed it, so an unlatched `consumed` is a stale flag.
+		const input = { ...base, isPrivate: true, fuel: { ...fuel, bridgeSecretSalt: "0xsalt" } }
+		expect(decideStandaloneFuelRecovery(input)).toBe("private-settled")
+	})
+
+	it("a PRIVATE record with incomplete metadata is unknown — still no public recovery, but surfaced", () => {
+		expect(decideStandaloneFuelRecovery({ ...base, isPrivate: true, fuel })).toBe("private-unknown")
+	})
+
+	it("no private record can ever reach 'offer'", () => {
+		for (const f of [fuel, { ...fuel, bridgeSecretSalt: "0xsalt" }, { received: "1000" }, {}]) {
+			expect(decideStandaloneFuelRecovery({ ...base, isPrivate: true, fuel: f })).not.toBe("offer")
+		}
 	})
 })

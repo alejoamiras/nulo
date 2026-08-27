@@ -41,6 +41,7 @@ export const TESTIDS = {
 	accountMenu: "fa-account-menu",
 	accountMenuRow: "fa-account-menu-row",
 	accountMenuCopy: "fa-account-menu-copy",
+
 	// Journal-card account attribution (deposit cards only — withdraws never persist their Aztec sender)
 	journalAccount: "fa-journal-account",
 	journalSwitchAccount: "fa-journal-switch-account",
@@ -149,6 +150,8 @@ export const TESTIDS = {
 	journalClaimWithoutFuel: "fa-journal-claim-without-fuel",
 	receiptFuel: "fa-receipt-fuel",
 	journalClaimGas: "fa-journal-claim-gas",
+	// Private bridge whose gas state can't be confirmed (incomplete private-claim metadata)
+	journalPrivateFuelUnknown: "fa-journal-private-fuel-unknown",
 	stepperBackup: "fa-stepper-backup",
 	journalRestore: "fa-journal-restore",
 	journalRestoreLink: "fa-journal-restore-link",

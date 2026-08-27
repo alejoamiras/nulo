@@ -215,9 +215,36 @@ byte-for-byte (identical) and found the bun-runtime-sensitive test constructs de
 
 | # | Residual (severity) | Disposition |
 |---|---|---|
-| D-46 | `claimFuelStandalone` doesn't explicitly reject PRIVATE records (LOW) | **Surfaced to the owner, not unilaterally changed.** Pre-existing and outside this feature's domain: the `standaloneClaimed` contract already documents "PUBLIC fuel only", and private fuel lands at the PrivateFPC, so a private standalone claim cannot redirect funds — it can only fail confusingly. Enforcing it is a bridge-recovery behavior change (and touches a fund-stranding-sensitive affordance), so it belongs to a bridge-owned change, not a merge refresh. |
+| D-46 | `claimFuelStandalone` doesn't explicitly reject PRIVATE records (LOW → **fixed, owner-reported in the wild**) | **Adopted** — see below. Initially deferred as an owner's call; the owner then reported hitting it live (a private bridge offered CLAIM YOUR GAS, the click failed confusingly), which moved it into scope. |
 | D-47 | `AccountSwitcher.test.ts` leaked its stub clipboard into later cases (LOW) | **Adopted**: descriptor saved and restored in `finally`. |
 | D-48 | Stale "under 5.0.1" comment after the 5.2.0 bump (LOW) | **Adopted**: comment now states the constraint without pinning a version. |
+
+### D-46 follow-up — private bridges must never offer the public gas recovery
+
+**Mechanism** (traced, not assumed). A private fueled deposit commits `fuelRecipient = PRIVATE_FPC_ADDRESS`
+in the L1 witness, so the Fee-Juice message is content-hash-bound to the PrivateFPC, not to the user's
+account. The claim itself is `claim_private` paid by `privateMintAndPayFee`, which runs `FeeJuice.claim`
++ `PrivateFPC.mint_and_pay_fee` as SETUP of that same transaction: the gas claim and the token claim are
+ONE tx, the bridged FJ paying for the very tx that consumes it. A **completed** private record has
+therefore definitionally spent its fuel — a `fuel.consumed` that is still false there is an unlatched
+flag (the inclusion probe needs `fuel.claimTxHash` plus an included receipt), not stranded gas.
+
+**The bug.** The card's `fuelRecoverable` gate never checked `isPrivate`, so those records offered
+CLAIM YOUR GAS → `claimFuelStandalone` → a **public, sponsored** `FeeJuice.claim(rec.recipient, …)`.
+Two independent defects: it names the user as claim recipient when the message is bound to the FPC (so
+it cannot match — the confusing failure the owner hit), and the whole ladder is public+sponsored, which
+this file's own L11 invariant forbids for private records.
+
+**Fix.** `fuelRecoverable` returns false for private records (reasoning inline so it isn't "cleaned up"
+later); `claimFuelStandalone` refuses them defensively with an honest message. A card test pins both
+directions — private hides the affordance, its public twin still shows it — and was verified to fail
+without the fix. No unit test for the function-level refusal: there is no `useDeposit.test.ts`, and its
+dependency surface makes a harness disproportionate for one guard sitting behind an already-tested gate
+(same disposition as D-39).
+
+**Why this strands nothing.** An unfinished private claim never reaches the affordance (`fuelRecoverable`
+requires `completedAt`); its retry path is the normal CLAIM action via `decidePrivateFuelClaim →
+"private-fpc"`.
 
 ## Security & Adversarial Considerations
 
