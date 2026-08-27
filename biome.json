@@ -432,7 +432,6 @@
 				"apps/extension/src/**",
 				"!apps/extension/src/utils/console-sniffer.ts",
 				"!apps/extension/src/wallet/logger/**",
-				"!apps/extension/src/popup/app.vue",
 				"!apps/extension/src/e2e/**",
 				"!apps/extension/src/**/*.test.ts"
 			],
