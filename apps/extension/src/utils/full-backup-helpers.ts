@@ -144,7 +144,9 @@ export async function assembleFullBackup(
 }
 
 interface AccountStateRestoreItem {
-	networkId: string
+	// `unknown`, not `string`: this is attacker-controlled slice content, and typing it as a string
+	// was what let the item level skip the sanitizing its children already got.
+	networkId: unknown
 	contracts: Array<{ restoreError?: unknown } & Record<string, unknown>>
 	senders: Array<{ restoreError?: unknown } & Record<string, unknown>>
 }
@@ -160,8 +162,12 @@ interface GenericRestoreItem {
  * address and a user-chosen label), network endpoints (`rpcUrl`, which routinely carries a
  * provider API key) and imported keys (`encryptedSigningKey`). The row id is what a developer
  * needs to find the row again; the rest is what leaks.
+ *
+ * `key` is included for config rows, where it is safe BY CONSTRUCTION rather than by filtering:
+ * only members of `RESTORABLE_CONFIG_KEYS` ever reach a config restore result, so the value set is
+ * a fixed allowlist and naming it beats an ordinal.
  */
-const RESTORE_ERROR_ID_KEYS = ["id", "networkId", "chainId", "profileId"] as const
+const RESTORE_ERROR_ID_KEYS = ["id", "networkId", "chainId", "profileId", "key"] as const
 
 /**
  * Upper bound on recorded failures. Nothing else bounds this: the viewer renders the whole log
@@ -230,6 +236,16 @@ function projectAccountStateChild(child: Record<string, unknown>, index: number)
 	return { child: index, restoreError: describeRestoreError(child.restoreError) }
 }
 
+/** Project the failed entries of a child array, numbering them by SOURCE position. */
+function projectFailedChildren(children: unknown): Array<Record<string, unknown>> {
+	// Presence-guarded: the result shape is built from an attacker-controlled slice.
+	if (!Array.isArray(children)) return []
+	return children
+		.map((child, index) => ({ child, index }))
+		.filter(({ child }) => (child as { restoreError?: unknown } | null)?.restoreError)
+		.map(({ child, index }) => projectAccountStateChild(child as Record<string, unknown>, index))
+}
+
 /** Trim to the cap, replacing the tail with one constant marker rather than silently dropping. */
 function capRecords(records: unknown[]): unknown[] {
 	if (records.length <= MAX_RECORDED_RESTORE_ERRORS) return records
@@ -263,22 +279,24 @@ export function collectRestoreErrors(serviceName: string, data: unknown): unknow
 			// Presence-guard the child arrays: the result shape is built from an
 			// attacker-controlled slice, and this collector runs post-finalize
 			// where a throw would strand the import on a false "Import failed".
-			const failedContracts = (Array.isArray(item.contracts) ? item.contracts : [])
-				.filter((c) => c?.restoreError)
-				.map((child, i) => projectAccountStateChild(child, i))
-			const failedSenders = (Array.isArray(item.senders) ? item.senders : [])
-				.filter((s) => s?.restoreError)
-				.map((child, i) => projectAccountStateChild(child, i))
+			// The ordinal is captured BEFORE filtering, so it points at the child's position in the
+			// SOURCE array. Numbering after the filter would just re-derive the error array's own
+			// index — information the array already carries, and useless for locating the row.
+			const failedContracts = projectFailedChildren(item.contracts)
+			const failedSenders = projectFailedChildren(item.senders)
 			// ITEM-LEVEL errors (whole-network skips, deadline notes, normalizer
 			// violations) count too — a top-level restoreError with clean child
 			// arrays used to vanish here, letting a skipped registration
 			// auto-route past the Continue gate.
 			if (!failedContracts.length && !failedSenders.length && !item.restoreError) continue
 			out.push({
-				networkId: item.networkId,
+				// Sanitized like every other field: `networkId` comes from the same attacker-controlled
+				// slice, and the normalizer admits ids up to 100 chars that then reach "Network not
+				// found" — so the item level is not a trusted layer above its children.
+				networkId: boundedScalar(item.networkId),
 				contracts: failedContracts,
 				senders: failedSenders,
-				...(item.restoreError !== undefined ? { restoreError: item.restoreError } : {}),
+				...(item.restoreError !== undefined ? { restoreError: describeRestoreError(item.restoreError) } : {}),
 			})
 		}
 		if (malformedItems > 0) {
@@ -286,9 +304,11 @@ export function collectRestoreErrors(serviceName: string, data: unknown): unknow
 		}
 		return out.length ? capRecords(out) : null
 	}
+	// Index BEFORE filtering — see the account-state branch above for why.
 	const filtered = (data as GenericRestoreItem[])
-		.filter((item) => item?.restoreError)
-		.map((item, i) => projectRestoreErrorRow(item as Record<string, unknown>, i))
+		.map((item, index) => ({ item, index }))
+		.filter(({ item }) => item?.restoreError)
+		.map(({ item, index }) => projectRestoreErrorRow(item as Record<string, unknown>, index))
 	return filtered.length ? capRecords(filtered) : null
 }
 

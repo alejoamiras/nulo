@@ -294,6 +294,7 @@ export function relinkRestoredTokenBalances(
 		if (!newTokens[i].restoreError) oldIdToNew.set(old.id, newTokens[i].id)
 	}
 	const droppedBalances: unknown[] = []
+	let droppedTotal = 0
 	data["token-balance"] = (data["token-balance"] as Array<Record<string, unknown>>).flatMap(
 		(tb: Record<string, unknown>, index: number) => {
 			const newId = oldIdToNew.get(tb.token)
@@ -312,6 +313,7 @@ export function relinkRestoredTokenBalances(
 				// and migration validates only `tb.id`, so `token` can be an arbitrary nested object
 				// holding a URL or a secret. Only the POSITION is recorded, which is all that
 				// distinguishes one dropped row from another anyway.
+				droppedTotal++
 				if (droppedBalances.length < MAX_DROPPED_BALANCES_RECORDED) {
 					droppedBalances.push({
 						row: index,
@@ -323,6 +325,12 @@ export function relinkRestoredTokenBalances(
 			return [{ ...tb, token: newId }]
 		},
 	)
+	// Say what was dropped rather than letting the cap read as "exactly 200 failures".
+	if (droppedTotal > droppedBalances.length) {
+		droppedBalances.push({
+			restoreError: `${droppedTotal - droppedBalances.length} further dropped balance(s) not recorded`,
+		})
+	}
 	return droppedBalances
 }
 

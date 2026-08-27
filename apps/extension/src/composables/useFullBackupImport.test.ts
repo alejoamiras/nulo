@@ -416,7 +416,9 @@ describe("relinkRestoredTokenBalances — stage 2b contract (Q-02)", () => {
 
 		const dropped = relinkRestoredTokenBalances(data, [{ id: "n1", chainId: 1, contract: "0xT" }], new Set(["1:0xa"]))
 
-		expect(dropped.length).toBeLessThanOrEqual(200)
+		// 200 records plus one truncation marker — the cap must not read as "exactly 200 failures".
+		expect(dropped).toHaveLength(201)
+		expect(JSON.stringify(dropped[200])).toContain("further dropped balance(s) not recorded")
 	})
 })
 

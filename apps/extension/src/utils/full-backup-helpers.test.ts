@@ -182,9 +182,10 @@ describe("collectRestoreErrors", () => {
 
 	it("filters generic services to only failed entries", () => {
 		const result = collectRestoreErrors("network", [{ id: "a", restoreError: "boom" }, { id: "b" }, { id: "c", restoreError: "kaput" }])
+		// `row` is the SOURCE position: "c" is index 2 of the input, not index 1 of the errors.
 		expect(result).toEqual([
 			{ row: 0, id: "a", restoreError: "boom" },
-			{ row: 1, id: "c", restoreError: "kaput" },
+			{ row: 2, id: "c", restoreError: "kaput" },
 		])
 	})
 
@@ -266,6 +267,59 @@ describe("collectRestoreErrors", () => {
 
 			expect(JSON.stringify(result)).not.toContain("BLOB")
 			expect(result).toEqual([{ networkId: "net1", contracts: [{ child: 0, restoreError: "fail" }], senders: [] }])
+		})
+
+		it("sanitizes the account-state ITEM level too, not just its children", () => {
+			// The item level is not a trusted layer above its children — `networkId` comes from the
+			// same attacker-controlled slice, and the normalizer admits ids up to 100 chars.
+			const result = collectRestoreErrors("account-state", [
+				{
+					networkId: { rpcUrl: "https://mainnet.example.com/v2/SECRET-KEY" },
+					contracts: [],
+					senders: [],
+					restoreError: "fetch failed: https://rpc.example.com/v2/SECRET-KEY",
+				},
+			]) as Array<Record<string, unknown>>
+
+			expect(JSON.stringify(result)).not.toContain("SECRET-KEY")
+			expect(result[0].networkId).toBe("[object]")
+			expect(result[0].restoreError).toContain("https://rpc.example.com")
+		})
+
+		it("numbers rows by SOURCE position, not by position in the error array", () => {
+			// Numbering after the filter would just re-derive the error array's own index —
+			// information the array already carries, and useless for locating the failed row.
+			const result = collectRestoreErrors("network", [
+				{ id: "a" },
+				{ id: "b" },
+				{ id: "c", restoreError: "boom" },
+				{ id: "d" },
+				{ id: "e", restoreError: "kaput" },
+			]) as Array<Record<string, unknown>>
+
+			expect(result.map((r) => r.row)).toEqual([2, 4])
+		})
+
+		it("numbers account-state CHILDREN by source position too", () => {
+			const result = collectRestoreErrors("account-state", [
+				{
+					networkId: "net1",
+					contracts: [{ address: "ok" }, { address: "ok2" }, { address: "bad", restoreError: "fail" }],
+					senders: [],
+				},
+			]) as Array<{ contracts: Array<Record<string, unknown>> }>
+
+			expect(result[0].contracts[0].child).toBe(2)
+		})
+
+		it("keeps a config key — safe by construction, and better than an ordinal", () => {
+			// Only members of RESTORABLE_CONFIG_KEYS reach a config restore result.
+			const result = collectRestoreErrors("config", [{ key: "theme", value: "dark", restoreError: "boom" }]) as Array<
+				Record<string, unknown>
+			>
+
+			expect(result[0].key).toBe("theme")
+			expect(result[0]).not.toHaveProperty("value")
 		})
 
 		it("constrains allowlisted fields by TYPE, not just by name", () => {
