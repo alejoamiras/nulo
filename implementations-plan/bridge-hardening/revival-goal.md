@@ -35,6 +35,32 @@ exist **only on the arc branches**, not on `dev`.
   "4 rounds"). The stack is hand-chained via `--base`, not `gh stack`-managed.
 - `implementations-plan/index.md` has no `bridge-hardening` entry.
 
+## Outcome (P0–P6 complete)
+
+All ten branches are green on the new contracts gate. Local at the stack top: forge 62, TXE 33,
+halmos 4, bridge-core 261, faucet 548, lint 0, typecheck clean. What P7 has left is un-drafting in
+order and the merge itself, which is the owner's call.
+
+**What the revival actually found.** Every one of these was a test, guard or CI step that could
+not fail, and every fix below was verified by mutation — break the thing, watch it go red:
+
+| Where | Defect |
+|---|---|
+| build | The forge project did not compile from a clean checkout under this repo's own isolated linker. Ten PRs and a codex pass survived it because nothing ran in CI. |
+| #439 | Two halmos proofs passed with `onlyOwner` stripped off `sweep`, a fund-drain primitive. |
+| #438 | The four-invariant campaign caught nothing when the router's balance guard was disabled. An FJ donation branch had never executed once. |
+| #435 | The fee-on-transfer test was green for a missing USDC allowance; removing the tax entirely left it passing. |
+| #442 | The TXE runner could not resolve its artifacts, never actually probed readiness, and died above ~24 tests. Six negative tests were satisfied by a dead oracle. |
+| #443 | The conformance oracle's rejection branches were unreachable; two were dead code. |
+| #444 | Silently regressed invariant I2 and the fork suite's skip-gate, neither disclosed. |
+| CI (new) | Four self-inflicted: bun missing, halmos passing with zero proofs, and three unpinned toolchains (Aztec, forge libraries, Foundry) resolving differently than validated. |
+
+**Process lesson worth carrying.** A file copied from the stack top onto a lower branch broke that
+branch's compile AND caused a later cascade to drop #436's PoC flip as "already applied" — leaving
+a PR that adds a security guard without the test proving it works. CI caught the compile error; it
+would NOT have caught the dropped hunk, because the remaining tests still passed. After any
+cascade, diff the whole stack against its previous tip and confirm every difference is intended.
+
 ## Phases
 
 ### P0 — home + honest baseline
