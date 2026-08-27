@@ -18,8 +18,9 @@ import { TESTIDS } from "@/lib/testids"
  * The dropdown is deliberately NOT the design package's Popover: that component
  * needs a `#popover` teleport root the faucet doesn't declare and carries a
  * pinned open/close lifecycle bug (packages/design/src/ui/Popover.vue), and its
- * rounded, inset-ringed surface reads as the one bordered floating panel in an
- * app of sharp hairline boxes. Depth here comes from shadow alone.
+ * rounded surface reads as the odd one out in an app of sharp hairline boxes.
+ * This one is sharp, with the same hairline every other surface uses — which the
+ * light palette needs anyway: a #fff panel on a #f5f5f7 page has no edge without it.
  */
 
 const props = defineProps<{
@@ -213,10 +214,11 @@ onBeforeUnmount(() => {
 	display: inline-flex;
 	align-items: center;
 	gap: 10px;
-	/* No vertical padding: the 40px floor (shared with the design Button and the L1 chip) sets the
-	   height, and the identity capsule centres inside it. */
-	min-height: 40px;
-	padding: 0 12px;
+	/* One 48px baseline across every wallet surface — the design system's `large` Button height,
+	   which the connect buttons also use. The vertical padding is real so the inner address block
+	   is inset from this border rather than pressed against it. */
+	min-height: 48px;
+	padding: 5px 12px;
 	box-sizing: border-box;
 	border: 1px solid var(--nulo-outline);
 	background: transparent;
@@ -269,8 +271,9 @@ onBeforeUnmount(() => {
 	font-size: 13px;
 }
 
-/* Sharp corners, depth from shadow alone — nothing outlines the panel, so it doesn't read as the
-   one bordered-and-rounded surface in an app of sharp hairline boxes. */
+/* Sharp corners like every other nulo surface — the rounded Popover recipe was the odd one out. The
+   hairline is load-bearing, not decoration: in the light palette the panel is #fff on a #f5f5f7 page,
+   so shadow alone leaves it with no discernible edge. */
 .menu {
 	position: absolute;
 	top: calc(100% + 6px);
@@ -278,9 +281,10 @@ onBeforeUnmount(() => {
 	z-index: 50;
 	min-width: 264px;
 	background: var(--dropdown-bg);
+	border: 1px solid var(--nulo-outline);
 	box-shadow:
-		0 14px 34px rgba(0, 0, 0, 0.35),
-		0 4px 14px rgba(0, 0, 0, 0.15);
+		0 14px 34px rgba(0, 0, 0, 0.28),
+		0 4px 14px rgba(0, 0, 0, 0.12);
 	padding: 6px 0;
 	display: flex;
 	flex-direction: column;

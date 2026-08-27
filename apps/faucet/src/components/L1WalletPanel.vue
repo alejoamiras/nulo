@@ -20,7 +20,7 @@ const { address, isConnected, wrongChain, isConnecting, connect, disconnect, swi
 			</button>
 		</div>
 
-		<Button v-else :loading="isConnecting" :disabled="isConnecting" :data-testid="TESTIDS.l1Connect" @click="connect">
+		<Button v-else size="large" :loading="isConnecting" :disabled="isConnecting" :data-testid="TESTIDS.l1Connect" @click="connect">
 			Connect Ethereum
 		</Button>
 	</section>
@@ -35,10 +35,11 @@ const { address, isConnected, wrongChain, isConnecting, connect, disconnect, swi
 	display: inline-flex;
 	align-items: center;
 	gap: 10px;
-	/* Shares the design Button's 40px floor with the Aztec chip, so connected and disconnected
-	   states across both networks sit on one baseline instead of three near-misses. */
-	min-height: 40px;
-	padding: 0 12px;
+	/* One 48px baseline across every wallet surface — the design system's `large` Button height,
+	   which the connect buttons also use. The vertical padding is real so the inner address block
+	   is inset from this border rather than pressed against it. */
+	min-height: 48px;
+	padding: 5px 12px;
 	box-sizing: border-box;
 	border: 1px solid var(--nulo-outline);
 }

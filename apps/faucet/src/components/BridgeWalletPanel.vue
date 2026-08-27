@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Button } from "@nulo/design"
+import { Button, Icon } from "@nulo/design"
 import { computed } from "vue"
 import { truncateName } from "@/composables/createAztecWalletSession"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
@@ -83,16 +83,17 @@ async function onClick() {
 
 		<div v-else class="connect">
 			<div v-if="showSplitConnect" class="split">
-				<Button :data-testid="TESTIDS.bridgeL2Connect" @click="onClick">
+				<Button size="large" :data-testid="TESTIDS.bridgeL2Connect" @click="onClick">
 					Connect {{ shortPreferredName }}
 				</Button>
 				<Button
 					class="caret"
+					size="large"
 					aria-label="Choose a different wallet"
 					:data-testid="TESTIDS.bridgeL2SwitchWallet"
 					@click="switchWallet"
 				>
-					▾
+					<Icon name="chevron" size="16" color="inverse" />
 				</Button>
 			</div>
 			<Button
