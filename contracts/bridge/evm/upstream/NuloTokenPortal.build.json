@@ -4,6 +4,16 @@
 	"source": "contracts/bridge/evm/upstream/NuloTokenPortal.sol",
 	"sourceKeccak": "0x5e81eaad47a3ccf2827635d0dc19c7abb218926112594009e56cd104b2bbdd95",
 	"solcVersion": "0.8.30+commit.73712a01",
+	"immutableReferences": [
+		{
+			"start": 313,
+			"length": 32
+		},
+		{
+			"start": 843,
+			"length": 32
+		}
+	],
 	"initCodeHash": "0x5cd282db90ecdc2f8ed3992a0c36f22eb69e9f98ad262bd8abb06a25476411e1",
 	"runtimeCodeHash": "0x7c7606cda9c2c7907a1abe2827b2c799fea571fa4edc3d11b07a4eaaf069b5d2",
 	"abi": [

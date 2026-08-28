@@ -1,5 +1,14 @@
+import { readFileSync } from "node:fs"
+import { keccak256 } from "viem"
 import { describe, expect, it } from "vitest"
-import { assertImmutableRefsMatch, assertRuntimeMatchesTemplate } from "./portal-artifact"
+import {
+	assertImmutableRefsMatch,
+	assertRuntimeMatchesTemplate,
+	FORKED_PORTAL_KECCAK,
+	PORTAL_BUILD_JSON,
+	PORTAL_PIN,
+	VENDORED_FORK,
+} from "./portal-artifact"
 
 // Mirrors the artifact's deployedBytecode.immutableReferences for the fork (slot-keyed map
 // flattened): two full-word sites holding left-padded address immutables.
@@ -109,5 +118,34 @@ describe("assertImmutableRefsMatch", () => {
 
 	it("rejects a dropped site", () => {
 		expect(() => assertImmutableRefsMatch([IMMUTABLES[0]], IMMUTABLES)).toThrow(/immutableReferences drifted/)
+	})
+})
+
+// The deploy reads its bytes from the committed artifact and gates them on the pins, but nothing in
+// CI executes that path — no job installs Foundry, and the contracts workflow filters on
+// contracts/bridge/** only. Source, artifact and pins can therefore drift apart silently and only
+// surface at deploy time, as an unhandled throw. These are the equalities the deploy asserts,
+// checked without solc so they run in the ordinary unit suite.
+describe("source ↔ artifact ↔ pin consistency", () => {
+	const artifact = JSON.parse(readFileSync(PORTAL_BUILD_JSON, "utf8"))
+
+	it("pins the current fork source", () => {
+		expect(keccak256(readFileSync(VENDORED_FORK))).toBe(FORKED_PORTAL_KECCAK)
+	})
+
+	it("was generated from the source the pin names", () => {
+		expect(artifact.sourceKeccak).toBe(FORKED_PORTAL_KECCAK)
+	})
+
+	it("carries the reviewed build's hashes and compiler", () => {
+		expect(artifact.initCodeHash).toBe(PORTAL_PIN.initCodeHash)
+		expect(artifact.runtimeCodeHash).toBe(PORTAL_PIN.runtimeCodeHash)
+		expect(artifact.solcVersion.startsWith(PORTAL_PIN.solc)).toBe(true)
+	})
+
+	// loadForkedPortalArtifact hands these straight to assertImmutableRefsMatch, which compares by
+	// JSON.stringify — an absent key throws there instead, far from the cause.
+	it("records the immutable sites the deploy re-checks", () => {
+		expect(artifact.immutableReferences).toStrictEqual(IMMUTABLES)
 	})
 })
