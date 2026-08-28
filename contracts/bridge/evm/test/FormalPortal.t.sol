@@ -6,23 +6,8 @@ import {NuloTokenPortal} from "../upstream/NuloTokenPortal.sol";
 import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./PortalRoundtripFuzz.t.sol";
 
 /// Symbolic proof for the portal's init-once guard, run by halmos (`check_` prefix), not forge.
-///
-/// The portal binds its outbox at initialize, and `withdraw` trusts that outbox to authorise
-/// releases — so a portal that can be re-pointed after deployment can be drained. The guard closing
-/// that had no test at all: deleting it from the real contract left the whole hermetic suite green,
-/// because the test named for it asserted against a hand-written shim rather than the contract.
-///
-/// Two properties of the harness are load-bearing and easy to lose in a later edit:
-///
-/// 1. The proof calls `initialize` DIRECTLY, with no symbolic caller and no prank. This contract
-///    deployed `locked`, so it is the immutable initializer and the call clears the deployer-only
-///    guard to land on the init-once guard. A symbolic caller assumed `!= initializer` would let
-///    every path exit through `NotInitializer` instead, leaving the proof green with the guard under
-///    test deleted — passing for a reason unrelated to what it claims.
-/// 2. Registry B must be fully operational, which `test_registryBRebindsEveryBinding` pins
-///    permanently. If its rollup calls ever started reverting, the second `initialize` would revert
-///    for that unrelated reason and the proof would still pass — a caught-looking mutation that was
-///    never caught.
+/// The portal binds its outbox at initialize and `withdraw` trusts that outbox to authorise releases,
+/// so a portal that can be re-pointed after deployment can be drained.
 contract FormalPortalTest is Test {
     NuloTokenPortal internal locked;
     NuloTokenPortal internal fresh;
@@ -50,17 +35,20 @@ contract FormalPortalTest is Test {
     }
 
     /// For every candidate underlying and L2 bridge, a second `initialize` on an already-initialized
-    /// portal leaves all seven bound values untouched.
+    /// portal is rejected by the init-once guard and leaves all seven bound values untouched.
     ///
-    /// The decisive assertion is the unwanted-success branch, not the comparisons: a second
-    /// initialize that returns normally trips `assertTrue(false)` whatever it wrote, so the guard's
-    /// deletion is caught even when the candidate arguments happen to equal what is already bound.
-    /// `revert(...)` must never be used to signal here — halmos observes only forge-std assertion
-    /// failures and EVM panics, so it would make this proof unfalsifiable.
+    /// Two properties keep this falsifiable, and both are easy to undo by accident:
+    /// - No symbolic caller. This contract deployed `locked`, so a direct call clears the
+    ///   deployer-only guard and lands on the guard under test. A caller assumed `!= initializer`
+    ///   would exit every path through `NotInitializer`, staying green with the guard deleted.
+    /// - The catch matches the guard's selector. A bare `catch` treats any revert as evidence, so a
+    ///   fixture that failed for its own reasons would look like the guard holding.
+    /// Signal failure with assertions only — halmos cannot observe `revert(string)`.
     function check_initializedBindingsCannotChange(address candidateUnderlying, bytes32 candidateBridge) public {
         try locked.initialize(address(regB), candidateUnderlying, candidateBridge) {
             assertTrue(false, "re-initialized an already-initialized portal");
-        } catch {
+        } catch (bytes memory reason) {
+            assertEq(bytes4(reason), NuloTokenPortal.AlreadyInitialized.selector, "rejected for the wrong reason");
             assertEq(address(locked.registry()), address(regA), "registry rebound");
             assertEq(address(locked.underlying()), UNDERLYING_A, "underlying rebound");
             assertEq(locked.l2Bridge(), BRIDGE_A, "l2Bridge rebound");
@@ -71,9 +59,8 @@ contract FormalPortalTest is Test {
         }
     }
 
-    /// Positive control for the proof above: registry B really can bind a portal end to end. Without
-    /// this, a registry B whose rollup calls reverted would make the proof vacuous — every path would
-    /// reach the catch branch for the wrong reason — and nothing would say so.
+    /// Registry B really can bind a portal end to end, so the proof above exercises a registry that
+    /// works rather than one that happens to revert.
     function test_registryBRebindsEveryBinding() public {
         fresh.initialize(address(regB), address(0xBEEF), bytes32(uint256(0x2222)));
 

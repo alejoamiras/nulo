@@ -13,11 +13,6 @@ name: Bridge contracts
 
 on:
   workflow_call:
-    inputs:
-      run-halmos:
-        description: Also run the halmos symbolic proofs.
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -74,7 +69,6 @@ jobs:
         run: forge test --no-match-contract Fork
 
       - name: halmos symbolic proofs
-        if: inputs.run-halmos
         working-directory: contracts/bridge/evm
         run: |
           set -o pipefail

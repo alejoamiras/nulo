@@ -5,16 +5,9 @@ import {Test} from "forge-std/Test.sol";
 import {NuloTokenPortal} from "../upstream/NuloTokenPortal.sol";
 import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./PortalRoundtripFuzz.t.sol";
 
-/// Always-on regression for the init-once guard, against the REAL portal.
-///
-/// This ran against a local shim until the shim was deleted, which made it unable to fail for the
-/// regression it is named after: removing the guard from `NuloTokenPortal` left this green, because
-/// the assertions were about a hand-written copy of the guard.
-///
-/// It is deliberately narrower than it used to be. The first-initialize front-run is covered on the
-/// real contract by `BlackhatAudit.t.sol`'s `test_FA_portalInitFrontRun_reverts`, and the exhaustive
-/// input coverage lives in `FormalPortal.t.sol`. What only this test gives is a fast, readable
-/// guard-level failure that still runs when halmos is disabled.
+/// Always-on regression for the init-once guard, against the REAL portal — the fast, readable
+/// guard-level failure that still runs when halmos is not. Front-run coverage lives in
+/// `BlackhatAudit.t.sol`; exhaustive input coverage in `FormalPortal.t.sol`.
 contract PortalReinitTest is Test {
     function _registry() internal returns (FakeRegistry) {
         return new FakeRegistry(address(new FakeRollup(address(new CapturingInbox()), address(new CapturingOutbox()))));

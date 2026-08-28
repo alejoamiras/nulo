@@ -62,3 +62,51 @@ The plan cut it, and this phase confirms that was right for scope but records th
 shipped proof loops or takes a dynamic array, so `--loop` and `--default-array-lengths` cannot truncate
 them. The mechanism is real and reproduced in `lessons/phase-0.md`; the moment a proof iterates over a
 dynamic array, that gate becomes necessary and the `#loop-bound` fragment is the pattern to use.
+
+## Arc-2 loop — codex closed a vacuity gap I had missed
+
+**Round 1: "The arc catches the intended mutation today, but I would not call the proof durably sound
+until one vacuity gap is closed."**
+
+**Medium — `catch {}` accepted any revert as evidence of the guard.** The proof asserted that a second
+`initialize` reverted, not that it reverted *for the reason claimed*. Codex also showed the positive
+control does not close that: the control initializes `fresh`, so registry B sees `fresh` as
+`msg.sender`, while the proof calls B through `locked` — a caller-sensitive mock, or any future
+condition applying only to already-initialized portals, could let the control pass while the proof went
+vacuous.
+
+Fixed by matching the selector:
+
+```solidity
+} catch (bytes memory reason) {
+    assertEq(bytes4(reason), NuloTokenPortal.AlreadyInitialized.selector, "rejected for the wrong reason");
+```
+
+**Verified with a third mutation the old form would have passed** — a portal that still rejects, but
+with the wrong error:
+
+```
+- if (address(registry) != address(0)) revert AlreadyInitialized();
++ if (address(registry) != address(0)) revert NotInitializer();
+```
+
+```
+[FAIL] check_initializedBindingsCannotChange(address,bytes32)
+Symbolic test result: 0 passed; 1 failed
+```
+
+A bare `catch` would have called that green. The original two rows still hold after the change.
+
+**Low — a fourth escape route.** `_bridge-contracts.yml`'s `run-halmos` input let the reusable workflow
+pass while running no proofs at all. No caller ever set it; the input and its `if` are removed, along
+with the now-empty `inputs:` block.
+
+**Low — overlong comments.** The proof's header and `PortalReinit`'s carried shim history that belongs
+in commit messages. Both trimmed; the two hazards that genuinely need stating (no symbolic caller,
+selector-matched catch) survive in four lines. Codex judged the assertion-signalling warning and the CI
+AST/count comments as earning their space, and they stay.
+
+**Front-run coverage confirmed sufficient**, with one correction worth recording: `BlackhatAudit.t.sol:304`
+covers rejection, zero registry, honest re-initialization, deposit operation and post-init attacker
+rejection — but it does **not** assert `l2Bridge`. That assertion survives in the trimmed
+`PortalReinit.t.sol`, so trimming further would lose it.
