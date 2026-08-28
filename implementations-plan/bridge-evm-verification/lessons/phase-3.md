@@ -137,3 +137,34 @@ the no-ceremony mandate.
 covers rejection, zero registry, the honest FIRST initialization, deposit operation and post-init attacker
 rejection — but it does **not** assert `l2Bridge`. That assertion survives in the trimmed
 `PortalReinit.t.sol`, so trimming further would lose it.
+
+## Gate closed on a real CI run, not a local one
+
+The cross-arc pass caught that this phase's gate promised "a pushed branch run of the contracts
+workflow" while the evidence recorded only local checks. Dispatched for real against `arc/proofs`
+(run 33202486929) rather than editing the promise down:
+
+```
+contracts-status                    success
+Suites / forge build + test         success
+Suites / nargo test (keystone)      success
+Suites / sole-consumer static guard success
+```
+
+and, from that run's log — the point of the exercise, since a green job says nothing about whether the
+proofs executed:
+
+```
+Running 1 tests for test/FormalPortal.t.sol:FormalPortalTest
+Symbolic test result: 1 passed; 0 failed; time: 0.16s
+Running 4 tests for test/FormalRouter.t.sol:FormalRouterTest
+Symbolic test result: 4 passed; 0 failed; time: 10.75s
+```
+
+Both contracts named, both counts as asserted, on the runner rather than on a developer machine that
+happened to have the right artifacts — which is exactly the failure mode that let a build-breaking
+remap regression survive an entire ten-PR arc before this workflow existed.
+
+**Scope note on the negative checks:** the proof-file-removal check was run locally against
+`FormalPortal.t.sol` only. `FormalRouterTest` shares the identical assertion shape, so it was not
+re-run for it; that is an inference, not an observation.
