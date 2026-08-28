@@ -31,7 +31,7 @@ function makeSeeder(overrides?: Partial<TokenSeederDeps> & { version?: string })
 	const api = new FakeBrowserApi()
 	const logger = new LoggerStore(new ConfigStore())
 	const deps: TokenSeederDeps = {
-		seeds: [SEED],
+		getSeeds: vi.fn(async () => [SEED]),
 		getActiveProfile: vi.fn(async () => ({ id: "p1" })),
 		getActiveNetwork: vi.fn(async () => ({ id: "net1", chainId: CHAIN_ID })),
 		getAccounts: vi.fn(async () => [{ address: "0xacc1" }]),
@@ -184,7 +184,7 @@ describe("TokenSeeder — trust boundary (hard skips)", () => {
 		const liveMetadata: SeedPreview = { name: "Clean USDC", symbol: "cUSDC", decimals: 6, interface: IFACE }
 
 		const accepted = makeSeeder({
-			seeds: [cusdc],
+			getSeeds: async () => [cusdc],
 			getActiveNetwork: vi.fn(async () => ({ id: "net1", chainId: cusdc.chainId })),
 			preview: vi.fn(async () => liveMetadata),
 		})
@@ -192,7 +192,7 @@ describe("TokenSeeder — trust boundary (hard skips)", () => {
 		expect(accepted.deps.persist).toHaveBeenCalledTimes(1)
 
 		const oldPin = makeSeeder({
-			seeds: [{ ...cusdc, expectedSymbol: "cUSD" }],
+			getSeeds: async () => [{ ...cusdc, expectedSymbol: "cUSD" }],
 			getActiveNetwork: vi.fn(async () => ({ id: "net1", chainId: cusdc.chainId })),
 			preview: vi.fn(async () => liveMetadata),
 		})
@@ -235,7 +235,7 @@ describe("TokenSeeder — attempt cap + retry semantics", () => {
 		let version = "1.0.0"
 		let previewOk = false
 		const deps: TokenSeederDeps = {
-			seeds: [SEED],
+			getSeeds: async () => [SEED],
 			getActiveProfile: async () => ({ id: "p1" }),
 			getActiveNetwork: async () => ({ id: "net1", chainId: CHAIN_ID }),
 			getAccounts: async () => [{ address: "0xacc1" }],

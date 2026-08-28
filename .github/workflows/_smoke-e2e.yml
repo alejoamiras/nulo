@@ -73,6 +73,28 @@ jobs:
           # public Alpha mainnet RPC, and a blackholed default RPC makes chain-adjacent flows eat the
           # node client's full timeout envelope. Test-build-only; prod defaults stay Alpha.
           VITE_NULO_E2E_DEFAULT_NET: testnet
+          # Arm the e2e token-seed source with NO storage key, so the seed list
+          # resolves EMPTY. Testnet carries a real default-token seed, and every
+          # smoke profile now creates an account — which triggers seeding. Without
+          # this, each fresh profile would call the public dRPC endpoint and a
+          # required gate would depend on a server we don't own.
+          VITE_NULO_E2E_TOKEN_SEEDS: "1"
+          VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM: "1"
+
+      # Both literals, because an unused export can tree-shake away even in an
+      # armed build (see price-map.ts): the stamp proves the flag propagated,
+      # the key proves the reader module survived. A silent miss here would send
+      # every smoke profile back to the live seed list.
+      - name: Assert the e2e token-seed source propagated (source build only)
+        if: inputs.artifact_name == '' && inputs.extension_path == ''
+        run: |
+          for marker in "NULO_E2E_TOKEN_SEEDS_BUILD_STAMP" "nulo:e2e:token-seeds"; do
+            if ! grep -rq "$marker" apps/extension/dist/chrome; then
+              echo "::error::token-seed source did not propagate ($marker absent from dist/chrome)" >&2
+              exit 1
+            fi
+          done
+          echo "e2e token-seed source present in the smoke build"
 
       - name: Run smoke e2e
         run: bun run --cwd apps/extension test:e2e

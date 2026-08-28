@@ -23,7 +23,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { feeJuiceAddress, feeJuiceName, feeJuiceSymbol } from "@/wallet/utils/fee-juice"
 import { simulate } from "@/wallet/utils/fn"
-import { findSeed } from "./default-tokens"
+import { DEFAULT_TOKEN_SEEDS, type DefaultTokenSeed, findSeed } from "./default-tokens"
 import { PinMismatchError, TokenSeeder } from "./seeder"
 import {
 	type Token,
@@ -61,7 +61,11 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	private readonly tokens: EntityStorage<Token>
 	private readonly lock = new Lock()
 	private readonly browserApi: BrowserApi
-	private readonly seederOverrides?: { getVersion?: () => string; enabled?: boolean }
+	private readonly seederOverrides?: {
+		getVersion?: () => string
+		enabled?: boolean
+		getSeeds?: () => Promise<readonly DefaultTokenSeed[]>
+	}
 	private seeder: TokenSeeder = null!
 
 	private pxeService: ShallowPxeClient = null!
@@ -75,7 +79,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		logger: ILogger,
 		browserApi: BrowserApi,
 		private readonly pxeClientFactory: ShallowPxeClientFactory = DEFAULT_SHALLOW_PXE_CLIENT_FACTORY,
-		seederOverrides?: { getVersion?: () => string; enabled?: boolean },
+		seederOverrides?: { getVersion?: () => string; enabled?: boolean; getSeeds?: () => Promise<readonly DefaultTokenSeed[]> },
 	) {
 		super(TOKEN_SERVICE_NAME, logger)
 		this.browserApi = browserApi
@@ -94,12 +98,14 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		this.networks.registerChainPurgeSubscriber(async (profileId, chainId) => this.clearChainState(profileId, chainId))
 
 		// Default-token seeding: lazy, single-flight, TOFU-pinned (see
-		// default-tokens.ts + seeder.ts). Triggered on unlock and on active-
-		// network change; both handlers coalesce through `seeder.run()`.
+		// default-tokens.ts + seeder.ts). Triggered on unlock, on active-network
+		// change, and on account creation; all three coalesce through
+		// `seeder.run()`.
 		this.seeder = new TokenSeeder(
 			{
 				getActiveProfile: () => this.profiles.getActiveProfile(),
 				getActiveNetwork: () => this.networks.getActiveNetwork(),
+				getSeeds: this.seederOverrides?.getSeeds ?? (async () => DEFAULT_TOKEN_SEEDS),
 				getAccounts: async (profileId, chainId) => await this.accounts.getAccounts(profileId, chainId),
 				preview: async (networkId, accountAddress, contract, expectedClassId) =>
 					await this.previewTokenMetadata(networkId, accountAddress, contract, expectedClassId),

@@ -173,7 +173,7 @@ Post-fix, *any* wallet booted on Testnet attempts a live seed against the public
 
 **Validation gate.** `bun run lint && bun run typecheck && bun run --cwd apps/extension vitest run src/wallet/services/token/`. Pass: exit 0, new assertions green. Layers: lint · typecheck · unit + composition.
 
-### Phase 2 — E2E seed seam + publication guards
+### Phase 2 — E2E seed seam + publication guards ✓
 
 - `e2e/config.ts`: `E2E_TOKEN_SEEDS` double opt-in (fail-closed on exactly-one) + live-pinned stamp.
 - `e2e/config.test.ts`: extend with the new pair's four cases — neither set → off, no stamp; both set → on, stamp present; each one alone → throws.

@@ -3,7 +3,7 @@ import { ValueStorage } from "@/wallet/storage"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import type { ILogger } from "@/wallet/logger"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
-import { DEFAULT_TOKEN_SEEDS, type DefaultTokenSeed } from "./default-tokens"
+import type { DefaultTokenSeed } from "./default-tokens"
 import type { TokenInterface } from "./spec"
 
 const LOG_SOURCE = "TokenSeeder"
@@ -47,8 +47,9 @@ export type SeedPreview = { name: string; symbol: string; decimals: number; inte
  * without the PXE/simulation stack.
  */
 export interface TokenSeederDeps {
-	/** Seed list override — tests only; production uses DEFAULT_TOKEN_SEEDS. */
-	seeds?: readonly DefaultTokenSeed[]
+	/** Resolved once per pass. Production returns `DEFAULT_TOKEN_SEEDS`; armed
+	 *  e2e builds return a storage-backed list the running test writes. */
+	getSeeds(): Promise<readonly DefaultTokenSeed[]>
 	getActiveProfile(): Promise<{ id: string } | undefined>
 	getActiveNetwork(): Promise<{ id: string; chainId: number } | null>
 	getAccounts(profileId: string, chainId: number): Promise<{ address: string }[]>
@@ -188,7 +189,11 @@ export class TokenSeeder {
 		if (!profile) return
 		const network = await this.deps.getActiveNetwork()
 		if (!network) return
-		const seeds = (this.deps.seeds ?? DEFAULT_TOKEN_SEEDS).filter((s) => s.chainId === network.chainId)
+		// Resolved per pass, not at construction: the e2e source reads a list the
+		// test writes after deploying its per-run token. A purge landing during
+		// this await can only make the READ stale — every write below is fenced
+		// by `guardsHold`, which re-checks the epoch.
+		const seeds = (await this.deps.getSeeds()).filter((s) => s.chainId === network.chainId)
 		if (seeds.length === 0) return
 
 		/** Lifecycle guard, re-checked before EVERY write: the pass's captured
