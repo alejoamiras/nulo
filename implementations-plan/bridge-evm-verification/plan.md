@@ -322,7 +322,7 @@ Pass: build exit 0, `62 tests passed`, `4 passed; 0 failed`.
 **Then `git restore --staged .gitmodules contracts/bridge/evm/lib/`** — `forge install` stages them, and
 committing them would ship the CI-pin divergence.
 
-### Phase 1 — devendor
+### Phase 1 — devendor ✓
 
 Delete the vendored file, `placePortalSource()`, `requireLegacyForgeInputs()` and the two constants; parse
 every manifest through `parseCandidateManifest`; collapse `portalTarget`; rewrite the `verify-l1.ts`

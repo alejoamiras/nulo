@@ -37,6 +37,22 @@ describe("candidate-schema (strict bridge-manifest gate)", () => {
 		expect(() => parseCandidateManifest(liveManifest())).not.toThrow()
 	})
 
+	// verify-l1 verifies exactly one portal source — the F-001 fork it vendors. Pre-fork manifests
+	// carried no portalSource and were verified against a vendored copy of Aztec's canonical portal
+	// that the repo no longer holds, so this schema is the only thing standing between such a manifest
+	// and forge being handed a contract path that does not exist.
+	it("rejects a manifest whose portalSource is not the fork", () => {
+		const m = liveManifest()
+		m.l1.portalSource = "canonical"
+		expect(() => parseCandidateManifest(m)).toThrow(/portalSource/)
+	})
+
+	it("rejects a pre-fork manifest that omits portalSource entirely", () => {
+		const m = liveManifest()
+		delete m.l1.portalSource
+		expect(() => parseCandidateManifest(m)).toThrow(/portalSource/)
+	})
+
 	it("rejects unknown fields anywhere (no silent stale carries)", () => {
 		const m = liveManifest()
 		m.l1.fuel.legacyCarriedField = "0xdead"

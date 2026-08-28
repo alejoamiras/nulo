@@ -7,22 +7,23 @@
  *   standard-json from the same foundry.toml that produced the deployed bytecode. A `circle-proxy`
  *   token (reused official USDC) is NOT source-verified here — its identity is pinned at deploy.
  * - the portal - compiled from source in the l1-contracts root (the npm package ships the full
- *   foundry project EXCEPT the target source). A `l1.portalSource: "forked-v1"` config verifies the
- *   F-001 fork NuloTokenPortal, staged + self-pinned by source keccak (see portal-artifact.ts);
- *   otherwise the canonical TokenPortal is verified, keccak-checked against the artifact metadata.
- *   Both sources are vendored under contracts/bridge/evm/upstream/.
+ *   foundry project EXCEPT the target source, which is why the fork is vendored under
+ *   contracts/bridge/evm/upstream/ and staged in). Only the F-001 fork NuloTokenPortal is
+ *   verifiable: pre-fork manifests, which carried no `l1.portalSource`, verified a vendored copy
+ *   of Aztec's canonical TokenPortal that no longer exists here, so their portals can no longer be
+ *   re-verified from this repo.
  *
  * Requires ETHERSCAN_API_KEY (bun auto-loads packages/bridge-core/.env). Pass --dry-run to build +
  * print source-graph stats without submitting (no key needed). Pass --config <path> to verify a
  * candidate manifest instead of the live testnet-bridge.json.
  */
 
-import { copyFileSync, mkdirSync, readFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { encodeAbiParameters, keccak256, parseAbiParameters } from "viem"
-import { evmAddress, parseCandidateManifest } from "../src/candidate-schema"
+import { encodeAbiParameters, parseAbiParameters } from "viem"
+import { parseCandidateManifest } from "../src/candidate-schema"
 import { assertEffectiveRemapping, generateRemappings } from "./gen-remappings"
 import { forgeBin, stageForkSource } from "./portal-artifact"
 import { run } from "./run"
@@ -35,8 +36,6 @@ const CONFIG_PATH =
 		: join(here, "..", "..", "..", "apps", "faucet", "public", "testnet-bridge.json")
 const EVM_ROOT = join(here, "..", "..", "..", "contracts", "bridge", "evm")
 const L1_ARTIFACTS_ROOT = join(dirname(createRequire(import.meta.url).resolve("@aztec/l1-artifacts/package.json")), "l1-contracts")
-const PORTAL_SOURCE_REL = join("test", "portals", "TokenPortal.sol")
-const VENDORED_PORTAL = join(EVM_ROOT, "upstream", "TokenPortal.sol")
 
 const dryRun = process.argv.includes("--dry-run")
 const apiKey = process.env.ETHERSCAN_API_KEY
@@ -50,69 +49,12 @@ function fail(message: string): never {
 	process.exit(1)
 }
 
-const obj = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {})
-
-/** A legacy (pre-`forked-v1`) manifest skips the strict schema; only the values forge receives are checked. */
-function requireLegacyForgeInputs(raw: unknown): void {
-	const l1 = obj(obj(raw).l1)
-	const fuel = obj(l1.fuel)
-	const core = obj(fuel.core)
-	const swap = obj(fuel.swap)
-	const addresses: Array<[string, unknown]> = [
-		["l1.usdc", l1.usdc],
-		["l1.portal", l1.portal],
-		...(fuel.core
-			? ([
-					["l1.fuel.core.router", core.router],
-					["l1.fuel.core.permit2", core.permit2],
-					["l1.fuel.core.feeJuicePortal", core.feeJuicePortal],
-					["l1.fuel.core.swapTarget", core.swapTarget],
-				] as Array<[string, unknown]>)
-			: []),
-		...(fuel.swap
-			? ([
-					["l1.fuel.swap.poolManager", swap.poolManager],
-					["l1.fuel.swap.feeJuice", swap.feeJuice],
-					["l1.fuel.swap.weth", swap.weth],
-				] as Array<[string, unknown]>)
-			: []),
-	]
-	for (const [path, value] of addresses) {
-		if (!evmAddress.safeParse(value).success) fail(`bridge manifest ${path} is not a 20-byte 0x address: ${JSON.stringify(value)}`)
-	}
-	const contract = obj(l1.token).sourceContract
-	if (contract !== undefined && contract !== "MintableERC20" && contract !== "TestUsdc") {
-		fail(`bridge manifest l1.token.sourceContract must be MintableERC20 or TestUsdc: ${JSON.stringify(contract)}`)
-	}
-	const chainId = obj(raw).l1ChainId
-	if (chainId !== undefined && !(Number.isInteger(chainId) && (chainId as number) > 0)) {
-		fail(`bridge manifest l1ChainId must be a positive integer when present: ${JSON.stringify(chainId)}`)
-	}
-}
-
 // The EVM root's @aztec/ remap must point at the installed l1-artifacts sources
 // regardless of node_modules layout: regenerate remappings.txt (gitignored,
 // overrides foundry.toml) and assert forge actually sees the mapping before
 // any build/verify runs against EVM_ROOT.
 generateRemappings()
 assertEffectiveRemapping(forge())
-
-/** The vendored portal source must hash-match what the deployed artifact was compiled from. */
-function placePortalSource() {
-	const artifact = JSON.parse(readFileSync(join(L1_ARTIFACTS_ROOT, "out", "TokenPortal.sol", "TokenPortal.json"), "utf8"))
-	const expected = JSON.parse(artifact.rawMetadata).sources["test/portals/TokenPortal.sol"].keccak256
-	const got = keccak256(readFileSync(VENDORED_PORTAL))
-	if (got !== expected) {
-		console.error(
-			`vendored TokenPortal.sol hash mismatch (have ${got}, artifact says ${expected}) - ` +
-				"an Aztec bump changed the portal; re-fetch l1-contracts/test/portals/TokenPortal.sol from the matching aztec-packages tag.",
-		)
-		process.exit(1)
-	}
-	const dest = join(L1_ARTIFACTS_ROOT, PORTAL_SOURCE_REL)
-	mkdirSync(dirname(dest), { recursive: true })
-	copyFileSync(VENDORED_PORTAL, dest)
-}
 
 function forge(): string {
 	try {
@@ -148,16 +90,13 @@ function runForge(root: string, label: string, args: string[]): boolean {
 }
 
 const config = JSON.parse(readFileSync(CONFIG_PATH, "utf8"))
-// Every value handed to forge comes from this file: a `forked-v1` manifest must pass the strict
-// schema, an older one is checked on exactly the fields that reach forge.
-if (obj(obj(config).l1).portalSource === "forked-v1") {
-	try {
-		parseCandidateManifest(config)
-	} catch (e) {
-		fail(e instanceof Error ? e.message : String(e))
-	}
-} else {
-	requireLegacyForgeInputs(config)
+// Every value handed to forge comes from this file, so it must clear the strict schema first — which
+// also rejects any manifest whose portalSource is not `forked-v1`, the only portal still verifiable
+// from this repo.
+try {
+	parseCandidateManifest(config)
+} catch (e) {
+	fail(e instanceof Error ? e.message : String(e))
 }
 const token = config.l1.token
 if (!token) {
@@ -184,11 +123,8 @@ const tokenArgs = ownToken
 		])
 	: null
 
-// `forked-v1` (the F-001 security fork) verifies NuloTokenPortal from the l1-root with a self-pinned
-// source hash; a legacy/absent marker verifies the canonical TokenPortal against the artifact metadata.
-const forkedPortal = config.l1.portalSource === "forked-v1"
-if (forkedPortal) stageForkSource(L1_ARTIFACTS_ROOT)
-else placePortalSource()
+// The F-001 fork is verified from the l1-root, staged there under its self-pinned source hash.
+stageForkSource(L1_ARTIFACTS_ROOT)
 
 const common = dryRun
 	? ["--chain-id", CHAIN_ID, "--show-standard-json-input"]
@@ -211,8 +147,8 @@ if (ownToken && tokenArgs) {
 } else {
 	console.log(`— token @ ${config.l1.usdc} is circle-proxy (reused official USDC): source-verify skipped; identity pinned at deploy`)
 }
-const portalTarget = forkedPortal ? "test/portals/NuloTokenPortal.sol:NuloTokenPortal" : "test/portals/TokenPortal.sol:TokenPortal"
-const okPortal = runForge(L1_ARTIFACTS_ROOT, `${forkedPortal ? "NuloTokenPortal" : "TokenPortal"} @ ${config.l1.portal}`, [
+const portalTarget = "test/portals/NuloTokenPortal.sol:NuloTokenPortal"
+const okPortal = runForge(L1_ARTIFACTS_ROOT, `NuloTokenPortal @ ${config.l1.portal}`, [
 	"verify-contract",
 	config.l1.portal,
 	portalTarget,
