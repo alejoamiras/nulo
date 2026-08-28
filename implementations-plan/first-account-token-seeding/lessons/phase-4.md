@@ -96,3 +96,37 @@ sandbox chain has no price-mapped tokens, and **no network fetch succeeds
 here**". Before this change nothing ever called out, so the premise held by
 accident. The block makes it true by construction. Successful end-to-end seeding
 is proven by the Phase 3 sandbox spec, not by artifact smoke.
+
+## Full network suite — PASS
+
+```
+NULO_E2E_PROVERLESS=1 bun run e2e:agent
+Test Files  1 failed | 71 passed | 2 skipped (74)
+```
+
+(The first attempt aborted immediately with `FATAL: this run includes
+proverless-gated test file(s) but NULO_E2E_PROVERLESS is not set` — the full
+suite must be run proverless locally.)
+
+The single failure was `network/wallet-locked-mid-session.test.ts`, signature
+`Expected no popup but 1 new popup target(s) appeared: …#/popup/auth`, i.e. an
+auth popup during a lock-mid-flow spec — nothing seeding-related. Re-run alone
+per the repo's flake policy:
+
+```
+NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/wallet-locked-mid-session.test.ts
+Test Files  1 passed (1)
+```
+
+Flake, not breakage. **71 network spec files passing is the real evidence for
+Inference 2**: the new trigger fires in every one of them that registers a
+profile, and none of them noticed.
+
+## Validation gate — PASS
+
+| part | result |
+|---|---|
+| `bun run audit:vue` | exit 0 — 392 test files passed, 2 skipped |
+| armed source smoke (build + `test:e2e`) | 31 passed, 1 skipped, exit 0 |
+| unarmed artifact-mode smoke | regression found and fixed; residual failures reproduce with the change removed (see above) |
+| `bun run e2e:agent` (full network) | 71 passed, 2 skipped, 1 flake green on isolated re-run |

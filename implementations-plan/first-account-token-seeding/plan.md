@@ -204,7 +204,7 @@ The test **must be verified red on the pre-Phase-1 code** (revert the `service.t
 
 **Validation gate.** `bun run e2e:agent tests/e2e/network/default-token-seeding.test.ts`, plus the recorded pre-fix red run. Pass: new file green; documented red without the Phase 1 subscription. Layers: network e2e (real sandbox).
 
-### Phase 4 — Regression sweep + docs
+### Phase 4 — Regression sweep + docs ✓
 
 The new trigger fires in every profile-registering test, so Inferences 2 and 3 must be *demonstrated*. `audit:vue` ends with an ordinary Chrome build carrying none of the smoke flags, so `audit:vue && test:e2e` would exercise neither smoke mode — and an unarmed non-artifact run is expressly rejected by the existing fixture-arming contract (`backup-migration.test.ts:36`). Both smoke modes therefore get explicit, separate runs.
 
