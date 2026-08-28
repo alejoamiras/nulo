@@ -1,6 +1,6 @@
 /**
  * Verifies the bridge's L1 sources on Etherscan — the chain comes from the manifest's `l1ChainId`
- * (Sepolia for testnet, Ethereum for mainnet; legacy manifests fall back to Sepolia).
+ * (Sepolia for testnet, Ethereum for mainnet; a manifest that omits it falls back to Sepolia).
  *
  * Two contracts, two compile roots:
  * - MintableERC20 - our own foundry project (contracts/bridge/evm); forge reconstructs the
@@ -105,7 +105,7 @@ if (!token) {
 }
 
 // The chain comes from the manifest (self-declared identity), not a hardcoded Sepolia — a mainnet
-// manifest verifies on Ethereum. Legacy manifests without l1ChainId fall back to Sepolia.
+// manifest verifies on Ethereum. The field is optional, so a manifest omitting it falls back.
 const CHAIN_ID = String(config.l1ChainId ?? 11155111)
 const EXPLORER_BASE = CHAIN_ID === "1" ? "https://etherscan.io" : "https://sepolia.etherscan.io"
 
