@@ -129,14 +129,28 @@ to log something sensitive.
   passwords and export returns), or whole backup rows.
 - **Endpoint URLs** are reduced to their origin (`scrubUrls`, `@/utils/scrub-urls`) — providers
   embed API keys in the path — on both the log path and the dApp-facing error envelope.
+- **Pick the level by REACH, not by tone.** Services call `this.log{Debug,Info,Warn,Error}`; UI
+  calls `console.{debug,warn,error}`. `LoggerStore.log` drops only `level < logLevel`, and
+  `logLevel` is `Info` unless `debugMode` is on — so **`warn` and `error` are captured for every
+  user with every toggle off**, and land in the buffer the log viewer renders and exports. `debug`
+  is the only level that costs nothing when nobody asked for it. A line you would not want in a
+  stranger's bug report belongs at `debug` or nowhere.
+- **Two flags, not one — don't conflate them.** `debugMode` gates the LEVEL (and grows the ring
+  buffer 1,000 → 10,000); `developerMode` gates PERSISTENCE to `chrome.storage.session`. Debug
+  lines are dropped without `debugMode` even when `developerMode` is on.
 - **`console.log`/`console.info` are banned** in `apps/extension/src/**` (biome `noConsole`,
-  `allow: debug|warn|error`). A diagnostic belongs at `debug`, which is dropped entirely unless
-  Developer Mode is on. Exempt by path: the sniffer, the logger internals, e2e, tests. The
+  `allow: debug|warn|error`). Exempt by path: the sniffer, the logger internals, e2e, tests. The
   anti-scam DevTools banner in `popup/app.vue` carries four line-local `biome-ignore`s instead —
   it must reach the real console, and a whole-file exemption would license every future
   `console.log` in the app shell.
 - **Retention is opt-in.** Persistence to `chrome.storage.session` only happens with Developer
-  Mode on; turning it off purges the stored copy, and so does "Clear logs".
+  Mode on; turning it off purges the stored copy, and so does "Clear logs". `chrome.storage.session`
+  is memory-backed — a browser restart, extension update or reload clears it, so a log is a
+  short-lived in-session artifact, not a disk record.
+- **Reading them**: with Developer Mode on, Settings → Advanced shows a Logs row that opens the
+  viewer window (`popup/windows/logger/`), which renders the buffer and exports it as CSV. That
+  export is the reason this policy exists — it is the path by which a user's logs become a public
+  bug report.
 
 When adding a sensitive field to a type, add its name to `REDACTED_KEYS` in
 `wallet/logger/utils.ts` — in camelCase *and* the kebab-case spelling used by exported backup JSON
