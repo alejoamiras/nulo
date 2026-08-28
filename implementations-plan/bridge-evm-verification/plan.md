@@ -381,7 +381,7 @@ Write `FormalPortal.t.sol` (the proof + the positive control). Delete `NuloToken
   the init-once guard, not an unrelated revert.
 - Layers: unit · symbolic · mutation
 
-### Phase 3 — CI gate
+### Phase 3 — CI gate ✓
 
 Name-bound counts in one halmos invocation; remove the existence escape hatch.
 
