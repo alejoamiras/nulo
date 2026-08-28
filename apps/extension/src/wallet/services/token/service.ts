@@ -42,6 +42,15 @@ import { getTokenInfo, isTokenComplete } from "./utils"
 export * from "./functions"
 export * from "./spec"
 
+/** Seeder seams the composition root may replace. `getSeeds` is the only one a
+ *  real build ever passes (armed e2e builds swap in the storage-backed list);
+ *  the other two are unit-test levers. */
+type SeederOverrides = {
+	getVersion?: () => string
+	enabled?: boolean
+	getSeeds?: () => Promise<readonly DefaultTokenSeed[]>
+}
+
 export class TokenService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()(
 		"getTokens",
@@ -61,11 +70,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	private readonly tokens: EntityStorage<Token>
 	private readonly lock = new Lock()
 	private readonly browserApi: BrowserApi
-	private readonly seederOverrides?: {
-		getVersion?: () => string
-		enabled?: boolean
-		getSeeds?: () => Promise<readonly DefaultTokenSeed[]>
-	}
+	private readonly seederOverrides?: SeederOverrides
 	private seeder: TokenSeeder = null!
 
 	private pxeService: ShallowPxeClient = null!
@@ -79,7 +84,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		logger: ILogger,
 		browserApi: BrowserApi,
 		private readonly pxeClientFactory: ShallowPxeClientFactory = DEFAULT_SHALLOW_PXE_CLIENT_FACTORY,
-		seederOverrides?: { getVersion?: () => string; enabled?: boolean; getSeeds?: () => Promise<readonly DefaultTokenSeed[]> },
+		seederOverrides?: SeederOverrides,
 	) {
 		super(TOKEN_SERVICE_NAME, logger)
 		this.browserApi = browserApi

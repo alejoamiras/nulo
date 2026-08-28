@@ -409,7 +409,8 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 				E2E_TOKEN_SEEDS_BUILD_STAMP
 		}
 		const tokenSeeds = E2E_TOKEN_SEEDS ? new ChromeStorageTokenSeeds() : undefined
-		services.add(new TokenService(logger, browserApi, undefined, tokenSeeds ? { getSeeds: () => tokenSeeds.get() } : undefined))
+		const seederOverrides = tokenSeeds ? { getSeeds: () => tokenSeeds.get() } : undefined
+		services.add(new TokenService(logger, browserApi, undefined, seederOverrides))
 		services.add(new TokenBalanceService(logger, browserApi))
 		services.add(new TransactionService(logger, browserApi))
 		// E2E_PROVERLESS injects the incoming-poll gate (same tree-shaken-in-prod

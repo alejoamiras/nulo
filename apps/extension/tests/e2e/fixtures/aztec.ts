@@ -163,9 +163,7 @@ export async function deployTestToken(
 	return contract.address.toString()
 }
 
-/** Read a deployed contract's current class id from the node. The default-token
- *  seeder pins this per seed, and the sandbox address is minted per run, so the
- *  e2e seed entry can only be assembled after deploy. */
+/** Read a deployed contract's current class id from the node. */
 export async function getContractClassId(node: ReturnType<typeof createAztecNodeClient>, address: string): Promise<string> {
 	const instance = await node.getContract(AztecAddress.fromStringUnsafe(address))
 	if (!instance) throw new Error(`contract instance not found at node for ${address}`)
