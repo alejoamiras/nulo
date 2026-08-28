@@ -81,7 +81,7 @@ Post-fix, *any* wallet booted on Testnet attempts a live seed against the public
 - **Artifact smoke (release / nightly)** — deliberately **not** armed: those runs download an unflagged production Chrome artifact (`release.yml:226,246`), and testing production bytes is their purpose. **Corrected after codex round 2 — my earlier residual was wrong twice over:**
   - An unflagged build has **Alpha active, not Testnet** (`network/service.ts:96-106`), so registration attempts **two Mainnet seeds** (`default-tokens.ts:38-59`), not one Testnet seed.
   - It is **not** true that no smoke assertion notices. `fiat-display.test.ts:23` asserts `[data-testid="token-fiat"]` is absent on a fresh wallet, and **both** Mainnet seeds are price-mapped (`price-map.ts:55-58`); a seeded token with a resolved quote renders `token-fiat` (`TokenCard.vue:97`). That makes a required gate depend on whether two external services answer before the assertion runs — the same fragility that already forced an artifact-run skip elsewhere (`backup-roundtrip.test.ts:24`).
-  - **Mitigation (adopted from codex): keep the artifact bytes untouched and make artifact-mode runs hermetic at the browser.** Block `lb.drpc.live` via Puppeteer launch arguments when `NULO_E2E_ARTIFACT_RUN=1` (the flag already exists — `_smoke-e2e.yml:37` — and the launch site is `fixtures/extension.ts:45-55`). This does not weaken any gate: `fiat-display.test.ts`'s own docstring already states its premise as "no network fetch succeeds here", so the block makes that premise *true* rather than accidental. Successful end-to-end seeding is proven by the sandbox test in Phase 3, not by artifact smoke.
+  - **Mitigation (adopted from codex): keep the artifact bytes untouched and make artifact-mode runs hermetic at the browser.** Block `lb.drpc.live` via Puppeteer launch arguments when `NULO_E2E_ARTIFACT_RUN=1` (the flag already exists — `_smoke-e2e.yml:37` — and the launch site is `fixtures/extension.ts:45-55`). Exact rule: `--host-resolver-rules=MAP lb.drpc.live ^NOTFOUND`. Launch args cover extension pages, the service worker, and offscreen contexts. **Block that host only** — both Alpha and Testnet use exactly that hostname (`network/service.ts:98,110`) with no alternate or fallback RPC host, and blocking CoinGecko or anything else would be over-broad: those requests cannot independently create a seeded-token row. This does not weaken any gate: `fiat-display.test.ts`'s own docstring already states its premise as "no network fetch succeeds here", so the block makes that premise *true* rather than accidental. Successful end-to-end seeding is proven by the sandbox test in Phase 3, not by artifact smoke.
 
 ### File-level change map
 
@@ -213,8 +213,10 @@ The new trigger fires in every profile-registering test, so Inferences 2 and 3 m
 **Validation gate.** Four parts, all required.
 
 1. `bun run audit:vue` — typecheck ∥ units + components ∥ lint, then build.
-2. **Armed source smoke** — build Chrome with the smoke flag set (`VITE_NULO_E2E_MIGRATION_FIXTURE=1`, `VITE_NULO_E2E_DEFAULT_NET=testnet`, and both token-seed flags), then `bun run test:e2e` with `NULO_E2E_MIGRATION_FIXTURE=1`. Proves Inference 2: an empty seed list changes nothing for the existing smoke specs.
-3. **Unarmed artifact-mode smoke** — build Chrome plain, then run `test:e2e` with `NULO_E2E_ARTIFACT_RUN=1` and `EXTENSION_PATH` pointed at that build, exactly as release/nightly do. Proves Inference 3: production bytes plus the `lb.drpc.live` block keep `fiat-display.test.ts` green.
+2. **Armed source smoke** — build Chrome with the smoke flags set (`VITE_NULO_E2E_MIGRATION_FIXTURE=1`, `VITE_NULO_E2E_DEFAULT_NET=testnet`, and both token-seed flags), then `bun run test:e2e` with `NULO_E2E_MIGRATION_FIXTURE=1` and `NULO_E2E_ARTIFACT_RUN` **unset**. Proves Inference 2: an empty seed list changes nothing for the existing smoke specs.
+3. **Unarmed artifact-mode smoke** — build Chrome plain, then run `test:e2e` with `NULO_E2E_ARTIFACT_RUN=1`, `NULO_E2E_MIGRATION_FIXTURE` **unset**, and `EXTENSION_PATH` set, exactly as release/nightly do. Proves Inference 3: production bytes plus the `lb.drpc.live` block keep `fiat-display.test.ts` green.
+
+Use **command-scoped** env assignments for parts 2 and 3 so neither run's flags leak into the other — the fixture-arming contract keys off exactly this pair. `EXTENSION_PATH` must be absolute, or `dist/chrome` relative to `apps/extension`: `global-setup-smoke.ts:8` resolves it from the runner's working directory, not the repo root.
 4. `bun run e2e:agent` — the full network suite.
 
 Pass: all four exit 0. Layers: typecheck · unit + component · lint · build · smoke e2e (both modes) · full network e2e.
@@ -257,7 +259,9 @@ Run in order once every phase is ✓ (single arc, so each step runs once over th
 
 **Codex round 2 (same session, condition check): `conditional approve`** — conditions 2, 4, 5 discharged; 1 and 3 only partially. New conditions: (a) Phase 2 must validate clean **Chrome and Firefox** outputs and pin armed source-smoke propagation; (b) extend `config.test.ts` for the new double opt-in; (c) replace Phase 4 with explicit armed-source and unarmed-artifact smoke runs; (d) correct the Alpha/two-seed artifact assumption and hermeticize artifact-mode public-RPC traffic; (e) make the production `getSeeds` default `async`. **All five adopted** in this revision.
 
-Full transcript: `audit-codex.md`.
+**Codex round 3 (same session, discharge check): `approve`** — "All five round-2 conditions are genuinely discharged. I found no remaining material defect… The plan is implementable as written." Two implementation details folded in: the exact resolver rule (`--host-resolver-rules=MAP lb.drpc.live ^NOTFOUND`, that host only) and `EXTENSION_PATH` resolution + command-scoped env for the two smoke modes. It also ruled an armed *Firefox* build unnecessary — it would duplicate the DCE-positive assertion without closing a distinct release risk.
+
+**Final verdict: `approve`.** Full transcript: `audit-codex.md`.
 
 ### Adopted vs rejected (round 1)
 

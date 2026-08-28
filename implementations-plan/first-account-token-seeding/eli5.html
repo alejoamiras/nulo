@@ -344,7 +344,7 @@
   <p class="phase-label">Step 2 · test-only plumbing</p>
   <h3>A way to observe seeding on a throwaway chain</h3>
   <p>Build the injection path, behind two separate switches that must both be on. Add automated checks that a real production build contains no trace of it — and that a test build genuinely does, so the check isn't silently testing nothing.</p>
-  <p class="gate"><b>Proves itself by:</b> the usual checks, plus a real production build searched for the test markers and confirmed clean.</p>
+  <p class="gate"><b>Proves itself by:</b> the usual checks, plus <em>both</em> shipped builds — Chrome and Firefox — searched for the test markers and confirmed clean, and a test build confirmed to still contain them. Checking only one direction would let a marker vanish silently and leave the safety check testing nothing.</p>
 </div>
 
 <div class="phase">
@@ -357,8 +357,8 @@
 <div class="phase">
   <p class="phase-label">Step 4 · make sure nothing else moved</p>
   <h3>Full sweep and docs</h3>
-  <p>Run every suite end to end. The new trigger fires in every test that creates a profile, so the assumption that nothing else notices has to be demonstrated, not assumed.</p>
-  <p class="gate"><b>Proves itself by:</b> the full quality gate, the smoke suite, and the entire browser suite all green.</p>
+  <p>Run every suite end to end. The new trigger fires in every test that creates a profile, so the assumption that nothing else notices has to be demonstrated, not assumed — and the smoke suite has to run in <em>both</em> of its modes, since the default command exercises neither.</p>
+  <p class="gate"><b>Proves itself by:</b> the full quality gate, the smoke suite run twice (test build and shipped build), and the entire browser suite, all green.</p>
 </div>
 
 <h2>Deliberately not doing</h2>
@@ -371,12 +371,15 @@
 
 <h2>Where review landed</h2>
 
-<p>Codex reviewed the plan at maximum reasoning and returned a <strong>conditional approval</strong> with five conditions — all adopted. The two that changed the plan most:</p>
+<p>Codex reviewed the plan at maximum reasoning across two rounds and returned a <strong>conditional approval</strong> each time — ten conditions in total, all adopted. The three that changed the plan most:</p>
 
 <ul>
-  <li>It caught that the <strong>smoke test suite</strong> also boots the wallet pointed at the public test network. Once the fix lands, every fresh test profile would quietly make a live call to an outside service — turning a required check into something that depends on a server we don't own. Now handled.</li>
+  <li>It caught that the <strong>smoke test suite</strong> also boots the wallet pointed at a public network. Once the fix lands, every fresh test profile would quietly make a live call to an outside service — turning a required check into something that depends on a server we don't own.</li>
+  <li>Round two then caught that my <em>mitigation</em> for that was wrong twice over. Release and nightly runs use the real production build, which points at the main network, not the test one — so they'd attempt <strong>two</strong> token additions, not one. And I'd claimed no test would notice. One does: a check that a brand-new wallet shows no currency amounts anywhere would start failing the moment a token got added and priced. That's a required gate breaking on a coin flip between two outside services. Now handled by cutting off that network access during those runs, without touching the shipped build itself.</li>
   <li>It found one of my stated facts was <strong>simply wrong</strong> — I'd claimed restoring a backup emits the account event. It doesn't. Corrected.</li>
 </ul>
+
+<p>It also talked me out of two things I'd have built: an extra layer of indirection that the existing code already provided, and a single on/off switch where two are needed — because an accidentally-flipped switch here wouldn't be harmless, it would <em>silently stop</em> adding default tokens.</p>
 
 <div class="decision">
   <h2>What I need you to decide</h2>
@@ -384,7 +387,7 @@
     <li>The scope, and the three things deliberately left out.</li>
     <li>Staying at <strong>light</strong>, given the security dimension isn't low.</li>
     <li>The test-only injection path existing at all — the alternative is having no end-to-end proof this bug is fixed.</li>
-    <li>That release and nightly runs will now make a real call to the public test network when a profile is created. That's genuine production behaviour, so it's left alone on purpose.</li>
+    <li>Blocking one outside network address during release and nightly test runs, so those runs stop depending on whether two external services answer in time. The shipped build itself is untouched.</li>
     <li>Single pull request into <code>dev</code>.</li>
   </ul>
   <p style="margin-bottom:0"><strong>Approve</strong>, <strong>conditionally approve</strong> with your own conditions, or <strong>reject</strong> with what blocks it.</p>

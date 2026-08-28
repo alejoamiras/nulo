@@ -2,7 +2,7 @@
 
 **Session:** `01a049c6-3770-72d1-81ad-3cc5948c0a6e` · model `gpt-5.6-sol` · reasoning `xhigh` · 2026-08-28
 
-**Round 1 verdict:** `conditional approve` — five conditions, all adopted. See the adopted-vs-rejected table in `plan.md`.
+**Verdicts:** round 1 `conditional approve` (5 conditions) → round 2 `conditional approve` (5 more) → round 3 **`approve`**. All ten conditions adopted; see the two adopted-vs-rejected tables in `plan.md`.
 
 ---
 
@@ -121,3 +121,24 @@ The core design is sound, but two enforcement gaps and the artifact-smoke assump
 Arming source smoke with an absent key should not break the current top-level suite. Those specs are exactly the files selected by the smoke config ([vitest.e2e.config.ts:10](apps/extension/vitest.e2e.config.ts:10)); no test expects a default token, synthetic backup state explicitly uses `token: []` ([passkey-backup.test.ts:176](apps/extension/tests/e2e/passkey-backup.test.ts:176)), and session-restart tests query only `nulo:liveness` rather than asserting the whole session area ([sw-restart-network.test.ts:48](apps/extension/tests/e2e/sw-restart-network.test.ts:48)). The empty provider returns before marker or chain work, preserving that behavior.
 
 conditional approve (with conditions: make Phase 2 validate clean Chrome and Firefox outputs and pin armed source-smoke propagation; extend config tests for the new double opt-in; replace Phase 4 with explicit armed-source and unarmed-artifact smoke runs; correct Alpha/two-seed artifact assumptions and hermeticize artifact-mode public RPC traffic; make the production getSeeds default async)
+---
+
+## Round 3 — discharge check
+
+**Verdict:** `approve`.
+
+All five round-2 conditions are genuinely discharged. I found no remaining material defect.
+
+- The `lb.drpc.live` block is at the right layer: Puppeteer launch arguments in [extension.ts](apps/extension/tests/e2e/fixtures/extension.ts:45) cover extension pages, the service worker, and offscreen contexts. Both Alpha and Testnet defaults use that exact hostname in [network/service.ts](apps/extension/src/wallet/services/network/service.ts:98), with no alternate RPC host or fallback. Blocking CoinGecko or other hosts would be over-broad: those requests cannot independently create a seeded-token row. The precise current Chromium rule should be `--host-resolver-rules=MAP lb.drpc.live ^NOTFOUND`; `^NOTFOUND` is the current failure sentinel in [Chromium’s resolver implementation](https://chromium.googlesource.com/chromium/src/%2B/HEAD/net/dns/mapped_host_resolver.h).
+
+- The source-smoke run must leave `NULO_E2E_ARTIFACT_RUN` unset or empty, and the artifact-mode run must leave `NULO_E2E_MIGRATION_FIXTURE` unset or empty. The Phase 4 commands as written do exactly that: they list only the appropriate runner variable for each mode. No additional flag is required. The implementation should use command-scoped environment assignments so flags cannot leak between the two runs. `EXTENSION_PATH` should be absolute—or `dist/chrome` relative to `apps/extension`—because [global-setup-smoke.ts](apps/extension/tests/e2e/global-setup-smoke.ts:8) resolves it from the runner’s working directory.
+
+- The six Phase 2 assertions are sufficient. Clean Chrome and Firefox negatives cover both publication targets; the armed Chrome positives prove both the live stamp and reader survive tree-shaking. The four configuration cases establish fail-closed double opt-in, and Phase 3 supplies runtime functional coverage. An armed Firefox build would duplicate the DCE-positive assertion without closing a distinct release risk.
+
+- The `getSeeds()` placement is correct. Resolving once after the active-network null guard and before chain filtering avoids unnecessary reads while preserving the existing purge-epoch fences around all consequential writes in [seeder.ts](apps/extension/src/wallet/services/token/seeder.ts:185). A stale read can waste work, but it cannot commit stale state.
+
+- The artifact mitigation now matches the test’s stated premise: DNS failure prevents contract preview and therefore token persistence, while leaving the artifact bytes unchanged. The corrected smoke matrix also actually exercises both modes rather than merely mentioning them.
+
+No new breakage was introduced by this revision. The plan is implementable as written.
+
+approve

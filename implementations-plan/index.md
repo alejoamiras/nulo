@@ -2,6 +2,7 @@
 
 Format: `- [plan-name](plan-name/plan.md) — status — one-line hook`
 
+- [first-account-token-seeding](first-account-token-seeding/plan.md) — approved (light; codex 3 rounds: conditional → conditional → approve, all 10 conditions adopted), implementing — default tokens never seed for a profile's FIRST account: TokenService only triggers the seeder on profile/network change, both of which fire before the first account row exists, and nothing re-triggers on onAccountAdded; adds the trigger + a double-opt-in, DCE'd e2e seed-injection seam so the sandbox can prove it end-to-end, plus CI isolation so the fix doesn't point smoke/network suites at a public RPC
 - [key-model-v2](key-model-v2/plan.md) — implemented + reviewed (P1–P6 green; code-review max + codex loop converged; stack #420 = PRs #417/#418/#419 draft) — recovery-phrase-centric key model + NULO-ACCOUNT-KDF v2 (pre-launch baseline redefinition)
 - [key-model-v2-hardening](key-model-v2-hardening/plan.md) — drafted, dual-audited (2× conditional-approve adopted), awaiting final codex pass + owner approval — imported-key DEK isolation, duplicate-phrase guard, passkey 512-bit reduce, missing account e2e (arcs 4–5 on stack #420)
 
