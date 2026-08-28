@@ -100,11 +100,10 @@ jobs:
           LABEL_HIT: ${{ contains(github.event.pull_request.labels.*.name, 'e2e:smoke') }}
         run: |
           # The paths filter already answers "does this diff touch the surface?" — gating it on
-          # the base branch as well only creates a hole, because `github.base_ref` on a STACKED
-          # PR is the branch below it, never `dev`. Every stacked PR therefore skipped this suite
-          # by paths and reported success-on-skip; a real dispatcher regression rode four such
-          # green PRs before the top of the stack (label-forced) caught it. `main` and
-          # `workflow_dispatch` still force-run, so dropping the base test only ever widens.
+          # the base branch as well only creates a hole, because a stacked PR's `github.base_ref`
+          # is the branch below it. Only the bottom arc of a stack targets `dev`; every arc above
+          # it could reach this suite by LABEL alone, and a gate miss reports success-on-skip.
+          # `main` and `workflow_dispatch` still force-run, so dropping the base test only widens.
           if [ "$EVENT" = "workflow_dispatch" ] \
              || [ "$BASE" = "main" ] \
              || [ "$LABEL_HIT" = "true" ] \
@@ -147,4 +146,11 @@ jobs:
               exit 1
             fi
           done
+          # A skip is only legitimate when the gate ASKED for one. `smoke` is gated solely on
+          # `decide.outputs.run`, so a skip while the gate said run means something swallowed the
+          # suite — and this job would otherwise report that as a pass.
+          if [ "${{ needs.decide.outputs.run }}" = "true" ] && [ "${{ needs.smoke.result }}" != "success" ]; then
+            echo "::error::The gate said run, but the smoke suite did not run: ${{ needs.smoke.result }}"
+            exit 1
+          fi
           echo "Smoke e2e gate passed (or was skipped — no relevant changes / not labeled)."
