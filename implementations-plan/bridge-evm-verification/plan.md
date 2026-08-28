@@ -178,10 +178,17 @@ was caught by the audit: with init-once deleted and deployer-only intact, every 
 through `NotInitializer`, so the proof stays green while the guard it names is gone. The decisive caller
 is the initializer, and it must be the *only* one.
 
-**Registry B must be operational** — a second real rollup mock with distinct inbox/outbox — so that with
-the guard deleted the second `initialize` genuinely *succeeds*. If B were invalid, `initialize` would
-revert for an unrelated reason and the mutation would look caught. (Distinct *version* is not required:
-the reused `FakeRollup.getVersion()` is `pure` returning `4242`, so two instances cannot differ there.)
+**What makes the proof decisive** is the unwanted-success branch, not the value comparison: any second
+`initialize` that returns normally executes `assertTrue(false)`, so deleting the guard fails the proof
+*even if every candidate argument happens to equal what is already bound*. The seven-value assertion is
+the secondary check — that a rejected call left state untouched.
+
+**Registry B must be operational** — a second real rollup mock — so that with the guard deleted the
+second `initialize` genuinely *succeeds* rather than reverting for an unrelated reason, which would
+make the mutation merely look caught. Registry, rollup, inbox and outbox are concretely distinct
+between A and B; `rollupVersion` is **not** an independent witness (the reused `FakeRollup.getVersion()`
+is `pure` returning `4242`), so it is asserted as part of "nothing changed" but must not be described as
+a distinct sentinel.
 
 **A positive control keeps that honest.** A plain `test_` — running in the hermetic suite forever, not
 just once at mutation time — asserts the initializer *can* fully initialize `fresh` against registry B
@@ -347,8 +354,21 @@ Write `FormalPortal.t.sol` (the proof + the positive control). Delete `NuloToken
 - `forge build --ast --force` · `forge test --no-match-contract Fork` · `forge build --ast --force` ·
   `halmos --contract FormalPortalTest`
   — the AST build repeats because `forge test` recompiles without it and halmos requires it.
-- Pass: `Symbolic test result: 1 passed; 0 failed`; forge reports **62 tests** (61 after the trim, +1
-  positive control); **and** the matrix below holds, with every diff and both outputs in `lessons/phase-2.md`.
+- Pass: `Symbolic test result: 1 passed; 0 failed`; **and** the matrix below holds, with every diff and
+  both outputs in `lessons/phase-2.md`.
+
+  On the forge side the total is **degenerate and must not be the assertion**: dropping
+  `PortalReinit`'s front-run test (−1) and adding the positive control (+1) leaves 62 either way, so a
+  count cannot distinguish the intended swap from a silently dropped test. Verified: `forge test --list`
+  shows 0 of `FormalRouter`'s 4 `check_` functions, so proofs never enter the forge total. Assert by
+  name instead, from `forge test --list`:
+
+  | Name | Expected |
+  |---|---|
+  | `test_F001_initialize_is_once_only` | present, passing, and now against the real portal |
+  | `test_F001_initialize_frontRun_reverts` | **absent** — deliberately dropped; `BlackhatAudit` covers it |
+  | the positive control | present and passing |
+  | total | 62 |
 
   | Mutation to `upstream/NuloTokenPortal.sol` | Must fail | Must still pass |
   |---|---|---|

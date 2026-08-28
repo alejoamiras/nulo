@@ -62,3 +62,45 @@ runs on import, writes `remappings.txt` at module scope and exits via `process.e
 job installs Foundry — so a spawn-based test would pass on `"forge not found"` rather than on the
 behaviour it names. The assertion belongs in `candidate-schema.test.ts`, where the rejection actually
 lives.
+
+## Arc-1 quality loop
+
+`/code-review` in this repo is an interactive guided tour, not an automated fixer — it sends one stop
+per message and waits for a human. Its judgment step was performed directly instead (the
+`requireLegacyForgeInputs` field-by-field comparison above), and the codex brief said so, so the audit
+knew there were no separate code-review commits to distinguish.
+
+**Round 1 — "The arc is sound. I found no functional or validation regressions."**
+
+It independently confirmed the removal question: *"Nothing previously validated on a still-reachable
+path became unvalidated. The strict schema covers all removed checks and imposes additional structural
+and semantic validation."* It also checked something not asked — that discarding `parseCandidateManifest`'s
+return value is safe, because the schema has no coercions, defaults or transforms — and that the
+operator-facing failure is legible: a real pre-fork manifest fails with
+`l1.portalSource: Invalid input: expected "forked-v1"`, not a buried zod dump.
+
+Two low-severity comment findings, both adopted (commit `2430b588`):
+
+1. The schema-test comment was long *and wrong*. It said that without the rejection forge is handed "a
+   contract path that does not exist"; forge would actually receive the **fork's** path against a
+   canonical portal address — a worse failure, and worth naming accurately.
+2. Two comments still said "legacy manifests fall back to Sepolia", which no longer parse at all. The
+   surviving behaviour is narrower: a valid manifest that omits `l1ChainId`.
+
+**Round 2 — converged. "No new findings."**
+
+## Forward answer that reshaped Phase 2's framing
+
+Asked whether the planned harness could pass for a reason other than the guard holding, codex named the
+decisive mechanism, which is *not* the seven-value comparison:
+
+> "Any successful second initialization executes `assertTrue(false)`. Therefore deleting
+> `AlreadyInitialized` fails the proof even if candidate values equal existing values."
+
+That matters because it means the proof cannot be defeated by a candidate argument that happens to
+equal what is already bound — the unwanted-success branch fires regardless.
+
+On `FakeRollup.getVersion()` being `pure` and returning a constant: harmless. The assertion still
+correctly checks that a rejected initialization left every binding untouched; it simply is not an
+independent rebind witness. Registry, rollup, inbox and outbox ARE concretely distinct between A and B.
+The plan's wording must therefore say *those four* are distinct sentinels, not all seven.
