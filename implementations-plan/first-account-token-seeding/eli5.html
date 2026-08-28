@@ -1,0 +1,417 @@
+<title>The Missing Trigger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --paper:      #F7F8FA;
+    --surface:    #FFFFFF;
+    --ink:        #16191F;
+    --muted:      #5C6473;
+    --hairline:   #DFE3E9;
+    --defect:     #B26A00;
+    --defect-bg:  #FDF4E4;
+    --fix:        #0F6E63;
+    --fix-bg:     #E7F2F0;
+    --code-bg:    #EFF1F5;
+
+    --display: "Newsreader", ui-serif, Georgia, serif;
+    --body: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:     #12141A;
+      --surface:   #1A1D25;
+      --ink:       #E7E9EE;
+      --muted:     #9BA3B2;
+      --hairline:  #2C313C;
+      --defect:    #E0A050;
+      --defect-bg: #2A2115;
+      --fix:       #5EBEB0;
+      --fix-bg:    #142624;
+      --code-bg:   #21252E;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:     #12141A;
+    --surface:   #1A1D25;
+    --ink:       #E7E9EE;
+    --muted:     #9BA3B2;
+    --hairline:  #2C313C;
+    --defect:    #E0A050;
+    --defect-bg: #2A2115;
+    --fix:       #5EBEB0;
+    --fix-bg:    #142624;
+    --code-bg:   #21252E;
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.65;
+    margin: 0;
+    padding: 0 1.25rem 6rem;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 40rem; margin: 0 auto; }
+
+  header { padding: 4.5rem 0 2.5rem; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 1.25rem;
+  }
+
+  h1 {
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: clamp(2.4rem, 7vw, 3.4rem);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: 0 0 1.25rem;
+  }
+
+  .standfirst {
+    font-family: var(--display);
+    font-size: 1.2rem;
+    line-height: 1.55;
+    color: var(--muted);
+    margin: 0;
+    text-wrap: pretty;
+  }
+
+  h2 {
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: 1.6rem;
+    letter-spacing: -0.012em;
+    text-wrap: balance;
+    margin: 3.5rem 0 1rem;
+  }
+
+  h3 {
+    font-family: var(--body);
+    font-weight: 600;
+    font-size: 1rem;
+    margin: 0 0 0.4rem;
+  }
+
+  p { margin: 0 0 1.1rem; text-wrap: pretty; }
+  strong { font-weight: 600; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.85em;
+    background: var(--code-bg);
+    padding: 0.12em 0.36em;
+    border-radius: 3px;
+  }
+
+  pre {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    line-height: 1.6;
+    background: var(--code-bg);
+    color: var(--ink);
+    padding: 1rem 1.1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  hr {
+    border: 0;
+    border-top: 1px solid var(--hairline);
+    margin: 3.5rem 0 0;
+  }
+
+  /* ---- the event sequence: the page's one centrepiece ---- */
+  .sequence { display: flex; flex-direction: column; gap: 0; margin: 2rem 0 1.5rem; }
+
+  .step {
+    display: grid;
+    grid-template-columns: 2.5rem 1fr;
+    gap: 1rem;
+    padding: 1.15rem 0;
+    border-top: 1px solid var(--hairline);
+  }
+  .step:last-child { border-bottom: 1px solid var(--hairline); }
+
+  .step-n {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--muted);
+    padding-top: 0.18rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .step-what { margin: 0 0 0.3rem; font-weight: 600; font-size: 0.97rem; }
+  .step-why { margin: 0; color: var(--muted); font-size: 0.92rem; line-height: 1.55; }
+
+  .verdict {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    padding: 0.16rem 0.5rem;
+    border-radius: 3px;
+    margin-top: 0.55rem;
+    background: var(--defect-bg);
+    color: var(--defect);
+  }
+  .step.orphan .step-n { color: var(--defect); }
+  .step.orphan .step-what { color: var(--defect); }
+
+  /* ---- phases ---- */
+  .phase {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 7px;
+    padding: 1.15rem 1.3rem;
+    margin: 0 0 0.85rem;
+  }
+  .phase-label {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 0.5rem;
+  }
+  .phase p { margin: 0 0 0.7rem; font-size: 0.95rem; }
+  .gate {
+    margin: 0;
+    padding-top: 0.7rem;
+    border-top: 1px solid var(--hairline);
+    font-size: 0.87rem;
+    color: var(--muted);
+  }
+  .gate b { font-weight: 600; color: var(--fix); }
+
+  ul { margin: 0 0 1.1rem; padding-left: 1.15rem; }
+  li { margin-bottom: 0.55rem; }
+  li::marker { color: var(--muted); }
+
+  .note {
+    background: var(--fix-bg);
+    border-left: 2px solid var(--fix);
+    padding: 1rem 1.2rem;
+    border-radius: 0 5px 5px 0;
+    margin: 0 0 1.5rem;
+  }
+  .note p:last-child { margin-bottom: 0; }
+  .note p { font-size: 0.95rem; }
+
+  .decision {
+    border: 1px solid var(--hairline);
+    border-radius: 7px;
+    background: var(--surface);
+    padding: 1.4rem 1.5rem;
+    margin: 1.5rem 0 0;
+  }
+  .decision h2 { margin-top: 0; }
+
+  .seed { margin: 0 0 1.5rem; }
+  .seed-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .seed-head h3 { margin: 0; font-family: var(--mono); font-size: 0.9rem; }
+  .pick {
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fix);
+    background: var(--fix-bg);
+    padding: 0.16rem 0.5rem;
+    border-radius: 3px;
+  }
+  .warn {
+    color: var(--defect);
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin: 0 0 1.25rem;
+  }
+
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--hairline);
+    font-size: 0.87rem;
+    color: var(--muted);
+  }
+
+  a { color: var(--fix); text-underline-offset: 2px; }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--fix); outline-offset: 2px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="wrap">
+
+<header>
+  <p class="eyebrow">Blueprint · light · plan for approval</p>
+  <h1>The Missing Trigger</h1>
+  <p class="standfirst">Your wallet's default tokens never show up for a brand-new account. Nothing is broken in the seeding logic itself — it simply runs at three moments, and the account it needs doesn't exist at any of them.</p>
+</header>
+
+<h2>What's actually happening</h2>
+
+<p>The wallet ships with a short list of tokens it adds for you automatically, so a fresh wallet isn't empty. A background component watches for two moments to do that work: when a profile becomes active, and when the active network changes.</p>
+
+<p>The problem is ordering. On a brand-new profile, <strong>both of those moments happen before your first account exists</strong>. The account is created a step later, by the popup — and nothing tells the seeder to look again.</p>
+
+<div class="sequence">
+  <div class="step">
+    <div class="step-n">01</div>
+    <div>
+      <p class="step-what">Your profile is created and unlocked</p>
+      <p class="step-why">The seeder wakes up, looks for the active network, and finds none — networks haven't been set up yet. It goes back to sleep.</p>
+    </div>
+  </div>
+  <div class="step">
+    <div class="step-n">02</div>
+    <div>
+      <p class="step-what">The popup sets up networks and picks the active one</p>
+      <p class="step-why">The seeder wakes up again. This time the network is there — but it asks "which accounts exist on this chain?" and the answer is none. It skips every token on the list.</p>
+    </div>
+  </div>
+  <div class="step orphan">
+    <div class="step-n">03</div>
+    <div>
+      <p class="step-what">Your first account is created</p>
+      <p class="step-why">This is the moment the seeder was waiting for. But nobody is listening to it — there is no subscription to this event at all.</p>
+      <span class="verdict">No listener · tokens never appear</span>
+    </div>
+  </div>
+</div>
+
+<p>This isn't a race that sometimes goes the wrong way. The popup deliberately sets up networks before accounts, so step 2 always comes before step 3. It fails the same way every time.</p>
+
+<h2>Why adding a second account seems to fix it</h2>
+
+<p>It doesn't, quite. Adding an account doesn't trigger seeding either, and switching between accounts is purely a screen change.</p>
+
+<p>What actually happens is that some <em>later</em> time you open the popup, it re-picks the active network — which wakes the seeder, and by then an account exists, so the tokens finally get added. Your account switch is what makes the assets list re-read from storage and show them. Two separate things that happened to line up.</p>
+
+<h2>The fix</h2>
+
+<p>One line: also listen for "an account was created". The seeder already knows how to check whether it's still looking at the right profile and network, and how to avoid running twice at once — so it needs no new safety logic, just the third invitation.</p>
+
+<p>Almost all the work in this plan is <strong>proving it</strong>, and making sure the fix doesn't quietly change how the existing test suites behave.</p>
+
+<div class="note">
+  <p><strong>The awkward part.</strong> There's no honest way to test this end-to-end today. The automated test wallet runs against a throwaway local blockchain, and the real default-token list has no entry for it — by design. So the plan adds a strictly test-only way to inject one token into that list, wrapped in four separate guards to make certain it can never reach a real release build.</p>
+</div>
+
+<h2>Why this tier</h2>
+
+<p>Scored as a <strong>light</strong> plan: no new territory, no data migration, no irreversible step, and the production change is a single line. The one dimension that isn't low is security — the default-token list is a trust boundary, since anything on it gets added to your wallet without asking you first. That's why the test-only injection got the heaviest scrutiny in review, and why the code review after implementation was raised a level.</p>
+
+<h2>The four steps</h2>
+
+<div class="phase">
+  <p class="phase-label">Step 1 · the actual fix</p>
+  <h3>Listen for the account</h3>
+  <p>Add the missing subscription, and pin it with tests that drive the real service wiring rather than a stand-in.</p>
+  <p class="gate"><b>Proves itself by:</b> lint, typecheck, and the token service's unit and composition tests all green.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-label">Step 2 · test-only plumbing</p>
+  <h3>A way to observe seeding on a throwaway chain</h3>
+  <p>Build the injection path, behind two separate switches that must both be on. Add automated checks that a real production build contains no trace of it — and that a test build genuinely does, so the check isn't silently testing nothing.</p>
+  <p class="gate"><b>Proves itself by:</b> the usual checks, plus a real production build searched for the test markers and confirmed clean.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-label">Step 3 · the regression test</p>
+  <h3>Watch a token appear on its own</h3>
+  <p>A browser test creates a fresh profile, switches to the local chain — which has no accounts, so it makes one — and then waits for the token to show up in the assets list without anyone importing it.</p>
+  <p class="gate"><b>Proves itself by:</b> the new test passing — <em>and</em> failing when the one-line fix is temporarily removed. A test that passes either way proves nothing.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-label">Step 4 · make sure nothing else moved</p>
+  <h3>Full sweep and docs</h3>
+  <p>Run every suite end to end. The new trigger fires in every test that creates a profile, so the assumption that nothing else notices has to be demonstrated, not assumed.</p>
+  <p class="gate"><b>Proves itself by:</b> the full quality gate, the smoke suite, and the entire browser suite all green.</p>
+</div>
+
+<h2>Deliberately not doing</h2>
+
+<ul>
+  <li><strong>Touching the assets screen.</strong> It already updates live through a different signal. A second path there would risk showing tokens twice.</li>
+  <li><strong>Fixing the retry-budget hazard.</strong> The seeder spends one of three retries <em>before</em> the slow part, so a background process shut down mid-work burns a retry for nothing — and three of those permanently give up until the next release. It's real, but the current behaviour deliberately prevents an infinite crash-retry loop, and undoing that safely needs its own design. Recorded, deferred.</li>
+  <li><strong>A missing-balance repair on restart.</strong> A pre-existing gap found during review, unrelated to this bug. Written down as a separate follow-up.</li>
+</ul>
+
+<h2>Where review landed</h2>
+
+<p>Codex reviewed the plan at maximum reasoning and returned a <strong>conditional approval</strong> with five conditions — all adopted. The two that changed the plan most:</p>
+
+<ul>
+  <li>It caught that the <strong>smoke test suite</strong> also boots the wallet pointed at the public test network. Once the fix lands, every fresh test profile would quietly make a live call to an outside service — turning a required check into something that depends on a server we don't own. Now handled.</li>
+  <li>It found one of my stated facts was <strong>simply wrong</strong> — I'd claimed restoring a backup emits the account event. It doesn't. Corrected.</li>
+</ul>
+
+<div class="decision">
+  <h2>What I need you to decide</h2>
+  <ul>
+    <li>The scope, and the three things deliberately left out.</li>
+    <li>Staying at <strong>light</strong>, given the security dimension isn't low.</li>
+    <li>The test-only injection path existing at all — the alternative is having no end-to-end proof this bug is fixed.</li>
+    <li>That release and nightly runs will now make a real call to the public test network when a profile is created. That's genuine production behaviour, so it's left alone on purpose.</li>
+    <li>Single pull request into <code>dev</code>.</li>
+  </ul>
+  <p style="margin-bottom:0"><strong>Approve</strong>, <strong>conditionally approve</strong> with your own conditions, or <strong>reject</strong> with what blocks it.</p>
+</div>
+
+<h2>Implementation seeds</h2>
+
+<p class="warn">Use exactly one of these per session — they don't combine.</p>
+
+<div class="seed">
+  <div class="seed-head">
+    <h3>/goal</h3>
+    <span class="pick">Recommended</span>
+  </div>
+  <p style="font-size:0.92rem;color:var(--muted);margin-bottom:0.6rem">Every finish line here is visible in the transcript, so a completion condition beats a timer.</p>
+  <pre><code>/goal All four phases marked ✓ in implementations-plan/first-account-token-seeding/plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate as written in plan.md reported passing in the transcript — including Phase 2's negative+positive bundle greps and Phase 3's documented pre-fix RED run; for each phase the agent has printed LESSONS_FILE=implementations-plan/first-account-token-seeding/lessons/phase-N.md in the transcript; /code-review medium --fix complete with findings applied and committed separately; the codex fix loop converged, evidenced by a resumed codex pass reporting no new material findings quoted in the transcript; a PR against dev exists (created only after the loop converged) with gh pr view output in the transcript; bun run audit:vue and bun run test:e2e and bun run e2e:agent all report exit 0 in the transcript.</code></pre>
+</div>
+
+<div class="seed">
+  <div class="seed-head">
+    <h3>/loop 15m</h3>
+  </div>
+  <pre><code>/loop 15m Drive implementations-plan/first-account-token-seeding forward. Never idle waiting for my input. Each firing: (1) Reality check: read plan.md + lessons/ (authoritative state), git status, git log --oneline -5; if a PR exists, gh pr view --json statusCheckRollup. (2) Waiting on CI is fine — use the wait to review the diff or prep the next phase. (3) No task in hand? Pick the next pending step from plan.md and start it; after each meaningful edit run bun run lint + bun run --cwd apps/extension vitest run for the touched dirs; commit → push. (4) Stuck or facing a decision? Call /codex xhigh, reach a defensible decision, act, log the consult in lessons/phase-N.md. Hard limits stay hard: never merge to dev/main, never publish, never expand scope beyond plan.md. (5) Same step failed 5 times? Stop retrying; reassess with codex. (6) Phase green? Run the phase's full validation gate as written in plan.md, paste the result, mark ✓ in plan.md, print LESSONS_FILE=implementations-plan/first-account-token-seeding/lessons/phase-N.md, advance. (7) All phases ✓? Run /code-review medium --fix → commit fixes separately → codex post-impl audit (net diff + code-review commit summary + adversarial ask + the no-over-engineering and comment-quality rules) → loop until clean → gh pr create --base dev → gh pr checks --watch → wrap-up report and stop.</code></pre>
+</div>
+
+<footer>
+  <p>Full technical plan: <code>implementations-plan/first-account-token-seeding/plan.md</code> · recon at <code>recon.md</code> · review transcript at <code>audit-codex.md</code> · per-phase logs under <code>lessons/</code>.</p>
+</footer>
+
+</div>

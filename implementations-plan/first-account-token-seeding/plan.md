@@ -3,6 +3,7 @@
 **Tier:** `light` (owner-selected). **`eli5_mode`:** Artifact.
 **Budget:** recon 2 agents (spent) · `/code-review` level **`medium`** (raised from `low` on codex's finding that a runtime-controlled zero-interaction seed source plus publication guards warrants a security-focused pass) · codex fix loop ≤3 rounds.
 **Base:** `origin/dev` @ `6de63585`. **Worktree/branch:** `first-account-token-seeding` / `worktree-first-account-token-seeding`.
+**ELI5 Artifact:** <https://claude.ai/code/artifact/a0781736-b8e4-4dae-b560-097f60591fde> — source `implementations-plan/first-account-token-seeding/eli5.html` (republish that path to update the same URL).
 
 ## Problem
 
@@ -57,7 +58,8 @@ with `onAccountAddedSeed = (): void => { void this.seeder.run() }`.
 
 `seedsForChain(0)` is empty by design and the sandbox token's address is minted per run; the bundle is also built before the chain exists (`agent.sh:80-104` vs `global-setup.ts:639-713`), so a just-deployed address cannot be baked in. The repo's established answer to that shape is runtime injection through a production interface with a no-op default and a `chrome.storage`-backed implementation constructed only inside a statically-false branch (`ProofGate` / `RestoreGate` / `IncomingPollGate`).
 
-- **`TokenSeederDeps.seeds` (static array, unit-test-only, no production caller) becomes `getSeeds(): Promise<readonly DefaultTokenSeed[]>`, resolved inside `doRun()`.** The values must be readable at pass time, not construction time. No new `TokenSeedSource` interface: `TokenSeederDeps` already *is* the narrow port, and the production default (`() => DEFAULT_TOKEN_SEEDS`) stays in the token domain. Only the Chrome-backed reader lives in `src/e2e/chrome-storage-token-seeds.ts`, matching the repo's existing interface/default-vs-Chrome-impl split.
+- **`TokenSeederDeps.seeds` (static array, unit-test-only, no production caller) becomes `getSeeds(): Promise<readonly DefaultTokenSeed[]>`, resolved inside `doRun()`.** The values must be readable at pass time, not construction time. No new `TokenSeedSource` interface: `TokenSeederDeps` already *is* the narrow port, and the production default (`async () => DEFAULT_TOKEN_SEEDS`) stays in the token domain. Only the Chrome-backed reader lives in `src/e2e/chrome-storage-token-seeds.ts`, matching the repo's existing interface/default-vs-Chrome-impl split.
+  **Await position:** resolve exactly once at `seeder.ts:185`, the slot the static list read occupies today — after the active-network null guard, before the `chainId` filter. No extra epoch guard is needed: purges bump the epoch (`seeder.ts:163`) and every write after the await is already fenced (`seeder.ts:228`, `:259`), so a purge landing during `getSeeds()` can cause a stale *read* but never a stale *write*.
 - **Double opt-in, fail-closed**, mirroring `E2E_PROVERLESS` (`e2e/config.ts:29-40`): both `VITE_NULO_E2E_TOKEN_SEEDS=1` and `VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1` are required; exactly one set throws at module eval. A single flag is *not* sufficient here, because the armed semantics below make an accidentally-armed production build silently stop seeding defaults — a different and worse failure mode than the inert migration fixture's.
 - **Armed semantics: the e2e reader REPLACES the production list, and an absent or malformed key yields an empty list.** These are only reachable in an armed build, which double opt-in makes implausible outside e2e.
 - **The injected payload is minimal and validated:** exactly one entry, `chainId === 0` (the sandbox) or it is rejected; `contract` and `expectedClassId` must match canonical 0x-hex field shapes; `expectedSymbol` is **hardcoded to `"TST"` in the e2e reader**, never taken from storage. The reader treats the blob as hostile and returns `[]` on any violation. This keeps the storage writer from choosing what counts as "expected" beyond the one field it genuinely cannot know ahead of time (the per-run address).
@@ -66,9 +68,9 @@ with `onAccountAddedSeed = (): void => { void this.seeder.run() }`.
 ### Publication guards (all four required — the seam's real control)
 
 1. **Normal top-level import** + construction inside `if (E2E_TOKEN_SEEDS)` so Vite statically replaces the `import.meta.env` reference and Rollup drops it. A dynamic `import()` is explicitly forbidden: the repo tried it and Rollup still emitted a code-split chunk (`chrome-storage-proof-gate.ts:40-42`).
-2. **Live-pinned build stamp.** A bare exported stamp constant is itself tree-shaken; the proverless stamp survives only because it is assigned as live data (`e2e/config.ts:43` + `offscreen/index.ts:84`). The token-seed stamp needs the same pin, or the negative grep tests nothing.
+2. **Live-pinned build stamp.** A bare exported stamp constant is itself tree-shaken; the proverless stamp survives only because it is assigned as live data (`e2e/config.ts:43` + `offscreen/index.ts:84`). This repo has already been bitten by exactly this: `price-map.ts:63-67` records that "an unused export gets tree-shaken even in ARMED builds, which made the release grep a false-negative guard", and pins its stamp as live data *inside the kept branch*. The token-seed stamp does the same, or the negative grep tests nothing.
 3. **Fail-fast on the env in CI, before building** — both flags, mirroring the CoinGecko guard's rationale at `_build-extension.yml:57` ("Vite bakes any `VITE_*` env into the bundle, so fail FAST if the variable is even set — stronger than only grepping the artifact afterwards").
-4. **Negative bundle-grep** over `dist/chrome` *and* `dist/firefox` (`_build-extension.yml:93`), adding **both** the stamp literal and the functional storage-key literal to the marker list. Plus a positive propagation grep in `agent.sh` alongside the existing ones, so a silently-unpropagated flag fails the e2e run instead of quietly testing nothing.
+4. **Negative bundle-grep** over `dist/chrome` *and* `dist/firefox` (`_build-extension.yml:93`), adding **both** the stamp literal and the functional storage-key literal to the marker list. Two positive propagation greps guard the other direction — one in `agent.sh` alongside the existing ones, and one in `_smoke-e2e.yml` **after its conditional source build only** — so a misspelled or dropped env name fails the run instead of silently reverting that suite to the live seed list.
 
 ### CI isolation (the condition I had missed)
 
@@ -76,7 +78,10 @@ Post-fix, *any* wallet booted on Testnet attempts a live seed against the public
 
 - **Network e2e** (`agent.sh`) — arm the seam. The injected chain-0 entry is what the new test asserts.
 - **Source-built smoke** (`_smoke-e2e.yml:62-75`, which builds with `VITE_NULO_E2E_DEFAULT_NET: testnet`) — arm the seam with **no** injected key, so the list resolves empty. Without this, every fresh smoke profile makes a live dRPC call and a required gate acquires an external dependency. The build step is already conditional on `inputs.artifact_name == '' && inputs.extension_path == ''`, so this touches source builds only.
-- **Artifact smoke (release / nightly)** — deliberately **not** armed: those runs load the production artifact, and testing production behavior is their purpose. **Accepted residual:** post-fix, artifact-smoke profile registrations will make a real Testnet seed attempt. It is asynchronous, failure-tolerant (logged warning, attempt counted), and no smoke test asserts on the token list (`registration.test.ts:14-78` asserts `balance-amount` / `actions-send` / `actions-receive`). Phase 4 verifies the smoke suite stays green rather than assuming it.
+- **Artifact smoke (release / nightly)** — deliberately **not** armed: those runs download an unflagged production Chrome artifact (`release.yml:226,246`), and testing production bytes is their purpose. **Corrected after codex round 2 — my earlier residual was wrong twice over:**
+  - An unflagged build has **Alpha active, not Testnet** (`network/service.ts:96-106`), so registration attempts **two Mainnet seeds** (`default-tokens.ts:38-59`), not one Testnet seed.
+  - It is **not** true that no smoke assertion notices. `fiat-display.test.ts:23` asserts `[data-testid="token-fiat"]` is absent on a fresh wallet, and **both** Mainnet seeds are price-mapped (`price-map.ts:55-58`); a seeded token with a resolved quote renders `token-fiat` (`TokenCard.vue:97`). That makes a required gate depend on whether two external services answer before the assertion runs — the same fragility that already forced an artifact-run skip elsewhere (`backup-roundtrip.test.ts:24`).
+  - **Mitigation (adopted from codex): keep the artifact bytes untouched and make artifact-mode runs hermetic at the browser.** Block `lb.drpc.live` via Puppeteer launch arguments when `NULO_E2E_ARTIFACT_RUN=1` (the flag already exists — `_smoke-e2e.yml:37` — and the launch site is `fixtures/extension.ts:45-55`). This does not weaken any gate: `fiat-display.test.ts`'s own docstring already states its premise as "no network fetch succeeds here", so the block makes that premise *true* rather than accidental. Successful end-to-end seeding is proven by the sandbox test in Phase 3, not by artifact smoke.
 
 ### File-level change map
 
@@ -85,10 +90,12 @@ Post-fix, *any* wallet booted on Testnet attempts a live seed against the public
 | `apps/extension/src/wallet/services/token/service.ts` | subscribe `onAccountAdded`; pass `getSeeds` into `TokenSeeder` |
 | `apps/extension/src/wallet/services/token/seeder.ts` | `seeds` → `getSeeds()`, awaited in `doRun()` |
 | `apps/extension/src/e2e/config.ts` | `E2E_TOKEN_SEEDS` double opt-in + live-pinned stamp |
+| `apps/extension/src/e2e/config.test.ts` | four fail-closed cases for the new pair (today it pins only the proverless pair, `:22`) |
 | `apps/extension/src/e2e/chrome-storage-token-seeds.ts` | **new** — validated single-entry chain-0 reader |
 | `apps/extension/src/wallet/runtime.ts` | construct the reader under the flag; pin the stamp |
 | `apps/extension/scripts/e2e/agent.sh` | set both flags; positive stamp grep |
-| `.github/workflows/_smoke-e2e.yml` | arm both flags on the source build only |
+| `.github/workflows/_smoke-e2e.yml` | arm both flags on the source build only + a source-build-only positive grep |
+| `apps/extension/tests/e2e/fixtures/extension.ts` | block `lb.drpc.live` in Puppeteer args when `NULO_E2E_ARTIFACT_RUN=1` |
 | `.github/workflows/_build-extension.yml` | fail-fast env rejection + two new negative-grep markers |
 | `apps/extension/src/wallet/services/token/seeder.test.ts` | adapt `makeSeeder` to `getSeeds`; add the retry-on-new-trigger pin |
 | `apps/extension/src/wallet/services/token/service.composition.test.ts` | `onAccountAdded` wiring assertion |
@@ -129,7 +136,7 @@ Post-fix, *any* wallet booted on Testnet attempts a live seed against the public
 
 1. **A one-line unguarded subscription is safe.** The scope/epoch argument holds and production events follow durable writes, so traffic is bounded by a finite static list with success/tombstone short-circuits and a 3-attempt cap. Corrected from the draft: **sequential** account events *do* start additional passes (`seeder.ts:103` only coalesces triggers overlapping an in-flight pass), and the earlier "restore emits a burst" premise was simply wrong (Fact 6). The residual is bounded-but-not-single: N accounts created in sequence can drive up to N passes over a settled marker blob, each mostly storage reads.
 2. **Arming empty replacement in both source-built e2e paths leaves the existing suites' behavior unchanged.** Recon found zero tests referencing the seeder, so nothing should depend on a default token existing. Proven, not assumed, by Phase 4's full smoke + network runs.
-3. **Artifact smoke's new live seed attempt is harmless.** No smoke test asserts on the token list, and the attempt is async and failure-tolerant. Verified by Phase 4.
+3. **Artifact-mode smoke stays green.** ~~No smoke test asserts on the token list~~ — **that draft claim was wrong** (codex round 2): `fiat-display.test.ts:23` asserts `token-fiat` is absent, both Mainnet seeds are price-mapped, and an unflagged artifact build runs on Alpha with two seeds. The revised inference is that blocking `lb.drpc.live` for `NULO_E2E_ARTIFACT_RUN=1` makes the seed attempt fail fast and hermetically, leaving the assertion true. Proven by Phase 4's dedicated artifact-mode run.
 4. **Dropping the `TokensView` change is correct.** Token persistence precedes `onTokenAdded`; balance persistence precedes `onTokenBalanceAdded`; the view subscribes to the latter and re-reads durable rows on mount. The genuine hole is SW death between the two — recorded as a deferred hazard, and a view listener would not repair it anyway.
 
 ### Asks — all resolved by codex (the owner delegated these)
@@ -169,15 +176,20 @@ Post-fix, *any* wallet booted on Testnet attempts a live seed against the public
 ### Phase 2 — E2E seed seam + publication guards
 
 - `e2e/config.ts`: `E2E_TOKEN_SEEDS` double opt-in (fail-closed on exactly-one) + live-pinned stamp.
+- `e2e/config.test.ts`: extend with the new pair's four cases — neither set → off, no stamp; both set → on, stamp present; each one alone → throws.
 - `e2e/chrome-storage-token-seeds.ts` (new) + colocated test: single-entry, `chainId === 0`, canonical-hex, `"TST"`-hardcoded reader; `[]` on absent or hostile blobs.
-- `seeder.ts`: `seeds` → `getSeeds()`, awaited in `doRun()`; production default `() => DEFAULT_TOKEN_SEEDS` stays in the token domain; update `makeSeeder`.
-- `runtime.ts`: construct under the flag; pin the stamp as live data.
-- `agent.sh`: set both flags + positive stamp grep. `_smoke-e2e.yml`: arm both flags on the source build only.
+- `seeder.ts`: `seeds` → `getSeeds()`, awaited at `:185`; production default `async () => DEFAULT_TOKEN_SEEDS` stays in the token domain; update `makeSeeder`.
+- `runtime.ts`: construct under the flag; pin the stamp as live data inside the kept branch.
+- `agent.sh`: set both flags + positive stamp grep. `_smoke-e2e.yml`: arm both flags on the source build only, plus a source-build-only positive grep for both literals.
 - `_build-extension.yml`: fail-fast env rejection for both flags; add the stamp and the storage-key literals to the negative-grep list.
 
-**Validation gate.** `bun run lint && bun run typecheck && bun run --cwd apps/extension vitest run src/wallet/services/token/ src/e2e/ && bun run lint:actions && bun run build`, then assert the production bundle is clean:
-`! grep -rq "NULO_E2E_TOKEN_SEEDS_BUILD_STAMP" apps/extension/dist/chrome && ! grep -rq "nulo:e2e:token-seeds" apps/extension/dist/chrome`.
-Also assert the guard bites: an armed build **does** contain both literals. Pass: exit 0 and both greps as specified. Layers: lint · typecheck · unit · actionlint · production build + negative/positive grep.
+**Validation gate.** Three parts, all required.
+
+1. `bun run lint && bun run typecheck && bun run --cwd apps/extension vitest run src/wallet/services/token/ src/e2e/ && bun run lint:actions`
+2. **Clean build, both targets** (`bun run build` is Chrome-only, so name them explicitly): `bun run build:chrome && bun run build:firefox`, then for each of `apps/extension/dist/chrome` and `apps/extension/dist/firefox` assert **absence** of `NULO_E2E_TOKEN_SEEDS_BUILD_STAMP` and `nulo:e2e:token-seeds`.
+3. **Armed build bites:** rebuild Chrome with both flags set and assert **presence** of both literals. The stamp proves the live pin survived tree-shaking; the key literal independently proves the reader module survived. Without this half, the negative grep is a false-negative guard — the failure mode `price-map.ts:63-67` already records.
+
+Pass: exit 0 and all six grep assertions as specified. Layers: lint · typecheck · unit · actionlint · dual-target production build + negative/positive greps.
 
 ### Phase 3 — Network e2e
 
@@ -194,10 +206,18 @@ The test **must be verified red on the pre-Phase-1 code** (revert the `service.t
 
 ### Phase 4 — Regression sweep + docs
 
-- Full suites: units + components, smoke, and the **whole** network suite — the new trigger fires in every profile-registering test, so Inferences 2 and 3 must be proven, not assumed.
+The new trigger fires in every profile-registering test, so Inferences 2 and 3 must be *demonstrated*. `audit:vue` ends with an ordinary Chrome build carrying none of the smoke flags, so `audit:vue && test:e2e` would exercise neither smoke mode — and an unarmed non-artifact run is expressly rejected by the existing fixture-arming contract (`backup-migration.test.ts:36`). Both smoke modes therefore get explicit, separate runs.
+
 - Docs: `ARCHITECTURE.md` (the seeding trigger set), `apps/extension/tests/e2e/README.md` (new flags + storage key), `implementations-plan/index.md`.
 
-**Validation gate.** `bun run audit:vue && bun run test:e2e && bun run e2e:agent`. Pass: all exit 0. Layers: typecheck · unit + component · lint · build · smoke e2e · full network e2e.
+**Validation gate.** Four parts, all required.
+
+1. `bun run audit:vue` — typecheck ∥ units + components ∥ lint, then build.
+2. **Armed source smoke** — build Chrome with the smoke flag set (`VITE_NULO_E2E_MIGRATION_FIXTURE=1`, `VITE_NULO_E2E_DEFAULT_NET=testnet`, and both token-seed flags), then `bun run test:e2e` with `NULO_E2E_MIGRATION_FIXTURE=1`. Proves Inference 2: an empty seed list changes nothing for the existing smoke specs.
+3. **Unarmed artifact-mode smoke** — build Chrome plain, then run `test:e2e` with `NULO_E2E_ARTIFACT_RUN=1` and `EXTENSION_PATH` pointed at that build, exactly as release/nightly do. Proves Inference 3: production bytes plus the `lb.drpc.live` block keep `fiat-display.test.ts` green.
+4. `bun run e2e:agent` — the full network suite.
+
+Pass: all four exit 0. Layers: typecheck · unit + component · lint · build · smoke e2e (both modes) · full network e2e.
 
 ## Delivery
 
@@ -233,9 +253,13 @@ Run in order once every phase is ✓ (single arc, so each step runs once over th
 
 ## Audit verdicts
 
-**Codex (session `01a049c6-3770-72d1-81ad-3cc5948c0a6e`, `gpt-5.6-sol` xhigh, 2026-08-28): `conditional approve`** — conditions: (1) double-opt-in and bundle-pin the e2e source; (2) restrict it to one validated chain-0 seed; (3) arm empty replacement in source-built smoke but never artifact/release builds; (4) correct the restore/coalescing claims; (5) explicitly defer the MV3 attempt-burn and balance-reconciliation hazards. **All five adopted** in this revision. Full transcript: `audit-codex.md`.
+**Codex round 1 (session `01a049c6-3770-72d1-81ad-3cc5948c0a6e`, `gpt-5.6-sol` xhigh, 2026-08-28): `conditional approve`** — conditions: (1) double-opt-in and bundle-pin the e2e source; (2) restrict it to one validated chain-0 seed; (3) arm empty replacement in source-built smoke but never artifact/release builds; (4) correct the restore/coalescing claims; (5) explicitly defer the MV3 attempt-burn and balance-reconciliation hazards. **All five adopted.**
 
-### Adopted vs rejected
+**Codex round 2 (same session, condition check): `conditional approve`** — conditions 2, 4, 5 discharged; 1 and 3 only partially. New conditions: (a) Phase 2 must validate clean **Chrome and Firefox** outputs and pin armed source-smoke propagation; (b) extend `config.test.ts` for the new double opt-in; (c) replace Phase 4 with explicit armed-source and unarmed-artifact smoke runs; (d) correct the Alpha/two-seed artifact assumption and hermeticize artifact-mode public-RPC traffic; (e) make the production `getSeeds` default `async`. **All five adopted** in this revision.
+
+Full transcript: `audit-codex.md`.
+
+### Adopted vs rejected (round 1)
 
 | Finding | Severity | Disposition |
 |---|---|---|
@@ -254,3 +278,14 @@ Run in order once every phase is ✓ (single arc, so each step runs once over th
 | Session key not dApp/content-script writable | Low | **Adopted as supporting evidence** in Security |
 | Unguarded subscription creates no unbounded production traffic | Low | **Adopted** — recorded in Inference 1 |
 | Composition coverage alone insufficient; pre-fix-red check valuable | Medium | **Adopted** — Phase 3 keeps the mandatory red run |
+
+### Adopted vs rejected (round 2)
+
+| Finding | Severity | Disposition |
+|---|---|---|
+| Phase 4 didn't run the smoke configuration it claimed to validate (`audit:vue` ends with an unflagged Chrome build; an unarmed non-artifact smoke run is rejected by the fixture-arming contract) | High | **Adopted** — Phase 4 replaced with four explicit parts, including separate armed-source and unarmed-artifact smoke runs |
+| Phase 2's gate greps only `dist/chrome` while promising a Chrome+Firefox assertion (`bun run build` is Chrome-only) | Medium | **Adopted** — gate now names `build:chrome` + `build:firefox` and greps both fresh outputs |
+| Source-smoke propagation unpinned; a misspelled env name silently reverts smoke to the live seed list. `config.test.ts` missing from the plan | Medium | **Adopted** — source-build-only positive grep in `_smoke-e2e.yml`; `config.test.ts` added to Phase 2 and the file map with the pair's four fail-closed cases |
+| Artifact smoke is **Alpha with two Mainnet seeds**, not Testnet with one — and `fiat-display.test.ts:23` *does* notice, because both Mainnet seeds are price-mapped | Medium | **Adopted** — my residual was wrong twice over; corrected, and mitigated by blocking `lb.drpc.live` under `NULO_E2E_ARTIFACT_RUN=1` rather than arming the artifact |
+| Production `getSeeds` default must be `async () => …`; resolve once after the network guard, before the chain filter; no extra epoch guard needed | Low | **Adopted** — await position and the stale-read-but-never-stale-write reasoning recorded |
+| Arming source smoke with an absent key breaks no existing smoke spec (verified against the smoke config's file set) | — | **Accepted as confirmation** — still demonstrated by Phase 4 part 2 rather than assumed |
