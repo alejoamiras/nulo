@@ -24,6 +24,7 @@ import {
 	RpcTimeoutError,
 	TooManyPendingError,
 	DuplicateInitializationError,
+	UnsupportedMethodError,
 } from "@nulo/extension-messaging/errors"
 import type { WalletResponse } from "@aztec/wallet-sdk/types"
 
@@ -91,6 +92,18 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 			data: { walletErrorCode: TooManyPendingError.CODE },
 		}
 	}
+	if (error instanceof UnsupportedMethodError) {
+		// -32601 = JSON-RPC "Method not found". Purely a statement about THIS wallet's surface, and
+		// the only variable part is the method name the dApp itself sent (bounded at the throw
+		// site), so the echo tells the caller nothing it did not already know. Classified because
+		// falling through would leave a dApp unable to tell "I asked for the wrong thing" from
+		// "the wallet broke" — and the faucet already branches on exactly that distinction.
+		return {
+			code: -32601,
+			message: error.message,
+			data: { walletErrorCode: UnsupportedMethodError.CODE },
+		}
+	}
 	if (error instanceof DuplicateInitializationError) {
 		// The account's first transaction lost the initialization race (another
 		// device or a lagging node). Transient from the dApp's perspective —
@@ -107,10 +120,15 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 	// known to be safe. Scrubbing and capping were tried and are not enough: a cap BOUNDS exposure
 	// without sanitizing it, and `new Error("private note: <secret>")` passes through verbatim.
 	//
-	// Every error a dApp is meant to act on is classified above and carries a `walletErrorCode`;
+	// An error a dApp is meant to act on has to be classified above and carry a `walletErrorCode`;
 	// an unclassified one has no defined meaning to the caller, so a constant loses nothing it
 	// could legitimately use. The wire contract (a plain string for unrecognised throws) is
 	// preserved — only the content is not.
+	//
+	// The obligation runs the other way too, and twice already it was not met: a `SESSION_INVALID`
+	// and an unsupported-method rejection both reached here as bare `Error`s and were flattened
+	// into this constant, leaving the dApp unable to tell an actionable refusal from a wallet
+	// fault. Adding an actionable throw means adding its class above, not relying on its text.
 	return UNCLASSIFIED_ERROR_MESSAGE
 }
 

@@ -7,7 +7,7 @@ import {
 	RpcTimeoutError,
 	TooManyPendingError,
 } from "@nulo/extension-messaging/errors"
-import { DuplicateInitializationError } from "@nulo/extension-messaging/errors"
+import { DuplicateInitializationError, UnsupportedMethodError } from "@nulo/extension-messaging/errors"
 import { unwrapOperationResult } from "@nulo/wallet-bridge"
 import { classifyOperationCatch } from "@/wallet/services/execution/rpc-cancel"
 import { toWalletResponseError, UNCLASSIFIED_ERROR_MESSAGE } from "./error-envelope"
@@ -108,6 +108,24 @@ describe("toWalletResponseError", () => {
 	test("non-Error throw → the same constant", () => {
 		expect(toWalletResponseError("nope")).toBe(UNCLASSIFIED_ERROR_MESSAGE)
 		expect(toWalletResponseError(42)).toBe(UNCLASSIFIED_ERROR_MESSAGE)
+	})
+
+	test("UnsupportedMethodError → {code:-32601, walletErrorCode} keeping the method name", () => {
+		// A dApp's whole response is to fall back to another route, so it must be able to tell this
+		// from a wallet fault. Flattening it into the constant is what broke `batch-partial-failure`.
+		const env = toWalletResponseError(UnsupportedMethodError.forMethod("thisMethodDoesNotExist"))
+		expect(env).toMatchObject({
+			code: -32601,
+			data: { walletErrorCode: UnsupportedMethodError.CODE },
+		})
+		expect((env as { message: string }).message).toMatch(/Unsupported wallet method.*thisMethodDoesNotExist/i)
+	})
+
+	test("the echoed method name is bounded — it arrives off the wire", () => {
+		const env = toWalletResponseError(UnsupportedMethodError.forMethod("X".repeat(5000)))
+		const message = (env as { message: string }).message
+		expect(message.length).toBeLessThan(120)
+		expect(message).toContain("…")
 	})
 })
 
