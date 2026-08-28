@@ -142,3 +142,56 @@ All five round-2 conditions are genuinely discharged. I found no remaining mater
 No new breakage was introduced by this revision. The plan is implementable as written.
 
 approve
+---
+
+## Post-implementation round 1 (session `01a04a45-fd5f-73f3-be25-1249ed545ee4`)
+
+**Verdict:** `approve` — 3 Low findings, all adopted.
+
+## Findings
+
+1. **Low — production seed-list wiring lacks a direct assertion.** [service.ts:113](apps/extension/src/wallet/services/token/service.ts:113)
+
+   The seeder units inject `getSeeds`, the network e2e uses the armed storage reader, source smoke uses the empty reader, and the wiring test spies on `run()`. All would still pass if the production fallback became `async () => []`. Add one narrow composition test proving an unarmed `TokenService` consumes `DEFAULT_TOKEN_SEEDS`.
+
+2. **Low — the account-trigger comment overstates the fence.** [service.ts:149](apps/extension/src/wallet/services/token/service.ts:149)
+
+   `doRun()` does not literally re-check before every internal journal/token write performed by `addSeededToken`; purge safety also depends on marker-lock ordering and subsequent cleanup. Replace that claim with the exact invariant: active context is checked before commit, and the epoch plus marker lock orders commits against purges.
+
+3. **Low — several new comments are substantially longer or more repetitive than their permanent value warrants.**
+
+   - [extension.ts:62](apps/extension/tests/e2e/fixtures/extension.ts:62) embeds the experiment history and named failing specs; retain only why artifact mode blocks this host and why connection refusal is required.
+   - [default-token-seeding.test.ts:1](apps/extension/tests/e2e/network/default-token-seeding.test.ts:1) repeats the same ordering again at lines 34–41.
+   - [token-seeds.ts:4](apps/extension/tests/e2e/fixtures/token-seeds.ts:4) duplicates the reader, test, and README; the write-before-trigger and fixed-symbol constraints are the useful parts.
+   - [aztec.ts:166](apps/extension/tests/e2e/fixtures/aztec.ts:166) merely restates the helper.
+   - [_build-extension.yml:54](.github/workflows/_build-extension.yml:54) references an implementation plan and the step remains CoinGecko-named despite now guarding token-seed flags too.
+
+## Audit conclusions
+
+- The reader cannot reach clean production bundles through the current graph. It is side-effect-free at module scope, instantiated only under the statically folded flag, and both Chrome and Firefox publication artifacts are negatively checked.
+- The stamp is genuinely live-pinned: the `globalThis` assignment at [runtime.ts:407](apps/extension/src/wallet/runtime.ts:407) is an observable side effect. The armed positive greps prove the current Rollup configuration retains it.
+- Every official release/nightly publication path uses `_build-extension.yml`. Raw local Vite builds can intentionally arm the seam, but they are not publication paths and the two supported e2e wrappers positively verify the result.
+- A purge during `getSeeds()` cannot survive as a stale write. The already-present and attempt paths call `guardsHold`; the final commit checks the epoch inside the marker lock. A purge either wins before the commit, or queues after it and removes its output.
+- Sequential account additions can cause additional settled-marker reads, but traffic remains bounded. Imported-account events are safe; backup restore remains silent.
+- Profile deletion is safe for durable token, journal, and marker state: a pre-snapshot commit is included in the deletion snapshot; a later commit is ordered ahead of `TokenService.purgeForProfile`, which fences the seeder, re-purges journals, and removes the token.
+- Repeated MV3 suspension after the attempt marker still can consume the three-attempt budget. That is the explicitly ledgered pre-existing residual; this change neither repairs nor materially broadens it.
+- Hardcoding `"TST"` is limited but real protection: it does not establish product identity when storage controls address and class ID, but it independently catches an incorrect fixture contract or an attempted symbol-pin override.
+- The artifact RPC block is at the correct browser-wide layer, covers both current default-network endpoints via their sole hostname, and does not mask any smoke assertion that promises successful public-RPC connectivity.
+- The composition and network regression tests are not theatre; both genuinely depend on the production subscription. The positive reader test also prevents the fail-empty catch path from making every rejection test falsely green.
+
+approve
+---
+
+## Post-implementation round 2 (re-review of the fixes)
+
+**Verdict:** `approve` — no code or test-correctness regressions; 2 Low comment-accuracy nits, both adopted. Loop converged.
+
+No code or test-correctness regressions found. The identity assertion is the right shape: it directly pins the production composition fallback, while seeder behavior is already tested at its own seam. Driving a real seed pass would add PXE-fixture complexity without strengthening this specific guarantee.
+
+- Low — [fixtures/extension.ts:63](apps/extension/tests/e2e/fixtures/extension.ts:63): “a seed that resolves would render fiat” is no longer exact. A resolved seed creates the token row; rendering fiat additionally requires a usable price quote. Restore that qualification, e.g. “a resolved seed plus a successful price quote could render fiat.”
+
+- Low — [service.composition.test.ts:158](apps/extension/src/wallet/services/token/service.composition.test.ts:158): the suite-level scope comment still says “unlock/network-change hook wiring,” omitting the now-covered account-added hook. “the three seed-trigger hooks” is shorter and current.
+
+The revised account-trigger comment accurately describes the outer lifecycle guard and the epoch check inside the marker-locked commit. The other trims retained their load-bearing constraints, and `git diff --check` is clean.
+
+approve
