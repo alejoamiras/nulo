@@ -279,7 +279,7 @@ const {
 } = useFeeEstimation({
 	debounceMs: 800,
 	estimate: ({ networkId, accountAddress, tokenId, transferType: tt, destination, amount, settings }, estimateToken) => {
-		console.log(`[send:${sendInstanceId}] estimateTransferFee firing`)
+		console.debug(`[send:${sendInstanceId}] estimateTransferFee firing`)
 		return executionService.estimateTransferFee(networkId, accountAddress, tokenId, tt, destination, amount, settings, estimateToken)
 	},
 	cancelRemote: (estimateToken) => {
@@ -478,7 +478,7 @@ watch(
 )
 
 onMounted(async () => {
-	console.log(`[send:${sendInstanceId}] mounted`)
+	console.debug(`[send:${sendInstanceId}] mounted`)
 	// Route mount fetch through the shared refetch so it inherits the
 	// sequence guard AND the null-triple defense AND the
 	// activeTokenIdx-rebind logic.
@@ -505,7 +505,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-	console.log(`[send:${sendInstanceId}] unmounting`)
+	console.debug(`[send:${sendInstanceId}] unmounting`)
 	cancelled = true
 
 	contactService.disconnect()
