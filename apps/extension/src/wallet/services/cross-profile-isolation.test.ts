@@ -144,7 +144,7 @@ describe("cross-profile isolation (standing gate)", () => {
 			const services = new ServiceCollection()
 			services.add(profile)
 			services.add(networkStub())
-			services.add(svc(AccountService.name, {}))
+			services.add(svc(AccountService.name, { onAccountAdded: new EventHandler() }))
 			services.add(svc(TaskService.name, {}))
 			services.add(svc(OperationJournalService.name, { purgeForProfile: async () => {} }))
 			tokens = new TokenService(mkLogger(), api)

@@ -16,10 +16,16 @@ single-flights.
 ## Test-harness fallout (expected, worth recording)
 
 `TokenService.init()` now dereferences `this.accounts.onAccountAdded`, so every
-harness that stubs `AccountService` had to supply it. Two stubs were bare `{}`:
+harness that stubs `AccountService` had to supply it. Three stubs were bare `{}`:
 
 - `service.test.ts:64`
 - `service.composition.test.ts:83`
+- `cross-profile-isolation.test.ts:147` — **missed on the first pass and caught by
+  Phase 4's `audit:vue`** (`TypeError: Cannot read properties of undefined
+  (reading 'add')`, 5 failures). I had grepped only `services/token/`; the right
+  search is repo-wide for `AccountService.name` stubs that construct a REAL
+  `TokenService`:
+  `grep -rn "AccountService.name" apps/extension/src --include="*.ts" | grep -v "services/account/" | grep -v onAccountAdded`
 
 Both now pass `{ onAccountAdded: new EventHandler() }`, exactly as the
 `ProfileService` / `NetworkService` stubs beside them already did for their own
