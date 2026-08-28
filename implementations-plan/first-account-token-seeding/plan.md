@@ -191,7 +191,7 @@ Post-fix, *any* wallet booted on Testnet attempts a live seed against the public
 
 Pass: exit 0 and all six grep assertions as specified. Layers: lint · typecheck · unit · actionlint · dual-target production build + negative/positive greps.
 
-### Phase 3 — Network e2e
+### Phase 3 — Network e2e ✓
 
 New `apps/extension/tests/e2e/network/default-token-seeding.test.ts`:
 

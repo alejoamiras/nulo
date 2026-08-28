@@ -59,6 +59,17 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 			"--disable-renderer-backgrounding",
 			"--disable-backgrounding-occluded-windows",
 			"--disable-features=CalculateNativeWinOcclusion",
+			// Artifact-mode smoke loads the PRODUCTION bundle, so Alpha is the
+			// active network and its two seeded default tokens are real. Creating
+			// a profile now triggers a seed pass, and a seed that resolves plus a
+			// price quote would render `token-fiat` — which `fiat-display.test.ts`
+			// asserts is absent. That test's premise is already "no network fetch
+			// succeeds here"; this makes it true instead of a race between two
+			// public services. Source builds arm the empty e2e seed list instead
+			// (`_smoke-e2e.yml`), so they need no block. Both default networks use
+			// this one host, and blocking anything wider (e.g. CoinGecko) would be
+			// over-broad — a price alone cannot create a token row.
+			...(process.env.NULO_E2E_ARTIFACT_RUN === "1" ? ["--host-resolver-rules=MAP lb.drpc.live ^NOTFOUND"] : []),
 		],
 		ignoreDefaultArgs: ["--disable-extensions"],
 		// Default protocolTimeout is 180_000ms — bump to 300_000 because the
