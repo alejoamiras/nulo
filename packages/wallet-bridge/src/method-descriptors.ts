@@ -21,6 +21,7 @@
  * become thin facades over it without an import cycle.
  */
 
+import { UnsupportedMethodError } from "@nulo/extension-messaging/errors"
 import type { OperationKind } from "./operation"
 import {
 	type ScopeCheck,
@@ -382,7 +383,7 @@ export interface RpcRequest {
  *  the dispatcher routes through — no permissive default, no `as` at the boundary. */
 export function assertKnownMethod(methodName: string): asserts methodName is MethodName {
 	if (!Object.hasOwn(METHOD_REGISTRY, methodName)) {
-		throw new Error(`Unsupported wallet method: ${methodName}`)
+		throw UnsupportedMethodError.forMethod(methodName)
 	}
 }
 

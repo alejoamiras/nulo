@@ -205,18 +205,22 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 							await accountStateService.addSender(activeNetworkId, _c.address)
 							senderOk++
 						} catch (err) {
-							console.warn(`Failed to register sender ${_c.address}`, err)
+							// The counterparty address is PII and this fires per failed row; the counts below carry
+							// the diagnosis.
+							console.warn("Failed to register a sender", err)
 						}
 					} else {
 						senderSkippedNoNetwork++
-						console.warn(`Skipping sender registration for ${_c.address}: no active network`)
+						console.warn("Skipping sender registration: no active network")
 					}
 				}
 			}
 
 			if (errors.length) {
 				for (const e of errors) {
-					console.error(`Failed to ${e.operation} contact ${e.name} ${e.address}`, e.error)
+					// The contact's name and address are PII; the operation and the error are the
+					// diagnosis, and the toast below already tells the user the import had failures.
+					console.error(`Failed to ${e.operation} a contact`, e.error)
 				}
 				openToast({ label: "Import ended with errors", icon: "warning" }, TOAST_DURATION.LONG)
 			} else if (senderTotal > 0 && senderOk < senderTotal) {

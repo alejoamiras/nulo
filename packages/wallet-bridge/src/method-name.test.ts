@@ -1,3 +1,4 @@
+import { UnsupportedMethodError } from "@nulo/extension-messaging/errors"
 import { describe, expect, test } from "vitest"
 import { METHOD_REGISTRY, assertKnownMethod } from "./method-descriptors"
 
@@ -13,6 +14,13 @@ describe("assertKnownMethod — typed dispatch-entry choke point", () => {
 		for (const name of Object.keys(METHOD_REGISTRY)) {
 			expect(() => assertKnownMethod(name)).not.toThrow()
 		}
+	})
+
+	test("throws the TYPED error, so the dApp-facing envelope can classify it", () => {
+		// A bare `Error` here reaches `toWalletResponseError`'s unclassified fall-through and is
+		// replaced by a constant — which left dApps unable to distinguish an unsupported method
+		// from a wallet fault, and reds the `batch-partial-failure` network e2e.
+		expect(() => assertKnownMethod("aztec_notARealMethod")).toThrow(UnsupportedMethodError)
 	})
 
 	test("throws the frozen 'Unsupported wallet method' string for an unknown method", () => {

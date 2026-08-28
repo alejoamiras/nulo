@@ -94,6 +94,7 @@ import type { SessionContext } from "./types"
 import { CapabilityNotGrantedError, JobCancelledError, walletErrorFromPayload } from "@nulo/extension-messaging/errors"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
+import { describeExternalId } from "./external-id"
 import type {
 	IAccountReader,
 	IDappInteractionRunner,
@@ -548,7 +549,11 @@ export class WalletSdkDispatcher {
 		const grants = dappSession.capabilityGrants ?? []
 		const hasAccountsGrant = grants.some((g) => g.capability.type === "accounts")
 		if (hasAccountsGrant) {
-			this.logger.log("wallet-sdk", LogLevel.Warn, `Desync: accounts grant exists but session.accounts is empty for ${ctx.origin}`)
+			this.logger.log(
+				"wallet-sdk",
+				LogLevel.Warn,
+				`Desync: accounts grant exists but session.accounts is empty for session ${describeExternalId(ctx.sessionId)}`,
+			)
 			return []
 		}
 

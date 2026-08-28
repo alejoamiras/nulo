@@ -2,7 +2,7 @@ import type { BrowserApi } from "@nulo/wallet-core/ports"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
-import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
@@ -146,7 +146,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 		return await this.lock.withLock(async () => {
 			const contact = requireOwnedRow(await this.storage.get(contactId), profile.id, "invalid id")
 
-			this.logDebug(`Remove contact #${contact.id} - ${contact.name}`)
+			this.logDebug(`Remove contact #${contact.id}`)
 			await this.storage.delete(contactId)
 
 			this.emit("onContactDeleted", contact)
@@ -196,23 +196,25 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 					const existingByAddress = contactsByAddress.get(_c.address)
 					const existingByName = contactsByName.get(_c.name)
 
+					// A contact's name and address are user PII — the row id identifies which contact
+					// was touched without writing down who it is.
 					if (existingByAddress) {
 						contact = await this.updateContact(existingByAddress.id, _c.name, _c.address)
 
-						this.logDebug(`Updated existing contact by address: ${_c.address}`)
+						this.logDebug(`Updated existing contact #${existingByAddress.id} (matched by address)`)
 					} else if (existingByName) {
 						contact = await this.updateContact(existingByName.id, _c.name, _c.address)
 
-						this.logDebug(`Updated existing contact by name: ${_c.name}`)
+						this.logDebug(`Updated existing contact #${existingByName.id} (matched by name)`)
 					} else {
 						contact = await this.addContact(_c.name, _c.address)
 
-						this.logDebug(`Added new contact: ${_c.name} - ${_c.address}`)
+						this.logDebug(`Added new contact #${contact?.id}`)
 					}
 
 					results.push(contact!)
 				} catch (error) {
-					this.logError(`Failed to import contact ${_c.name} - ${_c.address}`, getErrorMessage(error))
+					this.logError("Failed to import a contact", getErrorMessage(error))
 				}
 			}
 		}
@@ -241,7 +243,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 			await purgeRows(
 				contacts,
 				(contact) => {
-					this.logDebug(`Remove contact #${contact.id} - ${contact.name}`)
+					this.logDebug(`Remove contact #${contact.id}`)
 					return this.storage.delete(contact.id)
 				},
 				(contact) => this.emit("onContactDeleted", contact),

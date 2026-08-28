@@ -883,7 +883,9 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			try {
 				const droppedImported = await accountService.reconcileImportedAccounts(newProfile.id)
 				if (droppedImported.length > 0) {
-					console.warn(`[import] dropped ${droppedImported.length} imported account(s) with no key row:`, droppedImported)
+					// `droppedImported` is a list of on-chain ACCOUNT ADDRESSES from a corrupt or hostile
+					// backup; the count is what tells you reconciliation dropped rows.
+					console.warn(`[import] dropped ${droppedImported.length} imported account(s) with no key row`)
 				}
 			} catch (err) {
 				console.warn("[import] imported-account reconciliation failed (non-fatal):", err)

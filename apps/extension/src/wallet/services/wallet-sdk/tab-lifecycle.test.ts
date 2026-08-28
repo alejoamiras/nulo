@@ -73,7 +73,14 @@ describe("wireTabLifecycle", () => {
 		// Logging is part of the moved surface: exactly one entry, for the
 		// terminated session only.
 		expect(logSpy).toHaveBeenCalledTimes(1)
-		expect(String(logSpy.mock.calls[0][2])).toContain("hit")
+		const line = String(logSpy.mock.calls[0][2])
+		expect(line).toContain("Tab 7")
+		// The session id is page-supplied (upstream reuses the dApp's requestId as the sessionId),
+		// so it is replaced by a locally-minted correlation token rather than echoed. The
+		// destination origin is browsing history and must not appear either.
+		expect(line).toMatch(/session ext-\d+/)
+		expect(line).not.toContain("hit")
+		expect(line).not.toContain("new.example")
 	})
 
 	test("same-origin SPA navigation spares the session (the upstream #56 carve-out)", () => {

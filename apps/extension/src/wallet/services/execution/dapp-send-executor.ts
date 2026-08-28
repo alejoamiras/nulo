@@ -748,8 +748,11 @@ export class DappSendExecutor {
 				scopeWithAccountByHex.set(account.address.toString(), account.address)
 				for (const s of dappScopes) scopeWithAccountByHex.set(s.toString(), s)
 				const scopesWithAccount = [...scopeWithAccountByHex.values()]
+				// Counts, not the arrays: these are viewing-key scopes — the set of addresses whose
+				// private state this dApp can see — and pre-stringifying them would put them beyond
+				// the logger's reach.
 				this.deps.logDebug(
-					`executeNoFromSendTx: dappScopes=${JSON.stringify(dappScopes)}, additionalScopes=${JSON.stringify(additionalScopes)}, scopesWithAccount=${JSON.stringify(scopesWithAccount)}`,
+					`executeNoFromSendTx: dappScopes=${dappScopes.length}, additionalScopes=${additionalScopes.length}, scopesWithAccount=${scopesWithAccount.length}`,
 				)
 
 				this.deps.logDebug(`executeNoFromSendTx: starting kernelless discovery simulation`)

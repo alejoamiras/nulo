@@ -192,7 +192,10 @@ export class GasBalanceReader {
 		])
 		const { value: publicFeeJuice } = publicLeg
 		const { value: privateFeeJuice } = privateLeg
-		this.deps.logDebug(`getGasBalances: publicFeeJuice=${publicFeeJuice}, privateFeeJuice=${privateFeeJuice}`)
+		// Balances are financial data. Whether each leg read successfully and is non-zero explains a
+		// fee failure; the amounts add nothing a developer with the wallet open cannot already see.
+		const funded = (value: string | null) => (value === null ? "unread" : value !== "0")
+		this.deps.logDebug(`getGasBalances: publicFunded=${funded(publicFeeJuice)}, privateFunded=${funded(privateFeeJuice)}`)
 
 		const result = { publicFeeJuice, privateFeeJuice }
 		// An eviction that landed mid-compute means this snapshot belongs to
