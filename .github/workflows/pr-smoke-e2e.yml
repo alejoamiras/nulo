@@ -136,21 +136,21 @@ jobs:
     steps:
       - name: Aggregate results
         run: |
-          for r in \
-            "${{ needs.changes.result }}" \
-            "${{ needs.decide.result }}" \
-            "${{ needs.smoke.result }}" \
-          ; do
-            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
-              echo "::error::A required job failed or was cancelled: $r"
+          # An exact state machine, not a denylist of bad results — see the network gate for why.
+          RUN="${{ needs.decide.outputs.run }}"
+          for r in "${{ needs.changes.result }}" "${{ needs.decide.result }}"; do
+            if [ "$r" != "success" ]; then
+              echo "::error::A gate-control job did not succeed: $r"
               exit 1
             fi
           done
-          # A skip is only legitimate when the gate ASKED for one. `smoke` is gated solely on
-          # `decide.outputs.run`, so a skip while the gate said run means something swallowed the
-          # suite — and this job would otherwise report that as a pass.
-          if [ "${{ needs.decide.outputs.run }}" = "true" ] && [ "${{ needs.smoke.result }}" != "success" ]; then
-            echo "::error::The gate said run, but the smoke suite did not run: ${{ needs.smoke.result }}"
+          case "$RUN" in
+            true) want="success" ;;
+            false) want="skipped" ;;
+            *) echo "::error::decide.outputs.run is not true/false: '$RUN'"; exit 1 ;;
+          esac
+          if [ "${{ needs.smoke.result }}" != "$want" ]; then
+            echo "::error::gate said run=$RUN, so the smoke suite must be '$want' — got '${{ needs.smoke.result }}'"
             exit 1
           fi
           echo "Smoke e2e gate passed (or was skipped — no relevant changes / not labeled)."

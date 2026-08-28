@@ -3,9 +3,9 @@
  *
  * Its sibling `behavior-gating.test.ts` pins which PATHS each filter covers. Nothing pinned what
  * the gate then DOES with that answer, and that is exactly where the defect lived: the paths
- * clause was additionally conditioned on `github.base_ref == "dev"`, so a stacked PR — whose base
- * is the branch below it — could never reach the suite by paths, skipped it, and had the
- * aggregator report success-on-skip. Four green PRs carried a real regression that way.
+ * clause was additionally conditioned on `github.base_ref == "dev"`, so every arc ABOVE a stack's
+ * bottom — whose base is the arc below it, not `dev` — could not reach the suite by paths, skipped
+ * it, and had the aggregator report success-on-skip. Four green PRs carried a regression that way.
  *
  * So this executes the gate script itself against a table of inputs rather than asserting on its
  * text: a rule that re-appears in a different spelling still fails here.

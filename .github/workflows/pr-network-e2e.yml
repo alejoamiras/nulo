@@ -249,34 +249,33 @@ jobs:
     steps:
       - name: Aggregate results
         run: |
+          # An exact state machine, not a denylist of bad results. `changes` and `decide` must
+          # have SUCCEEDED, and the suites must match what the gate asked for: all `success` when
+          # it said run, all `skipped` when it said not to. Anything else — a malformed or empty
+          # `run` output from a wiring typo, a suite that vanished, a future zero-entry matrix —
+          # is a fault. Checking only the failure results, or only the `run=true` branch, is how a
+          # suite that never executed reports a green PR.
+          RUN="${{ needs.decide.outputs.run }}"
+          for r in "${{ needs.changes.result }}" "${{ needs.decide.result }}"; do
+            if [ "$r" != "success" ]; then
+              echo "::error::A gate-control job did not succeed: $r"
+              exit 1
+            fi
+          done
+          case "$RUN" in
+            true) want="success" ;;
+            false) want="skipped" ;;
+            *) echo "::error::decide.outputs.run is not true/false: '$RUN'"; exit 1 ;;
+          esac
           for r in \
-            "${{ needs.changes.result }}" \
-            "${{ needs.decide.result }}" \
             "${{ needs.network-e2e.result }}" \
             "${{ needs.network-e2e-heavy.result }}" \
             "${{ needs.network-e2e-heavy-concurrent.result }}" \
             "${{ needs.network-e2e-canary.result }}" \
           ; do
-            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
-              echo "::error::A required job failed or was cancelled: $r"
+            if [ "$r" != "$want" ]; then
+              echo "::error::gate said run=$RUN, so every suite job must be '$want' — got '$r'"
               exit 1
             fi
           done
-          # A skip is only legitimate when the gate ASKED for one. Every suite job below is gated
-          # solely on `decide.outputs.run`, so a skip while the gate said run means something
-          # swallowed the suite — and this job would otherwise report that as a pass, which is the
-          # shape that turns a gate miss into a green PR.
-          if [ "${{ needs.decide.outputs.run }}" = "true" ]; then
-            for r in \
-              "${{ needs.network-e2e.result }}" \
-              "${{ needs.network-e2e-heavy.result }}" \
-              "${{ needs.network-e2e-heavy-concurrent.result }}" \
-              "${{ needs.network-e2e-canary.result }}" \
-            ; do
-              if [ "$r" != "success" ]; then
-                echo "::error::The gate said run, but a suite job did not run: $r"
-                exit 1
-              fi
-            done
-          fi
           echo "Network e2e gate passed (or was skipped — no relevant changes / not labeled)."
