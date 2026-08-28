@@ -155,7 +155,7 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 	// covered at the seeder-deps seam in seeder.test.ts — D2 keeps it out of
 	// composition. This slice drives the REAL graph for everything else:
 	// register-free pin reads, the seed-only persist path + journal labeling,
-	// tombstone-on-delete, and the unlock/network-change hook wiring.
+	// tombstone-on-delete, and the three seed-trigger hooks.
 	const CUSD = DEFAULT_TOKEN_SEEDS[0].contract
 
 	async function seedHarness() {

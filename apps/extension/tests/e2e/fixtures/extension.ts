@@ -60,8 +60,8 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 			"--disable-backgrounding-occluded-windows",
 			"--disable-features=CalculateNativeWinOcclusion",
 			// Artifact mode runs the PRODUCTION bundle, so Alpha is active and its
-			// default-token seeds are real; a seed that resolves would render
-			// fiat that the smoke specs assert is absent. Both default networks
+			// default-token seeds are real; a resolved seed plus a successful price
+			// quote would render fiat the smoke specs assert is absent. Both networks
 			// use this one host. Mapped to a closed port rather than `^NOTFOUND`:
 			// an unresolvable host makes the node client retry with backoff, and a
 			// seed pass still in flight delays the post-reset route past its wait.
