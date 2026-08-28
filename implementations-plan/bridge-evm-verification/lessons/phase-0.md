@@ -63,10 +63,13 @@ by design: the trap arms itself the moment a proof over `_validateRoute` lands.
 ### Resulting gate design
 
 Pin `--array-lengths` to the intended set, set `--loop` strictly above the maximum length so the loop
-is fully unrolled, and **require the truncation warning to be absent** — grep
-`paths have not been fully explored` and fail on a hit, alongside the exact count. A proof that can only
-be trusted when a warning is absent must have that absence enforced mechanically, not read by a human
-scrolling a log.
+is fully unrolled, and **require the truncation warning to be absent** — fail on a hit, alongside the
+exact count. A proof that can only be trusted when a warning is absent must have that absence enforced
+mechanically, not read by a human scrolling a log.
+
+> **Do not grep the warning's prose.** The obvious pattern — `paths have not been fully explored` —
+> matches nothing, because halmos wraps mid-phrase; that is the next finding in this file, and it was
+> written after this paragraph. Match the stable `#loop-bound` URL fragment instead.
 
 ## Finding: the real portal's init-once guard is covered by nothing
 

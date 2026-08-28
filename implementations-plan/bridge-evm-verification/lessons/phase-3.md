@@ -134,6 +134,6 @@ substitution* in a diff, not a silent execution failure, and a per-function allo
 the no-ceremony mandate.
 
 **Front-run coverage confirmed sufficient**, with one correction worth recording: `BlackhatAudit.t.sol:304`
-covers rejection, zero registry, honest re-initialization, deposit operation and post-init attacker
+covers rejection, zero registry, the honest FIRST initialization, deposit operation and post-init attacker
 rejection — but it does **not** assert `l2Bridge`. That assertion survives in the trimmed
 `PortalReinit.t.sol`, so trimming further would lose it.

@@ -342,7 +342,9 @@ header comment. Add the schema rejection test. Do not touch `NuloTokenPortal.sol
 - Pass: tests green **including the new schema rejection case**; typecheck and lint exit 0; the dry-run
   emits standard-json for all four contracts (this requires #481 — Fact 1).
   `grep -rn "upstream/TokenPortal\|placePortalSource\|VENDORED_PORTAL\|requireLegacyForgeInputs"` returns
-  nothing outside this plan directory.
+  nothing outside this plan directory **except `upstream/NuloTokenPortal.sol`'s header**, which is left
+  stale deliberately (Fact 9 — editing it moves the bytecode). That one match is expected; any other is
+  a failure.
 - Layers: lint/typecheck · unit · script-level integration (no network)
 
 ### Phase 2 — the proof and the repaired regression ✓

@@ -3,7 +3,7 @@
 ## What changed
 
 - **`contracts/bridge/evm/test/FormalPortal.t.sol`** (new) — `check_initializedBindingsCannotChange`,
-  one halmos proof, plus `test_registryBRebindsEveryBinding`, a plain forge positive control.
+  one halmos proof, plus `test_registryBBindsAFreshPortal`, a plain forge positive control.
 - **`contracts/bridge/evm/test/NuloTokenPortalShim.sol`** — deleted.
 - **`contracts/bridge/evm/test/PortalReinit.t.sol`** — rewritten against the real `NuloTokenPortal`,
   trimmed to the init-once regression. Its front-run test is dropped: `BlackhatAudit.t.sol`'s
@@ -78,7 +78,7 @@ forge total. Dropping `PortalReinit`'s front-run test (−1) and adding the posi
 Verified by name instead:
 
 ```
-test_registryBRebindsEveryBinding      present
+test_registryBBindsAFreshPortal      present
 test_F001_initialize_is_once_only      present
 test_F001_initialize_frontRun_reverts  ABSENT   ← intentional
 ```
@@ -88,15 +88,18 @@ recurring one layer down. Worth remembering that it applies to forge totals, not
 
 ## Two harness properties that must survive future edits
 
-Both are commented in the file, because losing either makes the proof silently meaningless:
+> **Superseded in part by the arc-2 review.** As written below, both were *soundness* requirements —
+> true of the version described here, which used a bare `catch`. The selector assertion added in
+> `3303ba9b` (`assertEq(bytes4(reason), AlreadyInitialized.selector)`) makes either failure produce the
+> wrong selector and red the proof, so neither can now cause a silent pass. They remain **targeting and
+> diagnostic** choices, which is why they stay. See `phase-3.md`.
 
 1. **No symbolic caller, no prank.** The test contract deploys `locked`, so it *is* the initializer and
    a direct call clears the deployer-only guard to land on the init-once guard. The plan's first draft
    reused the router's `vm.assume(caller != owner)` shape; with a symbolic caller assumed
-   non-initializer, every path exits through `NotInitializer` and the proof stays green with the guard
-   under test deleted. That was caught in audit, not in testing — nothing about the green result would
-   have revealed it.
-2. **Registry B must stay operational.** If its rollup calls ever began reverting, the second
-   `initialize` would revert for that unrelated reason and the proof would still pass.
-   `test_registryBRebindsEveryBinding` pins this permanently rather than relying on a one-time mutation
-   run.
+   non-initializer, every path exits through `NotInitializer`. Before the selector assertion that meant
+   staying green with the guard deleted; now it means failing on a selector mismatch. Calling directly
+   is what *aims* the proof at the right branch.
+2. **Registry B stays operational.** If its rollup calls began reverting, the second `initialize` would
+   revert for that unrelated reason — again caught now by the selector, but as an obscure symbolic
+   failure. `test_registryBBindsAFreshPortal` turns that into an immediate forge-level diagnosis.

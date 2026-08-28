@@ -60,7 +60,7 @@ contract FormalPortalTest is Test {
     /// Registry B binds every field of a fresh portal. The proof above never reaches B on a passing
     /// run — the guard stops it first — so this is what says B is a working registry rather than an
     /// untested one, and it fails at forge level if the fixture rots.
-    function test_registryBRebindsEveryBinding() public {
+    function test_registryBBindsAFreshPortal() public {
         fresh.initialize(address(regB), address(0xBEEF), bytes32(uint256(0x2222)));
 
         assertEq(address(fresh.registry()), address(regB), "registry");
