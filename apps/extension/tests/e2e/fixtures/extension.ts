@@ -69,7 +69,13 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 			// (`_smoke-e2e.yml`), so they need no block. Both default networks use
 			// this one host, and blocking anything wider (e.g. CoinGecko) would be
 			// over-broad — a price alone cannot create a token row.
-			...(process.env.NULO_E2E_ARTIFACT_RUN === "1" ? ["--host-resolver-rules=MAP lb.drpc.live ^NOTFOUND"] : []),
+			//
+			// Mapped to a closed local port, NOT `^NOTFOUND`: an unresolvable host
+			// makes the node client retry with backoff, and a seed pass still in
+			// flight delays the post-reset route past its 10s wait (measured:
+			// passkey-backup + passkey-paths fail with the sentinel, pass with
+			// this). A refused connection fails immediately instead.
+			...(process.env.NULO_E2E_ARTIFACT_RUN === "1" ? ["--host-resolver-rules=MAP lb.drpc.live 127.0.0.1:1"] : []),
 		],
 		ignoreDefaultArgs: ["--disable-extensions"],
 		// Default protocolTimeout is 180_000ms — bump to 300_000 because the

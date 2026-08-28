@@ -27,7 +27,7 @@ harness that stubs `AccountService` had to supply it. Three stubs were bare `{}`
   `TokenService`:
   `grep -rn "AccountService.name" apps/extension/src --include="*.ts" | grep -v "services/account/" | grep -v onAccountAdded`
 
-Both now pass `{ onAccountAdded: new EventHandler() }`, exactly as the
+All three now pass `{ onAccountAdded: new EventHandler() }`, exactly as the
 `ProfileService` / `NetworkService` stubs beside them already did for their own
 event handlers. `seedHarness()` (`:200`) gets a real `EventHandler` so the
 wiring test can drive it.
