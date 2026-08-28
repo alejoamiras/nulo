@@ -106,10 +106,16 @@ jobs:
           NETWORK: ${{ needs.changes.outputs.extension-network }}
           LABEL_HIT: ${{ contains(github.event.pull_request.labels.*.name, 'e2e:network') }}
         run: |
+          # The paths filter already answers "does this diff touch the surface?" — gating it on
+          # the base branch as well only creates a hole, because `github.base_ref` on a STACKED
+          # PR is the branch below it, never `dev`. Every stacked PR therefore skipped this suite
+          # by paths and reported success-on-skip; a real dispatcher regression rode four such
+          # green PRs before the top of the stack (label-forced) caught it. `main` and
+          # `workflow_dispatch` still force-run, so dropping the base test only ever widens.
           if [ "$EVENT" = "workflow_dispatch" ] \
              || [ "$BASE" = "main" ] \
              || [ "$LABEL_HIT" = "true" ] \
-             || { [ "$BASE" = "dev" ] && [ "$NETWORK" = "true" ]; }; then
+             || [ "$NETWORK" = "true" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
