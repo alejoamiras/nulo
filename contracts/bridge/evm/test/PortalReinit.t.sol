@@ -7,7 +7,8 @@ import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./Porta
 
 /// Always-on regression for the init-once guard, against the REAL portal — the fast, readable
 /// guard-level failure that still runs when halmos is not. Front-run coverage lives in
-/// `BlackhatAudit.t.sol`; exhaustive input coverage in `FormalPortal.t.sol`.
+/// `BlackhatAudit.t.sol`; `FormalPortal.t.sol` proves the same guard over all candidate underlying
+/// and bridge arguments.
 contract PortalReinitTest is Test {
     function _registry() internal returns (FakeRegistry) {
         return new FakeRegistry(address(new FakeRollup(address(new CapturingInbox()), address(new CapturingOutbox()))));

@@ -102,9 +102,36 @@ pass while running no proofs at all. No caller ever set it; the input and its `i
 with the now-empty `inputs:` block.
 
 **Low — overlong comments.** The proof's header and `PortalReinit`'s carried shim history that belongs
-in commit messages. Both trimmed; the two hazards that genuinely need stating (no symbolic caller,
-selector-matched catch) survive in four lines. Codex judged the assertion-signalling warning and the CI
-AST/count comments as earning their space, and they stay.
+in commit messages. Both trimmed. Codex judged the assertion-signalling warning and the CI AST/count
+comments as earning their space, and they stay.
+
+**Round 2 — converged. "I found no new code or CI defect"** — bar one cleanup that the selector fix
+itself created, which is worth recording as a pattern: *a fix can invalidate the comments justifying the
+thing it fixed.* Three had gone stale in the same commit that made them wrong:
+
+- the proof claimed a symbolic caller would leave it "green with the guard deleted". No longer true —
+  such a path now fails on `NotInitializer.selector != AlreadyInitialized.selector`. Calling directly
+  is still what *aims* the proof at the init-once guard, but it is no longer what prevents vacuity;
+  the selector match is.
+- the proof said the positive control makes it "exercise a registry that works". On a passing run the
+  guard rejects before registry B is ever called, so the control is a forge-level statement about B's
+  bindings, not a property of the proof's path.
+- `PortalReinit`'s header said "exhaustive input coverage": the proof varies underlying and bridge,
+  while registry and initial state stay concrete.
+
+**Pushback that held.** Codex had said the seven readbacks and the positive control were unnecessary
+once the selector matched. Asked to argue it either way rather than let them stand by default, it kept
+them: *"no longer required for soundness, but they preserve the stated property explicitly and give
+fixture degradation an immediate Forge-level diagnosis. That is modest, local redundancy rather than
+ceremony."*
+
+**The gate's remaining boundary, stated precisely.** With `run-halmos` gone, codex found no route to
+success-with-no-execution: "Missing artifacts, files, contracts, checks, setup paths, timeouts, errors,
+and failed proofs all either disturb the expected lines/counts or produce a nonzero Halmos pipeline."
+One boundary is real and accepted: counts bind contracts, not individual functions, so deleting one
+`check_` while adding another in the same contract keeps the count green. That is a *visible same-count
+substitution* in a diff, not a silent execution failure, and a per-function allowlist was declined under
+the no-ceremony mandate.
 
 **Front-run coverage confirmed sufficient**, with one correction worth recording: `BlackhatAudit.t.sol:304`
 covers rejection, zero registry, honest re-initialization, deposit operation and post-init attacker

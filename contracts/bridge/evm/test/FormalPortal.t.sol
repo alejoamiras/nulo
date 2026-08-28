@@ -37,12 +37,10 @@ contract FormalPortalTest is Test {
     /// For every candidate underlying and L2 bridge, a second `initialize` on an already-initialized
     /// portal is rejected by the init-once guard and leaves all seven bound values untouched.
     ///
-    /// Two properties keep this falsifiable, and both are easy to undo by accident:
-    /// - No symbolic caller. This contract deployed `locked`, so a direct call clears the
-    ///   deployer-only guard and lands on the guard under test. A caller assumed `!= initializer`
-    ///   would exit every path through `NotInitializer`, staying green with the guard deleted.
-    /// - The catch matches the guard's selector. A bare `catch` treats any revert as evidence, so a
-    ///   fixture that failed for its own reasons would look like the guard holding.
+    /// Matching the selector is what keeps this falsifiable: a bare `catch` treats any revert as
+    /// evidence the guard held, so a fixture failing for its own reasons would look identical.
+    /// Calling directly, with no symbolic caller, is what aims the proof at the init-once guard —
+    /// this contract deployed `locked`, so the call clears the deployer-only guard first.
     /// Signal failure with assertions only — halmos cannot observe `revert(string)`.
     function check_initializedBindingsCannotChange(address candidateUnderlying, bytes32 candidateBridge) public {
         try locked.initialize(address(regB), candidateUnderlying, candidateBridge) {
@@ -59,8 +57,9 @@ contract FormalPortalTest is Test {
         }
     }
 
-    /// Registry B really can bind a portal end to end, so the proof above exercises a registry that
-    /// works rather than one that happens to revert.
+    /// Registry B binds every field of a fresh portal. The proof above never reaches B on a passing
+    /// run — the guard stops it first — so this is what says B is a working registry rather than an
+    /// untested one, and it fails at forge level if the fixture rots.
     function test_registryBRebindsEveryBinding() public {
         fresh.initialize(address(regB), address(0xBEEF), bytes32(uint256(0x2222)));
 
