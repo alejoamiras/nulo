@@ -37,6 +37,10 @@ const SPONSORED_FPC_SALT = 0n
 export interface AztecTestConfig {
 	nodeUrl: string
 	tokenAddress: string
+	/** Contract-class id of the deployed test token. The default-token seeder
+	 *  pins this per seed, and the sandbox address is minted per run, so the
+	 *  e2e seed entry can only be assembled from live deploy output. */
+	tokenClassId: string
 	sponsoredFpcAddress: string
 	/** Hex-encoded minter account address */
 	minterAddress: string
@@ -157,6 +161,15 @@ export async function deployTestToken(
 	).send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from: minterAddress })
 
 	return contract.address.toString()
+}
+
+/** Read a deployed contract's current class id from the node. The default-token
+ *  seeder pins this per seed, and the sandbox address is minted per run, so the
+ *  e2e seed entry can only be assembled after deploy. */
+export async function getContractClassId(node: ReturnType<typeof createAztecNodeClient>, address: string): Promise<string> {
+	const instance = await node.getContract(AztecAddress.fromStringUnsafe(address))
+	if (!instance) throw new Error(`contract instance not found at node for ${address}`)
+	return instance.currentContractClassId.toString()
 }
 
 /** Get the Sponsored FPC address (deterministic from salt=0). */
