@@ -345,7 +345,7 @@ header comment. Add the schema rejection test. Do not touch `NuloTokenPortal.sol
   nothing outside this plan directory.
 - Layers: lint/typecheck · unit · script-level integration (no network)
 
-### Phase 2 — the proof and the repaired regression
+### Phase 2 — the proof and the repaired regression ✓
 
 Write `FormalPortal.t.sol` (the proof + the positive control). Delete `NuloTokenPortalShim.sol`; rewrite
 `PortalReinit.t.sol` against the real portal, trimmed to init-once, importing the Roundtrip fakes.
