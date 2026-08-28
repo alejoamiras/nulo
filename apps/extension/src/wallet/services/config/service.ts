@@ -4,7 +4,15 @@ import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { IConfigStore } from "@/wallet/config"
 import type { ILogger } from "@/wallet/logger"
 import { EventHandler } from "@nulo/wallet-core/utils"
-import { CONFIG_SERVICE_NAME, type Config, type ConfigKey, type ConfigProp, type Events, type Methods } from "./spec"
+import {
+	CONFIG_SERVICE_NAME,
+	RESTORABLE_CONFIG_KEYS,
+	type Config,
+	type ConfigKey,
+	type ConfigProp,
+	type Events,
+	type Methods,
+} from "./spec"
 
 export * from "./spec"
 
@@ -16,17 +24,6 @@ export * from "./spec"
  * restore; the current/default (strict) value stays. Opting out of strict mode
  * is a deliberate in-app gesture in Settings, never a side effect of import.
  */
-const RESTORABLE_CONFIG_KEYS: ReadonlySet<ConfigKey> = new Set<ConfigKey>([
-	"theme",
-	"sidePanel",
-	"showNode",
-	"showPopupFullscreen",
-	"disableAnimations",
-	"defaultExplorer",
-	"incomingTransfersVisible",
-	"indicateFailures",
-])
-
 export class ConfigService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()("getProps", "getValue", "setValue", "reset")
 	public static name = CONFIG_SERVICE_NAME
