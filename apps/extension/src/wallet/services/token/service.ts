@@ -146,8 +146,9 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	 * passes skip every seed at the zero-accounts guard. Without this third
 	 * trigger nothing re-runs them and the defaults never land.
 	 *
-	 * Unguarded on purpose: `doRun` re-derives the active profile/network and
-	 * re-checks its purge epoch before every write, and `run` single-flights.
+	 * Unguarded on purpose: `doRun` re-derives the active profile/network per
+	 * pass and re-checks the purge epoch before committing, and the marker lock
+	 * orders that commit against a purge. `run` single-flights.
 	 */
 	private readonly onAccountAddedSeed = (): void => {
 		void this.seeder.run()

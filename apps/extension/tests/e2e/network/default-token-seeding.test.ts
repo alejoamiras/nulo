@@ -31,14 +31,9 @@ test.skipIf(!hasConfig)(
 		const page = await openPopup(registeredExtensionPerTest)
 		await waitForHash(page, "#/popup/general")
 
-		// Publish the sandbox seed BEFORE the switch: the seeder reads the list
-		// once per pass, so a later write would simply be missed by the pass the
-		// switch triggers.
+		// Before the switch — the pass it triggers reads the list once.
 		await seedSandboxDefaultToken(page, { address: aztecConfig!.tokenAddress, classId: aztecConfig!.tokenClassId })
 
-		// Local Network has no accounts yet, so the switch reproduces the bug's
-		// ordering: active-network change (seeder runs, finds no account) →
-		// ensureDefaultAccount (the trigger that must now exist).
 		await switchToLocalNetwork(page)
 
 		await page.waitForSelector('[data-testid="tokens-card"] [data-testid="token-symbol"][data-symbol="TST"]', {

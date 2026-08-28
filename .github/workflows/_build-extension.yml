@@ -51,11 +51,12 @@ jobs:
             console.log('patched extension version to', process.env.OVERRIDE);
           "
 
-      # The CoinGecko demo key is a LOCAL/CI convenience only ("no key ships in
-      # releases", implementations-plan/token-prices). Vite bakes any VITE_* env
-      # into the bundle, so fail FAST if the variable is even set — stronger
-      # than only grepping the artifact afterwards (which we also do below).
-      - name: Assert no CoinGecko API key in the build env
+      # Vite bakes any VITE_* env into the bundle, so fail FAST if one of these
+      # is even set — stronger than only grepping the artifact afterwards (which
+      # we also do below). The CoinGecko key is a local/CI convenience that must
+      # never ship; the e2e flags would ship a wallet that misprices or stops
+      # seeding defaults entirely.
+      - name: Assert no test-only or secret VITE_* flags in the build env
         run: |
           if [ -n "${VITE_COINGECKO_API_KEY:-}" ]; then
             echo "::error::VITE_COINGECKO_API_KEY is set in the build environment — release builds must be keyless" >&2

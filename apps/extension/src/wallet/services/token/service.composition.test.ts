@@ -34,7 +34,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import { fakeBrowser } from "@webext-core/fake-browser"
 import { CHAIN_IDS } from "@/utils/chain-ids"
 import { TokenService } from "./service"
-import { PinMismatchError, TokenSeeder } from "./seeder"
+import { PinMismatchError, TokenSeeder, type TokenSeederDeps } from "./seeder"
 import { DEFAULT_TOKEN_SEEDS } from "./default-tokens"
 import type { Token, TokenInterface } from "./spec"
 
@@ -340,6 +340,16 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 		await tokenService.deleteToken(info.id)
 		const res = await fakeBrowser.storage.local.get("nulo:core:token-seeded@p1")
 		expect(res["nulo:core:token-seeded@p1"]).toBeUndefined()
+	})
+
+	test("an unarmed TokenService seeds from the SHIPPED list, not an injected one", async () => {
+		// Every other seeding test injects `getSeeds` or drives the armed e2e
+		// reader, so all of them would stay green if the production fallback
+		// regressed to `async () => []` — which would silently stop seeding
+		// defaults in a shipped wallet.
+		const { tokenService } = await seedHarness()
+		const { seeder } = tokenService as unknown as { seeder: { deps: TokenSeederDeps } }
+		expect(await seeder.deps.getSeeds()).toBe(DEFAULT_TOKEN_SEEDS)
 	})
 
 	test("unlock + active-network-change + account-added all trigger a seed pass through the REAL init wiring", async () => {
