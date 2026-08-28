@@ -115,9 +115,14 @@ describe("TokenSeeder — happy path + skips", () => {
 		expect(deps.persist).not.toHaveBeenCalled()
 		expect((await readMarker())[KEY]).toBeUndefined()
 
+		// The second run stands in for the account-added trigger: on a fresh
+		// profile the profile- and network-change triggers both fire while this
+		// list is still empty, so that trigger is the only thing that reaches
+		// this branch. The pass must find a full attempt budget waiting.
 		accounts.push({ address: "0xacc1" })
 		await seeder.run()
 		expect(deps.persist).toHaveBeenCalledTimes(1)
+		expect((await readMarker())[KEY]).toMatchObject({ attempts: 1, outcome: "seeded" })
 	})
 
 	test("single-flight: concurrent runs coalesce into one pass", async () => {

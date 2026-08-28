@@ -61,7 +61,7 @@ async function makeHarness() {
 			onActiveNetworkChanged: new EventHandler(),
 		}),
 	)
-	collection.add(svc(AccountService.name, {}))
+	collection.add(svc(AccountService.name, { onAccountAdded: new EventHandler() }))
 	collection.add(svc(TaskService.name, {}))
 	collection.add(svc(OperationJournalService.name, journal))
 	const tokenService = new TokenService(logger, api)

@@ -165,7 +165,7 @@ Post-fix, *any* wallet booted on Testnet attempts a live seed against the public
 
 ## Phases
 
-### Phase 1 — Trigger fix + unit/composition coverage
+### Phase 1 — Trigger fix + unit/composition coverage ✓
 
 - `token/service.ts`: add `onAccountAddedSeed` next to the existing two handlers, inside the same `seederOverrides?.enabled !== false` guard.
 - `token/service.composition.test.ts`: extend `seedHarness()`'s stub `AccountService` with `onAccountAdded: new EventHandler()`; extend the trigger-wiring test at `:344-358` to a third trigger.

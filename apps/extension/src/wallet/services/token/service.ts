@@ -115,6 +115,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		if (this.seederOverrides?.enabled !== false) {
 			this.profiles.onActiveProfileChanged.add(this.onActiveProfileChangedSeed)
 			this.networks.onActiveNetworkChanged.add(this.onActiveNetworkChangedSeed)
+			this.accounts.onAccountAdded.add(this.onAccountAddedSeed)
 		}
 	}
 
@@ -124,6 +125,20 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	}
 
 	private readonly onActiveNetworkChangedSeed = (): void => {
+		void this.seeder.run()
+	}
+
+	/**
+	 * The profile- and network-change triggers both fire BEFORE a chain's first
+	 * account row exists — the popup creates networks, then accounts — so on a
+	 * fresh profile (and on every switch to a chain with no accounts) those
+	 * passes skip every seed at the zero-accounts guard. Without this third
+	 * trigger nothing re-runs them and the defaults never land.
+	 *
+	 * Unguarded on purpose: `doRun` re-derives the active profile/network and
+	 * re-checks its purge epoch before every write, and `run` single-flights.
+	 */
+	private readonly onAccountAddedSeed = (): void => {
 		void this.seeder.run()
 	}
 
