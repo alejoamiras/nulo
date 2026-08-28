@@ -1,3 +1,4 @@
+import { describeExternalId } from "./external-id"
 import type { BackgroundConnectionHandler, PendingDiscovery } from "@aztec/wallet-sdk/extension/handlers"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
@@ -66,20 +67,20 @@ export class DiscoveryQueue {
 	 */
 	enqueue(requestId: string, origin: string, chainId: string): boolean {
 		if (this.queue.some((d) => d.origin === origin && d.chainId === chainId)) {
-			this.logger.log("wallet-sdk", LogLevel.Info, `Discovery coalesced (already queued): ${origin} chain=${chainId}`)
+			this.logger.log("wallet-sdk", LogLevel.Info, `Discovery coalesced (already queued) on chain=${chainId}`)
 			return false
 		}
 		if (this.queue.filter((d) => d.origin === origin).length >= PER_ORIGIN_CAP) {
-			this.logger.log("wallet-sdk", LogLevel.Warn, `Discovery dropped (per-origin cap ${PER_ORIGIN_CAP}): ${origin}`)
+			this.logger.log("wallet-sdk", LogLevel.Warn, `Discovery dropped: one origin exceeded the per-origin cap of ${PER_ORIGIN_CAP}`)
 			return false
 		}
 		if (this.queue.length >= GLOBAL_CAP) {
-			this.logger.log("wallet-sdk", LogLevel.Warn, `Discovery dropped (global cap ${GLOBAL_CAP}): ${origin}`)
+			this.logger.log("wallet-sdk", LogLevel.Warn, `Discovery dropped: the queue is at its global cap of ${GLOBAL_CAP}`)
 			return false
 		}
 		this.queue.push({ requestId, origin, chainId })
 		this.updateBadge()
-		this.logger.log("wallet-sdk", LogLevel.Info, `Discovery queued (wallet locked): ${origin} [queue: ${this.queue.length}]`)
+		this.logger.log("wallet-sdk", LogLevel.Info, `Discovery queued (wallet locked) [queue: ${this.queue.length}]`)
 		return true
 	}
 
@@ -104,7 +105,7 @@ export class DiscoveryQueue {
 				this.logger.log(
 					"wallet-sdk",
 					LogLevel.Info,
-					`Discovery skipped (${!discovery ? "gone" : discovery.status}): ${entry.requestId}`,
+					`Discovery skipped (${!discovery ? "gone" : discovery.status}): ${describeExternalId(entry.requestId)}`,
 				)
 				continue
 			}
@@ -113,7 +114,7 @@ export class DiscoveryQueue {
 			// can await a popup) may itself push a later one past the window.
 			if (isDiscoveryExpired(discovery)) {
 				this.handler.rejectDiscovery(discovery.requestId)
-				this.logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (stale): ${discovery.origin}`)
+				this.logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (stale): request ${describeExternalId(entry.requestId)}`)
 				continue
 			}
 

@@ -31,7 +31,7 @@ import { BackgroundConnectionHandler, type PendingDiscovery, type ActiveSession 
 import { NOOP_LOGGER, type WalletMessage, type WalletResponse } from "@aztec/wallet-sdk/types"
 import { attachContentListener } from "./content-message-relay"
 import { isSubframeSender, validateContentScriptMessage } from "./content-script-validator"
-import { toWalletResponseError } from "./error-envelope"
+import { SESSION_INVALID_ERROR, toWalletResponseError } from "./error-envelope"
 import { toJsonSafe } from "./to-json-safe"
 import { deletePendingVerificationForTab, type PendingVerificationEntry } from "./pending-verification"
 import {
@@ -54,8 +54,16 @@ import type { DiscoveryParams } from "@/wallet/services/dapp-interaction/spec"
 import { DappSessionService, AccessLevel } from "@/wallet/services/dapp-session/service"
 import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
-import { type DispatchHooks, DiscoveryQueue, isDiscoveryExpired, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
-import { jsonStringify, getErrorMessage, KeyedLock } from "@nulo/wallet-core/utils"
+import {
+	describeExternalId,
+	describeWireMethod,
+	type DispatchHooks,
+	DiscoveryQueue,
+	isDiscoveryExpired,
+	type SessionContext,
+	WalletSdkDispatcher,
+} from "@nulo/wallet-bridge"
+import { getErrorMessage, KeyedLock } from "@nulo/wallet-core/utils"
 import { approveOrRollbackDiscoverySession } from "./discovery-approval"
 import { failQueuedIfUnclaimed, tryCreateQueuedJournal } from "./queued-journal"
 import { chainSendTxWithVouching } from "./queued-wait-vouching"
@@ -210,7 +218,9 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 						logger.log(
 							"wallet-sdk-bg",
 							LogLevel.Debug,
-							`Rejected content-script message from subframe (frameId=${sender.frameId}, tab.url=${sender.tab?.url}, sender.url=${sender.url}) — F-001 defense-in-depth`,
+							// The tab and sender URLs are the user's browsing history, and any subframe on any
+							// page can trigger this line. The frame identity is what diagnoses the rejection.
+							`Rejected content-script message from subframe (frameId=${sender.frameId}, tabId=${sender.tab?.id}) — F-001 defense-in-depth`,
 						)
 						return undefined
 					}
@@ -350,7 +360,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 							logger.log(
 								"wallet-sdk-bg",
 								LogLevel.Warn,
-								`Dropping message for ${key}: session failed/lost establishment validation`,
+								`Dropping message for session ${describeExternalId(key)}: failed/lost establishment validation`,
 							)
 							return
 						}
@@ -429,7 +439,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				logger.log(
 					"wallet-sdk-bg",
 					LogLevel.Info,
-					`Terminating live session ${match.sessionId} for revoked dApp ${origin}@${chainId}`,
+					`Terminating live session ${describeExternalId(match.sessionId)} on chain ${chainId} — dApp access revoked`,
 				)
 				handler.terminateSession(match.sessionId)
 			}
@@ -461,11 +471,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 					logger.log("wallet-sdk", LogLevel.Warn, "Wallet locked mid-drain, stopping")
 					return false
 				}
-				logger.log(
-					"wallet-sdk",
-					LogLevel.Info,
-					`Processing queued discovery: ${discovery.origin} (requestId: ${discovery.requestId})`,
-				)
+				logger.log("wallet-sdk", LogLevel.Info, `Processing queued discovery: request ${describeExternalId(discovery.requestId)}`)
 				await handleDiscovery(
 					discovery,
 					handler,
@@ -477,7 +483,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 					discoveryQueue,
 					logger,
 				)
-				logger.log("wallet-sdk", LogLevel.Info, `Queued discovery processed: ${discovery.origin}`)
+				logger.log("wallet-sdk", LogLevel.Info, `Queued discovery processed: request ${describeExternalId(discovery.requestId)}`)
 				return true
 			})
 		} else {
@@ -540,7 +546,11 @@ async function handleDiscovery(
 	const rejectIfExpired = (): boolean => {
 		if (isDiscoveryExpired(discovery)) {
 			handler.rejectDiscovery(discovery.requestId)
-			logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (past Nulo's 55s freshness cutoff): ${discovery.origin}`)
+			logger.log(
+				"wallet-sdk",
+				LogLevel.Warn,
+				`Discovery rejected (past Nulo's 55s freshness cutoff): request ${describeExternalId(discovery.requestId)}`,
+			)
 			return true
 		}
 		return false
@@ -574,7 +584,11 @@ async function handleDiscovery(
 		if (existingSession) {
 			if (rejectIfExpired()) return
 			handler.approveDiscovery(discovery.requestId)
-			logger.log("wallet-sdk", LogLevel.Info, `Discovery auto-approved (existing session): ${discovery.origin} chain=${chainId}`)
+			logger.log(
+				"wallet-sdk",
+				LogLevel.Info,
+				`Discovery auto-approved (existing session): request ${describeExternalId(discovery.requestId)} chain=${chainId}`,
+			)
 			return
 		}
 
@@ -605,14 +619,14 @@ async function handleDiscovery(
 				logger.log(
 					"wallet-sdk",
 					LogLevel.Info,
-					`Discovery auto-approved (pending popup resolved): ${discovery.origin} chain=${chainId}`,
+					`Discovery auto-approved (pending popup resolved): request ${describeExternalId(discovery.requestId)} chain=${chainId}`,
 				)
 			} else {
 				handler.rejectDiscovery(discovery.requestId)
 				logger.log(
 					"wallet-sdk",
 					LogLevel.Info,
-					`Discovery rejected (pending popup resolved without session): ${discovery.origin} chain=${chainId}`,
+					`Discovery rejected (pending popup resolved without session): request ${describeExternalId(discovery.requestId)} chain=${chainId}`,
 				)
 			}
 			return
@@ -628,7 +642,7 @@ async function handleDiscovery(
 			logger.log(
 				"wallet-sdk",
 				LogLevel.Warn,
-				`Discovery rejected (popup cap): ${discovery.origin} [origin=${originPopups}, global=${pendingDiscoveryPromises.size}]`,
+				`Discovery rejected (popup cap) [origin=${originPopups}, global=${pendingDiscoveryPromises.size}]`,
 			)
 			return
 		}
@@ -656,7 +670,7 @@ async function handleDiscovery(
 			const result = await dappInteractionService.discover(params, discovery.requestId)
 			if (!result.approved) {
 				handler.rejectDiscovery(discovery.requestId)
-				logger.log("wallet-sdk", LogLevel.Info, `Discovery denied: ${discovery.origin}`)
+				logger.log("wallet-sdk", LogLevel.Info, `Discovery denied: request ${describeExternalId(discovery.requestId)}`)
 				return
 			}
 
@@ -696,20 +710,20 @@ async function handleDiscovery(
 				logger,
 			})
 			if (approved) {
-				logger.log("wallet-sdk", LogLevel.Info, `Discovery approved: ${discovery.origin} chain=${chainId}`)
+				logger.log(
+					"wallet-sdk",
+					LogLevel.Info,
+					`Discovery approved: request ${describeExternalId(discovery.requestId)} chain=${chainId}`,
+				)
 			}
 		} finally {
 			resolvePopup!()
 			pendingDiscoveryPromises.delete(dedupeKey)
 		}
-	} catch (error) {
+	} catch {
 		// User rejected or popup was closed
 		handler.rejectDiscovery(discovery.requestId)
-		logger.log(
-			"wallet-sdk",
-			LogLevel.Warn,
-			`Discovery rejected for ${discovery.origin}: ${error instanceof Error ? error.message : String(error)}`,
-		)
+		logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected for request ${describeExternalId(discovery.requestId)}`)
 	}
 }
 
@@ -767,7 +781,7 @@ async function handleWalletMessage(
 			activeProfileId: profile.id,
 			sessionProfiles,
 			respond: () => {
-				response.error = toWalletResponseError(new Error("Session no longer valid — reconnect"))
+				response.error = SESSION_INVALID_ERROR
 				return handler.sendResponse(session.sessionId, response)
 			},
 			terminateSession: (sessionId) => handler.terminateSession(sessionId),
@@ -806,10 +820,15 @@ async function handleWalletMessage(
 		// unit-tested in isolation; everything not recognised collapses to a
 		// string, preserving the original wire contract.
 		response.error = toWalletResponseError(error)
-		// `response.error` may be an object now — stringify for the log line so
-		// logs don't read "[object Object]".
-		const logMsg = typeof response.error === "string" ? response.error : jsonStringify(response.error)
-		logger.log("wallet-sdk", LogLevel.Error, `Method ${message.type} failed for ${session.origin}: ${logMsg}`)
+		// Pass the error as an OBJECT, never pre-stringified: a finished string is opaque to the
+		// logger's redaction, so interpolating it here would smuggle whatever the error carries
+		// (endpoint URLs, argument values) straight into the log store.
+		logger.log(
+			"wallet-sdk",
+			LogLevel.Error,
+			`Method ${describeWireMethod(message.type)} failed for session ${describeExternalId(session.sessionId)}`,
+			response.error,
+		)
 
 		if (hooks?.queuedJournalId) {
 			await failQueuedIfUnclaimed(operationJournal, hooks.queuedJournalId, getErrorMessage(error), logger)
@@ -825,17 +844,19 @@ async function handleWalletMessage(
 	// response through. Pure lock/unlock-to-same bumps nothing, so those
 	// pinned flows still deliver.
 	if (entryEpoch !== undefined && switchEpoch.current() !== entryEpoch) {
-		logger.log("wallet-sdk", LogLevel.Warn, `Suppressing ${message.type} response for ${session.origin}: profile switched mid-dispatch`)
+		logger.log(
+			"wallet-sdk",
+			LogLevel.Warn,
+			`Suppressing ${describeWireMethod(message.type)} response for session ${describeExternalId(session.sessionId)}: profile switched mid-dispatch`,
+		)
 		return
 	}
 
 	try {
 		await handler.sendResponse(session.sessionId, response)
 	} catch (sendError) {
-		logger.log(
-			"wallet-sdk",
-			LogLevel.Error,
-			`Failed to send response for ${message.type}: ${sendError instanceof Error ? sendError.message : String(sendError)}`,
-		)
+		// The error goes as an OBJECT, not interpolated: this is an internal transport failure worth
+		// diagnosing, and passing it whole lets the logger's projection scrub and cap it.
+		logger.log("wallet-sdk", LogLevel.Error, `Failed to send response for ${describeWireMethod(message.type)}`, sendError)
 	}
 }

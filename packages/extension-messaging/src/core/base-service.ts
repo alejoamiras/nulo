@@ -6,6 +6,7 @@ import { awaitInitialized } from "./initialization"
 import type { ResponseContentLike } from "./base-client"
 import { ValidationError } from "../errors"
 import { unwrapParams } from "../utils"
+import { summarizeContent } from "./envelope-summary"
 
 /** The request envelope's `content` the dispatcher reads. `method` is a
  *  PropertyKey (the typed envelope's `keyof TRequests`); it is String()-ed
@@ -92,13 +93,13 @@ export abstract class BaseService<TRequests extends MethodsMap, TEvents extends 
 			requestId <= 0 ||
 			(!this.rpcMethods.has(methodName) && !this.frameworkRpcMethods.has(methodName))
 		) {
-			this.logWarn("Invalid request received", content)
+			this.logWarn("Invalid request received", summarizeContent(content, this.isRegisteredName))
 			return
 		}
 		if (typeof wrappedParams !== "object" || wrappedParams === null) {
 			// Valid requestId + method but malformed params. Reply with a clean
 			// error so the client rejects immediately instead of hanging.
-			this.logWarn("Invalid request params", content)
+			this.logWarn("Invalid request params", summarizeContent(content, this.isRegisteredName))
 			await this.sendResponse({ requestId, ...buildErrorResponseContent(new ValidationError("Invalid request params")) }, ctx)
 			return
 		}
@@ -173,6 +174,15 @@ export abstract class BaseService<TRequests extends MethodsMap, TEvents extends 
 	 *  independent of the per-service `Methods` type (e.g. the Port server's
 	 *  backup/restore convenience RPCs). Default none. */
 	protected readonly frameworkRpcMethods: ReadonlySet<string> = new Set()
+
+	/**
+	 * Vouches that a name came from this service's registered surface rather than from the sender.
+	 *
+	 * The envelope-summary logger echoes a method name only when this returns true: those log lines
+	 * fire on MALFORMED input, where the "method" is attacker-chosen and could just as easily be a
+	 * password. Bound as a field so it can be passed as a callback without losing `this`.
+	 */
+	protected readonly isRegisteredName = (name: string): boolean => this.rpcMethods.has(name) || this.frameworkRpcMethods.has(name)
 
 	/** Wire up the transport's inbound message listener(s). Called from ctor. */
 	protected abstract subscribe(): void

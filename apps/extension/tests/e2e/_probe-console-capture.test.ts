@@ -16,6 +16,12 @@
  *   3. the BUILT popup HTML preserves sniffer-before-entry script order
  *      (module order is spec-guaranteed; this eliminates the build-reorder
  *      residual).
+ *
+ * PRECONDITION for claim 1: log retention is opt-in — `LoggerStore` only flushes to
+ * `chrome.storage.session` when `developerMode` is on. This probe reads that flushed copy, so it
+ * must be run against a profile with developer mode enabled; otherwise the trail is legitimately
+ * empty and the assertion fails for the wrong reason. The probe is opt-in
+ * (`NULO_E2E_CONSOLE_PROBE=1`) and skipped by default, so this does not affect the normal suite.
  */
 import { readFileSync } from "node:fs"
 import path from "node:path"

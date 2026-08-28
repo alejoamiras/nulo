@@ -98,6 +98,65 @@ The extension has a data-preserving storage-migration framework — engine in `@
 - **Never migratable — don't try**: crypto/KDF/vector rotations (the migrator runs pre-unlock and has no password to re-encrypt with — re-encrypt-on-next-unlock or a documented reset; see [`packages/wallet-crypto/README.md`](./packages/wallet-crypto/README.md)); `chrome.storage.session` (ephemeral); PXE IndexedDB (Aztec-owned, protocol-reset concern; `account-state` backup slices are the non-storage carve-out — their wire shape is versioned by `aztec-version`, not the storage schema).
 - **Related standing rule**: UI code (popup / onboarding / stores / composables) accesses `chrome.storage.local` ONLY through the migration-aware facade (`@/utils/storage`) — never raw. Enforced by `storage-facade-ban.test.ts`; the barrier it provides is what stops a page opened mid-migration from corrupting the transform.
 
+## Logging policy (what may reach a log line)
+
+`console.*` is **not** the browser console. It is globally hijacked (`utils/console-sniffer.ts`) in
+all four contexts and funnels into `LoggerStore`, which buffers, persists to
+`chrome.storage.session`, feeds the log viewer, and is CSV-exportable. So an ordinary
+`console.warn` has the same reach as `this.logWarn`, and "it's just a debug line" is never a reason
+to log something sensitive.
+
+- **Pass the value as an object property NAMED for what it is.** The only redaction is `trim()`
+  (`wallet/logger/utils.ts`), an object walker: it blanks secret-named keys, collapses known
+  shapes (`Note`, `ActiveSession`, `Profile`, contract artifacts), summarises typed
+  arrays/`Map`/`Set`, and projects errors. It redacts **by key name**, so `{ password }` is safe
+  and `{ value: password }` is not — the walker reads a benign key and passes the string through.
+  **A finished string is opaque to it** — `` `k=${x}` ``
+  can never be redacted — and neither can `"k=" + x` or a bare `x` string argument. This is
+  enforced by `apps/extension/src/utils/log-payload-ban.test.ts`, which scans the extension app
+  plus every `packages/*/src` (enumerated at runtime, so a new package is covered the day it
+  exists — the transport layer logs the most dangerous payloads there is), and fails CI listing
+  every offending `file:line`. Its known false-negative is textual
+  (aliasing and indirection defeat it), stated in its own header. Its denied names are imported
+  FROM `REDACTED_KEYS`/`URL_KEYS`, so the two lists cannot drift; an arity read
+  (`authWitnesses.length`) is deliberately allowed, being the idiom this policy asks for.
+- **Log the identifier, not the payload — chosen per site.** There is no single right identifier:
+  a `txHash` links private activity, an unsalted origin hash is dictionary-reversible, a bare row
+  id is useless without the database. Prefer note type + content arity, function name + return
+  arity, operation + count + outcome, a row id for entity failures.
+- **Never log**: decrypted note contents, simulation/utility return values, contact name or
+  address, page or navigation URLs, balances, whole RPC envelopes (`params`/`result` carry
+  passwords and export returns), or whole backup rows.
+- **Endpoint URLs** are reduced to their origin (`scrubUrls`, `@/utils/scrub-urls`) — providers
+  embed API keys in the path — on both the log path and the dApp-facing error envelope.
+- **Pick the level by REACH, not by tone.** Services call `this.log{Debug,Info,Warn,Error}`; UI
+  calls `console.{debug,warn,error}`. `LoggerStore.log` drops only `level < logLevel`, and
+  `logLevel` is `Info` unless `debugMode` is on — so **`warn` and `error` are captured for every
+  user with every toggle off**, and land in the buffer the log viewer renders and exports. `debug`
+  is the only level that costs nothing when nobody asked for it. A line you would not want in a
+  stranger's bug report belongs at `debug` or nowhere.
+- **Two flags, not one — don't conflate them.** `debugMode` gates the LEVEL (and grows the ring
+  buffer 1,000 → 10,000); `developerMode` gates PERSISTENCE to `chrome.storage.session`. Debug
+  lines are dropped without `debugMode` even when `developerMode` is on.
+- **`console.log`/`console.info` are banned** in `apps/extension/src/**` (biome `noConsole`,
+  `allow: debug|warn|error`). Exempt by path: the sniffer, the logger internals, e2e, tests. The
+  anti-scam DevTools banner in `popup/app.vue` carries four line-local `biome-ignore`s instead —
+  it must reach the real console, and a whole-file exemption would license every future
+  `console.log` in the app shell.
+- **Retention is opt-in.** Persistence to `chrome.storage.session` only happens with Developer
+  Mode on; turning it off purges the stored copy, and so does "Clear logs". `chrome.storage.session`
+  is memory-backed — a browser restart, extension update or reload clears it, so a log is a
+  short-lived in-session artifact, not a disk record.
+- **Reading them**: with Developer Mode on, Settings → Advanced shows a Logs row that opens the
+  viewer window (`popup/windows/logger/`), which renders the buffer and exports it as CSV. That
+  export is the reason this policy exists — it is the path by which a user's logs become a public
+  bug report.
+
+When adding a sensitive field to a type, add its name to `REDACTED_KEYS` in
+`wallet/logger/utils.ts` — in camelCase *and* the kebab-case spelling used by exported backup JSON
+(the scanner reads `${row["master-key"]}` too). The static guard imports that set, so it extends in
+the same commit. Names ending in `secretKey` are covered by suffix in both.
+
 ## Extension component model (L0–L6)
 
 Six layers, low → high. A layer can import only from layers below it. Enforced via `biome.json` `noRestrictedImports` overrides.

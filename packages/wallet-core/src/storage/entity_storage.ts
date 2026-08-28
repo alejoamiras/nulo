@@ -15,9 +15,6 @@ export type MinimalStorageArea = {
 	remove(keys: string | string[]): Promise<void>
 }
 
-/** Maximum chars of a malformed payload preserved in the parse-failure log. */
-export const PARSE_FAILURE_PREVIEW_MAX = 200
-
 export class EntityStorage<T> {
 	private readonly storage: MinimalStorageArea
 	private readonly root: string
@@ -66,6 +63,19 @@ export class EntityStorage<T> {
 	}
 
 	/**
+	 * A storage key, safe to log.
+	 *
+	 * Row ids are not opaque — an account row is keyed by its address — so the full key is
+	 * identifying, and even a prefix is: it pins an address to ~40 bits, which confirms a guess.
+	 * The root names WHICH store failed, which is the actionable half; the id contributes only its
+	 * length, enough to tell a plausible id from a truncated or empty one.
+	 */
+	private describeKey(fullKey: string): string {
+		const idLength = Math.max(0, fullKey.length - this.root.length - 1)
+		return `${this.root}@<id:${idLength} chars>`
+	}
+
+	/**
 	 * Decode a raw storage value. Both failure modes KEEP the row (return
 	 * undefined = "present but unreadable"); the read path NEVER deletes by id.
 	 *
@@ -87,8 +97,20 @@ export class EntityStorage<T> {
 		try {
 			parsed = JSON.parse(raw as string)
 		} catch (err) {
-			const preview = typeof raw === "string" ? raw.slice(0, PARSE_FAILURE_PREVIEW_MAX) : String(raw)
-			const msg = err instanceof Error ? err.message : String(err)
+			// The row is whatever was stored under this root — profile ciphertext, contact PII,
+			// transaction detail, or attacker-supplied backup content — and this message is a
+			// pre-formatted string, which the logger's redaction cannot reach inside.
+			//
+			// The parse ERROR is withheld too, not just the payload: V8 quotes an excerpt of the
+			// offending input inside its own message (`Unexpected token 'S', "SECRET..." is not
+			// valid JSON`), so interpolating `err.message` re-introduces exactly what dropping the
+			// explicit preview removed. Size and type diagnose the real failure modes here — a
+			// truncated write, a non-string value — and a FIXED category separates a malformed-JSON
+			// failure from anything else.
+			const shape = typeof raw === "string" ? `string(${raw.length} chars)` : `[${typeof raw}]`
+			// A hard-coded category, not `err.name`: a custom error class name is itself arbitrary
+			// text and would reopen the same channel this branch exists to close.
+			const failure = err instanceof SyntaxError ? "SyntaxError" : "non-syntax throw"
 			// B-23: KEEP the malformed row — the read path never deletes by id. The
 			// old fire-and-forget `remove(fullKey)` raced a concurrent valid write: a
 			// get() reads a stale malformed snapshot, a concurrent set() overwrites
@@ -100,7 +122,7 @@ export class EntityStorage<T> {
 			// serialized repair path — see the purge-hardening follow-up — exactly as
 			// the validation-failure branch below already does.
 			console.error(
-				`EntityStorage[${this.root}]: row "${fullKey}" is malformed — KEEPING (not deleting) — ${msg} — payload preview: ${preview}`,
+				`EntityStorage[${this.root}]: row ${this.describeKey(fullKey)} is malformed — KEEPING (not deleting) — ${failure} — payload ${shape}`,
 			)
 			return undefined
 		}
@@ -110,9 +132,10 @@ export class EntityStorage<T> {
 		let validated: T
 		try {
 			validated = this.parse(parsed)
-		} catch (verr) {
-			const vmsg = verr instanceof Error ? verr.message : String(verr)
-			console.error(`EntityStorage[${this.root}]: row "${fullKey}" failed validation — KEEPING (not deleting) — ${vmsg}`)
+		} catch {
+			// The codec's exception is deliberately not read: a zod issue list quotes the values it
+			// rejected, which is the same channel the syntax branch above closes.
+			console.error(`EntityStorage[${this.root}]: row ${this.describeKey(fullKey)} failed validation — KEEPING (not deleting)`)
 			return undefined
 		}
 		return this.requireIdMatch(fullKey, validated)
@@ -137,7 +160,11 @@ export class EntityStorage<T> {
 				? typeof embedded === "number" && Number.isSafeInteger(embedded) && embedded >= 1 && String(embedded) === suffix
 				: typeof embedded === "string" && embedded === suffix
 		if (!ok) {
-			console.error(`EntityStorage[${this.root}]: row "${fullKey}" embeds id "${String(embedded)}" — KEEPING (not deleting)`)
+			// Both halves are identifying — the key suffix and the embedded id are addresses for
+			// several roots — and the security-relevant fact is only that they DISAGREE.
+			console.error(
+				`EntityStorage[${this.root}]: row ${this.describeKey(fullKey)} embeds a mismatched id (${typeof embedded}) — KEEPING (not deleting)`,
+			)
 			return undefined
 		}
 		return entity

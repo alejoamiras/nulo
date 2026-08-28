@@ -229,6 +229,7 @@ onMounted(async () => {
 	/** DevTools Warnings -> Logo + Scam Prevention */
 	const svgDataUrl = `data:image/svg+xml;base64,${btoa(LogoIcon)}`
 
+	// biome-ignore lint/suspicious/noConsole: `_log` is the sniffer's saved original — this banner must reach the real DevTools console, not the log store.
 	console._log(
 		"%c ",
 		`
@@ -245,11 +246,14 @@ onMounted(async () => {
 	const styleTitle = "color: #fff; font-family: sans-serif; font-size: 10em;"
 	const styleText =
 		"color: #fff; font-family: sans-serif; font-size: 2em; padding: 40px; border-radius: 24px; border: 2px solid orange; background: #1f1f1f; line-height: 160%"
+	// biome-ignore lint/suspicious/noConsole: `_log` is the sniffer's saved original — this banner must reach the real DevTools console, not the log store.
 	console._log("%cHold up!", styleTitle)
+	// biome-ignore lint/suspicious/noConsole: `_log` is the sniffer's saved original — this banner must reach the real DevTools console, not the log store.
 	console._log(
 		"%cIf someone asks you to do something in this interface (DevTools), 100% they are trying to scam you. If you don't know what you are doing, close this window (cross in the upper right corner).",
 		styleText,
 	)
+	// biome-ignore lint/suspicious/noConsole: `_log` is the sniffer's saved original — this banner must reach the real DevTools console, not the log store.
 	console._log("%cYou can report a scam through the form: https://nulo.sh/forms/report-scam", styleText)
 	/****************** */
 
