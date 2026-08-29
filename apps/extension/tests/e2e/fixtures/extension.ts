@@ -60,12 +60,15 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 			"--disable-backgrounding-occluded-windows",
 			"--disable-features=CalculateNativeWinOcclusion",
 			// Artifact mode runs the PRODUCTION bundle, so Alpha is active and its
-			// default-token seeds are real; a resolved seed plus a successful price
-			// quote would render fiat the smoke specs assert is absent. Both networks
-			// use this one host. Mapped to a closed port rather than `^NOTFOUND`:
-			// an unresolvable host makes the node client retry with backoff, and a
-			// seed pass still in flight delays the post-reset route past its wait.
-			...(process.env.NULO_E2E_ARTIFACT_RUN === "1" ? ["--host-resolver-rules=MAP lb.drpc.live 127.0.0.1:1"] : []),
+			// default-token seeds are real — a first account now triggers a seed
+			// pass that can resolve. `fiat-display` asserts no fiat renders on a
+			// fresh wallet, and a resolved seed plus a resolved quote would break
+			// that, so the PRICE host is blocked. Deliberately not the RPC host:
+			// blocking that makes the node client retry, which delays profile
+			// deletion past the reset specs' waits (measured — it fails three specs
+			// that pass without it). A seeded token card is harmless here; no smoke
+			// assertion looks at the token list.
+			...(process.env.NULO_E2E_ARTIFACT_RUN === "1" ? ["--host-resolver-rules=MAP api.coingecko.com 127.0.0.1:1"] : []),
 		],
 		ignoreDefaultArgs: ["--disable-extensions"],
 		// Default protocolTimeout is 180_000ms — bump to 300_000 because the

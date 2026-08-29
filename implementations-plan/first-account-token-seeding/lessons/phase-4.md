@@ -24,7 +24,7 @@ SMOKE_ARMED_EXIT=0
 Inference 2 demonstrated: arming an EMPTY seed list changes nothing for the
 existing smoke specs.
 
-## Artifact smoke found a real regression — and a three-arm experiment attributed it
+## Artifact smoke found a real regression — first attribution was WRONG (see the correction below)
 
 First unarmed artifact-mode run: **3 failed / 26 passed / 3 skipped**. All three
 were profile-**reset** flows, all `waitForHash`/route timeouts at 10s:
@@ -60,42 +60,77 @@ renders):
 Test Files  3 passed (3)   REFUSED_EXIT=0
 ```
 
-## Pre-existing artifact-mode instability, NOT caused by this change
+## CORRECTION — the artifact-mode failures were MINE, and the RPC block was the cause
 
-After the block-shape fix, artifact-mode smoke still fails intermittently on
-this machine, with one signature:
+An earlier revision of this file claimed the residual artifact-mode failures were
+"pre-existing, NOT caused by this change", on the strength of arm B (subscription
+removed) reproducing them. **That was wrong, and the error was a confound: every
+arm of that experiment had a host block active.** "Pre-existing" was never
+actually tested until a clean baseline was run.
+
+The baseline, run on a quiet box against clean `origin/dev` with the same
+three-spec batch:
 
 ```
-waitForProfilePurged: purge incomplete after 15000ms for profile <id>:
-  {"profileRow":false,"tombstone":true}; sessionPresent=false
+passkey-backup + passkey-paths + security-reset → 3 passed   BASELINE_EXIT=0
 ```
 
-The profile row is deleted but its tombstone lingers past 15s. Affected specs
-are the reset flows (`security-reset`, `passkey-backup`, `passkey-paths`), plus
-`sw-resilience` failing separately with the known
-`stopServiceWorker: target still alive 15s` CDP fingerprint.
+Then the same batch on the branch, same box, minutes later:
 
-**Attribution:** the identical tombstone signature appears in arm **B** — the
-run with `this.accounts.onAccountAdded.add(...)` removed entirely. It is
-therefore not caused by this change. It is also intermittent: one isolated
-3-spec run (passkey-backup + passkey-paths + fiat-display) passed all three with
-the fix, while a later isolated run including `security-reset` failed all three.
-That load-sensitivity, on a box that had been running heavy suites back-to-back
-for an hour, matches the repo's known smoke-flake profile.
+```
+→ 3 failed   BRANCH_EXIT=1
+```
 
-**Not chased further locally, deliberately:** artifact mode is the release /
-nightly path (`_smoke-e2e.yml` takes the artifact only when `artifact_name` or
-`extension_path` is supplied). The PR gate `smoke-e2e-status` builds from
-source, and that mode is green (31 passed). Left for CI's clean runners to
-adjudicate, and surfaced to the owner rather than absorbed.
+Same batch, same machine, different code. A live regression, not an environment
+artifact. Re-reading the original arms with the confound in view: arm B
+(subscription OFF, block ON) failed and arm C (subscription ON, block OFF)
+passed — the block, not the seed trigger, was always the variable that mattered.
 
-## Why the DNS block does not weaken a gate
+Removing the block entirely confirmed it, including the spec the block existed to
+protect:
 
-`fiat-display.test.ts`'s own docstring already states its premise as "the smoke
-sandbox chain has no price-mapped tokens, and **no network fetch succeeds
-here**". Before this change nothing ever called out, so the premise held by
-accident. The block makes it true by construction. Successful end-to-end seeding
-is proven by the Phase 3 sandbox spec, not by artifact smoke.
+```
+branch − block: passkey-backup + passkey-paths + security-reset + fiat-display
+              → 4 passed   NOBLOCK2_EXIT=0
+```
+
+**Root cause:** blocking `lb.drpc.live` makes the node client retry, which delays
+profile deletion past the reset specs' waits. Both block shapes did it;
+`^NOTFOUND` → refused-port only changed how long.
+
+**Fix: block the PRICE host instead.** `fiat-display.test.ts:24-26` asserts only
+that `token-fiat` / `balance-fiat` / `balance-fiat-partial` are absent — it says
+nothing about the token list. So the assertion at risk needs no quote, not no
+token. Blocking `api.coingecko.com` (`price/service.ts:31`) makes it impossible
+deterministically while leaving the RPC healthy, which is what the reset flows
+need. Codex called a CoinGecko block "over-broad", but that judgment was aimed at
+preventing the token row; on the assertion that actually exists, the price host
+is the precise target and the RPC block was the overreach.
+
+**Process lesson:** an A/B that varies one factor while a second confounding
+factor is pinned ON in *both* arms proves nothing about that second factor. The
+baseline against unmodified upstream is what makes an attribution real — and it
+should have been the first experiment, not the last. It was skipped initially
+because creating a baseline worktree was blocked from this session; a detached
+checkout in the existing worktree would have worked all along.
+
+## Fix verified
+
+```
+branch + api.coingecko.com block:
+  passkey-backup + passkey-paths + security-reset + fiat-display → 4 passed   VERIFY_EXIT=0
+```
+
+Matches the clean-`origin/dev` baseline, and keeps the spec the block exists for.
+
+## Why the price-host block does not weaken a gate
+
+`fiat-display.test.ts`'s docstring states its premise as "the smoke sandbox chain
+has no price-mapped tokens, and **no network fetch succeeds here**". Before this
+change nothing ever called out, so the premise held by accident; a first account
+now triggers a real seed pass on Alpha. Blocking `api.coingecko.com` makes the
+no-quote half true by construction without touching the RPC. Successful
+end-to-end seeding is proven by the Phase 3 sandbox spec, not by artifact smoke.
 
 ## Full network suite — PASS
 
