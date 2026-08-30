@@ -31,12 +31,15 @@ export type ReconcileRow = {
 	syncFailure?: unknown
 }
 
-export type ReconcilePlan = {
+/** Generic over the caller's real row types so the plan hands back the exact
+ *  objects it was given — the service needs full `Token`/`Account`/`TokenBalanceRaw`
+ *  to write, and narrowing here would force a cast at the call site. */
+export type ReconcilePlan<T extends ReconcileToken, A extends ReconcileAccount, R extends ReconcileRow> = {
 	/** Pairs with no row at all — the worker died before `repo.set`. */
-	missing: { token: ReconcileToken; account: ReconcileAccount }[]
+	missing: { token: T; account: A }[]
 	/** Rows that exist but were never projected — the worker died after
 	 *  `repo.set` and before `enqueue`, stranding the card mid-load. */
-	staleTokens: ReconcileRow[]
+	staleTokens: R[]
 }
 
 /** `${tokenId}:${address}` — the pair identity. Balance rows carry no chainId
@@ -62,14 +65,14 @@ function pairKey(token: number, account: string): string {
  * Output order is total and deterministic — chainId, token id, account index,
  * then address — so a repair batch allocates ids in a reproducible sequence.
  */
-export function reconcilePlan(input: {
-	tokens: readonly ReconcileToken[]
-	accounts: readonly ReconcileAccount[]
-	existing: readonly ReconcileRow[]
-}): ReconcilePlan {
+export function reconcilePlan<T extends ReconcileToken, A extends ReconcileAccount, R extends ReconcileRow>(input: {
+	tokens: readonly T[]
+	accounts: readonly A[]
+	existing: readonly R[]
+}): ReconcilePlan<T, A, R> {
 	const { tokens, accounts, existing } = input
 
-	const accountsByChain = new Map<number, ReconcileAccount[]>()
+	const accountsByChain = new Map<number, A[]>()
 	for (const account of accounts) {
 		const bucket = accountsByChain.get(account.chainId)
 		if (bucket) bucket.push(account)
@@ -77,7 +80,7 @@ export function reconcilePlan(input: {
 	}
 
 	const desired = new Set<string>()
-	const pairs: { token: ReconcileToken; account: ReconcileAccount }[] = []
+	const pairs: { token: T; account: A }[] = []
 	for (const token of tokens) {
 		for (const account of accountsByChain.get(token.chainId) ?? []) {
 			const key = pairKey(token.id, account.address)
@@ -90,7 +93,7 @@ export function reconcilePlan(input: {
 	}
 
 	const seen = new Set<string>()
-	const staleTokens: ReconcileRow[] = []
+	const staleTokens: R[] = []
 	for (const row of existing) {
 		const key = pairKey(row.token, row.account)
 		if (!desired.has(key)) continue

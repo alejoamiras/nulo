@@ -169,7 +169,7 @@ New tests: two parked allocation callers produce unique ids and no duplicate pai
 
 **Validation gate.** Above, plus `bun run --cwd apps/extension test src/wallet/services/`. Pass: exit 0; the concurrency test fails without the lock (record the red run).
 
-### Phase 3 — The sweep + key identity
+### Phase 3 — The sweep + key identity ✓
 Init + profile-switch sweeps calling the ensure path; `getAccountsRaw` grouped in memory; re-enqueue never-projected rows; `Warn` repair-count / `Debug` elapsed-ms logs.
 
 **Enable the key-identity guard on `BalanceRepository` here, not earlier — and it MUST be configured as:**

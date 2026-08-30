@@ -4,7 +4,8 @@ import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/rest
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { getTokenInfo } from "@/wallet/services/token/utils"
-import { EventHandler, Lock } from "@nulo/wallet-core/utils"
+import { EventHandler, Lock, getErrorMessage } from "@nulo/wallet-core/utils"
+import { reconcilePlan } from "./reconcile-pairs"
 import { AccountService, type Account } from "@/wallet/services/account/service"
 import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
@@ -147,6 +148,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 			if (gen === this.profileGeneration) {
 				this.profile = profile
 				for (const token of raw) this.tokens.set(token.id, token)
+				await this.reconcileBalanceRows(profile.id, gen)
 			}
 		}
 
@@ -259,6 +261,61 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		this.queue.enqueue(tb)
 	}
 
+	/**
+	 * Repair the two windows an MV3 worker death can leave inside
+	 * `createTokenBalanceHoldingLock`: no row at all (died before `repo.set`), and
+	 * a row that was never projected (died before `enqueue`, leaving the card
+	 * showing "Loading balance…" with nothing queued to finish it).
+	 *
+	 * Create-only. An existing row this profile cannot explain may belong to
+	 * another profile, may precede its token during a restore, or may be inside a
+	 * chain-purge cascade that is still draining — none of those are safe to
+	 * delete from a schema that carries neither profile nor chain.
+	 */
+	private async reconcileBalanceRows(profileId: string, gen: number): Promise<void> {
+		const startedAt = Date.now()
+		// One profile-wide account read rather than one per chain: every entity
+		// enumeration deserializes the whole storage namespace, so read COUNT is
+		// the cost. It also has no visibility parameter to get wrong — hidden
+		// accounts legitimately hold balance rows.
+		const accounts = await this.accountService.getAccountsRaw(profileId)
+		if (gen !== this.profileGeneration) return
+
+		await this.lock.withLock(async () => {
+			if (gen !== this.profileGeneration) return
+			const existing = await this.repo.getAll()
+			if (gen !== this.profileGeneration) return
+
+			const tokens = [...this.tokens.values()]
+			const plan = reconcilePlan({ tokens, accounts, existing })
+
+			for (const row of plan.staleTokens) {
+				if (gen !== this.profileGeneration) return
+				this.queue.enqueue(row)
+			}
+
+			let repaired = 0
+			for (const { token, account } of plan.missing) {
+				if (gen !== this.profileGeneration) return
+				try {
+					await this.createTokenBalanceHoldingLock(token, account, gen)
+					repaired++
+				} catch (error) {
+					// One unwritable row must not abandon the rest of the repair.
+					this.logWarn(`balance reconcile: ${token.id}:${account.address} failed`, getErrorMessage(error))
+				}
+			}
+
+			// A non-zero repair means a previous worker died mid-write — worth
+			// surfacing, unlike the no-op path.
+			if (repaired > 0 || plan.staleTokens.length > 0) {
+				this.logWarn(`balance reconcile: created ${repaired}, re-queued ${plan.staleTokens.length} (${Date.now() - startedAt}ms)`)
+			} else {
+				this.logDebug(`balance reconcile: nothing to repair (${Date.now() - startedAt}ms)`)
+			}
+		})
+	}
+
 	/** Whether the map still holds THIS token rather than a successor that reused
 	 *  its id (`token/service.ts` warns about exactly that reuse). */
 	private isSameTokenLive(token: Token): boolean {
@@ -306,6 +363,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		for (const token of raw) {
 			this.tokens.set(token.id, token)
 		}
+		await this.reconcileBalanceRows(profile.id, gen)
 	}
 
 	private readonly onAccountAdded = async (account: Account) => {
