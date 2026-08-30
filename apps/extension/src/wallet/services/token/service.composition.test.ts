@@ -34,7 +34,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import { fakeBrowser } from "@webext-core/fake-browser"
 import { CHAIN_IDS } from "@/utils/chain-ids"
 import { TokenService } from "./service"
-import { PinMismatchError, TokenSeeder } from "./seeder"
+import { PinMismatchError, TokenSeeder, type TokenSeederDeps } from "./seeder"
 import { DEFAULT_TOKEN_SEEDS } from "./default-tokens"
 import type { Token, TokenInterface } from "./spec"
 
@@ -80,7 +80,7 @@ async function makeHarness(fakeConfig?: ShallowPxeFakeConfig) {
 			onActiveNetworkChanged: new EventHandler(),
 		}),
 	)
-	collection.add(svc(AccountService.name, {}))
+	collection.add(svc(AccountService.name, { onAccountAdded: new EventHandler() }))
 	const startNewTask = vi.fn(() => fakeTask)
 	collection.add(svc(TaskService.name, { startNewTask }))
 	collection.add(svc(OperationJournalService.name, {}))
@@ -155,7 +155,7 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 	// covered at the seeder-deps seam in seeder.test.ts — D2 keeps it out of
 	// composition. This slice drives the REAL graph for everything else:
 	// register-free pin reads, the seed-only persist path + journal labeling,
-	// tombstone-on-delete, and the unlock/network-change hook wiring.
+	// tombstone-on-delete, and the three seed-trigger hooks.
 	const CUSD = DEFAULT_TOKEN_SEEDS[0].contract
 
 	async function seedHarness() {
@@ -172,6 +172,7 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 
 		const onActiveProfileChanged = new EventHandler<{ id: string } | undefined>()
 		const onActiveNetworkChanged = new EventHandler<unknown>()
+		const onAccountAdded = new EventHandler<unknown>()
 		const journal = {
 			createOperation: vi.fn(async (input: Record<string, unknown>) => ({ id: "op1", ...input })),
 			transitionOperation: vi.fn(async () => {}),
@@ -196,13 +197,13 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 				onActiveNetworkChanged,
 			}),
 		)
-		collection.add(svc(AccountService.name, { getAccounts: async () => [{ address: "0xacc1" }] }))
+		collection.add(svc(AccountService.name, { getAccounts: async () => [{ address: "0xacc1" }], onAccountAdded }))
 		collection.add(svc(TaskService.name, { startNewTask: () => fakeTask }))
 		collection.add(svc(OperationJournalService.name, journal))
 		const tokenService = new TokenService(logger, api, () => fake.client)
 		collection.add(tokenService)
 		await collection.start()
-		return { tokenService, fake, api, journal, onActiveProfileChanged, onActiveNetworkChanged }
+		return { tokenService, fake, api, journal, onActiveProfileChanged, onActiveNetworkChanged, onAccountAdded }
 	}
 
 	const seedIface = (chainId: number, contract: string) => ({ chainId, contract, isComplete: true }) as unknown as TokenInterface
@@ -341,10 +342,20 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 		expect(res["nulo:core:token-seeded@p1"]).toBeUndefined()
 	})
 
-	test("unlock + active-network-change both trigger a seed pass through the REAL init wiring", async () => {
+	test("an unarmed TokenService seeds from the SHIPPED list, not an injected one", async () => {
+		// Every other seeding test injects `getSeeds` or drives the armed e2e
+		// reader, so all of them would stay green if the production fallback
+		// regressed to `async () => []` — which would silently stop seeding
+		// defaults in a shipped wallet.
+		const { tokenService } = await seedHarness()
+		const { seeder } = tokenService as unknown as { seeder: { deps: TokenSeederDeps } }
+		expect(await seeder.deps.getSeeds()).toBe(DEFAULT_TOKEN_SEEDS)
+	})
+
+	test("unlock + active-network-change + account-added all trigger a seed pass through the REAL init wiring", async () => {
 		const runSpy = vi.spyOn(TokenSeeder.prototype, "run").mockResolvedValue(undefined)
 		try {
-			const { onActiveProfileChanged, onActiveNetworkChanged } = await seedHarness()
+			const { onActiveProfileChanged, onActiveNetworkChanged, onAccountAdded } = await seedHarness()
 			onActiveProfileChanged.invoke({ id: "p1" })
 			expect(runSpy).toHaveBeenCalledTimes(1)
 			// Lock (undefined) must NOT trigger a pass.
@@ -352,6 +363,11 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 			expect(runSpy).toHaveBeenCalledTimes(1)
 			onActiveNetworkChanged.invoke(NETWORK)
 			expect(runSpy).toHaveBeenCalledTimes(2)
+			// The one that was missing: both events above fire before a chain's
+			// first account exists, so this is the only trigger that can seed a
+			// fresh profile.
+			onAccountAdded.invoke({ address: "0xacc1", chainId: NETWORK.chainId })
+			expect(runSpy).toHaveBeenCalledTimes(3)
 		} finally {
 			runSpy.mockRestore()
 		}

@@ -87,6 +87,8 @@ if [ "${NULO_E2E_PROVERLESS:-}" = "1" ]; then
   VITE_NULO_E2E_DEFAULT_NET=testnet \
   VITE_NULO_E2E_PRICE_MAP=1 \
   VITE_NULO_E2E_MIGRATION_FIXTURE=1 \
+  VITE_NULO_E2E_TOKEN_SEEDS=1 \
+  VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 \
   VITE_NULO_E2E_PROVERLESS=1 \
   VITE_NULO_E2E_PROVERLESS_CONFIRM=1 \
     bun run build:chrome
@@ -100,6 +102,8 @@ else
   VITE_NULO_E2E_DEFAULT_NET=testnet \
   VITE_NULO_E2E_PRICE_MAP=1 \
   VITE_NULO_E2E_MIGRATION_FIXTURE=1 \
+  VITE_NULO_E2E_TOKEN_SEEDS=1 \
+  VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 \
     bun run build:chrome
 fi
 
@@ -121,6 +125,21 @@ if ! grep -rq "nulo:e2e:backup-mig-fixture" dist/chrome 2>/dev/null; then
   exit 2
 fi
 echo "[e2e:agent] bundle contains the backup-migration fixture ✓"
+
+# Positive token-seed-source assertion. The armed source REPLACES the seed list,
+# so a flag that fails to propagate does not fail loudly — the wallet quietly
+# falls back to the real seeds and the default-token spec has nothing to find
+# while every other spec starts calling the public Testnet RPC. Assert both the
+# stamp and the functional key: an unused export can tree-shake away even in an
+# armed build (see price-map.ts), which would make the release grep a
+# false-negative guard.
+for marker in "NULO_E2E_TOKEN_SEEDS_BUILD_STAMP" "nulo:e2e:token-seeds"; do
+  if ! grep -rq "$marker" dist/chrome 2>/dev/null; then
+    echo "[e2e:agent] FATAL: token-seed source did not propagate ($marker absent from dist/chrome)" >&2
+    exit 2
+  fi
+done
+echo "[e2e:agent] bundle contains the e2e token-seed source ✓"
 
 # Parallel bundle assertion for VITE_NULO_ACCELERATOR_REQUIRED. Codex post-impl
 # audit (finding #3): without this check, if the env var ever stops propagating

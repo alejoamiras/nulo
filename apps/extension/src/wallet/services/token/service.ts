@@ -23,7 +23,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { feeJuiceAddress, feeJuiceName, feeJuiceSymbol } from "@/wallet/utils/fee-juice"
 import { simulate } from "@/wallet/utils/fn"
-import { findSeed } from "./default-tokens"
+import { DEFAULT_TOKEN_SEEDS, type DefaultTokenSeed, findSeed } from "./default-tokens"
 import { PinMismatchError, TokenSeeder } from "./seeder"
 import {
 	type Token,
@@ -41,6 +41,15 @@ import { getTokenInfo, isTokenComplete } from "./utils"
 
 export * from "./functions"
 export * from "./spec"
+
+/** Seeder seams the composition root may replace. `getSeeds` is the only one a
+ *  real build ever passes (armed e2e builds swap in the storage-backed list);
+ *  the other two are unit-test levers. */
+type SeederOverrides = {
+	getVersion?: () => string
+	enabled?: boolean
+	getSeeds?: () => Promise<readonly DefaultTokenSeed[]>
+}
 
 export class TokenService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()(
@@ -61,7 +70,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	private readonly tokens: EntityStorage<Token>
 	private readonly lock = new Lock()
 	private readonly browserApi: BrowserApi
-	private readonly seederOverrides?: { getVersion?: () => string; enabled?: boolean }
+	private readonly seederOverrides?: SeederOverrides
 	private seeder: TokenSeeder = null!
 
 	private pxeService: ShallowPxeClient = null!
@@ -75,7 +84,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		logger: ILogger,
 		browserApi: BrowserApi,
 		private readonly pxeClientFactory: ShallowPxeClientFactory = DEFAULT_SHALLOW_PXE_CLIENT_FACTORY,
-		seederOverrides?: { getVersion?: () => string; enabled?: boolean },
+		seederOverrides?: SeederOverrides,
 	) {
 		super(TOKEN_SERVICE_NAME, logger)
 		this.browserApi = browserApi
@@ -94,12 +103,14 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		this.networks.registerChainPurgeSubscriber(async (profileId, chainId) => this.clearChainState(profileId, chainId))
 
 		// Default-token seeding: lazy, single-flight, TOFU-pinned (see
-		// default-tokens.ts + seeder.ts). Triggered on unlock and on active-
-		// network change; both handlers coalesce through `seeder.run()`.
+		// default-tokens.ts + seeder.ts). Triggered on unlock, on active-network
+		// change, and on account creation; all three coalesce through
+		// `seeder.run()`.
 		this.seeder = new TokenSeeder(
 			{
 				getActiveProfile: () => this.profiles.getActiveProfile(),
 				getActiveNetwork: () => this.networks.getActiveNetwork(),
+				getSeeds: this.seederOverrides?.getSeeds ?? (async () => DEFAULT_TOKEN_SEEDS),
 				getAccounts: async (profileId, chainId) => await this.accounts.getAccounts(profileId, chainId),
 				preview: async (networkId, accountAddress, contract, expectedClassId) =>
 					await this.previewTokenMetadata(networkId, accountAddress, contract, expectedClassId),
@@ -115,6 +126,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		if (this.seederOverrides?.enabled !== false) {
 			this.profiles.onActiveProfileChanged.add(this.onActiveProfileChangedSeed)
 			this.networks.onActiveNetworkChanged.add(this.onActiveNetworkChangedSeed)
+			this.accounts.onAccountAdded.add(this.onAccountAddedSeed)
 		}
 	}
 
@@ -124,6 +136,21 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	}
 
 	private readonly onActiveNetworkChangedSeed = (): void => {
+		void this.seeder.run()
+	}
+
+	/**
+	 * The profile- and network-change triggers both fire BEFORE a chain's first
+	 * account row exists — the popup creates networks, then accounts — so on a
+	 * fresh profile (and on every switch to a chain with no accounts) those
+	 * passes skip every seed at the zero-accounts guard. Without this third
+	 * trigger nothing re-runs them and the defaults never land.
+	 *
+	 * Unguarded on purpose: `doRun` re-derives the active profile/network per
+	 * pass and re-checks the purge epoch before committing, and the marker lock
+	 * orders that commit against a purge. `run` single-flights.
+	 */
+	private readonly onAccountAddedSeed = (): void => {
 		void this.seeder.run()
 	}
 

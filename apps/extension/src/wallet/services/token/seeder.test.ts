@@ -31,7 +31,7 @@ function makeSeeder(overrides?: Partial<TokenSeederDeps> & { version?: string })
 	const api = new FakeBrowserApi()
 	const logger = new LoggerStore(new ConfigStore())
 	const deps: TokenSeederDeps = {
-		seeds: [SEED],
+		getSeeds: vi.fn(async () => [SEED]),
 		getActiveProfile: vi.fn(async () => ({ id: "p1" })),
 		getActiveNetwork: vi.fn(async () => ({ id: "net1", chainId: CHAIN_ID })),
 		getAccounts: vi.fn(async () => [{ address: "0xacc1" }]),
@@ -115,9 +115,14 @@ describe("TokenSeeder — happy path + skips", () => {
 		expect(deps.persist).not.toHaveBeenCalled()
 		expect((await readMarker())[KEY]).toBeUndefined()
 
+		// The second run stands in for the account-added trigger: on a fresh
+		// profile the profile- and network-change triggers both fire while this
+		// list is still empty, so that trigger is the only thing that reaches
+		// this branch. The pass must find a full attempt budget waiting.
 		accounts.push({ address: "0xacc1" })
 		await seeder.run()
 		expect(deps.persist).toHaveBeenCalledTimes(1)
+		expect((await readMarker())[KEY]).toMatchObject({ attempts: 1, outcome: "seeded" })
 	})
 
 	test("single-flight: concurrent runs coalesce into one pass", async () => {
@@ -179,7 +184,7 @@ describe("TokenSeeder — trust boundary (hard skips)", () => {
 		const liveMetadata: SeedPreview = { name: "Clean USDC", symbol: "cUSDC", decimals: 6, interface: IFACE }
 
 		const accepted = makeSeeder({
-			seeds: [cusdc],
+			getSeeds: async () => [cusdc],
 			getActiveNetwork: vi.fn(async () => ({ id: "net1", chainId: cusdc.chainId })),
 			preview: vi.fn(async () => liveMetadata),
 		})
@@ -187,7 +192,7 @@ describe("TokenSeeder — trust boundary (hard skips)", () => {
 		expect(accepted.deps.persist).toHaveBeenCalledTimes(1)
 
 		const oldPin = makeSeeder({
-			seeds: [{ ...cusdc, expectedSymbol: "cUSD" }],
+			getSeeds: async () => [{ ...cusdc, expectedSymbol: "cUSD" }],
 			getActiveNetwork: vi.fn(async () => ({ id: "net1", chainId: cusdc.chainId })),
 			preview: vi.fn(async () => liveMetadata),
 		})
@@ -230,7 +235,7 @@ describe("TokenSeeder — attempt cap + retry semantics", () => {
 		let version = "1.0.0"
 		let previewOk = false
 		const deps: TokenSeederDeps = {
-			seeds: [SEED],
+			getSeeds: async () => [SEED],
 			getActiveProfile: async () => ({ id: "p1" }),
 			getActiveNetwork: async () => ({ id: "net1", chainId: CHAIN_ID }),
 			getAccounts: async () => [{ address: "0xacc1" }],

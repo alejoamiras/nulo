@@ -10,6 +10,7 @@ import {
 	waitForLocalNode,
 	createTestWallet,
 	deployTestToken,
+	getContractClassId,
 	createSponsoredFeeOptions,
 	LOCAL_NODE_URL,
 } from "./fixtures/aztec"
@@ -638,7 +639,9 @@ export async function setup(project: TestProject) {
  */
 async function deployContractsAndProvide(project: TestProject): Promise<void> {
 	const existingLock = readLock()
-	if (existingLock?.deployedConfig?.nodeUrl === LOCAL_NODE_URL) {
+	// A lock written before `tokenClassId` existed carries a config the
+	// default-token seeding spec cannot use; redeploy rather than reuse it.
+	if (existingLock?.deployedConfig?.nodeUrl === LOCAL_NODE_URL && existingLock.deployedConfig.tokenClassId) {
 		fs.writeFileSync(CONFIG_PATH, JSON.stringify(existingLock.deployedConfig, null, 2))
 		project.provide("aztecTestConfig", existingLock.deployedConfig)
 		console.log("[e2e-setup] reused deployed contracts from lockfile:", existingLock.deployedConfig)
@@ -658,10 +661,12 @@ async function deployContractsAndProvide(project: TestProject): Promise<void> {
 			const feeOptions = { paymentMethod }
 
 			const tokenAddress = await deployTestToken(wallet, minterAddress, feeOptions)
+			const tokenClassId = await getContractClassId(node, tokenAddress)
 
 			config = {
 				nodeUrl: LOCAL_NODE_URL,
 				tokenAddress,
+				tokenClassId,
 				sponsoredFpcAddress,
 				minterAddress: minterAddress.toString(),
 			}
