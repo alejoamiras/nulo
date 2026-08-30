@@ -653,8 +653,8 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 	})
 
 	test("a creation parked mid-write cannot survive a token deletion", async () => {
-		// A deletion must be serialized behind an in-flight creation, so a row
-		// written after the deletion's snapshot is still swept.
+		// Deletion queues behind an in-flight creation, so its snapshot includes
+		// and sweeps the completed write.
 		const flush = () => new Promise((r) => setTimeout(r, 0))
 		const api = new FakeBrowserApi()
 		api.reset()

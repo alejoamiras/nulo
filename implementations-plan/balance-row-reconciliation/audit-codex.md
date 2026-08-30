@@ -232,3 +232,98 @@ Only documentation nits remain:
 No remaining architecture, concurrency, recovery, security, or test-design blocker.
 
 approve
+---
+
+# Post-implementation audit (session `01a05303-c00e-7922-a458-d170ce9fc470`)
+
+## Round 1 — implementation audit
+
+**Verdict:** `reject` — one High (live handlers bypassed pair reconciliation, allowing duplicate rows) + 5 Lows. All adopted.
+
+I found one blocking implementation bug.
+
+## Findings
+
+- **High — live handlers serialize allocation but do not reconcile pair existence.** [service.ts:374](apps/extension/src/wallet/services/token-balance/service.ts:374), [service.ts:397](apps/extension/src/wallet/services/token-balance/service.ts:397)
+
+  Both handlers call `createTokenBalanceHoldingLock` unconditionally. The lock prevents ID collisions but not duplicate `(token, account)` rows. For example, a sweep can hold the lock while awaiting `repo.getAll`; `onTokenAdded` then inserts its token into the live map and queues for the lock; the sweep resumes, sees that token and creates its row; afterward the handler acquires the lock and creates the same pair under another ID. This produces duplicate cards and violates the documented one-row-per-pair invariant.
+
+  The concurrency test uses two deliberately different pairs, so it cannot catch this. Route both handler batches through the same locked read/diff/create path used by the sweep and add a same-pair race case.
+
+- **Medium — the never-projected recovery path is not actually tested.** [service.test.ts:427](apps/extension/src/wallet/services/token-balance/service.test.ts:427), [balance-row-reconciliation.test.ts:74](apps/extension/tests/e2e/network/balance-row-reconciliation.test.ts:74), [auth.vue:174](apps/extension/src/popup/pages/auth.vue:174)
+
+  The service test seeds a stale row but asserts only that it remains unduplicated. Removing the `staleTokens` enqueue loop entirely leaves that assertion green. The E2E deletes rows, so it tests only missing-row creation. Moreover, unlocking invokes `refreshBalances(...)`; therefore `maxRefreshes: 0` disables only helper-triggered refreshes, not the explicit refresh from the auth flow. The smallest reliable pin is a `createNewTask` spy asserting that the pre-existing stale row’s ID is enqueued during service start.
+
+- **Low — the new token-deletion lock has no race regression test.** [service.test.ts:77](apps/extension/src/wallet/services/token-balance/service.test.ts:77)
+
+  Every deletion test finishes seeding before deletion. Reverting commit `2a10be6c` would leave them green. Park a creator before its physical `repo.set`, start deletion, then release the write and assert no row survives.
+
+- **Low — the init hydration fence is implemented but its required test is absent.** [service.ts:144](apps/extension/src/wallet/services/token-balance/service.ts:144), [service.test.ts:251](apps/extension/src/wallet/services/token-balance/service.test.ts:251)
+
+  The existing slow-rebuild test directly exercises `onActiveProfileChanged`, not `init()`. Park init’s `getTokensRaw`, invoke a profile switch, release the stale init read, and assert it cannot repopulate the old profile.
+
+- **Low — the repair count can claim writes that never occurred.** [service.ts:301](apps/extension/src/wallet/services/token-balance/service.ts:301)
+
+  `createTokenBalanceHoldingLock` returns early on generation or liveness failure, but the caller increments `repaired` regardless. Return a boolean indicating whether `repo.set` ran and increment only on `true`.
+
+- **Low — comment/documentation cleanup.**
+
+  - [service.ts:39](apps/extension/src/wallet/services/token-balance/service.ts:39) retains audit-history language (`Q9`, “was…missing”, “joined when…”); state only the startup invariant.
+  - [service.ts:309](apps/extension/src/wallet/services/token-balance/service.ts:309) incorrectly attributes every repair to worker death; key mismatch or other invariant damage can also cause it.
+  - [reconcile-pairs.ts:1](apps/extension/src/wallet/services/token-balance/reconcile-pairs.ts:1), [reconcile-pairs.ts:26](apps/extension/src/wallet/services/token-balance/reconcile-pairs.ts:26), and [reconcile-pairs.ts:87](apps/extension/src/wallet/services/token-balance/reconcile-pairs.ts:87) narrate names or visible branches and can be removed or compressed.
+  - [reconcile-pairs.ts:63](apps/extension/src/wallet/services/token-balance/reconcile-pairs.ts:63) says “tracked separately” without a durable reference.
+  - [helpers.ts:1661](apps/extension/tests/e2e/fixtures/helpers.ts:1661) records copy-count history; remove it.
+  - [balance-row-reconciliation.test.ts:62](apps/extension/tests/e2e/network/balance-row-reconciliation.test.ts:62) says both sweeps run, but this restart lands locked; unlock exercises the profile-switch sweep. Its “boot enqueue” claim is also undermined by auth’s refresh.
+  - [ARCHITECTURE.md:97](ARCHITECTURE.md:97) omits `onTokenDeleted` and describes `purgeForTokens` as an allocating path.
+  - [service.ts:281](apps/extension/src/wallet/services/token-balance/service.ts:281) deserves one sentence explaining why the account snapshot intentionally precedes the balance lock.
+  - [service.ts:429](apps/extension/src/wallet/services/token-balance/service.ts:429) deserves a concise note that no in-worker balance-event subscriber re-enters this service.
+
+## Targeted questions
+
+- The lock participant set is complete: both live handlers, both sweeps, restore, both purge passes, and `onTokenDeleted`. Queue projection writes need not participate because they do not allocate/create pairs and are protected by invalidation, ownership, and generation fences.
+- I found no direct or indirect nested acquisition. `onTokenDeleted`’s emit cannot currently cycle back into this lock; there are no in-worker `onTokenBalance*` subscribers.
+- `isSameTokenLive` is load-bearing. Both live handlers retain tokens across awaits/lock acquisition, and token deletion removes map membership synchronously even while waiting for the lock. Identity comparison also protects ID reuse.
+- The requested init gap is fenced correctly. JavaScript cannot interleave between the synchronous hydration commit and entering `reconcileBalanceRows`; its first await is the account read, followed immediately by a generation check, with further checks inside the hold.
+- `getAccountsRaw` belongs outside the hold. The balance lock cannot make AccountService mutations atomic anyway. Account additions are closed by the locked handler; account deletion remains the already-deferred orphan case. After fixing the High finding, concurrent inclusion plus handler delivery will also be idempotent.
+
+reject (with blocking findings: live handlers bypass pair reconciliation and can create duplicate balance rows)
+---
+
+## Round 2 — re-review
+
+**Verdict:** `conditional approve` — no production defect remained; the same-pair test was theatre and comments needed correcting. Both adopted.
+
+No production correctness defect remains in the fix. The duplicate-pair window is closed, but one regression test does not exercise that window.
+
+### Findings
+
+- **Medium — [service.test.ts:611](apps/extension/src/wallet/services/token-balance/service.test.ts:611): the same-pair race test starts with the pair already created.** `services.start()` sees token 100 and account `0xa`, so the boot sweep creates the row before the allocation spy is installed. Both subsequent handlers only exercise the already-exists skip path. The test would still pass if existence were checked outside the lock. Have `getAccountsRaw()` return `[]`, retain `getAccounts()` returning `0xa`, and assert allocation occurs exactly once.
+
+- **Low — [service.ts:264](apps/extension/src/wallet/services/token-balance/service.ts:264): the helper contract is partly inaccurate and omits its most important constraint.** It is not “the one path that creates rows”—`restore()` deliberately writes directly. More importantly, an supplied `existing` snapshot must have been read during the current lock hold. State that explicitly; it is what makes the sweep’s optimization safe.
+
+- **Low — [service.ts:336](apps/extension/src/wallet/services/token-balance/service.ts:336): the repair-cause comment remains too strong.** An identity-hidden row did physically complete its write, and the sweep can also win a normal race with a live handler. The count is factual; the claimed cause is not. Remove the causal attribution.
+
+- **Low — [service.ts:442](apps/extension/src/wallet/services/token-balance/service.ts:442): the future-deadlock comment is incorrect.** `EventHandler.invoke()` does not await subscriber promises. A subscriber calling an async lock-taking entry point would queue behind the current hold, not deadlock it. There is no current nested acquisition, but this explanation should be removed or corrected.
+
+- **Low — [balance-row-reconciliation.test.ts:1](apps/extension/tests/e2e/network/balance-row-reconciliation.test.ts:1): the header still contradicts the corrected inline explanation.** Lines 2–13 claim boot recovery and a boot enqueue isolated by `maxRefreshes: 0`; lines 62–76 correctly establish that repair occurs on unlock and `auth.vue` explicitly refreshes. Rewrite the header around restart-plus-unlock end-to-end recovery.
+
+- **Low — [service.test.ts:650](apps/extension/src/wallet/services/token-balance/service.test.ts:650), [service.test.ts:762](apps/extension/src/wallet/services/token-balance/service.test.ts:762): mutation-history comments are permanent noise.** “Reverting…” and “Removing… must fail something” should directly state the tested invariant instead.
+
+The sweep’s `existing` is safe today: `repo.getAll()` occurs after acquiring the same lock used by every relevant creator, so no other holder can write between the snapshot and `ensurePairsHoldingLock`. Returning `true` after a generation change following `repo.set` is also correct—the row physically exists, so both `have` and the repair count should reflect it. Suppressing its emit/enqueue is intentional; a later activation sees it as stale.
+
+The deletion-race, init-fence, and stale-enqueue tests genuinely pin their intended behavior. The targeted service suite passes: 23/23.
+
+conditional approve (with conditions: make the same-pair test begin with an absent pair and correct the inaccurate comments)
+---
+
+## Round 3 — convergence
+
+**Verdict:** `conditional approve` — "no production or test-behavior issue found"; one comment ordering fix, applied. Loop converged.
+
+One remaining comment defect; no production or test-behavior issue found.
+
+- **Low — [service.test.ts:656](apps/extension/src/wallet/services/token-balance/service.test.ts:656):** the comment reverses the ordering. Under serialization, the deletion’s storage snapshot occurs **after** the parked write, not before it. Suggested wording: “Deletion queues behind an in-flight creation, so its snapshot includes and sweeps the completed write.”
+
+The same-pair test now genuinely enters the race and asserts one physical allocation. The remaining comment changes are accurate. Targeted verification passed: 23/23.
+
+conditional approve (with conditions: correct the deletion-race comment’s snapshot ordering)
