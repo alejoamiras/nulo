@@ -419,4 +419,76 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 		// The context departed mid-allocation: the write must be skipped entirely.
 		expect(setSpy).not.toHaveBeenCalled()
 	})
+
+	test("two concurrent creators never collide on an id — the allocator is serialized", async () => {
+		// `allocateIdAvoiding` is max+1 over the live key space, and event
+		// subscribers dispatch un-awaited, so an account-added and a token-added
+		// handler can interleave. Unserialized they read the same pre-write key
+		// space, compute the same id, and the later repo.set silently overwrites
+		// the earlier row — a balance disappears with no onTokenBalanceDeleted.
+		const flush = () => new Promise((r) => setTimeout(r, 0))
+		const api = new FakeBrowserApi()
+		api.reset()
+
+		const onTokenAdded = new EventHandler<never>()
+		const onAccountAdded = new EventHandler<never>()
+		const noopTicker = { subscribe: () => ({ cancel: () => {} }) } as never
+		const services = new ServiceCollection()
+		services.add(
+			svc(PROFILE_SERVICE_NAME, {
+				onActiveProfileChanged: new EventHandler(),
+				getActiveProfile: async () => ({ id: "A", name: "A" }),
+				getDeletionState: () => new ProfileDeletionState(),
+			}),
+		)
+		services.add(svc(NETWORK_SERVICE_NAME, {}))
+		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountAdded, getAccounts: async () => [{ address: "0xa", chainId: 1 }] }))
+		services.add(
+			svc(TOKEN_SERVICE_NAME, {
+				onTokenAdded,
+				onTokenUpdated: new EventHandler(),
+				onTokenDeleted: new EventHandler(),
+				// Token 100 is already mapped, so the account-added path has work.
+				getTokensRaw: async () => [tokenRaw(100, "A")],
+				getTokenRaw: async () => tokenRaw(200, "A"),
+			}),
+		)
+		services.add(svc(TRANSACTION_SERVICE_NAME, { onTransactionUpdated: new EventHandler() }))
+		services.add(svc(EXECUTION_SERVICE_NAME, {}))
+		services.add(svc(TASK_SERVICE_NAME, { createNewTask: () => ({ id: "t1" }) }))
+		const service = new TokenBalanceService(new LoggerStore(new ConfigStore()), api, noopTicker)
+		services.add(service)
+		await services.start()
+
+		const repo = service as never as {
+			repo: { allocateIdAvoiding: (a: ReadonlySet<number>) => Promise<number>; set: (b: { id: number }) => Promise<void> }
+		}
+		// Every allocation resolves on the NEXT tick, so an unserialized second
+		// caller has a window to read the same key space before the first writes.
+		const real = repo.repo.allocateIdAvoiding.bind(repo.repo)
+		vi.spyOn(repo.repo, "allocateIdAvoiding").mockImplementation(async (avoid) => {
+			const id = await real(avoid)
+			await flush()
+			return id
+		})
+		const written: number[] = []
+		const realSet = repo.repo.set.bind(repo.repo)
+		vi.spyOn(repo.repo, "set").mockImplementation(async (b) => {
+			written.push(b.id)
+			return realSet(b)
+		})
+
+		// Both creators in flight at once, the way independent RPCs produce them.
+		// `invoke` dispatches un-awaited (that is the property under test), so the
+		// handlers are drained by flushing rather than by awaiting the invokes.
+		void onAccountAdded.invoke({ address: "0xb", chainId: 1 } as never)
+		void onTokenAdded.invoke(tokenRaw(200, "A") as never)
+		for (let i = 0; i < 40; i++) await flush()
+
+		expect(written).toHaveLength(2)
+		expect(new Set(written).size).toBe(2)
+		const rows = await new BalanceRepository(api).getAll()
+		expect(rows).toHaveLength(2)
+		expect(new Set(rows.map((r) => `${r.token}:${r.account}`)).size).toBe(2)
+	})
 })

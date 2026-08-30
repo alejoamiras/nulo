@@ -160,7 +160,7 @@ Every `getAll`/`getKeys`/`getAccounts` deserializes the entire `chrome.storage.l
 
 **Validation gate.** `bun run lint && bun run typecheck && bun run --cwd apps/extension test src/wallet/services/token-balance/`. Pass: exit 0. Layers: lint · typecheck · unit.
 
-### Phase 2 — Lock + one ensure path
+### Phase 2 — Lock + one ensure path ✓
 Introduce the service lock with **`maxHoldMs: null`**. Build the ensure path and route the **two live handlers** (`onAccountAdded`, `onTokenAdded`) through it — Phase 3 adds the two sweep callers, making four; wrap `restore()`'s whole `restoreRows` batch in a single acquisition **without** ensure semantics; put `purgeForTokens`' typed **and** raw passes under the same lock. `…HoldingLock` helpers so nothing can reacquire. `onTokenDeleted` removes from the map synchronously; every write re-checks the generation **and** token **identity** (`profileId`/`chainId`/`contract`, not `has(id)`). Add `AccountService.name` to `dependencies`. Fix the two bare `AccountService` stubs (`service.test.ts:279`, `cross-profile-isolation.test.ts:206`).
 
 **Fence the init hydration** — capture the generation before the first init await and commit both the hydration and its sweep only if generation *and* profile identity still match. This is the service's one unfenced token-map write (Fact 14); the sweep would turn that latent cache corruption into cross-profile balance writes.
