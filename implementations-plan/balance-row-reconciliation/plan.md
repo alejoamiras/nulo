@@ -82,7 +82,7 @@ Every `getAll`/`getKeys`/`getAccounts` deserializes the entire `chrome.storage.l
 | `token-balance/reconcile-pairs.ts` | **new** — pure diff, no I/O |
 | `token-balance/reconcile-pairs.test.ts` | **new** — table-driven, incl. a large-input case |
 | `token-balance/service.ts` | lock; ensure path; both sweeps; `restore()` under the lock; `onTokenDeleted` sync map removal; `dependencies` += `AccountService.name`; logs |
-| `token-balance/balance-repository.ts` | **pending Open question A** (key-identity) |
+| `token-balance/balance-repository.ts` | `requireKeyIdentityMatch: true` + `keyIdentityMode: "numeric"` (Phase 3) |
 | `token-balance/service.test.ts` | extend `:247-422`; **add `getAccountsRaw` to the `AccountService` stub at `:279`**; two-parked-allocators concurrency test |
 | `services/cross-profile-isolation.test.ts` | **add `getAccountsRaw` to the bare stub at `:206`** |
 | `token-balance/service.composition.test.ts` | **new** — real service graph, seeded rows, recovery proof |
@@ -134,7 +134,7 @@ Every `getAll`/`getKeys`/`getAccounts` deserializes the entire `chrome.storage.l
 2. ~~Steady-state cost is one batched read~~ — **false, corrected.** It was `1 + N` full-namespace reads plus a `getKeys()` per created row. Now 2 reads and 0 writes in the steady state via `getAccountsRaw`; the per-created-row allocation scan remains and is bounded by the repair count.
 3. ~~A strictly sequential loop suffices~~ — **false, corrected.** Refuted at both call sites (Facts 5, 14). Replaced by the service lock.
 4. **The pure diff seam is right** — retained, and now filters the existing index to active desired keys rather than materializing foreign rows.
-5. **Remaining live inference:** taking `restore()`'s allocate/write section under the same lock introduces no deadlock. Checked: `createTokenBalance` emits (`:232`) and enqueues (`:233`); `sendEvent` reaches connected ports only (`extension-messaging/src/background/service.ts:85-94`) and no in-SW service subscribes to `onTokenBalance*`, so no re-entrancy. `Lock` is non-reentrant with a 5-minute watchdog (`lock.ts:24-38`). To be re-verified during implementation.
+5. **Remaining live inference:** taking `restore()`'s allocate/write section under the same lock introduces no deadlock. Checked: `createTokenBalance` emits (`:232`) and enqueues (`:233`); `sendEvent` reaches connected ports only (`extension-messaging/src/background/service.ts:85-94`) and no in-SW service subscribes to `onTokenBalance*`, so no re-entrancy. `Lock` is non-reentrant and this instance disables the watchdog (`maxHoldMs: null`), so a missed re-entrancy path is a hang rather than a race — which is why every internal callee takes a `…HoldingLock` form and only entry points acquire. `withLock` releases through `finally` (`lock.ts:79`), so a throw or early return still releases. To be re-verified during implementation.
 
 ### Asks — resolved by the audits
 
@@ -161,7 +161,7 @@ Every `getAll`/`getKeys`/`getAccounts` deserializes the entire `chrome.storage.l
 **Validation gate.** `bun run lint && bun run typecheck && bun run --cwd apps/extension test src/wallet/services/token-balance/`. Pass: exit 0. Layers: lint · typecheck · unit.
 
 ### Phase 2 — Lock + one ensure path
-Introduce the service lock with **`maxHoldMs: null`**. Route the **four** ensure callers through one path; wrap `restore()`'s whole `restoreRows` batch in a single acquisition **without** ensure semantics; put `purgeForTokens`' typed **and** raw passes under the same lock. `…HoldingLock` helpers so nothing can reacquire. `onTokenDeleted` removes from the map synchronously; every write re-checks the generation **and** token **identity** (`profileId`/`chainId`/`contract`, not `has(id)`). Add `AccountService.name` to `dependencies`. Fix the two bare `AccountService` stubs (`service.test.ts:279`, `cross-profile-isolation.test.ts:206`).
+Introduce the service lock with **`maxHoldMs: null`**. Build the ensure path and route the **two live handlers** (`onAccountAdded`, `onTokenAdded`) through it — Phase 3 adds the two sweep callers, making four; wrap `restore()`'s whole `restoreRows` batch in a single acquisition **without** ensure semantics; put `purgeForTokens`' typed **and** raw passes under the same lock. `…HoldingLock` helpers so nothing can reacquire. `onTokenDeleted` removes from the map synchronously; every write re-checks the generation **and** token **identity** (`profileId`/`chainId`/`contract`, not `has(id)`). Add `AccountService.name` to `dependencies`. Fix the two bare `AccountService` stubs (`service.test.ts:279`, `cross-profile-isolation.test.ts:206`).
 
 **Fence the init hydration** — capture the generation before the first init await and commit both the hydration and its sweep only if generation *and* profile identity still match. This is the service's one unfenced token-map write (Fact 14); the sweep would turn that latent cache corruption into cross-profile balance writes.
 
@@ -172,7 +172,20 @@ New tests: two parked allocation callers produce unique ids and no duplicate pai
 ### Phase 3 — The sweep + key identity
 Init + profile-switch sweeps calling the ensure path; `getAccountsRaw` grouped in memory; re-enqueue never-projected rows; `Warn` repair-count / `Debug` elapsed-ms logs.
 
-**Enable `requireKeyIdentityMatch` on `BalanceRepository` here, not earlier** — landing it alongside the sweep means no intermediate phase hides mismatched rows without repairing them. Codex held this ruling with the deferral counter-argument in view: the sweep *is* the recovery story — the guard hides but retains the mismatched row, physical `getKeys()` still prevents overwriting it, and the awaited init creates a canonical replacement at a fresh id and enqueues its projection before the first balance RPC can complete. What is not preserved is the corrupt row's last-known value; the replacement starts unresolved and gets an authoritative projection, which is the fail-closed behaviour.
+**Enable the key-identity guard on `BalanceRepository` here, not earlier — and it MUST be configured as:**
+
+```ts
+new EntityStorage<TokenBalanceRaw>(TOKEN_BALANCE_STORAGE_ROOT, area, parse, {
+  requireKeyIdentityMatch: true,
+  keyIdentityMode: "numeric",
+})
+```
+
+`keyIdentityMode` defaults to `"string"` (`entity_storage.ts:44-45`) and that guard requires `typeof embedded === "string"` (`:161`), but balance ids are numbers (`spec.ts:30`). Passing `requireKeyIdentityMatch` **alone** would make every valid balance row read as `undefined` — an empty assets view — while `getKeys()` still returns their physical keys (`:206-212`), so every wake would allocate fresh rows that are themselves instantly hidden: unbounded storage growth on top of a blank wallet. The mode is not optional detail.
+
+Two tests, not one: the mismatched-key recovery case **and** a control that `@1` containing `{ id: 1, … }` stays visible.
+
+— landing it alongside the sweep means no intermediate phase hides mismatched rows without repairing them. Codex held this ruling with the deferral counter-argument in view: the sweep *is* the recovery story — the guard hides but retains the mismatched row, physical `getKeys()` still prevents overwriting it, and the awaited init creates a canonical replacement at a fresh id and enqueues its projection before the first balance RPC can complete. What is not preserved is the corrupt row's last-known value; the replacement starts unresolved and gets an authoritative projection, which is the fail-closed behaviour.
 
 Composition test (`COMPOSITION-TESTS.md`-compliant: storage + lifecycle, no PXE/bb/simulate) proving recovery and proving **zero** `repo.set` calls when state is complete. Service test: a valid mismatched-key desired row becomes exactly one visible canonical row while the old physical bytes remain untouched.
 
@@ -217,7 +230,7 @@ Title (≤93 chars): `fix(balances): serialize row creation and repair stranded 
 | `getAccountsRaw` | **fable first**, codex concurred | Removes the `all: true` footgun structurally; `1+N` reads → 2 |
 | `restore()` under the lock | **codex first**, fable identified restore as a third creator | Otherwise the allocation race stays alive |
 | `onTokenDeleted` sync map removal | **codex only** | The generation fence covers profile changes, not token deletion |
-| Global token-id sequence as a Fact | **fable only** | It's what makes the pair key safe in a shared namespace; was an unstated assumption |
+| Global token-id sequence as a Fact | **fable proposed, codex narrowed** | Recorded, then corrected: it holds only among *currently stored* rows. Ids are `max+1` and reusable after deleting the highest token, so a stale row from a deleted incarnation can still suppress repair — filed as a residual, not relied on |
 | Fix the two bare test stubs | **fable only** | Verbatim repeat of #485's phase-4 lesson |
 | Gate commands must run under Bun | **fable only** | CLAUDE.md:33 — `bun --bun vitest run`; the draft (and #485's gates) launched vitest under Node |
 | No 4th rendezvous gate | both | New production seam + the most flake-prone construction in the suite; would be the 9th `stopServiceWorker` copy |
@@ -236,4 +249,5 @@ Title (≤93 chars): `fix(balances): serialize row creation and repair stranded 
 **Fable (Opus, plan round 1): `conditional approve`** — 8 conditions, all adopted. Full transcript: `audit-fable.md`.
 **Codex (session `01a05286-63b9-7c91-a4b4-1827954071ce`, `gpt-5.6-sol` xhigh, plan round 1): `reject`** — blocking findings, all adopted. Full transcript: `audit-codex.md`.
 **Codex round 2 (re-audit of the consolidated design): `conditional approve`** — 7 conditions: fence the init hydration; separate restore from ensure semantics; include `purgeForTokens` in a non-force-releasing lock; strengthen token liveness beyond id membership; correct and file the temporal id-reuse residual; enable numeric key identity with recovery tests; make the e2e prove automatic projection against a remounted UI. **All seven adopted in this revision.**
-Round 3 (discharge check): pending.
+**Codex round 3 (discharge check): `reject`** — six of seven conditions discharged; one Critical: Phase 3 said "enable `requireKeyIdentityMatch`" without specifying `keyIdentityMode: "numeric"`, and the default `"string"` mode would have hidden every numeric-id balance row while `getKeys()` kept allocating replacements — a blank wallet with unbounded storage growth. **Adopted**, plus the two Low stale-text/wording fixes.
+Round 4 (re-check): pending.
