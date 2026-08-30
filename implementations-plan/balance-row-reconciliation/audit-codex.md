@@ -122,3 +122,113 @@ Reuse `waitForFreshBalanceRow` and `waitForTokenCardAmount`. This tests the ship
 **Keep `mid` — Low.** The boot-path blast radius, shared storage, silent row overwrite, and required concurrency/e2e coverage rule out `light`. `deep` is unnecessary because the recommended solution does not migrate the storage schema or introduce a new durable protocol.
 
 reject (with blocking findings: replace Outline A with one locked idempotent creation path covering both handlers, both lifecycle sweeps, and restore allocation; recover pre-enqueue rows; use one profile-wide account read; enforce balance key identity; and add deterministic concurrency plus direct-gap restart e2e coverage)
+---
+
+## Round 2 — re-audit of the consolidated design
+
+**Verdict:** `conditional approve` — 7 conditions, all adopted.
+
+The revision has the right architecture, but it has not fully discharged the blockers. The remaining problems are precise enough for conditional approval rather than another redesign.
+
+## Findings
+
+- **High — the unfenced init hydration is recorded, not fixed.** Fact 14 acknowledges the only unfenced token-map write, but neither Phase 2 nor Phase 3 changes it. `init()` subscribes before awaiting and later mutates `this.tokens` without checking `profileGeneration`; a profile switch can rebuild profile B and then the late init continuation can add profile A’s tokens back. The new sweep would turn that existing cache corruption into cross-profile balance writes. [plan.md:113](implementations-plan/balance-row-reconciliation/plan.md:113), [service.ts:120](apps/extension/src/wallet/services/token-balance/service.ts:120), [service.ts:127](apps/extension/src/wallet/services/token-balance/service.ts:127), [service.ts:255](apps/extension/src/wallet/services/token-balance/service.ts:255)
+
+  Fix it by capturing the generation before the first init await and committing both hydration and its sweep only if generation and profile identity still match. Add the deterministic “switch while `getTokensRaw` is parked” test the parallel audit’s C-2 finding calls for.
+
+- **High — restore must share the lock, but must not share the active-profile ensure authorization.** The plan says all five callers use one ensure path and that every write checks active token-map membership. That would reject restored balances: full-backup balances are restored before the imported profile is activated, so their token IDs are intentionally absent from the active map. [plan.md:41](implementations-plan/balance-row-reconciliation/plan.md:41), [plan.md:56](implementations-plan/balance-row-reconciliation/plan.md:56), [useFullBackupImport.ts:890](apps/extension/src/composables/useFullBackupImport.ts:890), [useFullBackupImport.ts:900](apps/extension/src/composables/useFullBackupImport.ts:900)
+
+  There are four ensure callers, plus one separate restore writer. Wrap the entire `restoreRows` batch in one lock acquisition, mirroring `TokenService.restore`, but retain only schema parsing and deletion-epoch authorization for those writes. Do not run restore through pair deduplication, zero initialization, generation checks, active-map membership, emit, or enqueue. [service.ts:406](apps/extension/src/wallet/services/token-balance/service.ts:406), [token/service.ts:713](apps/extension/src/wallet/services/token/service.ts:713)
+
+- **High — the mutation protocol omits `purgeForTokens`.** Phase 2 locks `onTokenDeleted`, but profile deletion invokes `purgeForTokens` directly. Its typed snapshot, deletes, and raw purge currently run outside any lock. A creation whose `repo.set` settles after that purge’s snapshot can survive profile deletion. The deletion-fence contract explicitly expects restore writers and their purge path to use the same leaf lock. [plan.md:149](implementations-plan/balance-row-reconciliation/plan.md:149), [service.ts:326](apps/extension/src/wallet/services/token-balance/service.ts:326), [coordinator.ts:116](apps/extension/src/wallet/services/profile-deletion/coordinator.ts:116), [profile-deletion-state.ts:64](apps/extension/src/wallet/services/profile/profile-deletion-state.ts:64)
+
+  Put the complete typed-plus-raw `purgeForTokens` operation under the same lock. Use explicitly named `...HoldingLock` helpers so an ensure or restore path cannot accidentally reacquire the non-reentrant lock.
+
+- **High — the default five-minute watchdog is incompatible with this correctness lock.** A forced release expressly permits a second critical section while the first is still executing, destroying the allocator invariant. Holds are data-dependent, the balance Cartesian product has no cap, and the extension has `unlimitedStorage`. Construct this lock with `maxHoldMs: null`, or introduce a proven upper bound below the watchdog; merely accepting the default is unsafe. [lock.ts:27](packages/wallet-core/src/utils/lock.ts:27), [lock.ts:138](packages/wallet-core/src/utils/lock.ts:138), [manifest.config.ts:39](apps/extension/manifest/manifest.config.ts:39)
+
+- **High — `tokens.has(id)` is not a sufficient token-liveness check.** Token IDs are globally allocated, but not globally monotonic: deleting the highest token permits its ID to be reused. The source explicitly warns about a successor reusing that ID. An in-flight old-token creation can therefore see the reused ID present and pass a bare membership check. Compare the current map entry’s stable identity—`profileId`, `chainId`, and `contract`—with the captured token, not merely its ID. [id-allocators.ts:17](apps/extension/src/wallet/services/id-allocators.ts:17), [token/service.ts:447](apps/extension/src/wallet/services/token/service.ts:447), [token/service.ts:681](apps/extension/src/wallet/services/token/service.ts:681)
+
+- **High — the “foreign row can never collide” assumption is false over time.** A worker death after token deletion but before its un-awaited balance purge can leave an old, already-projected row. A later token can reuse that ID; profiles can also share deterministic account addresses. The old `(tokenId, account)` row can then suppress repair and, because `updatedAt > 0`, will not be re-enqueued. “Global sequence” guarantees uniqueness among currently stored honest token rows, not across deleted incarnations. [plan.md:91](implementations-plan/balance-row-reconciliation/plan.md:91), [account/service.ts:550](apps/extension/src/wallet/services/account/service.ts:550), [token/service.ts:458](apps/extension/src/wallet/services/token/service.ts:458)
+
+  Correct the claimed invariant and file this alongside the deferred account-orphan/reassociation work. A durable solution needs non-reused token identities, an awaited token-delete cascade, or schema-carried token incarnation; the balance sweep cannot infer it from the current schema.
+
+- **High — enable `requireKeyIdentityMatch` in this PR.** The counterargument does not change my ruling. This reconcile is the migration/recovery story: with the numeric guard enabled, the mismatched row is hidden but retained; physical `getKeys()` still prevents overwriting it; awaited init creates a canonical replacement at a fresh ID and enqueues projection before the first balance RPC can complete. [balance-repository.ts:23](apps/extension/src/wallet/services/token-balance/balance-repository.ts:23), [entity_storage.ts:145](packages/wallet-core/src/storage/entity_storage.ts:145), [entity_storage.ts:206](packages/wallet-core/src/storage/entity_storage.ts:206), [service.ts:146](apps/extension/src/wallet/services/token-balance/service.ts:146)
+
+  What is not preserved is the corrupt row’s last-known balance value; the replacement deliberately starts unresolved and obtains an authoritative projection. That is the correct fail-closed behavior. Add a service test proving a valid mismatched-key desired row becomes exactly one visible canonical row while the old physical bytes remain untouched.
+
+- **Medium — the E2E can false-pass the projection and card assertions.** `waitForFreshBalanceRow` actively calls `refreshBalances` unless `maxRefreshes: 0`, so it can prove an explicit refresh rather than the boot enqueue. The existing popup can also retain its pre-deletion token card; `TokensView` does not refetch balances on the token-balance client’s reconnect. [helpers.ts:1434](apps/extension/tests/e2e/fixtures/helpers.ts:1434), [TokensView.vue:176](apps/extension/src/popup/components/modules/general/TokensView.vue:176), [TokensView.vue:337](apps/extension/src/popup/components/modules/general/TokensView.vue:337)
+
+  Require `maxRefreshes: 0` for the automatic-projection proof, then reload/remount the popup before asserting the card. Also name the shared worker-stop helper extraction—the tree currently has no reusable helper, only eight local definitions.
+
+- **Low — deterministic ordering is underspecified.** Sorting by chain, account index, and address does not order multiple tokens on the same chain. Include token ID in the ordering and test input permutations. [plan.md:60](implementations-plan/balance-row-reconciliation/plan.md:60)
+
+## Direct rulings
+
+- **Lock and restore:** Safe once restore is one whole-batch acquisition, `purgeForTokens` participates, the lock cannot force-release, and no active-map authorization is applied to restore. There is no current in-SW balance-event re-entry; restore itself emits nothing. The implementation should still structurally prevent nested acquisition.
+
+- **Zero-row retry predicate:** Sound. Enqueue coalesces an already-pending row; success always writes a current timestamp; failure persists `syncFailure`. Therefore an active desired row with `updatedAt === 0 && syncFailure === undefined` has no durable evidence that projection finished or failed. Tokens without balance functions still complete successfully and advance the timestamp. [balance-job-queue.ts:128](apps/extension/src/wallet/services/token-balance/balance-job-queue.ts:128), [balance-job-queue.ts:173](apps/extension/src/wallet/services/token-balance/balance-job-queue.ts:173), [balance-job-queue.ts:255](apps/extension/src/wallet/services/token-balance/balance-job-queue.ts:255)
+
+- **Phase split:** The dependency direction Phase 1 → Phase 2 → Phase 3 is sound. Nothing essential in Phase 2 depends on Phase 3. Enable key-identity guarding alongside Phase 3’s sweep, however, so no intermediate phase hides mismatched rows without repairing them. Phase 2 must describe four ensure callers plus a separate locked restore writer.
+
+- **Tier:** `mid` remains correct. These are concurrency, lifecycle, and recovery changes with real e2e coverage, but no new durable schema protocol is required for this PR.
+
+conditional approve (with conditions: fence init hydration and its sweep; separate restore from active-profile ensure semantics; include purgeForTokens in a non-force-releasing service lock; strengthen token liveness beyond id membership; correct and file the temporal token-id-reuse residual; enable numeric key identity with recovery tests; and make the e2e prove automatic projection against a remounted UI)
+---
+
+## Round 3 — discharge check
+
+**Verdict:** `reject` — six of seven discharged; one Critical (numeric key-identity mode). Adopted.
+
+Six of the seven round-2 conditions are substantively discharged. One remains a release-blocking omission.
+
+### Blocking finding
+
+**Critical — Phase 3 does not specify numeric key-identity mode.**
+
+The implementation instruction only says to enable `requireKeyIdentityMatch` ([plan.md](implementations-plan/balance-row-reconciliation/plan.md:175)). But `EntityStorage` defaults `keyIdentityMode` to `"string"` ([entity_storage.ts](packages/wallet-core/src/storage/entity_storage.ts:56)), whose guard requires an embedded string id ([entity_storage.ts](packages/wallet-core/src/storage/entity_storage.ts:158)). Balance ids are numbers ([spec.ts](apps/extension/src/wallet/services/token-balance/spec.ts:30)).
+
+A literal implementation using only `{ requireKeyIdentityMatch: true }` would therefore hide every valid balance row. Since `getKeys()` still returns their physical keys ([entity_storage.ts](packages/wallet-core/src/storage/entity_storage.ts:206)), each wake would allocate fresh rows that are themselves immediately hidden—emptying the wallet view while growing storage indefinitely.
+
+The plan must prescribe exactly:
+
+```ts
+{
+  requireKeyIdentityMatch: true,
+  keyIdentityMode: "numeric",
+}
+```
+
+Also retain the mismatched-row recovery test and add/assert the simpler control case that `@1` containing `{ id: 1, ... }` remains visible. The audit summary says “numeric key identity” ([plan.md](implementations-plan/balance-row-reconciliation/plan.md:238)), but the operative Phase 3 instructions do not.
+
+### Other rulings
+
+- **Restore split: discharged.** Whole-batch `withLock` acquisitions cannot interleave; `withLock` releases through `finally` ([lock.ts](packages/wallet-core/src/utils/lock.ts:79)). In the supported import flow, every slice restore is awaited before late activation ([useFullBackupImport.ts](apps/extension/src/composables/useFullBackupImport.ts:890), [useFullBackupImport.ts](apps/extension/src/composables/useFullBackupImport.ts:900)). Thus the target profile cannot run ensure first. Direct/repeated out-of-protocol restore can still create duplicates, but that is the already-recorded restore residual, not a new interleaving defect.
+
+- **Init hydration fence: discharged.** A switch after hydration commit increments the generation, changes the profile, and synchronously clears the token map before its first await ([service.ts](apps/extension/src/wallet/services/token-balance/service.ts:255)). The captured generation/profile check and per-write identity check in the plan then prevent the old sweep from writing ([plan.md](implementations-plan/balance-row-reconciliation/plan.md:64), [plan.md](implementations-plan/balance-row-reconciliation/plan.md:166)).
+
+- **Lock release: discharged.** Rejection, throw, or early return from the batch still invokes `leave()` in `finally` ([lock.ts](packages/wallet-core/src/utils/lock.ts:79)). No identified callback intentionally leaves an unsettled promise. The implementation should use `withLock`, as the cited `TokenService.restore` precedent does ([token/service.ts](apps/extension/src/wallet/services/token/service.ts:713)).
+
+- **Zero-row re-enqueue: discharged.** Such a row has no legitimate terminal meaning here. Existing in-memory work coalesces by balance id ([balance-job-queue.ts](apps/extension/src/wallet/services/token-balance/balance-job-queue.ts:126)); after worker death, re-enqueueing is exactly the required recovery. Rows that already failed are excluded by `syncFailure`.
+
+- **Low — phase wording remains inconsistent.** Phase 2 says it routes four callers and fences “its sweep” ([plan.md](implementations-plan/balance-row-reconciliation/plan.md:163)), while Phase 3 introduces the two sweep callers ([plan.md](implementations-plan/balance-row-reconciliation/plan.md:172)). The final architecture is clear, but Phase 2 should say it routes the two live handlers and prepares the ensure path; Phase 3 adds the two sweeps.
+
+- **Low — stale text:** the file map still says key identity is pending ([plan.md](implementations-plan/balance-row-reconciliation/plan.md:85)); Inference 5 still describes a five-minute watchdog despite `maxHoldMs: null` ([plan.md](implementations-plan/balance-row-reconciliation/plan.md:137)); and the decision ledger still claims the global token-id sequence makes pair keys safe despite the recorded temporal-reuse residual ([plan.md](implementations-plan/balance-row-reconciliation/plan.md:220)).
+
+reject (with blocking findings: Phase 3 must explicitly configure `keyIdentityMode: "numeric"` alongside `requireKeyIdentityMatch`)
+---
+
+## Round 4 — final
+
+**Verdict:** `approve`.
+
+The plan is implementable as written. The numeric identity blocker is fully discharged: Phase 3 specifies both options and requires positive and negative control tests ([plan.md](implementations-plan/balance-row-reconciliation/plan.md:175)).
+
+Only documentation nits remain:
+
+- **Low:** Phase 2 still says it commits hydration “and its sweep” ([plan.md](implementations-plan/balance-row-reconciliation/plan.md:166)), although Phase 3 introduces that sweep ([plan.md](implementations-plan/balance-row-reconciliation/plan.md:172)). This does not obscure the final implementation.
+
+- **Low:** Two citations remain inaccurate. Late activation is documented at `useFullBackupImport.ts:900-905`, not `:888-891`; and `token/service.ts:444-449` does not warn about id reuse—the explicit reuse warning is at `:681-684`. The underlying conclusions remain supported.
+
+No remaining architecture, concurrency, recovery, security, or test-design blocker.
+
+approve
