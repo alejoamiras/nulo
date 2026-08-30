@@ -155,7 +155,7 @@ Every `getAll`/`getKeys`/`getAccounts` deserializes the entire `chrome.storage.l
 
 ## Phases
 
-### Phase 1 — Pure diff module
+### Phase 1 — Pure diff module ✓
 `reconcile-pairs.ts` + colocated table-driven test: cross-chain exclusion, hidden accounts included, duplicate-pair input, empty input, a row whose token is absent from the map, deterministic ordering, and a large-input cost-shape case.
 
 **Validation gate.** `bun run lint && bun run typecheck && bun run --cwd apps/extension test src/wallet/services/token-balance/`. Pass: exit 0. Layers: lint · typecheck · unit.
