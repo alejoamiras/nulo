@@ -26,7 +26,15 @@ Outline A (additive create-only pass) was **rejected by both auditors**; Outline
 
 `TokenBalanceService` gains `private readonly lock = new Lock(...)` (`packages/wallet-core/src/utils/lock.ts:17`), placed on the **service**, mirroring `TokenService.persistToken` (`token/service.ts:279`). Not on `BalanceRepository`: the repository is a storage-ownership seam and cannot see generation checks, token liveness, emits, or queue behavior.
 
-**Every new-row allocator participates**: `onAccountAdded`, `onTokenAdded`, the init sweep, the profile-switch sweep, and **`restore()`'s allocation/writes** (`:406-427`) — which both audits flagged as a third allocator the plan had missed. Restore keeps its own row values, `TokenBalanceRawSchema.parse`, and `assertRestoreEpoch`; only its allocate-and-write section joins the hold.
+**Constructed with `maxHoldMs: null`.** The default 5-minute watchdog force-releases, which `lock.ts:29-34` and `:138-142` document as admitting "a second critical section into a legitimately-running one" — precisely the allocator invariant this lock exists to protect. Holds here are data-dependent (the balance Cartesian product has no cap; the extension has `unlimitedStorage`), so queueing is the correct semantic and the watchdog must be off.
+
+**Four ensure callers, plus one separate locked restore writer.** `onAccountAdded`, `onTokenAdded`, the init sweep and the profile-switch sweep share the idempotent ensure path. **`restore()` shares the lock but NOT the ensure semantics** — one whole-batch acquisition around its `restoreRows` loop, mirroring `TokenService.restore` (`token/service.ts:713`), retaining only `TokenBalanceRawSchema.parse` and `assertRestoreEpoch`. It must **not** run through pair dedup, zero-initialization, the generation check, active-map membership, emit, or enqueue.
+
+**Why restore cannot take the ensure path:** full-backup balances are restored *before* the imported profile is activated — `useFullBackupImport.ts:888-891` is explicit ("Late activation: open the session NOW that all backup data is in storage"), and the service loop at `:891-895` runs ahead of it. Restored token ids are therefore intentionally absent from the active map at write time, so applying active-map authorization to restore would **reject every restored balance and silently break full-backup import**.
+
+**`purgeForTokens` (`:328-347`) also joins the lock** — profile deletion invokes it directly (`profile-deletion/coordinator.ts:116-121`), and its typed snapshot, deletes and raw purge currently run unlocked, so a creation whose `repo.set` settles after that snapshot survives profile deletion. Both the typed and raw passes go under the same hold.
+
+**Nested acquisition must be structurally impossible.** The lock is non-reentrant, so every internal callee takes an explicitly named `…HoldingLock` form (the convention `TokenService._deleteTokenByIdHoldingLock` already uses) and only the outermost entry point acquires.
 
 The critical section covers **read → diff → allocate → write**, not merely allocation. Pre-loop reads that don't need serializing (`getTokenRaw`, the account read) stay outside the hold.
 
@@ -38,7 +46,7 @@ Without the lock, two creators read the same pre-write `getKeys()` snapshot, com
 
 ### 2. One idempotent ensure path
 
-All five call sites route through one method that, under the hold: reads existing rows once, builds desired pairs, diffs, and creates only what's missing — updating the in-memory existing-pair set after each creation so the batch is self-consistent without re-reading.
+The **four** ensure callers route through one method that, under the hold: reads existing rows once, builds desired pairs, diffs, and creates only what's missing — updating the in-memory existing-pair set after each creation so the batch is self-consistent without re-reading. Restore is the fifth writer and is deliberately outside this path (§1).
 
 ### 3. Repair both windows
 
@@ -53,11 +61,13 @@ Every `getAll`/`getKeys`/`getAccounts` deserializes the entire `chrome.storage.l
 
 ### 5. Token-deletion safety
 
-`onTokenDeleted` (`:317-324`) removes the token from `this.tokens` **synchronously**, then purges under the same lock. Immediately before any new write, re-check **both** the generation **and** token-map membership — the existing generation fence covers profile changes only, not token deletion.
+`onTokenDeleted` (`:317-324`) removes the token from `this.tokens` **synchronously**, then purges under the same lock. Immediately before any new write, re-check the generation **and** token liveness — the existing generation fence covers profile changes only, not token deletion.
+
+**Liveness is an identity comparison, not `tokens.has(id)`.** Token ids are allocated `max+1` (`id-allocators.ts:17-37`) and are therefore **not monotonic over time**: deleting the highest token frees its id for reuse, which `token/service.ts:444-449` already warns about. An in-flight creation for an old token would see the reused id present and pass a bare membership check. Compare the current map entry's stable identity — `profileId`, `chainId`, `contract` — against the captured token.
 
 ### 6. Pure diff module
 
-`token-balance/reconcile-pairs.ts` exports `missingBalancePairs({ tokens, accountsByChain, existing })` — no `chrome.*`, no repo, no service. It filters the existing index down to active desired keys rather than materializing every foreign row, and emits deterministic order (chainId, then account index, then address — `getAccountsRaw` does not sort, unlike `getAccounts` at `account/service.ts:169-172`).
+`token-balance/reconcile-pairs.ts` exports `missingBalancePairs({ tokens, accountsByChain, existing })` — no `chrome.*`, no repo, no service. It filters the existing index down to active desired keys rather than materializing every foreign row, and emits a **total** deterministic order — chainId, then **token id**, then account index, then address. Chain/account alone does not order multiple tokens on the same chain; `getAccountsRaw` does not sort, unlike `getAccounts` (`account/service.ts:169-172`). Pinned by an input-permutation test.
 
 ### 7. Other required changes
 
@@ -88,7 +98,7 @@ Every `getAll`/`getKeys`/`getAccounts` deserializes the entire `chrome.storage.l
 
 - **Threat model.** No new RPC (`rpcMethods` at `:35` unchanged), no new storage root, no key material, no network I/O, no dependency.
 - **Exact-pair forgery (High, accepted residual).** `TokenBalanceRaw` has neither `profileId` nor `chainId` (`spec.ts:30-38`), so a stored-state attacker can forge the active `(tokenId, account)` pair with chosen balances and the sweep will treat it as present. Mitigation is directional: desired pairs originate **exclusively** from active-profile tokens and `getAccountsRaw(profileId)`; existing rows may only answer "does this already-constructed desired key exist?" — never contribute identity. Fundamentally indistinguishable without a schema change; recorded, not solved.
-- **Why the shared namespace is nonetheless safe** — token ids are a **single global sequence across profiles** (`token/service.ts:298`; `restore()` reallocates rather than preserving source ids, `token/service.ts:721`), which `TokenBalanceService.backup` already relies on (`:399-400`, "an exact partition"). So a foreign row can never collide on a desired pair or suppress a legitimate creation. This invariant is load-bearing and gets a comment + a test.
+- **Shared-namespace safety holds only among *currently stored* rows (High, corrected).** Token ids are one global sequence across profiles (`token/service.ts:298`; `restore()` reallocates rather than preserving source ids, `:721`), which `TokenBalanceService.backup` relies on (`:399-400`, "an exact partition"). But ids are `max+1` (`id-allocators.ts:17-37`) and therefore **not monotonic over time** — deleting the highest token frees its id. A worker death after token deletion but before its un-awaited balance purge can leave an old, already-projected row; a later token can reuse that id, and profiles can share deterministic account addresses. That stale `(tokenId, account)` row then **suppresses repair** and, because `updatedAt > 0`, is not re-enqueued either. The sweep cannot infer incarnation from this schema. **Accepted residual, filed** — a durable fix needs non-reused token identities, an awaited token-delete cascade, or schema-carried incarnation.
 - **Codec-hidden malformed rows.** `getValues()` hides them; `getKeys()` still sees their physical keys, so a recreated pair lands at a fresh id and cannot overwrite the hidden bytes. Exactly one duplicate, once, self-limiting, and the hidden twin never reaches the UI. Both auditors agree: **do not** delete malformed rows in a create-only sweep — using raw fields to suppress repair would preserve the outage.
 - **Availability amplification (Medium).** The pass converts stored token × account cardinality into writes and queued tasks, and neither has a practical cap. Bounded by: one profile-wide account read, zero writes in the steady state, and the `Warn` repair-count log making an anomalous repair visible. A large-input unit test pins the diff's cost shape.
 - **Residual: valid duplicate pairs.** `restore()` imposes no `(token, account)` uniqueness and the view renders every returned row, so pre-existing duplicates stay visible. The sweep must not add another; it cannot safely clean existing ones. Recorded.
@@ -109,11 +119,14 @@ Every `getAll`/`getKeys`/`getAccounts` deserializes the entire `chrome.storage.l
 10. `footprint-coverage.test.ts` governs migrations only; `TOKEN_BALANCE_STORAGE_ROOT` is already registered (`backup-migration-registry.ts:205`).
 11. `TokenBalanceService` has no `onAccountDeleted` subscriber (`:120-125`) — unlike `TransactionService` (`transaction/service.ts:113`), `IncomingTransferService` (`incoming-transfer/service.ts:275`) and `AuthRegistryService` (`auth-registry/service.ts:97`).
 12. No `Lock` in `TokenBalanceService`; `TokenService` serializes its allocate/write section (`token/service.ts:279,298`).
-13. **New.** Token ids are one global sequence across profiles (`token/service.ts:298`, restore reallocates at `:721`); `TokenBalanceService.backup` already depends on it (`:399-400`).
+13. **New, and narrower than first recorded.** Token ids are one global sequence across profiles (`token/service.ts:298`, restore reallocates at `:721`) — but **only among currently stored rows**. Allocation is `max+1` (`id-allocators.ts:17-37`), so deleting the highest token frees its id for reuse (`token/service.ts:444-449` warns about exactly this). The "a foreign row can never suppress a creation" claim is therefore false across deleted incarnations.
 14. **New.** `init()` subscribes at `:120-125` before awaiting at `:127`/`:129`; the `:129-131` map write is the only unfenced token-map write in the service. RPC handlers are live during `services.start()` (`runtime.ts:435`).
 15. **New.** `getAccountsRaw(profileId)` exists (`account/service.ts:564-567`) — one read, all chains, no visibility parameter; already used from a boot path (`account-integrity/coordinator.ts:93`).
 16. **New.** `updatedAt === 0` renders a permanent "Loading balance…" state (`TokenCard.vue:50-52`), and no ambient periodic resync exists.
-17. **New.** `stopServiceWorker` has **8** local definitions in the e2e tree (verified by grep), not 5.
+17. **New.** `stopServiceWorker` has **8** local definitions in the e2e tree (verified by grep), not 5 — there is no reusable helper.
+18. **New.** Full-backup restore writes **before** profile activation (`useFullBackupImport.ts:888-895`, "Late activation"), so restored token ids are intentionally absent from the active map at write time.
+19. **New.** `Lock`'s default watchdog force-releases and explicitly "admit[s] a second critical section into a legitimately-running one" (`lock.ts:29-34`, `:138-142`); locks with by-design long holds must pass `maxHoldMs: null`.
+20. **New.** `waitForFreshBalanceRow` actively calls `refreshBalances` unless `maxRefreshes: 0` (`tests/e2e/fixtures/helpers.ts:1434`), and `TokensView` does not refetch balances on the token-balance client's reconnect (`TokensView.vue:176`, `:337`).
 
 ### Inferences (post-audit)
 
@@ -135,9 +148,10 @@ Every `getAll`/`getKeys`/`getAccounts` deserializes the entire `chrome.storage.l
 | 5 | Direction? | **Create-only** (plus the re-enqueue). General deletion can't be made owner-safe from this schema. |
 | 6 | Tier? | **`mid`**, both auditors. |
 
-### Open question A — still live, routed back to codex
+### Filed as separate follow-ups
 
-**Enable `requireKeyIdentityMatch` on `BalanceRepository` in this PR, or file it separately?** The auditors disagree: codex says enable here (a row at key `@99` with embedded `id: 1` is served by `getAll()`, can suppress repair, and its later `get(1)` reads another key — `balance-repository.ts:23`, `entity_storage.ts:38,152`); fable filed the same finding as pre-existing C-7 and out of scope. Enabling a read-side guard on a live storage root changes how existing mismatched rows behave, which is a different risk class from an additive sweep.
+- **`onAccountDeleted` orphans** (Ask 1b) — needs an awaited, profile/chain-scoped coordination path; a bare subscriber isn't durable and deleting by address alone can erase another profile's rows.
+- **Temporal token-id reuse** — a stale already-projected row from a deleted token incarnation can suppress repair and won't be re-enqueued (`updatedAt > 0`). Needs non-reused identities, an awaited token-delete cascade, or schema-carried incarnation.
 
 ## Phases
 
@@ -147,17 +161,27 @@ Every `getAll`/`getKeys`/`getAccounts` deserializes the entire `chrome.storage.l
 **Validation gate.** `bun run lint && bun run typecheck && bun run --cwd apps/extension test src/wallet/services/token-balance/`. Pass: exit 0. Layers: lint · typecheck · unit.
 
 ### Phase 2 — Lock + one ensure path
-Introduce the service lock; route `onAccountAdded`, `onTokenAdded` and `restore()`'s allocate/write through it; `onTokenDeleted` synchronous map removal + purge under the lock; re-check generation **and** map membership before each write. Add `AccountService.name` to `dependencies`. Fix the two bare `AccountService` stubs (`service.test.ts:279`, `cross-profile-isolation.test.ts:206`). New test: two parked allocation callers must produce unique ids and no duplicate pair.
+Introduce the service lock with **`maxHoldMs: null`**. Route the **four** ensure callers through one path; wrap `restore()`'s whole `restoreRows` batch in a single acquisition **without** ensure semantics; put `purgeForTokens`' typed **and** raw passes under the same lock. `…HoldingLock` helpers so nothing can reacquire. `onTokenDeleted` removes from the map synchronously; every write re-checks the generation **and** token **identity** (`profileId`/`chainId`/`contract`, not `has(id)`). Add `AccountService.name` to `dependencies`. Fix the two bare `AccountService` stubs (`service.test.ts:279`, `cross-profile-isolation.test.ts:206`).
+
+**Fence the init hydration** — capture the generation before the first init await and commit both the hydration and its sweep only if generation *and* profile identity still match. This is the service's one unfenced token-map write (Fact 14); the sweep would turn that latent cache corruption into cross-profile balance writes.
+
+New tests: two parked allocation callers produce unique ids and no duplicate pair (must fail without the lock — record the red run); a profile switch while `getTokensRaw` is parked must not let the late init continuation repopulate the departed profile's tokens.
 
 **Validation gate.** Above, plus `bun run --cwd apps/extension test src/wallet/services/`. Pass: exit 0; the concurrency test fails without the lock (record the red run).
 
-### Phase 3 — The sweep
-Init + profile-switch sweeps calling the ensure path; `getAccountsRaw` grouped in memory; re-enqueue never-projected rows; `Warn` repair-count / `Debug` elapsed-ms logs. Composition test (`COMPOSITION-TESTS.md`-compliant: storage + lifecycle, no PXE/bb/simulate) proving recovery and proving **zero** `repo.set` calls when state is complete.
+### Phase 3 — The sweep + key identity
+Init + profile-switch sweeps calling the ensure path; `getAccountsRaw` grouped in memory; re-enqueue never-projected rows; `Warn` repair-count / `Debug` elapsed-ms logs.
+
+**Enable `requireKeyIdentityMatch` on `BalanceRepository` here, not earlier** — landing it alongside the sweep means no intermediate phase hides mismatched rows without repairing them. Codex held this ruling with the deferral counter-argument in view: the sweep *is* the recovery story — the guard hides but retains the mismatched row, physical `getKeys()` still prevents overwriting it, and the awaited init creates a canonical replacement at a fresh id and enqueues its projection before the first balance RPC can complete. What is not preserved is the corrupt row's last-known value; the replacement starts unresolved and gets an authoritative projection, which is the fail-closed behaviour.
+
+Composition test (`COMPOSITION-TESTS.md`-compliant: storage + lifecycle, no PXE/bb/simulate) proving recovery and proving **zero** `repo.set` calls when state is complete. Service test: a valid mismatched-key desired row becomes exactly one visible canonical row while the old physical bytes remain untouched.
 
 **Validation gate.** Above, plus the composition test green and the no-op assertion. Layers: lint · typecheck · unit · composition.
 
 ### Phase 4 — E2E
-Create a token/account normally, delete every matching `nulo:core:token-balances@*` row via `page.evaluate`, prove the gap, stop the worker (existing helper — do **not** add a 9th copy), wake it, then assert: exactly one valid pair row reappears; it gets a fresh projection (`waitForFreshBalanceRow`); the card shows the expected amount (`waitForTokenCardAmount`). Must fail without the sweep — record red/green in `lessons/phase-4.md`.
+Create a token/account normally, delete every matching `nulo:core:token-balances@*` row via `page.evaluate`, prove the gap, stop the worker, wake it, then assert: exactly one valid pair row reappears; it gets a fresh projection; the card shows the expected amount.
+
+Two false-pass traps to close (Fact 20): pass **`maxRefreshes: 0`** to `waitForFreshBalanceRow` so the assertion proves the *boot enqueue* rather than an explicit refresh the helper itself triggered; and **reload/remount the popup** before asserting the card, because `TokensView` does not refetch on the client's reconnect and would otherwise still show its pre-deletion card. Extract `stopServiceWorker` into `fixtures/helpers.ts` rather than adding a 9th copy. Must fail without the sweep — record red/green in `lessons/phase-4.md`.
 
 **Validation gate.** `bun run e2e:agent tests/e2e/network/<spec>.test.ts` plus the documented pre-fix red run.
 
@@ -198,10 +222,18 @@ Title (≤93 chars): `fix(balances): serialize row creation and repair stranded 
 | Gate commands must run under Bun | **fable only** | CLAUDE.md:33 — `bun --bun vitest run`; the draft (and #485's gates) launched vitest under Node |
 | No 4th rendezvous gate | both | New production seam + the most flake-prone construction in the suite; would be the 9th `stopServiceWorker` copy |
 | 1b (`onAccountDeleted`) deferred | both | Needs an awaited, profile/chain-scoped coordination path; addresses can be shared across profiles |
-| Key-identity scope | **disputed** | Open question A — routed back to codex |
+| Key-identity scope | **codex, held under challenge** | Enabled in this PR, landing with Phase 3. The sweep IS the recovery story: the guard hides but retains the row, `getKeys()` still prevents overwrite, and the awaited init creates a canonical replacement before the first balance RPC. The corrupt row's last-known value is deliberately not preserved |
+| `maxHoldMs: null` on the lock | **codex only (round 2)** | The default watchdog force-releases and admits a second critical section into a running one — it would break the very invariant the lock exists for (`lock.ts:29-34`) |
+| Restore shares the lock, not the ensure semantics | **codex only (round 2)** | Full-backup restore writes before profile activation, so active-map authorization would reject every restored balance and break import (`useFullBackupImport.ts:888-895`) |
+| `purgeForTokens` under the lock | **codex only (round 2)** | Profile deletion calls it directly; unlocked, a creation settling after its snapshot survives deletion |
+| Token liveness by identity, not `has(id)` | **codex only (round 2)** | Ids are `max+1` and reusable after deleting the highest token |
+| Fence the init hydration | **codex round 2, fable C-2** | The one unfenced token-map write; the sweep would turn latent cache corruption into cross-profile writes |
+| e2e `maxRefreshes: 0` + popup remount | **codex only (round 2)** | Otherwise the spec can prove an explicit refresh, and can assert a stale pre-deletion card |
+| Temporal token-id reuse | **codex only (round 2)** | Fact 13 as first recorded was false across deleted incarnations; corrected and filed as a residual |
 
 ## Audit verdicts
 
 **Fable (Opus, plan round 1): `conditional approve`** — 8 conditions, all adopted. Full transcript: `audit-fable.md`.
 **Codex (session `01a05286-63b9-7c91-a4b4-1827954071ce`, `gpt-5.6-sol` xhigh, plan round 1): `reject`** — blocking findings, all adopted. Full transcript: `audit-codex.md`.
-Round 2 (re-audit of this revision): pending.
+**Codex round 2 (re-audit of the consolidated design): `conditional approve`** — 7 conditions: fence the init hydration; separate restore from ensure semantics; include `purgeForTokens` in a non-force-releasing lock; strengthen token liveness beyond id membership; correct and file the temporal id-reuse residual; enable numeric key identity with recovery tests; make the e2e prove automatic projection against a remounted UI. **All seven adopted in this revision.**
+Round 3 (discharge check): pending.
