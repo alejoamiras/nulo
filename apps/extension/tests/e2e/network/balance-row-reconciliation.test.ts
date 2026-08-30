@@ -17,7 +17,8 @@
  */
 
 import { expect, inject } from "vitest"
-import { openPopup, test, waitForHash } from "../fixtures/extension"
+import { clickByTestId, openPopup, replaceInputValue, test, waitForHash } from "../fixtures/extension"
+import { TEST_PASSWORD } from "../fixtures/constants"
 import { stopServiceWorker, waitForFreshBalanceRow, waitForTokenCardAmount } from "../fixtures/helpers"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -34,7 +35,10 @@ test.skipIf(!hasConfig)(
 		await waitForHash(page, "#/popup/general")
 
 		// The fixture minted 1000 tokens and imported them, so a projected row
-		// exists before anything is deleted.
+		// exists before anything is deleted. `tokenReadyExtension` is file-scoped
+		// and this spec mutates it, but that is self-correcting: on a retry the
+		// sweep has already restored what the previous attempt deleted. It only
+		// cascades when the sweep is broken — where failing is the right outcome.
 		await waitForTokenCardAmount(page, "1,000", "TST", 60_000)
 
 		const deleted = await page.evaluate(async (root: string) => {
@@ -55,11 +59,16 @@ test.skipIf(!hasConfig)(
 		await page.close()
 		await stopServiceWorker(tokenReadyExtension)
 
-		// Opening the popup wakes the worker; init's sweep runs before any balance
-		// RPC can resolve, because the service is not marked initialized until it
-		// completes.
+		// Killing the worker drops the session, so the popup wakes it and lands on
+		// auth. Unlocking activates the profile, and BOTH sweeps run before any
+		// balance RPC can resolve — the service is not marked initialized until
+		// init's sweep completes, and activation triggers the switch sweep.
 		const reopened = await openPopup(tokenReadyExtension)
-		await waitForHash(reopened, "#/popup/general")
+		await waitForHash(reopened, "#/popup/auth", 30_000)
+		await reopened.waitForSelector('[data-testid="auth-password-input"]', { visible: true, timeout: 15_000 })
+		await replaceInputValue(reopened, '[data-testid="auth-password-input"]', TEST_PASSWORD)
+		await clickByTestId(reopened, "auth-submit")
+		await waitForHash(reopened, "#/popup/general", 60_000)
 
 		const accountAddress = tokenReadyExtension.accountAddress
 		// maxRefreshes: 0 — the row must be projected by the boot enqueue alone.

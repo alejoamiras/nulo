@@ -191,7 +191,7 @@ Composition test (`COMPOSITION-TESTS.md`-compliant: storage + lifecycle, no PXE/
 
 **Validation gate.** Above, plus the composition test green and the no-op assertion. Layers: lint · typecheck · unit · composition.
 
-### Phase 4 — E2E
+### Phase 4 — E2E ✓
 Create a token/account normally, delete every matching `nulo:core:token-balances@*` row via `page.evaluate`, prove the gap, stop the worker, wake it, then assert: exactly one valid pair row reappears; it gets a fresh projection; the card shows the expected amount.
 
 Two false-pass traps to close (Fact 20): pass **`maxRefreshes: 0`** to `waitForFreshBalanceRow` so the assertion proves the *boot enqueue* rather than an explicit refresh the helper itself triggered; and **reload/remount the popup** before asserting the card, because `TokensView` does not refetch on the client's reconnect and would otherwise still show its pre-deletion card. Extract `stopServiceWorker` into `fixtures/helpers.ts` rather than adding a 9th copy. Must fail without the sweep — record red/green in `lessons/phase-4.md`.
