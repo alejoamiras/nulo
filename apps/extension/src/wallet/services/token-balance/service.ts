@@ -417,12 +417,18 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	}
 
 	private readonly onTokenDeleted = async (token: TokenInfo) => {
+		// Synchronous, before any await: a creation that checks token liveness
+		// after this point must see the token gone.
 		this.tokens.delete(token.id)
-		for (const tb of (await this.repo.getAll()).filter((x) => x.token === token.id)) {
-			this.invalidatedBalanceIds.add(tb.id)
-			await this.repo.delete(tb.id)
-			this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb, token))
-		}
+		// Under the same lock as the creators — otherwise a creation whose write
+		// settles after this snapshot survives the deletion.
+		await this.lock.withLock(async () => {
+			for (const tb of (await this.repo.getAll()).filter((x) => x.token === token.id)) {
+				this.invalidatedBalanceIds.add(tb.id)
+				await this.repo.delete(tb.id)
+				this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb, token))
+			}
+		})
 	}
 
 	/** Awaited balance purge for a SET of token ids — called by the deletion
