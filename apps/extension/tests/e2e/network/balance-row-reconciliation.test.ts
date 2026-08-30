@@ -1,19 +1,15 @@
 /**
- * A token whose balance row is gone must come back on the next service-worker
- * boot, and must get a real projection — not just a placeholder row.
+ * A token whose balance row is gone must come back — with a real projection —
+ * once the wallet is restarted and unlocked.
  *
  * The gap this repairs is produced in production by an MV3 worker death inside
  * `createTokenBalance`, between the token row landing and its balance backfill.
  * Seeding the gap directly is deliberate: parking a worker mid-write and killing
  * it there proves MV3 nondeterminism, not the recovery that actually shipped.
  *
- * Two false-passes this spec is built to avoid:
- *  - `waitForFreshBalanceRow` re-kicks `refreshBalances` unless `maxRefreshes: 0`,
- *    so without that the assertion proves an explicit refresh rather than the
- *    boot enqueue.
- *  - `TokensView` does not refetch on the balance client's reconnect, so an
- *    already-open popup keeps rendering its pre-deletion card. The popup is
- *    reopened before the card is asserted.
+ * Scope: this asserts END-TO-END recovery across restart + unlock. It does not
+ * isolate the sweep's own enqueue — `auth.vue` refreshes balances on unlock — so
+ * the enqueue itself is pinned by the service-level task-spy test instead.
  */
 
 import { expect, inject } from "vitest"

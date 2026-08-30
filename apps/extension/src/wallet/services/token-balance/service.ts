@@ -261,13 +261,16 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	}
 
 	/**
-	 * The one path that creates rows. Serializing allocation alone is not enough:
-	 * two creators can hold the lock in turn and each create the SAME pair under a
-	 * different id, so the existence check has to happen inside the same hold as
-	 * the write. Callers MUST already hold the lock.
+	 * Creates rows for pairs that do not have one. Serializing allocation alone is
+	 * not enough: two creators can hold the lock in turn and each create the SAME
+	 * pair under a different id, so the existence check has to happen inside the
+	 * same hold as the write. Callers MUST already hold the lock.
 	 *
-	 * `existing` lets a caller that has already read the rows (the sweep) avoid a
-	 * second full-namespace deserialization.
+	 * `existing` skips a second full-namespace read for a caller that has one — it
+	 * MUST have been read during the current hold, or it can miss a write that
+	 * landed before this call and the pair is created twice. (`restore()` writes
+	 * directly rather than through here: it carries backup values and its token
+	 * ids are absent from the active map by design.)
 	 */
 	private async ensurePairsHoldingLock(
 		pairs: readonly { token: Token; account: Account }[],
@@ -333,9 +336,9 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 			const repaired = await this.ensurePairsHoldingLock(plan.missing, gen, existing)
 
-			// A non-zero repair means an earlier write did not complete — a worker
-			// death mid-create, or a row the identity guard now hides. Worth
-			// surfacing, unlike the no-op path.
+			// Surfaced because a non-zero repair means something upstream left the
+			// store inconsistent; the count is the fact, the cause is not inferable
+			// here.
 			if (repaired > 0 || plan.staleTokens.length > 0) {
 				this.logWarn(`balance reconcile: created ${repaired}, re-queued ${plan.staleTokens.length} (${Date.now() - startedAt}ms)`)
 			} else {
@@ -438,10 +441,10 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		// after this point must see the token gone.
 		this.tokens.delete(token.id)
 		// Under the same lock as the creators — otherwise a creation whose write
-		// settles after this snapshot survives the deletion. Emitting inside the
-		// hold is safe because no in-worker service subscribes to onTokenBalance*;
-		// the lock is non-reentrant, so a future subscriber that called back in
-		// would deadlock rather than race.
+		// settles after this snapshot survives the deletion. The emit inside the
+		// hold reaches no in-worker subscriber today; `EventHandler.invoke` does
+		// not await subscribers, so one added later would queue behind this hold
+		// rather than re-enter it.
 		await this.lock.withLock(async () => {
 			for (const tb of (await this.repo.getAll()).filter((x) => x.token === token.id)) {
 				this.invalidatedBalanceIds.add(tb.id)

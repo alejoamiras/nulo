@@ -608,7 +608,10 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 			svc(ACCOUNT_SERVICE_NAME, {
 				onAccountAdded,
 				getAccounts: async () => [{ address: "0xa", chainId: 1 }],
-				getAccountsRaw: async () => [{ address: "0xa", chainId: 1, index: 0, profileId: "A" }],
+				// Empty for the boot sweep so the pair does NOT exist when the two
+				// handlers race — otherwise both take the already-present skip path
+				// and the race window is never entered.
+				getAccountsRaw: async () => [],
 			}),
 		)
 		services.add(
@@ -631,7 +634,7 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 			repo: { allocateIdAvoiding: (a: ReadonlySet<number>) => Promise<number> }
 		}
 		const real = repo.repo.allocateIdAvoiding.bind(repo.repo)
-		vi.spyOn(repo.repo, "allocateIdAvoiding").mockImplementation(async (avoid) => {
+		const allocSpy = vi.spyOn(repo.repo, "allocateIdAvoiding").mockImplementation(async (avoid) => {
 			const id = await real(avoid)
 			await flush()
 			return id
@@ -644,11 +647,14 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 
 		const rows = await new BalanceRepository(api).getAll()
 		expect(rows.filter((r) => r.token === 100 && r.account === "0xa")).toHaveLength(1)
+		// Exactly one allocation: the second holder must observe the first's write,
+		// which only holds if the existence check runs inside the same hold.
+		expect(allocSpy).toHaveBeenCalledTimes(1)
 	})
 
 	test("a creation parked mid-write cannot survive a token deletion", async () => {
-		// Reverting the lock on onTokenDeleted's purge must fail something: every
-		// other deletion test finishes seeding before the delete begins.
+		// A deletion must be serialized behind an in-flight creation, so a row
+		// written after the deletion's snapshot is still swept.
 		const flush = () => new Promise((r) => setTimeout(r, 0))
 		const api = new FakeBrowserApi()
 		api.reset()
@@ -759,8 +765,8 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 	})
 
 	test("a never-projected row is re-queued at start, not just left alone", async () => {
-		// Removing the staleTokens enqueue must fail something: the row-count
-		// assertions alone stay green without it.
+		// A row that exists but was never projected must be queued for projection
+		// at start; row-count assertions alone cannot observe that.
 		const api = new FakeBrowserApi()
 		api.reset()
 		await new BalanceRepository(api).set({
