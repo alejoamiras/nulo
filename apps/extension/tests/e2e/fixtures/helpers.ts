@@ -1,6 +1,6 @@
-import type { Page } from "puppeteer"
+import type { Page, Target } from "puppeteer"
 import { TEST_PASSWORD } from "./constants"
-import { clickByTestId, clickSelector, replaceInputValue, withTimeoutMessage } from "./extension"
+import { type ExtensionContext, clickByTestId, clickSelector, replaceInputValue, withTimeoutMessage } from "./extension"
 
 /**
  * Selector contract for tests in this directory.
@@ -1645,4 +1645,43 @@ export async function deleteNetworkRow(page: Page, name: string): Promise<void> 
 		{ timeout: 5_000 },
 	)
 	await page.waitForFunction((sel: string) => !document.querySelector(sel), { timeout: 5_000 }, rowSelector)
+}
+
+/**
+ * Terminate the extension's service worker and wait until the ORIGINAL target
+ * is gone.
+ *
+ * `worker.close()` is the only Puppeteer call that actually kills an MV3
+ * service worker — `Runtime.terminateExecution` leaves it running. The
+ * destruction listener is armed BEFORE the close and keyed on Target object
+ * identity rather than a target id, so a fast replacement cannot be mistaken
+ * for the original surviving: without that, a restart test passes against a
+ * worker that never died.
+ *
+ * Extracted here after the eighth copy-paste; prefer this over a ninth local
+ * definition.
+ */
+export async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
+	const swTarget = await ext.browser.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId), {
+		timeout: 15_000,
+	})
+
+	const destroyed = new Promise<void>((resolve, reject) => {
+		const timer = setTimeout(() => {
+			ext.browser.off("targetdestroyed", onDestroyed)
+			reject(new Error("stopServiceWorker: the service-worker target was still alive 15s after close()"))
+		}, 15_000)
+		function onDestroyed(target: Target) {
+			if (target !== swTarget) return
+			clearTimeout(timer)
+			ext.browser.off("targetdestroyed", onDestroyed)
+			resolve()
+		}
+		ext.browser.on("targetdestroyed", onDestroyed)
+	})
+
+	const worker = await swTarget.worker()
+	if (!worker) throw new Error("stopServiceWorker: service-worker target exposed no worker to close")
+	await worker.close()
+	await destroyed
 }
