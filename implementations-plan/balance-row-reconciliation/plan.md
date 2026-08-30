@@ -198,7 +198,7 @@ Two false-pass traps to close (Fact 20): pass **`maxRefreshes: 0`** to `waitForF
 
 **Validation gate.** `bun run e2e:agent tests/e2e/network/<spec>.test.ts` plus the documented pre-fix red run.
 
-### Phase 5 — Regression sweep + docs
+### Phase 5 — Regression sweep + docs ✓
 `bun run audit:vue`; **both** smoke modes (armed source build, and unarmed artifact-mode with `NULO_E2E_ARTIFACT_RUN=1` + `EXTENSION_PATH` — the default command exercises neither, per #485's `lessons/phase-4.md`); `NULO_E2E_PROVERLESS=1 bun run e2e:agent`. Docs: `ARCHITECTURE.md` balance-row lifecycle.
 
 **Validation gate.** All four exit 0.
