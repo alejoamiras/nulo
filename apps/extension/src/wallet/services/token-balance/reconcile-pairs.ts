@@ -8,22 +8,19 @@
  * lives on the other side of this boundary.
  */
 
-/** The token fields reconciliation needs. Deliberately narrower than `Token`
- *  so this module can be exercised without the storage codec. */
+/** Narrower than `Token` so this module is exercisable without the storage codec. */
 export type ReconcileToken = {
 	id: number
 	chainId: number
 }
 
-/** The account fields reconciliation needs. `index` participates in the sort
- *  only as a tiebreak-before-address. */
+/** `index` participates only as a sort tiebreak before address. */
 export type ReconcileAccount = {
 	address: string
 	chainId: number
 	index: number
 }
 
-/** The existing-row fields reconciliation needs. */
 export type ReconcileRow = {
 	token: number
 	account: string
@@ -60,7 +57,8 @@ function pairKey(token: number, account: string): string {
  * so a foreign profile's rows are never materialized. This cannot defend
  * against a stale row left by a DELETED token whose id was later reused —
  * ids are `max+1`, so reuse is possible and such a row would suppress repair.
- * Not solvable from this schema; tracked separately.
+ * Not solvable from this schema — it needs non-reused token identities, an
+ * awaited token-delete cascade, or a schema-carried incarnation.
  *
  * Output order is total and deterministic — chainId, token id, account index,
  * then address — so a repair batch allocates ids in a reproducible sequence.
@@ -84,8 +82,6 @@ export function reconcilePlan<T extends ReconcileToken, A extends ReconcileAccou
 	for (const token of tokens) {
 		for (const account of accountsByChain.get(token.chainId) ?? []) {
 			const key = pairKey(token.id, account.address)
-			// A duplicate token id or account address in the inputs must not
-			// yield the same pair twice.
 			if (desired.has(key)) continue
 			desired.add(key)
 			pairs.push({ token, account })

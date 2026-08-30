@@ -60,9 +60,8 @@ test.skipIf(!hasConfig)(
 		await stopServiceWorker(tokenReadyExtension)
 
 		// Killing the worker drops the session, so the popup wakes it and lands on
-		// auth. Unlocking activates the profile, and BOTH sweeps run before any
-		// balance RPC can resolve — the service is not marked initialized until
-		// init's sweep completes, and activation triggers the switch sweep.
+		// auth. The wallet is locked at that point, so it is the UNLOCK — via
+		// `onActiveProfileChanged` — that runs the sweep which repairs this gap.
 		const reopened = await openPopup(tokenReadyExtension)
 		await waitForHash(reopened, "#/popup/auth", 30_000)
 		await reopened.waitForSelector('[data-testid="auth-password-input"]', { visible: true, timeout: 15_000 })
@@ -71,7 +70,10 @@ test.skipIf(!hasConfig)(
 		await waitForHash(reopened, "#/popup/general", 60_000)
 
 		const accountAddress = tokenReadyExtension.accountAddress
-		// maxRefreshes: 0 — the row must be projected by the boot enqueue alone.
+		// maxRefreshes: 0 stops the HELPER from re-kicking refreshes. It does not
+		// isolate the sweep's own enqueue — `auth.vue` calls refreshBalances on
+		// unlock — so this asserts end-to-end recovery, not the enqueue in
+		// isolation. The service test with the task spy is what pins that.
 		await waitForFreshBalanceRow(reopened, {
 			account: accountAddress,
 			tokenContract: aztecConfig!.tokenAddress,

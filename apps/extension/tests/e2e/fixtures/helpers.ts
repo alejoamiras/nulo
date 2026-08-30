@@ -1657,9 +1657,6 @@ export async function deleteNetworkRow(page: Page, name: string): Promise<void> 
  * identity rather than a target id, so a fast replacement cannot be mistaken
  * for the original surviving: without that, a restart test passes against a
  * worker that never died.
- *
- * Extracted here after the eighth copy-paste; prefer this over a ninth local
- * definition.
  */
 export async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
 	const swTarget = await ext.browser.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId), {

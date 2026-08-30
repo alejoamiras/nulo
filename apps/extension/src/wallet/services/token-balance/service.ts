@@ -36,11 +36,9 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	protected readonly rpcMethods = defineRpcMethods<Methods>()("getTokenBalance", "getTokenBalances", "refreshTokenBalance")
 	public static name = TOKEN_BALANCE_SERVICE_NAME
 
-	/** Declared startup deps (Q9): init() awaits ProfileService.getActiveProfile()
-	 *  + TokenService.getTokensRaw(), so topological start guarantees both are
-	 *  started first rather than relying on those callees' ensureInitialized
-	 *  poll. Was the only init-time peer-awaiter still missing a declaration.
-	 *  AccountService joined when init started reading accounts for the sweep. */
+	/** init() awaits all three, so topological start must have them running before
+	 *  this service starts — otherwise each call falls back to an
+	 *  `ensureInitialized` poll. */
 	public readonly dependencies = [ProfileService.name, TokenService.name, AccountService.name] as const
 
 	public readonly onTokenBalanceAdded = new EventHandler<TokenBalanceInfo>()
@@ -235,16 +233,16 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 	/** Allocation is `max+1` over the live key space, so it is only safe while
 	 *  this service's lock is held — callers MUST already hold it. */
-	private async createTokenBalanceHoldingLock(token: Token, account: Account, gen?: number) {
+	private async createTokenBalanceHoldingLock(token: Token, account: Account, gen?: number): Promise<boolean> {
 		const id = await this.allocateUnfencedId()
 		// A profile switch during allocation makes this write belong to a departed
 		// context — skip it (the id isn't persisted, so it's reused by the next call).
-		if (gen !== undefined && gen !== this.profileGeneration) return
+		if (gen !== undefined && gen !== this.profileGeneration) return false
 		// Token ids are `max+1`, so deleting the highest token frees its id for a
 		// successor: `tokens.has(id)` would pass for a DIFFERENT token. Compare the
 		// stable identity instead, so a creation for a token deleted mid-flight
 		// cannot attach to whatever now holds its id.
-		if (!this.isSameTokenLive(token)) return
+		if (!this.isSameTokenLive(token)) return false
 		const tb: TokenBalanceRaw = {
 			id,
 			token: token.id,
@@ -256,9 +254,45 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		await this.repo.set(tb)
 		// A switch during the write must not emit a UI event or enqueue a sync under
 		// the new profile's context.
-		if (gen !== undefined && gen !== this.profileGeneration) return
+		if (gen !== undefined && gen !== this.profileGeneration) return true
 		this.emit("onTokenBalanceAdded", this.getTokenBalanceInfo(tb))
 		this.queue.enqueue(tb)
+		return true
+	}
+
+	/**
+	 * The one path that creates rows. Serializing allocation alone is not enough:
+	 * two creators can hold the lock in turn and each create the SAME pair under a
+	 * different id, so the existence check has to happen inside the same hold as
+	 * the write. Callers MUST already hold the lock.
+	 *
+	 * `existing` lets a caller that has already read the rows (the sweep) avoid a
+	 * second full-namespace deserialization.
+	 */
+	private async ensurePairsHoldingLock(
+		pairs: readonly { token: Token; account: Account }[],
+		gen: number,
+		existing?: readonly TokenBalanceRaw[],
+	): Promise<number> {
+		if (pairs.length === 0) return 0
+		const rows = existing ?? (await this.repo.getAll())
+		const have = new Set(rows.map((r) => `${r.token}:${r.account}`))
+		let created = 0
+		for (const { token, account } of pairs) {
+			if (gen !== this.profileGeneration) return created
+			const key = `${token.id}:${account.address}`
+			if (have.has(key)) continue
+			try {
+				if (await this.createTokenBalanceHoldingLock(token, account, gen)) {
+					have.add(key)
+					created++
+				}
+			} catch (error) {
+				// One unwritable row must not abandon the rest of the batch.
+				this.logWarn(`balance ensure: ${key} failed`, getErrorMessage(error))
+			}
+		}
+		return created
 	}
 
 	/**
@@ -277,7 +311,10 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		// One profile-wide account read rather than one per chain: every entity
 		// enumeration deserializes the whole storage namespace, so read COUNT is
 		// the cost. It also has no visibility parameter to get wrong — hidden
-		// accounts legitimately hold balance rows.
+		// accounts legitimately hold balance rows. Taken OUTSIDE the hold on
+		// purpose: this lock cannot make AccountService mutations atomic, and
+		// holding it across a peer read would widen the critical section for
+		// nothing — a concurrently-added account is covered by its own handler.
 		const accounts = await this.accountService.getAccountsRaw(profileId)
 		if (gen !== this.profileGeneration) return
 
@@ -294,19 +331,10 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 				this.queue.enqueue(row)
 			}
 
-			let repaired = 0
-			for (const { token, account } of plan.missing) {
-				if (gen !== this.profileGeneration) return
-				try {
-					await this.createTokenBalanceHoldingLock(token, account, gen)
-					repaired++
-				} catch (error) {
-					// One unwritable row must not abandon the rest of the repair.
-					this.logWarn(`balance reconcile: ${token.id}:${account.address} failed`, getErrorMessage(error))
-				}
-			}
+			const repaired = await this.ensurePairsHoldingLock(plan.missing, gen, existing)
 
-			// A non-zero repair means a previous worker died mid-write — worth
+			// A non-zero repair means an earlier write did not complete — a worker
+			// death mid-create, or a row the identity guard now hides. Worth
 			// surfacing, unlike the no-op path.
 			if (repaired > 0 || plan.staleTokens.length > 0) {
 				this.logWarn(`balance reconcile: created ${repaired}, re-queued ${plan.staleTokens.length} (${Date.now() - startedAt}ms)`)
@@ -368,15 +396,8 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 	private readonly onAccountAdded = async (account: Account) => {
 		const gen = this.profileGeneration
-		const tokens = [...this.tokens.values()].filter((x) => x.chainId === account.chainId)
-		// One hold for the whole batch: the allocator reads the live key space, so
-		// interleaving with any other creator lets both compute the same id.
-		await this.lock.withLock(async () => {
-			for (const token of tokens) {
-				if (gen !== this.profileGeneration) return
-				await this.createTokenBalanceHoldingLock(token, account, gen)
-			}
-		})
+		const pairs = [...this.tokens.values()].filter((x) => x.chainId === account.chainId).map((token) => ({ token, account }))
+		await this.lock.withLock(() => this.ensurePairsHoldingLock(pairs, gen))
 	}
 
 	private readonly onTokenAdded = async (token: TokenInfo) => {
@@ -394,12 +415,8 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		// filters visibility.
 		const accounts = await this.accountService.getAccounts(profile.id, token.chainId, true)
 		if (gen !== this.profileGeneration) return
-		await this.lock.withLock(async () => {
-			for (const account of accounts) {
-				if (gen !== this.profileGeneration) return
-				await this.createTokenBalanceHoldingLock(tokenRaw, account, gen)
-			}
-		})
+		const pairs = accounts.map((account) => ({ token: tokenRaw, account }))
+		await this.lock.withLock(() => this.ensurePairsHoldingLock(pairs, gen))
 	}
 
 	private readonly onTokenUpdated = async (token: TokenInfo) => {
@@ -421,7 +438,10 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		// after this point must see the token gone.
 		this.tokens.delete(token.id)
 		// Under the same lock as the creators — otherwise a creation whose write
-		// settles after this snapshot survives the deletion.
+		// settles after this snapshot survives the deletion. Emitting inside the
+		// hold is safe because no in-worker service subscribes to onTokenBalance*;
+		// the lock is non-reentrant, so a future subscriber that called back in
+		// would deadlock rather than race.
 		await this.lock.withLock(async () => {
 			for (const tb of (await this.repo.getAll()).filter((x) => x.token === token.id)) {
 				this.invalidatedBalanceIds.add(tb.id)
