@@ -238,6 +238,11 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// unlike the removed per-chain empty-dir sweep (D7 TOCTOU).
 			const orphanProfiles = [...new Set(opfsDirs.map((c) => c.profileId))].filter((id) => !profiles.some((x) => x.id === id))
 			for (const profileId of orphanProfiles) {
+				// Re-check liveness at the moment of removal, not just at the snapshot:
+				// a same-id re-import can provision between `getProfiles` and this
+				// point, and its store dir (dir exists ⟹ key provisioned ⟹ lifecycle
+				// entry present) must not be deleted as an "orphan".
+				if (this.profileLifecycles.has(profileId)) continue
 				this.logWarn(`sweep: removing orphan OPFS PXE profile dir ${PXE_DATA_DIR_ROOT}/${profileId}`)
 				await removeProfileStoreDirs(profileId)
 			}
@@ -259,6 +264,13 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				if (deleted) pxes.splice(i, 1)
 			}
 			if (!pxes.length) {
+				// Re-prove global emptiness at commit: the `pxes` bookkeeping above is a
+				// boot-time snapshot, and a PXE DB created since (or a concurrent
+				// clearProfileState draining the same list) would make deleting the
+				// SHARED keyval-store cross-profile corruption — same re-list
+				// clearProfileState itself performs.
+				const remaining = (await indexedDB.databases()).some((x) => x.name?.startsWith(PXE_DATA_DIR_ROOT))
+				if (remaining) return
 				const keyval = dbs.find((x) => x.name === "keyval-store")
 				if (keyval) {
 					await new Promise<void>((resolve, reject) => {
