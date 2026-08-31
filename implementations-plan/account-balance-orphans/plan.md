@@ -128,7 +128,7 @@ Token-id-join point patch, no schema change. Both auditors rejected it: leaves e
 
 *(gates use the Bun-runtime test script: `bun run --cwd apps/extension test <path>`)*
 
-### Phase 1 — Schema, predicate, stamping, sweep, transition proof
+### Phase 1 — Schema, predicate, stamping, sweep, transition proof ✓
 Fields on type + schema; `balance-identity.ts`; stamp at create; restore-side derivation + unowned-token rejection + pair dedup; relink chain-authority fix; legacy sweep at init. Tests: ≥200-row transition (sweep + reconcile → one canonical row per pair, no dupes, bounded time); sweep exactness (partial-new, otherwise-malformed, and storage-key-mismatched rows LEFT untouched); forged-blob fields overwritten service-side; unowned token → `restoreError`; duplicate pairs collapsed.
 
 **Gate.** `bun run lint && bun run typecheck && bun run --cwd apps/extension test src/wallet/services/token-balance/ && bun run --cwd apps/extension test src/composables/useFullBackupImport.test.ts` — exit 0.

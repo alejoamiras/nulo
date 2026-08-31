@@ -253,6 +253,29 @@ describe("TokenBalanceService.restore — hostile-row validation (P1)", () => {
 		await expect(service.restore([balance(1, 1)], undefined as never)).rejects.toThrow(/profile id/)
 		expect(await seedRepo.getAll()).toEqual([])
 	})
+
+	test("blob-claimed identity fields are overwritten from the profile's own token table", async () => {
+		const forged = { ...balance(1, 1), profileId: "evil", chainId: 999, contract: "0xevil" }
+		const [restored] = await service.restore([forged], "p1")
+		expect(restored.restoreError).toBeUndefined()
+		const [row] = await seedRepo.getAll()
+		expect(row.profileId).toBe("p1")
+		expect(row.chainId).toBe(1)
+		expect(row.contract).toBe("0xtok1")
+	})
+
+	test("a row referencing a token the profile does not own is rejected, not written", async () => {
+		const [restored] = await service.restore([balance(1, 3)], "p1")
+		expect(restored.restoreError).toMatch(/does not own/)
+		expect(await seedRepo.getAll()).toEqual([])
+	})
+
+	test("duplicate (token, account) pairs collapse — the registry only dedupes row ids", async () => {
+		const restored = await service.restore([balance(1, 1), balance(2, 1)], "p1")
+		expect(restored[0].restoreError).toBeUndefined()
+		expect(restored[1].restoreError).toMatch(/duplicate balance pair/)
+		expect(await seedRepo.getAll()).toHaveLength(1)
+	})
 })
 
 describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild generation fence (B-05)", () => {
@@ -935,5 +958,71 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 		const rows = await new BalanceRepository(api).getAll()
 		expect(rows).toHaveLength(2)
 		expect(new Set(rows.map((r) => `${r.token}:${r.account}`)).size).toBe(2)
+	})
+})
+
+describe("TokenBalanceService legacy sweep + schema transition (P1)", () => {
+	test("200 legacy rows are swept at init, non-legacy debris survives, the live pair is recreated once, bounded", async () => {
+		const api = new FakeBrowserApi()
+		api.reset()
+		// 200 legacy-shape rows (no identity fields) for ONE live pair, plus two
+		// survivors the sweep must NOT touch: a partial-new row (carries profileId —
+		// different provenance) and a legacy-shaped row at a mismatched key.
+		const seed: Record<string, string> = {}
+		for (let i = 1; i <= 200; i++) {
+			seed[`nulo:core:token-balances@${i}`] = JSON.stringify({ id: i, token: 100, account: "0xa", updatedAt: 0 })
+		}
+		seed["nulo:core:token-balances@300"] = JSON.stringify({ id: 300, token: 100, account: "0xa", profileId: "A", updatedAt: 0 })
+		seed["nulo:core:token-balances@301"] = JSON.stringify({ id: 999, token: 100, account: "0xa", updatedAt: 0 })
+		await api.storage.local.set(seed)
+
+		const noopTicker = { subscribe: () => ({ cancel: () => {} }) } as never
+		const services = new ServiceCollection()
+		services.add(
+			svc(PROFILE_SERVICE_NAME, {
+				onActiveProfileChanged: new EventHandler(),
+				getActiveProfile: async () => ({ id: "A", name: "A" }),
+				getDeletionState: () => new ProfileDeletionState(),
+			}),
+		)
+		services.add(svc(NETWORK_SERVICE_NAME, {}))
+		services.add(
+			svc(ACCOUNT_SERVICE_NAME, {
+				onAccountAdded: new EventHandler(),
+				getAccountsRaw: async () => [{ address: "0xa", chainId: 1, index: 0, profileId: "A" }],
+			}),
+		)
+		services.add(
+			svc(TOKEN_SERVICE_NAME, {
+				onTokenAdded: new EventHandler(),
+				onTokenUpdated: new EventHandler(),
+				onTokenDeleted: new EventHandler(),
+				getTokensRaw: async () => [
+					{ id: 100, profileId: "A", chainId: 1, contract: "0xtok100", name: "T", symbol: "T", decimals: 18 } as never,
+				],
+			}),
+		)
+		services.add(svc(TRANSACTION_SERVICE_NAME, { onTransactionUpdated: new EventHandler() }))
+		services.add(svc(EXECUTION_SERVICE_NAME, {}))
+		services.add(svc(TASK_SERVICE_NAME, { createNewTask: () => ({ id: "t1" }) }))
+		const service = new TokenBalanceService(new LoggerStore(new ConfigStore()), api, noopTicker)
+		services.add(service)
+		const startedAt = Date.now()
+		await services.start()
+		const elapsed = Date.now() - startedAt
+
+		const raw = await api.storage.local.get(null)
+		const balanceKeys = Object.keys(raw).filter((k) => k.startsWith("nulo:core:token-balances@"))
+		expect(balanceKeys).toContain("nulo:core:token-balances@300")
+		expect(balanceKeys).toContain("nulo:core:token-balances@301")
+		for (let i = 1; i <= 200; i++) {
+			expect(raw[`nulo:core:token-balances@${i}`]).toBeUndefined()
+		}
+		const rows = await new BalanceRepository(api).getAll()
+		expect(rows).toHaveLength(1)
+		expect(rows[0]).toMatchObject({ token: 100, account: "0xa", profileId: "A", chainId: 1, contract: "0xtok100" })
+		// The whole init (sweep + reconcile + projection enqueue) over a 200-row
+		// store must stay interactive.
+		expect(elapsed).toBeLessThan(10_000)
 	})
 })
