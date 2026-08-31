@@ -88,8 +88,17 @@ const networkStub = () => svc(NetworkService.name, { registerChainPurgeSubscribe
 /** A ticker that never fires — lets token-balance's init run queue.start() without a poll loop. */
 const noopTicker: BackgroundTickerPort = { subscribe: () => ({ cancel: () => {} }) }
 
-const mkBalance = (id: number, token: number, account: string): TokenBalanceRaw =>
-	({ id, token, account, privateBalance: "0", publicBalance: "0", updatedAt: 0 }) as TokenBalanceRaw
+const mkBalance = (id: number, token: number, account: string, profileId: string): TokenBalanceRaw => ({
+	id,
+	token,
+	account,
+	profileId,
+	chainId: 1,
+	contract: `0xtok${token}`,
+	privateBalance: "0",
+	publicBalance: "0",
+	updatedAt: 0,
+})
 
 describe("cross-profile isolation (standing gate)", () => {
 	let api: FakeBrowserApi
@@ -219,8 +228,8 @@ describe("cross-profile isolation (standing gate)", () => {
 			services.add(tbal)
 			await services.start()
 			// p1 owns token 1, p2 owns token 2 (balances are FK'd via `token`, no profileId).
-			await seedRepo.set(mkBalance(10, 1, "0xp1acct"))
-			await seedRepo.set(mkBalance(20, 2, "0xp2acct"))
+			await seedRepo.set(mkBalance(10, 1, "0xp1acct", p1.id))
+			await seedRepo.set(mkBalance(20, 2, "0xp2acct", p2.id))
 		})
 
 		test("backup() returns only the active profile's balances", async () => {

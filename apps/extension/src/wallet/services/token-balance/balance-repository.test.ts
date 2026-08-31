@@ -61,13 +61,6 @@ describe("BalanceRepository", () => {
 		expect(await repo.allocateId()).toBe(8)
 	})
 
-	test("existsByTokenAndAccount", async () => {
-		await repo.set(balance(1, { token: 5, account: "0xA" }))
-		expect(await repo.existsByTokenAndAccount(5, "0xA")).toBe(true)
-		expect(await repo.existsByTokenAndAccount(5, "0xB")).toBe(false)
-		expect(await repo.existsByTokenAndAccount(6, "0xA")).toBe(false)
-	})
-
 	test("storage key is nulo:core:token-balances (frozen invariant)", async () => {
 		await repo.set(balance(1))
 		const all = await api.storage.local.get()

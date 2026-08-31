@@ -24,6 +24,7 @@ import { createViewTokenFn, TOKEN_FN_DESCRIPTORS } from "@/wallet/services/token
 import type { TokenService, Token } from "@/wallet/services/token/service"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { ViewFn } from "@/wallet/utils/fn"
+import { rowMatchesToken } from "./balance-identity"
 import type { TokenBalanceRaw } from "./spec"
 
 /** Per-balance projection outcome. */
@@ -62,7 +63,9 @@ export class BalanceProjector {
 		const resolvable: { balance: TokenBalanceRaw; token: Token }[] = []
 		for (const balance of balances) {
 			const token = await this.tokens.getTokenRaw(balance.token).catch(() => undefined)
-			if (!token) {
+			// Identity guard, not just resolution: a dead incarnation's row at a reused
+			// id must not trigger PXE/network work against the id-holder's contract.
+			if (!token || !rowMatchesToken(balance, token)) {
 				this.logger?.log(this.logSource, LogLevel.Error, `Unknown token #${balance.token}`)
 				results.push({ kind: "error", id: balance.id, error: `Unknown token #${balance.token}` })
 				continue

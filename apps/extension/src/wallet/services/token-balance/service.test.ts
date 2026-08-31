@@ -289,7 +289,7 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 		// Two profiles, one token each; a balance row per token so getTokenBalances
 		// (which filters by the in-memory active-token map) can observe the map.
 		await seedRepo.set(balance(1, 100)) // profile A's token
-		await seedRepo.set(balance(2, 200)) // profile B's token
+		await seedRepo.set(balance(2, 200, { profileId: "B" })) // profile B's token
 
 		// A's raw-token fetch is slow (resolves LAST); B's is immediate. The bug: A's
 		// late rebuild sets its token into the map that now belongs to active profile B.
@@ -1024,5 +1024,87 @@ describe("TokenBalanceService legacy sweep + schema transition (P1)", () => {
 		// The whole init (sweep + reconcile + projection enqueue) over a 200-row
 		// store must stay interactive.
 		expect(elapsed).toBeLessThan(10_000)
+	})
+})
+
+describe("TokenBalanceService reconcile — identity hardening (P2)", () => {
+	// Composition world: real service + repo over seeded rows and stub peers.
+	async function startWorld(opts: { rows: TokenBalanceRaw[]; tokens: unknown[] }) {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const seedRepo = new BalanceRepository(api)
+		for (const row of opts.rows) await seedRepo.set(row)
+		const noopTicker = { subscribe: () => ({ cancel: () => {} }) } as never
+		const services = new ServiceCollection()
+		services.add(
+			svc(PROFILE_SERVICE_NAME, {
+				onActiveProfileChanged: new EventHandler(),
+				getActiveProfile: async () => ({ id: "A", name: "A" }),
+				getDeletionState: () => new ProfileDeletionState(),
+			}),
+		)
+		services.add(svc(NETWORK_SERVICE_NAME, {}))
+		services.add(
+			svc(ACCOUNT_SERVICE_NAME, {
+				onAccountAdded: new EventHandler(),
+				getAccountsRaw: async () => [{ address: "0xa", chainId: 1, index: 0, profileId: "A" }],
+			}),
+		)
+		services.add(
+			svc(TOKEN_SERVICE_NAME, {
+				onTokenAdded: new EventHandler(),
+				onTokenUpdated: new EventHandler(),
+				onTokenDeleted: new EventHandler(),
+				getTokensRaw: async () => opts.tokens as never[],
+			}),
+		)
+		services.add(svc(TRANSACTION_SERVICE_NAME, { onTransactionUpdated: new EventHandler() }))
+		services.add(svc(EXECUTION_SERVICE_NAME, {}))
+		services.add(svc(TASK_SERVICE_NAME, { createNewTask: () => ({ id: "t1" }) }))
+		const service = new TokenBalanceService(new LoggerStore(new ConfigStore()), api, noopTicker)
+		services.add(service)
+		await services.start()
+		return { api, service, repo: new BalanceRepository(api) }
+	}
+	const liveToken = { id: 100, profileId: "A", chainId: 1, contract: "0xtok100", name: "T", symbol: "T", decimals: 18 }
+
+	test("a dead incarnation's row at a reused token id is deleted, fenced, and replaced by the canonical pair", async () => {
+		const { service, repo } = await startWorld({
+			rows: [balance(7, 100, { contract: "0xdeadbeef", updatedAt: 5 })],
+			tokens: [liveToken],
+		})
+		const rows = await repo.getAll()
+		expect(rows).toHaveLength(1)
+		expect(rows[0]).toMatchObject({ token: 100, account: "0xa", contract: "0xtok100" })
+		expect(rows[0].id).not.toBe(7)
+		// The stale id is fenced: an in-flight projection for it can never write.
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to the private fence
+		expect(((service as any).invalidatedBalanceIds as Set<number>).has(7)).toBe(true)
+		expect((await service.getTokenBalances()).map((b) => b.id)).toEqual([rows[0].id])
+	})
+
+	test("a row whose token id has NO live token is left in place — but never rendered", async () => {
+		const { service, repo } = await startWorld({
+			rows: [balance(7, 999, { contract: "0xwhatever", updatedAt: 5 })],
+			tokens: [liveToken],
+		})
+		const rows = await repo.getAll()
+		// The possibly-codec-hidden-token case: deletion here would destroy
+		// recoverable data, so the row survives; identity filtering hides it.
+		expect(rows.map((r) => r.id).sort()).toContain(7)
+		const visible = await service.getTokenBalances()
+		expect(visible.map((b) => b.token.id)).toEqual([100])
+	})
+
+	test("shared address across profiles: only the active profile's row renders, the foreign row is untouched", async () => {
+		const { service, repo } = await startWorld({
+			rows: [
+				balance(1, 100, { account: "0xa", updatedAt: 5 }),
+				balance(2, 555, { account: "0xa", profileId: "B", contract: "0xtok555", updatedAt: 5 }),
+			],
+			tokens: [liveToken],
+		})
+		expect((await service.getTokenBalances()).map((b) => b.id)).toEqual([1])
+		expect((await repo.getAll()).map((r) => r.id).sort()).toEqual([1, 2])
 	})
 })

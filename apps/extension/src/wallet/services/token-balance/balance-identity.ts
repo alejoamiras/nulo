@@ -10,7 +10,10 @@ import type { TokenBalanceRaw } from "./spec"
  * resolve `token` via `tokens.get(row.token)` making it implicit, but the invariant must
  * not depend on that caller precondition (backup's export join in particular).
  */
-export function rowMatchesToken(row: TokenBalanceRaw, token: Token): boolean {
+type RowIdentity = Pick<TokenBalanceRaw, "token" | "profileId" | "chainId" | "contract">
+type TokenIdentity = Pick<Token, "id" | "profileId" | "chainId" | "contract">
+
+export function rowMatchesToken(row: RowIdentity, token: TokenIdentity): boolean {
 	return row.token === token.id && row.profileId === token.profileId && row.chainId === token.chainId && row.contract === token.contract
 }
 

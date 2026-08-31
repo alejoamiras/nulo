@@ -6,7 +6,7 @@ import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { getTokenInfo } from "@/wallet/services/token/utils"
 import { EventHandler, Lock, getErrorMessage } from "@nulo/wallet-core/utils"
 import { reconcilePlan } from "./reconcile-pairs"
-import { isLegacyBalanceRow } from "./balance-identity"
+import { isLegacyBalanceRow, rowMatchesToken } from "./balance-identity"
 import { AccountService, type Account } from "@/wallet/services/account/service"
 import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
@@ -123,7 +123,10 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 					this.emit("onTokenBalanceUpdated", this.getTokenBalanceInfo(balance))
 				},
 				isBalanceInvalidated: (id) => this.invalidatedBalanceIds.has(id),
-				isRowEmittable: (tokenId) => this.tokens.has(tokenId),
+				isRowEmittable: (row) => {
+					const token = this.tokens.get(row.token)
+					return token !== undefined && rowMatchesToken(row, token)
+				},
 				getGeneration: () => this.profileGeneration,
 			},
 			this.logger,
@@ -165,7 +168,10 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	public async getTokenBalance(id: number): Promise<TokenBalanceInfo> {
 		await this.ensureInitialized()
 		const balance = await this.repo.get(id)
-		if (!balance) {
+		// Identity-mismatched rows answer exactly like absent ones — a foreign or
+		// dead-incarnation row must not be decorated with the id-holder's token.
+		const token = balance && this.tokens.get(balance.token)
+		if (!balance || !token || !rowMatchesToken(balance, token)) {
 			throw new Error("unknown token balance id")
 		}
 		return this.getTokenBalanceInfo(balance)
@@ -177,18 +183,21 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 			(await this.repo.getAll())
 				.filter((x) => tokenId === undefined || x.token === tokenId)
 				.filter((x) => accountAddress === undefined || x.account === accountAddress)
-				// Skip a balance whose token the active profile doesn't own (the map is
-				// active-profile-only): a lingering foreign-profile balance (balances carry
-				// no profileId) or a codec-hidden token row must not throw and white-screen
-				// the whole list — mirrors the balance projector's same-reason skip.
-				.filter((x) => this.tokens.has(x.token))
+				// Fail-closed row↔token identity: a foreign-profile balance, a dead
+				// incarnation at a reused token id, or a codec-hidden token row must not
+				// render (or throw and white-screen the list).
+				.filter((x) => {
+					const token = this.tokens.get(x.token)
+					return token !== undefined && rowMatchesToken(x, token)
+				})
 				.map((x) => this.getTokenBalanceInfo(x), this)
 		)
 	}
 
 	public async refreshTokenBalance(id: number): Promise<void> {
 		const balance = await this.repo.get(id)
-		if (!balance) {
+		const token = balance && this.tokens.get(balance.token)
+		if (!balance || !token || !rowMatchesToken(balance, token)) {
 			throw new Error("unknown token balance id")
 		}
 		this.queue.enqueue(balance)
@@ -213,7 +222,8 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		// `missing` while KEEPING the row on a real throw (a transient `getAll()`/storage failure), which
 		// would otherwise be indistinguishable and discard the sole durable refresh marker (codex R1 High #4).
 		const balance = (await this.repo.getAll()).find((x) => x.token === tokenId && x.account === accountAddress)
-		if (!balance) {
+		const token = balance && this.tokens.get(balance.token)
+		if (!balance || !token || !rowMatchesToken(balance, token)) {
 			return { missing: true }
 		}
 		const hadPending = this.queue.hasPendingTask(balance.id)
@@ -225,6 +235,8 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 	public async refreshAccountBalances(account: string): Promise<void> {
 		for (const balance of (await this.repo.getAll()).filter((x) => x.account === account)) {
+			const token = this.tokens.get(balance.token)
+			if (!token || !rowMatchesToken(balance, token)) continue
 			this.queue.enqueue(balance)
 		}
 	}
@@ -291,7 +303,17 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	): Promise<number> {
 		if (pairs.length === 0) return 0
 		const rows = existing ?? (await this.repo.getAll())
-		const have = new Set(rows.map((r) => `${r.token}:${r.account}`))
+		// Occupancy requires full identity: a dead incarnation's row at a reused
+		// token id must NOT hold the slot, or the canonical pair is never created.
+		const pairTokens = new Map(pairs.map((p) => [p.token.id, p.token]))
+		const have = new Set(
+			rows
+				.filter((r) => {
+					const token = pairTokens.get(r.token)
+					return token !== undefined && rowMatchesToken(r, token)
+				})
+				.map((r) => `${r.token}:${r.account}`),
+		)
 		let created = 0
 		for (const { token, account } of pairs) {
 			if (gen !== this.profileGeneration) return created
@@ -341,6 +363,16 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 			const tokens = [...this.tokens.values()]
 			const plan = reconcilePlan({ tokens, accounts, existing })
 
+			// Provably-stale rows (live token at the id, identity mismatch, this
+			// profile) are deleted BEFORE repair so the canonical pair can land.
+			// They were never renderable, so no delete event is emitted. Fence
+			// first: an in-flight projection must not resurrect the id.
+			for (const row of plan.staleIdentity) {
+				if (gen !== this.profileGeneration) return
+				this.invalidatedBalanceIds.add(row.id)
+				await this.repo.delete(row.id)
+			}
+
 			for (const row of plan.staleTokens) {
 				if (gen !== this.profileGeneration) return
 				this.queue.enqueue(row)
@@ -351,8 +383,10 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 			// Surfaced because a non-zero repair means something upstream left the
 			// store inconsistent; the count is the fact, the cause is not inferable
 			// here.
-			if (repaired > 0 || plan.staleTokens.length > 0) {
-				this.logWarn(`balance reconcile: created ${repaired}, re-queued ${plan.staleTokens.length} (${Date.now() - startedAt}ms)`)
+			if (repaired > 0 || plan.staleTokens.length > 0 || plan.staleIdentity.length > 0) {
+				this.logWarn(
+					`balance reconcile: created ${repaired}, re-queued ${plan.staleTokens.length}, deleted ${plan.staleIdentity.length} stale (${Date.now() - startedAt}ms)`,
+				)
 			} else {
 				this.logDebug(`balance reconcile: nothing to repair (${Date.now() - startedAt}ms)`)
 			}
@@ -441,7 +475,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		// token repopulate the active-only map or enqueue foreign rows.
 		if (gen !== this.profileGeneration || tokenRaw.profileId !== this.profile?.id) return
 		this.tokens.set(token.id, tokenRaw)
-		const rows = (await this.repo.getAll()).filter((x) => x.token === token.id)
+		const rows = (await this.repo.getAll()).filter((x) => rowMatchesToken(x, tokenRaw))
 		if (gen !== this.profileGeneration) return
 		for (const tb of rows) {
 			this.queue.enqueue(tb)
@@ -520,9 +554,9 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 					const balances = await this.repo.getAll()
 					for (const tb of balances) {
-						if (addresses.has(tb.account) && tokenIds.has(tb.token)) {
-							this.queue.enqueue(tb)
-						}
+						if (!addresses.has(tb.account) || !tokenIds.has(tb.token)) continue
+						const t = this.tokens.get(tb.token)
+						if (t && rowMatchesToken(tb, t)) this.queue.enqueue(tb)
 					}
 				} else {
 					await this.refreshAccountBalances(tx.account)
@@ -537,13 +571,15 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 	public async backup(): Promise<TokenBalanceRaw[]> {
 		const profile = await requireActiveProfile(this.profileService)
-		// Export-scope guard: balances carry no profileId, so scope the export to the
-		// active profile via its token ids. Token ids are a single global sequence, so
-		// `balance.token ∈ active-profile-token-ids` is an exact partition. Use the
-		// AUTHORITATIVE token service (not the in-memory `this.tokens`, which is cleared
-		// mid-profile-switch → would export nothing).
-		const ownedTokenIds = new Set((await this.tokenService.getTokensRaw(profile.id)).map((t) => t.id))
-		return (await this.repo.getAll()).filter((b) => ownedTokenIds.has(b.token))
+		// Export-scope guard: full row↔token identity against the AUTHORITATIVE token
+		// service (not the in-memory `this.tokens`, which is cleared mid-profile-switch
+		// → would export nothing). `row.profileId` alone would export a dead
+		// incarnation's debris; the identity join cannot.
+		const owned = new Map((await this.tokenService.getTokensRaw(profile.id)).map((t) => [t.id, t]))
+		return (await this.repo.getAll()).filter((b) => {
+			const token = owned.get(b.token)
+			return token !== undefined && rowMatchesToken(b, token)
+		})
 	}
 
 	public async restore(tokenBalances: TokenBalanceRaw[], profileId: string): Promise<Restored<TokenBalanceRaw>[]> {

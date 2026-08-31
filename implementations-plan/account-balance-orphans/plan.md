@@ -133,7 +133,7 @@ Fields on type + schema; `balance-identity.ts`; stamp at create; restore-side de
 
 **Gate.** `bun run lint && bun run typecheck && bun run --cwd apps/extension test src/wallet/services/token-balance/ && bun run --cwd apps/extension test src/composables/useFullBackupImport.test.ts` — exit 0.
 
-### Phase 2 — Complete identity enforcement + reconcile hardening
+### Phase 2 — Complete identity enforcement + reconcile hardening ✓
 Predicate at every §2 site (reads, refreshes, handlers, projector, queue, backup); occupancy-set fix; stale-row deletion with the carve-out; retire the workarounds; delete `existsByTokenAndAccount`. Tests: temporal-reuse case (dead-incarnation row deleted + fenced, canonical pair created, nothing rendered from it); codec-hidden-token row LEFT alone; occupancy (stale row no longer blocks creation); two-profiles-shared-address visibility isolation.
 
 **Gate.** Phase 1 commands plus `bun run --cwd apps/extension test src/wallet/services/` — exit 0.
