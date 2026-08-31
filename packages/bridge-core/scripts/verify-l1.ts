@@ -80,7 +80,14 @@ function runForge(root: string, label: string, args: string[]): boolean {
 			return false
 		}
 	}
-	if (res.exitCode === 0 || /already verified/i.test(out)) {
+	// Forge short-circuits on a contract Etherscan already holds a verification for, without
+	// compiling or submitting the staged source — so that outcome says nothing about whether the
+	// source here still matches the deployed bytes. Label it as what it is instead of the same ✓.
+	if (/already verified/i.test(out)) {
+		console.log(`— ${label}: Etherscan already holds a verification; the staged source was not checked against it`)
+		return true
+	}
+	if (res.exitCode === 0) {
 		console.log(out.trim())
 		console.log(`✓ ${label} verified`)
 		return true
