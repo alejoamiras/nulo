@@ -2665,8 +2665,10 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			await expect(service.exportBackupMaterial(p.id, "wrong-pass")).rejects.toBeInstanceOf(InvalidPasswordError)
 			await expect(service.exportImportedKeysDek(p.id, "wrong-pass")).rejects.toBeInstanceOf(InvalidPasswordError)
 
-			// exportMnemonic + changeProfilePassword throw a PLAIN Error whose exact
-			// message change-password.vue's wrong-password branch string-matches.
+			// exportMnemonic + changeProfilePassword throw a PLAIN Error with the same
+			// legacy message; the change-password UI string-matches it (from
+			// changeProfilePassword) for its wrong-password branch — both pinned so
+			// neither drifts.
 			const mnemonicErr = await service.exportMnemonic(p.id, "wrong-pass").then(
 				() => null,
 				(e: unknown) => e,

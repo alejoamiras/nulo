@@ -104,6 +104,8 @@ Branch-split `restore` (catch placement verbatim per branch) over `writeMarkerTh
 
 **Validation gate**: full profile-dir suite + `bun run lint` + `bun run typecheck:all` + scoped jscpd re-scan (same pinned jscpd 5.0.16 / min-tokens 50 invocation as `scripts/dup-trend`) showing the internal clone count collapsed (13 → ≤3, artifact-pair excluded) + the pre-PR battery: `bun run audit:vue` + `bun run test:ci-gating`. Layers: lint/typecheck + unit + integration + build.
 
+**Gate outcome (accepted exception, codex round 3)**: actual = 4 clones / 56 lines (from 13 / 202). Each survivor is an adjudicated leave — create↔import row-literal (a 7-param builder loses to a 10-line literal), the unlock pair's phase-3 prologue (F3 per-method by ledger), and two export openers now reduced to parallel one-liner helper runs (merging them = the rejected `unsealForExport`). Forcing ≤3 would recreate a rejected abstraction; codex round 3 concurred and approved.
+
 ## Post-implementation (self-contained — the implementing session executes THIS, not the skill)
 
 1. **`/code-review low --fix`** on the whole implementation diff (single-arc; contained single-file refactor → `low`). Skim applied fixes; commit them separately from implementation commits.

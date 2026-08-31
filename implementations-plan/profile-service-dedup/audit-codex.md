@@ -80,3 +80,26 @@ Held positions:
 2. **Password deterministic harness accepted as adjudicated.** A prototype spy could technically provide a seam without production changes, but requiring it is not justified once the passkey barrier and lock-boundary diff audit are mandatory.
 
 **Verdict: conditional approve (with conditions: close every pre-return secret/DEK cleanup path in extracted helpers; make fence-helper polarity explicit; make the deterministic passkey pin mandatory).**
+
+## Round 3 — post-implementation audit on the final diff (verdict: approve)
+
+No behavior-preservation or security defect found. The lock ownership, fences, event sequence, error identities, and secret cleanup hold after attack:
+
+- `captureRowFence` and `snapshotForUnlock` acquire the whole critical section (`service.ts:314-360`).
+- Fence polarity and locked/lock-free call-site wrapping remain exact (`service.ts:328-329,1165-1169,1644,1759,1843,1897-1901`).
+- Extracted crypto helpers wipe allocations before rethrow (`service.ts:397-400,986-990,1029-1033`).
+- Restore scratch fields are populated immediately after allocation and ownership transfer (`service.ts:2305-2313,2351-2356,2516-2532`), with cleanup still post-lock-release.
+- Every `…HoldingLock` invocation is under `runExclusive`; `writeMarkerThenRowHoldingLock` preserves marker → row → compensation with no emit (`service.ts:1354-1361`).
+- The overloads/`Extract<>` parameters are sound against the current two-member `Profile` union, and the unlock phase-3 checks still independently revalidate live rows.
+
+Findings:
+
+- **[nit]** The wrong-password comment is factually misleading: `exportMnemonic` claims “the import flow” string-matches its error, while the verified consumer is the change-password flow consuming `changeProfilePassword`. The new test repeats the conflation. Say only that the legacy identity is intentionally pinned, and attribute the UI consumer solely to password change. `service.ts:1885-1886`; `service.integration.test.ts:2668-2669`.
+
+- **[nit]** Several production comments retain review archaeology instead of durable rationale: “codex audit round 2,” “final-audit blocker/fact correction,” “round-1 audit HIGH,” and “P3/P4 rider.” Remove those labels while retaining the actual invariant. `service.ts:1293,2307,2483,2512,2604,2623`.
+
+- **[nit]** Some new comments narrate the refactor rather than the resulting contract—especially “pre-split/byte-equivalent” scratch commentary—and `sealedTriple`’s comment mostly restates its one-line body. Condense to ownership and lock requirements. `service.ts:63-68,291-294,2283-2285,2364-2384`.
+
+- **[nit]** Four surviving clones are technically justified; forcing any of the proposed mergers would recreate rejected or high-parameter abstractions. However, the permanent plan still states `≤3` as a passed gate while the lessons record four. Reconcile the gate as an explicitly accepted exception. `plan.md:105`; `lessons/phase-1-5.md:9`.
+
+**Verdict: approve.**

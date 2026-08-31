@@ -62,8 +62,7 @@ import type { AccountIntegrityBlocked, AccountIntegrityDelegate } from "../accou
 export * from "./spec"
 
 /** Out-params for `restore`'s locked commit bodies: allocations made under the lock are
- *  reported back so the branch's single post-release `finally` owns every buffer wipe —
- *  the same cleanup topology the pre-split code had with closure-captured `let`s. */
+ *  reported back so the branch's single post-lock-release `finally` owns every buffer wipe. */
 type PasswordRestoreScratch = { passhash?: Passhash; destinationDek?: ImportedKeysDek; storedContext: boolean }
 type PasskeyRestoreScratch = { stashDek?: ImportedKeysDek; storedPending: boolean; storedContext: boolean }
 
@@ -288,8 +287,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		return this.lock.withLock(fn)
 	}
 
-	/** The row's three password-sealed slots as the branded triple `PasswordSecretBox`
-	 *  unseal/reseal consumes. Pure projection — no I/O, no validation. */
+	/** The row's three password-sealed slots as the branded triple `PasswordSecretBox` consumes. */
 	private sealedTriple(p: { guard: string; secret: string; entropy: string }) {
 		return { guard: asBase64Ciphertext(p.guard), secret: asBase64Ciphertext(p.secret), entropy: asBase64Ciphertext(p.entropy) }
 	}
@@ -1157,8 +1155,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				// coordinator. Codex audit Q2 validated this shape.
 				await this.passkeyCoordinator.confirm(snapshot)
 			}
-			// Revalidate AFTER the async credential op (codex verify): a delete that
-			// completed during the (unlocked) derivation/prompt — even one followed by
+			// Revalidate AFTER the async credential op: a delete that completed
+			// during the (unlocked) derivation/prompt — even one followed by
 			// a same-id restore — must not report success for the stale generation.
 			// A LEGIT concurrent password change does NOT bump the epoch, so confirm
 			// still succeeds.
@@ -1290,7 +1288,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 *  still present. (b) is the load-bearing half against a finalize race:
 	 *  `finalizeRestore` clears the marker at entry UNDER THIS SAME LOCK and leaves the
 	 *  generation unchanged, so a generation check alone would let the sweep delete a
-	 *  just-finalized, in-use profile (codex audit round 2). Marker gone or different →
+	 *  just-finalized, in-use profile. Marker gone or different →
 	 *  the import finalized or restarted → refuse. */
 	private async assertTornGuardUnchangedHoldingLock(
 		id: string,
@@ -1552,8 +1550,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			try {
 				// Purge decisions run UNDER the facade lock: `restore()` writes its
 				// marker under the same lock, so read/compare/delete here is atomic
-				// against a live same-id restore (codex audit round 2 — an unlocked
-				// deleteIfSame is still TOCTOU between its get and remove).
+				// against a live same-id restore (an unlocked deleteIfSame is still
+				// TOCTOU between its get and remove).
 				const purged = await this.runExclusive(async () => {
 					const row = await this.repo.get(marker.profileId)
 					if (!row) {
@@ -1637,10 +1635,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				if (!unsealed) {
 					throw new InvalidPasswordError()
 				}
-				// Revalidate AFTER the slow unseal (codex verify): a delete that
-				// completed DURING derivation — even fully (row gone, reservation
-				// released) — must not still hand back the now-erased profile's
-				// master secret.
+				// Revalidate AFTER the slow unseal: a delete that completed DURING
+				// derivation — even fully (row gone, reservation released) — must
+				// not still hand back the now-erased profile's master secret.
 				if (await this.profileFenceBroken(id, capturedEpoch)) {
 					throw new Error("Invalid profile id")
 				}
@@ -1722,7 +1719,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			throw new Error("Invalid profile id")
 		}
 		// A delete that completed during the (unlocked) WebAuthn prompt must not
-		// still return the credentialId (codex verify).
+		// still return the credentialId.
 		if (
 			this.deletionState.isReserved(id) ||
 			!this.deletionState.isCurrent(id, capturedEpoch) ||
@@ -1882,8 +1879,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		const unsealed = await this.secretBox.unseal(password, this.sealedTriple(profile))
 		try {
 			if (!unsealed) {
-				// Identity-stable error message — the import flow expects this
-				// exact string for its wrong-password branch.
+				// Legacy identity-stable message, pinned by the integration suite — kept in
+				// lockstep with changeProfilePassword's, whose exact string the
+				// change-password UI matches for its wrong-password branch.
 				throw new Error("Invalid profile old password")
 			}
 			// The recovery words come from the STORED ENTROPY (the master derives one-way from
@@ -1893,7 +1891,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			const mnemonic = await getMnemonic(unsealed.entropy)
 			await this.assertEntropyMasterPair(unsealed.secret, unsealed.entropy)
 			// Revalidate under the lock AFTER the async derivations — a delete interleaving
-			// during them must not let the erased profile's words escape (codex verify r4).
+			// during them must not let the erased profile's words escape.
 			await this.runExclusive(async () => {
 				if (await this.profileFenceBroken(id, capturedEpoch)) {
 					throw new Error("Invalid profile id")
@@ -2253,8 +2251,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		}
 
 		// `scratch` is filled by the locked body — if seal throws mid-way, this finally
-		// still zeros the already-allocated buffers. (Pre-A11 had seal() outside the
-		// try, leaking plainSecret on seal failure.)
+		// still zeros the already-allocated buffers.
 		const scratch: PasswordRestoreScratch = { storedContext: false }
 		try {
 			return await this.runExclusive(() =>
@@ -2281,8 +2278,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	}
 
 	/** The locked commit of a password restore. Reports allocations back through
-	 *  `scratch` — the CALLER's post-release finally does every wipe (byte-equivalent
-	 *  to the pre-split cleanup order). Caller MUST hold the facade lock. */
+	 *  `scratch` — the CALLER's post-release finally does every wipe. Caller MUST hold
+	 *  the facade lock. */
 	private async commitRestoredPasswordProfileHoldingLock(
 		profile: ProfileInfo,
 		name: string,
@@ -2295,16 +2292,15 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	): Promise<Restored<ProfileInfo>> {
 		try {
 			// Duplicate-phrase guard under the SAME lock as the commit (check→write
-			// atomicity — final-audit condition). The catch below RETHROWS the
-			// typed error so the UI's confirm-retry can fire (restoreError
-			// flattening would dead-end it).
+			// atomicity). The catch below RETHROWS the typed error so the UI's
+			// confirm-retry can fire (restoreError flattening would dead-end it).
 			const walletFingerprint = await this.assertNotDuplicateWallet(
 				asMasterSecretBytes(plainSecret as Uint8Array<ArrayBuffer>),
 				allowDuplicate,
 			)
 			const sealed = await this.secretBox.seal(password, asMasterSecretBytes(plainSecret as Uint8Array<ArrayBuffer>), plainEntropy)
 			scratch.passhash = sealed.passhash
-			// CLONE DIVERGENCE (final-audit blocker): a FRESH destination DEK for the
+			// CLONE DIVERGENCE: a FRESH destination DEK for the
 			// new row — restoring A's backup beside a still-live A must not let the
 			// clone's credential open keys A imports later. The backup's own key rows
 			// stay usable via the source→destination rewrap context below.
@@ -2362,10 +2358,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			// auto-seeded defaults.
 			return this.getProfileInfo(newProfile)
 		} catch (err) {
-			// Build restoreError INSIDE the locked callback so it runs
-			// before the lock releases (withLock's finally) — byte-
-			// equivalent to the pre-refactor catch-before-release order
-			// (toRestoreError may invoke a custom err.toString()).
+			// Build restoreError INSIDE the locked callback so it runs before the
+			// lock releases (withLock's finally) — toRestoreError may invoke a
+			// custom err.toString().
 			// The duplicate-phrase verdict must REACH the UI as its typed self
 			// (confirm-retry), never flattened into a dead-end restoreError.
 			if (err instanceof DuplicateWalletError) throw err
@@ -2376,12 +2371,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		}
 	}
 
-	/** The passkey branch of `restore`: ceremony + credential binding run UNLOCKED
-	 *  (their early throws must NOT reach a lock release — the prior single
-	 *  try/finally released even when the acquisition was never reached); only the
-	 *  storage tail is locked. The catch converting to `restoreError` deliberately
-	 *  sits OUTSIDE the lock — the password branch's sits inside; both placements
-	 *  are the pre-split originals. */
+	/** The passkey branch of `restore`: ceremony + credential binding run UNLOCKED —
+	 *  their early throws must not reach a lock release — and only the storage tail is
+	 *  locked. The catch converting to `restoreError` therefore sits OUTSIDE the lock,
+	 *  covering the unlocked prologue too (the password branch's sits inside, for
+	 *  toRestoreError-before-release). */
 	private async restorePasskeyProfile(
 		profile: ProfileInfo,
 		secret: Extract<RestoreSecret, { type: "passkey" }>,
@@ -2479,8 +2473,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			throw new Error("Passkey profile already exists")
 		}
 		// Same-credential duplicate is a HARD reject even when the userHandle is
-		// absent (restore would otherwise mint a fresh id for the same credential —
-		// final-audit fact correction).
+		// absent (restore would otherwise mint a fresh id for the same credential).
 		await this.assertNotDuplicateCredential(recovery.credentialId)
 		// Same-master duplicate (theoretical cross-type case) is the WARNED path.
 		const walletFingerprint = await this.assertNotDuplicateWallet(recovery.secret, allowDuplicate)
@@ -2509,9 +2502,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 		// Late activation: stash the recovery secret + the DESTINATION DEK so
 		// finalize can open a non-degraded session without re-prompting WebAuthn
-		// (round-1 audit HIGH: a master-only stash left the first post-restore
-		// session dek-less, quarantining every restored imported account). The
-		// maps take ownership — DO NOT zero the stashed buffers in finally.
+		// (a master-only stash would leave the first post-restore session dek-less,
+		// quarantining every restored imported account). The maps take ownership —
+		// DO NOT zero the stashed buffers in finally.
 		this.sweepStalePendingRestore(Date.now(), id)
 		const stashDek = asImportedKeysDek(new Uint8Array(destinationDek))
 		scratch.stashDek = stashDek
