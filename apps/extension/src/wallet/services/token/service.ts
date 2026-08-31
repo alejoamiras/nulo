@@ -7,6 +7,7 @@ import { NetworkService, networkInfoFrom } from "@/wallet/services/network/servi
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import type { OperationContext, OperationOrigin } from "@/wallet/services/operation-journal/spec"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
 import { nextNumericId } from "@/wallet/services/id-allocators"
@@ -134,17 +135,23 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	 */
 	public async clearChainState(profileId: string, chainId: number): Promise<void> {
 		await this.ensureInitialized()
-		// Seeder fence FIRST: it bumps the seeder's purge epoch and waits on
-		// the marker lock, so an in-flight seed pass either aborts or fully
-		// commits BEFORE the row purge below — a commit landing after the row
-		// sweep would resurrect a token on the freshly-purged chain.
+		// Seeder fence FIRST, and OUTSIDE the token lock: it bumps the seeder's
+		// purge epoch and waits on the marker lock, so an in-flight seed pass
+		// either aborts or fully commits BEFORE the row purge below. (Taking it
+		// inside the lock would invert the seeder-commit's markerLock→tokenLock
+		// order into a deadlock.)
 		await this.seeder.onChainPurged(profileId, chainId)
-		const tokens = (await this.tokens.getValues()).filter((t) => t.profileId === profileId && t.chainId === chainId)
-		await purgeRows(
-			tokens,
-			(token) => this.tokens.delete(`${token.id}`),
-			(token) => this.emit("onTokenDeleted", { ...getTokenInfo(token), profileId: token.profileId }),
-		)
+		// Under the same lock persistToken commits with: the sweep and a create
+		// are atomic — a create either lands before the snapshot (and is purged)
+		// or runs after and fails its own in-lock liveness assert.
+		await this.lock.withLock(async () => {
+			const tokens = (await this.tokens.getValues()).filter((t) => t.profileId === profileId && t.chainId === chainId)
+			await purgeRows(
+				tokens,
+				(token) => this.tokens.delete(`${token.id}`),
+				(token) => this.emit("onTokenDeleted", { ...getTokenInfo(token), profileId: token.profileId }),
+			)
+		})
 	}
 
 	public async getTokens(profileId?: string, chainId?: number): Promise<TokenInfo[]> {
@@ -183,11 +190,19 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		opContext: OperationContext,
 	): Promise<TokenInfo> {
 		await this.ensureInitialized()
+		// The deletion fence is captured HERE — the entry that authorizes the
+		// write — atomically (read + capture under the profile facade lock) and
+		// threaded to the commit. Minting it later would bless a profile deleted
+		// and re-imported mid-flight; a caller-supplied id that isn't the active
+		// profile fails closed.
+		const fence = await this.profiles.captureExecutionFence()
+		if (fence.profileId !== profileId) throw new Error("unauthorized profile")
 		// Phase 2.5: the journal entry is created up-front (title=undefined) so
 		// the tokens-view TokenImportRow pops in immediately after approval,
 		// carrying the "Requested by <origin>" subtitle; `persistToken` backfills
 		// the title once the live fetch resolves the symbol.
 		return await this.persistToken({
+			fence,
 			profileId,
 			networkId,
 			tokenInterface,
@@ -213,6 +228,10 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	 * INSIDE the token lock, in the not-yet-persisted branch only.
 	 */
 	private async persistToken(input: {
+		/** Deletion fence captured at the AUTHORIZING entry (addToken /
+		 *  addSeededToken), never minted here — a post-deletion mint would
+		 *  observe the successor incarnation's settled epoch and pass. */
+		fence: ExecutionFence
 		profileId: string
 		networkId: string
 		tokenInterface: TokenInterface
@@ -221,7 +240,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 			| { kind: "seeded"; name: string; symbol: string; decimals: number }
 			| { kind: "live"; fetch: () => Promise<[string, string, number]> }
 	}): Promise<TokenInfo> {
-		const { profileId, networkId, tokenInterface, metadata } = input
+		const { fence, profileId, networkId, tokenInterface, metadata } = input
 
 		// Fast idempotency short-circuit (Opus H2 / codex DEFERRED).
 		// If the token is already on this profile+chain, return without
@@ -285,7 +304,21 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 						transferPublicToPrivateFn: tokenInterface.transferPublicToPrivateFn,
 						transferPrivateToPublicFn: tokenInterface.transferPrivateToPublicFn,
 					}
+					// Assert authority flush against the write: the metadata fetch above
+					// can span a profile deletion or the network's purge cascade —
+					// landing the row afterwards creates an orphan the cascade's own
+					// snapshot predates.
+					this.profiles.getDeletionState().assertCurrent(fence.profileId, fence.epoch)
+					if (!(await this.networks.isNetworkLive(networkId))) {
+						throw new Error("network deleted")
+					}
 					await this.tokens.set(`${token.id}`, token)
+					// The set itself awaits — re-check before making the row observable,
+					// compensating the just-written row if authority moved during it.
+					if (!this.profiles.getDeletionState().isCurrent(fence.profileId, fence.epoch)) {
+						await this.tokens.delete(`${token.id}`)
+						throw new Error(`profile ${fence.profileId} deleted`)
+					}
 					this.emit("onTokenAdded", getTokenInfo(token))
 				}
 				const result = getTokenInfo(token)
@@ -330,7 +363,10 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	}): Promise<TokenInfo> {
 		await this.ensureInitialized()
 		const { profileId, networkId, accountAddress, tokenInterface, name, symbol, decimals } = input
+		const fence = await this.profiles.captureExecutionFence()
+		if (fence.profileId !== profileId) throw new Error("unauthorized profile")
 		return await this.persistToken({
+			fence,
 			profileId,
 			networkId,
 			tokenInterface,

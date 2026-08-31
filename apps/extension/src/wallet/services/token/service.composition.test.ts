@@ -71,6 +71,7 @@ async function makeHarness(fakeConfig?: ShallowPxeFakeConfig) {
 			onProfileDeleted: { add: () => {} },
 			onActiveProfileChanged: new EventHandler(),
 			getDeletionState: () => new ProfileDeletionState(),
+			captureExecutionFence: async () => ({ profileId: "p1", epoch: 0 }),
 		}),
 	)
 	collection.add(
@@ -78,6 +79,7 @@ async function makeHarness(fakeConfig?: ShallowPxeFakeConfig) {
 			getNetwork: async () => NETWORK,
 			registerChainPurgeSubscriber: () => {},
 			onActiveNetworkChanged: new EventHandler(),
+			isNetworkLive: async () => true,
 		}),
 	)
 	collection.add(svc(AccountService.name, {}))
@@ -186,6 +188,7 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 				onProfileDeleted: { add: () => {} },
 				onActiveProfileChanged,
 				getDeletionState: () => new ProfileDeletionState(),
+				captureExecutionFence: async () => ({ profileId: "p1", epoch: 0 }),
 			}),
 		)
 		collection.add(
@@ -194,6 +197,7 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 				getActiveNetwork: async () => NETWORK,
 				registerChainPurgeSubscriber: () => {},
 				onActiveNetworkChanged,
+				isNetworkLive: async () => true,
 			}),
 		)
 		collection.add(svc(AccountService.name, { getAccounts: async () => [{ address: "0xacc1" }] }))

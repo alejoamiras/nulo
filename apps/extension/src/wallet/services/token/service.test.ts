@@ -52,6 +52,7 @@ async function makeHarness() {
 			onProfileDeleted: { add: () => {} },
 			onActiveProfileChanged: new EventHandler(),
 			getDeletionState: () => deletionState,
+			captureExecutionFence: async () => ({ profileId: "p1", epoch: deletionState.capture("p1") }),
 		}),
 	)
 	collection.add(
@@ -59,6 +60,7 @@ async function makeHarness() {
 			getNetwork: async () => NETWORK,
 			registerChainPurgeSubscriber: () => {},
 			onActiveNetworkChanged: new EventHandler(),
+			isNetworkLive: async () => true,
 		}),
 	)
 	collection.add(svc(AccountService.name, {}))
@@ -222,5 +224,72 @@ describe("TokenService.restore — deletion fence (N-14)", () => {
 		const { tokenService } = await makeHarness()
 		const restored = await tokenService.restore([mk("0xaaa"), mk("0xbbb")])
 		expect(restored.every((r) => r.restoreError === undefined)).toBe(true)
+	})
+})
+
+describe("TokenService.addToken — creation fences", () => {
+	function _deferred<T>() {
+		let resolve!: (v: T) => void
+		const promise = new Promise<T>((res) => {
+			resolve = res
+		})
+		return { promise, resolve }
+	}
+
+	async function tokenRowCount(api: { storage: { local: { get: (k: null) => Promise<Record<string, unknown>> } } }): Promise<number> {
+		const raw = await api.storage.local.get(null)
+		return Object.keys(raw).filter((k) => k.startsWith("nulo:core:tokens@")).length
+	}
+
+	test("a deletion completing DURING the metadata fetch rejects the write (entry-capture pin)", async () => {
+		// begin + RELEASE while parked: the deletion fully settles, so only a
+		// fence captured at the AUTHORIZING entry still rejects — a fence minted
+		// at commit would observe the settled epoch and land the orphan row.
+		const { tokenService, fetchStub, api, deletionState } = await makeHarness()
+		const gate = _deferred<[string, string, number]>()
+		fetchStub.mockReturnValueOnce(gate.promise)
+
+		const run = tokenService.addToken("p1", NETWORK.id, "0xacc", ti("0xdead"), { origin: "popup" })
+		await new Promise((r) => setTimeout(r, 0))
+		deletionState.beginDeletion("p1")
+		deletionState.release("p1")
+		gate.resolve(["Name", "SYM", 9])
+
+		await expect(run).rejects.toThrow(/deleted|not current/i)
+		expect(await tokenRowCount(api)).toBe(0)
+	})
+
+	test("a chain deleted during the metadata fetch rejects the write (liveness-at-commit pin)", async () => {
+		const { tokenService, fetchStub, api } = await makeHarness()
+		const gate = _deferred<[string, string, number]>()
+		fetchStub.mockReturnValueOnce(gate.promise)
+		const networks = (tokenService as unknown as { networks: { isNetworkLive: (id: string) => Promise<boolean> } }).networks
+
+		const run = tokenService.addToken("p1", NETWORK.id, "0xacc", ti("0xdead"), { origin: "popup" })
+		await new Promise((r) => setTimeout(r, 0))
+		networks.isNetworkLive = async () => false
+		gate.resolve(["Name", "SYM", 9])
+
+		await expect(run).rejects.toThrow(/network deleted/)
+		expect(await tokenRowCount(api)).toBe(0)
+	})
+
+	test("a deletion landing DURING the row write is compensated away before any emit", async () => {
+		const { tokenService, api, deletionState } = await makeHarness()
+		const emitted: unknown[] = []
+		tokenService.onTokenAdded.add((t) => emitted.push(t))
+		const realSet = api.storage.local.set.bind(api.storage.local)
+		let fired = false
+		api.storage.local.set = (async (items: Record<string, unknown>) => {
+			await realSet(items)
+			if (!fired && Object.keys(items).some((k) => k.startsWith("nulo:core:tokens@"))) {
+				fired = true
+				deletionState.beginDeletion("p1")
+			}
+		}) as typeof api.storage.local.set
+
+		await expect(tokenService.addToken("p1", NETWORK.id, "0xacc", ti("0xbeef"), { origin: "popup" })).rejects.toThrow(/deleted/)
+		expect(await tokenRowCount(api)).toBe(0)
+		expect(emitted).toHaveLength(0)
 	})
 })
