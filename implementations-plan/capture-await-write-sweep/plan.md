@@ -2,7 +2,7 @@
 
 **Tier**: `/blueprint light` (owner-fixed; escalation is risk-based — §Method 6: CONFIRMED > 2 OR any cross-context/shared-primitive/trust-boundary/high-harm fix → independent max review leg).
 **Branch/worktree**: `worktree-capture-await-write-sweep`, cut at dev `4f2833ab` (post audit-448 batch 9), origin/dev `1727a42f` (#470) merged in at `c3297ded`.
-**eli5_mode**: Artifact — published at https://claude.ai/code/artifact/f7a83199-df3f-4da6-8faf-61f97ed0d015 (source: `eli5.html` in this dir; redeploy the same file path to keep the URL).
+**eli5_mode**: Artifact — published at https://claude.ai/code/artifact/981cbb8b-94e3-4dfd-bae8-c4f774177741 (source: `eli5.html` in this dir; redeploy the same file path to keep the URL).
 
 ## Goal
 

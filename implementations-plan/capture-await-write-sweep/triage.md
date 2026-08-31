@@ -142,3 +142,9 @@ Verdict `ship-with-fixes` — 4 findings, all adjudicated in code; fixes in `398
 4. **Fence param wire-reachability (informational)**: already covered by the round-4 doc correction; the leg's no-escalation analysis (forged fence ≤ fresh capture — assertCurrent is equality) stands recorded.
 
 Its checked-and-sound list independently re-verified the drain CAS + tickets, the pxe sweep barrier, the window-manager identity fence, the fpc fences, and — notably — re-traced every revert probe to a failing assertion (pin non-vacuity confirmed by a second reviewer).
+
+### Final convergence
+
+- **Codex rounds 6–8** (post-independent-leg): round 6 verified the lockless-sweep design (`persistToken` proof accepted) but caught `updateToken`/`restore` newly unfenced by it — every token-row writer now carries pre-assert + post-set liveness compensation (updateToken re-read + compensate; restore per-row `isChainLive` pre+post via the new lock-free NetworkService helper). Round 7 caught restore's missing post-set leg; round 8: **`accept` — "No blocking findings."** The session-window question (a disconnect landing mid-refreshSession after an explicit approval click) was accepted with rationale: the click authorizes THIS operation; the session-row check guards incarnation identity, not grant freshness.
+- **Batteries on final state**: full unit run 4,887+ green ×2; audit:vue green; smoke green (armed); network e2e green three times (12-file targeted set, then the token-path set post-F11-redesign, then networks+token+session set post-lockless-sweep).
+- Both reviewers converged: codex `accept` (round 8), independent leg `ship-with-fixes` with all four findings fixed and its checked-and-sound list re-verifying the branch's core mechanisms.

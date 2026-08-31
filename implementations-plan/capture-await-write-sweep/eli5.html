@@ -99,20 +99,20 @@
   <h2>What the hunt found</h2>
   <div class="stats">
     <div class="stat"><b>~300</b><span>spots examined, every one verdicted</span></div>
-    <div class="stat race"><b>10</b><span>real gaps to fix</span></div>
+    <div class="stat race"><b>13</b><span>real gaps — all fixed &amp; pinned</span></div>
     <div class="stat fence"><b>rest</b><span>proven safe, with written reasons</span></div>
   </div>
   <p>The headline pattern: the audit fenced every backup-<em>restore</em> writer in five services, but the <em>create</em> buttons right next to them (add a network, add a contact, add a token…) were left bare — delete your profile at just the wrong moment and a ghost row belonging to the deleted profile gets written anyway. Same guard, five more doors. The other fixes are of the same flavor: a newer code path missing the re-check its older sibling already has, a cleanup task that can delete a store a re-imported profile just started using, two settings writes that can silently undo each other, a stray approval popup that never closes.</p>
   <p>Nothing found is a stolen-funds or leaked-secret bug. These are orphaned-data, wrong-moment-write, and stuck-UI bugs — the kind that turn into support mysteries later. Two known deep issues stay deliberately parked (they need a multi-PR redesign the earlier audit already scoped), so the final bill of health is <em>qualified</em>, exactly as it should be.</p>
 
   <h2>Why this size of ceremony</h2>
-  <p>You fixed the tier as <strong>light</strong>, escalating if more than two real bugs turned up. Ten did, and several sit near sensitive machinery — so the escalation applies: an independent second reviewer goes over the fixes, on top of the usual external-model review loop that has already rejected and reshaped this plan twice (its demands are folded in).</p>
+  <p>You fixed the tier as <strong>light</strong>, escalating if more than two real bugs turned up. Thirteen did, and several sit near sensitive machinery — so the escalation applied in full: an independent second reviewer went over the fixes on top of the eight-round external-model loop. That redundancy paid for itself concretely — the second reviewer caught a deadlock the loop itself had introduced and then signed off on twice.</p>
 
   <h2>Phases</h2>
   <div class="phase done"><h3>1 · Enumerate <span class="st">DONE</span></h3><p class="gate">Three passes: six readers covered all 122 hot files line by line; a second pass hunted the sneaky variants (callbacks that fire later, fire-and-forget writes); a third re-checked every file the first census had dismissed — and caught the census being wrong twice. Proves itself by: every file accounted for, in writing.</p></div>
-  <div class="phase done"><h3>2 · Judge every spot <span class="st">DONE — under external attack now</span></h3><p class="gate">Each spot got a verdict with a written reason; the risky calls were re-read in the actual code. The full table is frozen and an external model is currently trying to break the "safe" verdicts before any fix lands. Proves itself by: verdict-for-every-spot parity + the attack pass resolving.</p></div>
-  <div class="phase pend"><h3>3 · Fix the ten <span class="st">NEXT</span></h3><p class="gate">Each fix reuses an existing guard pattern from the codebase (never a new invention), and ships in the same commit with a test that fails if the guard is ever removed — verified by actually removing it once.</p></div>
-  <div class="phase pend"><h3>4 · Full test battery + review loop + PR <span class="st">PENDING</span></h3><p class="gate">The whole unit/build battery, the browser end-to-end suites where touched, an automated code review, the external-model review loop until it has nothing left to say, an independent second reviewer, then one PR to dev. Merge stays yours.</p></div>
+  <div class="phase done"><h3>2 · Judge every spot <span class="st">DONE</span></h3><p class="gate">Each spot got a verdict with a written reason; the risky calls were re-read in the actual code. The external attack pass on the frozen table upgraded three "safe" verdicts into fixes — its demands are all folded in.</p></div>
+  <div class="phase done"><h3>3 · Fix the thirteen <span class="st">DONE</span></h3><p class="gate">Every fix reuses an existing guard pattern from the codebase, and ships in the same commit with a test that fails if the guard is ever removed — each one verified by actually removing it once (all red→green runs logged).</p></div>
+  <div class="phase done"><h3>4 · Full battery + review loops <span class="st">DONE</span></h3><p class="gate">Full unit battery green (4,880+ tests), smoke e2e green, targeted network e2e green three times over (the dApp token-registration and network-deletion flows re-validated live after each redesign). The external-model review loop ran <strong>eight rounds</strong> — it rejected five times, every finding was verified in the real code before adoption, and its own round-2 demand turned out to plant the branch's worst bug. The independent second reviewer caught that one: a lock-ordering deadlock that would have frozen the token and network surfaces for five minutes on an unlucky add-token × delete-network overlap. Fixed by inverting the design (the purge sweep runs lock-free; every token writer self-compensates instead), plus two more of its findings: a stale approval popup could execute under a re-imported profile, and one error path reported success for a deleted profile. Both reviewers signed off on the final state.</p></div>
 
   <div class="approval">
     <h2>Decisions that are yours</h2>
@@ -125,12 +125,8 @@
     <p class="muted">This ran autonomously under your sweep brief; everything above is revisitable at PR review.</p>
   </div>
 
-  <h2>Implementation seeds</h2>
-  <p class="muted">Being executed in the originating session; seeds are for a resumed session (<code>agent-worktree resume capture-await-write-sweep</code> first). Use exactly one — they don't compose.</p>
-  <p class="rec">Recommended · /goal</p>
-  <pre class="seed">/goal All four phases marked ✓ in implementations-plan/capture-await-write-sweep/plan.md; candidates.md + triage.md committed with ID-set parity and every CONFIRMED row carrying an interleave scenario; every fix commit paired with a colocated pin whose revert-probe (red/green) is logged in lessons/; /code-review max --fix applied+committed; the codex fix loop converged (resumed pass reporting no new material findings, quoted in transcript); the independent max review resolved; PR to dev exists (gh pr view output in transcript) with `bun run audit:vue` and `bun run test:all` exit 0 quoted; e2e:agent green quoted if dApp/network/PXE surfaces were touched.</pre>
-  <p class="muted" style="margin-top:1rem">Alternative · /loop 15m</p>
-  <pre class="seed">/loop 15m Drive implementations-plan/capture-await-write-sweep forward. Each firing: read plan.md + triage.md + lessons/ (authoritative state); run git status. Pick the next pending fix unit F1–F10; implement with the named idiom; pin in the SAME commit; revert-probe and log it. After each edit run bun run lint + typecheck:all + targeted tests. Disputable verdicts → /codex xhigh, log consult + verdict in lessons/. Phase green = its plan.md gate passes verbatim. All ✓ → run the Post-implementation section of plan.md exactly (code-review → codex loop → independent review → PR). Never merge, never weaken a gate; 5 failures on one step → stop and reassess.</pre>
+  <h2>Where it stands</h2>
+  <p>All phases complete; the PR to <code>dev</code> is open and green-gated. The implementation seeds that used to live here are retired — the only remaining action is yours: review the PR, veto any accepted-risk row you disagree with, and merge when satisfied.</p>
 
   <p class="muted" style="margin-top:2.5rem">Full technical plan: <code>implementations-plan/capture-await-write-sweep/plan.md</code> in the worktree branch — with <code>recon.md</code>, <code>census.md</code>, <code>candidates.md</code>, <code>triage.md</code> beside it.</p>
 </main>
