@@ -241,6 +241,17 @@ describe("TokenService.addToken — creation fences", () => {
 		return Object.keys(raw).filter((k) => k.startsWith("nulo:core:tokens@")).length
 	}
 
+	test("addToken for a profile that is not the active one fails closed (authority-match pin)", async () => {
+		// Token ops are not switch-blocked: a post-approval profile switch must
+		// make the write fail rather than land under the wrong profile (F11 —
+		// the register_token cross-profile write).
+		const { tokenService, api } = await makeHarness()
+		await expect(
+			tokenService.addToken("other-profile", NETWORK.id, "0xacc", ti("0xdead"), { origin: "dapp", dappOrigin: "https://x" }),
+		).rejects.toThrow(/unauthorized/)
+		expect(await tokenRowCount(api)).toBe(0)
+	})
+
 	test("a deletion completing DURING the metadata fetch rejects the write (entry-capture pin)", async () => {
 		// begin + RELEASE while parked: the deletion fully settles, so only a
 		// fence captured at the AUTHORIZING entry still rejects — a fence minted

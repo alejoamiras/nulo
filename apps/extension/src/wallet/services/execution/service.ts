@@ -680,7 +680,12 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		origin: LocalTxOrigin,
 		parentTask?: WrappedTask,
 	): Promise<void> {
-		const profile = await requireActiveProfile(this.profileService, "Wallet locked")
+		await requireActiveProfile(this.profileService, "Wallet locked")
+		// `getNetwork` is ownership-checked against the ACTIVE profile, so the
+		// row's own profileId is the validated authority for this op — token ops
+		// are not switch-blocked (not a SENDING kind), and a live profile re-read
+		// at the write would follow a post-approval switch into the wrong
+		// profile. addToken's fence re-asserts this identity at commit.
 		const network = await this.networkService.getNetwork(op.networkId)
 
 		// Honor the popup's pre-fetched interface (`previewedInterface`) if it
@@ -724,7 +729,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// tx-enrichment.ts and tx-detail-helpers.ts.
 		const opContext: OperationContext =
 			origin.type === OriginType.DAPP ? { origin: "dapp", dappOrigin: origin.name ?? "dApp" } : { origin: "popup" }
-		await this.tokenService.addToken(profile.id, op.networkId, op.accountAddress, ti, opContext)
+		await this.tokenService.addToken(network.profileId, op.networkId, op.accountAddress, ti, opContext)
 	}
 
 	public async executeSendTransaction(
