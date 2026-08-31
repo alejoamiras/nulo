@@ -852,6 +852,12 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				}
 				await barrier.read(async () => {
 					await chainGuard.write(async () => {
+						// A stale op parked at this rebind can outlive a clearProfileState
+						// (which never bumps the CHAIN purge epoch) — without re-asserting
+						// the generation here, `ensure` would rebuild a runtime/store for
+						// the erased incarnation using the successor's key. Same assert,
+						// same placement, as withPxeWrite's ensure.
+						this.assertGenerationCurrent(network)
 						this.lifecycle.assertUnchanged(chainKey, purgeEpochAtEntry, label)
 						await this.registry.ensure(network, this.storeKeys.get(network.profileId))
 					})

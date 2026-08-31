@@ -262,4 +262,42 @@ describe("incarnation fence (#281 D4)", () => {
 		await expect(read.call(service, "t", net(GEN_1), async () => "ok")).rejects.toThrow(/stale/)
 		await expect(read.call(service, "t", net(GEN_1), async () => "ok")).rejects.not.toThrow(/PXE_STORE_KEY_MISSING/)
 	})
+
+	test("a stale op reaching the read-path REBIND cannot rebuild the erased incarnation's runtime", async () => {
+		// The rebind block runs registry.ensure — a MUTATION (runtime bind + store
+		// open under whatever key is now provisioned). A stale op whose first read
+		// passed (still live) but whose profile is erased + re-provisioned before
+		// the rebind must throw BEFORE ensure: the later loop iteration's assert
+		// rejecting is not enough, the mutation would already have landed.
+		let factoryCalls = 0
+		const factory: PxeFactory = {
+			createChainRuntime: async (n, storeKey) => {
+				factoryCalls += 1
+				if (!storeKey) throw new Error(`PXE_STORE_KEY_MISSING: no store key provisioned for profile ${n.profileId}`)
+				return new ChainRuntime(n.chainId, {} as never, { getNotes: async () => [] } as never, n.rpcUrl, {
+					close: async () => {},
+				} as never)
+			},
+		}
+		const service = new PxeService(noopProfiles, noopLogger, factory)
+		;(service as unknown as { initialized: boolean }).initialized = true
+		await service.provisionChainStoreKey("p1", KEY_B64, GEN_1)
+
+		// The one sync seam between the first read's generation assert and the
+		// rebind block is the registry miss itself: erase + re-provision there.
+		const svc = service as unknown as {
+			registry: { peekMatching: (n: NetworkInfo) => unknown }
+			profileLifecycles: Map<string, { kind: string; gen: string }>
+			storeKeys: Map<string, Uint8Array>
+			withPxeRead: (l: string, n: NetworkInfo, fn: () => Promise<string>) => Promise<string>
+		}
+		vi.spyOn(svc.registry, "peekMatching").mockImplementationOnce(() => {
+			svc.profileLifecycles.set("p1", { kind: "live", gen: GEN_2 })
+			svc.storeKeys.set("p1", new Uint8Array(32))
+			return undefined
+		})
+
+		await expect(svc.withPxeRead.call(service, "t", net(GEN_1), async () => "ok")).rejects.toThrow(/stale/)
+		expect(factoryCalls).toBe(0)
+	})
 })
