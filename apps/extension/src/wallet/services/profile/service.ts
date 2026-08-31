@@ -1459,10 +1459,18 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * + generation pin + tuple compare-and-delete are the containment. Without a
 	 * cutoff the sweep is SKIPPED entirely.
 	 */
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 	public async resumePendingDeletions(bootCutoff?: number): Promise<void> {
 		const delegate = this.deletionDelegate
 		if (!delegate) return
+		await this.resumeTombstonedDeletions(delegate)
+		// F-B24 torn-import sweep — only with an explicit boot cutoff (see doc).
+		if (bootCutoff === undefined) return
+		await this.sweepTornImports(bootCutoff)
+	}
+
+	/** Finish every valid tombstone's deletion through the same three-phase shape as the
+	 *  live `deleteProfile`; per-tombstone failures log and continue. */
+	private async resumeTombstonedDeletions(delegate: ProfileDeletionDelegate): Promise<void> {
 		// TELEMETRY: a corrupt tombstone reserves its id (fail-closed) but can't be
 		// auto-resumed — surface it for manual recovery. We do NOT drop it (that would
 		// fail OPEN: the row is already deleted but purge may still be pending).
@@ -1501,9 +1509,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				this.logError(`resume deletion failed for ${t.profileId}`, getErrorMessage(err))
 			}
 		}
+	}
 
-		// F-B24 torn-import sweep — only with an explicit boot cutoff (see doc).
-		if (bootCutoff === undefined) return
+	/** The F-B24 torn-import sweep body — see `resumePendingDeletions`' doc for the
+	 *  age-floor/abandonment rationale; per-marker failures log and continue. */
+	private async sweepTornImports(bootCutoff: number): Promise<void> {
 		const corruptMarkers = await this.restorePending.corruptIds()
 		if (corruptMarkers.length) {
 			// Fail CLOSED (tombstone doctrine): never delete what we can't decode —
