@@ -265,4 +265,74 @@ describe("WindowManager", () => {
 
 		await expect(promise).resolves.toBe("late result")
 	})
+
+	it("a timeout during a slow create still closes the late-created window", async () => {
+		// The timeout settles while windows.create is in flight: windowId is
+		// still undefined, so _settle cannot remove anything — the create's own
+		// continuation must clean up the window it just made, or a stray
+		// approval popup lingers with no owner.
+		const removeSpy = vi.spyOn(browser.windows, "remove")
+		const realCreate = browser.windows.create.bind(browser.windows)
+		let release!: () => void
+		const parked = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		browser.windows.create = (async (opts: unknown) => {
+			await parked
+			return realCreate(opts as never)
+		}) as typeof browser.windows.create
+
+		const { promise } = manager.openAndAwait<string>({
+			url: "popup.html",
+			width: 400,
+			height: 600,
+			timeoutMs: TIMEOUT_MS,
+			kind: "test",
+		})
+		clock.advance(TIMEOUT_MS)
+		await expect(promise).rejects.toMatch(/timed out/i)
+		expect(removeSpy).not.toHaveBeenCalled()
+
+		release()
+		await flushCreate()
+		await flushCreate()
+		expect(removeSpy).toHaveBeenCalledWith(FIRST_WINDOW_ID)
+	})
+
+	it("a stale create cannot adopt a re-minted handle id (identity fence)", async () => {
+		// After the original handle settles, its 8-hex id can be re-minted by a
+		// NEWER request. The stale create's continuation must compare handle
+		// OBJECTS, not map membership — and close its now-ownerless window.
+		const removeSpy = vi.spyOn(browser.windows, "remove")
+		const realCreate = browser.windows.create.bind(browser.windows)
+		let release!: () => void
+		const parked = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		browser.windows.create = (async (opts: unknown) => {
+			await parked
+			return realCreate(opts as never)
+		}) as typeof browser.windows.create
+
+		const { handleId, promise } = manager.openAndAwait<string>({
+			url: "popup.html",
+			width: 400,
+			height: 600,
+			timeoutMs: TIMEOUT_MS,
+			kind: "test",
+		})
+		clock.advance(TIMEOUT_MS)
+		await expect(promise).rejects.toMatch(/timed out/i)
+
+		const handles = (manager as unknown as { handles: Map<string, unknown> }).handles
+		const impostor = { settled: false }
+		handles.set(handleId, impostor)
+
+		release()
+		await flushCreate()
+		await flushCreate()
+		expect(removeSpy).toHaveBeenCalledWith(FIRST_WINDOW_ID)
+		expect((impostor as { windowId?: number }).windowId).toBeUndefined()
+		handles.delete(handleId)
+	})
 })
