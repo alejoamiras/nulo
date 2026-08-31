@@ -33,6 +33,9 @@ const { entities: tokens } = useEntityCrud({
 	fetch: () => tokenService.getTokens(appStore.profile.id, appStore.network.chainId),
 	added: tokenService.onTokenAdded,
 	deleted: tokenService.onTokenDeleted,
+	// Events are global; the list is chain-scoped — a mid-switch add for
+	// another chain must not render here.
+	accept: (t) => t.chainId === appStore.network?.chainId,
 })
 
 const handleDelete = (target) => {

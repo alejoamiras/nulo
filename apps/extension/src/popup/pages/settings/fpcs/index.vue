@@ -51,6 +51,9 @@ const {
 	added: fpcService.onFpcAdded,
 	updated: fpcService.onFpcUpdated,
 	deleted: fpcService.onFpcDeleted,
+	// Events are global; the list is chain-scoped — a mid-switch add/update
+	// for another chain must not render here.
+	accept: (f) => f.chainId === appStore.network?.chainId,
 })
 
 const fpcs = computed(() =>

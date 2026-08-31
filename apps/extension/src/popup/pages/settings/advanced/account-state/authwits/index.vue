@@ -50,6 +50,9 @@ const {
 	added: authwitsService.onAuthwitAdded,
 	deleted: authwitsService.onAuthwitDeleted,
 	identity: (aw) => aw.id,
+	// Events are global; the list is account-scoped — another account's
+	// authwit must not splice in mid-switch.
+	accept: (aw) => aw.account === appStore.account?.address,
 })
 
 const filteredAuthwits = computed(() => {

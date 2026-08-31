@@ -30,6 +30,14 @@ export interface UseEntityCrudOptions<T> {
 	 */
 	mode?: EntityCrudMode
 	/**
+	 * Live-scope filter for `"incremental"` mode. Service events are GLOBAL
+	 * broadcasts while `fetch` is scope-bound — without this, a mid-switch
+	 * event for another chain/profile/account splices a foreign row into the
+	 * list. Applied to add/update payloads only; deletes stay unfiltered
+	 * (removing by id is subtractive and scope-safe). Ignored in `"resync"`.
+	 */
+	accept?: (entity: T) => boolean
+	/**
 	 * Called if the initial fetch or a resync throws. Defaults to a no-op.
 	 * The composable still exposes `error` for template binding.
 	 */
@@ -53,7 +61,7 @@ const defaultIdentity = <T>(entity: T): string | number => {
 }
 
 export function useEntityCrud<T>(options: UseEntityCrudOptions<T>): UseEntityCrudResult<T> {
-	const { fetch, added, updated, deleted, identity = defaultIdentity, mode = "incremental", onError } = options
+	const { fetch, added, updated, deleted, identity = defaultIdentity, mode = "incremental", accept, onError } = options
 
 	const entities = ref([]) as Ref<T[]>
 	const isLoading = ref(true)
@@ -84,6 +92,7 @@ export function useEntityCrud<T>(options: UseEntityCrudOptions<T>): UseEntityCru
 			void refresh()
 			return
 		}
+		if (accept && !accept(entity)) return
 		const id = identity(entity)
 		if (entities.value.some((e) => identity(e) === id)) {
 			// Same id reappearing as `added` is treated as an update — common in
@@ -98,6 +107,7 @@ export function useEntityCrud<T>(options: UseEntityCrudOptions<T>): UseEntityCru
 			void refresh()
 			return
 		}
+		if (accept && !accept(entity)) return
 		const id = identity(entity)
 		const idx = entities.value.findIndex((e) => identity(e) === id)
 		if (idx === -1) {

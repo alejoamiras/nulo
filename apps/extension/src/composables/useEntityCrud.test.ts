@@ -315,4 +315,81 @@ describe("useEntityCrud", () => {
 		expect(() => result.entities.value).not.toThrow() // still populated by fetch
 		scope.stop()
 	})
+
+	describe("accept — live-scope filter (incremental)", () => {
+		it("an out-of-scope add is ignored; an in-scope add splices", async () => {
+			const scope = effectScope()
+			const result = scope.run(() =>
+				useEntityCrud<Item>({
+					fetch: async () => [{ id: "a", name: "A" }],
+					added,
+					accept: (e) => e.name.startsWith("scope:"),
+				}),
+			)!
+			await flush()
+
+			added.invoke({ id: "x", name: "foreign" })
+			expect(result.entities.value.map((e) => e.id)).toEqual(["a"])
+
+			added.invoke({ id: "b", name: "scope:B" })
+			expect(result.entities.value.map((e) => e.id)).toEqual(["a", "b"])
+			scope.stop()
+		})
+
+		it("an out-of-scope update neither patches nor appends", async () => {
+			const scope = effectScope()
+			const result = scope.run(() =>
+				useEntityCrud<Item>({
+					fetch: async () => [{ id: "a", name: "scope:A" }],
+					updated,
+					accept: (e) => e.name.startsWith("scope:"),
+				}),
+			)!
+			await flush()
+
+			updated.invoke({ id: "a", name: "foreign-rename" })
+			updated.invoke({ id: "z", name: "foreign-new" })
+			expect(result.entities.value).toEqual([{ id: "a", name: "scope:A" }])
+			scope.stop()
+		})
+
+		it("deletes stay UNFILTERED — subtractive events apply regardless of scope", async () => {
+			const scope = effectScope()
+			const result = scope.run(() =>
+				useEntityCrud<Item>({
+					fetch: async () => [{ id: "a", name: "scope:A" }],
+					deleted,
+					accept: () => false,
+				}),
+			)!
+			await flush()
+
+			deleted.invoke({ id: "a", name: "whatever" })
+			expect(result.entities.value).toEqual([])
+			scope.stop()
+		})
+
+		it("accept is ignored in resync mode (the re-fetch is the filter)", async () => {
+			let calls = 0
+			const scope = effectScope()
+			const result = scope.run(() =>
+				useEntityCrud<Item>({
+					fetch: async () => {
+						calls += 1
+						return [{ id: `fetch-${calls}`, name: "F" }]
+					},
+					added,
+					mode: "resync",
+					accept: () => false,
+				}),
+			)!
+			await flush()
+
+			added.invoke({ id: "x", name: "anything" })
+			await flush()
+			expect(calls).toBe(2)
+			expect(result.entities.value.map((e) => e.id)).toEqual(["fetch-2"])
+			scope.stop()
+		})
+	})
 })

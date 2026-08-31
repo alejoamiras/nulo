@@ -44,6 +44,9 @@ const {
 	added: accountStateClientService.onSenderAdded,
 	deleted: accountStateClientService.onSenderDeleted,
 	identity: (s) => s,
+	// The event payload is a bare address with no scope to filter on —
+	// re-fetch the network-scoped list instead of splicing blind.
+	mode: "resync",
 })
 
 const handleCopyAddress = (address) => {
