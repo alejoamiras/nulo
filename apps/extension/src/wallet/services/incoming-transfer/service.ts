@@ -1821,6 +1821,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			// substitute for a multi-key transaction). Trust-independent — a hidden receipt still
 			// changed the chain balance.
 			await this.markBalanceDirty(profileId, networkId, account, token.id)
+			// A wipe admitted during the dirty-mark's await must not land the record
+			// AFTER the purge enumerated rows; aborting here leaves dirty-without-
+			// record, which D4's ordering already tolerates (the drain heals it).
+			if (this.serviceEpoch !== epochAtStart) return
 			const record = this.buildPublicRecord({ ev, profileId, networkId, account, token, trustState })
 			await this.repo.upsertRecord(record)
 			if (trustState === "trusted" && (await this.isVisibilityEnabled()) && this.serviceEpoch === epochAtStart) {
