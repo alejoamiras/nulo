@@ -27,6 +27,7 @@ export interface ValidateSendAmountInput {
 
 const MIN_BASE_UNITS = 1n
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 17) — refactor when touched, never raise
 export function validateSendAmount(opts: ValidateSendAmountInput): ValidateSendAmount {
 	const { input, tokenDecimals, balanceRaw } = opts
 

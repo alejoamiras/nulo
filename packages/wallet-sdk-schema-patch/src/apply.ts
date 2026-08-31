@@ -48,6 +48,7 @@ const GRANT_AUTHWIT_SCHEMA = z.function({ input: z.tuple([schemas.AztecAddress, 
  * three Nulo-custom method entries. Idempotent when the entries already match our
  * shape; throws when an upstream entry of the same name has a different signature.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 24) — refactor when touched, never raise
 export function applyNuloSchemaPatch(schema: object): void {
 	// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entries are upstream-typed but the per-key shape is internal to @aztec/aztec.js.
 	const target = schema as any

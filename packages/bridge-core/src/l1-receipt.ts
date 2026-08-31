@@ -36,6 +36,7 @@ function assertNotReverted<R>(receipt: R, hash: `0x${string}`): R {
 	return receipt
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 export async function awaitL1Receipt<R>(client: L1ReceiptClient<R>, hash: `0x${string}`, opts: AwaitL1ReceiptOptions = {}): Promise<R> {
 	const attempts = opts.attempts ?? 8
 	const attemptTimeoutMs = opts.attemptTimeoutMs ?? 90_000

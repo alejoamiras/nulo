@@ -251,6 +251,7 @@ export interface NormalizedBackupData {
 
 export type NormalizeResult = { ok: true; normalized: NormalizedBackupData } | { ok: false; reason: string }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 50) — refactor when touched, never raise
 export function normalizeBackupData(data: unknown): NormalizeResult {
 	if (typeof data !== "object" || data === null || Array.isArray(data)) {
 		return { ok: false, reason: "backup data is not an object" }
@@ -318,6 +319,7 @@ export function normalizeBackupData(data: unknown): NormalizeResult {
 
 export type DenormalizeResult = { ok: true; data: Record<string, unknown> } | { ok: false; reason: string }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 41) — refactor when touched, never raise
 export function denormalizeBackupData(
 	scratchEntries: Record<string, unknown>,
 	normalized: Pick<NormalizedBackupData, "passThrough" | "present">,

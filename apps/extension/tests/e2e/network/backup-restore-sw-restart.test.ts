@@ -166,6 +166,7 @@ test.skipIf(!hasConfig)(
 	{
 		timeout: 900_000,
 	},
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
 	async ({ tokenReadyExtension }) => {
 		const { filePath, funded } = await exportFundedBackup(tokenReadyExtension)
 

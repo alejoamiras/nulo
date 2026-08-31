@@ -119,6 +119,8 @@ interface FpcDescriptor {
 	compatibleNodeVersions: Record<string, string[] | string>
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (91 lines) — split when touched, never grow
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 20) — refactor when touched, never raise
 export async function runFpcGate(mode: GateMode): Promise<void> {
 	const here = fileURLToPath(new URL(".", import.meta.url))
 	const pkg = JSON.parse(readFileSync(resolvePackageFile("@alejoamiras/private-fee-juice", "package.json"), "utf8"))

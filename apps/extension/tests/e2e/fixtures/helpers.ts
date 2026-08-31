@@ -1315,6 +1315,7 @@ export async function resetProfile(page: Page): Promise<void> {
  *  exist to prove. */
 export async function captureBalanceBaseline(page: Page, account: string, tokenContract: string): Promise<number> {
 	return await page.evaluate(
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 28) — refactor when touched, never raise
 		async ({ acct, contract }: { acct: string; contract: string }) => {
 			const all = await chrome.storage.local.get(null)
 			// Bind to the exact (account, token) rows: another token's row with the same
@@ -1398,6 +1399,7 @@ export async function waitForFreshBalanceRow(
 	// the acceptance (audit condition).
 	const readRows = (): Promise<BalanceRow[]> =>
 		page.evaluate(
+			// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 32) — refactor when touched, never raise
 			async ({ acct, contract }: { acct: string; contract: string }) => {
 				const all = await chrome.storage.local.get(null)
 				const tokenIds = new Set<number>()

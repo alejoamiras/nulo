@@ -124,6 +124,7 @@ export function createFeeEstimationEngine<TKey extends string | number, TParams,
 		const token = crypto.randomUUID()
 		inflight.set(key, { token, started: false })
 
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 25) — refactor when touched, never raise
 		const timer = setTimeout(async () => {
 			try {
 				const flight = inflight.get(key)

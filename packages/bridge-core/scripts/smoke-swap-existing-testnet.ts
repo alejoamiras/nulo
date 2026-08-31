@@ -67,6 +67,8 @@ const TOTAL = 10n * 10n ** TOKEN_DECIMALS
 // (quote >= minFuelFj) — a fresh pool's pricing can put the old default under the floor.
 const FUEL_SLICE = BigInt(process.env.FUEL_SLICE_UNITS ?? (10n ** TOKEN_DECIMALS).toString())
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (152 lines) — split when touched, never grow
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 async function main() {
 	const mins = stopwatch()
 

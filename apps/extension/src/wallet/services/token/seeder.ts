@@ -183,6 +183,7 @@ export class TokenSeeder {
 		return this.withMarkerLock(() => this.markerStorage(profileId).delete())
 	}
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 33) — refactor when touched, never raise
 	private async doRun(): Promise<void> {
 		const epoch = this.epoch
 		const profile = await this.deps.getActiveProfile()

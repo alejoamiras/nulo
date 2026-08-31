@@ -50,6 +50,7 @@ export class UnknownDependencyError extends Error {
  * @throws UnknownDependencyError — dep names a service not in the collection.
  * @throws DependencyCycleError   — any strongly-connected subgraph remains.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 29) — refactor when touched, never raise
 export function topologicalPhases<T extends ServiceNode>(nodes: readonly T[]): T[][] {
 	const byName = new Map<string, T>()
 	for (const node of nodes) byName.set(node.name, node)

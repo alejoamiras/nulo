@@ -81,6 +81,7 @@ const filteredRecentTransactions = computed(() => {
  *  concurrent in-flight ops the home-tab preview can exceed ROW_BUDGET —
  *  every in-flight op is visible by design (per user requirement), and
  *  settled overflow goes to the Activity page. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 30) — refactor when touched, never raise
 const recentActivityRows = computed(() => {
 	// Count slots only for cards that actually render. The send.vue fallback
 	// (`awaitingAccountTxs` / `isTokenAwaitingTx` generic card) is suppressed

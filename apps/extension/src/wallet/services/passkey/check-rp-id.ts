@@ -78,6 +78,7 @@ export interface DriftFinding {
  * cost of false negatives is high. If the scope ever broadens to
  * lots of files, swap in a proper AST walk.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 export function scanRpIdLiteralDrift(
 	file: string,
 	content: string,

@@ -54,6 +54,7 @@ interface CallLike {
  * the method name isn't in the known set OR if the arg arity doesn't
  * match the expected signature.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 export function parseTransferIntent(call: CallLike | undefined): TransferIntent {
 	if (!call) return { kind: "unverified" }
 	const name = call.method ?? call.name

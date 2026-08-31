@@ -44,6 +44,7 @@ export interface UseProfileImportFlowOptions {
 	openToast: (content: { label: string; icon?: string }, duration?: number) => void
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (207 lines) — split when touched, never grow
 export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 	const {
 		profileName,

@@ -406,6 +406,7 @@ export interface UseFullBackupImportResult {
 	resetBackupState: () => void
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (328 lines) — split when touched, never grow
 export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBackupImportResult {
 	const selectedBackup = ref<BackupSelection | null>(null)
 	const decryptionPassword = ref("")
@@ -427,6 +428,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		return true
 	})
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 23) — refactor when touched, never raise
 	async function pickBackupFile() {
 		if (restoreStatus.value === "progress") return
 		try {
@@ -483,6 +485,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		}
 	}
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
 	async function decryptBackup() {
 		if (!decryptionPassword.value) return
 		// Snapshot the selection this decrypt belongs to: a re-pick (or the
@@ -538,6 +541,8 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		}
 	}
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 114) — refactor when touched, never raise
+	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (220 lines) — split when touched, never grow
 	async function restoreBackup() {
 		// Re-entrancy guard: a second concurrent run (double-click, or the
 		// popup's document-level Enter handler firing again mid-flight) would

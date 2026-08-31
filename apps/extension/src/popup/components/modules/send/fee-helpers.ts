@@ -148,6 +148,7 @@ export function resolveSavedSelection(
  * rows are offered — set false on networks that have no funded sponsor
  * (Alpha/mainnet), where offering it would be a trap that fails at send.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
 export function buildFeeMethods(
 	registeredFpcs: RegisteredFpc[],
 	gasBalances?: GasBalances,

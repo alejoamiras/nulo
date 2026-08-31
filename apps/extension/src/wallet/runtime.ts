@@ -114,6 +114,7 @@ const HEARTBEAT_INTERVAL_MS = 10_000
 /** Uninstall URL. Matches nulo.sh brand; documented in SECURITY.md. */
 const UNINSTALL_URL = "https://nulo.sh/forms/uninstall"
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (183 lines) — split when touched, never grow
 export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 	const { browserApi, clock, config, logger, manifestVersion } = deps
 	const services = new ServiceCollection()
@@ -138,6 +139,8 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 	// throw transiently and re-run safely.
 	let retrySafe = true
 
+	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (160 lines) — split when touched, never grow
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 33) — refactor when touched, never raise
 	const doStart = async (): Promise<void> => {
 		// Uninstall URL comes first — zero-cost and covers the user experience
 		// even if the rest of startup fails.
@@ -157,6 +160,7 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// CLOSED: if its reads/writes fail, no engine this boot (repeated read
 		// faults can neither burn attempts nor bypass a terminal verdict) — the
 		// next respawn retries the gate.
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 27) — refactor when touched, never raise
 		const evaluateMigrationGate = async (): Promise<MigrationGateDecision> => {
 			const gate = await browserApi.storage.local.get([SCHEMA_BLOCKED_KEY, SCHEMA_RETRY_REQUESTED_KEY])
 			const retryRequested = isValidRetryRequest(gate[SCHEMA_RETRY_REQUESTED_KEY])

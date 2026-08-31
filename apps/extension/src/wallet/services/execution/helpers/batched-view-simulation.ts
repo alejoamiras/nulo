@@ -162,6 +162,8 @@ export interface BatchedViewSimulationResult {
 /** Tuple: [FunctionCall, originalIndex, slowArmSlotIndex (re-numbered per arm), returnTypes]. */
 type TxTuple = [FunctionCall, number, number, AbiType[]]
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (152 lines) — split when touched, never grow
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 71) — refactor when touched, never raise
 export async function batchedViewSimulation(
 	calls: ReadonlyArray<CallAction | EncodedCallAction>,
 	deps: BatchedViewSimulationDeps,

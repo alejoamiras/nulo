@@ -55,6 +55,7 @@ export function buildWithdrawSendOpts(from: AztecAddress) {
 let depsWired = false
 
 /** Wire the journal engine's withdraw-side chain deps (idempotent; real clients only). */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (82 lines) — split when touched, never grow
 function wireWithdrawDeps(): void {
 	if (depsWired) return
 	depsWired = true
@@ -176,6 +177,7 @@ function wireWithdrawDeps(): void {
  * private, two for public) → record rekeyed to the exit tx → the engine's consume tail (proven
  * wait → witness → ONE L1 prompt).
  */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (103 lines) — split when touched, never grow
 export function useWithdrawFlow() {
 	wireWithdrawDeps()
 	const l1 = useL1Wallet()
@@ -185,6 +187,8 @@ export function useWithdrawFlow() {
 	const busy = ref(false)
 	const error = ref<string | null>(null)
 
+	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (90 lines) — split when touched, never grow
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
 	async function withdraw(amount: bigint, isPrivate = false, opts: { onRecord?: (id: string) => void } = {}): Promise<string | null> {
 		error.value = null
 		const aztec = bridgeWallet.wallet.value

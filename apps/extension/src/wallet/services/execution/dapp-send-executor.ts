@@ -472,6 +472,7 @@ export class DappSendExecutor {
 		)
 	}
 
+	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (123 lines) — split when touched, never grow
 	public async executeAztecSendTx(
 		op: AztecSendTxOperation,
 		origin: LocalTxOrigin,
@@ -518,6 +519,8 @@ export class DappSendExecutor {
 					return primaryMethod ? [{ method: primaryMethod }] : undefined
 				},
 			},
+			// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
+			// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (108 lines) — split when touched, never grow
 			async ({ checkCancelled, markJournal }) => {
 				if (op.accountAddress !== op.opts?.from?.toString()) {
 					throw new Error("Invalid `opts.from`")
@@ -675,6 +678,7 @@ export class DappSendExecutor {
 	 * The dApp's ExecutionPayload is passed directly to DefaultEntrypoint — no account
 	 * contract wrapping, no wallet auth witness discovery, no call mutation.
 	 */
+	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (100 lines) — split when touched, never grow
 	private async executeNoFromSendTx(
 		op: AztecSendTxOperation,
 		origin: LocalTxOrigin,
@@ -710,6 +714,8 @@ export class DappSendExecutor {
 					return primaryMethod ? [{ method: primaryMethod }] : undefined
 				},
 			},
+			// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 20) — refactor when touched, never raise
+			// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (84 lines) — split when touched, never grow
 			async ({ checkCancelled, markJournal }) => {
 				await markJournal({ stage: "simulating" })
 

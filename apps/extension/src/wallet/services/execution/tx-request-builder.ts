@@ -115,6 +115,8 @@ export class TxRequestBuilder {
 	/** Standard Nulo path: wallet-lock check, resolve contracts, process
 	 *  every action (authwit / call / capsule / extraArgs), build via the
 	 *  account contract's entrypoint. */
+	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (208 lines) — split when touched, never grow
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 38) — refactor when touched, never raise
 	public async buildStandard(
 		op: { networkId: string; accountAddress: string; actions: Action[] },
 		feePaymentMethod: AccountFeePaymentMethodOptions,
@@ -402,6 +404,8 @@ export class TxRequestBuilder {
 	 *  wrapper, inlined `DefaultEntrypoint` logic. Cannot import
 	 *  `@aztec/entrypoints/default` in the service worker (upstream
 	 *  references `window`). */
+	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (85 lines) — split when touched, never grow
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 20) — refactor when touched, never raise
 	public async buildNoFrom(op: AztecSendTxOperation, parentTask?: WrappedTask): Promise<BuiltNoFromTx> {
 		const step = new StepContent("Processing transaction")
 		const task = parentTask ? parentTask.startSubtask(step) : this.taskService.startNewTask(step)

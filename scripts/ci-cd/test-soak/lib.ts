@@ -168,6 +168,7 @@ export interface ParsedRun {
 }
 
 /** Flattens vitest's JSON reporter output into per-test statuses keyed `<file> :: <full name>`. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
 export function parseVitestJson(json: VitestJson, canon: Canonicalizer): ParsedRun {
 	const statuses = new Map<string, string>()
 	const failing: string[] = []
@@ -287,6 +288,7 @@ export interface CompareResult {
 }
 
 /** `a` is the Node reference, `b` the Bun candidate. Every rule is fail-closed. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 41) — refactor when touched, never raise
 export function compareSummaries(a: SoakSummary, b: SoakSummary): CompareResult {
 	const problems: string[] = []
 	const lines: string[] = []
@@ -302,6 +304,7 @@ export function compareSummaries(a: SoakSummary, b: SoakSummary): CompareResult 
 	if (meta(a).runtimeMode !== "node") problems.push(`reference must be runtimeMode "node", got "${meta(a).runtimeMode}"`)
 	if (meta(b).runtimeMode !== "script") problems.push(`candidate must be runtimeMode "script", got "${meta(b).runtimeMode}"`)
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 31) — refactor when touched, never raise
 	const checkSide = (side: SoakSummary, label: string, expectBun: boolean) => {
 		if (side.runs.length !== side.meta.runs) problems.push(`${label}: ${side.runs.length} run rows for meta.runs=${side.meta.runs}`)
 		const identities = new Set(side.runs.map((run) => runtimeIdentity(run.runtime)))

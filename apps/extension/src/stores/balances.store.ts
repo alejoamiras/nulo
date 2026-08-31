@@ -149,6 +149,7 @@ function newEntry(epoch: number): BalanceEntry {
 	return { gas: newGasSlice(), fpc: newFpcSlice(), stale: false, epoch }
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (312 lines) — split when touched, never grow
 export const useBalancesStore = defineStore("balances", () => {
 	// ── app-lifetime clients (connect-once; tx client is event-only so its
 	//    connect is explicit — the lazy path only fires on RPC use) ──────────
@@ -357,6 +358,7 @@ export const useBalancesStore = defineStore("balances", () => {
 		const inFlight = legFlights.get(`${key}|gas|${epoch}`)
 		if (inFlight && opts.cause !== "forced") return inFlight
 		let mySeq = 0
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 60) — refactor when touched, never raise
 		const run = (async () => {
 			const entry0 = entries.value[key]
 			if (!entry0) return
@@ -468,6 +470,7 @@ export const useBalancesStore = defineStore("balances", () => {
 	async function fetchFpc(key: string, scope: BalanceScope, epoch: number, opts: FetchOpts): Promise<void> {
 		const inFlight = legFlights.get(`${key}|fpc|${epoch}`)
 		if (inFlight) return inFlight
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 29) — refactor when touched, never raise
 		const run = (async () => {
 			const entry0 = entries.value[key]
 			if (!entry0) return
@@ -516,6 +519,7 @@ export const useBalancesStore = defineStore("balances", () => {
 		}
 	}
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
 	async function ensure(scope: BalanceScope, opts: { legs: BalanceLeg[]; forceRefresh?: boolean }): Promise<EnsureSnapshot> {
 		const key = activityScopeKey(scope)
 		const epoch = epochOf(scope.profileId)
@@ -579,6 +583,7 @@ export const useBalancesStore = defineStore("balances", () => {
 		retryTimers.set(key, { timer, attempt })
 	}
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 20) — refactor when touched, never raise
 	async function runRetry(key: string, scope: BalanceScope, attempt: number): Promise<void> {
 		const union = capsUnion(key)
 		if (!union.retry) return

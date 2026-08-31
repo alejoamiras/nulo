@@ -155,6 +155,7 @@ function canonicalizeTransformMap(maps: Readonly<Record<string, RowMapTransform>
 	return cloneJsonObject(maps, where) as unknown as Record<string, RowMapTransform>
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 24) — refactor when touched, never raise
 function cloneJsonValue(value: unknown, path: string): JsonValue {
 	if (value === null || typeof value === "string" || typeof value === "boolean") return value
 	if (typeof value === "number") {
@@ -215,6 +216,7 @@ function cloneJsonObject(value: Record<string, unknown>, path: string): { [key: 
 
 /** Define-time well-formedness: reject transforms that could be ambiguous or
  *  non-idempotent BEFORE they ever meet data. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 53) — refactor when touched, never raise
 function validateTransform(target: string, t: RowMapTransform): void {
 	const fail = (reason: string): never => {
 		throw new Error(`row-map transform for "${target}": ${reason}`)
@@ -284,6 +286,7 @@ function validateTransform(target: string, t: RowMapTransform): void {
  *  ONLY inputs are one row and the frozen transform data. Throws on anything
  *  it cannot transform unambiguously (hostile-input rule: presence-guard
  *  every access, fail closed). Exported for the metamorphic guardrail tests. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 39) — refactor when touched, never raise
 export function applyRowTransform(row: unknown, t: RowMapTransform): Record<string, unknown> {
 	if (typeof row !== "object" || row === null || Array.isArray(row)) {
 		throw new Error("row is not an object")
@@ -324,6 +327,7 @@ export function applyRowTransform(row: unknown, t: RowMapTransform): Record<stri
 	return out
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 23) — refactor when touched, never raise
 function retypeValue(field: string, v: unknown, kind: "string" | "number" | "boolean"): string | number | boolean {
 	switch (kind) {
 		case "string": {

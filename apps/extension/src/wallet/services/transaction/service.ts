@@ -403,6 +403,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		return due
 	}
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 	private async updateTx(tx: Tx) {
 		this.logDebug(`Sync tx ${tx.hash.slice(0, 8)}`)
 		// Pin polling to the endpoint that submitted this tx: staying on the
@@ -534,6 +535,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		}
 	}
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 20) — refactor when touched, never raise
 	public async backup(): Promise<Tx[] | undefined> {
 		const profile = await requireActiveProfile(this.profileService)
 

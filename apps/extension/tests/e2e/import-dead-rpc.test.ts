@@ -99,6 +99,7 @@ function startStub(answer: (method: string) => unknown | undefined): Promise<Stu
 			req.on("data", (c) => {
 				body += String(c)
 			})
+			// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 26) — refactor when touched, never raise
 			req.on("end", () => {
 				// The aztec JSON-RPC client BATCHES: bodies arrive as arrays of
 				// request envelopes (the Phase-1 evidence harness learned this the

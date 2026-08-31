@@ -78,6 +78,7 @@ export interface ClaimHelperResult {
 	controller: AbortController | undefined
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 47) — refactor when touched, never raise
 export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, input: ClaimHelperInput): Promise<ClaimHelperResult> {
 	const { operationJournal, activeControllers, createFreshRecord, logger } = deps
 	const { networkId, accountAddress, origin, calls, queuedJournalId, reuseController } = input

@@ -125,6 +125,7 @@ export interface AztecWalletSessionConfig {
  * its own SDK side effects via its CAPTURED handles (never the mutable session fields — those
  * may already belong to a newer flow).
  */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (405 lines) — split when touched, never grow
 export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 	// Declared before the reactive state: `preferredWalletName`'s initializer
 	// calls `readPreferred()`, which reads this (a TDZ here silently nulls the
@@ -241,6 +242,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 	 *  re-caps the list; content is only ever used to PRE-SELECT among the live grant, never to
 	 *  select an outside address (plan D-2/D-23; validation against the grant happens at lookup
 	 *  sites). */
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 26) — refactor when touched, never raise
 	function readRememberedMap(): Array<[string, string]> {
 		try {
 			const raw = localStorage.getItem(selectedStorageKey)
@@ -336,6 +338,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		return connectImpl(true)
 	}
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 57) — refactor when touched, never raise
 	async function connectImpl(forcePicker: boolean): Promise<void> {
 		if (activeFlowEpoch !== null || status.value === "connected") return
 
@@ -403,6 +406,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 						// non-claimant wallets must never sit hidden for the full
 						// 60s discovery timeout. Best-effort detection only — the
 						// emoji verification remains the actual trust anchor.
+						// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
 						ambiguityTimer = setTimeout(() => {
 							ambiguityTimer = null
 							if (isStale(flowEpoch) || status.value !== "discovering") return
@@ -507,6 +511,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		}
 	}
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 	async function confirmVerification(): Promise<void> {
 		if (!pending) return
 		const flowEpoch = epoch
@@ -619,6 +624,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		await connectWithPicker()
 	}
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 34) — refactor when touched, never raise
 	async function requestCapabilities(flowEpoch: number): Promise<void> {
 		const flowWallet = wallet.value
 		const flowProvider = provider
@@ -689,6 +695,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 
 	/** Shared post-selection tail for BOTH the auto path and the choose-account confirm path.
 	 *  Owns its errors identically for both callers (plan D-20) — it never throws. */
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 	async function finishSetup(flowEpoch: number, flowWallet: Wallet, flowProvider: WalletProvider | null): Promise<void> {
 		try {
 			// The user already clicked Approve - we're now doing post-approval setup (registering
@@ -865,6 +872,7 @@ export interface ParsedGrantedAccounts {
  * Aliases are sanitized (control/bidi strip) and capped; addresses deduped (first wins); the
  * list is bounded with DISCLOSED truncation.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 17) — refactor when touched, never raise
 export function parseGrantedAccounts(result: unknown): ParsedGrantedAccounts {
 	const none: ParsedGrantedAccounts = { accounts: [], hiddenCount: 0 }
 	if (!result || typeof result !== "object") return none

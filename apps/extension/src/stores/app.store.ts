@@ -18,6 +18,7 @@ import { hasInFlightSend as inFlightHasSend } from "@/utils/in-flight-send"
 import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
 import { OperationJournalServiceClient } from "@/wallet/services/operation-journal/client"
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (245 lines) — split when touched, never grow
 export const useAppStore = defineStore("app", () => {
 	const _isHomeScreenOpened = ref(false)
 
@@ -79,6 +80,7 @@ export const useAppStore = defineStore("app", () => {
 	 * not superseded activations.
 	 */
 	let activationEpoch = 0
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
 	const setupActiveAccount = async (): Promise<boolean> => {
 		const myEpoch = ++activationEpoch
 		const scopeProfileId = profile.value?.id

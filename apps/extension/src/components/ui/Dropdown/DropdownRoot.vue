@@ -92,6 +92,7 @@ const handleOutside = (e) => {
 	close()
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 17) — refactor when touched, never raise
 watch(isOpen, async () => {
 	if (!isOpen.value) {
 		await nextTick()
@@ -135,6 +136,7 @@ watch(isOpen, async () => {
 				break
 		}
 
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
 		nextTick(() => {
 			let candidate
 			try {
@@ -207,6 +209,7 @@ onBeforeUnmount(() => {
 	document.removeEventListener("keydown", onKeydown)
 })
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
 const onKeydown = (event) => {
 	if (event.key === "Escape") close()
 	if (event.key === "Enter") {

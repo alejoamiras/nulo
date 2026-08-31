@@ -128,6 +128,7 @@ export interface PrivateFuelClaimEvidence {
 /** How long a private claim attempt may sit in receipt limbo before the retry path re-opens. */
 export const PRIVATE_ATTEMPT_STALE_MS = 15 * 60_000
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 export function decidePrivateFuelClaim(e: PrivateFuelClaimEvidence): { action: PrivateFuelClaimAction } {
 	if (e.attempt && e.txHashKnown) {
 		if (e.receiptStatus === "included" || e.consumed) return { action: "consumed" }

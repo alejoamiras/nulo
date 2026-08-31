@@ -367,6 +367,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		const accounts = await this.accountService.getAccountsRaw(profileId)
 		if (gen !== this.profileGeneration) return
 
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
 		await this.lock.withLock(async () => {
 			if (gen !== this.profileGeneration) return
 			const existing = await this.repo.getAll()
@@ -585,6 +586,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		})
 	}
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 50) — refactor when touched, never raise
 	private readonly onTransactionUpdated = async (tx: Tx) => {
 		if (tx.status !== TxStatus.Pending) {
 			if (tx.origin.type === OriginType.UI) {

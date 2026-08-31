@@ -134,6 +134,7 @@ const getInputType = computed(() => {
 	return "text"
 })
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 21) — refactor when touched, never raise
 const handleInput = (event?: Event) => {
 	if (props.disabled) return
 

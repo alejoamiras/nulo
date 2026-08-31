@@ -69,6 +69,7 @@ const isAvailableToCreateNetwork = computed(() => {
 })
 
 const isCreating = ref(false)
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 21) — refactor when touched, never raise
 const handleCreateNetwork = async () => {
 	if (!isAvailableToCreateNetwork.value) return
 	// Creating a network ACTIVATES it, so it moves the scope a send is building

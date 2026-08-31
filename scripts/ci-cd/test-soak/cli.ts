@@ -142,6 +142,7 @@ function emptyRun(partial: Partial<RunRecord>): RunRecord {
 }
 
 /** One retry-0 run of the launcher with the enforced reporter flags appended LAST. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
 export async function runOnce(opts: RunOnceOptions): Promise<RunOutcome> {
 	const tmp = mkdtempSync(join(tmpdir(), "test-soak-"))
 	const canon: Canonicalizer = createCanonicalizer({ repoRoot: opts.repoRoot, wsDir: opts.wsDir, tmpDirs: [tmp] })
@@ -277,6 +278,7 @@ interface SoakArgs {
 	filters: string[]
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 25) — refactor when touched, never raise
 export function parseSoakArgs(argv: string[]): SoakArgs {
 	const args: SoakArgs = { cwd: "", script: "test", runtime: "script", runs: 0, out: "", timeoutMin: 20, filters: [] }
 	let index = 0
@@ -312,6 +314,7 @@ export function parseSoakArgs(argv: string[]): SoakArgs {
 	return args
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 async function soak(argv: string[]): Promise<number> {
 	const args = parseSoakArgs(argv)
 	const wsDir = resolve(args.cwd)

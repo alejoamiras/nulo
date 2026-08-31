@@ -175,6 +175,7 @@ export class JournalReaper {
 	 * window — a proving op started 10s ago in THIS SW instance should
 	 * NOT be reaped.
 	 */
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 23) — refactor when touched, never raise
 	public async reap(opts?: { unconditional?: boolean; bootCutoff?: number }): Promise<void> {
 		const inflight = await this.journal.getOperations({ isTerminal: false })
 		const now = this.now()

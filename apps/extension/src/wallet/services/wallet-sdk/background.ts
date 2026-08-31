@@ -94,6 +94,7 @@ const NULO_ALLOW_IFRAME_DAPPS: boolean = import.meta.env?.VITE_NULO_ALLOW_IFRAME
  *
  * Call this after `services.start()` in the service worker entry point.
  */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (196 lines) — split when touched, never grow
 export function initWalletSdkHandler(services: ServiceCollection, logger: ILogger): BackgroundConnectionHandler {
 	const networkService: NetworkService = services.get(NetworkService.name)
 	const accountService: AccountService = services.get(AccountService.name)
@@ -525,6 +526,8 @@ const DISCOVERY_PENDING_PER_ORIGIN_CAP = 4
  *    - If no: show connect popup via DappInteractionService
  * 3. On approval, the wallet-sdk proceeds with ECDH key exchange
  */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (99 lines) — split when touched, never grow
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 21) — refactor when touched, never raise
 async function handleDiscovery(
 	discovery: PendingDiscovery,
 	handler: BackgroundConnectionHandler,

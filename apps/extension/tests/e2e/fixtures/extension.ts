@@ -621,6 +621,7 @@ export const test = base.extend<{
 						// Ground truth from the wallet's own storage: every account row
 						// with its chainId, so the failure discriminates wrong-chain
 						// creation from popup-side filtering.
+						// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
 						const storedAccounts = await capPopup.evaluate(async () => {
 							const all = await chrome.storage.local.get(null)
 							const out: string[] = []
@@ -1002,6 +1003,7 @@ export function patchPagePolling(page: Page): void {
 		// Use our patched waitForFunction (polling: 200) under the hood.
 		// biome-ignore lint/suspicious/noExplicitAny: dynamic invocation on the patched method
 		await (page as any).waitForFunction(
+			// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 29) — refactor when touched, never raise
 			(args: { sel: string; visible: boolean; hidden: boolean }) => {
 				const el = document.querySelector<HTMLElement>(args.sel)
 				if (args.hidden) {

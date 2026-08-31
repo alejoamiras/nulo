@@ -226,6 +226,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 *    on schema bump) so only the bytes are being reclaimed. Sweeps them ALL, plus the shared
 	 *    keyval-store once none remain.
 	 */
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 21) — refactor when touched, never raise
 	private async sweepOrphanStores(): Promise<void> {
 		const opfsDirs = await listChainStoreDirs()
 		const dbs = await indexedDB.databases()
@@ -307,6 +308,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		opts?: { pxeOnly?: boolean; nodeBestEffort?: boolean },
 	): Promise<ContractInstanceWithAddress | undefined> {
 		address = await AztecAddress.schema.parseAsync(address)
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 26) — refactor when touched, never raise
 		return this.withPxeRead("getContractInstance", network, async (pxe, node) => {
 			// 5.0.0: the PXE returns the address PREIMAGE (no currentContractClassId); the node
 			// returns the full chain-derived instance. Both funnel through the effective-class

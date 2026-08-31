@@ -33,6 +33,7 @@ let handlerAssetVerified = false
  * from the `l1.feeJuice` config; when it is absent every method is inert (the Fuel tab never renders).
  * Canonical viem only.
  */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (103 lines) — split when touched, never grow
 export function useL1FeeAsset() {
 	const l1 = useL1Wallet()
 

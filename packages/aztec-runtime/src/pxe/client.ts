@@ -121,6 +121,7 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 		this.generationProvider = provider
 	}
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 21) — refactor when touched, never raise
 	protected override async request<T extends keyof Methods>(
 		method: T,
 		...args: Parameters<Methods[T]>

@@ -180,6 +180,7 @@ const selectAccount = (account: UIAccount) => {
 
 const isAccountSelected = (account: UIAccount) => selectedAccounts.value.some((acc) => acc.address === account.address)
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
 const approve = async () => {
 	// Full-lifetime submit latch: `loading` alone only sets pointer-events CSS,
 	// so a keyboard-focused Approve can still emit a click mid-grant — the

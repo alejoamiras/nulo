@@ -137,6 +137,7 @@ const handleAgree = () => {
 
 const backupStatus = ref("")
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 39) — refactor when touched, never raise
 async function handleBackup() {
 	// Re-entry latch: closes synchronously, BEFORE the ceremony/KDF awaits —
 	// the empty-status window during PBKDF2 was where double-fires slipped in.
@@ -283,6 +284,7 @@ async function handleBackup() {
 	}
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 async function handleEncrypt() {
 	// Same latch + fence discipline as creation: `isBusy` blocks a double
 	// start before Vue re-renders the disabled CTA; the fence suppresses any

@@ -160,6 +160,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		super(EXECUTION_SERVICE_NAME, logger)
 	}
 
+	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (159 lines) — split when touched, never grow
 	protected async init(services: ServiceCollection) {
 		this.pxeService = this.pxeClientFactory(this.logger)
 		this.profileService = services.get(ProfileService.name)
@@ -493,6 +494,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		)
 	}
 
+	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (88 lines) — split when touched, never grow
 	public async executeOperations(
 		operations: Operation[],
 		origin: LocalTxOrigin,

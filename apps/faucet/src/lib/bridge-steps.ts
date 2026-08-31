@@ -60,6 +60,7 @@ export function stepperPhases(record: BridgeJournalRecord, runtime: RecordRuntim
 		: withdrawPhases(record as WithdrawJournalRecord, runtime)
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 32) — refactor when touched, never raise
 function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhase[] {
 	// Fueled deposits SIGN a Permit2 witness instead of APPROVING (the live token pre-approves
 	// Permit2). The fuel swap executes INSIDE the deposit transaction, so it is not independently
@@ -218,6 +219,7 @@ function buildPhases(
 ): BridgePhase[] {
 	const activeIndex = keys.indexOf(activeKey)
 	const failed = !!rt.attention && FAILED_ATTENTIONS.has(rt.attention)
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 20) — refactor when touched, never raise
 	return keys.map((key, i) => {
 		if (completed) return { key, label: labels[key], state: "done" as const }
 		if (i < activeIndex) return { key, label: labels[key], state: "done" as const }

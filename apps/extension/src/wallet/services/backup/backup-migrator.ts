@@ -73,6 +73,7 @@ export function maxBackupSchemaVersion(
  *  build would reject as from-the-future. */
 export const CURRENT_BACKUP_SCHEMA_VERSION = maxBackupSchemaVersion(realMigrations)
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 export async function migrateBackupData(opts: MigrateBackupOptions): Promise<BackupMigrationResult> {
 	const migrations = opts.migrations ?? backupMigrations
 	const baselineVersion = opts.baselineVersion ?? BACKUP_SCHEMA_BASELINE
@@ -125,6 +126,7 @@ export async function migrateBackupData(opts: MigrateBackupOptions): Promise<Bac
  *     no slice maps to cannot be replayed here);
  *  4. a read of a NON-optional slice the blob doesn't carry rejects (an
  *     optional absent slice already normalized as empty). */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 36) — refactor when touched, never raise
 function preflightPending(pending: Migration[], absentRequired: StorageRef[]): BackupMigrationResult | undefined {
 	const coveredRoots = new Set<string>()
 	const coveredValueKeys = new Set<string>()

@@ -114,6 +114,7 @@ async function waitForL1ToL2Message(
 	console.warn(`  anchor did not reach checkpoint ${msgCp} within ${timeoutMs}ms — proceeding best-effort`)
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (197 lines) — split when touched, never grow
 async function main() {
 	// ─── L1 (viem) ───────────────────────────────────────────────────
 	const account = privateKeyToAccount(ACCOUNT0_KEY)

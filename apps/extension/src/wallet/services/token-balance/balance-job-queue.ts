@@ -195,6 +195,7 @@ export class BalanceJobQueue {
 		this.callbacks.onBalanceUpdated(updated)
 	}
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 34) — refactor when touched, never raise
 	private async syncBatch(batch: TokenBalanceRaw[]): Promise<void> {
 		// Generation captured BEFORE any await: the projector resolves live
 		// active-profile handles mid-flight, so an A→B→A switch during it

@@ -156,6 +156,7 @@ export class ArtifactRegistry {
 	 *
 	 *  Cache: `verifiedClassIds: Set<string>` skips repeat recomputes
 	 *  for the same `(classId, artifact)` pair. Cleared by `clear()`. */
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 17) — refactor when touched, never raise
 	public async resolve(
 		classId: Fr,
 		pxeLookup: (id: Fr) => Promise<ContractArtifact | undefined>,

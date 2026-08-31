@@ -108,6 +108,7 @@ export class EstimateCancelRegistry {
 	 * when parked. Throws on duplicate tokens; a parked entry superseded by a
 	 * newer same-slot arrival rejects with `JobCancelledSentinel`.
 	 */
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 	public admit(token: string, profileId: string, flowKey: string): Promise<AbortSignal> {
 		this.sweep()
 		if (this.active.has(token) || this.settled.has(token)) {

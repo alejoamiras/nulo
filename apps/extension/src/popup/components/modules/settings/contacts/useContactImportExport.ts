@@ -26,6 +26,7 @@ export interface UseContactImportExportOptions {
  * for export, file pick + parse + per-row upsert + sender restoration for
  * import, and the aggregate user-facing toasts.
  */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (118 lines) — split when touched, never grow
 export function useContactImportExport(opts: UseContactImportExportOptions) {
 	const { contacts, contactService, accountStateService } = opts
 	const { openToast } = useToast()
@@ -82,6 +83,8 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 		}
 	}
 
+	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (86 lines) — split when touched, never grow
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 60) — refactor when touched, never raise
 	async function importContacts() {
 		try {
 			// The `.json` accept filter is UI guidance, not a boundary — a

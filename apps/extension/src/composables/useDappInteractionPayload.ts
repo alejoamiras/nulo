@@ -76,6 +76,7 @@ export function useDappInteractionPayload<TPayload>(
 	}
 	interactionService.onInteractionCancelled.add(onCancelled)
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
 	const load = async (): Promise<TPayload> => {
 		isLoading.value = true
 		error.value = null

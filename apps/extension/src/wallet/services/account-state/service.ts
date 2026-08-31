@@ -262,6 +262,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 	 * fails the REST of that network fast (the payload can't register against
 	 * an endpoint that isn't answering).
 	 */
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 47) — refactor when touched, never raise
 	public async restore(
 		backupAccountState: BackupAccountState[],
 		networks: Network[],

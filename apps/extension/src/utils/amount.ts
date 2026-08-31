@@ -234,6 +234,7 @@ export interface FormatBaseUnitsOpts {
  *   formatBaseUnits(1500000000n, 6, { thousandsSep: "," }) → "1,500"
  *   formatBaseUnits(150n, 6, { minDecimals: 4 })        → "0.0001"  (truncated; trailing zero kept by minDecimals)
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
 export const formatBaseUnits = (units: bigint | string | null | undefined, decimals: number, opts: FormatBaseUnitsOpts = {}): string => {
 	if (decimals < 0 || !Number.isInteger(decimals)) {
 		throw new Error("Invalid decimals: must be a non-negative integer")
