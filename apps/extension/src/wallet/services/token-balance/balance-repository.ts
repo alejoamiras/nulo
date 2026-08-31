@@ -21,8 +21,17 @@ export class BalanceRepository {
 	private readonly storage: EntityStorage<TokenBalanceRaw>
 
 	public constructor(browserApi: BrowserApi) {
-		this.storage = new EntityStorage<TokenBalanceRaw>(TOKEN_BALANCE_STORAGE_ROOT, browserApi.storage.local, (raw) =>
-			TokenBalanceRawSchema.parse(raw),
+		this.storage = new EntityStorage<TokenBalanceRaw>(
+			TOKEN_BALANCE_STORAGE_ROOT,
+			browserApi.storage.local,
+			(raw) => TokenBalanceRawSchema.parse(raw),
+			// Balance ids are minted `max+1` over the key space and every identity
+			// decision downstream trusts the embedded `id`, so a row whose key and
+			// `id` disagree must not be served. `keyIdentityMode` is NOT optional
+			// here: the default "string" mode requires a string id, which would
+			// reject every (numeric) balance row while `getKeys()` still saw their
+			// physical keys — a blank assets view plus unbounded reallocation.
+			{ requireKeyIdentityMatch: true, keyIdentityMode: "numeric" },
 		)
 	}
 

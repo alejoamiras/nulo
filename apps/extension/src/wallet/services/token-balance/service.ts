@@ -4,7 +4,8 @@ import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/rest
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { getTokenInfo } from "@/wallet/services/token/utils"
-import { EventHandler } from "@nulo/wallet-core/utils"
+import { EventHandler, Lock, getErrorMessage } from "@nulo/wallet-core/utils"
+import { reconcilePlan } from "./reconcile-pairs"
 import { AccountService, type Account } from "@/wallet/services/account/service"
 import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
@@ -35,11 +36,10 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	protected readonly rpcMethods = defineRpcMethods<Methods>()("getTokenBalance", "getTokenBalances", "refreshTokenBalance")
 	public static name = TOKEN_BALANCE_SERVICE_NAME
 
-	/** Declared startup deps (Q9): init() awaits ProfileService.getActiveProfile()
-	 *  + TokenService.getTokensRaw(), so topological start guarantees both are
-	 *  started first rather than relying on those callees' ensureInitialized
-	 *  poll. Was the only init-time peer-awaiter still missing a declaration. */
-	public readonly dependencies = [ProfileService.name, TokenService.name] as const
+	/** init() awaits all three, so topological start must have them running before
+	 *  this service starts — otherwise each call falls back to an
+	 *  `ensureInitialized` poll. */
+	public readonly dependencies = [ProfileService.name, TokenService.name, AccountService.name] as const
 
 	public readonly onTokenBalanceAdded = new EventHandler<TokenBalanceInfo>()
 	public readonly onTokenBalanceUpdated = new EventHandler<TokenBalanceInfo>()
@@ -47,6 +47,17 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 	private readonly repo: BalanceRepository
 	private readonly tokens = new Map<number, Token>()
+	/** Serializes every path that ALLOCATES a balance-row id. `allocateUnfencedId`
+	 *  reads the key space and computes `max+1`, and event subscribers dispatch
+	 *  un-awaited, so two creators can otherwise compute the same id and the later
+	 *  `repo.set` silently overwrites the earlier row.
+	 *
+	 *  `maxHoldMs: null` is required, not incidental: a force-release admits a
+	 *  second critical section into a still-running one, which is exactly the
+	 *  invariant this lock exists to hold. Holds are bounded by the repair count,
+	 *  which has no cap, so queueing is the only correct semantic. Non-reentrant —
+	 *  internal callees take `…HoldingLock` forms and only entry points acquire. */
+	private readonly lock = new Lock("token-balance", undefined, null)
 
 	private profileService: ProfileService = null!
 	private networkService: NetworkService = null!
@@ -124,10 +135,18 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		this.tokenService.onTokenDeleted.add(this.onTokenDeleted)
 		this.transactionService.onTransactionUpdated.add(this.onTransactionUpdated)
 
-		this.profile = await this.profileService.getActiveProfile()
-		if (this.profile) {
-			for (const token of await this.tokenService.getTokensRaw(this.profile.id)) {
-				this.tokens.set(token.id, token)
+		// Subscriptions are already live above, so a profile switch can land during
+		// these awaits: capture the generation first and commit only if it — and the
+		// profile identity — still hold. Without this the late continuation can
+		// repopulate the map for a profile the switch already replaced.
+		const gen = this.profileGeneration
+		const profile = await this.profileService.getActiveProfile()
+		if (profile) {
+			const raw = await this.tokenService.getTokensRaw(profile.id)
+			if (gen === this.profileGeneration) {
+				this.profile = profile
+				for (const token of raw) this.tokens.set(token.id, token)
+				await this.reconcileBalanceRows(profile.id, gen)
 			}
 		}
 
@@ -212,11 +231,18 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		return await this.repo.allocateIdAvoiding(this.invalidatedBalanceIds)
 	}
 
-	private async createTokenBalance(token: Token, account: Account, gen?: number) {
+	/** Allocation is `max+1` over the live key space, so it is only safe while
+	 *  this service's lock is held — callers MUST already hold it. */
+	private async createTokenBalanceHoldingLock(token: Token, account: Account, gen?: number): Promise<boolean> {
 		const id = await this.allocateUnfencedId()
 		// A profile switch during allocation makes this write belong to a departed
 		// context — skip it (the id isn't persisted, so it's reused by the next call).
-		if (gen !== undefined && gen !== this.profileGeneration) return
+		if (gen !== undefined && gen !== this.profileGeneration) return false
+		// Token ids are `max+1`, so deleting the highest token frees its id for a
+		// successor: `tokens.has(id)` would pass for a DIFFERENT token. Compare the
+		// stable identity instead, so a creation for a token deleted mid-flight
+		// cannot attach to whatever now holds its id.
+		if (!this.isSameTokenLive(token)) return false
 		const tb: TokenBalanceRaw = {
 			id,
 			token: token.id,
@@ -228,9 +254,106 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		await this.repo.set(tb)
 		// A switch during the write must not emit a UI event or enqueue a sync under
 		// the new profile's context.
-		if (gen !== undefined && gen !== this.profileGeneration) return
+		if (gen !== undefined && gen !== this.profileGeneration) return true
 		this.emit("onTokenBalanceAdded", this.getTokenBalanceInfo(tb))
 		this.queue.enqueue(tb)
+		return true
+	}
+
+	/**
+	 * Creates rows for pairs that do not have one. Serializing allocation alone is
+	 * not enough: two creators can hold the lock in turn and each create the SAME
+	 * pair under a different id, so the existence check has to happen inside the
+	 * same hold as the write. Callers MUST already hold the lock.
+	 *
+	 * `existing` skips a second full-namespace read for a caller that has one — it
+	 * MUST have been read during the current hold, or it can miss a write that
+	 * landed before this call and the pair is created twice. (`restore()` writes
+	 * directly rather than through here: it carries backup values and its token
+	 * ids are absent from the active map by design.)
+	 */
+	private async ensurePairsHoldingLock(
+		pairs: readonly { token: Token; account: Account }[],
+		gen: number,
+		existing?: readonly TokenBalanceRaw[],
+	): Promise<number> {
+		if (pairs.length === 0) return 0
+		const rows = existing ?? (await this.repo.getAll())
+		const have = new Set(rows.map((r) => `${r.token}:${r.account}`))
+		let created = 0
+		for (const { token, account } of pairs) {
+			if (gen !== this.profileGeneration) return created
+			const key = `${token.id}:${account.address}`
+			if (have.has(key)) continue
+			try {
+				if (await this.createTokenBalanceHoldingLock(token, account, gen)) {
+					have.add(key)
+					created++
+				}
+			} catch (error) {
+				// One unwritable row must not abandon the rest of the batch.
+				this.logWarn(`balance ensure: ${key} failed`, getErrorMessage(error))
+			}
+		}
+		return created
+	}
+
+	/**
+	 * Repair the two windows an MV3 worker death can leave inside
+	 * `createTokenBalanceHoldingLock`: no row at all (died before `repo.set`), and
+	 * a row that was never projected (died before `enqueue`, leaving the card
+	 * showing "Loading balance…" with nothing queued to finish it).
+	 *
+	 * Create-only. An existing row this profile cannot explain may belong to
+	 * another profile, may precede its token during a restore, or may be inside a
+	 * chain-purge cascade that is still draining — none of those are safe to
+	 * delete from a schema that carries neither profile nor chain.
+	 */
+	private async reconcileBalanceRows(profileId: string, gen: number): Promise<void> {
+		const startedAt = Date.now()
+		// One profile-wide account read rather than one per chain: every entity
+		// enumeration deserializes the whole storage namespace, so read COUNT is
+		// the cost. It also has no visibility parameter to get wrong — hidden
+		// accounts legitimately hold balance rows. Taken OUTSIDE the hold on
+		// purpose: this lock cannot make AccountService mutations atomic, and
+		// holding it across a peer read would widen the critical section for
+		// nothing — a concurrently-added account is covered by its own handler.
+		const accounts = await this.accountService.getAccountsRaw(profileId)
+		if (gen !== this.profileGeneration) return
+
+		await this.lock.withLock(async () => {
+			if (gen !== this.profileGeneration) return
+			const existing = await this.repo.getAll()
+			if (gen !== this.profileGeneration) return
+
+			const tokens = [...this.tokens.values()]
+			const plan = reconcilePlan({ tokens, accounts, existing })
+
+			for (const row of plan.staleTokens) {
+				if (gen !== this.profileGeneration) return
+				this.queue.enqueue(row)
+			}
+
+			const repaired = await this.ensurePairsHoldingLock(plan.missing, gen, existing)
+
+			// Surfaced because a non-zero repair means something upstream left the
+			// store inconsistent; the count is the fact, the cause is not inferable
+			// here.
+			if (repaired > 0 || plan.staleTokens.length > 0) {
+				this.logWarn(`balance reconcile: created ${repaired}, re-queued ${plan.staleTokens.length} (${Date.now() - startedAt}ms)`)
+			} else {
+				this.logDebug(`balance reconcile: nothing to repair (${Date.now() - startedAt}ms)`)
+			}
+		})
+	}
+
+	/** Whether the map still holds THIS token rather than a successor that reused
+	 *  its id (`token/service.ts` warns about exactly that reuse). */
+	private isSameTokenLive(token: Token): boolean {
+		const live = this.tokens.get(token.id)
+		return (
+			live !== undefined && live.profileId === token.profileId && live.chainId === token.chainId && live.contract === token.contract
+		)
 	}
 
 	private getTokenBalanceInfo(tb: TokenBalanceRaw, tokenInfo?: TokenInfo): TokenBalanceInfo {
@@ -271,14 +394,13 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		for (const token of raw) {
 			this.tokens.set(token.id, token)
 		}
+		await this.reconcileBalanceRows(profile.id, gen)
 	}
 
 	private readonly onAccountAdded = async (account: Account) => {
 		const gen = this.profileGeneration
-		for (const token of [...this.tokens.values()].filter((x) => x.chainId === account.chainId)) {
-			if (gen !== this.profileGeneration) return
-			await this.createTokenBalance(token, account, gen)
-		}
+		const pairs = [...this.tokens.values()].filter((x) => x.chainId === account.chainId).map((token) => ({ token, account }))
+		await this.lock.withLock(() => this.ensurePairsHoldingLock(pairs, gen))
 	}
 
 	private readonly onTokenAdded = async (token: TokenInfo) => {
@@ -292,12 +414,12 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		const profile = this.profile
 		if (gen !== this.profileGeneration || !profile || tokenRaw.profileId !== profile.id) return
 		this.tokens.set(token.id, tokenRaw)
+		// `all: true` — hidden accounts keep balance rows; only the account switcher
+		// filters visibility.
 		const accounts = await this.accountService.getAccounts(profile.id, token.chainId, true)
 		if (gen !== this.profileGeneration) return
-		for (const account of accounts) {
-			if (gen !== this.profileGeneration) return
-			await this.createTokenBalance(tokenRaw, account, gen)
-		}
+		const pairs = accounts.map((account) => ({ token: tokenRaw, account }))
+		await this.lock.withLock(() => this.ensurePairsHoldingLock(pairs, gen))
 	}
 
 	private readonly onTokenUpdated = async (token: TokenInfo) => {
@@ -315,12 +437,21 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	}
 
 	private readonly onTokenDeleted = async (token: TokenInfo) => {
+		// Synchronous, before any await: a creation that checks token liveness
+		// after this point must see the token gone.
 		this.tokens.delete(token.id)
-		for (const tb of (await this.repo.getAll()).filter((x) => x.token === token.id)) {
-			this.invalidatedBalanceIds.add(tb.id)
-			await this.repo.delete(tb.id)
-			this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb, token))
-		}
+		// Under the same lock as the creators — otherwise a creation whose write
+		// settles after this snapshot survives the deletion. The emit inside the
+		// hold reaches no in-worker subscriber today; `EventHandler.invoke` does
+		// not await subscribers, so one added later would queue behind this hold
+		// rather than re-enter it.
+		await this.lock.withLock(async () => {
+			for (const tb of (await this.repo.getAll()).filter((x) => x.token === token.id)) {
+				this.invalidatedBalanceIds.add(tb.id)
+				await this.repo.delete(tb.id)
+				this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb, token))
+			}
+		})
 	}
 
 	/** Awaited balance purge for a SET of token ids — called by the deletion
@@ -328,21 +459,21 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	public async purgeForTokens(tokenIds: readonly number[]): Promise<void> {
 		await this.ensureInitialized()
 		const set = new Set(tokenIds)
-		for (const tb of (await this.repo.getAll()).filter((x) => set.has(x.token))) {
-			if (this.tokens.has(tb.token)) this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb))
-			this.invalidatedBalanceIds.add(tb.id)
-			await this.repo.delete(tb.id)
-		}
-		// F-B23: raw second pass — a validation-failed balance row for a purged
-		// token is invisible to getAll() and would otherwise survive forever.
-		// No service-wide write lock exists here, but no legitimate writer can
-		// target a matched key either: the projector only rewrites ids it read
-		// through the codec, and a valid row cannot coexist with the malformed
-		// bytes at the same key. The helper's guarded re-read covers the rest.
-		await this.repo.purgeMalformed(
-			(raw) => typeof raw.token === "number" && set.has(raw.token),
-			(id) => this.logDebug(`purged malformed balance row ${id}`),
-		)
+		// Typed and raw passes share ONE hold with the creators: unlocked, a
+		// creation whose `repo.set` settles after this snapshot survives the purge.
+		await this.lock.withLock(async () => {
+			for (const tb of (await this.repo.getAll()).filter((x) => set.has(x.token))) {
+				if (this.tokens.has(tb.token)) this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb))
+				this.invalidatedBalanceIds.add(tb.id)
+				await this.repo.delete(tb.id)
+			}
+			// F-B23: raw second pass — a validation-failed balance row for a purged
+			// token is invisible to getAll() and would otherwise survive forever.
+			await this.repo.purgeMalformed(
+				(raw) => typeof raw.token === "number" && set.has(raw.token),
+				(id) => this.logDebug(`purged malformed balance row ${id}`),
+			)
+		})
 		for (const id of set) this.tokens.delete(id)
 	}
 
@@ -413,16 +544,23 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		}
 		const deletion = this.profileService.getDeletionState()
 		const epochs = captureRestoreEpochs(deletion, [profileId])
-		return await restoreRows(tokenBalances, async (tb) => {
-			const id = await this.allocateUnfencedId()
-			// Parse the exact persisted shape: an unvalidated restore row that fails
-			// the read-codec is KEPT-but-hidden by EntityStorage.decodeRow (invisible
-			// on read AND to a later getValues() cleanup). Parse here so a malformed
-			// backup row is recorded as restoreError, never written.
-			const row = TokenBalanceRawSchema.parse({ ...tb, id })
-			assertRestoreEpoch(deletion, epochs, profileId)
-			await this.repo.set(row)
-			return row
-		})
+		// ONE hold for the whole batch — restore allocates from the same key space
+		// as the creators. It deliberately does NOT take the ensure path: full-backup
+		// slices are written BEFORE the imported profile is activated, so their token
+		// ids are absent from the active map and any active-map authorization here
+		// would reject every restored balance.
+		return await this.lock.withLock(async () =>
+			restoreRows(tokenBalances, async (tb) => {
+				const id = await this.allocateUnfencedId()
+				// Parse the exact persisted shape: an unvalidated restore row that fails
+				// the read-codec is KEPT-but-hidden by EntityStorage.decodeRow (invisible
+				// on read AND to a later getValues() cleanup). Parse here so a malformed
+				// backup row is recorded as restoreError, never written.
+				const row = TokenBalanceRawSchema.parse({ ...tb, id })
+				assertRestoreEpoch(deletion, epochs, profileId)
+				await this.repo.set(row)
+				return row
+			}),
+		)
 	}
 }
