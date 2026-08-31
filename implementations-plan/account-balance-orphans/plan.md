@@ -1,149 +1,155 @@
 # account-balance-orphans — scope balance rows, purge them with their account
 
-**Tier:** `mid` (see Tier call). **`eli5_mode`:** Artifact.
-**Budget:** recon 2 agents (spent) · competing outline + codex/fable dual audit + re-audit to convergence · `/code-review` **medium** · codex fix loop ≤3 rounds.
+**Tier:** `mid` (confirmed by both audit legs). **`eli5_mode`:** Artifact.
+**Budget:** recon 2 agents (spent) · competing outline + codex/fable dual audit (spent) + discharge resume · `/code-review` **medium** · codex fix loop ≤3 rounds.
 **Base:** `origin/dev` @ `9103dea0` (includes #485 + #486). **Worktree/branch:** `account-balance-orphans` / `worktree-account-balance-orphans`.
-**Owner instruction:** "check if it needs architectural work instead of a monkey-patch" — the architecture-vs-patch ruling is this plan's centerpiece, delegated to the auditors.
+**Owner instruction:** "check if it needs architectural work instead of a monkey-patch" — both auditors ruled **architectural (revised Outline A)**; Outline B (the point patch) is recorded in the ledger as rejected.
 
 ## Problem
 
-`TokenBalanceRaw` (`token-balance/spec.ts:30-38`) carries no `profileId`, `chainId`, or `contract`. Recon traced every account-removal path (`recon.md`): chain purge and profile deletion already cascade balances correctly; **`AccountService.reconcileImportedAccounts` (`account/service.ts:785-797`) is the sole orphan producer** — it deletes only the Account row and emits `onAccountDeleted`, which no balance code subscribes to (`token-balance/service.ts:131-136`).
+`TokenBalanceRaw` (`token-balance/spec.ts:30-38`) carries no `profileId`, `chainId`, or `contract`. Recon traced every account-removal path (`recon.md`): chain purge and profile deletion cascade balances (chain purge best-effort — see Fact 1); **`AccountService.reconcileImportedAccounts` (`account/service.ts:785-797`) is the sole orphan producer** — it deletes only the Account row and emits `onAccountDeleted`, which no balance code subscribes to (`token-balance/service.ts:131-136`).
 
-Reachable in one restore: a backup with an imported Account row but no key row gets balance rows written (`useFullBackupImport.ts:864-898`), then the account dropped at finalize (`:909-918`). Re-importing the same key reproduces the same address (`account/service.ts:441-444,705-707`), `onAccountAdded` fires, and #486's `ensurePairsHoldingLock` **skips** the pair — the stale row already occupies `${token}:${account}` (`token-balance/service.ts:282-287`) and isn't even enqueued. The user sees pre-deletion balances until an unscoped self-heal fires (unlock's `refreshBalances(10,…)` `auth.vue:174`, token-detail mount, or manual refresh). Bounded, silent, wrong.
+Reachable in one restore: a backup with an imported Account row but no key row gets balance rows written (`useFullBackupImport.ts:864-898`), then the account dropped at finalize (`:909-918`). Re-importing the same key reproduces the same address (`account/service.ts:441-444,705-707`), `onAccountAdded` fires, and #486's `ensurePairsHoldingLock` **skips** the pair — the stale row already occupies `${token}:${account}` (`token-balance/service.ts:282-287`) and isn't even enqueued. The user sees pre-deletion balances until a self-heal fires — and the self-heals are user-action-dependent, not time-bounded (Fact 13). Silent, wrong.
 
-The same schema gap is the root of the family: the un-scopeable deletion (bare-address purge would destroy a sibling profile's rows — shared addresses are deliberately reachable, `recon.md`), #486's manual chain join, the token-map-only cross-profile guard, and the **temporal token-id-reuse residual** #486 filed as "not solvable from this schema."
+The same schema gap is the root of the family: the un-scopeable deletion (bare-address purge would destroy a sibling profile's rows — shared addresses are deliberately reachable; and the SAME profile can hold the same address on two chains, Fact 5), #486's manual chain join, the token-map-only cross-profile guard, and the **temporal token-id-reuse residual** #486 filed as "not solvable from this schema."
 
 ## Tier call
 
-Blast radius **HIGH** (a required-field schema change on every balance row; every reader in the service + queue + backup path), security **MEDIUM** (a new deletion path + hostile-backup input), irreversibility **LOW** (pre-production: shape changes redefine the launch baseline, zero migrations exist — `CLAUDE.md`, `migrations/index.ts:18,22`), novelty/migration/external **LOW**. 1 HIGH → `mid`, with the dual audit a schema change deserves.
+Blast radius **HIGH** (a required-field schema change on every balance row; every reader in the service + queue + backup path), security **MEDIUM** (a new deletion path + hostile-backup input), irreversibility **LOW** (pre-production: shape changes redefine the launch baseline, zero migrations exist — `CLAUDE.md`, `migrations/index.ts:21-26`), novelty/migration/external **LOW**. 1 HIGH → `mid`. Both auditors confirmed.
 
-## Architecture & Implementation — Outline A (chosen draft): complete the schema convention
+## Architecture — revised Outline A (dual-audit consolidated)
 
-`Account`, `Token`, and `ImportedAccountKey` all carry required `profileId`/`chainId`; the balance row is **the odd one out in its own family**, with no recorded rationale (`recon.md`). The draft extends it rather than patching around it — the owner's standing preference and the direction #486's own docs pointed ("schema-carried incarnation", deferred for scope only).
+`Account`, `Token`, and `ImportedAccountKey` all carry required `profileId`/`chainId`; the balance row is the odd one out in its own family. The decisive argument (fable §0): `TokenService.updateToken` **hard-rejects** any change to `profileId`/`chainId`/`contract` (`token/service.ts:389-394`) — the triple is the token's immutable natural key, so a stamped copy can only go stale by token *deletion*, which already has an awaited cascade.
 
 ### 1. Schema
 
-`TokenBalanceRaw` gains **required** `profileId: string`, `chainId: number`, `contract: string` (the paired token's). Required, not optional — the family precedent, and optional fields would force every future reader to null-check, forfeiting the point.
+`TokenBalanceRaw` gains **required** `profileId: string`, `chainId: number`, `contract: string` (the paired token's). Required, not optional — optional fields would force every future reader to null-check, forfeiting the point.
 
-**The transition is the just-shipped reconcile.** Old live rows fail the stricter read codec → KEEP-but-hidden (`entity_storage.ts:95-142`) → invisible to `getAll()` → `reconcileBalanceRows` (every init + profile switch, `token-balance/service.ts:149,397`) recreates each pair as a fresh canonical row and enqueues its projection. No migration is written (pre-production policy, quoted in `recon.md`).
+**Transition = legacy sweep + the just-shipped reconcile.** Old live rows fail the stricter read codec → KEEP-but-hidden (`entity_storage.ts:95-142`) → invisible to `getAll()`. On init, under the balance lock and before reconciliation, a **one-shot idempotent legacy sweep** deletes rows matching the exact pre-schema shape (`typeof raw.token === "number" && typeof raw.account === "string"` and all three new fields absent) via `repo.purgeMalformed` (snapshot-byte recheck + true-storage-id deletion, `purge-rows.ts:58-83`). Then `reconcileBalanceRows` (every init + profile switch) recreates each active-profile pair as a fresh canonical row. Rationale (codex Ask d, overruling fable's leave-it — see ledger): balance rows are recomputable projections, and hidden debris has a real cost — `allocateUnfencedId` → `nextNumericId` scans **physical keys** including hidden ones, plus a full-namespace `get()` per allocation (`id-allocators.ts:17-36`), so debris taxes every future creation. Other profiles' swept rows are recreated by their own next activation's reconcile. This is a startup baseline cleanup, **not** a numbered migration (pre-production policy).
 
-### 2. Stamping — every write site already holds the values
+### 2. One shared identity predicate
 
-- `createTokenBalanceHoldingLock` (`token-balance/service.ts:236-261`): receives the full `Token` — copy `profileId`/`chainId`/`contract` onto the literal. Zero new lookups.
-- `restore()` (`:537-565`): **overwrite** `profileId` from the already-required param (never trust the blob). `chainId`/`contract` arrive pre-stamped by relink (next bullet); the schema parse enforces presence.
-- `relinkRestoredTokenBalances` (`useFullBackupImport.ts:270-335`): already index-pairs old→new tokens and holds each restored token's `chainId`/`contract` in `newTokens`. Stamp both onto the relinked row **from restore-side truth, overwriting anything the hostile blob claims** — the same posture as the existing `token: newId` overwrite. Consequence: **old backups remain fully importable** (fields injected at relink), not degraded to restoreErrors; rows that fail relink drop exactly as today.
+New `token-balance/balance-identity.ts`: `rowMatchesToken(row, token)` ⇔ `row.profileId === token.profileId && row.chainId === token.chainId && row.contract === token.contract`. **Every raw-row decision goes through it** (codex Inference 3 — the filters must be complete, not decorative):
 
-### 3. `purgeForAccounts(addresses, profileId)` — the fix itself
+| Site | Change |
+|---|---|
+| `reconcile-pairs.ts` | existing rows count toward a desired pair only on full identity — closes the temporal id-reuse residual |
+| `ensurePairsHoldingLock` occupancy set (`service.ts:282-287`) | identity-mismatched rows do NOT occupy `${token}:${account}` — else a stale row blocks canonical creation forever (codex High: the reconcile repair "does not work as written" without this) |
+| `getTokenBalances` + `getTokenBalance(id)` | fail-closed filter (singular included — it currently returns any decodable row) |
+| `refreshTokenBalance` / `requestBalanceRefresh` / `refreshAccountBalances` | don't enqueue identity-mismatched rows |
+| `onTokenUpdated` / `onTransactionUpdated` row selection | same |
+| `balance-job-queue.isRowEmittable` | signature takes the row; identity check (write-time backstop) |
+| `balance-projector.ts` | identity guard before projecting — a foreign row must not trigger PXE/network work (decision recorded: adopt the guard; the predicate is shared and cheap) |
+| `backup()` | full-identity join against owned tokens — NOT `row.profileId` alone, which would export identity-mismatched debris |
 
-New on `TokenBalanceService`, mirroring `TransactionService.purgeForAccounts(addresses, profileId?)` (`transaction/service.ts:301-364`) and `AuthRegistryService`'s (`auth-registry/service.ts:428-449`):
+### 3. Stamping — service-owned, never client-authored
 
-- Deletes rows where `row.account ∈ addresses && row.profileId === profileId` — direct, safe scoping the schema makes possible. Never bare address.
-- Joins #486's lock (deletion must not interleave with a creation) and the `invalidatedBalanceIds` fence (an in-flight projection must not resurrect a deleted id), exactly as `purgeForTokens` does (`token-balance/service.ts:459-478`).
-- **Called directly and awaited from the restore composable** — `reconcileImportedAccounts` already returns the dropped addresses (`Promise<string[]>`, `account/service.ts:785-797`), and its only caller is `useFullBackupImport.ts:910`. Orchestration from above keeps the dependency arrows clean (`AccountService` is phase 0 and cannot call phase-1 `TokenBalanceService`); this is the coordinator precedent's shape — direct awaited call, events remain no-ops. **Not** an `onAccountDeleted` subscriber: structurally fire-and-forget (`event-handler.ts:47-61`), which is the monkey-patch recon ruled out.
+- **Create** (`createTokenBalanceHoldingLock`): receives the full `Token` — copy `profileId`/`chainId`/`contract` onto the literal. Zero new lookups.
+- **`restore()` derives all three fields itself** (fable A-2 ≡ codex Inference 2 — unanimous): one `tokenService.getTokensRaw(profileId)` read at the top of the hold (explicit-profileId, no active-profile gate — `token/service.ts:186-190`; `getTokenRaw(id)` would throw pre-activation) → resolve each `tb.token` in the owned map → stamp `{...tb, id, profileId, chainId: token.chainId, contract: token.contract}` with derived fields last → an unowned `token` id becomes a per-row `restoreError` (fail-closed; this also closes the pre-existing hole where `restore()` wrote rows for arbitrary token ids with no ownership check, `service.ts:552-563`). **Pair-level dedup** in the same loop (`seen` set on `(token, account)`, mirroring `AccountService.restore`'s in-batch dedup, `account/service.ts:664-668`): the backup registry rejects duplicate row *ids* only (`backup-migration-registry.ts:281-291`), so a hostile blob can otherwise mint duplicate canonical pairs.
+- **`relinkRestoredTokenBalances` stays untouched** — its `token: newId` remap and chain-equality cross-check keep their job; its chain authority is corrected to `newTokens[i].chainId` (the parsed persisted token), not the attacker-controlled `oldTokens[i].chainId` (codex Fact 9). No identity stamping in the popup: it would be blob-laundered (`TokenService.restore` parses blob values verbatim except `id`, `token/service.ts:725`) and version-skewed (an import running under an older composable against a newer worker would ship rows without the fields).
 
-### 4. What the fields retire (same PR, small diffs each)
+### 4. The purge — `purgeForAccounts(scopes, profileId)`, registered, chain-scoped
 
-- `reconcile-pairs.ts`: existing rows count toward a desired pair only on full identity (`profileId`/`chainId`/`contract` match), not numeric id — closing the temporal token-id-reuse residual. A stale row from a dead incarnation stops suppressing repair.
-- `getTokenBalances` (`:165-178`) + the queue's `isRowEmittable` (`balance-job-queue.ts:50-56`): filter on row identity against the live token (fail-closed — an identity-mismatched row is never rendered or written), retiring the token-map-only guard as the *sole* defense.
-- `backup()` (`:526-535`): direct `row.profileId` filter, dropping the owned-token-ids join.
+- **Scope = `(profileId, chainId, address)` tuples, never `(profileId, address)`** (codex Fact 5, verified): the same key imports on multiple chains in one profile (`importAccount` dup check is `(profileId, chainId)`-scoped, `account/service.ts:446-448`; key rows are keyed by the full tuple, `imported-keys-repository.ts:26-36`), and `reconcileImportedAccounts` drops per-`(chainId, address)` row. An address-scoped purge would kill the surviving chain's balances. `reconcileImportedAccounts`' return type changes to scope tuples `{ chainId, address }[]`.
+- **Wiring = the registration pattern** (fable A-1; `registerChainPurgeSubscriber` precedent, `account/service.ts:111` / `network/service.ts:736-770`): `TokenBalanceService.init` registers `(profileId, scopes) => this.purgeForAccounts(scopes, profileId)` with `AccountService`. **No new RPC surface** — `Methods`, `defineRpcMethods`, and the client stay untouched (this discharges codex's Medium RPC finding and makes the security claim true instead of false); no client lifecycle (fable C-2 moot); every future account-removal path inherits the cascade.
+- **Ordering = list → purge → delete, fail-fast** (unanimous; Inference 4 retracted): inside `reconcileImportedAccounts` — list keyless imported accounts (read-only, rechecking key absence) → await registered purges with the tuple scopes → delete Account rows + emit → return the scopes. A crash before purge changes nothing; a crash after purge but before delete leaves a keyless account with no stale balances — the safer direction, repaired by the next reconcile. **The composable's catch-and-continue at `useFullBackupImport.ts:914-917` is removed**: a purge/reconcile failure now escapes to the outer catch, which (pre-`finalizeStarted`) rolls the created profile back (`:987-993`) — import fails wholesale rather than committing with orphans (codex Ask e).
+- **Internals**: joins #486's lock and the `invalidatedBalanceIds` fence exactly as `purgeForTokens` (`service.ts:459-478`); typed pass deletes `row.account === address && row.profileId === profileId && row.chainId === chainId`; emit guarded by `this.tokens.has(row.token)` (the imported profile is NOT active at the call site — every row is unmappable, and an unguarded `getTokenBalanceInfo` throws "unknown token"; if built on an abort-on-error helper, one throw abandons the purge — fable C-3, pinned by test); **raw second pass** with the same predicate on raw fields — which **deliberately skips old-shape rows** (no `profileId`/`chainId` = unattributable; they belong to the legacy sweep, not an account purge). Lock scope honesty: the lock + fence serialize against creators and in-flight projections; they do not prevent a brand-new creation *starting after* the purge — acceptable here because account restore emits no add events (`account/service.ts:638-691`) and the profile isn't activated until finalize (documented, per codex).
+- Mirror `TransactionService.purgeForAccounts` (`transaction/service.ts:301-364`) for shape; do NOT cite AuthRegistry's — it purges by bare address (fable C-9).
 
-### 5. Data & control flow (critical path)
+### 5. Stale-row deletion in the reconcile — narrow, criterion-bound
 
-Restore finalize: slices restored (balances relink-stamped) → `reconcileImportedAccounts(profileId)` drops keyless imported accounts → **`await tokenBalance.purgeForAccounts(dropped, profileId)`** → activation → the switch-tail reconcile runs as backstop. Live creation: unchanged flow, three more fields on the literal.
+During active-profile reconciliation, **delete + fence** a row iff: `row.profileId` = active profile AND its numeric `token` id resolves to a **live token** AND identity mismatches that token (a dead incarnation's row after id reuse). **Leave** foreign-profile rows and rows whose token id has no live token — the codec-hidden-token case is exactly where deletion would destroy recoverable data (fable's carve-out, honored inside codex's criterion — see ledger). Then create the canonical missing pair.
 
 ### File-level change map
 
 | File | Change |
 |---|---|
 | `token-balance/spec.ts` | 3 required fields on type + schema |
-| `token-balance/service.ts` | stamp at create; `restore()` profileId overwrite; `purgeForAccounts` (lock + fence); identity-based `getTokenBalances` filter; `backup()` simplification |
-| `token-balance/balance-job-queue.ts` | `isRowEmittable` → identity check (callback signature change) |
+| `token-balance/balance-identity.ts` (new) | the shared predicate |
+| `token-balance/service.ts` | stamp at create; restore-side derivation + pair dedup; legacy sweep at init; `purgeForAccounts` (lock + fence, typed + raw passes); identity filters (plural + singular + refresh paths + handlers); `backup()` identity join; stale-row deletion in reconcile; occupancy-set fix; subscriber registration |
+| `token-balance/balance-job-queue.ts` | `isRowEmittable` → row-identity check (signature change) |
+| `token-balance/balance-projector.ts` | identity guard before projection |
 | `token-balance/reconcile-pairs.ts` | identity-keyed existing-row matching |
-| `composables/useFullBackupImport.ts` | relink stamps `chainId`/`contract`; awaited `purgeForAccounts` after reconcile |
-| tests | unit (spec/service/queue/reconcile-pairs), composition, restore-path, e2e |
+| `token-balance/balance-repository.ts` | delete dead `existsByTokenAndAccount` (verified: no production caller) |
+| `account/service.ts` (+ spec) | `registerAccountPurgeSubscriber`; `reconcileImportedAccounts` → list→purge→delete, returns `{chainId, address}[]` |
+| `composables/useFullBackupImport.ts` | reconcile catch removed (fail-fast to rollback); relink chain authority → `newTokens[i].chainId` |
+| `utils/full-backup-helpers.ts:206` | **deliberate no-op** — the balance restore-error allowlist stays `[ID]`; `contract` is an address-class field the surrounding doc forbids echoing (recorded so nobody "completes the convention") |
+| tests | see phases; plus `cross-profile-isolation.test.ts` (`as`-cast rows red at runtime), `storage-codecs.test.ts:98-111` (`satisfies` — compiler-led), `token-balance/service.test.ts` factory, queue tests' `isRowEmittable` wiring, `useFullBackupImport.test.ts` |
 | `ARCHITECTURE.md` | balance-row entry updated |
 
-### Trade-offs / alternatives not taken (within A)
+### Outline B (rejected — ledger)
 
-- **Deleting identity-mismatched stale rows** in the reconcile: deferred to an Ask — fail-closed filtering makes them invisible; deletion is a separate risk class even when newly safe.
-- **Composite storage key** (like Account's `profileId:chainId:address`): rejected — would break `numberAnchor("id")` backup identity and every numeric-id mechanism (allocator, fence, key-identity guard) for marginal gain over field-level scoping.
-
-## Architecture & Implementation — Outline B (competing, for the audit): the point patch
-
-No schema change. `purgeForAccounts(addresses, profileId)` scopes the delete via a token-id join instead: fetch the profile's token ids (`getTokensRaw(profileId)`), delete rows where `row.account ∈ addresses && row.token ∈ profileTokenIds` — safe because token ids are globally unique. Same lock/fence, same composable call site.
-
-- **Wins:** ~40 lines total; no row-shape change; no relink work; no reader churn.
-- **Costs:** leaves every workaround in place (the five comment-documented ones in `recon.md`); leaves the temporal-reuse residual open; leaves the re-import reattachment *partially* fixed (purge closes the restore path, but any future account-removal feature re-opens it and must remember the join); the cross-profile guard stays the in-memory token map alone; and the schema decision migrates from "nearly free now" (pre-production baseline) to "a real migration later."
-- **Why not chosen as the draft:** it is precisely the monkey-patch the owner asked us to check against. It fixes the one reachable path without touching the gap that produced the family.
+Token-id-join point patch, no schema change. Both auditors rejected it: leaves every workaround + the temporal-reuse residual in place, re-derives the join at every future scoping site, and moves the schema decision to a moment when it costs a real migration. Recorded strengths: ~40 lines; its raw pass reaches old-shape rows during transition.
 
 ## Security & Adversarial Considerations
 
-- **New deletion path.** `purgeForAccounts` is not RPC-exposed (internal + composable-called); scoped `account+profileId`; joins the lock and the invalidation fence. The shared-address hazard is the headline: bare-address deletion destroys a sibling profile's rows — pinned by a test with two profiles sharing an address.
-- **Hostile backup input.** The blob can claim any `profileId`/`chainId`/`contract` on balance rows: relink and `restore()` **overwrite from restore-side truth** (the restored token, the threaded profileId) — the same posture as the existing `token: newId` overwrite. A test feeds a blob with forged scoping fields and asserts the stored rows carry the derived values.
-- **Old-shape rows** (live storage, dev installs): codec-hidden, auto-repaired by the reconcile; hidden bytes are inert debris (never rendered, physical keys still block id reuse). Whether to raw-sweep them is an Ask.
-- **Fail-closed rendering.** Identity-mismatched rows (stale incarnation, foreign profile) are filtered out of `getTokenBalances` and `isRowEmittable` — the failure mode is a missing row (repaired by the reconcile), never a wrong one rendered.
-- **No new RPC surface, no new deps, no key material.** `footprint-coverage.test.ts` governs migrations only; `TOKEN_BALANCE` registry entry anchors on `id`, unaffected (`recon.md`).
+- **New deletion path.** `purgeForAccounts` is genuinely **not RPC-exposed** — internal, invoked via the registered awaited subscriber (the previous draft's claim was false under composable orchestration — fable C-1 Critical — and is now true by construction). Scoped `(profileId, chainId, address)`; joins the lock + invalidation fence. Two headline hazards, each pinned by a RED-verified test: bare-address deletion (sibling profile, shared address) and address-scoped deletion (same profile, same address, other chain — codex Fact 5).
+- **Hostile backup input.** The blob can claim any `profileId`/`chainId`/`contract` on balance rows and any duplicate pairs: `restore()` derives all three fields from the service-side owned-token map and dedupes pairs — nothing identity-bearing survives from the wire. A test feeds forged scoping fields + duplicate pairs and asserts derived values + collapsed pairs + `restoreError`s for unowned tokens.
+- **Old-shape rows** (live dev installs): swept at init under the lock via exact-shape predicate + snapshot-byte recheck; recreated per active profile by the reconcile. Failure mode of a partial sweep: leftover hidden debris, retried next init (idempotent).
+- **Fail-closed rendering, completely.** One predicate gates list/single reads, refresh enqueues, handler selection, projection, queue writes, and backup export. The failure mode everywhere is a missing row (repaired by the reconcile), never a wrong one rendered or exported.
+- **Fail-fast import.** A failed purge/reconcile aborts the import into the existing pre-finalize rollback instead of committing with orphans.
+- **No new RPC surface, no new deps, no key material.** `footprint-coverage.test.ts` governs migrations only; the `TOKEN_BALANCE` registry entry anchors on `id`, unaffected.
 
 ## Assumptions
 
-### Facts (verified at `9103dea0`)
+### Facts (verified at `9103dea0`; both audits re-verified, corrections applied)
 
-1. No standalone delete-account RPC exists; the three removal paths and their cascade outcomes are as tabled in `recon.md` (chain purge cascades via tokens; profile deletion via the coordinator's `purgeForTokens`, `coordinator.ts:121`; `reconcileImportedAccounts` orphans).
-2. `reconcileImportedAccounts` returns the dropped addresses (`account/service.ts:785-797`) and has exactly one caller (`useFullBackupImport.ts:910`).
-3. No balance-layer code subscribes to `onAccountDeleted`; subscribers are AuthRegistry/Transaction/IncomingTransfer only (`recon.md` search trail).
-4. `EventHandler.invoke` dispatches async subscribers un-awaited (`event-handler.ts:47-61`); the coordinator compensates with direct awaited calls in dependency order (`coordinator.ts:109-131`).
-5. Two profiles can share an address by design: mnemonic-only derivation (`derive-account-seed.ts:25-31`), soft duplicate-wallet guard (`profile/service.ts:1917-1928`), per-profile imported-key rows (`imported-keys-repository.ts:26-35`); `transaction/service.ts:305-310` documents the address-only-deletion hazard verbatim.
-6. Pre-production migrations policy is in force: `realMigrations = []` (`migrations/index.ts:18,22`); CLAUDE.md: shape changes redefine the launch baseline.
-7. `TokenBalanceRawSchema` is a plain `z.object` (`spec.ts:41-57`); a failed parse is KEEP-but-hidden (`entity_storage.ts:95-142`), and #486's reconcile recreates hidden pairs on every init/switch (`token-balance/service.ts:149,312-348,397`).
-8. Both write sites hold the needed values: `createTokenBalanceHoldingLock` receives the full `Token`; `restore()` already requires `profileId` (`token-balance/service.ts:236,537-546`).
-9. `relinkRestoredTokenBalances` index-pairs old→new tokens, already tracks per-token `chainId`, holds `contract` on `newTokens`, and drops un-relinkable rows with bounded diagnostics (`useFullBackupImport.ts:270-335`).
-10. Backup surface: no version bump needed (`CURRENT_BACKUP_SCHEMA_VERSION` derives from `realMigrations`, `backup-migrator.ts:74`); compat-epoch is key-derivation-only; registry entry anchors on `id` (`backup-migration-registry.ts:205`).
-11. `purgeForTokens` is the existing deletion shape to mirror: lock + `invalidatedBalanceIds` + typed & raw passes (`token-balance/service.ts:459-478`).
-12. UI consumes only projected `TokenBalanceInfo`; no reader of the raw shape exists outside the service module + backup registry (repo-wide grep, `recon.md`).
-13. The stale-reattachment exposure is bounded by three unscoped self-heals (unlock ≥10-min refresh `auth.vue:174`; token-detail mount; manual refresh) — real but not permanent.
+1. Three account-removal paths as tabled in `recon.md`; chain purge is **best-effort, not crash-safe** — `TokenService.clearChainState` emits `onTokenDeleted` un-awaited per token, so a worker death can leave a hidden token-orphan (codex; further supports carrying identity on rows).
+2. `reconcileImportedAccounts` returns dropped addresses (`account/service.ts:785-797`); sole caller `useFullBackupImport.ts:910`. It checks key rows per-`(profileId, chainId, address)` and can drop one chain's account while the same address survives on another chain of the same profile.
+3. No balance-layer subscriber to `onAccountDeleted`; subscribers are AuthRegistry/Transaction/IncomingTransfer.
+4. `EventHandler.invoke` dispatches async subscribers un-awaited (`event-handler.ts:47-61`); the coordinator and the chain-purge **registration pattern** (`account/service.ts:111`, `network/service.ts:736-770`) compensate with direct awaited calls in dependency order.
+5. Two profiles can share an address by design (mnemonic-only derivation, `packages/wallet-crypto/src/derive-account-seed.ts:25-31`; soft duplicate-wallet guard; per-profile key rows), **and the same profile can hold the same address on multiple chains** (`account/service.ts:446-448` dup check is chain-scoped; `imported-keys-repository.ts:26-36` full-tuple keys). Purges must be tuple-scoped.
+6. Pre-production migrations policy in force: `realMigrations = []` (`migrations/index.ts:21-26`); CLAUDE.md: shape changes redefine the launch baseline.
+7. `TokenBalanceRawSchema` is a plain `z.object`; failed parse is KEEP-but-hidden; #486's reconcile recreates hidden pairs **best-effort** (per-row failures caught and skipped, `service.ts:284-296`) on every init/switch.
+8. The create path holds the full `Token`; `restore()` holds only the row + threaded `profileId` and must **derive** chain/contract via `getTokensRaw(profileId)` (explicit-profileId, ungated — `token/service.ts:186-190`).
+9. `relinkRestoredTokenBalances` index-pairs old→new tokens; its chain map is currently built from the **old** (attacker-controlled) token rows (`useFullBackupImport.ts:293`) — authority must be `newTokens[i]`, the parsed persisted token.
+10. Backup surface: no version bump (`CURRENT_BACKUP_SCHEMA_VERSION` derives from `realMigrations`); compat-epoch covers account-contract/KDF generation + password-backup shape, none affected; registry anchors balance identity on numeric `id` (`backup-migration-registry.ts:197-205`); registry normalization rejects duplicate row **ids** only, not duplicate pairs (`:281-291`).
+11. `purgeForTokens` is the deletion shape to mirror: one lock hold, typed + raw passes, fence before delete, emit guarded by `this.tokens.has` (`service.ts:459-478`).
+12. Raw-shape readers outside the service module + backup registry: `utils/full-backup-helpers.ts:206` (restore-error allowlist `[ID]` — deliberate no-op) and `tests/e2e/fixtures/helpers.ts:1322-1425` (contract→id joins); the projector is an internal raw-row consumer (`balance-projector.ts:51-76`). UI consumes only projected `TokenBalanceInfo`.
+13. The stale-reattachment self-heals are **user-action-dependent, not time-bounded**: unlock refresh exists but `refreshBalances` ignores its minutes param and hardcodes 30 (`utils/core.ts:142-165`); token-detail mount and manual refresh require navigation.
 
-### Inferences (attack these)
+### Inferences
 
-1. **Required fields + reconcile auto-repair is a safe transition** for live dev installs — the only cost is one-time hidden debris and a re-projection pass. Unproven against a store with many rows.
-2. **Relink stamping keeps old backups fully importable** — fields injected in-memory before `restore()` parses. Assumes the composable's service-loop ordering (tokens → relink → balances) holds for every import path, including the one that skips relink if any.
-3. **Identity-filtering `isRowEmittable` and `getTokenBalances` breaks no existing consumer** — anything visible today has a live token in the map, which now also matches identity. The edge: rows created before the schema change are hidden anyway (Inference 1), so no NEW visibility loss.
-4. **The crash window between `reconcileImportedAccounts`' row delete and the awaited purge is an acceptable residual** — a crash mid-finalize lands in the restore-pending machinery, and the next unlock's reconcile + fail-closed filters make the orphan invisible (though its bytes persist).
+1. **Transition safety is test-backed, not asserted**: the ≥200-row transition test (Phase 1) pins one canonical row per pair, no duplicates, bounded wall time; the legacy sweep removes the allocator/storage debris tax (`id-allocators.ts:17-36` scans physical keys per allocation).
+2. ~~Relink stamping keeps old backups importable~~ — **moot**: `restore()` derives fields service-side, so old backups (and version-skewed in-flight imports) restore by construction.
+3. Identity filtering breaks no existing consumer — verified across UI readers, `utils/core.ts` refresh, incoming-transfer's `requestBalanceRefresh` (token ids globally unique), `onTokenUpdated` re-enqueue noise (write-guarded). Complete only because the predicate covers ALL raw-row decisions (§2 table), including the projector and `backup()`.
+4. **Retracted** (both audits): an account-orphaned row matches live-token identity exactly — filters do NOT hide it, `backup()` would export it, the reconcile ignores rather than deletes it. Hence purge-before-delete + fail-fast.
 
-### Asks — routed to the auditors, not the owner
+### Asks — RESOLVED (dual-audit rulings; disputes in the ledger)
 
-1. **A vs B** — is the schema extension justified, or is the point patch right? (The owner's instruction: check whether architectural work is warranted. The draft says yes.)
-2. **Field set** — `profileId`+`chainId`+`contract`, or a subset? `contract` is what closes the temporal-reuse residual; `chainId` is derivable from the token but retires the manual joins.
-3. **Stale-row deletion** — with identity now on rows, deleting provably-stale rows (identity mismatch vs the live token at that id, same profileId) becomes safe. Include a scoped cleanup in the reconcile, or keep create-only + fail-closed filtering and leave debris?
-4. **Old-shape debris raw-sweep** — sweep codec-hidden pre-schema rows once, or leave them (physical keys still guard id reuse)?
-5. **Crash-window ordering** — accept Inference 4, or split `reconcileImportedAccounts` into list→purge-balances→delete-rows so dependents die first (the coordinator's ordering rationale)?
-6. **Tier confirm** — `mid`?
+1. **A vs B → revised A** (unanimous).
+2. **Field set → all three** (unanimous; justified by token-identity immutability, `token/service.ts:389-394`).
+3. **Stale-row deletion → yes, narrowly** (codex criterion ∩ fable carve-out): delete only live-token identity-mismatch rows of the active profile; never rows whose token is absent from the map.
+4. **Old-shape debris → sweep at init** (codex, overruling fable — see ledger).
+5. **Crash-window ordering → split list→purge→delete, fail-fast to rollback** (unanimous; Inference 4 retracted).
+6. **Tier → `mid`** (unanimous).
 
 ## Phases
 
 *(gates use the Bun-runtime test script: `bun run --cwd apps/extension test <path>`)*
 
-### Phase 1 — Schema + stamping + transition proof
-Fields on type+schema; stamp at create and restore (profileId overwrite); relink stamping with hostile-field overwrite test; unit tests: old-shape row is hidden and the reconcile recreates its pair (the transition test); forged-blob scoping fields are overwritten.
+### Phase 1 — Schema, predicate, stamping, sweep, transition proof
+Fields on type + schema; `balance-identity.ts`; stamp at create; restore-side derivation + unowned-token rejection + pair dedup; relink chain-authority fix; legacy sweep at init. Tests: ≥200-row transition (sweep + reconcile → one canonical row per pair, no dupes, bounded time); forged-blob fields overwritten service-side; unowned token → `restoreError`; duplicate pairs collapsed.
 
-**Gate.** `bun run lint && bun run typecheck && bun run --cwd apps/extension test src/wallet/services/token-balance/` — exit 0; transition + forged-blob tests green.
+**Gate.** `bun run lint && bun run typecheck && bun run --cwd apps/extension test src/wallet/services/token-balance/ && bun run --cwd apps/extension test src/composables/useFullBackupImport.test.ts` — exit 0.
 
-### Phase 2 — Retire the workarounds
-Identity-keyed `reconcile-pairs`; identity filters in `getTokenBalances` + `isRowEmittable` (queue callback change); `backup()` simplification. Tests: temporal-reuse case (stale row from dead incarnation no longer suppresses repair AND is not rendered); two-profiles-shared-address visibility isolation.
+### Phase 2 — Complete identity enforcement + reconcile hardening
+Predicate at every §2 site (reads, refreshes, handlers, projector, queue, backup); occupancy-set fix; stale-row deletion with the carve-out; retire the workarounds; delete `existsByTokenAndAccount`. Tests: temporal-reuse case (dead-incarnation row deleted + fenced, canonical pair created, nothing rendered from it); codec-hidden-token row LEFT alone; occupancy (stale row no longer blocks creation); two-profiles-shared-address visibility isolation.
 
 **Gate.** Phase 1 commands plus `bun run --cwd apps/extension test src/wallet/services/` — exit 0.
 
-### Phase 3 — `purgeForAccounts` + composable wiring
-The purge (lock + fence, typed + raw passes per `purgeForTokens`); composable awaits it with `reconcileImportedAccounts`' return. Tests: purge scoped by profileId spares the sibling profile's rows at the same address (the headline pin); purge racing a parked creation (lock serialization); composition test driving the real service graph through a doctored restore.
+### Phase 3 — Purge, registration, split ordering, fail-fast
+`purgeForAccounts` (lock + fence, typed + raw passes, emit guard); `registerAccountPurgeSubscriber`; `reconcileImportedAccounts` → list→purge→delete returning `{chainId, address}[]`; composable catch removal. Tests: sibling-profile shared address spared (**RED vs a bare-address purge**); same-profile multi-chain — chain X keyless, chain Y live, only X purged (**RED vs an address-scoped purge**); purge completes with a foreign/empty active token map (fable C-3); purge racing a parked creation (lock serialization); purge failure pre-finalize fails the import (fail-fast); composition test driving the real service graph through a doctored restore.
 
-**Gate.** Phase 2 commands; the sibling-profile test verified RED against a bare-address purge implementation.
+**Gate.** Phase 2 commands; both RED runs recorded in `lessons/phase-3.md`.
 
 ### Phase 4 — E2E
-Doctored full-backup import (imported account present, key slice stripped): assert the account drops AND zero balance rows remain for it; then re-import the key and assert balances start fresh (no stale reattachment). Reuses the import-drivers helpers. Must fail without Phase 3's wiring — record red/green in `lessons/phase-4.md`.
+Doctored full-backup import (imported account present, key slice stripped): account drops AND zero balance rows remain for its scope; re-import the key → balances start fresh (no stale reattachment). Reuses the import-drivers helpers. Must fail without Phase 3's wiring — record red/green in `lessons/phase-4.md`.
 
 **Gate.** `bun run e2e:agent tests/e2e/<spec>` green + documented pre-fix red.
 
 ### Phase 5 — Regression sweep + docs
-`bun run audit:vue`; armed source smoke AND unarmed artifact-mode smoke (explicitly — the default command exercises neither, per #485/#486 lessons); `NULO_E2E_PROVERLESS=1 bun run e2e:agent` full suite. `ARCHITECTURE.md` balance-row entry.
+`bun run audit:vue`; armed source smoke AND unarmed artifact-mode smoke (explicitly — the default command exercises neither); `NULO_E2E_PROVERLESS=1 bun run e2e:agent` full suite. `ARCHITECTURE.md` balance-row entry.
 
 **Gate.** All four exit 0.
 
@@ -165,18 +171,35 @@ Title (≤93 chars): `fix(balances): profile-scoped rows and an awaited account 
 
 ## Decision ledger
 
-*(filled from the audits)*
+| Decision | Fable | Codex | Resolution |
+|---|---|---|---|
+| Outline | A, conditioned | revised A | **Revised A** — unanimous; B rejected (workarounds + residual survive; schema decision deferred into migration territory) |
+| Field set | all three (immutability argument) | all three | **All three** |
+| Purge scope | `(address, profileId)` | **`(profileId, chainId, address)`** — same-profile multi-chain hole (Fact 5) | **Codex** — verified: `importAccount` dup check is chain-scoped; return type becomes scope tuples |
+| Orchestration | **A-1 registration** (`registerChainPurgeSubscriber` precedent) — no RPC | composable 3-step (list/purge/delete via RPC), flags the RPC expansion as its own Medium | **Fable's A-1 shape carrying codex's ordering + fail-fast** — achieves codex Ask e inside `reconcileImportedAccounts` with zero new RPC surface, discharging codex's own RPC finding; ratified in the discharge resume |
+| Stamping authority | A-2: `restore()` derives via `getTokensRaw(profileId)` | same (Inference 2, adds the version-skew argument) | **Service-owned derivation** — unanimous; relink untouched except the chain-authority fix |
+| Stale-row deletion | NO — codec-hidden-token case makes it lossy | YES — but only live-token identity-mismatch, active profile; leave no-live-token + foreign rows | **Merge** — codex's criterion structurally excludes fable's killer case; adopted with the carve-out pinned by test |
+| Legacy debris sweep | NO — unattributable; other profiles' rows | YES — exact-shape predicate under lock; debris taxes the per-creation physical-key scan | **Codex** (owner's decision rule: codex rules on disputes) — balance rows are recomputable projections; swept rows are invisible + unexported meanwhile and recreated by each profile's own next activation reconcile; fable's cross-profile worry is thereby bounded to a transient re-projection |
+| Ordering | split, purge first | split + **fail-fast to the outer rollback** (kill the catch-and-continue) | **Split + fail-fast** — verified: reconcile precedes `finalizeStarted`, so escape reaches `rollbackCreatedProfile` |
+| Duplicate pairs (codex-only) | — | reject/collapse at restore | **Adopted** — `seen` set, `AccountService.restore` precedent |
+| Occupancy set (codex-only) | — | identity-keyed or repair fails | **Adopted** — without it the whole reconcile story is fiction |
+| `full-backup-helpers.ts:206` | deliberate no-op, record it | — | **Adopted** |
+| Tier | mid | mid | **mid** |
+
+Unresolved: none. Both verdicts were `conditional approve`; every condition is adopted above (fable 1–8; codex a–f), with the two disputes resolved as recorded.
 
 ## Audit verdicts
 
-*(pending — codex xhigh + fable leg, dual, on both outlines)*
+- **Fable leg** (`audit-fable.md`): `conditional approve` — all 8 conditions adopted.
+- **Codex leg** (`audit-codex.md`, session `01a05831-3c23-7ce2-9026-66f9c227dddf`): `conditional approve` — all conditions adopted (revised A, tuple scopes, service-owned derivation, complete identity enforcement, stale/legacy cleanup, fail-fast split ordering).
+- **Discharge pass**: codex session resumed with this consolidated plan + ledger — *(pending)*.
 
 ## Seeds
 
 *(draft — finalized after the approval gate)*
 
 ```
-/goal All five phases marked ✓ in implementations-plan/account-balance-orphans/plan.md (per-phase headers in the file), each ✓ backed by its gate as written reported passing in the transcript — including Phase 3's sibling-profile RED run and Phase 4's documented pre-fix RED run; per phase LESSONS_FILE=implementations-plan/account-balance-orphans/lessons/phase-N.md printed; /code-review medium --fix applied and committed separately; the codex fix loop converged (resumed pass with no new material findings quoted); a PR against dev exists, created only after convergence, with gh pr view output in the transcript; bun run audit:vue and both smoke modes and NULO_E2E_PROVERLESS=1 bun run e2e:agent all exit 0 in the transcript.
+/goal All five phases marked ✓ in implementations-plan/account-balance-orphans/plan.md (per-phase headers in the file), each ✓ backed by its gate as written reported passing in the transcript — including Phase 3's TWO documented RED runs (sibling-profile vs bare-address purge; same-profile multi-chain vs address-scoped purge) and Phase 4's documented pre-fix RED run; per phase LESSONS_FILE=implementations-plan/account-balance-orphans/lessons/phase-N.md printed; /code-review medium --fix applied and committed separately; the codex fix loop converged (resumed pass with no new material findings quoted); a PR against dev exists, created only after convergence, with gh pr view output in the transcript; bun run audit:vue and both smoke modes and NULO_E2E_PROVERLESS=1 bun run e2e:agent all exit 0 in the transcript.
 ```
 
 ```
