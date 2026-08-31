@@ -162,6 +162,7 @@ declare global {
   const runImportChainSync: typeof import('../composables/importChainSync').runImportChainSync
   const sanitizeJournalSubtitle: typeof import('../utils/journal-state').sanitizeJournalSubtitle
   const sanitizeString: typeof import('../utils/string').sanitizeString
+  const scrubUrls: typeof import('../utils/scrub-urls').scrubUrls
   const setLastActiveProfileId: typeof import('../utils/lastActiveProfile').setLastActiveProfileId
   const shallowReactive: typeof import('vue').shallowReactive
   const shallowReadonly: typeof import('vue').shallowReadonly
@@ -513,6 +514,7 @@ declare module 'vue' {
     readonly runImportChainSync: UnwrapRef<typeof import('../composables/importChainSync')['runImportChainSync']>
     readonly sanitizeJournalSubtitle: UnwrapRef<typeof import('../utils/journal-state')['sanitizeJournalSubtitle']>
     readonly sanitizeString: UnwrapRef<typeof import('../utils/string')['sanitizeString']>
+    readonly scrubUrls: UnwrapRef<typeof import('../utils/scrub-urls')['scrubUrls']>
     readonly setLastActiveProfileId: UnwrapRef<typeof import('../utils/lastActiveProfile')['setLastActiveProfileId']>
     readonly shallowReactive: UnwrapRef<typeof import('vue')['shallowReactive']>
     readonly shallowReadonly: UnwrapRef<typeof import('vue')['shallowReadonly']>

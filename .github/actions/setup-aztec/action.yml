@@ -6,6 +6,14 @@ inputs:
     description: Skip Foundry + Aztec CLI install (use when the test points at a remote node).
     required: false
     default: "false"
+  version:
+    description: >
+      Override the detected Aztec version. Leave empty to derive it from apps/extension's
+      @aztec/aztec.js, which is what every caller wants. The bridge contracts are the exception:
+      their Nargo.toml pins aztec-packages to its own tag, and compiling that tag's aztec-nr with
+      a newer nargo fails inside upstream's own macros.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -14,9 +22,16 @@ runs:
       if: inputs.skip_cli != 'true'
       id: detect
       shell: bash
+      env:
+        OVERRIDE: ${{ inputs.version }}
       run: |
-        VERSION=$(bun -e "console.log(JSON.parse(require('fs').readFileSync('apps/extension/package.json','utf8')).dependencies['@aztec/aztec.js'])")
-        echo "Aztec version: $VERSION"
+        if [ -n "$OVERRIDE" ]; then
+          VERSION="$OVERRIDE"
+          echo "Aztec version: $VERSION (caller override)"
+        else
+          VERSION=$(bun -e "console.log(JSON.parse(require('fs').readFileSync('apps/extension/package.json','utf8')).dependencies['@aztec/aztec.js'])")
+          echo "Aztec version: $VERSION (from apps/extension)"
+        fi
         echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Install Node.js 24
@@ -56,52 +71,6 @@ runs:
           | VERSION="$AZTEC_VERSION" bash
         ls -la ~/.aztec/versions/"$AZTEC_VERSION"/bin/
 
-    # snappy@7.4.0 (published 2026-08-12) ships a broken Node entry chain — its
-    # loader unconditionally reaches the platform-mismatched
-    # @napi-rs/snappy-wasm32-wasi fallback, which npm never installs on linux,
-    # so a FRESH toolchain install (the aztec installer resolves snappy
-    # un-pinned) boots a node that dies at startup with ERR_MODULE_NOT_FOUND.
-    # Load-check the installed snappy and, only when broken, replace it with
-    # 7.3.3 (last known-good) by direct tarball extraction — npm-free, so
-    # nothing else in the toolchain's tree gets re-resolved. Runs on BOTH the
-    # cache-hit and fresh-install paths (no-op when snappy loads). Remove once
-    # the aztec line ships with a fixed snappy resolution.
-    - name: Pin snappy 7.3.3 when the installed one cannot load
-      if: inputs.skip_cli != 'true'
-      shell: bash
-      env:
-        AZTEC_VERSION: ${{ steps.detect.outputs.version }}
-      run: |
-        AZDIR="$HOME/.aztec/versions/${AZTEC_VERSION}"
-        SNAPPY_DIR="$AZDIR/node_modules/snappy"
-        if [ ! -d "$SNAPPY_DIR" ]; then
-          echo "No snappy in the toolchain tree — nothing to pin."
-          exit 0
-        fi
-        load_check() {
-          node -e "const{createRequire}=require('module');const r=createRequire('$AZDIR/node_modules/');const s=r('snappy');process.exit(typeof s.compressSync==='function'?0:1)"
-        }
-        if load_check 2>/dev/null; then
-          echo "snappy loads — no pin needed."
-          exit 0
-        fi
-        echo "Installed snappy fails to load — pinning 7.3.3."
-        TMP=$(mktemp -d)
-        pushd "$TMP" > /dev/null
-        npm pack snappy@7.3.3 @napi-rs/snappy-linux-x64-gnu@7.3.3 --silent
-        mkdir -p s n
-        tar -xzf snappy-7.3.3.tgz -C s
-        tar -xzf napi-rs-snappy-linux-x64-gnu-7.3.3.tgz -C n
-        popd > /dev/null
-        rm -rf "$SNAPPY_DIR" "$AZDIR/node_modules/@napi-rs/snappy-linux-x64-gnu"
-        mkdir -p "$AZDIR/node_modules/@napi-rs"
-        mv "$TMP/s/package" "$SNAPPY_DIR"
-        mv "$TMP/n/package" "$AZDIR/node_modules/@napi-rs/snappy-linux-x64-gnu"
-        if ! load_check; then
-          echo "::error::snappy still fails to load after pinning 7.3.3 — toolchain unusable."
-          exit 1
-        fi
-        echo "snappy pinned to 7.3.3 and loads OK."
 
     # Fail-loud toolchain preflight, on BOTH the cache-hit and fresh-install
     # paths: the L1 deploy depends on the pin's bundled forge/anvil

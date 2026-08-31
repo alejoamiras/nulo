@@ -41,13 +41,29 @@ Do not start Phase 1 before the answers; on a reset, do not run any `--broadcast
 - The two noir patches: rename `patches/@aztec%2Fnoir-{acvm_js,noirc_abi}@<v>.patch` + the `patchedDependencies` keys in the root package.json.
 - `bunfig.toml` `minimumReleaseAgeExcludes`: fresh publishes are min-age-blocked, and the gate bites TRANSITIVES too — enumerate every `@aztec/*` name from `bun.lock` (~30), plus the three `@alejoamiras/*`. Date the comment; a follow-up PR removes the excludes after they age past 7 days.
 
-**The lockfile ritual** (Bun #25305 — per-package update won't re-resolve transitives):
-```bash
-rm bun.lock && bun install
-```
-- ⚠️ `bunfig.toml` pins `linker = "hoisted"` — do NOT remove it. A fresh lockfile otherwise defaults to the isolated linker and breaks the foundry `@aztec/` remap, `resolvePackageFile` walkers, and the deploy-script `node_modules/...` paths.
-- Allowlist-diff the lock: only the intended scopes move (in-range `^` refreshes of everything else are the accepted cost — investigate anything suspicious, trace odd new transitives to their parent).
-- Assert zero old-version entries remain: `rg -c '<old-version>' bun.lock` → 0.
+**The lockfile ritual** — `bun install` after editing the pins. Bun #25305 is CLOSED on Bun 1.4:
+targeted re-resolution now holds transitives to the min-age gate, so `rm bun.lock` is NO LONGER
+the default (a full regen re-gates every already-locked version and invites unrelated churn).
+Keep it as the last resort for unresolvable conflicts only.
+- ⚠️ `bunfig.toml` pins `linker = "isolated"` (since the 2026-08 isolated-linker arc) — do NOT
+  change it. The old hoisting assumptions were made layout-agnostic via `@nulo/resolve-asset` +
+  generated remappings; `apps/extension/scripts/layout-identity.test.ts` is the executable
+  guarantee (and carries `expectVersion` literals that MUST move with the line).
+- Diff the lock with `bun scripts/lockfile-exception-diff.ts <base-lock> bun.lock` and
+  disposition every `exceptions/added/removed` entry (no blanket acceptance).
+- **Residue is an ALLOWLIST check, not a zero check.** When any package is deliberately held,
+  old-line entries legitimately remain. `bun scripts/aztec-hold-residue-check.ts` encodes it:
+  graph-reachability from the held roots (bun.lock v2 shortens a single-dependent nested key to
+  the bare position, so key-prefix matching gives false failures) plus `realpath` resolution
+  from every consumer workspace. Anything else on the old line is a missed pin.
+- Fresh publishes are min-age-blocked. Prefer waiting; when a first-party release must land
+  immediately, add ONE dated `minimumReleaseAgeExcludes` entry with the removal date and the
+  provenance you verified (registry signature + npm/SLSA attestation binding the tarball to a
+  repo+commit), and file the removal PR.
+- Provenance actually runs like this: build a scratch npm project from the exception-diff's
+  resolved `name@version` set, `npm install --ignore-scripts`, THEN `npm audit signatures`.
+  `--package-lock-only` makes audit a no-op ("found no dependencies to audit") — which is why
+  earlier bumps never transcribed a passing run.
 
 **API churn**: `bun run typecheck:all` is the fast-fail — **but typecheck is NOT sufficient on a fork-class bump.** Surfaces typecheck can't see (5.0-fork precedent): copied/adapted upstream logic (fee options, gas math) that must be re-diffed against the new upstream; the three `nulo-schema-patch.ts` copies (extension/faucet/playground — they throw at RUNTIME if the wallet-sdk schema shape moved; `test:all` exercises them, typecheck doesn't); and native-proving required-mode (`VITE_NULO_ACCELERATOR_REQUIRED`) surviving the proving-stack change. Port mechanically and behavior-preserving; wrap renamed upstream APIs inside our service layer so OUR RPC surfaces don't ripple (precedent: PXE senders → tagging-secret sources, wrapped in `PxeService`). Non-mechanical churn (a removed API we depend on) → stop, `/codex` triage, re-plan.
 
@@ -105,13 +121,59 @@ Pre-flight: confirm the node runs the new version; deployer keys present (`packa
 6. **PrivateFPC — version gate FIRST, then deploy**: run `AZTEC_NODE_URL=<node> bun packages/bridge-core/scripts/check-fpc-version.ts` (read-only, no keys) — hardened in the 5.0.0 arc: exact full-version match, artifact sha256 vs the committed descriptor (`private-fpc-canonical.json`), descriptor coherence, and a live `node_getContract` class check (an RPC error is NOT absence). **Canonical salt policy (5.0.0+): `PRIVATE_FPC_SALT = 0x…01`, exported from `private-fuel.ts` — every rebuild site must use it.** When the salt/artifact changes meaning, sweep for the CONSTRUCTION pattern (`new Fr(0)` near FPC artifacts), not just the constant's import sites — a stray salt-0 rebuild in `fuel-testnet.ts` survived the import-site sweep and was caught live by its own tripwire. The FPC address is bytecode + `@aztec`-version specific: **depositing Fee Juice to an address derived from the wrong version is an UNRECOVERABLE loss**, and a version bump is exactly the operation that opens that window. Red gate ⇒ the pin needs the conscious re-pin + re-canary flow (drift detector 2), not a deploy. Only on green → `packages/bridge-core/scripts/deploy-private-fpc-testnet.ts` (idempotent universal deploy; asserts the pinned address).
 7. **Pool seed for the fresh AZLO**: the bridge deploy mints a NEW L1 token by design ⇒ re-run `DeployFuelLive` with `TOKEN_ADDRESS=<new>` + reuse flags + `SEED_AZLO_WETH=true SEED_ETH_FJ=false` (the ETH/FJ pool is token-independent and persists).
 8. **Candidate smokes → promote**: `verify-l1.ts --config <candidate>` + `smoke-existing-testnet.ts --config <candidate>` + **`smoke-swap-existing-testnet.ts --config <candidate>` (the FUELED smoke — proves the swap/self-paying-fuel route on the candidate BEFORE it goes live; needs `PRIVATE_KEY` + `SEPOLIA_RPC_URL` in `packages/bridge-core/.env`, template in `.env.example`)**; all green ⇒ copy candidate → `testnet-bridge.json`. Skipping the fueled smoke promotes an unproven fuel route — the step-9 canary would catch it, but on the LIVE manifest.
-9. **The live canaries** (all green = the redeploy gate): `verify-l1` · `verify:deployments` on the new pins · the candidate smoke (already done) · `fuel-testnet.ts` with `PRIVATE_RUNS=1` (the private self-paying claim MUST settle — re-confirm the step-6 `check-fpc-version.ts` gate is green first; this canary moves real Fee Juice) · **`fee-juice-canary-testnet.ts --config <candidate>` (the DIRECT `l1.feeJuice` lane — handler mint → `depositToAztecPublic(minFj)` → sponsored `FeeJuice.claim`; the lane `fuel-testnet` never exercises)** · a drip (`drip-canary-testnet.ts` — mirrors the UI's sponsored `drip_to_public` from a fresh account). **`PRIVATE_RUNS=1` is the settle-canary ONLY — its printed `minFuelFj` is a one-sample estimate; a one-sample number may only ever RAISE the floor, NEVER lower it.** To change `l1.fuel.minFuelFj`, run the default full calibration (`PRIVATE_RUNS` unset, ≥3 runs) — or leave the floor alone and note the full calibration as a follow-up.
+9. **The live canaries** (all green = the redeploy gate): `verify-l1` (on a promoted manifest this reports Etherscan's *existing* verification from step 8 — forge short-circuits on "already verified" without compiling the staged source, so it proves a verification exists, not that today's source still matches the bytes; the byte identity is what step 8's post-deploy `assertRuntimeMatchesTemplate` established) · `verify:deployments` on the new pins · the candidate smoke (already done) · `fuel-testnet.ts` with `PRIVATE_RUNS=1` (the private self-paying claim MUST settle — re-confirm the step-6 `check-fpc-version.ts` gate is green first; this canary moves real Fee Juice) · **`fee-juice-canary-testnet.ts --config <candidate>` (the DIRECT `l1.feeJuice` lane — handler mint → `depositToAztecPublic(minFj)` → sponsored `FeeJuice.claim`; the lane `fuel-testnet` never exercises)** · a drip (`drip-canary-testnet.ts` — mirrors the UI's sponsored `drip_to_public` from a fresh account). **`PRIVATE_RUNS=1` is the settle-canary ONLY — its printed `minFuelFj` is a one-sample estimate; a one-sample number may only ever RAISE the floor, NEVER lower it.** To change `l1.fuel.minFuelFj`, run the default full calibration (`PRIVATE_RUNS` unset, ≥3 runs) — or leave the floor alone and note the full calibration as a follow-up.
 10. **Client-side reset**: the old `migrate.ts` / `CURRENT_VERSION` bump is gone (replaced by the data-preserving migration framework). The storage baseline is now `BASELINE_VERSION` in `apps/extension/src/wallet/storage/migrations/index.ts` — pre-production, a fresh reinstall stamps it and runs nothing, and a shape change just redefines the baseline (no client migration UX). Chain-coupled rows (tokens, txs, balances, and other per-deployment state) are purged per-chain by `NetworkService.purgeChain` → each service's `clearChainState` (the `registerChainPurgeSubscriber` cascade + `PxeServiceClient.clearChainState`), fired when the stale network is removed — this replaces the old `KEY_PREFIXES_TO_WIPE_LOCAL` wipe-list. User-authored roots (contacts) are NOT chain-coupled and persist.
 11. **CSP check**: the faucet page connects to whatever RPC host the wallet reports — confirm `apps/faucet/public/_headers` `connect-src` covers it (both `*.aztec.network` and `*.aztec-labs.com` today).
 
 Then Branch A's delivery gates. Live-deploy discipline: fix forward carefully, never blind-retry a live step; a few failures on one step ⇒ stop and surface. **Recovery invariant for a partial landing:** a partial **L1 fuel** broadcast is recovered by re-running `DeployFuelLive` with the reuse flags (`ROUTER_ADDRESS`/`FUEL_SWAP_ADDRESS`) — never from scratch; a partial **L2 bridge** deploy hard-stops `deploy-bridge-testnet.ts` by design — fix forward and re-run (no flags to pass). Either way the LIVE `testnet-bridge.json` is untouched until step 8's smokes are green — **never promote a candidate built over a partial landing**.
 
 ## Gotchas (hard-won)
+
+- **Sweep version literals across the WHOLE workspace, not just the app.** Test fixtures pin the
+  expected `@aztec` version in places a per-app grep misses — `apps/extension/scripts/
+  layout-identity.test.ts` AND `packages/resolve-asset/src/index.test.ts` both hardcode it, and
+  the second one only surfaced in CI. Run `rg -l '<old-version>' --glob '!node_modules'
+  --glob '!bun.lock'` from the repo root and classify every hit.
+- **`test:all` passes only when its EXIT CODE is 0.** Counting `Exited with code 0` lines is not
+  a pass signal — failing packages hide behind passing ones. Check `rc=$?` and grep for
+  `Exited with code [1-9]`/`FAIL ` explicitly.
+
+- **One `@aztec` generation in the bundle, always.** Upstream's `getVKIndex`
+  (`noir-protocol-circuits-types/artifacts/vks/tree.ts`) discriminates with `instanceof`, so two
+  copies of that module make it treat the VK object as its own hash and abort with
+  `VK index for [object Object] not found in VK tree` — thrown in-wallet BEFORE any `/prove`
+  request, so the accelerator log is silent and it looks like a proving failure that never
+  reached the prover. Any package that exact-pins its own `@aztec` deps (the accelerator SDK)
+  must move WITH the line; holding it is not an option. Packages that declare exact-version
+  PEERS (private-fee-juice) or nothing at all (standards) re-bind to the workspace line and are
+  safe to hold. Gate: `scripts/aztec-hold-residue-check.ts`.
+- **Upstream recompiles `@aztec/accounts` artifacts on toolchain changes** (5.2.0 moved
+  SchnorrAccount's class id, −3,892 bytes). Production is immune — addresses come from the
+  vendored frozen artifact — but any E2E fixture that builds accounts through
+  `EmbeddedWallet.createSchnorrAccount` will fund one address and deploy another. Fix at the
+  wallet-construction seam: `EmbeddedWallet`'s constructor takes an `AccountContractsProvider`,
+  so subclass it and serve the frozen artifact for schnorr (see `FrozenArtifactWallet` in
+  `apps/extension/tests/e2e/fixtures/aztec.ts`). Symptom order if you patch it piecemeal:
+  address-parity mismatch → `Public keys not registered for account` → `Account "0x…" does not
+  exist on this wallet` — those are three different upstream steps you'd be re-implementing;
+  don't, use the provider.
+- **`tests/e2e` is outside the tsconfig graph** — fixture breakage never shows in
+  `typecheck:all`. The network suite is the only detector.
+- **Clear `<app>/node_modules/.vite` after a dependency-line swap**, before the first e2e run.
+  Stale dep-optimizer caches make dev-served apps fail with `.vite/deps/*.js does not exist`,
+  which surfaces as a page that never loads and a test that times out far from the cause.
+- **Don't edit fixtures while a suite is running.** Vitest workers load them per-worker, so a
+  mid-run edit yields a mix of old and new code and results you must throw away.
+- **Match the local run to CI's topology.** CI runs the network pool proverless in shards and
+  only a 3-file canary lane prover-ON. Running all ~70 files prover-ON locally is ~2.5h for no
+  extra signal; run prover-ON for the canaries + fee/tx-send paths and proverless for the rest.
+  Two files carry `@requires-proverless` and the runner hard-fails if they're in a prover-ON set.
+  And SHARD the proverless pass locally — `agent.sh` allocates its own ports per run, so 3-4
+  concurrent shards are safe (CI runs 5) and cut it from ~25min to under 10. Prover-ON is the
+  exception: every shard would queue on the single accelerator at the hardcoded port 59833.
+- **`BB_BINARY_PATH` is a footgun**: `find_bb` returns the seed unconditionally
+  (alejoamiras/aztec-accelerator#352), so a version-mismatched seed proves everything with the
+  wrong bb while the log shows a download of the right one. Run the server unseeded.
 
 - `aztec compile`'s "thread 'main' has overflowed its stack" can MASK real type errors — run `aztec-nargo compile` raw (with `ulimit -s 65520`) to see them.
 - rc.2+ `DeployMethod.send()` returns `Promise<DeployResultMined>` (no `.deployed()` chain), and codegen'd `Contract.deploy` needs the **EmbeddedWallet itself** as the `Wallet` (the account object lacks `getContractClassMetadata`) with the account as `from`.

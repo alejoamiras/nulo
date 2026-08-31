@@ -4,7 +4,6 @@
  * Frozen invariants:
  * - Storage key `nulo:core:token-balances`.
  * - Injected `browserApi.storage.local` (the chrome.storage.local adapter in prod).
- * - `TokenBalanceRaw` shape unchanged.
  * - IDs are numeric; `allocateId()` delegates to `nextNumericId`, which
  *   allocates max(allocatable ids) + 1 with hostile keys excluded (canonical
  *   round-trip + safe-integer bound; the candidate itself safe and free) —
@@ -21,8 +20,17 @@ export class BalanceRepository {
 	private readonly storage: EntityStorage<TokenBalanceRaw>
 
 	public constructor(browserApi: BrowserApi) {
-		this.storage = new EntityStorage<TokenBalanceRaw>(TOKEN_BALANCE_STORAGE_ROOT, browserApi.storage.local, (raw) =>
-			TokenBalanceRawSchema.parse(raw),
+		this.storage = new EntityStorage<TokenBalanceRaw>(
+			TOKEN_BALANCE_STORAGE_ROOT,
+			browserApi.storage.local,
+			(raw) => TokenBalanceRawSchema.parse(raw),
+			// Balance ids are minted `max+1` over the key space and every identity
+			// decision downstream trusts the embedded `id`, so a row whose key and
+			// `id` disagree must not be served. `keyIdentityMode` is NOT optional
+			// here: the default "string" mode requires a string id, which would
+			// reject every (numeric) balance row while `getKeys()` still saw their
+			// physical keys — a blank assets view plus unbounded reallocation.
+			{ requireKeyIdentityMatch: true, keyIdentityMode: "numeric" },
 		)
 	}
 
@@ -63,18 +71,10 @@ export class BalanceRepository {
 		})
 	}
 
-	/** Check whether a persisted balance exists for (token, account).
-	 *  Used by the projector write loop to guard against writing
-	 *  balances for records deleted mid-sync. */
-	public async existsByTokenAndAccount(tokenId: number, account: string): Promise<boolean> {
-		const all = await this.storage.getValues()
-		return all.some((x) => x.token === tokenId && x.account === account)
-	}
-
 	/** F-B23 raw second pass over the balance rows — the codec-hidden complement
 	 *  of `delete`, kept here so storage stays repository-private. */
 	public async purgeMalformed(
-		matchesRaw: (raw: Record<string, unknown>) => boolean,
+		matchesRaw: (raw: Record<string, unknown>, storageId: string) => boolean,
 		onPurged?: (storageId: string) => void,
 	): Promise<number> {
 		return purgeMalformedRows(this.storage, matchesRaw, onPurged)

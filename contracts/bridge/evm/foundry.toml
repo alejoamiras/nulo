@@ -12,13 +12,29 @@ out = "out"
 test = "test"
 script = "script"
 libs = ["lib"]
+allow_paths = ["../../../node_modules"]
 solc = "0.8.28"
 via_ir = true
 
 remappings = [
   "@oz/=lib/openzeppelin-contracts/contracts/",
   "@aztec/=../../../node_modules/@aztec/l1-artifacts/l1-contracts/src/",
+  "@aztec-blob-lib/=../../../node_modules/@aztec/l1-artifacts/l1-contracts/src/core/libraries/rollup/",
   "@uniswap/v4-core/=lib/v4-core/",
   "@test/=test/",
   "forge-std/=lib/forge-std/src/",
 ]
+
+# Pinned, not inherited: leaving these at Foundry's defaults means a toolchain upgrade can
+# silently change how much of the input space the fuzz and invariant suites actually cover,
+# with no diff to review.
+[profile.default.fuzz]
+runs = 256
+
+[profile.default.invariant]
+runs = 256
+depth = 500
+# Kept permissive deliberately: handler actions bound their own inputs and wrap the
+# expected-revert cases in try/catch, but `sweep` on an empty balance and other benign
+# no-ops still revert, and failing the campaign on those would only add noise.
+fail_on_revert = false

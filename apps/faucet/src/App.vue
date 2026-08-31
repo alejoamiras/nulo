@@ -3,6 +3,7 @@ import { computed, ref } from "vue"
 import { IS_MAINNET } from "@/lib/network"
 import { TESTIDS } from "@/lib/testids"
 import AppToastRegion from "./components/AppToastRegion.vue"
+import ChooseAccountModal from "./components/ChooseAccountModal.vue"
 import WalletPickerModal from "./components/WalletPickerModal.vue"
 import BridgeFooter from "./components/BridgeFooter.vue"
 import ThemeToggle from "./components/ThemeToggle.vue"
@@ -75,8 +76,10 @@ const stripExclude = computed(() => (tab.value === "faucet" ? ["no-wallet", "cap
 		     diverging dismissal state. -->
 		<ConnectionErrorStrip class="strip-slot" :exclude="stripExclude" />
 
-		<!-- v-show (not v-if): keep both views mounted so each tab owns an independent,
-		     persistent wallet session (codex: two sessions, not one shared connection). -->
+		<!-- v-show (not v-if): keep the views mounted so the (single, shared) wallet session and
+		     each view's local state persist across tab switches. All tabs read ONE session
+		     singleton (useBridgeWallet re-exports useWalletConnection) — one connection, one
+		     grant, one active account. -->
 		<FaucetView v-show="tab === 'faucet'" />
 		<BridgeView v-show="tab === 'bridge'" />
 		<FuelView v-show="tab === 'fuel'" />
@@ -86,6 +89,7 @@ const stripExclude = computed(() => (tab.value === "faucet" ? ["no-wallet", "cap
 		<AppToastRegion />
 		<!-- ONE picker for the shared session — the panels only trigger connect(). -->
 		<WalletPickerModal />
+		<ChooseAccountModal />
 	</main>
 </template>
 

@@ -27,10 +27,11 @@ import { ContactService } from "./services/contact/service"
 import { DappInteractionService } from "./services/dapp-interaction/service"
 import { DappSessionService } from "./services/dapp-session/service"
 import { ExecutionService } from "./services/execution/service"
-import { E2E_PROVERLESS } from "@/e2e/config"
+import { E2E_PROVERLESS, E2E_TOKEN_SEEDS, E2E_TOKEN_SEEDS_BUILD_STAMP } from "@/e2e/config"
 import { ChromeStorageProofGate } from "@/e2e/chrome-storage-proof-gate"
 import { ChromeStorageRestoreGate } from "@/e2e/chrome-storage-restore-gate"
 import { ChromeStorageIncomingPollGate } from "@/e2e/chrome-storage-incoming-poll-gate"
+import { ChromeStorageTokenSeeds } from "@/e2e/chrome-storage-token-seeds"
 import { FpcService } from "./services/fpc/service"
 import { LogViewerService } from "./services/log-viewer/service"
 import { LoggerService } from "./services/logger/service"
@@ -309,7 +310,15 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// boot promise silently pending forever when a leg hangs after the
 		// other failed, which is the defect class this arc exists to remove.
 		await Promise.all([
-			config.load().then(() => logger.log("wallet", LogLevel.Info, "Config loaded")),
+			// Settle log retention the moment the real config is known: the LoggerStore was built
+			// at module scope on schema defaults, and rehydrate() has already restored the previous
+			// lifecycle's entries unconditionally. `finally` so a REJECTED load still settles it —
+			// the config is then defaults, retention reads off, and the safe action (purge) runs;
+			// the rejection still propagates and vetoes the boot exactly as before.
+			config
+				.load()
+				.then(() => logger.log("wallet", LogLevel.Info, "Config loaded"))
+				.finally(() => logger.applyRetentionPolicy()),
 			BarretenbergSync.initSingleton({ wasmPath: process.env.BB_WASM_PATH })
 				.then(() => logger.log("wallet", LogLevel.Info, "Barretenberg initialized"))
 				.catch((err) => {
@@ -389,7 +398,19 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// pxeGeneration onto each op's NetworkInfo; a retry reuses its capture.
 		registerPxeGenerationProvider((profileId) => profileService.getPxeGeneration(profileId))
 		services.add(new TaskService(logger))
-		services.add(new TokenService(logger, browserApi))
+		// E2E_TOKEN_SEEDS swaps the seeder's seed list for a chrome.storage-backed
+		// one the running test writes — the sandbox mints a token address per run,
+		// so no build-time list can name it. It REPLACES the production list, which
+		// is what keeps e2e wallets off the public RPCs the real seeds point at.
+		// Statically false in prod builds, so this module tree-shakes out entirely;
+		// `_build-extension.yml` greps release bundles for the stamp and the key.
+		if (E2E_TOKEN_SEEDS_BUILD_STAMP) {
+			;(globalThis as { __NULO_E2E_TOKEN_SEEDS_BUILD_STAMP__?: string }).__NULO_E2E_TOKEN_SEEDS_BUILD_STAMP__ =
+				E2E_TOKEN_SEEDS_BUILD_STAMP
+		}
+		const tokenSeeds = E2E_TOKEN_SEEDS ? new ChromeStorageTokenSeeds() : undefined
+		const seederOverrides = tokenSeeds ? { getSeeds: () => tokenSeeds.get() } : undefined
+		services.add(new TokenService(logger, browserApi, undefined, seederOverrides))
 		services.add(new TokenBalanceService(logger, browserApi))
 		services.add(new TransactionService(logger, browserApi))
 		// E2E_PROVERLESS injects the incoming-poll gate (same tree-shaken-in-prod

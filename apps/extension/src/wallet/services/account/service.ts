@@ -782,22 +782,51 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		})
 	}
 
+	private readonly accountPurgeSubscribers: Array<
+		(profileId: string, scopes: ReadonlyArray<{ chainId: number; address: string }>) => Promise<void>
+	> = []
+
+	/** Register an awaited cleanup for account-scope removals. Peer services call this
+	 *  from their `init()`. `reconcileImportedAccounts` awaits every subscriber BEFORE
+	 *  deleting the Account rows; a subscriber throw aborts the removal with every row
+	 *  still in place — dependents die first, never the other way around. */
+	public registerAccountPurgeSubscriber(
+		fn: (profileId: string, scopes: ReadonlyArray<{ chainId: number; address: string }>) => Promise<void>,
+	): void {
+		this.accountPurgeSubscribers.push(fn)
+	}
+
 	/**
 	 * After a full-backup restore, drop any IMPORTED Account row that has no matching key row —
 	 * a hostile epoch-4 backup can carry a type-1 row with the key slice omitted, which would
 	 * otherwise restore as a zombie that fails only at signing. Runs at restore FINALIZE, after
 	 * both the account rows and the key rows have landed.
+	 *
+	 * Ordering is list → awaited dependent purges → delete: a crash before the purge changes
+	 * nothing; a crash after it leaves a keyless account with no stale dependents, repaired by
+	 * the next reconcile. Scopes are full (chainId, address) tuples — the same address can
+	 * legitimately exist on another chain of this profile and must survive. Returns only the
+	 * scopes actually deleted: the delete pass re-checks key absence per row, so an account
+	 * whose key appeared during the awaited purge is kept and not reported.
 	 */
-	public async reconcileImportedAccounts(profileId: string): Promise<string[]> {
+	public async reconcileImportedAccounts(profileId: string): Promise<{ chainId: number; address: string }[]> {
 		await this.ensureInitialized()
-		const dropped: string[] = []
 		const imported = (await this.liveRows()).filter((a) => a.profileId === profileId && a.type === AccountType.Imported)
+		const keyless: Account[] = []
 		for (const account of imported) {
-			if (!(await this.importedKeys.get(profileId, account.chainId, account.address))) {
-				await this.storage.delete(accountRowIdOf(account))
-				this.emit("onAccountDeleted", account)
-				dropped.push(account.address)
-			}
+			if (!(await this.importedKeys.get(profileId, account.chainId, account.address))) keyless.push(account)
+		}
+		if (keyless.length === 0) return []
+		const scopes = keyless.map((a) => ({ chainId: a.chainId, address: a.address }))
+		for (const subscriber of this.accountPurgeSubscribers) {
+			await subscriber(profileId, scopes)
+		}
+		const dropped: { chainId: number; address: string }[] = []
+		for (const account of keyless) {
+			if (await this.importedKeys.get(profileId, account.chainId, account.address)) continue
+			await this.storage.delete(accountRowIdOf(account))
+			this.emit("onAccountDeleted", account)
+			dropped.push({ chainId: account.chainId, address: account.address })
 		}
 		return dropped
 	}

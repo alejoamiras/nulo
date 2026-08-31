@@ -42,13 +42,15 @@ const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.from
 		<!--
 		Cards always render so the page never collapses into the header
 		alone. Composables only activate when the user is connected; the
-		`:key` flips on connection state so the card cleanly re-mounts and
-		the composable lifecycle is unambiguous (no half-active polling).
+		`:key` flips on connection state AND the active account so the card
+		cleanly re-mounts and the composable lifecycle is unambiguous (no
+		half-active polling, and — critically — no drip handle left bound to
+		a previously selected account after a switch).
 		-->
 		<section class="cards">
 			<TokenCard
 				v-for="entry in tokenEntries"
-				:key="`${entry.token.symbol}:${status === 'connected' ? 'on' : 'off'}`"
+				:key="`${entry.token.symbol}:${status === 'connected' && accountAddress ? accountAddress.toString() : 'off'}`"
 				:token="entry.token"
 				:token-address="entry.address"
 				:wallet="status === 'connected' && wallet ? wallet : undefined"

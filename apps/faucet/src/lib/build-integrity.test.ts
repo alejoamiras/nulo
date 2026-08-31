@@ -44,7 +44,7 @@ describe("checkBuildIntegrity — fail-closed target/manifest/hostname", () => {
 		const err = checkBuildIntegrity(
 			TESTNET,
 			{ l1ChainId: 11155111, walletChainId: 1816023401 },
-			{ hostname: "abc123.nulo-tools.pages.dev", isProd: true, allowedPreviewHost: "abc123.nulo-tools.pages.dev" },
+			{ hostname: "abc123.nulo-tools.pages.dev", isProd: true, allowedPreviewHosts: ["abc123.nulo-tools.pages.dev"] },
 		)
 		expect(err).toBeNull()
 	})
@@ -53,7 +53,7 @@ describe("checkBuildIntegrity — fail-closed target/manifest/hostname", () => {
 		const err = checkBuildIntegrity(
 			TESTNET,
 			{ l1ChainId: 11155111, walletChainId: 1816023401 },
-			{ hostname: "evil.nulo-tools.pages.dev", isProd: true, allowedPreviewHost: "abc123.nulo-tools.pages.dev" },
+			{ hostname: "evil.nulo-tools.pages.dev", isProd: true, allowedPreviewHosts: ["abc123.nulo-tools.pages.dev"] },
 		)
 		expect(err).toMatch(/mis-hosted build/)
 	})
@@ -74,5 +74,23 @@ describe("checkBuildIntegrity — fail-closed target/manifest/hostname", () => {
 			{ hostname: "localhost", isProd: false },
 		)
 		expect(err).toBeNull()
+	})
+})
+
+describe("preview hosts (branch alias)", () => {
+	const target = { key: "testnet", l1ChainId: 11155111, walletChainId: 1337, host: "testnet.tools.nulo.sh" } as never
+	const manifest = { l1ChainId: 11155111, walletChainId: 1337 }
+	const hosts = ["4182ff98.nulo-faucet.pages.dev", "worktree-faucet-multi-accoun.nulo-faucet.pages.dev"]
+
+	it("accepts BOTH baked preview hostnames (per-commit hash and branch alias)", () => {
+		for (const hostname of hosts) {
+			expect(checkBuildIntegrity(target, manifest, { hostname, isProd: true, allowedPreviewHosts: hosts })).toBeNull()
+		}
+	})
+
+	it("still refuses any OTHER pages.dev host — exact match, no wildcard", () => {
+		expect(
+			checkBuildIntegrity(target, manifest, { hostname: "evil.nulo-faucet.pages.dev", isProd: true, allowedPreviewHosts: hosts }),
+		).toMatch(/mis-hosted/)
 	})
 })

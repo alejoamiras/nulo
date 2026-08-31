@@ -192,3 +192,87 @@ export const PRIVATE_FUEL_INSUFFICIENCY_MSG = "Amount too low to cover gas cost"
 export function isPrivateFuelInsufficiency(message: string): boolean {
 	return message.includes(PRIVATE_FUEL_INSUFFICIENCY_MSG)
 }
+
+/**
+ * Which fuel ladder a deposit's claim may use — the L11 privacy fence as a routing decision.
+ *
+ * The two ladders are NOT interchangeable: the public one claims the bridged Fee Juice with a
+ * sponsored, publicly-visible tx, which deanonymizes a private bridge. So a private record whose
+ * private-claim metadata is incomplete — `bridgeSecretSalt` is optional in persisted and backup
+ * records, so legacy, partially-restored or tampered ones exist — must FAIL CLOSED instead of
+ * falling through to the public ladder, which is what it did before.
+ *
+ * A private deposit with NO fuel block is unaffected: it never bridged Fee Juice, so there is no
+ * FJ claim to protect and its claim pays the wallet's own way exactly as before.
+ */
+export type FuelLadder =
+	| "private" // PrivateFPC mint_and_pay_fee — the only ladder a private FUELED record may use.
+	| "public" // the sponsored/fjwc/standalone ladder (or the no-fuel fee path): never a private fueled record.
+	| "private-incomplete" // private + fueled but missing claim metadata: refuse BOTH ladders.
+
+export interface FuelLadderInputs {
+	isPrivate: boolean
+	/** The DURABLE "this deposit bought fuel" marker: `fuel` is present ⟺ schema 2. A schema-2 record
+	 *  with no fuel block is a corrupted one that still has a live FJ message — classifying it by the
+	 *  block's absence alone would send it down the public ladder. */
+	schema: 1 | 2
+	fuel?: { received?: string; leafIndex?: string; bridgeSecretSalt?: string }
+}
+
+export function decideFuelLadder(i: FuelLadderInputs): FuelLadder {
+	if (!i.isPrivate) return "public"
+	// Only a genuine no-fuel private deposit (schema 1, no block) has no FJ to protect.
+	if (!i.fuel) return i.schema === 2 ? "private-incomplete" : "public"
+	const f = i.fuel
+	return f.received && f.leafIndex && f.bridgeSecretSalt ? "private" : "private-incomplete"
+}
+
+/**
+ * Whether the PUBLIC standalone gas recovery ("CLAIM YOUR GAS") applies to a record — the single
+ * source both the card's affordance and the action's own guard read, so the button and the function
+ * can never disagree.
+ *
+ * A private claim pays for itself with the bridged FJ inside the completing tx, so on a COMPLETED
+ * well-formed private record the fuel is spent and an unlatched `consumed` is a stale flag, not
+ * stranded gas — silence is correct. The incomplete case is the one that must SAY something: its
+ * fuel state is genuinely unknown, and the public recovery still must not be offered.
+ */
+export type StandaloneFuelRecovery =
+	| "offer" // public record, completed, fuel bridged and not yet settled.
+	| "none" // nothing to recover: no fuel, a direct-Fuel record, unfinished, or already settled.
+	| "private-settled" // private + well-formed: its FJ paid for the completing tx. Say nothing.
+	| "private-unknown" // private + metadata gaps: never an offer, and the card has no action to advertise.
+
+export interface StandaloneFuelRecoveryInputs {
+	isPrivate: boolean
+	/** A direct-Fuel record's completion IS its gas claim — never offer a re-claim for one. */
+	isFeeJuiceAsset: boolean
+	schema: 1 | 2
+	completedAt?: number
+	fuel?: {
+		received?: string
+		leafIndex?: string
+		bridgeSecretSalt?: string
+		consumed?: boolean
+		standaloneClaimed?: boolean
+	}
+}
+
+export function decideStandaloneFuelRecovery(i: StandaloneFuelRecoveryInputs): StandaloneFuelRecovery {
+	const f = i.fuel
+	if (i.isFeeJuiceAsset) return "none"
+	if (!f?.received && !(i.isPrivate && i.schema === 2)) return "none"
+	if (i.completedAt === undefined) return "none" // an unfinished claim retries via the normal action.
+	if (f?.consumed === true || f?.standaloneClaimed === true) return "none"
+	if (!i.isPrivate) return f?.received ? "offer" : "none"
+	return decideFuelLadder({ isPrivate: true, schema: i.schema, fuel: f }) === "private" ? "private-settled" : "private-unknown"
+}
+
+/** The terminal record/receipt mismatch: the L1 receipt cannot supply this record's fuel data, so a
+ *  retry repeats the same immutable failure forever. Matched by the engine to mark the record
+ *  terminally rather than as a retryable error. */
+export const RECEIPT_RECORD_MISMATCH_MSG = "receipt doesn't match its record"
+
+export function isReceiptRecordMismatch(message: string): boolean {
+	return message.includes(RECEIPT_RECORD_MISMATCH_MSG)
+}

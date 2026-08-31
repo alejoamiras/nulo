@@ -10,6 +10,9 @@ const raw = (id: number, overrides: Partial<TokenBalanceRaw> = {}): TokenBalance
 	id,
 	token: 1,
 	account: "0xA",
+	profileId: "p1",
+	chainId: 1,
+	contract: "0xc1",
 	privateBalance: "0",
 	publicBalance: "0",
 	updatedAt: 0,
@@ -95,8 +98,6 @@ function makeRepo(seeded: TokenBalanceRaw[] = []): BalanceRepository {
 			const max = Array.from(store.keys()).reduce((m, k) => Math.max(m, k), 0)
 			return max + 1
 		},
-		existsByTokenAndAccount: async (tokenId: number, account: string) =>
-			Array.from(store.values()).some((b) => b.token === tokenId && b.account === account),
 	} as BalanceRepository
 }
 
@@ -466,7 +467,7 @@ describe("BalanceJobQueue", () => {
 		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, {
 			getGeneration: () => 0,
 			onBalanceUpdated,
-			isRowEmittable: (tokenId) => emittable.has(tokenId),
+			isRowEmittable: (row) => emittable.has(row.token),
 		})
 
 		queue.enqueue(raw(1, { token: 1 }))
@@ -496,7 +497,7 @@ describe("BalanceJobQueue", () => {
 		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, {
 			getGeneration: () => 0,
 			onBalanceUpdated,
-			isRowEmittable: (tokenId) => tokenId !== 1,
+			isRowEmittable: (row) => row.token !== 1,
 		})
 
 		queue.enqueue(raw(1, { token: 1 }))

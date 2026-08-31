@@ -68,6 +68,10 @@ export type RestoreStage =
 /** B-24: how many times to retry the compensating profile delete on rollback. */
 const ROLLBACK_MAX_ATTEMPTS = 3
 
+/** Bound on dropped-balance records. This path never reaches the collector, so it carries no cap
+ *  of its own — and a hostile backup can ship tens of thousands of un-relinkable rows. */
+const MAX_DROPPED_BALANCES_RECORDED = 200
+
 // Ceiling for the crash-rollback liveness gate. Structural, never the success
 // mechanism: the SW heartbeat re-writes liveness every 10s and a booting
 // worker writes immediately after full wiring, so a healthy respawn resolves
@@ -242,10 +246,11 @@ export async function restoreAccountsAndFilterOwnedSlices(
 		(tx) => typeof tx.account === "string" && typeof tx.chainId === "number" && importedChainAddress.has(`${tx.chainId}:${tx.account}`),
 		"transaction(s)",
 	)
-	// auth-registry + token-balance carry `account` but no independently
-	// forgeable chainId (addresses are chain-distinct), so address membership
-	// is sufficient. (token-balance ALSO gets token-ownership + chain-equality
-	// in the re-link step below.)
+	// auth-registry rows carry `account` only, and addresses are chain-distinct,
+	// so address membership is sufficient. token-balance rows now carry identity
+	// fields, but those are DERIVED service-side at restore — address membership
+	// here is a pre-filter, with token-ownership + chain-equality in the re-link
+	// step below.
 	filterByAccount(AUTH_REGISTRY_SERVICE_NAME, (aw) => typeof aw.account === "string" && importedAddresses.has(aw.account), "authwit(s)")
 	filterByAccount(
 		TOKEN_BALANCE_SERVICE_NAME,
@@ -285,26 +290,50 @@ export function relinkRestoredTokenBalances(
 	const oldIdToChain = new Map<unknown, number>()
 	for (let i = 0; i < newTokens.length; i++) {
 		const old = oldTokens[i]
-		if (!old) continue
-		oldIdToChain.set(old.id, old.chainId)
-		if (!newTokens[i].restoreError) oldIdToNew.set(old.id, newTokens[i].id)
+		if (!old || newTokens[i].restoreError) continue
+		// Chain authority is the RESTORED token (parsed, persisted) — the old row is raw
+		// attacker-controlled blob content, and a failed row must not feed the chain map.
+		oldIdToChain.set(old.id, newTokens[i].chainId)
+		oldIdToNew.set(old.id, newTokens[i].id)
 	}
 	const droppedBalances: unknown[] = []
-	data["token-balance"] = (data["token-balance"] as Array<Record<string, unknown>>).flatMap((tb: Record<string, unknown>) => {
-		const newId = oldIdToNew.get(tb.token)
-		// token/account chain-equality (final pass): the balance's account
-		// must be an account imported ON THE TOKEN'S CHAIN. Addresses are
-		// chain-distinct, so this rejects a balance pairing an imported
-		// account with a token on a chain that account wasn't imported on.
-		const tokenChain = oldIdToChain.get(tb.token)
-		const chainOk =
-			tokenChain !== undefined && typeof tb.account === "string" && importedChainAddress.has(`${tokenChain}:${tb.account}`)
-		if (newId === undefined || !chainOk) {
-			droppedBalances.push({ ...tb, restoreError: "Token balance could not be re-linked to a restored token" })
-			return []
-		}
-		return [{ ...tb, token: newId }]
-	})
+	let droppedTotal = 0
+	data["token-balance"] = (data["token-balance"] as Array<Record<string, unknown>>).flatMap(
+		(tb: Record<string, unknown>, index: number) => {
+			const newId = oldIdToNew.get(tb.token)
+			// token/account chain-equality (final pass): the balance's account
+			// must be an account imported ON THE TOKEN'S CHAIN. Addresses are
+			// chain-distinct, so this rejects a balance pairing an imported
+			// account with a token on a chain that account wasn't imported on.
+			const tokenChain = oldIdToChain.get(tb.token)
+			const chainOk =
+				tokenChain !== undefined && typeof tb.account === "string" && importedChainAddress.has(`${tokenChain}:${tb.account}`)
+			if (newId === undefined || !chainOk) {
+				// This path bypasses `collectRestoreErrors` entirely — these rows are dropped BEFORE any
+				// service sees them — so it must do its own allowlisting AND its own bounding.
+				//
+				// `tb` is raw, unvalidated backup content: it carries `publicBalance`/`privateBalance`,
+				// and migration validates only `tb.id`, so `token` can be an arbitrary nested object
+				// holding a URL or a secret. Only the POSITION is recorded, which is all that
+				// distinguishes one dropped row from another anyway.
+				droppedTotal++
+				if (droppedBalances.length < MAX_DROPPED_BALANCES_RECORDED) {
+					droppedBalances.push({
+						row: index,
+						restoreError: "Token balance could not be re-linked to a restored token",
+					})
+				}
+				return []
+			}
+			return [{ ...tb, token: newId }]
+		},
+	)
+	// Say what was dropped rather than letting the cap read as "exactly 200 failures".
+	if (droppedTotal > droppedBalances.length) {
+		droppedBalances.push({
+			restoreError: `${droppedTotal - droppedBalances.length} further dropped balance(s) not recorded`,
+		})
+	}
 	return droppedBalances
 }
 
@@ -501,7 +530,12 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		// APPEND, not assign: some services already have entries recorded before
 		// their restore runs (e.g. token-balance's un-relinkable rows are recorded
 		// pre-restore) — a plain assignment would clobber those diagnostics.
-		if (errors) restoreErrorLog.value[serviceName] = [...(restoreErrorLog.value[serviceName] ?? []), ...errors]
+		if (errors) {
+			// Names the service that gates the Continue screen. Without it a degraded import is
+			// only visible as "some slice failed", with the reasons stranded in the RPC result.
+			console.warn(`[full-backup-import] ${serviceName} reported ${errors.length} restore error(s)`, errors)
+			restoreErrorLog.value[serviceName] = [...(restoreErrorLog.value[serviceName] ?? []), ...errors]
+		}
 	}
 
 	async function restoreBackup() {
@@ -767,7 +801,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				importedChainAddress = await restoreAccountsAndFilterOwnedSlices(data, accountService, recordRestoreErrors)
 
 				// Imported-account key rows restore RIGHT AFTER the account rows and BEFORE
-				// reconciliation/finalize (final-codex ordering). The ciphertext is HKDF-bound to
+				// reconciliation/finalize. The ciphertext is HKDF-bound to
 				// (master, chainId, address) — not profileId — so it survives the id remap.
 				const importedKeySlice = (data as Record<string, unknown>)[IMPORTED_KEYS_SERVICE_NAME]
 				if (Array.isArray(importedKeySlice)) {
@@ -832,9 +866,9 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// store key, which is only provisionable once the session is open.
 			const backupServices: Array<{
 				name: string
-				// The created-profile id rides along on every restore: services whose
-				// rows carry no profileId (authwits, balances, txs) key their deletion
-				// fence on it; the rest ignore the extra argument.
+				// The created-profile id rides along on every restore: authwits and txs
+				// key their deletion fence on it, balances additionally derive their
+				// identity fields from it; the rest ignore the extra argument.
 				client: { restore: (rows: unknown[], profileId: string) => Promise<unknown>; disconnect: () => void }
 			}> = [
 				{ name: TRANSACTION_SERVICE_NAME, client: new TransactionServiceClient() as never },
@@ -875,13 +909,14 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// Reconcile imported accounts BEFORE activation: an epoch-4 backup carrying a type-1
 			// Account row with no matching key row would restore as a zombie that fails at signing —
 			// drop it now (both slices have landed).
-			try {
-				const droppedImported = await accountService.reconcileImportedAccounts(newProfile.id)
-				if (droppedImported.length > 0) {
-					console.warn(`[import] dropped ${droppedImported.length} imported account(s) with no key row:`, droppedImported)
-				}
-			} catch (err) {
-				console.warn("[import] imported-account reconciliation failed (non-fatal):", err)
+			// Fail-fast, deliberately uncaught: a reconcile/purge failure escapes to the
+			// outer catch, which (pre-finalize) rolls the created profile back — the
+			// import must not commit with orphaned balance rows. Inside the call,
+			// registered dependents (token balances) are purged BEFORE the Account rows.
+			const droppedImported = await accountService.reconcileImportedAccounts(newProfile.id)
+			if (droppedImported.length > 0) {
+				// Scope COUNT only — the tuples carry on-chain account addresses.
+				console.warn(`[import] dropped ${droppedImported.length} imported account(s) with no key row`)
 			}
 
 			finalizeStarted = true

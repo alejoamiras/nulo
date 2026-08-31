@@ -25,7 +25,9 @@ export class LogViewerService extends Service<Methods, Events> implements Servic
 	}
 
 	public async clearLogs() {
-		this.loggerStore.clear()
+		// Awaited: the RPC must not resolve until the persisted copy is gone, or a worker restart
+		// in the gap brings back logs the user was told were cleared.
+		await this.loggerStore.clear()
 	}
 
 	private readonly onLogAdded = (log: Log) => {

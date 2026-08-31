@@ -423,7 +423,7 @@ export class TxRequestBuilder {
 			// Register contracts referenced in the payload (same pattern as buildStandard)
 			const callAddresses = (op.exec.calls ?? []).map((c) => c.to?.toString()).filter(Boolean)
 			const uniqueAddresses = [...new Set(callAddresses)]
-			this.log(`buildNoFrom: registering contracts, callAddresses=${JSON.stringify(callAddresses)}, unique=${uniqueAddresses.length}`)
+			this.log(`buildNoFrom: registering contracts, callAddresses=${callAddresses.length}, unique=${uniqueAddresses.length}`)
 			const instances = await this.resolver.resolveInstances(pxe, uniqueAddresses)
 			this.log(`buildNoFrom: got ${instances.size} instances`)
 			const artifacts = await this.resolver.resolveArtifacts(pxe, instances)

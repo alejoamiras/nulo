@@ -259,6 +259,7 @@
     "runImportChainSync": true,
     "sanitizeJournalSubtitle": true,
     "sanitizeString": true,
+    "scrubUrls": true,
     "setLastActiveProfileId": true,
     "shallowReactive": true,
     "shallowReadonly": true,

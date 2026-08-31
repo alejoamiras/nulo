@@ -13,8 +13,11 @@ import {
 import { DRIPPER, NULO, OLUN, rebuildDripperInstance, rebuildNuloInstance, rebuildOlunInstance } from "@/contracts/deployments"
 import { getPrivateFpc } from "@/contracts/private-fpc"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
+import { watch } from "vue"
 import { buildCombinedManifest } from "@/lib/capabilities"
 import { createAztecWalletSession } from "./createAztecWalletSession"
+import { opsInFlight } from "./useOpsInFlight"
+import { useToast } from "./useToast"
 
 const APP_ID = "nulo-faucet"
 
@@ -53,8 +56,8 @@ async function registerAllContracts(w: Wallet): Promise<void> {
 	await w.registerContract(tokenInst, TokenContractArtifact)
 	await w.registerContract(bridgeInst, tokenBridgeArtifact)
 	// The PrivateFPC must be pre-registered so the no-fuel-claim gate's private Fee-Juice balance read
-	// works under 5.0.1 — the wallet only auto-registers it when a tx uses it as fee payer, which is too
-	// late for the pre-claim read. See @/contracts/private-fpc.
+	// resolves: the wallet only auto-registers it when a tx uses it as fee payer, which is too late for
+	// the pre-claim read. See @/contracts/private-fpc.
 	const { instance: privateFpcInst, artifact: privateFpcArtifact } = await getPrivateFpc()
 	await w.registerContract(privateFpcInst, privateFpcArtifact)
 }
@@ -66,7 +69,50 @@ const session = createAztecWalletSession({
 	appId: APP_ID,
 	buildManifest: buildCapabilityManifest,
 	registerContracts: registerAllContracts,
+	// The mutation-boundary switch gate: selectAccount() rejects while any account-sensitive
+	// operation (drip / deposit / withdraw / fuel / add-token / journal continuation) is in
+	// flight — the UI's disabled rows are UX on top, not the enforcement (plan D-18).
+	isSwitchBlocked: opsInFlight,
 })
+
+// Single owner of selection notices → toasts (plan D-25/D-29). The session pushes explicit
+// one-shot notices (auto-remembered selection, grant truncation); this MODULE — one instance,
+// unlike the three always-mounted panels — drains them exactly once. Panels never infer these
+// from status changes.
+function shortAddr(address: string): string {
+	return `${address.slice(0, 6)}…${address.slice(-4)}`
+}
+watch(session.selectionNotices, (list) => {
+	if (list.length === 0) return
+	// useToast resolved lazily INSIDE the callback: calling it at module init would run before
+	// test files' mock fixtures are initialized (hoisted vi.mock factories + TDZ).
+	const { push } = useToast()
+	for (const notice of session.consumeSelectionNotices()) {
+		if (notice.kind === "auto-remembered") {
+			const label = notice.alias || (notice.address ? shortAddr(notice.address) : "")
+			push({ kind: "info", text: `Using account ${label}` })
+		} else if (notice.kind === "grant-truncated") {
+			push({
+				kind: "info",
+				text: `Your wallet granted more accounts than the app can show — using the first ${session.accounts.value.length} (${notice.hiddenCount} hidden).`,
+			})
+		}
+	}
+})
+
+/** Switch the active account WITH user-visible feedback — the one path every UI surface uses
+ *  (AccountSwitcher rows, journal-card switch actions), so gating and toast copy stay
+ *  consistent. Returns whether the switch applied (false: busy-blocked / not granted / not
+ *  connected). */
+export function switchActiveAccount(address: string): boolean {
+	const applied = session.selectAccount(address)
+	if (applied) {
+		const acct = session.accounts.value.find((a) => a.address === address)
+		const label = acct?.alias || `${address.slice(0, 6)}…${address.slice(-4)}`
+		useToast().push({ kind: "ok", text: `Active account: ${label}` })
+	}
+	return applied
+}
 
 export function useWalletConnection() {
 	return session
@@ -75,5 +121,5 @@ export function useWalletConnection() {
 /** Test-only: clear state between cases. */
 export const __resetWalletConnectionForTests = session.reset
 
-export { extractGrantedAccounts } from "./createAztecWalletSession"
-export type { ConnectStatus, DiscoveredWallet, GrantedAccount } from "./createAztecWalletSession"
+export { extractGrantedAccounts, parseGrantedAccounts } from "./createAztecWalletSession"
+export type { ConnectStatus, DiscoveredWallet, GrantedAccount, ParsedGrantedAccounts, SelectionNotice } from "./createAztecWalletSession"

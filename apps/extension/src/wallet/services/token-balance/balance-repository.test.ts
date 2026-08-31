@@ -10,6 +10,9 @@ const balance = (id: number, overrides: Partial<TokenBalanceRaw> = {}): TokenBal
 	id,
 	token: 1,
 	account: "0xaccount",
+	profileId: "p1",
+	chainId: 1,
+	contract: "0xc1",
 	privateBalance: "0",
 	publicBalance: "0",
 	updatedAt: 0,
@@ -56,13 +59,6 @@ describe("BalanceRepository", () => {
 		await repo.set(balance(7))
 		await repo.set(balance(3))
 		expect(await repo.allocateId()).toBe(8)
-	})
-
-	test("existsByTokenAndAccount", async () => {
-		await repo.set(balance(1, { token: 5, account: "0xA" }))
-		expect(await repo.existsByTokenAndAccount(5, "0xA")).toBe(true)
-		expect(await repo.existsByTokenAndAccount(5, "0xB")).toBe(false)
-		expect(await repo.existsByTokenAndAccount(6, "0xA")).toBe(false)
 	})
 
 	test("storage key is nulo:core:token-balances (frozen invariant)", async () => {

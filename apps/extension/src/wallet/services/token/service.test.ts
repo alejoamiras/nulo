@@ -65,7 +65,7 @@ async function makeHarness() {
 			isChainLive: async () => networkLive.value,
 		}),
 	)
-	collection.add(svc(AccountService.name, {}))
+	collection.add(svc(AccountService.name, { onAccountAdded: new EventHandler() }))
 	collection.add(svc(TaskService.name, { startNewTask: () => ({ complete() {}, fail() {} }) }))
 	collection.add(svc(OperationJournalService.name, journal))
 	const tokenService = new TokenService(logger, api)

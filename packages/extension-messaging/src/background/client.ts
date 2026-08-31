@@ -4,6 +4,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { BaseServiceClient, type RequestErrorMeta } from "../core/base-client"
+import { summarizeMessage } from "../core/envelope-summary"
 import { MessageType, type EventMessage, type ResponseMessage } from "../messages"
 
 /** Default upper bound on any RPC request. Individual calls can override.
@@ -84,14 +85,13 @@ export abstract class ServiceClient<
 
 	private readonly onMessage = (message: ResponseMessage<TRequests> | EventMessage<TEvents>) => {
 		if (!message || (message.type !== MessageType.Response && message.type !== MessageType.Event) || !message.content) {
-			this.logWarn("Invalid message received", message)
+			this.logWarn("Invalid message received", summarizeMessage(message))
 			return
 		}
 		if (message.type === MessageType.Response) {
 			this.handleResponse(message.content)
 		} else {
 			const { event, payload } = message.content
-			this.logDebug("Event received", event, payload)
 			this.handleEvent(event, payload)
 		}
 	}

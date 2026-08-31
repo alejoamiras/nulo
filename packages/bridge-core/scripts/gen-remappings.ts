@@ -1,12 +1,13 @@
 /**
- * Generates `contracts/bridge/evm/remappings.txt` with the `@aztec/` remap
- * resolved through THIS workspace's declared `@aztec/l1-artifacts` dependency.
+ * Generates `contracts/bridge/evm/remappings.txt` with the `@aztec/` and
+ * `@aztec-blob-lib/` remaps resolved through THIS workspace's declared
+ * `@aztec/l1-artifacts` dependency.
  *
- * Why generated: `foundry.toml`'s static `../../../node_modules/...` remap
- * assumes the hoisted node_modules layout. Foundry gives `remappings.txt`
- * priority over the TOML remappings, so writing the resolved path here keeps
+ * Why generated: `foundry.toml`'s static `../../../node_modules/...` remaps
+ * assume the hoisted node_modules layout. Foundry gives `remappings.txt`
+ * priority over the TOML remappings, so writing the resolved paths here keeps
  * `forge` working under BOTH linkers without committing a machine path (the
- * file is gitignored). The four layout-independent remaps are repeated so the
+ * file is gitignored). The layout-independent remaps are repeated so the
  * override file is complete — Foundry treats remappings.txt as the full set.
  *
  * Run before any forge invocation in `contracts/bridge/evm` (verify-l1.ts does
@@ -26,6 +27,10 @@ export function generateRemappings(): string {
 	const lines = [
 		"@oz/=lib/openzeppelin-contracts/contracts/",
 		`@aztec/=${aztecSrc}`,
+		// FeeLib/ProposeLib import BlobLib through this alias rather than a relative
+		// path, so it must resolve to the same tree as @aztec/ or the upstream portal
+		// fails to compile under the isolated linker.
+		`@aztec-blob-lib/=${aztecSrc}core/libraries/rollup/`,
 		"@uniswap/v4-core/=lib/v4-core/",
 		"@test/=test/",
 		"forge-std/=lib/forge-std/src/",
@@ -48,15 +53,23 @@ export function assertEffectiveRemapping(forgeBin: string): void {
 	if (remaps.code !== undefined || remaps.exitCode !== 0) {
 		throw new Error(`forge remappings failed: ${remaps.code ?? remaps.stderr}`)
 	}
-	const aztecLine = remaps.stdout.split("\n").find((l) => l.startsWith("@aztec/="))
 	const expected = `${resolvePackageAsset("@aztec/l1-artifacts", "l1-contracts/src", { from: import.meta.url })}/`
-	// Exact-line equality: a substring match would accept `${expected}extra/` and
-	// defeat the stale/unexpected-target rejection this assertion exists for.
-	if (aztecLine?.trim() !== `@aztec/=${expected}`) {
-		throw new Error(
-			`forge (${version.stdout.split("\n")[0]}) does not see the generated @aztec/ remap.\n` +
-				`effective: ${aztecLine ?? "<none>"}\nexpected suffix: ${expected}`,
-		)
+	// Both aliases are asserted: checking only @aztec/ let a stale hoisted-layout
+	// @aztec-blob-lib/ pass this gate and fail at compile time instead.
+	const effective = remaps.stdout.split("\n")
+	for (const [prefix, target] of [
+		["@aztec/", expected],
+		["@aztec-blob-lib/", `${expected}core/libraries/rollup/`],
+	]) {
+		const line = effective.find((l) => l.startsWith(`${prefix}=`))
+		// Exact-line equality: a substring match would accept `${target}extra/` and
+		// defeat the stale/unexpected-target rejection this assertion exists for.
+		if (line?.trim() !== `${prefix}=${target}`) {
+			throw new Error(
+				`forge (${version.stdout.split("\n")[0]}) does not see the generated ${prefix} remap.\n` +
+					`effective: ${line ?? "<none>"}\nexpected: ${target}`,
+			)
+		}
 	}
 	console.log(`remappings OK — ${version.stdout.split("\n")[0]} sees @aztec/=${expected}`)
 }

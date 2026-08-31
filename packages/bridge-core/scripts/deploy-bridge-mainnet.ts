@@ -28,6 +28,7 @@
  */
 import { randomInt } from "node:crypto"
 import { createHash } from "node:crypto"
+import { spawnSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -49,8 +50,7 @@ import { FeeJuicePortalAbi, feeJuiceDepositArgs, parseFeeJuiceDeposit, planPubli
 import { appendJournal, type CandidateManifest, readJournal, resolveResume, writeCandidateAtomic } from "./deploy-manifest"
 import { resolveDeployerKeys } from "./deployer-keys"
 import { requirePinnedSigner } from "./live-intent"
-import { loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
-import { run } from "./run"
+import { assertRuntimeMatchesTemplate, loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
 import { createL1Clients, createL2Wallet, createNode, mainnetChain, stopwatch } from "./script-bootstrap"
 
 // ── Canonical mainnet identity (same pins as DeployBridgeMainnet.s.sol / discover-mainnet-fuel.ts) ──
@@ -150,8 +150,8 @@ async function main() {
 	const mins = stopwatch()
 
 	// ─── 0. Reviewed portal bytes + live network identity ────────────
-	rebuildAndVerifyPortal()
 	const portalArt = loadForkedPortalArtifact()
+	rebuildAndVerifyPortal(portalArt.immutableReferences)
 	const info = await nodeInfo()
 	if (info.l1ChainId !== 1) throw new Error(`Alpha node reports l1ChainId ${info.l1ChainId} != 1 — wrong node; STOP`)
 	console.log(`Alpha node: rollupVersion ${info.rollupVersion}, registry ${info.l1ContractAddresses.registryAddress}`)
@@ -251,11 +251,25 @@ async function main() {
 	console.log("L2 (precomputed) token:", tokenInstance.address.toString())
 	console.log("L2 (precomputed) bridge:", bridgeInstance.address.toString())
 
+	// F-001 hardening: the portal's initialize is guarded to the EOA that DEPLOYED it (constructor-
+	// pinned immutable). A journal resume must therefore broadcast with the SAME PRIVATE_KEY that
+	// landed the portal step — a different key gets NotInitializer and the run stops here.
 	if (!recorded?.confirmed["portal-init"]) {
 		const portalPre = getContract({ address: portal, abi: portalArt.abi as Abi, client: pub })
 		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
 		const preBridge = String(await (portalPre.read as any).l2Bridge())
 		if (!/^0x0+$/.test(preBridge)) throw new Error(`portal already initialized (l2Bridge ${preBridge}) — reuse forbidden; STOP`)
+		// Wrong-key preflight: read the pinned initializer back and compare BEFORE broadcasting.
+		// Without it a resume under a different key discovers the mismatch only as a NotInitializer
+		// revert, after gas is spent and mid-way through a one-shot sequence.
+		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
+		const pinnedInitializer = String(await (portalPre.read as any).initializer())
+		if (pinnedInitializer.toLowerCase() !== account.address.toLowerCase()) {
+			throw new Error(
+				`portal initializer is ${pinnedInitializer} but this run broadcasts from ${account.address} — ` +
+					"resume with the key that deployed the portal; initialize is pinned to it and there is no rescue path.",
+			)
+		}
 		const portalC = getContract({ address: portal, abi: portalArt.abi as never, client: wallet as never })
 		// biome-ignore lint/suspicious/noExplicitAny: viem contract write typing
 		const initHash = await (portalC as any).write.initialize([registry, CIRCLE_USDC, bridgeInstance.address.toString()])
@@ -428,7 +442,9 @@ async function main() {
 	if ((await pr.rollupVersion()) !== BigInt(info.rollupVersion)) throw new Error("read-back FAILED: portal.rollupVersion != node")
 	const onchain = await pub.getCode({ address: portal })
 	if (!onchain) throw new Error("read-back FAILED: portal has no deployed code")
-	assertSame(keccak256(onchain), portalArt.runtimeCodeHash, "portal runtime code hash == pin")
+	// Immutable-aware verification — see deploy-bridge-testnet.ts for rationale.
+	const observedInit = assertRuntimeMatchesTemplate(onchain, portalArt.deployedBytecode, account.address, portalArt.immutableReferences)
+	assertSame(observedInit.toLowerCase(), account.address.toLowerCase(), "portal initializer == broadcaster")
 
 	// Router wiring (group 1): swapTarget bound + the F-004 witness shape present.
 	const routerR = getContract({
@@ -506,8 +522,8 @@ async function main() {
 
 	if (process.env.ETHERSCAN_API_KEY) {
 		console.log("\nVerifying the candidate's L1 sources on Etherscan…")
-		const v = run("bun", [join(here, "verify-l1.ts"), "--config", CANDIDATE_PATH], { stdio: "inherit", check: false })
-		if (v.exitCode !== 0) console.log("⚠ verification failed — retry with `bun run verify:l1 --config <candidate>`.")
+		const v = spawnSync("bun", [join(here, "verify-l1.ts"), "--config", CANDIDATE_PATH], { stdio: "inherit" })
+		if (v.status !== 0) console.log("⚠ verification failed — retry with `bun run verify:l1 --config <candidate>`.")
 	}
 	console.log(JSON.stringify(manifest, null, 2))
 }

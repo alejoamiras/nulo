@@ -2,6 +2,7 @@ import type { ILogger } from "@nulo/wallet-core/logger"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { BaseService } from "../core/base-service"
 import { isTrustedInternalSender } from "../core/sender-auth"
+import { summarizeMessage } from "../core/envelope-summary"
 import type { ResponseContentLike } from "../core/base-client"
 import { MessageType } from "../messages"
 import type { EventMessage, RequestMessage } from "./messages"
@@ -46,7 +47,7 @@ export abstract class Service<TRequests extends MethodsMap, TEvents extends Even
 
 	private readonly onMessage = (message: RequestMessage<TRequests>) => {
 		if (message?.type !== MessageType.Request || !message.from || !message.content) {
-			this.logWarn("Invalid message received", message)
+			this.logWarn("Invalid message received", summarizeMessage(message, this.isRegisteredName))
 			return
 		}
 		void this.handleRequest(message.content, message.from)

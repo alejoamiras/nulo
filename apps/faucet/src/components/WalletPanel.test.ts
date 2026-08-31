@@ -95,14 +95,16 @@ describe("WalletPanel", () => {
 		expect(w.find(`[data-testid="${TESTIDS.btnInstallNulo}"]`).exists()).toBe(true)
 	})
 
-	it("connected: shows the selected account chip and a disconnect button", async () => {
+	it("connected: shows the account chip; Disconnect lives in the menu", async () => {
 		const c = useWalletConnection()
 		c.status.value = "connected"
-		c.selectedAccount.value = "0xa1b2c3d4e5f6"
+		c.selectedAccount.value = `0x${"a1b2c3".padStart(64, "0")}`
 		const w = mount(WalletPanel)
-		// Connected chip mirrors BridgeWalletPanel: an "Aztec" label + the address + a ✕ disconnect.
+		// Connected chip mirrors BridgeWalletPanel: "Aztec" label + address, menu on click.
 		expect(w.text()).toContain("Aztec")
 		expect(w.find(`[data-testid="${TESTIDS.account}"]`).exists()).toBe(true)
+		expect(w.find(`[data-testid="${TESTIDS.btnDisconnect}"]`).exists()).toBe(false)
+		await w.find(`[data-testid="${TESTIDS.accountChip}"]`).trigger("click")
 		expect(w.find(`[data-testid="${TESTIDS.btnDisconnect}"]`).exists()).toBe(true)
 	})
 

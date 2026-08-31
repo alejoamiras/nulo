@@ -32,7 +32,25 @@ export const SYNC_TARGET_MARGIN_BLOCKS = 3
 
 // Every attention fails the active phase: the rail is where the note + the fix-instruction live
 // (mismatch/stale states used to render a calm "active" prompt with no note at all).
-const FAILED_ATTENTIONS = new Set(["error", "unknown-outcome", "mismatch", "tampered", "unseal-failed", "stale", "stale-deployment"])
+/** Attentions no retry can clear: the underlying fact is immutable (a foreign deployment binding, an
+ *  L1 receipt that cannot supply the record's data), so EVERY surface must stop offering CLAIM/RETRY
+ *  and stop narrating one. The journal-level Restore stays the recovery path. */
+const TERMINAL_ATTENTIONS = new Set(["stale-deployment", "receipt-mismatch"])
+
+export function isTerminalAttention(attention?: string): boolean {
+	return attention !== undefined && TERMINAL_ATTENTIONS.has(attention)
+}
+
+const FAILED_ATTENTIONS = new Set([
+	"error",
+	"unknown-outcome",
+	"mismatch",
+	"tampered",
+	"unseal-failed",
+	"stale",
+	"stale-deployment",
+	"receipt-mismatch",
+])
 
 const clamp01 = (n: number): number => Math.max(0, Math.min(1, n))
 

@@ -1,0 +1,177 @@
+<title>Faucet Multi-Account — Plan ELI5</title>
+<style>
+  :root {
+    --bg: #fbfaf8;
+    --surface: #ffffff;
+    --ink: #22201d;
+    --ink-2: #6b655c;
+    --line: #e2ded6;
+    --accent: #a8480c;
+    --good: #0e8a68;
+    --warn: #9a6a1f;
+    --code-bg: #f2efe9;
+    --approval-bg: #f4ede5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f0e0c;
+      --surface: #171512;
+      --ink: #ece7dd;
+      --ink-2: #9a9186;
+      --line: #33302a;
+      --accent: #e8a06c;
+      --good: #3ecf9f;
+      --warn: #d9a84e;
+      --code-bg: #201d19;
+      --approval-bg: #221c15;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f0e0c; --surface: #171512; --ink: #ece7dd; --ink-2: #9a9186;
+    --line: #33302a; --accent: #e8a06c; --good: #3ecf9f; --warn: #d9a84e;
+    --code-bg: #201d19; --approval-bg: #221c15;
+  }
+  :root[data-theme="light"] {
+    --bg: #fbfaf8; --surface: #ffffff; --ink: #22201d; --ink-2: #6b655c;
+    --line: #e2ded6; --accent: #a8480c; --good: #0e8a68; --warn: #9a6a1f;
+    --code-bg: #f2efe9; --approval-bg: #f4ede5;
+  }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    line-height: 1.6; margin: 0; padding: 56px 20px 96px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  .eyebrow { font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); }
+  h1 { font-size: 1.9rem; font-weight: 700; line-height: 1.15; margin: 10px 0 4px; text-wrap: balance; }
+  h2 { font-size: 1.2rem; font-weight: 650; margin: 2.6rem 0 0.8rem; }
+  h3 { font-size: 1rem; font-weight: 650; margin: 1.2rem 0 0.3rem; }
+  p, li { color: var(--ink); font-size: 15.5px; }
+  .muted { color: var(--ink-2); font-size: 0.92em; }
+  a { color: var(--accent); }
+  .verdict {
+    display: inline-block; margin-top: 14px;
+    border: 1px solid var(--good); color: var(--good);
+    font: 600 12px/1 ui-monospace, Menlo, monospace; letter-spacing: 0.06em;
+    padding: 6px 10px; border-radius: 4px;
+  }
+  .phase {
+    margin: 1.1rem 0; padding: 14px 18px;
+    border-left: 3px solid var(--line); background: var(--surface);
+    border-radius: 0 6px 6px 0;
+  }
+  .phase h3 { margin-top: 0; }
+  .phase .gate { color: var(--ink-2); font-size: 0.9em; margin-bottom: 0; }
+  .phase .gate b { color: var(--good); font-weight: 600; }
+  .approval {
+    background: var(--approval-bg); border-left: 3px solid var(--accent);
+    padding: 16px 20px; margin: 1.6rem 0; border-radius: 0 6px 6px 0;
+  }
+  .approval h2 { margin-top: 0; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em; }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px;
+    padding: 14px 16px; overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+    color: var(--ink);
+  }
+  .seeds { margin-top: 3rem; padding-top: 1.6rem; border-top: 1px solid var(--line); }
+  .recommended { border-left-color: var(--warn); background: var(--surface); }
+  .recommended .tag { color: var(--warn); font: 600 10px/1 ui-monospace, Menlo, monospace; letter-spacing: 0.1em; text-transform: uppercase; }
+  .warning { color: var(--warn); font-weight: 600; }
+  ul { padding-left: 20px; }
+  li { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 0.6rem 0; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--ink-2); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+</style>
+
+<div class="wrap">
+  <span class="eyebrow">Blueprint ELI5 · light tier · plan: implementations-plan/faucet-multi-account</span>
+  <h1>Faucet multi-account: choose a main account, switch anytime</h1>
+  <p>Your wallet can share several accounts with the faucet, but the app currently grabs the first one and hides the rest — there's no way to see them or pick a different one. This plan fixes that: when your wallet shares more than one account, the faucet asks which one to use; it remembers your answer per wallet; and a small account menu on the connected chip lets you switch whenever you want, on every tab (Faucet, Bridge, Fuel).</p>
+  <span class="verdict">CODEX FINAL VERDICT: conditional approve — all conditions folded into the plan</span>
+
+  <h2>The decision trail</h2>
+  <p>You picked <strong>Proposal D</strong> from the <a href="https://claude.ai/code/artifact/dfe02113-58ea-4b40-912c-fddd27ba8c82">four UX mockups</a>: a "choose main account" step on connect (skipped entirely when only one account is shared) plus a quiet dropdown on the account chip for changing later. You also chose: the selection drives <strong>all tabs</strong>, and it's <strong>remembered per wallet</strong> across visits.</p>
+
+  <h2>Why the light tier</h2>
+  <p>Scored zero "high" risk dimensions: this is a known pattern (the wallet SDK documents it, a sibling app half-implements it), it touches one app, nothing is irreversible, no data migrations, no new outside services, and the money involved is testnet-only. Light means one plan, one auditor (Codex) — but you asked for an iteration loop, so Codex reviewed <em>three rounds</em> instead of one: reject → reject → conditional approve, with every finding either adopted or explicitly rejected with evidence (31 ledger entries in plan.md).</p>
+
+  <h2>What the audit loop actually caught</h2>
+  <p class="muted">Worth knowing before you approve — these were real:</p>
+  <ul>
+    <li><strong>The big one:</strong> the token cards bind to your account when they first appear. Without a fix, switching accounts would update the label at the top while drips kept going to the <em>old</em> account. The plan now rebuilds the cards on switch and includes a test that proves the next drip uses the new account.</li>
+    <li>"Remember per wallet" originally remembered only the <em>last</em> wallet — connecting wallet B forgot wallet A's choice. Now it's a small per-wallet memory (last 8 wallets).</li>
+    <li>Switching is <strong>blocked while an operation is running</strong> (a drip, a bridge transfer) — enforced in the state layer itself, not just greyed-out buttons — so nothing can ever run under an account other than the one it started with.</li>
+    <li>Data from the wallet is treated as untrusted: account names get sanitized (no invisible-character tricks), addresses validated, duplicates dropped, oversized lists capped <em>with a visible notice</em> instead of silent hiding.</li>
+    <li>Codex also made one wrong claim (said a test file doesn't exist — it does); it was pushed back with evidence and conceded. The loop worked in both directions.</li>
+  </ul>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1 — The brain: selection state &amp; memory</h3>
+    <p>Teach the wallet-session logic about multiple accounts: the pause-and-ask step on connect, the per-wallet memory, safe handling of weird wallet data, and the switch function itself.</p>
+    <p class="gate">Proves itself by: <b>types check + code style + all unit tests green</b>, including ~14 new tests covering every edge (double-clicks, disconnect mid-choice, hostile data, retries).</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2 — Nothing acts on the wrong account</h3>
+    <p>Make every consumer of "the current account" switch-safe: token cards rebuild, the bridge form resets cleanly, and every running operation blocks switching until it finishes.</p>
+    <p class="gate">Proves itself by: <b>same checks + an integration test</b> showing a post-switch drip provably uses the new account.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3 — The "choose main account" dialog</h3>
+    <p>The connect-time picker (only appears when &gt;1 account is shared and nothing is remembered), keyboard-friendly and screen-reader-labeled.</p>
+    <p class="gate">Proves itself by: <b>same checks + dialog component tests</b> (selection, cancel, never shown for single-account wallets).</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4 — The account menu on the chip</h3>
+    <p>The connected chip becomes a button that opens a small menu: all shared accounts, a check on the active one, copy-address, and Disconnect. Switching shows a confirmation toast. Present on both Faucet and Bridge panels.</p>
+    <p class="gate">Proves itself by: <b>same checks + menu component tests</b> (open/close, switch + toast fires exactly once, disabled while busy, keyboard navigation).</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 5 — Polish and the full gate</h3>
+    <p>Copy review, stale-comment cleanup, docs, plan index update.</p>
+    <p class="gate">Proves itself by: <b>the repo's full faucet audit command</b> — all typechecks, all tests, lint, deployment verification, and a production build, end to end.</p>
+  </div>
+
+  <h2>Open questions</h2>
+  <p class="muted">None blocking — four judgment calls were made during the audit loop and are listed for your confirmation below.</p>
+
+  <div class="approval">
+    <h2>Approval decision — ✅ APPROVED (unconditional), 2026-07-29</h2>
+    <p class="muted">Recorded for the archive; the checklist below is what was approved. Implementation is running under the /goal seed.</p>
+    <ul>
+      <li><strong>Scope</strong>: as above; explicitly OUT: wallet/extension changes, "request more accounts later" (the protocol can't re-prompt), the playground app's identical bug (follow-up candidate).</li>
+      <li><strong>Tier</strong>: light, with the 3-round codex loop already run.</li>
+      <li><strong>Validation</strong>: fast checks (types + lint + unit) gate every phase; the full <code>audit:faucet</code> aggregate gates the finish. (You chose these.)</li>
+      <li><strong>Confirm four folded judgment calls</strong>: (1) single-account connections are also remembered, so a later expanded grant keeps your old choice instead of re-prompting; (2) switching is disabled during running operations rather than allowed-with-warnings; (3) if a wallet shares more than 16 accounts, the list is capped with a visible notice; (4) a tampered browser storage can at worst pre-select another account <em>you already approved</em> — accepted residual, flagged by a toast whenever a remembered choice is auto-applied.</li>
+      <li><strong>Hardening</strong>: no <code>/harden</code> pass scheduled (testnet tool). Say the word if you want one at release time.</li>
+      <li>Reply with: <strong>approve</strong> · <strong>conditional approve (with conditions)</strong> · <strong>reject (with blocking findings)</strong>.</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (FINAL — approved scope)</h2>
+    <p>Start the implementation session <strong>inside the worktree</strong> (<code>agent-worktree resume faucet-multi-account</code>), then paste exactly one of these.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose; setting one replaces the other.</p>
+
+    <div class="phase recommended">
+      <span class="tag">Recommended for this plan</span>
+      <h3>/goal — works until the finish line is provably reached</h3>
+      <pre><code>/goal All 5 phases marked ✓ in implementations-plan/faucet-multi-account/plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate as defined in plan.md reported passing in the transcript (Phases 1–4: faucet typecheck + `bun run lint` + `bun run test:faucet`; Phase 5: `bun run audit:faucet`); for each phase the agent has printed `LESSONS_FILE=implementations-plan/faucet-multi-account/lessons/phase-N.md` in the transcript; `/code-review max --fix` complete with findings applied and committed separately; codex post-impl audit complete with high/critical findings addressed; `bun run test:faucet` and `bun run lint` both report exit 0 in the transcript.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop (interval-driven)</h3>
+    <pre><code>/loop 15m Drive implementations-plan/faucet-multi-account forward. Never idle waiting for my input. Each firing:
+1. Reality check: read implementations-plan/faucet-multi-account/plan.md and lessons/ (authoritative state — not the chat); run `git status` and `git log --oneline -5`. If a PR exists, `gh pr view --json statusCheckRollup` (no --watch).
+2. Waiting on CI is fine — confirm it's progressing; use the wait to review the diff or prep the next phase.
+3. No task in hand? Pick the next pending step from plan.md and start it. After each meaningful edit run `bun run lint` + `bun run test:faucet`. Commit → push (feature branch worktree-faucet-multi-account only).
+4. Stuck or facing a decision you'd normally bring to me? Call /codex xhigh with full context, converge, act, and log the consult + verdict in lessons/phase-N.md. Hard limits stay hard: never merge to dev/main, never publish/deploy, never expand scope beyond plan.md.
+5. Same step failed 5 times? Stop retrying; reassess with codex, then continue down the agreed path.
+6. Phase green? "Green" = the phase's validation gate as written in plan.md (Phases 1–4: faucet typecheck + `bun run lint` + `bun run test:faucet`; Phase 5: `bun run audit:faucet`). Run it, paste the result, mark ✓ in plan.md, file the lessons entry, print `LESSONS_FILE=implementations-plan/faucet-multi-account/lessons/phase-N.md`, advance.
+7. All phases ✓? Run `/code-review max --fix` → commit fixes separately → codex post-impl audit (net diff + code-review summary + adversarial ask) → address high/critical → write the wrap-up report (what shipped, contentious calls with ELI5 context, open items). Surface and stop.
+Keep the ASCII checklist visible each firing (human readability; plan.md is the source of truth).</code></pre>
+  </section>
+
+  <p class="muted">Full technical plan: <code>implementations-plan/faucet-multi-account/plan.md</code> in the worktree (with recon.md, the 31-entry decision ledger, and the complete codex transcripts in audit-codex.md). UX mockups: <a href="https://claude.ai/code/artifact/dfe02113-58ea-4b40-912c-fddd27ba8c82">proposals artifact</a>.</p>
+</div>

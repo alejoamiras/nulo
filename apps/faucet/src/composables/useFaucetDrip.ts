@@ -10,6 +10,7 @@ import { DRIPPER } from "@/contracts/deployments"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import { IS_MAINNET, NETWORK } from "@/lib/network"
 import type { FaucetToken, TokenSymbol } from "@/constants/tokens"
+import { withOperation } from "./useOpsInFlight"
 import { type NormalizedError, normalizeError } from "@/lib/errors"
 
 export type DripTarget = "public" | "private"
@@ -38,8 +39,10 @@ export function useFaucetDrip(wallet: Wallet, account: AztecAddress) {
 		inflight,
 		last,
 		isActive: (token: TokenSymbol, target: DripTarget) => inflight.value?.tokenSymbol === token && inflight.value.target === target,
+		// withOperation: a drip is an account-sensitive prompt/send span — while it runs, account
+		// switching is blocked (useOpsInFlight, plan D-8/D-19).
 		drip: async (token: FaucetToken, tokenAddress: AztecAddress, target: DripTarget) =>
-			drip(wallet, account, token, tokenAddress, target),
+			withOperation(() => drip(wallet, account, token, tokenAddress, target)),
 	}
 }
 

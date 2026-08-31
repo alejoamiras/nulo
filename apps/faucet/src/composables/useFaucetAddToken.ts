@@ -2,6 +2,7 @@ import type { Wallet } from "@aztec/aztec.js/wallet"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { ref } from "vue"
 import { type NormalizedError, normalizeError } from "@/lib/errors"
+import { withOperation } from "./useOpsInFlight"
 
 /**
  * Local typed augmentation matching the runtime schema patch in
@@ -87,5 +88,7 @@ export function useFaucetAddToken() {
 		}
 	}
 
-	return { status, addToken, isRegistered, reset }
+	// withOperation: an account-sensitive prompt/send span — while it runs, account switching is
+	// blocked (useOpsInFlight, plan D-8/D-19).
+	return { status, addToken: (...args: Parameters<typeof addToken>) => withOperation(() => addToken(...args)), isRegistered, reset }
 }

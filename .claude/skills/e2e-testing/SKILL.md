@@ -549,3 +549,37 @@ starved 2-core CI runner, which is why these fire in CI and "never reproduce" lo
 The standing rule above ("never use `runtime.reload()` for state reset") gained a second face: the PRODUCT now calls it legitimately (the migration barrier's Retry button — a deterministic restart, since popup close doesn't kill the SW). Under `--load-extension`, Chrome DISABLES the unpacked extension on `runtime.reload()`: every later `chrome-extension://` goto fails `net::ERR_BLOCKED_BY_CLIENT` until a browser restart — no retry loop recovers it.
 
 Harness pattern: click the button, wait briefly for its pre-reload storage write to land (belt — the handler awaits the write before reloading), then `browser.close()` + relaunch over the same `userDataDir`. Design the product flow so convergence is IMPOSSIBLE without the button's side effect (the migration gate short-circuits without the one-shot token), and the relaunch-based assertion proves the whole chain — no in-harness reload observation needed. Worked example: `tests/e2e/migration.test.ts` `retryAndReopen`.
+
+## The SW-kill load flake: `stopServiceWorker: still alive 15s` (2026-08-28)
+
+`stopServiceWorker` (inline in `sw-resilience.test.ts` and `sw-restart-network.test.ts`) arms a
+`targetdestroyed` listener, closes the worker, and rejects after 15s if the ORIGINAL target object
+never comes back destroyed. That identity check is deliberate and worth keeping — it is what stops
+the tests passing against a worker that never died. But its deadline is wall-clock, so on a starved
+runner the event lands late (or the worker takes longer than 15s to actually terminate) and the
+helper reports a lifecycle failure that never happened.
+
+**Fingerprint.** `Error: stopServiceWorker: the service-worker target was still alive 15s after
+close()`, thrown from `sw-resilience.test.ts` / `sw-restart-network.test.ts`, on a diff that
+touches no service-worker lifecycle code. Usually accompanied by `TimeoutError: Waiting failed:
+15000ms exceeded` from the same file.
+
+**It is load-correlated, not random.** Observed four times in one afternoon across four different
+PRs (#475, #476, #477, #478) while six PRs ran the full smoke + network suites concurrently; every
+one passed on a plain re-run of the same commit. On a quiet queue it is rare.
+
+**All three retries failing does NOT mean it is real** — this is the trap, because everywhere else
+in this repo that heuristic holds. Vitest's retries run back-to-back inside the SAME starved
+window, so a load flake exhausts the whole retry budget and presents exactly like a deterministic
+failure. Use the *diff* as the discriminator instead of the retry count: no SW-lifecycle change in
+the diff plus this fingerprint plus a busy queue ⇒ re-run before investigating.
+
+**Response.** `gh run rerun <run-id> --failed`, once. If it reproduces on a quiet queue, it is
+real and the helper's 15s deadline is the first thing to question — not the product. Never
+neutralize the assertion: the identity check is load-bearing (see the deflake-round-3
+`lessons/phase-3.md` note above), and a lengthened deadline hides a genuine
+worker-refuses-to-die regression.
+
+**If it becomes frequent enough to matter**, the fix is not a bigger constant: make the wait
+deadline-free and let the test's own timeout bound it, or assert the worker's death by a positive
+signal (a fresh target with a different id) rather than by the absence of an event.

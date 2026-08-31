@@ -30,6 +30,24 @@ export const TESTIDS = {
 	btnSwitchWallet: "fa-btn-switch-wallet",
 	bridgeL2SwitchWallet: "fa-bridge-l2-switch-wallet",
 
+	// Choose-main-account modal - shown when >1 account is granted and none is remembered
+	accountChoice: "fa-account-choice",
+	accountChoiceRow: "fa-account-choice-row",
+	accountChoiceContinue: "fa-account-choice-continue",
+	accountChoiceTruncation: "fa-account-choice-truncation",
+
+	// Account switcher - connected chip + dropdown menu (both wallet panels)
+	accountChip: "fa-account-chip",
+	accountMenu: "fa-account-menu",
+	accountMenuRow: "fa-account-menu-row",
+	accountMenuCopy: "fa-account-menu-copy",
+
+	// Journal-card account attribution (deposit cards only — withdraws never persist their Aztec sender)
+	journalAccount: "fa-journal-account",
+	journalSwitchAccount: "fa-journal-switch-account",
+	// (menu Disconnect keeps the pre-switcher panel ids: fa-btn-disconnect / fa-bridge-l2-disconnect)
+	accountMenuTruncation: "fa-account-menu-truncation",
+
 	// Verification modal - 3×3 emoji grid + match/cancel
 	verificationModal: "fa-verification-modal",
 	emojiGrid: "fa-emoji-grid",
@@ -132,6 +150,8 @@ export const TESTIDS = {
 	journalClaimWithoutFuel: "fa-journal-claim-without-fuel",
 	receiptFuel: "fa-receipt-fuel",
 	journalClaimGas: "fa-journal-claim-gas",
+	// Private bridge whose gas state can't be confirmed (incomplete private-claim metadata)
+	journalPrivateFuelUnknown: "fa-journal-private-fuel-unknown",
 	stepperBackup: "fa-stepper-backup",
 	journalRestore: "fa-journal-restore",
 	journalRestoreLink: "fa-journal-restore-link",

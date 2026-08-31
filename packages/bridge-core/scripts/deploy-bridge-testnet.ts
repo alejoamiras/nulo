@@ -21,6 +21,7 @@
  * packages/bridge-core/.env; AZTEC_NODE_URL defaults to the public testnet RPC.
  */
 import { randomInt } from "node:crypto"
+import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -41,8 +42,7 @@ import { type Abi, getContract, keccak256 } from "viem"
 import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts"
 import { appendJournal, type CandidateManifest, readJournal, resolveResume, writeCandidateAtomic } from "./deploy-manifest"
 import { resolveDeployerKeys } from "./deployer-keys"
-import { loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
-import { run } from "./run"
+import { assertRuntimeMatchesTemplate, loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
 import { assertPortalUninitialized, assertReuseMatchesManifest, assertReusedTokenMetadata, parseReuseTokenArg } from "../src/reuse-token"
 import { PLAN_PINNED_L1_SIGNER } from "./live-intent"
 import { createL1Clients, createL2Wallet, createNode, sepoliaChain, stopwatch } from "./script-bootstrap"
@@ -136,8 +136,8 @@ async function main() {
 	// ─── 0. Reviewed bytes + drift alarm ─────────────────────────────
 	// Rebuild the fork from source and assert it still matches the reviewed pins, then deploy the
 	// COMMITTED bytes (exact reviewed bytes, not "whatever builds today").
-	rebuildAndVerifyPortal()
 	const portalArt = loadForkedPortalArtifact()
+	rebuildAndVerifyPortal(portalArt.immutableReferences)
 
 	// ─── 1. Resume gate (never fresh salts over a partial landing) ───
 	const recorded = resolveResume(readJournal(JOURNAL_PATH))
@@ -362,6 +362,9 @@ async function main() {
 		}
 		console.log(`proxy wired (${mins()})`)
 
+		// F-001 hardening: the portal's initialize is guarded to the EOA that DEPLOYED it (constructor-
+		// pinned immutable). A journal resume must therefore broadcast with the SAME PRIVATE_KEY that
+		// landed the portal step — a different key gets NotInitializer and the run stops here.
 		const portalC = getContract({ address: portal, abi: portalArt.abi as never, client: wallet as never })
 		// Preflight (P5): the portal we are about to initialize must still be
 		// UNINITIALIZED — a non-zero l2Bridge() means this address is an
@@ -370,6 +373,17 @@ async function main() {
 		const portalPre = getContract({ address: portal, abi: portalArt.abi as Abi, client: pub })
 		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
 		assertPortalUninitialized(String(await (portalPre.read as any).l2Bridge()))
+		// Wrong-key preflight: read the pinned initializer back and compare BEFORE broadcasting.
+		// Without it a resume under a different key discovers the mismatch only as a NotInitializer
+		// revert, after gas is spent and mid-way through a one-shot sequence.
+		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
+		const pinnedInitializer = String(await (portalPre.read as any).initializer())
+		if (pinnedInitializer.toLowerCase() !== account.address.toLowerCase()) {
+			throw new Error(
+				`portal initializer is ${pinnedInitializer} but this run broadcasts from ${account.address} — ` +
+					"resume with the key that deployed the portal; initialize is pinned to it and there is no rescue path.",
+			)
+		}
 		// biome-ignore lint/suspicious/noExplicitAny: viem contract write typing
 		const initHash = await (portalC as any).write.initialize([registry, usdc, bridge.address.toString()])
 		appendJournal(JOURNAL_PATH, { phase: "submitted", step: "portal-init", txHash: initHash })
@@ -394,7 +408,11 @@ async function main() {
 	if ((await pr.rollupVersion()) <= 0n) throw new Error("read-back FAILED: portal.rollupVersion is 0")
 	const onchain = await pub.getCode({ address: portal })
 	if (!onchain) throw new Error("read-back FAILED: portal has no deployed code")
-	assertSame(keccak256(onchain), portalArt.runtimeCodeHash, "portal runtime code hash == pin")
+	// The constructor patches the immutable initializer into the runtime bytes, so raw keccak
+	// equality vs the template can never hold; verify structurally (diff confined to immutable
+	// words encoding THIS broadcaster) instead.
+	const observedInit = assertRuntimeMatchesTemplate(onchain, portalArt.deployedBytecode, account.address, portalArt.immutableReferences)
+	assertSame(observedInit.toLowerCase(), account.address.toLowerCase(), "portal initializer == broadcaster")
 
 	// L2 read-backs are BEST-EFFORT (log, never abort): aztec.js view-simulate returns `{ result }` and
 	// the decoded shape varies (AztecAddress / Fr / bigint), so a decode quirk must not false-abort a
@@ -537,8 +555,8 @@ async function main() {
 
 	if (process.env.ETHERSCAN_API_KEY) {
 		console.log("\nETHERSCAN_API_KEY set — verifying the candidate's L1 sources on Etherscan…")
-		const v = run("bun", [join(here, "verify-l1.ts"), "--config", CANDIDATE_PATH], { stdio: "inherit", check: false })
-		if (v.exitCode !== 0) console.log("⚠ verification failed — retry with `bun run verify:l1 --config <candidate>`.")
+		const v = spawnSync("bun", [join(here, "verify-l1.ts"), "--config", CANDIDATE_PATH], { stdio: "inherit" })
+		if (v.status !== 0) console.log("⚠ verification failed — retry with `bun run verify:l1 --config <candidate>`.")
 	} else {
 		console.log("\nETHERSCAN_API_KEY not set — run `bun run verify:l1 --config <candidate>` to verify L1 sources.")
 	}

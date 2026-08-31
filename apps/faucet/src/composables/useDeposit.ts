@@ -1,4 +1,5 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { fuelRecipientFor } from "@/lib/fuel-target"
 import { InboxAbi } from "@aztec/l1-artifacts"
 import { Contract } from "@aztec/aztec.js/contracts"
 import { computeSecretHash } from "@aztec/aztec.js/crypto"
@@ -23,6 +24,7 @@ import {
 	isSealTrusted,
 	markSealTrusted,
 	minOutputForSlippage,
+	PERMIT_DEADLINE_SECONDS,
 	predictedWorstMinFees,
 	PRIVATE_FPC_ADDRESS,
 	parseFeeJuiceDeposit,
@@ -53,9 +55,12 @@ import {
 	FUEL_FEE_MARGIN,
 	PRIVATE_ATTEMPT_STALE_MS,
 	decideFuelClaim,
+	decideFuelLadder,
 	decideNoFuelClaimGate,
 	decidePrivateFuelClaim,
+	decideStandaloneFuelRecovery,
 	isPrivateFuelInsufficiency,
+	RECEIPT_RECORD_MISMATCH_MSG,
 } from "@/lib/fuel-claim-state"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import {
@@ -80,6 +85,7 @@ import { useBridgeWallet } from "./useBridgeWallet"
 import { ERC20_ABI } from "./useL1Usdc"
 import { useL1Wallet } from "./useL1Wallet"
 import { readBalance } from "./useTokenBalance"
+import { withOperation } from "./useOpsInFlight"
 
 // Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
 const log = (...args: unknown[]) => console.log("[bridge:deposit]", ...args)
@@ -222,8 +228,32 @@ export async function claimFuelStandalone(id: string): Promise<void> {
 	const aztec = bridgeWallet.wallet.value
 	if (!aztec) throw new Error("Connect your Aztec wallet first.")
 	const rec = useBridgeJournal().records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
-	if (!rec?.fuel?.received || !rec.fuel.leafIndex) throw new Error("This bridge has no fuel to claim.")
-	await sendStandaloneFjClaim(aztec, AztecAddress.fromStringUnsafe(rec.recipient), rec.fuel, id)
+	const fuel = rec?.fuel
+	if (!rec || !fuel?.received || !fuel.leafIndex) throw new Error("This bridge has no fuel to claim.")
+	// Same source as the card's affordance, so the button and this guard can never disagree. The
+	// ladder below is public + sponsored, which L11 forbids for private records — and their FJ is
+	// bound to the PrivateFPC, so it could not match one anyway.
+	if (
+		decideStandaloneFuelRecovery({
+			isPrivate: rec.isPrivate,
+			isFeeJuiceAsset: assetKindOf(rec) === "fee-juice",
+			schema: rec.schema,
+			completedAt: rec.completedAt,
+			fuel,
+		}) !== "offer"
+	) {
+		throw new Error("Private gas is claimed as part of the private bridge; standalone recovery is unavailable.")
+	}
+	// Post-impl audit HIGH-1/HIGH-2: the claim acts for rec.recipient — refuse under a different
+	// (or unknown — fail-closed) active account, and run the wallet send inside a tracked
+	// operation span.
+	const active = bridgeWallet.selectedAccount.value
+	if (!active || active.toLowerCase() !== rec.recipient.toLowerCase()) {
+		throw new Error(
+			`This gas claim belongs to ${rec.recipient.slice(0, 6)}…${rec.recipient.slice(-4)}. Switch to that account to claim.`,
+		)
+	}
+	await withOperation(() => sendStandaloneFjClaim(aztec, AztecAddress.fromStringUnsafe(rec.recipient), fuel, id))
 }
 
 /** Read the account's PUBLIC Fee Juice balance — the cold-account detector for no-fuel claims. Uses the
@@ -328,6 +358,16 @@ export function ensureDepositJournalDeps(): void {
 				})
 				return "recovered"
 			}
+			// A schema-2 record's deposit went through the router, so its receipt MUST carry
+			// BridgeWithFuel. Falling back to the plain-portal event here would report "recovered"
+			// while leaving the fuel fields absent forever — re-probed on every private retry, and
+			// silently continued past on public ones. Only fail closed when we actually came looking
+			// for fuel data: a schema-2 record that already has it is just recovering its token leaf.
+			if (rec.schema === 2 && (!rec.fuel?.received || !rec.fuel?.leafIndex)) {
+				throw new Error(
+					`This bridge's Ethereum ${RECEIPT_RECORD_MISMATCH_MSG} - its gas details can't be recovered from the chain. Restore it from its backup file.`,
+				)
+			}
 			const sent = parseEventLogs({ abi: InboxAbi, eventName: "MessageSent", logs: receipt.logs })
 			const event = sent[0] as { args?: { index?: bigint } } | undefined
 			if (event?.args?.index === undefined) {
@@ -391,6 +431,21 @@ export function ensureDepositJournalDeps(): void {
 			// PRIVATE fuel (Option A — codex 019ec69a): a fully SEPARATE path. The fee is ALWAYS the
 			// Wonderland PrivateFPC method (feePayer=FPC); recovery retries ONLY that method. It NEVER
 			// touches the public sponsored/fjwc/standalone ladder below — the L11 privacy invariant.
+			// L11 structural fence: a private FUELED record reaches the private ladder or stops here. It
+			// must never fall through to the public/sponsored ladder below — that claims the FJ in a
+			// publicly-visible tx and deanonymizes the bridge. Incomplete metadata (legacy, partially
+			// restored, tampered) is exactly the fall-through that used to happen silently.
+			if (decideFuelLadder({ isPrivate: rec.isPrivate, schema: rec.schema, fuel }) === "private-incomplete") {
+				// Only advertise a retry where one can actually do something: the engine's receipt
+				// rehydration needs a depositTxHash, and only the event-derived fields come back that
+				// way. The client-random salt exists nowhere but a backup file.
+				const retryable = !!fuel?.bridgeSecretSalt && !!rec.depositTxHash
+				return stop(
+					retryable
+						? "This private bridge's gas details couldn't be read from Ethereum yet - retry in a minute. The public gas recovery is deliberately unavailable for private bridges."
+						: "This private bridge is missing the data needed to claim its gas privately (an older or partially restored record). Only its backup file can restore that - the public gas recovery is deliberately unavailable for private bridges.",
+				)
+			}
 			if (rec.isPrivate && fuel?.received && fuel.leafIndex && fuel.bridgeSecretSalt) {
 				const fb = fuel
 				const fuelReceived = BigInt(fuel.received)
@@ -575,7 +630,7 @@ export function ensureDepositJournalDeps(): void {
 					if (standaloneFj && fuel) {
 						// Best-effort inline standalone claim; a FAILURE leaves standaloneClaimed unset, so
 						// the card surfaces "CLAIM YOUR GAS" once the record completes (no silent strand).
-						void sendStandaloneFjClaim(aztec, recipientAddr, fuel, rec.id).catch((e) =>
+						void withOperation(() => sendStandaloneFjClaim(aztec, recipientAddr, fuel, rec.id)).catch((e) =>
 							log("standalone FJ claim failed (recoverable via CLAIM YOUR GAS):", e instanceof Error ? e.message : String(e)),
 						)
 					}
@@ -851,7 +906,7 @@ export function useDepositFlow() {
 
 				setRecordStep(id, "signing", "sign the bridge intent in your Ethereum wallet - one signature covers swap + deposit")
 				const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
-				const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800)
+				const deadline = BigInt(Math.floor(Date.now() / 1000)) + PERMIT_DEADLINE_SECONDS
 				const witness: BridgeWitness = {
 					tokenPortal: L1_PORTAL,
 					bridgeToken: L1_USDC,
@@ -862,7 +917,7 @@ export function useDepositFlow() {
 					aztecRecipient: (isPrivate ? `0x${"0".repeat(64)}` : recipient) as `0x${string}`,
 					// PRIVATE fuel lands at the PrivateFPC (claimer-bound by the secret); PUBLIC fuel at the user.
 					// A bug here either leaks (user addr on L1) or strands (FJ to a non-FPC) — the headline invariant.
-					fuelRecipient: (isPrivate ? PRIVATE_FPC_ADDRESS : recipient) as `0x${string}`,
+					fuelRecipient: fuelRecipientFor(isPrivate, recipient),
 					tokenSecretHash: id as `0x${string}`,
 					fuelSecretHash: fuelPre.secretHashHex as `0x${string}`,
 					minFuelOutput: fuelPre.minOutput,
@@ -986,7 +1041,7 @@ export function useDepositFlow() {
 
 			setRecordStep(id, "signing", "sign the bridge intent in your Ethereum wallet - one signature")
 			const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
-			const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800)
+			const deadline = BigInt(Math.floor(Date.now() / 1000)) + PERMIT_DEADLINE_SECONDS
 			const bridgeWitness: BridgeWitness = {
 				tokenPortal: L1_PORTAL,
 				bridgeToken: L1_USDC,
@@ -1111,5 +1166,7 @@ export function useDepositFlow() {
 		{ immediate: true },
 	)
 
-	return { busy, error, deposit, journal }
+	// withOperation: a deposit is an account-sensitive prompt/send span — while it runs, account
+	// switching is blocked (useOpsInFlight, plan D-8/D-19).
+	return { busy, error, deposit: (...args: Parameters<typeof deposit>) => withOperation(() => deposit(...args)), journal }
 }

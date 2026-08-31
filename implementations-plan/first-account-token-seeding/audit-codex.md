@@ -1,0 +1,197 @@
+# audit-codex — first-account-token-seeding
+
+**Session:** `01a049c6-3770-72d1-81ad-3cc5948c0a6e` · model `gpt-5.6-sol` · reasoning `xhigh` · 2026-08-28
+
+**Verdicts:** round 1 `conditional approve` (5 conditions) → round 2 `conditional approve` (5 more) → round 3 **`approve`**. All ten conditions adopted; see the two adopted-vs-rejected tables in `plan.md`.
+
+---
+
+## Round 1 — plan audit
+
+The production trigger is sound, but the plan is not safe enough as written. I found no Critical issue, but three High conditions around the e2e seam and CI isolation.
+
+## 1. Adversarial / security findings
+
+- **High — The single-flag “inert without the key” claim conflicts with replacement semantics.** The plan simultaneously says an accidentally armed source is inert without storage data, that the e2e source replaces production seeds, and that invalid data becomes an empty list ([plan.md:60](implementations-plan/first-account-token-seeding/plan.md:60), [plan.md:62](implementations-plan/first-account-token-seeding/plan.md:62), [plan.md:145](implementations-plan/first-account-token-seeding/plan.md:145)). Those properties cannot all hold:
+
+  - Absent key → production seeds means the other ~85 e2e profiles still contact public Testnet.
+  - Absent key → empty list means an accidentally armed production build silently disables default seeding.
+
+  Use fail-closed double opt-in, mirroring `E2E_PROVERLESS`, and define absent/garbage as empty only in an armed e2e build ([config.ts:29](apps/extension/src/e2e/config.ts:29), [config.ts:32](apps/extension/src/e2e/config.ts:32)).
+
+- **High — The seam does weaken the pins as a trust anchor, even though it does not bypass their code paths.** Today, `expectedClassId` and `expectedSymbol` are independently pinned product data ([default-tokens.ts:29](apps/extension/src/wallet/services/token/default-tokens.ts:29)). The class ID is checked before registration, and observed metadata is checked against the seed afterward ([service.ts:463](apps/extension/src/wallet/services/token/service.ts:463), [service.ts:468](apps/extension/src/wallet/services/token/service.ts:468), [seeder.ts:297](apps/extension/src/wallet/services/token/seeder.ts:297), [seeder.ts:315](apps/extension/src/wallet/services/token/seeder.ts:315)). In the proposed armed build, however, the storage writer supplies both “expected” values. That proves self-consistency with the chosen contract, not product identity.
+
+  This is acceptable only because the implementation is absent from production. Limit the e2e payload to exactly one `chainId === 0` seed, reject extra entries, validate canonical address/class-ID shapes, and preferably hardcode the only stable field, `expectedSymbol: "TST"`, rather than accepting it from storage.
+
+- **High — The DCE shape is viable, but the enforcement described is incomplete.** Vite statically replaces direct `import.meta.env.VITE_*` references specifically to enable tree-shaking ([Vite documentation](https://vite.dev/guide/env-and-mode.html)). The existing normal-import-plus-static-condition pattern is appropriate; the repository explicitly rejected dynamic imports because Rollup emitted a shipped chunk ([runtime.ts:349](apps/extension/src/wallet/runtime.ts:349)). The production workflow also scans both Chrome and Firefox bundles ([\_build-extension.yml:90](.github/workflows/_build-extension.yml:90)), and release publication goes through that workflow ([release.yml:226](.github/workflows/release.yml:226)).
+
+  But:
+
+  - The proposed module contains the production default as well as the Chrome implementation, so the whole module cannot be DCE’d as claimed; only unused exports can.
+  - A standalone exported stamp will itself be tree-shaken unless pinned as live data. The existing proverless stamp has an explicit live assignment for exactly that reason ([config.ts:43](apps/extension/src/e2e/config.ts:43), [offscreen/index.ts:84](apps/extension/src/offscreen/index.ts:84)).
+  - Any Vite build can be armed by environment or `.env`; “e2e build” is not an authority boundary.
+
+  Require both a pinned stamp and the functional key literal in the negative grep, positively grep them in e2e builds, and explicitly reject both token-seed env flags in `_build-extension.yml` before building, as already done for the price-map flag ([\_build-extension.yml:54](.github/workflows/_build-extension.yml:54)).
+
+- **High — The proposed flag coverage does not isolate source-built smoke.** The change map arms the seam only in `agent.sh` ([plan.md:75](implementations-plan/first-account-token-seeding/plan.md:75)). PR smoke also builds a wallet with Testnet active ([\_smoke-e2e.yml:62](.github/workflows/_smoke-e2e.yml:62), [\_smoke-e2e.yml:72](.github/workflows/_smoke-e2e.yml:72)). After this fix, each fresh smoke profile can therefore attempt the real Testnet USDC seed against the public dRPC endpoint ([network/service.ts:108](apps/extension/src/wallet/services/network/service.ts:108), [default-tokens.ts:60](apps/extension/src/wallet/services/token/default-tokens.ts:60)). Arm empty replacement, with a positive propagation check, for source-built smoke as well. Do not arm it for artifact smoke; release/nightly deliberately load the production artifact ([release.yml:246](.github/workflows/release.yml:246)).
+
+- **Low — The session key is not directly dApp- or content-script-writable under the current architecture.** `storage.session` is not exposed to content scripts by default, and this repository never calls `setAccessLevel`; offscreen documents only receive `chrome.runtime`, not `chrome.storage` ([Chrome storage documentation](https://developer.chrome.com/docs/extensions/reference/api/storage), [Chrome offscreen documentation](https://developer.chrome.com/docs/extensions/reference/api/offscreen)). The manifest’s content script runs broadly, but exposes no seed resource or external page ([manifest.config.ts:31](apps/extension/manifest/manifest.config.ts:31), [manifest.config.ts:55](apps/extension/manifest/manifest.config.ts:55)). The dApp registry has no account-creation or seed method and rejects unknown methods ([method-descriptors.ts:171](packages/wallet-bridge/src/method-descriptors.ts:171), [method-descriptors.ts:379](packages/wallet-bridge/src/method-descriptors.ts:379)). A trusted popup page can write session storage—the existing proof-gate fixture demonstrates that ([proof-gate.ts:17](apps/extension/tests/e2e/fixtures/proof-gate.ts:17)). Therefore a compromised trusted extension page can arm an accidentally shipped seam, which reinforces why bundle absence is the real control.
+
+- **Low — The unguarded account subscription does not create unbounded production traffic.** Production account events arise after durable `createAccount`/`ensureDefaultAccount` writes or individual account import writes ([account/service.ts:181](apps/extension/src/wallet/services/account/service.ts:181), [account/service.ts:255](apps/extension/src/wallet/services/account/service.ts:255), [account/service.ts:481](apps/extension/src/wallet/services/account/service.ts:481)). The static list is finite, success/tombstone markers short-circuit later runs, and failures cap at three attempts per seed/version ([seeder.ts:216](apps/extension/src/wallet/services/token/seeder.ts:216), [seeder.ts:238](apps/extension/src/wallet/services/token/seeder.ts:238)). Sequential events can cause more than two passes, but not unlimited previews against the static list. An armed, attacker-controlled rotating list would evade that global bound, which is why the injected list needs a one-entry/chain-0 restriction.
+
+- **Medium — The MV3 attempt-burn hazard is real.** Event dispatch does not await subscriber promises ([event-handler.ts:47](packages/wallet-core/src/utils/event-handler.ts:47)), and the account RPC’s keepalive ends once the account method returns, not when the seeder finishes ([base-service.ts:109](packages/extension-messaging/src/core/base-service.ts:109), [base-service.ts:129](packages/extension-messaging/src/core/base-service.ts:129)). The attempt is deliberately persisted before the slow preview ([seeder.ts:238](apps/extension/src/wallet/services/token/seeder.ts:238)). Three service-worker deaths can therefore cap a real seed for the current extension version.
+
+## 2. Assumptions audit
+
+### Facts
+
+- **Medium — The restore-emission fact is wrong.** `AccountService.restore()` writes restored rows but emits no `onAccountAdded` event ([account/service.ts:638](apps/extension/src/wallet/services/account/service.ts:638), [account/service.ts:689](apps/extension/src/wallet/services/account/service.ts:689)). Line 487 is `importAccount`, not full-backup restore ([account/service.ts:487](apps/extension/src/wallet/services/account/service.ts:487)). Full-backup correctness comes from late profile activation after account restoration, not event coalescing ([useFullBackupImport.ts:900](apps/extension/src/composables/useFullBackupImport.ts:900), [useFullBackupImport.ts:923](apps/extension/src/composables/useFullBackupImport.ts:923)). Correct [plan.md:54](implementations-plan/first-account-token-seeding/plan.md:54) and [recon.md:10](implementations-plan/first-account-token-seeding/recon.md:10).
+
+- **Low — Fact 2’s outcome is right, its wording is not.** Zero accounts does not “abort the pass”; the seeder still reads marker state and iterates every matching seed, hitting `continue` per entry ([seeder.ts:210](apps/extension/src/wallet/services/token/seeder.ts:210), [seeder.ts:213](apps/extension/src/wallet/services/token/seeder.ts:213), [seeder.ts:234](apps/extension/src/wallet/services/token/seeder.ts:234)). It correctly consumes no attempt.
+
+- **Low — Several exact citations are stale.** The first-account emit is at `account/service.ts:256`, network emission at `network/service.ts:466`, and token-balance backfill at `token-balance/service.ts:284-300` ([account/service.ts:255](apps/extension/src/wallet/services/account/service.ts:255), [network/service.ts:455](apps/extension/src/wallet/services/network/service.ts:455), [token-balance/service.ts:284](apps/extension/src/wallet/services/token-balance/service.ts:284)). CI’s wholesale extension paths are at `pr-network-e2e.yml:55` and `pr-smoke-e2e.yml:50`, not the cited checkout lines ([pr-network-e2e.yml:49](.github/workflows/pr-network-e2e.yml:49), [pr-smoke-e2e.yml:43](.github/workflows/pr-smoke-e2e.yml:43)).
+
+- **Low — The remaining material Facts check out.** The two current subscriptions are exactly at `TokenService.init()` ([service.ts:115](apps/extension/src/wallet/services/token/service.ts:115)); bootstrap orders networks before accounts ([useProfileBootstrap.ts:119](apps/extension/src/composables/useProfileBootstrap.ts:119)); `getOrInitNetworks` does not emit while `setActiveNetwork` does ([network/service.ts:259](apps/extension/src/wallet/services/network/service.ts:259), [network/service.ts:466](apps/extension/src/wallet/services/network/service.ts:466)); and silent restore is explicitly non-emitting ([session-manager.ts:493](apps/extension/src/wallet/services/profile/session-manager.ts:493)).
+
+### Inferences
+
+- **Medium — Inference 1 is unsafe as written.** The scope/epoch argument is sound, but the restore-burst premise is false, and “at most two passes” only applies to triggers overlapping one in-flight pass. A later sequential event starts another pass ([seeder.ts:103](apps/extension/src/wallet/services/token/seeder.ts:103)).
+
+- **High — Inference 2 ignores source-built smoke and leaves absent-key behavior undefined.** Replacement is the right network-suite policy, but it preserves existing-suite behavior only if every source-built e2e wallet is armed consistently and absent data means empty. The current file map does not cover `_smoke-e2e.yml` ([plan.md:68](implementations-plan/first-account-token-seeding/plan.md:68)).
+
+- **Low — Inferences 3 and 5 are now facts.** The existing fixture already fetches a deployed instance through `node.getContract`, exposing `currentContractClassId` ([aztec.ts:236](apps/extension/tests/e2e/fixtures/aztec.ts:236)). Existing e2e gates already write `chrome.storage.session` from an extension page ([proof-gate.ts:21](apps/extension/tests/e2e/fixtures/proof-gate.ts:21)).
+
+- **Medium — Inference 4 is correct for a live worker, incomplete for crash recovery.** `onTokenAdded` gets the durable token, generation-checks it, obtains every account, persists each balance row, and emits `onTokenBalanceAdded` ([token-balance/service.ts:284](apps/extension/src/wallet/services/token-balance/service.ts:284), [token-balance/service.ts:295](apps/extension/src/wallet/services/token-balance/service.ts:295), [token-balance/service.ts:215](apps/extension/src/wallet/services/token-balance/service.ts:215)). On service-worker restart, initialization hydrates only the token map; it does not reconcile missing balance rows ([token-balance/service.ts:127](apps/extension/src/wallet/services/token-balance/service.ts:127)). That is an existing durability hole, although a `TokensView.onTokenAdded` listener would not repair it.
+
+### Asks
+
+- **High — All four existing Asks need explicit resolutions, and two additional decisions must be surfaced:** absent-key semantics and whether source-built smoke is armed. Neither can remain an implementation detail because they determine public RPC traffic and accidental-production behavior.
+
+## 3. Architecture and implementation critique
+
+- **Low — The production trigger belongs in `TokenService`.** `onAccountAdded` fires after the account is stored ([account/service.ts:255](apps/extension/src/wallet/services/account/service.ts:255)), and the seeder already owns active-scope and purge fencing ([seeder.ts:185](apps/extension/src/wallet/services/token/seeder.ts:185)). Moving this to Vue would leave the background invariant dependent on an open UI and would duplicate the network-switch path ([network-switch.ts:57](apps/extension/src/popup/network-switch.ts:57)).
+
+- **Low — Resolving seeds asynchronously inside `doRun()` is justified if the e2e test remains.** The bundle exists before the sandbox contract is deployed ([global-setup.ts:231](apps/extension/tests/e2e/global-setup.ts:231), [global-setup.ts:639](apps/extension/tests/e2e/global-setup.ts:639)), while the test must inject after deployment and before the Local-network trigger. A construction-time array cannot express that cleanly.
+
+- **Medium — `TokenSeedSource` is more abstraction than needed.** `TokenSeederDeps` already is the narrow port ([seeder.ts:45](apps/extension/src/wallet/services/token/seeder.ts:45)). I would use a `getSeeds(): Promise<readonly DefaultTokenSeed[]>` function and keep the production default in the token domain. Put only the Chrome-backed reader in `src/e2e/chrome-storage-token-seeds.ts`. That matches the repository’s actual split between a production interface/default and a separate Chrome implementation ([proof-gate.ts:25](apps/extension/src/e2e/proof-gate.ts:25), [chrome-storage-proof-gate.ts:45](apps/extension/src/e2e/chrome-storage-proof-gate.ts:45)) and makes the DCE boundary easier to audit.
+
+- **Medium — Composition coverage alone is insufficient.** The composition test can prove only that an account event calls `TokenSeeder.run()`; the current test already uses a spy for the other triggers ([service.composition.test.ts:344](apps/extension/src/wallet/services/token/service.composition.test.ts:344)). The normative rules explicitly send `fetchTokenMetadata`/simulation behavior to network e2e ([COMPOSITION-TESTS.md:19](apps/extension/tests/COMPOSITION-TESTS.md:19), [COMPOSITION-TESTS.md:56](apps/extension/tests/COMPOSITION-TESTS.md:56)). The proposed pre-fix-red check is therefore valuable.
+
+- **Medium — “Low” review and “no hardening” understate the seam.** The plan calls the seam the only new attack surface, then says no new trust boundary warrants hardening ([plan.md:121](implementations-plan/first-account-token-seeding/plan.md:121), [plan.md:175](implementations-plan/first-account-token-seeding/plan.md:175), [plan.md:191](implementations-plan/first-account-token-seeding/plan.md:191)). The production diff is small, but a runtime-controlled zero-interaction seed source plus publication guards merits at least a medium, security-focused review.
+
+## 4. Definite Ask recommendations
+
+- **a — Medium: Keep one network e2e and the seam.** The reversal of the 2026-07-21 “no seeding network-e2e” decision is justified. That decision was explicit but contextual ([token-prices/plan.md:168](implementations-plan/token-prices/plan.md:168)); the newly established regression is precisely a lifecycle failure hidden by a unit test that manually calls `run()` a second time ([seeder.test.ts:111](apps/extension/src/wallet/services/token/seeder.test.ts:111)). Composition proves wiring, not real instance fetch, registration, simulation, balance creation, or browser event timing. A public-network smoke assertion would replace a deterministic seam with an external dependency.
+
+- **b — High: Replace, do not augment.** Augmentation would make every Testnet-first e2e profile attempt the live Testnet seed and potentially add USDC to unrelated tests ([agent.sh:66](apps/extension/scripts/e2e/agent.sh:66), [default-tokens.ts:60](apps/extension/src/wallet/services/token/default-tokens.ts:60)). The dedicated test’s purpose is the account-trigger lifecycle, while production pin semantics remain covered by the pin/mismatch suites ([seeder.test.ts:145](apps/extension/src/wallet/services/token/seeder.test.ts:145), [service.composition.test.ts:216](apps/extension/src/wallet/services/token/service.composition.test.ts:216)). Update recon’s contradictory “must be additive” statement ([recon.md:52](implementations-plan/first-account-token-seeding/recon.md:52)).
+
+- **c — Medium: Explicitly defer the attempt-burn change.** Do not merely move the attempt write after preview; that would remove the deliberate crash-loop bound pinned by tests ([seeder.test.ts:199](apps/extension/src/wallet/services/token/seeder.test.ts:199), [seeder.test.ts:215](apps/extension/src/wallet/services/token/seeder.test.ts:215)). A correct fix needs a durable in-progress lease/recovery policy that distinguishes routine MV3 suspension from repeatedly crashing hostile work. Track that separately and state the residual field risk in this plan.
+
+- **d — Medium: Dropping the `TokensView.onTokenAdded` change is correct.** On the successful live path, token persistence precedes `onTokenAdded`; balance persistence precedes `onTokenBalanceAdded`; and the view subscribes to that balance event ([service.ts:288](apps/extension/src/wallet/services/token/service.ts:288), [token-balance/service.ts:228](apps/extension/src/wallet/services/token-balance/service.ts:228), [TokensView.vue:176](apps/extension/src/popup/components/modules/general/TokensView.vue:176)). With the popup closed, the durable balance row is read on the next mount ([TokensView.vue:305](apps/extension/src/popup/components/modules/general/TokensView.vue:305), [TokensView.vue:359](apps/extension/src/popup/components/modules/general/TokensView.vue:359)). The genuine hole is service-worker death before balance backfill; a view listener cannot help while the popup is closed and risks creating a second presentation path. Record balance-row reconciliation as a separate follow-up.
+
+conditional approve (with conditions: double-opt-in and bundle-pin the e2e source; restrict it to one validated chain-0 seed; arm empty replacement in source-built smoke but never artifact/release builds; correct the restore/coalescing claims; explicitly defer the MV3 attempt-burn and balance-reconciliation hazards)
+---
+
+## Round 2 — condition check
+
+**Verdict:** `conditional approve` — conditions 2, 4, 5 discharged; 1 and 3 partially. Five new conditions, all adopted.
+
+The core design is sound, but two enforcement gaps and the artifact-smoke assumption remain. Conditions 2, 4, and 5 are discharged; conditions 1 and 3 are only partially discharged.
+
+## Findings
+
+- **High — Phase 4 does not run the smoke configuration it claims to validate.** The gate says `bun run audit:vue && bun run test:e2e` proves source-built and artifact-smoke behavior ([plan.md:195](implementations-plan/first-account-token-seeding/plan.md:195)). But `audit:vue` ends with the ordinary Chrome-only build, with none of the smoke flags ([package.json:35](package.json:35), [package.json:13](package.json:13)). The following smoke run is therefore neither the armed-empty source build nor an artifact-mode run. Worse, it should fail the existing fixture-arming contract because an unarmed, non-artifact invocation is expressly rejected ([backup-migration.test.ts:30](apps/extension/tests/e2e/backup-migration.test.ts:30)). Phase 4 needs explicit source-smoke build/run commands with the migration and token-seed flags, plus a distinct unarmed artifact-mode smoke run if Inference 3 is to be called verified.
+
+- **Medium — Phase 2’s written gate does not enforce the promised two-browser publication check.** `bun run build` builds Chrome only ([package.json:13](package.json:13)), and the gate greps only `dist/chrome` ([plan.md:178](implementations-plan/first-account-token-seeding/plan.md:178)). That does not produce the Chrome-and-Firefox assertion promised at [plan.md:66](implementations-plan/first-account-token-seeding/plan.md:66). The publication workflow will separately inspect whichever target it built ([\_build-extension.yml:70](.github/workflows/_build-extension.yml:70), [\_build-extension.yml:90](.github/workflows/_build-extension.yml:90)), so shipping protection is planned correctly, but the phase-completion gate is incomplete. Build both targets and negatively grep both fresh outputs.
+
+- **Medium — The clean/armed assertion pair is correct, but source-smoke propagation remains unpinned.** An armed build requiring both the stamp and storage-key literals will fail if the stamp assignment is tree-shaken; the key independently proves the functional reader module survived. The clean build then proves their production absence, while Phase 3 proves actual behavior. That is the right three-part test. However, `_smoke-e2e.yml` currently has no equivalent positive assertion after its conditional source build ([\_smoke-e2e.yml:62](.github/workflows/_smoke-e2e.yml:62)). If either new YAML environment name is misspelled or removed, smoke silently reverts to the live seed list. Add a source-build-only grep for both literals there. Also add the token pair’s four fail-closed cases to the existing config test; that test currently pins only the proverless pair ([config.test.ts:22](apps/extension/src/e2e/config.test.ts:22)), and `config.test.ts` is missing from the file-change map and Phase 2 steps.
+
+- **Medium — Artifact smoke is Alpha, not Testnet, and it has an observable race.** Release and nightly download an unflagged production Chrome artifact ([release.yml:226](.github/workflows/release.yml:226), [release.yml:246](.github/workflows/release.yml:246)). In such a build Alpha is active ([network/service.ts:96](apps/extension/src/wallet/services/network/service.ts:96), [network/service.ts:98](apps/extension/src/wallet/services/network/service.ts:98)), so registration attempts **two Mainnet seeds**, not one Testnet seed ([default-tokens.ts:38](apps/extension/src/wallet/services/token/default-tokens.ts:38)). The suite already skips one artifact test because Alpha connectivity stalls it ([backup-roundtrip.test.ts:24](apps/extension/tests/e2e/backup-roundtrip.test.ts:24)). It is also incorrect that no smoke assertion can notice successful seeding: `fiat-display.test.ts` requires all token fiat rows to be absent ([fiat-display.test.ts:12](apps/extension/tests/e2e/fiat-display.test.ts:12)), while both Mainnet seeds are price-mapped ([price-map.ts:55](apps/extension/src/wallet/services/price/price-map.ts:55)) and a successful quote renders `token-fiat` ([TokenCard.vue:97](apps/extension/src/popup/components/modules/general/TokenCard.vue:97)). That makes artifact smoke dependent on whether two external services happen to respond before the assertion. Do not arm the production artifact; instead, conditionally block `lb.drpc.live` in the Puppeteer launch arguments for `NULO_E2E_ARTIFACT_RUN=1` ([extension.ts:45](apps/extension/tests/e2e/fixtures/extension.ts:45)). This preserves the artifact bytes, makes the failure-tolerant path hermetic, and leaves successful end-to-end seeding to the sandbox test.
+
+- **Low — `getSeeds()` is structurally safe, but the stated production default is not type-correct.** The plan declares a Promise-returning port and then gives `() => DEFAULT_TOKEN_SEEDS` as its default ([plan.md:60](implementations-plan/first-account-token-seeding/plan.md:60)). Spell it `async () => DEFAULT_TOKEN_SEEDS`. Resolve it exactly once after the active-network null guard and before the chain filter—the position currently occupied by the static list read ([seeder.ts:185](apps/extension/src/wallet/services/token/seeder.ts:185)). No additional epoch guard is required: purges increment the epoch ([seeder.ts:163](apps/extension/src/wallet/services/token/seeder.ts:163)), and every possible write after the await is already fenced ([seeder.ts:228](apps/extension/src/wallet/services/token/seeder.ts:228), [seeder.ts:259](apps/extension/src/wallet/services/token/seeder.ts:259)). A purge during `getSeeds()` can cause stale reads but cannot cause a stale write.
+
+## Conditions status
+
+- Double opt-in and bundle pinning: **partially discharged**. The construction is sound; Firefox phase validation, config tests, and source-smoke propagation are missing.
+- One validated chain-0 seed: **discharged**.
+- Source smoke armed, artifact unarmed: **wiring discharged; validation and artifact residual not discharged**.
+- Corrected restore/coalescing claims: **discharged**.
+- Explicit hazard deferrals: **discharged**.
+
+Arming source smoke with an absent key should not break the current top-level suite. Those specs are exactly the files selected by the smoke config ([vitest.e2e.config.ts:10](apps/extension/vitest.e2e.config.ts:10)); no test expects a default token, synthetic backup state explicitly uses `token: []` ([passkey-backup.test.ts:176](apps/extension/tests/e2e/passkey-backup.test.ts:176)), and session-restart tests query only `nulo:liveness` rather than asserting the whole session area ([sw-restart-network.test.ts:48](apps/extension/tests/e2e/sw-restart-network.test.ts:48)). The empty provider returns before marker or chain work, preserving that behavior.
+
+conditional approve (with conditions: make Phase 2 validate clean Chrome and Firefox outputs and pin armed source-smoke propagation; extend config tests for the new double opt-in; replace Phase 4 with explicit armed-source and unarmed-artifact smoke runs; correct Alpha/two-seed artifact assumptions and hermeticize artifact-mode public RPC traffic; make the production getSeeds default async)
+---
+
+## Round 3 — discharge check
+
+**Verdict:** `approve`.
+
+All five round-2 conditions are genuinely discharged. I found no remaining material defect.
+
+- The `lb.drpc.live` block is at the right layer: Puppeteer launch arguments in [extension.ts](apps/extension/tests/e2e/fixtures/extension.ts:45) cover extension pages, the service worker, and offscreen contexts. Both Alpha and Testnet defaults use that exact hostname in [network/service.ts](apps/extension/src/wallet/services/network/service.ts:98), with no alternate RPC host or fallback. Blocking CoinGecko or other hosts would be over-broad: those requests cannot independently create a seeded-token row. The precise current Chromium rule should be `--host-resolver-rules=MAP lb.drpc.live ^NOTFOUND`; `^NOTFOUND` is the current failure sentinel in [Chromium’s resolver implementation](https://chromium.googlesource.com/chromium/src/%2B/HEAD/net/dns/mapped_host_resolver.h).
+
+- The source-smoke run must leave `NULO_E2E_ARTIFACT_RUN` unset or empty, and the artifact-mode run must leave `NULO_E2E_MIGRATION_FIXTURE` unset or empty. The Phase 4 commands as written do exactly that: they list only the appropriate runner variable for each mode. No additional flag is required. The implementation should use command-scoped environment assignments so flags cannot leak between the two runs. `EXTENSION_PATH` should be absolute—or `dist/chrome` relative to `apps/extension`—because [global-setup-smoke.ts](apps/extension/tests/e2e/global-setup-smoke.ts:8) resolves it from the runner’s working directory.
+
+- The six Phase 2 assertions are sufficient. Clean Chrome and Firefox negatives cover both publication targets; the armed Chrome positives prove both the live stamp and reader survive tree-shaking. The four configuration cases establish fail-closed double opt-in, and Phase 3 supplies runtime functional coverage. An armed Firefox build would duplicate the DCE-positive assertion without closing a distinct release risk.
+
+- The `getSeeds()` placement is correct. Resolving once after the active-network null guard and before chain filtering avoids unnecessary reads while preserving the existing purge-epoch fences around all consequential writes in [seeder.ts](apps/extension/src/wallet/services/token/seeder.ts:185). A stale read can waste work, but it cannot commit stale state.
+
+- The artifact mitigation now matches the test’s stated premise: DNS failure prevents contract preview and therefore token persistence, while leaving the artifact bytes unchanged. The corrected smoke matrix also actually exercises both modes rather than merely mentioning them.
+
+No new breakage was introduced by this revision. The plan is implementable as written.
+
+approve
+---
+
+## Post-implementation round 1 (session `01a04a45-fd5f-73f3-be25-1249ed545ee4`)
+
+**Verdict:** `approve` — 3 Low findings, all adopted.
+
+## Findings
+
+1. **Low — production seed-list wiring lacks a direct assertion.** [service.ts:113](apps/extension/src/wallet/services/token/service.ts:113)
+
+   The seeder units inject `getSeeds`, the network e2e uses the armed storage reader, source smoke uses the empty reader, and the wiring test spies on `run()`. All would still pass if the production fallback became `async () => []`. Add one narrow composition test proving an unarmed `TokenService` consumes `DEFAULT_TOKEN_SEEDS`.
+
+2. **Low — the account-trigger comment overstates the fence.** [service.ts:149](apps/extension/src/wallet/services/token/service.ts:149)
+
+   `doRun()` does not literally re-check before every internal journal/token write performed by `addSeededToken`; purge safety also depends on marker-lock ordering and subsequent cleanup. Replace that claim with the exact invariant: active context is checked before commit, and the epoch plus marker lock orders commits against purges.
+
+3. **Low — several new comments are substantially longer or more repetitive than their permanent value warrants.**
+
+   - [extension.ts:62](apps/extension/tests/e2e/fixtures/extension.ts:62) embeds the experiment history and named failing specs; retain only why artifact mode blocks this host and why connection refusal is required.
+   - [default-token-seeding.test.ts:1](apps/extension/tests/e2e/network/default-token-seeding.test.ts:1) repeats the same ordering again at lines 34–41.
+   - [token-seeds.ts:4](apps/extension/tests/e2e/fixtures/token-seeds.ts:4) duplicates the reader, test, and README; the write-before-trigger and fixed-symbol constraints are the useful parts.
+   - [aztec.ts:166](apps/extension/tests/e2e/fixtures/aztec.ts:166) merely restates the helper.
+   - [_build-extension.yml:54](.github/workflows/_build-extension.yml:54) references an implementation plan and the step remains CoinGecko-named despite now guarding token-seed flags too.
+
+## Audit conclusions
+
+- The reader cannot reach clean production bundles through the current graph. It is side-effect-free at module scope, instantiated only under the statically folded flag, and both Chrome and Firefox publication artifacts are negatively checked.
+- The stamp is genuinely live-pinned: the `globalThis` assignment at [runtime.ts:407](apps/extension/src/wallet/runtime.ts:407) is an observable side effect. The armed positive greps prove the current Rollup configuration retains it.
+- Every official release/nightly publication path uses `_build-extension.yml`. Raw local Vite builds can intentionally arm the seam, but they are not publication paths and the two supported e2e wrappers positively verify the result.
+- A purge during `getSeeds()` cannot survive as a stale write. The already-present and attempt paths call `guardsHold`; the final commit checks the epoch inside the marker lock. A purge either wins before the commit, or queues after it and removes its output.
+- Sequential account additions can cause additional settled-marker reads, but traffic remains bounded. Imported-account events are safe; backup restore remains silent.
+- Profile deletion is safe for durable token, journal, and marker state: a pre-snapshot commit is included in the deletion snapshot; a later commit is ordered ahead of `TokenService.purgeForProfile`, which fences the seeder, re-purges journals, and removes the token.
+- Repeated MV3 suspension after the attempt marker still can consume the three-attempt budget. That is the explicitly ledgered pre-existing residual; this change neither repairs nor materially broadens it.
+- Hardcoding `"TST"` is limited but real protection: it does not establish product identity when storage controls address and class ID, but it independently catches an incorrect fixture contract or an attempted symbol-pin override.
+- The artifact RPC block is at the correct browser-wide layer, covers both current default-network endpoints via their sole hostname, and does not mask any smoke assertion that promises successful public-RPC connectivity.
+- The composition and network regression tests are not theatre; both genuinely depend on the production subscription. The positive reader test also prevents the fail-empty catch path from making every rejection test falsely green.
+
+approve
+---
+
+## Post-implementation round 2 (re-review of the fixes)
+
+**Verdict:** `approve` — no code or test-correctness regressions; 2 Low comment-accuracy nits, both adopted. Loop converged.
+
+No code or test-correctness regressions found. The identity assertion is the right shape: it directly pins the production composition fallback, while seeder behavior is already tested at its own seam. Driving a real seed pass would add PXE-fixture complexity without strengthening this specific guarantee.
+
+- Low — [fixtures/extension.ts:63](apps/extension/tests/e2e/fixtures/extension.ts:63): “a seed that resolves would render fiat” is no longer exact. A resolved seed creates the token row; rendering fiat additionally requires a usable price quote. Restore that qualification, e.g. “a resolved seed plus a successful price quote could render fiat.”
+
+- Low — [service.composition.test.ts:158](apps/extension/src/wallet/services/token/service.composition.test.ts:158): the suite-level scope comment still says “unlock/network-change hook wiring,” omitting the now-covered account-added hook. “the three seed-trigger hooks” is shorter and current.
+
+The revised account-trigger comment accurately describes the outer lifecycle guard and the epoch check inside the marker-locked commit. The other trims retained their load-bearing constraints, and `git diff --check` is clean.
+
+approve

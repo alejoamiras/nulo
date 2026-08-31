@@ -7,6 +7,7 @@ import {
 	awaitL1Receipt,
 	bridgeWitnessPermitTypedData,
 	ensurePermit2Allowance,
+	PERMIT_DEADLINE_SECONDS,
 	PRIVATE_FPC_ADDRESS,
 	feeJuiceAddress,
 	isSealTrusted,
@@ -21,6 +22,7 @@ import { ref } from "vue"
 import { BRIDGE_PERMIT2, BRIDGE_ROUTER, BRIDGE_SWAP_TARGET, FUEL_ASSET, FUEL_PORTAL } from "@/contracts/bridge-deployments"
 import { ERC20_ABI } from "./useL1Usdc"
 import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
+import { withOperation } from "./useOpsInFlight"
 import {
 	addRecordVerified,
 	cacheSecret,
@@ -208,7 +210,7 @@ export function useFuelFlow() {
 
 			setRecordStep(id, "signing", "sign the Fuel deposit in your Ethereum wallet - one signature")
 			const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
-			const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800)
+			const deadline = BigInt(Math.floor(Date.now() / 1000)) + PERMIT_DEADLINE_SECONDS
 			const fuelWitness: BridgeWitness = {
 				tokenPortal: fuelPortalAddr,
 				bridgeToken: feeAssetAddr,
@@ -307,5 +309,7 @@ export function useFuelFlow() {
 		return id
 	}
 
-	return { busy, error, deposit, journal }
+	// withOperation: an account-sensitive prompt/send span — while it runs, account switching is
+	// blocked (useOpsInFlight, plan D-8/D-19).
+	return { busy, error, deposit: (...args: Parameters<typeof deposit>) => withOperation(() => deposit(...args)), journal }
 }

@@ -51,11 +51,12 @@ jobs:
             console.log('patched extension version to', process.env.OVERRIDE);
           "
 
-      # The CoinGecko demo key is a LOCAL/CI convenience only ("no key ships in
-      # releases", implementations-plan/token-prices). Vite bakes any VITE_* env
-      # into the bundle, so fail FAST if the variable is even set — stronger
-      # than only grepping the artifact afterwards (which we also do below).
-      - name: Assert no CoinGecko API key in the build env
+      # Vite bakes any VITE_* env into the bundle, so fail FAST if one of these
+      # is even set — stronger than only grepping the artifact afterwards (which
+      # we also do below). The CoinGecko key is a local/CI convenience that must
+      # never ship; the e2e flags would ship a wallet that misprices or stops
+      # seeding defaults entirely.
+      - name: Assert no test-only or secret VITE_* flags in the build env
         run: |
           if [ -n "${VITE_COINGECKO_API_KEY:-}" ]; then
             echo "::error::VITE_COINGECKO_API_KEY is set in the build environment — release builds must be keyless" >&2
@@ -65,7 +66,11 @@ jobs:
             echo "::error::VITE_NULO_E2E_PRICE_MAP is set in the build environment — e2e-only price mapping must never arm a release build" >&2
             exit 1
           fi
-          echo "✓ build env carries no CoinGecko key and no e2e price-map flag"
+          if [ -n "${VITE_NULO_E2E_TOKEN_SEEDS:-}" ] || [ -n "${VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM:-}" ]; then
+            echo "::error::VITE_NULO_E2E_TOKEN_SEEDS(_CONFIRM) is set in the build environment — an armed token-seed source REPLACES the default seed list, so a release build carrying it would ship a wallet that never seeds defaults" >&2
+            exit 1
+          fi
+          echo "✓ build env carries no CoinGecko key and no e2e price-map or token-seed flags"
 
       - name: Build Chrome
         if: inputs.target == 'chrome' || inputs.target == 'both'
@@ -92,7 +97,7 @@ jobs:
           fail=0
           for d in apps/extension/dist/chrome apps/extension/dist/firefox; do
             [ -d "$d" ] || continue
-            for marker in "NULO_E2E_PROVERLESS_BUILD_STAMP" "NULO_E2E_PRICE_MAP_BUILD_STAMP" "nulo:e2e:proof-gate" "nulo:e2e:restore-gate" "nulo:e2e:incoming-poll-hold" "nulo:e2e:incoming-poll-status" "SHALLOW_PXE_FAKE_BUNDLE_MARKER" "nulo:e2e:mig-fixture" "nulo:e2e:backup-mig-fixture"; do
+            for marker in "NULO_E2E_PROVERLESS_BUILD_STAMP" "NULO_E2E_PRICE_MAP_BUILD_STAMP" "nulo:e2e:proof-gate" "nulo:e2e:restore-gate" "nulo:e2e:incoming-poll-hold" "nulo:e2e:incoming-poll-status" "SHALLOW_PXE_FAKE_BUNDLE_MARKER" "nulo:e2e:mig-fixture" "nulo:e2e:backup-mig-fixture" "NULO_E2E_TOKEN_SEEDS_BUILD_STAMP" "nulo:e2e:token-seeds"; do
               if grep -rq "$marker" "$d"; then
                 echo "::error::test-only marker '$marker' leaked into $d" >&2
                 fail=1

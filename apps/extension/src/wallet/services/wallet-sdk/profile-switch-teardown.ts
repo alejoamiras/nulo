@@ -24,6 +24,7 @@
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
+import { describeExternalId } from "@nulo/wallet-bridge"
 
 export interface ProfileSwitchTeardownDeps {
 	onActiveProfileChanged: { add(listener: (profile: { id: string } | undefined) => void): unknown }
@@ -62,7 +63,7 @@ export async function enforceSessionProfileBinding(args: {
 	args.logger.log(
 		"wallet-sdk",
 		LogLevel.Warn,
-		`Rejected message for ${args.origin}: session bound to ${stamped ?? "no"} profile, active is ${args.activeProfileId}`,
+		`Rejected message for session ${describeExternalId(args.sessionId)}: bound to ${stamped ?? "no"} profile, active is ${args.activeProfileId}`,
 	)
 	return false
 }
@@ -127,7 +128,7 @@ export function wireProfileSwitchTeardown(deps: ProfileSwitchTeardownDeps): void
 			deps.logger.log(
 				"wallet-sdk-bg",
 				LogLevel.Info,
-				`Profile switch: terminating session ${session.sessionId} (${session.origin}) bound to ${stamped ?? "no"} profile`,
+				`Profile switch: terminating session ${describeExternalId(session.sessionId)} bound to ${stamped ?? "no"} profile`,
 			)
 			try {
 				deps.terminateSession(session.sessionId)
@@ -137,7 +138,7 @@ export function wireProfileSwitchTeardown(deps: ProfileSwitchTeardownDeps): void
 				deps.logger.log(
 					"wallet-sdk-bg",
 					LogLevel.Warn,
-					`Profile switch: failed to terminate ${session.sessionId}: ${getErrorMessage(err)}`,
+					`Profile switch: failed to terminate ${describeExternalId(session.sessionId)}: ${getErrorMessage(err)}`,
 				)
 			}
 		}

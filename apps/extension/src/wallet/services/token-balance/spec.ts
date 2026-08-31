@@ -31,6 +31,10 @@ export type TokenBalanceRaw = {
 	id: number
 	token: number
 	account: string
+	/** The paired token's immutable identity triple — stamped service-side at every write, never client-authored. */
+	profileId: string
+	chainId: number
+	contract: string
 	publicBalance?: string
 	privateBalance?: string
 	updatedAt: number
@@ -42,6 +46,9 @@ export const TokenBalanceRawSchema: z.ZodType<TokenBalanceRaw> = z.object({
 	id: z.number(),
 	token: z.number(),
 	account: z.string(),
+	profileId: z.string(),
+	chainId: z.number(),
+	contract: z.string(),
 	publicBalance: z.string().optional(),
 	privateBalance: z.string().optional(),
 	updatedAt: z.number(),

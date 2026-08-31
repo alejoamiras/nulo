@@ -192,6 +192,38 @@ export class DuplicateInitializationError extends WalletError {
 	}
 }
 
+/**
+ * A dApp asked for an RPC method this wallet does not implement.
+ *
+ * Typed rather than a bare `Error` because it is dApp-ACTIONABLE — the caller's whole response is
+ * to fall back to another route, and the faucet already distinguishes it from a network failure —
+ * so it must survive the dApp-facing envelope's unclassified fall-through, which by design
+ * replaces an unrecognised error's text with a constant.
+ *
+ * The method name is echoed back because the dApp supplied it, but bounded: it arrives off the
+ * wire, and nothing upstream constrains its length.
+ */
+export class UnsupportedMethodError extends WalletError {
+	public static readonly CODE = "UNSUPPORTED_METHOD"
+
+	/** Longest echoed method name. Real ones are short; anything longer is not a method name. */
+	public static readonly MAX_NAME_CHARS = 64
+
+	/** Takes the composed message, like every sibling here, so a payload round-trips unchanged. */
+	public constructor(message: string, details?: unknown) {
+		super(UnsupportedMethodError.CODE, message, details, "UnsupportedMethodError")
+	}
+
+	/** Compose the frozen string for a wire-supplied name. */
+	public static forMethod(methodName: string): UnsupportedMethodError {
+		const shown =
+			methodName.length <= UnsupportedMethodError.MAX_NAME_CHARS
+				? methodName
+				: `${methodName.slice(0, UnsupportedMethodError.MAX_NAME_CHARS)}…`
+		return new UnsupportedMethodError(`Unsupported wallet method: ${shown}`)
+	}
+}
+
 /** Request payload failed validation at the RPC boundary. */
 export class ValidationError extends WalletError {
 	public static readonly CODE = "VALIDATION"
@@ -306,6 +338,7 @@ type KnownWalletErrorPayload =
 	| { code: typeof ProfileIdConflictError.CODE; message: string; details?: unknown }
 	| { code: typeof DuplicateWalletError.CODE; message: string; details?: { existingProfileName?: string } }
 	| { code: typeof DuplicateInitializationError.CODE; message: string; details?: unknown }
+	| { code: typeof UnsupportedMethodError.CODE; message: string; details?: unknown }
 
 /**
  * Reconstruct a WalletError (concrete subclass if the code is recognised)
@@ -345,6 +378,8 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 			return new DuplicateWalletError(known.message, known.details)
 		case DuplicateInitializationError.CODE:
 			return new DuplicateInitializationError(known.message, known.details)
+		case UnsupportedMethodError.CODE:
+			return new UnsupportedMethodError(known.message, known.details)
 		default:
 			return new WalletError(payload.code, payload.message, payload.details)
 	}

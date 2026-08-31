@@ -4,3 +4,9 @@
 !*/target/*.json
 target/*
 !target/*.json
+# Runtime-staged dependency artifacts for the TXE suite (run-txe-tests.sh) — derived
+# copies, never source-of-truth: one duplicates the proxy crate's committed artifact,
+# the other is vendored from @aztec-foundation/aztec-standards.
+token_bridge/target/token_contract-Token.json
+token_bridge/target/token_minter_proxy-TokenMinterProxy.json
+txe-run.log

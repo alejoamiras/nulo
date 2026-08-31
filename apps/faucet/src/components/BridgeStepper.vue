@@ -8,7 +8,7 @@ import { useBridgeJournal } from "@/composables/useBridgeJournal"
 
 /** Utils */
 import { assetDecimals, assetSymbol } from "@/lib/asset-label"
-import { stepperPhases } from "@/lib/bridge-steps"
+import { isTerminalAttention, stepperPhases } from "@/lib/bridge-steps"
 import { formatBigInt } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
 
@@ -35,6 +35,8 @@ const failedPhase = computed(() => phases.value.find((p) => p.state === "failed"
 const canRetry = computed(() => {
 	const key = failedPhase.value?.key
 	if (!key) return false
+	// A terminal attention is not re-drivable from any surface — retrying repeats the same failure.
+	if (isTerminalAttention(journal.runtime.value[props.record.id]?.attention)) return false
 	if (props.record.direction === "deposit") {
 		// SYNC/CLAIM/CONFIRM are engine-driven; the L1 legs are not re-drivable from here.
 		return key === "sync" || key === "claim" || key === "confirm"

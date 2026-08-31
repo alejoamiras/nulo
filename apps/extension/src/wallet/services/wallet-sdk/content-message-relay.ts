@@ -97,7 +97,9 @@ export function registerContentMessageRelay(): void {
 		}
 		const origin = senderOrigin(sender)
 		if (buffered.filter((b) => b.origin === origin).length >= CONTENT_RELAY_PER_ORIGIN_CAP) {
-			console.warn(`[content-message-relay] pre-boot per-origin cap hit for ${origin} — dropping discovery (reject-new)`)
+			// The origin is the user's browsing history and this fires from a content script on any
+			// page; the cap being hit is the whole signal.
+			console.warn("[content-message-relay] pre-boot per-origin cap hit — dropping discovery (reject-new)")
 			return undefined
 		}
 		buffered.push({ message, sender, origin, receivedAt: Date.now() })
