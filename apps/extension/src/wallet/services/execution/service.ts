@@ -502,6 +502,12 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		 *  `operations` (never part of the shared `Operation` wire shape — a
 		 *  dApp cannot reach this parameter). */
 		estimateIds?: readonly (string | undefined)[],
+		/** SW-internal (same non-wire status as `estimateIds`): the deletion
+		 *  fence captured at the dApp interaction's session re-validation — the
+		 *  authorization moment. Ops whose commit asserts an entry capture
+		 *  (register_token) consume it so a delete + same-id re-import parked
+		 *  anywhere between approval and commit fails closed. */
+		authorizedFence?: ExecutionFence,
 	): Promise<OperationResult[]> {
 		await this.ensureInitialized()
 		const results: OperationResult[] = []
@@ -531,7 +537,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 						break
 					}
 					case "register_token": {
-						result = await this.executeRegisterToken(operation, origin, operationTask)
+						result = await this.executeRegisterToken(operation, origin, operationTask, authorizedFence)
 						break
 					}
 					case "send_transaction": {
@@ -679,21 +685,27 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		op: MaterializedRegisterTokenOperation,
 		origin: LocalTxOrigin,
 		parentTask?: WrappedTask,
+		authorizedFence?: ExecutionFence,
 	): Promise<void> {
-		// The deletion fence is captured at DISPATCH entry and threaded to the
-		// token commit — with the journal claim's own epoch check upstream this
-		// anchors the whole approval→commit chain: a deletion (or a delete +
-		// same-id re-import) landing anywhere after this line moves the epoch, so
-		// the commit's assert against THIS capture fails closed. Token ops are not
-		// switch-blocked (not a SENDING kind), so every identity below must derive
-		// from this one capture plus the ownership-checked network row — never a
-		// live re-read. The capture's only throw is the locked gate; re-thrown
-		// under this method's pinned message.
+		// The deletion fence anchors the whole approval→commit chain: the dApp
+		// path threads the capture made AT the interaction's session
+		// re-validation (upstream of the refreshSession park); popup-origin
+		// dispatches capture here, where dispatch IS the authorization. A
+		// deletion (or a delete + same-id re-import) landing anywhere after the
+		// capture moves the epoch, so the commit's assert against it fails
+		// closed. Token ops are not switch-blocked (not a SENDING kind), so
+		// every identity below must derive from this one capture plus the
+		// ownership-checked network row — never a live re-read. The capture's
+		// only throw is the locked gate; re-thrown under the pinned message.
 		let fence: ExecutionFence
-		try {
-			fence = await this.profileService.captureExecutionFence()
-		} catch {
-			throw new Error("Wallet locked")
+		if (authorizedFence) {
+			fence = authorizedFence
+		} else {
+			try {
+				fence = await this.profileService.captureExecutionFence()
+			} catch {
+				throw new Error("Wallet locked")
+			}
 		}
 		const network = await this.networkService.getNetwork(op.networkId)
 		// `getNetwork` anchors the row to the ACTIVE profile; tying it to the
@@ -741,7 +753,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// tx-enrichment.ts and tx-detail-helpers.ts.
 		const opContext: OperationContext =
 			origin.type === OriginType.DAPP ? { origin: "dapp", dappOrigin: origin.name ?? "dApp" } : { origin: "popup" }
-		await this.tokenService.addToken(fence.profileId, op.networkId, op.accountAddress, ti, opContext, fence)
+		await this.tokenService.addTokenAuthorized(fence, fence.profileId, op.networkId, op.accountAddress, ti, opContext)
 	}
 
 	public async executeSendTransaction(

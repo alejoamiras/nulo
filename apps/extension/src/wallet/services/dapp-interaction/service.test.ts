@@ -32,7 +32,11 @@ const flush = () => new Promise((r) => setTimeout(r, 0))
 /** Structural view of the privates the tests inject/drive. */
 type Internals = {
 	storage: Map<string, DappInteraction>
-	profileService: { refreshSession: () => Promise<void>; getActiveProfile: () => Promise<{ id: string } | undefined> }
+	profileService: {
+		refreshSession: () => Promise<void>
+		getActiveProfile: () => Promise<{ id: string } | undefined>
+		captureExecutionFence: () => Promise<{ profileId: string; epoch: number }>
+	}
 	executionService: { executeOperations: (...args: unknown[]) => Promise<unknown> }
 	silentInteraction: (payload: unknown, hooks?: ExecutionHooks) => Promise<unknown>
 }
@@ -47,6 +51,13 @@ function makeService(overrides: {
 	internals.profileService = {
 		refreshSession: vi.fn(async () => {}),
 		getActiveProfile: overrides.getActiveProfile ?? (async () => ({ id: "p1" })),
+		// Derived from the same override so a test's active-profile choice drives
+		// both the silent path's id read and executeAndResolve's atomic capture.
+		captureExecutionFence: async () => {
+			const p = await internals.profileService.getActiveProfile()
+			if (!p) throw new Error("Wallet locked")
+			return { profileId: p.id, epoch: 0 }
+		},
 	}
 	internals.executionService = { executeOperations: overrides.executeOperations ?? (async () => []) }
 	return { svc, internals }
@@ -87,6 +98,48 @@ describe("DappInteractionService forwards execution hooks (does not fire the bat
 		// The release is NOT fired by DappInteractionService — ExecutionService
 		// fires it once the request enqueues on the mutex.
 		expect(releaseSpy).not.toHaveBeenCalled()
+	})
+
+	test("executeAndResolve threads the AUTHORIZATION capture into executeOperations (F11)", async () => {
+		// The fence must be the capture made at the session re-validation —
+		// upstream of the refreshSession park — so entry-asserting ops commit
+		// against the authorization-time incarnation.
+		let observedFence: unknown
+		const executeOperations = vi.fn(async (...args: unknown[]) => {
+			observedFence = args[5]
+			return []
+		})
+		const { svc, internals } = makeService({ executeOperations })
+		const id = "interaction-fence"
+		internals.storage.set(id, {
+			id,
+			payload: emptyPayload,
+			handleId: "handle-f",
+			cancellationToken: id,
+		} as unknown as DappInteraction)
+
+		await svc.approveInteraction(id, [], origin)
+		await flush()
+
+		expect(executeOperations).toHaveBeenCalledTimes(1)
+		expect(observedFence).toEqual({ profileId: "p1", epoch: 0 })
+	})
+
+	test("executeAndResolve aborts (no dispatch) when the capture's profile differs from the session's", async () => {
+		const executeOperations = vi.fn(async () => [])
+		const { svc, internals } = makeService({ executeOperations, getActiveProfile: async () => ({ id: "p2" }) })
+		const id = "interaction-mismatch"
+		internals.storage.set(id, {
+			id,
+			payload: emptyPayload,
+			handleId: "handle-m",
+			cancellationToken: id,
+		} as unknown as DappInteraction)
+
+		await svc.approveInteraction(id, [], origin)
+		await flush()
+
+		expect(executeOperations).not.toHaveBeenCalled()
 	})
 
 	test("silentInteraction forwards the hooks to executeOperations", async () => {

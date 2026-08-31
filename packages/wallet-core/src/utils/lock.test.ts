@@ -79,6 +79,28 @@ describe("Lock", () => {
 		expect(secondAcquired).toBe(true)
 	})
 
+	test("withLock's isCurrent flips false for a displaced holder after a watchdog handoff", async () => {
+		// The displaced critical section keeps running after a force-release —
+		// isCurrent() is its only way to notice and decline the write it was
+		// about to make over a successor's state.
+		vi.useFakeTimers()
+		const lock = new Lock()
+		let probe: (() => boolean) | null = null
+		let release: () => void = () => {}
+		const displaced = lock.withLock(async (isCurrent) => {
+			probe = isCurrent
+			expect(isCurrent()).toBe(true)
+			await new Promise<void>((r) => {
+				release = r
+			})
+		})
+		await vi.advanceTimersByTimeAsync(0)
+		vi.advanceTimersByTime(5 * 60_000 + 1) // watchdog fires; successor may enter
+		expect((probe as unknown as () => boolean)()).toBe(false)
+		release()
+		await displaced
+	})
+
 	test("maxHoldMs: null disables the watchdog — a held lock never force-releases", async () => {
 		vi.useFakeTimers()
 		const lock = new Lock(undefined, undefined, null)

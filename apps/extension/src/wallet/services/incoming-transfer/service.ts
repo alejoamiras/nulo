@@ -204,8 +204,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		this.incomingPollGate = incomingPollGate
 	}
 
-	/** Run `fn` inside the service lock. */
-	private async withServiceLock<T>(fn: () => Promise<T>): Promise<T> {
+	/** Run `fn` inside the service lock. `isCurrent` reports whether this
+	 *  acquisition still owns the lock — false after a watchdog handoff. */
+	private async withServiceLock<T>(fn: (isCurrent: () => boolean) => Promise<T>): Promise<T> {
 		return this.serviceLock.withLock(fn)
 	}
 
@@ -1905,14 +1906,23 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			if (profileId !== profile.id) continue // active-profile-scoped (codex R2-followup-2 #1)
 			const tokenId = Number(tokenIdStr)
 			if (!Number.isInteger(tokenId)) continue
-			await this.withServiceLock(async () => {
+			await this.withServiceLock(async (isCurrent) => {
 				const current = await this.repo.getOutbox(profileId, networkId, accountAddress, tokenId)
 				if (!current) return
+				// Every write below is guarded by `isCurrent()`: a watchdog handoff
+				// admits a receipt writer whose fresher dirtyAt this displaced section
+				// must not clobber (an anchor overwrite here launders the new receipt
+				// into a PRE-receipt task's causality; the next drain's success-delete
+				// then drops the sole refresh marker — permanent until an unrelated
+				// refresh). The ticket flips on ANY successor acquisition, so a
+				// displaced drain stands down at the first write.
 				if (current.pendingTaskId) {
 					const state = this.readTaskState(current.pendingTaskId)
 					if (state === "success") {
+						if (!isCurrent()) return
 						await this.repo.deleteOutbox(profileId, networkId, accountAddress, tokenId)
 					} else if (state === "failure" || state === "missing") {
+						if (!isCurrent()) return
 						await this.repo.setOutbox(profileId, networkId, accountAddress, tokenId, { dirtyAt: current.dirtyAt })
 					}
 					// pending → keep waiting for the anchored task.
@@ -1929,6 +1939,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				}
 				if ("missing" in result) {
 					// The (token, account) balance pair is positively gone (removed) → delete the stale row.
+					if (!isCurrent()) return
 					await this.repo.deleteOutbox(profileId, networkId, accountAddress, tokenId)
 					return
 				}
@@ -1937,14 +1948,14 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 					// (dirtyAt moved) during the refresh await must not be overwritten with
 					// this older snapshot — stand down and let the next drain see the row's
 					// new state. Writing anyway would anchor stale dirt to the minted task.
-					// RESIDUAL (accepted): the re-read and the set below are not atomic, so
-					// a receipt landing exactly between them (requires a watchdog handoff —
-					// both writers hold the service lock) can be overwritten with this
-					// pre-receipt anchor, and that receipt's causal fast-path is lost. The
-					// balance job queue's poll cadence bounds the staleness; storage-level
-					// CAS is not worth building for that window.
+					// The receipt writer can only interleave by ACQUIRING the lock (a
+					// watchdog handoff), which flips the ticket — so the `isCurrent()`
+					// check below is a true guard, not a smaller race window: either the
+					// receipt landed before it (ticket flipped → stand down) or its write
+					// is dispatched after this set and last-writer-wins is the receipt.
 					const fresh = await this.repo.getOutbox(profileId, networkId, accountAddress, tokenId)
 					if (!fresh || fresh.dirtyAt !== current.dirtyAt) return
+					if (!isCurrent()) return
 					await this.repo.setOutbox(profileId, networkId, accountAddress, tokenId, {
 						dirtyAt: current.dirtyAt,
 						pendingTaskId: result.taskId,

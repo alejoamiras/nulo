@@ -188,18 +188,43 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		accountAddress: string,
 		tokenInterface: TokenInterface,
 		opContext: OperationContext,
-		// In-process callers whose AUTHORIZATION happened earlier (the dApp
-		// register_token dispatch) thread THEIR entry capture — a fresh mint here
-		// would bless a profile deleted and re-imported since that authorization
-		// (the successor's settled epoch passes every assert). Wire callers never
-		// supply this; the popup's authorizing entry IS this method.
-		authorizedFence?: ExecutionFence,
 	): Promise<TokenInfo> {
 		await this.ensureInitialized()
-		// Captured atomically (read + capture under the profile facade lock) and
-		// threaded to the commit; a caller-supplied profileId that isn't the
-		// fence's fails closed.
-		const fence = authorizedFence ?? (await this.profiles.captureExecutionFence())
+		// The popup's authorizing entry IS this method — mint the fence here,
+		// atomically (read + capture under the profile facade lock).
+		const fence = await this.profiles.captureExecutionFence()
+		return await this.addTokenWithFence(fence, profileId, networkId, accountAddress, tokenInterface, opContext)
+	}
+
+	/**
+	 * Fence-threaded token creation for in-process callers whose AUTHORIZATION
+	 * happened earlier (the dApp register_token dispatch): the commit asserts
+	 * the CALLER's capture — a fresh mint here would bless a profile deleted
+	 * and re-imported since that authorization (the successor's settled epoch
+	 * passes every assert). Deliberately NOT in `rpcMethods`: a threaded fence
+	 * is structural authority, and the wire surface must not accept one.
+	 */
+	public async addTokenAuthorized(
+		fence: ExecutionFence,
+		profileId: string,
+		networkId: string,
+		accountAddress: string,
+		tokenInterface: TokenInterface,
+		opContext: OperationContext,
+	): Promise<TokenInfo> {
+		await this.ensureInitialized()
+		return await this.addTokenWithFence(fence, profileId, networkId, accountAddress, tokenInterface, opContext)
+	}
+
+	private async addTokenWithFence(
+		fence: ExecutionFence,
+		profileId: string,
+		networkId: string,
+		accountAddress: string,
+		tokenInterface: TokenInterface,
+		opContext: OperationContext,
+	): Promise<TokenInfo> {
+		// A caller-supplied profileId that isn't the fence's fails closed.
 		if (fence.profileId !== profileId) throw new Error("unauthorized profile")
 		// Phase 2.5: the journal entry is created up-front (title=undefined) so
 		// the tokens-view TokenImportRow pops in immediately after approval,
@@ -245,6 +270,11 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 			| { kind: "live"; fetch: () => Promise<[string, string, number]> }
 	}): Promise<TokenInfo> {
 		const { fence, profileId, networkId, tokenInterface, metadata } = input
+
+		// A stale authorization must not pass through ANY exit — the idempotent
+		// short-circuit below would otherwise hand a deleted incarnation's flow a
+		// successor's row as its own success.
+		this.profiles.getDeletionState().assertCurrent(fence.profileId, fence.epoch)
 
 		// Fast idempotency short-circuit (Opus H2 / codex DEFERRED).
 		// If the token is already on this profile+chain, return without
