@@ -2,7 +2,7 @@
  * Verifies the bridge's L1 sources on Etherscan — the chain comes from the manifest's `l1ChainId`
  * (Sepolia for testnet, Ethereum for mainnet; a manifest that omits it falls back to Sepolia).
  *
- * Two contracts, two compile roots:
+ * Two compile roots:
  * - MintableERC20 - our own foundry project (contracts/bridge/evm); forge reconstructs the
  *   standard-json from the same foundry.toml that produced the deployed bytecode. A `circle-proxy`
  *   token (reused official USDC) is NOT source-verified here — its identity is pinned at deploy.
@@ -99,10 +99,6 @@ try {
 	fail(e instanceof Error ? e.message : String(e))
 }
 const token = config.l1.token
-if (!token) {
-	console.error("bridge manifest has no l1.token constructor record - redeploy or backfill it.")
-	process.exit(1)
-}
 
 // The chain comes from the manifest (self-declared identity), not a hardcoded Sepolia — a mainnet
 // manifest verifies on Ethereum. The field is optional, so a manifest omitting it falls back.
