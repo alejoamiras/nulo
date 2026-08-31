@@ -8,10 +8,14 @@
  * lives on the other side of this boundary.
  */
 
+import { rowMatchesToken } from "./balance-identity"
+
 /** Narrower than `Token` so this module is exercisable without the storage codec. */
 export type ReconcileToken = {
 	id: number
+	profileId: string
 	chainId: number
+	contract: string
 }
 
 /** `index` participates only as a sort tiebreak before address. */
@@ -24,6 +28,9 @@ export type ReconcileAccount = {
 export type ReconcileRow = {
 	token: number
 	account: string
+	profileId: string
+	chainId: number
+	contract: string
 	updatedAt: number
 	syncFailure?: unknown
 }
@@ -37,11 +44,17 @@ export type ReconcilePlan<T extends ReconcileToken, A extends ReconcileAccount, 
 	/** Rows that exist but were never projected — the worker died after
 	 *  `repo.set` and before `enqueue`, stranding the card mid-load. */
 	staleTokens: R[]
+	/** Rows of THIS profile whose token id resolves to a live token but whose
+	 *  chain/contract identity mismatches it — a dead incarnation left behind
+	 *  by id reuse. Provably stale; safe to delete. Rows whose token id has no
+	 *  live token (possibly just codec-hidden) and foreign-profile rows are
+	 *  deliberately NOT here. */
+	staleIdentity: R[]
 }
 
-/** `${tokenId}:${address}` — the pair identity. Balance rows carry no chainId
- *  or profileId, so the pair is only meaningful against a caller-supplied
- *  active-profile token set. */
+/** `${tokenId}:${address}` — the pair key, meaningful against a caller-supplied
+ *  active-profile token set; rows must ALSO match the token's full identity to
+ *  count as satisfying a pair. */
 function pairKey(token: number, account: string): string {
 	return `${token}:${account}`
 }
@@ -49,16 +62,14 @@ function pairKey(token: number, account: string): string {
 /**
  * Both halves of the repair, computed in one pass.
  *
- * Pairs are formed only where `token.chainId === account.chainId`: the row
- * schema cannot express chain scoping, so nothing downstream would catch a
- * mainnet token paired with a testnet account.
+ * Pairs are formed only where `token.chainId === account.chainId` — a mainnet
+ * token must never pair with a testnet account.
  *
  * Existing rows are indexed only under keys the desired set actually contains,
- * so a foreign profile's rows are never materialized. This cannot defend
- * against a stale row left by a DELETED token whose id was later reused —
- * ids are `max+1`, so reuse is possible and such a row would suppress repair.
- * Not solvable from this schema — it needs non-reused token identities, an
- * awaited token-delete cascade, or a schema-carried incarnation.
+ * so a foreign profile's rows are never materialized. A row counts toward a
+ * desired pair only on FULL identity (the schema-carried incarnation): a stale
+ * row from a dead token incarnation at a reused id no longer suppresses repair
+ * — it is reported in `staleIdentity` for deletion instead.
  *
  * Output order is total and deterministic — chainId, token id, account index,
  * then address — so a repair batch allocates ids in a reproducible sequence.
@@ -88,11 +99,20 @@ export function reconcilePlan<T extends ReconcileToken, A extends ReconcileAccou
 		}
 	}
 
+	const tokenById = new Map<number, T>()
+	for (const token of tokens) tokenById.set(token.id, token)
+
 	const seen = new Set<string>()
 	const staleTokens: R[] = []
+	const staleIdentity: R[] = []
 	for (const row of existing) {
+		const live = tokenById.get(row.token)
+		if (live && row.profileId === live.profileId && !rowMatchesToken(row, live)) {
+			staleIdentity.push(row)
+			continue
+		}
 		const key = pairKey(row.token, row.account)
-		if (!desired.has(key)) continue
+		if (!desired.has(key) || !live || !rowMatchesToken(row, live)) continue
 		seen.add(key)
 		// `syncFailure` set means the projector ran and failed — the queue owns
 		// that retry. Only a row with neither a timestamp nor a failure has no
@@ -109,5 +129,5 @@ export function reconcilePlan<T extends ReconcileToken, A extends ReconcileAccou
 			(a.account.address < b.account.address ? -1 : a.account.address > b.account.address ? 1 : 0),
 	)
 
-	return { missing, staleTokens }
+	return { missing, staleTokens, staleIdentity }
 }

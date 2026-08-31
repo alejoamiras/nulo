@@ -382,6 +382,19 @@ describe("relinkRestoredTokenBalances — stage 2b contract (Q-02)", () => {
 		}
 	})
 
+	it("chain authority is the RESTORED token, not the blob's old row", () => {
+		// The old row claims chain 1 (which IS in the allow-set); the persisted
+		// restore result says chain 2. Attacker-controlled old-row authority would
+		// keep the balance; restored-token authority must drop it.
+		const data = {
+			token: [{ id: 1, chainId: 1 }],
+			"token-balance": [{ id: 10, token: 1, account: "0xa" }],
+		} as never
+		const dropped = relinkRestoredTokenBalances(data, [{ id: "n1", chainId: 2, contract: "0xT" }], new Set(["1:0xa"]))
+		expect((data as Record<string, unknown>)["token-balance"]).toEqual([])
+		expect(dropped).toHaveLength(1)
+	})
+
 	it("records only the POSITION of a dropped row, never its content", () => {
 		// This path never reaches `collectRestoreErrors`, so it does its own allowlisting. `tb` is
 		// raw backup content: migration validates only `id`, so `token` can be an arbitrary nested
@@ -1392,6 +1405,24 @@ describe("useFullBackupImport — failure branches", () => {
 		expect(profileClient.finalizeRestore).not.toHaveBeenCalled()
 		// The half-created profile must not be left behind.
 		expect(profileClient.deleteProfile).toHaveBeenCalledWith("new-id")
+	})
+
+	it("(P3) a reconcile/purge failure is fail-fast: pre-finalize rollback, never a committed import with orphans", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup()
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([])
+		accountClient.reconcileImportedAccounts.mockRejectedValueOnce(new Error("dependent purge failed"))
+
+		await c.restoreBackup()
+
+		expect(opts.fillError).toHaveBeenCalledWith("full_backup", "Import failed", "dependent purge failed")
+		expect(profileClient.deleteProfile).toHaveBeenCalledWith("new-id")
+		expect(profileClient.finalizeRestore).not.toHaveBeenCalled()
 	})
 
 	it("a token restore throw (pre-finalize) also rolls the orphan profile back", async () => {

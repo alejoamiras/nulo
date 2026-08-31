@@ -47,12 +47,13 @@ export type BalanceJobQueueCallbacks = {
 	 *  the id here BEFORE its awaited `repo.delete`, so single-threaded dispatch
 	 *  order makes write-after-delete resurrection impossible. */
 	isBalanceInvalidated?: (id: number) => boolean
-	/** Ownership guard for failure writes: balances carry no profileId, so a
-	 *  shared-address row from ANOTHER profile can reach this queue (the
-	 *  projector already errors such rows as "Unknown token"). Writing a
-	 *  failure record onto a foreign profile's row — or emitting it through a
-	 *  token lookup that throws — must be skipped, not attempted. */
-	isRowEmittable?: (tokenId: number) => boolean
+	/** Ownership guard for failure writes: a shared-address row from ANOTHER
+	 *  profile, or a dead incarnation's row at a reused token id, can reach
+	 *  this queue. Writing a failure record onto such a row — or emitting it
+	 *  through a token lookup that throws — must be skipped, not attempted.
+	 *  Receives the full row so the check is the row↔token identity, not a
+	 *  bare id-presence probe. */
+	isRowEmittable?: (row: TokenBalanceRaw) => boolean
 	/** Profile generation, captured at syncBatch entry and re-read immediately
 	 *  before every post-projection write. The projector resolves LIVE
 	 *  active-profile handles mid-flight, so an A→B→A switch repopulates the
@@ -176,7 +177,7 @@ export class BalanceJobQueue {
 		// Foreign-profile rows (unknown token in the active map) get NO failure
 		// record: the row isn't ours to annotate, and emitting it would throw
 		// through the service's token lookup and abort the whole batch.
-		if (this.callbacks.isRowEmittable?.(current.token) === false) return
+		if (this.callbacks.isRowEmittable?.(current) === false) return
 		const updated: TokenBalanceRaw = {
 			...current,
 			syncFailure: { at, message: boundSyncFailureMessage(message) },
@@ -190,7 +191,7 @@ export class BalanceJobQueue {
 		// Re-check AFTER the awaited write: a token deleted during the await must
 		// not be emitted — the service's token lookup would throw and the outer
 		// batch catch would falsely fail every remaining healthy row.
-		if (this.callbacks.isRowEmittable?.(current.token) === false) return
+		if (this.callbacks.isRowEmittable?.(current) === false) return
 		this.callbacks.onBalanceUpdated(updated)
 	}
 
@@ -269,7 +270,7 @@ export class BalanceJobQueue {
 				}
 				// A row that is no longer ours (token deleted mid-batch) gets no
 				// write: its projection ran under a context that no longer holds.
-				if (this.callbacks.isRowEmittable?.(current.token) === false) {
+				if (this.callbacks.isRowEmittable?.(current) === false) {
 					this.tasks.failTask(taskId, "Token no longer active")
 					continue
 				}
@@ -284,7 +285,7 @@ export class BalanceJobQueue {
 				this.tasks.completeTask(taskId)
 				// Re-check AFTER the awaited write — same batch-abort hazard as the
 				// failure path's emit.
-				if (this.callbacks.isRowEmittable?.(current.token) === false) continue
+				if (this.callbacks.isRowEmittable?.(current) === false) continue
 				this.callbacks.onBalanceUpdated(updated)
 			}
 		} catch (err) {

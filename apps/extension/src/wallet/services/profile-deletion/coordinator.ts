@@ -118,7 +118,7 @@ export class ProfileDeletionCoordinator implements IService, ProfileDeletionDele
 		// addresses, and its history must survive.
 		await this.txs.purgeForAccounts(s.addresses, profileId)
 		await this.auth.purgeForAccounts(s.addresses)
-		await this.balances.purgeForTokens(s.tokenIds)
+		await this.balances.purgeForTokens(s.tokenIds, profileId)
 		await this.incoming.clearProfile(profileId)
 		await this.contacts.purgeForProfile(profileId)
 		await this.sessions.purgeForProfile(profileId)

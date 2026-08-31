@@ -35,13 +35,19 @@ import { NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
 import { svc } from "../composition-harness"
 import { AccountService } from "./service"
 import { AccountType, ImportedAccountUnusableError } from "./spec"
+import { BalanceRepository } from "@/wallet/services/token-balance/balance-repository"
+import { TokenBalanceService } from "@/wallet/services/token-balance/service"
+import { EXECUTION_SERVICE_NAME } from "@/wallet/services/execution/spec"
+import { TASK_SERVICE_NAME } from "@/wallet/services/task/spec"
+import { TOKEN_SERVICE_NAME } from "@/wallet/services/token/spec"
+import { TRANSACTION_SERVICE_NAME } from "@/wallet/services/transaction/spec"
 
 const MASTER_B64 = Buffer.from(new Uint8Array(32).fill(9)).toString("base64")
 const dekOf = (fill: number) => asImportedKeysDek(new Uint8Array(32).fill(fill) as Uint8Array<ArrayBuffer>)
 const CHAIN = 0
 const L1 = 31337
 
-async function build() {
+async function build(withBalances = false) {
 	const api = new FakeBrowserApi()
 	api.reset()
 	const services = new ServiceCollection()
@@ -51,6 +57,7 @@ async function build() {
 	services.add(
 		svc(PROFILE_SERVICE_NAME, {
 			onProfileDeleted: new EventHandler(),
+			onActiveProfileChanged: new EventHandler(),
 			getDeletionState: () => new ProfileDeletionState(),
 			// getProfileSecret → session-gated master Fr (32 bytes of 9).
 			getActiveProfile: async () => ({ id: "p1", name: "P", type: "password" }),
@@ -79,9 +86,25 @@ async function build() {
 	services.add(svc(NETWORK_SERVICE_NAME, { registerChainPurgeSubscriber: () => {}, getL1ChainIdStored: async () => L1 }))
 	const account = new AccountService(new LoggerStore(new ConfigStore()), api)
 	services.add(account)
+	if (withBalances) {
+		services.add(
+			svc(TOKEN_SERVICE_NAME, {
+				onTokenAdded: new EventHandler(),
+				onTokenUpdated: new EventHandler(),
+				onTokenDeleted: new EventHandler(),
+				getTokensRaw: async (pid: string) => (pid === "p1" ? [BAL_TOKEN] : []),
+			}),
+		)
+		services.add(svc(TRANSACTION_SERVICE_NAME, { onTransactionUpdated: new EventHandler() }))
+		services.add(svc(EXECUTION_SERVICE_NAME, {}))
+		services.add(svc(TASK_SERVICE_NAME, { createNewTask: () => ({ id: "t1" }) }))
+		services.add(new TokenBalanceService(new LoggerStore(new ConfigStore()), api, { subscribe: () => ({ cancel: () => {} }) } as never))
+	}
 	await services.start()
 	return { api, account }
 }
+
+const BAL_TOKEN = { id: 1, profileId: "p1", chainId: CHAIN, contract: "0xc1", name: "T", symbol: "T", decimals: 18 }
 
 const SK = GrumpkinScalar.fromString("0x000000000000000000000000000000000000000000000000000000000000002a")
 const exportFile = () => serializeAccountExport(buildAccountExport(SK, L1, addrFor(SK)))
@@ -197,7 +220,72 @@ describe("AccountService import/export", () => {
 		const keyId = Object.keys(await api.storage.local.get()).find((k) => k.startsWith("nulo:core:imported-account-keys@"))!
 		await api.storage.local.remove(keyId)
 		const dropped = await account.reconcileImportedAccounts("p1")
-		expect(dropped).toEqual([addrFor(SK)])
+		expect(dropped).toEqual([{ chainId: CHAIN, address: addrFor(SK) }])
 		expect(await account.getAccount("p1", CHAIN, addrFor(SK))).toBeUndefined()
+	})
+
+	test("(P3) registered purges run BEFORE the Account row is deleted, and a subscriber throw aborts the removal", async () => {
+		const { api, account } = await build()
+		await account.importAccount("p1", CHAIN, exportFile(), addrFor(SK), "")
+		const keyId = Object.keys(await api.storage.local.get()).find((k) => k.startsWith("nulo:core:imported-account-keys@"))!
+		await api.storage.local.remove(keyId)
+
+		let rowPresentDuringPurge: boolean | undefined
+		account.registerAccountPurgeSubscriber(async (profileId, scopes) => {
+			expect(profileId).toBe("p1")
+			expect(scopes).toEqual([{ chainId: CHAIN, address: addrFor(SK) }])
+			rowPresentDuringPurge = (await account.getAccount("p1", CHAIN, addrFor(SK))) !== undefined
+			throw new Error("dependent purge failed")
+		})
+
+		await expect(account.reconcileImportedAccounts("p1")).rejects.toThrow(/dependent purge failed/)
+		// Dependents die first: the subscriber saw the row, and the abort kept it.
+		expect(rowPresentDuringPurge).toBe(true)
+		expect(await account.getAccount("p1", CHAIN, addrFor(SK))).toBeDefined()
+	})
+
+	test("(P3) a key that appears DURING the awaited purge keeps its account and is excluded from the returned scopes", async () => {
+		const { api, account } = await build()
+		await account.importAccount("p1", CHAIN, exportFile(), addrFor(SK), "")
+		const store = await api.storage.local.get()
+		const keyId = Object.keys(store).find((k) => k.startsWith("nulo:core:imported-account-keys@"))!
+		const keyRow = store[keyId]
+		await api.storage.local.remove(keyId)
+
+		account.registerAccountPurgeSubscriber(async () => {
+			// A concurrent import completed while the purge was in flight.
+			await api.storage.local.set({ [keyId]: keyRow })
+		})
+
+		const dropped = await account.reconcileImportedAccounts("p1")
+		expect(dropped).toEqual([])
+		expect(await account.getAccount("p1", CHAIN, addrFor(SK))).toBeDefined()
+	})
+
+	test("(P3, composition) through the REAL registered graph, a keyless import's balance rows are purged with the account", async () => {
+		const { api, account } = await build(true)
+		await account.importAccount("p1", CHAIN, exportFile(), addrFor(SK), "")
+		const repo = new BalanceRepository(api)
+		await repo.set({
+			id: 9,
+			token: 1,
+			account: addrFor(SK),
+			profileId: "p1",
+			chainId: CHAIN,
+			contract: "0xc1",
+			publicBalance: "5",
+			privateBalance: "7",
+			updatedAt: 42,
+		})
+		const keyId = Object.keys(await api.storage.local.get()).find((k) => k.startsWith("nulo:core:imported-account-keys@"))!
+		await api.storage.local.remove(keyId)
+
+		const dropped = await account.reconcileImportedAccounts("p1")
+
+		expect(dropped).toEqual([{ chainId: CHAIN, address: addrFor(SK) }])
+		expect(await account.getAccount("p1", CHAIN, addrFor(SK))).toBeUndefined()
+		// The registered awaited purge ran BEFORE the Account delete: zero rows remain
+		// for the scope — the re-import reattachment hole is closed at the graph level.
+		expect((await repo.getAll()).filter((r) => r.account === addrFor(SK))).toEqual([])
 	})
 })

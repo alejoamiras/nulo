@@ -12,11 +12,14 @@ import { type ReconcileAccount, type ReconcileRow, type ReconcileToken, reconcil
 const MAINNET = 4248422646
 const TESTNET = 1816023401
 
-const token = (id: number, chainId = MAINNET): ReconcileToken => ({ id, chainId })
+const token = (id: number, chainId = MAINNET): ReconcileToken => ({ id, profileId: "p1", chainId, contract: `0xtok${id}` })
 const account = (address: string, chainId = MAINNET, index = 0): ReconcileAccount => ({ address, chainId, index })
 const row = (t: number, a: string, over: Partial<ReconcileRow> = {}): ReconcileRow => ({
 	token: t,
 	account: a,
+	profileId: "p1",
+	chainId: MAINNET,
+	contract: `0xtok${t}`,
 	updatedAt: 1,
 	...over,
 })
@@ -25,7 +28,7 @@ const pairsOf = (p: ReturnType<typeof reconcilePlan>) => p.missing.map((m) => `$
 
 describe("reconcilePlan — missing pairs", () => {
 	test("an empty world plans nothing", () => {
-		expect(reconcilePlan({ tokens: [], accounts: [], existing: [] })).toEqual({ missing: [], staleTokens: [] })
+		expect(reconcilePlan({ tokens: [], accounts: [], existing: [] })).toEqual({ missing: [], staleTokens: [], staleIdentity: [] })
 	})
 
 	test("a token with no row on its chain yields exactly that pair", () => {
@@ -42,7 +45,7 @@ describe("reconcilePlan — missing pairs", () => {
 		expect(pairsOf(plan)).toEqual(["2:0xa"])
 	})
 
-	test("pairs NEVER cross chains — the row schema has no chainId to catch it downstream", () => {
+	test("pairs NEVER cross chains", () => {
 		const plan = reconcilePlan({
 			tokens: [token(1, MAINNET)],
 			accounts: [account("0xtestnet", TESTNET), account("0xmainnet", MAINNET)],
@@ -109,7 +112,7 @@ describe("reconcilePlan — never-projected rows", () => {
 			accounts: [account("0xa")],
 			existing: [row(1, "0xa", { updatedAt: 1700000000000 })],
 		})
-		expect(plan).toEqual({ missing: [], staleTokens: [] })
+		expect(plan).toEqual({ missing: [], staleTokens: [], staleIdentity: [] })
 	})
 
 	test("a never-projected row for a FOREIGN pair is not re-enqueued", () => {
@@ -156,5 +159,33 @@ describe("reconcilePlan — cost shape", () => {
 		expect(plan.missing).toHaveLength(40)
 		expect(plan.missing.every((m) => m.token.id === 50)).toBe(true)
 		expect(plan.staleTokens).toEqual([])
+	})
+})
+
+describe("reconcilePlan — identity (schema-carried incarnation)", () => {
+	test("a dead incarnation's row at a reused id no longer suppresses repair — it is reported stale", () => {
+		const stale = row(1, "0xa", { contract: "0xdead" })
+		const plan = reconcilePlan({ tokens: [token(1)], accounts: [account("0xa")], existing: [stale] })
+		expect(pairsOf(plan)).toEqual(["1:0xa"])
+		expect(plan.staleIdentity).toEqual([stale])
+	})
+
+	test("a FOREIGN profile's mismatched row is left alone, never marked stale", () => {
+		const foreign = row(1, "0xa", { profileId: "p2", contract: "0xdead" })
+		const plan = reconcilePlan({ tokens: [token(1)], accounts: [account("0xa")], existing: [foreign] })
+		expect(plan.staleIdentity).toEqual([])
+	})
+
+	test("a row whose token id has NO live token (possibly codec-hidden) is left alone", () => {
+		const orphan = row(99, "0xa", { contract: "0xdead" })
+		const plan = reconcilePlan({ tokens: [token(1)], accounts: [account("0xa")], existing: [orphan] })
+		expect(plan.staleIdentity).toEqual([])
+	})
+
+	test("a chainId mismatch alone is stale — identity is the full triple", () => {
+		const wrongChain = row(1, "0xa", { chainId: TESTNET })
+		const plan = reconcilePlan({ tokens: [token(1)], accounts: [account("0xa")], existing: [wrongChain] })
+		expect(plan.staleIdentity).toEqual([wrongChain])
+		expect(pairsOf(plan)).toEqual(["1:0xa"])
 	})
 })
