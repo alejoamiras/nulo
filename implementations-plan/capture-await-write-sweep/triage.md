@@ -97,3 +97,25 @@ Pins: deferred-park the mid-path await, `beginDeletion`+`release` while parked (
 **Pass-2 ID mapping closure (rev 2 — every pass-2 ID's verdict named explicitly)** · P2-pkg#1 → pxe#5 → F12 · P2-pkg#2/#3 → F3 · P2-pkg#4 SAFE-latent (no-op handler body; unremovable registration noted) · P2-pkg#5 → **F13** · P2-pkg#6 SAFE + note (provider returns a fresh buffer today — extension provider derives per call; defensive-copy hygiene note) · P2-pkg#7 → OWNER-NOTE · P2-pkg#8 SAFE (dead write; hygiene) · P2-pkg#9 → crt rows SAFE (caller-held barrier verified) · P2-pkg#10 → OWNER-NOTE · P2-pkg#11 → evh#1 · P2-pkg#12 → klok#1 · P2-pkg#13 → rwg#3 · P2-pkg#14 → areg rows (latent) · P2-pkg#15 → base#1 · P2-ext#1 → F8 · P2-ext#2 → offs#1 note · P2-ext#3 → OWNER-NOTE (address-shared mirror semantics) · P2-ext#4 → auth#2 SAFE · P2-ext#5 → macs#2/#3 SAFE (writers are get-verify-first; trail) · P2-ext#6 → dint by-design note · P2-ext#7 → **F7** (identity fence adopted) · P2-ext#8 → task rows + exs#3 note · P2-ext#9 → pric#3/#4 SAFE (self-healing) · P2-ext#10 → lane#5 SAFE · P2-ext#11 → SAFE-fenced row above (agent line refs fabricated) · P2-ext#12 → SAFE-lww row above · P2-ext#13 → **F9** · P2-ext#14 → upx#1 SAFE-lww
 
 **Pre-seeded rows** · X-b1..X-b9, X-p1..X-p7 — VERIFIED-FENCED (capture order + branch coverage re-checked during this sweep's reads at the sites the candidates above touched; no regression found; the batch pins remain the enforcement) · X-d1/X-d2 KNOWN-DEFERRED · X-r1 refuted-adjacent adjudicated at ida#1/brep#1 (SAFE via batch-5 mechanisms + F10)
+
+## Fix status (post-implementation)
+
+All 13 fix units implemented with revert-probed regression pins (every probe logged red→green during implementation). Commit map (branch `worktree-capture-await-write-sweep`):
+
+| Unit | Commit(s) | Notes |
+|---|---|---|
+| F1 (token/contact/fpc/dses/network creation fences) | `55bfbd17`, `636d9712`+`178b93a4`, `b2d58396`, `3dcf3637`, `8623a04c` | chain-deletion leg via in-lock `isNetworkLive`; clearChainState under the service lock (chain-atomicity condition) |
+| F2 (incoming-transfer public arm epoch re-checks + drain CAS) | `0a223ea8` | |
+| F3 (pxe orphan-sweep lifecycle recheck + keyval re-list) | `2397840c` | |
+| F4 (config apply under store lock) | `6f21500a` | |
+| F5 (account rename/visibility per-row serialization) | `58ee4822` | |
+| F6 (resolveVerifiedL1ChainId single snapshot) | `014e750c` | |
+| F7 (window-manager handle-identity loss branches) | `2259455f` | |
+| F8 (profile client subscribe latch + seq) | `9e452a70` | |
+| F9 (useEntityCrud accept filter; senders resync) | `fbe14766` | |
+| F10 (token-balance onTokenDeleted gen fence; gen required) | `f03376a4` | |
+| F11 (register-token authority) | `68e51550` | **Implemented shape deviates from the prescription, same enforcement**: instead of threading a fence object through executeAndResolve → executeRegisterToken → persistToken, the write derives its profileId from the ownership-validated network row (`getNetwork` anchors to active at validation), and `addToken`'s F1 fence-match (`fence.profileId !== profileId → throw`) is the consumption-time assert — active-at-commit must equal row-owner. Every switch interleaving fails closed: pre-getNetwork (row not owned), post-getNetwork (fence-match). Less plumbing, same layered belt. |
+| F12 (withPxeRead rebind generation assert) | `c97dd60a` | |
+| F13 (pxe-client recovery generation revalidation) | `3067c7b7` | |
+
+Harness-stub widenings (the "widened dependency surface widens every stub" lesson): `14a3b3f5`, `6cee1442`, plus in-commit widenings inside F1/F6/F10 commits.
