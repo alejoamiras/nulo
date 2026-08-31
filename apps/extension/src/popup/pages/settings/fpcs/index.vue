@@ -51,9 +51,10 @@ const {
 	added: fpcService.onFpcAdded,
 	updated: fpcService.onFpcUpdated,
 	deleted: fpcService.onFpcDeleted,
-	// Events are global; the list is chain-scoped — a mid-switch add/update
-	// for another chain must not render here.
-	accept: (f) => f.chainId === appStore.network?.chainId,
+	// Events are global; the list is chain-scoped within the active profile — a
+	// mid-switch add/update for another chain OR another profile (the payload
+	// carries profileId; same chainId across profiles is common) must not render.
+	accept: (f) => f.chainId === appStore.network?.chainId && f.profileId === appStore.profile?.id,
 })
 
 const fpcs = computed(() =>

@@ -29,13 +29,18 @@ const popupStore = usePopupStore()
 const cacheStore = useCacheStore()
 
 const tokenService = new TokenServiceClient()
+// TokenInfo carries no profileId (it crosses the dApp boundary), so the profile
+// dimension is guarded by scope-freeze: this list only accepts events while the
+// profile it fetched under is still active (a switch remounts the page anyway).
+const profileAtMount = appStore.profile?.id
 const { entities: tokens } = useEntityCrud({
 	fetch: () => tokenService.getTokens(appStore.profile.id, appStore.network.chainId),
 	added: tokenService.onTokenAdded,
 	deleted: tokenService.onTokenDeleted,
 	// Events are global; the list is chain-scoped — a mid-switch add for
-	// another chain must not render here.
-	accept: (t) => t.chainId === appStore.network?.chainId,
+	// another chain (or after a profile switch, see scope-freeze above) must
+	// not render here.
+	accept: (t) => t.chainId === appStore.network?.chainId && appStore.profile?.id === profileAtMount,
 })
 
 const handleDelete = (target) => {
