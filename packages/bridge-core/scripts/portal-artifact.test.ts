@@ -1,5 +1,14 @@
+import { readFileSync } from "node:fs"
+import { keccak256 } from "viem"
 import { describe, expect, it } from "vitest"
-import { assertImmutableRefsMatch, assertRuntimeMatchesTemplate } from "./portal-artifact"
+import {
+	assertImmutableRefsMatch,
+	assertRuntimeMatchesTemplate,
+	FORKED_PORTAL_KECCAK,
+	PORTAL_BUILD_JSON,
+	PORTAL_PIN,
+	VENDORED_FORK,
+} from "./portal-artifact"
 
 // Mirrors the artifact's deployedBytecode.immutableReferences for the fork (slot-keyed map
 // flattened): two full-word sites holding left-padded address immutables.
@@ -109,5 +118,40 @@ describe("assertImmutableRefsMatch", () => {
 
 	it("rejects a dropped site", () => {
 		expect(() => assertImmutableRefsMatch([IMMUTABLES[0]], IMMUTABLES)).toThrow(/immutableReferences drifted/)
+	})
+})
+
+// The deploy reads its bytes from the committed artifact and gates them on the pins, but nothing in
+// CI executes that path — the only workflow that installs Foundry runs the forge suites alone, and
+// is filtered on contracts/bridge/**. Source, artifact and pins can therefore drift apart silently
+// and only surface at deploy time, as an unhandled throw. These are the equalities the deploy
+// asserts, checked without solc so they run in the ordinary unit suite.
+describe("source ↔ artifact ↔ pin consistency", () => {
+	const artifact = JSON.parse(readFileSync(PORTAL_BUILD_JSON, "utf8"))
+
+	it("pins the current fork source", () => {
+		expect(keccak256(readFileSync(VENDORED_FORK))).toBe(FORKED_PORTAL_KECCAK)
+	})
+
+	it("was generated from the source the pin names", () => {
+		expect(artifact.sourceKeccak).toBe(FORKED_PORTAL_KECCAK)
+	})
+
+	// The declared hash fields are just more JSON — only the bytes bind the artifact to the pins.
+	it("ships bytes that hash to the reviewed build", () => {
+		expect(keccak256(artifact.bytecode)).toBe(PORTAL_PIN.initCodeHash)
+		expect(keccak256(artifact.deployedBytecode)).toBe(PORTAL_PIN.runtimeCodeHash)
+	})
+
+	it("declares the hashes its bytes actually have, and the pinned compiler", () => {
+		expect(artifact.initCodeHash).toBe(keccak256(artifact.bytecode))
+		expect(artifact.runtimeCodeHash).toBe(keccak256(artifact.deployedBytecode))
+		expect(artifact.solcVersion.startsWith(PORTAL_PIN.solc)).toBe(true)
+	})
+
+	// loadForkedPortalArtifact hands these straight to assertImmutableRefsMatch, which compares by
+	// JSON.stringify — an absent key throws there instead, far from the cause.
+	it("records the immutable sites the deploy re-checks", () => {
+		expect(artifact.immutableReferences).toStrictEqual(IMMUTABLES)
 	})
 })
