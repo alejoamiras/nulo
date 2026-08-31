@@ -38,12 +38,14 @@ type Internals = {
 		captureExecutionFence: () => Promise<{ profileId: string; epoch: number }>
 	}
 	executionService: { executeOperations: (...args: unknown[]) => Promise<unknown> }
+	dappSessionService: { tryGetDappSession: (id: string) => Promise<{ profileId: string } | undefined> }
 	silentInteraction: (payload: unknown, hooks?: ExecutionHooks) => Promise<unknown>
 }
 
 function makeService(overrides: {
 	executeOperations?: (...args: unknown[]) => Promise<unknown>
 	getActiveProfile?: () => Promise<{ id: string } | undefined>
+	tryGetDappSession?: (id: string) => Promise<{ profileId: string } | undefined>
 }) {
 	const windowManager = { detach: vi.fn(), settle: vi.fn(), cancel: vi.fn() } as unknown as WindowManager
 	const svc = new DappInteractionService(noopLogger, windowManager)
@@ -60,6 +62,11 @@ function makeService(overrides: {
 		},
 	}
 	internals.executionService = { executeOperations: overrides.executeOperations ?? (async () => []) }
+	// Live-by-default: executeAndResolve re-validates the session ROW at
+	// approval; the default keeps the happy-path tests unchanged.
+	internals.dappSessionService = {
+		tryGetDappSession: overrides.tryGetDappSession ?? (async () => ({ profileId: "p1" })),
+	}
 	return { svc, internals }
 }
 
@@ -123,6 +130,27 @@ describe("DappInteractionService forwards execution hooks (does not fire the bat
 
 		expect(executeOperations).toHaveBeenCalledTimes(1)
 		expect(observedFence).toEqual({ profileId: "p1", epoch: 0 })
+	})
+
+	test("executeAndResolve aborts when the session ROW is gone — delete+re-import cannot ride an old approval", async () => {
+		// The payload's session is a snapshot from interaction CREATION; a delete
+		// + same-id re-import settling while the popup sat open makes the fence
+		// capture observe the successor's epoch (it passes). The purged session
+		// row is the discriminator: a re-import never resurrects it.
+		const executeOperations = vi.fn(async () => [])
+		const { svc, internals } = makeService({ executeOperations, tryGetDappSession: async () => undefined })
+		const id = "interaction-dead-session"
+		internals.storage.set(id, {
+			id,
+			payload: emptyPayload,
+			handleId: "handle-d",
+			cancellationToken: id,
+		} as unknown as DappInteraction)
+
+		await svc.approveInteraction(id, [], origin)
+		await flush()
+
+		expect(executeOperations).not.toHaveBeenCalled()
 	})
 
 	test("executeAndResolve aborts (no dispatch) when the capture's profile differs from the session's", async () => {

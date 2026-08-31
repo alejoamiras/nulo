@@ -190,6 +190,18 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 				if (authorizedFence.profileId !== payload.session.profileId) {
 					throw new Error("Active profile changed since approval; aborting to avoid executing against the wrong profile")
 				}
+				// The session in the payload is a snapshot from interaction CREATION,
+				// and the approval popup can sit open for minutes — long enough for a
+				// delete + same-id re-import to settle, which the capture above cannot
+				// see (it observes the successor's epoch). The session ROW is the
+				// discriminator: the deletion cascade purges it and a re-import never
+				// resurrects it, so requiring it live (and owned by the captured
+				// profile) closes the creation→click window; the fence covers
+				// click→commit.
+				const liveSession = await this.dappSessionService.tryGetDappSession(payload.session.id)
+				if (!liveSession || liveSession.profileId !== authorizedFence.profileId) {
+					throw new Error("Session no longer valid; aborting")
+				}
 			}
 			await this.profileService.refreshSession()
 			// Forward hooks captured at interaction-creation time. Survives the

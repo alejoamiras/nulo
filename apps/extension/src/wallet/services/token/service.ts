@@ -141,17 +141,23 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		// inside the lock would invert the seeder-commit's markerLock→tokenLock
 		// order into a deadlock.)
 		await this.seeder.onChainPurged(profileId, chainId)
-		// Under the same lock persistToken commits with: the sweep and a create
-		// are atomic — a create either lands before the snapshot (and is purged)
-		// or runs after and fails its own in-lock liveness assert.
-		await this.lock.withLock(async () => {
-			const tokens = (await this.tokens.getValues()).filter((t) => t.profileId === profileId && t.chainId === chainId)
-			await purgeRows(
-				tokens,
-				(token) => this.tokens.delete(`${token.id}`),
-				(token) => this.emit("onTokenDeleted", { ...getTokenInfo(token), profileId: token.profileId }),
-			)
-		})
+		// NO token lock here — the caller (purgeChain) holds the NETWORK lock
+		// (watchdog-disabled by design), and persistToken's in-token-lock
+		// metadata fetch takes the network lock via getNode: a sweep under the
+		// token lock closes that pair into an ABBA deadlock broken only by the
+		// token watchdog (5-minute freeze, then a displaced writer). Create-vs-
+		// sweep atomicity is held by the CREATE side instead: every create
+		// commits under the token lock with an isNetworkLive assert (false for
+		// the whole purge — deletingNetworks reservation precedes the sweep) and
+		// a POST-set isNetworkLive compensate for a reservation landing during
+		// the set — so any row a purge could miss self-compensates, and any row
+		// committed before the reservation is in this snapshot.
+		const tokens = (await this.tokens.getValues()).filter((t) => t.profileId === profileId && t.chainId === chainId)
+		await purgeRows(
+			tokens,
+			(token) => this.tokens.delete(`${token.id}`),
+			(token) => this.emit("onTokenDeleted", { ...getTokenInfo(token), profileId: token.profileId }),
+		)
 	}
 
 	public async getTokens(profileId?: string, chainId?: number): Promise<TokenInfo[]> {
@@ -356,6 +362,15 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 					if (!this.profiles.getDeletionState().isCurrent(fence.profileId, fence.epoch)) {
 						await this.tokens.delete(`${token.id}`)
 						throw new Error(`profile ${fence.profileId} deleted`)
+					}
+					// Network leg of the same compensate: the sweep runs WITHOUT the
+					// token lock (deadlock avoidance — see clearChainState), so a
+					// purge whose reservation landed during the set above may have
+					// snapshotted before this row existed. Self-compensating here is
+					// what makes the lockless sweep complete.
+					if (!(await this.networks.isNetworkLive(networkId))) {
+						await this.tokens.delete(`${token.id}`)
+						throw new Error("network deleted")
 					}
 					this.emit("onTokenAdded", getTokenInfo(token))
 				}

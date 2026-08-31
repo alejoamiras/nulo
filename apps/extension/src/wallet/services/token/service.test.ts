@@ -55,12 +55,13 @@ async function makeHarness() {
 			captureExecutionFence: async () => ({ profileId: "p1", epoch: deletionState.capture("p1") }),
 		}),
 	)
+	const networkLive = { value: true }
 	collection.add(
 		svc(NetworkService.name, {
 			getNetwork: async () => NETWORK,
 			registerChainPurgeSubscriber: () => {},
 			onActiveNetworkChanged: new EventHandler(),
-			isNetworkLive: async () => true,
+			isNetworkLive: async () => networkLive.value,
 		}),
 	)
 	collection.add(svc(AccountService.name, {}))
@@ -73,7 +74,7 @@ async function makeHarness() {
 	const fetchStub = vi.fn(async (): Promise<[string, string, number]> => ["Fetched Name", "FTCH", 9])
 	// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to stub the private simulate-backed fetch
 	;(tokenService as any).fetchTokenMetadata = fetchStub
-	return { tokenService, journal, fetchStub, api, deletionState }
+	return { tokenService, journal, fetchStub, api, deletionState, networkLive }
 }
 
 describe("TokenService.addToken — journal/lock machinery (characterization)", () => {
@@ -286,6 +287,48 @@ describe("TokenService.addToken — creation fences", () => {
 		await expect(
 			tokenService.addTokenAuthorized(staleFence, "p1", NETWORK.id, "0xacc", ti("0xdead"), { origin: "popup" }),
 		).rejects.toThrow(/deleted|not current/i)
+	})
+
+	test("clearChainState sweeps WITHOUT the token lock — it completes while a create holds it (ABBA pin)", async () => {
+		// purgeChain's caller holds the watchdog-disabled NETWORK lock, and a
+		// create's in-token-lock metadata fetch takes the network lock via
+		// getNode — a sweep queued on the token lock here would deadlock that
+		// pair for the token watchdog's full 5 minutes. The sweep must proceed
+		// while the token lock is held.
+		const { tokenService, fetchStub } = await makeHarness()
+		let releaseFetch!: (v: [string, string, number]) => void
+		fetchStub.mockReturnValueOnce(new Promise((r) => (releaseFetch = r)))
+		const adding = tokenService.addToken("p1", NETWORK.id, "0xacc", ti("0xheld"), { origin: "popup" })
+		await new Promise((r) => setTimeout(r, 20)) // create now holds the token lock, parked in the fetch
+
+		let sweepDone = false
+		const sweeping = tokenService.clearChainState("p1", 1).then(() => {
+			sweepDone = true
+		})
+		await new Promise((r) => setTimeout(r, 30))
+		expect(sweepDone).toBe(true) // did NOT queue behind the held token lock
+
+		releaseFetch(["Held", "HLD", 9])
+		await adding
+		await sweeping
+	})
+
+	test("a purge reservation landing DURING the row set is self-compensated (lockless-sweep belt)", async () => {
+		// The sweep no longer holds the token lock, so a row landing between the
+		// sweep's snapshot and its purge would survive — unless the create
+		// re-checks liveness AFTER its set and compensates.
+		const { tokenService, api, networkLive } = await makeHarness()
+		const realSet = api.storage.local.set.bind(api.storage.local)
+		api.storage.local.set = (async (items: Record<string, unknown>) => {
+			await realSet(items)
+			if (Object.keys(items).some((k) => k.startsWith("nulo:core:tokens@"))) {
+				networkLive.value = false // the deleteNetwork reservation lands mid-set
+			}
+		}) as typeof api.storage.local.set
+
+		await expect(tokenService.addToken("p1", NETWORK.id, "0xacc", ti("0xdead"), { origin: "popup" })).rejects.toThrow(/network deleted/)
+		api.storage.local.set = realSet as typeof api.storage.local.set
+		expect(await tokenRowCount(api)).toBe(0)
 	})
 
 	test("a deletion completing DURING findToken rejects the fast-path read exit too (F11)", async () => {

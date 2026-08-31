@@ -108,6 +108,27 @@ describe("NetworkService — addNetwork creation fence", () => {
 		const raw = await h.browserApi.storage.local.get(null)
 		expect(Object.keys(raw as Record<string, unknown>).some((k) => k.startsWith("nulo:core:networks@"))).toBe(false)
 	})
+
+	test("first-run seeding REJECTS (not empty-success) when the deletion lands mid-seed", async () => {
+		// The per-seed catch soft-fails one bad seed by design — but it also
+		// swallows the deletion compensate's throw, and without the post-loop
+		// re-assert the call would return [] as a SUCCESS for a deleted profile.
+		const h = harness({})
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;(h.service as any).initialized = true
+		const realSet = h.browserApi.storage.local.set.bind(h.browserApi.storage.local)
+		let fired = false
+		h.browserApi.storage.local.set = (async (items: Record<string, unknown>) => {
+			await realSet(items)
+			if (!fired && Object.keys(items).some((k) => k.startsWith("nulo:core:networks@"))) {
+				fired = true
+				h.deletionState.beginDeletion("p1")
+				h.deletionState.release("p1")
+			}
+		}) as typeof h.browserApi.storage.local.set
+
+		await expect(h.service.getOrInitNetworks()).rejects.toThrow(/deleted|not current/i)
+	})
 })
 
 describe("NetworkService — resolveVerifiedL1ChainId single-snapshot", () => {

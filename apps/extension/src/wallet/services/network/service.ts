@@ -265,6 +265,10 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 					this.logError(`Failed to seed default '${seed.name}'`, getErrorMessage(error))
 				}
 			}
+			// The per-seed catch above (soft-fail is right for one bad seed) also
+			// swallows the deletion compensate's throw — without this re-assert the
+			// call would return [] as a SUCCESS for a deleted profile.
+			deletion.assertCurrent(fence.profileId, fence.epoch)
 			if (!activeId && seeded.length) activeId = seeded[0]!.id
 			if (activeId) {
 				deletion.assertCurrent(fence.profileId, fence.epoch)
