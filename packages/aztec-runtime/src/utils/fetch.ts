@@ -32,6 +32,7 @@ type JsonRpcFetch = (
  * adds an AbortController that fires after `timeoutMs`.
  */
 function fetchOnce(timeoutMs: number): JsonRpcFetch {
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 21) — refactor when touched, never raise
 	return async (host, body, extraHeaders = {}, noRetry = false) => {
 		const controller = new AbortController()
 		const timeoutId = setTimeout(() => controller.abort(), timeoutMs)

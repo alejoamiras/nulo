@@ -100,6 +100,7 @@ async function findIncomingRecordByHash(page: Page, txHash: string): Promise<Sto
 test.skipIf(!hasConfig)(
 	"phase-0 harness: incoming-poll gate holds A's scan after discovery, releases into a committed record",
 	{ timeout: 600_000, retry: 0 },
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 17) — refactor when touched, never raise
 	async ({ tokenReadyExtension }) => {
 		if (!aztecConfig) throw new Error("unreachable — skipIf guards hasConfig")
 

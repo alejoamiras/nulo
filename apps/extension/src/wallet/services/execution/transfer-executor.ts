@@ -78,6 +78,7 @@ export interface TransferExecutorDeps {
 export class TransferExecutor {
 	public constructor(private readonly deps: TransferExecutorDeps) {}
 
+	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (118 lines) — split when touched, never grow
 	public async execute(req: TransferRequest, precomputedEstimateId?: string, fence?: ExecutionFence): Promise<string> {
 		const { networkId, accountAddress, tokenId, transferType, recipientAddress, amount } = req
 		const origin: LocalTxOrigin = { type: OriginType.UI }

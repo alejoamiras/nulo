@@ -4,6 +4,7 @@
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language"
 import { EditorView } from "@codemirror/view"
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (154 lines) — split when touched, never grow
 export const createTheme = ({ styles }) => {
 	const theme = EditorView.theme(
 		{

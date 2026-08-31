@@ -86,6 +86,7 @@ const advancePastAuth = async () => {
 	if (failure) postAuthNavClaimed = false
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 28) — refactor when touched, never raise
 const handleUnlockWallet = async () => {
 	if (!isAllowedToContinue.value) return
 	// Reentry guard: two programmatic submits while the first unlock awaits

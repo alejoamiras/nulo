@@ -216,6 +216,7 @@ function positionOf(log: LogResult): PublicEventCursor {
  * A reorg that dropped `referenceBlock` makes `getPublicLogsByTags` THROW — that propagates to the
  * caller unchanged (it is the D6 reorg-detection signal, not swallowed here).
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 25) — refactor when touched, never raise
 export async function fetchPublicTokenTransferEvents(
 	node: AztecNode,
 	contract: string,

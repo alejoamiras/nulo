@@ -258,6 +258,7 @@ function describeRestoreError(value: unknown): unknown {
  * transactions are keyed by `hash` and config by `key`, none of which are kept — so without a
  * position two failures in the same slice would be indistinguishable.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 function projectRestoreErrorRow(row: Record<string, unknown>, index: number, serviceName: string): Record<string, unknown> {
 	const out: Record<string, unknown> = { row: index }
 	for (const field of RESTORE_ERROR_FIELDS_BY_SERVICE[serviceName] ?? []) {
@@ -322,6 +323,7 @@ function capRecords(records: unknown[]): unknown[] {
  * which the hijacked console feeds into the log store. Passing rows through whole put
  * `encryptedSigningKey`, `rpcUrl` and contact PII on both paths.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 21) — refactor when touched, never raise
 export function collectRestoreErrors(serviceName: string, data: unknown): unknown[] | null {
 	if (!Array.isArray(data) || !data.length || !serviceName) return null
 	if (serviceName === "account-state") {

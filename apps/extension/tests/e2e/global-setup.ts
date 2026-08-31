@@ -229,6 +229,7 @@ export default async function setupWithTeardown(project: TestProject): Promise<(
 	return teardown
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 81) — refactor when touched, never raise
 export async function setup(project: TestProject) {
 	killOrphanChromes()
 

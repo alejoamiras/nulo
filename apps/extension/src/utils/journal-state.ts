@@ -326,6 +326,7 @@ export interface JournalTerminalCardProps {
  * Pure function. `tokenById` is passed via ctx because the token cache
  * lives in popup-store land; this file stays free of Pinia / Vue refs.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 export function buildJournalTerminalCardProps(op: OperationRecord, ctx: JournalTerminalCardCtx): JournalTerminalCardProps | null {
 	if (!ACTIVITY_FEED_KINDS.has(op.kind)) return null
 	const display = journalTerminalDisplay(op)

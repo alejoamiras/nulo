@@ -93,6 +93,7 @@ export function truncateErrorMessage(message: string): string {
  * (so duplicates cannot bypass per-network caps), enforce every cap, and
  * collapse malformed/excess content into bounded violation records.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 39) — refactor when touched, never raise
 export function normalizeAccountStateSlice(raw: unknown): NormalizedAccountState {
 	if (!Array.isArray(raw)) {
 		return { items: [], violations: [violation("(slice)", "malformed account-state slice (not an array)")] }

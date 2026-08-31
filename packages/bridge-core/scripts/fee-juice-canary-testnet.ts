@@ -74,6 +74,8 @@ const ERC20_MIN = [
 	},
 ] as const
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (107 lines) — split when touched, never grow
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 30) — refactor when touched, never raise
 async function main() {
 	const mins = stopwatch()
 	const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`)

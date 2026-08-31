@@ -91,6 +91,7 @@ export type MigrationBlockedStatus = {
  *    malformed `backstopRuns` decodes to 1 (already spent) — each field
  *    degrades in its own conservative direction, and none can void a valid
  *    same-version terminal verdict. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 export function decodeBlockedStatus(
 	raw: unknown,
 	currentExtensionVersion: string,

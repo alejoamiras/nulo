@@ -93,6 +93,7 @@ export async function pickFile(accept = ".json,.txt,.gz,.gzip", delay = false, a
 
 		document.body.appendChild(input)
 
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
 		input.onchange = async () => {
 			const file = input.files?.[0]
 			document.body.removeChild(input)

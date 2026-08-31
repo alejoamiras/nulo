@@ -130,6 +130,8 @@ function assertSame(actual: unknown, expected: unknown, label: string): void {
 	console.log(`  ✓ ${label}`)
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (270 lines) — split when touched, never grow
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 59) — refactor when touched, never raise
 async function main() {
 	const mins = stopwatch()
 

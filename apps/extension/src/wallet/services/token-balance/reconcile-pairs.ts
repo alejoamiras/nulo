@@ -74,6 +74,7 @@ function pairKey(token: number, account: string): string {
  * Output order is total and deterministic — chainId, token id, account index,
  * then address — so a repair batch allocates ids in a reproducible sequence.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
 export function reconcilePlan<T extends ReconcileToken, A extends ReconcileAccount, R extends ReconcileRow>(input: {
 	tokens: readonly T[]
 	accounts: readonly A[]

@@ -146,6 +146,8 @@ const ERC20_META = [
 	},
 ] as const
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (276 lines) — split when touched, never grow
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 65) — refactor when touched, never raise
 async function main() {
 	const mins = stopwatch()
 

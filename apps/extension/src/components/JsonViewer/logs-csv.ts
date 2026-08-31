@@ -8,6 +8,7 @@ const MAX_CELL_LENGTH = 32_760
  * downstream spreadsheets (Excel cell limit is 32_767 chars) don't
  * truncate silently.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 17) — refactor when touched, never raise
 export function buildLogsCsv(logs: LogEntry[]): string {
 	const rows: [string, string, string, string][] = []
 

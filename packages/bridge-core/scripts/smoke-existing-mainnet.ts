@@ -70,6 +70,8 @@ function nargoArtifact(rel: string) {
 	return loadContractArtifact(JSON.parse(readFileSync(join(AZTEC, rel), "utf8")))
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (145 lines) — split when touched, never grow
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
 async function main() {
 	const mins = stopwatch()
 

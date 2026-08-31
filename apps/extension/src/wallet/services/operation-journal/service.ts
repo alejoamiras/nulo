@@ -306,6 +306,7 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		})
 	}
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 29) — refactor when touched, never raise
 	private async _transitionLocked(id: string, progress: JobProgress, error?: JobError | null): Promise<OperationRecord> {
 		const existing = await this._loadValidated(id)
 		if (!existing) {

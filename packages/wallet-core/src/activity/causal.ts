@@ -210,6 +210,7 @@ export function applySnapshot<T>(state: SourceState<T>, snapshot: ActivitySnapsh
 }
 
 /** Merge snapshot rows/tombstones into `base`, which is already on the snapshot's incarnation. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
 function installSnapshot<T>(base: SourceState<T>, snapshot: ActivitySnapshot<T>): SourceState<T> {
 	const watermark = snapshot.watermark
 	const next = cloneState(base)

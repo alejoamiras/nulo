@@ -392,6 +392,7 @@ export class WalletSdkDispatcher {
 	 * @returns The result value from the first (and only) operation
 	 * @throws If the method is unsupported, the operation fails, or session context is invalid
 	 */
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 25) — refactor when touched, never raise
 	async dispatch(methodName: string, args: unknown[], ctx: SessionContext, hooks?: DispatchHooks): Promise<unknown> {
 		// F-006 / audit cross-cutting #1 / Phase 0.5: capture the dApp session
 		// ONCE at dispatch entry and thread it through every internal call.
@@ -866,6 +867,8 @@ export class WalletSdkDispatcher {
 	 * 3. Show popup for delta → user approves → merge and store
 	 *    - Track rejected types for future re-request detection
 	 */
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 31) — refactor when touched, never raise
+	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (102 lines) — split when touched, never grow
 	private async handleRequestCapabilities(
 		manifest: CapabilityManifest,
 		ctx: SessionContext,

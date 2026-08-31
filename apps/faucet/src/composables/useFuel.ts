@@ -56,6 +56,7 @@ const NODE_URL = NETWORK.nodeUrl
  * also sets the TOP-LEVEL `secret` so the engine's public-claim gate passes (it requires `rec.secret`);
  * the claim builder reads `fuel.secret`. PRIVATE seals the salt (the sole recovery input).
  */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (191 lines) — split when touched, never grow
 export function useFuelFlow() {
 	ensureDepositJournalDeps() // wire the journal engine WITHOUT useDepositFlow's resumeSessionWork watch.
 	const l1 = useL1Wallet()
@@ -66,6 +67,8 @@ export function useFuelFlow() {
 	const busy = ref(false)
 	const error = ref<string | null>(null)
 
+	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (182 lines) — split when touched, never grow
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 52) — refactor when touched, never raise
 	async function deposit(amount: bigint, isPrivate = false, opts: { onRecord?: (id: string) => void } = {}): Promise<string | null> {
 		error.value = null
 		const wallet = l1.ensureWalletClient()

@@ -73,6 +73,8 @@ const FUEL_SLICE = 25n * 10n ** 16n // 0.25 AZLO ≈ ~487 FJ at the live rate (t
 // scales with it, but the bridged FJ (~hundreds) dwarfs the few-FJ ceiling, so it never strands the budget.
 const RELIABILITY_PAD = Number(process.env.RELIABILITY_PAD ?? 1.5)
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (246 lines) — split when touched, never grow
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 47) — refactor when touched, never raise
 async function main() {
 	const mins = stopwatch()
 
@@ -219,6 +221,8 @@ async function main() {
 	}
 
 	// ─── One variant = L1 swap+bridge → self-paying L2 claim ─────────
+	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (97 lines) — split when touched, never grow
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 60) — refactor when touched, never raise
 	const runVariant = async (isPrivate: boolean, nonce: bigint, fuelViaPrivateFpc = false) => {
 		const label = `${isPrivate ? "PRIVATE" : "PUBLIC"}${fuelViaPrivateFpc ? "+FPC-fuel" : ""}`
 		console.log(`\n=== ${label} fueled bridge ===`)

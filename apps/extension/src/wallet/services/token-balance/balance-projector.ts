@@ -97,6 +97,7 @@ export class BalanceProjector {
 		return results
 	}
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 27) — refactor when touched, never raise
 	private async projectChunk(account: string, chainId: number, balances: TokenBalanceRaw[]): Promise<ProjectedBalance[]> {
 		try {
 			const calls: [CallAction | EncodedCallAction, number, boolean, ViewFn][] = []

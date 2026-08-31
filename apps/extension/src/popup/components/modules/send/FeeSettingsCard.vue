@@ -343,6 +343,7 @@ const commitFromEntry = (scope, reqKey, saved, baseline) => {
 	}
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 20) — refactor when touched, never raise
 const runInit = async () => {
 	const myRun = ++runSeq
 	try {

@@ -177,6 +177,8 @@ const {
 	reject: () => reject(),
 })
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (103 lines) — split when touched, never grow
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 25) — refactor when touched, never raise
 const init = async () => {
 	// B-30: disconnect the locally-constructed account/network clients on EVERY
 	// exit path. They were disconnected only on the success path (after the ops

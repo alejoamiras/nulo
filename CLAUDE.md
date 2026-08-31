@@ -73,6 +73,17 @@ Account addresses are a **frozen, versioned artifact of the extension major**, n
 - **Extension-major strategy (protocol break = a NEW extension).** "Nulo V6" ships as a separate extension ID + store listing, coexisting with V5. V5 backups restore under V5 derivation in V5 only; V6 recovery = seed import deriving V6-regime accounts (V5 backups are NOT imported into V6 as V5-derived accounts). Stored accounts are never ambiguous: every account in a given major belongs to that major's one regime.
 - **Runtime mismatch is a handled state, not a bare throw.** A stored account address that no longer matches re-derivation triggers the background integrity coordinator (session withheld, persisted blocking state, dedicated screen that never solicits the seed and offers no delete CTA); the typed `AccountAddressInconsistencyError` replaces the old generic throw. Deletion stays a deliberate settings flow.
 
+## Complexity budgets
+
+Biome enforces per-function complexity budgets at **error** severity, everywhere Biome runs (editor, pre-commit `--staged`, `bun run lint`, `quality-status`). Full rationale + the Claude×Codex reconciliation: [`implementations-plan/complexity-budgets/plan.md`](./implementations-plan/complexity-budgets/plan.md).
+
+- **Cognitive complexity ≤ 15** (`noExcessiveCognitiveComplexity`) — ALL code: src, tests, e2e, scripts, `.vue` script blocks. Write flat early-return dispatch, not nesting pyramids; a flat `switch` or one `&&`-run costs 1.
+- **≤ 80 non-blank lines per production function** (`noExcessiveLinesPerFunction`) — tests/e2e exempt via override. Blanks are free by design: the only way under the cap is less code, not denser code.
+- **`describe()` nesting ≤ 5** (`noExcessiveNestedTestSuites`) — zero findings at adoption; keep it that way.
+- **The baseline only shrinks — NEVER add a complexity suppression.** ~230 pre-existing offenders carry function-scoped `// biome-ignore lint/complexity/...: baseline (...)` directives, pinned per-rule × per-file by [`scripts/complexity-baseline/manifest.json`](./scripts/complexity-baseline/manifest.json) and enforced by `scripts/ci-cd/complexity-baseline.test.ts` (rides `test:ci-gating`). New code meets the budgets, full stop; a new suppression anywhere is a red build. When you touch a baselined function, refactor it under budget and rerun `bun run baseline:complexity` in the same PR (the shrink is otherwise a test failure — the manifest must match exactly).
+- **A `@biomejs/biome` version bump requires baseline regeneration** in the same PR (`bun run baseline:complexity`) — scores drift between Biome releases, and the manifest pins the version, so the pin test reds until you do.
+- File-wide `biome-ignore-all` of any complexity rule is forbidden (tested).
+
 ## Package boundaries
 
 See [`ARCHITECTURE.md`](./ARCHITECTURE.md) §2 for the layer hierarchy. Short version:

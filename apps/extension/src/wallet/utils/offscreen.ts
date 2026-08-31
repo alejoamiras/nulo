@@ -227,6 +227,7 @@ async function closeOffscreen() {
  *   taskbar/dock as a Nulo entry; the `chrome.runtime` message channel
  *   works identically to Chromium's offscreen.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
 async function createOffscreen(passId: number) {
 	if (hasOffscreenApi()) {
 		const create = () =>

@@ -482,6 +482,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 			// Phase 3 — re-enter lock, revalidate, open session.
 			try {
+				// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
 				return await this.runExclusive(async () => {
 					const current = await this.repo.get(id)
 					if (!current) {
@@ -678,6 +679,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (recovery.credentialId !== snapshot.credentialId) {
 				throw new Error("Invalid profile id")
 			}
+			// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 21) — refactor when touched, never raise
 			return await this.runExclusive(async () => {
 				const current = await this.repo.get(id)
 				if (!current) {
@@ -885,6 +887,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 	public async changeProfilePassword(id: string, oldPassword: string, newPassword: string): Promise<ProfileInfo> {
 		await this.ensureInitialized()
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 33) — refactor when touched, never raise
 		return this.runExclusive(async () => {
 			const profile = await this.repo.get(id)
 			if (!profile) {
@@ -1231,6 +1234,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		const delegate = this.deletionDelegate
 		if (!delegate) throw new Error("deletion coordinator not ready")
 
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 28) — refactor when touched, never raise
 		const { profile, epoch, snapshot } = await this.runExclusive(async () => {
 			this.sweepStalePendingRestore(Date.now())
 			const profile = await this.repo.get(id)
@@ -1361,6 +1365,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * + generation pin + tuple compare-and-delete are the containment. Without a
 	 * cutoff the sweep is SKIPPED entirely.
 	 */
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 	public async resumePendingDeletions(bootCutoff?: number): Promise<void> {
 		const delegate = this.deletionDelegate
 		if (!delegate) return
@@ -1481,6 +1486,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		return await this.importPasswordProfile(name, secret, entropy as Uint8Array<ArrayBuffer>, passhash, allowDuplicate)
 	}
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 25) — refactor when touched, never raise
 	public async exportPlain(id: string, password?: string, credentialData?: PasskeyCredentialData): Promise<string> {
 		await this.ensureInitialized()
 		// Capture the row + deletion epoch ATOMICALLY under the lock. A delete
@@ -2076,6 +2082,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		return await this.getActiveProfile()
 	}
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 36) — refactor when touched, never raise
+	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (171 lines) — split when touched, never grow
 	public async restore(
 		profile: ProfileInfo,
 		secret: RestoreSecret,
@@ -2423,9 +2431,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * Idempotent in spirit: if the session is already active for this profile,
 	 * skips the re-open (the no-op case after a second `finalizeRestore` call).
 	 */
+	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (94 lines) — split when touched, never grow
 	public async finalizeRestore(id: string, password?: string): Promise<ProfileInfo> {
 		await this.ensureInitialized()
 
+		// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (92 lines) — split when touched, never grow
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 46) — refactor when touched, never raise
 		return this.runExclusive(async () => {
 			// B-11: sweep stale entries but never the id being finalized here.
 			this.sweepStalePendingRestore(Date.now(), id)

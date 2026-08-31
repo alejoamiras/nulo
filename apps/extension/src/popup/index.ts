@@ -53,6 +53,7 @@ const router = createRouter({
 	routes,
 })
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
 router.beforeEach(async (to: RouteLocationNormalized, from: RouteLocationNormalized, next: NavigationGuardNext) => {
 	const appStore = useAppStore()
 

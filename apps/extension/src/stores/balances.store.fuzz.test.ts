@@ -120,6 +120,7 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 			{ numRuns },
 		)
 
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 103) — refactor when touched, never raise
 		async function runTape(tape: number[]) {
 			{
 				// ── per-run world ────────────────────────────────────────────
@@ -204,6 +205,7 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 
 				const flush = () => vi.advanceTimersByTimeAsync(0)
 
+				// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 29) — refactor when touched, never raise
 				const checkInvariants = () => {
 					for (const [key, entry] of Object.entries(store.entries)) {
 						const [profileId, , , accountAddress] = JSON.parse(key) as [string, string, number, string]

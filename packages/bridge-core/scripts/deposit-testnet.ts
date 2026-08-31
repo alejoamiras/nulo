@@ -70,6 +70,7 @@ async function nodeRegistry(): Promise<`0x${string}`> {
 	return pick(a.registryAddress)
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (155 lines) — split when touched, never grow
 async function main() {
 	const mins = stopwatch()
 

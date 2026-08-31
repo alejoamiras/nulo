@@ -174,6 +174,7 @@ function projectError(error: Error): Record<string, unknown> {
 	}
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 45) — refactor when touched, never raise
 export const trim = (value: unknown, depth: number = 0): unknown => {
 	if (Array.isArray(value)) {
 		if (depth === MAX_LOG_DATA_DEPTH) {

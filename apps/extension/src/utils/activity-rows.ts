@@ -47,6 +47,7 @@ export interface BuildActivityRowsParams {
 	profileId?: string
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 29) — refactor when touched, never raise
 export function buildActivityRows({
 	transactions,
 	terminalJournalOps,

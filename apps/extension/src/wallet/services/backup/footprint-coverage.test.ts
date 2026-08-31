@@ -73,6 +73,7 @@ describe("footprint coverage (anti-drift keystone)", () => {
 
 /** Derive sample rows straight from the transform's own declaration, so every
  *  DSL clause is exercised, plus generic rows the transform shouldn't touch. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 17) — refactor when touched, never raise
 function sampleRowsFor(t: RowMapTransform): Array<Record<string, unknown>> {
 	const rows: Array<Record<string, unknown>> = [{}, { untouched: "keep", n: 7, nested: { a: [1, 2] } }]
 	for (const [oldName, newName] of Object.entries(t.rename ?? {})) {

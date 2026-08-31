@@ -23,6 +23,7 @@ export function trackPhases(recordId: string, phases: BridgePhase[], now: number
 		clock = new Map()
 		clocks.set(recordId, clock)
 	}
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
 	return phases.map((phase) => {
 		let times = clock.get(phase.key)
 		if (!times) {

@@ -49,6 +49,7 @@ export function useProfileBootstrap() {
 	 *  checked after every await and before every shared-state mutation so a
 	 *  superseded bootstrap stops instead of replacing the winner's `managers.network`
 	 *  (read dynamically here) or writing stale networks. Standalone callers omit it. */
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 	const initNetworks = async (isCurrent: () => boolean = () => true) => {
 		if (!isCurrent()) return
 		appStore.networks = []

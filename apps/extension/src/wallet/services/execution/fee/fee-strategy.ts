@@ -252,6 +252,7 @@ export function assertCustomGasLimitsWithinCap(fee: FeeOptions | undefined, txsL
  *    bytes than the dApp signed off on).
  *  Absent (defensive), behavior is unchanged. NO_FROM builds never reach this
  *  function — their gasSettings are capped by construction in the builder. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 27) — refactor when touched, never raise
 export async function finalizeGasLimits(
 	node: AztecNode,
 	txRequest: TxExecutionRequest,

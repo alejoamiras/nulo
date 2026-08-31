@@ -304,6 +304,8 @@ export interface SwapRecoveryHooks {
  * (read from the `BridgeWithFuel` event, not guessed from deposit order) the L2 side claims with.
  * viem-only; the L2 claims (token via claim_*, fuel via publicFeeJuicePayment) run separately.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (82 lines) — split when touched, never grow
 export async function runSwapBridge(
 	l1: L1Ctx,
 	p: SwapBridgeParams,

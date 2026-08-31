@@ -202,6 +202,7 @@ async function ensureAccountDeployed(manager: AccountManager, node: AztecNode, f
 
 // ── Generic deploy with idempotency ─────────────────────────────────────────
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
 async function deployIfMissing(
 	deployer: Wallet,
 	node: AztecNode,

@@ -102,6 +102,7 @@ function clearsFeeLimit(
 }
 
 /** Build the {simulate, send} for a direct Fee-Juice claim. Guards fail CLOSED (return a `stop`). */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 26) — refactor when touched, never raise
 export async function buildFuelClaimInteraction(rec: DepositJournalRecord, deps: FuelClaimDeps): Promise<FuelClaimInteraction> {
 	const fuel = rec.fuel
 	if (!fuel?.received || !fuel.leafIndex) return stop("This Fuel bridge has no claimable Fee Juice.")

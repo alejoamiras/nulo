@@ -28,6 +28,7 @@ const MAX_VALUE_DEPTH = 6
 /** Type-tagged, length-prefixed scalar/structure encoder. Returns null on any
  *  value outside the allowlist (functions, symbols, class instances, Maps,
  *  cycles-by-depth, …). */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 25) — refactor when touched, never raise
 function encodeValue(value: unknown, depth: number): string | null {
 	if (depth > MAX_VALUE_DEPTH) return null
 	if (value === null) return "z"
@@ -85,6 +86,7 @@ function encodeStringArray(values: readonly string[]): string {
 }
 
 /** Exhaustive per-kind action encoder. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
 function encodeAction(action: Action): string | null {
 	switch (action.kind) {
 		case "add_capsule":

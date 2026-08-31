@@ -104,6 +104,7 @@ export function serializeAccountExport(exp: AccountExportV1): string {
  * signing key + l1ChainId + the file's CLAIMED address (the caller must recompute the address
  * from the signing key and compare — the checksum does not authenticate the address).
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 export function parseAccountExport(json: string): { signingKey: Fq; l1ChainId: number; claimedAddress: string } {
 	let raw: unknown
 	try {

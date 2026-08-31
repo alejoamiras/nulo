@@ -293,6 +293,7 @@ let depsWired = false
 /** Wire the journal engine's deposit-side chain deps (idempotent; real clients only). Exported as
  *  ensureDepositJournalDeps so the Fuel flow guarantees wiring WITHOUT useDepositFlow's
  *  resumeSessionWork side-effect (codex Option C, lessons/phase-3.md). */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (226 lines) — split when touched, never grow
 export function ensureDepositJournalDeps(): void {
 	if (depsWired) return
 	depsWired = true
@@ -376,6 +377,8 @@ export function ensureDepositJournalDeps(): void {
 			updateRecord(rec.id, { leafIndex: event.args.index.toString() })
 			return "recovered"
 		},
+		// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (154 lines) — split when touched, never grow
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 75) — refactor when touched, never raise
 		claim: async (rec, secretHex, envelope) => {
 			const aztec = bridgeWallet.wallet.value
 			if (!aztec) throw new Error("Connect your Aztec wallet first.")
@@ -667,6 +670,7 @@ export function ensureDepositJournalDeps(): void {
  * private bridge), and re-seal the finalized envelope (leafIndex) with the retained in-memory
  * key - zero extra signatures.
  */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (351 lines) — split when touched, never grow
 export function useDepositFlow() {
 	ensureDepositJournalDeps()
 	const l1 = useL1Wallet()
@@ -676,6 +680,8 @@ export function useDepositFlow() {
 	const busy = ref(false)
 	const error = ref<string | null>(null)
 
+	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (334 lines) — split when touched, never grow
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 132) — refactor when touched, never raise
 	async function deposit(
 		amount: bigint,
 		isPrivate = false,

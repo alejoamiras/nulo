@@ -162,6 +162,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		// Sentinel shape: the concurrent-holder early return maps UNDER the lock
 		// (as today), while the tail mapping below stays after release. `undefined`
 		// is the no-early-return sentinel — the mapped value is always an array.
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 21) — refactor when touched, never raise
 		const early = await this.lock.withLock(async () => {
 			// Re-read storage now that we hold the lock. A prior holder in the
 			// queue may have just completed discovery — if so, skip the PXE

@@ -166,6 +166,8 @@ const OPERATIONAL_ALLOWLIST = [
 	"apps/faucet/public/testnet-bridge.journal.jsonl",
 ]
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (92 lines) — split when touched, never grow
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
 async function build(intentPath: string): Promise<void> {
 	const sepolia = process.env.SEPOLIA_RPC_URL
 	if (!sepolia) throw new Error("SEPOLIA_RPC_URL required (source packages/bridge-core/.env)")
@@ -299,6 +301,8 @@ async function build(intentPath: string): Promise<void> {
 	)
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (91 lines) — split when touched, never grow
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 61) — refactor when touched, never raise
 async function verify(intentPath: string, candidatePath?: string): Promise<void> {
 	const intent = JSON.parse(readFileSync(intentPath, "utf8")) as DeployIntent
 	const sepolia = process.env.SEPOLIA_RPC_URL
@@ -479,6 +483,8 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
  * candidate's `l1.fuel` section must be BYTE-carried from the current live
  * manifest — new or changed fuel infrastructure hard-fails the promotion.
  */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (91 lines) — split when touched, never grow
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 35) — refactor when touched, never raise
 async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwap?: boolean; restoreSwap?: boolean } = {}): Promise<void> {
 	// --bridge-only: a bridge cutover that touches NO faucet deployment (codex r1 HIGH-4). The faucet
 	// candidate is not required; instead the LIVE faucet manifest is digest-pinned before/after so the

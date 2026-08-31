@@ -342,6 +342,7 @@ function guardDeployment(rec: BridgeJournalRecord): boolean {
  * the v2 envelope is opened (the ONLY accepted shape) and verified against the record's display
  * fields; mismatch rewrites the display from the envelope and stops for an explicit re-click.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 async function resolvePrivateSecret(rec: DepositJournalRecord): Promise<{ secretHex: string; envelope: DepositEnvelopeV2 } | null> {
 	const cached = secretCache.get(rec.id)
 	if (cached) return cached
@@ -548,10 +549,13 @@ function surfaceRunFailure(id: string, e: unknown): void {
 	setRuntime(id, { attention: "error", note: `${msg}. Your funds are not lost - retry from this card.` })
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (127 lines) — split when touched, never grow
 async function runDepositClaimInner(id: string, opts: { interactive?: boolean } = {}): Promise<void> {
 	const interactive = opts.interactive !== false
 	let continueRounds = false
 	let gen = 0
+	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (120 lines) — split when touched, never grow
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 114) — refactor when touched, never raise
 	await withRecordLock(id, async () => {
 		// F11: this runner is now the record's owner - any previously scheduled round dies silently.
 		gen = bumpGen(id)
@@ -772,6 +776,7 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 
 /** One ~3-minute receipt round (D4 completion, D2 narration). Returns "continue" when the claim
  *  is still pending and another round should be scheduled by the caller (outside the lock). */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 33) — refactor when touched, never raise
 async function runReceiptRound(rec: DepositJournalRecord, gen: number): Promise<"done" | "stop" | "continue"> {
 	if (!deps.claimReceiptStatus || !rec.claimTxHash) return "stop"
 	const roundsDone = receiptRounds.get(rec.id) ?? 0
@@ -890,6 +895,7 @@ export async function runWithdrawConsume(id: string): Promise<void> {
 }
 
 async function runWithdrawConsumeInner(id: string): Promise<void> {
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
 	await withRecordLock(id, async () => {
 		const rec = records.value.find((r) => r.id === id && r.direction === "withdraw") as WithdrawJournalRecord | undefined
 		if (!rec || rec.completedAt) return
@@ -949,6 +955,7 @@ async function runWithdrawConsumeInner(id: string): Promise<void> {
 }
 
 /** Auto-continue ONLY what this page session initiated, plus prompt-free receipt waits. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
 export function resumeSessionWork(): void {
 	for (const rec of records.value) {
 		if (rec.completedAt) continue

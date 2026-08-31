@@ -236,6 +236,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		const fence = await this.profileService.captureExecutionFence()
 		const deletion = this.profileService.getDeletionState()
 		const profile = { id: fence.profileId }
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
 		return await this.lock.withLock(async () => {
 			const existing = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
 			if (existing.length) return existing
@@ -836,6 +837,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			networks.map((n) => (n as { profileId?: unknown } | null)?.profileId),
 		)
 		const result: Restored<Network>[] = []
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 24) — refactor when touched, never raise
 		return await this.lock.withLock(async () => {
 			const existing = await this.storage.getValues()
 			// A collision re-roll must avoid every SOURCE id in this batch too, not

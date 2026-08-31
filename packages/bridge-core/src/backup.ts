@@ -70,6 +70,7 @@ const isOptionalDecimalString = (v: unknown): v is string | undefined => v === u
 
 /** STRICT per-direction guard for foreign input - the journal's shallow parse filter is for OUR
  *  own storage, never for a file someone handed us. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
 export function validateBackupRecord(rec: unknown): BridgeJournalRecord {
 	const r = rec as Partial<BridgeJournalRecord> | null
 	if (

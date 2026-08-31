@@ -35,6 +35,7 @@ export function useTokenBalance(wallet: Wallet, tokenAddress: AztecAddress, acco
 	let timer: ReturnType<typeof setInterval> | null = null
 	let disposed = false
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
 	async function fetchOnce(): Promise<void> {
 		if (disposed) return
 		loading.value = true

@@ -355,6 +355,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			return
 		}
 
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 17) — refactor when touched, never raise
 		await this.withServiceLock(async () => {
 			for (const network of networks) {
 				// Scheduler key is `(networkId, address)` — no profileId. Only
@@ -713,6 +714,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	 *  covers EVERY hydrate caller (init, profile-change, account-add,
 	 *  clearProfile, clearChain).
 	 */
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
 	private async hydrateSchedulers(): Promise<void> {
 		this.bumpServiceEpoch()
 		const epochAtStart = this.serviceEpoch
@@ -885,6 +887,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		const network = (await this.networkService.getNetworksRaw(profileId, token.chainId))[0]
 		if (!network) return
 
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
 		await this.withServiceLock(async () => {
 			// Bump the epoch FIRST — before the scheduler teardown / sync-state eviction / any await — so an
 			// in-flight off-lock scan holding the old epoch can't emit a sync state (or otherwise write) that
@@ -1043,6 +1046,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		// notes find `pending` and skip the emit (sticky pending semantic).
 		for (const note of notes) {
 			if (!note.siloedNullifier) continue
+			// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 47) — refactor when touched, never raise
 			await this.withServiceLock(async () => {
 				// Lifecycle-cancel guard.
 				if (this.serviceEpoch !== epochAtStart) return
@@ -1276,6 +1280,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	 * in-progress reconciliation / pending page or runs a bounded forward scan. A reorg throw
 	 * (referenceBlock dropped) escalates to reconciliation (D6).
 	 */
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 	private async scanPublicContract(profileId: string, networkId: string, contract: string): Promise<void> {
 		const epochAtStart = this.serviceEpoch
 		let network: Network
@@ -1697,6 +1702,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		const canonicalByHeight = new Map<number, string>()
 		for (const [height, hash] of seen) canonicalByHeight.set(height, hash)
 
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 17) — refactor when touched, never raise
 		await this.withServiceLock(async () => {
 			if (this.serviceEpoch !== epochAtStart) return
 			const records = await this.repo.listByContract(profileId, networkId, contract)
@@ -1759,6 +1765,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		epochAtStart: number,
 		opts?: { reconcile?: boolean },
 	): Promise<void> {
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 35) — refactor when touched, never raise
 		await this.withServiceLock(async () => {
 			if (this.serviceEpoch !== epochAtStart) return
 			const tokens = await this.tokenService.getTokensRaw(profileId)
@@ -1906,6 +1913,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			if (profileId !== profile.id) continue // active-profile-scoped (codex R2-followup-2 #1)
 			const tokenId = Number(tokenIdStr)
 			if (!Number.isInteger(tokenId)) continue
+			// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 47) — refactor when touched, never raise
 			await this.withServiceLock(async (isCurrent) => {
 				const current = await this.repo.getOutbox(profileId, networkId, accountAddress, tokenId)
 				if (!current) return
