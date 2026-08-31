@@ -49,6 +49,14 @@ const {
 	mode: "resync",
 })
 
+// A profile/network switch emits no sender events and this route is not
+// remounted — refetch explicitly; the composable's fetch sequence retires
+// stale fetches.
+watch(
+	() => [appStore.profile?.id, appStore.network?.id],
+	() => void fetchSenders(),
+)
+
 const handleCopyAddress = (address) => {
 	copiedAddress.value = address
 

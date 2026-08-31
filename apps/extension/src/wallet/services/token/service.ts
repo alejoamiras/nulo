@@ -285,6 +285,10 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		// the write path against concurrent imports of NEW addresses.
 		const existing = await this.findToken(profileId, tokenInterface.chainId, tokenInterface.contract)
 		if (existing) {
+			// findToken parked: a delete + same-id re-import completing during it
+			// makes `existing` the SUCCESSOR's row — re-assert so the stale flow
+			// cannot exit success through the read path either.
+			this.profiles.getDeletionState().assertCurrent(fence.profileId, fence.epoch)
 			return getTokenInfo(existing)
 		}
 

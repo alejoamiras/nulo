@@ -55,6 +55,14 @@ const {
 	accept: (aw) => aw.account === appStore.account?.address,
 })
 
+// An account/profile switch emits no authwit events and this route is not
+// remounted — refetch explicitly; the composable's fetch sequence retires
+// stale fetches.
+watch(
+	() => [appStore.profile?.id, appStore.account?.address],
+	() => void refreshAuthwits(),
+)
+
 const filteredAuthwits = computed(() => {
 	const sorted = sortAuthwits(authwits.value)
 	const term = searchTerm.value.trim()

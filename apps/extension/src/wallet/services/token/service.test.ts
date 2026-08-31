@@ -288,6 +288,33 @@ describe("TokenService.addToken — creation fences", () => {
 		).rejects.toThrow(/deleted|not current/i)
 	})
 
+	test("a deletion completing DURING findToken rejects the fast-path read exit too (F11)", async () => {
+		// The entry assert passes (fence fresh), findToken parks, the deletion
+		// begins AND settles, and the re-imported row is what findToken returns —
+		// only a re-assert at the read exit stops the stale flow claiming the
+		// successor's row as its own success.
+		const { tokenService, api, deletionState } = await makeHarness()
+		await tokenService.addToken("p1", NETWORK.id, "0xacc", ti("0xdead"), { origin: "popup" })
+		const fence = { profileId: "p1", epoch: deletionState.capture("p1") }
+
+		const realGet = api.storage.local.get.bind(api.storage.local)
+		let armed = true
+		api.storage.local.get = (async (key: unknown) => {
+			const value = await realGet(key as never)
+			if (armed) {
+				armed = false
+				deletionState.beginDeletion("p1")
+				deletionState.release("p1")
+			}
+			return value
+		}) as typeof api.storage.local.get
+
+		await expect(tokenService.addTokenAuthorized(fence, "p1", NETWORK.id, "0xacc", ti("0xdead"), { origin: "popup" })).rejects.toThrow(
+			/deleted|not current/i,
+		)
+		api.storage.local.get = realGet as typeof api.storage.local.get
+	})
+
 	test("a deletion completing DURING the metadata fetch rejects the write (entry-capture pin)", async () => {
 		// begin + RELEASE while parked: the deletion fully settles, so only a
 		// fence captured at the AUTHORIZING entry still rejects — a fence minted

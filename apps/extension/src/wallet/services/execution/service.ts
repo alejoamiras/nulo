@@ -502,11 +502,15 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		 *  `operations` (never part of the shared `Operation` wire shape — a
 		 *  dApp cannot reach this parameter). */
 		estimateIds?: readonly (string | undefined)[],
-		/** SW-internal (same non-wire status as `estimateIds`): the deletion
-		 *  fence captured at the dApp interaction's session re-validation — the
+		/** TRUSTED-INTERNAL parameter (like `estimateIds`): the deletion fence
+		 *  captured at the dApp interaction's session re-validation — the
 		 *  authorization moment. Ops whose commit asserts an entry capture
 		 *  (register_token) consume it so a delete + same-id re-import parked
-		 *  anywhere between approval and commit fails closed. */
+		 *  anywhere between approval and commit fails closed. NOT structurally
+		 *  unreachable over the wire (RPC dispatch forwards extra positional
+		 *  params) — the boundary is same-extension sender authentication, so
+		 *  only popup/SW code can supply it; dApps route through the
+		 *  wallet-bridge dispatcher, which never forwards it. */
 		authorizedFence?: ExecutionFence,
 	): Promise<OperationResult[]> {
 		await this.ensureInitialized()

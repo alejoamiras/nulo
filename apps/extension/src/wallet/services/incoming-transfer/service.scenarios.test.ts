@@ -4102,6 +4102,38 @@ describe("IncomingTransferService — public arm post-park epoch discipline", ()
 		expect(outboxFor()).toEqual({ dirtyAt: 999 })
 	})
 
+	test("drain: a DISPLACED holder (watchdog handoff) cannot land its anchor over a successor's receipt", async () => {
+		// The re-read CAS is blind when the successor's receipt carries the SAME
+		// dirtyAt (same-ms receipt — realistic under a frozen/coarse clock): only
+		// the lock-ownership probe stops the stale anchor write. The successor
+		// interleaves by ACQUIRING the service lock after the watchdog displaces
+		// the parked drain, which permanently flips the ticket.
+		const { reader, state } = makePublicReader()
+		const tokenBalance = makeTokenBalanceStub()
+		const { service } = await bootPublic(reader, state, { tokenBalance })
+		outbox.set("p1|n1|0xa|1", { dirtyAt: 100 })
+		vi.useFakeTimers()
+		try {
+			tokenBalance.requestBalanceRefresh.mockImplementationOnce(async () => {
+				// Drain is parked here holding the lock. Fire its watchdog, then run
+				// the receipt writer under a REAL lock acquisition (ticket flips).
+				await vi.advanceTimersByTimeAsync(5 * 60_000 + 1)
+				await (service as unknown as { withServiceLock: (fn: () => Promise<void>) => Promise<void> }).withServiceLock(async () => {
+					outbox.set("p1|n1|0xa|1", { dirtyAt: 100 })
+				})
+				return { taskId: "T1" }
+			})
+
+			await drain(service)
+
+			// The displaced drain must NOT have anchored: the row keeps the
+			// receipt's shape (no pendingTaskId), so the next drain re-requests.
+			expect(outboxFor()).toEqual({ dirtyAt: 100 })
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
 	test("drain: a row wiped during the refresh request is not resurrected by the anchor write", async () => {
 		const { reader, state } = makePublicReader()
 		const tokenBalance = makeTokenBalanceStub()

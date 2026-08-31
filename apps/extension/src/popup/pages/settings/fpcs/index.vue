@@ -57,6 +57,13 @@ const {
 	accept: (f) => f.chainId === appStore.network?.chainId && f.profileId === appStore.profile?.id,
 })
 
+// A scope switch emits no fpc events and this route is not remounted —
+// refetch explicitly; the composable's fetch sequence retires stale fetches.
+watch(
+	() => [appStore.profile?.id, appStore.network?.chainId],
+	() => void refreshFpcs(),
+)
+
 const fpcs = computed(() =>
 	rawFpcs.value
 		?.map((f) => prepareFpc(f))
