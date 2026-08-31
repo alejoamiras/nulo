@@ -60,3 +60,14 @@
 3. **Orchestration shape** — fable A-1 registration vs codex composable 3-step. A-1 adopted: it
    achieves codex's exact list→purge→delete ordering INSIDE `reconcileImportedAccounts` while
    discharging codex's own Medium RPC-expansion finding. To be ratified in the discharge resume.
+
+## Discharge rounds (same codex session, resumed)
+
+- **Round 2** (`response-1.md`): ratified all three consolidation deltas — A-1 registration ("cleaner
+  than composable RPC orchestration"), the stale-delete merge ("approved exactly as intended"), the
+  sweep (stood by it against fable's cross-profile objection; confirmed sweep vs account-purge raw
+  pass are complementary, not contradictory). Three narrow conditions: complete-legacy-codec sweep
+  predicate + canonical storage-key identity; `row.token === token.id` in the shared predicate;
+  return only scopes actually deleted after a per-row key recheck (+ test: callback installs key
+  mid-purge). Two editorial contradictions fixed. All adopted in `5748e2d9`.
+- **Round 3**: diff-check of the adopted text — verdict recorded in plan.md §Audit verdicts.
