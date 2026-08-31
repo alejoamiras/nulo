@@ -168,3 +168,21 @@ remap regression survive an entire ten-PR arc before this workflow existed.
 **Scope note on the negative checks:** the proof-file-removal check was run locally against
 `FormalPortal.t.sol` only. `FormalRouterTest` shares the identical assertion shape, so it was not
 re-run for it; that is an inference, not an observation.
+
+## Post-delivery: a red smoke gate that was neither the diff nor a flake
+
+After the three PRs were linked into a GitHub stack, #483's smoke job went red at a pre-test
+assertion — `token-seed source did not propagate (NULO_E2E_TOKEN_SEEDS_BUILD_STAMP absent from
+dist/chrome)` — on a diff that touches no extension source. A rerun failed identically.
+
+Cause, from the run's `referenced_workflows`: the reusable smoke workflow was resolved from
+`refs/pull/483/merge`, a merge ref GitHub chains through the stack (`arc/devendor` → #481's merge ref
+→ `dev`), so the *workflow* included #485, which landed on `dev` after this stack's base and added the
+stamp assertion. But `pr-smoke-e2e.yml` passes the smoke job `ref: head.sha`, so the *source built*
+was the PR head — pre-#485, with nothing to emit the stamp. Workflow from one tree, source from
+another; the gate could not pass.
+
+Resolution: rebase the stack bottom-up onto current `dev` (`git rebase --onto <new base> <old base
+tip>` per branch, since `gh stack link` creates no local tracking for `gh stack sync`) and
+force-with-lease each branch. No code change. Recorded because the fingerprint reads exactly like a
+build-cache flake and the first response — a rerun — was the wrong one.
