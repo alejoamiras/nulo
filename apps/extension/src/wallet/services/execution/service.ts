@@ -680,13 +680,25 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		origin: LocalTxOrigin,
 		parentTask?: WrappedTask,
 	): Promise<void> {
-		await requireActiveProfile(this.profileService, "Wallet locked")
-		// `getNetwork` is ownership-checked against the ACTIVE profile, so the
-		// row's own profileId is the validated authority for this op — token ops
-		// are not switch-blocked (not a SENDING kind), and a live profile re-read
-		// at the write would follow a post-approval switch into the wrong
-		// profile. addToken's fence re-asserts this identity at commit.
+		// The deletion fence is captured at DISPATCH entry and threaded to the
+		// token commit — with the journal claim's own epoch check upstream this
+		// anchors the whole approval→commit chain: a deletion (or a delete +
+		// same-id re-import) landing anywhere after this line moves the epoch, so
+		// the commit's assert against THIS capture fails closed. Token ops are not
+		// switch-blocked (not a SENDING kind), so every identity below must derive
+		// from this one capture plus the ownership-checked network row — never a
+		// live re-read. The capture's only throw is the locked gate; re-thrown
+		// under this method's pinned message.
+		let fence: ExecutionFence
+		try {
+			fence = await this.profileService.captureExecutionFence()
+		} catch {
+			throw new Error("Wallet locked")
+		}
 		const network = await this.networkService.getNetwork(op.networkId)
+		// `getNetwork` anchors the row to the ACTIVE profile; tying it to the
+		// fence makes the write identity and the commit assert one chain.
+		if (network.profileId !== fence.profileId) throw new Error("unauthorized profile")
 
 		// Honor the popup's pre-fetched interface (`previewedInterface`) if it
 		// passes the contract+chainId sanity check (Opus F4). Otherwise fall back
@@ -729,7 +741,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// tx-enrichment.ts and tx-detail-helpers.ts.
 		const opContext: OperationContext =
 			origin.type === OriginType.DAPP ? { origin: "dapp", dappOrigin: origin.name ?? "dApp" } : { origin: "popup" }
-		await this.tokenService.addToken(network.profileId, op.networkId, op.accountAddress, ti, opContext)
+		await this.tokenService.addToken(fence.profileId, op.networkId, op.accountAddress, ti, opContext, fence)
 	}
 
 	public async executeSendTransaction(

@@ -188,14 +188,18 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		accountAddress: string,
 		tokenInterface: TokenInterface,
 		opContext: OperationContext,
+		// In-process callers whose AUTHORIZATION happened earlier (the dApp
+		// register_token dispatch) thread THEIR entry capture — a fresh mint here
+		// would bless a profile deleted and re-imported since that authorization
+		// (the successor's settled epoch passes every assert). Wire callers never
+		// supply this; the popup's authorizing entry IS this method.
+		authorizedFence?: ExecutionFence,
 	): Promise<TokenInfo> {
 		await this.ensureInitialized()
-		// The deletion fence is captured HERE — the entry that authorizes the
-		// write — atomically (read + capture under the profile facade lock) and
-		// threaded to the commit. Minting it later would bless a profile deleted
-		// and re-imported mid-flight; a caller-supplied id that isn't the active
-		// profile fails closed.
-		const fence = await this.profiles.captureExecutionFence()
+		// Captured atomically (read + capture under the profile facade lock) and
+		// threaded to the commit; a caller-supplied profileId that isn't the
+		// fence's fails closed.
+		const fence = authorizedFence ?? (await this.profiles.captureExecutionFence())
 		if (fence.profileId !== profileId) throw new Error("unauthorized profile")
 		// Phase 2.5: the journal entry is created up-front (title=undefined) so
 		// the tokens-view TokenImportRow pops in immediately after approval,

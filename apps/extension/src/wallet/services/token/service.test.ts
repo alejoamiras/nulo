@@ -252,6 +252,22 @@ describe("TokenService.addToken — creation fences", () => {
 		expect(await tokenRowCount(api)).toBe(0)
 	})
 
+	test("a THREADED fence from a settled-out authorization is honored, not re-minted (F11 ABA pin)", async () => {
+		// The dApp dispatch captures its fence at authorization; if the profile is
+		// deleted AND the deletion settles (release) before addToken runs, a fresh
+		// mint inside addToken would observe the settled epoch and land the row —
+		// only honoring the CALLER's stale capture rejects the ABA.
+		const { tokenService, api, deletionState } = await makeHarness()
+		const staleFence = { profileId: "p1", epoch: deletionState.capture("p1") }
+		deletionState.beginDeletion("p1")
+		deletionState.release("p1")
+
+		await expect(
+			tokenService.addToken("p1", NETWORK.id, "0xacc", ti("0xdead"), { origin: "dapp", dappOrigin: "https://x" }, staleFence),
+		).rejects.toThrow(/deleted|not current/i)
+		expect(await tokenRowCount(api)).toBe(0)
+	})
+
 	test("a deletion completing DURING the metadata fetch rejects the write (entry-capture pin)", async () => {
 		// begin + RELEASE while parked: the deletion fully settles, so only a
 		// fence captured at the AUTHORIZING entry still rejects — a fence minted
