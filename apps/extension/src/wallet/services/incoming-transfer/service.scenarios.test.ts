@@ -4036,3 +4036,84 @@ describe("IncomingTransferService — public-scan cursor resume (SW-restart, cas
 		expect(resumed?.fromBlock).toBeUndefined()
 	})
 })
+
+describe("IncomingTransferService — public arm post-park epoch discipline", () => {
+	// The note arm re-checks the service epoch after every parked await inside its
+	// critical sections (the N-17 pins above drive the real watchdog for it). The
+	// public arm's writes carry the same obligation; these pins manufacture the
+	// post-handoff state directly — a bump from inside the CS's own awaited read,
+	// exactly where a handoff-admitted wipe would leave it.
+
+	test("commitPublicEvent: an epoch bump inside the in-CS token read suppresses record/trust/outbox writes", async () => {
+		const { reader, state } = makePublicReader()
+		const pending = vi.fn()
+		const { service } = await bootPublic(reader, state)
+		service.onIncomingTransferPending.add(pending)
+		const svc = service as unknown as { serviceEpoch: number; tokenService: { getTokensRaw: (p: string) => Promise<unknown[]> } }
+		const realGetTokensRaw = svc.tokenService.getTokensRaw.bind(svc.tokenService)
+		let bumped = false
+		svc.tokenService.getTokensRaw = async (p: string) => {
+			const tokens = await realGetTokensRaw(p)
+			if (!bumped) {
+				bumped = true
+				svc.serviceEpoch += 1
+			}
+			return tokens
+		}
+		state.responses.push(pubPage([pubEvent({ txHash: "0xparked" })]))
+
+		await scanPublic(service)
+
+		expect(records.get("pub:p1|n1|0xparked|0")).toBeUndefined()
+		expect(trust.get(trustKey("p1", "n1", tokenA.contract))).toBeUndefined()
+		expect(outboxFor()).toBeUndefined()
+		expect(pending).not.toHaveBeenCalled()
+	})
+
+	test("resolvePublicClassGate: an epoch bump during the class fetch leaves the wiped cache empty", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		const svc = service as unknown as { serviceEpoch: number; classGateCache: Map<string, unknown> }
+		const realClassStatus = reader.getTokenClassStatus.bind(reader)
+		reader.getTokenClassStatus = async (...args: Parameters<typeof realClassStatus>) => {
+			svc.serviceEpoch += 1
+			return realClassStatus(...args)
+		}
+		state.responses.push(pubPage([pubEvent({ txHash: "0xgate" })]))
+
+		await scanPublic(service)
+
+		expect(svc.classGateCache.size).toBe(0)
+	})
+
+	test("drain: a fresh dirtyAt bump during the refresh request is not reverted by the anchor write", async () => {
+		const { reader, state } = makePublicReader()
+		const tokenBalance = makeTokenBalanceStub()
+		const { service } = await bootPublic(reader, state, { tokenBalance })
+		outbox.set("p1|n1|0xa|1", { dirtyAt: 100 })
+		tokenBalance.requestBalanceRefresh.mockImplementationOnce(async () => {
+			// A receipt lands while the request is in flight: fresh dirt, anchor cleared.
+			outbox.set("p1|n1|0xa|1", { dirtyAt: 999 })
+			return { taskId: "T1" }
+		})
+
+		await drain(service)
+
+		expect(outboxFor()).toEqual({ dirtyAt: 999 })
+	})
+
+	test("drain: a row wiped during the refresh request is not resurrected by the anchor write", async () => {
+		const { reader, state } = makePublicReader()
+		const tokenBalance = makeTokenBalanceStub()
+		const { service } = await bootPublic(reader, state, { tokenBalance })
+		outbox.set("p1|n1|0xa|1", { dirtyAt: 100 })
+		tokenBalance.requestBalanceRefresh.mockImplementationOnce(async () => {
+			outbox.delete("p1|n1|0xa|1")
+			return { taskId: "T1" }
+		})
+
+		await drain(service)
+
+		expect(outboxFor()).toBeUndefined()
+	})
+})

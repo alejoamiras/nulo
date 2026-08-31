@@ -1233,6 +1233,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		contract: string,
 		finalizedTip: number,
 		checkpointHash: string | null,
+		epochAtStart: number,
 	): Promise<PublicTokenClassStatus> {
 		// No checkpoint hash this tick → we can't pin the checkpointed class anchor, so fail closed
 		// (the forward scan defers on the same condition). Never cache an unresolved.
@@ -1245,7 +1246,11 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		const cached = this.classGateCache.get(key)
 		if (cached && cached.finalizedTip === finalizedTip && cached.checkpointHash === checkpointHash) return cached.status
 		const status = await this.indexer.getClassStatus(networkId, contract, checkpointHash)
-		if (status !== "unresolved") this.classGateCache.set(key, { finalizedTip, checkpointHash, status })
+		// The one cache write in this file without an epoch guard would repopulate a
+		// key the locked wipe just deleted (in-flight resolve outliving the reset).
+		if (status !== "unresolved" && this.serviceEpoch === epochAtStart) {
+			this.classGateCache.set(key, { finalizedTip, checkpointHash, status })
+		}
 		return status
 	}
 
@@ -1297,6 +1302,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			contract,
 			tips.finalizedBlockNumber,
 			tips.checkpointedBlockHash,
+			epochAtStart,
 		)
 		if (classStatus !== "standard") {
 			// §3: a non-standard / unresolvable token is not scanned for public events → there's nothing to
@@ -1755,11 +1761,17 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		await this.withServiceLock(async () => {
 			if (this.serviceEpoch !== epochAtStart) return
 			const tokens = await this.tokenService.getTokensRaw(profileId)
+			// Every awaited read in this CS can park across a watchdog handoff that
+			// admits a wipe (clearProfile/onTokenDeleted bump + purge); re-check the
+			// epoch after each read block, before any write — the note arm's own
+			// post-park discipline, which this newer arm originally lacked.
+			if (this.serviceEpoch !== epochAtStart) return
 			const token = tokens.find((t) => t.contract === contract && t.chainId === chainId)
 			if (!token) return // token removed concurrently
 
 			const id = publicRecordId(profileId, networkId, ev.txHash, ev.logIndexWithinTx)
 			const existing = await this.repo.getRecord(id)
+			if (this.serviceEpoch !== epochAtStart) return
 			if (existing) {
 				// A reorg can re-mine the same tx (same PK) at a NEW block — update the chain fields so
 				// the reconciliation's blockHash comparison keeps it instead of deleting it.
@@ -1782,8 +1794,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			if (outgoing.has(ev.txHash)) return
 			const inflight = await this.collectInflightTxHashes(profileId, networkId, account)
 			if (inflight.has(ev.txHash)) return
+			if (this.serviceEpoch !== epochAtStart) return
 
 			let trustState = (await this.repo.getTrust(profileId, networkId, contract))?.state ?? "unknown"
+			if (this.serviceEpoch !== epochAtStart) return
 			if (trustState === "unknown") {
 				const updated = await this.repo.setTrust(profileId, networkId, contract, "pending")
 				this.emit("onIncomingTrustChanged", updated)
@@ -1801,6 +1815,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 					})
 				}
 			}
+			if (this.serviceEpoch !== epochAtStart) return
 
 			// D4 write-side: the outbox row is written BEFORE the record (ordering + idempotent replay
 			// substitute for a multi-key transaction). Trust-independent — a hidden receipt still
@@ -1808,7 +1823,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			await this.markBalanceDirty(profileId, networkId, account, token.id)
 			const record = this.buildPublicRecord({ ev, profileId, networkId, account, token, trustState })
 			await this.repo.upsertRecord(record)
-			if (trustState === "trusted" && (await this.isVisibilityEnabled())) {
+			if (trustState === "trusted" && (await this.isVisibilityEnabled()) && this.serviceEpoch === epochAtStart) {
 				this.emit("onIncomingTransferAdded", record)
 			}
 		})
@@ -1914,6 +1929,12 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 					return
 				}
 				if ("taskId" in result) {
+					// Re-read at commit: a wipe (row gone) or a fresh markBalanceDirty bump
+					// (dirtyAt moved) during the refresh await must not be overwritten with
+					// this older snapshot — stand down and let the next drain see the row's
+					// new state. Writing anyway would anchor stale dirt to the minted task.
+					const fresh = await this.repo.getOutbox(profileId, networkId, accountAddress, tokenId)
+					if (!fresh || fresh.dirtyAt !== current.dirtyAt) return
 					await this.repo.setOutbox(profileId, networkId, accountAddress, tokenId, {
 						dirtyAt: current.dirtyAt,
 						pendingTaskId: result.taskId,
