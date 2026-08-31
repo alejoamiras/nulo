@@ -46,6 +46,6 @@ Priority candidates where complexity and duplication debt coincide (duplication 
 
 ## Deferred (documented, not built)
 
-- **jscpd duplication gate** — strongest future addition; run it as a periodic audit for now (`bunx jscpd@<pinned> apps packages scripts --ignore "**/node_modules/**,**/dist/**,**/*.d.ts,..." --min-tokens 50 --reporters json`), don't gate a global % (tests dominate it).
+- **jscpd duplication gate** — NOT gated, but the trend instrument is wired (arc 1.1): `bun run audit:dup` (`scripts/dup-trend/report.ts`, jscpd exact-pinned, formatter unit-tested in `scripts/ci-cd/dup-trend-report.test.ts`) + nightly's advisory `dup-trend` job piping the markdown into the step summary (deliberately absent from `publish-nightly`'s needs). Rationale: clone identity is too unstable to ratchet, test↔test is over half the volume, and prod findings skew to Vue template/CSS shells. A diff-scoped new-clone check is the escalation if the trend worsens post-burn-down.
 - Per-symbol re-scoring audit of baselined functions (build only if suppression-gaming is observed).
 - oxlint cyclomatic gate (only if a flat-branch pathology evades cognitive scoring).

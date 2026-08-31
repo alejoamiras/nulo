@@ -230,6 +230,23 @@ jobs:
     secrets:
       SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
 
+  # Advisory duplication trend (jscpd) — a report instrument, never a gate.
+  # Deliberately absent from publish-nightly's needs; continue-on-error keeps a
+  # tool hiccup from reddening the nightly battery. See CLAUDE.md § Complexity
+  # budgets for why duplication is watched as a trend rather than ratcheted.
+  dup-trend:
+    needs: resolve
+    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+      - uses: ./.github/actions/setup-bun
+      - name: Duplication report → step summary
+        run: bun scripts/dup-trend/report.ts >> "$GITHUB_STEP_SUMMARY"
+
   # Builds gate on lint+unit only (not network) — same wall-time overlap as
   # release.yml; the publish job waits for everything.
 
