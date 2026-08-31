@@ -170,3 +170,40 @@ dropped… No concrete uncovered guard justifies expansion. Keep `withdraw` reje
 The one disagreement between rounds: r3 wanted the truncation gate shipped, the fresh pass wanted it cut.
 Cut, on the anti-expansion mandate — the finding survives in `lessons/phase-0.md` for the next proof over
 a loop.
+
+---
+
+## Post-delivery re-review (fresh session, after an independent second-model review)
+
+The owner asked for the three PRs to be re-reviewed cold. Two rounds; round 1 **rejected** with one
+finding neither the implementing model nor any earlier codex session had seen:
+
+**High — the artifact's bytes were never bound to the pins.** `loadForkedPortalArtifact` asserted the
+artifact's *declared* `initCodeHash` / `runtimeCodeHash` fields, then returned `bytecode` /
+`deployedBytecode` from the same file unhashed. The rebuild alarm checks a fresh build, not the
+artifact; the post-deploy runtime check uses the artifact as its template. A tampered `build.json`
+with untouched declared fields would have passed every gate. Fixed on #481 — hash the shipped bytes,
+require the declared fields to agree, assert the computed hashes. Mutation-verified (one flipped
+nibble in `deployedBytecode` → loader throws, two tests red).
+
+**Medium — the live mainnet portal does reach the artifact comparison.** Corrected a claim the review
+itself had just made: the committed `mainnet-bridge.journal.jsonl` records the live portal as confirmed,
+so a no-flag conductor run resumes onto it and `assertRuntimeMatchesTemplate` refuses it on length.
+Judged the right refusal; documented that the #436 redeploy must start from a fresh journal.
+
+**Medium — `verify-l1` printed ✓ on "already verified".** Forge short-circuits without compiling the
+staged source, so the runbook's live canary could vouch for portals whose bytes no longer match the
+repo. Fixed on #483 by labelling that outcome honestly; it still exits 0.
+
+Round 2 confirmed the byte binding complete (`immutableReferences` pinned by both conductors and the
+unit test; ABI and `solcVersion` cannot bypass the hashes) and the journal refusal defensible, but kept
+**one rejection: the honest label is a presentation fix, not a gate fix** — `verify-l1` still exits 0
+when the staged source was not verified, so the deploy conductors and the runbook's "all green" are
+unchanged. Codex's options: (a) on "already verified", succeed only after matching the deployed
+bytecode to the staged build over RPC; or (b) redefine the step as "an Etherscan verification exists".
+
+**Disposition: (b), and surfaced to the owner rather than decided.** (a) is a new capability — an RPC
+dependency and immutable-aware comparison for four contracts in a script that today needs only an
+Etherscan key — outside "complete what the branch meant to do". The `aztec-update` runbook's step 9
+now states exactly what `verify-l1` proves on a promoted manifest; whether the gate should be made
+strict is recorded as an open owner decision.
