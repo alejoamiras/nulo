@@ -370,6 +370,26 @@ describe("TokenService.addToken — creation fences", () => {
 		expect(await tokenRowCount(api)).toBe(0)
 	})
 
+	test("a purge reservation landing DURING a restore row's set is self-compensated", async () => {
+		const { tokenService, api, networkLive } = await makeHarness()
+		const realSet = api.storage.local.set.bind(api.storage.local)
+		let armed = true
+		api.storage.local.set = (async (items: Record<string, unknown>) => {
+			await realSet(items)
+			if (armed && Object.keys(items).some((k) => k.startsWith("nulo:core:tokens@"))) {
+				armed = false
+				networkLive.value = false
+			}
+		}) as typeof api.storage.local.set
+		const mk = (contract: string) => ({ id: 0, profileId: "p1", chainId: 1, contract, name: "T", symbol: "T", decimals: 9 })
+
+		const restored = await tokenService.restore([mk("0xaaa")])
+
+		api.storage.local.set = realSet as typeof api.storage.local.set
+		expect(restored[0].restoreError).toMatch(/network deleted/)
+		expect(await tokenRowCount(api)).toBe(0)
+	})
+
 	test("restore rejects rows for a dead/purging chain per-row (restoreError, no write)", async () => {
 		const { tokenService, api, networkLive } = await makeHarness()
 		networkLive.value = false

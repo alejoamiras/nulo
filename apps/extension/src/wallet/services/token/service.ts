@@ -809,6 +809,12 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 					throw new Error("network deleted")
 				}
 				await this.tokens.set(`${id}`, row)
+				// The set awaits — a purge whose reservation + snapshot landed during
+				// it would miss this row; self-compensate, mirroring persistToken.
+				if (!(await this.networks.isChainLive(row.profileId, row.chainId))) {
+					await this.tokens.delete(`${id}`)
+					throw new Error("network deleted")
+				}
 				return row
 			})
 		})
