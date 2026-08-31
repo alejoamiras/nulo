@@ -75,11 +75,17 @@ export class Lock {
 	 * the contract every hand-rolled `try { enter() } finally { leave() }`
 	 * frame encoded, made unforgettable. `enter()`/`leave()` stay public for
 	 * callers that genuinely need split acquisition.
+	 *
+	 * `fn` receives `isCurrent` — true while this acquisition still owns the
+	 * lock. After a watchdog force-release admits a successor, the displaced
+	 * critical section keeps RUNNING (see the dispatch() limitation note);
+	 * checking `isCurrent()` immediately before a write is how such a section
+	 * declines to clobber state a successor may have advanced.
 	 */
-	public async withLock<T>(fn: () => Promise<T> | T): Promise<T> {
+	public async withLock<T>(fn: (isCurrent: () => boolean) => Promise<T> | T): Promise<T> {
 		const ticket = await this.enter()
 		try {
-			return await fn()
+			return await fn(() => ticket === this.currentTicket)
 		} finally {
 			this.leave(ticket)
 		}

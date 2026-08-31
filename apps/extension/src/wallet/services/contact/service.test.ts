@@ -40,6 +40,11 @@ class FakeProfileService implements IService {
 		return this.active
 	}
 
+	public async captureExecutionFence(): Promise<{ profileId: string; epoch: number }> {
+		if (!this.active || this.deletionState.isReserved(this.active.id)) throw new Error("Wallet locked")
+		return { profileId: this.active.id, epoch: this.deletionState.capture(this.active.id) }
+	}
+
 	public setActiveProfile(profile: ProfileInfo | undefined): void {
 		this.active = profile
 	}
@@ -401,6 +406,59 @@ describe("ContactService (port-migrated)", () => {
 			expect(restored.every((r) => typeof r.restoreError === "string")).toBe(true)
 			const raw = await api.storage.local.get(null)
 			expect(Object.keys(raw).some((k) => k.startsWith("nulo:core:contacts@"))).toBe(false)
+		})
+	})
+
+	describe("addContact — creation fence", () => {
+		const contactRowCount = async (): Promise<number> => {
+			const raw = await api.storage.local.get(null)
+			return Object.keys(raw).filter((k) => k.startsWith("nulo:core:contacts@")).length
+		}
+
+		test("a deletion completing DURING the id allocation rejects the write (entry-capture pin)", async () => {
+			// begin + RELEASE while the id-alloc read is parked: the deletion fully
+			// settles, so only an entry-captured fence still rejects.
+			const realGet = api.storage.local.get.bind(api.storage.local)
+			let parked: (() => void) | null = null
+			let armed = true
+			api.storage.local.get = (async (key: unknown) => {
+				if (armed) {
+					armed = false
+					await new Promise<void>((resolve) => {
+						parked = resolve
+					})
+				}
+				return realGet(key as never)
+			}) as typeof api.storage.local.get
+
+			const run = contactService.addContact("Ghost", "0xdead")
+			await new Promise((r) => setTimeout(r, 0))
+			profile.getDeletionState().beginDeletion(profileA.id)
+			profile.getDeletionState().release(profileA.id)
+			;(parked as (() => void) | null)?.()
+
+			await expect(run).rejects.toThrow(/deleted|not current/i)
+			api.storage.local.get = realGet as typeof api.storage.local.get
+			expect(await contactRowCount()).toBe(0)
+		})
+
+		test("a deletion landing DURING the row write is compensated away before any emit", async () => {
+			const emitted: unknown[] = []
+			contactService.onContactAdded.add((c) => emitted.push(c))
+			const realSet = api.storage.local.set.bind(api.storage.local)
+			let fired = false
+			api.storage.local.set = (async (items: Record<string, unknown>) => {
+				await realSet(items)
+				if (!fired && Object.keys(items).some((k) => k.startsWith("nulo:core:contacts@"))) {
+					fired = true
+					profile.getDeletionState().beginDeletion(profileA.id)
+				}
+			}) as typeof api.storage.local.set
+
+			await expect(contactService.addContact("Ghost", "0xdead")).rejects.toThrow(/deleted/)
+			api.storage.local.set = realSet as typeof api.storage.local.set
+			expect(await contactRowCount()).toBe(0)
+			expect(emitted).toHaveLength(0)
 		})
 	})
 })

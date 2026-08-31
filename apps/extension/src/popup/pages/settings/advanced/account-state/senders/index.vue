@@ -44,7 +44,18 @@ const {
 	added: accountStateClientService.onSenderAdded,
 	deleted: accountStateClientService.onSenderDeleted,
 	identity: (s) => s,
+	// The event payload is a bare address with no scope to filter on —
+	// re-fetch the network-scoped list instead of splicing blind.
+	mode: "resync",
 })
+
+// A profile/network switch emits no sender events and this route is not
+// remounted — refetch explicitly; the composable's fetch sequence retires
+// stale fetches.
+watch(
+	() => [appStore.profile?.id, appStore.network?.id],
+	() => void fetchSenders({ clear: true }),
+)
 
 const handleCopyAddress = (address) => {
 	copiedAddress.value = address

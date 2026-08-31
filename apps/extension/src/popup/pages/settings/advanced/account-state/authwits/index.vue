@@ -50,6 +50,9 @@ const {
 	added: authwitsService.onAuthwitAdded,
 	deleted: authwitsService.onAuthwitDeleted,
 	identity: (aw) => aw.id,
+	// Events are global; the list is account-scoped — another account's
+	// authwit must not splice in mid-switch.
+	accept: (aw) => aw.account === appStore.account?.address,
 })
 
 const filteredAuthwits = computed(() => {
@@ -100,11 +103,15 @@ const handleOpenAuthwit = (aw) => {
 	popupStore.open("data_viewer")
 }
 
+// A profile/account switch emits no authwit events and this route is not
+// remounted — refetch explicitly. `clear` empties the foreign scope's rows
+// synchronously so a failed refetch cannot leave them rendered; the
+// composable's fetch sequence retires any in-flight stale fetch.
 watch(
-	() => appStore.account,
+	() => [appStore.profile?.id, appStore.account?.address],
 	() => {
-		refreshAuthwits()
-		fetchRegistryStatus()
+		void refreshAuthwits({ clear: true })
+		void fetchRegistryStatus()
 	},
 )
 

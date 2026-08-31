@@ -11,7 +11,7 @@ import { AccountService, type Account } from "@/wallet/services/account/service"
 import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
-import { TokenService, type Token, type TokenInfo } from "@/wallet/services/token/service"
+import { TokenService, type Token, type TokenDeleted, type TokenInfo } from "@/wallet/services/token/service"
 import { ExecutionService } from "@/wallet/services/execution/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { TaskService } from "@/wallet/services/task/service"
@@ -262,12 +262,14 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	}
 
 	/** Allocation is `max+1` over the live key space, so it is only safe while
-	 *  this service's lock is held — callers MUST already hold it. */
-	private async createTokenBalanceHoldingLock(token: Token, account: Account, gen?: number): Promise<boolean> {
+	 *  this service's lock is held — callers MUST already hold it. `gen` is
+	 *  REQUIRED: an omitted generation would silently disable the fences below,
+	 *  and the compiler is the caller-auditor that keeps new call sites honest. */
+	private async createTokenBalanceHoldingLock(token: Token, account: Account, gen: number): Promise<boolean> {
 		const id = await this.allocateUnfencedId()
 		// A profile switch during allocation makes this write belong to a departed
 		// context — skip it (the id isn't persisted, so it's reused by the next call).
-		if (gen !== undefined && gen !== this.profileGeneration) return false
+		if (gen !== this.profileGeneration) return false
 		// Token ids are `max+1`, so deleting the highest token frees its id for a
 		// successor: `tokens.has(id)` would pass for a DIFFERENT token. Compare the
 		// stable identity instead, so a creation for a token deleted mid-flight
@@ -287,7 +289,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		await this.repo.set(tb)
 		// A switch during the write must not emit a UI event or enqueue a sync under
 		// the new profile's context.
-		if (gen !== undefined && gen !== this.profileGeneration) return true
+		if (gen !== this.profileGeneration) return true
 		this.emit("onTokenBalanceAdded", this.getTokenBalanceInfo(tb))
 		this.queue.enqueue(tb)
 		return true
@@ -492,7 +494,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		}
 	}
 
-	private readonly onTokenDeleted = async (token: TokenInfo) => {
+	private readonly onTokenDeleted = async (token: TokenDeleted) => {
 		// Synchronous, before any await: a creation that checks token liveness
 		// after this point must see the token gone.
 		this.tokens.delete(token.id)
@@ -502,7 +504,10 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		// not await subscribers, so one added later would queue behind this hold
 		// rather than re-enter it.
 		await this.lock.withLock(async () => {
-			for (const tb of (await this.repo.getAll()).filter((x) => x.token === token.id)) {
+			// Full-identity filter, not id-only: token ids are max+1-reallocatable,
+			// so a successor context can re-mint this id — its rows must not be
+			// deleted by the departed token's handler.
+			for (const tb of (await this.repo.getAll()).filter((x) => rowMatchesToken(x, token))) {
 				this.invalidatedBalanceIds.add(tb.id)
 				await this.repo.delete(tb.id)
 				this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb, token))

@@ -51,6 +51,10 @@ const {
 	added: fpcService.onFpcAdded,
 	updated: fpcService.onFpcUpdated,
 	deleted: fpcService.onFpcDeleted,
+	// Events are global; the list is chain-scoped within the active profile — a
+	// mid-switch add/update for another chain OR another profile (the payload
+	// carries profileId; same chainId across profiles is common) must not render.
+	accept: (f) => f.chainId === appStore.network?.chainId && f.profileId === appStore.profile?.id,
 })
 
 const fpcs = computed(() =>
@@ -103,11 +107,15 @@ const handleDelete = (fpc) => {
 	popupStore.open("confirm")
 }
 
+// A profile/network switch emits no fpc events and this route is not
+// remounted — refetch explicitly. `clear` empties the foreign scope's rows
+// synchronously so a failed refetch cannot leave them rendered; the
+// composable's fetch sequence retires any in-flight stale fetch.
 watch(
-	() => [appStore.network, appStore.account],
+	() => [appStore.profile?.id, appStore.network, appStore.account],
 	() => {
 		if (appStore.network && appStore.account) {
-			refreshFpcs()
+			void refreshFpcs({ clear: true })
 		}
 	},
 )

@@ -83,7 +83,14 @@ export class WindowManager {
 		this.windows
 			.create({ type: "popup", url: opts.url, width: opts.width, height: opts.height })
 			.then((created) => {
-				if (!this.handles.has(handleId)) return
+				// Identity, not membership: a settled handle's 8-hex id is re-mintable,
+				// so `has(handleId)` could match a NEWER handle and adopt this stale
+				// create. And a handle lost mid-create (timeout settled first) leaves
+				// a window nothing owns — close it, or a stray popup lingers.
+				if (this.handles.get(handleId) !== handle) {
+					if (created.id !== undefined) void this.windows.remove(created.id)
+					return
+				}
 
 				if (created.id === undefined) {
 					this._settle(handleId, undefined, "Failed to open window.")
@@ -100,8 +107,9 @@ export class WindowManager {
 					this._settleUserClose(handleId)
 				})
 
-				if (!this.handles.has(handleId)) {
+				if (this.handles.get(handleId) !== handle) {
 					unsub()
+					void this.windows.remove(created.id)
 					return
 				}
 

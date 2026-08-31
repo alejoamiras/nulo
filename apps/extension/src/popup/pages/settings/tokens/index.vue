@@ -29,11 +29,24 @@ const popupStore = usePopupStore()
 const cacheStore = useCacheStore()
 
 const tokenService = new TokenServiceClient()
-const { entities: tokens } = useEntityCrud({
+const { entities: tokens, refresh: refreshTokens } = useEntityCrud({
 	fetch: () => tokenService.getTokens(appStore.profile.id, appStore.network.chainId),
 	added: tokenService.onTokenAdded,
 	deleted: tokenService.onTokenDeleted,
+	// TokenInfo carries no profileId (it crosses the dApp boundary), so no
+	// accept predicate can anchor an event to this list's profile+chain scope —
+	// resync re-reads through the scoped fetch instead, which is always correct
+	// (the senders list set the precedent for payloads without scope fields).
+	mode: "resync",
 })
+
+// A profile/network switch emits no token events and this route is not
+// remounted — refetch under the new scope explicitly; the composable's fetch
+// sequence makes any in-flight stale fetch stand down instead of installing.
+watch(
+	() => [appStore.profile?.id, appStore.network?.chainId],
+	() => void refreshTokens({ clear: true }),
+)
 
 const handleDelete = (target) => {
 	cacheStore.confirm.confirm_color = "red"

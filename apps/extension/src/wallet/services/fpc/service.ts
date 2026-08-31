@@ -2,7 +2,7 @@ import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import type { ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
-import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
@@ -91,14 +91,19 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 	 */
 	public async clearChainState(profileId: string, chainId: number): Promise<void> {
 		await this.ensureInitialized()
-		const fpcs = (await this.storage.getValues()).filter((f) => f.profileId === profileId && f.chainId === chainId)
-		await purgeRows(
-			fpcs,
-			(fpc) => this.storage.delete(fpc.id),
-			(fpc) => this.emit("onFpcDeleted", this.decorate(fpc, this.protocolAddresses.get(chainId))),
-		)
-		// Drop the cached addresses for this chain so a later re-add re-derives.
-		this.protocolAddresses.delete(chainId)
+		// Under the same lock the create/discovery writers commit with, so the
+		// sweep and a create are atomic — a create either lands before the
+		// snapshot (and is purged) or runs after and fails its in-lock asserts.
+		await this.lock.withLock(async () => {
+			const fpcs = (await this.storage.getValues()).filter((f) => f.profileId === profileId && f.chainId === chainId)
+			await purgeRows(
+				fpcs,
+				(fpc) => this.storage.delete(fpc.id),
+				(fpc) => this.emit("onFpcDeleted", this.decorate(fpc, this.protocolAddresses.get(chainId))),
+			)
+			// Drop the cached addresses for this chain so a later re-add re-derives.
+			this.protocolAddresses.delete(chainId)
+		})
 	}
 
 	private async getOrComputeProtocolAddresses(chainId: number): Promise<ProtocolAddresses> {
@@ -128,7 +133,11 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 
 	public async getFpcs(chainId?: number): Promise<FpcInfo[]> {
 		await this.ensureInitialized()
-		const profile = await requireActiveProfile(this.profileService)
+		// Atomic read+capture: this read path DISCOVERS (writes protocol rows), so
+		// its writes need the same deletion fence as addFpc.
+		const fence = await this.profileService.captureExecutionFence()
+		const deletion = this.profileService.getDeletionState()
+		const profile = { id: fence.profileId }
 		const allFpcs = await this.storage.getValues()
 		let result = allFpcs.filter((fpc) => fpc.profileId === profile.id && (chainId === undefined || fpc.chainId === chainId))
 		this.logDebug(
@@ -209,7 +218,18 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 						address: contractInstance.address.toString(),
 						name: type === FpcType.PrivateFpc ? PRIVATE_FPC_DEFAULT_NAME : SPONSORED_FPC_DEFAULT_NAME,
 					}
+					// Discovery is best-effort per item, but its WRITES carry the same
+					// obligations as addFpc: never land for a deleted profile or a
+					// mid-purge chain (the per-item catch keeps failures soft).
+					deletion.assertCurrent(fence.profileId, fence.epoch)
+					if (!(await this.networkService.isNetworkLive(network.id))) {
+						throw new Error("network deleted")
+					}
 					await this.storage.set(id, fpc)
+					if (!deletion.isCurrent(fence.profileId, fence.epoch)) {
+						await this.storage.delete(id)
+						throw new Error(`profile ${fence.profileId} deleted`)
+					}
 					result.push(fpc)
 				} catch (err) {
 					this.logWarn(`getFpcs: Failed to discover FPC ${contractInstance.address.toString()}:`, err)
@@ -238,7 +258,11 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		if (type !== FpcType.DefaultSponsoredFpc && type !== FpcType.PrivateFpc) {
 			throw new Error("Unsupported FPC type")
 		}
-		const profile = await requireActiveProfile(this.profileService)
+		// Atomic read+capture at the authorizing entry: the PXE fetches below can
+		// span the profile's deletion or the chain's purge — the commit asserts
+		// both flush against the write.
+		const fence = await this.profileService.captureExecutionFence()
+		const deletion = this.profileService.getDeletionState()
 		const network = await this.networkService.getNetwork(networkId)
 		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
 
@@ -263,13 +287,22 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 			const id = await nextRandomId(this.storage)
 			const fpc: StoredFpc = {
 				id,
-				profileId: profile.id,
+				profileId: fence.profileId,
 				chainId: network.chainId,
 				type,
 				address,
 				name,
 			}
+			deletion.assertCurrent(fence.profileId, fence.epoch)
+			if (!(await this.networkService.isNetworkLive(networkId))) {
+				throw new Error("network deleted")
+			}
 			await this.storage.set(id, fpc)
+			// The set awaits — compensate before the row becomes observable.
+			if (!deletion.isCurrent(fence.profileId, fence.epoch)) {
+				await this.storage.delete(id)
+				throw new Error(`profile ${fence.profileId} deleted`)
+			}
 			const decorated = this.decorate(fpc, protocols)
 			this.emit("onFpcAdded", decorated)
 			return decorated

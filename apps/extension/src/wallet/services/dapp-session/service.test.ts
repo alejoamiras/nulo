@@ -15,6 +15,7 @@ import { ServiceCollection } from "@/wallet/base"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/service"
+import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { DappSessionService } from "./service"
 
@@ -24,11 +25,18 @@ function makeProfileStub() {
 	// One deterministic HMAC key per profile so MAC-storage writes/reads verify
 	// within a test without a real key hierarchy.
 	const keys = new Map<string, Promise<CryptoKey>>()
+	const deletionState = new ProfileDeletionState()
 	return {
 		name: PROFILE_SERVICE_NAME,
 		dependencies: [],
 		onProfileDeleted: new EventHandler(),
 		getActiveProfile: vi.fn(async () => activeProfile),
+		getDeletionState: () => deletionState,
+		deletionState,
+		captureExecutionFence: vi.fn(async () => {
+			if (!activeProfile) throw new Error("Wallet locked")
+			return { profileId: activeProfile.id, epoch: deletionState.capture(activeProfile.id) }
+		}),
 		deriveDappSessionMacKey: vi.fn(async (profileId: string) => {
 			let key = keys.get(profileId)
 			if (!key) {
@@ -41,7 +49,11 @@ function makeProfileStub() {
 	}
 }
 
-async function makeService(): Promise<{ service: DappSessionService; profileStub: ReturnType<typeof makeProfileStub> }> {
+async function makeService(): Promise<{
+	service: DappSessionService
+	profileStub: ReturnType<typeof makeProfileStub>
+	browserApi: FakeBrowserApi
+}> {
 	const logger = new LoggerStore(new ConfigStore())
 	const browserApi = new FakeBrowserApi()
 	browserApi.reset()
@@ -51,7 +63,7 @@ async function makeService(): Promise<{ service: DappSessionService; profileStub
 	collection.add(profileStub as never)
 	collection.add(service)
 	await collection.start()
-	return { service, profileStub }
+	return { service, profileStub, browserApi }
 }
 
 beforeEach(() => {
@@ -75,6 +87,36 @@ describe("DappSessionService active-profile guards (Q19 preservation pins)", () 
 		const { service: svc } = await makeService()
 		activeProfile = undefined
 		await expect(svc.tryGetDappSessionByOriginAndChain("https://dapp.example", "1")).resolves.toBeUndefined()
+	})
+
+	test("addDappSession: a deletion completing DURING the expiry sweep rejects the write (entry-capture pin)", async () => {
+		// begin + RELEASE while the sweep's storage read is parked: the deletion
+		// fully settles, so only an entry-captured fence still rejects — an
+		// orphan dApp-session row would be a dormant permission grant.
+		const { service: svc, profileStub, browserApi } = await makeService()
+		const realGet = browserApi.storage.local.get.bind(browserApi.storage.local)
+		let parked: (() => void) | null = null
+		let armed = true
+		browserApi.storage.local.get = (async (key: unknown) => {
+			if (armed) {
+				armed = false
+				await new Promise<void>((resolve) => {
+					parked = resolve
+				})
+			}
+			return realGet(key as never)
+		}) as typeof browserApi.storage.local.get
+
+		const run = svc.addDappSession({ url: "https://dapp.example" } as never, [], [], 0 as never, "1")
+		await new Promise((r) => setTimeout(r, 0))
+		profileStub.deletionState.beginDeletion("p1")
+		profileStub.deletionState.release("p1")
+		;(parked as (() => void) | null)?.()
+
+		await expect(run).rejects.toThrow(/deleted|not current/i)
+		browserApi.storage.local.get = realGet as typeof browserApi.storage.local.get
+		const raw = await browserApi.storage.local.get(null)
+		expect(Object.keys(raw as Record<string, unknown>).some((k) => k.startsWith("nulo:core:dappSessions@"))).toBe(false)
 	})
 })
 

@@ -230,7 +230,12 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 
 	public async getOrInitNetworks(): Promise<Network[]> {
 		await this.ensureInitialized()
-		const profile = await requireActiveProfile(this.profileService)
+		// Atomic read+capture: the lock wait + per-seed id allocation below can
+		// span the profile's deletion; seeding rows (and the active pointer) for
+		// a deleted profile creates orphans the cascade's snapshot predates.
+		const fence = await this.profileService.captureExecutionFence()
+		const deletion = this.profileService.getDeletionState()
+		const profile = { id: fence.profileId }
 		return await this.lock.withLock(async () => {
 			const existing = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
 			if (existing.length) return existing
@@ -248,15 +253,25 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 						seed.kind,
 						seed.endpointLabel,
 					)
+					deletion.assertCurrent(fence.profileId, fence.epoch)
 					await this.storage.set(network.id, network)
+					if (!deletion.isCurrent(fence.profileId, fence.epoch)) {
+						await this.storage.delete(network.id)
+						throw new Error(`profile ${fence.profileId} deleted`)
+					}
 					seeded.push(network)
 					if (seed.isPrimaryActive) activeId = network.id
 				} catch (error) {
 					this.logError(`Failed to seed default '${seed.name}'`, getErrorMessage(error))
 				}
 			}
+			// The per-seed catch above (soft-fail is right for one bad seed) also
+			// swallows the deletion compensate's throw — without this re-assert the
+			// call would return [] as a SUCCESS for a deleted profile.
+			deletion.assertCurrent(fence.profileId, fence.epoch)
 			if (!activeId && seeded.length) activeId = seeded[0]!.id
 			if (activeId) {
+				deletion.assertCurrent(fence.profileId, fence.epoch)
 				await this._writeActive(profile.id, activeId)
 				const active = seeded.find((n) => n.id === activeId)!
 				const primaryEndpoint = active.endpoints.find((e) => e.id === active.primaryEndpointId)!
@@ -298,6 +313,12 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		await this.ensureInitialized()
 		const network = (await this.storage.getValues()).find((n) => n.profileId === profileId && n.chainId === chainId)
 		if (!network) throw new Error(`No network for chain ${chainId} in this profile`)
+		return NetworkService.assertCanonicalStoredL1(network)
+	}
+
+	/** Seeded-constant + canonical-range validation of a row's `l1ChainId` (sync — see
+	 *  `getL1ChainIdStored` for why the seeded row value must equal the in-code constant). */
+	private static assertCanonicalStoredL1(network: Network): number {
 		const seeded = SEED_L1_BY_KIND[network.kind ?? "custom"]
 		if (seeded !== undefined && network.l1ChainId !== seeded) {
 			throw new Error(`Seeded network L1 identity mismatch: stored ${network.l1ChainId}, expected ${seeded}`)
@@ -314,11 +335,15 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	 * poisoned custom-network row cannot mint a wrong-chain account. Seeded kinds are already
 	 * bound to in-code constants and stay offline-creatable; custom networks are online-configured
 	 * by nature, so an unreachable node fails creation with a clear error.
+	 *
+	 * ONE row read: the probe target and the returned l1ChainId must come from the same
+	 * snapshot — two independent reads could validate one row and return another's value.
 	 */
 	public async resolveVerifiedL1ChainId(profileId: string, chainId: number): Promise<number> {
-		const stored = await this.getL1ChainIdStored(profileId, chainId)
+		await this.ensureInitialized()
 		const network = (await this.storage.getValues()).find((n) => n.profileId === profileId && n.chainId === chainId)
 		if (!network) throw new Error(`No network for chain ${chainId} in this profile`)
+		const stored = NetworkService.assertCanonicalStoredL1(network)
 		const kind = network.kind ?? "custom"
 		if (SEED_L1_BY_KIND[kind] === undefined) {
 			const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId) ?? network.endpoints[0]
@@ -376,10 +401,13 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async addNetwork(name: string, rpcUrl: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.addNetwork.params, [name, rpcUrl], "addNetwork")
 		await this.ensureInitialized()
-		const profile = await requireActiveProfile(this.profileService)
+		// Atomic read+capture: the RPC probe below can span the profile's
+		// deletion — the commit asserts flush against the write.
+		const fence = await this.profileService.captureExecutionFence()
+		const deletion = this.profileService.getDeletionState()
 		const { chainId, l1ChainId } = await this._probeChainIdentity(rpcUrl)
 		return await this.lock.withLock(async () => {
-			const existingForProfile = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
+			const existingForProfile = (await this.storage.getValues()).filter((n) => n.profileId === fence.profileId)
 			const sameChain = existingForProfile.find((n) => n.chainId === chainId)
 			if (sameChain) {
 				throw new Error(`${ERR_DUPLICATE_CHAIN}: A network for chain ${chainId} already exists in this profile.`)
@@ -387,8 +415,14 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			if (existingForProfile.some((n) => n.name === name)) {
 				throw new Error(`Name '${name}' already in use.`)
 			}
-			const network = await this._buildNetwork(profile.id, name, rpcUrl, chainId, l1ChainId, "custom")
+			const network = await this._buildNetwork(fence.profileId, name, rpcUrl, chainId, l1ChainId, "custom")
+			deletion.assertCurrent(fence.profileId, fence.epoch)
 			await this.storage.set(network.id, network)
+			// The set awaits — compensate before the row becomes observable.
+			if (!deletion.isCurrent(fence.profileId, fence.epoch)) {
+				await this.storage.delete(network.id)
+				throw new Error(`profile ${fence.profileId} deleted`)
+			}
 			this.emit("onNetworkAdded", network)
 			return network
 		})
@@ -450,6 +484,17 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		await this.ensureInitialized()
 		if (this.deletingNetworks.has(networkId)) return false
 		return (await this.storage.get(networkId)) !== undefined
+	}
+
+	/** Chain-keyed variant of {@link isNetworkLive} for writers that carry only
+	 *  (profileId, chainId) — false when no network row exists for the pair OR
+	 *  the row is reserved-deleting. Deliberately lock-free: liveness checks run
+	 *  inside OTHER services' critical sections (see TokenService.clearChainState
+	 *  on why the sweep/create ordering depends on that). */
+	public async isChainLive(profileId: string, chainId: number): Promise<boolean> {
+		await this.ensureInitialized()
+		const network = (await this.storage.getValues()).find((n) => n.profileId === profileId && n.chainId === chainId)
+		return network !== undefined && !this.deletingNetworks.has(network.id)
 	}
 
 	public async setActiveNetwork(id: string): Promise<Network> {

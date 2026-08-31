@@ -43,10 +43,11 @@ const balance = (id: number, token: number, overrides: Partial<TokenBalanceRaw> 
 	...overrides,
 })
 
-// A token deletion only needs a shape carrying `id` (the filter key) plus the
-// fields the projection embeds; the handler is passed the token so
-// getTokenBalanceInfo never reaches into the tokens map.
-const tokenInfo = (id: number) => ({ id, chainId: 1, name: `T${id}`, symbol: `T${id}`, decimals: 18, contract: `0xtok${id}` }) as never
+// The deletion payload carries the FULL identity (id, profileId, chainId,
+// contract) — the handler's delete filter is identity-exact, so the fixture
+// must align with `balance()`'s stamps.
+const tokenInfo = (id: number) =>
+	({ id, profileId: "A", chainId: 1, name: `T${id}`, symbol: `T${id}`, decimals: 18, contract: `0xtok${id}` }) as never
 
 describe("TokenBalanceService.requestBalanceRefresh — missing-pair contract (codex R1 High #4)", () => {
 	test("an absent (token, account) balance pair returns {missing:true} (NOT a throw)", async () => {
@@ -63,12 +64,13 @@ describe("TokenBalanceService.requestBalanceRefresh — missing-pair contract (c
 describe("TokenBalanceService.onTokenDeleted purge cascade", () => {
 	let service: TokenBalanceService
 	let seedRepo: BalanceRepository
+	let api: FakeBrowserApi
 
 	beforeEach(() => {
 		// One FakeBrowserApi shared by the service's internal repo and the test's
 		// seedRepo (same fixed storage key) so the test can seed + assert without
 		// reaching into privates.
-		const api = new FakeBrowserApi()
+		api = new FakeBrowserApi()
 		api.reset()
 		seedRepo = new BalanceRepository(api)
 		service = new TokenBalanceService(new LoggerStore(new ConfigStore()), api)
@@ -107,6 +109,21 @@ describe("TokenBalanceService.onTokenDeleted purge cascade", () => {
 		await invokeDelete(1)
 
 		expect((await seedRepo.getAll()).map((b) => b.id)).toEqual([3])
+	})
+
+	test("a successor's rows at a RE-MINTED token id survive the departed token's handler (identity filter)", async () => {
+		// Numeric token ids are max+1-reallocatable: after A→B, B can re-mint
+		// this very id for a DIFFERENT token. The delete filter is identity-exact
+		// (profileId + chainId + contract, not just the id), so the departed
+		// handler must delete only its own rows and leave the successor's.
+		await seedRepo.set(balance(1, 1))
+		await seedRepo.set(balance(2, 1, { profileId: "B", contract: "0xreminted" }))
+
+		await invokeDelete(1)
+
+		const remaining = await seedRepo.getAll()
+		expect(remaining.map((b) => b.id)).toEqual([2])
+		expect(remaining[0].profileId).toBe("B")
 	})
 })
 

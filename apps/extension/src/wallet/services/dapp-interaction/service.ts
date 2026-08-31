@@ -3,6 +3,7 @@ import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService } from "@/wallet/services/profile/service"
+import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
 import { DappSessionService, AccessLevel, type DappSession } from "@/wallet/services/dapp-session/service"
@@ -170,17 +171,49 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			// two requests from one session would serialize on different lanes if the
 			// profile changed between them, breaking the in-order guarantee). Mirrors
 			// the silentInteraction guard.
+			//
+			// The check is an ATOMIC fence capture, not a bare id read: everything
+			// downstream (the refreshSession park, the dispatch) trusts this
+			// identity, and an id-only compare is blind to a delete + same-id
+			// re-import parked across it. The capture's epoch travels with the
+			// dispatch so entry-asserting ops (register_token) commit against the
+			// AUTHORIZATION-time incarnation. The capture's only throw is the
+			// locked gate — same abort as an id mismatch.
 			const payload = interaction.payload
+			let authorizedFence: ExecutionFence | undefined
 			if ("session" in payload) {
-				const active = await this.profileService.getActiveProfile()
-				if (active?.id !== payload.session.profileId) {
+				try {
+					authorizedFence = await this.profileService.captureExecutionFence()
+				} catch {
 					throw new Error("Active profile changed since approval; aborting to avoid executing against the wrong profile")
+				}
+				if (authorizedFence.profileId !== payload.session.profileId) {
+					throw new Error("Active profile changed since approval; aborting to avoid executing against the wrong profile")
+				}
+				// The session in the payload is a snapshot from interaction CREATION,
+				// and the approval popup can sit open for minutes — long enough for a
+				// delete + same-id re-import to settle, which the capture above cannot
+				// see (it observes the successor's epoch). The session ROW is the
+				// discriminator: the deletion cascade purges it and a re-import never
+				// resurrects it, so requiring it live (and owned by the captured
+				// profile) closes the creation→click window; the fence covers
+				// click→commit.
+				const liveSession = await this.dappSessionService.tryGetDappSession(payload.session.id)
+				if (!liveSession || liveSession.profileId !== authorizedFence.profileId) {
+					throw new Error("Session no longer valid; aborting")
 				}
 			}
 			await this.profileService.refreshSession()
 			// Forward hooks captured at interaction-creation time. Survives the
 			// popup handoff because we stash them on the interaction record.
-			const result = await this.executionService.executeOperations(operations, origin, undefined, interaction.hooks, estimateIds)
+			const result = await this.executionService.executeOperations(
+				operations,
+				origin,
+				undefined,
+				interaction.hooks,
+				estimateIds,
+				authorizedFence,
+			)
 			this.logInfo(`executeAndResolve: resolved [${kinds}]`)
 			this.windowManager.settle(interaction.handleId, result)
 		} catch (error) {

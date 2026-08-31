@@ -96,20 +96,31 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 
 	public async addContact(name: string, address: string): Promise<Contact> {
 		await this.ensureInitialized()
-		const profile = await requireActiveProfile(this.profileService)
+		// Atomic read+capture: the lock wait and id allocation below can span the
+		// profile's deletion — without a fence the row lands stamped with the
+		// deleted profile, surviving the cascade's earlier snapshot as an orphan.
+		const fence = await this.profileService.captureExecutionFence()
+		const deletion = this.profileService.getDeletionState()
 
 		return await this.lock.withLock(async () => {
 			const id = await nextRandomId(this.storage)
 
 			const contact: Contact = {
 				id,
-				profileId: profile.id,
+				profileId: fence.profileId,
 				name,
 				address,
 				abbr: this._getAbbreviation(name),
 			}
 
+			deletion.assertCurrent(fence.profileId, fence.epoch)
 			await this.storage.set(contact.id, contact)
+			// The set awaits — compensate the just-written row if the deletion
+			// landed during it, before the row becomes observable via the emit.
+			if (!deletion.isCurrent(fence.profileId, fence.epoch)) {
+				await this.storage.delete(contact.id)
+				throw new Error(`profile ${fence.profileId} deleted`)
+			}
 
 			this.emit("onContactAdded", contact)
 

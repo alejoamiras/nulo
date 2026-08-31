@@ -59,6 +59,10 @@ class FakeProfileService implements IService {
 	public getDeletionState(): ProfileDeletionState {
 		return this.deletionState
 	}
+	public async captureExecutionFence(): Promise<{ profileId: string; epoch: number }> {
+		if (!this.active) throw new Error("Profile locked")
+		return { profileId: this.active.id, epoch: this.deletionState.capture(this.active.id) }
+	}
 	public setActiveProfile(profile: ProfileInfo | undefined): void {
 		this.active = profile
 	}

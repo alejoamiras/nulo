@@ -131,14 +131,28 @@ export class ProfileServiceClient extends ServiceClient<Methods, Events> impleme
 	 * the reconnect hook. Consumers **should** call it from `onBeforeUnmount`.
 	 *
 	 * Known edge case: an event fired between the snapshot `getActiveProfile`
-	 * resolve and the `add(...)` call below is lost. In practice the
-	 * window is one microtask — acceptable for the pilot. A future hardening
-	 * could buffer emits during this window and flush after the snapshot.
+	 * resolve and the `add(...)` call below is lost. The window is a real RPC
+	 * round-trip (not a microtask) — accepted; a future hardening could buffer
+	 * emits during this window and flush after the snapshot.
 	 */
 	public async subscribeActiveProfile(handler: (profile: ProfileInfo | undefined) => void): Promise<() => void> {
+		// Latch + sequence: an in-flight snapshot RPC must not deliver into an
+		// unsubscribed (unmounted) consumer, and reconnect snapshots resolving
+		// out of order — or after a fresher LIVE event — must stand down rather
+		// than overwrite the newer profile. Live events bump the seq so a stale
+		// snapshot can never win; snapshots bump it so only the latest delivers.
+		let unsubscribed = false
+		let seq = 0
+		const liveHandler = (profile: ProfileInfo | undefined) => {
+			if (unsubscribed) return
+			seq += 1
+			handler(profile)
+		}
 		const emitSnapshot = async () => {
+			const mySeq = ++seq
 			try {
 				const snapshot = await this.getActiveProfile()
+				if (unsubscribed || mySeq !== seq) return
 				handler(snapshot)
 			} catch {
 				// Fetch failed (port disconnected, service errored). The
@@ -146,10 +160,11 @@ export class ProfileServiceClient extends ServiceClient<Methods, Events> impleme
 			}
 		}
 		await emitSnapshot()
-		this.onActiveProfileChanged.add(handler)
+		this.onActiveProfileChanged.add(liveHandler)
 		this.onConnected.add(emitSnapshot)
 		return () => {
-			this.onActiveProfileChanged.remove(handler)
+			unsubscribed = true
+			this.onActiveProfileChanged.remove(liveHandler)
 			this.onConnected.remove(emitSnapshot)
 		}
 	}

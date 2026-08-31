@@ -178,4 +178,30 @@ describe("PxeServiceClientBase generation capture (#281 D4)", () => {
 		await client.getSenders(net)
 		expect(wire[0].args[0]).not.toHaveProperty("pxeGeneration")
 	})
+
+	test("a deletion completing after the authority read aborts the provision (pre-wire revalidation)", async () => {
+		// The offscreen document can be replaced during the recovery's onReady;
+		// if the profile's deletion COMPLETED against the old document, the fresh
+		// document knows nothing — sending this provision would resurrect the
+		// erased generation as live. The live-row re-read right before the wire
+		// must abort instead: provider says the row is gone (or reminted).
+		const marker = new Error(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile p1`)
+		behaviors.push(() => {
+			throw marker
+		})
+		const key = new Uint8Array(32).fill(7)
+		const client = new PxeServiceClientBase(noopLogger)
+		let generationReads = 0
+		client.setGenerationProvider(async () => {
+			generationReads += 1
+			// Read 1 stamps the op (row alive, gen-A); read 2 is the pre-wire
+			// revalidation — the row is gone by then.
+			return generationReads === 1 ? "gen-A" : undefined
+		})
+		client.setStoreKeyProvider(async () => ({ key, generation: "gen-A" }))
+
+		await expect(client.getSenders(net)).rejects.toBe(marker)
+		expect(wire.map((w) => w.method)).toEqual(["getSenders"])
+		expect(key.every((b) => b === 0)).toBe(true)
+	})
 })

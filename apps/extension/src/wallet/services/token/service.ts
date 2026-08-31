@@ -7,6 +7,7 @@ import { NetworkService, networkInfoFrom } from "@/wallet/services/network/servi
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import type { OperationContext, OperationOrigin } from "@/wallet/services/operation-journal/spec"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
 import { nextNumericId } from "@/wallet/services/id-allocators"
@@ -161,11 +162,23 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	 */
 	public async clearChainState(profileId: string, chainId: number): Promise<void> {
 		await this.ensureInitialized()
-		// Seeder fence FIRST: it bumps the seeder's purge epoch and waits on
-		// the marker lock, so an in-flight seed pass either aborts or fully
-		// commits BEFORE the row purge below — a commit landing after the row
-		// sweep would resurrect a token on the freshly-purged chain.
+		// Seeder fence FIRST, and OUTSIDE the token lock: it bumps the seeder's
+		// purge epoch and waits on the marker lock, so an in-flight seed pass
+		// either aborts or fully commits BEFORE the row purge below. (Taking it
+		// inside the lock would invert the seeder-commit's markerLock→tokenLock
+		// order into a deadlock.)
 		await this.seeder.onChainPurged(profileId, chainId)
+		// NO token lock here — the caller (purgeChain) holds the NETWORK lock
+		// (watchdog-disabled by design), and persistToken's in-token-lock
+		// metadata fetch takes the network lock via getNode: a sweep under the
+		// token lock closes that pair into an ABBA deadlock broken only by the
+		// token watchdog (5-minute freeze, then a displaced writer). Create-vs-
+		// sweep atomicity is held by the CREATE side instead: every create
+		// commits under the token lock with an isNetworkLive assert (false for
+		// the whole purge — deletingNetworks reservation precedes the sweep) and
+		// a POST-set isNetworkLive compensate for a reservation landing during
+		// the set — so any row a purge could miss self-compensates, and any row
+		// committed before the reservation is in this snapshot.
 		const tokens = (await this.tokens.getValues()).filter((t) => t.profileId === profileId && t.chainId === chainId)
 		await purgeRows(
 			tokens,
@@ -210,11 +223,48 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		opContext: OperationContext,
 	): Promise<TokenInfo> {
 		await this.ensureInitialized()
+		// The popup's authorizing entry IS this method — mint the fence here,
+		// atomically (read + capture under the profile facade lock).
+		const fence = await this.profiles.captureExecutionFence()
+		return await this.addTokenWithFence(fence, profileId, networkId, accountAddress, tokenInterface, opContext)
+	}
+
+	/**
+	 * Fence-threaded token creation for in-process callers whose AUTHORIZATION
+	 * happened earlier (the dApp register_token dispatch): the commit asserts
+	 * the CALLER's capture — a fresh mint here would bless a profile deleted
+	 * and re-imported since that authorization (the successor's settled epoch
+	 * passes every assert). Deliberately NOT in `rpcMethods`: a threaded fence
+	 * is structural authority, and the wire surface must not accept one.
+	 */
+	public async addTokenAuthorized(
+		fence: ExecutionFence,
+		profileId: string,
+		networkId: string,
+		accountAddress: string,
+		tokenInterface: TokenInterface,
+		opContext: OperationContext,
+	): Promise<TokenInfo> {
+		await this.ensureInitialized()
+		return await this.addTokenWithFence(fence, profileId, networkId, accountAddress, tokenInterface, opContext)
+	}
+
+	private async addTokenWithFence(
+		fence: ExecutionFence,
+		profileId: string,
+		networkId: string,
+		accountAddress: string,
+		tokenInterface: TokenInterface,
+		opContext: OperationContext,
+	): Promise<TokenInfo> {
+		// A caller-supplied profileId that isn't the fence's fails closed.
+		if (fence.profileId !== profileId) throw new Error("unauthorized profile")
 		// Phase 2.5: the journal entry is created up-front (title=undefined) so
 		// the tokens-view TokenImportRow pops in immediately after approval,
 		// carrying the "Requested by <origin>" subtitle; `persistToken` backfills
 		// the title once the live fetch resolves the symbol.
 		return await this.persistToken({
+			fence,
 			profileId,
 			networkId,
 			tokenInterface,
@@ -240,6 +290,10 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	 * INSIDE the token lock, in the not-yet-persisted branch only.
 	 */
 	private async persistToken(input: {
+		/** Deletion fence captured at the AUTHORIZING entry (addToken /
+		 *  addSeededToken), never minted here — a post-deletion mint would
+		 *  observe the successor incarnation's settled epoch and pass. */
+		fence: ExecutionFence
 		profileId: string
 		networkId: string
 		tokenInterface: TokenInterface
@@ -248,7 +302,12 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 			| { kind: "seeded"; name: string; symbol: string; decimals: number }
 			| { kind: "live"; fetch: () => Promise<[string, string, number]> }
 	}): Promise<TokenInfo> {
-		const { profileId, networkId, tokenInterface, metadata } = input
+		const { fence, profileId, networkId, tokenInterface, metadata } = input
+
+		// A stale authorization must not pass through ANY exit — the idempotent
+		// short-circuit below would otherwise hand a deleted incarnation's flow a
+		// successor's row as its own success.
+		this.profiles.getDeletionState().assertCurrent(fence.profileId, fence.epoch)
 
 		// Fast idempotency short-circuit (Opus H2 / codex DEFERRED).
 		// If the token is already on this profile+chain, return without
@@ -259,6 +318,10 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		// the write path against concurrent imports of NEW addresses.
 		const existing = await this.findToken(profileId, tokenInterface.chainId, tokenInterface.contract)
 		if (existing) {
+			// findToken parked: a delete + same-id re-import completing during it
+			// makes `existing` the SUCCESSOR's row — re-assert so the stale flow
+			// cannot exit success through the read path either.
+			this.profiles.getDeletionState().assertCurrent(fence.profileId, fence.epoch)
 			return getTokenInfo(existing)
 		}
 
@@ -312,7 +375,30 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 						transferPublicToPrivateFn: tokenInterface.transferPublicToPrivateFn,
 						transferPrivateToPublicFn: tokenInterface.transferPrivateToPublicFn,
 					}
+					// Assert authority flush against the write: the metadata fetch above
+					// can span a profile deletion or the network's purge cascade —
+					// landing the row afterwards creates an orphan the cascade's own
+					// snapshot predates.
+					this.profiles.getDeletionState().assertCurrent(fence.profileId, fence.epoch)
+					if (!(await this.networks.isNetworkLive(networkId))) {
+						throw new Error("network deleted")
+					}
 					await this.tokens.set(`${token.id}`, token)
+					// The set itself awaits — re-check before making the row observable,
+					// compensating the just-written row if authority moved during it.
+					if (!this.profiles.getDeletionState().isCurrent(fence.profileId, fence.epoch)) {
+						await this.tokens.delete(`${token.id}`)
+						throw new Error(`profile ${fence.profileId} deleted`)
+					}
+					// Network leg of the same compensate: the sweep runs WITHOUT the
+					// token lock (deadlock avoidance — see clearChainState), so a
+					// purge whose reservation landed during the set above may have
+					// snapshotted before this row existed. Self-compensating here is
+					// what makes the lockless sweep complete.
+					if (!(await this.networks.isNetworkLive(networkId))) {
+						await this.tokens.delete(`${token.id}`)
+						throw new Error("network deleted")
+					}
 					this.emit("onTokenAdded", getTokenInfo(token))
 				}
 				const result = getTokenInfo(token)
@@ -357,7 +443,10 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	}): Promise<TokenInfo> {
 		await this.ensureInitialized()
 		const { profileId, networkId, accountAddress, tokenInterface, name, symbol, decimals } = input
+		const fence = await this.profiles.captureExecutionFence()
+		if (fence.profileId !== profileId) throw new Error("unauthorized profile")
 		return await this.persistToken({
+			fence,
 			profileId,
 			networkId,
 			tokenInterface,
@@ -412,7 +501,19 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 					transferPublicToPrivateFn: tokenInterface.transferPublicToPrivateFn,
 					transferPrivateToPublicFn: tokenInterface.transferPrivateToPublicFn,
 				}
+				// The metadata fetch above parks with the token lock held, but the
+				// chain sweep is LOCKLESS (see clearChainState) — re-read the row so
+				// a swept token is not resurrected by the set below.
+				if (!(await this.tokens.get(`${tokenId}`))) {
+					throw new Error("token deleted")
+				}
 				await this.tokens.set(`${token.id}`, token)
+				// The set awaits — a sweep whose snapshot predates it would miss this
+				// row; self-compensate, mirroring persistToken's commit.
+				if (!(await this.networks.isNetworkLive(networkId))) {
+					await this.tokens.delete(`${token.id}`)
+					throw new Error("network deleted")
+				}
 				this.emit("onTokenUpdated", getTokenInfo(token))
 				const result = getTokenInfo(token)
 				task.complete()
@@ -725,7 +826,22 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 				// orphaned balance. Parsing here records it as a restoreError instead.
 				const row = TokenSchema.parse({ ...token, id })
 				assertRestoreEpoch(deletion, epochs, row.profileId)
+				// The chain sweep is LOCKLESS (see clearChainState), so a purge can
+				// interleave this batch despite the token lock — a row written after
+				// the sweep's snapshot would survive it. Per-row liveness makes the
+				// row fail visibly (restoreError) instead; this also rejects rows for
+				// a chain with NO network row, which a well-formed backup (networks
+				// restore before tokens) never produces.
+				if (!(await this.networks.isChainLive(row.profileId, row.chainId))) {
+					throw new Error("network deleted")
+				}
 				await this.tokens.set(`${id}`, row)
+				// The set awaits — a purge whose reservation + snapshot landed during
+				// it would miss this row; self-compensate, mirroring persistToken.
+				if (!(await this.networks.isChainLive(row.profileId, row.chainId))) {
+					await this.tokens.delete(`${id}`)
+					throw new Error("network deleted")
+				}
 				return row
 			})
 		})

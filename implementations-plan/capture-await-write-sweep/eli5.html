@@ -1,0 +1,132 @@
+<title>Capture-Await-Write Sweep</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=Spline+Sans+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --paper: #fafbfc;
+    --ink: #1a1d21;
+    --steel: #5a6472;
+    --fence: #2f6b4f;
+    --race: #b3422a;
+    --line: #e3e7ec;
+    --card: #f2f4f7;
+  }
+  :root:not([data-theme="light"]) { }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #16181c;
+      --ink: #e8eaed;
+      --steel: #9aa4b2;
+      --fence: #6fb493;
+      --race: #e07856;
+      --line: #2a2f36;
+      --card: #1d2025;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #16181c;
+    --ink: #e8eaed;
+    --steel: #9aa4b2;
+    --fence: #6fb493;
+    --race: #e07856;
+    --line: #2a2f36;
+    --card: #1d2025;
+  }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, serif;
+    line-height: 1.65;
+    margin: 0;
+    padding: 3rem 1.25rem 5rem;
+  }
+  main { max-width: 720px; margin: 0 auto; }
+  h1, h2 { font-family: "Spline Sans Mono", ui-monospace, monospace; text-wrap: balance; }
+  h1 { font-size: 1.7rem; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 0.4rem; }
+  h2 { font-size: 1.05rem; font-weight: 600; margin: 2.8rem 0 0.8rem; }
+  p { max-width: 65ch; margin: 0.8rem 0; }
+  .eyebrow {
+    font-family: "Spline Sans Mono", ui-monospace, monospace;
+    font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--steel); margin-bottom: 1.6rem;
+  }
+  .shape {
+    font-family: "Spline Sans Mono", ui-monospace, monospace;
+    font-size: 0.85rem; line-height: 1.9;
+    background: var(--card); border: 1px solid var(--line); border-radius: 6px;
+    padding: 1.1rem 1.3rem; margin: 1.6rem 0; overflow-x: auto;
+  }
+  .shape .c { color: var(--steel); }
+  .shape .r { color: var(--race); font-weight: 500; }
+  .stats { display: flex; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin: 1.6rem 0; }
+  .stat { flex: 1; background: var(--card); padding: 0.85rem 1rem; min-width: 0; }
+  .stat b { display: block; font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 1.35rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 0.78rem; color: var(--steel); }
+  .stat.race b { color: var(--race); }
+  .stat.fence b { color: var(--fence); }
+  .phase { border-left: 2px solid var(--line); padding: 0.1rem 0 0.1rem 1.2rem; margin: 1.4rem 0; }
+  .phase.done { border-left-color: var(--fence); }
+  .phase h3 { font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 0.9rem; font-weight: 600; margin: 0 0 0.3rem; }
+  .phase .gate { font-size: 0.85rem; color: var(--steel); }
+  .phase .st { font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 0.72rem; letter-spacing: 0.08em; }
+  .done .st { color: var(--fence); }
+  .pend .st { color: var(--steel); }
+  ul { padding-left: 1.2rem; max-width: 65ch; }
+  li { margin: 0.45rem 0; }
+  li::marker { color: var(--steel); }
+  .approval {
+    background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--race);
+    border-radius: 6px; padding: 1.1rem 1.4rem; margin: 1.8rem 0;
+  }
+  .approval h2 { margin-top: 0.2rem; }
+  pre.seed {
+    font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 0.78rem; line-height: 1.6;
+    background: var(--card); border: 1px solid var(--line); border-radius: 6px;
+    padding: 1rem 1.2rem; overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+  }
+  .rec { font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fence); }
+  .warn { font-size: 0.88rem; color: var(--race); }
+  .muted { color: var(--steel); font-size: 0.85rem; }
+  a { color: inherit; text-decoration-color: var(--steel); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+<main>
+  <div class="eyebrow">Nulo wallet · concurrency plan &amp; status</div>
+  <h1>Capture-Await-Write Sweep</h1>
+  <p>The wallet's big August audit fixed 28 concurrency bugs, and most of them had the same three-beat shape. This sweep hunts that exact shape in all the code the audit <em>never looked at</em> — and either proves each spot safe or fixes it with the same battle-tested guard patterns the audit work established.</p>
+
+  <div class="shape"><span class="c">// the shape being hunted, everywhere:</span><br>const snap = readSharedState()   <span class="c">// take a snapshot (profile, network, row…)</span><br><span class="r">await something()                // pause — deletions &amp; switches can sneak in here</span><br>write(basedOn(snap))             <span class="c">// write using the now-possibly-stale snapshot</span></div>
+
+  <h2>What the hunt found</h2>
+  <div class="stats">
+    <div class="stat"><b>~300</b><span>spots examined, every one verdicted</span></div>
+    <div class="stat race"><b>13</b><span>real gaps — all fixed &amp; pinned</span></div>
+    <div class="stat fence"><b>rest</b><span>proven safe, with written reasons</span></div>
+  </div>
+  <p>The headline pattern: the audit fenced every backup-<em>restore</em> writer in five services, but the <em>create</em> buttons right next to them (add a network, add a contact, add a token…) were left bare — delete your profile at just the wrong moment and a ghost row belonging to the deleted profile gets written anyway. Same guard, five more doors. The other fixes are of the same flavor: a newer code path missing the re-check its older sibling already has, a cleanup task that can delete a store a re-imported profile just started using, two settings writes that can silently undo each other, a stray approval popup that never closes.</p>
+  <p>Nothing found is a stolen-funds or leaked-secret bug. These are orphaned-data, wrong-moment-write, and stuck-UI bugs — the kind that turn into support mysteries later. Two known deep issues stay deliberately parked (they need a multi-PR redesign the earlier audit already scoped), so the final bill of health is <em>qualified</em>, exactly as it should be.</p>
+
+  <h2>Why this size of ceremony</h2>
+  <p>You fixed the tier as <strong>light</strong>, escalating if more than two real bugs turned up. Thirteen did, and several sit near sensitive machinery — so the escalation applied in full: an independent second reviewer went over the fixes on top of the eight-round external-model loop. That redundancy paid for itself concretely — the second reviewer caught a deadlock the loop itself had introduced and then signed off on twice.</p>
+
+  <h2>Phases</h2>
+  <div class="phase done"><h3>1 · Enumerate <span class="st">DONE</span></h3><p class="gate">Three passes: six readers covered all 122 hot files line by line; a second pass hunted the sneaky variants (callbacks that fire later, fire-and-forget writes); a third re-checked every file the first census had dismissed — and caught the census being wrong twice. Proves itself by: every file accounted for, in writing.</p></div>
+  <div class="phase done"><h3>2 · Judge every spot <span class="st">DONE</span></h3><p class="gate">Each spot got a verdict with a written reason; the risky calls were re-read in the actual code. The external attack pass on the frozen table upgraded three "safe" verdicts into fixes — its demands are all folded in.</p></div>
+  <div class="phase done"><h3>3 · Fix the thirteen <span class="st">DONE</span></h3><p class="gate">Every fix reuses an existing guard pattern from the codebase, and ships in the same commit with a test that fails if the guard is ever removed — each one verified by actually removing it once (all red→green runs logged).</p></div>
+  <div class="phase done"><h3>4 · Full battery + review loops <span class="st">DONE</span></h3><p class="gate">Full unit battery green (4,880+ tests), smoke e2e green, targeted network e2e green three times over (the dApp token-registration and network-deletion flows re-validated live after each redesign). The external-model review loop ran <strong>eight rounds</strong> — it rejected five times, every finding was verified in the real code before adoption, and its own round-2 demand turned out to plant the branch's worst bug. The independent second reviewer caught that one: a lock-ordering deadlock that would have frozen the token and network surfaces for five minutes on an unlucky add-token × delete-network overlap. Fixed by inverting the design (the purge sweep runs lock-free; every token writer self-compensates instead), plus two more of its findings: a stale approval popup could execute under a re-imported profile, and one error path reported success for a deleted profile. Both reviewers signed off on the final state.</p></div>
+
+  <div class="approval">
+    <h2>Decisions that are yours</h2>
+    <ul>
+      <li><strong>Merge</strong> — the PR will be opened green and reviewed; landing it is your call, as always.</li>
+      <li><strong>Accepted-risk list</strong> — a handful of spots are judged "safe because the harm is a self-healing cosmetic blip". Each is labeled <em>owner-ack-pending</em> in the table and listed in the PR body; veto any and it becomes a fix.</li>
+      <li><strong>One scope addition</strong> — the message-transport package (between popup, background, and prover) was screened too, on the external reviewer's insistence. Findings there are notes, not code changes, unless you say otherwise.</li>
+      <li><strong>Parked design work</strong> — the activity-counter locking gap and a few hygiene items need real design, not a quick guard; they're written up as owner notes, mirroring how the earlier audit parked its two deep issues.</li>
+    </ul>
+    <p class="muted">This ran autonomously under your sweep brief; everything above is revisitable at PR review.</p>
+  </div>
+
+  <h2>Where it stands</h2>
+  <p>All phases complete; the PR to <code>dev</code> is open and green-gated. The implementation seeds that used to live here are retired — the only remaining action is yours: review the PR, veto any accepted-risk row you disagree with, and merge when satisfied.</p>
+
+  <p class="muted" style="margin-top:2.5rem">Full technical plan: <code>implementations-plan/capture-await-write-sweep/plan.md</code> in the worktree branch — with <code>recon.md</code>, <code>census.md</code>, <code>candidates.md</code>, <code>triage.md</code> beside it.</p>
+</main>

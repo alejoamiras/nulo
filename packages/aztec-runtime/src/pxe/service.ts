@@ -238,8 +238,27 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// unlike the removed per-chain empty-dir sweep (D7 TOCTOU).
 			const orphanProfiles = [...new Set(opfsDirs.map((c) => c.profileId))].filter((id) => !profiles.some((x) => x.id === id))
 			for (const profileId of orphanProfiles) {
-				this.logWarn(`sweep: removing orphan OPFS PXE profile dir ${PXE_DATA_DIR_ROOT}/${profileId}`)
-				await removeProfileStoreDirs(profileId)
+				// Serialize against store-opens: dirs are (re)created by `registry.ensure`
+				// under this profile's `barrier.read`, so holding WRITE here means a
+				// same-id re-import provisioning DURING the sweep either lands its
+				// lifecycle entry before the re-check below (removal skipped) or has its
+				// store creation queued until the removal finishes (fresh dir after).
+				// Without the barrier, the recursive remove could delete a successor
+				// store mid-create. The barrier entry is retained (unlike
+				// clearProfileState's success path) — deleting it here could split-brain
+				// a queued reader onto a stale guard instance.
+				const barrier = this.getProfileBarrier(profileId)
+				await barrier.enterWrite()
+				try {
+					// Re-check liveness AFTER acquiring the barrier, not just at the
+					// snapshot: a provision that landed while we waited (dir exists ⟹ key
+					// provisioned ⟹ lifecycle entry present) must not be swept as orphan.
+					if (this.profileLifecycles.has(profileId)) continue
+					this.logWarn(`sweep: removing orphan OPFS PXE profile dir ${PXE_DATA_DIR_ROOT}/${profileId}`)
+					await removeProfileStoreDirs(profileId)
+				} finally {
+					barrier.leaveWrite()
+				}
 			}
 		}
 		if (pxes.length) {
@@ -259,6 +278,13 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				if (deleted) pxes.splice(i, 1)
 			}
 			if (!pxes.length) {
+				// Re-prove global emptiness at commit: the `pxes` bookkeeping above is a
+				// boot-time snapshot, and a PXE DB created since (or a concurrent
+				// clearProfileState draining the same list) would make deleting the
+				// SHARED keyval-store cross-profile corruption — same re-list
+				// clearProfileState itself performs.
+				const remaining = (await indexedDB.databases()).some((x) => x.name?.startsWith(PXE_DATA_DIR_ROOT))
+				if (remaining) return
 				const keyval = dbs.find((x) => x.name === "keyval-store")
 				if (keyval) {
 					await new Promise<void>((resolve, reject) => {
@@ -852,6 +878,12 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				}
 				await barrier.read(async () => {
 					await chainGuard.write(async () => {
+						// A stale op parked at this rebind can outlive a clearProfileState
+						// (which never bumps the CHAIN purge epoch) — without re-asserting
+						// the generation here, `ensure` would rebuild a runtime/store for
+						// the erased incarnation using the successor's key. Same assert,
+						// same placement, as withPxeWrite's ensure.
+						this.assertGenerationCurrent(network)
 						this.lifecycle.assertUnchanged(chainKey, purgeEpochAtEntry, label)
 						await this.registry.ensure(network, this.storeKeys.get(network.profileId))
 					})
