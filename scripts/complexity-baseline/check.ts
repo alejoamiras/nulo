@@ -9,6 +9,10 @@ import { type BaselineManifest, compareToManifest, installedBiomeVersion, scanTr
 const manifest: BaselineManifest = JSON.parse(readFileSync("scripts/complexity-baseline/manifest.json", "utf8"))
 const rootPkg = JSON.parse(readFileSync("package.json", "utf8"))
 
+// --staged scans the index instead of the working tree — the pre-commit hook uses it
+// so what gets checked is exactly what the commit captures (split-staging can't evade).
+const staged = process.argv.includes("--staged")
+
 const problems: string[] = []
 
 const installed = installedBiomeVersion(rootPkg)
@@ -19,7 +23,7 @@ if (manifest.biomeVersion !== installed) {
 	)
 }
 
-const scan = scanTree()
+const scan = scanTree({ staged })
 for (const f of scan.forbidden) {
 	problems.push(`${f.file}:${f.line} — forbidden suppression: ${f.why}`)
 }

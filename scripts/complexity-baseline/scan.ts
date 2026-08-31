@@ -68,9 +68,14 @@ export interface ScanResult {
 	forbidden: { file: string; line: number; why: string }[]
 }
 
-/** Scans tracked source (working-tree contents) for suppressions reaching budget rules. */
-export function scanTree(): ScanResult {
-	const res = spawnSync("git", ["grep", "-nF", "biome-ignore", "--", ...SOURCE_PATHSPECS], {
+/**
+ * Scans tracked source for suppressions reaching budget rules. Default reads the
+ * working tree; `staged: true` reads the index (`git grep --cached`) — what a commit
+ * actually captures, so the pre-commit hook can't be split-staged past.
+ */
+export function scanTree(opts: { staged?: boolean } = {}): ScanResult {
+	const flags = opts.staged ? ["--cached"] : []
+	const res = spawnSync("git", ["grep", ...flags, "-nF", "biome-ignore", "--", ...SOURCE_PATHSPECS], {
 		encoding: "utf8",
 		maxBuffer: 64 * 1024 * 1024,
 	})

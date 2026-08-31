@@ -2,4 +2,4 @@
 set -e
 bunx biome check --staged --no-errors-on-unmatched
 ./scripts/check-no-brand.sh
-bun scripts/complexity-baseline/check.ts
+bun scripts/complexity-baseline/check.ts --staged
