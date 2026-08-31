@@ -134,7 +134,7 @@ describe("TokenBalanceService.purgeForTokens — F-B23 raw second pass, profile 
 		await service.purgeForTokens([5], "A")
 
 		const raw = await api.storage.local.get(null)
-		// No profileId → unattributable → left to the legacy sweep, never a purge.
+		// No profileId → unattributable → fail-closed debris, never purge-reachable.
 		expect(raw["nulo:core:token-balances@97"]).toBeDefined()
 		expect(raw["nulo:core:token-balances@98"]).toBeUndefined()
 		expect(raw["nulo:core:token-balances@99"]).toBeDefined()

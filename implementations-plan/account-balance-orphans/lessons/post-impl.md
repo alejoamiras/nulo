@@ -32,6 +32,11 @@ One blocking High + 4 findings, ALL verified true against source before adoption
 
 Fixes committed as `a7f401d6`; full services+composables suites, typecheck, lint green.
 
-## Round 2 — verdict
+## Round 2 — verdict: `approve`
 
-(recorded below when the resumed pass returns)
+"The fixes match the intended behavior. No production correctness findings remain."
+Codex explicitly ratified the raw-pass old-shape skip and ruled `profileId` equality the
+RIGHT live-map eviction condition (tombstones carry ids, not identities; the deleted
+profile id stays reserved + write-fenced, so a stricter identity check could strand a
+deleted profile's holder). One Low comment nit (a test comment mislabeled fail-closed
+debris as sweep-bound) fixed in the PR-open commit. Loop converged in 2 rounds.
