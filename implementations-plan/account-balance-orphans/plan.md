@@ -143,7 +143,7 @@ Predicate at every §2 site (reads, refreshes, handlers, projector, queue, backu
 
 **Gate.** Phase 2 commands; both RED runs recorded in `lessons/phase-3.md`.
 
-### Phase 4 — E2E
+### Phase 4 — E2E ✓
 Doctored full-backup import (imported account present, key slice stripped): account drops AND zero balance rows remain for its scope; re-import the key → balances start fresh (no stale reattachment). Reuses the import-drivers helpers. Must fail without Phase 3's wiring — record red/green in `lessons/phase-4.md`.
 
 **Gate.** `bun run e2e:agent tests/e2e/<spec>` green + documented pre-fix red.
