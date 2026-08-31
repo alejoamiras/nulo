@@ -224,9 +224,15 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		// throw — so the caller (the incoming-transfer outbox drain) can safely delete a stale row on
 		// `missing` while KEEPING the row on a real throw (a transient `getAll()`/storage failure), which
 		// would otherwise be indistinguishable and discard the sole durable refresh marker (codex R1 High #4).
-		const balance = (await this.repo.getAll()).find((x) => x.token === tokenId && x.account === accountAddress)
-		const token = balance && this.tokens.get(balance.token)
-		if (!balance || !token || !rowMatchesToken(balance, token)) {
+		// Find the identity-MATCHING row for the pair: between a stale incarnation's
+		// row and its canonical replacement (coexisting until the next reconcile), a
+		// bare pair-find could pick the stale one and false-report `missing`.
+		const balance = (await this.repo.getAll()).find((x) => {
+			if (x.token !== tokenId || x.account !== accountAddress) return false
+			const token = this.tokens.get(x.token)
+			return token !== undefined && rowMatchesToken(x, token)
+		})
+		if (!balance) {
 			return { missing: true }
 		}
 		const hadPending = this.queue.hasPendingTask(balance.id)
@@ -542,8 +548,10 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 				(row) => row.profileId === profileId && keys.has(`${row.chainId}:${row.account}`),
 			)) {
 				// The scope's profile is typically NOT active here (restore finalize), so
-				// the token map cannot decorate the row — emit only when it can.
-				if (this.tokens.has(tb.token)) this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb))
+				// the token map cannot decorate the row — emit only when the map holds the
+				// row's OWN token (a reused id's successor must not decorate the event).
+				const live = this.tokens.get(tb.token)
+				if (live && rowMatchesToken(tb, live)) this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb))
 				this.invalidatedBalanceIds.add(tb.id)
 				await this.repo.delete(tb.id)
 			}
