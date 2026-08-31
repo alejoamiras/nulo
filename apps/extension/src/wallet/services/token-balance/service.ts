@@ -317,13 +317,17 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	}
 
 	private readonly onTokenDeleted = async (token: TokenInfo) => {
-		// Same generation fence as the sibling handlers, scoped to the EMIT only:
-		// the row deletes are idempotent and must complete regardless of a switch
-		// (stranding rows is worse), but a UI event under the switched-to profile's
-		// context would splice a foreign deletion into its lists.
+		// Generation fence over the WHOLE handler, deletes included: numeric token
+		// ids are max+1-reallocatable, so the parked `getAll` can span a switch in
+		// which the successor context re-mints this very id — deleting `token === id`
+		// rows then destroys the successor's fresh balances. Aborting strands the
+		// departed profile's rows instead, which is the safe direction: orphans are
+		// invisible (reads join through live tokens) and its next sync reconciles.
 		const gen = this.profileGeneration
 		this.tokens.delete(token.id)
-		for (const tb of (await this.repo.getAll()).filter((x) => x.token === token.id)) {
+		const rows = (await this.repo.getAll()).filter((x) => x.token === token.id)
+		for (const tb of rows) {
+			if (gen !== this.profileGeneration) return
 			this.invalidatedBalanceIds.add(tb.id)
 			await this.repo.delete(tb.id)
 			if (gen === this.profileGeneration) {

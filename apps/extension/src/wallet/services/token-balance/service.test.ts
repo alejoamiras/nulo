@@ -107,13 +107,15 @@ describe("TokenBalanceService.onTokenDeleted purge cascade", () => {
 		expect((await seedRepo.getAll()).map((b) => b.id)).toEqual([3])
 	})
 
-	test("a profile switch mid-purge still deletes the rows but suppresses the UI emits", async () => {
+	test("a profile switch mid-purge ABORTS the row deletes and suppresses the UI emits", async () => {
 		await seedRepo.set(balance(1, 1))
 		await seedRepo.set(balance(2, 1))
 
 		// Bump the generation from inside the handler's first storage read — the
-		// switch lands between the entry capture and the per-row emits. Deletes
-		// must proceed (idempotent, stranding rows is worse); emits must not.
+		// switch lands during the parked `getAll`. Numeric token ids are
+		// max+1-reallocatable, so `token === 1` rows may already belong to the
+		// successor context: the handler must NOT delete them (stranding the
+		// departed profile's rows is the safe direction), and must not emit.
 		const svc = service as unknown as { profileGeneration: number; emit: (e: string, p: unknown) => void }
 		const realGet = api.storage.local.get.bind(api.storage.local)
 		let bumped = false
@@ -129,7 +131,7 @@ describe("TokenBalanceService.onTokenDeleted purge cascade", () => {
 
 		await invokeDelete(1)
 
-		expect(await seedRepo.getAll()).toEqual([])
+		expect((await seedRepo.getAll()).map((b) => b.id).sort()).toEqual([1, 2])
 		expect(emit.mock.calls.filter(([e]) => e === "onTokenBalanceDeleted")).toHaveLength(0)
 	})
 })
