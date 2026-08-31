@@ -74,31 +74,31 @@ Success = profile integration suite green with no assertion weakened, new equiva
 
 ## Phases
 
-### Phase 1 — Equivalence pins (no refactor yet)
+### Phase 1 ✓ — Equivalence pins (no refactor yet)
 
 Add: `exportBackupMaterial` + `exportImportedKeysDek` wrong-password → `toBeInstanceOf(InvalidPasswordError)`; `exportMnemonic` + `changeProfilePassword` wrong-password → exact message `"Invalid profile old password"` and NOT instanceof `InvalidPasswordError`; `(BUG PIN)` tombstoned-row mutation (seed row + tombstone via `FakeBrowserApi`, `changeProfileName` succeeds); event-order pin (`onProfileAdded` fires before the session opens on `createProfile`/import); deterministic passkey stale-rejection pin — MANDATORY (codex round 2 condition): override the suite's `FakePasskeyService.getKey` with a held promise (the phase-2 barrier), delete the profile while held, resolve, assert the unlock rejects `"Invalid profile id"`.
 
 **Validation gate**: `bun run --cwd apps/extension test src/wallet/services/profile/` green (new pins pass against UNCHANGED code); `bun run lint`; `bun run typecheck:all`. Layers: lint/typecheck + integration.
 
-### Phase 2 — Mechanical families (F4, F5, F6, triple)
+### Phase 2 ✓ — Mechanical families (F4, F5, F6, triple)
 
 Extract `sealedTriple`, `getProfileOrThrowHoldingLock`, `captureRowFence`, `fenceStillCurrent`; rewrite their ~20 call sites preserving wrappings. `exportPlain` may drop under 15 → remove directive + `bun run baseline:complexity`.
 
 **Validation gate**: profile-dir suite + `bun run lint` (post-regen) + `bun run typecheck:all`. Layers: lint/typecheck + integration.
 
-### Phase 3 — Unlock pair (F2 shared phase-1; F3 + degrade blocks decomposed)
+### Phase 3 ✓ — Unlock pair (F2 shared phase-1; F3 + degrade blocks decomposed)
 
 `snapshotForUnlock` (2 sites); `unsealTrustedDekHoldingLock` (unlock password-degrade block); per-method phase-3 helpers. Kills cognitive 19 + 21; regen baseline.
 
 **Validation gate**: same commands; the suite's `"Change 2 — unlockProfile phase-1/2/3"` / `"Change 1 — unlockPasskeyProfile phase-1/2/3"` blocks green. Layers: lint/typecheck + integration.
 
-### Phase 4 — changeProfilePassword (33), deleteProfile (28), resumePendingDeletions (16)
+### Phase 4 ✓ — changeProfilePassword (33), deleteProfile (28), resumePendingDeletions (16)
 
 Three SEPARATELY GATED sub-steps (codex round 1) — decompose one method, run the profile-dir suite, commit, next. `persistNewProfileHoldingLock` lands here with the import-twins' call sites. Regen baseline per sub-step that removes a directive.
 
 **Validation gate** (after each sub-step and at phase end): profile-dir suite (deletion blocks `(B-12 PIN)`, `F-B24` green) + lint + typecheck. Layers: lint/typecheck + integration.
 
-### Phase 5 — restore (36 / 171 lines) + finalizeRestore (46 / 94+92 lines) + F9
+### Phase 5 ✓ — restore (36 / 171 lines) + finalizeRestore (46 / 94+92 lines) + F9
 
 Branch-split `restore` (catch placement verbatim per branch) over `writeMarkerThenRowHoldingLock`; decompose `finalizeRestore` (password arm reuses `unsealTrustedDekHoldingLock`). Riskiest phase — smallest steps, suite between steps. Regen baseline: target zero directives in this file.
 
