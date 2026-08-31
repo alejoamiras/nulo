@@ -122,10 +122,10 @@ describe("assertImmutableRefsMatch", () => {
 })
 
 // The deploy reads its bytes from the committed artifact and gates them on the pins, but nothing in
-// CI executes that path — no job installs Foundry, and the contracts workflow filters on
-// contracts/bridge/** only. Source, artifact and pins can therefore drift apart silently and only
-// surface at deploy time, as an unhandled throw. These are the equalities the deploy asserts,
-// checked without solc so they run in the ordinary unit suite.
+// CI executes that path — the only workflow that installs Foundry runs the forge suites alone, and
+// is filtered on contracts/bridge/**. Source, artifact and pins can therefore drift apart silently
+// and only surface at deploy time, as an unhandled throw. These are the equalities the deploy
+// asserts, checked without solc so they run in the ordinary unit suite.
 describe("source ↔ artifact ↔ pin consistency", () => {
 	const artifact = JSON.parse(readFileSync(PORTAL_BUILD_JSON, "utf8"))
 
@@ -137,9 +137,15 @@ describe("source ↔ artifact ↔ pin consistency", () => {
 		expect(artifact.sourceKeccak).toBe(FORKED_PORTAL_KECCAK)
 	})
 
-	it("carries the reviewed build's hashes and compiler", () => {
-		expect(artifact.initCodeHash).toBe(PORTAL_PIN.initCodeHash)
-		expect(artifact.runtimeCodeHash).toBe(PORTAL_PIN.runtimeCodeHash)
+	// The declared hash fields are just more JSON — only the bytes bind the artifact to the pins.
+	it("ships bytes that hash to the reviewed build", () => {
+		expect(keccak256(artifact.bytecode)).toBe(PORTAL_PIN.initCodeHash)
+		expect(keccak256(artifact.deployedBytecode)).toBe(PORTAL_PIN.runtimeCodeHash)
+	})
+
+	it("declares the hashes its bytes actually have, and the pinned compiler", () => {
+		expect(artifact.initCodeHash).toBe(keccak256(artifact.bytecode))
+		expect(artifact.runtimeCodeHash).toBe(keccak256(artifact.deployedBytecode))
 		expect(artifact.solcVersion.startsWith(PORTAL_PIN.solc)).toBe(true)
 	})
 

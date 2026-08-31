@@ -129,8 +129,9 @@ export interface LoadedPortal {
 }
 
 /**
- * Load the committed reviewed-bytes artifact, asserting it against the pins AND against the current
- * fork source. This is the deploy's source of bytes - exact reviewed bytes, no rebuild required.
+ * Load the committed reviewed-bytes artifact, asserting its BYTES against the pins AND its source
+ * against the current fork. This is the deploy's source of bytes - exact reviewed bytes, no rebuild
+ * required.
  */
 export function loadForkedPortalArtifact(): LoadedPortal {
 	if (!existsSync(PORTAL_BUILD_JSON)) {
@@ -144,12 +145,22 @@ export function loadForkedPortalArtifact(): LoadedPortal {
 				`${FORKED_PORTAL_KECCAK}) - regenerate the artifact from the current fork.`,
 		)
 	}
-	assertPortalPins({ initCodeHash: a.initCodeHash, runtimeCodeHash: a.runtimeCodeHash, solcVersion: a.solcVersion })
+	// The artifact's declared hashes are just more fields of the same file; only hashing the bytes
+	// that will actually be broadcast binds them to the reviewed pins.
+	const initCodeHash = keccak256(a.bytecode)
+	const runtimeCodeHash = keccak256(a.deployedBytecode)
+	if (initCodeHash !== a.initCodeHash || runtimeCodeHash !== a.runtimeCodeHash) {
+		throw new Error(
+			`committed portal artifact is self-inconsistent: declares ${a.initCodeHash} / ${a.runtimeCodeHash} but its ` +
+				`bytes hash to ${initCodeHash} / ${runtimeCodeHash} - regenerate it.`,
+		)
+	}
+	assertPortalPins({ initCodeHash, runtimeCodeHash, solcVersion: a.solcVersion })
 	return {
 		abi: a.abi,
 		bytecode: a.bytecode,
 		deployedBytecode: a.deployedBytecode,
-		runtimeCodeHash: a.runtimeCodeHash,
+		runtimeCodeHash,
 		immutableReferences: a.immutableReferences,
 	}
 }
