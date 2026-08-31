@@ -1,57 +1,92 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import {
-	BASELINED_RULES,
+	classifySuppressionLine,
+	compareToManifest,
 	installedBiomeVersion,
-	scanFileWideSuppressions,
-	scanSuppressions,
+	scanTree,
 } from "../complexity-baseline/scan"
 import manifest from "../complexity-baseline/manifest.json"
 
 // The complexity-budget baseline is shrink-only: grandfathered suppressions may be
 // removed (with a manifest regeneration in the same PR), never added. Full protocol
-// in CLAUDE.md § Complexity budgets.
+// in CLAUDE.md § Complexity budgets. `bun scripts/complexity-baseline/check.ts` is
+// the same enforcement in the local lint/pre-commit path; this file is the CI mirror.
+
+// Sample lines are concatenation-built so this test file never matches the scanner itself.
+const IGNORE = "// biome-ignore"
+const line = (parts: string[]) => parts.join("")
+
+describe("suppression classifier", () => {
+	test("counts exact-rule directives, whitespace-tolerantly", () => {
+		expect(classifySuppressionLine(line([IGNORE, " lint/complexity/noExcessiveCognitiveComplexity: x"]))).toEqual({
+			kind: "baselined",
+			rule: "noExcessiveCognitiveComplexity",
+		})
+		// Biome accepts multiple spaces between token and scope (verified on 2.5.9).
+		expect(classifySuppressionLine(line([IGNORE, "  lint/complexity/noExcessiveLinesPerFunction: x"]))).toEqual({
+			kind: "baselined",
+			rule: "noExcessiveLinesPerFunction",
+		})
+	})
+
+	test("flags every broader syntax that also suppresses budget rules (verified on Biome 2.5.9)", () => {
+		for (const evasion of [
+			line([IGNORE, " lint: bare scope"]),
+			line([IGNORE, "  lint: bare scope, double space"]),
+			line([IGNORE, " lint/complexity: group scope"]),
+			line([IGNORE, "-all lint: file-wide bare"]),
+			line([IGNORE, "-all lint/complexity/noExcessiveCognitiveComplexity: file-wide rule"]),
+			line([IGNORE, "-start lint/complexity: range group"]),
+			line([IGNORE, " lint/complexity/noExcessiveNestedTestSuites: zero-baseline rule"]),
+		]) {
+			expect(classifySuppressionLine(evasion)?.kind, evasion).toBe("forbidden")
+		}
+	})
+
+	test("ignores suppressions that cannot reach a budget rule", () => {
+		for (const unrelated of [
+			line([IGNORE, " lint/suspicious/noExplicitAny: typed boundary"]),
+			line([IGNORE, " lint/complexity/useArrowFunction: style call"]),
+			line([IGNORE, "-start lint/style/noNonNullAssertion: range of another group"]),
+			"const x = 1 // no suppression here",
+		]) {
+			expect(classifySuppressionLine(unrelated), unrelated).toBeNull()
+		}
+	})
+})
+
 describe("complexity baseline", () => {
+	const scan = scanTree()
+
 	test("manifest pins the installed Biome version", () => {
 		const rootPkg = JSON.parse(readFileSync("package.json", "utf8"))
 		expect(
 			manifest.biomeVersion,
 			"Biome version changed — suppression scores drift between releases. Regenerate the baseline " +
-				"in this PR: `bun run baseline:complexity` (it re-derives every allowance under the new version).",
+				"in this PR: `bun run baseline:complexity -- --adopt` and review the manifest diff.",
 		).toBe(installedBiomeVersion(rootPkg))
 	})
 
-	test("suppression counts match the manifest exactly (shrink-only ratchet)", () => {
-		const actual = scanSuppressions()
-		for (const rule of BASELINED_RULES) {
-			const pinned = manifest.rules[rule] as Record<string, number>
-			const files = new Set([...Object.keys(pinned), ...Object.keys(actual[rule])])
-			const grew: string[] = []
-			const shrank: string[] = []
-			for (const file of files) {
-				const was = pinned[file] ?? 0
-				const now = actual[rule][file] ?? 0
-				if (now > was) grew.push(`${file}: ${was} → ${now}`)
-				else if (now < was) shrank.push(`${file}: ${was} → ${now}`)
-			}
-			expect(
-				grew,
-				`New ${rule} suppression(s) added — the baseline only shrinks. Refactor the function under ` +
-					"the budget instead of suppressing. (Grandfathered directives are pre-existing debt, not a pattern to copy.)",
-			).toEqual([])
-			expect(
-				shrank,
-				`${rule} offender(s) fixed — record the progress: rerun \`bun run baseline:complexity\` ` +
-					"in this PR so the manifest matches the shrunken baseline.",
-			).toEqual([])
-		}
+	test("no forbidden suppression forms anywhere in source", () => {
+		expect(
+			scan.forbidden.map((f) => `${f.file}:${f.line} — ${f.why}`),
+			"Broad or file-wide/range suppressions can silence complexity budgets invisibly — " +
+				"suppress a single rule on a single function, or refactor.",
+		).toEqual([])
 	})
 
-	test("no file-wide suppressions of any complexity-budget rule", () => {
+	test("suppression counts match the manifest exactly (shrink-only ratchet)", () => {
+		const drift = compareToManifest(manifest, scan.ruleCounts)
 		expect(
-			scanFileWideSuppressions(),
-			"File-wide biome-ignore-all suppressions of complexity-budget rules are never allowed — " +
-				"suppress per function (baseline regeneration) or refactor.",
+			drift.grew,
+			"New complexity suppression(s) added — the baseline only shrinks. Refactor the function under " +
+				"the budget instead of suppressing. (Grandfathered directives are pre-existing debt, not a pattern to copy.)",
+		).toEqual([])
+		expect(
+			drift.shrank,
+			"Baseline offender(s) fixed — record the progress: rerun `bun run baseline:complexity` " +
+				"in this PR so the manifest matches the shrunken baseline.",
 		).toEqual([])
 	})
 })

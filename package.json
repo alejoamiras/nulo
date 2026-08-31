@@ -21,7 +21,7 @@
     "test:e2e:all": "bun run --cwd apps/extension vitest run --config vitest.e2e.all.config.ts",
     "e2e:agent": "bash apps/extension/scripts/e2e/agent.sh",
     "e2e:reap": "bun apps/extension/tests/e2e/reap.ts",
-    "lint": "biome check",
+    "lint": "biome check && bun scripts/complexity-baseline/check.ts",
     "lint:fix": "biome check --fix",
     "lint:actions": "actionlint",
     "format": "biome format --write",

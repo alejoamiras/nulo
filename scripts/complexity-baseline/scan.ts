@@ -7,12 +7,96 @@ import { spawnSync } from "node:child_process"
 export const BASELINED_RULES = ["noExcessiveCognitiveComplexity", "noExcessiveLinesPerFunction"] as const
 export type BaselinedRule = (typeof BASELINED_RULES)[number]
 
-/** Built by concatenation so this file itself never matches the scan. */
-const DIRECTIVE_PREFIX = ["biome-ignore", " lint/complexity/"].join("")
-const FILE_WIDE_PREFIX = ["biome-ignore-all", " lint/complexity/"].join("")
+const BUDGET_RULES = new Set<string>([...BASELINED_RULES, "noExcessiveNestedTestSuites"])
 
-/** Source pathspecs the scan covers — suppressions can only live in lintable source. */
-const SOURCE_PATHSPECS = ["*.ts", "*.mts", "*.cts", "*.tsx", "*.js", "*.mjs", "*.cjs", "*.jsx", "*.vue"]
+/**
+ * Matches every Biome suppression form that could reach a budget rule: single-line,
+ * file-wide (-all) and range (-start/-end) variants, flexible whitespace, and the
+ * bare `lint:` / group `lint/complexity:` scopes that suppress budget rules implicitly.
+ */
+const SUPPRESSION_RE = /biome-ignore(-all|-start|-end)?\s+lint(?:\/([A-Za-z0-9]+))?(?:\/([A-Za-z0-9]+))?\s*:/
+
+export type Classified =
+	| { kind: "baselined"; rule: BaselinedRule }
+	| { kind: "forbidden"; why: string }
+	| null
+
+/**
+ * Classifies one source line's suppression comment against the budget policy.
+ * Returns null for suppressions that cannot affect a budget rule.
+ */
+export function classifySuppressionLine(line: string): Classified {
+	const m = line.match(SUPPRESSION_RE)
+	if (!m) return null
+	const [, variant, group, rule] = m
+	const reachesBudget = group === undefined || (group === "complexity" && (rule === undefined || BUDGET_RULES.has(rule)))
+	if (!reachesBudget) return null
+	if (variant !== undefined) {
+		return { kind: "forbidden", why: `file-wide/range suppression (biome-ignore${variant}) covering complexity budgets` }
+	}
+	if (group === undefined) {
+		return { kind: "forbidden", why: "bare `lint` suppression — suppresses every rule incl. complexity budgets; scope it to one rule" }
+	}
+	if (rule === undefined) {
+		return { kind: "forbidden", why: "group-level `lint/complexity` suppression — scope it to one rule" }
+	}
+	if (rule === "noExcessiveNestedTestSuites") {
+		return { kind: "forbidden", why: "noExcessiveNestedTestSuites had zero findings at adoption — restructure, never suppress" }
+	}
+	return { kind: "baselined", rule: rule as BaselinedRule }
+}
+
+/**
+ * Lintable-source pathspecs. `*.d.ts` is excluded to mirror Biome's scope — the
+ * generated types headers carry sanctioned bare-lint suppressions Biome never reads.
+ */
+const SOURCE_PATHSPECS = [
+	"*.ts",
+	"*.mts",
+	"*.cts",
+	"*.tsx",
+	"*.js",
+	"*.mjs",
+	"*.cjs",
+	"*.jsx",
+	"*.vue",
+	":(exclude)*.d.ts",
+]
+
+export interface ScanResult {
+	ruleCounts: Record<BaselinedRule, Record<string, number>>
+	forbidden: { file: string; line: number; why: string }[]
+}
+
+/** Scans tracked source (working-tree contents) for suppressions reaching budget rules. */
+export function scanTree(): ScanResult {
+	const res = spawnSync("git", ["grep", "-nF", "biome-ignore", "--", ...SOURCE_PATHSPECS], {
+		encoding: "utf8",
+		maxBuffer: 64 * 1024 * 1024,
+	})
+	// git grep exits 1 on zero matches — only >1 is a real failure.
+	if (res.status !== 0 && res.status !== 1) throw new Error(`git grep failed (${res.status}): ${res.stderr}`)
+	const ruleCounts = Object.fromEntries(BASELINED_RULES.map((r) => [r, {}])) as ScanResult["ruleCounts"]
+	const forbidden: ScanResult["forbidden"] = []
+	for (const hit of res.stdout.split("\n")) {
+		if (!hit) continue
+		const first = hit.indexOf(":")
+		const second = hit.indexOf(":", first + 1)
+		const file = hit.slice(0, first)
+		const lineNo = Number(hit.slice(first + 1, second))
+		const c = classifySuppressionLine(hit.slice(second + 1))
+		if (c === null) continue
+		if (c.kind === "forbidden") forbidden.push({ file, line: lineNo, why: c.why })
+		else ruleCounts[c.rule][file] = (ruleCounts[c.rule][file] ?? 0) + 1
+	}
+	for (const rule of BASELINED_RULES) {
+		// Byte-order sort — locale-independent so regeneration is reproducible across machines.
+		ruleCounts[rule] = Object.fromEntries(
+			Object.entries(ruleCounts[rule]).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+		)
+	}
+	return { ruleCounts, forbidden }
+}
 
 export interface BaselineManifest {
 	biomeVersion: string
@@ -20,41 +104,26 @@ export interface BaselineManifest {
 	rules: Record<BaselinedRule, Record<string, number>>
 }
 
-function gitGrepCount(pattern: string): Map<string, number> {
-	const res = spawnSync("git", ["grep", "-c", "-F", pattern, "--", ...SOURCE_PATHSPECS], {
-		encoding: "utf8",
-		maxBuffer: 32 * 1024 * 1024,
-	})
-	// git grep exits 1 on zero matches — only >1 is a real failure.
-	if (res.status !== 0 && res.status !== 1) {
-		throw new Error(`git grep failed (${res.status}): ${res.stderr}`)
-	}
-	const counts = new Map<string, number>()
-	for (const line of res.stdout.split("\n")) {
-		if (!line) continue
-		const sep = line.lastIndexOf(":")
-		counts.set(line.slice(0, sep), Number(line.slice(sep + 1)))
-	}
-	return counts
+export interface ManifestDrift {
+	grew: string[]
+	shrank: string[]
 }
 
-/** Counts per-rule × per-file suppression directives across tracked source files. */
-export function scanSuppressions(): Record<BaselinedRule, Record<string, number>> {
-	const out = {} as Record<BaselinedRule, Record<string, number>>
+/** Diffs an actual scan against the pinned manifest, per rule × file. */
+export function compareToManifest(manifest: BaselineManifest, actual: ScanResult["ruleCounts"]): ManifestDrift {
+	const grew: string[] = []
+	const shrank: string[] = []
 	for (const rule of BASELINED_RULES) {
-		const counts = gitGrepCount(DIRECTIVE_PREFIX + rule)
-		out[rule] = Object.fromEntries([...counts.entries()].sort(([a], [b]) => a.localeCompare(b)))
+		const pinned = manifest.rules[rule] ?? {}
+		const files = new Set([...Object.keys(pinned), ...Object.keys(actual[rule])])
+		for (const file of files) {
+			const was = pinned[file] ?? 0
+			const now = actual[rule][file] ?? 0
+			if (now > was) grew.push(`${rule} ${file}: ${was} → ${now}`)
+			else if (now < was) shrank.push(`${rule} ${file}: ${was} → ${now}`)
+		}
 	}
-	return out
-}
-
-/** File-wide suppressions of any complexity-budget rule are never allowed. */
-export function scanFileWideSuppressions(): string[] {
-	const hits = new Set<string>()
-	for (const rule of [...BASELINED_RULES, "noExcessiveNestedTestSuites"]) {
-		for (const file of gitGrepCount(FILE_WIDE_PREFIX + rule).keys()) hits.add(file)
-	}
-	return [...hits].sort()
+	return { grew, shrank }
 }
 
 export function installedBiomeVersion(rootPackageJson: { devDependencies?: Record<string, string> }): string {
