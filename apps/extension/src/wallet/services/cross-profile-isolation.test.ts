@@ -153,7 +153,13 @@ describe("cross-profile isolation (standing gate)", () => {
 			const services = new ServiceCollection()
 			services.add(profile)
 			services.add(networkStub())
-			services.add(svc(AccountService.name, { onAccountAdded: new EventHandler(), getAccountsRaw: async () => [] }))
+			services.add(
+				svc(AccountService.name, {
+					registerAccountPurgeSubscriber: () => {},
+					onAccountAdded: new EventHandler(),
+					getAccountsRaw: async () => [],
+				}),
+			)
 			services.add(svc(TaskService.name, {}))
 			services.add(svc(OperationJournalService.name, { purgeForProfile: async () => {} }))
 			tokens = new TokenService(mkLogger(), api)
@@ -212,7 +218,13 @@ describe("cross-profile isolation (standing gate)", () => {
 			const services = new ServiceCollection()
 			services.add(profile)
 			services.add(svc(NetworkService.name, {}))
-			services.add(svc(AccountService.name, { onAccountAdded: new EventHandler(), getAccountsRaw: async () => [] }))
+			services.add(
+				svc(AccountService.name, {
+					registerAccountPurgeSubscriber: () => {},
+					onAccountAdded: new EventHandler(),
+					getAccountsRaw: async () => [],
+				}),
+			)
 			services.add(
 				svc(TokenService.name, {
 					onTokenAdded: new EventHandler(),

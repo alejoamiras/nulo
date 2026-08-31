@@ -1394,6 +1394,24 @@ describe("useFullBackupImport — failure branches", () => {
 		expect(profileClient.deleteProfile).toHaveBeenCalledWith("new-id")
 	})
 
+	it("(P3) a reconcile/purge failure is fail-fast: pre-finalize rollback, never a committed import with orphans", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup()
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([])
+		accountClient.reconcileImportedAccounts.mockRejectedValueOnce(new Error("dependent purge failed"))
+
+		await c.restoreBackup()
+
+		expect(opts.fillError).toHaveBeenCalledWith("full_backup", "Import failed", "dependent purge failed")
+		expect(profileClient.deleteProfile).toHaveBeenCalledWith("new-id")
+		expect(profileClient.finalizeRestore).not.toHaveBeenCalled()
+	})
+
 	it("a token restore throw (pre-finalize) also rolls the orphan profile back", async () => {
 		const opts = makeOpts()
 		const c = useFullBackupImport(opts)

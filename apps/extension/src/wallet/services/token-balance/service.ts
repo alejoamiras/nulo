@@ -134,6 +134,9 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 		this.profileService.onActiveProfileChanged.add(this.onActiveProfileChanged)
 		this.accountService.onAccountAdded.add(this.onAccountAdded)
+		// Registered-awaited cascade: account removal purges this service's rows
+		// BEFORE the Account row is deleted. No RPC surface, no event race.
+		this.accountService.registerAccountPurgeSubscriber((profileId, scopes) => this.purgeForAccounts(scopes, profileId))
 		this.tokenService.onTokenAdded.add(this.onTokenAdded)
 		this.tokenService.onTokenUpdated.add(this.onTokenUpdated)
 		this.tokenService.onTokenDeleted.add(this.onTokenDeleted)
@@ -521,6 +524,41 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 			)
 		})
 		for (const id of set) this.tokens.delete(id)
+	}
+
+	/** Awaited balance purge for account scopes within ONE profile — registered with
+	 *  AccountService and invoked BEFORE the Account rows are deleted. Scope is the
+	 *  full (profileId, chainId, address) tuple: a bare-address match would destroy a
+	 *  sibling profile's rows (shared addresses are a supported state), and an
+	 *  address+profile match would destroy this profile's rows on ANOTHER chain.
+	 *  Idempotent. */
+	public async purgeForAccounts(scopes: ReadonlyArray<{ chainId: number; address: string }>, profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		if (scopes.length === 0) return
+		const keys = new Set(scopes.map((s) => `${s.chainId}:${s.address}`))
+		// One hold with the creators, fence before every delete — mirrors purgeForTokens.
+		await this.lock.withLock(async () => {
+			for (const tb of (await this.repo.getAll()).filter(
+				(row) => row.profileId === profileId && keys.has(`${row.chainId}:${row.account}`),
+			)) {
+				// The scope's profile is typically NOT active here (restore finalize), so
+				// the token map cannot decorate the row — emit only when it can.
+				if (this.tokens.has(tb.token)) this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb))
+				this.invalidatedBalanceIds.add(tb.id)
+				await this.repo.delete(tb.id)
+			}
+			// Raw second pass: a validation-failed new-shape row in scope must not
+			// survive as hidden debris. Old-shape rows carry no profileId/chainId —
+			// unattributable — and are DELIBERATELY left to the init legacy sweep.
+			await this.repo.purgeMalformed(
+				(raw) =>
+					raw.profileId === profileId &&
+					typeof raw.chainId === "number" &&
+					typeof raw.account === "string" &&
+					keys.has(`${raw.chainId}:${raw.account}`),
+				(id) => this.logDebug(`purged malformed balance row ${id}`),
+			)
+		})
 	}
 
 	private readonly onTransactionUpdated = async (tx: Tx) => {

@@ -138,7 +138,7 @@ Predicate at every §2 site (reads, refreshes, handlers, projector, queue, backu
 
 **Gate.** Phase 1 commands plus `bun run --cwd apps/extension test src/wallet/services/` — exit 0.
 
-### Phase 3 — Purge, registration, split ordering, fail-fast
+### Phase 3 — Purge, registration, split ordering, fail-fast ✓
 `purgeForAccounts` (lock + fence, typed + raw passes, emit guard); `registerAccountPurgeSubscriber`; `reconcileImportedAccounts` → list→purge→delete returning `{chainId, address}[]`; composable catch removal. Tests: sibling-profile shared address spared (**RED vs a bare-address purge**); same-profile multi-chain — chain X keyless, chain Y live, only X purged (**RED vs an address-scoped purge**); purge completes with a foreign/empty active token map (fable C-3); purge racing a parked creation (lock serialization); purge failure pre-finalize fails the import (fail-fast); a registered callback that installs the key mid-purge → that account is skipped by the delete pass and absent from the returned scopes; composition test driving the real service graph through a doctored restore.
 
 **Gate.** Phase 2 commands; both RED runs recorded in `lessons/phase-3.md`.

@@ -230,7 +230,7 @@ export type Methods = {
 	restoreImportedKeys(rows: ImportedAccountKey[]): Restored<ImportedAccountKey>[]
 
 	/** At restore finalize: drop imported Account rows with no matching key row; returns their addresses. */
-	reconcileImportedAccounts(profileId: string): string[]
+	reconcileImportedAccounts(profileId: string): { chainId: number; address: string }[]
 }
 
 export type Events = {

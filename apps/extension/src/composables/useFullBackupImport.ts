@@ -908,15 +908,14 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// Reconcile imported accounts BEFORE activation: an epoch-4 backup carrying a type-1
 			// Account row with no matching key row would restore as a zombie that fails at signing —
 			// drop it now (both slices have landed).
-			try {
-				const droppedImported = await accountService.reconcileImportedAccounts(newProfile.id)
-				if (droppedImported.length > 0) {
-					// `droppedImported` is a list of on-chain ACCOUNT ADDRESSES from a corrupt or hostile
-					// backup; the count is what tells you reconciliation dropped rows.
-					console.warn(`[import] dropped ${droppedImported.length} imported account(s) with no key row`)
-				}
-			} catch (err) {
-				console.warn("[import] imported-account reconciliation failed (non-fatal):", err)
+			// Fail-fast, deliberately uncaught: a reconcile/purge failure escapes to the
+			// outer catch, which (pre-finalize) rolls the created profile back — the
+			// import must not commit with orphaned balance rows. Inside the call,
+			// registered dependents (token balances) are purged BEFORE the Account rows.
+			const droppedImported = await accountService.reconcileImportedAccounts(newProfile.id)
+			if (droppedImported.length > 0) {
+				// Scope COUNT only — the tuples carry on-chain account addresses.
+				console.warn(`[import] dropped ${droppedImported.length} imported account(s) with no key row`)
 			}
 
 			finalizeStarted = true

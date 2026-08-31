@@ -160,7 +160,13 @@ describe("TokenBalanceService.restore — hostile-row validation (P1)", () => {
 			}),
 		)
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
-		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountAdded: new EventHandler(), getAccountsRaw: async () => [] }))
+		services.add(
+			svc(ACCOUNT_SERVICE_NAME, {
+				registerAccountPurgeSubscriber: () => {},
+				onAccountAdded: new EventHandler(),
+				getAccountsRaw: async () => [],
+			}),
+		)
 		services.add(
 			svc(TOKEN_SERVICE_NAME, {
 				onTokenAdded: new EventHandler(),
@@ -310,7 +316,13 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 			}),
 		)
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
-		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountAdded: new EventHandler(), getAccountsRaw: async () => [] }))
+		services.add(
+			svc(ACCOUNT_SERVICE_NAME, {
+				registerAccountPurgeSubscriber: () => {},
+				onAccountAdded: new EventHandler(),
+				getAccountsRaw: async () => [],
+			}),
+		)
 		services.add(
 			svc(TOKEN_SERVICE_NAME, {
 				onTokenAdded: new EventHandler(),
@@ -361,7 +373,14 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 			}),
 		)
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
-		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountAdded: new EventHandler(), getAccounts, getAccountsRaw: async () => [] }))
+		services.add(
+			svc(ACCOUNT_SERVICE_NAME, {
+				registerAccountPurgeSubscriber: () => {},
+				onAccountAdded: new EventHandler(),
+				getAccounts,
+				getAccountsRaw: async () => [],
+			}),
+		)
 		services.add(
 			svc(TOKEN_SERVICE_NAME, {
 				onTokenAdded,
@@ -416,6 +435,7 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
 		services.add(
 			svc(ACCOUNT_SERVICE_NAME, {
+				registerAccountPurgeSubscriber: () => {},
 				onAccountAdded: new EventHandler(),
 				getAccounts: async () => [{ address: "0xa", chainId: 1 }],
 				getAccountsRaw: async () => [],
@@ -488,6 +508,7 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
 		services.add(
 			svc(ACCOUNT_SERVICE_NAME, {
+				registerAccountPurgeSubscriber: () => {},
 				onAccountAdded: new EventHandler(),
 				getAccountsRaw: async () => [{ address: "0xa", chainId: 1, index: 0, profileId: "A" }],
 			}),
@@ -543,6 +564,7 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
 		services.add(
 			svc(ACCOUNT_SERVICE_NAME, {
+				registerAccountPurgeSubscriber: () => {},
 				onAccountAdded: new EventHandler(),
 				getAccountsRaw: async () => [{ address: "0xa", chainId: 1, index: 0, profileId: "A" }],
 			}),
@@ -600,6 +622,7 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
 		services.add(
 			svc(ACCOUNT_SERVICE_NAME, {
+				registerAccountPurgeSubscriber: () => {},
 				onAccountAdded: new EventHandler(),
 				getAccountsRaw: async () => [{ address: "0xa", chainId: 1, index: 0, profileId: "A" }],
 			}),
@@ -670,6 +693,7 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
 		services.add(
 			svc(ACCOUNT_SERVICE_NAME, {
+				registerAccountPurgeSubscriber: () => {},
 				onAccountAdded,
 				getAccounts: async () => [{ address: "0xa", chainId: 1 }],
 				// Empty for the boot sweep so the pair does NOT exist when the two
@@ -735,7 +759,13 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 			}),
 		)
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
-		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountAdded, getAccountsRaw: async () => [] }))
+		services.add(
+			svc(ACCOUNT_SERVICE_NAME, {
+				registerAccountPurgeSubscriber: () => {},
+				onAccountAdded,
+				getAccountsRaw: async () => [],
+			}),
+		)
 		services.add(
 			svc(TOKEN_SERVICE_NAME, {
 				onTokenAdded: new EventHandler(),
@@ -791,7 +821,13 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 			}),
 		)
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
-		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountAdded: new EventHandler(), getAccountsRaw: async () => [] }))
+		services.add(
+			svc(ACCOUNT_SERVICE_NAME, {
+				registerAccountPurgeSubscriber: () => {},
+				onAccountAdded: new EventHandler(),
+				getAccountsRaw: async () => [],
+			}),
+		)
 		services.add(
 			svc(TOKEN_SERVICE_NAME, {
 				onTokenAdded: new EventHandler(),
@@ -858,6 +894,7 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
 		services.add(
 			svc(ACCOUNT_SERVICE_NAME, {
+				registerAccountPurgeSubscriber: () => {},
 				onAccountAdded: new EventHandler(),
 				getAccountsRaw: async () => [{ address: "0xa", chainId: 1, index: 0, profileId: "A" }],
 			}),
@@ -906,6 +943,7 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
 		services.add(
 			svc(ACCOUNT_SERVICE_NAME, {
+				registerAccountPurgeSubscriber: () => {},
 				onAccountAdded,
 				getAccounts: async () => [{ address: "0xa", chainId: 1 }],
 				getAccountsRaw: async () => [],
@@ -988,6 +1026,7 @@ describe("TokenBalanceService legacy sweep + schema transition (P1)", () => {
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
 		services.add(
 			svc(ACCOUNT_SERVICE_NAME, {
+				registerAccountPurgeSubscriber: () => {},
 				onAccountAdded: new EventHandler(),
 				getAccountsRaw: async () => [{ address: "0xa", chainId: 1, index: 0, profileId: "A" }],
 			}),
@@ -1046,6 +1085,7 @@ describe("TokenBalanceService reconcile — identity hardening (P2)", () => {
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
 		services.add(
 			svc(ACCOUNT_SERVICE_NAME, {
+				registerAccountPurgeSubscriber: () => {},
 				onAccountAdded: new EventHandler(),
 				getAccountsRaw: async () => [{ address: "0xa", chainId: 1, index: 0, profileId: "A" }],
 			}),
@@ -1106,5 +1146,82 @@ describe("TokenBalanceService reconcile — identity hardening (P2)", () => {
 		})
 		expect((await service.getTokenBalances()).map((b) => b.id)).toEqual([1])
 		expect((await repo.getAll()).map((r) => r.id).sort()).toEqual([1, 2])
+	})
+})
+
+describe("TokenBalanceService.purgeForAccounts — tuple-scoped account purge (P3)", () => {
+	// The purge touches only repo + lock + fence (like purgeForTokens' raw-pass
+	// test): flip the init flag instead of stubbing seven services.
+	function bareService() {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const service = new TokenBalanceService(new LoggerStore(new ConfigStore()), api)
+		;(service as unknown as { initialized: boolean }).initialized = true
+		return { api, service, repo: new BalanceRepository(api) }
+	}
+	const fenced = (service: TokenBalanceService, id: number) =>
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to the private fence
+		((service as any).invalidatedBalanceIds as Set<number>).has(id)
+
+	test("spares the sibling profile's rows at the SAME address — bare-address scoping would destroy them", async () => {
+		const { service, repo } = bareService()
+		await repo.set(balance(1, 100, { account: "0xshared" }))
+		await repo.set(balance(2, 200, { account: "0xshared", profileId: "B" }))
+		await service.purgeForAccounts([{ chainId: 1, address: "0xshared" }], "A")
+		expect((await repo.getAll()).map((r) => r.id)).toEqual([2])
+		expect(fenced(service, 1)).toBe(true)
+		expect(fenced(service, 2)).toBe(false)
+	})
+
+	test("spares the SAME profile's rows on ANOTHER chain — address+profile scoping would destroy them", async () => {
+		const { service, repo } = bareService()
+		await repo.set(balance(1, 100, { account: "0xaddr" }))
+		await repo.set(balance(2, 200, { account: "0xaddr", chainId: 2 }))
+		await service.purgeForAccounts([{ chainId: 1, address: "0xaddr" }], "A")
+		expect((await repo.getAll()).map((r) => r.id)).toEqual([2])
+	})
+
+	test("completes with an EMPTY/foreign active token map — deletes every scoped row, no throw, ids fenced", async () => {
+		const { service, repo } = bareService()
+		await repo.set(balance(1, 100, { account: "0xa" }))
+		await repo.set(balance(2, 300, { account: "0xa" }))
+		await service.purgeForAccounts([{ chainId: 1, address: "0xa" }], "A")
+		expect(await repo.getAll()).toEqual([])
+		expect(fenced(service, 1)).toBe(true)
+		expect(fenced(service, 2)).toBe(true)
+	})
+
+	test("raw second pass reaps a malformed NEW-SHAPE row in scope; old-shape rows are left to the legacy sweep", async () => {
+		const { api, service } = bareService()
+		await api.storage.local.set({
+			"nulo:core:token-balances@98": JSON.stringify({ profileId: "A", chainId: 1, account: "0xa", junk: true }),
+			"nulo:core:token-balances@99": JSON.stringify({ id: 99, token: 5, account: "0xa", updatedAt: 0 }),
+		})
+		await service.purgeForAccounts([{ chainId: 1, address: "0xa" }], "A")
+		const raw = await api.storage.local.get(null)
+		expect(raw["nulo:core:token-balances@98"]).toBeUndefined()
+		expect(raw["nulo:core:token-balances@99"]).toBeDefined()
+	})
+
+	test("a purge racing a parked creation serializes on the shared lock — never a half state", async () => {
+		const { service, repo } = bareService()
+		const tokenA = { id: 100, profileId: "A", chainId: 1, contract: "0xtok100", name: "T", symbol: "T", decimals: 18 }
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to the private map/lock
+		const anyService = service as any
+		anyService.tokens.set(100, tokenA)
+		await repo.set(balance(1, 100, { account: "0xa" }))
+		const purge = service.purgeForAccounts([{ chainId: 1, address: "0xa" }], "A")
+		const create = anyService.lock.withLock(() =>
+			anyService.ensurePairsHoldingLock([{ token: tokenA, account: { address: "0xa" } }], anyService.profileGeneration),
+		)
+		await Promise.all([purge, create])
+		const rows = await repo.getAll()
+		// Either order is valid (purge→recreate leaves one FRESH row; create-noop→purge
+		// leaves none). Forbidden: a fenced live row or a duplicate pair.
+		expect(rows.length).toBeLessThanOrEqual(1)
+		for (const row of rows) {
+			expect(row.updatedAt).toBe(0)
+			expect(fenced(service, row.id)).toBe(false)
+		}
 	})
 })
