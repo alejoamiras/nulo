@@ -2554,12 +2554,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * Idempotent in spirit: if the session is already active for this profile,
 	 * skips the re-open (the no-op case after a second `finalizeRestore` call).
 	 */
-	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (94 lines) — split when touched, never grow
 	public async finalizeRestore(id: string, password?: string): Promise<ProfileInfo> {
 		await this.ensureInitialized()
 
-		// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (92 lines) — split when touched, never grow
-		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 46) — refactor when touched, never raise
 		return this.runExclusive(async () => {
 			// B-11: sweep stale entries but never the id being finalized here.
 			this.sweepStalePendingRestore(Date.now(), id)
@@ -2585,12 +2582,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			// Zeroize any LEFTOVER rewrap context for this id — the empty-slice case
 			// (`restoreImportedKeys` never ran, so nothing consumed it) and any abandoned
 			// re-restore of the same id. Consumed contexts are already gone.
-			const leftoverContext = this.pendingDekRewraps.get(id)
-			if (leftoverContext) {
-				this.pendingDekRewraps.delete(id)
-				zeroize(leftoverContext.sourceDek)
-				zeroize(leftoverContext.destinationDek)
-			}
+			this.dropPendingDekRewrap(id)
 
 			// If the session is already active for this profile, treat as
 			// no-op. Defensive against double-finalize.
@@ -2599,122 +2591,102 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			}
 
 			if (profile.type === "password") {
-				if (!password) {
-					throw new Error("Password is required for password profile")
-				}
-				// Re-derive: unseal the stored ciphertext with the supplied
-				// password. Mirrors `unlockProfile` Phase 3.
-				const unsealed = await this.secretBox.unseal(password, this.sealedTriple(profile))
-				if (!unsealed) {
-					throw new InvalidPasswordError()
-				}
-				let passhash: Passhash | undefined
-				let dek: ImportedKeysDek | null = null
-				try {
-					// Pairing check before the session opens (P3 rider): a tamper between restore()
-					// and finalize must not open a session whose recovery phrase is a lie. Inside
-					// the try so a pairing throw still wipes the unsealed buffers (rider Low).
-					await this.assertEntropyMasterPair(unsealed.secret, unsealed.entropy)
-					passhash = await EncryptionKey.getPasshash(password)
-					// Full degradation state machine at this open too (P4 rider High): the row was
-					// minted by restore(), so a DEK-unseal OR envelope-MAC-v3 failure here means a
-					// tamper landed BETWEEN restore and finalize — this path opens a bearer-backed
-					// session, so skipping the MAC check would hand a storage attacker a
-					// non-degraded session. On either failure: discard the DEK, open derived-only
-					// (no bearer), emit the visible warning.
-					dek = await this.unsealDekWithPasshash(passhash, profile.dekSealed)
-					if (dek) {
-						const macOk = await verifyEnvelopeMacV3(
-							id,
-							unsealed.secret,
-							dek,
-							this.macEnvelopeV3(
-								{ guard: profile.guard, secret: profile.secret, entropy: profile.entropy },
-								profile.dekSealed,
-								profile.walletFingerprint,
-							),
-							profile.envelopeMac,
-						)
-						if (!macOk) {
-							zeroize(dek)
-							dek = null
-						}
-					}
-					if (!dek) {
-						this.logger.log(
-							this.name,
-							LogLevel.Error,
-							"imported-keys DEK/MAC failed at finalizeRestore — opening derived-only",
-							id,
-						)
-					}
-					await this.openSessionVerified(profile, unsealed.secret, passhash, dek ?? undefined)
-					if (!dek) {
-						this.emit("onImportedKeysDegraded", this.getProfileInfo(profile))
-					}
-					return this.getProfileInfo(profile)
-				} finally {
-					// zero buffers after sessionManager has copied.
-					zeroize(unsealed.secret)
-					zeroize(unsealed.entropy)
-					zeroize(dek)
-					zeroize(passhash)
-				}
+				return this.finalizePasswordRestoreHoldingLock(id, profile, password)
 			}
+			// This dispatch falls through to the passkey branch for ANY non-password
+			// type — an edited `type` field must not select it; the branch re-checks.
+			return this.finalizePasskeyRestoreHoldingLock(id, profile)
+		})
+	}
 
-			// Passkey: consume the stashed recovery secret + destination DEK. Remove them from the
-			// map BEFORE the await (B-11) so no concurrent sweep can zeroize the buffers
-			// while openSessionVerified is copying them; zeroize in finally.
-			const pending = this.pendingRestoreSecrets.get(id)
-			if (!pending) {
-				throw new Error("No pending restore secret for passkey profile")
+	/** Password-side finalize: re-derive from the supplied password (PBKDF2 paid again —
+	 *  acceptable for a one-time import flow), mirroring `unlockProfile` phase 3, with
+	 *  the full degradation state machine at this open too (P4 rider High: the row was
+	 *  minted by `restore()`, so a DEK/MAC failure here means a tamper landed BETWEEN
+	 *  restore and finalize — skipping the MAC check would hand a storage attacker a
+	 *  bearer-backed non-degraded session). Caller MUST hold the facade lock. */
+	private async finalizePasswordRestoreHoldingLock(
+		id: string,
+		profile: Extract<Profile, { type: "password" }>,
+		password?: string,
+	): Promise<ProfileInfo> {
+		if (!password) {
+			throw new Error("Password is required for password profile")
+		}
+		const unsealed = await this.secretBox.unseal(password, this.sealedTriple(profile))
+		if (!unsealed) {
+			throw new InvalidPasswordError()
+		}
+		let passhash: Passhash | undefined
+		let dek: ImportedKeysDek | null = null
+		try {
+			// Pairing check before the session opens (P3 rider): a tamper between restore()
+			// and finalize must not open a session whose recovery phrase is a lie. Inside
+			// the try so a pairing throw still wipes the unsealed buffers (rider Low).
+			await this.assertEntropyMasterPair(unsealed.secret, unsealed.entropy)
+			passhash = await EncryptionKey.getPasshash(password)
+			dek = await this.unsealTrustedDekHoldingLock(id, profile, unsealed.secret, passhash, "finalizeRestore")
+			await this.openSessionVerified(profile, unsealed.secret, passhash, dek ?? undefined)
+			if (!dek) {
+				this.emit("onImportedKeysDegraded", this.getProfileInfo(profile))
 			}
-			// The dispatch below falls through to the passkey branch for ANY non-password
-			// type — an edited `type` field must not select it.
-			if (profile.type !== "passkey") {
-				throw new Error("Profile type changed between restore and finalizeRestore")
-			}
-			this.pendingRestoreSecrets.delete(id)
-			// Same binding every other passkey open enforces: a tamper between restore() and
-			// this finalize (the row sat unlocked in storage the whole time) must not yield a
-			// clean session — compare the live row's security fields against the restore-time
-			// snapshot AND recompute the fingerprint from the stashed master; degrade exactly
-			// like the password side on any mismatch.
-			let dek: ImportedKeysDek | null = pending.dek
-			try {
-				const intact =
-					profile.type === pending.expected.type &&
-					profile.credentialId === pending.expected.credentialId &&
-					profile.dekSealed === pending.expected.dekSealed &&
-					profile.pxeGeneration === pending.expected.pxeGeneration &&
-					profile.walletFingerprint === pending.expected.walletFingerprint &&
-					profile.walletFingerprint === (await computeWalletFingerprint(pending.secret))
-				if (!intact) {
-					zeroize(pending.dek)
-					dek = null
-				}
-			} catch {
+			return this.getProfileInfo(profile)
+		} finally {
+			// zero buffers after sessionManager has copied.
+			zeroize(unsealed.secret)
+			zeroize(unsealed.entropy)
+			zeroize(dek)
+			zeroize(passhash)
+		}
+	}
+
+	/** Passkey-side finalize: consume the stashed recovery secret + destination DEK.
+	 *  Removed from the map BEFORE the await (B-11) so no concurrent sweep can zeroize
+	 *  the buffers while `openSessionVerified` is copying them; zeroized in finally.
+	 *  Same binding every other passkey open enforces: a tamper between `restore()` and
+	 *  this finalize (the row sat unlocked in storage the whole time) must not yield a
+	 *  clean session — the live row's security fields are compared against the
+	 *  restore-time snapshot AND the fingerprint is recomputed from the stashed master;
+	 *  degrades exactly like the password side on any mismatch. Caller MUST hold the
+	 *  facade lock. */
+	private async finalizePasskeyRestoreHoldingLock(id: string, profile: Profile): Promise<ProfileInfo> {
+		const pending = this.pendingRestoreSecrets.get(id)
+		if (!pending) {
+			throw new Error("No pending restore secret for passkey profile")
+		}
+		if (profile.type !== "passkey") {
+			throw new Error("Profile type changed between restore and finalizeRestore")
+		}
+		this.pendingRestoreSecrets.delete(id)
+		let dek: ImportedKeysDek | null = pending.dek
+		try {
+			const intact =
+				profile.type === pending.expected.type &&
+				profile.credentialId === pending.expected.credentialId &&
+				profile.dekSealed === pending.expected.dekSealed &&
+				profile.pxeGeneration === pending.expected.pxeGeneration &&
+				profile.walletFingerprint === pending.expected.walletFingerprint &&
+				profile.walletFingerprint === (await computeWalletFingerprint(pending.secret))
+			if (!intact) {
 				zeroize(pending.dek)
 				dek = null
 			}
+		} catch {
+			zeroize(pending.dek)
+			dek = null
+		}
+		if (!dek) {
+			this.logger.log(this.name, LogLevel.Error, "passkey row changed between restore and finalizeRestore — opening derived-only", id)
+		}
+		try {
+			await this.openSessionVerified(profile, pending.secret, undefined, dek ?? undefined)
 			if (!dek) {
-				this.logger.log(
-					this.name,
-					LogLevel.Error,
-					"passkey row changed between restore and finalizeRestore — opening derived-only",
-					id,
-				)
+				this.emit("onImportedKeysDegraded", this.getProfileInfo(profile))
 			}
-			try {
-				await this.openSessionVerified(profile, pending.secret, undefined, dek ?? undefined)
-				if (!dek) {
-					this.emit("onImportedKeysDegraded", this.getProfileInfo(profile))
-				}
-				return this.getProfileInfo(profile)
-			} finally {
-				zeroize(pending.secret)
-				zeroize(dek)
-			}
-		})
+			return this.getProfileInfo(profile)
+		} finally {
+			zeroize(pending.secret)
+			zeroize(dek)
+		}
 	}
 }
