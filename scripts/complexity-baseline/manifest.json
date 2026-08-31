@@ -55,7 +55,7 @@
 			"apps/extension/src/wallet/services/operation-journal/reaper.ts": 1,
 			"apps/extension/src/wallet/services/operation-journal/service.ts": 1,
 			"apps/extension/src/wallet/services/passkey/check-rp-id.ts": 1,
-			"apps/extension/src/wallet/services/profile/service.ts": 4,
+			"apps/extension/src/wallet/services/profile/service.ts": 3,
 			"apps/extension/src/wallet/services/token-balance/balance-job-queue.ts": 1,
 			"apps/extension/src/wallet/services/token-balance/balance-projector.ts": 1,
 			"apps/extension/src/wallet/services/token-balance/reconcile-pairs.ts": 1,

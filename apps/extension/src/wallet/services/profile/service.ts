@@ -1281,6 +1281,80 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		return id
 	}
 
+	/** F-B24 torn-import guard, run UNDER the facade lock: refuse unless (a) the row's
+	 *  `pxeGeneration` still matches — a same-id re-import that landed between the
+	 *  sweep's observation and this call must never be deleted by a decision made about
+	 *  its predecessor — and (b) the EXACT observed restore-pending marker tuple is
+	 *  still present. (b) is the load-bearing half against a finalize race:
+	 *  `finalizeRestore` clears the marker at entry UNDER THIS SAME LOCK and leaves the
+	 *  generation unchanged, so a generation check alone would let the sweep delete a
+	 *  just-finalized, in-use profile (codex audit round 2). Marker gone or different →
+	 *  the import finalized or restarted → refuse. */
+	private async assertTornGuardUnchangedHoldingLock(
+		id: string,
+		profile: Profile,
+		tornGuard: { pxeGeneration: string; markerAt: number },
+	): Promise<void> {
+		if (profile.pxeGeneration !== tornGuard.pxeGeneration) {
+			throw new Error("profile generation changed since the deletion was decided")
+		}
+		const marker = await this.restorePending.get(id)
+		if (marker.kind !== "valid" || marker.marker.pxeGeneration !== tornGuard.pxeGeneration || marker.marker.at !== tornGuard.markerAt) {
+			throw new Error("restore-pending marker changed since the deletion was decided — import finalized or restarted")
+		}
+	}
+
+	/** B-12: `beginDeletion` reserved the id synchronously; if the tombstone write
+	 *  REJECTS, the delete didn't durably happen — but the rejection is
+	 *  commit-ambiguous (the key may still have landed). Read back the RAW tombstone
+	 *  key and release the reservation ONLY when its absence is confirmed (a
+	 *  cleanly-failed write), so the live profile isn't wedged. If the key exists / is
+	 *  corrupt / the read-back throws, RETAIN fail-closed (a durable tombstone means
+	 *  `resumePendingDeletions` finishes the delete; releasing would let an unlock race
+	 *  the resume). The epoch bump is kept regardless — rolling it back would let a
+	 *  later real deletion re-mint the same epoch and un-fence a stale writer. Caller
+	 *  MUST hold the facade lock. */
+	private async writeTombstoneHoldingLock(
+		id: string,
+		snapshot: { addresses: string[]; tokenIds: number[]; networkIds: string[]; pxeGeneration: string },
+		epoch: number,
+	): Promise<void> {
+		try {
+			await this.tombstones.write({ profileId: id, ...snapshot, epoch })
+		} catch (writeError) {
+			let tombstoneDurable = true
+			try {
+				tombstoneDurable = (await this.tombstones.reservedIds()).has(id)
+			} catch {
+				tombstoneDurable = true
+			}
+			if (!tombstoneDurable) {
+				this.deletionState.release(id)
+			}
+			throw writeError
+		}
+	}
+
+	/** Drop + zeroize the stashed passkey restore secret (the map owns its buffers). */
+	private dropPendingRestoreSecret(id: string): void {
+		const pending = this.pendingRestoreSecrets.get(id)
+		if (pending) {
+			this.pendingRestoreSecrets.delete(id)
+			zeroize(pending.secret)
+			zeroize(pending.dek)
+		}
+	}
+
+	/** Drop + zeroize the DEK rewrap context (the map owns its buffers). */
+	private dropPendingDekRewrap(id: string): void {
+		const rewrap = this.pendingDekRewraps.get(id)
+		if (rewrap) {
+			this.pendingDekRewraps.delete(id)
+			zeroize(rewrap.sourceDek)
+			zeroize(rewrap.destinationDek)
+		}
+	}
+
 	/**
 	 * Atomic, awaited, privacy-erasing profile deletion (finding D). THREE phases:
 	 *  1. UNDER the facade lock: snapshot (lock-free reads) → write the durable
@@ -1290,23 +1364,14 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 *     root. A failure leaves the tombstone → resume retries; the id stays reserved.
 	 *  3. UNDER the lock: clear the tombstone (epoch-guarded) + release the reservation.
 	 *
-	 * `tornGuard` (F-B24 torn-import sweep only): when supplied, phase 1 refuses
-	 * UNDER THE LOCK unless (a) the row's `pxeGeneration` still matches — a
-	 * same-id re-import that landed between the sweep's observation and this call
-	 * must never be deleted by a decision made about its predecessor — and (b)
-	 * the EXACT observed restore-pending marker tuple is still present. (b) is
-	 * the load-bearing half against a finalize race: `finalizeRestore` clears
-	 * the marker at entry UNDER THIS SAME LOCK and leaves the generation
-	 * unchanged, so a generation check alone would let the sweep delete a
-	 * just-finalized, in-use profile (codex audit round 2). Marker gone or
-	 * different → the import finalized or restarted → refuse.
+	 * `tornGuard` (F-B24 torn-import sweep only): phase 1 refuses unless the observed
+	 * generation + marker tuple are unchanged — see `assertTornGuardUnchangedHoldingLock`.
 	 */
 	public async deleteProfile(id: string, tornGuard?: { pxeGeneration: string; markerAt: number }): Promise<ProfileInfo> {
 		await this.ensureInitialized()
 		const delegate = this.deletionDelegate
 		if (!delegate) throw new Error("deletion coordinator not ready")
 
-		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 28) — refactor when touched, never raise
 		const { profile, epoch, snapshot } = await this.runExclusive(async () => {
 			this.sweepStalePendingRestore(Date.now())
 			const profile = await this.repo.get(id)
@@ -1314,17 +1379,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				throw new Error("Invalid profile id")
 			}
 			if (tornGuard !== undefined) {
-				if (profile.pxeGeneration !== tornGuard.pxeGeneration) {
-					throw new Error("profile generation changed since the deletion was decided")
-				}
-				const marker = await this.restorePending.get(id)
-				if (
-					marker.kind !== "valid" ||
-					marker.marker.pxeGeneration !== tornGuard.pxeGeneration ||
-					marker.marker.at !== tornGuard.markerAt
-				) {
-					throw new Error("restore-pending marker changed since the deletion was decided — import finalized or restarted")
-				}
+				await this.assertTornGuardUnchangedHoldingLock(id, profile, tornGuard)
 			}
 			// Fail FAST on a pre-fence row (no persisted pxeGeneration): proceeding
 			// would half-execute — the tombstone write drops the undefined field, its
@@ -1337,50 +1392,17 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			const rows = await delegate.snapshot(id)
 			const snapshot = { ...rows, pxeGeneration: profile.pxeGeneration }
 			const epoch = this.deletionState.beginDeletion(id)
-			// B-12: `beginDeletion` reserves the id synchronously. If the tombstone
-			// write REJECTS, the delete didn't durably happen — but the rejection is
-			// commit-ambiguous (the key may still have landed). Read back the RAW
-			// tombstone key: release the reservation ONLY when its absence is
-			// confirmed (a cleanly-failed write), so the live profile isn't wedged.
-			// If the key exists / is corrupt / the read-back throws, RETAIN
-			// fail-closed (a durable tombstone means resumePendingDeletions will
-			// finish the delete; releasing would let an unlock race the resume).
-			// The epoch bump is kept regardless — rolling it back would let a later
-			// real deletion re-mint the same epoch and un-fence a stale writer.
-			try {
-				await this.tombstones.write({ profileId: id, ...snapshot, epoch })
-			} catch (writeError) {
-				let tombstoneDurable = true
-				try {
-					tombstoneDurable = (await this.tombstones.reservedIds()).has(id)
-				} catch {
-					tombstoneDurable = true
-				}
-				if (!tombstoneDurable) {
-					this.deletionState.release(id)
-				}
-				throw writeError
-			}
+			await this.writeTombstoneHoldingLock(id, snapshot, epoch)
 			await this.repo.delete(id)
 			// Close the session BEFORE the emit (a subscriber reacting to the emit
 			// must not observe a still-open session for a deleted profile).
 			if (this.sessionManager.isActive(id)) {
 				await this.sessionManager.close()
 			}
-			const pending = this.pendingRestoreSecrets.get(id)
-			if (pending) {
-				this.pendingRestoreSecrets.delete(id)
-				zeroize(pending.secret)
-				zeroize(pending.dek)
-			}
+			this.dropPendingRestoreSecret(id)
 			// Deleting a profile mid-restore must also drop + zeroize its rewrap context (its
 			// buffers aren't aged yet, so the TTL sweep wouldn't reap them) — P4 rider Medium.
-			const rewrap = this.pendingDekRewraps.get(id)
-			if (rewrap) {
-				this.pendingDekRewraps.delete(id)
-				zeroize(rewrap.sourceDek)
-				zeroize(rewrap.destinationDek)
-			}
+			this.dropPendingDekRewrap(id)
 			// A deleted profile's integrity records must not outlive it: a stale blocking record
 			// would keep the barrier up forever, and a stale verified-stamp could let a future
 			// same-id re-import skip its first boot verification.
