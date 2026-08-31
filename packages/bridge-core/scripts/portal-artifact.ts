@@ -20,23 +20,21 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { keccak256 } from "viem"
 
-/** keccak256 of upstream/NuloTokenPortal.sol (the reviewed fork source). Re-pinned for the
- *  F-001 hardening: the fork gained a deployer-only initializer guard (constructor-pinned
- *  immutable) on top of the init-once guard — closes the front-run of the FIRST initialize
- *  (deploy and initialize are separate transactions). Diff reviewed: guard + error + header
- *  comments only; deposit/withdraw bodies untouched. */
-export const FORKED_PORTAL_KECCAK = "0xde14278d6026459eec7461d12dd7d3bc57ff56d77cfee4b74a1ad2cc2d4d50ec"
+/** keccak256 of upstream/NuloTokenPortal.sol (the reviewed fork source). The fork carries a
+ *  deployer-only initializer guard (constructor-pinned immutable) on top of the init-once guard,
+ *  closing the front-run of the FIRST initialize — deploy and initialize are separate transactions.
+ *  Moves only together with the source and a regenerated artifact; see PORTAL_PIN. */
+export const FORKED_PORTAL_KECCAK = "0x5e81eaad47a3ccf2827635d0dc19c7abb218926112594009e56cd104b2bbdd95"
 
-/** Creation/runtime code hashes + solc version of the reviewed fork build. Regenerated twice for
- *  F-001 hardening: once for the deployer-only initializer guard, again after correcting the
- *  header's circularity wording — solc's metadata hash covers the source, so even comment-only
- *  edits change bytecode. Diff reviewed both times: comments/guard only, deposit/withdraw bodies
- *  untouched. The candidate smoke's deposit→claim round-trip is the empirical proof of the portal
- *  semantics post-guard. */
+/** Creation/runtime code hashes + solc version of the reviewed fork build. solc's metadata hash
+ *  covers the source, so even a comment-only edit to the fork moves these — change them only
+ *  together with the source and a regenerated NuloTokenPortal.build.json, never on their own.
+ *  The candidate smoke's deposit→claim round-trip is the empirical proof of the portal semantics
+ *  post-guard. */
 export const PORTAL_PIN = {
 	solc: "0.8.30",
-	initCodeHash: "0x4dfc96fc7f7de5e2aa5ca7de846ea6752f701b614ce0928e74e3c92522d8d7c1",
-	runtimeCodeHash: "0x580419318282b189e24afbdf32177d54a4579b19aba885cce664613c00bb8652",
+	initCodeHash: "0x5cd282db90ecdc2f8ed3992a0c36f22eb69e9f98ad262bd8abb06a25476411e1",
+	runtimeCodeHash: "0x7c7606cda9c2c7907a1abe2827b2c799fea571fa4edc3d11b07a4eaaf069b5d2",
 } as const
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -131,8 +129,9 @@ export interface LoadedPortal {
 }
 
 /**
- * Load the committed reviewed-bytes artifact, asserting it against the pins AND against the current
- * fork source. This is the deploy's source of bytes - exact reviewed bytes, no rebuild required.
+ * Load the committed reviewed-bytes artifact, asserting its BYTES against the pins AND its source
+ * against the current fork. This is the deploy's source of bytes - exact reviewed bytes, no rebuild
+ * required.
  */
 export function loadForkedPortalArtifact(): LoadedPortal {
 	if (!existsSync(PORTAL_BUILD_JSON)) {
@@ -146,12 +145,22 @@ export function loadForkedPortalArtifact(): LoadedPortal {
 				`${FORKED_PORTAL_KECCAK}) - regenerate the artifact from the current fork.`,
 		)
 	}
-	assertPortalPins({ initCodeHash: a.initCodeHash, runtimeCodeHash: a.runtimeCodeHash, solcVersion: a.solcVersion })
+	// The artifact's declared hashes are just more fields of the same file; only hashing the bytes
+	// that will actually be broadcast binds them to the reviewed pins.
+	const initCodeHash = keccak256(a.bytecode)
+	const runtimeCodeHash = keccak256(a.deployedBytecode)
+	if (initCodeHash !== a.initCodeHash || runtimeCodeHash !== a.runtimeCodeHash) {
+		throw new Error(
+			`committed portal artifact is self-inconsistent: declares ${a.initCodeHash} / ${a.runtimeCodeHash} but its ` +
+				`bytes hash to ${initCodeHash} / ${runtimeCodeHash} - regenerate it.`,
+		)
+	}
+	assertPortalPins({ initCodeHash, runtimeCodeHash, solcVersion: a.solcVersion })
 	return {
 		abi: a.abi,
 		bytecode: a.bytecode,
 		deployedBytecode: a.deployedBytecode,
-		runtimeCodeHash: a.runtimeCodeHash,
+		runtimeCodeHash,
 		immutableReferences: a.immutableReferences,
 	}
 }

@@ -37,6 +37,20 @@ describe("candidate-schema (strict bridge-manifest gate)", () => {
 		expect(() => parseCandidateManifest(liveManifest())).not.toThrow()
 	})
 
+	// Only forked-v1 portals remain source-verifiable from this repo, so this is where a pre-fork
+	// manifest is stopped rather than silently verified against the wrong contract.
+	it("rejects a manifest whose portalSource is not the fork", () => {
+		const m = liveManifest()
+		m.l1.portalSource = "canonical"
+		expect(() => parseCandidateManifest(m)).toThrow(/portalSource/)
+	})
+
+	it("rejects a pre-fork manifest that omits portalSource entirely", () => {
+		const m = liveManifest()
+		delete m.l1.portalSource
+		expect(() => parseCandidateManifest(m)).toThrow(/portalSource/)
+	})
+
 	it("rejects unknown fields anywhere (no silent stale carries)", () => {
 		const m = liveManifest()
 		m.l1.fuel.legacyCarriedField = "0xdead"
