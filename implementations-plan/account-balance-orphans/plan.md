@@ -148,7 +148,7 @@ Doctored full-backup import (imported account present, key slice stripped): acco
 
 **Gate.** `bun run e2e:agent tests/e2e/<spec>` green + documented pre-fix red.
 
-### Phase 5 — Regression sweep + docs
+### Phase 5 — Regression sweep + docs ✓
 `bun run audit:vue`; armed source smoke AND unarmed artifact-mode smoke (explicitly — the default command exercises neither); `NULO_E2E_PROVERLESS=1 bun run e2e:agent` full suite. `ARCHITECTURE.md` balance-row entry.
 
 **Gate.** All four exit 0.
