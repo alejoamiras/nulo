@@ -1937,6 +1937,12 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 					// (dirtyAt moved) during the refresh await must not be overwritten with
 					// this older snapshot — stand down and let the next drain see the row's
 					// new state. Writing anyway would anchor stale dirt to the minted task.
+					// RESIDUAL (accepted): the re-read and the set below are not atomic, so
+					// a receipt landing exactly between them (requires a watchdog handoff —
+					// both writers hold the service lock) can be overwritten with this
+					// pre-receipt anchor, and that receipt's causal fast-path is lost. The
+					// balance job queue's poll cadence bounds the staleness; storage-level
+					// CAS is not worth building for that window.
 					const fresh = await this.repo.getOutbox(profileId, networkId, accountAddress, tokenId)
 					if (!fresh || fresh.dirtyAt !== current.dirtyAt) return
 					await this.repo.setOutbox(profileId, networkId, accountAddress, tokenId, {
