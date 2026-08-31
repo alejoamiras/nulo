@@ -119,3 +119,14 @@ All 13 fix units implemented with revert-probed regression pins (every probe log
 | F13 (pxe-client recovery generation revalidation) | `3067c7b7` | |
 
 Harness-stub widenings (the "widened dependency surface widens every stub" lesson): `14a3b3f5`, `6cee1442`, plus in-commit widenings inside F1/F6/F10 commits.
+
+### Codex fix-loop deltas (rounds 1–3, session 01a03e8d)
+
+Round-1 verdict `reject` (5 findings) → all verified in code, all adopted. Round-2 verdict: F10/F3 fixes accepted; F11/F9-tokens/F2-drain refined further. Commits `1c6bfb83`..`806d9ce0`:
+
+- **F11 final shape (round 3)**: the fence is captured at `executeAndResolve`'s session re-validation (atomic `captureExecutionFence` replacing the bare id compare — the id-only check was blind to a delete + same-id re-import parked across `refreshSession`) and threaded `executeOperations → executeRegisterToken → addTokenAuthorized` (non-RPC; the wire `addToken` self-mints — a threaded fence is structural authority the wire surface must not accept). `persistToken` asserts the fence before the idempotent short-circuit. The round-1 pin-vacuity claim was correct; pins now sit on every layer (dapp-interaction threading + mismatch abort, execution pass-through identity, token stale-fence via both exits), all revert-probed.
+- **F10 final**: deletes ABORT on generation mismatch (not just emit suppression) — `nextNumericId` is max+1 over physical keys, so the successor can own a freed id; stranding beats destroying (orphans invisible via the live-token join; next sync reconciles).
+- **F3 final**: sweep removal runs under the profile write barrier (store-opens hold `barrier.read`), lifecycle re-check post-acquire.
+- **F2-drain final**: codex refuted the "poll heals it" residual claim (the job queue drains, it never re-enqueues) — fixed via `Lock.withLock`'s new `isCurrent()` ownership probe guarding every outbox write in the drain CS (a receipt writer can only interleave by acquiring the lock, which flips the ticket permanently).
+- **F9-tokens final**: `mode: "resync"` (TokenInfo has no profileId — deliberately, dApp boundary — so no accept predicate can anchor events; codex's A→B→A delayed-event schedule defeats mount-scope freezing too). FPC keeps the payload-profileId accept; authwits stay account-anchored.
+- Round-1's "backup restore preserves profile/network ids" premise remains unverified (profiles are a block-listed backup root) — moot: entry-capture is correct regardless.
