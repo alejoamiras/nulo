@@ -80,6 +80,7 @@ async function makeHarness(fakeConfig?: ShallowPxeFakeConfig) {
 			registerChainPurgeSubscriber: () => {},
 			onActiveNetworkChanged: new EventHandler(),
 			isNetworkLive: async () => true,
+			isChainLive: async () => true,
 		}),
 	)
 	collection.add(svc(AccountService.name, {}))
@@ -198,6 +199,7 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 				registerChainPurgeSubscriber: () => {},
 				onActiveNetworkChanged,
 				isNetworkLive: async () => true,
+				isChainLive: async () => true,
 			}),
 		)
 		collection.add(svc(AccountService.name, { getAccounts: async () => [{ address: "0xacc1" }] }))

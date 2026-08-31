@@ -486,6 +486,17 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		return (await this.storage.get(networkId)) !== undefined
 	}
 
+	/** Chain-keyed variant of {@link isNetworkLive} for writers that carry only
+	 *  (profileId, chainId) — false when no network row exists for the pair OR
+	 *  the row is reserved-deleting. Deliberately lock-free: liveness checks run
+	 *  inside OTHER services' critical sections (see TokenService.clearChainState
+	 *  on why the sweep/create ordering depends on that). */
+	public async isChainLive(profileId: string, chainId: number): Promise<boolean> {
+		await this.ensureInitialized()
+		const network = (await this.storage.getValues()).find((n) => n.profileId === profileId && n.chainId === chainId)
+		return network !== undefined && !this.deletingNetworks.has(network.id)
+	}
+
 	public async setActiveNetwork(id: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.setActiveNetwork.params, [id], "setActiveNetwork")
 		await this.ensureInitialized()

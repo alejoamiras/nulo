@@ -474,7 +474,19 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 					transferPublicToPrivateFn: tokenInterface.transferPublicToPrivateFn,
 					transferPrivateToPublicFn: tokenInterface.transferPrivateToPublicFn,
 				}
+				// The metadata fetch above parks with the token lock held, but the
+				// chain sweep is LOCKLESS (see clearChainState) — re-read the row so
+				// a swept token is not resurrected by the set below.
+				if (!(await this.tokens.get(`${tokenId}`))) {
+					throw new Error("token deleted")
+				}
 				await this.tokens.set(`${token.id}`, token)
+				// The set awaits — a sweep whose snapshot predates it would miss this
+				// row; self-compensate, mirroring persistToken's commit.
+				if (!(await this.networks.isNetworkLive(networkId))) {
+					await this.tokens.delete(`${token.id}`)
+					throw new Error("network deleted")
+				}
 				this.emit("onTokenUpdated", getTokenInfo(token))
 				const result = getTokenInfo(token)
 				task.complete()
@@ -787,6 +799,15 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 				// orphaned balance. Parsing here records it as a restoreError instead.
 				const row = TokenSchema.parse({ ...token, id })
 				assertRestoreEpoch(deletion, epochs, row.profileId)
+				// The chain sweep is LOCKLESS (see clearChainState), so a purge can
+				// interleave this batch despite the token lock — a row written after
+				// the sweep's snapshot would survive it. Per-row liveness makes the
+				// row fail visibly (restoreError) instead; this also rejects rows for
+				// a chain with NO network row, which a well-formed backup (networks
+				// restore before tokens) never produces.
+				if (!(await this.networks.isChainLive(row.profileId, row.chainId))) {
+					throw new Error("network deleted")
+				}
 				await this.tokens.set(`${id}`, row)
 				return row
 			})
