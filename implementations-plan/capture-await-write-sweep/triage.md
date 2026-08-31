@@ -131,3 +131,14 @@ Round-1 verdict `reject` (5 findings) → all verified in code, all adopted. Rou
 - **F9-tokens final**: `mode: "resync"` (TokenInfo has no profileId — deliberately, dApp boundary — so no accept predicate can anchor events; codex's A→B→A delayed-event schedule defeats mount-scope freezing too). FPC keeps the payload-profileId accept; authwits stay account-anchored.
 - Round-1's "backup restore preserves profile/network ids" premise remains unverified (profiles are a block-listed backup root) — moot: entry-capture is correct regardless.
 - **Rounds 4–5 (final)**: round-3 findings — fast-path read-exit re-assert (pin parks findToken), scope watchers on all four list pages, the service-level watchdog-handoff drain pin (fake-timer displacement + same-dirtyAt receipt isolating the isCurrent guard), and the fence-param doc correction (trusted-internal, not non-wire). Round-4's one remaining blocker (a failed switch-refetch preserved the foreign scope's rows) closed by `refresh({clear:true})` — synchronous empty with the seq bump; consolidated watchers, no double-fire. **Round-5 verdict: `approve` — "No blocking findings."** Commits through `8901a545`.
+
+### Independent max-review leg (fresh-eyes, post-codex-approve)
+
+Verdict `ship-with-fixes` — 4 findings, all adjudicated in code; fixes in `398c2b06`:
+
+1. **ABBA deadlock (HIGH — the branch's own round-2 fix introduced it)**: clearChainState-under-token-lock met persistToken's in-lock `getNode` (network lock), while purgeChain's caller holds the watchdog-DISABLED network lock — a plain addToken × deleteNetwork overlap froze both for the token watchdog's 5 minutes, then continued displaced. Fixed by inverting the atomicity: the sweep is lockless again; the CREATE side carries it (lock-free `isNetworkLive` + `deletingNetworks` reservation + a new POST-set liveness compensate). fpc's under-lock sweep stays (no reverse edge — verified). Two pins, revert-probed.
+2. **Pre-click ABA (moderate)**: creation-time session snapshot + minutes-open popup + same-id re-import (passkey userHandle) → approval executed under the successor on the predecessor's grant. Fixed: `executeAndResolve` requires the session ROW live and owner-matched after the fence capture (the cascade purges rows; re-imports never resurrect them). Pin, revert-probed.
+3. **Swallowed compensate (low)**: getOrInitNetworks' per-seed catch ate the deletion throw → [] as success. Post-loop re-assert; pin, revert-probed.
+4. **Fence param wire-reachability (informational)**: already covered by the round-4 doc correction; the leg's no-escalation analysis (forged fence ≤ fresh capture — assertCurrent is equality) stands recorded.
+
+Its checked-and-sound list independently re-verified the drain CAS + tickets, the pxe sweep barrier, the window-manager identity fence, the fpc fences, and — notably — re-traced every revert probe to a failing assertion (pin non-vacuity confirmed by a second reviewer).
