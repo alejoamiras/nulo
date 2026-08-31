@@ -949,9 +949,119 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		})
 	}
 
+	/** Unseal the freshly-resealed pair and run the pre-commit integrity gates: fail
+	 *  CLOSED on a null unseal (`resealed.encrypted` was just minted under
+	 *  `resealed.passhash`, so null means the row is corrupt — continuing would persist
+	 *  the new cipher while SKIPPING the pairing check, the integrity pre-check, and the
+	 *  MAC re-key), then the pairing check BEFORE anything commits (a change-password on
+	 *  a transplanted-entropy row must NOT launder the mismatch into a MAC-valid
+	 *  profile), then the pre-persist drift verify — on drift nothing is committed AND
+	 *  the current session closes (a rejected change must not leave the blocked profile
+	 *  operating). Caller MUST hold the facade lock and OWNS the returned buffers; on a
+	 *  throw after the unseal they are zeroized here before the rethrow. */
+	private async unsealResealedVerifiedHoldingLock(
+		id: string,
+		resealed: NonNullable<Awaited<ReturnType<PasswordSecretBox["reseal"]>>>,
+	): Promise<{ secret: MasterSecretBytes; entropy: Uint8Array<ArrayBuffer> }> {
+		const unsealed = await this.secretBox.unsealWithPasshash(resealed.passhash, resealed.encrypted)
+		const secret = unsealed?.secret ?? null
+		const entropy = unsealed?.entropy ?? null
+		if (!secret || !entropy) {
+			zeroize(secret)
+			zeroize(entropy)
+			throw new Error("Profile storage corrupted")
+		}
+		try {
+			await this.assertEntropyMasterPair(secret, entropy)
+			try {
+				await this.integrityDelegate?.verifyBeforeSessionOpen(id, secret)
+			} catch (precheckError) {
+				if (precheckError instanceof AccountAddressInconsistencyError && this.sessionManager.isActive(id)) {
+					await this.sessionManager.close()
+				}
+				throw precheckError
+			}
+		} catch (err) {
+			zeroize(secret)
+			zeroize(entropy)
+			throw err
+		}
+		return { secret, entropy }
+	}
+
+	/** Recover the DEK under the RETIRED password and re-key it for the new one. Failure
+	 *  to unseal the old slot SELF-HEALS with a fresh mint (a lost DEK already means
+	 *  every imported key is dead — A4 repair is delete+re-import — so a fresh mint
+	 *  restores forward function without masking anything). But a recovered DEK whose
+	 *  envelope MAC does not cover the row is REFUSED, not healed: re-MACing would
+	 *  launder a transplanted `dekSealed` that unlock had quarantined into a
+	 *  freshly-valid envelope, and a MAC failure cannot distinguish that from
+	 *  corruption of the MAC field alone (DEK intact, keys recoverable) — minting fresh
+	 *  would silently destroy recoverable keys in the second case. The non-destructive
+	 *  repair is export a full backup (deliberately still works — see
+	 *  `exportBackupMaterial`) and restore it. Caller MUST hold the facade lock and OWNS
+	 *  the returned dek + oldPasshash; on a throw after allocation they are zeroized
+	 *  here before the rethrow. */
+	private async rekeyedDekForPasswordChangeHoldingLock(
+		id: string,
+		profile: Extract<Profile, { type: "password" }>,
+		secret: MasterSecretBytes,
+		oldPassword: string,
+		newPasshash: Passhash,
+	): Promise<{ dek: ImportedKeysDek; oldPasshash: Passhash; newDekSealed: string }> {
+		let dek: ImportedKeysDek | null = null
+		let oldPasshash: Passhash | null = null
+		try {
+			oldPasshash = await EncryptionKey.getPasshash(oldPassword)
+			dek = await this.unsealDekWithPasshash(oldPasshash, profile.dekSealed)
+			if (dek && !(await this.envelopeMacValid(id, profile, secret, dek))) {
+				this.logger.log(this.name, LogLevel.Error, "envelope MAC does not cover the DEK slot at password change", id)
+				throw new Error("Profile integrity check failed — export a full backup and restore it before changing the password")
+			}
+			if (!dek) {
+				this.logger.log(this.name, LogLevel.Error, "imported-keys DEK unrecoverable at password change — minting fresh", id)
+				dek = generateImportedKeysDek()
+			}
+			const newDekSealed = await this.sealDekWithPasshash(newPasshash, dek)
+			return { dek, oldPasshash, newDekSealed }
+		} catch (err) {
+			zeroize(dek)
+			zeroize(oldPasshash)
+			throw err
+		}
+	}
+
+	/** Re-open the active session over the just-committed row with a fresh Fr.
+	 *  `openSessionVerified` re-runs the integrity check + the deletion bracket. If the
+	 *  RE-check now fails on an address-drift block (e.g. a foreign account was restored
+	 *  between the pre-check and here), the password change ALREADY SUCCEEDED — it must
+	 *  not be reported as a failure. Swallow ONLY that typed error: openSessionVerified
+	 *  has already persisted the block + closed the session, so the barrier surfaces the
+	 *  drift as its own handled state. Any other error (deletion fence, etc.)
+	 *  propagates. Caller MUST hold the facade lock. */
+	private async reopenAfterPasswordChangeHoldingLock(
+		id: string,
+		profile: Profile,
+		secret: MasterSecretBytes,
+		passhash: Passhash,
+		dek: ImportedKeysDek,
+	): Promise<void> {
+		if (!this.sessionManager.isActive(id)) return
+		try {
+			await this.openSessionVerified(profile, secret, passhash, dek)
+		} catch (reopenError) {
+			if (!(reopenError instanceof AccountAddressInconsistencyError)) throw reopenError
+			this.logger.log(
+				this.name,
+				LogLevel.Error,
+				"password changed but re-open hit an address-integrity block — surfaced via the barrier",
+				id,
+			)
+		}
+	}
+
 	public async changeProfilePassword(id: string, oldPassword: string, newPassword: string): Promise<ProfileInfo> {
 		await this.ensureInitialized()
-		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 33) — refactor when touched, never raise
 		return this.runExclusive(async () => {
 			const profile = await this.getProfileOrThrowHoldingLock(id)
 			if (profile.type === "passkey") {
@@ -964,9 +1074,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			}
 
 			// Unseal the (new-cipher) secret up front so integrity can be checked BEFORE the new
-			// password is persisted. If the check throws (address drift), nothing is committed and
-			// the RPC failure is honest — the password is NOT durably changed under a reported
-			// failure. `reseal` returns passhash + ciphertext but not the raw secret.
+			// password is persisted — if a gate throws, nothing is committed and the RPC failure
+			// is honest. `reseal` returns passhash + ciphertext but not the raw secret.
 			let secret: MasterSecretBytes | null = null
 			let entropy: Uint8Array<ArrayBuffer> | null = null
 			let dek: ImportedKeysDek | null = null
@@ -974,68 +1083,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			try {
 				// Inside the try so a throw in the unseal still hits the finally that wipes
 				// resealed.passhash (memory hygiene — P3 rider Low).
-				const unsealed = await this.secretBox.unsealWithPasshash(resealed.passhash, resealed.encrypted)
-				secret = unsealed?.secret ?? null
-				entropy = unsealed?.entropy ?? null
-				// Fail CLOSED. `resealed.encrypted` was just minted under `resealed.passhash`, so a
-				// null here means the row is corrupt — and continuing would persist the new cipher
-				// while SKIPPING the pairing check, the integrity pre-check, and the MAC re-key,
-				// leaving a profile whose stored MAC no longer covers its own ciphertexts (i.e. a
-				// self-inflicted degraded state). Throw before any `profile.*` field is mutated so
-				// nothing is committed.
-				if (!secret || !entropy) {
-					throw new Error("Profile storage corrupted")
-				}
-				// Pairing check BEFORE the reseal is committed (P3 rider High): a change-password
-				// on a transplanted-entropy row must NOT launder the mismatch into a MAC-valid
-				// profile. reseal preserves the plaintext, so checking the freshly-sealed pair is
-				// equivalent to checking the pre-change one.
-				await this.assertEntropyMasterPair(secret, entropy)
-				// Pre-persist verify: on drift, nothing is committed (honest failure — the password
-				// is NOT changed). But a drift here means the CURRENT session is on a mismatched
-				// build, so close it too — a rejected change must not leave the blocked profile
-				// operating (matches openSessionVerified's close-on-throw).
-				try {
-					await this.integrityDelegate?.verifyBeforeSessionOpen(id, secret)
-				} catch (precheckError) {
-					if (precheckError instanceof AccountAddressInconsistencyError && this.sessionManager.isActive(id)) {
-						await this.sessionManager.close()
-					}
-					throw precheckError
-				}
-
-				// The DEK reseals in the SAME single-row atomic write as guard/master/entropy
-				// (extends reseal's "always all fields" audit-H2 invariant — a DEK left sealed
-				// under the retired password would be stranded after the change). Failure to
-				// unseal the old slot SELF-HEALS with a fresh DEK: a lost DEK already means every
-				// imported key is dead (quarantined; delete+re-import is the A4 repair), so a
-				// fresh mint restores forward function without masking anything — blocking the
-				// password change on a corrupt slot would deny a security operation over
-				// already-dead material.
-				oldPasshash = await EncryptionKey.getPasshash(oldPassword)
-				dek = await this.unsealDekWithPasshash(oldPasshash, profile.dekSealed)
-				// A recovered DEK is not yet a TRUSTED one. Without this check a password change
-				// re-MACs whatever sits in the slot, so a transplanted `dekSealed` that unlock had
-				// quarantined (derived-only) is laundered into a freshly-valid envelope — the
-				// profile silently "recovers" onto an attacker-chosen key and every subsequently
-				// imported account seals to it.
-				//
-				// REFUSE rather than self-heal. A MAC failure cannot distinguish a replaced slot
-				// (imported keys already lost) from corruption of the MAC field ALONE (the DEK is
-				// intact and every imported key still recoverable) — so minting fresh here would
-				// silently destroy recoverable keys in the second case. Refusing destroys nothing
-				// and blesses nothing; the non-destructive repair is export a full backup (which
-				// deliberately still works — see `exportBackupMaterial`) and restore it, since
-				// restore mints a fresh DEK and rewraps every row through it.
-				if (dek && !(await this.envelopeMacValid(id, profile, secret, dek))) {
-					this.logger.log(this.name, LogLevel.Error, "envelope MAC does not cover the DEK slot at password change", id)
-					throw new Error("Profile integrity check failed — export a full backup and restore it before changing the password")
-				}
-				if (!dek) {
-					this.logger.log(this.name, LogLevel.Error, "imported-keys DEK unrecoverable at password change — minting fresh", id)
-					dek = generateImportedKeysDek()
-				}
-				const newDekSealed = await this.sealDekWithPasshash(resealed.passhash, dek)
+				;({ secret, entropy } = await this.unsealResealedVerifiedHoldingLock(id, resealed))
+				const rekeyed = await this.rekeyedDekForPasswordChangeHoldingLock(id, profile, secret, oldPassword, resealed.passhash)
+				dek = rekeyed.dek
+				oldPasshash = rekeyed.oldPasshash
 
 				// Dual reseal is atomic with this same pre-persist-verified commit (audit H2):
 				// guard, master, entropy, AND the DEK re-encrypt together — nothing may remain
@@ -1045,36 +1096,17 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				profile.guard = resealed.encrypted.guard
 				profile.secret = resealed.encrypted.secret
 				profile.entropy = resealed.encrypted.entropy
-				profile.dekSealed = newDekSealed
+				profile.dekSealed = rekeyed.newDekSealed
 				profile.envelopeMac = await computeEnvelopeMacV3(
 					id,
 					secret,
 					dek,
-					this.macEnvelopeV3(resealed.encrypted, newDekSealed, profile.walletFingerprint),
+					this.macEnvelopeV3(resealed.encrypted, rekeyed.newDekSealed, profile.walletFingerprint),
 				)
 				await this.repo.set(id, profile)
 				this.emit("onProfileUpdated", this.getProfileInfo(profile))
 
-				if (this.sessionManager.isActive(id)) {
-					// Re-open with a fresh Fr. openSessionVerified re-runs the check + the deletion
-					// bracket. If the RE-check now fails on an address-drift block (e.g. a foreign
-					// account was restored between the pre-check and here), the password change ALREADY
-					// SUCCEEDED — it must not be reported as a failure. Swallow ONLY that typed error:
-					// openSessionVerified has already persisted the block + closed the session, so the
-					// barrier surfaces the drift as its own handled state. Any other error (deletion
-					// fence, etc.) propagates.
-					try {
-						await this.openSessionVerified(profile, secret, resealed.passhash, dek ?? undefined)
-					} catch (reopenError) {
-						if (!(reopenError instanceof AccountAddressInconsistencyError)) throw reopenError
-						this.logger.log(
-							this.name,
-							LogLevel.Error,
-							"password changed but re-open hit an address-integrity block — surfaced via the barrier",
-							id,
-						)
-					}
-				}
+				await this.reopenAfterPasswordChangeHoldingLock(id, profile, secret, resealed.passhash, dek)
 			} finally {
 				zeroize(secret)
 				zeroize(entropy)
