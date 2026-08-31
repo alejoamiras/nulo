@@ -83,7 +83,7 @@ export class BalanceRepository {
 	/** F-B23 raw second pass over the balance rows — the codec-hidden complement
 	 *  of `delete`, kept here so storage stays repository-private. */
 	public async purgeMalformed(
-		matchesRaw: (raw: Record<string, unknown>) => boolean,
+		matchesRaw: (raw: Record<string, unknown>, storageId: string) => boolean,
 		onPurged?: (storageId: string) => void,
 	): Promise<number> {
 		return purgeMalformedRows(this.storage, matchesRaw, onPurged)

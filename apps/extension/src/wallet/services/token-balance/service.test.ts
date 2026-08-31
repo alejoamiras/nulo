@@ -34,6 +34,9 @@ const balance = (id: number, token: number, overrides: Partial<TokenBalanceRaw> 
 	id,
 	token,
 	account: "0xaccount",
+	profileId: "A",
+	chainId: 1,
+	contract: `0xtok${token}`,
 	privateBalance: "0",
 	publicBalance: "0",
 	updatedAt: 0,
@@ -163,7 +166,15 @@ describe("TokenBalanceService.restore — hostile-row validation (P1)", () => {
 				onTokenAdded: new EventHandler(),
 				onTokenUpdated: new EventHandler(),
 				onTokenDeleted: new EventHandler(),
-				getTokensRaw: async () => [],
+				// restore() derives identity from the profile's OWN token table — the
+				// explicit-profileId read, not the (empty pre-activation) active map.
+				getTokensRaw: async (profileId: string) =>
+					profileId === "p1"
+						? ([
+								{ id: 1, profileId: "p1", chainId: 1, contract: "0xtok1" },
+								{ id: 2, profileId: "p1", chainId: 1, contract: "0xtok2" },
+							] as never[])
+						: [],
 			}),
 		)
 		services.add(svc(TRANSACTION_SERVICE_NAME, { onTransactionUpdated: new EventHandler() }))
@@ -430,7 +441,17 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 		const seedRepo = new BalanceRepository(api)
 		// Token 100 has no row at all (died before repo.set); token 200 has a row
 		// stuck at updatedAt 0 (died before enqueue — the card spins forever).
-		await seedRepo.set({ id: 7, token: 200, account: "0xa", publicBalance: "0", privateBalance: "0", updatedAt: 0 })
+		await seedRepo.set({
+			id: 7,
+			token: 200,
+			account: "0xa",
+			profileId: "A",
+			chainId: 1,
+			contract: "0xtok200",
+			publicBalance: "0",
+			privateBalance: "0",
+			updatedAt: 0,
+		})
 
 		const noopTicker = { subscribe: () => ({ cancel: () => {} }) } as never
 		const services = new ServiceCollection()
@@ -475,7 +496,17 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 		const api = new FakeBrowserApi()
 		api.reset()
 		const seedRepo = new BalanceRepository(api)
-		await seedRepo.set({ id: 1, token: 100, account: "0xa", publicBalance: "0", privateBalance: "0", updatedAt: 123 })
+		await seedRepo.set({
+			id: 1,
+			token: 100,
+			account: "0xa",
+			profileId: "A",
+			chainId: 1,
+			contract: "0xtok100",
+			publicBalance: "0",
+			privateBalance: "0",
+			updatedAt: 123,
+		})
 
 		const noopTicker = { subscribe: () => ({ cancel: () => {} }) } as never
 		const services = new ServiceCollection()
@@ -579,7 +610,17 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 		const api = new FakeBrowserApi()
 		api.reset()
 		const repo = new BalanceRepository(api)
-		await repo.set({ id: 1, token: 100, account: "0xa", publicBalance: "0", privateBalance: "0", updatedAt: 9 })
+		await repo.set({
+			id: 1,
+			token: 100,
+			account: "0xa",
+			profileId: "A",
+			chainId: 1,
+			contract: "0xtok100",
+			publicBalance: "0",
+			privateBalance: "0",
+			updatedAt: 9,
+		})
 		expect(await repo.getAll()).toHaveLength(1)
 	})
 
@@ -773,6 +814,9 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 			id: 7,
 			token: 100,
 			account: "0xa",
+			profileId: "A",
+			chainId: 1,
+			contract: "0xtok100",
 			publicBalance: "0",
 			privateBalance: "0",
 			updatedAt: 0,

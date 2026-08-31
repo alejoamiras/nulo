@@ -6,6 +6,7 @@ import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { getTokenInfo } from "@/wallet/services/token/utils"
 import { EventHandler, Lock, getErrorMessage } from "@nulo/wallet-core/utils"
 import { reconcilePlan } from "./reconcile-pairs"
+import { isLegacyBalanceRow } from "./balance-identity"
 import { AccountService, type Account } from "@/wallet/services/account/service"
 import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
@@ -140,6 +141,14 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		// profile identity — still hold. Without this the late continuation can
 		// repopulate the map for a profile the switch already replaced.
 		const gen = this.profileGeneration
+		// Baseline cleanup, idempotent, all profiles: pre-identity rows are unreadable
+		// projections, yet their PHYSICAL keys tax every future id allocation (max+1
+		// scans the key space) — reap them; each profile's own reconcile recreates its
+		// pairs on activation. The predicate matches only the provably-legacy shape.
+		await this.lock.withLock(async () => {
+			const swept = await this.repo.purgeMalformed(isLegacyBalanceRow, (id) => this.logDebug(`swept legacy balance row ${id}`))
+			if (swept > 0) this.logWarn(`balance legacy sweep: ${swept} pre-identity row(s) purged`)
+		})
 		const profile = await this.profileService.getActiveProfile()
 		if (profile) {
 			const raw = await this.tokenService.getTokensRaw(profile.id)
@@ -247,6 +256,9 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 			id,
 			token: token.id,
 			account: account.address,
+			profileId: token.profileId,
+			chainId: token.chainId,
+			contract: token.contract,
 			privateBalance: "0",
 			publicBalance: "0",
 			updatedAt: 0,
@@ -549,14 +561,32 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		// slices are written BEFORE the imported profile is activated, so their token
 		// ids are absent from the active map and any active-map authorization here
 		// would reject every restored balance.
+		// Identity authority is the profile's OWN token table (explicit-profileId read —
+		// the imported profile is not active yet, so the active map is useless here).
+		// Every scoping field is derived below; nothing identity-bearing survives from
+		// the wire, and a row pointing at a token the profile doesn't own is rejected.
+		const ownedTokens = new Map((await this.tokenService.getTokensRaw(profileId)).map((t) => [t.id, t]))
+		const seenPairs = new Set<string>()
 		return await this.lock.withLock(async () =>
 			restoreRows(tokenBalances, async (tb) => {
 				const id = await this.allocateUnfencedId()
-				// Parse the exact persisted shape: an unvalidated restore row that fails
-				// the read-codec is KEPT-but-hidden by EntityStorage.decodeRow (invisible
-				// on read AND to a later getValues() cleanup). Parse here so a malformed
-				// backup row is recorded as restoreError, never written.
-				const row = TokenBalanceRawSchema.parse({ ...tb, id })
+				const token = ownedTokens.get(tb.token)
+				if (!token) throw new Error("balance row references a token the profile does not own")
+				// The backup registry rejects duplicate row IDS only — two blob rows can
+				// share one (token, account) pair and would otherwise both restore.
+				const pair = `${token.id}:${tb.account}`
+				if (seenPairs.has(pair)) throw new Error("duplicate balance pair in backup")
+				seenPairs.add(pair)
+				// Parse the exact persisted shape (a malformed row records a restoreError,
+				// never a KEPT-but-hidden write). Derived identity fields land LAST so the
+				// blob can never override them.
+				const row = TokenBalanceRawSchema.parse({
+					...tb,
+					id,
+					profileId,
+					chainId: token.chainId,
+					contract: token.contract,
+				})
 				assertRestoreEpoch(deletion, epochs, profileId)
 				await this.repo.set(row)
 				return row

@@ -70,6 +70,9 @@ function balance(id: number, tokenId: number, account = ACCOUNT_A): TokenBalance
 		id,
 		token: tokenId,
 		account,
+		profileId: "p1",
+		chainId: 1,
+		contract: `0x${tokenId.toString(16).padStart(64, "0")}`,
 		updatedAt: 0,
 	}
 }

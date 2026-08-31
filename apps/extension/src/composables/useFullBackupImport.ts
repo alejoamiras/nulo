@@ -289,9 +289,11 @@ export function relinkRestoredTokenBalances(
 	const oldIdToChain = new Map<unknown, number>()
 	for (let i = 0; i < newTokens.length; i++) {
 		const old = oldTokens[i]
-		if (!old) continue
-		oldIdToChain.set(old.id, old.chainId)
-		if (!newTokens[i].restoreError) oldIdToNew.set(old.id, newTokens[i].id)
+		if (!old || newTokens[i].restoreError) continue
+		// Chain authority is the RESTORED token (parsed, persisted) — the old row is raw
+		// attacker-controlled blob content, and a failed row must not feed the chain map.
+		oldIdToChain.set(old.id, newTokens[i].chainId)
+		oldIdToNew.set(old.id, newTokens[i].id)
 	}
 	const droppedBalances: unknown[] = []
 	let droppedTotal = 0
