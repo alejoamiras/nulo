@@ -230,7 +230,12 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 
 	public async getOrInitNetworks(): Promise<Network[]> {
 		await this.ensureInitialized()
-		const profile = await requireActiveProfile(this.profileService)
+		// Atomic read+capture: the lock wait + per-seed id allocation below can
+		// span the profile's deletion; seeding rows (and the active pointer) for
+		// a deleted profile creates orphans the cascade's snapshot predates.
+		const fence = await this.profileService.captureExecutionFence()
+		const deletion = this.profileService.getDeletionState()
+		const profile = { id: fence.profileId }
 		return await this.lock.withLock(async () => {
 			const existing = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
 			if (existing.length) return existing
@@ -248,7 +253,12 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 						seed.kind,
 						seed.endpointLabel,
 					)
+					deletion.assertCurrent(fence.profileId, fence.epoch)
 					await this.storage.set(network.id, network)
+					if (!deletion.isCurrent(fence.profileId, fence.epoch)) {
+						await this.storage.delete(network.id)
+						throw new Error(`profile ${fence.profileId} deleted`)
+					}
 					seeded.push(network)
 					if (seed.isPrimaryActive) activeId = network.id
 				} catch (error) {
@@ -257,6 +267,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			}
 			if (!activeId && seeded.length) activeId = seeded[0]!.id
 			if (activeId) {
+				deletion.assertCurrent(fence.profileId, fence.epoch)
 				await this._writeActive(profile.id, activeId)
 				const active = seeded.find((n) => n.id === activeId)!
 				const primaryEndpoint = active.endpoints.find((e) => e.id === active.primaryEndpointId)!
@@ -386,10 +397,13 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async addNetwork(name: string, rpcUrl: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.addNetwork.params, [name, rpcUrl], "addNetwork")
 		await this.ensureInitialized()
-		const profile = await requireActiveProfile(this.profileService)
+		// Atomic read+capture: the RPC probe below can span the profile's
+		// deletion — the commit asserts flush against the write.
+		const fence = await this.profileService.captureExecutionFence()
+		const deletion = this.profileService.getDeletionState()
 		const { chainId, l1ChainId } = await this._probeChainIdentity(rpcUrl)
 		return await this.lock.withLock(async () => {
-			const existingForProfile = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
+			const existingForProfile = (await this.storage.getValues()).filter((n) => n.profileId === fence.profileId)
 			const sameChain = existingForProfile.find((n) => n.chainId === chainId)
 			if (sameChain) {
 				throw new Error(`${ERR_DUPLICATE_CHAIN}: A network for chain ${chainId} already exists in this profile.`)
@@ -397,8 +411,14 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			if (existingForProfile.some((n) => n.name === name)) {
 				throw new Error(`Name '${name}' already in use.`)
 			}
-			const network = await this._buildNetwork(profile.id, name, rpcUrl, chainId, l1ChainId, "custom")
+			const network = await this._buildNetwork(fence.profileId, name, rpcUrl, chainId, l1ChainId, "custom")
+			deletion.assertCurrent(fence.profileId, fence.epoch)
 			await this.storage.set(network.id, network)
+			// The set awaits — compensate before the row becomes observable.
+			if (!deletion.isCurrent(fence.profileId, fence.epoch)) {
+				await this.storage.delete(network.id)
+				throw new Error(`profile ${fence.profileId} deleted`)
+			}
 			this.emit("onNetworkAdded", network)
 			return network
 		})

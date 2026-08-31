@@ -39,6 +39,8 @@ type NodeInfo = {
 function harness(seeded: Record<string, NodeInfo | Error>): {
 	service: NetworkService
 	factory: FakeNodeFactory
+	deletionState: ProfileDeletionState
+	browserApi: FakeBrowserApi
 } {
 	const logger = new LoggerStore(new ConfigStore())
 
@@ -59,13 +61,16 @@ function harness(seeded: Record<string, NodeInfo | Error>): {
 	browserApi.reset()
 	const service = new NetworkService(logger, browserApi, factory)
 
-	// Stub a minimal ProfileService that reports an active profile.
+	// Stub a minimal ProfileService that reports an active profile. ONE shared
+	// deletion state: the fence captures + asserts against the same instance.
 	const fakeProfile = { id: "p1", name: "p1", type: "password" } as const
+	const deletionState = new ProfileDeletionState()
 	const fakeProfileService = {
 		getActiveProfile: async () => fakeProfile,
 		onActiveProfileChanged: { add: vi.fn(), remove: vi.fn() },
 		onProfileDeleted: { add: vi.fn(), remove: vi.fn() },
-		getDeletionState: () => new ProfileDeletionState(),
+		getDeletionState: () => deletionState,
+		captureExecutionFence: async () => ({ profileId: "p1", epoch: deletionState.capture("p1") }),
 	} as unknown as ProfileService
 
 	// Reach into the service's protected init via the services map the base
@@ -75,8 +80,35 @@ function harness(seeded: Record<string, NodeInfo | Error>): {
 	// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
 	;(service as any).profileService = fakeProfileService
 
-	return { service, factory }
+	return { service, factory, deletionState, browserApi }
 }
+
+describe("NetworkService — addNetwork creation fence", () => {
+	test("a deletion completing DURING the probe rejects the write (entry-capture pin)", async () => {
+		// begin + RELEASE while the RPC probe is parked: the deletion fully
+		// settles, so only a fence captured at the authorizing entry rejects.
+		let release!: (v: NodeInfo) => void
+		const parked = new Promise<NodeInfo>((resolve) => {
+			release = resolve
+		})
+		const h = harness({})
+		h.factory.setOverrides("https://new.example/", {
+			getNodeInfo: vi.fn().mockReturnValue(parked) as unknown as AztecNode["getNodeInfo"],
+		})
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;(h.service as any).initialized = true
+
+		const run = h.service.addNetwork("Custom", "https://new.example/")
+		await new Promise((r) => setTimeout(r, 0))
+		h.deletionState.beginDeletion("p1")
+		h.deletionState.release("p1")
+		release({ l1ChainId: 5, rollupVersion: 1 })
+
+		await expect(run).rejects.toThrow(/deleted|not current/i)
+		const raw = await h.browserApi.storage.local.get(null)
+		expect(Object.keys(raw as Record<string, unknown>).some((k) => k.startsWith("nulo:core:networks@"))).toBe(false)
+	})
+})
 
 describe("NetworkService — resolveVerifiedL1ChainId single-snapshot", () => {
 	test("the probe target and the returned l1ChainId come from one row read", async () => {
@@ -396,6 +428,7 @@ function setupServiceWithStorage(seeded: Record<string, NodeInfo | Error>): {
 		onActiveProfileChanged: { add: vi.fn(), remove: vi.fn() },
 		onProfileDeleted: { add: vi.fn(), remove: vi.fn() },
 		getDeletionState: () => deletionState,
+		captureExecutionFence: async () => ({ profileId: "p1", epoch: deletionState.capture("p1") }),
 	} as unknown as ProfileService
 	// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
 	;(service as any).pxeServiceClient = { clearChainState: pxeStub }
