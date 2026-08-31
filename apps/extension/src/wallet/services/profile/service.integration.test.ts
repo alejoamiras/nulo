@@ -2644,4 +2644,113 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			await expect(service.importPasskey("PK2", fakeCredentialData("cred-dup", "uh-dup2"), true)).rejects.toThrow(/already exists/)
 		})
 	})
+
+	/**
+	 * Equivalence pins: freeze the OBSERVABLE error identities, event order, and
+	 * lock-phase behavior the repeated lock/fetch/check blocks produce today, so
+	 * any structural change to them must prove itself against unchanged behavior.
+	 */
+	describe("equivalence pins — error/event/lock contracts", () => {
+		async function readRow(api: FakeBrowserApi, id: string): Promise<Record<string, unknown>> {
+			const key = `nulo:core:profiles@${id}`
+			const raw = (await api.storage.local.get(key))[key]
+			return typeof raw === "string" ? JSON.parse(raw) : (raw as Record<string, unknown>)
+		}
+
+		test("wrong-password error identities: typed for the export pair, exact plain string for mnemonic + password change", async () => {
+			const { service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+
+			// exportBackupMaterial + exportImportedKeysDek expose the TYPED error.
+			await expect(service.exportBackupMaterial(p.id, "wrong-pass")).rejects.toBeInstanceOf(InvalidPasswordError)
+			await expect(service.exportImportedKeysDek(p.id, "wrong-pass")).rejects.toBeInstanceOf(InvalidPasswordError)
+
+			// exportMnemonic + changeProfilePassword throw a PLAIN Error whose exact
+			// message change-password.vue's wrong-password branch string-matches.
+			const mnemonicErr = await service.exportMnemonic(p.id, "wrong-pass").then(
+				() => null,
+				(e: unknown) => e,
+			)
+			expect(mnemonicErr).toBeInstanceOf(Error)
+			expect(mnemonicErr).not.toBeInstanceOf(InvalidPasswordError)
+			expect((mnemonicErr as Error).message).toBe("Invalid profile old password")
+
+			const changeErr = await service.changeProfilePassword(p.id, "wrong-pass", "newpass9").then(
+				() => null,
+				(e: unknown) => e,
+			)
+			expect(changeErr).toBeInstanceOf(Error)
+			expect(changeErr).not.toBeInstanceOf(InvalidPasswordError)
+			expect((changeErr as Error).message).toBe("Invalid profile old password")
+		}, 30_000)
+
+		test("onProfileAdded fires BEFORE the session opens on createProfile", async () => {
+			const { service } = await makeService()
+			const order: string[] = []
+			service.onProfileAdded.add(() => {
+				order.push("added")
+			})
+			service.onActiveProfileChanged.add((p) => {
+				if (p) order.push("active")
+			})
+			await service.createProfile("P", "pass1234")
+			expect(order).toEqual(["added", "active"])
+		}, 30_000)
+
+		test("(BUG PIN) a tombstoned-but-present row (crash window) still accepts changeProfileName", async () => {
+			// deleteProfile writes the tombstone BEFORE deleting the row, under one lock —
+			// a crash between the two leaves the row present with its id reserved. The
+			// rename/change-password openers check only row presence, not the reservation,
+			// so the mutation SUCCEEDS while every read hides the profile. Preserved
+			// verbatim; tracked separately for fix.
+			const { api, service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			const row = await readRow(api, p.id)
+			await api.storage.local.set({
+				[`nulo:core:profile-tombstones@${p.id}`]: JSON.stringify({
+					profileId: p.id,
+					addresses: [],
+					tokenIds: [],
+					networkIds: [],
+					epoch: 1,
+					pxeGeneration: row.pxeGeneration,
+				}),
+			})
+			const boot2 = await makeServiceFromExistingApi(api)
+			const renamed = await boot2.service.changeProfileName(p.id, "renamed")
+			expect(renamed.name).toBe("renamed")
+			expect((await boot2.service.getProfiles()).find((x) => x.id === p.id)).toBeUndefined()
+		}, 30_000)
+
+		test("deterministic passkey unlock: a delete landing during the HELD phase-2 ceremony is rejected", async () => {
+			const { service, passkeys } = await makeService()
+			const profile = await service.createPasskeyProfile("PK")
+			await service.lockActiveProfile()
+
+			// The stub's getKey IS the WebAuthn ceremony — holding it open is a
+			// deterministic phase-2 barrier. deleteProfile completing while the
+			// ceremony is held also proves phase 2 runs outside the facade lock.
+			let ceremonyStarted!: () => void
+			const started = new Promise<void>((resolve) => {
+				ceremonyStarted = resolve
+			})
+			let releaseCeremony!: () => void
+			const gate = new Promise<void>((resolve) => {
+				releaseCeremony = resolve
+			})
+			const realGetKey = passkeys.getKey.bind(passkeys)
+			passkeys.getKey = async (credentialId?: string) => {
+				ceremonyStarted()
+				await gate
+				return realGetKey(credentialId)
+			}
+
+			const unlock = service.unlockPasskeyProfile(profile.id)
+			unlock.catch(() => {})
+			await started
+			await service.deleteProfile(profile.id)
+			releaseCeremony()
+			await expect(unlock).rejects.toThrow(/Invalid profile id/)
+		}, 30_000)
+	})
 })
