@@ -72,6 +72,38 @@ describe("PxeService orphan-store sweep — recheck at commit", () => {
 		expect(removeProfileStoreDirs).not.toHaveBeenCalled()
 	})
 
+	test("removal waits for the profile's write barrier — a held read (store-open in flight) delays it", async () => {
+		vi.stubGlobal("indexedDB", { databases: async () => [] })
+		const profiles: IProfileReader = {
+			connect: async () => {},
+			getProfiles: async () => [],
+			onProfileDeleted: { add: () => {} },
+			onActiveProfileChanged: { add: () => {} },
+		}
+		const service = makeSweepService(profiles)
+		// Simulate a successor store-open in flight: registry.ensure runs under
+		// barrier.read, so a held read must block the sweep's recursive remove.
+		const barrier = (
+			service as unknown as { getProfileBarrier: (id: string) => { read: <T>(fn: () => Promise<T>) => Promise<T> } }
+		).getProfileBarrier("p1")
+		let releaseRead: () => void = () => {}
+		const readHeld = barrier.read(
+			() =>
+				new Promise<void>((resolve) => {
+					releaseRead = resolve
+				}),
+		)
+
+		const run = sweep(service)
+		await new Promise((r) => setTimeout(r, 10))
+		expect(removeProfileStoreDirs).not.toHaveBeenCalled()
+
+		releaseRead()
+		await readHeld
+		await run
+		expect(removeProfileStoreDirs).toHaveBeenCalledWith("p1")
+	})
+
 	test("a genuinely orphaned profile dir (no lifecycle entry, no row) IS removed", async () => {
 		vi.stubGlobal("indexedDB", { databases: async () => [] })
 		const profiles: IProfileReader = {

@@ -238,13 +238,27 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// unlike the removed per-chain empty-dir sweep (D7 TOCTOU).
 			const orphanProfiles = [...new Set(opfsDirs.map((c) => c.profileId))].filter((id) => !profiles.some((x) => x.id === id))
 			for (const profileId of orphanProfiles) {
-				// Re-check liveness at the moment of removal, not just at the snapshot:
-				// a same-id re-import can provision between `getProfiles` and this
-				// point, and its store dir (dir exists ⟹ key provisioned ⟹ lifecycle
-				// entry present) must not be deleted as an "orphan".
-				if (this.profileLifecycles.has(profileId)) continue
-				this.logWarn(`sweep: removing orphan OPFS PXE profile dir ${PXE_DATA_DIR_ROOT}/${profileId}`)
-				await removeProfileStoreDirs(profileId)
+				// Serialize against store-opens: dirs are (re)created by `registry.ensure`
+				// under this profile's `barrier.read`, so holding WRITE here means a
+				// same-id re-import provisioning DURING the sweep either lands its
+				// lifecycle entry before the re-check below (removal skipped) or has its
+				// store creation queued until the removal finishes (fresh dir after).
+				// Without the barrier, the recursive remove could delete a successor
+				// store mid-create. The barrier entry is retained (unlike
+				// clearProfileState's success path) — deleting it here could split-brain
+				// a queued reader onto a stale guard instance.
+				const barrier = this.getProfileBarrier(profileId)
+				await barrier.enterWrite()
+				try {
+					// Re-check liveness AFTER acquiring the barrier, not just at the
+					// snapshot: a provision that landed while we waited (dir exists ⟹ key
+					// provisioned ⟹ lifecycle entry present) must not be swept as orphan.
+					if (this.profileLifecycles.has(profileId)) continue
+					this.logWarn(`sweep: removing orphan OPFS PXE profile dir ${PXE_DATA_DIR_ROOT}/${profileId}`)
+					await removeProfileStoreDirs(profileId)
+				} finally {
+					barrier.leaveWrite()
+				}
 			}
 		}
 		if (pxes.length) {
