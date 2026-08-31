@@ -192,7 +192,7 @@ Unresolved: none. Both verdicts were `conditional approve`; every condition is a
 
 - **Fable leg** (`audit-fable.md`): `conditional approve` — all 8 conditions adopted.
 - **Codex leg** (`audit-codex.md`, session `01a05831-3c23-7ce2-9026-66f9c227dddf`): `conditional approve` — all conditions adopted (revised A, tuple scopes, service-owned derivation, complete identity enforcement, stale/legacy cleanup, fail-fast split ordering).
-- **Discharge pass (round 2)**: codex ratified all three consolidation deltas (A-1 registration; the stale-delete merge; the sweep, standing by it against fable's objection) — `conditional approve` with three narrow contract fixes, all adopted in this revision: complete-legacy-codec sweep predicate + canonical key identity; `row.token === token.id` in the shared predicate; return only scopes actually deleted after the per-row key recheck. Final verdict — *(round 3 pending)*.
+- **Discharge pass (round 2)**: codex ratified all three consolidation deltas (A-1 registration; the stale-delete merge; the sweep, standing by it against fable's objection) — `conditional approve` with three narrow contract fixes, all adopted in this revision: complete-legacy-codec sweep predicate + canonical key identity; `row.token === token.id` in the shared predicate; return only scopes actually deleted after the per-row key recheck. **Round 3: `approve`** — "The consolidated plan matches all three conditions… I found no remaining blocking or conditional issue."
 
 ## Seeds
 

@@ -87,3 +87,46 @@ e. **High — Split to list → purge → delete, and make it fail-fast.** Have 
 f. **Low — Confirm `mid`.** The corrected design still has one high blast-radius dimension but no migration, cryptographic, external-protocol, or irreversible production-data change. The repository’s current pre-production policy makes `mid` appropriate ([CLAUDE.md:90-97](CLAUDE.md:90)).
 
 conditional approve (with conditions: adopt revised A with full profile/chain/address purge targets, service-owned restore derivation, complete identity enforcement, stale/legacy cleanup, and fail-fast list→purge→delete ordering)
+---
+
+## Round 2 — discharge of the consolidation (three deltas ratified)
+
+The revised architecture is sound, and all three consolidation choices are ratified. No High or Critical defect remains. Three narrow plan contracts still need correction before full discharge.
+
+## Remaining findings
+
+- **Medium — the “exact legacy shape” predicate is not exact.** The plan currently specifies only numeric `token`, string `account`, and absence of the three new fields ([plan.md:28](implementations-plan/account-balance-orphans/plan.md:28)). The legacy shape also requires valid `id`, `updatedAt`, balance/failure field types, and numeric storage-key identity ([spec.ts:30-57](apps/extension/src/wallet/services/token-balance/spec.ts:30), [balance-repository.ts:28-35](apps/extension/src/wallet/services/token-balance/balance-repository.ts:28)). Use a dedicated legacy codec/predicate and require the canonical numeric storage ID to equal `raw.id`. Leave partial-new, malformed, and key-mismatched rows untouched. This was part of my original sweep condition.
+
+- **Medium — `rowMatchesToken` omits the token FK.** The proposed predicate checks only `profileId/chainId/contract` ([plan.md:30-43](implementations-plan/account-balance-orphans/plan.md:30)). It should also require `row.token === token.id`. Many callers will obtain the token through `tokens.get(row.token)`, making equality implicit, but the shared predicate—especially `backup()`’s join—should encode the complete invariant rather than depend on an undocumented caller precondition.
+
+- **Low — return only scopes actually deleted.** After purge, the delete loop correctly rechecks that the imported key remains absent ([plan.md:53-56](implementations-plan/account-balance-orphans/plan.md:53)). If a key appeared during the awaited purge, that account must be skipped and must not be included in the returned “dropped” tuples. Add a test where the registered callback installs the key before returning.
+
+## Ratification of the three deltas
+
+1. **Registration orchestration: approved.** It is cleaner than composable RPC orchestration and follows the existing awaited registration pattern ([network/service.ts:736-770](apps/extension/src/wallet/services/network/service.ts:736)). It preserves purge-before-delete and removes the new token-balance RPC surface.
+
+   One wording correction: registration does not automatically protect “every future account-removal path.” Only paths that invoke the registered purge do. The existing chain and profile paths use their own cascades ([account/service.ts:146-157](apps/extension/src/wallet/services/account/service.ts:146), [coordinator.ts:116-130](apps/extension/src/wallet/services/profile-deletion/coordinator.ts:116)).
+
+2. **Narrow stale-row deletion: approved exactly as intended.** Requiring the active profile and a live token at the same numeric ID excludes the codec-hidden-token case. Foreign-profile and no-live-token rows remain untouched ([plan.md:59-61](implementations-plan/account-balance-orphans/plan.md:59)). The occupancy fix remains necessary because foreign/no-live-token rows intentionally survive and must not suppress canonical creation.
+
+3. **Legacy sweep: approved, subject to the exact-shape condition above.** I stand by it against the cross-profile objection: these are unreadable, unexportable projections; every affected profile recreates them on activation, while retained physical keys permanently tax allocation ([id-allocators.ts:17-36](apps/extension/src/wallet/services/id-allocators.ts:17)). The global startup sweep and account-purge raw pass are not contradictory: the former handles exact legacy rows; the latter deliberately acts only on attributable new-shape rows.
+
+Two nonblocking editorial contradictions should also be corrected:
+
+- [plan.md:22](implementations-plan/account-balance-orphans/plan.md:22) says token deletion has an awaited cascade, while Fact 1 correctly says chain deletion is best-effort at [plan.md:97](implementations-plan/account-balance-orphans/plan.md:97).
+- “Relink stays untouched” at [plan.md:49](implementations-plan/account-balance-orphans/plan.md:49) should read “does no identity stamping”; its chain-authority logic is explicitly changing.
+
+conditional approve (with conditions: make the legacy sweep predicate match the complete old codec plus canonical numeric key identity; include row.token === token.id in the shared identity predicate; return only account scopes actually deleted after the key-absence recheck)
+---
+
+## Round 3 — final verdict
+
+Discharged. The consolidated plan matches all three conditions:
+
+- Exact legacy sweep predicate and leave-alone cases: [plan.md:28](implementations-plan/account-balance-orphans/plan.md:28)
+- Complete `rowMatchesToken`, including `row.token === token.id`: [plan.md:32](implementations-plan/account-balance-orphans/plan.md:32)
+- Per-row key recheck with only actually deleted scopes returned: [plan.md:55](implementations-plan/account-balance-orphans/plan.md:55)
+
+The corresponding regression tests are explicitly pinned, and the editorial corrections remove the prior contradictions. I found no remaining blocking or conditional issue.
+
+approve
