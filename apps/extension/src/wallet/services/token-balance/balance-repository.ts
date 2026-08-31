@@ -4,7 +4,6 @@
  * Frozen invariants:
  * - Storage key `nulo:core:token-balances`.
  * - Injected `browserApi.storage.local` (the chrome.storage.local adapter in prod).
- * - `TokenBalanceRaw` shape unchanged.
  * - IDs are numeric; `allocateId()` delegates to `nextNumericId`, which
  *   allocates max(allocatable ids) + 1 with hostile keys excluded (canonical
  *   round-trip + safe-integer bound; the candidate itself safe and free) —

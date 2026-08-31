@@ -110,28 +110,52 @@ describe("TokenBalanceService.onTokenDeleted purge cascade", () => {
 	})
 })
 
-describe("TokenBalanceService.purgeForTokens — F-B23 raw second pass", () => {
-	test("removes a malformed balance row for a purged token; spares another token's malformed row", async () => {
+describe("TokenBalanceService.purgeForTokens — F-B23 raw second pass, profile scoping", () => {
+	function bareWorld() {
 		const api = new FakeBrowserApi()
 		api.reset()
-		const seedRepo = new BalanceRepository(api)
 		const service = new TokenBalanceService(new LoggerStore(new ConfigStore()), api)
 		// purgeForTokens gates on ensureInitialized; init() wires the projector +
 		// event subs, none of which the storage purge touches — flip the flag
 		// instead of stubbing seven services for one purge pin.
 		;(service as unknown as { initialized: boolean }).initialized = true
+		return { api, service, seedRepo: new BalanceRepository(api) }
+	}
+
+	test("removes a malformed balance row for a purged token; spares another token's and an unattributable one", async () => {
+		const { api, service, seedRepo } = bareWorld()
 		await seedRepo.set(balance(1, 5))
 		await api.storage.local.set({
-			"nulo:core:token-balances@98": JSON.stringify({ token: 5, junk: true }),
-			"nulo:core:token-balances@99": JSON.stringify({ token: 6, junk: true }),
+			"nulo:core:token-balances@97": JSON.stringify({ token: 5, junk: true }),
+			"nulo:core:token-balances@98": JSON.stringify({ token: 5, profileId: "A", junk: true }),
+			"nulo:core:token-balances@99": JSON.stringify({ token: 6, profileId: "A", junk: true }),
 		})
 
-		await service.purgeForTokens([5])
+		await service.purgeForTokens([5], "A")
 
 		const raw = await api.storage.local.get(null)
+		// No profileId → unattributable → left to the legacy sweep, never a purge.
+		expect(raw["nulo:core:token-balances@97"]).toBeDefined()
 		expect(raw["nulo:core:token-balances@98"]).toBeUndefined()
 		expect(raw["nulo:core:token-balances@99"]).toBeDefined()
 		expect(await seedRepo.getAll()).toEqual([])
+	})
+
+	test("a resumed deletion purging a REUSED token id spares the successor profile's row and live-map entry", async () => {
+		const { service, seedRepo } = bareWorld()
+		// Profile A died mid-deletion holding token id 5 in its tombstone; profile B
+		// later reused id 5. The resume must erase only A's leftovers.
+		await seedRepo.set(balance(1, 5))
+		await seedRepo.set(balance(2, 5, { profileId: "B", contract: "0xtokB" }))
+		const successor = { id: 5, profileId: "B", chainId: 1, contract: "0xtokB", name: "B", symbol: "B", decimals: 18 }
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to the private map
+		;(service as any).tokens.set(5, successor)
+
+		await service.purgeForTokens([5], "A")
+
+		expect((await seedRepo.getAll()).map((r) => r.id)).toEqual([2])
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to the private map
+		expect(((service as any).tokens as Map<number, unknown>).get(5)).toBe(successor)
 	})
 })
 

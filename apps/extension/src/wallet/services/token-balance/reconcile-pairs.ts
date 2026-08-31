@@ -62,9 +62,8 @@ function pairKey(token: number, account: string): string {
 /**
  * Both halves of the repair, computed in one pass.
  *
- * Pairs are formed only where `token.chainId === account.chainId`: the row
- * schema cannot express chain scoping, so nothing downstream would catch a
- * mainnet token paired with a testnet account.
+ * Pairs are formed only where `token.chainId === account.chainId` — a mainnet
+ * token must never pair with a testnet account.
  *
  * Existing rows are indexed only under keys the desired set actually contains,
  * so a foreign profile's rows are never materialized. A row counts toward a

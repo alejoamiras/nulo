@@ -347,10 +347,11 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	 * a row that was never projected (died before `enqueue`, leaving the card
 	 * showing "Loading balance…" with nothing queued to finish it).
 	 *
-	 * Create-only. An existing row this profile cannot explain may belong to
-	 * another profile, may precede its token during a restore, or may be inside a
-	 * chain-purge cascade that is still draining — none of those are safe to
-	 * delete from a schema that carries neither profile nor chain.
+	 * Creates missing pairs, re-queues never-projected rows, and deletes only
+	 * PROVABLY-stale rows: this profile, a live token at the id, identity
+	 * mismatch — a dead incarnation. Rows whose token id has no live token
+	 * (possibly just a codec-hidden token row) and foreign-profile rows are
+	 * left untouched.
 	 */
 	private async reconcileBalanceRows(profileId: string, gen: number): Promise<void> {
 		const startedAt = Date.now()
@@ -509,27 +510,37 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		})
 	}
 
-	/** Awaited balance purge for a SET of token ids — called by the deletion
-	 *  coordinator with the tombstone's token snapshot (finding D). Idempotent. */
-	public async purgeForTokens(tokenIds: readonly number[]): Promise<void> {
+	/** Awaited balance purge for a SET of token ids WITHIN one profile — called by
+	 *  the deletion coordinator with the tombstone's token snapshot (finding D).
+	 *  Profile-scoped because a resumed deletion can run AFTER a crash let a
+	 *  successor profile reuse a purged id (`max+1` allocation): an unscoped purge
+	 *  would erase the successor's rows and evict its live-map entry. Idempotent. */
+	public async purgeForTokens(tokenIds: readonly number[], profileId: string): Promise<void> {
 		await this.ensureInitialized()
 		const set = new Set(tokenIds)
 		// Typed and raw passes share ONE hold with the creators: unlocked, a
 		// creation whose `repo.set` settles after this snapshot survives the purge.
 		await this.lock.withLock(async () => {
-			for (const tb of (await this.repo.getAll()).filter((x) => set.has(x.token))) {
-				if (this.tokens.has(tb.token)) this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb))
+			for (const tb of (await this.repo.getAll()).filter((x) => set.has(x.token) && x.profileId === profileId)) {
 				this.invalidatedBalanceIds.add(tb.id)
 				await this.repo.delete(tb.id)
+				// Delete-before-emit (the repo-wide purge invariant); decorate only
+				// with the row's OWN token, never a reused id's successor.
+				const live = this.tokens.get(tb.token)
+				if (live && rowMatchesToken(tb, live)) this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb))
 			}
 			// F-B23: raw second pass — a validation-failed balance row for a purged
 			// token is invisible to getAll() and would otherwise survive forever.
+			// Old-shape rows carry no profileId and are left to the legacy sweep.
 			await this.repo.purgeMalformed(
-				(raw) => typeof raw.token === "number" && set.has(raw.token),
+				(raw) => typeof raw.token === "number" && set.has(raw.token) && raw.profileId === profileId,
 				(id) => this.logDebug(`purged malformed balance row ${id}`),
 			)
 		})
-		for (const id of set) this.tokens.delete(id)
+		for (const id of set) {
+			const live = this.tokens.get(id)
+			if (live && live.profileId === profileId) this.tokens.delete(id)
+		}
 	}
 
 	/** Awaited balance purge for account scopes within ONE profile — registered with
@@ -547,13 +558,13 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 			for (const tb of (await this.repo.getAll()).filter(
 				(row) => row.profileId === profileId && keys.has(`${row.chainId}:${row.account}`),
 			)) {
-				// The scope's profile is typically NOT active here (restore finalize), so
-				// the token map cannot decorate the row — emit only when the map holds the
-				// row's OWN token (a reused id's successor must not decorate the event).
-				const live = this.tokens.get(tb.token)
-				if (live && rowMatchesToken(tb, live)) this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb))
 				this.invalidatedBalanceIds.add(tb.id)
 				await this.repo.delete(tb.id)
+				// Delete-before-emit (the repo-wide purge invariant). The scope's profile
+				// is typically NOT active here (restore finalize) — emit only when the map
+				// holds the row's OWN token, never a reused id's successor.
+				const live = this.tokens.get(tb.token)
+				if (live && rowMatchesToken(tb, live)) this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb))
 			}
 			// Raw second pass: a validation-failed new-shape row in scope must not
 			// survive as hidden debris. Old-shape rows carry no profileId/chainId —
@@ -630,9 +641,9 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 	public async restore(tokenBalances: TokenBalanceRaw[], profileId: string): Promise<Restored<TokenBalanceRaw>[]> {
 		await this.ensureInitialized()
-		// Deletion fence keyed on the composable's authoritative created-profile
-		// id — balance rows carry NO profileId, so only the threaded id can
-		// anchor it. Fail closed: dispatch has no schema validation.
+		// Deletion fence keyed on the composable's authoritative created-profile id —
+		// blob-carried identity fields are overridden below, so only the threaded id
+		// may anchor it. Fail closed: dispatch has no schema validation.
 		if (typeof profileId !== "string" || profileId.length === 0) {
 			throw new Error("restore requires the created profile id")
 		}

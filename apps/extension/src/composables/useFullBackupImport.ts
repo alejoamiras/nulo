@@ -246,10 +246,11 @@ export async function restoreAccountsAndFilterOwnedSlices(
 		(tx) => typeof tx.account === "string" && typeof tx.chainId === "number" && importedChainAddress.has(`${tx.chainId}:${tx.account}`),
 		"transaction(s)",
 	)
-	// auth-registry + token-balance carry `account` but no independently
-	// forgeable chainId (addresses are chain-distinct), so address membership
-	// is sufficient. (token-balance ALSO gets token-ownership + chain-equality
-	// in the re-link step below.)
+	// auth-registry rows carry `account` only, and addresses are chain-distinct,
+	// so address membership is sufficient. token-balance rows now carry identity
+	// fields, but those are DERIVED service-side at restore — address membership
+	// here is a pre-filter, with token-ownership + chain-equality in the re-link
+	// step below.
 	filterByAccount(AUTH_REGISTRY_SERVICE_NAME, (aw) => typeof aw.account === "string" && importedAddresses.has(aw.account), "authwit(s)")
 	filterByAccount(
 		TOKEN_BALANCE_SERVICE_NAME,
@@ -800,7 +801,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				importedChainAddress = await restoreAccountsAndFilterOwnedSlices(data, accountService, recordRestoreErrors)
 
 				// Imported-account key rows restore RIGHT AFTER the account rows and BEFORE
-				// reconciliation/finalize (final-codex ordering). The ciphertext is HKDF-bound to
+				// reconciliation/finalize. The ciphertext is HKDF-bound to
 				// (master, chainId, address) — not profileId — so it survives the id remap.
 				const importedKeySlice = (data as Record<string, unknown>)[IMPORTED_KEYS_SERVICE_NAME]
 				if (Array.isArray(importedKeySlice)) {
@@ -865,9 +866,9 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// store key, which is only provisionable once the session is open.
 			const backupServices: Array<{
 				name: string
-				// The created-profile id rides along on every restore: services whose
-				// rows carry no profileId (authwits, balances, txs) key their deletion
-				// fence on it; the rest ignore the extra argument.
+				// The created-profile id rides along on every restore: authwits and txs
+				// key their deletion fence on it, balances additionally derive their
+				// identity fields from it; the rest ignore the extra argument.
 				client: { restore: (rows: unknown[], profileId: string) => Promise<unknown>; disconnect: () => void }
 			}> = [
 				{ name: TRANSACTION_SERVICE_NAME, client: new TransactionServiceClient() as never },

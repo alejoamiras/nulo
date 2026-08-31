@@ -111,10 +111,12 @@ export class BalanceProjector {
 					privateBalance: balance.privateBalance ?? "0",
 					publicBalance: balance.publicBalance ?? "0",
 				}
-				// `.catch(undefined)` absorbs the ownership guard on `getTokenRaw`: a
-				// stale/foreign balance whose token the active profile doesn't own now
-				// throws — cache undefined so the passes below skip it (see `if (!token)`).
-				tokenCache.set(balance.id, await this.tokens.getTokenRaw(balance.token).catch(() => undefined))
+				// `.catch(undefined)` absorbs the ownership guard on `getTokenRaw` (a
+				// foreign row's token throws); the identity re-check preserves the
+				// pre-network guard across this SECOND lookup — delete-and-reuse between
+				// the two lookups must not run PXE calls against a successor contract.
+				const token = await this.tokens.getTokenRaw(balance.token).catch(() => undefined)
+				tokenCache.set(balance.id, token && rowMatchesToken(balance, token) ? token : undefined)
 			}
 
 			// Pass 1: enqueue every PUBLIC call across all balances first.
