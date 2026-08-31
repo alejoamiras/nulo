@@ -161,12 +161,21 @@ What follows, and what does not:
 - **No live risk.** The deployer-only guard only matters at the first `initialize`; both live portals
   are already initialized and carry the init-once guard (the pre-#436 source has `revert
   AlreadyInitialized()` at its line 52).
-- **Nothing compares the live portals to the pins.** `assertRuntimeMatchesTemplate` runs against a
-  freshly deployed portal inside the conductor; `verify:deployments` never reads portal bytecode. So
-  the pins-vs-live mismatch breaks no path.
+- **One path does compare the live mainnet portal to the new artifact, and fails closed.** The first
+  version of this note said nothing did; the codex re-review corrected it.
+  `apps/faucet/public/mainnet-bridge.journal.jsonl` is *committed* (the testnet journals are
+  gitignored) with `portal` confirmed at the live address, so a no-flag run of
+  `deploy-bridge-mainnet.ts` resumes it, reuses that portal, and `assertRuntimeMatchesTemplate`
+  rejects it on length before anything else. Correct behaviour — a completed deployment cannot be
+  resumed onto a different artifact — with one operational consequence: **the #436 redeploy must
+  begin from a fresh journal.** `verify:deployments` never reads portal bytecode, so the faucet build
+  is unaffected.
 - **`verify-l1` cannot re-verify the live portals from this source**, and never could since #436 —
-  Etherscan holds their July verification and answers "already verified", which the script treats as
-  success. A post-deploy step, not a re-verification tool.
+  Etherscan holds their July verification and forge short-circuits with "already verified" without
+  compiling the staged source. The script used to print the same ✓ for that as for a real
+  verification, which made it a gate that could vouch for the wrong bytes; it now labels the outcome
+  as an existing Etherscan verification that the staged source was not checked against. A post-deploy
+  step, not a source-identity check.
 
 Heuristic note for the next person doing this: substring-searching runtime hex for a *custom error*
 selector is unreliable — `0x0dc149f0` (`AlreadyInitialized()`) is absent from the current artifact
