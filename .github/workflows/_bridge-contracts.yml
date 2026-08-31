@@ -13,11 +13,6 @@ name: Bridge contracts
 
 on:
   workflow_call:
-    inputs:
-      run-halmos:
-        description: Also run the halmos symbolic proofs.
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -74,28 +69,41 @@ jobs:
         run: forge test --no-match-contract Fork
 
       - name: halmos symbolic proofs
-        if: inputs.run-halmos
         working-directory: contracts/bridge/evm
         run: |
-          # The proofs arrive partway up the stack, so a branch below that point legitimately has
-          # no suite to run. Assert the count only where the file exists, rather than failing
-          # every earlier arc.
-          if [ ! -f test/FormalRouter.t.sol ]; then
-            echo "::notice::FormalRouter.t.sol not present on this ref — skipping the symbolic proofs"
-            exit 0
-          fi
+          set -o pipefail
           pipx install "halmos==$(cat halmos.version)"
-          # --ast --force: halmos reads the solc AST from the artifacts, and the plain `forge
-          # build` above writes them without it. Against those artifacts halmos does not fail —
-          # it reports "No tests with --match-contract", which passes for a missing suite unless
-          # the count is checked. Rebuild with the AST, then require exactly four proofs.
+          # --ast --force: halmos reads the solc AST from the artifacts, and the plain `forge build`
+          # above writes them without it. Against those artifacts halmos does not fail — it reports
+          # "No tests with --match-contract" and exits 0, which passes for a missing suite.
           forge build --ast --force
-          halmos --contract FormalRouterTest | tee halmos.log
-          # Anchored: a bare "4 passed" substring also matches "14 passed".
-          grep -qE "^Symbolic test result: 4 passed; 0 failed" halmos.log || {
-            echo "::error::expected exactly 4 passing symbolic proofs; see the log above"
-            exit 1
-          }
+          halmos --match-contract '^Formal' 2>&1 | tee halmos.log
+
+          # Counts alone cannot police this: halmos prints one summary per contract and no grand
+          # total, so a deleted proof file simply stops producing its line, and a renamed `check_`
+          # is invisible while the number stays right. Bind each expected count to the contract that
+          # must produce it, then require that nothing else ran and nothing failed.
+          fail=0
+          while read -r n contract; do
+            grep -qE "^Running ${n} tests for .*:${contract}\$" halmos.log || {
+              echo "::error::expected ${n} symbolic proofs in ${contract}; see the log above"
+              fail=1
+            }
+          done <<'EXPECTED'
+          4 FormalRouterTest
+          1 FormalPortalTest
+          EXPECTED
+
+          summaries=$(grep -c '^Symbolic test result: ' halmos.log || true)
+          if [ "$summaries" -ne 2 ]; then
+            echo "::error::expected 2 proof contracts to run, saw ${summaries}"
+            fail=1
+          fi
+          if grep -qE '^Symbolic test result: [0-9]+ passed; [1-9]' halmos.log; then
+            echo "::error::a symbolic proof failed; see the log above"
+            fail=1
+          fi
+          exit "$fail"
 
   noir:
     name: nargo test (keystone)

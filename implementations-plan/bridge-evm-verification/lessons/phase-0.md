@@ -63,10 +63,13 @@ by design: the trap arms itself the moment a proof over `_validateRoute` lands.
 ### Resulting gate design
 
 Pin `--array-lengths` to the intended set, set `--loop` strictly above the maximum length so the loop
-is fully unrolled, and **require the truncation warning to be absent** — grep
-`paths have not been fully explored` and fail on a hit, alongside the exact count. A proof that can only
-be trusted when a warning is absent must have that absence enforced mechanically, not read by a human
-scrolling a log.
+is fully unrolled, and **require the truncation warning to be absent** — fail on a hit, alongside the
+exact count. A proof that can only be trusted when a warning is absent must have that absence enforced
+mechanically, not read by a human scrolling a log.
+
+> **Do not grep the warning's prose.** The obvious pattern — `paths have not been fully explored` —
+> matches nothing, because halmos wraps mid-phrase; that is the next finding in this file, and it was
+> written after this paragraph. Match the stable `#loop-bound` URL fragment instead.
 
 ## Finding: the real portal's init-once guard is covered by nothing
 
@@ -132,3 +135,49 @@ before it is trusted — the same rule the proofs are held to.
 Stream note: with stderr discarded the full output still appears on stdout, so the existing
 `halmos … | tee halmos.log` does capture the warning. `2>&1 | tee` is still worth using, so the gate's
 correctness does not depend on which stream halmos chooses.
+
+## Review finding: the live portals are the pre-#436 build — the pins describe an undeployed one
+
+The pin fix (#481) was written as "the source, the artifact and the pins agree with each other and
+with what is deployed". The last clause was never checked. Fetched both live portals' runtime code
+over public RPC:
+
+| | bytes | runtime keccak | `initializer()` getter (`0x9ce110d7`) |
+|---|---|---|---|
+| mainnet `0x3c32f16f…` | 3170 | `0x851a507b…` | absent |
+| testnet `0xe0fd81b5…` | 3170 | `0x851a507b…` | absent |
+
+`0x851a507b…` is byte-exact the **pre-#436** `runtimeCodeHash` (`git show 44158c38^` on
+`portal-artifact.ts`), which is consistent with the dates: both portals were deployed 2026-07-27,
+#436 added the deployer-only guard on 2026-08-27, and the redeploy (Arc 8 / L-5) is still pending.
+The absent `initializer()` selector is the direct symptom — that getter only exists once the
+immutable does.
+
+What follows, and what does not:
+
+- **#481 is still the right fix.** `loadForkedPortalArtifact` feeds the *next* deploy, and the next
+  deploy must ship the reviewed #436 build with the front-run guard. Re-pinning to the live bytes
+  instead would have silently dropped that guard from the next deployment.
+- **No live risk.** The deployer-only guard only matters at the first `initialize`; both live portals
+  are already initialized and carry the init-once guard (the pre-#436 source has `revert
+  AlreadyInitialized()` at its line 52).
+- **One path does compare the live mainnet portal to the new artifact, and fails closed.** The first
+  version of this note said nothing did; the codex re-review corrected it.
+  `apps/faucet/public/mainnet-bridge.journal.jsonl` is *committed* (the testnet journals are
+  gitignored) with `portal` confirmed at the live address, so a no-flag run of
+  `deploy-bridge-mainnet.ts` resumes it, reuses that portal, and `assertRuntimeMatchesTemplate`
+  rejects it on length before anything else. Correct behaviour — a completed deployment cannot be
+  resumed onto a different artifact — with one operational consequence: **the #436 redeploy must
+  begin from a fresh journal.** `verify:deployments` never reads portal bytecode, so the faucet build
+  is unaffected.
+- **`verify-l1` cannot re-verify the live portals from this source**, and never could since #436 —
+  Etherscan holds their July verification and forge short-circuits with "already verified" without
+  compiling the staged source. The script used to print the same ✓ for that as for a real
+  verification, which made it a gate that could vouch for the wrong bytes; it now labels the outcome
+  as an existing Etherscan verification that the staged source was not checked against. A post-deploy
+  step, not a source-identity check.
+
+Heuristic note for the next person doing this: substring-searching runtime hex for a *custom error*
+selector is unreliable — `0x0dc149f0` (`AlreadyInitialized()`) is absent from the current artifact
+too, which certainly reverts with it. Getter selectors sit in the dispatch table and are reliable;
+the exact runtime keccak is the authoritative evidence.
