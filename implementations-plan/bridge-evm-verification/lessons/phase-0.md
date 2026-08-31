@@ -135,3 +135,40 @@ before it is trusted — the same rule the proofs are held to.
 Stream note: with stderr discarded the full output still appears on stdout, so the existing
 `halmos … | tee halmos.log` does capture the warning. `2>&1 | tee` is still worth using, so the gate's
 correctness does not depend on which stream halmos chooses.
+
+## Review finding: the live portals are the pre-#436 build — the pins describe an undeployed one
+
+The pin fix (#481) was written as "the source, the artifact and the pins agree with each other and
+with what is deployed". The last clause was never checked. Fetched both live portals' runtime code
+over public RPC:
+
+| | bytes | runtime keccak | `initializer()` getter (`0x9ce110d7`) |
+|---|---|---|---|
+| mainnet `0x3c32f16f…` | 3170 | `0x851a507b…` | absent |
+| testnet `0xe0fd81b5…` | 3170 | `0x851a507b…` | absent |
+
+`0x851a507b…` is byte-exact the **pre-#436** `runtimeCodeHash` (`git show 44158c38^` on
+`portal-artifact.ts`), which is consistent with the dates: both portals were deployed 2026-07-27,
+#436 added the deployer-only guard on 2026-08-27, and the redeploy (Arc 8 / L-5) is still pending.
+The absent `initializer()` selector is the direct symptom — that getter only exists once the
+immutable does.
+
+What follows, and what does not:
+
+- **#481 is still the right fix.** `loadForkedPortalArtifact` feeds the *next* deploy, and the next
+  deploy must ship the reviewed #436 build with the front-run guard. Re-pinning to the live bytes
+  instead would have silently dropped that guard from the next deployment.
+- **No live risk.** The deployer-only guard only matters at the first `initialize`; both live portals
+  are already initialized and carry the init-once guard (the pre-#436 source has `revert
+  AlreadyInitialized()` at its line 52).
+- **Nothing compares the live portals to the pins.** `assertRuntimeMatchesTemplate` runs against a
+  freshly deployed portal inside the conductor; `verify:deployments` never reads portal bytecode. So
+  the pins-vs-live mismatch breaks no path.
+- **`verify-l1` cannot re-verify the live portals from this source**, and never could since #436 —
+  Etherscan holds their July verification and answers "already verified", which the script treats as
+  success. A post-deploy step, not a re-verification tool.
+
+Heuristic note for the next person doing this: substring-searching runtime hex for a *custom error*
+selector is unreliable — `0x0dc149f0` (`AlreadyInitialized()`) is absent from the current artifact
+too, which certainly reverts with it. Getter selectors sit in the dispatch table and are reliable;
+the exact runtime keccak is the authoritative evidence.
