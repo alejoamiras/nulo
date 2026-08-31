@@ -54,7 +54,7 @@ const {
 // stale fetches.
 watch(
 	() => [appStore.profile?.id, appStore.network?.id],
-	() => void fetchSenders(),
+	() => void fetchSenders({ clear: true }),
 )
 
 const handleCopyAddress = (address) => {

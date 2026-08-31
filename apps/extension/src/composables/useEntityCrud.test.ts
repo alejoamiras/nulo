@@ -296,6 +296,34 @@ describe("useEntityCrud", () => {
 		scope.stop()
 	})
 
+	it("refresh({clear:true}) empties synchronously and a FAILED refetch leaves the list empty, not stale", async () => {
+		// Scope-switch semantics: the foreign scope's rows must vanish before any
+		// await, and a failed refetch must not resurrect them (rendering another
+		// profile's rows indefinitely was the reviewed failure mode).
+		const fetch = vi
+			.fn(async (): Promise<Item[]> => [])
+			.mockResolvedValueOnce([{ id: "foreign", name: "F" }])
+			.mockRejectedValueOnce(new Error("switch refetch failed"))
+		const scope = effectScope()
+		const result = scope.run(() =>
+			useEntityCrud<Item>({
+				fetch,
+				added,
+				updated,
+				deleted,
+			}),
+		)!
+		await flush()
+		expect(result.entities.value.map((e) => e.id)).toEqual(["foreign"])
+
+		const refreshing = result.refresh({ clear: true })
+		expect(result.entities.value).toEqual([]) // synchronous, pre-await
+		await refreshing
+		expect(result.entities.value).toEqual([]) // failed fetch does NOT restore
+		expect(result.error.value).toBeInstanceOf(Error)
+		scope.stop()
+	})
+
 	it("throws a clear error if no id field and no identity provided", async () => {
 		const scope = effectScope()
 		const onError = vi.fn()

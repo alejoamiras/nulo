@@ -48,7 +48,14 @@ export interface UseEntityCrudResult<T> {
 	entities: Ref<T[]>
 	isLoading: Ref<boolean>
 	error: Ref<unknown>
-	refresh: () => Promise<void>
+	/**
+	 * Re-run `fetch` and replace the list. `clear: true` empties the list
+	 * SYNCHRONOUSLY before fetching — for scope switches (profile/network/
+	 * account), where the old rows belong to another scope and must not
+	 * survive a failed refetch. Event-driven resyncs stay non-clearing so a
+	 * routine add/delete doesn't blank the whole list for a round-trip.
+	 */
+	refresh: (opts?: { clear?: boolean }) => Promise<void>
 	dispose: () => void
 }
 
@@ -70,8 +77,15 @@ export function useEntityCrud<T>(options: UseEntityCrudOptions<T>): UseEntityCru
 	let seq = 0
 	let disposed = false
 
-	const refresh = async () => {
+	const refresh = async (opts?: { clear?: boolean }) => {
 		const mySeq = ++seq
+		if (opts?.clear) {
+			// Synchronous with the seq bump: the foreign-scope rows are gone
+			// before ANY await, and a failed fetch below leaves the list empty
+			// rather than resurrecting them.
+			entities.value = []
+			error.value = null
+		}
 		isLoading.value = true
 		try {
 			const result = await fetch()

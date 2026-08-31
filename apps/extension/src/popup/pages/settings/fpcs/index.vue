@@ -57,13 +57,6 @@ const {
 	accept: (f) => f.chainId === appStore.network?.chainId && f.profileId === appStore.profile?.id,
 })
 
-// A scope switch emits no fpc events and this route is not remounted —
-// refetch explicitly; the composable's fetch sequence retires stale fetches.
-watch(
-	() => [appStore.profile?.id, appStore.network?.chainId],
-	() => void refreshFpcs(),
-)
-
 const fpcs = computed(() =>
 	rawFpcs.value
 		?.map((f) => prepareFpc(f))
@@ -114,11 +107,15 @@ const handleDelete = (fpc) => {
 	popupStore.open("confirm")
 }
 
+// A profile/network switch emits no fpc events and this route is not
+// remounted — refetch explicitly. `clear` empties the foreign scope's rows
+// synchronously so a failed refetch cannot leave them rendered; the
+// composable's fetch sequence retires any in-flight stale fetch.
 watch(
-	() => [appStore.network, appStore.account],
+	() => [appStore.profile?.id, appStore.network, appStore.account],
 	() => {
 		if (appStore.network && appStore.account) {
-			refreshFpcs()
+			void refreshFpcs({ clear: true })
 		}
 	},
 )

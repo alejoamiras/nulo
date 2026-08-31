@@ -45,7 +45,7 @@ const { entities: tokens, refresh: refreshTokens } = useEntityCrud({
 // sequence makes any in-flight stale fetch stand down instead of installing.
 watch(
 	() => [appStore.profile?.id, appStore.network?.chainId],
-	() => void refreshTokens(),
+	() => void refreshTokens({ clear: true }),
 )
 
 const handleDelete = (target) => {
