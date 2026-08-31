@@ -175,6 +175,17 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 				// original error propagates untouched.
 				const captured = (args[0] as { pxeGeneration?: string } | undefined)?.pxeGeneration
 				if (captured && provision.generation !== captured) throw err
+				// Revalidate the incarnation immediately before the wire: `onReady`
+				// above can have REPLACED the offscreen document, and a deletion that
+				// completed against the OLD document leaves the replacement's
+				// lifecycle map empty — this stale provision would install the erased
+				// generation as live (ghost profile; a later same-id re-import is
+				// then wedged behind the live-under-different-generation rejection).
+				// A gone or superseded row aborts with the original error.
+				if (this.generationProvider) {
+					const liveGeneration = await this.generationProvider(profileId)
+					if (liveGeneration !== provision.generation) throw err
+				}
 				// The base64 wire copy cannot be zeroized (JS strings are
 				// immutable); the key bytes below are, in every exit path.
 				await this.requestAlreadyReady(
