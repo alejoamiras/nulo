@@ -2,6 +2,7 @@ import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService } from "@/wallet/services/profile/service"
+import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { nextRandomId } from "@/wallet/services/id-allocators"
@@ -146,14 +147,24 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		chainId: string,
 	): Promise<DappSession> {
 		await this.ensureInitialized()
-		const profile = await requireActiveProfile(this.profileService, "Wallet is locked")
+		// Atomic read+capture: the expiry sweep + lock wait + id allocation below
+		// can span the profile's deletion. An orphan here is worse than most —
+		// a dApp-session row is a dormant permission grant. The capture's only
+		// throw is the locked gate; re-thrown under this method's pinned message.
+		let fence: ExecutionFence
+		try {
+			fence = await this.profileService.captureExecutionFence()
+		} catch {
+			throw new Error("Wallet is locked")
+		}
+		const deletion = this.profileService.getDeletionState()
 		await this.deleteExpired()
 		return await this.lock.withLock(async () => {
 			const id = await nextRandomId(this.storage, 64)
 
 			const session: DappSession = {
 				id,
-				profileId: profile.id,
+				profileId: fence.profileId,
 				chainId,
 				dappMetadata: dappMetadata,
 				permissions: permissions,
@@ -161,7 +172,13 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 				confirmationLevel: confirmationLevel,
 				expiry: Date.now() + 7 * 24 * 60 * 60 * 1000,
 			}
+			deletion.assertCurrent(fence.profileId, fence.epoch)
 			await this.storage.set(session.id, session)
+			// The set awaits — compensate before the grant becomes observable.
+			if (!deletion.isCurrent(fence.profileId, fence.epoch)) {
+				await this.storage.delete(session.id)
+				throw new Error(`profile ${fence.profileId} deleted`)
+			}
 			this.emit("onDappSessionAdded", session)
 
 			return session
