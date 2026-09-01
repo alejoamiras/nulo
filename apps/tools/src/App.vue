@@ -18,7 +18,6 @@ type Tab = "drip" | "bridge" | "fuel"
 // Mainnet defaults to the Bridge tab; the Drip tab stays (its tokens are play tokens there).
 const isMainnet = IS_MAINNET
 
-/** Default to the Bridge tab on mainnet or a bridge.* host; drip otherwise (testnet). */
 function defaultTab(): Tab {
 	if (isMainnet) return "bridge"
 	if (typeof window !== "undefined" && window.location.hostname.startsWith("bridge")) return "bridge"

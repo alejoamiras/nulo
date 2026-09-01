@@ -6,8 +6,7 @@ const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
 
 /**
- * Runtime checks for the incoming-transfer arc, pinned by the post-impl
- * codex audit. Three named scenarios:
+ * Runtime wiring checks for incoming transfers. Three named scenarios:
  *
  *   1. **activity feed mounts** — the popup's activity page loads on a
  *      fresh profile without a runtime error. This is a wire-up smoke
@@ -35,7 +34,7 @@ const hasConfig = aztecConfig !== undefined
  * provide the deeper coverage; this e2e provides the wire-up smoke.
  */
 test.skipIf(!hasConfig)(
-	"incoming-transfer arc — name regression + empty happy path + self-mint dedupe",
+	"incoming transfers — activity page mounts + empty incoming feed on a fresh profile",
 	{ timeout: 180_000, retry: 0 },
 	async ({ registeredExtension }) => {
 		const page = await openPopup(registeredExtension)

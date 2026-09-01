@@ -209,17 +209,18 @@ export interface CombinedManifestInput {
 }
 
 /**
- * Build ONE manifest covering the Bridge + fuel, and — when the drip tokens are supplied (testnet)
- * — the Drip tab too. The tabs are the same origin = the same app to the wallet, which keys the grant
- * per-app, so two separate manifests collide (the second connect's grant shadows the first, and
- * registerContract for the missing contracts hits a scope violation). One complete manifest, requested
- * once, fixes that. On mainnet the drip tokens are omitted (no Drip tab), but the PrivateFPC +
- * FEE_JUICE + auth-registry grants stay so private fuel + private-fuel-paid claims work (DP6).
- * `canCreateAuthWit: true` because the bridge's `exit_to_l1` needs a public burn auth-wit.
+ * Build ONE manifest covering the Bridge + fuel and — when the three drip tokens are supplied, as the
+ * shipped app always does — the Drip tab. The tabs are the same origin = the same app to the wallet,
+ * which keys the grant per-app, so two separate manifests collide (the second connect's grant shadows
+ * the first, and registerContract for the missing contracts hits a scope violation). One complete
+ * manifest, requested once, fixes that. Omitting the drip tokens yields a bridge+fuel-only manifest;
+ * the PrivateFPC + FEE_JUICE + auth-registry grants stay in both shapes so private fuel +
+ * private-fuel-paid claims work. `canCreateAuthWit: true` because the bridge's `exit_to_l1` needs a
+ * public burn auth-wit.
  */
 export function buildCombinedManifest(input: CombinedManifestInput): AppManifest {
 	const { dripperAddress, usdcAddress, ethAddress, bridgeAddress, tokenAddress, proxyAddress, sponsoredFpcAddress } = input
-	// All three drip tokens present ⇒ include the drip grants; none ⇒ bridge+fuel only (mainnet).
+	// All three drip tokens present ⇒ include the drip grants; none ⇒ bridge+fuel only.
 	const drip = dripperAddress && usdcAddress && ethAddress ? { dripper: dripperAddress, usdc: usdcAddress, eth: ethAddress } : null
 	return {
 		version: "1.0",

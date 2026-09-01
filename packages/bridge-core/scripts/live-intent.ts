@@ -478,7 +478,7 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
  * live paths are operationally allowlisted, so tree discipline does NOT flag a
  * crash-interrupted pair; the recovery is to RE-RUN promote — it is idempotent
  * (re-verifies and rewrites BOTH targets from the same pinned candidates) and
- * converges the pair before anything is committed (codex audit).
+ * converges the pair before anything is committed.
  *
  * Zero-seed assertion (this arc deploys no fuel/router and seeds no WETH): the
  * candidate's `l1.fuel` section must be BYTE-carried from the current live
@@ -508,7 +508,7 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwa
 	// candidate bytes against the digest required above).
 	await verify(intentPath, bridgeCandidatePath)
 
-	// 0c. The FPC require-deployed gate as CODE, not operator discipline (review finding #6):
+	// 0c. The FPC require-deployed gate as CODE, not operator discipline:
 	// promotion enables the app's Fuel tab, which hard-uses PRIVATE_FPC_ADDRESS — an
 	// undeployed or upgraded-out FPC at that address must abort the promotion.
 	run("bun", [join(here, "check-fpc-version.ts"), "--mode", "require-deployed"], { stdio: "inherit" })
@@ -535,7 +535,7 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwa
 	// 2. Read ONCE into buffers + validate the exact bytes that will be written. The
 	// bridge buffer must equal the RECORDED digest — verify() above read the file
 	// separately, and an edit between the two reads would otherwise ship bytes that
-	// skipped the digest pin + privileged readbacks (review finding #4).
+	// skipped the digest pin + privileged readbacks.
 	const bridgeBytes = readFileSync(bridgeCandidatePath)
 	const dripBytes = bridgeOnly ? null : readFileSync(dripCandidatePath)
 	const bridgeSha = createHash("sha256").update(bridgeBytes).digest("hex")

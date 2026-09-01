@@ -132,7 +132,6 @@ function extractTxHash(tx: unknown): string {
 	return ""
 }
 
-/** Test-only: clear state between cases. */
 export function __resetDripForTests(): void {
 	inflight.value = null
 	for (const k of Object.keys(last)) delete last[k]
