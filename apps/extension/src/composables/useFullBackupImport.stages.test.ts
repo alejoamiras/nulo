@@ -308,8 +308,8 @@ async function mountWithBackup(overrides: Record<string, unknown> = {}, opts = m
 describe("stage-order law (real wiring, happy path with every slice)", () => {
 	it("runs profile → networks → active-pointer → accounts → imported keys → tokens → six services → reconcile → finalize → account-state → completeImport, in order", async () => {
 		const order: string[] = []
-		const track = <T extends { restore: ReturnType<typeof vi.fn> }>(name: string, client: T) => {
-			const prev = client.restore.getMockImplementation()
+		const track = (name: string, client: { restore: ReturnType<typeof vi.fn> }) => {
+			const prev = client.restore.getMockImplementation() as ((...a: never[]) => Promise<unknown>) | undefined
 			client.restore.mockImplementation(async (...a: unknown[]) => {
 				order.push(name)
 				return prev ? prev(...(a as never[])) : []
@@ -426,7 +426,7 @@ describe("stage-order law (real wiring, happy path with every slice)", () => {
 		})
 		await c.restoreBackup()
 		expect(accountStateClient.restore).toHaveBeenCalled()
-		const nets = accountStateClient.restore.mock.calls[0][1] as Array<{ id: string }>
+		const nets = (accountStateClient.restore.mock.calls[0] as unknown[])[1] as Array<{ id: string }>
 		expect(nets.map((n) => n.id)).toEqual(["new-net-1"])
 	})
 })
