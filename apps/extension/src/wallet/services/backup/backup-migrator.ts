@@ -124,45 +124,75 @@ export async function migrateBackupData(opts: MigrateBackupOptions): Promise<Bac
  *     no slice maps to cannot be replayed here);
  *  4. a read of a NON-optional slice the blob doesn't carry rejects (an
  *     optional absent slice already normalized as empty). */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 36) — refactor when touched, never raise
 function preflightPending(pending: Migration[], absentRequired: StorageRef[]): BackupMigrationResult | undefined {
+	// Built afresh on every preflight — the registry is only TypeScript-readonly,
+	// so a module-level cache would freeze a mutated registry's FIRST shape.
+	const index = buildCoverageIndex()
+	const absentRoots = new Set(absentRequired.filter((r) => r.kind === "root").map((r) => r.root))
+	const absentKeys = new Set(absentRequired.filter((r) => r.kind === "value").map((r) => r.key))
+
+	for (const m of pending) {
+		const rejection = preflightMigrationRefs(m, index, absentRoots, absentKeys)
+		if (rejection) return rejection
+	}
+	return undefined
+}
+
+interface CoverageIndex {
+	readonly coveredRoots: ReadonlySet<string>
+	readonly coveredValueKeys: ReadonlySet<string>
+	readonly blocked: ReadonlySet<string>
+}
+
+function buildCoverageIndex(): CoverageIndex {
 	const coveredRoots = new Set<string>()
 	const coveredValueKeys = new Set<string>()
 	for (const desc of Object.values(BACKUP_SLICE_REGISTRY)) {
 		if (desc.kind === "root") coveredRoots.add(desc.root)
 		if (desc.kind === "value-projection") coveredValueKeys.add(desc.key)
 	}
-	const blocked = new Set(BACKUP_BLOCKED_ROOTS)
-	const absentRoots = new Set(absentRequired.filter((r) => r.kind === "root").map((r) => r.root))
-	const absentKeys = new Set(absentRequired.filter((r) => r.kind === "value").map((r) => r.key))
+	return { coveredRoots, coveredValueKeys, blocked: new Set(BACKUP_BLOCKED_ROOTS) }
+}
 
-	for (const m of pending) {
-		if (!isBackupSafeMigration(m)) {
-			return {
-				kind: "incompatible",
-				reason: `this wallet version can't upgrade old backups: migration ${m.version} is not backup-safe — re-export a fresh backup from a current wallet`,
-			}
+/** One migration's gates, in reject-oracle order: brand → blocked → uncovered
+ *  (reads-then-writes ref order) → absent-required read. */
+function preflightMigrationRefs(
+	m: Migration,
+	index: CoverageIndex,
+	absentRoots: ReadonlySet<string>,
+	absentKeys: ReadonlySet<string>,
+): BackupMigrationResult | undefined {
+	if (!isBackupSafeMigration(m)) {
+		return {
+			kind: "incompatible",
+			reason: `this wallet version can't upgrade old backups: migration ${m.version} is not backup-safe — re-export a fresh backup from a current wallet`,
 		}
-		for (const ref of [...m.reads, ...m.writes]) {
-			if (ref.kind === "root" && blocked.has(ref.root)) {
-				return {
-					kind: "incompatible",
-					reason: `migration ${m.version} touches "${ref.root}", which backups cannot represent — re-export a fresh backup from a current wallet`,
-				}
-			}
-			const covered = ref.kind === "root" ? coveredRoots.has(ref.root) : coveredValueKeys.has(ref.key)
-			if (!covered) {
-				const target = ref.kind === "root" ? ref.root : ref.key
-				return { kind: "incompatible", reason: `migration ${m.version} touches "${target}", which no backup slice maps to` }
-			}
+	}
+	for (const ref of [...m.reads, ...m.writes]) {
+		const rejection = rejectBlockedOrUncoveredRef(m.version, ref, index)
+		if (rejection) return rejection
+	}
+	for (const ref of m.reads) {
+		const missing = ref.kind === "root" ? absentRoots.has(ref.root) : absentKeys.has(ref.key)
+		if (missing) {
+			const target = ref.kind === "root" ? ref.root : ref.key
+			return { kind: "failed", reason: `backup is missing a required slice for "${target}" that migration ${m.version} reads` }
 		}
-		for (const ref of m.reads) {
-			const missing = ref.kind === "root" ? absentRoots.has(ref.root) : absentKeys.has(ref.key)
-			if (missing) {
-				const target = ref.kind === "root" ? ref.root : ref.key
-				return { kind: "failed", reason: `backup is missing a required slice for "${target}" that migration ${m.version} reads` }
-			}
+	}
+	return undefined
+}
+
+function rejectBlockedOrUncoveredRef(version: number, ref: StorageRef, index: CoverageIndex): BackupMigrationResult | undefined {
+	if (ref.kind === "root" && index.blocked.has(ref.root)) {
+		return {
+			kind: "incompatible",
+			reason: `migration ${version} touches "${ref.root}", which backups cannot represent — re-export a fresh backup from a current wallet`,
 		}
+	}
+	const covered = ref.kind === "root" ? index.coveredRoots.has(ref.root) : index.coveredValueKeys.has(ref.key)
+	if (!covered) {
+		const target = ref.kind === "root" ? ref.root : ref.key
+		return { kind: "incompatible", reason: `migration ${version} touches "${target}", which no backup slice maps to` }
 	}
 	return undefined
 }

@@ -251,7 +251,6 @@ export interface NormalizedBackupData {
 
 export type NormalizeResult = { ok: true; normalized: NormalizedBackupData } | { ok: false; reason: string }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 50) — refactor when touched, never raise
 export function normalizeBackupData(data: unknown): NormalizeResult {
 	if (typeof data !== "object" || data === null || Array.isArray(data)) {
 		return { ok: false, reason: "backup data is not an object" }
@@ -264,62 +263,96 @@ export function normalizeBackupData(data: unknown): NormalizeResult {
 		}
 	}
 
-	const entries: Record<string, string> = {}
-	const passThrough: Record<string, unknown> = {}
+	const acc: NormalizeAccumulator = { entries: {}, passThrough: {}, absentRequired: [] }
 	const present = new Set<string>()
-	const absentRequired: StorageRef[] = []
 
 	for (const [name, desc] of Object.entries(BACKUP_SLICE_REGISTRY)) {
 		const slice = Object.hasOwn(record, name) ? record[name] : undefined
 		if (slice !== undefined) present.add(name)
-
-		switch (desc.kind) {
-			case "root": {
-				if (slice === undefined) {
-					if (!desc.optional) absentRequired.push({ kind: "root", root: desc.root })
-					break
-				}
-				if (!Array.isArray(slice)) return { ok: false, reason: `slice "${name}" is not an array` }
-				for (let i = 0; i < slice.length; i++) {
-					const row = slice[i]
-					if (typeof row !== "object" || row === null || Array.isArray(row)) {
-						return { ok: false, reason: `slice "${name}" row ${i} is not an object` }
-					}
-					const id = desc.idOf(row as Record<string, unknown>)
-					if (id === undefined) return { ok: false, reason: `slice "${name}" row ${i} has a missing or malformed id` }
-					const key = `${desc.root}@${id}`
-					if (Object.hasOwn(entries, key)) return { ok: false, reason: `slice "${name}" has a duplicate row id "${id}"` }
-					entries[key] = JSON.stringify(row)
-				}
-				break
-			}
-			case "value-projection": {
-				if (slice === undefined) {
-					absentRequired.push({ kind: "value", key: desc.key })
-					break
-				}
-				if (!Array.isArray(slice)) return { ok: false, reason: `slice "${name}" is not an array` }
-				const stored = desc.toStored(slice)
-				if (!stored.ok) return { ok: false, reason: stored.reason }
-				entries[desc.key] = JSON.stringify(stored.stored)
-				break
-			}
-			case "non-storage":
-			case "block-listed": {
-				if (slice !== undefined) passThrough[name] = slice
-				break
-			}
-		}
+		const reason = normalizeSlice(name, desc, slice, acc)
+		if (reason !== undefined) return { ok: false, reason }
 	}
 
-	return { ok: true, normalized: { entries, passThrough, present, absentRequired } }
+	return {
+		ok: true,
+		normalized: { entries: acc.entries, passThrough: acc.passThrough, present, absentRequired: acc.absentRequired },
+	}
+}
+
+/** Fresh, orchestrator-owned accumulation state for one normalize run. */
+interface NormalizeAccumulator {
+	entries: Record<string, string>
+	passThrough: Record<string, unknown>
+	absentRequired: StorageRef[]
+}
+
+/** Files one slice (or its absence) into the accumulator per its descriptor.
+ *  Returns the reject reason, or undefined. */
+function normalizeSlice(name: string, desc: SliceDescriptor, slice: unknown, acc: NormalizeAccumulator): string | undefined {
+	switch (desc.kind) {
+		case "root": {
+			if (slice === undefined) {
+				if (!desc.optional) acc.absentRequired.push({ kind: "root", root: desc.root })
+				return undefined
+			}
+			return normalizeRootSlice(name, desc, slice, acc.entries)
+		}
+		case "value-projection": {
+			if (slice === undefined) {
+				acc.absentRequired.push({ kind: "value", key: desc.key })
+				return undefined
+			}
+			return normalizeValueProjectionSlice(name, desc, slice, acc.entries)
+		}
+		case "non-storage":
+		case "block-listed": {
+			if (slice !== undefined) acc.passThrough[name] = slice
+			return undefined
+		}
+	}
+}
+
+/** Serializes one root slice's rows into `entries` (fresh, orchestrator-owned).
+ *  Returns the reject reason, or undefined on success — entries written before
+ *  a mid-slice reject are discarded with the whole normalize result. */
+function normalizeRootSlice(
+	name: string,
+	desc: Extract<SliceDescriptor, { kind: "root" }>,
+	slice: unknown,
+	entries: Record<string, string>,
+): string | undefined {
+	if (!Array.isArray(slice)) return `slice "${name}" is not an array`
+	for (let i = 0; i < slice.length; i++) {
+		const row = slice[i]
+		if (typeof row !== "object" || row === null || Array.isArray(row)) {
+			return `slice "${name}" row ${i} is not an object`
+		}
+		const id = desc.idOf(row as Record<string, unknown>)
+		if (id === undefined) return `slice "${name}" row ${i} has a missing or malformed id`
+		const key = `${desc.root}@${id}`
+		if (Object.hasOwn(entries, key)) return `slice "${name}" has a duplicate row id "${id}"`
+		entries[key] = JSON.stringify(row)
+	}
+	return undefined
+}
+
+function normalizeValueProjectionSlice(
+	name: string,
+	desc: Extract<SliceDescriptor, { kind: "value-projection" }>,
+	slice: unknown,
+	entries: Record<string, string>,
+): string | undefined {
+	if (!Array.isArray(slice)) return `slice "${name}" is not an array`
+	const stored = desc.toStored(slice)
+	if (!stored.ok) return stored.reason
+	entries[desc.key] = JSON.stringify(stored.stored)
+	return undefined
 }
 
 // ── Denormalize: post-migration scratch entries → backup slices ──────────────
 
 export type DenormalizeResult = { ok: true; data: Record<string, unknown> } | { ok: false; reason: string }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 41) — refactor when touched, never raise
 export function denormalizeBackupData(
 	scratchEntries: Record<string, unknown>,
 	normalized: Pick<NormalizedBackupData, "passThrough" | "present">,
@@ -331,64 +364,97 @@ export function denormalizeBackupData(
 		// The engine's own journal/version keys are scratch bookkeeping, never
 		// backup payload.
 		if (key.startsWith(SCHEMA_RESERVED_PREFIX)) continue
-
-		const owner = ownerOf(key)
-		if (!owner) return { ok: false, reason: `scratch store holds a key outside every registered root: "${key}"` }
-		if (typeof raw !== "string") return { ok: false, reason: `scratch value for "${key}" is not a serialized string` }
-		let parsed: unknown
-		try {
-			parsed = JSON.parse(raw)
-		} catch {
-			return { ok: false, reason: `scratch value for "${key}" is not valid JSON` }
-		}
-
-		if (owner.desc.kind === "value-projection") {
-			valueByService.set(owner.name, parsed)
-			continue
-		}
-		if (owner.desc.kind !== "root") return { ok: false, reason: `scratch key "${key}" maps to a non-migratable slice` }
-		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-			return { ok: false, reason: `scratch row "${key}" is not an object` }
-		}
-		// Row-identity check at the seam: a migration must never mutate the
-		// anchor field its root is keyed by.
-		const id = owner.desc.idOf(parsed as Record<string, unknown>)
-		if (id !== owner.id) {
-			return { ok: false, reason: `scratch row "${key}" no longer matches its id anchor (got ${JSON.stringify(id)})` }
-		}
-		let rows = rowsByService.get(owner.name)
-		if (!rows) {
-			rows = []
-			rowsByService.set(owner.name, rows)
-		}
-		rows.push(parsed)
+		const reason = classifyScratchEntry(key, raw, rowsByService, valueByService)
+		if (reason !== undefined) return { ok: false, reason }
 	}
 
+	return reassembleSlices(rowsByService, valueByService, normalized)
+}
+
+/** Validates one post-migration scratch entry and files it into the fresh,
+ *  orchestrator-owned accumulators. Returns the reject reason, or undefined. */
+function classifyScratchEntry(
+	key: string,
+	raw: unknown,
+	rowsByService: Map<string, unknown[]>,
+	valueByService: Map<string, unknown>,
+): string | undefined {
+	const owner = ownerOf(key)
+	if (!owner) return `scratch store holds a key outside every registered root: "${key}"`
+	if (typeof raw !== "string") return `scratch value for "${key}" is not a serialized string`
+	let parsed: unknown
+	try {
+		parsed = JSON.parse(raw)
+	} catch {
+		return `scratch value for "${key}" is not valid JSON`
+	}
+
+	if (owner.desc.kind === "value-projection") {
+		valueByService.set(owner.name, parsed)
+		return undefined
+	}
+	if (owner.desc.kind !== "root") return `scratch key "${key}" maps to a non-migratable slice`
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+		return `scratch row "${key}" is not an object`
+	}
+	// Row-identity check at the seam: a migration must never mutate the
+	// anchor field its root is keyed by.
+	const id = owner.desc.idOf(parsed as Record<string, unknown>)
+	if (id !== owner.id) {
+		return `scratch row "${key}" no longer matches its id anchor (got ${JSON.stringify(id)})`
+	}
+	let rows = rowsByService.get(owner.name)
+	if (!rows) {
+		rows = []
+		rowsByService.set(owner.name, rows)
+	}
+	rows.push(parsed)
+	return undefined
+}
+
+function reassembleSlices(
+	rowsByService: ReadonlyMap<string, unknown[]>,
+	valueByService: ReadonlyMap<string, unknown>,
+	normalized: Pick<NormalizedBackupData, "passThrough" | "present">,
+): DenormalizeResult {
 	const data: Record<string, unknown> = {}
 	for (const [name, desc] of Object.entries(BACKUP_SLICE_REGISTRY)) {
-		switch (desc.kind) {
-			case "root": {
-				const rows = rowsByService.get(name) ?? []
-				if (normalized.present.has(name) || rows.length > 0) data[name] = rows
-				break
-			}
-			case "value-projection": {
-				if (!valueByService.has(name) && !normalized.present.has(name)) break
-				if (!valueByService.has(name)) return { ok: false, reason: `slice "${name}" vanished from the scratch store` }
-				const slice = desc.fromStored(valueByService.get(name))
-				if (!slice.ok) return { ok: false, reason: slice.reason }
-				data[name] = slice.slice
-				break
-			}
-			case "non-storage":
-			case "block-listed": {
-				if (Object.hasOwn(normalized.passThrough, name)) data[name] = normalized.passThrough[name]
-				break
-			}
+		const reason = reassembleSlice(name, desc, rowsByService, valueByService, normalized, data)
+		if (reason !== undefined) return { ok: false, reason }
+	}
+	return { ok: true, data }
+}
+
+/** Writes one slice back into `data` per its descriptor (absent stays absent).
+ *  Returns the reject reason, or undefined. */
+function reassembleSlice(
+	name: string,
+	desc: SliceDescriptor,
+	rowsByService: ReadonlyMap<string, unknown[]>,
+	valueByService: ReadonlyMap<string, unknown>,
+	normalized: Pick<NormalizedBackupData, "passThrough" | "present">,
+	data: Record<string, unknown>,
+): string | undefined {
+	switch (desc.kind) {
+		case "root": {
+			const rows = rowsByService.get(name) ?? []
+			if (normalized.present.has(name) || rows.length > 0) data[name] = rows
+			return undefined
+		}
+		case "value-projection": {
+			if (!valueByService.has(name) && !normalized.present.has(name)) return undefined
+			if (!valueByService.has(name)) return `slice "${name}" vanished from the scratch store`
+			const slice = desc.fromStored(valueByService.get(name))
+			if (!slice.ok) return slice.reason
+			data[name] = slice.slice
+			return undefined
+		}
+		case "non-storage":
+		case "block-listed": {
+			if (Object.hasOwn(normalized.passThrough, name)) data[name] = normalized.passThrough[name]
+			return undefined
 		}
 	}
-
-	return { ok: true, data }
 }
 
 type ScratchKeyOwner = { name: string; desc: SliceDescriptor; id?: string }

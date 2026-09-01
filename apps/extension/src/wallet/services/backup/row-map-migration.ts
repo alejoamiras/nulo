@@ -216,69 +216,78 @@ function cloneJsonObject(value: Record<string, unknown>, path: string): { [key: 
 
 /** Define-time well-formedness: reject transforms that could be ambiguous or
  *  non-idempotent BEFORE they ever meet data. */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 53) — refactor when touched, never raise
 function validateTransform(target: string, t: RowMapTransform): void {
-	const fail = (reason: string): never => {
-		throw new Error(`row-map transform for "${target}": ${reason}`)
+	if (t.rename) validateRenameClause(target, t.rename)
+	if (t.drop) assertFieldNames(target, t.drop, "drop")
+	if (t.retype) assertFieldNames(target, Object.keys(t.retype), "retype")
+	if (t.addDefault) assertFieldNames(target, Object.keys(t.addDefault), "addDefault")
+	if (t.remapValues) validateRemapChains(target, t.remapValues)
+	if (t.addDefault) validateAddDefaultOverlap(target, t)
+}
+
+function transformFail(target: string, reason: string): never {
+	throw new Error(`row-map transform for "${target}": ${reason}`)
+}
+
+function assertFieldNames(target: string, names: Iterable<string>, where: string): void {
+	for (const n of names) {
+		if (typeof n !== "string" || n.length === 0) transformFail(target, `${where} has an empty field name`)
+		// Writing `out["__proto__"]` on a row clone would mutate its
+		// prototype via the inherited setter, not set a field — never a
+		// legitimate transform target.
+		if (n === "__proto__") transformFail(target, `${where} targets "__proto__"`)
 	}
-	const fields = (names: Iterable<string>, where: string) => {
-		for (const n of names) {
-			if (typeof n !== "string" || n.length === 0) fail(`${where} has an empty field name`)
-			// Writing `out["__proto__"]` on a row clone would mutate its
-			// prototype via the inherited setter, not set a field — never a
-			// legitimate transform target.
-			if (n === "__proto__") fail(`${where} targets "__proto__"`)
-		}
+}
+
+function validateRenameClause(target: string, rename: Readonly<Record<string, string>>): void {
+	assertFieldNames(target, Object.keys(rename), "rename")
+	const targets = new Set<string>()
+	for (const [oldName, newName] of Object.entries(rename)) {
+		if (typeof newName !== "string" || newName.length === 0) transformFail(target, "rename has an empty target name")
+		if (newName === "__proto__") transformFail(target, `rename targets "__proto__"`)
+		if (oldName === newName) transformFail(target, `rename maps "${oldName}" onto itself`)
+		if (targets.has(newName)) transformFail(target, `rename maps two fields onto "${newName}"`)
+		targets.add(newName)
+		if (Object.hasOwn(rename, newName)) transformFail(target, `rename chains through "${newName}" (non-idempotent)`)
 	}
-	if (t.rename) {
-		fields(Object.keys(t.rename), "rename")
-		const targets = new Set<string>()
-		for (const [oldName, newName] of Object.entries(t.rename)) {
-			if (typeof newName !== "string" || newName.length === 0) fail("rename has an empty target name")
-			if (newName === "__proto__") fail(`rename targets "__proto__"`)
-			if (oldName === newName) fail(`rename maps "${oldName}" onto itself`)
-			if (targets.has(newName)) fail(`rename maps two fields onto "${newName}"`)
-			targets.add(newName)
-			if (Object.hasOwn(t.rename, newName)) fail(`rename chains through "${newName}" (non-idempotent)`)
-		}
-	}
-	if (t.drop) fields(t.drop, "drop")
-	if (t.retype) fields(Object.keys(t.retype), "retype")
-	if (t.addDefault) fields(Object.keys(t.addDefault), "addDefault")
-	if (t.remapValues) {
-		fields(Object.keys(t.remapValues), "remapValues")
-		for (const [field, table] of Object.entries(t.remapValues)) {
-			for (const [oldValue, newValue] of Object.entries(table)) {
-				// A new value that is itself a remap SOURCE would remap again on a
-				// re-run (a→b→c) — non-idempotent, reject at define time.
-				const asKey =
-					typeof newValue === "string" || typeof newValue === "number" || typeof newValue === "boolean"
-						? String(newValue)
-						: undefined
-				if (asKey !== undefined && asKey !== oldValue && Object.hasOwn(table, asKey)) {
-					fail(`remapValues for "${field}" chains "${oldValue}" → ${JSON.stringify(newValue)} → … (non-idempotent)`)
-				}
+}
+
+function validateRemapChains(target: string, remapValues: NonNullable<RowMapTransform["remapValues"]>): void {
+	assertFieldNames(target, Object.keys(remapValues), "remapValues")
+	for (const [field, table] of Object.entries(remapValues)) {
+		for (const [oldValue, newValue] of Object.entries(table)) {
+			// A new value that is itself a remap SOURCE would remap again on a
+			// re-run (a→b→c) — non-idempotent, reject at define time.
+			const asKey =
+				typeof newValue === "string" || typeof newValue === "number" || typeof newValue === "boolean" ? String(newValue) : undefined
+			if (asKey !== undefined && asKey !== oldValue && Object.hasOwn(table, asKey)) {
+				transformFail(target, `remapValues for "${field}" chains "${oldValue}" → ${JSON.stringify(newValue)} → … (non-idempotent)`)
 			}
 		}
 	}
+}
 
-	// Cross-clause idempotency: `addDefault` runs LAST, so a field it fills on
-	// the first pass would be re-transformed by an earlier value clause on the
-	// second — the harness runs every migration twice. Reject a default whose
-	// field is also `retype`d / `remapValues`d (run 2 coerces/remaps the
-	// freshly-defaulted value), or is a `rename` SOURCE (run 2 re-triggers the
-	// rename → a both-names collision throw). Overlap with `drop` is fine
-	// (drop-then-default is a stable reset).
-	if (t.addDefault) {
-		const retypeFields = new Set(Object.keys(t.retype ?? {}))
-		const remapFields = new Set(Object.keys(t.remapValues ?? {}))
-		const renameSources = new Set(Object.keys(t.rename ?? {}))
-		for (const field of Object.keys(t.addDefault)) {
-			if (retypeFields.has(field)) fail(`addDefault "${field}" is also retyped — a re-run would coerce the default (non-idempotent)`)
-			if (remapFields.has(field)) fail(`addDefault "${field}" is also remapped — a re-run would remap the default (non-idempotent)`)
-			if (renameSources.has(field))
-				fail(`addDefault "${field}" re-creates a rename source — a re-run would re-trigger the rename (non-idempotent)`)
-		}
+/** Cross-clause idempotency: `addDefault` runs LAST, so a field it fills on
+ *  the first pass would be re-transformed by an earlier value clause on the
+ *  second — the harness runs every migration twice. Reject a default whose
+ *  field is also `retype`d / `remapValues`d (run 2 coerces/remaps the
+ *  freshly-defaulted value), or is a `rename` SOURCE (run 2 re-triggers the
+ *  rename → a both-names collision throw). Overlap with `drop` is fine
+ *  (drop-then-default is a stable reset). */
+function validateAddDefaultOverlap(target: string, t: RowMapTransform): void {
+	const retypeFields = new Set(Object.keys(t.retype ?? {}))
+	const remapFields = new Set(Object.keys(t.remapValues ?? {}))
+	const renameSources = new Set(Object.keys(t.rename ?? {}))
+	for (const field of Object.keys(t.addDefault ?? {})) {
+		if (retypeFields.has(field))
+			transformFail(target, `addDefault "${field}" is also retyped — a re-run would coerce the default (non-idempotent)`)
+		if (remapFields.has(field))
+			transformFail(target, `addDefault "${field}" is also remapped — a re-run would remap the default (non-idempotent)`)
+		if (renameSources.has(field))
+			transformFail(
+				target,
+				`addDefault "${field}" re-creates a rename source — a re-run would re-trigger the rename (non-idempotent)`,
+			)
 	}
 }
 
