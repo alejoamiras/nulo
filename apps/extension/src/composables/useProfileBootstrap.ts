@@ -62,8 +62,11 @@ export function useProfileBootstrap() {
 		if (!isCurrent()) return // a newer activation took over — don't write stale networks
 		appStore.networks = nets
 
+		// The helper fences internally, but the await boundary itself yields a
+		// microtask — a new activation can bump the generation between the
+		// helper's last check and this resumption, so re-fence before writing.
 		const resolved = await resolveActiveNetwork(network, isCurrent)
-		if (resolved === "superseded") return
+		if (resolved === "superseded" || !isCurrent()) return
 		appStore.network = resolved
 
 		// Persist the resolved active network (covers both the restored-active and fallback branches).
