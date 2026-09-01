@@ -73,7 +73,7 @@ Wait for `faucet-cluster` PR-a and PR-b to merge to `dev`. `git fetch origin dev
 
 ### Arc 1 — App identity
 
-#### Phase 1 — The identity rename (one coherent change set)
+#### Phase 1 — The identity rename (one coherent change set) ✓ (2026-09-01, commits `ef67ec23`…`d7144349`, gate in lessons/phase-1.md)
 
 Commits, in order, each leaving the tree lint-clean where possible:
 1. `git mv apps/faucet apps/tools`, `git mv .github/workflows/_build-faucet.yml .github/workflows/_build-tools.yml`, `git mv apps/tools/tests/e2e/faucet-smoke.test.ts apps/tools/tests/e2e/tools-smoke.test.ts` + EVERY literal path consumer (root scripts `--cwd`, `tsconfig.json`, `biome.json:16,342`, root `.gitignore`, `bridge-core/scripts` literals + split forms, `chain-guard.ts` import, `_build-tools.yml` `--cwd`/artifact path, `pr-quick.yml` globs + `_build-tools.yml` reference, `behavior-gating.test.ts` filename assertion).
