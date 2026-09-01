@@ -162,8 +162,9 @@ export interface BatchedViewSimulationResult {
 /** Tuple: [FunctionCall, originalIndex, slowArmSlotIndex (re-numbered per arm), returnTypes]. */
 type TxTuple = [FunctionCall, number, number, AbiType[]]
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (152 lines) — split when touched, never grow
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 71) — refactor when touched, never raise
+type ClassifiedUtility = { kind: "utility"; functionCall: FunctionCall; returnTypes: AbiType[]; originalIndex: number }
+type ClassifiedTx = { kind: "tx"; functionCall: FunctionCall; returnTypes: AbiType[]; originalIndex: number }
+
 export async function batchedViewSimulation(
 	calls: ReadonlyArray<CallAction | EncodedCallAction>,
 	deps: BatchedViewSimulationDeps,
@@ -174,49 +175,9 @@ export async function batchedViewSimulation(
 
 	const { pxe, node, network, account, contractResolver, logger } = deps
 
-	// Resolve contract instances + artifacts up-front.
-	const contractAddresses = contractResolver.extractContracts([...calls])
-	const instances = await contractResolver.resolveInstances(pxe, contractAddresses)
-	const artifacts = await contractResolver.resolveArtifacts(pxe, instances)
-
-	// Register any contract PXE doesn't already know about.
-	await contractResolver.ensureContractsRegistered(pxe, instances, artifacts, {
-		onRegister: (contract) => logger?.log(LOG_SOURCE, LogLevel.Debug, `Register contract ${contract}`),
-	})
-
-	await account.ensureRegistered(pxe)
-
-	// Classify into utility + tx-typed pools. UTILITY is built but NOT launched
-	// here — we defer launch until after the anchor read (see partition below).
-	type ClassifiedUtility = { kind: "utility"; functionCall: FunctionCall; returnTypes: AbiType[]; originalIndex: number }
-	type ClassifiedTx = { kind: "tx"; functionCall: FunctionCall; returnTypes: AbiType[]; originalIndex: number }
-	const allTxCalls: ClassifiedTx[] = []
-	const allUtility: ClassifiedUtility[] = []
-
-	for (let i = 0; i < calls.length; i++) {
-		const c = await classifyCall(calls[i], instances, artifacts)
-		if (c.kind === "utility") {
-			allUtility.push({ ...c, originalIndex: i })
-		} else {
-			allTxCalls.push({ ...c, originalIndex: i })
-		}
-	}
-
-	// Partition tx-typed pool into [leadingFast (PUBLIC+isStatic+!hideMsgSender)
-	// prefix, slow (the rest)]. Mirrors upstream `extractOptimizablePublicStaticCalls`
-	// — any earlier non-static call can affect later calls' observed state, so we
-	// stop at the first non-eligible call.
-	let boundary = 0
-	for (const t of allTxCalls) {
-		const fc = t.functionCall
-		if (fc.type === FunctionType.PUBLIC && fc.isStatic && fc.hideMsgSender !== true) {
-			boundary++
-		} else {
-			break
-		}
-	}
-	let leadingFast: ClassifiedTx[] = allTxCalls.slice(0, boundary)
-	let slow: ClassifiedTx[] = allTxCalls.slice(boundary)
+	const { instances, artifacts } = await resolveBatchContracts(calls, deps)
+	const { allTxCalls, allUtility } = await classifyAll(calls, instances, artifacts)
+	let { leadingFast, slow } = partitionFastPrefix(allTxCalls)
 
 	// Acquire the block-header anchor BEFORE launching eager utility writes.
 	// Read-lock-after-queued-writers is the rw-guard hazard codex H2 flagged.
@@ -225,53 +186,10 @@ export async function batchedViewSimulation(
 	let chainInfo: ChainInfo | undefined
 	let gasSettings: Awaited<ReturnType<typeof completeFeeOptions>> | undefined
 	if (leadingFast.length > 0) {
-		blockHeader = await getBlockHeaderAnchor(pxe, node)
-		if (!blockHeader) {
-			logger?.log(LOG_SOURCE, LogLevel.Warn, "fast arm: anchor unavailable, falling back to standard path")
-			slow = allTxCalls.slice()
-			leadingFast = []
-		} else {
-			// `node.getNodeInfo()` is shared-fate with the slow arm
-			// (`buildTxExecutionRequest` uses it transitively). Don't catch —
-			// propagate per plan §1c, mirroring `fast-path.ts:170`.
-			const nodeInfo = await node.getNodeInfo()
-			// F-012 / A-01 V-01: rebind live chain identity to the stored
-			// network before deriving chainInfo. A drifted RPC must be rejected
-			// before any merge/sim that depends on chainInfo runs.
-			assertLiveChainIdentity(network, nodeInfo)
-			chainInfo = {
-				chainId: new Fr(nodeInfo.l1ChainId),
-				version: new Fr(nodeInfo.rollupVersion),
-			}
-			try {
-				// For views, no caller opts.fee → undefined → defaults. completeFeeOptions
-				// mirrors upstream `BaseWallet.completeFeeOptions` byte-for-byte.
-				gasSettings = await completeFeeOptions({ node, gasSettings: undefined, forEstimation: true })
-			} catch (err) {
-				logger?.log(
-					LOG_SOURCE,
-					LogLevel.Warn,
-					`fast arm: completeFeeOptions failed, falling back to standard path: ${getErrorMessage(err)}`,
-				)
-				slow = allTxCalls.slice()
-				leadingFast = []
-				blockHeader = undefined
-				chainInfo = undefined
-			}
-		}
+		;({ leadingFast, slow, blockHeader, chainInfo, gasSettings } = await prepareFastArm(allTxCalls, leadingFast, slow, deps))
 	}
 
-	// Re-number slow-arm slot indices separately (each arm has its own
-	// publicCallIndex/privateCallIndex space).
-	const slowTuples: TxTuple[] = []
-	{
-		let slowPublicIdx = 0
-		let slowPrivateIdx = 0
-		for (const t of slow) {
-			const slotIndex = t.functionCall.type === FunctionType.PUBLIC ? slowPublicIdx++ : slowPrivateIdx++
-			slowTuples.push([t.functionCall, t.originalIndex, slotIndex, t.returnTypes])
-		}
-	}
+	const slowTuples = renumberSlotIndices(slow)
 
 	// The slow arm shares the fast arm's validated chain identity. Derive +
 	// validate it here when the fast arm didn't set it (a slow-only batch, or a
@@ -308,54 +226,19 @@ export async function batchedViewSimulation(
 
 	const [fastSettled, slowSettled] = await Promise.allSettled([fastArmPromise, slowArmPromise])
 
-	let fastResults: TxSimulationResult[] | null = null
+	// Fast-arm settle: fulfilled → results; SimulationError → throw (real
+	// revert); other rejection → null = infra failure, full rerun needed.
+	let fastResults = settleFastArm(fastSettled, leadingFast, chainInfo, logger)
+	const rerunNeeded = fastResults === null
 	let slowResult: { simulatedTx: SlowArmResult; txRequest: TxRequestLike } | null = null
-	let rerunNeeded = false
-
-	if (fastSettled.status === "fulfilled") {
-		fastResults = fastSettled.value
-	} else if (fastSettled.reason instanceof SimulationError) {
-		// Real revert from a public-static call — same outcome the slow path
-		// would produce. Propagate; utility queue left un-awaited (matches
-		// pre-PR behavior for any throw before utility-await loop).
-		throw fastSettled.reason
-	} else {
-		// Infra: simulateViaNode rejected (network blip, RPC mismatch, malformed
-		// node response). Pre-dispatch failures (anchor missing /
-		// completeFeeOptions throw) are handled above without ever invoking
-		// runFastArm, so we never see them on this branch. WARN + full rerun.
-		const firstFast = leadingFast[0]
-		const fastContract = firstFast ? firstFast.functionCall.to.toString() : "<empty>"
-		const fastSelector = firstFast ? firstFast.functionCall.selector.toString() : "<empty>"
-		const chainIdLog = chainInfo ? chainInfo.chainId.toString() : "<unknown>"
-		logger?.log(
-			LOG_SOURCE,
-			LogLevel.Warn,
-			`fast arm rejected (non-SimulationError); rerunning through standard path. chainId=${chainIdLog} firstContract=${fastContract} firstSelector=${fastSelector} reason=${getErrorMessage(fastSettled.reason)}`,
-		)
-		rerunNeeded = true
-	}
-
 	if (!rerunNeeded) {
-		if (slowSettled.status === "fulfilled") {
-			slowResult = slowSettled.value
-		} else {
-			// Slow arm rejected on its own (no fast-arm fallback path taken).
-			// Propagate.
-			throw slowSettled.reason
-		}
+		slowResult = settleSlowArm(slowSettled)
 	}
 
 	if (rerunNeeded) {
 		// Rebuild combined payload from leadingFast + slow. Re-number slot indices
 		// across the combined set (publicCallIndex/privateCallIndex per type).
-		const combined: TxTuple[] = []
-		let publicIdx = 0
-		let privateIdx = 0
-		for (const t of allTxCalls) {
-			const slotIndex = t.functionCall.type === FunctionType.PUBLIC ? publicIdx++ : privateIdx++
-			combined.push([t.functionCall, t.originalIndex, slotIndex, t.returnTypes])
-		}
+		const combined = renumberSlotIndices(allTxCalls)
 		slowResult = await runSlowArm(combined, account, node, pxe, chainInfo as ChainInfo)
 		// Wipe fast results — combined slow arm covers everything now.
 		fastResults = null
@@ -364,68 +247,270 @@ export async function batchedViewSimulation(
 		slowTuples.push(...combined)
 	}
 
-	// Unpack fast arm (if any).
 	if (fastResults && leadingFast.length > 0) {
-		// `simulateViaNode` returns one TxSimulationResult per upstream-internal
-		// batch of MAX_ENQUEUED_CALLS_PER_CALL (=32 in @aztec/constants@5.0.0).
-		// With our typical batch sizes (≤12 from balance-projector, 1 from
-		// gas-balance) we get fastResults.length === 1, but flatMap is defensive
-		// against future BATCH_SIZE bumps.
-		const fastReturns = fastResults.flatMap((r) => r.publicOutput?.publicReturnValues ?? [])
-		for (let k = 0; k < leadingFast.length; k++) {
-			const tuple = leadingFast[k]
-			const values = fastReturns[k]?.values ?? []
-			encoded[tuple.originalIndex] = values
-			try {
-				decoded[tuple.originalIndex] = decodeFromAbi(tuple.returnTypes, values)
-			} catch (error) {
-				logger?.log(
-					LOG_SOURCE,
-					LogLevel.Error,
-					"Failed to decode fast-arm simulation results",
-					tuple.returnTypes,
-					// Arity, never the values: these are private call returns.
-					{ returnValueCount: values.length },
-					getErrorMessage(error),
-				)
-			}
-		}
+		unpackFastArm(fastResults, leadingFast, encoded, decoded, logger)
 	}
-
-	// Unpack slow arm (if any).
 	if (slowResult && slowTuples.length > 0) {
-		const { simulatedTx, txRequest } = slowResult
-		const publicReturn = simulatedTx.getPublicReturnValues()
-		// Origin-dependent nested-shape unpacking. After partition the slow-arm
-		// payload may be private-only / public-only / mixed — origin equality
-		// still holds because Nulo's `DefaultAccountEntrypoint` produces
-		// `origin === account.address` regardless of payload composition.
-		const privateReturn =
-			txRequest.origin.toString() === account.address.toString()
-				? simulatedTx.getPrivateReturnValues().nested
-				: simulatedTx.getPrivateReturnValues().nested[1].nested
-
-		for (const [call, i, j, types] of slowTuples) {
-			const values = (call.type === FunctionType.PUBLIC ? publicReturn[j] : privateReturn[j]).values ?? []
-			encoded[i] = values
-			try {
-				decoded[i] = decodeFromAbi(types, values)
-			} catch (error) {
-				logger?.log(
-					LOG_SOURCE,
-					LogLevel.Error,
-					"Failed to decode simulation results",
-					types,
-					{ returnValueCount: values.length },
-					getErrorMessage(error),
-				)
-			}
-		}
+		unpackSlowArm(slowResult, slowTuples, account, encoded, decoded, logger)
+	}
+	if (utilityLaunched.length > 0) {
+		await awaitUtilityResults(utilityLaunched, encoded, decoded, logger)
 	}
 
-	// Serially await utility promises (kicked off eagerly above; ran in
-	// parallel with tx-arm dispatch). Order of awaits doesn't affect
-	// throughput — only the final per-index assignment ordering.
+	return { encoded, decoded }
+}
+
+// ── Internal helpers ────────────────────────────────────────────────────
+
+type SlowArmResult = Awaited<ReturnType<IPXE["simulateTx"]>>
+type TxRequestLike = Awaited<ReturnType<IAccountContract["buildTxExecutionRequest"]>>
+
+/** Resolve contract instances + artifacts up-front, register any contract PXE
+ *  doesn't already know about, and ensure the account itself is registered. */
+async function resolveBatchContracts(
+	calls: ReadonlyArray<CallAction | EncodedCallAction>,
+	deps: BatchedViewSimulationDeps,
+): Promise<{ instances: Map<string, ContractInstanceWithAddress>; artifacts: Map<string, ContractArtifact> }> {
+	const { pxe, account, contractResolver, logger } = deps
+	const contractAddresses = contractResolver.extractContracts([...calls])
+	const instances = await contractResolver.resolveInstances(pxe, contractAddresses)
+	const artifacts = await contractResolver.resolveArtifacts(pxe, instances)
+	await contractResolver.ensureContractsRegistered(pxe, instances, artifacts, {
+		onRegister: (contract) => logger?.log(LOG_SOURCE, LogLevel.Debug, `Register contract ${contract}`),
+	})
+	await account.ensureRegistered(pxe)
+	return { instances, artifacts }
+}
+
+/** Classify into utility + tx-typed pools. UTILITY is built but NOT launched
+ *  here — launch is deferred until after the anchor read (see the partition +
+ *  fast-arm prep in the main body). */
+async function classifyAll(
+	calls: ReadonlyArray<CallAction | EncodedCallAction>,
+	instances: Map<string, ContractInstanceWithAddress>,
+	artifacts: Map<string, ContractArtifact>,
+): Promise<{ allTxCalls: ClassifiedTx[]; allUtility: ClassifiedUtility[] }> {
+	const allTxCalls: ClassifiedTx[] = []
+	const allUtility: ClassifiedUtility[] = []
+	for (let i = 0; i < calls.length; i++) {
+		const c = await classifyCall(calls[i], instances, artifacts)
+		if (c.kind === "utility") {
+			allUtility.push({ ...c, originalIndex: i })
+		} else {
+			allTxCalls.push({ ...c, originalIndex: i })
+		}
+	}
+	return { allTxCalls, allUtility }
+}
+
+/** Partition the tx-typed pool into [leadingFast (PUBLIC+isStatic+!hideMsgSender)
+ *  prefix, slow (the rest)]. Mirrors upstream `extractOptimizablePublicStaticCalls`
+ *  — any earlier non-static call can affect later calls' observed state, so we
+ *  stop at the first non-eligible call. */
+function partitionFastPrefix(allTxCalls: ClassifiedTx[]): { leadingFast: ClassifiedTx[]; slow: ClassifiedTx[] } {
+	let boundary = 0
+	for (const t of allTxCalls) {
+		const fc = t.functionCall
+		if (fc.type === FunctionType.PUBLIC && fc.isStatic && fc.hideMsgSender !== true) {
+			boundary++
+		} else {
+			break
+		}
+	}
+	return { leadingFast: allTxCalls.slice(0, boundary), slow: allTxCalls.slice(boundary) }
+}
+
+type FastArmPrep = {
+	leadingFast: ClassifiedTx[]
+	slow: ClassifiedTx[]
+	blockHeader: Awaited<ReturnType<typeof getBlockHeaderAnchor>>
+	chainInfo: ChainInfo | undefined
+	gasSettings: Awaited<ReturnType<typeof completeFeeOptions>> | undefined
+}
+
+/** Fast-arm prep: anchor read → live chain-identity rebind → gas defaults.
+ *  Entered only when `leadingFast` is non-empty (caller-side guard). A missing
+ *  anchor or a `completeFeeOptions` failure demotes the whole batch to the
+ *  slow arm (the returned `leadingFast` is emptied); a `node.getNodeInfo()`
+ *  throw propagates — shared-fate with the slow arm, mirroring `fast-path.ts:170`. */
+async function prepareFastArm(
+	allTxCalls: ClassifiedTx[],
+	leadingFast: ClassifiedTx[],
+	slow: ClassifiedTx[],
+	deps: BatchedViewSimulationDeps,
+): Promise<FastArmPrep> {
+	const { pxe, node, network, logger } = deps
+	const demoted: FastArmPrep = {
+		leadingFast: [],
+		slow: allTxCalls.slice(),
+		blockHeader: undefined,
+		chainInfo: undefined,
+		gasSettings: undefined,
+	}
+	const blockHeader = await getBlockHeaderAnchor(pxe, node)
+	if (!blockHeader) {
+		logger?.log(LOG_SOURCE, LogLevel.Warn, "fast arm: anchor unavailable, falling back to standard path")
+		return demoted
+	}
+	// `node.getNodeInfo()` is shared-fate with the slow arm
+	// (`buildTxExecutionRequest` uses it transitively). Don't catch — propagate.
+	const nodeInfo = await node.getNodeInfo()
+	// F-012 / A-01 V-01: rebind live chain identity to the stored network before
+	// deriving chainInfo. A drifted RPC must be rejected before any merge/sim
+	// that depends on chainInfo runs. This ONE validated chainInfo feeds BOTH
+	// arms — the slow arm never re-fetches an unvalidated tuple.
+	assertLiveChainIdentity(network, nodeInfo)
+	const chainInfo: ChainInfo = {
+		chainId: new Fr(nodeInfo.l1ChainId),
+		version: new Fr(nodeInfo.rollupVersion),
+	}
+	try {
+		// For views, no caller opts.fee → undefined → defaults. completeFeeOptions
+		// mirrors upstream `BaseWallet.completeFeeOptions` byte-for-byte.
+		const gasSettings = await completeFeeOptions({ node, gasSettings: undefined, forEstimation: true })
+		return { leadingFast, slow, blockHeader, chainInfo, gasSettings }
+	} catch (err) {
+		logger?.log(
+			LOG_SOURCE,
+			LogLevel.Warn,
+			`fast arm: completeFeeOptions failed, falling back to standard path: ${getErrorMessage(err)}`,
+		)
+		return demoted
+	}
+}
+
+/** Re-number per-arm slot indices (each arm has its own publicCallIndex /
+ *  privateCallIndex space). Also used by the rerun path over the COMBINED
+ *  set, which re-numbers across leadingFast ++ slow. */
+function renumberSlotIndices(txCalls: ClassifiedTx[]): TxTuple[] {
+	const tuples: TxTuple[] = []
+	let publicIdx = 0
+	let privateIdx = 0
+	for (const t of txCalls) {
+		const slotIndex = t.functionCall.type === FunctionType.PUBLIC ? publicIdx++ : privateIdx++
+		tuples.push([t.functionCall, t.originalIndex, slotIndex, t.returnTypes])
+	}
+	return tuples
+}
+
+/** Fast-arm settle arbitration: fulfilled → results; `SimulationError` → throw
+ *  (real revert from a public-static call — same outcome the slow path would
+ *  produce; utility queue left un-awaited, matching pre-extraction behavior
+ *  for any throw before the utility-await loop); any other rejection → null,
+ *  meaning infra failure (network blip, RPC mismatch, malformed node response)
+ *  and the caller reruns everything through the standard path. Pre-dispatch
+ *  failures (anchor missing / completeFeeOptions throw) are handled in
+ *  `prepareFastArm` without ever invoking `runFastArm`, so they never reach
+ *  the rejection branch here. */
+function settleFastArm(
+	fastSettled: PromiseSettledResult<TxSimulationResult[]>,
+	leadingFast: ClassifiedTx[],
+	chainInfo: ChainInfo | undefined,
+	logger: ILogger | undefined,
+): TxSimulationResult[] | null {
+	if (fastSettled.status === "fulfilled") return fastSettled.value
+	if (fastSettled.reason instanceof SimulationError) throw fastSettled.reason
+	const firstFast = leadingFast[0]
+	const fastContract = firstFast ? firstFast.functionCall.to.toString() : "<empty>"
+	const fastSelector = firstFast ? firstFast.functionCall.selector.toString() : "<empty>"
+	const chainIdLog = chainInfo ? chainInfo.chainId.toString() : "<unknown>"
+	logger?.log(
+		LOG_SOURCE,
+		LogLevel.Warn,
+		`fast arm rejected (non-SimulationError); rerunning through standard path. chainId=${chainIdLog} firstContract=${fastContract} firstSelector=${fastSelector} reason=${getErrorMessage(fastSettled.reason)}`,
+	)
+	return null
+}
+
+/** Slow-arm settle: fulfilled → result; rejected on its own (no fast-arm
+ *  fallback path taken) → propagate. */
+function settleSlowArm<T>(slowSettled: PromiseSettledResult<T>): T {
+	if (slowSettled.status === "fulfilled") return slowSettled.value
+	throw slowSettled.reason
+}
+
+/** Unpack fast-arm results into the per-original-index output arrays. */
+function unpackFastArm(
+	fastResults: TxSimulationResult[],
+	leadingFast: ClassifiedTx[],
+	encoded: Fr[][],
+	decoded: AbiDecoded[],
+	logger: ILogger | undefined,
+): void {
+	// `simulateViaNode` returns one TxSimulationResult per upstream-internal
+	// batch of MAX_ENQUEUED_CALLS_PER_CALL (=32 in @aztec/constants@5.0.0).
+	// With our typical batch sizes (≤12 from balance-projector, 1 from
+	// gas-balance) we get fastResults.length === 1, but flatMap is defensive
+	// against future BATCH_SIZE bumps.
+	const fastReturns = fastResults.flatMap((r) => r.publicOutput?.publicReturnValues ?? [])
+	for (let k = 0; k < leadingFast.length; k++) {
+		const tuple = leadingFast[k]
+		const values = fastReturns[k]?.values ?? []
+		encoded[tuple.originalIndex] = values
+		try {
+			decoded[tuple.originalIndex] = decodeFromAbi(tuple.returnTypes, values)
+		} catch (error) {
+			logger?.log(
+				LOG_SOURCE,
+				LogLevel.Error,
+				"Failed to decode fast-arm simulation results",
+				tuple.returnTypes,
+				// Arity, never the values: these are private call returns.
+				{ returnValueCount: values.length },
+				getErrorMessage(error),
+			)
+		}
+	}
+}
+
+/** Unpack slow-arm results into the per-original-index output arrays. */
+function unpackSlowArm(
+	slowResult: { simulatedTx: SlowArmResult; txRequest: TxRequestLike },
+	slowTuples: TxTuple[],
+	account: IAccountContract,
+	encoded: Fr[][],
+	decoded: AbiDecoded[],
+	logger: ILogger | undefined,
+): void {
+	const { simulatedTx, txRequest } = slowResult
+	const publicReturn = simulatedTx.getPublicReturnValues()
+	// Origin-dependent nested-shape unpacking. After partition the slow-arm
+	// payload may be private-only / public-only / mixed — origin equality
+	// still holds because Nulo's `DefaultAccountEntrypoint` produces
+	// `origin === account.address` regardless of payload composition.
+	const privateReturn =
+		txRequest.origin.toString() === account.address.toString()
+			? simulatedTx.getPrivateReturnValues().nested
+			: simulatedTx.getPrivateReturnValues().nested[1].nested
+
+	for (const [call, i, j, types] of slowTuples) {
+		const values = (call.type === FunctionType.PUBLIC ? publicReturn[j] : privateReturn[j]).values ?? []
+		encoded[i] = values
+		try {
+			decoded[i] = decodeFromAbi(types, values)
+		} catch (error) {
+			logger?.log(
+				LOG_SOURCE,
+				LogLevel.Error,
+				"Failed to decode simulation results",
+				types,
+				{ returnValueCount: values.length },
+				getErrorMessage(error),
+			)
+		}
+	}
+}
+
+/** Serially await utility promises (kicked off eagerly in the main body; ran
+ *  in parallel with tx-arm dispatch). Order of awaits doesn't affect
+ *  throughput — only the final per-index assignment ordering. Entered only
+ *  when at least one utility launched (caller-side guard). */
+async function awaitUtilityResults(
+	utilityLaunched: Array<[Promise<UtilityExecutionResult>, number, AbiType[]]>,
+	encoded: Fr[][],
+	decoded: AbiDecoded[],
+	logger: ILogger | undefined,
+): Promise<void> {
 	for (const [promise, i, types] of utilityLaunched) {
 		const { result: values } = await promise
 		try {
@@ -442,14 +527,7 @@ export async function batchedViewSimulation(
 		}
 		encoded[i] = values
 	}
-
-	return { encoded, decoded }
 }
-
-// ── Internal helpers ────────────────────────────────────────────────────
-
-type SlowArmResult = Awaited<ReturnType<IPXE["simulateTx"]>>
-type TxRequestLike = Awaited<ReturnType<IAccountContract["buildTxExecutionRequest"]>>
 
 /** Standard arm: bundle slow tuples into one ExecutionPayload and dispatch via
  *  `pxe.simulateTx({ simulatePublic: true })`. The opts are byte-equivalent

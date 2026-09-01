@@ -132,7 +132,9 @@ describe("buildStandard pins", () => {
 
 	test("capsule action maps contract/storageSlot/values in order", async () => {
 		const result = await build(h, [{ kind: "add_capsule", contract: CONTRACT, storageSlot: "0x05", capsule: ["0x01", "0x02"] }])
-		const payload = (h.buildArgs[0] as unknown[])[2] as { capsules: Array<{ contractAddress: unknown; storageSlot: Fr; data: Fr[] }> }
+		const payload = (h.buildArgs[0] as unknown[])[2] as {
+			capsules: Array<{ contractAddress: { toString(): string }; storageSlot: Fr; data: Fr[] }>
+		}
 		expect(payload.capsules).toHaveLength(1)
 		expect(payload.capsules[0].contractAddress.toString()).toBe(CONTRACT)
 		expect(payload.capsules[0].storageSlot.toString()).toBe(new Fr(5n).toString())
@@ -177,7 +179,7 @@ describe("buildStandard pins", () => {
 			Fr.fromString("0x1447").toString(),
 		])
 		// Each public authwit enqueues a set_authorized registry call + txCall.
-		const payload = (h.buildArgs[0] as unknown[])[2] as { calls: Array<{ name: string; to: unknown }> }
+		const payload = (h.buildArgs[0] as unknown[])[2] as { calls: Array<{ name: string; to: { toString(): string } }> }
 		expect(payload.calls).toHaveLength(2)
 		expect(payload.calls.every((c) => c.to.toString() === getAuthRegistryAddress().toString())).toBe(true)
 		expect(result.txCalls).toHaveLength(2)
