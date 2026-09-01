@@ -5,7 +5,7 @@
  * deploy script's output, wallet scope enforcement will reject every
  * `registerContract` call at connect time — failing here is cheaper.
  *
- *   bun apps/faucet/scripts/verify-deployments.ts [--config <path>]
+ *   bun apps/tools/scripts/verify-deployments.ts [--config <path>]
  *
  * Default target is the committed LIVE src/contracts/deployments.json;
  * `--config` points it at a candidate (candidate-first: the P6 redeploy

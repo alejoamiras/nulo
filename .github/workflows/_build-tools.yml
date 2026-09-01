@@ -38,24 +38,24 @@ jobs:
       - name: Verify deployments + bridge manifest (offline, ${{ inputs.target }})
         env:
           BRIDGE_MANIFEST: public/${{ inputs.target }}-bridge.json
-        run: bun run --cwd apps/faucet verify:deployments
+        run: bun run --cwd apps/tools verify:deployments
 
       - name: Smoke e2e (mock wallet, jsdom)
-        run: bun run --cwd apps/faucet test:e2e
+        run: bun run --cwd apps/tools test:e2e
 
       - name: Build (${{ inputs.target }})
-        run: bun run --cwd apps/faucet build:${{ inputs.target }}
+        run: bun run --cwd apps/tools build:${{ inputs.target }}
 
       # Prove the built artifact IS the target it claims: build.json's target/chainId and its
       # EMITTED manifestDigest must match this target + the bundled manifest (not a recomputed one).
       - name: Verify build.json matches the target
-        run: bun run --cwd apps/faucet verify:build-target ${{ inputs.target }}
+        run: bun run --cwd apps/tools verify:build-target ${{ inputs.target }}
 
       - name: Upload faucet build
         if: inputs.upload_artifacts
         uses: actions/upload-artifact@v7
         with:
           name: faucet-dist-${{ inputs.target }}
-          path: apps/faucet/dist
+          path: apps/tools/dist
           if-no-files-found: error
           retention-days: 7

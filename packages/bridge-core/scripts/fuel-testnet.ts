@@ -51,7 +51,7 @@ if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY required (packages/bridge-core/.e
 const here = dirname(fileURLToPath(import.meta.url))
 const CONFIG = loadManifestFromConfigArg(process.argv, {
 	mode: "fallback",
-	fallbackPath: join(here, "..", "..", "..", "apps", "faucet", "public", "testnet-bridge.json"),
+	fallbackPath: join(here, "..", "..", "..", "apps", "tools", "public", "testnet-bridge.json"),
 	// biome-ignore lint/suspicious/noExplicitAny: manifest fields are accessed via dynamic property paths without a formal schema, matching the original untyped JSON.parse.
 	parse: (raw) => raw as any,
 })

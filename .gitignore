@@ -53,5 +53,5 @@ packages/bridge-core/sandbox-deploy/
 **/wallet_data_*/
 
 # Bridge cutover deploy artifacts (transient; the promoted manifest is testnet-bridge.json)
-apps/faucet/public/testnet-bridge.candidate.json
-apps/faucet/public/testnet-bridge.journal*.jsonl
+apps/tools/public/testnet-bridge.candidate.json
+apps/tools/public/testnet-bridge.journal*.jsonl

@@ -5,7 +5,7 @@ import { describe, expect, test } from "vitest"
 
 // Read the raw stylesheets via fs — `?raw` imports return empty under the faucet's jsdom vitest (the
 // vue/css pipeline swallows them). The design package is always at `packages/design` in this monorepo.
-const here = dirname(fileURLToPath(import.meta.url)) // apps/faucet/src
+const here = dirname(fileURLToPath(import.meta.url)) // apps/tools/src
 const appCss = readFileSync(join(here, "app.css"), "utf8")
 const baseCss = readFileSync(join(here, "../../../packages/design/src/base.css"), "utf8")
 
@@ -20,7 +20,7 @@ const baseCss = readFileSync(join(here, "../../../packages/design/src/base.css")
  *
  * Scope: presence, NOT cascade effectiveness — jsdom can't resolve the CSS-var cascade, and a later
  * higher-specificity rule could still win. The guard assumes `app.css` is imported AFTER `base.css`
- * (`apps/faucet/src/main.ts`); the human visual gate covers ordering. If a future `base.css`
+ * (`apps/tools/src/main.ts`); the human visual gate covers ordering. If a future `base.css`
  * change drops one of these and `app.css` doesn't backfill it, this fails loudly instead of shipping
  * a silent regression.
  */

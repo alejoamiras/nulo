@@ -20,7 +20,7 @@ import { markBootReady, markBootStarted } from "./sentinel"
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const EXTENSION_PATH = path.resolve(__dirname, "../../dist/chrome")
 const PLAYGROUND_DIR = path.resolve(__dirname, "../../../playground")
-const FAUCET_DIR = path.resolve(__dirname, "../../../faucet")
+const FAUCET_DIR = path.resolve(__dirname, "../../../tools")
 const CONFIG_PATH = path.resolve(__dirname, ".test-config.json")
 // ── Aztec toolchain resolution ──────────────────────────────────────────
 // Resolve from the repo's `@aztec/aztec.js` pin (the SAME rule CI's

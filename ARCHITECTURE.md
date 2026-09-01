@@ -228,7 +228,7 @@ Vite env propagation: e2e network suites pass `VITE_LOCAL_NETWORK_RPC_URL=http:/
 |---|---|---|---|---|
 | Unit | Per-package `vitest.config.ts` in every workspace (`wallet-core`, `wallet-crypto`, `extension-messaging`, `design`, `bridge-core`, `extension`, `faucet`, and minimal explicit-`node` configs for `wallet-bridge`, `aztec-runtime`, `wallet-sdk-schema-patch`, `landing`); all spread `sharedTest` from the root `vitest.base.ts`. | Colocated `*.test.ts`. Pure logic, mocks via `@webext-core/fake-browser`, `FakeBrowserApi` from `wallet-core/testing`. | Bun (`bun --bun vitest run`) | No. |
 | Component | `apps/extension/vitest.config.ts` (filtered via `bun run test:components`) | Vue SFC tests via `@vue/test-utils`. `chrome.*` stubbed by `tests/vitest.setup.ts:88-113`. | Bun | No. |
-| Faucet jsdom smoke | `apps/faucet/vitest.e2e.config.ts` (`bun run --cwd apps/faucet test:e2e`) | In-process `App.vue` mount with a fake wallet provider — no browser. | Bun | No. |
+| Faucet jsdom smoke | `apps/tools/vitest.e2e.config.ts` (`bun run --cwd apps/tools test:e2e`) | In-process `App.vue` mount with a fake wallet provider — no browser. | Bun | No. |
 | Smoke e2e | `apps/extension/vitest.e2e.config.ts` | `tests/e2e/*.test.ts` — popup UI flows. | Node (Puppeteer) | No. |
 | Network e2e | `apps/extension/vitest.e2e.network.config.ts` | `tests/e2e/network/**` — drives the playground dApp against a real anvil + aztec sandbox. | Node (Puppeteer) | Yes (per worktree). |
 | Full e2e | `apps/extension/vitest.e2e.all.config.ts` | Smoke + network. | Node (Puppeteer) | Yes. |

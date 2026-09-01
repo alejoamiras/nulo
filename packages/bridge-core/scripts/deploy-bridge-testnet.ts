@@ -81,7 +81,7 @@ const allowTokenCutover = process.argv.includes("--allow-token-cutover")
 const reuseTokenAddress = parseReuseTokenArg(process.argv)
 
 const here = dirname(fileURLToPath(import.meta.url))
-const PUBLIC_DIR = join(here, "..", "..", "..", "apps", "faucet", "public")
+const PUBLIC_DIR = join(here, "..", "..", "..", "apps", "tools", "public")
 const LIVE_PATH = join(PUBLIC_DIR, "testnet-bridge.json")
 const CANDIDATE_PATH = join(PUBLIC_DIR, "testnet-bridge.candidate.json")
 const JOURNAL_PATH = join(PUBLIC_DIR, "testnet-bridge.journal.jsonl")
@@ -456,7 +456,7 @@ async function writeCandidate(d: {
 		},
 	}
 	writeCandidateAtomic(CANDIDATE_PATH, manifest)
-	console.log(`\n✅ candidate written to apps/faucet/public/testnet-bridge.candidate.json in ${d.mins()}.`)
+	console.log(`\n✅ candidate written to apps/tools/public/testnet-bridge.candidate.json in ${d.mins()}.`)
 	console.log("   Promote it to testnet-bridge.json at cutover, AFTER the candidate passes smoke.")
 
 	if (process.env.ETHERSCAN_API_KEY) {

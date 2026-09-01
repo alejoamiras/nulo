@@ -90,7 +90,7 @@ const l1OnlyMode = process.argv.includes("--l1-only")
 const fromJournalMode = process.argv.includes("--from-journal")
 
 const here = dirname(fileURLToPath(import.meta.url))
-const PUBLIC_DIR = join(here, "..", "..", "..", "apps", "faucet", "public")
+const PUBLIC_DIR = join(here, "..", "..", "..", "apps", "tools", "public")
 const CANDIDATE_PATH = join(PUBLIC_DIR, "mainnet-bridge.candidate.json")
 const JOURNAL_PATH = join(PUBLIC_DIR, "mainnet-bridge.journal.jsonl")
 
@@ -472,7 +472,7 @@ function writeCandidate(d: {
 		},
 	}
 	writeCandidateAtomic(CANDIDATE_PATH, manifest)
-	console.log(`\n✅ candidate written to apps/faucet/public/mainnet-bridge.candidate.json in ${d.mins()}.`)
+	console.log(`\n✅ candidate written to apps/tools/public/mainnet-bridge.candidate.json in ${d.mins()}.`)
 	console.log("   Next: PrivateFPC deploy + dust canary + smoke, THEN promote to mainnet-bridge.json.")
 
 	if (process.env.ETHERSCAN_API_KEY) {

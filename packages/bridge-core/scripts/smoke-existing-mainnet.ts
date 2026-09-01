@@ -9,7 +9,7 @@
  *   - No redirect-proof lane here: the recipient-binding is circuit-level and was proven live on
  *     testnet with the SAME artifacts; re-proving it would spend two extra USDC deposits.
  *
- *   bun scripts/smoke-existing-mainnet.ts --config apps/faucet/public/mainnet-bridge.candidate.json
+ *   bun scripts/smoke-existing-mainnet.ts --config apps/tools/public/mainnet-bridge.candidate.json
  *   [--private]  [SMOKE_USDC_UNITS=3000000]
  */
 import { readFileSync } from "node:fs"
@@ -30,7 +30,7 @@ const PRIVATE_KEY = process.env.MAINNET_PRIVATE_KEY as `0x${string}` | undefined
 if (!PRIVATE_KEY) throw new Error("MAINNET_PRIVATE_KEY required (packages/bridge-core/.env)")
 
 const configArg = process.argv.indexOf("--config")
-if (configArg === -1) throw new Error("pass --config apps/faucet/public/mainnet-bridge.candidate.json")
+if (configArg === -1) throw new Error("pass --config apps/tools/public/mainnet-bridge.candidate.json")
 const isPrivate = process.argv.includes("--private")
 
 const CONFIG = JSON.parse(readFileSync(process.argv[configArg + 1] as string, "utf8"))

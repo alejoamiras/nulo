@@ -10,7 +10,7 @@ const liveManifestPath = join(
 	"..",
 	"..",
 	"apps",
-	"faucet",
+	"tools",
 	"public",
 	"testnet-bridge.json",
 )

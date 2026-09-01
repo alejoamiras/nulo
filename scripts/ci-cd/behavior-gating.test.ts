@@ -103,7 +103,7 @@ describe("CI behavior-gating guard", () => {
 
   test("faucet build covers the faucet graph", () => {
     assertGraphCovered(quick["faucet"], "faucet", "faucet")
-    expect(quick["faucet"], "faucet must gate its build workflow").toContain(".github/workflows/_build-faucet.yml")
+    expect(quick["faucet"], "faucet must gate its build workflow").toContain(".github/workflows/_build-tools.yml")
   })
 
   test("cross-cutting inputs (patches + root build inputs) gate the e2e suites", () => {

@@ -60,7 +60,7 @@ export const DEFAULT_TOKEN_SEEDS: readonly DefaultTokenSeed[] = [
 	{
 		chainId: CHAIN_IDS.TESTNET,
 		// Testnet "Test USDC" — the L2 side of the tools bridge on Testnet (faucet-minted,
-		// permissionless; same address as apps/faucet/public/testnet-bridge.json).
+		// permissionless; same address as apps/tools/public/testnet-bridge.json).
 		contract: "0x1c81a6d581e065e82d4d3b969020e9d0f899b975ae844f6e4305031ff62be9ae",
 		// Live-captured 2026-07-28 from the Testnet node; original == current; same
 		// aztec-standards Token class as the mainnet tokens.

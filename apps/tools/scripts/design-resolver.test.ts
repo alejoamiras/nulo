@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
 import { NULO_DESIGN_COMPONENTS, nuloDesignResolver } from "./design-resolver"
 
-const here = dirname(fileURLToPath(import.meta.url)) // apps/faucet/scripts
+const here = dirname(fileURLToPath(import.meta.url)) // apps/tools/scripts
 const srcDir = join(here, "../src")
 
 describe("design-resolver", () => {

@@ -6,13 +6,13 @@
  * configured…").
  *
  * The canonical pair is single-sourced from the FAUCET's own
- * `apps/faucet/src/lib/chain-constants.ts` (which `chain-info.ts` also imports)
+ * `apps/tools/src/lib/chain-constants.ts` (which `chain-info.ts` also imports)
  * so the faucet, the wallet, and this release-time `verify-live` guard cannot
  * diverge. A testnet redeploy that bumps `chain-constants.ts` (e.g. the 5.0.0
  * stable reset) automatically flows here — no hand-edit, no drift.
  */
 
-import { TESTNET_L1_CHAIN_ID, TESTNET_ROLLUP_VERSION } from "../../apps/faucet/src/lib/chain-constants"
+import { TESTNET_L1_CHAIN_ID, TESTNET_ROLLUP_VERSION } from "../../apps/tools/src/lib/chain-constants"
 
 export { TESTNET_L1_CHAIN_ID, TESTNET_ROLLUP_VERSION }
 

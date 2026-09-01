@@ -14,7 +14,7 @@ For the full plan + audit transcripts see [`implementations-plan/faucet/`](../..
 ```bash
 # from repo root
 bun install
-bun run --cwd apps/faucet dev    # http://localhost:5176
+bun run --cwd apps/tools dev    # http://localhost:5176
 ```
 
 Connect with the Nulo extension (or any wallet that speaks
@@ -43,7 +43,7 @@ ETH contracts on alpha-testnet. The resulting addresses are written to
 `src/contracts/deployments.json` (and committed).
 
 ```bash
-cd apps/faucet
+cd apps/tools
 export DEPLOYER_SECRET="<at-least-32-character-string>"
 export AZTEC_NODE_URL="https://rpc.testnet.aztec-labs.com"   # optional
 bun run deploy:testnet
@@ -70,14 +70,14 @@ Commit the resulting `src/contracts/deployments.json` and push.
 ## Production build + hosting
 
 ```bash
-bun run --cwd apps/faucet build      # → apps/faucet/dist/
+bun run --cwd apps/tools build      # → apps/tools/dist/
 ```
 
 Static output (~6 MB JS, ~7 MB wasm chunks, ~5.5 MB gzipped total).
 
 Hosting: **Cloudflare Pages** is the recommended fit.
 
-- Project root: `apps/faucet`
+- Project root: `apps/tools`
 - Install: `bun install --frozen-lockfile`
 - Build: `bun run build`
 - Output: `dist`
@@ -115,9 +115,9 @@ the release pipeline's post-deploy `verify-live` check reads.
 ## Tests
 
 ```bash
-bun run --cwd apps/faucet typecheck   # vue-tsc
-bun run --cwd apps/faucet test        # vitest unit + component
-bun run --cwd apps/faucet test:e2e    # smoke e2e (mock wallet, jsdom)
+bun run --cwd apps/tools typecheck   # vue-tsc
+bun run --cwd apps/tools test        # vitest unit + component
+bun run --cwd apps/tools test:e2e    # smoke e2e (mock wallet, jsdom)
 ```
 
 The smoke e2e uses a mock wallet provider in jsdom — no real wallet, no
@@ -141,7 +141,7 @@ maintainer's responsibility before merging deploy changes.
                        └─────┬──────┘
                              │ window.postMessage
                 ┌────────────▼─────────────┐
-                │  apps/faucet (this)  │
+                │  apps/tools (this)  │
                 │                          │
                 │  Hero · WalletPanel ·    │
                 │  TokenCard × 2 ·         │
@@ -158,7 +158,7 @@ Three composables (no Pinia):
 ## File layout
 
 ```
-apps/faucet/
+apps/tools/
 ├── README.md                 ← you are here
 ├── public/_headers           ← COOP/COEP/CSP for cloudflare pages
 ├── scripts/deploy.ts         ← one-time deployer; idempotent

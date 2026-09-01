@@ -1,9 +1,9 @@
-# apps/faucet/tests/e2e
+# apps/tools/tests/e2e
 
 Smoke e2e tests for the faucet. Run via:
 
 ```bash
-bun run --cwd apps/faucet test:e2e
+bun run --cwd apps/tools test:e2e
 ```
 
 ## What this covers

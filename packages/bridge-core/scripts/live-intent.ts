@@ -155,15 +155,15 @@ export interface DeployIntent {
 }
 
 const OPERATIONAL_ALLOWLIST = [
-	"apps/faucet/public/testnet-bridge.candidate.json",
-	"apps/faucet/public/testnet-bridge.json",
-	"apps/faucet/src/contracts/deployments.candidate.json",
-	"apps/faucet/src/contracts/deployments.json",
+	"apps/tools/public/testnet-bridge.candidate.json",
+	"apps/tools/public/testnet-bridge.json",
+	"apps/tools/src/contracts/deployments.candidate.json",
+	"apps/tools/src/contracts/deployments.json",
 	"packages/bridge-core/deploy-journal.jsonl",
 	"implementations-plan/aztec-5.0.0-stable/lessons/",
 	"implementations-plan/aztec-5.0.1-line/lessons/",
 	"implementations-plan/tools-two-network/lessons/",
-	"apps/faucet/public/testnet-bridge.journal.jsonl",
+	"apps/tools/public/testnet-bridge.journal.jsonl",
 ]
 
 /** Network-identity pinning against the COMMITTED previous-arc intent: no network reset has
@@ -464,8 +464,8 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
 
 /**
  * Crash-safe, receipted promotion of BOTH candidates to their live paths:
- *   apps/faucet/public/testnet-bridge.candidate.json      → testnet-bridge.json
- *   apps/faucet/src/contracts/deployments.candidate.json  → deployments.json
+ *   apps/tools/public/testnet-bridge.candidate.json      → testnet-bridge.json
+ *   apps/tools/src/contracts/deployments.candidate.json  → deployments.json
  *
  * Invariant (audit): verify → validate-in-memory → temp-write+rename → re-hash →
  * re-verify → receipt. The candidates are read ONCE into buffers and every later
@@ -491,10 +491,10 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwa
 	// candidate is not required; instead the LIVE faucet manifest is digest-pinned before/after so the
 	// promotion provably leaves it byte-identical.
 	const bridgeOnly = opts.bridgeOnly === true
-	const bridgeCandidatePath = join(repoRoot, "apps/faucet/public/testnet-bridge.candidate.json")
-	const bridgeLivePath = join(repoRoot, "apps/faucet/public/testnet-bridge.json")
-	const faucetCandidatePath = join(repoRoot, "apps/faucet/src/contracts/deployments.candidate.json")
-	const faucetLivePath = join(repoRoot, "apps/faucet/src/contracts/deployments.json")
+	const bridgeCandidatePath = join(repoRoot, "apps/tools/public/testnet-bridge.candidate.json")
+	const bridgeLivePath = join(repoRoot, "apps/tools/public/testnet-bridge.json")
+	const faucetCandidatePath = join(repoRoot, "apps/tools/src/contracts/deployments.candidate.json")
+	const faucetLivePath = join(repoRoot, "apps/tools/src/contracts/deployments.json")
 
 	// 0. The recorded candidate digest is REQUIRED BEFORE promote's own verify runs — verify
 	// RECORDS a missing digest, so checking after it would always pass (the one-time recording
@@ -553,7 +553,7 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwa
 
 		// 2b. Prove the faucet CANDIDATE's derivation BEFORE any live write (review finding #3):
 		// previously a junk candidate failed only AFTER the live file was overwritten.
-		run("bun", [join(repoRoot, "apps/faucet/scripts/verify-deployments.ts"), "--config", faucetCandidatePath], {
+		run("bun", [join(repoRoot, "apps/tools/scripts/verify-deployments.ts"), "--config", faucetCandidatePath], {
 			stdio: "inherit",
 		})
 	}
@@ -593,7 +593,7 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwa
 	// 5. Re-verify the LIVE files: strict-parse the bridge manifest as written, and
 	// re-prove the faucet derivation through the real gate.
 	parseCandidateManifest(JSON.parse(readFileSync(bridgeLivePath, "utf8")))
-	run("bun", [join(repoRoot, "apps/faucet/scripts/verify-deployments.ts")], {
+	run("bun", [join(repoRoot, "apps/tools/scripts/verify-deployments.ts")], {
 		stdio: "inherit",
 		env: { ...process.env, BRIDGE_MANIFEST: bridgeLivePath },
 	})
@@ -616,10 +616,10 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwa
 				intent: intentPath,
 				commitAtPromotion: commit,
 				mode: bridgeOnly ? "bridge-only" : "bridge+faucet",
-				bridge: { candidateSha256: bridgeSha, live: "apps/faucet/public/testnet-bridge.json" },
+				bridge: { candidateSha256: bridgeSha, live: "apps/tools/public/testnet-bridge.json" },
 				faucet: faucetSha
-					? { candidateSha256: faucetSha, live: "apps/faucet/src/contracts/deployments.json" }
-					: { unchangedSha256: faucetLivePin, live: "apps/faucet/src/contracts/deployments.json" },
+					? { candidateSha256: faucetSha, live: "apps/tools/src/contracts/deployments.json" }
+					: { unchangedSha256: faucetLivePin, live: "apps/tools/src/contracts/deployments.json" },
 				zeroSeed: opts.restoreSwap
 					? "l1.fuel.core byte-carried; swap RESTORED (--restore-swap, pools seeded this arc)"
 					: opts.dropSwap

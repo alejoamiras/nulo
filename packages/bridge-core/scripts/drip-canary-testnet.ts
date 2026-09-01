@@ -35,7 +35,7 @@ const configArgIndex = process.argv.indexOf("--config")
 const deploymentsPath =
 	configArgIndex >= 0 && process.argv[configArgIndex + 1]
 		? process.argv[configArgIndex + 1]
-		: join(here, "..", "..", "..", "apps", "faucet", "src", "contracts", "deployments.json")
+		: join(here, "..", "..", "..", "apps", "tools", "src", "contracts", "deployments.json")
 const deployments = JSON.parse(readFileSync(deploymentsPath, "utf8")) as {
 	dripper: { address: string; salt: number; constructorArtifact: string }
 	tokens: {

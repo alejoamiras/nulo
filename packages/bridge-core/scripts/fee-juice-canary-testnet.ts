@@ -43,7 +43,7 @@ const configArg = process.argv.indexOf("--config")
 const CONFIG_PATH =
 	configArg !== -1
 		? (process.argv[configArg + 1] as string)
-		: join(here, "..", "..", "..", "apps", "faucet", "public", "testnet-bridge.json")
+		: join(here, "..", "..", "..", "apps", "tools", "public", "testnet-bridge.json")
 const CONFIG = loadManifestFromConfigArg(process.argv, {
 	mode: "fallback",
 	fallbackPath: CONFIG_PATH,

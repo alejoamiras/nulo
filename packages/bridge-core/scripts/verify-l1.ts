@@ -33,7 +33,7 @@ const configArg = process.argv.indexOf("--config")
 const CONFIG_PATH =
 	configArg !== -1
 		? (process.argv[configArg + 1] as string)
-		: join(here, "..", "..", "..", "apps", "faucet", "public", "testnet-bridge.json")
+		: join(here, "..", "..", "..", "apps", "tools", "public", "testnet-bridge.json")
 const EVM_ROOT = join(here, "..", "..", "..", "contracts", "bridge", "evm")
 const L1_ARTIFACTS_ROOT = join(dirname(createRequire(import.meta.url).resolve("@aztec/l1-artifacts/package.json")), "l1-contracts")
 

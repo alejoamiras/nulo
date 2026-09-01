@@ -110,7 +110,7 @@ jobs:
               # Built target — faucet (whole package) + its transitive dep libs
               # (bridge-core → wallet-crypto → wallet-core, + design) + the faucet build
               # workflow. Closes the prior under-gate (was faucet + design only).
-              - 'apps/faucet/**'
+              - 'apps/tools/**'
               - 'packages/bridge-core/src/**'
               - 'packages/bridge-core/package.json'
               - 'packages/resolve-asset/src/**'
@@ -123,7 +123,7 @@ jobs:
               - 'packages/wallet-sdk-schema-patch/package.json'
               - 'packages/design/src/**'
               - 'packages/design/package.json'
-              - '.github/workflows/_build-faucet.yml'
+              - '.github/workflows/_build-tools.yml'
             workflows:
               - '.github/workflows/**'
               - '.github/actions/**'
@@ -276,7 +276,7 @@ jobs:
       fail-fast: false
       matrix:
         target: [testnet, mainnet]
-    uses: ./.github/workflows/_build-faucet.yml
+    uses: ./.github/workflows/_build-tools.yml
     with:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
       target: ${{ matrix.target }}

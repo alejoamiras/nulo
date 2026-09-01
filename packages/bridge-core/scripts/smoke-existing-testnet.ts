@@ -30,7 +30,7 @@ if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY required (packages/bridge-core/.e
 
 const CONFIG = loadManifestFromConfigArg(process.argv, {
 	mode: "required",
-	requiredHint: "apps/faucet/public/testnet-bridge.candidate.json",
+	requiredHint: "apps/tools/public/testnet-bridge.candidate.json",
 	// biome-ignore lint/suspicious/noExplicitAny: manifest fields are accessed via dynamic property paths without a formal schema, matching the original untyped JSON.parse.
 	parse: (raw) => raw as any,
 })

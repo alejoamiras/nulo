@@ -42,7 +42,7 @@ import { assertSaltV2, parseClaimDescriptor, redactDescriptorForLog, requireRela
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
 
 const here = dirname(fileURLToPath(import.meta.url))
-const MANIFEST_PATH = process.env.BRIDGE_MANIFEST ?? join(here, "..", "..", "..", "apps", "faucet", "public", "testnet-bridge.json")
+const MANIFEST_PATH = process.env.BRIDGE_MANIFEST ?? join(here, "..", "..", "..", "apps", "tools", "public", "testnet-bridge.json")
 
 // Phase 7 canary (fresh-audit H2): submit claim_private with a WRONG recipient DIRECTLY to the
 // sequencer — bypassing the faucet's deposit-time client re-derivation guard — and assert the tx
