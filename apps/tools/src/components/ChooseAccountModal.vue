@@ -122,11 +122,11 @@ function onKey(evt: KeyboardEvent) {
 				class="modal"
 				role="dialog"
 				aria-modal="true"
-				aria-labelledby="fa-account-choice-title"
+				aria-labelledby="tl-account-choice-title"
 				tabindex="-1"
 				@keydown="onKey"
 			>
-				<h2 id="fa-account-choice-title" class="title">CHOOSE MAIN ACCOUNT</h2>
+				<h2 id="tl-account-choice-title" class="title">CHOOSE MAIN ACCOUNT</h2>
 				<p class="body">
 					Your wallet shared {{ accounts.length }} accounts. Pick the one this app should use —
 					you can switch anytime from the account chip.

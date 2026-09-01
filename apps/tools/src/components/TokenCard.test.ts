@@ -298,7 +298,7 @@ describe("TokenCard", () => {
 	it("the actions row renders both drip buttons", () => {
 		const w = makeCard()
 		const card = w.get(`[data-testid="${TESTIDS.tokenCard}"]`)
-		const dripButtons = card.findAll(`[data-testid^="fa-btn-drip-"]`)
+		const dripButtons = card.findAll(`[data-testid^="tl-btn-drip-"]`)
 		expect(dripButtons).toHaveLength(2)
 	})
 
