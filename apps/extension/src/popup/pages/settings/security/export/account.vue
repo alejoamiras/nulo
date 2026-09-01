@@ -10,7 +10,7 @@
 
 <script setup>
 /** Components */
-import SecretExportLayout from "@/components/composite/SecretExportLayout.vue"
+import CollapsingHeroLayout from "@/components/composite/CollapsingHeroLayout.vue"
 import SecretUnlockSection from "@/components/composite/SecretUnlockSection.vue"
 
 /** Services */
@@ -217,7 +217,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<SecretExportLayout heroMain="Account" heroSub="Backup" :collapsingLabel="collapsingLabel" backTo="/popup/settings/security/export">
+	<CollapsingHeroLayout heroMain="Account" heroSub="Backup" :collapsingLabel="collapsingLabel" backTo="/popup/settings/security/export">
 		<!-- Step 1: account picker (skipped when deep-linked with a preselected address) -->
 		<template v-if="!selectedAddress">
 			<div class="export_section_last">
@@ -319,5 +319,5 @@ onBeforeUnmount(() => {
 				Download File
 			</Button>
 		</template>
-	</SecretExportLayout>
+	</CollapsingHeroLayout>
 </template>

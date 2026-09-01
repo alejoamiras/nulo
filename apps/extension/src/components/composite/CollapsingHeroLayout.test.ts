@@ -1,10 +1,12 @@
 import { describe, expect, test } from "vitest"
 import { mount } from "@vue/test-utils"
-import SecretExportLayout from "./SecretExportLayout.vue"
+import CollapsingHeroLayout from "./CollapsingHeroLayout.vue"
 
 const STUBS = {
 	Flex: {
-		template: '<div :ref="forwardRef" :class="$attrs.class"><slot /></div>',
+		// v-bind="$attrs" mirrors the real Flex, which inherits fallthrough
+		// attrs onto its root div — the layout's attr-forwarding contract.
+		template: '<div :ref="forwardRef" v-bind="$attrs"><slot /></div>',
 		props: ["forwardRef"],
 		inheritAttrs: false,
 	},
@@ -15,7 +17,7 @@ const STUBS = {
 }
 
 const factory = (props: Record<string, unknown> = {}, slots: Record<string, string> = {}) =>
-	mount(SecretExportLayout, {
+	mount(CollapsingHeroLayout, {
 		props: {
 			heroMain: "Secret",
 			heroSub: "Key",
@@ -27,7 +29,7 @@ const factory = (props: Record<string, unknown> = {}, slots: Record<string, stri
 		global: { stubs: STUBS },
 	})
 
-describe("composite/SecretExportLayout", () => {
+describe("composite/CollapsingHeroLayout", () => {
 	test("renders heroMain in the title stack", () => {
 		const w = factory({ heroMain: "Encrypted" })
 		expect(w.text()).toContain("Encrypted")
@@ -69,5 +71,30 @@ describe("composite/SecretExportLayout", () => {
 		// uses CSS module class — assert no <div> with the bottom class is present.
 		const html = w.html()
 		expect(html).not.toMatch(/class="[^"]*bottom[^"]*"/)
+	})
+
+	test("default tone renders no destructive classes", () => {
+		const w = factory()
+		expect(w.html()).not.toContain("destructive")
+	})
+
+	test("destructive tone reds the hero title and bar", () => {
+		const w = factory({ tone: "destructive" })
+		expect(w.html()).toMatch(/title_main_destructive/)
+		expect(w.html()).toMatch(/hero_bar_destructive/)
+	})
+
+	test("overlay slot renders bare after the bottom bar", () => {
+		const w = factory({}, { overlay: '<dialog data-testid="ceremony">x</dialog>' })
+		expect(w.find('[data-testid="ceremony"]').exists()).toBe(true)
+	})
+
+	test("extra attributes fall through to the root element", () => {
+		const w = mount(CollapsingHeroLayout, {
+			props: { heroMain: "X", collapsingLabel: "X", backTo: "/x" },
+			attrs: { "data-profile-name": "acc-1" },
+			global: { stubs: STUBS },
+		})
+		expect(w.attributes("data-profile-name")).toBe("acc-1")
 	})
 })

@@ -173,7 +173,7 @@ function mountPage() {
 				}),
 			],
 			stubs: {
-				SecretExportLayout: {
+				CollapsingHeroLayout: {
 					template: "<div><slot /><slot name='bottom' /></div>",
 				},
 				SecretUnlockSection: {

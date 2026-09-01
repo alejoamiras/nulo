@@ -10,7 +10,7 @@
 
 <script setup>
 /** Components */
-import SecretExportLayout from "@/components/composite/SecretExportLayout.vue"
+import CollapsingHeroLayout from "@/components/composite/CollapsingHeroLayout.vue"
 import SecretUnlockSection from "@/components/composite/SecretUnlockSection.vue"
 import PasskeyCeremonyDialog from "@/components/passkey/PasskeyCeremonyDialog.vue"
 
@@ -407,7 +407,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<SecretExportLayout
+	<CollapsingHeroLayout
 		heroMain="Full"
 		heroSub="Backup"
 		collapsingLabel="Full Backup"
@@ -469,7 +469,7 @@ onBeforeUnmount(() => {
 				TransactionAwaitingCard.vue:37), the spinner is decorative
 				(`aria-hidden`), and the heading is left as a plain span so
 				the page's existing heading hierarchy isn't fractured
-				(SecretExportLayout.vue:63 uses spans for the hero, no h1).
+				(CollapsingHeroLayout.vue:63 uses spans for the hero, no h1).
 				-->
 				<div
 					v-if="backupStatus === 'progress' || backupStatus === 'encrypting'"
@@ -607,7 +607,7 @@ onBeforeUnmount(() => {
 				</Button>
 			</Flex>
 		</template>
-	</SecretExportLayout>
+	</CollapsingHeroLayout>
 
 	<!-- Path A: in-page passkey ceremony for backup-export. Mounts only
 	     while a ceremony is in flight; emits resolve/reject back through

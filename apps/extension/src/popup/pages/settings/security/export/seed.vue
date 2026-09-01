@@ -10,7 +10,7 @@
 
 <script setup>
 /** Components */
-import SecretExportLayout from "@/components/composite/SecretExportLayout.vue"
+import CollapsingHeroLayout from "@/components/composite/CollapsingHeroLayout.vue"
 import SecretRevealCard from "@/components/composite/SecretRevealCard.vue"
 import SecretCountdownClose from "@/components/composite/SecretCountdownClose.vue"
 import SecretUnlockSection from "@/components/composite/SecretUnlockSection.vue"
@@ -90,7 +90,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<SecretExportLayout
+	<CollapsingHeroLayout
 		heroMain="Recovery"
 		heroSub="Phrase"
 		collapsingLabel="Recovery Phrase"
@@ -197,5 +197,5 @@ onBeforeUnmount(() => {
 				@disableAutoClose="countdown.disable"
 			/>
 		</template>
-	</SecretExportLayout>
+	</CollapsingHeroLayout>
 </template>
