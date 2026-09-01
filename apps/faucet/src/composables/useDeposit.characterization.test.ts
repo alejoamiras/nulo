@@ -757,3 +757,82 @@ describe("recoverDepositLeg characterization", () => {
 		expect(stableTrace()).toMatchSnapshot()
 	})
 })
+
+describe("spec pins over the harness (witness law vs INPUT semantics)", () => {
+	test("private/fueled witness: zeroed aztecRecipient, FPC fuelRecipient, amount law, swapTarget bound", async () => {
+		await runDeposit(5000n, true, 1000n)
+		const typed = h.trace.find(([n]) => n === "l1.signTypedData")?.[1] as { message: Record<string, unknown> }
+		const w = typed.message.witness as Record<string, unknown>
+		expect(w.aztecRecipient).toBe(`0x${"0".repeat(64)}`)
+		expect(String(w.fuelRecipient)).toBe(PRIVATE_FPC_ADDRESS)
+		expect(w.totalAmount).toBe(5000n)
+		expect(w.fuelAmount).toBe(1000n)
+		expect(w.swapTarget).toBe("0x00000000000000000000000000000000000000ee")
+		const call = h.trace.find(([n, d]) => n === "l1.writeContract" && (d as { fn: string }).fn === "bridgeWithFuel")?.[1] as {
+			args: [Record<string, unknown>, unknown]
+		}
+		// Calldata mirrors the SIGNED witness field-for-field (a consistent wrong value in both
+		// is the theft shape — hence the comparison against the raw inputs above, not just parity).
+		expect(call.args[0].totalAmount).toBe(5000n)
+		expect(call.args[0].fuelAmount).toBe(1000n)
+		expect(call.args[0].aztecRecipient).toBe(w.aztecRecipient)
+		expect(call.args[0].fuelRecipient).toBe(w.fuelRecipient)
+		// Token-claim record amount law: total minus fuel.
+		const added = h.trace.find(([n]) => n === "journal.addRecordVerified")
+		const rec = (added?.[1] as [Record<string, unknown>] | undefined)?.[0]
+		expect(rec?.amount).toBe("4000")
+	})
+
+	test("public/fueled witness: user fuelRecipient, real aztecRecipient", async () => {
+		await runDeposit(5000n, false, 1000n)
+		const typed = h.trace.find(([n]) => n === "l1.signTypedData")?.[1] as { message: Record<string, unknown> }
+		const w = typed.message.witness as Record<string, unknown>
+		expect(String(w.aztecRecipient)).toBe(RECIPIENT)
+		expect(String(w.fuelRecipient)).toBe(RECIPIENT)
+	})
+
+	test("plain witness zeroes every fuel field", async () => {
+		h.fj.publicBalance = 5n
+		await runDeposit(1000n, false)
+		const typed = h.trace.find(([n]) => n === "l1.signTypedData")?.[1] as { message: Record<string, unknown> }
+		const w = typed.message.witness as Record<string, unknown>
+		expect(w.fuelAmount).toBe(0n)
+		expect(w.fuelRecipient).toBe(`0x${"0".repeat(64)}`)
+		expect(w.fuelSecretHash).toBe(`0x${"0".repeat(64)}`)
+		expect(w.minFuelOutput).toBe(0n)
+		expect(w.routeHash).toBe(`0x${"0".repeat(64)}`)
+	})
+})
+
+describe("private ladder: the remaining decisions fail-stop (never public)", () => {
+	test("consumed: never re-mint; pending attempt: wait", async () => {
+		const deps = wiredDeps()
+		const consumed = mkRec({
+			id: "0xrpc",
+			isPrivate: true,
+			secret: undefined,
+			schema: 2,
+			fuel: { ...FUEL_OK, claimAttempt: true, consumed: true, bridgeSecretSalt: "0x8888", fpc: PRIVATE_FPC_ADDRESS },
+		} as never)
+		const whyConsumed = await expectStop(await deps.claim(consumed, "0x5555", undefined))
+		expect(whyConsumed).toContain("not re-minting")
+
+		h.l2.txReceiptStatus = "pending"
+		const waiting = mkRec({
+			id: "0xrpw",
+			isPrivate: true,
+			secret: undefined,
+			schema: 2,
+			fuel: {
+				...FUEL_OK,
+				claimAttempt: true,
+				claimAttemptAt: 1_700_000_000_000,
+				claimTxHash: "0xpriorpriv",
+				bridgeSecretSalt: "0x8888",
+				fpc: PRIVATE_FPC_ADDRESS,
+			},
+		} as never)
+		const whyWait = await expectStop(await deps.claim(waiting, "0x5555", undefined))
+		expect(whyWait).toContain("waiting for its receipt")
+	})
+})
