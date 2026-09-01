@@ -1,10 +1,10 @@
 # execution-pipeline — round-2 plan 3 (blueprint light, BL/E; money path)
 
 Scope authority: [round-2 scope](../complexity-residue-round-2/scope.md) § 3. 1–2 PRs.
-Burns 10 directives: `batched-view-simulation` 71 + 152L, `claim-helper` 47,
-`tx-request-builder` 38 + 208L, `execution/service` 159L + 88L (length-only),
-`transfer-executor` 118L (length-only), `fee-strategy` 27, `fee-estimation-engine` 25,
-`fpc/service` 21. Manifest 111 → 101. Seam toolkit as adjudicated in plans 1–2: sync
+Burns 11 directives (codex count correction): `batched-view-simulation` 71 + 152L,
+`claim-helper` 47, `tx-request-builder` 38 + 208L, `execution/service` 159L + 88L,
+`transfer-executor` 118L, `fee-strategy` 27, `fee-estimation-engine` 25, `fpc/service` 21.
+Manifest 111 → 100. Seam toolkit as adjudicated in plans 1–2: sync
 guard-ladder helpers; tail-returns; an awaited helper only where its call replaces a span
 that already awaited, under a caller-side applicability guard; register-immediately spans
 never gain a hop.
@@ -12,10 +12,13 @@ never gain a hop.
 ## PR split
 
 - **PR-a**: the two monsters + the builder — `batched-view-simulation`, `claim-helper`,
-  `tx-request-builder`. (111 → 107; 4 directives.)
+  `tx-request-builder`. (111 → 106; 5 directives.)
 - **PR-b**: the length splits + fee tail — `execution/service` (×2 length),
   `transfer-executor` (length), `fee-strategy`, `fee-estimation-engine`, `fpc/service`.
-  (107 → 101; 6 directives.)
+  (106 → 100; 6 directives.) Codex flags `execution/service`, `transfer-executor`,
+  `fee-estimation-engine` and `fpc/service` as NON-mechanical (capture, cancellation,
+  observable-order, lock, deletion-compensation fences) — same recon rigor as PR-a;
+  only `fee-strategy` is a mechanical sync limit-calculation extraction.
 
 ## Recon + decomposition (PR-a)
 
@@ -28,10 +31,14 @@ never gain a hop.
   `prepareFastArm` returning `{leadingFast, slow, blockHeader, chainInfo, gasSettings}`
   (entered only when `leadingFast.length > 0`; that path's first op already awaited);
   (5) slow-tuple renumbering → sync; (6) slow-only chainInfo derivation stays inline
-  (guarded await); (7) the `Promise.allSettled` dispatch + settle-branching stays INLINE
-  (the fast-rejection classification and rerun flag are the money logic); (8) the rerun
-  rebuild → guarded awaited helper; (9) fast unpack + slow unpack → sync helpers (decode
-  loops + shape unpacking; log lines verbatim). Suite: `batched-view-simulation.test.ts`
+  (guarded await); (7) the `Promise.allSettled` dispatch, the `SimulationError instanceof`
+  classification and the infra-rerun flag stay INLINE; (8) the rerun path only rebuilds
+  tuples and invokes `runSlowArm` — `utilityLaunched` stays CALLER-OWNED, constructed
+  exactly once outside the rerun (codex condition); (9) fast unpack + slow unpack → sync
+  helpers (log lines verbatim). `prepareFastArm` preserves `getNodeInfo →
+  assertLiveChainIdentity → chainInfo` ordering and the ONE validated `chainInfo` feeds
+  both arms; any fallback refetch is validated identically. New pin: a mixed-arm batch
+  proves ONE `getNodeInfo()` call and identical chain context on both arms. Suite: `batched-view-simulation.test.ts`
   (29 — arms, fallbacks, rerun, utility-launch-once pins).
 - **`claimOrCreateDappExecuteJournal` (47)** — cancel-race-hardened claim protocol.
   Extract `createAndRegisterFresh(deps, input)` (the create+controller+register block,
@@ -47,15 +54,22 @@ never gain a hop.
   `resolveAuthwitMessageHash(content, nodeInfo, instances, artifacts)` (the messageHash
   inner switch, duplicated across the private/public authwit arms; the sync
   `message_hash` kind stays a caller-side ternary so it keeps its sync continuation);
-  per-arm awaited helpers for the authwit arms (each arm already awaited); the SYNC
-  `add_capsule` arm stays inline; the prelude (profile/network/account/node/identity/
+  the authwit arms keep their FULLY-SYNC case sync: `message_hash` content + a PROVIDED
+  witness is synchronous today, so the caller-side ternary and provided-witness
+  construction stay inline, the invalid-kind throw stays a caller-side sync guard, and
+  only the genuinely-awaited hash computations route through the helper (codex
+  condition); the SYNC `add_capsule` arm stays inline; the prelude (profile/network/account/node/identity/
   resolver chain) → awaited `resolveBuildContext` (sequential awaited spans); the
   entrypoint-build tail stays inline. **No direct suite — pre-extraction pins FIRST**
-  (`tx-request-builder.pins.test.ts`): per-action-kind dispatch (capsule shape, extra-args
-  hashing arity, authwit content-kind → messageHash routing incl. the invalid-kind throw,
-  provided-vs-created authwit), the drift rejection (`assertLiveChainIdentity` before any
-  resolve), and nonce threading — via fakes at the service seams (the
-  `service.composition.test.ts` fake style).
+  (`tx-request-builder.pins.test.ts`): per-action-kind dispatch; authwit content-kind →
+  messageHash routing incl. the invalid-kind throw; provided-vs-created authwit; the drift
+  rejection ordering (`assertLiveChainIdentity` before ANY resolver/registration/action
+  work); plus the codex additions — `pendingPublicAuthwits` account/hash/content/ORDER and
+  the ordered cap-gate hashes; private-authwit array ordering and the `ExecutionPayload`
+  array-slot ordering; capsule contract/storage-slot/value mapping and order; the public
+  registry-call fields plus their matching `txCalls`; the build options, `chainInfo`,
+  `gasSettings`, build-meta provenance and nonce identity — via fakes at the service
+  seams.
 
 ## Recon (PR-b, refined at implementation under the same toolkit)
 
@@ -71,15 +85,14 @@ BL/E + the builder pins. Existing suites zero-edit green per PR; error/log strin
 byte-identical. Gates per scope.md § 3 (single sequential e2e run):
 sim-methods · batch-mixed · batch-partial-failure · fee-methods · transfers ·
 tx-sendTx-{default,delegated-authwit,feePayer,multicall,noFrom,reject,sponsoredFpc} ·
-cancel-mid-prove — PR-a runs them all; PR-b re-runs fee-methods + transfers +
-tx-sendTx-{default,feePayer,sponsoredFpc} + cancel-mid-prove (its files own fee/transfer
-paths) plus audit:vue + test:ci-gating on both.
+cancel-mid-prove — BOTH PRs run all 13 (codex: `execution/service` dispatch touches every
+route) plus audit:vue + test:ci-gating on both.
 
 ## Acceptance
 
-- PR-a: 4 directives, 111 → 107, zero inserted (read the regen diff); builder pins green
+- PR-a: 5 directives, 111 → 106, zero inserted (read the regen diff); builder pins green
   pre+post; the three suites zero-edit.
-- PR-b: 6 directives, 107 → 101, zero inserted; all named suites zero-edit.
+- PR-b: 6 directives, 106 → 100, zero inserted; all named suites zero-edit.
 - Codex loop: one session — plan audit → PR-a impl review → PR-b impl review → approve.
 
 ## Rollback
