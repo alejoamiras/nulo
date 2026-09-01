@@ -177,8 +177,6 @@ const {
 	reject: () => reject(),
 })
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (103 lines) — split when touched, never grow
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 25) — refactor when touched, never raise
 const init = async () => {
 	// B-30: disconnect the locally-constructed account/network clients on EVERY
 	// exit path. They were disconnected only on the success path (after the ops
@@ -199,132 +197,31 @@ const init = async () => {
 
 		accountService = new AccountServiceClient()
 		networkService = new NetworkServiceClient()
-
-		const getNetwork = async (caipChain: CaipChain): Promise<Network> => {
-			const { chainId } = parseCaipChain(caipChain)
-			return resolveNetworkByChainId(networkService!, chainId)
-		}
-
-		const getNetworkAndAccount = async (caipAccount: CaipAccount): Promise<[Network, Account]> => {
-			const { chainId, address } = parseCaipAccount(caipAccount)
-			const network = await resolveNetworkByChainId(networkService!, chainId)
-			const account = await accountService!.getAccount(profile.value!.id, network.chainId, address)
-			if (!account) throw new Error("Account no longer exists")
-			return [network, account]
-		}
-
-		const _accounts: Account[] = []
-		const _operations: UIOperation[] = []
-		for (const op of payload.value.params.operations) {
-			switch (op.kind) {
-				case "register_contract":
-				case "register_sender":
-				case "aztec_getContractClassMetadata":
-				case "aztec_getContractMetadata":
-				case "aztec_getChainInfo":
-				case "aztec_registerSender":
-				case "aztec_getAddressBook":
-				case "aztec_registerContract":
-				case "aztec_getPrivateEvents": {
-					const network = await getNetwork(op.chain)
-					_operations.push({ ...op, network, networkId: network.id })
-					break
-				}
-				case "register_token":
-				case "simulate_transaction":
-				case "simulate_utility":
-				case "aztec_simulateTx":
-				case "aztec_executeUtility":
-				case "aztec_profileTx":
-				case "aztec_createAuthWit": {
-					const [network, account] = await getNetworkAndAccount(op.account)
-					_operations.push({
-						...op,
-						network,
-						networkId: network.id,
-						account,
-						accountAddress: account.address,
-					})
-					if (!_accounts.find((x) => x.address === account.address && x.chainId === account.chainId)) {
-						_accounts.push(account)
-					}
-					break
-				}
-				case "aztec_sendTx": {
-					const [network, account] = await getNetworkAndAccount(op.account)
-					const isNoFrom = op.executionMode === "default_entrypoint"
-					// `default_entrypoint` and explicit `exec.feePayer` are dApp-supplied
-					// fee paths (dApp handles fee payment via its own entrypoint).
-					// Pre-fill embedded so the FeeSettingsCard is suppressed; otherwise
-					// leave feeSettings undefined and rely on the user to pick a method.
-					// The `requiresFeeSelection` predicate at approve() gates undefined.
-					_operations.push({
-						...op,
-						network,
-						networkId: network.id,
-						account,
-						accountAddress: account.address,
-						feeSettings: isNoFrom || op.exec.feePayer !== undefined ? { paymentMethod: { kind: "embedded" } } : undefined,
-					})
-					if (!_accounts.find((x) => x.address === account.address && x.chainId === account.chainId)) {
-						_accounts.push(account)
-					}
-					break
-				}
-				case "send_transaction": {
-					const [network, account] = await getNetworkAndAccount(op.account)
-					// dApp may embed the fee payment via op.fee.embeddedFeePayment; in
-					// that case pre-fill embedded so the FeeSettingsCard is suppressed.
-					// Otherwise leave feeSettings undefined for user selection;
-					// `requiresFeeSelection` at approve() gates undefined.
-					_operations.push({
-						...op,
-						network,
-						networkId: network.id,
-						account,
-						accountAddress: account.address,
-						feeSettings: op.fee?.embeddedFeePayment !== undefined ? { paymentMethod: { kind: "embedded" } } : undefined,
-					})
-					if (!_accounts.find((x) => x.address === account.address && x.chainId === account.chainId)) {
-						_accounts.push(account)
-					}
-					break
-				}
-				default:
-					throw new Error("Invalid operation kind")
-			}
-		}
+		const resolved = await buildOperationsFromPayload(
+			payload.value.params.operations,
+			accountService,
+			networkService,
+			profile.value!.id,
+		)
 		session.value = payload.value.session
-		operations.value = _operations
-		accounts.value = _accounts
+		operations.value = resolved.operations
+		accounts.value = resolved.accounts
 		// Only flip after operations are committed to state. If the popup
 		// is dismissed mid-init (cancel from another window) we want the
 		// approve gate to stay closed.
-		initComplete.value = _operations.length > 0
+		initComplete.value = resolved.operations.length > 0
 
 		// Pre-fetch token metadata for any `register_token` ops so the
 		// OperationCard renders name/symbol/decimals before Allow. The Allow
 		// button is disabled while this is in flight (see template).
-		const registerOps = _operations.filter((op): op is UIOperation & { kind: "register_token" } => op.kind === "register_token")
+		const registerOps = resolved.operations.filter((op): op is UIOperation & { kind: "register_token" } => op.kind === "register_token")
 		if (registerOps.length > 0) {
-			tokenMetadataLoading.value = true
-			try {
-				await Promise.all(
-					registerOps.map(async (op) => {
-						try {
-							const meta = await tokenService.previewTokenMetadata(op.networkId, op.accountAddress, op.address)
-							tokenMetadata.value.set(op.address, { name: meta.name, symbol: meta.symbol, decimals: meta.decimals })
-							tokenInterfaces.value.set(op.address, meta.interface)
-						} catch (err) {
-							const msg = getErrorMessage(err)
-							tokenMetadataError.value.set(op.address, msg)
-							console.warn(`[Execute] previewTokenMetadata failed for ${op.address}: ${msg}`)
-						}
-					}),
-				)
-			} finally {
-				tokenMetadataLoading.value = false
-			}
+			await prefetchTokenMetadata(registerOps, tokenService, {
+				metadata: tokenMetadata,
+				interfaces: tokenInterfaces,
+				errors: tokenMetadataError,
+				loading: tokenMetadataLoading,
+			})
 		}
 	} catch (error) {
 		console.error(getErrorData(error))
@@ -334,6 +231,145 @@ const init = async () => {
 		// early-return alike (undefined when init returned before constructing them).
 		accountService?.disconnect()
 		networkService?.disconnect()
+	}
+}
+
+/** Resolve every requested operation SEQUENTIALLY (op N+1's lookups start only
+ *  after op N resolved) against the transient clients `init` owns and
+ *  disconnects; returns the draft operations plus the unique signer accounts. */
+async function buildOperationsFromPayload(
+	requested: NonNullable<typeof payload.value>["params"]["operations"],
+	accountService: AccountServiceClient,
+	networkService: NetworkServiceClient,
+	profileId: string,
+): Promise<{ operations: UIOperation[]; accounts: Account[] }> {
+	const getNetwork = async (caipChain: CaipChain): Promise<Network> => {
+		const { chainId } = parseCaipChain(caipChain)
+		return resolveNetworkByChainId(networkService, chainId)
+	}
+
+	const getNetworkAndAccount = async (caipAccount: CaipAccount): Promise<[Network, Account]> => {
+		const { chainId, address } = parseCaipAccount(caipAccount)
+		const network = await resolveNetworkByChainId(networkService, chainId)
+		const account = await accountService.getAccount(profileId, network.chainId, address)
+		if (!account) throw new Error("Account no longer exists")
+		return [network, account]
+	}
+
+	const accounts: Account[] = []
+	const operations: UIOperation[] = []
+	for (const op of requested) {
+		switch (op.kind) {
+			case "register_contract":
+			case "register_sender":
+			case "aztec_getContractClassMetadata":
+			case "aztec_getContractMetadata":
+			case "aztec_getChainInfo":
+			case "aztec_registerSender":
+			case "aztec_getAddressBook":
+			case "aztec_registerContract":
+			case "aztec_getPrivateEvents": {
+				const network = await getNetwork(op.chain)
+				operations.push({ ...op, network, networkId: network.id })
+				break
+			}
+			case "register_token":
+			case "simulate_transaction":
+			case "simulate_utility":
+			case "aztec_simulateTx":
+			case "aztec_executeUtility":
+			case "aztec_profileTx":
+			case "aztec_createAuthWit": {
+				const [network, account] = await getNetworkAndAccount(op.account)
+				operations.push({
+					...op,
+					network,
+					networkId: network.id,
+					account,
+					accountAddress: account.address,
+				})
+				pushUniqueAccount(accounts, account)
+				break
+			}
+			case "aztec_sendTx": {
+				const [network, account] = await getNetworkAndAccount(op.account)
+				const isNoFrom = op.executionMode === "default_entrypoint"
+				// `default_entrypoint` and explicit `exec.feePayer` are dApp-supplied
+				// fee paths (dApp handles fee payment via its own entrypoint).
+				// Pre-fill embedded so the FeeSettingsCard is suppressed; otherwise
+				// leave feeSettings undefined and rely on the user to pick a method.
+				// The `requiresFeeSelection` predicate at approve() gates undefined.
+				operations.push({
+					...op,
+					network,
+					networkId: network.id,
+					account,
+					accountAddress: account.address,
+					feeSettings: isNoFrom || op.exec.feePayer !== undefined ? { paymentMethod: { kind: "embedded" } } : undefined,
+				})
+				pushUniqueAccount(accounts, account)
+				break
+			}
+			case "send_transaction": {
+				const [network, account] = await getNetworkAndAccount(op.account)
+				// dApp may embed the fee payment via op.fee.embeddedFeePayment; in
+				// that case pre-fill embedded so the FeeSettingsCard is suppressed.
+				// Otherwise leave feeSettings undefined for user selection;
+				// `requiresFeeSelection` at approve() gates undefined.
+				operations.push({
+					...op,
+					network,
+					networkId: network.id,
+					account,
+					accountAddress: account.address,
+					feeSettings: op.fee?.embeddedFeePayment !== undefined ? { paymentMethod: { kind: "embedded" } } : undefined,
+				})
+				pushUniqueAccount(accounts, account)
+				break
+			}
+			default:
+				throw new Error("Invalid operation kind")
+		}
+	}
+	return { operations, accounts }
+}
+
+/** The signer list is unique by (address, chainId), first occurrence wins. */
+function pushUniqueAccount(accounts: Account[], account: Account): void {
+	if (!accounts.find((x) => x.address === account.address && x.chainId === account.chainId)) {
+		accounts.push(account)
+	}
+}
+
+/** Best-effort per-op metadata prefetch; a failed preview records its error
+ *  and never blocks the others, and the loading flag clears in `finally`. */
+async function prefetchTokenMetadata(
+	registerOps: Array<UIOperation & { kind: "register_token" }>,
+	tokenClient: TokenServiceClient,
+	refs: {
+		metadata: typeof tokenMetadata
+		interfaces: typeof tokenInterfaces
+		errors: typeof tokenMetadataError
+		loading: typeof tokenMetadataLoading
+	},
+): Promise<void> {
+	refs.loading.value = true
+	try {
+		await Promise.all(
+			registerOps.map(async (op) => {
+				try {
+					const meta = await tokenClient.previewTokenMetadata(op.networkId, op.accountAddress, op.address)
+					refs.metadata.value.set(op.address, { name: meta.name, symbol: meta.symbol, decimals: meta.decimals })
+					refs.interfaces.value.set(op.address, meta.interface)
+				} catch (err) {
+					const msg = getErrorMessage(err)
+					refs.errors.value.set(op.address, msg)
+					console.warn(`[Execute] previewTokenMetadata failed for ${op.address}: ${msg}`)
+				}
+			}),
+		)
+	} finally {
+		refs.loading.value = false
 	}
 }
 

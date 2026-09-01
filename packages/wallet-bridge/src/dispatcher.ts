@@ -64,7 +64,14 @@ import type {
 	TransactionCapability,
 } from "./capabilities"
 import { getRequiredCapability, isCapabilityExempt } from "./capability-map"
-import { METHOD_REGISTRY, METHOD_TO_KIND, NETWORK_ONLY_KINDS, ACCOUNT_KINDS, assertKnownMethod } from "./method-descriptors"
+import {
+	METHOD_REGISTRY,
+	METHOD_TO_KIND,
+	NETWORK_ONLY_KINDS,
+	ACCOUNT_KINDS,
+	assertKnownMethod,
+	type MethodName,
+} from "./method-descriptors"
 import type {
 	AztecCreateAuthWitRequest,
 	AztecSendTxRequest,
@@ -265,6 +272,149 @@ function isKnownCapabilityType(type: string): type is Capability["type"] {
 /** Grants of one capability type, narrowed to that variant. The single typed cast
  *  lives here instead of the `existing.capability as XCapability` casts scattered
  *  across the coverage branches. */
+/** The session stores CAIP-10 identifiers ("aztec:<chainId>:0x…") but dApps send RAW
+ *  hex addresses in scope arrays (the wallet-sdk serializes AztecAddress as hex), so
+ *  the set carries BOTH representations. Without this, every fresh session failed
+ *  account-scope validation deterministically; pre-CAIP sessions masked the mismatch. */
+function sessionAccountsOf(dappSession: IDappSessionRef): Set<string> {
+	const sessionAccounts = new Set<string>()
+	for (const entry of dappSession.accounts ?? []) {
+		sessionAccounts.add(entry)
+		try {
+			sessionAccounts.add(parseCaipAccount(entry).address)
+		} catch {
+			// A raw (pre-CAIP) entry: keep it as-is; nothing extra to add.
+		}
+	}
+	return sessionAccounts
+}
+
+type CapabilityPlan = {
+	existingGrants: GrantedCapabilityRecord[]
+	grantedTypes: Set<string>
+	rejectedTypes: Set<string>
+	/** Capabilities not yet granted OR previously rejected (re-request). */
+	delta: Record<string, unknown>[]
+	/** Delta items that are re-requests (previously rejected). */
+	reRequested: string[]
+	/** Existing grants shown to the popup — re-requested types are not "existing". */
+	existingCaps: Capability[]
+}
+
+function computeCapabilityDelta(requestedCapabilities: Record<string, unknown>[], dappSession: IDappSessionRef): CapabilityPlan {
+	const existingGrants = dappSession.capabilityGrants ?? []
+	const existingRejections = dappSession.capabilityRejections ?? []
+	const grantedTypes = new Set<string>(existingGrants.map((g) => g.capability.type))
+	const rejectedTypes = new Set(existingRejections.map((r) => r.capabilityType))
+
+	// For `accounts` specifically, compare full shape — `canGet` /
+	// `canCreateAuthWit` — not just type. Without this, a dApp granted
+	// `{canGet:true, canCreateAuthWit:false}` could later request
+	// `{canCreateAuthWit:true}` and the type-only filter would return empty,
+	// silently authorising the upgrade. The breadth fix for other cap types
+	// is filed as `wallet-sdk-capability-field-diff`.
+	const delta = requestedCapabilities.filter((cap) => {
+		const type = cap.type as string
+		if (rejectedTypes.has(type)) return true
+		// Unknown wire types keep the type-only default: they flow through to the
+		// popup and render default-off — do NOT drop or coerce them. Known types are
+		// trusted as their `Capability` variant (the same trust the removed per-branch
+		// `as unknown as XCapability` casts encoded) and checked field-aware via
+		// `isCapabilityCovered`. (Grant-path semantics unchanged: contracts APPENDS a
+		// grant, transaction REPLACES; scope checkers union across grants downstream.)
+		if (!isKnownCapabilityType(type)) return !grantedTypes.has(type)
+		return !isCapabilityCovered(cap as unknown as Capability, existingGrants, grantedTypes)
+	})
+	const reRequested = requestedCapabilities.filter((cap) => rejectedTypes.has(cap.type as string)).map((cap) => cap.type as string)
+	const existingCaps = existingGrants.filter((g) => !rejectedTypes.has(g.capability.type)).map((g) => g.capability)
+	return { existingGrants, grantedTypes, rejectedTypes, delta, reRequested, existingCaps }
+}
+
+type CapabilityDecisionInput = {
+	addAccounts: NonNullable<CapabilityResult["selectedAccounts"]>
+	aliasPatch: NonNullable<CapabilityResult["accountAliases"]>
+	grantRecords: GrantedCapabilityRecord[]
+	replaceTypes: string[]
+	approvedTypes: string[]
+	rejectedTypes: string[]
+}
+
+/** Folds the popup's answer into the ONE atomic decision the session row takes. */
+function mergeGrantsAndRejections(result: CapabilityResult, plan: CapabilityPlan): CapabilityDecisionInput {
+	const grantedResults = ensureAccountsGrant(result, plan.delta)
+
+	// Compute which delta types were approved vs rejected
+	const approvedTypes = new Set(grantedResults.map((cap) => cap.type as string))
+	const now = Date.now()
+	const deltaApprovedTypes = new Set(plan.delta.filter((cap) => approvedTypes.has(cap.type as string)).map((cap) => cap.type as string))
+	const newGrants = collectNewGrants(grantedResults, plan, deltaApprovedTypes, now)
+
+	// Delta items NOT approved become rejections.
+	const rejectedDeltaTypes = plan.delta.filter((cap) => !approvedTypes.has(cap.type as string)).map((cap) => cap.type as string)
+	const hasAccountSelection = (result.selectedAccounts?.length ?? 0) > 0
+
+	return {
+		addAccounts: hasAccountSelection ? (result.selectedAccounts ?? []) : [],
+		aliasPatch: hasAccountSelection ? (result.accountAliases ?? {}) : {},
+		grantRecords: newGrants,
+		replaceTypes: [...deltaApprovedTypes],
+		// ONLY the delta types that were approved clear their rejection — NOT the
+		// full grantedResults set (the popup echoes untouched existing caps, and
+		// clearing their rejections would erase a concurrent unrelated rejection).
+		approvedTypes: [...deltaApprovedTypes],
+		rejectedTypes: rejectedDeltaTypes,
+	}
+}
+
+/** Safety net: ensure accounts capability is in granted when accounts were selected. */
+function ensureAccountsGrant(result: CapabilityResult, delta: Record<string, unknown>[]): Record<string, unknown>[] {
+	const grantedResults = result.granted as Record<string, unknown>[]
+	if (result.selectedAccounts && result.selectedAccounts.length > 0) {
+		const hasAccountsInGranted = grantedResults.some((cap) => cap.type === "accounts")
+		if (!hasAccountsInGranted) {
+			const accountsCap = delta.find((cap) => cap.type === "accounts")
+			if (accountsCap) {
+				grantedResults.push(accountsCap)
+			}
+		}
+	}
+	return grantedResults
+}
+
+/** Approved DELTA types REPLACE their stored grant (never-granted types simply append).
+ *  The old type-only filter silently dropped re-approved types: a contracts re-consent
+ *  (field-diff, e.g. after a redeploy adds token addresses) was REPORTED granted but never
+ *  persisted - every later call still refused on the stale grant. Same hole applied to
+ *  accounts upgrades. The popup echoes existing caps alongside the newly approved delta,
+ *  so for replaced types we take the LAST result entry of that type that differs from the
+ *  stored capability (falling back to the delta's requested shape). */
+function collectNewGrants(
+	grantedResults: Record<string, unknown>[],
+	plan: CapabilityPlan,
+	deltaApprovedTypes: Set<string>,
+	now: number,
+): GrantedCapabilityRecord[] {
+	const replacementFor = (type: string): Capability | undefined => {
+		const stored = plan.existingGrants.find((g) => g.capability.type === type)?.capability
+		const candidates = grantedResults.filter((cap) => cap.type === type)
+		const changed = candidates.filter((cap) => JSON.stringify(cap) !== JSON.stringify(stored))
+		return (changed[changed.length - 1] ?? candidates[candidates.length - 1]) as Capability | undefined
+	}
+	const newGrants: GrantedCapabilityRecord[] = []
+	for (const cap of grantedResults) {
+		const type = cap.type as string
+		if (deltaApprovedTypes.has(type)) continue // handled via replacement below (dedupes echoes).
+		if (!plan.grantedTypes.has(type as Capability["type"]) || plan.rejectedTypes.has(type)) {
+			newGrants.push({ capability: cap as Capability, grantedAt: now })
+		}
+	}
+	for (const type of deltaApprovedTypes) {
+		const replacement = replacementFor(type) ?? (plan.delta.find((c) => c.type === type) as unknown as Capability)
+		newGrants.push({ capability: replacement, grantedAt: now })
+	}
+	return newGrants
+}
+
 function grantsOfType<K extends Capability["type"]>(grants: GrantedCapabilityRecord[], type: K): Extract<Capability, { type: K }>[] {
 	return grants.filter((g) => g.capability.type === type).map((g) => g.capability as Extract<Capability, { type: K }>)
 }
@@ -392,7 +542,6 @@ export class WalletSdkDispatcher {
 	 * @returns The result value from the first (and only) operation
 	 * @throws If the method is unsupported, the operation fails, or session context is invalid
 	 */
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 25) — refactor when touched, never raise
 	async dispatch(methodName: string, args: unknown[], ctx: SessionContext, hooks?: DispatchHooks): Promise<unknown> {
 		// F-006 / audit cross-cutting #1 / Phase 0.5: capture the dApp session
 		// ONCE at dispatch entry and thread it through every internal call.
@@ -403,7 +552,34 @@ export class WalletSdkDispatcher {
 		// profile, guard-verified upstream): a profile switch landing mid-await
 		// must not let this lookup resolve the NEW profile's row.
 		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId), ctx.profileId)
+		const { method, grants } = this.enforceMethodAndScope(methodName, args, ctx, dappSession)
 
+		// Methods that don't go through ExecutionService return the handler's
+		// own promise, un-awaited here (rejection timing unchanged).
+		const routed = this.routeHandlerMethod(method, args, ctx, dappSession, grants, hooks)
+		if (routed !== undefined) return routed
+
+		const kind = METHOD_TO_KIND[method]
+		if (!kind) {
+			throw new Error(`Unsupported wallet method: ${method}`)
+		}
+
+		const operation = await this.buildOperation(kind, args, ctx, dappSession)
+		const origin: LocalTxOrigin = { type: OriginType.DAPP, name: ctx.origin }
+
+		const results = await this.executionService.executeOperations([operation], origin)
+		return this.unwrapResult(results[0])
+	}
+
+	/** The synchronous guard ladder every dispatch runs after the session read —
+	 *  known method → arg schema → auth-relevant arg shape → capability → scope.
+	 *  Every throw keeps its exact message/class (dApp-visible contract). */
+	private enforceMethodAndScope(
+		methodName: string,
+		args: unknown[],
+		ctx: SessionContext,
+		dappSession: IDappSessionRef | undefined,
+	): { method: MethodName; grants: GrantedCapabilityRecord[] } {
 		// Resolve the method's descriptor up front. A method that reaches dispatch()
 		// without a registry row is unsupported (retired, or never-supported) —
 		// reject it before any enforcement/routing. This is the RUNTIME half of the
@@ -444,26 +620,25 @@ export class WalletSdkDispatcher {
 			// since enforceCapability would have returned []), fall back to
 			// the plain enforceScope to avoid throwing on the wrong thing.
 			if (dappSession) {
-				// The session stores CAIP-10 identifiers ("aztec:<chainId>:0x…") but dApps send RAW
-				// hex addresses in scope arrays (the wallet-sdk serializes AztecAddress as hex), so
-				// the set carries BOTH representations. Without this, every fresh session failed
-				// account-scope validation deterministically; pre-CAIP sessions masked the mismatch.
-				const sessionAccounts = new Set<string>()
-				for (const entry of dappSession.accounts ?? []) {
-					sessionAccounts.add(entry)
-					try {
-						sessionAccounts.add(parseCaipAccount(entry).address)
-					} catch {
-						// A raw (pre-CAIP) entry: keep it as-is; nothing extra to add.
-					}
-				}
-				enforceScopeWithSession(methodName, args, grants, sessionAccounts)
+				enforceScopeWithSession(methodName, args, grants, sessionAccountsOf(dappSession))
 			} else {
 				enforceScope(methodName, args, grants)
 			}
 		}
+		return { method: methodName, grants }
+	}
 
-		// Handle methods that don't go through ExecutionService
+	/** Routes the `via: "handler"` methods — returning the handler's EXACT promise
+	 *  (never awaited here, so rejection timing is the handler's) — or `undefined`
+	 *  for methods that take the generic build-and-execute path. */
+	private routeHandlerMethod(
+		methodName: MethodName,
+		args: unknown[],
+		ctx: SessionContext,
+		dappSession: IDappSessionRef | undefined,
+		grants: GrantedCapabilityRecord[],
+		hooks: DispatchHooks | undefined,
+	): Promise<unknown> | undefined {
 		if (methodName === "requestCapabilities") {
 			return this.handleRequestCapabilities(args[0] as CapabilityManifest, ctx, dappSession)
 		}
@@ -504,17 +679,7 @@ export class WalletSdkDispatcher {
 		if (methodName === "createAuthWit") {
 			return this.handleCreateAuthWit(args, ctx, dappSession, grants)
 		}
-
-		const kind = METHOD_TO_KIND[methodName]
-		if (!kind) {
-			throw new Error(`Unsupported wallet method: ${methodName}`)
-		}
-
-		const operation = await this.buildOperation(kind, args, ctx, dappSession)
-		const origin: LocalTxOrigin = { type: OriginType.DAPP, name: ctx.origin }
-
-		const results = await this.executionService.executeOperations([operation], origin)
-		return this.unwrapResult(results[0])
+		return undefined
 	}
 
 	/**
@@ -867,8 +1032,6 @@ export class WalletSdkDispatcher {
 	 * 3. Show popup for delta → user approves → merge and store
 	 *    - Track rejected types for future re-request detection
 	 */
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 31) — refactor when touched, never raise
-	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (102 lines) — split when touched, never grow
 	private async handleRequestCapabilities(
 		manifest: CapabilityManifest,
 		ctx: SessionContext,
@@ -888,39 +1051,13 @@ export class WalletSdkDispatcher {
 			}
 		}
 
-		// Phase 1: Check existing grants and rejections
-		const existingGrants = dappSession.capabilityGrants ?? []
-		const existingRejections = dappSession.capabilityRejections ?? []
-		const grantedTypes = new Set<string>(existingGrants.map((g) => g.capability.type))
-		const rejectedTypes = new Set(existingRejections.map((r) => r.capabilityType))
-
-		// Delta: capabilities not yet granted OR previously rejected (re-request).
-		//
-		// For `accounts` specifically, compare full shape — `canGet` /
-		// `canCreateAuthWit` — not just type. Without this, a dApp granted
-		// `{canGet:true, canCreateAuthWit:false}` could later request
-		// `{canCreateAuthWit:true}` and the type-only filter would return empty,
-		// silently authorising the upgrade. The breadth fix for other cap types
-		// is filed as `wallet-sdk-capability-field-diff`.
-		const delta = requestedCapabilities.filter((cap) => {
-			const type = cap.type as string
-			if (rejectedTypes.has(type)) return true
-			// Unknown wire types keep the type-only default: they flow through to the
-			// popup and render default-off — do NOT drop or coerce them. Known types are
-			// trusted as their `Capability` variant (the same trust the removed per-branch
-			// `as unknown as XCapability` casts encoded) and checked field-aware via
-			// `isCapabilityCovered`. (Grant-path semantics unchanged: contracts APPENDS a
-			// grant, transaction REPLACES; scope checkers union across grants downstream.)
-			if (!isKnownCapabilityType(type)) return !grantedTypes.has(type)
-			return !isCapabilityCovered(cap as unknown as Capability, existingGrants, grantedTypes)
-		})
-		// Track which delta items are re-requests (previously rejected)
-		const reRequested = requestedCapabilities.filter((cap) => rejectedTypes.has(cap.type as string)).map((cap) => cap.type as string)
+		// Phase 1: existing grants/rejections → the delta to negotiate.
+		const plan = computeCapabilityDelta(requestedCapabilities, dappSession)
 
 		// Phase 2: Early return if all types already granted and none re-requested
-		if (delta.length === 0) {
+		if (plan.delta.length === 0) {
 			const granted = await this.enrichGrantedCapabilities(
-				existingGrants.map((g) => g.capability),
+				plan.existingGrants.map((g) => g.capability),
 				requestedCapabilities,
 				ctx,
 				dappSession,
@@ -932,116 +1069,33 @@ export class WalletSdkDispatcher {
 			}
 		}
 
-		// Phase 3: Show capability popup for delta
-		const existingCaps = existingGrants
-			.filter((g) => !rejectedTypes.has(g.capability.type)) // Don't show re-requested as "existing"
-			.map((g) => g.capability)
-
-		// If `accounts` type is in the delta, load available accounts for the popup
-		const hasAccountsInDelta = delta.some((cap) => cap.type === "accounts")
-		let availableAccounts: Array<{ address: string; name: string; chainId: number }> | undefined
-		if (hasAccountsInDelta) {
-			const network = await this.resolveNetwork(ctx)
-			const accounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
-			availableAccounts = accounts.map((acc) => ({
-				address: acc.address,
-				name: acc.name,
-				chainId: acc.chainId,
-			}))
-		}
+		// Phase 3: Show capability popup for delta. If `accounts` type is in the
+		// delta, load available accounts for the popup.
+		const availableAccounts = plan.delta.some((cap) => cap.type === "accounts")
+			? await this.loadAvailableAccountsForPopup(ctx)
+			: undefined
 
 		let result: CapabilityResult
 		try {
 			result = await this.dappInteractionService.requestCapabilities({
 				sessionId: dappSession.id,
 				manifest,
-				delta,
-				existingGrants: existingCaps,
-				reRequested,
+				delta: plan.delta,
+				existingGrants: plan.existingCaps,
+				reRequested: plan.reRequested,
 				availableAccounts,
 			})
 		} catch (err) {
-			// On popup reject/close, persist rejection for all delta items so the
-			// next request renders the "previously denied" badge. One atomic decision
-			// (B-14), and if the row was revoked meanwhile just surface the popup error.
-			try {
-				await this.dappSessionService.applyCapabilityDecision(dappSession.id, {
-					addAccounts: [],
-					aliasPatch: {},
-					grantRecords: [],
-					replaceTypes: [],
-					approvedTypes: [],
-					rejectedTypes: delta.map((cap) => cap.type as string),
-				})
-			} catch {
-				// Session already revoked — nothing to persist.
-			}
+			await this.persistRejectionOnPopupFailure(dappSession.id, plan.delta)
 			throw err
 		}
-
-		// Safety net: ensure accounts capability is in granted when accounts were selected
-		const grantedResults = result.granted as Record<string, unknown>[]
-		if (result.selectedAccounts && result.selectedAccounts.length > 0) {
-			const hasAccountsInGranted = grantedResults.some((cap) => cap.type === "accounts")
-			if (!hasAccountsInGranted) {
-				const accountsCap = delta.find((cap) => cap.type === "accounts")
-				if (accountsCap) {
-					grantedResults.push(accountsCap)
-				}
-			}
-		}
-
-		// Compute which delta types were approved vs rejected
-		const approvedTypes = new Set(grantedResults.map((cap) => cap.type as string))
-		const now = Date.now()
-
-		// Approved DELTA types REPLACE their stored grant (never-granted types simply append).
-		// The old type-only filter silently dropped re-approved types: a contracts re-consent
-		// (field-diff, e.g. after a redeploy adds token addresses) was REPORTED granted but never
-		// persisted - every later call still refused on the stale grant. Same hole applied to
-		// accounts upgrades. The popup echoes existing caps alongside the newly approved delta,
-		// so for replaced types we take the LAST result entry of that type that differs from the
-		// stored capability (falling back to the delta's requested shape).
-		const deltaApprovedTypes = new Set(delta.filter((cap) => approvedTypes.has(cap.type as string)).map((cap) => cap.type as string))
-		const replacementFor = (type: string): Capability | undefined => {
-			const stored = existingGrants.find((g) => g.capability.type === type)?.capability
-			const candidates = grantedResults.filter((cap) => cap.type === type)
-			const changed = candidates.filter((cap) => JSON.stringify(cap) !== JSON.stringify(stored))
-			return (changed[changed.length - 1] ?? candidates[candidates.length - 1]) as Capability | undefined
-		}
-		const newGrants: GrantedCapabilityRecord[] = []
-		for (const cap of grantedResults) {
-			const type = cap.type as string
-			if (deltaApprovedTypes.has(type)) continue // handled via replacement below (dedupes echoes).
-			if (!grantedTypes.has(type as Capability["type"]) || rejectedTypes.has(type)) {
-				newGrants.push({ capability: cap as Capability, grantedAt: now })
-			}
-		}
-		for (const type of deltaApprovedTypes) {
-			const replacement = replacementFor(type) ?? (delta.find((c) => c.type === type) as unknown as Capability)
-			newGrants.push({ capability: replacement, grantedAt: now })
-		}
-
-		// Delta items NOT approved become rejections.
-		const rejectedDeltaTypes = delta.filter((cap) => !approvedTypes.has(cap.type as string)).map((cap) => cap.type as string)
-		const hasAccountSelection = (result.selectedAccounts?.length ?? 0) > 0
 
 		// ONE atomic decision (B-14): accounts + aliases + grants + rejections merged
 		// against the LATEST row under a single lock — no interleaving between the
 		// formerly-separate writes, and a concurrent revoke fails cleanly (no
 		// half-written row) instead of collapsing to a bare "Invalid id". Different-type
 		// concurrent approvals both survive (the merge reads the latest row).
-		const updatedSession = await this.dappSessionService.applyCapabilityDecision(dappSession.id, {
-			addAccounts: hasAccountSelection ? (result.selectedAccounts ?? []) : [],
-			aliasPatch: hasAccountSelection ? (result.accountAliases ?? {}) : {},
-			grantRecords: newGrants,
-			replaceTypes: [...deltaApprovedTypes],
-			// ONLY the delta types that were approved clear their rejection — NOT the
-			// full grantedResults set (the popup echoes untouched existing caps, and
-			// clearing their rejections would erase a concurrent unrelated rejection).
-			approvedTypes: [...deltaApprovedTypes],
-			rejectedTypes: rejectedDeltaTypes,
-		})
+		const updatedSession = await this.dappSessionService.applyCapabilityDecision(dappSession.id, mergeGrantsAndRejections(result, plan))
 
 		const granted = await this.enrichGrantedCapabilities(
 			(updatedSession.capabilityGrants ?? []).map((g) => g.capability),
@@ -1054,6 +1108,34 @@ export class WalletSdkDispatcher {
 			version: "1.0" as const,
 			granted,
 			wallet: { name: "Nulo", version: __VERSION__ },
+		}
+	}
+
+	private async loadAvailableAccountsForPopup(ctx: SessionContext): Promise<Array<{ address: string; name: string; chainId: number }>> {
+		const network = await this.resolveNetwork(ctx)
+		const accounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
+		return accounts.map((acc) => ({
+			address: acc.address,
+			name: acc.name,
+			chainId: acc.chainId,
+		}))
+	}
+
+	/** On popup reject/close, persist rejection for all delta items so the next
+	 *  request renders the "previously denied" badge. One atomic decision (B-14),
+	 *  and if the row was revoked meanwhile just surface the popup error. */
+	private async persistRejectionOnPopupFailure(sessionId: string, delta: Record<string, unknown>[]): Promise<void> {
+		try {
+			await this.dappSessionService.applyCapabilityDecision(sessionId, {
+				addAccounts: [],
+				aliasPatch: {},
+				grantRecords: [],
+				replaceTypes: [],
+				approvedTypes: [],
+				rejectedTypes: delta.map((cap) => cap.type as string),
+			})
+		} catch {
+			// Session already revoked — nothing to persist.
 		}
 	}
 
