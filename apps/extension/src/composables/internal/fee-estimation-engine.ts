@@ -124,32 +124,38 @@ export function createFeeEstimationEngine<TKey extends string | number, TParams,
 		const token = crypto.randomUUID()
 		inflight.set(key, { token, started: false })
 
-		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 25) — refactor when touched, never raise
-		const timer = setTimeout(async () => {
-			try {
-				const flight = inflight.get(key)
-				if (flight?.token === token) flight.started = true
-				const r = await run(params, token, key)
-				if (disposed || myCounter !== counters.get(key)) return
-				onResult(key, r)
-				completed.set(key, token)
-				inflight.delete(key)
-			} catch (err) {
-				if (disposed || myCounter !== counters.get(key)) return
-				onResult(key, null)
-				// A transport failure (RPC timeout) leaves the SW-side runner
-				// alive with no local owner — without this cancel it would be
-				// unreachable by every later cleanup path and its stash would
-				// sit un-evictable for the full TTL.
-				const flight = inflight.get(key)
-				if (flight?.token && !handedOff.has(flight.token)) cancelRemote?.(flight.token)
-				inflight.delete(key)
-				onError?.(key, err)
-			} finally {
-				if (!disposed && myCounter === counters.get(key)) {
-					onEstimating(key, false)
-				}
-			}
+		// Stale = disposed, or a newer schedule/cancel bumped this key's counter
+		// while our run was in flight. Every settle path re-checks it AFTER the
+		// awaited run, at the positions the pre-split callback checked.
+		const isStale = () => disposed || myCounter !== counters.get(key)
+		const settleSuccess = (r: TResult) => {
+			onResult(key, r)
+			completed.set(key, token)
+			inflight.delete(key)
+		}
+		const settleFailure = (err: unknown) => {
+			onResult(key, null)
+			// A transport failure (RPC timeout) leaves the SW-side runner
+			// alive with no local owner — without this cancel it would be
+			// unreachable by every later cleanup path and its stash would
+			// sit un-evictable for the full TTL.
+			const flight = inflight.get(key)
+			if (flight?.token && !handedOff.has(flight.token)) cancelRemote?.(flight.token)
+			inflight.delete(key)
+			onError?.(key, err)
+		}
+		const timer = setTimeout(() => {
+			void runScheduledEstimate({
+				markStarted: () => {
+					const flight = inflight.get(key)
+					if (flight?.token === token) flight.started = true
+				},
+				run: () => run(params, token, key),
+				isStale,
+				settleSuccess,
+				settleFailure,
+				clearEstimating: () => onEstimating(key, false),
+			})
 		}, debounceMs)
 		timers.set(key, timer)
 	}
@@ -182,4 +188,32 @@ export function createFeeEstimationEngine<TKey extends string | number, TParams,
 	}
 
 	return { schedule, cancel, cancelAll, handoffInclusive, handoffCompleted, rearm, dispose }
+}
+
+/** The debounce-fired estimate run, hoisted to module level so the debounced
+ *  callback itself carries no branching. The staleness re-checks sit AFTER the
+ *  awaited run on every settle path — the positions the engine's counters
+ *  contract requires — and the finally-side estimating clear fires only for
+ *  the run that still owns its key's counter. */
+async function runScheduledEstimate<TResult>(ctx: {
+	markStarted: () => void
+	run: () => Promise<TResult>
+	isStale: () => boolean
+	settleSuccess: (r: TResult) => void
+	settleFailure: (err: unknown) => void
+	clearEstimating: () => void
+}): Promise<void> {
+	try {
+		ctx.markStarted()
+		const r = await ctx.run()
+		if (ctx.isStale()) return
+		ctx.settleSuccess(r)
+	} catch (err) {
+		if (ctx.isStale()) return
+		ctx.settleFailure(err)
+	} finally {
+		if (!ctx.isStale()) {
+			ctx.clearEstimating()
+		}
+	}
 }

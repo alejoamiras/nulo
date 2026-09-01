@@ -160,7 +160,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		super(EXECUTION_SERVICE_NAME, logger)
 	}
 
-	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (159 lines) — split when touched, never grow
 	protected async init(services: ServiceCollection) {
 		this.pxeService = this.pxeClientFactory(this.logger)
 		this.profileService = services.get(ProfileService.name)
@@ -177,6 +176,24 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		this.resolver = new ContractResolver(this.logger)
 		this.authwit = new AuthwitDiscoverer(this.logger)
 		this.coordinator = new ExecutionCoordinator(this.taskService, this.logger, this.proofGate)
+		this.wireGasBalancesAndEstimateCaches()
+		this.wireExecutors()
+		// The deps literal stays HERE (Q-04 pilot): every eager `this.*` read and
+		// the lazy coordinator closure keep their capture point at the root.
+		const feeDeps: FeeStrategyDeps = {
+			txBuilder: this.txBuilder,
+			simulateTxTask: (pxe, req, opts, parentTask) => this.coordinator.simulateTxTask(pxe, req, opts, parentTask),
+			fpcService: this.fpcService,
+			tasks: this.taskService,
+			logger: this.logger,
+		}
+		this.feeStrategies = buildFeeStrategies(feeDeps)
+		this.wireCacheInvalidation()
+	}
+
+	/** Wiring only — every lambda reads `this.*` lazily at call time, so
+	 *  construction order relative to init's tail is not observable. */
+	private wireGasBalancesAndEstimateCaches(): void {
 		this.gasBalances = new GasBalanceReader({
 			getChainId: async (networkId) => (await this.networkService.getNetwork(networkId)).chainId,
 			getViewDeps: (networkId, accountAddress) =>
@@ -225,6 +242,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			},
 			logDebug: (msg) => this.logDebug(msg),
 		})
+	}
+
+	private wireExecutors(): void {
+		this.wireLaneAndTransferExecutor()
+		this.wireDappSendAndViewExecutors()
+	}
+
+	private wireLaneAndTransferExecutor(): void {
 		this.lane = new ExecutionLane({
 			operationJournal: this.operationJournal,
 			getActiveProfile: () => this.profileService.getActiveProfile(),
@@ -267,6 +292,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			this.authwit,
 			this.logger,
 		)
+	}
+
+	private wireDappSendAndViewExecutors(): void {
 		const estimateWithDiscovery = new DiscoveryAwareEstimator({
 			authwit: this.authwit,
 			buildAndEstimateValidated: (op, feeSettings, parentTask, signal) =>
@@ -323,17 +351,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			logDebug: (msg, ...rest) => this.logDebug(msg, ...rest),
 			logError: (msg, ...rest) => this.logError(msg, ...rest),
 		})
-		// The deps literal stays HERE (Q-04 pilot): every eager `this.*` read and
-		// the lazy coordinator closure keep their capture point at the root.
-		const feeDeps: FeeStrategyDeps = {
-			txBuilder: this.txBuilder,
-			simulateTxTask: (pxe, req, opts, parentTask) => this.coordinator.simulateTxTask(pxe, req, opts, parentTask),
-			fpcService: this.fpcService,
-			tasks: this.taskService,
-			logger: this.logger,
-		}
-		this.feeStrategies = buildFeeStrategies(feeDeps)
+	}
 
+	private wireCacheInvalidation(): void {
 		// Invalidate gas balance cache when a transaction settles
 		this.transactionService.onTransactionUpdated.add((tx) => {
 			if (tx.status !== TxStatus.Pending) {
@@ -494,7 +514,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		)
 	}
 
-	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (88 lines) — split when touched, never grow
 	public async executeOperations(
 		operations: Operation[],
 		origin: LocalTxOrigin,
@@ -532,100 +551,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			const operationTask = parentTask ? parentTask.startSubtask(content) : this.taskService.startNewTask(content, undefined, origin)
 
 			try {
-				let result: unknown
-				switch (operation.kind) {
-					case "register_contract": {
-						result = await this.executeRegisterContract(operation)
-						break
-					}
-					case "register_sender": {
-						result = await this.executeRegisterSender(operation)
-						break
-					}
-					case "register_token": {
-						result = await this.executeRegisterToken(operation, origin, operationTask, authorizedFence)
-						break
-					}
-					case "send_transaction": {
-						// B-02: forward hooks so the slot buckets per-origin (grantPublicAuthwit
-						// carries { originKey }); without it hostile-dApp grants + UI auth ops
-						// collapse into one __no_origin__ capacity bucket, losing fairness.
-						result = await this.executeSendTransaction(operation, origin, operationTask, hooks)
-						break
-					}
-					case "simulate_transaction": {
-						result = await this.viewExecutor.executeSimulateTransaction(operation)
-						break
-					}
-					case "simulate_utility": {
-						result = await this.viewExecutor.executeSimulateUtility(operation)
-						break
-					}
-					// Aztec.js interface:
-					case "aztec_getContractClassMetadata": {
-						result = await this.viewExecutor.executeAztecGetContractClassMetadata(operation)
-						break
-					}
-					case "aztec_getContractMetadata": {
-						result = await this.viewExecutor.executeAztecGetContractMetadata(operation)
-						break
-					}
-					case "aztec_getPrivateEvents": {
-						result = await this.viewExecutor.executeAztecGetPrivateEvents(operation)
-						break
-					}
-					case "aztec_getChainInfo": {
-						result = await this.viewExecutor.executeAztecGetChainInfo(operation)
-						break
-					}
-					case "aztec_registerSender": {
-						result = await this.executeAztecRegisterSender(operation)
-						break
-					}
-					case "aztec_getAddressBook": {
-						result = await this.viewExecutor.executeAztecGetAddressBook(operation)
-						break
-					}
-					case "aztec_registerContract": {
-						result = await this.executeAztecRegisterContract(operation)
-						break
-					}
-					case "aztec_simulateTx": {
-						result = await this.viewExecutor.executeAztecSimulateTx(operation)
-						break
-					}
-					case "aztec_executeUtility": {
-						result = await this.viewExecutor.executeAztecExecuteUtility(operation)
-						break
-					}
-					case "aztec_profileTx": {
-						result = await this.viewExecutor.executeAztecProfileTx(operation)
-						break
-					}
-					case "aztec_sendTx": {
-						// Hooks forwarded ONLY to aztec_sendTx; other ops don't need them.
-						// Capture the deletion fence HERE (a send op that writes a tx),
-						// not at the batch top — read-only ops must not trip the
-						// unlock check, and this is still before the prove (D13).
-						const fence = await this.captureFence()
-						result = await this.dappSendExecutor.executeAztecSendTx(
-							operation,
-							origin,
-							operationTask,
-							hooks,
-							fence,
-							estimateIds?.[operationIndex],
-						)
-						break
-					}
-					case "aztec_createAuthWit": {
-						result = await this.executeAztecCreateAuthWit(operation)
-						break
-					}
-					default: {
-						throw new Error("Invalid operation")
-					}
-				}
+				const result = await this.dispatchOperation(
+					operation,
+					origin,
+					operationTask,
+					hooks,
+					authorizedFence,
+					estimateIds?.[operationIndex],
+				)
 				operationTask.complete()
 				this.logDebug(`[${traceId}] executeOperations: ${operation.kind} completed`)
 				results.push({ status: "ok", result })
@@ -640,6 +573,89 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			}
 		}
 		return results
+	}
+
+	/** Per-operation dispatch — one contiguous awaited region (every arm was
+	 *  already awaited at this position in the pre-split loop). The deletion
+	 *  fence for `aztec_sendTx` is captured INSIDE its arm, not at the batch
+	 *  top: read-only ops must not trip the unlock check, and the capture still
+	 *  precedes the prove (D13). */
+	private async dispatchOperation(
+		operation: Operation,
+		origin: LocalTxOrigin,
+		operationTask: WrappedTask,
+		hooks: ExecutionHooks | undefined,
+		authorizedFence: ExecutionFence | undefined,
+		estimateId: string | undefined,
+	): Promise<unknown> {
+		switch (operation.kind) {
+			case "register_contract": {
+				return this.executeRegisterContract(operation)
+			}
+			case "register_sender": {
+				return this.executeRegisterSender(operation)
+			}
+			case "register_token": {
+				return this.executeRegisterToken(operation, origin, operationTask, authorizedFence)
+			}
+			case "send_transaction": {
+				// B-02: forward hooks so the slot buckets per-origin (grantPublicAuthwit
+				// carries { originKey }); without it hostile-dApp grants + UI auth ops
+				// collapse into one __no_origin__ capacity bucket, losing fairness.
+				return this.executeSendTransaction(operation, origin, operationTask, hooks)
+			}
+			case "simulate_transaction": {
+				return this.viewExecutor.executeSimulateTransaction(operation)
+			}
+			case "simulate_utility": {
+				return this.viewExecutor.executeSimulateUtility(operation)
+			}
+			// Aztec.js interface:
+			case "aztec_getContractClassMetadata": {
+				return this.viewExecutor.executeAztecGetContractClassMetadata(operation)
+			}
+			case "aztec_getContractMetadata": {
+				return this.viewExecutor.executeAztecGetContractMetadata(operation)
+			}
+			case "aztec_getPrivateEvents": {
+				return this.viewExecutor.executeAztecGetPrivateEvents(operation)
+			}
+			case "aztec_getChainInfo": {
+				return this.viewExecutor.executeAztecGetChainInfo(operation)
+			}
+			case "aztec_registerSender": {
+				return this.executeAztecRegisterSender(operation)
+			}
+			case "aztec_getAddressBook": {
+				return this.viewExecutor.executeAztecGetAddressBook(operation)
+			}
+			case "aztec_registerContract": {
+				return this.executeAztecRegisterContract(operation)
+			}
+			case "aztec_simulateTx": {
+				return this.viewExecutor.executeAztecSimulateTx(operation)
+			}
+			case "aztec_executeUtility": {
+				return this.viewExecutor.executeAztecExecuteUtility(operation)
+			}
+			case "aztec_profileTx": {
+				return this.viewExecutor.executeAztecProfileTx(operation)
+			}
+			case "aztec_sendTx": {
+				// Hooks forwarded ONLY to aztec_sendTx; other ops don't need them.
+				// Capture the deletion fence HERE (a send op that writes a tx),
+				// not at the batch top — read-only ops must not trip the
+				// unlock check, and this is still before the prove (D13).
+				const fence = await this.captureFence()
+				return this.dappSendExecutor.executeAztecSendTx(operation, origin, operationTask, hooks, fence, estimateId)
+			}
+			case "aztec_createAuthWit": {
+				return this.executeAztecCreateAuthWit(operation)
+			}
+			default: {
+				throw new Error("Invalid operation")
+			}
+		}
 	}
 
 	// Nulo base:

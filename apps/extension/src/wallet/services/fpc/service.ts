@@ -162,7 +162,6 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		// Sentinel shape: the concurrent-holder early return maps UNDER the lock
 		// (as today), while the tail mapping below stays after release. `undefined`
 		// is the no-early-return sentinel — the mapped value is always an array.
-		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 21) — refactor when touched, never raise
 		const early = await this.lock.withLock(async () => {
 			// Re-read storage now that we hold the lock. A prior holder in the
 			// queue may have just completed discovery — if so, skip the PXE
@@ -181,66 +180,89 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 
 			const network = await resolveNetworkByChainId(this.networkService, chainId)
 			const pxe = this.pxeService.getPXE(networkInfoFrom(network))
+			const toDiscover = await this.collectMissingProtocolInstances(hasSponsoredFpc, hasPrivateFpc)
 
-			const toDiscover: { instance: ContractInstanceWithAddress; artifact: ContractArtifact }[] = []
-
-			if (!hasSponsoredFpc) {
-				// Same params as getOrComputeProtocolAddresses — the shared const is what guarantees the
-				// discovered/registered instance equals `protocols.sponsored`.
-				const instance = await getContractInstanceFromInstantiationParams(SponsoredFPCContractArtifact, SPONSORED_FPC_PARAMS())
-				this.logDebug(`getFpcs: SponsoredFPC instance address=${instance.address.toString()}`)
-				toDiscover.push({ instance, artifact: SponsoredFPCContractArtifact })
-			}
-			if (!hasPrivateFpc) {
-				// Same params as getOrComputeProtocolAddresses — a divergence here would register/store a
-				// DIFFERENT PrivateFPC than `protocols.private`, so hasPrivateFpc never matches (endless
-				// re-discovery) and the private-fuel path keys off the wrong address (unrecoverable-deposit
-				// hazard — see this file's header). The shared const structurally prevents that drift.
-				const instance = await getContractInstanceFromInstantiationParams(PrivateFPCContractArtifact, PRIVATE_FPC_PARAMS())
-				this.logDebug(`getFpcs: PrivateFPC instance address=${instance.address.toString()}`)
-				toDiscover.push({ instance, artifact: PrivateFPCContractArtifact })
-			}
-
-			for (const { instance: contractInstance, artifact: contractArtifact } of toDiscover) {
+			for (const item of toDiscover) {
 				try {
-					await pxe.registerContract({ instance: contractInstance, artifact: contractArtifact })
-					this.logInfo(`Registered protocol FPC: ${contractInstance.address.toString()}`)
-
-					const type = this.detectFpcType(contractArtifact)
-					const fpcHandler = getFpcHandler(type)
-					fpcHandler.validateArtifact(contractArtifact)
-
-					const id = await nextRandomId(this.storage)
-					const fpc: StoredFpc = {
-						id,
-						profileId: profile.id,
-						chainId,
-						type,
-						address: contractInstance.address.toString(),
-						name: type === FpcType.PrivateFpc ? PRIVATE_FPC_DEFAULT_NAME : SPONSORED_FPC_DEFAULT_NAME,
-					}
-					// Discovery is best-effort per item, but its WRITES carry the same
-					// obligations as addFpc: never land for a deleted profile or a
-					// mid-purge chain (the per-item catch keeps failures soft).
-					deletion.assertCurrent(fence.profileId, fence.epoch)
-					if (!(await this.networkService.isNetworkLive(network.id))) {
-						throw new Error("network deleted")
-					}
-					await this.storage.set(id, fpc)
-					if (!deletion.isCurrent(fence.profileId, fence.epoch)) {
-						await this.storage.delete(id)
-						throw new Error(`profile ${fence.profileId} deleted`)
-					}
-					result.push(fpc)
+					result.push(await this.registerAndStoreProtocolFpc(item, pxe, chainId as number, network, fence, deletion))
 				} catch (err) {
-					this.logWarn(`getFpcs: Failed to discover FPC ${contractInstance.address.toString()}:`, err)
-					this.logError(`Failed to discover FPC ${contractInstance.address.toString()}`, err)
+					this.logWarn(`getFpcs: Failed to discover FPC ${item.instance.address.toString()}:`, err)
+					this.logError(`Failed to discover FPC ${item.instance.address.toString()}`, err)
 				}
 			}
 			return undefined
 		})
 		if (early) return early
 		return result.map((f) => this.decorate(f, protocols))
+	}
+
+	/** Derive the instance for each protocol FPC the profile is missing. Same
+	 *  params as getOrComputeProtocolAddresses — the shared consts are what
+	 *  guarantee the discovered/registered instances equal `protocols.*`; a
+	 *  divergence would register/store a DIFFERENT FPC than the derived address,
+	 *  so the has-checks never match (endless re-discovery) and the private-fuel
+	 *  path keys off the wrong address (unrecoverable-deposit hazard — see this
+	 *  file's header). */
+	private async collectMissingProtocolInstances(
+		hasSponsoredFpc: boolean,
+		hasPrivateFpc: boolean,
+	): Promise<{ instance: ContractInstanceWithAddress; artifact: ContractArtifact }[]> {
+		const toDiscover: { instance: ContractInstanceWithAddress; artifact: ContractArtifact }[] = []
+		if (!hasSponsoredFpc) {
+			const instance = await getContractInstanceFromInstantiationParams(SponsoredFPCContractArtifact, SPONSORED_FPC_PARAMS())
+			this.logDebug(`getFpcs: SponsoredFPC instance address=${instance.address.toString()}`)
+			toDiscover.push({ instance, artifact: SponsoredFPCContractArtifact })
+		}
+		if (!hasPrivateFpc) {
+			const instance = await getContractInstanceFromInstantiationParams(PrivateFPCContractArtifact, PRIVATE_FPC_PARAMS())
+			this.logDebug(`getFpcs: PrivateFPC instance address=${instance.address.toString()}`)
+			toDiscover.push({ instance, artifact: PrivateFPCContractArtifact })
+		}
+		return toDiscover
+	}
+
+	/** One protocol FPC's register + store, called only UNDER the discovery
+	 *  lock. Discovery is best-effort per item (the caller's catch keeps
+	 *  failures soft), but its WRITES carry the same obligations as addFpc:
+	 *  never land for a deleted profile or a mid-purge chain — the deletion
+	 *  fence sequence (assert → network-live check → write → re-check →
+	 *  compensating delete) is one contiguous span here. Throws propagate to
+	 *  the caller's per-item catch. */
+	private async registerAndStoreProtocolFpc(
+		item: { instance: ContractInstanceWithAddress; artifact: ContractArtifact },
+		pxe: ReturnType<PxeServiceClient["getPXE"]>,
+		chainId: number,
+		network: { id: string },
+		fence: { profileId: string; epoch: number },
+		deletion: ReturnType<ProfileService["getDeletionState"]>,
+	): Promise<StoredFpc> {
+		const { instance: contractInstance, artifact: contractArtifact } = item
+		await pxe.registerContract({ instance: contractInstance, artifact: contractArtifact })
+		this.logInfo(`Registered protocol FPC: ${contractInstance.address.toString()}`)
+
+		const type = this.detectFpcType(contractArtifact)
+		const fpcHandler = getFpcHandler(type)
+		fpcHandler.validateArtifact(contractArtifact)
+
+		const id = await nextRandomId(this.storage)
+		const fpc: StoredFpc = {
+			id,
+			profileId: fence.profileId,
+			chainId,
+			type,
+			address: contractInstance.address.toString(),
+			name: type === FpcType.PrivateFpc ? PRIVATE_FPC_DEFAULT_NAME : SPONSORED_FPC_DEFAULT_NAME,
+		}
+		deletion.assertCurrent(fence.profileId, fence.epoch)
+		if (!(await this.networkService.isNetworkLive(network.id))) {
+			throw new Error("network deleted")
+		}
+		await this.storage.set(id, fpc)
+		if (!deletion.isCurrent(fence.profileId, fence.epoch)) {
+			await this.storage.delete(id)
+			throw new Error(`profile ${fence.profileId} deleted`)
+		}
+		return fpc
 	}
 
 	public async getFpc(id: string): Promise<FpcInfo> {

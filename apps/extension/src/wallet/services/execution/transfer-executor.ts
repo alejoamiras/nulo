@@ -42,6 +42,24 @@ import type { Action, FeeOptions, FeeSettings, TransferFeeEstimate } from "./spe
 import { fingerprintBaseFee, fingerprintFeeSettings, type TransferEstimateReuse } from "./transfer-estimate-reuse"
 import { getEstimatedFee, getGasDetails } from "./tx-fee-details"
 
+/** The resolved inputs the prove-and-send tail consumes, produced by either
+ *  the reused-estimate arm or the fresh-build arm. */
+type TransferBuildInputs = {
+	txRequest: TxExecutionRequest
+	node: AztecNode
+	pxe: IPXE
+	account: IAccountContract
+	network: Network
+	nonce: { toString(): string }
+	feePaymentMethod: AccountFeePaymentMethodOptions
+	initializesAccount: boolean | undefined
+	activity: {
+		token: { contract: string; name: string; symbol: string; decimals: number }
+		fnName: string
+		args: readonly unknown[]
+	}
+}
+
 /** Controller-registry subset of the (future) execution lane. */
 export interface TransferExecutorLane {
 	registerController(journalId: string, controller: AbortController): void
@@ -78,44 +96,13 @@ export interface TransferExecutorDeps {
 export class TransferExecutor {
 	public constructor(private readonly deps: TransferExecutorDeps) {}
 
-	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (118 lines) — split when touched, never grow
 	public async execute(req: TransferRequest, precomputedEstimateId?: string, fence?: ExecutionFence): Promise<string> {
 		const { networkId, accountAddress, tokenId, transferType, recipientAddress, amount } = req
 		const origin: LocalTxOrigin = { type: OriginType.UI }
 		const transferContent = new TransferContent(tokenId, transferType, accountAddress, recipientAddress, amount, networkId)
 		const transferTask = this.deps.tasks.startNewTask(transferContent, undefined, origin)
 
-		// Durable record of this in-flight operation. Survives SW restart
-		// and popup close/reopen so consumers can recover a consistent view
-		// of "what is this tx doing right now". FSM:
-		//   pending → simulating → proving → submitting → succeeded | failed | cancelled
-		let journalOp: OperationRecord | undefined
-		try {
-			const profile = await this.deps.getActiveProfile()
-			if (profile) {
-				journalOp = await this.deps.createJournalOperation({
-					kind: "transfer",
-					origin: "popup",
-					profileId: profile.id,
-					accountAddress,
-					networkId,
-					tokenId,
-					// Persist amount + recipient so terminal cards can render
-					// the same info as awaiting/settled cards. amount is bigint
-					// → string for JSON safety; field name matches
-					// `balanceFormatted(rawAmount, decimals, length)`.
-					amountRaw: amount.toString(),
-					recipientAddress,
-					// Persist the privacy direction so the in-flight awaiting
-					// card can render the Private/Public chip the settled card
-					// shows. Resolved via `formatTransferType()` consumer-side.
-					transferType,
-				})
-			}
-		} catch (error) {
-			this.deps.logError("Failed to create journal operation", getErrorMessage(error))
-		}
-		const journalId = journalOp?.id
+		const journalId = await this.createTransferJournal(req)
 		const markJournal = async (progress: JobProgress, error?: JobError | null) => {
 			if (!journalId) return
 			try {
@@ -141,22 +128,6 @@ export class TransferExecutor {
 			// or any input field) — conservative: any mismatch ⇒ rebuild.
 			const reused = precomputedEstimateId ? await this.deps.estimateReuse.tryConsume(precomputedEstimateId, req) : undefined
 
-			let txRequest: TxExecutionRequest
-			let node: AztecNode
-			let pxe: IPXE
-			let account: IAccountContract
-			let network: Network
-			let nonce: { toString(): string }
-			let feePaymentMethod: AccountFeePaymentMethodOptions
-			let initializesAccount: boolean | undefined
-			// Activity-feed inputs — captured separately from the FPC-mutated
-			// `buildAndEstimate` txCalls so the persisted record stays just
-			// the user-intent transfer (no `pay_fee` / `fee_entrypoint_*`
-			// fee-payload pollution leaking into the activity card title).
-			let activityToken: { contract: string; name: string; symbol: string; decimals: number }
-			let activityFnName: string
-			let activityArgs: readonly unknown[]
-
 			// Enter `simulating` BEFORE the build — the fee strategies inside
 			// run real `simulateTx` calls which can take several seconds;
 			// leaving the journal at `pending` would hide that work from the
@@ -165,37 +136,10 @@ export class TransferExecutor {
 			await markJournal({ stage: "simulating" })
 			checkCancelled()
 
-			if (reused) {
-				this.deps.logDebug(`executeTransfer: reusing precomputed estimate ${precomputedEstimateId}`)
-				txRequest = reused.txRequest
-				// The entry retains the exact build — its provenance rides along.
-				initializesAccount = reused.initializesAccount
-				nonce = reused.nonce
-				feePaymentMethod = reused.feePaymentMethod
-				activityToken = reused.token
-				activityFnName = reused.fnName
-				activityArgs = reused.args
-				network = await this.deps.getNetwork(networkId)
-				node = await this.deps.getNode(network.chainId)
-				pxe = this.deps.getPXE(network)
-				const profile = await requireActiveProfile(this.deps, "Wallet locked")
-				account = await this.deps.getAccountContract(profile.id, network.chainId, accountAddress)
-			} else {
-				const { op, token, fn, args } = await this.deps.planner.buildTransferOperation(req)
-				activityToken = { contract: token.contract, name: token.name, symbol: token.symbol, decimals: token.decimals }
-				activityFnName = fn.name
-				activityArgs = args
-
-				const built = await this.deps.buildAndEstimate(op, op.feeSettings, transferTask)
-				initializesAccount = built.initializesAccount
-				txRequest = built.txRequest
-				node = built.node
-				pxe = built.pxe
-				account = built.account
-				network = built.network
-				nonce = built.nonce
-				feePaymentMethod = built.feePaymentMethod
-			}
+			const { txRequest, node, pxe, account, network, nonce, feePaymentMethod, initializesAccount, activity } = reused
+				? await this.fromReusedEstimate(reused, req, precomputedEstimateId)
+				: await this.buildFresh(req, transferTask)
+			const { token: activityToken, fnName: activityFnName, args: activityArgs } = activity
 
 			// Activity-feed shape is always transfer-only (no FPC fee payload).
 			// `txCalls` from the build carries the FPC mutation (`pay_fee` for
@@ -264,6 +208,92 @@ export class TransferExecutor {
 			throw error
 		} finally {
 			if (journalId) this.deps.lane.deleteController(journalId)
+		}
+	}
+
+	/** Durable record of the in-flight operation. Survives SW restart and popup
+	 *  close/reopen so consumers can recover a consistent view of "what is this
+	 *  tx doing right now". FSM: pending → simulating → proving → submitting →
+	 *  succeeded | failed | cancelled. Creation is best-effort — a journal
+	 *  failure logs and returns undefined, never blocks the transfer. */
+	private async createTransferJournal(req: TransferRequest): Promise<string | undefined> {
+		let journalOp: OperationRecord | undefined
+		try {
+			const profile = await this.deps.getActiveProfile()
+			if (profile) {
+				journalOp = await this.deps.createJournalOperation({
+					kind: "transfer",
+					origin: "popup",
+					profileId: profile.id,
+					accountAddress: req.accountAddress,
+					networkId: req.networkId,
+					tokenId: req.tokenId,
+					// Persist amount + recipient so terminal cards can render
+					// the same info as awaiting/settled cards. amount is bigint
+					// → string for JSON safety; field name matches
+					// `balanceFormatted(rawAmount, decimals, length)`.
+					amountRaw: req.amount.toString(),
+					recipientAddress: req.recipientAddress,
+					// Persist the privacy direction so the in-flight awaiting
+					// card can render the Private/Public chip the settled card
+					// shows. Resolved via `formatTransferType()` consumer-side.
+					transferType: req.transferType,
+				})
+			}
+		} catch (error) {
+			this.deps.logError("Failed to create journal operation", getErrorMessage(error))
+		}
+		return journalOp?.id
+	}
+
+	/** Reused-estimate arm: the entry retains the exact build — its provenance
+	 *  rides along; only the live handles (network/node/pxe/account) resolve. */
+	private async fromReusedEstimate(
+		reused: NonNullable<Awaited<ReturnType<TransferEstimateReuse["tryConsume"]>>>,
+		req: TransferRequest,
+		precomputedEstimateId: string | undefined,
+	): Promise<TransferBuildInputs> {
+		this.deps.logDebug(`executeTransfer: reusing precomputed estimate ${precomputedEstimateId}`)
+		const network = await this.deps.getNetwork(req.networkId)
+		const node = await this.deps.getNode(network.chainId)
+		const pxe = this.deps.getPXE(network)
+		const profile = await requireActiveProfile(this.deps, "Wallet locked")
+		const account = await this.deps.getAccountContract(profile.id, network.chainId, req.accountAddress)
+		return {
+			txRequest: reused.txRequest,
+			node,
+			pxe,
+			account,
+			network,
+			nonce: reused.nonce,
+			feePaymentMethod: reused.feePaymentMethod,
+			initializesAccount: reused.initializesAccount,
+			activity: { token: reused.token, fnName: reused.fnName, args: reused.args },
+		}
+	}
+
+	/** Fresh-build arm: plan the transfer, then build + estimate. The activity
+	 *  inputs are captured from the PLAN, separately from the FPC-mutated
+	 *  `buildAndEstimate` txCalls, so the persisted record stays just the
+	 *  user-intent transfer (no `pay_fee` / `fee_entrypoint_*` fee-payload
+	 *  pollution leaking into the activity card title). */
+	private async buildFresh(req: TransferRequest, transferTask: WrappedTask): Promise<TransferBuildInputs> {
+		const { op, token, fn, args } = await this.deps.planner.buildTransferOperation(req)
+		const built = await this.deps.buildAndEstimate(op, op.feeSettings, transferTask)
+		return {
+			txRequest: built.txRequest,
+			node: built.node,
+			pxe: built.pxe,
+			account: built.account,
+			network: built.network,
+			nonce: built.nonce,
+			feePaymentMethod: built.feePaymentMethod,
+			initializesAccount: built.initializesAccount,
+			activity: {
+				token: { contract: token.contract, name: token.name, symbol: token.symbol, decimals: token.decimals },
+				fnName: fn.name,
+				args,
+			},
 		}
 	}
 
