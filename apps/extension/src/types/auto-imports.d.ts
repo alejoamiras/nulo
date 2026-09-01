@@ -13,6 +13,7 @@ declare global {
   const AssemblyAbortedError: typeof import('../utils/full-backup-helpers').AssemblyAbortedError
   const BootstrapFailedError: typeof import('../composables/unlockWait').BootstrapFailedError
   const CHAIN_IDS: typeof import('../utils/chain-ids').CHAIN_IDS
+  const CLEANUP_PENDING_MESSAGE: typeof import('../composables/full-backup-restore').CLEANUP_PENDING_MESSAGE
   const EffectScope: typeof import('vue').EffectScope
   const EnsureSuperseded: typeof import('../stores/balances.store').EnsureSuperseded
   const FEE_JUICE_DECIMALS: typeof import('../utils/fee-estimation').FEE_JUICE_DECIMALS
@@ -36,6 +37,7 @@ declare global {
   const TOAST_DURATION: typeof import('../composables/toast.js').TOAST_DURATION
   const UnlockTimeoutError: typeof import('../composables/unlockWait').UnlockTimeoutError
   const activateNetworkGuarded: typeof import('../utils/guarded-network-activation').activateNetworkGuarded
+  const applyOutcome: typeof import('../composables/full-backup-restore').applyOutcome
   const assembleFullBackup: typeof import('../utils/full-backup-helpers').assembleFullBackup
   const awaitLivenessAdvance: typeof import('../utils/background-liveness').awaitLivenessAdvance
   const awaitProfileActivation: typeof import('../composables/unlockWait').awaitProfileActivation
@@ -44,6 +46,7 @@ declare global {
   const buildActivityRows: typeof import('../utils/activity-rows').buildActivityRows
   const buildFeeEstimate: typeof import('../utils/fee-estimation').buildFeeEstimate
   const buildJournalTerminalCardProps: typeof import('../utils/journal-state').buildJournalTerminalCardProps
+  const buildRestoreSecret: typeof import('../composables/full-backup-restore').buildRestoreSecret
   const capitalize: typeof import('../utils/string').capitalize
   const categoricalLabel: typeof import('../utils/journal-state').categoricalLabel
   const clampDecimals: typeof import('../utils/amount').clampDecimals
@@ -156,10 +159,19 @@ declare global {
   const requireTransaction: typeof import('../utils/core').requireTransaction
   const resolveComponent: typeof import('vue').resolveComponent
   const resolveFromDisplay: typeof import('../utils/received-display').resolveFromDisplay
+  const resolvePasskeyCredential: typeof import('../composables/full-backup-restore').resolvePasskeyCredential
   const resolveReceivedType: typeof import('../utils/received-display').resolveReceivedType
   const resolveRestoredActiveNetworkId: typeof import('../utils/full-backup-helpers').resolveRestoredActiveNetworkId
+  const restoreAccountStateStage: typeof import('../composables/full-backup-restore').restoreAccountStateStage
   const restoreAccountsAndFilterOwnedSlices: typeof import('../composables/useFullBackupImport').restoreAccountsAndFilterOwnedSlices
+  const restoreAccountsStage: typeof import('../composables/full-backup-restore').restoreAccountsStage
+  const restoreActiveNetworkPointer: typeof import('../composables/full-backup-restore').restoreActiveNetworkPointer
+  const restoreNetworksStage: typeof import('../composables/full-backup-restore').restoreNetworksStage
+  const restoreServiceSlices: typeof import('../composables/full-backup-restore').restoreServiceSlices
+  const restoreTokensStage: typeof import('../composables/full-backup-restore').restoreTokensStage
+  const rollbackCreatedProfile: typeof import('../composables/full-backup-restore').rollbackCreatedProfile
   const runImportChainSync: typeof import('../composables/importChainSync').runImportChainSync
+  const runRestoreFailurePath: typeof import('../composables/full-backup-restore').runRestoreFailurePath
   const sanitizeJournalSubtitle: typeof import('../utils/journal-state').sanitizeJournalSubtitle
   const sanitizeString: typeof import('../utils/string').sanitizeString
   const scrubUrls: typeof import('../utils/scrub-urls').scrubUrls
@@ -243,6 +255,9 @@ declare global {
   export type { ImportCompletionDeps, ImportCompletionOutcome } from '../composables/completeImportWithRecovery'
   import('../composables/completeImportWithRecovery')
   // @ts-ignore
+  export type { RestoreIo, StageFail, StageOutcome, RestoreScratch, ProfileRestoreClient, NetworkRestoreClient, AccountRestoreClient, RestoredNetwork, SliceRestoreClient } from '../composables/full-backup-restore'
+  import('../composables/full-backup-restore')
+  // @ts-ignore
   export type { ImportChainSyncDeps } from '../composables/importChainSync'
   import('../composables/importChainSync')
   // @ts-ignore
@@ -273,7 +288,7 @@ declare global {
   export type { FieldDef, FieldHandle, FormState } from '../composables/useFormState'
   import('../composables/useFormState')
   // @ts-ignore
-  export type { RestoreStatus, RestoreStage, FullBackupEnvelope, UseFullBackupImportOptions, UseFullBackupImportResult } from '../composables/useFullBackupImport'
+  export type { FullBackupEnvelope, UseFullBackupImportOptions, UseFullBackupImportResult, RestoreStage, RestoreStatus } from '../composables/useFullBackupImport'
   import('../composables/useFullBackupImport')
   // @ts-ignore
   export type { IncomingTransferServiceLike, ConfigServiceLike, PriceServiceLike, UseIncomingTransfersOptions, UseIncomingTransfersResult } from '../composables/useIncomingTransfers'
@@ -365,6 +380,7 @@ declare module 'vue' {
     readonly AssemblyAbortedError: UnwrapRef<typeof import('../utils/full-backup-helpers')['AssemblyAbortedError']>
     readonly BootstrapFailedError: UnwrapRef<typeof import('../composables/unlockWait')['BootstrapFailedError']>
     readonly CHAIN_IDS: UnwrapRef<typeof import('../utils/chain-ids')['CHAIN_IDS']>
+    readonly CLEANUP_PENDING_MESSAGE: UnwrapRef<typeof import('../composables/full-backup-restore')['CLEANUP_PENDING_MESSAGE']>
     readonly EffectScope: UnwrapRef<typeof import('vue')['EffectScope']>
     readonly EnsureSuperseded: UnwrapRef<typeof import('../stores/balances.store')['EnsureSuperseded']>
     readonly FEE_JUICE_DECIMALS: UnwrapRef<typeof import('../utils/fee-estimation')['FEE_JUICE_DECIMALS']>
@@ -388,6 +404,7 @@ declare module 'vue' {
     readonly TOAST_DURATION: UnwrapRef<typeof import('../composables/toast.js')['TOAST_DURATION']>
     readonly UnlockTimeoutError: UnwrapRef<typeof import('../composables/unlockWait')['UnlockTimeoutError']>
     readonly activateNetworkGuarded: UnwrapRef<typeof import('../utils/guarded-network-activation')['activateNetworkGuarded']>
+    readonly applyOutcome: UnwrapRef<typeof import('../composables/full-backup-restore')['applyOutcome']>
     readonly assembleFullBackup: UnwrapRef<typeof import('../utils/full-backup-helpers')['assembleFullBackup']>
     readonly awaitLivenessAdvance: UnwrapRef<typeof import('../utils/background-liveness')['awaitLivenessAdvance']>
     readonly awaitProfileActivation: UnwrapRef<typeof import('../composables/unlockWait')['awaitProfileActivation']>
@@ -396,6 +413,7 @@ declare module 'vue' {
     readonly buildActivityRows: UnwrapRef<typeof import('../utils/activity-rows')['buildActivityRows']>
     readonly buildFeeEstimate: UnwrapRef<typeof import('../utils/fee-estimation')['buildFeeEstimate']>
     readonly buildJournalTerminalCardProps: UnwrapRef<typeof import('../utils/journal-state')['buildJournalTerminalCardProps']>
+    readonly buildRestoreSecret: UnwrapRef<typeof import('../composables/full-backup-restore')['buildRestoreSecret']>
     readonly capitalize: UnwrapRef<typeof import('../utils/string')['capitalize']>
     readonly categoricalLabel: UnwrapRef<typeof import('../utils/journal-state')['categoricalLabel']>
     readonly clampDecimals: UnwrapRef<typeof import('../utils/amount')['clampDecimals']>
@@ -508,10 +526,19 @@ declare module 'vue' {
     readonly requireTransaction: UnwrapRef<typeof import('../utils/core')['requireTransaction']>
     readonly resolveComponent: UnwrapRef<typeof import('vue')['resolveComponent']>
     readonly resolveFromDisplay: UnwrapRef<typeof import('../utils/received-display')['resolveFromDisplay']>
+    readonly resolvePasskeyCredential: UnwrapRef<typeof import('../composables/full-backup-restore')['resolvePasskeyCredential']>
     readonly resolveReceivedType: UnwrapRef<typeof import('../utils/received-display')['resolveReceivedType']>
     readonly resolveRestoredActiveNetworkId: UnwrapRef<typeof import('../utils/full-backup-helpers')['resolveRestoredActiveNetworkId']>
+    readonly restoreAccountStateStage: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreAccountStateStage']>
     readonly restoreAccountsAndFilterOwnedSlices: UnwrapRef<typeof import('../composables/useFullBackupImport')['restoreAccountsAndFilterOwnedSlices']>
+    readonly restoreAccountsStage: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreAccountsStage']>
+    readonly restoreActiveNetworkPointer: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreActiveNetworkPointer']>
+    readonly restoreNetworksStage: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreNetworksStage']>
+    readonly restoreServiceSlices: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreServiceSlices']>
+    readonly restoreTokensStage: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreTokensStage']>
+    readonly rollbackCreatedProfile: UnwrapRef<typeof import('../composables/full-backup-restore')['rollbackCreatedProfile']>
     readonly runImportChainSync: UnwrapRef<typeof import('../composables/importChainSync')['runImportChainSync']>
+    readonly runRestoreFailurePath: UnwrapRef<typeof import('../composables/full-backup-restore')['runRestoreFailurePath']>
     readonly sanitizeJournalSubtitle: UnwrapRef<typeof import('../utils/journal-state')['sanitizeJournalSubtitle']>
     readonly sanitizeString: UnwrapRef<typeof import('../utils/string')['sanitizeString']>
     readonly scrubUrls: UnwrapRef<typeof import('../utils/scrub-urls')['scrubUrls']>
