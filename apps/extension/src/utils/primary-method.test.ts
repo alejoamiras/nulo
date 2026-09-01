@@ -73,7 +73,7 @@ describe("pickPrimaryMethod — empty / degenerate inputs", () => {
 })
 
 describe("pickPrimaryMethod — drip regression (the bug this PR fixes)", () => {
-	// Faucet drip shape: wallet-injected sponsor call sits at index 0, the
+	// Drip shape: wallet-injected sponsor call sits at index 0, the
 	// user's actual call sits at index 1. Pre-fix, the journal title was
 	// derived via .find(c => c.method ?? c.name) which returned the first
 	// item → the user saw "Sponsored unconditionally" while proving, then

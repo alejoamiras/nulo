@@ -25,7 +25,7 @@ const LEGACY_APP_ID = "nulo-faucet"
 
 async function buildCapabilityManifest() {
 	const sponsoredFpc = await getSponsoredFpcInstance()
-	// The faucet tokens (Dripper/NULO/OLUN) are universal deploys (deployer ZERO, fixed salts), so
+	// The drip tokens (Dripper/NULO/OLUN) are universal deploys (deployer ZERO, fixed salts), so
 	// the SAME addresses exist on BOTH networks — the grant includes them everywhere. The PrivateFPC +
 	// FEE_JUICE + auth-registry grants keep private fuel and private-fuel-paid claims working (DP6).
 	// The FPC is registered on both networks, so both grants must include it — the earlier bridge-only
@@ -43,7 +43,7 @@ async function buildCapabilityManifest() {
 }
 
 async function registerAllContracts(w: Wallet): Promise<void> {
-	// The bridge trio + PrivateFPC + the faucet's Dripper/NULO/OLUN all exist on both networks now
+	// The bridge trio + PrivateFPC + the drip tab's Dripper/NULO/OLUN all exist on both networks now
 	// (universal deploys — identical addresses per salt+args).
 	const [proxyInst, tokenInst, bridgeInst] = await Promise.all([
 		rebuildBridgeProxyInstance(),
@@ -64,7 +64,7 @@ async function registerAllContracts(w: Wallet): Promise<void> {
 	await w.registerContract(privateFpcInst, privateFpcArtifact)
 }
 
-// Module-level singleton - ONE Aztec session shared by both the Faucet and Bridge tabs. The two tabs
+// Module-level singleton - ONE Aztec session shared by both the Drip and Bridge tabs. The two tabs
 // are the same origin = the same app to the wallet, so a single combined manifest is granted once;
 // connect on either tab and the other inherits the connection + the full grant (no second prompt).
 const session = createAztecWalletSession({

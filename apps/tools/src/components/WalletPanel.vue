@@ -103,7 +103,7 @@ function openInstall() {
 		<Flex v-else-if="showNoWalletCta" direction="column" gap="12" align="start" class="no-wallet">
 			<h3>No Aztec wallet detected on this browser.</h3>
 			<p>
-				This faucet works with any wallet that speaks the Aztec Wallet SDK. Nulo is the fastest
+				Works with any wallet that speaks the Aztec Wallet SDK. Nulo is the fastest
 				way to start - it's an extension, takes 30 seconds.
 			</p>
 			<Button :data-testid="TESTIDS.btnInstallNulo" @click="openInstall">

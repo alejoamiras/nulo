@@ -21,13 +21,13 @@ vi.mock("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Dripper.js", 
 vi.mock("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js", () => ({ TokenContractArtifact: { name: "Token" } }))
 
 import { __resetWalletConnectionForTests, useWalletConnection } from "@/composables/useWalletConnection"
-import FaucetView from "./FaucetView.vue"
+import DripView from "./DripView.vue"
 
 const ADDR_A = `0x${"aa".padStart(64, "0")}`
 const ADDR_B = `0x${"bb".padStart(64, "0")}`
 
 /** Every SETUP of this stub records the account it was created with — a new entry means the
- *  real TokenCard would have re-run its setup and re-bound useFaucetDrip/useTokenBalance to
+ *  real TokenCard would have re-run its setup and re-bound useDrip/useTokenBalance to
  *  that account. This is the D-1 pin: cards must REMOUNT when the active account changes. */
 const captured: string[] = []
 const TokenCardStub = defineComponent({
@@ -40,12 +40,12 @@ const TokenCardStub = defineComponent({
 })
 
 function mountView() {
-	return mount(FaucetView, {
+	return mount(DripView, {
 		global: { stubs: { TokenCard: TokenCardStub, WalletPanel: true } },
 	})
 }
 
-describe("FaucetView — account-keyed token cards (D-1)", () => {
+describe("DripView — account-keyed token cards (D-1)", () => {
 	beforeEach(() => {
 		__resetWalletConnectionForTests()
 		captured.length = 0

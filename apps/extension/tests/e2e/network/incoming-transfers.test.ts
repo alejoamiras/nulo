@@ -9,7 +9,7 @@ const hasConfig = aztecConfig !== undefined
  * Runtime checks for the incoming-transfer arc, pinned by the post-impl
  * codex audit. Three named scenarios:
  *
- *   1. **faucet-drip name regression** — the unified `pickPrimaryMethod`
+ *   1. **drip name regression** — the unified `pickPrimaryMethod`
  *      helper across F4's 7 sites is exercised at every popup mount
  *      that loads the activity feed; the popup-side TransactionService
  *      replay flows through the helper. A reverted F4 site would
@@ -66,7 +66,7 @@ test.skipIf(!hasConfig)(
 		const incomingCards = await page.$$('[data-testid="tx-incoming-card"]')
 		expect(incomingCards.length).toBe(0)
 
-		// The faucet-drip name regression is captured at runtime by the
+		// The drip name regression is captured at runtime by the
 		// activity page successfully MOUNTING — its row-merge logic
 		// (buildActivityRows) runs through the unified row model + the
 		// pickPrimaryMethod helper indirectly via the tx-card flow. A

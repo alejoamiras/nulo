@@ -290,7 +290,7 @@ describe("OperationPlanner.extractPrimaryMethod", () => {
 })
 
 // FEE_METHODS-filter regression: when the planner's input includes a fee
-// method as the first call (faucet drip wraps the user's drip_to_private
+// method as the first call (the drip wraps the user's drip_to_private
 // behind a wallet-injected sponsor_unconditionally), the in-flight task
 // title MUST be derived from the USER call, not the fee call. Pinned here
 // so a future refactor of the planner or the shared pickPrimaryMethod helper

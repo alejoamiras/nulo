@@ -9,7 +9,7 @@ import { reactive, ref } from "vue"
 import { DRIPPER } from "@/contracts/deployments"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import { IS_MAINNET, NETWORK } from "@/lib/network"
-import type { FaucetToken, TokenSymbol } from "@/constants/tokens"
+import type { DripToken, TokenSymbol } from "@/constants/tokens"
 import { withOperation } from "./useOpsInFlight"
 import { type NormalizedError, normalizeError } from "@/lib/errors"
 
@@ -34,14 +34,14 @@ interface DripperContract {
 	methods: Record<string, (...args: unknown[]) => DripperInteraction>
 }
 
-export function useFaucetDrip(wallet: Wallet, account: AztecAddress) {
+export function useDrip(wallet: Wallet, account: AztecAddress) {
 	return {
 		inflight,
 		last,
 		isActive: (token: TokenSymbol, target: DripTarget) => inflight.value?.tokenSymbol === token && inflight.value.target === target,
 		// withOperation: a drip is an account-sensitive prompt/send span — while it runs, account
 		// switching is blocked (useOpsInFlight, plan D-8/D-19).
-		drip: async (token: FaucetToken, tokenAddress: AztecAddress, target: DripTarget) =>
+		drip: async (token: DripToken, tokenAddress: AztecAddress, target: DripTarget) =>
 			withOperation(() => drip(wallet, account, token, tokenAddress, target)),
 	}
 }
@@ -49,7 +49,7 @@ export function useFaucetDrip(wallet: Wallet, account: AztecAddress) {
 async function drip(
 	wallet: Wallet,
 	account: AztecAddress,
-	token: FaucetToken,
+	token: DripToken,
 	tokenAddress: AztecAddress,
 	target: DripTarget,
 ): Promise<DripResult> {
@@ -117,7 +117,7 @@ async function drip(
 /**
  * sendTx with the default wait option returns `{ receipt: TxReceipt }`
  * (TxSendResultMined); with NO_WAIT it returns `{ txHash }`
- * (TxSendResultImmediate). The faucet uses the mined path, so the hash
+ * (TxSendResultImmediate). The app uses the mined path, so the hash
  * lives at `tx.receipt.txHash`. The top-level `txHash` fallback keeps
  * test stubs that emit the immediate shape working.
  */
@@ -133,7 +133,7 @@ function extractTxHash(tx: unknown): string {
 }
 
 /** Test-only: clear state between cases. */
-export function __resetFaucetDripForTests(): void {
+export function __resetDripForTests(): void {
 	inflight.value = null
 	for (const k of Object.keys(last)) delete last[k]
 }

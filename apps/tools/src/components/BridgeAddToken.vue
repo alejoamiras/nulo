@@ -2,16 +2,16 @@
 import { onBeforeUnmount, ref, watch } from "vue"
 import { useL1Wallet } from "@/composables/useL1Wallet"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
-import { useFaucetAddToken } from "@/composables/useFaucetAddToken"
+import { useAddDripToken } from "@/composables/useAddDripToken"
 import { useToast } from "@/composables/useToast"
 import { BRIDGE_TOKEN, BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL, L1_USDC } from "@/contracts/bridge-deployments"
 import { TESTIDS } from "@/lib/testids"
 
 // Reuses the generic registerToken composable, pointed at the BRIDGE token - a different deployment
-// from the faucet's drips, so the faucet's own "Add to wallet" registers the wrong token here.
+// from the Drip tab's drips, so its own "Add to wallet" registers the wrong token here.
 const bridge = useBridgeWallet()
 const l1 = useL1Wallet()
-const addToken = useFaucetAddToken()
+const addToken = useAddDripToken()
 const { push } = useToast()
 
 // EVM wallets expose no is-watched introspection (EIP-747 is fire-and-forget), so this button

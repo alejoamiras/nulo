@@ -75,9 +75,9 @@ export const TESTIDS = {
 	// Toast
 	toast: "tl-toast",
 
-	// Shell tabs (Faucet | Bridge)
+	// Shell tabs (Drip | Bridge)
 	tabs: "tl-tabs",
-	tabFaucet: "tl-tab-faucet",
+	tabDrip: "tl-tab-drip",
 	tabBridge: "tl-tab-bridge",
 	tabFuel: "tl-tab-fuel",
 	themeToggle: "tl-theme-toggle",
@@ -162,7 +162,7 @@ export const TESTIDS = {
 	receiptNewBridge: "tl-receipt-new-bridge",
 	receiptLink: "tl-receipt-link",
 
-	// Bridge - the explicit L1 test-USDC mint (NOT the Faucet tab's L2 drips)
+	// Bridge - the explicit L1 test-USDC mint (NOT the Drip tab's L2 drips)
 	mintL1: "tl-mint-l1",
 	mintL1Status: "tl-mint-l1-status",
 

@@ -23,7 +23,7 @@ import { homedir } from "node:os"
 import { dirname, join, resolve as resolvePath } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parseCandidateManifest } from "../src/candidate-schema"
-import { assertFaucetCandidateShape, assertZeroSeed } from "../src/promotion"
+import { assertDripCandidateShape, assertZeroSeed } from "../src/promotion"
 import { PRIVATE_FPC_ADDRESS, PRIVATE_FPC_SALT } from "../src/private-fuel"
 import { git, resolveBin, run } from "./run"
 
@@ -471,7 +471,7 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
  * re-verify → receipt. The candidates are read ONCE into buffers and every later
  * step operates on/against those exact bytes; symlinked candidates or live paths
  * are rejected; each write is a same-directory temp + rename (atomic on one fs);
- * both written files are re-hashed against the source buffers and the faucet
+ * both written files are re-hashed against the source buffers and the drip
  * derivation is re-proven by the REAL verify-deployments gate over the live file.
  * Nothing here runs `git commit` — a crash at any point leaves only uncommitted
  * working-tree changes (never a partially-promoted COMMITTED state). NOTE the
@@ -487,14 +487,14 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (91 lines) — split when touched, never grow
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 35) — refactor when touched, never raise
 async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwap?: boolean; restoreSwap?: boolean } = {}): Promise<void> {
-	// --bridge-only: a bridge cutover that touches NO faucet deployment (codex r1 HIGH-4). The faucet
-	// candidate is not required; instead the LIVE faucet manifest is digest-pinned before/after so the
+	// --bridge-only: a bridge cutover that touches NO drip deployment. The drip
+	// candidate is not required; instead the LIVE drip manifest is digest-pinned before/after so the
 	// promotion provably leaves it byte-identical.
 	const bridgeOnly = opts.bridgeOnly === true
 	const bridgeCandidatePath = join(repoRoot, "apps/tools/public/testnet-bridge.candidate.json")
 	const bridgeLivePath = join(repoRoot, "apps/tools/public/testnet-bridge.json")
-	const faucetCandidatePath = join(repoRoot, "apps/tools/src/contracts/deployments.candidate.json")
-	const faucetLivePath = join(repoRoot, "apps/tools/src/contracts/deployments.json")
+	const dripCandidatePath = join(repoRoot, "apps/tools/src/contracts/deployments.candidate.json")
+	const dripLivePath = join(repoRoot, "apps/tools/src/contracts/deployments.json")
 
 	// 0. The recorded candidate digest is REQUIRED BEFORE promote's own verify runs — verify
 	// RECORDS a missing digest, so checking after it would always pass (the one-time recording
@@ -509,24 +509,24 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwa
 	await verify(intentPath, bridgeCandidatePath)
 
 	// 0c. The FPC require-deployed gate as CODE, not operator discipline (review finding #6):
-	// promotion enables the faucet's Fuel tab, which hard-uses PRIVATE_FPC_ADDRESS — an
+	// promotion enables the app's Fuel tab, which hard-uses PRIVATE_FPC_ADDRESS — an
 	// undeployed or upgraded-out FPC at that address must abort the promotion.
 	run("bun", [join(here, "check-fpc-version.ts"), "--mode", "require-deployed"], { stdio: "inherit" })
 
 	// 1. Symlink rejection on every involved path (a symlinked live target would
 	// redirect the rename; a symlinked candidate breaks the read-once contract).
 	const involvedPaths = bridgeOnly
-		? [bridgeCandidatePath, bridgeLivePath, faucetLivePath]
-		: [bridgeCandidatePath, faucetCandidatePath, bridgeLivePath, faucetLivePath]
+		? [bridgeCandidatePath, bridgeLivePath, dripLivePath]
+		: [bridgeCandidatePath, dripCandidatePath, bridgeLivePath, dripLivePath]
 	for (const p of involvedPaths) {
 		let st: ReturnType<typeof lstatSync> | undefined
 		try {
 			st = lstatSync(p)
 		} catch {
-			if (p === bridgeCandidatePath || (!bridgeOnly && p === faucetCandidatePath))
+			if (p === bridgeCandidatePath || (!bridgeOnly && p === dripCandidatePath))
 				throw new Error(`candidate missing: ${p} — nothing to promote`)
-			if (bridgeOnly && p === faucetLivePath)
-				throw new Error(`--bridge-only requires an existing live faucet manifest to pin: ${p} — STOP`)
+			if (bridgeOnly && p === dripLivePath)
+				throw new Error(`--bridge-only requires an existing live drip manifest to pin: ${p} — STOP`)
 			continue // a live target may not exist yet — rename will create it
 		}
 		if (st.isSymbolicLink()) throw new Error(`refusing to promote through a symlink: ${p}`)
@@ -537,23 +537,23 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwa
 	// separately, and an edit between the two reads would otherwise ship bytes that
 	// skipped the digest pin + privileged readbacks (review finding #4).
 	const bridgeBytes = readFileSync(bridgeCandidatePath)
-	const faucetBytes = bridgeOnly ? null : readFileSync(faucetCandidatePath)
+	const dripBytes = bridgeOnly ? null : readFileSync(dripCandidatePath)
 	const bridgeSha = createHash("sha256").update(bridgeBytes).digest("hex")
-	const faucetSha = faucetBytes ? createHash("sha256").update(faucetBytes).digest("hex") : null
-	// The bridge-only pin: the live faucet manifest's digest BEFORE any write; re-asserted after.
-	const faucetLivePin = bridgeOnly ? createHash("sha256").update(readFileSync(faucetLivePath)).digest("hex") : null
+	const dripSha = dripBytes ? createHash("sha256").update(dripBytes).digest("hex") : null
+	// The bridge-only pin: the live drip manifest's digest BEFORE any write; re-asserted after.
+	const dripLivePin = bridgeOnly ? createHash("sha256").update(readFileSync(dripLivePath)).digest("hex") : null
 	if (bridgeSha !== intent.candidateSha256) {
 		throw new Error(
 			`bridge candidate bytes changed between verify and promote: ${bridgeSha} != recorded ${intent.candidateSha256} — STOP`,
 		)
 	}
 	const bridgeCandidate = parseCandidateManifest(JSON.parse(bridgeBytes.toString("utf8")))
-	if (faucetBytes) {
-		assertFaucetCandidateShape(JSON.parse(faucetBytes.toString("utf8")))
+	if (dripBytes) {
+		assertDripCandidateShape(JSON.parse(dripBytes.toString("utf8")))
 
-		// 2b. Prove the faucet CANDIDATE's derivation BEFORE any live write (review finding #3):
+		// 2b. Prove the drip CANDIDATE's derivation BEFORE any live write:
 		// previously a junk candidate failed only AFTER the live file was overwritten.
-		run("bun", [join(repoRoot, "apps/tools/scripts/verify-deployments.ts"), "--config", faucetCandidatePath], {
+		run("bun", [join(repoRoot, "apps/tools/scripts/verify-deployments.ts"), "--config", dripCandidatePath], {
 			stdio: "inherit",
 		})
 	}
@@ -572,10 +572,10 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwa
 
 	// 4. Temp-write + same-directory rename, then re-hash the written outputs.
 	const writes: Array<[string, Buffer, string]> =
-		faucetBytes && faucetSha
+		dripBytes && dripSha
 			? [
 					[bridgeLivePath, bridgeBytes, bridgeSha],
-					[faucetLivePath, faucetBytes, faucetSha],
+					[dripLivePath, dripBytes, dripSha],
 				]
 			: [[bridgeLivePath, bridgeBytes, bridgeSha]]
 	for (const [target, bytes, sha] of writes) {
@@ -591,16 +591,16 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwa
 	}
 
 	// 5. Re-verify the LIVE files: strict-parse the bridge manifest as written, and
-	// re-prove the faucet derivation through the real gate.
+	// re-prove the drip derivation through the real gate.
 	parseCandidateManifest(JSON.parse(readFileSync(bridgeLivePath, "utf8")))
 	run("bun", [join(repoRoot, "apps/tools/scripts/verify-deployments.ts")], {
 		stdio: "inherit",
 		env: { ...process.env, BRIDGE_MANIFEST: bridgeLivePath },
 	})
-	if (faucetLivePin) {
-		const after = createHash("sha256").update(readFileSync(faucetLivePath)).digest("hex")
-		if (after !== faucetLivePin) {
-			throw new Error(`--bridge-only violated: live faucet manifest changed (${after} != pinned ${faucetLivePin}) — investigate NOW`)
+	if (dripLivePin) {
+		const after = createHash("sha256").update(readFileSync(dripLivePath)).digest("hex")
+		if (after !== dripLivePin) {
+			throw new Error(`--bridge-only violated: live drip manifest changed (${after} != pinned ${dripLivePin}) — investigate NOW`)
 		}
 	}
 
@@ -615,11 +615,11 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwa
 				promotedAt: new Date().toISOString(),
 				intent: intentPath,
 				commitAtPromotion: commit,
-				mode: bridgeOnly ? "bridge-only" : "bridge+faucet",
+				mode: bridgeOnly ? "bridge-only" : "bridge+drip",
 				bridge: { candidateSha256: bridgeSha, live: "apps/tools/public/testnet-bridge.json" },
-				faucet: faucetSha
-					? { candidateSha256: faucetSha, live: "apps/tools/src/contracts/deployments.json" }
-					: { unchangedSha256: faucetLivePin, live: "apps/tools/src/contracts/deployments.json" },
+				drip: dripSha
+					? { candidateSha256: dripSha, live: "apps/tools/src/contracts/deployments.json" }
+					: { unchangedSha256: dripLivePin, live: "apps/tools/src/contracts/deployments.json" },
 				zeroSeed: opts.restoreSwap
 					? "l1.fuel.core byte-carried; swap RESTORED (--restore-swap, pools seeded this arc)"
 					: opts.dropSwap

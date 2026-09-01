@@ -10,27 +10,27 @@ import ThemeToggle from "./components/ThemeToggle.vue"
 import Footer from "./components/Footer.vue"
 import ConnectionErrorStrip from "./components/ConnectionErrorStrip.vue"
 import BridgeView from "./views/BridgeView.vue"
-import FaucetView from "./views/FaucetView.vue"
+import DripView from "./views/DripView.vue"
 import FuelView from "./views/FuelView.vue"
 
-type Tab = "faucet" | "bridge" | "fuel"
+type Tab = "drip" | "bridge" | "fuel"
 
-// Mainnet has no faucet (real USDC, no test-token drips) — hide the tab + never default to it.
+// Mainnet has no drip (real USDC, no test-token drips) — hide the tab + never default to it.
 const isMainnet = IS_MAINNET
 
-/** Default to the Bridge tab on mainnet or a bridge.* host; faucet otherwise (testnet). */
+/** Default to the Bridge tab on mainnet or a bridge.* host; drip otherwise (testnet). */
 function defaultTab(): Tab {
 	if (isMainnet) return "bridge"
 	if (typeof window !== "undefined" && window.location.hostname.startsWith("bridge")) return "bridge"
-	return "faucet"
+	return "drip"
 }
 
 const tab = ref<Tab>(defaultTab())
 
 /** States with a dedicated in-panel UI never go to the strip: capability
  *  denial has the red morph everywhere; no-wallet has the install CTA on
- *  the faucet tab only (bridge/fuel have no CTA, so it shows here). */
-const stripExclude = computed(() => (tab.value === "faucet" ? ["no-wallet", "capability-rejected"] : ["capability-rejected"]))
+ *  the drip tab only (bridge/fuel have no CTA, so it shows here). */
+const stripExclude = computed(() => (tab.value === "drip" ? ["no-wallet", "capability-rejected"] : ["capability-rejected"]))
 </script>
 
 <template>
@@ -40,12 +40,12 @@ const stripExclude = computed(() => (tab.value === "faucet" ? ["no-wallet", "cap
 			<button
 				type="button"
 				class="tab"
-				:class="{ active: tab === 'faucet' }"
-				:aria-selected="tab === 'faucet'"
-				:data-testid="TESTIDS.tabFaucet"
-				@click="tab = 'faucet'"
+				:class="{ active: tab === 'drip' }"
+				:aria-selected="tab === 'drip'"
+				:data-testid="TESTIDS.tabDrip"
+				@click="tab = 'drip'"
 			>
-				Faucet
+				Drip
 			</button>
 			<button
 				type="button"
@@ -80,11 +80,11 @@ const stripExclude = computed(() => (tab.value === "faucet" ? ["no-wallet", "cap
 		     each view's local state persist across tab switches. All tabs read ONE session
 		     singleton (useBridgeWallet re-exports useWalletConnection) — one connection, one
 		     grant, one active account. -->
-		<FaucetView v-show="tab === 'faucet'" />
+		<DripView v-show="tab === 'drip'" />
 		<BridgeView v-show="tab === 'bridge'" />
 		<FuelView v-show="tab === 'fuel'" />
 
-		<Footer v-if="tab === 'faucet'" />
+		<Footer v-if="tab === 'drip'" />
 		<BridgeFooter v-else />
 		<AppToastRegion />
 		<!-- ONE picker for the shared session — the panels only trigger connect(). -->

@@ -2,18 +2,18 @@
 import type { AztecAddress } from "@aztec/aztec.js/addresses"
 import type { Wallet } from "@aztec/aztec.js/wallet"
 import { computed, onBeforeUnmount, ref } from "vue"
-import { type DripTarget, useFaucetDrip } from "@/composables/useFaucetDrip"
-import { useFaucetAddToken } from "@/composables/useFaucetAddToken"
+import { type DripTarget, useDrip } from "@/composables/useDrip"
+import { useAddDripToken } from "@/composables/useAddDripToken"
 import { useTokenBalance, type UseTokenBalanceHandle } from "@/composables/useTokenBalance"
 import { useToast } from "@/composables/useToast"
-import type { FaucetToken } from "@/constants/tokens"
+import type { DripToken } from "@/constants/tokens"
 import { explorerTxUrl } from "@/lib/explorer"
 import { formatBigInt } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
 import { BalanceRow, Card, DisclaimerTag, DripButton } from "@nulo/design"
 
 const props = defineProps<{
-	token: FaucetToken
+	token: DripToken
 	tokenAddress: AztecAddress
 	wallet?: Wallet
 	account?: AztecAddress
@@ -25,8 +25,8 @@ const props = defineProps<{
 const connected = !!(props.wallet && props.account)
 const balance: UseTokenBalanceHandle | null =
 	connected && props.wallet && props.account ? useTokenBalance(props.wallet, props.tokenAddress, props.account) : null
-const drip = connected && props.wallet && props.account ? useFaucetDrip(props.wallet, props.account) : null
-const addToken = useFaucetAddToken()
+const drip = connected && props.wallet && props.account ? useDrip(props.wallet, props.account) : null
+const addToken = useAddDripToken()
 const { push, dismiss } = useToast()
 
 // Hidden once the wallet reports this token registered (fail-open: failures show the button).
@@ -135,7 +135,7 @@ async function handleDrip(target: DripTarget) {
 // Single tracked reset timer. Without this, rapid clicks (button only
 // disabled during `submitting`) stack untracked setTimeouts - an older
 // timer can fire DURING a newer submission and flip the composable back
-// to `idle`, defeating the re-entrancy guard in `useFaucetAddToken`.
+// to `idle`, defeating the re-entrancy guard in `useAddDripToken`.
 // Track + clear before re-setting.
 let addTokenResetTimer: ReturnType<typeof setTimeout> | null = null
 function scheduleAddTokenReset() {

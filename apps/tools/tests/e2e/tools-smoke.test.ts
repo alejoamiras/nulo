@@ -103,7 +103,7 @@ vi.mock("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js", ()
 
 import App from "@/App.vue"
 import { __resetWalletConnectionForTests } from "@/composables/useWalletConnection"
-import { __resetFaucetDripForTests } from "@/composables/useFaucetDrip"
+import { __resetDripForTests } from "@/composables/useDrip"
 import { __resetToastsForTests } from "@/composables/useToast"
 import { TESTIDS } from "@/lib/testids"
 
@@ -146,7 +146,7 @@ describe("tools smoke", () => {
 	beforeEach(() => {
 		localStorage.clear()
 		__resetWalletConnectionForTests()
-		__resetFaucetDripForTests()
+		__resetDripForTests()
 		__resetToastsForTests()
 		mockEstablishSecureChannel.mockReset()
 		mockDisconnectProvider.mockReset()

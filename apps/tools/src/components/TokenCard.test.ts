@@ -25,10 +25,10 @@ vi.mock("@/composables/useTokenBalance", () => ({
 	}),
 }))
 
-vi.mock("@/composables/useFaucetDrip", () => {
+vi.mock("@/composables/useDrip", () => {
 	const lastRecord: Record<string, { kind: string; value: string }> = {}
 	return {
-		useFaucetDrip: () => ({
+		useDrip: () => ({
 			inflight: inflightRef,
 			last: lastRecord,
 			isActive: (sym: string, tgt: string) => inflightRef.value?.tokenSymbol === sym && inflightRef.value.target === tgt,

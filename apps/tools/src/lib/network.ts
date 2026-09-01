@@ -52,9 +52,9 @@ export const NETWORK: NetworkConfig = {
 /** The active target key. */
 export const NETWORK_KEY = target.key
 
-/** True on the mainnet/Alpha build. Gates OFF the faucet tab, the faucet-token registration +
+/** True on the mainnet/Alpha build. Gates OFF the drip tab, the drip-token registration +
  *  capabilities, and the testnet-only mint affordances (mainnet bridges real USDC — there is no
- *  faucet and no permissionless mint). */
+ *  drip and no permissionless mint). */
 export const IS_MAINNET = target.key === "mainnet"
 
 /** Uppercase L1 chip for the bridge/fuel FROM/TO panels: plain "ETHEREUM" on mainnet, the

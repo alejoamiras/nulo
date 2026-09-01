@@ -33,7 +33,7 @@ export type AddTokenStatus =
  * `registerToken` Nulo-custom RPC. The extension shows a confirmation popup
  * (with resolved token name / symbol / decimals) before the call resolves.
  */
-export function useFaucetAddToken() {
+export function useAddDripToken() {
 	const status = ref<AddTokenStatus>({ kind: "idle" })
 
 	async function addToken(wallet: Wallet, accountAddress: string, tokenAddress: AztecAddress): Promise<void> {
