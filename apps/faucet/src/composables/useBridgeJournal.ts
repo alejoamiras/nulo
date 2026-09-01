@@ -599,7 +599,10 @@ async function runDepositClaimLocked(id: string, gen: number, interactive: boole
 	// quick revalidation under the CLAIM phase instead (the simulate still guards consumability).
 	const preGated = runtime.value[id]?.claimable === true
 	let gate: ArrivalGateState = { simulateStart: 0, counted: false, preGated }
-	if (!preGated) {
+	// Await the gates only when one can actually run: a preGated retry, a record with no L2
+	// snapshot AND no message keys, or missing deps must reach the simulate loop with the same
+	// synchronous flow the original had (no no-op await seams).
+	if (arrivalGatesApply(fresh, preGated)) {
 		gate = await awaitBlockCountdown(fresh, id, gate)
 		gate = await awaitCheckpointGate(fresh, id, gate)
 	}
@@ -720,6 +723,14 @@ function resolvePublicClaimMaterial(rec: DepositJournalRecord, id: string): { se
 		return null
 	}
 	return { secretHex: rec.secret }
+}
+
+/** Whether either arrival gate has anything to do for this record. */
+function arrivalGatesApply(rec: DepositJournalRecord, preGated: boolean): boolean {
+	if (preGated) return false
+	const countdownApplies = rec.depositL2Block !== undefined && !!deps.l2BlockNumber
+	const checkpointApplies = !!deps.messageReadiness && (!!rec.messageHash || !!rec.fuel?.messageHash)
+	return countdownApplies || checkpointApplies
 }
 
 /** The arrival gates' threaded state: `simulateStart` is the shared 300-iteration budget the
@@ -854,31 +865,31 @@ async function sendAndWatch(
 /** One ~3-minute receipt round (D4 completion, D2 narration). Returns "continue" when the claim
  *  is still pending and another round should be scheduled by the caller (outside the lock). */
 async function runReceiptRound(rec: DepositJournalRecord, gen: number): Promise<"done" | "stop" | "continue"> {
-	if (!deps.claimReceiptStatus || !rec.claimTxHash) return "stop"
-	const roundsDone = receiptRounds.get(rec.id) ?? 0
+	if (!receiptRoundReady(rec)) return "stop"
+	const roundsDone = priorReceiptRounds(rec.id)
 	const streaks = { dropped: 0, unreachable: 0 }
 	for (let i = 0; i < RECEIPT_POLLS_PER_ROUND; i++) {
 		if (genOf(rec.id) !== gen) return "stop" // F11: a newer owner took over (RETRY/discard/sweep).
 		const checkNo = roundsDone * RECEIPT_POLLS_PER_ROUND + i + 1
 		setStep(rec.id, "confirming", "the claim is processing on Aztec")
-		const status = await deps.claimReceiptStatus(rec.claimTxHash)
+		// Read-at-call-time under receiptRoundReady's gate (same parity pattern as the other deps).
+		const status = await (deps.claimReceiptStatus as NonNullable<typeof deps.claimReceiptStatus>)(rec.claimTxHash as string)
 		log("receipt check", { id: rec.id, checkNo, status })
 		if (genOf(rec.id) !== gen) return "stop"
 		flipProposedLanded(rec, status)
-		// Terminal statuses only: a non-terminal poll must stay SYNCHRONOUS from the gen check
-		// through the streak mutation (no new microtask seams on the hot path).
-		if (TERMINAL_RECEIPT_STATUSES.has(status)) {
-			const settled = await settleTerminalReceipt(rec, gen, status)
+		// Success is the only arm that awaits; reverted and every non-terminal status stay
+		// SYNCHRONOUS from the gen check through their runtime/streak writes (no new seams).
+		if (status === "success") {
+			const settled = await handleSuccessReceipt(rec, gen)
 			if (settled === "poll") continue
 			return settled
 		}
+		if (status === "reverted") return reportRevertedClaim(rec)
 		if (advanceReceiptStreaks(rec.id, status, streaks) === "give-up") return "stop"
 		await wait(4000)
 	}
 	return closeReceiptRound(rec.id, roundsDone)
 }
-
-const TERMINAL_RECEIPT_STATUSES = new Set(["success", "reverted"])
 
 /** Round bookkeeping: budget the finished round; at the soft cap (NOT a dead-end — no
  *  attention) the card re-arms RETRY and says so. */
@@ -902,12 +913,19 @@ function flipProposedLanded(rec: DepositJournalRecord, status: string): void {
 	}
 }
 
-/** The two terminal receipt states. Success routes through the provenance-gated completion
- *  ("poll" = its probe wants another pass); a terminal revert keeps the hash (a retry rechecks
- *  the same receipt), so the hash-scoped landed view WOULD re-light during the recheck window -
- *  clear the flag explicitly. Null = non-terminal, keep polling. */
-async function settleTerminalReceipt(rec: DepositJournalRecord, gen: number, status: string): Promise<"done" | "stop" | "poll"> {
-	if (status === "success") return handleSuccessReceipt(rec, gen)
+/** Both preconditions a round needs; callers guarantee them, this is the defensive form. */
+function receiptRoundReady(rec: DepositJournalRecord): boolean {
+	return !!deps.claimReceiptStatus && !!rec.claimTxHash
+}
+
+function priorReceiptRounds(id: string): number {
+	return receiptRounds.get(id) ?? 0
+}
+
+/** A terminal revert keeps the hash (a retry rechecks the same receipt), so the hash-scoped
+ *  landed view WOULD re-light during the recheck window - clear the flag explicitly.
+ *  Deliberately synchronous: it runs between a gen check and the loop's next step. */
+function reportRevertedClaim(rec: DepositJournalRecord): "stop" {
 	setRuntime(rec.id, {
 		attention: "error",
 		note: "The claim reverted on Aztec. You can retry from this card - the deposit remains claimable.",

@@ -30,6 +30,7 @@ import {
 	addRecord,
 	cacheSecret,
 	connectJournalDeps,
+	discard,
 	runDepositClaim,
 	runWithdrawConsume,
 	updateRecord,
@@ -413,6 +414,7 @@ describe("journal engine — pre-extraction pins", () => {
 					throw new Error("No non-nullified L1 to L2 message found")
 				},
 				send: async () => {
+					order.push("send")
 					throw new Error("send must never fire on the sent path")
 				},
 			}
@@ -423,6 +425,8 @@ describe("journal engine — pre-extraction pins", () => {
 		expect(order[0]).toBe("receipt:0xtheclaim")
 		expect(order.indexOf("build")).toBeGreaterThan(0)
 		expect(order).toContain("probe-simulate")
+		// Explicit: the sent path NEVER sends (the throwing fake would also have pushed).
+		expect(order).not.toContain("send")
 		const { records } = useBridgeJournal()
 		expect(records.value.find((r) => r.id === "0xsentalready")?.completedAt).toBe(999)
 	})
@@ -588,6 +592,20 @@ describe("journal engine — pre-extraction pins", () => {
 		const fresh = records.value.find((r) => r.id === "0xwfresh") as WithdrawJournalRecord | undefined
 		expect(fresh?.completedAt).toBe(999)
 		expect(fresh?.consumeTxHash).toBe("0xconsumetx")
+	})
+
+	it("(h) completion uses the POST-WAIT reread: a record discarded during the receipt wait is not resurrected", async () => {
+		const deps = baseDeps(kv)
+		const { records } = useBridgeJournal()
+		deps.waitConsumeReceipt.mockImplementation(async () => {
+			discard("0xwgone")
+			return true
+		})
+		connectJournalDeps({ ...deps, claim: smartClaimFake() })
+		addRecord(mkWithdraw("0xwgone"))
+		await runWithdrawConsume("0xwgone")
+		// The success path rereads the journal; the discarded record must not come back completed.
+		expect(records.value.find((r) => r.id === "0xwgone")).toBeUndefined()
 	})
 
 	it("(h) absent verifier defaults open (?? true) on a rediscovered consume; progress ?? fallbacks derive proven", async () => {
