@@ -572,3 +572,78 @@ describe("execute window — dApp cancellation state", () => {
 		expect(w!.find('[data-testid="error-text"]').exists()).toBe(false)
 	})
 })
+
+// ── Seam pins (round-2 plan 5, codex conditions) — pre-extraction, byte-identical
+//    across the refactor commits: init resolves operations SEQUENTIALLY (op N+1's
+//    lookups start only after op N resolved), commits operations/accounts and
+//    flips `initComplete` only AFTER the loop, then prefetches register_token
+//    metadata with the loading flag cleared in a `finally` even on failure. ──
+
+describe("execute window — init sequencing pins", () => {
+	const NETWORK = { id: "n1", chainId: 1, name: "TestNet" }
+	const account = (address: string) => ({ address, chainId: 1, name: `acct-${address}` })
+	const twoOpsPayload = () => ({
+		session: { profileId: "p1", dappMetadata: { name: "Test DApp", url: "https://example.com" } },
+		params: {
+			operations: [
+				{ kind: "register_token", account: "aztec:1:0xaaa", address: "0xtok" },
+				{ kind: "send_transaction", account: "aztec:1:0xbbb", calls: [] },
+			],
+		},
+	})
+
+	test("operations resolve one at a time: the second op's lookups wait for the first to resolve", async () => {
+		const order: string[] = []
+		let releaseFirstAccount!: () => void
+		const firstAccount = new Promise<unknown>((resolve) => {
+			releaseFirstAccount = () => resolve(account("0xaaa"))
+		})
+		accountServiceCtorMock.mockImplementationOnce(function () {
+			return {
+				getAccount: vi.fn((_p: string, _c: number, address: string) => {
+					order.push(`getAccount:${address}`)
+					return address === "0xaaa" ? firstAccount : Promise.resolve(account(address))
+				}),
+				connect: vi.fn(),
+				disconnect: vi.fn(),
+			}
+		})
+		networkServiceCtorMock.mockImplementationOnce(function () {
+			return { getNetworks: vi.fn(async () => [NETWORK]), connect: vi.fn(), disconnect: vi.fn() }
+		} as never)
+		payloadToLoad = twoOpsPayload()
+		w = factory()
+		await completeInit()
+		// The first op is parked on its account lookup; the second has not started.
+		expect(order).toEqual(["getAccount:0xaaa"])
+		const vm = w.vm as unknown as ExecVm
+		expect(vm.initComplete).toBe(false)
+		releaseFirstAccount()
+		await flushPromises()
+		expect(order).toEqual(["getAccount:0xaaa", "getAccount:0xbbb"])
+		expect(vm.operations).toHaveLength(2)
+		expect(vm.initComplete).toBe(true)
+	})
+
+	test("register_token metadata is prefetched AFTER the commit, and the loading flag clears in finally on failure", async () => {
+		accountServiceCtorMock.mockImplementationOnce(function () {
+			return {
+				getAccount: vi.fn(async (_p: string, _c: number, address: string) => account(address)),
+				connect: vi.fn(),
+				disconnect: vi.fn(),
+			}
+		})
+		networkServiceCtorMock.mockImplementationOnce(function () {
+			return { getNetworks: vi.fn(async () => [NETWORK]), connect: vi.fn(), disconnect: vi.fn() }
+		} as never)
+		payloadToLoad = twoOpsPayload()
+		w = factory()
+		await completeInit()
+		const vm = w.vm as unknown as ExecVm & { tokenMetadataLoading: boolean; tokenMetadataError: Map<string, string> }
+		expect(vm.initComplete).toBe(true)
+		// The mocked TokenServiceClient's previewTokenMetadata resolves undefined →
+		// the per-op catch records an error; the finally clears the flag.
+		expect(vm.tokenMetadataLoading).toBe(false)
+		expect(vm.tokenMetadataError.get("0xtok")).toBeDefined()
+	})
+})

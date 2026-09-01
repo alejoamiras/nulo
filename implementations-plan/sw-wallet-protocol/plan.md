@@ -181,10 +181,11 @@ sequential e2e run. PR-a rebases onto #509 first (manifest 87 is post-#509).
 ## Acceptance
 
 - PR-a: 4 directives, 87 → 83, zero inserted (read the regen diff); runtime suites
-  zero-edit; the three boot gates green.
+  zero-edit; the three boot gates green. **DONE — #510 merged 2026-09-01.**
 - PR-b: 9 directives, 83 → 74, zero inserted; dispatcher/background/apply/execute suites
-  zero-edit; the protocol gates + PR-a's three green.
+  zero-edit; the protocol gates + PR-a's three green (27 specs, one sequential run).
 - Codex loop: one session — plan audit → PR-a impl review → PR-b impl review → approve.
+  Transcript summary + lessons: `lessons/phase-1.md`.
 
 ## Rollback
 
