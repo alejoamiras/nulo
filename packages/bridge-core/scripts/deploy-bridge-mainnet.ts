@@ -1,6 +1,7 @@
 /**
- * MAINNET (Alpha) bridge deploy conductor — Phase 8. Mirrors deploy-bridge-testnet.ts's journal-first
- * structure with the mainnet deltas; the testnet conductor stays untouched (battle-proven mid-arc).
+ * MAINNET (Alpha) bridge deploy conductor. Mirrors deploy-bridge-testnet.ts's journal-first
+ * structure; the two stay SEPARATE conductors on purpose — the network policies differ in kind
+ * (token model, fee bootstrap, broadcast staging), so they share mechanisms, never orchestration.
  *
  * Deltas vs testnet:
  *   - The token is NEVER deployed: Circle's canonical USDC proxy is identity-asserted and reused
@@ -26,31 +27,35 @@
  * Env (packages/bridge-core/.env): MAINNET_PRIVATE_KEY, BRIDGE_DEPLOYER_SECRET_MAINNET,
  * FUEL_ROUTER, FUEL_SWAP; ETH_RPC_URL + AZTEC_NODE_URL override the defaults.
  */
-import { randomInt } from "node:crypto"
-import { createHash } from "node:crypto"
+import { createHash, randomInt } from "node:crypto"
 import { spawnSync } from "node:child_process"
-import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { loadContractArtifact } from "@aztec/aztec.js/abi"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
-
+import { Contract } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
-import { PublicKeys } from "@aztec/aztec.js/keys"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { RegistryAbi } from "@aztec/l1-artifacts"
-import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
-import { type Abi, getContract, keccak256 } from "viem"
+import { type Abi, getContract } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
+import { bridgeProxyArtifact, tokenBridgeArtifact } from "../src/artifacts"
 import { preexistingFeeJuicePayment, publicFeeJuicePayment } from "../src/fee-juice"
 import { FeeJuicePortalAbi, feeJuiceDepositArgs, parseFeeJuiceDeposit, planPublicFuelDeposit } from "../src/fuel"
-import { appendJournal, type CandidateManifest, readJournal, resolveResume, writeCandidateAtomic } from "./deploy-manifest"
-import { resolveDeployerKeys } from "./deployer-keys"
+import {
+	appendJournal,
+	type CandidateManifest,
+	type GenerationState,
+	journaledEvmDeploy,
+	readJournal,
+	resolveResume,
+	writeCandidateAtomic,
+} from "./deploy-manifest"
 import { requirePinnedSigner } from "./live-intent"
 import { assertRuntimeMatchesTemplate, loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
+import { assertPortalInitializerPinned, assertRouterWitnessShape, assertSame, ERC20_MIN_ABI } from "./script-l1"
+import { deployerSchnorrAccount, universalDeployInstance } from "./script-l2"
 import { createL1Clients, createL2Wallet, createNode, mainnetChain, stopwatch } from "./script-bootstrap"
 
 // ── Canonical mainnet identity (same pins as DeployBridgeMainnet.s.sol / discover-mainnet-fuel.ts) ──
@@ -85,22 +90,19 @@ const l1OnlyMode = process.argv.includes("--l1-only")
 const fromJournalMode = process.argv.includes("--from-journal")
 
 const here = dirname(fileURLToPath(import.meta.url))
-const AZTEC = join(here, "..", "..", "..", "contracts", "bridge", "aztec")
 const PUBLIC_DIR = join(here, "..", "..", "..", "apps", "faucet", "public")
 const CANDIDATE_PATH = join(PUBLIC_DIR, "mainnet-bridge.candidate.json")
 const JOURNAL_PATH = join(PUBLIC_DIR, "mainnet-bridge.journal.jsonl")
 
 const mainnet = mainnetChain(ETH_RPC)
 
-function nargoArtifact(rel: string) {
-	return loadContractArtifact(JSON.parse(readFileSync(join(AZTEC, rel), "utf8")))
-}
-
-async function nodeInfo(): Promise<{
+interface NodeInfo {
 	l1ChainId: number
 	rollupVersion: number
 	l1ContractAddresses: Record<string, `0x${string}`>
-}> {
+}
+
+async function nodeInfo(): Promise<NodeInfo> {
 	const res = await fetch(NODE_URL, {
 		method: "POST",
 		headers: { "content-type": "application/json" },
@@ -119,49 +121,23 @@ async function nodeInfo(): Promise<{
 	}
 }
 
-const lc = (v: unknown) => String(v).toLowerCase()
-function assertSame(actual: unknown, expected: unknown, label: string): void {
-	if (lc(actual) !== lc(expected)) throw new Error(`read-back FAILED: ${label} - on-chain ${lc(actual)} != expected ${lc(expected)}`)
-	console.log(`  ✓ ${label}`)
+interface MainnetCtx {
+	account: { address: `0x${string}` }
+	wallet: ReturnType<typeof createL1Clients>["wallet"]
+	pub: ReturnType<typeof createL1Clients>["pub"]
+	recorded: GenerationState | null
+	salts: { proxy: number; token: number; bridge: number }
+	mins: () => string
 }
 
-const ERC20_META = [
-	{ type: "function", name: "name", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
-	{ type: "function", name: "symbol", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
-	{ type: "function", name: "decimals", stateMutability: "view", inputs: [], outputs: [{ type: "uint8" }] },
-	{ type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
-	{
-		type: "function",
-		name: "allowance",
-		stateMutability: "view",
-		inputs: [{ type: "address" }, { type: "address" }],
-		outputs: [{ type: "uint256" }],
-	},
-	{
-		type: "function",
-		name: "approve",
-		stateMutability: "nonpayable",
-		inputs: [{ type: "address" }, { type: "uint256" }],
-		outputs: [{ type: "bool" }],
-	},
-] as const
+function recordedAddr(recorded: GenerationState | null, step: string): `0x${string}` {
+	const a = recorded?.confirmed[step]
+	if (!a || a === "done") throw new Error(`journal: step "${step}" never confirmed — partial landing; STOP`)
+	return a as `0x${string}`
+}
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (276 lines) — split when touched, never grow
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 65) — refactor when touched, never raise
-async function main() {
-	const mins = stopwatch()
-
-	// ─── 0. Reviewed portal bytes + live network identity ────────────
-	const portalArt = loadForkedPortalArtifact()
-	rebuildAndVerifyPortal(portalArt.immutableReferences)
-	const info = await nodeInfo()
-	if (info.l1ChainId !== 1) throw new Error(`Alpha node reports l1ChainId ${info.l1ChainId} != 1 — wrong node; STOP`)
-	console.log(`Alpha node: rollupVersion ${info.rollupVersion}, registry ${info.l1ContractAddresses.registryAddress}`)
-	const registry = info.l1ContractAddresses.registryAddress
-	const feeJuicePortal = info.l1ContractAddresses.feeJuicePortalAddress
-	const feeJuiceAsset = info.l1ContractAddresses.feeJuiceAddress
-
-	// ─── 1. Resume gate (never fresh salts over a partial landing) ───
+/** Resume gate for the staged broadcast groups (never fresh salts over a partial landing). */
+function resolveGeneration(): { recorded: GenerationState | null; salts: MainnetCtx["salts"] } {
 	const recorded = resolveResume(readJournal(JOURNAL_PATH))
 	if (recorded && !fromJournalMode && !l1OnlyMode && !recorded.confirmed["portal-init"]) {
 		throw new Error("journal exists but portal-init never confirmed — finish the L1 group (--l1-only) first; STOP")
@@ -177,6 +153,351 @@ async function main() {
 		bridge: randomInt(2, 2 ** 40),
 	}
 	if (!recorded) appendJournal(JOURNAL_PATH, { phase: "generation", salts })
+	return { recorded, salts }
+}
+
+/** The reused canonical Circle proxy must BE the expected token — never a lookalike. */
+async function assertCircleUsdc(ctx: MainnetCtx): Promise<void> {
+	const usdcR = getContract({ address: CIRCLE_USDC, abi: ERC20_MIN_ABI as unknown as Abi, client: ctx.pub })
+	// biome-ignore lint/suspicious/noExplicitAny: viem read typing
+	const ur = usdcR.read as any
+	assertSame(await ur.name(), TOKEN_NAME, "Circle USDC name")
+	assertSame(await ur.symbol(), TOKEN_SYMBOL, "Circle USDC symbol")
+	if (Number(await ur.decimals()) !== TOKEN_DECIMALS) throw new Error("Circle USDC decimals != 6; STOP")
+	appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "usdc", address: CIRCLE_USDC })
+}
+
+async function landPortal(ctx: MainnetCtx, portalArt: ReturnType<typeof loadForkedPortalArtifact>): Promise<`0x${string}`> {
+	if (ctx.recorded?.confirmed["portal"]) {
+		const portal = recordedAddr(ctx.recorded, "portal")
+		console.log("portal (recorded):", portal)
+		return portal
+	}
+	return await journaledEvmDeploy(
+		{ wallet: ctx.wallet, pub: ctx.pub },
+		JOURNAL_PATH,
+		"portal",
+		"NuloTokenPortal",
+		portalArt,
+		[],
+		(addr) => console.log("NuloTokenPortal:", addr, `(${ctx.mins()})`),
+	)
+}
+
+/** The portal's one-shot initialize, bound to the PRECOMPUTED bridge address — what makes
+ *  the L1-only group self-contained. F-001: the initialize is guarded to the EOA that
+ *  DEPLOYED the portal, so a resume must broadcast with the SAME key. */
+async function initializePortalOnce(
+	ctx: MainnetCtx,
+	d: { portal: `0x${string}`; portalArt: ReturnType<typeof loadForkedPortalArtifact>; registry: `0x${string}`; bridgeAddress: string },
+): Promise<void> {
+	if (ctx.recorded?.confirmed["portal-init"]) return
+	const portalPre = getContract({ address: d.portal, abi: d.portalArt.abi as Abi, client: ctx.pub })
+	// biome-ignore lint/suspicious/noExplicitAny: viem read typing
+	const preBridge = String(await (portalPre.read as any).l2Bridge())
+	if (!/^0x0+$/.test(preBridge)) throw new Error(`portal already initialized (l2Bridge ${preBridge}) — reuse forbidden; STOP`)
+	await assertPortalInitializerPinned(ctx.pub, d.portal, d.portalArt.abi as Abi, ctx.account.address)
+	const portalC = getContract({ address: d.portal, abi: d.portalArt.abi as never, client: ctx.wallet as never })
+	// biome-ignore lint/suspicious/noExplicitAny: viem contract write typing
+	const initHash = await (portalC as any).write.initialize([d.registry, CIRCLE_USDC, d.bridgeAddress])
+	appendJournal(JOURNAL_PATH, { phase: "submitted", step: "portal-init", txHash: initHash })
+	const ir = await ctx.pub.waitForTransactionReceipt({ hash: initHash })
+	if (ir.status !== "success") throw new Error("portal.initialize reverted; STOP")
+	appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "portal-init", address: "done" })
+	console.log(`portal initialized (${ctx.mins()})`)
+}
+
+/** GROUP 2 (L1) part 2: the FJ deposit — approve (exact) + depositToAztecPublic(to = L2
+ *  deployer, derived secret). The step's address slot records amount:leafIndex (the claim's
+ *  resume key; the secret is derived, never persisted). */
+async function depositFeeJuice(
+	ctx: MainnetCtx,
+	d: { feeJuicePortal: `0x${string}`; feeJuiceAsset: `0x${string}`; from: AztecAddress; claimSecret: Fr },
+): Promise<{ amount: bigint; leafIndex: bigint }> {
+	if (ctx.recorded?.confirmed["fj-deposit"]) {
+		const [amt, leaf] = String(ctx.recorded.confirmed["fj-deposit"]).split(":")
+		const record = { amount: BigInt(amt), leafIndex: BigInt(leaf) }
+		console.log(`fj-deposit (recorded): ${record.amount} FJ-wei, leaf ${record.leafIndex}`)
+		return record
+	}
+	// Cross-check the node-claimed portal/asset against the group-1 script's constants.
+	const fjPortalR = getContract({ address: d.feeJuicePortal, abi: FeeJuicePortalAbi as unknown as Abi, client: ctx.pub })
+	// biome-ignore lint/suspicious/noExplicitAny: viem read typing
+	assertSame(await (fjPortalR.read as any).UNDERLYING(), d.feeJuiceAsset, "FeeJuicePortal.UNDERLYING == node fee asset")
+	const assetR = getContract({ address: d.feeJuiceAsset, abi: ERC20_MIN_ABI as unknown as Abi, client: ctx.pub })
+	// biome-ignore lint/suspicious/noExplicitAny: viem read typing
+	const ar = assetR.read as any
+	const aztecBal = (await ar.balanceOf([ctx.account.address])) as bigint
+	if (aztecBal < FJ_BRIDGE_AMOUNT) throw new Error(`$AZTEC balance ${aztecBal} < FJ_BRIDGE_AMOUNT ${FJ_BRIDGE_AMOUNT}; STOP`)
+	const plan = await planPublicFuelDeposit(d.from, FJ_BRIDGE_AMOUNT, d.claimSecret)
+	const allowance = (await ar.allowance([ctx.account.address, d.feeJuicePortal])) as bigint
+	if (allowance < FJ_BRIDGE_AMOUNT) {
+		const approveHash = await ctx.wallet.writeContract({
+			address: d.feeJuiceAsset,
+			abi: ERC20_MIN_ABI,
+			functionName: "approve",
+			args: [d.feeJuicePortal, FJ_BRIDGE_AMOUNT],
+		})
+		const apr = await ctx.pub.waitForTransactionReceipt({ hash: approveHash })
+		if (apr.status !== "success") throw new Error("$AZTEC approve reverted; STOP")
+	}
+	const depHash = await ctx.wallet.writeContract({
+		address: d.feeJuicePortal,
+		abi: FeeJuicePortalAbi,
+		functionName: "depositToAztecPublic",
+		args: feeJuiceDepositArgs(plan) as never,
+	})
+	appendJournal(JOURNAL_PATH, { phase: "submitted", step: "fj-deposit", txHash: depHash })
+	const dr = await ctx.pub.waitForTransactionReceipt({ hash: depHash })
+	if (dr.status !== "success") throw new Error("depositToAztecPublic reverted; STOP")
+	const dep = parseFeeJuiceDeposit(dr.logs as never)
+	appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "fj-deposit", address: `${dep.amount}:${dep.leafIndex}` })
+	console.log(`FJ deposited: ${dep.amount} FJ-wei, leaf ${dep.leafIndex} (${ctx.mins()})`)
+	return { amount: dep.amount, leafIndex: BigInt(dep.leafIndex) }
+}
+
+/** GROUP 3 (L2) part 1: the deployer account's FIRST tx is its own deploy paid CLAIM-IN-TX
+ *  from the bridged FJ (no SponsoredFPC on mainnet); retries until the message syncs. */
+async function deployAccountClaimInTx(
+	ctx: MainnetCtx,
+	d: {
+		node: ReturnType<typeof createNode>
+		manager: { getDeployMethod: () => Promise<{ send: (o: never) => Promise<unknown> }> }
+		from: AztecAddress
+		claim: { claimAmount: bigint; claimSecret: Fr; messageLeafIndex: bigint }
+	},
+): Promise<void> {
+	if (await d.node.getContract(d.from)) return
+	console.log(`deploying L2 account paid CLAIM-IN-TX from the bridged FJ (real proof; retries until the message syncs)… (${ctx.mins()})`)
+	const deployMethod = await d.manager.getDeployMethod()
+	let landed = false
+	for (let i = 0; i < 200 && !landed; i++) {
+		try {
+			await deployMethod.send({
+				fee: { paymentMethod: publicFeeJuicePayment(d.from, d.claim) },
+				from: "NO_FROM" as never,
+				wait: { waitForStatus: TxStatus.CHECKPOINTED },
+			} as never)
+			landed = true
+		} catch (e) {
+			if (i % 10 === 0) console.log(`  account-deploy retry (${ctx.mins()}): ${e instanceof Error ? e.message.slice(0, 160) : e}`)
+			await new Promise((r) => setTimeout(r, 12_000))
+		}
+	}
+	if (!landed) throw new Error("L2 account deploy (claim-in-tx) never landed; the FJ message may not have synced — re-run to resume")
+	console.log(`L2 account deployed + FJ claimed (${ctx.mins()})`)
+}
+
+/** Deploy (or re-bind) a universal-deploy L2 contract with mainnet's THREE-way resume: a
+ *  --from-journal rebind, a group-resume re-bind of an already-confirmed step, or a fresh
+ *  journaled deploy. */
+async function deployL2Contract(
+	ctx: MainnetCtx,
+	ewallet: unknown,
+	opts: unknown,
+	p: { step: string; label: string; art: unknown; args: unknown[]; ctor: string; saltNum: number },
+): Promise<Contract> {
+	const instance = await universalDeployInstance(p.art, p.args, p.ctor, p.saltNum)
+	if (fromJournalMode) {
+		assertSame(instance.address.toString(), recordedAddr(ctx.recorded, p.step), `${p.label} recompute == recorded`)
+	} else if (ctx.recorded?.confirmed[p.step]) {
+		assertSame(instance.address.toString(), recordedAddr(ctx.recorded, p.step), `${p.label} recompute == recorded (resume)`)
+	} else {
+		// The L2 address is deterministic (salt + args + universal deploy), so journal it BEFORE
+		// the send — that is the durable recovery key (DeploySentTx exposes no pre-wait txHash
+		// accessor; `.send({ wait })` is the proven inclusion path).
+		appendJournal(JOURNAL_PATH, { phase: "submitted", step: p.step, address: instance.address.toString() })
+		await Contract.deploy(ewallet as never, p.art as never, p.args as never, p.ctor, {
+			salt: new Fr(p.saltNum),
+			universalDeploy: true,
+		} as never).send({ ...(opts as object), wait: { waitForStatus: TxStatus.CHECKPOINTED } } as never)
+		appendJournal(JOURNAL_PATH, { phase: "confirmed", step: p.step, address: instance.address.toString() })
+	}
+	const c = await Contract.at(instance.address, p.art as never, ewallet as never)
+	console.log(`${p.label}:`, c.address.toString(), `(${ctx.mins()})`)
+	return c
+}
+
+/** GROUP 3 (L2) part 2: the trio deploy (fees paid from the claimed public FJ) + wiring. */
+async function landL2Trio(
+	ctx: MainnetCtx,
+	ewallet: unknown,
+	portal: `0x${string}`,
+	from: AztecAddress,
+): Promise<{ proxy: Contract; token: Contract; bridge: Contract }> {
+	const fee = { paymentMethod: preexistingFeeJuicePayment(from) }
+	const opts = { from, fee }
+	const sendOpts = { ...opts, wait: { waitForStatus: TxStatus.CHECKPOINTED } }
+
+	const proxy = await deployL2Contract(ctx, ewallet, opts, {
+		step: "proxy",
+		label: "TokenMinterProxy",
+		art: bridgeProxyArtifact,
+		args: [],
+		ctor: "constructor",
+		saltNum: ctx.salts.proxy,
+	})
+	const token = await deployL2Contract(ctx, ewallet, opts, {
+		step: "token",
+		label: "Token",
+		art: TokenContractArtifact,
+		args: [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address, AztecAddress.ZERO],
+		ctor: "constructor_with_minter",
+		saltNum: ctx.salts.token,
+	})
+	const bridge = await deployL2Contract(ctx, ewallet, opts, {
+		step: "bridge",
+		label: "TokenBridge",
+		art: tokenBridgeArtifact,
+		args: [proxy.address, EthAddress.fromString(portal)],
+		ctor: "constructor",
+		saltNum: ctx.salts.bridge,
+	})
+
+	if (!fromJournalMode) {
+		if (!ctx.recorded?.confirmed["set-token"]) {
+			await proxy.methods.set_token(token.address).send(sendOpts as never)
+			appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "set-token", address: "done" })
+		}
+		if (!ctx.recorded?.confirmed["set-bridge"]) {
+			await proxy.methods.set_bridge(bridge.address).send(sendOpts as never)
+			appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "set-bridge", address: "done" })
+		}
+		console.log(`proxy wired (${ctx.mins()})`)
+	}
+	return { proxy, token, bridge }
+}
+
+/** Read-backs: abort on any L1 mismatch, then the group-1 router wiring gate. */
+async function runReadbacks(
+	ctx: MainnetCtx,
+	d: {
+		portal: `0x${string}`
+		portalArt: ReturnType<typeof loadForkedPortalArtifact>
+		registry: `0x${string}`
+		bridge: Contract
+		rollupVersion: number
+	},
+): Promise<void> {
+	console.log("read-backs:")
+	const portalR = getContract({ address: d.portal, abi: d.portalArt.abi as Abi, client: ctx.pub })
+	const reg = getContract({ address: d.registry, abi: RegistryAbi as Abi, client: ctx.pub })
+	// biome-ignore lint/suspicious/noExplicitAny: viem read typing
+	const pr = portalR.read as any
+	assertSame(await pr.registry(), d.registry, "portal.registry")
+	assertSame(await pr.underlying(), CIRCLE_USDC, "portal.underlying == Circle USDC")
+	assertSame(await pr.l2Bridge(), d.bridge.address.toString(), "portal.l2Bridge")
+	// biome-ignore lint/suspicious/noExplicitAny: viem read typing
+	assertSame(await pr.rollup(), await (reg.read as any).getCanonicalRollup(), "portal.rollup == registry canonical")
+	if ((await pr.rollupVersion()) !== BigInt(d.rollupVersion)) throw new Error("read-back FAILED: portal.rollupVersion != node")
+	const onchain = await ctx.pub.getCode({ address: d.portal })
+	if (!onchain) throw new Error("read-back FAILED: portal has no deployed code")
+	// Immutable-aware verification — see deploy-bridge-testnet.ts for rationale.
+	const observedInit = assertRuntimeMatchesTemplate(
+		onchain,
+		d.portalArt.deployedBytecode,
+		ctx.account.address,
+		d.portalArt.immutableReferences,
+	)
+	assertSame(observedInit.toLowerCase(), ctx.account.address.toLowerCase(), "portal initializer == broadcaster")
+
+	// Router wiring (group 1): swapTarget bound + the F-004 witness shape present.
+	await assertRouterWitnessShape(ctx.pub, FUEL_ROUTER, FUEL_SWAP, "router witness shape lacks swapTarget; STOP")
+}
+
+/** Writes ONLY the candidate — promotion to the live manifest is a separate deliberate step. */
+function writeCandidate(d: {
+	info: NodeInfo
+	portal: `0x${string}`
+	salts: MainnetCtx["salts"]
+	proxy: Contract
+	token: Contract
+	bridge: Contract
+	feeJuicePortal: `0x${string}`
+	feeJuiceAsset: `0x${string}`
+	mins: () => string
+}): void {
+	const manifest: CandidateManifest = {
+		network: "mainnet",
+		l1ChainId: d.info.l1ChainId,
+		walletChainId: (d.info.l1ChainId ^ d.info.rollupVersion) >>> 0,
+		l1: {
+			usdc: CIRCLE_USDC.toLowerCase(),
+			portal: d.portal,
+			portalSource: "forked-v1",
+			privateClaimMode: "salt-v2",
+			token: { name: TOKEN_NAME, symbol: TOKEN_SYMBOL, decimals: TOKEN_DECIMALS, source: "circle-proxy" },
+			fuel: {
+				core: {
+					router: FUEL_ROUTER.toLowerCase(),
+					permit2: PERMIT2.toLowerCase(),
+					swapTarget: FUEL_SWAP.toLowerCase(),
+					swapTargetContract: "UniswapFuelSwap",
+					feeJuicePortal: d.feeJuicePortal.toLowerCase(),
+				},
+				// The DISCOVERED canonical route (discover-mainnet-fuel.ts winners) — mainnet rides
+				// existing liquidity, never seeds. minFuelFj is a conservative pre-canary default;
+				// the fueled canary recalibrates it before promote.
+				swap: {
+					poolManager: POOL_MANAGER.toLowerCase(),
+					quoter: V4_QUOTER.toLowerCase(),
+					weth: WETH.toLowerCase(),
+					feeJuice: d.feeJuiceAsset.toLowerCase(),
+					pools: { tokenWeth: { fee: 500, tickSpacing: 10 }, ethFj: { fee: 10000, tickSpacing: 200 } },
+					slippageBps: 300,
+					minFuelFj: String(process.env.MIN_FUEL_FJ ?? (30n * 10n ** 18n).toString()),
+				},
+			},
+			// No FeeAssetHandler on mainnet (BYO-$AZTEC) — the schema keys the mint affordance off its absence.
+			feeJuice: {
+				portal: d.feeJuicePortal.toLowerCase(),
+				asset: d.feeJuiceAsset.toLowerCase(),
+				minFj: String(process.env.FUEL_MIN_FJ ?? (16n * 10n ** 18n).toString()),
+			},
+		},
+		l2: {
+			proxy: { address: d.proxy.address.toString(), salt: d.salts.proxy, constructorArtifact: "constructor", constructorArgs: [] },
+			token: {
+				address: d.token.address.toString(),
+				salt: d.salts.token,
+				constructorArtifact: "constructor_with_minter",
+				constructorArgs: [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, d.proxy.address.toString(), AztecAddress.ZERO.toString()],
+			},
+			bridge: {
+				address: d.bridge.address.toString(),
+				salt: d.salts.bridge,
+				constructorArtifact: "constructor",
+				constructorArgs: [d.proxy.address.toString(), d.portal],
+			},
+		},
+	}
+	writeCandidateAtomic(CANDIDATE_PATH, manifest)
+	console.log(`\n✅ candidate written to apps/faucet/public/mainnet-bridge.candidate.json in ${d.mins()}.`)
+	console.log("   Next: PrivateFPC deploy + dust canary + smoke, THEN promote to mainnet-bridge.json.")
+
+	if (process.env.ETHERSCAN_API_KEY) {
+		console.log("\nVerifying the candidate's L1 sources on Etherscan…")
+		const v = spawnSync("bun", [join(here, "verify-l1.ts"), "--config", CANDIDATE_PATH], { stdio: "inherit" })
+		if (v.status !== 0) console.log("⚠ verification failed — retry with `bun run verify:l1 --config <candidate>`.")
+	}
+	console.log(JSON.stringify(manifest, null, 2))
+}
+
+async function main() {
+	const mins = stopwatch()
+
+	// ─── 0. Reviewed portal bytes + live network identity ────────────
+	const portalArt = loadForkedPortalArtifact()
+	rebuildAndVerifyPortal(portalArt.immutableReferences)
+	const info = await nodeInfo()
+	if (info.l1ChainId !== 1) throw new Error(`Alpha node reports l1ChainId ${info.l1ChainId} != 1 — wrong node; STOP`)
+	console.log(`Alpha node: rollupVersion ${info.rollupVersion}, registry ${info.l1ContractAddresses.registryAddress}`)
+	const registry = info.l1ContractAddresses.registryAddress
+	const feeJuicePortal = info.l1ContractAddresses.feeJuicePortalAddress
+	const feeJuiceAsset = info.l1ContractAddresses.feeJuiceAddress
+
+	// ─── 1. Resume gate ──────────────────────────────────────────────
+	const { recorded, salts } = resolveGeneration()
 
 	// ─── 2. L1 signer (plan-pinned) + Circle USDC identity ───────────
 	const account = privateKeyToAccount(PRIVATE_KEY)
@@ -186,151 +507,43 @@ async function main() {
 	}
 	console.log("L1 deployer", account.address)
 	const { wallet, pub } = createL1Clients({ chain: mainnet, rpcUrl: ETH_RPC, account })
-
-	const usdcR = getContract({ address: CIRCLE_USDC, abi: ERC20_META as unknown as Abi, client: pub })
-	// biome-ignore lint/suspicious/noExplicitAny: viem read typing
-	const ur = usdcR.read as any
-	assertSame(await ur.name(), TOKEN_NAME, "Circle USDC name")
-	assertSame(await ur.symbol(), TOKEN_SYMBOL, "Circle USDC symbol")
-	if (Number(await ur.decimals()) !== TOKEN_DECIMALS) throw new Error("Circle USDC decimals != 6; STOP")
-	appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "usdc", address: CIRCLE_USDC })
+	const ctx: MainnetCtx = { account, wallet, pub, recorded, salts, mins }
+	await assertCircleUsdc(ctx)
 
 	// ─── 3. L2 deployer identity (stable, derived) + precomputed L2 addresses ──
-	const { secret, salt: acctSalt } = resolveDeployerKeys("mainnet")
-	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret)
+	const ewallet = await createL2Wallet({ nodeUrl: NODE_URL, proverEnabled: true })
+	const { manager, from, secret } = await deployerSchnorrAccount(ewallet as never, "mainnet")
+	console.log("L2 deployer", from.toString())
 	// The claim secret derives from the SAME root (fresh domain), so the L1-deposit → L2-claim arc
 	// is crash-resumable without persisting anything.
 	const claimSecret = Fr.fromHexString(
 		`0x${createHash("sha256").update(`nulo-mainnet-fj-claim:${secret.toString()}`).digest("hex").slice(0, 62)}`,
 	)
 
-	const proxyArt = nargoArtifact("token_minter_proxy/target/token_minter_proxy-TokenMinterProxy.json")
-	const bridgeArt = nargoArtifact("token_bridge/target/token_bridge_contract-TokenBridge.json")
-	const instanceOf = async (art: unknown, args: unknown[], ctor: string, saltNum: number) =>
-		await getContractInstanceFromInstantiationParams(
-			art as never,
-			{
-				constructorArgs: args,
-				salt: new Fr(saltNum),
-				publicKeys: PublicKeys.default(),
-				deployer: AztecAddress.ZERO,
-				constructorArtifact: ctor,
-			} as never,
-		)
-
-	const recordedAddr = (step: string): `0x${string}` => {
-		const a = recorded?.confirmed[step]
-		if (!a || a === "done") throw new Error(`journal: step "${step}" never confirmed — partial landing; STOP`)
-		return a as `0x${string}`
-	}
-
 	// ─── 4. GROUP 2 (L1): portal deploy + initialize + FJ deposit ────
-	let portal: `0x${string}`
-	if (recorded?.confirmed["portal"]) {
-		portal = recordedAddr("portal")
-		console.log("portal (recorded):", portal)
-	} else {
-		const hash = await wallet.deployContract({ abi: portalArt.abi as never, bytecode: portalArt.bytecode, args: [] })
-		appendJournal(JOURNAL_PATH, { phase: "submitted", step: "portal", txHash: hash })
-		const r = await pub.waitForTransactionReceipt({ hash })
-		if (!r.contractAddress) throw new Error("portal: no contractAddress")
-		portal = r.contractAddress
-		appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "portal", address: portal })
-		console.log("NuloTokenPortal:", portal, `(${mins()})`)
-	}
+	const portal = await landPortal(ctx, portalArt)
 
 	// L2 addresses are deterministic — compute them NOW so the portal can bind to the bridge
 	// before any L2 tx exists (this is what makes the L1-only group self-contained).
-	const proxyInstance = await instanceOf(proxyArt, [], "constructor", salts.proxy)
-	const tokenInstance = await instanceOf(
+	const proxyInstance = await universalDeployInstance(bridgeProxyArtifact, [], "constructor", salts.proxy)
+	const tokenInstance = await universalDeployInstance(
 		TokenContractArtifact,
 		[TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxyInstance.address, AztecAddress.ZERO],
 		"constructor_with_minter",
 		salts.token,
 	)
-	const bridgeInstance = await instanceOf(bridgeArt, [proxyInstance.address, EthAddress.fromString(portal)], "constructor", salts.bridge)
+	const bridgeInstance = await universalDeployInstance(
+		tokenBridgeArtifact,
+		[proxyInstance.address, EthAddress.fromString(portal)],
+		"constructor",
+		salts.bridge,
+	)
 	console.log("L2 (precomputed) proxy:", proxyInstance.address.toString())
 	console.log("L2 (precomputed) token:", tokenInstance.address.toString())
 	console.log("L2 (precomputed) bridge:", bridgeInstance.address.toString())
 
-	// F-001 hardening: the portal's initialize is guarded to the EOA that DEPLOYED it (constructor-
-	// pinned immutable). A journal resume must therefore broadcast with the SAME PRIVATE_KEY that
-	// landed the portal step — a different key gets NotInitializer and the run stops here.
-	if (!recorded?.confirmed["portal-init"]) {
-		const portalPre = getContract({ address: portal, abi: portalArt.abi as Abi, client: pub })
-		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
-		const preBridge = String(await (portalPre.read as any).l2Bridge())
-		if (!/^0x0+$/.test(preBridge)) throw new Error(`portal already initialized (l2Bridge ${preBridge}) — reuse forbidden; STOP`)
-		// Wrong-key preflight: read the pinned initializer back and compare BEFORE broadcasting.
-		// Without it a resume under a different key discovers the mismatch only as a NotInitializer
-		// revert, after gas is spent and mid-way through a one-shot sequence.
-		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
-		const pinnedInitializer = String(await (portalPre.read as any).initializer())
-		if (pinnedInitializer.toLowerCase() !== account.address.toLowerCase()) {
-			throw new Error(
-				`portal initializer is ${pinnedInitializer} but this run broadcasts from ${account.address} — ` +
-					"resume with the key that deployed the portal; initialize is pinned to it and there is no rescue path.",
-			)
-		}
-		const portalC = getContract({ address: portal, abi: portalArt.abi as never, client: wallet as never })
-		// biome-ignore lint/suspicious/noExplicitAny: viem contract write typing
-		const initHash = await (portalC as any).write.initialize([registry, CIRCLE_USDC, bridgeInstance.address.toString()])
-		appendJournal(JOURNAL_PATH, { phase: "submitted", step: "portal-init", txHash: initHash })
-		const ir = await pub.waitForTransactionReceipt({ hash: initHash })
-		if (ir.status !== "success") throw new Error("portal.initialize reverted; STOP")
-		appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "portal-init", address: "done" })
-		console.log(`portal initialized (${mins()})`)
-	}
-
-	// FJ deposit: approve (exact) + depositToAztecPublic(to = L2 deployer, derived secret).
-	const ewallet = await createL2Wallet({ nodeUrl: NODE_URL, proverEnabled: true })
-	const manager = await ewallet.createSchnorrAccount(secretKey, acctSalt, signingKey)
-	const deployer = await manager.getAccount()
-	const from = deployer.getAddress()
-	console.log("L2 deployer", from.toString())
-
-	let depositRecord: { amount: bigint; leafIndex: bigint }
-	if (recorded?.confirmed["fj-deposit"]) {
-		const [amt, leaf] = String(recorded.confirmed["fj-deposit"]).split(":")
-		depositRecord = { amount: BigInt(amt), leafIndex: BigInt(leaf) }
-		console.log(`fj-deposit (recorded): ${depositRecord.amount} FJ-wei, leaf ${depositRecord.leafIndex}`)
-	} else {
-		// Cross-check the node-claimed portal/asset against the group-1 script's constants.
-		const fjPortalR = getContract({ address: feeJuicePortal, abi: FeeJuicePortalAbi as unknown as Abi, client: pub })
-		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
-		assertSame(await (fjPortalR.read as any).UNDERLYING(), feeJuiceAsset, "FeeJuicePortal.UNDERLYING == node fee asset")
-		const assetR = getContract({ address: feeJuiceAsset, abi: ERC20_META as unknown as Abi, client: pub })
-		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
-		const ar = assetR.read as any
-		const aztecBal = (await ar.balanceOf([account.address])) as bigint
-		if (aztecBal < FJ_BRIDGE_AMOUNT) throw new Error(`$AZTEC balance ${aztecBal} < FJ_BRIDGE_AMOUNT ${FJ_BRIDGE_AMOUNT}; STOP`)
-		const plan = await planPublicFuelDeposit(from, FJ_BRIDGE_AMOUNT, claimSecret)
-		const allowance = (await ar.allowance([account.address, feeJuicePortal])) as bigint
-		if (allowance < FJ_BRIDGE_AMOUNT) {
-			const approveHash = await wallet.writeContract({
-				address: feeJuiceAsset,
-				abi: ERC20_META,
-				functionName: "approve",
-				args: [feeJuicePortal, FJ_BRIDGE_AMOUNT],
-			})
-			const apr = await pub.waitForTransactionReceipt({ hash: approveHash })
-			if (apr.status !== "success") throw new Error("$AZTEC approve reverted; STOP")
-		}
-		const depHash = await wallet.writeContract({
-			address: feeJuicePortal,
-			abi: FeeJuicePortalAbi,
-			functionName: "depositToAztecPublic",
-			args: feeJuiceDepositArgs(plan) as never,
-		})
-		appendJournal(JOURNAL_PATH, { phase: "submitted", step: "fj-deposit", txHash: depHash })
-		const dr = await pub.waitForTransactionReceipt({ hash: depHash })
-		if (dr.status !== "success") throw new Error("depositToAztecPublic reverted; STOP")
-		const dep = parseFeeJuiceDeposit(dr.logs as never)
-		depositRecord = { amount: dep.amount, leafIndex: BigInt(dep.leafIndex) }
-		// The step's address slot records amount:leafIndex (the claim's resume key; secret is derived).
-		appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "fj-deposit", address: `${dep.amount}:${dep.leafIndex}` })
-		console.log(`FJ deposited: ${dep.amount} FJ-wei, leaf ${dep.leafIndex} (${mins()})`)
-	}
+	await initializePortalOnce(ctx, { portal, portalArt, registry, bridgeAddress: bridgeInstance.address.toString() })
+	const depositRecord = await depositFeeJuice(ctx, { feeJuicePortal, feeJuiceAsset, from, claimSecret })
 
 	if (l1OnlyMode) {
 		console.log(
@@ -343,191 +556,21 @@ async function main() {
 
 	// ─── 5. GROUP 3 (L2): account (claim-in-tx) + trio + wiring ──────
 	const node = createNode(NODE_URL)
-	const claim = {
-		claimAmount: depositRecord.amount,
-		claimSecret,
-		messageLeafIndex: depositRecord.leafIndex,
-	}
-	if (!(await node.getContract(from))) {
-		console.log(`deploying L2 account paid CLAIM-IN-TX from the bridged FJ (real proof; retries until the message syncs)… (${mins()})`)
-		const deployMethod = await manager.getDeployMethod()
-		let landed = false
-		for (let i = 0; i < 200 && !landed; i++) {
-			try {
-				await deployMethod.send({
-					fee: { paymentMethod: publicFeeJuicePayment(from, claim) },
-					from: "NO_FROM" as never,
-					wait: { waitForStatus: TxStatus.CHECKPOINTED },
-				} as never)
-				landed = true
-			} catch (e) {
-				if (i % 10 === 0) console.log(`  account-deploy retry (${mins()}): ${e instanceof Error ? e.message.slice(0, 160) : e}`)
-				await new Promise((r) => setTimeout(r, 12_000))
-			}
-		}
-		if (!landed) throw new Error("L2 account deploy (claim-in-tx) never landed; the FJ message may not have synced — re-run to resume")
-		console.log(`L2 account deployed + FJ claimed (${mins()})`)
-	}
+	await deployAccountClaimInTx(ctx, {
+		node,
+		manager: manager as never,
+		from,
+		claim: { claimAmount: depositRecord.amount, claimSecret, messageLeafIndex: depositRecord.leafIndex },
+	})
 
-	const fee = { paymentMethod: preexistingFeeJuicePayment(from) }
-	const opts = { from, fee }
-	const sendOpts = { ...opts, wait: { waitForStatus: TxStatus.CHECKPOINTED } }
-
-	const deployL2 = async (
-		step: string,
-		label: string,
-		art: unknown,
-		args: unknown[],
-		ctor: string,
-		saltNum: number,
-	): Promise<Contract> => {
-		const instance = await instanceOf(art, args, ctor, saltNum)
-		if (fromJournalMode) {
-			assertSame(instance.address.toString(), recordedAddr(step), `${label} recompute == recorded`)
-		} else if (recorded?.confirmed[step]) {
-			assertSame(instance.address.toString(), recordedAddr(step), `${label} recompute == recorded (resume)`)
-		} else {
-			appendJournal(JOURNAL_PATH, { phase: "submitted", step, address: instance.address.toString() })
-			await Contract.deploy(ewallet as never, art as never, args as never, ctor, {
-				salt: new Fr(saltNum),
-				universalDeploy: true,
-			} as never).send({ ...opts, wait: { waitForStatus: TxStatus.CHECKPOINTED } } as never)
-			appendJournal(JOURNAL_PATH, { phase: "confirmed", step, address: instance.address.toString() })
-		}
-		const c = await Contract.at(instance.address, art as never, ewallet as never)
-		console.log(`${label}:`, c.address.toString(), `(${mins()})`)
-		return c
-	}
-
-	const proxy = await deployL2("proxy", "TokenMinterProxy", proxyArt, [], "constructor", salts.proxy)
-	const token = await deployL2(
-		"token",
-		"Token",
-		TokenContractArtifact,
-		[TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address, AztecAddress.ZERO],
-		"constructor_with_minter",
-		salts.token,
-	)
-	const bridge = await deployL2(
-		"bridge",
-		"TokenBridge",
-		bridgeArt,
-		[proxy.address, EthAddress.fromString(portal)],
-		"constructor",
-		salts.bridge,
-	)
+	const { proxy, token, bridge } = await landL2Trio(ctx, ewallet, portal, from)
 	assertSame(bridge.address.toString(), bridgeInstance.address.toString(), "deployed bridge == portal-bound address")
 
-	if (!fromJournalMode) {
-		if (!recorded?.confirmed["set-token"]) {
-			await proxy.methods.set_token(token.address).send(sendOpts)
-			appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "set-token", address: "done" })
-		}
-		if (!recorded?.confirmed["set-bridge"]) {
-			await proxy.methods.set_bridge(bridge.address).send(sendOpts)
-			appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "set-bridge", address: "done" })
-		}
-		console.log(`proxy wired (${mins()})`)
-	}
-
 	// ─── 6. Read-backs ───────────────────────────────────────────────
-	console.log("read-backs:")
-	const portalR = getContract({ address: portal, abi: portalArt.abi as Abi, client: pub })
-	const reg = getContract({ address: registry, abi: RegistryAbi as Abi, client: pub })
-	// biome-ignore lint/suspicious/noExplicitAny: viem read typing
-	const pr = portalR.read as any
-	assertSame(await pr.registry(), registry, "portal.registry")
-	assertSame(await pr.underlying(), CIRCLE_USDC, "portal.underlying == Circle USDC")
-	assertSame(await pr.l2Bridge(), bridge.address.toString(), "portal.l2Bridge")
-	// biome-ignore lint/suspicious/noExplicitAny: viem read typing
-	assertSame(await pr.rollup(), await (reg.read as any).getCanonicalRollup(), "portal.rollup == registry canonical")
-	if ((await pr.rollupVersion()) !== BigInt(info.rollupVersion)) throw new Error("read-back FAILED: portal.rollupVersion != node")
-	const onchain = await pub.getCode({ address: portal })
-	if (!onchain) throw new Error("read-back FAILED: portal has no deployed code")
-	// Immutable-aware verification — see deploy-bridge-testnet.ts for rationale.
-	const observedInit = assertRuntimeMatchesTemplate(onchain, portalArt.deployedBytecode, account.address, portalArt.immutableReferences)
-	assertSame(observedInit.toLowerCase(), account.address.toLowerCase(), "portal initializer == broadcaster")
+	await runReadbacks(ctx, { portal, portalArt, registry, bridge, rollupVersion: info.rollupVersion })
 
-	// Router wiring (group 1): swapTarget bound + the F-004 witness shape present.
-	const routerR = getContract({
-		address: FUEL_ROUTER,
-		abi: [
-			{ type: "function", name: "swapTarget", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] },
-			{ type: "function", name: "BRIDGE_WITNESS_TYPE_STRING", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
-		] as Abi,
-		client: pub,
-	})
-	// biome-ignore lint/suspicious/noExplicitAny: viem read typing
-	const rr = routerR.read as any
-	assertSame(await rr.swapTarget(), FUEL_SWAP, "router.swapTarget == FUEL_SWAP")
-	if (!((await rr.BRIDGE_WITNESS_TYPE_STRING()) as string).includes("swapTarget"))
-		throw new Error("router witness shape lacks swapTarget; STOP")
-
-	// ─── 7. Candidate manifest (never the live file) ─────────────────
-	const manifest: CandidateManifest = {
-		network: "mainnet",
-		l1ChainId: info.l1ChainId,
-		walletChainId: (info.l1ChainId ^ info.rollupVersion) >>> 0,
-		l1: {
-			usdc: CIRCLE_USDC.toLowerCase(),
-			portal,
-			portalSource: "forked-v1",
-			privateClaimMode: "salt-v2",
-			token: { name: TOKEN_NAME, symbol: TOKEN_SYMBOL, decimals: TOKEN_DECIMALS, source: "circle-proxy" },
-			fuel: {
-				core: {
-					router: FUEL_ROUTER.toLowerCase(),
-					permit2: PERMIT2.toLowerCase(),
-					swapTarget: FUEL_SWAP.toLowerCase(),
-					swapTargetContract: "UniswapFuelSwap",
-					feeJuicePortal: feeJuicePortal.toLowerCase(),
-				},
-				// The DISCOVERED canonical route (discover-mainnet-fuel.ts winners) — mainnet rides
-				// existing liquidity, never seeds. minFuelFj is a conservative pre-canary default;
-				// the fueled canary recalibrates it before promote.
-				swap: {
-					poolManager: POOL_MANAGER.toLowerCase(),
-					quoter: V4_QUOTER.toLowerCase(),
-					weth: WETH.toLowerCase(),
-					feeJuice: feeJuiceAsset.toLowerCase(),
-					pools: { tokenWeth: { fee: 500, tickSpacing: 10 }, ethFj: { fee: 10000, tickSpacing: 200 } },
-					slippageBps: 300,
-					minFuelFj: String(process.env.MIN_FUEL_FJ ?? (30n * 10n ** 18n).toString()),
-				},
-			},
-			// No FeeAssetHandler on mainnet (BYO-$AZTEC) — the schema keys the mint affordance off its absence.
-			feeJuice: {
-				portal: feeJuicePortal.toLowerCase(),
-				asset: feeJuiceAsset.toLowerCase(),
-				minFj: String(process.env.FUEL_MIN_FJ ?? (16n * 10n ** 18n).toString()),
-			},
-		},
-		l2: {
-			proxy: { address: proxy.address.toString(), salt: salts.proxy, constructorArtifact: "constructor", constructorArgs: [] },
-			token: {
-				address: token.address.toString(),
-				salt: salts.token,
-				constructorArtifact: "constructor_with_minter",
-				constructorArgs: [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address.toString(), AztecAddress.ZERO.toString()],
-			},
-			bridge: {
-				address: bridge.address.toString(),
-				salt: salts.bridge,
-				constructorArtifact: "constructor",
-				constructorArgs: [proxy.address.toString(), portal],
-			},
-		},
-	}
-	writeCandidateAtomic(CANDIDATE_PATH, manifest)
-	console.log(`\n✅ candidate written to apps/faucet/public/mainnet-bridge.candidate.json in ${mins()}.`)
-	console.log("   Next: PrivateFPC deploy + dust canary + smoke, THEN promote to mainnet-bridge.json.")
-
-	if (process.env.ETHERSCAN_API_KEY) {
-		console.log("\nVerifying the candidate's L1 sources on Etherscan…")
-		const v = spawnSync("bun", [join(here, "verify-l1.ts"), "--config", CANDIDATE_PATH], { stdio: "inherit" })
-		if (v.status !== 0) console.log("⚠ verification failed — retry with `bun run verify:l1 --config <candidate>`.")
-	}
-	console.log(JSON.stringify(manifest, null, 2))
+	// ─── 7. Candidate manifest ───────────────────────────────────────
+	writeCandidate({ info, portal, salts, proxy, token, bridge, feeJuicePortal, feeJuiceAsset, mins })
 }
 
 main().catch((e) => {
