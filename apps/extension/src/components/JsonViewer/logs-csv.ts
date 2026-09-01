@@ -8,7 +8,6 @@ const MAX_CELL_LENGTH = 32_760
  * downstream spreadsheets (Excel cell limit is 32_767 chars) don't
  * truncate silently.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 17) — refactor when touched, never raise
 export function buildLogsCsv(logs: LogEntry[]): string {
 	const rows: [string, string, string, string][] = []
 
@@ -16,32 +15,36 @@ export function buildLogsCsv(logs: LogEntry[]): string {
 		const time = new Date(log.timestamp).toISOString()
 		const source = log.source
 		const level = getLogLevelName(log.level)
-		const data = computeData(log)
-
-		if (data.length <= MAX_CELL_LENGTH) {
-			rows.push([time, source, level, data])
-			continue
-		}
-
-		let i = 0
-		while (i < data.length) {
-			const chunk = data.slice(i, i + MAX_CELL_LENGTH)
-			const isFirst = i === 0
-			const isLast = i + MAX_CELL_LENGTH >= data.length
-
-			let chunkWithDots = chunk
-			if (isFirst && !isLast) chunkWithDots = `${chunk}...`
-			else if (!isFirst && !isLast) chunkWithDots = `...${chunk}...`
-			else if (!isFirst && isLast) chunkWithDots = `...${chunk}`
-
-			rows.push([time, source, level, chunkWithDots])
-			i += MAX_CELL_LENGTH
+		for (const cell of splitIntoCells(computeData(log))) {
+			rows.push([time, source, level, cell])
 		}
 	}
 
 	return [["time", "source", "level", "data"], ...rows]
 		.map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(","))
 		.join("\n")
+}
+
+/** Split an over-long data value into MAX_CELL_LENGTH-wide cells, ellipsis-marked on the
+ *  cut sides so a continuation cell is visibly a continuation. */
+function splitIntoCells(data: string): string[] {
+	if (data.length <= MAX_CELL_LENGTH) return [data]
+	const cells: string[] = []
+	let i = 0
+	while (i < data.length) {
+		const chunk = data.slice(i, i + MAX_CELL_LENGTH)
+		const isFirst = i === 0
+		const isLast = i + MAX_CELL_LENGTH >= data.length
+
+		let chunkWithDots = chunk
+		if (isFirst && !isLast) chunkWithDots = `${chunk}...`
+		else if (!isFirst && !isLast) chunkWithDots = `...${chunk}...`
+		else if (!isFirst && isLast) chunkWithDots = `...${chunk}`
+
+		cells.push(chunkWithDots)
+		i += MAX_CELL_LENGTH
+	}
+	return cells
 }
 
 function computeData(log: LogEntry): string {

@@ -54,7 +54,6 @@ interface CallLike {
  * the method name isn't in the known set OR if the arg arity doesn't
  * match the expected signature.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 export function parseTransferIntent(call: CallLike | undefined): TransferIntent {
 	if (!call) return { kind: "unverified" }
 	const name = call.method ?? call.name
@@ -62,27 +61,29 @@ export function parseTransferIntent(call: CallLike | undefined): TransferIntent 
 	const args = call.args
 	if (!Array.isArray(args)) return { kind: "unverified" }
 
-	if (KNOWN_TRANSFER_METHODS.has(name)) {
-		// Signature: (from, to, amount). Strict arity is the "do not guess"
-		// defense if upstream extends the signature.
-		if (args.length !== 3) return { kind: "unverified" }
-		const from = canonicalAddress(args[0])
-		const to = canonicalAddress(args[1])
-		const amount = canonicalAmount(args[2])
-		if (from === undefined || to === undefined || amount === undefined) return { kind: "unverified" }
-		return { kind: "transfer", from, to, amount }
-	}
-
-	if (KNOWN_MINT_METHODS.has(name)) {
-		// Signature: (to, amount).
-		if (args.length !== 2) return { kind: "unverified" }
-		const to = canonicalAddress(args[0])
-		const amount = canonicalAmount(args[1])
-		if (to === undefined || amount === undefined) return { kind: "unverified" }
-		return { kind: "mint", to, amount }
-	}
-
+	if (KNOWN_TRANSFER_METHODS.has(name)) return parseTransferArgs(args)
+	if (KNOWN_MINT_METHODS.has(name)) return parseMintArgs(args)
 	return { kind: "unverified" }
+}
+
+/** Signature: (from, to, amount). Strict arity is the "do not guess" defense if
+ *  upstream extends the signature. */
+function parseTransferArgs(args: unknown[]): TransferIntent {
+	if (args.length !== 3) return { kind: "unverified" }
+	const from = canonicalAddress(args[0])
+	const to = canonicalAddress(args[1])
+	const amount = canonicalAmount(args[2])
+	if (from === undefined || to === undefined || amount === undefined) return { kind: "unverified" }
+	return { kind: "transfer", from, to, amount }
+}
+
+/** Signature: (to, amount). */
+function parseMintArgs(args: unknown[]): TransferIntent {
+	if (args.length !== 2) return { kind: "unverified" }
+	const to = canonicalAddress(args[0])
+	const amount = canonicalAmount(args[1])
+	if (to === undefined || amount === undefined) return { kind: "unverified" }
+	return { kind: "mint", to, amount }
 }
 
 /** Canonical 32-byte hex form — what an Aztec address serializes to.

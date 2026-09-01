@@ -326,33 +326,55 @@ export interface JournalTerminalCardProps {
  * Pure function. `tokenById` is passed via ctx because the token cache
  * lives in popup-store land; this file stays free of Pinia / Vue refs.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 export function buildJournalTerminalCardProps(op: OperationRecord, ctx: JournalTerminalCardCtx): JournalTerminalCardProps | null {
 	if (!ACTIVITY_FEED_KINDS.has(op.kind)) return null
 	const display = journalTerminalDisplay(op)
 	if (!display) return null
 
-	const isTransfer = op.kind === "transfer"
-	const token = isTransfer && op.tokenId !== undefined ? ctx.tokenById(op.tokenId) : undefined
-	const title = isTransfer ? token?.symbol || "Transfer" : op.title ? humanizeMethodName(op.title) : "Transaction"
-	const activityIcon = isTransfer ? "arrow-narrow-up-right" : "zap"
-	// `op.subtitle` is the dApp-controlled origin/name persisted at session-
-	// discover time. Bracket schemeful values so a malicious dApp can't make
-	// its label visually read as a clickable link on the main feed.
-	const originLabel = isTransfer ? null : sanitizeJournalSubtitle(op.subtitle)
-	// Gate on `=== undefined` because TransferType.Private === 0; a truthy
-	// check would silently drop the Private → Private chip.
-	const transferTypeLabel = isTransfer && op.transferType !== undefined ? formatTransferType(op.transferType) : null
+	const fields = op.kind === "transfer" ? transferCardFields(op, ctx) : dappCardFields(op)
+	return { ...fields, ...display }
+}
+
+type JournalCardFields = Pick<
+	JournalTerminalCardProps,
+	"title" | "activityIcon" | "originLabel" | "transferTypeLabel" | "amount" | "amountSymbol"
+>
+
+function transferCardFields(op: OperationRecord, ctx: JournalTerminalCardCtx): JournalCardFields {
+	const token = op.tokenId !== undefined ? ctx.tokenById(op.tokenId) : undefined
 
 	// Pre-v7 records lacking `amountRaw` would have `balanceFormatted(undefined, …)`
 	// silently render "0", surfacing as a fake "0 USDC" ghost on the card
 	// (codex audit catch). Only emit amount when both pieces are present.
 	let amount: string | null = null
 	let amountSymbol: string | null = null
-	if (isTransfer && op.amountRaw && token) {
+	if (op.amountRaw && token) {
 		amount = balanceFormatted(op.amountRaw, token.decimals || 0, 8).value
 		amountSymbol = token.symbol ?? null
 	}
 
-	return { title, activityIcon, originLabel, transferTypeLabel, amount, amountSymbol, ...display }
+	return {
+		title: token?.symbol || "Transfer",
+		activityIcon: "arrow-narrow-up-right",
+		originLabel: null,
+		// Gate on `=== undefined` because TransferType.Private === 0; a truthy
+		// check would silently drop the Private → Private chip.
+		transferTypeLabel: op.transferType !== undefined ? formatTransferType(op.transferType) : null,
+		amount,
+		amountSymbol,
+	}
+}
+
+function dappCardFields(op: OperationRecord): JournalCardFields {
+	return {
+		title: op.title ? humanizeMethodName(op.title) : "Transaction",
+		activityIcon: "zap",
+		// `op.subtitle` is the dApp-controlled origin/name persisted at session-
+		// discover time. Bracket schemeful values so a malicious dApp can't make
+		// its label visually read as a clickable link on the main feed.
+		originLabel: sanitizeJournalSubtitle(op.subtitle),
+		transferTypeLabel: null,
+		amount: null,
+		amountSymbol: null,
+	}
 }

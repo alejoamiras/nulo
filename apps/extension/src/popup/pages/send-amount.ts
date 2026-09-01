@@ -27,7 +27,20 @@ export interface ValidateSendAmountInput {
 
 const MIN_BASE_UNITS = 1n
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 17) — refactor when touched, never raise
+/** Result-shaped wrapper over `parseAmountToBaseUnits`: its throw is the only signal, and
+ *  the too-many-decimals case gets its own user-facing reason. */
+function parseToBaseUnits(
+	trimmed: string,
+	tokenDecimals: number,
+): { ok: true; value: bigint } | { ok: false; reason: "tooManyDecimals" | "invalid" } {
+	try {
+		return { ok: true, value: parseAmountToBaseUnits(trimmed, tokenDecimals) }
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err)
+		return { ok: false, reason: msg.includes("too many decimals") ? "tooManyDecimals" : "invalid" }
+	}
+}
+
 export function validateSendAmount(opts: ValidateSendAmountInput): ValidateSendAmount {
 	const { input, tokenDecimals, balanceRaw } = opts
 
@@ -43,16 +56,11 @@ export function validateSendAmount(opts: ValidateSendAmountInput): ValidateSendA
 		return { valid: false, reason: "decimalsUnknown" }
 	}
 
-	let integerized: bigint
-	try {
-		integerized = parseAmountToBaseUnits(trimmed, tokenDecimals)
-	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err)
-		if (msg.includes("too many decimals")) {
-			return { valid: false, reason: "tooManyDecimals" }
-		}
-		return { valid: false, reason: "invalid" }
+	const parsed = parseToBaseUnits(trimmed, tokenDecimals)
+	if (!parsed.ok) {
+		return { valid: false, reason: parsed.reason }
 	}
+	const integerized = parsed.value
 
 	if (integerized < MIN_BASE_UNITS) {
 		return { valid: false, reason: "belowMinimum" }

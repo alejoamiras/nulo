@@ -148,7 +148,6 @@ export function resolveSavedSelection(
  * rows are offered — set false on networks that have no funded sponsor
  * (Alpha/mainnet), where offering it would be a trap that fails at send.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
 export function buildFeeMethods(
 	registeredFpcs: RegisteredFpc[],
 	gasBalances?: GasBalances,
@@ -156,35 +155,7 @@ export function buildFeeMethods(
 ): FeeMethodOption[] {
 	const allowSponsored = options?.allowSponsored ?? true
 	const privateFpc = registeredFpcs.find((f) => f.type === FpcType.PrivateFpc)
-	const publicFeeJuiceZero = gasBalances?.publicFeeJuice === "0"
-	// Unknown (null) disables too — but with an honest reason, never "no balance".
-	const publicFeeJuiceUnknown = gasBalances !== undefined && gasBalances.publicFeeJuice === null
-	const privateFeeJuiceZero = gasBalances !== undefined && (gasBalances.privateFeeJuice === null || gasBalances.privateFeeJuice === "0")
-
-	const fj: FeeMethodOption = { type: "fj", title: "Fee Juice", subtitle: "public" }
-	if (publicFeeJuiceZero) {
-		fj.disabled = true
-		fj.disabledReason = "no balance"
-	} else if (publicFeeJuiceUnknown) {
-		fj.disabled = true
-		fj.disabledReason = "couldn't check balance"
-	}
-
-	const privateFj: FeeMethodOption = {
-		type: "private_fpc",
-		title: privateFpc?.name || "Private Fee Juice",
-		subtitle: "private",
-		fpc: privateFpc ?? null,
-	}
-	if (!privateFpc) {
-		privateFj.disabled = true
-		privateFj.disabledReason = "not available"
-	} else if (privateFeeJuiceZero) {
-		privateFj.disabled = true
-		privateFj.disabledReason = "no balance"
-	}
-
-	const base: FeeMethodOption[] = [fj, privateFj]
+	const base: FeeMethodOption[] = [feeJuiceOption(gasBalances), privateFeeJuiceOption(privateFpc, gasBalances)]
 
 	for (const fpc of registeredFpcs) {
 		if (fpc.type === FpcType.PrivateFpc) {
@@ -199,6 +170,41 @@ export function buildFeeMethods(
 	}
 
 	return base
+}
+
+function feeJuiceOption(gasBalances?: GasBalances): FeeMethodOption {
+	const publicFeeJuiceZero = gasBalances?.publicFeeJuice === "0"
+	// Unknown (null) disables too — but with an honest reason, never "no balance".
+	const publicFeeJuiceUnknown = gasBalances !== undefined && gasBalances.publicFeeJuice === null
+
+	const fj: FeeMethodOption = { type: "fj", title: "Fee Juice", subtitle: "public" }
+	if (publicFeeJuiceZero) {
+		fj.disabled = true
+		fj.disabledReason = "no balance"
+	} else if (publicFeeJuiceUnknown) {
+		fj.disabled = true
+		fj.disabledReason = "couldn't check balance"
+	}
+	return fj
+}
+
+function privateFeeJuiceOption(privateFpc: RegisteredFpc | undefined, gasBalances?: GasBalances): FeeMethodOption {
+	const privateFeeJuiceZero = gasBalances !== undefined && (gasBalances.privateFeeJuice === null || gasBalances.privateFeeJuice === "0")
+
+	const privateFj: FeeMethodOption = {
+		type: "private_fpc",
+		title: privateFpc?.name || "Private Fee Juice",
+		subtitle: "private",
+		fpc: privateFpc ?? null,
+	}
+	if (!privateFpc) {
+		privateFj.disabled = true
+		privateFj.disabledReason = "not available"
+	} else if (privateFeeJuiceZero) {
+		privateFj.disabled = true
+		privateFj.disabledReason = "no balance"
+	}
+	return privateFj
 }
 
 /**

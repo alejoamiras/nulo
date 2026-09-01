@@ -49,7 +49,6 @@ export function useProfileBootstrap() {
 	 *  checked after every await and before every shared-state mutation so a
 	 *  superseded bootstrap stops instead of replacing the winner's `managers.network`
 	 *  (read dynamically here) or writing stale networks. Standalone callers omit it. */
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 	const initNetworks = async (isCurrent: () => boolean = () => true) => {
 		if (!isCurrent()) return
 		appStore.networks = []
@@ -63,20 +62,12 @@ export function useProfileBootstrap() {
 		if (!isCurrent()) return // a newer activation took over — don't write stale networks
 		appStore.networks = nets
 
-		const active = await network.getActiveNetwork()
-		if (!isCurrent()) return
-		if (active) {
-			appStore.network = active
-		} else {
-			// No active pointer (e.g. a freshly IMPORTED profile — its active-network selection isn't
-			// restored yet; that's item 1b). Fall back to the profile's PRIMARY network from the
-			// service — single-sourced from the `isPrimaryActive` seed (Alpha in prod, Testnet under
-			// the e2e flag), so it can't diverge from a fresh profile's default or break e2e the way a
-			// hardcoded `kind === "testnet"` did (#305 flipped the default to Alpha but left this).
-			const primary = await network.getPrimaryNetwork()
-			if (!isCurrent()) return
-			appStore.network = primary ?? appStore.networks[0]
-		}
+		// The helper fences internally, but the await boundary itself yields a
+		// microtask — a new activation can bump the generation between the
+		// helper's last check and this resumption, so re-fence before writing.
+		const resolved = await resolveActiveNetwork(network, isCurrent)
+		if (resolved === "superseded" || !isCurrent()) return
+		appStore.network = resolved
 
 		// Persist the resolved active network (covers both the restored-active and fallback branches).
 		if (appStore.network) {
@@ -84,6 +75,23 @@ export function useProfileBootstrap() {
 			if (!isCurrent()) return
 		}
 		appStore.syncNetworkStatus()
+	}
+
+	/** The stored active network if present, else the profile's PRIMARY network (else the
+	 *  first known one). "superseded" means a newer activation took over mid-await — the
+	 *  caller must stop without writing; it is distinct from undefined (no networks). */
+	const resolveActiveNetwork = async (network: NetworkServiceClient, isCurrent: () => boolean) => {
+		const active = await network.getActiveNetwork()
+		if (!isCurrent()) return "superseded" as const
+		if (active) return active
+		// No active pointer (e.g. a freshly IMPORTED profile — its active-network selection isn't
+		// restored yet; that's item 1b). Fall back to the profile's PRIMARY network from the
+		// service — single-sourced from the `isPrimaryActive` seed (Alpha in prod, Testnet under
+		// the e2e flag), so it can't diverge from a fresh profile's default or break e2e the way a
+		// hardcoded `kind === "testnet"` did (#305 flipped the default to Alpha but left this).
+		const primary = await network.getPrimaryNetwork()
+		if (!isCurrent()) return "superseded" as const
+		return primary ?? appStore.networks[0]
 	}
 
 	/** Replaces the inline `initAccount` in popup/app.vue. Fenced per B-27 (see initNetworks). */
