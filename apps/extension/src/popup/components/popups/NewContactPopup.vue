@@ -2,6 +2,10 @@
 /** Utils */
 import { isValidHex } from "@/utils/string"
 
+/** Components */
+import ContactFormFields from "@/popup/components/modules/settings/contacts/ContactFormFields.vue"
+import ProcessingErrorNote from "@/popup/components/modules/settings/contacts/ProcessingErrorNote.vue"
+
 /** Services */
 import { ContactServiceClient } from "@/wallet/services/contact/client"
 
@@ -164,73 +168,20 @@ watch(
 		submitTestId="new-contact-submit"
 		@submit="handleAddContact"
 	>
-		<Input
-			label="Name"
-			placeholder="New contact"
-			autofocus
-			sanitize
-			:maxLength="25"
-			v-model="nameTerm"
-		>
-			<template #right>
-				<Transition name="fade">
-					<Flex v-if="isAlreadyExistName" align="center" gap="6">
-						<Icon name="warning" size="12" color="primary" />
-						<Text size="12" weight="600" color="primary"> Already exist </Text>
-					</Flex>
-				</Transition>
-			</template>
-		</Input>
-
-		<AddressInput
-			label="Address"
-			placeholder="0x15c4ac6afcffdf59aa8a1fb3317ff0c86aee3eb02f9e52c3612e1163d4701446"
-			sanitize
-			v-model="contactAddressTerm"
-		>
-			<template #right>
-				<Transition name="fade">
-					<Flex v-if="!isValidAddress && contactAddressTerm" align="center" gap="6">
-						<Icon name="warning" size="12" color="primary" />
-						<Text size="12" weight="600" color="primary"> Invalid address </Text>
-					</Flex>
-					<Flex v-else-if="isAlreadyExistAddress && contactAddressTerm" align="center" gap="6">
-						<Icon name="warning" size="12" color="primary" />
-						<Text size="12" weight="600" color="primary"> Already exist </Text>
-					</Flex>
-				</Transition>
-			</template>
-		</AddressInput>
+		<ContactFormFields
+			v-model:name="nameTerm"
+			v-model:address="contactAddressTerm"
+			:nameExists="isAlreadyExistName"
+			:addressValid="isValidAddress"
+			:addressExists="isAlreadyExistAddress"
+		/>
 
 		<template #aboveSubmit>
-			<Transition name="fade">
-				<Tooltip
-					v-if="processingError.show"
-					side="top"
-					position="start"
-					wide
-					:disabled="!processingError.tooltip"
-					:style="{ marginTop: '-12px' }"
-				>
-					<Flex align="center" wide>
-						<Icon
-							name="info"
-							size="14"
-							color="primary"
-						/>
-
-						<Text size="12" weight="600" color="secondary" :style="{ paddingLeft: '4px' }">
-							{{ processingError.title }}
-						</Text>
-					</Flex>
-
-					<template #content>
-						<Text size="12" color="secondary">
-							{{ processingError.tooltip }}
-						</Text>
-					</template>
-				</Tooltip>
-			</Transition>
+			<ProcessingErrorNote
+				:show="processingError.show"
+				:title="processingError.title"
+				:tooltip="processingError.tooltip"
+			/>
 		</template>
 	</FormPopup>
 </template>
