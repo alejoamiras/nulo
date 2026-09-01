@@ -121,7 +121,6 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 		this.generationProvider = provider
 	}
 
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 21) — refactor when touched, never raise
 	protected override async request<T extends keyof Methods>(
 		method: T,
 		...args: Parameters<Methods[T]>
@@ -132,14 +131,7 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 		// carries its original generation and is rejected offscreen-side instead
 		// of silently running against the successor's store (#281 D4).
 		const netArg = args[0] as (NetworkInfo & { pxeGeneration?: string }) | undefined
-		if (
-			netArg &&
-			typeof netArg === "object" &&
-			"profileId" in netArg &&
-			"chainId" in netArg &&
-			!netArg.pxeGeneration &&
-			this.generationProvider
-		) {
+		if (netArg && needsGenerationStamp(netArg) && this.generationProvider) {
 			const generation = await this.generationProvider(netArg.profileId)
 			// A registered provider returning undefined means the profile row is GONE or
 			// tombstoned — exactly the deletion window the fence exists for. Failing here
@@ -159,49 +151,59 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 			if (method === "provisionChainStoreKey" || !message.includes("PXE_STORE_KEY_MISSING") || !profileId || !this.storeKeyProvider) {
 				throw err
 			}
-			// AUDIT D4-hardening: the recovery sequence is readiness ONCE, then
-			// authority ONCE, then already-ready sends — no `onReady` (which can
-			// recreate the offscreen document and reset its lifecycle map) may run
-			// between the authority read and the wire, or a concurrent delete +
-			// recreation could let a stale provision land on an empty map.
-			await this.onReady()
-			const provision = await this.storeKeyProvider(profileId)
-			if (!provision) throw err
-			try {
-				// Capture-equality guard, POST-STAMP (the capture block above mutated
-				// args[0]) and capture-conditional: an UNCAPTURED op keeps the
-				// documented provision-then-retry contract, but a captured op whose
-				// generation differs from the provider's current row must not
-				// side-effect-install a newer key from its own error path — the
-				// original error propagates untouched.
-				const captured = (args[0] as { pxeGeneration?: string } | undefined)?.pxeGeneration
-				if (captured && provision.generation !== captured) throw err
-				// Revalidate the incarnation immediately before the wire: `onReady`
-				// above can have REPLACED the offscreen document, and a deletion that
-				// completed against the OLD document leaves the replacement's
-				// lifecycle map empty — this stale provision would install the erased
-				// generation as live (ghost profile; a later same-id re-import is
-				// then wedged behind the live-under-different-generation rejection).
-				// A gone or superseded row aborts with the original error.
-				if (this.generationProvider) {
-					const liveGeneration = await this.generationProvider(profileId)
-					if (liveGeneration !== provision.generation) throw err
-				}
-				// The base64 wire copy cannot be zeroized (JS strings are
-				// immutable); the key bytes below are, in every exit path.
-				await this.requestAlreadyReady(
-					"provisionChainStoreKey" as T,
-					...([profileId, btoa(String.fromCharCode(...provision.key)), provision.generation] as unknown as Parameters<
-						Methods[T]
-					>),
-				)
-				// A provision/retry send failure propagates AS ITSELF (more
-				// diagnostic than the original marker error), and the retry runs
-				// exactly once — a second missing-key rejection is terminal.
-				return await this.requestAlreadyReady(method, ...args)
-			} finally {
-				provision.key.fill(0)
+			// Tail-returned: the recovery helper owns the ENTIRE D4-hardened
+			// sequence (readiness → authority → guarded provision → single retry)
+			// including the key-zeroizing finally.
+			return this.recoverMissingStoreKey(method, args, err, profileId)
+		}
+	}
+
+	/** AUDIT D4-hardening: the recovery sequence is readiness ONCE, then
+	 *  authority ONCE, then already-ready sends — no `onReady` (which can
+	 *  recreate the offscreen document and reset its lifecycle map) may run
+	 *  between the authority read and the wire, or a concurrent delete +
+	 *  recreation could let a stale provision land on an empty map. */
+	private async recoverMissingStoreKey<T extends keyof Methods>(
+		method: T,
+		args: Parameters<Methods[T]>,
+		originalErr: unknown,
+		profileId: string,
+	): Promise<Awaited<ReturnType<Methods[T]>>> {
+		await this.onReady()
+		const provision = await this.storeKeyProvider?.(profileId)
+		if (!provision) throw originalErr
+		try {
+			// Capture-equality guard, POST-STAMP (the capture block above mutated
+			// args[0]) and capture-conditional: an UNCAPTURED op keeps the
+			// documented provision-then-retry contract, but a captured op whose
+			// generation differs from the provider's current row must not
+			// side-effect-install a newer key from its own error path — the
+			// original error propagates untouched.
+			const captured = (args[0] as { pxeGeneration?: string } | undefined)?.pxeGeneration
+			if (captured && provision.generation !== captured) throw originalErr
+			// Revalidate the incarnation immediately before the wire: `onReady`
+			// above can have REPLACED the offscreen document, and a deletion that
+			// completed against the OLD document leaves the replacement's
+			// lifecycle map empty — this stale provision would install the erased
+			// generation as live (ghost profile; a later same-id re-import is
+			// then wedged behind the live-under-different-generation rejection).
+			// A gone or superseded row aborts with the original error.
+			if (this.generationProvider) {
+				const liveGeneration = await this.generationProvider(profileId)
+				if (liveGeneration !== provision.generation) throw originalErr
 			}
+			// The base64 wire copy cannot be zeroized (JS strings are
+			// immutable); the key bytes below are, in every exit path.
+			await this.requestAlreadyReady(
+				"provisionChainStoreKey" as T,
+				...([profileId, btoa(String.fromCharCode(...provision.key)), provision.generation] as unknown as Parameters<Methods[T]>),
+			)
+			// A provision/retry send failure propagates AS ITSELF (more
+			// diagnostic than the original marker error), and the retry runs
+			// exactly once — a second missing-key rejection is terminal.
+			return await this.requestAlreadyReady(method, ...args)
+		} finally {
+			provision.key.fill(0)
 		}
 	}
 
@@ -369,4 +371,10 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 	public async provisionChainStoreKey(profileId: string, storeKeyBase64: string, generation: string): Promise<void> {
 		await this.request("provisionChainStoreKey", profileId, storeKeyBase64, generation)
 	}
+}
+
+/** An op carries a stampable NetworkInfo when its first argument names a
+ *  profile + chain and no generation was stamped yet. */
+function needsGenerationStamp(netArg: NetworkInfo & { pxeGeneration?: string }): boolean {
+	return typeof netArg === "object" && "profileId" in netArg && "chainId" in netArg && !netArg.pxeGeneration
 }

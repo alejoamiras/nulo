@@ -860,7 +860,6 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			networks.map((n) => (n as { profileId?: unknown } | null)?.profileId),
 		)
 		const result: Restored<Network>[] = []
-		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 24) — refactor when touched, never raise
 		return await this.lock.withLock(async () => {
 			const existing = await this.storage.getValues()
 			// A collision re-roll must avoid every SOURCE id in this batch too, not
@@ -874,24 +873,9 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			}
 			for (const raw of networks) {
 				try {
-					if (!isNewShapeNetwork(raw)) {
-						throw new Error(`${ERR_BACKUP_TOO_OLD}: This backup was created with an older version of Nulo.`)
-					}
-					// F-011 / A-04: enforce the RPC URL allowlist on every endpoint
-					// during restore. Pre-fix, restore went directly to storage
-					// after a shape check, so a malicious backup could re-introduce
-					// `javascript:`, `data:`, non-loopback `http:`, or userinfo
-					// URLs that the runtime adapter would later reject. Validate
-					// at the persistence boundary AND at the adapter (defense in
-					// depth).
-					const parsed = NetworkSchema.safeParse(raw)
-					if (!parsed.success) {
-						throw new Error(`Backup rejected: ${parsed.error.issues.map((i) => i.message).join("; ")}`)
-					}
-					const candidate = parsed.data
-					if (existing.some((n) => n.profileId === candidate.profileId && n.chainId === candidate.chainId)) {
-						throw new Error(`A network for chain ${candidate.chainId} already exists in profile ${candidate.profileId}.`)
-					}
+					// SYNCHRONOUS validation: its throws land in this catch on the
+					// same continuation, exactly as the inline checks did.
+					const candidate = validateRestoredNetwork(raw, existing)
 					const id = await preferOrReallocId(this.storage, candidate.id, sourceIds)
 					const stored: Network = { ...candidate, id }
 					assertRestoreEpoch(deletion, epochs, stored.profileId)
@@ -1045,4 +1029,28 @@ function isNewShapeNetwork(value: unknown): value is Network {
 		Array.isArray(v.endpoints) &&
 		v.endpoints.length > 0
 	)
+}
+
+/** Restore-boundary validation for one backup entry (all throws — the caller's
+ * per-entry catch turns them into that entry's `restoreError`):
+ * shape gate (`BACKUP_TOO_OLD`), then F-011 / A-04 — enforce the RPC URL
+ * allowlist on every endpoint during restore (pre-fix, restore went directly to
+ * storage after a shape check, so a malicious backup could re-introduce
+ * `javascript:`, `data:`, non-loopback `http:`, or userinfo URLs that the
+ * runtime adapter would later reject; validate at the persistence boundary AND
+ * at the adapter — defense in depth), then the stored `(profileId, chainId)`
+ * collision check so a partial-merge can't promote a stale RPC. */
+function validateRestoredNetwork(raw: unknown, existing: Network[]): Network {
+	if (!isNewShapeNetwork(raw)) {
+		throw new Error(`${ERR_BACKUP_TOO_OLD}: This backup was created with an older version of Nulo.`)
+	}
+	const parsed = NetworkSchema.safeParse(raw)
+	if (!parsed.success) {
+		throw new Error(`Backup rejected: ${parsed.error.issues.map((i) => i.message).join("; ")}`)
+	}
+	const candidate = parsed.data
+	if (existing.some((n) => n.profileId === candidate.profileId && n.chainId === candidate.chainId)) {
+		throw new Error(`A network for chain ${candidate.chainId} already exists in profile ${candidate.profileId}.`)
+	}
+	return candidate
 }

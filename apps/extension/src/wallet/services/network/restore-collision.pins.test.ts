@@ -4,7 +4,7 @@
  * becomes THAT entry's `restoreError` and later entries continue unharmed.
  */
 import { beforeEach, describe, expect, test, vi } from "vitest"
-import type { BrowserApi } from "@/utils/browser-api"
+import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
