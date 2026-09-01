@@ -309,6 +309,12 @@ function normalizeSlice(name: string, desc: SliceDescriptor, slice: unknown, acc
 			if (slice !== undefined) acc.passThrough[name] = slice
 			return undefined
 		}
+		default: {
+			// Compile-time exhaustiveness: a new SliceDescriptor kind must be
+			// handled here, never silently pass unvalidated.
+			const unhandled: never = desc
+			return `slice "${name}" has an unhandled descriptor kind ${JSON.stringify(unhandled)}`
+		}
 	}
 }
 
@@ -453,6 +459,12 @@ function reassembleSlice(
 		case "block-listed": {
 			if (Object.hasOwn(normalized.passThrough, name)) data[name] = normalized.passThrough[name]
 			return undefined
+		}
+		default: {
+			// Compile-time exhaustiveness: a new SliceDescriptor kind must be
+			// handled here, never silently dropped from the reassembled backup.
+			const unhandled: never = desc
+			return `slice "${name}" has an unhandled descriptor kind ${JSON.stringify(unhandled)}`
 		}
 	}
 }
