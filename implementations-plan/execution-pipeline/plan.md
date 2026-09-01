@@ -95,9 +95,15 @@ route) plus audit:vue + test:ci-gating on both.
 ## Acceptance
 
 - PR-a: 5 directives, 111 → 106, zero inserted (read the regen diff); builder pins green
-  pre+post; the three suites zero-edit.
+  pre+post; the three suites zero-edit. ✅ **#506** — pins strengthened per codex
+  (live drift composite + rejection pin, per-index registry-args pairing,
+  gasSettings/buildMeta provenance, cap-before-build ordering), codex approve.
 - PR-b: 6 directives, 106 → 100, zero inserted; all named suites zero-edit.
-- Codex loop: one session — plan audit → PR-a impl review → PR-b impl review → approve.
+  ✅ **#507** — codex-caught cancel publication window closed
+  (`createTransferJournal` owns create→controller→register, returning both) with
+  two fault-sensitive pins verified red against the hop shape; codex approve.
+- Codex loop: one session — plan audit → PR-a impl review → PR-b impl review → approve. ✅
+- Lessons: [lessons/phase-1.md](lessons/phase-1.md).
 
 ## Rollback
 

@@ -252,7 +252,6 @@ export function assertCustomGasLimitsWithinCap(fee: FeeOptions | undefined, txsL
  *    bytes than the dApp signed off on).
  *  Absent (defensive), behavior is unchanged. NO_FROM builds never reach this
  *  function — their gasSettings are capped by construction in the builder. */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 27) — refactor when touched, never raise
 export async function finalizeGasLimits(
 	node: AztecNode,
 	txRequest: TxExecutionRequest,
@@ -296,33 +295,14 @@ export async function finalizeGasLimits(
 		}
 	}
 
-	let gasLimits: Gas
-	if (customLimits?.gasLimits) {
-		gasLimits = new Gas(customLimits.gasLimits.daGas, customLimits.gasLimits.l2Gas)
-		if (cap && (gasLimits.daGas > cap.daGas || gasLimits.l2Gas > cap.l2Gas)) {
-			throw new Error(
-				`Requested gasLimits (da=${gasLimits.daGas}, l2=${gasLimits.l2Gas}) exceed the network per-tx admission ` +
-					`limit (da=${cap.daGas}, l2=${cap.l2Gas}).`,
-			)
-		}
-	} else {
-		const padded = simulatedTx.gasUsed.totalGas.mul(gasPadding)
-		gasLimits = cap ? new Gas(Math.min(padded.daGas, cap.daGas), Math.min(padded.l2Gas, cap.l2Gas)) : padded
-	}
-
-	let teardownGasLimits: Gas
-	if (customLimits?.teardownGasLimits) {
-		teardownGasLimits = new Gas(customLimits.teardownGasLimits.daGas, customLimits.teardownGasLimits.l2Gas)
-		if (cap && (teardownGasLimits.daGas > cap.daGas || teardownGasLimits.l2Gas > cap.l2Gas)) {
-			throw new Error(
-				`Requested teardownGasLimits (da=${teardownGasLimits.daGas}, l2=${teardownGasLimits.l2Gas}) exceed the ` +
-					`network per-tx admission limit (da=${cap.daGas}, l2=${cap.l2Gas}).`,
-			)
-		}
-	} else {
-		const padded = simulatedTx.gasUsed.teardownGas.mul(gasPadding)
-		teardownGasLimits = cap ? new Gas(Math.min(padded.daGas, cap.daGas), Math.min(padded.l2Gas, cap.l2Gas)) : padded
-	}
+	const gasLimits = resolveLimitLimb("gasLimits", customLimits?.gasLimits, simulatedTx.gasUsed.totalGas, gasPadding, cap)
+	const teardownGasLimits = resolveLimitLimb(
+		"teardownGasLimits",
+		customLimits?.teardownGasLimits,
+		simulatedTx.gasUsed.teardownGas,
+		gasPadding,
+		cap,
+	)
 
 	txRequest.txContext.gasSettings = new GasSettings(
 		gasLimits,
@@ -330,6 +310,32 @@ export async function finalizeGasLimits(
 		maxFeesPerGas,
 		txRequest.txContext.gasSettings.maxPriorityFeesPerGas,
 	)
+}
+
+/** One limit limb (gasLimits / teardownGasLimits): a dApp custom limit over
+ *  the cap THROWS — never silently capped (a dApp-visible behavior contract;
+ *  capping silently would commit different bytes than the dApp signed off
+ *  on) — while auto-derived limits (measured × padding) clamp to the cap
+ *  (the padding is headroom, not a claim the tx needs that much). */
+function resolveLimitLimb(
+	label: "gasLimits" | "teardownGasLimits",
+	custom: { daGas: number; l2Gas: number } | undefined,
+	measured: Gas,
+	gasPadding: number,
+	cap: Gas | undefined,
+): Gas {
+	if (custom) {
+		const limits = new Gas(custom.daGas, custom.l2Gas)
+		if (cap && (limits.daGas > cap.daGas || limits.l2Gas > cap.l2Gas)) {
+			throw new Error(
+				`Requested ${label} (da=${limits.daGas}, l2=${limits.l2Gas}) exceed the network per-tx admission ` +
+					`limit (da=${cap.daGas}, l2=${cap.l2Gas}).`,
+			)
+		}
+		return limits
+	}
+	const padded = measured.mul(gasPadding)
+	return cap ? new Gas(Math.min(padded.daGas, cap.daGas), Math.min(padded.l2Gas, cap.l2Gas)) : padded
 }
 
 /** Wrap an estimate-fee block in a TaskService step for UI bookkeeping.
