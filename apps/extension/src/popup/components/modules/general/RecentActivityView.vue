@@ -27,6 +27,7 @@ import { ACTIVITY_FEED_KINDS, buildJournalTerminalCardProps, journalTerminalDisp
 import { formatTransferType, humanizeMethodName } from "@/utils/tx-enrichment"
 import { receivedLabel, resolveReceivedType } from "@/utils/received-display"
 import { buildCancelHandler, filterPendingDoubleRender, isMatchingTask } from "./recent-activity-handlers"
+import { buildRecentActivityRows, remainingRowSlots } from "./recent-activity-rows"
 
 /** Composables */
 import { useIncomingTransfers } from "@/composables/useIncomingTransfers"
@@ -81,7 +82,6 @@ const filteredRecentTransactions = computed(() => {
  *  concurrent in-flight ops the home-tab preview can exceed ROW_BUDGET —
  *  every in-flight op is visible by design (per user requirement), and
  *  settled overflow goes to the Activity page. */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 30) — refactor when touched, never raise
 const recentActivityRows = computed(() => {
 	// Count slots only for cards that actually render. The send.vue fallback
 	// (`awaitingAccountTxs` / `isTokenAwaitingTx` generic card) is suppressed
@@ -93,47 +93,27 @@ const recentActivityRows = computed(() => {
 	const orphanCount = hasOrphanExecutingTask.value ? 1 : 0
 	const fallbackRendered =
 		journalCount === 0 && orphanCount === 0 && (props.token ? isTokenAwaitingTx.value : awaitingAccountTxs.value.length > 0)
-	const inFlightCount = journalCount + orphanCount + (fallbackRendered ? 1 : 0)
-	const remaining = Math.max(0, ROW_BUDGET - inFlightCount)
+	const remaining = remainingRowSlots({ journalCount, orphanCount, fallbackRendered, budget: ROW_BUDGET })
 	if (remaining === 0) return []
 	// Layer-A containment (defense-in-depth): scope tx rows to the active
 	// account + chain and incoming rows to the active account + network, exactly
 	// as `buildActivityRows` does — so both feed surfaces make identical scope
 	// decisions. The store (`syncTransactions`/`onTxAdded`) and the incoming
 	// composable already ingest-filter; a foreign-scope row reaching here would
-	// be a second missed guard, so it is dropped anyway. Tolerant when a scope
-	// field is unknown (mirrors `buildActivityRows`), never "active-now".
-	const activeAccountAddress = appStore.account?.address
-	const activeChainId = appStore.network?.chainId
-	const activeNetworkId = appStore.network?.id
-	const activeProfileId = appStore.profile?.id
-	// Two profiles can derive the same address, so a row naming a profile must
-	// match the one being viewed; rows naming none stay visible.
-	const wrongProfile = (rowProfileId) => activeProfileId !== undefined && rowProfileId !== undefined && rowProfileId !== activeProfileId
-	const rows = []
-	for (const op of recentlyTerminalJournalOps.value) {
-		rows.push({ type: "journal", key: `journal:${op.id}`, sortKey: op.terminalAt ?? 0, op })
-	}
-	for (const tx of filteredRecentTransactions.value) {
-		if (activeAccountAddress !== undefined && tx.account !== activeAccountAddress) continue
-		if (activeChainId !== undefined && tx.chainId !== activeChainId) continue
-		if (wrongProfile(tx.profileId)) continue
-		rows.push({ type: "tx", key: `tx:${tx.hash}`, sortKey: tx.updatedAt, tx })
-	}
-	for (const inc of incomingTransfers.value) {
-		// Token-scoped views (token-detail page) only show incoming for the
-		// active token. The home view shows all.
-		if (props.token && inc.tokenId !== props.token.id) continue
-		if (activeAccountAddress !== undefined && inc.accountAddress !== activeAccountAddress) continue
-		if (activeNetworkId !== undefined && inc.networkId !== activeNetworkId) continue
-		if (wrongProfile(inc.profileId)) continue
-		// Path 2: prefer block timestamp (chain-derived, survives remove+re-add).
-		// Fall back to discoveredAt for legacy records or when PXE didn't
-		// resolve the block. *1000 to align magnitude with tx.updatedAt (ms).
-		const sortKey = inc.blockTimestamp !== undefined ? inc.blockTimestamp * 1000 : inc.discoveredAt
-		rows.push({ type: "incoming", key: `incoming:${inc.id}`, sortKey, inc })
-	}
-	rows.sort((a, b) => b.sortKey - a.sortKey)
+	// be a second missed guard, so it is dropped anyway. Every input is read
+	// HERE (inside the computed) so its dependency tracking is unchanged.
+	const rows = buildRecentActivityRows({
+		journalOps: recentlyTerminalJournalOps.value,
+		transactions: filteredRecentTransactions.value,
+		incomingTransfers: incomingTransfers.value,
+		scope: {
+			accountAddress: appStore.account?.address,
+			chainId: appStore.network?.chainId,
+			networkId: appStore.network?.id,
+			profileId: appStore.profile?.id,
+		},
+		token: props.token,
+	})
 	return rows.slice(0, remaining)
 })
 const isTokenAwaitingTx = computed(() => {

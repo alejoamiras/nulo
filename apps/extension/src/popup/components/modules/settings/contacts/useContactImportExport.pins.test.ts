@@ -152,7 +152,11 @@ describe("importContacts — per-row order and early exits", () => {
 	test.each<[string, () => void, string | null]>([
 		["no file picked", () => pickFileMock.mockResolvedValueOnce(null), null],
 		["file over the byte cap", () => fileWith(twoSenders, MAX_CONTACT_IMPORT_BYTES + 1), "Contacts file is too large"],
-		["picker threw FileTooLargeError", () => pickFileMock.mockRejectedValueOnce(new FileTooLargeError()), "Contacts file is too large"],
+		[
+			"picker threw FileTooLargeError",
+			() => pickFileMock.mockRejectedValueOnce(new FileTooLargeError(1)),
+			"Contacts file is too large",
+		],
 		["no rows in the file", () => fileWith({ version: 2, contacts: [] }), "No contacts found in file"],
 		[
 			"read threw",

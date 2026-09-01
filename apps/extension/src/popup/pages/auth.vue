@@ -86,7 +86,51 @@ const advancePastAuth = async () => {
 	if (failure) postAuthNavClaimed = false
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 28) — refactor when touched, never raise
+/** Path A pulls credentialId so the ceremony targets THIS profile's credential (not a discovery
+ *  picker that would let the user choose any of their passkeys). `appStore.profile.id` is read at
+ *  each site, as before — never captured once across the awaits. */
+const unlockActiveProfile = async () => {
+	if (isPasskeyProfile.value) {
+		const credentialId = await managers.profile.getPasskeyCredentialId(appStore.profile.id)
+		const credData = await runCeremony({ mode: "get", credentialId })
+		return managers.profile.unlockPasskeyProfile(appStore.profile.id, credData)
+	}
+	return managers.profile.unlockProfile(appStore.profile.id, password.value)
+}
+
+/** The unlock failure ladder — one synchronous pass, in this order, on the original error. */
+const handleUnlockError = (error, activeProfileId) => {
+	// Service throws `InvalidPasswordError` (a WalletError subclass).
+	// Client reconstructs the instance across the RPC boundary so the
+	// instanceof check holds. Legacy-message fallback covers the
+	// short window where the service has been redeployed but the
+	// popup hasn't reloaded yet.
+	const isInvalid =
+		error instanceof InvalidPasswordError || (error instanceof Error && error.message === InvalidPasswordError.LEGACY_MESSAGE)
+	if (isInvalid) isWrongPassword.value = true
+	if (error instanceof RestoreTornError) {
+		isTornImport.value = true
+		return
+	}
+	// Path A user cancel surfaces here; silent return matches the
+	// existing profile/new.vue behavior (no error toast on Escape /
+	// "user closed").
+	if (error instanceof UserRejectedError) return
+	if (error instanceof UnlockTimeoutError) {
+		// Silent yield when a DIFFERENT profile won the race — its UI is
+		// live and a "try again" toast would race a successful
+		// navigation. Otherwise the wait genuinely expired: say so.
+		if (appStore.isLogined && appStore.profile?.id !== activeProfileId) return
+		openToast({ label: "Unlock timed out — please try again", icon: "warning" }, TOAST_DURATION.LONG)
+		return
+	}
+	if (error instanceof BootstrapFailedError) {
+		// The shell already toasted the failure (with stale-suppression);
+		// the join's job here is only to release the spinner immediately.
+		return
+	}
+}
+
 const handleUnlockWallet = async () => {
 	if (!isAllowedToContinue.value) return
 	// Reentry guard: two programmatic submits while the first unlock awaits
@@ -100,16 +144,7 @@ const handleUnlockWallet = async () => {
 			// A stale failure record from a PRIOR attempt must not insta-reject
 			// this attempt's activation wait.
 			appStore.bootstrapFailure = null
-			if (isPasskeyProfile.value) {
-				// Path A: pull credentialId so the ceremony targets THIS
-				// profile's credential (not a discovery picker that would
-				// let the user choose any of their passkeys).
-				const credentialId = await managers.profile.getPasskeyCredentialId(appStore.profile.id)
-				const credData = await runCeremony({ mode: "get", credentialId })
-				activeProfile = await managers.profile.unlockPasskeyProfile(appStore.profile.id, credData)
-			} else {
-				activeProfile = await managers.profile.unlockProfile(appStore.profile.id, password.value)
-			}
+			activeProfile = await unlockActiveProfile()
 			if (!activeProfile?.id) return
 			// Bounded, identity-aware, failure-joined wait — replaces an
 			// unbounded isLogined poll whose finally was unreachable when
@@ -118,35 +153,7 @@ const handleUnlockWallet = async () => {
 			// the analogous import handshake allows 30 s).
 			await awaitProfileActivation(appStore, activeProfile.id, UNLOCK_WAIT_MS)
 		} catch (error) {
-			// Service throws `InvalidPasswordError` (a WalletError subclass).
-			// Client reconstructs the instance across the RPC boundary so the
-			// instanceof check holds. Legacy-message fallback covers the
-			// short window where the service has been redeployed but the
-			// popup hasn't reloaded yet.
-			const isInvalid =
-				error instanceof InvalidPasswordError || (error instanceof Error && error.message === InvalidPasswordError.LEGACY_MESSAGE)
-			if (isInvalid) isWrongPassword.value = true
-			if (error instanceof RestoreTornError) {
-				isTornImport.value = true
-				return
-			}
-			// Path A user cancel surfaces here; silent return matches the
-			// existing profile/new.vue behavior (no error toast on Escape /
-			// "user closed").
-			if (error instanceof UserRejectedError) return
-			if (error instanceof UnlockTimeoutError) {
-				// Silent yield when a DIFFERENT profile won the race — its UI is
-				// live and a "try again" toast would race a successful
-				// navigation. Otherwise the wait genuinely expired: say so.
-				if (appStore.isLogined && appStore.profile?.id !== activeProfile?.id) return
-				openToast({ label: "Unlock timed out — please try again", icon: "warning" }, TOAST_DURATION.LONG)
-				return
-			}
-			if (error instanceof BootstrapFailedError) {
-				// The shell already toasted the failure (with stale-suppression);
-				// the join's job here is only to release the spinner immediately.
-				return
-			}
+			handleUnlockError(error, activeProfile?.id)
 			return
 		} finally {
 			isAwaitingResponse.value = false

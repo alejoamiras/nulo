@@ -4,14 +4,8 @@
 	"rules": {
 		"noExcessiveCognitiveComplexity": {
 			"apps/extension/src/components/ui/Dropdown/DropdownRoot.vue": 2,
-			"apps/extension/src/popup/components/modules/general/RecentActivityView.vue": 1,
 			"apps/extension/src/popup/components/modules/send/FeeSettingsCard.test.ts": 1,
-			"apps/extension/src/popup/components/modules/settings/contacts/useContactImportExport.ts": 1,
-			"apps/extension/src/popup/components/popups/NewNetworkPopup.vue": 1,
-			"apps/extension/src/popup/index.ts": 1,
-			"apps/extension/src/popup/pages/auth.vue": 1,
 			"apps/extension/src/stores/balances.store.fuzz.test.ts": 2,
-			"apps/extension/src/utils/activity-rows.ts": 1,
 			"apps/extension/src/utils/amount.ts": 1,
 			"apps/extension/src/utils/files.ts": 1,
 			"apps/extension/src/utils/log-payload-ban.test.ts": 2,
@@ -43,9 +37,7 @@
 		},
 		"noExcessiveLinesPerFunction": {
 			"apps/extension/src/components/JsonViewer/creator.js": 1,
-			"apps/extension/src/popup/components/modules/settings/contacts/useContactImportExport.ts": 2,
 			"apps/extension/src/stores/activity.store.ts": 1,
-			"apps/extension/src/stores/app.store.ts": 1,
 			"packages/bridge-core/scripts/deploy-sandbox.ts": 1,
 			"packages/bridge-core/scripts/deposit-testnet.ts": 1,
 			"packages/bridge-core/scripts/discover-mainnet-fuel.ts": 1,
