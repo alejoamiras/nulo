@@ -45,11 +45,15 @@ never gain a hop.
   duplicated ×3 — every site's path already awaited via `createFreshRecord`); the
   scope-mismatch block → guarded awaited `refileToExecutingScope(deps, input, record)`
   returning `{kind:"record"} | {kind:"result"}` (its throws — the three
-  JobCancelledSentinel exits — stay inside, positions unchanged); the claim-transition
-  CATCH body only → awaited `disambiguateClaimFailure` (the catch path already awaited via
-  the re-read; the HAPPY transition path keeps NO helper so the documented
-  register-immediately span — transition write → `activeControllers.set` — gains no hop).
-  Suite: `claim-helper.test.ts` (18 — the race matrix).
+  JobCancelledSentinel exits — stay inside, positions unchanged; codex condition: the
+  pending-without-reuseController fall-through is handled INTERNALLY — the helper registers
+  the controller and returns the result inside its own continuation, so no pending record
+  crosses a helper-return hop unregistered); `createAndRegisterFresh` owns the complete
+  `await createFreshRecord → new AbortController → activeControllers.set` triplet; the
+  claim-transition CATCH body only → awaited `disambiguateClaimFailure` (always throws —
+  the sentinel or the original error; the HAPPY transition path keeps NO helper so the
+  documented register-immediately span — transition write → `activeControllers.set` —
+  gains no hop). Suite: `claim-helper.test.ts` (18 — the race matrix).
 - **`buildStandard` (38 + 208L)** — the action-processing switch dominates. Extract
   `resolveAuthwitMessageHash(content, nodeInfo, instances, artifacts)` (the messageHash
   inner switch, duplicated across the private/public authwit arms; the sync
