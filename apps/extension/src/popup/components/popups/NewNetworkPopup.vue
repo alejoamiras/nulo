@@ -69,7 +69,6 @@ const isAvailableToCreateNetwork = computed(() => {
 })
 
 const isCreating = ref(false)
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 21) — refactor when touched, never raise
 const handleCreateNetwork = async () => {
 	if (!isAvailableToCreateNetwork.value) return
 	// Creating a network ACTIVATES it, so it moves the scope a send is building
@@ -97,13 +96,7 @@ const handleCreateNetwork = async () => {
 			network,
 		)
 		if (result !== "activated") {
-			if (result !== "stale") {
-				const label =
-					result === "blocked"
-						? "Network added. Finish or cancel your pending transaction to switch to it"
-						: "Network added, but the switch didn't confirm — reopen the popup to verify"
-				openToast({ label, icon: result === "blocked" ? "info" : "warning" }, 4_000)
-			}
+			toastNonActivatedOutcome(result)
 			appStore.networks = await managers.network.getNetworks()
 			emit("onClose")
 			return
@@ -114,21 +107,35 @@ const handleCreateNetwork = async () => {
 
 		openToast({ label: "Network is created" })
 	} catch (error) {
-		const msg = error instanceof Error ? error.message : String(error)
-		if (msg.startsWith("DUPLICATE_CHAIN")) {
-			// Smart-add: chain already exists in profile. Surface this clearly
-			// so the user knows to use Settings → Networks → [chain] → Add endpoint.
-			openToast(
-				{ label: "A network for this chain already exists. Add it as an endpoint instead.", icon: "warning" },
-				TOAST_DURATION.LONG,
-			)
-		} else if (msg === "Failed to fetch node info" || msg === "Failed to fetch network info") {
-			isUrlHasError.value = true
-		} else {
-			openToast({ label: "Something went wrong", icon: "warning" }, TOAST_DURATION.LONG)
-		}
+		reportCreateFailure(error)
 	} finally {
 		isCreating.value = false
+	}
+}
+
+/** The network exists but is not active: say why, unless the guard was merely superseded (`stale`). */
+function toastNonActivatedOutcome(result) {
+	if (result === "stale") return
+	const label =
+		result === "blocked"
+			? "Network added. Finish or cancel your pending transaction to switch to it"
+			: "Network added, but the switch didn't confirm — reopen the popup to verify"
+	openToast({ label, icon: result === "blocked" ? "info" : "warning" }, 4_000)
+}
+
+function reportCreateFailure(error) {
+	const msg = error instanceof Error ? error.message : String(error)
+	if (msg.startsWith("DUPLICATE_CHAIN")) {
+		// Smart-add: chain already exists in profile. Surface this clearly
+		// so the user knows to use Settings → Networks → [chain] → Add endpoint.
+		openToast(
+			{ label: "A network for this chain already exists. Add it as an endpoint instead.", icon: "warning" },
+			TOAST_DURATION.LONG,
+		)
+	} else if (msg === "Failed to fetch node info" || msg === "Failed to fetch network info") {
+		isUrlHasError.value = true
+	} else {
+		openToast({ label: "Something went wrong", icon: "warning" }, TOAST_DURATION.LONG)
 	}
 }
 

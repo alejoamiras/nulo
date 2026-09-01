@@ -47,7 +47,6 @@ export interface BuildActivityRowsParams {
 	profileId?: string
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 29) — refactor when touched, never raise
 export function buildActivityRows({
 	transactions,
 	terminalJournalOps,
@@ -57,35 +56,56 @@ export function buildActivityRows({
 	networkId,
 	profileId,
 }: BuildActivityRowsParams): ActivityRow[] {
-	/** Two profiles can hold the same address, so a row that names a profile
-	 *  must match the one being viewed. Rows written before scope stamping name
-	 *  none and stay visible — they cannot be attributed either way. */
-	const wrongProfile = (rowProfileId: string | undefined) =>
-		profileId !== undefined && rowProfileId !== undefined && rowProfileId !== profileId
-	const rows: ActivityRow[] = []
+	const scope = { accountAddress, chainId, networkId, profileId }
+	const rows: ActivityRow[] = [
+		...txRows(transactions, scope),
+		...journalRows(terminalJournalOps, scope),
+		...incomingRows(incomingTransfers, scope),
+	]
+	return rows.sort((a, b) => b.sortKey - a.sortKey)
+}
 
+type RowScope = Pick<BuildActivityRowsParams, "accountAddress" | "chainId" | "networkId" | "profileId">
+
+/** Two profiles can hold the same address, so a row that names a profile
+ *  must match the one being viewed. Rows written before scope stamping name
+ *  none and stay visible — they cannot be attributed either way. */
+export function isForeignProfile(scopeProfileId: string | undefined, rowProfileId: string | undefined): boolean {
+	return scopeProfileId !== undefined && rowProfileId !== undefined && rowProfileId !== scopeProfileId
+}
+
+/** Scope tx to the active account+chain when a scope is supplied (a late/
+ *  out-of-scope tx from the store's flat list must not render under B). */
+function txRows(transactions: BuildActivityRowsParams["transactions"], scope: RowScope): ActivityRow[] {
+	const rows: ActivityRow[] = []
 	for (const tx of transactions) {
-		// Scope tx to the active account+chain when a scope is supplied (a late/
-		// out-of-scope tx from the store's flat list must not render under B).
-		if (accountAddress !== undefined && tx.account !== accountAddress) continue
-		if (chainId !== undefined && tx.chainId !== chainId) continue
-		if (wrongProfile(tx.profileId)) continue
+		if (scope.accountAddress !== undefined && tx.account !== scope.accountAddress) continue
+		if (scope.chainId !== undefined && tx.chainId !== scope.chainId) continue
+		if (isForeignProfile(scope.profileId, tx.profileId)) continue
 		rows.push({ type: "tx", key: `tx:${tx.hash}`, sortKey: tx.updatedAt, tx })
 	}
+	return rows
+}
 
+function journalRows(terminalJournalOps: BuildActivityRowsParams["terminalJournalOps"], scope: RowScope): ActivityRow[] {
+	const rows: ActivityRow[] = []
 	for (const op of terminalJournalOps) {
 		if (op.progress?.stage === "succeeded") continue
 		if (!ACTIVITY_FEED_KINDS.has(op.kind)) continue
-		if (op.accountAddress !== accountAddress) continue
-		if (wrongProfile(op.profileId)) continue
+		if (op.accountAddress !== scope.accountAddress) continue
+		if (isForeignProfile(scope.profileId, op.profileId)) continue
 		if (op.terminalAt === null) continue
 		rows.push({ type: "journal", key: `journal:${op.id}`, sortKey: op.terminalAt, op })
 	}
+	return rows
+}
 
+/** Scope incoming to the active account+network when supplied. */
+function incomingRows(incomingTransfers: BuildActivityRowsParams["incomingTransfers"], scope: RowScope): ActivityRow[] {
+	const rows: ActivityRow[] = []
 	for (const inc of incomingTransfers) {
-		// Scope incoming to the active account+network when supplied.
-		if (accountAddress !== undefined && inc.accountAddress !== accountAddress) continue
-		if (networkId !== undefined && inc.networkId !== networkId) continue
+		if (scope.accountAddress !== undefined && inc.accountAddress !== scope.accountAddress) continue
+		if (scope.networkId !== undefined && inc.networkId !== scope.networkId) continue
 		// Path 2: prefer the chain-derived block timestamp (UTC seconds) over
 		// the wall-clock `discoveredAt`. Block timestamp survives token
 		// remove + re-add (records get re-indexed from PXE with identical
@@ -97,6 +117,5 @@ export function buildActivityRows({
 		const sortKey = inc.blockTimestamp !== undefined ? inc.blockTimestamp * 1000 : inc.discoveredAt
 		rows.push({ type: "incoming", key: `incoming:${inc.id}`, sortKey, inc })
 	}
-
-	return rows.sort((a, b) => b.sortKey - a.sortKey)
+	return rows
 }
