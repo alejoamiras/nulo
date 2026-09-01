@@ -158,10 +158,11 @@ onBeforeUnmount(() => {
 				</Flex>
 			</Flex>
 
-			<div v-else :class="$style.empty">
-				<span :class="$style.empty_headline">NO SENDERS YET</span>
-				<span :class="$style.empty_sub">Most transfers are detected automatically. Add a sender only for transfers delivered with address-derived tagging.</span>
-			</div>
+			<ListStatusMessage
+				v-else
+				headline="NO SENDERS YET"
+				sub="Most transfers are detected automatically. Add a sender only for transfers delivered with address-derived tagging."
+			/>
 
 			<Button @click="popupStore.open('new_sender')" wide variant="primary" size="large" data-testid="senders-add-btn">
 				Add sender
@@ -210,34 +211,6 @@ onBeforeUnmount(() => {
 	}
 }
 
-.empty {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 8px;
 
-	padding: 32px 16px;
-	border: 1px dashed var(--nulo-border);
 
-	text-align: center;
-}
-
-.empty_headline {
-	font-family: var(--font-headline);
-	font-size: 14px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
-}
-
-.empty_sub {
-	width: 100%;
-
-	font-family: var(--font-mono);
-	font-size: 11px;
-	line-height: 1.4;
-	color: var(--nulo-outline);
-	overflow-wrap: break-word;
-}
 </style>
