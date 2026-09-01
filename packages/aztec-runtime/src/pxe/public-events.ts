@@ -216,7 +216,6 @@ function positionOf(log: LogResult): PublicEventCursor {
  * A reorg that dropped `referenceBlock` makes `getPublicLogsByTags` THROW — that propagates to the
  * caller unchanged (it is the D6 reorg-detection signal, not swallowed here).
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 25) — refactor when touched, never raise
 export async function fetchPublicTokenTransferEvents(
 	node: AztecNode,
 	contract: string,
@@ -235,33 +234,19 @@ export async function fetchPublicTokenTransferEvents(
 		// fork by definition. The membership query must not run here: a block is NOT a member of
 		// its own archive snapshot (verified against live Alpha), so a caught-up scanner probing a
 		// non-advancing checkpoint got a spurious "reorg" → a full reconciliation on EVERY quiet
-		// poll tick until the chain moved.
+		// poll tick until the chain moved. Both guards stay CALLER-SIDE (synchronous);
+		// only the always-awaited witness probe is tail-returned.
 		if (args.verifyAncestorHash === args.referenceBlock) {
 			return { events: [], scannedThrough: null, hasMore: false, dropped: false }
 		}
-		const witness = await node.getBlockHashMembershipWitness(
-			BlockHash.fromString(args.referenceBlock),
-			BlockHash.fromString(args.verifyAncestorHash),
-		)
-		if (!witness) throw new Error("public-events: boundary block is not an ancestor of the checkpoint (reorg)")
-		return { events: [], scannedThrough: null, hasMore: false, dropped: false }
+		return probeAncestryWitness(node, args.referenceBlock, args.verifyAncestorHash)
 	}
 
 	const tag = await getTransferLogTag()
 	// A PINNED `toBlock` bounds the whole (multi-page) scan to ONE fixed tip. Without it we fall back
 	// to the node's live checkpointed.
 	const nodeCheckpointed = Number(await node.getBlockNumber("checkpointed"))
-	if (args.toBlock !== undefined && args.toBlock > nodeCheckpointed) {
-		// The caller pinned a window that extends BEYOND what the node currently reports as checkpointed
-		// (a lagging / regressed / inconsistent backend). Do NOT silently truncate to `nodeCheckpointed`:
-		// for a reconciliation pinned to `[lowerBound..upperBound]` that would EOF early and let
-		// `finishReconciliation` DELETE the canonical records in the unscanned tail. Signal a suspect
-		// DROP so the caller defers this tick instead of finishing (codex R2 #3).
-		log?.("warn", "public-events: pinned toBlock exceeds node checkpointed — deferring", {
-			contract,
-			toBlock: args.toBlock,
-			nodeCheckpointed,
-		})
+	if (pinnedBoundExceedsCheckpointed(args, nodeCheckpointed, contract, log)) {
 		return { events: [], scannedThrough: null, hasMore: false, dropped: true }
 	}
 	const checkpointed = args.toBlock ?? nodeCheckpointed
@@ -290,8 +275,70 @@ export async function fetchPublicTokenTransferEvents(
 		return { events: [], scannedThrough: null, hasMore: false, dropped: false }
 	}
 
-	// Page-level validation — any violation drops the WHOLE page with no cursor advance.
-	let prev: PublicEventCursor | undefined = args.afterCursor
+	if (!validatePageOrdering(logsForTag, args.afterCursor, checkpointed, contract, log)) {
+		return { events: [], scannedThrough: null, hasMore: false, dropped: true }
+	}
+
+	const events = decodeTransferPage(logsForTag, log)
+
+	// `scannedThrough` advances past EVERY examined log — including any skipped-as-malformed —
+	// so the tail can never livelock; `hasMore` mirrors an exactly-full node page.
+	const scannedThrough = positionOf(logsForTag[logsForTag.length - 1])
+	return { events, scannedThrough, hasMore: logsForTag.length === MAX_LOGS_PER_TAG, dropped: false }
+}
+
+/** The pinned-window sanity gate (synchronous): the caller pinned a window
+ *  extending BEYOND what the node currently reports as checkpointed (a
+ *  lagging / regressed / inconsistent backend). Do NOT silently truncate to
+ *  `nodeCheckpointed`: for a reconciliation pinned to `[lowerBound..upperBound]`
+ *  that would EOF early and let `finishReconciliation` DELETE the canonical
+ *  records in the unscanned tail. Signal a suspect DROP so the caller defers
+ *  this tick instead of finishing (codex R2 #3). */
+function pinnedBoundExceedsCheckpointed(
+	args: PublicTransferFetchArgs,
+	nodeCheckpointed: number,
+	contract: string,
+	log?: PublicEventLogger,
+): boolean {
+	if (args.toBlock === undefined || args.toBlock <= nodeCheckpointed) return false
+	log?.("warn", "public-events: pinned toBlock exceeds node checkpointed — deferring", {
+		contract,
+		toBlock: args.toBlock,
+		nodeCheckpointed,
+	})
+	return true
+}
+
+/** Per-item decode over a validated page (synchronous; malformed items skip
+ *  with their own warn inside the decoder). */
+function decodeTransferPage(logsForTag: LogResult[], log?: PublicEventLogger): PublicTransferEvent[] {
+	const events: PublicTransferEvent[] = []
+	for (const entry of logsForTag) {
+		const decoded = decodePublicTransfer(entry, log)
+		if (decoded) events.push(decoded)
+	}
+	return events
+}
+
+/** The always-awaited half of the ancestry probe (the sync guards stay at the
+ *  call site): one archive-membership query, atomically, in the checkpoint's
+ *  frame. */
+async function probeAncestryWitness(node: AztecNode, referenceBlock: string, ancestorHash: string): Promise<PublicTransferPage> {
+	const witness = await node.getBlockHashMembershipWitness(BlockHash.fromString(referenceBlock), BlockHash.fromString(ancestorHash))
+	if (!witness) throw new Error("public-events: boundary block is not an ancestor of the checkpoint (reorg)")
+	return { events: [], scannedThrough: null, hasMore: false, dropped: false }
+}
+
+/** Page-level validation (synchronous) — any violation warns and fails the
+ *  WHOLE page (the caller drops it with no cursor advance). */
+function validatePageOrdering(
+	logsForTag: LogResult[],
+	afterCursor: PublicEventCursor | undefined,
+	checkpointed: number,
+	contract: string,
+	log?: PublicEventLogger,
+): boolean {
+	let prev: PublicEventCursor | undefined = afterCursor
 	for (const entry of logsForTag) {
 		const pos = positionOf(entry)
 		if (pos.blockNumber > checkpointed) {
@@ -300,7 +347,7 @@ export async function fetchPublicTokenTransferEvents(
 				pos,
 				checkpointed,
 			})
-			return { events: [], scannedThrough: null, hasMore: false, dropped: true }
+			return false
 		}
 		if (prev !== undefined && comparePositions(pos, prev) <= 0) {
 			log?.("warn", "public-events: page is not strictly increasing (or precedes cursor) — dropping page", {
@@ -308,21 +355,11 @@ export async function fetchPublicTokenTransferEvents(
 				prev,
 				pos,
 			})
-			return { events: [], scannedThrough: null, hasMore: false, dropped: true }
+			return false
 		}
 		prev = pos
 	}
-
-	const events: PublicTransferEvent[] = []
-	for (const entry of logsForTag) {
-		const decoded = decodePublicTransfer(entry, log)
-		if (decoded) events.push(decoded)
-	}
-
-	// `scannedThrough` advances past EVERY examined log — including any skipped-as-malformed —
-	// so the tail can never livelock; `hasMore` mirrors an exactly-full node page.
-	const scannedThrough = positionOf(logsForTag[logsForTag.length - 1])
-	return { events, scannedThrough, hasMore: logsForTag.length === MAX_LOGS_PER_TAG, dropped: false }
+	return true
 }
 
 /** Decode a single `Transfer` log, or `undefined` (with a warn) on any per-item failure. */

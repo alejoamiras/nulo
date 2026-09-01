@@ -226,7 +226,6 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 *    on schema bump) so only the bytes are being reclaimed. Sweeps them ALL, plus the shared
 	 *    keyval-store once none remain.
 	 */
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 21) — refactor when touched, never raise
 	private async sweepOrphanStores(): Promise<void> {
 		const opfsDirs = await listChainStoreDirs()
 		const dbs = await indexedDB.databases()
@@ -238,16 +237,21 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// row), so recursively dropping its dir cannot race a sibling-chain open —
 			// unlike the removed per-chain empty-dir sweep (D7 TOCTOU).
 			const orphanProfiles = [...new Set(opfsDirs.map((c) => c.profileId))].filter((id) => !profiles.some((x) => x.id === id))
+			// The barrier loop stays INLINE: the next orphan's `enterWrite()` must
+			// be reserved on the same continuation the previous `leaveWrite()` ran
+			// on — a helper-return hop here would let a concurrent reader win the
+			// barrier and change removal/warning timing (codex post-impl).
 			for (const profileId of orphanProfiles) {
-				// Serialize against store-opens: dirs are (re)created by `registry.ensure`
-				// under this profile's `barrier.read`, so holding WRITE here means a
-				// same-id re-import provisioning DURING the sweep either lands its
-				// lifecycle entry before the re-check below (removal skipped) or has its
-				// store creation queued until the removal finishes (fresh dir after).
-				// Without the barrier, the recursive remove could delete a successor
-				// store mid-create. The barrier entry is retained (unlike
-				// clearProfileState's success path) — deleting it here could split-brain
-				// a queued reader onto a stale guard instance.
+				// Serialize against store-opens: dirs are (re)created by
+				// `registry.ensure` under this profile's `barrier.read`, so holding
+				// WRITE here means a same-id re-import provisioning DURING the sweep
+				// either lands its lifecycle entry before the re-check below
+				// (removal skipped) or has its store creation queued until the
+				// removal finishes (fresh dir after). Without the barrier, the
+				// recursive remove could delete a successor store mid-create. The
+				// barrier entry is retained (unlike clearProfileState's success
+				// path) — deleting it here could split-brain a queued reader onto a
+				// stale guard instance.
 				const barrier = this.getProfileBarrier(profileId)
 				await barrier.enterWrite()
 				try {
@@ -262,44 +266,50 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				}
 			}
 		}
-		if (pxes.length) {
-			for (let i = pxes.length - 1; i >= 0; i--) {
-				const deleted = await new Promise<boolean>((resolve, reject) => {
-					const req = indexedDB.deleteDatabase(pxes[i].name!)
-					req.onsuccess = () => resolve(true)
-					req.onerror = () => reject(req.error)
-					req.onblocked = () => {
-						this.logWarn("deleteDatabase blocked (DB still in use):", pxes[i].name)
-						resolve(false) // Skip — don't hang the sweep forever
-					}
-				})
-				// Only a REAL deletion clears the entry: a blocked DB survives, and the
-				// shared keyval-store guard below must see it (review finding — the
-				// unconditional splice made the emptiness check vacuous).
-				if (deleted) pxes.splice(i, 1)
-			}
-			if (!pxes.length) {
-				// Re-prove global emptiness at commit: the `pxes` bookkeeping above is a
-				// boot-time snapshot, and a PXE DB created since (or a concurrent
-				// clearProfileState draining the same list) would make deleting the
-				// SHARED keyval-store cross-profile corruption — same re-list
-				// clearProfileState itself performs.
-				const remaining = (await indexedDB.databases()).some((x) => x.name?.startsWith(PXE_DATA_DIR_ROOT))
-				if (remaining) return
-				const keyval = dbs.find((x) => x.name === "keyval-store")
-				if (keyval) {
-					await new Promise<void>((resolve, reject) => {
-						const req = indexedDB.deleteDatabase(keyval.name!)
-						req.onsuccess = () => resolve()
-						req.onerror = () => reject(req.error)
-						req.onblocked = () => {
-							this.logWarn("deleteDatabase blocked (DB still in use): keyval-store")
-							resolve()
-						}
-					})
+		if (!pxes.length) return
+		// Tail-returned (never awaited-then-resumed): a hop before the first
+		// deleteDatabase would widen the window in which a concurrent DB open
+		// changes the blocked/warn outcome.
+		return this.sweepLegacyIndexedDbs(dbs, pxes)
+	}
+
+	/** One-way cleanup of the LEGACY (rc.2-era, pre-OPFS) IndexedDB stores,
+	 *  plus the shared keyval-store once none remain. */
+	private async sweepLegacyIndexedDbs(dbs: IDBDatabaseInfo[], pxes: IDBDatabaseInfo[]): Promise<void> {
+		for (let i = pxes.length - 1; i >= 0; i--) {
+			const deleted = await new Promise<boolean>((resolve, reject) => {
+				const req = indexedDB.deleteDatabase(pxes[i].name!)
+				req.onsuccess = () => resolve(true)
+				req.onerror = () => reject(req.error)
+				req.onblocked = () => {
+					this.logWarn("deleteDatabase blocked (DB still in use):", pxes[i].name)
+					resolve(false) // Skip — don't hang the sweep forever
 				}
-			}
+			})
+			// Only a REAL deletion clears the entry: a blocked DB survives, and the
+			// shared keyval-store guard below must see it (review finding — the
+			// unconditional splice made the emptiness check vacuous).
+			if (deleted) pxes.splice(i, 1)
 		}
+		if (pxes.length) return
+		// Re-prove global emptiness at commit: the `pxes` bookkeeping above is a
+		// boot-time snapshot, and a PXE DB created since (or a concurrent
+		// clearProfileState draining the same list) would make deleting the
+		// SHARED keyval-store cross-profile corruption — same re-list
+		// clearProfileState itself performs.
+		const remaining = (await indexedDB.databases()).some((x) => x.name?.startsWith(PXE_DATA_DIR_ROOT))
+		if (remaining) return
+		const keyval = dbs.find((x) => x.name === "keyval-store")
+		if (!keyval) return
+		await new Promise<void>((resolve, reject) => {
+			const req = indexedDB.deleteDatabase(keyval.name!)
+			req.onsuccess = () => resolve()
+			req.onerror = () => reject(req.error)
+			req.onblocked = () => {
+				this.logWarn("deleteDatabase blocked (DB still in use): keyval-store")
+				resolve()
+			}
+		})
 	}
 
 	public async getContractInstance(
@@ -308,39 +318,48 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		opts?: { pxeOnly?: boolean; nodeBestEffort?: boolean },
 	): Promise<ContractInstanceWithAddress | undefined> {
 		address = await AztecAddress.schema.parseAsync(address)
-		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 26) — refactor when touched, never raise
 		return this.withPxeRead("getContractInstance", network, async (pxe, node) => {
 			// 5.0.0: the PXE returns the address PREIMAGE (no currentContractClassId); the node
 			// returns the full chain-derived instance. Both funnel through the effective-class
 			// helper: node-sourced instances reject upgrades explicitly, PXE preimages hydrate
 			// under the documented no-upgrades assumption.
 			const preimage = await pxe.getContractInstance(address)
-			let instance = preimage ? hydratePreimage(preimage) : undefined
-			if (!instance && !opts?.pxeOnly) {
-				try {
-					const nodeInstance = await node.getContract(address)
-					instance = nodeInstance ? assertNotUpgraded(nodeInstance) : undefined
-				} catch (err) {
-					// An upgrade rejection is a DEFINITIVE node answer, not a hiccup — re-throw it even in
-					// best-effort mode, or the cascade would silently serve a stale known-bundle instance
-					// for a contract the node says is unsupported.
-					if (err instanceof ContractUpgradedError) throw err
-					if (!opts?.nodeBestEffort) throw err
-					// Node hiccup on a best-effort lookup: degrade to "not found"
-					// and continue the cascade so the local known-bundle still has a chance.
-					this.logWarn(
-						`getContractInstance: node lookup failed for ${address.toString()}, continuing cascade`,
-						err instanceof Error ? err.message : String(err),
-					)
-					instance = undefined
-				}
-				if (!instance) {
-					await this.artifacts.ensureKnown()
-					instance = this.artifacts.getKnownInstance(address.toString())
-				}
-			}
-			return instance
+			const instance = preimage ? hydratePreimage(preimage) : undefined
+			if (instance || opts?.pxeOnly) return instance
+			// Tail-returned so the PXE-hit / pxeOnly fast paths above stay on the
+			// monolith's synchronous continuation.
+			return this.resolveInstanceFallback(node, address, opts)
 		})
+	}
+
+	/** The node → known-bundle tail of the contract-instance cascade (runs only
+	 *  on a PXE miss without `pxeOnly`). */
+	private async resolveInstanceFallback(
+		node: AztecNode,
+		address: AztecAddress,
+		opts: { nodeBestEffort?: boolean } | undefined,
+	): Promise<ContractInstanceWithAddress | undefined> {
+		let instance: ContractInstanceWithAddress | undefined
+		try {
+			const nodeInstance = await node.getContract(address)
+			instance = nodeInstance ? assertNotUpgraded(nodeInstance) : undefined
+		} catch (err) {
+			// An upgrade rejection is a DEFINITIVE node answer, not a hiccup — re-throw it even in
+			// best-effort mode, or the cascade would silently serve a stale known-bundle instance
+			// for a contract the node says is unsupported.
+			if (err instanceof ContractUpgradedError) throw err
+			if (!opts?.nodeBestEffort) throw err
+			// Node hiccup on a best-effort lookup: degrade to "not found"
+			// and continue the cascade so the local known-bundle still has a chance.
+			this.logWarn(
+				`getContractInstance: node lookup failed for ${address.toString()}, continuing cascade`,
+				err instanceof Error ? err.message : String(err),
+			)
+			instance = undefined
+		}
+		if (instance) return instance
+		await this.artifacts.ensureKnown()
+		return this.artifacts.getKnownInstance(address.toString())
 	}
 
 	public async getContractArtifact(network: NetworkInfo, id: Fr, opts?: { pxeOnly?: boolean }): Promise<ContractArtifact | undefined> {

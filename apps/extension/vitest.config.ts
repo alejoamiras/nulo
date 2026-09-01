@@ -73,6 +73,7 @@ export default defineConfig({
 			// D2 gate), which crashes under jsdom (`BBApiException: std::bad_cast` — same limitation as
 			// the account vectors above). Runs in aztec-runtime's own node-env suite via `test:all`.
 			"../../packages/aztec-runtime/src/pxe/public-events.test.ts",
+			"../../packages/aztec-runtime/src/pxe/public-events-warn.pins.test.ts",
 		],
 		// Inline workspace @nulo/* packages so vite processes their TS
 		// source entry points instead of externalizing them (default

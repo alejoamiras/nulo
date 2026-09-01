@@ -32,7 +32,9 @@ type JsonRpcFetch = (
  * adds an AbortController that fires after `timeoutMs`.
  */
 function fetchOnce(timeoutMs: number): JsonRpcFetch {
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 21) — refactor when touched, never raise
+	// Both awaits and the timeout `finally` stay inline: the abort signal must
+	// remain live through a pending `resp.json()` (pinned), so no helper may
+	// own either await. The classifiers below are synchronous.
 	return async (host, body, extraHeaders = {}, noRetry = false) => {
 		const controller = new AbortController()
 		const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
@@ -47,10 +49,7 @@ function fetchOnce(timeoutMs: number): JsonRpcFetch {
 					signal: controller.signal,
 				})
 			} catch (err: unknown) {
-				if (err instanceof DOMException && err.name === "AbortError") {
-					throw new Error(`Request to ${host} timed out after ${timeoutMs}ms`)
-				}
-				throw new Error(`Error fetching from host ${host}: ${err}`)
+				throw mapFetchDispatchFailure(err, host, timeoutMs)
 			}
 
 			let responseJson: { error?: { message?: string } } | undefined
@@ -61,20 +60,35 @@ function fetchOnce(timeoutMs: number): JsonRpcFetch {
 				throw new Error(`Failed to parse body as JSON`)
 			}
 
-			if (!resp.ok) {
-				const errorMessage = `Error ${resp.status} from server ${host}: ${responseJson?.error?.message ?? resp.statusText}`
-				if (noRetry || (resp.status >= 400 && resp.status < 500)) {
-					throw new NoRetryError(errorMessage)
-				} else {
-					throw new Error(errorMessage)
-				}
-			}
+			if (!resp.ok) throw classifyRpcFailure(resp, host, responseJson, noRetry)
 
 			return { response: responseJson, headers: resp.headers }
 		} finally {
 			clearTimeout(timeoutId)
 		}
 	}
+}
+
+/** Map a dispatch-phase failure: an abort is the timeout; anything else keeps
+ *  the SDK-compatible host-prefixed message. */
+function mapFetchDispatchFailure(err: unknown, host: string, timeoutMs: number): Error {
+	if (err instanceof DOMException && err.name === "AbortError") {
+		return new Error(`Request to ${host} timed out after ${timeoutMs}ms`)
+	}
+	return new Error(`Error fetching from host ${host}: ${err}`)
+}
+
+/** Status classification for a non-ok response: 4xx (or an explicit noRetry)
+ *  is terminal, everything else stays retryable. */
+function classifyRpcFailure(
+	resp: Response,
+	host: string,
+	responseJson: { error?: { message?: string } } | undefined,
+	noRetry: boolean,
+): Error {
+	const errorMessage = `Error ${resp.status} from server ${host}: ${responseJson?.error?.message ?? resp.statusText}`
+	if (noRetry || (resp.status >= 400 && resp.status < 500)) return new NoRetryError(errorMessage)
+	return new Error(errorMessage)
 }
 
 /**
