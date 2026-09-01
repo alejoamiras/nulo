@@ -5,7 +5,6 @@
 		"noExcessiveCognitiveComplexity": {
 			"apps/extension/src/components/ui/Dropdown/DropdownRoot.vue": 2,
 			"apps/extension/src/composables/internal/fee-estimation-engine.ts": 1,
-			"apps/extension/src/composables/useFullBackupImport.ts": 3,
 			"apps/extension/src/popup/components/modules/general/RecentActivityView.vue": 1,
 			"apps/extension/src/popup/components/modules/send/FeeSettingsCard.test.ts": 1,
 			"apps/extension/src/popup/components/modules/settings/contacts/useContactImportExport.ts": 1,
@@ -88,7 +87,6 @@
 		},
 		"noExcessiveLinesPerFunction": {
 			"apps/extension/src/components/JsonViewer/creator.js": 1,
-			"apps/extension/src/composables/useFullBackupImport.ts": 2,
 			"apps/extension/src/composables/useProfileImportFlow.ts": 1,
 			"apps/extension/src/popup/components/modules/settings/contacts/useContactImportExport.ts": 2,
 			"apps/extension/src/popup/windows/execute/index.vue": 1,
