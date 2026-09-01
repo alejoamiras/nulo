@@ -102,7 +102,7 @@ export class TransferExecutor {
 		const transferContent = new TransferContent(tokenId, transferType, accountAddress, recipientAddress, amount, networkId)
 		const transferTask = this.deps.tasks.startNewTask(transferContent, undefined, origin)
 
-		const journalId = await this.createTransferJournal(req)
+		const { journalId, controller } = await this.createTransferJournal(req)
 		const markJournal = async (progress: JobProgress, error?: JobError | null) => {
 			if (!journalId) return
 			try {
@@ -112,12 +112,9 @@ export class TransferExecutor {
 			}
 		}
 
-		// Cancel surface: register an AbortController under journalId so
-		// cancelJob(journalId) can fire `signal.abort()`. checkCancelled
-		// reads the signal at each stage boundary and short-circuits with
-		// JobCancelledSentinel so the catch handler can skip the failure path.
-		const controller = journalId ? new AbortController() : undefined
-		if (journalId && controller) this.deps.lane.registerController(journalId, controller)
+		// checkCancelled reads the controller's signal at each stage boundary
+		// and short-circuits with JobCancelledSentinel so the catch handler can
+		// skip the failure path.
 		const checkCancelled = (): void => {
 			if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
 		}
@@ -215,8 +212,16 @@ export class TransferExecutor {
 	 *  close/reopen so consumers can recover a consistent view of "what is this
 	 *  tx doing right now". FSM: pending → simulating → proving → submitting →
 	 *  succeeded | failed | cancelled. Creation is best-effort — a journal
-	 *  failure logs and returns undefined, never blocks the transfer. */
-	private async createTransferJournal(req: TransferRequest): Promise<string | undefined> {
+	 *  failure logs and returns an empty result, never blocks the transfer.
+	 *  This helper OWNS the full `await create → new AbortController →
+	 *  registerController` span: the controller must be registered in the SAME
+	 *  continuation that sees the durable row, so `cancelJob(journalId)` can
+	 *  never land in a settlement hop between the row becoming visible and the
+	 *  controller existing (it would transition the row terminal, find nothing
+	 *  to abort, and a later-installed controller would let proving continue). */
+	private async createTransferJournal(
+		req: TransferRequest,
+	): Promise<{ journalId: string | undefined; controller: AbortController | undefined }> {
 		let journalOp: OperationRecord | undefined
 		try {
 			const profile = await this.deps.getActiveProfile()
@@ -243,7 +248,10 @@ export class TransferExecutor {
 		} catch (error) {
 			this.deps.logError("Failed to create journal operation", getErrorMessage(error))
 		}
-		return journalOp?.id
+		const journalId = journalOp?.id
+		const controller = journalId ? new AbortController() : undefined
+		if (journalId && controller) this.deps.lane.registerController(journalId, controller)
+		return { journalId, controller }
 	}
 
 	/** Reused-estimate arm: the entry retains the exact build — its provenance
