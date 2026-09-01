@@ -552,223 +552,14 @@ function surfaceRunFailure(id: string, e: unknown): void {
 	setRuntime(id, { attention: "error", note: `${msg}. Your funds are not lost - retry from this card.` })
 }
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (127 lines) — split when touched, never grow
 async function runDepositClaimInner(id: string, opts: { interactive?: boolean } = {}): Promise<void> {
 	const interactive = opts.interactive !== false
 	let continueRounds = false
 	let gen = 0
-	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (120 lines) — split when touched, never grow
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 114) — refactor when touched, never raise
 	await withRecordLock(id, async () => {
 		// F11: this runner is now the record's owner - any previously scheduled round dies silently.
 		gen = bumpGen(id)
-		const rec = records.value.find((r) => r.id === id && r.direction === "deposit") as DepositJournalRecord | undefined
-		if (!rec || rec.completedAt) return
-		if (!guardDeployment(rec)) return
-		if (!deps.claim || !deps.claimReceiptStatus) throw new Error("Journal deps not connected")
-
-		// Pre-click recipient guard (ALL deposit claims — post-impl audit HIGH-1): the claim acts
-		// for rec.recipient; it must never run while a DIFFERENT Aztec account is active, or the
-		// chip shows B while an action executes for A. Private claims additionally mint a NOTE to
-		// the recipient. Auto-resume respects the same rule: a mismatched record waits with a
-		// mismatch card until its account is active again.
-		const aztec = deps.connectedAztec?.() ?? null
-		// Fail-CLOSED (codex residual): no known active account is treated like a mismatch —
-		// never run a claim on the hope that the right account happens to be connected. A
-		// non-string/empty recipient (tampered localStorage) is refused the same way instead of
-		// bypassing the compare and failing deep in address parsing.
-		const recipientOk = typeof rec.recipient === "string" && rec.recipient.length > 0
-		if (!aztec || !recipientOk || aztec.toLowerCase() !== rec.recipient.toLowerCase()) {
-			setRuntime(id, {
-				attention: "mismatch",
-				note: `This deposit claims to ${rec.recipient}. Switch to that Aztec account to claim.`,
-			})
-			return
-		}
-
-		// An already-sent claim is finished by waiting on ITS receipt, never a re-send. A checkpointed
-		// receipt IS confirmation; the message probe (best-effort, needs the secret - an EXPLICIT
-		// click on a rediscovered private record unseals it first) can only DELAY completion while
-		// the PXE still shows the message as claimable.
-		if (rec.claimTxHash) {
-			if (rec.isPrivate && interactive && !secretCache.has(id) && rec.sealedEnvelope) {
-				const resolved = await resolvePrivateSecret(rec)
-				if (!resolved) return
-			}
-			// A fresh re-entry clears any stale soft note (the 30-min cap) before checking again.
-			setRuntime(id, { attention: undefined, note: undefined })
-			continueRounds = (await runReceiptRound(rec, gen)) === "continue"
-			return
-		}
-
-		// No leafIndex ⇒ the deposit leg hasn't finished. With a recorded depositTxHash the leg is
-		// chain-recoverable: the flow may have DIED mid-wait (L1 timeout, closed tab) after the tx
-		// was sent — without this recovery every retry would bail here forever while a confirmed
-		// L1 deposit sits stranded with no L2 claim (user money). Without a txHash the flow is
-		// genuinely still pre-send: bail and let it (or a later click) re-enter.
-		// A fueled record whose EVENT-DERIVED fuel fields are missing is chain-recoverable by the same
-		// receipt, but the gate above only ever fired on a missing TOKEN leaf — so those records never
-		// got rehydrated. They must, because the private ladder now fails closed without them rather
-		// than silently falling through to the public one. Guarded on the dep + tx hash so the bail
-		// below stays reachable only from the original missing-leaf path.
-		const fuelFieldsRecoverable =
-			rec.schema === 2 && !!rec.depositTxHash && !!deps.recoverDepositLeg && (!rec.fuel?.received || !rec.fuel?.leafIndex)
-		if (!rec.leafIndex || fuelFieldsRecoverable) {
-			if (!rec.depositTxHash || !deps.recoverDepositLeg) {
-				log("no leafIndex yet - the deposit leg is still running", id)
-				return
-			}
-			setStep(id, "depositing", "checking the Ethereum deposit")
-			let outcome: "recovered" | "pending"
-			try {
-				outcome = await deps.recoverDepositLeg(rec)
-			} catch (e) {
-				const raw = e instanceof Error ? e.message : String(e)
-				setRuntime(id, { attention: isReceiptRecordMismatch(raw) ? "receipt-mismatch" : "error", note: humanizeWalletError(raw) })
-				return
-			}
-			if (outcome === "pending") {
-				setStep(id, "depositing", "waiting for the Ethereum confirmation")
-				setRuntime(id, { attention: "error", note: "The Ethereum deposit isn't confirmed yet - retry in a minute." })
-				return
-			}
-			log("deposit leg recovered from L1", id)
-			setRuntime(id, { attention: undefined, note: undefined })
-		}
-
-		let secretHex: string
-		// The private record's unsealed authoritative copy — forwarded to the claim dep so the fee-juice
-		// path reads `envelope.salt` (source of truth) over the plaintext journal copy (codex post-impl HIGH).
-		let resolvedEnvelope: DepositEnvelopeV2 | undefined
-		if (rec.isPrivate) {
-			// Only narrate UNSEALING when a real signature is needed (a rediscovered record). A fresh
-			// in-session deposit has its secret cached, so the unseal is instant - setting "unsealing"
-			// (which the rail maps to CLAIM) flashes CLAIM and then regresses to CROSSING when the sync
-			// gate below runs (the "instant green then rollback" bug). Cached ⇒ stay quiet; the gate
-			// narrates CROSSING until the simulate probe says the message is consumable.
-			if (!secretCache.has(id)) setStep(id, "unsealing", "one Ethereum signature")
-			const resolved = await resolvePrivateSecret(rec)
-			if (!resolved) return
-			secretHex = resolved.secretHex
-			resolvedEnvelope = resolved.envelope
-		} else {
-			if (!rec.secret) {
-				setRuntime(id, { attention: "stale", note: "This record has no claim secret - it cannot be claimed." })
-				return
-			}
-			secretHex = rec.secret
-		}
-		setRuntime(id, { attention: undefined, note: undefined })
-
-		const fresh = records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
-		if (!fresh) return // Cross-tab discard while the unseal signature waited.
-		const interaction = await deps.claim(fresh, secretHex, resolvedEnvelope)
-
-		// Sync phase, two legs sharing one iteration budget:
-		// 1. Block countdown (display pacing): the deposit-time L2 snapshot + a fixed margin gives a
-		//    LEGIBLE "blocks until arrival" - no PXE simulate churn while the rollup predictably
-		//    catches up. Best-effort: missing snapshot/dep/node falls through to the gate.
-		// 2. The claim-simulate gate stays the consumability AUTHORITY - the countdown can never
-		//    green-light a claim by itself (the wallet's PXE lags the node).
-		// A retry on an already-gate-passed record must NOT visually re-run the crossing: narrate the
-		// quick revalidation under the CLAIM phase instead (the simulate still guards consumability).
-		const preGated = runtime.value[id]?.claimable === true
-		let i = 0
-		const target = fresh.depositL2Block !== undefined && deps.l2BlockNumber ? fresh.depositL2Block + SYNC_TARGET_MARGIN_BLOCKS : null
-		let counted = false
-		if (!preGated && target !== null && deps.l2BlockNumber) {
-			while (i < 300) {
-				let current: number
-				try {
-					current = await deps.l2BlockNumber()
-				} catch {
-					break // Connectivity wobble: the gate loop narrates from here.
-				}
-				if (current >= target) {
-					setRuntime(id, { syncBlock: current })
-					break
-				}
-				counted = true
-				setRuntime(id, { syncBlock: current })
-				const left = target - current
-				setStep(id, "syncing", `${left} ${left === 1 ? "block" : "blocks"} until your funds arrive`)
-				await wait(6000)
-				i++
-			}
-		}
-
-		// 5.0 checkpoint gate — the consumability AUTHORITY for records that captured the real inbox
-		// message key(s). An L1→L2 message is claimable only once the node anchor's checkpoint >= the
-		// message's checkpoint (the claim builds its membership witness against the anchor; before that
-		// the claim-simulate throws "No L1 to L2 message found"). We poll the REAL keys the inbox emitted
-		// — the token claim AND, for a fueled deposit, the FJ message that pays for it. Legacy records
-		// with no messageHash fall through to the simulate-only loop below.
-		const gateHashes = [fresh.messageHash, fresh.fuel?.messageHash].filter((h): h is string => !!h)
-		if (!preGated && deps.messageReadiness && gateHashes.length > 0) {
-			for (let g = 0; g < 300; g++) {
-				let blocked: { checkpoint: number; anchor: number } | "unfolded" | null = null
-				for (const h of gateHashes) {
-					const st = await deps.messageReadiness(h).catch(() => null)
-					if (st === null) {
-						blocked = "unfolded"
-						break
-					}
-					if (st.anchor < st.checkpoint) {
-						blocked = st
-						break
-					}
-				}
-				if (blocked === null) break
-				counted = true
-				if (blocked === "unfolded") setStep(id, "syncing", "waiting for the message to reach the L2")
-				else {
-					const left = Math.max(blocked.checkpoint - blocked.anchor, 0)
-					setStep(id, "syncing", `${left} ${left === 1 ? "checkpoint" : "checkpoints"} until your funds arrive`)
-				}
-				await wait(6000)
-			}
-		}
-
-		let ready = false
-		for (; i < 300; i++) {
-			// Only a record already known-claimable (preGated - a retry within the same session) narrates
-			// under CLAIM up front. A FRESH claim stays on CROSSING until a probe actually says the
-			// message is consumable: an optimistic first probe used to flash CLAIM and then regress to
-			// CROSSING on the not-ready answer (the "goes back to crossing" bug). Reload of an
-			// already-ready record shows one brief CROSSING tick before CLAIM - forward, and the
-			// ready-simulate returns immediately, so no 6s stall.
-			if (preGated) setStep(id, "sending", "checking the message")
-			else
-				setStep(
-					id,
-					"syncing",
-					counted ? "message arrived - waiting for your wallet to sync it" : "waiting for your wallet to sync the message",
-				)
-			try {
-				await interaction.simulate()
-				ready = true
-				break
-			} catch (e) {
-				const msg = e instanceof Error ? e.message : String(e)
-				if (!isMsgNotReady(msg)) throw e
-				log(`message not consumable yet (poll ${i + 1}) - waiting 6s`, id)
-				await wait(6000)
-			}
-		}
-		if (!ready) throw new Error("the L1→L2 message never became consumable - claim it again from the journal later")
-		setRuntime(id, { claimable: true })
-
-		setStep(id, "sending", "confirm in your Aztec wallet")
-		const { txHash } = await runOnLane("aztec", () => interaction.send())
-		log("claim sent", { id, txHash })
-		patchRecord(id, { claimTxHash: txHash })
-		receiptRounds.delete(id)
-		// F12: the forge-resistant provenance - THIS process watched claimable → sent.
-		localClaimProvenance.add(id)
-		// Cross-tab guard: the record can vanish remotely between the send and this reread.
-		const sent = records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
-		if (!sent) return
-		continueRounds = (await runReceiptRound(sent, gen)) === "continue"
+		continueRounds = (await runDepositClaimLocked(id, gen, interactive)) === "continue"
 	})
 	// Chunked re-entry happens OUTSIDE the lock so RETRY/DISCARD stay reachable between rounds.
 	if (continueRounds && genOf(id) === gen) {
@@ -777,97 +568,438 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 	}
 }
 
+/** The lock-held claim sequence. Runs UNDER withRecordLock's serialization — the awaits in
+ *  here are deliberately unfenced (a newer runner cannot enter until this releases; its
+ *  bumpGen then kills this runner's rounds); explicit gen checks live only in the receipt
+ *  polling and the caller's chunked re-entry. Returns whether another receipt round should
+ *  be scheduled outside the lock. */
+async function runDepositClaimLocked(id: string, gen: number, interactive: boolean): Promise<"continue" | "stop"> {
+	const rec = claimTarget(id)
+	if (!rec) return "stop"
+
+	if (recipientMismatch(rec, id)) return "stop"
+	if (rec.claimTxHash) return resumeSentClaim(rec, id, gen, interactive)
+	// Caller-side condition so the common has-leaf path stays synchronous (no new await seam).
+	if (legRecoveryNeeded(rec) && (await recoverLegIfNeeded(rec, id)) === "stop") return "stop"
+
+	// Public material resolves synchronously (parity with the original inline branch).
+	const material = rec.isPrivate ? await resolvePrivateClaimMaterial(rec, id) : resolvePublicClaimMaterial(rec, id)
+	if (!material) return "stop"
+	setRuntime(id, { attention: undefined, note: undefined })
+
+	const fresh = records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
+	if (!fresh) return "stop" // Cross-tab discard while the unseal signature waited.
+	// Interaction CONSTRUCTION happens BEFORE all three gates — fee/fuel resolution timing and
+	// any journal mutations the build performs must not move.
+	const interaction = await (deps.claim as NonNullable<typeof deps.claim>)(fresh, material.secretHex, material.envelope)
+
+	// A retry on an already-gate-passed record must NOT visually re-run the crossing: narrate the
+	// quick revalidation under the CLAIM phase instead (the simulate still guards consumability).
+	const preGated = runtime.value[id]?.claimable === true
+	let gate: ArrivalGateState = { simulateStart: 0, counted: false, preGated }
+	// Await each gate only when IT can actually run: a preGated retry, a missing dep, a
+	// snapshot-less or keyless record must reach the next stage with the same synchronous
+	// flow the original had (no no-op await seams — each gate is guarded independently).
+	if (!preGated && countdownApplies(fresh)) gate = await awaitBlockCountdown(fresh, id, gate)
+	if (!preGated && checkpointApplies(fresh)) gate = await awaitCheckpointGate(fresh, id, gate)
+	const ready = await awaitConsumable(interaction, id, gate)
+	if (!ready) throw new Error("the L1→L2 message never became consumable - claim it again from the journal later")
+	setRuntime(id, { claimable: true })
+
+	return sendAndWatch(id, gen, interaction)
+}
+
+/** The runnable claim target, or undefined: completed/absent/wrong-deployment records don't
+ *  run; missing engine deps throw (a wiring bug, not a record state). Synchronous — the
+ *  head guards keep the original's no-await entry. */
+function claimTarget(id: string): DepositJournalRecord | undefined {
+	const rec = records.value.find((r) => r.id === id && r.direction === "deposit") as DepositJournalRecord | undefined
+	if (!rec || rec.completedAt) return undefined
+	if (!guardDeployment(rec)) return undefined
+	if (!deps.claim || !deps.claimReceiptStatus) throw new Error("Journal deps not connected")
+	return rec
+}
+
+/** Pre-click recipient guard (ALL deposit claims — post-impl audit HIGH-1): the claim acts
+ *  for rec.recipient; it must never run while a DIFFERENT Aztec account is active, or the
+ *  chip shows B while an action executes for A. Private claims additionally mint a NOTE to
+ *  the recipient. Auto-resume respects the same rule: a mismatched record waits with a
+ *  mismatch card until its account is active again. Fail-CLOSED (codex residual): no known
+ *  active account is treated like a mismatch — never run a claim on the hope that the right
+ *  account happens to be connected; a non-string/empty recipient (tampered localStorage) is
+ *  refused the same way instead of bypassing the compare and failing deep in address parsing. */
+function recipientMismatch(rec: DepositJournalRecord, id: string): boolean {
+	const aztec = deps.connectedAztec?.() ?? null
+	const recipientOk = typeof rec.recipient === "string" && rec.recipient.length > 0
+	if (!aztec || !recipientOk || aztec.toLowerCase() !== rec.recipient.toLowerCase()) {
+		setRuntime(id, {
+			attention: "mismatch",
+			note: `This deposit claims to ${rec.recipient}. Switch to that Aztec account to claim.`,
+		})
+		return true
+	}
+	return false
+}
+
+/** An already-sent claim is finished by waiting on ITS receipt, never a re-send. A checkpointed
+ *  receipt IS confirmation; the message probe (best-effort, needs the secret - an EXPLICIT
+ *  click on a rediscovered private record unseals it first) can only DELAY completion while
+ *  the PXE still shows the message as claimable. */
+async function resumeSentClaim(rec: DepositJournalRecord, id: string, gen: number, interactive: boolean): Promise<"continue" | "stop"> {
+	if (rec.isPrivate && interactive && !secretCache.has(id) && rec.sealedEnvelope) {
+		const resolved = await resolvePrivateSecret(rec)
+		if (!resolved) return "stop"
+	}
+	// A fresh re-entry clears any stale soft note (the 30-min cap) before checking again.
+	setRuntime(id, { attention: undefined, note: undefined })
+	return (await runReceiptRound(rec, gen)) === "continue" ? "continue" : "stop"
+}
+
+/**
+ * No leafIndex ⇒ the deposit leg hasn't finished. With a recorded depositTxHash the leg is
+ * chain-recoverable: the flow may have DIED mid-wait (L1 timeout, closed tab) after the tx
+ * was sent — without this recovery every retry would bail here forever while a confirmed
+ * L1 deposit sits stranded with no L2 claim (user money). Without a txHash the flow is
+ * genuinely still pre-send: bail and let it (or a later click) re-enter.
+ * A fueled record whose EVENT-DERIVED fuel fields are missing is chain-recoverable by the same
+ * receipt, but the gate above only ever fired on a missing TOKEN leaf — so those records never
+ * got rehydrated. They must, because the private ladder now fails closed without them rather
+ * than silently falling through to the public one. Guarded on the dep + tx hash so the bail
+ * below stays reachable only from the original missing-leaf path.
+ */
+function legRecoveryNeeded(rec: DepositJournalRecord): boolean {
+	const fuelFieldsRecoverable =
+		rec.schema === 2 && !!rec.depositTxHash && !!deps.recoverDepositLeg && (!rec.fuel?.received || !rec.fuel?.leafIndex)
+	return !rec.leafIndex || fuelFieldsRecoverable
+}
+
+async function recoverLegIfNeeded(rec: DepositJournalRecord, id: string): Promise<"proceed" | "stop"> {
+	if (!rec.depositTxHash || !deps.recoverDepositLeg) {
+		log("no leafIndex yet - the deposit leg is still running", id)
+		return "stop"
+	}
+	if ((await attemptLegRecovery(rec, id)) === "stop") return "stop"
+	return "proceed"
+}
+
+/** One recovery attempt against the recorded L1 receipt: terminal receipt-mismatch vs
+ *  retryable error classification, and the not-yet-mined soft bail. */
+async function attemptLegRecovery(rec: DepositJournalRecord, id: string): Promise<"recovered" | "stop"> {
+	setStep(id, "depositing", "checking the Ethereum deposit")
+	let outcome: "recovered" | "pending"
+	try {
+		// Read-at-call-time (parity): a concurrently removed dep throws into THIS catch, exactly
+		// like the original property access did.
+		outcome = await (deps.recoverDepositLeg as NonNullable<typeof deps.recoverDepositLeg>)(rec)
+	} catch (e) {
+		const raw = e instanceof Error ? e.message : String(e)
+		setRuntime(id, { attention: isReceiptRecordMismatch(raw) ? "receipt-mismatch" : "error", note: humanizeWalletError(raw) })
+		return "stop"
+	}
+	if (outcome === "pending") {
+		setStep(id, "depositing", "waiting for the Ethereum confirmation")
+		setRuntime(id, { attention: "error", note: "The Ethereum deposit isn't confirmed yet - retry in a minute." })
+		return "stop"
+	}
+	log("deposit leg recovered from L1", id)
+	setRuntime(id, { attention: undefined, note: undefined })
+	return "recovered"
+}
+
+/** The claim material: for a private record the unsealed authoritative copy — forwarded to
+ *  the claim dep so the fee-juice path reads `envelope.salt` (source of truth) over the
+ *  plaintext journal copy (codex post-impl HIGH). Null = the run must stop (already narrated). */
+async function resolvePrivateClaimMaterial(
+	rec: DepositJournalRecord,
+	id: string,
+): Promise<{ secretHex: string; envelope?: DepositEnvelopeV2 } | null> {
+	// Only narrate UNSEALING when a real signature is needed (a rediscovered record). A fresh
+	// in-session deposit has its secret cached, so the unseal is instant - setting "unsealing"
+	// (which the rail maps to CLAIM) flashes CLAIM and then regresses to CROSSING when the sync
+	// gate below runs (the "instant green then rollback" bug). Cached ⇒ stay quiet; the gate
+	// narrates CROSSING until the simulate probe says the message is consumable.
+	if (!secretCache.has(id)) setStep(id, "unsealing", "one Ethereum signature")
+	const resolved = await resolvePrivateSecret(rec)
+	if (!resolved) return null
+	return { secretHex: resolved.secretHex, envelope: resolved.envelope }
+}
+
+function resolvePublicClaimMaterial(rec: DepositJournalRecord, id: string): { secretHex: string; envelope?: DepositEnvelopeV2 } | null {
+	if (!rec.secret) {
+		setRuntime(id, { attention: "stale", note: "This record has no claim secret - it cannot be claimed." })
+		return null
+	}
+	return { secretHex: rec.secret }
+}
+
+/** Whether the block countdown has anything to do for this record. */
+function countdownApplies(rec: DepositJournalRecord): boolean {
+	return rec.depositL2Block !== undefined && !!deps.l2BlockNumber
+}
+
+/** Whether the checkpoint gate has anything to do for this record. */
+function checkpointApplies(rec: DepositJournalRecord): boolean {
+	return !!deps.messageReadiness && (!!rec.messageHash || !!rec.fuel?.messageHash)
+}
+
+/** The arrival gates' threaded state: `simulateStart` is the shared 300-iteration budget the
+ *  countdown consumes from ahead of the simulate loop; `counted` selects the later
+ *  "message arrived" narration once any gate actually waited. */
+interface ArrivalGateState {
+	simulateStart: number
+	counted: boolean
+	preGated: boolean
+}
+
+/** Sync leg 1 — block countdown (display pacing): the deposit-time L2 snapshot + a fixed
+ *  margin gives a LEGIBLE "blocks until arrival" - no PXE simulate churn while the rollup
+ *  predictably catches up. Best-effort: missing snapshot/dep/node falls through to the gate.
+ *  Never an authority — it can never green-light a claim by itself. */
+async function awaitBlockCountdown(rec: DepositJournalRecord, id: string, gate: ArrivalGateState): Promise<ArrivalGateState> {
+	let { simulateStart: i, counted } = gate
+	const target = rec.depositL2Block !== undefined && deps.l2BlockNumber ? rec.depositL2Block + SYNC_TARGET_MARGIN_BLOCKS : null
+	if (target !== null && deps.l2BlockNumber) {
+		while (i < 300) {
+			let current: number
+			try {
+				current = await deps.l2BlockNumber()
+			} catch {
+				break // Connectivity wobble: the gate loop narrates from here.
+			}
+			if (current >= target) {
+				setRuntime(id, { syncBlock: current })
+				break
+			}
+			counted = true
+			setRuntime(id, { syncBlock: current })
+			const left = target - current
+			setStep(id, "syncing", `${left} ${left === 1 ? "block" : "blocks"} until your funds arrive`)
+			await wait(6000)
+			i++
+		}
+	}
+	return { ...gate, simulateStart: i, counted }
+}
+
+/** Sync leg 2 — the 5.0 checkpoint gate, the consumability pre-check for records that captured
+ *  the real inbox message key(s). An L1→L2 message is claimable only once the node anchor's
+ *  checkpoint >= the message's checkpoint (the claim builds its membership witness against the
+ *  anchor; before that the claim-simulate throws "No L1 to L2 message found"). We poll the REAL
+ *  keys the inbox emitted — the token claim AND, for a fueled deposit, the FJ message that pays
+ *  for it. Legacy records with no messageHash fall through to the simulate-only loop. Its own
+ *  separate 300 budget; waiting here sets `counted`. */
+async function awaitCheckpointGate(rec: DepositJournalRecord, id: string, gate: ArrivalGateState): Promise<ArrivalGateState> {
+	let counted = gate.counted
+	const gateHashes = [rec.messageHash, rec.fuel?.messageHash].filter((h): h is string => !!h)
+	if (deps.messageReadiness && gateHashes.length > 0) {
+		for (let g = 0; g < 300; g++) {
+			const blocked = await sweepMessageCheckpoints(gateHashes)
+			if (blocked === null) break
+			counted = true
+			if (blocked === "unfolded") setStep(id, "syncing", "waiting for the message to reach the L2")
+			else {
+				const left = Math.max(blocked.checkpoint - blocked.anchor, 0)
+				setStep(id, "syncing", `${left} ${left === 1 ? "checkpoint" : "checkpoints"} until your funds arrive`)
+			}
+			await wait(6000)
+		}
+	}
+	return { ...gate, counted }
+}
+
+/** One sweep over the gate hashes: the FIRST not-yet-ready message blocks the sweep — either
+ *  "unfolded" (probe failed / message not anchored) or its checkpoint distance. Null = all ready. */
+async function sweepMessageCheckpoints(gateHashes: string[]): Promise<{ checkpoint: number; anchor: number } | "unfolded" | null> {
+	for (const h of gateHashes) {
+		// Read-at-call-time (parity): the caller gates on the dep; a concurrent removal throws
+		// out of the gate loop exactly like the original direct call.
+		const st = await (deps.messageReadiness as NonNullable<typeof deps.messageReadiness>)(h).catch(() => null)
+		if (st === null) return "unfolded"
+		if (st.anchor < st.checkpoint) return st
+	}
+	return null
+}
+
+/** The claim-simulate loop — the consumability AUTHORITY. Shares the countdown's 300-iteration
+ *  budget (`simulateStart` is how many the countdown consumed). Only a record already
+ *  known-claimable (preGated - a retry within the same session) narrates under CLAIM up front;
+ *  a FRESH claim stays on CROSSING until a probe actually says the message is consumable: an
+ *  optimistic first probe used to flash CLAIM and then regress to CROSSING on the not-ready
+ *  answer (the "goes back to crossing" bug). Reload of an already-ready record shows one brief
+ *  CROSSING tick before CLAIM - forward, and the ready-simulate returns immediately, so no 6s
+ *  stall. */
+async function awaitConsumable(interaction: { simulate: () => Promise<unknown> }, id: string, gate: ArrivalGateState): Promise<boolean> {
+	for (let i = gate.simulateStart; i < 300; i++) {
+		if (gate.preGated) setStep(id, "sending", "checking the message")
+		else
+			setStep(
+				id,
+				"syncing",
+				gate.counted ? "message arrived - waiting for your wallet to sync it" : "waiting for your wallet to sync the message",
+			)
+		try {
+			await interaction.simulate()
+			return true
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e)
+			if (!isMsgNotReady(msg)) throw e
+			log(`message not consumable yet (poll ${i + 1}) - waiting 6s`, id)
+			await wait(6000)
+		}
+	}
+	return false
+}
+
+/** The send tail: journal the hash the moment it exists, reset the round budget, record the
+ *  forge-resistant provenance (THIS process watched claimable → sent), reread across the
+ *  cross-tab window, then run the first receipt round. */
+async function sendAndWatch(
+	id: string,
+	gen: number,
+	interaction: { send: () => Promise<{ txHash: string }> },
+): Promise<"continue" | "stop"> {
+	setStep(id, "sending", "confirm in your Aztec wallet")
+	const { txHash } = await runOnLane("aztec", () => interaction.send())
+	log("claim sent", { id, txHash })
+	patchRecord(id, { claimTxHash: txHash })
+	receiptRounds.delete(id)
+	// F12: the forge-resistant provenance - THIS process watched claimable → sent.
+	localClaimProvenance.add(id)
+	// Cross-tab guard: the record can vanish remotely between the send and this reread.
+	const sent = records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
+	if (!sent) return "stop"
+	return (await runReceiptRound(sent, gen)) === "continue" ? "continue" : "stop"
+}
+
 /** One ~3-minute receipt round (D4 completion, D2 narration). Returns "continue" when the claim
  *  is still pending and another round should be scheduled by the caller (outside the lock). */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 33) — refactor when touched, never raise
 async function runReceiptRound(rec: DepositJournalRecord, gen: number): Promise<"done" | "stop" | "continue"> {
-	if (!deps.claimReceiptStatus || !rec.claimTxHash) return "stop"
-	const roundsDone = receiptRounds.get(rec.id) ?? 0
-	let droppedStreak = 0
-	let unreachableStreak = 0
+	if (!receiptRoundReady(rec)) return "stop"
+	const roundsDone = priorReceiptRounds(rec.id)
+	const streaks = { dropped: 0, unreachable: 0 }
 	for (let i = 0; i < RECEIPT_POLLS_PER_ROUND; i++) {
 		if (genOf(rec.id) !== gen) return "stop" // F11: a newer owner took over (RETRY/discard/sweep).
 		const checkNo = roundsDone * RECEIPT_POLLS_PER_ROUND + i + 1
 		setStep(rec.id, "confirming", "the claim is processing on Aztec")
-		const status = await deps.claimReceiptStatus(rec.claimTxHash)
+		// Read-at-call-time under receiptRoundReady's gate (same parity pattern as the other deps).
+		const status = await (deps.claimReceiptStatus as NonNullable<typeof deps.claimReceiptStatus>)(rec.claimTxHash as string)
 		log("receipt check", { id: rec.id, checkNo, status })
 		if (genOf(rec.id) !== gen) return "stop"
-		if (status === "proposed" && runtime.value[rec.id]?.confirmLandedTxHash !== rec.claimTxHash) {
-			// Quiet flip: real evidence THIS claim was accepted into a proposed block. Display-only
-			// (the rail's dot goes mint); the round keeps polling to inclusion exactly as before.
-			setRuntime(rec.id, { confirmLandedTxHash: rec.claimTxHash })
-		}
+		flipProposedLanded(rec, status)
+		// Success is the only arm that awaits; reverted and every non-terminal status stay
+		// SYNCHRONOUS from the gen check through their runtime/streak writes (no new seams).
 		if (status === "success") {
-			// A checkpointed receipt for the recorded claimTxHash IS confirmation (owner decision:
-			// the node's word beats the wallet's lagging PXE). The message probe is best-effort:
-			// skipped when THIS process drove the send (forge-resistant provenance), and for
-			// rediscovered records it can only DELAY completion while the PXE still visibly shows
-			// the message as claimable - it can never dead-end a confirmed claim. Residual risk
-			// (accepted): a forged-but-checkpointed claimTxHash planted in localStorage completes a
-			// record; that attacker already has storage write and could delete the record outright.
-			if (localClaimProvenance.has(rec.id)) {
-				completeDeposit(records.value.find((r) => r.id === rec.id) as DepositJournalRecord | undefined)
-				return "done"
-			}
-			setStep(rec.id, "verifying", "checking the claim against this record")
-			const consumed = await recordMessageConsumed(rec)
-			if (genOf(rec.id) !== gen) return "stop"
-			if (consumed === false) {
-				// The PXE still sees the message - lag right after the checkpoint, or a receipt that
-				// wasn't ours. Keep polling instead of completing; the next pass re-probes.
-				setStep(rec.id, "verifying", "confirmed on the node - waiting for your wallet to sync")
-				await wait(4000)
-				continue
-			}
-			completeDeposit(records.value.find((r) => r.id === rec.id) as DepositJournalRecord | undefined)
-			return "done"
+			const settled = await handleSuccessReceipt(rec, gen)
+			if (settled === "poll") continue
+			return settled
 		}
-		if (status === "reverted") {
-			// Terminal revert keeps the hash (a retry rechecks the same receipt), so the hash-scoped
-			// landed view WOULD re-light during the recheck window - clear the flag explicitly.
-			setRuntime(rec.id, {
-				attention: "error",
-				note: "The claim reverted on Aztec. You can retry from this card - the deposit remains claimable.",
-				confirmLandedTxHash: undefined,
-			})
-			return "stop"
-		}
-		if (status === "dropped") {
-			// Debounced: a freshly-proposed tx can read dropped/unknown transiently.
-			droppedStreak++
-			if (droppedStreak >= 3) {
-				// Hash-scoping alone doesn't cover a SAME-hash resurrection (a restored backup can
-				// re-import the dropped hash into this record) - clear the flag with the hash.
-				patchRecord(rec.id, { claimTxHash: undefined })
-				setRuntime(rec.id, {
-					attention: "error",
-					note: "The claim was dropped - claim again from this card. Nothing was lost.",
-					confirmLandedTxHash: undefined,
-				})
-				return "stop"
-			}
-		} else {
-			droppedStreak = 0
-		}
-		if (status === "unreachable") {
-			// A dead RPC is a connectivity problem, never a slow claim (D2).
-			unreachableStreak++
-			setStep(rec.id, "confirming", `node unreachable - retrying (${unreachableStreak})`)
-		} else {
-			unreachableStreak = 0
-		}
+		if (status === "reverted") return reportRevertedClaim(rec)
+		if (advanceReceiptStreaks(rec.id, status, streaks) === "give-up") return "stop"
 		await wait(4000)
 	}
-	receiptRounds.set(rec.id, roundsDone + 1)
+	return closeReceiptRound(rec.id, roundsDone)
+}
+
+/** Round bookkeeping: budget the finished round; at the soft cap (NOT a dead-end — no
+ *  attention) the card re-arms RETRY and says so. */
+function closeReceiptRound(id: string, roundsDone: number): "continue" | "stop" {
+	receiptRounds.set(id, roundsDone + 1)
 	if (roundsDone + 1 >= RECEIPT_MAX_ROUNDS) {
-		// Soft cap, NOT a dead-end: no attention, the card re-arms RETRY and says so.
-		setStep(rec.id, undefined, undefined)
-		setRuntime(rec.id, {
+		setStep(id, undefined, undefined)
+		setRuntime(id, {
 			note: "Still confirming after ~30 minutes - slow testnet. Press CLAIM to keep checking; your funds are safe either way.",
 		})
 		return "stop"
 	}
 	return "continue"
+}
+
+/** Quiet flip: real evidence THIS claim was accepted into a proposed block. Display-only
+ *  (the rail's dot goes mint); the round keeps polling to inclusion exactly as before. */
+function flipProposedLanded(rec: DepositJournalRecord, status: string): void {
+	if (status === "proposed" && runtime.value[rec.id]?.confirmLandedTxHash !== rec.claimTxHash) {
+		setRuntime(rec.id, { confirmLandedTxHash: rec.claimTxHash })
+	}
+}
+
+/** Both preconditions a round needs; callers guarantee them, this is the defensive form. */
+function receiptRoundReady(rec: DepositJournalRecord): boolean {
+	return !!deps.claimReceiptStatus && !!rec.claimTxHash
+}
+
+function priorReceiptRounds(id: string): number {
+	return receiptRounds.get(id) ?? 0
+}
+
+/** A terminal revert keeps the hash (a retry rechecks the same receipt), so the hash-scoped
+ *  landed view WOULD re-light during the recheck window - clear the flag explicitly.
+ *  Deliberately synchronous: it runs between a gen check and the loop's next step. */
+function reportRevertedClaim(rec: DepositJournalRecord): "stop" {
+	setRuntime(rec.id, {
+		attention: "error",
+		note: "The claim reverted on Aztec. You can retry from this card - the deposit remains claimable.",
+		confirmLandedTxHash: undefined,
+	})
+	return "stop"
+}
+
+/** The per-poll streak accounting (state threaded through one mutable object — the streaks
+ *  reset at each round boundary by construction, since the object is round-local).
+ *  Dropped is debounced: a freshly-proposed tx can read dropped/unknown transiently; three
+ *  straight drops clear the hash — hash-scoping alone doesn't cover a SAME-hash resurrection
+ *  (a restored backup can re-import the dropped hash), so the flag clears with it.
+ *  Unreachable is independent: a dead RPC is a connectivity problem, never a slow claim (D2). */
+function advanceReceiptStreaks(id: string, status: string, streaks: { dropped: number; unreachable: number }): "give-up" | "poll" {
+	if (status === "dropped") {
+		streaks.dropped++
+		if (streaks.dropped >= 3) {
+			patchRecord(id, { claimTxHash: undefined })
+			setRuntime(id, {
+				attention: "error",
+				note: "The claim was dropped - claim again from this card. Nothing was lost.",
+				confirmLandedTxHash: undefined,
+			})
+			return "give-up"
+		}
+	} else {
+		streaks.dropped = 0
+	}
+	if (status === "unreachable") {
+		streaks.unreachable++
+		setStep(id, "confirming", `node unreachable - retrying (${streaks.unreachable})`)
+	} else {
+		streaks.unreachable = 0
+	}
+	return "poll"
+}
+
+/**
+ * The success arm of a receipt poll. A checkpointed receipt for the recorded claimTxHash IS
+ * confirmation (owner decision: the node's word beats the wallet's lagging PXE). The message
+ * probe is best-effort: skipped when THIS process drove the send (forge-resistant provenance),
+ * and for rediscovered records it can only DELAY completion while the PXE still visibly shows
+ * the message as claimable - it can never dead-end a confirmed claim. Residual risk
+ * (accepted): a forged-but-checkpointed claimTxHash planted in localStorage completes a
+ * record; that attacker already has storage write and could delete the record outright.
+ * "poll" = keep polling (the helper already waited its 4s).
+ */
+async function handleSuccessReceipt(rec: DepositJournalRecord, gen: number): Promise<"done" | "stop" | "poll"> {
+	if (localClaimProvenance.has(rec.id)) {
+		completeDeposit(records.value.find((r) => r.id === rec.id) as DepositJournalRecord | undefined)
+		return "done"
+	}
+	setStep(rec.id, "verifying", "checking the claim against this record")
+	const consumed = await recordMessageConsumed(rec)
+	if (genOf(rec.id) !== gen) return "stop"
+	if (consumed === false) {
+		// The PXE still sees the message - lag right after the checkpoint, or a receipt that
+		// wasn't ours. Keep polling instead of completing; the next pass re-probes.
+		setStep(rec.id, "verifying", "confirmed on the node - waiting for your wallet to sync")
+		await wait(4000)
+		return "poll"
+	}
+	completeDeposit(records.value.find((r) => r.id === rec.id) as DepositJournalRecord | undefined)
+	return "done"
 }
 
 /** True/false when determinable; null when the secret isn't available for the probe (prompt-free rule). */
@@ -898,63 +1030,70 @@ export async function runWithdrawConsume(id: string): Promise<void> {
 }
 
 async function runWithdrawConsumeInner(id: string): Promise<void> {
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
-	await withRecordLock(id, async () => {
-		const rec = records.value.find((r) => r.id === id && r.direction === "withdraw") as WithdrawJournalRecord | undefined
-		if (!rec || rec.completedAt) return
-		if (!guardDeployment(rec)) return
-		if (!deps.consume || !deps.waitConsumeReceipt) throw new Error("Journal deps not connected")
+	await withRecordLock(id, () => runWithdrawConsumeLocked(id))
+}
 
-		if (!rec.exitTxHash) {
-			setRuntime(id, {
-				attention: "unknown-outcome",
-				note: "The exit was started but its transaction was never recorded (tab closed mid-send). Check your wallet activity, then discard.",
-			})
-			return
-		}
-
-		if (rec.consumeTxHash) {
-			setStep(id, "verifying", "matching the finish transaction to this withdrawal")
-			const legit = (await deps.verifyConsumeIdentity?.(rec, rec.consumeTxHash)) ?? true
-			if (!legit) {
-				setRuntime(id, {
-					attention: "unknown-outcome",
-					note: "The recorded finish transaction doesn't match this withdrawal - not marking it done. Your exited funds stay claimable on Ethereum.",
-				})
-				return
-			}
-			log("consume already submitted - waiting on it", { id, consumeTxHash: rec.consumeTxHash })
-			setStep(id, "confirming", "waiting for the Ethereum confirmation")
-			if (await deps.waitConsumeReceipt(rec.consumeTxHash)) {
-				completeWithdraw(rec, rec.consumeTxHash)
-				return
-			}
-			patchRecord(id, { consumeTxHash: undefined })
-			setRuntime(id, {
-				attention: "error",
-				note: "The prior finish transaction failed - finish again from this card. Nothing was lost.",
-			})
-			return
-		}
-
-		setStep(id, "confirming", "waiting for the proven epoch, then one Ethereum confirmation")
-		const { consumeTxHash } = await deps.consume(rec, (p) => {
-			const provenBlock = p.provenBlock ?? runtime.value[id]?.provenBlock
-			const targetBlock = p.targetBlock ?? runtime.value[id]?.targetBlock
-			setRuntime(id, {
-				...p,
-				proven: provenBlock !== undefined && targetBlock !== undefined ? provenBlock >= targetBlock : undefined,
-			})
+/** A rediscovered consumeTxHash waits (with the identity check) instead of re-prompting. */
+async function finishSubmittedConsume(rec: WithdrawJournalRecord, id: string): Promise<void> {
+	setStep(id, "verifying", "matching the finish transaction to this withdrawal")
+	const legit = (await deps.verifyConsumeIdentity?.(rec, rec.consumeTxHash as string)) ?? true
+	if (!legit) {
+		setRuntime(id, {
+			attention: "unknown-outcome",
+			note: "The recorded finish transaction doesn't match this withdrawal - not marking it done. Your exited funds stay claimable on Ethereum.",
 		})
-		patchRecord(id, { consumeTxHash })
-		setStep(id, "confirming", "waiting for the Ethereum confirmation")
-		if (await deps.waitConsumeReceipt(consumeTxHash)) {
-			completeWithdraw(records.value.find((r) => r.id === id) as WithdrawJournalRecord | undefined, consumeTxHash)
-		} else {
-			patchRecord(id, { consumeTxHash: undefined })
-			setRuntime(id, { attention: "error", note: "The finish transaction failed - finish again from this card. Nothing was lost." })
-		}
+		return
+	}
+	log("consume already submitted - waiting on it", { id, consumeTxHash: rec.consumeTxHash })
+	setStep(id, "confirming", "waiting for the Ethereum confirmation")
+	// Read-at-call-time (parity with the original direct call under the caller's dep gate).
+	if (await (deps.waitConsumeReceipt as NonNullable<typeof deps.waitConsumeReceipt>)(rec.consumeTxHash as string)) {
+		completeWithdraw(rec, rec.consumeTxHash as string)
+		return
+	}
+	patchRecord(id, { consumeTxHash: undefined })
+	setRuntime(id, {
+		attention: "error",
+		note: "The prior finish transaction failed - finish again from this card. Nothing was lost.",
 	})
+}
+
+/** The lock-held consume sequence: journal-first latch — a fresh consumeTxHash is PERSISTED
+ *  before its receipt wait; success completes from a FRESH reread; prior-hash and fresh-hash
+ *  receipt failures both clear the hash, each with its own copy. */
+async function runWithdrawConsumeLocked(id: string): Promise<void> {
+	const rec = records.value.find((r) => r.id === id && r.direction === "withdraw") as WithdrawJournalRecord | undefined
+	if (!rec || rec.completedAt) return
+	if (!guardDeployment(rec)) return
+	if (!deps.consume || !deps.waitConsumeReceipt) throw new Error("Journal deps not connected")
+
+	if (!rec.exitTxHash) {
+		setRuntime(id, {
+			attention: "unknown-outcome",
+			note: "The exit was started but its transaction was never recorded (tab closed mid-send). Check your wallet activity, then discard.",
+		})
+		return
+	}
+
+	if (rec.consumeTxHash) return finishSubmittedConsume(rec, id)
+
+	setStep(id, "confirming", "waiting for the proven epoch, then one Ethereum confirmation")
+	const { consumeTxHash } = await deps.consume(rec, (p) => {
+		const provenBlock = p.provenBlock ?? runtime.value[id]?.provenBlock
+		const targetBlock = p.targetBlock ?? runtime.value[id]?.targetBlock
+		setRuntime(id, {
+			...p,
+			proven: provenBlock !== undefined && targetBlock !== undefined ? provenBlock >= targetBlock : undefined,
+		})
+	})
+	patchRecord(id, { consumeTxHash })
+	setStep(id, "confirming", "waiting for the Ethereum confirmation")
+	if (await deps.waitConsumeReceipt(consumeTxHash)) {
+		completeWithdraw(records.value.find((r) => r.id === id) as WithdrawJournalRecord | undefined, consumeTxHash)
+	} else {
+		patchRecord(id, { consumeTxHash: undefined })
+		setRuntime(id, { attention: "error", note: "The finish transaction failed - finish again from this card. Nothing was lost." })
+	}
 }
 
 /** Whether (and how) a record participates in session resume. "skip" covers completed records,
