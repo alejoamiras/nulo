@@ -121,12 +121,6 @@ export interface RouterDepositParams {
 	mins: () => string
 }
 
-/**
- * The app's ONLY deposit path, end to end: one-time Permit2 max-approve when the token needs
- * it (MintableERC20 short-circuits; TestUsdc/real USDC start at zero), then the witness-bound
- * router bridge(). Returns the claim value (PRIVATE: the salt in = the value out; PUBLIC: the
- * flow's own random secret) + leaf index for the L2 claim.
- */
 /** One-time Permit2 max-approve when the token needs it (MintableERC20 short-circuits;
  *  TestUsdc/real USDC start at zero) — the app's exact allowance dance. */
 export async function ensureRouterPermit2(
@@ -156,6 +150,11 @@ export async function ensureRouterPermit2(
 	})
 }
 
+/**
+ * The app's ONLY deposit path, end to end: the Permit2 approve dance, then the witness-bound
+ * router bridge(). Returns the claim value (PRIVATE: the salt in = the value out; PUBLIC: the
+ * flow's own random secret) + leaf index for the L2 claim.
+ */
 export async function depositViaRouter(env: RouterDepositEnv, p: RouterDepositParams): Promise<{ claimValue: Fr; leafIndex: bigint }> {
 	const { pub, wallet, account } = env as { pub: never; wallet: never; account: { address: `0x${string}` } }
 	await ensureRouterPermit2(env, { usdc: p.usdc, usdcAbi: p.usdcAbi, permit2: p.core.permit2, needed: p.amount, mins: p.mins })

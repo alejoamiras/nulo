@@ -1,6 +1,7 @@
 /**
- * MAINNET (Alpha) bridge deploy conductor — Phase 8. Mirrors deploy-bridge-testnet.ts's journal-first
- * structure with the mainnet deltas; the testnet conductor stays untouched (battle-proven mid-arc).
+ * MAINNET (Alpha) bridge deploy conductor. Mirrors deploy-bridge-testnet.ts's journal-first
+ * structure; the two stay SEPARATE conductors on purpose — the network policies differ in kind
+ * (token model, fee bootstrap, broadcast staging), so they share mechanisms, never orchestration.
  *
  * Deltas vs testnet:
  *   - The token is NEVER deployed: Circle's canonical USDC proxy is identity-asserted and reused
@@ -120,7 +121,6 @@ async function nodeInfo(): Promise<NodeInfo> {
 	}
 }
 
-/** Per-run state every stage threads. */
 interface MainnetCtx {
 	account: { address: `0x${string}` }
 	wallet: ReturnType<typeof createL1Clients>["wallet"]
@@ -156,7 +156,7 @@ function resolveGeneration(): { recorded: GenerationState | null; salts: Mainnet
 	return { recorded, salts }
 }
 
-/** Circle USDC identity asserts — the reused canonical proxy must BE the expected token. */
+/** The reused canonical Circle proxy must BE the expected token — never a lookalike. */
 async function assertCircleUsdc(ctx: MainnetCtx): Promise<void> {
 	const usdcR = getContract({ address: CIRCLE_USDC, abi: ERC20_MIN_ABI as unknown as Abi, client: ctx.pub })
 	// biome-ignore lint/suspicious/noExplicitAny: viem read typing
@@ -167,7 +167,6 @@ async function assertCircleUsdc(ctx: MainnetCtx): Promise<void> {
 	appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "usdc", address: CIRCLE_USDC })
 }
 
-/** GROUP 2 (L1) part 1: land (or re-bind from the journal) the portal. */
 async function landPortal(ctx: MainnetCtx, portalArt: ReturnType<typeof loadForkedPortalArtifact>): Promise<`0x${string}`> {
 	if (ctx.recorded?.confirmed["portal"]) {
 		const portal = recordedAddr(ctx.recorded, "portal")
@@ -304,6 +303,9 @@ async function deployL2Contract(
 	} else if (ctx.recorded?.confirmed[p.step]) {
 		assertSame(instance.address.toString(), recordedAddr(ctx.recorded, p.step), `${p.label} recompute == recorded (resume)`)
 	} else {
+		// The L2 address is deterministic (salt + args + universal deploy), so journal it BEFORE
+		// the send — that is the durable recovery key (DeploySentTx exposes no pre-wait txHash
+		// accessor; `.send({ wait })` is the proven inclusion path).
 		appendJournal(JOURNAL_PATH, { phase: "submitted", step: p.step, address: instance.address.toString() })
 		await Contract.deploy(ewallet as never, p.art as never, p.args as never, p.ctor, {
 			salt: new Fr(p.saltNum),
@@ -403,7 +405,7 @@ async function runReadbacks(
 	await assertRouterWitnessShape(ctx.pub, FUEL_ROUTER, FUEL_SWAP, "router witness shape lacks swapTarget; STOP")
 }
 
-/** Candidate manifest (never the live file) + optional Etherscan verification. */
+/** Writes ONLY the candidate — promotion to the live manifest is a separate deliberate step. */
 function writeCandidate(d: {
 	info: NodeInfo
 	portal: `0x${string}`

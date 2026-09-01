@@ -123,7 +123,7 @@ async function registerLiveContracts(ewallet: unknown, mins: () => string) {
 	const feeJuice = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, ewallet as never)
 
 	// Register the PrivateFPC locally (instance + class). It has no public functions / no init, so 5.0
-	// needs NO on-chain deploy (codex 019ee697); the private-kernel oracle DOES need both the instance +
+	// needs NO on-chain deploy; the private-kernel oracle DOES need both the instance +
 	// class preimages, so registerContract (not just the class). The canonical salt reproduces the pinned
 	// PRIVATE_FPC_ADDRESS from the 5.0.0 artifact.
 	// The artifact package was RENAMED @alejoamiras/aztec-fee-payment → private-fee-juice
@@ -457,7 +457,7 @@ const rndNonce = () => BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
 async function main() {
 	const mins = stopwatch()
 
-	// FUND-MOVING PREFLIGHT (codex ultra-audit HIGH): this canary deposits Fee Juice
+	// FUND-MOVING PREFLIGHT: this canary deposits Fee Juice
 	// and pays fees THROUGH the PrivateFPC at PRIVATE_FPC_ADDRESS — an unrecoverable
 	// loss if that address isn't the deployed, class-correct, version-compatible
 	// contract. The gate runs INLINE here (not as a separate operator command) so it

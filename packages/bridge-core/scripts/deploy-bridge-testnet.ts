@@ -8,7 +8,7 @@
  * manifest (`testnet-bridge.candidate.json`) - never the live `testnet-bridge.json`. Promotion of the
  * candidate to live is the deliberate cutover step (after smoke).
  *
- * Durability (per codex 019ecbee): a write-ahead journal records every step submitted (txHash, before
+ * Durability: a write-ahead journal records every step submitted (txHash, before
  * the receipt) then confirmed (address). A one-shot cutover must not start fresh salts over a partial
  * landing, so if a journal already exists this refuses to run unless `--from-journal` is passed:
  *   - clean start (no journal): full deploy + journal + candidate.
@@ -100,8 +100,8 @@ async function nodeL1Addresses(): Promise<Record<string, `0x${string}`>> {
 }
 
 /**
- * The chain identity the manifest must self-declare (the startup build-integrity assertion needs it,
- * codex post-impl HIGH-3). Read from the node — NOT hardcoded — so a network reset can't ship a stale
+ * The chain identity the manifest must self-declare (the startup build-integrity assertion needs
+ * it). Read from the node — NOT hardcoded — so a network reset can't ship a stale
  * pin (the chain-constants incident). `walletChainId = (l1ChainId ^ rollupVersion) >>> 0`.
  */
 async function nodeChainIdentity(): Promise<{ l1ChainId: number; walletChainId: number }> {
@@ -173,7 +173,7 @@ async function resolveL1Token(ctx: DeployCtx): Promise<`0x${string}`> {
 		)
 	}
 	// --from-journal resume: the flag must agree with the journal's recorded usdc —
-	// journaling the flag value unchecked would poison later resumes (codex audit).
+	// journaling the flag value unchecked would poison later resumes.
 	if (fromJournalMode) {
 		const recordedUsdc = ctx.recorded?.confirmed["usdc"]
 		if (recordedUsdc && recordedUsdc.toLowerCase() !== reuseTokenAddress.toLowerCase()) {
@@ -294,7 +294,7 @@ async function wirePortal(
 	console.log(`portal initialized (${ctx.mins()})`)
 }
 
-/** Expanded on-chain read-backs (codex 019ecbee #6): abort on any L1 mismatch. L2 read-backs
+/** Expanded on-chain read-backs: abort on any L1 mismatch. L2 read-backs
  *  are BEST-EFFORT (log, never abort): aztec.js view-simulate returns `{ result }` and the
  *  decoded shape varies (AztecAddress / Fr / bigint), so a decode quirk must not false-abort a
  *  correct deploy. The deposit->claim smoke is the definitive L2 gate - it mints via the proxy
@@ -367,7 +367,7 @@ async function buildFuelCarry(
 	// land INSIDE `core` (they used to be flat).
 	// A token cutover DROPS the swap stack: the Uniswap pools are keyed by the token address, so the
 	// prior token's pools cannot serve the new token — carrying them would emit a manifest whose
-	// quoting path points at nonexistent liquidity (codex bug-bash r2 HIGH). The cutover shape is
+	// quoting path points at nonexistent liquidity. The cutover shape is
 	// bridge-only + direct fuel: core carried (refreshed), swap gone — exactly the mainnet shape.
 	if (allowTokenCutover && priorFuel?.swap) {
 		console.log("⚠ token cutover: DROPPING the prior swap stack (pools are token-keyed) — promote with --drop-swap")
@@ -382,7 +382,7 @@ async function buildFuelCarry(
 					// the operator deployed a replacement and says so via SWAP_TARGET_CONTRACT.
 					...(allowTokenCutover ? { swapTargetContract: process.env.SWAP_TARGET_CONTRACT ?? "UniswapFuelSwap" } : {}),
 					// The FeeJuicePortal is ROLLUP-COUPLED — refresh it from the node so a carried fuel
-					// block never re-promotes the previous rollup's (dead) portal (codex post-impl MED).
+					// block never re-promotes the previous rollup's (dead) portal.
 					feeJuicePortal: l1a.feeJuicePortalAddress.toLowerCase(),
 					...(process.env.FUEL_ROUTER ? { router: process.env.FUEL_ROUTER.toLowerCase() } : {}),
 					...(process.env.FUEL_SWAP ? { swapTarget: process.env.FUEL_SWAP.toLowerCase() } : {}),
@@ -483,7 +483,7 @@ async function main() {
 
 	// ─── L1 (Sepolia) ────────────────────────────────────────────────
 	const account = PRIVATE_KEY ? privateKeyToAccount(PRIVATE_KEY) : mnemonicToAccount(MNEMONIC as string)
-	// Signer pin (codex ultra-audit HIGH): the broadcast script itself asserts the
+	// Signer pin: the broadcast script itself asserts the
 	// deployer == the plan-pinned signer, so sourcing a WRONG key/mnemonic before this
 	// script can't spend from an unexpected account (verify runs in a separate shell).
 	if (account.address.toLowerCase() !== PLAN_PINNED_L1_SIGNER.toLowerCase()) {

@@ -58,8 +58,9 @@ interface SmokeDeps {
 /**
  * Prove the CIRCUIT binding LIVE: deposit A + a sync SENTINEL B (both to R). Once B claims, the
  * network has synced past both, so a wrong-recipient claim on the earlier A reverts for the BINDING
- * reason, not because A isn't synced yet. The authoritative gate is that the CORRECT claim of A still
- * succeeds afterwards — if the wrong claim had redirected/consumed A, that correct claim would fail.
+ * reason, not because A isn't synced yet. The evidence is three-fold: B's correct claim lands (sync
+ * + private claims work), the wrong-recipient claim on synced A reverts, and B's balance arrives —
+ * A itself is deliberately never re-claimed here (see the in-body PXE-wedge note).
  */
 async function runRedirectProofLane(d: SmokeDeps): Promise<void> {
 	const depositPrivate = async (salt: Fr): Promise<bigint> => {
@@ -125,7 +126,7 @@ async function main() {
 	const portal = CONFIG.l1.portal as `0x${string}`
 	const usdcAbi = evmAbi((CONFIG.l1.token?.sourceContract as string | undefined) ?? "MintableERC20")
 	// The app's ONLY deposit path is the router's witness-bound Permit2 bridge() — the smoke must
-	// prove THAT path (approve fallback included), not the portal-direct legacy (codex bug-bash r1).
+	// prove THAT path (approve fallback included), not the portal-direct legacy.
 	const core = CONFIG.l1.fuel?.core as { router?: `0x${string}`; permit2?: `0x${string}`; swapTarget?: `0x${string}` } | undefined
 	if (!core?.router || !core?.permit2 || !core?.swapTarget) {
 		throw new Error("candidate manifest has no l1.fuel.core router/permit2/swapTarget — the app deposit path needs them (C7)")

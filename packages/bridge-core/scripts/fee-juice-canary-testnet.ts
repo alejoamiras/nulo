@@ -126,7 +126,7 @@ async function depositDirectFj(d: CanaryL1, plan: Awaited<ReturnType<typeof plan
 }
 
 /**
- * The faucet's PUBLIC claim lane — SELF-PAY (fuelClaim.ts, owner call 2026-07-21): claim the bridged
+ * The faucet's PUBLIC claim lane — SELF-PAY (fuelClaim.ts): claim the bridged
  * FJ and pay THIS tx's fee FROM it in one carrier-less zero-app-call tx (BatchCall([]) +
  * FeeJuicePaymentMethodWithClaim → claim_and_end_setup in the SETUP phase). No Sponsored FPC — the
  * mainnet shape. Setup is the CORRECT home for claim_and_end_setup: the 5.0.0 "149 failed simulates"
@@ -207,7 +207,7 @@ async function main() {
 	const { fee: sponsoredFee } = await sponsoredFpcFee(ewallet)
 	// --fresh-selfpay: SKIP the sponsored account deploy so the self-pay claim is the account's FIRST
 	// tx and carries initialization (ctor + instance publication) - the mainnet persona (no sponsor
-	// exists there). Measures the gas shape the steady-state calibration excludes (fable audit H1).
+	// exists there). Measures the gas shape the steady-state calibration excludes.
 	if (process.argv.includes("--fresh-selfpay")) {
 		console.log("FRESH-SELFPAY mode: skipping the sponsored account deploy - the claim must carry init")
 	} else {
