@@ -69,7 +69,8 @@ that creates a cancellable/registered resource owns the create→register span.
   info enqueues ONLY the matching (account, token) rows via `queue.enqueue` and never
   calls `refreshAccountBalances`; UI-origin without transfer info → ONE broad refresh and
   the early return (no double refresh); non-UI origin → broad refresh; a UI tx whose
-  transfers name unknown contracts falls through to broad. Then sync
+  transfers name only UNKNOWN contracts enters the narrowed arm, finds zero token ids
+  and refreshes NOTHING (codex correction — pinned as-is, not a fall-through). Then sync
   `collectTransferParties(calls)` + `tokenIdsForContracts(contracts)`, and awaited
   `enqueueNarrowedBalances(addresses, tokenIds)` under the existing
   `addresses.size > 0 && contracts.size > 0` guard (its first op is the `repo.getAll`
@@ -100,14 +101,17 @@ that creates a cancellable/registered resource owns the create→register span.
   becoming `() => this.method(...)` (nesting 0 for every branch). Then per arm, awaited
   helpers whose spans already await and which keep their fences INSIDE:
   `backfillBlockTimestamp` (blockTimestampFor → epoch re-check → upsert);
-  `resolveTrustTransition` (getTrust → epoch re-check → setTrust+emit as one sync pair →
-  visibility-gated Pending emit) shared by the note and public arms;
+  per-arm trust helpers — `resolveNoteTrust` (getTrust → setTrust+emit as one sync pair
+  → visibility-gated Pending emit) and `resolvePublicTrust` (the same with the public
+  arm's epoch re-check after `getTrust`) — NOT shared (codex: sharing would either weaken
+  the public fence or change note behavior);
   `commitDiscoveredRecord` (blockTimestampFor → epoch re-check → `markBalanceDirty` →
   [public arm: epoch re-check] → `upsertRecord` → visibility+epoch-gated Added emit —
   the D4 `markBalanceDirty → upsertRecord` adjacency never gains a hop);
   `resolveAnchoredOutboxRow` (sync `readTaskState` + ticket `isCurrent()` re-evaluated
   immediately before each write); `anchorFreshTask` (outbox re-read → `dirtyAt`
-  staleness compare → `isCurrent()` → `setOutbox`, one atomic helper). The
+  staleness compare → `isCurrent()` → `setOutbox`, one atomic helper). Both receive the
+  `isCurrent` CLOSURE, never a cached boolean (codex). The
   transient-throw catch around `requestBalanceRefresh` stays in the drain method.
   NON-mechanical: five distinct post-await epoch re-checks in the public arm — each
   stays in the continuation of its own await.
@@ -128,8 +132,13 @@ that creates a cancellable/registered resource owns the create→register span.
 
 ## Equivalence
 
-BL/C. New pins FIRST for `onTransactionUpdated` (committed before any refactor, byte-
-identical after). Existing suites zero-edit green per PR (named above). Gates per
+BL/C. New pins FIRST (committed before any refactor, byte-identical after):
+`onTransactionUpdated` (6, committed); plus the codex seam pins — PR-a: same-turn
+duplicate `ensure()` calls issue ONE registered balance flight; queue
+write-before-complete-before-emit order; PR-b: D4 outbox-write-before-record-write in
+both incoming arms; trust `setTrust`-before-emit and journal `storage.set`-before-emit;
+an anchored terminal outbox row displaced while `getOutbox` awaits proves fresh
+`isCurrent()` evaluation. Existing suites zero-edit green per PR (named above). Gates per
 scope.md § 4, BOTH PRs, single sequential run: account-balance-orphans ·
 balance-row-reconciliation · incoming-transfers · receive-unregistered ·
 default-token-seeding · account-switch-isolation — plus audit:vue + test:ci-gating.
@@ -140,7 +149,8 @@ default-token-seeding · account-switch-isolation — plus audit:vue + test:ci-g
   green pre+post; store/queue/projector/reconcile suites + fuzz zero-edit.
 - PR-b: 6 directives, 93 → 87, zero inserted; scenarios/seeder/journal/reaper suites
   zero-edit.
-- Codex loop: one session — plan audit → PR-a impl review → PR-b impl review → approve.
+- Codex loop: one session — plan audit (conditional approve, conditions folded above) →
+  PR-a impl review → PR-b impl review → approve.
 
 ## Rollback
 
