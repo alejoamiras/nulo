@@ -45,7 +45,7 @@ export const TESTIDS = {
 	// Journal-card account attribution (deposit cards only — withdraws never persist their Aztec sender)
 	journalAccount: "tl-journal-account",
 	journalSwitchAccount: "tl-journal-switch-account",
-	// (menu Disconnect keeps the pre-switcher panel ids: fa-btn-disconnect / fa-bridge-l2-disconnect)
+	// (menu Disconnect keeps the pre-switcher panel ids: tl-btn-disconnect / tl-bridge-l2-disconnect)
 	accountMenuTruncation: "tl-account-menu-truncation",
 
 	// Verification modal - 3×3 emoji grid + match/cancel

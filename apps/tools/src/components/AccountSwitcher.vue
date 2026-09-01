@@ -24,7 +24,7 @@ import { TESTIDS } from "@/lib/testids"
  */
 
 const props = defineProps<{
-	/** Panel-specific testid for the chip's address text (fa-account / fa-bridge-l2-account). */
+	/** Panel-specific testid for the chip's address text (tl-account / tl-bridge-l2-account). */
 	addressTestid: string
 	/** Panel-specific testid for the menu's Disconnect action (keeps the pre-switcher ids alive). */
 	disconnectTestid: string
