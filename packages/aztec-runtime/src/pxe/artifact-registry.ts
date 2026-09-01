@@ -156,7 +156,6 @@ export class ArtifactRegistry {
 	 *
 	 *  Cache: `verifiedClassIds: Set<string>` skips repeat recomputes
 	 *  for the same `(classId, artifact)` pair. Cleared by `clear()`. */
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 17) — refactor when touched, never raise
 	public async resolve(
 		classId: Fr,
 		pxeLookup: (id: Fr) => Promise<ContractArtifact | undefined>,
@@ -169,27 +168,30 @@ export class ArtifactRegistry {
 
 		for (const source of order) {
 			if (pxeOnly && source !== "pxe-local") continue
-			switch (source) {
-				case "pxe-local": {
-					const found = await pxeLookup(classId)
-					if (found) {
-						const verified = await this.verifyAndCache(classId, found)
-						if (verified) return verified
-					}
-					break
-				}
-				case "known": {
-					await this.ensureKnown()
-					const found = this.known?.artifacts.get(classId.toString())
-					// "known" branch is keyed by load-time-computed class-id;
-					// `Map.get(classId.toString())` is itself the class-id
-					// equality check. Skip recompute.
-					if (found) return found
-					break
-				}
-			}
+			const found = await this.resolveFromSource(source, classId, pxeLookup)
+			if (found) return found
 		}
 		return undefined
+	}
+
+	private async resolveFromSource(
+		source: "pxe-local" | "known",
+		classId: Fr,
+		pxeLookup: (id: Fr) => Promise<ContractArtifact | undefined>,
+	): Promise<ContractArtifact | undefined> {
+		switch (source) {
+			case "pxe-local": {
+				const found = await pxeLookup(classId)
+				return found ? await this.verifyAndCache(classId, found) : undefined
+			}
+			case "known": {
+				await this.ensureKnown()
+				// "known" branch is keyed by load-time-computed class-id;
+				// `Map.get(classId.toString())` is itself the class-id
+				// equality check. Skip recompute.
+				return this.known?.artifacts.get(classId.toString())
+			}
+		}
 	}
 
 	/**

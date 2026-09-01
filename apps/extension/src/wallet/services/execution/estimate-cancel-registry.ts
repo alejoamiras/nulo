@@ -97,6 +97,16 @@ export class EstimateCancelRegistry {
 		return n
 	}
 
+	/** A token may be admitted once, ever — active, settled, and parked all collide. */
+	private assertFreshToken(token: string): void {
+		if (this.active.has(token) || this.settled.has(token)) {
+			throw new Error("duplicate estimate token")
+		}
+		for (const parked of this.pending.values()) {
+			if (parked.token === token) throw new Error("duplicate estimate token")
+		}
+	}
+
 	/** Test/introspection surface: unsettled underlying jobs for a profile. */
 	public unsettledCount(profileId: string): number {
 		return this.activeCount(profileId)
@@ -108,15 +118,9 @@ export class EstimateCancelRegistry {
 	 * when parked. Throws on duplicate tokens; a parked entry superseded by a
 	 * newer same-slot arrival rejects with `JobCancelledSentinel`.
 	 */
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 	public admit(token: string, profileId: string, flowKey: string): Promise<AbortSignal> {
 		this.sweep()
-		if (this.active.has(token) || this.settled.has(token)) {
-			throw new Error("duplicate estimate token")
-		}
-		for (const parked of this.pending.values()) {
-			if (parked.token === token) throw new Error("duplicate estimate token")
-		}
+		this.assertFreshToken(token)
 
 		if (this.activeCount(profileId) < MAX_ACTIVE_ESTIMATES_PER_PROFILE) {
 			return Promise.resolve(this.activate(token, profileId, flowKey))

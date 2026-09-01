@@ -236,7 +236,6 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		const fence = await this.profileService.captureExecutionFence()
 		const deletion = this.profileService.getDeletionState()
 		const profile = { id: fence.profileId }
-		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
 		return await this.lock.withLock(async () => {
 			const existing = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
 			if (existing.length) return existing
@@ -245,21 +244,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			let activeId: string | undefined
 			for (const seed of DEFAULT_SEEDS) {
 				try {
-					const network = await this._buildNetwork(
-						profile.id,
-						seed.name,
-						seed.rpcUrl,
-						seed.chainId,
-						seed.l1ChainId,
-						seed.kind,
-						seed.endpointLabel,
-					)
-					deletion.assertCurrent(fence.profileId, fence.epoch)
-					await this.storage.set(network.id, network)
-					if (!deletion.isCurrent(fence.profileId, fence.epoch)) {
-						await this.storage.delete(network.id)
-						throw new Error(`profile ${fence.profileId} deleted`)
-					}
+					const network = await this.seedOneNetworkLocked(profile.id, seed, fence, deletion)
 					seeded.push(network)
 					if (seed.isPrimaryActive) activeId = network.id
 				} catch (error) {
@@ -270,16 +255,54 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			// swallows the deletion compensate's throw — without this re-assert the
 			// call would return [] as a SUCCESS for a deleted profile.
 			deletion.assertCurrent(fence.profileId, fence.epoch)
-			if (!activeId && seeded.length) activeId = seeded[0]!.id
-			if (activeId) {
-				deletion.assertCurrent(fence.profileId, fence.epoch)
-				await this._writeActive(profile.id, activeId)
-				const active = seeded.find((n) => n.id === activeId)!
-				const primaryEndpoint = active.endpoints.find((e) => e.id === active.primaryEndpointId)!
-				this.nodes.set(active.chainId, this.nodeFactory.createNode(primaryEndpoint.rpcUrl))
-			}
+			await this.activateSeededLocked(profile.id, seeded, activeId, fence, deletion)
 			return seeded
 		})
+	}
+
+	/** Build + persist one default seed, deletion-fenced on both sides of the write:
+	 *  a profile deleted mid-seed gets its just-written row compensated away. Caller
+	 *  holds the network lock. */
+	private async seedOneNetworkLocked(
+		profileId: string,
+		seed: (typeof DEFAULT_SEEDS)[number],
+		fence: { profileId: string; epoch: number },
+		deletion: ReturnType<ProfileService["getDeletionState"]>,
+	): Promise<Network> {
+		const network = await this._buildNetwork(
+			profileId,
+			seed.name,
+			seed.rpcUrl,
+			seed.chainId,
+			seed.l1ChainId,
+			seed.kind,
+			seed.endpointLabel,
+		)
+		deletion.assertCurrent(fence.profileId, fence.epoch)
+		await this.storage.set(network.id, network)
+		if (!deletion.isCurrent(fence.profileId, fence.epoch)) {
+			await this.storage.delete(network.id)
+			throw new Error(`profile ${fence.profileId} deleted`)
+		}
+		return network
+	}
+
+	/** Point the active-network pointer at the primary seed (or the first seeded) and
+	 *  warm its node. Caller holds the network lock. */
+	private async activateSeededLocked(
+		profileId: string,
+		seeded: Network[],
+		primaryActiveId: string | undefined,
+		fence: { profileId: string; epoch: number },
+		deletion: ReturnType<ProfileService["getDeletionState"]>,
+	): Promise<void> {
+		const activeId = primaryActiveId ?? (seeded.length ? seeded[0]!.id : undefined)
+		if (!activeId) return
+		deletion.assertCurrent(fence.profileId, fence.epoch)
+		await this._writeActive(profileId, activeId)
+		const active = seeded.find((n) => n.id === activeId)!
+		const primaryEndpoint = active.endpoints.find((e) => e.id === active.primaryEndpointId)!
+		this.nodes.set(active.chainId, this.nodeFactory.createNode(primaryEndpoint.rpcUrl))
 	}
 
 	public async getNetworks(chainId?: number): Promise<Network[]> {

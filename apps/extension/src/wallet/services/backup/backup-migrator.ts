@@ -73,7 +73,13 @@ export function maxBackupSchemaVersion(
  *  build would reject as from-the-future. */
 export const CURRENT_BACKUP_SCHEMA_VERSION = maxBackupSchemaVersion(realMigrations)
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
+/** Flatten a non-success engine result to its reason (the engine's failure kinds each
+ *  carry one; anything else is a shape we don't recognize). */
+function engineFailureReason(result: { kind: string; reason?: string }): string {
+	if (result.kind === "failed" || result.kind === "needs-recovery") return result.reason ?? result.kind
+	return `unexpected engine result "${result.kind}"`
+}
+
 export async function migrateBackupData(opts: MigrateBackupOptions): Promise<BackupMigrationResult> {
 	const migrations = opts.migrations ?? backupMigrations
 	const baselineVersion = opts.baselineVersion ?? BACKUP_SCHEMA_BASELINE
@@ -100,13 +106,7 @@ export async function migrateBackupData(opts: MigrateBackupOptions): Promise<Bac
 
 	const result = await new Migrator({ store: scratch, migrations, baselineVersion }).run()
 	if (result.kind !== "noop" && result.kind !== "migrated") {
-		const reason =
-			result.kind === "failed"
-				? result.reason
-				: result.kind === "needs-recovery"
-					? result.reason
-					: `unexpected engine result "${result.kind}"`
-		return { kind: "failed", reason: `backup migration failed: ${reason}` }
+		return { kind: "failed", reason: `backup migration failed: ${engineFailureReason(result)}` }
 	}
 
 	const denormalized = denormalizeBackupData(await scratch.get(), { passThrough, present })

@@ -78,7 +78,6 @@ export interface DriftFinding {
  * cost of false negatives is high. If the scope ever broadens to
  * lots of files, swap in a proper AST walk.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 export function scanRpIdLiteralDrift(
 	file: string,
 	content: string,
@@ -86,49 +85,26 @@ export function scanRpIdLiteralDrift(
 	options: { excludeDefinition?: boolean } = {},
 ): DriftFinding[] {
 	const findings: DriftFinding[] = []
-	const literalDouble = `"${rpIdValue}"`
-	const literalSingle = `'${rpIdValue}'`
-	const literalBacktick = `\`${rpIdValue}\``
+	const literals = [`"${rpIdValue}"`, `'${rpIdValue}'`, `\`${rpIdValue}\``]
 
 	const lines = content.split("\n")
 	let inBlockComment = false
 
 	for (let i = 0; i < lines.length; i++) {
-		const lineNo = i + 1
 		const raw = lines[i]
-		let line = raw
-
-		// Best-effort block-comment tracking. Doesn't handle pathological
-		// cases like nested `/* /* */` strings inside comments, but the
-		// passkey-touching files we scan don't have those.
-		if (inBlockComment) {
-			const close = line.indexOf("*/")
-			if (close === -1) continue
-			line = line.slice(close + 2)
-			inBlockComment = false
-		}
-		const open = line.indexOf("/*")
-		if (open !== -1 && line.indexOf("*/", open) === -1) {
-			line = line.slice(0, open)
-			inBlockComment = true
-		}
-
-		// Strip trailing line comments.
-		const lineCommentIdx = stripLineComment(line)
-		if (lineCommentIdx !== -1) {
-			line = line.slice(0, lineCommentIdx)
-		}
+		const step = stripCommentsForScan(raw, inBlockComment)
+		inBlockComment = step.inBlockComment
+		if (step.skip) continue
 
 		// Skip the RP_ID definition line (caller opted in).
-		if (options.excludeDefinition && /\bRP_ID\s*=\s*["'`]/.test(line)) {
+		if (options.excludeDefinition && /\bRP_ID\s*=\s*["'`]/.test(step.line)) {
 			continue
 		}
 
-		const found = findLiteral(line, [literalDouble, literalSingle, literalBacktick])
-		if (found) {
+		if (findLiteral(step.line, literals)) {
 			findings.push({
 				file,
-				line: lineNo,
+				line: i + 1,
 				literal: rpIdValue,
 				context: raw.trim(),
 			})
@@ -136,6 +112,32 @@ export function scanRpIdLiteralDrift(
 	}
 
 	return findings
+}
+
+/** One comment-stripping step of the scan. Best-effort block-comment tracking: doesn't
+ *  handle pathological cases like nested `/* /*` strings inside comments, but the
+ *  passkey-touching files we scan don't have those. `skip` = the whole line is inside a
+ *  block comment. */
+function stripCommentsForScan(raw: string, inBlockComment: boolean): { line: string; inBlockComment: boolean; skip: boolean } {
+	let line = raw
+	let inside = inBlockComment
+	if (inside) {
+		const close = line.indexOf("*/")
+		if (close === -1) return { line: "", inBlockComment: true, skip: true }
+		line = line.slice(close + 2)
+		inside = false
+	}
+	const open = line.indexOf("/*")
+	if (open !== -1 && line.indexOf("*/", open) === -1) {
+		line = line.slice(0, open)
+		inside = true
+	}
+	// Strip trailing line comments.
+	const lineCommentIdx = stripLineComment(line)
+	if (lineCommentIdx !== -1) {
+		line = line.slice(0, lineCommentIdx)
+	}
+	return { line, inBlockComment: inside, skip: false }
 }
 
 /** Returns the index of `//` comment start, or -1 if no line comment.

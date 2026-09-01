@@ -36,7 +36,16 @@ function assertNotReverted<R>(receipt: R, hash: `0x${string}`): R {
 	return receipt
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
+/** One direct receipt probe after a failed wait round — the tx may have mined while the
+ *  wait timed out. `undefined` = genuinely not mined yet (or the RPC is still flaky). */
+async function probeMinedReceipt<R>(client: L1ReceiptClient<R>, hash: `0x${string}`): Promise<R | undefined> {
+	try {
+		return await client.getTransactionReceipt({ hash })
+	} catch {
+		return undefined
+	}
+}
+
 export async function awaitL1Receipt<R>(client: L1ReceiptClient<R>, hash: `0x${string}`, opts: AwaitL1ReceiptOptions = {}): Promise<R> {
 	const attempts = opts.attempts ?? 8
 	const attemptTimeoutMs = opts.attemptTimeoutMs ?? 90_000
@@ -48,12 +57,7 @@ export async function awaitL1Receipt<R>(client: L1ReceiptClient<R>, hash: `0x${s
 		} catch (e) {
 			if (e instanceof Error && /reverted on-chain/.test(e.message)) throw e
 			lastError = e
-			let mined: R | undefined
-			try {
-				mined = await client.getTransactionReceipt({ hash })
-			} catch {
-				// Genuinely not mined yet (or the RPC is still flaky) — next round.
-			}
+			const mined = await probeMinedReceipt(client, hash)
 			if (mined !== undefined) return assertNotReverted(mined, hash)
 			opts.onStillWaiting?.(attempt)
 			await wait(2_000)

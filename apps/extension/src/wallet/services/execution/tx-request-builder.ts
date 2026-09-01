@@ -404,8 +404,68 @@ export class TxRequestBuilder {
 	 *  wrapper, inlined `DefaultEntrypoint` logic. Cannot import
 	 *  `@aztec/entrypoints/default` in the service worker (upstream
 	 *  references `window`). */
-	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (85 lines) — split when touched, never grow
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 20) — refactor when touched, never raise
+	/**
+	 * Parse + validate the single NO_FROM call: bind the dApp-supplied name to the
+	 * selector's real ABI function, and derive the function type from the ABI — never
+	 * trust call.name/type. The NO_FROM path resolved no artifact, so a dApp could name
+	 * a benign function while running a different selector.
+	 */
+	private async resolveNoFromCall(
+		op: AztecSendTxOperation,
+		instances: Awaited<ReturnType<TxRequestBuilder["resolver"]["resolveInstances"]>>,
+		artifacts: Awaited<ReturnType<TxRequestBuilder["resolver"]["resolveArtifacts"]>>,
+	): Promise<FunctionCall> {
+		const rawCalls = op.exec.calls ?? []
+		if (rawCalls.length !== 1) {
+			throw new Error(`DefaultEntrypoint requires exactly 1 call, got ${rawCalls.length}`)
+		}
+		const call = await FunctionCall.schema.parseAsync(rawCalls[0])
+		const noFromInstance = instances.get(call.to.toString())
+		if (!noFromInstance) {
+			throw new Error("Contract not found")
+		}
+		const noFromArtifact = artifacts.get(noFromInstance.currentContractClassId.toString())
+		if (!noFromArtifact) {
+			throw new Error("Contract artifact not found")
+		}
+		const noFromFn = await findFunctionBySelector(noFromArtifact, call.selector.toString())
+		if (!noFromFn) {
+			throw new Error("Method not found")
+		}
+		if (call.name !== undefined && call.name !== noFromFn.name) {
+			throw new Error(
+				`Scope violation: call name "${call.name}" does not match selector's function "${noFromFn.name}" on ${call.to.toString()}`,
+			)
+		}
+		if (noFromFn.functionType !== FunctionType.PRIVATE) {
+			throw new Error("DefaultEntrypoint only supports private functions")
+		}
+		return call
+	}
+
+	/** Parse authwits/capsules/extra args from both exec and opts (same merge as
+	 *  processAztecJsPayload) through the Zod schemas — the RPC bridge serializes to
+	 *  plain objects. */
+	private async parseNoFromExtras(op: AztecSendTxOperation): Promise<{
+		parsedAuthWits: AuthWitness[]
+		parsedCapsules: Capsule[]
+		parsedExtraArgs: HashedValues[]
+	}> {
+		const parsedAuthWits: AuthWitness[] = []
+		for (const raw of (op.exec.authWitnesses ?? []).concat(op.opts.authWitnesses ?? [])) {
+			parsedAuthWits.push(await AuthWitness.schema.parseAsync(raw))
+		}
+		const parsedCapsules: Capsule[] = []
+		for (const raw of (op.exec.capsules ?? []).concat(op.opts.capsules ?? [])) {
+			parsedCapsules.push(await Capsule.schema.parseAsync(raw))
+		}
+		const parsedExtraArgs: HashedValues[] = []
+		for (const raw of op.exec.extraHashedArgs ?? []) {
+			parsedExtraArgs.push(await HashedValues.schema.parseAsync(raw))
+		}
+		return { parsedAuthWits, parsedCapsules, parsedExtraArgs }
+	}
+
 	public async buildNoFrom(op: AztecSendTxOperation, parentTask?: WrappedTask): Promise<BuiltNoFromTx> {
 		const step = new StepContent("Processing transaction")
 		const task = parentTask ? parentTask.startSubtask(step) : this.taskService.startNewTask(step)
@@ -440,50 +500,8 @@ export class TxRequestBuilder {
 
 			// Inline DefaultEntrypoint logic — calls the function directly, msg_sender = None.
 			// Cannot import @aztec/entrypoints/default in service worker (references `window`).
-			// Must parse raw JSON fields through Zod schemas (RPC bridge serializes to plain objects).
-			const rawCalls = op.exec.calls ?? []
-			if (rawCalls.length !== 1) {
-				throw new Error(`DefaultEntrypoint requires exactly 1 call, got ${rawCalls.length}`)
-			}
-			const call = await FunctionCall.schema.parseAsync(rawCalls[0])
-			// Bind the dApp-supplied name to the selector's real ABI function, and derive
-			// the function type from the ABI — never trust call.name/type. The NO_FROM path
-			// resolved no artifact, so a dApp could name a benign function while running a
-			// different selector.
-			const noFromInstance = instances.get(call.to.toString())
-			if (!noFromInstance) {
-				throw new Error("Contract not found")
-			}
-			const noFromArtifact = artifacts.get(noFromInstance.currentContractClassId.toString())
-			if (!noFromArtifact) {
-				throw new Error("Contract artifact not found")
-			}
-			const noFromFn = await findFunctionBySelector(noFromArtifact, call.selector.toString())
-			if (!noFromFn) {
-				throw new Error("Method not found")
-			}
-			if (call.name !== undefined && call.name !== noFromFn.name) {
-				throw new Error(
-					`Scope violation: call name "${call.name}" does not match selector's function "${noFromFn.name}" on ${call.to.toString()}`,
-				)
-			}
-			if (noFromFn.functionType !== FunctionType.PRIVATE) {
-				throw new Error("DefaultEntrypoint only supports private functions")
-			}
-
-			// Parse authwits from both exec and opts (same as processAztecJsPayload)
-			const parsedAuthWits: AuthWitness[] = []
-			for (const raw of (op.exec.authWitnesses ?? []).concat(op.opts.authWitnesses ?? [])) {
-				parsedAuthWits.push(await AuthWitness.schema.parseAsync(raw))
-			}
-			const parsedCapsules: Capsule[] = []
-			for (const raw of (op.exec.capsules ?? []).concat(op.opts.capsules ?? [])) {
-				parsedCapsules.push(await Capsule.schema.parseAsync(raw))
-			}
-			const parsedExtraArgs: HashedValues[] = []
-			for (const raw of op.exec.extraHashedArgs ?? []) {
-				parsedExtraArgs.push(await HashedValues.schema.parseAsync(raw))
-			}
+			const call = await this.resolveNoFromCall(op, instances, artifacts)
+			const { parsedAuthWits, parsedCapsules, parsedExtraArgs } = await this.parseNoFromExtras(op)
 
 			const hashedArguments = [await HashedValues.fromArgs(call.args)]
 			const nodeInfo = await node.getNodeInfo()

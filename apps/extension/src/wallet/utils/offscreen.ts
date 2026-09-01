@@ -227,49 +227,53 @@ async function closeOffscreen() {
  *   taskbar/dock as a Nulo entry; the `chrome.runtime` message channel
  *   works identically to Chromium's offscreen.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
 async function createOffscreen(passId: number) {
-	if (hasOffscreenApi()) {
-		const create = () =>
-			chrome.offscreen.createDocument({
-				url: path,
-				reasons: ["WORKERS"],
-				justification: "Offscreen document is used for running PXE in it",
-			})
-		try {
+	if (hasOffscreenApi()) return createOffscreenChromium(passId)
+	return createOffscreenFirefox(passId)
+}
+
+async function createOffscreenChromium(passId: number) {
+	const create = () =>
+		chrome.offscreen.createDocument({
+			url: path,
+			reasons: ["WORKERS"],
+			justification: "Offscreen document is used for running PXE in it",
+		})
+	try {
+		await create()
+	} catch (err) {
+		// Two transient shapes get one close-and-retry: the ghost bug
+		// ("single offscreen document": getContexts saw none but create says
+		// one exists) and the loading race ("closed before fully loading":
+		// the document was torn down mid-load, e.g. by browser cleanup —
+		// the close is a no-op then, the retry is what matters). ONLY while
+		// this pass is still current: the ready-gate timeout bumps `passSeq`
+		// and then closes the document, so a timeout-induced rejection (or a
+		// zombie continuation surviving into a successor pass) must
+		// propagate — its close-and-retry would tear down a document this
+		// pass no longer tracks.
+		const msg = String(err)
+		if (passId === passSeq && (msg.includes("single offscreen document") || msg.includes("closed before fully loading"))) {
+			// B-17: route through the serialized close tail so this close composes
+			// with a concurrent timeout close instead of racing it — a successor
+			// joins the tail and can't create into a document this close then tears
+			// down out of order.
+			await trackedClose()
+			// The close suspends: re-check the fence so a timeout landing in
+			// the close window can't be followed by an untracked create.
+			if (passId !== passSeq) throw err
 			await create()
-		} catch (err) {
-			// Two transient shapes get one close-and-retry: the ghost bug
-			// ("single offscreen document": getContexts saw none but create says
-			// one exists) and the loading race ("closed before fully loading":
-			// the document was torn down mid-load, e.g. by browser cleanup —
-			// the close is a no-op then, the retry is what matters). ONLY while
-			// this pass is still current: the ready-gate timeout bumps `passSeq`
-			// and then closes the document, so a timeout-induced rejection (or a
-			// zombie continuation surviving into a successor pass) must
-			// propagate — its close-and-retry would tear down a document this
-			// pass no longer tracks.
-			const msg = String(err)
-			if (passId === passSeq && (msg.includes("single offscreen document") || msg.includes("closed before fully loading"))) {
-				// B-17: route through the serialized close tail so this close composes
-				// with a concurrent timeout close instead of racing it — a successor
-				// joins the tail and can't create into a document this close then tears
-				// down out of order.
-				await trackedClose()
-				// The close suspends: re-check the fence so a timeout landing in
-				// the close window can't be followed by an untracked create.
-				if (passId !== passSeq) throw err
-				await create()
-			} else {
-				throw err
-			}
+		} else {
+			throw err
 		}
-		return
 	}
-	// Firefox path. `chrome.windows.create` can resolve to undefined when
-	// the browser refuses (rare, but typed that way) — fail loud so the
-	// caller's create-promise rejection path runs and the ready-gate can
-	// time out cleanly instead of hanging on a missing window id.
+}
+
+/** Firefox path. `chrome.windows.create` can resolve to undefined when the browser
+ *  refuses (rare, but typed that way) — fail loud so the caller's create-promise
+ *  rejection path runs and the ready-gate can time out cleanly instead of hanging on a
+ *  missing window id. */
+async function createOffscreenFirefox(passId: number) {
 	const token = firefoxInstanceToken()
 	const win = await chrome.windows.create({
 		url: `${chrome.runtime.getURL(path)}?instance=${token}`,

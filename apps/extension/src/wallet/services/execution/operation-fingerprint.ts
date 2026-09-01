@@ -85,8 +85,30 @@ function encodeStringArray(values: readonly string[]): string {
 	return `a${values.length}[${values.map(str).join(",")}]`
 }
 
+/** Exhaustive authwit-content encoder — the inner discriminated union of both authwit kinds. */
+function encodeAuthwitContent(content: (Action & { kind: "add_private_authwit" | "add_public_authwit" })["content"]): string | null {
+	switch (content.kind) {
+		case "call": {
+			const args = encodeValue(content.args, 0)
+			return args === null
+				? null
+				: `call(${str(content.caller)}|${str(content.contract)}|${str(content.method)}|${args}|${content.hideSender ?? false})`
+		}
+		case "encoded_call":
+			return `enc(${str(content.caller)}|${str(content.to)}|${str(content.selector)}|${encodeStringArray(content.args)}|${content.hideMsgSender ?? false})`
+		case "intent":
+			return `intent(${str(content.consumer)}|${encodeStringArray(content.intent)})`
+		case "message_hash":
+			return `hash(${str(content.messageHash)})`
+		default: {
+			const _exhaustive: never = content
+			void _exhaustive
+			return null
+		}
+	}
+}
+
 /** Exhaustive per-kind action encoder. */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
 function encodeAction(action: Action): string | null {
 	switch (action.kind) {
 		case "add_capsule":
@@ -95,32 +117,7 @@ function encodeAction(action: Action): string | null {
 			return `extra(${encodeStringArray(action.args)})`
 		case "add_private_authwit":
 		case "add_public_authwit": {
-			const content = action.content
-			let contentEnc: string | null
-			switch (content.kind) {
-				case "call": {
-					const args = encodeValue(content.args, 0)
-					contentEnc =
-						args === null
-							? null
-							: `call(${str(content.caller)}|${str(content.contract)}|${str(content.method)}|${args}|${content.hideSender ?? false})`
-					break
-				}
-				case "encoded_call":
-					contentEnc = `enc(${str(content.caller)}|${str(content.to)}|${str(content.selector)}|${encodeStringArray(content.args)}|${content.hideMsgSender ?? false})`
-					break
-				case "intent":
-					contentEnc = `intent(${str(content.consumer)}|${encodeStringArray(content.intent)})`
-					break
-				case "message_hash":
-					contentEnc = `hash(${str(content.messageHash)})`
-					break
-				default: {
-					const _exhaustive: never = content
-					void _exhaustive
-					contentEnc = null
-				}
-			}
+			const contentEnc = encodeAuthwitContent(action.content)
 			if (contentEnc === null) return null
 			const witness = action.kind === "add_private_authwit" && action.authwit ? encodeStringArray(action.authwit) : ""
 			return `${action.kind}(${contentEnc}|${witness})`
