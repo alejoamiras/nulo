@@ -1,5 +1,5 @@
 /*
- * Canonical drip token catalog. Plan-v2 §3 - pinned fixed amounts.
+ * Canonical drip token catalog — pinned fixed amounts.
  *
  * `onchainAmount` is what the Dripper's `amount: u64` param receives.
  * Both values fit comfortably under u64 (max ≈ 1.844e19); Dripper casts

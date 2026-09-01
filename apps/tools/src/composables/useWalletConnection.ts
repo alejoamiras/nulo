@@ -27,10 +27,10 @@ async function buildCapabilityManifest() {
 	const sponsoredFpc = await getSponsoredFpcInstance()
 	// The drip tokens (Dripper/NULO/OLUN) are universal deploys (deployer ZERO, fixed salts), so
 	// the SAME addresses exist on BOTH networks — the grant includes them everywhere. The PrivateFPC +
-	// FEE_JUICE + auth-registry grants keep private fuel and private-fuel-paid claims working (DP6).
+	// FEE_JUICE + auth-registry grants keep private fuel and private-fuel-paid claims working.
 	// The FPC is registered on both networks, so both grants must include it — the earlier bridge-only
 	// manifest omitted it and would have broken the mainnet grant vs the unconditional FPC
-	// registration (codex post-impl HIGH-1).
+	// registration.
 	return buildCombinedManifest({
 		bridgeAddress: BRIDGE,
 		tokenAddress: BRIDGE_TOKEN,

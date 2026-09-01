@@ -28,7 +28,7 @@ const ADDR_B = `0x${"bb".padStart(64, "0")}`
 
 /** Every SETUP of this stub records the account it was created with — a new entry means the
  *  real TokenCard would have re-run its setup and re-bound useDrip/useTokenBalance to
- *  that account. This is the D-1 pin: cards must REMOUNT when the active account changes. */
+ *  that account: cards must REMOUNT when the active account changes. */
 const captured: string[] = []
 const TokenCardStub = defineComponent({
 	name: "TokenCard",

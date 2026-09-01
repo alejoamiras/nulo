@@ -467,7 +467,7 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
  *   apps/tools/public/testnet-bridge.candidate.json      → testnet-bridge.json
  *   apps/tools/src/contracts/deployments.candidate.json  → deployments.json
  *
- * Invariant (audit): verify → validate-in-memory → temp-write+rename → re-hash →
+ * Invariant: verify → validate-in-memory → temp-write+rename → re-hash →
  * re-verify → receipt. The candidates are read ONCE into buffers and every later
  * step operates on/against those exact bytes; symlinked candidates or live paths
  * are rejected; each write is a same-directory temp + rename (atomic on one fs);

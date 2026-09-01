@@ -15,7 +15,7 @@ import FuelView from "./views/FuelView.vue"
 
 type Tab = "drip" | "bridge" | "fuel"
 
-// Mainnet has no drip (real USDC, no test-token drips) — hide the tab + never default to it.
+// Mainnet defaults to the Bridge tab; the Drip tab stays (its tokens are play tokens there).
 const isMainnet = IS_MAINNET
 
 /** Default to the Bridge tab on mainnet or a bridge.* host; drip otherwise (testnet). */

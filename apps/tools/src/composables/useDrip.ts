@@ -40,7 +40,7 @@ export function useDrip(wallet: Wallet, account: AztecAddress) {
 		last,
 		isActive: (token: TokenSymbol, target: DripTarget) => inflight.value?.tokenSymbol === token && inflight.value.target === target,
 		// withOperation: a drip is an account-sensitive prompt/send span — while it runs, account
-		// switching is blocked (useOpsInFlight, plan D-8/D-19).
+		// switching is blocked (useOpsInFlight).
 		drip: async (token: DripToken, tokenAddress: AztecAddress, target: DripTarget) =>
 			withOperation(() => drip(wallet, account, token, tokenAddress, target)),
 	}

@@ -166,10 +166,10 @@ describe("buildCombinedManifest", () => {
 		])
 	})
 
-	// The mainnet shape (HIGH-1 fix): omit the drip tokens, but the bridge + PrivateFPC + private-fuel
-	// scopes MUST stay so private fuel (DP6) and private-fuel-paid claims work and the unconditional FPC
+	// Bridge+fuel-only shape: omit the drip tokens, but the bridge + PrivateFPC + private-fuel scopes
+	// MUST stay so private fuel and private-fuel-paid claims work and the unconditional FPC
 	// registration doesn't hit a scope violation.
-	describe("mainnet shape (no drip tokens)", () => {
+	describe("bridge+fuel-only shape (no drip tokens)", () => {
 		const mm = buildCombinedManifest({
 			bridgeAddress: BRIDGE,
 			tokenAddress: TOKEN,

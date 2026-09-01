@@ -194,10 +194,10 @@ export function buildBridgeManifest(input: BridgeManifestInput): AppManifest {
 }
 
 export interface CombinedManifestInput {
-	/** The drip tokens (Dripper/NULO/OLUN) — testnet-only. Omit ALL three on mainnet: the grant then
-	 *  covers the Bridge + fuel (public + private) but NOT the Drip tab, matching the mainnet UI (no
-	 *  drip tab). The bridge + PrivateFPC + FEE_JUICE + auth-registry grants are always present, so
-	 *  private-fuel-paid bridge claims work on both networks (DP6). */
+	/** The drip tokens (Dripper/NULO/OLUN). Optional as a set: omit all three for a bridge+fuel-only
+	 *  manifest. The shipped app always supplies them (universal deploys, present on both networks).
+	 *  The bridge + PrivateFPC + FEE_JUICE + auth-registry grants are always present, so
+	 *  private-fuel-paid bridge claims work on both networks. */
 	readonly dripperAddress?: AztecAddress
 	readonly usdcAddress?: AztecAddress
 	readonly ethAddress?: AztecAddress

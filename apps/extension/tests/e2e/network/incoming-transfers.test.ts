@@ -9,12 +9,10 @@ const hasConfig = aztecConfig !== undefined
  * Runtime checks for the incoming-transfer arc, pinned by the post-impl
  * codex audit. Three named scenarios:
  *
- *   1. **drip name regression** — the unified `pickPrimaryMethod`
- *      helper across F4's 7 sites is exercised at every popup mount
- *      that loads the activity feed; the popup-side TransactionService
- *      replay flows through the helper. A reverted F4 site would
- *      surface in the popup mounting / activity-feed loading path
- *      (typecheck wouldn't catch a runtime-level regression).
+ *   1. **activity feed mounts** — the popup's activity page loads on a
+ *      fresh profile without a runtime error. This is a wire-up smoke
+ *      only: the primary-method naming logic is pinned by the unit
+ *      suites listed below, not exercised here.
  *
  *   2. **incoming-receive happy path** — `IncomingTransferServiceClient`
  *      is reachable + connects + returns the expected empty list on a
@@ -66,12 +64,7 @@ test.skipIf(!hasConfig)(
 		const incomingCards = await page.$$('[data-testid="tx-incoming-card"]')
 		expect(incomingCards.length).toBe(0)
 
-		// The drip name regression is captured at runtime by the
-		// activity page successfully MOUNTING — its row-merge logic
-		// (buildActivityRows) runs through the unified row model + the
-		// pickPrimaryMethod helper indirectly via the tx-card flow. A
-		// reverted F4 site would have thrown an import or runtime error
-		// during this mount path. The mount-without-error is the assert.
+		// Mount-without-error is the assert: the activity page rendered on a fresh profile.
 		const onActivityPage = await page.evaluate(() => window.location.hash.includes("/popup/activity"))
 		expect(onActivityPage).toBe(true)
 
