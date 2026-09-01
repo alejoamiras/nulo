@@ -472,7 +472,6 @@ export class DappSendExecutor {
 		)
 	}
 
-	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (123 lines) — split when touched, never grow
 	public async executeAztecSendTx(
 		op: AztecSendTxOperation,
 		origin: LocalTxOrigin,
@@ -519,8 +518,6 @@ export class DappSendExecutor {
 					return primaryMethod ? [{ method: primaryMethod }] : undefined
 				},
 			},
-			// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
-			// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (108 lines) — split when touched, never grow
 			async ({ checkCancelled, markJournal }) => {
 				if (op.accountAddress !== op.opts?.from?.toString()) {
 					throw new Error("Invalid `opts.from`")
@@ -536,94 +533,18 @@ export class DappSendExecutor {
 				await markJournal({ stage: "simulating" })
 				checkCancelled()
 
-				// Estimate→confirm reuse: consume validates the full drift ladder
-				// (fingerprint at the same pre-discovery normalization point, profile,
-				// endpoint, pending set, chain identity, FPC identity, base fee).
-				// Any miss falls through to the full discovery + build below.
-				const reused = estimateId
-					? await this.deps.operationEstimateReuse.tryConsume(estimateId, {
-							networkId: op.networkId,
-							accountAddress: op.accountAddress,
-							executionMode: op.executionMode ?? "standard",
-							from: op.opts?.from?.toString() ?? "",
-							actions,
-							fee,
-							feeSettings: op.feeSettings,
-						})
-					: undefined
-
-				let txRequest: FeeEstimate["txRequest"]
-				let node: FeeEstimate["node"]
-				let pxe: FeeEstimate["pxe"]
-				let account: FeeEstimate["account"]
-				let network: Network
-				let nonce: { toString(): string }
-				let txCalls: FeeEstimate["txCalls"]
-				let feePaymentMethod: FeeEstimate["feePaymentMethod"]
-				let pendingPublicAuthwits: FeeEstimate["pendingPublicAuthwits"]
-				let initializesAccount: boolean | undefined
-
-				if (reused) {
-					this.deps.logDebug(`[executeAztecSendTx] reusing precomputed estimate ${estimateId}`)
-					// Live handles are re-resolved, never cached — the cross-profile
-					// fail-closed property depends on this.
-					network = await this.deps.getNetwork(op.networkId)
-					node = await this.deps.getNode(network.chainId)
-					pxe = this.deps.getPXE(network)
-					const profile = await this.deps.getActiveProfile()
-					if (!profile) throw new Error("Wallet locked")
-					account = await this.deps.getAccountContract(profile.id, network.chainId, op.accountAddress)
-					txRequest = reused.txRequest
-					// The entry retains the exact build — its provenance rides along.
-					initializesAccount = reused.initializesAccount
-					nonce = reused.nonce
-					txCalls = reused.txCalls
-					feePaymentMethod = reused.feePaymentMethod
-					pendingPublicAuthwits = [...reused.pendingPublicAuthwits]
-				} else if (fee.embeddedFeePayment) {
-					// Embedded fee payments skip discovery entirely — the dApp's own
-					// fee calls conflict with the discovery simulation's dummy fee
-					// method. Probe-free validated pipeline, as always.
-					checkCancelled()
-					;({
-						txRequest,
-						node,
-						pxe,
-						account,
-						network,
-						nonce,
-						txCalls,
-						feePaymentMethod,
-						pendingPublicAuthwits,
-						initializesAccount,
-					} = await this.deps.buildAndEstimateValidated({ ...op, actions, fee }, op.feeSettings, parentTask))
-				} else {
-					const { built, discoveredActions } = await this.deps.estimateWithDiscovery.estimate(
-						op,
-						actions,
-						fee,
-						op.feeSettings,
-						parentTask,
-					)
-					if (discoveredActions.length) {
-						this.deps.logDebug(
-							`[executeAztecSendTx] Discovered ${discoveredActions.length} auth witness(es) via offchain effects`,
-						)
-					}
-					checkCancelled()
-					;({
-						txRequest,
-						node,
-						pxe,
-						account,
-						network,
-						nonce,
-						txCalls,
-						feePaymentMethod,
-						pendingPublicAuthwits,
-						initializesAccount,
-					} = built)
-				}
+				const {
+					txRequest,
+					node,
+					pxe,
+					account,
+					network,
+					nonce,
+					txCalls,
+					feePaymentMethod,
+					pendingPublicAuthwits,
+					initializesAccount,
+				} = await this.resolveStandardBuild(op, actions, fee, estimateId, parentTask, checkCancelled)
 
 				const sendAdditionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
 				const { txHash, offchainOutput } = await this.deps.coordinator.proveAndSend({
@@ -674,11 +595,87 @@ export class DappSendExecutor {
 	}
 
 	/**
+	 * Resolve the standard path's build: consume a still-valid precomputed estimate
+	 * (tryConsume validates the full drift ladder — fingerprint at the same
+	 * pre-discovery normalization point, profile, endpoint, pending set, chain
+	 * identity, FPC identity, base fee), else fall through to the full build —
+	 * probe-free for embedded fee payments (the dApp's own fee calls conflict with
+	 * the discovery simulation's dummy fee method), discovery-first otherwise.
+	 */
+	private async resolveStandardBuild(
+		op: AztecSendTxOperation,
+		actions: Awaited<ReturnType<DappSendExecutorDeps["planner"]["processAztecJsPayload"]>>["actions"],
+		fee: Awaited<ReturnType<DappSendExecutorDeps["planner"]["processAztecJsPayload"]>>["feeOptions"],
+		estimateId: string | undefined,
+		parentTask: WrappedTask | undefined,
+		checkCancelled: () => void,
+	): Promise<{
+		txRequest: FeeEstimate["txRequest"]
+		node: FeeEstimate["node"]
+		pxe: FeeEstimate["pxe"]
+		account: FeeEstimate["account"]
+		network: Network
+		nonce: { toString(): string }
+		txCalls: FeeEstimate["txCalls"]
+		feePaymentMethod: FeeEstimate["feePaymentMethod"]
+		pendingPublicAuthwits: FeeEstimate["pendingPublicAuthwits"]
+		initializesAccount: boolean | undefined
+	}> {
+		const reused = estimateId
+			? await this.deps.operationEstimateReuse.tryConsume(estimateId, {
+					networkId: op.networkId,
+					accountAddress: op.accountAddress,
+					executionMode: op.executionMode ?? "standard",
+					from: op.opts?.from?.toString() ?? "",
+					actions,
+					fee,
+					feeSettings: op.feeSettings,
+				})
+			: undefined
+
+		if (reused) {
+			this.deps.logDebug(`[executeAztecSendTx] reusing precomputed estimate ${estimateId}`)
+			// Live handles are re-resolved, never cached — the cross-profile
+			// fail-closed property depends on this.
+			const network = await this.deps.getNetwork(op.networkId)
+			const node = await this.deps.getNode(network.chainId)
+			const pxe = this.deps.getPXE(network)
+			const profile = await this.deps.getActiveProfile()
+			if (!profile) throw new Error("Wallet locked")
+			const account = await this.deps.getAccountContract(profile.id, network.chainId, op.accountAddress)
+			return {
+				txRequest: reused.txRequest,
+				node,
+				pxe,
+				account,
+				network,
+				// The entry retains the exact build — its provenance rides along.
+				initializesAccount: reused.initializesAccount,
+				nonce: reused.nonce,
+				txCalls: reused.txCalls,
+				feePaymentMethod: reused.feePaymentMethod,
+				pendingPublicAuthwits: [...reused.pendingPublicAuthwits],
+			}
+		}
+		if (fee.embeddedFeePayment) {
+			// Embedded fee payments skip discovery entirely. Probe-free validated
+			// pipeline, as always.
+			checkCancelled()
+			return await this.deps.buildAndEstimateValidated({ ...op, actions, fee }, op.feeSettings, parentTask)
+		}
+		const { built, discoveredActions } = await this.deps.estimateWithDiscovery.estimate(op, actions, fee, op.feeSettings, parentTask)
+		if (discoveredActions.length) {
+			this.deps.logDebug(`[executeAztecSendTx] Discovered ${discoveredActions.length} auth witness(es) via offchain effects`)
+		}
+		checkCancelled()
+		return built
+	}
+
+	/**
 	 * Execute a NO_FROM (DefaultEntrypoint) transaction.
 	 * The dApp's ExecutionPayload is passed directly to DefaultEntrypoint — no account
 	 * contract wrapping, no wallet auth witness discovery, no call mutation.
 	 */
-	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (100 lines) — split when touched, never grow
 	private async executeNoFromSendTx(
 		op: AztecSendTxOperation,
 		origin: LocalTxOrigin,
@@ -714,8 +711,6 @@ export class DappSendExecutor {
 					return primaryMethod ? [{ method: primaryMethod }] : undefined
 				},
 			},
-			// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 20) — refactor when touched, never raise
-			// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (84 lines) — split when touched, never grow
 			async ({ checkCancelled, markJournal }) => {
 				await markJournal({ stage: "simulating" })
 
@@ -742,57 +737,18 @@ export class DappSendExecutor {
 				suggestGasLimits(txRequest, feeOpts)
 				await applyEmbeddedFpcGasCap(txRequest, feeOpts, node)
 
-				// Kernelless auth witness discovery: stub the user's account so verify_private_authwit
-				// doesn't fail on missing witnesses. The stub accepts any authwit during simulation.
-				// The discovery result is ONLY used to read offchain effects — never for proving or gas estimation.
-				const dappScopes: AztecAddress[] = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
-				// Dedup by hex (AztecAddress is a class — Set de-dups by ref, not value).
-				const scopeByHex = new Map<string, AztecAddress>()
-				for (const s of dappScopes) scopeByHex.set(s.toString(), s)
-				const additionalScopes = [...scopeByHex.values()]
-				const scopeWithAccountByHex = new Map<string, AztecAddress>()
-				scopeWithAccountByHex.set(account.address.toString(), account.address)
-				for (const s of dappScopes) scopeWithAccountByHex.set(s.toString(), s)
-				const scopesWithAccount = [...scopeWithAccountByHex.values()]
+				const { dappScopesCount, additionalScopes, scopesWithAccount } = dedupNoFromScopes(
+					op.opts.additionalScopes,
+					account.address,
+				)
 				// Counts, not the arrays: these are viewing-key scopes — the set of addresses whose
 				// private state this dApp can see — and pre-stringifying them would put them beyond
 				// the logger's reach.
 				this.deps.logDebug(
-					`executeNoFromSendTx: dappScopes=${dappScopes.length}, additionalScopes=${additionalScopes.length}, scopesWithAccount=${scopesWithAccount.length}`,
+					`executeNoFromSendTx: dappScopes=${dappScopesCount}, additionalScopes=${additionalScopes.length}, scopesWithAccount=${scopesWithAccount.length}`,
 				)
 
-				this.deps.logDebug(`executeNoFromSendTx: starting kernelless discovery simulation`)
-				const discoveryResult = await pxe.simulateTx(
-					txRequest,
-					{ simulatePublic: true, skipTxValidation: true, skipFeeEnforcement: true, scopes: additionalScopes },
-					[account.address.toString()],
-				)
-
-				this.deps.logDebug(`executeNoFromSendTx: kernelless discovery completed`)
-				// Extract auth witness requirements from CallAuthorizationRequest offchain effects
-				const effects = collectOffchainEffects(discoveryResult.privateExecutionResult)
-				this.deps.logDebug(`executeNoFromSendTx: offchain effects found: ${effects.length}`)
-				if (effects.length) {
-					const nodeInfo2 = await node.getNodeInfo()
-					// F-012 / A-01 V-01: NO_FROM path also derives chainInfo from
-					// live node — rebind to selected network before constructing
-					// the authwit message hash.
-					assertLiveChainIdentity(network, nodeInfo2)
-					const chainInfo = { chainId: new Fr(nodeInfo2.l1ChainId), version: new Fr(nodeInfo2.rollupVersion) }
-					for (const effect of effects) {
-						try {
-							const authRequest = await CallAuthorizationRequest.fromFields(effect.data)
-							const messageHash = await computeAuthWitMessageHash(
-								{ consumer: effect.contractAddress, innerHash: authRequest.innerHash },
-								chainInfo,
-							)
-							const authWitness = await account.createAuthWit(messageHash)
-							txRequest.authWitnesses.push(authWitness)
-						} catch {
-							// Not a CallAuthorizationRequest — skip
-						}
-					}
-				}
+				await this.addDiscoveredNoFromAuthwits({ pxe, node, network, account, txRequest, additionalScopes })
 
 				this.deps.logDebug(`executeNoFromSendTx: authwits added: ${txRequest.authWitnesses.length}, starting real simulation`)
 				// Real simulation with actual auth witnesses and real account contract
@@ -841,5 +797,70 @@ export class DappSendExecutor {
 				return { receipt, ...offchainOutput } as SendReturn<InteractionWaitOptions>
 			},
 		)
+	}
+
+	/**
+	 * Kernelless auth witness discovery for the NO_FROM path: stub the user's account so
+	 * verify_private_authwit doesn't fail on missing witnesses (the stub accepts any
+	 * authwit during simulation), then sign each discovered CallAuthorizationRequest into
+	 * `txRequest.authWitnesses`. The discovery result is ONLY used to read offchain
+	 * effects — never for proving or gas estimation. F-012 / A-01 V-01: chainInfo derives
+	 * from the LIVE node, rebound to the selected network, before constructing the
+	 * authwit message hash.
+	 */
+	private async addDiscoveredNoFromAuthwits(d: {
+		pxe: FeeEstimate["pxe"]
+		node: FeeEstimate["node"]
+		network: Network
+		account: FeeEstimate["account"]
+		txRequest: FeeEstimate["txRequest"]
+		additionalScopes: AztecAddress[]
+	}): Promise<void> {
+		this.deps.logDebug(`executeNoFromSendTx: starting kernelless discovery simulation`)
+		const discoveryResult = await d.pxe.simulateTx(
+			d.txRequest,
+			{ simulatePublic: true, skipTxValidation: true, skipFeeEnforcement: true, scopes: d.additionalScopes },
+			[d.account.address.toString()],
+		)
+
+		this.deps.logDebug(`executeNoFromSendTx: kernelless discovery completed`)
+		const effects = collectOffchainEffects(discoveryResult.privateExecutionResult)
+		this.deps.logDebug(`executeNoFromSendTx: offchain effects found: ${effects.length}`)
+		if (!effects.length) return
+		const nodeInfo2 = await d.node.getNodeInfo()
+		assertLiveChainIdentity(d.network, nodeInfo2)
+		const chainInfo = { chainId: new Fr(nodeInfo2.l1ChainId), version: new Fr(nodeInfo2.rollupVersion) }
+		for (const effect of effects) {
+			try {
+				const authRequest = await CallAuthorizationRequest.fromFields(effect.data)
+				const messageHash = await computeAuthWitMessageHash(
+					{ consumer: effect.contractAddress, innerHash: authRequest.innerHash },
+					chainInfo,
+				)
+				const authWitness = await d.account.createAuthWit(messageHash)
+				d.txRequest.authWitnesses.push(authWitness)
+			} catch {
+				// Not a CallAuthorizationRequest — skip
+			}
+		}
+	}
+}
+
+/** Viewing-key scope sets for the NO_FROM path, de-duped by hex (AztecAddress is a
+ *  class — Set de-dups by ref, not value). */
+function dedupNoFromScopes(
+	rawScopes: unknown,
+	accountAddress: AztecAddress,
+): { dappScopesCount: number; additionalScopes: AztecAddress[]; scopesWithAccount: AztecAddress[] } {
+	const dappScopes: AztecAddress[] = Array.isArray(rawScopes) ? rawScopes : []
+	const scopeByHex = new Map<string, AztecAddress>()
+	for (const s of dappScopes) scopeByHex.set(s.toString(), s)
+	const scopeWithAccountByHex = new Map<string, AztecAddress>()
+	scopeWithAccountByHex.set(accountAddress.toString(), accountAddress)
+	for (const s of dappScopes) scopeWithAccountByHex.set(s.toString(), s)
+	return {
+		dappScopesCount: dappScopes.length,
+		additionalScopes: [...scopeByHex.values()],
+		scopesWithAccount: [...scopeWithAccountByHex.values()],
 	}
 }
