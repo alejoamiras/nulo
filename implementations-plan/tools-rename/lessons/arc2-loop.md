@@ -6,6 +6,19 @@ Same shape as arc 1 (one fresh Sonnet reviewer over `git diff worktree-tools-ren
 
 Verdict: **clean — no findings.** One sub-threshold style nit noted ("the Drip tab drips its own tokens" is mildly repetitive); left as is. No code-review commit for arc 2.
 
-## Codex round 1 (fresh session, xhigh)
+## Codex round 1 (fresh session `01a05f4c-7bdf-7e62-a0b3-fe837b40d205`, xhigh)
+
+"No Critical or High findings." Four material findings (1 Medium, 3 Low), all verified and adopted:
+
+| # | finding | disposition |
+|---|---|---|
+| 1 | M — lessons substituted unit tests for the plan's "forget leaves neither key" browser check | done in the browser: a second throwaway spec called `forgetPreferredWallet()` via the dev server's module graph after a legacy-key reconnect → both keys null (lessons/phase-4.md) |
+| 2 | L — `App.vue:18`, `network.ts:55`, `capabilities.ts:197` said mainnet hides the Drip tab / omits its grants; the button is unconditional and the app always supplies the drip tokens | comments corrected; `capabilities.test.ts` describe relabelled "bridge+fuel-only shape" (commit `3ab1845f`) |
+| 3 | L — `incoming-transfers.test.ts` header claimed runtime coverage of the naming helper the test never exercises | header + inline comment reduced to what the test proves (mount-without-error smoke) |
+| 4 | L — plan/review tags in five touched comments (`Plan-v2 §3`, `D-8/D-19`, `DP6`, `HIGH-1`, `D-1 pin`, `Invariant (audit)`) | tags removed, invariants kept |
+
+Rejected: nothing.
+
+## Codex round 2 (resumed)
 
 _pending_

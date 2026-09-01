@@ -32,4 +32,12 @@ vitest: 1 passed, EXIT=0
 
 Two harness facts worth keeping: the wallet announces itself to the page only AFTER its discover popup is approved, so a dApp-side picker row cannot be awaited before that approval (the first attempt deadlocked on exactly this); and a dev-served app has no `nulo-build` meta (only production builds inject it), so the build id above comes from the built extension's manifest, not the page.
 
-"Forget leaves neither key" has no UI entry point in the tools app (`forgetPreferredWallet` is a session API; the panels only expose `switchWallet`, which deliberately KEEPS the preference), so it is proven by the unit cases `forgetting the wallet removes BOTH keys` and `a failed remembered connect clears the legacy key too` rather than in the browser.
+"Forget leaves neither key" has no UI entry point in the tools app (`forgetPreferredWallet` is a session API; the panels only expose `switchWallet`, which deliberately KEEPS the preference). Codex's arc-2 audit asked for a browser proof anyway, so a second throwaway spec drove the legacy-key reconnect to `connected` and then called the session API through the dev server's module graph (`import('/src/composables/useWalletConnection.ts')` from the page — the same module instance the app imported; the `import()` has to be passed to `page.evaluate` as a string, otherwise the test bundler tries to resolve it):
+
+```
+BEFORE_FORGET current={"id":"nulo","name":"Nulo"} legacy={"id":"nulo","name":"Nulo"}
+AFTER_FORGET  current=null legacy=null
+vitest: 1 passed, EXIT=0   (23:41–23:44 UTC, same extension build)
+```
+
+The unit cases `forgetting the wallet removes BOTH keys` and `a failed remembered connect clears the legacy key too` remain the durable pins.
