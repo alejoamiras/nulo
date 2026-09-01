@@ -103,7 +103,7 @@ Local: `bun run --cwd apps/tools build:testnet && bun run --cwd apps/tools verif
 
 ### Arc 2 — Drip
 
-#### Phase 4 — Feature vocabulary
+#### Phase 4 — Feature vocabulary ✓ (2026-09-01, `a413c886`; gate + real-wallet check in lessons/phase-4.md)
 
 Per §Scope arc 2. Review the `faucet-drip` comments at `apps/extension/tests/e2e/network/incoming-transfers.test.ts:12,69` (prose about the drip concept — reword to "drip" where it reads as the app). Manual/real check (records the extension build id in `lessons/phase-4.md`): load the built testnet target with the Nulo extension, connect → disconnect → reconnect; the approve popup shows `nulo-tools`; with a pre-seeded `nulo-faucet:preferred-wallet` key the wallet is preselected, and "forget wallet" leaves neither key behind (DevTools → Application → Local Storage).
 
