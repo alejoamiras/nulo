@@ -13,7 +13,7 @@ import { OutboxContract } from "@aztec/ethereum/contracts"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { decodeFunctionData } from "viem"
 import { NETWORK } from "@/lib/network"
-import { ref, watch } from "vue"
+import { type Ref, ref, watch } from "vue"
 import { BRIDGE, BRIDGE_PROXY, BRIDGE_TOKEN, L1_PORTAL } from "@/contracts/bridge-deployments"
 import {
 	addRecord,
@@ -172,12 +172,74 @@ function wireWithdrawDeps(): void {
 	})
 }
 
+/** The L2 exit leg: one Aztec prompt for private (the burn authwit is created off-chain),
+ *  two for public (the authwit set, then the exit). */
+async function submitExit(ctx: {
+	aztec: NonNullable<ReturnType<typeof useBridgeWallet>["wallet"]["value"]>
+	fromAddr: AztecAddress
+	l1addr: string
+	amount: bigint
+	nonce: Fr
+	sendOpts: ReturnType<typeof buildWithdrawSendOpts>
+	token: Contract
+	bridge: Contract
+	isPrivate: boolean
+}): Promise<{ txHash: unknown; blockNumber?: number }> {
+	const { aztec, fromAddr, l1addr, amount, nonce, sendOpts, token, bridge, isPrivate } = ctx
+	if (isPrivate) {
+		log("private burn authwit (off-chain, no prompt) + exit_to_l1_private (one Aztec prompt)")
+		const burnAuthwit = await aztec.createAuthWit(fromAddr, {
+			caller: BRIDGE_PROXY,
+			call: await token.methods.burn_private(fromAddr, amount, nonce).getFunctionCall(),
+		})
+		return (
+			(await runOnLane("aztec", () =>
+				bridge.methods
+					.exit_to_l1_private(EthAddress.fromString(l1addr), amount, EthAddress.ZERO, nonce)
+					.send({ ...sendOpts, authWitnesses: [burnAuthwit] } as never),
+			)) as { receipt: { txHash: unknown; blockNumber?: number } }
+		).receipt
+	}
+	log("public burn authwit (one Aztec prompt) + exit_to_l1_public (second Aztec prompt)")
+	const authwit = await SetPublicAuthwitContractInteraction.create(
+		aztec as never,
+		fromAddr,
+		{ caller: BRIDGE_PROXY, action: token.methods.burn_public(fromAddr, amount, nonce) } as never,
+		true,
+	)
+	await runOnLane("aztec", () => authwit.send(sendOpts as never))
+	return (
+		(await runOnLane("aztec", () =>
+			bridge.methods.exit_to_l1_public(EthAddress.fromString(l1addr), amount, EthAddress.ZERO, nonce).send(sendOpts as never),
+		)) as { receipt: { txHash: unknown; blockNumber?: number } }
+	).receipt
+}
+
+/** The cleanup matrix (plan S8/S14): only an EXPLICIT user rejection before the exit tx
+ *  discards the provisional record; ambiguous failures keep it with an error surface. */
+function handleWithdrawFailure(
+	e: unknown,
+	ids: { provisionalId: string; finalId: string },
+	error: Ref<string | null>,
+	journal: ReturnType<typeof useBridgeJournal>,
+): void {
+	const msg = humanizeWalletError(e instanceof Error ? e.message : "Withdraw failed")
+	log("FAILED:", msg)
+	error.value = msg
+	const rec = journal.records.value.find((r) => r.id === ids.finalId) as WithdrawJournalRecord | undefined
+	if (rec && !rec.exitTxHash && isUserRejection(e)) {
+		discard(ids.provisionalId)
+		error.value = "Rejected in your wallet - nothing was sent."
+	} else if (rec) {
+		flagRecordError(ids.finalId, `${msg}. If the exit never reached Aztec, nothing left your balance.`)
+	}
+}
+
 /**
  * The withdraw flow: provisional journal record → burn authwit + exit on L2 (one Aztec prompt for
  * private, two for public) → record rekeyed to the exit tx → the engine's consume tail (proven
  * wait → witness → ONE L1 prompt).
  */
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (103 lines) — split when touched, never grow
 export function useWithdrawFlow() {
 	wireWithdrawDeps()
 	const l1 = useL1Wallet()
@@ -187,8 +249,6 @@ export function useWithdrawFlow() {
 	const busy = ref(false)
 	const error = ref<string | null>(null)
 
-	// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (90 lines) — split when touched, never grow
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
 	async function withdraw(amount: bigint, isPrivate = false, opts: { onRecord?: (id: string) => void } = {}): Promise<string | null> {
 		error.value = null
 		const aztec = bridgeWallet.wallet.value
@@ -236,37 +296,7 @@ export function useWithdrawFlow() {
 			const token = await Contract.at(BRIDGE_TOKEN, TokenContractArtifact, aztec)
 			const bridge = await Contract.at(BRIDGE, tokenBridgeArtifact, aztec)
 
-			let exitReceipt: { txHash: unknown; blockNumber?: number }
-			if (isPrivate) {
-				log("private burn authwit (off-chain, no prompt) + exit_to_l1_private (one Aztec prompt)")
-				const burnAuthwit = await aztec.createAuthWit(fromAddr, {
-					caller: BRIDGE_PROXY,
-					call: await token.methods.burn_private(fromAddr, amount, nonce).getFunctionCall(),
-				})
-				exitReceipt = (
-					(await runOnLane("aztec", () =>
-						bridge.methods
-							.exit_to_l1_private(EthAddress.fromString(l1addr), amount, EthAddress.ZERO, nonce)
-							.send({ ...sendOpts, authWitnesses: [burnAuthwit] } as never),
-					)) as { receipt: { txHash: unknown; blockNumber?: number } }
-				).receipt
-			} else {
-				log("public burn authwit (one Aztec prompt) + exit_to_l1_public (second Aztec prompt)")
-				const authwit = await SetPublicAuthwitContractInteraction.create(
-					aztec as never,
-					fromAddr,
-					{ caller: BRIDGE_PROXY, action: token.methods.burn_public(fromAddr, amount, nonce) } as never,
-					true,
-				)
-				await runOnLane("aztec", () => authwit.send(sendOpts as never))
-				exitReceipt = (
-					(await runOnLane("aztec", () =>
-						bridge.methods
-							.exit_to_l1_public(EthAddress.fromString(l1addr), amount, EthAddress.ZERO, nonce)
-							.send(sendOpts as never),
-					)) as { receipt: { txHash: unknown; blockNumber?: number } }
-				).receipt
-			}
+			const exitReceipt = await submitExit({ aztec, fromAddr, l1addr, amount, nonce, sendOpts, token, bridge, isPrivate })
 
 			const exitTxHash = String(exitReceipt.txHash)
 			log("exit tx", { exitTxHash, block: exitReceipt.blockNumber })
@@ -282,18 +312,7 @@ export function useWithdrawFlow() {
 			await runWithdrawConsume(exitTxHash)
 			log("withdraw flow finished", exitTxHash)
 		} catch (e) {
-			const msg = humanizeWalletError(e instanceof Error ? e.message : "Withdraw failed")
-			log("FAILED:", msg)
-			error.value = msg
-			// The cleanup matrix (plan S8/S14): only an EXPLICIT user rejection before the exit tx
-			// discards the provisional record; ambiguous failures keep it with an error surface.
-			const rec = journal.records.value.find((r) => r.id === finalId) as WithdrawJournalRecord | undefined
-			if (rec && !rec.exitTxHash && isUserRejection(e)) {
-				discard(provisionalId)
-				error.value = "Rejected in your wallet - nothing was sent."
-			} else if (rec) {
-				flagRecordError(finalId, `${msg}. If the exit never reached Aztec, nothing left your balance.`)
-			}
+			handleWithdrawFailure(e, { provisionalId, finalId }, error, journal)
 		} finally {
 			busy.value = false
 		}

@@ -128,25 +128,29 @@ export interface PrivateFuelClaimEvidence {
 /** How long a private claim attempt may sit in receipt limbo before the retry path re-opens. */
 export const PRIVATE_ATTEMPT_STALE_MS = 15 * 60_000
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 export function decidePrivateFuelClaim(e: PrivateFuelClaimEvidence): { action: PrivateFuelClaimAction } {
-	if (e.attempt && e.txHashKnown) {
-		if (e.receiptStatus === "included" || e.consumed) return { action: "consumed" }
-		if (e.receiptStatus === "dropped") return { action: "private-fpc" } // not included ⇒ FJ unconsumed ⇒ retry
-		// Pending / unprobed / unreachable node: a FRESH attempt may still land - wait, never guess.
-		// An AGED-OUT attempt re-opens the retry (the engine's simulate gate is the double-spend
-		// authority; see attemptAgedOut).
-		return e.attemptAgedOut ? { action: "private-fpc" } : { action: "wait" }
-	}
-	if (e.attempt) {
-		// Attempt latched but NO tx hash. Durable consumption still settles it; the setup-insufficiency
-		// assert is the one retryable case; anything else waits until the latch ages out (the wallet
-		// may still return / the tx may still land within the stale window). NEVER public/Sponsored.
-		if (e.consumed) return { action: "consumed" }
-		if (e.setupInsufficiency) return { action: "private-fpc" }
-		return e.attemptAgedOut ? { action: "private-fpc" } : { action: "wait" }
-	}
+	if (e.attempt && e.txHashKnown) return decideHashedAttempt(e)
+	if (e.attempt) return decideHashlessAttempt(e)
 	return { action: "private-fpc" } // fresh record ⇒ first private claim attempt
+}
+
+/** Attempt latched AND the tx hash is known — receipt evidence drives the call. */
+function decideHashedAttempt(e: PrivateFuelClaimEvidence): { action: PrivateFuelClaimAction } {
+	if (e.receiptStatus === "included" || e.consumed) return { action: "consumed" }
+	if (e.receiptStatus === "dropped") return { action: "private-fpc" } // not included ⇒ FJ unconsumed ⇒ retry
+	// Pending / unprobed / unreachable node: a FRESH attempt may still land - wait, never guess.
+	// An AGED-OUT attempt re-opens the retry (the engine's simulate gate is the double-spend
+	// authority; see attemptAgedOut).
+	return e.attemptAgedOut ? { action: "private-fpc" } : { action: "wait" }
+}
+
+/** Attempt latched but NO tx hash. Durable consumption still settles it; the setup-insufficiency
+ *  assert is the one retryable case; anything else waits until the latch ages out (the wallet
+ *  may still return / the tx may still land within the stale window). NEVER public/Sponsored. */
+function decideHashlessAttempt(e: PrivateFuelClaimEvidence): { action: PrivateFuelClaimAction } {
+	if (e.consumed) return { action: "consumed" }
+	if (e.setupInsufficiency) return { action: "private-fpc" }
+	return e.attemptAgedOut ? { action: "private-fpc" } : { action: "wait" }
 }
 
 /**

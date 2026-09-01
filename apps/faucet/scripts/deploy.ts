@@ -202,7 +202,27 @@ async function ensureAccountDeployed(manager: AccountManager, node: AztecNode, f
 
 // ── Generic deploy with idempotency ─────────────────────────────────────────
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
+/** The root failure text: prefer the wrapped cause (Aztec send errors nest it there). */
+function errorCauseMessage(err: unknown): string {
+	if (err instanceof Error && "cause" in err && err.cause instanceof Error) return err.cause.message
+	return err instanceof Error ? err.message : String(err)
+}
+
+/** Known instance: register it with THIS deployer's PXE so later calls resolve (an
+ *  already-registered contract is fine). */
+async function registerExisting(
+	deployer: Wallet,
+	instance: Awaited<ReturnType<typeof getContractInstanceFromInstantiationParams>>,
+	artifact: typeof TokenContractArtifact,
+): Promise<void> {
+	try {
+		await deployer.registerContract(instance, artifact)
+	} catch (err: unknown) {
+		const msg = err instanceof Error ? err.message : String(err)
+		if (!msg.includes("already")) throw err
+	}
+}
+
 async function deployIfMissing(
 	deployer: Wallet,
 	node: AztecNode,
@@ -222,12 +242,7 @@ async function deployIfMissing(
 	})
 	const existing = await node.getContract(instance.address)
 	if (existing) {
-		try {
-			await deployer.registerContract(instance, artifact)
-		} catch (err: unknown) {
-			const msg = err instanceof Error ? err.message : String(err)
-			if (!msg.includes("already")) throw err
-		}
+		await registerExisting(deployer, instance, artifact)
 		logger.info(`${label} already at ${instance.address.toString()} [EXISTING]`)
 		return { address: instance.address, status: "existing" }
 	}
@@ -244,13 +259,7 @@ async function deployIfMissing(
 			wait: { waitForStatus: TxStatus.PROPOSED },
 		})
 	} catch (err: unknown) {
-		const cause =
-			err instanceof Error && "cause" in err && err.cause instanceof Error
-				? err.cause.message
-				: err instanceof Error
-					? err.message
-					: String(err)
-		if (cause.includes("Existing nullifier")) {
+		if (errorCauseMessage(err).includes("Existing nullifier")) {
 			logger.info(`${label} at ${instance.address.toString()} (existing nullifier)`)
 			return { address: instance.address, status: "existing" }
 		}

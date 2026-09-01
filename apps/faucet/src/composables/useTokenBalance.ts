@@ -35,34 +35,33 @@ export function useTokenBalance(wallet: Wallet, tokenAddress: AztecAddress, acco
 	let timer: ReturnType<typeof setInterval> | null = null
 	let disposed = false
 
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
+	/** Settled independently: one failing path must not blank the other, and per-path raw
+	 *  errors (with stacks) are the diagnosable artifact - normalizeError produces toast copy
+	 *  that masks the cause ("Something went wrong"), so it is never stored here. */
+	function applySettledBalances(pub: PromiseSettledResult<bigint>, prv: PromiseSettledResult<bigint>): void {
+		if (pub.status === "fulfilled") publicBalance.value = pub.value
+		else console.warn(`[token-balance] balance_of_public failed (${tokenAddress.toString()}):`, pub.reason)
+		if (prv.status === "fulfilled") privateBalance.value = prv.value
+		else console.warn(`[token-balance] balance_of_private failed (${tokenAddress.toString()}):`, prv.reason)
+		const firstFailure = [pub, prv].find((r): r is PromiseRejectedResult => r.status === "rejected")
+		error.value = firstFailure ? describeReason(firstFailure.reason) : null
+	}
+
 	async function fetchOnce(): Promise<void> {
 		if (disposed) return
 		loading.value = true
 		try {
 			const contract = await Contract.at(tokenAddress, TokenContractArtifact, wallet)
-			// Settled independently: one failing path must not blank the other, and per-path raw
-			// errors (with stacks) are the diagnosable artifact - normalizeError produces toast copy
-			// that masks the cause ("Something went wrong"), so it is never stored here.
 			const [pub, prv] = await Promise.allSettled([
 				readBalance(wallet, contract, "balance_of_public", accountAddress),
 				readBalance(wallet, contract, "balance_of_private", accountAddress),
 			])
 			if (disposed) return
-			if (pub.status === "fulfilled") publicBalance.value = pub.value
-			else console.warn(`[token-balance] balance_of_public failed (${tokenAddress.toString()}):`, pub.reason)
-			if (prv.status === "fulfilled") privateBalance.value = prv.value
-			else console.warn(`[token-balance] balance_of_private failed (${tokenAddress.toString()}):`, prv.reason)
-			const firstFailure = [pub, prv].find((r): r is PromiseRejectedResult => r.status === "rejected")
-			error.value = firstFailure
-				? firstFailure.reason instanceof Error
-					? firstFailure.reason.message
-					: String(firstFailure.reason)
-				: null
+			applySettledBalances(pub, prv)
 		} catch (err) {
 			if (disposed) return
 			console.warn(`[token-balance] reader failed (${tokenAddress.toString()}):`, err)
-			error.value = err instanceof Error ? err.message : String(err)
+			error.value = describeReason(err)
 		} finally {
 			if (!disposed) loading.value = false
 		}
@@ -154,6 +153,10 @@ function extractFirstFr(raw: UtilityExecutionResultShape): bigint {
 	const first = raw.result?.[0]
 	if (first === undefined || first === null) return 0n
 	return toBigInt(first)
+}
+
+function describeReason(reason: unknown): string {
+	return reason instanceof Error ? reason.message : String(reason)
 }
 
 function toBigInt(value: unknown): bigint {

@@ -119,28 +119,32 @@ interface FpcDescriptor {
 	compatibleNodeVersions: Record<string, string[] | string>
 }
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (91 lines) — split when touched, never grow
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 20) — refactor when touched, never raise
-export async function runFpcGate(mode: GateMode): Promise<void> {
-	const here = fileURLToPath(new URL(".", import.meta.url))
-	const pkg = JSON.parse(readFileSync(resolvePackageFile("@alejoamiras/private-fee-juice", "package.json"), "utf8"))
-	const artifactBytes = readFileSync(resolvePackageFile("@alejoamiras/private-fee-juice", "target/private_contract-PrivateFPC.json"))
+type LiveNodeInfo = { nodeVersion: string; l1ChainId: number; rollupVersion: number }
 
-	const info = await rpc<{ nodeVersion: string; l1ChainId: number; rollupVersion: number }>("node_getNodeInfo", [])
-
-	// Select the descriptor whose network pins match the LIVE node (testnet vs mainnet) — never a
-	// flag, so an operator pointing at the wrong node can't pick the wrong pins. No match = STOP.
+/** Select the descriptor whose network pins match the LIVE node (testnet vs mainnet) — never a
+ *  flag, so an operator pointing at the wrong node can't pick the wrong pins. No match = STOP. */
+function selectDescriptor(here: string, info: LiveNodeInfo): FpcDescriptor {
 	const descriptors = ["private-fpc-canonical.json", "private-fpc-canonical-mainnet.json"].map(
 		(f) => JSON.parse(readFileSync(join(here, "..", "src", f), "utf8")) as FpcDescriptor,
 	)
 	const descriptor = descriptors.find((d) => d.network.l1ChainId === info.l1ChainId && d.network.rollupVersion === info.rollupVersion)
 	if (!descriptor) {
-		fail(
+		// Thrown directly (not via `fail`) so TS narrows the return to a found descriptor.
+		throw new Error(
 			`no FPC descriptor pins the live network (l1ChainId=${info.l1ChainId}, rollupVersion=${info.rollupVersion}) — ` +
 				"wrong node URL, a network reset, or a network this repo has not curated. STOP.",
 		)
-		return
 	}
+	return descriptor
+}
+
+export async function runFpcGate(mode: GateMode): Promise<void> {
+	const here = fileURLToPath(new URL(".", import.meta.url))
+	const pkg = JSON.parse(readFileSync(resolvePackageFile("@alejoamiras/private-fee-juice", "package.json"), "utf8"))
+	const artifactBytes = readFileSync(resolvePackageFile("@alejoamiras/private-fee-juice", "target/private_contract-PrivateFPC.json"))
+
+	const info = await rpc<LiveNodeInfo>("node_getNodeInfo", [])
+	const descriptor = selectDescriptor(here, info)
 
 	console.log("gate mode          :", mode)
 	console.log("node URL           :", NODE_URL)
@@ -148,14 +152,26 @@ export async function runFpcGate(mode: GateMode): Promise<void> {
 	console.log("installed package  :", String(pkg.version), "| descriptor:", descriptor.aztecVersion)
 	console.log("pinned FPC address :", PRIVATE_FPC_ADDRESS, `(salt ${PRIVATE_FPC_SALT})`)
 
+	const digest = await assertArtifactPins(pkg, descriptor, artifactBytes)
+
+	assertDistArtifactCoherence(artifactBytes)
+
+	assertNetworkCompat(descriptor, info, digest)
+
+	await assertLiveClass(artifactBytes, mode)
+
+	console.log(`\n✓ FPC gate green (${mode}) — compat + identity + digest + live class all agree.`)
+}
+
+/** Stages 3 + 3b + 1 + 2: descriptor/constants coherence, address re-derived from the INSTALLED
+ *  artifact + canonical salt + zero deployer (without this, descriptor+constant could be coherently
+ *  edited to an arbitrary absent address and still pass version+digest), exact version match, and
+ *  the artifact digest — checked BEFORE the compat lookup, which is keyed by it. Returns the digest. */
+async function assertArtifactPins(pkg: { version?: unknown }, descriptor: FpcDescriptor, artifactBytes: Buffer): Promise<string> {
 	// 3. Descriptor/constants coherence (also machine-asserted in private-fuel.test.ts).
 	if (descriptor.expectedAddress !== PRIVATE_FPC_ADDRESS || descriptor.salt !== PRIVATE_FPC_SALT) {
 		fail("descriptor/constants drift — private-fpc-canonical.json disagrees with the private-fuel.ts pins.")
 	}
-
-	// 3b. Re-derive the address from the INSTALLED artifact + canonical salt + zero deployer, and bind
-	// it to the pin. Without this, descriptor+constant could be coherently edited to an arbitrary
-	// (absent) address and still pass version+digest — the standalone gate would green a wrong pin.
 	const rederived = (
 		await getContractInstanceFromInstantiationParams(loadContractArtifact(JSON.parse(artifactBytes.toString("utf8"))), {
 			constructorArgs: [],
@@ -166,22 +182,22 @@ export async function runFpcGate(mode: GateMode): Promise<void> {
 	if (rederived !== PRIVATE_FPC_ADDRESS) {
 		fail(`re-derived address ${rederived} (from the installed artifact + canonical salt) != pinned ${PRIVATE_FPC_ADDRESS}.`)
 	}
-
 	// 1. Installed package must EXACTLY match the descriptor (the artifact side never widens).
 	if (String(pkg.version) !== descriptor.aztecVersion) {
 		fail(`installed @alejoamiras/private-fee-juice ${pkg.version} != descriptor aztecVersion ${descriptor.aztecVersion}.`)
 	}
-
-	// 2. Artifact digest — checked BEFORE the compat lookup, which is keyed by this digest.
 	const digest = createHash("sha256").update(artifactBytes).digest("hex")
 	if (digest !== descriptor.artifactSha256) {
 		fail(`installed artifact sha256 ${digest} != descriptor ${descriptor.artifactSha256}.`)
 	}
+	return digest
+}
 
-	// 2b. The RUNTIME-imported artifact (dist/target — what `PrivateFPCContract` actually loads)
-	// must be CORE-equal to the gated target artifact. The two copies legitimately differ only in
-	// the debug `file_map`; a divergent dist copy would let the wallet derive/execute against
-	// bytes the gate never checked (codex audit).
+/** 2b. The RUNTIME-imported artifact (dist/target — what `PrivateFPCContract` actually loads)
+ *  must be CORE-equal to the gated target artifact. The two copies legitimately differ only in
+ *  the debug `file_map`; a divergent dist copy would let the wallet derive/execute against
+ *  bytes the gate never checked (codex audit). */
+function assertDistArtifactCoherence(artifactBytes: Buffer): void {
 	const canonicalize = (value: unknown): unknown => {
 		if (Array.isArray(value)) return value.map(canonicalize)
 		if (value && typeof value === "object") {
@@ -206,10 +222,12 @@ export async function runFpcGate(mode: GateMode): Promise<void> {
 			"dist/target PrivateFPC artifact diverges from the gated target artifact (beyond file_map) — the runtime would use unchecked bytes.",
 		)
 	}
+}
 
-	// 1 (compat). Digest-keyed, human-curated node compat: the live nodeVersion must be in the
-	// entry for EXACTLY this artifact digest. Missing entry = RED — compat is never inherited
-	// across artifact changes.
+/** 1 (compat) + 1b. Digest-keyed, human-curated node compat (the live nodeVersion must be in the
+ *  entry for EXACTLY this artifact digest — compat is never inherited across artifact changes;
+ *  missing entry = RED) plus the hard network-identity pins. */
+function assertNetworkCompat(descriptor: FpcDescriptor, info: LiveNodeInfo, digest: string): void {
 	const compatEntry = descriptor.compatibleNodeVersions[digest]
 	if (!Array.isArray(compatEntry)) {
 		fail(`no curated compatibleNodeVersions entry for artifact digest ${digest} — re-curate the descriptor before any live use.`)
@@ -221,51 +239,50 @@ export async function runFpcGate(mode: GateMode): Promise<void> {
 				"for the pinned artifact — a version bump is exactly the operation that opens the unrecoverable-deposit window.",
 		)
 	}
-
-	// 1b. Hard network-identity pins — running against the wrong network is operator error.
 	if (info.l1ChainId !== descriptor.network.l1ChainId) {
 		fail(`live l1ChainId ${info.l1ChainId} != pinned ${descriptor.network.l1ChainId} — wrong network.`)
 	}
 	if (info.rollupVersion !== descriptor.network.rollupVersion) {
 		fail(`live rollupVersion ${info.rollupVersion} != pinned ${descriptor.network.rollupVersion} — wrong rollup (reset or fork?).`)
 	}
+}
 
-	// 4. Live class at the pinned address (RPC failure = error, NOT absence).
+/** 4. Live class at the pinned address (RPC failure = error, NOT absence). BOTH class ids must
+ *  equal the expected class: checking only `original` would GREEN an UPGRADED contract — its
+ *  original class stays correct while `current` points at different/malicious code that actually
+ *  runs, and deposits to it can be consumed or stranded (fund loss). */
+async function assertLiveClass(artifactBytes: Buffer, mode: GateMode): Promise<void> {
 	const expectedClassId = (await getContractClassFromArtifact(loadContractArtifact(JSON.parse(artifactBytes.toString("utf8"))))).id
 	const live = await rpcOptional<{ originalContractClassId?: string; currentContractClassId?: string }>("node_getContract", [
 		PRIVATE_FPC_ADDRESS,
 	])
 	// (RPC failure already threw above; a malformed no-result response now throws too — never absence.)
-	if (live) {
-		const expected = expectedClassId.toString()
-		const originalClass = String(live.originalContractClassId ?? "")
-		// BOTH ids must equal the expected class. Checking only `original` would GREEN an UPGRADED
-		// contract: its original class stays correct while `current` points at different/malicious
-		// code that actually runs — and deposits to it can be consumed or stranded (fund loss).
-		const currentClass = String(live.currentContractClassId ?? "")
-		if (originalClass !== expected) {
+	if (!live) {
+		if (mode === "require-deployed") {
 			fail(
-				`the pinned address is DEPLOYED with original class ${originalClass}, but the installed artifact ` +
-					`computes ${expected} — wrong contract at our address; never deposit.`,
+				"the pinned address is NOT deployed and --mode require-deployed was requested — " +
+					"funding/canary/promotion must never run against an undeployed pin. Deploy first (predeploy mode gates that).",
 			)
 		}
-		if (currentClass !== expected) {
-			fail(
-				`the pinned address has been UPGRADED (current class ${currentClass} != expected ${expected}) — ` +
-					"the running code is not the pinned artifact; never deposit.",
-			)
-		}
-		console.log("live contract      : DEPLOYED with the expected class (original == current ==", `${expected})`)
-	} else if (mode === "require-deployed") {
-		fail(
-			"the pinned address is NOT deployed and --mode require-deployed was requested — " +
-				"funding/canary/promotion must never run against an undeployed pin. Deploy first (predeploy mode gates that).",
-		)
-	} else {
 		console.log("live contract      : absent (clean) — deploy via deploy-private-fpc-testnet.ts")
+		return
 	}
-
-	console.log(`\n✓ FPC gate green (${mode}) — compat + identity + digest + live class all agree.`)
+	const expected = expectedClassId.toString()
+	const originalClass = String(live.originalContractClassId ?? "")
+	const currentClass = String(live.currentContractClassId ?? "")
+	if (originalClass !== expected) {
+		fail(
+			`the pinned address is DEPLOYED with original class ${originalClass}, but the installed artifact ` +
+				`computes ${expected} — wrong contract at our address; never deposit.`,
+		)
+	}
+	if (currentClass !== expected) {
+		fail(
+			`the pinned address has been UPGRADED (current class ${currentClass} != expected ${expected}) — ` +
+				"the running code is not the pinned artifact; never deposit.",
+		)
+	}
+	console.log("live contract      : DEPLOYED with the expected class (original == current ==", `${expected})`)
 }
 
 /** True only when this file is the process entrypoint (not when imported). */
