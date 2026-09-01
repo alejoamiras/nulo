@@ -166,26 +166,16 @@ const OPERATIONAL_ALLOWLIST = [
 	"apps/faucet/public/testnet-bridge.journal.jsonl",
 ]
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (92 lines) — split when touched, never grow
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
-async function build(intentPath: string): Promise<void> {
-	const sepolia = process.env.SEPOLIA_RPC_URL
-	if (!sepolia) throw new Error("SEPOLIA_RPC_URL required (source packages/bridge-core/.env)")
-	const pk = process.env.PRIVATE_KEY
-	if (!pk) throw new Error("PRIVATE_KEY required (source packages/bridge-core/.env)")
-
-	const identity = await probeIdentity(NODE_URL)
-	const walletChainId = (identity.l1ChainId ^ identity.rollupVersion) >>> 0
-
-	// Network-identity pinning against the COMMITTED previous-arc intent: no network reset has
-	// happened on this line (nodeVersion 5.0.0, rollupVersion unchanged), so every node-claimed
-	// L1 address MUST be byte-equal to the values the 5.0.0 arc recorded and committed. A
-	// mismatch is a STOP — either the network reset (redeploy plan changes) or the node is
-	// lying/stale (never build an intent from it). Code-presence corroboration below stays: this
-	// check authenticates the claims against history, that one against the L1 itself.
-	// Read the pin from the COMMITTED blob (git show HEAD:…), never the working tree:
-	// the lessons dir is allowlisted-dirty during live arcs, so a tree read could be
-	// silently re-pointed without tripping tree discipline (review finding #7).
+/** Network-identity pinning against the COMMITTED previous-arc intent: no network reset has
+ *  happened on this line (nodeVersion 5.0.0, rollupVersion unchanged), so every node-claimed
+ *  L1 address MUST be byte-equal to the values the 5.0.0 arc recorded and committed. A
+ *  mismatch is a STOP — either the network reset (redeploy plan changes) or the node is
+ *  lying/stale (never build an intent from it). Code-presence corroboration in `build` stays:
+ *  this check authenticates the claims against history, that one against the L1 itself.
+ *  Read the pin from the COMMITTED blob (git show HEAD:…), never the working tree:
+ *  the lessons dir is allowlisted-dirty during live arcs, so a tree read could be
+ *  silently re-pointed without tripping tree discipline (review finding #7). */
+function assertNoResetPins(identity: Awaited<ReturnType<typeof probeIdentity>>): void {
 	const previousArc = JSON.parse(git(["show", "HEAD:implementations-plan/aztec-5.0.0-stable/lessons/intent.json"], repoRoot)) as {
 		identity: { l1ChainId: number; rollupVersion: number }
 		l1: Record<string, string>
@@ -211,6 +201,17 @@ async function build(intentPath: string): Promise<void> {
 			)
 		}
 	}
+}
+
+async function build(intentPath: string): Promise<void> {
+	const sepolia = process.env.SEPOLIA_RPC_URL
+	if (!sepolia) throw new Error("SEPOLIA_RPC_URL required (source packages/bridge-core/.env)")
+	const pk = process.env.PRIVATE_KEY
+	if (!pk) throw new Error("PRIVATE_KEY required (source packages/bridge-core/.env)")
+
+	const identity = await probeIdentity(NODE_URL)
+	const walletChainId = (identity.l1ChainId ^ identity.rollupVersion) >>> 0
+	assertNoResetPins(identity)
 
 	// Independent L1 corroboration of the node's claims — a lying/stale node fails here. The node
 	// controls these strings, so validate them as addresses BEFORE they reach `cast`.

@@ -342,7 +342,24 @@ function guardDeployment(rec: BridgeJournalRecord): boolean {
  * the v2 envelope is opened (the ONLY accepted shape) and verified against the record's display
  * fields; mismatch rewrites the display from the envelope and stops for an explicit re-click.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
+/** A REJECTED signature prompt is not an unseal failure: no key was derived, nothing tested -
+ *  revoking trust there would re-impose the 2-signature self-test for a change of mind. A real
+ *  open failure revokes trust ONLY for the account that claims to have sealed this record - a
+ *  wrong-account attempt must not destroy the connected account's valid verdict. */
+function handleUnsealFailure(rec: DepositJournalRecord, e: unknown, connected: string | null): void {
+	if (isUserRejection(e)) {
+		setRuntime(rec.id, { attention: "error", note: "Signature request declined - press CLAIM when you're ready." })
+		return
+	}
+	if (connected && rec.sealerL1 && connected === rec.sealerL1.toLowerCase()) {
+		revokeSealTrust(deps.kv, rec.chainId, connected)
+	}
+	setRuntime(rec.id, {
+		attention: "unseal-failed",
+		note: "Your signature didn't open this record. If this address lives in more than one wallet app, retry with the one used at deposit time. Nothing was deleted.",
+	})
+}
+
 async function resolvePrivateSecret(rec: DepositJournalRecord): Promise<{ secretHex: string; envelope: DepositEnvelopeV2 } | null> {
 	const cached = secretCache.get(rec.id)
 	if (cached) return cached
@@ -367,21 +384,7 @@ async function resolvePrivateSecret(rec: DepositJournalRecord): Promise<{ secret
 		)
 		envelope = await openDepositEnvelope(key, rec.sealedEnvelope)
 	} catch (e) {
-		// A REJECTED signature prompt is not an unseal failure: no key was derived, nothing tested -
-		// revoking trust here would re-impose the 2-signature self-test for a change of mind.
-		if (isUserRejection(e)) {
-			setRuntime(rec.id, { attention: "error", note: "Signature request declined - press CLAIM when you're ready." })
-			return null
-		}
-		// Revoke trust ONLY for the account that claims to have sealed this record - a wrong-account
-		// attempt must not destroy the connected account's valid verdict.
-		if (connected && rec.sealerL1 && connected === rec.sealerL1.toLowerCase()) {
-			revokeSealTrust(deps.kv, rec.chainId, connected)
-		}
-		setRuntime(rec.id, {
-			attention: "unseal-failed",
-			note: "Your signature didn't open this record. If this address lives in more than one wallet app, retry with the one used at deposit time. Nothing was deleted.",
-		})
+		handleUnsealFailure(rec, e, connected)
 		return null
 	}
 	if (envelope.sealerL1 && connected && envelope.sealerL1.toLowerCase() !== connected) {
@@ -954,22 +957,28 @@ async function runWithdrawConsumeInner(id: string): Promise<void> {
 	})
 }
 
+/** Whether (and how) a record participates in session resume. "skip" covers completed records,
+ *  records neither session-live nor in a prompt-free receipt wait, and mid-flight records the flow
+ *  itself is still driving (not resumable yet: a deposit without a leafIndex is between L1 legs, a
+ *  withdraw without an exitTxHash is mid-exit-prompt - re-entering them here races the flow, and
+ *  would tag a live provisional record unknown-outcome). */
+function resumeActionFor(rec: BridgeJournalRecord): "skip" | "deposit" | "withdraw" {
+	if (rec.completedAt) return "skip"
+	const promptFreeWait =
+		(rec.direction === "deposit" && (rec as DepositJournalRecord).claimTxHash) ||
+		(rec.direction === "withdraw" && (rec as WithdrawJournalRecord).consumeTxHash)
+	if (!sessionLive.has(rec.id) && !promptFreeWait) return "skip"
+	if (rec.direction === "deposit" && !(rec as DepositJournalRecord).leafIndex && !(rec as DepositJournalRecord).claimTxHash) return "skip"
+	if (rec.direction === "withdraw" && !(rec as WithdrawJournalRecord).exitTxHash) return "skip"
+	return rec.direction === "deposit" ? "deposit" : "withdraw"
+}
+
 /** Auto-continue ONLY what this page session initiated, plus prompt-free receipt waits. */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
 export function resumeSessionWork(): void {
 	for (const rec of records.value) {
-		if (rec.completedAt) continue
-		const promptFreeWait =
-			(rec.direction === "deposit" && (rec as DepositJournalRecord).claimTxHash) ||
-			(rec.direction === "withdraw" && (rec as WithdrawJournalRecord).consumeTxHash)
-		if (!sessionLive.has(rec.id) && !promptFreeWait) continue
-		// Mid-flight records the flow itself is still driving aren't resumable yet: a deposit without a
-		// leafIndex is between L1 legs, a withdraw without an exitTxHash is mid-exit-prompt - re-entering
-		// them here races the flow (and would tag a live provisional record unknown-outcome).
-		if (rec.direction === "deposit" && !(rec as DepositJournalRecord).leafIndex && !(rec as DepositJournalRecord).claimTxHash) continue
-		if (rec.direction === "withdraw" && !(rec as WithdrawJournalRecord).exitTxHash) continue
-		if (rec.direction === "deposit") void runDepositClaim(rec.id, { interactive: false })
-		else void runWithdrawConsume(rec.id)
+		const action = resumeActionFor(rec)
+		if (action === "deposit") void runDepositClaim(rec.id, { interactive: false })
+		else if (action === "withdraw") void runWithdrawConsume(rec.id)
 	}
 }
 

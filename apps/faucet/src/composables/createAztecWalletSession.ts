@@ -338,6 +338,23 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		return connectImpl(true)
 	}
 
+	/** Remembered-window fire: a sole claimant of the remembered id auto-connects; otherwise
+	 *  the picker shows — non-claimant wallets must never sit hidden for the full 60s
+	 *  discovery timeout. Best-effort detection only — the emoji verification remains the
+	 *  actual trust anchor. */
+	function fireRememberedWindow(preferredId: string, flowEpoch: number): void {
+		ambiguityTimer = null
+		if (isStale(flowEpoch) || status.value !== "discovering") return
+		const cs = claimantsOf(preferredId)
+		if (cs.length === 1) {
+			connectingViaRemembered = true
+			void proceedWith(cs[0].key, flowEpoch)
+		} else if (discoveredWallets.value.length > 0) {
+			status.value = "choosing"
+			pickerOpen.value = true
+		}
+	}
+
 	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 57) — refactor when touched, never raise
 	async function connectImpl(forcePicker: boolean): Promise<void> {
 		if (activeFlowEpoch !== null || status.value === "connected") return
@@ -401,24 +418,8 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 					} else if (ambiguityTimer === null && status.value === "discovering") {
 						// FIRST announcement (claimant or not) opens the bounded
 						// window. Discovery stays LIVE during it so buffered + late
-						// announcements are seen. At fire: a sole claimant of the
-						// remembered id auto-connects; otherwise the picker shows —
-						// non-claimant wallets must never sit hidden for the full
-						// 60s discovery timeout. Best-effort detection only — the
-						// emoji verification remains the actual trust anchor.
-						// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
-						ambiguityTimer = setTimeout(() => {
-							ambiguityTimer = null
-							if (isStale(flowEpoch) || status.value !== "discovering") return
-							const cs = claimantsOf(preferred.id)
-							if (cs.length === 1) {
-								connectingViaRemembered = true
-								void proceedWith(cs[0].key, flowEpoch)
-							} else if (discoveredWallets.value.length > 0) {
-								status.value = "choosing"
-								pickerOpen.value = true
-							}
-						}, REMEMBERED_AMBIGUITY_WINDOW_MS)
+						// announcements are seen — see fireRememberedWindow.
+						ambiguityTimer = setTimeout(() => fireRememberedWindow(preferred.id, flowEpoch), REMEMBERED_AMBIGUITY_WINDOW_MS)
 					}
 				} else if (status.value === "discovering") {
 					// Fresh path: the picker shows from the first announcement, waitless.
@@ -511,7 +512,16 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		}
 	}
 
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
+	/** A flow that went stale AFTER the wallet-side session came to exist (post-confirm, or
+	 *  mid-setup) leaves a live session behind — disconnect it, best-effort. */
+	async function disconnectStaleSession(flowProvider: typeof provider): Promise<void> {
+		try {
+			await flowProvider?.disconnect()
+		} catch {
+			// best-effort
+		}
+	}
+
 	async function confirmVerification(): Promise<void> {
 		if (!pending) return
 		const flowEpoch = epoch
@@ -527,12 +537,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		try {
 			const w = await flowPending.confirm()
 			if (isStale(flowEpoch)) {
-				// Confirmed-but-stale: the wallet-side session exists — disconnect it.
-				try {
-					await flowProvider?.disconnect()
-				} catch {
-					// best-effort
-				}
+				await disconnectStaleSession(flowProvider)
 				return
 			}
 			wallet.value = w
@@ -695,7 +700,6 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 
 	/** Shared post-selection tail for BOTH the auto path and the choose-account confirm path.
 	 *  Owns its errors identically for both callers (plan D-20) — it never throws. */
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 	async function finishSetup(flowEpoch: number, flowWallet: Wallet, flowProvider: WalletProvider | null): Promise<void> {
 		try {
 			// The user already clicked Approve - we're now doing post-approval setup (registering
@@ -704,11 +708,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 			status.value = "setting-up"
 			await config.registerContracts(flowWallet)
 			if (isStale(flowEpoch)) {
-				try {
-					await flowProvider?.disconnect()
-				} catch {
-					// best-effort
-				}
+				await disconnectStaleSession(flowProvider)
 				return
 			}
 
@@ -872,28 +872,16 @@ export interface ParsedGrantedAccounts {
  * Aliases are sanitized (control/bidi strip) and capped; addresses deduped (first wins); the
  * list is bounded with DISCLOSED truncation.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 17) — refactor when touched, never raise
 export function parseGrantedAccounts(result: unknown): ParsedGrantedAccounts {
-	const none: ParsedGrantedAccounts = { accounts: [], hiddenCount: 0 }
-	if (!result || typeof result !== "object") return none
-	const granted = (result as { granted?: unknown[] }).granted
-	if (!Array.isArray(granted)) return none
-	const cap = granted.find((c): c is GrantedAccountsCap => {
-		return typeof c === "object" && c !== null && (c as { type?: unknown }).type === "accounts"
-	})
-	if (!cap?.accounts || !Array.isArray(cap.accounts)) return none
+	const entries = findGrantedAccountEntries(result)
+	if (!entries) return { accounts: [], hiddenCount: 0 }
 
 	const seen = new Set<string>()
 	const accounts: GrantedAccount[] = []
 	let hiddenCount = 0
-	for (const entry of cap.accounts) {
-		let address: string
-		try {
-			const raw = typeof entry?.item === "string" ? entry.item : (entry?.item?.toString() ?? "")
-			address = AztecAddress.fromStringUnsafe(raw).toString()
-		} catch {
-			continue
-		}
+	for (const entry of entries) {
+		const address = parseEntryAddress(entry)
+		if (address === null) continue
 		if (seen.has(address)) continue
 		seen.add(address)
 		if (accounts.length >= MAX_GRANTED_ACCOUNTS) {
@@ -904,6 +892,30 @@ export function parseGrantedAccounts(result: unknown): ParsedGrantedAccounts {
 		accounts.push({ address, alias: truncateName(rawAlias.replace(UNSAFE_ALIAS_CHARS, "").trim(), ALIAS_MAX) })
 	}
 	return { accounts, hiddenCount }
+}
+
+/** The accounts capability's entry list out of the wallet-controlled result; null when absent
+ *  or malformed at any level. */
+function findGrantedAccountEntries(result: unknown): NonNullable<GrantedAccountsCap["accounts"]> | null {
+	if (!result || typeof result !== "object") return null
+	const granted = (result as { granted?: unknown[] }).granted
+	if (!Array.isArray(granted)) return null
+	const cap = granted.find((c): c is GrantedAccountsCap => {
+		return typeof c === "object" && c !== null && (c as { type?: unknown }).type === "accounts"
+	})
+	if (!cap?.accounts || !Array.isArray(cap.accounts)) return null
+	return cap.accounts
+}
+
+/** Per-entry address projection: round-trip `AztecAddress.fromStringUnsafe` — syntactic +
+ *  canonical-form validation ONLY; a throwing `toString` or malformed entry yields null (skip). */
+function parseEntryAddress(entry: { item?: { toString(): string } | string } | null): string | null {
+	try {
+		const raw = typeof entry?.item === "string" ? entry.item : (entry?.item?.toString() ?? "")
+		return AztecAddress.fromStringUnsafe(raw).toString()
+	} catch {
+		return null
+	}
 }
 
 /** Back-compat projection of parseGrantedAccounts (existing call sites and tests). */

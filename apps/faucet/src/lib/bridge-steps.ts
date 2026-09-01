@@ -219,21 +219,34 @@ function buildPhases(
 ): BridgePhase[] {
 	const activeIndex = keys.indexOf(activeKey)
 	const failed = !!rt.attention && FAILED_ATTENTIONS.has(rt.attention)
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 20) — refactor when touched, never raise
 	return keys.map((key, i) => {
 		if (completed) return { key, label: labels[key], state: "done" as const }
 		if (i < activeIndex) return { key, label: labels[key], state: "done" as const }
-		if (i === activeIndex) {
-			return {
-				key,
-				label: labels[key],
-				state: failed ? ("failed" as const) : ("active" as const),
-				detail: failed ? rt.note : (rt.stepDetail ?? prompts[key]),
-				progress: progress[key],
-				eta: failed ? undefined : etas[key],
-				...(key === "confirm" && landedConfirm && !failed ? { landed: true } : {}),
-			}
-		}
+		if (i === activeIndex) return activePhase(key, { labels, prompts, etas, progress, rt, failed, landedConfirm })
 		return { key, label: labels[key], state: "pending" as const }
 	})
+}
+
+function activePhase(
+	key: BridgePhase["key"],
+	ctx: {
+		labels: Record<string, string>
+		prompts: Record<string, string>
+		etas: Partial<Record<string, string>>
+		progress: Partial<Record<string, BridgePhase["progress"]>>
+		rt: RecordRuntime
+		failed: boolean
+		landedConfirm?: boolean
+	},
+): BridgePhase {
+	const { labels, prompts, etas, progress, rt, failed, landedConfirm } = ctx
+	return {
+		key,
+		label: labels[key],
+		state: failed ? ("failed" as const) : ("active" as const),
+		detail: failed ? rt.note : (rt.stepDetail ?? prompts[key]),
+		progress: progress[key],
+		eta: failed ? undefined : etas[key],
+		...(key === "confirm" && landedConfirm && !failed ? { landed: true } : {}),
+	}
 }
