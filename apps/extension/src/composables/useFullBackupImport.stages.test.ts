@@ -429,16 +429,22 @@ describe("stage-order law (real wiring, happy path with every slice)", () => {
 						primaryEndpointId: "e2",
 					},
 				],
-				"account-state": [{ networkId: "src-net-1", contracts: [], senders: [AS_SENDER] }],
+				"account-state": [
+					{ networkId: "src-net-1", contracts: [], senders: [AS_SENDER] },
+					// Work targeting the FAILED network: its id never remaps, so the chain-sync
+					// normalizer must record it, never probe it.
+					{ networkId: "src-net-2", contracts: [], senders: [AS_SENDER] },
+				],
 			},
 		})
 		await c.restoreBackup()
 		expect(accountStateClient.restore).toHaveBeenCalled()
 		const nets = (accountStateClient.restore.mock.calls[0] as unknown[])[1] as Array<{ id: string }>
 		expect(nets.map((n) => n.id)).toEqual(["new-net-1"])
-		// Failed networks are never probed: every probe call names a SUCCESSFUL id.
+		// Failed networks are never probed — even with account-state work pointed at them:
+		// exactly the successful id is probed, nothing else.
 		const probed = networkClient.probeNodeStatus.mock.calls.map((call) => call[0])
-		expect(probed.every((id) => id === "new-net-1")).toBe(true)
+		expect(probed).toEqual(["new-net-1"])
 	})
 })
 
