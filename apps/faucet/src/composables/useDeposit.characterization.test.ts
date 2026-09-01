@@ -24,6 +24,7 @@ const storageBacking = new Map<string, string>()
 	},
 }
 
+import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Fr } from "@aztec/aztec.js/fields"
 import { GasFees } from "@aztec/stdlib/gas"
 import { PRIVATE_FPC_ADDRESS, SWAP_BRIDGE_ROUTER_ABI, feeJuiceAddress } from "@nulo/bridge-core"
@@ -140,7 +141,9 @@ vi.mock("./useL1Wallet", () => {
 			return `0x${"a".repeat(130)}`
 		},
 		signTypedData: async (typed: Record<string, unknown>) => {
-			h.t("l1.signTypedData", { primaryType: typed.primaryType, message: typed.message })
+			// domain + types are pinned too: a wrong chain id or Permit2 verifying contract
+			// must fail the trace, not just a wrong message (codex impl-review MEDIUM).
+			h.t("l1.signTypedData", { primaryType: typed.primaryType, domain: typed.domain, types: typed.types, message: typed.message })
 			return `0x${"b".repeat(130)}`
 		},
 		writeContract: async (args: { functionName: string; args?: unknown[]; address?: string }) => {
@@ -305,9 +308,16 @@ vi.mock("./useBridgeJournal", async (importOriginal) => {
 })
 
 import { InboxAbi } from "@aztec/l1-artifacts"
-import { FeeJuicePortalAbi, type DepositJournalRecord } from "@nulo/bridge-core"
+import {
+	FeeJuicePortalAbi,
+	type DepositJournalRecord,
+	deriveTokenClaimSecret,
+	openDepositEnvelope,
+	recoveryKeyFromSignature,
+} from "@nulo/bridge-core"
+import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { __resetJournalForTests, addRecord, useBridgeJournal } from "./useBridgeJournal"
-import { ensureDepositJournalDeps, useDepositFlow } from "./useDeposit"
+import { ensureDepositJournalDeps, overrideFuelClaim, useDepositFlow } from "./useDeposit"
 
 // ── receipts with REAL-encoded event logs (parseEventLogs runs for real) ─────
 function routerLog(eventName: "Bridge" | "BridgeWithFuel", aztecRecipient: `0x${string}`, values: unknown[]) {
@@ -834,5 +844,78 @@ describe("private ladder: the remaining decisions fail-stop (never public)", () 
 		} as never)
 		const whyWait = await expectStop(await deps.claim(waiting, "0x5555", undefined))
 		expect(whyWait).toContain("waiting for its receipt")
+	})
+})
+
+describe("commitment identity + envelope round-trip (codex impl-review pins)", () => {
+	test("private/plain: the record id IS hash(deriveTokenClaimSecret(secret, recipient)); the finalized envelope decrypts to the full claim material", async () => {
+		h.fj.publicBalance = 5n
+		const id = await runDeposit(1000n, true)
+		// Seeded Fr.random sequence: the token secret is the FIRST draw (0x1111).
+		const secret = new Fr(0x1111n)
+		const expectedId = (await computeSecretHash(deriveTokenClaimSecret(secret, AztecAddress.fromStringUnsafe(RECIPIENT)))).toString()
+		expect(id).toBe(expectedId)
+
+		// Decrypt the FINALIZED envelope with the recovery key derived from the (fake, fixed)
+		// seal signature — proves the re-sealed material, not just its presence.
+		const rec = useBridgeJournal().records.value.find((r) => r.id === id) as { sealedEnvelope?: string } | undefined
+		const key = await recoveryKeyFromSignature(`0x${"a".repeat(130)}`)
+		const envelope = await openDepositEnvelope(key, rec?.sealedEnvelope as string)
+		expect(envelope).toMatchObject({
+			secret: secret.toString(),
+			recipient: RECIPIENT,
+			amount: "1000",
+			sealerL1: FROM,
+			leafIndex: "11",
+		})
+	})
+
+	test("private/fueled: the commitment binds the SECOND Fr draw (the first is the fuel salt)", async () => {
+		const id = await runDeposit(5000n, true, 1000n)
+		const tokenSecret = new Fr(0x1112n)
+		const expectedId = (
+			await computeSecretHash(deriveTokenClaimSecret(tokenSecret, AztecAddress.fromStringUnsafe(RECIPIENT)))
+		).toString()
+		expect(id).toBe(expectedId)
+	})
+
+	test("public/plain: the commitment is hash(rawSecret) — no derivation", async () => {
+		h.fj.publicBalance = 5n
+		const id = await runDeposit(1000n, false)
+		const expectedId = (await computeSecretHash(new Fr(0x1111n))).toString()
+		expect(id).toBe(expectedId)
+	})
+})
+
+describe("public ladder: sponsored arm + wait sendWhy (codex impl-review pins)", () => {
+	test("user override routes to plain sponsored — no fjwc latch, no standalone claim", async () => {
+		const deps = wiredDeps()
+		const rec = mkRec({ id: "0xrovr", fuel: { ...FUEL_OK } } as never)
+		overrideFuelClaim("0xrovr")
+		const i = await deps.claim(rec, rec.secret as string, undefined)
+		await i.simulate()
+		await i.send()
+		const feeSeen = h.trace.find(([n]) => n === "bridge.claim_public.simulate")?.[1] as { fee: { paymentMethod: string } }
+		expect(feeSeen.fee.paymentMethod).toBe("SponsoredFeePaymentMethod")
+		expect(h.trace.some(([n]) => n === "journal.updateRecord")).toBe(false)
+		expect(h.trace.some(([n]) => n === "fj.claim.send")).toBe(false)
+	})
+
+	test("a consumed prior attempt routes to plain sponsored", async () => {
+		const deps = wiredDeps()
+		const rec = mkRec({ id: "0xrcon", fuel: { ...FUEL_OK, claimAttempt: true, consumed: true } } as never)
+		const i = await deps.claim(rec, rec.secret as string, undefined)
+		await i.simulate()
+		const feeSeen = h.trace.find(([n]) => n === "bridge.claim_public.simulate")?.[1] as { fee: { paymentMethod: string } }
+		expect(feeSeen.fee.paymentMethod).toBe("SponsoredFeePaymentMethod")
+	})
+
+	test("the wait stop keeps the historical ASYMMETRIC messages (send is shorter)", async () => {
+		const deps = wiredDeps()
+		h.l2.txReceiptStatus = "pending"
+		const rec = mkRec({ id: "0xrwait", fuel: { ...FUEL_OK, claimAttempt: true, claimTxHash: "0xoldattempt" } } as never)
+		const i = await deps.claim(rec, rec.secret as string, undefined)
+		await expect(i.simulate()).rejects.toThrow("fuel claim attempt pending - waiting for its receipt before retrying")
+		await expect(i.send()).rejects.toThrow(/^fuel claim attempt pending$/)
 	})
 })

@@ -634,6 +634,11 @@ exports[`deposit() characterization > private/fueled: bridge-secret salt derivat
   [
     "l1.signTypedData",
     {
+      "domain": {
+        "chainId": 11155111,
+        "name": "Permit2",
+        "verifyingContract": "0x00000000000000000000000000000000000000cc",
+      },
       "message": {
         "deadline": 1700000600n,
         "nonce": 302240678275694148452607n,
@@ -658,6 +663,90 @@ exports[`deposit() characterization > private/fueled: bridge-secret salt derivat
         },
       },
       "primaryType": "PermitWitnessTransferFrom",
+      "types": {
+        "BridgeWitness": [
+          {
+            "name": "tokenPortal",
+            "type": "address",
+          },
+          {
+            "name": "bridgeToken",
+            "type": "address",
+          },
+          {
+            "name": "totalAmount",
+            "type": "uint256",
+          },
+          {
+            "name": "fuelAmount",
+            "type": "uint256",
+          },
+          {
+            "name": "aztecRecipient",
+            "type": "bytes32",
+          },
+          {
+            "name": "fuelRecipient",
+            "type": "bytes32",
+          },
+          {
+            "name": "tokenSecretHash",
+            "type": "bytes32",
+          },
+          {
+            "name": "fuelSecretHash",
+            "type": "bytes32",
+          },
+          {
+            "name": "minFuelOutput",
+            "type": "uint256",
+          },
+          {
+            "name": "routeHash",
+            "type": "bytes32",
+          },
+          {
+            "name": "isPrivate",
+            "type": "bool",
+          },
+          {
+            "name": "swapTarget",
+            "type": "address",
+          },
+        ],
+        "PermitWitnessTransferFrom": [
+          {
+            "name": "permitted",
+            "type": "TokenPermissions",
+          },
+          {
+            "name": "spender",
+            "type": "address",
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+          },
+          {
+            "name": "deadline",
+            "type": "uint256",
+          },
+          {
+            "name": "witness",
+            "type": "BridgeWitness",
+          },
+        ],
+        "TokenPermissions": [
+          {
+            "name": "token",
+            "type": "address",
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+          },
+        ],
+      },
     },
   ],
   [
@@ -911,6 +1000,11 @@ exports[`deposit() characterization > private/plain: seal-before-L1 with write-a
   [
     "l1.signTypedData",
     {
+      "domain": {
+        "chainId": 11155111,
+        "name": "Permit2",
+        "verifyingContract": "0x00000000000000000000000000000000000000cc",
+      },
       "message": {
         "deadline": 1700000600n,
         "nonce": 302240678275694148452607n,
@@ -935,6 +1029,90 @@ exports[`deposit() characterization > private/plain: seal-before-L1 with write-a
         },
       },
       "primaryType": "PermitWitnessTransferFrom",
+      "types": {
+        "BridgeWitness": [
+          {
+            "name": "tokenPortal",
+            "type": "address",
+          },
+          {
+            "name": "bridgeToken",
+            "type": "address",
+          },
+          {
+            "name": "totalAmount",
+            "type": "uint256",
+          },
+          {
+            "name": "fuelAmount",
+            "type": "uint256",
+          },
+          {
+            "name": "aztecRecipient",
+            "type": "bytes32",
+          },
+          {
+            "name": "fuelRecipient",
+            "type": "bytes32",
+          },
+          {
+            "name": "tokenSecretHash",
+            "type": "bytes32",
+          },
+          {
+            "name": "fuelSecretHash",
+            "type": "bytes32",
+          },
+          {
+            "name": "minFuelOutput",
+            "type": "uint256",
+          },
+          {
+            "name": "routeHash",
+            "type": "bytes32",
+          },
+          {
+            "name": "isPrivate",
+            "type": "bool",
+          },
+          {
+            "name": "swapTarget",
+            "type": "address",
+          },
+        ],
+        "PermitWitnessTransferFrom": [
+          {
+            "name": "permitted",
+            "type": "TokenPermissions",
+          },
+          {
+            "name": "spender",
+            "type": "address",
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+          },
+          {
+            "name": "deadline",
+            "type": "uint256",
+          },
+          {
+            "name": "witness",
+            "type": "BridgeWitness",
+          },
+        ],
+        "TokenPermissions": [
+          {
+            "name": "token",
+            "type": "address",
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+          },
+        ],
+      },
     },
   ],
   [
@@ -1135,6 +1313,11 @@ exports[`deposit() characterization > public/fueled: quote gate, witness law, Br
   [
     "l1.signTypedData",
     {
+      "domain": {
+        "chainId": 11155111,
+        "name": "Permit2",
+        "verifyingContract": "0x00000000000000000000000000000000000000cc",
+      },
       "message": {
         "deadline": 1700000600n,
         "nonce": 302240678275694148452607n,
@@ -1159,6 +1342,90 @@ exports[`deposit() characterization > public/fueled: quote gate, witness law, Br
         },
       },
       "primaryType": "PermitWitnessTransferFrom",
+      "types": {
+        "BridgeWitness": [
+          {
+            "name": "tokenPortal",
+            "type": "address",
+          },
+          {
+            "name": "bridgeToken",
+            "type": "address",
+          },
+          {
+            "name": "totalAmount",
+            "type": "uint256",
+          },
+          {
+            "name": "fuelAmount",
+            "type": "uint256",
+          },
+          {
+            "name": "aztecRecipient",
+            "type": "bytes32",
+          },
+          {
+            "name": "fuelRecipient",
+            "type": "bytes32",
+          },
+          {
+            "name": "tokenSecretHash",
+            "type": "bytes32",
+          },
+          {
+            "name": "fuelSecretHash",
+            "type": "bytes32",
+          },
+          {
+            "name": "minFuelOutput",
+            "type": "uint256",
+          },
+          {
+            "name": "routeHash",
+            "type": "bytes32",
+          },
+          {
+            "name": "isPrivate",
+            "type": "bool",
+          },
+          {
+            "name": "swapTarget",
+            "type": "address",
+          },
+        ],
+        "PermitWitnessTransferFrom": [
+          {
+            "name": "permitted",
+            "type": "TokenPermissions",
+          },
+          {
+            "name": "spender",
+            "type": "address",
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+          },
+          {
+            "name": "deadline",
+            "type": "uint256",
+          },
+          {
+            "name": "witness",
+            "type": "BridgeWitness",
+          },
+        ],
+        "TokenPermissions": [
+          {
+            "name": "token",
+            "type": "address",
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+          },
+        ],
+      },
     },
   ],
   [
@@ -1361,6 +1628,11 @@ exports[`deposit() characterization > public/plain: cold-check passes on public 
   [
     "l1.signTypedData",
     {
+      "domain": {
+        "chainId": 11155111,
+        "name": "Permit2",
+        "verifyingContract": "0x00000000000000000000000000000000000000cc",
+      },
       "message": {
         "deadline": 1700000600n,
         "nonce": 302240678275694148452607n,
@@ -1385,6 +1657,90 @@ exports[`deposit() characterization > public/plain: cold-check passes on public 
         },
       },
       "primaryType": "PermitWitnessTransferFrom",
+      "types": {
+        "BridgeWitness": [
+          {
+            "name": "tokenPortal",
+            "type": "address",
+          },
+          {
+            "name": "bridgeToken",
+            "type": "address",
+          },
+          {
+            "name": "totalAmount",
+            "type": "uint256",
+          },
+          {
+            "name": "fuelAmount",
+            "type": "uint256",
+          },
+          {
+            "name": "aztecRecipient",
+            "type": "bytes32",
+          },
+          {
+            "name": "fuelRecipient",
+            "type": "bytes32",
+          },
+          {
+            "name": "tokenSecretHash",
+            "type": "bytes32",
+          },
+          {
+            "name": "fuelSecretHash",
+            "type": "bytes32",
+          },
+          {
+            "name": "minFuelOutput",
+            "type": "uint256",
+          },
+          {
+            "name": "routeHash",
+            "type": "bytes32",
+          },
+          {
+            "name": "isPrivate",
+            "type": "bool",
+          },
+          {
+            "name": "swapTarget",
+            "type": "address",
+          },
+        ],
+        "PermitWitnessTransferFrom": [
+          {
+            "name": "permitted",
+            "type": "TokenPermissions",
+          },
+          {
+            "name": "spender",
+            "type": "address",
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+          },
+          {
+            "name": "deadline",
+            "type": "uint256",
+          },
+          {
+            "name": "witness",
+            "type": "BridgeWitness",
+          },
+        ],
+        "TokenPermissions": [
+          {
+            "name": "token",
+            "type": "address",
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+          },
+        ],
+      },
     },
   ],
   [

@@ -23,13 +23,14 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { Fr } from "@aztec/aztec.js/fields"
 import { GasFees } from "@aztec/stdlib/gas"
+import { EncryptionKey } from "@nulo/wallet-crypto"
 import { type DepositJournalRecord, deriveBridgeSecret, deriveTokenClaimSecret } from "@nulo/bridge-core"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { ref } from "vue"
 
 const h = vi.hoisted(() => {
 	const calls: Array<[string, unknown]> = []
-	return { calls, t: (n: string, d?: unknown) => void calls.push([n, d]) }
+	return { calls, t: (n: string, d?: unknown) => void calls.push([n, d]), updateRecordThrows: false }
 })
 
 vi.mock("@/contracts/bridge-deployments", () => ({
@@ -52,7 +53,10 @@ vi.mock("./useBridgeJournal", async (importOriginal) => {
 	const real = (await importOriginal()) as typeof import("./useBridgeJournal")
 	return {
 		...real,
-		updateRecord: (id: string, patch: unknown) => h.t("updateRecord", { id, patch }),
+		updateRecord: (id: string, patch: unknown) => {
+			if (h.updateRecordThrows) throw new Error("storage full")
+			h.t("updateRecord", { id, patch })
+		},
 		discard: (id: string) => h.t("discard", id),
 		flagRecordError: (id: string, msg: string) => h.t("flagRecordError", { id, msg }),
 	}
@@ -97,6 +101,7 @@ function mkRec(over: Partial<DepositJournalRecord> = {}): DepositJournalRecord {
 
 beforeEach(() => {
 	h.calls.length = 0
+	h.updateRecordThrows = false
 	vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000)
 })
 
@@ -195,6 +200,37 @@ describe("cleanup matrix (handleDepositFailure)", () => {
 })
 
 describe("finalizePrivateEnvelope key lifecycle", () => {
+	test("a failing JOURNAL WRITE retains the key too — the seal succeeded but nothing persisted", async () => {
+		const sealKeys = new Map<string, EncryptionKey>()
+		sealKeys.set("0xspec1", await EncryptionKey.fromPassword("spec-pin-password"))
+		h.updateRecordThrows = true
+		await expect(
+			finalizePrivateEnvelope({
+				id: "0xspec1",
+				sealKeys,
+				secretStr: "0xs",
+				recipient: RECIPIENT,
+				tokenAmountStr: "900",
+				from: "0xef4d9e1f4e9e2dd9e747b53f4be3d04bfa935f2d",
+				leafIndex: "1",
+			}),
+		).rejects.toThrow("storage full")
+		expect(sealKeys.has("0xspec1")).toBe(true)
+
+		// And the success path deletes it — the full lifecycle in one place.
+		h.updateRecordThrows = false
+		await finalizePrivateEnvelope({
+			id: "0xspec1",
+			sealKeys,
+			secretStr: "0xs",
+			recipient: RECIPIENT,
+			tokenAmountStr: "900",
+			from: "0xef4d9e1f4e9e2dd9e747b53f4be3d04bfa935f2d",
+			leafIndex: "1",
+		})
+		expect(sealKeys.has("0xspec1")).toBe(false)
+	})
+
 	test("a failing seal RETAINS the key (retry stays possible); no key is a no-op", async () => {
 		const sealKeys = new Map<string, never>()
 		sealKeys.set("0xspec1", { garbage: true } as never)
