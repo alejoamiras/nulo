@@ -110,3 +110,37 @@ Four items, one PR, behavior-preserving, testids verbatim, tests inline:
 **Recorded LEAVE** (with the evidence above): whole-page template shells; approval
 windows; `BridgeForm↔FuelForm`; the faucet wallet panels; the remaining 39–47L two-site
 CSS pairs.
+
+## Implementation record
+
+- **Reporter** (`scripts/dup-trend/report.ts`): production per-format totals line added;
+  html-format clones counted in every total but excluded from the actionable top-pairs
+  table (header states why). Fixture-pinned in `scripts/ci-cd/dup-trend-report.test.ts`.
+- **`ListStatusMessage`** (`src/components/composite/`, 11 tests): `empty` variant
+  (headline + optional sub, dashed card) and `no-results` variant (flat search-miss line,
+  slot-overridable copy), `testid` prop forwarded as `data-testid` (omitted from the DOM
+  when unset — `contacts-empty` is e2e-load-bearing and preserved). Migrated the SIX
+  exact-contract sites: settings tokens/contacts + account-state authwits/notes/contracts/
+  senders (the last three also swap their `no_results` divs). The `empty_sub` CSS takes the
+  four-site superset (`width:100%; overflow-wrap:break-word`) — visually inert for the
+  other two. The five headline-typography-only files (tx/journal/received detail pages,
+  TokensView, RecentActivityView) were NOT migrated, per the reconciliation constraint.
+- **Contact popups**: `ContactFormFields.vue` (v-model:name/address + warning-flag props;
+  placeholders documented as e2e-load-bearing) and `ProcessingErrorNote.vue`
+  (show/title/tooltip), both in `modules/settings/contacts/` with tests (8 + 4). The two
+  components split what codex sketched as one because the error note lives in a different
+  `FormPopup` slot than the fields. Both popups' scripts untouched; their 2×~20-case
+  suites green with zero edits. The `sanitize` attr-order drift dissolves with the copies.
+- **Collapsing-hero layout**: `SecretExportLayout` renamed `CollapsingHeroLayout`
+  (4 existing consumers' imports rewritten), generalized with `tone="destructive"`
+  (red hero title + bar), a bare `overlay` slot after the bottom bar (fixed-position
+  dialogs keep their DOM order), and a documented root-attr fallthrough contract
+  (tested). The four pages (`import.vue`, `profile/new.vue`, `change-password.vue`,
+  `reset.vue`) drop their hand-rolled scaffold — template shell, `heroVisible` +
+  scroll-listener script, and ~11 CSS classes each — keeping page-specific sections,
+  testids verbatim, and their root `data-*` markers (`data-restore-stage`,
+  `data-profile-name`) via fallthrough. reset.vue keeps its slow-delete-timer cleanup;
+  the pages' keydown listeners stay page-owned.
+- Validation: vue-tsc clean, `bun run lint` + baseline check OK (manifest untouched —
+  none of the migrated functions were baselined), 457 component tests green
+  (popup/contact suites zero-edit), `audit:vue` full gate + smoke per the PR flow.
