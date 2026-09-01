@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { checkBuildIntegrity } from "./build-integrity"
+import { MAINNET_TARGET, TESTNET_TARGET } from "./network-targets"
 
 const TESTNET = { key: "testnet" as const, l1ChainId: 11155111, walletChainId: 1816023401, host: "testnet.tools.nulo.sh" }
 const MAINNET = { key: "mainnet" as const, l1ChainId: 1, walletChainId: 4248422646, host: "tools.nulo.sh" }
@@ -96,5 +97,15 @@ describe("preview hosts (branch alias)", () => {
 				allowedPreviewHosts: hosts,
 			}),
 		).toMatch(/mis-hosted/)
+	})
+})
+
+describe("production host pins", () => {
+	// The fixtures above duplicate the hosts on purpose (they exercise the checker); this pins the
+	// REAL exported targets, which verify-build-target never reads — without it an edit to the
+	// baked pins would pass every build gate.
+	it("bakes the tools.nulo.sh hostnames into the exported targets", () => {
+		expect(TESTNET_TARGET.host).toBe("testnet.tools.nulo.sh")
+		expect(MAINNET_TARGET.host).toBe("tools.nulo.sh")
 	})
 })
