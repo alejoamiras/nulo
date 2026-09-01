@@ -517,7 +517,7 @@ export type PublicClaimFee =
 	| { kind: "sponsored-standalone" }
 
 /** The NO-fuel gate: the bridge claim has no fresh FJ message to consume, so it self-pays from gas
- *  the account ALREADY holds. The faucet does NOT pre-select a method - it omits the fee and lets
+ *  the account ALREADY holds. The tools app does NOT pre-select a method - it omits the fee and lets
  *  the WALLET's fee picker choose Public OR Private Fee Juice (or Sponsored), exactly as the
  *  public path always has. We only UNBLOCK when there is gas in either balance; private FJ at
  *  the PrivateFPC counts (selectable via pay_fee). Reads are fail-closed (null = unread). */
@@ -681,7 +681,7 @@ export interface DepositL1Ctx {
 	from: string
 }
 
-/** No-fuel L7 (faucet-only): block a TRULY cold account before depositing so tokens aren't bridged
+/** No-fuel L7 (tools-only): block a TRULY cold account before depositing so tokens aren't bridged
  *  unclaimable. Cold = zero PUBLIC and zero PRIVATE Fee Juice; private FJ (held at the PrivateFPC
  *  from a prior private fuel claim) pays the no-fuel claim via pay_fee, so it is NOT cold. A read
  *  error gives the benefit of the doubt (the claim-time gate is the fail-closed check); a FUELED

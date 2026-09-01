@@ -157,7 +157,7 @@ function decideHashlessAttempt(e: PrivateFuelClaimEvidence): { action: PrivateFu
  * Whether to UNBLOCK a NO-fuel bridge claim (the "arrive with gas" toggle OFF), as a pure decision. A
  * no-fuel claim has no fresh L1→L2 Fee-Juice message to consume, so it self-pays from gas the account
  * already holds — public Fee Juice OR the private balance a prior private fuel claim credited at the
- * PrivateFPC. The faucet does NOT pre-select a method: it only decides whether the account has gas to
+ * PrivateFPC. The tools app does NOT pre-select a method: it only decides whether the account has gas to
  * reach the wallet's fee picker, which then selects Public OR Private Fee Juice (or Sponsored). This
  * mirrors the long-standing public path (`fee = undefined` → wallet chooses), now extended so PRIVATE
  * FJ also counts as "has gas" (it's selectable in the picker via `pay_fee`).

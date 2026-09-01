@@ -33,7 +33,7 @@ function displayName(name: string): string {
  *  (javascript:, http:, oversized data blobs) falls back to a glyph. */
 const ICON_MAX_LENGTH = 4096
 /** Icons that passed the allowlist but FAILED to load (e.g. the deployed
- *  faucet's CSP is `img-src 'self' data:`, which blocks https and
+ *  tools app's CSP is `img-src 'self' data:`, which blocks https and
  *  chrome-extension sources) degrade to the glyph via @error. */
 const failedIcons = ref(new Set<number>())
 function onIconError(key: number) {

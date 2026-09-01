@@ -11,7 +11,7 @@
  *
  * `displayPlaces` clamps the fractional digits shown (default 2).
  * Trailing zeros within `displayPlaces` are kept - predictable column
- * alignment matters more than terse output for a faucet.
+ * alignment matters more than terse output for a tools app.
  */
 export function formatBigInt(value: bigint, decimals: number, displayPlaces = 2): string {
 	const divisor = 10n ** BigInt(decimals)

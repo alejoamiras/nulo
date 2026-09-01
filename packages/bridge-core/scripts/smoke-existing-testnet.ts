@@ -5,7 +5,7 @@
  *
  * Unlike deposit-testnet.ts (which deploys a fresh set), this binds to the addresses already recorded
  * in the manifest, so it proves two things at once: the manifest is self-consistent (each L2 address
- * recomputes from its recorded salt + args, exactly as the faucet rebuilds it) AND the deployed set
+ * recomputes from its recorded salt + args, exactly as the tools app rebuilds it) AND the deployed set
  * actually bridges. The L2 recipient is a throwaway account; the deposit is funded by PRIVATE_KEY.
  *
  * Real proofs make the claim take minutes. Run:
@@ -156,7 +156,7 @@ async function main() {
 	})
 
 	// Register (NOT deploy) each L2 contract from the manifest, asserting the recorded address
-	// recomputes from its salt + args - the same reconstruction the faucet's bridge-deployments does.
+	// recomputes from its salt + args - the same reconstruction the tools app's bridge-deployments does.
 	const { token, bridge } = await registerManifestTrio(ewallet, CONFIG)
 
 	// ─── Deposit → claim (public, or --private recipient-committed) ────────────────────

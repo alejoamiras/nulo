@@ -8,11 +8,11 @@ const here = dirname(fileURLToPath(import.meta.url)) // apps/tools/scripts
 const srcDir = join(here, "../src")
 
 describe("design-resolver", () => {
-	// No faucet-local SFC may share a name with the resolver set: with dirs:[] the resolver only fires
+	// No tools-local SFC may share a name with the resolver set: with dirs:[] the resolver only fires
 	// for unimported bare tags, but a same-named local component would still be the one a bare tag means
 	// to render. This pins that the resolver can never silently shadow a local component. Scans ALL of
 	// src/** (not just src/components) so an SFC in views/ or a nested folder can't slip a collision past.
-	test("no faucet-local SFC name collides with the resolver set", () => {
+	test("no tools-local SFC name collides with the resolver set", () => {
 		const localNames = (readdirSync(srcDir, { recursive: true }) as string[])
 			.filter((f) => f.endsWith(".vue"))
 			.map((f) =>

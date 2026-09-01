@@ -404,7 +404,7 @@ async function resolveDeployerKeys(): Promise<DeployerKeys> {
 	// Prefer the holonym-style hex+salt pair: if a project already has a
 	// funded testnet account under (secretKey, salt, derivedSigningKey),
 	// supplying those same values reproduces the same account address —
-	// which is what lets the faucet share an existing fee-juiced deployer.
+	// which is what lets the tools app share an existing fee-juiced deployer.
 	const hexSecret = process.env.DEPLOYER_SECRET_KEY
 	const hexSalt = process.env.DEPLOYER_SALT
 	if (hexSecret && hexSalt) {

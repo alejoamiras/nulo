@@ -15,13 +15,13 @@ describe("buildFaucetManifest", () => {
 		usdcAddress: USDC,
 		ethAddress: ETH,
 		sponsoredFpcAddress: SPONSORED_FPC,
-		appUrl: "https://faucet.test",
+		appUrl: "https://tools.test",
 	})
 
 	it("populates metadata with the dApp identity and url", () => {
 		expect(m.metadata.name).toBe("nulo-tools")
 		expect(m.metadata.version).toBe("0.1.0")
-		expect(m.metadata.url).toBe("https://faucet.test")
+		expect(m.metadata.url).toBe("https://tools.test")
 	})
 
 	it("requests accounts with canGet=true and canCreateAuthWit=false (no authwit needed)", () => {
@@ -280,7 +280,7 @@ describe("fuel claim scope (canonical FeeJuice)", () => {
 	it("includes the PrivateFPC in contracts (pre-registered for the no-fuel private-FJ read under 5.0.1)", () => {
 		// The wallet only auto-registers the FPC when a tx USES it as fee payer; the no-fuel claim gate
 		// reads its balance_of BEFORE that, and 5.0.1's registerContract conformance (dev #288) stops the
-		// read's on-the-fly Contract.at() from registering the artifact — so the faucet pre-registers it.
+		// read's on-the-fly Contract.at() from registering the artifact — so the tools app pre-registers it.
 		const m = buildCombinedManifest(combinedInput())
 		const cap = m.capabilities.find((c) => c.type === "contracts")
 		if (cap?.type !== "contracts") throw new Error("contracts cap missing")

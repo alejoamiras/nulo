@@ -1,7 +1,7 @@
 import { ref } from "vue"
 
 /**
- * Faucet theme switcher — Dark / Light / System, mirroring the extension. The raw choice is persisted
+ * Tools theme switcher — Dark / Light / System, mirroring the extension. The raw choice is persisted
  * to localStorage and read back BEFORE first paint by public/theme-boot.js (no flash-of-dark). "system"
  * tracks the OS via prefers-color-scheme. The stored value is allowlist-validated on read (untrusted).
  */

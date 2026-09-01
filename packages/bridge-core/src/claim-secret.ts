@@ -21,7 +21,7 @@ import { computeSecretHash } from "@aztec/stdlib/hash"
 /**
  * Domain separator: `poseidon2_hash_bytes("nulo_dom_sep__token_bridge_private_claim_secret") as u32`.
  * Mirrors the Noir `DOM_SEP__TOKEN_BRIDGE_PRIVATE_CLAIM_SECRET`. PINNED as a literal (NOT computed at
- * load): a poseidon call at module-load time crashes non-node consumers (the faucet's jsdom test env
+ * load): a poseidon call at module-load time crashes non-node consumers (the tools app's jsdom test env
  * throws before Barretenberg is initialized) — same constraint as `private-fuel.ts`. The keystone test
  * re-derives this in node and asserts equality; that is the drift tripwire. Distinct from the FPC fuel
  * separator (3952304070) and the protocol secret-hash separator (4199652938) — cross-protocol reuse hygiene.

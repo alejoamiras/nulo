@@ -5,7 +5,7 @@ const FEE_JUICE_L2 = AztecAddress.fromStringUnsafe(feeJuiceAddress)
 /** The Wonderland PrivateFPC L2 address (pinned from the installed artifact). The wallet auto-registers
  *  it when a tx USES it as fee payer (`fpc/service.ts`), but the no-fuel-claim gate reads its
  *  `balance_of` BEFORE any such tx, and 5.0.1's registerContract conformance (dev #288) stops the read's
- *  on-the-fly Contract.at() from registering the artifact — so the faucet now pre-registers it at connect
+ *  on-the-fly Contract.at() from registering the artifact — so the tools app now pre-registers it at connect
  *  (`useWalletConnection` + `@/contracts/private-fpc`) and it is IN `contracts` (registerable). */
 const PRIVATE_FPC_L2 = AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)
 import { AztecAddress } from "@aztec/aztec.js/addresses"

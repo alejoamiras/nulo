@@ -1,6 +1,6 @@
-# @nulo/faucet
+# @nulo/tools
 
-A faucet web app for the Aztec Network. Lets the Aztec Foundation team
+The Nulo tools web app for the Aztec Network — a testnet token drip, an L1↔L2 bridge and a fee-juice Fuel tab. Lets the Aztec Foundation team
 (or anyone with a wallet) self-mint test USDC + test ETH on
 **alpha-testnet** through Wonderland's permissionless `Dripper` contract.
 
@@ -18,7 +18,7 @@ bun run --cwd apps/tools dev    # http://localhost:5176
 ```
 
 Connect with the Nulo extension (or any wallet that speaks
-`@aztec/wallet-sdk`). The faucet uses **discovery** to find wallets: every
+`@aztec/wallet-sdk`). The tools app uses **discovery** to find wallets: every
 wallet that answers is listed in a picker and you choose explicitly (a
 wallet's name/icon/id are self-claimed, so the picker is a selection, not a
 trust decision — the emoji verification that follows is what proves the
@@ -30,7 +30,7 @@ remembered identity during the scan window, auto-reconnect turns itself
 off and the picker shows all claimants.
 
 **Multiple accounts**: if your wallet shares more than one account, the
-faucet asks which one to use ("Choose main account") and remembers the
+tools app asks which one to use ("Choose main account") and remembers the
 answer per wallet. The connected chip shows the active account and opens
 a menu to switch anytime — switching drives all tabs (Faucet, Bridge,
 Fuel) and is blocked while an operation is running, so nothing ever
@@ -85,7 +85,7 @@ Hosting: **Cloudflare Pages** is the recommended fit.
   defaults to Bun 1.2.15, which cannot read the repo's v2 lockfile; only this
   variable selects the Bun version (no version file or `packageManager` is honored).
 
-`bb.js` needs cross-origin isolation. The faucet ships a
+`bb.js` needs cross-origin isolation. The tools app ships a
 `public/_headers` file with `Cross-Origin-Opener-Policy: same-origin` +
 `Cross-Origin-Embedder-Policy: require-corp` and a tight CSP. Cloudflare
 Pages respects `_headers` natively.
@@ -105,7 +105,7 @@ frontend env (`VITE_AZTEC_NODE_URL`). The build never embeds `DEPLOYER_SECRET`.
 
 **Chain identity is NOT an env var.** The L1 chainId + rollup version that
 wallet-sdk discovery matches on are hardcoded in `src/lib/chain-constants.ts`
-(the faucet is testnet-only) — there is deliberately no `VITE_CHAIN_*` override.
+(the tools app is testnet-only) — there is deliberately no `VITE_CHAIN_*` override.
 A stale Cloudflare `VITE_CHAIN_VERSION` once shadowed the value and broke the
 wallet handshake in prod ("No network configured for chainId 4138294185"), so
 the env path was removed. The production build also emits `dist/build.json` +
@@ -198,6 +198,6 @@ Non-goals (from plan-v2 §12):
 - No network switcher (alpha-testnet only)
 - No custom drip amounts (fixed 1,000 USDC / 1 ETH)
 - No `@nulo/ui` extraction (design tokens vendored)
-- No extension refactor — the faucet does not touch `apps/extension/**`
+- No extension refactor — the tools app does not touch `apps/extension/**`
 - No i18n
 - No swap UI or transfer-between-users — that's the AMM playground

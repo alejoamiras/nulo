@@ -2,13 +2,13 @@
  * Nulo-custom extension of `@aztec/wallet-sdk`'s `WalletSchema` with the
  * `registerToken`, `isTokenRegistered`, and `grantPublicAuthwit` methods.
  *
- * This is the single source of truth — the extension, faucet, and playground all
+ * This is the single source of truth — the extension, tools, and playground all
  * activate it via the sibling `./register` side-effect entry. (It used to be three
  * byte-identical inline copies; the drift risk is gone now that there is one.)
  *
  * ## Why a private package (not a wallet-bridge export)
  *
- * `wallet-bridge` is extension-internal — exposing it to faucet/playground would
+ * `wallet-bridge` is extension-internal — exposing it to tools/playground would
  * give third-party dApp surfaces a path to its dispatcher/protocol internals. A
  * dedicated PRIVATE package keeps the patch Nulo-internal while giving all three
  * apps one source.

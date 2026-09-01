@@ -1738,7 +1738,7 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 // ── grantPublicAuthwit (Nulo-custom) — schema-patch reachability + routing ──
 //
 // Same contract as registerToken: three identical schema-patch copies
-// (extension / faucet / playground) pinned by importing the extension's,
+// (extension / tools / playground) pinned by importing the extension's,
 // routing through DappInteractionService.execute (popup gate), and the
 // dApp-supplied account validated against the session's authorized set.
 

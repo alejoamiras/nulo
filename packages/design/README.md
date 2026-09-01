@@ -1,7 +1,7 @@
 # @nulo/design
 
 The shared, framework-/host-agnostic design system for Nulo apps (the wallet **extension** and the
-**faucet**). **Presentational only** — components take their data and any `data-testid` via props and
+**tools**). **Presentational only** — components take their data and any `data-testid` via props and
 never import app utilities, stores, service clients, or `chrome.*`.
 
 ## Layers (low → high)
@@ -35,7 +35,7 @@ round-1 Phase 2 (the base/theme/font takeover).
 
 The package ships **Vue SFC + TS source** (no build step); each consumer's Vite/`vue-tsc` compiles it.
 There is **no auto-import** in this package — every component, Vue API, and helper uses **explicit
-imports** (consumers like the faucet have no `unplugin-auto-import`/`unplugin-vue-components`). The
+imports** (consumers like the tools app have no `unplugin-auto-import`/`unplugin-vue-components`). The
 extension keeps `<Tag>` templates working by mapping `@nulo/design` component names through a custom
 `unplugin-vue-components` resolver, so call sites and `data-testid`s are untouched.
 

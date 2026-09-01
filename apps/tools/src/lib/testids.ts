@@ -1,5 +1,5 @@
 /**
- * Central catalog of every data-testid the faucet emits. Components
+ * Central catalog of every data-testid the tools app emits. Components
  * import from here so a rename touches one file. E2E selectors use
  * these constants verbatim - no text/role/aria/class lookups per
  * CLAUDE.md.

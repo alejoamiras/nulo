@@ -196,7 +196,7 @@ export class DuplicateInitializationError extends WalletError {
  * A dApp asked for an RPC method this wallet does not implement.
  *
  * Typed rather than a bare `Error` because it is dApp-ACTIONABLE — the caller's whole response is
- * to fall back to another route, and the faucet already distinguishes it from a network failure —
+ * to fall back to another route, and the tools app already distinguishes it from a network failure —
  * so it must survive the dApp-facing envelope's unclassified fall-through, which by design
  * replaces an unrecognised error's text with a constant.
  *

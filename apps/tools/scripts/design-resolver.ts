@@ -1,9 +1,9 @@
 import type { ComponentResolverFunction } from "unplugin-vue-components"
 
 /**
- * `@nulo/design` primitives the faucet uses as bare tags. Mirrors the extension's primitives-only
+ * `@nulo/design` primitives the tools app uses as bare tags. Mirrors the extension's primitives-only
  * resolver discipline: only framework-agnostic primitives newly introduced during the design adoption
- * resolve here. Components the faucet already imports explicitly (Button, Card, Toast, AddressDisplay,
+ * resolve here. Components the tools app already imports explicitly (Button, Card, Toast, AddressDisplay,
  * Spinner, BalanceRow, DripButton, DisclaimerTag, EmojiGrid) stay explicit — converting them would be
  * churn with zero reuse gain.
  *

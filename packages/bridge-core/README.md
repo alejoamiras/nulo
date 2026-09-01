@@ -1,6 +1,6 @@
 # @nulo/bridge-core
 
-Framework-agnostic L1↔L2 bridge logic for the Nulo Faucet→Bridge — pure TypeScript over
+Framework-agnostic L1↔L2 bridge logic for the Nulo tools bridge — pure TypeScript over
 `viem` (L1) + `aztec.js` (L2). No React, no Vue, no server. The bridge frontend's composables
 and the sandbox deploy script drive these functions; the proven reference for every flow is
 `scripts/deploy-sandbox.ts --smoke`.

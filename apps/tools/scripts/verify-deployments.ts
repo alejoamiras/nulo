@@ -16,7 +16,7 @@
  * WASM runtime init that jsdom doesn't provide. As a bun-run script
  * (Node), bb.js initializes on first call and the rebuild works.
  *
- * Wired into `audit:faucet` in the root package.json.
+ * Wired into `audit:tools` in the root package.json.
  */
 import { readFileSync } from "node:fs"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
@@ -62,7 +62,7 @@ function findToken(data: DeploymentsJson, symbol: "NULO" | "OLUN"): TokenDeploym
  * a DIFFERENT address than committed would strand the cutover. Also asserts router/permit2/swapTarget
  * are present (C7 — bridge-only now requires them) and `privateClaimMode: "salt-v2"` (L9 interlock).
  * Runs against the CANDIDATE in Phase 6 (`BRIDGE_MANIFEST=…candidate.json`); unset ⇒ skipped, so the
- * default `audit:faucet` run (live manifest, pre-cutover) is unaffected.
+ * default `audit:tools` run (live manifest, pre-cutover) is unaffected.
  */
 async function verifyBridgeManifest(path: string): Promise<boolean> {
 	const m = JSON.parse(readFileSync(path, "utf8")) as {

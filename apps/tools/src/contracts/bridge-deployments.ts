@@ -15,7 +15,7 @@ import rawTestnetConfig from "../../public/testnet-bridge.json"
  * Mirrors src/contracts/deployments.ts for the faucet's own contracts.
  *
  * STRICT-validated at module init (candidate-schema): a malformed or stale-shaped manifest fails
- * the faucet loudly at boot instead of shipping a broken lane (the rc.2 arc shipped a stale
+ * the tools app loudly at boot instead of shipping a broken lane (the rc.2 arc shipped a stale
  * carried feeJuicePortal precisely because this file used to cast an untyped `fuel` block).
  */
 // The bridge manifest is injected per build target via vite `define` (import.meta.env). Falls back to
@@ -70,7 +70,7 @@ export interface FuelDeployment {
 }
 
 // Fully typed via the strict schema — the pool keys the swap UI needs are asserted here (the
-// schema keeps `pools` an open record; the faucet's swap lane requires these two specifically).
+// schema keeps `pools` an open record; the tools app's swap lane requires these two specifically).
 // The swap-fuel stack. Present ONLY when `l1.fuel.swap` exists (testnet) — a bridge-only mainnet
 // manifest omits `swap`, so BRIDGE_FUEL is undefined and the swap-fuel UI never renders (DP2). The
 // flat shape is preserved (core + swap merged) so every downstream consumer is unchanged.

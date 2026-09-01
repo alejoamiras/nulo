@@ -21,7 +21,7 @@ function getProvider(): EIP1193Provider | undefined {
  * Public (read) client routed through the live injected provider, resolved per-call because this
  * singleton is built before any wallet connects. It MUST NOT use viem's `http()` default transport:
  * that issues a page-origin fetch to the chain's default RPC (Sepolia → `https://11155111.rpc.thirdweb.com`)
- * which the faucet's CSP `connect-src` refuses, breaking every L1 read + receipt wait. Delegating to the
+ * which the tools app's CSP `connect-src` refuses, breaking every L1 read + receipt wait. Delegating to the
  * wallet's EIP-1193 provider makes the extension perform the `eth_call` (no page fetch, so the page CSP
  * never applies) using the user's own RPC. Every L1 read is gated on a connected wallet, so the provider
  * is present whenever a read actually runs.

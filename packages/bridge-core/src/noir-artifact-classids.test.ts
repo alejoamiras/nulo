@@ -62,7 +62,7 @@ describe("committed bridge Noir artifacts — class-id + digest tripwire (5.0.1)
  * integrity, and `descriptors-real-artifact.test.ts` only checks ABI shape (a
  * bytecode-tampered artifact retaining its ABI passes). Pinning the DERIVED class ids
  * of the runtime-loaded Token + Dripper artifacts binds their on-chain IDENTITY — the
- * wallet, faucet, and bridge all register instances from these exact bytes.
+ * wallet, tools, and bridge all register instances from these exact bytes.
  */
 describe("installed aztec-standards Token/Dripper — class-id tripwire (5.0.1)", () => {
 	const STANDARDS = [

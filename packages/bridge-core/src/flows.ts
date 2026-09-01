@@ -52,7 +52,7 @@ export interface RecoveryHooks {
 // FeeJuicePortal) both go through bridge(). Signs a Permit2 witness (fuel fields zeroed) and
 // calls bridge(); returns the L1 result. The L2 claim runs separately (claimPublic/claimPrivate),
 // mirroring runSwapBridge. The direct approve+portal path (runDeposit/depositPublic/depositPrivate)
-// is DELETED — bridge-only now goes through bridge() everywhere (faucet inlines the same witness).
+// is DELETED — bridge-only now goes through bridge() everywhere (tools inlines the same witness).
 
 /** L1 stages for a router deposit, surfaced to the UI. */
 export type RouterDepositStage = "signing" | "depositing" | "syncing" | "done"
@@ -105,7 +105,7 @@ export async function runRouterDeposit(
 	// A nonzero-but-invalid recipient (a field that isn't a point on Grumpkin) would be committed into
 	// the deposit and then mint an undecryptable, unspendable note — the commitment makes it
 	// unrecoverable. Fail closed before the irreversible L1 tx. (The Noir claim_private wants a matching
-	// is_valid() assert on the next redeploy; today the faucet's wallet-sourced recipient is always valid.)
+	// is_valid() assert on the next redeploy; today the tools app's wallet-sourced recipient is always valid.)
 	if (!(await AztecAddress.fromStringUnsafe(p.aztecRecipient).isValid())) {
 		throw new Error("runRouterDeposit: aztecRecipient is not a valid Aztec address (not a Grumpkin point) — refusing to deposit")
 	}
@@ -299,7 +299,7 @@ export interface SwapRecoveryHooks {
  *  Without this, a missing fuelSecret silently falls back to Fr.random() and strands the
  *  Fee Juice (the PrivateFPC claimer reconstructs the secret from msg_sender — a random
  *  one is unrecoverable), and a non-FPC fuelRecipient deposits the gas publicly to the
- *  wrong L2 address. The shipping faucet always passes both; this guards every other
+ *  wrong L2 address. The shipping tools always passes both; this guards every other
  *  caller of the exported helper. */
 function assertPrivateFuelInvariants(p: SwapBridgeParams): void {
 	if (!p.isPrivate) return

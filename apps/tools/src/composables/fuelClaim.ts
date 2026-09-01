@@ -2,7 +2,7 @@
  * The Fuel claim builder — the fee-juice branch the journal's `claim` dep dispatches to by
  * `assetKind` (codex Option C, lessons/phase-3.md). NON-composable: imports only bridge-core / the
  * Aztec SDK / the pure `fuel-claim-state` lib, and takes the wallet + sponsored-FPC + floor as
- * ARGUMENTS — never a faucet singleton — so `useDeposit → fuelClaim → bridge-core` stays acyclic.
+ * ARGUMENTS — never a tools-app singleton — so `useDeposit → fuelClaim → bridge-core` stays acyclic.
  *
  * PUBLIC: the carrier-less self-pay tx — `new BatchCall(wallet, [])` (no app call) paid by
  * `publicFeeJuicePayment` (`FeeJuicePaymentMethodWithClaim` → `claim_and_end_setup` as setup); it claims

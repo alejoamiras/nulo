@@ -13,7 +13,7 @@ let cached: SponsoredFpcInstance | null = null
  * across all Aztec environments and the computation is hash-only (no I/O),
  * so a single warm-up is sufficient.
  *
- * Used as `feePayer: instance.address` in the faucet's drip exec payload.
+ * Used as `feePayer: instance.address` in the tools app's drip exec payload.
  * Nulo's dispatcher materializes the embedded fee path on the wallet side;
  * the dApp never needs to `wallet.registerContract(sponsoredFpc, ...)`.
  */

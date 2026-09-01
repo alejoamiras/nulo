@@ -1,5 +1,5 @@
 /*
- * Faucet smoke e2e. Mounts App.vue in jsdom, mocks the wallet-sdk +
+ * Tools smoke e2e. Mounts App.vue in jsdom, mocks the wallet-sdk +
  * contracts boundaries, walks through:
  *
  *   1. empty state (no wallet detected when discovery times out)
@@ -9,7 +9,7 @@
  *   5. disconnect → resets to empty state
  *
  * No real browser, no aztec network. The mock provider satisfies every
- * RPC the faucet issues — discovery, secure-channel, confirm,
+ * RPC the tools app issues — discovery, secure-channel, confirm,
  * requestCapabilities, registerContract, executeUtility, sendTx.
  */
 

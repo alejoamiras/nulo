@@ -1,5 +1,5 @@
 /**
- * PERSISTENT testnet bridge deploy for the faucet's Bridge tab - the SECURITY-FORK generation.
+ * PERSISTENT testnet bridge deploy for the tools app's Bridge tab - the SECURITY-FORK generation.
  *
  * Deploys the bridge's OWN set - L1: MintableERC20 USDC + the F-001 fork NuloTokenPortal (deployed
  * uninitialized from committed reviewed bytes, then `initialize`d once); L2: token_minter_proxy +
@@ -230,7 +230,7 @@ async function deployL2Contract(
 		// locked at construction), NOT send options. Passing them to .send() is silently ignored, so the
 		// deploy lands at the wallet-as-deployer / default-salt address — DIFFERENT from the deployer=ZERO
 		// instance computed above — and the wiring + read-backs then target a never-deployed address.
-		// Mirrors the faucet deploy (faucet/scripts/deploy.ts), which gets this right on V5.
+		// Mirrors the tools app deploy (tools/scripts/deploy.ts), which gets this right on V5.
 		await Contract.deploy(ewallet as never, p.art as never, p.args as never, p.ctor, {
 			salt: new Fr(p.saltNum),
 			universalDeploy: true,
@@ -562,7 +562,7 @@ async function main() {
 	// ─── Direct-Fuel config (`l1.feeJuice`): the portal/asset/handler are ROLLUP-COUPLED (a network
 	// reset re-points them), so they come fresh from the node — never carried from the prior manifest.
 	// Only `minFj` (empirically calibrated, network-independent) carries forward, env-overridable.
-	// Omitting this block from a promotion would silently disable the faucet's Fuel tab.
+	// Omitting this block from a promotion would silently disable the tools app's Fuel tab.
 	const priorFeeJuice = prior?.l1?.feeJuice as Record<string, unknown> | undefined
 	const feeJuice = {
 		portal: l1a.feeJuicePortalAddress.toLowerCase(),

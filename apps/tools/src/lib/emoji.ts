@@ -6,7 +6,7 @@ import { hashToEmoji } from "@aztec/wallet-sdk/crypto"
  * Both the dApp and the wallet import the same `hashToEmoji` function, so the
  * 9-emoji output matches by construction - there's no palette / window-stride
  * divergence to worry about. The verification grid is the only emoji surface
- * in the faucet (protocol security material, not UI).
+ * in the tools app (protocol security material, not UI).
  */
 export { hashToEmoji }
 

@@ -1,6 +1,6 @@
 /**
  * L2-side helpers shared by the operator scripts: the universal-deploy instance computation
- * (salt + args + deployer=ZERO — the SAME reconstruction the faucet's bridge-deployments
+ * (salt + args + deployer=ZERO — the SAME reconstruction the tools app's bridge-deployments
  * runs), manifest-bound contract registration, and the claim-until-synced loop the smoke
  * gates share.
  */
@@ -34,7 +34,7 @@ export async function universalDeployInstance(art: unknown, args: unknown[], cto
 }
 
 /** Register (NOT deploy) one manifest-recorded L2 contract, asserting the recorded address
- *  recomputes from its salt + args — the same reconstruction the faucet's
+ *  recomputes from its salt + args — the same reconstruction the tools app's
  *  bridge-deployments does. Registration failures are swallowed (already registered). */
 export async function registerManifestContract(
 	ewallet: unknown,

@@ -3,7 +3,7 @@
  * critical skeleton both network twins duplicated: stopwatch + node client +
  * pinned-address read + idempotent exists-early-return, then the canonical
  * deploy (PRIVATE_FPC_SALT, deployer ZERO) and the address===pin assertion
- * that proves the deployment landed where the faucet manifest and wallet
+ * that proves the deployment landed where the tools app manifest and wallet
  * hardcode expect.
  *
  * The EXISTENCE CHECK RUNS FIRST, before any wallet creation — both callers
@@ -50,7 +50,7 @@ export async function deployCanonicalPrivateFpc(opts: {
 
 	// The CANONICAL salt (PRIVATE_FPC_SALT, fixed from 5.0.0 onward) + universalDeploy (deployer
 	// ZERO) reproduces the pinned derivation. The EmbeddedWallet itself is the `Wallet` for the
-	// deploy (the account object lacks getContractClassMetadata — same pattern as the faucet's
+	// deploy (the account object lacks getContractClassMetadata — same pattern as the tools app's
 	// deploy.ts); the prepared account only supplies `from` + pays the fee.
 	console.log(`deploying PrivateFPC (canonical salt, deployer ZERO)… (${mins()})`)
 	const result = await PrivateFPCContract.deploy(ewallet as never, {

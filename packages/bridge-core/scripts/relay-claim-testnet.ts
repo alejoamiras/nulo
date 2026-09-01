@@ -45,7 +45,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const MANIFEST_PATH = process.env.BRIDGE_MANIFEST ?? join(here, "..", "..", "..", "apps", "tools", "public", "testnet-bridge.json")
 
 // Phase 7 canary (fresh-audit H2): submit claim_private with a WRONG recipient DIRECTLY to the
-// sequencer — bypassing the faucet's deposit-time client re-derivation guard — and assert the tx
+// sequencer — bypassing the tools app's deposit-time client re-derivation guard — and assert the tx
 // REVERTS. This proves the CIRCUIT's recipient binding (not just the client assert): a relayer with a
 // valid (salt, amount, leaf) cannot redirect to a recipient other than the one bound at deposit time.
 const WRONG_RECIPIENT_CANARY = process.argv.includes("--wrong-recipient")

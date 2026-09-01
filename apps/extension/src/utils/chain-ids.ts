@@ -17,7 +17,7 @@ export function walletChainId(l1ChainId: number, rollupVersion: number): number 
 export const MAINNET_L1_CHAIN_ID = 1
 export const MAINNET_ROLLUP_VERSION = 4248422647
 
-/** V5 testnet identity — the L1/rollup pair behind CHAIN_IDS.TESTNET; the faucet's
+/** V5 testnet identity — the L1/rollup pair behind CHAIN_IDS.TESTNET; the tools app's
  *  chain-constants.ts independently pins the same pair (release chain-guard). */
 export const TESTNET_L1_CHAIN_ID = 11155111
 export const TESTNET_ROLLUP_VERSION = 1821665230

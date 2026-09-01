@@ -91,7 +91,7 @@ export function truncateName(name: string, max: number): string {
 }
 
 /**
- * Per-feature config for an Aztec wallet session. The faucet app creates ONE session (a
+ * Per-feature config for an Aztec wallet session. The tools app creates ONE session (a
  * module-level singleton in useWalletConnection; useBridgeWallet re-exports it) with a combined
  * capability manifest covering every tab — one connection, one grant, one active account.
  *
@@ -112,7 +112,7 @@ export interface AztecWalletSessionConfig {
 	readonly registerContracts: (wallet: Wallet) => Promise<void>
 	/** Mutation-boundary guard for account switching: while it returns true, `selectAccount()`
 	 *  rejects. Injected (rather than imported) so the factory stays UI-agnostic and the gate is
-	 *  unit-testable — the faucet wires it to the ops-in-flight registry (plan D-18). */
+	 *  unit-testable — the tools app wires it to the ops-in-flight registry (plan D-18). */
 	readonly isSwitchBlocked?: () => boolean
 }
 

@@ -16,7 +16,7 @@ import { TESTIDS } from "@/lib/testids"
  * too — it is where Disconnect lives, and Disconnect must never disappear.
  *
  * The dropdown is deliberately NOT the design package's Popover: that component
- * needs a `#popover` teleport root the faucet doesn't declare and carries a
+ * needs a `#popover` teleport root the tools app doesn't declare and carries a
  * pinned open/close lifecycle bug (packages/design/src/ui/Popover.vue), and its
  * rounded surface reads as the odd one out in an app of sharp hairline boxes.
  * This one is sharp, with the same hairline every other surface uses — which the

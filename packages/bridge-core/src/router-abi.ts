@@ -1,5 +1,5 @@
 /**
- * Minimal SwapBridgeRouter ABI for browser callers (the faucet can't read forge artifacts at
+ * Minimal SwapBridgeRouter ABI for browser callers (the tools app can't read forge artifacts at
  * runtime). Hand-written and PINNED against the forge artifact by router-abi.test.ts — any
  * drift between this const and the compiled router fails the suite.
  */

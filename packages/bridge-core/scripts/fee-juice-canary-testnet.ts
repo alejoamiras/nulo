@@ -1,7 +1,7 @@
 /**
  * LIVE-testnet DIRECT Fee-Juice canary: proves the candidate's `l1.feeJuice` lane end-to-end —
  * the one lane `fuel-testnet.ts` does NOT exercise (that one acquires FJ via the swap router).
- * Mirrors the faucet's PUBLIC direct-Fuel flow exactly (useL1FeeAsset + useFuel + fuelClaim):
+ * Mirrors the tools app's PUBLIC direct-Fuel flow exactly (useL1FeeAsset + useFuel + fuelClaim):
  *
  *   1. fail-closed coherence: handler.FEE_ASSET() == asset, portal.UNDERLYING() == asset
  *   2. FeeAssetHandler.mint(owner)            — the wallet's mint button
@@ -126,7 +126,7 @@ async function depositDirectFj(d: CanaryL1, plan: Awaited<ReturnType<typeof plan
 }
 
 /**
- * The faucet's PUBLIC claim lane — SELF-PAY (fuelClaim.ts): claim the bridged
+ * The tools app's PUBLIC claim lane — SELF-PAY (fuelClaim.ts): claim the bridged
  * FJ and pay THIS tx's fee FROM it in one carrier-less zero-app-call tx (BatchCall([]) +
  * FeeJuicePaymentMethodWithClaim → claim_and_end_setup in the SETUP phase). No Sponsored FPC — the
  * mainnet shape. Setup is the CORRECT home for claim_and_end_setup: the 5.0.0 "149 failed simulates"

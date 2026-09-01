@@ -1,6 +1,6 @@
 # apps/tools/tests/e2e
 
-Smoke e2e tests for the faucet. Run via:
+Smoke e2e tests for the tools app. Run via:
 
 ```bash
 bun run --cwd apps/tools test:e2e
@@ -13,7 +13,7 @@ against a **mock wallet provider** that intercepts `aztec-wallet-discovery`
 postMessage and emits canned RPC replies. No browser, no real wallet,
 no Aztec network.
 
-The mock implements every wallet-sdk RPC the faucet uses:
+The mock implements every wallet-sdk RPC the tools app uses:
 
 1. discovery handshake (`aztec-wallet-discovery` postMessage)
 2. `establishSecureChannel` → returns deterministic `verificationHash`

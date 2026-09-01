@@ -3,20 +3,20 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, test } from "vitest"
 
-// Read the raw stylesheets via fs — `?raw` imports return empty under the faucet's jsdom vitest (the
+// Read the raw stylesheets via fs — `?raw` imports return empty under the tools app's jsdom vitest (the
 // vue/css pipeline swallows them). The design package is always at `packages/design` in this monorepo.
 const here = dirname(fileURLToPath(import.meta.url)) // apps/tools/src
 const appCss = readFileSync(join(here, "app.css"), "utf8")
 const baseCss = readFileSync(join(here, "../../../packages/design/src/base.css"), "utf8")
 
 /**
- * Faucet host-rule parity guard (design-system round-2 F9 / round-1 phase-5 lesson).
+ * Tools host-rule parity guard (design-system round-2 F9 / round-1 phase-5 lesson).
  *
- * The round-1 faucet light-bg regression slipped past EVERY machine check because token VALUES were
+ * The round-1 tools light-bg regression slipped past EVERY machine check because token VALUES were
  * byte-identical — the gap was MISSING RULES (the extension's lean `@nulo/design/base.css` dropped a
- * handful of element-global declarations the faucet relied on; they were restored in `app.css`).
+ * handful of element-global declarations the tools app relied on; they were restored in `app.css`).
  * Token-drift tests can't see a missing rule. This is a rule-PRESENCE guard: the host element-global
- * rule-groups the faucet needs must exist SOMEWHERE in `app.css ∪ @nulo/design/base.css`.
+ * rule-groups the tools app needs must exist SOMEWHERE in `app.css ∪ @nulo/design/base.css`.
  *
  * Scope: presence, NOT cascade effectiveness — jsdom can't resolve the CSS-var cascade, and a later
  * higher-specificity rule could still win. The guard assumes `app.css` is imported AFTER `base.css`
@@ -37,7 +37,7 @@ const REQUIRED: Array<[string, RegExp]> = [
 	["focus-visible outline", /focus-visible[^{]*\{[^}]*outline/],
 ]
 
-describe("faucet host-rule parity (missing-rule guard over app.css ∪ @nulo/design/base.css)", () => {
+describe("tools host-rule parity (missing-rule guard over app.css ∪ @nulo/design/base.css)", () => {
 	for (const [label, re] of REQUIRED) {
 		test(`host rule present: ${label}`, () => {
 			expect(re.test(css), `missing host rule "${label}" — restore it in app.css or @nulo/design/base.css`).toBe(true)
