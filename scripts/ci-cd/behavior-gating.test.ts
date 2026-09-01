@@ -106,6 +106,18 @@ describe("CI behavior-gating guard", () => {
     expect(quick["tools"], "tools must gate its build workflow").toContain(".github/workflows/_build-tools.yml")
   })
 
+  test("the tools build job is wired from the changes output through to quality-status", () => {
+    // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
+    const wf = Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows/pr-quick.yml"), "utf8")) as any
+    const outputs = Object.keys(wf.jobs.changes.outputs ?? {})
+    expect(outputs).toContain("tools")
+    expect(outputs).toContain("needs-tools-build")
+    expect(String(wf.jobs["build-tools"]?.if), "build-tools must gate on needs-tools-build").toContain(
+      "needs-tools-build",
+    )
+    expect(wf.jobs.status.needs, "quality-status must wait on build-tools").toContain("build-tools")
+  })
+
   test("cross-cutting inputs (patches + root build inputs) gate the e2e suites", () => {
     for (const [label, pats] of [
       ["smoke", smoke],

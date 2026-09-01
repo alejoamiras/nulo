@@ -1081,3 +1081,86 @@ describe("parseGrantedAccounts hardening", () => {
 		expect(hiddenCount).toBe(4)
 	})
 })
+
+describe("legacy app-id migration", () => {
+	const PREF = "test-app:preferred-wallet"
+	const LEGACY_PREF = "old-app:preferred-wallet"
+	const LEGACY_SELECTED = "old-app:selected-accounts"
+	function makeLegacySession() {
+		return createAztecWalletSession({
+			appId: "test-app",
+			legacyAppId: "old-app",
+			buildManifest: async () => ({}),
+			registerContracts: vi.fn(async () => {}),
+		})
+	}
+
+	it("a legacy-only preference is honoured; the current key wins when both exist", () => {
+		localStorage.setItem(LEGACY_PREF, JSON.stringify({ id: "nulo", name: "Legacy" }))
+		expect(makeLegacySession().preferredWalletName.value).toBe("Legacy")
+		localStorage.setItem(PREF, JSON.stringify({ id: "nulo", name: "Current" }))
+		expect(makeLegacySession().preferredWalletName.value).toBe("Current")
+	})
+
+	it("a malformed legacy value reads as nothing", () => {
+		localStorage.setItem(LEGACY_PREF, "{not json")
+		expect(makeLegacySession().preferredWalletName.value).toBeNull()
+		localStorage.setItem(LEGACY_PREF, JSON.stringify({ id: 1 }))
+		expect(makeLegacySession().preferredWalletName.value).toBeNull()
+	})
+
+	it("a successful remembered connect from the legacy key promotes it to the current key", async () => {
+		localStorage.setItem(LEGACY_PREF, JSON.stringify({ id: "nulo", name: "Nulo" }))
+		const { provider } = makeProvider()
+		const s = makeLegacySession()
+		const c = s.connect()
+		await flush()
+		stream.push(provider)
+		await flush()
+		stream.end()
+		await c
+		expect(s.status.value).toBe("verifying")
+		expect(localStorage.getItem(PREF)).toBeNull() // promotion waits for full success
+		await s.confirmVerification()
+		expect(s.status.value).toBe("connected")
+		expect(JSON.parse(localStorage.getItem(PREF) ?? "{}")).toEqual({ id: "nulo", name: "Nulo" })
+	})
+
+	it("forgetting the wallet removes BOTH keys", () => {
+		localStorage.setItem(LEGACY_PREF, JSON.stringify({ id: "nulo", name: "Nulo" }))
+		localStorage.setItem(PREF, JSON.stringify({ id: "nulo", name: "Nulo" }))
+		const s = makeLegacySession()
+		s.forgetPreferredWallet()
+		expect(localStorage.getItem(PREF)).toBeNull()
+		expect(localStorage.getItem(LEGACY_PREF)).toBeNull()
+		expect(s.preferredWalletName.value).toBeNull()
+	})
+
+	it("a failed remembered connect clears the legacy key too", async () => {
+		vi.useFakeTimers()
+		localStorage.setItem(LEGACY_PREF, JSON.stringify({ id: "nulo", name: "Nulo" }))
+		const bad = makeProvider()
+		bad.provider.establishSecureChannel.mockRejectedValue(new Error("wallet gone"))
+		const s = makeLegacySession()
+		void s.connect()
+		await flush()
+		stream.push(bad.provider)
+		await flush()
+		await vi.advanceTimersByTimeAsync(1_000)
+		await flush()
+		expect(s.status.value).toBe("error")
+		expect(localStorage.getItem(LEGACY_PREF)).toBeNull()
+	})
+
+	it("a legacy-only remembered account pre-selects; the next write lands on the current key only", async () => {
+		localStorage.setItem(LEGACY_SELECTED, JSON.stringify([["nulo", MA_B]]))
+		const { provider } = makeMultiProvider()
+		const s = makeLegacySession()
+		await driveThroughGrant(s, provider)
+		expect(s.status.value).toBe("connected")
+		expect(s.selectedAccount.value).toBe(MA_B)
+		expect(s.selectAccount(MA_A)).toBe(true)
+		expect(storedMap()).toEqual([["nulo", MA_A]])
+		expect(localStorage.getItem(LEGACY_SELECTED)).toBe(JSON.stringify([["nulo", MA_B]]))
+	})
+})

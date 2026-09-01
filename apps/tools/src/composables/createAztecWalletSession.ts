@@ -101,6 +101,10 @@ export function truncateName(name: string, max: number): string {
  */
 export interface AztecWalletSessionConfig {
 	readonly appId: string
+	/** A previous app id whose `localStorage` entries are still honoured: read after `appId`'s,
+	 *  promoted to the current key on the next successful remembered connect, and cleared with
+	 *  it. Reads only — nothing is ever written under this id. */
+	readonly legacyAppId?: string
 	/** Build the wallet-sdk capability manifest at connect time (async - needs the SponsoredFPC). */
 	// biome-ignore lint/suspicious/noExplicitAny: SDK manifest type is zod-inferred, not exported usably.
 	readonly buildManifest: () => Promise<any>
@@ -182,10 +186,14 @@ function createSessionState(config: AztecWalletSessionConfig) {
 	const storageKey = `${config.appId}:preferred-wallet`
 	/** Per-wallet selected-account memory (MRU pairs, see readRememberedMap). */
 	const selectedStorageKey = `${config.appId}:selected-accounts`
+	const legacyStorageKey = config.legacyAppId ? `${config.legacyAppId}:preferred-wallet` : null
+	const legacySelectedKey = config.legacyAppId ? `${config.legacyAppId}:selected-accounts` : null
 	return {
 		config,
 		storageKey,
 		selectedStorageKey,
+		legacyStorageKey,
+		legacySelectedKey,
 		status: ref<ConnectStatus>("idle"),
 		verificationEmojis: ref<string | null>(null),
 		accounts: ref<GrantedAccount[]>([]),
@@ -205,7 +213,7 @@ function createSessionState(config: AztecWalletSessionConfig) {
 		 *  user must see the scan happening, not a frozen button). The remembered path keeps it
 		 *  closed unless it falls back to a choice. */
 		pickerOpen: ref(false),
-		preferredWalletName: ref<string | null>(readPreferredFor(storageKey)?.name ?? null),
+		preferredWalletName: ref<string | null>((readPreferredFor(storageKey) ?? readPreferredFor(legacyStorageKey))?.name ?? null),
 		provider: null as WalletProvider | null,
 		pending: null as PendingConnection | null,
 		cancelDiscovery: null as (() => void) | null,
@@ -240,7 +248,8 @@ type SessionState = ReturnType<typeof createSessionState>
 // Storage controller — localStorage is untrusted input; every read re-validates and bounds.
 // ---------------------------------------------------------------------------------------------
 
-function readPreferredFor(storageKey: string): PreferredWallet | null {
+function readPreferredFor(storageKey: string | null): PreferredWallet | null {
+	if (storageKey === null) return null
 	try {
 		const raw = localStorage.getItem(storageKey)
 		if (!raw) return null
@@ -254,7 +263,7 @@ function readPreferredFor(storageKey: string): PreferredWallet | null {
 	}
 }
 function readPreferred(s: SessionState): PreferredWallet | null {
-	return readPreferredFor(s.storageKey)
+	return readPreferredFor(s.storageKey) ?? readPreferredFor(s.legacyStorageKey)
 }
 function writePreferred(s: SessionState, value: PreferredWallet): void {
 	// Same write-bound as the selected-account map (D-23/codex residual): a hostile provider
@@ -271,6 +280,8 @@ function writePreferred(s: SessionState, value: PreferredWallet): void {
 function clearPreferred(s: SessionState): void {
 	try {
 		localStorage.removeItem(s.storageKey)
+		// A poisoned legacy value must not outlive "forget" (or a failed remembered connect).
+		if (s.legacyStorageKey !== null) localStorage.removeItem(s.legacyStorageKey)
 	} catch {
 		// best-effort
 	}
@@ -284,7 +295,8 @@ function clearPreferred(s: SessionState): void {
  *  sites). */
 function readRememberedMap(s: SessionState): Array<[string, string]> {
 	try {
-		const raw = localStorage.getItem(s.selectedStorageKey)
+		const raw =
+			localStorage.getItem(s.selectedStorageKey) ?? (s.legacySelectedKey === null ? null : localStorage.getItem(s.legacySelectedKey))
 		if (!raw) return []
 		return parseRememberedEntries(JSON.parse(raw))
 	} catch {
@@ -833,9 +845,10 @@ async function finishSetup(s: SessionState, flowEpoch: number, flowWallet: Walle
 		}
 
 		s.status.value = "connected"
-		// Persist ONLY on full success, and never re-persist on the remembered path (the
-		// stored value is already this wallet).
-		if (!s.connectingViaRemembered && flowProvider) {
+		// Persist ONLY on full success. The remembered path re-persists solely when the current
+		// key is empty — i.e. the preference was read from the legacy id and is promoted here,
+		// never on read, so a stale legacy value is blessed only by a complete connect.
+		if (flowProvider && (!s.connectingViaRemembered || readPreferredFor(s.storageKey) === null)) {
 			writePreferred(s, { id: flowProvider.id, name: flowProvider.name })
 		}
 		s.connectingViaRemembered = false

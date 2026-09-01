@@ -81,7 +81,7 @@ export function buildFaucetManifest(input: FaucetManifestInput): AppManifest {
 	return {
 		version: "1.0",
 		metadata: {
-			name: "nulo-faucet",
+			name: "nulo-tools",
 			version: "0.1.0",
 			description: "Test NULO + OLUN on Aztec alpha-testnet - Nulo",
 			url: input.appUrl ?? defaultUrl(),
@@ -224,7 +224,7 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 	return {
 		version: "1.0",
 		metadata: {
-			name: "nulo-faucet",
+			name: "nulo-tools",
 			version: "0.1.0",
 			description: faucet ? "Faucet + Bridge on Aztec - Nulo" : "Bridge on Aztec - Nulo",
 			url: input.appUrl ?? defaultUrl(),

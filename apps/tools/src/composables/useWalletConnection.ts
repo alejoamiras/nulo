@@ -19,7 +19,9 @@ import { createAztecWalletSession } from "./createAztecWalletSession"
 import { opsInFlight } from "./useOpsInFlight"
 import { useToast } from "./useToast"
 
-const APP_ID = "nulo-faucet"
+const APP_ID = "nulo-tools"
+/** The app id before the tools rename; its stored wallet/account choices are still honoured. */
+const LEGACY_APP_ID = "nulo-faucet"
 
 async function buildCapabilityManifest() {
 	const sponsoredFpc = await getSponsoredFpcInstance()
@@ -67,6 +69,7 @@ async function registerAllContracts(w: Wallet): Promise<void> {
 // connect on either tab and the other inherits the connection + the full grant (no second prompt).
 const session = createAztecWalletSession({
 	appId: APP_ID,
+	legacyAppId: LEGACY_APP_ID,
 	buildManifest: buildCapabilityManifest,
 	registerContracts: registerAllContracts,
 	// The mutation-boundary switch gate: selectAccount() rejects while any account-sensitive

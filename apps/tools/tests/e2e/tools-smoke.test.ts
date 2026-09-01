@@ -140,7 +140,7 @@ async function connectThroughPicker(wrapper: VueWrapper) {
 	await flushPromises()
 }
 
-describe("faucet smoke", () => {
+describe("tools smoke", () => {
 	let wrapper: VueWrapper | null = null
 
 	beforeEach(() => {
@@ -218,6 +218,19 @@ describe("faucet smoke", () => {
 	it("2b. a remembered wallet skips the picker (auto-reconnect path)", async () => {
 		// The discovery stream yields the sole claimant and ends naturally, so
 		// the remembered path resolves immediately (no ambiguity-window wait).
+		localStorage.setItem("nulo-tools:preferred-wallet", JSON.stringify({ id: "nulo", name: "Nulo" }))
+		const pending = makePending()
+		mockEstablishSecureChannel.mockResolvedValueOnce(pending)
+		wrapper = mount(App, { attachTo: document.body })
+
+		await wrapper.get(`[data-testid="${TESTIDS.btnConnect}"]`).trigger("click")
+		await flushPromises()
+
+		expect(document.querySelector(`[data-testid="${TESTIDS.walletPicker}"]`)).toBeNull()
+		expect(document.querySelector(`[data-testid="${TESTIDS.verificationModal}"]`)).not.toBeNull()
+	})
+
+	it("2c. a wallet remembered under the pre-rename app id still skips the picker", async () => {
 		localStorage.setItem("nulo-faucet:preferred-wallet", JSON.stringify({ id: "nulo", name: "Nulo" }))
 		const pending = makePending()
 		mockEstablishSecureChannel.mockResolvedValueOnce(pending)

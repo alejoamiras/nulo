@@ -19,7 +19,7 @@ describe("buildFaucetManifest", () => {
 	})
 
 	it("populates metadata with the dApp identity and url", () => {
-		expect(m.metadata.name).toBe("nulo-faucet")
+		expect(m.metadata.name).toBe("nulo-tools")
 		expect(m.metadata.version).toBe("0.1.0")
 		expect(m.metadata.url).toBe("https://faucet.test")
 	})
