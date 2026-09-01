@@ -65,7 +65,7 @@ git grep -n -i faucet -- ':!implementations-plan' ':!audit' ':!.claude/worktrees
 
 ## Phases
 
-### Phase 0 — Precondition + rebase
+### Phase 0 — Precondition + rebase ✓ (2026-09-01, pre-rename sha `01d06692`)
 
 Wait for `faucet-cluster` PR-a and PR-b to merge to `dev`. `git fetch origin dev && git rebase origin/dev`, `bun install --frozen-lockfile`, re-run the master grep and record the fresh counts + the pre-rename sha (`git rev-parse HEAD`) in `lessons/phase-0.md` — every transform-diff gate below reads from that sha.
 
