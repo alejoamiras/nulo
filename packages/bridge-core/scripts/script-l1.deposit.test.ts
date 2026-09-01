@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+// Each fake env pushes into a shared trace; the mock records the deposit into whichever
+// trace the current test wired, so ordering asserts can see approve-vs-deposit.
+let activeTrace: string[] = []
 vi.mock("../src/flows", () => ({
-	runRouterDeposit: vi.fn(async () => ({ claimValueHex: "0x0abc", leafIndex: 42n })),
+	runRouterDeposit: vi.fn(async () => {
+		activeTrace.push("deposit")
+		return { claimValueHex: "0x0abc", leafIndex: 42n }
+	}),
 }))
 
 import { runRouterDeposit } from "../src/flows"
@@ -45,6 +51,8 @@ describe("depositViaRouter", () => {
 
 	it("threads network params verbatim into the router flow and returns the claim pair", async () => {
 		const calls: string[] = []
+		activeTrace = calls
+		const claimSalt = new (await import("@aztec/aztec.js/fields")).Fr(1234)
 		const out = await depositViaRouter(fakeEnv(1n << 200n, calls), {
 			usdc: "0xusdc" as `0x${string}`,
 			usdcAbi: [],
@@ -53,6 +61,7 @@ describe("depositViaRouter", () => {
 			amount: 777n,
 			recipient: "0xrecipient",
 			isPrivate: true,
+			claimSalt,
 			chainId: 1,
 			mins: () => "0m",
 		})
@@ -68,10 +77,12 @@ describe("depositViaRouter", () => {
 		expect(params.amount).toBe(777n)
 		expect(params.aztecRecipient).toBe("0xrecipient")
 		expect(params.isPrivate).toBe(true)
+		expect(params.claimSalt).toBe(claimSalt)
 	})
 
 	it("approves Permit2 BEFORE the deposit when the allowance is short, and skips it when covered", async () => {
 		const short: string[] = []
+		activeTrace = short
 		await depositViaRouter(fakeEnv(0n, short), {
 			usdc: "0xusdc" as `0x${string}`,
 			usdcAbi: [],
@@ -83,10 +94,11 @@ describe("depositViaRouter", () => {
 			chainId: 11155111,
 			mins: () => "0m",
 		})
-		// allowance read → max-approve → receipt wait, all before the router flow ran.
-		expect(short.slice(0, 3)).toEqual(["read:allowance", "write:approve", "wait"])
+		// allowance read → max-approve → receipt wait → post-approve re-read, ALL before the deposit.
+		expect(short).toEqual(["read:allowance", "write:approve", "wait", "read:allowance", "deposit"])
 
 		const covered: string[] = []
+		activeTrace = covered
 		await depositViaRouter(fakeEnv(1n << 200n, covered), {
 			usdc: "0xusdc" as `0x${string}`,
 			usdcAbi: [],
@@ -98,6 +110,6 @@ describe("depositViaRouter", () => {
 			chainId: 11155111,
 			mins: () => "0m",
 		})
-		expect(covered).toEqual(["read:allowance"])
+		expect(covered).toEqual(["read:allowance", "deposit"])
 	})
 })
