@@ -17,6 +17,9 @@ import { ProfileServiceClient } from "@/wallet/services/profile/client"
 import { useToast } from "@/composables/toast"
 const { openToast } = useToast()
 
+/** Components */
+import CollapsingHeroLayout from "@/components/composite/CollapsingHeroLayout.vue"
+
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 const appStore = useAppStore()
@@ -24,10 +27,6 @@ const appStore = useAppStore()
 const router = useRouter()
 
 let profileService = null
-
-const wrapperRef = useTemplateRef("wrapperRef")
-const heroVisible = ref(true)
-let scrollEl = null
 
 const currentPassword = ref("")
 const newPassword = ref("")
@@ -90,167 +89,136 @@ const onKeydown = (e) => {
 	if (e.key === "Enter") handleChangePassword()
 }
 
-const handleScroll = () => {
-	if (!scrollEl) return
-	heroVisible.value = scrollEl.scrollTop < 40
-}
-
-onMounted(async () => {
+onMounted(() => {
 	profileService = new ProfileServiceClient()
 	document.addEventListener("keydown", onKeydown)
-	await nextTick()
-	scrollEl = wrapperRef.value?.wrapper
-	if (!scrollEl) return
-	scrollEl.addEventListener("scroll", handleScroll, { passive: true })
-	handleScroll()
 })
 
 onBeforeUnmount(() => {
 	document.removeEventListener("keydown", onKeydown)
 	profileService?.disconnect()
 	profileService = null
-	scrollEl?.removeEventListener("scroll", handleScroll)
-	scrollEl = null
 })
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.page">
-		<Flex ref="wrapperRef" direction="column" :class="$style.wrapper">
-			<SubPageHeader :backTo="'/popup/settings/profile'">
-				<template #title>
-					<span :class="[$style.collapsing_label, !heroVisible && $style.collapsing_label_visible]">Change Password</span>
-				</template>
-			</SubPageHeader>
+	<CollapsingHeroLayout heroMain="Change" heroSub="Password" collapsingLabel="Change Password" backTo="/popup/settings/profile">
+		<!-- Profile -->
+		<div :class="$style.section">
+			<span :class="$style.section_label">Profile</span>
+			<ItemsContainer flat>
+				<SettingItem :title="appStore.profile?.name ?? ''" icon="user" raw />
+			</ItemsContainer>
+		</div>
 
-			<Flex direction="column" :class="$style.content">
-				<!-- Hero -->
-				<div :class="$style.hero">
-					<div :class="$style.title_stack">
-						<span :class="$style.title_main">Change</span>
-						<span :class="$style.title_sub">Password</span>
-					</div>
-					<div :class="$style.hero_bar" />
-				</div>
-
-				<!-- Profile -->
-				<div :class="$style.section">
-					<span :class="$style.section_label">Profile</span>
-					<ItemsContainer flat>
-						<SettingItem :title="appStore.profile?.name ?? ''" icon="user" raw />
-					</ItemsContainer>
-				</div>
-
-				<!-- Current password -->
-				<div :class="$style.section">
-					<span :class="$style.section_label">Current password</span>
-					<div :class="[isWrongCurrentPassword && $style.shake]">
-						<Input
-							v-model="currentPassword"
-							:error="isWrongCurrentPassword"
-							:ariaInvalid="isWrongCurrentPassword"
-							:type="isPasswordType ? 'password' : 'text'"
-							@input="handlePasswordInput"
-							placeholder="Enter current password"
-							autofocus
-							data-testid="current-password-input"
+		<!-- Current password -->
+		<div :class="$style.section">
+			<span :class="$style.section_label">Current password</span>
+			<div :class="[isWrongCurrentPassword && $style.shake]">
+				<Input
+					v-model="currentPassword"
+					:error="isWrongCurrentPassword"
+					:ariaInvalid="isWrongCurrentPassword"
+					:type="isPasswordType ? 'password' : 'text'"
+					@input="handlePasswordInput"
+					placeholder="Enter current password"
+					autofocus
+					data-testid="current-password-input"
+				>
+					<template #suffix>
+						<button
+							type="button"
+							@click="isPasswordType = !isPasswordType"
+							tabindex="-1"
+							:class="$style.visibility_btn"
+							:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
 						>
-							<template #suffix>
-								<button
-									type="button"
-									@click="isPasswordType = !isPasswordType"
-									tabindex="-1"
-									:class="$style.visibility_btn"
-									:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
-								>
-									<MaterialIcon
-										:name="isPasswordType ? 'visibility' : 'visibility_off'"
-										:size="18"
-										color="secondary"
-									/>
-								</button>
-							</template>
-						</Input>
-					</div>
-					<Transition name="fade">
-						<span
-							v-if="isWrongCurrentPassword"
-							:class="$style.error_text"
-							role="alert"
-							data-testid="error-text"
-						>
-							Wrong current password
-						</span>
-					</Transition>
-				</div>
+							<MaterialIcon
+								:name="isPasswordType ? 'visibility' : 'visibility_off'"
+								:size="18"
+								color="secondary"
+							/>
+						</button>
+					</template>
+				</Input>
+			</div>
+			<Transition name="fade">
+				<span
+					v-if="isWrongCurrentPassword"
+					:class="$style.error_text"
+					role="alert"
+					data-testid="error-text"
+				>
+					Wrong current password
+				</span>
+			</Transition>
+		</div>
 
-				<!-- New password -->
-				<div :class="$style.section_last">
-					<span :class="$style.section_label">New password</span>
-					<Flex direction="column" gap="12">
-						<Input
-							v-model="newPassword"
-							:type="isPasswordType ? 'password' : 'text'"
-							@input="handlePasswordInput"
-							:maxLength="maxPasswordLength"
-							placeholder="Enter new password"
-							data-testid="new-password-input"
+		<!-- New password -->
+		<div :class="$style.section_last">
+			<span :class="$style.section_label">New password</span>
+			<Flex direction="column" gap="12">
+				<Input
+					v-model="newPassword"
+					:type="isPasswordType ? 'password' : 'text'"
+					@input="handlePasswordInput"
+					:maxLength="maxPasswordLength"
+					placeholder="Enter new password"
+					data-testid="new-password-input"
+				>
+					<template #suffix>
+						<button
+							type="button"
+							@click="isPasswordType = !isPasswordType"
+							tabindex="-1"
+							:class="$style.visibility_btn"
+							:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
 						>
-							<template #suffix>
-								<button
-									type="button"
-									@click="isPasswordType = !isPasswordType"
-									tabindex="-1"
-									:class="$style.visibility_btn"
-									:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
-								>
-									<MaterialIcon
-										:name="isPasswordType ? 'visibility' : 'visibility_off'"
-										:size="18"
-										color="secondary"
-									/>
-								</button>
-							</template>
-							<template #bottom>
-								<Flex align="center" gap="6" :class="$style.hint_row">
-									<MaterialIcon name="lock" :size="12" color="tertiary" />
-									<Text size="12" weight="600" color="tertiary">{{ passwordHint }}</Text>
-								</Flex>
-							</template>
-						</Input>
-						<Input
-							v-model="repeatedNewPassword"
-							data-testid="new-password-repeat-input"
-							:type="isPasswordType ? 'password' : 'text'"
-							@input="handlePasswordInput"
-							:maxLength="maxPasswordLength"
-							placeholder="Repeat new password"
-						/>
-					</Flex>
-
-					<Flex
-						v-if="unexpectedErrorMessage"
-						align="start"
-						gap="6"
-						style="margin-top: 12px"
-						role="alert"
-					>
-						<Icon name="info" size="14" color="red" />
-						<Text
-							size="12"
-							weight="600"
-							height="120"
-							color="red"
-							data-testid="error-text-unexpected"
-						>
-							{{ unexpectedErrorMessage }}
-						</Text>
-					</Flex>
-				</div>
+							<MaterialIcon
+								:name="isPasswordType ? 'visibility' : 'visibility_off'"
+								:size="18"
+								color="secondary"
+							/>
+						</button>
+					</template>
+					<template #bottom>
+						<Flex align="center" gap="6" :class="$style.hint_row">
+							<MaterialIcon name="lock" :size="12" color="tertiary" />
+							<Text size="12" weight="600" color="tertiary">{{ passwordHint }}</Text>
+						</Flex>
+					</template>
+				</Input>
+				<Input
+					v-model="repeatedNewPassword"
+					data-testid="new-password-repeat-input"
+					:type="isPasswordType ? 'password' : 'text'"
+					@input="handlePasswordInput"
+					:maxLength="maxPasswordLength"
+					placeholder="Repeat new password"
+				/>
 			</Flex>
-		</Flex>
 
-		<div :class="$style.bottom">
+			<Flex
+				v-if="unexpectedErrorMessage"
+				align="start"
+				gap="6"
+				style="margin-top: 12px"
+				role="alert"
+			>
+				<Icon name="info" size="14" color="red" />
+				<Text
+					size="12"
+					weight="600"
+					height="120"
+					color="red"
+					data-testid="error-text-unexpected"
+				>
+					{{ unexpectedErrorMessage }}
+				</Text>
+			</Flex>
+		</div>
+
+		<template #bottom>
 			<Button
 				@click="handleChangePassword"
 				:disabled="!isAllowedToChange || hasError || isLoading"
@@ -259,87 +227,11 @@ onBeforeUnmount(() => {
 			>
 				{{ isLoading ? "Changing…" : "Change Password" }}
 			</Button>
-		</div>
-	</Flex>
+		</template>
+	</CollapsingHeroLayout>
 </template>
 
 <style module>
-.page {
-	flex: 1;
-	min-height: 0;
-	background: var(--app-bg);
-}
-
-.wrapper {
-	flex: 1;
-	min-height: 0;
-	overflow: auto;
-	scrollbar-gutter: stable;
-}
-
-.collapsing_label {
-	font-family: var(--font-headline);
-	font-size: 13px;
-	font-weight: 700;
-	letter-spacing: 0.12em;
-	text-transform: uppercase;
-	color: var(--txt-primary);
-
-	text-decoration: underline;
-	text-decoration-color: var(--nulo-accent);
-	text-decoration-thickness: 2px;
-	text-underline-offset: 4px;
-
-	opacity: 0;
-	pointer-events: none;
-
-	transition: opacity 0.18s cubic-bezier(0.4, 0, 1, 1);
-}
-
-.collapsing_label_visible {
-	opacity: 1;
-	pointer-events: auto;
-}
-
-.content {
-	flex: 1;
-	padding: 0 24px;
-}
-
-.hero {
-	padding: 20px 0;
-}
-
-.title_stack {
-	display: flex;
-	flex-direction: column;
-	line-height: 1.02;
-}
-
-.title_main {
-	font-family: var(--font-headline);
-	font-size: 40px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--nulo-accent);
-}
-
-.title_sub {
-	font-family: var(--font-headline);
-	font-size: 40px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
-}
-
-.hero_bar {
-	width: 32px;
-	height: 2px;
-	background: var(--nulo-accent);
-	margin-top: 10px;
-}
 
 /* No section-level border-bottom: the Input's own .base { border-bottom }
  * already underlines the section's last child. Stacking both produced two
@@ -399,13 +291,6 @@ onBeforeUnmount(() => {
 }
 
 .shake { animation: shakeInput 0.3s ease; }
-
-.bottom {
-	flex-shrink: 0;
-	padding: 20px 24px;
-	background: var(--app-bg);
-	border-top: 1px solid var(--nulo-border);
-}
 
 .cta {
 	width: 100%;

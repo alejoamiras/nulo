@@ -10,7 +10,7 @@
 
 <script setup>
 /** Components */
-import SecretExportLayout from "@/components/composite/SecretExportLayout.vue"
+import CollapsingHeroLayout from "@/components/composite/CollapsingHeroLayout.vue"
 
 /** Services */
 import { managers } from "@/utils/core"
@@ -175,7 +175,7 @@ const collapsingLabel = "Import Account"
 </script>
 
 <template>
-	<SecretExportLayout heroMain="Import" heroSub="Account" :collapsingLabel="collapsingLabel" backTo="/popup/settings/accounts">
+	<CollapsingHeroLayout heroMain="Import" heroSub="Account" :collapsingLabel="collapsingLabel" backTo="/popup/settings/accounts">
 		<!-- Step 1: the file (the full-backup restore's picker pattern). The section divider only
 		     exists when the password section actually follows — `export_section`'s border-bottom
 		     separates it from a NEXT section, and a plain file has none. -->
@@ -282,5 +282,5 @@ const collapsingLabel = "Import Account"
 				Import Account
 			</Button>
 		</template>
-	</SecretExportLayout>
+	</CollapsingHeroLayout>
 </template>

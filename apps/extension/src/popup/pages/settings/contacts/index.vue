@@ -195,10 +195,12 @@ onBeforeUnmount(() => {
 				/>
 			</ItemsContainer>
 
-			<div v-else :class="$style.empty" data-testid="contacts-empty">
-				<span :class="$style.empty_headline">NO CONTACTS YET</span>
-				<span :class="$style.empty_sub">Save the people you send to or receive from often.</span>
-			</div>
+			<ListStatusMessage
+				v-else
+				headline="NO CONTACTS YET"
+				sub="Save the people you send to or receive from often."
+				testid="contacts-empty"
+			/>
 
 			<Button
 				@click="popupStore.open('new_contact')"
@@ -225,33 +227,8 @@ onBeforeUnmount(() => {
 	padding: 16px 24px var(--nav-clearance) 24px;
 }
 
-.empty {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 8px;
 
-	padding: 32px 16px;
-	border: 1px dashed var(--nulo-border);
 
-	text-align: center;
-}
-
-.empty_headline {
-	font-family: var(--font-headline);
-	font-size: 14px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
-}
-
-.empty_sub {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	line-height: 1.4;
-	color: var(--nulo-outline);
-}
 
 .icon_btn {
 	display: flex;

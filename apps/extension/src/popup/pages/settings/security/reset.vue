@@ -17,15 +17,14 @@ import { storageLocalRemove } from "@/utils/storage"
 import { useToast } from "@/composables/toast"
 const { openToast } = useToast()
 
+/** Components */
+import CollapsingHeroLayout from "@/components/composite/CollapsingHeroLayout.vue"
+
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 const appStore = useAppStore()
 
 const router = useRouter()
-
-const wrapperRef = useTemplateRef("wrapperRef")
-const heroVisible = ref(true)
-let scrollEl = null
 
 const checks = reactive({
 	permanent: false,
@@ -102,88 +101,61 @@ const handleReset = async () => {
 	}
 }
 
-const handleScroll = () => {
-	if (!scrollEl) return
-	heroVisible.value = scrollEl.scrollTop < 40
-}
-
-onMounted(async () => {
-	await nextTick()
-	scrollEl = wrapperRef.value?.wrapper
-	if (!scrollEl) return
-	scrollEl.addEventListener("scroll", handleScroll, { passive: true })
-	handleScroll()
-})
-
 onBeforeUnmount(() => {
-	scrollEl?.removeEventListener("scroll", handleScroll)
-	scrollEl = null
 	if (slowDeleteTimer) clearTimeout(slowDeleteTimer)
 })
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.page" :data-profile-name="appStore.profile?.name ?? ''">
-		<Flex ref="wrapperRef" direction="column" :class="$style.wrapper">
-			<SubPageHeader :backTo="'/popup/settings/profile'">
-				<template #title>
-					<span :class="[$style.collapsing_label, !heroVisible && $style.collapsing_label_visible]">Delete Profile</span>
-				</template>
-			</SubPageHeader>
+	<CollapsingHeroLayout
+		heroMain="Delete"
+		heroSub="Profile"
+		collapsingLabel="Delete Profile"
+		backTo="/popup/settings/profile"
+		tone="destructive"
+		:data-profile-name="appStore.profile?.name ?? ''"
+	>
+		<!-- Profile -->
+		<div :class="$style.section">
+			<span :class="$style.section_label">Profile to delete</span>
+			<ItemsContainer flat>
+				<SettingItem :title="appStore.profile?.name ?? ''" icon="user" raw />
+			</ItemsContainer>
+		</div>
 
-			<Flex direction="column" :class="$style.content">
-				<!-- Hero -->
-				<div :class="$style.hero">
-					<div :class="$style.title_stack">
-						<span :class="$style.title_main">Delete</span>
-						<span :class="$style.title_sub">Profile</span>
-					</div>
-					<div :class="$style.hero_bar" />
-				</div>
-
-				<!-- Profile -->
-				<div :class="$style.section">
-					<span :class="$style.section_label">Profile to delete</span>
-					<ItemsContainer flat>
-						<SettingItem :title="appStore.profile?.name ?? ''" icon="user" raw />
-					</ItemsContainer>
-				</div>
-
-				<!-- Agreements -->
-				<div :class="$style.section">
-					<span :class="$style.section_label">Agreements required</span>
-					<Flex direction="column" gap="12">
-						<Checkbox v-model="checks.permanent" data-testid="reset-checkbox-permanent">
-							<Text size="14" weight="600" color="secondary" height="140">I understand this action is permanent</Text>
-						</Checkbox>
-						<Checkbox v-model="checks.undone" data-testid="reset-checkbox-undone">
-							<Text size="14" weight="600" color="secondary" height="140">I understand this action cannot be undone</Text>
-						</Checkbox>
-						<Checkbox v-model="checks.sure" data-testid="reset-checkbox-sure">
-							<Text size="14" weight="600" color="secondary" height="140">I'm sure there's no assets left in my profile</Text>
-						</Checkbox>
-					</Flex>
-				</div>
-
-				<!-- Confirmation -->
-				<div :class="$style.section_last">
-					<span :class="$style.section_label">Confirm deletion</span>
-					<Input
-						v-model="confirmText"
-
-						type="text"
-						label="Profile name"
-						:placeholder="`Type &quot;${appStore.profile?.name}&quot; to confirm`"
-						data-testid="reset-confirm-input"
-					/>
-					<Text size="12" weight="500" color="tertiary" height="150">
-						You will be able to recover your profile later if you have saved your recovery phrase
-					</Text>
-				</div>
+		<!-- Agreements -->
+		<div :class="$style.section">
+			<span :class="$style.section_label">Agreements required</span>
+			<Flex direction="column" gap="12">
+				<Checkbox v-model="checks.permanent" data-testid="reset-checkbox-permanent">
+					<Text size="14" weight="600" color="secondary" height="140">I understand this action is permanent</Text>
+				</Checkbox>
+				<Checkbox v-model="checks.undone" data-testid="reset-checkbox-undone">
+					<Text size="14" weight="600" color="secondary" height="140">I understand this action cannot be undone</Text>
+				</Checkbox>
+				<Checkbox v-model="checks.sure" data-testid="reset-checkbox-sure">
+					<Text size="14" weight="600" color="secondary" height="140">I'm sure there's no assets left in my profile</Text>
+				</Checkbox>
 			</Flex>
-		</Flex>
+		</div>
 
-		<div :class="$style.bottom">
+		<!-- Confirmation -->
+		<div :class="$style.section_last">
+			<span :class="$style.section_label">Confirm deletion</span>
+			<Input
+				v-model="confirmText"
+
+				type="text"
+				label="Profile name"
+				:placeholder="`Type &quot;${appStore.profile?.name}&quot; to confirm`"
+				data-testid="reset-confirm-input"
+			/>
+			<Text size="12" weight="500" color="tertiary" height="150">
+				You will be able to recover your profile later if you have saved your recovery phrase
+			</Text>
+		</div>
+
+		<template #bottom>
 			<Text v-if="isSlowDelete" size="12" color="secondary" data-testid="reset-wait-hint">
 				Waiting for an in-flight operation to finish — this can take up to ~30 minutes while a
 				transaction is proving. Keep this window open.
@@ -191,87 +163,11 @@ onBeforeUnmount(() => {
 			<Button @click="handleReset" :disabled="!isReadyToReset || isResetting" variant="cta_destructive" data-testid="reset-submit-btn">
 				{{ isResetting ? "Deleting…" : "Delete Profile" }}
 			</Button>
-		</div>
-	</Flex>
+		</template>
+	</CollapsingHeroLayout>
 </template>
 
 <style module>
-.page {
-	flex: 1;
-	min-height: 0;
-	background: var(--app-bg);
-}
-
-.wrapper {
-	flex: 1;
-	min-height: 0;
-	overflow: auto;
-	scrollbar-gutter: stable;
-}
-
-.collapsing_label {
-	font-family: var(--font-headline);
-	font-size: 13px;
-	font-weight: 700;
-	letter-spacing: 0.12em;
-	text-transform: uppercase;
-	color: var(--txt-primary);
-
-	text-decoration: underline;
-	text-decoration-color: var(--nulo-accent);
-	text-decoration-thickness: 2px;
-	text-underline-offset: 4px;
-
-	opacity: 0;
-	pointer-events: none;
-
-	transition: opacity 0.18s cubic-bezier(0.4, 0, 1, 1);
-}
-
-.collapsing_label_visible {
-	opacity: 1;
-	pointer-events: auto;
-}
-
-.content {
-	flex: 1;
-	padding: 0 24px;
-}
-
-.hero {
-	padding: 20px 0;
-}
-
-.title_stack {
-	display: flex;
-	flex-direction: column;
-	line-height: 1.02;
-}
-
-.title_main {
-	font-family: var(--font-headline);
-	font-size: 40px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--red);
-}
-
-.title_sub {
-	font-family: var(--font-headline);
-	font-size: 40px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
-}
-
-.hero_bar {
-	width: 32px;
-	height: 2px;
-	background: var(--red);
-	margin-top: 10px;
-}
 
 .section {
 	display: flex;
@@ -299,13 +195,6 @@ onBeforeUnmount(() => {
 	text-transform: uppercase;
 	letter-spacing: 0.18em;
 	color: var(--nulo-secondary);
-}
-
-.bottom {
-	flex-shrink: 0;
-	padding: 20px 24px;
-	background: var(--app-bg);
-	border-top: 1px solid var(--nulo-border);
 }
 
 .cta {

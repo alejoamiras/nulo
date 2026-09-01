@@ -1,15 +1,18 @@
 <script setup>
 /**
- * Page chrome for `pages/settings/security/export/seed.vue`. Owns:
+ * Collapsing-hero page chrome (export pages, create/import profile,
+ * change-password, delete-profile). Owns:
  *
  * - SubPageHeader with the scroll-collapse "secondary title" treatment
  * - Hero block (big two-tone title + accent bar)
  * - Scrollable content slot
  * - Bottom-bar slot (page wires its CTA — usually `<Button>` or
  *   `<SecretCountdownClose>`)
+ * - Bare `overlay` slot after the bottom bar for fixed-position dialogs
  *
- * The page owns variant-picking + reveal/unlock flow; the layout is
- * purely visual chrome.
+ * The page owns its flow/state; the layout is purely visual chrome.
+ * Extra attributes fall through to the root element (single root), so
+ * pages can pin their e2e data-* markers on the component tag.
  */
 defineProps({
 	/**
@@ -23,6 +26,8 @@ defineProps({
 	collapsingLabel: { type: String, required: true },
 	/** Where the back arrow points. */
 	backTo: { type: String, required: true },
+	/** "accent" (default) or "destructive" — reds the hero title + bar. */
+	tone: { type: String, default: "accent" },
 })
 
 const wrapperRef = useTemplateRef("wrapperRef")
@@ -62,10 +67,10 @@ onBeforeUnmount(() => {
 			<Flex direction="column" :class="$style.content">
 				<div :class="$style.hero">
 					<div :class="$style.title_stack">
-						<span :class="$style.title_main">{{ heroMain }}</span>
+						<span :class="[$style.title_main, tone === 'destructive' && $style.title_main_destructive]">{{ heroMain }}</span>
 						<span v-if="heroSub" :class="$style.title_sub">{{ heroSub }}</span>
 					</div>
-					<div :class="$style.hero_bar" />
+					<div :class="[$style.hero_bar, tone === 'destructive' && $style.hero_bar_destructive]" />
 				</div>
 
 				<slot />
@@ -75,6 +80,8 @@ onBeforeUnmount(() => {
 		<div v-if="$slots.bottom" :class="$style.bottom">
 			<slot name="bottom" />
 		</div>
+
+		<slot name="overlay" />
 	</Flex>
 </template>
 
@@ -154,6 +161,14 @@ onBeforeUnmount(() => {
 	height: 2px;
 	background: var(--nulo-accent);
 	margin-top: 10px;
+}
+
+.title_main_destructive {
+	color: var(--red);
+}
+
+.hero_bar_destructive {
+	background: var(--red);
 }
 
 .bottom {
