@@ -345,9 +345,12 @@ describe("stage-order law (real wiring, happy path with every slice)", () => {
 		})
 
 		const opts = makeOpts()
+		const markersAtComplete: unknown[] = []
 		opts.completeImport.mockImplementation(async () => {
 			order.push("complete")
+			markersAtComplete.push(cRef?.restoreStatus.value, cRef?.restoreStage.value)
 		})
+		let cRef: ReturnType<typeof useFullBackupImport> | undefined
 		const { c } = await mountWithBackup(
 			{
 				"active-network-id": "src-net-1",
@@ -358,13 +361,17 @@ describe("stage-order law (real wiring, happy path with every slice)", () => {
 					"auth-registry": [{ id: 1, account: "0xaaaa" }],
 					fpc: [{ id: "f1" }],
 					contact: [],
+					config: [{ key: "k", value: true }],
 					"account-state": [{ networkId: "src-net-1", contracts: [], senders: [AS_SENDER] }],
 				},
 			},
 			opts,
 		)
+		cRef = c
 		await c.restoreBackup()
 
+		// Both finished markers are already set when completeImport observes them.
+		expect(markersAtComplete).toEqual(["finished", "finished"])
 		expect(order).toEqual([
 			"profile",
 			"network",
@@ -377,6 +384,7 @@ describe("stage-order law (real wiring, happy path with every slice)", () => {
 			"auth-registry",
 			"fpc",
 			"contact",
+			"config",
 			"reconcile",
 			"finalize",
 			"account-state",
@@ -428,6 +436,9 @@ describe("stage-order law (real wiring, happy path with every slice)", () => {
 		expect(accountStateClient.restore).toHaveBeenCalled()
 		const nets = (accountStateClient.restore.mock.calls[0] as unknown[])[1] as Array<{ id: string }>
 		expect(nets.map((n) => n.id)).toEqual(["new-net-1"])
+		// Failed networks are never probed: every probe call names a SUCCESSFUL id.
+		const probed = networkClient.probeNodeStatus.mock.calls.map((call) => call[0])
+		expect(probed.every((id) => id === "new-net-1")).toBe(true)
 	})
 })
 
@@ -660,5 +671,99 @@ describe("pickBackupFile / decryptBackup behavior pins", () => {
 		c.decryptionPassword.value = "pw12345678"
 		await c.decryptBackup()
 		expect(c.parsedBackupName.value).toBe("Kept")
+	})
+})
+
+describe("epoch-4 passkey gates (codex impl-review pins)", () => {
+	const CRED_ID = Buffer.from(new Uint8Array(16).fill(7)).toString("base64")
+
+	async function passkeyBackup(mutate: (body: Record<string, unknown>) => void) {
+		const base = await buildBackup({
+			"master-key": CRED_ID,
+			"imported-keys-dek-sealed": Buffer.from(new Uint8Array(48).fill(3)).toString("base64"),
+			data: { profile: { id: "src-profile-id", name: "Imported", type: "passkey" } },
+		})
+		const { checksum: _c, entropy: _e, "imported-keys-dek": _dek, ...body } = base as Record<string, unknown>
+		mutate(body)
+		return { ...body, checksum: await EncryptionKey.getHashHex(JSON.stringify(body)) }
+	}
+
+	function mountPasskey(backup: unknown) {
+		const runCeremony = vi.fn(async () => ({ credentialId: CRED_ID }) as never)
+		const opts = { ...makeOpts({ password: "", repeatedPassword: "" }), runCeremony }
+		const c = useFullBackupImport(opts as never)
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "passkey" }
+		return { c, opts, runCeremony }
+	}
+
+	it("a passkey backup WITH an entropy field fails with the exact copy", async () => {
+		const backup = await passkeyBackup((body) => {
+			body.entropy = Buffer.from(new Uint8Array(32).fill(9)).toString("base64")
+		})
+		const { c, opts } = mountPasskey(backup)
+		await c.restoreBackup()
+		expect(opts.fillError).toHaveBeenCalledWith("full_backup", "Can't import", "A passkey backup must not carry an entropy field.")
+		expect(c.restoreStatus.value).toBe("failed")
+	})
+
+	it("a passkey backup missing its sealed DEK fails with the exact copy", async () => {
+		const backup = await passkeyBackup((body) => {
+			body["imported-keys-dek-sealed"] = undefined
+		})
+		const { c, opts } = mountPasskey(backup)
+		await c.restoreBackup()
+		expect(opts.fillError).toHaveBeenCalledWith("full_backup", "Can't import", "This backup is missing its imported-keys key.")
+	})
+
+	it("PERMISSIVENESS: a passkey backup with an EXTRA plain DEK still imports", async () => {
+		happyWiring()
+		const backup = await passkeyBackup((body) => {
+			body["imported-keys-dek"] = Buffer.from(new Uint8Array(32).fill(2)).toString("base64")
+		})
+		const { c, opts, runCeremony } = mountPasskey(backup)
+		await c.restoreBackup()
+		expect(runCeremony).toHaveBeenCalledWith({ mode: "get", credentialId: CRED_ID })
+		expect(c.restoreStatus.value).toBe("finished")
+		expect(opts.fillError).not.toHaveBeenCalled()
+	})
+})
+
+describe("decrypt publication race — the last await seam (codex impl-review HIGH)", () => {
+	it("a re-pick landing between the helper's final fence and the caller's continuation is NOT overwritten", async () => {
+		const inner = { data: { profile: { type: "password", name: "RaceName" } } }
+		const key = await EncryptionKey.fromPassword("pw12345678")
+		const sealed = Buffer.from(await key.encrypt(new TextEncoder().encode(JSON.stringify(inner)))).toString("base64")
+
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const original = { name: "e.txt", backup: sealed, type: "encrypted" as const, profileType: null }
+		const replacement = { name: "new.json", backup: {}, type: "plain" as const, profileType: "password" }
+		c.selectedBackup.value = original
+		c.decryptionPassword.value = "pw12345678"
+
+		// Deterministic scheduling: wrap the real key's decrypt so the re-pick is queued AT
+		// decrypt resolution. Microtask order is then [helper continuation (fence passes,
+		// parse, return), re-pick, caller continuation] — landing the replacement exactly in
+		// the seam between the helper's last internal fence and the caller's publication.
+		const realFromPasshash = EncryptionKey.fromPasshash.bind(EncryptionKey)
+		vi.spyOn(EncryptionKey, "fromPasshash").mockImplementation(async (passhash) => {
+			const realKey = await realFromPasshash(passhash)
+			return {
+				decrypt: async (bytes: Uint8Array) => {
+					const out = await realKey.decrypt(bytes as Uint8Array<ArrayBuffer>)
+					queueMicrotask(() => {
+						c.selectedBackup.value = replacement
+					})
+					return out
+				},
+			} as never
+		})
+
+		await c.decryptBackup()
+
+		// The replacement selection must survive (structural: the ref stores a reactive
+		// proxy of the assigned object); the decrypted publication must not land.
+		expect(c.selectedBackup.value).toStrictEqual(replacement)
+		expect(c.parsedBackupName.value).not.toBe("RaceName")
 	})
 })

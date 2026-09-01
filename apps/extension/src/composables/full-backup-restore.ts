@@ -364,7 +364,9 @@ export async function restoreAccountsStage(
 		if (msg === "Duplicate account") {
 			// NetworkService.onProfileDeleted cascades — purges this profile's networks
 			// automatically. No explicit cleanup needed.
-			return rollbackAndFail(profileService, profileId, {
+			// `return await` (not a bare return): the finally's disconnect must run AFTER the
+			// bounded rollback completes, matching the original catch-then-finally ordering.
+			return await rollbackAndFail(profileService, profileId, {
 				title: "Can't import",
 				message: "An account from this backup is already in your wallet",
 			})

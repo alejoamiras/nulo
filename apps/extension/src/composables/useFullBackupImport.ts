@@ -12,7 +12,7 @@ import { CONTACT_SERVICE_NAME } from "@/wallet/services/contact/spec"
 import { FpcServiceClient } from "@/wallet/services/fpc/client"
 import { FPC_SERVICE_NAME } from "@/wallet/services/fpc/spec"
 import { NetworkServiceClient } from "@/wallet/services/network/client"
-import { ProfileServiceClient } from "@/wallet/services/profile/client"
+import { ProfileServiceClient, type RestoreSecret } from "@/wallet/services/profile/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import { TOKEN_BALANCE_SERVICE_NAME } from "@/wallet/services/token-balance/spec"
 import { TransactionServiceClient } from "@/wallet/services/transaction/client"
@@ -408,6 +408,40 @@ function buildSliceClients() {
 }
 
 /**
+ * Profile restore with the duplicate-confirm wiring. Honors the parent-supplied
+ * Profile-name override when non-empty after trim (spread-clone: the parsed `data.profile`
+ * is never mutated in place — the structure may be re-read on retry paths; the service-side
+ * auto-suffix still resolves collisions). The dup guard throws a TYPED error out of restore
+ * (deliberately rethrown past restore's restoreError flattening); `confirmDuplicate`
+ * surfaces the shared dialog and re-runs with the override. `undefined` = the user declined
+ * → abandon cleanly (no profile was created — the guard runs before the row commit).
+ */
+async function restoreProfileStep(
+	profile: { id: string; name: string; type: "password" | "passkey" },
+	restoreSecret: RestoreSecret,
+	credentialData: PasskeyCredentialData | undefined,
+	deps: { profileService: ProfileServiceClient; opts: UseFullBackupImportOptions },
+	io: RestoreIo,
+): Promise<{ id: string; restoreError?: unknown } | null> {
+	const { profileService, opts } = deps
+	const override = opts.profileName?.value.trim()
+	const profileForRestore = override ? { ...profile, name: override } : profile
+	const runRestore = () =>
+		profileService.restore(profileForRestore, restoreSecret, opts.password.value, credentialData, opts.allowDuplicate?.value)
+	const newProfile = opts.confirmDuplicate ? await opts.confirmDuplicate(runRestore) : await runRestore()
+	if (!newProfile) {
+		io.setStatus("")
+		return null
+	}
+	if (newProfile.restoreError) {
+		const errMsg = newProfile.restoreError instanceof Error ? newProfile.restoreError.message : String(newProfile.restoreError)
+		applyOutcome(io, { kind: "fail", title: "Import failed", message: errMsg })
+		return null
+	}
+	return newProfile
+}
+
+/**
  * The staged restore sequence between the validate gate and completion — the order-of-restore
  * law lives here (see full-backup-restore.ts for each stage's own invariants). Returns the
  * restored profile, or null when a stage already rendered its terminal outcome. `scratch` is
@@ -435,34 +469,8 @@ async function executeRestore(
 		applyOutcome(io, secretOut)
 		return null
 	}
-	// Honor the parent-supplied Profile-name override when non-empty after trim. Spread-clone
-	// the backup-parsed profile so we never mutate the parsed `data.profile` in place (the
-	// data structure may be re-read on retry paths). Service-side auto-suffix still resolves
-	// collisions against existing profiles.
-	const override = opts.profileName?.value.trim()
-	const profileForRestore = override ? { ...profile, name: override } : profile
-	// The dup guard throws a TYPED error out of restore (it is deliberately rethrown past
-	// restore's restoreError flattening); `confirmDuplicate` surfaces the shared dialog and
-	// re-runs with the override. `undefined` = the user declined → abandon the import
-	// cleanly (no profile was created — the guard runs before the row commit).
-	const runRestore = () =>
-		profileService.restore(
-			profileForRestore,
-			secretOut.restoreSecret,
-			opts.password.value,
-			cred.credentialData,
-			opts.allowDuplicate?.value,
-		)
-	const newProfile = opts.confirmDuplicate ? await opts.confirmDuplicate(runRestore) : await runRestore()
-	if (!newProfile) {
-		io.setStatus("")
-		return null
-	}
-	if (newProfile.restoreError) {
-		const errMsg = newProfile.restoreError instanceof Error ? newProfile.restoreError.message : String(newProfile.restoreError)
-		applyOutcome(io, { kind: "fail", title: "Import failed", message: errMsg })
-		return null
-	}
+	const newProfile = await restoreProfileStep(profile, secretOut.restoreSecret, cred.credentialData, deps, io)
+	if (!newProfile) return null
 	scratch.createdProfileId = newProfile.id
 
 	// UNCONDITIONAL all-rows remap, even when the restored root profile id is unchanged. A
@@ -503,8 +511,14 @@ async function executeRestore(
 	io.setStage("restoring:tokens")
 	await restoreTokensStage(data, accounts.importedChainAddress, io, relinkRestoredTokenBalances as never)
 
+	const sliceClients = buildSliceClients()
+	// The profile restore above always ran first; its id is the fence key every slice
+	// restore carries (defensive internal check preserved from the original).
+	if (scratch.createdProfileId === undefined) {
+		throw new Error("internal: services restore reached without a created profile")
+	}
 	io.setStage("restoring:services")
-	await restoreServiceSlices(data, buildSliceClients(), newProfile.id, io)
+	await restoreServiceSlices(data, sliceClients, scratch.createdProfileId, io)
 
 	// Reconcile imported accounts BEFORE activation: an epoch-4 backup carrying a type-1
 	// Account row with no matching key row would restore as a zombie that fails at signing —
@@ -610,6 +624,10 @@ async function runDecryptBackup(state: ImportRefs, opts: UseFullBackupImportOpti
 			() => state.selectedBackup.value !== target,
 		)
 		if (opened.kind === "stale") return
+		// The helper fences internally, but its resolution yields a microtask before this
+		// continuation — a queued re-pick in that window must not be overwritten (same
+		// await-boundary class as useProfileBootstrap's network write).
+		if (state.selectedBackup.value !== target) return
 		const backupObject = opened.backupObject
 		state.selectedBackup.value = {
 			...target,
