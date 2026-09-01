@@ -58,7 +58,6 @@
 			"apps/faucet/src/composables/createAztecWalletSession.ts": 3,
 			"apps/faucet/src/composables/fuelClaim.ts": 1,
 			"apps/faucet/src/composables/useBridgeJournal.ts": 3,
-			"apps/faucet/src/composables/useDeposit.ts": 1,
 			"apps/faucet/src/composables/useFuel.ts": 1,
 			"apps/faucet/src/lib/bridge-steps.ts": 1,
 			"apps/faucet/src/lib/errors.ts": 1,

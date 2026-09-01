@@ -17,11 +17,13 @@ import {
 	updateRecord,
 	useBridgeJournal,
 } from "./useBridgeJournal"
+import type { Ref } from "vue"
 import {
 	buildClaimInteraction,
 	buildDepositRecord,
 	coldAccountPreflight,
 	type DepositL1Ctx,
+	type FuelPre,
 	fuelReceiptStatus,
 	handleDepositFailure,
 	prepareFuelSlice,
@@ -170,6 +172,111 @@ export function ensureDepositJournalDeps(): void {
 	})
 }
 
+/** L9 runtime interlock + defense-in-depth recipient validity, both BEFORE the
+ *  irreversible L1 tx. Salt-v2: a derived-secret deposit against an old bearer-bridge
+ *  manifest would strand funds. Validity (codex ultra Low): a nonzero-but-invalid
+ *  recipient (not a Grumpkin point) would be committed and then mint an undecryptable,
+ *  unrecoverable note — the wallet-connected address is always valid, but fail closed. */
+async function assertPrivateDepositAllowed(isPrivate: boolean, recipient: string): Promise<void> {
+	if (isPrivate && !SUPPORTS_SALT_V2) {
+		throw new Error(
+			"This deployment predates recipient-committed private claims (manifest lacks privateClaimMode: salt-v2). Private bridging is unavailable here — use a public bridge or wait for the cutover.",
+		)
+	}
+	if (!(await AztecAddress.fromStringUnsafe(recipient).isValid())) {
+		throw new Error("Selected account is not a valid Aztec address — refusing to bridge.")
+	}
+}
+
+/** The staged sequence between the guards and the cleanup matrix. `scratch.id` is an
+ *  out-param: it must be visible to the caller's catch from the moment it exists, so a
+ *  mid-flight throw can route the cleanup to the record. */
+/** The composable-owned io the staged sequence reads and writes. */
+interface DepositIo {
+	publicClient: unknown
+	error: Ref<string | null>
+	records: () => DepositJournalRecord[]
+}
+
+/** Cold-gate + fuel pre-flight prologue. `blocked` carries the user-facing copy. */
+async function prepareDepositInputs(
+	amount: bigint,
+	isPrivate: boolean,
+	opts: { fuelSlice?: bigint },
+	actors: { aztec: unknown; recipient: string },
+	io: DepositIo,
+): Promise<{ blocked: true } | { blocked: false; fuelSlice?: bigint; fuelPre?: FuelPre }> {
+	const fuelSlice = opts.fuelSlice && opts.fuelSlice > 0n ? opts.fuelSlice : undefined
+	if (!fuelSlice && (await coldAccountPreflight(actors.aztec, actors.recipient)) === "blocked") {
+		io.error.value = 'No gas (Fee Juice) to claim a no-fuel bridge. Turn on "arrive with gas", or fund your Aztec account first.'
+		return { blocked: true }
+	}
+	const fuelPre = fuelSlice
+		? await prepareFuelSlice({ publicClient: io.publicClient as never, amount, fuelSlice, isPrivate, recipient: actors.recipient })
+		: undefined
+	return { blocked: false, fuelSlice, fuelPre }
+}
+
+async function executeDeposit(
+	scratch: { id: string | null },
+	amount: bigint,
+	isPrivate: boolean,
+	opts: { onRecord?: (id: string) => void; fuelSlice?: bigint },
+	actors: { wallet: unknown; from: string; aztec: unknown; recipient: string },
+	io: DepositIo,
+): Promise<string | null> {
+	const { wallet, from, recipient } = actors
+	const inputs = await prepareDepositInputs(amount, isPrivate, opts, actors, io)
+	if (inputs.blocked) return null
+	const { fuelSlice, fuelPre } = inputs
+	const l1ctx = { publicClient: io.publicClient, wallet, from } as never as DepositL1Ctx
+
+	await assertPrivateDepositAllowed(isPrivate, recipient)
+	// `secret` is the value stored + claimed-with: for PRIVATE it's the recipient-committed claim_salt
+	// (claim_private re-derives the consumption secret from it + the recipient); for PUBLIC it's the raw
+	// secret (claim_public binds the recipient in its content hash). The L1-committed secretHash is over
+	// the DERIVED secret for private, so a claim naming a different recipient can't consume the message.
+	const secret = Fr.random()
+	const committedSecret = isPrivate ? deriveTokenClaimSecret(secret, AztecAddress.fromStringUnsafe(recipient)) : secret
+	const secretHash = await computeSecretHash(committedSecret)
+	const id = secretHash.toString()
+	scratch.id = id
+	const tokenAmount = fuelSlice ? amount - fuelSlice : amount
+	log("start", { id, amount: amount.toString(), fuelSlice: fuelSlice?.toString(), isPrivate })
+
+	const base = buildDepositRecord({ id, isPrivate, tokenAmount, fuelSlice, fuelPre, recipient, secret, now: Date.now() })
+
+	// The record exists BEFORE any signature: a storage failure aborts before the user signs
+	// anything, and the stepper has a record to narrate from the first prompt on. A clean
+	// rejection during the legs discards it (the cleanup matrix).
+	addRecordVerified(base)
+	markSessionLive(id)
+	opts.onRecord?.(id)
+
+	if (isPrivate) {
+		await sealPrivateRecord({
+			id,
+			secretStr: secret.toString(),
+			recipient,
+			tokenAmountStr: tokenAmount.toString(),
+			from,
+			wallet: l1ctx.wallet,
+			sealKeys,
+			readBack: () => io.records().find((r) => r.id === id),
+		})
+	}
+
+	const legCtx = { id, amount, tokenAmount, isPrivate, recipient, secretStr: secret.toString(), l1: l1ctx, sealKeys }
+	if (fuelPre && fuelSlice) {
+		await runFueledDepositLeg({ ...legCtx, fuelSlice, fuelPre })
+		log("fueled deposit flow finished", id)
+		return id
+	}
+	await runPlainDepositLeg(legCtx)
+	log("deposit flow finished", id)
+	return id
+}
+
 /**
  * The deposit flow: approve (allowance-skipped) + deposit on L1, journal-backed from the first
  * irreversible step, then the engine's claim tail. Private deposits seal the bearer secret + its
@@ -186,23 +293,6 @@ export function useDepositFlow() {
 	const busy = ref(false)
 	const error = ref<string | null>(null)
 
-	/** L9 runtime interlock + defense-in-depth recipient validity, both BEFORE the
-	 *  irreversible L1 tx. Salt-v2: a derived-secret deposit against an old bearer-bridge
-	 *  manifest would strand funds. Validity (codex ultra Low): a nonzero-but-invalid
-	 *  recipient (not a Grumpkin point) would be committed and then mint an undecryptable,
-	 *  unrecoverable note — the wallet-connected address is always valid, but fail closed. */
-	async function assertPrivateDepositAllowed(isPrivate: boolean, recipient: string): Promise<void> {
-		if (isPrivate && !SUPPORTS_SALT_V2) {
-			throw new Error(
-				"This deployment predates recipient-committed private claims (manifest lacks privateClaimMode: salt-v2). Private bridging is unavailable here — use a public bridge or wait for the cutover.",
-			)
-		}
-		if (!(await AztecAddress.fromStringUnsafe(recipient).isValid())) {
-			throw new Error("Selected account is not a valid Aztec address — refusing to bridge.")
-		}
-	}
-
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 26) — refactor when touched, never raise
 	async function deposit(
 		amount: bigint,
 		isPrivate = false,
@@ -222,67 +312,26 @@ export function useDepositFlow() {
 			return null
 		}
 		busy.value = true
-		let id: string | null = null
+		const scratch: { id: string | null } = { id: null }
 		try {
-			const fuelSlice = opts.fuelSlice && opts.fuelSlice > 0n ? opts.fuelSlice : undefined
-			if (!fuelSlice && (await coldAccountPreflight(aztec, recipient)) === "blocked") {
-				error.value = 'No gas (Fee Juice) to claim a no-fuel bridge. Turn on "arrive with gas", or fund your Aztec account first.'
-				return null
-			}
-			const l1ctx = { publicClient: l1.publicClient, wallet, from } as never as DepositL1Ctx
-			const fuelPre = fuelSlice
-				? await prepareFuelSlice({ publicClient: l1ctx.publicClient, amount, fuelSlice, isPrivate, recipient })
-				: undefined
-
-			await assertPrivateDepositAllowed(isPrivate, recipient)
-			// `secret` is the value stored + claimed-with: for PRIVATE it's the recipient-committed claim_salt
-			// (claim_private re-derives the consumption secret from it + the recipient); for PUBLIC it's the raw
-			// secret (claim_public binds the recipient in its content hash). The L1-committed secretHash is over
-			// the DERIVED secret for private, so a claim naming a different recipient can't consume the message.
-			const secret = Fr.random()
-			const committedSecret = isPrivate ? deriveTokenClaimSecret(secret, AztecAddress.fromStringUnsafe(recipient)) : secret
-			const secretHash = await computeSecretHash(committedSecret)
-			id = secretHash.toString()
-			const tokenAmount = fuelSlice ? amount - fuelSlice : amount
-			log("start", { id, amount: amount.toString(), fuelSlice: fuelSlice?.toString(), isPrivate })
-
-			const base = buildDepositRecord({ id, isPrivate, tokenAmount, fuelSlice, fuelPre, recipient, secret, now: Date.now() })
-
-			// The record exists BEFORE any signature: a storage failure aborts before the user signs
-			// anything, and the stepper has a record to narrate from the first prompt on. A clean
-			// rejection during the legs discards it (the cleanup matrix).
-			addRecordVerified(base)
-			markSessionLive(id)
-			opts.onRecord?.(id)
-
-			if (isPrivate) {
-				const sealId = id
-				await sealPrivateRecord({
-					id,
-					secretStr: secret.toString(),
-					recipient,
-					tokenAmountStr: tokenAmount.toString(),
-					from,
-					wallet: l1ctx.wallet,
-					sealKeys,
-					readBack: () => journal.records.value.find((r) => r.id === sealId) as DepositJournalRecord | undefined,
-				})
-			}
-
-			const legCtx = { id, amount, tokenAmount, isPrivate, recipient, secretStr: secret.toString(), l1: l1ctx, sealKeys }
-			if (fuelPre && fuelSlice) {
-				await runFueledDepositLeg({ ...legCtx, fuelSlice, fuelPre })
-				log("fueled deposit flow finished", id)
-				return id
-			}
-			await runPlainDepositLeg(legCtx)
-			log("deposit flow finished", id)
+			return await executeDeposit(
+				scratch,
+				amount,
+				isPrivate,
+				opts,
+				{ wallet, from, aztec, recipient },
+				{
+					publicClient: l1.publicClient,
+					error,
+					records: () => journal.records.value as DepositJournalRecord[],
+				},
+			)
 		} catch (e) {
-			handleDepositFailure(e, id, error, () => journal.records.value as DepositJournalRecord[])
+			handleDepositFailure(e, scratch.id, error, () => journal.records.value as DepositJournalRecord[])
 		} finally {
 			busy.value = false
 		}
-		return id
+		return scratch.id
 	}
 
 	// Receipt-waits resume prompt-free on reconnect; sessionLive records continue. Nothing else moves.
