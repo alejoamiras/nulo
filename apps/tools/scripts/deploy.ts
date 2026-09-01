@@ -52,7 +52,7 @@ import { type DeploymentConfig, getDeploymentConfig, type Network } from "./depl
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-const logger = createLogger("faucet:deploy")
+const logger = createLogger("tools:deploy")
 
 const UNIVERSAL_DEPLOYER = AztecAddress.ZERO
 

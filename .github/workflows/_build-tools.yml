@@ -1,4 +1,4 @@
-name: _Build faucet (reusable)
+name: _Build tools (reusable)
 
 on:
   workflow_call:
@@ -21,7 +21,7 @@ on:
 
 jobs:
   build:
-    name: vite build (faucet ${{ inputs.target }})
+    name: vite build (tools ${{ inputs.target }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -31,7 +31,7 @@ jobs:
 
       - uses: ./.github/actions/setup-bun
 
-      # Offline manifest-integrity gate (D20). verify:deployments re-derives the faucet's own token
+      # Offline manifest-integrity gate (D20). verify:deployments re-derives the tools app's own token
       # instances AND — with BRIDGE_MANIFEST set to THIS target's manifest — the bridge L2 instances,
       # asserting each recomputes to the committed address and that the required core router/permit2/
       # swapTarget are present. No network: the live on-chain readbacks live at deploy time (verify-l1).
@@ -51,11 +51,11 @@ jobs:
       - name: Verify build.json matches the target
         run: bun run --cwd apps/tools verify:build-target ${{ inputs.target }}
 
-      - name: Upload faucet build
+      - name: Upload tools build
         if: inputs.upload_artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: faucet-dist-${{ inputs.target }}
+          name: tools-dist-${{ inputs.target }}
           path: apps/tools/dist
           if-no-files-found: error
           retention-days: 7

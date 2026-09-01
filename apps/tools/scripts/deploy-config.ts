@@ -54,7 +54,7 @@ export function getDeploymentConfig(network: Network): DeploymentConfig {
 	const nodeUrl = process.env.AZTEC_NODE_URL || NETWORK_URLS[network]
 	return {
 		network: { name: network, nodeUrl },
-		deployer: { dataDirectory: `.faucet-deploy-${network}/` },
+		deployer: { dataDirectory: `.tools-deploy-${network}/` },
 		contracts: {
 			tokens: FAUCET_TOKEN_CONFIGS,
 			dripper: { salt: DRIPPER_SALT },

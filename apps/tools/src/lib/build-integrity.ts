@@ -1,5 +1,5 @@
 import { MANIFEST_CHAIN } from "@/contracts/bridge-deployments"
-import { type FaucetTarget, resolveFaucetTarget } from "./network-targets"
+import { type ToolsTarget, resolveToolsTarget } from "./network-targets"
 
 export interface ManifestChainIdentity {
 	l1ChainId?: number
@@ -18,13 +18,13 @@ export interface ManifestChainIdentity {
  *    `assertNodeChainMatches`, run after the node handshake.)
  */
 export function checkBuildIntegrity(
-	target: Pick<FaucetTarget, "key" | "l1ChainId" | "walletChainId" | "host">,
+	target: Pick<ToolsTarget, "key" | "l1ChainId" | "walletChainId" | "host">,
 	manifest: ManifestChainIdentity,
 	opts: { hostname: string; isProd: boolean; allowedPreviewHosts?: readonly string[] },
 ): string | null {
 	// A Cloudflare PR preview is a PROD build at its EXACT baked preview hostnames (the per-commit
 	// CF_PAGES_URL host + the branch alias, derived at build time — never a wildcard, and never
-	// baked into mainnet builds; see makeFaucetConfig / preview-hosts.ts).
+	// baked into mainnet builds; see makeToolsConfig / preview-hosts.ts).
 	const hostOk = opts.hostname === target.host || (opts.allowedPreviewHosts?.includes(opts.hostname) ?? false)
 	if (opts.isProd && !hostOk) {
 		return `hostname ${opts.hostname} != ${target.key} target host ${target.host} (mis-hosted build)`
@@ -43,7 +43,7 @@ export function checkBuildIntegrity(
 
 /** Fail-closed gate called before mount — throws (app refuses to render) on any mismatch. */
 export function assertBuildIntegrity(hostname: string = typeof window !== "undefined" ? window.location.hostname : ""): void {
-	const err = checkBuildIntegrity(resolveFaucetTarget(), MANIFEST_CHAIN, {
+	const err = checkBuildIntegrity(resolveToolsTarget(), MANIFEST_CHAIN, {
 		hostname,
 		isProd: import.meta.env.PROD,
 		allowedPreviewHosts: (import.meta.env.VITE_ALLOWED_PREVIEW_HOSTS || "").split(",").filter(Boolean),
@@ -53,7 +53,7 @@ export function assertBuildIntegrity(hostname: string = typeof window !== "undef
 
 /** Layer 2 async half — call after the node handshake with the node's derived wallet chain id. */
 export function assertNodeChainMatches(nodeWalletChainId: number): void {
-	const target = resolveFaucetTarget()
+	const target = resolveToolsTarget()
 	if (nodeWalletChainId !== target.walletChainId) {
 		throw new Error(
 			`build integrity check failed — live node chain ${nodeWalletChainId} != ${target.key} target ${target.walletChainId}`,

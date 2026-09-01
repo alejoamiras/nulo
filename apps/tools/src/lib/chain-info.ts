@@ -1,6 +1,6 @@
 import type { ChainInfo } from "@aztec/aztec.js/account"
 import { Fr } from "@aztec/aztec.js/fields"
-import { resolveFaucetTarget } from "./network-targets"
+import { resolveToolsTarget } from "./network-targets"
 
 /**
  * Resolve the chain info passed to wallet-sdk discovery.
@@ -21,7 +21,7 @@ import { resolveFaucetTarget } from "./network-targets"
  * that in dev too.)
  */
 export function readChainInfo(url: URL = new URL(window.location.href)): ChainInfo {
-	const target = resolveFaucetTarget()
+	const target = resolveToolsTarget()
 	if (import.meta.env.DEV) {
 		const queryChainId = url.searchParams.get("chainId")
 		const queryVersion = url.searchParams.get("version")

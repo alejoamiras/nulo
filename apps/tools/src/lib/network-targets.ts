@@ -1,8 +1,8 @@
 /**
  * The two build targets, selected at BUILD TIME by which vite config is used — never at runtime and
  * never from a Cloudflare dashboard var (the `chain-constants` incident). This is the "config factory"
- * spine: each `vite.<target>.config.mts` imports one `FaucetTarget` and threads it into (a) a `define`
- * that the app reads via `resolveFaucetTarget()` and (b) `buildMetaPlugin(target)` for `build.json`.
+ * spine: each `vite.<target>.config.mts` imports one `ToolsTarget` and threads it into (a) a `define`
+ * that the app reads via `resolveToolsTarget()` and (b) `buildMetaPlugin(target)` for `build.json`.
  *
  * Node-safe (imports only the plain-number `chain-constants`, no `viem`/`@aztec`), so `vite.config.ts`
  * can import it in Node scope — the same reason a vite `resolve.alias` can't carry chain identity into
@@ -18,10 +18,10 @@ import {
 	TESTNET_WALLET_CHAIN_ID,
 } from "./chain-constants"
 
-export type FaucetTargetKey = "testnet" | "mainnet"
+export type ToolsTargetKey = "testnet" | "mainnet"
 
-export interface FaucetTarget {
-	key: FaucetTargetKey
+export interface ToolsTarget {
+	key: ToolsTargetKey
 	/** L1 (Ethereum) chain id — viem clients + the Permit2 EIP-712 domain bind to this. */
 	l1ChainId: number
 	/** Aztec rollup version (the wallet-handshake `version`). */
@@ -40,7 +40,7 @@ export interface FaucetTarget {
 	cspConnectSrc: string
 }
 
-export const TESTNET_TARGET: FaucetTarget = {
+export const TESTNET_TARGET: ToolsTarget = {
 	key: "testnet",
 	l1ChainId: TESTNET_L1_CHAIN_ID,
 	rollupVersion: TESTNET_ROLLUP_VERSION,
@@ -53,7 +53,7 @@ export const TESTNET_TARGET: FaucetTarget = {
 	cspConnectSrc: "'self' data: blob: https://*.aztec.network wss://*.aztec.network https://*.aztec-labs.com wss://*.aztec-labs.com",
 }
 
-export const MAINNET_TARGET: FaucetTarget = {
+export const MAINNET_TARGET: ToolsTarget = {
 	key: "mainnet",
 	l1ChainId: MAINNET_L1_CHAIN_ID,
 	rollupVersion: MAINNET_ROLLUP_VERSION,
@@ -68,17 +68,17 @@ export const MAINNET_TARGET: FaucetTarget = {
 	cspConnectSrc: "'self' data: blob: https://lb.drpc.live wss://lb.drpc.live",
 }
 
-export const TARGETS: Record<FaucetTargetKey, FaucetTarget> = {
+export const TARGETS: Record<ToolsTargetKey, ToolsTarget> = {
 	testnet: TESTNET_TARGET,
 	mainnet: MAINNET_TARGET,
 }
 
 /**
- * Resolve the active build target from the value `define`d by the vite config (`VITE_FAUCET_TARGET`).
+ * Resolve the active build target from the value `define`d by the vite config (`VITE_TOOLS_TARGET`).
  * Falls back to testnet when unset — i.e. under vitest (no define) and the default `vite build`, so
  * unit tests and the legacy testnet build keep working unchanged.
  */
-export function resolveFaucetTarget(): FaucetTarget {
-	const key = import.meta.env.VITE_FAUCET_TARGET as FaucetTargetKey | undefined
+export function resolveToolsTarget(): ToolsTarget {
+	const key = import.meta.env.VITE_TOOLS_TARGET as ToolsTargetKey | undefined
 	return (key && TARGETS[key]) || TESTNET_TARGET
 }

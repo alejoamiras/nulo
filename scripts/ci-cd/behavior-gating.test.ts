@@ -16,7 +16,7 @@ import { join } from "node:path"
 
 const ROOT = join(import.meta.dir, "..", "..")
 // apps/ vs packages/ split (FLAT layout): deployable leaves live under apps/, libs under packages/.
-const APPS = new Set(["extension", "faucet", "landing", "playground"])
+const APPS = new Set(["extension", "tools", "landing", "playground"])
 const dirOf = (pkg: string): string => (APPS.has(pkg) ? "apps" : "packages")
 
 /** Direct `@nulo/*` workspace deps of a package (runtime + dev — what it's built/tested from). */
@@ -101,9 +101,9 @@ describe("CI behavior-gating guard", () => {
     assertGraphCovered(union, "extension", "needs-extension-build")
   })
 
-  test("faucet build covers the faucet graph", () => {
-    assertGraphCovered(quick["faucet"], "faucet", "faucet")
-    expect(quick["faucet"], "faucet must gate its build workflow").toContain(".github/workflows/_build-tools.yml")
+  test("tools build covers the tools graph", () => {
+    assertGraphCovered(quick["tools"], "tools", "tools")
+    expect(quick["tools"], "tools must gate its build workflow").toContain(".github/workflows/_build-tools.yml")
   })
 
   test("cross-cutting inputs (patches + root build inputs) gate the e2e suites", () => {

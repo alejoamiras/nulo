@@ -1,7 +1,7 @@
 /* @nulo/design/base.css is the extension's lean base: it omits the page-shell background and
-   a few element-global declarations the extension instead supplies per-component. The faucet
+   a few element-global declarations the extension instead supplies per-component. The tools app
    has no such component layer for its raw elements, so it restores its prior globals here. The
-   page background is a host concern: the extension paints its app-root; the faucet paints html/body. */
+   page background is a host concern: the extension paints its app-root; the tools app paints html/body. */
 html,
 body {
 	background: var(--app-bg);

@@ -12,7 +12,7 @@
  */
 import type { Chain } from "viem"
 import { mainnet, sepolia } from "viem/chains"
-import { resolveFaucetTarget } from "./network-targets"
+import { resolveToolsTarget } from "./network-targets"
 
 export interface NetworkConfig {
 	/** L1 (Ethereum) chain id — every viem client + the Permit2 EIP-712 domain bind to this. */
@@ -27,7 +27,7 @@ export interface NetworkConfig {
 	l1ExplorerBaseUrl: string
 }
 
-const target = resolveFaucetTarget()
+const target = resolveToolsTarget()
 
 // The only place viem/chains is allowed. Map the target's L1 chain id to its viem Chain — the lookup
 // is what guarantees viemChain.id === l1ChainId (so viem clients + the Permit2 domain agree).
@@ -52,7 +52,7 @@ export const NETWORK: NetworkConfig = {
 /** The active target key. */
 export const NETWORK_KEY = target.key
 
-/** True on the mainnet/Alpha build. Gates OFF the faucet tab, the faucet-token registration +
+/** True on the mainnet/Alpha build. Gates OFF the tools app tab, the tools app-token registration +
  *  capabilities, and the testnet-only mint affordances (mainnet bridges real USDC — there is no
  *  faucet and no permissionless mint). */
 export const IS_MAINNET = target.key === "mainnet"

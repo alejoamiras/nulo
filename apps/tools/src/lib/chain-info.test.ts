@@ -16,7 +16,7 @@ describe("chain-constants", () => {
 })
 
 describe("readChainInfo", () => {
-	const url = (qs: string) => new URL(`https://faucet.nulo.sh/${qs}`)
+	const url = (qs: string) => new URL(`https://tools.nulo.sh/${qs}`)
 
 	it("defaults to the testnet constants (no env override path exists)", () => {
 		const info = readChainInfo(url(""))

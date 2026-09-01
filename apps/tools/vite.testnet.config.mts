@@ -1,6 +1,6 @@
 import { TESTNET_TARGET } from "./src/lib/network-targets"
-import { makeFaucetConfig } from "./vite.config"
+import { makeToolsConfig } from "./vite.config"
 
 // Explicit testnet build → testnet.tools.nulo.sh. (The bare `vite.config.ts` default is also testnet,
 // so `vite build` and `vite build --config vite.testnet.config.mts` are equivalent.)
-export default makeFaucetConfig(TESTNET_TARGET)
+export default makeToolsConfig(TESTNET_TARGET)

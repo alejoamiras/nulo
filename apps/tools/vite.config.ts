@@ -8,7 +8,7 @@ import { defineConfig, type Plugin, type UserConfig } from "vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 import { resolvePackageAsset } from "@nulo/resolve-asset"
 import { nuloComponentsPlugin } from "./scripts/components-plugin"
-import { type FaucetTarget, TESTNET_TARGET } from "./src/lib/network-targets"
+import { type ToolsTarget, TESTNET_TARGET } from "./src/lib/network-targets"
 import { deriveAllowedPreviewHosts } from "./src/lib/preview-hosts"
 
 const COOP_COEP_HEADERS = {
@@ -17,10 +17,10 @@ const COOP_COEP_HEADERS = {
 }
 
 // Dev server port. Defaults to 5176 for local DX; the e2e network harness
-// overrides this per-worktree via FAUCET_DEV_PORT so parallel agents don't
+// overrides this per-worktree via TOOLS_DEV_PORT so parallel agents don't
 // collide. strictPort is only on for local dev — when the harness picks a
 // port, Vite must be allowed to bind to whatever it allocates.
-const FAUCET_DEV_PORT = Number(process.env.FAUCET_DEV_PORT) || 5176
+const TOOLS_DEV_PORT = Number(process.env.TOOLS_DEV_PORT) || 5176
 
 /**
  * Emit authoritative build metadata so the release pipeline's post-deploy
@@ -28,11 +28,11 @@ const FAUCET_DEV_PORT = Number(process.env.FAUCET_DEV_PORT) || 5176
  * cache serving a fresh build.json over a stale index.html). One `buildId` goes
  * into BOTH the served HTML (`<meta name="nulo-build">`) and `dist/build.json`;
  * verify-live requires them to match EXACTLY. `chainId` is the target's canonical
- * wallet id (single-sourced from the FaucetTarget) — verify-live asserts the live
- * faucet serves the chain the wallet expects, and `target`/`manifestDigest` let
+ * wallet id (single-sourced from the ToolsTarget) — verify-live asserts the live
+ * tools app serves the chain the wallet expects, and `target`/`manifestDigest` let
  * CI prove the right per-target manifest shipped.
  */
-function buildMetaPlugin(target: FaucetTarget, manifestJson: string, allowedPreviewHosts: readonly string[] = []): Plugin {
+function buildMetaPlugin(target: ToolsTarget, manifestJson: string, allowedPreviewHosts: readonly string[] = []): Plugin {
 	const pkg = JSON.parse(readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8")) as { version: string }
 	let buildId = ""
 	let root = process.cwd()
@@ -88,7 +88,7 @@ function createHashHex(s: string): string {
 	return createHash("sha256").update(s).digest("hex")
 }
 
-function readManifest(target: FaucetTarget): string {
+function readManifest(target: ToolsTarget): string {
 	const p = fileURLToPath(new URL(`./public/${target.manifestFile}`, import.meta.url))
 	return readFileSync(p, "utf8")
 }
@@ -98,7 +98,7 @@ function readManifest(target: FaucetTarget): string {
  * must allow `lb.drpc.live` (the Alpha node), which the testnet CSP does not cover. Generated per
  * build rather than shipped statically so the two deployments can't share one wrong header set (F8).
  */
-function headersPlugin(target: FaucetTarget): Plugin {
+function headersPlugin(target: ToolsTarget): Plugin {
 	let root = process.cwd()
 	let outDir = "dist"
 	const csp = [
@@ -134,13 +134,13 @@ function headersPlugin(target: FaucetTarget): Plugin {
 }
 
 /**
- * The config factory. Each `vite.<target>.config.mts` calls this with its one `FaucetTarget`; the
+ * The config factory. Each `vite.<target>.config.mts` calls this with its one `ToolsTarget`; the
  * default export builds testnet so the legacy `vite build` (and vitest, which ignores this file) keep
  * working. The target key + its bridge manifest are `define`d into `import.meta.env` so the app
- * (`resolveFaucetTarget`, `bridge-deployments`) reads them at runtime; `build.json` gets the target
+ * (`resolveToolsTarget`, `bridge-deployments`) reads them at runtime; `build.json` gets the target
  * via the plugin arg (Node scope — a vite alias can't reach here).
  */
-export function makeFaucetConfig(target: FaucetTarget): UserConfig {
+export function makeToolsConfig(target: ToolsTarget): UserConfig {
 	const manifestJson = readManifest(target)
 	// Cloudflare Pages PR previews: a preview is a PROD build served at TWO hostnames — the
 	// per-commit <hash>.<project>.pages.dev (CF_PAGES_URL) AND the branch alias. Both are baked
@@ -153,8 +153,8 @@ export function makeFaucetConfig(target: FaucetTarget): UserConfig {
 	})
 	return defineConfig({
 		server: {
-			port: FAUCET_DEV_PORT,
-			strictPort: !process.env.FAUCET_DEV_PORT,
+			port: TOOLS_DEV_PORT,
+			strictPort: !process.env.TOOLS_DEV_PORT,
 			// bb.js threaded wasm requires cross-origin isolation. Same headers
 			// ship in production via public/_headers (Cloudflare Pages).
 			headers: COOP_COEP_HEADERS,
@@ -163,7 +163,7 @@ export function makeFaucetConfig(target: FaucetTarget): UserConfig {
 			headers: COOP_COEP_HEADERS,
 		},
 		define: {
-			"import.meta.env.VITE_FAUCET_TARGET": JSON.stringify(target.key),
+			"import.meta.env.VITE_TOOLS_TARGET": JSON.stringify(target.key),
 			"import.meta.env.VITE_BRIDGE_MANIFEST_JSON": JSON.stringify(manifestJson),
 			"import.meta.env.VITE_ALLOWED_PREVIEW_HOSTS": JSON.stringify(allowedPreviewHosts.join(",")),
 		},
@@ -202,4 +202,4 @@ export function makeFaucetConfig(target: FaucetTarget): UserConfig {
 	})
 }
 
-export default makeFaucetConfig(TESTNET_TARGET)
+export default makeToolsConfig(TESTNET_TARGET)

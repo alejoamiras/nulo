@@ -1,7 +1,7 @@
 # Local artifacts created by `bun run deploy:testnet[:dry]`. The PXE data
 # directory + the embedded wallet's lmdb store are per-machine and per-
 # deployer-secret; they don't belong in version control.
-.faucet-deploy-*/
+.tools-deploy-*/
 wallet_data_*/
 
 # Vite output

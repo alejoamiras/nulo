@@ -10,12 +10,12 @@ import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { type FaucetTargetKey, TARGETS } from "../src/lib/network-targets"
+import { type ToolsTargetKey, TARGETS } from "../src/lib/network-targets"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const appRoot = join(here, "..")
 
-const key = (process.argv[2] || process.env.FAUCET_TARGET || "testnet") as FaucetTargetKey
+const key = (process.argv[2] || process.env.TOOLS_TARGET || "testnet") as ToolsTargetKey
 const target = TARGETS[key]
 if (!target) throw new Error(`verify-build-target: unknown target "${key}" (expected testnet | mainnet)`)
 

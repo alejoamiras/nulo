@@ -1,6 +1,6 @@
 /*
  * Pre-paint theme boot. A classic (render-blocking) external script in <head> that sets <html theme>
- * before first paint so the faucet never flashes the wrong theme. localStorage["nulo:theme"] is the
+ * before first paint so the app never flashes the wrong theme. localStorage["nulo:theme"] is the
  * persisted choice (written by useTheme); "system" / missing / junk resolves to the OS preference.
  * Keep the key + allowed values in sync with src/composables/useTheme.ts.
  */

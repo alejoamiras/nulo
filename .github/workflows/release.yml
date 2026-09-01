@@ -386,13 +386,13 @@ jobs:
           echo "deploy-hook triggered (HTTP $code)"
 
   # Fails a stable publish EARLY (right after resolve, before the ~20-min build
-  # chain) when the faucet deploy hook secret is not wired — an unwired hook used
+  # chain) when the tools app deploy hook secret is not wired — an unwired hook used
   # to fall back silently to the CF dashboard Git-integration, which strands the
-  # faucet on workflow_dispatch republishes (those don't push to main, so the
+  # tools on workflow_dispatch republishes (those don't push to main, so the
   # Git-integration never fires). `environment: production` so an env-scoped
-  # secret is visible here exactly as it is in deploy-faucet.
-  deploy-faucet:
-    name: deploy faucet (Cloudflare Pages deploy hook)
+  # secret is visible here exactly as it is in deploy-tools.
+  deploy-tools:
+    name: deploy tools (Cloudflare Pages deploy hook)
     needs: [resolve, attach-assets]
     if: |
       always() && !cancelled() &&
@@ -405,31 +405,31 @@ jobs:
     timeout-minutes: 2
     environment: production
     steps:
-      - name: Trigger Cloudflare Pages deploy (faucet)
+      - name: Trigger Cloudflare Pages deploy (tools)
         env:
-          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_FAUCET_DEPLOY_HOOK }}
+          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_TOOLS_DEPLOY_HOOK }}
         run: |
           if [ -z "$DEPLOY_HOOK" ]; then
-            # Not wired: skip, don't fail. The faucet's Cloudflare dashboard Git-integration
+            # Not wired: skip, don't fail. The tools app's Cloudflare dashboard Git-integration
             # deploys it on push, so an unwired hook never blocks a release.
-            echo "::notice::CLOUDFLARE_FAUCET_DEPLOY_HOOK unset — skipping the CI faucet deploy (dashboard Git-integration still deploys it)."
+            echo "::notice::CLOUDFLARE_TOOLS_DEPLOY_HOOK unset — skipping the CI tools deploy (dashboard Git-integration still deploys it)."
             exit 0
           fi
-          code=$(curl -sS -o /tmp/cf-faucet.out -w "%{http_code}" \
+          code=$(curl -sS -o /tmp/cf-tools.out -w "%{http_code}" \
             --retry 3 --retry-all-errors --retry-delay 2 \
             -X POST "$DEPLOY_HOOK")
           if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
-            echo "::error::faucet deploy-hook curl returned HTTP $code"
-            cat /tmp/cf-faucet.out
+            echo "::error::tools deploy-hook curl returned HTTP $code"
+            cat /tmp/cf-tools.out
             exit 1
           fi
-          echo "faucet deploy-hook triggered (HTTP $code)"
+          echo "tools deploy-hook triggered (HTTP $code)"
 
   verify-live:
     name: verify live deploys (advisory)
-    needs: [resolve, attach-assets, refresh-landing, deploy-faucet]
+    needs: [resolve, attach-assets, refresh-landing, deploy-tools]
     # ADVISORY — deliberately NOT in the `status` aggregator. It reports red
-    # without blocking the release; open nulo.sh / faucet.nulo.sh and re-fire the
+    # without blocking the release; open nulo.sh / tools.nulo.sh and re-fire the
     # deploy (refresh-landing.yml break-glass) if it flags a stale site.
     if: |
       always() &&
@@ -561,7 +561,7 @@ jobs:
         smoke-against-artifact,
         attach-assets,
         refresh-landing,
-        deploy-faucet,
+        deploy-tools,
         publish-chrome-store,
         publish-firefox-amo,
       ]
@@ -582,7 +582,7 @@ jobs:
             "${{ needs.smoke-against-artifact.result }}" \
             "${{ needs.attach-assets.result }}" \
             "${{ needs.refresh-landing.result }}" \
-            "${{ needs.deploy-faucet.result }}" \
+            "${{ needs.deploy-tools.result }}" \
             "${{ needs.publish-chrome-store.result }}" \
             "${{ needs.publish-firefox-amo.result }}" \
           ; do

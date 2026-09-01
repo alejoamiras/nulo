@@ -23,7 +23,7 @@ describe("L1_CHAIN_LABEL — the FROM/TO panel chip", () => {
 	})
 
 	it("mainnet target → plain ETHEREUM", async () => {
-		vi.stubEnv("VITE_FAUCET_TARGET", "mainnet")
+		vi.stubEnv("VITE_TOOLS_TARGET", "mainnet")
 		vi.resetModules()
 		try {
 			const { L1_CHAIN_LABEL } = await import("./network")
