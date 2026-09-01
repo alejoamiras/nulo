@@ -134,26 +134,33 @@ const getInputType = computed(() => {
 	return "text"
 })
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 21) — refactor when touched, never raise
 const handleInput = (event?: Event) => {
 	if (props.disabled) return
 
 	text.value = props.sanitize ? sanitizeString(text.value as string, props.maxLength) : text.value
 
-	if (!!props.maxLength) {
-		fillWarning()
-		emit("maxLengthReached", false)
+	if (!!props.maxLength) applyMaxLength(props.maxLength)
 
-		if ((text.value as string).length > props.maxLength) {
-			text.value = (text.value as string).slice(0, props.maxLength)
-		}
+	emitParsedValue(event)
+}
 
-		if ((text.value as string).length === props.maxLength) {
-			fillWarning(`You can’t enter more than ${props.maxLength} characters`)
-			emit("maxLengthReached", true)
-		}
+/** Truncate to the cap and flip the "limit reached" warning + event; the warning clears on every keystroke first. */
+function applyMaxLength(maxLength: number) {
+	fillWarning()
+	emit("maxLengthReached", false)
+
+	if ((text.value as string).length > maxLength) {
+		text.value = (text.value as string).slice(0, maxLength)
 	}
 
+	if ((text.value as string).length === maxLength) {
+		fillWarning(`You can’t enter more than ${maxLength} characters`)
+		emit("maxLengthReached", true)
+	}
+}
+
+/** Emit the model value in the field's type: parsed float for `number`, clamped digits for `int`, raw text otherwise. */
+function emitParsedValue(event?: Event) {
 	if (props.type === "number") {
 		emit(
 			"update:modelValue",

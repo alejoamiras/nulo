@@ -93,8 +93,7 @@ export async function pickFile(accept = ".json,.txt,.gz,.gzip", delay = false, a
 
 		document.body.appendChild(input)
 
-		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
-		input.onchange = async () => {
+		input.onchange = () => {
 			const file = input.files?.[0]
 			document.body.removeChild(input)
 
@@ -103,41 +102,18 @@ export async function pickFile(accept = ".json,.txt,.gz,.gzip", delay = false, a
 				return
 			}
 
-			// The cap must run HERE, not in callers: for compressed files the
-			// unbounded materialization would otherwise already have happened
-			// inside the decompress below by the time a caller can look at
-			// `.size`. A throw would leave the outer promise pending (async
-			// onchange callback) — reject-and-return, always.
-			if (maxBytes !== undefined && file.size > maxBytes) {
-				reject(new FileTooLargeError(maxBytes))
+			// The cap and the plain path settle SYNCHRONOUSLY here (reject-and-return, always — a
+			// throw would leave the outer promise pending); only decompression goes async.
+			const verdict = classifyPickedFile(file, autoDecompress, maxBytes)
+			if (verdict === "too-large") {
+				reject(new FileTooLargeError(maxBytes as number))
 				return
 			}
-
-			const compressionFormat = getCompressionFormat(file?.name)
-			if (!compressionFormat || !autoDecompress) {
+			if (verdict === "plain") {
 				resolve(file)
 				return
 			}
-
-			try {
-				const decompressedBlob = await decompressData(file, compressionFormat, maxBytes)
-				const decompressedFile = new File([decompressedBlob], file.name.replace(`${getExtension(file.name)}`, ""), {
-					type: decompressedBlob.type,
-					lastModified: file.lastModified,
-				})
-
-				resolve(decompressedFile)
-			} catch (err) {
-				// The cap error must NOT fall into the warn-and-fallback below —
-				// resolving with the still-compressed original would reclassify a
-				// decompression bomb as a plain file.
-				if (err instanceof FileTooLargeError) {
-					reject(err)
-					return
-				}
-				console.warn(`Failed to decompress ${file.name}:`, err instanceof Error ? err.message : err)
-				resolve(file)
-			}
+			void settleDecompressed(file, verdict, maxBytes, resolve, reject)
 		}
 
 		if (delay) {
@@ -146,6 +122,43 @@ export async function pickFile(accept = ".json,.txt,.gz,.gzip", delay = false, a
 			input.click()
 		}
 	})
+}
+
+/** The cap must run HERE, not in callers: for compressed files the unbounded materialization would
+ *  otherwise already have happened inside the decompress by the time a caller can look at `.size`. */
+function classifyPickedFile(file: File, autoDecompress: boolean, maxBytes: number | undefined): "too-large" | "plain" | CompressionFormat {
+	if (maxBytes !== undefined && file.size > maxBytes) return "too-large"
+	const compressionFormat = getCompressionFormat(file?.name)
+	if (!compressionFormat || !autoDecompress) return "plain"
+	return compressionFormat
+}
+
+/** The async tail of a pick: inflate, or fall back to the original file — except for the cap
+ *  error, which must NOT fall into the warn-and-fallback (resolving with the still-compressed
+ *  original would reclassify a decompression bomb as a plain file). Owns the pick's settlement. */
+async function settleDecompressed(
+	file: File,
+	compressionFormat: CompressionFormat,
+	maxBytes: number | undefined,
+	resolve: (file: File) => void,
+	reject: (err: unknown) => void,
+): Promise<void> {
+	try {
+		const decompressedBlob = await decompressData(file, compressionFormat, maxBytes)
+		const decompressedFile = new File([decompressedBlob], file.name.replace(`${getExtension(file.name)}`, ""), {
+			type: decompressedBlob.type,
+			lastModified: file.lastModified,
+		})
+
+		resolve(decompressedFile)
+	} catch (err) {
+		if (err instanceof FileTooLargeError) {
+			reject(err)
+			return
+		}
+		console.warn(`Failed to decompress ${file.name}:`, err instanceof Error ? err.message : err)
+		resolve(file)
+	}
 }
 
 // Compression / Decompression
