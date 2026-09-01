@@ -99,8 +99,39 @@
         "webext-bridge": "^6.0.1",
       },
     },
-    "apps/faucet": {
-      "name": "@nulo/faucet",
+    "apps/landing": {
+      "name": "@nulo/landing",
+      "version": "0.1.0",
+      "devDependencies": {
+        "typescript": "^6.0.3",
+        "vite": "^8.0.16",
+        "vitest": "^4.1.9",
+      },
+    },
+    "apps/playground": {
+      "name": "@nulo/playground",
+      "version": "0.1.0",
+      "dependencies": {
+        "@aztec-foundation/aztec-standards": "5.0.1",
+        "@aztec/aztec.js": "5.2.0",
+        "@aztec/bb.js": "5.2.0",
+        "@aztec/foundation": "5.2.0",
+        "@aztec/noir-acvm_js": "5.2.0",
+        "@aztec/noir-contracts.js": "5.2.0",
+        "@aztec/noir-noirc_abi": "5.2.0",
+        "@aztec/stdlib": "5.2.0",
+        "@aztec/wallet-sdk": "5.2.0",
+        "@nulo/wallet-sdk-schema-patch": "workspace:*",
+        "zod": "^4.4.3",
+      },
+      "devDependencies": {
+        "typescript": "^6.0.3",
+        "vite": "^8.0.16",
+        "vite-plugin-node-polyfills": "^0.28.0",
+      },
+    },
+    "apps/tools": {
+      "name": "@nulo/tools",
       "version": "0.1.0",
       "dependencies": {
         "@aztec-foundation/aztec-standards": "5.0.1",
@@ -141,37 +172,6 @@
         "vite-plugin-node-polyfills": "^0.28.0",
         "vitest": "^4.1.9",
         "vue-tsc": "^3.3.5",
-      },
-    },
-    "apps/landing": {
-      "name": "@nulo/landing",
-      "version": "0.1.0",
-      "devDependencies": {
-        "typescript": "^6.0.3",
-        "vite": "^8.0.16",
-        "vitest": "^4.1.9",
-      },
-    },
-    "apps/playground": {
-      "name": "@nulo/playground",
-      "version": "0.1.0",
-      "dependencies": {
-        "@aztec-foundation/aztec-standards": "5.0.1",
-        "@aztec/aztec.js": "5.2.0",
-        "@aztec/bb.js": "5.2.0",
-        "@aztec/foundation": "5.2.0",
-        "@aztec/noir-acvm_js": "5.2.0",
-        "@aztec/noir-contracts.js": "5.2.0",
-        "@aztec/noir-noirc_abi": "5.2.0",
-        "@aztec/stdlib": "5.2.0",
-        "@aztec/wallet-sdk": "5.2.0",
-        "@nulo/wallet-sdk-schema-patch": "workspace:*",
-        "zod": "^4.4.3",
-      },
-      "devDependencies": {
-        "typescript": "^6.0.3",
-        "vite": "^8.0.16",
-        "vite-plugin-node-polyfills": "^0.28.0",
       },
     },
     "packages/aztec-runtime": {
@@ -729,13 +729,13 @@
 
     "@nulo/extension-messaging": ["@nulo/extension-messaging@workspace:packages/extension-messaging"],
 
-    "@nulo/faucet": ["@nulo/faucet@workspace:apps/faucet"],
-
     "@nulo/landing": ["@nulo/landing@workspace:apps/landing"],
 
     "@nulo/playground": ["@nulo/playground@workspace:apps/playground"],
 
     "@nulo/resolve-asset": ["@nulo/resolve-asset@workspace:packages/resolve-asset"],
+
+    "@nulo/tools": ["@nulo/tools@workspace:apps/tools"],
 
     "@nulo/wallet-bridge": ["@nulo/wallet-bridge@workspace:packages/wallet-bridge"],
 
@@ -2359,7 +2359,7 @@
 
     "@noble/curves/@noble/hashes": ["@noble/hashes@1.6.0", "", {}, "sha512-YUULf0Uk4/mAA89w+k3+yUYh6NrEvxZa5T6SY3wlMvE2chHkxFUUIDI8/XW1QSC357iA5pSnqt7XEhvFOqmDyQ=="],
 
-    "@nulo/faucet/viem": ["viem@2.55.17", "", { "dependencies": { "@noble/curves": "1.9.1", "@noble/hashes": "1.8.0", "@scure/bip32": "1.7.0", "@scure/bip39": "1.6.0", "abitype": "1.2.3", "isows": "1.0.7", "ox": "0.14.33", "ws": "8.21.0" }, "peerDependencies": { "typescript": ">=5.0.4" }, "optionalPeers": ["typescript"] }, "sha512-XKASpfG9jznxsU/J7Bj2k9aS0UZgU3sBcwVoQ6slD5T1RmNJHh3khmFVJuRKjrOe3uqHb0FJKbb6jwE49WtVDQ=="],
+    "@nulo/tools/viem": ["viem@2.55.17", "", { "dependencies": { "@noble/curves": "1.9.1", "@noble/hashes": "1.8.0", "@scure/bip32": "1.7.0", "@scure/bip39": "1.6.0", "abitype": "1.2.3", "isows": "1.0.7", "ox": "0.14.33", "ws": "8.21.0" }, "peerDependencies": { "typescript": ">=5.0.4" }, "optionalPeers": ["typescript"] }, "sha512-XKASpfG9jznxsU/J7Bj2k9aS0UZgU3sBcwVoQ6slD5T1RmNJHh3khmFVJuRKjrOe3uqHb0FJKbb6jwE49WtVDQ=="],
 
     "@opentelemetry/exporter-logs-otlp-http/@opentelemetry/core": ["@opentelemetry/core@1.28.0", "", { "dependencies": { "@opentelemetry/semantic-conventions": "1.27.0" }, "peerDependencies": { "@opentelemetry/api": ">=1.0.0 <1.10.0" } }, "sha512-ZLwRMV+fNDpVmF2WYUdBHlq0eOWtEaUJSusrzjGnBt7iSRvfjFE3RXYUZJrqou/wIDWV0DwQ5KIfYe9WXg9Xqw=="],
 
@@ -2591,15 +2591,15 @@
 
     "@isaacs/cliui/wrap-ansi/ansi-styles": ["ansi-styles@6.2.3", "", {}, "sha512-4Dj6M28JB+oAH8kFkTLUo+a2jwOFkuqb3yucU0CANcRRUbxS0cP0nZYCGjcc3BNXwRIsUVmDGgzawme7zvJHvg=="],
 
-    "@nulo/faucet/viem/@noble/curves": ["@noble/curves@1.9.1", "", { "dependencies": { "@noble/hashes": "1.8.0" } }, "sha512-k11yZxZg+t+gWvBbIswW0yoJlu8cHOC7dhunwOzoWH/mXGBiYyR4YY6hAEK/3EUs4UpB8la1RfdRpeGsFHkWsA=="],
+    "@nulo/tools/viem/@noble/curves": ["@noble/curves@1.9.1", "", { "dependencies": { "@noble/hashes": "1.8.0" } }, "sha512-k11yZxZg+t+gWvBbIswW0yoJlu8cHOC7dhunwOzoWH/mXGBiYyR4YY6hAEK/3EUs4UpB8la1RfdRpeGsFHkWsA=="],
 
-    "@nulo/faucet/viem/@scure/bip39": ["@scure/bip39@1.6.0", "", { "dependencies": { "@noble/hashes": "~1.8.0", "@scure/base": "~1.2.5" } }, "sha512-+lF0BbLiJNwVlev4eKelw1WWLaiKXw7sSl8T6FvBlWkdX+94aGJ4o8XjUdlyhTCjd8c+B3KT3JfS8P0bLRNU6A=="],
+    "@nulo/tools/viem/@scure/bip39": ["@scure/bip39@1.6.0", "", { "dependencies": { "@noble/hashes": "~1.8.0", "@scure/base": "~1.2.5" } }, "sha512-+lF0BbLiJNwVlev4eKelw1WWLaiKXw7sSl8T6FvBlWkdX+94aGJ4o8XjUdlyhTCjd8c+B3KT3JfS8P0bLRNU6A=="],
 
-    "@nulo/faucet/viem/abitype": ["abitype@1.2.3", "", { "peerDependencies": { "typescript": ">=5.0.4", "zod": "^3.22.0 || ^4.0.0" }, "optionalPeers": ["typescript", "zod"] }, "sha512-Ofer5QUnuUdTFsBRwARMoWKOH1ND5ehwYhJ3OJ/BQO+StkwQjHw0XyVh4vDttzHB7QOFhPHa/o413PJ82gU/Tg=="],
+    "@nulo/tools/viem/abitype": ["abitype@1.2.3", "", { "peerDependencies": { "typescript": ">=5.0.4", "zod": "^3.22.0 || ^4.0.0" }, "optionalPeers": ["typescript", "zod"] }, "sha512-Ofer5QUnuUdTFsBRwARMoWKOH1ND5ehwYhJ3OJ/BQO+StkwQjHw0XyVh4vDttzHB7QOFhPHa/o413PJ82gU/Tg=="],
 
-    "@nulo/faucet/viem/ox": ["ox@0.14.33", "", { "dependencies": { "@adraffy/ens-normalize": "^1.11.0", "@noble/ciphers": "^1.3.0", "@noble/curves": "1.9.1", "@noble/hashes": "^1.8.0", "@scure/bip32": "^1.7.0", "@scure/bip39": "^1.6.0", "abitype": "^1.2.3", "eventemitter3": "5.0.1" }, "peerDependencies": { "typescript": ">=5.4.0" }, "optionalPeers": ["typescript"] }, "sha512-rooA/4o7bBof4Ge2VH/eovfNPb/AEEYyrNj03wggc55g5HZD8Pjs/OeWhttgjic3dDcqn0r29bDuvQEdTiUemQ=="],
+    "@nulo/tools/viem/ox": ["ox@0.14.33", "", { "dependencies": { "@adraffy/ens-normalize": "^1.11.0", "@noble/ciphers": "^1.3.0", "@noble/curves": "1.9.1", "@noble/hashes": "^1.8.0", "@scure/bip32": "^1.7.0", "@scure/bip39": "^1.6.0", "abitype": "^1.2.3", "eventemitter3": "5.0.1" }, "peerDependencies": { "typescript": ">=5.4.0" }, "optionalPeers": ["typescript"] }, "sha512-rooA/4o7bBof4Ge2VH/eovfNPb/AEEYyrNj03wggc55g5HZD8Pjs/OeWhttgjic3dDcqn0r29bDuvQEdTiUemQ=="],
 
-    "@nulo/faucet/viem/ws": ["ws@8.21.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g=="],
+    "@nulo/tools/viem/ws": ["ws@8.21.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g=="],
 
     "@opentelemetry/exporter-logs-otlp-http/@opentelemetry/core/@opentelemetry/semantic-conventions": ["@opentelemetry/semantic-conventions@1.27.0", "", {}, "sha512-sAay1RrB+ONOem0OZanAR1ZI/k7yDpnOQSQmTMuGImUQb2y8EbSaCJ94FQluM74xoU03vlb2d2U90hZluL6nQg=="],
 
