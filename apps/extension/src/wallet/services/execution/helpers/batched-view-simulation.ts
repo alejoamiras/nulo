@@ -173,7 +173,7 @@ export async function batchedViewSimulation(
 	const decoded: AbiDecoded[] = []
 	if (calls.length === 0) return { encoded, decoded }
 
-	const { pxe, node, network, account, contractResolver, logger } = deps
+	const { pxe, node, network, account, logger } = deps
 
 	const { instances, artifacts } = await resolveBatchContracts(calls, deps)
 	const { allTxCalls, allUtility } = await classifyAll(calls, instances, artifacts)

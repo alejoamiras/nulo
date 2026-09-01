@@ -60,7 +60,12 @@ function abi(name: string, kind: FunctionType, isStatic: boolean): FunctionAbi {
 	} as any
 }
 
-function makeDeps() {
+const NODE_L1_CHAIN_ID = 11155111
+const NODE_ROLLUP_VERSION = 4127419662
+// The stored composite the drift assert verifies — a wrong value must reject.
+const STORED_CHAIN_ID = (NODE_L1_CHAIN_ID ^ NODE_ROLLUP_VERSION) >>> 0
+
+function makeDeps(storedChainId = STORED_CHAIN_ID) {
 	const fns = [abi("fast_view", FunctionType.PUBLIC, true), abi("bal_priv", FunctionType.PRIVATE, false)]
 	// biome-ignore lint/suspicious/noExplicitAny: duck-typed PXE stub
 	const pxe: any = {
@@ -77,7 +82,7 @@ function makeDeps() {
 	// biome-ignore lint/suspicious/noExplicitAny: duck-typed node stub
 	const node: any = {
 		getBlockHeader: vi.fn(async () => ({ id: "node-header" })),
-		getNodeInfo: vi.fn(async () => ({ l1ChainId: 11155111, rollupVersion: 4127419662 })),
+		getNodeInfo: vi.fn(async () => ({ l1ChainId: NODE_L1_CHAIN_ID, rollupVersion: NODE_ROLLUP_VERSION })),
 	}
 	// biome-ignore lint/suspicious/noExplicitAny: stub IAccountContract — only the surface the helper touches
 	const account: any = {
@@ -94,8 +99,16 @@ function makeDeps() {
 		ensureContractsRegistered: ContractResolver.prototype.ensureContractsRegistered,
 		// biome-ignore lint/suspicious/noExplicitAny: ContractResolver structural stub
 	} as any
-	// chainId=0 → assertLiveChainIdentity is a noop (local substrate).
-	return { pxe, node, network: { chainId: 0 }, account, contractResolver, logger: { log: () => {} } } as BatchedViewSimulationDeps
+	// A REAL stored composite by default (not the local-substrate 0), so the
+	// drift assert genuinely runs on this pin's path.
+	return {
+		pxe,
+		node,
+		network: { chainId: storedChainId },
+		account,
+		contractResolver,
+		logger: { log: () => {} },
+	} as BatchedViewSimulationDeps
 }
 
 beforeEach(() => {
@@ -126,7 +139,19 @@ describe("batchedViewSimulation — mixed-arm chain-identity pin", () => {
 		// biome-ignore lint/suspicious/noExplicitAny: reading stub call args
 		const slowChainInfo = (deps.account as any).buildTxExecutionRequest.mock.calls[0]?.[4] as { chainId: Fr; version: Fr }
 		expect(fastChainInfo).toBe(slowChainInfo)
-		expect(fastChainInfo.chainId.toBigInt()).toBe(11155111n)
-		expect(fastChainInfo.version.toBigInt()).toBe(4127419662n)
+		expect(fastChainInfo.chainId.toBigInt()).toBe(BigInt(NODE_L1_CHAIN_ID))
+		expect(fastChainInfo.version.toBigInt()).toBe(BigInt(NODE_ROLLUP_VERSION))
+	})
+
+	test("drifted stored identity rejects a mixed batch BEFORE either arm dispatches", async () => {
+		const deps = makeDeps(STORED_CHAIN_ID ^ 1)
+		const calls: CallAction[] = [
+			{ kind: "call", contract: CONTRACT_A, method: "fast_view", args: [] },
+			{ kind: "call", contract: CONTRACT_A, method: "bal_priv", args: [] },
+		]
+		await expect(batchedViewSimulation(calls, deps)).rejects.toThrowError(/Chain identity mismatch/)
+		expect(simulateViaNodeMock).not.toHaveBeenCalled()
+		// biome-ignore lint/suspicious/noExplicitAny: reading stub call args
+		expect((deps.pxe as any).simulateTx).not.toHaveBeenCalled()
 	})
 })
