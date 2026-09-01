@@ -27,7 +27,6 @@ import {
 	bridgeWitnessPermitTypedData,
 	buildFuelRoute,
 	deriveBridgeSecret,
-	ensurePermit2Allowance,
 	feeJuiceAddress,
 	hashRoute,
 	isSealTrusted,
@@ -43,7 +42,7 @@ import {
 } from "@nulo/bridge-core"
 import { fuelRecipientFor } from "@/lib/fuel-target"
 import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
-import { ERC20_ABI } from "./useL1Usdc"
+import { bestEffortL2Block, ensurePermit2Approval, signAndSendRouterBridge } from "./router-bridge-leg"
 import { tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
 import { InboxAbi } from "@aztec/l1-artifacts"
 import { type Log, parseEventLogs } from "viem"
@@ -74,7 +73,6 @@ import {
 	discard,
 	flagRecordError,
 	isMsgConsumed,
-	markApproveOutcome,
 	runDepositClaim,
 	runOnLane,
 	setRecordStep,
@@ -147,14 +145,9 @@ export function parseBridgeWithFuelEvent(logs: Log[]):
 	return fe?.args
 }
 
-/** L2 height snapshot, best-effort: a dead node just means the gate narrates without the countdown. */
-export async function bestEffortL2Block(): Promise<number | undefined> {
-	try {
-		return Number(await createAztecNodeClient(NODE_URL).getBlockNumber())
-	} catch {
-		return undefined
-	}
-}
+// The L1 mechanics shared with the Fuel deposit live in `router-bridge-leg.ts`; re-exported so the
+// deposit surface (and its characterization harness) keeps one import site.
+export { bestEffortL2Block, ensurePermit2Approval, signAndSendRouterBridge }
 
 export async function fuelReceiptStatus(txHash: string): Promise<"included" | "dropped" | "pending"> {
 	try {
@@ -842,46 +835,6 @@ export async function sealPrivateRecord(ctx: {
 	}
 }
 
-/** Real USDC (and the DP7 permissionless-mint test token) start at ZERO Permit2 allowance, so a
- *  deposit must do a one-time approve(Permit2, max) before the witness transfer. The testnet
- *  MintableERC20 auto-grants Permit2 → this short-circuits (no tx) for it; the DP7 token + real
- *  USDC are what exercise the approve (codex F2/F4). Mirrors useFuel's approve leg. The shared
- *  approval state machine (bridge-core) — the same sequencing the candidate smokes rehearse. The
- *  approval hash is JOURNALED the moment it exists, so a rejection after the approval mines
- *  still shows the standing max allowance instead of "nothing was sent". */
-export async function ensurePermit2Approval(permit2: `0x${string}`, needed: bigint, recordId: string, l1: DepositL1Ctx): Promise<void> {
-	await ensurePermit2Allowance({
-		allowance: async () =>
-			(await l1.publicClient.readContract({
-				address: L1_USDC,
-				abi: ERC20_ABI,
-				functionName: "allowance",
-				args: [l1.from, permit2],
-			})) as bigint,
-		approveMax: async () =>
-			(await runOnLane("l1", () =>
-				l1.wallet.writeContract({
-					address: L1_USDC,
-					abi: ERC20_ABI,
-					functionName: "approve",
-					args: [permit2, (1n << 256n) - 1n],
-					chain: NETWORK.viemChain,
-					account: l1.from,
-				}),
-			)) as `0x${string}`,
-		waitReceipt: async (hash) =>
-			await awaitL1Receipt(l1.publicClient as never, hash, {
-				onStillWaiting: (attempt) => setRecordStep(recordId, "approving", `still waiting for the approval (round ${attempt})`),
-			}),
-		needed,
-		onStatus: (status, txHash) => {
-			if (status === "approving") setRecordStep(recordId, "approving", "first time only: approve Permit2 in your Ethereum wallet")
-			if (status === "waiting" && txHash) updateRecord(recordId, { approveTxHash: txHash })
-			if (status === "approved") markApproveOutcome(recordId, "done")
-		},
-	})
-}
-
 /** Finalized envelope: same key retained in memory ⇒ zero additional signatures. */
 export async function finalizePrivateEnvelope(ctx: {
 	id: string
@@ -923,7 +876,7 @@ export async function runFueledDepositLeg(ctx: DepositLegCtx & { fuelSlice: bigi
 	const { id, amount, tokenAmount, isPrivate, recipient, secretStr, l1, sealKeys, fuelSlice, fuelPre } = ctx
 	if (!BRIDGE_FUEL) throw new Error("Fuel is not configured for this deployment.")
 	const fuelCfg = BRIDGE_FUEL
-	await ensurePermit2Approval(fuelCfg.permit2, amount, id, l1)
+	await ensurePermit2Approval({ permit2: fuelCfg.permit2, token: L1_USDC, needed: amount, recordId: id, l1 })
 
 	setRecordStep(id, "signing", "sign the bridge intent in your Ethereum wallet - one signature covers swap + deposit")
 	const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
@@ -1050,59 +1003,27 @@ export async function runPlainDepositLeg(ctx: DepositLegCtx): Promise<void> {
 	if (!BRIDGE_ROUTER || !BRIDGE_PERMIT2 || !BRIDGE_SWAP_TARGET) {
 		throw new Error("Bridge router/permit2 not configured (required for the deposit path).")
 	}
-	await ensurePermit2Approval(BRIDGE_PERMIT2, tokenAmount, id, l1)
+	await ensurePermit2Approval({ permit2: BRIDGE_PERMIT2, token: L1_USDC, needed: tokenAmount, recordId: id, l1 })
 
-	setRecordStep(id, "signing", "sign the bridge intent in your Ethereum wallet - one signature")
-	const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
-	const deadline = BigInt(Math.floor(Date.now() / 1000)) + PERMIT_DEADLINE_SECONDS
-	const bridgeWitness: BridgeWitness = {
+	const { depositTxHash } = await signAndSendRouterBridge(l1, {
+		id,
+		router: BRIDGE_ROUTER,
+		permit2: BRIDGE_PERMIT2,
+		swapTarget: BRIDGE_SWAP_TARGET,
 		tokenPortal: L1_PORTAL,
 		bridgeToken: L1_USDC,
-		totalAmount: tokenAmount,
-		fuelAmount: 0n,
+		amount: tokenAmount,
 		// PRIVATE recipient is committed via secretHash, never published — zero it so the router's
 		// indexed Bridge event can't leak R (privacy). PUBLIC binds R in the portal content hash.
 		aztecRecipient: (isPrivate ? `0x${"0".repeat(64)}` : recipient) as `0x${string}`,
-		fuelRecipient: `0x${"0".repeat(64)}`,
-		tokenSecretHash: id as `0x${string}`,
-		fuelSecretHash: `0x${"0".repeat(64)}`,
-		minFuelOutput: 0n,
-		routeHash: `0x${"0".repeat(64)}`,
+		secretHash: id as `0x${string}`,
 		isPrivate,
-		swapTarget: BRIDGE_SWAP_TARGET,
-	}
-	const bridgeTyped = bridgeWitnessPermitTypedData(
-		{ permitted: { token: L1_USDC, amount: tokenAmount }, spender: BRIDGE_ROUTER, nonce, deadline },
-		bridgeWitness,
-		BRIDGE_PERMIT2,
-		NETWORK.l1ChainId,
-	)
-	const bridgeSig = await runOnLane("l1", () => l1.wallet.signTypedData({ account: l1.from, ...bridgeTyped } as never))
-
-	log("bridge (confirm in your Ethereum wallet)")
-	setRecordStep(id, "depositing", "confirm the deposit in your Ethereum wallet")
-	const depositTxHash = await runOnLane("l1", () =>
-		l1.wallet.writeContract({
-			address: BRIDGE_ROUTER,
-			abi: SWAP_BRIDGE_ROUTER_ABI,
-			functionName: "bridge",
-			args: [
-				{
-					tokenPortal: L1_PORTAL,
-					bridgeToken: L1_USDC,
-					amount: tokenAmount,
-					aztecRecipient: bridgeWitness.aztecRecipient,
-					secretHash: id as `0x${string}`,
-					isPrivate,
-				},
-				{ nonce, deadline, signature: bridgeSig },
-			],
-			chain: NETWORK.viemChain,
-			account: l1.from,
-		} as never),
-	)
-	// Persisted the moment the hash exists - leafIndex stays chain-recoverable from here on.
-	updateRecord(id, { depositTxHash: depositTxHash as string })
+		prompts: {
+			sign: "sign the bridge intent in your Ethereum wallet - one signature",
+			confirm: "confirm the deposit in your Ethereum wallet",
+		},
+		beforeConfirm: () => log("bridge (confirm in your Ethereum wallet)"),
+	})
 	setRecordStep(id, "depositing", "waiting for the Ethereum confirmation")
 	const receipt = await awaitL1Receipt(l1.publicClient as never, depositTxHash as `0x${string}`, {
 		onStillWaiting: (attempt) => setRecordStep(id, "depositing", `still waiting for the Ethereum confirmation (round ${attempt})`),

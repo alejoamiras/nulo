@@ -68,11 +68,20 @@ const isOptionalNumber = (v: unknown): v is number | undefined => v === undefine
 const isOptionalBoolean = (v: unknown): v is boolean | undefined => v === undefined || typeof v === "boolean"
 const isOptionalDecimalString = (v: unknown): v is string | undefined => v === undefined || isDecimalString(v)
 
+const INVALID_RECORD = "The sealed contents are not a valid bridge record."
+
 /** STRICT per-direction guard for foreign input - the journal's shallow parse filter is for OUR
- *  own storage, never for a file someone handed us. */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
+ *  own storage, never for a file someone handed us. Shape-strict, not semantic: the exact
+ *  acceptance set (empty required strings pass, numbers are type-checked) is part of the contract. */
 export function validateBackupRecord(rec: unknown): BridgeJournalRecord {
 	const r = rec as Partial<BridgeJournalRecord> | null
+	assertCommonRecordShape(r)
+	if (r.direction === "deposit") return validateDepositRecord(r as Partial<DepositJournalRecord>)
+	if (r.direction === "withdraw") return validateWithdrawRecord(r as Partial<WithdrawJournalRecord>)
+	throw new Error(INVALID_RECORD)
+}
+
+function assertCommonRecordShape(r: Partial<BridgeJournalRecord> | null): asserts r is Partial<BridgeJournalRecord> {
 	if (
 		!r ||
 		typeof r !== "object" ||
@@ -88,70 +97,73 @@ export function validateBackupRecord(rec: unknown): BridgeJournalRecord {
 		typeof r.portal !== "string" ||
 		typeof r.bridge !== "string"
 	) {
-		throw new Error("The sealed contents are not a valid bridge record.")
+		throw new Error(INVALID_RECORD)
 	}
-	if (r.direction === "deposit") {
-		const d = r as Partial<DepositJournalRecord>
-		if (
-			typeof d.recipient !== "string" ||
-			typeof d.secretHashHex !== "string" ||
-			!isOptionalString(d.secret) ||
-			!isOptionalString(d.sealedEnvelope) ||
-			!isOptionalString(d.sealerL1) ||
-			!isOptionalString(d.depositTxHash) ||
-			!isOptionalString(d.leafIndex) ||
-			!isOptionalString(d.claimTxHash) ||
-			!isOptionalNumber(d.depositL2Block) ||
-			(d.assetKind !== undefined && d.assetKind !== "bridge-token" && d.assetKind !== "fee-juice")
-		) {
-			throw new Error("The sealed contents are not a valid bridge record.")
-		}
-		// Schema 2 ⟺ fuel present, validated strictly; schema 1 must NOT carry fuel. Malformed
-		// fuel metadata rejects the restore outright - never guessed through.
-		if (d.schema === 2) {
-			const f = d.fuel as Partial<DepositFuelBlock> | undefined
-			if (
-				!f ||
-				typeof f !== "object" ||
-				!isDecimalString(f.amount) ||
-				typeof f.secret !== "string" ||
-				f.secret.length === 0 ||
-				typeof f.secretHashHex !== "string" ||
-				!isDecimalString(f.minOutput) ||
-				!isOptionalDecimalString(f.leafIndex) ||
-				!isOptionalDecimalString(f.received) ||
-				!isOptionalBoolean(f.claimAttempt) ||
-				!isOptionalString(f.claimTxHash) ||
-				!isOptionalBoolean(f.consumed) ||
-				!isOptionalBoolean(f.standaloneClaimed) ||
-				// PRIVATE-fuel extras — validated strictly too (these are recovery inputs for a private
-				// Fuel claim; a malformed salt/fpc must reject the restore, never be guessed through).
-				!isOptionalString(f.bridgeSecretSalt) ||
-				!isOptionalString(f.fpc) ||
-				!isOptionalBoolean(f.setupInsufficiency)
-			) {
-				throw new Error("The sealed contents are not a valid bridge record.")
-			}
-		} else if (d.fuel !== undefined) {
-			throw new Error("The sealed contents are not a valid bridge record.")
-		}
-		return d as DepositJournalRecord
+}
+
+function validateDepositRecord(d: Partial<DepositJournalRecord>): DepositJournalRecord {
+	if (
+		typeof d.recipient !== "string" ||
+		typeof d.secretHashHex !== "string" ||
+		!isOptionalString(d.secret) ||
+		!isOptionalString(d.sealedEnvelope) ||
+		!isOptionalString(d.sealerL1) ||
+		!isOptionalString(d.depositTxHash) ||
+		!isOptionalString(d.leafIndex) ||
+		!isOptionalString(d.claimTxHash) ||
+		!isOptionalNumber(d.depositL2Block) ||
+		(d.assetKind !== undefined && d.assetKind !== "bridge-token" && d.assetKind !== "fee-juice")
+	) {
+		throw new Error(INVALID_RECORD)
 	}
-	if (r.direction === "withdraw") {
-		if (r.schema !== 1) throw new Error("The sealed contents are not a valid bridge record.")
-		const w = r as Partial<WithdrawJournalRecord>
-		if (
-			typeof w.recipientL1 !== "string" ||
-			!isOptionalString(w.exitTxHash) ||
-			!isOptionalNumber(w.exitBlock) ||
-			!isOptionalString(w.consumeTxHash) ||
-			isProvisionalWithdrawId(r.id)
-		) {
-			throw new Error("The sealed contents are not a valid bridge record.")
-		}
-		return w as WithdrawJournalRecord
+	// Schema 2 ⟺ fuel present, validated strictly; schema 1 must NOT carry fuel. Malformed
+	// fuel metadata rejects the restore outright - never guessed through.
+	if (d.schema === 2) {
+		assertFuelBlockShape(d.fuel)
+	} else if (d.fuel !== undefined) {
+		throw new Error(INVALID_RECORD)
 	}
-	throw new Error("The sealed contents are not a valid bridge record.")
+	return d as DepositJournalRecord
+}
+
+function assertFuelBlockShape(fuel: unknown): void {
+	const f = fuel as Partial<DepositFuelBlock> | undefined
+	if (
+		!f ||
+		typeof f !== "object" ||
+		!isDecimalString(f.amount) ||
+		typeof f.secret !== "string" ||
+		f.secret.length === 0 ||
+		typeof f.secretHashHex !== "string" ||
+		!isDecimalString(f.minOutput) ||
+		!isOptionalDecimalString(f.leafIndex) ||
+		!isOptionalDecimalString(f.received) ||
+		!isOptionalBoolean(f.claimAttempt) ||
+		!isOptionalString(f.claimTxHash) ||
+		!isOptionalBoolean(f.consumed) ||
+		!isOptionalBoolean(f.standaloneClaimed) ||
+		// PRIVATE-fuel extras — validated strictly too (these are recovery inputs for a private
+		// Fuel claim; a malformed salt/fpc must reject the restore, never be guessed through).
+		!isOptionalString(f.bridgeSecretSalt) ||
+		!isOptionalString(f.fpc) ||
+		!isOptionalBoolean(f.setupInsufficiency)
+	) {
+		throw new Error(INVALID_RECORD)
+	}
+}
+
+function validateWithdrawRecord(w: Partial<WithdrawJournalRecord>): WithdrawJournalRecord {
+	if (w.schema !== 1) throw new Error(INVALID_RECORD)
+	if (
+		typeof w.recipientL1 !== "string" ||
+		!isOptionalString(w.exitTxHash) ||
+		!isOptionalNumber(w.exitBlock) ||
+		!isOptionalString(w.consumeTxHash) ||
+		isProvisionalWithdrawId(w.id as string)
+	) {
+		throw new Error(INVALID_RECORD)
+	}
+	return w as WithdrawJournalRecord
 }
 
 interface BackupPayload {

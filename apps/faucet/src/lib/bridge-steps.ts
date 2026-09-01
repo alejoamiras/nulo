@@ -60,7 +60,6 @@ export function stepperPhases(record: BridgeJournalRecord, runtime: RecordRuntim
 		: withdrawPhases(record as WithdrawJournalRecord, runtime)
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 32) — refactor when touched, never raise
 function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhase[] {
 	// Fueled deposits SIGN a Permit2 witness instead of APPROVING (the live token pre-approves
 	// Permit2). The fuel swap executes INSIDE the deposit transaction, so it is not independently
@@ -90,23 +89,7 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 		"confirm",
 	]
 
-	// The fact-bounded zone (the latch): runtime can only refine WITHIN it.
-	let activeKey: BridgePhase["key"]
-	if (rec.claimTxHash) activeKey = "confirm"
-	else if (rec.leafIndex) {
-		// Once the gate passed (claimable) the bridge is AT the claim - structurally cleared steps
-		// or a post-gate failure must not point back at a visibly-complete crossing.
-		activeKey = rt.step === "unsealing" || rt.step === "sending" || rt.claimable === true ? "claim" : "sync"
-	} else if (rec.depositTxHash) activeKey = "deposit"
-	else if (rt.step === "sealing") activeKey = "seal"
-	else if (rt.step === "signing") activeKey = "sign"
-	else if (rt.step === "approving") activeKey = "approve"
-	else if (rt.step === "depositing") activeKey = "deposit"
-	// No deposit tx and no live step (preflight before the first narration, or a reload): the run is at
-	// its FIRST prompt, not at DEPOSIT - the old "deposit" fallback rendered AUTHORIZE as already done
-	// before anything was signed, then jumped BACKWARD when approving/signing narrated in, and pinned a
-	// preflight failure's ✕ on a DEPOSIT that never happened.
-	else activeKey = rec.isPrivate ? "seal" : "sign"
+	const activeKey = depositActiveKey(rec, rt)
 
 	const labels: Record<string, string> = {
 		seal: "SEAL",
@@ -117,7 +100,44 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 		claim: isFuel ? "CLAIM GAS" : "CLAIM",
 		confirm: "CONFIRM",
 	}
-	const prompts: Record<string, string> = {
+	const prompts = depositPrompts(rec, rt, fueled)
+	const etas: Partial<Record<string, string>> = {
+		sign: "your signature - instant",
+		deposit: "usually under 1 min",
+		sync: "usually 1-4 min",
+		claim: "your signature + a few sec",
+		confirm: "usually 1-2 min",
+	}
+	const progress = syncProgress(rec, rt, activeKey)
+
+	// Hash-scoped: light only for the record's CURRENT claim tx, so a dropped/replaced claim can
+	// never inherit a previous attempt's mint dot (any tab).
+	const landedConfirm = rt.confirmLandedTxHash !== undefined && rt.confirmLandedTxHash === rec.claimTxHash
+	return buildPhases(keys, labels, prompts, etas, progress, activeKey, rec.completedAt !== undefined, rt, landedConfirm)
+}
+
+/** The fact-bounded zone (the latch): runtime can only refine WITHIN what the record proves. */
+function depositActiveKey(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhase["key"] {
+	if (rec.claimTxHash) return "confirm"
+	if (rec.leafIndex) {
+		// Once the gate passed (claimable) the bridge is AT the claim - structurally cleared steps
+		// or a post-gate failure must not point back at a visibly-complete crossing.
+		return rt.step === "unsealing" || rt.step === "sending" || rt.claimable === true ? "claim" : "sync"
+	}
+	if (rec.depositTxHash) return "deposit"
+	if (rt.step === "sealing") return "seal"
+	if (rt.step === "signing") return "sign"
+	if (rt.step === "approving") return "approve"
+	if (rt.step === "depositing") return "deposit"
+	// No deposit tx and no live step (preflight before the first narration, or a reload): the run is at
+	// its FIRST prompt, not at DEPOSIT - the old "deposit" fallback rendered AUTHORIZE as already done
+	// before anything was signed, then jumped BACKWARD when approving/signing narrated in, and pinned a
+	// preflight failure's ✕ on a DEPOSIT that never happened.
+	return rec.isPrivate ? "seal" : "sign"
+}
+
+function depositPrompts(rec: DepositJournalRecord, rt: RecordRuntime, fueled: boolean): Record<string, string> {
+	return {
 		seal: "Sign in your Ethereum wallet - encrypts this bridge's recovery secret. No funds move.",
 		approve: "First time only: approve Permit2 for the fee asset in your Ethereum wallet. No funds move yet.",
 		deposit: rec.depositTxHash
@@ -137,32 +157,24 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 					: "Confirm the claim in your Aztec wallet.",
 		confirm: "Confirming on Aztec - no signature needed.",
 	}
-	const etas: Partial<Record<string, string>> = {
-		sign: "your signature - instant",
-		deposit: "usually under 1 min",
-		sync: "usually 1-4 min",
-		claim: "your signature + a few sec",
-		confirm: "usually 1-2 min",
-	}
+}
 
-	// SYNC progress: real blocks against the deposit-time snapshot + margin (the countdown).
-	let progress: Partial<Record<string, BridgePhase["progress"]>> = {}
-	if (activeKey === "sync" && rec.depositL2Block !== undefined && rt.syncBlock !== undefined) {
-		const target = rec.depositL2Block + SYNC_TARGET_MARGIN_BLOCKS
-		const span = target - rec.depositL2Block
-		progress = {
-			sync: {
-				current: rt.syncBlock,
-				target,
-				fraction: span > 0 ? clamp01((rt.syncBlock - rec.depositL2Block) / span) : 1,
-			},
-		}
+/** SYNC progress: real blocks against the deposit-time snapshot + margin (the countdown). */
+function syncProgress(
+	rec: DepositJournalRecord,
+	rt: RecordRuntime,
+	activeKey: BridgePhase["key"],
+): Partial<Record<string, BridgePhase["progress"]>> {
+	if (activeKey !== "sync" || rec.depositL2Block === undefined || rt.syncBlock === undefined) return {}
+	const target = rec.depositL2Block + SYNC_TARGET_MARGIN_BLOCKS
+	const span = target - rec.depositL2Block
+	return {
+		sync: {
+			current: rt.syncBlock,
+			target,
+			fraction: span > 0 ? clamp01((rt.syncBlock - rec.depositL2Block) / span) : 1,
+		},
 	}
-
-	// Hash-scoped: light only for the record's CURRENT claim tx, so a dropped/replaced claim can
-	// never inherit a previous attempt's mint dot (any tab).
-	const landedConfirm = rt.confirmLandedTxHash !== undefined && rt.confirmLandedTxHash === rec.claimTxHash
-	return buildPhases(keys, labels, prompts, etas, progress, activeKey, rec.completedAt !== undefined, rt, landedConfirm)
 }
 
 function withdrawPhases(rec: WithdrawJournalRecord, rt: RecordRuntime): BridgePhase[] {
