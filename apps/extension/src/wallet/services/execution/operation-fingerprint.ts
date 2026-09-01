@@ -85,7 +85,6 @@ function encodeStringArray(values: readonly string[]): string {
 	return `a${values.length}[${values.map(str).join(",")}]`
 }
 
-/** Exhaustive authwit-content encoder — the inner discriminated union of both authwit kinds. */
 function encodeAuthwitContent(content: (Action & { kind: "add_private_authwit" | "add_public_authwit" })["content"]): string | null {
 	switch (content.kind) {
 		case "call": {

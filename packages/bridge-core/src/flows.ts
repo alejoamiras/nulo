@@ -295,15 +295,6 @@ export interface SwapRecoveryHooks {
 	onBridged?: (r: { tokenLeafIndex: bigint; fuelLeafIndex: bigint }) => void
 }
 
-/**
- * The headline one-tx flow: sign a Permit2 witness-bound transfer, then call the router's
- * `bridgeWithFuel` — which pulls the token, swaps `fuelAmount` for Fee Juice, deposits the FJ to
- * L2, and bridges the remaining tokens, atomically. The witness binds every bridge field (the
- * hashing is cross-pinned to the Solidity router in l1.test.ts), so a relayer can't alter
- * recipients/amounts/route after signing. Returns the two claim secrets + the Inbox leaf indices
- * (read from the `BridgeWithFuel` event, not guessed from deposit order) the L2 side claims with.
- * viem-only; the L2 claims (token via claim_*, fuel via publicFeeJuicePayment) run separately.
- */
 /** Fail closed on the private-fuel invariants BEFORE any secret generation or signing.
  *  Without this, a missing fuelSecret silently falls back to Fr.random() and strands the
  *  Fee Juice (the PrivateFPC claimer reconstructs the secret from msg_sender — a random
@@ -329,6 +320,15 @@ function assertPrivateFuelInvariants(p: SwapBridgeParams): void {
 	}
 }
 
+/**
+ * The headline one-tx flow: sign a Permit2 witness-bound transfer, then call the router's
+ * `bridgeWithFuel` — which pulls the token, swaps `fuelAmount` for Fee Juice, deposits the FJ to
+ * L2, and bridges the remaining tokens, atomically. The witness binds every bridge field (the
+ * hashing is cross-pinned to the Solidity router in l1.test.ts), so a relayer can't alter
+ * recipients/amounts/route after signing. Returns the two claim secrets + the Inbox leaf indices
+ * (read from the `BridgeWithFuel` event, not guessed from deposit order) the L2 side claims with.
+ * viem-only; the L2 claims (token via claim_*, fuel via publicFeeJuicePayment) run separately.
+ */
 export async function runSwapBridge(
 	l1: L1Ctx,
 	p: SwapBridgeParams,

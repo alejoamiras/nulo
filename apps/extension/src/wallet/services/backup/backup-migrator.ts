@@ -73,8 +73,6 @@ export function maxBackupSchemaVersion(
  *  build would reject as from-the-future. */
 export const CURRENT_BACKUP_SCHEMA_VERSION = maxBackupSchemaVersion(realMigrations)
 
-/** Flatten a non-success engine result to its reason (the engine's failure kinds each
- *  carry one; anything else is a shape we don't recognize). */
 function engineFailureReason(result: { kind: string; reason?: string }): string {
 	if (result.kind === "failed" || result.kind === "needs-recovery") return result.reason ?? result.kind
 	return `unexpected engine result "${result.kind}"`

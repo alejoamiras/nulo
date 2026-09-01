@@ -399,11 +399,6 @@ export class TxRequestBuilder {
 		}
 	}
 
-	/** DefaultEntrypoint variant: Aztec.js `aztec_sendTx` with
-	 *  `executionMode: "default_entrypoint"`. Single-call, no account
-	 *  wrapper, inlined `DefaultEntrypoint` logic. Cannot import
-	 *  `@aztec/entrypoints/default` in the service worker (upstream
-	 *  references `window`). */
 	/**
 	 * Parse + validate the single NO_FROM call: bind the dApp-supplied name to the
 	 * selector's real ABI function, and derive the function type from the ABI — never
@@ -466,6 +461,11 @@ export class TxRequestBuilder {
 		return { parsedAuthWits, parsedCapsules, parsedExtraArgs }
 	}
 
+	/** DefaultEntrypoint variant: Aztec.js `aztec_sendTx` with
+	 *  `executionMode: "default_entrypoint"`. Single-call, no account
+	 *  wrapper, inlined `DefaultEntrypoint` logic. Cannot import
+	 *  `@aztec/entrypoints/default` in the service worker (upstream
+	 *  references `window`). */
 	public async buildNoFrom(op: AztecSendTxOperation, parentTask?: WrappedTask): Promise<BuiltNoFromTx> {
 		const step = new StepContent("Processing transaction")
 		const task = parentTask ? parentTask.startSubtask(step) : this.taskService.startNewTask(step)

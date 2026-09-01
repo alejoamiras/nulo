@@ -98,12 +98,6 @@ export function serializeAccountExport(exp: AccountExportV1): string {
 	return JSON.stringify(exp, null, "\t")
 }
 
-/**
- * Parse + STRUCTURALLY validate a plaintext export (hostile input): shape, this-build regime
- * digests, canonical signing key (Fq rejects ≥ modulus), and checksum. Returns the validated
- * signing key + l1ChainId + the file's CLAIMED address (the caller must recompute the address
- * from the signing key and compare — the checksum does not authenticate the address).
- */
 /** The envelope gates: format, version, this-build regime digests. Flat on purpose —
  *  each check is one hostile-input rejection with its own message. */
 function assertExportEnvelope(v: Record<string, unknown>): void {
@@ -114,6 +108,12 @@ function assertExportEnvelope(v: Record<string, unknown>): void {
 	}
 }
 
+/**
+ * Parse + STRUCTURALLY validate a plaintext export (hostile input): shape, this-build regime
+ * digests, canonical signing key (Fq rejects ≥ modulus), and checksum. Returns the validated
+ * signing key + l1ChainId + the file's CLAIMED address (the caller must recompute the address
+ * from the signing key and compare — the checksum does not authenticate the address).
+ */
 export function parseAccountExport(json: string): { signingKey: Fq; l1ChainId: number; claimedAddress: string } {
 	let raw: unknown
 	try {

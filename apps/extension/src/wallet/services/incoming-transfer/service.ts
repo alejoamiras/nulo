@@ -2088,11 +2088,8 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	}
 }
 
-/** Decode the UintNote amount from the parsed content map. Returns the
- *  raw u128 stringified decimal, or null if the note isn't a UintNote /
- *  failed to decode. */
-/** Is this record deleted by a finished reconciliation? Records at or below the finalized
- *  floor (`lowerBound`) are never touched. A record ABOVE the reconciled checkpoint
+/** Is this record deleted by a finished reconciliation? Records below `lowerBound` —
+ *  therefore at or below the finalized floor — are never touched. A record ABOVE the reconciled checkpoint
  *  (`upperBound`) is stale unconditionally: Aztec prunes the checkpointed tip back to the
  *  proven tip, so a rollback (old checkpoint 100 → new 90) leaves records at 91–100 no
  *  longer checkpointed and possibly on a pruned fork — the forward scan re-indexes them if
@@ -2110,6 +2107,9 @@ export function orphanedByReconciliation(
 	return true
 }
 
+/** Decode the UintNote amount from the parsed content map. Returns the
+ *  raw u128 stringified decimal, or null if the note isn't a UintNote /
+ *  failed to decode. */
 function parseNoteAmount(note: RawNote): string | null {
 	const value = note.content?.value
 	if (!value) return null

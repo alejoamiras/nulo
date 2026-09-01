@@ -390,9 +390,10 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		})
 	}
 
-	/** Apply a reconcile plan under the lock, generation-fenced at every step;
-	 *  `undefined` = the profile generation moved mid-apply (bail silently, the
-	 *  successor's own reconcile owns the store now). */
+	/** Apply a reconcile plan under the lock, generation-fenced before each delete/enqueue;
+	 *  `undefined` = the generation moved during THOSE steps (bail silently — the successor's
+	 *  own reconcile owns the store). A move inside `ensurePairsHoldingLock` instead returns
+	 *  its partial count, so the outcome still logs, as before the split. */
 	private async applyReconcilePlanHoldingLock(
 		plan: { staleIdentity: TokenBalanceRaw[]; staleTokens: TokenBalanceRaw[]; missing: { token: Token; account: Account }[] },
 		gen: number,
