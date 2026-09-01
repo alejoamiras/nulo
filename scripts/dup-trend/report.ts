@@ -54,6 +54,7 @@ export function formatDupReport(report: JscpdReport): string {
 	let testLines = 0
 	let mixed = 0
 	const prodPairs = new Map<string, { clones: number; lines: number }>()
+	const prodFormats = new Map<string, { clones: number; lines: number }>()
 	for (const c of report.duplicates) {
 		const a = c.firstFile.name
 		const b = c.secondFile.name
@@ -65,6 +66,14 @@ export function formatDupReport(report: JscpdReport): string {
 		} else if (!aTest && !bTest) {
 			prod++
 			prodLines += c.lines
+			const f = prodFormats.get(c.format) ?? { clones: 0, lines: 0 }
+			f.clones++
+			f.lines += c.lines
+			prodFormats.set(c.format, f)
+			// html-format clones over Vue templates are tokenizer noise (whole-template
+			// vocabulary matches with wildly unequal spans), so they stay out of the
+			// actionable pair ranking; the per-format split above still counts them.
+			if (c.format === "html") continue
 			const key = a === b ? `${a} (internal)` : [a, b].sort().join(" ↔ ")
 			const e = prodPairs.get(key) ?? { clones: 0, lines: 0 }
 			e.clones++
@@ -74,6 +83,7 @@ export function formatDupReport(report: JscpdReport): string {
 			mixed++
 		}
 	}
+	const formats = [...prodFormats.entries()].sort((x, y) => y[1].lines - x[1].lines)
 	const top = [...prodPairs.entries()].sort((x, y) => y[1].lines - x[1].lines).slice(0, 10)
 	const out: string[] = []
 	out.push("## Duplication trend (jscpd, advisory)")
@@ -88,7 +98,11 @@ export function formatDupReport(report: JscpdReport): string {
 		`Split: **production ${prod} clones / ${prodLines} lines** · test↔test ${test} / ${testLines} · mixed ${mixed}.`,
 	)
 	out.push("")
-	out.push("### Top production clone pairs")
+	if (formats.length > 0) {
+		out.push("Production by format: " + formats.map(([f, e]) => `${f} ${e.clones} / ${e.lines}`).join(" · ") + ".")
+		out.push("")
+	}
+	out.push("### Top production clone pairs (html excluded — Vue-template tokenizer noise)")
 	out.push("")
 	out.push("| dup lines | clones | pair |")
 	out.push("|--:|--:|---|")
