@@ -54,122 +54,131 @@ export function buildWithdrawSendOpts(from: AztecAddress) {
 
 let depsWired = false
 
+type L1Wallet = ReturnType<typeof useL1Wallet>
+type WithdrawDeps = Parameters<typeof connectJournalDeps>[0]
+type ConsumeProgress = Parameters<NonNullable<WithdrawDeps["consume"]>>[1]
+
 /** Wire the journal engine's withdraw-side chain deps (idempotent; real clients only). */
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (82 lines) — split when touched, never grow
 function wireWithdrawDeps(): void {
 	if (depsWired) return
 	depsWired = true
 	const l1 = useL1Wallet()
+	connectJournalDeps({
+		consume: (rec, onProgress) => consumeExit(l1, rec, onProgress),
+		waitConsumeReceipt: (txHash) => waitConsumeReceipt(l1, txHash),
+		verifyConsumeIdentity: (rec, txHash) => verifyConsumeIdentity(l1, rec, txHash),
+	})
+}
 
-	/** Recompute THIS exit's witness - the identity anchor a consume tx must match. */
-	async function expectedWitness(rec: WithdrawJournalRecord) {
-		const node = createAztecNodeClient(NODE_URL)
-		const txHash = TxHash.fromString(rec.exitTxHash as string)
-		const eff = await node.getTxEffect(txHash as never)
-		if (!eff) throw new Error("no tx effect for the exit")
-		const messageHash = eff.data.l2ToL1Msgs[0]
-		if (!messageHash) throw new Error("no L2→L1 message in the exit tx")
-		// 5.0: pass the L1 Outbox roots reader (OutboxContract) as the new 2nd arg.
-		const { l1ContractAddresses } = await node.getNodeInfo()
-		const outbox = new OutboxContract(l1.publicClient as never, l1ContractAddresses.outboxAddress)
-		const wit = await computeL2ToL1MembershipWitness(node as never, outbox, messageHash, txHash as never, 0)
-		if (!wit) throw new Error("L2→L1 witness not available")
-		return wit
+/** Recompute THIS exit's witness - the identity anchor a consume tx must match. */
+async function expectedWitness(l1: L1Wallet, rec: WithdrawJournalRecord) {
+	const node = createAztecNodeClient(NODE_URL)
+	const txHash = TxHash.fromString(rec.exitTxHash as string)
+	const eff = await node.getTxEffect(txHash as never)
+	if (!eff) throw new Error("no tx effect for the exit")
+	const messageHash = eff.data.l2ToL1Msgs[0]
+	if (!messageHash) throw new Error("no L2→L1 message in the exit tx")
+	// 5.0: pass the L1 Outbox roots reader (OutboxContract) as the new 2nd arg.
+	const { l1ContractAddresses } = await node.getNodeInfo()
+	const outbox = new OutboxContract(l1.publicClient as never, l1ContractAddresses.outboxAddress)
+	const wit = await computeL2ToL1MembershipWitness(node as never, outbox, messageHash, txHash as never, 0)
+	if (!wit) throw new Error("L2→L1 witness not available")
+	return wit
+}
+
+/** The consume tail: exit mined → proven → witness → ONE L1 prompt. */
+async function consumeExit(l1: L1Wallet, rec: WithdrawJournalRecord, onProgress: ConsumeProgress): Promise<{ consumeTxHash: string }> {
+	const l1wallet = l1.ensureWalletClient()
+	const l1addr = l1.address.value
+	if (!l1wallet || !l1addr) throw new Error("Connect your Ethereum wallet to finish the withdraw.")
+	const node = createAztecNodeClient(NODE_URL)
+	const txHash = TxHash.fromString(rec.exitTxHash as string)
+
+	// The exit's PROPOSED receipt has no blockNumber; poll the node until it is mined.
+	let receipt = await node.getTxReceipt(txHash).catch(() => undefined)
+	for (let i = 0; i < 120 && !receipt?.blockNumber; i++) {
+		log(`exit not yet in an L2 block (poll ${i + 1}) - waiting 5s`, rec.id)
+		await sleep(5000)
+		receipt = await node.getTxReceipt(txHash).catch(() => undefined)
+	}
+	if (!receipt?.blockNumber) throw new Error("the exit tx never landed in an L2 block - finish it from the journal later")
+	onProgress({ targetBlock: Number(receipt.blockNumber) })
+
+	const pollTimer = setInterval(() => {
+		node.getBlockNumber("proven")
+			.then((n) => onProgress({ provenBlock: Number(n) }))
+			.catch(() => {})
+	}, 5000)
+	try {
+		await waitForProven(node as never, receipt as never, { provenTimeout: PROVEN_TIMEOUT_SEC } as never)
+	} finally {
+		clearInterval(pollTimer)
 	}
 
-	connectJournalDeps({
-		consume: async (rec, onProgress) => {
-			const l1wallet = l1.ensureWalletClient()
-			const l1addr = l1.address.value
-			if (!l1wallet || !l1addr) throw new Error("Connect your Ethereum wallet to finish the withdraw.")
-			const node = createAztecNodeClient(NODE_URL)
-			const txHash = TxHash.fromString(rec.exitTxHash as string)
+	const wit = await expectedWitness(l1, rec)
+	const path = wit.siblingPath.toBufferArray().map((b: Buffer) => `0x${b.toString("hex")}` as `0x${string}`)
+	log("witness", { id: rec.id, epochNumber: wit.epochNumber, leafIndex: wit.leafIndex })
 
-			// The exit's PROPOSED receipt has no blockNumber; poll the node until it is mined.
-			let receipt = await node.getTxReceipt(txHash).catch(() => undefined)
-			for (let i = 0; i < 120 && !receipt?.blockNumber; i++) {
-				log(`exit not yet in an L2 block (poll ${i + 1}) - waiting 5s`, rec.id)
-				await sleep(5000)
-				receipt = await node.getTxReceipt(txHash).catch(() => undefined)
-			}
-			if (!receipt?.blockNumber) throw new Error("the exit tx never landed in an L2 block - finish it from the journal later")
-			onProgress({ targetBlock: Number(receipt.blockNumber) })
-
-			const pollTimer = setInterval(() => {
-				node.getBlockNumber("proven")
-					.then((n) => onProgress({ provenBlock: Number(n) }))
-					.catch(() => {})
-			}, 5000)
-			try {
-				await waitForProven(node as never, receipt as never, { provenTimeout: PROVEN_TIMEOUT_SEC } as never)
-			} finally {
-				clearInterval(pollTimer)
-			}
-
-			const wit = await expectedWitness(rec)
-			const path = wit.siblingPath.toBufferArray().map((b: Buffer) => `0x${b.toString("hex")}` as `0x${string}`)
-			log("witness", { id: rec.id, epochNumber: wit.epochNumber, leafIndex: wit.leafIndex })
-
-			const sim = await l1.publicClient.simulateContract({
-				address: L1_PORTAL,
-				abi: TokenPortalAbi,
-				functionName: "withdraw",
-				// 5.0 portal `withdraw` is 7-arg: (recipient, amount, withCaller, epoch,
-				// numCheckpointsInEpoch, leafIndex, path). The decode path at L131 was updated but this
-				// encode was missed — omitting numCheckpointsInEpoch mis-encodes + reverts on finalize.
-				args: [
-					rec.recipientL1 as `0x${string}`,
-					BigInt(rec.amount),
-					false,
-					BigInt(wit.epochNumber),
-					BigInt(wit.numCheckpointsInEpoch),
-					wit.leafIndex,
-					path,
-				] as never,
-				account: l1addr,
-			})
-			const hash = await runOnLane("l1", () =>
-				l1wallet.writeContract({ ...(sim.request as object), chain: NETWORK.viemChain, account: l1addr } as never),
-			)
-			log("consume tx", { id: rec.id, hash })
-			return { consumeTxHash: hash as string }
-		},
-		waitConsumeReceipt: async (txHash) => {
-			try {
-				const receipt = await awaitL1Receipt(l1.publicClient, txHash as `0x${string}`)
-				return receipt.status === "success"
-			} catch {
-				return false
-			}
-		},
-		verifyConsumeIdentity: async (rec, txHash) => {
-			try {
-				const tx = await l1.publicClient.getTransaction({ hash: txHash as `0x${string}` })
-				if (!tx || tx.to?.toLowerCase() !== L1_PORTAL.toLowerCase()) return false
-				const decoded = decodeFunctionData({ abi: TokenPortalAbi, data: tx.input })
-				if (decoded.functionName !== "withdraw") return false
-				// 5.0 withdraw args: (recipient, amount, withCaller, epoch, numCheckpointsInEpoch, leafIndex, path).
-				// leafIndex moved to position 5 (numCheckpointsInEpoch was inserted at 4).
-				const [recipient, amount, , epoch, , leafIndex] = decoded.args as readonly [
-					string,
-					bigint,
-					boolean,
-					bigint,
-					bigint,
-					bigint,
-					unknown,
-				]
-				if (recipient.toLowerCase() !== rec.recipientL1.toLowerCase() || amount !== BigInt(rec.amount)) return false
-				// Bind to THIS exit, not just same-recipient-same-amount: the witness recomputed from the
-				// record's exitTxHash must match the tx's epoch + leafIndex.
-				const wit = await expectedWitness(rec)
-				return BigInt(wit.epochNumber) === epoch && BigInt(wit.leafIndex) === leafIndex
-			} catch {
-				// Conservative: an unverifiable consume never marks the record done.
-				return false
-			}
-		},
+	const sim = await l1.publicClient.simulateContract({
+		address: L1_PORTAL,
+		abi: TokenPortalAbi,
+		functionName: "withdraw",
+		// 5.0 portal `withdraw` is 7-arg: (recipient, amount, withCaller, epoch,
+		// numCheckpointsInEpoch, leafIndex, path). The decode path at L131 was updated but this
+		// encode was missed — omitting numCheckpointsInEpoch mis-encodes + reverts on finalize.
+		args: [
+			rec.recipientL1 as `0x${string}`,
+			BigInt(rec.amount),
+			false,
+			BigInt(wit.epochNumber),
+			BigInt(wit.numCheckpointsInEpoch),
+			wit.leafIndex,
+			path,
+		] as never,
+		account: l1addr,
 	})
+	const hash = await runOnLane("l1", () =>
+		l1wallet.writeContract({ ...(sim.request as object), chain: NETWORK.viemChain, account: l1addr } as never),
+	)
+	log("consume tx", { id: rec.id, hash })
+	return { consumeTxHash: hash as string }
+}
+
+async function waitConsumeReceipt(l1: L1Wallet, txHash: string): Promise<boolean> {
+	try {
+		const receipt = await awaitL1Receipt(l1.publicClient, txHash as `0x${string}`)
+		return receipt.status === "success"
+	} catch {
+		return false
+	}
+}
+
+async function verifyConsumeIdentity(l1: L1Wallet, rec: WithdrawJournalRecord, txHash: string): Promise<boolean> {
+	try {
+		const tx = await l1.publicClient.getTransaction({ hash: txHash as `0x${string}` })
+		if (!tx || tx.to?.toLowerCase() !== L1_PORTAL.toLowerCase()) return false
+		const decoded = decodeFunctionData({ abi: TokenPortalAbi, data: tx.input })
+		if (decoded.functionName !== "withdraw") return false
+		// 5.0 withdraw args: (recipient, amount, withCaller, epoch, numCheckpointsInEpoch, leafIndex, path).
+		// leafIndex moved to position 5 (numCheckpointsInEpoch was inserted at 4).
+		const [recipient, amount, , epoch, , leafIndex] = decoded.args as readonly [
+			string,
+			bigint,
+			boolean,
+			bigint,
+			bigint,
+			bigint,
+			unknown,
+		]
+		if (recipient.toLowerCase() !== rec.recipientL1.toLowerCase() || amount !== BigInt(rec.amount)) return false
+		// Bind to THIS exit, not just same-recipient-same-amount: the witness recomputed from the
+		// record's exitTxHash must match the tx's epoch + leafIndex.
+		const wit = await expectedWitness(l1, rec)
+		return BigInt(wit.epochNumber) === epoch && BigInt(wit.leafIndex) === leafIndex
+	} catch {
+		// Conservative: an unverifiable consume never marks the record done.
+		return false
+	}
 }
 
 /** The L2 exit leg: one Aztec prompt for private (the burn authwit is created off-chain),

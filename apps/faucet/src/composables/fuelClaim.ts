@@ -101,111 +101,137 @@ function clearsFeeLimit(
 	return received >= BigInt(gas.l2Gas) * maxFees.feePerL2Gas + BigInt(gas.daGas) * maxFees.feePerDaGas
 }
 
-/** Build the {simulate, send} for a direct Fee-Juice claim. Guards fail CLOSED (return a `stop`). */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 26) — refactor when touched, never raise
+type FuelBlock = NonNullable<DepositJournalRecord["fuel"]>
+type PayloadSimulator = (fee: { paymentMethod: unknown }) => Promise<unknown>
+
+/** Build the {simulate, send} for a direct Fee-Juice claim. Guards fail CLOSED (return a `stop`).
+ *  Stays `async` on purpose: a throwing parse (a malformed salt) surfaces as a rejection, never a
+ *  synchronous throw at the call site. */
 export async function buildFuelClaimInteraction(rec: DepositJournalRecord, deps: FuelClaimDeps): Promise<FuelClaimInteraction> {
 	const fuel = rec.fuel
 	if (!fuel?.received || !fuel.leafIndex) return stop("This Fuel bridge has no claimable Fee Juice.")
-	const { aztec, recipient } = deps
 	const received = BigInt(fuel.received)
 	const leaf = new Fr(BigInt(fuel.leafIndex))
-	// Simulate the FULLY BUILT payload: request() merges the fee's claim setup into the tx, whereas
-	// BatchCall([]).simulate() IGNORES options.fee for an empty batch (SDK batch_call.ts) and no-ops. That
-	// no-op would make the caller's message-availability gate AND its recordMessageConsumed probe silently
-	// pass, so a claim could send before the L1→L2 message anchors and a consumed message could look
-	// claimable forever (codex). simulateTx runs the SAME l1_to_l2_message check send does, so it throws the
-	// isMsgNotReady / isMsgConsumed shapes those consumers key off. Used by BOTH self-pay branches.
-	// toSimulateOptions carries the claim's EXPLICIT gasSettings into the wallet call — without it the
-	// wallet simulates with estimation defaults (max limits + padded fees), which mismatches send and can
-	// spuriously fail the self-pay budget check (codex round 3). Mirrors BatchCall.simulate's own
-	// non-empty-batch path: [request payload, toSimulateOptions(interaction options)].
-	const simulateViaPayload = async (fee: { paymentMethod: unknown }): Promise<unknown> => {
+	const simulateViaPayload = makePayloadSimulator(deps)
+	return rec.isPrivate
+		? buildPrivateFuelClaim(fuel, received, leaf, deps, simulateViaPayload)
+		: buildPublicFuelClaim(fuel, received, deps, simulateViaPayload)
+}
+
+/** Simulate the FULLY BUILT payload: request() merges the fee's claim setup into the tx, whereas
+ *  BatchCall([]).simulate() IGNORES options.fee for an empty batch (SDK batch_call.ts) and no-ops. That
+ *  no-op would make the caller's message-availability gate AND its recordMessageConsumed probe silently
+ *  pass, so a claim could send before the L1→L2 message anchors and a consumed message could look
+ *  claimable forever (codex). simulateTx runs the SAME l1_to_l2_message check send does, so it throws the
+ *  isMsgNotReady / isMsgConsumed shapes those consumers key off. Used by BOTH self-pay branches.
+ *  toSimulateOptions carries the claim's EXPLICIT gasSettings into the wallet call — without it the
+ *  wallet simulates with estimation defaults (max limits + padded fees), which mismatches send and can
+ *  spuriously fail the self-pay budget check (codex round 3). Mirrors BatchCall.simulate's own
+ *  non-empty-batch path: [request payload, toSimulateOptions(interaction options)]. */
+function makePayloadSimulator(deps: FuelClaimDeps): PayloadSimulator {
+	const { aztec, recipient } = deps
+	return async (fee) => {
 		const payload = await new BatchCall(aztec as never, []).request({ fee: { paymentMethod: fee.paymentMethod } } as never)
 		return await (aztec as { simulateTx: (p: unknown, o: unknown) => Promise<unknown> }).simulateTx(
 			payload,
 			toSimulateOptions({ from: recipient, fee } as never),
 		)
 	}
+}
 
-	if (rec.isPrivate) {
-		// Fail-CLOSED floor: the bridged FJ must cover its own claim, or mint_and_pay_fee reverts post-mint.
-		try {
-			assertFuelClearsFloor(received, deps.minFloorFj)
-		} catch (e) {
-			return stop(e instanceof Error ? e.message : "The bridged gas is below the safe claim floor.")
-		}
-		if (!clearsFeeLimit(received, PRIVATE_CLAIM_GAS, deps.maxFeesPerGas)) {
-			return stop("The bridged gas can't cover this claim's fee limit right now (fees spiked). Try again shortly.")
-		}
-		// FPC version-drift kill-switch — never claim to a drifted FPC, never downgrade to public (L11/L15).
-		if (fuel.fpc && fuel.fpc !== PRIVATE_FPC_ADDRESS) {
-			return stop("Private fuel FPC address mismatch (version drift), refusing to claim. Reselect a mode.")
-		}
-		// Authoritative-first: the engine-unsealed salt wins over the plaintext journal copy (which can be
-		// missing/corrupted while the seal is intact). Plaintext is a fallback only (no-envelope legacy).
-		const saltHex = deps.resolvedSalt ?? fuel.bridgeSecretSalt
-		if (!saltHex) return stop("This private Fuel bridge is missing its recovery salt, cannot claim.")
-		const salt = Fr.fromString(saltHex)
-		const fpcAddr = AztecAddress.fromStringUnsafe(fuel.fpc ?? PRIVATE_FPC_ADDRESS)
-		// teardownGas=0 keeps max_gas_cost within the bridged amount. maxFeesPerGas is the caller's
-		// predicted-worst snapshot (NO padding) — a self-pay claim spends the bridged amount as its whole
-		// budget, so any padding inflates max_gas_cost past it and the FPC reverts "Amount too low to cover
-		// gas cost". predicted-worst still covers base-fee drift; a rare overshoot fails recoverably (retry).
-		const privateFee = {
-			paymentMethod: privateMintAndPayFee(fpcAddr, received, deriveBridgeSecret(salt, recipient), salt, leaf),
-			gasSettings: {
-				// EXPLICIT gasLimits is REQUIRED for the carrier-less claim. The empty BatchCall([]) gives the
-				// wallet's gas estimator nothing to estimate, so it defaults gasLimits to the network per-tx
-				// MAX (txsLimits.gas ≈ 6.5M L2 on V5). applyEmbeddedFpcGasCap then caps maxFeesPerGas but NOT
-				// gasLimits, so max_gas_cost = MAX_gasLimits × fee (≈23 FJ) and no realistic bridge self-pays
-				// it ("Amount too low to cover gas cost"). The wallet honors a dApp-supplied gasLimits
-				// (suggestGasLimits), so size it to the 2-call setup ({@link PRIVATE_CLAIM_GAS}). The fee is
-				// billed on ACTUAL gas, not the limit, so a generous limit does not overpay — but it IS the
-				// balance-check bound (getFeeLimit), so {@link clearsFeeLimit} above fail-closes on it.
-				gasLimits: Gas.from(PRIVATE_CLAIM_GAS),
-				teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
-				...(deps.maxFeesPerGas ? { maxFeesPerGas: deps.maxFeesPerGas } : {}),
-			},
-		}
-		const carrier = () => new BatchCall(aztec as never, [])
-		return {
-			simulate: () => simulateViaPayload(privateFee),
-			send: async () => {
-				deps.onAttempt?.()
-				try {
-					const { receipt } = (await carrier().send({
-						from: recipient,
-						fee: privateFee,
-						wait: { waitForStatus: TxStatus.PROPOSED },
-					} as never)) as { receipt: { txHash: unknown } }
-					const txHash = String(receipt.txHash)
-					deps.onTxHash?.(txHash)
-					return { txHash }
-				} catch (e) {
-					// A setup-insufficiency throw ⇒ the tx was INVALID (FJ unconsumed) ⇒ authorise a retry.
-					// Never fall back to public/Sponsored on the private path (L11).
-					if (isPrivateFuelInsufficiency(e instanceof Error ? e.message : String(e))) deps.onSetupInsufficiency?.()
-					throw e
-				}
-			},
-		}
-	}
-
-	// PUBLIC: SELF-PAY — claim the bridged Fee Juice and pay THIS tx's own fee from it in ONE tx
-	// (`FeeJuicePaymentMethodWithClaim` → `claim_and_end_setup` in the setup phase). Deliberately NOT the
-	// Sponsored FPC (owner call 2026-07-21): the sponsor does not exist on mainnet, and masking a real
-	// self-pay failure behind it would HIDE the bug instead of surfacing it. Fuel-only has no app call, so
-	// like the private path this is a CARRIER-LESS zero-app-call tx (`BatchCall([])`) — the mechanism the
-	// private path already proves live; the public self-pay is proven by fee-juice-canary-testnet.ts.
-	// Fail-CLOSED floor: the bridged FJ must cover its own claim or claim_and_end_setup reverts post-claim.
+/** The two budget guards both branches share, in order: the fail-CLOSED floor (the bridged FJ must
+ *  cover its own claim, or the setup reverts post-mint/post-claim), then the fee LIMIT. */
+function checkClaimBudget(received: bigint, gas: { daGas: number; l2Gas: number }, deps: FuelClaimDeps): FuelClaimInteraction | null {
 	try {
 		assertFuelClearsFloor(received, deps.minFloorFj)
 	} catch (e) {
 		return stop(e instanceof Error ? e.message : "The bridged gas is below the safe claim floor.")
 	}
-	if (!clearsFeeLimit(received, PUBLIC_CLAIM_GAS, deps.maxFeesPerGas)) {
+	if (!clearsFeeLimit(received, gas, deps.maxFeesPerGas)) {
 		return stop("The bridged gas can't cover this claim's fee limit right now (fees spiked). Try again shortly.")
 	}
+	return null
+}
+
+function buildPrivateFuelClaim(
+	fuel: FuelBlock,
+	received: bigint,
+	leaf: Fr,
+	deps: FuelClaimDeps,
+	simulateViaPayload: PayloadSimulator,
+): FuelClaimInteraction {
+	const { aztec, recipient } = deps
+	const budgetStop = checkClaimBudget(received, PRIVATE_CLAIM_GAS, deps)
+	if (budgetStop) return budgetStop
+	// FPC version-drift kill-switch — never claim to a drifted FPC, never downgrade to public (L11/L15).
+	if (fuel.fpc && fuel.fpc !== PRIVATE_FPC_ADDRESS) {
+		return stop("Private fuel FPC address mismatch (version drift), refusing to claim. Reselect a mode.")
+	}
+	// Authoritative-first: the engine-unsealed salt wins over the plaintext journal copy (which can be
+	// missing/corrupted while the seal is intact). Plaintext is a fallback only (no-envelope legacy).
+	const saltHex = deps.resolvedSalt ?? fuel.bridgeSecretSalt
+	if (!saltHex) return stop("This private Fuel bridge is missing its recovery salt, cannot claim.")
+	const salt = Fr.fromString(saltHex)
+	const fpcAddr = AztecAddress.fromStringUnsafe(fuel.fpc ?? PRIVATE_FPC_ADDRESS)
+	// teardownGas=0 keeps max_gas_cost within the bridged amount. maxFeesPerGas is the caller's
+	// predicted-worst snapshot (NO padding) — a self-pay claim spends the bridged amount as its whole
+	// budget, so any padding inflates max_gas_cost past it and the FPC reverts "Amount too low to cover
+	// gas cost". predicted-worst still covers base-fee drift; a rare overshoot fails recoverably (retry).
+	const privateFee = {
+		paymentMethod: privateMintAndPayFee(fpcAddr, received, deriveBridgeSecret(salt, recipient), salt, leaf),
+		gasSettings: {
+			// EXPLICIT gasLimits is REQUIRED for the carrier-less claim. The empty BatchCall([]) gives the
+			// wallet's gas estimator nothing to estimate, so it defaults gasLimits to the network per-tx
+			// MAX (txsLimits.gas ≈ 6.5M L2 on V5). applyEmbeddedFpcGasCap then caps maxFeesPerGas but NOT
+			// gasLimits, so max_gas_cost = MAX_gasLimits × fee (≈23 FJ) and no realistic bridge self-pays
+			// it ("Amount too low to cover gas cost"). The wallet honors a dApp-supplied gasLimits
+			// (suggestGasLimits), so size it to the 2-call setup ({@link PRIVATE_CLAIM_GAS}). The fee is
+			// billed on ACTUAL gas, not the limit, so a generous limit does not overpay — but it IS the
+			// balance-check bound (getFeeLimit), so {@link clearsFeeLimit} above fail-closes on it.
+			gasLimits: Gas.from(PRIVATE_CLAIM_GAS),
+			teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
+			...(deps.maxFeesPerGas ? { maxFeesPerGas: deps.maxFeesPerGas } : {}),
+		},
+	}
+	const carrier = () => new BatchCall(aztec as never, [])
+	return {
+		simulate: () => simulateViaPayload(privateFee),
+		send: async () => {
+			deps.onAttempt?.()
+			try {
+				const { receipt } = (await carrier().send({
+					from: recipient,
+					fee: privateFee,
+					wait: { waitForStatus: TxStatus.PROPOSED },
+				} as never)) as { receipt: { txHash: unknown } }
+				const txHash = String(receipt.txHash)
+				deps.onTxHash?.(txHash)
+				return { txHash }
+			} catch (e) {
+				// A setup-insufficiency throw ⇒ the tx was INVALID (FJ unconsumed) ⇒ authorise a retry.
+				// Never fall back to public/Sponsored on the private path (L11).
+				if (isPrivateFuelInsufficiency(e instanceof Error ? e.message : String(e))) deps.onSetupInsufficiency?.()
+				throw e
+			}
+		},
+	}
+}
+
+/** PUBLIC: SELF-PAY — claim the bridged Fee Juice and pay THIS tx's own fee from it in ONE tx
+ *  (`FeeJuicePaymentMethodWithClaim` → `claim_and_end_setup` in the setup phase). Deliberately NOT the
+ *  Sponsored FPC (owner call 2026-07-21): the sponsor does not exist on mainnet, and masking a real
+ *  self-pay failure behind it would HIDE the bug instead of surfacing it. Fuel-only has no app call, so
+ *  like the private path this is a CARRIER-LESS zero-app-call tx (`BatchCall([])`) — the mechanism the
+ *  private path already proves live; the public self-pay is proven by fee-juice-canary-testnet.ts. */
+function buildPublicFuelClaim(
+	fuel: FuelBlock,
+	received: bigint,
+	deps: FuelClaimDeps,
+	simulateViaPayload: PayloadSimulator,
+): FuelClaimInteraction {
+	const { aztec, recipient } = deps
+	const budgetStop = checkClaimBudget(received, PUBLIC_CLAIM_GAS, deps)
+	if (budgetStop) return budgetStop
 	// Authoritative-first: the engine-gated `rec.secret` wins over the `fuel.secret` display copy so the
 	// gate and the claim can never read divergent secrets (codex LOW). Plaintext is a fallback only.
 	const secretHex = deps.resolvedSecret ?? fuel.secret
@@ -214,7 +240,7 @@ export async function buildFuelClaimInteraction(rec: DepositJournalRecord, deps:
 		paymentMethod: publicFeeJuicePayment(recipient, {
 			claimAmount: received,
 			claimSecret: Fr.fromString(secretHex),
-			messageLeafIndex: BigInt(fuel.leafIndex),
+			messageLeafIndex: BigInt(fuel.leafIndex as string),
 		}),
 		// {@link PUBLIC_CLAIM_GAS}: explicit + canary-calibrated (the empty BatchCall gives the estimator
 		// nothing). teardownGas=0; maxFeesPerGas is the caller's predicted-worst snapshot (NO padding),

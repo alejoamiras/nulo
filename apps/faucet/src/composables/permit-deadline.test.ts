@@ -15,13 +15,15 @@ import { describe, expect, test } from "vitest"
  * against a mock wallet purely to read one field back.
  */
 const COMPOSABLES = join(__dirname)
-// Exact counts, not "at least one": with a lower bound, renaming or hardcoding ONE of
-// deposit-flow's two sites (the fueled + plain legs) leaves the other satisfying the
-// assertion and the test green — which is the same shape as the bug it exists to catch.
+// Exact counts, not "at least one": with a lower bound, renaming or hardcoding ONE site
+// leaves the others satisfying the assertion and the test green — which is the same shape as
+// the bug it exists to catch. Sites: the fueled leg (deposit-flow) and the shared plain
+// router leg (router-bridge-leg, used by both the token deposit and the Fuel deposit).
 const SIGNING_SOURCES: ReadonlyArray<readonly [string, number]> = [
-	["deposit-flow.ts", 2],
+	["deposit-flow.ts", 1],
+	["router-bridge-leg.ts", 1],
 	["useDeposit.ts", 0],
-	["useFuel.ts", 1],
+	["useFuel.ts", 0],
 ]
 
 describe("permit deadline reachability", () => {
