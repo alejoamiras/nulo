@@ -1,0 +1,82 @@
+<title>Profile Service Dedup</title>
+<style>
+  :root {
+    --bg: #f7f7f4; --card: #ffffff; --ink: #21241f; --muted: #68705f;
+    --accent: #0f766e; --accent-ink: #0b5a54; --line: #e3e4dd;
+    --pin: #f3efe2; --pin-line: #d9d2b8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #171a17; --card: #1f231f; --ink: #e6e8e1; --muted: #9aa392;
+      --accent: #34d3c3; --accent-ink: #7be3d7; --line: #2c312b;
+      --pin: #262a20; --pin-line: #4a4a33;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #171a17; --card: #1f231f; --ink: #e6e8e1; --muted: #9aa392;
+    --accent: #34d3c3; --accent-ink: #7be3d7; --line: #2c312b;
+    --pin: #262a20; --pin-line: #4a4a33;
+  }
+  body { background: var(--bg); color: var(--ink); font: 16px/1.65 -apple-system, "Segoe UI", Roboto, sans-serif;
+         margin: 0; padding: 3rem 1.25rem 4rem; }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1, h2, h3 { font-family: "Spectral", Georgia, serif; text-wrap: balance; line-height: 1.25; }
+  h1 { font-size: 2.1rem; font-weight: 600; margin: 0 0 .3rem; }
+  h2 { font-size: 1.35rem; font-weight: 600; margin: 2.6rem 0 .8rem; }
+  h3 { font-size: 1.02rem; font-weight: 600; margin: 0 0 .3rem; }
+  .kicker { text-transform: uppercase; letter-spacing: .12em; font-size: .72rem; color: var(--accent-ink); font-weight: 600; }
+  .lede { color: var(--muted); margin-top: .4rem; }
+  p { margin: .7rem 0; }
+  .phase { background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+           border-radius: 6px; padding: .95rem 1.15rem; margin: .8rem 0; }
+  .gate { color: var(--muted); font-size: .88rem; margin: .45rem 0 0; }
+  .gate b { color: var(--accent-ink); font-weight: 600; }
+  .approval { background: var(--pin); border: 1px solid var(--pin-line); border-radius: 6px; padding: 1rem 1.2rem; margin: 1.2rem 0; }
+  ul { padding-left: 1.2rem; } li { margin: .35rem 0; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .86em;
+         background: var(--card); border: 1px solid var(--line); border-radius: 4px; padding: .08em .35em; }
+  .muted { color: var(--muted); font-size: .9rem; }
+  a { color: var(--accent-ink); }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:wght@600&display=swap">
+<main>
+  <p class="kicker">Blueprint ELI5 · arc 1 of the complexity burn-down</p>
+  <h1>Profile Service Dedup</h1>
+  <p class="lede">Clean up the wallet's most sensitive file — the profile service — by collapsing its thirteen copy-pasted blocks into shared helpers, without changing what the code does.</p>
+
+  <h2>What this is</h2>
+  <p>One 2,600-line file guards unlocking, deleting, exporting, and restoring wallet profiles. Over time the same few shapes — "lock, fetch, check, capture" — were pasted into it thirteen times, and eleven of the repo's 230 grandfathered complexity waivers live here. This plan extracts the repeated shapes into small named helpers and splits the four giant functions at their natural seams, so the waivers can be deleted. Nothing user-visible changes: same errors, same events, same timing of secret wipes.</p>
+
+  <h2>Why the lightest planning tier</h2>
+  <p>One file, one test suite, no new features, fully reversible (revert the one PR). The risk rubric scored zero highs — but because it's wallet-critical code, the plan still went through two adversarial review rounds with a second model (Codex), which first rejected the draft, forced a safer design, then approved it with three conditions — all adopted.</p>
+
+  <h2>The five phases</h2>
+  <div class="phase"><h3>1 · Pin current behavior first</h3>
+    <p>Before touching anything, write tests that freeze the exact error messages and event order today's code produces — including one deliberately preserved oddity (a mid-crash profile can still be renamed) marked as a known bug, not fixed here.</p>
+    <p class="gate"><b>Proves itself by:</b> new pins pass against the unchanged code.</p></div>
+  <div class="phase"><h3>2 · The safe, mechanical extractions</h3>
+    <p>Four tiny helpers replace the blocks that are byte-identical everywhere they appear.</p>
+    <p class="gate"><b>Proves itself by:</b> full profile test suite + lint + typecheck green.</p></div>
+  <div class="phase"><h3>3 · The two unlock flows</h3>
+    <p>Password and passkey unlock share their opening step; their differing security checks stay deliberately separate.</p>
+    <p class="gate"><b>Proves itself by:</b> the unlock race-condition tests stay green.</p></div>
+  <div class="phase"><h3>4 · Password change, deletion, cleanup</h3>
+    <p>Three heavyweight functions split at their existing internal seams — one at a time, tests between each.</p>
+    <p class="gate"><b>Proves itself by:</b> deletion-safety tests green after each split.</p></div>
+  <div class="phase"><h3>5 · Backup restore (the riskiest, done last)</h3>
+    <p>The 300-line restore function becomes two clear branches over one shared write-safely helper; the finalize step is split the same way. Then the duplication scanner re-runs to prove the clones are actually gone.</p>
+    <p class="gate"><b>Proves itself by:</b> everything above, plus the full pre-PR battery and the clone count dropping from 13 to ≤3.</p></div>
+
+  <h2>What you're ratifying (post-hoc)</h2>
+  <div class="approval">
+    <ul>
+      <li><b>Scope:</b> behavior-preserving refactor of one file; the waiver count in the repo drops from 230 toward 219.</li>
+      <li><b>Residue rule:</b> zero waivers here is the target; if a function resists a natural split, it keeps its waiver with a one-line justification for your sign-off in the PR.</li>
+      <li><b>The pinned bug:</b> renaming works on a profile that's mid-deletion after a crash — preserved and test-documented; fixing it would be a separate PR.</li>
+      <li><b>FYI:</b> three stale worktrees on this machine still touch this file (all superseded by merged work) — worth deleting when convenient.</li>
+    </ul>
+  </div>
+
+  <h2>Implementation seeds</h2>
+  <p class="muted">Not needed this run — the arc executes inside the standing <code>/goal</code> that commissioned the whole burn-down. A fresh session would run <code>agent-worktree resume profile-service-dedup</code> and follow <code>implementations-plan/profile-service-dedup/plan.md</code> phases 1→5, then its Post-implementation section.</p>
+</main>

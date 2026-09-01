@@ -1,6 +1,6 @@
 # Complexity budgets — cognitive + function-length gates with a shrink-only baseline
 
-**Status: arc 1 (gate + baseline) — this PR.** Burn-down follows as separate PRs.
+**Status: gate + baseline shipped (#490); trend instrument shipped (#491); burn-down in progress.** Lead 1 (profile service) done — `implementations-plan/profile-service-dedup/` collapsed its 13 clone families and removed all 11 of its directives (manifest 230 → 219, zero residue in that file).
 
 Two independent proposals (Claude Fable with six research subagents + a 22,525-function repo measurement; Codex GPT-5.6 with repo access and its own Biome dry-runs) were reconciled over two critique rounds. Shareable long-form writeup with the worked examples, distribution charts, reconciliation log, and ~30 cited sources: <https://claude.ai/code/artifact/b667636f-1dc6-4f26-89a8-41cff0661d4e>.
 
