@@ -6,6 +6,9 @@
  * `buildActivityRows`: unifying would broaden or drop rows.
  */
 import { isForeignProfile } from "@/utils/activity-rows"
+import type { IncomingTransferRecord } from "@/wallet/services/incoming-transfer/spec"
+import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
+import type { Tx } from "@/wallet/services/transaction/spec"
 
 export interface RecentRowScope {
 	accountAddress?: string
@@ -14,31 +17,13 @@ export interface RecentRowScope {
 	profileId?: string
 }
 
-export interface RecentJournalOp {
-	id: string
-	terminalAt?: number | null
-}
-export interface RecentTx {
-	hash: string
-	account?: string
-	chainId?: number
-	profileId?: string
-	updatedAt: number
-}
-export interface RecentIncoming {
-	id: string
-	tokenId?: string
-	accountAddress?: string
-	networkId?: string
-	profileId?: string
-	blockTimestamp?: number
-	discoveredAt: number
-}
+/** The token page's token object when the view is token-scoped; a PRESENT token with an undefined id still scopes. */
+export type RecentTokenScope = { id?: number } | undefined
 
 export type RecentActivityRow =
-	| { type: "journal"; key: string; sortKey: number; op: RecentJournalOp }
-	| { type: "tx"; key: string; sortKey: number; tx: RecentTx }
-	| { type: "incoming"; key: string; sortKey: number; inc: RecentIncoming }
+	| { type: "journal"; key: string; sortKey: number; op: OperationRecord }
+	| { type: "tx"; key: string; sortKey: number; tx: Tx }
+	| { type: "incoming"; key: string; sortKey: number; inc: IncomingTransferRecord }
 
 /** Count slots only for cards that actually render: the send.vue fallback card is suppressed by
  *  the template when ANY journal card or orphan executing task is on screen, so it counts only when
@@ -49,12 +34,11 @@ export function remainingRowSlots(p: { journalCount: number; orphanCount: number
 }
 
 export function buildRecentActivityRows(p: {
-	journalOps: RecentJournalOp[]
-	transactions: RecentTx[]
-	incomingTransfers: RecentIncoming[]
+	journalOps: OperationRecord[]
+	transactions: Tx[]
+	incomingTransfers: IncomingTransferRecord[]
 	scope: RecentRowScope
-	/** The token page's token object when the view is token-scoped (a PRESENT token with an undefined id still scopes). */
-	token: { id?: string } | undefined
+	token: RecentTokenScope
 }): RecentActivityRow[] {
 	const rows: RecentActivityRow[] = []
 	for (const op of p.journalOps) {
@@ -68,7 +52,7 @@ export function buildRecentActivityRows(p: {
 /** Layer-A containment (defense-in-depth): scope tx rows to the active account + chain exactly as
  *  `buildActivityRows` does — so both feed surfaces make identical scope decisions. Tolerant when a
  *  scope field is unknown, never "active-now". */
-function scopedTxRows(transactions: RecentTx[], scope: RecentRowScope): RecentActivityRow[] {
+function scopedTxRows(transactions: Tx[], scope: RecentRowScope): RecentActivityRow[] {
 	const rows: RecentActivityRow[] = []
 	for (const tx of transactions) {
 		if (scope.accountAddress !== undefined && tx.account !== scope.accountAddress) continue
@@ -79,11 +63,7 @@ function scopedTxRows(transactions: RecentTx[], scope: RecentRowScope): RecentAc
 	return rows
 }
 
-function tokenScopedIncomingRows(
-	incoming: RecentIncoming[],
-	scope: RecentRowScope,
-	token: { id?: string } | undefined,
-): RecentActivityRow[] {
+function tokenScopedIncomingRows(incoming: IncomingTransferRecord[], scope: RecentRowScope, token: RecentTokenScope): RecentActivityRow[] {
 	const rows: RecentActivityRow[] = []
 	for (const inc of incoming) {
 		// Token-scoped views (token-detail page) only show incoming for the active token. The home view shows all.

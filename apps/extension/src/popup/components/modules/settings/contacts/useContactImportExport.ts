@@ -236,8 +236,20 @@ async function applyImportRows(deps: ContactIoDeps, res: SelectedRow[]): Promise
 		// attempted — and counted — even when the address-book row
 		// failed, so the toast accounting never silently drops it.
 		if (_c.isSender) {
-			const pending = registerSenderForRow(deps.accountStateService, _c, activeNetworkId, tally)
-			if (pending) await pending
+			tally.senderTotal++
+			if (activeNetworkId) {
+				try {
+					await deps.accountStateService.addSender(activeNetworkId, _c.address)
+					tally.senderOk++
+				} catch (err) {
+					// The counterparty address is PII and this fires per failed row; the counts below carry
+					// the diagnosis.
+					console.warn("Failed to register a sender", err)
+				}
+			} else {
+				tally.senderSkippedNoNetwork++
+				console.warn("Skipping sender registration: no active network")
+			}
 		}
 	}
 	return tally
@@ -261,32 +273,6 @@ async function upsertOneContact(
 	} catch (err) {
 		return { name: row.name, address: row.address, operation: existingByAddress || existingByName ? "update" : "create", error: err }
 	}
-}
-
-/** Counts the intent, then registers on the active network; returns the pending registration, or
- *  nothing when there is no network to register on (a synchronous skip, as before). */
-function registerSenderForRow(
-	accountStateService: AccountStateServiceClient,
-	row: SelectedRow,
-	activeNetworkId: string | null,
-	tally: ImportTally,
-): Promise<void> | undefined {
-	tally.senderTotal++
-	if (!activeNetworkId) {
-		tally.senderSkippedNoNetwork++
-		console.warn("Skipping sender registration: no active network")
-		return undefined
-	}
-	return accountStateService.addSender(activeNetworkId, row.address).then(
-		() => {
-			tally.senderOk++
-		},
-		(err) => {
-			// The counterparty address is PII and this fires per failed row; the counts below carry
-			// the diagnosis.
-			console.warn("Failed to register a sender", err)
-		},
-	)
 }
 
 function toastImportOutcome(openToast: ContactIoDeps["openToast"], tally: ImportTally): void {
