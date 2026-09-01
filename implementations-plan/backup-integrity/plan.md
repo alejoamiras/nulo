@@ -1,8 +1,8 @@
 # backup-integrity — round-2 plan 1 (blueprint light)
 
 Scope authority: [round-2 scope](../complexity-residue-round-2/scope.md) § plan 1. Two PRs,
-BL/C. Burns 8 directives (validateTransform 53; registry 50 + 41; migrator 36; then the
-restore surface's 4). The retained trio in `row-map-migration.ts` (`cloneJsonValue` 24,
+BL/C. Burns 9 directives (PR-a: validateTransform 53, registry 50 + 41, migrator 36; PR-b: the
+restore surface's 5 — 47/39/39/207L/21). The retained trio in `row-map-migration.ts` (`cloneJsonValue` 24,
 `applyRowTransform` 39, `retypeValue` 23) is owner-signed residue — untouched.
 
 ## PR-a — migration core (this PR)
@@ -75,12 +75,54 @@ in-memory functions). No migration semantics change — the same objects, same o
   read-only by the per-migration validator; ordering pins added; converter + where/target
   pins added; counts corrected.
 
-## PR-b — restore surface (next PR)
+## PR-b — restore surface (this PR)
 
-`account-state/{service,normalize}.ts` (47, 39), `export/full.vue` (39),
-`useProfileImportFlow.ts` (207L), `full-backup-helpers.ts` (21). Recon + decomposition
-sections land with that PR; gates: backup-restore-integrity, backup-restore-sw-restart,
-profile-reimport-matrix (+ roundtrip re-run if migration files were touched again).
+### Recon
+
+- `account-state/normalize.ts` (199L): `normalizeAccountStateSlice` (39) — three sync
+  phases over hostile input: gates (array/serializable/size caps) → duplicate-network merge
+  loop (malformed counting) → per-network cap enforcement. Violation-record strings are the
+  oracle. Cuts: `mergeSliceItems(inputItems, violations)` → byNetwork map + malformed
+  counters appended as violations; `applyNetworkCaps(byNetwork, violations)` → items.
+- `account-state/service.ts` (383L): `restore` (47) — async, deadline-budgeted,
+  per-network {unreachable, skippedByDeadline} state + `classify` closure; two await-bearing
+  loops (senders, contracts). Cuts preserving await parity: hoist each loop to
+  `restoreSenders(...)` / `restoreContracts(...)` guarded by
+  `if (item.senders.length > 0)` so the zero-entry fast path stays synchronous (non-empty
+  paths already awaited ≥1×); per-item context out-param `{unreachable, skippedByDeadline}`
+  travels between the two (contracts sees senders' unreachable). `classify` hoists with the
+  context. Deadline `expired()` passed as a thunk (read-at-call-time).
+- `export/full.vue` (682L): `handleBackup` (39) — generation-fenced export flow. Cuts as
+  SETUP-LEVEL sibling functions (nesting 0): `acquirePasskeyCredential(gen)` (the Path-A
+  try/catch verbatim, returns credential | "handled"), `exportKeyMaterial(gen, cred)` (the
+  discriminated export try/catch, returns material | "handled"), `buildBackupEnvelope(material)`
+  (sync). Every gen-check keeps its exact position (catch blocks travel with their try;
+  stage boundaries already sat at await + gen check — no new seams). isBusy latch +
+  finally stay in the orchestrator.
+- `composables/useProfileImportFlow.ts` (358L): ONE length directive (207 lines) — split
+  the returned-flow builder at its handler seams (no cognitive directive; pure length).
+- `utils/full-backup-helpers.ts` (458L): one 21 — a single shallow extract-helper.
+
+### Equivalence
+
+- normalize: exact violation-string pins (pre-extraction) + existing suite.
+- service.restore: pins via the service test harness — unreachable propagation
+  (sender connectivity failure → contracts all SKIP_UNREACHABLE), deadline skip counting,
+  network-not-found precedence over address-parse (pre-existing contract, keep verbatim),
+  protocol-contract skip (address ≤ 6). Check existing account-state tests first.
+- full.vue: full.test.ts harness — stage-order + silent-cancel (UserRejectedError resets
+  isAgreed) + wrong-password path + gen-fence (superseded run writes nothing) pins where
+  not already covered.
+- Gates: all four backup e2e specs re-run (sharded per owner directive: 2×2 parallel
+  agent runs).
+
+### Acceptance (PR-b)
+
+- Directives burned: 5 (47/39/39/207L/21); manifest 122 → 117 via regen; zero inserted.
+- Existing account-state + full.vue + import-flow suites green, zero edits; new pins green
+  pre- and post-refactor.
+- Gates: the four backup e2e specs re-run SHARDED (2×2 parallel agent runs, proverless
+  where gated) + audit:vue + test:ci-gating.
 
 ## Codex loop
 

@@ -1,4 +1,4 @@
-import { computed, ref, watch } from "vue"
+import { computed, type Ref, ref, watch } from "vue"
 import { DuplicateWalletError, UserRejectedError } from "@nulo/extension-messaging/errors"
 import { useCacheStore } from "@/stores/cache.store"
 import { usePopupStore } from "@/stores/popup.store"
@@ -44,21 +44,51 @@ export interface UseProfileImportFlowOptions {
 	openToast: (content: { label: string; icon?: string }, duration?: number) => void
 }
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (207 lines) — split when touched, never grow
-export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
-	const {
-		profileName,
-		trimmedName,
-		nameError,
-		shakeName,
-		nameInputRef,
-		validate: validateName,
-		handleInput: handleNameInput,
-		dispose: disposeNameField,
-	} = useProfileNameField()
+/** The flow's error banner + copy-to-clipboard affordance. */
+function useImportErrorState(openToast: UseProfileImportFlowOptions["openToast"]) {
+	const error = ref({ type: "", title: "", tooltip: "" })
+	function fillError(type?: string, title?: string, tooltip?: string) {
+		if (!title) {
+			error.value = { type: "", title: "", tooltip: "" }
+			return
+		}
+		error.value = { type: type ?? "unknown", title, tooltip: tooltip ?? "" }
+	}
+	function clearError() {
+		fillError()
+	}
 
-	const { request: ceremonyRequest, runCeremony, onResolve: onCeremonyResolve, onReject: onCeremonyReject } = usePasskeyCeremony()
+	// Unified catch-all (A1): both shells render title "Import failed" + the
+	// message as tooltip. Replaces popup's prior `fillError("unknown", err)`,
+	// which put the Error object in the title slot and rendered "[object Object]".
+	function fillUnknownImportError(err: unknown) {
+		fillError("unknown", "Import failed", err instanceof Error ? err.message : String(err))
+	}
 
+	const isCopied = ref(false)
+	function handleCopyError() {
+		isCopied.value = true
+		void copyToClipboard(`${error.value.title}${error.value.tooltip ? `: ${error.value.tooltip}` : ""}`, openToast, {
+			success: { label: "Error is copied" },
+			failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
+		})
+		setTimeout(() => {
+			isCopied.value = false
+		}, 1_500)
+	}
+
+	function handlePasswordInput() {
+		if (error.value.type === "password") fillError()
+	}
+	function handleSecretInput() {
+		if (error.value.type === "secret") fillError()
+	}
+
+	return { error, isCopied, fillError, clearError, fillUnknownImportError, handleCopyError, handlePasswordInput, handleSecretInput }
+}
+
+/** The duplicate-recovery-phrase warn-and-confirm, shared by every import path. */
+function useDuplicateConfirm() {
 	const cacheStore = useCacheStore()
 	const popupStore = usePopupStore()
 	/** `cacheStore.confirm` is an untyped shared `reactive({})` (every other consumer is an
@@ -121,50 +151,130 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 		}
 	}
 
+	return { allowDuplicate, withDuplicateConfirm }
+}
+
+interface ImportHandlerDeps {
+	isImporting: Ref<boolean>
+	isAllowedToImportBySeedPhrase: Ref<boolean>
+	validateName: (opts: { existingNames: string[] }) => boolean
+	trimmedName: Ref<string>
+	seedPhrase: Ref<string | undefined>
+	password: Ref<string>
+	allowDuplicate: Ref<boolean>
+	withDuplicateConfirm: <T>(run: () => Promise<T>) => Promise<T | undefined>
+	runCeremony: ReturnType<typeof usePasskeyCeremony>["runCeremony"]
+	fillUnknownImportError: (err: unknown) => void
+	completeImport: UseProfileImportFlowOptions["completeImport"]
+	notifyImportFailed: UseProfileImportFlowOptions["notifyImportFailed"]
+}
+
+/** The seed + passkey import handlers (the full-backup path lives in
+ *  `useFullBackupImport`). Bodies own the in-flight latch + error routing. */
+function createImportHandlers(deps: ImportHandlerDeps) {
+	async function fetchExistingNames(): Promise<string[]> {
+		return (await managers.profile.getProfiles()).map((p) => p.name)
+	}
+
+	// In-flight latch is set BEFORE the async `getProfiles()` fetch so two rapid
+	// clicks can't both pass the pre-check before the lock is set.
+	const handleImportSeed = async () => {
+		if (!deps.isAllowedToImportBySeedPhrase.value || deps.isImporting.value) return
+		deps.isImporting.value = true
+		try {
+			const existingNames = await fetchExistingNames()
+			if (!deps.validateName({ existingNames })) {
+				deps.isImporting.value = false
+				return
+			}
+			const profile = await deps.withDuplicateConfirm(() =>
+				managers.profile.importMnemonic(
+					deps.trimmedName.value,
+					(deps.seedPhrase.value ?? "").split(" "),
+					deps.password.value,
+					deps.allowDuplicate.value,
+				),
+			)
+			// `undefined` = the user declined the duplicate warning; stay on the form.
+			if (!profile) return
+			await deps.completeImport(profile)
+		} catch (err) {
+			deps.fillUnknownImportError(err)
+		} finally {
+			deps.isImporting.value = false
+		}
+	}
+
+	const handleImportPasskey = async () => {
+		if (deps.isImporting.value) return
+		deps.isImporting.value = true
+		try {
+			const existingNames = await fetchExistingNames()
+			if (!deps.validateName({ existingNames })) {
+				deps.isImporting.value = false
+				return
+			}
+			// Discovery `get` — no allowedCredentials; the user picks from their
+			// available passkeys.
+			const credData = await deps.runCeremony({ mode: "get" })
+			// The SAME credentialData is reused on the confirm-retry — no second WebAuthn ceremony.
+			const profile = await deps.withDuplicateConfirm(() =>
+				managers.profile.importPasskey(deps.trimmedName.value, credData, deps.allowDuplicate.value),
+			)
+			if (!profile) return
+			await deps.completeImport(profile)
+		} catch (err) {
+			// User cancel: silent return (no warning notification on Escape /
+			// "user closed" / "timed out or not allowed").
+			if (err instanceof UserRejectedError) return
+			deps.notifyImportFailed()
+			console.error("Failed to import profile:", err)
+		} finally {
+			deps.isImporting.value = false
+		}
+	}
+
+	return { handleImportSeed, handleImportPasskey }
+}
+
+/** Capped pick: the byte gate must run inside pickFile (compressed files
+ *  inflate in there, before any caller-side .size check could). The cap
+ *  error maps to the flow's error banner and the flow exits through its
+ *  existing no-file path. */
+function cappedBackupPick(fillError: (type?: string, title?: string, tooltip?: string) => void) {
+	return async () => {
+		try {
+			return await pickFile(undefined, false, true, MAX_BACKUP_FILE_BYTES)
+		} catch (err) {
+			if (err instanceof FileTooLargeError) {
+				fillError(
+					"full_backup",
+					"Backup File Too Large",
+					"The backup file is too large to import. Please select a correct backup file.",
+				)
+				return undefined
+			}
+			throw err
+		}
+	}
+}
+
+export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
+	const nameField = useProfileNameField()
+	const { profileName, trimmedName } = nameField
+
+	const { request: ceremonyRequest, runCeremony, onResolve: onCeremonyResolve, onReject: onCeremonyReject } = usePasskeyCeremony()
+
+	const { allowDuplicate, withDuplicateConfirm } = useDuplicateConfirm()
+	const { error, isCopied, fillError, clearError, fillUnknownImportError, handleCopyError, handlePasswordInput, handleSecretInput } =
+		useImportErrorState(opts.openToast)
+
 	const selectedImportOption = ref<string | null>(null)
 	const seedPhrase = ref<string | undefined>(undefined)
 	const password = ref("")
 	const repeatedPassword = ref("")
 	const maxPasswordLength = 128
 	const isImporting = ref(false)
-
-	const error = ref({ type: "", title: "", tooltip: "" })
-	function fillError(type?: string, title?: string, tooltip?: string) {
-		if (!title) {
-			error.value = { type: "", title: "", tooltip: "" }
-			return
-		}
-		error.value = { type: type ?? "unknown", title, tooltip: tooltip ?? "" }
-	}
-	function clearError() {
-		fillError()
-	}
-
-	// Unified catch-all (A1): both shells render title "Import failed" + the
-	// message as tooltip. Replaces popup's prior `fillError("unknown", err)`,
-	// which put the Error object in the title slot and rendered "[object Object]".
-	function fillUnknownImportError(err: unknown) {
-		fillError("unknown", "Import failed", err instanceof Error ? err.message : String(err))
-	}
-
-	const isCopied = ref(false)
-	function handleCopyError() {
-		isCopied.value = true
-		void copyToClipboard(`${error.value.title}${error.value.tooltip ? `: ${error.value.tooltip}` : ""}`, opts.openToast, {
-			success: { label: "Error is copied" },
-			failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
-		})
-		setTimeout(() => {
-			isCopied.value = false
-		}, 1_500)
-	}
-
-	function handlePasswordInput() {
-		if (error.value.type === "password") fillError()
-	}
-	function handleSecretInput() {
-		if (error.value.type === "secret") fillError()
-	}
 
 	// Name check is excluded on purpose — name is validated at submit time so
 	// an empty name shakes the input instead of silently disabling the buttons.
@@ -178,119 +288,32 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 		return seedPhrase.value?.split(" ").length === 24 && password.value.length >= 8
 	})
 
-	async function fetchExistingNames(): Promise<string[]> {
-		return (await managers.profile.getProfiles()).map((p) => p.name)
-	}
+	const { handleImportSeed, handleImportPasskey } = createImportHandlers({
+		isImporting,
+		isAllowedToImportBySeedPhrase,
+		validateName: nameField.validate,
+		trimmedName,
+		seedPhrase,
+		password,
+		allowDuplicate,
+		withDuplicateConfirm,
+		runCeremony,
+		fillUnknownImportError,
+		completeImport: opts.completeImport,
+		notifyImportFailed: opts.notifyImportFailed,
+	})
 
-	// In-flight latch is set BEFORE the async `getProfiles()` fetch so two rapid
-	// clicks can't both pass the pre-check before the lock is set.
-	const handleImportSeed = async () => {
-		if (!isAllowedToImportBySeedPhrase.value || isImporting.value) return
-		isImporting.value = true
-		try {
-			const existingNames = await fetchExistingNames()
-			if (!validateName({ existingNames })) {
-				isImporting.value = false
-				return
-			}
-			const profile = await withDuplicateConfirm(() =>
-				managers.profile.importMnemonic(
-					trimmedName.value,
-					(seedPhrase.value ?? "").split(" "),
-					password.value,
-					allowDuplicate.value,
-				),
-			)
-			// `undefined` = the user declined the duplicate warning; stay on the form.
-			if (!profile) return
-			await opts.completeImport(profile)
-		} catch (err) {
-			fillUnknownImportError(err)
-		} finally {
-			isImporting.value = false
-		}
-	}
-
-	const handleImportPasskey = async () => {
-		if (isImporting.value) return
-		isImporting.value = true
-		try {
-			const existingNames = await fetchExistingNames()
-			if (!validateName({ existingNames })) {
-				isImporting.value = false
-				return
-			}
-			// Discovery `get` — no allowedCredentials; the user picks from their
-			// available passkeys.
-			const credData = await runCeremony({ mode: "get" })
-			// The SAME credentialData is reused on the confirm-retry — no second WebAuthn ceremony.
-			const profile = await withDuplicateConfirm(() =>
-				managers.profile.importPasskey(trimmedName.value, credData, allowDuplicate.value),
-			)
-			if (!profile) return
-			await opts.completeImport(profile)
-		} catch (err) {
-			// User cancel: silent return (no warning notification on Escape /
-			// "user closed" / "timed out or not allowed").
-			if (err instanceof UserRejectedError) return
-			opts.notifyImportFailed()
-			console.error("Failed to import profile:", err)
-		} finally {
-			isImporting.value = false
-		}
-	}
-
-	const {
-		selectedBackup,
-		decryptionPassword,
-		restoreStatus,
-		restoreStage,
-		importedProfile,
-		isAllowedToImportBackup,
-		isRestoreHasErrors,
-		parsedBackupName,
-		pickBackupFile,
-		decryptBackup,
-		restoreBackup,
-		showRestoreErrorLog,
-		resetBackupState,
-	} = useFullBackupImport({
+	const backup = wireBackupImport({
 		password,
 		repeatedPassword,
 		fillError,
 		clearError,
-		// Capped pick: the byte gate must run inside pickFile (compressed files
-		// inflate in there, before any caller-side .size check could). The cap
-		// error maps to the flow's error banner and the flow exits through its
-		// existing no-file path.
-		pickFile: async () => {
-			try {
-				return await pickFile(undefined, false, true, MAX_BACKUP_FILE_BYTES)
-			} catch (err) {
-				if (err instanceof FileTooLargeError) {
-					fillError(
-						"full_backup",
-						"Backup File Too Large",
-						"The backup file is too large to import. Please select a correct backup file.",
-					)
-					return undefined
-				}
-				throw err
-			}
-		},
 		completeImport: opts.completeImport,
 		runCeremony,
 		profileName,
 		showErrorLog: opts.showErrorLog,
 		allowDuplicate,
-		confirmDuplicate: withDuplicateConfirm,
-	})
-
-	// Guarded prefill: fill the Profile-name input from a parsed backup, but
-	// only when the user hasn't typed anything yet (protects mid-typing from a
-	// delayed parse).
-	watch(parsedBackupName, (newName) => {
-		if (newName && !profileName.value.trim()) profileName.value = newName
+		withDuplicateConfirm,
 	})
 
 	// Keep `profileName` across import-method switches so the user doesn't have
@@ -300,23 +323,21 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 		seedPhrase.value = undefined
 		password.value = ""
 		repeatedPassword.value = ""
-		resetBackupState()
+		backup.resetBackupState()
 		clearError()
 	}
-	const handleBack = () => clearFormState()
-
 	function dispose() {
-		disposeNameField()
+		nameField.dispose()
 	}
 
 	return {
 		// name field
 		profileName,
 		trimmedName,
-		nameError,
-		shakeName,
-		nameInputRef,
-		handleNameInput,
+		nameError: nameField.nameError,
+		shakeName: nameField.shakeName,
+		nameInputRef: nameField.nameInputRef,
+		handleNameInput: nameField.handleInput,
 		// passkey ceremony
 		ceremonyRequest,
 		onCeremonyResolve,
@@ -332,18 +353,8 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 		isCopied,
 		// per-method gates
 		isAllowedToImportBySeedPhrase,
-		// full backup
-		selectedBackup,
-		decryptionPassword,
-		restoreStatus,
-		restoreStage,
-		importedProfile,
-		isAllowedToImportBackup,
-		isRestoreHasErrors,
-		pickBackupFile,
-		decryptBackup,
-		restoreBackup,
-		showRestoreErrorLog,
+		// full backup (surface from the wiring sub-composable, verbatim keys)
+		...backup.surface,
 		// handlers
 		handleImportSeed,
 		handleImportPasskey,
@@ -351,8 +362,77 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 		handleSecretInput,
 		handleCopyError,
 		clearError,
-		handleBack,
+		handleBack: clearFormState,
 		// lifecycle
 		dispose,
+	}
+}
+
+interface WireBackupImportDeps {
+	password: Ref<string>
+	repeatedPassword: Ref<string>
+	fillError: (type?: string, title?: string, tooltip?: string) => void
+	clearError: () => void
+	completeImport: UseProfileImportFlowOptions["completeImport"]
+	runCeremony: ReturnType<typeof usePasskeyCeremony>["runCeremony"]
+	profileName: Ref<string>
+	showErrorLog: UseProfileImportFlowOptions["showErrorLog"]
+	allowDuplicate: Ref<boolean>
+	withDuplicateConfirm: <T>(run: () => Promise<T>) => Promise<T | undefined>
+}
+
+/** Wires the full-backup sub-flow (capped pick, name prefill) and shapes its
+ *  exported surface — key names verbatim, both shells destructure them. */
+function wireBackupImport(deps: WireBackupImportDeps) {
+	const {
+		selectedBackup,
+		decryptionPassword,
+		restoreStatus,
+		restoreStage,
+		importedProfile,
+		isAllowedToImportBackup,
+		isRestoreHasErrors,
+		parsedBackupName,
+		pickBackupFile,
+		decryptBackup,
+		restoreBackup,
+		showRestoreErrorLog,
+		resetBackupState,
+	} = useFullBackupImport({
+		password: deps.password,
+		repeatedPassword: deps.repeatedPassword,
+		fillError: deps.fillError,
+		clearError: deps.clearError,
+		pickFile: cappedBackupPick(deps.fillError),
+		completeImport: deps.completeImport,
+		runCeremony: deps.runCeremony,
+		profileName: deps.profileName,
+		showErrorLog: deps.showErrorLog,
+		allowDuplicate: deps.allowDuplicate,
+		confirmDuplicate: deps.withDuplicateConfirm,
+	})
+
+	// Guarded prefill: fill the Profile-name input from a parsed backup, but
+	// only when the user hasn't typed anything yet (protects mid-typing from a
+	// delayed parse).
+	watch(parsedBackupName, (newName) => {
+		if (newName && !deps.profileName.value.trim()) deps.profileName.value = newName
+	})
+
+	return {
+		resetBackupState,
+		surface: {
+			selectedBackup,
+			decryptionPassword,
+			restoreStatus,
+			restoreStage,
+			importedProfile,
+			isAllowedToImportBackup,
+			isRestoreHasErrors,
+			pickBackupFile,
+			decryptBackup,
+			restoreBackup,
+			showRestoreErrorLog,
+		},
 	}
 }

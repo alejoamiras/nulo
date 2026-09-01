@@ -137,7 +137,129 @@ const handleAgree = () => {
 
 const backupStatus = ref("")
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 39) — refactor when touched, never raise
+/** Path A: collect the WebAuthn credential via the in-page modal BEFORE
+ *  calling the service. Targeted `get` against this profile's stored
+ *  credentialId so the OS prompt is bound to the right key. Returns "handled"
+ *  when the flow already resolved the failure UI (or was superseded). */
+async function acquirePasskeyCredential(gen) {
+	try {
+		const credentialId = await managers.profile.getPasskeyCredentialId(appStore.profile.id)
+		if (gen !== generation) return "handled"
+		const credentialData = await runCeremony({ mode: "get", credentialId })
+		return { credentialData }
+	} catch (err) {
+		if (gen !== generation) return "handled"
+		backupStatus.value = ""
+		// Silent cancel matches the rest of the wallet (auth.vue, profile/
+		// new.vue, import.vue). Reset the agreement gate so the user can
+		// re-confirm or back out without bouncing them off the page —
+		// passkey export auto-fires on agree (no "Create Backup" CTA),
+		// so without this reset they'd be stuck on a dead form.
+		if (err instanceof UserRejectedError) {
+			isAgreed.value = false
+			return "handled"
+		}
+		// User-facing copy stays generic; the underlying error goes to the console so a failed
+		// export is diagnosable (this catch and the exportPlain one below are otherwise
+		// indistinguishable — same toast, same navigation).
+		console.error("[export/full] passkey credential acquisition failed:", err)
+		openToast({ label: "Failed to authenticate by passkey", icon: "warning" }, TOAST_DURATION.LONG)
+		router.go(-1)
+		return "handled"
+	}
+}
+
+/** Stage 2: the authenticated key-material export, discriminated per profile
+ *  type. Returns "handled" when the failure UI already resolved (wrong
+ *  password / passkey failure / superseded run). */
+async function exportKeyMaterial(gen, credentialData) {
+	try {
+		if (isPasskeyProfile.value) {
+			// Passkey blobs carry the credentialId as `master-key` and NEVER an entropy field —
+			// the master re-derives from the passkey PRF at restore. The imported-keys DEK travels
+			// as the SEALED row blob verbatim (the restore ceremony's wrap key opens it).
+			const key = await managers.profile.exportPlain(appStore.profile.id, password.value, credentialData)
+			if (gen !== generation) return "handled"
+			const dekSealedB64 = await managers.profile.getProfileDekSealed(appStore.profile.id)
+			return { key, dekSealedB64 }
+		}
+		// Atomic discriminated export: master + recovery-phrase entropy + imported-keys DEK
+		// from ONE authenticated pass, so the backup fields can never come from different
+		// row states.
+		const material = await managers.profile.exportBackupMaterial(appStore.profile.id, password.value)
+		return { key: material.masterKey, entropyB64: material.entropy, dekB64: material.importedKeysDek }
+	} catch (error) {
+		if (gen !== generation) return "handled"
+		backupStatus.value = ""
+		if (!isPasskeyProfile.value) {
+			isWrongPassword.value = true
+		} else {
+			// See the acquisition catch above — stage-tagged so the two failure points are
+			// distinguishable in the console while the user-facing copy stays generic.
+			console.error("[export/full] passkey exportPlain failed:", error)
+			openToast({ label: "Failed to authenticate by passkey", icon: "warning" }, TOAST_DURATION.LONG)
+			router.go(-1)
+		}
+		return "handled"
+	}
+}
+
+/** Two orthogonal version fields replace the legacy conflated
+ *  `schema-version: 2`: the NON-migratable account-contract epoch and the
+ *  MIGRATABLE storage schema version the import path migrates forward from.
+ *  Constants are single-sourced with the import gates. `data` and
+ *  `checksum` are the assembler's to add — in that order, so the sealed
+ *  key order matches what the import side re-serializes. */
+function buildBackupEnvelope({ key, entropyB64, dekB64, dekSealedB64 }) {
+	return {
+		"wallet-version": version,
+		"aztec-version": aztecVersion,
+		[COMPAT_EPOCH_FIELD]: CURRENT_COMPAT_EPOCH,
+		[BACKUP_SCHEMA_VERSION_FIELD]: CURRENT_BACKUP_SCHEMA_VERSION,
+		"master-key": key,
+		// Password blobs REQUIRE this; passkey blobs must NOT carry it (`undefined` is dropped
+		// by JSON.stringify). Restore verifies PBKDF2(words(entropy)) == master-key before
+		// sealing either.
+		entropy: entropyB64,
+		// Imported-keys DEK carriers (epoch-4 REQUIRED, per profile type; the other stays
+		// undefined → dropped): plaintext beside the plaintext master for password blobs — the
+		// same trust envelope — and the sealed row blob for passkey blobs. Restore feeds it
+		// ONLY into the rewrap context (the restored row mints a FRESH dek — clone divergence).
+		"imported-keys-dek": dekB64,
+		"imported-keys-dek-sealed": dekSealedB64,
+		// Item 1b: preserve the user's ACTIVE-network selection (a top-level raw network id, like
+		// `master-key` — NOT a slice). Restore resolves it against the restored rows; absent (older
+		// backups / no active network) → the import falls back to the primary network. `undefined`
+		// is dropped by JSON.stringify, so the field is simply absent when there's no active network.
+		"active-network-id": appStore.network?.id,
+	}
+}
+
+/** Export-side half of the shared size invariant: never ship a file the
+ *  import gate would reject — fail loud here instead of silently at
+ *  restore time. Measured in UTF-8 BYTES to match the import side's
+ *  `file.size` (string .length counts UTF-16 code units and undercounts
+ *  multi-byte content like emoji in profile/contact names).
+ *  Deliberately synchronous — runs inside the post-assembly fenced span. */
+function rejectOversizedBackup(pretty) {
+	if (new TextEncoder().encode(pretty).length <= MAX_BACKUP_FILE_BYTES) return false
+	backupStatus.value = ""
+	if (isPasskeyProfile.value) isAgreed.value = false
+	openToast({ label: "Backup is too large to create", icon: "warning" }, TOAST_DURATION.LONG)
+	return true
+}
+
+/** The assembly-failure UI (deliberately synchronous — runs inside the catch's
+ *  span; owns the currency fence: a superseded run stays silent — the page
+ *  that could show the error is gone). */
+function reportAssemblyFailure(gen, err) {
+	if (gen !== generation) return
+	backupStatus.value = ""
+	if (isPasskeyProfile.value) isAgreed.value = false
+	console.error("[export/full] backup assembly failed:", err)
+	openToast({ label: "Failed to create the backup", icon: "warning" }, TOAST_DURATION.LONG)
+}
+
 async function handleBackup() {
 	// Re-entry latch: closes synchronously, BEFORE the ceremony/KDF awaits —
 	// the empty-status window during PBKDF2 was where double-fires slipped in.
@@ -147,139 +269,34 @@ async function handleBackup() {
 	backupStatus.value = "progress"
 	let runClients = null
 	try {
-		let key = ""
 		let credentialData
 		if (isPasskeyProfile.value) {
-			try {
-				// Path A: collect the WebAuthn credential via the in-page modal
-				// BEFORE calling the service. Targeted `get` against this profile's
-				// stored credentialId so the OS prompt is bound to the right key.
-				const credentialId = await managers.profile.getPasskeyCredentialId(appStore.profile.id)
-				if (gen !== generation) return
-				credentialData = await runCeremony({ mode: "get", credentialId })
-			} catch (err) {
-				if (gen !== generation) return
-				backupStatus.value = ""
-				// Silent cancel matches the rest of the wallet (auth.vue, profile/
-				// new.vue, import.vue). Reset the agreement gate so the user can
-				// re-confirm or back out without bouncing them off the page —
-				// passkey export auto-fires on agree (no "Create Backup" CTA),
-				// so without this reset they'd be stuck on a dead form.
-				if (err instanceof UserRejectedError) {
-					isAgreed.value = false
-					return
-				}
-				// User-facing copy stays generic; the underlying error goes to the console so a failed
-				// export is diagnosable (this catch and the exportPlain one below are otherwise
-				// indistinguishable — same toast, same navigation).
-				console.error("[export/full] passkey credential acquisition failed:", err)
-				openToast({ label: "Failed to authenticate by passkey", icon: "warning" }, TOAST_DURATION.LONG)
-				router.go(-1)
-				return
-			}
-			if (gen !== generation) return
+			const acquired = await acquirePasskeyCredential(gen)
+			if (acquired === "handled" || gen !== generation) return
+			credentialData = acquired.credentialData
 		}
 
-		let entropyB64
-		let dekB64
-		let dekSealedB64
-		try {
-			if (isPasskeyProfile.value) {
-				// Passkey blobs carry the credentialId as `master-key` and NEVER an entropy field —
-				// the master re-derives from the passkey PRF at restore. The imported-keys DEK travels
-				// as the SEALED row blob verbatim (the restore ceremony's wrap key opens it).
-				key = await managers.profile.exportPlain(appStore.profile.id, password.value, credentialData)
-				if (gen !== generation) return
-				dekSealedB64 = await managers.profile.getProfileDekSealed(appStore.profile.id)
-			} else {
-				// Atomic discriminated export: master + recovery-phrase entropy + imported-keys DEK
-				// from ONE authenticated pass, so the backup fields can never come from different
-				// row states.
-				const material = await managers.profile.exportBackupMaterial(appStore.profile.id, password.value)
-				key = material.masterKey
-				entropyB64 = material.entropy
-				dekB64 = material.importedKeysDek
-			}
-		} catch (error) {
-			if (gen !== generation) return
-			backupStatus.value = ""
-			if (!isPasskeyProfile.value) {
-				isWrongPassword.value = true
-			} else {
-				// See the acquisition catch above — stage-tagged so the two failure points are
-				// distinguishable in the console while the user-facing copy stays generic.
-				console.error("[export/full] passkey exportPlain failed:", error)
-				openToast({ label: "Failed to authenticate by passkey", icon: "warning" }, TOAST_DURATION.LONG)
-				router.go(-1)
-			}
-			return
-		}
-		if (gen !== generation) return
-
-		// Two orthogonal version fields replace the legacy conflated
-		// `schema-version: 2`: the NON-migratable account-contract epoch and the
-		// MIGRATABLE storage schema version the import path migrates forward from.
-		// Constants are single-sourced with the import gates. `data` and
-		// `checksum` are the assembler's to add — in that order, so the sealed
-		// key order matches what the import side re-serializes.
-		const envelope = {
-			"wallet-version": version,
-			"aztec-version": aztecVersion,
-			[COMPAT_EPOCH_FIELD]: CURRENT_COMPAT_EPOCH,
-			[BACKUP_SCHEMA_VERSION_FIELD]: CURRENT_BACKUP_SCHEMA_VERSION,
-			"master-key": key,
-			// Password blobs REQUIRE this; passkey blobs must NOT carry it (`undefined` is dropped
-			// by JSON.stringify). Restore verifies PBKDF2(words(entropy)) == master-key before
-			// sealing either.
-			entropy: entropyB64,
-			// Imported-keys DEK carriers (epoch-4 REQUIRED, per profile type; the other stays
-			// undefined → dropped): plaintext beside the plaintext master for password blobs — the
-			// same trust envelope — and the sealed row blob for passkey blobs. Restore feeds it
-			// ONLY into the rewrap context (the restored row mints a FRESH dek — clone divergence).
-			"imported-keys-dek": dekB64,
-			"imported-keys-dek-sealed": dekSealedB64,
-			// Item 1b: preserve the user's ACTIVE-network selection (a top-level raw network id, like
-			// `master-key` — NOT a slice). Restore resolves it against the restored rows; absent (older
-			// backups / no active network) → the import falls back to the primary network. `undefined`
-			// is dropped by JSON.stringify, so the field is simply absent when there's no active network.
-			"active-network-id": appStore.network?.id,
-		}
+		const material = await exportKeyMaterial(gen, credentialData)
+		if (material === "handled" || gen !== generation) return
+		const envelope = buildBackupEnvelope(material)
 
 		runClients = buildBackupServices()
 		activeRunClients = runClients
 		const sources = runClients.map(({ name, client }) => ({ name, backup: () => client.backup() }))
 		const result = await assembleFullBackup(envelope, sources, () => gen === generation)
-		if (gen !== generation) return
-
-		// Export-side half of the shared size invariant: never ship a file the
-		// import gate would reject — fail loud here instead of silently at
-		// restore time. Measured in UTF-8 BYTES to match the import side's
-		// `file.size` (string .length counts UTF-16 code units and undercounts
-		// multi-byte content like emoji in profile/contact names).
-		if (new TextEncoder().encode(result.pretty).length > MAX_BACKUP_FILE_BYTES) {
-			backupStatus.value = ""
-			if (isPasskeyProfile.value) isAgreed.value = false
-			openToast({ label: "Backup is too large to create", icon: "warning" }, TOAST_DURATION.LONG)
-			return
-		}
+		// Fence first: a superseded run must not run the oversize UI writes.
+		if (gen !== generation || rejectOversizedBackup(result.pretty)) return
 
 		payloadCompact = result.compact
 		payloadPretty = result.pretty
 		backupStatus.value = "finished"
 		showRecommendation.value = true
 	} catch (err) {
-		// A superseded run (unmount bumped the fence, or the assembler's probe
-		// aborted) stays silent — the page that could show the error is gone.
-		if (gen !== generation) return
-		backupStatus.value = ""
-		if (isPasskeyProfile.value) isAgreed.value = false
-		console.error("[export/full] backup assembly failed:", err)
-		openToast({ label: "Failed to create the backup", icon: "warning" }, TOAST_DURATION.LONG)
+		reportAssemblyFailure(gen, err)
 	} finally {
-		if (runClients) {
-			disconnectAll(runClients)
-			if (activeRunClients === runClients) activeRunClients = null
-		}
+		if (runClients) disconnectAll(runClients)
+		// A null runClients matches only a null activeRunClients — no-op either way.
+		if (activeRunClients === runClients) activeRunClients = null
 		if (gen === generation) isBusy.value = false
 	}
 }
