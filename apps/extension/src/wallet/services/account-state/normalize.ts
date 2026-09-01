@@ -93,7 +93,6 @@ export function truncateErrorMessage(message: string): string {
  * (so duplicates cannot bypass per-network caps), enforce every cap, and
  * collapse malformed/excess content into bounded violation records.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 39) — refactor when touched, never raise
 export function normalizeAccountStateSlice(raw: unknown): NormalizedAccountState {
 	if (!Array.isArray(raw)) {
 		return { items: [], violations: [violation("(slice)", "malformed account-state slice (not an array)")] }
@@ -119,6 +118,13 @@ export function normalizeAccountStateSlice(raw: unknown): NormalizedAccountState
 		)
 	}
 
+	const byNetwork = mergeSliceItems(inputItems, violations)
+	return { items: applyNetworkCaps(byNetwork, violations), violations }
+}
+
+/** Duplicate-networkId merge over the capped input, collapsing malformed
+ *  items/children into bounded counter violations (appended in place). */
+function mergeSliceItems(inputItems: unknown[], violations: AccountStateViolationRecord[]): Map<string, NormalizedAccountStateItem> {
 	let malformedItems = 0
 	let malformedChildren = 0
 	const byNetwork = new Map<string, NormalizedAccountStateItem>()
@@ -129,26 +135,47 @@ export function normalizeAccountStateSlice(raw: unknown): NormalizedAccountState
 			continue
 		}
 		const merged = byNetwork.get(networkId) ?? { networkId, senders: [], contracts: [] }
-		const rawSenders = (item as { senders?: unknown }).senders
-		const rawContracts = (item as { contracts?: unknown }).contracts
-		if (!Array.isArray(rawSenders) || !Array.isArray(rawContracts)) {
-			// The old per-item "malformed (not arrays)" record vanished in the
-			// collector; it now surfaces as a bounded top-level violation.
-			violations.push(violation(networkId, "malformed account-state item (senders/contracts not arrays)"))
-		}
-		for (const s of Array.isArray(rawSenders) ? rawSenders : []) {
-			if (isValidSender(s)) merged.senders.push({ address: s.address })
-			else malformedChildren++
-		}
-		for (const c of Array.isArray(rawContracts) ? rawContracts : []) {
-			if (isValidContract(c)) merged.contracts.push({ address: c.address, instance: c.instance, artifact: c.artifact })
-			else malformedChildren++
-		}
+		malformedChildren += mergeItemChildren(item as Record<string, unknown>, merged, violations)
 		byNetwork.set(networkId, merged)
 	}
 	if (malformedItems > 0) violations.push(violation("(slice)", `${malformedItems} malformed account-state item(s) dropped`))
 	if (malformedChildren > 0) violations.push(violation("(slice)", `${malformedChildren} malformed sender/contract entries dropped`))
+	return byNetwork
+}
 
+/** Folds one item's sender/contract children into its merged entry, returning
+ *  the malformed-child count (the caller aggregates it into ONE bounded
+ *  violation across the whole slice). */
+function mergeItemChildren(
+	item: Record<string, unknown>,
+	merged: NormalizedAccountStateItem,
+	violations: AccountStateViolationRecord[],
+): number {
+	let malformedChildren = 0
+	const rawSenders = item.senders
+	const rawContracts = item.contracts
+	if (!Array.isArray(rawSenders) || !Array.isArray(rawContracts)) {
+		// The old per-item "malformed (not arrays)" record vanished in the
+		// collector; it now surfaces as a bounded top-level violation.
+		violations.push(violation(merged.networkId, "malformed account-state item (senders/contracts not arrays)"))
+	}
+	for (const s of Array.isArray(rawSenders) ? rawSenders : []) {
+		if (isValidSender(s)) merged.senders.push({ address: s.address })
+		else malformedChildren++
+	}
+	for (const c of Array.isArray(rawContracts) ? rawContracts : []) {
+		if (isValidContract(c)) merged.contracts.push({ address: c.address, instance: c.instance, artifact: c.artifact })
+		else malformedChildren++
+	}
+	return malformedChildren
+}
+
+/** Network-count + per-network child caps over the merged map, recording a
+ *  violation per over-cap network (appended in place). */
+function applyNetworkCaps(
+	byNetwork: Map<string, NormalizedAccountStateItem>,
+	violations: AccountStateViolationRecord[],
+): NormalizedAccountStateItem[] {
 	const items: NormalizedAccountStateItem[] = []
 	for (const item of byNetwork.values()) {
 		if (items.length >= ACCOUNT_STATE_CAPS.maxNetworks) {
@@ -171,8 +198,7 @@ export function normalizeAccountStateSlice(raw: unknown): NormalizedAccountState
 			contracts: item.contracts.slice(0, ACCOUNT_STATE_CAPS.maxContractsPerNetwork),
 		})
 	}
-
-	return { items, violations }
+	return items
 }
 
 /** Networks (deduped, capped) that carry at least one registrable entry —

@@ -327,53 +327,54 @@ function capRecords(records: unknown[]): unknown[] {
  * which the hijacked console feeds into the log store. Passing rows through whole put
  * `encryptedSigningKey`, `rpcUrl` and contact PII on both paths.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 21) — refactor when touched, never raise
 export function collectRestoreErrors(serviceName: string, data: unknown): unknown[] | null {
 	if (!Array.isArray(data) || !data.length || !serviceName) return null
-	if (serviceName === "account-state") {
-		const out: Array<AccountStateRestoreItem & { restoreError?: unknown }> = []
-		let malformedItems = 0
-		for (const item of data as Array<AccountStateRestoreItem & { restoreError?: unknown }>) {
-			// A non-object result entry (hostile/degenerate restore output) must
-			// not throw post-finalize — collapse into ONE constant record below.
-			if (typeof item !== "object" || item === null) {
-				malformedItems++
-				continue
-			}
-			// Presence-guard the child arrays: the result shape is built from an
-			// attacker-controlled slice, and this collector runs post-finalize
-			// where a throw would strand the import on a false "Import failed".
-			// The ordinal is captured BEFORE filtering, so it points at the child's position in the
-			// SOURCE array. Numbering after the filter would just re-derive the error array's own
-			// index — information the array already carries, and useless for locating the row.
-			const failedContracts = projectFailedChildren(item.contracts)
-			const failedSenders = projectFailedChildren(item.senders)
-			// ITEM-LEVEL errors (whole-network skips, deadline notes, normalizer
-			// violations) count too — a top-level restoreError with clean child
-			// arrays used to vanish here, letting a skipped registration
-			// auto-route past the Continue gate.
-			if (!failedContracts.length && !failedSenders.length && !item.restoreError) continue
-			out.push({
-				// Sanitized like every other field: `networkId` comes from the same attacker-controlled
-				// slice, and the normalizer admits ids up to 100 chars that then reach "Network not
-				// found" — so the item level is not a trusted layer above its children.
-				networkId: boundedScalar(item.networkId),
-				contracts: failedContracts,
-				senders: failedSenders,
-				...(item.restoreError !== undefined ? { restoreError: describeRestoreError(item.restoreError) } : {}),
-			})
-		}
-		if (malformedItems > 0) {
-			out.push({ networkId: "(result)", contracts: [], senders: [], restoreError: "malformed account-state restore result" })
-		}
-		return out.length ? capRecords(out) : null
-	}
-	// Index BEFORE filtering — see the account-state branch above for why.
+	if (serviceName === "account-state") return collectAccountStateErrors(data)
+	// Index BEFORE filtering — see the account-state collector for why.
 	const filtered = (data as GenericRestoreItem[])
 		.map((item, index) => ({ item, index }))
 		.filter(({ item }) => item?.restoreError)
 		.map(({ item, index }) => projectRestoreErrorRow(item as Record<string, unknown>, index, serviceName))
 	return filtered.length ? capRecords(filtered) : null
+}
+
+function collectAccountStateErrors(data: unknown[]): unknown[] | null {
+	const out: Array<AccountStateRestoreItem & { restoreError?: unknown }> = []
+	let malformedItems = 0
+	for (const item of data as Array<AccountStateRestoreItem & { restoreError?: unknown }>) {
+		// A non-object result entry (hostile/degenerate restore output) must
+		// not throw post-finalize — collapse into ONE constant record below.
+		if (typeof item !== "object" || item === null) {
+			malformedItems++
+			continue
+		}
+		// Presence-guard the child arrays: the result shape is built from an
+		// attacker-controlled slice, and this collector runs post-finalize
+		// where a throw would strand the import on a false "Import failed".
+		// The ordinal is captured BEFORE filtering, so it points at the child's position in the
+		// SOURCE array. Numbering after the filter would just re-derive the error array's own
+		// index — information the array already carries, and useless for locating the row.
+		const failedContracts = projectFailedChildren(item.contracts)
+		const failedSenders = projectFailedChildren(item.senders)
+		// ITEM-LEVEL errors (whole-network skips, deadline notes, normalizer
+		// violations) count too — a top-level restoreError with clean child
+		// arrays used to vanish here, letting a skipped registration
+		// auto-route past the Continue gate.
+		if (!failedContracts.length && !failedSenders.length && !item.restoreError) continue
+		out.push({
+			// Sanitized like every other field: `networkId` comes from the same attacker-controlled
+			// slice, and the normalizer admits ids up to 100 chars that then reach "Network not
+			// found" — so the item level is not a trusted layer above its children.
+			networkId: boundedScalar(item.networkId),
+			contracts: failedContracts,
+			senders: failedSenders,
+			...(item.restoreError !== undefined ? { restoreError: describeRestoreError(item.restoreError) } : {}),
+		})
+	}
+	if (malformedItems > 0) {
+		out.push({ networkId: "(result)", contracts: [], senders: [], restoreError: "malformed account-state restore result" })
+	}
+	return out.length ? capRecords(out) : null
 }
 
 /**

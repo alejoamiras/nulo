@@ -262,7 +262,6 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 	 * fails the REST of that network fast (the payload can't register against
 	 * an endpoint that isn't answering).
 	 */
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 47) — refactor when touched, never raise
 	public async restore(
 		backupAccountState: BackupAccountState[],
 		networks: Network[],
@@ -290,81 +289,24 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 		const safeNetworks = (Array.isArray(networks) ? networks : []).slice(0, 64).filter((n) => NetworkSchema.safeParse(n).success)
 
 		for (const item of items) {
-			const senders: Restored<BackupSender>[] = []
-			const contracts: Restored<BackupContract>[] = []
 			const network = safeNetworks.find((n) => n.id === item.networkId)
-			let unreachable = false
-			let skippedByDeadline = 0
+			// Cross-loop registration state: a connectivity-class sender failure
+			// fail-fasts the CONTRACT loop too; deadline skips accumulate across
+			// both for the tail record.
+			const reg: RestoreRegistrationState = { unreachable: false, skippedByDeadline: 0 }
 
-			const classify = (err: unknown): string => {
-				const message = truncateErrorMessage(toRestoreError(err))
-				if (isConnectivityErrorMessage(message)) unreachable = true
-				// The per-item errors only travel back in the RPC result, which gates the import's
-				// Continue screen without ever being rendered — log them or a degraded restore is
-				// undiagnosable in the field.
-				this.logWarn(`restore: registration failed on ${item.networkId} — ${message}`)
-				return message
-			}
+			// Length guards keep the empty-entry fast path synchronous — only a
+			// loop that would launch (or classify) work is awaited.
+			const senders =
+				item.senders.length > 0 ? await this.restoreItemSenders(item.networkId, item.senders, network, expired, reg) : []
+			const contracts =
+				item.contracts.length > 0 ? await this.restoreItemContracts(item.networkId, item.contracts, network, expired, reg) : []
 
-			for (const sender of item.senders) {
-				if (unreachable) {
-					senders.push({ ...sender, restoreError: ACCOUNT_STATE_SKIP_UNREACHABLE })
-					continue
-				}
-				if (expired()) {
-					skippedByDeadline++
-					continue
-				}
-				try {
-					if (!network) throw new Error("Network not found")
-					await this.pxeService.registerSender(networkInfoFrom(network), AztecAddress.fromStringUnsafe(sender.address))
-					senders.push(sender)
-				} catch (err) {
-					senders.push({ ...sender, restoreError: classify(err) })
-				}
-			}
-
-			for (const contract of item.contracts) {
-				if (unreachable) {
-					contracts.push({ ...contract, restoreError: ACCOUNT_STATE_SKIP_UNREACHABLE })
-					continue
-				}
-				// Network-first error precedence (pre-existing contract): a missing
-				// network reports "Network not found", not the address-parse error.
-				let addressNum: bigint
-				try {
-					if (!network) throw new Error("Network not found")
-					addressNum = AztecAddress.fromStringUnsafe(contract.address).toBigInt()
-				} catch (err) {
-					contracts.push({ ...contract, restoreError: truncateErrorMessage(toRestoreError(err)) })
-					continue
-				}
-				if (addressNum >= 0 && addressNum <= 6) {
-					// ignore protocol contracts registration,
-					// because we cannot validate it due to hardcoded addresses
-					continue
-				}
-				if (expired()) {
-					skippedByDeadline++
-					continue
-				}
-				try {
-					if (!network) throw new Error("Network not found")
-					await this.pxeService.registerContract(networkInfoFrom(network), {
-						instance: contract.instance,
-						artifact: contract.artifact,
-					})
-					contracts.push(contract)
-				} catch (err) {
-					contracts.push({ ...contract, restoreError: classify(err) })
-				}
-			}
-
-			if (skippedByDeadline > 0) {
-				// Same reasoning as the classify() log: an expired budget gates the import's
+			if (reg.skippedByDeadline > 0) {
+				// Same reasoning as the classify log: an expired budget gates the import's
 				// Continue screen with nothing written anywhere a field report could show.
 				this.logWarn(
-					`restore: budget expired on ${item.networkId} — ${skippedByDeadline} registration(s) not attempted ` +
+					`restore: budget expired on ${item.networkId} — ${reg.skippedByDeadline} registration(s) not attempted ` +
 						`(${senders.length} sender(s), ${contracts.length} contract(s) done)`,
 				)
 			}
@@ -372,12 +314,112 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 				networkId: item.networkId,
 				senders,
 				contracts,
-				...(skippedByDeadline > 0
-					? { restoreError: `${ACCOUNT_STATE_SKIP_DEADLINE} (${skippedByDeadline} registration(s) not attempted)` }
+				...(reg.skippedByDeadline > 0
+					? { restoreError: `${ACCOUNT_STATE_SKIP_DEADLINE} (${reg.skippedByDeadline} registration(s) not attempted)` }
 					: {}),
 			})
 		}
 
 		return result
 	}
+
+	/** Truncate + connectivity-classify one registration failure, flipping the
+	 *  item's fail-fast flag; the log line is the field-diagnosable record (the
+	 *  per-item errors only travel back in the RPC result, which gates the
+	 *  import's Continue screen without ever being rendered). */
+	private classifyRestoreFailure(networkId: string, err: unknown, reg: RestoreRegistrationState): string {
+		const message = truncateErrorMessage(toRestoreError(err))
+		if (isConnectivityErrorMessage(message)) reg.unreachable = true
+		this.logWarn(`restore: registration failed on ${networkId} — ${message}`)
+		return message
+	}
+
+	private async restoreItemSenders(
+		networkId: string,
+		items: BackupSender[],
+		network: Network | undefined,
+		expired: () => boolean,
+		reg: RestoreRegistrationState,
+	): Promise<Restored<BackupSender>[]> {
+		const senders: Restored<BackupSender>[] = []
+		for (const sender of items) {
+			if (reg.unreachable) {
+				senders.push({ ...sender, restoreError: ACCOUNT_STATE_SKIP_UNREACHABLE })
+				continue
+			}
+			if (expired()) {
+				reg.skippedByDeadline++
+				continue
+			}
+			try {
+				if (!network) throw new Error("Network not found")
+				await this.pxeService.registerSender(networkInfoFrom(network), AztecAddress.fromStringUnsafe(sender.address))
+				senders.push(sender)
+			} catch (err) {
+				senders.push({ ...sender, restoreError: this.classifyRestoreFailure(networkId, err, reg) })
+			}
+		}
+		return senders
+	}
+
+	private async restoreItemContracts(
+		networkId: string,
+		items: BackupContract[],
+		network: Network | undefined,
+		expired: () => boolean,
+		reg: RestoreRegistrationState,
+	): Promise<Restored<BackupContract>[]> {
+		const contracts: Restored<BackupContract>[] = []
+		for (const contract of items) {
+			if (reg.unreachable) {
+				contracts.push({ ...contract, restoreError: ACCOUNT_STATE_SKIP_UNREACHABLE })
+				continue
+			}
+			const precheck = precheckContractAddress(contract, network)
+			if (precheck === "protocol") continue
+			if (precheck !== "register") {
+				contracts.push(precheck)
+				continue
+			}
+			if (expired()) {
+				reg.skippedByDeadline++
+				continue
+			}
+			try {
+				if (!network) throw new Error("Network not found")
+				await this.pxeService.registerContract(networkInfoFrom(network), {
+					instance: contract.instance,
+					artifact: contract.artifact,
+				})
+				contracts.push(contract)
+			} catch (err) {
+				contracts.push({ ...contract, restoreError: this.classifyRestoreFailure(networkId, err, reg) })
+			}
+		}
+		return contracts
+	}
+}
+
+/** Synchronous pre-launch gate for one contract: network-first error precedence
+ *  (pre-existing contract — a missing network reports "Network not found", not
+ *  the address-parse error), and protocol contracts (address ≤ 6) are skipped
+ *  outright because their hardcoded addresses cannot be validated. */
+function precheckContractAddress(
+	contract: BackupContract,
+	network: Network | undefined,
+): "register" | "protocol" | Restored<BackupContract> {
+	let addressNum: bigint
+	try {
+		if (!network) throw new Error("Network not found")
+		addressNum = AztecAddress.fromStringUnsafe(contract.address).toBigInt()
+	} catch (err) {
+		return { ...contract, restoreError: truncateErrorMessage(toRestoreError(err)) }
+	}
+	return addressNum >= 0 && addressNum <= 6 ? "protocol" : "register"
+}
+
+/** Per-item registration state shared by the sender + contract loops. */
+interface RestoreRegistrationState {
+	unreachable: boolean
+	skippedByDeadline: number
 }

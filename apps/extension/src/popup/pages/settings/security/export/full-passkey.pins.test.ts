@@ -90,9 +90,9 @@ vi.mock("@/wallet/services/config/client", () => ({
 }))
 
 const exportBackupMaterial = vi.fn<(profileId: string, password: string) => Promise<unknown>>()
-const getPasskeyCredentialId = vi.fn(async () => "cred-1")
-const exportPlain = vi.fn(async () => "mk")
-const getProfileDekSealed = vi.fn(async () => "sealed")
+const getPasskeyCredentialId = vi.fn(async (_id: string) => "cred-1")
+const exportPlain = vi.fn(async (..._args: unknown[]) => "mk")
+const getProfileDekSealed = vi.fn(async (_id: string) => "sealed")
 vi.mock("@/utils/core", () => ({
 	managers: {
 		profile: {
