@@ -16,21 +16,19 @@
  */
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { BatchCall, Contract, getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
-import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
-import { Fr } from "@aztec/aztec.js/fields"
-import { TxStatus } from "@aztec/aztec.js/tx"
-import { Gas } from "@aztec/stdlib/gas"
-import { SPONSORED_FPC_SALT } from "@aztec/constants"
-import { FeeAssetHandlerAbi } from "@aztec/l1-artifacts"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { BatchCall, Contract } from "@aztec/aztec.js/contracts"
+import type { Fr } from "@aztec/aztec.js/fields"
+import { TxStatus } from "@aztec/aztec.js/tx"
+import { FeeAssetHandlerAbi } from "@aztec/l1-artifacts"
 import { FeeJuiceContractArtifact } from "@aztec/noir-contracts.js/FeeJuice"
-import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
-import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
+import { Gas } from "@aztec/stdlib/gas"
 import { privateKeyToAccount } from "viem/accounts"
 import { parseCandidateManifest } from "../src/candidate-schema"
 import { feeJuiceAddress, predictedWorstMinFees, publicFeeJuicePayment } from "../src/fee-juice"
 import { FeeJuicePortalAbi, feeJuiceDepositArgs, parseFeeJuiceDeposit, planPublicFuelDeposit } from "../src/fuel"
+import { ERC20_MIN_ABI } from "./script-l1"
+import { deployAccountIfAbsent, freshSchnorrAccount, sponsoredFpcFee } from "./script-l2"
 import { createL1Clients, createL2Wallet, createNode, loadManifestFromConfigArg, sepoliaChain, stopwatch } from "./script-bootstrap"
 
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
@@ -56,144 +54,102 @@ const direct = CONFIG.l1.feeJuice
 
 const sepolia = sepoliaChain(SEPOLIA_RPC)
 
-const ERC20_MIN = [
-	{ type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
-	{
-		type: "function",
-		name: "allowance",
-		stateMutability: "view",
-		inputs: [{ type: "address" }, { type: "address" }],
-		outputs: [{ type: "uint256" }],
-	},
-	{
-		type: "function",
-		name: "approve",
-		stateMutability: "nonpayable",
-		inputs: [{ type: "address" }, { type: "uint256" }],
-		outputs: [{ type: "bool" }],
-	},
-] as const
+interface CanaryL1 {
+	wallet: ReturnType<typeof createL1Clients>["wallet"]
+	pub: ReturnType<typeof createL1Clients>["pub"]
+	owner: `0x${string}`
+	asset: `0x${string}`
+	portal: `0x${string}`
+	handler: `0x${string}`
+	minFj: bigint
+	mins: () => string
+}
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (107 lines) — split when touched, never grow
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 30) — refactor when touched, never raise
-async function main() {
-	const mins = stopwatch()
-	const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`)
-	const { wallet, pub } = createL1Clients({ chain: sepolia, rpcUrl: SEPOLIA_RPC, account })
-	const asset = direct.asset as `0x${string}`
-	const portal = direct.portal as `0x${string}`
-	const handler = direct.feeAssetHandler as `0x${string}`
-	const minFj = BigInt(direct.minFj)
-	console.log(`direct-FJ lane: asset ${asset} | portal ${portal} | handler ${handler} | minFj ${minFj}`)
+/** The wallet's fail-closed coherence checks (useL1FeeAsset.verifyPortalAsset/verifyHandlerAsset). */
+async function assertLaneCoherence(d: CanaryL1): Promise<void> {
+	const underlying = (await d.pub.readContract({ address: d.portal, abi: FeeJuicePortalAbi, functionName: "UNDERLYING" })) as string
+	if (underlying.toLowerCase() !== d.asset.toLowerCase()) throw new Error(`portal UNDERLYING ${underlying} != asset ${d.asset}`)
+	const feeAsset = (await d.pub.readContract({ address: d.handler, abi: FeeAssetHandlerAbi, functionName: "FEE_ASSET" })) as string
+	if (feeAsset.toLowerCase() !== d.asset.toLowerCase()) throw new Error(`handler FEE_ASSET ${feeAsset} != asset ${d.asset}`)
+	console.log(`coherence OK: UNDERLYING + FEE_ASSET match the manifest asset (${d.mins()})`)
+}
 
-	// 1. The wallet's fail-closed coherence checks (useL1FeeAsset.verifyPortalAsset/verifyHandlerAsset).
-	const underlying = (await pub.readContract({ address: portal, abi: FeeJuicePortalAbi, functionName: "UNDERLYING" })) as string
-	if (underlying.toLowerCase() !== asset.toLowerCase()) throw new Error(`portal UNDERLYING ${underlying} != asset ${asset}`)
-	const feeAsset = (await pub.readContract({ address: handler, abi: FeeAssetHandlerAbi, functionName: "FEE_ASSET" })) as string
-	if (feeAsset.toLowerCase() !== asset.toLowerCase()) throw new Error(`handler FEE_ASSET ${feeAsset} != asset ${asset}`)
-	console.log(`coherence OK: UNDERLYING + FEE_ASSET match the manifest asset (${mins()})`)
-
-	// 2. Mint via the handler — the wallet's mint path. The handler's fixed mintAmount must cover the
-	//    floor the manifest promises, or the wallet's own mint button couldn't fund a deposit.
-	const mintAmount = (await pub.readContract({ address: handler, abi: FeeAssetHandlerAbi, functionName: "mintAmount" })) as bigint
-	const balBefore = (await pub.readContract({
-		address: asset,
-		abi: ERC20_MIN,
-		functionName: "balanceOf",
-		args: [account.address],
-	})) as bigint
-	if (balBefore < minFj) {
-		const mintTx = await wallet.writeContract({
-			address: handler,
-			abi: FeeAssetHandlerAbi,
-			functionName: "mint",
-			args: [account.address],
-		})
-		const mintReceipt = await pub.waitForTransactionReceipt({ hash: mintTx })
-		if (mintReceipt.status !== "success") throw new Error("handler mint reverted on-chain")
-		const balAfter = (await pub.readContract({
-			address: asset,
-			abi: ERC20_MIN,
-			functionName: "balanceOf",
-			args: [account.address],
-		})) as bigint
-		console.log(`minted ${balAfter - balBefore} fee asset via handler (mintAmount ${mintAmount}) (${mins()})`)
-		if (balAfter < minFj) throw new Error(`post-mint balance ${balAfter} < minFj ${minFj} — one mint can't fund the floor`)
-	} else {
+/** Mint via the handler — the wallet's mint path. The handler's fixed mintAmount must cover
+ *  the floor the manifest promises, or the wallet's own mint button couldn't fund a deposit. */
+async function ensureFeeAssetFunded(d: CanaryL1): Promise<void> {
+	const readBalance = async () =>
+		(await d.pub.readContract({ address: d.asset, abi: ERC20_MIN_ABI, functionName: "balanceOf", args: [d.owner] })) as bigint
+	const mintAmount = (await d.pub.readContract({ address: d.handler, abi: FeeAssetHandlerAbi, functionName: "mintAmount" })) as bigint
+	const balBefore = await readBalance()
+	if (balBefore >= d.minFj) {
 		console.log(`existing fee-asset balance ${balBefore} covers minFj — skipping mint (mintAmount ${mintAmount})`)
+		return
 	}
+	const mintTx = await d.wallet.writeContract({ address: d.handler, abi: FeeAssetHandlerAbi, functionName: "mint", args: [d.owner] })
+	const mintReceipt = await d.pub.waitForTransactionReceipt({ hash: mintTx })
+	if (mintReceipt.status !== "success") throw new Error("handler mint reverted on-chain")
+	const balAfter = await readBalance()
+	console.log(`minted ${balAfter - balBefore} fee asset via handler (mintAmount ${mintAmount}) (${d.mins()})`)
+	if (balAfter < d.minFj) throw new Error(`post-mint balance ${balAfter} < minFj ${d.minFj} — one mint can't fund the floor`)
+}
 
-	// 3. L2 fresh account first (the deposit binds to its address), sponsored-FPC deploy.
-	const node = createNode(NODE_URL)
-	const ewallet = await createL2Wallet({ nodeUrl: NODE_URL, proverEnabled: true })
-	const { signingKey, secretKey } = await deriveNuloAccountKeys(Fr.random())
-	const manager = await ewallet.createSchnorrAccount(secretKey, Fr.random(), signingKey)
-	const from = (await manager.getAccount()).getAddress()
-	console.log(`L2 recipient ${from.toString()}`)
-	const fpc = await getContractInstanceFromInstantiationParams(SponsoredFPCContract.artifact, { salt: new Fr(SPONSORED_FPC_SALT) })
-	try {
-		await ewallet.registerContract(fpc, SponsoredFPCContract.artifact)
-	} catch {}
-	const sponsoredFee = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
-	// --fresh-selfpay: SKIP the sponsored account deploy so the self-pay claim is the account's FIRST
-	// tx and carries initialization (ctor + instance publication) - the mainnet persona (no sponsor
-	// exists there). Measures the gas shape the steady-state calibration excludes (fable audit H1).
-	const freshSelfPay = process.argv.includes("--fresh-selfpay")
-	if (freshSelfPay) {
-		console.log("FRESH-SELFPAY mode: skipping the sponsored account deploy - the claim must carry init")
-	} else if (!(await node.getContract(from))) {
-		console.log(`deploying L2 account via sponsored FPC (real proof)… (${mins()})`)
-		const deployMethod = await manager.getDeployMethod()
-		await deployMethod.send({ fee: sponsoredFee, from: "NO_FROM" as never } as never)
-		console.log(`L2 account deployed (${mins()})`)
-	}
-
-	// 4. Direct deposit of EXACTLY minFj — approve (allowance-skip, like the wallet) then deposit.
-	const plan = await planPublicFuelDeposit(from, minFj)
-	const allowance = (await pub.readContract({
-		address: asset,
-		abi: ERC20_MIN,
+/** Direct deposit of EXACTLY minFj — approve (allowance-skip, like the wallet) then deposit. */
+async function depositDirectFj(d: CanaryL1, plan: Awaited<ReturnType<typeof planPublicFuelDeposit>>) {
+	const allowance = (await d.pub.readContract({
+		address: d.asset,
+		abi: ERC20_MIN_ABI,
 		functionName: "allowance",
-		args: [account.address, portal],
+		args: [d.owner, d.portal],
 	})) as bigint
-	if (allowance < minFj) {
-		const approveTx = await wallet.writeContract({ address: asset, abi: ERC20_MIN, functionName: "approve", args: [portal, minFj] })
-		const approveReceipt = await pub.waitForTransactionReceipt({ hash: approveTx })
+	if (allowance < d.minFj) {
+		const approveTx = await d.wallet.writeContract({
+			address: d.asset,
+			abi: ERC20_MIN_ABI,
+			functionName: "approve",
+			args: [d.portal, d.minFj],
+		})
+		const approveReceipt = await d.pub.waitForTransactionReceipt({ hash: approveTx })
 		if (approveReceipt.status !== "success") throw new Error("approve reverted on-chain")
 	}
-	const depositTx = await wallet.writeContract({
-		address: portal,
+	const depositTx = await d.wallet.writeContract({
+		address: d.portal,
 		abi: FeeJuicePortalAbi,
 		functionName: "depositToAztecPublic",
 		args: feeJuiceDepositArgs(plan) as never,
 	})
-	const depositReceipt = await pub.waitForTransactionReceipt({ hash: depositTx })
+	const depositReceipt = await d.pub.waitForTransactionReceipt({ hash: depositTx })
 	if (depositReceipt.status !== "success") throw new Error("depositToAztecPublic reverted on-chain")
 	const deposit = parseFeeJuiceDeposit(depositReceipt.logs as never)
-	console.log(`deposited: ${deposit.amount} FJ-wei, leaf ${deposit.leafIndex} (${mins()})`)
-	if (deposit.amount !== minFj) throw new Error(`deposit event amount ${deposit.amount} != minFj ${minFj}`)
+	console.log(`deposited: ${deposit.amount} FJ-wei, leaf ${deposit.leafIndex} (${d.mins()})`)
+	if (deposit.amount !== d.minFj) throw new Error(`deposit event amount ${deposit.amount} != minFj ${d.minFj}`)
+	return deposit
+}
 
-	// 5. The faucet's PUBLIC claim lane — SELF-PAY (fuelClaim.ts, owner call 2026-07-21): claim the bridged
-	//    FJ and pay THIS tx's fee FROM it in one carrier-less zero-app-call tx (BatchCall([]) +
-	//    FeeJuicePaymentMethodWithClaim → claim_and_end_setup in the SETUP phase). No Sponsored FPC — the
-	//    mainnet shape. Setup is the CORRECT home for claim_and_end_setup: the 5.0.0 "149 failed simulates"
-	//    bug was that variant in the APP phase under a sponsored fee; as a fee payload it is valid. This
-	//    canary is what PROVES the zero-app-call + claim_and_end_setup combination live before we ship it.
-	//    Retry until the L1→L2 message syncs (same cadence as fuel-testnet's claim loop).
-	const feeJuice = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, ewallet as never)
-	const fjBalance = async (): Promise<bigint> => {
-		const r = (await feeJuice.methods.balance_of_public(from).simulate({ from })) as { result?: bigint } | bigint
-		return typeof r === "bigint" ? r : (r.result ?? 0n)
-	}
-	const fjBefore = await fjBalance()
+/**
+ * The faucet's PUBLIC claim lane — SELF-PAY (fuelClaim.ts, owner call 2026-07-21): claim the bridged
+ * FJ and pay THIS tx's fee FROM it in one carrier-less zero-app-call tx (BatchCall([]) +
+ * FeeJuicePaymentMethodWithClaim → claim_and_end_setup in the SETUP phase). No Sponsored FPC — the
+ * mainnet shape. Setup is the CORRECT home for claim_and_end_setup: the 5.0.0 "149 failed simulates"
+ * bug was that variant in the APP phase under a sponsored fee; as a fee payload it is valid. This
+ * canary is what PROVES the zero-app-call + claim_and_end_setup combination live before we ship it.
+ * Retries until the L1→L2 message syncs (same cadence as fuel-testnet's claim loop).
+ */
+async function runSelfPayClaim(p: {
+	ewallet: unknown
+	node: ReturnType<typeof createNode>
+	from: AztecAddress
+	deposit: { amount: bigint; leafIndex: number | bigint }
+	claimSecret: Fr
+	mins: () => string
+}): Promise<void> {
 	// predicted-worst maxFeesPerGas (NO padding): a self-pay claim spends the bridged amount as its whole
 	// budget, so any padding inflates max_gas_cost past it and claim_and_end_setup reverts "Amount too low".
-	const worst = await predictedWorstMinFees(node)
+	const worst = await predictedWorstMinFees(p.node)
 	const selfPayFee = {
-		paymentMethod: publicFeeJuicePayment(from, {
-			claimAmount: deposit.amount,
-			claimSecret: plan.secret,
-			messageLeafIndex: BigInt(deposit.leafIndex),
+		paymentMethod: publicFeeJuicePayment(p.from, {
+			claimAmount: p.deposit.amount,
+			claimSecret: p.claimSecret,
+			messageLeafIndex: BigInt(p.deposit.leafIndex),
 		}),
 		gasSettings: {
 			// EXPLICIT gasLimits — the empty BatchCall([]) gives the estimator nothing, so it would default to
@@ -208,8 +164,8 @@ async function main() {
 	let settled = false
 	for (let i = 0; i < 300 && !settled; i++) {
 		try {
-			await new BatchCall(ewallet as never, []).send({
-				from,
+			await new BatchCall(p.ewallet as never, []).send({
+				from: p.from,
 				fee: selfPayFee,
 				wait: { waitForStatus: TxStatus.PROPOSED },
 			} as never)
@@ -217,11 +173,68 @@ async function main() {
 		} catch (e) {
 			// Surface the real error on the retry cadence — a swallowed persistent assert looks identical to a
 			// slow message sync from the outside (the claim_and_end_setup bug hid behind this in 5.0.0).
-			if (i % 10 === 0) console.log(`self-pay claim retry (${mins()}): ${e instanceof Error ? e.message.slice(0, 200) : e}`)
+			if (i % 10 === 0) console.log(`self-pay claim retry (${p.mins()}): ${e instanceof Error ? e.message.slice(0, 200) : e}`)
 			await new Promise((r) => setTimeout(r, 6000))
 		}
 	}
 	if (!settled) throw new Error("direct-FJ SELF-PAY claim never SETTLED within budget")
+}
+
+async function main() {
+	const mins = stopwatch()
+	const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`)
+	const { wallet, pub } = createL1Clients({ chain: sepolia, rpcUrl: SEPOLIA_RPC, account })
+	const l1: CanaryL1 = {
+		wallet,
+		pub,
+		owner: account.address,
+		asset: direct.asset as `0x${string}`,
+		portal: direct.portal as `0x${string}`,
+		handler: direct.feeAssetHandler as `0x${string}`,
+		minFj: BigInt(direct.minFj),
+		mins,
+	}
+	console.log(`direct-FJ lane: asset ${l1.asset} | portal ${l1.portal} | handler ${l1.handler} | minFj ${l1.minFj}`)
+
+	await assertLaneCoherence(l1)
+	await ensureFeeAssetFunded(l1)
+
+	// L2 fresh account first (the deposit binds to its address), sponsored-FPC deploy.
+	const node = createNode(NODE_URL)
+	const ewallet = await createL2Wallet({ nodeUrl: NODE_URL, proverEnabled: true })
+	const { manager, from } = await freshSchnorrAccount(ewallet as never)
+	console.log(`L2 recipient ${from.toString()}`)
+	const { fee: sponsoredFee } = await sponsoredFpcFee(ewallet)
+	// --fresh-selfpay: SKIP the sponsored account deploy so the self-pay claim is the account's FIRST
+	// tx and carries initialization (ctor + instance publication) - the mainnet persona (no sponsor
+	// exists there). Measures the gas shape the steady-state calibration excludes (fable audit H1).
+	if (process.argv.includes("--fresh-selfpay")) {
+		console.log("FRESH-SELFPAY mode: skipping the sponsored account deploy - the claim must carry init")
+	} else {
+		await deployAccountIfAbsent({
+			node,
+			manager: manager as never,
+			from,
+			fee: sponsoredFee,
+			log: (stage) =>
+				console.log(
+					stage === "deploying"
+						? `deploying L2 account via sponsored FPC (real proof)… (${mins()})`
+						: `L2 account deployed (${mins()})`,
+				),
+		})
+	}
+
+	const plan = await planPublicFuelDeposit(from, l1.minFj)
+	const deposit = await depositDirectFj(l1, plan)
+
+	const feeJuice = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, ewallet as never)
+	const fjBalance = async (): Promise<bigint> => {
+		const r = (await feeJuice.methods.balance_of_public(from).simulate({ from })) as { result?: bigint } | bigint
+		return typeof r === "bigint" ? r : (r.result ?? 0n)
+	}
+	const fjBefore = await fjBalance()
+	await runSelfPayClaim({ ewallet, node, from, deposit, claimSecret: plan.secret, mins })
 
 	// SELF-PAY: the claim paid this tx's fee FROM the deposit, so the NET gain is deposit − max_gas_cost
 	// (NOT the full deposit). Assert a positive balance landed strictly below the deposit — the mainnet shape.
