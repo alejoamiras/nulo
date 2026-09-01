@@ -2,7 +2,14 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { appendJournal, type CandidateManifest, readJournal, resolveResume, writeCandidateAtomic } from "./deploy-manifest"
+import {
+	appendJournal,
+	type CandidateManifest,
+	journaledEvmDeploy,
+	readJournal,
+	resolveResume,
+	writeCandidateAtomic,
+} from "./deploy-manifest"
 
 let dir: string
 beforeEach(() => {
@@ -130,5 +137,58 @@ describe("journal + resume", () => {
 		// Once portal-init confirms, resume must treat the generation as locked.
 		appendJournal(j, { phase: "confirmed", step: "portal-init", address: "done" })
 		expect(resolveResume(readJournal(j))?.portalInitialized).toBe(true)
+	})
+
+	it("journaledEvmDeploy writes submitted (with hash) BEFORE the receipt, then confirmed (with address)", async () => {
+		const j = join(dir, "j3.jsonl")
+		const seen: string[] = []
+		const addr = await journaledEvmDeploy(
+			{
+				wallet: {
+					deployContract: async () => {
+						seen.push("deploy")
+						return "0xhash1" as `0x${string}`
+					},
+				},
+				pub: {
+					waitForTransactionReceipt: async ({ hash }) => {
+						// The submitted line must already be durable when the wait begins — that
+						// hash is the crash-recovery key.
+						const phases = readJournal(j).map((e) => `${e.phase}:${e.step}`)
+						expect(phases).toContain("submitted:portal")
+						seen.push(`wait:${hash}`)
+						return { contractAddress: "0xdeadbeef" as `0x${string}` }
+					},
+				},
+			},
+			j,
+			"portal",
+			"NuloTokenPortal",
+			{ abi: [], bytecode: "0x00" },
+			[],
+		)
+		expect(addr).toBe("0xdeadbeef")
+		expect(seen).toEqual(["deploy", "wait:0xhash1"])
+		const confirmed = resolveResume(readJournal(j).concat([{ ts: "", phase: "generation", salts: { proxy: 1, token: 2, bridge: 3 } }]))
+		expect(confirmed?.confirmed.portal).toBe("0xdeadbeef")
+	})
+
+	it("journaledEvmDeploy rejects a receipt without contractAddress and leaves NO confirmed line", async () => {
+		const j = join(dir, "j4.jsonl")
+		await expect(
+			journaledEvmDeploy(
+				{
+					wallet: { deployContract: async () => "0xhash2" as `0x${string}` },
+					pub: { waitForTransactionReceipt: async () => ({ contractAddress: null }) },
+				},
+				j,
+				"usdc",
+				"MintableERC20",
+				{ abi: [], bytecode: "0x00" },
+				[],
+			),
+		).rejects.toThrow(/MintableERC20: no contractAddress/)
+		const entries = readJournal(j)
+		expect(entries.map((e) => e.phase)).toEqual(["submitted"])
 	})
 })

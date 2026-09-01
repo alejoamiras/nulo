@@ -136,3 +136,33 @@ export function resolveResume(journal: JournalEntry[]): GenerationState | null {
 	for (const e of journal) if (e.phase === "confirmed" && e.step) confirmed[e.step] = e.address ?? "done"
 	return { salts: gen.salts, confirmed, portalInitialized: "portal-init" in confirmed }
 }
+
+/** The viem client surface `journaledEvmDeploy` needs — narrow so tests drive it with fakes. */
+export interface EvmDeployClients {
+	wallet: { deployContract: (a: { abi: never; bytecode: `0x${string}`; args: never }) => Promise<`0x${string}`> }
+	pub: { waitForTransactionReceipt: (a: { hash: `0x${string}` }) => Promise<{ contractAddress?: `0x${string}` | null }> }
+}
+
+/**
+ * One journaled EVM contract deploy — the write-ahead bracket both bridge conductors use for
+ * their fresh-deploy path: journal `submitted` with the tx hash BEFORE the receipt is awaited
+ * (the durable recovery key), then `confirmed` with the landed address. Resume/from-journal
+ * short-circuits stay at the call site — this is only the fresh landing.
+ */
+export async function journaledEvmDeploy(
+	clients: EvmDeployClients,
+	journalPath: string,
+	step: string,
+	name: string,
+	art: { abi: unknown; bytecode: `0x${string}` },
+	args: unknown[],
+	log: (address: `0x${string}`) => void = () => {},
+): Promise<`0x${string}`> {
+	const hash = await clients.wallet.deployContract({ abi: art.abi as never, bytecode: art.bytecode, args: args as never })
+	appendJournal(journalPath, { phase: "submitted", step, txHash: hash })
+	const r = await clients.pub.waitForTransactionReceipt({ hash })
+	if (!r.contractAddress) throw new Error(`${name}: no contractAddress`)
+	appendJournal(journalPath, { phase: "confirmed", step, address: r.contractAddress })
+	log(r.contractAddress)
+	return r.contractAddress
+}
