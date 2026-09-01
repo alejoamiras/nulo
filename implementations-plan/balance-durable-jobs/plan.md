@@ -147,10 +147,13 @@ default-token-seeding · account-switch-isolation — plus audit:vue + test:ci-g
 
 - PR-a: 7 directives, 100 → 93, zero inserted (read the regen diff); tx-refresh pins
   green pre+post; store/queue/projector/reconcile suites + fuzz zero-edit.
+  ✅ **#508** — one interim insertion (projectChunk at 21) cut deeper hop-free; codex
+  caught the eager view-fn factory (throw-order change) → kept lazy per job; approve.
 - PR-b: 6 directives, 93 → 87, zero inserted; scenarios/seeder/journal/reaper suites
-  zero-edit.
+  zero-edit. ✅ (opened after #508 merged) — codex approve, no conditions.
 - Codex loop: one session — plan audit (conditional approve, conditions folded above) →
-  PR-a impl review → PR-b impl review → approve.
+  PR-a impl review → PR-b impl review → approve. ✅
+- Lessons: [lessons/phase-1.md](lessons/phase-1.md).
 
 ## Rollback
 

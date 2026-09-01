@@ -40,6 +40,32 @@ export type SeedMarkerEntry = {
 
 type SeedMarkerState = Record<string, SeedMarkerEntry>
 
+/** One seeding pass's captured context: the profile/network it was resolved
+ *  against and the lifecycle guard bound to that capture. */
+type SeedPassContext = {
+	epoch: number
+	profile: { id: string }
+	network: { id: string; chainId: number }
+	seeds: readonly DefaultTokenSeed[]
+	account: { address: string } | undefined
+	state: SeedMarkerState
+	version: string
+	guardsHold: () => Promise<boolean>
+}
+
+/** Sync skip checks for one marker entry; a capped entry under a NEW version
+ *  gets one fresh round (mutated in place). False = skip this seed. */
+function prepareSeedEntry(entry: SeedMarkerEntry, version: string): boolean {
+	if (entry.outcome === "deleted" || entry.outcome === "seeded") return false
+	if (entry.attempts >= SEED_ATTEMPT_CAP && entry.cappedAtVersion === version) return false
+	if (entry.attempts >= SEED_ATTEMPT_CAP) {
+		// New version → one fresh round.
+		entry.attempts = 0
+		entry.cappedAtVersion = undefined
+	}
+	return true
+}
+
 export type SeedPreview = { name: string; symbol: string; decimals: number; interface: TokenInterface }
 
 /**
@@ -183,19 +209,32 @@ export class TokenSeeder {
 		return this.withMarkerLock(() => this.markerStorage(profileId).delete())
 	}
 
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 33) — refactor when touched, never raise
 	private async doRun(): Promise<void> {
+		const ctx = await this.resolveSeedContext()
+		if (!ctx) return
+		for (const seed of ctx.seeds) {
+			const key = seedKey(seed.chainId, seed.contract)
+			const entry = { ...(ctx.state[key] ?? { attempts: 0 }) }
+			if (!prepareSeedEntry(entry, ctx.version)) continue
+			if ((await this.seedOne(ctx, seed, key, entry)) === "abort") return
+		}
+	}
+
+	/** The pass prelude — profile, network, the chain's seed list, the first
+	 *  account, the marker blob, the version — plus the lifecycle guard BOUND to
+	 *  this capture. `undefined` = nothing to do this pass. */
+	private async resolveSeedContext(): Promise<SeedPassContext | undefined> {
 		const epoch = this.epoch
 		const profile = await this.deps.getActiveProfile()
-		if (!profile) return
+		if (!profile) return undefined
 		const network = await this.deps.getActiveNetwork()
-		if (!network) return
+		if (!network) return undefined
 		// Resolved per pass, not at construction: the e2e source reads a list the
 		// test writes after deploying its per-run token. A purge landing during
 		// this await can only make the READ stale — every write below is fenced
 		// by `guardsHold`, which re-checks the epoch.
 		const seeds = (await this.deps.getSeeds()).filter((s) => s.chainId === network.chainId)
-		if (seeds.length === 0) return
+		if (seeds.length === 0) return undefined
 
 		/** Lifecycle guard, re-checked before EVERY write: the pass's captured
 		 *  profile/network must still be current, and no purge may have run
@@ -218,79 +257,83 @@ export class TokenSeeder {
 
 		const state = await this.readMarkerState(profile.id)
 		const version = this.getVersion()
+		return { epoch, profile, network, seeds, account, state, version, guardsHold }
+	}
 
-		for (const seed of seeds) {
-			const key = seedKey(seed.chainId, seed.contract)
-			const entry = { ...(state[key] ?? { attempts: 0 }) }
-
-			if (entry.outcome === "deleted" || entry.outcome === "seeded") continue
-			if (entry.attempts >= SEED_ATTEMPT_CAP && entry.cappedAtVersion === version) continue
-			if (entry.attempts >= SEED_ATTEMPT_CAP) {
-				// New version → one fresh round.
-				entry.attempts = 0
-				entry.cappedAtVersion = undefined
-			}
-
-			if (await this.deps.isTokenPresent(profile.id, seed.chainId, seed.contract)) {
-				if (!(await guardsHold())) return
-				await this.updateMarker(profile.id, key, (existing) => ({ ...existing, outcome: "seeded" }))
-				continue
-			}
-
-			// Zero accounts on this chain: metadata simulation is impossible.
-			// Skip WITHOUT consuming an attempt; retried on the next trigger.
-			if (!account) continue
-
-			if (!(await guardsHold())) return
-			// Attempt recorded BEFORE the risky work — a SW death mid-attempt
-			// still counts toward the cap (no infinite crash-retry loops).
-			entry.attempts += 1
-			if (entry.attempts >= SEED_ATTEMPT_CAP) entry.cappedAtVersion = version
-			await this.updateMarker(profile.id, key, () => ({ ...entry }))
-
-			try {
-				const preview = await this.previewOne(seed, network.id, account.address)
-				if (!preview) continue
-				// Lifecycle guard first: a purge or switch during the slow
-				// preview aborts the whole pass.
-				if (!(await guardsHold())) return
-				// COMMIT happens inside ONE marker-lock critical section:
-				// tombstone re-check, persist, and the seeded-marker write are
-				// indivisible against concurrent marker mutations. Purges bump
-				// the epoch BEFORE queueing on this same lock, so either we see
-				// the bump and abort, or our whole commit lands before the
-				// purge's cleanup (which then sweeps it) — no resurrection
-				// window either way. Direct reads/writes here: updateMarker
-				// would re-acquire the lock and deadlock the promise chain.
-				const committed = await this.withMarkerLock(async () => {
-					if (this.epoch !== epoch) return false
-					const latest = await this.readMarkerState(profile.id)
-					if (latest[key]?.outcome === "deleted") return false
-					await this.deps.persist({
-						profileId: profile.id,
-						networkId: network.id,
-						accountAddress: account.address,
-						tokenInterface: preview.interface,
-						name: preview.name,
-						symbol: preview.symbol,
-						decimals: preview.decimals,
-					})
-					const state = await this.readMarkerState(profile.id)
-					const existing = state[key] ?? { attempts: 0 }
-					state[key] = { ...existing, outcome: "seeded", observedDecimals: preview.decimals }
-					await this.markerStorage(profile.id).set(state)
-					return true
-				})
-				if (!committed && this.epoch !== epoch) return
-				// preview === undefined → pin/bounds rejection: hard skip. The
-				// attempt stays counted; the cap (or a version bump after a
-				// seed-list fix) governs retries.
-			} catch (err) {
-				// Transient failure (network down, RPC error): attempt counted,
-				// retried next trigger until the cap.
-				this.log(LogLevel.Warn, `seed ${key} failed`, getErrorMessage(err))
-			}
+	/** One seed's pass, entered only after the sync skip checks — its first op is
+	 *  the awaited presence read, so the caller's await replaces its own. "abort"
+	 *  ends the whole pass (a lifecycle guard tripped). */
+	private async seedOne(
+		ctx: SeedPassContext,
+		seed: DefaultTokenSeed,
+		key: string,
+		entry: SeedMarkerEntry,
+	): Promise<"continue" | "abort"> {
+		const { profile, network, account, version, guardsHold } = ctx
+		if (await this.deps.isTokenPresent(profile.id, seed.chainId, seed.contract)) {
+			if (!(await guardsHold())) return "abort"
+			await this.updateMarker(profile.id, key, (existing) => ({ ...existing, outcome: "seeded" }))
+			return "continue"
 		}
+
+		// Zero accounts on this chain: metadata simulation is impossible.
+		// Skip WITHOUT consuming an attempt; retried on the next trigger.
+		if (!account) return "continue"
+
+		if (!(await guardsHold())) return "abort"
+		// Attempt recorded BEFORE the risky work — a SW death mid-attempt
+		// still counts toward the cap (no infinite crash-retry loops).
+		entry.attempts += 1
+		if (entry.attempts >= SEED_ATTEMPT_CAP) entry.cappedAtVersion = version
+		await this.updateMarker(profile.id, key, () => ({ ...entry }))
+
+		try {
+			const preview = await this.previewOne(seed, network.id, account.address)
+			if (!preview) return "continue"
+			// Lifecycle guard first: a purge or switch during the slow
+			// preview aborts the whole pass.
+			if (!(await guardsHold())) return "abort"
+			const committed = await this.commitSeedResult(ctx, account, key, preview)
+			if (!committed && this.epoch !== ctx.epoch) return "abort"
+			// preview === undefined → pin/bounds rejection: hard skip. The
+			// attempt stays counted; the cap (or a version bump after a
+			// seed-list fix) governs retries.
+		} catch (err) {
+			// Transient failure (network down, RPC error): attempt counted,
+			// retried next trigger until the cap.
+			this.log(LogLevel.Warn, `seed ${key} failed`, getErrorMessage(err))
+		}
+		return "continue"
+	}
+
+	/** COMMIT happens inside ONE marker-lock critical section: tombstone
+	 *  re-check, persist, and the seeded-marker write are indivisible against
+	 *  concurrent marker mutations. Purges bump the epoch BEFORE queueing on this
+	 *  same lock, so either we see the bump and abort, or our whole commit lands
+	 *  before the purge's cleanup (which then sweeps it) — no resurrection window
+	 *  either way. Direct reads/writes here: updateMarker would re-acquire the
+	 *  lock and deadlock the promise chain — never decompose this block further. */
+	private commitSeedResult(ctx: SeedPassContext, account: { address: string }, key: string, preview: SeedPreview): Promise<boolean> {
+		const { profile, network, epoch } = ctx
+		return this.withMarkerLock(async () => {
+			if (this.epoch !== epoch) return false
+			const latest = await this.readMarkerState(profile.id)
+			if (latest[key]?.outcome === "deleted") return false
+			await this.deps.persist({
+				profileId: profile.id,
+				networkId: network.id,
+				accountAddress: account.address,
+				tokenInterface: preview.interface,
+				name: preview.name,
+				symbol: preview.symbol,
+				decimals: preview.decimals,
+			})
+			const state = await this.readMarkerState(profile.id)
+			const existing = state[key] ?? { attempts: 0 }
+			state[key] = { ...existing, outcome: "seeded", observedDecimals: preview.decimals }
+			await this.markerStorage(profile.id).set(state)
+			return true
+		})
 	}
 
 	/**

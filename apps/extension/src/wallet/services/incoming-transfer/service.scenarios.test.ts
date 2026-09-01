@@ -4150,3 +4150,114 @@ describe("IncomingTransferService — public arm post-park epoch discipline", ()
 		expect(outboxFor()).toBeUndefined()
 	})
 })
+
+// ── Seam pins (round-2 plan 4, codex conditions) — pre-extraction, byte-identical
+//    across the refactor commits. They fence the register-immediately spans the
+//    decomposition must not split: D4 outbox-before-record in both arms, trust
+//    write-before-emit, and the ticket `isCurrent()` read fresh at write time. ──
+
+describe("IncomingTransferService — seam pins (D4 order, trust order, fresh isCurrent)", () => {
+	function seedTrusted() {
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+	}
+
+	test("(D4 ORDER, note arm) the outbox row is written BEFORE the record", async () => {
+		const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
+		const token = makeTokenStub([tokenA])
+		const noteSvc = makeNoteStub({ [tokenA.contract]: [note()] })
+		const { service } = await bootService({ network, token, note: noteSvc })
+		seedTrusted()
+		const outboxSet = vi.spyOn(outbox, "set")
+		const recordSet = vi.spyOn(records, "set")
+		try {
+			await scan(service)
+			expect(outboxSet).toHaveBeenCalledTimes(1)
+			expect(recordSet).toHaveBeenCalledTimes(1)
+			expect(outboxSet.mock.invocationCallOrder[0]).toBeLessThan(recordSet.mock.invocationCallOrder[0])
+		} finally {
+			outboxSet.mockRestore()
+			recordSet.mockRestore()
+		}
+	})
+
+	test("(D4 ORDER, public arm) the outbox row is written BEFORE the record", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		seedTrusted()
+		state.responses.push(pubPage([pubEvent({ txHash: "0xorder" })]))
+		const outboxSet = vi.spyOn(outbox, "set")
+		const recordSet = vi.spyOn(records, "set")
+		try {
+			await scanPublic(service)
+			expect(outboxSet).toHaveBeenCalledTimes(1)
+			expect(recordSet).toHaveBeenCalledTimes(1)
+			expect(outboxSet.mock.invocationCallOrder[0]).toBeLessThan(recordSet.mock.invocationCallOrder[0])
+		} finally {
+			outboxSet.mockRestore()
+			recordSet.mockRestore()
+		}
+	})
+
+	test("(TRUST ORDER) unknown→pending persists the trust row BEFORE onIncomingTrustChanged fires", async () => {
+		const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
+		const token = makeTokenStub([tokenA])
+		const noteSvc = makeNoteStub({ [tokenA.contract]: [note()] })
+		const { service } = await bootService({ network, token, note: noteSvc })
+		const seenAtEmit: string[] = []
+		const changed = vi.fn(() => {
+			seenAtEmit.push(trust.get(trustKey("p1", "n1", tokenA.contract))?.state ?? "absent")
+		})
+		service.onIncomingTrustChanged.add(changed)
+		const trustSet = vi.spyOn(trust, "set")
+		try {
+			await scan(service)
+			expect(trustSet).toHaveBeenCalledTimes(1)
+			expect(changed).toHaveBeenCalledTimes(1)
+			expect(trustSet.mock.invocationCallOrder[0]).toBeLessThan(changed.mock.invocationCallOrder[0])
+			expect(seenAtEmit).toEqual(["pending"])
+		} finally {
+			trustSet.mockRestore()
+		}
+	})
+
+	test("(FRESH isCurrent) an anchored terminal-success row displaced while getOutbox awaits is NOT deleted", async () => {
+		// The drain's per-row critical section parks on `await repo.getOutbox`
+		// while HOLDING the serviceLock; the lock's watchdog hands the ticket
+		// over; the revoked CS resumes with a terminal-success anchor and must
+		// re-read `isCurrent()` at the write — a helper that cached the ticket
+		// verdict before the await would delete the row here.
+		vi.useFakeTimers()
+		try {
+			const { reader, state } = makePublicReader()
+			const tokenBalance = makeTokenBalanceStub()
+			const task = makeTaskStub()
+			const { service } = await bootPublic(reader, state, { tokenBalance, task })
+			outbox.set("p1|n1|0xa|1", { dirtyAt: 100, pendingTaskId: "T1" })
+			task.setTask("T1", TaskStatus.Completed, Date.now())
+			let releaseRow!: () => void
+			const parked = new Promise<unknown>((resolve) => {
+				releaseRow = () => resolve({ dirtyAt: 100, pendingTaskId: "T1" })
+			})
+			const getSpy = vi.spyOn(outbox, "get").mockImplementationOnce(() => parked as never)
+			try {
+				const drainP = drain(service) // parks inside getOutbox, serviceLock held
+				await vi.advanceTimersByTimeAsync(0)
+				// Watchdog handoff → the parked CS's ticket is revoked.
+				await vi.advanceTimersByTimeAsync(5 * 60_000 + 1)
+				releaseRow()
+				await drainP
+			} finally {
+				getSpy.mockRestore()
+			}
+			expect(outboxFor()?.pendingTaskId).toBe("T1") // the revoked CS wrote nothing
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+})

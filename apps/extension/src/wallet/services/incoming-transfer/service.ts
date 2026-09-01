@@ -49,6 +49,39 @@ export * from "./spec"
  *  + PXE sync cadence. */
 const DEFAULT_POLL_INTERVAL_MS = 30_000
 
+/** One scan's capture for its per-note critical sections: the scope, the
+ *  lifecycle epoch taken before any await, and the scan-scoped timestamp cache. */
+type NoteScanContext = {
+	profileId: string
+	networkId: string
+	accountAddress: string
+	contract: string
+	chainId: number
+	epochAtStart: number
+	blockTimestampFor: (blockNumber: number) => Promise<number | undefined>
+}
+
+/** One public receipt's capture for its locked commit. */
+type PublicEventContext = {
+	profileId: string
+	networkId: string
+	contract: string
+	chainId: number
+	account: string
+	epochAtStart: number
+}
+
+type OutboxRowKey = { profileId: string; networkId: string; accountAddress: string; tokenId: number }
+type RefreshRequestResult = { taskId: string } | { busy: true } | { missing: true }
+
+/** What an anchored outbox row's task state asks of the drain: terminal-success
+ *  deletes the row, terminal-failure/missing clears the anchor, pending waits. */
+function anchoredRowAction(state: "success" | "failure" | "pending" | "missing"): "delete" | "clear" | "wait" {
+	if (state === "success") return "delete"
+	if (state === "failure" || state === "missing") return "clear"
+	return "wait"
+}
+
 /**
  * IncomingTransferService — surfaces decrypted notes that arrived from known
  * fungible-token contracts as "Received" rows in the activity feed.
@@ -1072,105 +1105,132 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		// Note: only the FIRST note in this poll that observes `unknown`
 		// triggers the unknown→pending transition + Pending emit. Subsequent
 		// notes find `pending` and skip the emit (sticky pending semantic).
+		const ctx: NoteScanContext = {
+			profileId,
+			networkId,
+			accountAddress,
+			contract,
+			chainId: network.chainId,
+			epochAtStart,
+			blockTimestampFor,
+		}
 		for (const note of notes) {
 			if (!note.siloedNullifier) continue
-			// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 47) — refactor when touched, never raise
-			await this.withServiceLock(async () => {
-				// Lifecycle-cancel guard.
-				if (this.serviceEpoch !== epochAtStart) return
-
-				// Live re-reads INSIDE the lock.
-				const tokens = await this.tokenService.getTokensRaw(profileId)
-				const token = tokens.find((t) => t.contract === contract && t.chainId === network.chainId)
-				if (!token) return // Token removed concurrently.
-
-				// Re-read tx-suppression sets live. The outer-scan-loop
-				// approach would stale these between notes if onTransactionAdded
-				// fires mid-scan (codex R1 M1 / R2 confirmation).
-				const outgoingTxHashes = await this.collectOutgoingTxHashes(profileId, networkId, network.chainId, accountAddress)
-				const inflightTxHashes = await this.collectInflightTxHashes(profileId, networkId, accountAddress)
-
-				// Existing-record branch: backfill blockTimestamp if missing.
-				const existing = await this.repo.getRecord(noteRecordId(profileId, networkId, note.siloedNullifier))
-				if (existing) {
-					if (existing.blockTimestamp === undefined) {
-						const ts = await blockTimestampFor(note.l2BlockNumber)
-						// The PXE-bound await above is the CS's park point: a lock
-						// watchdog handoff there lets a destructive lifecycle bumper
-						// (purge/delete) run to completion — writing after it would
-						// resurrect what it wiped. Re-check before the write.
-						if (this.serviceEpoch !== epochAtStart) return
-						if (ts !== undefined) {
-							await this.repo.upsertRecord({ ...existing, blockTimestamp: ts })
-						}
-					}
-					return
-				}
-
-				if (outgoingTxHashes.has(note.txHash)) return
-				if (inflightTxHashes.has(note.txHash)) return
-				const amountRaw = parseNoteAmount(note)
-				if (amountRaw === null) return
-
-				// Read trust FRESH inside the lock — kills the residual race
-				// codex audit-6 identified (the LOCAL trustState going stale
-				// across PXE await chains in the prior design).
-				const liveTrust = (await this.repo.getTrust(profileId, networkId, contract))?.state ?? "unknown"
-				let trustState = liveTrust
-
-				// First-receive: transition unknown → pending and emit the
-				// pending event so the popup can prompt the user. Visibility
-				// gate respects the user's `incomingTransfersVisible` toggle.
-				if (trustState === "unknown") {
-					const updated = await this.repo.setTrust(profileId, networkId, contract, "pending")
-					this.emit("onIncomingTrustChanged", updated)
-					trustState = "pending"
-					if (await this.isVisibilityEnabled()) {
-						this.emit("onIncomingTransferPending", {
-							profileId,
-							networkId,
-							accountAddress,
-							contract,
-							tokenId: token.id,
-							tokenSymbol: token.symbol,
-							tokenDecimals: token.decimals,
-							amountRaw,
-						})
-					}
-				}
-
-				const blockTimestamp = await blockTimestampFor(note.l2BlockNumber)
-				// Same park-point discipline as the backfill branch: nothing may be
-				// written (outbox row, record, Added emit) after a mid-await epoch
-				// move — the other awaits in this CS are fast storage/config reads,
-				// and every DESTRUCTIVE bumper holds this lock, so the two PXE-bound
-				// awaits are the only revocation windows that matter.
-				if (this.serviceEpoch !== epochAtStart) return
-				const record = this.buildRecord({
-					note,
-					profileId,
-					networkId,
-					accountAddress,
-					token,
-					amountRaw,
-					trustState,
-					blockTimestamp,
-				})
-				// D4 write-side (both arms): the outbox row is written BEFORE the record. A discovered
-				// note changed the chain-factual balance regardless of trust/display state.
-				await this.markBalanceDirty(profileId, networkId, accountAddress, token.id)
-				await this.repo.upsertRecord(record)
-
-				if (trustState === "trusted" && (await this.isVisibilityEnabled())) {
-					this.emit("onIncomingTransferAdded", record)
-				}
-				// pending / blocked: record persisted hidden, no Added emit.
-			})
+			await this.withServiceLock(() => this.commitScannedNote(ctx, note))
 		}
 
 		// Tell the test the parked scan's locked commit is done (the late emission,
 		// if any, has fired) — its precondition before asserting cross-account isolation.
 		if (heldTxHash) await this.incomingPollGate?.markCommitted(heldTxHash)
+	}
+
+	/** The per-note locked critical section (hoisted so its branches sit at
+	 *  nesting depth 0; the lock callback invokes it directly). */
+	private async commitScannedNote(ctx: NoteScanContext, note: RawNote): Promise<void> {
+		const { profileId, networkId, accountAddress, contract, chainId, epochAtStart } = ctx
+		// Lifecycle-cancel guard.
+		if (this.serviceEpoch !== epochAtStart) return
+
+		// Live re-reads INSIDE the lock.
+		const tokens = await this.tokenService.getTokensRaw(profileId)
+		const token = tokens.find((t) => t.contract === contract && t.chainId === chainId)
+		if (!token) return // Token removed concurrently.
+
+		// Re-read tx-suppression sets live. The outer-scan-loop
+		// approach would stale these between notes if onTransactionAdded
+		// fires mid-scan (codex R1 M1 / R2 confirmation).
+		const outgoingTxHashes = await this.collectOutgoingTxHashes(profileId, networkId, chainId, accountAddress)
+		const inflightTxHashes = await this.collectInflightTxHashes(profileId, networkId, accountAddress)
+
+		// Existing-record branch: backfill blockTimestamp if missing.
+		const existing = await this.repo.getRecord(noteRecordId(profileId, networkId, note.siloedNullifier))
+		if (existing) {
+			if (existing.blockTimestamp === undefined) await this.backfillNoteTimestamp(ctx, existing, note)
+			return
+		}
+
+		if (outgoingTxHashes.has(note.txHash)) return
+		if (inflightTxHashes.has(note.txHash)) return
+		const amountRaw = parseNoteAmount(note)
+		if (amountRaw === null) return
+
+		const trustState = await this.resolveNoteTrust(ctx, token, amountRaw)
+		await this.commitDiscoveredNote(ctx, note, token, amountRaw, trustState)
+	}
+
+	/** The PXE-bound await here is the CS's park point: a lock watchdog handoff
+	 *  there lets a destructive lifecycle bumper (purge/delete) run to
+	 *  completion — writing after it would resurrect what it wiped. Re-check
+	 *  before the write. */
+	private async backfillNoteTimestamp(ctx: NoteScanContext, existing: IncomingTransferRecord, note: RawNote): Promise<void> {
+		const ts = await ctx.blockTimestampFor(note.l2BlockNumber)
+		if (this.serviceEpoch !== ctx.epochAtStart) return
+		if (ts !== undefined) {
+			await this.repo.upsertRecord({ ...existing, blockTimestamp: ts })
+		}
+	}
+
+	/** Read trust FRESH inside the lock — kills the residual race codex audit-6
+	 *  identified (the LOCAL trustState going stale across PXE await chains in
+	 *  the prior design). First-receive: transition unknown → pending (the
+	 *  setTrust write and the trust-changed emit are one sync pair) and emit
+	 *  the pending event so the popup can prompt the user; the visibility gate
+	 *  respects the user's `incomingTransfersVisible` toggle. */
+	private async resolveNoteTrust(ctx: NoteScanContext, token: Token, amountRaw: string): Promise<IncomingTrustState> {
+		const { profileId, networkId, accountAddress, contract } = ctx
+		const liveTrust = (await this.repo.getTrust(profileId, networkId, contract))?.state ?? "unknown"
+		if (liveTrust !== "unknown") return liveTrust
+		const updated = await this.repo.setTrust(profileId, networkId, contract, "pending")
+		this.emit("onIncomingTrustChanged", updated)
+		if (await this.isVisibilityEnabled()) {
+			this.emit("onIncomingTransferPending", {
+				profileId,
+				networkId,
+				accountAddress,
+				contract,
+				tokenId: token.id,
+				tokenSymbol: token.symbol,
+				tokenDecimals: token.decimals,
+				amountRaw,
+			})
+		}
+		return "pending"
+	}
+
+	/** Same park-point discipline as the backfill branch: nothing may be
+	 *  written (outbox row, record, Added emit) after a mid-await epoch move —
+	 *  the other awaits in this CS are fast storage/config reads, and every
+	 *  DESTRUCTIVE bumper holds this lock, so the two PXE-bound awaits are the
+	 *  only revocation windows that matter. D4 write-side (both arms): the
+	 *  outbox row is written BEFORE the record — a discovered note changed the
+	 *  chain-factual balance regardless of trust/display state. */
+	private async commitDiscoveredNote(
+		ctx: NoteScanContext,
+		note: RawNote,
+		token: Token,
+		amountRaw: string,
+		trustState: IncomingTrustState,
+	): Promise<void> {
+		const { profileId, networkId, accountAddress, epochAtStart } = ctx
+		const blockTimestamp = await ctx.blockTimestampFor(note.l2BlockNumber)
+		if (this.serviceEpoch !== epochAtStart) return
+		const record = this.buildRecord({
+			note,
+			profileId,
+			networkId,
+			accountAddress,
+			token,
+			amountRaw,
+			trustState,
+			blockTimestamp,
+		})
+		await this.markBalanceDirty(profileId, networkId, accountAddress, token.id)
+		await this.repo.upsertRecord(record)
+
+		if (trustState === "trusted" && (await this.isVisibilityEnabled())) {
+			this.emit("onIncomingTransferAdded", record)
+		}
+		// pending / blocked: record persisted hidden, no Added emit.
 	}
 
 	/** Visibility check used by both initial-load (`getIncomingTransfers`)
@@ -1789,80 +1849,111 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		epochAtStart: number,
 		opts?: { reconcile?: boolean },
 	): Promise<void> {
-		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 35) — refactor when touched, never raise
-		await this.withServiceLock(async () => {
-			if (this.serviceEpoch !== epochAtStart) return
-			const tokens = await this.tokenService.getTokensRaw(profileId)
-			// Every awaited read in this CS can park across a watchdog handoff that
-			// admits a wipe (clearProfile/onTokenDeleted bump + purge); re-check the
-			// epoch after each read block, before any write — the note arm's own
-			// post-park discipline, which this newer arm originally lacked.
-			if (this.serviceEpoch !== epochAtStart) return
-			const token = tokens.find((t) => t.contract === contract && t.chainId === chainId)
-			if (!token) return // token removed concurrently
+		const ctx: PublicEventContext = { profileId, networkId, contract, chainId, account, epochAtStart }
+		await this.withServiceLock(() => this.commitPublicEventLocked(ctx, ev, opts))
+	}
 
-			const id = publicRecordId(profileId, networkId, ev.txHash, ev.logIndexWithinTx)
-			const existing = await this.repo.getRecord(id)
-			if (this.serviceEpoch !== epochAtStart) return
-			if (existing) {
-				// A reorg can re-mine the same tx (same PK) at a NEW block — update the chain fields so
-				// the reconciliation's blockHash comparison keeps it instead of deleting it.
-				if (opts?.reconcile && existing.kind === "public-event" && existing.blockHash !== ev.blockHash) {
-					await this.repo.upsertRecord({
-						...existing,
-						blockHash: ev.blockHash,
-						l2BlockNumber: ev.l2BlockNumber,
-						txIndexInBlock: ev.txIndexWithinBlock,
-						indexInTx: ev.logIndexWithinTx,
-						blockTimestamp: ev.blockTimestamp,
-					})
-				}
-				return
+	/** The per-event locked critical section. Every awaited read in it can park
+	 *  across a watchdog handoff that admits a wipe (clearProfile/onTokenDeleted
+	 *  bump + purge); the epoch is re-checked after each read block, before any
+	 *  write — the note arm's own post-park discipline, which this newer arm
+	 *  originally lacked. */
+	private async commitPublicEventLocked(ctx: PublicEventContext, ev: PublicTransferEvent, opts?: { reconcile?: boolean }): Promise<void> {
+		const { profileId, networkId, contract, chainId, epochAtStart } = ctx
+		if (this.serviceEpoch !== epochAtStart) return
+		const tokens = await this.tokenService.getTokensRaw(profileId)
+		if (this.serviceEpoch !== epochAtStart) return
+		const token = tokens.find((t) => t.contract === contract && t.chainId === chainId)
+		if (!token) return // token removed concurrently
+
+		const id = publicRecordId(profileId, networkId, ev.txHash, ev.logIndexWithinTx)
+		const existing = await this.repo.getRecord(id)
+		if (this.serviceEpoch !== epochAtStart) return
+		if (existing) {
+			// A reorg can re-mine the same tx (same PK) at a NEW block — update the chain fields so
+			// the reconciliation's blockHash comparison keeps it instead of deleting it.
+			if (opts?.reconcile && existing.kind === "public-event" && existing.blockHash !== ev.blockHash) {
+				await this.repo.upsertRecord({
+					...existing,
+					blockHash: ev.blockHash,
+					l2BlockNumber: ev.l2BlockNumber,
+					txIndexInBlock: ev.txIndexWithinBlock,
+					indexInTx: ev.logIndexWithinTx,
+					blockTimestamp: ev.blockTimestamp,
+				})
 			}
+			return
+		}
 
-			// 3-source dedupe: own outgoing tx hashes, in-flight journal txHash (existing record was
-			// checked above).
-			const outgoing = await this.collectOutgoingTxHashes(profileId, networkId, chainId, account)
-			if (outgoing.has(ev.txHash)) return
-			const inflight = await this.collectInflightTxHashes(profileId, networkId, account)
-			if (inflight.has(ev.txHash)) return
-			if (this.serviceEpoch !== epochAtStart) return
+		if (await this.isDedupedPublicEvent(ctx, ev.txHash)) return
+		const trustState = await this.resolvePublicTrust(ctx, token, ev)
+		if (trustState === undefined) return
+		if (this.serviceEpoch !== epochAtStart) return
+		await this.commitPublicRecord(ctx, ev, token, trustState)
+	}
 
-			let trustState = (await this.repo.getTrust(profileId, networkId, contract))?.state ?? "unknown"
-			if (this.serviceEpoch !== epochAtStart) return
-			if (trustState === "unknown") {
-				const updated = await this.repo.setTrust(profileId, networkId, contract, "pending")
-				this.emit("onIncomingTrustChanged", updated)
-				trustState = "pending"
-				if (await this.isVisibilityEnabled()) {
-					this.emit("onIncomingTransferPending", {
-						profileId,
-						networkId,
-						accountAddress: account,
-						contract,
-						tokenId: token.id,
-						tokenSymbol: token.symbol,
-						tokenDecimals: token.decimals,
-						amountRaw: ev.amountRaw,
-					})
-				}
-			}
-			if (this.serviceEpoch !== epochAtStart) return
+	/** 3-source dedupe (the existing-record check ran before this): own outgoing
+	 *  tx hashes, then the in-flight journal txHash, then the post-read epoch
+	 *  re-check. True = stand down. */
+	private async isDedupedPublicEvent(ctx: PublicEventContext, txHash: string): Promise<boolean> {
+		const { profileId, networkId, chainId, account } = ctx
+		const outgoing = await this.collectOutgoingTxHashes(profileId, networkId, chainId, account)
+		if (outgoing.has(txHash)) return true
+		const inflight = await this.collectInflightTxHashes(profileId, networkId, account)
+		if (inflight.has(txHash)) return true
+		return this.serviceEpoch !== ctx.epochAtStart
+	}
 
-			// D4 write-side: the outbox row is written BEFORE the record (ordering + idempotent replay
-			// substitute for a multi-key transaction). Trust-independent — a hidden receipt still
-			// changed the chain balance.
-			await this.markBalanceDirty(profileId, networkId, account, token.id)
-			// A wipe admitted during the dirty-mark's await must not land the record
-			// AFTER the purge enumerated rows; aborting here leaves dirty-without-
-			// record, which D4's ordering already tolerates (the drain heals it).
-			if (this.serviceEpoch !== epochAtStart) return
-			const record = this.buildPublicRecord({ ev, profileId, networkId, account, token, trustState })
-			await this.repo.upsertRecord(record)
-			if (trustState === "trusted" && (await this.isVisibilityEnabled()) && this.serviceEpoch === epochAtStart) {
-				this.emit("onIncomingTransferAdded", record)
-			}
-		})
+	/** Trust read fresh inside the lock, with this arm's post-read epoch
+	 *  re-check (undefined = stand down). First-receive transitions unknown →
+	 *  pending (the setTrust write and the trust-changed emit are one sync
+	 *  pair) and emits the visibility-gated Pending event. */
+	private async resolvePublicTrust(
+		ctx: PublicEventContext,
+		token: Token,
+		ev: PublicTransferEvent,
+	): Promise<IncomingTrustState | undefined> {
+		const { profileId, networkId, contract, account } = ctx
+		const trustState = (await this.repo.getTrust(profileId, networkId, contract))?.state ?? "unknown"
+		if (this.serviceEpoch !== ctx.epochAtStart) return undefined
+		if (trustState !== "unknown") return trustState
+		const updated = await this.repo.setTrust(profileId, networkId, contract, "pending")
+		this.emit("onIncomingTrustChanged", updated)
+		if (await this.isVisibilityEnabled()) {
+			this.emit("onIncomingTransferPending", {
+				profileId,
+				networkId,
+				accountAddress: account,
+				contract,
+				tokenId: token.id,
+				tokenSymbol: token.symbol,
+				tokenDecimals: token.decimals,
+				amountRaw: ev.amountRaw,
+			})
+		}
+		return "pending"
+	}
+
+	/** D4 write-side: the outbox row is written BEFORE the record (ordering +
+	 *  idempotent replay substitute for a multi-key transaction).
+	 *  Trust-independent — a hidden receipt still changed the chain balance. A
+	 *  wipe admitted during the dirty-mark's await must not land the record AFTER
+	 *  the purge enumerated rows; aborting there leaves dirty-without-record,
+	 *  which D4's ordering already tolerates (the drain heals it). */
+	private async commitPublicRecord(
+		ctx: PublicEventContext,
+		ev: PublicTransferEvent,
+		token: Token,
+		trustState: IncomingTrustState,
+	): Promise<void> {
+		const { profileId, networkId, account, epochAtStart } = ctx
+		await this.markBalanceDirty(profileId, networkId, account, token.id)
+		if (this.serviceEpoch !== epochAtStart) return
+		const record = this.buildPublicRecord({ ev, profileId, networkId, account, token, trustState })
+		await this.repo.upsertRecord(record)
+		if (trustState === "trusted" && (await this.isVisibilityEnabled()) && this.serviceEpoch === epochAtStart) {
+			this.emit("onIncomingTransferAdded", record)
+		}
 	}
 
 	private buildPublicRecord(params: {
@@ -1937,65 +2028,89 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			if (profileId !== profile.id) continue // active-profile-scoped (codex R2-followup-2 #1)
 			const tokenId = Number(tokenIdStr)
 			if (!Number.isInteger(tokenId)) continue
-			// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 47) — refactor when touched, never raise
-			await this.withServiceLock(async (isCurrent) => {
-				const current = await this.repo.getOutbox(profileId, networkId, accountAddress, tokenId)
-				if (!current) return
-				// Every write below is guarded by `isCurrent()`: a watchdog handoff
-				// admits a receipt writer whose fresher dirtyAt this displaced section
-				// must not clobber (an anchor overwrite here launders the new receipt
-				// into a PRE-receipt task's causality; the next drain's success-delete
-				// then drops the sole refresh marker — permanent until an unrelated
-				// refresh). The ticket flips on ANY successor acquisition, so a
-				// displaced drain stands down at the first write.
-				if (current.pendingTaskId) {
-					const state = this.readTaskState(current.pendingTaskId)
-					if (state === "success") {
-						if (!isCurrent()) return
-						await this.repo.deleteOutbox(profileId, networkId, accountAddress, tokenId)
-					} else if (state === "failure" || state === "missing") {
-						if (!isCurrent()) return
-						await this.repo.setOutbox(profileId, networkId, accountAddress, tokenId, { dirtyAt: current.dirtyAt })
-					}
-					// pending → keep waiting for the anchored task.
-					return
-				}
-				let result: { taskId: string } | { busy: true } | { missing: true }
-				try {
-					result = await this.tokenBalanceService.requestBalanceRefresh(tokenId, accountAddress)
-				} catch (error) {
-					// TRANSIENT failure (storage/task), NOT a missing pair — keep the row + retry next
-					// drain. Deleting here would lose the only durable refresh marker (codex R1 High #4).
-					this.logWarn(`drainBalanceOutbox: refresh request failed transiently, keeping row: ${getErrorMessage(error)}`)
-					return
-				}
-				if ("missing" in result) {
-					// The (token, account) balance pair is positively gone (removed) → delete the stale row.
-					if (!isCurrent()) return
-					await this.repo.deleteOutbox(profileId, networkId, accountAddress, tokenId)
-					return
-				}
-				if ("taskId" in result) {
-					// Re-read at commit: a wipe (row gone) or a fresh markBalanceDirty bump
-					// (dirtyAt moved) during the refresh await must not be overwritten with
-					// this older snapshot — stand down and let the next drain see the row's
-					// new state. Writing anyway would anchor stale dirt to the minted task.
-					// The receipt writer can only interleave by ACQUIRING the lock (a
-					// watchdog handoff), which flips the ticket — so the `isCurrent()`
-					// check below is a true guard, not a smaller race window: either the
-					// receipt landed before it (ticket flipped → stand down) or its write
-					// is dispatched after this set and last-writer-wins is the receipt.
-					const fresh = await this.repo.getOutbox(profileId, networkId, accountAddress, tokenId)
-					if (!fresh || fresh.dirtyAt !== current.dirtyAt) return
-					if (!isCurrent()) return
-					await this.repo.setOutbox(profileId, networkId, accountAddress, tokenId, {
-						dirtyAt: current.dirtyAt,
-						pendingTaskId: result.taskId,
-					})
-				}
-				// busy → keep the row unanchored; a later drain mints a fresh post-`dirtyAt` task.
-			})
+			const row: OutboxRowKey = { profileId, networkId, accountAddress, tokenId }
+			await this.withServiceLock((isCurrent) => this.drainOutboxRow(row, isCurrent))
 		}
+	}
+
+	/** The per-row locked drain. Every write is guarded by `isCurrent()`, read
+	 *  fresh immediately before the write dispatch: a watchdog handoff admits a
+	 *  receipt writer whose fresher dirtyAt this displaced section must not
+	 *  clobber (an anchor overwrite here launders the new receipt into a
+	 *  PRE-receipt task's causality; the next drain's success-delete then drops
+	 *  the sole refresh marker — permanent until an unrelated refresh). The
+	 *  ticket flips on ANY successor acquisition, so a displaced drain stands
+	 *  down at the first write. */
+	private async drainOutboxRow(row: OutboxRowKey, isCurrent: () => boolean): Promise<void> {
+		const { profileId, networkId, accountAddress, tokenId } = row
+		const current = await this.repo.getOutbox(profileId, networkId, accountAddress, tokenId)
+		if (!current) return
+		if (current.pendingTaskId) {
+			const action = anchoredRowAction(this.readTaskState(current.pendingTaskId))
+			// pending → keep waiting for the anchored task.
+			if (action !== "wait" && isCurrent()) await this.settleAnchoredRow(row, current, action)
+			return
+		}
+		const result = await this.requestRefreshOrKeep(tokenId, accountAddress)
+		if (!result) return
+		if ("missing" in result) {
+			// The (token, account) balance pair is positively gone (removed) → delete the stale row.
+			if (!isCurrent()) return
+			await this.repo.deleteOutbox(profileId, networkId, accountAddress, tokenId)
+			return
+		}
+		if ("taskId" in result) await this.anchorFreshTask(row, current, result.taskId, isCurrent)
+		// busy → keep the row unanchored; a later drain mints a fresh post-`dirtyAt` task.
+	}
+
+	/** Terminal-success → delete the row; terminal-failure/missing → clear the
+	 *  anchor so the next drain re-requests. Entered only after `isCurrent()`. */
+	private async settleAnchoredRow(row: OutboxRowKey, current: IncomingBalanceOutboxRow, action: "delete" | "clear"): Promise<void> {
+		const { profileId, networkId, accountAddress, tokenId } = row
+		if (action === "delete") {
+			await this.repo.deleteOutbox(profileId, networkId, accountAddress, tokenId)
+		} else {
+			await this.repo.setOutbox(profileId, networkId, accountAddress, tokenId, { dirtyAt: current.dirtyAt })
+		}
+	}
+
+	/** `requestBalanceRefresh` with a TRANSIENT throw (storage/task, NOT a
+	 *  missing pair) mapped to undefined = keep the row + retry next drain.
+	 *  Deleting on a throw would lose the only durable refresh marker
+	 *  (codex R1 High #4). */
+	private async requestRefreshOrKeep(tokenId: number, accountAddress: string): Promise<RefreshRequestResult | undefined> {
+		try {
+			return await this.tokenBalanceService.requestBalanceRefresh(tokenId, accountAddress)
+		} catch (error) {
+			this.logWarn(`drainBalanceOutbox: refresh request failed transiently, keeping row: ${getErrorMessage(error)}`)
+			return undefined
+		}
+	}
+
+	/** Re-read at commit: a wipe (row gone) or a fresh markBalanceDirty bump
+	 *  (dirtyAt moved) during the refresh await must not be overwritten with
+	 *  this older snapshot — stand down and let the next drain see the row's new
+	 *  state. Writing anyway would anchor stale dirt to the minted task. The
+	 *  receipt writer can only interleave by ACQUIRING the lock (a watchdog
+	 *  handoff), which flips the ticket — so the `isCurrent()` check is a true
+	 *  guard, not a smaller race window: either the receipt landed before it
+	 *  (ticket flipped → stand down) or its write is dispatched after this set
+	 *  and last-writer-wins is the receipt. One atomic span: re-read → compare
+	 *  → ticket → write. */
+	private async anchorFreshTask(
+		row: OutboxRowKey,
+		current: IncomingBalanceOutboxRow,
+		taskId: string,
+		isCurrent: () => boolean,
+	): Promise<void> {
+		const { profileId, networkId, accountAddress, tokenId } = row
+		const fresh = await this.repo.getOutbox(profileId, networkId, accountAddress, tokenId)
+		if (!fresh || fresh.dirtyAt !== current.dirtyAt) return
+		if (!isCurrent()) return
+		await this.repo.setOutbox(profileId, networkId, accountAddress, tokenId, {
+			dirtyAt: current.dirtyAt,
+			pendingTaskId: taskId,
+		})
 	}
 
 	/** Terminal state of an anchored refresh task via the TaskService ledger (`missing` = expired/gone). */

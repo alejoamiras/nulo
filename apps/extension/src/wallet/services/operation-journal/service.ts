@@ -306,7 +306,6 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		})
 	}
 
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 29) — refactor when touched, never raise
 	private async _transitionLocked(id: string, progress: JobProgress, error?: JobError | null): Promise<OperationRecord> {
 		const existing = await this._loadValidated(id)
 		if (!existing) {
@@ -315,57 +314,10 @@ export class OperationJournalService extends Service<Methods, Events> implements
 
 		// FSM legality — throws IllegalTransitionError on a bad transition.
 		assertCanTransition(existing.progress.stage, progress.stage)
-
-		// "error iff failed" invariant.
-		if (progress.stage === "failed") {
-			if (!error) {
-				throw new ValidationError("transitionOperation: `error` is required when stage is 'failed'")
-			}
-		} else if (error) {
-			throw new ValidationError(`transitionOperation: \`error\` must be null when stage is '${progress.stage}' (got failed envelope)`)
-		}
-
-		// Phase 2.5: kind ↔ succeeded.txHash invariant + shortcut gate.
-		// On-chain ops (transfer, dapp_execute) must succeed with a txHash AND
-		// must go through the full prove + submit path (no `simulating → succeeded`
-		// shortcut). Non-tx ops (token_import) must succeed without a txHash and
-		// take the shortcut. Both halves of the invariant matter — codex caught
-		// that a buggy caller could otherwise drag an on-chain kind through the
-		// shortcut by attaching a fake txHash.
+		assertErrorInvariant(progress, error)
 		if (progress.stage === "succeeded") {
-			const hasTxHash = typeof progress.txHash === "string" && progress.txHash.length > 0
-			const cameFromSimulating = existing.progress.stage === "simulating"
-			if (existing.kind === "transfer" || existing.kind === "dapp_execute") {
-				if (!hasTxHash) {
-					throw new ValidationError(`transitionOperation: succeeded ${existing.kind} requires a txHash`)
-				}
-				if (cameFromSimulating) {
-					throw new ValidationError(
-						`transitionOperation: ${existing.kind} cannot use the simulating → succeeded shortcut (must prove + submit)`,
-					)
-				}
-			} else if (existing.kind === "token_import") {
-				if (hasTxHash) {
-					throw new ValidationError("transitionOperation: succeeded token_import must not carry a txHash")
-				}
-			}
-
-			// v2 Layer A: pin `submitting.txHash === succeeded.txHash` when both
-			// are populated. The four execution paths emit the canonical
-			// `tx.getTxHash().toString()` at BOTH the submitting and succeeded
-			// transitions; if they ever drift the RecentActivityView per-hash
-			// pending-suppression filter (`filterPendingDoubleRender`) silently
-			// no-ops and the disappearing-card bug returns. Catch the drift here
-			// at the FSM layer rather than letting it surface as a UI
-			// regression. The check is conditional on submitting carrying a
-			// hash so older records / non-tx kinds aren't affected.
-			if (existing.progress.stage === "submitting" && existing.progress.txHash && hasTxHash) {
-				if (existing.progress.txHash !== progress.txHash) {
-					throw new ValidationError(
-						`transitionOperation: submitting.txHash !== succeeded.txHash (${existing.progress.txHash} vs ${progress.txHash}) — hash drift across the prove/submit boundary`,
-					)
-				}
-			}
+			assertSucceededKindInvariant(existing, progress)
+			assertNoHashDrift(existing, progress)
 		}
 
 		const now = Date.now()
@@ -570,5 +522,60 @@ export class OperationJournalService extends Service<Methods, Events> implements
 			this.emit("onOperationUpdated", updated)
 			return { outcome: "refiled", record: updated }
 		})
+	}
+}
+
+// ── Transition invariants (pure, throw ValidationError) ─────────────────
+
+/** "error iff failed". */
+function assertErrorInvariant(progress: JobProgress, error: JobError | null | undefined): void {
+	if (progress.stage === "failed") {
+		if (!error) {
+			throw new ValidationError("transitionOperation: `error` is required when stage is 'failed'")
+		}
+	} else if (error) {
+		throw new ValidationError(`transitionOperation: \`error\` must be null when stage is '${progress.stage}' (got failed envelope)`)
+	}
+}
+
+/** Kind ↔ succeeded.txHash invariant + shortcut gate. On-chain ops (transfer,
+ *  dapp_execute) must succeed with a txHash AND must go through the full prove +
+ *  submit path (no `simulating → succeeded` shortcut). Non-tx ops (token_import)
+ *  must succeed without a txHash and take the shortcut. Both halves matter — a
+ *  buggy caller could otherwise drag an on-chain kind through the shortcut by
+ *  attaching a fake txHash. */
+function assertSucceededKindInvariant(existing: OperationRecord, progress: Extract<JobProgress, { stage: "succeeded" }>): void {
+	const hasTxHash = typeof progress.txHash === "string" && progress.txHash.length > 0
+	const cameFromSimulating = existing.progress.stage === "simulating"
+	if (existing.kind === "transfer" || existing.kind === "dapp_execute") {
+		if (!hasTxHash) {
+			throw new ValidationError(`transitionOperation: succeeded ${existing.kind} requires a txHash`)
+		}
+		if (cameFromSimulating) {
+			throw new ValidationError(
+				`transitionOperation: ${existing.kind} cannot use the simulating → succeeded shortcut (must prove + submit)`,
+			)
+		}
+	} else if (existing.kind === "token_import") {
+		if (hasTxHash) {
+			throw new ValidationError("transitionOperation: succeeded token_import must not carry a txHash")
+		}
+	}
+}
+
+/** Pin `submitting.txHash === succeeded.txHash` when both are populated. The
+ *  execution paths emit the canonical `tx.getTxHash().toString()` at BOTH
+ *  transitions; if they ever drift, the RecentActivityView per-hash
+ *  pending-suppression filter silently no-ops and the disappearing-card bug
+ *  returns — catch the drift at the FSM layer. Conditional on submitting
+ *  carrying a hash so older records / non-tx kinds aren't affected. */
+function assertNoHashDrift(existing: OperationRecord, progress: Extract<JobProgress, { stage: "succeeded" }>): void {
+	const hasTxHash = typeof progress.txHash === "string" && progress.txHash.length > 0
+	if (existing.progress.stage === "submitting" && existing.progress.txHash && hasTxHash) {
+		if (existing.progress.txHash !== progress.txHash) {
+			throw new ValidationError(
+				`transitionOperation: submitting.txHash !== succeeded.txHash (${existing.progress.txHash} vs ${progress.txHash}) — hash drift across the prove/submit boundary`,
+			)
+		}
 	}
 }

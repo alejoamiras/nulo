@@ -45,7 +45,7 @@ import type { AlarmsPort } from "@nulo/wallet-core/ports"
 import { AlarmDispatcher, getErrorMessage } from "@nulo/wallet-core/utils"
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
-import type { OperationJournalService } from "./service"
+import type { OperationJournalService, OperationRecord } from "./service"
 
 export const JOURNAL_REAPER_ALARM_NAME = "nulo:journal:reap"
 
@@ -69,7 +69,9 @@ export const REAP_PERIOD_MINUTES = 1
  * - `submitting` is short: once the tx is broadcast the node returns
  *   the answer within seconds; 5 min is a safety margin for slow nodes.
  */
-const STAGE_GRACE_MS: Readonly<Record<Exclude<JobStage, "succeeded" | "failed" | "cancelled">, number>> = {
+type ActiveStage = Exclude<JobStage, "succeeded" | "failed" | "cancelled">
+
+const STAGE_GRACE_MS: Readonly<Record<ActiveStage, number>> = {
 	// Matches the wallet-sdk dApp-interaction popup timeout (INTERACTION_TIMEOUT_MS).
 	// A queued record that survives 10 minutes means background.ts either crashed
 	// or somehow lost the handler — sweep it so the activity feed doesn't show a
@@ -175,7 +177,6 @@ export class JournalReaper {
 	 * window — a proving op started 10s ago in THIS SW instance should
 	 * NOT be reaped.
 	 */
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 23) — refactor when touched, never raise
 	public async reap(opts?: { unconditional?: boolean; bootCutoff?: number }): Promise<void> {
 		const inflight = await this.journal.getOperations({ isTerminal: false })
 		const now = this.now()
@@ -183,35 +184,10 @@ export class JournalReaper {
 		const bootCutoff = opts?.bootCutoff
 		for (const op of inflight) {
 			const stage = op.progress.stage
-			if (stage === "succeeded" || stage === "failed" || stage === "cancelled") continue
-			// B-03: the aggressive boot sweep must NOT fail a record created in THIS
-			// SW lifetime (createdAt >= bootCutoff) — e.g. by the request that woke
-			// the SW. Such an op is live; the pipeline still owns it. Prior-lifetime
-			// records (createdAt < bootCutoff) are unrecoverable and swept as before.
-			// `>=` errs toward NOT sweeping (clock skew / same-ms) — the periodic
-			// tick catches genuine intra-lifetime staleness under its grace window.
-			if (unconditional && bootCutoff !== undefined && op.createdAt >= bootCutoff) continue
-			const grace = STAGE_GRACE_MS[stage]
 			const age = now - op.updatedAt
-			if (!unconditional && age < grace) continue
-			// Map stage → canonical error kind documented on JobError.kind.
-			// Boot sweep uses `sw_restart_post_prove` for proving — the exact
-			// post-SW-restart-mid-prove case where the new SW can't deliver
-			// the offscreen's prove result (no matching requestId).
-			// Periodic ticks use `stuck_proving` — the proving op exceeded its
-			// 35-min sanity ceiling within THIS SW's lifetime; rare in practice.
-			let kind: string
-			if (stage === "proving") {
-				kind = unconditional ? "sw_restart_post_prove" : "stuck_proving"
-			} else if (stage === "queued") {
-				// Plan §14: queued records that exceed their grace window are
-				// "stuck" rather than "stale-on-resume" — they never made it
-				// past the message-arrival surface (background.ts somehow lost
-				// the handler). Tagged distinctly for observability.
-				kind = "stuck_queued"
-			} else {
-				kind = "stale_on_resume"
-			}
+			if (shouldSkipRecord(op, age, unconditional, bootCutoff)) continue
+			const grace = STAGE_GRACE_MS[stage as ActiveStage]
+			const kind = classifyReapKind(stage, unconditional)
 			const reason = unconditional
 				? `SW restart with non-terminal record in ${stage} — unrecoverable`
 				: `${stage} stage exceeded grace window (${age}ms ≥ ${grace}ms)`
@@ -240,4 +216,29 @@ export class JournalReaper {
 			}
 		}
 	}
+}
+
+/** Terminal records never reap; the boot sweep (B-03) must NOT fail a record
+ *  created in THIS SW lifetime (createdAt >= bootCutoff) — e.g. by the request
+ *  that woke the SW; such an op is live, the pipeline still owns it. `>=` errs
+ *  toward NOT sweeping (clock skew / same-ms) — the periodic tick catches
+ *  genuine intra-lifetime staleness under its grace window, enforced here. */
+function shouldSkipRecord(op: OperationRecord, age: number, unconditional: boolean, bootCutoff: number | undefined): boolean {
+	const stage = op.progress.stage
+	if (stage === "succeeded" || stage === "failed" || stage === "cancelled") return true
+	if (unconditional && bootCutoff !== undefined && op.createdAt >= bootCutoff) return true
+	return !unconditional && age < STAGE_GRACE_MS[stage]
+}
+
+/** Stage → canonical error kind documented on JobError.kind. The boot sweep
+ *  uses `sw_restart_post_prove` for proving — the exact post-SW-restart-mid-prove
+ *  case where the new SW can't deliver the offscreen's prove result (no matching
+ *  requestId); periodic ticks use `stuck_proving` — the proving op exceeded its
+ *  35-min sanity ceiling within THIS SW's lifetime. Queued records past their
+ *  grace window are "stuck" rather than "stale-on-resume" — they never made it
+ *  past the message-arrival surface — tagged distinctly for observability. */
+function classifyReapKind(stage: OperationRecord["progress"]["stage"], unconditional: boolean): string {
+	if (stage === "proving") return unconditional ? "sw_restart_post_prove" : "stuck_proving"
+	if (stage === "queued") return "stuck_queued"
+	return "stale_on_resume"
 }
