@@ -35,6 +35,14 @@ export type ProjectedBalance =
 /** A chunk-local token lookup: undefined when the active profile doesn't own the row's token. */
 type CachedToken = Awaited<ReturnType<TokenService["getTokenRaw"]>> | undefined
 
+/** One arm enqueue, planned sync; the view fn itself is instantiated lazily at enqueue time. */
+type ArmJob = {
+	descriptor: typeof TOKEN_FN_DESCRIPTORS.balanceOfPublic | typeof TOKEN_FN_DESCRIPTORS.balanceOfPrivate
+	impl: NonNullable<Token["balanceOfPublicFn"]> | NonNullable<Token["balanceOfPrivateFn"]>
+	token: Token
+	index: number
+}
+
 const BATCH_SIZE = 12
 
 type GroupKey = string // `${account}:${chainId}`
@@ -116,12 +124,17 @@ export class BalanceProjector {
 			// call total. Each arm's plan is sync; the enqueues keep their
 			// one-await-per-job shape.
 			for (const job of this.planArm(balances, tokenCache, perBalance, false)) {
-				await this.enqueueCall(calls, job.fn, job.token, account, job.index, false)
+				// The view fn is built lazily, right before its enqueue — the factory
+				// throws on an invalid impl, and which job's error surfaces first must
+				// not change (an earlier enqueue failure still wins).
+				const fn = createViewTokenFn(job.descriptor, job.impl.name, job.impl.impl)
+				await this.enqueueCall(calls, fn, job.token, account, job.index, false)
 			}
 
 			// Pass 2: enqueue every PRIVATE call across all balances second.
 			for (const job of this.planArm(balances, tokenCache, perBalance, true)) {
-				await this.enqueueCall(calls, job.fn, job.token, account, job.index, true)
+				const fn = createViewTokenFn(job.descriptor, job.impl.name, job.impl.impl)
+				await this.enqueueCall(calls, fn, job.token, account, job.index, true)
 			}
 
 			const network = (await this.networks.getNetworks(chainId))[0]
@@ -178,8 +191,8 @@ export class BalanceProjector {
 		tokenCache: Map<number, CachedToken>,
 		perBalance: Record<number, { privateBalance: string; publicBalance: string }>,
 		isPrivate: boolean,
-	): { fn: ViewFn; token: Token; index: number }[] {
-		const jobs: { fn: ViewFn; token: Token; index: number }[] = []
+	): ArmJob[] {
+		const jobs: ArmJob[] = []
 		for (let i = 0; i < balances.length; i++) {
 			const balance = balances[i]
 			const token = tokenCache.get(balance.id)
@@ -187,7 +200,7 @@ export class BalanceProjector {
 			const impl = isPrivate ? token.balanceOfPrivateFn : token.balanceOfPublicFn
 			if (impl) {
 				const descriptor = isPrivate ? TOKEN_FN_DESCRIPTORS.balanceOfPrivate : TOKEN_FN_DESCRIPTORS.balanceOfPublic
-				jobs.push({ fn: createViewTokenFn(descriptor, impl.name, impl.impl), token, index: i })
+				jobs.push({ descriptor, impl, token, index: i })
 			} else if (isPrivate) {
 				perBalance[balance.id].privateBalance = "0"
 			} else {
