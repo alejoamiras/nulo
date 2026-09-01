@@ -1,0 +1,225 @@
+<title>Faucet to Tools Rename</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  :root {
+    --bg: #f5f7f6;
+    --paper: #ffffff;
+    --ink: #1b2422;
+    --ink-2: #4d5c58;
+    --ink-3: #7d8b87;
+    --rule: #d9e0dd;
+    --accent: #0f6e68;
+    --accent-ink: #0a4f4b;
+    --accent-bg: #e3f1ef;
+    --old: #9a4b2f;
+    --old-bg: #f6e9e3;
+    --gate: #f0f3f2;
+    --focus: #0f6e68;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #131817; --paper: #1a201f; --ink: #e6ecea; --ink-2: #aeb9b5; --ink-3: #7f8c88;
+      --rule: #2b3533; --accent: #4fb8af; --accent-ink: #8fd6cf; --accent-bg: #16302d;
+      --old: #d98a6a; --old-bg: #33221b; --gate: #202726; --focus: #4fb8af;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #131817; --paper: #1a201f; --ink: #e6ecea; --ink-2: #aeb9b5; --ink-3: #7f8c88;
+    --rule: #2b3533; --accent: #4fb8af; --accent-ink: #8fd6cf; --accent-bg: #16302d;
+    --old: #d98a6a; --old-bg: #33221b; --gate: #202726; --focus: #4fb8af;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    font-size: 17px; line-height: 1.55;
+  }
+  main { max-width: 700px; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
+  h1, h2, h3 { font-family: "Newsreader", Georgia, serif; font-weight: 600; text-wrap: balance; margin: 0; }
+  h1 { font-size: 2.4rem; line-height: 1.1; letter-spacing: -0.01em; }
+  h2 { font-size: 1.45rem; margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--rule); }
+  h3 { font-size: 1.1rem; margin-top: 1.5rem; }
+  p { margin: 0.75rem 0; max-width: 62ch; }
+  ul { padding-left: 1.2rem; margin: 0.5rem 0; }
+  li { margin: 0.35rem 0; }
+  code, pre { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-size: 0.86em; }
+  code { background: var(--gate); padding: 0.05em 0.3em; border-radius: 3px; }
+  pre { background: var(--paper); border: 1px solid var(--rule); padding: 1rem; overflow-x: auto; white-space: pre-wrap; line-height: 1.45; margin: 0.75rem 0; }
+  pre code { background: none; padding: 0; }
+  .eyebrow { font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; margin-bottom: 0.9rem; }
+  .lede { font-size: 1.15rem; color: var(--ink-2); margin-top: 1rem; }
+  .meta { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; margin-top: 1.25rem; font-size: 0.9rem; color: var(--ink-2); }
+  .meta b { color: var(--ink); font-weight: 600; }
+
+  .ledger { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.95rem; }
+  .ledger th { text-align: left; font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--rule); }
+  .ledger td { padding: 0.5rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  .ledger td:first-child { color: var(--ink-2); width: 34%; }
+  .old { color: var(--old); background: var(--old-bg); text-decoration: line-through; text-decoration-thickness: 1px; }
+  .new { color: var(--accent-ink); background: var(--accent-bg); font-weight: 600; }
+  .wrap { overflow-x: auto; }
+
+  .phase { margin: 1.25rem 0; padding: 1rem 1.25rem; background: var(--paper); border: 1px solid var(--rule); border-left: 3px solid var(--accent); }
+  .phase h3 { margin-top: 0; }
+  .phase .who { font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+  .gate { margin-top: 0.75rem; padding-top: 0.6rem; border-top: 1px dashed var(--rule); color: var(--ink-2); font-size: 0.93rem; }
+  .gate b { color: var(--accent-ink); font-weight: 600; }
+  .arc { font-family: "Newsreader", Georgia, serif; font-size: 1.05rem; color: var(--ink-2); margin: 2rem 0 0; }
+
+  .rubric { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 0.6rem; margin: 1rem 0; }
+  .rubric div { padding: 0.6rem 0.75rem; background: var(--paper); border: 1px solid var(--rule); font-size: 0.9rem; }
+  .rubric span { display: block; font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+  .rubric .hi span { color: var(--old); }
+
+  .decision { background: var(--accent-bg); border: 1px solid var(--accent); padding: 1.1rem 1.35rem; margin: 1.5rem 0; }
+  .decision h2 { border: 0; margin: 0 0 0.5rem; padding: 0; font-size: 1.35rem; }
+  .decision li b { font-weight: 600; }
+  .default { color: var(--ink-3); font-size: 0.9em; }
+
+  .seed { margin: 1.25rem 0; padding: 1rem 1.25rem; background: var(--paper); border: 1px solid var(--rule); }
+  .seed.rec { border-color: var(--accent); }
+  .seed h3 { margin-top: 0; }
+  .warn { color: var(--old); font-weight: 600; }
+  .verdict { display: inline-block; padding: 0.15em 0.6em; border-radius: 3px; font-size: 0.85rem; font-weight: 600; background: var(--accent-bg); color: var(--accent-ink); }
+  .muted { color: var(--ink-3); font-size: 0.9rem; }
+  a { color: var(--accent-ink); }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<main>
+  <div class="eyebrow">Blueprint · light · plan file <code>implementations-plan/tools-rename/plan.md</code></div>
+  <h1>Faucet to Tools Rename</h1>
+  <p class="lede">The web app at <code>tools.nulo.sh</code> has been called "tools" since the domain moved, but the repo still calls it "faucet" everywhere that matters: the folder, the package, the build scripts, the CI jobs, the release job, the test harness, and the name the wallet shows when you connect. This plan finishes the rename, and turns the in-app "Faucet" tab into "Drip", the word the code and the contract already use.</p>
+  <div class="meta">
+    <span><b>Worktree</b> tools-rename</span>
+    <span><b>Delivery</b> two stacked PRs (identity, then Drip)</span>
+    <span><b>Starts after</b> faucet-cluster merges</span>
+    <span><b>Codex</b> round 1 reject → round 2 <span id="verdict" class="verdict">conditional approve, conditions folded</span></span>
+  </div>
+
+  <h2>What changes, in one table</h2>
+  <p>Old on the left is retired; new on the right is what the repo will say. Everything that names the <em>product</em> moves in the first PR; everything that names the <em>drip feature</em> moves in the second.</p>
+  <div class="wrap">
+  <table class="ledger">
+    <thead><tr><th>Where</th><th>Old → new</th></tr></thead>
+    <tbody>
+      <tr><td>Folder and package</td><td><code class="old">apps/faucet</code> <code class="new">apps/tools</code> · <code class="old">@nulo/faucet</code> <code class="new">@nulo/tools</code></td></tr>
+      <tr><td>Root scripts</td><td><code class="old">dev:faucet</code> <code class="new">dev:tools</code>, same for build / test / audit</td></tr>
+      <tr><td>CI build workflow and jobs</td><td><code class="old">_build-faucet.yml</code> <code class="new">_build-tools.yml</code> · job <code class="old">build-faucet</code> <code class="new">build-tools</code> · release job <code class="old">deploy-faucet</code> <code class="new">deploy-tools</code></td></tr>
+      <tr><td>Test harness variables</td><td><code class="old">FAUCET_DEV_PORT</code> <code class="new">TOOLS_DEV_PORT</code> and five sibling names, changed together</td></tr>
+      <tr><td>Name the wallet shows on connect</td><td><code class="old">nulo-faucet</code> <code class="new">nulo-tools</code> (your remembered wallet and accounts carry over)</td></tr>
+      <tr><td>Test selector prefix</td><td><code class="old">fa-</code> <code class="new">tl-</code></td></tr>
+      <tr><td>The in-app tab</td><td><code class="old">Faucet</code> <code class="new">Drip</code> · <code class="old">FaucetView</code> <code class="new">DripView</code> · <code class="old">useFaucetDrip</code> <code class="new">useDrip</code></td></tr>
+      <tr><td>Stale prose</td><td><code class="old">faucet.nulo.sh</code> (a dead domain) removed from docs and workflow comments</td></tr>
+      <tr><td>Deliberately untouched</td><td>Solidity contracts (editing a comment breaks Etherscan verification), the on-chain deployment files, the changelog, old plans, the wallet's generic tap icon, the <code>Dripper</code> contract name (external)</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2>Why "light"</h2>
+  <p>One risk dimension is high: the two Cloudflare Pages projects build from a folder path set in their dashboard, which the repo cannot change, and a wrong or late change there silently stops new deploys. Everything else is mechanical and reversible.</p>
+  <div class="rubric">
+    <div><span>Novelty</span>low — a rename with a precedent in this repo</div>
+    <div><span>Blast radius</span>medium — ~160 files, one app, CI wiring</div>
+    <div><span>Irreversibility</span>low — git history preserved, no data</div>
+    <div><span>Migration cost</span>low — two browser storage keys</div>
+    <div class="hi"><span>External coupling</span>high — Pages dashboard root directory</div>
+    <div><span>Security</span>low — no new credential or boundary</div>
+  </div>
+  <p class="muted">Codex rejected the first draft on four points (a leaky lockfile check, an internally contradictory phase order, an incomplete storage carry-over, and an untested assumption about the connect id), then conditionally approved the rewrite with eight smaller conditions (exact structural checks for the two generated files, a real proof for the Cloudflare step, branch-by-branch dashboard timing, two missed comment sites). All are folded in; details live in the plan's audit log.</p>
+
+  <h2>Phases</h2>
+  <p class="arc">Before anything</p>
+  <div class="phase">
+    <div class="who">Phase 0 · wait, then rebase</div>
+    <h3>Let faucet-cluster land first</h3>
+    <p>A separate cleanup is already reshaping files inside this app. Doing the rename on top of it avoids a messy conflict. We wait for its two PRs, rebase, and record the exact commit the rename starts from.</p>
+    <div class="gate"><b>Proves itself by:</b> the faucet-cluster merge is an ancestor of our branch; a clean install and lint pass.</div>
+  </div>
+
+  <p class="arc">PR 1 · the identity</p>
+  <div class="phase">
+    <div class="who">Phase 1 · the rename itself</div>
+    <h3>Move the folder and every name that points at it, in one go</h3>
+    <p>Git keeps the file history. Then the package name, scripts, CI job names, harness variables, build-target names, the connect id (with a carry-over so returning users keep their remembered wallet), and the test prefix all change in seven small commits. Two generated files (the dependency lockfile and the complexity baseline) are regenerated and checked against an exact "old file with the path swapped" copy, so nothing else can slip in.</p>
+    <div class="gate"><b>Proves itself by:</b> both generated-file diffs are empty after the path swap; typecheck, lint, unit tests, the app's browser smoke test, the CI-graph guard test and the workflow linter all pass; searches for every old name return nothing.</div>
+  </div>
+  <div class="phase">
+    <div class="who">Phase 2 · prove it in real builds and real CI</div>
+    <h3>Build both network targets and run the real pipeline once</h3>
+    <p>The app ships as two builds (testnet and mainnet). Both are built and checked. The extension's smoke tests run. Then the actual CI workflow is triggered by hand on this branch, which runs the renamed build jobs before any PR exists.</p>
+    <div class="gate"><b>Proves itself by:</b> both builds verify; smoke tests green; the CI run shows "Build Tools (testnet)" and "Build Tools (mainnet)" succeeded.</div>
+  </div>
+  <div class="phase">
+    <div class="who">Phase 3 · docs</div>
+    <h3>Update the living documents</h3>
+    <p>CLAUDE.md, CI.md, the architecture notes, the app README, the package READMEs, the Aztec-update runbook, and comments in other packages that mention the app. Old plans and the changelog stay as they were: they are history.</p>
+    <div class="gate"><b>Proves itself by:</b> the full audit script passes; the dead domain appears nowhere; the remaining "faucet" mentions are reviewed one by one and match the keep list.</div>
+  </div>
+
+  <p class="arc">PR 2 · the Drip tab</p>
+  <div class="phase">
+    <div class="who">Phase 4 · feature vocabulary</div>
+    <h3>Rename the tab and everything that only exists because of it</h3>
+    <p>The tab label, the view, the composables, the token list, the manifest builder, the deploy-script token config, and a validator in the bridge tooling all say "drip". A real connect / disconnect / reconnect with the Nulo extension confirms the wallet shows "nulo-tools", remembers you, and forgets you when asked.</p>
+    <div class="gate"><b>Proves itself by:</b> the audit script and the app's browser tests pass; no "faucet" remains outside the keep list; the manual wallet check is recorded with the extension build id.</div>
+  </div>
+
+  <p class="arc">After the merge reaches each site's branch · you</p>
+  <div class="phase">
+    <div class="who">Phase 5 · Cloudflare dashboard</div>
+    <h3>Point each Pages project at the new folder, one branch at a time</h3>
+    <p>Each site builds from a branch. Flip a project only after the rename is on that branch: <code>nulo-tools-testnet</code> (tracks <code>dev</code>) right after PR 1 merges; <code>nulo-tools-mainnet</code> (tracks <code>main</code>) right after the next promote. In each project change Build → Root directory from <code>apps/faucet</code> to <code>apps/tools</code> and retry the last deployment. Flipping too early only makes new deploys fail; the live site stays on the previous build, so nothing goes dark.</p>
+    <div class="gate"><b>Proves itself by:</b> each site's <code>/build.json</code> build id ends in the short commit hash of the branch it tracks, and the build log shows <code>apps/tools</code>.</div>
+  </div>
+
+  <h2>Human context</h2>
+  <ul>
+    <li><b>The domain already moved.</b> <code>faucet.nulo.sh</code> no longer resolves. The 55 mentions of it in the repo are stale text, not a live dependency.</li>
+    <li><b>The deploy hook secret never existed.</b> The release job's tools deploy step already skips itself. Renaming the secret's name in the workflow is a text change; the Pages projects deploy through their own Git integration.</li>
+    <li><b>Why "Drip" and not "Mint".</b> "Mint" already means two other things in this app (the Bridge tab's test-USDC mint and the Fuel tab's asset mint) and one in the wallet (any minting transaction). "Drip" is the contract's own verb.</li>
+    <li><b>Why the connect id changes.</b> The wallet can display that id to you during approval, so today Nulo may literally show "nulo-faucet". A third-party wallet might treat the new id as a new app and ask you to approve once more. Nothing you own is keyed by it.</li>
+    <li><b>Other branches.</b> One open PR (#471) and any in-flight work touching the app will need a rebase across the folder move. Git detects the move, so this is usually painless.</li>
+  </ul>
+
+  <h2>Questions, as resolved</h2>
+  <ul>
+    <li><b>Test selector prefix:</b> <code>tl-</code>.</li>
+    <li><b>Footnote copy:</b> "Internal drip. No real value."</li>
+    <li><b>PR count:</b> two stacked PRs (codex withdrew its one-PR preference once the Cloudflare step became branch-by-branch).</li>
+    <li><b>Connect id:</b> <code>nulo-faucet</code> → <code>nulo-tools</code>, with the storage carry-over.</li>
+    <li><b>Pages dashboard facts:</b> you confirm both projects' root directory and tracked branch as the first step of Phase 5.</li>
+    <li><b>Cloudflare Access</b> on <code>tools.nulo.sh</code>: noted, no action.</li>
+  </ul>
+
+  <div class="decision">
+    <h2>Approved</h2>
+    <p>Owner verdict <b>approve</b>, 2026-09-01. Scope, tier, validation layers and two-PR delivery as written above. No hardening pass scheduled. Implementation begins once the faucet-cluster PRs have merged; Phase 5 stays with you, per branch.</p>
+  </div>
+
+  <h2>Implementation seeds <span class="muted">(final)</span></h2>
+  <p>Two ways to run the implementation session. Pick one. <span class="warn">Use exactly one per session; setting one replaces the other.</span> The session must run inside the plan's worktree (<code>agent-worktree resume tools-rename</code>).</p>
+
+  <div class="seed rec">
+    <h3>Recommended: /goal</h3>
+    <p class="muted">Completion is fully visible in the transcript (gates, run ids, codex verdicts, PR view), and /goal survives a resume.</p>
+    <pre><code>/goal All phases 0–4 marked ✓ in implementations-plan/tools-rename/plan.md (the per-phase headers in the file — not the chat), each ✓ backed by its phase's validation gate as written in plan.md reported passing in the transcript (incl. the empty lockfile and manifest transform-diffs, the pr-quick.yml dispatch run id with both Build Tools jobs successful, the extension smoke e2e, the resolve-ports.ts key check, and the Phase-4 manual reconnect + forget check); for each phase `LESSONS_FILE=implementations-plan/tools-rename/lessons/phase-N.md` printed in the transcript; `/code-review low --fix` complete per arc with fixes committed separately; the codex fix loop converged for arc 1, arc 2 AND the final cross-arc pass, each evidenced by a resumed codex pass reporting no new material findings quoted in the transcript; the PR topology from plan.md §Delivery exists on GitHub, created only after all loops converged (`gh stack view` or `gh pr view` output in the transcript); `bun run audit:tools` and `bun run lint:actions` both exit 0 in the transcript. Phase 5 (Pages root-dir flip) is owner-executed and NOT part of this goal.</code></pre>
+  </div>
+
+  <div class="seed">
+    <h3>Alternative: /loop 15m</h3>
+    <pre><code>/loop 15m Drive implementations-plan/tools-rename forward. Never idle waiting for my input. Each firing:
+1. Reality check: read implementations-plan/tools-rename/plan.md + lessons/ (authoritative — not the chat); task list empty? rebuild it from plan.md's phase headers; `git status`, `git log --oneline -5`. Phase 0 not ✓? check `gh pr list --search "faucet-cluster"` — if PR-a/PR-b aren't merged, do NOT start Phase 1; prep instead (dry-run the git mv on a scratch branch, draft doc edits) and log it. PR exists? `gh stack view` (no --watch). Otherwise `gh run list --branch $(git branch --show-current) --limit 1 --json status,databaseId`.
+2. Waiting on CI is fine — `gh run watch &lt;id&gt;` up to 10 min; stuck past that → inspect logs, log as blocked. Use the wait to prep the next phase.
+3. No task in hand? Take the next pending step from plan.md. After each meaningful edit run `bun run lint` + the touched package's test (`bun run test:tools`, `bun run --cwd packages/bridge-core test`, `bun run test:ci-gating`). Commit small (scope `tools`, subject ≤ 100 chars, signed) → `gh stack push`.
+4. Stuck or facing a decision you'd bring to me? Call `/codex xhigh` with full context, converge, act, log consult + verdict in lessons/phase-N.md. Hard limits: never merge, never publish/deploy, never touch `.sol` files, never edit the `status`/`quality-status` job names, never accept a lockfile or manifest transform-diff that is not empty, never expand scope beyond plan.md — surface and hold instead.
+5. Same step failed 5 times? Stop retrying; reassess with codex, then continue on the agreed path.
+6. Phase green = THE PHASE'S VALIDATION GATE in plan.md passes verbatim. Paste the result, mark ✓ in plan.md, write lessons, print `LESSONS_FILE=implementations-plan/tools-rename/lessons/phase-N.md`, `agent-worktree status tools-rename "phase N green: &lt;next&gt;"`. Arc-1 boundary (Phase 3 ✓)? Run the arc loop FIRST — `/code-review low --fix` → commit separately → codex loop with the arc map + the plan's no-over-engineering + comment-quality rules until clean — THEN `gh stack add refactor/tools-drip-tab`.
+7. Phase 4 ✓? Run arc 2's loop the same way, then the final cross-arc codex pass over `git diff origin/dev...HEAD`. Then Delivery per plan.md — the FIRST time any PR opens: `gh stack sync` → `gh stack submit --auto` → `gh pr edit` bodies (include the Phase-5 owner checklist) → `gh pr checks --watch`. Write the wrap-up (what shipped, every contentious codex decision with ELI5 context, the Phase-5 checklist for me) and stop.
+Keep the native task list current; plan.md stays the source of truth.</code></pre>
+  </div>
+
+  <p class="muted">Technical detail, the audit transcript and the recon live next to the plan in the repo: <code>implementations-plan/tools-rename/</code>.</p>
+</main>
