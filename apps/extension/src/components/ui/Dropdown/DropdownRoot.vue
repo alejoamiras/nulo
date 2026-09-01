@@ -92,116 +92,120 @@ const handleOutside = (e) => {
 	close()
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 17) — refactor when touched, never raise
 watch(isOpen, async () => {
-	if (!isOpen.value) {
-		await nextTick()
-		if (trap.value?.active) {
-			trap.value.deactivate()
-		}
-
-		removeOutside?.()
-
-		if (Object.hasOwn(dropdownStyles.value, "top")) {
-			dropdownStyles.value.top = undefined
-		}
-		if (Object.hasOwn(dropdownStyles.value, "bottom")) {
-			dropdownStyles.value.bottom = undefined
-		}
-
-		emit("onClose")
-
-		document.removeEventListener("keydown", onKeydown)
-	} else {
-		document.addEventListener("keydown", onKeydown)
-
-		const triggerRect = trigger.value.getBoundingClientRect()
-
-		if (props.width) {
-			dropdownStyles.value.width = `${props.width}px`
-		}
-
-		if (props.fullWidth) {
-			dropdownStyles.value.width = `${triggerRect.width}px`
-		}
-
-		switch (props.position) {
-			case "start":
-				dropdownStyles.value.right = `${window.innerWidth - triggerRect.x - triggerRect.width}px`
-				if (props.wide) dropdownStyles.value.left = `${triggerRect.x}px`
-				break
-
-			case "end":
-				dropdownStyles.value.left = `${triggerRect.x}px`
-				break
-		}
-
-		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
-		nextTick(() => {
-			let candidate
-			try {
-				candidate = focusTrap.createFocusTrap(dropdown.value.$el, {
-					initialFocus: false,
-					// Container is focusable (tabindex=-1) so focus-trap can hold focus even
-					// when every menu item is disabled (no tabbable node) — the case that
-					// otherwise makes activate() throw. The try/catch stays as a backstop.
-					fallbackFocus: () => dropdown.value?.$el,
-				})
-				candidate.activate()
-				trap.value = candidate
-			} catch {
-				// Backstop: fallbackFocus should prevent the no-tabbable throw, but if activate()
-				// still fails after partially installing listeners, deactivate the candidate so we
-				// don't leak focus isolation — then leave `trap` inert (its deactivate() no-ops).
-				// A menu that can't trap focus is far better than the y:0 undismissable lock-up
-				// this whole path exists to prevent.
-				try {
-					candidate?.deactivate?.()
-				} catch {
-					// deactivating a half-activated trap can itself throw; ignore.
-				}
-				trap.value = {}
-			}
-
-			/** Check if there is enough space to open (top/bottom) */
-			const dropdownRect = dropdown.value.$el.getBoundingClientRect()
-
-			switch (props.side) {
-				case "top":
-					if (triggerRect.top < dropdownRect.height) {
-						dropdownStyles.value.top = `${triggerRect.y + triggerRect.height + 8}px`
-					} else {
-						dropdownStyles.value.bottom = `${window.innerHeight - triggerRect.y + 8}px`
-					}
-					break
-
-				case "bottom":
-					if (window.innerHeight - dropdownRect.height - triggerRect.top < 50) {
-						dropdownStyles.value.bottom = `${window.innerHeight - triggerRect.y + 8}px`
-					} else {
-						dropdownStyles.value.top = `${triggerRect.y + triggerRect.height + 8}px`
-					}
-					break
-			}
-
-			if (props.customPosition) {
-				dropdownStyles.value.top = undefined
-				dropdownStyles.value.bottom = undefined
-				dropdownStyles.value.left = undefined
-				dropdownStyles.value.right = undefined
-
-				dropdownStyles.value = { ...props.customPosition }
-			}
-
-			if (props.height) dropdownStyles.value.maxHeight = props.height
-			if (props.verticalOverflow) dropdownStyles.value.overflowY = "auto"
-
-			emit("onOpen")
-
-			removeOutside = useOutside(dropdown.value.wrapper, handleOutside)
-		})
-	}
+	if (isOpen.value) openDropdown()
+	else await closeDropdown()
 })
+
+async function closeDropdown() {
+	await nextTick()
+	if (trap.value?.active) {
+		trap.value.deactivate()
+	}
+
+	removeOutside?.()
+
+	if (Object.hasOwn(dropdownStyles.value, "top")) {
+		dropdownStyles.value.top = undefined
+	}
+	if (Object.hasOwn(dropdownStyles.value, "bottom")) {
+		dropdownStyles.value.bottom = undefined
+	}
+
+	emit("onClose")
+
+	document.removeEventListener("keydown", onKeydown)
+}
+
+function openDropdown() {
+	document.addEventListener("keydown", onKeydown)
+
+	const triggerRect = trigger.value.getBoundingClientRect()
+
+	if (props.width) {
+		dropdownStyles.value.width = `${props.width}px`
+	}
+
+	if (props.fullWidth) {
+		dropdownStyles.value.width = `${triggerRect.width}px`
+	}
+
+	switch (props.position) {
+		case "start":
+			dropdownStyles.value.right = `${window.innerWidth - triggerRect.x - triggerRect.width}px`
+			if (props.wide) dropdownStyles.value.left = `${triggerRect.x}px`
+			break
+
+		case "end":
+			dropdownStyles.value.left = `${triggerRect.x}px`
+			break
+	}
+
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
+	nextTick(() => {
+		let candidate
+		try {
+			candidate = focusTrap.createFocusTrap(dropdown.value.$el, {
+				initialFocus: false,
+				// Container is focusable (tabindex=-1) so focus-trap can hold focus even
+				// when every menu item is disabled (no tabbable node) — the case that
+				// otherwise makes activate() throw. The try/catch stays as a backstop.
+				fallbackFocus: () => dropdown.value?.$el,
+			})
+			candidate.activate()
+			trap.value = candidate
+		} catch {
+			// Backstop: fallbackFocus should prevent the no-tabbable throw, but if activate()
+			// still fails after partially installing listeners, deactivate the candidate so we
+			// don't leak focus isolation — then leave `trap` inert (its deactivate() no-ops).
+			// A menu that can't trap focus is far better than the y:0 undismissable lock-up
+			// this whole path exists to prevent.
+			try {
+				candidate?.deactivate?.()
+			} catch {
+				// deactivating a half-activated trap can itself throw; ignore.
+			}
+			trap.value = {}
+		}
+
+		/** Check if there is enough space to open (top/bottom) */
+		const dropdownRect = dropdown.value.$el.getBoundingClientRect()
+
+		switch (props.side) {
+			case "top":
+				if (triggerRect.top < dropdownRect.height) {
+					dropdownStyles.value.top = `${triggerRect.y + triggerRect.height + 8}px`
+				} else {
+					dropdownStyles.value.bottom = `${window.innerHeight - triggerRect.y + 8}px`
+				}
+				break
+
+			case "bottom":
+				if (window.innerHeight - dropdownRect.height - triggerRect.top < 50) {
+					dropdownStyles.value.bottom = `${window.innerHeight - triggerRect.y + 8}px`
+				} else {
+					dropdownStyles.value.top = `${triggerRect.y + triggerRect.height + 8}px`
+				}
+				break
+		}
+
+		if (props.customPosition) {
+			dropdownStyles.value.top = undefined
+			dropdownStyles.value.bottom = undefined
+			dropdownStyles.value.left = undefined
+			dropdownStyles.value.right = undefined
+
+			dropdownStyles.value = { ...props.customPosition }
+		}
+
+		if (props.height) dropdownStyles.value.maxHeight = props.height
+		if (props.verticalOverflow) dropdownStyles.value.overflowY = "auto"
+
+		emit("onOpen")
+
+		removeOutside = useOutside(dropdown.value.wrapper, handleOutside)
+	})
+}
 
 onBeforeUnmount(() => {
 	if (trap.value.active) trap.value.deactivate()

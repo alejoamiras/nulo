@@ -284,7 +284,19 @@ async function handleBackup() {
 	}
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
+/** Passkey profiles type the encryption password on this page, so it needs
+ *  the empty/mismatch checks here. Returns true when encryption must not start. */
+function passkeyPasswordBlocked() {
+	if (!isPasskeyProfile.value) return false
+	showRecommendation.value = false
+	if (!password.value) return true
+	if (password.value !== repeatedPassword.value) {
+		isPasswordMismatch.value = true
+		return true
+	}
+	return false
+}
+
 async function handleEncrypt() {
 	// Same latch + fence discipline as creation: `isBusy` blocks a double
 	// start before Vue re-renders the disabled CTA; the fence suppresses any
@@ -293,14 +305,7 @@ async function handleEncrypt() {
 	// starting mid-download — the plaintext file would land on disk while the
 	// page ends up saying "successfully encrypted".
 	if (isBusy.value || isDownloading.value) return
-	if (isPasskeyProfile.value) {
-		showRecommendation.value = false
-		if (!password.value) return
-		if (password.value !== repeatedPassword.value) {
-			isPasswordMismatch.value = true
-			return
-		}
-	}
+	if (passkeyPasswordBlocked()) return
 	isBusy.value = true
 	const gen = generation
 	const plaintext = payloadCompact

@@ -80,7 +80,28 @@ export const useAppStore = defineStore("app", () => {
 	 * not superseded activations.
 	 */
 	let activationEpoch = 0
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
+	/** Point `account` at `target` through the scope-change guard.
+	 *  "already-active" is the fast path — re-pointing at the account already
+	 *  active is not a scope change, so it commits synchronously with no guard.
+	 *  The fence re-check lives INSIDE the synchronous commit (the widest
+	 *  await is commitScopeChange's own refreshInFlight); `landed` keeps
+	 *  the outcome honest when the commit refuses as stale. */
+	const commitAccountTarget = async (
+		target: Account | undefined,
+		superseded: () => boolean,
+	): Promise<"already-active" | "landed" | "refused"> => {
+		if (account.value?.address === target?.address) {
+			account.value = target
+			return "already-active"
+		}
+		let landed = false
+		const admitted = await commitScopeChange(() => {
+			if (superseded()) return
+			account.value = target
+			landed = true
+		})
+		return admitted && landed ? "landed" : "refused"
+	}
 	const setupActiveAccount = async (): Promise<boolean> => {
 		const myEpoch = ++activationEpoch
 		const scopeProfileId = profile.value?.id
@@ -88,46 +109,23 @@ export const useAppStore = defineStore("app", () => {
 		const superseded = () => activationEpoch !== myEpoch || profile.value?.id !== scopeProfileId || network.value?.id !== scopeNetworkId
 
 		const activeAccountResult = await storageLocalGet("nulo:ui:activeAccount")
-		// INVARIANT: no await between this check and the two re-point early-return
-		// assignments below — that synchronous span is what lets them skip their
-		// own superseded() re-check. Inserting an await in it reopens the race.
+		// INVARIANT: no await between this check and commitAccountTarget's
+		// synchronous fast-path assignment (an async call runs synchronously up
+		// to its first await) — that synchronous span is what lets the fast path
+		// skip its own superseded() re-check. Inserting an await in it (here or
+		// before the helper's fast-path check) reopens the race.
 		if (superseded()) return false
 		if ("nulo:ui:activeAccount" in activeAccountResult) {
 			const activeAccountAddress = activeAccountResult["nulo:ui:activeAccount"]
 			const remembered = accounts.value.find((a) => a.address === activeAccountAddress)
-			if (remembered) {
-				// Re-pointing at the account already active is not a scope change.
-				if (account.value?.address === remembered.address) {
-					account.value = remembered
-					return true
-				}
-				// The fence re-check lives INSIDE the synchronous commit (the widest
-				// await is commitScopeChange's own refreshInFlight); `landed` keeps
-				// the returned boolean honest when the commit refuses as stale.
-				let landed = false
-				const admitted = await commitScopeChange(() => {
-					if (superseded()) return
-					account.value = remembered
-					landed = true
-				})
-				return admitted && landed
-			}
+			if (remembered) return (await commitAccountTarget(remembered, superseded)) !== "refused"
 		}
 
 		const first = accounts.value[0]
-		if (account.value?.address === first?.address) {
-			account.value = first
-			return true
-		}
-		let landed = false
-		const admitted = await commitScopeChange(() => {
-			if (superseded()) return
-			account.value = first
-			landed = true
-		})
-		if (!admitted || !landed) {
-			return false
-		}
+		const outcome = await commitAccountTarget(first, superseded)
+		// The fast path returns without stamping the durable pointer — nothing moved.
+		if (outcome === "already-active") return true
+		if (outcome === "refused") return false
 		// Re-check across the await boundary between the commit and the durable
 		// write: a supersede landing in that gap must not let the loser stamp the
 		// global pointer (it outlives this run — the next bootstrap reads it).

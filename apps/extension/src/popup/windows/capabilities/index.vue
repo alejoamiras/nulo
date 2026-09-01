@@ -180,7 +180,34 @@ const selectAccount = (account: UIAccount) => {
 
 const isAccountSelected = (account: UIAccount) => selectedAccounts.value.some((acc) => acc.address === account.address)
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
+/** Riders are excluded here: the authwit rider's `capability` IS the accounts
+ *  cap, which is pushed separately below — including riders would grant
+ *  accounts twice (and bypass the account picker's own selected-accounts gate). */
+const buildGrantedCaps = (): Capability[] => {
+	const approvedNew = capabilities.value.filter((c) => c.isNew && c.selected && !c.authwitRider).map((c) => c.capability)
+	const existing = capabilities.value.filter((c) => !c.isNew).map((c) => c.capability)
+
+	const granted: Capability[] = [...approvedNew, ...existing]
+	if (needsAccountSelection.value && selectedAccounts.value.length > 0) {
+		const delta = payload.value!.params.delta as Capability[]
+		const accountsCap = delta.find((cap) => cap.type === "accounts")
+		if (accountsCap) granted.push(buildGrantedAccountsCap(accountsCap, capabilities.value))
+	}
+	return granted
+}
+
+/** CAIP-formatted account selection + alias map; both undefined when no picker ran. */
+const buildAccountSelectionResult = (): { selectedAccounts?: string[]; accountAliases?: Record<string, string> } => {
+	if (!needsAccountSelection.value || selectedAccounts.value.length === 0) return {}
+	const selected = selectedAccounts.value.map((acc) => formatCaipAccount(acc.chainId, acc.address))
+	const aliases: Record<string, string> = {}
+	for (const acc of selectedAccounts.value) {
+		const caip = formatCaipAccount(acc.chainId, acc.address)
+		aliases[caip] = accountAliases.value[caip] || acc.name
+	}
+	return { selectedAccounts: selected, accountAliases: aliases }
+}
+
 const approve = async () => {
 	// Full-lifetime submit latch: `loading` alone only sets pointer-events CSS,
 	// so a keyboard-focused Approve can still emit a click mid-grant — the
@@ -204,35 +231,13 @@ const approve = async () => {
 	}
 	try {
 		isLoading.value = true
-		// Riders are excluded here: the authwit rider's `capability` IS the
-		// accounts cap, which is pushed separately below — including riders
-		// would grant accounts twice (and bypass the account picker's own
-		// selected-accounts gate).
-		const approvedNew = capabilities.value.filter((c) => c.isNew && c.selected && !c.authwitRider).map((c) => c.capability)
-		const existing = capabilities.value.filter((c) => !c.isNew).map((c) => c.capability)
-
-		const granted: Capability[] = [...approvedNew, ...existing]
-		if (needsAccountSelection.value && selectedAccounts.value.length > 0) {
-			const delta = payload.value!.params.delta as Capability[]
-			const accountsCap = delta.find((cap) => cap.type === "accounts")
-			if (accountsCap) granted.push(buildGrantedAccountsCap(accountsCap, capabilities.value))
-		}
-
-		let resultSelectedAccounts: string[] | undefined
-		let resultAliases: Record<string, string> | undefined
-		if (needsAccountSelection.value && selectedAccounts.value.length > 0) {
-			resultSelectedAccounts = selectedAccounts.value.map((acc) => formatCaipAccount(acc.chainId, acc.address))
-			resultAliases = {}
-			for (const acc of selectedAccounts.value) {
-				const caip = formatCaipAccount(acc.chainId, acc.address)
-				resultAliases[caip] = accountAliases.value[caip] || acc.name
-			}
-		}
+		const granted = buildGrantedCaps()
+		const selection = buildAccountSelectionResult()
 
 		await interactionService.resolveInteraction(requestId.value!, {
 			granted,
-			selectedAccounts: resultSelectedAccounts,
-			accountAliases: resultAliases,
+			selectedAccounts: selection.selectedAccounts,
+			accountAliases: selection.accountAliases,
 		})
 		closeWindow(true)
 	} catch (error) {

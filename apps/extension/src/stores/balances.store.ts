@@ -519,7 +519,6 @@ export const useBalancesStore = defineStore("balances", () => {
 		}
 	}
 
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
 	async function ensure(scope: BalanceScope, opts: { legs: BalanceLeg[]; forceRefresh?: boolean }): Promise<EnsureSnapshot> {
 		const key = activityScopeKey(scope)
 		const epoch = epochOf(scope.profileId)
@@ -532,20 +531,27 @@ export const useBalancesStore = defineStore("balances", () => {
 		if (epochOf(scope.profileId) !== epoch) throw new EnsureSuperseded()
 		const entry = entries.value[key]
 		if (!entry) throw new EnsureSuperseded()
-		// Debt follows the OBSERVING cause, not the flight's: an ensure that
-		// JOINED a failing forced flight (whose own failure creates no debt —
-		// D11) still has a retry-capable stake in the outcome. Without this,
-		// the degraded card would paint its retrying notice while no loop runs
-		// and retryVersion never bumps to wake its recovery watch. Gas-only:
-		// the fpc leg has no forced cause, so every degraded fpc already
-		// carries its debt from the failure commit.
-		if (opts.legs.includes("gas") && entry.gas.status === "degraded" && !entry.gas.retryDebt) {
-			commitEntry(key, { ...entry, gas: { ...entry.gas, retryDebt: true } })
-		}
-		const degraded =
-			(opts.legs.includes("gas") && entry.gas.status === "degraded") || (opts.legs.includes("fpc") && entry.fpc.status === "degraded")
+		adoptGasRetryDebt(key, entry, opts.legs)
+		const degraded = anyLegDegraded(entry, opts.legs)
 		if (degraded) scheduleRetry(key, scope)
 		return { scope, epoch, gas: { verified: entry.gas.verified }, fpc: { data: entry.fpc.data }, degraded }
+	}
+
+	/** Debt follows the OBSERVING cause, not the flight's: an ensure that
+	 *  JOINED a failing forced flight (whose own failure creates no debt —
+	 *  D11) still has a retry-capable stake in the outcome. Without this,
+	 *  the degraded card would paint its retrying notice while no loop runs
+	 *  and retryVersion never bumps to wake its recovery watch. Gas-only:
+	 *  the fpc leg has no forced cause, so every degraded fpc already
+	 *  carries its debt from the failure commit. */
+	function adoptGasRetryDebt(key: string, entry: BalanceEntry, legs: BalanceLeg[]): void {
+		if (legs.includes("gas") && entry.gas.status === "degraded" && !entry.gas.retryDebt) {
+			commitEntry(key, { ...entry, gas: { ...entry.gas, retryDebt: true } })
+		}
+	}
+
+	function anyLegDegraded(entry: BalanceEntry, legs: BalanceLeg[]): boolean {
+		return (legs.includes("gas") && entry.gas.status === "degraded") || (legs.includes("fpc") && entry.fpc.status === "degraded")
 	}
 
 	// ── retry backoff (runs only while retryDebt && a retry-capable sub) ─────
@@ -583,24 +589,33 @@ export const useBalancesStore = defineStore("balances", () => {
 		retryTimers.set(key, { timer, attempt })
 	}
 
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 20) — refactor when touched, never raise
+	/** Legs that still owe a retry AND are retry-covered by the current subscriber union. */
+	function retryLegsFor(entry: BalanceEntry, unionLegs: BalanceLeg[]): BalanceLeg[] {
+		const legs: BalanceLeg[] = []
+		if (entry.gas.retryDebt && unionLegs.includes("gas")) legs.push("gas")
+		if (entry.fpc.retryDebt && unionLegs.includes("fpc")) legs.push("fpc")
+		return legs
+	}
+
+	/** Re-arm only while debt remains AND retry capability survived the flight —
+	 *  a subscriber can drop the retry cap mid-flight. */
+	function shouldRearmRetry(key: string): boolean {
+		const after = entries.value[key]
+		return Boolean(after && (after.gas.retryDebt || after.fpc.retryDebt) && capsUnion(key).retry)
+	}
+
 	async function runRetry(key: string, scope: BalanceScope, attempt: number): Promise<void> {
 		const union = capsUnion(key)
 		if (!union.retry) return
 		const entry = entries.value[key]
 		if (!entry || (!entry.gas.retryDebt && !entry.fpc.retryDebt)) return
 		const epoch = epochOf(scope.profileId)
-		const legs: BalanceLeg[] = []
-		if (entry.gas.retryDebt && union.legs.includes("gas")) legs.push("gas")
-		if (entry.fpc.retryDebt && union.legs.includes("fpc")) legs.push("fpc")
+		const legs = retryLegsFor(entry, union.legs)
 		await Promise.all([
 			legs.includes("gas") ? fetchGas(key, scope, epoch, { cause: "retry" }) : Promise.resolve(),
 			legs.includes("fpc") ? fetchFpc(key, scope, epoch, { cause: "retry" }) : Promise.resolve(),
 		])
-		const after = entries.value[key]
-		if (after && (after.gas.retryDebt || after.fpc.retryDebt) && capsUnion(key).retry) {
-			armRetry(key, scope, attempt + 1)
-		}
+		if (shouldRearmRetry(key)) armRetry(key, scope, attempt + 1)
 	}
 
 	// ── tx-settle → forced gas refresh for txRefresh-capable keys ────────────

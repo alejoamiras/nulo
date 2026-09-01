@@ -343,11 +343,40 @@ const commitFromEntry = (scope, reqKey, saved, baseline) => {
 	}
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 20) — refactor when touched, never raise
+/** Embedded ops without the "use own method" opt-in render no fee card state. */
+const embeddedHidden = () => isCustomMethod.value && !useOwnMethod.value
+
+/** True when a run no longer owns the card: unmounted, the identity props
+ *  (profile/network/chain/account) moved off the snapshot this run targeted,
+ *  or the card flipped embedded-visible (its watcher released the lease and
+ *  a fresh runInit owns the new state). */
+const identityDrifted = (scope) =>
+	!isMounted ||
+	props.profile?.id !== scope.profileId ||
+	props.network?.id !== scope.networkId ||
+	props.network?.chainId !== scope.chainId ||
+	props.account?.address !== scope.accountAddress ||
+	embeddedHidden()
+
+/** The store fetches the legs with per-leg isolation, timeout, and raw-promise
+ *  reuse; ensure settles when both requested legs settle, ready OR degraded.
+ *  False means a superseded ensure — a profile switch fenced the run out and
+ *  the new identity's own init covers it: no degraded state, no notice (the
+ *  caller's drift guard cannot observe a rejection). Other failures propagate. */
+const ensureLegsSettled = async (scope) => {
+	try {
+		await balancesStore.ensure(scope, { legs: ["gas", "fpc"] })
+		return true
+	} catch (e) {
+		if (e instanceof EnsureSuperseded) return false
+		throw e
+	}
+}
+
 const runInit = async () => {
 	const myRun = ++runSeq
 	try {
-		if (!props.profile || !props.network || !props.account || (isCustomMethod.value && !useOwnMethod.value)) {
+		if (!props.profile || !props.network || !props.account || embeddedHidden()) {
 			// Embedded ops (and identity-less mounts) hold no subscription: the
 			// release kills the store's retry loop for this key, preserving the
 			// old retry-chain death on this early-return; the useOwnMethod
@@ -400,47 +429,19 @@ const runInit = async () => {
 		// mid-await embedded flip (its watcher just released) or identity
 		// change means a fresh runInit owns the new state — subscribing here
 		// would re-lease a key this run no longer represents.
-		if (
-			!isMounted ||
-			props.profile?.id !== reqProfileId ||
-			props.network?.id !== reqNetworkId ||
-			props.network?.chainId !== reqChainId ||
-			props.account?.address !== reqAccount ||
-			(isCustomMethod.value && !useOwnMethod.value)
-		)
-			return
+		if (identityDrifted(scope)) return
 
 		loadingRun = myRun
 		isLoading.value = true
 		subscribeTo(scope, reqKey)
-		try {
-			// The store fetches the legs with per-leg isolation, timeout, and
-			// raw-promise reuse; ensure settles when both requested legs settle,
-			// ready OR degraded.
-			await balancesStore.ensure(scope, { legs: ["gas", "fpc"] })
-		} catch (e) {
-			// A superseded ensure means a profile switch fenced this run out —
-			// the new identity's own init covers it. Explicit NO-OP: no degraded
-			// state, no notice (the drift guard below cannot observe a rejection).
-			if (e instanceof EnsureSuperseded) return
-			throw e
-		}
+		if (!(await ensureLegsSettled(scope))) return
 		// Discard if the profile/network/chain/account switched mid-flight, a
 		// newer run took over, or the card flipped embedded-visible during the
 		// ensure (its watcher released the lease; committing here would open
 		// the gate and let derivedSettings overwrite the dApp's embedded
 		// v-model). Everything past this guard is synchronous (no awaits), so
 		// the commit is atomic against the checked state.
-		if (
-			!isMounted ||
-			myRun !== runSeq ||
-			(isCustomMethod.value && !useOwnMethod.value) ||
-			props.profile?.id !== reqProfileId ||
-			props.network?.id !== reqNetworkId ||
-			props.network?.chainId !== reqChainId ||
-			props.account?.address !== reqAccount
-		)
-			return
+		if (myRun !== runSeq || identityDrifted(scope)) return
 
 		commitFromEntry(scope, reqKey, saved, baseline)
 	} catch (e) {

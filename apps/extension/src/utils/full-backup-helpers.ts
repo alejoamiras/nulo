@@ -258,29 +258,33 @@ function describeRestoreError(value: unknown): unknown {
  * transactions are keyed by `hash` and config by `key`, none of which are kept — so without a
  * position two failures in the same slice would be indistinguishable.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 function projectRestoreErrorRow(row: Record<string, unknown>, index: number, serviceName: string): Record<string, unknown> {
 	const out: Record<string, unknown> = { row: index }
 	for (const field of RESTORE_ERROR_FIELDS_BY_SERVICE[serviceName] ?? []) {
 		const value = row[field.name]
 		if (value === undefined) continue
-		if (field.kind === "number") {
-			// A string here is not a chain id, whatever it claims to be.
-			if (typeof value === "number" && Number.isFinite(value)) out[field.name] = value
-			continue
-		}
-		if (field.kind === "configKey") {
-			// Safe by construction, not by filtering — but only for the service whose restore path
-			// actually enforces that construction, and only for a value that really is in the set.
-			if (serviceName === CONFIG_SERVICE_NAME && typeof value === "string" && RESTORABLE_CONFIG_KEYS.has(value as ConfigKey)) {
-				out[field.name] = value
-			}
-			continue
-		}
-		out[field.name] = boundedScalar(value)
+		const projected = projectRestoreErrorField(field, value, serviceName)
+		if (projected !== undefined) out[field.name] = projected
 	}
 	out.restoreError = describeRestoreError(row.restoreError)
 	return out
+}
+
+/** One field's allowlist projection; `undefined` means the field is dropped, not emitted. */
+function projectRestoreErrorField(field: RestoreErrorField, value: unknown, serviceName: string): unknown {
+	if (field.kind === "number") {
+		// A string here is not a chain id, whatever it claims to be.
+		return typeof value === "number" && Number.isFinite(value) ? value : undefined
+	}
+	if (field.kind === "configKey") {
+		// Safe by construction, not by filtering — but only for the service whose restore path
+		// actually enforces that construction, and only for a value that really is in the set.
+		const restorable =
+			serviceName === CONFIG_SERVICE_NAME && typeof value === "string" && RESTORABLE_CONFIG_KEYS.has(value as ConfigKey)
+		return restorable ? value : undefined
+	}
+	// boundedScalar never yields undefined, so identifier fields always emit.
+	return boundedScalar(value)
 }
 
 /**
