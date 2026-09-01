@@ -581,9 +581,11 @@ async function runDepositClaimLocked(id: string, gen: number, interactive: boole
 
 	if (recipientMismatch(rec, id)) return "stop"
 	if (rec.claimTxHash) return resumeSentClaim(rec, id, gen, interactive)
-	if ((await recoverLegIfNeeded(rec, id)) === "stop") return "stop"
+	// Caller-side condition so the common has-leaf path stays synchronous (no new await seam).
+	if (legRecoveryNeeded(rec) && (await recoverLegIfNeeded(rec, id)) === "stop") return "stop"
 
-	const material = await resolveClaimMaterial(rec, id)
+	// Public material resolves synchronously (parity with the original inline branch).
+	const material = rec.isPrivate ? await resolvePrivateClaimMaterial(rec, id) : resolvePublicClaimMaterial(rec, id)
 	if (!material) return "stop"
 	setRuntime(id, { attention: undefined, note: undefined })
 
@@ -597,8 +599,10 @@ async function runDepositClaimLocked(id: string, gen: number, interactive: boole
 	// quick revalidation under the CLAIM phase instead (the simulate still guards consumability).
 	const preGated = runtime.value[id]?.claimable === true
 	let gate: ArrivalGateState = { simulateStart: 0, counted: false, preGated }
-	gate = await awaitBlockCountdown(fresh, id, gate)
-	gate = await awaitCheckpointGate(fresh, id, gate)
+	if (!preGated) {
+		gate = await awaitBlockCountdown(fresh, id, gate)
+		gate = await awaitCheckpointGate(fresh, id, gate)
+	}
 	const ready = await awaitConsumable(interaction, id, gate)
 	if (!ready) throw new Error("the L1→L2 message never became consumable - claim it again from the journal later")
 	setRuntime(id, { claimable: true })
@@ -653,28 +657,30 @@ async function resumeSentClaim(rec: DepositJournalRecord, id: string, gen: numbe
  * than silently falling through to the public one. Guarded on the dep + tx hash so the bail
  * below stays reachable only from the original missing-leaf path.
  */
-async function recoverLegIfNeeded(rec: DepositJournalRecord, id: string): Promise<"proceed" | "stop"> {
+function legRecoveryNeeded(rec: DepositJournalRecord): boolean {
 	const fuelFieldsRecoverable =
 		rec.schema === 2 && !!rec.depositTxHash && !!deps.recoverDepositLeg && (!rec.fuel?.received || !rec.fuel?.leafIndex)
-	if (!rec.leafIndex || fuelFieldsRecoverable) {
-		if (!rec.depositTxHash || !deps.recoverDepositLeg) {
-			log("no leafIndex yet - the deposit leg is still running", id)
-			return "stop"
-		}
-		if ((await attemptLegRecovery(rec, id)) === "stop") return "stop"
+	return !rec.leafIndex || fuelFieldsRecoverable
+}
+
+async function recoverLegIfNeeded(rec: DepositJournalRecord, id: string): Promise<"proceed" | "stop"> {
+	if (!rec.depositTxHash || !deps.recoverDepositLeg) {
+		log("no leafIndex yet - the deposit leg is still running", id)
+		return "stop"
 	}
+	if ((await attemptLegRecovery(rec, id)) === "stop") return "stop"
 	return "proceed"
 }
 
 /** One recovery attempt against the recorded L1 receipt: terminal receipt-mismatch vs
  *  retryable error classification, and the not-yet-mined soft bail. */
 async function attemptLegRecovery(rec: DepositJournalRecord, id: string): Promise<"recovered" | "stop"> {
-	const recover = deps.recoverDepositLeg
-	if (!recover) return "stop" // unreachable: the caller gates on the dep
 	setStep(id, "depositing", "checking the Ethereum deposit")
 	let outcome: "recovered" | "pending"
 	try {
-		outcome = await recover(rec)
+		// Read-at-call-time (parity): a concurrently removed dep throws into THIS catch, exactly
+		// like the original property access did.
+		outcome = await (deps.recoverDepositLeg as NonNullable<typeof deps.recoverDepositLeg>)(rec)
 	} catch (e) {
 		const raw = e instanceof Error ? e.message : String(e)
 		setRuntime(id, { attention: isReceiptRecordMismatch(raw) ? "receipt-mismatch" : "error", note: humanizeWalletError(raw) })
@@ -693,21 +699,22 @@ async function attemptLegRecovery(rec: DepositJournalRecord, id: string): Promis
 /** The claim material: for a private record the unsealed authoritative copy — forwarded to
  *  the claim dep so the fee-juice path reads `envelope.salt` (source of truth) over the
  *  plaintext journal copy (codex post-impl HIGH). Null = the run must stop (already narrated). */
-async function resolveClaimMaterial(
+async function resolvePrivateClaimMaterial(
 	rec: DepositJournalRecord,
 	id: string,
 ): Promise<{ secretHex: string; envelope?: DepositEnvelopeV2 } | null> {
-	if (rec.isPrivate) {
-		// Only narrate UNSEALING when a real signature is needed (a rediscovered record). A fresh
-		// in-session deposit has its secret cached, so the unseal is instant - setting "unsealing"
-		// (which the rail maps to CLAIM) flashes CLAIM and then regresses to CROSSING when the sync
-		// gate below runs (the "instant green then rollback" bug). Cached ⇒ stay quiet; the gate
-		// narrates CROSSING until the simulate probe says the message is consumable.
-		if (!secretCache.has(id)) setStep(id, "unsealing", "one Ethereum signature")
-		const resolved = await resolvePrivateSecret(rec)
-		if (!resolved) return null
-		return { secretHex: resolved.secretHex, envelope: resolved.envelope }
-	}
+	// Only narrate UNSEALING when a real signature is needed (a rediscovered record). A fresh
+	// in-session deposit has its secret cached, so the unseal is instant - setting "unsealing"
+	// (which the rail maps to CLAIM) flashes CLAIM and then regresses to CROSSING when the sync
+	// gate below runs (the "instant green then rollback" bug). Cached ⇒ stay quiet; the gate
+	// narrates CROSSING until the simulate probe says the message is consumable.
+	if (!secretCache.has(id)) setStep(id, "unsealing", "one Ethereum signature")
+	const resolved = await resolvePrivateSecret(rec)
+	if (!resolved) return null
+	return { secretHex: resolved.secretHex, envelope: resolved.envelope }
+}
+
+function resolvePublicClaimMaterial(rec: DepositJournalRecord, id: string): { secretHex: string; envelope?: DepositEnvelopeV2 } | null {
 	if (!rec.secret) {
 		setRuntime(id, { attention: "stale", note: "This record has no claim secret - it cannot be claimed." })
 		return null
@@ -731,7 +738,7 @@ interface ArrivalGateState {
 async function awaitBlockCountdown(rec: DepositJournalRecord, id: string, gate: ArrivalGateState): Promise<ArrivalGateState> {
 	let { simulateStart: i, counted } = gate
 	const target = rec.depositL2Block !== undefined && deps.l2BlockNumber ? rec.depositL2Block + SYNC_TARGET_MARGIN_BLOCKS : null
-	if (!gate.preGated && target !== null && deps.l2BlockNumber) {
+	if (target !== null && deps.l2BlockNumber) {
 		while (i < 300) {
 			let current: number
 			try {
@@ -764,7 +771,7 @@ async function awaitBlockCountdown(rec: DepositJournalRecord, id: string, gate: 
 async function awaitCheckpointGate(rec: DepositJournalRecord, id: string, gate: ArrivalGateState): Promise<ArrivalGateState> {
 	let counted = gate.counted
 	const gateHashes = [rec.messageHash, rec.fuel?.messageHash].filter((h): h is string => !!h)
-	if (!gate.preGated && deps.messageReadiness && gateHashes.length > 0) {
+	if (deps.messageReadiness && gateHashes.length > 0) {
 		for (let g = 0; g < 300; g++) {
 			const blocked = await sweepMessageCheckpoints(gateHashes)
 			if (blocked === null) break
@@ -784,8 +791,10 @@ async function awaitCheckpointGate(rec: DepositJournalRecord, id: string, gate: 
  *  "unfolded" (probe failed / message not anchored) or its checkpoint distance. Null = all ready. */
 async function sweepMessageCheckpoints(gateHashes: string[]): Promise<{ checkpoint: number; anchor: number } | "unfolded" | null> {
 	for (const h of gateHashes) {
-		const st = await deps.messageReadiness?.(h).catch(() => null)
-		if (st === null || st === undefined) return "unfolded"
+		// Read-at-call-time (parity): the caller gates on the dep; a concurrent removal throws
+		// out of the gate loop exactly like the original direct call.
+		const st = await (deps.messageReadiness as NonNullable<typeof deps.messageReadiness>)(h).catch(() => null)
+		if (st === null) return "unfolded"
 		if (st.anchor < st.checkpoint) return st
 	}
 	return null
@@ -856,17 +865,28 @@ async function runReceiptRound(rec: DepositJournalRecord, gen: number): Promise<
 		log("receipt check", { id: rec.id, checkNo, status })
 		if (genOf(rec.id) !== gen) return "stop"
 		flipProposedLanded(rec, status)
-		const settled = await settleTerminalReceipt(rec, gen, status)
-		if (settled === "poll") continue
-		if (settled) return settled
+		// Terminal statuses only: a non-terminal poll must stay SYNCHRONOUS from the gen check
+		// through the streak mutation (no new microtask seams on the hot path).
+		if (TERMINAL_RECEIPT_STATUSES.has(status)) {
+			const settled = await settleTerminalReceipt(rec, gen, status)
+			if (settled === "poll") continue
+			return settled
+		}
 		if (advanceReceiptStreaks(rec.id, status, streaks) === "give-up") return "stop"
 		await wait(4000)
 	}
-	receiptRounds.set(rec.id, roundsDone + 1)
+	return closeReceiptRound(rec.id, roundsDone)
+}
+
+const TERMINAL_RECEIPT_STATUSES = new Set(["success", "reverted"])
+
+/** Round bookkeeping: budget the finished round; at the soft cap (NOT a dead-end — no
+ *  attention) the card re-arms RETRY and says so. */
+function closeReceiptRound(id: string, roundsDone: number): "continue" | "stop" {
+	receiptRounds.set(id, roundsDone + 1)
 	if (roundsDone + 1 >= RECEIPT_MAX_ROUNDS) {
-		// Soft cap, NOT a dead-end: no attention, the card re-arms RETRY and says so.
-		setStep(rec.id, undefined, undefined)
-		setRuntime(rec.id, {
+		setStep(id, undefined, undefined)
+		setRuntime(id, {
 			note: "Still confirming after ~30 minutes - slow testnet. Press CLAIM to keep checking; your funds are safe either way.",
 		})
 		return "stop"
@@ -886,17 +906,14 @@ function flipProposedLanded(rec: DepositJournalRecord, status: string): void {
  *  ("poll" = its probe wants another pass); a terminal revert keeps the hash (a retry rechecks
  *  the same receipt), so the hash-scoped landed view WOULD re-light during the recheck window -
  *  clear the flag explicitly. Null = non-terminal, keep polling. */
-async function settleTerminalReceipt(rec: DepositJournalRecord, gen: number, status: string): Promise<"done" | "stop" | "poll" | null> {
+async function settleTerminalReceipt(rec: DepositJournalRecord, gen: number, status: string): Promise<"done" | "stop" | "poll"> {
 	if (status === "success") return handleSuccessReceipt(rec, gen)
-	if (status === "reverted") {
-		setRuntime(rec.id, {
-			attention: "error",
-			note: "The claim reverted on Aztec. You can retry from this card - the deposit remains claimable.",
-			confirmLandedTxHash: undefined,
-		})
-		return "stop"
-	}
-	return null
+	setRuntime(rec.id, {
+		attention: "error",
+		note: "The claim reverted on Aztec. You can retry from this card - the deposit remains claimable.",
+		confirmLandedTxHash: undefined,
+	})
+	return "stop"
 }
 
 /** The per-poll streak accounting (state threaded through one mutable object — the streaks
@@ -1002,7 +1019,8 @@ async function finishSubmittedConsume(rec: WithdrawJournalRecord, id: string): P
 	}
 	log("consume already submitted - waiting on it", { id, consumeTxHash: rec.consumeTxHash })
 	setStep(id, "confirming", "waiting for the Ethereum confirmation")
-	if (await deps.waitConsumeReceipt?.(rec.consumeTxHash as string)) {
+	// Read-at-call-time (parity with the original direct call under the caller's dep gate).
+	if (await (deps.waitConsumeReceipt as NonNullable<typeof deps.waitConsumeReceipt>)(rec.consumeTxHash as string)) {
 		completeWithdraw(rec, rec.consumeTxHash as string)
 		return
 	}

@@ -234,30 +234,63 @@ describe("journal engine — pre-extraction pins", () => {
 		expect(messageReadiness).not.toHaveBeenCalled()
 	})
 
-	it("(c) preGated retry: countdown deps untouched; claimable latches after simulate, before a rejected send", async () => {
+	it("(c) preGated retry: countdown AND checkpoint deps untouched; claimable latches after simulate, before a rejected send", async () => {
 		const deps = baseDeps(kv)
 		const { runtime } = useBridgeJournal()
 		let sendRejects = true
+		let claimableInsideSend: boolean | undefined
 		const claim = vi.fn(async () => ({
 			simulate: async () => {},
 			send: async () => {
+				claimableInsideSend = runtime.value["0xpregate"]?.claimable
 				if (sendRejects) throw new Error("wallet closed")
 				return { txHash: "0xsent2" }
 			},
 		}))
 		const l2BlockNumber = vi.fn(async () => 100 + SYNC_TARGET_MARGIN_BLOCKS)
-		connectJournalDeps({ ...deps, claim, l2BlockNumber })
-		addRecord(mkDeposit("0xpregate", { depositL2Block: 100 }))
+		const messageReadiness = vi.fn(async () => ({ checkpoint: 1, anchor: 1 }))
+		connectJournalDeps({ ...deps, claim, l2BlockNumber, messageReadiness })
+		addRecord(mkDeposit("0xpregate", { depositL2Block: 100, messageHash: "0xTOK" }))
 		await runDepositClaim("0xpregate")
-		// claimable latched by the successful simulate even though the send rejected.
+		// claimable latched by the successful simulate BEFORE the send rejected — the send
+		// itself observed it already true.
+		expect(claimableInsideSend).toBe(true)
 		expect(runtime.value["0xpregate"]?.claimable).toBe(true)
 		const countdownCalls = l2BlockNumber.mock.calls.length
+		const gateCalls = messageReadiness.mock.calls.length
 		sendRejects = false
 		await runDepositClaim("0xpregate")
-		// The preGated retry consults NO countdown dep.
+		// The preGated retry consults NEITHER gate dep.
 		expect(l2BlockNumber.mock.calls.length).toBe(countdownCalls)
+		expect(messageReadiness.mock.calls.length).toBe(gateCalls)
 		const { records } = useBridgeJournal()
 		expect(records.value.find((r) => r.id === "0xpregate")?.completedAt).toBe(999)
+	})
+
+	it("(a) the checkpoint gate does NOT consume the simulate budget", async () => {
+		const deps = baseDeps(kv)
+		let readiness = 0
+		const messageReadiness = vi.fn(async () => {
+			readiness++
+			// Three blocked sweeps, then ready.
+			return readiness <= 3 ? { checkpoint: 9, anchor: 5 } : { checkpoint: 9, anchor: 9 }
+		})
+		let simulateCalls = 0
+		const claim = vi.fn(async () => ({
+			simulate: async () => {
+				simulateCalls++
+				// Succeed on the 300th poll — only reachable if the checkpoint waits did NOT
+				// consume from the simulate budget.
+				if (simulateCalls < 300) throw new Error("No L1 to L2 message found for message hash 0xdead")
+			},
+			send: async () => ({ txHash: "0xindep" }),
+		}))
+		connectJournalDeps({ ...deps, claim, messageReadiness })
+		addRecord(mkDeposit("0xindep", { messageHash: "0xTOK" }))
+		await runDepositClaim("0xindep")
+		expect(simulateCalls).toBe(300)
+		const { records } = useBridgeJournal()
+		expect(records.value.find((r) => r.id === "0xindep")?.completedAt).toBe(999)
 	})
 
 	it("(d) claim-material conservation: the claim receives the recovery-patched record + exact private material", async () => {
@@ -266,18 +299,22 @@ describe("journal engine — pre-extraction pins", () => {
 			leafIndex?: string
 			messageHash?: string
 			fuelLeaf?: string
+			fuelKey?: string
 			fuelReceived?: string
 			secretHex: string
 			envelopeSecret?: string
+			envelopeSalt?: string
 		}> = []
-		const claim = vi.fn(async (rec: DepositJournalRecord, secretHex: string, envelope?: { secret?: string }) => {
+		const claim = vi.fn(async (rec: DepositJournalRecord, secretHex: string, envelope?: { secret?: string; salt?: string }) => {
 			seen.push({
 				leafIndex: rec.leafIndex,
 				messageHash: rec.messageHash,
 				fuelLeaf: rec.fuel?.leafIndex,
+				fuelKey: rec.fuel?.messageHash,
 				fuelReceived: rec.fuel?.received,
 				secretHex,
 				envelopeSecret: envelope?.secret,
+				envelopeSalt: envelope?.salt,
 			})
 			return { simulate: async () => {}, send: async () => ({ txHash: "0xdone" }) }
 		})
@@ -304,6 +341,7 @@ describe("journal engine — pre-extraction pins", () => {
 		cacheSecret("0xmaterial", "0xprivatesecret", {
 			v: 2,
 			secret: "0xprivatesecret",
+			salt: "0xenvelopesalt",
 			recipient: base.recipient,
 			amount: base.amount,
 			sealerL1: SEALER,
@@ -315,10 +353,26 @@ describe("journal engine — pre-extraction pins", () => {
 			leafIndex: "77",
 			messageHash: "0xTOKKEY",
 			fuelLeaf: "78",
+			fuelKey: "0xFUELKEY",
 			fuelReceived: "4444",
 			secretHex: "0xprivatesecret",
 			envelopeSecret: "0xprivatesecret",
+			// The envelope SALT is the private-FJ claim's source of truth — losing it strands fuel.
+			envelopeSalt: "0xenvelopesalt",
 		})
+	})
+
+	it("(d) public claim material: the raw journal secret, NO envelope", async () => {
+		const deps = baseDeps(kv)
+		const seen: Array<{ secretHex: string; envelope: unknown }> = []
+		const claim = vi.fn(async (_rec: DepositJournalRecord, secretHex: string, envelope?: unknown) => {
+			seen.push({ secretHex, envelope })
+			return { simulate: async () => {}, send: async () => ({ txHash: "0xpub" }) }
+		})
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xpubmat"))
+		await runDepositClaim("0xpubmat")
+		expect(seen[0]).toEqual({ secretHex: "0xpublicsecret", envelope: undefined })
 	})
 
 	it("(d) terminal receipt-mismatch classifies as receipt-mismatch; a generic recovery throw as error", async () => {
@@ -342,29 +396,33 @@ describe("journal engine — pre-extraction pins", () => {
 		expect(runtime.value["0xgen"]?.attention).toBe("error")
 	})
 
-	it("(e) sent-claim monotonicity: an existing hash goes to ITS receipt; deps.claim/send never invoked", async () => {
+	it("(e) sent-claim monotonicity: receipt FIRST, verification-only claim build, interaction.send NEVER", async () => {
 		const deps = baseDeps(kv)
-		const claim = vi.fn()
-		const hashesChecked: string[] = []
+		const order: string[] = []
 		deps.claimReceiptStatus.mockImplementation((async (h: string) => {
-			hashesChecked.push(h)
+			order.push(`receipt:${h}`)
 			return "success"
 		}) as never)
-		connectJournalDeps({ ...deps, claim: claim as never })
+		// The probe build is ALLOWED (verification-only) — but only AFTER the receipt, and its
+		// interaction's send must never fire.
+		const claim = vi.fn(async () => {
+			order.push("build")
+			return {
+				simulate: async () => {
+					order.push("probe-simulate")
+					throw new Error("No non-nullified L1 to L2 message found")
+				},
+				send: async () => {
+					throw new Error("send must never fire on the sent path")
+				},
+			}
+		})
+		connectJournalDeps({ ...deps, claim })
 		addRecord(mkDeposit("0xsentalready", { claimTxHash: "0xtheclaim" }))
-		// Forge-resistant completion needs provenance OR the probe; without provenance the probe
-		// needs the secret — public record has one, so recordMessageConsumed builds a probe claim.
-		// Use a probe-friendly claim: consumed shape.
-		claim.mockImplementation(async () => ({
-			simulate: async () => {
-				throw new Error("No non-nullified L1 to L2 message found")
-			},
-			send: async () => {
-				throw new Error("send must never fire on the sent path")
-			},
-		}))
 		await runDepositClaim("0xsentalready")
-		expect(hashesChecked).toEqual(["0xtheclaim"])
+		expect(order[0]).toBe("receipt:0xtheclaim")
+		expect(order.indexOf("build")).toBeGreaterThan(0)
+		expect(order).toContain("probe-simulate")
 		const { records } = useBridgeJournal()
 		expect(records.value.find((r) => r.id === "0xsentalready")?.completedAt).toBe(999)
 	})
@@ -419,6 +477,49 @@ describe("journal engine — pre-extraction pins", () => {
 		expect(records.value.find((r) => r.id === "0xflip")?.completedAt).toBe(999)
 	})
 
+	it("(f) drops spanning the 45-poll round boundary do NOT accumulate (streaks are round-local)", async () => {
+		const deps = baseDeps(kv)
+		// Round 1: 43 pending + 2 dropped (streak 2 at the boundary). Round 2: 1 dropped (would be
+		// 3 if carried) + success. The hash must survive to completion.
+		const seq: string[] = [...Array(43).fill("pending"), "dropped", "dropped", "dropped", "success"]
+		let n = 0
+		deps.claimReceiptStatus.mockImplementation((async () => (n < seq.length ? seq[n++] : "success")) as never)
+		const claim = vi.fn(async () => ({
+			simulate: async () => {
+				throw new Error("No non-nullified L1 to L2 message found")
+			},
+			send: async () => ({ txHash: "0xx" }),
+		}))
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xboundary", { claimTxHash: "0xspan" }))
+		await runDepositClaim("0xboundary")
+		await vi.waitFor(() => {
+			const { records } = useBridgeJournal()
+			expect(records.value.find((r) => r.id === "0xboundary")?.completedAt).toBe(999)
+		})
+		const { records } = useBridgeJournal()
+		expect((records.value.find((r) => r.id === "0xboundary") as DepositJournalRecord | undefined)?.claimTxHash).toBe("0xspan")
+	})
+
+	it("(f) streak independence: alternating dropped/unreachable never clears (each resets the other)", async () => {
+		const deps = baseDeps(kv)
+		const seq: string[] = ["dropped", "unreachable", "dropped", "unreachable", "dropped", "success"]
+		let n = 0
+		deps.claimReceiptStatus.mockImplementation((async () => (n < seq.length ? seq[n++] : "success")) as never)
+		const claim = vi.fn(async () => ({
+			simulate: async () => {
+				throw new Error("No non-nullified L1 to L2 message found")
+			},
+			send: async () => ({ txHash: "0xx" }),
+		}))
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xalt", { claimTxHash: "0xalthash" }))
+		await runDepositClaim("0xalt")
+		const { records } = useBridgeJournal()
+		expect((records.value.find((r) => r.id === "0xalt") as DepositJournalRecord | undefined)?.claimTxHash).toBe("0xalthash")
+		expect(records.value.find((r) => r.id === "0xalt")?.completedAt).toBe(999)
+	})
+
 	it("(f) round accounting: exactly ten 45-poll rounds, then the soft cap re-arms RETRY (no round 11)", async () => {
 		const deps = baseDeps(kv)
 		deps.claimReceiptStatus.mockResolvedValue("pending")
@@ -467,6 +568,26 @@ describe("journal engine — pre-extraction pins", () => {
 		expect(hashAtWait).toBe("0xconsumetx")
 		expect((records.value.find((r) => r.id === "0xwd") as WithdrawJournalRecord | undefined)?.consumeTxHash).toBeUndefined()
 		expect(runtime.value["0xwd"]?.note).toMatch(/The finish transaction failed/)
+	})
+
+	it("(h) prior-hash receipt failure clears the hash with the PRIOR copy; a fresh consume success completes", async () => {
+		const deps = baseDeps(kv)
+		const { records, runtime } = useBridgeJournal()
+		deps.waitConsumeReceipt.mockResolvedValue(false)
+		connectJournalDeps({ ...deps, claim: smartClaimFake() })
+		addRecord(mkWithdraw("0xwprior", { consumeTxHash: "0xoldconsume" }))
+		await runWithdrawConsume("0xwprior")
+		expect((records.value.find((r) => r.id === "0xwprior") as WithdrawJournalRecord | undefined)?.consumeTxHash).toBeUndefined()
+		expect(runtime.value["0xwprior"]?.note).toMatch(/The prior finish transaction failed/)
+
+		// Fresh consume success: hash journaled, receipt ok, completion from the post-wait reread.
+		deps.waitConsumeReceipt.mockResolvedValue(true)
+		connectJournalDeps({ ...deps, claim: smartClaimFake() })
+		addRecord(mkWithdraw("0xwfresh"))
+		await runWithdrawConsume("0xwfresh")
+		const fresh = records.value.find((r) => r.id === "0xwfresh") as WithdrawJournalRecord | undefined
+		expect(fresh?.completedAt).toBe(999)
+		expect(fresh?.consumeTxHash).toBe("0xconsumetx")
 	})
 
 	it("(h) absent verifier defaults open (?? true) on a rediscovered consume; progress ?? fallbacks derive proven", async () => {
