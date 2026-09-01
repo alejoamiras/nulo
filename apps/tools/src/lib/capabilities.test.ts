@@ -143,6 +143,10 @@ describe("buildCombinedManifest", () => {
 		appUrl: "https://app.test",
 	})
 
+	it("identifies the app as nulo-tools (the name wallets show on approval)", () => {
+		expect(m.metadata.name).toBe("nulo-tools")
+	})
+
 	it("requests canCreateAuthWit=true (the bridge's exit needs a public burn auth-wit)", () => {
 		const cap = m.capabilities.find((c) => c.type === "accounts")
 		expect(cap).toEqual({ type: "accounts", canGet: true, canCreateAuthWit: true })

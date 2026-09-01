@@ -21,8 +21,7 @@ const hasConfig = aztecConfig !== undefined
  *   - User Allow → tokenService.addToken with origin "dapp" + dappOrigin set.
  *
  * Drives via the playground rather than the tools app because the playground
- * helpers are mature; the tools-driven e2e (using TOOLS_DEV_PORT +
- * toolsUrl fixture) is a separate spec.
+ * helpers are mature.
  *
  * Uses `dappConnectedExtensionWithAccountsCap` so the cap-popup round-trip
  * happens during fixture setup (hookTimeout=300s) rather than during this

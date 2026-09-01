@@ -6,7 +6,7 @@
  *
  * Node-safe (imports only the plain-number `chain-constants`, no `viem`/`@aztec`), so `vite.config.ts`
  * can import it in Node scope — the same reason a vite `resolve.alias` can't carry chain identity into
- * `build.json` (codex round-1 Critical). The app ALSO imports it (for the type + the testnet fallback);
+ * `build.json`. The app ALSO imports it (for the type + the testnet fallback);
  * that's fine because it pulls in no browser-hostile deps.
  */
 import {

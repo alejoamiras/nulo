@@ -93,10 +93,9 @@ const AZTEC_ADMIN_PORT = Number(process.env.AZTEC_ADMIN_PORT ?? 8880)
 const AZTEC_P2P_PORT = Number(process.env.AZTEC_P2P_PORT ?? 40400)
 const PLAYGROUND_PORT = Number(process.env.PLAYGROUND_PORT ?? 5174)
 const PLAYGROUND_URL = process.env.PLAYGROUND_URL ?? `http://localhost:${PLAYGROUND_PORT}/`
-/** Tools dev server. Opt-in via TOOLS_DEV_PORT (the agent wrapper sets it when
- *  the suite includes the `tools-add-token` spec). Without this gate, every
- *  network e2e run would spawn the tools app, which is expensive (Vite + Vue +
- *  Aztec deps) and pointless for tests that don't touch the tools app. */
+/** Tools dev server. Spawned only when TOOLS_DEV_PORT is set (the agent wrapper
+ *  always sets it; a bare vitest run does not), so a run without it never pays
+ *  the Vite + Vue + Aztec startup. */
 const TOOLS_PORT = process.env.TOOLS_DEV_PORT ? Number(process.env.TOOLS_DEV_PORT) : undefined
 const TOOLS_URL = TOOLS_PORT ? `http://localhost:${TOOLS_PORT}/` : undefined
 
@@ -894,10 +893,8 @@ declare module "vitest" {
 		extensionPath: string
 		aztecTestConfig?: AztecTestConfig
 		playgroundUrl: string
-		/** Defined only when the network suite pre-allocated a tools port via
-		 *  `TOOLS_DEV_PORT`. Tests that exercise the tools app dApp (e.g.
-		 *  `tools-add-token.test.ts`) consume this; tests that don't need it
-		 *  ignore the field. */
+		/** Defined only when `TOOLS_DEV_PORT` pre-allocated a tools port; tests
+		 *  that drive the tools app consume it, the rest ignore the field. */
 		toolsUrl?: string
 	}
 }

@@ -1,7 +1,7 @@
 /**
  * Single source of truth for the tools app's alpha-testnet chain identity.
  *
- * The tools app is testnet-only, so these are CONSTANTS with deliberately NO
+ * Chain identity is pinned at build time, so these are CONSTANTS with deliberately NO
  * `VITE_CHAIN_*` env override: a stale Cloudflare `VITE_CHAIN_VERSION=4127419662`
  * once shadowed the correct value, yielding wallet chainId `4138294185` — which
  * the V5 wallet (`1816023401`) has no network for ("No network configured for

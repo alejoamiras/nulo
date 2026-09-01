@@ -1,8 +1,6 @@
 import { MAINNET_TARGET } from "./src/lib/network-targets"
 import { makeToolsConfig } from "./vite.config"
 
-// Mainnet/Alpha build → tools.nulo.sh. Until Phase 8 deploys the real contracts, this bundles the
-// PLACEHOLDER public/mainnet-bridge.json, whose chain identity deliberately mismatches the mainnet
-// target so the startup assertion fails closed — a mainnet build cannot silently ship before the real
-// manifest is promoted.
+// Mainnet/Alpha build → tools.nulo.sh. Bundles public/mainnet-bridge.json; the startup assertion
+// fails closed if that manifest's chain identity ever mismatches the mainnet target.
 export default makeToolsConfig(MAINNET_TARGET)

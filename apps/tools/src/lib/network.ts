@@ -8,7 +8,7 @@
  *
  * Chain-id math lives in the Node-safe `chain-constants.ts` (importable from `vite.config.ts` with
  * no `viem`/`@aztec` pull); this module layers the `viem` Chain object + endpoints on top for the
- * app bundle. Today it is pinned to testnet (Sepolia); the two-network build makes it target-driven.
+ * app bundle. The Chain object is target-driven (Sepolia for the testnet build, mainnet otherwise).
  */
 import type { Chain } from "viem"
 import { mainnet, sepolia } from "viem/chains"

@@ -4,7 +4,9 @@ run-name: "refresh-landing → ${{ inputs.target }}"
 # Break-glass: manually re-fire the Cloudflare Pages deploy hook(s) to redeploy
 # the landing (nulo.sh) and/or tools (tools.nulo.sh) WITHOUT a full release run.
 #
-# The release pipeline (release.yml) deploys both automatically on every stable publish.
+# The release pipeline (release.yml) redeploys the landing on every stable publish; the tools
+# app redeploys through its Cloudflare Git-integration on push:main (its hook is unwired, so
+# neither release.yml nor this workflow can redeploy it until that changes).
 # This workflow exists for the rare stale-deploy case (a CDN miss, or a landing
 # that didn't refresh) — one command, no Cloudflare token, no account id, no
 # dashboard: `gh workflow run refresh-landing.yml [-f target=landing|tools|both]`.
@@ -63,7 +65,7 @@ jobs:
           if [ -z "$DEPLOY_HOOK" ]; then
             if [ "$TARGET" = "tools" ]; then
               # Explicitly asked to refresh the tools app, but its hook isn't wired —
-              # fail loud rather than a green no-op (codex post-impl finding).
+              # fail loud rather than a green no-op.
               echo "::error::CLOUDFLARE_TOOLS_DEPLOY_HOOK is unset but target=tools was requested — nothing to deploy."
               exit 1
             fi

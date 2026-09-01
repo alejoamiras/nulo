@@ -167,7 +167,7 @@ For smoke / network e2e specifically: failure artifacts (vitest output, `.e2e-st
 
 The `pr-quick` / `pr-smoke-e2e` / `pr-network-e2e` `changes` jobs use `dorny/paths-filter` to skip work on PRs that can't affect a given target. **These filters are derived from the workspace dependency graph, not hand-curated** — a suite/build runs whenever any package its target is built from changes:
 
-- **Built targets** (`extension`, `tools`, `playground`) → gated on the **whole package** (`packages/<target>/**`), so no build input (manifest, vite/tsconfig configs, `public/` assets, scripts, the e2e harness) can ever be silently missed.
+- **Built targets** (`extension`, `tools`, `playground`) → gated on the **whole package** (`apps/<target>/**`), so no build input (manifest, vite/tsconfig configs, `public/` assets, scripts, the e2e harness) can ever be silently missed.
 - **Dependency libraries** (`wallet-core`, `wallet-crypto`, `extension-messaging`, `aztec-runtime`, `wallet-bridge`, `design`, `bridge-core`) → gated on their consumed surface (`packages/<dep>/src/**` + `package.json`); their own README/docs stay out of the gate.
 - Plus repo-wide build inputs (`package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`, **`patches/**`**) + each suite's harness/workflow files.
 

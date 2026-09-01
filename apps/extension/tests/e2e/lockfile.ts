@@ -51,9 +51,8 @@ export interface OwnedPorts {
 	aztecAdmin: number
 	aztecP2P: number
 	playground: number
-	/** Optional: only allocated when the network suite needs the tools app dev
-	 *  server (e.g. the `tools-add-token` spec). Older lockfiles won't have
-	 *  this field — the reuse path treats `undefined` as "no tools owned". */
+	/** Optional: allocated only when TOOLS_DEV_PORT is set. Older lockfiles won't
+	 *  have this field — the reuse path treats `undefined` as "no tools owned". */
 	tools?: number
 }
 
