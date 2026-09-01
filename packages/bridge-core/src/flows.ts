@@ -295,6 +295,31 @@ export interface SwapRecoveryHooks {
 	onBridged?: (r: { tokenLeafIndex: bigint; fuelLeafIndex: bigint }) => void
 }
 
+/** Fail closed on the private-fuel invariants BEFORE any secret generation or signing.
+ *  Without this, a missing fuelSecret silently falls back to Fr.random() and strands the
+ *  Fee Juice (the PrivateFPC claimer reconstructs the secret from msg_sender — a random
+ *  one is unrecoverable), and a non-FPC fuelRecipient deposits the gas publicly to the
+ *  wrong L2 address. The shipping faucet always passes both; this guards every other
+ *  caller of the exported helper. */
+function assertPrivateFuelInvariants(p: SwapBridgeParams): void {
+	if (!p.isPrivate) return
+	if (!p.fuelSecret) {
+		throw new Error(
+			"runSwapBridge: private fuel requires an injected fuelSecret (deriveBridgeSecret(salt, claimer)) — a random secret strands the Fee Juice",
+		)
+	}
+	if (!p.tokenClaimSalt) {
+		throw new Error(
+			"runSwapBridge: private token leg requires an injected tokenClaimSalt — a random token secret strands the deposit against the recipient-committed claim_private (F2)",
+		)
+	}
+	if (p.fuelRecipient.toLowerCase() !== PRIVATE_FPC_ADDRESS.toLowerCase()) {
+		throw new Error(
+			`runSwapBridge: private fuel must target the PrivateFPC (${PRIVATE_FPC_ADDRESS}); got fuelRecipient=${p.fuelRecipient}`,
+		)
+	}
+}
+
 /**
  * The headline one-tx flow: sign a Permit2 witness-bound transfer, then call the router's
  * `bridgeWithFuel` — which pulls the token, swaps `fuelAmount` for Fee Juice, deposits the FJ to
@@ -304,36 +329,13 @@ export interface SwapRecoveryHooks {
  * (read from the `BridgeWithFuel` event, not guessed from deposit order) the L2 side claims with.
  * viem-only; the L2 claims (token via claim_*, fuel via publicFeeJuicePayment) run separately.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (82 lines) — split when touched, never grow
 export async function runSwapBridge(
 	l1: L1Ctx,
 	p: SwapBridgeParams,
 	onStage?: (s: SwapFlowStage) => void,
 	recovery?: SwapRecoveryHooks,
 ): Promise<SwapBridgeResult> {
-	// Fail closed on the private-fuel invariants BEFORE any secret generation or signing. Without
-	// this, a missing fuelSecret silently falls back to Fr.random() below and strands the Fee Juice
-	// (the PrivateFPC claimer reconstructs the secret from msg_sender — a random one is unrecoverable),
-	// and a non-FPC fuelRecipient deposits the gas publicly to the wrong L2 address. The shipping
-	// faucet always passes both; this guards every other caller of the exported helper.
-	if (p.isPrivate) {
-		if (!p.fuelSecret) {
-			throw new Error(
-				"runSwapBridge: private fuel requires an injected fuelSecret (deriveBridgeSecret(salt, claimer)) — a random secret strands the Fee Juice",
-			)
-		}
-		if (!p.tokenClaimSalt) {
-			throw new Error(
-				"runSwapBridge: private token leg requires an injected tokenClaimSalt — a random token secret strands the deposit against the recipient-committed claim_private (F2)",
-			)
-		}
-		if (p.fuelRecipient.toLowerCase() !== PRIVATE_FPC_ADDRESS.toLowerCase()) {
-			throw new Error(
-				`runSwapBridge: private fuel must target the PrivateFPC (${PRIVATE_FPC_ADDRESS}); got fuelRecipient=${p.fuelRecipient}`,
-			)
-		}
-	}
+	assertPrivateFuelInvariants(p)
 	// A nonzero-but-invalid recipient (not a Grumpkin point) strands the deposit — it would mint an
 	// undecryptable note, and the commitment makes it unrecoverable. Fail closed before the L1 tx.
 	if (!(await AztecAddress.fromStringUnsafe(p.aztecRecipient).isValid())) {

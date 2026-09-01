@@ -98,13 +98,22 @@ export function serializeAccountExport(exp: AccountExportV1): string {
 	return JSON.stringify(exp, null, "\t")
 }
 
+/** The envelope gates: format, version, this-build regime digests. Flat on purpose —
+ *  each check is one hostile-input rejection with its own message. */
+function assertExportEnvelope(v: Record<string, unknown>): void {
+	if (v.format !== ACCOUNT_EXPORT_FORMAT) throw new Error("Not a Nulo account export")
+	if (v.version !== ACCOUNT_EXPORT_VERSION) throw new Error(`Unsupported account-export version: ${String(v.version)}`)
+	for (const [k, expected] of Object.entries(EXPORT_REGIME_DIGESTS)) {
+		if (v[k] !== expected) throw new Error(`Account export is for a different Nulo regime (${k} mismatch)`)
+	}
+}
+
 /**
  * Parse + STRUCTURALLY validate a plaintext export (hostile input): shape, this-build regime
  * digests, canonical signing key (Fq rejects ≥ modulus), and checksum. Returns the validated
  * signing key + l1ChainId + the file's CLAIMED address (the caller must recompute the address
  * from the signing key and compare — the checksum does not authenticate the address).
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 export function parseAccountExport(json: string): { signingKey: Fq; l1ChainId: number; claimedAddress: string } {
 	let raw: unknown
 	try {
@@ -114,11 +123,7 @@ export function parseAccountExport(json: string): { signingKey: Fq; l1ChainId: n
 	}
 	if (!raw || typeof raw !== "object") throw new Error("Account export is not an object")
 	const v = raw as Record<string, unknown>
-	if (v.format !== ACCOUNT_EXPORT_FORMAT) throw new Error("Not a Nulo account export")
-	if (v.version !== ACCOUNT_EXPORT_VERSION) throw new Error(`Unsupported account-export version: ${String(v.version)}`)
-	for (const [k, expected] of Object.entries(EXPORT_REGIME_DIGESTS)) {
-		if (v[k] !== expected) throw new Error(`Account export is for a different Nulo regime (${k} mismatch)`)
-	}
+	assertExportEnvelope(v)
 	if (typeof v.l1ChainId !== "number" || !Number.isSafeInteger(v.l1ChainId) || v.l1ChainId < 0 || v.l1ChainId > 0xffffffff) {
 		throw new Error("Account export has a non-canonical l1ChainId")
 	}

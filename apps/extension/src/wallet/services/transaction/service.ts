@@ -403,7 +403,29 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		return due
 	}
 
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
+	/** DROPPED-debounce bookkeeping: within the submission grace window, or below the
+	 *  consecutive-observation threshold, keep the row Pending and let the next tick
+	 *  re-check ("bail"). No streak bookkeeping for a tx that is no longer the armed
+	 *  instance — an in-flight poll racing a purge would otherwise recreate the map entry
+	 *  the purge just cleaned. Any non-(Dropped-over-Pending) observation resets the streak. */
+	private trackDroppedStreak(tx: Tx, status: TxStatus): "bail" | "proceed" {
+		if (status === TxStatus.Dropped && tx.status === TxStatus.Pending) {
+			if (this.pending.get(tx.hash) !== tx) return "bail"
+			const streak = (this.droppedStreaks.get(tx.hash) ?? 0) + 1
+			this.droppedStreaks.set(tx.hash, streak)
+			const ageMs = Date.now() - tx.createdAt
+			if (ageMs < DROPPED_GRACE_MS || streak < DROPPED_CONFIRMATIONS) {
+				this.logDebug(
+					`Tx ${tx.hash.slice(0, 8)} reported dropped (streak ${streak}, age ${Math.round(ageMs / 1000)}s) — keeping pending`,
+				)
+				return "bail"
+			}
+			return "proceed"
+		}
+		this.droppedStreaks.delete(tx.hash)
+		return "proceed"
+	}
+
 	private async updateTx(tx: Tx) {
 		this.logDebug(`Sync tx ${tx.hash.slice(0, 8)}`)
 		// Pin polling to the endpoint that submitted this tx: staying on the
@@ -434,27 +456,9 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		const status = this.getTxStatus(receipt.status)
 		const executionResult = this.getTxExecutionResult(receipt.executionResult)
 
-		// Debounce DROPPED for a still-pending tx: within the submission grace
-		// window, or below the consecutive-observation threshold, keep the row
-		// Pending and let the next tick re-check (see the constants' doc block —
-		// DROPPED also means "this replica has never seen the hash").
-		if (status === TxStatus.Dropped && tx.status === TxStatus.Pending) {
-			// No streak bookkeeping for a tx that is no longer the armed instance —
-			// an in-flight poll racing a purge would otherwise recreate the map
-			// entry the purge just cleaned.
-			if (this.pending.get(tx.hash) !== tx) return
-			const streak = (this.droppedStreaks.get(tx.hash) ?? 0) + 1
-			this.droppedStreaks.set(tx.hash, streak)
-			const ageMs = Date.now() - tx.createdAt
-			if (ageMs < DROPPED_GRACE_MS || streak < DROPPED_CONFIRMATIONS) {
-				this.logDebug(
-					`Tx ${tx.hash.slice(0, 8)} reported dropped (streak ${streak}, age ${Math.round(ageMs / 1000)}s) — keeping pending`,
-				)
-				return
-			}
-		} else {
-			this.droppedStreaks.delete(tx.hash)
-		}
+		// DROPPED also means "this replica has never seen the hash" (see the constants'
+		// doc block) — debounce it for a still-pending tx.
+		if (this.trackDroppedStreak(tx, status) === "bail") return
 
 		if (status === tx.status && executionResult === tx.executionResult) {
 			this.logDebug(`Tx ${tx.hash.slice(0, 8)} still ${receipt.status}`)
@@ -535,7 +539,6 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		}
 	}
 
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 20) — refactor when touched, never raise
 	public async backup(): Promise<Tx[] | undefined> {
 		const profile = await requireActiveProfile(this.profileService)
 
@@ -549,16 +552,8 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		for (const n of networks) {
 			const accounts = await this.accountService.getAccounts(profile.id, n.chainId)
 			for (const acc of accounts) {
-				for (const tx of await this.getTransactions(acc.address)) {
-					// The fetch is by address, which two same-seed profiles share, so a
-					// row naming another profile is not ours to export. A row that was
-					// marked unattributable is nobody's, and restore would hand it to
-					// whichever profile imported the backup.
-					if (tx.ambiguous) continue
-					if (tx.profileId !== undefined && tx.profileId !== profile.id) continue
-					if (tx.chainId !== n.chainId) continue
-					txs.push(tx)
-				}
+				const mine = (await this.getTransactions(acc.address)).filter((tx) => exportableTx(tx, profile.id, n.chainId))
+				txs.push(...mine)
 			}
 		}
 
@@ -607,4 +602,13 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			})
 		})
 	}
+}
+
+/** Is this row OURS to export? The fetch is by address, which two same-seed profiles
+ *  share, so a row naming another profile is not ours. A row marked unattributable is
+ *  nobody's — restore would hand it to whichever profile imported the backup. */
+function exportableTx(tx: Tx, profileId: string, chainId: number): boolean {
+	if (tx.ambiguous) return false
+	if (tx.profileId !== undefined && tx.profileId !== profileId) return false
+	return tx.chainId === chainId
 }

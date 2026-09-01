@@ -367,7 +367,6 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		const accounts = await this.accountService.getAccountsRaw(profileId)
 		if (gen !== this.profileGeneration) return
 
-		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
 		await this.lock.withLock(async () => {
 			if (gen !== this.profileGeneration) return
 			const existing = await this.repo.getAll()
@@ -375,23 +374,8 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 			const tokens = [...this.tokens.values()]
 			const plan = reconcilePlan({ tokens, accounts, existing })
-
-			// Provably-stale rows (live token at the id, identity mismatch, this
-			// profile) are deleted BEFORE repair so the canonical pair can land.
-			// They were never renderable, so no delete event is emitted. Fence
-			// first: an in-flight projection must not resurrect the id.
-			for (const row of plan.staleIdentity) {
-				if (gen !== this.profileGeneration) return
-				this.invalidatedBalanceIds.add(row.id)
-				await this.repo.delete(row.id)
-			}
-
-			for (const row of plan.staleTokens) {
-				if (gen !== this.profileGeneration) return
-				this.queue.enqueue(row)
-			}
-
-			const repaired = await this.ensurePairsHoldingLock(plan.missing, gen, existing)
+			const repaired = await this.applyReconcilePlanHoldingLock(plan, gen, existing)
+			if (repaired === undefined) return
 
 			// Surfaced because a non-zero repair means something upstream left the
 			// store inconsistent; the count is the fact, the cause is not inferable
@@ -404,6 +388,33 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 				this.logDebug(`balance reconcile: nothing to repair (${Date.now() - startedAt}ms)`)
 			}
 		})
+	}
+
+	/** Apply a reconcile plan under the lock, generation-fenced before each delete/enqueue;
+	 *  `undefined` = the generation moved during THOSE steps (bail silently — the successor's
+	 *  own reconcile owns the store). A move inside `ensurePairsHoldingLock` instead returns
+	 *  its partial count, so the outcome still logs, as before the split. */
+	private async applyReconcilePlanHoldingLock(
+		plan: { staleIdentity: TokenBalanceRaw[]; staleTokens: TokenBalanceRaw[]; missing: { token: Token; account: Account }[] },
+		gen: number,
+		existing: TokenBalanceRaw[],
+	): Promise<number | undefined> {
+		// Provably-stale rows (live token at the id, identity mismatch, this
+		// profile) are deleted BEFORE repair so the canonical pair can land.
+		// They were never renderable, so no delete event is emitted. Fence
+		// first: an in-flight projection must not resurrect the id.
+		for (const row of plan.staleIdentity) {
+			if (gen !== this.profileGeneration) return undefined
+			this.invalidatedBalanceIds.add(row.id)
+			await this.repo.delete(row.id)
+		}
+
+		for (const row of plan.staleTokens) {
+			if (gen !== this.profileGeneration) return undefined
+			this.queue.enqueue(row)
+		}
+
+		return await this.ensurePairsHoldingLock(plan.missing, gen, existing)
 	}
 
 	/** Whether the map still holds THIS token rather than a successor that reused

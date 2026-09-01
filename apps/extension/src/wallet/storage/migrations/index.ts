@@ -91,7 +91,6 @@ export type MigrationBlockedStatus = {
  *    malformed `backstopRuns` decodes to 1 (already spent) — each field
  *    degrades in its own conservative direction, and none can void a valid
  *    same-version terminal verdict. */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
 export function decodeBlockedStatus(
 	raw: unknown,
 	currentExtensionVersion: string,
@@ -103,11 +102,10 @@ export function decodeBlockedStatus(
 	if (typeof b.atExtensionVersion !== "string" || b.atExtensionVersion.length === 0 || b.atExtensionVersion !== currentExtensionVersion) {
 		return { kind: "invalidated" }
 	}
-	const lastAttemptAt =
-		typeof b.lastAttemptAt === "number" && Number.isFinite(b.lastAttemptAt) && b.lastAttemptAt <= now ? b.lastAttemptAt : 0
-	const backstopRuns = typeof b.backstopRuns === "number" && Number.isInteger(b.backstopRuns) && b.backstopRuns >= 0 ? b.backstopRuns : 1
-	const gestureRuns = typeof b.gestureRuns === "number" && Number.isInteger(b.gestureRuns) && b.gestureRuns >= 0 ? b.gestureRuns : 1
-	const claimedAt = typeof b.claimedAt === "number" && Number.isFinite(b.claimedAt) && b.claimedAt <= now ? b.claimedAt : undefined
+	const lastAttemptAt = decodePastTimestamp(b.lastAttemptAt, now) ?? 0
+	const backstopRuns = decodeRunCount(b.backstopRuns) ?? 1
+	const gestureRuns = decodeRunCount(b.gestureRuns) ?? 1
+	const claimedAt = decodePastTimestamp(b.claimedAt, now)
 	return {
 		kind: "blocked",
 		status: {
@@ -121,6 +119,16 @@ export function decodeBlockedStatus(
 			...(claimedAt !== undefined ? { claimedAt } : {}),
 		},
 	}
+}
+
+/** A finite timestamp that isn't in the future, else undefined (the caller's fallback). */
+function decodePastTimestamp(v: unknown, now: number): number | undefined {
+	return typeof v === "number" && Number.isFinite(v) && v <= now ? v : undefined
+}
+
+/** A non-negative integer run count, else undefined (the caller's fallback). */
+function decodeRunCount(v: unknown): number | undefined {
+	return typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : undefined
 }
 
 /** The retry request is a gesture token, not data — any object with a finite

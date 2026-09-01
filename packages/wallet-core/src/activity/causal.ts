@@ -210,32 +210,12 @@ export function applySnapshot<T>(state: SourceState<T>, snapshot: ActivitySnapsh
 }
 
 /** Merge snapshot rows/tombstones into `base`, which is already on the snapshot's incarnation. */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
 function installSnapshot<T>(base: SourceState<T>, snapshot: ActivitySnapshot<T>): SourceState<T> {
 	const watermark = snapshot.watermark
 	const next = cloneState(base)
 
-	for (const tombstone of snapshot.tombstones) {
-		const seq = tombstone.revision.seq
-		const existing = next.records.get(tombstone.recordId)
-		if (existing && compareCounter(existing.seq, seq) > 0) continue // client has something newer
-		const known = next.tombstones.get(tombstone.recordId)
-		if (known !== undefined && compareCounter(known, seq) >= 0) continue
-		next.records.delete(tombstone.recordId)
-		next.tombstones.set(tombstone.recordId, seq)
-	}
-
-	const inSnapshot = new Set<string>()
-	for (const row of snapshot.records) {
-		inSnapshot.add(row.recordId)
-		const seq = row.revision.seq
-		const existing = next.records.get(row.recordId)
-		if (existing && compareCounter(existing.seq, seq) >= 0) continue // client has it, same or newer
-		const tombstone = next.tombstones.get(row.recordId)
-		if (tombstone !== undefined && compareCounter(seq, tombstone) <= 0) continue // deleted after this revision
-		next.records.set(row.recordId, { payload: row.record, seq })
-		next.tombstones.delete(row.recordId)
-	}
+	applySnapshotTombstones(next, snapshot.tombstones)
+	const inSnapshot = applySnapshotRows(next, snapshot.records)
 
 	// Absence is authoritative at the watermark: a record the client holds at or
 	// below the watermark that the snapshot does not list has been deleted.
@@ -246,6 +226,37 @@ function installSnapshot<T>(base: SourceState<T>, snapshot: ActivitySnapshot<T>)
 
 	next.snapshotCoverage = maxCounter(next.snapshotCoverage, watermark)
 	return next
+}
+
+/** Merge tombstones in place: a client record newer than the tombstone survives; an
+ *  already-known same-or-newer tombstone stays. */
+function applySnapshotTombstones<T>(next: SourceState<T>, tombstones: ActivitySnapshot<T>["tombstones"]): void {
+	for (const tombstone of tombstones) {
+		const seq = tombstone.revision.seq
+		const existing = next.records.get(tombstone.recordId)
+		if (existing && compareCounter(existing.seq, seq) > 0) continue // client has something newer
+		const known = next.tombstones.get(tombstone.recordId)
+		if (known !== undefined && compareCounter(known, seq) >= 0) continue
+		next.records.delete(tombstone.recordId)
+		next.tombstones.set(tombstone.recordId, seq)
+	}
+}
+
+/** Merge rows in place; returns the id set the snapshot listed (the absence-authority
+ *  sweep needs it). A same-or-newer client copy wins; a later tombstone wins. */
+function applySnapshotRows<T>(next: SourceState<T>, records: ActivitySnapshot<T>["records"]): Set<string> {
+	const inSnapshot = new Set<string>()
+	for (const row of records) {
+		inSnapshot.add(row.recordId)
+		const seq = row.revision.seq
+		const existing = next.records.get(row.recordId)
+		if (existing && compareCounter(existing.seq, seq) >= 0) continue // client has it, same or newer
+		const tombstone = next.tombstones.get(row.recordId)
+		if (tombstone !== undefined && compareCounter(seq, tombstone) <= 0) continue // deleted after this revision
+		next.records.set(row.recordId, { payload: row.record, seq })
+		next.tombstones.delete(row.recordId)
+	}
+	return inSnapshot
 }
 
 /**
