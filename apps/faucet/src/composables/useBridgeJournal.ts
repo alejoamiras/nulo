@@ -574,10 +574,8 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
  *  polling and the caller's chunked re-entry. Returns whether another receipt round should
  *  be scheduled outside the lock. */
 async function runDepositClaimLocked(id: string, gen: number, interactive: boolean): Promise<"continue" | "stop"> {
-	const rec = records.value.find((r) => r.id === id && r.direction === "deposit") as DepositJournalRecord | undefined
-	if (!rec || rec.completedAt) return "stop"
-	if (!guardDeployment(rec)) return "stop"
-	if (!deps.claim || !deps.claimReceiptStatus) throw new Error("Journal deps not connected")
+	const rec = claimTarget(id)
+	if (!rec) return "stop"
 
 	if (recipientMismatch(rec, id)) return "stop"
 	if (rec.claimTxHash) return resumeSentClaim(rec, id, gen, interactive)
@@ -593,24 +591,33 @@ async function runDepositClaimLocked(id: string, gen: number, interactive: boole
 	if (!fresh) return "stop" // Cross-tab discard while the unseal signature waited.
 	// Interaction CONSTRUCTION happens BEFORE all three gates — fee/fuel resolution timing and
 	// any journal mutations the build performs must not move.
-	const interaction = await deps.claim(fresh, material.secretHex, material.envelope)
+	const interaction = await (deps.claim as NonNullable<typeof deps.claim>)(fresh, material.secretHex, material.envelope)
 
 	// A retry on an already-gate-passed record must NOT visually re-run the crossing: narrate the
 	// quick revalidation under the CLAIM phase instead (the simulate still guards consumability).
 	const preGated = runtime.value[id]?.claimable === true
 	let gate: ArrivalGateState = { simulateStart: 0, counted: false, preGated }
-	// Await the gates only when one can actually run: a preGated retry, a record with no L2
-	// snapshot AND no message keys, or missing deps must reach the simulate loop with the same
-	// synchronous flow the original had (no no-op await seams).
-	if (arrivalGatesApply(fresh, preGated)) {
-		gate = await awaitBlockCountdown(fresh, id, gate)
-		gate = await awaitCheckpointGate(fresh, id, gate)
-	}
+	// Await each gate only when IT can actually run: a preGated retry, a missing dep, a
+	// snapshot-less or keyless record must reach the next stage with the same synchronous
+	// flow the original had (no no-op await seams — each gate is guarded independently).
+	if (!preGated && countdownApplies(fresh)) gate = await awaitBlockCountdown(fresh, id, gate)
+	if (!preGated && checkpointApplies(fresh)) gate = await awaitCheckpointGate(fresh, id, gate)
 	const ready = await awaitConsumable(interaction, id, gate)
 	if (!ready) throw new Error("the L1→L2 message never became consumable - claim it again from the journal later")
 	setRuntime(id, { claimable: true })
 
 	return sendAndWatch(id, gen, interaction)
+}
+
+/** The runnable claim target, or undefined: completed/absent/wrong-deployment records don't
+ *  run; missing engine deps throw (a wiring bug, not a record state). Synchronous — the
+ *  head guards keep the original's no-await entry. */
+function claimTarget(id: string): DepositJournalRecord | undefined {
+	const rec = records.value.find((r) => r.id === id && r.direction === "deposit") as DepositJournalRecord | undefined
+	if (!rec || rec.completedAt) return undefined
+	if (!guardDeployment(rec)) return undefined
+	if (!deps.claim || !deps.claimReceiptStatus) throw new Error("Journal deps not connected")
+	return rec
 }
 
 /** Pre-click recipient guard (ALL deposit claims — post-impl audit HIGH-1): the claim acts
@@ -725,12 +732,14 @@ function resolvePublicClaimMaterial(rec: DepositJournalRecord, id: string): { se
 	return { secretHex: rec.secret }
 }
 
-/** Whether either arrival gate has anything to do for this record. */
-function arrivalGatesApply(rec: DepositJournalRecord, preGated: boolean): boolean {
-	if (preGated) return false
-	const countdownApplies = rec.depositL2Block !== undefined && !!deps.l2BlockNumber
-	const checkpointApplies = !!deps.messageReadiness && (!!rec.messageHash || !!rec.fuel?.messageHash)
-	return countdownApplies || checkpointApplies
+/** Whether the block countdown has anything to do for this record. */
+function countdownApplies(rec: DepositJournalRecord): boolean {
+	return rec.depositL2Block !== undefined && !!deps.l2BlockNumber
+}
+
+/** Whether the checkpoint gate has anything to do for this record. */
+function checkpointApplies(rec: DepositJournalRecord): boolean {
+	return !!deps.messageReadiness && (!!rec.messageHash || !!rec.fuel?.messageHash)
 }
 
 /** The arrival gates' threaded state: `simulateStart` is the shared 300-iteration budget the
