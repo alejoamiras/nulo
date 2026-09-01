@@ -141,70 +141,76 @@ function openDropdown() {
 			break
 	}
 
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
 	nextTick(() => {
-		let candidate
-		try {
-			candidate = focusTrap.createFocusTrap(dropdown.value.$el, {
-				initialFocus: false,
-				// Container is focusable (tabindex=-1) so focus-trap can hold focus even
-				// when every menu item is disabled (no tabbable node) — the case that
-				// otherwise makes activate() throw. The try/catch stays as a backstop.
-				fallbackFocus: () => dropdown.value?.$el,
-			})
-			candidate.activate()
-			trap.value = candidate
-		} catch {
-			// Backstop: fallbackFocus should prevent the no-tabbable throw, but if activate()
-			// still fails after partially installing listeners, deactivate the candidate so we
-			// don't leak focus isolation — then leave `trap` inert (its deactivate() no-ops).
-			// A menu that can't trap focus is far better than the y:0 undismissable lock-up
-			// this whole path exists to prevent.
-			try {
-				candidate?.deactivate?.()
-			} catch {
-				// deactivating a half-activated trap can itself throw; ignore.
-			}
-			trap.value = {}
-		}
-
-		/** Check if there is enough space to open (top/bottom) */
-		const dropdownRect = dropdown.value.$el.getBoundingClientRect()
-
-		switch (props.side) {
-			case "top":
-				if (triggerRect.top < dropdownRect.height) {
-					dropdownStyles.value.top = `${triggerRect.y + triggerRect.height + 8}px`
-				} else {
-					dropdownStyles.value.bottom = `${window.innerHeight - triggerRect.y + 8}px`
-				}
-				break
-
-			case "bottom":
-				if (window.innerHeight - dropdownRect.height - triggerRect.top < 50) {
-					dropdownStyles.value.bottom = `${window.innerHeight - triggerRect.y + 8}px`
-				} else {
-					dropdownStyles.value.top = `${triggerRect.y + triggerRect.height + 8}px`
-				}
-				break
-		}
-
-		if (props.customPosition) {
-			dropdownStyles.value.top = undefined
-			dropdownStyles.value.bottom = undefined
-			dropdownStyles.value.left = undefined
-			dropdownStyles.value.right = undefined
-
-			dropdownStyles.value = { ...props.customPosition }
-		}
-
-		if (props.height) dropdownStyles.value.maxHeight = props.height
-		if (props.verticalOverflow) dropdownStyles.value.overflowY = "auto"
+		installFocusTrap()
+		placeDropdown(triggerRect)
 
 		emit("onOpen")
 
 		removeOutside = useOutside(dropdown.value.wrapper, handleOutside)
 	})
+}
+
+/** Hold focus inside the open menu. Container is focusable (tabindex=-1) so focus-trap can hold
+ *  focus even when every menu item is disabled (no tabbable node) — the case that otherwise makes
+ *  activate() throw. The try/catch stays as a backstop. */
+function installFocusTrap() {
+	let candidate
+	try {
+		candidate = focusTrap.createFocusTrap(dropdown.value.$el, {
+			initialFocus: false,
+			fallbackFocus: () => dropdown.value?.$el,
+		})
+		candidate.activate()
+		trap.value = candidate
+	} catch {
+		// Backstop: fallbackFocus should prevent the no-tabbable throw, but if activate()
+		// still fails after partially installing listeners, deactivate the candidate so we
+		// don't leak focus isolation — then leave `trap` inert (its deactivate() no-ops).
+		// A menu that can't trap focus is far better than the y:0 undismissable lock-up
+		// this whole path exists to prevent.
+		try {
+			candidate?.deactivate?.()
+		} catch {
+			// deactivating a half-activated trap can itself throw; ignore.
+		}
+		trap.value = {}
+	}
+}
+
+/** Check if there is enough space to open (top/bottom), then the explicit overrides. */
+function placeDropdown(triggerRect) {
+	const dropdownRect = dropdown.value.$el.getBoundingClientRect()
+
+	switch (props.side) {
+		case "top":
+			if (triggerRect.top < dropdownRect.height) {
+				dropdownStyles.value.top = `${triggerRect.y + triggerRect.height + 8}px`
+			} else {
+				dropdownStyles.value.bottom = `${window.innerHeight - triggerRect.y + 8}px`
+			}
+			break
+
+		case "bottom":
+			if (window.innerHeight - dropdownRect.height - triggerRect.top < 50) {
+				dropdownStyles.value.bottom = `${window.innerHeight - triggerRect.y + 8}px`
+			} else {
+				dropdownStyles.value.top = `${triggerRect.y + triggerRect.height + 8}px`
+			}
+			break
+	}
+
+	if (props.customPosition) {
+		dropdownStyles.value.top = undefined
+		dropdownStyles.value.bottom = undefined
+		dropdownStyles.value.left = undefined
+		dropdownStyles.value.right = undefined
+
+		dropdownStyles.value = { ...props.customPosition }
+	}
+
+	if (props.height) dropdownStyles.value.maxHeight = props.height
+	if (props.verticalOverflow) dropdownStyles.value.overflowY = "auto"
 }
 
 onBeforeUnmount(() => {
@@ -213,37 +219,37 @@ onBeforeUnmount(() => {
 	document.removeEventListener("keydown", onKeydown)
 })
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
 const onKeydown = (event) => {
 	if (event.key === "Escape") close()
 	if (event.key === "Enter") {
 		if (document.activeElement?.getAttribute("aria-disabled") !== "true") document.activeElement?.click()
 	}
 
-	if (event.key === "ArrowDown") {
-		if (!dropdown.value?.wrapper) return
-		const itemsToNavigate = dropdown.value.wrapper.querySelectorAll("[data-dropdown-item]")
-		if (!itemsToNavigate.length) return
-		const activeItemIdx = [...itemsToNavigate].findIndex((item) => item.isEqualNode(document.activeElement))
+	if (event.key === "ArrowDown") focusAdjacentItem(1)
+	if (event.key === "ArrowUp") focusAdjacentItem(-1)
+}
 
-		if (activeItemIdx === -1 || activeItemIdx === itemsToNavigate.length - 1) {
+/** Roving focus over the menu's `[data-dropdown-item]`s: nothing focused starts at the first
+ *  (down) or last (up) item, and both ends wrap. Inert when the menu has no items. */
+function focusAdjacentItem(direction) {
+	if (!dropdown.value?.wrapper) return
+	const itemsToNavigate = dropdown.value.wrapper.querySelectorAll("[data-dropdown-item]")
+	if (!itemsToNavigate.length) return
+	const activeItemIdx = [...itemsToNavigate].findIndex((item) => item.isEqualNode(document.activeElement))
+	const lastIdx = itemsToNavigate.length - 1
+
+	if (direction > 0) {
+		if (activeItemIdx === -1 || activeItemIdx === lastIdx) {
 			itemsToNavigate[0].focus()
 		} else {
 			itemsToNavigate[activeItemIdx + 1].focus()
 		}
+		return
 	}
-
-	if (event.key === "ArrowUp") {
-		if (!dropdown.value?.wrapper) return
-		const itemsToNavigate = dropdown.value.wrapper.querySelectorAll("[data-dropdown-item]")
-		if (!itemsToNavigate.length) return
-		const activeItemIdx = [...itemsToNavigate].findIndex((item) => item.isEqualNode(document.activeElement))
-
-		if (activeItemIdx === -1 || activeItemIdx === 0) {
-			itemsToNavigate[itemsToNavigate.length - 1].focus()
-		} else {
-			itemsToNavigate[activeItemIdx - 1].focus()
-		}
+	if (activeItemIdx === -1 || activeItemIdx === 0) {
+		itemsToNavigate[lastIdx].focus()
+	} else {
+		itemsToNavigate[activeItemIdx - 1].focus()
 	}
 }
 </script>

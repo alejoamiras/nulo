@@ -3,11 +3,9 @@
 	"generated": "2026-09-01",
 	"rules": {
 		"noExcessiveCognitiveComplexity": {
-			"apps/extension/src/components/ui/Dropdown/DropdownRoot.vue": 2,
 			"apps/extension/src/popup/components/modules/send/FeeSettingsCard.test.ts": 1,
 			"apps/extension/src/stores/balances.store.fuzz.test.ts": 2,
 			"apps/extension/src/utils/amount.ts": 1,
-			"apps/extension/src/utils/files.ts": 1,
 			"apps/extension/src/utils/log-payload-ban.test.ts": 2,
 			"apps/extension/src/wallet/logger/utils.ts": 1,
 			"apps/extension/src/wallet/services/backup/footprint-coverage.test.ts": 1,
@@ -29,7 +27,6 @@
 			"packages/bridge-core/scripts/fpc-dust-canary-mainnet.ts": 1,
 			"packages/bridge-core/scripts/live-intent.ts": 2,
 			"packages/bridge-core/scripts/relay-claim-testnet.ts": 1,
-			"packages/design/src/ui/Input.vue": 1,
 			"packages/wallet-core/src/base/topology.ts": 1,
 			"packages/wallet-core/src/utils/serialization.ts": 1,
 			"scripts/ci-cd/test-soak/cli.ts": 3,
