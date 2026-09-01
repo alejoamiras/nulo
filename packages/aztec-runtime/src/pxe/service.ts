@@ -237,8 +237,33 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// row), so recursively dropping its dir cannot race a sibling-chain open —
 			// unlike the removed per-chain empty-dir sweep (D7 TOCTOU).
 			const orphanProfiles = [...new Set(opfsDirs.map((c) => c.profileId))].filter((id) => !profiles.some((x) => x.id === id))
+			// The barrier loop stays INLINE: the next orphan's `enterWrite()` must
+			// be reserved on the same continuation the previous `leaveWrite()` ran
+			// on — a helper-return hop here would let a concurrent reader win the
+			// barrier and change removal/warning timing (codex post-impl).
 			for (const profileId of orphanProfiles) {
-				await this.removeOrphanProfileDir(profileId)
+				// Serialize against store-opens: dirs are (re)created by
+				// `registry.ensure` under this profile's `barrier.read`, so holding
+				// WRITE here means a same-id re-import provisioning DURING the sweep
+				// either lands its lifecycle entry before the re-check below
+				// (removal skipped) or has its store creation queued until the
+				// removal finishes (fresh dir after). Without the barrier, the
+				// recursive remove could delete a successor store mid-create. The
+				// barrier entry is retained (unlike clearProfileState's success
+				// path) — deleting it here could split-brain a queued reader onto a
+				// stale guard instance.
+				const barrier = this.getProfileBarrier(profileId)
+				await barrier.enterWrite()
+				try {
+					// Re-check liveness AFTER acquiring the barrier, not just at the
+					// snapshot: a provision that landed while we waited (dir exists ⟹ key
+					// provisioned ⟹ lifecycle entry present) must not be swept as orphan.
+					if (this.profileLifecycles.has(profileId)) continue
+					this.logWarn(`sweep: removing orphan OPFS PXE profile dir ${PXE_DATA_DIR_ROOT}/${profileId}`)
+					await removeProfileStoreDirs(profileId)
+				} finally {
+					barrier.leaveWrite()
+				}
 			}
 		}
 		if (!pxes.length) return
@@ -246,30 +271,6 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		// deleteDatabase would widen the window in which a concurrent DB open
 		// changes the blocked/warn outcome.
 		return this.sweepLegacyIndexedDbs(dbs, pxes)
-	}
-
-	/** One orphan profile dir's guarded removal. Serialize against store-opens:
-	 *  dirs are (re)created by `registry.ensure` under this profile's
-	 *  `barrier.read`, so holding WRITE here means a same-id re-import
-	 *  provisioning DURING the sweep either lands its lifecycle entry before
-	 *  the re-check below (removal skipped) or has its store creation queued
-	 *  until the removal finishes (fresh dir after). Without the barrier, the
-	 *  recursive remove could delete a successor store mid-create. The barrier
-	 *  entry is retained (unlike clearProfileState's success path) — deleting
-	 *  it here could split-brain a queued reader onto a stale guard instance. */
-	private async removeOrphanProfileDir(profileId: string): Promise<void> {
-		const barrier = this.getProfileBarrier(profileId)
-		await barrier.enterWrite()
-		try {
-			// Re-check liveness AFTER acquiring the barrier, not just at the
-			// snapshot: a provision that landed while we waited (dir exists ⟹ key
-			// provisioned ⟹ lifecycle entry present) must not be swept as orphan.
-			if (this.profileLifecycles.has(profileId)) return
-			this.logWarn(`sweep: removing orphan OPFS PXE profile dir ${PXE_DATA_DIR_ROOT}/${profileId}`)
-			await removeProfileStoreDirs(profileId)
-		} finally {
-			barrier.leaveWrite()
-		}
 	}
 
 	/** One-way cleanup of the LEGACY (rc.2-era, pre-OPFS) IndexedDB stores,

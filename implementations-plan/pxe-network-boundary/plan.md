@@ -10,13 +10,12 @@ replaces a span that already awaited, under a caller-side applicability guard.
 
 ## Recon + decomposition (per function)
 
-- **`sweepOrphanStores` (21)** — two independent, pre-guarded sweeps over boot-time
-  snapshots. Extract `sweepOrphanOpfsDirs(opfsDirs)` and `sweepLegacyIndexedDbs(dbs, pxes)`
-  as private async methods behind the EXISTING `if (…length)` guards (guards read lists
-  fetched before either sweep — sampling unchanged; guarded paths await immediately inside;
-  empty paths stay sync). One seam between the sweeps (helper return → idb block) crosses no
-  clock/fence observation — the sweep is deferred boot maintenance over snapshots; barrier
-  acquisition order inside the OPFS sweep is untouched. Suite: `service-sweep.test.ts` (4).
+- **`sweepOrphanStores` (21)** — the OPFS orchestration (selection + the barrier loop +
+  the post-barrier liveness re-check) stays INLINE: the next orphan's `enterWrite()` must be
+  reserved on the same continuation the previous `leaveWrite()` ran on (codex post-impl).
+  Only `sweepLegacyIndexedDbs(dbs, pxes)` is extracted, TAIL-RETURNED behind the existing
+  `pxes.length` guard so no hop precedes the first `deleteDatabase`. Suites:
+  `service-sweep.test.ts` (4) + the barrier-pending pin.
 - **`getContractInstance`'s closure (26)** — keep the closure + the PXE-preimage fast path;
   extract the `!instance && !pxeOnly` fallback body → `resolveInstanceFallback(node,
   address, opts)` (node try/catch incl. the ContractUpgradedError rethrow + best-effort
@@ -34,12 +33,12 @@ replaces a span that already awaited, under a caller-side applicability guard.
   in finally — the WHOLE D4-hardened sequence moves as one unit, order untouched). The
   catch keeps the sync marker/method guard + rethrow. Suites: `client-capture.test.ts` (8),
   `incarnation-fence.test.ts` (13).
-- **`fetch.ts` fetchOnce closure (21)** — extract sync `mapFetchFailure(err, host,
-  timeoutMs): Error` (abort→timeout / generic mapping; caller throws it) and async
-  `readRpcResponse(resp, host, noRetry)` (json parse + ok/NoRetryError ladder; called at an
-  already-awaited position). **No existing suite — add `fetch.pins.test.ts` FIRST** with a
-  mocked global fetch: timeout abort message, generic failure message, 4xx → NoRetryError,
-  5xx → Error with server message, parse-failure on ok and non-ok, success passthrough.
+- **`fetch.ts` fetchOnce closure (21)** — both awaits and the timeout `finally` stay
+  INLINE (the abort signal must stay live through a pending `resp.json()` — pinned); extract
+  only the sync classifiers `mapFetchDispatchFailure` and `classifyRpcFailure`.
+  `fetch.pins.test.ts` (11, committed first) is the closure's first coverage: the full
+  reject oracle, header/signal passthrough, abort-through-pending-json, and the two
+  retry-wrapper pins.
 - **`network/service.ts` restore closure (24)** — extract SYNC
   `validateRestoredNetwork(raw, existing)` (shape gate `BACKUP_TOO_OLD`, NetworkSchema
   F-011/A-04 boundary validation, collision check — all throws stay synchronous into the
