@@ -16,10 +16,11 @@ import { describe, expect, test } from "vitest"
  */
 const COMPOSABLES = join(__dirname)
 // Exact counts, not "at least one": with a lower bound, renaming or hardcoding ONE of
-// useDeposit's two sites leaves the other satisfying the assertion and the test green — which
-// is the same shape as the bug it exists to catch.
+// deposit-flow's two sites (the fueled + plain legs) leaves the other satisfying the
+// assertion and the test green — which is the same shape as the bug it exists to catch.
 const SIGNING_SOURCES: ReadonlyArray<readonly [string, number]> = [
-	["useDeposit.ts", 2],
+	["deposit-flow.ts", 2],
+	["useDeposit.ts", 0],
 	["useFuel.ts", 1],
 ]
 

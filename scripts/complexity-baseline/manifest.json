@@ -104,7 +104,6 @@
 			"apps/extension/src/wallet/services/wallet-sdk/background.ts": 2,
 			"apps/faucet/src/composables/createAztecWalletSession.ts": 1,
 			"apps/faucet/src/composables/useBridgeJournal.ts": 2,
-			"apps/faucet/src/composables/useDeposit.ts": 2,
 			"apps/faucet/src/composables/useFuel.ts": 2,
 			"apps/faucet/src/composables/useL1FeeAsset.ts": 1,
 			"apps/faucet/src/composables/useWithdraw.ts": 1,
