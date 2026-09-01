@@ -32,6 +32,9 @@ export type ProjectedBalance =
 	| { kind: "ok"; id: number; privateBalance: string; publicBalance: string }
 	| { kind: "error"; id: number; error: string }
 
+/** A chunk-local token lookup: undefined when the active profile doesn't own the row's token. */
+type CachedToken = Awaited<ReturnType<TokenService["getTokenRaw"]>> | undefined
+
 const BATCH_SIZE = 12
 
 type GroupKey = string // `${account}:${chainId}`
@@ -97,28 +100,12 @@ export class BalanceProjector {
 		return results
 	}
 
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 27) — refactor when touched, never raise
 	private async projectChunk(account: string, chainId: number, balances: TokenBalanceRaw[]): Promise<ProjectedBalance[]> {
 		try {
 			const calls: [CallAction | EncodedCallAction, number, boolean, ViewFn][] = []
 			const perBalance: Record<number, { privateBalance: string; publicBalance: string }> = {}
 			// Cache so the two passes below don't re-fetch the same token metadata.
-			const tokenCache = new Map<number, Awaited<ReturnType<typeof this.tokens.getTokenRaw>> | undefined>()
-
-			// Pass 0: initialize perBalance entries + populate the token cache.
-			for (let i = 0; i < balances.length; i++) {
-				const balance = balances[i]
-				perBalance[balance.id] = {
-					privateBalance: balance.privateBalance ?? "0",
-					publicBalance: balance.publicBalance ?? "0",
-				}
-				// `.catch(undefined)` absorbs the ownership guard on `getTokenRaw` (a
-				// foreign row's token throws); the identity re-check preserves the
-				// pre-network guard across this SECOND lookup — delete-and-reuse between
-				// the two lookups must not run PXE calls against a successor contract.
-				const token = await this.tokens.getTokenRaw(balance.token).catch(() => undefined)
-				tokenCache.set(balance.id, token && rowMatchesToken(balance, token) ? token : undefined)
-			}
+			const tokenCache = await this.buildTokenCache(balances, perBalance)
 
 			// Pass 1: enqueue every PUBLIC call across all balances first.
 			// Two-pass produces a chunk shape [pub_0..pub_{N-1}, priv_0..priv_{N-1}]
@@ -126,38 +113,15 @@ export class BalanceProjector {
 			// covers the whole public arm. A per-token swap WOULD NOT work — it
 			// produces [pub_0, priv_0, pub_1, priv_1, …], breaking the prefix
 			// at the first private call and reducing fast-path coverage to one
-			// call total.
-			for (let i = 0; i < balances.length; i++) {
-				const balance = balances[i]
-				const token = tokenCache.get(balance.id)
-				if (!token) continue // skip a balance whose token the active profile doesn't own (ownership guard)
-				if (token.balanceOfPublicFn) {
-					const fn = createViewTokenFn(
-						TOKEN_FN_DESCRIPTORS.balanceOfPublic,
-						token.balanceOfPublicFn.name,
-						token.balanceOfPublicFn.impl,
-					)
-					await this.enqueueCall(calls, fn, token, account, i, false)
-				} else {
-					perBalance[balance.id].publicBalance = "0"
-				}
+			// call total. Each arm's plan is sync; the enqueues keep their
+			// one-await-per-job shape.
+			for (const job of this.planArm(balances, tokenCache, perBalance, false)) {
+				await this.enqueueCall(calls, job.fn, job.token, account, job.index, false)
 			}
 
 			// Pass 2: enqueue every PRIVATE call across all balances second.
-			for (let i = 0; i < balances.length; i++) {
-				const balance = balances[i]
-				const token = tokenCache.get(balance.id)
-				if (!token) continue // skip a balance whose token the active profile doesn't own (ownership guard)
-				if (token.balanceOfPrivateFn) {
-					const fn = createViewTokenFn(
-						TOKEN_FN_DESCRIPTORS.balanceOfPrivate,
-						token.balanceOfPrivateFn.name,
-						token.balanceOfPrivateFn.impl,
-					)
-					await this.enqueueCall(calls, fn, token, account, i, true)
-				} else {
-					perBalance[balance.id].privateBalance = "0"
-				}
+			for (const job of this.planArm(balances, tokenCache, perBalance, true)) {
+				await this.enqueueCall(calls, job.fn, job.token, account, job.index, true)
 			}
 
 			const network = (await this.networks.getNetworks(chainId))[0]
@@ -166,33 +130,7 @@ export class BalanceProjector {
 			}
 
 			if (calls.length > 0) {
-				const deps = await getViewSimulationDeps(
-					{
-						profiles: this.profiles,
-						networks: this.networks,
-						accounts: this.accounts,
-						pxeService: this.pxeService,
-						contractResolver: this.execution.contractResolver,
-						logger: this.logger,
-					},
-					network.id,
-					account,
-				)
-				const results = await batchedViewSimulation(
-					calls.map((x) => x[0]),
-					deps,
-				)
-
-				for (let i = 0; i < calls.length; i++) {
-					const [_, tbIndex, isPrivate, viewFn] = calls[i]
-					const balance = (viewFn.unpackResult(results.encoded[i]) as bigint).toString()
-					const target = perBalance[balances[tbIndex].id]
-					if (isPrivate) {
-						target.privateBalance = balance
-					} else {
-						target.publicBalance = balance
-					}
-				}
+				await this.runBatchedSimulation(network.id, account, calls, balances, perBalance)
 			}
 
 			return balances.map((b) => ({
@@ -205,6 +143,95 @@ export class BalanceProjector {
 			const errorMessage = getErrorMessage(err)
 			this.logger?.log(this.logSource, LogLevel.Error, `Failed to sync chunk: ${errorMessage}`)
 			return balances.map((b) => ({ kind: "error" as const, id: b.id, error: errorMessage }))
+		}
+	}
+
+	/** Pass 0: initialize perBalance entries + populate the token cache. A
+	 *  chunk is never empty, so this always awaits — the caller's await replaces
+	 *  the loop's own, adding no hop. */
+	private async buildTokenCache(
+		balances: TokenBalanceRaw[],
+		perBalance: Record<number, { privateBalance: string; publicBalance: string }>,
+	): Promise<Map<number, CachedToken>> {
+		const tokenCache = new Map<number, CachedToken>()
+		for (let i = 0; i < balances.length; i++) {
+			const balance = balances[i]
+			perBalance[balance.id] = {
+				privateBalance: balance.privateBalance ?? "0",
+				publicBalance: balance.publicBalance ?? "0",
+			}
+			// `.catch(undefined)` absorbs the ownership guard on `getTokenRaw` (a
+			// foreign row's token throws); the identity re-check preserves the
+			// pre-network guard across this SECOND lookup — delete-and-reuse between
+			// the two lookups must not run PXE calls against a successor contract.
+			const token = await this.tokens.getTokenRaw(balance.token).catch(() => undefined)
+			tokenCache.set(balance.id, token && rowMatchesToken(balance, token) ? token : undefined)
+		}
+		return tokenCache
+	}
+
+	/** One arm's enqueue plan across the chunk (sync): a balance whose token
+	 *  the active profile doesn't own is skipped (ownership guard); a token
+	 *  without the arm's fn takes the arm's "0" default. */
+	private planArm(
+		balances: TokenBalanceRaw[],
+		tokenCache: Map<number, CachedToken>,
+		perBalance: Record<number, { privateBalance: string; publicBalance: string }>,
+		isPrivate: boolean,
+	): { fn: ViewFn; token: Token; index: number }[] {
+		const jobs: { fn: ViewFn; token: Token; index: number }[] = []
+		for (let i = 0; i < balances.length; i++) {
+			const balance = balances[i]
+			const token = tokenCache.get(balance.id)
+			if (!token) continue
+			const impl = isPrivate ? token.balanceOfPrivateFn : token.balanceOfPublicFn
+			if (impl) {
+				const descriptor = isPrivate ? TOKEN_FN_DESCRIPTORS.balanceOfPrivate : TOKEN_FN_DESCRIPTORS.balanceOfPublic
+				jobs.push({ fn: createViewTokenFn(descriptor, impl.name, impl.impl), token, index: i })
+			} else if (isPrivate) {
+				perBalance[balance.id].privateBalance = "0"
+			} else {
+				perBalance[balance.id].publicBalance = "0"
+			}
+		}
+		return jobs
+	}
+
+	/** The simulation tail — always awaited once the chunk has any call: resolve
+	 *  the view deps, run the batched simulation, unpack per (balance, arm). */
+	private async runBatchedSimulation(
+		networkId: string,
+		account: string,
+		calls: [CallAction | EncodedCallAction, number, boolean, ViewFn][],
+		balances: TokenBalanceRaw[],
+		perBalance: Record<number, { privateBalance: string; publicBalance: string }>,
+	): Promise<void> {
+		const deps = await getViewSimulationDeps(
+			{
+				profiles: this.profiles,
+				networks: this.networks,
+				accounts: this.accounts,
+				pxeService: this.pxeService,
+				contractResolver: this.execution.contractResolver,
+				logger: this.logger,
+			},
+			networkId,
+			account,
+		)
+		const results = await batchedViewSimulation(
+			calls.map((x) => x[0]),
+			deps,
+		)
+
+		for (let i = 0; i < calls.length; i++) {
+			const [_, tbIndex, isPrivate, viewFn] = calls[i]
+			const balance = (viewFn.unpackResult(results.encoded[i]) as bigint).toString()
+			const target = perBalance[balances[tbIndex].id]
+			if (isPrivate) {
+				target.privateBalance = balance
+			} else {
+				target.publicBalance = balance
+			}
 		}
 	}
 

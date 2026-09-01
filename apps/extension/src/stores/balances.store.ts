@@ -149,27 +149,97 @@ function newEntry(epoch: number): BalanceEntry {
 	return { gas: newGasSlice(), fpc: newFpcSlice(), stale: false, epoch }
 }
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (312 lines) — split when touched, never grow
-export const useBalancesStore = defineStore("balances", () => {
+interface FetchOpts {
+	cause: "ensure" | "retry" | "forced"
+	forceRefresh?: boolean
+}
+
+/** Success commit for the gas leg. `forcedPendingLive` = a forced run is live
+ *  for this key: a non-forced success then carries PRE-trigger data (a
+ *  post-trigger non-forced fetch would have JOINED the forced leg run) and
+ *  must not clear the stale-mark. */
+function gasSuccessEntry(entry: BalanceEntry, opts: FetchOpts, result: GasBalances, forcedPendingLive: boolean): BalanceEntry {
+	const preTrigger = opts.cause !== "forced" && forcedPendingLive
+	return {
+		...entry,
+		stale: preTrigger ? entry.stale : false,
+		gas: {
+			...entry.gas,
+			display: result,
+			verified: result,
+			status: "ready",
+			version: entry.gas.version + 1,
+			retryVersion: opts.cause === "retry" ? entry.gas.retryVersion + 1 : entry.gas.retryVersion,
+			forcedVersion: opts.cause === "forced" ? entry.gas.forcedVersion + 1 : entry.gas.forcedVersion,
+			// Debt clears ONLY on a retry-path success (D11): a plain
+			// ensure landing fresh data leaves the loop to finish its
+			// own cycle — the retry success is what bumps retryVersion
+			// and wakes the degraded card's recovery watch.
+			retryDebt: opts.cause === "retry" ? false : entry.gas.retryDebt,
+			lastError: undefined,
+		},
+	}
+}
+
+function gasFailureEntry(entry: BalanceEntry, opts: FetchOpts, failed: string | undefined): BalanceEntry {
+	return {
+		...entry,
+		gas: {
+			...entry.gas,
+			verified: undefined, // display retained (SWR); gating sees unknown
+			status: "degraded",
+			version: entry.gas.version + 1,
+			// A tx-refresh failure creates no retry debt (D11).
+			retryDebt: opts.cause === "forced" ? entry.gas.retryDebt : true,
+			lastError: failed,
+		},
+	}
+}
+
+function fpcSuccessEntry(entry: BalanceEntry, opts: FetchOpts, result: FpcInfo[]): BalanceEntry {
+	return {
+		...entry,
+		fpc: {
+			...entry.fpc,
+			data: result ?? [],
+			status: "ready",
+			version: entry.fpc.version + 1,
+			retryVersion: opts.cause === "retry" ? entry.fpc.retryVersion + 1 : entry.fpc.retryVersion,
+			// Same D11 rule as the gas leg: only a retry-path success clears debt.
+			retryDebt: opts.cause === "retry" ? false : entry.fpc.retryDebt,
+			lastError: undefined,
+		},
+	}
+}
+
+/** lastGoodFpc retention: keep prior data (same key = same identity). */
+function fpcFailureEntry(entry: BalanceEntry, failed: string | undefined): BalanceEntry {
+	return {
+		...entry,
+		fpc: { ...entry.fpc, status: "degraded", version: entry.fpc.version + 1, retryDebt: true, lastError: failed },
+	}
+}
+
+/**
+ * The store's machinery, hoisted out of the Pinia setup closure so every
+ * method sits at nesting depth 0 — the setup body only constructs it, installs
+ * the profile-switch belt (which needs Pinia context), and returns the API.
+ * Field and method bodies are the former closures verbatim.
+ */
+class BalancesCore {
 	// ── app-lifetime clients (connect-once; tx client is event-only so its
 	//    connect is explicit — the lazy path only fires on RPC use) ──────────
-	const execution = new ExecutionServiceClient()
-	const fpc = new FpcServiceClient()
-	const transactions = new TransactionServiceClient()
-	let txConnected = false
-	function ensureTxSubscription(): void {
-		if (txConnected) return
-		txConnected = true
-		transactions.onTransactionUpdated.add(onTransactionSettled)
-		transactions.connect()
-	}
+	private readonly execution = new ExecutionServiceClient()
+	private readonly fpc = new FpcServiceClient()
+	private readonly transactions = new TransactionServiceClient()
+	private txConnected = false
 
 	// ── state ────────────────────────────────────────────────────────────────
-	const entries = ref<Record<string, BalanceEntry>>({})
-	const epochs = new Map<string, number>() // profileId → epoch
-	const subscribers = new Map<string, Map<number, { scope: BalanceScope; caps: SubscribeCaps }>>()
-	const rawFlights = new Map<string, Promise<unknown>>() // `${key}|${leg}|${epoch}`
-	const legFlights = new Map<string, Promise<void>>() // `${key}|${leg}|${epoch}` single-flight per attempt
+	readonly entries = ref<Record<string, BalanceEntry>>({})
+	private readonly epochs = new Map<string, number>() // profileId → epoch
+	private readonly subscribers = new Map<string, Map<number, { scope: BalanceScope; caps: SubscribeCaps }>>()
+	private readonly rawFlights = new Map<string, Promise<unknown>>() // `${key}|${leg}|${epoch}`
+	private readonly legFlights = new Map<string, Promise<void>>() // `${key}|${leg}|${epoch}` single-flight per attempt
 	// Epoch-scoped like raw flights: a post-switch ensure must never JOIN a
 	// pre-switch leg flight (it would await work fenced out of committing).
 	// Keys with a forced gas fetch live (counted — forced runs can overlap):
@@ -177,89 +247,98 @@ export const useBalancesStore = defineStore("balances", () => {
 	// forced stale-mark — its data predates the trigger, so the on-screen
 	// value stays known-invalidated (dim + dot) until the post-trigger fetch
 	// itself commits.
-	const forcedGasPending = new Map<string, number>()
+	private readonly forcedGasPending = new Map<string, number>()
 	// Monotonic per-key forced-TRIGGER sequence. Authority follows trigger
 	// recency, never settlement order: a forced run whose seq is no longer
 	// current was overtaken by a newer settle — its data pre-dates that
 	// trigger, so its commit is skipped wholesale (an inverted settlement
 	// order must not let the older run overwrite the newer run's result).
-	const forcedGasSeq = new Map<string, number>()
-	const retryTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; attempt: number }>()
-	const lruTouch = new Map<string, number>()
-	let subToken = 0
-	let lruTick = 0
+	private readonly forcedGasSeq = new Map<string, number>()
+	private readonly retryTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; attempt: number }>()
+	private readonly lruTouch = new Map<string, number>()
+	private readonly keyProfile = new Map<string, string>()
+	private subToken = 0
+	private lruTick = 0
 
-	const epochOf = (profileId: string): number => epochs.get(profileId) ?? 0
+	private ensureTxSubscription(): void {
+		if (this.txConnected) return
+		this.txConnected = true
+		this.transactions.onTransactionUpdated.add(this.onTransactionSettled)
+		this.transactions.connect()
+	}
+
+	private epochOf(profileId: string): number {
+		return this.epochs.get(profileId) ?? 0
+	}
 
 	/** Profile switch fence: bump the departing profile's epoch and clear its
 	 *  entries. Called synchronously by the app-shell watcher (belt) and on the
 	 *  last release of a profile's subscribers (suspenders). */
-	function invalidateProfile(profileId: string): void {
-		epochs.set(profileId, epochOf(profileId) + 1)
+	invalidateProfile(profileId: string): void {
+		this.epochs.set(profileId, this.epochOf(profileId) + 1)
 		const next: Record<string, BalanceEntry> = {}
-		for (const [key, entry] of Object.entries(entries.value)) {
-			const owner = keyProfile.get(key)
+		for (const [key, entry] of Object.entries(this.entries.value)) {
+			const owner = this.keyProfile.get(key)
 			if (owner !== profileId) next[key] = entry
 			else {
-				stopRetry(key)
-				lruTouch.delete(key)
-				keyProfile.delete(key)
+				this.stopRetry(key)
+				this.lruTouch.delete(key)
+				this.keyProfile.delete(key)
 				// Per-key forced state dies with the fence: old-epoch runs must
 				// not be counted against (or grant authority to) the next
 				// epoch's fetches. Their own finally is epoch-guarded.
-				forcedGasPending.delete(key)
-				forcedGasSeq.delete(key)
+				this.forcedGasPending.delete(key)
+				this.forcedGasSeq.delete(key)
 			}
 		}
-		entries.value = next
+		this.entries.value = next
 	}
-	const keyProfile = new Map<string, string>()
 
-	function entryFor(key: string, scope: BalanceScope): BalanceEntry {
-		let entry = entries.value[key]
+	private entryFor(key: string, scope: BalanceScope): BalanceEntry {
+		let entry = this.entries.value[key]
 		// Touch BEFORE any eviction: an untouched brand-new key would sort
 		// oldest and evict itself.
-		lruTouch.set(key, ++lruTick)
+		this.lruTouch.set(key, ++this.lruTick)
 		if (!entry) {
-			entry = newEntry(epochOf(scope.profileId))
-			entries.value = { ...entries.value, [key]: entry }
-			keyProfile.set(key, scope.profileId)
-			evictIfNeeded()
+			entry = newEntry(this.epochOf(scope.profileId))
+			this.entries.value = { ...this.entries.value, [key]: entry }
+			this.keyProfile.set(key, scope.profileId)
+			this.evictIfNeeded()
 		}
 		return entry
 	}
 
-	function commitEntry(key: string, entry: BalanceEntry): void {
-		entries.value = { ...entries.value, [key]: entry }
+	private commitEntry(key: string, entry: BalanceEntry): void {
+		this.entries.value = { ...this.entries.value, [key]: entry }
 	}
 
-	function evictIfNeeded(): void {
-		const keys = Object.keys(entries.value)
+	private evictIfNeeded(): void {
+		const keys = Object.keys(this.entries.value)
 		if (keys.length <= MAX_CACHED_ENTRIES) return
 		const evictable = keys
 			// Forced-pending keys are exempt (transient, fetch-bounded): evicting
 			// one would orphan its keyProfile row, so a later profile fence could
 			// no longer clear its forced state — a permanently stranded count.
-			.filter((k) => (!subscribers.has(k) || subscribers.get(k)?.size === 0) && !forcedGasPending.has(k))
-			.sort((a, b) => (lruTouch.get(a) ?? 0) - (lruTouch.get(b) ?? 0))
+			.filter((k) => (!this.subscribers.has(k) || this.subscribers.get(k)?.size === 0) && !this.forcedGasPending.has(k))
+			.sort((a, b) => (this.lruTouch.get(a) ?? 0) - (this.lruTouch.get(b) ?? 0))
 		const excess = keys.length - MAX_CACHED_ENTRIES
-		const next = { ...entries.value }
+		const next = { ...this.entries.value }
 		for (const k of evictable.slice(0, excess)) {
 			delete next[k]
-			lruTouch.delete(k)
-			keyProfile.delete(k)
+			this.lruTouch.delete(k)
+			this.keyProfile.delete(k)
 			// Keep auxiliary metadata aligned with the LRU (a settled force's
 			// seq row would otherwise outlive its evicted entry).
-			forcedGasSeq.delete(k)
-			stopRetry(k)
+			this.forcedGasSeq.delete(k)
+			this.stopRetry(k)
 		}
-		entries.value = next
+		this.entries.value = next
 	}
 
 	// ── capabilities ─────────────────────────────────────────────────────────
-	function capsUnion(key: string): SubscribeCaps {
+	private capsUnion(key: string): SubscribeCaps {
 		const union: SubscribeCaps = { legs: [], retry: false, txRefresh: false, peek: false }
-		const subs = subscribers.get(key)
+		const subs = this.subscribers.get(key)
 		if (!subs) return union
 		const legs = new Set<BalanceLeg>()
 		for (const { caps } of subs.values()) {
@@ -272,54 +351,54 @@ export const useBalancesStore = defineStore("balances", () => {
 		return union
 	}
 
-	function subscribe(scope: BalanceScope, caps: SubscribeCaps): { release: () => void } {
-		ensureTxSubscription()
+	subscribe(scope: BalanceScope, caps: SubscribeCaps): { release: () => void } {
+		this.ensureTxSubscription()
 		const key = activityScopeKey(scope)
-		const token = ++subToken
-		const hadRetryCapable = capsUnion(key).retry
-		let subs = subscribers.get(key)
+		const token = ++this.subToken
+		const hadRetryCapable = this.capsUnion(key).retry
+		let subs = this.subscribers.get(key)
 		if (!subs) {
 			subs = new Map()
-			subscribers.set(key, subs)
+			this.subscribers.set(key, subs)
 		}
 		subs.set(token, { scope, caps })
-		entryFor(key, scope)
+		this.entryFor(key, scope)
 		// 0→1 retry-capable transition = today's reset-on-identity-change.
-		if (!hadRetryCapable && caps.retry) resetRetryAttempts(key)
-		if (caps.peek) void primeFromPeek(key, scope)
+		if (!hadRetryCapable && caps.retry) this.resetRetryAttempts(key)
+		if (caps.peek) void this.primeFromPeek(key, scope)
 		let released = false
 		return {
 			release: () => {
 				if (released) return
 				released = true
-				const current = subscribers.get(key)
+				const current = this.subscribers.get(key)
 				current?.delete(token)
-				if (!capsUnion(key).retry) stopRetry(key) // 1→0 = today's chain death
+				if (!this.capsUnion(key).retry) this.stopRetry(key) // 1→0 = today's chain death
 				if (current && current.size === 0) {
-					subscribers.delete(key)
+					this.subscribers.delete(key)
 					// Last subscriber of this profile gone → suspenders fence.
 					const profileId = scope.profileId
-					const anyLeft = [...subscribers.values()].some((m) => [...m.values()].some((s) => s.scope.profileId === profileId))
-					if (!anyLeft) invalidateProfile(profileId)
+					const anyLeft = [...this.subscribers.values()].some((m) => [...m.values()].some((s) => s.scope.profileId === profileId))
+					if (!anyLeft) this.invalidateProfile(profileId)
 				}
 			},
 		}
 	}
 
 	// ── SWR peek (display-only, version-guarded) ─────────────────────────────
-	async function primeFromPeek(key: string, scope: BalanceScope): Promise<void> {
-		const versionAtStart = entries.value[key]?.gas.version ?? 0
+	private async primeFromPeek(key: string, scope: BalanceScope): Promise<void> {
+		const versionAtStart = this.entries.value[key]?.gas.version ?? 0
 		try {
-			const peeked = await execution.peekGasBalances(scope.networkId, scope.accountAddress)
-			const entry = entries.value[key]
+			const peeked = await this.execution.peekGasBalances(scope.networkId, scope.accountAddress)
+			const entry = this.entries.value[key]
 			if (!peeked || !entry) return
 			// A late peek must never overwrite a newer fetch/forced commit.
 			if (entry.gas.version !== versionAtStart) return
 			// A forced fetch marks stale without bumping the version — a slow
 			// fresh peek landing mid-force would pass the version guard and
 			// un-dim the known-invalidated value. Defer to the force entirely.
-			if (forcedGasPending.has(key)) return
-			commitEntry(key, {
+			if (this.forcedGasPending.has(key)) return
+			this.commitEntry(key, {
 				...entry,
 				// Honor the SW's own staleness verdict: a within-TTL peek is
 				// FRESH and must not dim the card (today's fresh-peek behavior).
@@ -332,15 +411,15 @@ export const useBalancesStore = defineStore("balances", () => {
 	}
 
 	// ── the fetch pipeline ───────────────────────────────────────────────────
-	function rawReuse<T>(key: string, leg: BalanceLeg, epoch: number, start: () => Promise<T>): Promise<T> {
+	private rawReuse<T>(key: string, leg: BalanceLeg, epoch: number, start: () => Promise<T>): Promise<T> {
 		const flightKey = `${key}|${leg}|${epoch}`
-		const existing = rawFlights.get(flightKey)
+		const existing = this.rawFlights.get(flightKey)
 		if (existing) return existing as Promise<T>
 		const flight = start()
-		rawFlights.set(flightKey, flight)
+		this.rawFlights.set(flightKey, flight)
 		flight
 			.finally(() => {
-				if (rawFlights.get(flightKey) === flight) rawFlights.delete(flightKey)
+				if (this.rawFlights.get(flightKey) === flight) this.rawFlights.delete(flightKey)
 			})
 			.catch(() => {
 				// Settle-probe chain must never surface as unhandled; the real
@@ -349,191 +428,149 @@ export const useBalancesStore = defineStore("balances", () => {
 		return flight
 	}
 
-	interface FetchOpts {
-		cause: "ensure" | "retry" | "forced"
-		forceRefresh?: boolean
-	}
-
-	async function fetchGas(key: string, scope: BalanceScope, epoch: number, opts: FetchOpts): Promise<void> {
-		const inFlight = legFlights.get(`${key}|gas|${epoch}`)
+	private async fetchGas(key: string, scope: BalanceScope, epoch: number, opts: FetchOpts): Promise<void> {
+		const inFlight = this.legFlights.get(`${key}|gas|${epoch}`)
 		if (inFlight && opts.cause !== "forced") return inFlight
-		let mySeq = 0
-		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 60) — refactor when touched, never raise
-		const run = (async () => {
-			const entry0 = entries.value[key]
-			if (!entry0) return
-			// A forced refresh means the on-screen value is known-invalidated:
-			// mark it stale at START so the card dims immediately and a FAILED
-			// force can't leave it rendered as current (settle-refresh dim rule).
-			if (opts.cause === "forced") {
-				forcedGasPending.set(key, (forcedGasPending.get(key) ?? 0) + 1)
-				mySeq = (forcedGasSeq.get(key) ?? 0) + 1
-				forcedGasSeq.set(key, mySeq)
-			}
-			commitEntry(key, {
-				...entry0,
-				stale: opts.cause === "forced" ? true : entry0.stale,
-				gas: { ...entry0.gas, status: "fetching" },
-			})
-			let result: GasBalances | undefined
-			let failed: string | undefined
-			try {
-				if (opts.cause === "forced") {
-					// Never join a raw flight that predates the trigger: wait it
-					// out, then start fresh. The wait is BOUNDED — an unbounded
-					// wait on a wedged transport would hold every joiner of this
-					// run past the fetch bound the constant promises; on timeout
-					// we re-enter anyway (one stacked RPC, transport-bounded).
-					const stale = rawFlights.get(`${key}|gas|${epoch}`)
-					if (stale) {
-						await withTimeout(
-							stale.then(
-								() => {},
-								() => {},
-							),
-							INIT_FETCH_TIMEOUT_MS,
-							"pre-trigger gas flight",
-						).catch(() => {})
-					}
-					rawFlights.delete(`${key}|gas|${epoch}`)
-				}
-				result = await withTimeout(
-					rawReuse(key, "gas", epoch, () => execution.getGasBalances(scope.networkId, scope.accountAddress, opts.forceRefresh)),
-					INIT_FETCH_TIMEOUT_MS,
-					"getGasBalances",
-				)
-			} catch (err) {
-				failed = err instanceof Error ? err.message : String(err)
-			}
-			if (epochOf(scope.profileId) !== epoch) return // fenced: no cross-epoch commit
-			// An OUTRANKED forced run (a newer settle started since this one's
-			// trigger) is superseded wholesale: success or failure, its data
-			// pre-dates the newer trigger — the newer run owns the entry.
-			if (opts.cause === "forced" && mySeq !== forcedGasSeq.get(key)) return
-			const entry = entries.value[key]
-			if (!entry) return
-			if (result !== undefined) {
-				// A non-forced success while ANY forced run is live carries
-				// PRE-trigger data (a post-trigger non-forced fetch would have
-				// JOINED the forced leg run): it must not clear the stale-mark.
-				const preTrigger = opts.cause !== "forced" && forcedGasPending.has(key)
-				commitEntry(key, {
-					...entry,
-					stale: preTrigger ? entry.stale : false,
-					gas: {
-						...entry.gas,
-						display: result,
-						verified: result,
-						status: "ready",
-						version: entry.gas.version + 1,
-						retryVersion: opts.cause === "retry" ? entry.gas.retryVersion + 1 : entry.gas.retryVersion,
-						forcedVersion: opts.cause === "forced" ? entry.gas.forcedVersion + 1 : entry.gas.forcedVersion,
-						// Debt clears ONLY on a retry-path success (D11): a plain
-						// ensure landing fresh data leaves the loop to finish its
-						// own cycle — the retry success is what bumps retryVersion
-						// and wakes the degraded card's recovery watch.
-						retryDebt: opts.cause === "retry" ? false : entry.gas.retryDebt,
-						lastError: undefined,
-					},
-				})
-			} else {
-				commitEntry(key, {
-					...entry,
-					gas: {
-						...entry.gas,
-						verified: undefined, // display retained (SWR); gating sees unknown
-						status: "degraded",
-						version: entry.gas.version + 1,
-						// A tx-refresh failure creates no retry debt (D11).
-						retryDebt: opts.cause === "forced" ? entry.gas.retryDebt : true,
-						lastError: failed,
-					},
-				})
-			}
-		})()
-		legFlights.set(`${key}|gas|${epoch}`, run)
+		// An async method runs synchronously to its first await exactly like the
+		// former IIFE, so the single-flight registration below keeps its position.
+		const run = this.runGasFetch(key, scope, epoch, opts)
+		this.legFlights.set(`${key}|gas|${epoch}`, run)
 		try {
 			await run
 		} finally {
 			// Epoch-guarded: after a profile fence the per-key forced state was
 			// already cleared — decrementing here would corrupt the NEW epoch's
 			// counter if a fresh forced run started since.
-			if (opts.cause === "forced" && epochOf(scope.profileId) === epoch) {
-				const left = (forcedGasPending.get(key) ?? 1) - 1
-				if (left <= 0) forcedGasPending.delete(key)
-				else forcedGasPending.set(key, left)
+			if (opts.cause === "forced" && this.epochOf(scope.profileId) === epoch) {
+				const left = (this.forcedGasPending.get(key) ?? 1) - 1
+				if (left <= 0) this.forcedGasPending.delete(key)
+				else this.forcedGasPending.set(key, left)
 			}
-			if (legFlights.get(`${key}|gas|${epoch}`) === run) legFlights.delete(`${key}|gas|${epoch}`)
+			if (this.legFlights.get(`${key}|gas|${epoch}`) === run) this.legFlights.delete(`${key}|gas|${epoch}`)
 		}
 	}
 
-	async function fetchFpc(key: string, scope: BalanceScope, epoch: number, opts: FetchOpts): Promise<void> {
-		const inFlight = legFlights.get(`${key}|fpc|${epoch}`)
+	/** Register a forced run BEFORE any await: count it live and take the next
+	 *  trigger seq (authority follows trigger recency). Returns this run's seq. */
+	private beginForcedRun(key: string): number {
+		this.forcedGasPending.set(key, (this.forcedGasPending.get(key) ?? 0) + 1)
+		const mySeq = (this.forcedGasSeq.get(key) ?? 0) + 1
+		this.forcedGasSeq.set(key, mySeq)
+		return mySeq
+	}
+
+	/** The two post-RPC re-checks, read fresh in the await's own continuation:
+	 *  fenced (no cross-epoch commit), and an OUTRANKED forced run (a newer
+	 *  settle started since this one's trigger) is superseded wholesale —
+	 *  success or failure, its data pre-dates the newer trigger. */
+	private isGasRunStale(key: string, scope: BalanceScope, epoch: number, opts: FetchOpts, mySeq: number): boolean {
+		if (this.epochOf(scope.profileId) !== epoch) return true
+		return opts.cause === "forced" && mySeq !== this.forcedGasSeq.get(key)
+	}
+
+	private async runGasFetch(key: string, scope: BalanceScope, epoch: number, opts: FetchOpts): Promise<void> {
+		const entry0 = this.entries.value[key]
+		if (!entry0) return
+		// A forced refresh means the on-screen value is known-invalidated:
+		// mark it stale at START so the card dims immediately and a FAILED
+		// force can't leave it rendered as current (settle-refresh dim rule).
+		const mySeq = opts.cause === "forced" ? this.beginForcedRun(key) : 0
+		this.commitEntry(key, {
+			...entry0,
+			stale: opts.cause === "forced" ? true : entry0.stale,
+			gas: { ...entry0.gas, status: "fetching" },
+		})
+		let result: GasBalances | undefined
+		let failed: string | undefined
+		try {
+			if (opts.cause === "forced") {
+				// Never join a raw flight that predates the trigger: wait it
+				// out, then start fresh. The wait is BOUNDED — an unbounded
+				// wait on a wedged transport would hold every joiner of this
+				// run past the fetch bound the constant promises; on timeout
+				// we re-enter anyway (one stacked RPC, transport-bounded).
+				const stale = this.rawFlights.get(`${key}|gas|${epoch}`)
+				if (stale) {
+					await withTimeout(
+						stale.then(
+							() => {},
+							() => {},
+						),
+						INIT_FETCH_TIMEOUT_MS,
+						"pre-trigger gas flight",
+					).catch(() => {})
+				}
+				this.rawFlights.delete(`${key}|gas|${epoch}`)
+			}
+			result = await withTimeout(
+				this.rawReuse(key, "gas", epoch, () =>
+					this.execution.getGasBalances(scope.networkId, scope.accountAddress, opts.forceRefresh),
+				),
+				INIT_FETCH_TIMEOUT_MS,
+				"getGasBalances",
+			)
+		} catch (err) {
+			failed = err instanceof Error ? err.message : String(err)
+		}
+		if (this.isGasRunStale(key, scope, epoch, opts, mySeq)) return
+		const entry = this.entries.value[key]
+		if (!entry) return
+		this.commitEntry(
+			key,
+			result !== undefined
+				? gasSuccessEntry(entry, opts, result, this.forcedGasPending.has(key))
+				: gasFailureEntry(entry, opts, failed),
+		)
+	}
+
+	private async fetchFpc(key: string, scope: BalanceScope, epoch: number, opts: FetchOpts): Promise<void> {
+		const inFlight = this.legFlights.get(`${key}|fpc|${epoch}`)
 		if (inFlight) return inFlight
-		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 29) — refactor when touched, never raise
-		const run = (async () => {
-			const entry0 = entries.value[key]
-			if (!entry0) return
-			commitEntry(key, { ...entry0, fpc: { ...entry0.fpc, status: "fetching" } })
-			let result: FpcInfo[] | undefined
-			let failed: string | undefined
-			try {
-				result = await withTimeout(
-					rawReuse(key, "fpc", epoch, () => fpc.getFpcs(scope.chainId)),
-					INIT_FETCH_TIMEOUT_MS,
-					"getFpcs",
-				)
-			} catch (err) {
-				failed = err instanceof Error ? err.message : String(err)
-			}
-			if (epochOf(scope.profileId) !== epoch) return
-			const entry = entries.value[key]
-			if (!entry) return
-			if (result !== undefined) {
-				commitEntry(key, {
-					...entry,
-					fpc: {
-						...entry.fpc,
-						data: result ?? [],
-						status: "ready",
-						version: entry.fpc.version + 1,
-						retryVersion: opts.cause === "retry" ? entry.fpc.retryVersion + 1 : entry.fpc.retryVersion,
-						// Same D11 rule as the gas leg: only a retry-path success clears debt.
-						retryDebt: opts.cause === "retry" ? false : entry.fpc.retryDebt,
-						lastError: undefined,
-					},
-				})
-			} else {
-				// lastGoodFpc retention: keep prior data (same key = same identity).
-				commitEntry(key, {
-					...entry,
-					fpc: { ...entry.fpc, status: "degraded", version: entry.fpc.version + 1, retryDebt: true, lastError: failed },
-				})
-			}
-		})()
-		legFlights.set(`${key}|fpc|${epoch}`, run)
+		const run = this.runFpcFetch(key, scope, epoch, opts)
+		this.legFlights.set(`${key}|fpc|${epoch}`, run)
 		try {
 			await run
 		} finally {
-			if (legFlights.get(`${key}|fpc|${epoch}`) === run) legFlights.delete(`${key}|fpc|${epoch}`)
+			if (this.legFlights.get(`${key}|fpc|${epoch}`) === run) this.legFlights.delete(`${key}|fpc|${epoch}`)
 		}
 	}
 
-	async function ensure(scope: BalanceScope, opts: { legs: BalanceLeg[]; forceRefresh?: boolean }): Promise<EnsureSnapshot> {
+	private async runFpcFetch(key: string, scope: BalanceScope, epoch: number, opts: FetchOpts): Promise<void> {
+		const entry0 = this.entries.value[key]
+		if (!entry0) return
+		this.commitEntry(key, { ...entry0, fpc: { ...entry0.fpc, status: "fetching" } })
+		let result: FpcInfo[] | undefined
+		let failed: string | undefined
+		try {
+			result = await withTimeout(
+				this.rawReuse(key, "fpc", epoch, () => this.fpc.getFpcs(scope.chainId)),
+				INIT_FETCH_TIMEOUT_MS,
+				"getFpcs",
+			)
+		} catch (err) {
+			failed = err instanceof Error ? err.message : String(err)
+		}
+		if (this.epochOf(scope.profileId) !== epoch) return
+		const entry = this.entries.value[key]
+		if (!entry) return
+		this.commitEntry(key, result !== undefined ? fpcSuccessEntry(entry, opts, result) : fpcFailureEntry(entry, failed))
+	}
+
+	async ensure(scope: BalanceScope, opts: { legs: BalanceLeg[]; forceRefresh?: boolean }): Promise<EnsureSnapshot> {
 		const key = activityScopeKey(scope)
-		const epoch = epochOf(scope.profileId)
-		entryFor(key, scope)
+		const epoch = this.epochOf(scope.profileId)
+		this.entryFor(key, scope)
 		const cause: FetchOpts["cause"] = opts.forceRefresh ? "forced" : "ensure"
 		await Promise.all([
-			opts.legs.includes("gas") ? fetchGas(key, scope, epoch, { cause, forceRefresh: opts.forceRefresh }) : Promise.resolve(),
-			opts.legs.includes("fpc") ? fetchFpc(key, scope, epoch, { cause }) : Promise.resolve(),
+			opts.legs.includes("gas") ? this.fetchGas(key, scope, epoch, { cause, forceRefresh: opts.forceRefresh }) : Promise.resolve(),
+			opts.legs.includes("fpc") ? this.fetchFpc(key, scope, epoch, { cause }) : Promise.resolve(),
 		])
-		if (epochOf(scope.profileId) !== epoch) throw new EnsureSuperseded()
-		const entry = entries.value[key]
+		if (this.epochOf(scope.profileId) !== epoch) throw new EnsureSuperseded()
+		const entry = this.entries.value[key]
 		if (!entry) throw new EnsureSuperseded()
-		adoptGasRetryDebt(key, entry, opts.legs)
+		this.adoptGasRetryDebt(key, entry, opts.legs)
 		const degraded = anyLegDegraded(entry, opts.legs)
-		if (degraded) scheduleRetry(key, scope)
+		if (degraded) this.scheduleRetry(key, scope)
 		return { scope, epoch, gas: { verified: entry.gas.verified }, fpc: { data: entry.fpc.data }, degraded }
 	}
 
@@ -544,95 +581,100 @@ export const useBalancesStore = defineStore("balances", () => {
 	 *  and retryVersion never bumps to wake its recovery watch. Gas-only:
 	 *  the fpc leg has no forced cause, so every degraded fpc already
 	 *  carries its debt from the failure commit. */
-	function adoptGasRetryDebt(key: string, entry: BalanceEntry, legs: BalanceLeg[]): void {
+	private adoptGasRetryDebt(key: string, entry: BalanceEntry, legs: BalanceLeg[]): void {
 		if (legs.includes("gas") && entry.gas.status === "degraded" && !entry.gas.retryDebt) {
-			commitEntry(key, { ...entry, gas: { ...entry.gas, retryDebt: true } })
+			this.commitEntry(key, { ...entry, gas: { ...entry.gas, retryDebt: true } })
 		}
-	}
-
-	function anyLegDegraded(entry: BalanceEntry, legs: BalanceLeg[]): boolean {
-		return (legs.includes("gas") && entry.gas.status === "degraded") || (legs.includes("fpc") && entry.fpc.status === "degraded")
 	}
 
 	// ── retry backoff (runs only while retryDebt && a retry-capable sub) ─────
-	function resetRetryAttempts(key: string): void {
-		const state = retryTimers.get(key)
+	private resetRetryAttempts(key: string): void {
+		const state = this.retryTimers.get(key)
 		if (state) {
 			clearTimeout(state.timer)
-			retryTimers.delete(key)
+			this.retryTimers.delete(key)
 		}
 	}
-	function stopRetry(key: string): void {
-		resetRetryAttempts(key)
+	private stopRetry(key: string): void {
+		this.resetRetryAttempts(key)
 	}
 
-	function scheduleRetry(key: string, scope: BalanceScope): void {
-		if (!capsUnion(key).retry) return
-		const entry = entries.value[key]
+	private scheduleRetry(key: string, scope: BalanceScope): void {
+		if (!this.capsUnion(key).retry) return
+		const entry = this.entries.value[key]
 		if (!entry || (!entry.gas.retryDebt && !entry.fpc.retryDebt)) return
-		if (retryTimers.has(key)) return
+		if (this.retryTimers.has(key)) return
 		const attempt = 0
-		armRetry(key, scope, attempt)
+		this.armRetry(key, scope, attempt)
 	}
 
-	function armRetry(key: string, scope: BalanceScope, attempt: number): void {
+	private armRetry(key: string, scope: BalanceScope, attempt: number): void {
 		// One chain per key: a concurrent ensure can arm a timer while a
 		// runRetry is mid-flight; overwriting its map entry without clearing
 		// would orphan a still-pending setTimeout into a duplicate chain.
-		const existing = retryTimers.get(key)
+		const existing = this.retryTimers.get(key)
 		if (existing) clearTimeout(existing.timer)
 		const delay = INIT_RETRY_BACKOFF_MS[Math.min(attempt, INIT_RETRY_BACKOFF_MS.length - 1)]
 		const timer = setTimeout(() => {
-			retryTimers.delete(key)
-			void runRetry(key, scope, attempt)
+			this.retryTimers.delete(key)
+			void this.runRetry(key, scope, attempt)
 		}, delay)
-		retryTimers.set(key, { timer, attempt })
-	}
-
-	/** Legs that still owe a retry AND are retry-covered by the current subscriber union. */
-	function retryLegsFor(entry: BalanceEntry, unionLegs: BalanceLeg[]): BalanceLeg[] {
-		const legs: BalanceLeg[] = []
-		if (entry.gas.retryDebt && unionLegs.includes("gas")) legs.push("gas")
-		if (entry.fpc.retryDebt && unionLegs.includes("fpc")) legs.push("fpc")
-		return legs
+		this.retryTimers.set(key, { timer, attempt })
 	}
 
 	/** Re-arm only while debt remains AND retry capability survived the flight —
 	 *  a subscriber can drop the retry cap mid-flight. */
-	function shouldRearmRetry(key: string): boolean {
-		const after = entries.value[key]
-		return Boolean(after && (after.gas.retryDebt || after.fpc.retryDebt) && capsUnion(key).retry)
+	private shouldRearmRetry(key: string): boolean {
+		const after = this.entries.value[key]
+		return Boolean(after && (after.gas.retryDebt || after.fpc.retryDebt) && this.capsUnion(key).retry)
 	}
 
-	async function runRetry(key: string, scope: BalanceScope, attempt: number): Promise<void> {
-		const union = capsUnion(key)
+	private async runRetry(key: string, scope: BalanceScope, attempt: number): Promise<void> {
+		const union = this.capsUnion(key)
 		if (!union.retry) return
-		const entry = entries.value[key]
+		const entry = this.entries.value[key]
 		if (!entry || (!entry.gas.retryDebt && !entry.fpc.retryDebt)) return
-		const epoch = epochOf(scope.profileId)
+		const epoch = this.epochOf(scope.profileId)
 		const legs = retryLegsFor(entry, union.legs)
 		await Promise.all([
-			legs.includes("gas") ? fetchGas(key, scope, epoch, { cause: "retry" }) : Promise.resolve(),
-			legs.includes("fpc") ? fetchFpc(key, scope, epoch, { cause: "retry" }) : Promise.resolve(),
+			legs.includes("gas") ? this.fetchGas(key, scope, epoch, { cause: "retry" }) : Promise.resolve(),
+			legs.includes("fpc") ? this.fetchFpc(key, scope, epoch, { cause: "retry" }) : Promise.resolve(),
 		])
-		if (shouldRearmRetry(key)) armRetry(key, scope, attempt + 1)
+		if (this.shouldRearmRetry(key)) this.armRetry(key, scope, attempt + 1)
 	}
 
 	// ── tx-settle → forced gas refresh for txRefresh-capable keys ────────────
-	function onTransactionSettled(tx: { account: string; status: unknown }): void {
+	// An arrow field: it is handed to the transaction client's event handler.
+	private readonly onTransactionSettled = (tx: { account: string; status: unknown }): void => {
 		if (tx.status === TxStatus.Pending) return
-		for (const [key, subs] of subscribers) {
+		for (const [key, subs] of this.subscribers) {
 			const anyTxRefresh = [...subs.values()].some((s) => s.caps.txRefresh)
 			if (!anyTxRefresh) continue
 			const scope = [...subs.values()][0]?.scope
 			if (!scope || scope.accountAddress !== tx.account) continue
-			void fetchGas(key, scope, epochOf(scope.profileId), { cause: "forced", forceRefresh: true })
+			void this.fetchGas(key, scope, this.epochOf(scope.profileId), { cause: "forced", forceRefresh: true })
 		}
 	}
 
-	function entry(scope: BalanceScope): BalanceEntry | undefined {
-		return entries.value[activityScopeKey(scope)]
+	entry(scope: BalanceScope): BalanceEntry | undefined {
+		return this.entries.value[activityScopeKey(scope)]
 	}
+}
+
+function anyLegDegraded(entry: BalanceEntry, legs: BalanceLeg[]): boolean {
+	return (legs.includes("gas") && entry.gas.status === "degraded") || (legs.includes("fpc") && entry.fpc.status === "degraded")
+}
+
+/** Legs that still owe a retry AND are retry-covered by the current subscriber union. */
+function retryLegsFor(entry: BalanceEntry, unionLegs: BalanceLeg[]): BalanceLeg[] {
+	const legs: BalanceLeg[] = []
+	if (entry.gas.retryDebt && unionLegs.includes("gas")) legs.push("gas")
+	if (entry.fpc.retryDebt && unionLegs.includes("fpc")) legs.push("fpc")
+	return legs
+}
+
+export const useBalancesStore = defineStore("balances", () => {
+	const core = new BalancesCore()
 
 	// The BELT: fence the departing profile the instant the active profile
 	// changes, synchronously — before any component watcher can fetch under
@@ -642,16 +684,16 @@ export const useBalancesStore = defineStore("balances", () => {
 	watch(
 		() => appStore.profile?.id,
 		(_next, prev) => {
-			if (prev !== undefined) invalidateProfile(prev)
+			if (prev !== undefined) core.invalidateProfile(prev)
 		},
 		{ flush: "sync" },
 	)
 
 	return {
-		entries,
-		subscribe,
-		ensure,
-		entry,
-		invalidateProfile,
+		entries: core.entries,
+		subscribe: core.subscribe.bind(core),
+		ensure: core.ensure.bind(core),
+		entry: core.entry.bind(core),
+		invalidateProfile: core.invalidateProfile.bind(core),
 	}
 })

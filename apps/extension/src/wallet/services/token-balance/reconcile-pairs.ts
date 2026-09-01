@@ -74,21 +74,37 @@ function pairKey(token: number, account: string): string {
  * Output order is total and deterministic — chainId, token id, account index,
  * then address — so a repair batch allocates ids in a reproducible sequence.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
 export function reconcilePlan<T extends ReconcileToken, A extends ReconcileAccount, R extends ReconcileRow>(input: {
 	tokens: readonly T[]
 	accounts: readonly A[]
 	existing: readonly R[]
 }): ReconcilePlan<T, A, R> {
 	const { tokens, accounts, existing } = input
+	const { desired, pairs } = buildDesiredPairs(tokens, groupAccountsByChain(accounts))
+	const tokenById = new Map<number, T>()
+	for (const token of tokens) tokenById.set(token.id, token)
+	const { seen, staleTokens, staleIdentity } = classifyExistingRows(existing, tokenById, desired)
+	const missing = pairs.filter(({ token, account }) => !seen.has(pairKey(token.id, account.address)))
+	missing.sort(comparePairs)
+	return { missing, staleTokens, staleIdentity }
+}
 
+function groupAccountsByChain<A extends ReconcileAccount>(accounts: readonly A[]): Map<number, A[]> {
 	const accountsByChain = new Map<number, A[]>()
 	for (const account of accounts) {
 		const bucket = accountsByChain.get(account.chainId)
 		if (bucket) bucket.push(account)
 		else accountsByChain.set(account.chainId, [account])
 	}
+	return accountsByChain
+}
 
+/** Pairs form only where `token.chainId === account.chainId`; the first
+ *  (token, account) occurrence wins so duplicates never double-pair. */
+function buildDesiredPairs<T extends ReconcileToken, A extends ReconcileAccount>(
+	tokens: readonly T[],
+	accountsByChain: Map<number, A[]>,
+): { desired: Set<string>; pairs: { token: T; account: A }[] } {
 	const desired = new Set<string>()
 	const pairs: { token: T; account: A }[] = []
 	for (const token of tokens) {
@@ -99,10 +115,16 @@ export function reconcilePlan<T extends ReconcileToken, A extends ReconcileAccou
 			pairs.push({ token, account })
 		}
 	}
+	return { desired, pairs }
+}
 
-	const tokenById = new Map<number, T>()
-	for (const token of tokens) tokenById.set(token.id, token)
-
+/** A row counts toward a desired pair only on FULL identity; a same-profile
+ *  row at a reused id whose identity no longer matches is `staleIdentity`. */
+function classifyExistingRows<T extends ReconcileToken, R extends ReconcileRow>(
+	existing: readonly R[],
+	tokenById: Map<number, T>,
+	desired: Set<string>,
+): { seen: Set<string>; staleTokens: R[]; staleIdentity: R[] } {
 	const seen = new Set<string>()
 	const staleTokens: R[] = []
 	const staleIdentity: R[] = []
@@ -120,15 +142,23 @@ export function reconcilePlan<T extends ReconcileToken, A extends ReconcileAccou
 		// durable evidence the projection ever started.
 		if (row.updatedAt === 0 && row.syncFailure === undefined) staleTokens.push(row)
 	}
+	return { seen, staleTokens, staleIdentity }
+}
 
-	const missing = pairs.filter(({ token, account }) => !seen.has(pairKey(token.id, account.address)))
-	missing.sort(
-		(a, b) =>
-			a.token.chainId - b.token.chainId ||
-			a.token.id - b.token.id ||
-			a.account.index - b.account.index ||
-			(a.account.address < b.account.address ? -1 : a.account.address > b.account.address ? 1 : 0),
+/** Total, deterministic order — chainId, token id, account index, then address. */
+function comparePairs<T extends ReconcileToken, A extends ReconcileAccount>(
+	a: { token: T; account: A },
+	b: { token: T; account: A },
+): number {
+	return (
+		a.token.chainId - b.token.chainId ||
+		a.token.id - b.token.id ||
+		a.account.index - b.account.index ||
+		compareAddress(a.account.address, b.account.address)
 	)
+}
 
-	return { missing, staleTokens, staleIdentity }
+function compareAddress(a: string, b: string): number {
+	if (a < b) return -1
+	return a > b ? 1 : 0
 }

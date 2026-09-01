@@ -597,42 +597,15 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		})
 	}
 
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 50) — refactor when touched, never raise
 	private readonly onTransactionUpdated = async (tx: Tx) => {
 		if (tx.status !== TxStatus.Pending) {
 			if (tx.origin.type === OriginType.UI) {
-				const addresses = new Set<string>()
-				const contracts = new Set<string>()
-				const tokenIds = new Set<number>()
-
-				for (const c of tx.calls) {
-					if (c.contract && c.transfers) {
-						contracts.add(c.contract)
-					}
-					if (c.transfers) {
-						for (const t of c.transfers) {
-							addresses.add(t.to)
-							addresses.add(t.from)
-						}
-					}
-				}
-
+				const { addresses, contracts } = this.collectTransferParties(tx.calls)
 				// If we found specific transfer info, refresh only affected balances.
 				// Otherwise (e.g. faucet mints, generic contract calls), refresh all
 				// balances for the tx account since we can't narrow the scope.
 				if (addresses.size > 0 && contracts.size > 0) {
-					for (const t of this.tokens.values()) {
-						if (contracts.has(t.contract)) {
-							tokenIds.add(t.id)
-						}
-					}
-
-					const balances = await this.repo.getAll()
-					for (const tb of balances) {
-						if (!addresses.has(tb.account) || !tokenIds.has(tb.token)) continue
-						const t = this.tokens.get(tb.token)
-						if (t && rowMatchesToken(tb, t)) this.queue.enqueue(tb)
-					}
+					await this.enqueueNarrowedBalances(addresses, this.tokenIdsForContracts(contracts))
 				} else {
 					await this.refreshAccountBalances(tx.account)
 				}
@@ -641,6 +614,45 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 			}
 
 			await this.refreshAccountBalances(tx.account)
+		}
+	}
+
+	/** The tx's transfer parties: every to/from address, and every called
+	 *  contract that carried transfer info. */
+	private collectTransferParties(calls: Tx["calls"]): { addresses: Set<string>; contracts: Set<string> } {
+		const addresses = new Set<string>()
+		const contracts = new Set<string>()
+		for (const c of calls) {
+			if (c.contract && c.transfers) {
+				contracts.add(c.contract)
+			}
+			if (c.transfers) {
+				for (const t of c.transfers) {
+					addresses.add(t.to)
+					addresses.add(t.from)
+				}
+			}
+		}
+		return { addresses, contracts }
+	}
+
+	private tokenIdsForContracts(contracts: Set<string>): Set<number> {
+		const tokenIds = new Set<number>()
+		for (const t of this.tokens.values()) {
+			if (contracts.has(t.contract)) {
+				tokenIds.add(t.id)
+			}
+		}
+		return tokenIds
+	}
+
+	/** Enqueue only the (party account × called-contract token) rows, identity-gated. */
+	private async enqueueNarrowedBalances(addresses: Set<string>, tokenIds: Set<number>): Promise<void> {
+		const balances = await this.repo.getAll()
+		for (const tb of balances) {
+			if (!addresses.has(tb.account) || !tokenIds.has(tb.token)) continue
+			const t = this.tokens.get(tb.token)
+			if (t && rowMatchesToken(tb, t)) this.queue.enqueue(tb)
 		}
 	}
 
