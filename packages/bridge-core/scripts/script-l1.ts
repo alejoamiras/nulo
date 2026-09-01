@@ -57,8 +57,8 @@ export async function assertRouterWitnessShape(
 		] as Abi,
 		client: pub as never,
 	})
-	// biome-ignore lint/suspicious/noExplicitAny: viem read typing
-	const rr = routerR.read as any
+	// biome-ignore lint/suspicious/noExplicitAny: viem typing collapses over an untyped client
+	const rr = (routerR as any).read
 	assertSame(await rr.swapTarget(), expectedSwapTarget, "router.swapTarget")
 	if (!((await rr.BRIDGE_WITNESS_TYPE_STRING()) as string).includes("swapTarget")) {
 		throw new Error(preB2Hint)
@@ -76,8 +76,8 @@ export async function assertPortalInitializerPinned(
 	broadcaster: string,
 ): Promise<void> {
 	const portalPre = getContract({ address: portal, abi: portalAbi, client: pub as never })
-	// biome-ignore lint/suspicious/noExplicitAny: viem read typing
-	const pinnedInitializer = String(await (portalPre.read as any).initializer())
+	// biome-ignore lint/suspicious/noExplicitAny: viem typing collapses over an untyped client
+	const pinnedInitializer = String(await (portalPre as any).read.initializer())
 	if (pinnedInitializer.toLowerCase() !== broadcaster.toLowerCase()) {
 		throw new Error(
 			`portal initializer is ${pinnedInitializer} but this run broadcasts from ${broadcaster} — ` +
@@ -127,7 +127,12 @@ export interface RouterDepositParams {
  * router bridge(). Returns the claim value (PRIVATE: the salt in = the value out; PUBLIC: the
  * flow's own random secret) + leaf index for the L2 claim.
  */
-export async function depositViaRouter(env: RouterDepositEnv, p: RouterDepositParams): Promise<{ claimValue: Fr; leafIndex: bigint }> {
+/** One-time Permit2 max-approve when the token needs it (MintableERC20 short-circuits;
+ *  TestUsdc/real USDC start at zero) — the app's exact allowance dance. */
+export async function ensureRouterPermit2(
+	env: RouterDepositEnv,
+	p: { usdc: `0x${string}`; usdcAbi: unknown; permit2: `0x${string}`; needed: bigint; mins: () => string },
+): Promise<void> {
 	const { pub, wallet, account } = env as { pub: never; wallet: never; account: { address: `0x${string}` } }
 	await ensurePermit2Allowance({
 		allowance: async () =>
@@ -135,20 +140,25 @@ export async function depositViaRouter(env: RouterDepositEnv, p: RouterDepositPa
 				address: p.usdc,
 				abi: p.usdcAbi as never,
 				functionName: "allowance",
-				args: [account.address, p.core.permit2],
+				args: [account.address, p.permit2],
 			})) as bigint,
 		approveMax: async () =>
 			await (wallet as { writeContract: (a: unknown) => Promise<`0x${string}`> }).writeContract({
 				address: p.usdc,
 				abi: p.usdcAbi as never,
 				functionName: "approve",
-				args: [p.core.permit2, (1n << 256n) - 1n] as never,
+				args: [p.permit2, (1n << 256n) - 1n] as never,
 			}),
 		waitReceipt: async (hash) =>
 			await (pub as { waitForTransactionReceipt: (a: unknown) => Promise<never> }).waitForTransactionReceipt({ hash }),
-		needed: p.amount,
+		needed: p.needed,
 		onStatus: (st, tx) => console.log(`permit2 approval: ${st}${tx ? ` (${tx})` : ""} (${p.mins()})`),
 	})
+}
+
+export async function depositViaRouter(env: RouterDepositEnv, p: RouterDepositParams): Promise<{ claimValue: Fr; leafIndex: bigint }> {
+	const { pub, wallet, account } = env as { pub: never; wallet: never; account: { address: `0x${string}` } }
+	await ensureRouterPermit2(env, { usdc: p.usdc, usdcAbi: p.usdcAbi, permit2: p.core.permit2, needed: p.amount, mins: p.mins })
 	const r = await retryOnRevert(() =>
 		runRouterDeposit(
 			{ pub, wallet, account } as never,
