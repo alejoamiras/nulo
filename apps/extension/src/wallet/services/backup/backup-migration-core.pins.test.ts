@@ -10,6 +10,7 @@ import { defineMigration } from "@nulo/wallet-core/migration"
 import { ACCOUNT_STORAGE_ROOT } from "@/wallet/services/account/spec"
 import { CONTACT_STORAGE_ROOT } from "@/wallet/services/contact/spec"
 import { PROFILE_STORAGE_ROOT } from "@/wallet/services/profile/repository"
+import { CONFIG_STORAGE_KEY } from "@/wallet/config/store"
 import { denormalizeBackupData, normalizeBackupData } from "./backup-migration-registry"
 import { migrateBackupData } from "./backup-migrator"
 import { defineRowMapMigration } from "./row-map-migration"
@@ -208,5 +209,103 @@ describe("preflight reject oracle (via migrateBackupData's migrations seam)", ()
 			kind: "failed",
 			reason: `backup is missing a required slice for "${ACCOUNT_STORAGE_ROOT}" that migration 2 reads`,
 		})
+	})
+
+	// The reject-oracle ORDER is contract too: brand → blocked → uncovered →
+	// absent-read, per migration, refs in reads-then-writes insertion order.
+	test("precedence: an imperative migration touching a blocked root reports NOT-BACKUP-SAFE first", async () => {
+		const res = await run(
+			defineMigration({
+				version: 2,
+				description: "imperative over profiles",
+				reads: [{ kind: "root", root: PROFILE_STORAGE_ROOT }],
+				writes: [{ kind: "root", root: PROFILE_STORAGE_ROOT }],
+				up: async () => {},
+			}),
+		)
+		expect(res.reason).toBe(
+			"this wallet version can't upgrade old backups: migration 2 is not backup-safe — re-export a fresh backup from a current wallet",
+		)
+	})
+
+	test("precedence: blocked beats uncovered when both appear (first offending ref wins)", async () => {
+		const res = await run(
+			defineRowMapMigration({
+				version: 2,
+				description: "blocked+uncovered",
+				rowMaps: {
+					[PROFILE_STORAGE_ROOT]: { addDefault: { x: 1 } },
+					"nulo:mystery": { addDefault: { x: 1 } },
+				},
+			}),
+		)
+		expect(res.reason).toBe(
+			`migration 2 touches "${PROFILE_STORAGE_ROOT}", which backups cannot represent — re-export a fresh backup from a current wallet`,
+		)
+	})
+
+	test("precedence: uncovered beats absent-required-read (refs loop runs before the reads loop)", async () => {
+		const res = await run(
+			defineRowMapMigration({
+				version: 2,
+				description: "uncovered+absent",
+				rowMaps: {
+					"nulo:mystery": { addDefault: { x: 1 } },
+					[ACCOUNT_STORAGE_ROOT]: { addDefault: { pinned: false } },
+				},
+			}),
+		)
+		expect(res.reason).toBe('migration 2 touches "nulo:mystery", which no backup slice maps to')
+	})
+})
+
+describe("field-name guard propagates where + target through every clause", () => {
+	const wheres: Array<[string, object]> = [
+		["rename", { rename: { "": "x" } }],
+		["drop", { drop: [""] }],
+		["retype", { retype: { "": "string" } }],
+		["addDefault", { addDefault: { "": 1 } }],
+		["remapValues", { remapValues: { "": { a: "b" } } }],
+	]
+	for (const [where, transform] of wheres) {
+		test(`empty field name in ${where}`, () => {
+			expect(() => rowMap(9, transform)).toThrowError(`row-map transform for "nulo:core:contacts": ${where} has an empty field name`)
+		})
+	}
+
+	test("valueMaps targets carry their own key as the error prefix", () => {
+		expect(() => defineRowMapMigration({ version: 9, description: "pin", valueMaps: { "nulo:cfg": { drop: [""] } } })).toThrowError(
+			'row-map transform for "nulo:cfg": drop has an empty field name',
+		)
+	})
+})
+
+describe("config value-projection converter oracle (moves with the registry decomposition)", () => {
+	const normReason = (config: unknown): string => {
+		const res = normalizeBackupData({ config })
+		if (res.ok) throw new Error("expected reject")
+		return res.reason
+	}
+
+	test("toStored: non-object element", () => {
+		expect(normReason([42])).toBe("config slice element is not an object")
+	})
+	test("toStored: malformed key", () => {
+		expect(normReason([{ key: "" }])).toBe("config slice element has a missing or malformed key")
+	})
+	test("toStored: missing value", () => {
+		expect(normReason([{ key: "a" }])).toBe('config slice element "a" has no value')
+	})
+	test("toStored: duplicate key", () => {
+		expect(
+			normReason([
+				{ key: "a", value: 1 },
+				{ key: "a", value: 2 },
+			]),
+		).toBe('config slice has a duplicate key "a"')
+	})
+	test("fromStored: non-object stored value", () => {
+		const res = denormalizeBackupData({ [CONFIG_STORAGE_KEY]: '"str"' }, { passThrough: {}, present: new Set(["config"]) })
+		expect(res).toEqual({ ok: false, reason: "stored config value is not an object" })
 	})
 })

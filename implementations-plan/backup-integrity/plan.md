@@ -20,10 +20,11 @@ restore surface's 4). The retained trio in `row-map-migration.ts` (`cloneJsonVal
 - `backup-migrator.ts` (168L): `preflightPending` (36) = coverage-index build + per-migration
   three-gate loop (branded check / blocked-or-uncovered refs / absent-required reads).
   Synchronous; returns a result or undefined.
-- Existing equivalence base: `footprint-coverage.test.ts` (18 tests: define-time rejections,
-  metamorphic guardrail, run-twice idempotence, brand non-forgeability),
-  `backup-migration-registry.test.ts` (12), `backup-migrator.test.ts` (12). Gap: not every
-  rejection branch's EXACT reason string is pinned.
+- Existing equivalence base: `footprint-coverage.test.ts` (24 instantiated tests: define-time
+  rejections, metamorphic guardrail, run-twice idempotence, brand non-forgeability),
+  `backup-migration-registry.test.ts` (20), `backup-migrator.test.ts` (12). Gap: not every
+  rejection branch's EXACT reason string is pinned, and the reject-oracle ORDERING
+  (brand → blocked → uncovered → absent-read) was unpinned.
 
 ### Decomposition (all extractions module-private, synchronous — no await seams exist)
 
@@ -45,11 +46,16 @@ restore surface's 4). The retained trio in `row-map-migration.ts` (`cloneJsonVal
 
 Pre-extraction pins committed FIRST in `backup-migration-core.pins.test.ts`: exact-reason
 assertions for every branch that moves — validateTransform's 12 rejection messages;
-normalize's unknown-slice / non-array / row-shape / missing-id / duplicate-id /
-value-projection-failure reasons; denormalize's outside-root / non-string / bad-JSON /
-non-migratable / id-anchor / vanished-slice reasons; preflight's three incompatible/failed
-message shapes (positional data included). Then the three existing suites + the pins stay
-zero-edit green across the refactor commits.
+normalize's unknown-slice / non-array / row-shape / missing-id / duplicate-id reasons and
+the config projection's toStored/fromStored converter reasons; denormalize's outside-root /
+non-string / bad-JSON / id-anchor / vanished-slice reasons; preflight's FOUR message shapes
+(non-branded, blocked, uncovered, absent-required) plus three PRECEDENCE pins fixing the
+reject-oracle order (brand → blocked → uncovered → absent-read); parameterized field-name
+pins proving `where` and `target` both propagate through the hoisted helper. 43 pins total.
+Denormalize's `non-migratable slice` branch is unreachable through the current registry
+(ownerOf returns only root/value-projection descriptors) — it is preserved mechanically,
+not pinned. Then the three existing suites + the pins stay zero-edit green across the
+refactor commits.
 
 ### Rollback
 
@@ -60,9 +66,14 @@ in-memory functions). No migration semantics change — the same objects, same o
 
 - Directives burned: 4 (53/50/41/36); manifest 126 → 122 via regen; zero inserted.
 - `footprint-coverage` + registry + migrator + pins suites green, zero edits to existing.
-- Gates: `bun run e2e:agent tests/e2e/network/backup-migration-roundtrip.test.ts` (+ the
-  plan's other three specs ride PR-b where the restore surface changes) — plus audit:vue,
-  test:ci-gating.
+- Gates: ALL FOUR binding specs on PR-a (it changes every full-import path):
+  backup-migration-roundtrip, backup-restore-integrity, backup-restore-sw-restart,
+  profile-reimport-matrix via `e2e:agent` — plus audit:vue, test:ci-gating. PR-b re-runs
+  the same four.
+- Codex conditions folded (session 01a05d54): coverage index built fresh per preflight
+  invocation (never module-cached — the registry is only TypeScript-readonly), treated
+  read-only by the per-migration validator; ordering pins added; converter + where/target
+  pins added; counts corrected.
 
 ## PR-b — restore surface (next PR)
 
