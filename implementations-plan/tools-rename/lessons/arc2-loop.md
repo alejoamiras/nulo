@@ -19,6 +19,10 @@ Verdict: **clean — no findings.** One sub-threshold style nit noted ("the Drip
 
 Rejected: nothing.
 
-## Codex round 2 (resumed)
+## Codex round 2 (resumed, fix diff `3ab1845f`)
+
+Three Low leftovers of round 1's own cleanup, all comment-only, all adopted in `c6bb7964`: the `buildCombinedManifest` doc comment still described the omission path as "mainnet" (now: shipped shape vs optional bridge+fuel-only); the incoming-transfers header/title still claimed the audit provenance and the untested scenarios (now: wiring-smoke wording, title renamed); two doc lines that restated their function (`defaultTab`, `__resetDripForTests`) deleted and the three cited review-history fragments in `live-intent.ts` removed. Four more `(review finding #N)` fragments in `live-intent.ts` sit on lines the rename never touched and were left alone (out of scope).
+
+## Codex round 3 (resumed, fix diff `c6bb7964`)
 
 _pending_

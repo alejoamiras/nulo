@@ -6,24 +6,12 @@ const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
 
 /**
- * Runtime wiring checks for incoming transfers. Three named scenarios:
- *
- *   1. **activity feed mounts** — the popup's activity page loads on a
- *      fresh profile without a runtime error. This is a wire-up smoke
- *      only: the primary-method naming logic is pinned by the unit
- *      suites listed below, not exercised here.
- *
- *   2. **incoming-receive happy path** — `IncomingTransferServiceClient`
- *      is reachable + connects + returns the expected empty list on a
- *      fresh profile with no third-party senders. Validates the codex
- *      re-audit critical (ServiceClient never auto-connects on listener
- *      registration — explicit connect() in onMounted is required).
- *
- *   3. **self-mint dedupe** — verified by absence: a fresh profile has
- *      no outgoing tx hashes to dedupe against, and the
- *      IncomingTransferService poll surface returns []. A regression
- *      that surfaced ANY note as incoming on a fresh profile would
- *      fail the empty-list assertion.
+ * Runtime wiring smoke for incoming transfers. It proves two things and only two: the popup's
+ * activity page mounts on a fresh profile without a runtime error, and the
+ * `IncomingTransferServiceClient` connects (explicit connect() in onMounted — a ServiceClient never
+ * auto-connects on listener registration) and renders an empty incoming feed. No receive, no
+ * outgoing hash and no self-mint is created, so neither the receive path nor the dedupe is
+ * exercised here.
  *
  * Implementation note: this test deliberately stays off the send-tx
  * path. Prior attempts that drove `sendTransfer` against the
