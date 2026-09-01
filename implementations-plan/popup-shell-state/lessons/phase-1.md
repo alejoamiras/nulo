@@ -10,7 +10,8 @@ PR-b review).
 |---|---|---|---|
 | 1 | Blueprint audit | conditional approve | (a) the `next(await …)` guard shape deferred the three synchronous branches by a microtask (the cold-boot strand) → discriminated early result + `createPopupGuard` calling `next` synchronously, pinned with "no service calls" + "next before the callback settles"; (b) `pickFile`'s plain-file path resolves synchronously today → sync classifier + async settler owning resolve/reject (PR-b); (c) `cacheStore.importPromise` holds the CONTROLS, not the promise; (d) the outcome literal is `"unconfirmed"`; (e) test counts corrected (13/15/12/33); (f) app.store: keep factories but explicit named results + documented order + pins for `$state`/`storeToRefs`/classification/return order/alias/`$reset`/one client/watcher order; (g) two activity builders kept (token filter, upstream journal filter, slot accounting, slicing differ) + equal-sort-key and token-presence coverage; (h) one sync unlock-error ladder, re-read `profile.id` at both sites; (i) contact pins: don't duplicate cap/minimal/dedupe/adds-only; add control identity, all early-exit cleanup, partial/total sender toasts, error-object/log order; (j) PR-b pins: ArrowUp + wrap boundaries, files settlement order |
 | 2 | PR-a review | conditional approve | (a) BLOCKING: my sync-shaped `registerSenderForRow` returned `addSender(...).then(ok, warn)` — a DERIVED promise the caller awaited (one extra microtask per row) and it moved the `addSender()` call outside the old `try`, so a synchronous throw would escape to the outer import error instead of counting as a sender failure → the caller-owned `try { await addSender; senderOk++ } catch { warn }` is back inline, verbatim; (b) the recent-rows helper declared parallel interfaces (`tokenId: string` where the domain says `number`) that the JS caller hid from typecheck → it now takes `Tx` / `OperationRecord` / `IncomingTransferRecord`; (c) pin counts corrected (11 contact / 5 store / 8 popup); (d) accepted: `unlockActiveProfile`'s adoption microtask (the activation wait checks success/failure before registering its watcher) and `getProfileApi()` being evaluated eagerly on non-early routes |
-| 3 | PR-b review | — | — |
+| 3 | PR-a fix confirmation | approve | — |
+| 4 | PR-b review | approve | no findings; noted that `onchange` now returns `undefined` instead of a promise (the DOM ignores it, no caller consumes it) and that the 3-microtask settlement pin is runtime-coupled by design |
 
 ## Lessons
 
@@ -36,6 +37,10 @@ PR-b review).
   mounting the app.
 - **Narrowing does not survive extraction (again).** The unlock ladder reads `activeProfile?.id` — pass
   the id, not the object, so the helper's identity check compares exactly what the inline code did.
+
+- **Measure settlement, don't assume it.** "Resolves synchronously inside `onchange`" was true, but the
+  caller sees `pickFile`'s `async` wrapper adopt that promise — 3 microtasks today. The pin asserts the
+  measured count (a probe test, run once and deleted), so a relay that adds a tick fails it.
 
 ## Gotchas (tooling)
 
