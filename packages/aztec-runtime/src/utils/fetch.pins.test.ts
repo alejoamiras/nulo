@@ -105,7 +105,7 @@ describe("fetchOnce (via makeSingleAttemptFetch) reject oracle", () => {
 		const out = await makeSingleAttemptFetch(1000)("http://h", { m: 1 }, { "x-extra": "1" })
 		expect(out.response).toEqual({ result: 7 })
 		expect(out.headers.get("x-pin")).toBe("yes")
-		const init = spy.mock.calls[0]?.[1] as RequestInit
+		const init = (spy.mock.calls[0] as unknown[])?.[1] as RequestInit
 		expect((init.headers as Record<string, string>)["x-extra"]).toBe("1")
 		expect((init.headers as Record<string, string>)["content-type"]).toBe("application/json")
 		expect(init.signal).toBeInstanceOf(AbortSignal)

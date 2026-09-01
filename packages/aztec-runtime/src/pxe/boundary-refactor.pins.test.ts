@@ -20,11 +20,12 @@ vi.mock("./opfs-store", async (importOriginal) => ({
 	removeProfileStoreDirs: (profileId: string) => removeProfileStoreDirs(profileId),
 }))
 
-import type { AztecNode, PXE } from "@aztec/stdlib/interfaces/client"
+import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import type { PXE } from "@aztec/pxe/client/bundle"
 import type { AztecAddress } from "@aztec/stdlib/aztec-address"
 import type { ILogger } from "@nulo/wallet-core/logger"
-import { ChainRuntime, type NetworkInfo } from "./chain-runtime"
-import { PxeService, type IProfileReader, type PxeFactory } from "./service"
+import { ChainRuntime, type NetworkInfo, type PxeFactory } from "./chain-runtime"
+import { PxeService, type IProfileReader } from "./service"
 
 const noopLogger: ILogger = { log: () => {} }
 const KEY_B64 = btoa(String.fromCharCode(...new Uint8Array(32)))
@@ -44,7 +45,7 @@ describe("getContractInstance pxeOnly pin", () => {
 		let nodeCalls = 0
 		let knownCalls = 0
 		const factory: PxeFactory = {
-			createChainRuntime: async (n) => {
+			createChainRuntime: async (n: NetworkInfo) => {
 				const pxe = { getContractInstance: async () => undefined } as unknown as PXE
 				const node = {
 					getContract: async () => {
