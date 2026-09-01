@@ -55,3 +55,8 @@ Squash revert stops NEW bad imports; it cannot undo profiles or child rows a fau
 2. **Outcome shape**: DIVERGED and codex's position ADOPTED — typed terminal descriptors + one `applyOutcome` renderer, not stages-writing-own-status: copy stays in the stage, the write matrix becomes exhaustive and centrally testable.
 3. **pick/decrypt**: both LIGHT-TOUCH — a pure name-normalization helper only; the conditional publication and stale-selection fences keep their exact shapes (no shared publisher with reset authority).
 4. **Codex conditional-approve conditions, all folded**: explicit reconcile stage; live error-log callbacks; helpers preserved in place; real-wiring + pick/decrypt pins committed BEFORE extraction; rollback claim narrowed.
+
+
+## Post-implementation record
+
+Codex loop (arc-4 session): implementation review fix-first — 1 HIGH (decrypt publication fence gap at the helper await boundary, fixed + deterministically race-pinned), 2 fidelity restorations (services-stage ordering incl. the defensive id guard; `return await` on the duplicate-account rollback so the disconnect follows completion), 2 pin completions (passkey-side epoch-4 gates; 16-step trace with config + non-vacuous failed-network probe assertion + in-completeImport markers). Round 3: "Converged; the failed-network projection pin is now non-vacuous and exact. Verdict: approve." Gates: audit:vue exit 0, test:ci-gating 64, 99 suite tests, vue-tsc clean; manifest 152 → 147.
