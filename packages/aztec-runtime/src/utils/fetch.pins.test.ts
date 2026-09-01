@@ -5,7 +5,7 @@
  */
 import { NoRetryError } from "@aztec/foundation/retry"
 import { afterEach, describe, expect, test, vi } from "vitest"
-import { makeSingleAttemptFetch } from "./fetch"
+import { makeFetchWithTimeout, makeSingleAttemptFetch } from "./fetch"
 
 const realFetch = globalThis.fetch
 
@@ -109,5 +109,68 @@ describe("fetchOnce (via makeSingleAttemptFetch) reject oracle", () => {
 		expect((init.headers as Record<string, string>)["x-extra"]).toBe("1")
 		expect((init.headers as Record<string, string>)["content-type"]).toBe("application/json")
 		expect(init.signal).toBeInstanceOf(AbortSignal)
+	})
+
+	test("the abort timer stays armed through a PENDING resp.json(): a stalled body still times out", async () => {
+		// fetch resolves fast, but the body read hangs; the AbortController fires
+		// mid-json and the (aborted) read rejects INTO the json-parse catch —
+		// surfacing as the parse-failure message on an ok response (current
+		// behavior, pinned so the extraction can't move clearTimeout ahead of
+		// the body read).
+		vi.useFakeTimers()
+		try {
+			let signal: AbortSignal | undefined
+			globalThis.fetch = vi.fn(async (_h: unknown, init: RequestInit) => {
+				signal = init.signal as AbortSignal
+				return {
+					ok: true,
+					status: 200,
+					statusText: "OK",
+					headers: { get: () => null },
+					json: () =>
+						new Promise((_, reject) => {
+							signal?.addEventListener("abort", () => reject(new Error("body read aborted")))
+						}),
+				} as unknown as Response
+			}) as unknown as typeof fetch
+			const pending = makeSingleAttemptFetch(50)("http://h", {})
+			const settled = expect(pending).rejects.toThrowError("Failed to parse body as JSON")
+			await vi.advanceTimersByTimeAsync(60)
+			await settled
+			expect(signal?.aborted).toBe(true)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+})
+
+describe("retry-wrapper interaction (makeFetchWithTimeout)", () => {
+	test("retryable failures retry; a later success wins", async () => {
+		let calls = 0
+		globalThis.fetch = vi.fn(async () => {
+			calls++
+			if (calls === 1) return jsonResponse({ error: { message: "flaky" } }, { ok: false, status: 500 })
+			return jsonResponse({ result: 42 }, { ok: true })
+		}) as typeof fetch
+		vi.useFakeTimers()
+		try {
+			const pending = makeFetchWithTimeout(1000)("http://h", {})
+			await vi.advanceTimersByTimeAsync(5000)
+			const out = await pending
+			expect(out.response).toEqual({ result: 42 })
+			expect(calls).toBe(2)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("a 4xx NoRetryError stops immediately — exactly one attempt", async () => {
+		let calls = 0
+		globalThis.fetch = vi.fn(async () => {
+			calls++
+			return jsonResponse({ error: { message: "bad" } }, { ok: false, status: 404 })
+		}) as typeof fetch
+		await expect(makeFetchWithTimeout(1000)("http://h", {})).rejects.toThrowError("Error 404 from server http://h: bad")
+		expect(calls).toBe(1)
 	})
 })
