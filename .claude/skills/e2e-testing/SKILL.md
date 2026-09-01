@@ -583,3 +583,24 @@ worker-refuses-to-die regression.
 **If it becomes frequent enough to matter**, the fix is not a bigger constant: make the wait
 deadline-free and let the test's own timeout bound it, or assert the worker's death by a positive
 signal (a fresh target with a different id) rather than by the absence of an event.
+
+## The cold-shard approvable flake: `multicall-chunked` `feeMethod:null` (2026-09-01)
+
+**Fingerprint.** `tx-sendTx-multicall-chunked (#33)` red with `waitForExecuteApprovable: not
+approvable after 10000ms: {"btnInDom":true,"btnDisabled":true,…,"feeMethod":null,"opCount":1}`,
+while `#32` (the 3-call multicall in the same file, same execute popup, same fee selector) passes
+in the same shard. First seen on PR #515 (shard 1/5), a diff that touched no estimation code; the
+shard's aztec-node boot had also logged `Address already in use` — a contended runner.
+
+**Why it is timing, not rendering.** `feeMethod` is read from the selector trigger's
+`data-fee-method`, which is bound to `modelValue?.subtitle` — null means the fee-estimation pipeline
+had not yet picked a default method, upstream of anything the popup draws. The chunked variant
+simulates 7 transfers, the heaviest estimation in the suite, and `approveExecute` runs it under the
+default 10s `approvableTimeoutMs` (no cold-path override in the test). On a warm host the same spec
+reaches approvable in a fraction of that: locally both cases pass, #33 in ~15s end-to-end.
+
+**Response.** `gh run rerun <run-id> --failed`, once. A second identical failure on a quiet queue:
+run `bun run e2e:agent tests/e2e/network/tx-sendTx-multicall.test.ts` locally first (proverless
+boots in ~2 min) before touching either the test's budget or the estimation code. If it ever
+recurs on a diff that touches estimation or the execute popup, the diff is the suspect — the
+fingerprint alone does not clear it.

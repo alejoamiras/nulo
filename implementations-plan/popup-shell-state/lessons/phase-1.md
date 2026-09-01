@@ -47,3 +47,10 @@ PR-b review).
 - commitlint's 100-char header bites on descriptive subjects; keep the burn count in the body.
 - The pre-commit hook's `biome check --staged` rejects a single over-width fixture line; run
   `biome format --write` on any hand-edited test before committing.
+- **New network flake fingerprint (PR-b, shard 1/5):** `tx-sendTx-multicall-chunked (#33)` red with
+  `waitForExecuteApprovable: not approvable after 10000ms … feeMethod:null` while `#32` (same file,
+  same `FeeMethodSelector` → `Dropdown`) passed in the same shard, whose aztec-node boot had logged
+  `Address already in use`. `feeMethod` is the selector's `modelValue?.subtitle`, so null = the
+  estimation pipeline had not picked a default inside the 10s cold budget for the 7-call chunked
+  simulation — upstream of the Dropdown refactor. Local run of the spec on the PR tree: both cases
+  green (#33 in 15s). Rerun once; recorded in the `e2e-testing` skill's flake list.
