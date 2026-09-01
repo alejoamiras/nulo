@@ -29,7 +29,7 @@ import type { BackgroundTickerPort, TickerHandle } from "@nulo/wallet-core/ports
 import { Queue } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { BalanceUpdateContent, type TaskService } from "@/wallet/services/task/service"
-import type { BalanceProjector } from "./balance-projector"
+import type { BalanceProjector, ProjectedBalance } from "./balance-projector"
 import type { BalanceRepository } from "./balance-repository"
 import { boundSyncFailureMessage, type TokenBalanceRaw } from "./spec"
 
@@ -195,7 +195,6 @@ export class BalanceJobQueue {
 		this.callbacks.onBalanceUpdated(updated)
 	}
 
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 34) — refactor when touched, never raise
 	private async syncBatch(batch: TokenBalanceRaw[]): Promise<void> {
 		// Generation captured BEFORE any await: the projector resolves live
 		// active-profile handles mid-flight, so an A→B→A switch during it
@@ -205,16 +204,39 @@ export class BalanceJobQueue {
 		// The task id THIS batch owns per balance id — captured up front so a
 		// concurrent queue reset (profile switch) that re-registers a newer task
 		// for the same id can't cause us to complete/fail/delete the wrong record.
+		const owned = this.startBatchTasks(batch)
+
+		try {
+			const results = await this.projector.project(batch)
+			const now = Date.now()
+
+			for (const result of results) {
+				const taskId = owned.get(result.id)
+				if (!taskId) continue
+				if (result.kind === "error") {
+					await this.applyProjectedError(result, taskId, now, gen)
+				} else {
+					await this.applyProjectedOk(result, taskId, batch, now, gen)
+				}
+			}
+		} catch (err) {
+			await this.failBatchOnProjectorError(batch, owned, gen, err)
+		} finally {
+			this.releaseOwnedTaskPointers(batch, owned)
+		}
+	}
+
+	/** Start each balance's task record — sync, no await between the mint and the
+	 *  `pendingTasks` registration. Handles both the already-registered case
+	 *  (from `enqueue`) and the defensive create-missing case. */
+	private startBatchTasks(batch: TokenBalanceRaw[]): Map<number, string> {
 		const owned = new Map<number, string>()
-		// Start each balance's task record. Handles both the
-		// already-registered case (from `enqueue`) and the defensive
-		// create-missing case (mirrors service.ts:262-267).
 		for (const tb of batch) {
 			const taskId = this.pendingTasks.get(tb.id)
 			// A pre-registered id the TaskService no longer knows (its map was
 			// cleared on a profile switch) is stale: mint a fresh record instead of
-			// letting `startTask` throw "Invalid task id" OUTSIDE the try/finally
-			// below — that escape drops the whole batch and strands the dead
+			// letting `startTask` throw "Invalid task id" OUTSIDE syncBatch's
+			// try/finally — that escape drops the whole batch and strands the dead
 			// `pendingTasks` entry, permanently jamming every future enqueue for
 			// this id. A genuine not-pending invariant error still propagates.
 			if (!taskId || !this.tasks.hasTask(taskId)) {
@@ -226,93 +248,108 @@ export class BalanceJobQueue {
 				owned.set(tb.id, taskId)
 			}
 		}
+		return owned
+	}
 
-		try {
-			const results = await this.projector.project(batch)
-			const now = Date.now()
+	private async applyProjectedError(
+		result: Extract<ProjectedBalance, { kind: "error" }>,
+		taskId: string,
+		now: number,
+		gen: number,
+	): Promise<void> {
+		this.tasks.failTask(taskId, result.error)
+		// Persist the failure onto the row (balances + updatedAt
+		// untouched — the last-known value keeps rendering). Without
+		// this write, "failed" and "still running" are identical in
+		// storage once the in-memory task record dies with the SW.
+		await this.writeSyncFailure(result.id, result.error, now, gen)
+	}
 
-			for (const result of results) {
-				const taskId = owned.get(result.id)
-				if (!taskId) continue
+	/** One successful projection's commit, in the frozen order: re-read → the
+	 *  sync fence ladder (deletion, ownership, generation — NO await between any
+	 *  fence and the write dispatch) → write → task completion → post-write
+	 *  ownership re-check → emit. */
+	private async applyProjectedOk(
+		result: Extract<ProjectedBalance, { kind: "ok" }>,
+		taskId: string,
+		batch: TokenBalanceRaw[],
+		now: number,
+		gen: number,
+	): Promise<void> {
+		// Existence-check mirrors service.ts:392-401 — if the balance
+		// record was deleted mid-sync, surface a task failure.
+		const current = await this.repo.get(result.id)
+		if (!current) {
+			this.tasks.failTask(taskId, "Balance record not found")
+			this.callbacks.onOrphanDetected?.(batch.find((b) => b.id === result.id)!)
+			return
+		}
 
-				if (result.kind === "error") {
-					this.tasks.failTask(taskId, result.error)
-					// Persist the failure onto the row (balances + updatedAt
-					// untouched — the last-known value keeps rendering). Without
-					// this write, "failed" and "still running" are identical in
-					// storage once the in-memory task record dies with the SW.
-					await this.writeSyncFailure(result.id, result.error, now, gen)
-					continue
-				}
+		const updated: TokenBalanceRaw = {
+			...current,
+			privateBalance: result.privateBalance,
+			publicBalance: result.publicBalance,
+			updatedAt: now,
+			// A successful projection clears the failure record
+			// (JSON-serialization drops the undefined key).
+			syncFailure: undefined,
+		}
+		// Fence check with NO await between it and the write dispatch
+		// (a delete interleaving since the re-read must win).
+		if (this.callbacks.isBalanceInvalidated?.(result.id)) {
+			this.tasks.failTask(taskId, "Balance record deleted mid-sync")
+			return
+		}
+		// A row that is no longer ours (token deleted mid-batch) gets no
+		// write: its projection ran under a context that no longer holds.
+		if (this.callbacks.isRowEmittable?.(current) === false) {
+			this.tasks.failTask(taskId, "Token no longer active")
+			return
+		}
+		// Generation fence (A→B→A): the map-membership check above is
+		// disarmed by a round-trip switch; the generation is not. No
+		// await between this check and the write dispatch.
+		if (gen !== this.callbacks.getGeneration()) {
+			this.tasks.failTask(taskId, "Profile changed mid-sync")
+			return
+		}
+		await this.repo.set(updated)
+		this.tasks.completeTask(taskId)
+		// Re-check AFTER the awaited write — same batch-abort hazard as the
+		// failure path's emit.
+		if (this.callbacks.isRowEmittable?.(current) === false) return
+		this.callbacks.onBalanceUpdated(updated)
+	}
 
-				// Existence-check mirrors service.ts:392-401 — if the balance
-				// record was deleted mid-sync, surface a task failure.
-				const current = await this.repo.get(result.id)
-				if (!current) {
-					this.tasks.failTask(taskId, "Balance record not found")
-					this.callbacks.onOrphanDetected?.(batch.find((b) => b.id === result.id)!)
-					continue
-				}
-
-				const updated: TokenBalanceRaw = {
-					...current,
-					privateBalance: result.privateBalance,
-					publicBalance: result.publicBalance,
-					updatedAt: now,
-					// A successful projection clears the failure record
-					// (JSON-serialization drops the undefined key).
-					syncFailure: undefined,
-				}
-				// Fence check with NO await between it and the write dispatch
-				// (a delete interleaving since the re-read must win).
-				if (this.callbacks.isBalanceInvalidated?.(result.id)) {
-					this.tasks.failTask(taskId, "Balance record deleted mid-sync")
-					continue
-				}
-				// A row that is no longer ours (token deleted mid-batch) gets no
-				// write: its projection ran under a context that no longer holds.
-				if (this.callbacks.isRowEmittable?.(current) === false) {
-					this.tasks.failTask(taskId, "Token no longer active")
-					continue
-				}
-				// Generation fence (A→B→A): the map-membership check above is
-				// disarmed by a round-trip switch; the generation is not. No
-				// await between this check and the write dispatch.
-				if (gen !== this.callbacks.getGeneration()) {
-					this.tasks.failTask(taskId, "Profile changed mid-sync")
-					continue
-				}
-				await this.repo.set(updated)
-				this.tasks.completeTask(taskId)
-				// Re-check AFTER the awaited write — same batch-abort hazard as the
-				// failure path's emit.
-				if (this.callbacks.isRowEmittable?.(current) === false) continue
-				this.callbacks.onBalanceUpdated(updated)
+	/** Projector-level failure that survived its own catch. Every balance in
+	 *  the batch fails. Mirrors the outer catch at service.ts:406-415. */
+	private async failBatchOnProjectorError(
+		batch: TokenBalanceRaw[],
+		owned: Map<number, string>,
+		gen: number,
+		err: unknown,
+	): Promise<void> {
+		const errorMessage = getErrorMessage(err)
+		for (const tb of batch) {
+			const taskId = owned.get(tb.id)
+			// A reset since batch-start may have cleared this batch's task record;
+			// `getTaskSync` would throw and abort the remaining failure writes.
+			if (!taskId || !this.tasks.hasTask(taskId)) continue
+			const task = this.tasks.getTaskSync(taskId)
+			if (!task.finishedAt) {
+				this.tasks.failTask(taskId, errorMessage)
+				await this.writeSyncFailure(tb.id, errorMessage, Date.now(), gen)
 			}
-		} catch (err) {
-			// Projector-level failure that survived its own catch. Every
-			// balance in the batch fails. Mirrors the outer catch at
-			// service.ts:406-415.
-			const errorMessage = getErrorMessage(err)
-			for (const tb of batch) {
-				const taskId = owned.get(tb.id)
-				// A reset since batch-start may have cleared this batch's task record;
-				// `getTaskSync` would throw and abort the remaining failure writes.
-				if (!taskId || !this.tasks.hasTask(taskId)) continue
-				const task = this.tasks.getTaskSync(taskId)
-				if (!task.finishedAt) {
-					this.tasks.failTask(taskId, errorMessage)
-					await this.writeSyncFailure(tb.id, errorMessage, Date.now(), gen)
-				}
-			}
-		} finally {
-			for (const tb of batch) {
-				// Identity-checked: only clear the pointer if it STILL points at the
-				// task this batch owned. A reset that re-registered a newer task for
-				// this id must keep its fresh pointer intact.
-				if (this.pendingTasks.get(tb.id) === owned.get(tb.id)) {
-					this.pendingTasks.delete(tb.id)
-				}
+		}
+	}
+
+	private releaseOwnedTaskPointers(batch: TokenBalanceRaw[], owned: Map<number, string>): void {
+		for (const tb of batch) {
+			// Identity-checked: only clear the pointer if it STILL points at the
+			// task this batch owned. A reset that re-registered a newer task for
+			// this id must keep its fresh pointer intact.
+			if (this.pendingTasks.get(tb.id) === owned.get(tb.id)) {
+				this.pendingTasks.delete(tb.id)
 			}
 		}
 	}
