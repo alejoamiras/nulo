@@ -1,7 +1,9 @@
 /**
  * Fast local enforcement of the complexity-budget baseline (sub-second: one git grep).
  * Chained into `bun run lint` and the pre-commit hook so a violation reds the agent's
- * local loop, not just CI; scripts/ci-cd/complexity-baseline.test.ts is the CI mirror.
+ * local loop, not just CI; scripts/ci-cd/complexity-baseline.test.ts is the CI mirror and
+ * scripts/ci-cd/complexity-rescore.test.ts holds every accepted stamp to the function's
+ * observed value (that one needs Biome, so it is CI + on-demand: `bun run baseline:rescore`).
  */
 import { readFileSync } from "node:fs"
 import { type BaselineManifest, compareToManifest, installedBiomeVersion, scanTree } from "./scan"
@@ -19,7 +21,8 @@ const installed = installedBiomeVersion(rootPkg)
 if (manifest.biomeVersion !== installed) {
 	problems.push(
 		`Biome ${installed} installed but the baseline was generated under ${manifest.biomeVersion} — scores drift ` +
-			"between releases. Regenerate in this PR: `bun run baseline:complexity -- --adopt` and review the manifest diff.",
+			"between releases. In this PR: `bun run baseline:rescore` to see every drifted stamp, edit each directive " +
+			"to its observed value (or refactor), then `bun run baseline:complexity -- --adopt` and review the manifest diff.",
 	)
 }
 
@@ -28,17 +31,25 @@ for (const f of scan.forbidden) {
 	problems.push(`${f.file}:${f.line} — forbidden suppression: ${f.why}`)
 }
 
-const drift = compareToManifest(manifest, scan.ruleCounts)
-if (drift.grew.length > 0) {
+const drift = compareToManifest(manifest, scan.accepted)
+if (drift.added.length > 0) {
 	problems.push(
-		"New complexity suppression(s) — the baseline only shrinks. Refactor the function under the budget " +
-			`instead of suppressing:\n  ${drift.grew.join("\n  ")}`,
+		"New or MOVED complexity acceptance(s) — the baseline only shrinks. Refactor the function under the budget " +
+			`instead of accepting it:\n  ${drift.added.join("\n  ")}`,
 	)
 }
-if (drift.shrank.length > 0) {
+if (drift.restamped.length > 0) {
 	problems.push(
-		"Baseline offender(s) fixed — record the progress: rerun `bun run baseline:complexity` in this PR " +
-			`so the manifest matches:\n  ${drift.shrank.join("\n  ")}`,
+		"Accepted stamp(s) changed — a stamp is the function's exact observed value. Confirm with `bun run baseline:rescore`, " +
+			`then record it: \`bun run baseline:complexity\` (a Biome bump needs \`-- --adopt\`):\n  ${drift.restamped
+				.map((r) => `${r.key}: ${r.from} → ${r.to}`)
+				.join("\n  ")}`,
+	)
+}
+if (drift.removed.length > 0) {
+	problems.push(
+		"Accepted function(s) fixed or removed — record the progress: rerun `bun run baseline:complexity` in this PR " +
+			`so the manifest matches:\n  ${drift.removed.join("\n  ")}`,
 	)
 }
 

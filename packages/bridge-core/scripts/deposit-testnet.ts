@@ -70,7 +70,7 @@ async function nodeRegistry(): Promise<`0x${string}`> {
 	return pick(a.registryAddress)
 }
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (155 lines) — split when touched, never grow
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: accepted at 155 lines — the deploy → deposit → claim → withdraw proof shares ephemeral addresses and secrets in one custody trace
 async function main() {
 	const mins = stopwatch()
 

@@ -50,7 +50,7 @@ export class UnknownDependencyError extends Error {
  * @throws UnknownDependencyError — dep names a service not in the collection.
  * @throws DependencyCycleError   — any strongly-connected subgraph remains.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 29) — refactor when touched, never raise
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 29 — validation, layered Kahn traversal and cycle detection are one conventional topological algorithm
 export function topologicalPhases<T extends ServiceNode>(nodes: readonly T[]): T[][] {
 	const byName = new Map<string, T>()
 	for (const node of nodes) byName.set(node.name, node)

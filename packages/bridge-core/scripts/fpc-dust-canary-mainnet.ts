@@ -68,7 +68,7 @@ async function nodeL1(): Promise<{ portal: `0x${string}`; asset: `0x${string}` }
 	return { portal: pick(a.feeJuicePortalAddress), asset: pick(a.feeJuiceAddress) }
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 23) — refactor when touched, never raise
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 23 — the live canary binds fee sizing, deposit evidence, repriced retries and balance-delta acceptance
 async function main() {
 	const mins = stopwatch()
 

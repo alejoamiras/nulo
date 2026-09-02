@@ -91,7 +91,7 @@ vi.mock("./repository", () => ({
 					for (const [k, v] of records) if (v.profileId === p) records.delete(k)
 					for (const [k, v] of trust) if (v.profileId === p) trust.delete(k)
 				},
-				// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 30) — refactor when touched, never raise
+				// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 30 — clearing a chain atomically covers records, trust, cursors and outbox under one scope predicate
 				clearChain: async (p: string, n: string) => {
 					for (const [k, v] of records) if (v.profileId === p && v.networkId === n) records.delete(k)
 					for (const [k, v] of trust) if (v.profileId === p && v.networkId === n) trust.delete(k)

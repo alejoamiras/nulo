@@ -621,7 +621,7 @@ export const test = base.extend<{
 						// Ground truth from the wallet's own storage: every account row
 						// with its chainId, so the failure discriminates wrong-chain
 						// creation from popup-side filtering.
-						// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
+						// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 19 — an in-browser diagnostic scanning exactly the account and network roots in serialized or object form
 						const storedAccounts = await capPopup.evaluate(async () => {
 							const all = await chrome.storage.local.get(null)
 							const out: string[] = []
@@ -1003,7 +1003,7 @@ export function patchPagePolling(page: Page): void {
 		// Use our patched waitForFunction (polling: 200) under the hood.
 		// biome-ignore lint/suspicious/noExplicitAny: dynamic invocation on the patched method
 		await (page as any).waitForFunction(
-			// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 29) — refactor when touched, never raise
+			// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 29 — the predicate implements Puppeteer's exact exists / visible / hidden selector semantics in-page
 			(args: { sel: string; visible: boolean; hidden: boolean }) => {
 				const el = document.querySelector<HTMLElement>(args.sel)
 				if (args.hidden) {

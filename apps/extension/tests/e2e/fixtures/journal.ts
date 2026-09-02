@@ -38,7 +38,7 @@ export type InFlightCounts = { active: number; queued: number; total: number }
  * were copy-pasted across concurrency tests.
  */
 export async function readDappExecuteRecords(page: Page): Promise<DappExecuteView[]> {
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 16) — refactor when touched, never raise
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 16 — one tolerant in-browser journal scan projecting the exact lean record view
 	return page.evaluate(async () => {
 		const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
 		const out: { id: string; stage: string; sessionId?: string }[] = []
@@ -171,7 +171,7 @@ export async function dumpAuthwitMeasurement(page: Page, label: string): Promise
  * callers (F1/F2) too. Allowlisted to `dapp_execute` (NOT a `get(null)` dump).
  */
 export async function readDappExecuteRecordsFull(page: Page): Promise<unknown[] | string> {
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 18 — one tolerant scan applies the diagnostic allowlist before data crosses into CI artifacts
 	return extCtxEvaluate(page, async () => {
 		const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
 		const out: unknown[] = []
@@ -401,7 +401,7 @@ export async function waitForInFlight(
 ): Promise<void> {
 	const { minActive = 0, minQueued = 0, minInFlight = 0, sessionId, timeout = 30_000 } = opts
 	const wait = page.waitForFunction(
-		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 26) — refactor when touched, never raise
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 26 — parse, session filter, stage classification and three threshold checks form one polling predicate
 		async (sid: string | null, minA: number, minQ: number, minIF: number) => {
 			const active = new Set(["pending", "simulating", "proving", "submitting"])
 			const all = (await chrome.storage.local.get(null)) as Record<string, unknown>

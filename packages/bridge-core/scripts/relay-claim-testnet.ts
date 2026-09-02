@@ -57,8 +57,8 @@ function claimPathFromArgv(argv: string[]): string {
 	return isAbsolute(path) ? path : join(process.cwd(), path)
 }
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (93 lines) — split when touched, never grow
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: accepted at 93 lines — offline validation, wallet setup, contract registration and submission form one ordered custody procedure
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 22 — the wrong-recipient canary and the bounded claim retry are explicit security outcomes of that procedure
 async function main(): Promise<void> {
 	// 1. Validate everything OFFLINE before touching the network (fail-closed, no secret/salt logged).
 	const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"))

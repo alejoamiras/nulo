@@ -32,6 +32,7 @@
     "test:release": "bun test scripts/release/",
     "test:ci-gating": "bun test scripts/ci-cd/",
     "baseline:complexity": "bun scripts/complexity-baseline/generate.ts",
+    "baseline:rescore": "bun scripts/complexity-baseline/rescore.ts",
     "audit:dup": "bun scripts/dup-trend/report.ts",
     "check:imports": "biome check apps/ packages/",
     "audit:vue": "bun run --parallel typecheck:all test lint && bun run build",

@@ -33,5 +33,217 @@
 			"packages/bridge-core/scripts/discover-mainnet-fuel.ts": 1,
 			"packages/bridge-core/scripts/relay-claim-testnet.ts": 1
 		}
-	}
+	},
+	"accepted": [
+		{
+			"file": "apps/extension/src/components/JsonViewer/creator.js",
+			"rule": "noExcessiveLinesPerFunction",
+			"anchor": "export const createTheme = ({ styles }) => {",
+			"accepted": 154
+		},
+		{
+			"file": "apps/extension/src/popup/components/modules/send/FeeSettingsCard.test.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "get: async (keys: string | string[] | null | undefined) => {",
+			"accepted": 19
+		},
+		{
+			"file": "apps/extension/src/stores/activity.store.ts",
+			"rule": "noExcessiveLinesPerFunction",
+			"anchor": "export const useActivityStore = defineStore(\"activity\", () => {",
+			"accepted": 122
+		},
+		{
+			"file": "apps/extension/src/utils/amount.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "export const formatBaseUnits = (units: bigint | string | null | undefined, decimals: number, opts: FormatBaseUnitsOpts = {}): string => {",
+			"accepted": 22
+		},
+		{
+			"file": "apps/extension/src/utils/log-payload-ban.test.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "function findLoggedSecrets(files: Array<{ path: string; content: string }>): string[] {",
+			"accepted": 17
+		},
+		{
+			"file": "apps/extension/src/utils/log-payload-ban.test.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "function stripNoise(line: string, state: LexState): { code: string; state: LexState } {",
+			"accepted": 41
+		},
+		{
+			"file": "apps/extension/src/wallet/logger/utils.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "export const trim = (value: unknown, depth: number = 0): unknown => {",
+			"accepted": 45
+		},
+		{
+			"file": "apps/extension/src/wallet/services/backup/footprint-coverage.test.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "function sampleRowsFor(t: RowMapTransform): Array<Record<string, unknown>> {",
+			"accepted": 17
+		},
+		{
+			"file": "apps/extension/src/wallet/services/backup/row-map-migration.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "export function applyRowTransform(row: unknown, t: RowMapTransform): Record<string, unknown> {",
+			"accepted": 39
+		},
+		{
+			"file": "apps/extension/src/wallet/services/backup/row-map-migration.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "function cloneJsonValue(value: unknown, path: string): JsonValue {",
+			"accepted": 24
+		},
+		{
+			"file": "apps/extension/src/wallet/services/backup/row-map-migration.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "function retypeValue(field: string, v: unknown, kind: \"string\" | \"number\" | \"boolean\"): string | number | boolean {",
+			"accepted": 23
+		},
+		{
+			"file": "apps/extension/src/wallet/services/execution/fee/fee-strategy-clamp-properties.test.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "test(\"I1+I2+I4+I6 — auto-derived limits: cap-bounded, measured-floored, throw iff inadmissible\", async () => {",
+			"accepted": 19
+		},
+		{
+			"file": "apps/extension/src/wallet/services/execution/operation-estimate-reuse.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "public async tryConsume(estimateId: string, input: OperationFingerprintInput): Promise<OperationEstimateReuseEntry | undefined> {",
+			"accepted": 21
+		},
+		{
+			"file": "apps/extension/src/wallet/services/execution/operation-fingerprint.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "function encodeValue(value: unknown, depth: number): string | null {",
+			"accepted": 25
+		},
+		{
+			"file": "apps/extension/src/wallet/services/incoming-transfer/service.scenarios.test.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "clearChain: async (p: string, n: string) => {",
+			"accepted": 30
+		},
+		{
+			"file": "apps/extension/tests/e2e/fixtures/extension.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "(args: { sel: string; visible: boolean; hidden: boolean }) => {",
+			"accepted": 29
+		},
+		{
+			"file": "apps/extension/tests/e2e/fixtures/extension.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "const storedAccounts = await capPopup.evaluate(async () => {",
+			"accepted": 19
+		},
+		{
+			"file": "apps/extension/tests/e2e/fixtures/journal.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "async (sid: string | null, minA: number, minQ: number, minIF: number) => {",
+			"accepted": 26
+		},
+		{
+			"file": "apps/extension/tests/e2e/fixtures/journal.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "return extCtxEvaluate(page, async () => {",
+			"accepted": 18
+		},
+		{
+			"file": "apps/extension/tests/e2e/fixtures/journal.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "return page.evaluate(async () => {",
+			"accepted": 16
+		},
+		{
+			"file": "apps/tools/src/lib/errors.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "export function normalizeError(err: unknown): NormalizedError {",
+			"accepted": 21
+		},
+		{
+			"file": "apps/tools/src/lib/phase-clock.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "return phases.map((phase) => {",
+			"accepted": 22
+		},
+		{
+			"file": "packages/bridge-core/scripts/deploy-sandbox.ts",
+			"rule": "noExcessiveLinesPerFunction",
+			"anchor": "async function main() {",
+			"accepted": 197
+		},
+		{
+			"file": "packages/bridge-core/scripts/deposit-testnet.ts",
+			"rule": "noExcessiveLinesPerFunction",
+			"anchor": "async function main() {",
+			"accepted": 155
+		},
+		{
+			"file": "packages/bridge-core/scripts/discover-mainnet-fuel.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "async function main(): Promise<void> {",
+			"accepted": 32
+		},
+		{
+			"file": "packages/bridge-core/scripts/discover-mainnet-fuel.ts",
+			"rule": "noExcessiveLinesPerFunction",
+			"anchor": "async function main(): Promise<void> {",
+			"accepted": 87
+		},
+		{
+			"file": "packages/bridge-core/scripts/fpc-dust-canary-mainnet.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "async function main() {",
+			"accepted": 23
+		},
+		{
+			"file": "packages/bridge-core/scripts/relay-claim-testnet.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "async function main(): Promise<void> {",
+			"accepted": 22
+		},
+		{
+			"file": "packages/bridge-core/scripts/relay-claim-testnet.ts",
+			"rule": "noExcessiveLinesPerFunction",
+			"anchor": "async function main(): Promise<void> {",
+			"accepted": 93
+		},
+		{
+			"file": "packages/wallet-core/src/base/topology.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "export function topologicalPhases<T extends ServiceNode>(nodes: readonly T[]): T[][] {",
+			"accepted": 29
+		},
+		{
+			"file": "packages/wallet-core/src/utils/serialization.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "return JSON.stringify(obj, (_key, value) => {",
+			"accepted": 23
+		},
+		{
+			"file": "scripts/ci-cd/test-soak/cli.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "async function soak(argv: string[]): Promise<number> {",
+			"accepted": 16
+		},
+		{
+			"file": "scripts/ci-cd/test-soak/cli.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "export async function runOnce(opts: RunOnceOptions): Promise<RunOutcome> {",
+			"accepted": 19
+		},
+		{
+			"file": "scripts/ci-cd/test-soak/cli.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "export function parseSoakArgs(argv: string[]): SoakArgs {",
+			"accepted": 25
+		},
+		{
+			"file": "scripts/ci-cd/test-soak/lib.ts",
+			"rule": "noExcessiveCognitiveComplexity",
+			"anchor": "export function parseVitestJson(json: VitestJson, canon: Canonicalizer): ParsedRun {",
+			"accepted": 22
+		}
+	]
 }

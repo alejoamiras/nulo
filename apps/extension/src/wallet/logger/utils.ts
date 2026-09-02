@@ -174,7 +174,7 @@ function projectError(error: Error): Record<string, unknown> {
 	}
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 45) — refactor when touched, never raise
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 45 — the ordered recursive shape walker IS the redaction policy; extraction would scatter security precedence
 export const trim = (value: unknown, depth: number = 0): unknown => {
 	if (Array.isArray(value)) {
 		if (depth === MAX_LOG_DATA_DEPTH) {

@@ -155,7 +155,7 @@ function canonicalizeTransformMap(maps: Readonly<Record<string, RowMapTransform>
 	return cloneJsonObject(maps, where) as unknown as Record<string, RowMapTransform>
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 24) — refactor when touched, never raise
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 24 — hostile-JSON cloning keeps primitive, prototype, accessor, array-index and recursion checks adjacent
 function cloneJsonValue(value: unknown, path: string): JsonValue {
 	if (value === null || typeof value === "string" || typeof value === "boolean") return value
 	if (typeof value === "number") {
@@ -295,7 +295,7 @@ function validateAddDefaultOverlap(target: string, t: RowMapTransform): void {
  *  ONLY inputs are one row and the frozen transform data. Throws on anything
  *  it cannot transform unambiguously (hostile-input rule: presence-guard
  *  every access, fail closed). Exported for the metamorphic guardrail tests. */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 39) — refactor when touched, never raise
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 39 — clause order and presence guards ARE the row-transform DSL interpreter semantics
 export function applyRowTransform(row: unknown, t: RowMapTransform): Record<string, unknown> {
 	if (typeof row !== "object" || row === null || Array.isArray(row)) {
 		throw new Error("row is not an object")
@@ -336,7 +336,7 @@ export function applyRowTransform(row: unknown, t: RowMapTransform): Record<stri
 	return out
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 23) — refactor when touched, never raise
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 23 — the explicit source-type × destination-type matrix defines the permitted coercions
 function retypeValue(field: string, v: unknown, kind: "string" | "number" | "boolean"): string | number | boolean {
 	switch (kind) {
 		case "string": {
