@@ -25,6 +25,7 @@ import {
 	hasEntries,
 	installedBiomeVersion,
 	type LegacyManifest,
+	MOVE_APPROVED_LABEL,
 	ratchetViolations,
 	scanTree,
 	toManifestEntries,
@@ -117,7 +118,8 @@ if (scan.forbidden.length > 0) {
 const entries = toManifestEntries(scan.accepted)
 if (committed) {
 	const diff = diffEntries(committed.accepted, entries)
-	const violations = ratchetViolations(diff)
+	// A move regenerates locally so the manifest can follow a rename; CI is where it needs the label.
+	const violations = ratchetViolations(diff, { movesApproved: true })
 	const adoptAllowed = adopt && committed.biomeVersion !== installed
 	if (violations.length > 0 && !adoptAllowed) {
 		console.error("ERROR: regeneration would GROW the baseline — refusing. New or raised acceptances:")
@@ -125,7 +127,7 @@ if (committed) {
 		console.error("Refactor the function(s) under the budget instead; `--adopt` exists only for a Biome version bump.")
 		process.exit(1)
 	}
-	for (const m of diff.moved) console.log(`moved: ${m.from.file} — ${m.from.anchor}  →  ${m.to.file} — ${m.to.anchor}`)
+	for (const m of diff.moved) console.log(`moved (CI needs the owner's ${MOVE_APPROVED_LABEL} label): ${m.from.file} — ${m.from.anchor}  →  ${m.to.file} — ${m.to.anchor}`)
 	for (const k of diff.reworded) console.log(`reworded: ${k}`)
 }
 

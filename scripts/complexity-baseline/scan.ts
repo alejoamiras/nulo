@@ -326,10 +326,12 @@ export function declarationName(anchor: string): string | undefined {
 	return undefined
 }
 
-/** Pairs an added entry with a removed one as a MOVE only when the function's identity visibly
- *  continues: same rule, stamp and sentence, and either the exact declaration line in another
- *  file (a file move) or the same declaration name (a signature edit). Copying a sentence onto a
- *  differently named function is an add, so a delete-and-recreate cannot launder through here. */
+/** Pairs an added entry with a removed one as a MOVE when the function's identity visibly
+ *  continues — same rule, stamp, sentence and declaration name (a signature edit or a file move
+ *  of a named declaration; anonymous callbacks have no move path). Name continuity is evidence
+ *  for a reviewer, not proof: a same-named replacement with the same score and a copied sentence
+ *  pairs too, which is why the CI ratchet refuses moves unless the PR carries the owner's
+ *  `baseline:move-approved` label. */
 function pairMoves(added: ManifestEntry[], removed: ManifestEntry[]): Pick<EntryDiff, "added" | "removed" | "moved"> {
 	const pool = [...removed]
 	const moved: EntryDiff["moved"] = []
@@ -344,15 +346,21 @@ function pairMoves(added: ManifestEntry[], removed: ManifestEntry[]): Pick<Entry
 
 function isMoveOf(from: ManifestEntry, to: ManifestEntry): boolean {
 	if (from.rule !== to.rule || from.accepted !== to.accepted || from.sentence !== to.sentence) return false
-	if (from.anchor === to.anchor) return true
 	const name = declarationName(from.anchor)
 	return name !== undefined && name === declarationName(to.anchor)
 }
 
-/** What a change on the SAME Biome may never do to the acceptance set: add one, or raise one. */
-export function ratchetViolations(diff: EntryDiff): string[] {
+/** The PR label an owner applies to let a move (see `pairMoves`) through the CI ratchet. */
+export const MOVE_APPROVED_LABEL = "baseline:move-approved"
+
+/** What a change on the SAME Biome may never do to the acceptance set: add one, raise one, or —
+ *  without the owner's label — move one. */
+export function ratchetViolations(diff: EntryDiff, opts: { movesApproved?: boolean } = {}): string[] {
 	const out = diff.added.map((e) => `+ ${entryKey(e)} (accepted at ${e.accepted})`)
 	for (const r of diff.restamped) if (r.to > r.from) out.push(`↑ ${r.key}: ${r.from} → ${r.to}`)
+	if (opts.movesApproved !== true) {
+		for (const m of diff.moved) out.push(`→ ${entryKey(m.from)}  ⇒  ${entryKey(m.to)} (a move needs the \`${MOVE_APPROVED_LABEL}\` label on the PR)`)
+	}
 	return out
 }
 

@@ -15,6 +15,7 @@ import {
 	type LegacyManifest,
 	legacyRatchetViolations,
 	type ManifestEntry,
+	MOVE_APPROVED_LABEL,
 	parseGrepWithContext,
 	ratchetViolations,
 	ruleCountsOf,
@@ -171,13 +172,13 @@ describe("entry diff + ratchet", () => {
 		...over,
 	})
 
-	test("a signature edit or file move keeping rule, stamp, sentence and name is a move, not growth; anything else added or raised is", () => {
+	test("lowered stamps and rewording are free; a same-name signature edit or file move pairs as a move; anything else is an add", () => {
 		const base = [entry({}), entry({ anchor: "function g() {", accepted: 30 }), entry({ anchor: "function h() {", accepted: 25 }), entry({ anchor: "function m() {", accepted: 27 })]
 		const head = [
 			entry({ anchor: "function f(x: number) {" }), // signature edit: same name
 			entry({ anchor: "function g() {", accepted: 28 }), // lowered
 			entry({ anchor: "function h() {", accepted: 25, sentence: "tightened wording" }), // reworded
-			entry({ file: "moved/a.ts", anchor: "function m() {", accepted: 27 }), // file move: exact line elsewhere
+			entry({ file: "moved/a.ts", anchor: "function m() {", accepted: 27 }), // file move
 			entry({ anchor: "function k() {", accepted: 25, sentence: "brand new acceptance" }), // added
 		]
 		const diff = diffEntries(base, head)
@@ -186,20 +187,25 @@ describe("entry diff + ratchet", () => {
 		expect(diff.reworded).toEqual(["noExcessiveCognitiveComplexity a.ts — function h() {"])
 		expect(diff.added.map((e) => e.anchor)).toEqual(["function k() {"])
 		expect(diff.removed).toEqual([])
-		expect(ratchetViolations(diff)).toEqual(["+ noExcessiveCognitiveComplexity a.ts — function k() { (accepted at 25)"])
 		expect(ratchetViolations(diffEntries(base, [entry({ accepted: 23 })]))).toEqual(["↑ noExcessiveCognitiveComplexity a.ts — function f() {: 22 → 23"])
+		// Moves are violations by default — name continuity is reviewer evidence, not proof — and pass only under the owner's label.
+		expect(ratchetViolations(diff)).toEqual([
+			"+ noExcessiveCognitiveComplexity a.ts — function k() { (accepted at 25)",
+			`→ noExcessiveCognitiveComplexity a.ts — function f() {  ⇒  noExcessiveCognitiveComplexity a.ts — function f(x: number) { (a move needs the \`${MOVE_APPROVED_LABEL}\` label on the PR)`,
+			`→ noExcessiveCognitiveComplexity a.ts — function m() {  ⇒  noExcessiveCognitiveComplexity moved/a.ts — function m() { (a move needs the \`${MOVE_APPROVED_LABEL}\` label on the PR)`,
+		])
+		expect(ratchetViolations(diff, { movesApproved: true })).toEqual(["+ noExcessiveCognitiveComplexity a.ts — function k() { (accepted at 25)"])
 	})
 
-	test("a delete-and-recreate under the copied sentence is an add, not a move — and anonymous anchors have no move path", () => {
+	test("a delete-and-recreate under the copied sentence is an add even with the label, and anonymous anchors have no move path at all", () => {
+		const approved = { movesApproved: true }
 		// f is removed; k appears with f's exact stamp and sentence verbatim: the name changed, so it is growth.
-		expect(ratchetViolations(diffEntries([entry({})], [entry({ anchor: "function k() {" })]))).toHaveLength(1)
-		// Same laundering through a file move: exact sentence, new name, other file.
-		expect(ratchetViolations(diffEntries([entry({})], [entry({ file: "b.ts", anchor: "function k() {" })]))).toHaveLength(1)
-		// An anonymous callback's line edit is a new identity even with everything else equal.
+		expect(ratchetViolations(diffEntries([entry({})], [entry({ anchor: "function k() {" })]), approved)).toHaveLength(1)
+		expect(ratchetViolations(diffEntries([entry({})], [entry({ file: "b.ts", anchor: "function k() {" })]), approved)).toHaveLength(1)
+		// An anonymous callback's identity is its exact line in its file: an edit OR a file move is an add.
 		const anon = entry({ anchor: "(args: { sel: string }) => {" })
-		expect(ratchetViolations(diffEntries([anon], [{ ...anon, anchor: "(args: { sel: string; visible: boolean }) => {" }]))).toHaveLength(1)
-		// The exact anonymous line in another file is still a file move.
-		expect(ratchetViolations(diffEntries([anon], [{ ...anon, file: "b.ts" }]))).toEqual([])
+		expect(ratchetViolations(diffEntries([anon], [{ ...anon, anchor: "(args: { sel: string; visible: boolean }) => {" }]), approved)).toHaveLength(1)
+		expect(ratchetViolations(diffEntries([anon], [{ ...anon, file: "b.ts" }]), approved)).toHaveLength(1)
 	})
 
 	test("against a base that predates entries, per-rule totals derived from the head ENTRIES may not grow", () => {
@@ -263,14 +269,24 @@ function ratchetBase(): { label: string; sha?: string; branch?: string } | null 
 	return sha ? { label: `${branch}@${sha.slice(0, 8)}`, sha } : { label: `origin/${branch}`, branch }
 }
 
-function pullRequestBaseSha(eventPath: string | undefined): string | undefined {
+function pullRequestEvent(eventPath: string | undefined): { base?: { sha?: unknown }; labels?: Array<{ name?: unknown }> } | undefined {
 	if (!eventPath) return undefined
 	try {
-		const sha = JSON.parse(readFileSync(eventPath, "utf8"))?.pull_request?.base?.sha
-		return typeof sha === "string" && /^[0-9a-f]{40}$/.test(sha) ? sha : undefined
+		return JSON.parse(readFileSync(eventPath, "utf8"))?.pull_request ?? undefined
 	} catch {
 		return undefined
 	}
+}
+
+function pullRequestBaseSha(eventPath: string | undefined): string | undefined {
+	const sha = pullRequestEvent(eventPath)?.base?.sha
+	return typeof sha === "string" && /^[0-9a-f]{40}$/.test(sha) ? sha : undefined
+}
+
+/** Whether the PR carries the owner's move-approval label (event state at run start — apply the
+ *  label, then re-run the workflow). */
+function movesApproved(eventPath: string | undefined): boolean {
+	return (pullRequestEvent(eventPath)?.labels ?? []).some((l) => l?.name === MOVE_APPROVED_LABEL)
 }
 
 function git(...args: string[]): { ok: boolean; stdout: string; stderr: string } {
@@ -309,11 +325,15 @@ describe("shrink-only ratchet against the base branch", () => {
 				console.warn(`ratchet relaxed — Biome ${read.manifest.biomeVersion} → ${head.biomeVersion}: review every added or raised acceptance in this PR's diff by hand`)
 				return
 			}
-			const violations = hasEntries(read.manifest) ? ratchetViolations(diffEntries(read.manifest.accepted, head.accepted)) : legacyRatchetViolations(read.manifest.rules, head.accepted)
+			const approved = movesApproved(process.env.GITHUB_EVENT_PATH)
+			const violations = hasEntries(read.manifest)
+				? ratchetViolations(diffEntries(read.manifest.accepted, head.accepted), { movesApproved: approved })
+				: legacyRatchetViolations(read.manifest.rules, head.accepted)
 			expect(
 				violations,
-				`The manifest grew relative to ${base.label} on the same Biome — the baseline only shrinks, and manifest.json is ` +
-					"never hand-edited. Refactor the function under the budget; a genuinely new acceptance is a blueprint with owner sign-off.",
+				`The manifest grew or moved relative to ${base.label} on the same Biome — the baseline only shrinks, and manifest.json is ` +
+					"never hand-edited. Refactor the function under the budget; a genuinely new acceptance is a blueprint with owner sign-off; " +
+					`a genuine rename or file move of an accepted function needs the owner's \`${MOVE_APPROVED_LABEL}\` label, then a re-run.`,
 			).toEqual([])
 		},
 		{ timeout: 180_000 },

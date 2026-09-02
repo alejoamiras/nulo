@@ -76,10 +76,11 @@ codex session per plan).
 - **Manifest** pins each acceptance as `{file, rule, anchor, accepted, sentence}`. Tree and manifest
   must match entry by entry (added / removed / moved / re-stamped / reworded all fail until
   regenerated). On a PR the CI mirror also ratchets head against the base branch's manifest: on the
-  same Biome no added entry (a signature edit keeping the declaration name, or the exact line in
-  another file, with rule, stamp and sentence unchanged, pairs as a move; a copied sentence on a
-  differently named function is an add) and no raised stamp — a hand-edited row matches the tree
-  but not the base, and a `rules` summary that disagrees with the entries is refused. The base is
+  same Biome no added entry, no raised stamp, and no move (a signature edit or file move keeping
+  the declaration NAME, rule, stamp and sentence pairs as a move, refused unless the PR carries the
+  owner's `baseline:move-approved` label; a copied sentence on a differently named function, or any
+  edit to an anonymous callback's line, is an add) — a hand-edited row matches the tree but not the
+  base, and a `rules` summary that disagrees with the entries is refused. The base is
   the pull_request event's exact `base.sha`; a base that predates entries is ratcheted on per-rule
   totals derived from the head entries.
 - **Generator** (`generate.ts`): for a function newly over budget it inserts
