@@ -16,6 +16,8 @@ fable-role audit in parallel on the first draft.
 
 | 5 | codex | PR review round 2 (the fold) | **reject** on one point, folded | the 15-minute age-out I kept as a liveness escape converts pending/unreachable into permission to rebuild, and elapsed time is not evidence the queued tx vanished — a time-bounded double-send window, which is an owner-level security tradeoff, not a reviewer-level one → removed: pending/unreachable always waits; only dropped rebuilds. Surfaced as residual R4 (a pending the node never resolves waits forever on the direct-FJ path; the private ladder's `attemptAgedOut` is the precedent if the owner wants the tradeoff). Confirmed sound: the non-empty expected-hash guard, `vi.waitFor`, the fresh-pending/unreachable pins exercise production routing |
 
+| 6 | codex | PR review round 3 (the protocol's last) | **approve** | "the direct-FJ gate now has the correct safety rule … R4 accurately surfaces the resulting liveness tradeoff without weakening the guarantee"; the expected-hash and flaky-wait concerns confirmed resolved |
+
 ## Decision ledger
 
 - **Helper**: kv-fresh READ in the journal (`currentRecord`) + WRITE through the exported
