@@ -584,6 +584,39 @@ worker-refuses-to-die regression.
 deadline-free and let the test's own timeout bound it, or assert the worker's death by a positive
 signal (a fresh target with a different id) rather than by the absence of an event.
 
+## Editing `global-setup.ts` (stage split, 2026-09-02)
+
+`setup` is a coordinator over stage functions (`reconcilePriorLock`, `ensureAnvil`,
+`ensureAztecNode` + `spawnAztecNode`, `ensureDevServer`, `finishBoot`, `provideWithoutSandbox`).
+Rules that came out of the split's two audits, each guarding a real failure mode:
+
+- **Probe first, gate second.** Every `ensure*` starts with its health probe; the binary / pin
+  gates sit inside the "not already running" branch. Hoisting a gate above the probe makes a run
+  with a healthy pre-existing node and an unusable pin throw under `E2E_REQUIRE_SETUP=1`.
+- **`markBootStarted()` stays in the coordinator**, between `writeProvisionalLock()` and the first
+  spawn. Its position IS the exit-86 contract: a missing-binary FATAL after it is a retryable boot
+  failure; moving it earlier makes lock reconciliation retryable, later drops the retry.
+- **Ownership order after a spawn is handle → `weStarted* = true` → `recordSpawnedPid()`**, before
+  listeners and the readiness wait (`currentPids` reads the flag; a pid recorded after the wait
+  reopens the cancel-window orphan leak). `ensureDevServer` takes `setHandle` / `setStarted`
+  callbacks for exactly this reason — never return-then-assign.
+- **Never reset a `weStarted*` flag on a kill path.** Teardown's data-dir removal keys off
+  `weStartedNode`; the kill paths null the handle only.
+- **The reuse path owns nothing**: no provisional lock, `weOwnLock` stays false, `clearLock()` is
+  reachable only under `if (priorLock)` after a reap, and `markBootReady()` fires without
+  `markBootStarted()` (intended: nothing to retry).
+- **Skip exits share provides, not cleanup**: a missing aztec CLI leaves anvil alive until
+  teardown; a node that never becomes healthy kills node THEN anvil. Cleanup stays in the stage,
+  `provideWithoutSandbox` + `return` in the coordinator, so a lost or doubled `provide` is visible.
+- **Log pipes are per-child data**: anvil is stderr-only with `address already in use` in its
+  needle set and keeps its own `once("exit")`; only the two Vite servers share a pipe.
+- **Proof for a change here** (there is no deterministic unit seam for a boot): full network suite on CI, the
+  reuse drill (direct vitest on a pinned port pack, `kill -9` the vitest group after deploy, run
+  again → `reusing prior sandbox (identity check passed)`), the reap drill (a following
+  `e2e:agent` run → `prior lock is for different ports — reaping orphans`), the fail-loud negative
+  (empty `HOME` + strict mode on free ports → the anvil FATAL before any spawn), and the trimmed-line
+  + string-literal multiset diffs (only wrapper lines and templated log strings may differ).
+
 ## The cold-shard approvable flake: `multicall-chunked` `feeMethod:null` (2026-09-01)
 
 **Fingerprint.** `tx-sendTx-multicall-chunked (#33)` red with `waitForExecuteApprovable: not

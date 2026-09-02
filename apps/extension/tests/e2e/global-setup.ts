@@ -228,7 +228,13 @@ export default async function setupWithTeardown(project: TestProject): Promise<(
 	return teardown
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 81) — refactor when touched, never raise
+/**
+ * Boot coordinator. The ORDER here is the contract: orphan reap + build guard run before the
+ * boot-failure (exit 86) window opens; the provisional lock is written before the first spawn;
+ * `markBootStarted()` sits between them and the first spawn so a missing-binary FATAL is still a
+ * retryable boot failure; on reuse this run owns nothing (no provisional lock, `weOwnLock` stays
+ * false) and skips straight to the shared tail.
+ */
 export async function setup(project: TestProject) {
 	killOrphanChromes()
 
@@ -243,77 +249,9 @@ export async function setup(project: TestProject) {
 		`[e2e-setup] ports: anvil=:${ANVIL_PORT} aztec=:${AZTEC_PORT} (admin :${AZTEC_ADMIN_PORT}, p2p :${AZTEC_P2P_PORT}) playground=:${PLAYGROUND_PORT}`,
 	)
 
-	// ── Lockfile: reap orphans or take over a still-healthy pack ───────
-	// `bun run e2e:agent` always allocates fresh ports, so the prior lock's
-	// ports never match the current ones — we fall through to reaping
-	// orphans, then a fresh spawn. Direct vitest invocations with stable
-	// env can land on the reuse path.
-	const priorLock = readLock()
-	if (priorLock) {
-		const portsMatch =
-			priorLock.ports.anvil === ANVIL_PORT &&
-			priorLock.ports.aztec === AZTEC_PORT &&
-			priorLock.ports.aztecAdmin === AZTEC_ADMIN_PORT &&
-			priorLock.ports.aztecP2P === AZTEC_P2P_PORT &&
-			priorLock.ports.playground === PLAYGROUND_PORT &&
-			// Tools port is optional — match only if both sides agree on its
-			// presence and value. Lockfiles written before tools wiring have
-			// `priorLock.ports.tools === undefined`; current runs without
-			// tools have `TOOLS_PORT === undefined`. Both match.
-			priorLock.ports.tools === TOOLS_PORT
-		const urlMatch = priorLock.bakedLocalRpcUrl === LOCAL_NODE_URL
-		if (portsMatch && urlMatch) {
-			console.log("[e2e-setup] prior ownership lock matches current run — probing for reuse")
-			const allCoreAlive =
-				isPidAlive(priorLock.pids.anvil) && isPidAlive(priorLock.pids.aztec) && isPidAlive(priorLock.pids.playground)
-			const toolsAlive = TOOLS_PORT ? isPidAlive(priorLock.pids.tools) : true
-			const toolsHealthy = TOOLS_URL ? await probeHttp(TOOLS_URL) : true
-			const allHealthy =
-				allCoreAlive &&
-				toolsAlive &&
-				(await probeAnvil(ANVIL_URL)) &&
-				(await checkNodeHealth(LOCAL_NODE_URL)) &&
-				(await probeHttp(PLAYGROUND_URL)) &&
-				toolsHealthy
-			if (allHealthy) {
-				const identityOk = await verifyIdentity(LOCAL_NODE_URL, priorLock.l1ContractAddresses)
-				if (identityOk) {
-					console.log("[e2e-setup] reusing prior sandbox (identity check passed)")
-					weStartedAnvil = false
-					weStartedNode = false
-					weStartedPlayground = false
-					weStartedTools = false
-					AZTEC_DATA_DIR = priorLock.aztecDataDir
-					project.provide("playgroundUrl", PLAYGROUND_URL)
-					project.provide("toolsUrl", TOOLS_URL)
-					await deployContractsAndProvide(project)
-					markBootReady()
-					return
-				}
-				console.warn("[e2e-setup] prior sandbox identity mismatch — tearing down and starting fresh")
-			} else {
-				console.warn("[e2e-setup] prior sandbox not all healthy — tearing down")
-			}
-			killOrphanByPid(priorLock.pids.anvil, "anvil")
-			killOrphanByPid(priorLock.pids.aztec, "aztec")
-			killOrphanByPid(priorLock.pids.playground, "playground")
-			killOrphanByPid(priorLock.pids.tools, "tools")
-			try {
-				fs.rmSync(priorLock.aztecDataDir, { recursive: true, force: true })
-			} catch {}
-		} else {
-			// Different ports — fresh agent run after a previous one in the
-			// same worktree. Reap any orphans on the previous ports.
-			console.log("[e2e-setup] prior lock is for different ports — reaping orphans")
-			killOrphanByPid(priorLock.pids.anvil, "anvil")
-			killOrphanByPid(priorLock.pids.aztec, "aztec")
-			killOrphanByPid(priorLock.pids.playground, "playground")
-			killOrphanByPid(priorLock.pids.tools, "tools")
-			try {
-				fs.rmSync(priorLock.aztecDataDir, { recursive: true, force: true })
-			} catch {}
-		}
-		clearLock()
+	if ((await reconcilePriorLock()) === "reused") {
+		await finishBoot(project)
+		return
 	}
 
 	// Provisional lock BEFORE the first spawn, updated after each spawn (recordSpawnedPid): the
@@ -328,307 +266,414 @@ export async function setup(project: TestProject) {
 	// must NOT be retried.
 	markBootStarted()
 
-	// ── Anvil (L1) ─────────────────────────────────────────────────────
-	const anvilAlreadyRunning = await probeAnvil(ANVIL_URL)
-	if (anvilAlreadyRunning) {
-		console.log("[e2e-setup] Anvil already speaking JSON-RPC at", ANVIL_URL)
-		weStartedAnvil = false
-	} else {
-		if (!fs.existsSync(ANVIL_BIN)) {
-			// Same fail-loud gate as the deploy-failure path below: when invoked
-			// via scripts/e2e/agent.sh, missing infrastructure must abort the
-			// run, not pass-by-skip. Otherwise CI reports `61 skipped` exit 0
-			// and the suite stays silently broken (this regressed in CI from
-			// 2026-05-22 when the setup-aztec action didn't symlink
-			// ~/.aztec/current — every PR's network-e2e check was "green" while
-			// running zero tests).
-			if (process.env.E2E_REQUIRE_SETUP === "1") {
-				throw new Error(
-					`[e2e-setup] FATAL: anvil binary not found at ${ANVIL_BIN} and E2E_REQUIRE_SETUP=1 is set. ` +
-						`Aborting run to prevent silent pass-by-skip. Ensure setup-aztec installed Aztec CLI ` +
-						`AND created the ~/.aztec/current symlink (CI: see .github/actions/setup-aztec/action.yml).`,
-				)
-			}
-			console.warn("[e2e-setup] anvil binary not found at", ANVIL_BIN, "— skipping network setup")
-			project.provide("aztecTestConfig", undefined)
-			project.provide("playgroundUrl", PLAYGROUND_URL)
-			project.provide("toolsUrl", TOOLS_URL)
-			return
-		}
-		console.log("[e2e-setup] Starting anvil at", ANVIL_URL, "...")
-		anvilProcess = spawn(
-			ANVIL_BIN,
-			["--host", "127.0.0.1", "--port", String(ANVIL_PORT), "--chain-id", "31337", "--slots-in-an-epoch", "1", "--silent"],
-			{
-				stdio: "pipe",
-				detached: true,
-			},
-		)
-		weStartedAnvil = true
-		recordSpawnedPid()
-
-		anvilProcess.stderr?.on("data", (data: Buffer) => {
-			const line = data.toString().trim()
-			if (line.includes("error") || line.includes("Error") || line.includes("address already in use")) {
-				console.error("[anvil]", line.slice(0, 200))
-			}
-		})
-		anvilProcess.once("exit", (code) => {
-			if (weStartedAnvil && code !== 0 && code !== null) {
-				console.error(`[anvil] exited unexpectedly with code ${code}`)
-			}
-		})
-
-		try {
-			await waitForAnvil(ANVIL_URL, 30_000)
-			console.log("[e2e-setup] Anvil is ready")
-		} catch (error) {
-			console.error("[e2e-setup] Failed to start anvil:", error)
-			await killProcessGroup(anvilProcess, "anvil", weStartedAnvil)
-			anvilProcess = null
-			// Under the real agent runner a dead sandbox MUST be a loud
-			// failure, not a silent pass-by-skip — a green run where every
-			// suite skipped hides exactly the breakage the gate exists for.
-			if (process.env.E2E_REQUIRE_SETUP === "1") {
-				throw new Error("[e2e-setup] FATAL: anvil failed to become healthy and E2E_REQUIRE_SETUP=1 is set.")
-			}
-			project.provide("aztecTestConfig", undefined)
-			project.provide("playgroundUrl", PLAYGROUND_URL)
-			project.provide("toolsUrl", TOOLS_URL)
-			return
-		}
+	if ((await ensureAnvil()) === "skip") {
+		provideWithoutSandbox(project)
+		return
+	}
+	if ((await ensureAztecNode()) === "skip") {
+		provideWithoutSandbox(project)
+		return
 	}
 
-	// ── Aztec (L2) ─────────────────────────────────────────────────────
-	const nodeAlreadyRunning = await checkNodeHealth(LOCAL_NODE_URL)
-
-	if (nodeAlreadyRunning) {
-		console.log("[e2e-setup] Local Aztec node already running at", LOCAL_NODE_URL)
-		weStartedNode = false
-	} else {
-		console.log("[e2e-setup] Starting local Aztec network at", LOCAL_NODE_URL, "...")
-		if (!AZTEC_PIN_USABLE) {
-			const reason = AZTEC_PIN
-				? `pinned aztec ${AZTEC_PIN} at ${AZTEC_PINNED_ROOT} is missing: ${AZTEC_PIN_MISSING.join(", ")}`
-				: `repo aztec pin unreadable (${AZTEC_PIN_READ.error})`
-			// Strict runs fail CLOSED: falling back to the mutable `current`
-			// symlink is exactly the drift that breaks the L1 deploy, and a
-			// silent skip/pass would hide it.
-			if (process.env.E2E_REQUIRE_SETUP === "1") {
-				throw new Error(
-					`[e2e-setup] FATAL: ${reason}, and E2E_REQUIRE_SETUP=1 forbids the ~/.aztec/current fallback. Fix: aztec-up install ${AZTEC_PIN ?? "<repo @aztec/aztec.js pin>"}`,
-				)
-			}
-			console.warn(
-				`[e2e-setup] ${reason} — falling back to ~/.aztec/current, which may mismatch the repo pin. Fix: aztec-up install ${AZTEC_PIN ?? "<pin>"}`,
-			)
-		}
-		if (!fs.existsSync(AZTEC_BIN)) {
-			// See comment above the matching ANVIL_BIN gate for the rationale.
-			if (process.env.E2E_REQUIRE_SETUP === "1") {
-				throw new Error(
-					`[e2e-setup] FATAL: aztec CLI not found at ${AZTEC_BIN} and E2E_REQUIRE_SETUP=1 is set. ` +
-						`Aborting run to prevent silent pass-by-skip. Ensure the repo's pinned aztec version is ` +
-						`installed under ~/.aztec/versions (aztec-up install ${AZTEC_PIN ?? "<pin>"}; ` +
-						`CI: see .github/actions/setup-aztec/action.yml).`,
-				)
-			}
-			console.warn("[e2e-setup] aztec CLI not found at", AZTEC_BIN, "— skipping network setup")
-			project.provide("aztecTestConfig", undefined)
-			project.provide("playgroundUrl", PLAYGROUND_URL)
-			project.provide("toolsUrl", TOOLS_URL)
-			return
-		}
-
-		// Mandatory --data-directory per agent: aztec writes to $HOME/.aztec/data
-		// by default for some subsystems, which would corrupt LMDB if two
-		// agents run concurrently with the default path.
-		fs.mkdirSync(AZTEC_DATA_DIR, { recursive: true })
-
-		nodeProcess = spawn(
-			AZTEC_BIN,
-			[
-				"start",
-				"--local-network",
-				"--port",
-				String(AZTEC_PORT),
-				"--admin-port",
-				String(AZTEC_ADMIN_PORT),
-				"--p2p.p2pPort",
-				String(AZTEC_P2P_PORT),
-				"--l1-rpc-urls",
-				ANVIL_URL,
-				"--data-directory",
-				AZTEC_DATA_DIR,
-				"--disable-admin-api-key",
-			],
-			{
-				stdio: "pipe",
-				detached: true,
-				env: {
-					...process.env,
-					PATH: `${AZTEC_INTERNAL_BIN}${path.delimiter}${process.env.PATH ?? ""}`,
-					SEQ_MIN_TX_PER_BLOCK: "0",
-					ETHEREUM_HOSTS: ANVIL_URL,
-					ANVIL_PORT: String(ANVIL_PORT),
-					AZTEC_PORT: String(AZTEC_PORT),
-					// Highest-priority override for @aztec/ethereum's
-					// resolveFoundryBinary: without these, the node's L1 deploy
-					// reads `~/.aztec/current/internal-bin/forge` regardless of
-					// which version's CLI is booting — a `current` re-pointed by
-					// any other install on the machine then breaks the deploy
-					// with a forge-CLI arg mismatch. A caller-supplied override
-					// wins (same rule as the resolver itself); the executable
-					// guard matters because the resolver THROWS on a
-					// set-but-missing override rather than falling back.
-					...(!process.env.FORGE_BIN && isExecutable(path.join(AZTEC_INTERNAL_BIN, "forge"))
-						? { FORGE_BIN: path.join(AZTEC_INTERNAL_BIN, "forge") }
-						: {}),
-					...(!process.env.ANVIL_BIN && isExecutable(path.join(AZTEC_INTERNAL_BIN, "anvil"))
-						? { ANVIL_BIN: path.join(AZTEC_INTERNAL_BIN, "anvil") }
-						: {}),
-				},
-			},
-		)
-		weStartedNode = true
-		recordSpawnedPid()
-
-		nodeProcess.stdout?.on("data", (data: Buffer) => {
-			const line = data.toString().trim()
-			if (line.includes("Aztec") || line.includes("ready") || line.includes("error")) {
-				console.log("[aztec-node]", line.slice(0, 200))
-			}
-		})
-		nodeProcess.stderr?.on("data", (data: Buffer) => {
-			const line = data.toString().trim()
-			if (line.includes("error") || line.includes("Error")) {
-				console.error("[aztec-node]", line.slice(0, 200))
-			}
-		})
-
-		try {
-			await waitForLocalNode(LOCAL_NODE_URL, 90_000)
-			console.log("[e2e-setup] Local Aztec node is ready")
-		} catch (error) {
-			console.error("[e2e-setup] Failed to start local node:", error)
-			await killProcessGroup(nodeProcess, "aztec", weStartedNode)
-			nodeProcess = null
-			await killProcessGroup(anvilProcess, "anvil", weStartedAnvil)
-			anvilProcess = null
-			// Same loud-failure contract as the anvil path: a node that never
-			// became healthy (e.g. native bb SIGILL) must fail the run, not
-			// skip it green.
-			if (process.env.E2E_REQUIRE_SETUP === "1") {
-				throw new Error("[e2e-setup] FATAL: local Aztec node failed to become healthy and E2E_REQUIRE_SETUP=1 is set.")
-			}
-			project.provide("aztecTestConfig", undefined)
-			project.provide("playgroundUrl", PLAYGROUND_URL)
-			project.provide("toolsUrl", TOOLS_URL)
-			return
-		}
-	}
-
-	// ── Playground dev server ──────────────────────────────────────────
-	const playgroundAlreadyRunning = await probeHttp(PLAYGROUND_URL, 1500)
-	if (playgroundAlreadyRunning) {
-		console.log("[e2e-setup] Playground already running at", PLAYGROUND_URL)
-		weStartedPlayground = false
-	} else {
-		console.log("[e2e-setup] Starting playground dev server at", PLAYGROUND_URL, "...")
-		try {
-			playgroundProcess = spawn("bun", ["run", "dev"], {
-				cwd: PLAYGROUND_DIR,
-				stdio: "pipe",
-				detached: true,
-				env: {
-					...process.env,
-					NODE_ENV: "test",
-					VITE_DISABLE_HMR: "1",
-					PLAYGROUND_PORT: String(PLAYGROUND_PORT),
-				},
-			})
-			weStartedPlayground = true
-			recordSpawnedPid()
-
-			playgroundProcess.stdout?.on("data", (data: Buffer) => {
-				const line = data.toString().trim()
-				if (line.includes("Local:") || line.includes("error")) {
-					console.log("[playground]", line.slice(0, 200))
-				}
-			})
-			playgroundProcess.stderr?.on("data", (data: Buffer) => {
-				const line = data.toString().trim()
-				if (line.includes("error") || line.includes("Error")) {
-					console.error("[playground]", line.slice(0, 200))
-				}
-			})
-
-			await waitForHttp(PLAYGROUND_URL, 30_000)
-			console.log("[e2e-setup] Playground is ready")
-		} catch (error) {
-			console.warn("[e2e-setup] Failed to start playground:", error)
-			await killProcessGroup(playgroundProcess, "playground", weStartedPlayground)
-			playgroundProcess = null
-			// Continue without playground — tests that depend on it will skip / fail individually
-		}
-	}
-	project.provide("playgroundUrl", PLAYGROUND_URL)
+	await ensureDevServer({
+		label: "playground",
+		title: "Playground",
+		cwd: PLAYGROUND_DIR,
+		url: PLAYGROUND_URL,
+		env: { NODE_ENV: "test", VITE_DISABLE_HMR: "1", PLAYGROUND_PORT: String(PLAYGROUND_PORT) },
+		setHandle: (child) => {
+			playgroundProcess = child
+		},
+		setStarted: (started) => {
+			weStartedPlayground = started
+		},
+	})
 
 	// ── Tools dev server (opt-in via TOOLS_DEV_PORT) ─────────────────
 	// Only spawned when the test runner pre-allocated a tools port. This
 	// keeps the default network suite lightweight — tools startup adds ~5s
 	// + a Vite + Vue process per worktree.
 	if (TOOLS_PORT && TOOLS_URL) {
-		const toolsAlreadyRunning = await probeHttp(TOOLS_URL, 1500)
-		if (toolsAlreadyRunning) {
-			console.log("[e2e-setup] Tools already running at", TOOLS_URL)
-			weStartedTools = false
-		} else {
-			console.log("[e2e-setup] Starting tools dev server at", TOOLS_URL, "...")
-			try {
-				toolsProcess = spawn("bun", ["run", "dev"], {
-					cwd: TOOLS_DIR,
-					stdio: "pipe",
-					detached: true,
-					env: {
-						...process.env,
-						NODE_ENV: "test",
-						TOOLS_DEV_PORT: String(TOOLS_PORT),
-					},
-				})
-				weStartedTools = true
-				recordSpawnedPid()
-
-				toolsProcess.stdout?.on("data", (data: Buffer) => {
-					const line = data.toString().trim()
-					if (line.includes("Local:") || line.includes("error")) {
-						console.log("[tools]", line.slice(0, 200))
-					}
-				})
-				toolsProcess.stderr?.on("data", (data: Buffer) => {
-					const line = data.toString().trim()
-					if (line.includes("error") || line.includes("Error")) {
-						console.error("[tools]", line.slice(0, 200))
-					}
-				})
-
-				await waitForHttp(TOOLS_URL, 30_000)
-				console.log("[e2e-setup] Tools is ready")
-			} catch (error) {
-				console.warn("[e2e-setup] Failed to start tools:", error)
-				await killProcessGroup(toolsProcess, "tools", weStartedTools)
-				toolsProcess = null
-				// Continue — only tools-specific tests will fail.
-			}
-		}
+		await ensureDevServer({
+			label: "tools",
+			title: "Tools",
+			cwd: TOOLS_DIR,
+			url: TOOLS_URL,
+			env: { NODE_ENV: "test", TOOLS_DEV_PORT: String(TOOLS_PORT) },
+			setHandle: (child) => {
+				toolsProcess = child
+			},
+			setStarted: (started) => {
+				weStartedTools = started
+			},
+		})
 	}
-	project.provide("toolsUrl", TOOLS_URL)
 
+	await finishBoot(project)
+}
+
+/** The permissive skip exits (no sandbox, `E2E_REQUIRE_SETUP` unset): suites gate on
+ *  `aztecTestConfig` being undefined; the dev-server URLs are still provided so the rest can run. */
+function provideWithoutSandbox(project: TestProject): void {
+	project.provide("aztecTestConfig", undefined)
+	project.provide("playgroundUrl", PLAYGROUND_URL)
+	project.provide("toolsUrl", TOOLS_URL)
+}
+
+/** The shared tail of the reuse and fresh paths. The dev-server URLs are provided even when a
+ *  server was not spawned (only the tests that need it fail), then contracts, then the ready
+ *  marker. */
+async function finishBoot(project: TestProject): Promise<void> {
+	project.provide("playgroundUrl", PLAYGROUND_URL)
+	project.provide("toolsUrl", TOOLS_URL)
 	await deployContractsAndProvide(project)
 	// Sandbox healthy + contracts deployed, BEFORE any test worker starts —
 	// this closes the boot-failure (exit 86) window. Any failure from here on
 	// (fixture, import, test body) is a real failure, never an infra-boot flake.
 	markBootReady()
+}
+
+// ── Lockfile: reap orphans or take over a still-healthy pack ───────
+// `bun run e2e:agent` always allocates fresh ports, so the prior lock's
+// ports never match the current ones — we fall through to reaping
+// orphans, then a fresh spawn. Direct vitest invocations with stable
+// env can land on the reuse path.
+async function reconcilePriorLock(): Promise<"reused" | "fresh"> {
+	const priorLock = readLock()
+	if (!priorLock) return "fresh"
+	if (priorPortsMatch(priorLock)) {
+		console.log("[e2e-setup] prior ownership lock matches current run — probing for reuse")
+		if (await priorPackHealthy(priorLock)) {
+			const identityOk = await verifyIdentity(LOCAL_NODE_URL, priorLock.l1ContractAddresses)
+			if (identityOk) {
+				console.log("[e2e-setup] reusing prior sandbox (identity check passed)")
+				weStartedAnvil = false
+				weStartedNode = false
+				weStartedPlayground = false
+				weStartedTools = false
+				AZTEC_DATA_DIR = priorLock.aztecDataDir
+				return "reused"
+			}
+			console.warn("[e2e-setup] prior sandbox identity mismatch — tearing down and starting fresh")
+		} else {
+			console.warn("[e2e-setup] prior sandbox not all healthy — tearing down")
+		}
+		reapPrior(priorLock)
+	} else {
+		// Different ports — fresh agent run after a previous one in the
+		// same worktree. Reap any orphans on the previous ports.
+		console.log("[e2e-setup] prior lock is for different ports — reaping orphans")
+		reapPrior(priorLock)
+	}
+	clearLock()
+	return "fresh"
+}
+
+function priorPortsMatch(priorLock: OwnedState): boolean {
+	const portsMatch =
+		priorLock.ports.anvil === ANVIL_PORT &&
+		priorLock.ports.aztec === AZTEC_PORT &&
+		priorLock.ports.aztecAdmin === AZTEC_ADMIN_PORT &&
+		priorLock.ports.aztecP2P === AZTEC_P2P_PORT &&
+		priorLock.ports.playground === PLAYGROUND_PORT &&
+		// Tools port is optional — match only if both sides agree on its
+		// presence and value. Lockfiles written before tools wiring have
+		// `priorLock.ports.tools === undefined`; current runs without
+		// tools have `TOOLS_PORT === undefined`. Both match.
+		priorLock.ports.tools === TOOLS_PORT
+	const urlMatch = priorLock.bakedLocalRpcUrl === LOCAL_NODE_URL
+	return portsMatch && urlMatch
+}
+
+/** Every recorded process alive AND every endpoint answering, probed in the recorded order. */
+async function priorPackHealthy(priorLock: OwnedState): Promise<boolean> {
+	const allCoreAlive = isPidAlive(priorLock.pids.anvil) && isPidAlive(priorLock.pids.aztec) && isPidAlive(priorLock.pids.playground)
+	const toolsAlive = TOOLS_PORT ? isPidAlive(priorLock.pids.tools) : true
+	const toolsHealthy = TOOLS_URL ? await probeHttp(TOOLS_URL) : true
+	return (
+		allCoreAlive &&
+		toolsAlive &&
+		(await probeAnvil(ANVIL_URL)) &&
+		(await checkNodeHealth(LOCAL_NODE_URL)) &&
+		(await probeHttp(PLAYGROUND_URL)) &&
+		toolsHealthy
+	)
+}
+
+function reapPrior(priorLock: OwnedState): void {
+	killOrphanByPid(priorLock.pids.anvil, "anvil")
+	killOrphanByPid(priorLock.pids.aztec, "aztec")
+	killOrphanByPid(priorLock.pids.playground, "playground")
+	killOrphanByPid(priorLock.pids.tools, "tools")
+	try {
+		fs.rmSync(priorLock.aztecDataDir, { recursive: true, force: true })
+	} catch {}
+}
+
+// ── Anvil (L1) ─────────────────────────────────────────────────────
+/** Probe first: an anvil already speaking JSON-RPC on our port is adopted, never respawned. */
+async function ensureAnvil(): Promise<"ready" | "skip"> {
+	const anvilAlreadyRunning = await probeAnvil(ANVIL_URL)
+	if (anvilAlreadyRunning) {
+		console.log("[e2e-setup] Anvil already speaking JSON-RPC at", ANVIL_URL)
+		weStartedAnvil = false
+		return "ready"
+	}
+	if (!fs.existsSync(ANVIL_BIN)) {
+		// Same fail-loud gate as the deploy-failure path below: when invoked
+		// via scripts/e2e/agent.sh, missing infrastructure must abort the
+		// run, not pass-by-skip. Otherwise CI reports `61 skipped` exit 0
+		// and the suite stays silently broken (this regressed in CI from
+		// 2026-05-22 when the setup-aztec action didn't symlink
+		// ~/.aztec/current — every PR's network-e2e check was "green" while
+		// running zero tests).
+		if (process.env.E2E_REQUIRE_SETUP === "1") {
+			throw new Error(
+				`[e2e-setup] FATAL: anvil binary not found at ${ANVIL_BIN} and E2E_REQUIRE_SETUP=1 is set. ` +
+					`Aborting run to prevent silent pass-by-skip. Ensure setup-aztec installed Aztec CLI ` +
+					`AND created the ~/.aztec/current symlink (CI: see .github/actions/setup-aztec/action.yml).`,
+			)
+		}
+		console.warn("[e2e-setup] anvil binary not found at", ANVIL_BIN, "— skipping network setup")
+		return "skip"
+	}
+	console.log("[e2e-setup] Starting anvil at", ANVIL_URL, "...")
+	anvilProcess = spawn(
+		ANVIL_BIN,
+		["--host", "127.0.0.1", "--port", String(ANVIL_PORT), "--chain-id", "31337", "--slots-in-an-epoch", "1", "--silent"],
+		{
+			stdio: "pipe",
+			detached: true,
+		},
+	)
+	weStartedAnvil = true
+	recordSpawnedPid()
+
+	anvilProcess.stderr?.on("data", (data: Buffer) => {
+		const line = data.toString().trim()
+		if (line.includes("error") || line.includes("Error") || line.includes("address already in use")) {
+			console.error("[anvil]", line.slice(0, 200))
+		}
+	})
+	anvilProcess.once("exit", (code) => {
+		if (weStartedAnvil && code !== 0 && code !== null) {
+			console.error(`[anvil] exited unexpectedly with code ${code}`)
+		}
+	})
+
+	try {
+		await waitForAnvil(ANVIL_URL, 30_000)
+		console.log("[e2e-setup] Anvil is ready")
+	} catch (error) {
+		console.error("[e2e-setup] Failed to start anvil:", error)
+		await killProcessGroup(anvilProcess, "anvil", weStartedAnvil)
+		anvilProcess = null
+		// Under the real agent runner a dead sandbox MUST be a loud
+		// failure, not a silent pass-by-skip — a green run where every
+		// suite skipped hides exactly the breakage the gate exists for.
+		if (process.env.E2E_REQUIRE_SETUP === "1") {
+			throw new Error("[e2e-setup] FATAL: anvil failed to become healthy and E2E_REQUIRE_SETUP=1 is set.")
+		}
+		return "skip"
+	}
+	return "ready"
+}
+
+// ── Aztec (L2) ─────────────────────────────────────────────────────
+/** Probe first: a healthy node on our port is adopted. Otherwise the pinned toolchain is checked,
+ *  the node is spawned with a per-run data directory, and a node that never becomes healthy is
+ *  torn down together with anvil. A missing CLI leaves anvil alive until teardown, as before. */
+async function ensureAztecNode(): Promise<"ready" | "skip"> {
+	const nodeAlreadyRunning = await checkNodeHealth(LOCAL_NODE_URL)
+	if (nodeAlreadyRunning) {
+		console.log("[e2e-setup] Local Aztec node already running at", LOCAL_NODE_URL)
+		weStartedNode = false
+		return "ready"
+	}
+	console.log("[e2e-setup] Starting local Aztec network at", LOCAL_NODE_URL, "...")
+	if (!AZTEC_PIN_USABLE) requirePinnedToolchainOrWarn()
+	if (!fs.existsSync(AZTEC_BIN)) {
+		// See comment above the matching ANVIL_BIN gate for the rationale.
+		if (process.env.E2E_REQUIRE_SETUP === "1") {
+			throw new Error(
+				`[e2e-setup] FATAL: aztec CLI not found at ${AZTEC_BIN} and E2E_REQUIRE_SETUP=1 is set. ` +
+					`Aborting run to prevent silent pass-by-skip. Ensure the repo's pinned aztec version is ` +
+					`installed under ~/.aztec/versions (aztec-up install ${AZTEC_PIN ?? "<pin>"}; ` +
+					`CI: see .github/actions/setup-aztec/action.yml).`,
+			)
+		}
+		console.warn("[e2e-setup] aztec CLI not found at", AZTEC_BIN, "— skipping network setup")
+		return "skip"
+	}
+
+	// Mandatory --data-directory per agent: aztec writes to $HOME/.aztec/data
+	// by default for some subsystems, which would corrupt LMDB if two
+	// agents run concurrently with the default path.
+	fs.mkdirSync(AZTEC_DATA_DIR, { recursive: true })
+
+	spawnAztecNode()
+
+	try {
+		await waitForLocalNode(LOCAL_NODE_URL, 90_000)
+		console.log("[e2e-setup] Local Aztec node is ready")
+	} catch (error) {
+		console.error("[e2e-setup] Failed to start local node:", error)
+		await killProcessGroup(nodeProcess, "aztec", weStartedNode)
+		nodeProcess = null
+		await killProcessGroup(anvilProcess, "anvil", weStartedAnvil)
+		anvilProcess = null
+		// Same loud-failure contract as the anvil path: a node that never
+		// became healthy (e.g. native bb SIGILL) must fail the run, not
+		// skip it green.
+		if (process.env.E2E_REQUIRE_SETUP === "1") {
+			throw new Error("[e2e-setup] FATAL: local Aztec node failed to become healthy and E2E_REQUIRE_SETUP=1 is set.")
+		}
+		return "skip"
+	}
+	return "ready"
+}
+
+/** The pinned toolchain is unusable. Strict runs fail CLOSED: falling back to the mutable
+ *  `current` symlink is exactly the drift that breaks the L1 deploy, and a silent skip/pass would
+ *  hide it. Permissive runs warn, naming the fix, and boot from `current`. */
+function requirePinnedToolchainOrWarn(): void {
+	const reason = AZTEC_PIN
+		? `pinned aztec ${AZTEC_PIN} at ${AZTEC_PINNED_ROOT} is missing: ${AZTEC_PIN_MISSING.join(", ")}`
+		: `repo aztec pin unreadable (${AZTEC_PIN_READ.error})`
+	if (process.env.E2E_REQUIRE_SETUP === "1") {
+		throw new Error(
+			`[e2e-setup] FATAL: ${reason}, and E2E_REQUIRE_SETUP=1 forbids the ~/.aztec/current fallback. Fix: aztec-up install ${AZTEC_PIN ?? "<repo @aztec/aztec.js pin>"}`,
+		)
+	}
+	console.warn(
+		`[e2e-setup] ${reason} — falling back to ~/.aztec/current, which may mismatch the repo pin. Fix: aztec-up install ${AZTEC_PIN ?? "<pin>"}`,
+	)
+}
+
+/** Spawn the pinned aztec CLI as its own process group, own it (handle → flag → lock record, in
+ *  that order), and pipe its logs. */
+function spawnAztecNode(): void {
+	nodeProcess = spawn(
+		AZTEC_BIN,
+		[
+			"start",
+			"--local-network",
+			"--port",
+			String(AZTEC_PORT),
+			"--admin-port",
+			String(AZTEC_ADMIN_PORT),
+			"--p2p.p2pPort",
+			String(AZTEC_P2P_PORT),
+			"--l1-rpc-urls",
+			ANVIL_URL,
+			"--data-directory",
+			AZTEC_DATA_DIR,
+			"--disable-admin-api-key",
+		],
+		{
+			stdio: "pipe",
+			detached: true,
+			env: {
+				...process.env,
+				PATH: `${AZTEC_INTERNAL_BIN}${path.delimiter}${process.env.PATH ?? ""}`,
+				SEQ_MIN_TX_PER_BLOCK: "0",
+				ETHEREUM_HOSTS: ANVIL_URL,
+				ANVIL_PORT: String(ANVIL_PORT),
+				AZTEC_PORT: String(AZTEC_PORT),
+				// Highest-priority override for @aztec/ethereum's
+				// resolveFoundryBinary: without these, the node's L1 deploy
+				// reads `~/.aztec/current/internal-bin/forge` regardless of
+				// which version's CLI is booting — a `current` re-pointed by
+				// any other install on the machine then breaks the deploy
+				// with a forge-CLI arg mismatch. A caller-supplied override
+				// wins (same rule as the resolver itself); the executable
+				// guard matters because the resolver THROWS on a
+				// set-but-missing override rather than falling back.
+				...(!process.env.FORGE_BIN && isExecutable(path.join(AZTEC_INTERNAL_BIN, "forge"))
+					? { FORGE_BIN: path.join(AZTEC_INTERNAL_BIN, "forge") }
+					: {}),
+				...(!process.env.ANVIL_BIN && isExecutable(path.join(AZTEC_INTERNAL_BIN, "anvil"))
+					? { ANVIL_BIN: path.join(AZTEC_INTERNAL_BIN, "anvil") }
+					: {}),
+			},
+		},
+	)
+	weStartedNode = true
+	recordSpawnedPid()
+
+	nodeProcess.stdout?.on("data", (data: Buffer) => {
+		const line = data.toString().trim()
+		if (line.includes("Aztec") || line.includes("ready") || line.includes("error")) {
+			console.log("[aztec-node]", line.slice(0, 200))
+		}
+	})
+	nodeProcess.stderr?.on("data", (data: Buffer) => {
+		const line = data.toString().trim()
+		if (line.includes("error") || line.includes("Error")) {
+			console.error("[aztec-node]", line.slice(0, 200))
+		}
+	})
+}
+
+// ── Vite dev servers (playground; tools opt-in) ───────────────────
+interface DevServerSpec {
+	/** Log tag + the lower-case name in "Starting … dev server" / "Failed to start …". */
+	label: string
+	/** The capitalised name in "… already running" / "… is ready". */
+	title: string
+	cwd: string
+	url: string
+	env: Record<string, string>
+	/** Handle ownership stays with the module-level slots; the helper assigns in the strict
+	 *  order the provisional lock needs: handle → started flag → `recordSpawnedPid()`. */
+	setHandle: (child: ChildProcess | null) => void
+	setStarted: (started: boolean) => void
+}
+
+/** Adopt a server already answering on its URL, else spawn `bun run dev`, own it, pipe its logs
+ *  and wait up to 30 s. A server that fails to come up is killed and the boot continues — only
+ *  the tests that depend on it fail individually. */
+async function ensureDevServer(spec: DevServerSpec): Promise<void> {
+	const alreadyRunning = await probeHttp(spec.url, 1500)
+	if (alreadyRunning) {
+		console.log(`[e2e-setup] ${spec.title} already running at`, spec.url)
+		spec.setStarted(false)
+		return
+	}
+	console.log(`[e2e-setup] Starting ${spec.label} dev server at`, spec.url, "...")
+	let child: ChildProcess | null = null
+	try {
+		child = spawn("bun", ["run", "dev"], {
+			cwd: spec.cwd,
+			stdio: "pipe",
+			detached: true,
+			env: { ...process.env, ...spec.env },
+		})
+		spec.setHandle(child)
+		spec.setStarted(true)
+		recordSpawnedPid()
+
+		child.stdout?.on("data", (data: Buffer) => {
+			const line = data.toString().trim()
+			if (line.includes("Local:") || line.includes("error")) {
+				console.log(`[${spec.label}]`, line.slice(0, 200))
+			}
+		})
+		child.stderr?.on("data", (data: Buffer) => {
+			const line = data.toString().trim()
+			if (line.includes("error") || line.includes("Error")) {
+				console.error(`[${spec.label}]`, line.slice(0, 200))
+			}
+		})
+
+		await waitForHttp(spec.url, 30_000)
+		console.log(`[e2e-setup] ${spec.title} is ready`)
+	} catch (error) {
+		console.warn(`[e2e-setup] Failed to start ${spec.label}:`, error)
+		await killProcessGroup(child, spec.label, true)
+		spec.setHandle(null)
+		// Continue without the server — tests that depend on it will skip / fail individually
+	}
 }
 
 /**

@@ -90,11 +90,14 @@ Fable-role audit conditions (folded — see the ledger in `lessons/phase-1.md`):
 - **Reuse branch never touches `weOwnLock`**; `clearLock()` stays inside `if (priorLock)`.
 - **Zero new `weStarted* = false` assignments** — the flags are deliberately NOT reset on kill
   paths (teardown's data-dir removal keys off them).
-- **`provide` placement**: `provideWithoutSandbox` appears exactly 4×, each followed by `return`;
-  `playgroundUrl` / `toolsUrl` are provided on the happy path OUTSIDE their blocks (toolsUrl even
-  when tools is not spawned) — a shared `finishBoot(project)` (provide both → deploy →
-  `markBootReady`) serves both the reuse and the fresh exits, which also shrinks
-  `reconcilePriorLock`.
+- **`provide` placement**: the four permissive skip causes return `"skip"` from two stages, and
+  the coordinator's two `provideWithoutSandbox(project); return` sites own the exits (codex: two
+  call sites covering four causes — cleaner than duplicating the call per cause); `playgroundUrl` /
+  `toolsUrl` are provided by the shared `finishBoot(project)` (provide both → deploy →
+  `markBootReady`) on both the reuse and the fresh path (toolsUrl even when tools is not spawned).
+  **Accepted ordering difference**: `playgroundUrl` used to be provided BEFORE the optional tools
+  probe/start; it is now provided after, with `toolsUrl`. Vitest workers cannot observe it (they
+  start after setup returns); only an exceptional tools probe or a mocked `TestProject` could.
 - **Log needles are per-child data, not defaults**: anvil has NO stdout handler and its stderr
   set is `["error","Error","address already in use"]`; the anvil-only `once("exit")` handler stays
   anvil-only; playground's `VITE_DISABLE_HMR` env is not shared; log labels are passed in both
