@@ -231,8 +231,9 @@ const loadProfile = async () => {
 	const seq = ++loadProfileSeq
 	const isCurrent = () => seq === loadProfileSeq
 	// A new run supersedes any earlier give-up: it may well succeed this time. A retry of a
-	// FAILED boot keeps the auth form withheld until this run decides.
-	bootRetrying.value = bootOutcome.value === "failed"
+	// FAILED boot keeps the auth form withheld until a run DECIDES — latched, not recomputed:
+	// a reconnect that starts a newer run mid-retry sees an empty outcome and must not drop it.
+	bootRetrying.value = bootRetrying.value || bootOutcome.value === "failed"
 	bootOutcome.value = ""
 	managers.profile.onActiveProfileChanged.add(onActiveProfileChanged)
 	managers.profile.onImportedKeysDegraded.add(onImportedKeysDegraded)
