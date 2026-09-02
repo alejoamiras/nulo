@@ -11,6 +11,7 @@ import {
 	loadJournal,
 	openDepositEnvelope,
 	patchRecord as journalPatch,
+	patchRecordWhen as journalPatchWhen,
 	pruneCompleted,
 	recoveryKeyFromSignature,
 	recoveryKeyMessage,
@@ -285,6 +286,12 @@ export function addRecordVerified(rec: BridgeJournalRecord): void {
 
 export function updateRecord(id: string, patch: Partial<BridgeJournalRecord>): void {
 	patchRecord(id, patch)
+}
+
+/** The PERSISTED record, read straight from kv — not this tab's reactive copy, which lags other
+ *  tabs' writes until their storage event lands. For read-then-patch sites; touches no ref. */
+export function currentRecord(id: string): BridgeJournalRecord | undefined {
+	return loadJournal(deps.kv).find((r) => r.id === id)
 }
 
 /** Provisional-withdraw upgrade: replace the `wd-pending-*` record under its real exitTxHash id.
@@ -931,10 +938,19 @@ function priorReceiptRounds(id: string): number {
 	return receiptRounds.get(id) ?? 0
 }
 
-/** A terminal revert keeps the hash (a retry rechecks the same receipt), so the hash-scoped
- *  landed view WOULD re-light during the recheck window - clear the flag explicitly.
- *  Deliberately synchronous: it runs between a gen check and the loop's next step. */
+/** A terminal revert clears the hash so RETRY re-enters the build path (a kept hash routed every
+ *  retry back to the same reverted receipt). Expected-hash guard, not a CAS (localStorage has
+ *  none): the clear applies only while the persisted hash is still the reverted one, so a late
+ *  poll in this tab cannot wipe a fresh hash another tab already sent. Deliberately synchronous:
+ *  it runs between a gen check and the loop's next step. */
 function reportRevertedClaim(rec: DepositJournalRecord): "stop" {
+	const cleared = journalPatchWhen(deps.kv, rec.id, (live) => (live as DepositJournalRecord).claimTxHash === rec.claimTxHash, {
+		claimTxHash: undefined,
+	})
+	if (cleared) {
+		receiptRounds.delete(rec.id)
+		reload()
+	}
 	setRuntime(rec.id, {
 		attention: "error",
 		note: "The claim reverted on Aztec. You can retry from this card - the deposit remains claimable.",

@@ -8,6 +8,7 @@ import {
 	type DepositJournalRecord,
 	type KV,
 	type WithdrawJournalRecord,
+	patchRecord as kvPatchRecord,
 	recoveryKeyFromSignature,
 	sealDepositEnvelope,
 } from "@nulo/bridge-core"
@@ -31,6 +32,8 @@ import {
 	cacheSecret,
 	connectJournalDeps,
 	discard,
+	markSessionLive,
+	resumeSessionWork,
 	runDepositClaim,
 	runWithdrawConsume,
 	updateRecord,
@@ -431,7 +434,7 @@ describe("journal engine — pre-extraction pins", () => {
 		expect(records.value.find((r) => r.id === "0xsentalready")?.completedAt).toBe(999)
 	})
 
-	it("(e) (BUG PIN) the reverted-hash trap: a terminal revert RETAINS claimTxHash — every retry rechecks, none can resend", async () => {
+	it("(e) a terminal revert clears claimTxHash, so RETRY re-enters the build path and sends a fresh claim", async () => {
 		const deps = baseDeps(kv)
 		const claim = vi.fn(async () => ({ simulate: async () => {}, send: async () => ({ txHash: "0xnew" }) }))
 		deps.claimReceiptStatus.mockResolvedValue("reverted")
@@ -439,12 +442,46 @@ describe("journal engine — pre-extraction pins", () => {
 		addRecord(mkDeposit("0xrevtrap", { claimTxHash: "0xreverted" }))
 		await runDepositClaim("0xrevtrap")
 		const { records, runtime } = useBridgeJournal()
-		// The copy says "retry" but the hash survives, so the next run re-enters the receipt
-		// path and can never resend. Preserved verbatim; owner follow-up candidate.
+		const rec = () => records.value.find((r) => r.id === "0xrevtrap") as DepositJournalRecord | undefined
 		expect(runtime.value["0xrevtrap"]?.note).toMatch(/reverted on Aztec/)
-		expect((records.value.find((r) => r.id === "0xrevtrap") as DepositJournalRecord | undefined)?.claimTxHash).toBe("0xreverted")
+		expect(runtime.value["0xrevtrap"]?.attention).toBe("error")
+		expect(rec()?.claimTxHash).toBeUndefined()
+		expect(claim).not.toHaveBeenCalled() // the first run was the receipt path, verbatim
 		await runDepositClaim("0xrevtrap")
+		expect(claim).toHaveBeenCalledTimes(1)
+		expect(deps.claimReceiptStatus).toHaveBeenLastCalledWith("0xnew")
+		expect(rec()?.completedAt).toBeUndefined()
+	})
+
+	it("(e) the revert clear is an expected-hash guard: a late reverted poll never wipes a fresh hash another tab sent", async () => {
+		const deps = baseDeps(kv)
+		deps.claimReceiptStatus.mockImplementation((async (hash: string) => {
+			if (hash !== "0xH") return "pending"
+			// Between this tab's poll and its clear, "another tab" retried and journaled a new hash.
+			kvPatchRecord(kv, "0xrace", { claimTxHash: "0xN" })
+			return "reverted"
+		}) as never)
+		connectJournalDeps({ ...deps, claim: vi.fn() as never })
+		addRecord(mkDeposit("0xrace", { claimTxHash: "0xH" }))
+		await runDepositClaim("0xrace")
+		const { records } = useBridgeJournal()
+		expect((records.value.find((r) => r.id === "0xrace") as DepositJournalRecord | undefined)?.claimTxHash).toBe("0xN")
+	})
+
+	it("(e) after the clear, only a SESSION-LIVE reverted record auto-resends on reconnect; an idle one waits for RETRY", async () => {
+		const deps = baseDeps(kv)
+		const claim = vi.fn(async () => ({ simulate: async () => {}, send: async () => ({ txHash: "0xnew" }) }))
+		deps.claimReceiptStatus.mockResolvedValue("reverted")
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xrevlive", { claimTxHash: "0xrev1" }))
+		addRecord(mkDeposit("0xrevidle", { claimTxHash: "0xrev2" }))
+		markSessionLive("0xrevlive")
+		await runDepositClaim("0xrevlive")
+		await runDepositClaim("0xrevidle")
 		expect(claim).not.toHaveBeenCalled()
+		resumeSessionWork()
+		await vi.waitFor(() => expect(claim).toHaveBeenCalledTimes(1))
+		expect((claim.mock.calls[0] as unknown as [DepositJournalRecord])[0].id).toBe("0xrevlive")
 	})
 
 	it("(f) dropped debounce: any non-dropped status resets the streak; three straight drops clear the hash", async () => {

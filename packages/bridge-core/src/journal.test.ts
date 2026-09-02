@@ -14,6 +14,7 @@ import {
 	deriveWithdrawStage,
 	loadJournal,
 	patchRecord,
+	patchRecordWhen,
 	pruneCompleted,
 	rekeyRecord,
 	removeRecord,
@@ -90,6 +91,22 @@ describe("journal CRUD", () => {
 		upsertRecord(kv, deposit("0xaaa"))
 		expect(patchRecord(kv, "0xnope", { leafIndex: "1" })).toBeUndefined()
 		expect(loadJournal(kv)).toHaveLength(1)
+	})
+
+	it("a guarded patch applies only while the freshly loaded record satisfies the guard", () => {
+		const kv = memKV()
+		upsertRecord(kv, deposit("0xaaa", { claimTxHash: "0xH" }))
+		const rejected = patchRecordWhen(kv, "0xaaa", (cur) => (cur as DepositJournalRecord).claimTxHash === "0xstale", {
+			claimTxHash: undefined,
+		})
+		expect(rejected).toBeUndefined()
+		expect((loadJournal(kv)[0] as DepositJournalRecord).claimTxHash).toBe("0xH")
+		const applied = patchRecordWhen(kv, "0xaaa", (cur) => (cur as DepositJournalRecord).claimTxHash === "0xH", {
+			claimTxHash: undefined,
+		})
+		expect((applied as DepositJournalRecord).claimTxHash).toBeUndefined()
+		expect((loadJournal(kv)[0] as DepositJournalRecord).claimTxHash).toBeUndefined()
+		expect(patchRecordWhen(kv, "0xnope", () => true, { leafIndex: "1" })).toBeUndefined()
 	})
 
 	it("rekey upgrades a provisional withdraw to its exitTxHash id", () => {

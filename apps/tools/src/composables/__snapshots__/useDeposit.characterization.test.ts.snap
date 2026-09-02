@@ -1,5 +1,63 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`claim dep characterization > after an fjwc claim reverted (hash cleared), the retry pays sponsored — the FJ was consumed in setup 1`] = `
+[
+  [
+    "journal.updateRecord",
+    [
+      "<id>",
+      {
+        "fuel": {
+          "amount": "1000",
+          "claimAttempt": true,
+          "claimAttemptAt": 1,
+          "claimTxHash": "0x0000000000000000000000000000000000000000000000000000000000000004",
+          "consumed": true,
+          "leafIndex": "22",
+          "minOutput": "3960",
+          "received": "4000",
+          "secret": "0x0000000000000000000000000000000000000000000000000000000000006666",
+          "secretHashHex": "0x7777",
+        },
+      },
+    ],
+  ],
+  [
+    "bridge.claim_public.simulate",
+    {
+      "args": [
+        "0x1018808f2c17794badb361c02c945582b8198b495a7e8d01154f7eeb7d719c0d",
+        "900",
+        "0x0000000000000000000000000000000000000000000000000000000000005555",
+        "0x000000000000000000000000000000000000000000000000000000000000000b",
+      ],
+      "fee": {
+        "gasSettings": undefined,
+        "paymentMethod": "SponsoredFeePaymentMethod",
+      },
+    },
+  ],
+  [
+    "bridge.claim_public.send",
+    {
+      "args": [
+        "0x1018808f2c17794badb361c02c945582b8198b495a7e8d01154f7eeb7d719c0d",
+        "900",
+        "0x0000000000000000000000000000000000000000000000000000000000005555",
+        "0x000000000000000000000000000000000000000000000000000000000000000b",
+      ],
+      "fee": {
+        "gasSettings": undefined,
+        "paymentMethod": "SponsoredFeePaymentMethod",
+      },
+      "wait": {
+        "waitForStatus": "proposed",
+      },
+    },
+  ],
+]
+`;
+
 exports[`claim dep characterization > direct fee-juice (private): builder gets the ENVELOPE salt, never the journal copy 1`] = `
 [
   [
@@ -366,7 +424,7 @@ exports[`claim dep characterization > public fueled, below floor: sponsored + st
 ]
 `;
 
-exports[`claim dep characterization > public fueled, fresh: fjwc fee; (BUG PIN) PROPOSED write drops the pre-send claimAttemptAt > fjwc-latch-patches 1`] = `
+exports[`claim dep characterization > public fueled, fresh: fjwc fee; the PROPOSED write keeps the pre-send claimAttemptAt > fjwc-latch-patches 1`] = `
 [
   [
     "0xrec1",
@@ -389,6 +447,7 @@ exports[`claim dep characterization > public fueled, fresh: fjwc fee; (BUG PIN) 
       "fuel": {
         "amount": "1000",
         "claimAttempt": true,
+        "claimAttemptAt": 1700000000000,
         "claimTxHash": "0xl2claimtx",
         "leafIndex": "22",
         "minOutput": "3960",
@@ -401,7 +460,7 @@ exports[`claim dep characterization > public fueled, fresh: fjwc fee; (BUG PIN) 
 ]
 `;
 
-exports[`claim dep characterization > public fueled, fresh: fjwc fee; (BUG PIN) PROPOSED write drops the pre-send claimAttemptAt 1`] = `
+exports[`claim dep characterization > public fueled, fresh: fjwc fee; the PROPOSED write keeps the pre-send claimAttemptAt 1`] = `
 [
   [
     "bridge.claim_public.simulate",
@@ -462,6 +521,7 @@ exports[`claim dep characterization > public fueled, fresh: fjwc fee; (BUG PIN) 
         "fuel": {
           "amount": "1000",
           "claimAttempt": true,
+          "claimAttemptAt": 1700000000000,
           "claimTxHash": "0xl2claimtx",
           "leafIndex": "22",
           "minOutput": "3960",
