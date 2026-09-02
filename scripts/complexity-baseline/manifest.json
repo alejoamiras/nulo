@@ -19,7 +19,6 @@
 			"apps/tools/src/lib/phase-clock.ts": 1,
 			"packages/bridge-core/scripts/discover-mainnet-fuel.ts": 1,
 			"packages/bridge-core/scripts/fpc-dust-canary-mainnet.ts": 1,
-			"packages/bridge-core/scripts/live-intent.ts": 2,
 			"packages/bridge-core/scripts/relay-claim-testnet.ts": 1,
 			"packages/wallet-core/src/base/topology.ts": 1,
 			"packages/wallet-core/src/utils/serialization.ts": 1,
@@ -32,7 +31,6 @@
 			"packages/bridge-core/scripts/deploy-sandbox.ts": 1,
 			"packages/bridge-core/scripts/deposit-testnet.ts": 1,
 			"packages/bridge-core/scripts/discover-mainnet-fuel.ts": 1,
-			"packages/bridge-core/scripts/live-intent.ts": 2,
 			"packages/bridge-core/scripts/relay-claim-testnet.ts": 1
 		}
 	}
