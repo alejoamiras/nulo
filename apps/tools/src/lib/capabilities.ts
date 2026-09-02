@@ -12,7 +12,7 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec/standard-contracts/auth-registry/constants"
 
 /**
- * Build the wallet-sdk capability manifest for the faucet.
+ * Build the wallet-sdk capability manifest for the Drip tab.
  *
  * Scope is tight:
  *  - `accounts.canCreateAuthWit: false` (Dripper has no auth guards).
@@ -33,7 +33,7 @@ import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec/standard-contracts/auth-r
  * No wildcard scopes.
  */
 
-export interface FaucetManifestInput {
+export interface DripManifestInput {
 	readonly dripperAddress: AztecAddress
 	readonly usdcAddress: AztecAddress
 	readonly ethAddress: AztecAddress
@@ -76,7 +76,7 @@ export interface AppManifest {
 	capabilities: ReadonlyArray<AccountsCapability | ContractsCapability | SimulationCapability | TransactionCapability>
 }
 
-export function buildFaucetManifest(input: FaucetManifestInput): AppManifest {
+export function buildDripManifest(input: DripManifestInput): AppManifest {
 	const { dripperAddress, usdcAddress, ethAddress, sponsoredFpcAddress } = input
 	return {
 		version: "1.0",
@@ -130,7 +130,7 @@ export interface BridgeManifestInput {
 }
 
 /**
- * Build the wallet-sdk capability manifest for the Bridge tab. Wider than the faucet's:
+ * Build the wallet-sdk capability manifest for the Bridge tab. Wider than the Drip tab's:
  *  - `accounts.canCreateAuthWit: true` - `exit_to_l1` needs a public burn auth-wit.
  *  - `contracts` = [bridge, token, proxy] (token_bridge, the bridged token, the minter proxy).
  *  - `transaction.scope` covers claim + exit (both privacies), the token burns the exit auth-wit
@@ -194,10 +194,10 @@ export function buildBridgeManifest(input: BridgeManifestInput): AppManifest {
 }
 
 export interface CombinedManifestInput {
-	/** The faucet tokens (Dripper/NULO/OLUN) — testnet-only. Omit ALL three on mainnet: the grant then
-	 *  covers the Bridge + fuel (public + private) but NOT the faucet, matching the mainnet UI (no
-	 *  faucet tab). The bridge + PrivateFPC + FEE_JUICE + auth-registry grants are always present, so
-	 *  private-fuel-paid bridge claims work on both networks (DP6). */
+	/** The drip tokens (Dripper/NULO/OLUN). Optional as a set: omit all three for a bridge+fuel-only
+	 *  manifest. The shipped app always supplies them (universal deploys, present on both networks).
+	 *  The bridge + PrivateFPC + FEE_JUICE + auth-registry grants are always present, so
+	 *  private-fuel-paid bridge claims work on both networks. */
 	readonly dripperAddress?: AztecAddress
 	readonly usdcAddress?: AztecAddress
 	readonly ethAddress?: AztecAddress
@@ -209,24 +209,25 @@ export interface CombinedManifestInput {
 }
 
 /**
- * Build ONE manifest covering the Bridge + fuel, and — when the faucet tokens are supplied (testnet)
- * — the Faucet too. The tabs are the same origin = the same app to the wallet, which keys the grant
- * per-app, so two separate manifests collide (the second connect's grant shadows the first, and
- * registerContract for the missing contracts hits a scope violation). One complete manifest, requested
- * once, fixes that. On mainnet the faucet tokens are omitted (no faucet), but the PrivateFPC +
- * FEE_JUICE + auth-registry grants stay so private fuel + private-fuel-paid claims work (DP6).
- * `canCreateAuthWit: true` because the bridge's `exit_to_l1` needs a public burn auth-wit.
+ * Build ONE manifest covering the Bridge + fuel and — when the three drip tokens are supplied, as the
+ * shipped app always does — the Drip tab. The tabs are the same origin = the same app to the wallet,
+ * which keys the grant per-app, so two separate manifests collide (the second connect's grant shadows
+ * the first, and registerContract for the missing contracts hits a scope violation). One complete
+ * manifest, requested once, fixes that. Omitting the drip tokens yields a bridge+fuel-only manifest;
+ * the PrivateFPC + FEE_JUICE + auth-registry grants stay in both shapes so private fuel +
+ * private-fuel-paid claims work. `canCreateAuthWit: true` because the bridge's `exit_to_l1` needs a
+ * public burn auth-wit.
  */
 export function buildCombinedManifest(input: CombinedManifestInput): AppManifest {
 	const { dripperAddress, usdcAddress, ethAddress, bridgeAddress, tokenAddress, proxyAddress, sponsoredFpcAddress } = input
-	// All three faucet tokens present ⇒ include the faucet grants; none ⇒ bridge+fuel only (mainnet).
-	const faucet = dripperAddress && usdcAddress && ethAddress ? { dripper: dripperAddress, usdc: usdcAddress, eth: ethAddress } : null
+	// All three drip tokens present ⇒ include the drip grants; none ⇒ bridge+fuel only.
+	const drip = dripperAddress && usdcAddress && ethAddress ? { dripper: dripperAddress, usdc: usdcAddress, eth: ethAddress } : null
 	return {
 		version: "1.0",
 		metadata: {
 			name: "nulo-tools",
 			version: "0.1.0",
-			description: faucet ? "Faucet + Bridge on Aztec - Nulo" : "Bridge on Aztec - Nulo",
+			description: drip ? "Drip + Bridge on Aztec - Nulo" : "Bridge on Aztec - Nulo",
 			url: input.appUrl ?? defaultUrl(),
 		},
 		capabilities: [
@@ -238,7 +239,7 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 					tokenAddress,
 					proxyAddress,
 					PRIVATE_FPC_L2,
-					...(faucet ? [faucet.dripper, faucet.usdc, faucet.eth] : []),
+					...(drip ? [drip.dripper, drip.usdc, drip.eth] : []),
 				],
 				canRegister: true,
 				canGetMetadata: true,
@@ -247,10 +248,10 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 				type: "simulation",
 				utilities: {
 					scope: [
-						...(faucet
+						...(drip
 							? [
-									{ contract: faucet.usdc, function: "balance_of_private" },
-									{ contract: faucet.eth, function: "balance_of_private" },
+									{ contract: drip.usdc, function: "balance_of_private" },
+									{ contract: drip.eth, function: "balance_of_private" },
 								]
 							: []),
 						{ contract: tokenAddress, function: "balance_of_private" },
@@ -266,10 +267,10 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 				// the actual send is still gated by the (separate) transaction scope.
 				transactions: {
 					scope: [
-						...(faucet
+						...(drip
 							? [
-									{ contract: faucet.usdc, function: "balance_of_public" },
-									{ contract: faucet.eth, function: "balance_of_public" },
+									{ contract: drip.usdc, function: "balance_of_public" },
+									{ contract: drip.eth, function: "balance_of_public" },
 								]
 							: []),
 						{ contract: tokenAddress, function: "balance_of_public" },
@@ -299,10 +300,10 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 			{
 				type: "transaction",
 				scope: [
-					...(faucet
+					...(drip
 						? [
-								{ contract: faucet.dripper, function: "drip_to_public" },
-								{ contract: faucet.dripper, function: "drip_to_private" },
+								{ contract: drip.dripper, function: "drip_to_public" },
+								{ contract: drip.dripper, function: "drip_to_private" },
 							]
 						: []),
 					{ contract: FEE_JUICE_L2, function: "claim_and_end_setup" },

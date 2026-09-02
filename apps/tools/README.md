@@ -32,7 +32,7 @@ off and the picker shows all claimants.
 **Multiple accounts**: if your wallet shares more than one account, the
 tools app asks which one to use ("Choose main account") and remembers the
 answer per wallet. The connected chip shows the active account and opens
-a menu to switch anytime — switching drives all tabs (Faucet, Bridge,
+a menu to switch anytime — switching drives all tabs (Drip, Bridge,
 Fuel) and is blocked while an operation is running, so nothing ever
 executes under an account other than the one it started with.
 
@@ -152,7 +152,7 @@ maintainer's responsibility before merging deploy changes.
 Three composables (no Pinia):
 
 - `useWalletConnection` — discovery → emoji verify → capability approval → `setting-up` (register contracts) → connected
-- `useFaucetDrip` — single global in-flight drip; `interaction.request({ fee: new SponsoredFeePaymentMethod(fpc.address) })` embeds the sponsor call so the public-setup-phase passes the allow-list
+- `useDrip` — single global in-flight drip; `interaction.request({ fee: new SponsoredFeePaymentMethod(fpc.address) })` embeds the sponsor call so the public-setup-phase passes the allow-list
 - `useTokenBalance` — polls every 15s. `balance_of_public` (public view) via `interaction.simulate({from})` → `SimulationResult.result`; `balance_of_private` (utility) via `wallet.executeUtility(call, opts)` → `UtilityExecutionResult.result[0]`
 
 ## File layout

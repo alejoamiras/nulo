@@ -1,6 +1,6 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { describe, expect, it } from "vitest"
-import { buildBridgeManifest, buildCombinedManifest, buildFaucetManifest } from "./capabilities"
+import { buildBridgeManifest, buildCombinedManifest, buildDripManifest } from "./capabilities"
 
 const DRIPPER = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000001")
 const USDC = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000002")
@@ -9,8 +9,8 @@ const SPONSORED_FPC = AztecAddress.fromStringUnsafe("0x0000000000000000000000000
 
 import { PRIVATE_FPC_ADDRESS, feeJuiceAddress } from "@nulo/bridge-core"
 
-describe("buildFaucetManifest", () => {
-	const m = buildFaucetManifest({
+describe("buildDripManifest", () => {
+	const m = buildDripManifest({
 		dripperAddress: DRIPPER,
 		usdcAddress: USDC,
 		ethAddress: ETH,
@@ -152,7 +152,7 @@ describe("buildCombinedManifest", () => {
 		expect(cap).toEqual({ type: "accounts", canGet: true, canCreateAuthWit: true })
 	})
 
-	it("declares all seven contracts - bridge (bridge, token, proxy) + PrivateFPC + faucet (dripper, usdc, eth)", () => {
+	it("declares all seven contracts - bridge (bridge, token, proxy) + PrivateFPC + drip (dripper, usdc, eth)", () => {
 		const cap = m.capabilities.find((c) => c.type === "contracts")
 		if (cap?.type !== "contracts") throw new Error("contracts cap missing")
 		expect(cap.contracts.map((a) => a.toString())).toEqual([
@@ -166,17 +166,17 @@ describe("buildCombinedManifest", () => {
 		])
 	})
 
-	// The mainnet shape (HIGH-1 fix): omit the faucet tokens, but the bridge + PrivateFPC + private-fuel
-	// scopes MUST stay so private fuel (DP6) and private-fuel-paid claims work and the unconditional FPC
+	// Bridge+fuel-only shape: omit the drip tokens, but the bridge + PrivateFPC + private-fuel scopes
+	// MUST stay so private fuel and private-fuel-paid claims work and the unconditional FPC
 	// registration doesn't hit a scope violation.
-	describe("mainnet shape (no faucet tokens)", () => {
+	describe("bridge+fuel-only shape (no drip tokens)", () => {
 		const mm = buildCombinedManifest({
 			bridgeAddress: BRIDGE,
 			tokenAddress: TOKEN,
 			proxyAddress: PROXY,
 			sponsoredFpcAddress: SPONSORED_FPC,
 		})
-		it("grants bridge + token + proxy + PrivateFPC and NO faucet tokens", () => {
+		it("grants bridge + token + proxy + PrivateFPC and NO drip tokens", () => {
 			const cap = mm.capabilities.find((c) => c.type === "contracts")
 			if (cap?.type !== "contracts") throw new Error("contracts cap missing")
 			expect(cap.contracts.map((a) => a.toString())).toEqual([
@@ -186,7 +186,7 @@ describe("buildCombinedManifest", () => {
 				PRIVATE_FPC_ADDRESS,
 			])
 		})
-		it("keeps the private-fuel scopes (mint_and_pay_fee, pay_fee) and drops the faucet drips", () => {
+		it("keeps the private-fuel scopes (mint_and_pay_fee, pay_fee) and drops the drips", () => {
 			const cap = mm.capabilities.find((c) => c.type === "transaction")
 			if (cap?.type !== "transaction") throw new Error("transaction cap missing")
 			const fns = cap.scope.map((s) => s.function)
@@ -197,7 +197,7 @@ describe("buildCombinedManifest", () => {
 		})
 	})
 
-	it("scopes both faucet drips and the bridge claim/exit/burn + sponsor", () => {
+	it("scopes both drips and the bridge claim/exit/burn + sponsor", () => {
 		const cap = m.capabilities.find((c) => c.type === "transaction")
 		if (cap?.type !== "transaction") throw new Error("transaction cap missing")
 		expect(cap.scope.map((s) => s.function)).toEqual([

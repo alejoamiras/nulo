@@ -12,7 +12,7 @@ import rawTestnetConfig from "../../public/testnet-bridge.json"
  * testnet-bridge.json is DEPLOY METADATA, not registerable instances. We rebuild each L2
  * instance here via getContractInstanceFromInstantiationParams - same salt + args + universal
  * deploy (deployer = ZERO) as deploy-bridge-testnet.ts, so the addresses agree by construction.
- * Mirrors src/contracts/deployments.ts for the faucet's own contracts.
+ * Mirrors src/contracts/deployments.ts for the drip tab's own contracts.
  *
  * STRICT-validated at module init (candidate-schema): a malformed or stale-shaped manifest fails
  * the tools app loudly at boot instead of shipping a broken lane (the rc.2 arc shipped a stale

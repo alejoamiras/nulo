@@ -112,7 +112,7 @@ export interface AztecWalletSessionConfig {
 	readonly registerContracts: (wallet: Wallet) => Promise<void>
 	/** Mutation-boundary guard for account switching: while it returns true, `selectAccount()`
 	 *  rejects. Injected (rather than imported) so the factory stays UI-agnostic and the gate is
-	 *  unit-testable — the tools app wires it to the ops-in-flight registry (plan D-18). */
+	 *  unit-testable — the tools app wires it to the ops-in-flight registry. */
 	readonly isSwitchBlocked?: () => boolean
 }
 
@@ -894,7 +894,7 @@ async function cancelAccountChoice(s: SessionState): Promise<void> {
 	}
 }
 
-/** Post-connect account switching. Gated at the MUTATION BOUNDARY (plan D-18): rejects unless
+/** Post-connect account switching. Gated at the MUTATION BOUNDARY: rejects unless
  *  connected, the address is in the live grant, and no tracked operation is in flight. Returns
  *  whether the switch applied — the UI toasts on true. */
 function selectAccount(s: SessionState, address: string): boolean {

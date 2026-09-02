@@ -5,13 +5,13 @@ import TokenCard from "@/components/TokenCard.vue"
 import WalletPanel from "@/components/WalletPanel.vue"
 import { useWalletConnection } from "@/composables/useWalletConnection"
 import { IS_MAINNET } from "@/lib/network"
-import { FAUCET_TOKENS } from "@/constants/tokens"
+import { DRIP_TOKENS } from "@/constants/tokens"
 import { NULO, OLUN } from "@/contracts/deployments"
 
 const { status, wallet, selectedAccount } = useWalletConnection()
 
 const tokenEntries = computed(() =>
-	FAUCET_TOKENS.map((token) => ({
+	DRIP_TOKENS.map((token) => ({
 		token,
 		address: token.symbol === "NULO" ? NULO : OLUN,
 	})),
@@ -31,7 +31,7 @@ const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.from
 			</p>
 			<p v-else class="sub">
 				Alpha-testnet only. Connect an Aztec wallet and mint fixed NULO or OLUN into a public or
-				private balance. Internal faucet. No real value.
+				private balance. Internal drip. No real value.
 			</p>
 		</Flex>
 

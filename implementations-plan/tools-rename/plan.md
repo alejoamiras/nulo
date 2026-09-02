@@ -103,7 +103,7 @@ Local: `bun run --cwd apps/tools build:testnet && bun run --cwd apps/tools verif
 
 ### Arc 2 — Drip
 
-#### Phase 4 — Feature vocabulary
+#### Phase 4 — Feature vocabulary ✓ (2026-09-01, `a413c886`; gate + real-wallet check in lessons/phase-4.md)
 
 Per §Scope arc 2. Review the `faucet-drip` comments at `apps/extension/tests/e2e/network/incoming-transfers.test.ts:12,69` (prose about the drip concept — reword to "drip" where it reads as the app). Manual/real check (records the extension build id in `lessons/phase-4.md`): load the built testnet target with the Nulo extension, connect → disconnect → reconnect; the approve popup shows `nulo-tools`; with a pre-seeded `nulo-faucet:preferred-wallet` key the wallet is preselected, and "forget wallet" leaves neither key behind (DevTools → Application → Local Storage).
 
@@ -199,6 +199,13 @@ Blocking: (1) keyword-grep lockfile gate porous; (2) Phase 1 zero-`apps/faucet` 
 Conditions, all folded into this version: (1) Phase-5 proof read `.sha`, but `build.json` carries `buildId = version+sha8` (`vite.config.ts:59`) → gate now extracts the sha component exactly as `verify-live.ts:61-68` does; (2) mainnet flip right after the `dev` merge would point the project at a non-existent directory if it tracks `main` → cut-over is branch-gated per project; (3) line-sorted lockfile compare loses object ownership in nested JSONC → structural deep-compare using the repo's own JSONC parse + `lockfile-exception-diff.ts` run; (4) `generate.ts:118` rewrites `generated` daily and `--adopt` may insert directives (`generate.ts:71`) → gate ignores the date and asserts the manifest is the only file the command changed; (5) `resolve-ports.ts` stdout is a summary → gate reads the written `.e2e-state/ports.json`; (6) the `nulo-faucet:` zero-hit regex contradicted the tests that must contain it → exact three-file allow-list; (7) `register-token.test.ts:23-25` (harness names, arc 1) and `incoming-transfers.test.ts:12,69` (`faucet-drip` prose, arc 2) mapped; (8) stale `candidate-schema.test.ts:13` instruction removed (it is the split app path, arc 1). Codex confirmed the storage promotion trigger (on full remembered-connect success, never on read — read-time promotion would bless stale or attacker-controlled same-origin state) and withdrew the one-PR objection.
 
 **Rejected:** nothing.
+
+## Post-implementation — what happened (2026-09-01/02)
+
+- **Arc 1** (`worktree-tools-rename`, phases 0–3): `/code-review low` as one fresh reviewer agent → 3 prose fixes (`chore(tools): apply code-review fixes (arc 1)`); codex round 1 → 6 findings (tighter CI/ports/manifest pins, prose matched to code) → round 2 "no new material findings". `lessons/arc1-loop.md`.
+- **Arc 2** (`refactor/tools-drip-tab`, phase 4): `/code-review low` clean; codex round 1 → 4 findings (in-browser forget check, mainnet comments, e2e header, tags) → rounds 2–3 comment leftovers → round 4 "no new material findings". `lessons/arc2-loop.md`.
+- **Cross-arc** (fresh session): 3 findings (stale stack → `gh stack sync` onto `e5f36cfd`; two comment classes) → see `lessons/cross-arc.md` for the confirmation round.
+- Gates re-run on the rebased top: `audit:tools`, `lint:actions`, frozen install, arc-1 tip lint — green. Final residue: the 22-file allow-list + `CLAUDE.md:83` (dev's new sentence naming the `faucet-cluster` plan).
 
 ## ELI5 companion
 

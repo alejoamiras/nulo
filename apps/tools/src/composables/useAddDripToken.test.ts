@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { useFaucetAddToken } from "./useFaucetAddToken"
+import { useAddDripToken } from "./useAddDripToken"
 
 const TOKEN_ADDR = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000002")
 const ACCOUNT = "0x000000000000000000000000000000000000000000000000000000000000000a"
@@ -14,10 +14,10 @@ function makeWallet(registerTokenImpl: (account: AztecAddress, token: AztecAddre
 	return { registerToken: registerTokenImpl }
 }
 
-describe("useFaucetAddToken", () => {
+describe("useAddDripToken", () => {
 	it("happy path: status transitions idle → submitting → ok", async () => {
 		const wallet = makeWallet(async () => undefined)
-		const { status, addToken } = useFaucetAddToken()
+		const { status, addToken } = useAddDripToken()
 		expect(status.value.kind).toBe("idle")
 
 		// biome-ignore lint/suspicious/noExplicitAny: typed mock
@@ -34,7 +34,7 @@ describe("useFaucetAddToken", () => {
 		const wallet = makeWallet(async () => {
 			throw new Error("User rejected")
 		})
-		const { status, addToken } = useFaucetAddToken()
+		const { status, addToken } = useAddDripToken()
 		// biome-ignore lint/suspicious/noExplicitAny: typed mock
 		await addToken(wallet as any, ACCOUNT, TOKEN_ADDR)
 		expect(status.value.kind).toBe("rejected")
@@ -46,7 +46,7 @@ describe("useFaucetAddToken", () => {
 			;(err as Error & { code?: number }).code = 4001
 			throw err
 		})
-		const { status, addToken } = useFaucetAddToken()
+		const { status, addToken } = useAddDripToken()
 		// biome-ignore lint/suspicious/noExplicitAny: typed mock
 		await addToken(wallet as any, ACCOUNT, TOKEN_ADDR)
 		expect(status.value.kind).toBe("rejected")
@@ -56,7 +56,7 @@ describe("useFaucetAddToken", () => {
 		const wallet = makeWallet(async () => {
 			throw new Error("Unsupported wallet method: registerToken")
 		})
-		const { status, addToken } = useFaucetAddToken()
+		const { status, addToken } = useAddDripToken()
 		// biome-ignore lint/suspicious/noExplicitAny: typed mock
 		await addToken(wallet as any, ACCOUNT, TOKEN_ADDR)
 		expect(status.value.kind).toBe("unsupported")
@@ -66,7 +66,7 @@ describe("useFaucetAddToken", () => {
 		const wallet = makeWallet(async () => {
 			throw new Error("Network timeout")
 		})
-		const { status, addToken } = useFaucetAddToken()
+		const { status, addToken } = useAddDripToken()
 		// biome-ignore lint/suspicious/noExplicitAny: typed mock
 		await addToken(wallet as any, ACCOUNT, TOKEN_ADDR)
 		expect(status.value.kind).toBe("error")
@@ -86,7 +86,7 @@ describe("useFaucetAddToken", () => {
 					resolveFn = resolve
 				}),
 		)
-		const { status, addToken } = useFaucetAddToken()
+		const { status, addToken } = useAddDripToken()
 		// biome-ignore lint/suspicious/noExplicitAny: typed mock
 		const first = addToken(wallet as any, ACCOUNT, TOKEN_ADDR)
 		expect(status.value.kind).toBe("submitting")
@@ -104,7 +104,7 @@ describe("useFaucetAddToken", () => {
 
 	it("reset() returns the composable to idle", async () => {
 		const wallet = makeWallet(async () => undefined)
-		const { status, addToken, reset } = useFaucetAddToken()
+		const { status, addToken, reset } = useAddDripToken()
 		// biome-ignore lint/suspicious/noExplicitAny: typed mock
 		await addToken(wallet as any, ACCOUNT, TOKEN_ADDR)
 		expect(status.value.kind).toBe("ok")

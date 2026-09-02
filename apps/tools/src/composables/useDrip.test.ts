@@ -56,7 +56,7 @@ vi.mock("@nulo/bridge-core", () => ({
 }))
 
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { __resetFaucetDripForTests, useFaucetDrip } from "./useFaucetDrip"
+import { __resetDripForTests, useDrip } from "./useDrip"
 
 const NULO_ADDR = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000002")
 const OLUN_ADDR = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000003")
@@ -94,7 +94,7 @@ function makeInteraction(target: "public" | "private") {
 }
 
 beforeEach(() => {
-	__resetFaucetDripForTests()
+	__resetDripForTests()
 	mockDripperMethods.drip_to_public.mockReset()
 	mockDripperMethods.drip_to_private.mockReset()
 	mockDripperMethods.drip_to_public.mockImplementation(() => makeInteraction("public"))
@@ -105,11 +105,11 @@ afterEach(() => {
 	vi.clearAllMocks()
 })
 
-describe("useFaucetDrip", () => {
+describe("useDrip", () => {
 	it("drip-public uses the drip_to_public method with the NULO onchain amount", async () => {
 		const w = makeWallet()
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		const drip = useFaucetDrip(w as any, ACCOUNT)
+		const drip = useDrip(w as any, ACCOUNT)
 		await drip.drip(NULO, NULO_ADDR, "public")
 		expect(mockDripperMethods.drip_to_public).toHaveBeenCalledWith(NULO_ADDR, 1_000_000_000n)
 		expect(mockDripperMethods.drip_to_private).not.toHaveBeenCalled()
@@ -118,7 +118,7 @@ describe("useFaucetDrip", () => {
 	it("drip-private uses the drip_to_private method", async () => {
 		const w = makeWallet()
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		const drip = useFaucetDrip(w as any, ACCOUNT)
+		const drip = useDrip(w as any, ACCOUNT)
 		await drip.drip(NULO, NULO_ADDR, "private")
 		expect(mockDripperMethods.drip_to_private).toHaveBeenCalledWith(NULO_ADDR, 1_000_000_000n)
 	})
@@ -126,7 +126,7 @@ describe("useFaucetDrip", () => {
 	it("OLUN drips use the 1e18 onchain amount", async () => {
 		const w = makeWallet()
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		const drip = useFaucetDrip(w as any, ACCOUNT)
+		const drip = useDrip(w as any, ACCOUNT)
 		await drip.drip(OLUN, OLUN_ADDR, "public")
 		expect(mockDripperMethods.drip_to_public).toHaveBeenCalledWith(OLUN_ADDR, 1_000_000_000_000_000_000n)
 	})
@@ -134,7 +134,7 @@ describe("useFaucetDrip", () => {
 	it("passes a SponsoredFeePaymentMethod to interaction.request({fee}) so the sponsor call is embedded", async () => {
 		const w = makeWallet()
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		const drip = useFaucetDrip(w as any, ACCOUNT)
+		const drip = useDrip(w as any, ACCOUNT)
 		await drip.drip(NULO, NULO_ADDR, "public")
 		const interactionInstance = mockDripperMethods.drip_to_public.mock.results[0]?.value as ReturnType<typeof makeInteraction>
 		expect(interactionInstance.request).toHaveBeenCalledWith({
@@ -145,7 +145,7 @@ describe("useFaucetDrip", () => {
 	it("sendTx opts carry the padded maxFeesPerGas — the wallet reads fees from SEND options only", async () => {
 		const w = makeWallet()
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		const drip = useFaucetDrip(w as any, ACCOUNT)
+		const drip = useDrip(w as any, ACCOUNT)
 		await drip.drip(NULO, NULO_ADDR, "public")
 		// Load-bearing: without an explicit padded cap the wallet pins the
 		// sponsored tx at getCurrentMinFees() (zero headroom) and any base-fee
@@ -159,7 +159,7 @@ describe("useFaucetDrip", () => {
 		vi.mocked(predictedWorstMinFees).mockRejectedValueOnce(new Error("node unreachable"))
 		const w = makeWallet()
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		const drip = useFaucetDrip(w as any, ACCOUNT)
+		const drip = useDrip(w as any, ACCOUNT)
 		const res = await drip.drip(NULO, NULO_ADDR, "public")
 		expect(res.kind).toBe("txHash")
 		const opts = w._calls[0]?.opts as { from?: unknown; fee?: unknown }
@@ -169,7 +169,7 @@ describe("useFaucetDrip", () => {
 	it("sendTx receives the merged exec (sponsor call + feePayer) and the selected account", async () => {
 		const w = makeWallet()
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		const drip = useFaucetDrip(w as any, ACCOUNT)
+		const drip = useDrip(w as any, ACCOUNT)
 		await drip.drip(NULO, NULO_ADDR, "public")
 		expect(w.sendTx).toHaveBeenCalledTimes(1)
 		const [exec, opts] = w.sendTx.mock.calls[0]
@@ -187,7 +187,7 @@ describe("useFaucetDrip", () => {
 	it("on success, stores the tx hash under '<symbol>:<target>' in `last`", async () => {
 		const w = makeWallet()
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		const drip = useFaucetDrip(w as any, ACCOUNT)
+		const drip = useDrip(w as any, ACCOUNT)
 		const result = await drip.drip(NULO, NULO_ADDR, "public")
 		expect(result.kind).toBe("txHash")
 		expect(result.value).toBe("0xdeadbeef0001")
@@ -201,7 +201,7 @@ describe("useFaucetDrip", () => {
 			}),
 		}
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		const drip = useFaucetDrip(w as any, ACCOUNT)
+		const drip = useDrip(w as any, ACCOUNT)
 		const result = await drip.drip(NULO, NULO_ADDR, "private")
 		expect(result.kind).toBe("error")
 		expect(result.category).toBe("tx-reverted")
@@ -211,7 +211,7 @@ describe("useFaucetDrip", () => {
 	it("clears `inflight` after a successful drip (returns to null)", async () => {
 		const w = makeWallet()
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		const drip = useFaucetDrip(w as any, ACCOUNT)
+		const drip = useDrip(w as any, ACCOUNT)
 		expect(drip.inflight.value).toBeNull()
 		await drip.drip(NULO, NULO_ADDR, "public")
 		expect(drip.inflight.value).toBeNull()
@@ -224,7 +224,7 @@ describe("useFaucetDrip", () => {
 			}),
 		}
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		const drip = useFaucetDrip(w as any, ACCOUNT)
+		const drip = useDrip(w as any, ACCOUNT)
 		await drip.drip(NULO, NULO_ADDR, "public")
 		expect(drip.inflight.value).toBeNull()
 	})
@@ -240,7 +240,7 @@ describe("useFaucetDrip", () => {
 			),
 		}
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		const drip = useFaucetDrip(w as any, ACCOUNT)
+		const drip = useDrip(w as any, ACCOUNT)
 		const p1 = drip.drip(NULO, NULO_ADDR, "public")
 		await new Promise((r) => setTimeout(r, 0))
 		const second = await drip.drip(OLUN, OLUN_ADDR, "public")
@@ -261,7 +261,7 @@ describe("useFaucetDrip", () => {
 			),
 		}
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		const drip = useFaucetDrip(w as any, ACCOUNT)
+		const drip = useDrip(w as any, ACCOUNT)
 		const p = drip.drip(NULO, NULO_ADDR, "private")
 		await new Promise((r) => setTimeout(r, 0))
 		expect(drip.isActive("NULO", "private")).toBe(true)

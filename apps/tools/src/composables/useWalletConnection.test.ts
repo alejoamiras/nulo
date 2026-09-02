@@ -199,7 +199,7 @@ describe("useWalletConnection", () => {
 		expect(c.status.value).toBe("connected")
 		expect(c.selectedAccount.value).toBe(ADDR_MAIN)
 		expect(c.accounts.value).toEqual([{ address: ADDR_MAIN, alias: "Main" }])
-		// 7 = the combined faucet + bridge set (dripper, usdc, eth, proxy, token, bridge) + the PrivateFPC
+		// 7 = the combined drip + bridge set (dripper, usdc, eth, proxy, token, bridge) + the PrivateFPC
 		// (pre-registered so the no-fuel-claim private Fee-Juice balance read works under 5.0.1).
 		expect(wallet.registerContract).toHaveBeenCalledTimes(7)
 	})

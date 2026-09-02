@@ -1,5 +1,5 @@
 /**
- * Faucet contract deployer — vendored from
+ * Drip contract deployer — vendored from
  * `aztec-standards/scripts/deploy.ts` (560 lines) and adapted to our
  * 2-token catalog (NULO, OLUN).
  *

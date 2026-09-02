@@ -22,8 +22,8 @@ vi.mock("@/composables/useL1Wallet", () => ({
 vi.mock("@/composables/useBridgeWallet", () => ({
 	useBridgeWallet: () => ({ status: ref("connected"), selectedAccount: ref(`0x${"10".repeat(32)}`), wallet: ref({}) }),
 }))
-vi.mock("@/composables/useFaucetAddToken", () => ({
-	useFaucetAddToken: () => ({ isRegistered, addToken: addTokenFn, status: addStatus, reset: vi.fn() }),
+vi.mock("@/composables/useAddDripToken", () => ({
+	useAddDripToken: () => ({ isRegistered, addToken: addTokenFn, status: addStatus, reset: vi.fn() }),
 }))
 vi.mock("@/composables/useToast", () => ({ useToast: () => ({ push: pushToast }) }))
 

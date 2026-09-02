@@ -27,7 +27,7 @@ const status = computed(() => {
 			<h3>GET TEST {{ BRIDGE_TOKEN_SYMBOL }} ON SEPOLIA (L1)</h3>
 			<p class="sub">
 				Mints 100 test {{ BRIDGE_TOKEN_SYMBOL }} to your Ethereum account on Sepolia: the asset this bridge
-				moves. This is not the Faucet tab - the Faucet drips its own tokens directly on Aztec (L2), and this bridge cannot
+				moves. This is not the Drip tab - the Drip tab drips its own tokens directly on Aztec (L2), and this bridge cannot
 				move that one. No real value.
 			</p>
 		</header>

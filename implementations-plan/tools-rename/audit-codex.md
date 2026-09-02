@@ -184,3 +184,11 @@ Two PRs are no longer materially less safe once mainnet cut-over is branch-gated
 ### Verdict
 
 conditional approve (with conditions: fix the structural lock/baseline comparisons, executable e2e/residue/live gates, mainnet cut-over timing, and the two missed e2e comment sites)
+
+---
+
+## Post-implementation audits (arc loops)
+
+- Arc 1: fresh session `01a05f30-ab1b-79e1-826e-e6fa42fe8982` — round 1: 6 material findings (1 M, 5 L), all fixed in `245c41f0`; round 2 (resumed): "no new material findings". Transcript in `lessons/arc1-loop.md`.
+- Arc 2: fresh session `01a05f4c-7bdf-7e62-a0b3-fe837b40d205` — round 1: 4 material findings (1 M, 3 L), fixed in `3ab1845f` + an in-browser forget check; round 2: 3 Low comment leftovers, `c6bb7964`; round 3: 1 Low comment leftover, `60ad688b`; round 4 (confirmation): "no new material findings". Transcript in `lessons/arc2-loop.md`.
+- Cross-arc: see `lessons/cross-arc.md`.
