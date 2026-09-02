@@ -336,19 +336,16 @@ export async function recoverDepositLeg(rec: DepositJournalRecord, publicClient:
 /** A direct-FJ record with a prior fuel claim on record is rebuilt ONLY once that claim
  *  conclusively dropped: an included one (success, or reverted past setup — the message was
  *  consumed either way) has nothing left to claim, and a pending/unreachable one may still land
- *  (simulate is an authority, not exclusion against a concurrent pending tx). The one escape from
- *  a "pending" that never resolves is the ladders' age-out: past `PRIVATE_ATTEMPT_STALE_MS` the
- *  retry re-opens with the simulate gate as the double-spend authority. */
+ *  — simulate is an authority, not exclusion against a queued tx, and elapsed time is not evidence
+ *  the tx vanished. A pending that the node never resolves therefore waits; re-opening it is an
+ *  owner-level tradeoff (a time-bounded double-send window), deliberately not taken here. */
 async function priorFuelClaimStop(fuel: DepositJournalRecord["fuel"]): Promise<ClaimInteraction | null> {
 	if (fuel?.consumed === true) return failStopInteraction(FUEL_ALREADY_CLAIMED)
 	if (fuel?.claimTxHash === undefined) return null
 	const status = await fuelReceiptStatus(fuel.claimTxHash)
 	if (status === "included") return failStopInteraction(FUEL_ALREADY_CLAIMED)
 	if (status === "dropped") return null
-	const agedOut = fuel.claimAttemptAt === undefined || Date.now() - fuel.claimAttemptAt > PRIVATE_ATTEMPT_STALE_MS
-	return agedOut
-		? null
-		: failStopInteraction("A gas claim for this bridge is still pending - waiting for its receipt before trying again.")
+	return failStopInteraction("A gas claim for this bridge is still pending - waiting for its receipt before trying again.")
 }
 const FUEL_ALREADY_CLAIMED = "The gas claim was already included on Aztec - there is nothing left to claim for this bridge."
 

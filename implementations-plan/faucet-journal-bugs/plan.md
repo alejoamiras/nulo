@@ -17,8 +17,8 @@ Audits: codex (blueprint, reject → folded) + fable-role (conditional approve �
   - private token, private fuel: the fail-stop "private fuel already consumed" (never re-mint, L11) — a
     dead-end replaced by a true statement, not a resend;
   - direct-FJ (fuel-only bridge, public or private): the builder fail-stops "already included" on an
-    included `fuel.claimTxHash`, "still pending" on a pending/unreachable one until the latch ages
-    out, and rebuilds only a dropped one (never a second claim against a live one).
+    included `fuel.claimTxHash`, "still pending" on a pending/unreachable one, and rebuilds only a
+    dropped one (never a second claim against a possibly-live one).
   Pending / proposed / dropped-streak receipts behave exactly as today.
 - Both pins flip; the listed snapshots change and nothing else; every other tools unit + jsdom e2e
   test is zero-edit green. Manifest stays 35.
@@ -119,12 +119,14 @@ the `reverted` arm. The dropped-streak clear keeps its unconditional form — ou
 
 ### C — direct-FJ records rebuild a prior fuel claim only once it conclusively dropped (`priorFuelClaimStop`)
 Before the builder runs: `fuel.consumed` or an included `fuel.claimTxHash` ⇒ "already included";
-a dropped one ⇒ rebuild (as today); pending/unreachable ⇒ "still pending" until the latch ages out
-(`PRIVATE_ATTEMPT_STALE_MS`, the ladders' existing escape from a pending that never resolves; the
-simulate gate is then the authority). Codex r2 refused "unreachable" as an argument for the
-included case, and its PR review refused rebuilding on pending: the persisted window between the
-nested hash (`fuelClaim.ts` onTxHash) and the top-level hash (`useBridgeJournal.ts` sendAndWatch)
-is real, and simulate is not exclusion against a concurrent pending tx.
+a dropped one ⇒ rebuild (as today); pending/unreachable ⇒ "still pending", always. Codex r2 refused
+"unreachable" as an argument for the included case; its PR review refused rebuilding on pending
+(the persisted window between the nested hash — `fuelClaim.ts` onTxHash — and the top-level hash —
+`useBridgeJournal.ts` sendAndWatch — is real, and simulate is not exclusion against a queued tx);
+and its second review refused the age-out I had added as a liveness escape (elapsed time is not
+evidence the tx vanished — a time-bounded double-send window is an owner-level tradeoff). Residual
+R4, surfaced: a pending the node never resolves leaves a direct-FJ record waiting; the private
+ladder's own `attemptAgedOut` is the existing precedent if the owner wants that tradeoff.
 
 ### Competing outline (rejected; both audits independently agreed)
 - A″: deep-merge `fuel` in `bridge-core` `patchRecord` — policy in the storage package.

@@ -778,7 +778,7 @@ describe("claim dep characterization", () => {
 		expect(settle()).toMatchObject({ standaloneClaimed: true, messageHash: "0xfromothertab" })
 	})
 
-	test("direct fee-juice: a PENDING prior fuel claim waits (never a second claim) until the latch ages out", async () => {
+	test("direct fee-juice: a PENDING or unreachable prior fuel claim always waits — never a second claim, however old the latch", async () => {
 		const deps = wiredDeps()
 		const now = 1_700_000_000_000
 		const fresh = mkRec({
@@ -793,13 +793,14 @@ describe("claim dep characterization", () => {
 		expect(await expectStop(await deps.claim(fresh, "0xsecrethex", undefined))).toMatch(/still pending/)
 		h.l2.txReceiptThrows = false
 		expect(h.trace.some(([n]) => n === "fuelClaim.buildFuelClaimInteraction")).toBe(false)
+		// Elapsed time is not evidence the queued tx vanished: an old latch waits exactly like a fresh one.
 		const aged = mkRec({
 			id: "0xfjaged",
 			assetKind: "fee-juice",
 			fuel: { ...FUEL_OK, claimAttempt: true, claimAttemptAt: now - 16 * 60_000, claimTxHash: TX(6) },
 		} as never)
-		await (await deps.claim(aged, "0xsecrethex", undefined)).simulate()
-		expect(h.trace.some(([n]) => n === "fuelClaim.buildFuelClaimInteraction")).toBe(true)
+		expect(await expectStop(await deps.claim(aged, "0xsecrethex", undefined))).toMatch(/still pending/)
+		expect(h.trace.some(([n]) => n === "fuelClaim.buildFuelClaimInteraction")).toBe(false)
 	})
 
 	test("reconcileFuelConsumed merges into the persisted block, not the copy it read before its await", async () => {
