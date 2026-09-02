@@ -18,4 +18,8 @@ Stack-hygiene answer from the pass: arc 1's vocabulary is independently consiste
 
 ## Round 2 — resumed on the fixes + rebase
 
-_pending_
+One Low, one word: `app.css.parity.test.ts:15` still said "round-1". Reworded ("A tools light-background regression …"); a one-line confirmation resume followed.
+
+## Round 3 — confirmation (on `3c339499`)
+
+Verbatim: **"no new material findings"**. Cross-arc pass converged; delivery follows.
