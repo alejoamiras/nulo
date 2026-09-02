@@ -302,6 +302,7 @@ describe("isTerminalAttention", () => {
 	it("is true only for attentions no retry can clear", () => {
 		expect(isTerminalAttention("stale-deployment")).toBe(true)
 		expect(isTerminalAttention("receipt-mismatch")).toBe(true)
+		expect(isTerminalAttention("malformed-record")).toBe(true)
 	})
 
 	it("leaves every retryable attention (and the absent one) actionable", () => {

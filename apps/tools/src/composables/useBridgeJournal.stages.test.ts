@@ -98,7 +98,7 @@ function smartClaimFake() {
 		},
 		send: async () => {
 			sent = true
-			return { txHash: "0xclaimtx" }
+			return { txHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478" }
 		},
 	}))
 	return claim
@@ -115,7 +115,7 @@ function baseDeps(kv: KV) {
 		claimReceiptStatus: vi.fn<() => Promise<"success" | "dropped" | "reverted" | "pending" | "unreachable">>(async () => "success"),
 		waitConsumeReceipt: vi.fn(async () => true),
 		verifyConsumeIdentity: vi.fn(async () => true),
-		consume: vi.fn(async () => ({ consumeTxHash: "0xconsumetx" })),
+		consume: vi.fn(async () => ({ consumeTxHash: "0x0015000000000000000000000000000000000000000000636f6e73756d657478" })),
 	}
 }
 
@@ -423,9 +423,9 @@ describe("journal engine — pre-extraction pins", () => {
 			}
 		})
 		connectJournalDeps({ ...deps, claim })
-		addRecord(mkDeposit("0xsentalready", { claimTxHash: "0xtheclaim" }))
+		addRecord(mkDeposit("0xsentalready", { claimTxHash: "0x001f00000000000000000000000000000000000000000000746865636c61696d" }))
 		await runDepositClaim("0xsentalready")
-		expect(order[0]).toBe("receipt:0xtheclaim")
+		expect(order[0]).toBe("receipt:0x001f00000000000000000000000000000000000000000000746865636c61696d")
 		expect(order.indexOf("build")).toBeGreaterThan(0)
 		expect(order).toContain("probe-simulate")
 		// Explicit: the sent path NEVER sends (the throwing fake would also have pushed).
@@ -439,7 +439,7 @@ describe("journal engine — pre-extraction pins", () => {
 		const claim = vi.fn(async () => ({ simulate: async () => {}, send: async () => ({ txHash: "0xnew" }) }))
 		deps.claimReceiptStatus.mockResolvedValue("reverted")
 		connectJournalDeps({ ...deps, claim })
-		addRecord(mkDeposit("0xrevtrap", { claimTxHash: "0xreverted" }))
+		addRecord(mkDeposit("0xrevtrap", { claimTxHash: "0x001c000000000000000000000000000000000000000000007265766572746564" }))
 		await runDepositClaim("0xrevtrap")
 		const { records, runtime } = useBridgeJournal()
 		const rec = () => records.value.find((r) => r.id === "0xrevtrap") as DepositJournalRecord | undefined
@@ -456,16 +456,18 @@ describe("journal engine — pre-extraction pins", () => {
 	it("(e) the revert clear is an expected-hash guard: a late reverted poll never wipes a fresh hash another tab sent", async () => {
 		const deps = baseDeps(kv)
 		deps.claimReceiptStatus.mockImplementation((async (hash: string) => {
-			if (hash !== "0xH") return "pending"
+			if (hash !== "0x0010000000000000000000000000000000000000000000000000000000000048") return "pending"
 			// Between this tab's poll and its clear, "another tab" retried and journaled a new hash.
-			kvPatchRecord(kv, "0xrace", { claimTxHash: "0xN" })
+			kvPatchRecord(kv, "0xrace", { claimTxHash: "0x001100000000000000000000000000000000000000000000000000000000004e" })
 			return "reverted"
 		}) as never)
 		connectJournalDeps({ ...deps, claim: vi.fn() as never })
-		addRecord(mkDeposit("0xrace", { claimTxHash: "0xH" }))
+		addRecord(mkDeposit("0xrace", { claimTxHash: "0x0010000000000000000000000000000000000000000000000000000000000048" }))
 		await runDepositClaim("0xrace")
 		const { records } = useBridgeJournal()
-		expect((records.value.find((r) => r.id === "0xrace") as DepositJournalRecord | undefined)?.claimTxHash).toBe("0xN")
+		expect((records.value.find((r) => r.id === "0xrace") as DepositJournalRecord | undefined)?.claimTxHash).toBe(
+			"0x001100000000000000000000000000000000000000000000000000000000004e",
+		)
 	})
 
 	it("(e) after the clear, only a SESSION-LIVE reverted record auto-resends on reconnect; an idle one waits for RETRY", async () => {
@@ -473,8 +475,8 @@ describe("journal engine — pre-extraction pins", () => {
 		const claim = vi.fn(async () => ({ simulate: async () => {}, send: async () => ({ txHash: "0xnew" }) }))
 		deps.claimReceiptStatus.mockResolvedValue("reverted")
 		connectJournalDeps({ ...deps, claim })
-		addRecord(mkDeposit("0xrevlive", { claimTxHash: "0xrev1" }))
-		addRecord(mkDeposit("0xrevidle", { claimTxHash: "0xrev2" }))
+		addRecord(mkDeposit("0xrevlive", { claimTxHash: "0x001a000000000000000000000000000000000000000000000000000072657631" }))
+		addRecord(mkDeposit("0xrevidle", { claimTxHash: "0x001b000000000000000000000000000000000000000000000000000072657632" }))
 		markSessionLive("0xrevlive")
 		await runDepositClaim("0xrevlive")
 		await runDepositClaim("0xrevidle")
@@ -484,21 +486,58 @@ describe("journal engine — pre-extraction pins", () => {
 		expect((claim.mock.calls[0] as unknown as [DepositJournalRecord])[0].id).toBe("0xrevlive")
 	})
 
+	it("(e) a malformed persisted claim hash is a terminal record fault — named, never probed, never resent", async () => {
+		const deps = baseDeps(kv)
+		const claim = vi.fn()
+		connectJournalDeps({ ...deps, claim: claim as never })
+		addRecord(mkDeposit("0xbadhash", { claimTxHash: "0xnot-a-tx-hash" }))
+		await runDepositClaim("0xbadhash")
+		const { records, runtime } = useBridgeJournal()
+		expect(runtime.value["0xbadhash"]?.attention).toBe("malformed-record")
+		expect(runtime.value["0xbadhash"]?.note).toMatch(/malformed/)
+		expect(deps.claimReceiptStatus).not.toHaveBeenCalled()
+		expect(claim).not.toHaveBeenCalled()
+		// The record is untouched: only a restore or a discard changes it.
+		expect((records.value.find((r) => r.id === "0xbadhash") as DepositJournalRecord | undefined)?.claimTxHash).toBe("0xnot-a-tx-hash")
+		// Once known, session resume leaves it alone — the explicit RETRY is the only path back in.
+		deps.claimReceiptStatus.mockClear()
+		resumeSessionWork()
+		await new Promise((r) => setTimeout(r, 0))
+		expect(deps.claimReceiptStatus).not.toHaveBeenCalled()
+		expect(claim).not.toHaveBeenCalled()
+	})
+
+	it("(e) after a fresh reload, the first session resume classifies a malformed record without a click, probe or resend", async () => {
+		const deps = baseDeps(kv)
+		const claim = vi.fn()
+		connectJournalDeps({ ...deps, claim: claim as never })
+		// A persisted hash makes the record a prompt-free receipt wait, which resume picks up.
+		addRecord(mkDeposit("0xbadreload", { claimTxHash: "0xnot-a-tx-hash" }))
+		resumeSessionWork()
+		const { runtime } = useBridgeJournal()
+		await vi.waitFor(() => expect(runtime.value["0xbadreload"]?.attention).toBe("malformed-record"))
+		expect(deps.claimReceiptStatus).not.toHaveBeenCalled()
+		expect(claim).not.toHaveBeenCalled()
+	})
+
 	it("(f) the dropped-streak clear is expected-hash guarded too: a fresh hash another tab sent survives three late drops", async () => {
 		const deps = baseDeps(kv)
 		let polls = 0
 		deps.claimReceiptStatus.mockImplementation((async (hash: string) => {
-			if (hash !== "0xH") return "pending"
+			if (hash !== "0x0010000000000000000000000000000000000000000000000000000000000048") return "pending"
 			// "Another tab" retried and journaled a new hash while this tab's drop streak was building.
-			if (++polls === 2) kvPatchRecord(kv, "0xdroprace", { claimTxHash: "0xN" })
+			if (++polls === 2)
+				kvPatchRecord(kv, "0xdroprace", { claimTxHash: "0x001100000000000000000000000000000000000000000000000000000000004e" })
 			return "dropped"
 		}) as never)
 		connectJournalDeps({ ...deps, claim: vi.fn() as never })
-		addRecord(mkDeposit("0xdroprace", { claimTxHash: "0xH" }))
+		addRecord(mkDeposit("0xdroprace", { claimTxHash: "0x0010000000000000000000000000000000000000000000000000000000000048" }))
 		await runDepositClaim("0xdroprace")
 		const { records, runtime } = useBridgeJournal()
 		expect(deps.claimReceiptStatus).toHaveBeenCalledTimes(3)
-		expect((records.value.find((r) => r.id === "0xdroprace") as DepositJournalRecord | undefined)?.claimTxHash).toBe("0xN")
+		expect((records.value.find((r) => r.id === "0xdroprace") as DepositJournalRecord | undefined)?.claimTxHash).toBe(
+			"0x001100000000000000000000000000000000000000000000000000000000004e",
+		)
 		expect(runtime.value["0xdroprace"]?.note).toMatch(/dropped - claim again/)
 	})
 
@@ -509,7 +548,7 @@ describe("journal engine — pre-extraction pins", () => {
 		let n = 0
 		deps.claimReceiptStatus.mockImplementation(async () => (n < seq.length ? seq[n++] : "pending"))
 		connectJournalDeps({ ...deps, claim: claim as never })
-		addRecord(mkDeposit("0xstreak", { claimTxHash: "0xdroppy" }))
+		addRecord(mkDeposit("0xstreak", { claimTxHash: "0x001600000000000000000000000000000000000000000000000064726f707079" }))
 		claim.mockImplementation(async () => ({ simulate: async () => {}, send: async () => ({ txHash: "0xx" }) }))
 		await runDepositClaim("0xstreak")
 		const { records, runtime } = useBridgeJournal()
@@ -550,14 +589,16 @@ describe("journal engine — pre-extraction pins", () => {
 			send: async () => ({ txHash: "0xx" }),
 		}))
 		connectJournalDeps({ ...deps, claim })
-		addRecord(mkDeposit("0xboundary", { claimTxHash: "0xspan" }))
+		addRecord(mkDeposit("0xboundary", { claimTxHash: "0x001e00000000000000000000000000000000000000000000000000007370616e" }))
 		await runDepositClaim("0xboundary")
 		await vi.waitFor(() => {
 			const { records } = useBridgeJournal()
 			expect(records.value.find((r) => r.id === "0xboundary")?.completedAt).toBe(999)
 		})
 		const { records } = useBridgeJournal()
-		expect((records.value.find((r) => r.id === "0xboundary") as DepositJournalRecord | undefined)?.claimTxHash).toBe("0xspan")
+		expect((records.value.find((r) => r.id === "0xboundary") as DepositJournalRecord | undefined)?.claimTxHash).toBe(
+			"0x001e00000000000000000000000000000000000000000000000000007370616e",
+		)
 	})
 
 	it("(f) streak independence: alternating dropped/unreachable never clears (each resets the other)", async () => {
@@ -572,10 +613,12 @@ describe("journal engine — pre-extraction pins", () => {
 			send: async () => ({ txHash: "0xx" }),
 		}))
 		connectJournalDeps({ ...deps, claim })
-		addRecord(mkDeposit("0xalt", { claimTxHash: "0xalthash" }))
+		addRecord(mkDeposit("0xalt", { claimTxHash: "0x00120000000000000000000000000000000000000000000000616c7468617368" }))
 		await runDepositClaim("0xalt")
 		const { records } = useBridgeJournal()
-		expect((records.value.find((r) => r.id === "0xalt") as DepositJournalRecord | undefined)?.claimTxHash).toBe("0xalthash")
+		expect((records.value.find((r) => r.id === "0xalt") as DepositJournalRecord | undefined)?.claimTxHash).toBe(
+			"0x00120000000000000000000000000000000000000000000000616c7468617368",
+		)
 		expect(records.value.find((r) => r.id === "0xalt")?.completedAt).toBe(999)
 	})
 
@@ -584,7 +627,7 @@ describe("journal engine — pre-extraction pins", () => {
 		deps.claimReceiptStatus.mockResolvedValue("pending")
 		connectJournalDeps({ ...deps, claim: smartClaimFake() })
 		const { runtime } = useBridgeJournal()
-		addRecord(mkDeposit("0xrounds", { claimTxHash: "0xslow" }))
+		addRecord(mkDeposit("0xrounds", { claimTxHash: "0x001d0000000000000000000000000000000000000000000000000000736c6f77" }))
 		await runDepositClaim("0xrounds")
 		// Rounds 2-10 chain detached between lock releases; waitMs is a no-op so they finish fast.
 		await vi.waitFor(() => {
@@ -624,7 +667,7 @@ describe("journal engine — pre-extraction pins", () => {
 		connectJournalDeps({ ...deps, claim: smartClaimFake() })
 		addRecord(mkWithdraw("0xwd"))
 		await runWithdrawConsume("0xwd")
-		expect(hashAtWait).toBe("0xconsumetx")
+		expect(hashAtWait).toBe("0x0015000000000000000000000000000000000000000000636f6e73756d657478")
 		expect((records.value.find((r) => r.id === "0xwd") as WithdrawJournalRecord | undefined)?.consumeTxHash).toBeUndefined()
 		expect(runtime.value["0xwd"]?.note).toMatch(/The finish transaction failed/)
 	})
@@ -634,7 +677,7 @@ describe("journal engine — pre-extraction pins", () => {
 		const { records, runtime } = useBridgeJournal()
 		deps.waitConsumeReceipt.mockResolvedValue(false)
 		connectJournalDeps({ ...deps, claim: smartClaimFake() })
-		addRecord(mkWithdraw("0xwprior", { consumeTxHash: "0xoldconsume" }))
+		addRecord(mkWithdraw("0xwprior", { consumeTxHash: "0x001700000000000000000000000000000000000000006f6c64636f6e73756d65" }))
 		await runWithdrawConsume("0xwprior")
 		expect((records.value.find((r) => r.id === "0xwprior") as WithdrawJournalRecord | undefined)?.consumeTxHash).toBeUndefined()
 		expect(runtime.value["0xwprior"]?.note).toMatch(/The prior finish transaction failed/)
@@ -646,7 +689,7 @@ describe("journal engine — pre-extraction pins", () => {
 		await runWithdrawConsume("0xwfresh")
 		const fresh = records.value.find((r) => r.id === "0xwfresh") as WithdrawJournalRecord | undefined
 		expect(fresh?.completedAt).toBe(999)
-		expect(fresh?.consumeTxHash).toBe("0xconsumetx")
+		expect(fresh?.consumeTxHash).toBe("0x0015000000000000000000000000000000000000000000636f6e73756d657478")
 	})
 
 	it("(h) completion uses the POST-WAIT reread: a record discarded during the receipt wait is not resurrected", async () => {
@@ -671,10 +714,10 @@ describe("journal engine — pre-extraction pins", () => {
 		deps.consume.mockImplementation((async (_rec: unknown, onProgress: (p: Record<string, number>) => void) => {
 			onProgress({ targetBlock: 10 })
 			onProgress({ provenBlock: 10 })
-			return { consumeTxHash: "0xc2" }
+			return { consumeTxHash: "0x0013000000000000000000000000000000000000000000000000000000006332" }
 		}) as never)
 		connectJournalDeps(noVerify as never)
-		addRecord(mkWithdraw("0xwd2", { consumeTxHash: "0xrediscovered" }))
+		addRecord(mkWithdraw("0xwd2", { consumeTxHash: "0x00190000000000000000000000000000000000007265646973636f7665726564" }))
 		await runWithdrawConsume("0xwd2")
 		// ?? true: the prior hash completes without a verifier.
 		const { records } = useBridgeJournal()
