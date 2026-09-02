@@ -16,7 +16,6 @@
 			"apps/extension/src/wallet/services/incoming-transfer/service.scenarios.test.ts": 1,
 			"apps/extension/tests/e2e/fixtures/extension.ts": 2,
 			"apps/extension/tests/e2e/fixtures/journal.ts": 3,
-			"apps/extension/tests/e2e/global-setup.ts": 1,
 			"apps/tools/src/lib/errors.ts": 1,
 			"apps/tools/src/lib/phase-clock.ts": 1,
 			"packages/bridge-core/scripts/discover-mainnet-fuel.ts": 1,

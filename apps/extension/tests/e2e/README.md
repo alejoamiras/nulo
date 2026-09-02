@@ -23,12 +23,12 @@ bun run e2e:agent --shard=5/5                        # reproduce one CI shard (s
 
 Internally `scripts/e2e/agent.sh`:
 
-1. Calls `scripts/e2e/resolve-ports.ts` to allocate five ephemeral TCP ports (anvil, aztec, aztec admin, aztec p2p, playground) and persists them to `.e2e-state/ports.json`.
+1. Calls `scripts/e2e/resolve-ports.ts` to allocate six ephemeral TCP ports (anvil, aztec, aztec admin, aztec p2p, playground, tools) and persists them to `.e2e-state/ports.json`.
 2. Builds the Chrome extension with `VITE_LOCAL_NETWORK_RPC_URL=http://localhost:<aztec port>` so the wallet's "Local Network" preset talks to this run's sandbox.
 3. Greps the bundle for the URL — fails fast if the vite env didn't propagate.
 4. Runs the network suite with `ANVIL_URL` / `ANVIL_PORT` / `AZTEC_NODE_URL` / `AZTEC_PORT` / `AZTEC_ADMIN_PORT` / `AZTEC_P2P_PORT` / `PLAYGROUND_URL` / `PLAYGROUND_PORT` in env.
 
-`global-setup.ts` reads those env vars, spawns anvil + aztec + playground (each with the assigned port) and writes an ownership lockfile at `.e2e-state/owned.json`.
+`global-setup.ts` reads those env vars, spawns anvil + aztec + playground (each with the assigned port) and writes an ownership lockfile at `.e2e-state/owned.json`. Its `setup` is a short coordinator whose ORDER is the contract — orphan reap + build guard → `reconcilePriorLock` (reuse a healthy pack, or reap a stale one) → provisional lock → `markBootStarted()` (the exit-86 window opens here, AFTER the build/env checks that must never be retried) → `ensureAnvil` → `ensureAztecNode` → `ensureDevServer` (playground; tools opt-in) → `finishBoot` (provide URLs, deploy, `markBootReady()`). Each stage probes first and adopts an already-running service; a stage detects a permissive failure and returns `"skip"` (the strict-mode `E2E_REQUIRE_SETUP=1` throws stay inside it), and the coordinator owns the exit (`provideWithoutSandbox` + `return`), so a lost or doubled `provide` is visible in one place. Process handles and the `weStarted*` flags stay module-level, shared with `teardown` and the signal hooks.
 
 ### Accelerator: local vs CI
 

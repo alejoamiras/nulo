@@ -12,6 +12,24 @@ subagent audit (Opus, the Fable fallback) on the stage split.
 
 | 3 | codex | PR-a review (diff) | approve | no transcription defects; polling parity exact; planner keeps the partial method log on a throwing `answer`; gate-ref timing identical; one non-blocking nit folded — the "unparsed" planner test now uses an 80-char body so the 60-char truncation is actually pinned |
 
+| 4 | codex | PR-b review (stage split diff, read-only) | conditional approve → approve | no runtime defect (probe/gate order, FATAL strings, node→anvil cleanup, reuse ownership, marker placement, spawn→flag→pid order, log filters, env overrides, tools opt-in, teardown + signal-hook state all match); conditions were docs/ledger only: (a) `playgroundUrl` is now provided after the tools probe (inert — workers start after setup) → recorded as an accepted ordering difference in the plan + PR body; (b) `provideWithoutSandbox` has TWO call sites covering four skip causes, not four — plan text corrected; (c) README: stages detect and return `"skip"`, the coordinator provides and exits; six ports (tools), not five; skill: "no existing deterministic unit seam" instead of "no pins are possible" |
+
+## PR-b evidence (2026-09-02)
+
+- Isolated Biome scoring (scratch project, one rule @15): original `setup` unsuppressed = **81**;
+  the split = no diagnostic (every stage ≤ 15). Manifest 44 → 43, generator inserted nothing.
+- Multiset proofs (old vs new): trimmed lines 90 only-old / 127 only-new — all wrapper lines,
+  the dedup'd `provide` triples (×4), the reap block (×2), the two dev-server blocks, four
+  `else {` → early returns, formatter re-wraps; string literals 38/39 — the same dedups plus the
+  playground/tools strings that became `${label}`/`${title}` templates; added literals are the
+  outcome tags and doc-comment backticks only.
+- Drills (one spec, `meta-getChainInfo`): **1a** fresh boot on the recorded port pack, `kill -9`
+  after deploy, lock pids intact · **1b** same command → `reusing prior sandbox (identity check
+  passed)` ×1, `Starting anvil` ×0, 1/1 green · **2** `e2e:agent` on fresh ports → `prior lock is
+  for different ports — reaping orphans` ×1, 1/1 green, no orphans after · **3** empty `HOME` +
+  `E2E_REQUIRE_SETUP=1` on free ports → `FATAL: anvil binary not found at` before any spawn,
+  exit 1.
+
 ## Decision ledger
 
 - **Stage split vs ACCEPT-with-justification for `setup`**: split. Both auditors' own position:
