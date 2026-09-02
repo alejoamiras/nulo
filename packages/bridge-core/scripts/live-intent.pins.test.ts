@@ -41,7 +41,7 @@ const h = vi.hoisted(() => {
 })
 
 vi.mock("./run", () => {
-	type Opts = { cwd?: string; stdio?: unknown; env?: NodeJS.ProcessEnv }
+	type Opts = { cwd?: string; stdio?: unknown; env?: NodeJS.ProcessEnv; check?: boolean; maxBuffer?: number }
 	// The event carries what the script passed BESIDES argv: cwd, stdio, and every env entry that
 	// differs from the process env (the live verifier's BRIDGE_MANIFEST) — a regression that drops
 	// or changes any of them breaks the golden trace.
@@ -52,16 +52,23 @@ vi.mock("./run", () => {
 	}
 	const project = (opts?: Opts) => {
 		if (!opts) return ""
-		const extra = envExtras(opts.env)
 		const tag: Record<string, unknown> = {}
 		if (opts.cwd) tag.cwd = h.rel(opts.cwd)
 		if (opts.stdio) tag.stdio = opts.stdio
-		if (Object.keys(extra).length) tag.env = extra
+		if (opts.check !== undefined) tag.check = opts.check
+		if (opts.maxBuffer !== undefined) tag.maxBuffer = opts.maxBuffer
+		if (opts.env) {
+			tag.env = envExtras(opts.env)
+			// `{ ...process.env, X }` vs `{ X }`: the latter would drop PATH and the RPC credentials.
+			tag.inheritsProcessEnv = opts.env.PATH === process.env.PATH
+		}
 		return Object.keys(tag).length ? ` ${JSON.stringify(tag)}` : ""
 	}
+	// The event serialises the argv ARRAY (never a joined string, so `["--mode","x"]` and
+	// `["--mode x"]` cannot collide); the script table is keyed by the joined form for brevity.
 	const runImpl = (bin: string, args: readonly string[], opts?: Opts) => {
 		const k = h.key(bin, args)
-		h.state.events.push(`run ${k}${project(opts)}`)
+		h.state.events.push(`run ${bin} ${h.rel(JSON.stringify(args))}${project(opts)}`)
 		const scripted = h.state.scripts.get(k)
 		if (scripted === undefined) throw new Error(`unscripted run: ${k}`)
 		if (scripted instanceof Error) throw scripted
@@ -251,34 +258,34 @@ const IN_REPO = ' {"cwd":"<repo>"}'
 const CAST_IO = ' {"stdio":["ignore","pipe","pipe"]}'
 const VERIFY_GREEN_TRACE = [
 	"read <repo>/implementations-plan/aztec-5.0.1-line/lessons/intent.json",
-	`run git --literal-pathspecs status --porcelain -- <repo>/implementations-plan/aztec-5.0.1-line/lessons/intent.json${IN_REPO}`,
-	`run git status --porcelain${IN_REPO}`,
-	`run git diff --name-only --end-of-options 39de187a444e623f76ced479b07a5dd322ce10c7 HEAD --${IN_REPO}`,
+	`run git ["--literal-pathspecs","status","--porcelain","--","<repo>/implementations-plan/aztec-5.0.1-line/lessons/intent.json"]${IN_REPO}`,
+	`run git ["status","--porcelain"]${IN_REPO}`,
+	`run git ["diff","--name-only","--end-of-options","39de187a444e623f76ced479b07a5dd322ce10c7","HEAD","--"]${IN_REPO}`,
 	"fetch https://node.example node_getNodeInfo []",
-	`run cast wallet address --private-key abababababababababababababababababababababababababababababababab${CAST_IO}`,
+	`run cast ["wallet","address","--private-key","abababababababababababababababababababababababababababababababab"]${CAST_IO}`,
 	"read <repo>/contracts/bridge/aztec/token_bridge/target/token_bridge_contract-TokenBridge.json",
 	"read <repo>/contracts/bridge/aztec/token_minter_proxy/target/token_minter_proxy-TokenMinterProxy.json",
 	"read <repo>/contracts/bridge/aztec/keystone/target/keystone.json",
 	"read <repo>/packages/bridge-core/src/private-fpc-canonical.json",
 	"read <repo>/apps/tools/public/testnet-bridge.candidate.json",
-	`run cast call 0xb4a9f8eadc8ca944729d61e59a9f491faff237a3 UNDERLYING()(address) --rpc-url https://sepolia.example/rpc${CAST_IO}`,
-	`run cast call 0x5602c39a6e9c5ace589f64f754927bcda4f4bfc9 FEE_ASSET()(address) --rpc-url https://sepolia.example/rpc${CAST_IO}`,
-	`run cast call 0x78365a471dfce304f25d0382cdbd65b2b7935820 owner()(address) --rpc-url https://sepolia.example/rpc${CAST_IO}`,
-	`run cast call 0x78365a471dfce304f25d0382cdbd65b2b7935820 swapTarget()(address) --rpc-url https://sepolia.example/rpc${CAST_IO}`,
-	`run cast balance 0xFcc2238319aC360e985f1736aBB3df6251DAF6F5 --rpc-url https://sepolia.example/rpc --ether${CAST_IO}`,
+	`run cast ["call","0xb4a9f8eadc8ca944729d61e59a9f491faff237a3","UNDERLYING()(address)","--rpc-url","https://sepolia.example/rpc"]${CAST_IO}`,
+	`run cast ["call","0x5602c39a6e9c5ace589f64f754927bcda4f4bfc9","FEE_ASSET()(address)","--rpc-url","https://sepolia.example/rpc"]${CAST_IO}`,
+	`run cast ["call","0x78365a471dfce304f25d0382cdbd65b2b7935820","owner()(address)","--rpc-url","https://sepolia.example/rpc"]${CAST_IO}`,
+	`run cast ["call","0x78365a471dfce304f25d0382cdbd65b2b7935820","swapTarget()(address)","--rpc-url","https://sepolia.example/rpc"]${CAST_IO}`,
+	`run cast ["balance","0xFcc2238319aC360e985f1736aBB3df6251DAF6F5","--rpc-url","https://sepolia.example/rpc","--ether"]${CAST_IO}`,
 ]
 
 const PROMOTE_GREEN_TRACE = [
 	"read <repo>/implementations-plan/aztec-5.0.1-line/lessons/intent.json",
 	...VERIFY_GREEN_TRACE,
-	'run bun <repo>/packages/bridge-core/scripts/check-fpc-version.ts --mode require-deployed {"stdio":"inherit"}',
+	'run bun ["<repo>/packages/bridge-core/scripts/check-fpc-version.ts","--mode","require-deployed"] {"stdio":"inherit"}',
 	"lstat <repo>/apps/tools/public/testnet-bridge.candidate.json",
 	"lstat <repo>/apps/tools/src/contracts/deployments.candidate.json",
 	"lstat <repo>/apps/tools/public/testnet-bridge.json",
 	"lstat <repo>/apps/tools/src/contracts/deployments.json",
 	"read <repo>/apps/tools/public/testnet-bridge.candidate.json",
 	"read <repo>/apps/tools/src/contracts/deployments.candidate.json",
-	'run bun <repo>/apps/tools/scripts/verify-deployments.ts --config <repo>/apps/tools/src/contracts/deployments.candidate.json {"stdio":"inherit"}',
+	'run bun ["<repo>/apps/tools/scripts/verify-deployments.ts","--config","<repo>/apps/tools/src/contracts/deployments.candidate.json"] {"stdio":"inherit"}',
 	"read <repo>/apps/tools/public/testnet-bridge.json",
 	"mkdir <repo>/apps/tools/public",
 	"rm <repo>/apps/tools/public/testnet-bridge.json.promote-tmp",
@@ -291,9 +298,9 @@ const PROMOTE_GREEN_TRACE = [
 	"rename <repo>/apps/tools/src/contracts/deployments.json.promote-tmp -> <repo>/apps/tools/src/contracts/deployments.json",
 	"read <repo>/apps/tools/src/contracts/deployments.json",
 	"read <repo>/apps/tools/public/testnet-bridge.json",
-	'run bun <repo>/apps/tools/scripts/verify-deployments.ts {"stdio":"inherit","env":{"BRIDGE_MANIFEST":"<repo>/apps/tools/public/testnet-bridge.json"}}',
+	'run bun ["<repo>/apps/tools/scripts/verify-deployments.ts"] {"stdio":"inherit","env":{"BRIDGE_MANIFEST":"<repo>/apps/tools/public/testnet-bridge.json"},"inheritsProcessEnv":true}',
 	"mkdir <repo>/implementations-plan/aztec-5.0.1-line/lessons",
-	`run git rev-parse HEAD${IN_REPO}`,
+	`run git ["rev-parse","HEAD"]${IN_REPO}`,
 	"write <repo>/implementations-plan/aztec-5.0.1-line/lessons/promotion-receipt.json",
 ]
 
@@ -349,7 +356,7 @@ describe("verify — the gate ladder", () => {
 		put(BRIDGE_CANDIDATE, JSON.stringify({ network: "testnet" }))
 		await expect(verify(INTENT_PATH, BRIDGE_CANDIDATE)).rejects.toThrow(/bridge manifest failed strict validation/)
 		expect(events().some((e) => e.startsWith("write "))).toBe(false)
-		expect(events().some((e) => e.includes("cast call"))).toBe(false)
+		expect(events().some((e) => e.includes('run cast ["call"'))).toBe(false)
 	})
 
 	test("a valid candidate whose readback fails leaves the digest recorded (verbatim ordering)", async () => {
@@ -366,24 +373,28 @@ describe("verify — the gate ladder", () => {
 			"intent uncommitted",
 			() => script(`git --literal-pathspecs status --porcelain -- ${h.rel(INTENT_PATH)}`, " M intent.json"),
 			/intent\.json is uncommitted/,
-			"git status --porcelain",
+			'"--literal-pathspecs"',
+			'["status","--porcelain"]',
 		],
 		[
 			"non-allowlisted dirty tree",
 			() => script("git status --porcelain", " M packages/bridge-core/src/x.ts"),
 			/non-allowlisted files dirty during the live arc/,
-			"git diff",
+			'["status","--porcelain"]',
+			'["diff"',
 		],
 		[
 			"deploy-relevant change since build",
 			() => script(`git diff --name-only --end-of-options ${COMMIT} HEAD --`, "packages/bridge-core/src/x.ts\n"),
 			/deploy-relevant files changed since the intent was built/,
-			"fetch",
+			'["diff"',
+			"fetch ",
 		],
-	] as const)("STOP: %s — and nothing after it runs", async (_name, arm, message, nextStage) => {
+	] as const)("STOP: %s — the failing call ran and nothing after it did", async (_name, arm, message, failingCall, nextStage) => {
 		greenWorld()
 		arm()
 		await expect(verify(INTENT_PATH, BRIDGE_CANDIDATE)).rejects.toThrow(message)
+		expect(events().some((e) => e.includes(failingCall))).toBe(true)
 		expect(events().some((e) => e.includes(nextStage))).toBe(false)
 	})
 
@@ -402,7 +413,7 @@ describe("verify — the gate ladder", () => {
 		;(intent.source as { commit: string }).commit = "HEAD; rm -rf /"
 		put(INTENT_PATH, JSON.stringify(intent))
 		await expect(verify(INTENT_PATH, BRIDGE_CANDIDATE)).rejects.toThrow(/intent\.source\.commit is not a 40-hex commit — STOP/)
-		expect(events().some((e) => e.includes("git diff"))).toBe(false)
+		expect(events().some((e) => e.includes('["diff"'))).toBe(false)
 	})
 
 	test.each([
@@ -422,8 +433,8 @@ describe("verify — the gate ladder", () => {
 		h.state.rpc.set(`${NODE_URL} node_getNodeInfo`, mutate(identityFor(intent) as unknown as Record<string, unknown>))
 		await expect(verify(INTENT_PATH, BRIDGE_CANDIDATE)).rejects.toThrow(message)
 		const ev = events()
-		expect(ev.indexOf("fetch https://node.example node_getNodeInfo []")).toBeGreaterThan(ev.findIndex((e) => e.includes("git diff")))
-		expect(ev.some((e) => e.includes("cast wallet address"))).toBe(false)
+		expect(ev.indexOf("fetch https://node.example node_getNodeInfo []")).toBeGreaterThan(ev.findIndex((e) => e.includes('["diff"')))
+		expect(ev.some((e) => e.includes('"wallet","address"'))).toBe(false)
 	})
 
 	test("signer: a mismatch stops; no PRIVATE_KEY skips the check", async () => {
@@ -434,7 +445,7 @@ describe("verify — the gate ladder", () => {
 		greenWorld()
 		vi.stubEnv("PRIVATE_KEY", "")
 		await expect(verify(INTENT_PATH, BRIDGE_CANDIDATE)).resolves.toBeUndefined()
-		expect(events().some((e) => e.includes("cast wallet address"))).toBe(false)
+		expect(events().some((e) => e.includes('"wallet","address"'))).toBe(false)
 	})
 
 	test("artifacts: a drifted Noir target, then a drifted canonical PrivateFPC, each stop before the candidate read", async () => {
@@ -453,7 +464,7 @@ describe("verify — the gate ladder", () => {
 		greenWorld()
 		put(BRIDGE_CANDIDATE, `${readReal(BRIDGE_LIVE, "utf8")}\n`)
 		await expect(verify(INTENT_PATH, BRIDGE_CANDIDATE)).rejects.toThrow(/candidate digest CHANGED since recorded: .* — never promote/)
-		expect(events().some((e) => e.includes("cast call"))).toBe(false)
+		expect(events().some((e) => e.includes('run cast ["call"'))).toBe(false)
 	})
 
 	test.each([
@@ -517,7 +528,7 @@ describe("verify — the gate ladder", () => {
 		greenWorld()
 		arm()
 		await expect(verify(INTENT_PATH, BRIDGE_CANDIDATE)).rejects.toThrow(message)
-		expect(events().some((e) => e.includes("cast balance"))).toBe(false)
+		expect(events().some((e) => e.includes('run cast ["balance"'))).toBe(false)
 	})
 
 	test("spend: over the cap stops; within the cap logs the delta; a legacy intent without a baseline logs the balance", async () => {
@@ -702,7 +713,7 @@ describe("promote — the stage sequence", () => {
 		script("bun <repo>/apps/tools/scripts/verify-deployments.ts", new Error("bun failed (exit 1): live derivation mismatch"))
 		await expect(promote(INTENT_PATH)).rejects.toThrow(/live derivation mismatch/)
 		expect(h.state.files.has(RECEIPT)).toBe(false)
-		expect(events().some((e) => e.includes("git rev-parse"))).toBe(false)
+		expect(events().some((e) => e.includes('"rev-parse"'))).toBe(false)
 	})
 
 	test("--bridge-only: the drip candidate is not required, the live drip digest is pinned before and after, the receipt says unchanged", async () => {
