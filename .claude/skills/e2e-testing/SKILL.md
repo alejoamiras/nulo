@@ -584,6 +584,37 @@ worker-refuses-to-die regression.
 deadline-free and let the test's own timeout bound it, or assert the worker's death by a positive
 signal (a fresh target with a different id) rather than by the absence of an event.
 
+## The SW-restart auth-popup flake: `ensureUnlocked: lock state never settled` (2026-09-02)
+
+**Fingerprint.** `Error: ensureUnlocked: lock state never settled within 30s (hash: #/popup/auth,
+session record: well-formed, password field: true)` from `frozen-account-canary.test.ts` right
+after `stopServiceWorker`, on the prover-ON canary lane, on a diff touching no session or popup
+code. Seen on #509, #526 and once more the same week; every rerun passed.
+
+**Two mechanisms produce the identical state.** After the restart the recovery popup boots
+`loadProfile`: `getActiveProfile()` (waits for the profile service's init, restore included) →
+`bootstrapActiveProfile` (networks, account, transactions) → `/popup/general`, while the route
+guard parks the popup on `/popup/auth` with the password field mounted and the session record
+still well-formed — the "mid-decision" state `ensureUnlocked` refuses to act on by design.
+(1) *Slow*: on a starved runner (five shards + heavy lanes + real proving) that bootstrap
+outlives 30s while the test's own next wait allows 120s for the same bootstrap. (2) *Stalled*
+(codex, 2026-09-02): the first request after a restart can REJECT while the worker is still
+booting; `loadProfile` had no rejection path, so `isSessionChecked` stayed false for good, the
+guard answers "auth" without retrying while it is false, and a silent restore emits no event that
+could rescue the popup — a product stall, not a slow one, and a longer budget alone would hide it.
+
+**Fix (both).** Product: `loadProfile` runs both boot-time reads (profile list, active session)
+through the guard's own backoff (`lookupActiveProfileWithBackoff`, unit-tested) and, when the
+service stays unreachable or the bootstrap throws, settles the check and lands on the lock screen
+with `data-boot-outcome` on the shell — the password path is the user's recovery, so it must be
+reachable. Every run is generation-fenced (mount + each background reconnect starts one; a run
+that awaited past a newer one commits nothing) and a new run clears the marker first, so the
+harness can never see the marker while a fresh run is mid-bootstrap. Harness:
+`ensureUnlocked` treats "password field + `[data-boot-outcome]`" as locked (types the password),
+takes `{ decisionBudgetMs }` for the genuinely slow case (the canary passes its 120s envelope), and
+its timeout reports whether the service-worker heartbeat advanced during the wait — read that
+neutrally: it proves the worker wrote, not that the bootstrap will finish.
+
 ## Editing `global-setup.ts` (stage split, 2026-09-02)
 
 `setup` is a coordinator over stage functions (`reconcilePriorLock`, `ensureAnvil`,

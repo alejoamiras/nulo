@@ -92,7 +92,16 @@ export async function lockWallet(page: Page): Promise<void> {
  *    in principle observe a session that a concurrent deletion fence then
  *    closes. Every current caller follows with route convergence or an
  *    account/on-chain read, which is what actually pins the outcome. */
-export async function ensureUnlocked(page: Page, password = TEST_PASSWORD): Promise<void> {
+export async function ensureUnlocked(
+	page: Page,
+	password = TEST_PASSWORD,
+	opts: {
+		/** How long the app may take to DECIDE its lock state. The default covers a warm popup;
+		 *  a caller that just restarted the service worker passes its own bootstrap envelope. */
+		decisionBudgetMs?: number
+	} = {},
+): Promise<void> {
+	const decisionBudgetMs = opts.decisionBudgetMs ?? 30_000
 	// Lock state comes from the session record, never from the route and never
 	// from a lone DOM marker — each of those lies in one direction. `app.vue`
 	// pushes `/popup/auth` BEFORE `initNetworks()`/`initAccount()` finish and
@@ -118,10 +127,18 @@ export async function ensureUnlocked(page: Page, password = TEST_PASSWORD): Prom
 	// as bootstrap does — the same transient window that makes a lone route or DOM
 	// read unsafe. A caller right after a service-worker restart (the canary) hit
 	// exactly that: record well-formed, hash still /popup/auth, field mounted, i.e.
-	// mid-decision, and 5s was simply too short to observe the outcome. The budget
-	// therefore matches the app's own post-restart envelope, in line with the
-	// neighbouring waits in `frozen-account-canary` (30s liveness, 60s hash, 120s
-	// general). Nothing here accepts a state it previously rejected.
+	// mid-decision, and 5s was simply too short to observe the outcome. The 30s
+	// default covers a warm popup. Right after a service-worker restart the
+	// decision IS the activation bootstrap (`loadProfile` → `bootstrapActiveProfile`
+	// → `/popup/general`, with the route guard parking the popup on `/popup/auth`
+	// until `isSessionChecked` flips), and on a starved prover-ON runner that has
+	// outlived 30s three times while the same test allows 120s for the very same
+	// bootstrap to reach `/popup/general`. Such a caller passes `decisionBudgetMs`
+	// equal to that envelope; the two waits then measure one thing with one clock.
+	// Nothing here accepts a state it previously rejected.
+	const readLiveness = () =>
+		page.evaluate(async () => Number((await chrome.storage.session.get("nulo:liveness"))["nulo:liveness"] ?? 0)).catch(() => 0)
+	const livenessAtStart = await readLiveness()
 	const readSession = () =>
 		page.evaluate(async () => {
 			const raw = (await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"]
@@ -147,14 +164,24 @@ export async function ensureUnlocked(page: Page, password = TEST_PASSWORD): Prom
 						rec = undefined
 					}
 					const wellFormed = !!rec && typeof rec.profile === "string" && typeof rec.since === "number"
+					const field = !!document.querySelector('[data-testid="auth-password-input"]')
 					if (wellFormed && !window.location.hash.includes("/popup/auth")) return "unlocked"
-					if (!wellFormed && document.querySelector('[data-testid="auth-password-input"]')) return "locked"
+					if (!wellFormed && field) return "locked"
+					// The shell says its boot-time check GAVE UP (service unreachable across the
+					// backoff, or the bootstrap threw): the record may well be live in the worker,
+					// but this popup will never leave the lock screen on its own — the password is
+					// the user's recovery path, so it is ours too.
+					if (field && document.querySelector("[data-boot-outcome]")) return "locked"
 					return null
 				},
-				{ timeout: 30_000, polling: 200 },
+				{ timeout: decisionBudgetMs, polling: 200 },
 			)
 			.then((handle) => handle.jsonValue()),
 		async () => {
+			// Was the service worker alive and writing while we waited? A frozen heartbeat
+			// means the worker died or never came back — a different bug from a slow bootstrap.
+			const livenessAtEnd = await readLiveness()
+			const heartbeat = livenessAtEnd > livenessAtStart ? "advanced" : livenessAtEnd === 0 ? "unreadable" : "frozen"
 			const diag = await page
 				.evaluate(async () => {
 					const raw = (await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"]
@@ -178,9 +205,11 @@ export async function ensureUnlocked(page: Page, password = TEST_PASSWORD): Prom
 				})
 				.catch(() => ({ hash: "<unreadable>", record: "<unreadable>", field: false }))
 			return (
-				`ensureUnlocked: lock state never settled within 30s (hash: ${diag.hash}, session record: ${diag.record}, ` +
-				`password field: ${diag.field}). A well-formed record on /popup/auth with no password field is a LOCKED ` +
-				"PASSKEY profile, which this helper cannot unlock — drive the passkey ceremony instead."
+				`ensureUnlocked: lock state never settled within ${decisionBudgetMs / 1000}s (hash: ${diag.hash}, session record: ${diag.record}, ` +
+				`password field: ${diag.field}, service-worker heartbeat during the wait: ${heartbeat}). A well-formed record on ` +
+				"/popup/auth WITH the password field and no data-boot-outcome is the activation bootstrap still deciding; a frozen " +
+				"heartbeat says the worker stopped writing. One with NO password field is a LOCKED PASSKEY profile, which this " +
+				"helper cannot unlock — drive the passkey ceremony instead."
 			)
 		},
 	)

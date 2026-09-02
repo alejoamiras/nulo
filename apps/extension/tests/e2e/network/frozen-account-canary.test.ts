@@ -242,7 +242,10 @@ test.skipIf(!hasConfig)(
 			preKillLiveness,
 		)
 		await recoveryPopup.waitForFunction(() => window.location.hash.length > 2, { timeout: 60_000 })
-		await ensureUnlocked(recoveryPopup, TEST_PASSWORD)
+		// Post-restart the lock decision IS the activation bootstrap, which the next wait budgets
+		// at 120s — the helper's default 30s measured the same bootstrap with a shorter clock and
+		// tripped three times on starved prover-ON runners (heartbeat advancing, record well-formed).
+		await ensureUnlocked(recoveryPopup, TEST_PASSWORD, { decisionBudgetMs: 120_000 })
 		await recoveryPopup.waitForFunction(() => window.location.hash.includes("/popup/general"), { timeout: 120_000 })
 		// WHICH of the profile's accounts the popup presents after a restart is UI behavior, not a
 		// freeze invariant — the address just has to be one of the frozen-derived pair (the real
