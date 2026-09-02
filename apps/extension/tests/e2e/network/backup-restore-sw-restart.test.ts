@@ -144,6 +144,98 @@ async function readDisconnectProbe(page: Page): Promise<{ connectedAt: number; d
 		.catch(() => null)
 }
 
+/** The residue a mid-restore crash can leave behind: profile rows + the restore-pending marker.
+ *  Never catches — each call site decides whether an evaluate failure is diagnostic (→ null) or fatal. */
+function readRestoreResidue(page: Page): Promise<{ profileRows: string[]; pendingMarkers: string[] }> {
+	return page.evaluate(async () => {
+		const all = await chrome.storage.local.get()
+		const keys = Object.keys(all)
+		return {
+			profileRows: keys.filter((k) => k.startsWith("nulo:core:profiles@")),
+			pendingMarkers: keys.filter((k) => k.startsWith("nulo:core:restore-pending@")),
+		}
+	})
+}
+
+/** A rollback that never reached a terminal stage is a product verdict ONLY when the page saw the
+ *  worker die; a silent probe is kill/Port mechanics, reported as such. */
+function stuckVerdict(probe: Awaited<ReturnType<typeof readDisconnectProbe>>, detail: string): Error {
+	if (probe?.disconnectedAt != null) {
+		return new Error(
+			`PRODUCT BUG (pre-finalize crash, page alive): the disconnect reached the page but the designed ` +
+				`rollback never completed within ${ROLLBACK_BUDGET_MS}ms — the orphan profile and restore-pending ` +
+				`marker survive a crash the product defines as roll-back. ${detail}`,
+		)
+	}
+	return new Error(
+		`INCONCLUSIVE (kill/Port mechanics): the page never observed the worker's disconnect, so no product ` +
+			`verdict is possible. ${detail}`,
+	)
+}
+
+/** The gate page a scenario's `finally` clears. The recovery probe re-points it the moment a popup
+ *  opens, so a probe that dies mid-way still gets its gate cleared. */
+type GateRef = { page: Page | null }
+
+/** Measure the DESIGNED BACKSTOP out of the rollback-failed state empirically: with the orphan +
+ *  marker in place, the unlock must be REFUSED with the torn message, whose own copy instructs
+ *  delete-below-and-re-import — so that is exactly what this drives, on a now-live worker (the
+ *  fresh-install import route is unreachable: the popup boots to auth for the surviving orphan).
+ *  Returns the recovery verdict for the product-finding report; never throws. */
+async function probeRecoveryBackstop(ctx2: ExtensionContext, filePath: string, funded: string, gate: GateRef): Promise<string> {
+	try {
+		const pageR = await openPopup(ctx2)
+		gate.page = pageR
+		await pageR.waitForSelector('[data-testid="auth-password-input"] input', { visible: true, timeout: 15_000 })
+		await setInputs(pageR, { '[data-testid="auth-password-input"] input': TEST_PASSWORD })
+		await clickByTestId(pageR, "auth-submit")
+		await pageR.waitForSelector('[data-testid="auth-restore-torn"]', { visible: true, timeout: 30_000 })
+		await clickByTestId(pageR, "auth-reset")
+		await pageR.waitForSelector('[data-testid="forgot-reset-btn"]', { visible: true, timeout: 10_000 })
+		await clickByTestId(pageR, "forgot-reset-btn")
+		await waitForHash(pageR, "#/popup/settings/security/reset", 10_000)
+		// This delete rides the SAME deleteProfile the rollback could not
+		// reach — on a live worker now.
+		await completeResetRitual(pageR)
+		const cleaned = await readRestoreResidue(pageR)
+		if (cleaned.profileRows.length > 0 || cleaned.pendingMarkers.length > 0) {
+			throw new Error(`reset left residue: ${JSON.stringify(cleaned)}`)
+		}
+		const skipErrors = await reimportToTerminal(pageR, filePath)
+		await waitForActiveAccount(pageR, funded)
+		const baselineR = await captureBalanceBaseline(pageR, funded, aztecConfig!.tokenAddress)
+		await waitForFreshBalanceRow(pageR, {
+			account: funded,
+			tokenContract: aztecConfig!.tokenAddress,
+			expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+			baselineUpdatedAt: baselineR,
+			timeoutMs: 210_000,
+		})
+		await waitForTokenCardAmount(pageR, "1,000", "TST")
+		return skipErrors
+			? `torn-unlock, delete, re-import: CONVERGED WITH SKIP ERRORS — summary: ${JSON.stringify(skipErrors)}`
+			: "torn-unlock, delete, re-import: CONVERGED clean"
+	} catch (recoveryErr) {
+		// Where the probe died matters as much as that it died: the
+		// route, the import's stage attribute, and whether the errors
+		// screen (which never auto-routes) is what the success-hash
+		// wait was actually starving behind.
+		const diag = gate.page
+			? await gate.page
+					.evaluate(() => ({
+						hash: window.location.hash,
+						stage: document.querySelector("[data-restore-stage]")?.getAttribute("data-restore-stage") ?? null,
+						errorsScreen: !!document.querySelector('[data-testid="import-full-backup-continue-btn"]'),
+					}))
+					.catch(() => null)
+			: null
+		return (
+			`torn-unlock, delete, re-import FAILED: ${(recoveryErr as Error)?.message ?? String(recoveryErr)} ` +
+			`diag=${JSON.stringify(diag)} probeConsole=${JSON.stringify(ctx2.consoleErrors.slice(0, 8))}`
+		)
+	}
+}
+
 // Budget for the SW handler to acknowledge the hold: the whole pre-hold
 // restore runs under CI proving load first (decrypt, migrate, profile,
 // networks, tokens for A; plus finalize's argon2 + session open for B).
@@ -166,16 +258,15 @@ test.skipIf(!hasConfig)(
 	{
 		timeout: 900_000,
 	},
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 18) — refactor when touched, never raise
 	async ({ tokenReadyExtension }) => {
 		const { filePath, funded } = await exportFundedBackup(tokenReadyExtension)
 
 		const profileDir = mkdtempSync(join(tmpdir(), "nulo-sw-crash-pre-"))
 		const ctx2 = await launchExtension({ userDataDir: profileDir })
-		let gatePage: Page | null = null
+		const gate: GateRef = { page: null }
 		try {
 			const page2 = await gotoPopupImport(ctx2)
-			gatePage = page2
+			gate.page = page2
 			// Unfiltered console tap — DIAGNOSTICS ONLY, and honest about its
 			// limits: run-7 evidence showed app `console.*` from the popup never
 			// reaches this CDP stream at all (ledger: consoleErrors blind spot),
@@ -222,28 +313,9 @@ test.skipIf(!hasConfig)(
 			if (outcome === "stuck") {
 				const probe = await readDisconnectProbe(page2)
 				const stage = await readStage(page2)
-				const store = await page2
-					.evaluate(async () => {
-						const all = await chrome.storage.local.get()
-						const keys = Object.keys(all)
-						return {
-							profileRows: keys.filter((k) => k.startsWith("nulo:core:profiles@")),
-							pendingMarkers: keys.filter((k) => k.startsWith("nulo:core:restore-pending@")),
-						}
-					})
-					.catch(() => null)
+				const store = await readRestoreResidue(page2).catch(() => null)
 				const detail = `stage=${stage}, sinceKill=${Date.now() - killAt}ms, probe=${JSON.stringify(probe)}, store=${JSON.stringify(store)}`
-				if (probe?.disconnectedAt != null) {
-					throw new Error(
-						`PRODUCT BUG (pre-finalize crash, page alive): the disconnect reached the page but the designed ` +
-							`rollback never completed within ${ROLLBACK_BUDGET_MS}ms — the orphan profile and restore-pending ` +
-							`marker survive a crash the product defines as roll-back. ${detail}`,
-					)
-				}
-				throw new Error(
-					`INCONCLUSIVE (kill/Port mechanics): the page never observed the worker's disconnect, so no product ` +
-						`verdict is possible. ${detail}`,
-				)
+				throw stuckVerdict(probe, detail)
 			}
 
 			if (outcome === "rollback-failed") {
@@ -254,16 +326,7 @@ test.skipIf(!hasConfig)(
 				await new Promise((r) => setTimeout(r, 750))
 				const deleteRejectionTail = rawErrors.filter((t) => !t.includes("Receiving end does not exist")).slice(-6)
 				const churnCount = rawErrors.length - rawErrors.filter((t) => !t.includes("Receiving end does not exist")).length
-				const store = await page2
-					.evaluate(async () => {
-						const all = await chrome.storage.local.get()
-						const keys = Object.keys(all)
-						return {
-							profileRows: keys.filter((k) => k.startsWith("nulo:core:profiles@")),
-							pendingMarkers: keys.filter((k) => k.startsWith("nulo:core:restore-pending@")),
-						}
-					})
-					.catch(() => null)
+				const store = await readRestoreResidue(page2).catch(() => null)
 				const sinceKill = Date.now() - killAt
 				// Before reporting, measure the DESIGNED BACKSTOP empirically: with
 				// the orphan + marker in place, a re-import must hit the duplicate
@@ -273,69 +336,7 @@ test.skipIf(!hasConfig)(
 				// would park the recovery import at the same hold point.
 				await clearRestoreGate(page2)
 				await page2.close()
-				let recovery: string
-				try {
-					// The REAL designed path out of this state. The fresh-install
-					// import route is unreachable (the popup boots to auth for the
-					// surviving orphan): the unlock attempt must be REFUSED with the
-					// torn message, whose own copy instructs delete-below-and-
-					// re-import — so that is exactly what this probe drives.
-					const pageR = await openPopup(ctx2)
-					gatePage = pageR
-					await pageR.waitForSelector('[data-testid="auth-password-input"] input', { visible: true, timeout: 15_000 })
-					await setInputs(pageR, { '[data-testid="auth-password-input"] input': TEST_PASSWORD })
-					await clickByTestId(pageR, "auth-submit")
-					await pageR.waitForSelector('[data-testid="auth-restore-torn"]', { visible: true, timeout: 30_000 })
-					await clickByTestId(pageR, "auth-reset")
-					await pageR.waitForSelector('[data-testid="forgot-reset-btn"]', { visible: true, timeout: 10_000 })
-					await clickByTestId(pageR, "forgot-reset-btn")
-					await waitForHash(pageR, "#/popup/settings/security/reset", 10_000)
-					// This delete rides the SAME deleteProfile the rollback could not
-					// reach — on a live worker now.
-					await completeResetRitual(pageR)
-					const cleaned = await pageR.evaluate(async () => {
-						const all = await chrome.storage.local.get()
-						const keys = Object.keys(all)
-						return {
-							profileRows: keys.filter((k) => k.startsWith("nulo:core:profiles@")),
-							pendingMarkers: keys.filter((k) => k.startsWith("nulo:core:restore-pending@")),
-						}
-					})
-					if (cleaned.profileRows.length > 0 || cleaned.pendingMarkers.length > 0) {
-						throw new Error(`reset left residue: ${JSON.stringify(cleaned)}`)
-					}
-					const skipErrors = await reimportToTerminal(pageR, filePath)
-					await waitForActiveAccount(pageR, funded)
-					const baselineR = await captureBalanceBaseline(pageR, funded, aztecConfig!.tokenAddress)
-					await waitForFreshBalanceRow(pageR, {
-						account: funded,
-						tokenContract: aztecConfig!.tokenAddress,
-						expectedPublicRaw: (1000n * 10n ** 18n).toString(),
-						baselineUpdatedAt: baselineR,
-						timeoutMs: 210_000,
-					})
-					await waitForTokenCardAmount(pageR, "1,000", "TST")
-					recovery = skipErrors
-						? `torn-unlock, delete, re-import: CONVERGED WITH SKIP ERRORS — summary: ${JSON.stringify(skipErrors)}`
-						: "torn-unlock, delete, re-import: CONVERGED clean"
-				} catch (recoveryErr) {
-					// Where the probe died matters as much as that it died: the
-					// route, the import's stage attribute, and whether the errors
-					// screen (which never auto-routes) is what the success-hash
-					// wait was actually starving behind.
-					const diag = gatePage
-						? await gatePage
-								.evaluate(() => ({
-									hash: window.location.hash,
-									stage: document.querySelector("[data-restore-stage]")?.getAttribute("data-restore-stage") ?? null,
-									errorsScreen: !!document.querySelector('[data-testid="import-full-backup-continue-btn"]'),
-								}))
-								.catch(() => null)
-						: null
-					recovery =
-						`torn-unlock, delete, re-import FAILED: ${(recoveryErr as Error)?.message ?? String(recoveryErr)} ` +
-						`diag=${JSON.stringify(diag)} probeConsole=${JSON.stringify(ctx2.consoleErrors.slice(0, 8))}`
-				}
+				const recovery = await probeRecoveryBackstop(ctx2, filePath, funded, gate)
 				throw new Error(
 					`PRODUCT FINDING (pre-finalize crash, page alive): the designed rollback dispatched but ` +
 						`deleteProfile FAILED — the orphan survives a crash the product defines as roll-back. ` +
@@ -348,14 +349,7 @@ test.skipIf(!hasConfig)(
 			expect(outcome).toBe("rolled-back")
 			// The rollback's storage effects, not just the stage: orphan gone,
 			// marker gone.
-			const store = await page2.evaluate(async () => {
-				const all = await chrome.storage.local.get()
-				const keys = Object.keys(all)
-				return {
-					profileRows: keys.filter((k) => k.startsWith("nulo:core:profiles@")),
-					pendingMarkers: keys.filter((k) => k.startsWith("nulo:core:restore-pending@")),
-				}
-			})
+			const store = await readRestoreResidue(page2)
 			expect(store.profileRows).toEqual([])
 			expect(store.pendingMarkers).toEqual([])
 			await clearRestoreGate(page2)
@@ -364,7 +358,7 @@ test.skipIf(!hasConfig)(
 			// The designed retry — previously reachable only by race, now on
 			// every A run. importFullBackup's own success wait applies.
 			const page3 = await gotoPopupImport(ctx2)
-			gatePage = page3
+			gate.page = page3
 			await importFullBackup(page3, filePath, TEST_PASSWORD, POPUP_IMPORT_SHELL)
 			await waitForActiveAccount(page3, funded)
 
@@ -381,7 +375,7 @@ test.skipIf(!hasConfig)(
 			await waitForTokenCardAmount(page3, "1,000", "TST")
 			expect(ctx2.pageErrors).toEqual([])
 		} finally {
-			if (gatePage) await clearRestoreGate(gatePage).catch(() => {})
+			if (gate.page) await clearRestoreGate(gate.page).catch(() => {})
 			await ctx2.browser.close().catch(() => {})
 			rmSync(profileDir, { recursive: true, force: true })
 		}
@@ -408,14 +402,7 @@ test.skipIf(!hasConfig)(
 			// Post-finalize preconditions, asserted BEFORE the kill:
 			// finalizeRestore cleared the pending marker at entry, so a torn
 			// screen after the crash cannot be a designed outcome.
-			const pre = await page2.evaluate(async () => {
-				const all = await chrome.storage.local.get()
-				const keys = Object.keys(all)
-				return {
-					profileRows: keys.filter((k) => k.startsWith("nulo:core:profiles@")),
-					pendingMarkers: keys.filter((k) => k.startsWith("nulo:core:restore-pending@")),
-				}
-			})
+			const pre = await readRestoreResidue(page2)
 			expect(pre.profileRows.length).toBeGreaterThan(0)
 			expect(pre.pendingMarkers).toEqual([])
 			const probePre = await readDisconnectProbe(page2)

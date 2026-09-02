@@ -1314,37 +1314,66 @@ export async function resetProfile(page: Page): Promise<void> {
  *  post-import/post-reopen sync, silently un-proving the re-sync the tests
  *  exist to prove. */
 export async function captureBalanceBaseline(page: Page, account: string, tokenContract: string): Promise<number> {
-	return await page.evaluate(
-		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 28) — refactor when touched, never raise
-		async ({ acct, contract }: { acct: string; contract: string }) => {
-			const all = await chrome.storage.local.get(null)
-			// Bind to the exact (account, token) rows: another token's row with the same
-			// raw value must never satisfy the later freshness/value acceptance.
-			const tokenIds = new Set<number>()
-			for (const [k, v] of Object.entries(all)) {
-				if (!k.startsWith("nulo:core:tokens@")) continue
-				try {
-					const row = JSON.parse(v as string) as { id?: number; contract?: string }
-					if (typeof row.id === "number" && row.contract?.toLowerCase() === contract.toLowerCase()) tokenIds.add(row.id)
-				} catch {
-					// Hostile-input discipline: a malformed row is ignored, never fatal.
-				}
-			}
-			let max = 0
-			for (const [k, v] of Object.entries(all)) {
-				if (!k.startsWith("nulo:core:token-balances@")) continue
-				try {
-					const row = JSON.parse(v as string) as { account?: string; token?: number; updatedAt?: number }
-					if (row.account !== acct || typeof row.token !== "number" || !tokenIds.has(row.token)) continue
-					if (typeof row.updatedAt === "number" && row.updatedAt > max) max = row.updatedAt
-				} catch {
-					// Malformed row: skip.
-				}
-			}
-			return max
-		},
-		{ acct: account, contract: tokenContract },
-	)
+	let max = 0
+	for (const row of await readScopedBalanceRows(page, account, tokenContract)) {
+		if (typeof row.updatedAt === "number" && row.updatedAt > max) max = row.updatedAt
+	}
+	return max
+}
+
+const TOKEN_ROWS_PREFIX = "nulo:core:tokens@"
+const BALANCE_ROWS_PREFIX = "nulo:core:token-balances@"
+
+type BalanceRow = { account?: string; token?: number; publicBalance?: string; privateBalance?: string; updatedAt?: number }
+
+/** Runs IN THE PAGE (Puppeteer serializes it, so it must not reference module scope): the raw
+ *  `chrome.storage.local` values under each prefix, all from ONE snapshot, decoded by nothing —
+ *  the hostile rows are parsed on the Node side by the same guarded loops that used to run here. */
+async function readStorageValuesByPrefixes({ prefixes }: { prefixes: string[] }): Promise<unknown[][]> {
+	const all = await chrome.storage.local.get(null)
+	const entries = Object.entries(all)
+	return prefixes.map((prefix) => entries.filter(([k]) => k.startsWith(prefix)).map(([, v]) => v))
+}
+
+/** Numeric ids of the token rows bound to `contract` (case-insensitive). Each raw value is decoded
+ *  inside its own try: a malformed row, or one whose shape makes the predicate throw, is skipped —
+ *  hostile-input discipline, never fatal. */
+function tokenIdsForContract(tokenValues: unknown[], contract: string): Set<number> {
+	const tokenIds = new Set<number>()
+	for (const v of tokenValues) {
+		try {
+			const row = JSON.parse(v as string) as { id?: number; contract?: string }
+			if (typeof row.id === "number" && row.contract?.toLowerCase() === contract.toLowerCase()) tokenIds.add(row.id)
+		} catch {
+			// Malformed row: skip.
+		}
+	}
+	return tokenIds
+}
+
+/** Balance rows for exactly `account` × `tokenIds`, raw (no field normalization — the callers'
+ *  comparisons keep coercing as they always did). Same per-row try discipline as the token scan. */
+function balanceRowsFor(balanceValues: unknown[], account: string, tokenIds: Set<number>): BalanceRow[] {
+	const rows: BalanceRow[] = []
+	for (const v of balanceValues) {
+		try {
+			const row = JSON.parse(v as string) as BalanceRow
+			if (row.account === account && typeof row.token === "number" && tokenIds.has(row.token)) rows.push(row)
+		} catch {
+			// Malformed row: skip.
+		}
+	}
+	return rows
+}
+
+/** The exact (account, token) join both balance waits share, re-resolved from one storage snapshot
+ *  per call: another token's row with the same raw value must never satisfy a freshness/value
+ *  acceptance, and after a restore the token row itself can land later than the first read. */
+async function readScopedBalanceRows(page: Page, account: string, tokenContract: string): Promise<BalanceRow[]> {
+	const [tokenValues, balanceValues] = await page.evaluate(readStorageValuesByPrefixes, {
+		prefixes: [TOKEN_ROWS_PREFIX, BALANCE_ROWS_PREFIX],
+	})
+	return balanceRowsFor(balanceValues, account, tokenIdsForContract(tokenValues, tokenContract))
 }
 
 /** Wait for a balance row for `account` that is both FRESH (`updatedAt` past the
@@ -1392,46 +1421,8 @@ export async function waitForFreshBalanceRow(
 	const { account, tokenContract, expectedPublicRaw, expectedPrivateRaw, baselineUpdatedAt, timeoutMs = 120_000 } = opts
 	const maxRefreshes = opts.maxRefreshes ?? Math.ceil(timeoutMs / MIN_REFRESH_SPACING_MS)
 	const deadline = Date.now() + timeoutMs
-	type BalanceRow = { account?: string; token?: number; publicBalance?: string; privateBalance?: string; updatedAt?: number }
-	// The (account, token) join re-resolves EVERY poll: after a restore the token
-	// row itself can land later than the first read, and binding to the exact
-	// token is what stops another token's identical raw value from satisfying
-	// the acceptance (audit condition).
-	const readRows = (): Promise<BalanceRow[]> =>
-		page.evaluate(
-			// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 32) — refactor when touched, never raise
-			async ({ acct, contract }: { acct: string; contract: string }) => {
-				const all = await chrome.storage.local.get(null)
-				const tokenIds = new Set<number>()
-				for (const [k, v] of Object.entries(all)) {
-					if (!k.startsWith("nulo:core:tokens@")) continue
-					try {
-						const row = JSON.parse(v as string) as { id?: number; contract?: string }
-						if (typeof row.id === "number" && row.contract?.toLowerCase() === contract.toLowerCase()) tokenIds.add(row.id)
-					} catch {
-						// Malformed row: skip.
-					}
-				}
-				const rows: Array<{
-					account?: string
-					token?: number
-					publicBalance?: string
-					privateBalance?: string
-					updatedAt?: number
-				}> = []
-				for (const [k, v] of Object.entries(all)) {
-					if (!k.startsWith("nulo:core:token-balances@")) continue
-					try {
-						const row = JSON.parse(v as string) as { account?: string; token?: number }
-						if (row.account === acct && typeof row.token === "number" && tokenIds.has(row.token)) rows.push(row)
-					} catch {
-						// Malformed row: skip.
-					}
-				}
-				return rows
-			},
-			{ acct: account, contract: tokenContract },
-		)
+	// The (account, token) join re-resolves EVERY poll (audit condition) — see `readScopedBalanceRows`.
+	const readRows = (): Promise<BalanceRow[]> => readScopedBalanceRows(page, account, tokenContract)
 
 	let refreshes = 0
 	let lastRefreshAt = 0

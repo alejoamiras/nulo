@@ -26,7 +26,7 @@ import { createServer, type Server } from "node:http"
 import type { AddressInfo, Socket } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { expect } from "vitest"
+import { describe, expect, it } from "vitest"
 import type { Page } from "puppeteer"
 import { clickByTestId, launchExtension, test, waitForHash } from "./fixtures/extension"
 import {
@@ -87,6 +87,81 @@ interface StubServer {
 	close: () => Promise<void>
 }
 
+type BatchPlan = { kind: "unparsed" } | { kind: "blackhole" } | { kind: "replies"; payload: unknown }
+
+/** Plans the stub's answer to one request body. The aztec JSON-RPC client BATCHES: bodies
+ *  arrive as arrays of request envelopes (the Phase-1 evidence harness learned this the hard
+ *  way). Every element is logged into `methods` and asked of `answer`, in order, even after one
+ *  proves unanswerable — a batch with ANY unanswerable element blackholes whole (no partial
+ *  responses); a bare request answers as a bare object. An `answer` throw escapes. */
+function planBatchReplies(body: string, answer: (method: string) => unknown | undefined, methods: string[]): BatchPlan {
+	let entries: Array<{ method?: string; id?: unknown }>
+	let wasBatch = false
+	try {
+		const parsed = JSON.parse(body) as { method?: string } | Array<{ method?: string }>
+		wasBatch = Array.isArray(parsed)
+		entries = Array.isArray(parsed) ? parsed : [parsed]
+	} catch {
+		methods.push(`<unparsed:${body.slice(0, 60)}>`)
+		return { kind: "unparsed" }
+	}
+	const replies: unknown[] = []
+	let blackhole = false
+	for (const entry of entries) {
+		const method = entry?.method ?? "<no-method>"
+		methods.push(method)
+		const result = answer(method)
+		if (result === undefined) blackhole = true
+		else replies.push({ jsonrpc: "2.0", id: entry?.id ?? null, result })
+	}
+	if (blackhole) return { kind: "blackhole" }
+	return { kind: "replies", payload: wasBatch ? replies : replies[0] }
+}
+
+describe("planBatchReplies (no browser)", () => {
+	const answer = (method: string) => (method === "ok" ? { fine: true } : undefined)
+
+	it("logs an unparseable body as a note truncated to 60 chars and answers nothing", () => {
+		const methods: string[] = []
+		const body = `{not json ${"x".repeat(80)}`
+		expect(planBatchReplies(body, answer, methods)).toEqual({ kind: "unparsed" })
+		expect(methods).toEqual([`<unparsed:${body.slice(0, 60)}>`])
+		expect(methods[0]?.length).toBe("<unparsed:".length + 60 + 1)
+	})
+
+	it("answers a bare request as a bare object and a batch as an array, keeping falsy ids", () => {
+		const methods: string[] = []
+		expect(planBatchReplies(JSON.stringify({ method: "ok", id: 0 }), answer, methods)).toEqual({
+			kind: "replies",
+			payload: { jsonrpc: "2.0", id: 0, result: { fine: true } },
+		})
+		expect(
+			planBatchReplies(JSON.stringify([{ method: "ok", id: "" }, { method: "ok", id: false }, { method: "ok" }]), answer, methods),
+		).toEqual({
+			kind: "replies",
+			payload: [
+				{ jsonrpc: "2.0", id: "", result: { fine: true } },
+				{ jsonrpc: "2.0", id: false, result: { fine: true } },
+				{ jsonrpc: "2.0", id: null, result: { fine: true } },
+			],
+		})
+		expect(planBatchReplies("[]", answer, methods)).toEqual({ kind: "replies", payload: [] })
+		expect(methods).toEqual(["ok", "ok", "ok", "ok"])
+	})
+
+	it("blackholes a whole batch on one unanswerable element, still logging and asking every element", () => {
+		const methods: string[] = []
+		const asked: string[] = []
+		const spy = (method: string) => {
+			asked.push(method)
+			return answer(method)
+		}
+		expect(planBatchReplies(JSON.stringify([{ method: "ok" }, { method: "nope" }, {}]), spy, methods)).toEqual({ kind: "blackhole" })
+		expect(methods).toEqual(["ok", "nope", "<no-method>"])
+		expect(asked).toEqual(methods)
+	})
+})
+
 /** Local stub bound to an OS-assigned port (parallel-agent safe). Logs every
  *  JSON-RPC method it receives; `answer` decides which methods get a real
  *  response — everything else blackholes (accepted, never answered). */
@@ -99,34 +174,11 @@ function startStub(answer: (method: string) => unknown | undefined): Promise<Stu
 			req.on("data", (c) => {
 				body += String(c)
 			})
-			// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 26) — refactor when touched, never raise
 			req.on("end", () => {
-				// The aztec JSON-RPC client BATCHES: bodies arrive as arrays of
-				// request envelopes (the Phase-1 evidence harness learned this the
-				// hard way). Log + answer element-wise; a batch with ANY
-				// unanswerable element blackholes whole (no partial responses).
-				let entries: Array<{ method?: string; id?: unknown }>
-				let wasBatch = false
-				try {
-					const parsed = JSON.parse(body) as { method?: string } | Array<{ method?: string }>
-					wasBatch = Array.isArray(parsed)
-					entries = Array.isArray(parsed) ? parsed : [parsed]
-				} catch {
-					methods.push(`<unparsed:${body.slice(0, 60)}>`)
-					return
-				}
-				const replies: unknown[] = []
-				let blackhole = false
-				for (const entry of entries) {
-					const method = entry?.method ?? "<no-method>"
-					methods.push(method)
-					const result = answer(method)
-					if (result === undefined) blackhole = true
-					else replies.push({ jsonrpc: "2.0", id: entry?.id ?? null, result })
-				}
-				if (blackhole) return
+				const plan = planBatchReplies(body, answer, methods)
+				if (plan.kind !== "replies") return
 				res.setHeader("content-type", "application/json")
-				res.end(JSON.stringify(wasBatch ? replies : replies[0]))
+				res.end(JSON.stringify(plan.payload))
 			})
 		})
 		server.on("connection", (s) => {

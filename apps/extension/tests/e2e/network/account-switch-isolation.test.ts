@@ -100,7 +100,6 @@ async function findIncomingRecordByHash(page: Page, txHash: string): Promise<Sto
 test.skipIf(!hasConfig)(
 	"phase-0 harness: incoming-poll gate holds A's scan after discovery, releases into a committed record",
 	{ timeout: 600_000, retry: 0 },
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 17) — refactor when touched, never raise
 	async ({ tokenReadyExtension }) => {
 		if (!aztecConfig) throw new Error("unreachable — skipIf guards hasConfig")
 
@@ -111,27 +110,9 @@ test.skipIf(!hasConfig)(
 		expect(accountA).toBe(tokenReadyExtension.accountAddress)
 
 		// ── Resolve the active (profile, network, account) triple the gate arms
-		//    on. profileId lives under `nulo:ui:lastActiveProfile`; the active
-		//    network id under `nulo:core:active-network@<profileId>` (same reads
-		//    incoming-transfers.test.ts uses). contract is the fixture's token.
-		const triple = await page.evaluate(async () => {
-			const profileId = (await chrome.storage.local.get("nulo:ui:lastActiveProfile"))["nulo:ui:lastActiveProfile"]
-			const account = (await chrome.storage.local.get("nulo:ui:activeAccount"))["nulo:ui:activeAccount"]
-			let networkId: string | null = null
-			if (typeof profileId === "string") {
-				const activeKey = `nulo:core:active-network@${profileId}`
-				const activeId = (await chrome.storage.local.get(activeKey))[activeKey]
-				if (typeof activeId === "string") networkId = activeId
-			}
-			return {
-				profileId: typeof profileId === "string" ? profileId : null,
-				account: typeof account === "string" ? account : null,
-				networkId,
-			}
-		})
-		if (!triple.profileId || !triple.networkId || !triple.account) {
-			throw new Error(`could not resolve active (profile, network, account): ${JSON.stringify(triple)}`)
-		}
+		//    on (the same persisted keys incoming-transfers.test.ts reads).
+		//    contract is the fixture's token.
+		const triple = await resolveActiveTriple(page)
 		expect(triple.account).toBe(accountA)
 		const contract = aztecConfig.tokenAddress
 
@@ -168,19 +149,7 @@ test.skipIf(!hasConfig)(
 		//    (each fires a simulateTx); the incoming scheduler (30s cadence) then
 		//    discovers the just-synced note and — because the gate is armed for
 		//    exactly this note — parks in `scanContract`.
-		let held = false
-		for (let i = 0; i < 40 && !held; i++) {
-			await refreshBalances(page)
-			for (let j = 0; j < 15 && !held; j++) {
-				const status = await readIncomingPollStatus(page)
-				if (status?.phase === "discovery-held" && status.txHash === txHash) {
-					held = true
-					break
-				}
-				await new Promise((r) => setTimeout(r, 300))
-			}
-		}
-		expect(held).toBe(true)
+		expect(await driveScanUntilHeld(page, txHash)).toBe(true)
 		// Belt-and-suspenders: the fixture wait confirms the exact phase+hash.
 		await waitForIncomingPollPhase(page, "discovery-held", txHash, 5_000)
 		console.log("✓ Scan parked at discovery-held for A's note")
@@ -197,12 +166,7 @@ test.skipIf(!hasConfig)(
 
 		// ── A's incoming record THEN appears, correlated by the exact tx hash,
 		//    owned by A, and visible (auto-trusted token).
-		let record: StoredIncomingRecord | null = null
-		for (let i = 0; i < 25 && !record; i++) {
-			record = await findIncomingRecordByHash(page, txHash)
-			if (record) break
-			await new Promise((r) => setTimeout(r, 200))
-		}
+		const record = await pollIncomingRecordByHash(page, txHash)
 		expect(record).not.toBeNull()
 		expect(record?.accountAddress).toBe(accountA)
 		expect(record?.hidden).toBe(false)
@@ -239,6 +203,36 @@ async function resolveActiveTriple(page: Page): Promise<{ profileId: string; net
 		throw new Error(`could not resolve active (profile, network, account): ${JSON.stringify(triple)}`)
 	}
 	return { profileId: triple.profileId, networkId: triple.networkId, account: triple.account }
+}
+
+/** Drive the extension PXE forward until a scan discovers the note and parks at
+ *  `discovery-held` for `txHash`: at most 40 refreshes, each followed by up to 15
+ *  status reads 300 ms apart (the sleep follows every miss, none follows the hit). */
+async function driveScanUntilHeld(page: Page, txHash: string): Promise<boolean> {
+	let held = false
+	for (let i = 0; i < 40 && !held; i++) {
+		await refreshBalances(page)
+		for (let j = 0; j < 15 && !held; j++) {
+			const status = await readIncomingPollStatus(page)
+			if (status?.phase === "discovery-held" && status.txHash === txHash) {
+				held = true
+				break
+			}
+			await new Promise((r) => setTimeout(r, 300))
+		}
+	}
+	return held
+}
+
+/** The incoming record correlated by `txHash`, polled up to 25 times 200 ms apart. */
+async function pollIncomingRecordByHash(page: Page, txHash: string): Promise<StoredIncomingRecord | null> {
+	let record: StoredIncomingRecord | null = null
+	for (let i = 0; i < 25 && !record; i++) {
+		record = await findIncomingRecordByHash(page, txHash)
+		if (record) break
+		await new Promise((r) => setTimeout(r, 200))
+	}
+	return record
 }
 
 /** Deliver a real private note to `toAddress` from an independent EmbeddedWallet
