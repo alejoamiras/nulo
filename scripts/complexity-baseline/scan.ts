@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process"
+import { readFileSync } from "node:fs"
 
 /**
  * The two rules that carry an accepted-suppression baseline. The nested-test-suites
@@ -32,7 +33,7 @@ export const MARKER_PREFIX = "JUSTIFICATION REQUIRED"
 export const LEGACY_PREFIX = "baseline ("
 
 export type Classified =
-	| { kind: "baselined"; rule: BaselinedRule; accepted: number }
+	| { kind: "baselined"; rule: BaselinedRule; accepted: number; sentence: string }
 	| { kind: "forbidden"; why: string }
 	| null
 
@@ -82,7 +83,7 @@ function classifyAcceptedForm(line: string, rule: BaselinedRule): Classified {
 	if (sentence.length < MIN_SENTENCE || PLACEHOLDER_RE.test(sentence)) {
 		return { kind: "forbidden", why: "the accepted sentence must say why THIS function's complexity is essential (no placeholders)" }
 	}
-	return { kind: "baselined", rule, accepted: Number(score ?? lines) }
+	return { kind: "baselined", rule, accepted: Number(score ?? lines), sentence }
 }
 
 /**
@@ -102,15 +103,20 @@ const SOURCE_PATHSPECS = [
 	":(exclude)*.d.ts",
 ]
 
-/** One accepted directive as the tree carries it. `anchor` (the declaration line under the
- *  directive) is its identity in the manifest — a directive moved onto another function is a
- *  different entry, not the same count. */
-export interface AcceptedDirective {
+/** The manifest's per-acceptance record. Identity is (file, rule, anchor) — `anchor` is the
+ *  declaration line under the directive, which must be unique in its file — and the pinned
+ *  claim is (accepted, sentence). A directive moved onto another function is a new identity. */
+export interface ManifestEntry {
 	file: string
-	line: number
 	rule: BaselinedRule
-	accepted: number
 	anchor: string
+	accepted: number
+	sentence: string
+}
+
+/** One accepted directive as the tree carries it: a manifest entry plus its source line. */
+export interface AcceptedDirective extends ManifestEntry {
+	line: number
 }
 
 export interface ScanResult {
@@ -119,9 +125,10 @@ export interface ScanResult {
 	forbidden: { file: string; line: number; why: string }[]
 }
 
-/** How many lines under a directive may be other suppressions before the declaration (paired
- *  length + cognitive directives on one function). */
-const ANCHOR_LOOKAHEAD = 3
+/** How far below a directive the declaration may sit (paired directives, a doc comment, blanks). */
+const ANCHOR_LOOKAHEAD = 8
+/** Lines that cannot be the declaration: blank, line comments, block-comment openers and their continuations. */
+const NON_DECLARATION_RE = /^\s*(?:\/\/|\/\*|\*|$)/
 
 /**
  * Scans tracked source for suppressions reaching budget rules. Default reads the
@@ -129,7 +136,8 @@ const ANCHOR_LOOKAHEAD = 3
  * actually captures, so the pre-commit hook can't be split-staged past.
  */
 export function scanTree(opts: { staged?: boolean } = {}): ScanResult {
-	const flags = opts.staged ? ["--cached"] : []
+	const staged = opts.staged === true
+	const flags = staged ? ["--cached"] : []
 	const res = spawnSync("git", ["grep", ...flags, "-nF", `-A${ANCHOR_LOOKAHEAD}`, "biome-ignore", "--", ...SOURCE_PATHSPECS], {
 		encoding: "utf8",
 		maxBuffer: 64 * 1024 * 1024,
@@ -147,14 +155,21 @@ export function scanTree(opts: { staged?: boolean } = {}): ScanResult {
 			forbidden.push({ file: hit.file, line: hit.line, why: c.why })
 			continue
 		}
+		const anchor = anchorFor(parsed, hit.file, hit.line)
+		if (anchor === undefined) {
+			forbidden.push({ file: hit.file, line: hit.line, why: `no declaration within ${ANCHOR_LOOKAHEAD} lines below the directive — an acceptance sits directly above the function it covers` })
+			continue
+		}
 		ruleCounts[c.rule][hit.file] = (ruleCounts[c.rule][hit.file] ?? 0) + 1
-		accepted.push({ file: hit.file, line: hit.line, rule: c.rule, accepted: c.accepted, anchor: anchorFor(parsed, hit.file, hit.line) })
+		accepted.push({ file: hit.file, line: hit.line, rule: c.rule, accepted: c.accepted, sentence: c.sentence, anchor })
 	}
+	forbidden.push(...duplicateIdentities(accepted), ...ambiguousAnchors(accepted, staged))
 	for (const rule of BASELINED_RULES) {
 		// Byte-order sort — locale-independent so regeneration is reproducible across machines.
 		ruleCounts[rule] = Object.fromEntries(Object.entries(ruleCounts[rule]).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
 	}
 	accepted.sort(compareDirectives)
+	forbidden.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line))
 	return { ruleCounts, accepted, forbidden }
 }
 
@@ -163,7 +178,7 @@ interface GrepLine {
 	line: number
 	content: string
 }
-interface ParsedGrep {
+export interface ParsedGrep {
 	matches: GrepLine[]
 	/** Every line git printed (matches and context), keyed `file:line`. */
 	byKey: Map<string, string>
@@ -187,30 +202,60 @@ export function parseGrepWithContext(stdout: string): ParsedGrep {
 	return { matches, byKey }
 }
 
-/** The first non-suppression line under the directive, trimmed — the declaration it applies to. */
-function anchorFor(parsed: ParsedGrep, file: string, line: number): string {
+/** The first line under the directive that is neither blank nor a comment (so neither a paired
+ *  directive nor a doc block), trimmed — the declaration it applies to. */
+export function anchorFor(parsed: ParsedGrep, file: string, line: number): string | undefined {
 	for (let offset = 1; offset <= ANCHOR_LOOKAHEAD; offset++) {
 		const next = parsed.byKey.get(`${file}:${line + offset}`)
-		if (next === undefined) break
-		if (SUPPRESSION_RE.test(next)) continue
+		if (next === undefined) return undefined
+		if (NON_DECLARATION_RE.test(next)) continue
 		return next.trim()
 	}
-	return "<no declaration within reach>"
+	return undefined
+}
+
+function duplicateIdentities(accepted: AcceptedDirective[]): ScanResult["forbidden"] {
+	const first = new Map<string, number>()
+	const out: ScanResult["forbidden"] = []
+	for (const d of accepted) {
+		const key = entryKey(d)
+		const seenAt = first.get(key)
+		if (seenAt === undefined) first.set(key, d.line)
+		else out.push({ file: d.file, line: d.line, why: `duplicate acceptance — same rule and declaration as line ${seenAt}` })
+	}
+	return out
+}
+
+function fileLines(file: string, staged: boolean): string[] {
+	if (!staged) return readFileSync(file, "utf8").split("\n")
+	const res = spawnSync("git", ["show", `:${file}`], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
+	if (res.status !== 0) throw new Error(`git show :${file} failed (${res.status}): ${res.stderr}`)
+	return res.stdout.split("\n")
+}
+
+/** An anchor that occurs more than once in its file would let a directive slide onto a
+ *  same-text declaration (a same-file swap) without changing identity — refused. */
+export function ambiguousAnchors(accepted: AcceptedDirective[], staged = false): ScanResult["forbidden"] {
+	const byFile = new Map<string, AcceptedDirective[]>()
+	for (const d of accepted) byFile.set(d.file, [...(byFile.get(d.file) ?? []), d])
+	const out: ScanResult["forbidden"] = []
+	for (const [file, list] of byFile) {
+		const trimmed = fileLines(file, staged).map((l) => l.trim())
+		for (const d of list) {
+			const n = trimmed.filter((l) => l === d.anchor).length
+			if (n > 1) out.push({ file, line: d.line, why: `the declaration line under the directive occurs ${n}× in this file — an acceptance anchors to a unique declaration (name it, or move the directive onto the named one)` })
+		}
+	}
+	return out
 }
 
 export function compareDirectives(a: AcceptedDirective, b: AcceptedDirective): number {
-	const ka = `${a.file} ${a.rule} ${a.anchor}`
-	const kb = `${b.file} ${b.rule} ${b.anchor}`
+	const ka = entryKey(a)
+	const kb = entryKey(b)
 	return ka < kb ? -1 : ka > kb ? 1 : 0
 }
 
-/** The manifest's per-acceptance record: identity (file, rule, anchor) + the stamped value. */
-export interface ManifestEntry {
-	file: string
-	rule: BaselinedRule
-	anchor: string
-	accepted: number
-}
+export const entryKey = (e: ManifestEntry) => `${e.rule} ${e.file} — ${e.anchor}`
 
 export interface BaselineManifest {
 	biomeVersion: string
@@ -220,38 +265,85 @@ export interface BaselineManifest {
 	accepted: ManifestEntry[]
 }
 
-export interface ManifestDrift {
-	/** Entries in the tree but not in the manifest (a new or MOVED acceptance). */
-	added: string[]
-	/** Entries in the manifest but not in the tree (an acceptance removed or moved away). */
-	removed: string[]
-	/** Same identity, different stamp — `file: N → M`. */
-	restamped: { key: string; from: number; to: number }[]
-	/** Convenience for the shrink-only messages: `added` also counts as growth. */
-	grew: string[]
-	shrank: string[]
+/** A manifest committed before acceptances were pinned individually (counts only). Only ever
+ *  read as a PR's BASE by the CI ratchet; never written or accepted as the current shape. */
+export interface LegacyManifest {
+	biomeVersion: string
+	rules: Record<BaselinedRule, Record<string, number>>
+	accepted?: undefined
 }
 
-const entryKey = (e: ManifestEntry) => `${e.rule} ${e.file} — ${e.anchor}`
+export function hasEntries(m: BaselineManifest | LegacyManifest): m is BaselineManifest {
+	return Array.isArray(m.accepted)
+}
 
-/** Diffs an actual scan against the pinned manifest, acceptance by acceptance. */
-export function compareToManifest(manifest: BaselineManifest, actual: AcceptedDirective[]): ManifestDrift {
-	const pinned = new Map((manifest.accepted ?? []).map((e) => [entryKey(e), e]))
-	const seen = new Map(actual.map((e) => [entryKey(e), e]))
-	const added: string[] = []
-	const removed: string[] = []
-	const restamped: ManifestDrift["restamped"] = []
+export interface EntryDiff {
+	/** In `head` with no identity in `base`, and not a move. */
+	added: ManifestEntry[]
+	/** In `base` with no identity in `head`, and not a move. */
+	removed: ManifestEntry[]
+	/** Same rule, stamp and sentence under a new identity: a renamed declaration or a moved file. */
+	moved: { from: ManifestEntry; to: ManifestEntry }[]
+	/** Same identity, different stamp. */
+	restamped: { key: string; from: number; to: number }[]
+	/** Same identity and stamp, different sentence. */
+	reworded: string[]
+}
+
+/** Diffs two acceptance sets entry by entry. Used both for tree-vs-manifest (must be empty in
+ *  every bucket) and manifest-vs-base-branch (the shrink-only ratchet, see `ratchetViolations`). */
+export function diffEntries(base: ManifestEntry[], head: ManifestEntry[]): EntryDiff {
+	const pinned = new Map(base.map((e) => [entryKey(e), e]))
+	const seen = new Map(head.map((e) => [entryKey(e), e]))
+	const added: ManifestEntry[] = []
+	const restamped: EntryDiff["restamped"] = []
+	const reworded: string[] = []
 	for (const [key, e] of seen) {
 		const was = pinned.get(key)
-		if (!was) added.push(`${key} (accepted at ${e.accepted})`)
+		if (!was) added.push(e)
 		else if (was.accepted !== e.accepted) restamped.push({ key, from: was.accepted, to: e.accepted })
+		else if (was.sentence !== e.sentence) reworded.push(key)
 	}
-	for (const key of pinned.keys()) if (!seen.has(key)) removed.push(key)
-	return { added, removed, restamped, grew: added, shrank: removed }
+	const removed = [...pinned].filter(([key]) => !seen.has(key)).map(([, e]) => e)
+	return { ...pairMoves(added, removed), restamped, reworded }
+}
+
+/** Pairs an added entry with a removed one carrying the same rule, stamp AND sentence: that is a
+ *  declaration rename or a file move, not a new acceptance. A swap onto another function would
+ *  have to carry the old function's sentence verbatim — visible nonsense in review. */
+function pairMoves(added: ManifestEntry[], removed: ManifestEntry[]): Pick<EntryDiff, "added" | "removed" | "moved"> {
+	const pool = [...removed]
+	const moved: EntryDiff["moved"] = []
+	const unpaired: ManifestEntry[] = []
+	for (const a of added) {
+		const i = pool.findIndex((r) => r.rule === a.rule && r.accepted === a.accepted && r.sentence === a.sentence)
+		if (i === -1) unpaired.push(a)
+		else moved.push({ from: pool.splice(i, 1)[0], to: a })
+	}
+	return { added: unpaired, removed: pool, moved }
+}
+
+/** What a change on the SAME Biome may never do to the acceptance set: add one, or raise one. */
+export function ratchetViolations(diff: EntryDiff): string[] {
+	const out = diff.added.map((e) => `+ ${entryKey(e)} (accepted at ${e.accepted})`)
+	for (const r of diff.restamped) if (r.to > r.from) out.push(`↑ ${r.key}: ${r.from} → ${r.to}`)
+	return out
+}
+
+/** The ratchet against a base that predates per-acceptance entries: per-rule totals only. */
+export function legacyRatchetViolations(base: LegacyManifest["rules"], head: BaselineManifest["rules"]): string[] {
+	const total = (counts: Record<string, number>) => Object.values(counts).reduce((a, b) => a + b, 0)
+	const out: string[] = []
+	for (const rule of BASELINED_RULES) {
+		const from = total(base[rule] ?? {})
+		const to = total(head[rule] ?? {})
+		if (to > from) out.push(`↑ ${rule}: ${from} → ${to} acceptance(s)`)
+	}
+	return out
 }
 
 export function toManifestEntries(accepted: AcceptedDirective[]): ManifestEntry[] {
-	return accepted.map(({ file, rule, anchor, accepted: stamp }) => ({ file, rule, anchor, accepted: stamp }))
+	return accepted.map(({ file, rule, anchor, accepted: stamp, sentence }) => ({ file, rule, anchor, accepted: stamp, sentence }))
 }
 
 export function installedBiomeVersion(rootPackageJson: { devDependencies?: Record<string, string> }): string {

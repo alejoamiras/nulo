@@ -10,6 +10,8 @@ import { scanTree } from "../complexity-baseline/scan"
 
 const IGNORE = "// biome-ignore"
 const rule = "noExcessiveCognitiveComplexity" as const
+const sentence = "the nested loop is the fixture's whole point here"
+const anchor = "export function f"
 
 /** A function whose cognitive score is far over 15, under a directive stamped `accepted`. Lives
  *  under an included Biome root (`scripts/ci-cd/test-soak/`) so the repo config applies. */
@@ -18,7 +20,7 @@ function fixture(accepted: number, deep: boolean): { file: string; line: number 
 	const body = deep
 		? ["export function f(a: number, b: number): number {", "\tlet n = 0", "\tfor (let i = 0; i < a; i++) {", "\t\tif (i % 2 === 0 && b > 1) {", "\t\t\tif (i % 3 === 0 || b > 2) {", "\t\t\t\tif (i % 5 === 0 && b > 3) {", "\t\t\t\t\tif (i % 7 === 0 || b > 4) n += i", "\t\t\t\t\telse n -= 1", "\t\t\t\t}", "\t\t\t}", "\t\t}", "\t}", "\treturn n", "}"]
 		: ["export function f(a: number): number {", "\treturn a + 1", "}"]
-	const directive = `${IGNORE} lint/complexity/${rule}: accepted at score ${accepted} — the nested loop is the fixture's whole point here`
+	const directive = `${IGNORE} lint/complexity/${rule}: accepted at score ${accepted} — ${sentence}`
 	writeFileSync(file, `${[directive, ...body].join("\n")}\n`, { flag: "wx" })
 	return { file, line: 1 }
 }
@@ -50,7 +52,7 @@ describe("complexity rescore", () => {
 			] as const) {
 				const fx = fixture(accepted, deep)
 				try {
-					seen.push([accepted, deep, rescore([{ ...fx, rule, accepted, anchor: "export function f" }]).violations])
+					seen.push([accepted, deep, rescore([{ ...fx, rule, accepted, anchor, sentence }]).violations])
 				} finally {
 					rmSync(fx.file, { force: true })
 				}
@@ -62,7 +64,7 @@ describe("complexity rescore", () => {
 			const observed = Number(seen[0][2][0].match(/observed (\d+)/)?.[1])
 			const exact = fixture(observed, true)
 			try {
-				expect(rescore([{ ...exact, rule, accepted: observed, anchor: "export function f" }]).violations).toEqual([])
+				expect(rescore([{ ...exact, rule, accepted: observed, anchor, sentence }]).violations).toEqual([])
 			} finally {
 				rmSync(exact.file, { force: true })
 			}

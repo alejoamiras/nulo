@@ -7,10 +7,12 @@
  * exits 1 listing them without writing the manifest. A human replaces each marker with
  * `accepted at … — <why>` (or refactors) and re-runs. Existing directives are never rewritten.
  *
- * The manifest only shrinks on its own. Growth (a new or moved acceptance) or an upward re-stamp
- * needs `--adopt`, and `--adopt` is accepted ONLY when the installed Biome differs from the
- * manifest's pin — a version bump, the one legitimate reason numbers move — never as a
- * general-purpose bypass.
+ * The manifest only shrinks on its own: removals, lowered stamps, reworded sentences and moves
+ * (a renamed declaration or moved file keeping rule, stamp and sentence) regenerate freely. A
+ * new acceptance or a raised stamp needs `--adopt`, and `--adopt` is accepted ONLY when the
+ * installed Biome differs from the manifest's pin — a version bump, the one legitimate reason
+ * numbers rise — never as a general-purpose bypass. CI applies the same ratchet against the PR's
+ * base branch, so a hand-edited manifest does not get past review either.
  */
 import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
@@ -19,8 +21,11 @@ import {
 	type BaselineManifest,
 	BASELINED_RULES,
 	type BaselinedRule,
-	compareToManifest,
+	diffEntries,
+	hasEntries,
 	installedBiomeVersion,
+	type LegacyManifest,
+	ratchetViolations,
 	scanTree,
 	toManifestEntries,
 } from "./scan"
@@ -60,7 +65,11 @@ function isBaselined(category: string): category is BaselinedRule {
 const adopt = process.argv.includes("--adopt")
 const rootPkg = JSON.parse(readFileSync("package.json", "utf8"))
 const installed = installedBiomeVersion(rootPkg)
-const committed: BaselineManifest | undefined = existsSync(MANIFEST_PATH) ? JSON.parse(readFileSync(MANIFEST_PATH, "utf8")) : undefined
+const committed: BaselineManifest | LegacyManifest | undefined = existsSync(MANIFEST_PATH) ? JSON.parse(readFileSync(MANIFEST_PATH, "utf8")) : undefined
+if (committed !== undefined && !hasEntries(committed)) {
+	console.error(`ERROR: ${MANIFEST_PATH} carries no per-acceptance entries — restore it from git before regenerating.`)
+	process.exit(1)
+}
 if (adopt && committed && committed.biomeVersion === installed) {
 	console.error(`ERROR: --adopt is only for a Biome version bump; the manifest already pins the installed ${installed}.`)
 	console.error("Growth is never adopted on the same Biome: refactor the function under the budget instead.")
@@ -93,7 +102,8 @@ for (const [path, findings] of byFile) {
 if (inserted.length > 0) {
 	console.error(`ERROR: ${inserted.length} function(s) exceed a budget and now carry a JUSTIFICATION REQUIRED marker:`)
 	for (const i of inserted) console.error(`  ${i}`)
-	console.error("Refactor each under the budget, or replace its marker with `accepted at … — <why>`, then re-run. Nothing was written.")
+	console.error("Refactor each under the budget, or replace its marker with `accepted at … — <why>`, then re-run.")
+	console.error("The manifest was not written; the markers remain in the source until you resolve them.")
 	process.exit(1)
 }
 
@@ -104,28 +114,26 @@ if (scan.forbidden.length > 0) {
 	process.exit(1)
 }
 
-// A manifest written before acceptances were pinned individually (counts only) is migrated once:
-// every current directive becomes an entry. From then on the entry set only shrinks on its own.
-const legacyShape = committed !== undefined && committed.accepted === undefined
-if (legacyShape) console.log("manifest carries no per-acceptance entries yet — pinning the current directives (one-time shape migration)")
-if (committed && !legacyShape) {
-	const drift = compareToManifest(committed, scan.accepted)
-	const upward = drift.restamped.filter((r) => r.to > r.from)
+const entries = toManifestEntries(scan.accepted)
+if (committed) {
+	const diff = diffEntries(committed.accepted, entries)
+	const violations = ratchetViolations(diff)
 	const adoptAllowed = adopt && committed.biomeVersion !== installed
-	if ((drift.added.length > 0 || upward.length > 0) && !adoptAllowed) {
+	if (violations.length > 0 && !adoptAllowed) {
 		console.error("ERROR: regeneration would GROW the baseline — refusing. New or raised acceptances:")
-		for (const g of drift.added) console.error(`  + ${g}`)
-		for (const r of upward) console.error(`  ↑ ${r.key}: ${r.from} → ${r.to}`)
+		for (const v of violations) console.error(`  ${v}`)
 		console.error("Refactor the function(s) under the budget instead; `--adopt` exists only for a Biome version bump.")
 		process.exit(1)
 	}
+	for (const m of diff.moved) console.log(`moved: ${m.from.file} — ${m.from.anchor}  →  ${m.to.file} — ${m.to.anchor}`)
+	for (const k of diff.reworded) console.log(`reworded: ${k}`)
 }
 
 const manifest: BaselineManifest = {
 	biomeVersion: installed,
 	generated: new Date().toISOString().slice(0, 10),
 	rules: scan.ruleCounts,
-	accepted: toManifestEntries(scan.accepted),
+	accepted: entries,
 }
 writeFileSync(MANIFEST_PATH, `${JSON.stringify(manifest, null, "\t")}\n`)
 const totals = BASELINED_RULES.map((r) => `${r}: ${Object.values(manifest.rules[r]).reduce((a, b) => a + b, 0)}`).join(", ")

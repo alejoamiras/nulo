@@ -36,214 +36,249 @@
 	},
 	"accepted": [
 		{
-			"file": "apps/extension/src/components/JsonViewer/creator.js",
-			"rule": "noExcessiveLinesPerFunction",
-			"anchor": "export const createTheme = ({ styles }) => {",
-			"accepted": 154
-		},
-		{
 			"file": "apps/extension/src/popup/components/modules/send/FeeSettingsCard.test.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "get: async (keys: string | string[] | null | undefined) => {",
-			"accepted": 19
-		},
-		{
-			"file": "apps/extension/src/stores/activity.store.ts",
-			"rule": "noExcessiveLinesPerFunction",
-			"anchor": "export const useActivityStore = defineStore(\"activity\", () => {",
-			"accepted": 122
+			"accepted": 19,
+			"sentence": "the Chrome-storage fake implements the null / string / string[] lookup contract; those branches are its API"
 		},
 		{
 			"file": "apps/extension/src/utils/amount.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "export const formatBaseUnits = (units: bigint | string | null | undefined, decimals: number, opts: FormatBaseUnitsOpts = {}): string => {",
-			"accepted": 22
+			"accepted": 22,
+			"sentence": "sign, truncation, padding, zero trimming and separators ARE the integer-formatting algorithm"
 		},
 		{
 			"file": "apps/extension/src/utils/log-payload-ban.test.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "function findLoggedSecrets(files: Array<{ path: string; content: string }>): string[] {",
-			"accepted": 17
+			"accepted": 17,
+			"sentence": "one scan preserves per-file lexical state, source offsets, call windows and deduplication"
 		},
 		{
 			"file": "apps/extension/src/utils/log-payload-ban.test.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "function stripNoise(line: string, state: LexState): { code: string; state: LexState } {",
-			"accepted": 41
+			"accepted": 41,
+			"sentence": "a lexer state machine: comment, quote, regex and template-interpolation precedence must stay together"
 		},
 		{
 			"file": "apps/extension/src/wallet/logger/utils.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "export const trim = (value: unknown, depth: number = 0): unknown => {",
-			"accepted": 45
+			"accepted": 45,
+			"sentence": "the ordered recursive shape walker IS the redaction policy; extraction would scatter security precedence"
 		},
 		{
 			"file": "apps/extension/src/wallet/services/backup/footprint-coverage.test.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "function sampleRowsFor(t: RowMapTransform): Array<Record<string, unknown>> {",
-			"accepted": 17
+			"accepted": 17,
+			"sentence": "the loops enumerate every row-transform DSL clause into its required samples"
 		},
 		{
 			"file": "apps/extension/src/wallet/services/backup/row-map-migration.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "export function applyRowTransform(row: unknown, t: RowMapTransform): Record<string, unknown> {",
-			"accepted": 39
+			"accepted": 39,
+			"sentence": "clause order and presence guards ARE the row-transform DSL interpreter semantics"
 		},
 		{
 			"file": "apps/extension/src/wallet/services/backup/row-map-migration.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "function cloneJsonValue(value: unknown, path: string): JsonValue {",
-			"accepted": 24
+			"accepted": 24,
+			"sentence": "hostile-JSON cloning keeps primitive, prototype, accessor, array-index and recursion checks adjacent"
 		},
 		{
 			"file": "apps/extension/src/wallet/services/backup/row-map-migration.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "function retypeValue(field: string, v: unknown, kind: \"string\" | \"number\" | \"boolean\"): string | number | boolean {",
-			"accepted": 23
+			"accepted": 23,
+			"sentence": "the explicit source-type × destination-type matrix defines the permitted coercions"
 		},
 		{
 			"file": "apps/extension/src/wallet/services/execution/fee/fee-strategy-clamp-properties.test.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "test(\"I1+I2+I4+I6 — auto-derived limits: cap-bounded, measured-floored, throw iff inadmissible\", async () => {",
-			"accepted": 19
+			"accepted": 19,
+			"sentence": "each generated tuple must branch between rejection and the complete postcondition set"
 		},
 		{
 			"file": "apps/extension/src/wallet/services/execution/operation-estimate-reuse.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "public async tryConsume(estimateId: string, input: OperationFingerprintInput): Promise<OperationEstimateReuseEntry | undefined> {",
-			"accepted": 21
+			"accepted": 21,
+			"sentence": "the ordered single-shot validation ladder is the reuse-authorization checklist"
 		},
 		{
 			"file": "apps/extension/src/wallet/services/execution/operation-fingerprint.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "function encodeValue(value: unknown, depth: number): string | null {",
-			"accepted": 25
+			"accepted": 25,
+			"sentence": "recursive type-tagged encoding must reject unsupported shapes while canonicalizing arrays and objects"
 		},
 		{
 			"file": "apps/extension/src/wallet/services/incoming-transfer/service.scenarios.test.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "clearChain: async (p: string, n: string) => {",
-			"accepted": 30
+			"accepted": 30,
+			"sentence": "clearing a chain atomically covers records, trust, cursors and outbox under one scope predicate"
 		},
 		{
 			"file": "apps/extension/tests/e2e/fixtures/extension.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "(args: { sel: string; visible: boolean; hidden: boolean }) => {",
-			"accepted": 29
+			"accepted": 29,
+			"sentence": "the predicate implements Puppeteer's exact exists / visible / hidden selector semantics in-page"
 		},
 		{
 			"file": "apps/extension/tests/e2e/fixtures/extension.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "const storedAccounts = await capPopup.evaluate(async () => {",
-			"accepted": 19
+			"accepted": 19,
+			"sentence": "an in-browser diagnostic scanning exactly the account and network roots in serialized or object form"
 		},
 		{
 			"file": "apps/extension/tests/e2e/fixtures/journal.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "async (sid: string | null, minA: number, minQ: number, minIF: number) => {",
-			"accepted": 26
+			"accepted": 26,
+			"sentence": "parse, session filter, stage classification and three threshold checks form one polling predicate"
 		},
 		{
 			"file": "apps/extension/tests/e2e/fixtures/journal.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "return extCtxEvaluate(page, async () => {",
-			"accepted": 18
+			"accepted": 18,
+			"sentence": "one tolerant scan applies the diagnostic allowlist before data crosses into CI artifacts"
 		},
 		{
 			"file": "apps/extension/tests/e2e/fixtures/journal.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "return page.evaluate(async () => {",
-			"accepted": 16
+			"accepted": 16,
+			"sentence": "one tolerant in-browser journal scan projecting the exact lean record view"
 		},
 		{
 			"file": "apps/tools/src/lib/errors.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "export function normalizeError(err: unknown): NormalizedError {",
-			"accepted": 21
+			"accepted": 21,
+			"sentence": "ordered overlapping message predicates are the error-classification precedence policy"
 		},
 		{
 			"file": "apps/tools/src/lib/phase-clock.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "return phases.map((phase) => {",
-			"accepted": 22
-		},
-		{
-			"file": "packages/bridge-core/scripts/deploy-sandbox.ts",
-			"rule": "noExcessiveLinesPerFunction",
-			"anchor": "async function main() {",
-			"accepted": 197
-		},
-		{
-			"file": "packages/bridge-core/scripts/deposit-testnet.ts",
-			"rule": "noExcessiveLinesPerFunction",
-			"anchor": "async function main() {",
-			"accepted": 155
+			"accepted": 22,
+			"sentence": "pending / active / failed / done transitions specify the latest-attempt temporal reducer"
 		},
 		{
 			"file": "packages/bridge-core/scripts/discover-mainnet-fuel.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "async function main(): Promise<void> {",
-			"accepted": 32
-		},
-		{
-			"file": "packages/bridge-core/scripts/discover-mainnet-fuel.ts",
-			"rule": "noExcessiveLinesPerFunction",
-			"anchor": "async function main(): Promise<void> {",
-			"accepted": 87
+			"accepted": 32,
+			"sentence": "the nested fee-tier cross-product and failed-quote reporting are the discovery matrix"
 		},
 		{
 			"file": "packages/bridge-core/scripts/fpc-dust-canary-mainnet.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "async function main() {",
-			"accepted": 23
+			"accepted": 23,
+			"sentence": "the live canary binds fee sizing, deposit evidence, repriced retries and balance-delta acceptance"
 		},
 		{
 			"file": "packages/bridge-core/scripts/relay-claim-testnet.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "async function main(): Promise<void> {",
-			"accepted": 22
-		},
-		{
-			"file": "packages/bridge-core/scripts/relay-claim-testnet.ts",
-			"rule": "noExcessiveLinesPerFunction",
-			"anchor": "async function main(): Promise<void> {",
-			"accepted": 93
+			"accepted": 22,
+			"sentence": "the wrong-recipient canary and the bounded claim retry are explicit security outcomes of that procedure"
 		},
 		{
 			"file": "packages/wallet-core/src/base/topology.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "export function topologicalPhases<T extends ServiceNode>(nodes: readonly T[]): T[][] {",
-			"accepted": 29
+			"accepted": 29,
+			"sentence": "validation, layered Kahn traversal and cycle detection are one conventional topological algorithm"
 		},
 		{
 			"file": "packages/wallet-core/src/utils/serialization.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "return JSON.stringify(obj, (_key, value) => {",
-			"accepted": 23
+			"accepted": 23,
+			"sentence": "upstream-compatible replacer dispatch defines the JSON wire form of each supported runtime type"
 		},
 		{
 			"file": "scripts/ci-cd/test-soak/cli.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "async function soak(argv: string[]): Promise<number> {",
-			"accepted": 16
+			"accepted": 16,
+			"sentence": "one coordinator binds two launch modes to provenance capture and summary emission"
 		},
 		{
 			"file": "scripts/ci-cd/test-soak/cli.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "export async function runOnce(opts: RunOnceOptions): Promise<RunOutcome> {",
-			"accepted": 19
+			"accepted": 19,
+			"sentence": "one temp lifecycle owns hooks, the child group, reporter evidence, early failures and guaranteed cleanup"
 		},
 		{
 			"file": "scripts/ci-cd/test-soak/cli.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "export function parseSoakArgs(argv: string[]): SoakArgs {",
-			"accepted": 25
+			"accepted": 25,
+			"sentence": "the flat CLI grammar, terminator, typed runtime and required-field checks are the parser specification"
 		},
 		{
 			"file": "scripts/ci-cd/test-soak/lib.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "export function parseVitestJson(json: VitestJson, canon: Canonicalizer): ParsedRun {",
-			"accepted": 22
+			"accepted": 22,
+			"sentence": "nested reporter traversal keeps file failures, duplicate test identities, status counts and messages together"
+		},
+		{
+			"file": "apps/extension/src/components/JsonViewer/creator.js",
+			"rule": "noExcessiveLinesPerFunction",
+			"anchor": "export const createTheme = ({ styles }) => {",
+			"accepted": 154,
+			"sentence": "one declarative CodeMirror theme value; splitting selector groups only fragments a single style sheet"
+		},
+		{
+			"file": "apps/extension/src/stores/activity.store.ts",
+			"rule": "noExcessiveLinesPerFunction",
+			"anchor": "export const useActivityStore = defineStore(\"activity\", () => {",
+			"accepted": 122,
+			"sentence": "one Pinia closure owns the scoped slices and the ABA-safe mutation fences every action shares"
+		},
+		{
+			"file": "packages/bridge-core/scripts/deploy-sandbox.ts",
+			"rule": "noExcessiveLinesPerFunction",
+			"anchor": "async function main() {",
+			"accepted": 197,
+			"sentence": "shared live handles make L1/L2 deployment, wiring and optional smoke one auditable sandbox recipe"
+		},
+		{
+			"file": "packages/bridge-core/scripts/deposit-testnet.ts",
+			"rule": "noExcessiveLinesPerFunction",
+			"anchor": "async function main() {",
+			"accepted": 155,
+			"sentence": "the deploy → deposit → claim → withdraw proof shares ephemeral addresses and secrets in one custody trace"
+		},
+		{
+			"file": "packages/bridge-core/scripts/discover-mainnet-fuel.ts",
+			"rule": "noExcessiveLinesPerFunction",
+			"anchor": "async function main(): Promise<void> {",
+			"accepted": 87,
+			"sentence": "one evidence transcript links identity checks, pool discovery, quotations and the winning manifest block"
+		},
+		{
+			"file": "packages/bridge-core/scripts/relay-claim-testnet.ts",
+			"rule": "noExcessiveLinesPerFunction",
+			"anchor": "async function main(): Promise<void> {",
+			"accepted": 93,
+			"sentence": "offline validation, wallet setup, contract registration and submission form one ordered custody procedure"
 		}
 	]
 }
