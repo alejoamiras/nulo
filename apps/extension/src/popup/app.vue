@@ -8,6 +8,7 @@ import { managers, isBackgroundConnected } from "@/utils/core"
 import { isPrefersDarkScheme, persistThemeHint } from "@/utils/general"
 import { getLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { shouldAdvanceToGeneral } from "./should-advance-to-general"
+import { lookupActiveProfileWithBackoff } from "./auth-guard"
 import { defaultConfig } from "@/wallet/config"
 import { AccountServiceClient } from "@/wallet/services/account/client"
 import { createNetworkSwitchHandler } from "@/popup/network-switch"
@@ -179,41 +180,96 @@ const onImportedKeysDegraded = (profile) => {
 	openToast({ label: `Imported accounts unavailable in "${profile.name}"`, icon: "warning" }, TOAST_DURATION.LONG)
 }
 
+/** How the boot-time session check ended when it could NOT decide: the service stayed
+ *  unreachable across the backoff, or the activation bootstrap threw. Rendered as
+ *  `data-boot-outcome` on the shell so the lock screen the user lands on is distinguishable
+ *  from the transient one the route guard parks a still-deciding popup on. Empty = deciding
+ *  or decided. */
+const bootOutcome = ref("")
+
+/** The boot-time check gave up: mark it done so the guard's own retry takes over, and land on
+ *  the lock screen — the password path is the recovery, and it must be reachable. An
+ *  un-checked session would otherwise park the popup on /popup/auth for good. `outcome` is
+ *  "unreachable" or "failed". */
+const settleUndecidedBoot = (outcome) => {
+	bootOutcome.value = outcome
+	appStore.isSessionChecked = true
+	router.push("/popup/auth")
+}
+
+// Generation fence for loadProfile: mount and every background reconnect start a run, and a
+// run that awaited past a newer one must not commit — its push or marker would land on top of
+// the newer run's (or the user's own unlock's) state.
+let loadProfileSeq = 0
+
+/** The boot-time reads, both through the guard's backoff: right after a service-worker restart
+ *  the first requests can reject while the worker is still booting, and a rejection here used
+ *  to leave `isSessionChecked` false forever (the guard answers "auth" without retrying while
+ *  it is). The profile list decides register-vs-auth, so a stale one must never stand in.
+ *  Resolves to the active profile, `undefined` for a clean lock, or "unreachable"; a run
+ *  superseded mid-read resolves "superseded" and its caller commits nothing. */
+const readBootSession = async (isCurrent) => {
+	const profiles = await lookupActiveProfileWithBackoff(() => managers.profile.getProfiles())
+	if (!isCurrent()) return "superseded"
+	if (profiles.kind === "unreachable") return "unreachable"
+	appStore.profiles = profiles.kind === "active" ? profiles.profile : []
+	const lookup = await lookupActiveProfileWithBackoff(() => managers.profile.getActiveProfile())
+	if (!isCurrent()) return "superseded"
+	if (lookup.kind === "unreachable") return "unreachable"
+	return lookup.kind === "active" ? lookup.profile : undefined
+}
+
+/** No open session: pick the lock screen's profile (the last active one, else the first) and
+ *  land on it, or stay put on a passkey-interaction route. */
+const landOnLockScreen = async (isCurrent) => {
+	if (appStore.profile || route.meta.isPasskeyInteraction || !appStore.profiles.length) {
+		if (!route.meta.isPasskeyInteraction || appStore.profile) appStore.isSessionChecked = true
+		return
+	}
+	const lastActiveId = await getLastActiveProfileId()
+	if (!isCurrent()) return
+	const lastActive = lastActiveId ? appStore.profiles.find((p) => p.id === lastActiveId) : undefined
+	appStore.profile = lastActive ?? appStore.profiles[0]
+	appStore.isSessionChecked = true
+	router.push("/popup/auth")
+}
+
 const loadProfile = async () => {
+	const seq = ++loadProfileSeq
+	const isCurrent = () => seq === loadProfileSeq
+	// A new run supersedes any earlier give-up: it may well succeed this time.
+	bootOutcome.value = ""
 	managers.profile.onActiveProfileChanged.add(onActiveProfileChanged)
 	managers.profile.onImportedKeysDegraded.add(onImportedKeysDegraded)
 
-	appStore.profiles = await managers.profile.getProfiles()
-	const activeProfile = await managers.profile.getActiveProfile()
-	if (activeProfile) {
-		const stillActive = await bootstrapActiveProfile(activeProfile)
-		appStore.isSessionChecked = true
-
-		// Only advance into the authed area if the session survived bootstrap (a lock
-		// mid-bootstrap leaves stillActive=false). See shouldAdvanceToGeneral.
-		if (shouldAdvanceToGeneral(stillActive, route.name)) router.push("/popup/general")
-
+	const session = await readBootSession(isCurrent)
+	// The helper fenced itself before resolving; this caller resumes a microtask later, and a
+	// reconnect can bump the sequence in between — fence again here, never on the helper's word.
+	if (session === "superseded" || !isCurrent()) return
+	if (session === "unreachable") {
+		settleUndecidedBoot("unreachable")
+		return
+	}
+	if (session === undefined) {
+		await landOnLockScreen(isCurrent)
 		return
 	}
 
-	if (!appStore.profile) {
-		if (route.meta.isPasskeyInteraction) {
-			return
-		}
-
-		if (appStore.profiles.length) {
-			const lastActiveId = await getLastActiveProfileId()
-			const lastActive = lastActiveId ? appStore.profiles.find((p) => p.id === lastActiveId) : undefined
-			appStore.profile = lastActive ?? appStore.profiles[0]
-
-			appStore.isSessionChecked = true
-
-			router.push("/popup/auth")
-			return
-		}
+	let stillActive = false
+	try {
+		stillActive = await bootstrapActiveProfile(session)
+	} catch (error) {
+		if (!isCurrent()) return
+		console.error("activation bootstrap failed", { error })
+		settleUndecidedBoot("failed")
+		return
 	}
-
+	if (!isCurrent()) return
 	appStore.isSessionChecked = true
+
+	// Only advance into the authed area if the session survived bootstrap (a lock
+	// mid-bootstrap leaves stillActive=false). See shouldAdvanceToGeneral.
+	if (shouldAdvanceToGeneral(stillActive, route.name)) router.push("/popup/general")
 }
 
 onBeforeMount(async () => {
@@ -291,7 +347,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex wide direction="column" :class="$style.wrapper">
+	<Flex wide direction="column" :class="$style.wrapper" :data-boot-outcome="bootOutcome || undefined">
 		<!-- Popup Teleport -->
 		<div id="popup" />
 		<div id="tooltip" />

@@ -1,5 +1,37 @@
 import { describe, expect, test } from "vitest"
-import { authRequiredGate } from "./auth-guard"
+import { authRequiredGate, lookupActiveProfileWithBackoff } from "./auth-guard"
+
+describe("lookupActiveProfileWithBackoff", () => {
+	test("an open session is active, a clean undefined is locked — both on the first call", async () => {
+		let calls = 0
+		expect(
+			await lookupActiveProfileWithBackoff(async () => {
+				calls++
+				return { id: "p1" }
+			}),
+		).toEqual({ kind: "active", profile: { id: "p1" } })
+		expect(await lookupActiveProfileWithBackoff(async () => undefined)).toEqual({ kind: "locked" })
+		expect(calls).toBe(1)
+	})
+
+	test("rejections retry across the schedule; a late answer wins, exhaustion is UNREACHABLE (unknown), never locked", async () => {
+		let calls = 0
+		const lateOk = async () => {
+			calls++
+			if (calls < 3) throw new Error("port not ready")
+			return { id: "p1" }
+		}
+		expect(await lookupActiveProfileWithBackoff(lateOk)).toEqual({ kind: "active", profile: { id: "p1" } })
+		expect(calls).toBe(3)
+		let always = 0
+		const alwaysRejects = async () => {
+			always++
+			throw new Error("port not ready")
+		}
+		expect(await lookupActiveProfileWithBackoff(alwaysRejects)).toEqual({ kind: "unreachable" })
+		expect(always).toBe(4)
+	})
+})
 
 const activeProfile = { id: "p1" }
 const okLookup = async () => activeProfile

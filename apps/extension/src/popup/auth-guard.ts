@@ -31,18 +31,32 @@ export async function authRequiredGate(
 ): Promise<AuthRequiredGate> {
 	if (isLogined) return "pass"
 	if (!isSessionChecked) return "auth"
-	// Transport-level failures back off across ~1.5s before degrading: respawns under CPU
-	// pressure have been observed to outlast any single short gap.
+	const lookup = await lookupActiveProfileWithBackoff(getActiveProfile)
+	// Unreachable degrades to pass: a locked wallet answers cleanly, so a rejection means the
+	// worker is restarting, and ejecting an open session to the password screen is the bug.
+	return lookup.kind === "locked" ? "auth" : "pass"
+}
+
+export type ActiveProfileLookup<P> = { kind: "active"; profile: P } | { kind: "locked" } | { kind: "unreachable" }
+
+/**
+ * A boot-time service read with the transport backoff every such caller needs: a
+ * service-worker respawn under CPU pressure has been observed to outlast any single short gap,
+ * so transport-level rejections retry across ~1.5s before the result is reported as
+ * `unreachable` — which is UNKNOWN, never locked. A clean `undefined` answer is `locked`; any
+ * other value is `active` with that value (for the active-session read, the profile; the same
+ * shape serves the profile-list read, whose empty array is a value, not a lock).
+ */
+export async function lookupActiveProfileWithBackoff<P>(getActiveProfile: () => Promise<P | undefined>): Promise<ActiveProfileLookup<P>> {
 	const delays = [0, 250, 500, 750]
-	let rejected = false
 	for (const delay of delays) {
 		if (delay) await new Promise<void>((r) => setTimeout(r, delay))
 		try {
-			const active = await getActiveProfile()
-			return active ? "pass" : "auth"
+			const profile = await getActiveProfile()
+			return profile ? { kind: "active", profile } : { kind: "locked" }
 		} catch {
-			rejected = true
+			// Retry on the next delay; the schedule's end is the only "unreachable" verdict.
 		}
 	}
-	return rejected ? "pass" : "auth"
+	return { kind: "unreachable" }
 }
