@@ -286,6 +286,46 @@ describe("compareSummaries", () => {
 	test("the allowlist is exactly the four bun-condition packages", () => {
 		expect([...RESOLVE_ALLOWLIST].sort()).toEqual(["@logtape/logtape", "axios", "isows", "msgpackr"])
 	})
+	test("a multi-failure pair renders the exact report — problem and line ORDER across the validators is the contract", () => {
+		const a = summary("node", { gitDirty: true })
+		a.runs = a.runs.map((r, i) => ({ ...r, wallMs: 100 + i * 50 }))
+		const b = summary("bun", { gitSha: "other" })
+		b.runs[0] = { ...b.runs[0], wallMs: 100 }
+		b.runs[1] = run({ runtime: { execPath: "<node>", versions: { node: "24.18.0" } }, exitCode: 1, timedOut: true, wallMs: 150 })
+		b.inventory["src/extra.test.ts :: only on bun"] = { statuses: { passed: 2 }, observations: 2, failures: 0 }
+		b.inventory["src/a.test.ts :: a passes"] = { statuses: { passed: 1, failed: 1 }, observations: 2, failures: 1 }
+		b.meta.resolves.isows = { esm: "<repo>/node_modules/isows/_esm/bun.js" }
+		b.meta.resolves.zod = { esm: "<repo>/node_modules/zod/bun.js" }
+		const result = compareSummaries(a, b)
+		expect(result.ok).toBe(false)
+		expect(result.problems).toEqual([
+			"reference summary was produced on a dirty tree",
+			"meta.gitSha differs: abc vs other",
+			'candidate: runtime records are missing or inconsistent ({"execPath":"<bun>","bun":"1.4.0","node":"26.3.0"} | {"execPath":"<node>","bun":null,"node":"24.18.0"})',
+			"candidate: run 1 ran on Node, expected Bun",
+			"candidate: 1 run row(s) fail the gate",
+			"candidate: failedRuns=0 disagrees with 1 failing row(s)",
+			"inventories differ: 0 only in reference, 1 only in candidate",
+			'"src/a.test.ts :: a passes": statuses [["passed",2]] vs [["failed",1],["passed",1]]',
+			'"src/a.test.ts :: a passes": candidate failed 1× vs reference 0×',
+			'"zod" resolves differently and is not in the pinned allowlist',
+		])
+		expect(result.report).toBe(
+			[
+				`reference apps/x test [node] 2 runs, failedRuns=0, inventory 1 tests, digest ${a.inventoryDigest.slice(0, 16)}`,
+				`candidate apps/x test [script] 2 runs, failedRuns=0, inventory 2 tests, digest ${b.inventoryDigest.slice(0, 16)}`,
+				"wall-clock reference: min 100 ms · median 100 ms · p95 150 ms",
+				"wall-clock candidate: min 100 ms · median 100 ms · p95 150 ms",
+				"  only in candidate: src/extra.test.ts :: only on bun",
+				"  src/a.test.ts :: a passes: failures 0 → 1",
+				"resolution allowlist (pinned): isows, msgpackr, @logtape/logtape, axios",
+				'  resolution differs: zod: {"esm":"<repo>/node_modules/zod/index.js"} vs {"esm":"<repo>/node_modules/zod/bun.js"}',
+				'  resolution differs (allowed): isows: {"esm":"<repo>/node_modules/isows/index.js"} vs {"esm":"<repo>/node_modules/isows/_esm/bun.js"}',
+				...result.problems.map((p) => `  ✖ ${p}`),
+				"COMPARE FAILED (10 problems)",
+			].join("\n"),
+		)
+	})
 })
 
 describe("compactSummary", () => {
