@@ -6,6 +6,14 @@ import {
 	type SoakSummary,
 	buildInventory,
 	canonicalExecPath,
+	checkFailedRuns,
+	checkInventoryEntries,
+	checkInventoryMembership,
+	checkMeta,
+	checkObservations,
+	checkResolutions,
+	checkRunRows,
+	checkSide,
 	compactSummary,
 	compareSummaries,
 	createCanonicalizer,
@@ -285,6 +293,108 @@ describe("compareSummaries", () => {
 	})
 	test("the allowlist is exactly the four bun-condition packages", () => {
 		expect([...RESOLVE_ALLOWLIST].sort()).toEqual(["@logtape/logtape", "axios", "isows", "msgpackr"])
+	})
+	test("a multi-failure pair renders the exact report — problem and line ORDER across the validators is the contract", () => {
+		const a = summary("node", { gitDirty: true })
+		a.runs = a.runs.map((r, i) => ({ ...r, wallMs: 100 + i * 50 }))
+		const b = summary("bun", { gitSha: "other" })
+		b.runs[0] = { ...b.runs[0], wallMs: 100 }
+		b.runs[1] = run({ runtime: { execPath: "<node>", versions: { node: "24.18.0" } }, exitCode: 1, timedOut: true, wallMs: 150 })
+		b.inventory["src/extra.test.ts :: only on bun"] = { statuses: { passed: 2 }, observations: 2, failures: 0 }
+		b.inventory["src/a.test.ts :: a passes"] = { statuses: { passed: 1, failed: 1 }, observations: 2, failures: 1 }
+		b.meta.resolves.isows = { esm: "<repo>/node_modules/isows/_esm/bun.js" }
+		b.meta.resolves.zod = { esm: "<repo>/node_modules/zod/bun.js" }
+		const result = compareSummaries(a, b)
+		expect(result.ok).toBe(false)
+		expect(result.problems).toEqual([
+			"reference summary was produced on a dirty tree",
+			"meta.gitSha differs: abc vs other",
+			'candidate: runtime records are missing or inconsistent ({"execPath":"<bun>","bun":"1.4.0","node":"26.3.0"} | {"execPath":"<node>","bun":null,"node":"24.18.0"})',
+			"candidate: run 1 ran on Node, expected Bun",
+			"candidate: 1 run row(s) fail the gate",
+			"candidate: failedRuns=0 disagrees with 1 failing row(s)",
+			"inventories differ: 0 only in reference, 1 only in candidate",
+			'"src/a.test.ts :: a passes": statuses [["passed",2]] vs [["failed",1],["passed",1]]',
+			'"src/a.test.ts :: a passes": candidate failed 1× vs reference 0×',
+			'"zod" resolves differently and is not in the pinned allowlist',
+		])
+		expect(result.report).toBe(
+			[
+				`reference apps/x test [node] 2 runs, failedRuns=0, inventory 1 tests, digest ${a.inventoryDigest.slice(0, 16)}`,
+				`candidate apps/x test [script] 2 runs, failedRuns=0, inventory 2 tests, digest ${b.inventoryDigest.slice(0, 16)}`,
+				"wall-clock reference: min 100 ms · median 100 ms · p95 150 ms",
+				"wall-clock candidate: min 100 ms · median 100 ms · p95 150 ms",
+				"  only in candidate: src/extra.test.ts :: only on bun",
+				"  src/a.test.ts :: a passes: failures 0 → 1",
+				"resolution allowlist (pinned): isows, msgpackr, @logtape/logtape, axios",
+				'  resolution differs: zod: {"esm":"<repo>/node_modules/zod/index.js"} vs {"esm":"<repo>/node_modules/zod/bun.js"}',
+				'  resolution differs (allowed): isows: {"esm":"<repo>/node_modules/isows/index.js"} vs {"esm":"<repo>/node_modules/isows/_esm/bun.js"}',
+				...result.problems.map((p) => `  ✖ ${p}`),
+				"COMPARE FAILED (10 problems)",
+			].join("\n"),
+		)
+	})
+})
+
+describe("compare validators (each on its own inputs)", () => {
+	test("checkMeta: role swap, provenance drift and filters", () => {
+		expect(checkMeta(summary("node"), summary("bun"))).toEqual([])
+		expect(checkMeta(summary("bun"), summary("node"))).toEqual([
+			'reference must be runtimeMode "node", got "script"',
+			'candidate must be runtimeMode "script", got "node"',
+		])
+		expect(checkMeta(summary("node", { filters: ["a"] }), summary("bun", { vitestVersion: "5.0.0" }))).toEqual([
+			"meta.vitestVersion differs: 4.1.10 vs 5.0.0",
+			"filters differ: [a] vs []",
+		])
+	})
+	test("checkSide = rows/engine → failed runs → observations, in that order", () => {
+		const b = summary("bun")
+		b.runs[1] = run({ runtime: { execPath: "<node>", versions: { node: "24.18.0" } }, exitCode: 1 })
+		b.inventory["src/a.test.ts :: a passes"] = { statuses: { passed: 1 }, observations: 1, failures: 0 }
+		expect(checkSide(b, "candidate", true)).toEqual([
+			...checkRunRows(b, "candidate", true),
+			...checkFailedRuns(b, "candidate"),
+			...checkObservations(b, "candidate"),
+		])
+		expect(checkRunRows(b, "candidate", true)).toEqual([
+			'candidate: runtime records are missing or inconsistent ({"execPath":"<bun>","bun":"1.4.0","node":"26.3.0"} | {"execPath":"<node>","bun":null,"node":"24.18.0"})',
+			"candidate: run 1 ran on Node, expected Bun",
+		])
+		expect(checkFailedRuns(b, "candidate")).toEqual([
+			"candidate: 1 run row(s) fail the gate",
+			"candidate: failedRuns=0 disagrees with 1 failing row(s)",
+		])
+		expect(checkObservations(b, "candidate")).toEqual(['candidate: "src/a.test.ts :: a passes" observed 1/2 runs'])
+	})
+	test("checkInventoryMembership lists the first 20 ids per side; checkInventoryEntries skips ids missing on either side", () => {
+		const a = summary("node")
+		const b = summary("bun")
+		for (let i = 0; i < 25; i++)
+			b.inventory[`src/x${String(i).padStart(2, "0")}.test.ts :: t`] = { statuses: { passed: 2 }, observations: 2, failures: 0 }
+		const idsA = Object.keys(a.inventory).sort()
+		const idsB = Object.keys(b.inventory).sort()
+		const membership = checkInventoryMembership(idsA, idsB, a, b)
+		expect(membership.problems).toEqual(["inventories differ: 0 only in reference, 25 only in candidate"])
+		expect(membership.lines).toHaveLength(20)
+		expect(membership.lines[0]).toBe("  only in candidate: src/x00.test.ts :: t")
+		expect(checkInventoryEntries(idsB, a, b)).toEqual({ problems: [], lines: [] })
+		b.inventory["src/a.test.ts :: a passes"] = { statuses: { passed: 1, failed: 1 }, observations: 2, failures: 1 }
+		expect(checkInventoryEntries(idsA, a, b)).toEqual({
+			problems: [
+				'"src/a.test.ts :: a passes": statuses [["passed",2]] vs [["failed",1],["passed",1]]',
+				'"src/a.test.ts :: a passes": candidate failed 1× vs reference 0×',
+			],
+			lines: ["  src/a.test.ts :: a passes: failures 0 → 1"],
+		})
+	})
+	test("checkResolutions always leads with the pinned allowlist line", () => {
+		const clean = checkResolutions(summary("node"), summary("bun"))
+		expect(clean).toEqual({ problems: [], lines: ["resolution allowlist (pinned): isows, msgpackr, @logtape/logtape, axios"] })
+		const b = summary("bun")
+		const { vue: _omitted, ...withoutVue } = b.meta.resolves
+		b.meta.resolves = withoutVue
+		expect(checkResolutions(summary("node"), b).problems).toEqual(['no resolution evidence for "vue" on candidate'])
 	})
 })
 

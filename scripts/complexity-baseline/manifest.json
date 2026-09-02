@@ -23,7 +23,7 @@
 			"packages/wallet-core/src/base/topology.ts": 1,
 			"packages/wallet-core/src/utils/serialization.ts": 1,
 			"scripts/ci-cd/test-soak/cli.ts": 3,
-			"scripts/ci-cd/test-soak/lib.ts": 3
+			"scripts/ci-cd/test-soak/lib.ts": 1
 		},
 		"noExcessiveLinesPerFunction": {
 			"apps/extension/src/components/JsonViewer/creator.js": 1,
