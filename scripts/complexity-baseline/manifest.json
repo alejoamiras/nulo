@@ -1,6 +1,6 @@
 {
 	"biomeVersion": "2.5.9",
-	"generated": "2026-09-01",
+	"generated": "2026-09-02",
 	"rules": {
 		"noExcessiveCognitiveComplexity": {
 			"apps/extension/src/popup/components/modules/send/FeeSettingsCard.test.ts": 1,
@@ -15,12 +15,8 @@
 			"apps/extension/src/wallet/services/execution/operation-fingerprint.ts": 1,
 			"apps/extension/src/wallet/services/incoming-transfer/service.scenarios.test.ts": 1,
 			"apps/extension/tests/e2e/fixtures/extension.ts": 2,
-			"apps/extension/tests/e2e/fixtures/helpers.ts": 2,
 			"apps/extension/tests/e2e/fixtures/journal.ts": 3,
 			"apps/extension/tests/e2e/global-setup.ts": 1,
-			"apps/extension/tests/e2e/import-dead-rpc.test.ts": 1,
-			"apps/extension/tests/e2e/network/account-switch-isolation.test.ts": 1,
-			"apps/extension/tests/e2e/network/backup-restore-sw-restart.test.ts": 1,
 			"apps/tools/src/lib/errors.ts": 1,
 			"apps/tools/src/lib/phase-clock.ts": 1,
 			"packages/bridge-core/scripts/discover-mainnet-fuel.ts": 1,
