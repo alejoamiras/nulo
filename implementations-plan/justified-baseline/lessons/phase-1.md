@@ -48,6 +48,13 @@ Round-3 plan 4. One codex session (fresh; blueprint audit → PR review).
   `frozen-account-canary.test.ts:245`) on a diff of comment lines and scripts — rerun once per
   policy. `quality-status` green = the base ratchet ran on a real pull_request event against dev's
   entry-less manifest and passed on per-rule totals.
+- **Bump rehearsal (2026-09-02, throwaway branch, Biome 2.5.9 → 2.5.10):** `check.ts` failed with the
+  bump guidance as designed; `baseline:rescore` reported 35/35 exact (no score drift between these
+  two releases); the CI-mode ratchet printed "relaxed — review every added or raised acceptance by
+  hand" and passed; Biome reported zero `suppressions/unused`. One gap found and closed: a PLAIN
+  `baseline:complexity` re-pinned the new version when nothing had drifted, after which `--adopt`
+  refused as "already pins the installed" — so the documented "`--adopt` is the bump path" was only
+  true when scores moved. The generator now refuses a version change without `--adopt`.
 - **Harness split is 6 + 5 + 4.** Of the 15 harness acceptances, 6 sit in unit-test files, 5 in
   the e2e fixtures (`extension.ts`, `journal.ts`) and 4 in the CI test-soak scripts — "test/e2e
   harness" undercounted the soak scripts, so CLAUDE.md now says test/CI harness.

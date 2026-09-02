@@ -76,6 +76,13 @@ if (adopt && committed && committed.biomeVersion === installed) {
 	console.error("Growth is never adopted on the same Biome: refactor the function under the budget instead.")
 	process.exit(1)
 }
+if (!adopt && committed && committed.biomeVersion !== installed) {
+	// A bump is re-pinned only deliberately: without this, a plain regen on a bump that happened
+	// to drift nothing would silently move the pin and leave `--adopt` with nothing to do.
+	console.error(`ERROR: Biome changed ${committed.biomeVersion} → ${installed}; the manifest is re-pinned only with --adopt.`)
+	console.error("In the bump PR: `bun run baseline:rescore`, re-stamp each drifted directive by hand, then `bun run baseline:complexity -- --adopt`.")
+	process.exit(1)
+}
 
 const byFile = new Map<string, Finding[]>()
 for (const d of lint()) {
