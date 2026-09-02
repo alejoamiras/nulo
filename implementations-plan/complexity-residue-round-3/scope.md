@@ -131,7 +131,7 @@ Marginal by score (18, 26 — `backup-restore-sw-restart`, `import-dead-rpc`): k
 because the extraction is small and exposes the scenario; if the PR-a diff shows otherwise, move
 them to ACCEPT with a justification and say so in the PR body.
 
-## ACCEPT (35) — stays as-is; the directive carries this reason (codex drafts, tighten at the line)
+## ACCEPT (35) — stays as-is; the directive carries this reason (codex drafts; the sentence at the line + `manifest.json`'s anchor/stamp entry are the record)
 
 | file:line | accepted at | reason |
 |---|---|---|
@@ -155,8 +155,8 @@ them to ACCEPT with a justification and say so in the PR body.
 | `apps/extension/tests/e2e/fixtures/journal.ts:41` | score 16 | one tolerant in-browser journal scan projecting the exact lean record view |
 | `apps/extension/tests/e2e/fixtures/journal.ts:174` | score 18 | one tolerant scan applies the diagnostic allowlist before data crosses into CI artifacts |
 | `apps/extension/tests/e2e/fixtures/journal.ts:404` | score 26 | parse, session filter, stage classification and three threshold checks form one polling predicate |
-| `apps/faucet/src/lib/errors.ts:39` | score 21 | ordered overlapping message predicates are the error-classification precedence policy |
-| `apps/faucet/src/lib/phase-clock.ts:26` | score 22 | pending / active / failed / done transitions specify the latest-attempt temporal reducer |
+| `apps/tools/src/lib/errors.ts:39` | score 21 | ordered overlapping message predicates are the error-classification precedence policy |
+| `apps/tools/src/lib/phase-clock.ts:26` | score 22 | pending / active / failed / done transitions specify the latest-attempt temporal reducer |
 | `packages/bridge-core/scripts/deploy-sandbox.ts:117` | 197 lines | shared live handles make L1/L2 deployment, wiring and optional smoke one auditable sandbox recipe |
 | `packages/bridge-core/scripts/deposit-testnet.ts:73` | 155 lines | the deploy → deposit → claim → withdraw proof shares ephemeral addresses and secrets in one custody trace |
 | `packages/bridge-core/scripts/discover-mainnet-fuel.ts:78` | 87 lines | one evidence transcript links identity checks, pool discovery, quotations and the winning manifest block |
