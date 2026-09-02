@@ -206,6 +206,7 @@
     "initTransactionService": true,
     "inject": true,
     "isBackgroundConnected": true,
+    "isForeignProfile": true,
     "isInFlightSend": true,
     "isPopupSubmitKey": true,
     "isPrefersDarkScheme": true,

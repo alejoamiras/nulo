@@ -1,5 +1,9 @@
 # Complexity residue — round 3: justify in place, refactor on merit
 
+**Status: completed 2026-09-02** — PRs #521–#527 (plans 1–5), manifest 49 → 35, all in the accepted
+form under the fail-closed ratchet; both BUG PINs flipped. Records per plan in
+`implementations-plan/{harness-fixtures,fuzz-runner,operator-gates,justified-baseline,faucet-journal-bugs}/`.
+
 Commissioned by the owner after round 2 closed at 49 directives (see
 [complexity-residue-round-2/scope.md](../complexity-residue-round-2/scope.md)). The owner's framing,
 2026-09-02, verbatim: *"I don't want to force going to zero … I don't want to force the code to do
