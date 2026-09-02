@@ -464,10 +464,13 @@ describe("journal engine — pre-extraction pins", () => {
 		connectJournalDeps({ ...deps, claim: vi.fn() as never })
 		addRecord(mkDeposit("0xrace", { claimTxHash: "0x0010000000000000000000000000000000000000000000000000000000000048" }))
 		await runDepositClaim("0xrace")
-		const { records } = useBridgeJournal()
+		const { records, runtime } = useBridgeJournal()
 		expect((records.value.find((r) => r.id === "0xrace") as DepositJournalRecord | undefined)?.claimTxHash).toBe(
 			"0x001100000000000000000000000000000000000000000000000000000000004e",
 		)
+		// The guard rejected, so this runner says nothing about a claim it no longer owns.
+		expect(runtime.value["0xrace"]?.note).toBeUndefined()
+		expect(runtime.value["0xrace"]?.attention).toBeUndefined()
 	})
 
 	it("(e) after the clear, only a SESSION-LIVE reverted record auto-resends on reconnect; an idle one waits for RETRY", async () => {
@@ -538,7 +541,9 @@ describe("journal engine — pre-extraction pins", () => {
 		expect((records.value.find((r) => r.id === "0xdroprace") as DepositJournalRecord | undefined)?.claimTxHash).toBe(
 			"0x001100000000000000000000000000000000000000000000000000000000004e",
 		)
-		expect(runtime.value["0xdroprace"]?.note).toMatch(/dropped - claim again/)
+		// The guard rejected, so this runner says nothing about a claim it no longer owns.
+		expect(runtime.value["0xdroprace"]?.note).toBeUndefined()
+		expect(runtime.value["0xdroprace"]?.attention).toBeUndefined()
 	})
 
 	it("(f) dropped debounce: any non-dropped status resets the streak; three straight drops clear the hash", async () => {

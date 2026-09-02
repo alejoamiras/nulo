@@ -352,8 +352,10 @@ async function priorFuelClaimStop(fuel: DepositJournalRecord["fuel"]): Promise<C
 	const status = await fuelReceiptStatus(fuel.claimTxHash)
 	if (status === "included") return failStopInteraction(FUEL_ALREADY_CLAIMED)
 	if (status === "dropped") return null
+	// Never steer at DISCARD from here: on a private record it destroys the only claim secret,
+	// and "the node is unreachable" is not evidence the claim will never land.
 	return failStopInteraction(
-		"A gas claim for this bridge is still pending - waiting for its receipt before trying again. Retry later, or discard this record if you know that claim will never land.",
+		"A gas claim for this bridge is still pending - waiting for its receipt before trying again. Retry later; if you decide to discard this record, back it up first.",
 	)
 }
 const FUEL_ALREADY_CLAIMED = "The gas claim was already included on Aztec - there is nothing left to claim for this bridge."

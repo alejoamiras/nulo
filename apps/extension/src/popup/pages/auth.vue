@@ -52,6 +52,15 @@ const isAwaitingResponse = ref(false)
 
 const isPasskeyProfile = computed(() => appStore.profile?.type === "passkey")
 
+// The shell's boot outcome. "failed" = an OPEN session whose activation bootstrap threw: the
+// banner's RETRY is the only true recovery, and a password typed here would unlock an already-
+// open session and repair nothing — so the form is withheld, not merely disabled, and stays
+// withheld while that retry runs (the outcome clears at retry start; the flag bridges the gap).
+// An "unreachable" boot keeps the form: the password path IS its recovery.
+const bootOutcome = inject("bootOutcome", ref(""))
+const bootRetrying = inject("bootRetrying", ref(false))
+const isBootWithheld = computed(() => bootOutcome.value === "failed" || bootRetrying.value)
+
 // Path A: in-page passkey ceremony. The dialog is mounted via `v-if="ceremonyRequest"`
 // in the template; we drive it imperatively via `runCeremony` to keep the
 // existing handleUnlockWallet flow shape intact.
@@ -223,14 +232,17 @@ watch(
 
 			<Flex direction="column" align="center" gap="8">
 				<h1 :class="$style.heading">
-					{{ isPasskeyProfile ? 'Passkey required' : 'Password required' }}
+					{{ isBootWithheld ? 'Wallet not ready' : isPasskeyProfile ? 'Passkey required' : 'Password required' }}
 				</h1>
-				<p :class="$style.subheading">
+				<p v-if="isBootWithheld" :class="$style.subheading" role="status" data-testid="auth-boot-failed">
+					{{ bootRetrying ? 'Retrying the wallet start-up…' : 'Your session is open, but the wallet could not finish starting up. Use RETRY above.' }}
+				</p>
+				<p v-else :class="$style.subheading">
 					{{ isPasskeyProfile ? 'Use your passkey to continue' : 'Enter your profile password to continue' }}
 				</p>
 			</Flex>
 
-			<form @submit.prevent="handleUnlockWallet" :class="$style.form">
+			<form v-if="!isBootWithheld" @submit.prevent="handleUnlockWallet" :class="$style.form">
 				<template v-if="!isPasskeyProfile">
 					<div :class="[isWrongPassword && $style.shake]">
 						<Input

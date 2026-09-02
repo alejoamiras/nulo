@@ -203,6 +203,8 @@ Non-goals (from plan-v2 §12):
 - No swap UI or transfer-between-users — that's the AMM playground
 - **No multi-tab safety.** The bridge journal lives in `localStorage` and its per-record lock and
   generation fence are tab-local: two tabs can both pass a claim's simulate and both send it.
-  Journal writes are per-record merges and the hash clears are expected-hash guarded, so a second
-  tab cannot erase a first tab's live claim — but use ONE tab for bridging. Owner decision
+  Journal writes are per-record merges and the hash clears are expected-hash guarded (load,
+  compare and write in one synchronous span — `localStorage` offers no atomic compare-and-set,
+  so a write from another tab can still land inside that span), which makes a second tab erasing
+  a first tab's live claim unlikely, not impossible. Use ONE tab for bridging. Owner decision
   2026-09-02; Web Locks were considered and declined.

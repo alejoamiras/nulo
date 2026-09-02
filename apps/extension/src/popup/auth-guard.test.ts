@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import { authRequiredGate, lookupActiveProfileWithBackoff } from "./auth-guard"
 
 describe("lookupActiveProfileWithBackoff", () => {
@@ -30,6 +30,55 @@ describe("lookupActiveProfileWithBackoff", () => {
 		}
 		expect(await lookupActiveProfileWithBackoff(alwaysRejects)).toEqual({ kind: "unreachable" })
 		expect(always).toBe(4)
+	})
+
+	test("one overall deadline bounds the whole call, in-flight requests included — never four RPC timeouts in a row", async () => {
+		let calls = 0
+		const hangs = () => {
+			calls++
+			return new Promise<{ id: string } | undefined>(() => {})
+		}
+		const started = Date.now()
+		expect(await lookupActiveProfileWithBackoff(hangs, { deadlineMs: 60 })).toEqual({ kind: "unreachable" })
+		expect(Date.now() - started).toBeLessThan(1_000)
+		expect(calls).toBe(1) // the first attempt consumed the whole budget; no retry sleeps were started past it
+	})
+
+	test("a retry sleep that resumes past the deadline (starved timer) launches no request", async () => {
+		// The wall clock is what the deadline reads; a starved runner's sleep resumes with that
+		// clock far ahead. Leap it 5s DURING the first retry sleep of a 1s budget.
+		let now = 0
+		const clock = vi.spyOn(Date, "now").mockImplementation(() => now)
+		try {
+			let calls = 0
+			const rejectsOnce = async () => {
+				calls++
+				throw new Error("port not ready")
+			}
+			setTimeout(() => {
+				now = 5_000
+			}, 10)
+			expect(await lookupActiveProfileWithBackoff(rejectsOnce, { deadlineMs: 1_000 })).toEqual({ kind: "unreachable" })
+			expect(calls).toBe(1) // the pre-sleep check passed (1000 > 250); the post-sleep re-read saw the leap
+		} finally {
+			clock.mockRestore()
+		}
+	})
+
+	test("a request the deadline abandons never surfaces as an unhandled rejection", async () => {
+		const unhandled: unknown[] = []
+		const onUnhandled = (reason: unknown) => unhandled.push(reason)
+		process.on("unhandledRejection", onUnhandled)
+		try {
+			let rejectLate: (e: Error) => void = () => {}
+			const late = () => new Promise<{ id: string } | undefined>((_, reject) => (rejectLate = reject))
+			expect(await lookupActiveProfileWithBackoff(late, { deadlineMs: 20 })).toEqual({ kind: "unreachable" })
+			rejectLate(new Error("late transport failure"))
+			await new Promise((r) => setTimeout(r, 10))
+			expect(unhandled).toEqual([])
+		} finally {
+			process.off("unhandledRejection", onUnhandled)
+		}
 	})
 })
 

@@ -18,6 +18,7 @@ import {
 	MOVE_APPROVED_LABEL,
 	parseGrepWithContext,
 	ratchetViolations,
+	regenGate,
 	ruleCountsOf,
 	scanTree,
 	toManifestEntries,
@@ -213,6 +214,17 @@ describe("entry diff + ratchet", () => {
 		const three = [entry({ anchor: "function a() {" }), entry({ anchor: "function b() {" }), entry({ anchor: "function c() {" })]
 		expect(legacyRatchetViolations(base, three)).toEqual([])
 		expect(legacyRatchetViolations(base, [...three, entry({ anchor: "function d() {" })])).toEqual(["↑ noExcessiveCognitiveComplexity: 3 → 4 acceptance(s)"])
+	})
+})
+
+describe("regeneration gate (the Biome-bump path)", () => {
+	test("a version change is re-pinned only with --adopt, and --adopt is refused on the same version", () => {
+		expect(regenGate({ adopt: false, committedVersion: "2.5.9", installed: "2.5.9" })).toBe("ok")
+		expect(regenGate({ adopt: false, committedVersion: "2.5.9", installed: "2.5.10" })).toBe("version-changed-without-adopt")
+		expect(regenGate({ adopt: true, committedVersion: "2.5.9", installed: "2.5.10" })).toBe("ok")
+		expect(regenGate({ adopt: true, committedVersion: "2.5.9", installed: "2.5.9" })).toBe("adopt-on-same-version")
+		// No manifest yet: the first generation may run either way.
+		expect(regenGate({ adopt: false, committedVersion: undefined, installed: "2.5.9" })).toBe("ok")
 	})
 })
 

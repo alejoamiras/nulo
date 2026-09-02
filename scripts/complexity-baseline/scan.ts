@@ -392,6 +392,18 @@ export function toManifestEntries(accepted: AcceptedDirective[]): ManifestEntry[
 	return accepted.map(({ file, rule, anchor, accepted: stamp, sentence }) => ({ file, rule, anchor, accepted: stamp, sentence }))
 }
 
+/** Whether a regeneration may run at all, given the manifest's pinned Biome and the installed
+ *  one: a version change is re-pinned only by a deliberate `--adopt` (a plain regen on a bump
+ *  that drifted nothing would otherwise move the pin silently), and `--adopt` on the same
+ *  version is a growth bypass. */
+export type RegenGate = "ok" | "adopt-on-same-version" | "version-changed-without-adopt"
+export function regenGate(args: { adopt: boolean; committedVersion: string | undefined; installed: string }): RegenGate {
+	if (args.committedVersion === undefined) return "ok"
+	if (args.adopt && args.committedVersion === args.installed) return "adopt-on-same-version"
+	if (!args.adopt && args.committedVersion !== args.installed) return "version-changed-without-adopt"
+	return "ok"
+}
+
 export function installedBiomeVersion(rootPackageJson: { devDependencies?: Record<string, string> }): string {
 	const v = rootPackageJson.devDependencies?.["@biomejs/biome"]
 	if (!v) throw new Error("@biomejs/biome not found in root devDependencies")

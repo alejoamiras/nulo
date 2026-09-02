@@ -1,10 +1,19 @@
+import { Fr } from "@aztec/aztec.js/fields"
+import { TxHash } from "@aztec/aztec.js/tx"
 import { describe, expect, it } from "vitest"
 import { classifyClaimReceipt, isWellFormedTxHash } from "./claim-receipt"
 
 describe("isWellFormedTxHash", () => {
-	it("accepts exactly 0x + 64 hex digits, either case, and nothing else", () => {
-		expect(isWellFormedTxHash(`0x${"ab".repeat(32)}`)).toBe(true)
-		expect(isWellFormedTxHash(`0x${"AB".repeat(32)}`)).toBe(true)
+	it("accepts exactly 0x + 64 hex digits that the parser also accepts — parity with TxHash.fromString, not just shape", () => {
+		expect(isWellFormedTxHash(`0x${"00".repeat(31)}ab`)).toBe(true)
+		expect(isWellFormedTxHash(`0x${"00".repeat(31)}AB`)).toBe(true)
+		// A tx hash is a field element: these are 32 bytes of hex the parser rejects.
+		expect(isWellFormedTxHash(`0x${"ff".repeat(32)}`)).toBe(false)
+		expect(isWellFormedTxHash(`0x${Fr.MODULUS.toString(16).padStart(64, "0")}`)).toBe(false)
+		expect(isWellFormedTxHash(`0x${(Fr.MODULUS - 1n).toString(16).padStart(64, "0")}`)).toBe(true)
+		// …and these are values the parser accepts that are not tx hashes.
+		expect(TxHash.fromString("0x01")).toBeTruthy()
+		expect(isWellFormedTxHash("0x01")).toBe(false)
 		for (const bad of [
 			"",
 			"0x",

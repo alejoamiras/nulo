@@ -39,24 +39,52 @@ export async function authRequiredGate(
 
 export type ActiveProfileLookup<P> = { kind: "active"; profile: P } | { kind: "locked" } | { kind: "unreachable" }
 
+/** One overall bound for the whole backoff — the same envelope a single RPC had before the
+ *  retries existed (`DEFAULT_RPC_TIMEOUT_MS` in extension-messaging). Without it four attempts
+ *  against a wedged worker could each wait their full RPC timeout: four minutes for a lookup
+ *  documented as "~1.5s". */
+export const LOOKUP_DEADLINE_MS = 60_000
+
 /**
  * A boot-time service read with the transport backoff every such caller needs: a
  * service-worker respawn under CPU pressure has been observed to outlast any single short gap,
- * so transport-level rejections retry across ~1.5s before the result is reported as
+ * so transport-level rejections retry across ~1.5s of sleeps before the result is reported as
  * `unreachable` — which is UNKNOWN, never locked. A clean `undefined` answer is `locked`; any
  * other value is `active` with that value (for the active-session read, the profile; the same
- * shape serves the profile-list read, whose empty array is a value, not a lock).
+ * shape serves the profile-list read, whose empty array is a value, not a lock). The deadline
+ * bounds the WHOLE call, in-flight requests included: a request still pending at the deadline
+ * is abandoned (its late answer is dropped) and the result is `unreachable`.
  */
-export async function lookupActiveProfileWithBackoff<P>(getActiveProfile: () => Promise<P | undefined>): Promise<ActiveProfileLookup<P>> {
+export async function lookupActiveProfileWithBackoff<P>(
+	getActiveProfile: () => Promise<P | undefined>,
+	opts: { deadlineMs?: number } = {},
+): Promise<ActiveProfileLookup<P>> {
+	const deadline = Date.now() + (opts.deadlineMs ?? LOOKUP_DEADLINE_MS)
 	const delays = [0, 250, 500, 750]
 	for (const delay of delays) {
+		if (deadline - Date.now() <= delay) break
 		if (delay) await new Promise<void>((r) => setTimeout(r, delay))
+		// Re-read after the sleep: a starved timer can resume past the deadline, and a request
+		// must never be launched with no budget left to attach to it.
+		const remaining = deadline - Date.now()
+		if (remaining <= 0) break
 		try {
-			const profile = await getActiveProfile()
+			const profile = await withinDeadline(getActiveProfile(), remaining)
 			return profile ? { kind: "active", profile } : { kind: "locked" }
 		} catch {
-			// Retry on the next delay; the schedule's end is the only "unreachable" verdict.
+			// Retry on the next delay; the schedule's end (or the deadline) is the only "unreachable" verdict.
 		}
 	}
 	return { kind: "unreachable" }
+}
+
+/** Races a request against the remaining budget. A request the deadline abandons is still
+ *  observed (its late rejection is swallowed) so it can never surface as unhandled. */
+function withinDeadline<T>(request: Promise<T>, ms: number): Promise<T> {
+	request.catch(() => {})
+	let timer: ReturnType<typeof setTimeout> | undefined
+	const expiry = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(new Error("lookup deadline exhausted")), ms)
+	})
+	return Promise.race([request, expiry]).finally(() => clearTimeout(timer))
 }
