@@ -25,4 +25,8 @@ Three Low leftovers of round 1's own cleanup, all comment-only, all adopted in `
 
 ## Codex round 3 (resumed, fix diff `c6bb7964`)
 
-_pending_
+One Low, comment-only: the incoming-transfers header still enumerated the two scenarios the test never exercises. Collapsed to the two facts the test proves (`60ad688b`). No functional finding in any round; the third round was the plan's hard stop for material churn, and this was not that — a one-line confirmation resume followed.
+
+## Codex round 4 (resumed, confirmation on `60ad688b`)
+
+Verbatim: **"no new material findings"**. Arc 2 converged.

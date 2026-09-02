@@ -13,13 +13,8 @@ const hasConfig = aztecConfig !== undefined
  * outgoing hash and no self-mint is created, so neither the receive path nor the dedupe is
  * exercised here.
  *
- * Implementation note: this test deliberately stays off the send-tx
- * path. Prior attempts that drove `sendTransfer` against the
- * tokenReadyExtension fixture stalled at the amount-input enable
- * (60s timeout) — a fee-estimation edge case unrelated to this arc.
- * The unit-test pins for the helper logic (primary-method.test.ts +
- * tx-enrichment.test.ts + operation-planner.test.ts + service.test.ts)
- * provide the deeper coverage; this e2e provides the wire-up smoke.
+ * Deliberately off the send-tx path; the helper logic is unit-pinned (primary-method,
+ * tx-enrichment, operation-planner and service tests).
  */
 test.skipIf(!hasConfig)(
 	"incoming transfers — activity page mounts + empty incoming feed on a fresh profile",
@@ -44,14 +39,10 @@ test.skipIf(!hasConfig)(
 		// as a hung request, surfacing here when nothing renders.
 		await new Promise((r) => setTimeout(r, 3_000))
 
-		// Empty-list assertions cover both the happy-path empty state
-		// (incoming-receive happy path) AND the dedupe-by-absence proof
-		// (self-mint dedupe — no spurious rows on a fresh profile that
-		// has done zero transfers and zero receives).
+		// A fresh profile has nothing incoming; any card here is a spurious row.
 		const incomingCards = await page.$$('[data-testid="tx-incoming-card"]')
 		expect(incomingCards.length).toBe(0)
 
-		// Mount-without-error is the assert: the activity page rendered on a fresh profile.
 		const onActivityPage = await page.evaluate(() => window.location.hash.includes("/popup/activity"))
 		expect(onActivityPage).toBe(true)
 

@@ -10,7 +10,7 @@ const appCss = readFileSync(join(here, "app.css"), "utf8")
 const baseCss = readFileSync(join(here, "../../../packages/design/src/base.css"), "utf8")
 
 /**
- * Tools host-rule parity guard (design-system round-2 F9 / round-1 phase-5 lesson).
+ * Tools host-rule parity guard.
  *
  * The round-1 tools light-bg regression slipped past EVERY machine check because token VALUES were
  * byte-identical — the gap was MISSING RULES (the extension's lean `@nulo/design/base.css` dropped a

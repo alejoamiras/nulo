@@ -89,6 +89,6 @@ export function useAddDripToken() {
 	}
 
 	// withOperation: an account-sensitive prompt/send span — while it runs, account switching is
-	// blocked (useOpsInFlight, plan D-8/D-19).
+	// blocked (useOpsInFlight).
 	return { status, addToken: (...args: Parameters<typeof addToken>) => withOperation(() => addToken(...args)), isRegistered, reset }
 }

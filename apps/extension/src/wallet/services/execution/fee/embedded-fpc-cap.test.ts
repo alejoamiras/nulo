@@ -72,7 +72,7 @@ describe("applyEmbeddedFpcGasCap", () => {
 	})
 
 	// This IS the private-fuel claim path: PrivateMintAndPayFeePaymentMethod sets feePayer=FPC (≠ from)
-	// → embedded="fpc", and the tools app supplies explicit maxFeesPerGas + teardownGas=0 (plan L14), which
+	// → embedded="fpc", and the tools app supplies explicit maxFeesPerGas + teardownGas=0, which
 	// must pass through verbatim so mint_and_pay_fee's `gasLimits * maxFeesPerGas <= amount` assertion holds.
 	test("3. embedded='fpc', dApp supplied explicit maxFeesPerGas → uses provided values; node NOT consulted (the private-fuel path)", async () => {
 		const node = fakeNode()
