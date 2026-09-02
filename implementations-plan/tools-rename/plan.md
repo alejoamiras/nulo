@@ -200,6 +200,13 @@ Conditions, all folded into this version: (1) Phase-5 proof read `.sha`, but `bu
 
 **Rejected:** nothing.
 
+## Post-implementation — what happened (2026-09-01/02)
+
+- **Arc 1** (`worktree-tools-rename`, phases 0–3): `/code-review low` as one fresh reviewer agent → 3 prose fixes (`chore(tools): apply code-review fixes (arc 1)`); codex round 1 → 6 findings (tighter CI/ports/manifest pins, prose matched to code) → round 2 "no new material findings". `lessons/arc1-loop.md`.
+- **Arc 2** (`refactor/tools-drip-tab`, phase 4): `/code-review low` clean; codex round 1 → 4 findings (in-browser forget check, mainnet comments, e2e header, tags) → rounds 2–3 comment leftovers → round 4 "no new material findings". `lessons/arc2-loop.md`.
+- **Cross-arc** (fresh session): 3 findings (stale stack → `gh stack sync` onto `e5f36cfd`; two comment classes) → see `lessons/cross-arc.md` for the confirmation round.
+- Gates re-run on the rebased top: `audit:tools`, `lint:actions`, frozen install, arc-1 tip lint — green. Final residue: the 22-file allow-list + `CLAUDE.md:83` (dev's new sentence naming the `faucet-cluster` plan).
+
 ## ELI5 companion
 
 Artifact: https://claude.ai/code/artifact/79178d58-9e52-4542-8e48-a5c6f44c92e2 (the first publish, `…/bdc1cc30-…`, was deleted before approval sync) · source `implementations-plan/tools-rename/eli5.html` (republish the same path to update the same URL).
