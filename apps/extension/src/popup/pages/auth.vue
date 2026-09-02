@@ -52,6 +52,13 @@ const isAwaitingResponse = ref(false)
 
 const isPasskeyProfile = computed(() => appStore.profile?.type === "passkey")
 
+// The shell's boot outcome. "failed" = an OPEN session whose activation bootstrap threw: the
+// banner's RETRY is the only true recovery, and a password typed here would unlock an already-
+// open session and repair nothing — so the form is withheld, not merely disabled. An
+// "unreachable" boot keeps the form: the password path IS its recovery.
+const bootOutcome = inject("bootOutcome", ref(""))
+const isBootFailed = computed(() => bootOutcome.value === "failed")
+
 // Path A: in-page passkey ceremony. The dialog is mounted via `v-if="ceremonyRequest"`
 // in the template; we drive it imperatively via `runCeremony` to keep the
 // existing handleUnlockWallet flow shape intact.
@@ -230,7 +237,10 @@ watch(
 				</p>
 			</Flex>
 
-			<form @submit.prevent="handleUnlockWallet" :class="$style.form">
+			<p v-if="isBootFailed" :class="$style.subheading" role="status" data-testid="auth-boot-failed">
+				Your session is open, but the wallet could not finish starting up. Use RETRY above.
+			</p>
+			<form v-else @submit.prevent="handleUnlockWallet" :class="$style.form">
 				<template v-if="!isPasskeyProfile">
 					<div :class="[isWrongPassword && $style.shake]">
 						<Input

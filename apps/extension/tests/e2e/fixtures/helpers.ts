@@ -167,16 +167,17 @@ export async function ensureUnlocked(
 						rec = undefined
 					}
 					const wellFormed = !!rec && typeof rec.profile === "string" && typeof rec.since === "number"
+					// The shell saying its boot-time check GAVE UP (service unreachable across the
+					// backoff, or the bootstrap threw over an OPEN session) wins over BOTH decisions
+					// below: a missing record with the field mounted looks exactly like a lock, but
+					// under the marker the record may be live and a reconnect may clear the marker
+					// at any moment — so it is never typed against. The product's own RETRY is
+					// pressed once, and the wait resumes for a real decision.
+					const outcome = document.querySelector("[data-boot-outcome]")?.getAttribute("data-boot-outcome")
+					if (outcome) return `boot:${outcome}`
 					const field = !!document.querySelector('[data-testid="auth-password-input"]')
 					if (wellFormed && !window.location.hash.includes("/popup/auth")) return "unlocked"
 					if (!wellFormed && field) return "locked"
-					// The shell says its boot-time check GAVE UP (service unreachable across the
-					// backoff, or the bootstrap threw over an OPEN session). That is neither of the
-					// two states above — the record may be live and a reconnect may clear the
-					// marker at any moment — so it is never typed against: the product's own RETRY
-					// is pressed once, and the wait resumes for a real decision.
-					const outcome = document.querySelector("[data-boot-outcome]")?.getAttribute("data-boot-outcome")
-					if (outcome) return `boot:${outcome}`
 					return null
 				},
 				{ timeout: decisionBudgetMs, polling: 200 },

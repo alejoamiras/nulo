@@ -63,12 +63,14 @@ export async function resolveBootSession<P extends { id: string }>(deps: BootSes
 	return { kind: "active", profiles, profile: session.profile, stillActive }
 }
 
-/** The profile the lock screen unlocks: the last active one when it still exists, else the first. */
+/** The profile the lock screen unlocks: the last active one when it still exists, else the
+ *  first. The last-active read is a storage facade that can reject during a worker restart —
+ *  that is a preference, never a reason to leave the session check undecided. */
 async function lockScreenCandidate<P extends { id: string }>(
 	profiles: P[],
 	lastActiveProfileId: () => Promise<string | undefined>,
 ): Promise<P | undefined> {
 	if (profiles.length === 0) return undefined
-	const lastId = await lastActiveProfileId()
+	const lastId = await lastActiveProfileId().catch(() => undefined)
 	return (lastId ? profiles.find((p) => p.id === lastId) : undefined) ?? profiles[0]
 }

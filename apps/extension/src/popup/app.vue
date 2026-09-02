@@ -186,6 +186,9 @@ const onImportedKeysDegraded = (profile) => {
  *  so the user (and the e2e harness) can tell it from the transient lock screen the route guard
  *  parks a still-deciding popup on. Empty = deciding or decided. */
 const bootOutcome = ref("")
+// The auth page reads it to withhold its form while a FAILED boot's banner is the only true
+// recovery: a password typed there would unlock an already-open session and repair nothing.
+provide("bootOutcome", bootOutcome)
 
 /** The boot-time check gave up. Mark it done so the guard's own retry takes over — an
  *  un-checked session would park the popup on /popup/auth for good. Unreachable with a known

@@ -968,12 +968,17 @@ function reportRevertedClaim(rec: DepositJournalRecord): "stop" {
 	if (cleared) {
 		receiptRounds.delete(rec.id)
 		reload()
+		setRuntime(rec.id, {
+			attention: "error",
+			note: "The claim reverted on Aztec. You can retry from this card - the deposit remains claimable.",
+			confirmLandedTxHash: undefined,
+		})
+	} else {
+		// The hash this round polled is no longer the record's: a newer claim owns it now and
+		// this runner has nothing to say about it — stop quietly, never "retry".
+		log("reverted claim superseded by a newer hash - leaving the record to its owner", { id: rec.id })
+		setRuntime(rec.id, { attention: undefined, note: undefined, confirmLandedTxHash: undefined })
 	}
-	setRuntime(rec.id, {
-		attention: "error",
-		note: "The claim reverted on Aztec. You can retry from this card - the deposit remains claimable.",
-		confirmLandedTxHash: undefined,
-	})
 	return "stop"
 }
 

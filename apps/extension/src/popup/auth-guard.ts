@@ -62,11 +62,14 @@ export async function lookupActiveProfileWithBackoff<P>(
 	const deadline = Date.now() + (opts.deadlineMs ?? LOOKUP_DEADLINE_MS)
 	const delays = [0, 250, 500, 750]
 	for (const delay of delays) {
-		const remaining = deadline - Date.now()
-		if (remaining <= delay) break
+		if (deadline - Date.now() <= delay) break
 		if (delay) await new Promise<void>((r) => setTimeout(r, delay))
+		// Re-read after the sleep: a starved timer can resume past the deadline, and a request
+		// must never be launched with no budget left to attach to it.
+		const remaining = deadline - Date.now()
+		if (remaining <= 0) break
 		try {
-			const profile = await withinDeadline(getActiveProfile(), deadline - Date.now())
+			const profile = await withinDeadline(getActiveProfile(), remaining)
 			return profile ? { kind: "active", profile } : { kind: "locked" }
 		} catch {
 			// Retry on the next delay; the schedule's end (or the deadline) is the only "unreachable" verdict.
@@ -75,8 +78,10 @@ export async function lookupActiveProfileWithBackoff<P>(
 	return { kind: "unreachable" }
 }
 
+/** Races a request against the remaining budget. A request the deadline abandons is still
+ *  observed (its late rejection is swallowed) so it can never surface as unhandled. */
 function withinDeadline<T>(request: Promise<T>, ms: number): Promise<T> {
-	if (ms <= 0) return Promise.reject(new Error("lookup deadline exhausted"))
+	request.catch(() => {})
 	let timer: ReturnType<typeof setTimeout> | undefined
 	const expiry = new Promise<never>((_, reject) => {
 		timer = setTimeout(() => reject(new Error("lookup deadline exhausted")), ms)
