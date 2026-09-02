@@ -17,7 +17,8 @@ Audits: codex (blueprint, reject → folded) + fable-role (conditional approve �
   - private token, private fuel: the fail-stop "private fuel already consumed" (never re-mint, L11) — a
     dead-end replaced by a true statement, not a resend;
   - direct-FJ (fuel-only bridge, public or private): the builder fail-stops "already included" on an
-    included `fuel.claimTxHash` (never a second claim; a dropped one rebuilds as today).
+    included `fuel.claimTxHash`, "still pending" on a pending/unreachable one until the latch ages
+    out, and rebuilds only a dropped one (never a second claim against a live one).
   Pending / proposed / dropped-streak receipts behave exactly as today.
 - Both pins flip; the listed snapshots change and nothing else; every other tools unit + jsdom e2e
   test is zero-edit green. Manifest stays 35.
@@ -116,12 +117,14 @@ so the residual window is the same one every `patchRecord` already has, not the 
 window a separate read would leave. Synchronous between the gen check and the loop's return; only
 the `reverted` arm. The dropped-streak clear keeps its unconditional form — out of scope, noted.
 
-### C — direct-FJ records never rebuild an included fuel claim (`buildFeeJuiceClaimDep`)
-An included `fuel.claimTxHash` (or `fuel.consumed`) fail-stops "already included" before the builder
-runs; a dropped one rebuilds as today. Codex r2 refused "unreachable" as an argument (fee setup and
-public-enqueued calls can still yield a mined reverted receipt), so the outcome is enforced, not
-assumed: after B clears the token hash, the retry of a direct-FJ record whose fuel claim landed
-stops with a true statement instead of a simulate error.
+### C — direct-FJ records rebuild a prior fuel claim only once it conclusively dropped (`priorFuelClaimStop`)
+Before the builder runs: `fuel.consumed` or an included `fuel.claimTxHash` ⇒ "already included";
+a dropped one ⇒ rebuild (as today); pending/unreachable ⇒ "still pending" until the latch ages out
+(`PRIVATE_ATTEMPT_STALE_MS`, the ladders' existing escape from a pending that never resolves; the
+simulate gate is then the authority). Codex r2 refused "unreachable" as an argument for the
+included case, and its PR review refused rebuilding on pending: the persisted window between the
+nested hash (`fuelClaim.ts` onTxHash) and the top-level hash (`useBridgeJournal.ts` sendAndWatch)
+is real, and simulate is not exclusion against a concurrent pending tx.
 
 ### Competing outline (rejected; both audits independently agreed)
 - A″: deep-merge `fuel` in `bridge-core` `patchRecord` — policy in the storage package.

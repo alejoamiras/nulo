@@ -944,7 +944,8 @@ function priorReceiptRounds(id: string): number {
  *  poll in this tab cannot wipe a fresh hash another tab already sent. Deliberately synchronous:
  *  it runs between a gen check and the loop's next step. */
 function reportRevertedClaim(rec: DepositJournalRecord): "stop" {
-	const cleared = journalPatchWhen(deps.kv, rec.id, (live) => (live as DepositJournalRecord).claimTxHash === rec.claimTxHash, {
+	const expected = rec.claimTxHash
+	const cleared = journalPatchWhen(deps.kv, rec.id, (live) => !!expected && (live as DepositJournalRecord).claimTxHash === expected, {
 		claimTxHash: undefined,
 	})
 	if (cleared) {

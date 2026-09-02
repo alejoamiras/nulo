@@ -333,6 +333,25 @@ export async function recoverDepositLeg(rec: DepositJournalRecord, publicClient:
 
 // ── claim builders (the journal engine's claim dep, decomposed) ──────────────
 
+/** A direct-FJ record with a prior fuel claim on record is rebuilt ONLY once that claim
+ *  conclusively dropped: an included one (success, or reverted past setup — the message was
+ *  consumed either way) has nothing left to claim, and a pending/unreachable one may still land
+ *  (simulate is an authority, not exclusion against a concurrent pending tx). The one escape from
+ *  a "pending" that never resolves is the ladders' age-out: past `PRIVATE_ATTEMPT_STALE_MS` the
+ *  retry re-opens with the simulate gate as the double-spend authority. */
+async function priorFuelClaimStop(fuel: DepositJournalRecord["fuel"]): Promise<ClaimInteraction | null> {
+	if (fuel?.consumed === true) return failStopInteraction(FUEL_ALREADY_CLAIMED)
+	if (fuel?.claimTxHash === undefined) return null
+	const status = await fuelReceiptStatus(fuel.claimTxHash)
+	if (status === "included") return failStopInteraction(FUEL_ALREADY_CLAIMED)
+	if (status === "dropped") return null
+	const agedOut = fuel.claimAttemptAt === undefined || Date.now() - fuel.claimAttemptAt > PRIVATE_ATTEMPT_STALE_MS
+	return agedOut
+		? null
+		: failStopInteraction("A gas claim for this bridge is still pending - waiting for its receipt before trying again.")
+}
+const FUEL_ALREADY_CLAIMED = "The gas claim was already included on Aztec - there is nothing left to claim for this bridge."
+
 /** Fee-juice (Fuel) records claim via a different, no-token-leg path — the dedicated builder;
  *  the token claim never runs for them (codex Option C, lessons/phase-3.md). */
 export async function buildFeeJuiceClaimDep(
@@ -342,12 +361,8 @@ export async function buildFeeJuiceClaimDep(
 	aztec: unknown,
 ): Promise<ClaimInteraction> {
 	const latchFuel = (patch: Partial<FuelBlock>) => patchFuel(rec.id, rec.fuel, patch)
-	// An included fuel claim (success, or reverted past setup — the message was consumed either
-	// way) is never rebuilt: a second claim could only fail simulate, so say why instead.
-	const priorHash = rec.fuel?.claimTxHash
-	if (rec.fuel?.consumed === true || (priorHash !== undefined && (await fuelReceiptStatus(priorHash)) === "included")) {
-		return failStopInteraction("The gas claim was already included on Aztec - there is nothing left to claim for this bridge.")
-	}
+	const prior = await priorFuelClaimStop(rec.fuel)
+	if (prior) return prior
 	// V5: pin the claim's maxFeesPerGas to predicted-worst — NO extra padding. BOTH paths now
 	// SELF-PAY (public via FeeJuicePaymentMethodWithClaim, private via the embedded FPC): the bridged
 	// amount is the whole budget and the setup asserts amount >= gasLimits*maxFeesPerGas with no

@@ -773,9 +773,33 @@ describe("claim dep characterization", () => {
 		kvPatchRecord(kv, rec.id, { fuel: { ...FUEL_OK, received: "500", messageHash: "0xfromothertab" } } as never)
 		h.trace.length = 0
 		await i.send()
-		await new Promise((r) => setTimeout(r, 20))
-		const settle = fuelPatches().find((f) => f?.standaloneClaimed === true)
-		expect(settle).toMatchObject({ standaloneClaimed: true, messageHash: "0xfromothertab" })
+		const settle = () => fuelPatches().find((f) => f?.standaloneClaimed === true)
+		await vi.waitFor(() => expect(settle()).toBeDefined())
+		expect(settle()).toMatchObject({ standaloneClaimed: true, messageHash: "0xfromothertab" })
+	})
+
+	test("direct fee-juice: a PENDING prior fuel claim waits (never a second claim) until the latch ages out", async () => {
+		const deps = wiredDeps()
+		const now = 1_700_000_000_000
+		const fresh = mkRec({
+			id: "0xfjpend",
+			assetKind: "fee-juice",
+			fuel: { ...FUEL_OK, claimAttempt: true, claimAttemptAt: now, claimTxHash: TX(6) },
+		} as never)
+		const why = await expectStop(await deps.claim(fresh, "0xsecrethex", undefined))
+		expect(why).toMatch(/still pending/)
+		// An unreachable node reads as pending too — fail-closed, same stop.
+		h.l2.txReceiptThrows = true
+		expect(await expectStop(await deps.claim(fresh, "0xsecrethex", undefined))).toMatch(/still pending/)
+		h.l2.txReceiptThrows = false
+		expect(h.trace.some(([n]) => n === "fuelClaim.buildFuelClaimInteraction")).toBe(false)
+		const aged = mkRec({
+			id: "0xfjaged",
+			assetKind: "fee-juice",
+			fuel: { ...FUEL_OK, claimAttempt: true, claimAttemptAt: now - 16 * 60_000, claimTxHash: TX(6) },
+		} as never)
+		await (await deps.claim(aged, "0xsecrethex", undefined)).simulate()
+		expect(h.trace.some(([n]) => n === "fuelClaim.buildFuelClaimInteraction")).toBe(true)
 	})
 
 	test("reconcileFuelConsumed merges into the persisted block, not the copy it read before its await", async () => {
