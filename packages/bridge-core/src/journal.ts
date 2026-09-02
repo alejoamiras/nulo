@@ -215,9 +215,21 @@ export function upsertRecord(kv: KV, rec: BridgeJournalRecord): void {
 
 /** Shallow-merge a patch into one record (re-read first). No-op if the id is gone. */
 export function patchRecord(kv: KV, id: string, patch: Partial<BridgeJournalRecord>): BridgeJournalRecord | undefined {
+	return patchRecordWhen(kv, id, () => true, patch)
+}
+
+/** `patchRecord` guarded by a predicate over the freshly loaded record: a no-op (undefined) when
+ *  the id is gone or the guard rejects. Load, guard and write are one synchronous span — the
+ *  closest thing to a compare-and-set that localStorage offers, not an atomic one. */
+export function patchRecordWhen(
+	kv: KV,
+	id: string,
+	when: (current: BridgeJournalRecord) => boolean,
+	patch: Partial<BridgeJournalRecord>,
+): BridgeJournalRecord | undefined {
 	const records = loadJournal(kv)
 	const i = records.findIndex((r) => r.id === id)
-	if (i < 0) return undefined
+	if (i < 0 || !when(records[i])) return undefined
 	const next = { ...records[i], ...patch, id: records[i].id, updatedAt: Date.now() } as BridgeJournalRecord
 	records[i] = next
 	write(kv, records)

@@ -9,14 +9,7 @@ import { NETWORK } from "@/lib/network"
 import { ref, watch } from "vue"
 import { SUPPORTS_SALT_V2 } from "@/contracts/bridge-deployments"
 import { decideStandaloneFuelRecovery } from "@/lib/fuel-claim-state"
-import {
-	addRecordVerified,
-	connectJournalDeps,
-	markSessionLive,
-	resumeSessionWork,
-	updateRecord,
-	useBridgeJournal,
-} from "./useBridgeJournal"
+import { addRecordVerified, connectJournalDeps, markSessionLive, resumeSessionWork, useBridgeJournal } from "./useBridgeJournal"
 import type { Ref } from "vue"
 import {
 	buildClaimInteraction,
@@ -26,6 +19,7 @@ import {
 	type FuelPre,
 	fuelReceiptStatus,
 	handleDepositFailure,
+	patchFuel,
 	prepareFuelSlice,
 	recoverDepositLeg,
 	runFueledDepositLeg,
@@ -85,7 +79,7 @@ export async function reconcileFuelConsumed(id: string): Promise<void> {
 	const fuel = rec?.fuel
 	if (!fuel?.claimTxHash || fuel.consumed === true) return
 	if ((await fuelReceiptStatus(fuel.claimTxHash)) === "included") {
-		updateRecord(id, { fuel: { ...fuel, consumed: true } })
+		patchFuel(id, fuel, { consumed: true })
 	}
 }
 

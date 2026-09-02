@@ -38,8 +38,8 @@ const h = vi.hoisted(() => {
 		t: (name: string, detail?: unknown) => void trace.push([name, detail]),
 		captured: { deps: undefined as undefined | Record<string, unknown> },
 		lastId: { value: "" },
-		fj: { publicBalance: 0n, privateBalance: 0n, publicThrows: false },
-		l2: { blockNumber: 42n, txReceiptStatus: "pending" as string, txReceiptThrows: false },
+		fj: { publicBalance: 0n, privateBalance: 0n, publicThrows: false, invokeLatch: false, claimSendError: null as null | string },
+		l2: { blockNumber: 42n, txReceiptStatus: "pending" as string, txExecutionResult: "success" as string, txReceiptThrows: false },
 		allowance: { value: 0n },
 		bridge: { sendError: null as null | "insufficiency" | "other" },
 	}
@@ -107,7 +107,17 @@ vi.mock("./fuelClaim", () => ({
 			resolvedSalt: opts.resolvedSalt,
 			resolvedSecret: opts.resolvedSecret,
 		})
-		return { simulate: async () => ({}), send: async () => ({ txHash: "0xfjclaimtx" }) }
+		return {
+			simulate: async () => ({}),
+			send: async () => {
+				// Opt-in: the real builder latches through these; the default keeps prior traces intact.
+				if (h.fj.invokeLatch) {
+					;(opts.onAttempt as (() => void) | undefined)?.()
+					;(opts.onTxHash as ((tx: string) => void) | undefined)?.("0xfjclaimtx")
+				}
+				return { txHash: "0xfjclaimtx" }
+			},
+		}
 	},
 }))
 
@@ -209,6 +219,7 @@ function contractAt(addr: string): Record<string, unknown> {
 				claim: (...args: unknown[]) => ({
 					send: async (opts: Record<string, unknown>) => {
 						h.t("fj.claim.send", { args: args.map(String), wait: opts.wait })
+						if (h.fj.claimSendError) throw new Error(h.fj.claimSendError)
 						return { receipt: { txHash: "0xstandalonefjtx" } }
 					},
 				}),
@@ -267,7 +278,7 @@ vi.mock("@aztec/aztec.js/node", () => ({
 		getCurrentMinFees: async () => GasFees.from({ feePerDaGas: 10n, feePerL2Gas: 20n }),
 		getTxReceipt: async () => {
 			if (h.l2.txReceiptThrows) throw new Error("node down")
-			return { status: h.l2.txReceiptStatus }
+			return { status: h.l2.txReceiptStatus, executionResult: h.l2.txExecutionResult }
 		},
 		getL1ToL2MessageCheckpoint: async () => undefined,
 		getBlockData: async () => ({ checkpointNumber: 7n }),
@@ -301,7 +312,8 @@ vi.mock("./useBridgeJournal", async (importOriginal) => {
 			h.t("journal.runDepositClaim", id)
 		}) as typeof real.runDepositClaim,
 		connectJournalDeps: ((deps: Record<string, unknown>) => {
-			h.captured.deps = deps
+			// Capture the flow's full wiring only; a test wiring a bare `kv` must not replace it.
+			if ("claim" in deps) h.captured.deps = deps
 			return real.connectJournalDeps(deps as never)
 		}) as typeof real.connectJournalDeps,
 	}
@@ -311,13 +323,31 @@ import { InboxAbi } from "@aztec/l1-artifacts"
 import {
 	FeeJuicePortalAbi,
 	type DepositJournalRecord,
+	type KV,
 	deriveTokenClaimSecret,
 	openDepositEnvelope,
+	patchRecord as kvPatchRecord,
 	recoveryKeyFromSignature,
 } from "@nulo/bridge-core"
 import { computeSecretHash } from "@aztec/aztec.js/crypto"
-import { __resetJournalForTests, addRecord, useBridgeJournal } from "./useBridgeJournal"
-import { ensureDepositJournalDeps, overrideFuelClaim, useDepositFlow } from "./useDeposit"
+import { classifyClaimReceipt } from "@/lib/claim-receipt"
+import { fuelReceiptStatus } from "./deposit-flow"
+import { __resetJournalForTests, addRecord, connectJournalDeps, useBridgeJournal } from "./useBridgeJournal"
+import { ensureDepositJournalDeps, overrideFuelClaim, reconcileFuelConsumed, useDepositFlow } from "./useDeposit"
+
+/** Well-formed 32-byte tx hashes: `TxHash.fromString` rejects short fakes, which the probes then
+ *  read as unreachable/pending — the shape the older cases rely on. */
+const TX = (n: number) => `0x${n.toString(16).padStart(64, "0")}`
+
+/** A journal store the test can write to directly — "another tab" that this tab's ref never reloads. */
+function memKV(): KV {
+	const store = new Map<string, string>()
+	return {
+		getItem: (k) => store.get(k) ?? null,
+		setItem: (k, v) => void store.set(k, v),
+		removeItem: (k) => void store.delete(k),
+	}
+}
 
 // ── receipts with REAL-encoded event logs (parseEventLogs runs for real) ─────
 function routerLog(eventName: "Bridge" | "BridgeWithFuel", aztecRecipient: `0x${string}`, values: unknown[]) {
@@ -440,8 +470,11 @@ beforeEach(() => {
 	h.fj.publicBalance = 0n
 	h.fj.privateBalance = 0n
 	h.fj.publicThrows = false
+	h.fj.invokeLatch = false
+	h.fj.claimSendError = null
 	h.l2.blockNumber = 42n
 	h.l2.txReceiptStatus = "pending"
+	h.l2.txExecutionResult = "success"
 	h.l2.txReceiptThrows = false
 	h.allowance.value = 0n
 	h.bridge.sendError = null
@@ -657,18 +690,172 @@ describe("claim dep characterization", () => {
 		expect({ whyDrift, whyFloor }).toMatchSnapshot()
 	})
 
-	test("public fueled, fresh: fjwc fee; (BUG PIN) PROPOSED write drops the pre-send claimAttemptAt", async () => {
+	test("public fueled, fresh: fjwc fee; the PROPOSED write keeps the pre-send claimAttemptAt", async () => {
 		const deps = wiredDeps()
 		const rec = mkRec({ fuel: { ...FUEL_OK } } as never)
 		const i = await deps.claim(rec, rec.secret as string, undefined)
 		await i.simulate()
 		await i.send()
-		// (BUG PIN) The second updateRecord spreads the STALE captured fuel object: claimAttemptAt,
-		// written journal-first by the first update, is absent again in the PROPOSED patch. Preserved
-		// verbatim during the decomposition; tracked separately for an owner-approved fix.
+		// Every fuel write merges into the PERSISTED block, so the journal-first latch's
+		// claimAttemptAt survives the PROPOSED patch that adds the hash.
 		const patches = h.trace.filter(([n]) => n === "journal.updateRecord").map(([, d]) => d)
 		expect(patches).toMatchSnapshot("fjwc-latch-patches")
 		expect(stableTrace()).toMatchSnapshot()
+	})
+
+	/** The fuel patches recorded since the trace was last cleared, oldest first. */
+	const fuelPatches = () =>
+		h.trace
+			.filter(([n]) => n === "journal.updateRecord")
+			.map(([, d]) => ((d as [string, { fuel?: Record<string, unknown> }])[1] ?? {}).fuel)
+
+	test("fuel writes merge into the PERSISTED block: a field another tab wrote lands in every fjwc latch", async () => {
+		const kv = memKV()
+		connectJournalDeps({ kv } as never)
+		const deps = wiredDeps()
+		const rec = mkRec({ fuel: { ...FUEL_OK } } as never)
+		const i = await deps.claim(rec, rec.secret as string, undefined)
+		await i.simulate()
+		// "Another tab" writes straight to storage; this tab's reactive copy never reloads.
+		kvPatchRecord(kv, rec.id, { fuel: { ...FUEL_OK, messageHash: "0xfromothertab" } } as never)
+		h.trace.length = 0
+		await i.send()
+		const patches = fuelPatches()
+		expect(patches).toHaveLength(2)
+		expect(patches.every((f) => f?.messageHash === "0xfromothertab")).toBe(true)
+		expect(patches[1]).toMatchObject({ claimAttempt: true, claimAttemptAt: 1_700_000_000_000, claimTxHash: "0xl2claimtx" })
+	})
+
+	test("direct fee-juice latch: onAttempt clears a stale setupInsufficiency and onTxHash keeps it cleared", async () => {
+		const deps = wiredDeps()
+		h.fj.invokeLatch = true
+		const rec = mkRec({ assetKind: "fee-juice", fuel: { ...FUEL_OK, setupInsufficiency: true } } as never)
+		const i = await deps.claim(rec, "0xsecrethex", undefined)
+		h.trace.length = 0
+		await i.send()
+		const patches = fuelPatches()
+		expect(patches[0]).toMatchObject({ claimAttempt: true, claimAttemptAt: 1_700_000_000_000, setupInsufficiency: false })
+		expect(patches[1]).toMatchObject({ claimAttempt: true, claimTxHash: "0xfjclaimtx", setupInsufficiency: false })
+		const { records } = useBridgeJournal()
+		expect((records.value.find((r) => r.id === rec.id) as DepositJournalRecord).fuel?.setupInsufficiency).toBe(false)
+	})
+
+	test("direct fee-juice: an included prior fuel claim is never rebuilt; a dropped one is", async () => {
+		const deps = wiredDeps()
+		h.l2.txReceiptStatus = "checkpointed"
+		const included = mkRec({
+			id: "0xfjinc",
+			assetKind: "fee-juice",
+			fuel: { ...FUEL_OK, claimAttempt: true, claimTxHash: TX(1) },
+		} as never)
+		const why = await expectStop(await deps.claim(included, "0xsecrethex", undefined))
+		expect(why).toMatch(/already included/)
+		expect(h.trace.some(([n]) => n === "fuelClaim.buildFuelClaimInteraction")).toBe(false)
+		h.l2.txReceiptStatus = "dropped"
+		const dropped = mkRec({
+			id: "0xfjdrop",
+			assetKind: "fee-juice",
+			fuel: { ...FUEL_OK, claimAttempt: true, claimTxHash: TX(1) },
+		} as never)
+		await (await deps.claim(dropped, "0xsecrethex", undefined)).simulate()
+		expect(h.trace.some(([n]) => n === "fuelClaim.buildFuelClaimInteraction")).toBe(true)
+	})
+
+	test("standalone FJ settle merges into the persisted block, not the fuel captured at build time", async () => {
+		const kv = memKV()
+		connectJournalDeps({ kv } as never)
+		const deps = wiredDeps()
+		// The already-consumed shape settles immediately (the inclusion poll cannot parse the
+		// harness's short standalone hash); the write site is the same `fuel` captured at build.
+		h.fj.claimSendError = "No non-nullified L1 to L2 message found"
+		const rec = mkRec({ fuel: { ...FUEL_OK, received: "500" } } as never)
+		const i = await deps.claim(rec, rec.secret as string, undefined)
+		kvPatchRecord(kv, rec.id, { fuel: { ...FUEL_OK, received: "500", messageHash: "0xfromothertab" } } as never)
+		h.trace.length = 0
+		await i.send()
+		const settle = () => fuelPatches().find((f) => f?.standaloneClaimed === true)
+		await vi.waitFor(() => expect(settle()).toBeDefined())
+		expect(settle()).toMatchObject({ standaloneClaimed: true, messageHash: "0xfromothertab" })
+	})
+
+	test("direct fee-juice: a PENDING or unreachable prior fuel claim always waits — never a second claim, however old the latch", async () => {
+		const deps = wiredDeps()
+		const now = 1_700_000_000_000
+		const fresh = mkRec({
+			id: "0xfjpend",
+			assetKind: "fee-juice",
+			fuel: { ...FUEL_OK, claimAttempt: true, claimAttemptAt: now, claimTxHash: TX(6) },
+		} as never)
+		const why = await expectStop(await deps.claim(fresh, "0xsecrethex", undefined))
+		expect(why).toMatch(/still pending/)
+		// An unreachable node reads as pending too — fail-closed, same stop.
+		h.l2.txReceiptThrows = true
+		expect(await expectStop(await deps.claim(fresh, "0xsecrethex", undefined))).toMatch(/still pending/)
+		h.l2.txReceiptThrows = false
+		expect(h.trace.some(([n]) => n === "fuelClaim.buildFuelClaimInteraction")).toBe(false)
+		// Elapsed time is not evidence the queued tx vanished: an old latch waits exactly like a fresh one.
+		const aged = mkRec({
+			id: "0xfjaged",
+			assetKind: "fee-juice",
+			fuel: { ...FUEL_OK, claimAttempt: true, claimAttemptAt: now - 16 * 60_000, claimTxHash: TX(6) },
+		} as never)
+		expect(await expectStop(await deps.claim(aged, "0xsecrethex", undefined))).toMatch(/still pending/)
+		expect(h.trace.some(([n]) => n === "fuelClaim.buildFuelClaimInteraction")).toBe(false)
+	})
+
+	test("reconcileFuelConsumed merges into the persisted block, not the copy it read before its await", async () => {
+		const kv = memKV()
+		connectJournalDeps({ kv } as never)
+		wiredDeps()
+		h.l2.txReceiptStatus = "checkpointed"
+		const rec = mkRec({ fuel: { ...FUEL_OK, claimAttempt: true, claimTxHash: TX(2) } } as never)
+		kvPatchRecord(kv, rec.id, { fuel: { ...FUEL_OK, claimAttempt: true, claimTxHash: TX(2), messageHash: "0xfromothertab" } } as never)
+		h.trace.length = 0
+		await reconcileFuelConsumed(rec.id)
+		expect(fuelPatches()).toEqual([expect.objectContaining({ consumed: true, claimTxHash: TX(2), messageHash: "0xfromothertab" })])
+	})
+
+	test("an included-but-reverted receipt reads `reverted` to the journal and `included` to the fuel probe", async () => {
+		const deps = wiredDeps() as unknown as { claimReceiptStatus: (txHash: string) => Promise<string> }
+		h.l2.txReceiptStatus = "checkpointed"
+		h.l2.txExecutionResult = "app_logic_reverted"
+		expect(classifyClaimReceipt({ status: "checkpointed", executionResult: "app_logic_reverted" })).toBe("reverted")
+		expect(await deps.claimReceiptStatus(TX(3))).toBe("reverted")
+		expect(await fuelReceiptStatus(TX(3))).toBe("included")
+	})
+
+	test("after an fjwc claim reverted (hash cleared), the retry pays sponsored — the FJ was consumed in setup", async () => {
+		const deps = wiredDeps()
+		h.l2.txReceiptStatus = "checkpointed"
+		h.l2.txExecutionResult = "app_logic_reverted"
+		const rec = mkRec({ fuel: { ...FUEL_OK, claimAttempt: true, claimAttemptAt: 1, claimTxHash: TX(4) } } as never)
+		const i = await deps.claim(rec, rec.secret as string, undefined)
+		await i.simulate()
+		await i.send()
+		// The only fuel write is the inclusion-grade `consumed` promotion; no fjwc latch fires on send.
+		expect(fuelPatches()).toEqual([expect.objectContaining({ consumed: true, claimTxHash: TX(4) })])
+		expect(stableTrace()).toMatchSnapshot()
+	})
+
+	test("after a private fuel claim reverted (hash cleared), the retry stops as consumed — never a second mint", async () => {
+		const deps = wiredDeps()
+		h.l2.txReceiptStatus = "checkpointed"
+		h.l2.txExecutionResult = "app_logic_reverted"
+		const rec = mkRec({
+			isPrivate: true,
+			secret: undefined,
+			schema: 2,
+			fuel: {
+				...FUEL_OK,
+				bridgeSecretSalt: "0x0000000000000000000000000000000000000000000000000000000000008888",
+				fpc: PRIVATE_FPC_ADDRESS,
+				claimAttempt: true,
+				claimAttemptAt: 1,
+				claimTxHash: TX(5),
+			},
+		} as never)
+		const why = await expectStop(await deps.claim(rec, "0x0000000000000000000000000000000000000000000000000000000000005555", undefined))
+		expect(why).toMatch(/private fuel already consumed/)
 	})
 
 	test("public fueled, attempt pending: wait fail-stop", async () => {

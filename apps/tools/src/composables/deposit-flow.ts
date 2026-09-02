@@ -70,6 +70,7 @@ import {
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import {
 	cacheSecret,
+	currentRecord,
 	discard,
 	flagRecordError,
 	isMsgConsumed,
@@ -149,6 +150,24 @@ export function parseBridgeWithFuelEvent(logs: Log[]):
 // deposit surface (and its characterization harness) keeps one import site.
 export { bestEffortL2Block, ensurePermit2Approval, signAndSendRouterBridge }
 
+type FuelBlock = NonNullable<DepositJournalRecord["fuel"]>
+
+/** Merge explicit fields into the record's PERSISTED fuel block (never a captured copy: the
+ *  journal's merge is shallow, so a nested `fuel` write replaces the block, and every claim-path
+ *  write runs long after its builder captured the record). The captured block is the fallback when
+ *  the journal holds no live copy (unit fixtures, a wiped block). `topLevel` rides in the same write
+ *  so a site that also patches record fields keeps its one-write shape. */
+export function patchFuel(
+	id: string,
+	captured: FuelBlock | undefined,
+	patch: Partial<FuelBlock>,
+	topLevel: Partial<DepositJournalRecord> = {},
+): void {
+	const base = (currentRecord(id) as DepositJournalRecord | undefined)?.fuel ?? captured
+	if (!base) return
+	updateRecord(id, { ...topLevel, fuel: { ...base, ...patch } })
+}
+
 export async function fuelReceiptStatus(txHash: string): Promise<"included" | "dropped" | "pending"> {
 	try {
 		const receipt = await createAztecNodeClient(NODE_URL).getTxReceipt(TxHash.fromString(txHash))
@@ -204,7 +223,7 @@ export async function sendStandaloneFjClaim(
 		// consumed shape, NOT not-ready: latching standaloneClaimed on a not-yet-anchored message would
 		// permanently hide the recovery affordance for FJ that was never claimed (fund-stranding).
 		if (isMsgConsumed(e instanceof Error ? e.message : String(e))) {
-			updateRecord(id, { fuel: { ...fuel, standaloneClaimed: true } })
+			patchFuel(id, fuel, { standaloneClaimed: true })
 			log("standalone FJ claim: message already consumed - gas already in wallet", id)
 			return
 		}
@@ -213,7 +232,7 @@ export async function sendStandaloneFjClaim(
 	if ((await waitForFuelInclusion(receiptTxHash)) !== "included") {
 		throw new Error("The gas claim was sent but hasn't confirmed yet - try CLAIM YOUR GAS again in a moment.")
 	}
-	updateRecord(id, { fuel: { ...fuel, standaloneClaimed: true } })
+	patchFuel(id, fuel, { standaloneClaimed: true })
 	log("standalone FJ claim confirmed", id)
 }
 
@@ -273,28 +292,24 @@ export async function recoverDepositLeg(rec: DepositJournalRecord, publicClient:
 	}
 	if (assetKindOf(rec) === "fee-juice") {
 		const ev = parseFeeJuiceDeposit(receipt.logs as never)
-		const fuel = rec.fuel as NonNullable<DepositJournalRecord["fuel"]>
-		updateRecord(rec.id, {
-			leafIndex: ev.leafIndex.toString(),
-			fuel: { ...fuel, received: ev.amount.toString(), leafIndex: ev.leafIndex.toString() },
-		})
+		patchFuel(
+			rec.id,
+			rec.fuel,
+			{ received: ev.amount.toString(), leafIndex: ev.leafIndex.toString() },
+			{ leafIndex: ev.leafIndex.toString() },
+		)
 		return "recovered"
 	}
 	// Fueled token deposit (router) carries a BridgeWithFuel event; the plain portal deposit
 	// carries the Inbox MessageSent. Try the richer one first.
 	const fe = parseBridgeWithFuelEvent(receipt.logs as Log[])
 	if (fe?.tokenIndex !== undefined && fe.fuelIndex !== undefined && fe.fuelAmount !== undefined) {
-		const fuel = rec.fuel as NonNullable<DepositJournalRecord["fuel"]>
-		updateRecord(rec.id, {
-			leafIndex: fe.tokenIndex.toString(),
-			messageHash: fe.tokenKey,
-			fuel: {
-				...fuel,
-				leafIndex: fe.fuelIndex.toString(),
-				messageHash: fe.fuelKey,
-				received: fe.fuelAmount.toString(),
-			},
-		})
+		patchFuel(
+			rec.id,
+			rec.fuel,
+			{ leafIndex: fe.fuelIndex.toString(), messageHash: fe.fuelKey, received: fe.fuelAmount.toString() },
+			{ leafIndex: fe.tokenIndex.toString(), messageHash: fe.tokenKey },
+		)
 		return "recovered"
 	}
 	// A schema-2 record's deposit went through the router, so its receipt MUST carry
@@ -318,6 +333,22 @@ export async function recoverDepositLeg(rec: DepositJournalRecord, publicClient:
 
 // ── claim builders (the journal engine's claim dep, decomposed) ──────────────
 
+/** A direct-FJ record with a prior fuel claim on record is rebuilt ONLY once that claim
+ *  conclusively dropped: an included one (success, or reverted past setup — the message was
+ *  consumed either way) has nothing left to claim, and a pending/unreachable one may still land
+ *  — simulate is an authority, not exclusion against a queued tx, and elapsed time is not evidence
+ *  the tx vanished. A pending that the node never resolves therefore waits; re-opening it is an
+ *  owner-level tradeoff (a time-bounded double-send window), deliberately not taken here. */
+async function priorFuelClaimStop(fuel: DepositJournalRecord["fuel"]): Promise<ClaimInteraction | null> {
+	if (fuel?.consumed === true) return failStopInteraction(FUEL_ALREADY_CLAIMED)
+	if (fuel?.claimTxHash === undefined) return null
+	const status = await fuelReceiptStatus(fuel.claimTxHash)
+	if (status === "included") return failStopInteraction(FUEL_ALREADY_CLAIMED)
+	if (status === "dropped") return null
+	return failStopInteraction("A gas claim for this bridge is still pending - waiting for its receipt before trying again.")
+}
+const FUEL_ALREADY_CLAIMED = "The gas claim was already included on Aztec - there is nothing left to claim for this bridge."
+
 /** Fee-juice (Fuel) records claim via a different, no-token-leg path — the dedicated builder;
  *  the token claim never runs for them (codex Option C, lessons/phase-3.md). */
 export async function buildFeeJuiceClaimDep(
@@ -326,10 +357,9 @@ export async function buildFeeJuiceClaimDep(
 	envelope: { salt?: string } | undefined,
 	aztec: unknown,
 ): Promise<ClaimInteraction> {
-	const latchFuel = (patch: Record<string, unknown>) => {
-		const f = rec.fuel
-		if (f) updateRecord(rec.id, { fuel: { ...f, ...patch } })
-	}
+	const latchFuel = (patch: Partial<FuelBlock>) => patchFuel(rec.id, rec.fuel, patch)
+	const prior = await priorFuelClaimStop(rec.fuel)
+	if (prior) return prior
 	// V5: pin the claim's maxFeesPerGas to predicted-worst — NO extra padding. BOTH paths now
 	// SELF-PAY (public via FeeJuicePaymentMethodWithClaim, private via the embedded FPC): the bridged
 	// amount is the whole budget and the setup asserts amount >= gasLimits*maxFeesPerGas with no
@@ -389,7 +419,7 @@ export async function buildPrivateFuelClaim(ctx: TokenClaimCtx): Promise<ClaimIn
 	const fpcAddr = AztecAddress.fromStringUnsafe(fb.fpc ?? PRIVATE_FPC_ADDRESS)
 	const receiptStatus = fb.claimTxHash ? await fuelReceiptStatus(fb.claimTxHash) : undefined
 	if (receiptStatus === "included" && fb.consumed !== true) {
-		updateRecord(rec.id, { fuel: { ...fb, consumed: true } })
+		patchFuel(rec.id, fb, { consumed: true })
 	}
 	const decision = decidePrivateFuelClaim({
 		attempt: fb.claimAttempt === true,
@@ -474,7 +504,7 @@ async function sendPrivateFuelClaim(
 	privateFee: unknown,
 ): Promise<{ txHash: string }> {
 	// Latch the attempt JOURNAL-FIRST (before the wallet call), clearing any stale insufficiency.
-	updateRecord(rec.id, { fuel: { ...fb, claimAttempt: true, claimAttemptAt: Date.now(), setupInsufficiency: false } })
+	patchFuel(rec.id, fb, { claimAttempt: true, claimAttemptAt: Date.now(), setupInsufficiency: false })
 	try {
 		const { receipt } = (await claimPriv().send({
 			from: recipientAddr,
@@ -483,15 +513,7 @@ async function sendPrivateFuelClaim(
 		} as never)) as { receipt: { txHash: unknown } }
 		const txHash = String(receipt.txHash)
 		// PROPOSED is NOT inclusion; `consumed` is set inclusion-grade later from the receipt probe.
-		updateRecord(rec.id, {
-			fuel: {
-				...fb,
-				claimAttempt: true,
-				claimAttemptAt: Date.now(),
-				claimTxHash: txHash,
-				setupInsufficiency: false,
-			},
-		})
+		patchFuel(rec.id, fb, { claimAttempt: true, claimAttemptAt: Date.now(), claimTxHash: txHash, setupInsufficiency: false })
 		return { txHash }
 	} catch (e) {
 		const msg = e instanceof Error ? e.message : String(e)
@@ -499,9 +521,7 @@ async function sendPrivateFuelClaim(
 		// Any OTHER throw leaves setupInsufficiency unset ⇒ the next decision WAITS (fail-closed).
 		// NEVER fall back to public/Sponsored on the private path (L11).
 		if (isPrivateFuelInsufficiency(msg)) {
-			updateRecord(rec.id, {
-				fuel: { ...fb, claimAttempt: true, claimAttemptAt: Date.now(), setupInsufficiency: true },
-			})
+			patchFuel(rec.id, fb, { claimAttempt: true, claimAttemptAt: Date.now(), setupInsufficiency: true })
 		}
 		throw e
 	}
@@ -551,7 +571,7 @@ export async function resolvePublicClaimFee(
 	// receipt sets `consumed`, so a later unreachable node can trust it - a PROPOSED-time
 	// latch would wrongly survive a dropped tx (post-impl audit HIGH).
 	if (receiptStatus === "included" && fuel.consumed !== true) {
-		updateRecord(rec.id, { fuel: { ...fuel, consumed: true } })
+		patchFuel(rec.id, fuel, { consumed: true })
 	}
 	const decision = decideFuelClaim({
 		attempt: fuel.claimAttempt === true,
@@ -613,7 +633,7 @@ export function buildTokenClaimInteraction(
 		simulate: () => interaction().simulate({ from: recipientAddr, ...(fee ? { fee } : {}) } as never),
 		send: async () => {
 			// L14 trigger-1 precondition: latch the attempt JOURNAL-FIRST, before the wallet call.
-			if (fjwcAttempt && fuel) updateRecord(rec.id, { fuel: { ...fuel, claimAttempt: true, claimAttemptAt: Date.now() } })
+			if (fjwcAttempt && fuel) patchFuel(rec.id, fuel, { claimAttempt: true, claimAttemptAt: Date.now() })
 			const { receipt } = (await interaction().send({
 				from: recipientAddr,
 				...(fee ? { fee } : {}),
@@ -623,9 +643,7 @@ export function buildTokenClaimInteraction(
 			// PROPOSED is NOT inclusion: latch the attempt + hash only. `consumed` is set later,
 			// inclusion-grade, from the receipt probe (post-impl audit HIGH). If this fjwc tx is
 			// later dropped, the card's "CLAIM YOUR GAS" recovery still surfaces the stranded FJ.
-			if (fjwcAttempt && fuel) {
-				updateRecord(rec.id, { fuel: { ...fuel, claimAttempt: true, claimTxHash: txHash } })
-			}
+			if (fjwcAttempt && fuel) patchFuel(rec.id, fuel, { claimAttempt: true, claimTxHash: txHash })
 			if (standaloneFj && fuel) {
 				// Best-effort inline standalone claim; a FAILURE leaves standaloneClaimed unset, so
 				// the card surfaces "CLAIM YOUR GAS" once the record completes (no silent strand).
