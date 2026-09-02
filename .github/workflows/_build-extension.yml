@@ -80,6 +80,17 @@ jobs:
         if: inputs.target == 'firefox' || inputs.target == 'both'
         run: bun run --cwd apps/extension build:firefox
 
+      # The build regenerates the auto-import declarations under src/types (unplugin-auto-import +
+      # unplugin-vue-components). A commit that adds an auto-imported export without rebuilding
+      # leaves dev one export stale until someone notices (#514 → #528). Fail here instead.
+      - name: Assert the build left generated sources unchanged
+        run: |
+          if ! git diff --exit-code --stat -- apps/extension/src/types/; then
+            echo "::error::the extension build regenerated files under apps/extension/src/types/ — run 'bun run build' locally and commit the result" >&2
+            exit 1
+          fi
+          echo "✓ generated sources unchanged by the build"
+
       # Production bundle-hygiene guard for test-only markers. Two families must
       # NEVER appear in a shipping build:
       #   - proverless: this build never sets VITE_NULO_E2E_PROVERLESS, so the
