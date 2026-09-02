@@ -107,7 +107,7 @@ function smartClaimFake() {
 		},
 		send: async () => {
 			sent = true
-			return { txHash: "0xclaimtx" }
+			return { txHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478" }
 		},
 	}))
 	return claim
@@ -124,7 +124,7 @@ function baseDeps(kv: KV) {
 		claimReceiptStatus: vi.fn<() => Promise<"success" | "dropped" | "reverted" | "pending" | "unreachable">>(async () => "success"),
 		waitConsumeReceipt: vi.fn(async () => true),
 		verifyConsumeIdentity: vi.fn(async () => true),
-		consume: vi.fn(async () => ({ consumeTxHash: "0xconsumetx" })),
+		consume: vi.fn(async () => ({ consumeTxHash: "0x0015000000000000000000000000000000000000000000636f6e73756d657478" })),
 	}
 }
 
@@ -151,7 +151,7 @@ describe("useBridgeJournal engine", () => {
 		const deps = baseDeps(kv)
 		const claim = smartClaimFake()
 		connectJournalDeps({ ...deps, claim })
-		addRecord(mkDeposit("0xrediscovered"))
+		addRecord(mkDeposit("0x00190000000000000000000000000000000000007265646973636f7665726564"))
 		resumeSessionWork()
 		await new Promise((r) => setTimeout(r, 10))
 		expect(claim).not.toHaveBeenCalled()
@@ -194,12 +194,17 @@ describe("useBridgeJournal engine", () => {
 			throw new Error("The Ethereum deposit transaction reverted")
 		})
 		connectJournalDeps({ ...deps, claim, recoverDepositLeg })
-		addRecord(mkDeposit("0xreverted", { leafIndex: undefined, depositTxHash: "0xdeadbeef" }))
-		await runDepositClaim("0xreverted")
+		addRecord(
+			mkDeposit("0x001c000000000000000000000000000000000000000000007265766572746564", {
+				leafIndex: undefined,
+				depositTxHash: "0xdeadbeef",
+			}),
+		)
+		await runDepositClaim("0x001c000000000000000000000000000000000000000000007265766572746564")
 		expect(claim).not.toHaveBeenCalled()
 		const { runtime } = useBridgeJournal()
-		expect(runtime.value["0xreverted"]?.attention).toBe("error")
-		expect(runtime.value["0xreverted"]?.note).toMatch(/reverted/)
+		expect(runtime.value["0x001c000000000000000000000000000000000000000000007265766572746564"]?.attention).toBe("error")
+		expect(runtime.value["0x001c000000000000000000000000000000000000000000007265766572746564"]?.note).toMatch(/reverted/)
 	})
 
 	it("no depositTxHash keeps the old bail (the flow is genuinely pre-send) - recovery never fires", async () => {
@@ -296,13 +301,13 @@ describe("useBridgeJournal engine", () => {
 			simulate: async () => {
 				throw new Error("No L1 to L2 message found for message hash 0xdead")
 			},
-			send: async () => ({ txHash: "0xclaimtx" }),
+			send: async () => ({ txHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478" }),
 		}))
 		const statuses = ["dropped", "success"] as const
 		let i = 0
 		deps.claimReceiptStatus = vi.fn(async () => statuses[Math.min(i++, statuses.length - 1)])
 		connectJournalDeps({ ...deps, claim, connectedAztec: () => RECIPIENT })
-		addRecord(mkDeposit("0xdebounce", { claimTxHash: "0xclaimtx" }))
+		addRecord(mkDeposit("0xdebounce", { claimTxHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478" }))
 		resumeSessionWork()
 		await vi.waitFor(() => {
 			const { records } = useBridgeJournal()
@@ -314,7 +319,12 @@ describe("useBridgeJournal engine", () => {
 		const deps2 = baseDeps(kv)
 		deps2.claimReceiptStatus = vi.fn(async () => "dropped" as const)
 		connectJournalDeps({ ...deps2, claim: smartClaimFake() })
-		addRecord(mkDeposit("0xdropped", { claimTxHash: "0xclaimtx", secret: undefined }))
+		addRecord(
+			mkDeposit("0xdropped", {
+				claimTxHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478",
+				secret: undefined,
+			}),
+		)
 		resumeSessionWork()
 		await vi.waitFor(() => {
 			const { records, runtime } = useBridgeJournal()
@@ -339,7 +349,7 @@ describe("useBridgeJournal engine", () => {
 				order.push("simulate")
 				return {}
 			},
-			send: async () => ({ txHash: "0xclaimtx" }),
+			send: async () => ({ txHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478" }),
 		}))
 		connectJournalDeps({ ...deps, claim, l2BlockNumber })
 		addRecord(mkDeposit("0xcountdown", { depositL2Block: 100 }))
@@ -355,7 +365,7 @@ describe("useBridgeJournal engine", () => {
 		const l2BlockNumber = vi.fn(async () => 100)
 		const claim = vi.fn(async () => ({
 			simulate: async () => ({}),
-			send: async () => ({ txHash: "0xclaimtx" }),
+			send: async () => ({ txHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478" }),
 		}))
 		connectJournalDeps({ ...deps, claim, l2BlockNumber })
 		addRecord(mkDeposit("0xnosnap"))
@@ -371,7 +381,7 @@ describe("useBridgeJournal engine", () => {
 			simulate: async () => {
 				sampledSteps.push(useBridgeJournal().runtime.value["0xpg"]?.step)
 			},
-			send: async () => ({ txHash: "0xclaimtx" }),
+			send: async () => ({ txHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478" }),
 		}))
 		connectJournalDeps({ ...deps, claim })
 		addRecord(mkDeposit("0xpg", { depositL2Block: 100 }))
@@ -391,7 +401,7 @@ describe("useBridgeJournal engine", () => {
 				sampledSteps.push(useBridgeJournal().runtime.value["0xun"]?.step)
 				if (calls++ === 0) throw new Error("No L1 to L2 message found")
 			},
-			send: async () => ({ txHash: "0xclaimtx" }),
+			send: async () => ({ txHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478" }),
 		}))
 		connectJournalDeps({ ...deps, claim })
 		addRecord(mkDeposit("0xun"))
@@ -415,7 +425,7 @@ describe("useBridgeJournal engine", () => {
 				simulate: async () => {
 					sampledSteps.push(useBridgeJournal().runtime.value["0xfreshpriv"]?.step)
 				},
-				send: async () => ({ txHash: "0xclaimtx" }),
+				send: async () => ({ txHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478" }),
 			}
 		})
 		cacheSecret("0xfreshpriv", "0xprivatesecret", {
@@ -438,7 +448,7 @@ describe("useBridgeJournal engine", () => {
 		// simulate keeps succeeding (PXE lag right after checkpoint) - local provenance wins anyway.
 		const claim = vi.fn(async () => ({
 			simulate: async () => ({}),
-			send: async () => ({ txHash: "0xclaimtx" }),
+			send: async () => ({ txHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478" }),
 		}))
 		connectJournalDeps({ ...deps, claim })
 		addRecord(mkDeposit("0xlocal"))
@@ -454,7 +464,7 @@ describe("useBridgeJournal engine", () => {
 		// keeps showing the message ⇒ completion is DELAYED, never dead-ended into attention.
 		const claim = vi.fn(async () => ({ simulate: async () => ({}), send: async () => ({ txHash: "0x" }) }))
 		connectJournalDeps({ ...deps, claim })
-		addRecord(mkDeposit("0xlagging", { claimTxHash: "0xclaimtx" }))
+		addRecord(mkDeposit("0xlagging", { claimTxHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478" }))
 		await runDepositClaim("0xlagging")
 		// Rounds 2..cap run via detached re-entry; the soft cap ends with the gentle note.
 		await vi.waitFor(() => {
@@ -472,7 +482,12 @@ describe("useBridgeJournal engine", () => {
 		// forged-but-checkpointed claimTxHash needs localStorage write, which already owns the journal.
 		const claim = vi.fn(async () => ({ simulate: async () => ({}), send: async () => ({ txHash: "0x" }) }))
 		connectJournalDeps({ ...deps, claim })
-		const rec = mkDeposit("0xresumed", { isPrivate: true, secret: undefined, sealerL1: SEALER, claimTxHash: "0xclaimtx" })
+		const rec = mkDeposit("0xresumed", {
+			isPrivate: true,
+			secret: undefined,
+			sealerL1: SEALER,
+			claimTxHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478",
+		})
 		rec.sealedEnvelope = await sealEnvelopeFor(rec)
 		addRecord(rec)
 		resumeSessionWork()
@@ -492,7 +507,12 @@ describe("useBridgeJournal engine", () => {
 			send: async () => ({ txHash: "0x" }),
 		}))
 		connectJournalDeps({ ...deps, claim })
-		const rec = mkDeposit("0xverify", { isPrivate: true, secret: undefined, sealerL1: SEALER, claimTxHash: "0xclaimtx" })
+		const rec = mkDeposit("0xverify", {
+			isPrivate: true,
+			secret: undefined,
+			sealerL1: SEALER,
+			claimTxHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478",
+		})
 		rec.sealedEnvelope = await sealEnvelopeFor(rec)
 		addRecord(rec)
 		await runDepositClaim("0xverify")
@@ -610,10 +630,10 @@ describe("useBridgeJournal engine", () => {
 	it("⑩ rediscovered consumeTxHash waits on the receipt - consume() never re-prompts", async () => {
 		const deps = baseDeps(kv)
 		connectJournalDeps(deps)
-		addRecord(mkWithdraw("0xexit", { consumeTxHash: "0xprior" }))
+		addRecord(mkWithdraw("0xexit", { consumeTxHash: "0x0018000000000000000000000000000000000000000000000000007072696f72" }))
 		await runWithdrawConsume("0xexit")
 		expect(deps.consume).not.toHaveBeenCalled()
-		expect(deps.waitConsumeReceipt).toHaveBeenCalledWith("0xprior")
+		expect(deps.waitConsumeReceipt).toHaveBeenCalledWith("0x0018000000000000000000000000000000000000000000000000007072696f72")
 		expect(useBridgeJournal().records.value.find((r) => r.id === "0xexit")?.completedAt).toBe(999)
 	})
 
@@ -621,7 +641,7 @@ describe("useBridgeJournal engine", () => {
 		const deps = baseDeps(kv)
 		deps.verifyConsumeIdentity = vi.fn(async () => false)
 		connectJournalDeps(deps)
-		addRecord(mkWithdraw("0xforged", { consumeTxHash: "0xunrelated" }))
+		addRecord(mkWithdraw("0xforged", { consumeTxHash: "0x0020000000000000000000000000000000000000000000756e72656c61746564" }))
 		await runWithdrawConsume("0xforged")
 		const { records, runtime } = useBridgeJournal()
 		expect(runtime.value["0xforged"]?.attention).toBe("unknown-outcome")
@@ -636,7 +656,7 @@ describe("useBridgeJournal engine", () => {
 		await runWithdrawConsume("0xfresh")
 		expect(deps.consume).toHaveBeenCalledTimes(1)
 		const rec = useBridgeJournal().records.value.find((r) => r.id === "0xfresh") as WithdrawJournalRecord
-		expect(rec.consumeTxHash).toBe("0xconsumetx")
+		expect(rec.consumeTxHash).toBe("0x0015000000000000000000000000000000000000000000636f6e73756d657478")
 		expect(rec.completedAt).toBe(999)
 	})
 
@@ -707,7 +727,7 @@ describe("useBridgeJournal engine", () => {
 			send: async () => {
 				seen.push(useBridgeJournal().runtime.value["0xnarrate"]?.step)
 				sent = true
-				return { txHash: "0xclaimtx" }
+				return { txHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478" }
 			},
 		}))
 		connectJournalDeps({ ...deps, claim })
@@ -724,15 +744,25 @@ describe("useBridgeJournal engine", () => {
 		const deps = baseDeps(kv)
 		deps.claimReceiptStatus = vi.fn(async () => "pending" as const)
 		connectJournalDeps({ ...deps, claim: smartClaimFake() })
-		addRecord(mkDeposit("0xslow", { claimTxHash: "0xclaimtx" }))
-		await runDepositClaim("0xslow", { interactive: false })
+		addRecord(
+			mkDeposit("0x001d0000000000000000000000000000000000000000000000000000736c6f77", {
+				claimTxHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478",
+			}),
+		)
+		await runDepositClaim("0x001d0000000000000000000000000000000000000000000000000000736c6f77", { interactive: false })
 		await vi.waitFor(() => {
-			const rt = useBridgeJournal().runtime.value["0xslow"]
+			const rt = useBridgeJournal().runtime.value["0x001d0000000000000000000000000000000000000000000000000000736c6f77"]
 			expect(rt?.note).toMatch(/still confirming/i)
 		})
-		const rt = useBridgeJournal().runtime.value["0xslow"]
+		const rt = useBridgeJournal().runtime.value["0x001d0000000000000000000000000000000000000000000000000000736c6f77"]
 		expect(rt?.attention).toBeUndefined()
-		expect((useBridgeJournal().records.value.find((r) => r.id === "0xslow") as DepositJournalRecord).claimTxHash).toBe("0xclaimtx")
+		expect(
+			(
+				useBridgeJournal().records.value.find(
+					(r) => r.id === "0x001d0000000000000000000000000000000000000000000000000000736c6f77",
+				) as DepositJournalRecord
+			).claimTxHash,
+		).toBe("0x00140000000000000000000000000000000000000000000000636c61696d7478")
 	})
 
 	it("P1: transport failures narrate as unreachable, never pending, never an attention", async () => {
@@ -744,7 +774,7 @@ describe("useBridgeJournal engine", () => {
 			details.push(useBridgeJournal().runtime.value["0xdeadrpc"]?.stepDetail)
 		}
 		connectJournalDeps({ ...deps, claim: smartClaimFake(), waitMs })
-		addRecord(mkDeposit("0xdeadrpc", { claimTxHash: "0xclaimtx" }))
+		addRecord(mkDeposit("0xdeadrpc", { claimTxHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478" }))
 		await runDepositClaim("0xdeadrpc", { interactive: false })
 		await vi.waitFor(() => expect(useBridgeJournal().runtime.value["0xdeadrpc"]?.note).toMatch(/still confirming/i))
 		expect(details.some((d) => d?.includes("node unreachable"))).toBe(true)
@@ -760,7 +790,7 @@ describe("useBridgeJournal engine", () => {
 			return "pending" as const
 		})
 		connectJournalDeps({ ...deps, claim: smartClaimFake() })
-		addRecord(mkDeposit("0xkilled", { claimTxHash: "0xclaimtx" }))
+		addRecord(mkDeposit("0xkilled", { claimTxHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478" }))
 		await runDepositClaim("0xkilled", { interactive: false })
 		await new Promise((r) => setTimeout(r, 20))
 		expect(useBridgeJournal().records.value.find((r) => r.id === "0xkilled")).toBeUndefined()
@@ -788,7 +818,7 @@ describe("useBridgeJournal engine", () => {
 			send: async () => ({ txHash: "0x" }),
 		}))
 		connectJournalDeps({ ...deps, claim })
-		addRecord(mkDeposit("0xredisc", { claimTxHash: "0xclaimtx" }))
+		addRecord(mkDeposit("0xredisc", { claimTxHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478" }))
 		await runDepositClaim("0xredisc")
 		await new Promise((r) => setTimeout(r, 20))
 		expect(useBridgeJournal().records.value.find((r) => r.id === "0xredisc")?.completedAt).toBe(999)
@@ -804,7 +834,7 @@ describe("useBridgeJournal engine", () => {
 			send: async () => ({ txHash: "0x" }),
 		}))
 		connectJournalDeps({ ...deps, claim })
-		const rec = mkDeposit("0xstale-note", { claimTxHash: "0xclaimtx" })
+		const rec = mkDeposit("0xstale-note", { claimTxHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478" })
 		addRecord(rec)
 		// Simulate the 30-min soft-cap note left by an earlier chain.
 		connectJournalDeps({ ...deps, claim })
@@ -822,7 +852,11 @@ describe("useBridgeJournal engine", () => {
 		await runWithdrawConsume("0xwdhide")
 		expect(useBridgeJournal().records.value.find((r) => r.id === "0xwdhide")?.completedAt).toBe(999)
 		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xwdhide")).toBe(true)
-		expect(useBridgeJournal().lastCompleted.value).toMatchObject({ id: "0xwdhide", direction: "withdraw", txHash: "0xconsumetx" })
+		expect(useBridgeJournal().lastCompleted.value).toMatchObject({
+			id: "0xwdhide",
+			direction: "withdraw",
+			txHash: "0x0015000000000000000000000000000000000000000000636f6e73756d657478",
+		})
 	})
 
 	it("a throwing claim SURFACES on the record (UI call sites void the promise) and clears the step", async () => {
@@ -858,7 +892,7 @@ describe("useBridgeJournal engine", () => {
 		})
 		connectJournalDeps({ ...deps, claim: smartClaimFake() })
 		const { records: recs } = useBridgeJournal()
-		addRecord(mkDeposit("0xremote", { claimTxHash: "0xclaimtx" }))
+		addRecord(mkDeposit("0xremote", { claimTxHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478" }))
 		await expect(runDepositClaim("0xremote", { interactive: false })).resolves.toBeUndefined()
 		await new Promise((r) => setTimeout(r, 20))
 		expect(recs.value.find((r) => r.id === "0xremote")).toBeUndefined()
@@ -869,7 +903,10 @@ describe("useBridgeJournal engine", () => {
 		const deps = baseDeps(kv)
 		deps.claimReceiptStatus = vi.fn(async () => {
 			// Another tab completed the record while we polled.
-			const remote = { ...mkDeposit("0xracedone", { claimTxHash: "0xclaimtx" }), completedAt: 12345 }
+			const remote = {
+				...mkDeposit("0xracedone", { claimTxHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478" }),
+				completedAt: 12345,
+			}
 			kv.setItem("nulo-bridge:journal:v1", JSON.stringify({ schema: 1, records: [remote] }))
 			window.dispatchEvent(new StorageEvent("storage", { key: "nulo-bridge:journal:v1" }))
 			return "success" as const
@@ -882,7 +919,7 @@ describe("useBridgeJournal engine", () => {
 		}))
 		connectJournalDeps({ ...deps, claim })
 		useBridgeJournal() // ensure the storage listener is registered for the remote write
-		addRecord(mkDeposit("0xracedone", { claimTxHash: "0xclaimtx" }))
+		addRecord(mkDeposit("0xracedone", { claimTxHash: "0x00140000000000000000000000000000000000000000000000636c61696d7478" }))
 		await runDepositClaim("0xracedone")
 		const rec = useBridgeJournal().records.value.find((r) => r.id === "0xracedone")
 		expect(rec?.completedAt).toBe(12345) // The remote completion stands; ours never overwrote it.
@@ -1025,7 +1062,7 @@ describe("confirm quiet flip - proposed receipt surfaces as confirmLanded", () =
 		resumeSessionWork()
 		await vi.waitFor(() => {
 			const { runtime } = useBridgeJournal()
-			expect(runtime.value["0xflip"]?.confirmLandedTxHash).toBe("0xclaimtx")
+			expect(runtime.value["0xflip"]?.confirmLandedTxHash).toBe("0x00140000000000000000000000000000000000000000000000636c61696d7478")
 		})
 		await vi.waitFor(() => {
 			const { records } = useBridgeJournal()
@@ -1057,7 +1094,7 @@ describe("confirm quiet flip - proposed receipt surfaces as confirmLanded", () =
 		await vi.waitFor(() => {
 			expect(useBridgeJournal().runtime.value["0xdrop"]?.attention).toBe("error")
 		})
-		expect(landedMidFlight).toBe("0xclaimtx")
+		expect(landedMidFlight).toBe("0x00140000000000000000000000000000000000000000000000636c61696d7478")
 		const { runtime, records } = useBridgeJournal()
 		const dropped = records.value.find((r) => r.id === "0xdrop") as DepositJournalRecord | undefined
 		expect(dropped?.claimTxHash).toBeUndefined()

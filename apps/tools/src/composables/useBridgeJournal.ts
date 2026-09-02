@@ -25,6 +25,7 @@ import { computed, ref } from "vue"
 import { BRIDGE, FUEL_PORTAL, L1_PORTAL } from "@/contracts/bridge-deployments"
 import { SYNC_TARGET_MARGIN_BLOCKS } from "@/lib/bridge-steps"
 import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
+import { isWellFormedTxHash } from "@/lib/claim-receipt"
 import { isReceiptRecordMismatch } from "@/lib/fuel-claim-state"
 import { dropPhaseClock } from "@/lib/phase-clock"
 import { withOperation } from "./useOpsInFlight"
@@ -62,6 +63,9 @@ export type Attention =
 	/** Terminal: the L1 receipt can't supply this record's fuel data. Retrying repeats the same
 	 *  immutable failure, so the card must not offer one — only a restore recovers it. */
 	| "receipt-mismatch"
+	/** Terminal: the persisted claim hash cannot be asked about (corrupted or hand-edited
+	 *  storage). A retry re-reads the same record; only a restore or a discard changes it. */
+	| "malformed-record"
 	| "unknown-outcome"
 	| "error"
 
@@ -585,6 +589,7 @@ async function runDepositClaimLocked(id: string, gen: number, interactive: boole
 	if (!rec) return "stop"
 
 	if (recipientMismatch(rec, id)) return "stop"
+	if (rec.claimTxHash !== undefined && !isWellFormedTxHash(rec.claimTxHash)) return reportMalformedClaimHash(rec.id)
 	if (rec.claimTxHash) return resumeSentClaim(rec, id, gen, interactive)
 	// Caller-side condition so the common has-leaf path stays synchronous (no new await seam).
 	if (legRecoveryNeeded(rec) && (await recoverLegIfNeeded(rec, id)) === "stop") return "stop"
@@ -614,6 +619,18 @@ async function runDepositClaimLocked(id: string, gen: number, interactive: boole
 	setRuntime(id, { claimable: true })
 
 	return sendAndWatch(id, gen, interaction)
+}
+
+/** A persisted claim hash the node cannot be asked about is a RECORD problem (corrupted or
+ *  hand-edited storage), not a receipt state: the receipt dep would read the parse throw as
+ *  "unreachable", the round would narrate connectivity, and after the cap the card would say
+ *  "slow testnet" while every retry repeated. Terminal: only a restore or a discard fixes it. */
+function reportMalformedClaimHash(id: string): "stop" {
+	setRuntime(id, {
+		attention: "malformed-record",
+		note: "This record's claim transaction hash is malformed - restore the record from a backup, or discard it.",
+	})
+	return "stop"
 }
 
 /** The runnable claim target, or undefined: completed/absent/wrong-deployment records don't
@@ -1132,6 +1149,10 @@ async function runWithdrawConsumeLocked(id: string): Promise<void> {
  *  would tag a live provisional record unknown-outcome). */
 function resumeActionFor(rec: BridgeJournalRecord): "skip" | "deposit" | "withdraw" {
 	if (rec.completedAt) return "skip"
+	// Once a record is KNOWN malformed there is nothing to resume: every run would re-raise the
+	// same terminal fault. The first resume after a reload still runs, so the card learns the
+	// fault without a click (runtime attention is empty until then); RETRY always reaches it.
+	if (runtime.value[rec.id]?.attention === "malformed-record") return "skip"
 	const promptFreeWait =
 		(rec.direction === "deposit" && (rec as DepositJournalRecord).claimTxHash) ||
 		(rec.direction === "withdraw" && (rec as WithdrawJournalRecord).consumeTxHash)

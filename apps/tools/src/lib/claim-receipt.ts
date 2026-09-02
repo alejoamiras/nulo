@@ -11,6 +11,11 @@
  */
 export type ClaimReceiptClass = "success" | "dropped" | "reverted" | "proposed" | "pending"
 
+/** A persisted tx hash the node can be asked about. `TxHash.fromString` throws on anything
+ *  else, and a probe that swallows that throw reads as pending/unreachable forever — so the
+ *  engine checks the shape BEFORE any receipt path and names the record, not the network. */
+export const isWellFormedTxHash = (h: string): boolean => /^0x[0-9a-fA-F]{64}$/.test(h)
+
 export function classifyClaimReceipt(receipt: { status?: unknown; executionResult?: unknown } | null | undefined): ClaimReceiptClass {
 	const status = String(receipt?.status ?? "pending").toLowerCase()
 	const included = /checkpointed|proven|finalized|success|mined/.test(status)

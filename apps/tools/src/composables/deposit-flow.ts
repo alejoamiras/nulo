@@ -40,6 +40,7 @@ import {
 	sealDepositEnvelope,
 	sealDepositRecord,
 } from "@nulo/bridge-core"
+import { isWellFormedTxHash } from "@/lib/claim-receipt"
 import { fuelRecipientFor } from "@/lib/fuel-target"
 import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
 import { bestEffortL2Block, ensurePermit2Approval, signAndSendRouterBridge } from "./router-bridge-leg"
@@ -168,10 +169,8 @@ export function patchFuel(
 	updateRecord(id, { ...topLevel, fuel: { ...base, ...patch } })
 }
 
-/** A persisted tx hash the node can be asked about. `TxHash.fromString` throws on anything else,
- *  and the probes read that throw as "pending" — a corrupted or hand-edited record would wait
- *  forever with no diagnostic, so the ladders check the shape first and say so. */
-export const isWellFormedTxHash = (h: string): boolean => /^0x[0-9a-fA-F]{64}$/.test(h)
+// The probes read a `TxHash.fromString` throw as "pending" — a corrupted or hand-edited record
+// would wait forever with no diagnostic, so the ladders check the shape first and say so.
 const MALFORMED_FUEL_HASH =
 	"This bridge's recorded gas-claim transaction hash is malformed - restore the record from a backup, or discard it."
 
