@@ -186,9 +186,14 @@ const onImportedKeysDegraded = (profile) => {
  *  so the user (and the e2e harness) can tell it from the transient lock screen the route guard
  *  parks a still-deciding popup on. Empty = deciding or decided. */
 const bootOutcome = ref("")
-// The auth page reads it to withhold its form while a FAILED boot's banner is the only true
+// True from a RETRY pressed on a FAILED boot until that run reaches a decision: the marker
+// clears at run start (the run may succeed), but the auth form must stay withheld meanwhile —
+// re-enabling it mid-retry would invite a password into a screen about to route away.
+const bootRetrying = ref(false)
+// The auth page reads both to withhold its form while a FAILED boot's banner is the only true
 // recovery: a password typed there would unlock an already-open session and repair nothing.
 provide("bootOutcome", bootOutcome)
+provide("bootRetrying", bootRetrying)
 
 /** The boot-time check gave up. Mark it done so the guard's own retry takes over — an
  *  un-checked session would park the popup on /popup/auth for good. Unreachable with a known
@@ -225,7 +230,9 @@ let loadProfileSeq = 0
 const loadProfile = async () => {
 	const seq = ++loadProfileSeq
 	const isCurrent = () => seq === loadProfileSeq
-	// A new run supersedes any earlier give-up: it may well succeed this time.
+	// A new run supersedes any earlier give-up: it may well succeed this time. A retry of a
+	// FAILED boot keeps the auth form withheld until this run decides.
+	bootRetrying.value = bootOutcome.value === "failed"
 	bootOutcome.value = ""
 	managers.profile.onActiveProfileChanged.add(onActiveProfileChanged)
 	managers.profile.onImportedKeysDegraded.add(onImportedKeysDegraded)
@@ -240,6 +247,8 @@ const loadProfile = async () => {
 	// The core fenced itself before resolving; this caller resumes a microtask later, and a
 	// reconnect can bump the sequence in between — fence again here, never on the core's word.
 	if (result.kind === "superseded" || !isCurrent()) return
+	// A decision — of any kind — ends the retrying presentation; a newer run owns the next one.
+	bootRetrying.value = false
 	appStore.profiles = result.profiles
 	if (result.kind === "unreachable") return settleUndecidedBoot("unreachable", result.candidate)
 	if (result.kind === "failed") {
@@ -354,11 +363,17 @@ onBeforeUnmount(() => {
 
 		<Header />
 
-		<Banner v-if="bootOutcome" variant="warning" direction="vertical" data-testid="boot-outcome-banner">
+		<Banner v-if="bootOutcome || bootRetrying" variant="warning" direction="vertical" data-testid="boot-outcome-banner">
 			<Text size="13" weight="500">
-				{{ bootOutcome === "failed" ? "The wallet could not finish starting up." : "The wallet service could not be reached." }}
+				{{
+					bootRetrying
+						? "Retrying…"
+						: bootOutcome === "failed"
+							? "The wallet could not finish starting up."
+							: "The wallet service could not be reached."
+				}}
 			</Text>
-			<button type="button" :class="$style.retry" data-testid="boot-retry" @click="loadProfile()">RETRY</button>
+			<button type="button" :class="$style.retry" data-testid="boot-retry" :disabled="bootRetrying" @click="loadProfile()">RETRY</button>
 		</Banner>
 
 		<RouterView v-slot="{ Component }">
