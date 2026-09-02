@@ -8,6 +8,7 @@ import {
 	anchorFor,
 	type BaselineManifest,
 	classifySuppressionLine,
+	declarationName,
 	diffEntries,
 	hasEntries,
 	installedBiomeVersion,
@@ -16,6 +17,7 @@ import {
 	type ManifestEntry,
 	parseGrepWithContext,
 	ratchetViolations,
+	ruleCountsOf,
 	scanTree,
 	toManifestEntries,
 } from "../complexity-baseline/scan"
@@ -112,13 +114,37 @@ describe("identity anchors", () => {
 			"--",
 			`packages/y/baz.ts:5:${line([IGNORE, COG, "accepted at score 22 — d"])}`,
 			"packages/y/baz.ts-6-// only comments follow",
+			"--",
+			`packages/y/gen.ts:5:${line([IGNORE, COG, "accepted at score 22 — e"])}`,
+			"packages/y/gen.ts-6-\t*walk(node: Node): Generator<Node> {",
 		].join("\n")
 		const parsed = parseGrepWithContext(stdout)
-		expect(parsed.matches.map((m) => `${m.file}:${m.line}`)).toEqual(["apps/x/Foo.vue:10", "packages/y/bar.ts:5", "packages/y/baz.ts:5"])
+		expect(parsed.matches.map((m) => `${m.file}:${m.line}`)).toEqual(["apps/x/Foo.vue:10", "packages/y/bar.ts:5", "packages/y/baz.ts:5", "packages/y/gen.ts:5"])
 		expect(anchorFor(parsed, "apps/x/Foo.vue", 10)).toBe("async function verify(intentPath: string) {")
 		expect(anchorFor(parsed, "apps/x/Foo.vue", 11)).toBe("async function verify(intentPath: string) {")
 		expect(anchorFor(parsed, "packages/y/bar.ts", 5)).toBe("export function bar() {")
 		expect(anchorFor(parsed, "packages/y/baz.ts", 5)).toBeUndefined()
+		expect(anchorFor(parsed, "packages/y/gen.ts", 5)).toBe("*walk(node: Node): Generator<Node> {")
+	})
+
+	test("a declaration's name is what a move must preserve; anonymous callbacks have none", () => {
+		for (const [anchor, name] of [
+			["export function applyRowTransform(row: unknown, t: RowMapTransform): Record<string, unknown> {", "applyRowTransform"],
+			["async function main(): Promise<void> {", "main"],
+			["export const trim = (value: unknown, depth: number = 0): unknown => {", "trim"],
+			["const storedAccounts = await capPopup.evaluate(async () => {", "storedAccounts"],
+			["clearChain: async (p: string, n: string) => {", "clearChain"],
+			["get: async (keys: string | string[] | null | undefined) => {", "get"],
+			["public async tryConsume(estimateId: string, input: Input): Promise<Entry | undefined> {", "tryConsume"],
+			["*walk(node: Node): Generator<Node> {", "walk"],
+			['test("I1+I2+I4+I6 — auto-derived limits", async () => {', "I1+I2+I4+I6 — auto-derived limits"],
+			["(args: { sel: string; visible: boolean }) => {", undefined],
+			["async (sid: string | null, minA: number) => {", undefined],
+			["return extCtxEvaluate(page, async () => {", undefined],
+			["return phases.map((phase) => {", undefined],
+		] as const) {
+			expect(declarationName(anchor), anchor).toBe(name)
+		}
 	})
 
 	test("an anchor must be unique in its file — a same-text declaration elsewhere is refused", () => {
@@ -145,30 +171,42 @@ describe("entry diff + ratchet", () => {
 		...over,
 	})
 
-	test("a rename or file move keeping rule, stamp and sentence is a move, not growth; anything else added or raised is", () => {
-		const base = [entry({}), entry({ anchor: "function g() {", accepted: 30 }), entry({ anchor: "function h() {", accepted: 25 })]
+	test("a signature edit or file move keeping rule, stamp, sentence and name is a move, not growth; anything else added or raised is", () => {
+		const base = [entry({}), entry({ anchor: "function g() {", accepted: 30 }), entry({ anchor: "function h() {", accepted: 25 }), entry({ anchor: "function m() {", accepted: 27 })]
 		const head = [
-			entry({ file: "b.ts", anchor: "function f(x: number) {" }), // moved
+			entry({ anchor: "function f(x: number) {" }), // signature edit: same name
 			entry({ anchor: "function g() {", accepted: 28 }), // lowered
 			entry({ anchor: "function h() {", accepted: 25, sentence: "tightened wording" }), // reworded
+			entry({ file: "moved/a.ts", anchor: "function m() {", accepted: 27 }), // file move: exact line elsewhere
 			entry({ anchor: "function k() {", accepted: 25, sentence: "brand new acceptance" }), // added
 		]
 		const diff = diffEntries(base, head)
-		expect(diff.moved.map((m) => `${m.from.anchor} → ${m.to.file} ${m.to.anchor}`)).toEqual(["function f() { → b.ts function f(x: number) {"])
+		expect(diff.moved.map((m) => `${m.from.anchor} → ${m.to.file} ${m.to.anchor}`)).toEqual(["function f() { → a.ts function f(x: number) {", "function m() { → moved/a.ts function m() {"])
 		expect(diff.restamped).toEqual([{ key: "noExcessiveCognitiveComplexity a.ts — function g() {", from: 30, to: 28 }])
 		expect(diff.reworded).toEqual(["noExcessiveCognitiveComplexity a.ts — function h() {"])
 		expect(diff.added.map((e) => e.anchor)).toEqual(["function k() {"])
 		expect(diff.removed).toEqual([])
 		expect(ratchetViolations(diff)).toEqual(["+ noExcessiveCognitiveComplexity a.ts — function k() { (accepted at 25)"])
 		expect(ratchetViolations(diffEntries(base, [entry({ accepted: 23 })]))).toEqual(["↑ noExcessiveCognitiveComplexity a.ts — function f() {: 22 → 23"])
-		// A swap: the directive leaves f and lands on k with k's real score and a fresh sentence — that is an add.
-		expect(ratchetViolations(diffEntries([entry({})], [entry({ anchor: "function k() {", sentence: "different function, different why" })]))).toHaveLength(1)
 	})
 
-	test("against a base that predates entries, per-rule totals may not grow", () => {
+	test("a delete-and-recreate under the copied sentence is an add, not a move — and anonymous anchors have no move path", () => {
+		// f is removed; k appears with f's exact stamp and sentence verbatim: the name changed, so it is growth.
+		expect(ratchetViolations(diffEntries([entry({})], [entry({ anchor: "function k() {" })]))).toHaveLength(1)
+		// Same laundering through a file move: exact sentence, new name, other file.
+		expect(ratchetViolations(diffEntries([entry({})], [entry({ file: "b.ts", anchor: "function k() {" })]))).toHaveLength(1)
+		// An anonymous callback's line edit is a new identity even with everything else equal.
+		const anon = entry({ anchor: "(args: { sel: string }) => {" })
+		expect(ratchetViolations(diffEntries([anon], [{ ...anon, anchor: "(args: { sel: string; visible: boolean }) => {" }]))).toHaveLength(1)
+		// The exact anonymous line in another file is still a file move.
+		expect(ratchetViolations(diffEntries([anon], [{ ...anon, file: "b.ts" }]))).toEqual([])
+	})
+
+	test("against a base that predates entries, per-rule totals derived from the head ENTRIES may not grow", () => {
 		const base: LegacyManifest["rules"] = { noExcessiveCognitiveComplexity: { "a.ts": 2, "b.ts": 1 }, noExcessiveLinesPerFunction: { "c.ts": 1 } }
-		expect(legacyRatchetViolations(base, { noExcessiveCognitiveComplexity: { "z.ts": 3 }, noExcessiveLinesPerFunction: {} })).toEqual([])
-		expect(legacyRatchetViolations(base, { noExcessiveCognitiveComplexity: { "z.ts": 4 }, noExcessiveLinesPerFunction: {} })).toEqual(["↑ noExcessiveCognitiveComplexity: 3 → 4 acceptance(s)"])
+		const three = [entry({ anchor: "function a() {" }), entry({ anchor: "function b() {" }), entry({ anchor: "function c() {" })]
+		expect(legacyRatchetViolations(base, three)).toEqual([])
+		expect(legacyRatchetViolations(base, [...three, entry({ anchor: "function d() {" })])).toEqual(["↑ noExcessiveCognitiveComplexity: 3 → 4 acceptance(s)"])
 	})
 })
 
@@ -209,14 +247,30 @@ describe("complexity baseline (this checkout)", () => {
 			"The manifest is stale — rerun `bun run baseline:complexity` in this PR so it records the change.",
 		).toEqual([])
 		expect((manifest as BaselineManifest).accepted.length).toBe(scan.accepted.length)
+		expect(manifest.rules, "manifest.json's `rules` summary was edited by hand — it is derived from the entries; rerun `bun run baseline:complexity`.").toEqual(ruleCountsOf(scan.accepted))
 	})
 })
 
-/** The PR's base branch, or null when there is none to ratchet against: GitHub push/schedule/
- *  dispatch runs (the merged content already passed on its PR) — locally, `dev`. */
-function ratchetBaseRef(): string | null {
-	if (process.env.GITHUB_ACTIONS === "true") return process.env.GITHUB_BASE_REF || null
-	return "dev"
+/** What to ratchet against, or null when there is nothing: under Actions the pull_request event's
+ *  exact `base.sha` (reproducible even if the base branch advances mid-run), falling back to the
+ *  base branch tip; push/schedule/dispatch runs have no base (the content already passed on its
+ *  PR); locally, `origin/dev`. */
+function ratchetBase(): { label: string; sha?: string; branch?: string } | null {
+	if (process.env.GITHUB_ACTIONS !== "true") return { label: "origin/dev", branch: "dev" }
+	const branch = process.env.GITHUB_BASE_REF
+	if (!branch) return null
+	const sha = pullRequestBaseSha(process.env.GITHUB_EVENT_PATH)
+	return sha ? { label: `${branch}@${sha.slice(0, 8)}`, sha } : { label: `origin/${branch}`, branch }
+}
+
+function pullRequestBaseSha(eventPath: string | undefined): string | undefined {
+	if (!eventPath) return undefined
+	try {
+		const sha = JSON.parse(readFileSync(eventPath, "utf8"))?.pull_request?.base?.sha
+		return typeof sha === "string" && /^[0-9a-f]{40}$/.test(sha) ? sha : undefined
+	} catch {
+		return undefined
+	}
 }
 
 function git(...args: string[]): { ok: boolean; stdout: string; stderr: string } {
@@ -224,16 +278,16 @@ function git(...args: string[]): { ok: boolean; stdout: string; stderr: string }
 	return { ok: res.status === 0, stdout: res.stdout ?? "", stderr: res.stderr ?? "" }
 }
 
-/** Reads the base branch's manifest, fetching the branch tip shallowly when the checkout lacks it
- *  (CI checkouts are depth-1). Returns the reason when there is nothing to compare against. */
-function readBaseManifest(base: string): { manifest: BaselineManifest | LegacyManifest } | { skipped: string } {
-	const ref = `refs/remotes/origin/${base}`
-	if (!git("rev-parse", "--verify", "-q", ref).ok) {
-		const fetched = git("fetch", "--no-tags", "--depth=1", "origin", `${base}:${ref}`)
-		if (!fetched.ok) return { skipped: `origin/${base} unavailable: ${fetched.stderr.trim() || "fetch failed"}` }
+/** Reads the base's manifest, fetching the commit shallowly when the checkout lacks it (CI
+ *  checkouts are depth-1; GitHub serves any reachable commit by SHA). */
+function readBaseManifest(base: { sha?: string; branch?: string }): { manifest: BaselineManifest | LegacyManifest } | { skipped: string } {
+	const ref = base.sha ?? `refs/remotes/origin/${base.branch}`
+	if (!git("rev-parse", "--verify", "-q", `${ref}^{commit}`).ok) {
+		const fetched = git("fetch", "--no-tags", "--depth=1", "origin", base.sha ?? `${base.branch}:${ref}`)
+		if (!fetched.ok) return { skipped: `${ref} unavailable: ${fetched.stderr.trim() || "fetch failed"}` }
 	}
 	const shown = git("show", `${ref}:scripts/complexity-baseline/manifest.json`)
-	if (!shown.ok) return { skipped: `origin/${base} has no manifest: ${shown.stderr.trim()}` }
+	if (!shown.ok) return { skipped: `${ref} has no manifest: ${shown.stderr.trim()}` }
 	return { manifest: JSON.parse(shown.stdout) }
 }
 
@@ -241,7 +295,7 @@ describe("shrink-only ratchet against the base branch", () => {
 	test(
 		"the manifest never gains or raises an acceptance relative to the PR base (a Biome bump excepted)",
 		() => {
-			const base = ratchetBaseRef()
+			const base = ratchetBase()
 			if (base === null) return
 			const read = readBaseManifest(base)
 			if ("skipped" in read) {
@@ -255,10 +309,10 @@ describe("shrink-only ratchet against the base branch", () => {
 				console.warn(`ratchet relaxed — Biome ${read.manifest.biomeVersion} → ${head.biomeVersion}: review every added or raised acceptance in this PR's diff by hand`)
 				return
 			}
-			const violations = hasEntries(read.manifest) ? ratchetViolations(diffEntries(read.manifest.accepted, head.accepted)) : legacyRatchetViolations(read.manifest.rules, head.rules)
+			const violations = hasEntries(read.manifest) ? ratchetViolations(diffEntries(read.manifest.accepted, head.accepted)) : legacyRatchetViolations(read.manifest.rules, head.accepted)
 			expect(
 				violations,
-				`The manifest grew relative to origin/${base} on the same Biome — the baseline only shrinks, and manifest.json is ` +
+				`The manifest grew relative to ${base.label} on the same Biome — the baseline only shrinks, and manifest.json is ` +
 					"never hand-edited. Refactor the function under the budget; a genuinely new acceptance is a blueprint with owner sign-off.",
 			).toEqual([])
 		},

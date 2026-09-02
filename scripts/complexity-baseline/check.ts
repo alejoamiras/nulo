@@ -8,7 +8,7 @@
  * (that one needs Biome, so it is CI + on-demand: `bun run baseline:rescore`).
  */
 import { readFileSync } from "node:fs"
-import { type BaselineManifest, diffEntries, hasEntries, installedBiomeVersion, scanTree, toManifestEntries } from "./scan"
+import { type BaselineManifest, diffEntries, hasEntries, installedBiomeVersion, ruleCountsOf, scanTree, toManifestEntries } from "./scan"
 
 const manifest: BaselineManifest = JSON.parse(readFileSync("scripts/complexity-baseline/manifest.json", "utf8"))
 const rootPkg = JSON.parse(readFileSync("package.json", "utf8"))
@@ -58,6 +58,9 @@ if (diff.moved.length > 0) {
 }
 if (diff.reworded.length > 0) {
 	problems.push(`Accepted sentence(s) edited — rerun \`bun run baseline:complexity\` so the manifest carries the new wording:${list(diff.reworded)}`)
+}
+if (hasEntries(manifest) && JSON.stringify(manifest.rules) !== JSON.stringify(ruleCountsOf(manifest.accepted))) {
+	problems.push("manifest.json's `rules` summary does not match its entries — it was edited by hand; rerun `bun run baseline:complexity`.")
 }
 
 if (problems.length > 0) {

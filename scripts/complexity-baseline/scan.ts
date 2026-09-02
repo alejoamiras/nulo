@@ -127,8 +127,9 @@ export interface ScanResult {
 
 /** How far below a directive the declaration may sit (paired directives, a doc comment, blanks). */
 const ANCHOR_LOOKAHEAD = 8
-/** Lines that cannot be the declaration: blank, line comments, block-comment openers and their continuations. */
-const NON_DECLARATION_RE = /^\s*(?:\/\/|\/\*|\*|$)/
+/** Lines that cannot be the declaration: blank, line comments, block-comment openers and their
+ *  star-prefixed continuation and closing lines (a `*gen() {` generator method is a declaration). */
+const NON_DECLARATION_RE = /^\s*(?:\/\/|\/\*|\*(?:\s|\/|$)|$)/
 
 /**
  * Scans tracked source for suppressions reaching budget rules. Default reads the
@@ -145,7 +146,6 @@ export function scanTree(opts: { staged?: boolean } = {}): ScanResult {
 	// git grep exits 1 on zero matches — only >1 is a real failure.
 	if (res.status !== 0 && res.status !== 1) throw new Error(`git grep failed (${res.status}): ${res.stderr}`)
 	const parsed = parseGrepWithContext(res.stdout)
-	const ruleCounts = Object.fromEntries(BASELINED_RULES.map((r) => [r, {}])) as ScanResult["ruleCounts"]
 	const accepted: AcceptedDirective[] = []
 	const forbidden: ScanResult["forbidden"] = []
 	for (const hit of parsed.matches) {
@@ -160,17 +160,13 @@ export function scanTree(opts: { staged?: boolean } = {}): ScanResult {
 			forbidden.push({ file: hit.file, line: hit.line, why: `no declaration within ${ANCHOR_LOOKAHEAD} lines below the directive — an acceptance sits directly above the function it covers` })
 			continue
 		}
-		ruleCounts[c.rule][hit.file] = (ruleCounts[c.rule][hit.file] ?? 0) + 1
 		accepted.push({ file: hit.file, line: hit.line, rule: c.rule, accepted: c.accepted, sentence: c.sentence, anchor })
 	}
 	forbidden.push(...duplicateIdentities(accepted), ...ambiguousAnchors(accepted, staged))
-	for (const rule of BASELINED_RULES) {
-		// Byte-order sort — locale-independent so regeneration is reproducible across machines.
-		ruleCounts[rule] = Object.fromEntries(Object.entries(ruleCounts[rule]).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-	}
+	// Byte-order sorts — locale-independent so regeneration is reproducible across machines.
 	accepted.sort(compareDirectives)
 	forbidden.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line))
-	return { ruleCounts, accepted, forbidden }
+	return { ruleCounts: ruleCountsOf(accepted), accepted, forbidden }
 }
 
 interface GrepLine {
@@ -308,19 +304,49 @@ export function diffEntries(base: ManifestEntry[], head: ManifestEntry[]): Entry
 	return { ...pairMoves(added, removed), restamped, reworded }
 }
 
-/** Pairs an added entry with a removed one carrying the same rule, stamp AND sentence: that is a
- *  declaration rename or a file move, not a new acceptance. A swap onto another function would
- *  have to carry the old function's sentence verbatim — visible nonsense in review. */
+const MODIFIERS = "public|private|protected|static|readonly|override|async|get|set"
+/** Words the method pattern could otherwise read as a name (`if (`, `async (x) => {`, `return (`). */
+const NOT_A_METHOD = `${MODIFIERS}|function|if|for|while|switch|catch|return|await|yield|typeof|void|delete|new|throw`
+const NAME_PATTERNS: RegExp[] = [
+	/^(?:describe|it|test)(?:\.\w+)*\(\s*(["'`])(.+?)\1/,
+	/^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)/,
+	/^(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)/,
+	/^([A-Za-z_$][\w$]*)\s*:\s*(?:async\s*)?(?:\(|function\b)/,
+	new RegExp(`^(?:(?:${MODIFIERS})\\s+)*\\*?\\s*(?!(?:${NOT_A_METHOD})\\b)([A-Za-z_$][\\w$]*)\\s*[(<]`),
+]
+
+/** The name a declaration line binds — a test title, a function, a `const` arrow, an object
+ *  property, or a class/object method. Anonymous callbacks have none: they carry no move path
+ *  (any edit to their line is a new identity), which fails closed. */
+export function declarationName(anchor: string): string | undefined {
+	for (const re of NAME_PATTERNS) {
+		const m = anchor.match(re)
+		if (m) return m[2] ?? m[1]
+	}
+	return undefined
+}
+
+/** Pairs an added entry with a removed one as a MOVE only when the function's identity visibly
+ *  continues: same rule, stamp and sentence, and either the exact declaration line in another
+ *  file (a file move) or the same declaration name (a signature edit). Copying a sentence onto a
+ *  differently named function is an add, so a delete-and-recreate cannot launder through here. */
 function pairMoves(added: ManifestEntry[], removed: ManifestEntry[]): Pick<EntryDiff, "added" | "removed" | "moved"> {
 	const pool = [...removed]
 	const moved: EntryDiff["moved"] = []
 	const unpaired: ManifestEntry[] = []
 	for (const a of added) {
-		const i = pool.findIndex((r) => r.rule === a.rule && r.accepted === a.accepted && r.sentence === a.sentence)
+		const i = pool.findIndex((r) => isMoveOf(r, a))
 		if (i === -1) unpaired.push(a)
 		else moved.push({ from: pool.splice(i, 1)[0], to: a })
 	}
 	return { added: unpaired, removed: pool, moved }
+}
+
+function isMoveOf(from: ManifestEntry, to: ManifestEntry): boolean {
+	if (from.rule !== to.rule || from.accepted !== to.accepted || from.sentence !== to.sentence) return false
+	if (from.anchor === to.anchor) return true
+	const name = declarationName(from.anchor)
+	return name !== undefined && name === declarationName(to.anchor)
 }
 
 /** What a change on the SAME Biome may never do to the acceptance set: add one, or raise one. */
@@ -330,13 +356,25 @@ export function ratchetViolations(diff: EntryDiff): string[] {
 	return out
 }
 
-/** The ratchet against a base that predates per-acceptance entries: per-rule totals only. */
-export function legacyRatchetViolations(base: LegacyManifest["rules"], head: BaselineManifest["rules"]): string[] {
+/** The manifest's `rules` summary, derived from the entries — the only form the checks trust. */
+export function ruleCountsOf(entries: ManifestEntry[]): BaselineManifest["rules"] {
+	const counts = Object.fromEntries(BASELINED_RULES.map((r) => [r, {} as Record<string, number>])) as BaselineManifest["rules"]
+	for (const e of entries) counts[e.rule][e.file] = (counts[e.rule][e.file] ?? 0) + 1
+	for (const rule of BASELINED_RULES) {
+		counts[rule] = Object.fromEntries(Object.entries(counts[rule]).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+	}
+	return counts
+}
+
+/** The ratchet against a base that predates per-acceptance entries: per-rule totals, the head
+ *  side derived from its entries (never from its editable summary). */
+export function legacyRatchetViolations(base: LegacyManifest["rules"], headEntries: ManifestEntry[]): string[] {
 	const total = (counts: Record<string, number>) => Object.values(counts).reduce((a, b) => a + b, 0)
+	const head = ruleCountsOf(headEntries)
 	const out: string[] = []
 	for (const rule of BASELINED_RULES) {
 		const from = total(base[rule] ?? {})
-		const to = total(head[rule] ?? {})
+		const to = total(head[rule])
 		if (to > from) out.push(`↑ ${rule}: ${from} → ${to} acceptance(s)`)
 	}
 	return out
