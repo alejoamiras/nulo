@@ -19,7 +19,10 @@ const h = vi.hoisted(() => {
 		tombstones: new Set<string>(),
 		symlinks: new Set<string>(),
 		scripts: new Map<string, string | Error>(),
-		identity: undefined as unknown,
+		/** JSON-RPC answers keyed `<url> <method>`; an unscripted call throws. */
+		rpc: new Map<string, unknown>(),
+		/** `resolveBin` calls, kept across cases: the script caches the cast path at module level. */
+		resolves: [] as string[],
 		logs: [] as string[],
 	}
 	const rel = (p: unknown) => String(p).split(repo).join("<repo>")
@@ -31,16 +34,34 @@ const h = vi.hoisted(() => {
 		state.tombstones.clear()
 		state.symlinks.clear()
 		state.scripts.clear()
-		state.identity = undefined
+		state.rpc.clear()
 		state.logs.length = 0
 	}
 	return { state, rel, key, reset }
 })
 
 vi.mock("./run", () => {
-	const runImpl = (bin: string, args: readonly string[]) => {
+	type Opts = { cwd?: string; stdio?: unknown; env?: NodeJS.ProcessEnv }
+	// The event carries what the script passed BESIDES argv: cwd, stdio, and every env entry that
+	// differs from the process env (the live verifier's BRIDGE_MANIFEST) — a regression that drops
+	// or changes any of them breaks the golden trace.
+	const envExtras = (env?: NodeJS.ProcessEnv) => {
+		const extra: Record<string, string> = {}
+		for (const [k, v] of Object.entries(env ?? {})) if (v !== undefined && process.env[k] !== v) extra[k] = h.rel(v)
+		return extra
+	}
+	const project = (opts?: Opts) => {
+		if (!opts) return ""
+		const extra = envExtras(opts.env)
+		const tag: Record<string, unknown> = {}
+		if (opts.cwd) tag.cwd = h.rel(opts.cwd)
+		if (opts.stdio) tag.stdio = opts.stdio
+		if (Object.keys(extra).length) tag.env = extra
+		return Object.keys(tag).length ? ` ${JSON.stringify(tag)}` : ""
+	}
+	const runImpl = (bin: string, args: readonly string[], opts?: Opts) => {
 		const k = h.key(bin, args)
-		h.state.events.push(`run ${k}`)
+		h.state.events.push(`run ${k}${project(opts)}`)
 		const scripted = h.state.scripts.get(k)
 		if (scripted === undefined) throw new Error(`unscripted run: ${k}`)
 		if (scripted instanceof Error) throw scripted
@@ -48,8 +69,14 @@ vi.mock("./run", () => {
 	}
 	return {
 		run: runImpl,
-		git: (args: readonly string[]) => runImpl("git", args).stdout.trim(),
-		resolveBin: () => "cast",
+		git: (args: readonly string[], cwd: string) => runImpl("git", args, { cwd }).stdout.trim(),
+		resolveBin: (name: string, opts: { envVar: string; prefer: string }) => {
+			h.state.resolves.push(`${name} ${opts.envVar} ${opts.prefer}`)
+			const scripted = h.state.scripts.get(`resolveBin ${name}`)
+			if (scripted === undefined) throw new Error(`unscripted resolveBin: ${name}`)
+			if (scripted instanceof Error) throw scripted
+			return scripted
+		},
 	}
 })
 
@@ -91,6 +118,7 @@ vi.mock("node:fs", async (importOriginal) => {
 		rmSync: (p: string) => {
 			h.state.events.push(`rm ${h.rel(p)}`)
 			h.state.files.delete(p)
+			h.state.symlinks.delete(p)
 			h.state.tombstones.add(p)
 		},
 		mkdirSync: (p: string) => {
@@ -112,6 +140,7 @@ import { promote, verify } from "./live-intent"
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 const REPO = h.state.repo
 const SEPOLIA = "https://sepolia.example/rpc"
+const NODE_URL = "https://node.example"
 const SIGNER = "0xFcc2238319aC360e985f1736aBB3df6251DAF6F5"
 const PK = "ab".repeat(32)
 const COMMIT = "39de187a444e623f76ced479b07a5dd322ce10c7"
@@ -139,7 +168,7 @@ const canonicalFpcSha = (
 function baseIntent(): Record<string, unknown> {
 	return {
 		builtAt: "2026-07-18T21:32:35.033Z",
-		primaryRpc: "https://node.example",
+		primaryRpc: NODE_URL,
 		identity: { nodeVersion: "5.0.0", l1ChainId: 11155111, rollupVersion: 1821665230, walletChainId: 1816023401 },
 		l1: {
 			rollup: "0xd73a91bdcf6891c7642f3e460036e1ef2cc23178",
@@ -185,7 +214,8 @@ function greenWorld(opts: { recorded?: boolean; balance?: string } = {}) {
 	put(INTENT_PATH, JSON.stringify(intent, null, "\t"))
 	put(BRIDGE_CANDIDATE, candidate)
 	for (const rel of NOIR) put(join(REPO, "contracts", "bridge", "aztec", rel), `artifact:${rel}`)
-	h.state.identity = identityFor(intent)
+	h.state.rpc.set(`${NODE_URL} node_getNodeInfo`, identityFor(intent))
+	script("resolveBin cast", "cast")
 	script(`git --literal-pathspecs status --porcelain -- ${h.rel(INTENT_PATH)}`, "")
 	script("git status --porcelain", "")
 	script(`git diff --name-only --end-of-options ${COMMIT} HEAD --`, "")
@@ -217,36 +247,38 @@ function promoteWorld(opts: { bridgeOnly?: boolean } = {}) {
 	return { ...world, drip }
 }
 
+const IN_REPO = ' {"cwd":"<repo>"}'
+const CAST_IO = ' {"stdio":["ignore","pipe","pipe"]}'
 const VERIFY_GREEN_TRACE = [
 	"read <repo>/implementations-plan/aztec-5.0.1-line/lessons/intent.json",
-	"run git --literal-pathspecs status --porcelain -- <repo>/implementations-plan/aztec-5.0.1-line/lessons/intent.json",
-	"run git status --porcelain",
-	"run git diff --name-only --end-of-options 39de187a444e623f76ced479b07a5dd322ce10c7 HEAD --",
-	"fetch node_getNodeInfo",
-	"run cast wallet address --private-key abababababababababababababababababababababababababababababababab",
+	`run git --literal-pathspecs status --porcelain -- <repo>/implementations-plan/aztec-5.0.1-line/lessons/intent.json${IN_REPO}`,
+	`run git status --porcelain${IN_REPO}`,
+	`run git diff --name-only --end-of-options 39de187a444e623f76ced479b07a5dd322ce10c7 HEAD --${IN_REPO}`,
+	"fetch https://node.example node_getNodeInfo []",
+	`run cast wallet address --private-key abababababababababababababababababababababababababababababababab${CAST_IO}`,
 	"read <repo>/contracts/bridge/aztec/token_bridge/target/token_bridge_contract-TokenBridge.json",
 	"read <repo>/contracts/bridge/aztec/token_minter_proxy/target/token_minter_proxy-TokenMinterProxy.json",
 	"read <repo>/contracts/bridge/aztec/keystone/target/keystone.json",
 	"read <repo>/packages/bridge-core/src/private-fpc-canonical.json",
 	"read <repo>/apps/tools/public/testnet-bridge.candidate.json",
-	"run cast call 0xb4a9f8eadc8ca944729d61e59a9f491faff237a3 UNDERLYING()(address) --rpc-url https://sepolia.example/rpc",
-	"run cast call 0x5602c39a6e9c5ace589f64f754927bcda4f4bfc9 FEE_ASSET()(address) --rpc-url https://sepolia.example/rpc",
-	"run cast call 0x78365a471dfce304f25d0382cdbd65b2b7935820 owner()(address) --rpc-url https://sepolia.example/rpc",
-	"run cast call 0x78365a471dfce304f25d0382cdbd65b2b7935820 swapTarget()(address) --rpc-url https://sepolia.example/rpc",
-	"run cast balance 0xFcc2238319aC360e985f1736aBB3df6251DAF6F5 --rpc-url https://sepolia.example/rpc --ether",
+	`run cast call 0xb4a9f8eadc8ca944729d61e59a9f491faff237a3 UNDERLYING()(address) --rpc-url https://sepolia.example/rpc${CAST_IO}`,
+	`run cast call 0x5602c39a6e9c5ace589f64f754927bcda4f4bfc9 FEE_ASSET()(address) --rpc-url https://sepolia.example/rpc${CAST_IO}`,
+	`run cast call 0x78365a471dfce304f25d0382cdbd65b2b7935820 owner()(address) --rpc-url https://sepolia.example/rpc${CAST_IO}`,
+	`run cast call 0x78365a471dfce304f25d0382cdbd65b2b7935820 swapTarget()(address) --rpc-url https://sepolia.example/rpc${CAST_IO}`,
+	`run cast balance 0xFcc2238319aC360e985f1736aBB3df6251DAF6F5 --rpc-url https://sepolia.example/rpc --ether${CAST_IO}`,
 ]
 
 const PROMOTE_GREEN_TRACE = [
 	"read <repo>/implementations-plan/aztec-5.0.1-line/lessons/intent.json",
 	...VERIFY_GREEN_TRACE,
-	"run bun <repo>/packages/bridge-core/scripts/check-fpc-version.ts --mode require-deployed",
+	'run bun <repo>/packages/bridge-core/scripts/check-fpc-version.ts --mode require-deployed {"stdio":"inherit"}',
 	"lstat <repo>/apps/tools/public/testnet-bridge.candidate.json",
 	"lstat <repo>/apps/tools/src/contracts/deployments.candidate.json",
 	"lstat <repo>/apps/tools/public/testnet-bridge.json",
 	"lstat <repo>/apps/tools/src/contracts/deployments.json",
 	"read <repo>/apps/tools/public/testnet-bridge.candidate.json",
 	"read <repo>/apps/tools/src/contracts/deployments.candidate.json",
-	"run bun <repo>/apps/tools/scripts/verify-deployments.ts --config <repo>/apps/tools/src/contracts/deployments.candidate.json",
+	'run bun <repo>/apps/tools/scripts/verify-deployments.ts --config <repo>/apps/tools/src/contracts/deployments.candidate.json {"stdio":"inherit"}',
 	"read <repo>/apps/tools/public/testnet-bridge.json",
 	"mkdir <repo>/apps/tools/public",
 	"rm <repo>/apps/tools/public/testnet-bridge.json.promote-tmp",
@@ -259,9 +291,9 @@ const PROMOTE_GREEN_TRACE = [
 	"rename <repo>/apps/tools/src/contracts/deployments.json.promote-tmp -> <repo>/apps/tools/src/contracts/deployments.json",
 	"read <repo>/apps/tools/src/contracts/deployments.json",
 	"read <repo>/apps/tools/public/testnet-bridge.json",
-	"run bun <repo>/apps/tools/scripts/verify-deployments.ts",
+	'run bun <repo>/apps/tools/scripts/verify-deployments.ts {"stdio":"inherit","env":{"BRIDGE_MANIFEST":"<repo>/apps/tools/public/testnet-bridge.json"}}',
 	"mkdir <repo>/implementations-plan/aztec-5.0.1-line/lessons",
-	"run git rev-parse HEAD",
+	`run git rev-parse HEAD${IN_REPO}`,
 	"write <repo>/implementations-plan/aztec-5.0.1-line/lessons/promotion-receipt.json",
 ]
 
@@ -270,11 +302,12 @@ const env = { SEPOLIA_RPC_URL: SEPOLIA, PRIVATE_KEY: PK }
 beforeEach(() => {
 	h.reset()
 	for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v)
-	vi.stubGlobal("fetch", async (_url: string, init: { body: string }) => {
-		const method = (JSON.parse(init.body) as { method: string }).method
-		h.state.events.push(`fetch ${method}`)
-		if (h.state.identity === undefined) throw new Error(`unscripted fetch: ${method}`)
-		return { ok: true, json: async () => ({ result: h.state.identity }) }
+	vi.stubGlobal("fetch", async (url: string, init: { body: string }) => {
+		const req = JSON.parse(init.body) as { method: string; params: unknown[] }
+		h.state.events.push(`fetch ${url} ${req.method} ${JSON.stringify(req.params)}`)
+		const answer = h.state.rpc.get(`${url} ${req.method}`)
+		if (answer === undefined) throw new Error(`unscripted fetch: ${url} ${req.method}`)
+		return { ok: true, json: async () => ({ result: answer }) }
 	})
 	vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
 		h.state.logs.push(args.map(String).join(" "))
@@ -385,11 +418,11 @@ describe("verify — the gate ladder", () => {
 			/rollup address moved — STOP/,
 		],
 	] as const)("identity: %s moved — after the tree gates, before the signer", async (_name, mutate, message) => {
-		greenWorld()
-		h.state.identity = mutate(h.state.identity as Record<string, unknown>)
+		const { intent } = greenWorld()
+		h.state.rpc.set(`${NODE_URL} node_getNodeInfo`, mutate(identityFor(intent) as unknown as Record<string, unknown>))
 		await expect(verify(INTENT_PATH, BRIDGE_CANDIDATE)).rejects.toThrow(message)
 		const ev = events()
-		expect(ev.indexOf("fetch node_getNodeInfo")).toBeGreaterThan(ev.findIndex((e) => e.includes("git diff")))
+		expect(ev.indexOf("fetch https://node.example node_getNodeInfo []")).toBeGreaterThan(ev.findIndex((e) => e.includes("git diff")))
 		expect(ev.some((e) => e.includes("cast wallet address"))).toBe(false)
 	})
 
@@ -685,6 +718,16 @@ describe("promote — the stage sequence", () => {
 		expect(events().some((e) => e.includes("--config"))).toBe(false)
 	})
 
+	test("a pre-planted tmp symlink is removed, then exclusive-created, then renamed over the target", async () => {
+		const { candidate } = promoteWorld()
+		const tmp = `${BRIDGE_LIVE}.promote-tmp`
+		h.state.symlinks.add(tmp)
+		await promote(INTENT_PATH)
+		const ev = events()
+		expect(ev.indexOf(`rm ${h.rel(tmp)}`)).toBeLessThan(ev.indexOf(`write ${h.rel(tmp)} wx`))
+		expect(h.state.files.get(BRIDGE_LIVE)?.equals(candidate)).toBe(true)
+	})
+
 	test("--bridge-only: a live drip manifest that changed during the promotion stops before the receipt", async () => {
 		promoteWorld({ bridgeOnly: true })
 		const originalPush = h.state.events.push.bind(h.state.events)
@@ -695,6 +738,12 @@ describe("promote — the stage sequence", () => {
 		}
 		await expect(promote(INTENT_PATH, { bridgeOnly: true })).rejects.toThrow(/--bridge-only violated: live drip manifest changed/)
 		expect(h.state.files.has(RECEIPT)).toBe(false)
+	})
+})
+
+describe("cast resolution (module-cached)", () => {
+	test("resolveBin was consulted exactly once across the file: CAST_BIN override, candidates before PATH", () => {
+		expect(h.state.resolves).toEqual(["cast CAST_BIN candidates"])
 	})
 })
 
@@ -719,6 +768,13 @@ describe("fs overlay contract (real temp dir)", () => {
 			expect(fs.readFileSync(regular, "utf8")).toBe("c")
 			expect(Buffer.isBuffer(fs.readFileSync(regular))).toBe(true)
 			expect(fs.existsSync(tmp)).toBe(false)
+			// The promote recovery: a pre-planted dangling tmp symlink is removed, then exclusive-created.
+			fs.symlinkSync(join(dir, "missing"), tmp)
+			expect(() => fs.writeFileSync(tmp, "d", { flag: "wx" })).toThrow(expect.objectContaining({ code: "EEXIST" }))
+			fs.rmSync(tmp, { force: true })
+			fs.writeFileSync(tmp, "d", { flag: "wx" })
+			fs.renameSync(tmp, regular)
+			expect(fs.readFileSync(regular, "utf8")).toBe("d")
 		} finally {
 			fs.rmSync(dir, { recursive: true, force: true })
 		}
