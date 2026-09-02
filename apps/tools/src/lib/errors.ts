@@ -36,7 +36,7 @@ const TOAST_COPY: Record<ErrorCategory, string> = {
 	unknown: "Something went wrong. Try again.",
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 21) — refactor when touched, never raise
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 21 — ordered overlapping message predicates are the error-classification precedence policy
 export function normalizeError(err: unknown): NormalizedError {
 	const msg = err instanceof Error ? err.message : String(err)
 	const lc = msg.toLowerCase()

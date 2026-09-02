@@ -68,19 +68,32 @@ codex session per plan).
   sentence>` (`accepted at N lines — …` for the length rule). Drafts for all 35 are in the ACCEPT
   table below; tighten at the line, never a category label.
 - **Scanner** (`scripts/complexity-baseline/scan.ts`): a budget-rule directive whose reason does not
-  match the accepted form is `forbidden` — that rejects the legacy `baseline (` text AND the new
-  generator marker. Both `check.ts` (local, pre-commit) and `scripts/ci-cd/complexity-baseline.test.ts`
+  match the accepted form is `forbidden` — that rejects the legacy `baseline (` text, the generator
+  marker, block comments and every broad form. Each acceptance is anchored to the first declaration
+  under it (read through a paired directive, a doc block, blanks), and that declaration line must be
+  unique in its file. Both `check.ts` (local, pre-commit) and `scripts/ci-cd/complexity-baseline.test.ts`
   (CI) inherit it.
-- **Generator** (`generate.ts`): for a function a future Biome bump newly flags it inserts
-  `JUSTIFICATION REQUIRED (observed score N): refactor, or replace with "accepted at score N — <why>"`
-  — which the scanner refuses, including under `--adopt`, until a human decides. Fail-closed.
-- **Rescore audit** (new, CI-only in `test:ci-gating`, ~60 lines): for each directive, lint the
-  file with that directive line removed via `biome lint --stdin-file-path=<path>` and fail if the
-  reported score/length exceeds the accepted N. Closes the hole where a suppressed function quietly
-  grows under a still-"valid" reason. Biome-version drift is handled by the existing manifest pin +
-  `--adopt` regeneration (which must re-stamp N, never the sentence).
-- **Manifest** stays as the growth guard (per-rule × per-file counts, shrink-only). NOT built:
-  copy-paste / generic-phrase detectors (over-engineering; review catches prose).
+- **Manifest** pins each acceptance as `{file, rule, anchor, accepted, sentence}`. Tree and manifest
+  must match entry by entry (added / removed / moved / re-stamped / reworded all fail until
+  regenerated). On a PR the CI mirror also ratchets head against the base branch's manifest: on the
+  same Biome no added entry, no raised stamp, and no move (a signature edit or file move keeping
+  the declaration NAME, rule, stamp and sentence pairs as a move, refused unless the PR carries the
+  owner's `baseline:move-approved` label; a copied sentence on a differently named function, or any
+  edit to an anonymous callback's line, is an add) — a hand-edited row matches the tree but not the
+  base, and a `rules` summary that disagrees with the entries is refused. The base is
+  the pull_request event's exact `base.sha`; a base that predates entries is ratcheted on per-rule
+  totals derived from the head entries.
+- **Generator** (`generate.ts`): for a function newly over budget it inserts
+  `JUSTIFICATION REQUIRED (observed score N): refactor, or replace this line with "accepted at score N — <why>"`
+  — which the scanner refuses — and exits 1 without writing the manifest. It never re-stamps.
+  `--adopt` is accepted only when the manifest's pinned Biome differs from the installed one; a
+  manifest without entries is refused (no shape migration hatch).
+- **Rescore audit** (`rescore.ts`, CI in `test:ci-gating` + `bun run baseline:rescore`): one sibling
+  copy per accepted file with all its directives removed, originals + copies in ONE Biome run,
+  pairing by file → rule → sorted line; `observed !== accepted` fails in either direction, a stale
+  directive fails, an unsuppressed offender in an original fails. The stdin approach was dropped —
+  Biome's stdin mode prints code, not diagnostics.
+- NOT built: copy-paste / generic-phrase detectors (over-engineering; review catches prose).
 - Docs: CLAUDE.md § Complexity budgets (no "refactor when touched"; the accepted form; the marker;
   the audit), the residue ledger artifact, this file's ACCEPT table = the 35.
 
@@ -131,7 +144,7 @@ Marginal by score (18, 26 — `backup-restore-sw-restart`, `import-dead-rpc`): k
 because the extraction is small and exposes the scenario; if the PR-a diff shows otherwise, move
 them to ACCEPT with a justification and say so in the PR body.
 
-## ACCEPT (35) — stays as-is; the directive carries this reason (codex drafts, tighten at the line)
+## ACCEPT (35) — stays as-is; the directive carries this reason (codex drafts; the sentence at the line + `manifest.json`'s anchor/stamp entry are the record)
 
 | file:line | accepted at | reason |
 |---|---|---|
@@ -155,8 +168,8 @@ them to ACCEPT with a justification and say so in the PR body.
 | `apps/extension/tests/e2e/fixtures/journal.ts:41` | score 16 | one tolerant in-browser journal scan projecting the exact lean record view |
 | `apps/extension/tests/e2e/fixtures/journal.ts:174` | score 18 | one tolerant scan applies the diagnostic allowlist before data crosses into CI artifacts |
 | `apps/extension/tests/e2e/fixtures/journal.ts:404` | score 26 | parse, session filter, stage classification and three threshold checks form one polling predicate |
-| `apps/faucet/src/lib/errors.ts:39` | score 21 | ordered overlapping message predicates are the error-classification precedence policy |
-| `apps/faucet/src/lib/phase-clock.ts:26` | score 22 | pending / active / failed / done transitions specify the latest-attempt temporal reducer |
+| `apps/tools/src/lib/errors.ts:39` | score 21 | ordered overlapping message predicates are the error-classification precedence policy |
+| `apps/tools/src/lib/phase-clock.ts:26` | score 22 | pending / active / failed / done transitions specify the latest-attempt temporal reducer |
 | `packages/bridge-core/scripts/deploy-sandbox.ts:117` | 197 lines | shared live handles make L1/L2 deployment, wiring and optional smoke one auditable sandbox recipe |
 | `packages/bridge-core/scripts/deposit-testnet.ts:73` | 155 lines | the deploy → deposit → claim → withdraw proof shares ephemeral addresses and secrets in one custody trace |
 | `packages/bridge-core/scripts/discover-mainnet-fuel.ts:78` | 87 lines | one evidence transcript links identity checks, pool discovery, quotations and the winning manifest block |

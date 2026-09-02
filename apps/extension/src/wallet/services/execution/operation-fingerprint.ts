@@ -28,7 +28,7 @@ const MAX_VALUE_DEPTH = 6
 /** Type-tagged, length-prefixed scalar/structure encoder. Returns null on any
  *  value outside the allowlist (functions, symbols, class instances, Maps,
  *  cycles-by-depth, …). */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 25) — refactor when touched, never raise
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 25 — recursive type-tagged encoding must reject unsupported shapes while canonicalizing arrays and objects
 function encodeValue(value: unknown, depth: number): string | null {
 	if (depth > MAX_VALUE_DEPTH) return null
 	if (value === null) return "z"

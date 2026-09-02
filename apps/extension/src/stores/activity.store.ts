@@ -100,7 +100,7 @@ export function txBelongsToScope(tx: Tx, scope: ActivityScope, opts: { soleProfi
 	)
 }
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (122 lines) — split when touched, never grow
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: accepted at 122 lines — one Pinia closure owns the scoped slices and the ABA-safe mutation fences every action shares
 export const useActivityStore = defineStore("activity", () => {
 	// `shallowRef` + explicit trigger: slices are mutated in place on a hot event
 	// path, and deep reactivity over every transaction row is pure overhead.

@@ -53,7 +53,7 @@ const effectiveCap = (cap: Gas) => ({
 const ITERATIONS = 300
 
 describe("finalizeGasLimits clamp properties (seeded)", () => {
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 19) — refactor when touched, never raise
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 19 — each generated tuple must branch between rejection and the complete postcondition set
 	test("I1+I2+I4+I6 — auto-derived limits: cap-bounded, measured-floored, throw iff inadmissible", async () => {
 		const rng = makeRng(0xb1)
 		for (let i = 0; i < ITERATIONS; i++) {

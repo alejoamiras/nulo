@@ -115,7 +115,7 @@ export class OperationEstimateReuse {
 	 * entry is deleted up front (ids are SW-minted UUIDs — unguessable), so a
 	 * failed validation still consumes the slot and the caller rebuilds.
 	 */
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 21) — refactor when touched, never raise
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 21 — the ordered single-shot validation ladder is the reuse-authorization checklist
 	public async tryConsume(estimateId: string, input: OperationFingerprintInput): Promise<OperationEstimateReuseEntry | undefined> {
 		const entry = this.cache.consume(estimateId) // single-shot
 		if (!entry) return undefined

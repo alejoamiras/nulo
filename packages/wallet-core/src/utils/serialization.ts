@@ -24,7 +24,7 @@ declare const Buffer: {
 
 // copied from @aztec/foundation/json-rpc
 export function jsonStringify(obj: unknown): string {
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 23) — refactor when touched, never raise
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 23 — upstream-compatible replacer dispatch defines the JSON wire form of each supported runtime type
 	return JSON.stringify(obj, (_key, value) => {
 		if (typeof value === "bigint") {
 			return value.toString()

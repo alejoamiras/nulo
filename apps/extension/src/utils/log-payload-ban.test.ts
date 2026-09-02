@@ -151,7 +151,7 @@ const FRESH_LEX: LexState = { inBlockComment: false, quote: null, interp: [] }
  * contain its own object literals and nested templates, and treating the first `}` as the end of
  * the interpolation would silently blank the rest of the expression.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 41) — refactor when touched, never raise
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 41 — a lexer state machine: comment, quote, regex and template-interpolation precedence must stay together
 function stripNoise(line: string, state: LexState): { code: string; state: LexState } {
 	let out = ""
 	let inBlock = state.inBlockComment
@@ -414,7 +414,7 @@ function hazards(window: string): Array<{ name: string; index: number }> {
 }
 
 /** Returns `file:line` for every log call flattening a sensitive identifier into its message. */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 17) — refactor when touched, never raise
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 17 — one scan preserves per-file lexical state, source offsets, call windows and deduplication
 function findLoggedSecrets(files: Array<{ path: string; content: string }>): string[] {
 	const offenders: string[] = []
 	for (const { path, content } of files) {

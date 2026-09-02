@@ -168,7 +168,7 @@ export interface ParsedRun {
 }
 
 /** Flattens vitest's JSON reporter output into per-test statuses keyed `<file> :: <full name>`. */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 22) — refactor when touched, never raise
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 22 — nested reporter traversal keeps file failures, duplicate test identities, status counts and messages together
 export function parseVitestJson(json: VitestJson, canon: Canonicalizer): ParsedRun {
 	const statuses = new Map<string, string>()
 	const failing: string[] = []
