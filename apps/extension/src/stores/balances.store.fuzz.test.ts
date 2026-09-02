@@ -23,6 +23,8 @@
  * passing `{ seed, path }` to fc.assert. Deepen locally with
  * NULO_FUZZ_RUNS=2000.
  */
+import { createHash } from "node:crypto"
+import { appendFileSync } from "node:fs"
 import fc from "fast-check"
 import { createPinia, setActivePinia } from "pinia"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -95,6 +97,64 @@ interface CallMeta {
 
 const TIMER_STEPS = [0, 50, 5_000, 20_000]
 
+// ── Replay + equivalence tooling (inert unless the env is set) ──────────────
+/** fast-check seed from `NULO_FUZZ_SEED`, parsed only when defined. Blank, non-finite,
+ *  non-integer or outside int32 throws — a silent fallback to a random seed would defeat the
+ *  replay the variable exists for. `0` is a valid seed. */
+function fuzzSeed(): number | undefined {
+	const raw = process.env.NULO_FUZZ_SEED
+	if (raw === undefined) return undefined
+	const seed = raw.trim() === "" ? Number.NaN : Number(raw)
+	if (!Number.isInteger(seed) || seed < -2_147_483_648 || seed > 2_147_483_647) {
+		throw new Error(`NULO_FUZZ_SEED must be an int32, got ${JSON.stringify(raw)}`)
+	}
+	return seed
+}
+
+/** Per-run trace for the pre/post refactor equivalence proof. With `NULO_FUZZ_TRACE=<file>`
+ *  every completed run appends `{ tape, digest }`, the digest hashing the canonical event
+ *  stream (decoded ops, RPC issue + settlement order, post-flush store snapshots, pending ids,
+ *  counters, fences, checkpoints). Every method is synchronous and the unset form is a no-op,
+ *  so the property's timing is untouched either way. */
+interface TraceRecorder {
+	event(kind: string, data: unknown): void
+	finish(tape: number[]): void
+}
+const NO_TRACE: TraceRecorder = { event() {}, finish() {} }
+function createTraceRecorder(): TraceRecorder {
+	const file = process.env.NULO_FUZZ_TRACE
+	if (!file) return NO_TRACE
+	const hash = createHash("sha256")
+	return {
+		event(kind, data) {
+			hash.update(`${kind}:${JSON.stringify(data)}\n`)
+		},
+		finish(tape) {
+			const tapeId = createHash("sha256").update(tape.join(",")).digest("hex").slice(0, 16)
+			appendFileSync(file, `${JSON.stringify({ tape: tapeId, digest: hash.digest("hex") })}\n`)
+		},
+	}
+}
+
+/** Canonical, key-sorted projection of `store.entries` for the trace. */
+function snapshotEntries(store: ReturnType<typeof useBalancesStore>): unknown {
+	return Object.entries(store.entries)
+		.sort(([a], [b]) => (a < b ? -1 : 1))
+		.map(([key, e]) => [
+			key,
+			{
+				stale: e.stale,
+				gas: {
+					status: e.gas.status,
+					debt: e.gas.retryDebt,
+					verified: e.gas.verified?.publicFeeJuice ?? null,
+					display: e.gas.display?.publicFeeJuice ?? null,
+				},
+				fpc: { status: e.fpc.status, ids: (e.fpc.data ?? []).map((f) => f.id) },
+			},
+		])
+}
+
 describe("balances store — randomized interleavings (fuzz)", () => {
 	beforeEach(() => {
 		vi.useFakeTimers()
@@ -105,6 +165,7 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 
 	it("invariants hold under arbitrary operation/settlement schedules", async () => {
 		const numRuns = Number(process.env.NULO_FUZZ_RUNS ?? 120)
+		const seed = fuzzSeed()
 		await fc.assert(
 			fc.asyncProperty(fc.array(fc.nat({ max: 999_983 }), { minLength: 40, maxLength: 120 }), async (tape) => {
 				try {
@@ -117,7 +178,7 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 					txAdd.mockClear()
 				}
 			}),
-			{ numRuns },
+			{ numRuns, ...(seed !== undefined ? { seed } : {}) },
 		)
 
 		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 103) — refactor when touched, never raise
@@ -125,6 +186,7 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 			{
 				// ── per-run world ────────────────────────────────────────────
 				setActivePinia(createPinia())
+				const trace = createTraceRecorder()
 				const pending: PendingCall[] = []
 				const callMeta = new Map<number, CallMeta>()
 				const fences: Record<string, number> = { p1: 0, p2: 0 }
@@ -138,14 +200,16 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 							totalCalls++
 							const profile = PROFILE_OF_ACCOUNT.get(account) ?? "p1"
 							callMeta.set(id, { kind: "gas", account, profile, fencesAtCall: fences[profile] ?? 0 })
+							trace.event("issue", { id, kind: "gas", account, fencesAtCall: fences[profile] ?? 0 })
 							pending.push({
 								id,
 								kind: "gas",
 								account,
-								settle: (ok) =>
-									ok
-										? resolve({ publicFeeJuice: String(id), privateFeeJuice: null })
-										: reject(new Error(`gas ${id} down`)),
+								settle: (ok) => {
+									trace.event("settle", { id, ok })
+									if (ok) resolve({ publicFeeJuice: String(id), privateFeeJuice: null })
+									else reject(new Error(`gas ${id} down`))
+								},
 							})
 						}),
 				)
@@ -156,11 +220,15 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 							totalCalls++
 							const profile = PROFILE_OF_CHAIN.get(chainId) ?? "p1"
 							callMeta.set(id, { kind: "fpc", profile, fencesAtCall: fences[profile] ?? 0 })
+							trace.event("issue", { id, kind: "fpc", chainId, fencesAtCall: fences[profile] ?? 0 })
 							pending.push({
 								id,
 								kind: "fpc",
-								settle: (ok) =>
-									ok ? resolve([{ id: `fpc-${id}`, type: 1, name: "S" }]) : reject(new Error(`fpc ${id} down`)),
+								settle: (ok) => {
+									trace.event("settle", { id, ok })
+									if (ok) resolve([{ id: `fpc-${id}`, type: 1, name: "S" }])
+									else reject(new Error(`fpc ${id} down`))
+								},
 							})
 						}),
 				)
@@ -171,17 +239,20 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 							totalCalls++
 							const profile = PROFILE_OF_ACCOUNT.get(account) ?? "p1"
 							callMeta.set(id, { kind: "peek", account, profile, fencesAtCall: fences[profile] ?? 0 })
+							trace.event("issue", { id, kind: "peek", account, fencesAtCall: fences[profile] ?? 0 })
 							pending.push({
 								id,
 								kind: "peek",
 								account,
-								settle: (ok, stale) =>
-									ok
-										? resolve({
-												balances: { publicFeeJuice: `${id}`, privateFeeJuice: null },
-												stale: stale ?? id % 2 === 0,
-											})
-										: reject(new Error(`peek ${id}`)),
+								settle: (ok, stale) => {
+									trace.event("settle", { id, ok, stale: stale ?? null })
+									if (ok) {
+										resolve({
+											balances: { publicFeeJuice: `${id}`, privateFeeJuice: null },
+											stale: stale ?? id % 2 === 0,
+										})
+									} else reject(new Error(`peek ${id}`))
+								},
 							})
 						}),
 				)
@@ -312,6 +383,19 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 					}
 					await flush()
 					checkInvariants()
+					trace.event("step", {
+						n,
+						op,
+						p1,
+						p2,
+						pending: pending.map((c) => c.id),
+						calls: totalCalls,
+						next: nextCallId,
+						fences: { ...fences },
+						subs: subs.map((s) => [scopeKey(s.scope), s.caps, s.released]),
+						owed: [...expectGasRecovery].sort(),
+						entries: snapshotEntries(store),
+					})
 				}
 
 				// ── drain to quiescence ──────────────────────────────────────
@@ -326,6 +410,7 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 				}
 				expect(pending.length, "drain must reach quiescence — a call is wedged").toBe(0)
 				checkInvariants()
+				trace.event("drain", { calls: totalCalls, entries: snapshotEntries(store) })
 				for (const [key, entry] of Object.entries(store.entries)) {
 					expect(entry.gas.status, `gas slice of ${key} stuck fetching after drain`).not.toBe("fetching")
 					expect(entry.fpc.status, `fpc slice of ${key} stuck fetching after drain`).not.toBe("fetching")
@@ -339,12 +424,14 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 					expect(entry?.gas.retryDebt, `recovery-owed key ${key} still carries retry debt after a clean drain`).toBe(false)
 					expect(entry?.gas.status, `recovery-owed key ${key} never recovered`).toBe("ready")
 				}
+				trace.event("c1", { owed: [...expectGasRecovery].sort() })
 				// C2 — post-drain silence: every retry resolved successfully, so
 				// no timer may produce further calls.
 				const callsAfterDrain = totalCalls
 				await vi.advanceTimersByTimeAsync(35_000)
 				await vi.advanceTimersByTimeAsync(35_000)
 				expect(totalCalls, "client calls after a clean drain — an orphaned timer is firing").toBe(callsAfterDrain)
+				trace.event("c2", { calls: totalCalls })
 				// C3 — stranded-forced probe: with no forced run live, a stale
 				// peek must COMMIT (a stranded forced counter discards it) and a
 				// plain successful fetch afterwards must un-dim. Per-profile
@@ -380,6 +467,7 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 					probeSub.release()
 				}
 				holders.forEach((h) => h.release())
+				trace.event("c3", { calls: totalCalls, entries: snapshotEntries(store) })
 				// C4 — every timer dies with its lease: release everything, then
 				// further virtual time must be silent.
 				for (const s of liveSubs()) {
@@ -391,6 +479,7 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 				await vi.advanceTimersByTimeAsync(35_000)
 				await vi.advanceTimersByTimeAsync(35_000)
 				expect(totalCalls, "client calls after releasing every lease — an orphaned timer survived release").toBe(callsAfterRelease)
+				trace.event("c4", { calls: totalCalls })
 				// C5 — a retry ARMED at release time dies with its last lease:
 				// arm a backoff deliberately (sole retry-capable sub + a failed
 				// fetch), release before the tick, and demand silence. This is
@@ -409,6 +498,8 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 				await vi.advanceTimersByTimeAsync(35_000)
 				await vi.advanceTimersByTimeAsync(35_000)
 				expect(totalCalls, "a retry armed at release time fired after its last lease died").toBe(callsAfterArmedRelease)
+				trace.event("c5", { calls: totalCalls })
+				trace.finish(tape)
 			}
 		}
 	}, 120_000)
