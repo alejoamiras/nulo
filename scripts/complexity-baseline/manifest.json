@@ -4,7 +4,6 @@
 	"rules": {
 		"noExcessiveCognitiveComplexity": {
 			"apps/extension/src/popup/components/modules/send/FeeSettingsCard.test.ts": 1,
-			"apps/extension/src/stores/balances.store.fuzz.test.ts": 2,
 			"apps/extension/src/utils/amount.ts": 1,
 			"apps/extension/src/utils/log-payload-ban.test.ts": 2,
 			"apps/extension/src/wallet/logger/utils.ts": 1,

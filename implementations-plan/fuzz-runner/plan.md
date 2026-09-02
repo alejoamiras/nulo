@@ -28,7 +28,7 @@ coherence (B).
   snapshot → `callMeta.set` → `pending.push`); mutable scalars are always read as `world.<field>`.
 - Helpers over `world`: `retryCoves(world, scope, leg)`, `liveSubs(world)`,
   `lastOfProfile(world, profileId, releasing)`; `scopeKey` and `flush` stay free functions.
-- `applyOp(world, n): Promise<void> | undefined` — the seven-way ladder on `op = n % 100` with the
+- `applyOp(world, n, decoded): Promise<unknown> | undefined` — the seven-way ladder on `op = n % 100` with the
   SAME ranges and `p1`/`p2` derivations; arms `opSubscribe`, `opRelease`, `opEnsure`,
   `opTxSettled`, `opFence`, `opSettle` are synchronous and return nothing; only the timer arm
   returns `vi.advanceTimersByTimeAsync(TIMER_STEPS[p1])`. The loop: `const p = applyOp(world, n);
@@ -76,7 +76,8 @@ coherence (B).
    account/chain, `fencesAtCall`) and settlement (`id`, ok, stale) in order, the post-flush snapshot
    of `store.entries` (status/stale/retryDebt/verified/display/fpc ids), `pending` ids, the counters
    and fences, the modeled subs and owed set; then checkpoints after the drain and after each
-   probe. A no-op recorder otherwise, so the property's timing is untouched.
+   probe. A no-op recorder otherwise (payloads still built, nothing hashed or written) — timing-
+   preserving in both forms, never awaited.
 2. **Proof**: commit 1 vs the refactor commit, three seeds × `NULO_FUZZ_RUNS=120`: the trace files
    must be byte-identical (pass-only runs prove nothing — a dropped op or a suppressed call can
    keep every invariant). Then one deep run (`NULO_FUZZ_RUNS=500`) on the refactor.
