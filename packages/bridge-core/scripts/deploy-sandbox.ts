@@ -4,7 +4,7 @@
  * L1: anvil_setCode Permit2 (bytecode from Sepolia), then MintableERC20 +
  *     MockSwapTarget + SwapBridgeRouter + canonical TokenPortal (all via viem).
  * L2: token_minter_proxy, aztec-standards Token (minter = proxy), our token_bridge
- *     (proxy, portal) — via aztec.js, mirroring faucet/scripts/deploy.ts plumbing
+ *     (proxy, portal) — via aztec.js, mirroring tools/scripts/deploy.ts plumbing
  *     (EmbeddedWallet + sponsored fee). The mock stands in for V4 (codex verdict c).
  * Wire: portal.initialize(registry, usdc, bridge); proxy.set_token + set_bridge(bridge);
  *     fund the mock with sandbox feeJuice.

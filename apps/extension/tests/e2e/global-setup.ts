@@ -20,7 +20,7 @@ import { markBootReady, markBootStarted } from "./sentinel"
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const EXTENSION_PATH = path.resolve(__dirname, "../../dist/chrome")
 const PLAYGROUND_DIR = path.resolve(__dirname, "../../../playground")
-const FAUCET_DIR = path.resolve(__dirname, "../../../faucet")
+const TOOLS_DIR = path.resolve(__dirname, "../../../tools")
 const CONFIG_PATH = path.resolve(__dirname, ".test-config.json")
 // ── Aztec toolchain resolution ──────────────────────────────────────────
 // Resolve from the repo's `@aztec/aztec.js` pin (the SAME rule CI's
@@ -93,12 +93,11 @@ const AZTEC_ADMIN_PORT = Number(process.env.AZTEC_ADMIN_PORT ?? 8880)
 const AZTEC_P2P_PORT = Number(process.env.AZTEC_P2P_PORT ?? 40400)
 const PLAYGROUND_PORT = Number(process.env.PLAYGROUND_PORT ?? 5174)
 const PLAYGROUND_URL = process.env.PLAYGROUND_URL ?? `http://localhost:${PLAYGROUND_PORT}/`
-/** Faucet dev server. Opt-in via FAUCET_DEV_PORT (the agent wrapper sets it when
- *  the suite includes the `faucet-add-token` spec). Without this gate, every
- *  network e2e run would spawn the faucet, which is expensive (Vite + Vue +
- *  Aztec deps) and pointless for tests that don't touch the faucet. */
-const FAUCET_PORT = process.env.FAUCET_DEV_PORT ? Number(process.env.FAUCET_DEV_PORT) : undefined
-const FAUCET_URL = FAUCET_PORT ? `http://localhost:${FAUCET_PORT}/` : undefined
+/** Tools dev server. Spawned only when TOOLS_DEV_PORT is set (the agent wrapper
+ *  always sets it; a bare vitest run does not), so a run without it never pays
+ *  the Vite + Vue + Aztec startup. */
+const TOOLS_PORT = process.env.TOOLS_DEV_PORT ? Number(process.env.TOOLS_DEV_PORT) : undefined
+const TOOLS_URL = TOOLS_PORT ? `http://localhost:${TOOLS_PORT}/` : undefined
 
 /** Per-run aztec data directory. Mandatory even for in-memory mode because
  *  some aztec subsystems still write to ~/.aztec/data by default — two
@@ -120,8 +119,8 @@ let nodeProcess: ChildProcess | null = null
 let weStartedNode = false
 let playgroundProcess: ChildProcess | null = null
 let weStartedPlayground = false
-let faucetProcess: ChildProcess | null = null
-let weStartedFaucet = false
+let toolsProcess: ChildProcess | null = null
+let weStartedTools = false
 
 /** Probe a URL with HEAD/GET; returns true on any 2xx/3xx/4xx response. */
 async function probeHttp(url: string, timeoutMs = 1500): Promise<boolean> {
@@ -257,25 +256,25 @@ export async function setup(project: TestProject) {
 			priorLock.ports.aztecAdmin === AZTEC_ADMIN_PORT &&
 			priorLock.ports.aztecP2P === AZTEC_P2P_PORT &&
 			priorLock.ports.playground === PLAYGROUND_PORT &&
-			// Faucet port is optional — match only if both sides agree on its
-			// presence and value. Lockfiles written before faucet wiring have
-			// `priorLock.ports.faucet === undefined`; current runs without
-			// faucet have `FAUCET_PORT === undefined`. Both match.
-			priorLock.ports.faucet === FAUCET_PORT
+			// Tools port is optional — match only if both sides agree on its
+			// presence and value. Lockfiles written before tools wiring have
+			// `priorLock.ports.tools === undefined`; current runs without
+			// tools have `TOOLS_PORT === undefined`. Both match.
+			priorLock.ports.tools === TOOLS_PORT
 		const urlMatch = priorLock.bakedLocalRpcUrl === LOCAL_NODE_URL
 		if (portsMatch && urlMatch) {
 			console.log("[e2e-setup] prior ownership lock matches current run — probing for reuse")
 			const allCoreAlive =
 				isPidAlive(priorLock.pids.anvil) && isPidAlive(priorLock.pids.aztec) && isPidAlive(priorLock.pids.playground)
-			const faucetAlive = FAUCET_PORT ? isPidAlive(priorLock.pids.faucet) : true
-			const faucetHealthy = FAUCET_URL ? await probeHttp(FAUCET_URL) : true
+			const toolsAlive = TOOLS_PORT ? isPidAlive(priorLock.pids.tools) : true
+			const toolsHealthy = TOOLS_URL ? await probeHttp(TOOLS_URL) : true
 			const allHealthy =
 				allCoreAlive &&
-				faucetAlive &&
+				toolsAlive &&
 				(await probeAnvil(ANVIL_URL)) &&
 				(await checkNodeHealth(LOCAL_NODE_URL)) &&
 				(await probeHttp(PLAYGROUND_URL)) &&
-				faucetHealthy
+				toolsHealthy
 			if (allHealthy) {
 				const identityOk = await verifyIdentity(LOCAL_NODE_URL, priorLock.l1ContractAddresses)
 				if (identityOk) {
@@ -283,10 +282,10 @@ export async function setup(project: TestProject) {
 					weStartedAnvil = false
 					weStartedNode = false
 					weStartedPlayground = false
-					weStartedFaucet = false
+					weStartedTools = false
 					AZTEC_DATA_DIR = priorLock.aztecDataDir
 					project.provide("playgroundUrl", PLAYGROUND_URL)
-					project.provide("faucetUrl", FAUCET_URL)
+					project.provide("toolsUrl", TOOLS_URL)
 					await deployContractsAndProvide(project)
 					markBootReady()
 					return
@@ -298,7 +297,7 @@ export async function setup(project: TestProject) {
 			killOrphanByPid(priorLock.pids.anvil, "anvil")
 			killOrphanByPid(priorLock.pids.aztec, "aztec")
 			killOrphanByPid(priorLock.pids.playground, "playground")
-			killOrphanByPid(priorLock.pids.faucet, "faucet")
+			killOrphanByPid(priorLock.pids.tools, "tools")
 			try {
 				fs.rmSync(priorLock.aztecDataDir, { recursive: true, force: true })
 			} catch {}
@@ -309,7 +308,7 @@ export async function setup(project: TestProject) {
 			killOrphanByPid(priorLock.pids.anvil, "anvil")
 			killOrphanByPid(priorLock.pids.aztec, "aztec")
 			killOrphanByPid(priorLock.pids.playground, "playground")
-			killOrphanByPid(priorLock.pids.faucet, "faucet")
+			killOrphanByPid(priorLock.pids.tools, "tools")
 			try {
 				fs.rmSync(priorLock.aztecDataDir, { recursive: true, force: true })
 			} catch {}
@@ -353,7 +352,7 @@ export async function setup(project: TestProject) {
 			console.warn("[e2e-setup] anvil binary not found at", ANVIL_BIN, "— skipping network setup")
 			project.provide("aztecTestConfig", undefined)
 			project.provide("playgroundUrl", PLAYGROUND_URL)
-			project.provide("faucetUrl", FAUCET_URL)
+			project.provide("toolsUrl", TOOLS_URL)
 			return
 		}
 		console.log("[e2e-setup] Starting anvil at", ANVIL_URL, "...")
@@ -395,7 +394,7 @@ export async function setup(project: TestProject) {
 			}
 			project.provide("aztecTestConfig", undefined)
 			project.provide("playgroundUrl", PLAYGROUND_URL)
-			project.provide("faucetUrl", FAUCET_URL)
+			project.provide("toolsUrl", TOOLS_URL)
 			return
 		}
 	}
@@ -437,7 +436,7 @@ export async function setup(project: TestProject) {
 			console.warn("[e2e-setup] aztec CLI not found at", AZTEC_BIN, "— skipping network setup")
 			project.provide("aztecTestConfig", undefined)
 			project.provide("playgroundUrl", PLAYGROUND_URL)
-			project.provide("faucetUrl", FAUCET_URL)
+			project.provide("toolsUrl", TOOLS_URL)
 			return
 		}
 
@@ -524,7 +523,7 @@ export async function setup(project: TestProject) {
 			}
 			project.provide("aztecTestConfig", undefined)
 			project.provide("playgroundUrl", PLAYGROUND_URL)
-			project.provide("faucetUrl", FAUCET_URL)
+			project.provide("toolsUrl", TOOLS_URL)
 			return
 		}
 	}
@@ -575,55 +574,55 @@ export async function setup(project: TestProject) {
 	}
 	project.provide("playgroundUrl", PLAYGROUND_URL)
 
-	// ── Faucet dev server (opt-in via FAUCET_DEV_PORT) ─────────────────
-	// Only spawned when the test runner pre-allocated a faucet port. This
-	// keeps the default network suite lightweight — faucet startup adds ~5s
+	// ── Tools dev server (opt-in via TOOLS_DEV_PORT) ─────────────────
+	// Only spawned when the test runner pre-allocated a tools port. This
+	// keeps the default network suite lightweight — tools startup adds ~5s
 	// + a Vite + Vue process per worktree.
-	if (FAUCET_PORT && FAUCET_URL) {
-		const faucetAlreadyRunning = await probeHttp(FAUCET_URL, 1500)
-		if (faucetAlreadyRunning) {
-			console.log("[e2e-setup] Faucet already running at", FAUCET_URL)
-			weStartedFaucet = false
+	if (TOOLS_PORT && TOOLS_URL) {
+		const toolsAlreadyRunning = await probeHttp(TOOLS_URL, 1500)
+		if (toolsAlreadyRunning) {
+			console.log("[e2e-setup] Tools already running at", TOOLS_URL)
+			weStartedTools = false
 		} else {
-			console.log("[e2e-setup] Starting faucet dev server at", FAUCET_URL, "...")
+			console.log("[e2e-setup] Starting tools dev server at", TOOLS_URL, "...")
 			try {
-				faucetProcess = spawn("bun", ["run", "dev"], {
-					cwd: FAUCET_DIR,
+				toolsProcess = spawn("bun", ["run", "dev"], {
+					cwd: TOOLS_DIR,
 					stdio: "pipe",
 					detached: true,
 					env: {
 						...process.env,
 						NODE_ENV: "test",
-						FAUCET_DEV_PORT: String(FAUCET_PORT),
+						TOOLS_DEV_PORT: String(TOOLS_PORT),
 					},
 				})
-				weStartedFaucet = true
+				weStartedTools = true
 				recordSpawnedPid()
 
-				faucetProcess.stdout?.on("data", (data: Buffer) => {
+				toolsProcess.stdout?.on("data", (data: Buffer) => {
 					const line = data.toString().trim()
 					if (line.includes("Local:") || line.includes("error")) {
-						console.log("[faucet]", line.slice(0, 200))
+						console.log("[tools]", line.slice(0, 200))
 					}
 				})
-				faucetProcess.stderr?.on("data", (data: Buffer) => {
+				toolsProcess.stderr?.on("data", (data: Buffer) => {
 					const line = data.toString().trim()
 					if (line.includes("error") || line.includes("Error")) {
-						console.error("[faucet]", line.slice(0, 200))
+						console.error("[tools]", line.slice(0, 200))
 					}
 				})
 
-				await waitForHttp(FAUCET_URL, 30_000)
-				console.log("[e2e-setup] Faucet is ready")
+				await waitForHttp(TOOLS_URL, 30_000)
+				console.log("[e2e-setup] Tools is ready")
 			} catch (error) {
-				console.warn("[e2e-setup] Failed to start faucet:", error)
-				await killProcessGroup(faucetProcess, "faucet", weStartedFaucet)
-				faucetProcess = null
-				// Continue — only faucet-specific tests will fail.
+				console.warn("[e2e-setup] Failed to start tools:", error)
+				await killProcessGroup(toolsProcess, "tools", weStartedTools)
+				toolsProcess = null
+				// Continue — only tools-specific tests will fail.
 			}
 		}
 	}
-	project.provide("faucetUrl", FAUCET_URL)
+	project.provide("toolsUrl", TOOLS_URL)
 
 	await deployContractsAndProvide(project)
 	// Sandbox healthy + contracts deployed, BEFORE any test worker starts —
@@ -728,7 +727,7 @@ function buildOwnedState(extra: Partial<OwnedState> = {}): OwnedState {
 			aztecAdmin: AZTEC_ADMIN_PORT,
 			aztecP2P: AZTEC_P2P_PORT,
 			playground: PLAYGROUND_PORT,
-			...(FAUCET_PORT ? { faucet: FAUCET_PORT } : {}),
+			...(TOOLS_PORT ? { tools: TOOLS_PORT } : {}),
 		},
 		pids: currentPids(),
 		aztecDataDir: AZTEC_DATA_DIR,
@@ -753,7 +752,7 @@ function currentPids(): OwnedState["pids"] {
 		anvil: weStartedAnvil ? anvilProcess?.pid : undefined,
 		aztec: weStartedNode ? nodeProcess?.pid : undefined,
 		playground: weStartedPlayground ? playgroundProcess?.pid : undefined,
-		faucet: weStartedFaucet ? faucetProcess?.pid : undefined,
+		tools: weStartedTools ? toolsProcess?.pid : undefined,
 	}
 }
 
@@ -803,8 +802,8 @@ export async function teardown() {
 		// ignore
 	}
 
-	await killProcessGroup(faucetProcess, "faucet", weStartedFaucet)
-	faucetProcess = null
+	await killProcessGroup(toolsProcess, "tools", weStartedTools)
+	toolsProcess = null
 	await killProcessGroup(playgroundProcess, "playground", weStartedPlayground)
 	playgroundProcess = null
 	await killProcessGroup(nodeProcess, "aztec", weStartedNode)
@@ -876,7 +875,7 @@ function bestEffortKill(child: ChildProcess | null, weStarted: boolean): void {
 }
 
 const onExit = () => {
-	bestEffortKill(faucetProcess, weStartedFaucet)
+	bestEffortKill(toolsProcess, weStartedTools)
 	bestEffortKill(playgroundProcess, weStartedPlayground)
 	bestEffortKill(nodeProcess, weStartedNode)
 	bestEffortKill(anvilProcess, weStartedAnvil)
@@ -894,10 +893,8 @@ declare module "vitest" {
 		extensionPath: string
 		aztecTestConfig?: AztecTestConfig
 		playgroundUrl: string
-		/** Defined only when the network suite pre-allocated a faucet port via
-		 *  `FAUCET_DEV_PORT`. Tests that exercise the faucet dApp (e.g.
-		 *  `faucet-add-token.test.ts`) consume this; tests that don't need it
-		 *  ignore the field. */
-		faucetUrl?: string
+		/** Defined only when `TOOLS_DEV_PORT` pre-allocated a tools port; tests
+		 *  that drive the tools app consume it, the rest ignore the field. */
+		toolsUrl?: string
 	}
 }

@@ -53,13 +53,13 @@ jobs:
       extension: ${{ steps.override.outputs.full || steps.filter.outputs.extension }}
       playground: ${{ steps.override.outputs.full || steps.filter.outputs.playground }}
       landing: ${{ steps.override.outputs.full || steps.filter.outputs.landing }}
-      faucet: ${{ steps.override.outputs.full || steps.filter.outputs.faucet }}
+      tools: ${{ steps.override.outputs.full || steps.filter.outputs.tools }}
       workflows: ${{ steps.override.outputs.full || steps.filter.outputs.workflows }}
       root-config: ${{ steps.override.outputs.full || steps.filter.outputs.root-config }}
       firefox-touching: ${{ steps.override.outputs.full || steps.filter.outputs.firefox-touching }}
       needs-extension-build: ${{ steps.compute.outputs.needs-extension-build }}
       needs-firefox-build: ${{ steps.compute.outputs.needs-firefox-build }}
-      needs-faucet-build: ${{ steps.compute.outputs.needs-faucet-build }}
+      needs-tools-build: ${{ steps.compute.outputs.needs-tools-build }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -106,11 +106,11 @@ jobs:
             landing:
               # Dead filter — no job consumes it; kept positive-only for the no-`!` invariant.
               - 'apps/landing/**'
-            faucet:
-              # Built target — faucet (whole package) + its transitive dep libs
-              # (bridge-core → wallet-crypto → wallet-core, + design) + the faucet build
-              # workflow. Closes the prior under-gate (was faucet + design only).
-              - 'apps/faucet/**'
+            tools:
+              # Built target — tools (whole package) + its transitive dep libs
+              # (bridge-core → wallet-crypto → wallet-core, + design) + the tools app build
+              # workflow. Closes the prior under-gate (was tools + design only).
+              - 'apps/tools/**'
               - 'packages/bridge-core/src/**'
               - 'packages/bridge-core/package.json'
               - 'packages/resolve-asset/src/**'
@@ -123,7 +123,7 @@ jobs:
               - 'packages/wallet-sdk-schema-patch/package.json'
               - 'packages/design/src/**'
               - 'packages/design/package.json'
-              - '.github/workflows/_build-faucet.yml'
+              - '.github/workflows/_build-tools.yml'
             workflows:
               - '.github/workflows/**'
               - '.github/actions/**'
@@ -160,7 +160,7 @@ jobs:
           RUNTIME: ${{ steps.override.outputs.full || steps.filter.outputs.aztec-runtime }}
           BRIDGE: ${{ steps.override.outputs.full || steps.filter.outputs.wallet-bridge }}
           EXTENSION: ${{ steps.override.outputs.full || steps.filter.outputs.extension }}
-          FAUCET: ${{ steps.override.outputs.full || steps.filter.outputs.faucet }}
+          TOOLS: ${{ steps.override.outputs.full || steps.filter.outputs.tools }}
           WORKFLOWS: ${{ steps.override.outputs.full || steps.filter.outputs.workflows }}
           ROOT: ${{ steps.override.outputs.full || steps.filter.outputs.root-config }}
           FIREFOX_TOUCHING: ${{ steps.override.outputs.full || steps.filter.outputs.firefox-touching }}
@@ -182,12 +182,12 @@ jobs:
           else
             echo "needs-firefox-build=false" >> "$GITHUB_OUTPUT"
           fi
-          # Faucet build runs on faucet-touching PRs + any workflow / root
+          # Tools build runs on tools-touching PRs + any workflow / root
           # config change that could affect its bundle.
-          if [ "$FAUCET" = "true" ] || [ "$WORKFLOWS" = "true" ] || [ "$ROOT" = "true" ]; then
-            echo "needs-faucet-build=true" >> "$GITHUB_OUTPUT"
+          if [ "$TOOLS" = "true" ] || [ "$WORKFLOWS" = "true" ] || [ "$ROOT" = "true" ]; then
+            echo "needs-tools-build=true" >> "$GITHUB_OUTPUT"
           else
-            echo "needs-faucet-build=false" >> "$GITHUB_OUTPUT"
+            echo "needs-tools-build=false" >> "$GITHUB_OUTPUT"
           fi
 
   commitlint:
@@ -268,15 +268,15 @@ jobs:
       target: firefox
       upload_artifacts: true
 
-  build-faucet:
-    name: Build Faucet (${{ matrix.target }})
+  build-tools:
+    name: Build Tools (${{ matrix.target }})
     needs: changes
-    if: needs.changes.outputs.needs-faucet-build == 'true'
+    if: needs.changes.outputs.needs-tools-build == 'true'
     strategy:
       fail-fast: false
       matrix:
         target: [testnet, mainnet]
-    uses: ./.github/workflows/_build-faucet.yml
+    uses: ./.github/workflows/_build-tools.yml
     with:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
       target: ${{ matrix.target }}
@@ -289,7 +289,7 @@ jobs:
   status:
     name: quality-status
     if: always()
-    needs: [changes, commitlint, lint-and-typecheck, unit-tests, build-chrome, build-firefox, build-faucet]
+    needs: [changes, commitlint, lint-and-typecheck, unit-tests, build-chrome, build-firefox, build-tools]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -302,7 +302,7 @@ jobs:
             "${{ needs.unit-tests.result }}" \
             "${{ needs.build-chrome.result }}" \
             "${{ needs.build-firefox.result }}" \
-            "${{ needs.build-faucet.result }}" \
+            "${{ needs.build-tools.result }}" \
           ; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
               echo "::error::A required job failed or was cancelled: $r"

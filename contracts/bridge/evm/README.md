@@ -1,6 +1,6 @@
 # bridge-evm (Foundry)
 
-L1 contracts for the Nulo Faucet→Bridge. Aztec L1 interfaces resolve to the
+L1 contracts for the Nulo tools bridge. Aztec L1 interfaces resolve to the
 installed `@aztec/l1-artifacts` 4.2.0 sources via the `@aztec/` remapping in
 `foundry.toml` — no `aztec-contracts` submodule needed (the version matches the
 repo's pinned `@aztec/* 4.2.0`).
@@ -61,7 +61,7 @@ value-bearing deployment — carried forward from the June bridge red-team + the
   which portal a caller may target — a malicious frontend could point a signed Permit2 witness at a
   hostile portal (a **generic-router phishing surface**). On testnet this is contained by the witness
   binding (the portal is inside the signed struct, so the user's wallet shows what they sign) + the
-  faucet's hardcoded config. For a value token this MUST be hardened to an **on-chain allowlist of
+  tools app's hardcoded config. For a value token this MUST be hardened to an **on-chain allowlist of
   permitted portals** (or an immutable portal binding) so a signature can never be steered to an
   attacker-controlled portal. Applies to BOTH paths.
 - **INFO-1 — `MintableERC20` is not a value token.** Its `mint` is permissionless (capped per tx) and

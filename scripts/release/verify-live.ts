@@ -5,12 +5,12 @@
  * branch is unit-testable with zero network.
  *
  * Fail-closed: anything we can't positively confirm is a FAILURE, never a pass.
- * The faucet check defeats a split CDN cache (fresh `/build.json` but stale
+ * The tools app check defeats a split CDN cache (fresh `/build.json` but stale
  * `index.html`/JS) by requiring the buildId embedded in the served HTML to
  * EXACTLY equal the one in `/build.json` — the exact false-pass codex flagged.
  */
 
-export interface FaucetBuildJson {
+export interface ToolsBuildJson {
 	buildId?: string
 	version?: string
 	chainId?: number
@@ -18,13 +18,13 @@ export interface FaucetBuildJson {
 
 export interface VerifyLiveInput {
 	expectedVersion: string
-	/** the release commit (full sha); the faucet buildId's sha component must match its first 8. */
+	/** the release commit (full sha); the tools app buildId's sha component must match its first 8. */
 	expectedSha: string
 	expectedWalletChainId: number
-	/** faucet `/` HTML (null ⇒ unreachable). */
-	faucetHtml: string | null
-	/** faucet `/build.json` parsed (null ⇒ unreachable / unparseable). */
-	faucetBuildJson: FaucetBuildJson | null
+	/** tools `/` HTML (null ⇒ unreachable). */
+	toolsHtml: string | null
+	/** tools `/build.json` parsed (null ⇒ unreachable / unparseable). */
+	toolsBuildJson: ToolsBuildJson | null
 	/** landing `/` HTML (null ⇒ unreachable). */
 	landingHtml: string | null
 }
@@ -44,31 +44,31 @@ export function extractBuildId(html: string): string | null {
 export function verifyLive(input: VerifyLiveInput): VerifyLiveResult {
 	const failures: string[] = []
 
-	// --- Faucet: HTML buildId must match build.json buildId (split-cache guard) + chainId ---
-	if (input.faucetHtml === null) {
-		failures.push("faucet: unreachable")
+	// --- Tools: HTML buildId must match build.json buildId (split-cache guard) + chainId ---
+	if (input.toolsHtml === null) {
+		failures.push("tools: unreachable")
 	}
-	if (input.faucetBuildJson === null) {
-		failures.push("faucet: /build.json unreachable or unparseable")
+	if (input.toolsBuildJson === null) {
+		failures.push("tools: /build.json unreachable or unparseable")
 	}
-	if (input.faucetHtml !== null && input.faucetBuildJson !== null) {
-		const htmlBuildId = extractBuildId(input.faucetHtml)
-		const jsonBuildId = input.faucetBuildJson.buildId ?? null
-		if (!htmlBuildId) failures.push("faucet: no nulo-build meta in served HTML")
-		else if (!jsonBuildId) failures.push("faucet: no buildId in /build.json")
+	if (input.toolsHtml !== null && input.toolsBuildJson !== null) {
+		const htmlBuildId = extractBuildId(input.toolsHtml)
+		const jsonBuildId = input.toolsBuildJson.buildId ?? null
+		if (!htmlBuildId) failures.push("tools: no nulo-build meta in served HTML")
+		else if (!jsonBuildId) failures.push("tools: no buildId in /build.json")
 		else if (htmlBuildId !== jsonBuildId) {
-			failures.push(`faucet: split CDN cache — HTML buildId ${htmlBuildId} != build.json ${jsonBuildId}`)
+			failures.push(`tools: split CDN cache — HTML buildId ${htmlBuildId} != build.json ${jsonBuildId}`)
 		} else if (input.expectedSha) {
 			// Fresh-deploy guard: buildId is `${version}+${sha}`; its sha component must be
 			// THIS release's commit, else a stale-but-self-consistent prior deploy passes
-			// (both files old together). The faucet version is decoupled from the release,
+			// (both files old together). The tools app version is decoupled from the release,
 			// so the sha — not the version — is the freshness signal.
 			const buildSha = jsonBuildId.split("+").pop() ?? ""
 			const wantSha = input.expectedSha.slice(0, 8)
-			if (buildSha !== wantSha) failures.push(`faucet: stale deploy — build sha '${buildSha}' != release ${wantSha}`)
+			if (buildSha !== wantSha) failures.push(`tools: stale deploy — build sha '${buildSha}' != release ${wantSha}`)
 		}
-		if (input.faucetBuildJson.chainId !== input.expectedWalletChainId) {
-			failures.push(`faucet: chainId ${input.faucetBuildJson.chainId} != expected ${input.expectedWalletChainId}`)
+		if (input.toolsBuildJson.chainId !== input.expectedWalletChainId) {
+			failures.push(`tools: chainId ${input.toolsBuildJson.chainId} != expected ${input.expectedWalletChainId}`)
 		}
 	}
 

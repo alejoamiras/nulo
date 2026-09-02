@@ -30,8 +30,8 @@ import { git } from "./run"
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = join(here, "..", "..", "..")
-const LIVE = join(repoRoot, "apps", "faucet", "public", "testnet-bridge.json")
-const CANDIDATE = join(repoRoot, "apps", "faucet", "public", "testnet-bridge.candidate.json")
+const LIVE = join(repoRoot, "apps", "tools", "public", "testnet-bridge.json")
+const CANDIDATE = join(repoRoot, "apps", "tools", "public", "testnet-bridge.candidate.json")
 
 const argOf = (flag: string): string | undefined => {
 	const i = process.argv.indexOf(flag)
@@ -97,7 +97,7 @@ async function main(): Promise<void> {
 	// name a commit — never an option to `rev-parse` or `show`.
 	const fromOid = git(["rev-parse", "--verify", "--end-of-options", `${fromRef}^{commit}`], repoRoot)
 	const prior = parseCandidateManifest(
-		JSON.parse(git(["show", "--end-of-options", `${fromOid}:apps/faucet/public/testnet-bridge.json`], repoRoot)),
+		JSON.parse(git(["show", "--end-of-options", `${fromOid}:apps/tools/public/testnet-bridge.json`], repoRoot)),
 	)
 	const priorSwap = prior.l1.fuel?.swap
 	if (!priorSwap) throw new Error(`--from ${fromRef} manifest has no swap block; STOP`)

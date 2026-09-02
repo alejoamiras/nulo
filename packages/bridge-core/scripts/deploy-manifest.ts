@@ -27,7 +27,7 @@ export interface L2Record {
 	constructorArgs: unknown[]
 }
 
-/** Shape consumed by the faucet reader (bridge-deployments.ts) - keep every field it reads. */
+/** Shape consumed by the tools app reader (bridge-deployments.ts) - keep every field it reads. */
 export interface CandidateManifest {
 	network: string
 	/** Chain identity — the startup build-integrity assertion requires these, so a promoted candidate
@@ -50,7 +50,7 @@ export interface CandidateManifest {
 			sourceContract?: "MintableERC20" | "TestUsdc"
 		}
 		fuel?: Record<string, unknown>
-		/** Direct Fee-Juice bridge config — the faucet's Fuel tab reads exactly these keys
+		/** Direct Fee-Juice bridge config — the tools app's Fuel tab reads exactly these keys
 		 *  (bridge-deployments.ts). Omitting it from a promotion silently disables direct Fuel. */
 		feeJuice?: { portal: string; asset: string; feeAssetHandler?: string; minFj: string }
 	}

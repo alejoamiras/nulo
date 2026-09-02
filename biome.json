@@ -13,7 +13,7 @@
 			"!**/target",
 			"!**/*.svg",
 			"!**/apps/extension/src/types",
-			"!**/apps/faucet/src/types",
+			"!**/apps/tools/src/types",
 			"!**/packages/aztec-runtime/src/account/artifacts"
 		]
 	},
@@ -339,7 +339,7 @@
 			}
 		},
 		{
-			"includes": ["apps/faucet/src/**", "!apps/faucet/src/lib/network.ts"],
+			"includes": ["apps/tools/src/**", "!apps/tools/src/lib/network.ts"],
 			"linter": {
 				"rules": {
 					"style": {

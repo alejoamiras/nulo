@@ -39,7 +39,7 @@ const props = defineProps({
 	},
 	// Closed anchor mode: `tag="a"` renders a styled <a href> — NOT an arbitrary component constructor
 	// (a wallet primitive must not accept one). Router links are wired by the extension wrapper via
-	// RouterLink custom → tag="a"; the faucet uses the default <button>.
+	// RouterLink custom → tag="a"; the tools app uses the default <button>.
 	tag: {
 		type: String as PropType<"button" | "a">,
 		default: "button",

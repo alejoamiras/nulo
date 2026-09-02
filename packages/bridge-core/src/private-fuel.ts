@@ -20,7 +20,7 @@ import { computeSecretHash } from "@aztec/stdlib/hash"
 /**
  * Domain separator: `poseidon2_hash_bytes("az_dom_sep__fpc_bridge_secret") as u32`. Mirrors the Noir
  * constant `DOM_SEP__FPC_BRIDGE_SECRET`. PINNED as a literal (NOT computed at load): a poseidon call at
- * module-load time crashes non-node consumers — the faucet's jsdom test env throws `std::bad_cast`
+ * module-load time crashes non-node consumers — the tools app's jsdom test env throws `std::bad_cast`
  * before Barretenberg is initialized, and merely importing this module would trigger it. The keystone
  * test re-derives this in node (where bb is ready) and asserts equality — that is the drift tripwire.
  */
@@ -68,7 +68,7 @@ export const privateFuelSecretHash = (salt: Fr, claimer: AztecAddress): Promise<
  * then `PrivateFPC.mint_and_pay_fee(amount, salt, leafIndex)` — and whose `getFeePayer()` is the FPC.
  * `secret` is the bridge secret ({@link deriveBridgeSecret}); `salt` is the per-deposit bridge-secret
  * salt (NOT the FPC-address salt). The wallet runs this verbatim via the EXTERNAL embedded path; the
- * faucet + the headless script both build it through this one wrapper (the only Wonderland coupling).
+ * tools + the headless script both build it through this one wrapper (the only Wonderland coupling).
  */
 export const privateMintAndPayFee = (
 	fpc: AztecAddress,

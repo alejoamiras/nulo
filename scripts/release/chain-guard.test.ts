@@ -10,7 +10,7 @@ import {
 
 describe("walletChainId (the XOR the wallet uses)", () => {
 	test("canonical 5.0.0 testnet — single-sourced from chain-constants → 1816023401", () => {
-		// Canary: chain-guard now imports the pair from apps/faucet/src/lib/chain-constants.ts,
+		// Canary: chain-guard now imports the pair from apps/tools/src/lib/chain-constants.ts,
 		// so a testnet redeploy that bumps that file surfaces HERE too (no silent drift).
 		expect(TESTNET_L1_CHAIN_ID).toBe(11155111)
 		expect(TESTNET_ROLLUP_VERSION).toBe(1821665230)

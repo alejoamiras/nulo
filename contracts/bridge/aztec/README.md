@@ -1,6 +1,6 @@
 # bridge-aztec (Noir)
 
-L2 contracts for the Nulo Faucet→Bridge: `token_minter_proxy` (single-minter
+L2 contracts for the Nulo tools bridge: `token_minter_proxy` (single-minter
 proxy with an allow-list, so the faucet Dripper AND the bridge can mint the
 same token) and `token_bridge` (claim_public/private + exit_to_l1, stripped of
 the reference's attestation layer).

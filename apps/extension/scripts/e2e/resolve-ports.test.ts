@@ -25,8 +25,8 @@ describe("resolve-ports — collision-immune static allocation", () => {
 	test("a pack has six distinct ports", async () => {
 		const { ports, release } = await reservePortPack()
 		try {
+			expect(Object.keys(ports).sort()).toEqual(["anvil", "aztec", "aztecAdmin", "aztecP2P", "playground", "tools"])
 			const values = Object.values(ports)
-			expect(values).toHaveLength(6)
 			expect(new Set(values).size).toBe(6)
 			for (const p of values) {
 				expect(p).toBeGreaterThan(1024)

@@ -51,17 +51,16 @@ export interface OwnedPorts {
 	aztecAdmin: number
 	aztecP2P: number
 	playground: number
-	/** Optional: only allocated when the network suite needs the faucet dev
-	 *  server (e.g. the `faucet-add-token` spec). Older lockfiles won't have
-	 *  this field — the reuse path treats `undefined` as "no faucet owned". */
-	faucet?: number
+	/** Optional: allocated only when TOOLS_DEV_PORT is set. Older lockfiles won't
+	 *  have this field — the reuse path treats `undefined` as "no tools owned". */
+	tools?: number
 }
 
 export interface OwnedState {
 	startedAt: string
 	bakedLocalRpcUrl: string
 	ports: OwnedPorts
-	pids: { anvil?: number; aztec?: number; playground?: number; faucet?: number }
+	pids: { anvil?: number; aztec?: number; playground?: number; tools?: number }
 	aztecDataDir: string
 	/** Recorded post-deploy. Used as the identity assertion on reuse. */
 	l1ContractAddresses?: Record<string, string>

@@ -97,7 +97,7 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 		// the only variable part is the method name the dApp itself sent (bounded at the throw
 		// site), so the echo tells the caller nothing it did not already know. Classified because
 		// falling through would leave a dApp unable to tell "I asked for the wrong thing" from
-		// "the wallet broke" — and the faucet already branches on exactly that distinction.
+		// "the wallet broke" — and the tools app already branches on exactly that distinction.
 		return {
 			code: -32601,
 			message: error.message,

@@ -7,7 +7,7 @@
  *
  * Fonts are package-owned (`src/fonts`, referenced package-relative from base.css); the consumer's
  * Vite bundles them. There is NO auto-import in this package — every component, Vue API, and helper
- * uses explicit imports (consumers like the faucet have no unplugin-auto-import).
+ * uses explicit imports (consumers like the tools app have no unplugin-auto-import).
  *
  * Presentational only: components take their data + any `data-testid` via props.
  * They never import app-specific utilities, stores, or service clients.
@@ -36,7 +36,7 @@ export { default as Spinner } from "./ui/Spinner.vue"
 export { default as SubPageHeaderBase } from "./ui/SubPageHeaderBase.vue"
 export { default as Tag } from "./ui/Tag.vue"
 export { default as Toast } from "./ui/Toast.vue"
-/** Extension's transient single-toast region (distinct from the faucet's `Toast` item). */
+/** Extension's transient single-toast region (distinct from the tools app's `Toast` item). */
 export { default as ToastManagerBase } from "./ui/ToastManagerBase.vue"
 export { default as Toggle } from "./ui/Toggle.vue"
 export { default as Tooltip } from "./ui/Tooltip.vue"

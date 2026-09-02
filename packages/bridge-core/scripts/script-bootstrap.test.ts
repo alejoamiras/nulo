@@ -52,7 +52,7 @@ describe("loadManifestFromConfigArg", () => {
 		expect(() =>
 			loadManifestFromConfigArg(["bun", "script.ts"], {
 				mode: "required",
-				requiredHint: "apps/faucet/public/testnet-bridge.candidate.json",
+				requiredHint: "apps/tools/public/testnet-bridge.candidate.json",
 				parse: (raw) => raw,
 			}),
 		).toThrow(/pass --config .*testnet-bridge\.candidate\.json/)

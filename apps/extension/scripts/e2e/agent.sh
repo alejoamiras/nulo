@@ -57,11 +57,11 @@ AZTEC_PORT=$(jq -r .aztec "$PORTS_JSON")
 AZTEC_ADMIN_PORT=$(jq -r .aztecAdmin "$PORTS_JSON")
 AZTEC_P2P_PORT=$(jq -r .aztecP2P "$PORTS_JSON")
 PLAYGROUND_PORT=$(jq -r .playground "$PORTS_JSON")
-FAUCET_PORT=$(jq -r .faucet "$PORTS_JSON")
+TOOLS_PORT=$(jq -r .tools "$PORTS_JSON")
 ANVIL_URL=$(jq -r .anvilUrl "$PORTS_JSON")
 AZTEC_NODE_URL=$(jq -r .aztecUrl "$PORTS_JSON")
 PLAYGROUND_URL=$(jq -r .playgroundUrl "$PORTS_JSON")
-FAUCET_URL=$(jq -r .faucetUrl "$PORTS_JSON")
+TOOLS_URL=$(jq -r .toolsUrl "$PORTS_JSON")
 
 echo "[e2e:agent] building wallet with VITE_LOCAL_NETWORK_RPC_URL=$AZTEC_NODE_URL"
 # VITE_NULO_E2E_DEFAULT_NET=testnet pins the SEEDED-ACTIVE network: fresh-extension import flows
@@ -207,8 +207,8 @@ AZTEC_ADMIN_PORT="$AZTEC_ADMIN_PORT" \
 AZTEC_P2P_PORT="$AZTEC_P2P_PORT" \
 PLAYGROUND_URL="$PLAYGROUND_URL" \
 PLAYGROUND_PORT="$PLAYGROUND_PORT" \
-FAUCET_URL="$FAUCET_URL" \
-FAUCET_DEV_PORT="$FAUCET_PORT" \
+TOOLS_URL="$TOOLS_URL" \
+TOOLS_DEV_PORT="$TOOLS_PORT" \
   bun run vitest run --config vitest.e2e.network.config.ts "$@"
 VITEST_EXIT=$?
 set -e

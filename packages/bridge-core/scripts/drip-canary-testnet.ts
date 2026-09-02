@@ -1,6 +1,6 @@
 /**
- * LIVE-testnet faucet drip canary: proves the deployed Dripper actually drips through the SAME
- * call the faucet UI makes (`drip_to_public(token, amount)` paid by the Sponsored FPC) from a
+ * LIVE-testnet tools drip canary: proves the deployed Dripper actually drips through the SAME
+ * call the tools app UI makes (`drip_to_public(token, amount)` paid by the Sponsored FPC) from a
  * fresh L2 account. Instances are REBUILT from the committed deployments.json params and their
  * addresses asserted — a drifted record fails here, not in a user's browser.
  *
@@ -25,7 +25,7 @@ import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { stopwatch } from "./script-bootstrap"
 
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
-// The faucet UI's NULO drip (constants/tokens.ts): 1,000 NULO at 6 decimals.
+// The tools app UI's NULO drip (constants/tokens.ts): 1,000 NULO at 6 decimals.
 const DRIP_AMOUNT = 1_000_000_000n
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -35,7 +35,7 @@ const configArgIndex = process.argv.indexOf("--config")
 const deploymentsPath =
 	configArgIndex >= 0 && process.argv[configArgIndex + 1]
 		? process.argv[configArgIndex + 1]
-		: join(here, "..", "..", "..", "apps", "faucet", "src", "contracts", "deployments.json")
+		: join(here, "..", "..", "..", "apps", "tools", "src", "contracts", "deployments.json")
 const deployments = JSON.parse(readFileSync(deploymentsPath, "utf8")) as {
 	dripper: { address: string; salt: number; constructorArtifact: string }
 	tokens: {

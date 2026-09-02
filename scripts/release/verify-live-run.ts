@@ -1,6 +1,6 @@
 /**
  * The I/O runner around the pure `verifyLive` decision (verify-live.ts). Fetches
- * the live faucet + landing (cache-busted, `no-cache`), retries to ride out CDN
+ * the live tools + landing (cache-busted, `no-cache`), retries to ride out CDN
  * propagation lag, and fails CLOSED — if the live state can't be confirmed to
  * match the release after the retry budget, it's a failure, never a pass.
  *
@@ -9,18 +9,18 @@
  */
 
 import { TESTNET_WALLET_CHAIN_ID } from "./chain-guard"
-import { type FaucetBuildJson, verifyLive, type VerifyLiveResult } from "./verify-live"
+import { type ToolsBuildJson, verifyLive, type VerifyLiveResult } from "./verify-live"
 
 export interface RunVerifyLiveOpts {
 	/** the release version the landing must reference, e.g. "0.23.0". */
 	version: string
-	/** the release commit (full sha); the faucet buildId's sha component must match its first 8. */
+	/** the release commit (full sha); the tools app buildId's sha component must match its first 8. */
 	sha: string
 	/** landing origin, e.g. "https://nulo.sh". */
 	landingUrl: string
-	/** tools/faucet origin — MUST be the OPEN host. A CF-Access-gated host returns the
+	/** tools origin — MUST be the OPEN host. A CF-Access-gated host returns the
 	 *  login page, not build.json, so verify-live would fail. e.g. "https://testnet.tools.nulo.sh". */
-	faucetUrl: string
+	toolsUrl: string
 	fetchImpl?: typeof fetch
 	/** retries AFTER the first attempt (default 6). */
 	retries?: number
@@ -45,25 +45,25 @@ async function getText(fetchImpl: typeof fetch, url: string): Promise<string | n
 }
 
 async function gather(fetchImpl: typeof fetch, opts: RunVerifyLiveOpts) {
-	const [faucetHtml, faucetBuildRaw, landingHtml] = await Promise.all([
-		getText(fetchImpl, `${opts.faucetUrl}/`),
-		getText(fetchImpl, `${opts.faucetUrl}/build.json`),
+	const [toolsHtml, toolsBuildRaw, landingHtml] = await Promise.all([
+		getText(fetchImpl, `${opts.toolsUrl}/`),
+		getText(fetchImpl, `${opts.toolsUrl}/build.json`),
 		getText(fetchImpl, `${opts.landingUrl}/`),
 	])
-	let faucetBuildJson: FaucetBuildJson | null = null
-	if (faucetBuildRaw !== null) {
+	let toolsBuildJson: ToolsBuildJson | null = null
+	if (toolsBuildRaw !== null) {
 		try {
-			faucetBuildJson = JSON.parse(faucetBuildRaw) as FaucetBuildJson
+			toolsBuildJson = JSON.parse(toolsBuildRaw) as ToolsBuildJson
 		} catch {
-			faucetBuildJson = null // unparseable → treated as unreachable → fail-closed
+			toolsBuildJson = null // unparseable → treated as unreachable → fail-closed
 		}
 	}
 	return {
 		expectedVersion: opts.version,
 		expectedSha: opts.sha,
 		expectedWalletChainId: TESTNET_WALLET_CHAIN_ID,
-		faucetHtml,
-		faucetBuildJson,
+		toolsHtml,
+		toolsBuildJson,
 		landingHtml,
 	}
 }
@@ -89,7 +89,7 @@ if (import.meta.main) {
 		version: process.env.VERSION ?? "",
 		sha: process.env.SHA ?? "",
 		landingUrl: process.env.LANDING_URL ?? "https://nulo.sh",
-		faucetUrl: process.env.FAUCET_URL ?? "https://testnet.tools.nulo.sh",
+		toolsUrl: process.env.TOOLS_URL ?? "https://testnet.tools.nulo.sh",
 	})
 	if (result.ok) {
 		console.log("verify-live: OK — both surfaces serve this release")

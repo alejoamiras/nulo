@@ -77,7 +77,7 @@ export function requireRelayerSecret(env: Record<string, string | undefined>): F
 /**
  * Fail-closed unless the target deployment is recipient-committed. A pre-commitment (bearer) deployment
  * has raw-secret claims that a relayer WOULD be able to redirect — so relaying against one is unsafe and
- * this refuses. Mirrors the faucet's L9 interlock (`useDeposit.ts`) on the relayer side.
+ * this refuses. Mirrors the tools app's L9 interlock (`useDeposit.ts`) on the relayer side.
  */
 export function assertSaltV2(manifest: unknown): void {
 	const mode = (manifest as { l1?: { privateClaimMode?: unknown } })?.l1?.privateClaimMode

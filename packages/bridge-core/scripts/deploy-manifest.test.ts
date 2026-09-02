@@ -73,13 +73,13 @@ const manifest: CandidateManifest = {
 }
 
 describe("writeCandidateAtomic", () => {
-	it("round-trips every faucet-consumed field and leaves no temp file", () => {
+	it("round-trips every tools-consumed field and leaves no temp file", () => {
 		const target = join(dir, "testnet-bridge.candidate.json")
 		writeCandidateAtomic(target, manifest)
 
 		const back = JSON.parse(readFileSync(target, "utf8"))
 		expect(back).toEqual(manifest)
-		// The faucet reader (bridge-deployments.ts) reads exactly these paths.
+		// The tools app reader (bridge-deployments.ts) reads exactly these paths.
 		expect(back.l1.usdc).toBe(manifest.l1.usdc)
 		expect(back.l1.portal).toBe(manifest.l1.portal)
 		expect(back.l1.portalSource).toBe("forked-v1")

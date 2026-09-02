@@ -4,6 +4,6 @@
 		{ "path": "apps/extension" },
 		{ "path": "apps/playground" },
 		{ "path": "apps/landing" },
-		{ "path": "apps/faucet" }
+		{ "path": "apps/tools" }
 	]
 }

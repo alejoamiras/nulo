@@ -22,7 +22,7 @@ import Toggle from "./ui/Toggle.vue"
 
 /**
  * Producer-side gate: every migrated SFC must mount with EXPLICIT imports — no reliance on the
- * extension's auto-import (the package + the faucet have none). Fails on a Vue "failed to resolve
+ * extension's auto-import (the package + the tools app have none). Fails on a Vue "failed to resolve
  * component" warning or a runtime throw — the exact bug class (e.g. a missing `import { computed }`)
  * that vue-tsc + build silently pass on JS SFCs. Grows as later phases migrate more components.
  */
