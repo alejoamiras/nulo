@@ -603,16 +603,20 @@ booting; `loadProfile` had no rejection path, so `isSessionChecked` stayed false
 guard answers "auth" without retrying while it is false, and a silent restore emits no event that
 could rescue the popup — a product stall, not a slow one, and a longer budget alone would hide it.
 
-**Fix (both).** Product: `loadProfile` runs both boot-time reads (profile list, active session)
-through the guard's own backoff (`lookupActiveProfileWithBackoff`, unit-tested) and, when the
-service stays unreachable or the bootstrap throws, settles the check and lands on the lock screen
-with `data-boot-outcome` on the shell — the password path is the user's recovery, so it must be
-reachable. Every run is generation-fenced (mount + each background reconnect starts one; a run
-that awaited past a newer one commits nothing) and a new run clears the marker first, so the
-harness can never see the marker while a fresh run is mid-bootstrap. Harness:
-`ensureUnlocked` treats "password field + `[data-boot-outcome]`" as locked (types the password),
-takes `{ decisionBudgetMs }` for the genuinely slow case (the canary passes its 120s envelope), and
-its timeout reports whether the service-worker heartbeat advanced during the wait — read that
+**Fix (both).** Product: the boot sequence is a pure core (`popup/boot-session.ts`,
+`resolveBootSession`, unit-tested for every outcome) over the guard's backoff
+(`lookupActiveProfileWithBackoff`, one overall 60s deadline). When the service stays unreachable
+the check settles: with a known profile it lands on the lock screen (the password path is a
+recovery, and the auth page needs a selected profile); with none known it stays put. A bootstrap
+that throws over an OPEN session is `failed`, never a lock. Both render `data-boot-outcome` on the
+shell and a banner with RETRY (`boot-retry`), and the settings read can no longer abort the
+sequence. Every run is generation-fenced (mount + each background reconnect starts one; a run
+that awaited past a newer one commits nothing) and a new run clears the marker first. Harness:
+`ensureUnlocked` NEVER types on the marker — a reconnect can clear it between a read and a
+keystroke — it presses the product's RETRY once and resumes waiting for a real decision; a second
+give-up fails the test with the outcome's name (a product boot failure must not pass as a slow
+bootstrap). `{ decisionBudgetMs }` covers the genuinely slow case (the canary passes its 120s
+envelope); the timeout reports whether the service-worker heartbeat advanced — read that
 neutrally: it proves the worker wrote, not that the bootstrap will finish.
 
 ## Editing `global-setup.ts` (stage split, 2026-09-02)

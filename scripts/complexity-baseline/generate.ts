@@ -27,6 +27,7 @@ import {
 	type LegacyManifest,
 	MOVE_APPROVED_LABEL,
 	ratchetViolations,
+	regenGate,
 	scanTree,
 	toManifestEntries,
 } from "./scan"
@@ -71,15 +72,14 @@ if (committed !== undefined && !hasEntries(committed)) {
 	console.error(`ERROR: ${MANIFEST_PATH} carries no per-acceptance entries — restore it from git before regenerating.`)
 	process.exit(1)
 }
-if (adopt && committed && committed.biomeVersion === installed) {
+const gate = regenGate({ adopt, committedVersion: committed?.biomeVersion, installed })
+if (gate === "adopt-on-same-version") {
 	console.error(`ERROR: --adopt is only for a Biome version bump; the manifest already pins the installed ${installed}.`)
 	console.error("Growth is never adopted on the same Biome: refactor the function under the budget instead.")
 	process.exit(1)
 }
-if (!adopt && committed && committed.biomeVersion !== installed) {
-	// A bump is re-pinned only deliberately: without this, a plain regen on a bump that happened
-	// to drift nothing would silently move the pin and leave `--adopt` with nothing to do.
-	console.error(`ERROR: Biome changed ${committed.biomeVersion} → ${installed}; the manifest is re-pinned only with --adopt.`)
+if (gate === "version-changed-without-adopt") {
+	console.error(`ERROR: Biome changed ${committed?.biomeVersion} → ${installed}; the manifest is re-pinned only with --adopt.`)
 	console.error("In the bump PR: `bun run baseline:rescore`, re-stamp each drifted directive by hand, then `bun run baseline:complexity -- --adopt`.")
 	process.exit(1)
 }

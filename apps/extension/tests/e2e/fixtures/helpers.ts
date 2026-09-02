@@ -99,9 +99,12 @@ export async function ensureUnlocked(
 		/** How long the app may take to DECIDE its lock state. The default covers a warm popup;
 		 *  a caller that just restarted the service worker passes its own bootstrap envelope. */
 		decisionBudgetMs?: number
+		/** Internal: the product's boot RETRY has already been pressed once on this call. */
+		retried?: boolean
 	} = {},
 ): Promise<void> {
 	const decisionBudgetMs = opts.decisionBudgetMs ?? 30_000
+	const retried = opts.retried === true
 	// Lock state comes from the session record, never from the route and never
 	// from a lone DOM marker — each of those lies in one direction. `app.vue`
 	// pushes `/popup/auth` BEFORE `initNetworks()`/`initAccount()` finish and
@@ -168,15 +171,17 @@ export async function ensureUnlocked(
 					if (wellFormed && !window.location.hash.includes("/popup/auth")) return "unlocked"
 					if (!wellFormed && field) return "locked"
 					// The shell says its boot-time check GAVE UP (service unreachable across the
-					// backoff, or the bootstrap threw): the record may well be live in the worker,
-					// but this popup will never leave the lock screen on its own — the password is
-					// the user's recovery path, so it is ours too.
-					if (field && document.querySelector("[data-boot-outcome]")) return "locked"
+					// backoff, or the bootstrap threw over an OPEN session). That is neither of the
+					// two states above — the record may be live and a reconnect may clear the
+					// marker at any moment — so it is never typed against: the product's own RETRY
+					// is pressed once, and the wait resumes for a real decision.
+					const outcome = document.querySelector("[data-boot-outcome]")?.getAttribute("data-boot-outcome")
+					if (outcome) return `boot:${outcome}`
 					return null
 				},
 				{ timeout: decisionBudgetMs, polling: 200 },
 			)
-			.then((handle) => handle.jsonValue()),
+			.then((handle) => handle.jsonValue() as Promise<string | null>),
 		async () => {
 			// Was the service worker alive and writing while we waited? A frozen heartbeat
 			// means the worker died or never came back — a different bug from a slow bootstrap.
@@ -206,15 +211,25 @@ export async function ensureUnlocked(
 				.catch(() => ({ hash: "<unreadable>", record: "<unreadable>", field: false }))
 			return (
 				`ensureUnlocked: lock state never settled within ${decisionBudgetMs / 1000}s (hash: ${diag.hash}, session record: ${diag.record}, ` +
-				`password field: ${diag.field}, service-worker heartbeat during the wait: ${heartbeat}). A well-formed record on ` +
-				"/popup/auth WITH the password field and no data-boot-outcome is the activation bootstrap still deciding; a frozen " +
-				"heartbeat says the worker stopped writing. One with NO password field is a LOCKED PASSKEY profile, which this " +
-				"helper cannot unlock — drive the passkey ceremony instead."
+				`password field: ${diag.field}, service-worker heartbeat during the wait: ${heartbeat}${retried ? ", boot RETRY pressed once" : ""}). ` +
+				"A well-formed record on /popup/auth WITH the password field and no data-boot-outcome is the activation bootstrap " +
+				"still deciding; a frozen heartbeat says the worker stopped writing. One with NO password field is a LOCKED PASSKEY " +
+				"profile, which this helper cannot unlock — drive the passkey ceremony instead."
 			)
 		},
 	)
 
 	if (state === "unlocked") return
+	if (typeof state === "string" && state.startsWith("boot:")) {
+		// The one recovery a user has; taken exactly once so a product boot failure that
+		// survives its own retry still fails the test with its name, never a typed password.
+		if (retried)
+			throw new Error(
+				`ensureUnlocked: the popup's boot-time check gave up twice (${state.slice(5)}) — a product boot failure, not a slow bootstrap`,
+			)
+		await clickByTestId(page, "boot-retry")
+		return ensureUnlocked(page, password, { ...opts, retried: true })
+	}
 
 	// Scope the proof below to THIS unlock: the profile the auth screen is about
 	// to unlock, and the record generation preceding it.

@@ -8,7 +8,7 @@ import { managers, isBackgroundConnected } from "@/utils/core"
 import { isPrefersDarkScheme, persistThemeHint } from "@/utils/general"
 import { getLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { shouldAdvanceToGeneral } from "./should-advance-to-general"
-import { lookupActiveProfileWithBackoff } from "./auth-guard"
+import { resolveBootSession } from "./boot-session"
 import { defaultConfig } from "@/wallet/config"
 import { AccountServiceClient } from "@/wallet/services/account/client"
 import { createNetworkSwitchHandler } from "@/popup/network-switch"
@@ -180,59 +180,44 @@ const onImportedKeysDegraded = (profile) => {
 	openToast({ label: `Imported accounts unavailable in "${profile.name}"`, icon: "warning" }, TOAST_DURATION.LONG)
 }
 
-/** How the boot-time session check ended when it could NOT decide: the service stayed
- *  unreachable across the backoff, or the activation bootstrap threw. Rendered as
- *  `data-boot-outcome` on the shell so the lock screen the user lands on is distinguishable
- *  from the transient one the route guard parks a still-deciding popup on. Empty = deciding
- *  or decided. */
+/** How the boot-time session check ended when it could NOT decide: "unreachable" (the service
+ *  stayed unreachable across the backoff) or "failed" (an OPEN session whose activation
+ *  bootstrap threw). Rendered as `data-boot-outcome` on the shell plus a banner with RETRY,
+ *  so the user (and the e2e harness) can tell it from the transient lock screen the route guard
+ *  parks a still-deciding popup on. Empty = deciding or decided. */
 const bootOutcome = ref("")
 
-/** The boot-time check gave up: mark it done so the guard's own retry takes over, and land on
- *  the lock screen — the password path is the recovery, and it must be reachable. An
- *  un-checked session would otherwise park the popup on /popup/auth for good. `outcome` is
- *  "unreachable" or "failed". */
-const settleUndecidedBoot = (outcome) => {
+/** The boot-time check gave up. Mark it done so the guard's own retry takes over — an
+ *  un-checked session would park the popup on /popup/auth for good. Unreachable with a known
+ *  profile lands on the lock screen (the password path is a recovery, so it must be reachable,
+ *  and the auth page needs a selected profile to submit against); unreachable with no profile
+ *  known, and a failed bootstrap over an OPEN session, are NOT locks — re-entering a password
+ *  repairs neither — so the popup stays put and the banner's RETRY is the recovery. */
+const settleUndecidedBoot = (outcome, candidate) => {
 	bootOutcome.value = outcome
 	appStore.isSessionChecked = true
-	router.push("/popup/auth")
+	if (outcome !== "unreachable") return
+	if (!appStore.profile && candidate) appStore.profile = candidate
+	if (appStore.profile) router.push("/popup/auth")
+}
+
+/** No open session: land on the lock screen with its profile selected, or stay put on a
+ *  passkey-interaction route (which owns its own ceremony). */
+const landOnLockScreen = (candidate) => {
+	if (route.meta.isPasskeyInteraction && !appStore.profile) return
+	if (!appStore.profile && candidate) {
+		appStore.profile = candidate
+		appStore.isSessionChecked = true
+		router.push("/popup/auth")
+		return
+	}
+	appStore.isSessionChecked = true
 }
 
 // Generation fence for loadProfile: mount and every background reconnect start a run, and a
 // run that awaited past a newer one must not commit — its push or marker would land on top of
 // the newer run's (or the user's own unlock's) state.
 let loadProfileSeq = 0
-
-/** The boot-time reads, both through the guard's backoff: right after a service-worker restart
- *  the first requests can reject while the worker is still booting, and a rejection here used
- *  to leave `isSessionChecked` false forever (the guard answers "auth" without retrying while
- *  it is). The profile list decides register-vs-auth, so a stale one must never stand in.
- *  Resolves to the active profile, `undefined` for a clean lock, or "unreachable"; a run
- *  superseded mid-read resolves "superseded" and its caller commits nothing. */
-const readBootSession = async (isCurrent) => {
-	const profiles = await lookupActiveProfileWithBackoff(() => managers.profile.getProfiles())
-	if (!isCurrent()) return "superseded"
-	if (profiles.kind === "unreachable") return "unreachable"
-	appStore.profiles = profiles.kind === "active" ? profiles.profile : []
-	const lookup = await lookupActiveProfileWithBackoff(() => managers.profile.getActiveProfile())
-	if (!isCurrent()) return "superseded"
-	if (lookup.kind === "unreachable") return "unreachable"
-	return lookup.kind === "active" ? lookup.profile : undefined
-}
-
-/** No open session: pick the lock screen's profile (the last active one, else the first) and
- *  land on it, or stay put on a passkey-interaction route. */
-const landOnLockScreen = async (isCurrent) => {
-	if (appStore.profile || route.meta.isPasskeyInteraction || !appStore.profiles.length) {
-		if (!route.meta.isPasskeyInteraction || appStore.profile) appStore.isSessionChecked = true
-		return
-	}
-	const lastActiveId = await getLastActiveProfileId()
-	if (!isCurrent()) return
-	const lastActive = lastActiveId ? appStore.profiles.find((p) => p.id === lastActiveId) : undefined
-	appStore.profile = lastActive ?? appStore.profiles[0]
-	appStore.isSessionChecked = true
-	router.push("/popup/auth")
-}
 
 const loadProfile = async () => {
 	const seq = ++loadProfileSeq
@@ -242,41 +227,41 @@ const loadProfile = async () => {
 	managers.profile.onActiveProfileChanged.add(onActiveProfileChanged)
 	managers.profile.onImportedKeysDegraded.add(onImportedKeysDegraded)
 
-	const session = await readBootSession(isCurrent)
-	// The helper fenced itself before resolving; this caller resumes a microtask later, and a
-	// reconnect can bump the sequence in between — fence again here, never on the helper's word.
-	if (session === "superseded" || !isCurrent()) return
-	if (session === "unreachable") {
-		settleUndecidedBoot("unreachable")
-		return
+	const result = await resolveBootSession({
+		getProfiles: () => managers.profile.getProfiles(),
+		getActiveProfile: () => managers.profile.getActiveProfile(),
+		bootstrap: (profile) => bootstrapActiveProfile(profile),
+		lastActiveProfileId: getLastActiveProfileId,
+		isCurrent,
+	})
+	// The core fenced itself before resolving; this caller resumes a microtask later, and a
+	// reconnect can bump the sequence in between — fence again here, never on the core's word.
+	if (result.kind === "superseded" || !isCurrent()) return
+	appStore.profiles = result.profiles
+	if (result.kind === "unreachable") return settleUndecidedBoot("unreachable", result.candidate)
+	if (result.kind === "failed") {
+		console.error("activation bootstrap failed for the open session", { profileId: result.profile.id })
+		return settleUndecidedBoot("failed", undefined)
 	}
-	if (session === undefined) {
-		await landOnLockScreen(isCurrent)
-		return
-	}
+	if (result.kind === "locked") return landOnLockScreen(result.candidate)
 
-	let stillActive = false
-	try {
-		stillActive = await bootstrapActiveProfile(session)
-	} catch (error) {
-		if (!isCurrent()) return
-		console.error("activation bootstrap failed", { error })
-		settleUndecidedBoot("failed")
-		return
-	}
-	if (!isCurrent()) return
 	appStore.isSessionChecked = true
-
 	// Only advance into the authed area if the session survived bootstrap (a lock
 	// mid-bootstrap leaves stillActive=false). See shouldAdvanceToGeneral.
-	if (shouldAdvanceToGeneral(stillActive, route.name)) router.push("/popup/general")
+	if (shouldAdvanceToGeneral(result.stillActive, route.name)) router.push("/popup/general")
 }
 
 onBeforeMount(async () => {
 	await router.isReady()
 
-	const settings = await configService.getProps()
-	settings.forEach(applySetting)
+	// Settings are cosmetic (theme, links…): a read that rejects during a service-worker
+	// restart keeps the defaults and must never keep the session check from running.
+	try {
+		const settings = await configService.getProps()
+		settings.forEach(applySetting)
+	} catch (error) {
+		console.error("settings read failed at boot; defaults kept", { error })
+	}
 
 	await loadProfile()
 })
@@ -366,6 +351,13 @@ onBeforeUnmount(() => {
 
 		<Header />
 
+		<Banner v-if="bootOutcome" variant="warning" direction="vertical" data-testid="boot-outcome-banner">
+			<Text size="13" weight="500">
+				{{ bootOutcome === "failed" ? "The wallet could not finish starting up." : "The wallet service could not be reached." }}
+			</Text>
+			<button type="button" :class="$style.retry" data-testid="boot-retry" @click="loadProfile()">RETRY</button>
+		</Banner>
+
 		<RouterView v-slot="{ Component }">
 			<component :is="Component"></component>
 		</RouterView>
@@ -379,5 +371,20 @@ onBeforeUnmount(() => {
 	position: relative;
 
 	overflow: hidden;
+}
+
+.retry {
+	align-self: flex-start;
+	margin-top: 8px;
+	padding: 4px 10px;
+	font: inherit;
+	font-size: 12px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	color: inherit;
+	background: transparent;
+	border: 1px solid currentColor;
+	border-radius: 4px;
+	cursor: pointer;
 }
 </style>

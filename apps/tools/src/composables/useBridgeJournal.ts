@@ -994,17 +994,22 @@ function advanceReceiptStreaks(
 		if (streaks.dropped >= 3) {
 			// Same expected-hash guard as the revert clear: only the hash this round polled is
 			// cleared, never a fresh one another tab journaled while these three polls ran.
-			if (
-				journalPatchWhen(deps.kv, id, (live) => (live as DepositJournalRecord).claimTxHash === polledHash, {
-					claimTxHash: undefined,
-				})
-			)
-				reload()
-			setRuntime(id, {
-				attention: "error",
-				note: "The claim was dropped - claim again from this card. Nothing was lost.",
-				confirmLandedTxHash: undefined,
+			const cleared = journalPatchWhen(deps.kv, id, (live) => (live as DepositJournalRecord).claimTxHash === polledHash, {
+				claimTxHash: undefined,
 			})
+			if (cleared) {
+				reload()
+				setRuntime(id, {
+					attention: "error",
+					note: "The claim was dropped - claim again from this card. Nothing was lost.",
+					confirmLandedTxHash: undefined,
+				})
+			} else {
+				// The hash this round polled is no longer the record's: a newer claim owns it now
+				// and this runner has nothing to say about it — stop quietly, never "claim again".
+				log("dropped claim superseded by a newer hash - leaving the record to its owner", { id })
+				setRuntime(id, { attention: undefined, note: undefined, confirmLandedTxHash: undefined })
+			}
 			return "give-up"
 		}
 	} else {

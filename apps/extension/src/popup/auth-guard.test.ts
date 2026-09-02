@@ -31,6 +31,18 @@ describe("lookupActiveProfileWithBackoff", () => {
 		expect(await lookupActiveProfileWithBackoff(alwaysRejects)).toEqual({ kind: "unreachable" })
 		expect(always).toBe(4)
 	})
+
+	test("one overall deadline bounds the whole call, in-flight requests included — never four RPC timeouts in a row", async () => {
+		let calls = 0
+		const hangs = () => {
+			calls++
+			return new Promise<{ id: string } | undefined>(() => {})
+		}
+		const started = Date.now()
+		expect(await lookupActiveProfileWithBackoff(hangs, { deadlineMs: 60 })).toEqual({ kind: "unreachable" })
+		expect(Date.now() - started).toBeLessThan(1_000)
+		expect(calls).toBe(1) // the first attempt consumed the whole budget; no retry sleeps were started past it
+	})
 })
 
 const activeProfile = { id: "p1" }
