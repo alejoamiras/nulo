@@ -168,6 +168,13 @@ export function patchFuel(
 	updateRecord(id, { ...topLevel, fuel: { ...base, ...patch } })
 }
 
+/** A persisted tx hash the node can be asked about. `TxHash.fromString` throws on anything else,
+ *  and the probes read that throw as "pending" — a corrupted or hand-edited record would wait
+ *  forever with no diagnostic, so the ladders check the shape first and say so. */
+export const isWellFormedTxHash = (h: string): boolean => /^0x[0-9a-fA-F]{64}$/.test(h)
+const MALFORMED_FUEL_HASH =
+	"This bridge's recorded gas-claim transaction hash is malformed - restore the record from a backup, or discard it."
+
 export async function fuelReceiptStatus(txHash: string): Promise<"included" | "dropped" | "pending"> {
 	try {
 		const receipt = await createAztecNodeClient(NODE_URL).getTxReceipt(TxHash.fromString(txHash))
@@ -342,10 +349,13 @@ export async function recoverDepositLeg(rec: DepositJournalRecord, publicClient:
 async function priorFuelClaimStop(fuel: DepositJournalRecord["fuel"]): Promise<ClaimInteraction | null> {
 	if (fuel?.consumed === true) return failStopInteraction(FUEL_ALREADY_CLAIMED)
 	if (fuel?.claimTxHash === undefined) return null
+	if (!isWellFormedTxHash(fuel.claimTxHash)) return failStopInteraction(MALFORMED_FUEL_HASH)
 	const status = await fuelReceiptStatus(fuel.claimTxHash)
 	if (status === "included") return failStopInteraction(FUEL_ALREADY_CLAIMED)
 	if (status === "dropped") return null
-	return failStopInteraction("A gas claim for this bridge is still pending - waiting for its receipt before trying again.")
+	return failStopInteraction(
+		"A gas claim for this bridge is still pending - waiting for its receipt before trying again. Retry later, or discard this record if you know that claim will never land.",
+	)
 }
 const FUEL_ALREADY_CLAIMED = "The gas claim was already included on Aztec - there is nothing left to claim for this bridge."
 
@@ -417,6 +427,7 @@ export async function buildPrivateFuelClaim(ctx: TokenClaimCtx): Promise<ClaimIn
 	const unsafe = privateFuelSafetyStop(fb, fuelReceived)
 	if (unsafe) return unsafe
 	const fpcAddr = AztecAddress.fromStringUnsafe(fb.fpc ?? PRIVATE_FPC_ADDRESS)
+	if (fb.claimTxHash !== undefined && !isWellFormedTxHash(fb.claimTxHash)) return failStopInteraction(MALFORMED_FUEL_HASH)
 	const receiptStatus = fb.claimTxHash ? await fuelReceiptStatus(fb.claimTxHash) : undefined
 	if (receiptStatus === "included" && fb.consumed !== true) {
 		patchFuel(rec.id, fb, { consumed: true })
@@ -566,6 +577,7 @@ export async function resolvePublicClaimFee(
 ): Promise<PublicClaimFee> {
 	const fuel = rec.fuel
 	if (!(fuel?.received && fuel.leafIndex)) return gateNoFuelClaim(rec, recipientAddr, aztec)
+	if (fuel.claimTxHash !== undefined && !isWellFormedTxHash(fuel.claimTxHash)) return { kind: "stop", why: MALFORMED_FUEL_HASH }
 	const receiptStatus = fuel.claimTxHash ? await fuelReceiptStatus(fuel.claimTxHash) : undefined
 	// Promote a prior attempt to INCLUSION-GRADE durable evidence: only an `included`
 	// receipt sets `consumed`, so a later unreachable node can trust it - a PROPOSED-time

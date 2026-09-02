@@ -901,7 +901,7 @@ async function runReceiptRound(rec: DepositJournalRecord, gen: number): Promise<
 			return settled
 		}
 		if (status === "reverted") return reportRevertedClaim(rec)
-		if (advanceReceiptStreaks(rec.id, status, streaks) === "give-up") return "stop"
+		if (advanceReceiptStreaks(rec.id, rec.claimTxHash as string, status, streaks) === "give-up") return "stop"
 		await wait(4000)
 	}
 	return closeReceiptRound(rec.id, roundsDone)
@@ -966,11 +966,23 @@ function reportRevertedClaim(rec: DepositJournalRecord): "stop" {
  *  straight drops clear the hash — hash-scoping alone doesn't cover a SAME-hash resurrection
  *  (a restored backup can re-import the dropped hash), so the flag clears with it.
  *  Unreachable is independent: a dead RPC is a connectivity problem, never a slow claim (D2). */
-function advanceReceiptStreaks(id: string, status: string, streaks: { dropped: number; unreachable: number }): "give-up" | "poll" {
+function advanceReceiptStreaks(
+	id: string,
+	polledHash: string,
+	status: string,
+	streaks: { dropped: number; unreachable: number },
+): "give-up" | "poll" {
 	if (status === "dropped") {
 		streaks.dropped++
 		if (streaks.dropped >= 3) {
-			patchRecord(id, { claimTxHash: undefined })
+			// Same expected-hash guard as the revert clear: only the hash this round polled is
+			// cleared, never a fresh one another tab journaled while these three polls ran.
+			if (
+				journalPatchWhen(deps.kv, id, (live) => (live as DepositJournalRecord).claimTxHash === polledHash, {
+					claimTxHash: undefined,
+				})
+			)
+				reload()
 			setRuntime(id, {
 				attention: "error",
 				note: "The claim was dropped - claim again from this card. Nothing was lost.",

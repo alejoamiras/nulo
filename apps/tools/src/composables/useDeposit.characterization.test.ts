@@ -803,6 +803,31 @@ describe("claim dep characterization", () => {
 		expect(h.trace.some(([n]) => n === "fuelClaim.buildFuelClaimInteraction")).toBe(false)
 	})
 
+	test("a malformed persisted fuel claim hash is surfaced on every ladder, never silently read as pending", async () => {
+		const deps = wiredDeps()
+		// A node that throws would read as pending/unreachable; "malformed" proves it was never asked.
+		h.l2.txReceiptThrows = true
+		const bad = { ...FUEL_OK, claimAttempt: true, claimTxHash: "0xnot-a-real-hash" }
+		const direct = mkRec({ id: "0xbadfj", assetKind: "fee-juice", fuel: bad } as never)
+		expect(await expectStop(await deps.claim(direct, "0xsecrethex", undefined))).toMatch(/malformed/)
+		const pub = mkRec({ id: "0xbadpub", fuel: bad } as never)
+		expect(await expectStop(await deps.claim(pub, pub.secret as string, undefined))).toMatch(/malformed/)
+		const priv = mkRec({
+			id: "0xbadpriv",
+			isPrivate: true,
+			secret: undefined,
+			schema: 2,
+			fuel: {
+				...bad,
+				bridgeSecretSalt: "0x0000000000000000000000000000000000000000000000000000000000008888",
+				fpc: PRIVATE_FPC_ADDRESS,
+			},
+		} as never)
+		expect(
+			await expectStop(await deps.claim(priv, "0x0000000000000000000000000000000000000000000000000000000000005555", undefined)),
+		).toMatch(/malformed/)
+	})
+
 	test("reconcileFuelConsumed merges into the persisted block, not the copy it read before its await", async () => {
 		const kv = memKV()
 		connectJournalDeps({ kv } as never)
@@ -861,7 +886,7 @@ describe("claim dep characterization", () => {
 	test("public fueled, attempt pending: wait fail-stop", async () => {
 		const deps = wiredDeps()
 		h.l2.txReceiptStatus = "pending"
-		const rec = mkRec({ fuel: { ...FUEL_OK, claimAttempt: true, claimTxHash: "0xoldattempt" } } as never)
+		const rec = mkRec({ fuel: { ...FUEL_OK, claimAttempt: true, claimTxHash: TX(7) } } as never)
 		const why = await expectStop(await deps.claim(rec, rec.secret as string, undefined))
 		expect(why).toMatchSnapshot()
 	})
@@ -1024,7 +1049,7 @@ describe("private ladder: the remaining decisions fail-stop (never public)", () 
 				...FUEL_OK,
 				claimAttempt: true,
 				claimAttemptAt: 1_700_000_000_000,
-				claimTxHash: "0xpriorpriv",
+				claimTxHash: TX(8),
 				bridgeSecretSalt: "0x8888",
 				fpc: PRIVATE_FPC_ADDRESS,
 			},
@@ -1100,7 +1125,7 @@ describe("public ladder: sponsored arm + wait sendWhy (codex impl-review pins)",
 	test("the wait stop keeps the historical ASYMMETRIC messages (send is shorter)", async () => {
 		const deps = wiredDeps()
 		h.l2.txReceiptStatus = "pending"
-		const rec = mkRec({ id: "0xrwait", fuel: { ...FUEL_OK, claimAttempt: true, claimTxHash: "0xoldattempt" } } as never)
+		const rec = mkRec({ id: "0xrwait", fuel: { ...FUEL_OK, claimAttempt: true, claimTxHash: TX(7) } } as never)
 		const i = await deps.claim(rec, rec.secret as string, undefined)
 		await expect(i.simulate()).rejects.toThrow("fuel claim attempt pending - waiting for its receipt before retrying")
 		await expect(i.send()).rejects.toThrow(/^fuel claim attempt pending$/)

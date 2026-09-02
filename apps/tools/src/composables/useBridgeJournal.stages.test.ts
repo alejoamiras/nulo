@@ -484,6 +484,24 @@ describe("journal engine — pre-extraction pins", () => {
 		expect((claim.mock.calls[0] as unknown as [DepositJournalRecord])[0].id).toBe("0xrevlive")
 	})
 
+	it("(f) the dropped-streak clear is expected-hash guarded too: a fresh hash another tab sent survives three late drops", async () => {
+		const deps = baseDeps(kv)
+		let polls = 0
+		deps.claimReceiptStatus.mockImplementation((async (hash: string) => {
+			if (hash !== "0xH") return "pending"
+			// "Another tab" retried and journaled a new hash while this tab's drop streak was building.
+			if (++polls === 2) kvPatchRecord(kv, "0xdroprace", { claimTxHash: "0xN" })
+			return "dropped"
+		}) as never)
+		connectJournalDeps({ ...deps, claim: vi.fn() as never })
+		addRecord(mkDeposit("0xdroprace", { claimTxHash: "0xH" }))
+		await runDepositClaim("0xdroprace")
+		const { records, runtime } = useBridgeJournal()
+		expect(deps.claimReceiptStatus).toHaveBeenCalledTimes(3)
+		expect((records.value.find((r) => r.id === "0xdroprace") as DepositJournalRecord | undefined)?.claimTxHash).toBe("0xN")
+		expect(runtime.value["0xdroprace"]?.note).toMatch(/dropped - claim again/)
+	})
+
 	it("(f) dropped debounce: any non-dropped status resets the streak; three straight drops clear the hash", async () => {
 		const deps = baseDeps(kv)
 		const claim = vi.fn()
