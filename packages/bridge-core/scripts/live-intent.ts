@@ -22,7 +22,7 @@ import { lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync }
 import { homedir } from "node:os"
 import { dirname, join, resolve as resolvePath } from "node:path"
 import { fileURLToPath } from "node:url"
-import { parseCandidateManifest } from "../src/candidate-schema"
+import { parseCandidateManifest, type ValidatedCandidateManifest } from "../src/candidate-schema"
 import { assertDripCandidateShape, assertZeroSeed } from "../src/promotion"
 import { PRIVATE_FPC_ADDRESS, PRIVATE_FPC_SALT } from "../src/private-fuel"
 import { git, resolveBin, run } from "./run"
@@ -302,30 +302,50 @@ async function build(intentPath: string): Promise<void> {
 	)
 }
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (91 lines) — split when touched, never grow
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 61) — refactor when touched, never raise
+/**
+ * The verify ladder, in the order the gates were reviewed into: intent + RPC → the committed-intent
+ * check (only once a candidate digest is recorded) → tree discipline → source unchanged since
+ * build → identity (the only network probe) → signer → artifact digests → the candidate (digest
+ * pin, strict parse, privileged L1 readbacks) → spend within caps. Every gate is a hard stop.
+ */
 export async function verify(intentPath: string, candidatePath?: string): Promise<void> {
 	const intent = JSON.parse(readFileSync(intentPath, "utf8")) as DeployIntent
 	const sepolia = process.env.SEPOLIA_RPC_URL
 	if (!sepolia) throw new Error("SEPOLIA_RPC_URL required")
 
-	// The intent is the gate's own trust anchor (caps, signer, digests). It lives under the
-	// otherwise-allowlisted lessons dir, so once it carries a recorded candidate digest (i.e. we are
-	// PAST the one-time digest-recording verify and into the gating regime) it MUST be committed — an
-	// uncommitted edit to weaken caps/signer/digest would otherwise slip through the tree check.
-	if (intent.candidateSha256) {
-		// `--literal-pathspecs` + `--`: the path is neither an option nor pathspec magic.
-		const intentStatus = run("git", ["--literal-pathspecs", "status", "--porcelain", "--", intentPath], {
-			cwd: repoRoot,
-		}).stdout.trim()
-		if (intentStatus.length > 0) {
-			throw new Error(`intent.json is uncommitted — the gate's own anchor must be committed before promotion:\n${intentStatus}`)
-		}
-	}
+	if (intent.candidateSha256) assertIntentCommitted(intentPath)
+	assertTreeDiscipline()
+	if (intent.source?.commit) assertSourceUnchangedSinceBuild(intent.source.commit)
 
-	// Tree discipline at EVERY verify, not just at build: only allowlisted operational files may be
-	// dirty during the live arc. A non-allowlisted source change must be committed (fix-forward,
-	// logged in lessons) before the next broadcast group — never carried silently into a promotion.
+	// Identity re-validation (before EVERY broadcast group + at promotion).
+	const now = await probeIdentity(intent.primaryRpc)
+	assertIdentityUnmoved(intent, now)
+	assertSignerUnchanged(intent)
+	assertArtifactDigests(intent)
+
+	if (candidatePath) verifyCandidate({ intent, intentPath, sepolia }, candidatePath)
+
+	assertSpendWithinCaps(intent, sepolia, now)
+}
+
+/** The intent is the gate's own trust anchor (caps, signer, digests). It lives under the
+ *  otherwise-allowlisted lessons dir, so once it carries a recorded candidate digest (i.e. we are
+ *  PAST the one-time digest-recording verify and into the gating regime) it MUST be committed — an
+ *  uncommitted edit to weaken caps/signer/digest would otherwise slip through the tree check. */
+function assertIntentCommitted(intentPath: string): void {
+	// `--literal-pathspecs` + `--`: the path is neither an option nor pathspec magic.
+	const intentStatus = run("git", ["--literal-pathspecs", "status", "--porcelain", "--", intentPath], {
+		cwd: repoRoot,
+	}).stdout.trim()
+	if (intentStatus.length > 0) {
+		throw new Error(`intent.json is uncommitted — the gate's own anchor must be committed before promotion:\n${intentStatus}`)
+	}
+}
+
+/** Tree discipline at EVERY verify, not just at build: only allowlisted operational files may be
+ *  dirty during the live arc. A non-allowlisted source change must be committed (fix-forward,
+ *  logged in lessons) before the next broadcast group — never carried silently into a promotion. */
+function assertTreeDiscipline(): void {
 	const dirtyNow = run("git", ["status", "--porcelain"], { cwd: repoRoot })
 		.stdout.split("\n")
 		.filter(Boolean)
@@ -333,115 +353,132 @@ export async function verify(intentPath: string, candidatePath?: string): Promis
 	if (dirtyNow.length > 0) {
 		throw new Error(`non-allowlisted files dirty during the live arc — commit or revert first:\n${dirtyNow.join("\n")}`)
 	}
+}
 
-	// Source-commit discipline (codex ultra-audit HIGH): tree-discipline catches UNCOMMITTED
-	// changes, but a CLEAN commit between build and a later verify (changing a deploy script or
-	// EVM artifact) would pass. Diff HEAD against the intent's recorded build commit and require
-	// every changed path to be allowlisted — so the intent commit itself (allowlisted lessons)
-	// is fine, but a deploy-relevant change since build is a STOP.
-	if (intent.source?.commit) {
-		// The intent is a type-cast JSON file: the commit is validated before it becomes a git argument.
-		if (!COMMIT_SHA.test(intent.source.commit)) throw new Error(`intent.source.commit is not a 40-hex commit — STOP`)
-		const changedSinceBuild = git(["diff", "--name-only", "--end-of-options", intent.source.commit, "HEAD", "--"], repoRoot)
-			.split("\n")
-			.filter(Boolean)
-			.filter((path) => !OPERATIONAL_ALLOWLIST.some((a) => path.startsWith(a)))
-		if (changedSinceBuild.length > 0) {
-			throw new Error(
-				`deploy-relevant files changed since the intent was built (commit ${intent.source.commit.slice(0, 12)}):\n` +
-					`${changedSinceBuild.join("\n")}\nrebuild the intent — STOP`,
-			)
-		}
+/** Source-commit discipline: tree-discipline catches UNCOMMITTED changes, but a CLEAN commit
+ *  between build and a later verify (changing a deploy script or EVM artifact) would pass. Diff
+ *  HEAD against the intent's recorded build commit and require every changed path to be
+ *  allowlisted — so the intent commit itself (allowlisted lessons) is fine, but a deploy-relevant
+ *  change since build is a STOP. */
+function assertSourceUnchangedSinceBuild(buildCommit: string): void {
+	// The intent is a type-cast JSON file: the commit is validated before it becomes a git argument.
+	if (!COMMIT_SHA.test(buildCommit)) throw new Error(`intent.source.commit is not a 40-hex commit — STOP`)
+	const changedSinceBuild = git(["diff", "--name-only", "--end-of-options", buildCommit, "HEAD", "--"], repoRoot)
+		.split("\n")
+		.filter(Boolean)
+		.filter((path) => !OPERATIONAL_ALLOWLIST.some((a) => path.startsWith(a)))
+	if (changedSinceBuild.length > 0) {
+		throw new Error(
+			`deploy-relevant files changed since the intent was built (commit ${buildCommit.slice(0, 12)}):\n` +
+				`${changedSinceBuild.join("\n")}\nrebuild the intent — STOP`,
+		)
 	}
+}
 
-	// Identity re-validation (before EVERY broadcast group + at promotion).
-	const now = await probeIdentity(intent.primaryRpc)
+function assertIdentityUnmoved(intent: DeployIntent, now: NodeIdentity): void {
 	if (now.rollupVersion !== intent.identity.rollupVersion)
 		throw new Error(`rollupVersion MOVED mid-arc: ${now.rollupVersion} != ${intent.identity.rollupVersion} — STOP`)
 	if (now.nodeVersion !== intent.identity.nodeVersion)
 		throw new Error(`nodeVersion moved: ${now.nodeVersion} != ${intent.identity.nodeVersion} — STOP`)
 	if (now.l1ContractAddresses.rollupAddress !== intent.l1.rollup) throw new Error("rollup address moved — STOP")
+}
 
-	// Signer re-check.
+/** Signer re-check — only when a key is in the env (a read-only verify has none). */
+function assertSignerUnchanged(intent: DeployIntent): void {
 	const pk = process.env.PRIVATE_KEY
 	if (pk) {
 		const signer = cast(["wallet", "address", "--private-key", requirePrivateKey(pk)])
 		if (signer.toLowerCase() !== intent.signer.toLowerCase()) throw new Error(`signer ${signer} != intent ${intent.signer} — STOP`)
 	}
+}
 
-	// Artifact digests unchanged — the Noir targets AND the canonical PrivateFPC
-	// (previously recorded at build but never re-verified — review finding #6).
+/** Artifact digests unchanged — the Noir targets AND the canonical PrivateFPC
+ *  (previously recorded at build but never re-verified). */
+function assertArtifactDigests(intent: DeployIntent): void {
 	for (const [rel, expected] of Object.entries(intent.artifacts.noirTargets)) {
 		const actual = sha256(join(repoRoot, "contracts", "bridge", "aztec", rel))
 		if (actual !== expected) throw new Error(`Noir artifact drifted since intent: ${rel}`)
 	}
-	{
-		const descriptorSha = JSON.parse(readFileSync(join(here, "..", "src", "private-fpc-canonical.json"), "utf8")).artifactSha256
-		if (descriptorSha !== intent.artifacts.privateFpc.sha256) {
-			throw new Error(
-				`canonical PrivateFPC digest drifted since intent: ${descriptorSha} != ${intent.artifacts.privateFpc.sha256} — STOP`,
-			)
+	const descriptorSha = JSON.parse(readFileSync(join(here, "..", "src", "private-fpc-canonical.json"), "utf8")).artifactSha256
+	if (descriptorSha !== intent.artifacts.privateFpc.sha256) {
+		throw new Error(
+			`canonical PrivateFPC digest drifted since intent: ${descriptorSha} != ${intent.artifacts.privateFpc.sha256} — STOP`,
+		)
+	}
+}
+
+interface VerifyContext {
+	intent: DeployIntent
+	intentPath: string
+	sepolia: string
+}
+
+/** The candidate leg, in its reviewed order: digest pin → strict parse → the ONE-TIME digest
+ *  recording (so an invalid manifest never rewrites the intent) → privileged L1 readbacks. */
+function verifyCandidate({ intent, intentPath, sepolia }: VerifyContext, candidatePath: string): void {
+	const raw = readFileSync(candidatePath, "utf8")
+	const digest = createHash("sha256").update(raw).digest("hex")
+	if (intent.candidateSha256 && intent.candidateSha256 !== digest) {
+		throw new Error(`candidate digest CHANGED since recorded: ${digest} != ${intent.candidateSha256} — never promote`)
+	}
+	const candidate = parseCandidateManifest(JSON.parse(raw))
+	if (!intent.candidateSha256) {
+		intent.candidateSha256 = digest
+		writeFileSync(intentPath, `${JSON.stringify(intent, null, "\t")}\n`)
+		console.log(`✓ candidate digest recorded: ${digest}`)
+	}
+	// Privileged-state readbacks on L1 (a fingerprint can't catch a wrong owner/binding). The
+	// candidate addresses are schema-validated (EVM-address regex), so they're shell-safe; passed
+	// as argv all the same. The `"UNDERLYING()(address)"` sig is one argv element (no shell parse).
+	if (candidate.l1.feeJuice) assertFeeJuiceReadbacks(candidate.l1.feeJuice, intent, sepolia)
+	if (candidate.l1.fuel) assertFuelReadbacks(candidate.l1.fuel, intent, sepolia)
+	console.log("✓ candidate strict-valid + privileged readbacks agree")
+}
+
+/** Cross-pin against the intent's corroborated L1 set FIRST: internal consistency (portal↔asset
+ *  readbacks below) is not authentication — a lying node at deploy time can mint a self-consistent
+ *  FAKE pair. The intent's values went through previous-arc byte-equality + eth_getCode; the
+ *  candidate must match them exactly or deposits go to the wrong portal (unrecoverable). */
+function assertFeeJuiceReadbacks(
+	feeJuice: NonNullable<ValidatedCandidateManifest["l1"]["feeJuice"]>,
+	intent: DeployIntent,
+	sepolia: string,
+): void {
+	if (feeJuice.portal.toLowerCase() !== intent.l1.feeJuicePortal.toLowerCase()) {
+		throw new Error(`candidate feeJuice.portal ${feeJuice.portal} != intent pin ${intent.l1.feeJuicePortal} — STOP`)
+	}
+	if (feeJuice.asset.toLowerCase() !== intent.l1.feeJuice.toLowerCase()) {
+		throw new Error(`candidate feeJuice.asset ${feeJuice.asset} != intent pin ${intent.l1.feeJuice} — STOP`)
+	}
+	const underlying = cast(["call", feeJuice.portal, "UNDERLYING()(address)", "--rpc-url", sepolia])
+	if (underlying.toLowerCase() !== feeJuice.asset.toLowerCase()) {
+		throw new Error(`portal UNDERLYING ${underlying} != manifest asset ${feeJuice.asset} — STOP`)
+	}
+	// The FeeAssetHandler is testnet-only (permissionless mint); mainnet is BYO-$AZTEC with no
+	// handler. Verify it (intent-pin + FEE_ASSET readback) only when the manifest declares one.
+	const handler = feeJuice.feeAssetHandler
+	if (handler) {
+		if (handler.toLowerCase() !== intent.l1.feeAssetHandler.toLowerCase()) {
+			throw new Error(`candidate feeJuice.feeAssetHandler ${handler} != intent pin ${intent.l1.feeAssetHandler} — STOP`)
+		}
+		const feeAsset = cast(["call", handler, "FEE_ASSET()(address)", "--rpc-url", sepolia])
+		if (feeAsset.toLowerCase() !== feeJuice.asset.toLowerCase()) {
+			throw new Error(`handler FEE_ASSET ${feeAsset} != manifest asset — STOP`)
 		}
 	}
+}
 
-	if (candidatePath) {
-		const raw = readFileSync(candidatePath, "utf8")
-		const digest = createHash("sha256").update(raw).digest("hex")
-		if (intent.candidateSha256 && intent.candidateSha256 !== digest) {
-			throw new Error(`candidate digest CHANGED since recorded: ${digest} != ${intent.candidateSha256} — never promote`)
-		}
-		const candidate = parseCandidateManifest(JSON.parse(raw))
-		if (!intent.candidateSha256) {
-			intent.candidateSha256 = digest
-			writeFileSync(intentPath, `${JSON.stringify(intent, null, "\t")}\n`)
-			console.log(`✓ candidate digest recorded: ${digest}`)
-		}
-		// Privileged-state readbacks on L1 (a fingerprint can't catch a wrong owner/binding). The
-		// candidate addresses are schema-validated (EVM-address regex), so they're shell-safe; passed
-		// as argv all the same. The `"UNDERLYING()(address)"` sig is one argv element (no shell parse).
-		if (candidate.l1.feeJuice) {
-			// Cross-pin against the intent's corroborated L1 set FIRST (review finding #1):
-			// internal consistency (portal↔asset readbacks below) is not authentication —
-			// a lying node at deploy time can mint a self-consistent FAKE pair. The intent's
-			// values went through previous-arc byte-equality + eth_getCode; the candidate
-			// must match them exactly or deposits go to the wrong portal (unrecoverable).
-			if (candidate.l1.feeJuice.portal.toLowerCase() !== intent.l1.feeJuicePortal.toLowerCase()) {
-				throw new Error(
-					`candidate feeJuice.portal ${candidate.l1.feeJuice.portal} != intent pin ${intent.l1.feeJuicePortal} — STOP`,
-				)
-			}
-			if (candidate.l1.feeJuice.asset.toLowerCase() !== intent.l1.feeJuice.toLowerCase()) {
-				throw new Error(`candidate feeJuice.asset ${candidate.l1.feeJuice.asset} != intent pin ${intent.l1.feeJuice} — STOP`)
-			}
-			const underlying = cast(["call", candidate.l1.feeJuice.portal, "UNDERLYING()(address)", "--rpc-url", sepolia])
-			if (underlying.toLowerCase() !== candidate.l1.feeJuice.asset.toLowerCase()) {
-				throw new Error(`portal UNDERLYING ${underlying} != manifest asset ${candidate.l1.feeJuice.asset} — STOP`)
-			}
-			// The FeeAssetHandler is testnet-only (permissionless mint); mainnet is BYO-$AZTEC with no
-			// handler. Verify it (intent-pin + FEE_ASSET readback) only when the manifest declares one.
-			const handler = candidate.l1.feeJuice.feeAssetHandler
-			if (handler) {
-				if (handler.toLowerCase() !== intent.l1.feeAssetHandler.toLowerCase()) {
-					throw new Error(`candidate feeJuice.feeAssetHandler ${handler} != intent pin ${intent.l1.feeAssetHandler} — STOP`)
-				}
-				const feeAsset = cast(["call", handler, "FEE_ASSET()(address)", "--rpc-url", sepolia])
-				if (feeAsset.toLowerCase() !== candidate.l1.feeJuice.asset.toLowerCase()) {
-					throw new Error(`handler FEE_ASSET ${feeAsset} != manifest asset — STOP`)
-				}
-			}
-		}
-		if (candidate.l1.fuel) {
-			const owner = cast(["call", candidate.l1.fuel.core.router, "owner()(address)", "--rpc-url", sepolia]).toLowerCase()
-			if (owner !== intent.signer.toLowerCase()) throw new Error(`router owner ${owner} != our signer — STOP (privileged binding)`)
-			const swapTarget = cast(["call", candidate.l1.fuel.core.router, "swapTarget()(address)", "--rpc-url", sepolia]).toLowerCase()
-			if (swapTarget !== candidate.l1.fuel.core.swapTarget.toLowerCase())
-				throw new Error(`router swapTarget ${swapTarget} != manifest — STOP`)
-		}
-		console.log("✓ candidate strict-valid + privileged readbacks agree")
-	}
+/** The router's privileged bindings: owned by our signer, pointing at the manifest's swap target. */
+function assertFuelReadbacks(fuel: NonNullable<ValidatedCandidateManifest["l1"]["fuel"]>, intent: DeployIntent, sepolia: string): void {
+	const owner = cast(["call", fuel.core.router, "owner()(address)", "--rpc-url", sepolia]).toLowerCase()
+	if (owner !== intent.signer.toLowerCase()) throw new Error(`router owner ${owner} != our signer — STOP (privileged binding)`)
+	const swapTarget = cast(["call", fuel.core.router, "swapTarget()(address)", "--rpc-url", sepolia]).toLowerCase()
+	if (swapTarget !== fuel.core.swapTarget.toLowerCase()) throw new Error(`router swapTarget ${swapTarget} != manifest — STOP`)
+}
 
-	// Balance-within-caps reconciliation — ENFORCED, not merely printed. A build recorded the
-	// pre-spend baseline; if the cumulative spend since then exceeds the cap, hard-stop.
+/** Balance-within-caps reconciliation — ENFORCED, not merely printed. A build recorded the
+ *  pre-spend baseline; if the cumulative spend since then exceeds the cap, hard-stop. */
+function assertSpendWithinCaps(intent: DeployIntent, sepolia: string, now: NodeIdentity): void {
 	const balance = Number(cast(["balance", requireAddress(intent.signer, "intent signer"), "--rpc-url", sepolia, "--ether"]))
 	if (typeof intent.startingBalanceEth === "number" && Number.isFinite(intent.startingBalanceEth)) {
 		const spent = intent.startingBalanceEth - balance
@@ -460,6 +497,40 @@ export async function verify(intentPath: string, candidatePath?: string): Promis
 			`✓ verify green — rollupVersion ${now.rollupVersion}, signer balance ${balance} ETH (caps: ≤${intent.caps.maxTotalEthSpend} total spend; no baseline to enforce)`,
 		)
 	}
+}
+
+/** The four files a promotion touches, computed once — positional strings invite swaps. */
+interface PromotionPaths {
+	bridgeCandidate: string
+	bridgeLive: string
+	dripCandidate: string
+	dripLive: string
+}
+
+function promotionPaths(): PromotionPaths {
+	return {
+		bridgeCandidate: join(repoRoot, "apps/tools/public/testnet-bridge.candidate.json"),
+		bridgeLive: join(repoRoot, "apps/tools/public/testnet-bridge.json"),
+		dripCandidate: join(repoRoot, "apps/tools/src/contracts/deployments.candidate.json"),
+		dripLive: join(repoRoot, "apps/tools/src/contracts/deployments.json"),
+	}
+}
+
+/** What the read-once stage pins: the exact bytes that will be written, their digests, the parsed
+ *  bridge candidate, and (bridge-only) the live drip digest to re-assert after the write. */
+interface StagedCandidates {
+	bridgeBytes: Buffer
+	bridgeSha: string
+	dripBytes: Buffer | null
+	dripSha: string | null
+	dripLivePin: string | null
+	bridgeCandidate: ValidatedCandidateManifest
+}
+
+interface PromoteOptions {
+	bridgeOnly?: boolean
+	dropSwap?: boolean
+	restoreSwap?: boolean
 }
 
 /**
@@ -484,87 +555,110 @@ export async function verify(intentPath: string, candidatePath?: string): Promis
  * candidate's `l1.fuel` section must be BYTE-carried from the current live
  * manifest — new or changed fuel infrastructure hard-fails the promotion.
  */
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: baseline (91 lines) — split when touched, never grow
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 35) — refactor when touched, never raise
-export async function promote(
-	intentPath: string,
-	opts: { bridgeOnly?: boolean; dropSwap?: boolean; restoreSwap?: boolean } = {},
-): Promise<void> {
+export async function promote(intentPath: string, opts: PromoteOptions = {}): Promise<void> {
 	// --bridge-only: a bridge cutover that touches NO drip deployment. The drip
 	// candidate is not required; instead the LIVE drip manifest is digest-pinned before/after so the
 	// promotion provably leaves it byte-identical.
 	const bridgeOnly = opts.bridgeOnly === true
-	const bridgeCandidatePath = join(repoRoot, "apps/tools/public/testnet-bridge.candidate.json")
-	const bridgeLivePath = join(repoRoot, "apps/tools/public/testnet-bridge.json")
-	const dripCandidatePath = join(repoRoot, "apps/tools/src/contracts/deployments.candidate.json")
-	const dripLivePath = join(repoRoot, "apps/tools/src/contracts/deployments.json")
+	const paths = promotionPaths()
 
 	// 0. The recorded candidate digest is REQUIRED BEFORE promote's own verify runs — verify
 	// RECORDS a missing digest, so checking after it would always pass (the one-time recording
-	// regime would never have happened; codex bug-bash r2 HIGH). Read + require FIRST.
-	const intent = JSON.parse(readFileSync(intentPath, "utf8")) as DeployIntent
-	if (!intent.candidateSha256) {
-		throw new Error("intent has no recorded candidateSha256 — run verify --candidate (and commit the intent) BEFORE promote — STOP")
-	}
+	// regime would never have happened). Read + require FIRST.
+	const intent = requireRecordedDigest(intentPath)
 
 	// 0b. The full gate, candidate-pinned, immediately before anything is written (re-pins the
 	// candidate bytes against the digest required above).
-	await verify(intentPath, bridgeCandidatePath)
+	await verify(intentPath, paths.bridgeCandidate)
 
 	// 0c. The FPC require-deployed gate as CODE, not operator discipline:
 	// promotion enables the app's Fuel tab, which hard-uses PRIVATE_FPC_ADDRESS — an
 	// undeployed or upgraded-out FPC at that address must abort the promotion.
 	run("bun", [join(here, "check-fpc-version.ts"), "--mode", "require-deployed"], { stdio: "inherit" })
 
-	// 1. Symlink rejection on every involved path (a symlinked live target would
-	// redirect the rename; a symlinked candidate breaks the read-once contract).
+	// 1. Symlink rejection on every involved path.
+	rejectSymlinks(paths, bridgeOnly)
+
+	// 2. Read ONCE into buffers + validate the exact bytes that will be written.
+	const staged = readCandidatesOnce(paths, intent, bridgeOnly)
+	if (staged.dripBytes) proveDripDerivation(paths, staged.dripBytes)
+
+	// 3. Zero-seed assertion: fuel section byte-carried from live (or absent in both).
+	assertZeroSeedCarried(paths, staged.bridgeCandidate, opts)
+
+	// 4. Temp-write + same-directory rename, then re-hash the written outputs.
+	writeAtomically(planWrites(paths, staged))
+
+	// 5. Re-verify the LIVE files.
+	reverifyLive(paths, staged.dripLivePin)
+
+	// 6. Promotion receipt — committed by the operator alongside the promoted files.
+	const receiptPath = writeReceipt(intentPath, staged, opts, bridgeOnly)
+	console.log(`✓ promoted both candidates; receipt at ${receiptPath} — commit the promoted files + receipt together`)
+}
+
+function requireRecordedDigest(intentPath: string): DeployIntent {
+	const intent = JSON.parse(readFileSync(intentPath, "utf8")) as DeployIntent
+	if (!intent.candidateSha256) {
+		throw new Error("intent has no recorded candidateSha256 — run verify --candidate (and commit the intent) BEFORE promote — STOP")
+	}
+	return intent
+}
+
+/** A symlinked live target would redirect the rename; a symlinked candidate breaks the read-once
+ *  contract. A live target may not exist yet (rename will create it); a missing candidate — or,
+ *  bridge-only, a missing live drip manifest to pin — is a stop. */
+function rejectSymlinks(paths: PromotionPaths, bridgeOnly: boolean): void {
 	const involvedPaths = bridgeOnly
-		? [bridgeCandidatePath, bridgeLivePath, dripLivePath]
-		: [bridgeCandidatePath, dripCandidatePath, bridgeLivePath, dripLivePath]
+		? [paths.bridgeCandidate, paths.bridgeLive, paths.dripLive]
+		: [paths.bridgeCandidate, paths.dripCandidate, paths.bridgeLive, paths.dripLive]
 	for (const p of involvedPaths) {
 		let st: ReturnType<typeof lstatSync> | undefined
 		try {
 			st = lstatSync(p)
 		} catch {
-			if (p === bridgeCandidatePath || (!bridgeOnly && p === dripCandidatePath))
+			if (p === paths.bridgeCandidate || (!bridgeOnly && p === paths.dripCandidate))
 				throw new Error(`candidate missing: ${p} — nothing to promote`)
-			if (bridgeOnly && p === dripLivePath)
+			if (bridgeOnly && p === paths.dripLive)
 				throw new Error(`--bridge-only requires an existing live drip manifest to pin: ${p} — STOP`)
 			continue // a live target may not exist yet — rename will create it
 		}
 		if (st.isSymbolicLink()) throw new Error(`refusing to promote through a symlink: ${p}`)
 	}
+}
 
-	// 2. Read ONCE into buffers + validate the exact bytes that will be written. The
-	// bridge buffer must equal the RECORDED digest — verify() above read the file
-	// separately, and an edit between the two reads would otherwise ship bytes that
-	// skipped the digest pin + privileged readbacks.
-	const bridgeBytes = readFileSync(bridgeCandidatePath)
-	const dripBytes = bridgeOnly ? null : readFileSync(dripCandidatePath)
+/** The bridge buffer must equal the RECORDED digest — verify() read the file separately, and an
+ *  edit between the two reads would otherwise ship bytes that skipped the digest pin +
+ *  privileged readbacks. */
+function readCandidatesOnce(paths: PromotionPaths, intent: DeployIntent, bridgeOnly: boolean): StagedCandidates {
+	const bridgeBytes = readFileSync(paths.bridgeCandidate)
+	const dripBytes = bridgeOnly ? null : readFileSync(paths.dripCandidate)
 	const bridgeSha = createHash("sha256").update(bridgeBytes).digest("hex")
 	const dripSha = dripBytes ? createHash("sha256").update(dripBytes).digest("hex") : null
 	// The bridge-only pin: the live drip manifest's digest BEFORE any write; re-asserted after.
-	const dripLivePin = bridgeOnly ? createHash("sha256").update(readFileSync(dripLivePath)).digest("hex") : null
+	const dripLivePin = bridgeOnly ? createHash("sha256").update(readFileSync(paths.dripLive)).digest("hex") : null
 	if (bridgeSha !== intent.candidateSha256) {
 		throw new Error(
 			`bridge candidate bytes changed between verify and promote: ${bridgeSha} != recorded ${intent.candidateSha256} — STOP`,
 		)
 	}
 	const bridgeCandidate = parseCandidateManifest(JSON.parse(bridgeBytes.toString("utf8")))
-	if (dripBytes) {
-		assertDripCandidateShape(JSON.parse(dripBytes.toString("utf8")))
+	return { bridgeBytes, bridgeSha, dripBytes, dripSha, dripLivePin, bridgeCandidate }
+}
 
-		// 2b. Prove the drip CANDIDATE's derivation BEFORE any live write:
-		// previously a junk candidate failed only AFTER the live file was overwritten.
-		run("bun", [join(repoRoot, "apps/tools/scripts/verify-deployments.ts"), "--config", dripCandidatePath], {
-			stdio: "inherit",
-		})
-	}
+/** Prove the drip CANDIDATE's derivation BEFORE any live write: previously a junk candidate
+ *  failed only AFTER the live file was overwritten. */
+function proveDripDerivation(paths: PromotionPaths, dripBytes: Buffer): void {
+	assertDripCandidateShape(JSON.parse(dripBytes.toString("utf8")))
+	run("bun", [join(repoRoot, "apps/tools/scripts/verify-deployments.ts"), "--config", paths.dripCandidate], {
+		stdio: "inherit",
+	})
+}
 
-	// 3. Zero-seed assertion: fuel section byte-carried from live (or absent in both).
+function assertZeroSeedCarried(paths: PromotionPaths, bridgeCandidate: ValidatedCandidateManifest, opts: PromoteOptions): void {
 	let liveFuel: unknown
 	try {
-		liveFuel = (JSON.parse(readFileSync(bridgeLivePath, "utf8")) as { l1?: { fuel?: unknown } }).l1?.fuel
+		liveFuel = (JSON.parse(readFileSync(paths.bridgeLive, "utf8")) as { l1?: { fuel?: unknown } }).l1?.fuel
 	} catch {
 		liveFuel = undefined
 	}
@@ -572,42 +666,49 @@ export async function promote(
 		allowSwapDrop: opts.dropSwap === true,
 		allowSwapAdd: opts.restoreSwap === true,
 	})
+}
 
-	// 4. Temp-write + same-directory rename, then re-hash the written outputs.
-	const writes: Array<[string, Buffer, string]> =
-		dripBytes && dripSha
-			? [
-					[bridgeLivePath, bridgeBytes, bridgeSha],
-					[dripLivePath, dripBytes, dripSha],
-				]
-			: [[bridgeLivePath, bridgeBytes, bridgeSha]]
+/** `[target, bytes, sha]` per live file — bridge first, then the drip when it is being promoted. */
+function planWrites(paths: PromotionPaths, staged: StagedCandidates): Array<[string, Buffer, string]> {
+	return staged.dripBytes && staged.dripSha
+		? [
+				[paths.bridgeLive, staged.bridgeBytes, staged.bridgeSha],
+				[paths.dripLive, staged.dripBytes, staged.dripSha],
+			]
+		: [[paths.bridgeLive, staged.bridgeBytes, staged.bridgeSha]]
+}
+
+function writeAtomically(writes: Array<[string, Buffer, string]>): void {
 	for (const [target, bytes, sha] of writes) {
 		mkdirSync(dirname(target), { recursive: true })
 		const tmp = `${target}.promote-tmp`
 		// A pre-planted tmp (symlink or file) must not be followed or reused: remove it,
-		// then exclusive-create so a racing recreate fails loudly (review finding #10).
+		// then exclusive-create so a racing recreate fails loudly.
 		rmSync(tmp, { force: true })
 		writeFileSync(tmp, bytes, { flag: "wx" })
 		renameSync(tmp, target)
 		const written = createHash("sha256").update(readFileSync(target)).digest("hex")
 		if (written !== sha) throw new Error(`re-hash mismatch after write: ${target} ${written} != ${sha} — investigate before committing`)
 	}
+}
 
-	// 5. Re-verify the LIVE files: strict-parse the bridge manifest as written, and
-	// re-prove the drip derivation through the real gate.
-	parseCandidateManifest(JSON.parse(readFileSync(bridgeLivePath, "utf8")))
+/** Strict-parse the bridge manifest as written, re-prove the drip derivation through the real
+ *  gate over the live file, and (bridge-only) re-assert the live drip digest. */
+function reverifyLive(paths: PromotionPaths, dripLivePin: string | null): void {
+	parseCandidateManifest(JSON.parse(readFileSync(paths.bridgeLive, "utf8")))
 	run("bun", [join(repoRoot, "apps/tools/scripts/verify-deployments.ts")], {
 		stdio: "inherit",
-		env: { ...process.env, BRIDGE_MANIFEST: bridgeLivePath },
+		env: { ...process.env, BRIDGE_MANIFEST: paths.bridgeLive },
 	})
 	if (dripLivePin) {
-		const after = createHash("sha256").update(readFileSync(dripLivePath)).digest("hex")
+		const after = createHash("sha256").update(readFileSync(paths.dripLive)).digest("hex")
 		if (after !== dripLivePin) {
 			throw new Error(`--bridge-only violated: live drip manifest changed (${after} != pinned ${dripLivePin}) — investigate NOW`)
 		}
 	}
+}
 
-	// 6. Promotion receipt — committed by the operator alongside the promoted files.
+function writeReceipt(intentPath: string, staged: StagedCandidates, opts: PromoteOptions, bridgeOnly: boolean): string {
 	const receiptPath = join(repoRoot, "implementations-plan/aztec-5.0.1-line/lessons/promotion-receipt.json")
 	mkdirSync(dirname(receiptPath), { recursive: true })
 	const commit = git(["rev-parse", "HEAD"], repoRoot)
@@ -619,10 +720,10 @@ export async function promote(
 				intent: intentPath,
 				commitAtPromotion: commit,
 				mode: bridgeOnly ? "bridge-only" : "bridge+drip",
-				bridge: { candidateSha256: bridgeSha, live: "apps/tools/public/testnet-bridge.json" },
-				drip: dripSha
-					? { candidateSha256: dripSha, live: "apps/tools/src/contracts/deployments.json" }
-					: { unchangedSha256: dripLivePin, live: "apps/tools/src/contracts/deployments.json" },
+				bridge: { candidateSha256: staged.bridgeSha, live: "apps/tools/public/testnet-bridge.json" },
+				drip: staged.dripSha
+					? { candidateSha256: staged.dripSha, live: "apps/tools/src/contracts/deployments.json" }
+					: { unchangedSha256: staged.dripLivePin, live: "apps/tools/src/contracts/deployments.json" },
 				zeroSeed: opts.restoreSwap
 					? "l1.fuel.core byte-carried; swap RESTORED (--restore-swap, pools seeded this arc)"
 					: opts.dropSwap
@@ -633,7 +734,7 @@ export async function promote(
 			"\t",
 		)}\n`,
 	)
-	console.log(`✓ promoted both candidates; receipt at ${receiptPath} — commit the promoted files + receipt together`)
+	return receiptPath
 }
 
 // CLI dispatch — guarded so importing this module (e.g. for PLAN_PINNED_L1_SIGNER)
