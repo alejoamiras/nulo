@@ -287,11 +287,9 @@ export interface CompareResult {
 	report: string
 }
 
-/** `a` is the Node reference, `b` the Bun candidate. Every rule is fail-closed. */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 41) — refactor when touched, never raise
-export function compareSummaries(a: SoakSummary, b: SoakSummary): CompareResult {
+/** Metadata parity between the two sides: dirty trees, drifted provenance, swapped roles. */
+export function checkMeta(a: SoakSummary, b: SoakSummary): string[] {
 	const problems: string[] = []
-	const lines: string[] = []
 	const meta = (side: SoakSummary) => side.meta
 
 	if (meta(a).gitDirty) problems.push("reference summary was produced on a dirty tree")
@@ -303,34 +301,58 @@ export function compareSummaries(a: SoakSummary, b: SoakSummary): CompareResult 
 		problems.push(`filters differ: [${meta(a).filters.join(" ")}] vs [${meta(b).filters.join(" ")}]`)
 	if (meta(a).runtimeMode !== "node") problems.push(`reference must be runtimeMode "node", got "${meta(a).runtimeMode}"`)
 	if (meta(b).runtimeMode !== "script") problems.push(`candidate must be runtimeMode "script", got "${meta(b).runtimeMode}"`)
+	return problems
+}
 
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: baseline (score 31) — refactor when touched, never raise
-	const checkSide = (side: SoakSummary, label: string, expectBun: boolean) => {
-		if (side.runs.length !== side.meta.runs) problems.push(`${label}: ${side.runs.length} run rows for meta.runs=${side.meta.runs}`)
-		const identities = new Set(side.runs.map((run) => runtimeIdentity(run.runtime)))
-		if (identities.size !== 1) problems.push(`${label}: runtime records are missing or inconsistent (${[...identities].join(" | ")})`)
-		for (const [index, run] of side.runs.entries()) {
-			const hasBun = Boolean(run.runtime?.versions.bun)
-			if (!run.runtime) problems.push(`${label}: run ${index} has no runtime record`)
-			else if (hasBun !== expectBun)
-				problems.push(`${label}: run ${index} ran on ${hasBun ? "Bun" : "Node"}, expected ${expectBun ? "Bun" : "Node"}`)
-		}
-		// Never trust the stored count: re-derive it from the rows, then require both to be zero.
-		const failedRows = side.runs.filter(isFailedRun).length
-		if (failedRows !== 0) problems.push(`${label}: ${failedRows} run row(s) fail the gate`)
-		if (side.failedRuns !== failedRows)
-			problems.push(`${label}: failedRuns=${side.failedRuns} disagrees with ${failedRows} failing row(s)`)
-		if (side.failedRuns !== 0) problems.push(`${label}: failedRuns=${side.failedRuns}, expected 0`)
-		for (const [id, entry] of Object.entries(side.inventory)) {
-			if (entry.observations !== side.meta.runs)
-				problems.push(`${label}: "${id}" observed ${entry.observations}/${side.meta.runs} runs`)
-		}
+/** One side's own consistency, fail-closed, in the report's order: the run rows and their engine,
+ *  the failing rows with the stored count re-derived from them, every id observed in every run. */
+export function checkSide(side: SoakSummary, label: string, expectBun: boolean): string[] {
+	return [...checkRunRows(side, label, expectBun), ...checkFailedRuns(side, label), ...checkObservations(side, label)]
+}
+
+/** Row count matches `meta.runs`, exactly one runtime identity, and every run on the expected engine. */
+export function checkRunRows(side: SoakSummary, label: string, expectBun: boolean): string[] {
+	const problems: string[] = []
+	if (side.runs.length !== side.meta.runs) problems.push(`${label}: ${side.runs.length} run rows for meta.runs=${side.meta.runs}`)
+	const identities = new Set(side.runs.map((run) => runtimeIdentity(run.runtime)))
+	if (identities.size !== 1) problems.push(`${label}: runtime records are missing or inconsistent (${[...identities].join(" | ")})`)
+	for (const [index, run] of side.runs.entries()) {
+		const hasBun = Boolean(run.runtime?.versions.bun)
+		if (!run.runtime) problems.push(`${label}: run ${index} has no runtime record`)
+		else if (hasBun !== expectBun)
+			problems.push(`${label}: run ${index} ran on ${hasBun ? "Bun" : "Node"}, expected ${expectBun ? "Bun" : "Node"}`)
 	}
-	checkSide(a, "reference", false)
-	checkSide(b, "candidate", true)
+	return problems
+}
 
-	const idsA = Object.keys(a.inventory).sort()
-	const idsB = Object.keys(b.inventory).sort()
+/** Never trust the stored count: re-derive it from the rows, then require both to be zero. */
+export function checkFailedRuns(side: SoakSummary, label: string): string[] {
+	const problems: string[] = []
+	const failedRows = side.runs.filter(isFailedRun).length
+	if (failedRows !== 0) problems.push(`${label}: ${failedRows} run row(s) fail the gate`)
+	if (side.failedRuns !== failedRows) problems.push(`${label}: failedRuns=${side.failedRuns} disagrees with ${failedRows} failing row(s)`)
+	if (side.failedRuns !== 0) problems.push(`${label}: failedRuns=${side.failedRuns}, expected 0`)
+	return problems
+}
+
+/** Every inventory id must have been observed in every run of the side. */
+export function checkObservations(side: SoakSummary, label: string): string[] {
+	const problems: string[] = []
+	for (const [id, entry] of Object.entries(side.inventory)) {
+		if (entry.observations !== side.meta.runs) problems.push(`${label}: "${id}" observed ${entry.observations}/${side.meta.runs} runs`)
+	}
+	return problems
+}
+
+interface Findings {
+	problems: string[]
+	lines: string[]
+}
+
+/** Inventory membership must be identical; the report lists the first 20 ids on each side. */
+export function checkInventoryMembership(idsA: string[], idsB: string[], a: SoakSummary, b: SoakSummary): Findings {
+	const problems: string[] = []
+	const lines: string[] = []
 	if (!sameArray(idsA, idsB)) {
 		const onlyA = idsA.filter((id) => !(id in b.inventory))
 		const onlyB = idsB.filter((id) => !(id in a.inventory))
@@ -338,6 +360,14 @@ export function compareSummaries(a: SoakSummary, b: SoakSummary): CompareResult 
 		for (const id of onlyA.slice(0, 20)) lines.push(`  only in reference: ${id}`)
 		for (const id of onlyB.slice(0, 20)) lines.push(`  only in candidate: ${id}`)
 	}
+	return { problems, lines }
+}
+
+/** Per-id status records compared EXACTLY, and the candidate may never fail more than the
+ *  reference; any failure delta is reported. */
+export function checkInventoryEntries(idsA: string[], a: SoakSummary, b: SoakSummary): Findings {
+	const problems: string[] = []
+	const lines: string[] = []
 	for (const id of idsA) {
 		const entryA = a.inventory[id]
 		const entryB = b.inventory[id]
@@ -350,8 +380,14 @@ export function compareSummaries(a: SoakSummary, b: SoakSummary): CompareResult 
 			problems.push(`"${id}": candidate failed ${entryB.failures}× vs reference ${entryA.failures}×`)
 		if (entryA.failures !== entryB.failures) lines.push(`  ${id}: failures ${entryA.failures} → ${entryB.failures}`)
 	}
+	return { problems, lines }
+}
 
-	lines.push(`resolution allowlist (pinned): ${[...RESOLVE_ALLOWLIST].join(", ")}`)
+/** Module resolution evidence per pinned spec: both sides must carry it, and a difference passes
+ *  only inside the pinned allowlist (reported either way). */
+export function checkResolutions(a: SoakSummary, b: SoakSummary): Findings {
+	const problems: string[] = []
+	const lines: string[] = [`resolution allowlist (pinned): ${[...RESOLVE_ALLOWLIST].join(", ")}`]
 	for (const spec of RESOLVE_SPECS) {
 		const recA = a.meta.resolves[spec]
 		const recB = b.meta.resolves[spec]
@@ -365,7 +401,10 @@ export function compareSummaries(a: SoakSummary, b: SoakSummary): CompareResult 
 		lines.push(`  resolution differs${allowed ? " (allowed)" : ""}: ${spec}: ${JSON.stringify(recA)} vs ${JSON.stringify(recB)}`)
 		if (!allowed) problems.push(`"${spec}" resolves differently and is not in the pinned allowlist`)
 	}
+	return { problems, lines }
+}
 
+function buildReport(a: SoakSummary, b: SoakSummary, idsA: string[], idsB: string[], lines: string[], problems: string[]): string {
 	const wall = (side: SoakSummary) => {
 		const ms = side.runs.map((run) => run.wallMs)
 		return `min ${Math.min(...ms)} ms · median ${percentile(ms, 50)} ms · p95 ${percentile(ms, 95)} ms`
@@ -377,7 +416,24 @@ export function compareSummaries(a: SoakSummary, b: SoakSummary): CompareResult 
 		`wall-clock candidate: ${b.runs.length ? wall(b) : "n/a"}`,
 	]
 	const verdict = problems.length === 0 ? "COMPARE OK" : `COMPARE FAILED (${problems.length} problem${problems.length === 1 ? "" : "s"})`
-	const report = [...header, ...lines, ...problems.map((problem) => `  ✖ ${problem}`), verdict].join("\n")
+	return [...header, ...lines, ...problems.map((problem) => `  ✖ ${problem}`), verdict].join("\n")
+}
+
+/** `a` is the Node reference, `b` the Bun candidate. Every rule is fail-closed. The validators run
+ *  in the report's order — meta, reference side, candidate side, inventory, resolutions — so
+ *  `problems` and the report lines read exactly as they always did. */
+export function compareSummaries(a: SoakSummary, b: SoakSummary): CompareResult {
+	const problems: string[] = [...checkMeta(a, b), ...checkSide(a, "reference", false), ...checkSide(b, "candidate", true)]
+	const lines: string[] = []
+
+	const idsA = Object.keys(a.inventory).sort()
+	const idsB = Object.keys(b.inventory).sort()
+	for (const found of [checkInventoryMembership(idsA, idsB, a, b), checkInventoryEntries(idsA, a, b), checkResolutions(a, b)]) {
+		problems.push(...found.problems)
+		lines.push(...found.lines)
+	}
+
+	const report = buildReport(a, b, idsA, idsB, lines, problems)
 	return { ok: problems.length === 0, problems, report }
 }
 
