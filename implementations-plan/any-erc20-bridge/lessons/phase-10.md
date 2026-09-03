@@ -109,6 +109,33 @@ canonical clone (six keys; nothing was created). The sign-off remains a live wal
   `packages/bridge-core/src/private-fpc-canonical.json` (a curated ruling by the descriptor's own
   policy) → `promote` → `fuel-testnet.ts` `PRIVATE_RUNS=1` as the re-canary; (b) hold the promotion.
   Never hand-copy the candidate.
+- **Owner ruling (2026-09-03, in chat: "I vouch for that")** → `5.2.0-nightly.20260815` appended to
+  the descriptor's compat entry (`71ef45ef`); `private-fuel.test.ts` 9/9; the gate green
+  (compat + identity + digest + live class). Intent rebuilt at `71ef45ef` → digest re-recorded
+  (same `a27da472…`, the candidate was untouched) → **`promote --bridge-only` landed**
+  (`417a00ba`, receipt beside the intent; the faucet file byte-pinned unchanged). The receipt writer
+  used to hardcode the 5.0.1 arc's lessons dir and overwrote that arc's receipt — restored, and the
+  path now derives from the intent.
+- Gate-independent canaries (candidate): **fee-juice direct lane ✓** (16 FJ deposit at leaf
+  63311872 → self-paid claim landed 14.7287 FJ, fee 1.2713 FJ, 3.6 min) · **drip ✓** (1e9 NULO
+  units to a fresh account, 0.5 min). Live-file canaries after promotion: `verify:l1 --strict` ✓,
+  `verify:deployments` ✓.
+- **Re-promotion**: the tools manifest test (`bridge-generation.test.ts`) pins `privateFpc.address`
+  on every shipped manifest and the conductor wrote the candidate without the block the placeholder
+  carried. Fix `512f31e1` (`privateFpcBlock()` from the pinned address + the descriptor's
+  version/digest); the conductor re-run resumed everything from the journal (no broadcast) and
+  rewrote the candidate with the block and the budgets carried from the live file; intent rebuilt,
+  digest `deb70e43…` recorded (`a0ea1ad8`), promoted again (`2f2d1107`); test 8/8, strict verify-l1
+  and verify:deployments green on the live file.
+- **Fuel canary run 1 failed on its own default**: `FUEL_SLICE` = 0.25 USDC quotes 10.19 FJ on the
+  new pools, under the 29.58 FJ `minFuelFj` floor, so the router's floor guard reverted
+  (`UniswapFuelSwap: insufficient output`) before anything moved — correct behaviour; the old v1
+  pool priced 0.25 USDC above the floor. Re-run with `FUEL_SLICE_UNITS=1000000` (1 USDC → 40.66 FJ):
+  public lane ✓, private-FPC run recorded below. Follow-up: derive the script's default slice from
+  the floor and the live quote instead of a fixed quarter unit.
+- The conductor's `deploy-journal/testnet-generation.jsonl` stays local (untracked, allowlisted):
+  its run-3 `candidate-written` line carries this machine's absolute path (fixed for future runs in
+  `609fa305`), and the brand/path hook refuses it. Every address it holds is recorded above.
 
 ## Pre-flight the agent completed
 
