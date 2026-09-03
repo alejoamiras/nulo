@@ -166,6 +166,40 @@ canonical clone (six keys; nothing was created). The sign-off remains a live wal
   ×1.2 = 3.127 FJ vs the promoted 3.115 FJ (+0.4 %, inside the margin) — not worth a re-promotion;
   fold into the next calibration.
 
+## Codex review of the live fix-forwards (session `01a067a0-d197-7733-b88a-b078790910bc`)
+
+Round 1 (fresh session, xhigh, read-only, on `f25ddbd7`): "request changes" — two highs, three
+mediums, one low; the init-nullifier and message-classification fixes clean.
+- HIGH `hub-l2.ts` `firstPrivateClaim` — VERIFIED REAL: the app's ladder hands ONE `fee.opts` to
+  `claimViaHub`, which paid `register_token` AND the claim with it; a mint-and-pay fee spends the
+  bridged Fee Juice message once, so a fueled private first claim on an unregistered token could
+  never claim (registration consumed the message). Neither the sandbox (its private flows ran on
+  registered tokens) nor the smokes (pre-created = registered) could see it. Fix `1de456c0`: a
+  `registerFee` seam in `SendOpts` — `splitRegisterFee` gives the registration `registerFee` and the
+  claim `fee`, stripped before the wallet; the app's ladder and the validator set it to the sponsor
+  on the private-fuel lane. Codex's alternative (mint-and-pay for the registration, then the FPC
+  balance for the claim) was rejected: registration is public-effect anyway and the sponsor lane
+  exists, and it keeps ONE FPC ceiling instead of two.
+- HIGH `private-fuel.ts` limit sizing + "margin costs nothing" — VERIFIED: the FPC's Noir (in the
+  artifact's `file_map`) credits `amount − max_gas_cost` and refunds nothing, so limit and padding
+  are Fee Juice the claimer forfeits. The comment now says so; 2.0M kept (init-shape headroom, and
+  a first claim on an unregistered token cannot be simulated at all — the derived token's
+  constructor is enqueued).
+- MEDIUM ×1.5 padding — dropped in the app's private lane and the validator (`RELIABILITY_PAD`
+  default 1): predicted-worst only, the direct lane's policy; retries re-price.
+- MEDIUM floor 29.58 vs 4× — left to the owner (runbook: a one-sample number may only raise; the
+  settle canary's 4× = 26.39 FJ is under it). Codex's note: sum both transactions when
+  registration is required.
+- MEDIUM `generation.ts` — the nullifier rejection is trusted only once `node.getContractClass(id)`
+  serves the class; a phantom rejection throws and journals nothing (tested).
+- LOW `bridge-generation.test.ts` — the full `privateFpc` triple is pinned.
+Gates after the round: bridge-core 428, tools 1086, lint 0, typecheck 0.
+
+Live validation of the seam (also the runbook's registering-sample path): third seed token
+**EURC** `0xc10bcb5a0519934e68b489a3a89ee28af8624d24` (tx `0x23b9e385…2a02`), pre-created on the
+candidate WITHOUT hub registration → portal `0x1b7806120b80f674719ae7e1be0cc039cc10ae34`, EURC/WETH
+pool seeded; then `fuel-testnet.ts --token EURC PRIVATE_RUNS=1`: recorded below.
+
 ## Pre-flight the agent completed
 
 - The stack (#536–#540, stack #541) is rebased on `dev` `4df5eae5` with every gate green per commit
