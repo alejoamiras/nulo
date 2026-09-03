@@ -78,11 +78,13 @@ describe("TokenTile", () => {
 		w.unmount()
 	})
 
-	it("a listed token shows its name, with the checksummed address a hover away — never on the row", () => {
+	it("a listed token shows its name AND its trimmed address on the row — the one line a look-alike cannot fake", () => {
 		const w = tile({ token: token({ source: "list" }) })
-		expect(w.find(sel(TESTIDS.sendTokenAddress)).exists()).toBe(false)
+		const row = w.find(sel(TESTIDS.sendTokenAddress))
+		expect(row.text()).toBe("0xA0b869…06eB48")
+		expect(row.attributes("data-added")).toBeUndefined()
 		expect(w.find(sel(TESTIDS.sendTokenTile)).text()).toContain("USD Coin")
-		// EIP-55 casing on the title, so the address is reachable without cluttering the list.
+		// EIP-55 casing in full on the row's title, so the trimmed form is never the only copy.
 		expect(w.find(sel(TESTIDS.sendTokenTile)).attributes("title")).toBe("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
 		w.unmount()
 	})

@@ -25,11 +25,11 @@ const name = computed(() => safeDisplay(props.token.name))
 
 const added = computed(() => props.token.source === "pasted")
 
-/** The identity the symbol only claims to be. On the row only for a token the user added by
- *  address — that address is the whole reason the row exists. A listed token shows its name; its
- *  address stays a hover away here and is printed in full, checksummed and linked, on the review,
- *  where the live metadata is also checked against the list's claim before anything is signed. */
-const address = computed(() => (added.value ? trimAddress(checksumAddress(props.token.address), 8, 6) : null))
+/** The identity the symbol only claims to be. Shown for every row the app does not publish itself:
+ *  a listed token can copy a trusted token's symbol, name, decimals AND live metadata exactly (the
+ *  review's conflict check sees nothing), so the address is the one line a look-alike cannot fake —
+ *  and it has to be on the row, where the choice is made, not only on hover or behind Details. */
+const address = computed(() => (props.token.source === "manifest" ? null : trimAddress(checksumAddress(props.token.address), 8, 6)))
 
 const rowTitle = computed(() => (props.token.source === "manifest" ? undefined : checksumAddress(props.token.address)))
 
@@ -69,7 +69,9 @@ const balanceText = computed(() => {
 		<span class="ident">
 			<span class="symbol">{{ symbol }}</span>
 			<span v-if="name && !added" class="name">{{ name }}</span>
-			<span v-if="address" class="address" :data-testid="TESTIDS.sendTokenAddress" data-added>{{ address }} · added by you</span>
+			<span v-if="address" class="address" :data-testid="TESTIDS.sendTokenAddress" :data-added="added || undefined">
+				{{ address }}<template v-if="added"> · added by you</template>
+			</span>
 		</span>
 		<span v-if="balanceText !== null" class="balance">{{ balanceText }}</span>
 	</button>

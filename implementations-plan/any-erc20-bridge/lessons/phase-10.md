@@ -587,11 +587,13 @@ Three items, "not much more … great work":
      own gate fails closed. "Register" for such an account happens only through Token + gas, where
      the sponsor pays the registration.
 3. **UNI and WETH showed addresses in the list.** They come from the remote token list, not the
-   manifest; the row printed the address for every non-manifest token because a list can label any
-   address "USDC". The approved canvas had listed tokens showing a name, so: the address is on the
-   row only for a token the user added by address ("added by you"); a listed token shows its name,
-   keeps the checksummed address on hover, and the review's Details prints it in full, linked, with
-   the live-metadata conflict warning before anything is signed.
+   manifest; the row prints the address for every non-manifest token because a list can label any
+   address "USDC". I first moved it to the row's hover title (the approved canvas showed listed
+   tokens with a name), and codex objected (MED): a listed token can copy a trusted token's symbol,
+   name, decimals AND live metadata exactly, which defeats the review's conflict warning, and a
+   hover-only address helps no touch user at the moment of choosing. Codex is right; the address
+   is back on listed rows, under the name, in tertiary type. The inconsistency the owner noticed IS
+   the signal: manifest tokens are the app's own, everything else says which contract it is.
 
 ## Sign-off
 
