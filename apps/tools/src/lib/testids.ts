@@ -75,65 +75,25 @@ export const TESTIDS = {
 	// Toast
 	toast: "tl-toast",
 
-	// Shell tabs (Drip | Bridge)
+	// Shell tabs (Faucet | Send)
 	tabs: "tl-tabs",
 	tabDrip: "tl-tab-drip",
-	tabBridge: "tl-tab-bridge",
-	tabFuel: "tl-tab-fuel",
 	themeToggle: "tl-theme-toggle",
-	bridgeView: "tl-bridge-view",
 
-	// Fuel - direct L1 fee-asset → L2 Fee Juice (the third tab)
-	fuelView: "tl-fuel-view",
-	fuelForm: "tl-fuel-form",
-	fuelAmount: "tl-fuel-amount",
-	fuelBalanceL1: "tl-fuel-balance-l1",
-	fuelPresetPrivate: "tl-fuel-preset-private",
-	fuelPresetPublic: "tl-fuel-preset-public",
-	fuelSubmit: "tl-fuel-submit",
-	feeJuiceNotice: "tl-fee-juice-notice",
-	fuelFormError: "tl-fuel-form-error",
-	fuelFlowError: "tl-fuel-flow-error",
-	fuelMintCard: "tl-fuel-mint-card",
-	fuelMintBtn: "tl-fuel-mint-btn",
-	fuelMintStatus: "tl-fuel-mint-status",
-
-	// Bridge - L1 (Ethereum) wallet
+	// Send - L1 (Ethereum) wallet
 	l1Status: "tl-l1-status",
 	l1Connect: "tl-l1-connect",
 	l1Account: "tl-l1-account",
 	l1Disconnect: "tl-l1-disconnect",
 	l1SwitchChain: "tl-l1-switch-chain",
 
-	// Bridge - L2 (Aztec) wallet
+	// Send - L2 (Aztec) wallet
 	bridgeL2Status: "tl-bridge-l2-status",
 	bridgeL2Connect: "tl-bridge-l2-connect",
 	bridgeL2Account: "tl-bridge-l2-account",
 	bridgeL2Disconnect: "tl-bridge-l2-disconnect",
 
-	// Bridge - the unified swap-style form (cards carry data-chain; the L2 balance carries data-privacy)
-	bridgeForm: "tl-bridge-form",
-	bridgeFrom: "tl-bridge-from",
-	bridgeTo: "tl-bridge-to",
-	bridgeFlip: "tl-bridge-flip",
-	bridgeAmount: "tl-bridge-amount",
-	bridgeBalanceL1: "tl-bridge-balance-l1",
-	// The Aztec panel stacks BOTH balances (public + private) with the toggle highlighting the
-	// active one - visibility never depends on the toggle.
-	bridgeBalanceL2Public: "tl-bridge-balance-l2-public",
-	bridgeBalanceL2Private: "tl-bridge-balance-l2-private",
-	bridgePrivacyToggle: "tl-bridge-privacy-toggle",
-	// "How it arrives" preset cards (private default) — they replace the single privacy toggle.
-	bridgePresetPrivate: "tl-bridge-preset-private",
-	bridgePresetPublic: "tl-bridge-preset-public",
-	// ONE adaptive private note (data-first carries the signature-count variant).
-	bridgePrivacyNote: "tl-bridge-privacy-note",
-	bridgeSubmit: "tl-bridge-submit",
-	// Amount validation renders under the input; flow failures render near the button.
-	bridgeFormError: "tl-bridge-form-error",
-	bridgeFlowError: "tl-bridge-flow-error",
-
-	// Bridge - the takeover stepper + receipt (phases carry data-phase/data-state)
+	// Send - the takeover stepper + receipt (phases carry data-phase/data-state)
 	stepper: "tl-bridge-stepper",
 	stepperPhase: "tl-stepper-phase",
 	// The journal cards' compact phase rail (same mapper, distinct ids - surfaces must not collide).
@@ -141,12 +101,6 @@ export const TESTIDS = {
 	journalPhase: "tl-journal-phase",
 	// Per-bridge sealed recovery files: export icons + the journal-header restore flow.
 	cardBackup: "tl-card-backup",
-	bridgeAddTokenEvm: "tl-bridge-add-token-evm",
-	bridgeFuelToggle: "tl-bridge-fuel-toggle",
-	bridgeFuelSlice: "tl-bridge-fuel-slice",
-	bridgeFuelQuote: "tl-bridge-fuel-quote",
-	bridgeFuelError: "tl-bridge-fuel-error",
-	bridgeFuelPrivateNote: "tl-bridge-fuel-private-note",
 	journalClaimWithoutFuel: "tl-journal-claim-without-fuel",
 	receiptFuel: "tl-receipt-fuel",
 	journalClaimGas: "tl-journal-claim-gas",
@@ -162,11 +116,12 @@ export const TESTIDS = {
 	receiptNewBridge: "tl-receipt-new-bridge",
 	receiptLink: "tl-receipt-link",
 
-	// Bridge - the explicit L1 test-USDC mint (NOT the Drip tab's L2 drips)
+	// The explicit L1 mint of a permissionless test token (NOT the Faucet tab's L2 drips)
+	mintL1Card: "tl-mint-l1-card",
 	mintL1: "tl-mint-l1",
 	mintL1Status: "tl-mint-l1-status",
 
-	// Bridge - the in-flight journal (cards carry data-id/direction/stage/privacy/attention)
+	// Send - the in-flight journal (cards carry data-id/direction/stage/privacy/attention)
 	journal: "tl-bridge-journal",
 	journalEmpty: "tl-journal-empty",
 	journalCard: "tl-journal-card",
@@ -180,8 +135,99 @@ export const TESTIDS = {
 	journalStep: "tl-journal-step",
 	journalTxLink: "tl-journal-tx-link",
 
-	// Bridge - add the bridged token to the wallet (registerToken, the bridge's own USDC)
-	bridgeAddToken: "tl-bridge-add-token",
+	// Send wizard - token discovery (catalog + paste) and the reads a selection triggers
+	sendTokenSearch: "tl-send-token-search",
+	sendTokenSource: "tl-send-token-source",
+	sendCatalogProvenance: "tl-send-catalog-provenance",
+	sendCatalogEmpty: "tl-send-catalog-empty",
+	sendPasteInput: "tl-send-paste-input",
+	sendPasteAdd: "tl-send-paste-add",
+	sendPasteError: "tl-send-paste-error",
+	sendTokenState: "tl-send-token-state",
+	sendSelectionError: "tl-send-selection-error",
+	sendBalanceL1: "tl-send-balance-l1",
+	sendBalanceL2Public: "tl-send-balance-l2-public",
+	sendBalanceL2Private: "tl-send-balance-l2-private",
+
+	// Send wizard - the gas leg: the discovered fuel route and the slice it sizes
+	sendRouteStatus: "tl-send-route-status",
+	sendGasTxTarget: "tl-send-gas-tx-target",
+	sendGasShare: "tl-send-gas-share",
+	sendGasFloor: "tl-send-gas-floor",
+
+	// Send wizard — shell + steps.
+	tabSend: "tl-tab-send",
+	sendView: "tl-send-view",
+	sendDirection: "tl-send-direction",
+	sendDirectionDeposit: "tl-send-direction-deposit",
+	sendDirectionExit: "tl-send-direction-exit",
+	sendStepStrip: "tl-send-step-strip",
+	sendStep: "tl-send-step",
+	sendStepToken: "tl-send-step-token",
+	sendStepAmount: "tl-send-step-amount",
+	sendStepReview: "tl-send-step-review",
+	sendStepPanel: "tl-send-step-panel",
+	sendStepAnnounce: "tl-send-step-announce",
+	sendTokenList: "tl-send-token-list",
+	sendTokenTile: "tl-send-token-tile",
+	sendTokenLogo: "tl-send-token-logo",
+	sendTokenMonogram: "tl-send-token-monogram",
+	sendTokenAddress: "tl-send-token-address",
+	sendTokenNext: "tl-send-token-next",
+	sendAmountInput: "tl-send-amount-input",
+	sendAmountMax: "tl-send-amount-max",
+	sendAmountError: "tl-send-amount-error",
+	sendChoiceCards: "tl-send-choice-cards",
+	sendChoiceToken: "tl-send-choice-token",
+	sendChoiceTokenGas: "tl-send-choice-token-gas",
+	sendChoiceGas: "tl-send-choice-gas",
+	sendGasBreakdown: "tl-send-gas-breakdown",
+	sendGasBreakdownToken: "tl-send-gas-breakdown-token",
+	sendGasBreakdownFuel: "tl-send-gas-breakdown-fuel",
+	sendGasChange: "tl-send-gas-change",
+	sendPrivateToggle: "tl-send-private-toggle",
+	sendAmountBack: "tl-send-amount-back",
+	sendAmountNext: "tl-send-amount-next",
+	sendReviewSend: "tl-send-review-send",
+	sendReviewArrives: "tl-send-review-arrives",
+	sendReviewGas: "tl-send-review-gas",
+	sendReviewNetworkFee: "tl-send-review-network-fee",
+	sendReviewTakes: "tl-send-review-takes",
+	sendReviewFirstTime: "tl-send-review-first-time",
+	sendReviewBurnNote: "tl-send-review-burn-note",
+	sendReviewDetailsToggle: "tl-send-review-details-toggle",
+	sendReviewDetails: "tl-send-review-details",
+	sendReviewRoute: "tl-send-review-route",
+	sendReviewSlippage: "tl-send-review-slippage",
+	sendReviewPortal: "tl-send-review-portal",
+	sendReviewPortalWarning: "tl-send-review-portal-warning",
+	sendReviewMetadataWarning: "tl-send-review-metadata-warning",
+	sendReviewStale: "tl-send-review-stale",
+	sendReviewToken: "tl-send-review-token",
+	sendReviewAccount: "tl-send-review-account",
+	sendReviewSignature: "tl-send-review-signature",
+	sendReviewBack: "tl-send-review-back",
+	sendReviewConfirm: "tl-send-review-confirm",
+	sendGrantPending: "tl-send-grant-pending",
+	sendGrantDeclined: "tl-send-grant-declined",
+	sendGrantBusy: "tl-send-grant-busy",
+	sendAmountBlocked: "tl-send-amount-blocked",
+	sendPausedNotice: "tl-send-paused-notice",
+	sendStepperRegister: "tl-send-stepper-register",
+	sendReceiptToken: "tl-send-receipt-token",
+	sendReceiptGas: "tl-send-receipt-gas",
+	sendReceiptReviewSaid: "tl-send-receipt-review-said",
+	sendReceiptAddToken: "tl-send-receipt-add-token",
+	mainnetPlaceholder: "tl-mainnet-placeholder",
+	mainnetPlaceholderLink: "tl-mainnet-placeholder-link",
+
+	// step components
+	sendCatalogError: "tl-send-catalog-error",
+	sendReviewError: "tl-send-review-error",
+
+	// A network whose manifest carries no bridge block: the SEND tab has nothing to send through while
+	// the rest of the app keeps working. Distinct from the mainnet placeholder, which IS the whole app.
+	sendUnavailable: "tl-send-unavailable",
 } as const
 
 export type Testid = (typeof TESTIDS)[keyof typeof TESTIDS]

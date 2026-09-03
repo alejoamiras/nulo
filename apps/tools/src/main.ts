@@ -3,7 +3,7 @@ import App from "./App.vue"
 import "@nulo/design/base.css"
 import "./app.css"
 import { assertBuildIntegrity, assertNodeChainMatches } from "./lib/build-integrity"
-import { NETWORK } from "./lib/network"
+import { IS_MAINNET, NETWORK } from "./lib/network"
 
 // Fail-closed BEFORE mount: if the build target, its bundled manifest, or the serving hostname
 // disagree, refuse to render (a wrong-chain build must never reach a transaction). Show the reason
@@ -26,7 +26,10 @@ try {
 // right after mount (completes in seconds, long before any wallet connect + deposit); a mismatch in
 // PROD kills the app the same way the sync assertion does — a stale/wrong committed node URL must
 // never carry a real deposit's claim polling to the wrong chain. Dev only warns (local nodes vary).
+// The mainnet build serves a static placeholder with no node behind it (and a CSP that blocks the
+// call), so probing there could only ever fail — skip it rather than kill the page on a dead fetch.
 void (async () => {
+	if (IS_MAINNET) return
 	try {
 		const res = await fetch(NETWORK.nodeUrl, {
 			method: "POST",

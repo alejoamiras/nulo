@@ -11,9 +11,17 @@ import {
 	sealBridgeBackup,
 } from "@nulo/bridge-core"
 import { NETWORK } from "@/lib/network"
-import { BRIDGE, FUEL_PORTAL, L1_PORTAL } from "@/contracts/bridge-deployments"
-import { addRecordVerified, runOnLane, useBridgeJournal } from "./useBridgeJournal"
-import { getRetainedSealKey, providerFingerprint } from "./useDeposit"
+import { FUEL_PORTAL } from "@/contracts/bridge-generation"
+import {
+	addRecordVerified,
+	deploymentMatches,
+	runOnLane,
+	sendHeaderMatches,
+	useBridgeJournal,
+	validateSendRecordBlock,
+} from "./useBridgeJournal"
+import { providerFingerprint } from "./deposit-flow"
+import { getRetainedSealKey } from "./useSend"
 import { useL1Wallet } from "./useL1Wallet"
 import { useToast } from "./useToast"
 
@@ -42,6 +50,18 @@ function triggerDownload(file: BridgeBackupFile, name: string): void {
  * once. A non-deterministic signer must fail HERE, never produce an unrestorable file.
  */
 const exportsInFlight = new Set<string>()
+
+/** A schema-3 file is only tracked once its own binding AND its token block still agree with the
+ *  chain: an imported record is attacker-supplied, and the block is what every later claim or exit
+ *  is built from. */
+async function assertSendRecordImportable(record: BridgeJournalRecord): Promise<void> {
+	if (record.schema !== 3) return
+	if (!deploymentMatches(record)) {
+		throw new Error("This file belongs to a different bridge deployment - it cannot be restored here.")
+	}
+	const blocked = await validateSendRecordBlock(record)
+	if (blocked) throw new Error(blocked)
+}
 
 export function useBridgeBackup() {
 	const l1 = useL1Wallet()
@@ -114,10 +134,12 @@ export function useBridgeBackup() {
 		const file = parseBackupFile(raw)
 		const portal = file.portal.toLowerCase()
 		const bridge = file.bridge.toLowerCase()
-		const matchesToken = portal === L1_PORTAL.toLowerCase() && bridge === BRIDGE.toString().toLowerCase()
-		// A Fuel recovery file binds to the canonical FeeJuicePortal + the L2 Fee Juice address (plan §5 DQ2).
-		const matchesFuel = !!FUEL_PORTAL && portal === FUEL_PORTAL.toLowerCase() && bridge === feeJuiceAddress.toLowerCase()
-		if (file.chainId !== NETWORK.l1ChainId || (!matchesToken && !matchesFuel)) {
+		// A Fuel recovery file binds to the canonical FeeJuicePortal + the L2 Fee Juice address.
+		const matchesFuel = portal === FUEL_PORTAL.toLowerCase() && bridge === feeJuiceAddress.toLowerCase()
+		// A send file's portal is its TOKEN's clone, which the header alone cannot pin down; the hub
+		// is what the header can prove, and the unsealed record proves the rest.
+		const matchesSend = sendHeaderMatches(file.chainId, bridge)
+		if (file.chainId !== NETWORK.l1ChainId || (!matchesFuel && !matchesSend)) {
 			throw new Error("This file belongs to a different bridge deployment - it cannot be restored here.")
 		}
 		if (journal.records.value.some((r) => r.id === file.id)) {
@@ -127,6 +149,7 @@ export function useBridgeBackup() {
 		if (journal.records.value.some((r) => r.id === record.id)) {
 			throw new Error("This bridge is already tracked here - nothing to restore.")
 		}
+		await assertSendRecordImportable(record)
 		addRecordVerified(record)
 		log("restored", { id: record.id, direction: record.direction })
 		return record

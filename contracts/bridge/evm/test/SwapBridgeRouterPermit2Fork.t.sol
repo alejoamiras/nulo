@@ -15,7 +15,6 @@ import {UniswapFuelSwap} from "../src/UniswapFuelSwap.sol";
 import {SwapBridgeRouter, IUniswapFuelSwap} from "../src/SwapBridgeRouter.sol";
 import {PortalFactory} from "../src/PortalFactory.sol";
 import {PoolSetupHelper} from "../script/PoolSetupHelper.sol";
-import {NuloTokenPortal} from "../upstream/NuloTokenPortal.sol";
 
 interface IPermit2Domain {
     function DOMAIN_SEPARATOR() external view returns (bytes32);
@@ -34,7 +33,8 @@ contract Harness is SwapBridgeRouter {
 /// Forks Sepolia and drives the REAL Permit2, the REAL Uniswap V4 pools, the REAL Aztec
 /// registry/Inbox and the REAL canonical FeeJuicePortal through the router: the token leg lands
 /// in a factory clone the router creates on first use, the fuel leg is either a live V4 swap or
-/// the fee asset's identity pass-through. Opt-in (skips without SEPOLIA_RPC_URL).
+/// the fee asset's identity pass-through. Opt-in: skips unless SEPOLIA_RPC_URL and
+/// AZTEC_REGISTRY (the network's canonical registry) are both set.
 contract SwapBridgeRouterPermit2ForkTest is Test {
     address constant POOL_MANAGER = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
     address constant WETH = 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
@@ -42,8 +42,6 @@ contract SwapBridgeRouterPermit2ForkTest is Test {
     address constant FEE_ASSET_HANDLER = 0x5602c39A6E9C5AcE589F64F754927bcDa4f4BFc9;
     address constant FEE_JUICE_PORTAL = 0xb4A9F8EAdC8CA944729D61E59A9f491fAFf237A3;
     address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
-    /// The live legacy portal — its `registry()` is the canonical registry on this network.
-    NuloTokenPortal constant LIVE_PORTAL = NuloTokenPortal(0xE0FD81b5DdB13bbB64243D018a6E9C3dfaE8d21F);
     bytes32 constant HUB = bytes32(uint256(0x4B));
 
     uint24 constant FEE = 3000;
@@ -75,7 +73,8 @@ contract SwapBridgeRouterPermit2ForkTest is Test {
 
     function setUp() public {
         string memory rpc = vm.envOr("SEPOLIA_RPC_URL", string(""));
-        if (bytes(rpc).length == 0) {
+        address registryAddr = vm.envOr("AZTEC_REGISTRY", address(0));
+        if (bytes(rpc).length == 0 || registryAddr == address(0)) {
             vm.skip(true);
             return;
         }
@@ -86,7 +85,7 @@ contract SwapBridgeRouterPermit2ForkTest is Test {
         usdc = new MintableERC20("Nulo USDC", "USDC", 6, 1000);
         require(address(usdc) < WETH, "usdc must sort below WETH");
         swap = new UniswapFuelSwap(POOL_MANAGER, FEE_JUICE, WETH);
-        IRegistry registry = LIVE_PORTAL.registry();
+        IRegistry registry = IRegistry(registryAddr);
         factory = new PortalFactory(registry, HUB, address(this));
         router = new Harness(PERMIT2, FEE_JUICE_PORTAL, address(swap), address(factory));
         inbox = IRollup(address(registry.getCanonicalRollup())).getInbox();

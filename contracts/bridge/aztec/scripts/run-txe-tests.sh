@@ -12,7 +12,7 @@
 #   - The server's dependency set is the committed mini-project in ../txe-server (frozen lockfile),
 #     never an ad-hoc `bun add` — its transitives are part of the supply chain.
 #
-# Usage: scripts/run-txe-tests.sh --crate <token_bridge|token_bridge_hub> [nargo flags...] [-- test names...]
+# Usage: scripts/run-txe-tests.sh [--crate token_bridge_hub] [nargo flags...] [-- test names...]
 #
 # Pass criteria are per crate: a committed `txe-manifest.txt` names every test that must pass, so a
 # dropped `mod test;` or a silently skipped file cannot read as green.
@@ -24,13 +24,13 @@ AZTEC_HOME="${AZTEC_HOME:-$HOME/.aztec/versions/5.0.1}"
 NARGO="$AZTEC_HOME/bin/aztec-nargo"
 [ -x "$NARGO" ] || { echo "aztec-nargo not found at $NARGO" >&2; exit 1; }
 
-crate=""
+crate="token_bridge_hub"
 if [ "${1:-}" = "--crate" ]; then
   crate="${2:-}"; shift 2
 fi
 case "$crate" in
-  token_bridge|token_bridge_hub) ;;
-  *) echo "usage: $0 --crate <token_bridge|token_bridge_hub> [nargo flags...] [-- test names...]" >&2; exit 2 ;;
+  token_bridge_hub) ;;
+  *) echo "usage: $0 [--crate token_bridge_hub] [nargo flags...] [-- test names...]" >&2; exit 2 ;;
 esac
 # Everything before `--` is a nargo flag (with or without a value); only names after `--` filter.
 nargo_flags=()
@@ -77,9 +77,6 @@ trap cleanup EXIT INT TERM
 TOKEN_ARTIFACT="$repo_root/packages/bridge-core/node_modules/@aztec-foundation/aztec-standards/artifacts/target/token_contract-Token.json"
 [ -f "$TOKEN_ARTIFACT" ] || { echo "Token artifact missing at $TOKEN_ARTIFACT — run bun install." >&2; exit 1; }
 cp "$TOKEN_ARTIFACT" "$tb/target/token_contract-Token.json"
-if [ "$crate" = "token_bridge" ]; then
-  cp "$here/token_minter_proxy/target/token_minter_proxy-TokenMinterProxy.json" "$tb/target/"
-fi
 
 # TXE speaks JSON-RPC and does not answer a bare GET, so `curl -sf` reports failure even once
 # it is serving. Probe the TCP socket instead — the original HTTP probe never succeeded, which
@@ -152,8 +149,7 @@ grep -qE "[1-9][0-9]* tests? passed" "$tb/txe-run.log" || {
 # manifest is not a pass criterion either.
 if [ "${#filters[@]}" -eq 0 ]; then
   [ -f "$tb/txe-manifest.txt" ] || { echo "run-txe-tests.sh: $tb/txe-manifest.txt is missing" >&2; exit 1; }
-  floor=1
-  [ "$crate" = "token_bridge_hub" ] && floor=40
+  floor=40
   named=$(grep -E '^[A-Za-z_][A-Za-z0-9_]*$' "$tb/txe-manifest.txt" | sort -u | wc -l | tr -d ' ')
   if [ "$named" -lt "$floor" ]; then
     echo "run-txe-tests.sh: $tb/txe-manifest.txt names $named tests; the floor for $crate is $floor" >&2

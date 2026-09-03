@@ -7,7 +7,7 @@ import {
 	assetKindOf,
 	deriveDepositStage,
 	deriveWithdrawStage,
-	isProvisionalWithdrawId,
+	isProvisionalRecordId,
 } from "@nulo/bridge-core"
 import { computed, ref, watch } from "vue"
 
@@ -18,7 +18,7 @@ import { useOpsInFlight } from "@/composables/useOpsInFlight"
 import { switchActiveAccount } from "@/composables/useWalletConnection"
 
 /** Utils */
-import { assetDecimals, assetSymbol } from "@/lib/asset-label"
+import { assetDecimals, assetSymbol, recordTokenBlock } from "@/lib/asset-label"
 import { decideStandaloneFuelRecovery } from "@/lib/fuel-claim-state"
 import { isTerminalAttention } from "@/lib/bridge-steps"
 import { useNow } from "@/lib/clock"
@@ -26,7 +26,7 @@ import { IS_MAINNET } from "@/lib/network"
 import { formatBigInt } from "@/lib/format"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
 import { TESTIDS } from "@/lib/testids"
-import { claimFuelStandalone, overrideFuelClaim, reconcileFuelConsumed } from "@/composables/useDeposit"
+import { claimFuelStandalone, overrideFuelClaim, reconcileFuelConsumed } from "@/composables/fuel-recovery"
 
 /** Components */
 import BridgePhaseRail from "./BridgePhaseRail.vue"
@@ -36,7 +36,7 @@ const emit = defineEmits<{ backup: [record: BridgeJournalRecord] }>()
 
 const journal = useBridgeJournal()
 const exportable = computed(() => {
-	if (isProvisionalWithdrawId(props.record.id)) return false
+	if (isProvisionalRecordId(props.record.id)) return false
 	const r = props.record
 	// A private deposit pre-seal has no recovery material - a file now would be a false promise.
 	if (r.direction === "deposit" && r.isPrivate && !(r as DepositJournalRecord).sealedEnvelope) return false
@@ -193,10 +193,14 @@ const stage = computed(() => {
 })
 
 const attention = computed(() => rt.value.attention)
+/** Persisted refusal: a re-read of the chain contradicted this record's own token facts. It never
+ *  runs again, and unlike the runtime attention it survives a reload — so the card must state the
+ *  reason and offer nothing from the moment it renders, not only after a run has narrated one. */
+const blocked = computed(() => props.record.blocked)
 // Every attention except a deployment mismatch is retryable: the runs re-validate all guards
 // idempotently, so pressing CLAIM/FINISH after fixing the cause (switching accounts, etc.) is
 // exactly the recovery path - hiding the button stranded those states until a reload.
-const actionable = computed(() => !isTerminalAttention(attention.value))
+const actionable = computed(() => !blocked.value && !isTerminalAttention(attention.value))
 
 /** Guidance for an IDLE card only: while the engine drives (busy) the rail narrates live, and a
  *  done card's stamp says everything - a parallel stage line would just repeat them. */
@@ -205,7 +209,7 @@ const actionable = computed(() => !isTerminalAttention(attention.value))
 const stageLabel = computed(() => {
 	// A terminal record has no CLAIM/FINISH button, so guidance telling the user to press one would
 	// point at something that isn't there.
-	if (rt.value.busy || stage.value === "done" || isTerminalAttention(attention.value)) return null
+	if (rt.value.busy || stage.value === "done" || !actionable.value) return null
 	const r = props.record
 	if (r.direction === "deposit") {
 		switch (stage.value) {
@@ -261,8 +265,9 @@ const showFinish = computed(
 )
 
 /** Soft notes only (e.g. the 30-min "still confirming"): ANY attention's note renders in the
- *  rail's failed phase - a parallel line here would double it. */
-const note = computed(() => (attention.value ? null : rt.value.note))
+ *  rail's failed phase - a parallel line here would double it. A blocked record is the exception:
+ *  its reason is persisted, so it is stated here even before any run narrates it. */
+const note = computed(() => blocked.value ?? (attention.value ? null : rt.value.note))
 
 const txLinks = computed(() => {
 	const links: { label: string; href: string }[] = []
@@ -280,8 +285,9 @@ const txLinks = computed(() => {
 })
 
 const amountKind = computed(() => assetKindOf(props.record))
-const amountDisplay = computed(() => formatBigInt(BigInt(props.record.amount), assetDecimals(amountKind.value)))
-const amountSymbol = computed(() => assetSymbol(amountKind.value, props.record.isPrivate))
+const tokenBlock = computed(() => recordTokenBlock(props.record))
+const amountDisplay = computed(() => formatBigInt(BigInt(props.record.amount), assetDecimals(amountKind.value, tokenBlock.value)))
+const amountSymbol = computed(() => assetSymbol(amountKind.value, props.record.isPrivate, tokenBlock.value))
 
 const now = useNow()
 const age = computed(() => {

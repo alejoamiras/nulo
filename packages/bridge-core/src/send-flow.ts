@@ -87,7 +87,15 @@ export interface SendResult {
 }
 
 export interface SendRecoveryHooks {
-	onSecrets?: (r: { tokenClaimValueHex?: string; fuelSecretHex?: string; isPrivate: boolean }) => void
+	/** The secret hashes travel with the values: they are what the L1 witness commits to, so a
+	 *  caller keying its recovery record by them can write that record BEFORE the signature. */
+	onSecrets?: (r: {
+		tokenClaimValueHex?: string
+		tokenSecretHashHex?: Hex
+		fuelSecretHex?: string
+		fuelSecretHashHex?: Hex
+		isPrivate: boolean
+	}) => void
 	onSent?: (txHash: Hex) => void
 	onConfirmed?: (r: SendResult) => void
 }
@@ -231,7 +239,9 @@ export async function runSend(
 	const fuel = await fuelSecrets(p)
 	recovery?.onSecrets?.({
 		tokenClaimValueHex: tok?.claimValue.toString(),
+		tokenSecretHashHex: tok?.secretHash,
 		fuelSecretHex: fuel?.secret.toString(),
+		fuelSecretHashHex: fuel?.secretHash,
 		isPrivate: p.isPrivate,
 	})
 
@@ -310,16 +320,29 @@ function routerEvent<T>(g: SendGeneration, eventName: "Bridge" | "BridgeWithFuel
 	return events[0] as T
 }
 
+/** The event carried no amount and no signed amount stood behind it, so nothing says what landed. */
+export class MissingBridgeAmountError extends Error {
+	constructor(txHash: Hex) {
+		super(`Bridge event in ${txHash} decoded without an amount — refusing to record a gas leg of unknown size`)
+		this.name = "MissingBridgeAmountError"
+	}
+}
+
+/** What `readLeaves` needs of a send. A receipt-only recovery has the intent but no signed amount. */
+type LeafParams = Pick<SendParams, "intent"> & { amount?: bigint }
+
 /** The leaf indices + message keys the L2 claims consume, read from the router's event — never guessed from order. */
-function readLeaves(g: SendGeneration, p: SendParams, entry: "bridge" | "bridgeWithFuel", txHash: Hex, logs: Logs): Partial<SendResult> {
+function readLeaves(g: SendGeneration, p: LeafParams, entry: "bridge" | "bridgeWithFuel", txHash: Hex, logs: Logs): Partial<SendResult> {
 	if (entry === "bridge") {
-		const ev = routerEvent<{ args?: { index?: bigint; key?: Hex } }>(g, "Bridge", txHash, logs)
+		const ev = routerEvent<{ args?: { index?: bigint; key?: Hex; amount?: bigint } }>(g, "Bridge", txHash, logs)
 		if (ev.args?.index === undefined || ev.args.key === undefined)
 			throw new Error(`Bridge event in ${txHash} decoded without index/key`)
-		// The fee asset sent straight into the FeeJuicePortal IS the gas leg.
-		return p.intent === "gas"
-			? { fuelLeafIndex: ev.args.index, fuelMessageHashHex: ev.args.key, fuelReceived: p.amount }
-			: { tokenLeafIndex: ev.args.index, tokenMessageHashHex: ev.args.key }
+		if (p.intent !== "gas") return { tokenLeafIndex: ev.args.index, tokenMessageHashHex: ev.args.key }
+		// The fee asset sent straight into the FeeJuicePortal IS the gas leg; the event's amount is
+		// what landed, which a recovery reading the receipt alone still has.
+		const received = ev.args.amount ?? p.amount
+		if (received === undefined) throw new MissingBridgeAmountError(txHash)
+		return { fuelLeafIndex: ev.args.index, fuelMessageHashHex: ev.args.key, fuelReceived: received }
 	}
 	const ev = routerEvent<{ args?: { tokenKey?: Hex; tokenIndex?: bigint; fuelKey?: Hex; fuelIndex?: bigint; fuelAmount?: bigint } }>(
 		g,
@@ -331,6 +354,20 @@ function readLeaves(g: SendGeneration, p: SendParams, entry: "bridge" | "bridgeW
 		throw new Error(`BridgeWithFuel event in ${txHash} decoded without fuelIndex/fuelKey`)
 	const fuelLeg = { fuelLeafIndex: ev.args.fuelIndex, fuelMessageHashHex: ev.args.fuelKey, fuelReceived: ev.args.fuelAmount ?? 0n }
 	return p.intent === "gas" ? fuelLeg : { ...fuelLeg, tokenLeafIndex: ev.args.tokenIndex, tokenMessageHashHex: ev.args.tokenKey }
+}
+
+/**
+ * The leaves a landed send produced, from its receipt alone — what a journal recovers after a
+ * crash between the signature and the confirmation. A first-time deposit's receipt also carries the
+ * factory's register leaf, so the Inbox events are never read directly: only the router's own
+ * event names the deposit's leaf.
+ */
+export function readSendReceiptLeaves(g: SendGeneration, intent: SendParams["intent"], txHash: Hex, logs: Logs): Partial<SendResult> {
+	const own = logs.filter((l) => l.address.toLowerCase() === g.router.toLowerCase())
+	const fueled = parseEventLogs({ abi: g.routerAbi, eventName: "BridgeWithFuel", logs: own }).length > 0
+	// The receipt is the whole input here: there is no signed amount to fall back on, so an event
+	// that decodes without one fails rather than recording a gas-only recovery as having received 0.
+	return readLeaves(g, { intent }, fueled ? "bridgeWithFuel" : "bridge", txHash, logs)
 }
 
 async function readSendResult(

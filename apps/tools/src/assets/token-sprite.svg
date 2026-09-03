@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" aria-hidden="true">
+	<!--
+	Original geometric marks, never vendor artwork: a disc in the asset's conventional colour plus a
+	two-letter glyph. Symbol ids are the chain id and the lowercase ERC-20, so a mark can never follow
+	a ticker another token also claims. Markup only: this file is inlined into the page, and
+	token-sprite.test.ts rejects every executable and embedding construct.
+	-->
+	<symbol id="1:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" viewBox="0 0 32 32">
+		<circle cx="16" cy="16" r="16" fill="#2775ca" />
+		<text x="16" y="21" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="#ffffff">UC</text>
+	</symbol>
+	<symbol id="1:0xdac17f958d2ee523a2206206994597c13d831ec7" viewBox="0 0 32 32">
+		<circle cx="16" cy="16" r="16" fill="#26a17b" />
+		<text x="16" y="21" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="#ffffff">UT</text>
+	</symbol>
+	<symbol id="1:0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" viewBox="0 0 32 32">
+		<circle cx="16" cy="16" r="16" fill="#627eea" />
+		<text x="16" y="21" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="#ffffff">WE</text>
+	</symbol>
+	<symbol id="1:0x2260fac5e5542a773aa44fbcfedf7c193bc2c599" viewBox="0 0 32 32">
+		<circle cx="16" cy="16" r="16" fill="#f09242" />
+		<text x="16" y="21" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="#ffffff">WB</text>
+	</symbol>
+	<symbol id="1:0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf" viewBox="0 0 32 32">
+		<circle cx="16" cy="16" r="16" fill="#0052ff" />
+		<text x="16" y="21" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="#ffffff">CB</text>
+	</symbol>
+</svg>

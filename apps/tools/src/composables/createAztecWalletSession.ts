@@ -72,6 +72,9 @@ const ALIAS_MAX = 48
  *  silent — silently hiding account 17 would recreate the hidden-account bug this feature fixes
  *  (plan D-9/D-24). */
 const MAX_GRANTED_ACCOUNTS = 16
+/** Same bound for the granted contract list — it is wallet-controlled input too, and the app only
+ *  ever asks for a set it can enumerate. */
+const MAX_GRANTED_CONTRACTS = 256
 /** Per-wallet selected-account memory: most-recent-first, so A→B→A keeps both (plan D-2). */
 const MAX_REMEMBERED_WALLETS = 8
 /** Bound on stored id/address strings — storage is untrusted input (plan D-23). */
@@ -136,6 +139,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		status: s.status,
 		verificationEmojis: s.verificationEmojis,
 		accounts: s.accounts,
+		grantedContracts: s.grantedContracts,
 		selectedAccount: s.selectedAccount,
 		selectionNotices: s.selectionNotices,
 		hiddenAccountsCount: s.hiddenAccountsCount,
@@ -162,7 +166,8 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		cancelAccountChoice: (): Promise<void> => cancelAccountChoice(s),
 		selectAccount: (address: string): boolean => selectAccount(s, address),
 		consumeSelectionNotices: (): SelectionNotice[] => consumeSelectionNotices(s),
-		retryCapabilities: (): Promise<void> => retryCapabilities(s),
+		/** False when it did not run because another flow already owns the wallet — not a refusal. */
+		retryCapabilities: (): Promise<boolean> => retryCapabilities(s),
 		disconnect: (): Promise<void> => disconnect(s),
 		reset: (): void => reset(s),
 	}
@@ -197,6 +202,10 @@ function createSessionState(config: AztecWalletSessionConfig) {
 		status: ref<ConnectStatus>("idle"),
 		verificationEmojis: ref<string | null>(null),
 		accounts: ref<GrantedAccount[]>([]),
+		/** The contracts the app may act on, lowercased: the requested manifest INTERSECTED with the
+		 *  wallet's answer, scopes included. A per-token feature reads this to decide whether it still
+		 *  owes the user a prompt. */
+		grantedContracts: ref<readonly string[]>([]),
 		selectedAccount: ref<string | null>(null),
 		/** Valid accounts dropped by the grant cap — drives the persistent "Showing N of M"
 		 *  disclosure rows (the one-shot notice covers only the toast; plan D-24). */
@@ -420,6 +429,7 @@ function cleanupSession(s: SessionState): void {
 	s.connectingViaRemembered = false
 	s.wallet.value = null
 	s.accounts.value = []
+	s.grantedContracts.value = []
 	s.selectedAccount.value = null
 	s.verificationEmojis.value = null
 	s.pendingAccountChoice = null
@@ -712,17 +722,20 @@ async function cancelVerification(s: SessionState): Promise<void> {
 	}
 }
 
-async function retryCapabilities(s: SessionState): Promise<void> {
-	if (!s.wallet.value) return
+/** Returns whether the request actually ran: a caller waiting on a grant must be able to tell
+ *  "the wallet was busy" from "the wallet answered", or a no-op reads as a refusal. */
+async function retryCapabilities(s: SessionState): Promise<boolean> {
+	if (!s.wallet.value) return false
 	// Flow ownership: while the INITIAL capability request (or any other
 	// flow) is live, retry is a no-op — concurrent requestCapabilities runs
 	// could interleave grants/contract setup.
-	if (s.activeFlowEpoch !== null) return
+	if (s.activeFlowEpoch !== null) return false
 	const flowEpoch = s.epoch
 	s.activeFlowEpoch = flowEpoch
 	s.error.value = null
 	s.status.value = "capability-approval"
 	await requestCapabilities(s, flowEpoch)
+	return true
 }
 
 async function disconnect(s: SessionState): Promise<void> {
@@ -771,6 +784,9 @@ async function requestCapabilities(s: SessionState, flowEpoch: number): Promise<
 			return
 		}
 		const { accounts: granted, hiddenCount } = parseGrantedAccounts(result)
+		// Published BEFORE the account step: an approval replaces the stored grant wholesale, so the
+		// answer is authoritative even when the flow then pauses for a choice.
+		s.grantedContracts.value = parseGrantedContracts(manifest, result)
 		if (chooseGrantedAccount(s, granted, hiddenCount, flowWallet, flowProvider, flowEpoch) === "paused") return
 	} catch (err) {
 		if (isStale(s, flowEpoch)) return
@@ -971,12 +987,7 @@ export function parseGrantedAccounts(result: unknown): ParsedGrantedAccounts {
 /** The accounts capability's entry list out of the wallet-controlled result; null when absent
  *  or malformed at any level. */
 function findGrantedAccountEntries(result: unknown): NonNullable<GrantedAccountsCap["accounts"]> | null {
-	if (!result || typeof result !== "object") return null
-	const granted = (result as { granted?: unknown[] }).granted
-	if (!Array.isArray(granted)) return null
-	const cap = granted.find((c): c is GrantedAccountsCap => {
-		return typeof c === "object" && c !== null && (c as { type?: unknown }).type === "accounts"
-	})
+	const cap = findGrantedCapability(result, "accounts") as GrantedAccountsCap | null
 	if (!cap?.accounts || !Array.isArray(cap.accounts)) return null
 	return cap.accounts
 }
@@ -995,4 +1006,131 @@ function parseEntryAddress(entry: { item?: { toString(): string } | string } | n
 /** Back-compat projection of parseGrantedAccounts (existing call sites and tests). */
 export function extractGrantedAccounts(result: unknown): GrantedAccount[] {
 	return parseGrantedAccounts(result).accounts
+}
+
+/** One capability object out of the wallet-controlled result, by type. */
+function findGrantedCapability(result: unknown, type: string): Record<string, unknown> | null {
+	if (!result || typeof result !== "object") return null
+	const granted = (result as { granted?: unknown[] }).granted
+	if (!Array.isArray(granted)) return null
+	const cap = granted.find((c) => typeof c === "object" && c !== null && (c as { type?: unknown }).type === type)
+	return (cap as Record<string, unknown>) ?? null
+}
+
+/** A granted contract entry is a plain address (string or address-like); null when it is neither. */
+function parseContractAddress(entry: unknown): string | null {
+	try {
+		const raw = typeof entry === "string" ? entry : ((entry as { toString(): string } | null)?.toString() ?? "")
+		return AztecAddress.fromStringUnsafe(raw).toString().toLowerCase()
+	} catch {
+		return null
+	}
+}
+
+/** A `"*"` on either side — a whole contract list, a whole scope, or a pattern's own contract or
+ *  function. The app never asks for one, so a wildcard is a shape it cannot attribute to any token;
+ *  reading it as "everything is granted" would turn an odd answer into a permission upgrade. */
+const WILDCARD = "*"
+
+/** Bound on the scope entries kept from ONE side — the answer is wallet-controlled input. Overflow
+ *  can only shrink a grant, since a requested scope missing from the answer reads as a refusal. */
+const MAX_SCOPE_ENTRIES = 4_096
+
+type ScopeBucket = "transaction" | "simulation.transactions" | "simulation.utilities"
+
+/** One side of the handshake, flattened: the contracts it names, and per contract the
+ *  `<bucket>:<function>` scopes it carries. */
+interface CapabilityScopes {
+	contracts: string[]
+	scopes: Map<string, Set<string>>
+	wildcard: boolean
+	entries: number
+}
+
+/** The app's request and the wallet's answer carry the same capability shapes, so ONE reader covers
+ *  both sides of the comparison. */
+function collectCapabilityScopes(list: unknown): CapabilityScopes {
+	const out: CapabilityScopes = { contracts: [], scopes: new Map(), wildcard: false, entries: 0 }
+	if (!Array.isArray(list)) return out
+	for (const cap of list) {
+		const entry = cap as { type?: unknown; contracts?: unknown; scope?: unknown; transactions?: unknown; utilities?: unknown } | null
+		if (entry?.type === "contracts") readContractList(entry.contracts, out)
+		else if (entry?.type === "transaction") readScope(entry.scope, "transaction", out)
+		else if (entry?.type === "simulation") {
+			readScope((entry.transactions as { scope?: unknown } | undefined)?.scope, "simulation.transactions", out)
+			readScope((entry.utilities as { scope?: unknown } | undefined)?.scope, "simulation.utilities", out)
+		}
+	}
+	return out
+}
+
+function readContractList(value: unknown, out: CapabilityScopes): void {
+	if (value === WILDCARD) {
+		out.wildcard = true
+		return
+	}
+	if (!Array.isArray(value)) return
+	for (const entry of value) {
+		if (out.contracts.length >= MAX_GRANTED_CONTRACTS) return
+		const address = parseContractAddress(entry)
+		if (address !== null && !out.contracts.includes(address)) out.contracts.push(address)
+	}
+}
+
+function readScope(scope: unknown, bucket: ScopeBucket, out: CapabilityScopes): void {
+	if (scope === WILDCARD) {
+		out.wildcard = true
+		return
+	}
+	if (!Array.isArray(scope)) return
+	for (const pattern of scope) {
+		if (out.entries >= MAX_SCOPE_ENTRIES) return
+		const entry = pattern as { contract?: unknown; function?: unknown } | null
+		if (entry?.contract === WILDCARD || entry?.function === WILDCARD) {
+			out.wildcard = true
+			return
+		}
+		const address = parseContractAddress(entry?.contract)
+		if (address === null || typeof entry?.function !== "string") continue
+		const keys = out.scopes.get(address) ?? new Set<string>()
+		keys.add(`${bucket}:${entry.function}`)
+		out.scopes.set(address, keys)
+		out.entries++
+	}
+}
+
+/** Every scope the request named for one contract must come back. A wallet that grants the contract
+ *  but drops its transaction or simulation scopes has not granted what the app needs on it, and a
+ *  deposit sent on that answer would only discover the hole at the Aztec claim. */
+function scopesSatisfied(address: string, request: CapabilityScopes, answer: CapabilityScopes): boolean {
+	const wanted = request.scopes.get(address)
+	if (!wanted) return true
+	const given = answer.scopes.get(address)
+	if (!given) return false
+	for (const key of wanted) {
+		if (!given.has(key)) return false
+	}
+	return true
+}
+
+function capabilityListOf(source: unknown, key: "capabilities" | "granted"): unknown {
+	if (!source || typeof source !== "object") return null
+	return (source as Record<string, unknown>)[key]
+}
+
+/**
+ * The contracts the app may act on: the requested manifest INTERSECTED with the wallet's answer,
+ * lowercased, in request order. Membership in the answer's contract list is not enough — a contract
+ * counts only when every scope the request named for it came back too. A contract the app never
+ * asked for is ignored, and a `"*"` on either side yields nothing at all.
+ *
+ * Same per-entry hardening as the account list: every address round-trips
+ * `AztecAddress.fromStringUnsafe`, and a malformed entry is skipped rather than crashing the connect.
+ */
+export function parseGrantedContracts(request: unknown, result: unknown): string[] {
+	const requested = collectCapabilityScopes(capabilityListOf(request, "capabilities"))
+	const answered = collectCapabilityScopes(capabilityListOf(result, "granted"))
+	if (requested.wildcard || answered.wildcard) return []
+	const granted = new Set(answered.contracts)
+	return requested.contracts.filter((address) => granted.has(address) && scopesSatisfied(address, requested, answered))
 }

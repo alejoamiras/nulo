@@ -17,6 +17,8 @@
  * `window.localStorage`.
  */
 
+import { validateAnyBackupRecord } from "./backup"
+
 export interface KV {
 	getItem(key: string): string | null
 	setItem(key: string, value: string): void
@@ -24,6 +26,9 @@ export interface KV {
 }
 
 export const JOURNAL_KEY = "nulo-bridge:journal:v1"
+
+/** Where entries that failed the load-time validation are parked. Never read as records. */
+export const QUARANTINE_KEY = "nulo-bridge:journal:quarantine"
 
 /** Parse cap - storage-flooding guard. Eviction is prioritized: unfinished records survive
  *  first, then newest completed; junk can never evict a live record. */
@@ -39,8 +44,8 @@ interface JournalBase {
 	 *  schema 2 — no bump: an old client reads a private record as a public schema-2 record minus the
 	 *  optional private fields. */
 	schema: 1 | 2 | 3
-	/** Deposits: secretHashHex (exists before any irreversible tx). Withdraws: exitTxHash, or a
-	 *  provisional `wd-pending-<rand>` between send and receipt. */
+	/** Deposits: secretHashHex, or a provisional `dep-pending-<rand>` until the send derives it.
+	 *  Withdraws: exitTxHash, or a provisional `wd-pending-<rand>` between send and receipt. */
 	id: string
 	direction: "deposit" | "withdraw"
 	isPrivate: boolean
@@ -54,6 +59,10 @@ interface JournalBase {
 	chainId: number
 	portal: string
 	bridge: string
+	/** Set when a re-read of the chain contradicted the record's own token facts. Terminal: a
+	 *  blocked record never runs again, so a rewritten block can never be claimed or exited
+	 *  against; only discarding it clears the state. */
+	blocked?: string
 }
 
 /** The fuel side of a fueled deposit (plan ledger L11/L14). All amounts base-unit decimal strings. */
@@ -144,6 +153,11 @@ export interface WithdrawJournalRecord extends JournalBase {
 	exitTxHash?: string
 	exitBlock?: number
 	consumeTxHash?: string
+	/** The Outbox says this exit's message is already consumed while THIS app never sent a finish
+	 *  transaction: the message names its L1 recipient, so a relayer that got there first released
+	 *  the funds to the same address. Terminal — there is nothing left to consume, and retrying
+	 *  forever is the only other outcome. */
+	consumedByOther?: boolean
 }
 
 /**
@@ -195,7 +209,10 @@ export function isSendRecord(rec: BridgeJournalRecord): rec is SendJournalRecord
 /** Schema-3 display stages: a first-time private deposit passes through `registering` before the claim. */
 export type SendDepositStage = DepositStage | "registering"
 
-export function deriveSendDepositStage(rec: SendDepositRecord, runtime: DepositStageRuntime = {}): SendDepositStage {
+/** The facts a stage is derived from — every deposit shape carries them, so one rail serves them all. */
+export type DepositStageFacts = Pick<SendDepositRecord, "completedAt" | "claimTxHash" | "registerTxHash" | "leafIndex">
+
+export function deriveSendDepositStage(rec: DepositStageFacts, runtime: DepositStageRuntime = {}): SendDepositStage {
 	if (rec.completedAt) return "done"
 	if (rec.claimTxHash) return "claiming"
 	if (rec.registerTxHash) return "registering"
@@ -215,30 +232,100 @@ export function assetKindOf(rec: BridgeJournalRecord): "bridge-token" | "fee-jui
 export type DepositStage = "depositing" | "syncing" | "claimable" | "claiming" | "done"
 export type WithdrawStage = "exiting" | "proving" | "consumable" | "consuming" | "done"
 
+const WITHDRAW_PENDING = "wd-pending-"
+const DEPOSIT_PENDING = "dep-pending-"
+const pendingSuffix = () => Math.random().toString(36).slice(2, 10)
+
 export function makeProvisionalWithdrawId(): string {
-	return `wd-pending-${Math.random().toString(36).slice(2, 10)}`
+	return `${WITHDRAW_PENDING}${pendingSuffix()}`
+}
+
+/** The id a deposit is journaled under before its own claim hash exists — everything the L1 leg
+ *  narrates (the Permit2 approval above all) needs a record to narrate into. */
+export function makeProvisionalDepositId(): string {
+	return `${DEPOSIT_PENDING}${pendingSuffix()}`
 }
 
 export function isProvisionalWithdrawId(id: string): boolean {
-	return id.startsWith("wd-pending-")
+	return id.startsWith(WITHDRAW_PENDING)
 }
 
-function parseRecords(raw: string | null): BridgeJournalRecord[] {
-	if (!raw) return []
+/** Any id a flow minted before its own transaction named the record: there is nothing in such a
+ *  record a backup or a resume could act on. */
+export function isProvisionalRecordId(id: string): boolean {
+	return id.startsWith(WITHDRAW_PENDING) || id.startsWith(DEPOSIT_PENDING)
+}
+
+/** The id stood in while a half-started row is validated: the file validator refuses a provisional
+ *  withdraw id outright (a recovery file must never carry one), while our own storage legitimately
+ *  holds such rows between a send and the receipt that names them. */
+const PROBE_ID = `0x${"0".repeat(64)}`
+
+/**
+ * Deep-validate ONE stored entry with the strictness an imported recovery file gets. Storage is not
+ * a trusted channel: a token block from here reaches the wallet's grant + contract registration, so
+ * its words must be as strictly shaped as a file's, and a half-shaped schema-3 row would otherwise
+ * crash the boot that reads it. Null = the entry does not run and does not render.
+ */
+function validateStoredRecord(entry: unknown): BridgeJournalRecord | null {
+	const id = (entry as { id?: unknown } | null)?.id
+	if (typeof id !== "string" || id.length === 0) return null
 	try {
-		const parsed = JSON.parse(raw) as { schema?: number; records?: unknown }
-		if (parsed?.schema !== 1 || !Array.isArray(parsed.records)) return []
-		const valid = parsed.records.filter(
-			(r): r is BridgeJournalRecord =>
-				!!r &&
-				typeof r === "object" &&
-				typeof (r as BridgeJournalRecord).id === "string" &&
-				((r as BridgeJournalRecord).direction === "deposit" || (r as BridgeJournalRecord).direction === "withdraw"),
-		)
-		return capRecords(valid)
+		const rec = validateAnyBackupRecord(isProvisionalRecordId(id) ? { ...(entry as object), id: PROBE_ID } : entry)
+		return { ...rec, id } as BridgeJournalRecord
+	} catch {
+		return null
+	}
+}
+
+/** The stored entries split into what may run and what may not. */
+interface JournalPartition {
+	records: BridgeJournalRecord[]
+	invalid: unknown[]
+}
+
+function partitionStored(raw: string | null): JournalPartition {
+	if (!raw) return { records: [], invalid: [] }
+	let parsed: { schema?: number; records?: unknown }
+	try {
+		parsed = JSON.parse(raw) as { schema?: number; records?: unknown }
+	} catch {
+		return { records: [], invalid: [] }
+	}
+	if (parsed?.schema !== 1 || !Array.isArray(parsed.records)) return { records: [], invalid: [] }
+	const records: BridgeJournalRecord[] = []
+	const invalid: unknown[] = []
+	for (const entry of parsed.records) {
+		const rec = validateStoredRecord(entry)
+		if (rec) records.push(rec)
+		else invalid.push(entry)
+	}
+	return { records: capRecords(records), invalid }
+}
+
+/** The quarantined entries exactly as stored — they failed validation, so they are never records. */
+export function loadQuarantine(kv: KV): unknown[] {
+	try {
+		const parsed = JSON.parse(kv.getItem(QUARANTINE_KEY) ?? "null") as { schema?: number; records?: unknown }
+		return parsed?.schema === 1 && Array.isArray(parsed.records) ? parsed.records : []
 	} catch {
 		return []
 	}
+}
+
+/**
+ * Park every entry that failed validation under the quarantine key and rewrite the journal without
+ * them. Run once at startup, BEFORE anything writes: every write round-trips through `loadJournal`,
+ * so a sweep that never ran would let the first patch drop an unreadable row for good. Returns how
+ * many entries moved; no write at all when everything validated.
+ */
+export function quarantineInvalid(kv: KV): number {
+	const { records, invalid } = partitionStored(kv.getItem(JOURNAL_KEY))
+	if (invalid.length === 0) return 0
+	const held = loadQuarantine(kv)
+	kv.setItem(QUARANTINE_KEY, JSON.stringify({ schema: 1, records: [...held, ...invalid].slice(-MAX_RECORDS) }))
+	write(kv, records)
+	return invalid.length
 }
 
 /** Prioritized retention under MAX_RECORDS: unfinished records are NEVER evicted - an unfinished
@@ -254,7 +341,7 @@ export function capRecords(records: BridgeJournalRecord[]): BridgeJournalRecord[
 }
 
 export function loadJournal(kv: KV): BridgeJournalRecord[] {
-	return parseRecords(kv.getItem(JOURNAL_KEY))
+	return partitionStored(kv.getItem(JOURNAL_KEY)).records
 }
 
 function write(kv: KV, records: BridgeJournalRecord[]): void {

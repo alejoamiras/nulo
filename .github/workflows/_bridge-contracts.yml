@@ -100,7 +100,6 @@ jobs:
             }
           done <<'EXPECTED'
           8 FormalRouterTest
-          1 FormalPortalTest
           2 FormalFactoryTest
           2 FormalCloneTest
           EXPECTED
@@ -118,7 +117,6 @@ jobs:
           check_bridgeWithFuel_identity_conservesUserFunds
           check_bridgeWithFuel_partialRejectsFeeJuicePortal
           check_deposit_revertsWhenPaused
-          check_initializedBindingsCannotChange
           check_predictPortal_isCreate2OfInitcode
           check_setPaused_revertsForNonOwner
           check_setSwapTarget_revertsForNonOwner
@@ -127,8 +125,8 @@ jobs:
           PROOFS
 
           summaries=$(grep -c '^Symbolic test result: ' halmos.clean || true)
-          if [ "$summaries" -ne 4 ]; then
-            echo "::error::expected 4 proof contracts to run, saw ${summaries}"
+          if [ "$summaries" -ne 3 ]; then
+            echo "::error::expected 3 proof contracts to run, saw ${summaries}"
             fail=1
           fi
           if grep -qE '^Symbolic test result: [0-9]+ passed; [1-9]' halmos.clean; then
@@ -178,7 +176,7 @@ jobs:
           version: ${{ steps.aztec-pin.outputs.version }}
 
       # Pure-library crates only: they need no TXE oracle, so they run unattended here.
-      # The TokenBridge TXE suite is excluded on purpose — see the header.
+      # The hub's TXE suite is excluded on purpose — see the header.
       #
       # --force because target/ is tracked: without it nargo can report a stale success having
       # compiled nothing. The claim_secret crate is deliberately absent — it carries no #[test]

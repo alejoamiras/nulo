@@ -24,7 +24,7 @@ import {ReentrancyGuardTransient} from "@oz/utils/ReentrancyGuardTransient.sol";
 import {PortalFactory} from "../src/PortalFactory.sol";
 import {TokenPortalImpl} from "../src/TokenPortalImpl.sol";
 import {IPortalFactory} from "../src/interfaces/IPortalFactory.sol";
-import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./PortalRoundtripFuzz.t.sol";
+import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./mocks/AztecFakes.sol";
 import {HugeNameERC20, PlainERC20, ReentrantNameERC20} from "./mocks/MetadataERC20s.sol";
 
 // ═══════════════════════════ hostile tokens ═══════════════════════════

@@ -2,17 +2,24 @@ import {
 	type BridgeJournalRecord,
 	type DepositEnvelopeV2,
 	type DepositJournalRecord,
+	type JournalTokenBlock,
 	type KV,
+	type SendDepositRecord,
+	type SendJournalRecord,
+	type SendWithdrawRecord,
 	type WithdrawJournalRecord,
 	assetKindOf,
 	clearLegacyKeys,
 	envelopeMatchesRecord,
 	feeJuiceAddress,
+	isSendRecord,
 	loadJournal,
 	openDepositEnvelope,
 	patchRecord as journalPatch,
 	patchRecordWhen as journalPatchWhen,
+	predictPortal,
 	pruneCompleted,
+	quarantineInvalid,
 	recoveryKeyFromSignature,
 	recoveryKeyMessage,
 	rekeyRecord,
@@ -20,9 +27,10 @@ import {
 	revokeSealTrust,
 	upsertRecord,
 } from "@nulo/bridge-core"
+import type { GrantOutcome } from "@/lib/send-model"
 import { NETWORK } from "@/lib/network"
 import { computed, ref } from "vue"
-import { BRIDGE, FUEL_PORTAL, L1_PORTAL } from "@/contracts/bridge-deployments"
+import { FUEL_PORTAL } from "@/contracts/bridge-generation"
 import { SYNC_TARGET_MARGIN_BLOCKS } from "@/lib/bridge-steps"
 import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
 import { isWellFormedTxHash } from "@/lib/claim-receipt"
@@ -53,6 +61,10 @@ export const isMsgNotReady = (msg: string): boolean =>
  *  latch a false "claimed" [fund-stranding], and (b) never recognise the real consumed shape. */
 export const isMsgConsumed = (msg: string): boolean =>
 	/No non-nullified L1 to L2 message found|message has already been nullified/i.test(msg)
+
+/** Every deposit record the claim path drives. The shared helpers read only the facts both
+ *  shapes carry; the steps that differ re-narrow with `isSendRecord`. */
+export type ClaimRecord = DepositJournalRecord | SendDepositRecord
 
 export type Attention =
 	| "mismatch"
@@ -110,10 +122,14 @@ export interface RecordRuntime {
 	confirmLandedTxHash?: string
 }
 
+/** What finishing an exit on L1 can end in: our own consume transaction, or the discovery that
+ *  someone else's already spent the message. */
+export type ConsumeOutcome = { consumeTxHash: string } | { consumedByOther: true }
+
 /**
  * Chain/wallet boundaries injected so the engine is unit-testable with plain fakes. Production
- * wiring lives in the composables that own the real clients (useDepositFlow / useWithdrawFlow /
- * BridgeView) and passes these once at startup via `connectJournalDeps`.
+ * wiring lives in the composables that own the real clients (useSend / useHubExit) and passes these
+ * once at startup via `connectJournalDeps`.
  */
 export interface JournalEngineDeps {
 	kv: KV
@@ -153,6 +169,37 @@ export interface JournalEngineDeps {
 	waitConsumeReceipt?: (txHash: string) => Promise<boolean>
 	/** Verify a rediscovered consume tx actually consumes THIS record's exit (identity check). */
 	verifyConsumeIdentity?: (rec: WithdrawJournalRecord, txHash: string) => Promise<boolean>
+	/** The generation every schema-3 record must belong to. Absent ⇒ this network has no send
+	 *  lane, and no send record can be resumed on it. */
+	sendBinding?: () => { factory: string; implementation: string; hub: string; feeJuicePortal: string } | undefined
+	/** Re-read the factory's frozen registration and compare the WHOLE token block against it.
+	 *  `null` ⇒ the block still matches; a string is the user-facing reason it does not, and is
+	 *  persisted as `blocked` — the record is never silently corrected. */
+	validateTokenBlock?: (token: JournalTokenBlock) => Promise<string | null>
+	/** The per-token wallet grant. A schema-3 lane runs only on "granted". */
+	ensureTokenGrant?: (token: JournalTokenBlock) => Promise<GrantOutcome>
+	/** The hub claim for a token-moving schema-3 record. `send` also reports the separate
+	 *  registration transaction a private first claim needs. `envelope` is the private record's
+	 *  UNSEALED authoritative copy: the fee ladder rebuilds the private fuel secret from
+	 *  `envelope.salt`, which the journal's plaintext copy can contradict. */
+	claimSend?: (
+		rec: SendDepositRecord,
+		claimValueHex: string,
+		envelope?: DepositEnvelopeV2,
+	) => Promise<{
+		simulate: () => Promise<unknown>
+		send: () => Promise<{ txHash: string; registerTxHash?: string }>
+	}>
+	/** A schema-3 exit's L1 tail: the consume runs against the record's OWN portal clone, so it
+	 *  cannot share the single-portal dep above. `consumedByOther` reports the one outcome that has
+	 *  no transaction of ours behind it — the Outbox message was already spent when the consume
+	 *  failed, so the funds are out and there is nothing left to send. */
+	consumeSend?: (
+		rec: SendWithdrawRecord,
+		onProgress: (p: { provenBlock?: number; targetBlock?: number }) => void,
+	) => Promise<ConsumeOutcome>
+	/** The identity check for a rediscovered schema-3 consume tx (its `to` is the token's clone). */
+	verifyConsumeIdentitySend?: (rec: SendWithdrawRecord, txHash: string) => Promise<boolean>
 	/** Current Aztec block height (latest, not proven) - drives the sync countdown. */
 	l2BlockNumber?: () => Promise<number>
 	/** 5.0 L1→L2 readiness for a real inbox message key: its checkpoint + the node anchor's current
@@ -160,6 +207,9 @@ export interface JournalEngineDeps {
 	 *  only once anchor >= checkpoint (else the claim-simulate throws "No L1 to L2 message found").
 	 *  Absent dep / record without a messageHash ⇒ the engine falls back to simulate-only polling. */
 	messageReadiness?: (messageHash: string) => Promise<{ checkpoint: number; anchor: number } | null>
+	/** Re-pin the wallet's grant set from the tokens the journal still holds. Called whenever a
+	 *  record leaves, so a pin never outlives the record that earned it. */
+	retainPinnedTokens?: (needed: string[]) => void
 	/** Injectable wait (tests pass a no-op; production uses real timers). */
 	waitMs?: (ms: number) => Promise<void>
 }
@@ -235,6 +285,10 @@ export function initJournal(): void {
 	if (initialized) return
 	initialized = true
 	clearLegacyKeys(deps.kv)
+	// BEFORE anything writes: every write round-trips the journal through its validator, so a row
+	// that fails it would be dropped for good by the first patch instead of being kept for inspection.
+	const quarantined = quarantineInvalid(deps.kv)
+	if (quarantined > 0) log("quarantined unreadable journal entries", { quarantined })
 	pruneCompleted(deps.kv, PRUNE_AFTER_MS, deps.now())
 	reload()
 	if (typeof window !== "undefined") {
@@ -298,12 +352,15 @@ export function currentRecord(id: string): BridgeJournalRecord | undefined {
 	return loadJournal(deps.kv).find((r) => r.id === id)
 }
 
-/** Provisional-withdraw upgrade: replace the `wd-pending-*` record under its real exitTxHash id.
- *  Foreground ownership follows the rekey, or the stepper would lose its record mid-watch. */
+/** Provisional-record upgrade: replace the pending row under the id its own transaction gave it.
+ *  Foreground ownership follows the rekey, or the stepper would lose its record mid-watch, and so
+ *  does the runtime - the narration and the approve outcome describe the same attempt. */
 export function rekeyJournalRecord(oldId: string, next: BridgeJournalRecord): void {
 	rekeyRecord(deps.kv, oldId, next)
 	if (sessionLive.delete(oldId)) sessionLive.add(next.id)
 	if (activeFlowId.value === oldId) activeFlowId.value = next.id
+	const { [oldId]: carried, ...rest } = runtime.value
+	if (carried) runtime.value = { ...rest, [next.id]: { ...carried, ...rest[next.id] } }
 	reload()
 }
 
@@ -320,25 +377,147 @@ export function discard(id: string): void {
 	const { [id]: _gone, ...rest } = runtime.value
 	runtime.value = rest
 	reload()
+	// Re-derived from what SURVIVED, never from the record that left: two records can share a token.
+	deps.retainPinnedTokens?.(sendTokenBlocks().map((t) => t.l2Token))
 	log("discarded", id)
 }
 
 export const clearDone = discard
 
-/** Deployment binding: a record from another deployment never resumes (stale-deployment). */
-export function deploymentMatches(rec: BridgeJournalRecord): boolean {
-	if (rec.chainId !== NETWORK.l1ChainId) return false
-	// Fee-juice (Fuel) records bind to the canonical FeeJuicePortal + the L2 Fee Juice address — NOT the
-	// token bridge. Same chain, different deployment edge: without this branch a Fuel record would be
-	// wrongly quarantined as stale-deployment (plan §5 DQ2).
-	if (assetKindOf(rec) === "fee-juice") {
+/**
+ * A schema-3 record binds to ONE generation: the clone it names must be the factory's CREATE2 for
+ * the ERC-20 in its token block, and its bridge must be that generation's hub. A gas-only send
+ * carries no token and keeps the Fee Juice binding, against the generation's own portal.
+ */
+function sendDeploymentMatches(rec: SendJournalRecord): boolean {
+	const binding = deps.sendBinding?.()
+	if (!binding) return false
+	if (rec.intent === "gas") {
 		return (
-			!!FUEL_PORTAL &&
-			rec.portal?.toLowerCase() === FUEL_PORTAL.toLowerCase() &&
+			rec.portal?.toLowerCase() === binding.feeJuicePortal.toLowerCase() &&
 			rec.bridge?.toLowerCase() === feeJuiceAddress.toLowerCase()
 		)
 	}
-	return rec.portal?.toLowerCase() === L1_PORTAL.toLowerCase() && rec.bridge?.toLowerCase() === BRIDGE.toString().toLowerCase()
+	const token = rec.token
+	return (
+		rec.bridge?.toLowerCase() === binding.hub.toLowerCase() &&
+		rec.portal?.toLowerCase() === token.portal.toLowerCase() &&
+		token.portal.toLowerCase() === predictPortal(binding.factory, binding.implementation, token.erc20)
+	)
+}
+
+/**
+ * Deployment binding: a record from another deployment never resumes (stale-deployment). A record
+ * predating the generation binds to contracts this app no longer talks to — only a direct Fee Juice
+ * bridge survives that cut, because the canonical FeeJuicePortal + the L2 Fee Juice address are
+ * protocol addresses rather than generation ones.
+ */
+export function deploymentMatches(rec: BridgeJournalRecord): boolean {
+	if (rec.chainId !== NETWORK.l1ChainId) return false
+	if (isSendRecord(rec)) return sendDeploymentMatches(rec)
+	return (
+		assetKindOf(rec) === "fee-juice" &&
+		rec.portal?.toLowerCase() === FUEL_PORTAL.toLowerCase() &&
+		rec.bridge?.toLowerCase() === feeJuiceAddress.toLowerCase()
+	)
+}
+
+/** Every distinct token a schema-3 record holds — the boot input to the app's wallet grant set,
+ *  so a resumed lane's token is already covered by the first prompt. */
+export function sendTokenBlocks(): JournalTokenBlock[] {
+	const seen = new Map<string, JournalTokenBlock>()
+	for (const rec of records.value) {
+		if (isSendRecord(rec) && rec.intent !== "gas") seen.set(rec.token.l2Token.toLowerCase(), rec.token)
+	}
+	return [...seen.values()]
+}
+
+/**
+ * Prove every distinct token block the journal holds against the factory, and return the ones that
+ * still hold. Storage is attacker-writable, and a block reaches the wallet as a grant request AND a
+ * contract registration built from ITS words — so nothing persisted may be handed over before the
+ * chain has vouched for it. A contradicted block blocks its records (terminal, as on the claim
+ * lane); a chain that cannot answer proves nothing, so its block is simply left out rather than
+ * blocked on a transport failure.
+ */
+export async function attestSendTokenBlocks(): Promise<JournalTokenBlock[]> {
+	if (!deps.validateTokenBlock) throw new Error("Journal deps not connected")
+	const attested: JournalTokenBlock[] = []
+	for (const token of sendTokenBlocks()) {
+		let reason: string | null
+		try {
+			reason = await deps.validateTokenBlock(token)
+		} catch (e) {
+			log("token block attestation unavailable - leaving it unpinned", e instanceof Error ? e.message : String(e))
+			continue
+		}
+		if (reason === null) attested.push(token)
+		else blockTokenRecords(token, reason)
+	}
+	return attested
+}
+
+function blockTokenRecords(token: JournalTokenBlock, reason: string): void {
+	const key = token.l2Token.toLowerCase()
+	for (const rec of records.value) {
+		if (!isSendRecord(rec) || rec.intent === "gas" || rec.token.l2Token.toLowerCase() !== key) continue
+		patchRecord(rec.id, { blocked: reason })
+		setRuntime(rec.id, { attention: "stale-deployment", note: reason })
+	}
+}
+
+/** Copy for a grant that did not end in an approval; "stale" means a newer selection superseded it. */
+const grantNote = (outcome: GrantOutcome): string =>
+	outcome === "declined"
+		? "Your wallet hasn't granted access to this token yet - press CLAIM and approve the request."
+		: "The token grant was superseded by a newer selection - press CLAIM to request it again."
+
+/**
+ * The block check both send lanes run before anything is granted or executed. A mismatch is
+ * TERMINAL - the record is blocked rather than silently corrected, because a rewritten block
+ * would move a different L2 token than the one the deposit committed to.
+ */
+async function checkTokenBlock(token: JournalTokenBlock, id: string): Promise<"stop" | "proceed"> {
+	if (!deps.validateTokenBlock) throw new Error("Journal deps not connected")
+	const reason = await deps.validateTokenBlock(token)
+	if (!reason) return "proceed"
+	patchRecord(id, { blocked: reason })
+	setRuntime(id, { attention: "stale-deployment", note: reason })
+	return "stop"
+}
+
+/** The deposit lane's preflight: the block check, then the wallet grant for that token. */
+async function prepareSendLane(rec: SendJournalRecord, id: string): Promise<"stop" | "proceed"> {
+	if (rec.intent === "gas") return "proceed"
+	if (!deps.ensureTokenGrant) throw new Error("Journal deps not connected")
+	if ((await checkTokenBlock(rec.token, id)) === "stop") return "stop"
+	const outcome = await deps.ensureTokenGrant(rec.token)
+	if (outcome === "granted") return "proceed"
+	setRuntime(id, { attention: "error", note: grantNote(outcome) })
+	return "stop"
+}
+
+/** Whether a recovery file's HEADER could belong to this generation's send lane. The header is
+ *  unauthenticated, so this only decides whether to attempt the unseal; the record's own binding
+ *  and token block are checked afterwards. */
+export function sendHeaderMatches(chainId: number, bridge: string): boolean {
+	const binding = deps.sendBinding?.()
+	return !!binding && chainId === NETWORK.l1ChainId && bridge.toLowerCase() === binding.hub.toLowerCase()
+}
+
+/** The import path's authoritative check: a restored send record proves its block against the
+ *  factory before it is ever tracked. Returns the refusal reason, or null when it holds. */
+export async function validateSendRecordBlock(rec: BridgeJournalRecord): Promise<string | null> {
+	if (!isSendRecord(rec) || rec.intent === "gas") return null
+	if (!deps.validateTokenBlock) throw new Error("Journal deps not connected")
+	return deps.validateTokenBlock(rec.token)
+}
+
+/** A record the chain has contradicted never runs again - only discarding it clears the state. */
+function guardBlocked(rec: BridgeJournalRecord): boolean {
+	if (!rec.blocked) return true
+	setRuntime(rec.id, { attention: "stale-deployment", note: rec.blocked })
+	return false
 }
 
 function guardDeployment(rec: BridgeJournalRecord): boolean {
@@ -357,7 +536,7 @@ function guardDeployment(rec: BridgeJournalRecord): boolean {
  *  revoking trust there would re-impose the 2-signature self-test for a change of mind. A real
  *  open failure revokes trust ONLY for the account that claims to have sealed this record - a
  *  wrong-account attempt must not destroy the connected account's valid verdict. */
-function handleUnsealFailure(rec: DepositJournalRecord, e: unknown, connected: string | null): void {
+function handleUnsealFailure(rec: ClaimRecord, e: unknown, connected: string | null): void {
 	if (isUserRejection(e)) {
 		setRuntime(rec.id, { attention: "error", note: "Signature request declined - press CLAIM when you're ready." })
 		return
@@ -371,7 +550,7 @@ function handleUnsealFailure(rec: DepositJournalRecord, e: unknown, connected: s
 	})
 }
 
-async function resolvePrivateSecret(rec: DepositJournalRecord): Promise<{ secretHex: string; envelope: DepositEnvelopeV2 } | null> {
+async function resolvePrivateSecret(rec: ClaimRecord): Promise<{ secretHex: string; envelope: DepositEnvelopeV2 } | null> {
 	const cached = secretCache.get(rec.id)
 	if (cached) return cached
 	if (!deps.signL1) {
@@ -463,8 +642,11 @@ function setStep(id: string, step?: BridgeStep, stepDetail?: string): void {
 	setRuntime(id, { step, stepDetail })
 }
 
-/** The flows' narration channel into the per-record runtime (plan S3). */
+/** The flows' narration channel into the per-record runtime (plan S3). An empty id is a caller
+ *  narrating before it created its record: the runtime entry it would write is unreachable and the
+ *  step it describes would never appear anywhere, so it fails loudly instead. */
 export function setRecordStep(id: string, step?: BridgeStep, stepDetail?: string): void {
+	if (id === "") throw new Error("setRecordStep: narrating a step before the record exists")
 	setStep(id, step, stepDetail)
 }
 
@@ -494,7 +676,7 @@ export function releaseForeground(id: string): void {
 	if (activeFlowId.value === id) activeFlowId.value = null
 }
 
-function completeDeposit(rec: DepositJournalRecord | undefined): void {
+function completeDeposit(rec: ClaimRecord | undefined): void {
 	// Cross-tab guard: another tab may have discarded (record gone) or completed this record while
 	// we ran - generations are tab-local, so the WRITE must be existence- and idempotency-checked.
 	if (!rec) return
@@ -520,7 +702,7 @@ function completeDeposit(rec: DepositJournalRecord | undefined): void {
 	log("deposit complete", rec.id)
 }
 
-function completeWithdraw(rec: WithdrawJournalRecord | undefined, consumeTxHash?: string): void {
+function completeWithdraw(rec: ExitRecord | undefined, consumeTxHash?: string): void {
 	if (!rec) return
 	const current = records.value.find((r) => r.id === rec.id)
 	if (!current || current.completedAt) return
@@ -588,8 +770,8 @@ async function runDepositClaimLocked(id: string, gen: number, interactive: boole
 	const rec = claimTarget(id)
 	if (!rec) return "stop"
 
-	if (recipientMismatch(rec, id)) return "stop"
 	if (rec.claimTxHash !== undefined && !isWellFormedTxHash(rec.claimTxHash)) return reportMalformedClaimHash(rec.id)
+	if ((await claimGuards(rec, id)) === "stop") return "stop"
 	if (rec.claimTxHash) return resumeSentClaim(rec, id, gen, interactive)
 	// Caller-side condition so the common has-leaf path stays synchronous (no new await seam).
 	if (legRecoveryNeeded(rec) && (await recoverLegIfNeeded(rec, id)) === "stop") return "stop"
@@ -599,11 +781,11 @@ async function runDepositClaimLocked(id: string, gen: number, interactive: boole
 	if (!material) return "stop"
 	setRuntime(id, { attention: undefined, note: undefined })
 
-	const fresh = records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
+	const fresh = records.value.find((r) => r.id === id) as ClaimRecord | undefined
 	if (!fresh) return "stop" // Cross-tab discard while the unseal signature waited.
 	// Interaction CONSTRUCTION happens BEFORE all three gates — fee/fuel resolution timing and
 	// any journal mutations the build performs must not move.
-	const interaction = await (deps.claim as NonNullable<typeof deps.claim>)(fresh, material.secretHex, material.envelope)
+	const interaction = await buildClaimHandles(fresh, material)
 
 	// A retry on an already-gate-passed record must NOT visually re-run the crossing: narrate the
 	// quick revalidation under the CLAIM phase instead (the simulate still guards consumability).
@@ -633,15 +815,40 @@ function reportMalformedClaimHash(id: string): "stop" {
 	return "stop"
 }
 
-/** The runnable claim target, or undefined: completed/absent/wrong-deployment records don't
- *  run; missing engine deps throw (a wiring bug, not a record state). Synchronous — the
+/** The runnable claim target, or undefined: completed/absent/wrong-deployment/blocked records
+ *  don't run; missing engine deps throw (a wiring bug, not a record state). Synchronous — the
  *  head guards keep the original's no-await entry. */
-function claimTarget(id: string): DepositJournalRecord | undefined {
-	const rec = records.value.find((r) => r.id === id && r.direction === "deposit") as DepositJournalRecord | undefined
+function claimTarget(id: string): ClaimRecord | undefined {
+	const rec = records.value.find((r) => r.id === id && r.direction === "deposit") as ClaimRecord | undefined
 	if (!rec || rec.completedAt) return undefined
-	if (!guardDeployment(rec)) return undefined
-	if (!deps.claim || !deps.claimReceiptStatus) throw new Error("Journal deps not connected")
+	if (!guardBlocked(rec) || !guardDeployment(rec)) return undefined
+	if (!claimsThroughHub(rec) && !deps.claim) throw new Error("Journal deps not connected")
+	if (claimsThroughHub(rec) && !deps.claimSend) throw new Error("Journal deps not connected")
+	if (!deps.claimReceiptStatus) throw new Error("Journal deps not connected")
 	return rec
+}
+
+/** Only a token-moving send goes through the hub; a gas-only send is still a Fee Juice claim. */
+const claimsThroughHub = (rec: ClaimRecord): rec is SendDepositRecord => isSendRecord(rec) && rec.intent !== "gas"
+
+/** The pre-claim guards in order: recipient identity, then a send record's block validation and
+ *  its wallet grant — both BEFORE any interaction is built or any transaction is signed. */
+async function claimGuards(rec: ClaimRecord, id: string): Promise<"stop" | "proceed"> {
+	if (recipientMismatch(rec, id)) return "stop"
+	return isSendRecord(rec) ? prepareSendLane(rec, id) : "proceed"
+}
+
+/** The claim's simulate/send pair: a token-moving send claims through the hub (which may also
+ *  register the token), everything else through the token-bridge dep. */
+async function buildClaimHandles(
+	rec: ClaimRecord,
+	material: { secretHex: string; envelope?: DepositEnvelopeV2 },
+): Promise<{ simulate: () => Promise<unknown>; send: () => Promise<{ txHash: string; registerTxHash?: string }> }> {
+	if (claimsThroughHub(rec)) {
+		if (!deps.claimSend) throw new Error("Journal deps not connected")
+		return deps.claimSend(rec, material.secretHex, material.envelope)
+	}
+	return (deps.claim as NonNullable<typeof deps.claim>)(rec as DepositJournalRecord, material.secretHex, material.envelope)
 }
 
 /** Pre-click recipient guard (ALL deposit claims — post-impl audit HIGH-1): the claim acts
@@ -652,7 +859,7 @@ function claimTarget(id: string): DepositJournalRecord | undefined {
  *  active account is treated like a mismatch — never run a claim on the hope that the right
  *  account happens to be connected; a non-string/empty recipient (tampered localStorage) is
  *  refused the same way instead of bypassing the compare and failing deep in address parsing. */
-function recipientMismatch(rec: DepositJournalRecord, id: string): boolean {
+function recipientMismatch(rec: ClaimRecord, id: string): boolean {
 	const aztec = deps.connectedAztec?.() ?? null
 	const recipientOk = typeof rec.recipient === "string" && rec.recipient.length > 0
 	if (!aztec || !recipientOk || aztec.toLowerCase() !== rec.recipient.toLowerCase()) {
@@ -669,7 +876,7 @@ function recipientMismatch(rec: DepositJournalRecord, id: string): boolean {
  *  receipt IS confirmation; the message probe (best-effort, needs the secret - an EXPLICIT
  *  click on a rediscovered private record unseals it first) can only DELAY completion while
  *  the PXE still shows the message as claimable. */
-async function resumeSentClaim(rec: DepositJournalRecord, id: string, gen: number, interactive: boolean): Promise<"continue" | "stop"> {
+async function resumeSentClaim(rec: ClaimRecord, id: string, gen: number, interactive: boolean): Promise<"continue" | "stop"> {
 	if (rec.isPrivate && interactive && !secretCache.has(id) && rec.sealedEnvelope) {
 		const resolved = await resolvePrivateSecret(rec)
 		if (!resolved) return "stop"
@@ -691,13 +898,15 @@ async function resumeSentClaim(rec: DepositJournalRecord, id: string, gen: numbe
  * than silently falling through to the public one. Guarded on the dep + tx hash so the bail
  * below stays reachable only from the original missing-leaf path.
  */
-function legRecoveryNeeded(rec: DepositJournalRecord): boolean {
+function legRecoveryNeeded(rec: ClaimRecord): boolean {
+	// A send that bought gas emits the same router event, so its fuel fields come back the same way.
+	const boughtGas = rec.schema === 2 || (isSendRecord(rec) && rec.intent === "token+gas")
 	const fuelFieldsRecoverable =
-		rec.schema === 2 && !!rec.depositTxHash && !!deps.recoverDepositLeg && (!rec.fuel?.received || !rec.fuel?.leafIndex)
+		boughtGas && !!rec.depositTxHash && !!deps.recoverDepositLeg && (!rec.fuel?.received || !rec.fuel?.leafIndex)
 	return !rec.leafIndex || fuelFieldsRecoverable
 }
 
-async function recoverLegIfNeeded(rec: DepositJournalRecord, id: string): Promise<"proceed" | "stop"> {
+async function recoverLegIfNeeded(rec: ClaimRecord, id: string): Promise<"proceed" | "stop"> {
 	if (!rec.depositTxHash || !deps.recoverDepositLeg) {
 		log("no leafIndex yet - the deposit leg is still running", id)
 		return "stop"
@@ -708,13 +917,13 @@ async function recoverLegIfNeeded(rec: DepositJournalRecord, id: string): Promis
 
 /** One recovery attempt against the recorded L1 receipt: terminal receipt-mismatch vs
  *  retryable error classification, and the not-yet-mined soft bail. */
-async function attemptLegRecovery(rec: DepositJournalRecord, id: string): Promise<"recovered" | "stop"> {
+async function attemptLegRecovery(rec: ClaimRecord, id: string): Promise<"recovered" | "stop"> {
 	setStep(id, "depositing", "checking the Ethereum deposit")
 	let outcome: "recovered" | "pending"
 	try {
 		// Read-at-call-time (parity): a concurrently removed dep throws into THIS catch, exactly
 		// like the original property access did.
-		outcome = await (deps.recoverDepositLeg as NonNullable<typeof deps.recoverDepositLeg>)(rec)
+		outcome = await (deps.recoverDepositLeg as NonNullable<typeof deps.recoverDepositLeg>)(rec as DepositJournalRecord)
 	} catch (e) {
 		const raw = e instanceof Error ? e.message : String(e)
 		setRuntime(id, { attention: isReceiptRecordMismatch(raw) ? "receipt-mismatch" : "error", note: humanizeWalletError(raw) })
@@ -734,7 +943,7 @@ async function attemptLegRecovery(rec: DepositJournalRecord, id: string): Promis
  *  the claim dep so the fee-juice path reads `envelope.salt` (source of truth) over the
  *  plaintext journal copy (codex post-impl HIGH). Null = the run must stop (already narrated). */
 async function resolvePrivateClaimMaterial(
-	rec: DepositJournalRecord,
+	rec: ClaimRecord,
 	id: string,
 ): Promise<{ secretHex: string; envelope?: DepositEnvelopeV2 } | null> {
 	// Only narrate UNSEALING when a real signature is needed (a rediscovered record). A fresh
@@ -748,21 +957,32 @@ async function resolvePrivateClaimMaterial(
 	return { secretHex: resolved.secretHex, envelope: resolved.envelope }
 }
 
-function resolvePublicClaimMaterial(rec: DepositJournalRecord, id: string): { secretHex: string; envelope?: DepositEnvelopeV2 } | null {
-	if (!rec.secret) {
+/**
+ * A public record's claim credential, from the ONE place that holds it. A gas-only send has no
+ * token leg, so the secret its L1 message committed to lives in the fuel block and nowhere else —
+ * a top-level copy would be a second source of truth for the same value, free to drift from the
+ * block the claim actually spends.
+ */
+function publicClaimSecretOf(rec: ClaimRecord): string | undefined {
+	return isSendRecord(rec) && rec.intent === "gas" ? rec.fuel?.secret : rec.secret
+}
+
+function resolvePublicClaimMaterial(rec: ClaimRecord, id: string): { secretHex: string; envelope?: DepositEnvelopeV2 } | null {
+	const secretHex = publicClaimSecretOf(rec)
+	if (!secretHex) {
 		setRuntime(id, { attention: "stale", note: "This record has no claim secret - it cannot be claimed." })
 		return null
 	}
-	return { secretHex: rec.secret }
+	return { secretHex }
 }
 
 /** Whether the block countdown has anything to do for this record. */
-function countdownApplies(rec: DepositJournalRecord): boolean {
+function countdownApplies(rec: ClaimRecord): boolean {
 	return rec.depositL2Block !== undefined && !!deps.l2BlockNumber
 }
 
 /** Whether the checkpoint gate has anything to do for this record. */
-function checkpointApplies(rec: DepositJournalRecord): boolean {
+function checkpointApplies(rec: ClaimRecord): boolean {
 	return !!deps.messageReadiness && (!!rec.messageHash || !!rec.fuel?.messageHash)
 }
 
@@ -779,7 +999,7 @@ interface ArrivalGateState {
  *  margin gives a LEGIBLE "blocks until arrival" - no PXE simulate churn while the rollup
  *  predictably catches up. Best-effort: missing snapshot/dep/node falls through to the gate.
  *  Never an authority — it can never green-light a claim by itself. */
-async function awaitBlockCountdown(rec: DepositJournalRecord, id: string, gate: ArrivalGateState): Promise<ArrivalGateState> {
+async function awaitBlockCountdown(rec: ClaimRecord, id: string, gate: ArrivalGateState): Promise<ArrivalGateState> {
 	let { simulateStart: i, counted } = gate
 	const target = rec.depositL2Block !== undefined && deps.l2BlockNumber ? rec.depositL2Block + SYNC_TARGET_MARGIN_BLOCKS : null
 	if (target !== null && deps.l2BlockNumber) {
@@ -812,7 +1032,7 @@ async function awaitBlockCountdown(rec: DepositJournalRecord, id: string, gate: 
  *  keys the inbox emitted — the token claim AND, for a fueled deposit, the FJ message that pays
  *  for it. Legacy records with no messageHash fall through to the simulate-only loop. Its own
  *  separate 300 budget; waiting here sets `counted`. */
-async function awaitCheckpointGate(rec: DepositJournalRecord, id: string, gate: ArrivalGateState): Promise<ArrivalGateState> {
+async function awaitCheckpointGate(rec: ClaimRecord, id: string, gate: ArrivalGateState): Promise<ArrivalGateState> {
 	let counted = gate.counted
 	const gateHashes = [rec.messageHash, rec.fuel?.messageHash].filter((h): h is string => !!h)
 	if (deps.messageReadiness && gateHashes.length > 0) {
@@ -880,24 +1100,27 @@ async function awaitConsumable(interaction: { simulate: () => Promise<unknown> }
 async function sendAndWatch(
 	id: string,
 	gen: number,
-	interaction: { send: () => Promise<{ txHash: string }> },
+	interaction: { send: () => Promise<{ txHash: string; registerTxHash?: string }> },
 ): Promise<"continue" | "stop"> {
 	setStep(id, "sending", "confirm in your Aztec wallet")
-	const { txHash } = await runOnLane("aztec", () => interaction.send())
-	log("claim sent", { id, txHash })
-	patchRecord(id, { claimTxHash: txHash })
+	const { txHash, registerTxHash } = await runOnLane("aztec", () => interaction.send())
+	log("claim sent", { id, txHash, registerTxHash })
+	// The registration is journalled together with the claim it precedes: the hub reports both
+	// only once the claim is away, and a run that dies in between simply re-reads the hub and
+	// claims plainly, so the two hashes never disagree about what landed.
+	patchRecord(id, { claimTxHash: txHash, ...(registerTxHash ? { registerTxHash } : {}) })
 	receiptRounds.delete(id)
 	// F12: the forge-resistant provenance - THIS process watched claimable → sent.
 	localClaimProvenance.add(id)
 	// Cross-tab guard: the record can vanish remotely between the send and this reread.
-	const sent = records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
+	const sent = records.value.find((r) => r.id === id) as ClaimRecord | undefined
 	if (!sent) return "stop"
 	return (await runReceiptRound(sent, gen)) === "continue" ? "continue" : "stop"
 }
 
 /** One ~3-minute receipt round (D4 completion, D2 narration). Returns "continue" when the claim
  *  is still pending and another round should be scheduled by the caller (outside the lock). */
-async function runReceiptRound(rec: DepositJournalRecord, gen: number): Promise<"done" | "stop" | "continue"> {
+async function runReceiptRound(rec: ClaimRecord, gen: number): Promise<"done" | "stop" | "continue"> {
 	if (!receiptRoundReady(rec)) return "stop"
 	const roundsDone = priorReceiptRounds(rec.id)
 	const streaks = { dropped: 0, unreachable: 0 }
@@ -940,14 +1163,14 @@ function closeReceiptRound(id: string, roundsDone: number): "continue" | "stop" 
 
 /** Quiet flip: real evidence THIS claim was accepted into a proposed block. Display-only
  *  (the rail's dot goes mint); the round keeps polling to inclusion exactly as before. */
-function flipProposedLanded(rec: DepositJournalRecord, status: string): void {
+function flipProposedLanded(rec: ClaimRecord, status: string): void {
 	if (status === "proposed" && runtime.value[rec.id]?.confirmLandedTxHash !== rec.claimTxHash) {
 		setRuntime(rec.id, { confirmLandedTxHash: rec.claimTxHash })
 	}
 }
 
 /** Both preconditions a round needs; callers guarantee them, this is the defensive form. */
-function receiptRoundReady(rec: DepositJournalRecord): boolean {
+function receiptRoundReady(rec: ClaimRecord): boolean {
 	return !!deps.claimReceiptStatus && !!rec.claimTxHash
 }
 
@@ -960,9 +1183,9 @@ function priorReceiptRounds(id: string): number {
  *  none): the clear applies only while the persisted hash is still the reverted one, so a late
  *  poll in this tab cannot wipe a fresh hash another tab already sent. Deliberately synchronous:
  *  it runs between a gen check and the loop's next step. */
-function reportRevertedClaim(rec: DepositJournalRecord): "stop" {
+function reportRevertedClaim(rec: ClaimRecord): "stop" {
 	const expected = rec.claimTxHash
-	const cleared = journalPatchWhen(deps.kv, rec.id, (live) => !!expected && (live as DepositJournalRecord).claimTxHash === expected, {
+	const cleared = journalPatchWhen(deps.kv, rec.id, (live) => !!expected && (live as ClaimRecord).claimTxHash === expected, {
 		claimTxHash: undefined,
 	})
 	if (cleared) {
@@ -1039,7 +1262,7 @@ function advanceReceiptStreaks(
  * record; that attacker already has storage write and could delete the record outright.
  * "poll" = keep polling (the helper already waited its 4s).
  */
-async function handleSuccessReceipt(rec: DepositJournalRecord, gen: number): Promise<"done" | "stop" | "poll"> {
+async function handleSuccessReceipt(rec: ClaimRecord, gen: number): Promise<"done" | "stop" | "poll"> {
 	if (localClaimProvenance.has(rec.id)) {
 		completeDeposit(records.value.find((r) => r.id === rec.id) as DepositJournalRecord | undefined)
 		return "done"
@@ -1059,11 +1282,13 @@ async function handleSuccessReceipt(rec: DepositJournalRecord, gen: number): Pro
 }
 
 /** True/false when determinable; null when the secret isn't available for the probe (prompt-free rule). */
-async function recordMessageConsumed(rec: DepositJournalRecord): Promise<boolean | null> {
-	const secretHex = rec.isPrivate ? secretCache.get(rec.id)?.secretHex : rec.secret
-	if (!secretHex || !deps.claim) return null
+async function recordMessageConsumed(rec: ClaimRecord): Promise<boolean | null> {
+	const secretHex = rec.isPrivate ? secretCache.get(rec.id)?.secretHex : publicClaimSecretOf(rec)
+	if (!secretHex) return null
 	try {
-		const interaction = await deps.claim(rec, secretHex)
+		// The probe rebuilds the SAME claim the record would send, so a send record re-simulates
+		// against the hub; an unwired dep throws here and reads as "unknown", never as consumed.
+		const interaction = await buildClaimHandles(rec, { secretHex })
 		await interaction.simulate()
 		return false // Still claimable ⇒ that successful receipt was NOT this record's claim.
 	} catch (e) {
@@ -1089,10 +1314,23 @@ async function runWithdrawConsumeInner(id: string): Promise<void> {
 	await withRecordLock(id, () => runWithdrawConsumeLocked(id))
 }
 
+export type ExitRecord = WithdrawJournalRecord | SendWithdrawRecord
+type ExitProgress = (p: { provenBlock?: number; targetBlock?: number }) => void
+
+// The consume legs are picked per record shape: a send's exit is consumed on its OWN portal
+// clone, so it can never share the single-portal deps the token bridge wired.
+const exitConsume = (rec: ExitRecord, onProgress: ExitProgress) =>
+	isSendRecord(rec) ? deps.consumeSend?.(rec, onProgress) : deps.consume?.(rec, onProgress)
+
+const exitVerify = (rec: ExitRecord, txHash: string) =>
+	isSendRecord(rec) ? deps.verifyConsumeIdentitySend?.(rec, txHash) : deps.verifyConsumeIdentity?.(rec, txHash)
+
+const exitConsumeWired = (rec: ExitRecord): boolean => !!(isSendRecord(rec) ? deps.consumeSend : deps.consume)
+
 /** A rediscovered consumeTxHash waits (with the identity check) instead of re-prompting. */
-async function finishSubmittedConsume(rec: WithdrawJournalRecord, id: string): Promise<void> {
+async function finishSubmittedConsume(rec: ExitRecord, id: string): Promise<void> {
 	setStep(id, "verifying", "matching the finish transaction to this withdrawal")
-	const legit = (await deps.verifyConsumeIdentity?.(rec, rec.consumeTxHash as string)) ?? true
+	const legit = (await exitVerify(rec, rec.consumeTxHash as string)) ?? true
 	if (!legit) {
 		setRuntime(id, {
 			attention: "unknown-outcome",
@@ -1114,14 +1352,26 @@ async function finishSubmittedConsume(rec: WithdrawJournalRecord, id: string): P
 	})
 }
 
+/** A message someone else consumed is DONE, not failed: it named this record's L1 recipient, so the
+ *  funds landed where the burn said they would. Recorded as its own fact — no consume transaction of
+ *  ours exists to show — and terminal, because retrying can only ever fail the same way. */
+function completeConsumedByOther(id: string): void {
+	patchRecord(id, { consumedByOther: true } as Partial<BridgeJournalRecord>)
+	completeWithdraw(records.value.find((r) => r.id === id) as ExitRecord | undefined)
+	log("exit finished by another caller - marking complete", id)
+}
+
 /** The lock-held consume sequence: journal-first latch — a fresh consumeTxHash is PERSISTED
  *  before its receipt wait; success completes from a FRESH reread; prior-hash and fresh-hash
  *  receipt failures both clear the hash, each with its own copy. */
 async function runWithdrawConsumeLocked(id: string): Promise<void> {
-	const rec = records.value.find((r) => r.id === id && r.direction === "withdraw") as WithdrawJournalRecord | undefined
+	const rec = records.value.find((r) => r.id === id && r.direction === "withdraw") as ExitRecord | undefined
 	if (!rec || rec.completedAt) return
-	if (!guardDeployment(rec)) return
-	if (!deps.consume || !deps.waitConsumeReceipt) throw new Error("Journal deps not connected")
+	if (!guardBlocked(rec) || !guardDeployment(rec)) return
+	if (!exitConsumeWired(rec) || !deps.waitConsumeReceipt) throw new Error("Journal deps not connected")
+	// A send's exit spends the record's OWN token block on L1; a block the factory no longer
+	// agrees with must never reach the Outbox consume.
+	if (isSendRecord(rec) && (await checkTokenBlock(rec.token, id)) === "stop") return
 
 	if (!rec.exitTxHash) {
 		setRuntime(id, {
@@ -1134,7 +1384,7 @@ async function runWithdrawConsumeLocked(id: string): Promise<void> {
 	if (rec.consumeTxHash) return finishSubmittedConsume(rec, id)
 
 	setStep(id, "confirming", "waiting for the proven epoch, then one Ethereum confirmation")
-	const { consumeTxHash } = await deps.consume(rec, (p) => {
+	const consumed = await exitConsume(rec, (p) => {
 		const provenBlock = p.provenBlock ?? runtime.value[id]?.provenBlock
 		const targetBlock = p.targetBlock ?? runtime.value[id]?.targetBlock
 		setRuntime(id, {
@@ -1142,10 +1392,12 @@ async function runWithdrawConsumeLocked(id: string): Promise<void> {
 			proven: provenBlock !== undefined && targetBlock !== undefined ? provenBlock >= targetBlock : undefined,
 		})
 	})
+	if (consumed && "consumedByOther" in consumed) return completeConsumedByOther(id)
+	const consumeTxHash = (consumed as { consumeTxHash: string }).consumeTxHash
 	patchRecord(id, { consumeTxHash })
 	setStep(id, "confirming", "waiting for the Ethereum confirmation")
 	if (await deps.waitConsumeReceipt(consumeTxHash)) {
-		completeWithdraw(records.value.find((r) => r.id === id) as WithdrawJournalRecord | undefined, consumeTxHash)
+		completeWithdraw(records.value.find((r) => r.id === id) as ExitRecord | undefined, consumeTxHash)
 	} else {
 		patchRecord(id, { consumeTxHash: undefined })
 		setRuntime(id, { attention: "error", note: "The finish transaction failed - finish again from this card. Nothing was lost." })

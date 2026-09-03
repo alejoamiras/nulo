@@ -32,7 +32,6 @@ import {ReentrancyGuard} from "@oz/utils/ReentrancyGuard.sol";
 import {SwapBridgeRouter, IUniswapFuelSwap} from "../src/SwapBridgeRouter.sol";
 import {ITokenPortal} from "../src/interfaces/ITokenPortal.sol";
 import {MintableERC20} from "../src/MintableERC20.sol";
-import {NuloTokenPortal} from "../upstream/NuloTokenPortal.sol";
 import {RouterFixture} from "./mocks/RouterFixture.sol";
 import {MockSwap, MaliciousPrefundSwap} from "./mocks/RouterMocks.sol";
 import {FeeOnTransferERC20} from "./mocks/MetadataERC20s.sol";
@@ -148,39 +147,6 @@ contract BlackhatAuditTest is RouterFixture {
 
     function _fuel(bool isPrivate) internal view returns (SwapBridgeRouter.BridgeParams memory) {
         return _fuelParams(address(usdc), 1000 * 1e6, 100 * 1e6, isPrivate);
-    }
-
-    // ─────────────────────────── [F-A] legacy portal init front-run ───────────────────────────
-
-    /// The legacy deploy conductor sends `deploy portal` and `initialize portal` as TWO separate
-    /// txs. Pre-fix, an attacker front-running the initialize bricked the deployment — and a
-    /// poisoned address that got published would have been a full drain (fake registry →
-    /// attacker outbox). The deployer-only initializer guard must reject the front-run while the
-    /// honest initialize still succeeds. (Retired with the legacy portal; the factory's clones
-    /// have no initializer at all — see BlackhatFactory.t.sol.)
-    function test_FA_portalInitFrontRun_reverts() public {
-        MintableERC20 realUsdc = new MintableERC20("Circle USDC", "USDC", 6, 1_000_000_000);
-        NuloTokenPortal portal = new NuloTokenPortal();
-
-        AttackerRegistry evilReg = new AttackerRegistry();
-        vm.prank(address(0xBAD));
-        vm.expectRevert(NuloTokenPortal.NotInitializer.selector);
-        portal.initialize(address(evilReg), address(realUsdc), bytes32(uint256(0xAAAA)));
-        assertEq(address(portal.registry()), address(0), "front-run must not bind a registry");
-
-        AttackerRegistry honestReg = new AttackerRegistry();
-        portal.initialize(address(honestReg), address(realUsdc), bytes32(uint256(0xBBBB)));
-        assertEq(address(portal.registry()), address(honestReg), "honest init binds the registry");
-
-        realUsdc.mint(address(0xBEEF), 1000e6);
-        vm.startPrank(address(0xBEEF));
-        realUsdc.approve(address(portal), 1000e6);
-        portal.depositToAztecPublic(RECIPIENT, 1000e6, SECRET);
-        vm.stopPrank();
-        assertEq(realUsdc.balanceOf(address(portal)), 1000e6, "victim funds held by the honest portal");
-        vm.prank(address(0xBAD));
-        vm.expectRevert(NuloTokenPortal.NotInitializer.selector);
-        portal.initialize(address(evilReg), address(realUsdc), bytes32(uint256(0xCCCC)));
     }
 
     // ─────────────────────── [F-B] donation-grief neutrality ───────────────────────

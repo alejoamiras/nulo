@@ -7,23 +7,18 @@ import { describe, expect, test } from "vitest"
  *
  * Pinning the constant's VALUE is not enough: the deadline only binds what the wallet actually
  * signs, so a call site that computes its own literal is unaffected by any assertion on the
- * export. That is not hypothetical — the tightening from 1800s to 600s left a third signing
- * site in useFuel.ts untouched while both the PR body and econ-matrix.md recorded it as
- * covering every site.
+ * export. That is not hypothetical — an earlier tightening from 1800s to 600s left one signing
+ * site untouched while the change was recorded as covering every site.
  *
- * Source-level rather than behavioural because the alternative is mounting three composables
- * against a mock wallet purely to read one field back.
+ * Source-level rather than behavioural because the alternative is mounting the composable against
+ * a mock wallet purely to read one field back.
  */
 const COMPOSABLES = join(__dirname)
-// Exact counts, not "at least one": with a lower bound, renaming or hardcoding ONE site
-// leaves the others satisfying the assertion and the test green — which is the same shape as
-// the bug it exists to catch. Sites: the fueled leg (deposit-flow) and the shared plain
-// router leg (router-bridge-leg, used by both the token deposit and the Fuel deposit).
+// Exact counts, not "at least one": with a lower bound, a new site that hardcodes its own window
+// would still satisfy the assertion — which is the same shape as the bug this exists to catch.
 const SIGNING_SOURCES: ReadonlyArray<readonly [string, number]> = [
-	["deposit-flow.ts", 1],
-	["router-bridge-leg.ts", 1],
-	["useDeposit.ts", 0],
-	["useFuel.ts", 0],
+	["deposit-flow.ts", 0],
+	["useSend.ts", 1],
 ]
 
 describe("permit deadline reachability", () => {

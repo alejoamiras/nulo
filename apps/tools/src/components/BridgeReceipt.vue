@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /** Utils */
 import { computed } from "vue"
-import { type AssetKind, assetDecimals, assetSymbol } from "@/lib/asset-label"
+import { type AssetBlock, type AssetKind, assetDecimals, assetSymbol } from "@/lib/asset-label"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
-import { formatBigInt } from "@/lib/format"
+import { toDecimalString } from "@/lib/format"
 import { formatElapsed } from "@/lib/phase-clock"
 import { TESTIDS } from "@/lib/testids"
 
@@ -26,10 +26,20 @@ export interface ReceiptSnapshot {
 	/** The claim tx's fee (gas used), base units — read post-completion. Undefined ⇒ omit the used row
 	 *  and treat `available` as the full received amount. */
 	fuelUsed?: string
+	/** A send's own token identity, taken from the record's frozen block. Absent ⇒ the single-token
+	 *  bridge, whose symbol and decimals come from the deployment. */
+	token?: AssetBlock
+	/** What the review promised, replayed beside what actually landed. */
+	reviewSaid?: string
+	/** The L2 token a wallet can be asked to watch. Absent ⇒ no add-token CTA. */
+	addTokenLabel?: string
 }
 
-const props = withDefaults(defineProps<{ snapshot: ReceiptSnapshot; ctaLabel?: string }>(), { ctaLabel: "NEW BRIDGE" })
-const emit = defineEmits<{ "new-bridge": [] }>()
+const props = withDefaults(defineProps<{ snapshot: ReceiptSnapshot; ctaLabel?: string; addTokenBusy?: boolean }>(), {
+	ctaLabel: "NEW BRIDGE",
+	addTokenBusy: false,
+})
+const emit = defineEmits<{ "new-bridge": []; "add-token": [] }>()
 
 // The meme: a one-shot burst of square monospace bits. Deterministic pseudo-random placement,
 // CSS-only, gone in under a second - celebration without a dependency.
@@ -49,17 +59,33 @@ const gasLabel = computed(() => (props.snapshot.isPrivate ? "Private FJ" : "FJ")
 /** Past-tense hero verb by surface — the only label on the hero row. */
 const heroLabel = computed(() => (isFuel.value ? "Fueled" : isDeposit.value ? "Bridged" : "Released"))
 
-const amountDisplay = computed(() => formatBigInt(BigInt(props.snapshot.amount), assetDecimals(props.snapshot.assetKind)))
-const amountSymbol = computed(() => assetSymbol(props.snapshot.assetKind, props.snapshot.isPrivate))
+// Full precision, matching the review's own wording: the "review said … you got …" line is only a
+// check the reader can make if both halves are written the same way.
+const amountDisplay = computed(() =>
+	toDecimalString(BigInt(props.snapshot.amount), assetDecimals(props.snapshot.assetKind, props.snapshot.token)),
+)
+const amountSymbol = computed(() => assetSymbol(props.snapshot.assetKind, props.snapshot.isPrivate, props.snapshot.token))
 // Fuel rides IN only on a token deposit: a withdraw never carries gas, and a Fuel bridge IS the gas (no split).
 // The `!isFuel` guard keeps hasFuel and isFuel mutually exclusive, so the receiptFuel testid is never duplicated.
 const hasFuel = computed(() => isDeposit.value && !isFuel.value && !!props.snapshot.fuelReceived)
-const usedDisplay = computed(() => (props.snapshot.fuelUsed ? formatBigInt(BigInt(props.snapshot.fuelUsed), 18) : null))
+const usedDisplay = computed(() => (props.snapshot.fuelUsed ? toDecimalString(BigInt(props.snapshot.fuelUsed), 18) : null))
 /** Gas READY = received − used (the net the user can spend next); used unknown ⇒ the full received. */
 const availableDisplay = computed(() => {
 	if (!props.snapshot.fuelReceived) return null
 	const available = BigInt(props.snapshot.fuelReceived) - (props.snapshot.fuelUsed ? BigInt(props.snapshot.fuelUsed) : 0n)
-	return formatBigInt(available < 0n ? 0n : available, 18)
+	return toDecimalString(available < 0n ? 0n : available, 18)
+})
+
+/** A send names its own token, so its hero and gas rows carry the send-specific ids the wizard's
+ *  tests select on; the single-token bridge keeps the ids it has always emitted. */
+const isSend = computed(() => props.snapshot.token !== undefined)
+const heroTestid = computed(() => (isFuel.value ? TESTIDS.receiptFuel : isSend.value ? TESTIDS.sendReceiptToken : undefined))
+const gasTestid = computed(() => (isSend.value ? TESTIDS.sendReceiptGas : TESTIDS.receiptFuel))
+
+/** What actually landed — the counterpart the review line is read against. */
+const got = computed(() => {
+	const token = `${amountDisplay.value} ${amountSymbol.value}`
+	return availableDisplay.value ? `${token} + ${availableDisplay.value} ${gasLabel.value}` : token
 })
 
 const totalElapsed = computed(() => {
@@ -99,12 +125,12 @@ const links = computed(() => {
 				<span>{{ route }} · {{ privacyWord }}<template v-if="totalElapsed"> · {{ totalElapsed }}</template></span>
 				<span class="done" role="img" aria-label="completed">✓</span>
 			</p>
-			<div class="row primary" :data-testid="isFuel ? TESTIDS.receiptFuel : undefined">
+			<div class="row primary" :data-testid="heroTestid">
 				<span class="k">{{ heroLabel }}</span>
 				<span class="v">{{ amountDisplay }} {{ amountSymbol }}</span>
 			</div>
 			<template v-if="hasFuel">
-				<div class="row" :data-testid="TESTIDS.receiptFuel">
+				<div class="row" :data-testid="gasTestid">
 					<span class="k">Gas ready</span><span class="v">{{ availableDisplay }} {{ gasLabel }}</span>
 				</div>
 				<div v-if="usedDisplay" class="row">
@@ -112,6 +138,10 @@ const links = computed(() => {
 				</div>
 			</template>
 		</div>
+
+		<p v-if="snapshot.reviewSaid" class="review-said" :data-testid="TESTIDS.sendReceiptReviewSaid">
+			Review said {{ snapshot.reviewSaid }} &middot; you got {{ got }}
+		</p>
 
 		<Flex v-if="links.length" gap="12" class="links">
 			<a
@@ -123,7 +153,19 @@ const links = computed(() => {
 				:data-testid="TESTIDS.receiptLink"
 			>{{ link.label }}</a>
 		</Flex>
-		<button type="button" class="action" :data-testid="TESTIDS.receiptNewBridge" @click="emit('new-bridge')">{{ ctaLabel }}</button>
+		<Flex gap="8" class="ctas">
+			<button type="button" class="action" :data-testid="TESTIDS.receiptNewBridge" @click="emit('new-bridge')">{{ ctaLabel }}</button>
+			<button
+				v-if="snapshot.addTokenLabel"
+				type="button"
+				class="action"
+				:disabled="addTokenBusy"
+				:data-testid="TESTIDS.sendReceiptAddToken"
+				@click="emit('add-token')"
+			>
+				{{ addTokenBusy ? "ADDING…" : snapshot.addTokenLabel }}
+			</button>
+		</Flex>
 	</section>
 </template>
 
@@ -201,8 +243,18 @@ const links = computed(() => {
 	color: var(--nulo-accent);
 }
 
-.action {
+.review-said {
+	margin: 0;
+	color: var(--txt-secondary);
+	font: 500 12px/1.5 var(--font-mono);
+}
+
+.ctas {
 	align-self: flex-start;
+	flex-wrap: wrap;
+}
+
+.action {
 	padding: 10px 16px;
 	background: transparent;
 	border: 1px solid var(--nulo-outline);
@@ -212,9 +264,14 @@ const links = computed(() => {
 	cursor: pointer;
 }
 
-.action:hover {
+.action:hover:not(:disabled) {
 	border-color: var(--nulo-accent);
 	color: var(--nulo-accent);
+}
+
+.action:disabled {
+	cursor: not-allowed;
+	opacity: 0.6;
 }
 
 .confetti {

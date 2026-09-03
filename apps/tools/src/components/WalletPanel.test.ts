@@ -17,6 +17,19 @@ vi.mock("@/contracts/deployments", () => ({
 	rebuildUsdcInstance: vi.fn(async () => ({ address: { toString: () => "0x2" } })),
 	rebuildEthInstance: vi.fn(async () => ({ address: { toString: () => "0x3" } })),
 }))
+// The generation reader validates the live manifest at module init, and the wallet session imports
+// it. A bridge-less generation is enough for everything this suite asserts.
+vi.mock("@/contracts/bridge-generation", () => ({
+	HUB: undefined,
+	HUB_ARTIFACT: { name: "TokenBridgeHub" },
+	HUB_TOKEN_ARTIFACT: { name: "Token" },
+	MANIFEST_TOKENS: [],
+	TOKEN_CLASS_ID: undefined,
+	SEND_GENERATION: undefined,
+	IS_PLACEHOLDER: true,
+	rebuildHubInstance: vi.fn(),
+	rebuildHubTokenInstance: vi.fn(),
+}))
 vi.mock("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Dripper.js", () => ({ DripperContractArtifact: { name: "Dripper" } }))
 vi.mock("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js", () => ({ TokenContractArtifact: { name: "Token" } }))
 

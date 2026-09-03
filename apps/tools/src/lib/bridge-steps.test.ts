@@ -1,4 +1,4 @@
-import type { DepositJournalRecord, WithdrawJournalRecord } from "@nulo/bridge-core"
+import type { BridgeJournalRecord, DepositJournalRecord, SendDepositRecord, WithdrawJournalRecord } from "@nulo/bridge-core"
 import { describe, expect, it } from "vitest"
 import type { RecordRuntime } from "@/composables/useBridgeJournal"
 import { isTerminalAttention, stepperPhases } from "./bridge-steps"
@@ -37,8 +37,10 @@ function wd(over: Partial<WithdrawJournalRecord> = {}): WithdrawJournalRecord {
 	}
 }
 
-const states = (rec: DepositJournalRecord | WithdrawJournalRecord, rt: RecordRuntime = {}) =>
-	Object.fromEntries(stepperPhases(rec, rt).map((p) => [p.key, p.state]))
+const states = (rec: BridgeJournalRecord, rt: RecordRuntime = {}) => Object.fromEntries(stepperPhases(rec, rt).map((p) => [p.key, p.state]))
+
+/** The key of the one non-pending, non-done phase - the rail's cursor. */
+const sendActive = (rec: BridgeJournalRecord, rt: RecordRuntime = {}) => stepperPhases(rec, rt).find((p) => p.state === "active")?.key
 
 describe("stepperPhases - fuel (fee-juice) records", () => {
 	const fuelRec = (over: Partial<DepositJournalRecord> = {}): DepositJournalRecord =>
@@ -295,6 +297,109 @@ describe("stepperPhases - confirm quiet flip (landed)", () => {
 	it("withdraw CONFIRM (an L1 wait) never carries landed", () => {
 		const confirm = stepperPhases(wd({ consumeTxHash: "0xk" }), { confirmLandedTxHash: "0xk" }).find((p) => p.key === "confirm")
 		expect(confirm?.landed).toBeUndefined()
+	})
+})
+
+const TOKEN = {
+	erc20: "0x70e0ba845a1a0f2da3359c97e0285013525ffc49",
+	portal: "0x94752ef7cf8f037f78ee7722a9387ef95c819fc8",
+	l2Token: `0x${"1".repeat(64)}`,
+	nameWord: `0x${"2".repeat(64)}`,
+	symbolWord: `0x${"3".repeat(64)}`,
+	decimals: 6,
+	displaySymbol: "USDC",
+	registerIndex: "4",
+}
+
+function send(over: Partial<SendDepositRecord> = {}): SendDepositRecord {
+	return {
+		schema: 3,
+		id: "0xs",
+		direction: "deposit",
+		isPrivate: false,
+		intent: "token",
+		token: TOKEN,
+		amount: "100000000",
+		createdAt: 1,
+		updatedAt: 1,
+		recipient: "0xa",
+		secretHashHex: "0xs",
+		...DEPLOY,
+		...over,
+	} as SendDepositRecord
+}
+
+describe("stepperPhases - send (schema 3) deposit rail", () => {
+	it("a public token send has no REGISTER step - its first claim registers inside the claim", () => {
+		expect(stepperPhases(send()).map((p) => p.key)).toEqual(["sign", "deposit", "sync", "claim", "confirm"])
+	})
+
+	it("REGISTER appears only once a private send actually registered, and sits between CROSSING and CLAIM", () => {
+		const before = stepperPhases(send({ isPrivate: true, leafIndex: "7" })).map((p) => p.key)
+		expect(before).toEqual(["seal", "sign", "deposit", "sync", "claim", "confirm"])
+		const after = stepperPhases(send({ isPrivate: true, leafIndex: "7", registerTxHash: "0xr" })).map((p) => p.key)
+		expect(after).toEqual(["seal", "sign", "deposit", "sync", "register", "claim", "confirm"])
+	})
+
+	it("a registration without a claim yet is the ACTIVE phase; CROSSING behind it is done", () => {
+		expect(states(send({ isPrivate: true, leafIndex: "7", registerTxHash: "0xr" }))).toEqual({
+			seal: "done",
+			sign: "done",
+			deposit: "done",
+			sync: "done",
+			register: "active",
+			claim: "pending",
+			confirm: "pending",
+		})
+	})
+
+	it("once the claim is sent the registration reads as a completed step and CONFIRM is active", () => {
+		const phases = stepperPhases(send({ isPrivate: true, leafIndex: "7", registerTxHash: "0xr", claimTxHash: "0xc" }))
+		expect(phases.find((p) => p.key === "register")?.state).toBe("done")
+		expect(phases.find((p) => p.key === "confirm")?.state).toBe("active")
+	})
+
+	it("token+gas relabels DEPOSIT and narrates one claim for both legs; gas-only claims GAS", () => {
+		const fueled = stepperPhases(send({ intent: "token+gas" }))
+		expect(fueled.find((p) => p.key === "deposit")?.label).toBe("DEPOSIT + FUEL")
+		expect(fueled.find((p) => p.key === "claim")?.label).toBe("CLAIM")
+		const gas = stepperPhases(send({ intent: "gas", token: undefined }))
+		expect(gas.find((p) => p.key === "claim")?.label).toBe("CLAIM GAS")
+		expect(gas.find((p) => p.key === "deposit")?.label).toBe("DEPOSIT")
+	})
+
+	it("APPROVE renders only while a real Permit2 approval is part of this run", () => {
+		expect(stepperPhases(send()).map((p) => p.key)).not.toContain("approve")
+		expect(stepperPhases(send(), { approveOutcome: "done" }).map((p) => p.key)).toContain("approve")
+	})
+
+	it("CROSSING carries the block countdown; a claimable message moves the active phase to CLAIM", () => {
+		const crossing = stepperPhases(send({ leafIndex: "7", depositL2Block: 10 }), { syncBlock: 11 })
+		expect(crossing.find((p) => p.key === "sync")?.progress).toEqual({ current: 11, target: 13, fraction: 1 / 3 })
+		expect(states(send({ leafIndex: "7" }), { claimable: true }).claim).toBe("active")
+	})
+
+	it("a fresh private send with no live step sits at its FIRST prompt (SEAL), never at DEPOSIT", () => {
+		expect(sendActive(send({ isPrivate: true }))).toBe("seal")
+		expect(sendActive(send({ isPrivate: false }))).toBe("sign")
+		expect(sendActive(send({ depositTxHash: "0xd" }))).toBe("deposit")
+	})
+
+	it("an attention fails the ACTIVE phase and replaces its prompt with the note", () => {
+		const phases = stepperPhases(send({ leafIndex: "7" }), { claimable: true, attention: "error", note: "the claim reverted" })
+		const claim = phases.find((p) => p.key === "claim")
+		expect(claim?.state).toBe("failed")
+		expect(claim?.detail).toBe("the claim reverted")
+	})
+
+	it("a completed send shows every phase done", () => {
+		const phases = stepperPhases(send({ leafIndex: "7", claimTxHash: "0xc", completedAt: 5 }))
+		expect(phases.every((p) => p.state === "done")).toBe(true)
+	})
+
+	it("a send WITHDRAW keeps the unchanged exit rail", () => {
+		const exit = { ...send(), direction: "withdraw", recipientL1: "0xe", exitTxHash: "0xw" } as unknown as SendDepositRecord
+		expect(stepperPhases(exit).map((p) => p.key)).toEqual(["exit", "prove", "finish", "confirm"])
 	})
 })
 

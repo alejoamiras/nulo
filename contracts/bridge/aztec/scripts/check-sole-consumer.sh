@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Sole-consumer invariant for the recipient-commitment property: a bridge contract must have
-# EXACTLY its named `consume_l1_to_l2_message` call sites — two for the legacy token_bridge
-# (claim_public, claim_private), three for the token_bridge_hub (those two plus the factory's
-# `register` message in `_bind`, consumed from the bound l1_factory with a constant secret) — and
+# Sole-consumer invariant for the recipient-commitment property: the bridge contract must have
+# EXACTLY its named `consume_l1_to_l2_message` call sites — three for the token_bridge_hub
+# (claim_public, claim_private, and the factory's `register` message in `_bind`, consumed from
+# the bound l1_factory with a constant secret) — and
 # claim_private must (a) NOT take a raw secret parameter and (b) DERIVE its consumption secret via a
 # `derive_claim_secret(...)` CALL inside its own body. Any of: a stray consume site, a raw-secret
 # param, or a private path that consumes without deriving, silently reintroduces the F-007 bearer
@@ -128,12 +128,10 @@ check_file() {
 
 # --self-test: prove the guard passes on the real source AND rejects crafted bearer regressions.
 if [ "${1:-}" = "--self-test" ]; then
-	real="$here/token_bridge/src/main.nr"
 	tmp=$(mktemp -d)
 	trap 'rm -rf "$tmp"' EXIT
 	fails=0
 
-	check_file "$real" >/dev/null 2>&1 || { echo "SELF-TEST FAIL: real source rejected" >&2; fails=1; }
 	check_file "$here/token_bridge_hub/src/main.nr" 3 >/dev/null 2>&1 || { echo "SELF-TEST FAIL: real hub source rejected" >&2; fails=1; }
 
 	# Regression 1: multi-line raw-secret signature + consume-with-raw-secret, derivation import kept.
@@ -357,7 +355,7 @@ EOF
 	check_file "$tmp/hub_secret_register.nr" 3 >/dev/null 2>&1 && { echo "SELF-TEST FAIL: hub caller-secret register regression accepted" >&2; fails=1; }
 
 	if [ "$fails" -ne 0 ]; then echo "❌ check-sole-consumer self-test FAILED" >&2; exit 1; fi
-	echo "✅ check-sole-consumer self-test passed (both real sources upheld; 14 bearer regressions rejected)"
+	echo "✅ check-sole-consumer self-test passed (the hub source upheld; 14 bearer regressions rejected)"
 	exit 0
 fi
 
@@ -366,6 +364,5 @@ if [ "$#" -gt 0 ]; then
 	echo "✅ sole-consumer invariant holds for $1"
 	exit 0
 fi
-check_file "$here/token_bridge/src/main.nr" 2 || exit 1
 check_file "$here/token_bridge_hub/src/main.nr" 3 || exit 1
-echo "✅ sole-consumer invariant holds: token_bridge 2 sites, token_bridge_hub 3 sites (_bind, claim_public, claim_private); claim_private derives (no raw-secret path)"
+echo "✅ sole-consumer invariant holds: token_bridge_hub 3 sites (_bind, claim_public, claim_private); claim_private derives (no raw-secret path)"

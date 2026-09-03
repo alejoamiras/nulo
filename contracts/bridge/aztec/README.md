@@ -1,9 +1,10 @@
 # bridge-aztec (Noir)
 
-L2 contracts for the Nulo tools bridge: `token_minter_proxy` (single-minter
-proxy with an allow-list, so the Dripper AND the bridge can mint the
-same token) and `token_bridge` (claim_public/private + exit_to_l1, stripped of
-the reference's attestation layer).
+L2 contracts for the Nulo bridge: `token_bridge_hub` — one hub per generation that
+registers a token from the L1 factory's attested words, then claims into it
+(`claim_public`/`claim_private`) and exits back to Ethereum. `claim_secret` and
+`register_hash` are the shared derivation libraries; `keystone` pins them against
+their TypeScript and Solidity mirrors.
 
 ## Toolchain — use the 5.0.0 nargo (NOT the default)
 
@@ -19,11 +20,10 @@ scripts/compile.sh            # uses AZTEC_HOME=~/.aztec/versions/5.0.0 (aztec-u
 CI must pin this toolchain version for the Noir build.
 
 ## Status
-- ✅ `token_minter_proxy` + `token_bridge` compile clean with the 5.0.0 nargo via
+- ✅ `token_bridge_hub` + `keystone` compile clean with the pinned nargo via
   `scripts/compile.sh` (`aztec compile` + the `bb` AVM transpile → deployable `target/*.json`).
-- ✅ `token_bridge` attestation layer stripped (no clean-hands/passport/schnorr gate).
-  `claim_public`/`claim_private` + `exit_to_l1_public`/`exit_to_l1_private`, the latter with a
-  non-zero-`recipient` assert (codex HIGH #3). Proven end-to-end via
-  `bridge-core/scripts/deploy-sandbox.ts --smoke` — deposit + withdraw, both public + private.
+- ✅ The hub's TXE suite runs via `scripts/run-txe-tests.sh`, gated by `txe-manifest.txt`.
+- ✅ Sole-consumer invariant (three named consume sites; `claim_private` derives its secret)
+  enforced statically by `scripts/check-sole-consumer.sh`.
 - ✅ Keystone content-hash equality (Solidity vs Noir vs TS) pinned in
   `bridge-evm/test/WitnessHash.t.sol` + `bridge-core/src/l1.test.ts`.

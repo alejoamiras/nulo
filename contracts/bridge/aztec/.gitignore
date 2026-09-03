@@ -4,11 +4,8 @@
 !*/target/*.json
 target/*
 !target/*.json
-# Runtime-staged dependency artifacts for the TXE suite (run-txe-tests.sh) — derived
-# copies, never source-of-truth: one duplicates the proxy crate's committed artifact,
-# the other is vendored from @aztec-foundation/aztec-standards.
-token_bridge/target/token_contract-Token.json
-token_bridge/target/token_minter_proxy-TokenMinterProxy.json
+# Runtime-staged dependency artifact for the TXE suite (run-txe-tests.sh) — a derived
+# copy vendored from @aztec-foundation/aztec-standards, never source-of-truth.
 txe-run.log
 token_bridge_hub/target/token_contract-Token.json
 # The TXE server mini-project: its lockfile is committed, its install is not.

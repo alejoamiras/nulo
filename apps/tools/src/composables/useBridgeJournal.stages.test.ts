@@ -1,30 +1,23 @@
 /**
- * PRE-EXTRACTION pins for the journal claim engine — the equivalence complement the
- * journal-engine-decomposition plan requires committed BEFORE any refactor (codex blueprint
- * audit, response-11). Drives the CURRENT engine over the same injected-deps style as
- * useBridgeJournal.test.ts (scaffolding duplicated — no vi.mock sharing across files).
+ * Ordering + narration pins for the journal claim engine, driven over the same injected-deps style
+ * as useBridgeJournal.test.ts (scaffolding duplicated — no vi.mock sharing across files).
  */
 import {
 	type DepositJournalRecord,
+	type JournalTokenBlock,
 	type KV,
 	type WithdrawJournalRecord,
 	patchRecord as kvPatchRecord,
+	type SendDepositRecord,
+	type SendWithdrawRecord,
+	feeJuiceAddress,
+	predictPortal,
 	recoveryKeyFromSignature,
 	sealDepositEnvelope,
 } from "@nulo/bridge-core"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-vi.mock("@/contracts/bridge-deployments", () => ({
-	BRIDGE_FUEL: undefined,
-	L1_USDC: "0xl1token",
-	BRIDGE_TOKEN_SYMBOL: "USDC",
-	BRIDGE_TOKEN_DECIMALS: 6,
-	L1_PORTAL: "0xportal",
-	FUEL_PORTAL: "0xfjportal",
-	FUEL_ASSET: "0xfjasset",
-	FUEL_MIN_FJ: 11000000000000000000n,
-	BRIDGE: { toString: () => "0xbridge" },
-}))
+vi.mock("@/contracts/bridge-generation", () => ({ FUEL_PORTAL: "0xfd05ee8687d4ca828ba3d26ef04b80dd1348e5bd" }))
 
 import {
 	__resetJournalForTests,
@@ -49,7 +42,27 @@ function memKV(): KV {
 	}
 }
 
-const DEPLOY = { chainId: 11155111, portal: "0xportal", bridge: "0xbridge" }
+const FACTORY = "0x5eb3bc0a489c5a8288765d2336659ebca68fcd00"
+const IMPLEMENTATION = "0xc95ff0608561b6ba084c78d14f09e9826190f968"
+const ERC20 = "0x70e0ba845a1a0f2da3359c97e0285013525ffc49"
+const HUB = `0x${"b".repeat(64)}`
+const FJ_PORTAL = "0xfd05ee8687d4ca828ba3d26ef04b80dd1348e5bd"
+const CLONE = predictPortal(FACTORY, IMPLEMENTATION, ERC20)
+
+const TOKEN_BLOCK: JournalTokenBlock = {
+	erc20: ERC20,
+	portal: CLONE,
+	l2Token: `0x${"c".repeat(64)}`,
+	nameWord: `0x${"1".repeat(64)}`,
+	symbolWord: `0x${"2".repeat(64)}`,
+	decimals: 6,
+	displaySymbol: "USDC",
+	registerIndex: "3",
+}
+
+// The deposit fixtures are direct Fee Juice bridges: the one pre-generation shape whose binding
+// still resolves, so the engine's shape-agnostic machinery runs on a genuinely runnable record.
+const DEPLOY = { chainId: 11155111, portal: FJ_PORTAL, bridge: feeJuiceAddress.toString() }
 const SEALER = "0xef4d9e1f4e9e2dd9e747b53f4be3d04bfa935f2d"
 const RECIPIENT = "0x1018808f2c17794badb361c02c945582b8198b495a7e8d01154f7eeb7d719c0d"
 const SIG = `0x${"a".repeat(130)}`
@@ -60,6 +73,7 @@ function mkDeposit(id: string, over: Partial<DepositJournalRecord> = {}): Deposi
 		id,
 		direction: "deposit",
 		isPrivate: false,
+		assetKind: "fee-juice",
 		amount: "100000000",
 		createdAt: 1,
 		updatedAt: 1,
@@ -72,18 +86,22 @@ function mkDeposit(id: string, over: Partial<DepositJournalRecord> = {}): Deposi
 	}
 }
 
-function mkWithdraw(id: string, over: Partial<WithdrawJournalRecord> = {}): WithdrawJournalRecord {
+function mkWithdraw(id: string, over: Partial<SendWithdrawRecord> = {}): SendWithdrawRecord {
 	return {
-		schema: 1,
+		schema: 3,
 		id,
 		direction: "withdraw",
 		isPrivate: false,
+		intent: "token",
+		token: TOKEN_BLOCK,
 		amount: "40000000",
 		createdAt: 1,
 		updatedAt: 1,
 		recipientL1: SEALER,
 		exitTxHash: id,
-		...DEPLOY,
+		chainId: 11155111,
+		portal: CLONE,
+		bridge: HUB,
 		...over,
 	}
 }
@@ -114,8 +132,11 @@ function baseDeps(kv: KV) {
 		signL1: vi.fn(async () => SIG),
 		claimReceiptStatus: vi.fn<() => Promise<"success" | "dropped" | "reverted" | "pending" | "unreachable">>(async () => "success"),
 		waitConsumeReceipt: vi.fn(async () => true),
-		verifyConsumeIdentity: vi.fn(async () => true),
-		consume: vi.fn(async () => ({ consumeTxHash: "0x0015000000000000000000000000000000000000000000636f6e73756d657478" })),
+		sendBinding: () => ({ factory: FACTORY, implementation: IMPLEMENTATION, hub: HUB, feeJuicePortal: FJ_PORTAL }),
+		validateTokenBlock: vi.fn(async () => null as string | null),
+		ensureTokenGrant: vi.fn(async () => "granted" as const),
+		verifyConsumeIdentitySend: vi.fn(async () => true),
+		consumeSend: vi.fn(async () => ({ consumeTxHash: "0x0015000000000000000000000000000000000000000000636f6e73756d657478" })),
 	}
 }
 
@@ -216,7 +237,14 @@ describe("journal engine — pre-extraction pins", () => {
 			}
 		})
 		connectJournalDeps({ ...deps, claim, l2BlockNumber, messageReadiness })
-		addRecord(mkDeposit("0xorder", { depositL2Block: 100, messageHash: "0xTOK", fuel: { messageHash: "0xFUEL" } as never }))
+		addRecord(
+			mkDeposit("0xorder", {
+				schema: 2,
+				depositL2Block: 100,
+				messageHash: "0xTOK",
+				fuel: { amount: "1", secret: "0xf", secretHashHex: "0xfh", minOutput: "1", messageHash: "0xFUEL" },
+			}),
+		)
 		await runDepositClaim("0xorder")
 		expect(order[0]).toBe("build")
 		expect(order[1]).toBe("countdown")
@@ -666,14 +694,14 @@ describe("journal engine — pre-extraction pins", () => {
 		const { records, runtime } = useBridgeJournal()
 		let hashAtWait: string | undefined
 		deps.waitConsumeReceipt.mockImplementation(async () => {
-			hashAtWait = (records.value.find((r) => r.id === "0xwd") as WithdrawJournalRecord | undefined)?.consumeTxHash
+			hashAtWait = (records.value.find((r) => r.id === "0xwd") as SendWithdrawRecord | undefined)?.consumeTxHash
 			return false
 		})
 		connectJournalDeps({ ...deps, claim: smartClaimFake() })
 		addRecord(mkWithdraw("0xwd"))
 		await runWithdrawConsume("0xwd")
 		expect(hashAtWait).toBe("0x0015000000000000000000000000000000000000000000636f6e73756d657478")
-		expect((records.value.find((r) => r.id === "0xwd") as WithdrawJournalRecord | undefined)?.consumeTxHash).toBeUndefined()
+		expect((records.value.find((r) => r.id === "0xwd") as SendWithdrawRecord | undefined)?.consumeTxHash).toBeUndefined()
 		expect(runtime.value["0xwd"]?.note).toMatch(/The finish transaction failed/)
 	})
 
@@ -684,7 +712,7 @@ describe("journal engine — pre-extraction pins", () => {
 		connectJournalDeps({ ...deps, claim: smartClaimFake() })
 		addRecord(mkWithdraw("0xwprior", { consumeTxHash: "0x001700000000000000000000000000000000000000006f6c64636f6e73756d65" }))
 		await runWithdrawConsume("0xwprior")
-		expect((records.value.find((r) => r.id === "0xwprior") as WithdrawJournalRecord | undefined)?.consumeTxHash).toBeUndefined()
+		expect((records.value.find((r) => r.id === "0xwprior") as SendWithdrawRecord | undefined)?.consumeTxHash).toBeUndefined()
 		expect(runtime.value["0xwprior"]?.note).toMatch(/The prior finish transaction failed/)
 
 		// Fresh consume success: hash journaled, receipt ok, completion from the post-wait reread.
@@ -692,7 +720,7 @@ describe("journal engine — pre-extraction pins", () => {
 		connectJournalDeps({ ...deps, claim: smartClaimFake() })
 		addRecord(mkWithdraw("0xwfresh"))
 		await runWithdrawConsume("0xwfresh")
-		const fresh = records.value.find((r) => r.id === "0xwfresh") as WithdrawJournalRecord | undefined
+		const fresh = records.value.find((r) => r.id === "0xwfresh") as SendWithdrawRecord | undefined
 		expect(fresh?.completedAt).toBe(999)
 		expect(fresh?.consumeTxHash).toBe("0x0015000000000000000000000000000000000000000000636f6e73756d657478")
 	})
@@ -715,8 +743,8 @@ describe("journal engine — pre-extraction pins", () => {
 		const deps = baseDeps(kv)
 		const { runtime } = useBridgeJournal()
 		const noVerify = { ...deps, claim: smartClaimFake() } as Record<string, unknown>
-		noVerify.verifyConsumeIdentity = undefined
-		deps.consume.mockImplementation((async (_rec: unknown, onProgress: (p: Record<string, number>) => void) => {
+		noVerify.verifyConsumeIdentitySend = undefined
+		deps.consumeSend.mockImplementation((async (_rec: unknown, onProgress: (p: Record<string, number>) => void) => {
 			onProgress({ targetBlock: 10 })
 			onProgress({ provenBlock: 10 })
 			return { consumeTxHash: "0x0013000000000000000000000000000000000000000000000000000000006332" }
@@ -733,5 +761,91 @@ describe("journal engine — pre-extraction pins", () => {
 		await runWithdrawConsume("0xwd3")
 		// The second progress call lacked targetBlock — the ?? fallback against runtime derives proven=true.
 		expect(runtime.value["0xwd3"]?.proven).toBe(true)
+	})
+})
+
+function mkSend(id: string, over: Record<string, unknown> = {}): SendDepositRecord {
+	return {
+		...mkDeposit(id),
+		schema: 3,
+		intent: "token",
+		token: TOKEN_BLOCK,
+		portal: CLONE,
+		bridge: HUB,
+		...over,
+	} as SendDepositRecord
+}
+
+describe("journal engine — send-lane ordering pins", () => {
+	let kv: KV
+
+	beforeEach(() => {
+		__resetJournalForTests()
+		kv = memKV()
+	})
+
+	function sendDeps(order: string[]) {
+		return {
+			sendBinding: () => ({ factory: FACTORY, implementation: IMPLEMENTATION, hub: HUB, feeJuicePortal: FJ_PORTAL }),
+			validateTokenBlock: vi.fn(async () => {
+				order.push("validate")
+				return null as string | null
+			}),
+			ensureTokenGrant: vi.fn(async () => {
+				order.push("grant")
+				return "granted" as const
+			}),
+			claimSend: vi.fn(async () => {
+				order.push("build")
+				return {
+					simulate: async () => {
+						order.push("simulate")
+						return {}
+					},
+					send: async () => {
+						order.push("send")
+						return { txHash: "0xhubclaim", registerTxHash: "0xregister" }
+					},
+				}
+			}),
+		}
+	}
+
+	it("the block check precedes the grant, which precedes the claim build, simulate and send", async () => {
+		const order: string[] = []
+		connectJournalDeps({ ...baseDeps(kv), ...sendDeps(order) })
+		addRecord(mkSend("0xorder"))
+		await runDepositClaim("0xorder")
+		expect(order).toEqual(["validate", "grant", "build", "simulate", "send"])
+	})
+
+	it("a private send hands the hub its UNSEALED claim salt AND the envelope it came from", async () => {
+		const order: string[] = []
+		const send = sendDeps(order)
+		connectJournalDeps({ ...baseDeps(kv), ...send })
+		const rec = mkSend("0xpriv", { isPrivate: true, secret: undefined })
+		addRecord(rec)
+		const envelope = {
+			v: 2 as const,
+			secret: "0xsealedsalt",
+			recipient: RECIPIENT,
+			amount: rec.amount,
+			sealerL1: SEALER,
+			salt: "0xsealedfuelsalt",
+		}
+		cacheSecret("0xpriv", "0xsealedsalt", envelope)
+		await runDepositClaim("0xpriv")
+		// The envelope travels with the claim: the private fuel fee rebuilds its secret from the
+		// authenticated `salt`, which the journal's plaintext copy can contradict.
+		expect(send.claimSend).toHaveBeenCalledWith(expect.objectContaining({ id: "0xpriv" }), "0xsealedsalt", envelope)
+	})
+
+	it("the registration and the claim it precedes are journaled in ONE patch, never half-written", async () => {
+		const order: string[] = []
+		connectJournalDeps({ ...baseDeps(kv), ...sendDeps(order) })
+		addRecord(mkSend("0xpair"))
+		await runDepositClaim("0xpair")
+		const rec = useBridgeJournal().records.value.find((r) => r.id === "0xpair") as SendDepositRecord
+		expect([rec.registerTxHash, rec.claimTxHash]).toEqual(["0xregister", "0xhubclaim"])
 	})
 })

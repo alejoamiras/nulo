@@ -2,15 +2,15 @@
 	"schema": 2,
 	"network": "sandbox",
 	"l1ChainId": 31337,
-	"walletChainId": 31337,
+	"walletChainId": 3686003978,
 	"bridge": {
 		"l1": {
 			"factory": "0x5eb3bc0a489c5a8288765d2336659ebca68fcd00",
 			"implementation": "0xc95ff0608561b6ba084c78d14f09e9826190f968",
 			"router": "0x36c02da8a0983159322a80ffe9f24b1acff8b570",
 			"permit2": "0x000000000022d473030f116ddee9f6b43ac78ba3",
-			"swapTarget": "0x851356ae760d987e095750cceb3bc6014560891c",
 			"feeJuicePortal": "0xfd05ee8687d4ca828ba3d26ef04b80dd1348e5bd",
+			"swapTarget": "0x851356ae760d987e095750cceb3bc6014560891c",
 			"registry": "0x610178da211fef7d417bc0e6fed39f05609ad788",
 			"guardian": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
 		},

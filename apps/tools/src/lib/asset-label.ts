@@ -1,22 +1,37 @@
-import { BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
+import { type BridgeJournalRecord, isSendRecord } from "@nulo/bridge-core"
 
 /** The journal's asset discriminant (mirrors `@nulo/bridge-core`'s `assetKindOf` return). */
 export type AssetKind = "bridge-token" | "fee-juice"
 
-/**
- * Display symbol for a bridged asset. A Fuel (fee-juice) record carries Aztec Fee Juice as gas, NOT the
- * token bridge's asset — so it must never render the bridge symbol. Per the gas-naming convention the
- * L2-surface name is "FJ" public / "Private FJ" private ($AZTEC is only the L1-side name). Token bridges
- * use the configured bridge symbol. Used wherever a fee-juice record can surface on a shared bridge view
- * (the background completion toast + the journal card) so it isn't mislabelled as the token (codex MEDIUM/LOW).
- */
-export function assetSymbol(assetKind: AssetKind | undefined, isPrivate: boolean): string {
-	if (assetKind === "fee-juice") return isPrivate ? "Private FJ" : "FJ"
-	return BRIDGE_TOKEN_SYMBOL
+/** The display identity a record carries for its own token — any ERC-20, not one deployment's. */
+export interface AssetBlock {
+	displaySymbol: string
+	decimals: number
 }
 
-/** Decimals for a bridged asset. Fee Juice is the 18-decimal protocol standard; the token bridge uses its
- *  own configured decimals. A fee-juice amount formatted at the token's decimals shows a wildly wrong number. */
-export function assetDecimals(assetKind: AssetKind | undefined): number {
-	return assetKind === "fee-juice" ? 18 : BRIDGE_TOKEN_DECIMALS
+/** A record predating the generation carries no token identity of its own; it can only be named
+ *  generically, and it can never run here (its deployment binding no longer matches). */
+const UNKNOWN_SYMBOL = "TOKEN"
+const UNKNOWN_DECIMALS = 18
+
+/**
+ * Display symbol for a bridged asset. A gas-only bridge carries Aztec Fee Juice, NOT a token — per
+ * the gas-naming convention its L2-surface name is "FJ" public / "Private FJ" private ($AZTEC is
+ * only the L1-side name).
+ */
+export function assetSymbol(assetKind: AssetKind | undefined, isPrivate: boolean, token?: AssetBlock): string {
+	if (assetKind === "fee-juice") return isPrivate ? "Private FJ" : "FJ"
+	return token?.displaySymbol ?? UNKNOWN_SYMBOL
+}
+
+/** Decimals for a bridged asset. Fee Juice is the 18-decimal protocol standard; a send uses its own
+ *  token block's decimals. An amount formatted at the wrong decimals shows a wildly wrong number. */
+export function assetDecimals(assetKind: AssetKind | undefined, token?: AssetBlock): number {
+	if (assetKind === "fee-juice") return 18
+	return token?.decimals ?? UNKNOWN_DECIMALS
+}
+
+/** A record's own token identity: present on every schema-3 send except a gas-only one. */
+export function recordTokenBlock(rec: BridgeJournalRecord): AssetBlock | undefined {
+	return isSendRecord(rec) ? rec.token : undefined
 }

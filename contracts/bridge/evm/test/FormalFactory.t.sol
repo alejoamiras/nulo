@@ -7,7 +7,7 @@ import {Ownable} from "@oz/access/Ownable.sol";
 
 import {PortalFactory} from "../src/PortalFactory.sol";
 import {IPortalFactory} from "../src/interfaces/IPortalFactory.sol";
-import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./PortalRoundtripFuzz.t.sol";
+import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./mocks/AztecFakes.sol";
 import {PlainERC20} from "./mocks/MetadataERC20s.sol";
 
 /// SYMBOLIC checks for the factory (run with `halmos`, not forge): function arguments are symbolic,

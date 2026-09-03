@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest"
 import { EncryptionKey } from "@nulo/wallet-crypto"
-import { type BridgeBackupFile, openBridgeBackup, parseBackupFile, sealBridgeBackup, validateBackupRecord } from "./backup"
-import type { DepositJournalRecord, WithdrawJournalRecord } from "./journal"
+import {
+	type BridgeBackupFile,
+	openBridgeBackup,
+	parseBackupFile,
+	sealBridgeBackup,
+	validateAnyBackupRecord,
+	validateBackupRecord,
+} from "./backup"
+import type { DepositJournalRecord, JournalTokenBlock, SendDepositRecord, SendWithdrawRecord, WithdrawJournalRecord } from "./journal"
 
 const SEALER = "0xef4d9e1f4e9e2dd9e747b53f4be3d04bfa935f2d"
 const DEPLOY = { chainId: 11155111, portal: "0xportal", bridge: "0xbridge" }
@@ -195,5 +202,201 @@ describe("bridge backup files", () => {
 		const blob = Buffer.from(await key.encrypt(enc)).toString("base64")
 		const file = await sealBridgeBackup(key, publicDeposit(), SEALER)
 		expect(openBridgeBackup(key, { ...file, blob })).rejects.toThrow(/not a valid bridge record/)
+	})
+})
+
+// ── writer → validator round trip ────────────────────────────────────────────────────────────────
+
+const CLONE = "0x00000000000000000000000000000000000000a1"
+const HUB = `0x${"ab".repeat(32)}`
+const FJ_PORTAL = "0x00000000000000000000000000000000000000f1"
+const FEE_JUICE_L2 = `0x${"05".repeat(32)}`
+
+const TOKEN_BLOCK: JournalTokenBlock = {
+	erc20: "0x00000000000000000000000000000000000e2c20",
+	portal: CLONE,
+	l2Token: `0x${"11".repeat(32)}`,
+	nameWord: `0x00${"4e".repeat(31)}`,
+	symbolWord: `0x00${"54".repeat(31)}`,
+	decimals: 18,
+	displaySymbol: "NTT",
+	registerKey: `0x${"22".repeat(32)}`,
+	registerIndex: "5",
+}
+
+/** Every fuel field a writer sets, in the shapes it sets them: the send's own pre-signature block,
+ *  the receipt's event fields, and the claim ladder's latches. */
+const FUEL_FULL = {
+	amount: "250000000000000000",
+	secret: "0xf00d",
+	secretHashHex: "0xfeed",
+	minOutput: "450000000000000000000",
+	leafIndex: "8",
+	messageHash: `0x${"fe".repeat(32)}`,
+	received: "487000000000000000000",
+	claimAttemptAt: 1_700_000_000_000,
+	claimAttempt: true,
+	claimTxHash: "0xfjclaim",
+	consumed: true,
+	standaloneClaimed: false,
+	bridgeSecretSalt: `0x${"5a".repeat(32)}`,
+	fpc: "0x1b1706cc0947eca1de6527562af65d43e95540f9009a896dcd847afea92ede1e",
+	setupInsufficiency: false,
+}
+
+/** The two optionals every record shape can carry: the terminal block reason and the completion stamp. */
+const BASE_SET = { blocked: "This token's registration on Ethereum no longer matches this record.", completedAt: 3 }
+
+const sendBase = {
+	...BASE_SET,
+	schema: 3 as const,
+	isPrivate: false,
+	amount: "99000000",
+	createdAt: 1,
+	updatedAt: 2,
+	chainId: 31337,
+}
+
+/** A public token+gas send with every optional field the deposit writers persist. */
+function sendDepositPublic(over: Partial<SendDepositRecord> = {}): SendDepositRecord {
+	return {
+		...sendBase,
+		id: "0xsendpub",
+		direction: "deposit",
+		intent: "token+gas",
+		token: TOKEN_BLOCK,
+		portal: CLONE,
+		bridge: HUB,
+		recipient: `0x${"10".repeat(32)}`,
+		secretHashHex: "0xsendpub",
+		secret: `0x${"07".repeat(32)}`,
+		approveTxHash: "0xapprove",
+		depositTxHash: "0xl1tx",
+		leafIndex: "7",
+		messageHash: `0x${"7e".repeat(32)}`,
+		claimTxHash: "0xhubclaim",
+		registerTxHash: "0xregister",
+		depositL2Block: 42,
+		fuel: FUEL_FULL,
+		...over,
+	} as SendDepositRecord
+}
+
+/** The private variant: the claim material is sealed, so the plaintext copy is gone and the
+ *  envelope + its sealer take its place. */
+const sendDepositPrivate = (): SendDepositRecord =>
+	sendDepositPublic({
+		id: "0xsendpriv",
+		secretHashHex: "0xsendpriv",
+		isPrivate: true,
+		secret: undefined,
+		sealedEnvelope: "sealed-blob",
+		sealerL1: SEALER,
+	})
+
+/** Gas-only: no token block, bound to the Fee Juice portal, and its ONE claim secret lives in the
+ *  fuel block rather than at the top level. */
+const sendDepositGasOnly = (): SendDepositRecord =>
+	sendDepositPublic({
+		id: "0xsendgas",
+		secretHashHex: "0xsendgas",
+		intent: "gas",
+		token: undefined,
+		portal: FJ_PORTAL,
+		bridge: FEE_JUICE_L2,
+		secret: undefined,
+		leafIndex: "8",
+	} as Partial<SendDepositRecord>)
+
+function sendExit(over: Partial<SendWithdrawRecord> = {}): SendWithdrawRecord {
+	return {
+		...sendBase,
+		id: "0xexittx",
+		direction: "withdraw",
+		intent: "token",
+		token: TOKEN_BLOCK,
+		portal: CLONE,
+		bridge: HUB,
+		recipientL1: SEALER,
+		exitTxHash: "0xexittx",
+		exitBlock: 5,
+		consumeTxHash: "0xconsume",
+		consumedByOther: false,
+		...over,
+	} as SendWithdrawRecord
+}
+
+/** [field path, a value of the WRONG type a rewritten record could carry]. */
+type WrongTyped = [string, unknown]
+
+const BASE_WRONG: WrongTyped[] = [
+	["blocked", 7],
+	["completedAt", "soon"],
+]
+
+const DEPOSIT_WRONG: WrongTyped[] = [
+	...BASE_WRONG,
+	["secret", 7],
+	["sealedEnvelope", 7],
+	["sealerL1", 7],
+	["approveTxHash", 7],
+	["depositTxHash", 7],
+	["leafIndex", 7],
+	["messageHash", 7],
+	["claimTxHash", 7],
+	["registerTxHash", 7],
+	["depositL2Block", "42"],
+	["fuel.leafIndex", 7],
+	["fuel.messageHash", 7],
+	["fuel.received", "12.5"],
+	["fuel.claimAttemptAt", "now"],
+	["fuel.claimAttempt", "yes"],
+	["fuel.claimTxHash", 7],
+	["fuel.consumed", "yes"],
+	["fuel.standaloneClaimed", "yes"],
+	["fuel.bridgeSecretSalt", 7],
+	["fuel.fpc", 7],
+	["fuel.setupInsufficiency", "yes"],
+]
+
+const WITHDRAW_WRONG: WrongTyped[] = [
+	...BASE_WRONG,
+	["exitTxHash", 7],
+	["exitBlock", "5"],
+	["consumeTxHash", 7],
+	["consumedByOther", "yes"],
+]
+
+/** Replace one field, or one field of the fuel block, leaving everything else as the writer left it. */
+function mutate(rec: object, path: string, value: unknown): unknown {
+	const [head, tail] = path.split(".")
+	const r = rec as Record<string, unknown>
+	return tail ? { ...r, [head]: { ...(r[head] as object), [tail]: value } } : { ...r, [head]: value }
+}
+
+describe("every persisted optional field is validated by type", () => {
+	it("accepts each writer's record with every optional field set", () => {
+		const written = [
+			sendDepositPublic(),
+			sendDepositPrivate(),
+			sendDepositGasOnly(),
+			sendExit(),
+			sendExit({ id: "0xexitpriv", exitTxHash: "0xexitpriv", isPrivate: true }),
+			publicDeposit({ schema: 2, fuel: FUEL_FULL, assetKind: "fee-juice", ...BASE_SET } as never),
+			withdraw({ ...BASE_SET, exitBlock: 5, consumeTxHash: "0xconsume", consumedByOther: false } as never),
+		]
+		for (const rec of written) expect(validateAnyBackupRecord(rec)).toEqual(rec)
+	})
+
+	it.each(DEPOSIT_WRONG)("rejects a send deposit whose %s is the wrong type", (path, bad) => {
+		expect(() => validateAnyBackupRecord(mutate(sendDepositPublic(), path, bad))).toThrow(/not a valid bridge record/)
+	})
+
+	it.each(WITHDRAW_WRONG)("rejects a send exit whose %s is the wrong type", (path, bad) => {
+		expect(() => validateAnyBackupRecord(mutate(sendExit(), path, bad))).toThrow(/not a valid bridge record/)
+	})
+
+	it.each(BASE_WRONG)("rejects a legacy deposit whose %s is the wrong type", (path, bad) => {
+		expect(() => validateAnyBackupRecord(mutate(publicDeposit(), path, bad))).toThrow(/not a valid bridge record/)
 	})
 })

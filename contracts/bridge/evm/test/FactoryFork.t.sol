@@ -12,35 +12,35 @@ import {IERC20Metadata} from "@oz/token/ERC20/extensions/IERC20Metadata.sol";
 import {PortalFactory} from "../src/PortalFactory.sol";
 import {TokenPortalImpl} from "../src/TokenPortalImpl.sol";
 import {TestUsdc} from "../src/TestUsdc.sol";
-import {NuloTokenPortal} from "../upstream/NuloTokenPortal.sol";
 
 /// Forks Sepolia so the factory wires into the REAL registry → rollup → Inbox/Outbox, reads the
 /// metadata of live tokens (Test USDC, canonical WETH9), sends real `register` messages, and a
-/// real clone deposits through the real Inbox. Opt-in: skips unless SEPOLIA_RPC_URL is set.
+/// real clone deposits through the real Inbox. Opt-in: skips unless SEPOLIA_RPC_URL and
+/// AZTEC_REGISTRY (the network's canonical registry) are both set.
 contract FactoryForkTest is Test {
-    /// The live legacy portal — its `registry()` is the one canonical registry on this network.
-    NuloTokenPortal internal constant LIVE_PORTAL = NuloTokenPortal(0xE0FD81b5DdB13bbB64243D018a6E9C3dfaE8d21F);
     TestUsdc internal constant USDC = TestUsdc(0x032E4F5f21d74AE177b96BeD98E472FFA9D62448);
     IERC20Metadata internal constant WETH = IERC20Metadata(0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14);
     bytes32 internal constant HUB = bytes32(uint256(0x4B));
 
     PortalFactory internal factory;
+    IRegistry internal registry;
     IInbox internal inbox;
 
     function setUp() public {
         string memory rpc = vm.envOr("SEPOLIA_RPC_URL", string(""));
-        if (bytes(rpc).length == 0) {
+        address registryAddr = vm.envOr("AZTEC_REGISTRY", address(0));
+        if (bytes(rpc).length == 0 || registryAddr == address(0)) {
             vm.skip(true);
             return;
         }
         vm.createSelectFork(rpc);
-        IRegistry registry = LIVE_PORTAL.registry();
+        registry = IRegistry(registryAddr);
         factory = new PortalFactory(registry, HUB, address(this));
         inbox = IRollup(address(registry.getCanonicalRollup())).getInbox();
     }
 
     function test_wiresIntoTheCanonicalRollup() public view {
-        IRollup rollup = IRollup(address(LIVE_PORTAL.registry().getCanonicalRollup()));
+        IRollup rollup = IRollup(address(registry.getCanonicalRollup()));
         assertEq(address(factory.INBOX()), address(rollup.getInbox()), "factory inbox");
         assertEq(factory.ROLLUP_VERSION(), rollup.getVersion(), "factory version");
         TokenPortalImpl impl = TokenPortalImpl(factory.IMPLEMENTATION());

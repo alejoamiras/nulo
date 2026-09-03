@@ -8,10 +8,10 @@ import {Epoch} from "@aztec/core/libraries/TimeLib.sol";
 
 import {PortalFactory} from "../src/PortalFactory.sol";
 import {TokenPortalImpl} from "../src/TokenPortalImpl.sol";
-import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./PortalRoundtripFuzz.t.sol";
+import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./mocks/AztecFakes.sol";
 import {PlainERC20} from "./mocks/MetadataERC20s.sol";
 
-/// The PortalRoundtripFuzz model — sha256 with the top byte dropped, over `encodeWithSignature` —
+/// The content-hash model — sha256 with the top byte dropped, over `encodeWithSignature` —
 /// replayed against a factory-made CLONE: a clone must put exactly the canonical portal's bytes on
 /// the wire (content, secret hash, version, the hub as the L2 actor), or the L2 side never matches.
 contract CloneRoundtripFuzzTest is Test {

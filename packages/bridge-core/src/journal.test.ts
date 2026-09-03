@@ -7,15 +7,19 @@ import {
 	JOURNAL_KEY,
 	LEGACY_KEYS,
 	MAX_RECORDS,
+	QUARANTINE_KEY,
 	assetKindOf,
 	capRecords,
 	clearLegacyKeys,
 	deriveDepositStage,
 	deriveWithdrawStage,
 	loadJournal,
+	loadQuarantine,
+	makeProvisionalWithdrawId,
 	patchRecord,
 	patchRecordWhen,
 	pruneCompleted,
+	quarantineInvalid,
 	rekeyRecord,
 	removeRecord,
 	upsertRecord,
@@ -61,6 +65,41 @@ function withdraw(id: string, over: Partial<WithdrawJournalRecord> = {}): Withdr
 		recipientL1: "0xeth",
 		exitTxHash: id,
 		...DEPLOY,
+		...over,
+	}
+}
+
+const ERC20 = "0x70e0ba845a1a0f2da3359c97e0285013525ffc49"
+const CLONE = "0x94752ef7cf8f037f78ee7722a9387ef95c819fc8"
+
+const TOKEN_BLOCK = {
+	erc20: ERC20,
+	portal: CLONE,
+	l2Token: `0x${"c".repeat(64)}`,
+	nameWord: `0x${"1".repeat(64)}`,
+	symbolWord: `0x${"2".repeat(64)}`,
+	decimals: 6,
+	displaySymbol: "USDC",
+	registerKey: `0x${"4".repeat(64)}`,
+	registerIndex: "3",
+}
+
+function sendDeposit(id: string, over: Record<string, unknown> = {}) {
+	return {
+		schema: 3,
+		id,
+		direction: "deposit",
+		isPrivate: false,
+		intent: "token",
+		token: TOKEN_BLOCK,
+		amount: "100",
+		createdAt: 1,
+		updatedAt: 1,
+		chainId: 11155111,
+		portal: CLONE,
+		bridge: `0x${"b".repeat(64)}`,
+		recipient: "0xaztec",
+		secretHashHex: id,
 		...over,
 	}
 }
@@ -253,6 +292,51 @@ describe("parse hardening + cap priority", () => {
 		const capped = capRecords([...junk, live])
 		expect(capped.some((r) => r.id === "0xlive")).toBe(true)
 		expect(capped.filter((r) => !r.completedAt)).toHaveLength(MAX_RECORDS + 51)
+	})
+})
+
+describe("load-time deep validation + quarantine", () => {
+	it("a schema-3 record with no token block never loads, and the load survives it", () => {
+		const broken = { schema: 3, id: "0xbroken", direction: "deposit", intent: "token" }
+		const kv = memKV({ [JOURNAL_KEY]: JSON.stringify({ schema: 1, records: [broken, sendDeposit("0xgood")] }) })
+		expect(loadJournal(kv).map((r) => r.id)).toEqual(["0xgood"])
+	})
+
+	it("a valid schema-3 record loads with its token block intact - the pin source is what passed", () => {
+		const kv = memKV({ [JOURNAL_KEY]: JSON.stringify({ schema: 1, records: [sendDeposit("0xgood")] }) })
+		const [rec] = loadJournal(kv)
+		expect(rec.schema).toBe(3)
+		expect((rec as { token?: { l2Token: string } }).token?.l2Token).toBe(TOKEN_BLOCK.l2Token)
+	})
+
+	it("attacker-shaped words are refused: a token block whose nameWord is not a field is quarantined", () => {
+		const forged = sendDeposit("0xforged", { token: { ...TOKEN_BLOCK, nameWord: "javascript:alert(1)" } })
+		const kv = memKV({ [JOURNAL_KEY]: JSON.stringify({ schema: 1, records: [forged] }) })
+		expect(loadJournal(kv)).toEqual([])
+	})
+
+	it("quarantineInvalid parks the bad entries and rewrites the journal without them - never a silent drop", () => {
+		const broken = { schema: 3, id: "0xbroken", direction: "deposit", intent: "token" }
+		const kv = memKV({ [JOURNAL_KEY]: JSON.stringify({ schema: 1, records: [broken, sendDeposit("0xgood")] }) })
+		expect(quarantineInvalid(kv)).toBe(1)
+		expect(loadQuarantine(kv)).toEqual([broken])
+		expect(kv.store.has(QUARANTINE_KEY)).toBe(true)
+		expect(JSON.parse(kv.store.get(JOURNAL_KEY) as string).records.map((r: { id: string }) => r.id)).toEqual(["0xgood"])
+		// Idempotent: a second sweep has nothing left to move.
+		expect(quarantineInvalid(kv)).toBe(0)
+		expect(loadQuarantine(kv)).toHaveLength(1)
+	})
+
+	it("a half-started row survives the sweep - it is the app's own, not a recovery file", () => {
+		const pending = makeProvisionalWithdrawId()
+		const kv = memKV({
+			[JOURNAL_KEY]: JSON.stringify({
+				schema: 1,
+				records: [{ ...sendDeposit(pending), direction: "withdraw", recipientL1: "0xeth", intent: "token" }],
+			}),
+		})
+		expect(loadJournal(kv).map((r) => r.id)).toEqual([pending])
+		expect(quarantineInvalid(kv)).toBe(0)
 	})
 })
 

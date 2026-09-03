@@ -3,28 +3,18 @@
 import { computed } from "vue"
 
 /** Utils */
-import {
-	BRIDGE,
-	BRIDGE_FUEL,
-	BRIDGE_PROXY,
-	BRIDGE_TOKEN,
-	BRIDGE_TOKEN_DECIMALS,
-	BRIDGE_TOKEN_SYMBOL,
-	L1_PORTAL,
-	L1_USDC,
-} from "@/contracts/bridge-deployments"
+import { FUEL_PORTAL, GENERATION, HUB } from "@/contracts/bridge-generation"
 import { etherscanAddressUrl, explorerAddressUrl } from "@/lib/explorer"
 import { IS_MAINNET, NETWORK } from "@/lib/network"
 
-const tagline = `${IS_MAINNET ? "Real funds — keep it small" : "Testnet only"} · 1:1 ${NETWORK.viemChain.name} ↔ Aztec · ${BRIDGE_TOKEN_DECIMALS} decimals · Public or private claims`
+/** The generation's own contracts, so a reader can check what this build actually sends through. */
+const tagline = `${IS_MAINNET ? "Real funds — keep it small" : "Testnet only"} · any ERC-20 · ${NETWORK.viemChain.name} ↔ Aztec · Public or private claims`
 
 const links = computed(() => ({
-	l1Token: etherscanAddressUrl(L1_USDC),
-	portal: etherscanAddressUrl(L1_PORTAL),
-	router: BRIDGE_FUEL ? etherscanAddressUrl(BRIDGE_FUEL.router) : "",
-	l2Token: explorerAddressUrl(BRIDGE_TOKEN.toString()),
-	bridge: explorerAddressUrl(BRIDGE.toString()),
-	proxy: explorerAddressUrl(BRIDGE_PROXY.toString()),
+	factory: GENERATION ? etherscanAddressUrl(GENERATION.l1.factory) : "",
+	router: GENERATION ? etherscanAddressUrl(GENERATION.l1.router) : "",
+	feeJuicePortal: etherscanAddressUrl(FUEL_PORTAL),
+	hub: HUB ? explorerAddressUrl(HUB.toString()) : "",
 }))
 </script>
 
@@ -32,25 +22,18 @@ const links = computed(() => ({
 	<footer class="footer">
 		<p class="contracts">
 			<span class="label">{{ NETWORK.viemChain.name }}:</span>
-			<a v-if="links.l1Token" :href="links.l1Token" target="_blank" rel="noopener noreferrer">{{ BRIDGE_TOKEN_SYMBOL }}</a>
-			<span v-else>{{ BRIDGE_TOKEN_SYMBOL }}</span>
+			<a v-if="links.factory" :href="links.factory" target="_blank" rel="noopener noreferrer">Portal factory</a>
+			<span v-else>Portal factory</span>
 			<span class="sep">·</span>
-			<a v-if="links.portal" :href="links.portal" target="_blank" rel="noopener noreferrer">Portal</a>
-			<template v-if="links.router">
-				·
-				<a :href="links.router" target="_blank" rel="noopener noreferrer">Fuel router</a>
-			</template>
-			<span v-else>Portal</span>
+			<a v-if="links.router" :href="links.router" target="_blank" rel="noopener noreferrer">Router</a>
+			<span v-else>Router</span>
+			<span class="sep">·</span>
+			<a v-if="links.feeJuicePortal" :href="links.feeJuicePortal" target="_blank" rel="noopener noreferrer">Fee Juice portal</a>
+			<span v-else>Fee Juice portal</span>
 			<span class="gap" />
 			<span class="label">Aztec:</span>
-			<a v-if="links.l2Token" :href="links.l2Token" target="_blank" rel="noopener noreferrer">{{ BRIDGE_TOKEN_SYMBOL }}</a>
-			<span v-else>{{ BRIDGE_TOKEN_SYMBOL }}</span>
-			<span class="sep">·</span>
-			<a v-if="links.bridge" :href="links.bridge" target="_blank" rel="noopener noreferrer">Bridge</a>
-			<span v-else>Bridge</span>
-			<span class="sep">·</span>
-			<a v-if="links.proxy" :href="links.proxy" target="_blank" rel="noopener noreferrer">Minter</a>
-			<span v-else>Minter</span>
+			<a v-if="links.hub" :href="links.hub" target="_blank" rel="noopener noreferrer">Bridge hub</a>
+			<span v-else>Bridge hub</span>
 		</p>
 		<p class="tagline">{{ tagline }}</p>
 	</footer>

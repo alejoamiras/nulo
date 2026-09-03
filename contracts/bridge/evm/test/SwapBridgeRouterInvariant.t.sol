@@ -10,7 +10,7 @@ import {IRegistry} from "@aztec/governance/interfaces/IRegistry.sol";
 import {SwapBridgeRouter, IUniswapFuelSwap} from "../src/SwapBridgeRouter.sol";
 import {PortalFactory} from "../src/PortalFactory.sol";
 import {MintableERC20} from "../src/MintableERC20.sol";
-import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./PortalRoundtripFuzz.t.sol";
+import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./mocks/AztecFakes.sol";
 import {MockPermit2, MockSwap, MockFeeJuicePortal} from "./mocks/RouterMocks.sol";
 
 /// Cross-call INVARIANT suite for SwapBridgeRouter over the REAL factory: a handler drives
