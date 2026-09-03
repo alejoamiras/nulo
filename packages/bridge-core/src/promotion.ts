@@ -1,84 +1,52 @@
 /**
- * Pure validation seams for the `live-intent.ts promote` subcommand — extracted
- * so the fund-adjacent checks are unit-testable without live RPC/cast plumbing.
+ * The pure validation seams of a manifest promotion: the boot shape the app needs from a candidate,
+ * and the interlock that stops a promotion from quietly moving the network or the generation.
+ * Extracted so the fund-adjacent checks are unit-testable without live RPC plumbing.
  */
+import { type ManifestV2, parseManifestV2Strict } from "./manifest-v2"
 
-export interface DripCandidateShape {
-	tokens?: Array<{ constructorArgs?: { authContract?: string } }>
-	dripper?: unknown
+/**
+ * Strict-parses a candidate — both halves, so every token's L2 address is the hub's derivation —
+ * and adds what the app needs at boot but the schema allows in general: a real bridge
+ * (`bridge: null` is a legal placeholder manifest, never a promotable one) carrying at least one
+ * token, so the wizard never boots onto an empty token list.
+ */
+export async function assertFaucetCandidateShape(raw: unknown): Promise<ManifestV2> {
+	const m = await parseManifestV2Strict(raw)
+	if (!m.bridge) {
+		throw new Error(`candidate for ${m.network} carries no bridge (placeholder network) — there is nothing to promote; STOP`)
+	}
+	if (m.bridge.tokens.length === 0) throw new Error(`candidate for ${m.network} carries no tokens — STOP`)
+	return m
 }
 
-const AZTEC_ADDRESS_HEX = /^0x[0-9a-fA-F]{64}$/
+const IDENTITY_FIELDS = ["network", "l1ChainId", "walletChainId"] as const
 
-/** The drip candidate must be post-5.0.1 shaped: tokens[] + dripper present and
- *  EVERY token record carrying constructorArgs.authContract (the 5th constructor
- *  parameter the 5.0.1 standards Token requires to re-derive its address). */
-export function assertDripCandidateShape(candidate: DripCandidateShape): void {
-	if (!Array.isArray(candidate.tokens) || candidate.tokens.length === 0 || !candidate.dripper) {
-		throw new Error("drip candidate shape invalid (tokens[] + dripper required) — STOP")
+/**
+ * A promotion advances the SAME network's SAME generation and nothing else. The chain identity keys
+ * every stored account, journal row and claim secret; the factory is what every portal address
+ * derives from, and the factory's register messages are addressed to ONE hub. Moving any of them
+ * is a new generation — a deliberate flow of its own, never the side effect of publishing a
+ * candidate.
+ */
+export function assertZeroSeed(candidate: ManifestV2, live: ManifestV2): void {
+	const moved = IDENTITY_FIELDS.filter((k) => candidate[k] !== live[k])
+	if (moved.length > 0) {
+		const detail = moved.map((k) => `${k} ${String(live[k])} → ${String(candidate[k])}`).join(", ")
+		throw new Error(`promotion would change the network identity (${detail}) — STOP`)
 	}
-	for (const t of candidate.tokens) {
-		if (!t.constructorArgs?.authContract) {
-			throw new Error("drip candidate has a token without constructorArgs.authContract (pre-5.0.1 shape) — STOP")
-		}
-		if (!AZTEC_ADDRESS_HEX.test(t.constructorArgs.authContract)) {
-			throw new Error(
-				`drip candidate authContract is not a 32-byte aztec address: ${JSON.stringify(t.constructorArgs.authContract)} — STOP`,
-			)
-		}
+	if (!live.bridge) return
+	if (!candidate.bridge) throw new Error("promotion would drop the live bridge (candidate is a placeholder) — STOP")
+	if (candidate.bridge.l1.factory.toLowerCase() !== live.bridge.l1.factory.toLowerCase()) {
+		throw new Error(
+			`promotion would change the L1 factory (${live.bridge.l1.factory} → ${candidate.bridge.l1.factory}): every portal address ` +
+				"derives from it, so that is a new generation, not a promotion — STOP",
+		)
 	}
-}
-
-/** Zero-seed assertion for the 5.0.1 arc: the candidate's `l1.fuel` section must be
- *  byte-carried from the live manifest (or absent in both) — any new or changed fuel
- *  infrastructure means a fuel/router deploy or WETH seed happened, which this arc
- *  forbids. Deep-equality via canonical JSON of the two sections. */
-/** Deep key-sorted stringify: the candidate arrives ZOD-PARSED (schema key order) while the live
- *  manifest is raw JSON (file key order) — the zero-seed invariant is semantic equality of keys +
- *  values, not serialization order (hit live at the first --drop-swap promote). */
-function canonical(value: unknown): string {
-	const sort = (v: unknown): unknown => {
-		if (Array.isArray(v)) return v.map(sort)
-		if (v && typeof v === "object") {
-			return Object.fromEntries(
-				Object.keys(v as Record<string, unknown>)
-					.sort()
-					.map((k) => [k, sort((v as Record<string, unknown>)[k])]),
-			)
-		}
-		return v
+	if (candidate.bridge.l2.hub.address.toLowerCase() !== live.bridge.l2.hub.address.toLowerCase()) {
+		throw new Error(
+			`promotion would change the L2 hub (${live.bridge.l2.hub.address} → ${candidate.bridge.l2.hub.address}) under the same ` +
+				"factory: the factory's register messages name one hub, so the new one could never learn a token — STOP",
+		)
 	}
-	return JSON.stringify(sort(value ?? null))
-}
-
-export function assertZeroSeed(
-	candidateFuel: unknown,
-	liveFuel: unknown,
-	opts: { allowSwapDrop?: boolean; allowSwapAdd?: boolean } = {},
-): void {
-	if (canonical(candidateFuel) === canonical(liveFuel)) return
-	// EXPLICIT swap restoration (pools seeded THIS arc for the current token): the candidate keeps
-	// `core` byte-equal and ADDS a whole `swap` block the live manifest lacks. Allowed only under the
-	// operator's --restore-swap flag — core may never change, and an existing swap may never be
-	// silently replaced through this door.
-	if (opts.allowSwapAdd) {
-		const cand = candidateFuel as { core?: unknown; swap?: unknown } | null | undefined
-		const live = liveFuel as { core?: unknown; swap?: unknown } | null | undefined
-		const coreEqual = canonical(cand?.core) === canonical(live?.core)
-		if (coreEqual && cand?.swap !== undefined && live?.swap === undefined) return
-	}
-	// EXPLICIT swap retirement (a token cutover): the Uniswap pools are keyed by the token address,
-	// so a new token cannot carry the old swap config — the candidate keeps `core` BYTE-EQUAL and
-	// DROPS `swap` entirely. Allowed only under the operator's --drop-swap flag; core may never
-	// change and swap may never be silently ALTERED (only dropped whole).
-	if (opts.allowSwapDrop) {
-		const cand = candidateFuel as { core?: unknown; swap?: unknown } | null | undefined
-		const live = liveFuel as { core?: unknown; swap?: unknown } | null | undefined
-		const coreEqual = canonical(cand?.core) === canonical(live?.core)
-		if (coreEqual && cand?.swap === undefined && live?.swap !== undefined) return
-	}
-	throw new Error(
-		"zero-seed violated: the candidate's l1.fuel differs from the live manifest — no fuel/router deploys this arc " +
-			"(a token cutover retiring the swap stack must pass --drop-swap with core byte-carried); STOP",
-	)
 }

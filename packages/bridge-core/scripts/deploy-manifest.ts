@@ -1,15 +1,11 @@
 /**
- * Durable artifacts for the bridge cutover deploy: a write-ahead JOURNAL (the authoritative resume
- * record) and an atomically-written CANDIDATE manifest.
+ * Durable artifacts for a bridge generation deploy: a write-ahead JOURNAL of the generation's steps
+ * (the authoritative resume record) and an atomically-written CANDIDATE manifest.
  *
- * Why both (per the codex review of the cutover design, session 019ecbee):
- * - The deploy is one-shot and irreversible. The journal records every step BEFORE and AFTER its tx
- *   lands so a crash is recoverable; the post-deploy manifest alone is too late. Once the portal is
- *   `initialize`d it is married to one exact L2 bridge, so resume must reuse the WHOLE recorded
- *   generation (salts + addresses) - never fresh salts mid-flight.
- * - The deploy writes a CANDIDATE, never the live `testnet-bridge.json`. "Write nothing on a failed
- *   read-back" is not a rollback (it would leave the app on the old/vulnerable bridge); promotion of
- *   the candidate to live is the deliberate cutover step.
+ * Why both: the deploy spans two chains and is not transactional, so every step is recorded the
+ * moment it becomes irreversible and a re-run resumes from that record instead of re-deriving fresh
+ * identities — the factory address, the hub salt and every pre-created portal are one generation.
+ * The deploy writes a CANDIDATE, never the live manifest; promoting it is a separate, deliberate step.
  *
  * Durability: the journal is fsync'd after every append and the candidate is written to a same-dir
  * sibling temp (0600) + fsync + atomic rename(2); the parent dir is fsync'd after each mutation so
@@ -18,44 +14,65 @@
 import { randomBytes } from "node:crypto"
 import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, writeSync } from "node:fs"
 import { dirname, join } from "node:path"
-import { parseCandidateManifest } from "../src/candidate-schema"
+import z from "zod"
+import { evmAddressV2, type ManifestV2, parseManifestV2 } from "../src/manifest-v2"
 
-export interface L2Record {
-	address: string
-	salt: number
-	constructorArtifact: string
-	constructorArgs: unknown[]
-}
+const aztecAddress = z.string().regex(/^0x[0-9a-fA-F]{64}$/, "expected a 32-byte 0x hex address")
+const bytes32 = z.string().regex(/^0x[0-9a-fA-F]{64}$/, "expected a 32-byte 0x hex word")
+const txHash = z.string().regex(/^0x[0-9a-fA-F]{64}$/, "expected a 32-byte 0x hex tx hash")
+const decimalString = z.string().regex(/^\d+$/, "expected a base-10 integer string")
 
-/** Shape consumed by the tools app reader (bridge-deployments.ts) - keep every field it reads. */
-export interface CandidateManifest {
-	network: string
-	/** Chain identity — the startup build-integrity assertion requires these, so a promoted candidate
-	 *  MUST carry them or the deployed app rejects the manifest at boot (codex post-impl HIGH-3). */
-	l1ChainId?: number
-	walletChainId?: number
-	l1: {
-		usdc: string
-		portal: string
-		portalSource: "forked-v1"
-		/** L9 runtime interlock — "salt-v2" marks a recipient-committed deployment; the deposit code
-		 *  refuses private deposits without it. Written only into candidate/promoted manifests. */
-		privateClaimMode?: "salt-v2"
-		token: {
-			name: string
-			symbol: string
-			decimals: number
-			maxWholePerTx?: number
-			source?: "permissionless-mint" | "circle-proxy"
-			sourceContract?: "MintableERC20" | "TestUsdc"
-		}
-		fuel?: Record<string, unknown>
-		/** Direct Fee-Juice bridge config — the tools app's Fuel tab reads exactly these keys
-		 *  (bridge-deployments.ts). Omitting it from a promotion silently disables direct Fuel. */
-		feeJuice?: { portal: string; asset: string; feeAssetHandler?: string; minFj: string }
-	}
-	l2: { proxy: L2Record; token: L2Record; bridge: L2Record }
-}
+/**
+ * One generation step. The two-line factory bracket is the write-ahead pair: the CREATE2 address is
+ * journalled BEFORE the deploy tx, so a crash between broadcast and receipt still names the contract
+ * the re-run must adopt rather than deploy a second one.
+ */
+export const deployStepSchema = z.discriminatedUnion("kind", [
+	// The network the journal's addresses belong to, stamped before any of them exist.
+	z
+		.object({
+			kind: z.literal("identity"),
+			l1ChainId: z.number().int().nonnegative(),
+			rollupVersion: z.number().int().nonnegative(),
+			deployer: evmAddressV2,
+			registry: evmAddressV2,
+			feeJuicePortal: evmAddressV2,
+		})
+		.strict(),
+	z.object({ kind: z.literal("classes-published"), tokenClassId: bytes32, hubClassId: bytes32 }).strict(),
+	z.object({ kind: z.literal("factory-predicted"), factory: evmAddressV2, implementation: evmAddressV2 }).strict(),
+	// No txHash when the factory was adopted after landing ahead of its journal entry.
+	z
+		.object({ kind: z.literal("factory-deployed"), factory: evmAddressV2, implementation: evmAddressV2, txHash: txHash.optional() })
+		.strict(),
+	z.object({ kind: z.literal("swap-target-deployed"), address: evmAddressV2, txHash }).strict(),
+	z.object({ kind: z.literal("router-deployed"), router: evmAddressV2, txHash }).strict(),
+	z.object({ kind: z.literal("hub-deployed"), hub: aztecAddress, salt: bytes32, txHash: txHash.optional() }).strict(),
+	// `txHash` is the L1 createPortal; a portal that already existed has none (the call is idempotent).
+	// `registerTxHash` is the L2 register_token, absent when the deploy leaves it to the first claim.
+	z
+		.object({
+			kind: z.literal("token-precreated"),
+			erc20: evmAddressV2,
+			portal: evmAddressV2,
+			txHash: txHash.optional(),
+			registerTxHash: z.string().min(1).optional(),
+		})
+		.strict(),
+	z.object({ kind: z.literal("pool-seeded"), erc20: evmAddressV2, txHash: txHash.optional() }).strict(),
+	z.object({ kind: z.literal("calibrated"), fjPerTx: decimalString, fjRegister: decimalString }).strict(),
+	z.object({ kind: z.literal("candidate-written"), path: z.string().min(1) }).strict(),
+])
+
+export type DeployStep = z.infer<typeof deployStepSchema>
+export type DeployStepKind = DeployStep["kind"]
+export type DeployIdentityStep = Extract<DeployStep, { kind: "identity" }>
+export type DeployIdentity = Omit<DeployIdentityStep, "kind">
+
+/** Every identity field, so a new one cannot be added to the type and forgotten by the comparison. */
+const IDENTITY_FIELDS: readonly (keyof DeployIdentity)[] = ["l1ChainId", "rollupVersion", "deployer", "registry", "feeJuicePortal"]
+
+const journalLineSchema = z.object({ ts: z.string().min(1), step: deployStepSchema }).strict()
 
 /** fsync a directory so a create/rename/append is durable across a crash. */
 function fsyncDir(dir: string): void {
@@ -67,10 +84,10 @@ function fsyncDir(dir: string): void {
 	}
 }
 
-/** Write JSON to a same-dir sibling temp (0600) + fsync + atomic rename + parent-dir fsync.
- *  The manifest is STRICT-validated first — a malformed candidate never reaches disk. */
-export function writeCandidateAtomic(targetPath: string, manifest: CandidateManifest): void {
-	parseCandidateManifest(manifest)
+/** Write JSON to a same-dir sibling temp (0600) + fsync + atomic rename + parent-dir fsync. The
+ *  manifest is STRICT-validated first — a malformed candidate never reaches disk. */
+export function writeCandidateAtomically(targetPath: string, manifest: ManifestV2): void {
+	parseManifestV2(manifest)
 	const dir = dirname(targetPath)
 	const tmp = join(dir, `.${randomBytes(9).toString("hex")}.candidate.tmp`)
 	const fd = openSync(tmp, "wx", 0o600)
@@ -84,85 +101,89 @@ export function writeCandidateAtomic(targetPath: string, manifest: CandidateMani
 	fsyncDir(dir)
 }
 
-/**
- * One write-ahead-journal line. `generation` seeds the run's salts; `submitted` records a tx hash
- * before its receipt is awaited; `confirmed` records the landed address (or "done" for a wiring tx).
- */
-export interface JournalEntry {
-	ts: string
-	phase: "generation" | "submitted" | "confirmed"
-	step?: string
-	txHash?: string
-	address?: string
-	salts?: { proxy: number; token: number; bridge: number }
+/** The candidate written so far, re-validated; `undefined` when the run has not written one yet. */
+export function readCandidate(path: string): ManifestV2 | undefined {
+	if (!existsSync(path)) return undefined
+	return parseManifestV2(JSON.parse(readFileSync(path, "utf8")))
 }
 
-/** Append one line + fsync the file and its parent dir. */
-export function appendJournal(path: string, entry: Omit<JournalEntry, "ts">): void {
-	const line = `${JSON.stringify({ ts: new Date().toISOString(), ...entry })}\n`
-	const fd = openSync(path, "a", 0o600)
+function parseEntry(line: string, n: number): DeployStep {
+	let raw: unknown
 	try {
-		writeSync(fd, line)
-		fsyncSync(fd)
-	} finally {
-		closeSync(fd)
+		raw = JSON.parse(line)
+	} catch {
+		throw new Error(`deploy journal entry ${n} is not JSON — the journal is the resume authority and must not be hand-edited`)
 	}
-	fsyncDir(dirname(path))
+	const parsed = journalLineSchema.safeParse(raw)
+	if (!parsed.success) {
+		const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")
+		throw new Error(`deploy journal entry ${n} is not a valid step — ${issues}`)
+	}
+	return parsed.data.step
 }
 
-export function readJournal(path: string): JournalEntry[] {
+/** Every step recorded so far, oldest first. Throws on the first unreadable entry rather than
+ *  resuming from a partial history — a step silently dropped here is a contract deployed twice. */
+export function readDeployJournal(path: string): DeployStep[] {
 	if (!existsSync(path)) return []
 	return readFileSync(path, "utf8")
 		.split("\n")
 		.filter(Boolean)
-		.map((l) => JSON.parse(l) as JournalEntry)
+		.map((line, i) => parseEntry(line, i + 1))
 }
 
-export interface GenerationState {
-	salts: { proxy: number; token: number; bridge: number }
-	confirmed: Record<string, string>
-	portalInitialized: boolean
+/** The per-token key of a step, for `has(kind, erc20)`. */
+function stepKey(step: DeployStep): string | undefined {
+	return "erc20" in step ? step.erc20.toLowerCase() : undefined
 }
 
-/**
- * Reconstruct the recorded generation from a journal. Returns null for an empty journal (clean
- * start). A non-null result MUST be resumed (never started fresh) - the caller enforces codex's rule
- * that fresh salts after a confirmed portal-init are forbidden.
- */
-export function resolveResume(journal: JournalEntry[]): GenerationState | null {
-	const gen = journal.find((e) => e.phase === "generation" && e.salts)
-	if (!gen?.salts) return null
-	const confirmed: Record<string, string> = {}
-	for (const e of journal) if (e.phase === "confirmed" && e.step) confirmed[e.step] = e.address ?? "done"
-	return { salts: gen.salts, confirmed, portalInitialized: "portal-init" in confirmed }
-}
-
-/** The viem client surface `journaledEvmDeploy` needs — narrow so tests drive it with fakes. */
-export interface EvmDeployClients {
-	wallet: { deployContract: (a: { abi: never; bytecode: `0x${string}`; args: never }) => Promise<`0x${string}`> }
-	pub: { waitForTransactionReceipt: (a: { hash: `0x${string}` }) => Promise<{ contractAddress?: `0x${string}` | null }> }
+export interface DeployJournal {
+	/** The recorded steps, oldest first; `append` extends this array in place. */
+	readonly steps: DeployStep[]
+	append(step: DeployStep): void
+	/** Whether the step is already recorded — with `key` (an ERC-20) for the per-token kinds. */
+	has(kind: DeployStepKind, key?: string): boolean
 }
 
 /**
- * One journaled EVM contract deploy — the write-ahead bracket both bridge conductors use for
- * their fresh-deploy path: journal `submitted` with the tx hash BEFORE the receipt is awaited
- * (the durable recovery key), then `confirmed` with the landed address. Resume/from-journal
- * short-circuits stay at the call site — this is only the fresh landing.
+ * Binds the journal to one network. A generation's recorded addresses only exist on the chain that
+ * deployed them, so resuming against another one would adopt a stranger's factory and hub as this
+ * generation's — the stamp turns that into a refusal before the first step reads anything.
  */
-export async function journaledEvmDeploy(
-	clients: EvmDeployClients,
-	journalPath: string,
-	step: string,
-	name: string,
-	art: { abi: unknown; bytecode: `0x${string}` },
-	args: unknown[],
-	log: (address: `0x${string}`) => void = () => {},
-): Promise<`0x${string}`> {
-	const hash = await clients.wallet.deployContract({ abi: art.abi as never, bytecode: art.bytecode, args: args as never })
-	appendJournal(journalPath, { phase: "submitted", step, txHash: hash })
-	const r = await clients.pub.waitForTransactionReceipt({ hash })
-	if (!r.contractAddress) throw new Error(`${name}: no contractAddress`)
-	appendJournal(journalPath, { phase: "confirmed", step, address: r.contractAddress })
-	log(r.contractAddress)
-	return r.contractAddress
+function stampIdentity(journal: DeployJournal, identity: DeployIdentity): void {
+	const recorded = journal.steps.find((s): s is DeployIdentityStep => s.kind === "identity")
+	if (!recorded) {
+		if (journal.steps.length > 0) {
+			throw new Error("deploy journal predates identity stamping — its steps name a network nothing here can verify; start a new one")
+		}
+		journal.append({ kind: "identity", ...identity })
+		return
+	}
+	for (const field of IDENTITY_FIELDS) {
+		const was = String(recorded[field]).toLowerCase()
+		const now = String(identity[field]).toLowerCase()
+		if (was !== now) throw new Error(`deploy journal ${field} is ${was}, the live network says ${now} — wrong network; STOP`)
+	}
+}
+
+/** Passing `identity` stamps an empty journal with it and refuses one recorded on another network. */
+export function openDeployJournal(path: string, identity?: DeployIdentity): DeployJournal {
+	const steps = readDeployJournal(path)
+	const journal: DeployJournal = {
+		steps,
+		append(step: DeployStep): void {
+			const fd = openSync(path, "a", 0o600)
+			try {
+				writeSync(fd, `${JSON.stringify({ ts: new Date().toISOString(), step })}\n`)
+				fsyncSync(fd)
+			} finally {
+				closeSync(fd)
+			}
+			fsyncDir(dirname(path))
+			steps.push(step)
+		},
+		has: (kind, key) => steps.some((s) => s.kind === kind && (key === undefined || stepKey(s) === key.toLowerCase())),
+	}
+	if (identity) stampIdentity(journal, identity)
+	return journal
 }

@@ -25,7 +25,8 @@ import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
-import { bridgeProxyArtifact, tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
+import { assertManifestTokensDerive, parseManifestV2 } from "@nulo/bridge-core"
+import { bridgeProxyArtifact, tokenBridgeArtifact, tokenBridgeHubArtifact } from "@nulo/bridge-core/artifacts"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import {
@@ -64,8 +65,8 @@ function findToken(data: DeploymentsJson, symbol: "NULO" | "OLUN"): TokenDeploym
  * Runs against the CANDIDATE in Phase 6 (`BRIDGE_MANIFEST=…candidate.json`); unset ⇒ skipped, so the
  * default `audit:tools` run (live manifest, pre-cutover) is unaffected.
  */
-async function verifyBridgeManifest(path: string): Promise<boolean> {
-	const m = JSON.parse(readFileSync(path, "utf8")) as {
+async function verifyLegacyBridgeManifest(raw: unknown): Promise<boolean> {
+	const m = raw as {
 		l1: { fuel?: { core?: { router?: string; permit2?: string; swapTarget?: string } }; privateClaimMode?: string; portal: string }
 		l2: {
 			proxy: { address: string; salt: string; constructorArtifact: string }
@@ -114,6 +115,45 @@ async function verifyBridgeManifest(path: string): Promise<boolean> {
 		ok = false
 	}
 	return ok
+}
+
+/**
+ * Generation manifest (schema 2): re-derives the hub from its recorded salt + constructor args and
+ * every token from the hub + its words, and asserts both match the committed addresses.
+ * `bridge: null` is the legal placeholder the app renders as such (the build gate runs this against
+ * BOTH targets' live manifests); refusing a placeholder is promotion's job, not the build's.
+ */
+async function verifyGenerationManifest(raw: unknown): Promise<boolean> {
+	const m = parseManifestV2(raw)
+	if (!m.bridge) {
+		console.log(`[OK] ${m.network} manifest is a placeholder (bridge: null) — nothing to derive`)
+		return true
+	}
+	const hub = m.bridge.l2.hub
+	const [classId, factory, guardian] = hub.constructorArgs as [string, string, string]
+	const derived = await getContractInstanceFromInstantiationParams(tokenBridgeHubArtifact, {
+		publicKeys: PublicKeys.default(),
+		deployer: AztecAddress.ZERO,
+		constructorArgs: [Fr.fromHexString(classId), EthAddress.fromString(factory), AztecAddress.fromStringUnsafe(guardian)],
+		salt: Fr.fromHexString(hub.salt),
+		constructorArtifact: hub.constructorArtifact,
+	})
+	const hubOk = derived.address.toString().toLowerCase() === hub.address.toLowerCase()
+	console.log(`[${hubOk ? "OK" : "DRIFT"}] bridge.hub    computed=${derived.address.toString()} committed=${hub.address}`)
+	try {
+		await assertManifestTokensDerive(m)
+		for (const t of m.bridge.tokens) console.log(`[OK] bridge.token  ${t.displaySymbol.padEnd(6)} ${t.l2Token}`)
+	} catch (e) {
+		console.error(`[DRIFT] ${e instanceof Error ? e.message : String(e)}`)
+		return false
+	}
+	return hubOk
+}
+
+/** One manifest file, two generations of shape: the schema field picks the verifier. */
+async function verifyBridgeManifest(path: string): Promise<boolean> {
+	const raw = JSON.parse(readFileSync(path, "utf8")) as { schema?: unknown }
+	return raw.schema === 2 ? verifyGenerationManifest(raw) : verifyLegacyBridgeManifest(raw)
 }
 
 async function main(): Promise<void> {

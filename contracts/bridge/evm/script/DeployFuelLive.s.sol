@@ -14,7 +14,7 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {MintableERC20} from "../src/MintableERC20.sol";
 import {SwapBridgeRouter} from "../src/SwapBridgeRouter.sol";
 import {UniswapFuelSwap} from "../src/UniswapFuelSwap.sol";
-import {PoolSetupHelper, IWETH} from "./DeployBridge.s.sol";
+import {PoolSetupHelper, IWETH} from "./PoolSetupHelper.sol";
 import {GenerationDeployer} from "./DeployGeneration.s.sol";
 
 /**

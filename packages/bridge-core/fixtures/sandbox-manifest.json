@@ -1,0 +1,80 @@
+{
+	"schema": 2,
+	"network": "sandbox",
+	"l1ChainId": 31337,
+	"walletChainId": 31337,
+	"bridge": {
+		"l1": {
+			"factory": "0x5eb3bc0a489c5a8288765d2336659ebca68fcd00",
+			"implementation": "0xc95ff0608561b6ba084c78d14f09e9826190f968",
+			"router": "0x36c02da8a0983159322a80ffe9f24b1acff8b570",
+			"permit2": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+			"swapTarget": "0x851356ae760d987e095750cceb3bc6014560891c",
+			"feeJuicePortal": "0xfd05ee8687d4ca828ba3d26ef04b80dd1348e5bd",
+			"registry": "0x610178da211fef7d417bc0e6fed39f05609ad788",
+			"guardian": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+		},
+		"l2": {
+			"hub": {
+				"address": "0x1b876ce323e88c685ee393b383e72458494c03570eb93e4c650f03d36bfe92a7",
+				"salt": "0x0000000000000000000000005eb3bc0a489c5a8288765d2336659ebca68fcd00",
+				"constructorArtifact": "constructor",
+				"constructorArgs": [
+					"0x0225da0f4227a139c3d6562b6554750adcdec45fd62d9b16af11da21033ef2cf",
+					"0x5eb3bc0a489c5a8288765d2336659ebca68fcd00",
+					"0x2be3a51cfda73e700533c859d75abe1292f84081d95411627c4ff51a0c2d178a"
+				]
+			},
+			"guardian": "0x2be3a51cfda73e700533c859d75abe1292f84081d95411627c4ff51a0c2d178a",
+			"tokenClassId": "0x0225da0f4227a139c3d6562b6554750adcdec45fd62d9b16af11da21033ef2cf",
+			"tokenArtifactSha256": "24c6455ddb11d71563d1102bdc5d8fb2b559552a1e14eafe659bd93a71d3218c"
+		},
+		"tokens": [
+			{
+				"erc20": "0x70e0ba845a1a0f2da3359c97e0285013525ffc49",
+				"portal": "0x94752ef7cf8f037f78ee7722a9387ef95c819fc8",
+				"l2Token": "0x1824b09343cd81bd65e892c5691e84a0fb5e07b3b52340eb0f4dcb88bb97fdd6",
+				"nameWord": "0x004e756c6f205553444300000000000000000000000000000000000000000000",
+				"symbolWord": "0x0055534443000000000000000000000000000000000000000000000000000000",
+				"decimals": 6,
+				"displayName": "Nulo USDC",
+				"displaySymbol": "USDC",
+				"source": "permissionless-mint",
+				"sourceContract": "MintableERC20",
+				"maxWholePerTx": 1000000
+			},
+			{
+				"erc20": "0x4826533b4897376654bb4d4ad88b7fafd0c98528",
+				"portal": "0x60f5f753858a432e6eae8822d24175ec7702bfc9",
+				"l2Token": "0x17edd013301ef5114fbcd2d492fea46cd5b846e202285f5f05f129720908633b",
+				"nameWord": "0x004e756c6f205553445400000000000000000000000000000000000000000000",
+				"symbolWord": "0x0055534454000000000000000000000000000000000000000000000000000000",
+				"decimals": 6,
+				"displayName": "Nulo USDT",
+				"displaySymbol": "USDT",
+				"source": "permissionless-mint",
+				"sourceContract": "MintableERC20",
+				"maxWholePerTx": 1000000
+			},
+			{
+				"erc20": "0x0e801d84fa97b50751dbf25036d067dcf18858bf",
+				"portal": "0xf5df404d20971c8c82697528b413fcfcf2a6432a",
+				"l2Token": "0x0db000cf31419e3d11c1e6db2b5fc174db658df6d462ef4a6659056739b4722a",
+				"nameWord": "0x00506f7274616c204f6e6c790000000000000000000000000000000000000000",
+				"symbolWord": "0x0050584f00000000000000000000000000000000000000000000000000000000",
+				"decimals": 18,
+				"displayName": "Portal Only",
+				"displaySymbol": "PXO",
+				"source": "permissionless-mint",
+				"sourceContract": "MintableERC20",
+				"maxWholePerTx": 1000000
+			}
+		]
+	},
+	"feeJuice": {
+		"portal": "0xfd05ee8687d4ca828ba3d26ef04b80dd1348e5bd",
+		"asset": "0x0165878a594ca255338adfa4d48449f69242eb8f",
+		"minFj": "1000000000000000000"
+	},
+	"privateClaimMode": "salt-v2"
+}

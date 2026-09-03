@@ -1,15 +1,32 @@
 import { describe, expect, it, vi } from "vitest"
-import { assertPortalInitializerPinned, assertRouterWitnessShape, assertSame, retryOnRevert } from "./script-l1"
+import { predictPortal } from "../src/portal-address"
+import {
+	assertFactoryPortal,
+	assertRouterWitnessShape,
+	assertSame,
+	type FactoryReader,
+	retryOnRevert,
+	type RouterReader,
+} from "./script-l1"
 
-// viem's getContract builds `read.<fn>()` callables from the client's readContract — a stub
-// client is enough to drive the preflights.
-function stubClient(answers: Record<string, unknown>) {
+const ROUTER = `0x${"1a".repeat(20)}` as const
+const FACTORY = `0x${"2b".repeat(20)}` as const
+const IMPLEMENTATION = `0x${"3c".repeat(20)}` as const
+const ERC20 = `0x${"4d".repeat(20)}` as const
+const SWAP_TARGET = `0x${"5e".repeat(20)}` as const
+
+const WITNESS_TYPE_STRING = "BridgeWitness witness)BridgeWitness(address tokenPortal,bool isPrivate,address swapTarget)TokenPermissions()"
+
+/** The preflights read through `readContract`, so answering by function name is a whole client. */
+function router(answers: { swapTarget: string; typeString: string }): RouterReader {
 	return {
-		readContract: async ({ functionName }: { functionName: string }) => {
-			if (!(functionName in answers)) throw new Error(`unexpected read: ${functionName}`)
-			return answers[functionName]
-		},
+		readContract: async ({ functionName }: { functionName: string }) =>
+			(functionName === "swapTarget" ? answers.swapTarget : answers.typeString) as never,
 	}
+}
+
+function factory(predicted: string): FactoryReader {
+	return { readContract: async () => predicted as never }
 }
 
 describe("script-l1", () => {
@@ -18,30 +35,36 @@ describe("script-l1", () => {
 		expect(() => assertSame("0x01", "0x02", "portal.registry")).toThrow(/portal\.registry - on-chain 0x01 != expected 0x02/)
 	})
 
-	it("router witness gate passes on a bound B2 router", async () => {
-		const pub = stubClient({ swapTarget: "0xSWAP", BRIDGE_WITNESS_TYPE_STRING: "TokenBridge(... swapTarget ...)" })
-		await expect(assertRouterWitnessShape(pub, "0xrouter" as `0x${string}`, "0xswap", "pre-B2; STOP")).resolves.toBeUndefined()
-	})
-
-	it("router witness gate rejects a wrong swapTarget and a pre-B2 witness string", async () => {
-		const wrongTarget = stubClient({ swapTarget: "0xOTHER", BRIDGE_WITNESS_TYPE_STRING: "has swapTarget" })
-		await expect(assertRouterWitnessShape(wrongTarget, "0xrouter" as `0x${string}`, "0xswap", "hint")).rejects.toThrow(
-			/router\.swapTarget/,
-		)
-		const preB2 = stubClient({ swapTarget: "0xSWAP", BRIDGE_WITNESS_TYPE_STRING: "legacy witness" })
-		await expect(assertRouterWitnessShape(preB2, "0xrouter" as `0x${string}`, "0xswap", "pre-B2; STOP")).rejects.toThrow(/pre-B2; STOP/)
-	})
-
-	it("initializer preflight passes the pinned broadcaster and rejects any other key", async () => {
-		const initializerAbi = [
-			{ type: "function", name: "initializer", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] },
-		] as const
-		const pub = stubClient({ initializer: "0xAbCd" })
+	it("router witness gate passes on a router that binds the expected swap target", async () => {
 		await expect(
-			assertPortalInitializerPinned(pub, "0xportal" as `0x${string}`, initializerAbi as never, "0xabcd"),
+			assertRouterWitnessShape(
+				router({ swapTarget: SWAP_TARGET.toUpperCase(), typeString: WITNESS_TYPE_STRING }),
+				ROUTER,
+				SWAP_TARGET,
+			),
 		).resolves.toBeUndefined()
-		await expect(assertPortalInitializerPinned(pub, "0xportal" as `0x${string}`, initializerAbi as never, "0x9999")).rejects.toThrow(
-			/no rescue path/,
+	})
+
+	it("router witness gate rejects a wrong swap target and a witness that omits it", async () => {
+		await expect(
+			assertRouterWitnessShape(router({ swapTarget: `0x${"99".repeat(20)}`, typeString: WITNESS_TYPE_STRING }), ROUTER, SWAP_TARGET),
+		).rejects.toThrow(/router\.swapTarget/)
+		const unbound = "BridgeWitness witness)BridgeWitness(address tokenPortal,bool isPrivate)TokenPermissions()"
+		await expect(
+			assertRouterWitnessShape(router({ swapTarget: SWAP_TARGET, typeString: unbound }), ROUTER, SWAP_TARGET),
+		).rejects.toThrow(/does not bind swapTarget/)
+	})
+
+	it("portal preflight requires the manifest AND the factory to agree with the CREATE2 derivation", async () => {
+		const portal = predictPortal(FACTORY, IMPLEMENTATION, ERC20)
+		await expect(assertFactoryPortal(factory(portal), FACTORY, IMPLEMENTATION, ERC20, portal)).resolves.toBeUndefined()
+		// A carried portal address that is not this generation's CREATE2.
+		await expect(assertFactoryPortal(factory(portal), FACTORY, IMPLEMENTATION, ERC20, `0x${"77".repeat(20)}`)).rejects.toThrow(
+			/predictPortal/,
+		)
+		// The factory disagrees: its implementation is not the manifest's.
+		await expect(assertFactoryPortal(factory(`0x${"88".repeat(20)}`), FACTORY, IMPLEMENTATION, ERC20, portal)).rejects.toThrow(
+			/factory\.predictPortal/,
 		)
 	})
 

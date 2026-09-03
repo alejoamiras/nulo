@@ -75,21 +75,6 @@ export function requireRelayerSecret(env: Record<string, string | undefined>): F
 }
 
 /**
- * Fail-closed unless the target deployment is recipient-committed. A pre-commitment (bearer) deployment
- * has raw-secret claims that a relayer WOULD be able to redirect — so relaying against one is unsafe and
- * this refuses. Mirrors the tools app's L9 interlock (`useDeposit.ts`) on the relayer side.
- */
-export function assertSaltV2(manifest: unknown): void {
-	const mode = (manifest as { l1?: { privateClaimMode?: unknown } })?.l1?.privateClaimMode
-	if (mode !== "salt-v2") {
-		throw new Error(
-			`refusing to relay: manifest privateClaimMode is ${typeof mode === "string" ? mode : "absent"} ` +
-				'(need "salt-v2" — a pre-commitment deployment has bearer claims a relayer could redirect)',
-		)
-	}
-}
-
-/**
  * A log-safe view of a descriptor. The salt is a linkage credential — but so are the recipient, amount,
  * and leaf index TOGETHER (they reconstruct the deposit↔recipient↔amount link the salt is meant to hide),
  * so ALL of them are redacted, not just the salt. Only the bridge address (a public contract shared by

@@ -14,6 +14,7 @@
 		"test": "bun --bun vitest run",
 		"test:watch": "vitest",
 		"deploy:sandbox": "bun scripts/deploy-sandbox.ts",
+		"deploy:generation": "bun scripts/deploy-generation.ts",
 		"verify:l1": "bun scripts/verify-l1.ts"
 	},
 	"dependencies": {

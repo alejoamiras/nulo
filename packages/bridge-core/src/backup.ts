@@ -1,5 +1,12 @@
 import type { EncryptionKey } from "@nulo/wallet-crypto"
-import type { BridgeJournalRecord, DepositFuelBlock, DepositJournalRecord, WithdrawJournalRecord } from "./journal"
+import type {
+	BridgeJournalRecord,
+	DepositFuelBlock,
+	DepositJournalRecord,
+	JournalTokenBlock,
+	SendJournalRecord,
+	WithdrawJournalRecord,
+} from "./journal"
 import { isProvisionalWithdrawId } from "./journal"
 import { openSecret, sealSecret } from "./recovery-crypto"
 
@@ -166,6 +173,85 @@ function validateWithdrawRecord(w: Partial<WithdrawJournalRecord>): WithdrawJour
 	return w as WithdrawJournalRecord
 }
 
+const isHexWord = (v: unknown): v is string => typeof v === "string" && /^0x[0-9a-fA-F]{64}$/.test(v)
+const isEvmAddress = (v: unknown): v is string => typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v)
+
+/** The token block of a schema-3 record: every field a claim or exit is rebuilt from, strictly typed. */
+function validateTokenBlock(t: unknown): JournalTokenBlock {
+	const b = t as Partial<JournalTokenBlock> | null
+	if (
+		!b ||
+		typeof b !== "object" ||
+		!isEvmAddress(b.erc20) ||
+		!isEvmAddress(b.portal) ||
+		!isHexWord(b.l2Token) ||
+		!isHexWord(b.nameWord) ||
+		!isHexWord(b.symbolWord) ||
+		typeof b.decimals !== "number" ||
+		!Number.isInteger(b.decimals) ||
+		b.decimals < 0 ||
+		b.decimals > 255 ||
+		typeof b.displaySymbol !== "string" ||
+		!isOptionalString(b.registerKey) ||
+		!isOptionalDecimalString(b.registerIndex)
+	) {
+		throw new Error("The sealed contents are not a valid bridge record.")
+	}
+	return b as JournalTokenBlock
+}
+
+const INVALID = "The sealed contents are not a valid bridge record."
+
+interface SendShape {
+	schema?: unknown
+	direction?: unknown
+	intent?: unknown
+	token?: unknown
+	fuel?: unknown
+	registerTxHash?: unknown
+}
+
+/** Runs the schema-1/2 validator over the shared facts of a schema-3 record. */
+function validateSendSharedFacts(r: SendShape): BridgeJournalRecord {
+	const sharedSchema = r.direction === "withdraw" || r.fuel === undefined ? 1 : 2
+	return validateBackupRecord({ ...r, schema: sharedSchema, intent: undefined, token: undefined, registerTxHash: undefined })
+}
+
+function validateSendIntent(r: SendShape): "token" | "token+gas" | "gas" {
+	if (r.intent === "gas") {
+		if (r.direction !== "deposit" || r.token !== undefined) throw new Error(INVALID)
+		return "gas"
+	}
+	if (r.intent !== "token" && r.intent !== "token+gas") throw new Error(INVALID)
+	if (r.direction === "withdraw" && r.intent !== "token") throw new Error(INVALID)
+	return r.intent
+}
+
+/**
+ * Schema-3 records reuse the schema-2 deposit / schema-1 withdraw validation for their shared facts
+ * and add the intent + token block. A token-moving record without its block, or a gas-only record
+ * carrying one, is rejected — the block is what binds the record to ONE token's clone and L2 token,
+ * so a restore can never be claimed against another.
+ */
+function validateSendRecord(rec: unknown): SendJournalRecord {
+	const r = rec as SendShape | null
+	if (!r || typeof r !== "object" || r.schema !== 3) throw new Error(INVALID)
+	if (r.direction === "deposit" && !isOptionalString(r.registerTxHash)) throw new Error(INVALID)
+	const shared = validateSendSharedFacts(r)
+	const intent = validateSendIntent(r)
+	const registerTxHash = r.direction === "deposit" ? (r.registerTxHash as string | undefined) : undefined
+	if (intent === "gas") return { ...(shared as object), schema: 3, intent, registerTxHash } as SendJournalRecord
+	const token = validateTokenBlock(r.token)
+	if (token.portal.toLowerCase() !== shared.portal.toLowerCase()) throw new Error(INVALID)
+	return { ...(shared as object), schema: 3, intent, token, registerTxHash } as SendJournalRecord
+}
+
+/** Any record shape the journal can hold; schema 3 dispatches to its own validator. */
+export function validateAnyBackupRecord(rec: unknown): BridgeJournalRecord {
+	const schema = (rec as { schema?: unknown } | null)?.schema
+	return schema === 3 ? validateSendRecord(rec) : validateBackupRecord(rec)
+}
+
 interface BackupPayload {
 	bk: 1
 	record: BridgeJournalRecord
@@ -213,7 +299,7 @@ export async function openBridgeBackup(key: EncryptionKey, file: BridgeBackupFil
 	if (payload?.bk !== 1 || !payload.record) {
 		throw new Error("The sealed contents are not a valid bridge record.")
 	}
-	const record = validateBackupRecord(payload.record)
+	const record = validateAnyBackupRecord(payload.record)
 	// The header is unauthenticated routing data - the SEALED copies are authoritative. Every
 	// header field with a sealed counterpart is re-checked (sealerL1 only exists inside private
 	// deposit records); refuse on any edit rather than trust either side.

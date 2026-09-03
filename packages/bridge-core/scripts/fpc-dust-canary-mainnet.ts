@@ -174,7 +174,7 @@ async function main() {
 	const gained = after - before
 	if (gained <= 0n || gained >= dust) throw new Error(`FPC private balance delta ${gained} out of (0, ${dust}) — canary FAILED`)
 	console.log(`\n✅ FPC DUST CANARY PASSED — private balance +${gained} FJ-wei (fee ${dust - gained}) in ${mins()}.`)
-	console.log(`   Calibrated minFuelFj (2× live ceiling): ${dust} — set l1.fuel.swap.minFuelFj in the candidate.`)
+	console.log(`   Calibrated minFuelFj (2× live ceiling): ${dust} — set bridge.l1.swap.minFuelFj in the candidate.`)
 }
 
 main().catch((e) => {

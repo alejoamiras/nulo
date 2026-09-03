@@ -38,7 +38,7 @@ interface JournalBase {
 	 *  (kept explicit for back-compat); withdraws are always 1. Private-fuel fields are additive WITHIN
 	 *  schema 2 — no bump: an old client reads a private record as a public schema-2 record minus the
 	 *  optional private fields. */
-	schema: 1 | 2
+	schema: 1 | 2 | 3
 	/** Deposits: secretHashHex (exists before any irreversible tx). Withdraws: exitTxHash, or a
 	 *  provisional `wd-pending-<rand>` between send and receipt. */
 	id: string
@@ -102,6 +102,7 @@ export interface DepositFuelBlock {
 }
 
 export interface DepositJournalRecord extends JournalBase {
+	schema: 1 | 2
 	direction: "deposit"
 	/** Which asset this deposit bridges. Absent ⇒ "bridge-token" (ADDITIVE — pre-Fuel records have no
 	 *  field and the loader never gates on it). "fee-juice" = a direct Fuel bridge (L1 fee asset → L2 Fee
@@ -136,6 +137,7 @@ export interface DepositJournalRecord extends JournalBase {
 }
 
 export interface WithdrawJournalRecord extends JournalBase {
+	schema: 1 | 2
 	direction: "withdraw"
 	/** Bound in the L2→L1 message - tamper makes the consume revert. */
 	recipientL1: string
@@ -144,12 +146,68 @@ export interface WithdrawJournalRecord extends JournalBase {
 	consumeTxHash?: string
 }
 
-export type BridgeJournalRecord = DepositJournalRecord | WithdrawJournalRecord
+/**
+ * The token a schema-3 record moves, copied from the factory's frozen registration record once the
+ * L1 receipt exists (the pre-receipt copy is the app's prediction; the receipt rewrite is what the
+ * L2 side is claimed against). `portal` here and `JournalBase.portal` are the same clone.
+ */
+export interface JournalTokenBlock {
+	erc20: string
+	portal: string
+	l2Token: string
+	nameWord: string
+	symbolWord: string
+	decimals: number
+	displaySymbol: string
+	/** From the factory's `PortalCreated`/`registrationOf` — the `register` leaf a first claim consumes. */
+	registerKey?: string
+	registerIndex?: string
+}
+
+/** What a send intends: the token leg, the token leg plus a gas slice, or gas only (no token block). */
+export type SendIntent = { intent: "token" | "token+gas"; token: JournalTokenBlock } | { intent: "gas"; token?: never }
+
+/**
+ * Schema 3: one record per send through the hub. `bridge` is the hub, `portal` the token's clone
+ * (or the FeeJuicePortal for a gas-only send). Deposit facts are the schema-2 ones; a first-time
+ * private deposit additionally records its own L2 `register_token` tx.
+ */
+export type SendDepositRecord = Omit<DepositJournalRecord, "schema" | "assetKind"> & {
+	schema: 3
+	/** The L2 registration tx of a first-time private deposit (the claim is the next tx). */
+	registerTxHash?: string
+} & SendIntent
+
+export type SendWithdrawRecord = Omit<WithdrawJournalRecord, "schema"> & {
+	schema: 3
+	intent: "token"
+	token: JournalTokenBlock
+}
+
+export type SendJournalRecord = SendDepositRecord | SendWithdrawRecord
+
+export type BridgeJournalRecord = DepositJournalRecord | WithdrawJournalRecord | SendJournalRecord
+
+export function isSendRecord(rec: BridgeJournalRecord): rec is SendJournalRecord {
+	return rec.schema === 3
+}
+
+/** Schema-3 display stages: a first-time private deposit passes through `registering` before the claim. */
+export type SendDepositStage = DepositStage | "registering"
+
+export function deriveSendDepositStage(rec: SendDepositRecord, runtime: DepositStageRuntime = {}): SendDepositStage {
+	if (rec.completedAt) return "done"
+	if (rec.claimTxHash) return "claiming"
+	if (rec.registerTxHash) return "registering"
+	if (rec.leafIndex) return runtime.claimable ? "claimable" : "syncing"
+	return "depositing"
+}
 
 /** The deposit's asset variant, defaulting to the legacy "bridge-token" for records written before Fuel
  *  existed (the field is additive; absent ⇒ token bridge). Withdraws are always token-bridge. The ONE
  *  place the default is decided, so every consumer (deploymentMatches, backup, receipt) agrees. */
 export function assetKindOf(rec: BridgeJournalRecord): "bridge-token" | "fee-juice" {
+	if (isSendRecord(rec)) return rec.direction === "deposit" && rec.intent === "gas" ? "fee-juice" : "bridge-token"
 	return rec.direction === "deposit" && rec.assetKind === "fee-juice" ? "fee-juice" : "bridge-token"
 }
 

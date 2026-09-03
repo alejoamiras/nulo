@@ -1,204 +1,162 @@
 /**
- * Relayer: submit a user's PRIVATE token `claim_private` FOR them, on live testnet.
+ * Relayer: finish a user's stuck L1→L2 deposit by submitting the hub claim FOR them, on live testnet.
  *
- * This is the concrete demonstration of the recipient-commitment capability (the DRIVER of the whole
- * change): a dedicated relayer account finishes a stranded/pending private deposit without being able
- * to redirect the funds — the circuit re-derives the consumption secret from `(salt, recipient)`, so a
- * wrong recipient can't consume. The pure key-handling + validation lives in `../src/relay-claim.ts`
- * (unit-tested); this file is only the live wiring (node, sponsored-FPC wallet, the send).
- *
- * LIVE-ONLY. It needs a recipient-committed deployment (`privateClaimMode: "salt-v2"`) — it fail-closes
- * against today's bearer testnet, by design. Runnable only after the Phase 6/7 cutover.
+ * The private claim is recipient-committed — the circuit re-derives the consumption secret from
+ * `(salt, recipient)` — so a relayer can complete a deposit and can never redirect it. The pure
+ * key-handling + descriptor validation lives in `../src/relay-claim.ts` (unit-tested); this file is
+ * only the live wiring (node, sponsored-FPC wallet, hub registration, the send).
  *
  * Usage:
- *   RELAYER_L2_SECRET_KEY=0x…  bun run scripts/relay-claim-testnet.ts --claim ./claim.json
+ *   RELAYER_L2_SECRET_KEY=0x…  bun run scripts/relay-claim-testnet.ts --claim ./claim.json \
+ *     [--config apps/tools/public/testnet-bridge.json] [--token 0x…] [--public] \
+ *     [--register-index <n>] [--wrong-recipient]
  * where claim.json is the off-chain hand-off from the user:
- *   { "bridge": "0x…", "recipient": "0x…", "amount": "1000", "salt": "0x…", "leafIndex": 7 }
+ *   { "bridge": "0x…hub", "recipient": "0x…", "amount": "1000", "salt": "0x…", "leafIndex": 7 }
  *
- * Security: the relayer runs under its OWN dedicated key (RELAYER_L2_SECRET_KEY), never the user's. The
- * `salt` is a linkage-privacy credential the relayer necessarily learns; it is NEVER logged (only a
- * redacted view is printed).
+ * `--token` selects which manifest ERC-20 the claim belongs to (default: the first). `--public`
+ * treats `salt` as the raw public claim secret instead of the private claim salt. `--register-index`
+ * is needed only when the hub has not registered the token yet — the deposit's factory `register`
+ * leaf, from the sender's journal record or the factory's `registrationOf`.
+ *
+ * Security: the relayer runs under its OWN dedicated key (RELAYER_L2_SECRET_KEY), never the user's.
+ * The `salt` is a linkage-privacy credential the relayer necessarily learns; it is NEVER logged
+ * (only a redacted view is printed).
  */
 import { readFileSync } from "node:fs"
 import { dirname, isAbsolute, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
-import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
+import type { ContractBase } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
-import { PublicKeys } from "@aztec/aztec.js/keys"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { TxStatus } from "@aztec/aztec.js/tx"
-import { SPONSORED_FPC_SALT } from "@aztec/constants"
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { EthAddress } from "@aztec/foundation/eth-address"
-import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
-import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
-import { bridgeProxyArtifact, tokenBridgeArtifact } from "../src/artifacts"
-import { bridgeAt, submitPrivateClaim } from "../src/l2"
-import { assertSaltV2, parseClaimDescriptor, redactDescriptorForLog, requireRelayerSecret } from "../src/relay-claim"
+import { claimViaHub, type HubClaimParams } from "../src/hub-l2"
+import type { JournalTokenBlock } from "../src/journal"
+import type { SendOpts } from "../src/l2"
+import { type ManifestToken, type ManifestV2, manifestToken } from "../src/manifest-v2"
+import { parseClaimDescriptor, type RelayClaimDescriptor, redactDescriptorForLog, requireRelayerSecret } from "../src/relay-claim"
+import { createL2Wallet, createNode, loadManifestV2FromConfigArg, requireBridge } from "./script-bootstrap"
+import { claimTokensUntilSynced, deployAccountIfAbsent, registerHub, registerHubToken, sponsoredFpcFee } from "./script-l2"
 
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const MANIFEST_PATH = process.env.BRIDGE_MANIFEST ?? join(here, "..", "..", "..", "apps", "tools", "public", "testnet-bridge.json")
 
-// Phase 7 canary (fresh-audit H2): submit claim_private with a WRONG recipient DIRECTLY to the
-// sequencer — bypassing the tools app's deposit-time client re-derivation guard — and assert the tx
-// REVERTS. This proves the CIRCUIT's recipient binding (not just the client assert): a relayer with a
-// valid (salt, amount, leaf) cannot redirect to a recipient other than the one bound at deposit time.
-const WRONG_RECIPIENT_CANARY = process.argv.includes("--wrong-recipient")
+function flagValue(argv: string[], flag: string): string | undefined {
+	const i = argv.indexOf(flag)
+	return i >= 0 ? argv[i + 1] : undefined
+}
 
 function claimPathFromArgv(argv: string[]): string {
-	const i = argv.indexOf("--claim")
-	const path = i >= 0 ? argv[i + 1] : process.env.RELAY_CLAIM_FILE
+	const path = flagValue(argv, "--claim") ?? process.env.RELAY_CLAIM_FILE
 	if (!path) throw new Error("missing --claim <file> (or RELAY_CLAIM_FILE)")
 	return isAbsolute(path) ? path : join(process.cwd(), path)
 }
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: accepted at 93 lines — offline validation, wallet setup, contract registration and submission form one ordered custody procedure
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 22 — the wrong-recipient canary and the bounded claim retry are explicit security outcomes of that procedure
-async function main(): Promise<void> {
-	// 1. Validate everything OFFLINE before touching the network (fail-closed, no secret/salt logged).
-	const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"))
-	assertSaltV2(manifest)
-	const descriptor = parseClaimDescriptor(JSON.parse(readFileSync(claimPathFromArgv(process.argv), "utf8")))
-	const relayerSecret = requireRelayerSecret(process.env)
-	console.log("relaying claim:", redactDescriptorForLog(descriptor))
+/** The claim's token facts, from the manifest plus the register leaf a first-ever claim consumes. */
+function tokenBlock(token: ManifestToken, registerIndex?: string): JournalTokenBlock {
+	return {
+		erc20: token.erc20,
+		portal: token.portal,
+		l2Token: token.l2Token,
+		nameWord: token.nameWord,
+		symbolWord: token.symbolWord,
+		decimals: token.decimals,
+		displaySymbol: token.displaySymbol,
+		registerIndex,
+	}
+}
 
-	// 2. Relayer wallet (its OWN dedicated key) + sponsored fees (relayer needs no Fee Juice). A FIXED
-	//    account salt makes the address deterministic across runs; the account is deployed once, on first
-	//    use, via the sponsored FPC (getContract(addr) skips the deploy when it already exists).
-	const node = createAztecNodeClient(NODE_URL)
-	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
-	// 5.0.1: the account secret + signing key are BOTH derived from the seed via the Nulo KDF
-	// (deriveSigningKey was removed from @aztec/stdlib/keys). Mirrors every other testnet script.
-	const { signingKey, secretKey } = await deriveNuloAccountKeys(relayerSecret)
+/**
+ * The relayer's own account: a FIXED account salt makes its address deterministic across runs, and
+ * the sponsored FPC means it never needs Fee Juice of its own.
+ */
+async function relayerWallet(secret: Fr) {
+	const node = createNode(NODE_URL)
+	const ewallet = await createL2Wallet({ nodeUrl: NODE_URL, proverEnabled: true })
+	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret)
 	const manager = await ewallet.createSchnorrAccount(secretKey, Fr.ZERO, signingKey)
-	const relayerAddr = (await manager.getAccount()).getAddress()
-	const fpc = await getContractInstanceFromInstantiationParams(SponsoredFPCContract.artifact, {
-		salt: new Fr(SPONSORED_FPC_SALT),
-		publicKeys: PublicKeys.default(),
+	const from = (await manager.getAccount()).getAddress()
+	const { fee } = await sponsoredFpcFee(ewallet)
+	await deployAccountIfAbsent({
+		node,
+		manager: manager as never,
+		from,
+		fee,
+		log: (stage) => {
+			if (stage === "deploying") console.log("deploying the relayer account (real proof, ~minutes)…")
+		},
 	})
-	try {
-		await ewallet.registerContract(fpc, SponsoredFPCContract.artifact)
-	} catch {}
-	const fee = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
-	if (!(await node.getContract(relayerAddr))) {
-		const deployMethod = await manager.getDeployMethod()
-		await deployMethod.send({ fee, from: "NO_FROM" as never } as never)
-	}
+	return { ewallet, from, sendOpts: { from, fee, wait: { waitForStatus: TxStatus.PROPOSED } } }
+}
 
-	// 3. Register EVERY L2 contract the private claim touches. claim_private privately calls
-	//    TokenMinterProxy.mint_to_private → the Token, so a clean PXE needs the proxy + token + bridge
-	//    artifacts to simulate+prove — not just the bridge. Rebuilt from the manifest (same path as
-	//    verify-deployments / fuel-testnet).
-	const proxy = await getContractInstanceFromInstantiationParams(bridgeProxyArtifact, {
-		publicKeys: PublicKeys.default(),
-		deployer: AztecAddress.ZERO,
-		constructorArgs: [],
-		salt: new Fr(BigInt(manifest.l2.proxy.salt)),
-		constructorArtifact: manifest.l2.proxy.constructorArtifact,
-	})
-	const [tokenName, tokenSymbol, tokenDecimals] = manifest.l2.token.constructorArgs
-	const token = await getContractInstanceFromInstantiationParams(TokenContractArtifact, {
-		publicKeys: PublicKeys.default(),
-		deployer: AztecAddress.ZERO,
-		// 5.0.1 standards Token: constructor_with_minter's 5th param is auth_contract (ZERO = none).
-		constructorArgs: [tokenName, tokenSymbol, tokenDecimals, proxy.address, AztecAddress.ZERO],
-		salt: new Fr(BigInt(manifest.l2.token.salt)),
-		constructorArtifact: manifest.l2.token.constructorArtifact,
-	})
-	const bridgeInstance = await getContractInstanceFromInstantiationParams(tokenBridgeArtifact, {
-		publicKeys: PublicKeys.default(),
-		deployer: AztecAddress.ZERO,
-		constructorArgs: [proxy.address, EthAddress.fromString(manifest.l1.portal)],
-		salt: new Fr(BigInt(manifest.l2.bridge.salt)),
-		constructorArtifact: manifest.l2.bridge.constructorArtifact,
-	})
-	if (bridgeInstance.address.toString().toLowerCase() !== descriptor.bridge.toLowerCase()) {
+/**
+ * Prove the circuit's recipient binding live: the same salt, amount and leaf under the RELAYER's own
+ * address derives a different consumption secret, so the claim cannot consume the message. A success
+ * here would mean a relayer can redirect a user's funds.
+ */
+async function runRedirectCanary(hub: ContractBase, claim: HubClaimParams, relayer: string, sendOpts: SendOpts): Promise<void> {
+	if (relayer.toLowerCase() === claim.recipient.toLowerCase()) {
 		throw new Error(
-			`bridge mismatch: descriptor names ${descriptor.bridge} but the manifest rebuilds ${bridgeInstance.address.toString()} — refusing`,
+			"--wrong-recipient: the relayer IS the bound recipient — use a relayer key that differs so the wrong claim is wrong",
 		)
 	}
-	for (const [inst, art] of [
-		[proxy, bridgeProxyArtifact],
-		[token, TokenContractArtifact],
-		[bridgeInstance, tokenBridgeArtifact],
-	] as const) {
-		await ewallet.registerContract(inst, art as never)
+	console.log(`[canary] claiming with the WRONG recipient ${relayer} — this MUST revert`)
+	let reverted = false
+	try {
+		await claimViaHub(hub, { ...claim, recipient: relayer }, sendOpts)
+	} catch {
+		reverted = true
 	}
+	if (!reverted)
+		throw new Error("SECURITY FAILURE: a wrong-recipient claim SUCCEEDED — recipient-commitment is broken (redirect possible)")
+	console.log("✅ the wrong-recipient claim REVERTED — the binding holds; the message stays claimable for the bound recipient")
+}
 
-	// 4. Submit the claim FOR the user, with a bounded retry for the L1→L2 settling window / fee drift
-	//    (the message may not be claimable the instant the relayer is handed the descriptor). A wrong
-	//    recipient could not have produced this salt→secret, so the relayer cannot redirect; the funds
-	//    land at descriptor.recipient. `wait` auto-waits and THROWS if the tx doesn't reach PROPOSED.
-	const bridge = bridgeAt(ewallet as never, descriptor.bridge, tokenBridgeArtifact)
-
-	// Canary: the wrong-recipient claim MUST revert (the circuit re-derives the secret from the recipient
-	// argument, so a wrong recipient yields a non-matching secret that can't consume the message).
-	if (WRONG_RECIPIENT_CANARY) {
-		if (relayerAddr.toString().toLowerCase() === descriptor.recipient.toLowerCase()) {
-			throw new Error(
-				"--wrong-recipient: the relayer IS the bound recipient — use a relayer key that differs so the wrong claim is genuinely wrong",
-			)
-		}
-		console.log(
-			`[canary] submitting claim_private with WRONG recipient ${relayerAddr.toString()} (bound=${descriptor.recipient}) — MUST revert`,
-		)
-		let reverted = false
-		try {
-			await submitPrivateClaim(
-				bridge,
-				{
-					recipient: relayerAddr.toString(),
-					amount: descriptor.amount,
-					secret: descriptor.salt,
-					messageLeafIndex: descriptor.leafIndex,
-				},
-				{ from: relayerAddr, ...fee, wait: { waitForStatus: TxStatus.PROPOSED } },
-			)
-		} catch {
-			reverted = true
-		}
-		if (!reverted) {
-			throw new Error(
-				"SECURITY FAILURE: wrong-recipient claim_private SUCCEEDED — recipient-commitment is broken (redirect possible)",
-			)
-		}
-		console.log(
-			"✅ wrong-recipient claim_private REVERTED — the circuit binding holds (relayer cannot redirect); the message stays claimable for the correct recipient",
-		)
-		return
+function selectToken(argv: string[], manifest: ManifestV2, tokens: ManifestToken[]): ManifestToken {
+	const erc20 = flagValue(argv, "--token")
+	if (!erc20) {
+		const first = tokens[0]
+		if (!first) throw new Error("the manifest carries no tokens — nothing to relay")
+		return first
 	}
+	const found = manifestToken(manifest, erc20)
+	if (!found) throw new Error(`--token ${erc20} is not in the manifest`)
+	return found
+}
 
-	let result: { receipt?: { txHash?: { toString(): string } } } | undefined
-	let lastErr: unknown
-	for (let attempt = 1; attempt <= 5 && !result; attempt++) {
-		try {
-			result = (await submitPrivateClaim(
-				bridge,
-				{
-					recipient: descriptor.recipient,
-					amount: descriptor.amount,
-					secret: descriptor.salt,
-					messageLeafIndex: descriptor.leafIndex,
-				},
-				{ from: relayerAddr, ...fee, wait: { waitForStatus: TxStatus.PROPOSED } },
-			)) as { receipt?: { txHash?: { toString(): string } } }
-		} catch (e) {
-			// A claim error never carries the salt (it's a not-yet-claimable / fee-drift condition), so the
-			// message is safe to log; the salt stays out per redactDescriptorForLog + the top-level catch.
-			lastErr = e
-			console.log(`claim attempt ${attempt}/5 failed: ${e instanceof Error ? e.message : String(e)} — retrying in 15s`)
-			await new Promise((r) => setTimeout(r, 15_000))
-		}
+async function main(): Promise<void> {
+	// Validate everything OFFLINE before touching the network. A valid v2 manifest is salt-v2 by
+	// schema, so the recipient-commitment interlock is satisfied by parsing alone.
+	const manifest = loadManifestV2FromConfigArg(process.argv, { mode: "fallback", fallbackPath: MANIFEST_PATH })
+	const bridge = requireBridge(manifest)
+	const token = selectToken(process.argv, manifest, bridge.tokens)
+	const descriptor: RelayClaimDescriptor = parseClaimDescriptor(JSON.parse(readFileSync(claimPathFromArgv(process.argv), "utf8")))
+	if (descriptor.bridge.toLowerCase() !== bridge.l2.hub.address.toLowerCase()) {
+		throw new Error(`descriptor names ${descriptor.bridge} but the manifest hub is ${bridge.l2.hub.address} — refusing`)
 	}
-	if (!result) throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
-	console.log(
-		`✅ relayed claim_private for ${descriptor.recipient} — tx ${result.receipt?.txHash?.toString() ?? "(mined)"} (funds land at the bound recipient)`,
-	)
+	const relayerSecret = requireRelayerSecret(process.env)
+	console.log(`relaying ${token.displaySymbol} claim:`, redactDescriptorForLog(descriptor))
+
+	const { ewallet, from, sendOpts } = await relayerWallet(relayerSecret)
+	const hub = await registerHub(ewallet, bridge.l2.hub)
+	await registerHubToken(ewallet, hub.address, token, bridge.l2.tokenClassId)
+
+	const claim: HubClaimParams = {
+		token: tokenBlock(token, flagValue(process.argv, "--register-index")),
+		recipient: descriptor.recipient,
+		amount: descriptor.amount,
+		claimValue: descriptor.salt,
+		leafIndex: descriptor.leafIndex,
+		isPrivate: !process.argv.includes("--public"),
+		from: from.toString(),
+	}
+	if (process.argv.includes("--wrong-recipient")) return await runRedirectCanary(hub, claim, from.toString(), sendOpts)
+
+	// The message may not be in the tree the instant the relayer is handed the descriptor; every
+	// other failure is final and surfaces on the first attempt.
+	const outcome = await claimTokensUntilSynced({ hub, claim, sendOpts, attempts: 5, intervalMs: 15_000 })
+	console.log(`✅ relayed the ${claim.isPrivate ? "private" : "public"} claim (${outcome.path}) — tx ${outcome.claimTxHash}`)
 }
 
 main().catch((err: unknown) => {

@@ -1,15 +1,12 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import {
-	appendJournal,
-	type CandidateManifest,
-	journaledEvmDeploy,
-	readJournal,
-	resolveResume,
-	writeCandidateAtomic,
-} from "./deploy-manifest"
+import { deriveHubTokenInstance } from "../src/hub-token"
+import type { ManifestV2 } from "../src/manifest-v2"
+import { predictPortal } from "../src/portal-address"
+import { openDeployJournal, readCandidate, readDeployJournal, writeCandidateAtomically } from "./deploy-manifest"
 
 let dir: string
 beforeEach(() => {
@@ -19,176 +16,186 @@ afterEach(() => {
 	rmSync(dir, { recursive: true, force: true })
 })
 
-// Schema-valid fixture: the atomic writer now STRICT-validates before writing (candidate-schema),
-// so the fixture carries full-width addresses and a complete fuel block, like a real candidate.
-const L2A = `0x${"aa".repeat(32)}`
-const L2B = `0x${"bb".repeat(32)}`
-const L2C = `0x${"cc".repeat(32)}`
-const manifest: CandidateManifest = {
-	network: "testnet",
-	l1: {
-		usdc: "0x0000000000000000000000000000000000000001",
-		portal: "0x0000000000000000000000000000000000000002",
-		portalSource: "forked-v1",
-		token: { name: "Aztec Nulo", symbol: "AZLO", decimals: 18, maxWholePerTx: 1000 },
-		fuel: {
-			core: {
-				router: "0x0000000000000000000000000000000000000003",
-				permit2: "0x0000000000000000000000000000000000000007",
-				swapTarget: "0x0000000000000000000000000000000000000004",
-				feeJuicePortal: "0x000000000000000000000000000000000000000a",
-			},
-			swap: {
-				poolManager: "0x0000000000000000000000000000000000000005",
-				quoter: "0x0000000000000000000000000000000000000006",
-				weth: "0x0000000000000000000000000000000000000008",
-				feeJuice: "0x0000000000000000000000000000000000000009",
-				pools: { tokenWeth: { fee: 500, tickSpacing: 10 }, ethFj: { fee: 987, tickSpacing: 10 } },
-				slippageBps: 100,
-				minFuelFj: "10000000000000000000",
-			},
-		},
-		feeJuice: {
-			portal: "0x000000000000000000000000000000000000000a",
-			asset: "0x0000000000000000000000000000000000000009",
-			feeAssetHandler: "0x000000000000000000000000000000000000000b",
-			minFj: "1000000000000000000",
-		},
-	},
-	l2: {
-		proxy: { address: L2A, salt: 111, constructorArtifact: "constructor", constructorArgs: [] },
-		token: {
-			address: L2B,
-			salt: 222,
-			constructorArtifact: "constructor_with_minter",
-			constructorArgs: ["Aztec Nulo", "AZLO", 18, L2A],
-		},
-		bridge: {
-			address: L2C,
-			salt: 333,
-			constructorArtifact: "constructor",
-			constructorArgs: [L2A, "0x0000000000000000000000000000000000000002"],
-		},
-	},
+const FACTORY = "0x3333333333333333333333333333333333333333"
+const IMPL = "0x1111111111111111111111111111111111111111"
+const ERC20 = "0x00000000000000000000000000000000000e2c20"
+const HUB = "0x1234000000000000000000000000000000000000000000000000000000000abc"
+const GUARDIAN = `0x${"0".repeat(61)}ab1`
+const TOKEN_CLASS_ID = "0x0225da0f4227a139c3d6562b6554750adcdec45fd62d9b16af11da21033ef2cf"
+const NAME_WORD = "0x004e756c6f205465737420546f6b656e00000000000000000000000000000000"
+const SYMBOL_WORD = "0x004e545400000000000000000000000000000000000000000000000000000000"
+const FEE_PORTAL = "0xb4a9f8eadc8ca944729d61e59a9f491faff237a3"
+const TX = `0x${"ab".repeat(32)}`
+
+/** A network with no bridge — a legal manifest, and the smallest thing the writer must accept. */
+const placeholder: ManifestV2 = {
+	schema: 2,
+	network: "mainnet",
+	l1ChainId: 1,
+	walletChainId: 1,
+	bridge: null,
+	feeJuice: { portal: FEE_PORTAL, asset: "0x762c132040fda6183066fa3b14d985ee55aa3c18", minFj: "16000000000000000000" },
+	privateClaimMode: "salt-v2",
 }
 
-describe("writeCandidateAtomic", () => {
-	it("round-trips every tools-consumed field and leaves no temp file", () => {
-		const target = join(dir, "testnet-bridge.candidate.json")
-		writeCandidateAtomic(target, manifest)
+async function withBridge(): Promise<ManifestV2> {
+	const l2Token = await deriveHubTokenInstance(
+		AztecAddress.fromStringUnsafe(HUB),
+		ERC20,
+		{ nameWord: NAME_WORD, symbolWord: SYMBOL_WORD, decimals: 18 },
+		TOKEN_CLASS_ID,
+	)
+	return {
+		...placeholder,
+		network: "sandbox",
+		l1ChainId: 31337,
+		walletChainId: 31337,
+		bridge: {
+			l1: {
+				registry: "0x0000000000000000000000000000000000000001",
+				factory: FACTORY,
+				implementation: IMPL,
+				guardian: "0x0000000000000000000000000000000000000002",
+				router: "0x0000000000000000000000000000000000000003",
+				permit2: "0x000000000022d473030f116ddee9f6b43ac78ba3",
+				swapTarget: "0x0000000000000000000000000000000000000004",
+				feeJuicePortal: FEE_PORTAL,
+			},
+			l2: {
+				hub: {
+					address: HUB,
+					salt: `0x${"0".repeat(24)}${FACTORY.slice(2)}`,
+					constructorArtifact: "constructor",
+					constructorArgs: [TOKEN_CLASS_ID, FACTORY, GUARDIAN],
+				},
+				guardian: GUARDIAN,
+				tokenClassId: TOKEN_CLASS_ID,
+				tokenArtifactSha256: "a".repeat(64),
+			},
+			tokens: [
+				{
+					erc20: ERC20,
+					portal: predictPortal(FACTORY, IMPL, ERC20),
+					l2Token: l2Token.address.toString(),
+					nameWord: NAME_WORD,
+					symbolWord: SYMBOL_WORD,
+					decimals: 18,
+					displayName: "Nulo Test Token",
+					displaySymbol: "NTT",
+					source: "permissionless-mint",
+					sourceContract: "TestUsdc",
+					maxWholePerTx: 1000,
+				},
+			],
+		},
+	}
+}
 
-		const back = JSON.parse(readFileSync(target, "utf8"))
-		expect(back).toEqual(manifest)
-		// The tools app reader (bridge-deployments.ts) reads exactly these paths.
-		expect(back.l1.usdc).toBe(manifest.l1.usdc)
-		expect(back.l1.portal).toBe(manifest.l1.portal)
-		expect(back.l1.portalSource).toBe("forked-v1")
-		expect(back.l1.fuel.core.swapTarget).toBe((manifest.l1.fuel?.core as { swapTarget: string } | undefined)?.swapTarget)
-		for (const k of ["proxy", "token", "bridge"] as const) {
-			expect(back.l2[k].address).toBe(manifest.l2[k].address)
-			expect(typeof back.l2[k].salt).toBe("number")
-			expect(back.l2[k].constructorArtifact).toBe(manifest.l2[k].constructorArtifact)
-		}
-		// No sibling temp left behind after the atomic rename.
+describe("writeCandidateAtomically", () => {
+	it("round-trips a bridge manifest and leaves no temp file", async () => {
+		const manifest = await withBridge()
+		const target = join(dir, "sandbox-bridge.candidate.json")
+		writeCandidateAtomically(target, manifest)
+
+		expect(JSON.parse(readFileSync(target, "utf8"))).toEqual(manifest)
+		expect(readCandidate(target)).toEqual(manifest)
+		expect(readCandidate(join(dir, "absent.json"))).toBeUndefined()
 		expect(readdirSync(dir).filter((f) => f.endsWith(".tmp"))).toHaveLength(0)
 	})
 
-	it("overwrites an existing candidate atomically", () => {
+	it("accepts a placeholder network and overwrites an existing candidate atomically", () => {
 		const target = join(dir, "c.json")
-		writeCandidateAtomic(target, manifest)
-		const next = { ...manifest, l1: { ...manifest.l1, portal: "0x0000000000000000000000000000000000000099" } }
-		writeCandidateAtomic(target, next)
-		expect(JSON.parse(readFileSync(target, "utf8")).l1.portal).toBe("0x0000000000000000000000000000000000000099")
+		writeCandidateAtomically(target, placeholder)
+		writeCandidateAtomically(target, { ...placeholder, network: "mainnet-2" })
+		expect(readCandidate(target)?.network).toBe("mainnet-2")
+	})
+
+	it("refuses an invalid manifest before anything reaches disk", async () => {
+		const manifest = await withBridge()
+		const target = join(dir, "bad.json")
+		const bridge = manifest.bridge
+		if (!bridge) throw new Error("fixture must carry a bridge")
+
+		expect(() =>
+			writeCandidateAtomically(target, {
+				...manifest,
+				bridge: { ...bridge, tokens: [{ ...bridge.tokens[0], portal: "0x00000000000000000000000000000000000000ee" }] },
+			}),
+		).toThrow(/portal is not the factory's CREATE2/)
+		// Validation runs before the temp file is created, so a refused write leaves the directory clean.
+		expect(readdirSync(dir)).toEqual([])
 	})
 })
 
-describe("journal + resume", () => {
-	it("appends two-phase entries and reads them back in order", () => {
-		const j = join(dir, "j.jsonl")
-		appendJournal(j, { phase: "generation", salts: { proxy: 1, token: 2, bridge: 3 } })
-		appendJournal(j, { phase: "submitted", step: "usdc", txHash: "0xdead" })
-		appendJournal(j, { phase: "confirmed", step: "usdc", address: "0xusdc" })
+describe("deploy journal", () => {
+	it("appends steps, reads them back in order, and resumes per-token work by key", () => {
+		const path = join(dir, "deploy.jsonl")
+		const journal = openDeployJournal(path)
+		expect(journal.steps).toEqual([])
 
-		const entries = readJournal(j)
-		expect(entries).toHaveLength(3)
-		expect(entries[0].phase).toBe("generation")
-		expect(entries[1]).toMatchObject({ phase: "submitted", step: "usdc", txHash: "0xdead" })
-		expect(entries[2]).toMatchObject({ phase: "confirmed", step: "usdc", address: "0xusdc" })
-		expect(entries.every((e) => typeof e.ts === "string")).toBe(true)
+		journal.append({ kind: "classes-published", tokenClassId: TOKEN_CLASS_ID, hubClassId: `0x${"cc".repeat(32)}` })
+		journal.append({ kind: "factory-predicted", factory: FACTORY, implementation: IMPL })
+		journal.append({ kind: "factory-deployed", factory: FACTORY, implementation: IMPL, txHash: TX })
+		journal.append({ kind: "token-precreated", erc20: ERC20, portal: predictPortal(FACTORY, IMPL, ERC20), txHash: TX })
+
+		expect(journal.steps.map((s) => s.kind)).toEqual(["classes-published", "factory-predicted", "factory-deployed", "token-precreated"])
+		expect(journal.has("hub-deployed")).toBe(false)
+		expect(journal.has("token-precreated", ERC20.toUpperCase().replace("0X", "0x"))).toBe(true)
+		expect(journal.has("token-precreated", "0x0000000000000000000000000000000000000009")).toBe(false)
+		expect(journal.has("pool-seeded", ERC20)).toBe(false)
+
+		// A fresh reader sees exactly the same history — the journal, not memory, is the resume authority.
+		const resumed = openDeployJournal(path)
+		expect(resumed.steps).toEqual(journal.steps)
+		expect(resumed.has("factory-deployed")).toBe(true)
 	})
 
-	it("resolveResume returns null for an empty journal (clean start)", () => {
-		expect(resolveResume([])).toBeNull()
-		expect(resolveResume(readJournal(join(dir, "missing.jsonl")))).toBeNull()
+	it("stamps the live network once and refuses a resume against another one", () => {
+		const path = join(dir, "identity.jsonl")
+		const identity = {
+			l1ChainId: 11155111,
+			rollupVersion: 4,
+			deployer: "0x7777777777777777777777777777777777777777",
+			registry: "0x0000000000000000000000000000000000000001",
+			feeJuicePortal: FEE_PORTAL,
+		}
+		const journal = openDeployJournal(path, identity)
+		expect(journal.steps).toEqual([{ kind: "identity", ...identity }])
+		journal.append({ kind: "factory-predicted", factory: FACTORY, implementation: IMPL })
+
+		// The same network re-opens the journal and resumes; a second stamp is never written.
+		const resumed = openDeployJournal(path, identity)
+		expect(resumed.steps.filter((s) => s.kind === "identity")).toHaveLength(1)
+		expect(resumed.has("factory-predicted")).toBe(true)
+
+		// A moved rollup means the recorded factory and hub belong to a chain that no longer exists.
+		expect(() => openDeployJournal(path, { ...identity, rollupVersion: 5 })).toThrow(/rollupVersion is 4, the live network says 5/)
+		expect(() => openDeployJournal(path, { ...identity, deployer: IMPL })).toThrow(/deployer is/)
 	})
 
-	it("reconstructs salts, confirmed steps, and the portal-init flag", () => {
-		const j = join(dir, "j2.jsonl")
-		appendJournal(j, { phase: "generation", salts: { proxy: 11, token: 12, bridge: 13 } })
-		appendJournal(j, { phase: "confirmed", step: "portal", address: "0xportal" })
-		appendJournal(j, { phase: "confirmed", step: "bridge", address: "0xbridge" })
-
-		const before = resolveResume(readJournal(j))
-		expect(before).not.toBeNull()
-		expect(before?.salts).toEqual({ proxy: 11, token: 12, bridge: 13 })
-		expect(before?.confirmed.portal).toBe("0xportal")
-		expect(before?.portalInitialized).toBe(false)
-
-		// Once portal-init confirms, resume must treat the generation as locked.
-		appendJournal(j, { phase: "confirmed", step: "portal-init", address: "done" })
-		expect(resolveResume(readJournal(j))?.portalInitialized).toBe(true)
+	it("refuses a journal that predates identity stamping", () => {
+		const path = join(dir, "unstamped.jsonl")
+		openDeployJournal(path).append({ kind: "factory-predicted", factory: FACTORY, implementation: IMPL })
+		expect(() =>
+			openDeployJournal(path, {
+				l1ChainId: 31337,
+				rollupVersion: 1,
+				deployer: FACTORY,
+				registry: IMPL,
+				feeJuicePortal: FEE_PORTAL,
+			}),
+		).toThrow(/predates identity stamping/)
 	})
 
-	it("journaledEvmDeploy writes submitted (with hash) BEFORE the receipt, then confirmed (with address)", async () => {
-		const j = join(dir, "j3.jsonl")
-		const seen: string[] = []
-		const addr = await journaledEvmDeploy(
-			{
-				wallet: {
-					deployContract: async () => {
-						seen.push("deploy")
-						return "0xhash1" as `0x${string}`
-					},
-				},
-				pub: {
-					waitForTransactionReceipt: async ({ hash }) => {
-						// The submitted line must already be durable when the wait begins — that
-						// hash is the crash-recovery key.
-						const phases = readJournal(j).map((e) => `${e.phase}:${e.step}`)
-						expect(phases).toContain("submitted:portal")
-						seen.push(`wait:${hash}`)
-						return { contractAddress: "0xdeadbeef" as `0x${string}` }
-					},
-				},
-			},
-			j,
-			"portal",
-			"NuloTokenPortal",
-			{ abi: [], bytecode: "0x00" },
-			[],
-		)
-		expect(addr).toBe("0xdeadbeef")
-		expect(seen).toEqual(["deploy", "wait:0xhash1"])
-		const confirmed = resolveResume(readJournal(j).concat([{ ts: "", phase: "generation", salts: { proxy: 1, token: 2, bridge: 3 } }]))
-		expect(confirmed?.confirmed.portal).toBe("0xdeadbeef")
-	})
+	it("rejects a journal line that is not a valid step", () => {
+		const path = join(dir, "garbage.jsonl")
+		writeFileSync(path, `${JSON.stringify({ ts: "now", step: { kind: "factory-deployed", factory: FACTORY } })}\n`)
+		expect(() => readDeployJournal(path)).toThrow(/entry 1 is not a valid step/)
 
-	it("journaledEvmDeploy rejects a receipt without contractAddress and leaves NO confirmed line", async () => {
-		const j = join(dir, "j4.jsonl")
-		await expect(
-			journaledEvmDeploy(
-				{
-					wallet: { deployContract: async () => "0xhash2" as `0x${string}` },
-					pub: { waitForTransactionReceipt: async () => ({ contractAddress: null }) },
-				},
-				j,
-				"usdc",
-				"MintableERC20",
-				{ abi: [], bytecode: "0x00" },
-				[],
-			),
-		).rejects.toThrow(/MintableERC20: no contractAddress/)
-		const entries = readJournal(j)
-		expect(entries.map((e) => e.phase)).toEqual(["submitted"])
+		writeFileSync(path, "{not json\n")
+		expect(() => readDeployJournal(path)).toThrow(/entry 1 is not JSON/)
+
+		writeFileSync(path, `${JSON.stringify({ ts: "now", step: { kind: "who-knows" } })}\n`)
+		expect(() => readDeployJournal(path)).toThrow(/entry 1 is not a valid step/)
 	})
 })

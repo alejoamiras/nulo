@@ -1,88 +1,131 @@
+import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { describe, expect, it } from "vitest"
-import { assertDripCandidateShape, assertZeroSeed } from "./promotion"
+import { deriveHubTokenInstance } from "./hub-token"
+import { deriveManifestHub, type ManifestV2 } from "./manifest-v2"
+import { predictPortal } from "./portal-address"
+import { assertFaucetCandidateShape, assertZeroSeed } from "./promotion"
 
-const ADDR32 = `0x${"ab".repeat(32)}`
-const token = (authContract?: string) => ({ constructorArgs: { authContract } })
+const FACTORY = "0x3333333333333333333333333333333333333333"
+const IMPL = "0x1111111111111111111111111111111111111111"
+const ERC20 = "0x00000000000000000000000000000000000e2c20"
+const GUARDIAN = "0x0000000000000000000000000000000000000000000000000000000000000ab1"
+const TOKEN_CLASS_ID = "0x0225da0f4227a139c3d6562b6554750adcdec45fd62d9b16af11da21033ef2cf"
+const FEE_PORTAL = "0xb4a9f8eadc8ca944729d61e59a9f491faff237a3"
+const HUB_RECORD = {
+	salt: `0x${"0".repeat(24)}${FACTORY.slice(2)}`,
+	constructorArtifact: "constructor",
+	constructorArgs: [TOKEN_CLASS_ID, FACTORY, GUARDIAN],
+}
+const HUB = (
+	await deriveManifestHub({ l2: { hub: { ...HUB_RECORD, address: "" } } } as unknown as Parameters<typeof deriveManifestHub>[0])
+).address.toString()
 
-describe("assertDripCandidateShape", () => {
-	it("accepts a post-5.0.1 candidate", () => {
-		expect(() => assertDripCandidateShape({ tokens: [token(ADDR32)], dripper: {} })).not.toThrow()
+const NAME_WORD = "0x004e756c6f205465737420546f6b656e00000000000000000000000000000000"
+const SYMBOL_WORD = "0x004e545400000000000000000000000000000000000000000000000000000000"
+const L2_TOKEN = (
+	await deriveHubTokenInstance(
+		AztecAddress.fromStringUnsafe(HUB),
+		ERC20,
+		{ nameWord: NAME_WORD, symbolWord: SYMBOL_WORD, decimals: 18 },
+		TOKEN_CLASS_ID,
+	)
+).address.toString()
+
+function raw(overrides: { factory?: string; hub?: string; network?: string; l1ChainId?: number; walletChainId?: number } = {}) {
+	const factory = overrides.factory ?? FACTORY
+	return {
+		schema: 2,
+		network: overrides.network ?? "sandbox",
+		l1ChainId: overrides.l1ChainId ?? 31337,
+		walletChainId: overrides.walletChainId ?? 31337,
+		bridge: {
+			l1: {
+				registry: "0x0000000000000000000000000000000000000001",
+				factory,
+				implementation: IMPL,
+				guardian: "0x0000000000000000000000000000000000000002",
+				router: "0x0000000000000000000000000000000000000003",
+				permit2: "0x000000000022d473030f116ddee9f6b43ac78ba3",
+				swapTarget: "0x0000000000000000000000000000000000000004",
+				feeJuicePortal: FEE_PORTAL,
+			},
+			l2: {
+				hub: {
+					address: overrides.hub ?? HUB,
+					salt: `0x${"0".repeat(24)}${factory.slice(2)}`,
+					constructorArtifact: "constructor",
+					constructorArgs: [TOKEN_CLASS_ID, factory, GUARDIAN],
+				},
+				guardian: GUARDIAN,
+				tokenClassId: TOKEN_CLASS_ID,
+				tokenArtifactSha256: "a".repeat(64),
+			},
+			tokens: [
+				{
+					erc20: ERC20,
+					portal: predictPortal(factory, IMPL, ERC20),
+					l2Token: L2_TOKEN,
+					nameWord: NAME_WORD,
+					symbolWord: SYMBOL_WORD,
+					decimals: 18,
+					displayName: "Nulo Test Token",
+					displaySymbol: "NTT",
+					source: "canonical",
+				},
+			],
+		},
+		feeJuice: { portal: FEE_PORTAL, asset: "0x762c132040fda6183066fa3b14d985ee55aa3c18", minFj: "16000000000000000000" },
+		privateClaimMode: "salt-v2",
+	}
+}
+
+/** The interlock reads the sync-parsed shape; only the candidate check needs the derivation. */
+const parsed = (overrides?: Parameters<typeof raw>[0]): ManifestV2 => raw(overrides) as ManifestV2
+
+describe("assertFaucetCandidateShape", () => {
+	it("returns the parsed manifest for a promotable candidate", async () => {
+		expect((await assertFaucetCandidateShape(raw())).bridge?.tokens[0].displaySymbol).toBe("NTT")
 	})
-	it("rejects a malformed authContract (not a 32-byte aztec address)", () => {
-		expect(() => assertDripCandidateShape({ tokens: [token("0xjunk")], dripper: {} })).toThrow(/not a 32-byte aztec address/)
-		expect(() => assertDripCandidateShape({ tokens: [token("0x123")], dripper: {} })).toThrow(/not a 32-byte aztec address/)
+
+	it("rejects a placeholder manifest and a bridge with no tokens", async () => {
+		await expect(assertFaucetCandidateShape({ ...raw(), bridge: null })).rejects.toThrow(/no bridge \(placeholder network\)/)
+		const empty = raw()
+		empty.bridge.tokens = []
+		await expect(assertFaucetCandidateShape(empty)).rejects.toThrow(/carries no tokens/)
 	})
-	it("rejects an empty or dripper-less candidate", () => {
-		expect(() => assertDripCandidateShape({ tokens: [], dripper: {} })).toThrow(/shape invalid/)
-		expect(() => assertDripCandidateShape({ tokens: [token(ADDR32)] })).toThrow(/shape invalid/)
-	})
-	it("rejects any pre-5.0.1 token record (missing authContract)", () => {
-		expect(() => assertDripCandidateShape({ tokens: [token(ADDR32), token(undefined)], dripper: {} })).toThrow(/pre-5\.0\.1 shape/)
+
+	it("rejects anything the strict schema rejects (a carried portal, a foreign claim mode, an L2 token the hub would not derive)", async () => {
+		const carried = raw()
+		carried.bridge.tokens[0].portal = "0x00000000000000000000000000000000000000ee"
+		await expect(assertFaucetCandidateShape(carried)).rejects.toThrow(/not the factory's CREATE2/)
+		await expect(assertFaucetCandidateShape({ ...raw(), privateClaimMode: "secret-v1" })).rejects.toThrow(/failed strict validation/)
+		const foreign = raw()
+		foreign.bridge.tokens[0].l2Token = `0x${"5".repeat(64)}`
+		await expect(assertFaucetCandidateShape(foreign)).rejects.toThrow(/is not the hub's derivation/)
 	})
 })
 
 describe("assertZeroSeed", () => {
-	const fuel = { router: "0xr", weth: "0xw", pools: { a: 1 } }
-	it("accepts byte-carried fuel and absent-in-both", () => {
-		expect(() => assertZeroSeed(structuredClone(fuel), fuel)).not.toThrow()
-		expect(() => assertZeroSeed(undefined, undefined)).not.toThrow()
-	})
-	it("rejects new, removed, or changed fuel sections", () => {
-		expect(() => assertZeroSeed(fuel, undefined)).toThrow(/zero-seed violated/)
-		expect(() => assertZeroSeed(undefined, fuel)).toThrow(/zero-seed violated/)
-		expect(() => assertZeroSeed({ ...fuel, router: "0xother" }, fuel)).toThrow(/zero-seed violated/)
+	it("accepts a promotion that keeps the network and the generation", () => {
+		expect(() => assertZeroSeed(parsed(), parsed())).not.toThrow()
 	})
 
-	// The token cutover retires the token-keyed swap stack: core byte-carried + swap DROPPED whole,
-	// allowed ONLY under the explicit operator flag — a changed core or altered swap still rejects.
-	describe("allowSwapDrop (token cutover)", () => {
-		const core = { router: "0xr", permit2: "0xp", swapTarget: "0xs", feeJuicePortal: "0xf" }
-		const live = { core, swap: { quoter: "0xq", pools: { a: 1 } } }
-		it("accepts core-carried + swap-dropped under the flag", () => {
-			expect(() => assertZeroSeed({ core: structuredClone(core) }, live, { allowSwapDrop: true })).not.toThrow()
-		})
-		it("rejects the same shape WITHOUT the flag", () => {
-			expect(() => assertZeroSeed({ core: structuredClone(core) }, live)).toThrow(/zero-seed violated/)
-		})
-		it("rejects a CHANGED core even under the flag", () => {
-			expect(() => assertZeroSeed({ core: { ...core, router: "0xother" } }, live, { allowSwapDrop: true })).toThrow(
-				/zero-seed violated/,
-			)
-		})
-		// The core compare is STRICT byte-equality — even a metadata-only enrichment (the conductor
-		// adding swapTargetContract) rejects, which is why the LIVE manifest carries the field
-		// (backfilled) BEFORE a cutover. Codex r4 reproduced the failure; this pins the strictness.
-		it("rejects a candidate core that ADDS a field the live core lacks (metadata enrichment)", () => {
-			expect(() =>
-				assertZeroSeed({ core: { ...core, swapTargetContract: "UniswapFuelSwap" } }, live, { allowSwapDrop: true }),
-			).toThrow(/zero-seed violated/)
-		})
-		it("accepts identical cores that BOTH carry swapTargetContract (the backfilled live shape)", () => {
-			const c = { ...core, swapTargetContract: "UniswapFuelSwap" }
-			expect(() => assertZeroSeed({ core: structuredClone(c) }, { core: c, swap: live.swap }, { allowSwapDrop: true })).not.toThrow()
-		})
-		it("allowSwapAdd: accepts core-carried + a whole NEW swap under --restore-swap only", () => {
-			const newSwap = { quoter: "0xq2", pools: { tokenWeth: { fee: 3000, tickSpacing: 60 } } }
-			expect(() => assertZeroSeed({ core: structuredClone(core), swap: newSwap }, { core }, { allowSwapAdd: true })).not.toThrow()
-			expect(() => assertZeroSeed({ core: structuredClone(core), swap: newSwap }, { core })).toThrow(/zero-seed violated/)
-			// never a silent REPLACE of an existing swap through this door
-			expect(() => assertZeroSeed({ core: structuredClone(core), swap: newSwap }, live, { allowSwapAdd: true })).toThrow(
-				/zero-seed violated/,
-			)
-		})
-		it("compares CANONICALLY — key order differences (zod vs raw JSON) do not reject", () => {
-			const reordered = {
-				feeJuicePortal: core.feeJuicePortal,
-				swapTarget: core.swapTarget,
-				permit2: core.permit2,
-				router: core.router,
-			}
-			expect(() => assertZeroSeed({ core: reordered }, live, { allowSwapDrop: true })).not.toThrow()
-		})
-		it("rejects an ALTERED (not dropped) swap even under the flag", () => {
-			expect(() =>
-				assertZeroSeed({ core: structuredClone(core), swap: { quoter: "0xother" } }, live, { allowSwapDrop: true }),
-			).toThrow(/zero-seed violated/)
-		})
+	it("refuses any change of network identity", () => {
+		expect(() => assertZeroSeed(parsed({ network: "testnet" }), parsed())).toThrow(/network sandbox → testnet/)
+		expect(() => assertZeroSeed(parsed({ l1ChainId: 11155111 }), parsed())).toThrow(/l1ChainId 31337 → 11155111/)
+		expect(() => assertZeroSeed(parsed({ walletChainId: 7 }), parsed())).toThrow(/walletChainId 31337 → 7/)
+	})
+
+	it("refuses a factory move, a hub swap under the same factory, and dropping a live bridge", () => {
+		expect(() => assertZeroSeed(parsed({ factory: "0x4444444444444444444444444444444444444444" }), parsed())).toThrow(
+			/change the L1 factory/,
+		)
+		expect(() => assertZeroSeed(parsed({ hub: `0x${"9".repeat(64)}` }), parsed())).toThrow(/change the L2 hub/)
+		const placeholder = { ...parsed(), bridge: null }
+		expect(() => assertZeroSeed(placeholder, parsed())).toThrow(/would drop the live bridge/)
+	})
+
+	it("allows the first bridge onto a live placeholder network", () => {
+		expect(() => assertZeroSeed(parsed(), { ...parsed(), bridge: null })).not.toThrow()
 	})
 })

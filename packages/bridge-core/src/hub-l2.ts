@@ -1,0 +1,177 @@
+/**
+ * The L2 leg through the hub. A claim is decided at CLAIM time by the hub's own `token_for`: zero
+ * means this claim also registers the token (one transaction for a public claim; a separate
+ * `register_token` first for a private one); otherwise it is a plain claim. If another claimant
+ * registers between the read and the send, the registration path fails on the already-consumed
+ * register leaf and the claim is retried as a plain one — the deposit is never stranded on a race.
+ */
+import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { Contract, type ContractBase } from "@aztec/aztec.js/contracts"
+import { Fr } from "@aztec/aztec.js/fields"
+import type { Wallet } from "@aztec/aztec.js/wallet"
+import { EthAddress } from "@aztec/foundation/eth-address"
+import { tokenBridgeHubArtifact } from "./artifacts"
+import type { JournalTokenBlock } from "./journal"
+import type { SendOpts } from "./l2"
+
+export function hubAt(wallet: Wallet, hub: string): ContractBase {
+	return Contract.at(AztecAddress.fromStringUnsafe(hub), tokenBridgeHubArtifact, wallet)
+}
+
+const ZERO_FIELD = `0x${"0".repeat(64)}`
+
+/** The hub's binding for an ERC-20, or undefined when it has not registered it. */
+export async function hubTokenFor(hub: ContractBase, erc20: string, from: string): Promise<string | undefined> {
+	const r = (await hub.methods
+		.token_for(EthAddress.fromString(erc20))
+		.simulate({ from: AztecAddress.fromStringUnsafe(from) } as never)) as { result?: unknown }
+	const addr = String(r.result ?? r)
+	return addr.toLowerCase() === ZERO_FIELD ? undefined : addr
+}
+
+/** The guardian's exit switch, read without simulating an exit. */
+export async function hubExitsPaused(hub: ContractBase, from: string): Promise<boolean> {
+	const r = (await hub.methods.exits_paused().simulate({ from: AztecAddress.fromStringUnsafe(from) } as never)) as {
+		result?: unknown
+	}
+	const v = r.result ?? r
+	if (v === true || v === 1n || v === 1 || v === "true") return true
+	if (v === false || v === 0n || v === 0 || v === "false") return false
+	// A safety switch must never read as open because the simulator's answer changed shape.
+	throw new Error(`exits_paused() answered ${JSON.stringify(v)} — not a boolean; refusing to treat the hub as unpaused`)
+}
+
+/** Everything the L2 side needs from the L1 receipt + the journal. */
+export interface HubClaimParams {
+	token: JournalTokenBlock
+	recipient: string
+	amount: bigint
+	/** PUBLIC: the raw secret. PRIVATE: the `claim_salt`. */
+	claimValue: Fr
+	leafIndex: bigint
+	isPrivate: boolean
+	/** The L2 account submitting (the recipient, or a relayer). */
+	from: string
+}
+
+function registerArgs(t: JournalTokenBlock) {
+	if (t.registerIndex === undefined) throw new Error("hub claim: the token block carries no registerIndex — cannot register")
+	return [
+		EthAddress.fromString(t.erc20),
+		EthAddress.fromString(t.portal),
+		Fr.fromHexString(t.nameWord),
+		Fr.fromHexString(t.symbolWord),
+		t.decimals,
+		new Fr(BigInt(t.registerIndex)),
+	] as const
+}
+
+/** True when the failure means someone else consumed the register leaf first. */
+export function isRegisterRace(e: unknown): boolean {
+	const msg = e instanceof Error ? e.message : String(e)
+	return /non-nullified L1 to L2 message|already nullified|duplicate nullifier|Nullifier already exists/i.test(msg)
+}
+
+type Sent = Promise<{ receipt: { txHash: unknown } }>
+const txHashOf = async (sent: Sent) => String((await sent).receipt.txHash)
+
+export type HubClaimPath = "claim" | "register+claim" | "register,claim"
+export interface HubClaimOutcome {
+	path: HubClaimPath
+	/** Only the private first claim registers in a transaction of its own. */
+	registerTxHash?: string
+	claimTxHash: string
+}
+
+function plainClaim(hub: ContractBase, p: HubClaimParams, send: SendOpts): Sent {
+	const l2Token = AztecAddress.fromStringUnsafe(p.token.l2Token)
+	const to = AztecAddress.fromStringUnsafe(p.recipient)
+	const call = p.isPrivate
+		? hub.methods.claim_private(l2Token, to, p.amount, p.claimValue, new Fr(p.leafIndex))
+		: hub.methods.claim_public(l2Token, to, p.amount, p.claimValue, new Fr(p.leafIndex))
+	return call.send(send as never) as unknown as Sent
+}
+
+/** The hub's binding for the block's ERC-20, refused when it names a different L2 token than the block. */
+async function registeredTokenOf(hub: ContractBase, p: HubClaimParams): Promise<string | undefined> {
+	const bound = await hubTokenFor(hub, p.token.erc20, p.from)
+	if (bound !== undefined && bound.toLowerCase() !== p.token.l2Token.toLowerCase()) {
+		throw new Error(`hub claim: the hub binds ${p.token.erc20} to ${bound}, the journal says ${p.token.l2Token} — refusing to claim`)
+	}
+	return bound
+}
+
+/**
+ * A failed registration is a lost race only if the hub now knows the token. The same message
+ * also means "the leaf is not consumable yet", and that case must reach the caller's sync retry —
+ * a plain claim on an unregistered token would fail on the uninitialized binding instead.
+ */
+async function rethrowUnlessRaceLost(hub: ContractBase, p: HubClaimParams, e: unknown): Promise<void> {
+	if (!isRegisterRace(e) || (await registeredTokenOf(hub, p)) === undefined) throw e
+}
+
+async function firstPublicClaim(hub: ContractBase, p: HubClaimParams, send: SendOpts): Promise<HubClaimOutcome> {
+	const to = AztecAddress.fromStringUnsafe(p.recipient)
+	try {
+		const sent = hub.methods
+			.register_and_claim_public(...registerArgs(p.token), to, p.amount, p.claimValue, new Fr(p.leafIndex))
+			.send(send as never) as unknown as Sent
+		return { path: "register+claim", claimTxHash: await txHashOf(sent) }
+	} catch (e) {
+		await rethrowUnlessRaceLost(hub, p, e)
+		return { path: "claim", claimTxHash: await txHashOf(plainClaim(hub, p, send)) }
+	}
+}
+
+async function firstPrivateClaim(hub: ContractBase, p: HubClaimParams, send: SendOpts): Promise<HubClaimOutcome> {
+	let registerTxHash: string | undefined
+	try {
+		registerTxHash = await txHashOf(hub.methods.register_token(...registerArgs(p.token)).send(send as never) as unknown as Sent)
+	} catch (e) {
+		await rethrowUnlessRaceLost(hub, p, e)
+	}
+	// The registration derived the token from the words; a block whose l2Token disagrees is caught
+	// here by name, before a claim on the wrong address burns a transaction.
+	await registeredTokenOf(hub, p)
+	return { path: "register,claim", registerTxHash, claimTxHash: await txHashOf(plainClaim(hub, p, send)) }
+}
+
+/** Sends the claim, registering the token first when the hub does not know it yet. */
+export async function claimViaHub(hub: ContractBase, p: HubClaimParams, send: SendOpts): Promise<HubClaimOutcome> {
+	if (await registeredTokenOf(hub, p)) return { path: "claim", claimTxHash: await txHashOf(plainClaim(hub, p, send)) }
+	return p.isPrivate ? firstPrivateClaim(hub, p, send) : firstPublicClaim(hub, p, send)
+}
+
+export interface HubExitParams {
+	l2Token: string
+	recipientL1: string
+	amount: bigint
+	callerOnL1: string
+	authwitNonce: Fr
+	isPrivate: boolean
+}
+
+function exitCall(hub: ContractBase, p: HubExitParams) {
+	if (/^0x0{40}$/i.test(p.recipientL1)) throw new Error("exit recipient must not be the zero address (would strand the withdraw)")
+	const args = [
+		AztecAddress.fromStringUnsafe(p.l2Token),
+		EthAddress.fromString(p.recipientL1),
+		p.amount,
+		EthAddress.fromString(p.callerOnL1),
+		p.authwitNonce,
+	] as const
+	return p.isPrivate ? hub.methods.exit_to_l1_private(...args) : hub.methods.exit_to_l1_public(...args)
+}
+
+/**
+ * The L2 half of the exit preflight: simulating the exit runs the pause assert (public inline,
+ * private through its enqueued public call), the portal read and the burn, so a paused hub, an
+ * unregistered token or a short balance all surface before any authwit is spent.
+ */
+export async function preflightHubExit(hub: ContractBase, p: HubExitParams, from: string): Promise<void> {
+	await exitCall(hub, p).simulate({ from: AztecAddress.fromStringUnsafe(from) } as never)
+}
+
+export function exitViaHub(hub: ContractBase, p: HubExitParams, send: SendOpts) {
+	return exitCall(hub, p).send(send as never)
+}

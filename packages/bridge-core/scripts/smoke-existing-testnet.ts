@@ -1,150 +1,212 @@
 /**
- * Pre-promotion smoke for a freshly-deployed CANDIDATE manifest. Registers the EXISTING L1/L2
- * contracts from the manifest (NO deploy) and runs a plain public deposit -> claim, asserting the
- * L2 balance. This is the candidate's gate before it is promoted to the live testnet-bridge.json.
+ * Pre-promotion smoke for a freshly-deployed CANDIDATE generation manifest. It registers the
+ * recorded hub and the first two tokens (NO deploy) and bridges each of them publicly and privately
+ * through the app's own send path, so a pass proves two things at once: the manifest is
+ * self-consistent — every recorded address recomputes, and the factory's frozen registration agrees
+ * with the words it carries — AND the deployed generation actually bridges more than one token.
  *
- * Unlike deposit-testnet.ts (which deploys a fresh set), this binds to the addresses already recorded
- * in the manifest, so it proves two things at once: the manifest is self-consistent (each L2 address
- * recomputes from its recorded salt + args, exactly as the tools app rebuilds it) AND the deployed set
- * actually bridges. The L2 recipient is a throwaway account; the deposit is funded by PRIVATE_KEY.
- *
- * Real proofs make the claim take minutes. Run:
+ * The L2 recipient is a throwaway account; the deposits are funded by PRIVATE_KEY. Real proofs make
+ * each claim take minutes. Run:
  *   bun run scripts/smoke-existing-testnet.ts --config <path/to/testnet-bridge.candidate.json>
  * (needs PRIVATE_KEY + SEPOLIA_RPC_URL in packages/bridge-core/.env; AZTEC_NODE_URL defaults to the
  * public testnet RPC).
  */
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import type { Contract } from "@aztec/aztec.js/contracts"
+import type { AztecAddress } from "@aztec/aztec.js/addresses"
+import type { ContractBase } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
 import { TxStatus } from "@aztec/aztec.js/tx"
+import type { Address } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
+import { ERC20_ABI } from "../src/erc20"
+import type { L1Ctx } from "../src/flows"
+import { hubExitsPaused, hubTokenFor } from "../src/hub-l2"
+import type { SendOpts } from "../src/l2"
+import type { ManifestToken } from "../src/manifest-v2"
+import { runSend, type SendGeneration } from "../src/send-flow"
+import { sendGenerationOf } from "./script-send"
 import { evmAbi } from "./script-artifacts"
-import { depositViaRouter, type RouterDepositEnv } from "./script-l1"
-import { claimTokensUntilSynced, deployAccountIfAbsent, freshSchnorrAccount, registerManifestTrio, sponsoredFpcFee } from "./script-l2"
-import { createL1Clients, createL2Wallet, createNode, loadManifestFromConfigArg, sepoliaChain, stopwatch } from "./script-bootstrap"
+import { ensureRouterPermit2 } from "./script-l1"
+import {
+	claimTokensUntilSynced,
+	deployAccountIfAbsent,
+	freshSchnorrAccount,
+	registerHub,
+	registerHubToken,
+	sponsoredFpcFee,
+} from "./script-l2"
+import {
+	createL1Clients,
+	createL2Wallet,
+	createNode,
+	loadManifestV2FromConfigArg,
+	requireBridge,
+	sepoliaChain,
+	stopwatch,
+} from "./script-bootstrap"
 
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
 const PRIVATE_KEY = process.env.PRIVATE_KEY as `0x${string}` | undefined
 if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY required (packages/bridge-core/.env)")
 
-const CONFIG = loadManifestFromConfigArg(process.argv, {
+const MANIFEST = loadManifestV2FromConfigArg(process.argv, {
 	mode: "required",
 	requiredHint: "apps/tools/public/testnet-bridge.candidate.json",
-	// biome-ignore lint/suspicious/noExplicitAny: manifest fields are accessed via dynamic property paths without a formal schema, matching the original untyped JSON.parse.
-	parse: (raw) => raw as any,
 })
-// --private exercises the recipient-committed path (the strand-risk gate): deposit commits to
-// H(deriveTokenClaimSecret(salt, recipient)) and claim_private re-derives the secret in-circuit.
-// --redirect-proof (implies private) additionally proves the CIRCUIT binding LIVE: a wrong recipient
-// can't consume (Phase 7 step 3, fresh-audit H2).
-const redirectProof = process.argv.includes("--redirect-proof")
-const isPrivate = process.argv.includes("--private") || redirectProof
+const BRIDGE = requireBridge(MANIFEST)
 
-const sepolia = sepoliaChain(SEPOLIA_RPC)
-
-interface SmokeDeps {
-	env: RouterDepositEnv
-	mint: (amount: bigint) => Promise<void>
-	deposit: (amount: bigint, priv: boolean, claimSalt?: Fr) => Promise<{ claimValue: Fr; leafIndex: bigint }>
-	bridge: Contract
-	token: Contract
+interface Lane {
+	l1: L1Ctx
+	generation: SendGeneration
+	hub: ContractBase
+	l2Token: ContractBase
+	token: ManifestToken
 	from: AztecAddress
-	sendOpts: unknown
+	sendOpts: SendOpts
+	/** One whole unit — enough to move a balance, small enough for a token with no faucet. */
 	amount: bigint
 	mins: () => string
 }
 
-/**
- * Prove the CIRCUIT binding LIVE: deposit A + a sync SENTINEL B (both to R). Once B claims, the
- * network has synced past both, so a wrong-recipient claim on the earlier A reverts for the BINDING
- * reason, not because A isn't synced yet. The evidence is three-fold: B's correct claim lands (sync
- * + private claims work), the wrong-recipient claim on synced A reverts, and B's balance arrives —
- * A itself is deliberately never re-claimed here (see the in-body PXE-wedge note).
- */
-async function runRedirectProofLane(d: SmokeDeps): Promise<void> {
-	const depositPrivate = async (salt: Fr): Promise<bigint> => {
-		await d.mint(d.amount)
-		return (await d.deposit(d.amount, true, salt)).leafIndex
+/** The L1 balance a lane spends: a permissionless-mint test token mints on demand, anything else
+ *  must already be held (a canonical token has no faucet and the smoke must not pretend otherwise). */
+async function fundL1(lane: Lane): Promise<void> {
+	const erc20 = lane.token.erc20 as Address
+	if (lane.token.source !== "permissionless-mint") {
+		const held = await lane.l1.pub.readContract({
+			address: erc20,
+			abi: ERC20_ABI,
+			functionName: "balanceOf",
+			args: [lane.l1.account.address],
+		})
+		if (held < lane.amount)
+			throw new Error(`${lane.token.displaySymbol}: funder holds ${held} < ${lane.amount} and the token has no mint`)
+		return
 	}
-	const claimPrivate = async (recipient: AztecAddress, salt: Fr, leaf: bigint): Promise<boolean> => {
-		for (let i = 0; i < 300; i++) {
-			try {
-				await d.bridge.methods.claim_private(recipient, d.amount, salt, new Fr(leaf)).send(d.sendOpts as never)
-				return true
-			} catch {
-				await new Promise((r) => setTimeout(r, 6000))
-			}
-		}
-		return false
-	}
-
-	const saltA = Fr.random()
-	const leafA = await depositPrivate(saltA)
-	const saltB = Fr.random()
-	const leafB = await depositPrivate(saltB)
-	console.log(`redirect-proof: deposited A(leaf ${leafA}) + sentinel B(leaf ${leafB}) (${d.mins()})`)
-
-	if (!(await claimPrivate(d.from, saltB, leafB))) throw new Error("sentinel B never claimed — L1→L2 not synced within budget")
-	console.log(`sentinel B claimed → network synced; A is now claimable (${d.mins()})`)
-
-	// A is synced (B, a LATER leaf, claimed). So a wrong-recipient claim on A that reverts does so for
-	// the BINDING reason, not because A isn't synced yet. Single attempt — no retry (we want the revert).
-	const wrongRecipient = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000001")
-	let wrongReverted = false
-	try {
-		await d.bridge.methods.claim_private(wrongRecipient, d.amount, saltA, new Fr(leafA)).send(d.sendOpts as never)
-	} catch {
-		wrongReverted = true
-	}
-	if (!wrongReverted) {
-		throw new Error(
-			"SECURITY FAILURE: wrong-recipient claim_private on a SYNCED message did NOT revert — recipient-commitment broken (redirect possible)",
-		)
-	}
-	// A stays claimable: a reverted consume_l1_to_l2_message never nullifies the message (protocol
-	// invariant). We deliberately do NOT re-claim A here — re-simulating the same leaf in the same PXE
-	// session after a failed consume attempt wedges the local PXE (a harness limitation, not on-chain
-	// state); canary 2 already proves a correct private claim settles + mints. B's claim is the balance
-	// sanity that private claims work on this candidate.
-	const balRP = ((await d.token.methods.balance_of_private(d.from).simulate({ from: d.from })) as { result: bigint }).result
-	if (balRP < d.amount) throw new Error(`redirect-proof: sentinel balance ${balRP} < expected ${d.amount} (B)`)
-	console.log(
-		`\n✅ CANDIDATE REDIRECT-PROOF PASSED — a wrong recipient cannot consume a SYNCED message (binding holds); sentinel balance ${balRP} (${d.mins()})`,
-	)
+	const hash = await lane.l1.wallet.writeContract({
+		address: erc20,
+		abi: evmAbi(lane.token.sourceContract ?? "MintableERC20"),
+		functionName: "mint",
+		args: [lane.l1.account.address, lane.amount],
+		account: lane.l1.account,
+		chain: lane.l1.wallet.chain,
+	} as never)
+	await lane.l1.pub.waitForTransactionReceipt({ hash })
 }
 
-async function main() {
-	const mins = stopwatch()
+/** Before the first claim the L2 token is not published yet, so its balance read reverts — that is
+ *  a zero balance, not a failure. */
+async function l2Balance(lane: Lane, isPrivate: boolean): Promise<bigint> {
+	try {
+		const call = isPrivate ? lane.l2Token.methods.balance_of_private(lane.from) : lane.l2Token.methods.balance_of_public(lane.from)
+		return ((await call.simulate({ from: lane.from } as never)) as { result: bigint }).result
+	} catch {
+		return 0n
+	}
+}
 
-	// ─── L1 (Sepolia, viem) ──────────────────────────────────────────
+/** The factory's frozen registration is what the hub derives the L2 token from, so a manifest whose
+ *  words or portal disagree with it names an address the hub would never mint to. */
+function assertRegistrationMatches(
+	lane: Lane,
+	registered: { portal: string; nameWord: string; symbolWord: string; decimals: number },
+): void {
+	const mismatches = [
+		["portal", registered.portal, lane.token.portal],
+		["nameWord", registered.nameWord, lane.token.nameWord],
+		["symbolWord", registered.symbolWord, lane.token.symbolWord],
+		["decimals", String(registered.decimals), String(lane.token.decimals)],
+	].filter(([, onChain, recorded]) => onChain.toLowerCase() !== recorded.toLowerCase())
+	if (mismatches.length > 0) {
+		throw new Error(
+			`${lane.token.displaySymbol}: the factory's registration disagrees with the manifest — ${mismatches.map(([f, a, b]) => `${f} ${a} != ${b}`).join("; ")}`,
+		)
+	}
+}
+
+/** One deposit → claim, end to end on the app's path, asserting the L2 balance actually moved. */
+async function bridgeOnce(lane: Lane, isPrivate: boolean): Promise<void> {
+	const label = `${lane.token.displaySymbol} ${isPrivate ? "private" : "public"}`
+	await fundL1(lane)
+	await ensureRouterPermit2(lane.l1, {
+		usdc: lane.token.erc20 as Address,
+		usdcAbi: ERC20_ABI,
+		permit2: lane.generation.permit2,
+		needed: lane.amount,
+		mins: lane.mins,
+	})
+	const sent = await runSend(
+		lane.l1,
+		lane.generation,
+		{
+			intent: "token",
+			erc20: lane.token.erc20 as Address,
+			amount: lane.amount,
+			aztecRecipient: lane.from.toString() as `0x${string}`,
+			isPrivate,
+			claimSalt: isPrivate ? Fr.random() : undefined,
+			nonce: BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`),
+			deadline: BigInt(Math.floor(Date.now() / 1000) + 1800),
+		},
+		(stage) => console.log(`${label} l1: ${stage} (${lane.mins()})`),
+	)
+	if (!sent.token || sent.tokenLeafIndex === undefined || !sent.tokenClaimValueHex) {
+		throw new Error(`${label}: the send returned no token leg (${sent.txHash})`)
+	}
+	assertRegistrationMatches(lane, sent.token)
+	console.log(`${label}: deposited ${lane.amount} at leaf ${sent.tokenLeafIndex} (${lane.mins()})`)
+
+	const before = await l2Balance(lane, isPrivate)
+	const outcome = await claimTokensUntilSynced({
+		hub: lane.hub,
+		// The factory record carries no L2 address; the manifest's is the one the registration derives.
+		claim: {
+			token: { ...sent.token, l2Token: lane.token.l2Token },
+			recipient: lane.from.toString(),
+			amount: lane.amount,
+			claimValue: Fr.fromHexString(sent.tokenClaimValueHex),
+			leafIndex: sent.tokenLeafIndex,
+			isPrivate,
+			from: lane.from.toString(),
+		},
+		sendOpts: lane.sendOpts,
+	})
+	const moved = (await l2Balance(lane, isPrivate)) - before
+	if (moved < lane.amount) throw new Error(`${label}: balance moved ${moved} < deposited ${lane.amount}`)
+	console.log(`${label}: claimed via ${outcome.path} — balance +${moved} (${lane.mins()})`)
+}
+
+/** After the first claim the hub must name exactly the L2 token the manifest recorded. */
+async function assertHubBinding(lane: Lane): Promise<void> {
+	const bound = await hubTokenFor(lane.hub, lane.token.erc20, lane.from.toString())
+	if (bound?.toLowerCase() !== lane.token.l2Token.toLowerCase()) {
+		throw new Error(`hub token_for(${lane.token.erc20}) is ${bound ?? "unregistered"} but the manifest records ${lane.token.l2Token}`)
+	}
+}
+
+/** The hub has no paused view, so the check is the assert itself: on a paused hub an exit simulation
+ *  fails with the contract's own string before reaching the authwit it would fail on anyway. */
+async function assertExitsOpen(lane: Lane): Promise<void> {
+	if (await hubExitsPaused(lane.hub, lane.from.toString()))
+		throw new Error("the candidate hub has exits PAUSED — refusing to call the smoke a pass")
+}
+
+async function main(): Promise<void> {
+	const mins = stopwatch()
+	const tokens = BRIDGE.tokens.slice(0, 2)
+	if (tokens.length < 2) throw new Error("the candidate carries fewer than two tokens — the smoke exists to prove the hub serves several")
+
 	const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`)
 	console.log("L1 funder", account.address)
-	const { wallet, pub } = createL1Clients({ chain: sepolia, rpcUrl: SEPOLIA_RPC, account })
+	const { wallet, pub } = createL1Clients({ chain: sepoliaChain(SEPOLIA_RPC), rpcUrl: SEPOLIA_RPC, account })
+	const l1: L1Ctx = { wallet, pub, account }
 
-	const usdc = CONFIG.l1.usdc as `0x${string}`
-	const portal = CONFIG.l1.portal as `0x${string}`
-	const usdcAbi = evmAbi((CONFIG.l1.token?.sourceContract as string | undefined) ?? "MintableERC20")
-	// The app's ONLY deposit path is the router's witness-bound Permit2 bridge() — the smoke must
-	// prove THAT path (approve fallback included), not the portal-direct legacy.
-	const core = CONFIG.l1.fuel?.core as { router?: `0x${string}`; permit2?: `0x${string}`; swapTarget?: `0x${string}` } | undefined
-	if (!core?.router || !core?.permit2 || !core?.swapTarget) {
-		throw new Error("candidate manifest has no l1.fuel.core router/permit2/swapTarget — the app deposit path needs them (C7)")
-	}
-	const routerCore = core as { router: `0x${string}`; permit2: `0x${string}`; swapTarget: `0x${string}` }
-	const decimals = CONFIG.l1.token.decimals as number
-	console.log(`candidate: portal ${portal} (${CONFIG.l1.portalSource ?? "legacy"}), usdc ${usdc}`)
-
-	// ─── L2 (testnet aztec.js — REAL proofs) ─────────────────────────
 	const node = createNode(NODE_URL)
 	const ewallet = await createL2Wallet({ nodeUrl: NODE_URL, proverEnabled: true })
 	const { manager, from } = await freshSchnorrAccount(ewallet as never)
 	console.log("L2 smoke account", from.toString())
-
 	const { fee } = await sponsoredFpcFee(ewallet)
-	const opts = { from, fee }
-	const sendOpts = { ...opts, wait: { waitForStatus: TxStatus.PROPOSED } }
-
+	const sendOpts: SendOpts = { from, fee, wait: { waitForStatus: TxStatus.PROPOSED } }
 	await deployAccountIfAbsent({
 		node,
 		manager: manager as never,
@@ -155,66 +217,24 @@ async function main() {
 		},
 	})
 
-	// Register (NOT deploy) each L2 contract from the manifest, asserting the recorded address
-	// recomputes from its salt + args - the same reconstruction the tools app's bridge-deployments does.
-	const { token, bridge } = await registerManifestTrio(ewallet, CONFIG)
-
-	// ─── Deposit → claim (public, or --private recipient-committed) ────────────────────
-	const amount = 100n * 10n ** BigInt(decimals)
-	const env: RouterDepositEnv = { pub, wallet, account }
-	const mint = async (mintAmount: bigint) => {
-		await pub.waitForTransactionReceipt({
-			hash: await wallet.writeContract({
-				address: usdc,
-				abi: usdcAbi as never,
-				functionName: "mint",
-				args: [account.address, mintAmount] as never,
-			}),
-		})
+	const hub = await registerHub(ewallet, BRIDGE.l2.hub)
+	console.log(`registered hub ${hub.address.toString()} (${mins()})`)
+	const generation = sendGenerationOf(MANIFEST, BRIDGE)
+	const lanes: Lane[] = []
+	for (const token of tokens) {
+		const l2Token = await registerHubToken(ewallet, hub.address, token, BRIDGE.l2.tokenClassId)
+		lanes.push({ l1, generation, hub, l2Token, token, from, sendOpts, amount: 10n ** BigInt(token.decimals), mins })
 	}
-	const deposit = (depAmount: bigint, priv: boolean, claimSalt?: Fr) =>
-		depositViaRouter(env, {
-			usdc,
-			usdcAbi,
-			core: routerCore,
-			portal,
-			amount: depAmount,
-			recipient: from.toString(),
-			isPrivate: priv,
-			claimSalt,
-			chainId: 11155111,
-			mins,
-		})
-
-	if (redirectProof) {
-		await runRedirectProofLane({ env, mint, deposit, bridge, token, from, sendOpts, amount, mins })
-		return
+	for (const lane of lanes) {
+		await bridgeOnce(lane, false)
+		await assertHubBinding(lane)
+		await bridgeOnce(lane, true)
 	}
-	// PRIVATE: the claimed value is the claim_salt (claim_private re-derives the secret in-circuit).
-	// PUBLIC: runRouterDeposit generates + returns the raw secret. Both ride the app's router path.
-	const claimSalt = isPrivate ? Fr.random() : undefined
-	await mint(amount)
-	const dep = await deposit(amount, isPrivate, claimSalt)
-	console.log(`deposited ${amount} → L2 via router (${isPrivate ? "private" : "public"}), leafIndex ${dep.leafIndex} (${mins()})`)
+	// The exit preflight reads the hub's portal binding, which only exists once a token has registered.
+	await assertExitsOpen(lanes[0])
 
-	await claimTokensUntilSynced({
-		bridge,
-		isPrivate,
-		recipient: from,
-		amount,
-		claimValue: dep.claimValue,
-		leafIndex: dep.leafIndex,
-		sendOpts,
-	})
-
-	const bal = isPrivate
-		? ((await token.methods.balance_of_private(from).simulate({ from })) as { result: bigint }).result
-		: ((await token.methods.balance_of_public(from).simulate({ from })) as { result: bigint }).result
-	if (bal < amount) throw new Error(`balance ${bal} < deposited ${amount}`)
-	console.log(
-		`\n✅ CANDIDATE ${isPrivate ? "PRIVATE " : ""}smoke PASSED — deposit→claim bridged ${amount} on the recorded set in ${mins()}.`,
-	)
-	console.log("   Safe to promote testnet-bridge.candidate.json → testnet-bridge.json.")
+	console.log(`\n✅ CANDIDATE smoke PASSED — ${tokens.length} tokens bridged public + private on the recorded generation in ${mins()}.`)
+	console.log("   Safe to promote the candidate manifest.")
 }
 
 main().catch((e) => {

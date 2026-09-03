@@ -75,7 +75,7 @@ contract V4Seeder is IUnlockCallback {
     receive() external payable {}
 
     function seed(PoolKey calldata key, int24 lower, int24 upper, int256 liquidity) external payable {
-        // Mirror DeployBridge.s.sol's PoolSetupHelper exactly: initialize (idempotent) then unlock.
+        // Mirror PoolSetupHelper exactly: initialize (idempotent) then unlock.
         try pm.initialize(key, TickMath.getSqrtPriceAtTick(0)) returns (int24) {} catch {}
         pm.unlock(abi.encode(key, lower, upper, liquidity));
     }
