@@ -227,7 +227,10 @@ lanes, worst 2.98 FJ; the EURC `register_and_claim_public` 4.62 FJ): `fjPerTx` 3
 `fjRegister` 1.967 FJ (the calibrator's worst-registering minus worst-plain, now measured rather
 than scaled from the sandbox). Candidate rebuilt from the journal with four tokens (USDC, USDT,
 EURC, GBPC — the last two registered by their first claims), the new floor and these budgets →
-`verify --candidate` → promote: recorded below.
+`verify --candidate` (strict verify-l1 on all four tokens + hub readback green, digest
+`ba7ced36…`) → **promoted `f24539dc`** (first attempt died on a DNS blip before any write;
+the retry landed). Live-file canaries: `verify:l1 --strict` ✓, `verify:deployments` ✓ (hub + four
+L2 tokens re-derive). Codex round 3 (resumed) on `1de456c0..f24539dc`: recorded below.
 
 Round 2 (resumed, on `1de456c0`): "close" — one wallet-boundary miss, one policy point, one known
 gap, one nit.
