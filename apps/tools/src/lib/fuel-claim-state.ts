@@ -97,7 +97,7 @@ export function decideFuelClaim(e: FuelClaimEvidence): FuelClaimDecision {
  *  - a conclusively `dropped` attempt landed nothing ⇒ retry the private claim;
  *  - the ONE retryable no-hash case is a pre-inclusion `mint_and_pay_fee` setup-insufficiency (the
  *    "Amount too low to cover gas cost" assert makes the bundled tx invalid, so the FJ stays unconsumed);
- *  - everything else ambiguous WAITS. Never public/Sponsored on any branch.
+ *  - everything else ambiguous WAITS. Never public on any branch.
  */
 export type PrivateFuelClaimAction =
 	| "private-fpc" // attempt (or retry) the PrivateFPC mint_and_pay_fee claim.
@@ -146,7 +146,7 @@ function decideHashedAttempt(e: PrivateFuelClaimEvidence): { action: PrivateFuel
 
 /** Attempt latched but NO tx hash. Durable consumption still settles it; the setup-insufficiency
  *  assert is the one retryable case; anything else waits until the latch ages out (the wallet
- *  may still return / the tx may still land within the stale window). NEVER public/Sponsored. */
+ *  may still return / the tx may still land within the stale window). NEVER public. */
 function decideHashlessAttempt(e: PrivateFuelClaimEvidence): { action: PrivateFuelClaimAction } {
 	if (e.consumed) return { action: "consumed" }
 	if (e.setupInsufficiency) return { action: "private-fpc" }

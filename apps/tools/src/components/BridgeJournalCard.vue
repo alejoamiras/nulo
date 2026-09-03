@@ -121,7 +121,7 @@ const fuelAmount = computed(() => {
 	const label = props.record.isPrivate ? "Private FJ" : "FJ"
 	return f.received ? `+ ${formatBigInt(BigInt(f.received), 18)} ${label}` : `+ ${label} gas`
 })
-// The explicit, non-destructive escape: claim the tokens sponsored; the FJ message (if
+// The explicit, non-destructive escape: claim the tokens with the gas the account already holds; the FJ message (if
 // unconsumed) stays claimable later. Offered only when a fueled claim is stuck on an error.
 const showClaimWithoutFuel = computed(
 	() =>
@@ -136,7 +136,7 @@ function onClaimWithoutFuel() {
 }
 
 // Post-completion fuel recovery: the token side finished but the FJ was neither consumed by an
-// fjwc claim nor landed standalone - offer to claim it now (sponsored, safe to retry; a
+// fjwc claim nor landed standalone - offer to claim it now (it pays its own claim, safe to retry; a
 // reverting "already claimed" just clears the affordance). Closes both stranding paths the
 // post-impl audit flagged.
 // Shared with `claimFuelStandalone`'s own guard, so the affordance and the action can never disagree.
@@ -379,7 +379,7 @@ function onDiscard() {
 				class="action"
 				:disabled="fuelRecovering"
 				:data-testid="TESTIDS.journalClaimGas"
-				title="Your tokens arrived but the gas is still unclaimed - this claims it (sponsored, no cost)."
+				title="Your tokens arrived but the gas is still unclaimed - this claims it, paying its own claim out of the gas that lands."
 				@click="onClaimGas"
 			>
 				{{ fuelRecovering ? "CLAIMING GAS…" : "CLAIM YOUR GAS" }}
@@ -444,7 +444,7 @@ function onDiscard() {
 				type="button"
 				class="action"
 				:data-testid="TESTIDS.journalClaimWithoutFuel"
-				title="Claims your tokens with the sponsored fee instead. The fuel stays claimable later - nothing is abandoned."
+				title="Claims your tokens with the gas you already hold on Aztec instead. The fuel stays claimable later - nothing is abandoned."
 				@click="onClaimWithoutFuel"
 			>
 				CLAIM WITHOUT FUEL
