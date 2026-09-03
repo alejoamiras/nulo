@@ -256,7 +256,9 @@ registration race fired `onClaimSend` before `register_and_claim_public` and aga
 fallback plain claim. Fixed `780803dd`: one call before the try (both transactions are the same
 attempt), the lost-race case pinned (`register_and_claim_public → claim_public`, one callback).
 Lint 0; `test:all` at `f6c34d1e` exit 0 (the previous top); re-run at `780803dd`: recorded below.
-Round 5 (resumed): recorded below.
+Codex round 5 (resumed): "Verdict: `780803dd` correctly makes the public lost-race fallback one
+logical attempt while preserving wallet-option stripping. no new material findings." — the live
+arc's fix loop has converged (rounds 1–5, one fresh session after the outage).
 
 Round 2 (resumed, on `1de456c0`): "close" — one wallet-boundary miss, one policy point, one known
 gap, one nit.
