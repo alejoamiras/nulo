@@ -112,11 +112,21 @@ const CASES: Array<[string, Component, Record<string, unknown>]> = [
 			routeKind: "route",
 			routeLoading: false,
 			txTarget: 3,
+			fjPerTx: 100_000_000_000_000_000n,
 			gasError: null,
 		},
 	],
 	["ChoiceCards", ChoiceCards, { intent: "token", exitOnly: false, feeAsset: false, noRoute: false }],
-	["GasBreakdown", GasBreakdown, { token: RESOLVED, amount: 5_000_000n, gas: GAS, txTarget: 3, loading: false, error: null }],
+	[
+		"GasBreakdown",
+		GasBreakdown,
+		{ token: RESOLVED, amount: 5_000_000n, intent: "token+gas", gas: GAS, txTarget: 3, fjPerTx: 1n, loading: false, error: null },
+	],
+	[
+		"GasBreakdown (gas)",
+		GasBreakdown,
+		{ token: RESOLVED, amount: 5_000_000n, intent: "gas", gas: GAS, txTarget: 3, fjPerTx: 1n, loading: false, error: null },
+	],
 	["MintStrip", MintStrip, {}],
 	["ReviewDetails", ReviewDetails, REVIEW],
 	[
@@ -168,8 +178,9 @@ describe("send-step testid coverage", () => {
 	it.each(CASES)("%s gives every interactive element a data-testid", async (name, component, props) => {
 		const { missing, seen } = await sweep(mount(component, { props, attachTo: document.body }))
 		expect(missing).toEqual([])
-		// A selector that stops matching would otherwise pass silently; only the sprite sheet is inert.
-		expect(seen > 0 || name === "SpriteSheet").toBe(true)
+		// A selector that stops matching would otherwise pass silently; only the sprite sheet and the
+		// gas-only card (two read-only lines) are inert.
+		expect(seen > 0 || name === "SpriteSheet" || name === "GasBreakdown (gas)").toBe(true)
 	})
 
 	it("the orchestrators own no bare controls of their own", () => {

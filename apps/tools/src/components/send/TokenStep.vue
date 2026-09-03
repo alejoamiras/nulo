@@ -51,7 +51,7 @@ function balanceText(value: bigint | undefined): string {
 // and never shown without the address they belong to.
 const found = computed(() => {
 	const state = props.lookup
-	if (!state || state.status !== "found") return null
+	if (state?.status !== "found") return null
 	return { symbol: safeDisplay(state.identity.symbol), name: safeDisplay(state.identity.name), decimals: state.identity.decimals }
 })
 

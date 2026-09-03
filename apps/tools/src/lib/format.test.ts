@@ -1,5 +1,24 @@
 import { describe, expect, it } from "vitest"
-import { formatBigInt, parseAmount, parseAmountStrict, toDecimalString, trimAddress } from "./format"
+import { formatBigInt, formatCompact, parseAmount, parseAmountStrict, toDecimalString, trimAddress } from "./format"
+
+describe("formatCompact", () => {
+	it("groups thousands and drops trailing zeros", () => {
+		expect(formatCompact(1_000_000_000n, 6)).toBe("1,000")
+		expect(formatCompact(10_700_000_000_000_000_000n, 18)).toBe("10.7")
+		expect(formatCompact(0n, 18)).toBe("0")
+	})
+
+	it("cuts the fraction to the requested places without rounding", () => {
+		expect(formatCompact(1_239_999n, 6)).toBe("1.23")
+		expect(formatCompact(1_239_999n, 6, 4)).toBe("1.2399")
+	})
+
+	it("never rounds a tiny value away — it shows the leading significant digits", () => {
+		expect(formatCompact(5_000n, 18)).toBe("0.000000000000005")
+		expect(formatCompact(4_500n, 18)).toBe("0.0000000000000045")
+		expect(formatCompact(5_000n, 6)).toBe("0.005")
+	})
+})
 
 describe("formatBigInt", () => {
 	it("formats zero with the requested display places", () => {

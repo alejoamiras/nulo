@@ -42,8 +42,10 @@ type Props = {
 	routeKind: RouteKind | null
 	routeLoading: boolean
 	txTarget: number
+	fjPerTx: bigint | null
 	gasError: string | null
 	blockedReason?: string | null
+	tokenOnlyBlocked?: string | null
 }
 
 function step(over: Partial<Props> = {}) {
@@ -60,6 +62,7 @@ function step(over: Partial<Props> = {}) {
 			routeKind: "route",
 			routeLoading: false,
 			txTarget: 20,
+			fjPerTx: 100_000_000_000_000_000n,
 			gasError: null,
 			...over,
 		},
@@ -83,7 +86,8 @@ describe("AmountStep", () => {
 		w.unmount()
 	})
 
-	it("states the gas route, and that it is still being checked", async () => {
+	it("says nothing about a working route, and states one that cannot buy gas or is still being checked", async () => {
+		expect(step().find(sel(TESTIDS.sendRouteStatus)).exists()).toBe(false)
 		const w = step({ routeKind: "no-route" })
 		const line = w.find(sel(TESTIDS.sendRouteStatus))
 		expect(line.attributes("data-route")).toBe("no-route")
@@ -140,17 +144,17 @@ describe("AmountStep", () => {
 		w.unmount()
 	})
 
-	it("MAX fills the balance at full precision, not the display rounding", async () => {
+	it("Use all fills the balance at full precision, not the display rounding", async () => {
 		const w = step({ balances: { l1: 12_345_678n } })
 		await w.find(sel(TESTIDS.sendAmountMax)).trigger("click")
 		expect(w.emitted("update:amount")).toEqual([["12.345678"]])
 		w.unmount()
 	})
 
-	it("MAX is out of the tab order and inert while the balance is unknown", () => {
+	it("Use all sits beside the balance and is inert while the balance is unknown", () => {
 		const w = step({ balances: {} })
 		const max = w.find(sel(TESTIDS.sendAmountMax))
-		expect(max.attributes("tabindex")).toBe("-1")
+		expect(max.text()).toBe("Use all")
 		expect(max.attributes("disabled")).toBeDefined()
 		w.unmount()
 	})
@@ -165,7 +169,6 @@ describe("AmountStep", () => {
 
 	it("passes a changed tx target up", async () => {
 		const w = step({ intent: "token+gas", gas: GAS })
-		await w.find(sel(TESTIDS.sendGasChange)).trigger("click")
 		await w.find(sel(TESTIDS.sendGasTxTarget)).setValue("8")
 		expect(w.emitted("update:txTarget")).toEqual([[8]])
 		w.unmount()
@@ -218,7 +221,7 @@ describe("AmountStep", () => {
 
 	it("shows a sub-cent balance instead of rounding it to nothing", () => {
 		const w = step({ balances: { l1: 5_000n } })
-		expect(w.find(sel(TESTIDS.sendBalanceL1)).text()).toBe("Balance: 0.005 USDC")
+		expect(w.find(sel(TESTIDS.sendBalanceL1)).text()).toBe("Balance 0.005 USDC")
 		w.unmount()
 	})
 
@@ -230,6 +233,17 @@ describe("AmountStep", () => {
 		await w.setProps({ amount: "5" })
 		expect(w.find(sel(TESTIDS.sendAmountInput)).attributes("aria-invalid")).toBeUndefined()
 		expect(w.find(sel(TESTIDS.sendAmountInput)).attributes("aria-describedby")).toBeUndefined()
+		w.unmount()
+	})
+
+	it("says why token alone cannot go without a sponsor, and keeps CONTINUE off until the intent moves", async () => {
+		const w = step({ intent: "token", tokenOnlyBlocked: "No sponsor covers a token-only send on this network." })
+		expect(w.find(sel(TESTIDS.sendTokenOnlyBlocked)).text()).toContain("No sponsor")
+		expect(w.find(sel(TESTIDS.sendAmountNext)).attributes("disabled")).toBeDefined()
+		expect(w.emitted("update:valid")?.at(-1)).toEqual([false])
+		await w.setProps({ intent: "token+gas", gas: GAS })
+		expect(w.find(sel(TESTIDS.sendTokenOnlyBlocked)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.sendAmountNext)).attributes("disabled")).toBeUndefined()
 		w.unmount()
 	})
 

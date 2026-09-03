@@ -89,7 +89,7 @@ vi.mock("@/contracts/bridge-generation", () => ({
 	HUB: { toString: () => AZTEC_ACCOUNT },
 	HUB_TOKEN_ARTIFACT: {},
 	SEND_GENERATION: { factory: FACTORY, implementation: IMPLEMENTATION },
-	SWAP: { slippageBps: 300 },
+	SWAP: { slippageBps: 300, fjPerTx: "100000000000000000" },
 	MANIFEST_TOKENS: [],
 }))
 vi.mock("@/composables/useL1Wallet", () => ({
@@ -199,8 +199,10 @@ const stubs = {
 		"routeKind",
 		"routeLoading",
 		"txTarget",
+		"fjPerTx",
 		"gasError",
 		"blockedReason",
+		"tokenOnlyBlocked",
 	]),
 	ReviewStep: stub("ReviewStep", [
 		"plan",

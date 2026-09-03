@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ref } from "vue"
 import { TESTIDS } from "@/lib/testids"
 
-const { MINTABLE, CANONICAL, CAPPED, tokens } = vi.hoisted(() => {
+const { MINTABLE, tokens } = vi.hoisted(() => {
 	const MINTABLE = "0x70e0ba845a1a0f2da3359c97e0285013525ffc49"
 	const CANONICAL = "0x4826533b4897376654bb4d4ad88b7fafd0c98528"
 	const CAPPED = "0x0e801d84fa97b50751dbf25036d067dcf18858bf"
@@ -12,7 +12,7 @@ const { MINTABLE, CANONICAL, CAPPED, tokens } = vi.hoisted(() => {
 		{ erc20: CANONICAL, decimals: 18, displaySymbol: "REAL", source: "canonical" },
 		{ erc20: CAPPED, decimals: 18, displaySymbol: "CAP", source: "permissionless-mint", maxWholePerTx: 5 },
 	]
-	return { MINTABLE, CANONICAL, CAPPED, tokens: { value: all, all } }
+	return { MINTABLE, tokens: { value: all, all } }
 })
 
 const writeContract = vi.fn(async () => "0xmint")

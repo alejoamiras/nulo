@@ -49,12 +49,12 @@ describe("ChoiceCards", () => {
 		w.unmount()
 	})
 
-	it("disables both gas choices, with the reason, when the token has no route", () => {
+	it("disables both gas choices, with the reason on hover, when the token has no route", () => {
 		const w = cards({ noRoute: true })
 		expect(w.find(sel(TESTIDS.sendChoiceTokenGas)).attributes("disabled")).toBeDefined()
 		expect(w.find(sel(TESTIDS.sendChoiceGas)).attributes("disabled")).toBeDefined()
 		expect(w.find(sel(TESTIDS.sendChoiceToken)).attributes("disabled")).toBeUndefined()
-		expect(w.find(sel(TESTIDS.sendChoiceGas)).text()).toContain("can't buy Aztec gas")
+		expect(w.find(sel(TESTIDS.sendChoiceGas)).attributes("title")).toContain("can't buy Aztec gas")
 		w.unmount()
 	})
 
@@ -99,8 +99,8 @@ describe("ChoiceCards", () => {
 
 	it("says the gas conversion is one for one when the token IS the gas asset", () => {
 		const w = cards({ feeAsset: true })
-		expect(w.find(sel(TESTIDS.sendChoiceTokenGas)).text()).toContain("one for one")
-		expect(w.find(sel(TESTIDS.sendChoiceGas)).text()).toContain("one for one")
+		expect(w.find(sel(TESTIDS.sendChoiceTokenGas)).text()).toContain("One for one")
+		expect(w.find(sel(TESTIDS.sendChoiceGas)).text()).toContain("One for one")
 		w.unmount()
 	})
 

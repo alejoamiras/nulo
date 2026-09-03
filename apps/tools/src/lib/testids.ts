@@ -150,9 +150,14 @@ export const TESTIDS = {
 
 	// Send wizard - the gas leg: the discovered fuel route and the slice it sizes
 	sendRouteStatus: "tl-send-route-status",
+	sendTokenOnlyBlocked: "tl-send-token-only-blocked",
 	sendGasTxTarget: "tl-send-gas-tx-target",
+	sendGasTxFewer: "tl-send-gas-tx-fewer",
+	sendGasTxMore: "tl-send-gas-tx-more",
 	sendGasShare: "tl-send-gas-share",
+	sendGasSizing: "tl-send-gas-sizing",
 	sendGasFloor: "tl-send-gas-floor",
+	sendGasEnough: "tl-send-gas-enough",
 
 	// Send wizard — shell + steps.
 	tabSend: "tl-tab-send",

@@ -23,9 +23,12 @@ const props = defineProps<{
 	routeKind: RouteKind | null
 	routeLoading: boolean
 	txTarget: number
+	fjPerTx: bigint | null
 	gasError: string | null
 	/** A refusal decided above the step (an exit on a token the hub has not bound): shown, and CONTINUE stays off. */
 	blockedReason?: string | null
+	/** Why `token` alone cannot be chosen here (no sponsor on this network); shown, and the intent is steered off it. */
+	tokenOnlyBlocked?: string | null
 }>()
 const emit = defineEmits<{
 	"update:intent": [intent: SendIntent]
@@ -44,9 +47,8 @@ const NUMERIC_SHAPE = /^\d*(\.\d*)?$/
 const AMOUNT_ERROR_ID = "send-amount-error"
 const PRIVACY_LABEL_ID = "send-privacy-label"
 
-const ROUTE_LABEL: Record<RouteKind, string> = {
-	route: "This token can buy Aztec gas on the way in.",
-	identity: "This token is the Aztec gas asset.",
+// Only the outcomes that change what the user can do are said aloud; a working route is the default.
+const ROUTE_LABEL: Partial<Record<RouteKind, string>> = {
 	"no-route": "This token can't buy Aztec gas on the way in.",
 	unavailable: "Gas options can't be checked right now.",
 }
@@ -75,15 +77,22 @@ const amountError = computed<string | null>(() => {
 
 const showGas = computed(() => !isExit.value && props.intent !== "token")
 
+const routeLine = computed(() => {
+	if (isExit.value) return null
+	if (props.routeLoading) return "Checking gas options…"
+	return props.routeKind ? (ROUTE_LABEL[props.routeKind] ?? null) : null
+})
+
 const canContinue = computed(() => {
 	if (props.blockedReason) return false
+	if (!isExit.value && props.intent === "token" && props.tokenOnlyBlocked) return false
 	if (amountError.value !== null || parsed.value === null || parsed.value === 0n) return false
 	return !showGas.value || props.gas !== null
 })
 
 watch(canContinue, (valid) => emit("update:valid", valid), { immediate: true })
 
-/** The balance is what MAX types into the field, so it is written the same way — full precision. */
+/** The balance is what "Use all" types into the field, so it is written the same way — full precision. */
 const balanceText = computed(() => (spendable.value === undefined ? "—" : toDecimalString(spendable.value, props.token.decimals)))
 
 const balanceTestid = computed(() => {
@@ -91,7 +100,7 @@ const balanceTestid = computed(() => {
 	return props.isPrivate ? TESTIDS.sendBalanceL2Private : TESTIDS.sendBalanceL2Public
 })
 
-function onMax(): void {
+function onUseAll(): void {
 	const max = spendable.value
 	if (max !== undefined) emit("update:amount", toDecimalString(max, props.token.decimals))
 }
@@ -107,44 +116,55 @@ function onMax(): void {
 			@update:intent="emit('update:intent', $event)"
 		/>
 
+		<p v-if="routeLine" class="route" aria-live="polite" :data-testid="TESTIDS.sendRouteStatus" :data-route="routeKind ?? undefined">
+			{{ routeLine }}
+		</p>
 		<p
-			v-if="!isExit && (routeKind || routeLoading)"
+			v-if="!isExit && intent === 'token' && tokenOnlyBlocked"
 			class="route"
+			data-route="no-sponsor"
 			aria-live="polite"
-			:data-testid="TESTIDS.sendRouteStatus"
-			:data-route="routeKind ?? undefined"
+			:data-testid="TESTIDS.sendTokenOnlyBlocked"
 		>
-			{{ routeLoading ? "Checking gas options…" : routeKind ? ROUTE_LABEL[routeKind] : "" }}
+			{{ tokenOnlyBlocked }}
 		</p>
 
-		<div class="amount-row">
-			<input
-				class="amount"
-				type="text"
-				inputmode="decimal"
-				autocomplete="off"
-				:aria-label="`Amount in ${token.symbol}`"
-				:aria-invalid="amountError ? 'true' : undefined"
-				:aria-describedby="amountError ? AMOUNT_ERROR_ID : undefined"
-				:value="amount"
-				:data-testid="TESTIDS.sendAmountInput"
-				:data-invalid="amountError ? 'true' : undefined"
-				@input="emit('update:amount', ($event.target as HTMLInputElement).value)"
-			/>
-			<span class="unit">{{ token.symbol }}</span>
-			<button type="button" class="max" tabindex="-1" :disabled="spendable === undefined" :data-testid="TESTIDS.sendAmountMax" @click="onMax">
-				MAX
-			</button>
+		<div class="amount">
+			<label class="field" :data-invalid="amountError ? 'true' : undefined">
+				<input
+					class="input"
+					type="text"
+					inputmode="decimal"
+					autocomplete="off"
+					placeholder="0"
+					:aria-label="`Amount in ${token.symbol}`"
+					:aria-invalid="amountError ? 'true' : undefined"
+					:aria-describedby="amountError ? AMOUNT_ERROR_ID : undefined"
+					:value="amount"
+					:data-testid="TESTIDS.sendAmountInput"
+					@input="emit('update:amount', ($event.target as HTMLInputElement).value)"
+				/>
+				<span class="unit">{{ token.symbol }}</span>
+			</label>
+			<div class="under">
+				<span class="balance" :data-testid="balanceTestid">Balance {{ balanceText }} {{ token.symbol }}</span>
+				<button type="button" class="use-all" :disabled="spendable === undefined" :data-testid="TESTIDS.sendAmountMax" @click="onUseAll">
+					Use all
+				</button>
+			</div>
+			<p v-if="amountError" :id="AMOUNT_ERROR_ID" class="err" aria-live="polite" :data-testid="TESTIDS.sendAmountError">{{ amountError }}</p>
 		</div>
-		<p class="balance" :data-testid="balanceTestid">Balance: {{ balanceText }} {{ token.symbol }}</p>
-		<p v-if="amountError" :id="AMOUNT_ERROR_ID" class="err" aria-live="polite" :data-testid="TESTIDS.sendAmountError">{{ amountError }}</p>
+
+		<slot name="nudge" />
 
 		<GasBreakdown
-			v-if="showGas"
+			v-if="showGas && intent !== 'token'"
 			:token="token"
 			:amount="parsed ?? 0n"
+			:intent="intent"
 			:gas="gas"
 			:tx-target="txTarget"
+			:fj-per-tx="fjPerTx"
 			:loading="routeLoading"
 			:error="gasError"
 			@update:tx-target="emit('update:txTarget', $event)"
@@ -170,7 +190,9 @@ function onMax(): void {
 
 		<div class="nav">
 			<button type="button" class="btn" :data-testid="TESTIDS.sendAmountBack" @click="emit('back')">BACK</button>
-			<button type="button" class="btn" :disabled="!canContinue" :data-testid="TESTIDS.sendAmountNext" @click="emit('next')">CONTINUE</button>
+			<button type="button" class="btn primary" :disabled="!canContinue" :data-testid="TESTIDS.sendAmountNext" @click="emit('next')">
+				CONTINUE
+			</button>
 		</div>
 	</section>
 </template>
@@ -179,7 +201,7 @@ function onMax(): void {
 .step {
 	display: flex;
 	flex-direction: column;
-	gap: 12px;
+	gap: 16px;
 }
 
 .route {
@@ -189,28 +211,46 @@ function onMax(): void {
 }
 
 .route[data-route="no-route"],
-.route[data-route="unavailable"] {
+.route[data-route="unavailable"],
+.route[data-route="no-sponsor"] {
 	color: var(--yellow);
 }
 
-.amount-row {
+.amount {
 	display: flex;
-	align-items: center;
+	flex-direction: column;
 	gap: 8px;
 }
 
-.amount {
+.field {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 14px;
+	border: 1px solid var(--nulo-outline);
+}
+
+.field:focus-within {
+	border-color: var(--nulo-accent);
+}
+
+.field[data-invalid] {
+	border-color: var(--red);
+}
+
+.input {
 	flex: 1;
 	min-width: 0;
-	padding: 12px 14px;
+	padding: 0;
 	background: transparent;
-	border: 1px solid var(--nulo-outline);
+	border: none;
+	outline: none;
 	color: var(--txt-primary);
 	font: 600 20px/1.2 var(--font-mono);
 }
 
-.amount[data-invalid] {
-	border-color: var(--red);
+.input::placeholder {
+	color: var(--txt-tertiary);
 }
 
 .unit {
@@ -218,30 +258,32 @@ function onMax(): void {
 	color: var(--txt-secondary);
 }
 
-.max {
-	padding: 8px 12px;
-	background: transparent;
-	border: 1px solid var(--nulo-outline);
-	color: var(--txt-secondary);
-	font: 600 11px/1 var(--font-mono);
-	letter-spacing: 0.06em;
-	cursor: pointer;
-}
-
-.max:hover:not(:disabled) {
-	border-color: var(--nulo-accent);
-	color: var(--nulo-accent);
-}
-
-.max:disabled {
-	cursor: not-allowed;
-	opacity: 0.6;
+.under {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 12px;
 }
 
 .balance {
-	margin: 0;
 	font: 500 12px/1.4 var(--font-mono);
 	color: var(--txt-secondary);
+}
+
+.use-all {
+	padding: 0;
+	background: transparent;
+	border: none;
+	color: var(--nulo-accent);
+	font: 500 12px/1.4 var(--font-mono);
+	text-decoration: underline;
+	text-underline-offset: 3px;
+	cursor: pointer;
+}
+
+.use-all:disabled {
+	cursor: not-allowed;
+	opacity: 0.5;
 }
 
 .err {
@@ -296,7 +338,7 @@ function onMax(): void {
 }
 
 .btn {
-	padding: 10px 18px;
+	padding: 12px 18px;
 	background: transparent;
 	border: 1px solid var(--nulo-outline);
 	color: var(--txt-primary);
@@ -310,8 +352,27 @@ function onMax(): void {
 	color: var(--nulo-accent);
 }
 
+.btn.primary {
+	padding: 12px 20px;
+	background: var(--nulo-accent);
+	border-color: var(--nulo-accent);
+	color: var(--txt-inverse);
+}
+
+.btn.primary:hover:not(:disabled) {
+	color: var(--txt-inverse);
+	opacity: 0.9;
+}
+
 .btn:disabled {
 	cursor: not-allowed;
 	opacity: 0.6;
+}
+
+.btn.primary:disabled {
+	background: transparent;
+	border-color: var(--nulo-outline);
+	color: var(--txt-secondary);
+	opacity: 1;
 }
 </style>

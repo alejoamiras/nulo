@@ -37,40 +37,36 @@ function gasPlan(over: Partial<GasLegPlan> = {}): GasLegPlan {
 type Props = {
 	token: ResolvedToken
 	amount: bigint
+	intent: "token+gas" | "gas"
 	gas: GasLegPlan | null
 	txTarget: number
+	fjPerTx: bigint | null
 	loading: boolean
 	error: string | null
 }
 
 function breakdown(over: Partial<Props> = {}) {
 	return mount(GasBreakdown, {
-		props: { token: TOKEN, amount: 10_000_000n, gas: gasPlan(), txTarget: 20, loading: false, error: null, ...over },
+		props: {
+			token: TOKEN,
+			amount: 10_000_000n,
+			intent: "token+gas",
+			gas: gasPlan(),
+			txTarget: 20,
+			fjPerTx: 100_000_000_000_000_000n,
+			loading: false,
+			error: null,
+			...over,
+		},
 	})
 }
 
 describe("GasBreakdown", () => {
-	it("says how much of the amount stays a token", () => {
+	it("says what arrives as the token and what arrives as gas, and from how much", () => {
 		const w = breakdown()
 		expect(w.find(sel(TESTIDS.sendGasBreakdownToken)).text()).toContain("8 USDC")
-		w.unmount()
-	})
-
-	it("says how much gas the slice buys", () => {
-		const w = breakdown()
-		expect(w.find(sel(TESTIDS.sendGasBreakdownFuel)).text()).toContain("0.3 FJ")
-		w.unmount()
-	})
-
-	it("names the slice in the token's own units", () => {
-		const w = breakdown()
-		expect(w.find(sel(TESTIDS.sendGasShare)).text()).toContain("2 USDC")
-		w.unmount()
-	})
-
-	it("states the floor the send is signed against", () => {
-		const w = breakdown()
-		expect(w.find(sel(TESTIDS.sendGasFloor)).text()).toContain("0.285 FJ")
+		expect(w.find(sel(TESTIDS.sendGasBreakdownFuel)).text()).toContain("≈ 0.3 FJ")
+		expect(w.find(sel(TESTIDS.sendGasShare)).text()).toBe("from 2 USDC")
 		w.unmount()
 	})
 
@@ -100,51 +96,84 @@ describe("GasBreakdown", () => {
 		w.unmount()
 	})
 
-	it("keeps the tx-target control behind `change`", () => {
-		const w = breakdown()
-		expect(w.find(sel(TESTIDS.sendGasTxTarget)).exists()).toBe(false)
-		expect(w.find(sel(TESTIDS.sendGasChange)).attributes("aria-expanded")).toBe("false")
+	it("the stepper shows the target and nudges it one transaction at a time", async () => {
+		const w = breakdown({ txTarget: 3 })
+		expect((w.find(sel(TESTIDS.sendGasTxTarget)).element as HTMLInputElement).value).toBe("3")
+		expect(w.find(sel(TESTIDS.sendGasBreakdown)).text()).toContain("transactions")
+		await w.find(sel(TESTIDS.sendGasTxMore)).trigger("click")
+		await w.find(sel(TESTIDS.sendGasTxFewer)).trigger("click")
+		expect(w.emitted("update:txTarget")).toEqual([[4], [2]])
 		w.unmount()
 	})
 
-	it("`change` reveals the control at the current target", async () => {
-		const w = breakdown({ txTarget: 35 })
-		await w.find(sel(TESTIDS.sendGasChange)).trigger("click")
-		expect(w.find(sel(TESTIDS.sendGasChange)).attributes("aria-expanded")).toBe("true")
-		expect((w.find(sel(TESTIDS.sendGasTxTarget)).element as HTMLInputElement).value).toBe("35")
+	it("never steps below one transaction", async () => {
+		const w = breakdown({ txTarget: 1 })
+		expect(w.find(sel(TESTIDS.sendGasTxFewer)).attributes("disabled")).toBeDefined()
+		expect((w.find(sel(TESTIDS.sendGasTxTarget)).element as HTMLInputElement).value).toBe("1")
+		expect(w.find(sel(TESTIDS.sendGasBreakdown)).text()).not.toContain("transactions")
 		w.unmount()
 	})
 
-	it("emits the new target as a number", async () => {
+	it("a typed target lands on change, as a number", async () => {
 		const w = breakdown()
-		await w.find(sel(TESTIDS.sendGasChange)).trigger("click")
 		await w.find(sel(TESTIDS.sendGasTxTarget)).setValue("12")
 		expect(w.emitted("update:txTarget")).toEqual([[12]])
 		w.unmount()
 	})
 
-	it("ignores a half-typed target rather than sizing for zero", async () => {
+	it("ignores a half-typed or out-of-range target rather than sizing for it", async () => {
 		const w = breakdown()
-		await w.find(sel(TESTIDS.sendGasChange)).trigger("click")
-		await w.find(sel(TESTIDS.sendGasTxTarget)).setValue("")
-		await w.find(sel(TESTIDS.sendGasTxTarget)).setValue("0")
+		const field = w.find(sel(TESTIDS.sendGasTxTarget))
+		await field.setValue("")
+		await field.setValue("0")
+		await field.setValue("5000")
 		expect(w.emitted("update:txTarget")).toBeUndefined()
 		w.unmount()
 	})
 
-	it("never rounds a small slice away — the split shown is the one signed", () => {
+	it("keeps how the gas is sized behind a disclosure, with the floor the send is signed against", async () => {
+		const w = breakdown({ txTarget: 3 })
+		expect(w.find(sel(TESTIDS.sendGasSizing)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.sendGasChange)).attributes("aria-expanded")).toBe("false")
+		await w.find(sel(TESTIDS.sendGasChange)).trigger("click")
+		expect(w.find(sel(TESTIDS.sendGasChange)).attributes("aria-expanded")).toBe("true")
+		expect(w.find(sel(TESTIDS.sendGasSizing)).text()).toContain("≈ 3 transactions")
+		expect(w.find(sel(TESTIDS.sendGasFloor)).text()).toContain("at least 0.285 FJ")
+		w.unmount()
+	})
+
+	it("never rounds a small slice away — the split shown is the one signed", async () => {
 		const w = breakdown({ amount: 6_000n, gas: gasPlan({ fuelAmount: 1_000n, quote: 5_000n, minFuelOutput: 4_500n }) })
 		expect(w.find(sel(TESTIDS.sendGasBreakdownToken)).text()).toContain("0.005 USDC")
 		expect(w.find(sel(TESTIDS.sendGasShare)).text()).toContain("0.001 USDC")
 		expect(w.find(sel(TESTIDS.sendGasBreakdownFuel)).text()).toContain("0.000000000000005 FJ")
+		await w.find(sel(TESTIDS.sendGasChange)).trigger("click")
 		expect(w.find(sel(TESTIDS.sendGasFloor)).text()).toContain("0.0000000000000045 FJ")
 		w.unmount()
 	})
 
-	it("says when the slice was capped", () => {
+	it("says when the slice was capped, inside the disclosure", async () => {
 		const w = breakdown({ gas: gasPlan({ capped: "half" }) })
 		expect(w.find(sel(TESTIDS.sendGasBreakdown)).attributes("data-capped")).toBe("half")
-		expect(w.find(sel(TESTIDS.sendGasBreakdown)).text()).toContain("capped at half")
+		await w.find(sel(TESTIDS.sendGasChange)).trigger("click")
+		expect(w.find(sel(TESTIDS.sendGasSizing)).text()).toContain("capped at half")
+		w.unmount()
+	})
+
+	it("a gas-only send shows only what arrives and what it is enough for", () => {
+		const w = breakdown({ intent: "gas", amount: 2_000_000n, gas: gasPlan({ quote: 1_050_000_000_000_000_000n }) })
+		expect(w.find(sel(TESTIDS.sendGasBreakdown)).attributes("data-intent")).toBe("gas")
+		expect(w.find(sel(TESTIDS.sendGasBreakdownFuel)).text()).toContain("≈ 1.05 FJ")
+		expect(w.find(sel(TESTIDS.sendGasEnough)).text()).toContain("≈ 10 transactions")
+		expect(w.find(sel(TESTIDS.sendGasBreakdownToken)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.sendGasTxTarget)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.sendGasChange)).exists()).toBe(false)
+		w.unmount()
+	})
+
+	it("a gas-only send on a network with no per-transaction budget states no count", () => {
+		const w = breakdown({ intent: "gas", fjPerTx: null })
+		expect(w.find(sel(TESTIDS.sendGasEnough)).exists()).toBe(false)
 		w.unmount()
 	})
 })

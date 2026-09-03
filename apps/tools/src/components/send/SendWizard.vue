@@ -54,6 +54,8 @@ const EXIT_TAKES = "tens of minutes — Aztec proves exits in epoch batches"
 /** The fee asset needs no swap, so its gas leg carries no pools at all. */
 const NO_SWAP = { path: [], zeroForOnes: [] }
 const ONE_TO_ONE = { probeIn: 1n, probeOut: 1n }
+/** What one Aztec transaction is budgeted at on this network; null where nothing can buy gas. */
+const fjPerTx = SWAP ? BigInt(SWAP.fjPerTx) : null
 
 const l1 = useL1Wallet()
 const bridge = useBridgeWallet()
@@ -668,6 +670,7 @@ onBeforeUnmount(() => {
 				:route-kind="routeKind"
 				:route-loading="routeQuote.loading.value"
 				:tx-target="gasShare.txTarget.value"
+				:fj-per-tx="fjPerTx"
 				:gas-error="gasError"
 				:blocked-reason="exitBlocked"
 				@update:valid="amountValid = $event"
