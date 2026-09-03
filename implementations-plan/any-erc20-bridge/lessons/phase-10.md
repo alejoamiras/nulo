@@ -50,6 +50,37 @@ canonical clone (six keys; nothing was created). The sign-off remains a live wal
   register EXCESS scaled by the ratio of the two networks' `claim_public` samples. The private-FPC
   fuel lane on 5.2.0-nightly stays unproven — an owner call (re-curate the compat list → re-canary),
   not this arc's.
+- **Generation landed (run 3, 10.1 min, exit 0)** — journal
+  `packages/bridge-core/deploy-journal/testnet-generation.jsonl`:
+  - `UniswapFuelSwap` `0x43857b88e2f625c873c051834fc51558801c4bb3` (run 1)
+  - `PortalFactory` `0xcb00b6b713f6170e1a42cb8ff933866e46945edc` (impl `0x3ffbd5a0…aaad2`),
+    `SwapBridgeRouter` `0x218e782b748ce61d5c5d48d92dfbe55396353816`,
+    `TokenBridgeHub` `0x0c1e649c332328319a8c559dbbe7a7290dc91a2487c05372e82c13c8c0715a7f`
+    (Token class `0x0225da0f…ef2cf`, already published on the network; hub class published by us);
+    readbacks ✓ (`factory.L2_HUB`, router `FACTORY/FEE_ASSET/permit2/feeJuicePortal/swapTarget`,
+    `hub.token_for(0) == 0`). Guardian L1 = the signer; guardian L2 = the deployer account.
+  - USDC → portal `0xd97917c37294a073b90e0e6a9ded8345f1fdb757`, L2 `0x00242d87…6502`, registered,
+    USDC/WETH pool seeded (fee 3000 / tick 60, price within tolerance).
+  - USDT → portal `0x3896dfb982a66ef992020e0fc8066956a3e694bd`, L2 `0x14c11c3c…ed96`, registered,
+    USDT/WETH pool seeded.
+  - `apps/tools/public/testnet-bridge.candidate.json` written (schema 2, walletChainId 1816023401,
+    `fjPerTx`/`fjRegister` = `0` placeholders — the live file is v1, nothing to carry).
+  - `verify-l1 --strict` on the candidate: **passed** (bindings, both tokens' portal derivation +
+    frozen registration + live metadata, three masked runtime code hashes).
+  - Spend after the deploy: 0.5136 ETH by the tool's tally (+ ≈0.0035 for the run-1 swap target).
+  - `BRIDGE_MANIFEST=public/testnet-bridge.candidate.json verify:deployments`: hub + both L2 tokens
+    re-derive to the committed addresses.
+- **Smoke run 1 died at the first claim** — `smoke-existing`'s USDC public deposit landed (leaf
+  63287296, 1 USDC to a throwaway account, abandoned) and the immediate hub claim simulated into
+  `Tried to consume nonexistent L1-to-L2 message` — the message was not in the L2 tree yet, which
+  is exactly what `claimTokensUntilSynced` exists to wait out, but its predicate knew only wordings
+  no 5.x node emits (`L1 to L2 message.*not found` never matches `No L1 to L2 message found`), and
+  it DID retry `No non-nullified …`, the already-consumed case (30 min of waiting for nothing). The
+  sandbox never surfaced it: its smoke forces a block before every claim. Fix-forward `d8dea004`:
+  the app's classification (`nonexistent L1-to-L2 message` · `l1_to_l2_msg_exists` ·
+  `message not in state` · `(?<!non-nullified )No L1 to L2 message found`), consumed surfaces at
+  once; unit-pinned with both live wordings. Intent rebuilt → `9da0f5b1`.
+- Smoke run 2: verify → smoke-existing → smoke-swap (fuel excluded: FPC gate).
 
 ## Pre-flight the agent completed
 
