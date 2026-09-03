@@ -44,7 +44,7 @@ import { useTokenGrant } from "@/composables/useTokenGrant"
 import { useTokenSelection } from "@/composables/useTokenSelection"
 
 /** Utils */
-import { assetDecimals, assetSymbol, recordTokenBlock } from "@/lib/asset-label"
+import { recordTokenBlock } from "@/lib/asset-label"
 import { stepperPhases } from "@/lib/bridge-steps"
 import { formatBigInt, formatCompact, parseAmountStrict, toDecimalString } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
@@ -125,6 +125,10 @@ const receiptSnapshot = ref<ReceiptSnapshot | null>(null)
 const receiptL2Token = ref<string | null>(null)
 /** The record RUN IN BACKGROUND handed to the journal; the wizard keeps a line on it until it completes. */
 const backgroundedId = ref<string | null>(null)
+/** What the review promised for it — the strip's subject, whatever the record's own units are. */
+const backgroundedLine = ref<string | null>(null)
+/** A provisional record is rekeyed once its transaction names it; the wizard follows the rekey. */
+const backgroundedCanonical = computed(() => (backgroundedId.value ? journal.canonicalRecordId(backgroundedId.value) : null))
 const reviewSaid = ref<string | null>(null)
 const submitting = ref(false)
 /** Record ids that existed before THIS submit — see `adoptRunRecord`. */
@@ -317,9 +321,11 @@ function freezeReview(target: SendPlan | ExitPlan): ReviewSnapshot {
 
 /** The promise the receipt replays back to the user. */
 function promisedLine(target: SendPlan | ExitPlan): string {
-	const token = `${toDecimalString(target.amount, target.token.decimals)} ${target.token.symbol}`
+	const token = `${toDecimalString(target.amount, target.token.decimals)} ${safeDisplay(target.token.symbol)}`
 	const gasLeg = target.direction === "l1-to-l2" ? target.gas : undefined
-	return gasLeg ? `${token} + ≈ ${formatBigInt(gasLeg.fuelFj, 18)} FJ gas` : token
+	if (!gasLeg) return token
+	const gas = `≈ ${formatBigInt(gasLeg.fuelFj, 18)} FJ gas`
+	return target.direction === "l1-to-l2" && target.intent === "gas" ? `${gas} from ${token}` : `${token} + ${gas}`
 }
 
 /** ---- selection --------------------------------------------------------------------------- */
@@ -456,8 +462,23 @@ function invalidateReview(): void {
 
 watch(resolved, () => void verifyPortal())
 watch([step, resolved, direction], quoteRoute)
+// The gas the account holds decides whether a token-only send may go: re-read on the way into the
+// amount step, and a verdict that lands after the review was frozen stands it down like any change.
+watch(step, (index) => {
+	if (index === 1) void gasHeld.refresh()
+})
 watch(
-	[resolved, amount, intent, isPrivate, gas, () => bridge.selectedAccount.value, () => l1.address.value, () => l1.chainId.value],
+	[
+		resolved,
+		amount,
+		intent,
+		isPrivate,
+		gas,
+		tokenOnlyBlocked,
+		() => bridge.selectedAccount.value,
+		() => l1.address.value,
+		() => l1.chainId.value,
+	],
 	invalidateReview,
 )
 // The grant window closes the moment the send starts signing: from there the prompt is the wallet's.
@@ -487,14 +508,20 @@ function adopt(id: string): void {
 function adoptRunRecord(): void {
 	if (!submitting.value || ownedId.value || stage.value !== "wizard") return
 	const mine = journal.records.value.find((r) => isSendRecord(r) && !preSubmitIds.has(r.id) && journal.isSessionLive(r.id))
-	if (mine && mine.id !== backgroundedId.value) adopt(mine.id)
+	if (mine && mine.id !== backgroundedCanonical.value) adopt(mine.id)
 }
 watch(journal.records, adoptRunRecord)
 
 async function onConfirm(): Promise<void> {
 	const target = reviewed.value?.plan
 	if (!target || submitting.value || stage.value !== "wizard") return
+	// The frozen review is what gets signed, but a gate that closed under it is not the user's to override.
+	if (tokenOnlyBlocked.value !== null) {
+		invalidateReview()
+		return
+	}
 	backgroundedId.value = null
+	backgroundedLine.value = null
 	submitting.value = true
 	preSubmitIds = new Set(journal.records.value.map((r) => r.id))
 	reviewSaid.value = promisedLine(target)
@@ -513,7 +540,7 @@ async function runSend(target: SendPlan): Promise<void> {
 		// The run NAMES its record; that id wins over whatever the takeover adopted provisionally.
 		// Unless the user sent it to the background meanwhile: the lane resolves only once the whole
 		// bridge is done, and re-adopting then would drag the finished send back over a new one.
-		if (ownedId.value !== id && backgroundedId.value !== id) adopt(id)
+		if (ownedId.value !== id && backgroundedCanonical.value !== id) adopt(id)
 		return
 	}
 	// Nothing was sent. A grant that never landed is the reason worth naming on the review.
@@ -522,7 +549,7 @@ async function runSend(target: SendPlan): Promise<void> {
 
 async function runExit(target: ExitPlan): Promise<void> {
 	const id = await exitFlow.exit(target)
-	if (id && ownedId.value !== id && backgroundedId.value !== id) adopt(id)
+	if (id && ownedId.value !== id && backgroundedCanonical.value !== id) adopt(id)
 }
 
 /** ---- stepper → receipt -------------------------------------------------------------------- */
@@ -610,9 +637,13 @@ function onNewSend(): void {
 	receiptL2Token.value = null
 	reviewSaid.value = null
 	resetAmount()
+	gasShare.reset()
 	goToStep(0)
 	standDown()
-	void selection.refreshBalances()
+	// The send that just ran may have registered the token: its state, binding and balances are
+	// re-read rather than carried over, so the next send is priced and worded for what it now is.
+	const token = picked.value
+	if (token) void reselect(token, direction.value)
 	void rowBalances.refresh()
 	void gasHeld.refresh()
 }
@@ -621,6 +652,7 @@ function onNewSend(): void {
  *  step, with one line above it that follows the send until it lands. */
 function onBackground(): void {
 	backgroundedId.value = ownedId.value
+	backgroundedLine.value = reviewSaid.value
 	// The run is still in flight: neither its record's next write nor its lane resolving may take
 	// the wizard over again (see `adoptRunRecord` / `runSend`).
 	if (ownedId.value) preSubmitIds.add(ownedId.value)
@@ -628,23 +660,23 @@ function onBackground(): void {
 }
 
 const backgrounded = computed(() => {
-	const id = backgroundedId.value
+	const id = backgroundedCanonical.value
 	const rec = id ? journal.records.value.find((r) => r.id === id) : undefined
 	return rec && !rec.completedAt ? rec : undefined
 })
 
+// The subject is what the review promised, never the record's own amount: a gas-only record files
+// the token amount it swapped, which is not a Fee Juice figure.
 const backgroundLine = computed(() => {
 	const rec = backgrounded.value
 	if (!rec) return null
-	const kind = assetKindOf(rec)
-	const token = recordTokenBlock(rec)
-	const amount = `${formatBigInt(BigInt(rec.amount), assetDecimals(kind, token))} ${assetSymbol(kind, rec.isPrivate, token)}`
+	const subject = backgroundedLine.value ?? "Your send"
 	const active = stepperPhases(rec, journal.runtime.value[rec.id] ?? {}).find((p) => p.state === "active" || p.state === "failed")
-	if (!active) return `${amount} is on its way.`
+	if (!active) return `${subject} is on its way.`
 	const eta = active.eta ? ` · ${active.eta}` : ""
 	return active.state === "failed"
-		? `${amount} needs your attention — see Activity.`
-		: `${amount} is on its way — ${active.label.toLowerCase()}${eta}`
+		? `${subject} needs your attention — see Activity.`
+		: `${subject} is on its way — ${active.label.toLowerCase()}${eta}`
 })
 
 function showActivity(): void {

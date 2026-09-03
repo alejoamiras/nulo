@@ -352,6 +352,21 @@ export function currentRecord(id: string): BridgeJournalRecord | undefined {
 	return loadJournal(deps.kv).find((r) => r.id === id)
 }
 
+/** Every rekey this tab performed, old id → new id, so a surface holding a provisional id can keep
+ *  following its record after the transaction names it. Session-scoped, like `sessionLive`. */
+const rekeyed = ref<Record<string, string>>({})
+
+/** The id a record is filed under now, following every rekey since `id`; `id` itself when none. */
+export function canonicalRecordId(id: string): string {
+	let current = id
+	const seen = new Set<string>()
+	while (rekeyed.value[current] && !seen.has(current)) {
+		seen.add(current)
+		current = rekeyed.value[current] as string
+	}
+	return current
+}
+
 /** Provisional-record upgrade: replace the pending row under the id its own transaction gave it.
  *  Foreground ownership follows the rekey, or the stepper would lose its record mid-watch, and so
  *  does the runtime - the narration and the approve outcome describe the same attempt. */
@@ -359,6 +374,7 @@ export function rekeyJournalRecord(oldId: string, next: BridgeJournalRecord): vo
 	rekeyRecord(deps.kv, oldId, next)
 	if (sessionLive.delete(oldId)) sessionLive.add(next.id)
 	if (activeFlowId.value === oldId) activeFlowId.value = next.id
+	rekeyed.value = { ...rekeyed.value, [oldId]: next.id }
 	const { [oldId]: carried, ...rest } = runtime.value
 	if (carried) runtime.value = { ...rest, [next.id]: { ...carried, ...rest[next.id] } }
 	reload()
@@ -1445,6 +1461,7 @@ export function useBridgeJournal() {
 		runtime,
 		lastCompleted,
 		activeFlowId,
+		canonicalRecordId,
 		claimForeground,
 		releaseForeground,
 		addRecord,

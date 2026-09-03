@@ -412,6 +412,29 @@ file at a time): 1 HIGH, 5 MED, 5 LOW; all fixed in one commit except two LOWs k
   and found it right; a TXE fixture is the stronger pin and is not worth a toolchain run for a UI
   hint); one `mintL1` testid on every mint button, disambiguated by `data-symbol`.
 
+**Codex round 1** (session `01a06880-b0b4-79e2-ab58-5e7536d63a5b`, xhigh, read-only): "request
+changes — hub storage lookup is correct, but background rekeying and gas gating still have material
+holes." 1 HIGH, 3 MED, 3 LOW; all but one LOW fixed.
+
+- HIGH — a backgrounded PUBLIC deposit or any withdrawal starts as a provisional record the journal
+  rekeys once its transaction names it; the new id was neither the backgrounded one nor in the
+  pre-submit set, so the wizard re-adopted it. The journal now records every rekey (session-scoped,
+  like `sessionLive`) and exposes `canonicalRecordId`; the wizard follows it in every adopt guard
+  and in the strip's lookup.
+- MED — a no-gas verdict landing AFTER the review was frozen left Sign & send enabled:
+  `tokenOnlyBlocked` joins the review-invalidation sources, `onConfirm` refuses past it, and the
+  amount step re-reads the balances on entry.
+- MED — NEW SEND kept the resolved token, so a token the send had just registered would be priced
+  with `fjRegister` and worded first-time again: the token is re-resolved and the gas target reset.
+- MED — the strip formatted a gas-only record's amount (the swapped token amount) as 18-dec FJ; the
+  strip's subject is now the review's promise line ("≈ 5 FJ gas from 1 WBTC").
+- LOW fixed — non-manifest display symbol/name sanitised once at resolve; two pre-existing
+  BridgeStepper comments naming a plan step and a codex finding rewritten; sponsor wording in the
+  plan and a test fixture.
+- LOW kept — a chain switch during an in-flight lookup could show a wrong-chain identity in the ADD
+  row; the selection fails closed on `assertL1Chain` and the row is only a hint, so no live-chain
+  watch was added.
+
 ## Sign-off
 
 _Owner sign-off: PENDING._

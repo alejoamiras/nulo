@@ -29,7 +29,7 @@ keeps its contract, except one read that today runs only once the Aztec wallet i
    `Arrives as X` / `Arrives as gas ≈ Y FJ from Z` and a `How the gas is sized` disclosure;
    gas-only shows `Arrives as gas` + `Enough for ≈ N transactions` and nothing else.
 5. **Review step**: Arrives lists both legs; Fee reads `≈ X FJ — the first of those N, paid from
-   that gas` (token-only stays `paid by the sponsor`); Details is a bordered row with a chevron.
+   that gas` (token-only: `paid from the gas you already hold on Aztec`); Details is a bordered row with a chevron.
 6. **First-time false positive**: the hub binding is read from the node's public storage (the
    `token_of` map slot the hub artifact declares), whether or not an Aztec account is connected,
    so a registered token never shows the register path on a plain wallet.
@@ -63,4 +63,4 @@ stack lands. `/code-review medium --fix`, then the codex fix loop until "no new 
 - Mint buttons only render for tokens the signed manifest marks `permissionless-mint`; the amount
   is fixed client-side and the call is the token's own `mint(to, amount)` — no new contract
   surface.
-- The sponsor gate is advisory UX over a balance read; the hub still enforces payment on-chain.
+- The no-gas gate is advisory UX over a balance read; the claim's own gate re-reads and fails closed.

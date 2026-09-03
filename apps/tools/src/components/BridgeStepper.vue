@@ -31,7 +31,7 @@ const phases = computed(() => stepperPhases(props.record, rt.value))
 
 const failedPhase = computed(() => phases.value.find((p) => p.state === "failed"))
 
-/** Per-phase retry routing (plan S9): only engine-drivable phases get a RETRY. */
+/** Per-phase retry routing: only engine-drivable phases get a RETRY. */
 const canRetry = computed(() => {
 	const key = failedPhase.value?.key
 	if (!key) return false
@@ -50,8 +50,8 @@ function onRetry() {
 }
 
 const headline = computed(() => {
-	// A fee-juice (Fuel) record is 18-dec Fee Juice, not the token bridge asset (codex LOW — same class
-	// as the toast/card; the stepper header is the third shared surface).
+	// A fee-juice (Fuel) record is 18-dec Fee Juice, not the token bridge asset — the same rule the
+	// toast and the card apply; the stepper header is the third shared surface.
 	const kind = assetKindOf(props.record)
 	const token = recordTokenBlock(props.record)
 	const amount = formatBigInt(BigInt(props.record.amount), assetDecimals(kind, token))

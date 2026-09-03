@@ -24,6 +24,7 @@ import { type Ref, ref, shallowRef } from "vue"
 import { rebuildHubTokenInstance, SEND_GENERATION } from "@/contracts/bridge-generation"
 import { assertL1Chain } from "./useSend"
 import type { Direction, MetadataConflict, ResolvedToken, SelectableToken, TokenBalances, TokenWords } from "@/lib/send-model"
+import { safeDisplay } from "@/lib/token-display"
 
 export interface TokenSelectionDeps {
 	pub: () => PublicClient | undefined
@@ -101,9 +102,13 @@ async function toResolved(token: SelectableToken, reads: ChainReads): Promise<Re
 	// are the last resort, and getting them wrong misprices the send.
 	const decimals = registration?.decimals ?? meta?.decimals ?? token.decimals
 	// Only the manifest's own tokens keep their curated strings; everything else shows what the
-	// contract answers, so a list cannot dress an arbitrary address up as a token the user knows.
+	// contract answers — stripped and capped once here, so no surface downstream renders a bidi
+	// override or a kilobyte of "symbol" — so a list cannot dress an arbitrary address up as a token
+	// the user knows. The RAW bytes stay in `words` for the derivation.
 	const display =
-		token.source !== "manifest" && meta ? { symbol: meta.symbol, name: meta.name } : { symbol: token.symbol, name: token.name }
+		token.source !== "manifest" && meta
+			? { symbol: safeDisplay(meta.symbol), name: safeDisplay(meta.name) }
+			: { symbol: token.symbol, name: token.name }
 	const conflict = metadataConflictOf(token, meta)
 	return {
 		...token,

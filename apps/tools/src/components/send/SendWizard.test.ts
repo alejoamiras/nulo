@@ -66,6 +66,8 @@ const gasShareDispose = vi.fn()
 const records = ref<Record<string, unknown>[]>([])
 /** Records THIS tab's engine created — the wizard's provenance test for adopting a run's record. */
 const sessionLive = new Set<string>()
+/** Provisional id → the id the record's transaction gave it. */
+const rekeys = ref<Record<string, string>>({})
 const activeFlowId = ref<string | null>(null)
 const claimForeground = vi.fn((id: string) => {
 	activeFlowId.value = id
@@ -108,6 +110,7 @@ vi.mock("@/composables/useBridgeJournal", () => ({
 		claimForeground,
 		releaseForeground,
 		isSessionLive: (id: string) => sessionLive.has(id),
+		canonicalRecordId: (id: string) => rekeys.value[id] ?? id,
 	}),
 }))
 vi.mock("@/composables/useBridgeBackup", () => ({ useBridgeBackup: () => ({ exportBridgeWithToast: vi.fn() }) }))
@@ -163,7 +166,15 @@ vi.mock("@/composables/useRouteQuote", () => ({
 	useRouteQuote: () => ({ quoted: routeQuoted, loading: ref(false), error: routeError, quote: quoteFn, dispose: routeDispose }),
 }))
 vi.mock("@/composables/useGasShare", () => ({
-	useGasShare: () => ({ txTarget, propose: proposeFn, floorFor: (q: bigint) => (q * 97n) / 100n, dispose: gasShareDispose }),
+	useGasShare: () => ({
+		txTarget,
+		propose: proposeFn,
+		floorFor: (q: bigint) => (q * 97n) / 100n,
+		reset: () => {
+			txTarget.value = 20
+		},
+		dispose: gasShareDispose,
+	}),
 }))
 vi.mock("@/composables/useSend", () => ({
 	useSend: () => ({ send: sendFn, stage: ref(null), busy: sendBusy, error: sendError, dispose: sendDispose }),
@@ -311,6 +322,8 @@ describe("SendWizard", () => {
 		selectionError.value = null
 		epoch = 0
 		gasHeld.value = null
+		rekeys.value = {}
+		sessionLive.clear()
 		nextResolved = (token) => resolvedToken(token)
 		granted.value = [L2_TOKEN]
 		grantOutcome = "granted"
@@ -490,6 +503,78 @@ describe("SendWizard", () => {
 		expect(w.findComponent({ name: "BridgeReceipt" }).exists()).toBe(false)
 		expect(w.find(`[data-testid="${TESTIDS.sendBackgroundStrip}"]`).exists()).toBe(false)
 		expect(claimForeground).toHaveBeenCalledTimes(1)
+	})
+
+	it("a backgrounded send follows its record through a rekey, and the renamed record is never re-adopted", async () => {
+		let releaseSend = (): void => {}
+		sendFn.mockImplementation(async () => {
+			sessionLive.add("dep-pending-1")
+			records.value = [...records.value, sendRecord("dep-pending-1")]
+			await new Promise<void>((resolve) => {
+				releaseSend = resolve
+			})
+			return "0xfinal"
+		})
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		w.findComponent({ name: "BridgeStepper" }).vm.$emit("background")
+		await flushPromises()
+		expect(w.find(`[data-testid="${TESTIDS.sendBackgroundStrip}"]`).exists()).toBe(true)
+
+		// The deposit transaction names the record: the journal rekeys it, session-live moves with it.
+		sessionLive.delete("dep-pending-1")
+		sessionLive.add("0xfinal")
+		rekeys.value = { "dep-pending-1": "0xfinal" }
+		records.value = records.value.map((r) => (r.id === "dep-pending-1" ? { ...r, id: "0xfinal" } : r))
+		await flushPromises()
+		expect(w.findComponent({ name: "BridgeStepper" }).exists()).toBe(false)
+		expect(w.find(`[data-testid="${TESTIDS.sendBackgroundStrip}"]`).exists()).toBe(true)
+
+		releaseSend()
+		await flushPromises()
+		expect(w.findComponent({ name: "BridgeStepper" }).exists()).toBe(false)
+		expect(claimForeground).toHaveBeenCalledTimes(1)
+
+		records.value = records.value.map((r) => (r.id === "0xfinal" ? { ...r, completedAt: 2_000 } : r))
+		await flushPromises()
+		expect(w.find(`[data-testid="${TESTIDS.sendBackgroundStrip}"]`).exists()).toBe(false)
+		expect(w.findComponent({ name: "BridgeReceipt" }).exists()).toBe(false)
+	})
+
+	it("a no-gas verdict that lands under the frozen review stands it down, and confirm never signs past it", async () => {
+		const w = await wizard()
+		const review = await atReview(w)
+		gasHeld.value = false
+		await flushPromises()
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
+		expect(w.findComponent({ name: "AmountStep" }).props("tokenOnlyBlocked")).toContain("holds no gas")
+		expect(w.find(`[data-testid="${TESTIDS.sendReviewStale}"]`).exists()).toBe(true)
+		// A confirm the frozen review still had in flight sends nothing.
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(sendFn).not.toHaveBeenCalled()
+	})
+
+	it("NEW SEND re-resolves the token — a send that registered it must not be priced as first-time again", async () => {
+		sendFn.mockImplementation(async () => {
+			records.value = [...records.value, sendRecord("rec-1")]
+			return "rec-1"
+		})
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		records.value = records.value.map((r) => (r.id === "rec-1" ? { ...r, completedAt: 2_000 } : r))
+		await flushPromises()
+		expect(w.findComponent({ name: "BridgeReceipt" }).exists()).toBe(true)
+		expect(selectFn).toHaveBeenCalledTimes(1)
+		w.findComponent({ name: "BridgeReceipt" }).vm.$emit("new-bridge")
+		await flushPromises()
+		expect(selectFn).toHaveBeenCalledTimes(2)
+		expect(selectFn).toHaveBeenLastCalledWith(candidate(), "l1-to-l2")
+		expect(w.findComponent({ name: "TokenStep" }).exists()).toBe(true)
 	})
 
 	it("a token-only review says the fee is the gas already held; adding gas names one transaction's cost out of it", async () => {

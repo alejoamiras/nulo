@@ -236,9 +236,9 @@ describe("AmountStep", () => {
 		w.unmount()
 	})
 
-	it("says why token alone cannot go without a sponsor, and keeps CONTINUE off until the intent moves", async () => {
-		const w = step({ intent: "token", tokenOnlyBlocked: "No sponsor covers a token-only send on this network." })
-		expect(w.find(sel(TESTIDS.sendTokenOnlyBlocked)).text()).toContain("No sponsor")
+	it("says why token alone cannot go without gas held, and keeps CONTINUE off until the intent moves", async () => {
+		const w = step({ intent: "token", tokenOnlyBlocked: "Your Aztec account holds no gas yet." })
+		expect(w.find(sel(TESTIDS.sendTokenOnlyBlocked)).text()).toContain("holds no gas")
 		expect(w.find(sel(TESTIDS.sendAmountNext)).attributes("disabled")).toBeDefined()
 		expect(w.emitted("update:valid")?.at(-1)).toEqual([false])
 		await w.setProps({ intent: "token+gas", gas: GAS })
