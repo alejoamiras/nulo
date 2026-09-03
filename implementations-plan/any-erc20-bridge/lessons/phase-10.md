@@ -518,6 +518,30 @@ labels the single tx REGISTER + CLAIM.
   path that no longer exists (the review is gone while the wallet decides); it now pins the
   permission phase instead. The engine's epoch check for a superseded grant stays as the net.
 
+**Codex round 6** (resumed, on the round-2 delta): "not ready; the core journal/rekey design
+holds, but the delta introduces four material transition/UX regressions." All four MED fixed, two
+of three LOW fixed, one LOW declined.
+
+- MED — a grant that THREW (not declined) left the permission screen up forever: the send's
+  rejection skipped the cleanup after the await. The await is in a `try/finally`; the wizard returns
+  from `permit` either way and the review shows the error.
+- MED — a private send: `openSendRecord` awaited the seal before `markGrantOutcome`, so the record
+  watcher adopted a rail without PERMISSION and the phase was inserted retroactively after SEAL.
+  The outcome is marked right after the record is filed, before the seal.
+- MED — picking token B while A was still resolved rendered the amount step on A's symbol and
+  decimals until B's read landed, and the row-symbol fallback bypassed `safeDisplay`. `amountToken`
+  uses the read only when its address is the picked row's, and sanitises the row's symbol.
+- MED — with picking-as-the-step, ↑/↓ in the list emitted `select` on every row, so the first arrow
+  press left the catalog. Arrows move focus only (the tab stop follows focus); Enter/Space/click
+  pick.
+- LOW fixed — every stand-in record shared one id, so the rail's phase clock carried the previous
+  prompt's elapsed time onto the next (the id is now fresh per prompt); the backup validator let
+  `registers: "yes"` through by spread (it is now `undefined | true`, deposits with a token leg
+  only).
+- LOW declined — codex flagged "plan/phase/review terminology" in comments; the lines it cited are
+  pre-existing (`plan S3/S10`, `plan S15`, "codex post-impl HIGH" in the journal and rail), untouched
+  by this branch. They are a repo-wide sweep of their own, not a rider on a UX PR.
+
 ## Sign-off
 
 _Owner sign-off: PENDING._

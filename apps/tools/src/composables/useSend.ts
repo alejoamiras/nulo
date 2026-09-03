@@ -614,6 +614,9 @@ async function openSendRecord(id: string, ctx: RunCtx, prepared: Prepared): Prom
 	const { plan, actors } = ctx
 	addRecordVerified(buildSendRecord({ ...prepared.inputs, fuelSalt: prepared.fuelSalt, id, plan, recipient: actors.recipient }))
 	markSessionLive(id)
+	// The permission the wallet granted happened before the record existed; it is the run's first,
+	// done phase from the record's first render — the seal's own prompt comes after it.
+	if (ctx.granted) markGrantOutcome(id)
 	// EVERY private send seals, gas-only included: without an envelope its claim material exists
 	// only in this tab's memory, so a reload strands it and a recovery file cannot be exported.
 	if (plan.isPrivate) await sealSend(id, plan, prepared, actors, () => ctx.journal.records.value as ClaimRecord[])
@@ -628,9 +631,6 @@ async function executeSend(ctx: RunCtx): Promise<string> {
 	const prepared = await prepareSecrets(plan, actors.recipient)
 	let id = prepared.id ?? makeProvisionalDepositId()
 	await openSendRecord(id, ctx, prepared)
-	// The permission the wallet just granted happened before the record existed; the rail shows it
-	// as this run's first, done phase.
-	if (ctx.granted) markGrantOutcome(id)
 	try {
 		await ensurePermit2Approval(gen.permit2, plan.amount, id, l1ApprovalCtx(actors), plan.token.address)
 		const res = await runSend(

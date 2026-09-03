@@ -470,6 +470,43 @@ describe("SendWizard", () => {
 		expect(w.findComponent({ name: "TokenStep" }).props("selectionError")).toContain("not an ERC-20")
 	})
 
+	it("a second row picked while the first is still being read renders on ITS row, sanitised, never the first's answer", async () => {
+		const OTHER = "0x5555555555555555555555555555555555555555"
+		const bidi = `PA${String.fromCodePoint(0x202e)}XG`
+		const w = await wizard()
+		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
+		await flushPromises()
+		expect(w.findComponent({ name: "AmountStep" }).props("token")).toMatchObject({ symbol: "WBTC", decimals: 8 })
+
+		// The first read stands; the user goes back and picks a 6-decimal row with a hostile symbol.
+		selectFn.mockImplementationOnce(async () => {
+			selectLoading.value = true
+		})
+		w.findComponent({ name: "WizardShell" }).vm.$emit("goto", 0)
+		await flushPromises()
+		w.findComponent({ name: "TokenStep" }).vm.$emit("select", { ...candidate(OTHER), symbol: bidi, decimals: 6 })
+		await flushPromises()
+		const token = w.findComponent({ name: "AmountStep" }).props("token")
+		expect(token.decimals).toBe(6)
+		expect(token.symbol).toBe("PAXG")
+		expect(token.symbol).not.toContain(String.fromCodePoint(0x202e))
+		selectLoading.value = false
+	})
+
+	it("a grant that throws (not declines) returns to the wizard and reports it, never a stuck permission screen", async () => {
+		granted.value = []
+		sendFn.mockImplementation(async () => {
+			throw new Error("wallet unreachable")
+		})
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(w.findComponent({ name: "BridgeStepper" }).exists()).toBe(false)
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(true)
+		expect(w.findComponent({ name: "ReviewStep" }).props("busy")).toBe(false)
+	})
+
 	it("the wallet's token permission is the stepper's first phase, shown before any record exists", async () => {
 		granted.value = []
 		let releaseSend = (): void => {}
@@ -488,12 +525,8 @@ describe("SendWizard", () => {
 		await flushPromises()
 		const permit = w.findComponent({ name: "BridgeStepper" })
 		expect(permit.exists()).toBe(true)
-		expect(permit.props("record")).toMatchObject({
-			id: "dep-pending-permit",
-			schema: 3,
-			registers: true,
-			token: { displaySymbol: "WBTC" },
-		})
+		expect(permit.props("record")).toMatchObject({ schema: 3, registers: true, token: { displaySymbol: "WBTC" } })
+		expect(permit.props("record").id).toMatch(/^dep-pending-permit-/)
 		expect(permit.props("runtime")).toEqual({ step: "granting" })
 		expect(permit.props("canBackground")).toBe(false)
 		expect(claimForeground).not.toHaveBeenCalled()

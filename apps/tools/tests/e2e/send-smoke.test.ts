@@ -579,7 +579,7 @@ describe("send wizard smoke", () => {
 		// The wizard is gone: the stepper is up on a record the journal does not hold yet, with the
 		// permission as its active first phase, and no way to background or re-pick meanwhile.
 		expect(w.find(sel(TESTIDS.sendStepReview)).exists()).toBe(false)
-		expect(w.find(sel(TESTIDS.stepper)).attributes("data-id")).toBe("dep-pending-permit")
+		expect(w.find(sel(TESTIDS.stepper)).attributes("data-id")).toMatch(/^dep-pending-permit-/)
 		const first = w.findAll(sel(TESTIDS.stepperPhase))[0]
 		expect(first?.attributes("data-phase")).toBe("permit")
 		expect(first?.attributes("data-state")).toBe("active")
@@ -590,7 +590,7 @@ describe("send wizard smoke", () => {
 		release()
 		await settle()
 		expect(h.fn.runSend).toHaveBeenCalledTimes(1)
-		expect(w.find(sel(TESTIDS.stepper)).attributes("data-id")).not.toBe("dep-pending-permit")
+		expect(w.find(sel(TESTIDS.stepper)).attributes("data-id")).not.toMatch(/^dep-pending-permit-/)
 		// Granted in this run, the permission stays on the rail as its first, done phase.
 		expect(w.findAll(sel(TESTIDS.stepperPhase))[0]?.attributes("data-phase")).toBe("permit")
 		expect(w.findAll(sel(TESTIDS.stepperPhase))[0]?.attributes("data-state")).toBe("done")

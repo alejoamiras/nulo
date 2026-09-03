@@ -73,20 +73,25 @@ describe("TokenList", () => {
 		w.unmount()
 	})
 
-	it("↓ moves focus AND the selection to the next row", async () => {
+	it("↓ moves focus to the next row without picking it — picking is the step, browsing is not", async () => {
 		const w = list()
 		const rows = w.findAll(sel(TESTIDS.sendTokenTile))
 		await rows[0]?.trigger("keydown", { key: "ArrowDown" })
 		expect(document.activeElement).toBe(rows[1]?.element)
-		expect(w.emitted("select")?.[0]).toEqual([TOKENS[1]])
+		expect(w.emitted("select")).toBeUndefined()
+		// The tab stop follows focus, so leaving and re-entering the list lands where the user was.
+		expect(w.findAll(sel(TESTIDS.sendTokenTile)).map((t) => t.attributes("tabindex"))).toEqual(["-1", "0", "-1"])
 		w.unmount()
 	})
 
-	it("↑ from the first row wraps to the last, selecting it", async () => {
+	it("↑ from the first row wraps to the last; Enter on the focused row picks it", async () => {
 		const w = list()
 		const rows = w.findAll(sel(TESTIDS.sendTokenTile))
 		await rows[0]?.trigger("keydown", { key: "ArrowUp" })
 		expect(document.activeElement).toBe(rows[2]?.element)
+		expect(w.emitted("select")).toBeUndefined()
+		// A native button: Enter and Space click it.
+		await rows[2]?.trigger("click")
 		expect(w.emitted("select")?.[0]).toEqual([TOKENS[2]])
 		w.unmount()
 	})

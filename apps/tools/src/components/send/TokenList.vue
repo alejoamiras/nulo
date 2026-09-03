@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Utils */
-import { computed, useTemplateRef } from "vue"
+import { computed, ref, useTemplateRef } from "vue"
 import type { SelectableToken } from "@/lib/send-model"
 import { TESTIDS } from "@/lib/testids"
 
@@ -20,23 +20,22 @@ const emit = defineEmits<{ select: [token: SelectableToken] }>()
 
 const list = useTemplateRef<HTMLElement>("list")
 
-// The listbox is ONE tab stop: the selected row carries it, and the first row when nothing is
-// selected yet, so Tab never walks a list that can hold hundreds of tokens.
+// The listbox is ONE tab stop: the row focus last rested on carries it (the selected row, else the
+// first), so Tab never walks a list that can hold hundreds of tokens.
+const focused = ref<number | null>(null)
 const rovingIndex = computed(() => {
+	if (focused.value !== null && focused.value < props.tokens.length) return focused.value
 	const key = props.selected?.logoKey
 	const found = key === undefined ? -1 : props.tokens.findIndex((t) => t.logoKey === key)
 	return found === -1 ? 0 : found
 })
 
-/** ↑/↓ move focus AND the selection together, the way the direction tablist does: a listbox whose
- *  focus and selection can drift apart reads one row to assistive tech while another is armed. */
+/** ↑/↓ move focus only: picking a row is the whole step, so the arrows must let the keyboard user
+ *  browse the list without committing to every row they pass; Enter or Space on the row picks it. */
 function move(from: number, delta: number): void {
 	const count = props.tokens.length
 	if (count === 0) return
 	const next = (from + delta + count) % count
-	const token = props.tokens[next]
-	if (!token) return
-	emit("select", token)
 	list.value?.querySelector<HTMLElement>(`[data-index="${next}"]`)?.focus()
 }
 </script>
@@ -62,6 +61,7 @@ function move(from: number, delta: number): void {
 				:data-index="index"
 				:tabindex="index === rovingIndex ? 0 : -1"
 				@select="emit('select', token)"
+				@focus="focused = index"
 				@keydown.down.prevent="move(index, 1)"
 				@keydown.up.prevent="move(index, -1)"
 			/>

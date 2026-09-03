@@ -170,12 +170,15 @@ const amountUnits = computed(() => (resolved.value ? parseAmountStrict(amount.va
 
 // The strip's labels render a symbol a list or a pasted contract chose; stripped and capped like
 // every other place it lands.
-/** What the amount step renders against: the chain's answer once it lands, the catalog row's own
- *  symbol and decimals meanwhile, so picking a row moves on at once instead of waiting on a read. */
+/** What the amount step renders against: the chain's answer once it lands FOR THE ROW PICKED, the
+ *  row's own symbol and decimals meanwhile, so picking a row moves on at once instead of waiting on
+ *  a read — and a read still standing from the previous row never dresses the new one. */
 const amountToken = computed<AmountToken | null>(() => {
-	if (resolved.value) return resolved.value
 	const row = picked.value
-	return row && row.decimals >= 0 ? { symbol: row.symbol, decimals: row.decimals } : null
+	if (!row) return null
+	const read = resolved.value
+	if (read && read.address === row.address) return read
+	return row.decimals >= 0 ? { symbol: safeDisplay(row.symbol), decimals: row.decimals } : null
 })
 
 const tokenLabel = computed(() => (amountToken.value ? safeDisplay(amountToken.value.symbol) : undefined))
@@ -588,12 +591,13 @@ async function onConfirm(): Promise<void> {
 }
 
 /** The record the permission phase is rendered from: the plan, filed the way the send will file it,
- *  under a provisional id so nothing offers to back it up. */
+ *  under a provisional id so nothing offers to back it up. The id is fresh per prompt: the rail's
+ *  phase clock is keyed on it, and a reused id would show the previous prompt's elapsed time. */
 function permitRecordOf(target: SendPlan): SendDepositRecord {
 	const now = Date.now()
 	const base = {
 		schema: 3 as const,
-		id: "dep-pending-permit",
+		id: `dep-pending-permit-${now.toString(36)}`,
 		direction: "deposit" as const,
 		isPrivate: target.isPrivate,
 		amount: (target.amount - (target.gas?.fuelAmount ?? 0n)).toString(),
@@ -618,10 +622,16 @@ async function runSend(target: SendPlan): Promise<void> {
 		permitRecord.value = permitRecordOf(target)
 		stage.value = "permit"
 	}
-	const id = await sendFlow.send(target)
-	if (stage.value === "permit") {
-		stage.value = "wizard"
-		permitRecord.value = null
+	let id = ""
+	try {
+		id = await sendFlow.send(target)
+	} finally {
+		// A lane that threw before filing a record (a grant that errored rather than declined) must not
+		// leave the permission screen up with nothing behind it.
+		if (stage.value === "permit") {
+			stage.value = "wizard"
+			permitRecord.value = null
+		}
 	}
 	if (id) {
 		// The run NAMES its record; that id wins over whatever the takeover adopted provisionally.
