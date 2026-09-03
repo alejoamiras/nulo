@@ -40,8 +40,8 @@ interface FakeHubOpts {
 	paused?: boolean | string
 	/** How many claim simulations fail before the claimer's view catches up with the node; traced in `calls`. */
 	claimSimulateFailures?: number
-	/** The receipt status a landed registration reports (a reverted one still has a hash). */
-	registerStatus?: string
+	/** The execution result a landed registration reports (a reverted one is mined and has a hash). */
+	registerExecution?: string
 }
 
 function fakeHub(opts: FakeHubOpts) {
@@ -68,7 +68,7 @@ function fakeHub(opts: FakeHubOpts) {
 			throw new Error(opts.failRegister)
 		}
 		if (opts.registerBinds) registered = true
-		return opts.registerStatus ?? "proposed"
+		return opts.registerExecution ?? "success"
 	}
 	const simulateOf = async (name: string): Promise<unknown> => {
 		const v = views()
@@ -83,7 +83,13 @@ function fakeHub(opts: FakeHubOpts) {
 			send: async (o?: Record<string, unknown>) => {
 				calls.push(name)
 				sentWith.push([name, o ?? {}])
-				return { receipt: { txHash: `0x${name}`, status: name.startsWith("register") ? registrationLands() : "proposed" } }
+				return {
+					receipt: {
+						txHash: `0x${name}`,
+						status: "proposed",
+						executionResult: name.startsWith("register") ? registrationLands() : "success",
+					},
+				}
 			},
 		})
 	}
@@ -183,7 +189,7 @@ describe("hub L2 claims", () => {
 		// The registration's wait must not throw on the revert, or the hash (the only evidence the
 		// bridged gas is now credit at the FPC) would be lost with the error.
 		const order: string[] = []
-		const h = fakeHub({ registered: false, registerStatus: "app_logic_reverted" })
+		const h = fakeHub({ registered: false, registerExecution: "reverted" })
 		await expect(
 			claimViaHub(h.hub, params(true), {
 				from: USER,

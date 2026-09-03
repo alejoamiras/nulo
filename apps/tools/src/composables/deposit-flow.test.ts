@@ -391,11 +391,11 @@ describe("private fuel fee — the sealed salt is authoritative", () => {
 	})
 
 	test("spent fuel on a still-unregistered token registers from the credit too: both ceilings, both seams from pay_fee", async () => {
-		// A registration that reverted past its setup spent the fuel without binding the token; its
-		// landed-but-reverted receipt reads as spent, never as pending.
+		// A registration that reverted past its setup spent the fuel without binding the token: it is
+		// mined like any other transaction, so its receipt reads as spent, never as pending.
 		const spent = fueled(SEALED_SALT)
 		spent.fuel = { ...(spent.fuel as object), claimAttempt: true, claimTxHash: `0x${"00".repeat(31)}ab` } as never
-		h.receiptStatus = "app_logic_reverted"
+		h.receiptStatus = "checkpointed"
 		h.privateFj = 122_000_000n
 		const resolved = await resolve(spent, true)
 		expect(resolved).toMatchObject({ kind: "opts" })

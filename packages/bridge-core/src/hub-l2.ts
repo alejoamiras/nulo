@@ -126,9 +126,10 @@ function splitRegisterFee(send: SendOpts): { register: SendOpts; claim: SendOpts
 	}
 }
 
-/** A landed transaction that reverted past its setup: the fee is charged and any message its setup
- *  consumed is spent, but nothing the app phase meant to do happened. */
-const revertedPastSetup = (status: unknown): boolean => /reverted/i.test(String(status ?? ""))
+/** A landed transaction that reverted past its setup: its block status is a mined one, its
+ *  execution result says reverted — the fee is charged and any message its setup consumed is
+ *  spent, but nothing the app phase meant to do happened. */
+const revertedPastSetup = (receipt: { executionResult?: unknown }): boolean => /reverted/i.test(String(receipt.executionResult ?? ""))
 
 /** Everything the L2 side needs from the L1 receipt + the journal. */
 export interface HubClaimParams {
@@ -161,7 +162,7 @@ export function isRegisterRace(e: unknown): boolean {
 	return /non-nullified L1 to L2 message|already nullified|duplicate nullifier|Nullifier already exists/i.test(msg)
 }
 
-type Sent = Promise<{ receipt: { txHash: unknown; status?: unknown } }>
+type Sent = Promise<{ receipt: { txHash: unknown; executionResult?: unknown } }>
 const txHashOf = async (sent: Sent) => String((await sent).receipt.txHash)
 
 export type HubClaimPath = "claim" | "register+claim" | "register,claim"
@@ -251,7 +252,7 @@ async function firstPrivateClaim(hub: ContractBase, p: HubClaimParams, send: Sen
 	try {
 		const { receipt } = await (hub.methods.register_token(...registerArgs(p.token)).send(register as never) as unknown as Sent)
 		registerTxHash = String(receipt.txHash)
-		if (revertedPastSetup(receipt.status)) {
+		if (revertedPastSetup(receipt)) {
 			// The registration's setup spent what paid for it before the public half reverted: the
 			// hash is the caller's evidence of that spend, and the claim retries against the credit.
 			send.onRegistered?.(registerTxHash)

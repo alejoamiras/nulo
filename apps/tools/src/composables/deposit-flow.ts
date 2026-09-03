@@ -135,9 +135,10 @@ export async function fuelReceiptStatus(txHash: string): Promise<"included" | "d
 	try {
 		const receipt = await createAztecNodeClient(NODE_URL).getTxReceipt(TxHash.fromString(txHash))
 		const status = String(receipt?.status ?? "pending").toLowerCase()
-		// A transaction that reverted past its setup still landed: the fee was charged and the Fee
-		// Juice message its setup consumed is spent, so it counts as included for the fuel's sake.
-		if (/checkpointed|proven|finalized|success|mined|reverted/.test(status)) return "included"
+		// A mined status is inclusion whatever the execution result: a transaction that reverted past
+		// its setup still landed, the fee was charged and the Fee Juice message its setup consumed is
+		// spent — so it counts as included for the fuel's sake, never as a claim to retry.
+		if (/checkpointed|proven|finalized|success|mined/.test(status)) return "included"
 		if (status.includes("dropped")) return "dropped"
 		return "pending"
 	} catch {
