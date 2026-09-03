@@ -558,6 +558,41 @@ after close()") — the known runner CDP flake on SW-untouched diffs (this branc
 under `apps/extension`). Re-run `--failed` once, per the standing rule; never neutralised. The
 rerun passed: quality, smoke and network e2e all green on ba110529.
 
+## Owner walk of the PR #542 preview — round 3 (2026-09-03)
+
+Three items, "not much more … great work":
+
+1. **The Aztec panel flipped to "Setting up session…" while the wallet asked for the token
+   permission.** Real bug: `retryCapabilities` re-ran the connect statuses (`capability-approval`
+   → `setting-up` → `connected`) on a session that was already connected, so the panel read as a
+   connection lost and re-made while the stepper's own PERMISSION phase was narrating the prompt.
+   A re-grant from a connected session now keeps the status put throughout; a retry from an error
+   state still walks the statuses as a fresh connect does. The session test pins that no status
+   change is observed across a connected re-grant.
+2. **"What happens with Register when the user has no gas?"** — answered from the code, no change:
+   - A private first send is two transactions from the user's account: `register_token` (a PRIVATE
+     hub function whose only public side effect is `_register(erc20, portal, token)` — no account
+     in it), then `claim_private`. A public first send is one: `register_and_claim_public`.
+   - Fueled private: the registration is paid by the SponsoredFPC (the bridged Fee Juice message
+     can be consumed by one transaction only, and that is the claim's, via the PrivateFPC's
+     `mint_and_pay_fee`). Publicly the register tx shows the SponsoredFPC as fee payer and the
+     token's words; the claim shows the PrivateFPC as fee payer. Neither carries the account.
+   - No fuel (the account already holds gas): both transactions go with NO fee option, so the
+     wallet's own picker chooses — exactly what a no-register private claim does today. That is
+     the "same behaviour" asked for. The honest caveat: the picker can choose PUBLIC Fee Juice,
+     which makes the account the visible fee payer of a private claim; that is the wallet's
+     default to fix (out of bridge scope, D34), not something the bridge decides.
+   - No gas at all: unreachable from the wizard since this arc — the amount step blocks Token alone
+     while both balances (public FJ, private FJ at the PrivateFPC) are known zero, and the claim's
+     own gate fails closed. "Register" for such an account happens only through Token + gas, where
+     the sponsor pays the registration.
+3. **UNI and WETH showed addresses in the list.** They come from the remote token list, not the
+   manifest; the row printed the address for every non-manifest token because a list can label any
+   address "USDC". The approved canvas had listed tokens showing a name, so: the address is on the
+   row only for a token the user added by address ("added by you"); a listed token shows its name,
+   keeps the checksummed address on hover, and the review's Details prints it in full, linked, with
+   the live-metadata conflict warning before anything is signed.
+
 ## Sign-off
 
 _Owner sign-off: PENDING._

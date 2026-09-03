@@ -23,11 +23,15 @@ const sprite = computed(() => hasSprite(props.token.logoKey))
 const symbol = computed(() => safeDisplay(props.token.symbol))
 const name = computed(() => safeDisplay(props.token.name))
 
-/** The identity the symbol only claims to be. Shown for every row the app does not publish itself —
- *  a list can label any address "USDC", and the address is the part that cannot lie. */
-const address = computed(() => (props.token.source === "manifest" ? null : trimAddress(checksumAddress(props.token.address), 8, 6)))
-
 const added = computed(() => props.token.source === "pasted")
+
+/** The identity the symbol only claims to be. On the row only for a token the user added by
+ *  address — that address is the whole reason the row exists. A listed token shows its name; its
+ *  address stays a hover away here and is printed in full, checksummed and linked, on the review,
+ *  where the live metadata is also checked against the list's claim before anything is signed. */
+const address = computed(() => (added.value ? trimAddress(checksumAddress(props.token.address), 8, 6) : null))
+
+const rowTitle = computed(() => (props.token.source === "manifest" ? undefined : checksumAddress(props.token.address)))
 
 const initials = computed(() => symbol.value.slice(0, 2).toUpperCase() || "??")
 
@@ -53,6 +57,7 @@ const balanceText = computed(() => {
 		:data-key="token.logoKey"
 		:data-selected="selected || undefined"
 		:aria-selected="selected"
+		:title="rowTitle"
 		@click="emit('select')"
 	>
 		<svg v-if="sprite" class="mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false" :data-testid="TESTIDS.sendTokenLogo">
@@ -64,15 +69,7 @@ const balanceText = computed(() => {
 		<span class="ident">
 			<span class="symbol">{{ symbol }}</span>
 			<span v-if="name && !added" class="name">{{ name }}</span>
-			<span
-				v-if="address"
-				class="address"
-				:data-testid="TESTIDS.sendTokenAddress"
-				:data-added="added || undefined"
-				:title="checksumAddress(token.address)"
-			>
-				{{ address }}<template v-if="added"> · added by you</template>
-			</span>
+			<span v-if="address" class="address" :data-testid="TESTIDS.sendTokenAddress" data-added>{{ address }} · added by you</span>
 		</span>
 		<span v-if="balanceText !== null" class="balance">{{ balanceText }}</span>
 	</button>

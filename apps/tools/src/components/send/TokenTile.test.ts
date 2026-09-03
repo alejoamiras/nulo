@@ -78,18 +78,19 @@ describe("TokenTile", () => {
 		w.unmount()
 	})
 
-	it("shows the checksummed address under the symbol for anything the app did not publish", () => {
+	it("a listed token shows its name, with the checksummed address a hover away — never on the row", () => {
 		const w = tile({ token: token({ source: "list" }) })
-		const row = w.find(sel(TESTIDS.sendTokenAddress))
-		// EIP-55 casing, and the FULL value on the title so the trimmed form is never the only copy.
-		expect(row.attributes("title")).toBe("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-		expect(row.text()).toBe("0xA0b869…06eB48")
+		expect(w.find(sel(TESTIDS.sendTokenAddress)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.sendTokenTile)).text()).toContain("USD Coin")
+		// EIP-55 casing on the title, so the address is reachable without cluttering the list.
+		expect(w.find(sel(TESTIDS.sendTokenTile)).attributes("title")).toBe("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
 		w.unmount()
 	})
 
-	it("shows no address for a manifest token — the app published that row itself", () => {
+	it("shows no address for a manifest token, on the row or on hover — the app published that row itself", () => {
 		const w = tile()
 		expect(w.find(sel(TESTIDS.sendTokenAddress)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.sendTokenTile)).attributes("title")).toBeUndefined()
 		w.unmount()
 	})
 
@@ -104,11 +105,11 @@ describe("TokenTile", () => {
 		w.unmount()
 	})
 
-	it("a row the user added says so beside its address, and shows no name line", () => {
+	it("a row the user added shows its trimmed address and says so, and no name line", () => {
 		const w = tile({ token: token({ source: "pasted", symbol: "PAXG", name: "Paxos Gold", logoKey: "11155111:0xfeed" }) })
 		const address = w.find(sel(TESTIDS.sendTokenAddress))
 		expect(address.attributes("data-added")).toBeDefined()
-		expect(address.text()).toContain("added by you")
+		expect(address.text()).toBe("0xA0b869…06eB48 · added by you")
 		expect(w.text()).not.toContain("Paxos Gold")
 		w.unmount()
 	})

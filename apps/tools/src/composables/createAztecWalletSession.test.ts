@@ -10,6 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest"
+import { watch } from "vue"
 
 vi.mock("@nulo/wallet-sdk-schema-patch/register", () => ({}))
 vi.mock("@/lib/chain-info", () => ({ readChainInfo: () => ({ chainId: 1 }) }))
@@ -1282,7 +1283,7 @@ describe("granted contracts on the session", () => {
 		expect(s.grantedContracts.value).toEqual([])
 	})
 
-	it("retryCapabilities resolves only once contract registration has finished", async () => {
+	it("retryCapabilities resolves only once contract registration has finished, and a connected session stays connected throughout", async () => {
 		let release: (() => void) | undefined
 		const registerContracts = vi
 			.fn(async () => {})
@@ -1291,18 +1292,25 @@ describe("granted contracts on the session", () => {
 		const { provider } = makeGrantProvider([MA_B])
 		const { session: s } = makeSessionWith({ registerContracts })
 		await driveThroughGrant(s, provider)
+		expect(s.status.value).toBe("connected")
 
+		// A re-grant is the caller's own phase to narrate; the panel must not flip to "awaiting
+		// permissions" or "setting up" as if the connection were being re-made.
+		const seen = new Set<string>()
+		const stop = watch(s.status, (v) => seen.add(v))
 		let settled = false
 		const retry = s.retryCapabilities().then(() => {
 			settled = true
 		})
 		await flush(8)
 		expect(settled).toBe(false)
-		expect(s.status.value).toBe("setting-up")
+		expect(s.status.value).toBe("connected")
 
 		release?.()
 		await retry
+		stop()
 		expect(settled).toBe(true)
 		expect(s.status.value).toBe("connected")
+		expect([...seen]).toEqual([])
 	})
 })
