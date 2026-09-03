@@ -552,6 +552,12 @@ shows it, and `useSend.test.ts` pins that a throwing grant resolves empty with t
 6104ff11. `/code-review` was NOT run on this round: the owner asked for it to be dropped as too
 token-intensive (2026-09-03); the codex loop is the review from here on.
 
+CI on ba110529: quality and network e2e green; smoke red on the extension's
+`sw-restart-network.test.ts` ("stopServiceWorker: the service-worker target was still alive 15s
+after close()") — the known runner CDP flake on SW-untouched diffs (this branch touches zero files
+under `apps/extension`). Re-run `--failed` once, per the standing rule; never neutralised. The
+rerun passed: quality, smoke and network e2e all green on ba110529.
+
 ## Sign-off
 
 _Owner sign-off: PENDING._
