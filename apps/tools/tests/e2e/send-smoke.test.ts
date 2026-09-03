@@ -161,8 +161,13 @@ vi.mock("@aztec/aztec.js/crypto", async (orig) => {
 	}
 })
 
-// The node behind the hub-binding read: a fake whose one method the mocked `hubBindingAt` never calls.
-vi.mock("@aztec/aztec.js/node", () => ({ createAztecNodeClient: () => ({ getPublicStorageAt: async () => undefined }) }))
+// The node answers the binding read and the fee read a private gas slice is priced from.
+vi.mock("@aztec/aztec.js/node", () => ({
+	createAztecNodeClient: () => ({
+		getPublicStorageAt: async () => undefined,
+		getCurrentMinFees: async () => ({ feePerDaGas: 10n, feePerL2Gas: 20n }),
+	}),
+}))
 // The gas-held read reaches the FeeJuice contract through the wallet; the smoke answers it directly.
 vi.mock("@/composables/useGasHeld", () => ({
 	useGasHeld: () => ({ held: h.state.gasHeld, refresh: async () => {}, dispose: () => {} }),
