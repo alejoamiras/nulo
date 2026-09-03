@@ -26,6 +26,9 @@ export interface SelectableToken {
 	logoKey: string
 }
 
+/** What the amount step needs to render a field: the catalog row has it before the chain is read. */
+export type AmountToken = Pick<SelectableToken, "symbol" | "decimals">
+
 /** The shape `SelectableToken.logoKey` carries: the committed sprite is keyed by identity, never by symbol. */
 export const logoKeyOf = (chainId: number, address: string): string => `${chainId}:${address}`
 

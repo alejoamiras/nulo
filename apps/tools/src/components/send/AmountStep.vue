@@ -2,7 +2,7 @@
 /** Utils */
 import { computed, watch } from "vue"
 import { parseAmountStrict, toDecimalString } from "@/lib/format"
-import type { Direction, GasLegPlan, ResolvedToken, SendIntent, TokenBalances } from "@/lib/send-model"
+import type { AmountToken, Direction, GasLegPlan, SendIntent, TokenBalances } from "@/lib/send-model"
 import { TESTIDS } from "@/lib/testids"
 
 /** Components */
@@ -13,7 +13,9 @@ export type RouteKind = "route" | "identity" | "no-route" | "unavailable"
 
 const props = defineProps<{
 	direction: Direction
-	token: ResolvedToken
+	token: AmountToken
+	/** The chain is still being read behind this step: the field is live, CONTINUE is not. */
+	resolving?: boolean
 	balances: TokenBalances
 	intent: SendIntent
 	/** A string model: the field must keep what the user typed, including a trailing separator. */
@@ -77,14 +79,14 @@ const amountError = computed<string | null>(() => {
 
 const showGas = computed(() => !isExit.value && props.intent !== "token")
 
+// Only an outcome is said; a route still being checked shows nothing rather than a spinner line.
 const routeLine = computed(() => {
-	if (isExit.value) return null
-	if (props.routeLoading) return "Checking gas options…"
-	return props.routeKind ? (ROUTE_LABEL[props.routeKind] ?? null) : null
+	if (isExit.value || props.routeLoading || !props.routeKind) return null
+	return ROUTE_LABEL[props.routeKind] ?? null
 })
 
 const canContinue = computed(() => {
-	if (props.blockedReason) return false
+	if (props.blockedReason || props.resolving) return false
 	if (!isExit.value && props.intent === "token" && props.tokenOnlyBlocked) return false
 	if (amountError.value !== null || parsed.value === null || parsed.value === 0n) return false
 	return !showGas.value || props.gas !== null

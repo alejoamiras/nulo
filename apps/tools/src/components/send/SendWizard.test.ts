@@ -27,6 +27,7 @@ const addPasted = vi.fn((address: string) => candidate(address))
 const catalogDispose = vi.fn()
 
 const selected = ref<ResolvedToken | null>(null)
+const selectLoading = ref(false)
 const balances = ref<TokenBalances>({})
 const selectionError = ref<string | null>(null)
 const selectDispose = vi.fn()
@@ -149,7 +150,7 @@ vi.mock("@/composables/useTokenSelection", () => ({
 	useTokenSelection: () => ({
 		selected,
 		balances,
-		loading: ref(false),
+		loading: selectLoading,
 		error: selectionError,
 		epoch: () => epoch,
 		select: selectFn,
@@ -202,15 +203,13 @@ const stubs = {
 		"lookup",
 		"addError",
 		"selected",
-		"resolved",
-		"resolving",
 		"selectionError",
-		"balances",
 		"rowBalances",
 	]),
 	AmountStep: stub("AmountStep", [
 		"direction",
 		"token",
+		"resolving",
 		"balances",
 		"intent",
 		"amount",
@@ -303,9 +302,8 @@ async function wizard() {
 /** Walk the wizard to the review step with a resolved token and a valid amount. The stub stands in
  *  for the real step's own validation, which is what the wizard gates on. */
 async function atReview(w: Awaited<ReturnType<typeof wizard>>, amount = "1") {
+	// Picking a row is the whole token step: the wizard is on the amount step when this resolves.
 	w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
-	await flushPromises()
-	w.findComponent({ name: "TokenStep" }).vm.$emit("next")
 	await flushPromises()
 	w.findComponent({ name: "AmountStep" }).vm.$emit("update:amount", amount)
 	w.findComponent({ name: "AmountStep" }).vm.$emit("update:valid", true)
@@ -368,7 +366,6 @@ describe("SendWizard", () => {
 		const w = await wizard()
 		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
 		await flushPromises()
-		w.findComponent({ name: "TokenStep" }).vm.$emit("next")
 		await flushPromises()
 		const amount = w.findComponent({ name: "AmountStep" })
 		amount.vm.$emit("update:amount", "1")
@@ -398,7 +395,6 @@ describe("SendWizard", () => {
 		const w = await wizard()
 		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
 		await flushPromises()
-		w.findComponent({ name: "TokenStep" }).vm.$emit("next")
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:amount", "1")
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
@@ -413,7 +409,6 @@ describe("SendWizard", () => {
 		const w = await wizard()
 		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
 		await flushPromises()
-		w.findComponent({ name: "TokenStep" }).vm.$emit("next")
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:amount", "1")
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
@@ -429,7 +424,6 @@ describe("SendWizard", () => {
 		const w = await wizard()
 		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
 		await flushPromises()
-		w.findComponent({ name: "TokenStep" }).vm.$emit("next")
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:amount", "1")
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "gas")
@@ -438,12 +432,39 @@ describe("SendWizard", () => {
 		expect(w.findComponent({ name: "AmountStep" }).props("gas").fuelAmount).toBe(10n ** 8n)
 	})
 
+	it("picking a row moves to the amount step at once, on the row's own symbol, and a failed read brings the user back", async () => {
+		let releaseSelect = (): void => {}
+		selectFn.mockImplementationOnce(async (token: SelectableToken) => {
+			selectLoading.value = true
+			await new Promise<void>((resolve) => {
+				releaseSelect = resolve
+			})
+			epoch++
+			selected.value = nextResolved(token)
+			selectLoading.value = false
+		})
+		const w = await wizard()
+		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
+		await flushPromises()
+		const amountStep = w.findComponent({ name: "AmountStep" })
+		expect(amountStep.exists()).toBe(true)
+		expect(amountStep.props("resolving")).toBe(true)
+		expect(amountStep.props("token")).toMatchObject({ symbol: candidate().symbol, decimals: candidate().decimals })
+		releaseSelect()
+		await flushPromises()
+		expect(w.findComponent({ name: "AmountStep" }).props("resolving")).toBe(false)
+
+		// A read that fails returns the user to the row, where the reason is shown.
+		selectionError.value = "That address is not an ERC-20."
+		await flushPromises()
+		expect(w.findComponent({ name: "TokenStep" }).exists()).toBe(true)
+		expect(w.findComponent({ name: "TokenStep" }).props("selectionError")).toContain("not an ERC-20")
+	})
+
 	it("a token-only send is blocked while the account is known to hold no gas, and released by adding gas", async () => {
 		gasHeld.value = false
 		const w = await wizard()
 		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
-		await flushPromises()
-		w.findComponent({ name: "TokenStep" }).vm.$emit("next")
 		await flushPromises()
 		const amountStep = () => w.findComponent({ name: "AmountStep" })
 		amountStep().vm.$emit("update:amount", "1")
@@ -665,7 +686,7 @@ describe("SendWizard", () => {
 		// The background reset re-resolved once (the token is still first-time at that point), and
 		// the user prepares the next send from it while the first is still running.
 		expect(selectFn).toHaveBeenCalledTimes(2)
-		w.findComponent({ name: "TokenStep" }).vm.$emit("next")
+		w.findComponent({ name: "WizardShell" }).vm.$emit("goto", 1)
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:amount", "2")
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:valid", true)
@@ -849,7 +870,6 @@ describe("SendWizard", () => {
 		const w = await wizard()
 		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
 		await flushPromises()
-		w.findComponent({ name: "TokenStep" }).vm.$emit("next")
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:amount", "1")
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
@@ -903,10 +923,9 @@ describe("SendWizard", () => {
 		const w = await wizard()
 		w.findComponent({ name: "WizardShell" }).vm.$emit("update:direction", "l2-to-l1")
 		await flushPromises()
-		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
-		await flushPromises()
-		expect(ensureGranted).toHaveBeenCalledTimes(1)
 		const review = await atReview(w)
+		// Picking the row raised the grant, before any amount was typed.
+		expect(ensureGranted).toHaveBeenCalledTimes(1)
 		expect(review.props("plan")).toEqual(expect.objectContaining({ direction: "l2-to-l1", recipientL1: L1_ADDRESS, amount: 10n ** 8n }))
 		expect(review.props("plan").gas).toBeUndefined()
 		review.vm.$emit("confirm")
@@ -920,8 +939,6 @@ describe("SendWizard", () => {
 		nextResolved = (token) => resolvedToken(token, HUB_REGISTERED)
 		const w = await wizard()
 		w.findComponent({ name: "WizardShell" }).vm.$emit("update:direction", "l2-to-l1")
-		await flushPromises()
-		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
 		await flushPromises()
 		const review = await atReview(w)
 		expect(review.props("grant")).toBe("pending")
@@ -947,7 +964,6 @@ describe("SendWizard", () => {
 		const w = await wizard()
 		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
 		await flushPromises()
-		w.findComponent({ name: "TokenStep" }).vm.$emit("next")
 		await flushPromises()
 		w.findComponent({ name: "WizardShell" }).vm.$emit("update:direction", "l2-to-l1")
 		await flushPromises()

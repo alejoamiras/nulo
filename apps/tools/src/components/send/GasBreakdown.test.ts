@@ -78,7 +78,7 @@ describe("GasBreakdown", () => {
 
 	it("shows the gas value as pending while the slice is being sized", () => {
 		const w = breakdown({ loading: true })
-		expect(w.find(sel(TESTIDS.sendGasBreakdownFuel)).text()).toContain("sizing")
+		expect(w.find(sel(TESTIDS.sendGasBreakdownFuel)).text()).toContain("—")
 		expect(w.find(sel(TESTIDS.sendGasBreakdown)).attributes("data-loading")).toBeDefined()
 		w.unmount()
 	})

@@ -33,7 +33,8 @@ const GAS = {
 
 type Props = {
 	direction: Direction
-	token: ResolvedToken
+	token: { symbol: string; decimals: number }
+	resolving?: boolean
 	balances: TokenBalances
 	intent: SendIntent
 	amount: string
@@ -92,8 +93,9 @@ describe("AmountStep", () => {
 		const line = w.find(sel(TESTIDS.sendRouteStatus))
 		expect(line.attributes("data-route")).toBe("no-route")
 		expect(line.text()).toContain("can't buy Aztec gas")
+		// A route still being checked shows nothing — no spinner line, no stale outcome.
 		await w.setProps({ routeLoading: true })
-		expect(w.find(sel(TESTIDS.sendRouteStatus)).text()).toContain("Checking gas options")
+		expect(w.find(sel(TESTIDS.sendRouteStatus)).exists()).toBe(false)
 		w.unmount()
 	})
 
@@ -243,6 +245,17 @@ describe("AmountStep", () => {
 		expect(w.emitted("update:valid")?.at(-1)).toEqual([false])
 		await w.setProps({ intent: "token+gas", gas: GAS })
 		expect(w.find(sel(TESTIDS.sendTokenOnlyBlocked)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.sendAmountNext)).attributes("disabled")).toBeUndefined()
+		w.unmount()
+	})
+
+	it("renders on the row's own symbol while the chain is still being read, with CONTINUE off", async () => {
+		const w = step({ token: { symbol: "USDC", decimals: 6 }, resolving: true, balances: {} })
+		expect(w.find(sel(TESTIDS.sendAmountInput)).exists()).toBe(true)
+		expect(w.text()).toContain("USDC")
+		expect(w.text()).not.toMatch(/reading|loading|checking/i)
+		expect(w.find(sel(TESTIDS.sendAmountNext)).attributes("disabled")).toBeDefined()
+		await w.setProps({ resolving: false, balances: { l1: 10_000_000n } })
 		expect(w.find(sel(TESTIDS.sendAmountNext)).attributes("disabled")).toBeUndefined()
 		w.unmount()
 	})

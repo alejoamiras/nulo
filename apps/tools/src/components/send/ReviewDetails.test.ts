@@ -1,6 +1,12 @@
 import { mount } from "@vue/test-utils"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { ExitPlan, GasLegPlan, ResolvedToken, SendPlan } from "@/lib/send-model"
+
+// The route's currencies are named against this network's WETH and Fee Juice.
+vi.mock("@/contracts/bridge-generation", () => ({
+	SWAP: { weth: "0x00000000000000000000000000000000000000e7" },
+	FEE_JUICE: { asset: "0x000000000000000000000000000000000000fee0" },
+}))
 import { TESTIDS } from "@/lib/testids"
 import ReviewDetails, { type PortalState } from "./ReviewDetails.vue"
 
@@ -19,19 +25,28 @@ function token(kind: "registered" | "portal-only" | "first-time" = "registered")
 		source: "manifest",
 		logoKey: `1:${USDC}`,
 		state: kind === "first-time" ? { kind } : { kind, registration: {}, l2Token: "0x01" },
-		portal: "0xportal",
+		portal: "0x94752ef7cf8f037f78ee7722a9387ef95c819fc8",
 		words: { nameWord: "0x01", symbolWord: "0x02" },
 		l2Token: "0x01",
 	} as unknown as ResolvedToken
 }
 
+const WETH = "0x00000000000000000000000000000000000000e7"
+const FJ = "0x000000000000000000000000000000000000fee0"
+const OTHER = "0x0000000000000000000000000000000000000abc"
+
+/** USDC → ETH → Fee Juice: the token enters the first pool as currency0, ETH the second as currency1. */
 function gas(hops: number): GasLegPlan {
+	const path = [
+		{ currency0: USDC, currency1: WETH, fee: 500, tickSpacing: 10, hooks: OTHER },
+		{ currency0: FJ, currency1: WETH, fee: 3000, tickSpacing: 60, hooks: OTHER },
+	].slice(0, hops)
 	return {
 		fuelAmount: 1_000_000n,
 		fuelFj: 1n,
 		quote: 1n,
 		minFuelOutput: 1n,
-		route: { path: Array.from({ length: hops }, () => ({})), zeroForOnes: [] },
+		route: { path, zeroForOnes: [true, false].slice(0, hops) },
 		capped: null,
 	} as unknown as GasLegPlan
 }
@@ -80,10 +95,13 @@ describe("ReviewDetails", () => {
 		w.unmount()
 	})
 
-	it("counts the pool hops a gas leg swaps through", async () => {
+	it("names the currencies a gas leg swaps through, in order, and counts the pools", async () => {
 		const w = await open(details({ plan: { ...DEPOSIT, intent: "token+gas", gas: gas(2) } }))
-		expect(w.find(sel(TESTIDS.sendReviewRoute)).text()).toContain("2 pool hops")
+		expect(w.find(sel(TESTIDS.sendReviewRoute)).text()).toContain("USDC → ETH → Fee Juice on Uniswap v4 (2 pools)")
+		const one = await open(details({ plan: { ...DEPOSIT, intent: "token+gas", gas: gas(1) } }))
+		expect(one.find(sel(TESTIDS.sendReviewRoute)).text()).toContain("USDC → ETH on Uniswap v4 (1 pool)")
 		w.unmount()
+		one.unmount()
 	})
 
 	it("says a send with no gas leg swaps nothing", async () => {
@@ -117,7 +135,7 @@ describe("ReviewDetails", () => {
 		verified.unmount()
 
 		const fresh = await open(details({ portalVerified: "absent", plan: { ...DEPOSIT, token: token("first-time") } }))
-		expect(fresh.find(sel(TESTIDS.sendReviewPortal)).text()).toContain("will be created")
+		expect(fresh.find(sel(TESTIDS.sendReviewPortal)).text()).toContain("created by this send")
 		fresh.unmount()
 	})
 
@@ -125,8 +143,8 @@ describe("ReviewDetails", () => {
 		const w = await open(details({ portalVerified: "unknown", plan: { ...DEPOSIT, token: token("first-time") } }))
 		const row = w.find(sel(TESTIDS.sendReviewPortal))
 		expect(row.attributes("data-portal")).toBe("unknown")
-		expect(row.text()).toContain("could not be read")
-		expect(row.text()).not.toContain("will be created")
+		expect(row.text()).toContain("not readable")
+		expect(row.text()).not.toContain("created by this send")
 		expect(row.text()).not.toContain("verified")
 		w.unmount()
 	})
@@ -136,7 +154,18 @@ describe("ReviewDetails", () => {
 		const row = w.find(sel(TESTIDS.sendReviewPortal))
 		expect(row.attributes("data-portal")).toBe("mismatch")
 		expect(row.text()).toContain("DIFFERENT address")
-		expect(row.text()).not.toContain("will be created")
+		expect(row.text()).not.toContain("created by this send")
+		w.unmount()
+	})
+
+	it("the token and the portal are links to the Ethereum explorer, on their full checksummed addresses", async () => {
+		const w = await open(details())
+		const tokenLink = w.find(sel(TESTIDS.sendReviewTokenLink))
+		expect(tokenLink.attributes("href")).toMatch(/\/address\/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48$/)
+		expect(tokenLink.attributes("rel")).toContain("noopener")
+		const portalLink = w.find(sel(TESTIDS.sendReviewPortalLink))
+		expect(portalLink.attributes("href")).toMatch(/\/address\/0x94752ef7Cf8f037F78EE7722a9387ef95c819fC8$/)
+		expect(portalLink.text()).toBe("0x94752ef7Cf8f037F78EE7722a9387ef95c819fC8")
 		w.unmount()
 	})
 

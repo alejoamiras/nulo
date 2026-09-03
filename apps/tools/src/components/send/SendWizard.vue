@@ -49,7 +49,7 @@ import { stepperPhases } from "@/lib/bridge-steps"
 import { formatBigInt, formatCompact, parseAmountStrict, toDecimalString } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
 import { safeDisplay } from "@/lib/token-display"
-import type { Direction, ExitPlan, GasLegPlan, ResolvedToken, SelectableToken, SendIntent, SendPlan } from "@/lib/send-model"
+import type { AmountToken, Direction, ExitPlan, GasLegPlan, ResolvedToken, SelectableToken, SendIntent, SendPlan } from "@/lib/send-model"
 
 /** The rail's own etas, summed and rounded UP — the review must never undersell how long this takes. */
 const DEPOSIT_TAKES = "usually 3–8 min end to end"
@@ -165,7 +165,15 @@ const amountUnits = computed(() => (resolved.value ? parseAmountStrict(amount.va
 
 // The strip's labels render a symbol a list or a pasted contract chose; stripped and capped like
 // every other place it lands.
-const tokenLabel = computed(() => (resolved.value ? safeDisplay(resolved.value.symbol) : undefined))
+/** What the amount step renders against: the chain's answer once it lands, the catalog row's own
+ *  symbol and decimals meanwhile, so picking a row moves on at once instead of waiting on a read. */
+const amountToken = computed<AmountToken | null>(() => {
+	if (resolved.value) return resolved.value
+	const row = picked.value
+	return row && row.decimals >= 0 ? { symbol: row.symbol, decimals: row.decimals } : null
+})
+
+const tokenLabel = computed(() => (amountToken.value ? safeDisplay(amountToken.value.symbol) : undefined))
 
 /** What the step strip shows for the amount once the user has moved past it. */
 const amountLabel = computed(() => {
@@ -360,12 +368,22 @@ function resetAmount(): void {
 	grantState.value = "idle"
 }
 
+/** Picking a row is the whole token step: the wizard moves to the amount at once and reads the
+ *  token behind it; a read that fails brings the user back to the row with the reason. */
 async function onSelect(token: SelectableToken): Promise<void> {
 	resetAmount()
 	addError.value = null
 	picked.value = token
+	if (token.decimals >= 0) goToStep(1)
 	await reselect(token, direction.value)
 }
+
+watch(
+	() => selection.error.value,
+	(failure) => {
+		if (failure) goToStep(0)
+	},
+)
 
 /** The looked-up token joins the list under the identity the lookup read, and the search clears so
  *  the new row is what the user sees selected. */
@@ -798,15 +816,11 @@ onBeforeUnmount(() => {
 				:lookup="lookup.state.value"
 				:add-error="addError"
 				:selected="picked"
-				:resolved="resolved"
-				:resolving="selection.loading.value"
 				:selection-error="selection.error.value"
-				:balances="selection.balances.value"
 				:row-balances="rowBalances.balances.value"
 				@update:search="catalog.search.value = $event"
 				@select="onSelect"
 				@add="onAdd"
-				@next="step = 1"
 			/>
 		</template>
 		<template #amount>
@@ -814,9 +828,10 @@ onBeforeUnmount(() => {
 				Something changed while you were on the review, so it was stood down. Check the amount and review again.
 			</p>
 			<AmountStep
-				v-if="resolved"
+				v-if="amountToken"
 				:direction="direction"
-				:token="resolved"
+				:token="amountToken"
+				:resolving="selection.loading.value"
 				:balances="selection.balances.value"
 				:intent="intent"
 				:amount="amount"

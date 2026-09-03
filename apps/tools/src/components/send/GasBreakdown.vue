@@ -2,11 +2,11 @@
 /** Utils */
 import { computed, ref } from "vue"
 import { formatCompact, toDecimalString } from "@/lib/format"
-import type { GasLegPlan, ResolvedToken, SendIntent } from "@/lib/send-model"
+import type { AmountToken, GasLegPlan, SendIntent } from "@/lib/send-model"
 import { TESTIDS } from "@/lib/testids"
 
 const props = defineProps<{
-	token: ResolvedToken
+	token: AmountToken
 	amount: bigint
 	/** `token+gas` sizes a slice for a number of transactions; `gas` spends the whole amount. */
 	intent: Extract<SendIntent, "token+gas" | "gas">
@@ -123,7 +123,7 @@ function onTarget(event: Event): void {
 			<p class="line" :data-testid="TESTIDS.sendGasBreakdownFuel">
 				<span class="what">Arrives as gas</span>
 				<span class="value">
-					<template v-if="loading">sizing…</template>
+					<template v-if="loading">—</template>
 					<template v-else>{{ gasArrives }} <span class="from" :data-testid="TESTIDS.sendGasShare">from {{ sliceText }} {{ token.symbol }}</span></template>
 				</span>
 			</p>
@@ -143,7 +143,7 @@ function onTarget(event: Event): void {
 		<template v-else>
 			<p class="line" :data-testid="TESTIDS.sendGasBreakdownFuel">
 				<span class="what">Arrives as gas</span>
-				<span class="value">{{ loading ? "sizing…" : gasArrives }}</span>
+				<span class="value">{{ loading ? "—" : gasArrives }}</span>
 			</p>
 			<p v-if="enoughFor !== null" class="line" :data-testid="TESTIDS.sendGasEnough">
 				<span class="what">Enough for</span>

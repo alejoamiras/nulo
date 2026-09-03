@@ -20,7 +20,7 @@ function token(kind: "registered" | "portal-only" | "first-time" = "registered")
 		source: "manifest",
 		logoKey: `1:${USDC}`,
 		state: kind === "first-time" ? { kind } : { kind, registration: {}, l2Token: "0x01" },
-		portal: "0xportal",
+		portal: "0x94752ef7cf8f037f78ee7722a9387ef95c819fc8",
 		words: { nameWord: "0x01", symbolWord: "0x02" },
 		l2Token: "0x01",
 	} as unknown as ResolvedToken

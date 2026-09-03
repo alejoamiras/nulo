@@ -2,8 +2,8 @@
 /** Utils */
 import { computed } from "vue"
 import type { LookupState } from "@/composables/useAddressLookup"
-import { formatBigInt, trimAddress } from "@/lib/format"
-import type { Direction, ResolvedToken, SelectableToken, TokenBalances } from "@/lib/send-model"
+import { trimAddress } from "@/lib/format"
+import type { Direction, SelectableToken } from "@/lib/send-model"
 import { TESTIDS } from "@/lib/testids"
 import { checksumAddress, safeDisplay } from "@/lib/token-display"
 
@@ -11,6 +11,7 @@ import { checksumAddress, safeDisplay } from "@/lib/token-display"
 import TokenList from "./TokenList.vue"
 import { monogramBackground } from "./token-sprite"
 
+/** Picking a row IS the step: the wizard moves on at once and reads the token behind the amount step. */
 const props = defineProps<{
 	direction: Direction
 	tokens: SelectableToken[]
@@ -22,10 +23,8 @@ const props = defineProps<{
 	/** What the catalog said when a looked-up address was added (a duplicate, the zero address, …). */
 	addError: string | null
 	selected: SelectableToken | null
-	resolved: ResolvedToken | null
-	resolving: boolean
+	/** Why the picked token could not be read; the wizard brings the user back here to see it. */
 	selectionError: string | null
-	balances: TokenBalances
 	/** Ethereum balances behind the rows, keyed by `logoKey`. */
 	rowBalances?: Record<string, bigint>
 }>()
@@ -33,19 +32,7 @@ const emit = defineEmits<{
 	"update:search": [value: string]
 	select: [token: SelectableToken]
 	add: [address: string]
-	next: []
 }>()
-
-const isExit = computed(() => props.direction === "l2-to-l1")
-
-const symbol = computed(() => safeDisplay(props.resolved?.symbol ?? props.selected?.symbol ?? ""))
-
-const decimals = computed(() => props.resolved?.decimals ?? props.selected?.decimals ?? -1)
-
-function balanceText(value: bigint | undefined): string {
-	if (value === undefined || decimals.value < 0) return "—"
-	return `${formatBigInt(value, decimals.value)} ${symbol.value}`.trim()
-}
 
 // The looked-up strings are whatever the contract answered: clamped and stripped before they render,
 // and never shown without the address they belong to.
@@ -59,8 +46,6 @@ const lookupAddress = computed(() => (props.lookup ? checksumAddress(props.looku
 const lookupShort = computed(() => (props.lookup ? trimAddress(lookupAddress.value, 8, 6) : ""))
 const lookupInitials = computed(() => found.value?.symbol.slice(0, 2).toUpperCase() || "??")
 const lookupMark = computed(() => ({ background: props.lookup ? monogramBackground(props.lookup.logoKey) : undefined }))
-
-const canContinue = computed(() => props.resolved !== null && !props.resolving)
 </script>
 
 <template>
@@ -84,6 +69,7 @@ const canContinue = computed(() => props.resolved !== null && !props.resolving)
 		</label>
 
 		<p v-if="catalogError" class="err" aria-live="polite" :data-testid="TESTIDS.sendCatalogError">{{ catalogError }}</p>
+		<p v-if="selectionError" class="err" aria-live="polite" :data-testid="TESTIDS.sendSelectionError">{{ selectionError }}</p>
 
 		<div v-if="lookup" class="lookup" aria-live="polite" :data-testid="TESTIDS.sendTokenLookup" :data-status="lookup.status">
 			<template v-if="found">
@@ -112,25 +98,6 @@ const canContinue = computed(() => props.resolved !== null && !props.resolving)
 			:empty="tokens.length === 0"
 			@select="emit('select', $event)"
 		/>
-
-		<p v-if="selectionError" class="err" aria-live="polite" :data-testid="TESTIDS.sendSelectionError">{{ selectionError }}</p>
-
-		<div class="foot">
-			<p class="summary" aria-live="polite" :data-testid="TESTIDS.sendTokenSummary">
-				<template v-if="resolving">Reading this token…</template>
-				<template v-else-if="selected && !isExit">
-					Sending {{ symbol }} · balance on Ethereum
-					<span :data-testid="TESTIDS.sendBalanceL1">{{ balanceText(balances.l1) }}</span>
-				</template>
-				<template v-else-if="selected">
-					Sending {{ symbol }} · private
-					<span :data-testid="TESTIDS.sendBalanceL2Private">{{ balanceText(balances.l2Private) }}</span>
-					· public
-					<span :data-testid="TESTIDS.sendBalanceL2Public">{{ balanceText(balances.l2Public) }}</span>
-				</template>
-			</p>
-			<button type="button" class="next" :disabled="!canContinue" :data-testid="TESTIDS.sendTokenNext" @click="emit('next')">CONTINUE</button>
-		</div>
 	</section>
 </template>
 
@@ -247,36 +214,5 @@ const canContinue = computed(() => props.resolved !== null && !props.resolving)
 	margin: 0;
 	font: 500 12px/1.5 var(--font-mono);
 	color: var(--red);
-}
-
-.foot {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 12px;
-}
-
-.summary {
-	margin: 0;
-	font: 500 12px/1.4 var(--font-mono);
-	color: var(--txt-secondary);
-}
-
-.next {
-	flex: none;
-	padding: 12px 20px;
-	background: var(--nulo-accent);
-	border: 1px solid var(--nulo-accent);
-	color: var(--txt-inverse);
-	font: 600 12px/1 var(--font-mono);
-	letter-spacing: 0.06em;
-	cursor: pointer;
-}
-
-.next:disabled {
-	background: transparent;
-	border-color: var(--nulo-outline);
-	color: var(--txt-secondary);
-	cursor: not-allowed;
 }
 </style>

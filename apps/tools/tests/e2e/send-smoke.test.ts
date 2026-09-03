@@ -426,8 +426,8 @@ async function pick(w: Wrapper, erc20: string): Promise<void> {
 	await settle()
 }
 
+/** Picking a row already moved the wizard to the amount step; this only waits out the route probe. */
 async function toAmount(w: Wrapper, amount: string, opts: { route?: boolean } = {}): Promise<void> {
-	await w.find(sel(TESTIDS.sendTokenNext)).trigger("click")
 	await settle(opts.route ? ROUTE_DEBOUNCE_MS : 0)
 	await w.find(sel(TESTIDS.sendAmountInput)).setValue(amount)
 	await settle()
@@ -516,6 +516,10 @@ describe("send wizard smoke", () => {
 		await settle()
 		expect(w.find(sel(TESTIDS.sendTokenLookup)).attributes("data-status")).toBe("found")
 		await w.find(sel(TESTIDS.sendLookupAdd)).trigger("click")
+		await settle()
+		// Adding IS picking: the wizard is on the amount step; the row waits in the list behind it.
+		expect(w.find(sel(TESTIDS.sendStepAmount)).exists()).toBe(true)
+		await w.find(sel(TESTIDS.sendAmountBack)).trigger("click")
 		await settle()
 		const tiles = w.findAll(sel(TESTIDS.sendTokenTile))
 		expect(tiles).toHaveLength(MANIFEST_TOKENS.length + 3)

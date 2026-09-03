@@ -476,6 +476,25 @@ which is the lesson: an `await` inserted between "the user confirmed" and "the s
 a window every reactive source can move in, and the review snapshot's identity — not its plan, not
 a flag — is the only thing that says the confirm still applies.
 
+## Owner walk of the PR #542 preview — round 2 (2026-09-03)
+
+Ten items. Four landed straight away; five are design choices put on a second canvas for the
+owner to pick from; the receipt (item 9) is deferred to a later arc at the owner's request.
+
+- Landed: the "Minting — confirm in your wallet" line goes (the button says MINTING…); picking a
+  row IS the token step — the wizard moves to the amount at once on the row's own symbol and reads
+  the token behind it, CONTINUE held until the read lands, a failed read brings the user back to
+  the row with the reason; the "Checking gas options…" and "sizing…" loaders go (nothing shows
+  until there is an outcome); Details: the token and the portal are Etherscan links on their full
+  addresses, the route names the currencies it walks ("USDC → ETH → Fee Juice on Uniswap v4
+  (2 pools)"), and "Portal: verified…" becomes the address plus one word of state.
+- On the canvas: the max/"Use all" control (item 4), the fee copy (6), where "private" sits on the
+  Arrives line (7), the "How the gas is sized" disclosure (8, four or five ways), and the wallet
+  permission for a new token as a stepper phase — before DEPOSIT or before CLAIM (10).
+- Item 10 has a safety edge the canvas has to show: the grant is raised BEFORE the L1 deposit today
+  so a declined permission costs nothing; raised at claim time it would leave a deposit waiting on
+  Ethereum until the user grants it.
+
 ## Sign-off
 
 _Owner sign-off: PENDING._

@@ -1,7 +1,7 @@
 import { mount } from "@vue/test-utils"
 import { describe, expect, it } from "vitest"
 import type { LookupState } from "@/composables/useAddressLookup"
-import type { Direction, ResolvedToken, SelectableToken, TokenBalances } from "@/lib/send-model"
+import type { Direction, SelectableToken } from "@/lib/send-model"
 import { TESTIDS } from "@/lib/testids"
 import TokenStep from "./TokenStep.vue"
 
@@ -26,16 +26,6 @@ function token(address: string, symbol: string, over: Partial<SelectableToken> =
 
 const TOKENS = [token(USDC, "USDC"), token(USDT, "USDT")]
 
-function resolved(kind: "registered" | "portal-only" | "first-time"): ResolvedToken {
-	return {
-		...token(USDC, "USDC"),
-		state: kind === "first-time" ? { kind } : { kind, registration: {}, l2Token: "0x01" },
-		portal: "0xportal",
-		words: { nameWord: "0x01", symbolWord: "0x02" },
-		l2Token: "0x01",
-	} as unknown as ResolvedToken
-}
-
 const LOGO = `1:${LINK}`
 const FOUND: LookupState = {
 	status: "found",
@@ -53,10 +43,7 @@ type Props = {
 	lookup: LookupState | null
 	addError: string | null
 	selected: SelectableToken | null
-	resolved: ResolvedToken | null
-	resolving: boolean
 	selectionError: string | null
-	balances: TokenBalances
 	rowBalances?: Record<string, bigint>
 }
 
@@ -72,10 +59,7 @@ function step(over: Partial<Props> = {}) {
 			lookup: null,
 			addError: null,
 			selected: null,
-			resolved: null,
-			resolving: false,
 			selectionError: null,
-			balances: {},
 			...over,
 		},
 	})
@@ -154,37 +138,10 @@ describe("TokenStep", () => {
 		w.unmount()
 	})
 
-	it("a deposit sums up the token and its Ethereum balance", () => {
-		const w = step({ selected: TOKENS[0], resolved: resolved("registered"), balances: { l1: 12_500_000n } })
-		expect(w.find(sel(TESTIDS.sendTokenSummary)).text()).toContain("Sending USDC")
-		expect(w.find(sel(TESTIDS.sendBalanceL1)).text()).toBe("12.50 USDC")
-		expect(w.find(sel(TESTIDS.sendBalanceL2Public)).exists()).toBe(false)
-		w.unmount()
-	})
-
-	it("an exit sums up both Aztec balances", () => {
-		const w = step({
-			direction: "l2-to-l1",
-			selected: TOKENS[0],
-			resolved: resolved("registered"),
-			balances: { l2Public: 1_000_000n, l2Private: 2_000_000n },
-		})
-		expect(w.find(sel(TESTIDS.sendBalanceL2Private)).text()).toBe("2.00 USDC")
-		expect(w.find(sel(TESTIDS.sendBalanceL2Public)).text()).toBe("1.00 USDC")
-		expect(w.find(sel(TESTIDS.sendBalanceL1)).exists()).toBe(false)
-		w.unmount()
-	})
-
-	it("shows no balance for a token whose decimals are not read yet", () => {
-		const w = step({ selected: token(USDT, "", { decimals: -1, source: "pasted" }), balances: { l1: 5n } })
-		expect(w.find(sel(TESTIDS.sendBalanceL1)).text()).toBe("—")
-		w.unmount()
-	})
-
-	it("says it is reading a token instead of summing up a stale one", () => {
-		const w = step({ selected: TOKENS[0], resolved: resolved("registered"), resolving: true, balances: { l1: 5n } })
-		expect(w.find(sel(TESTIDS.sendTokenSummary)).text()).toBe("Reading this token…")
-		expect(w.find(sel(TESTIDS.sendBalanceL1)).exists()).toBe(false)
+	it("has no footer, no summary and no CONTINUE — picking a row is the step", () => {
+		const w = step({ selected: TOKENS[0] })
+		expect(w.findAll("button").filter((b) => b.text() === "CONTINUE")).toHaveLength(0)
+		expect(w.text()).not.toMatch(/reading|sending|balance on/i)
 		w.unmount()
 	})
 
@@ -196,18 +153,8 @@ describe("TokenStep", () => {
 		w.unmount()
 	})
 
-	it("cannot continue before a token resolves", async () => {
-		const w = step({ selected: TOKENS[0], resolving: true })
-		expect(w.find(sel(TESTIDS.sendTokenNext)).attributes("disabled")).toBeDefined()
-		await w.setProps({ resolving: false, resolved: resolved("registered") })
-		expect(w.find(sel(TESTIDS.sendTokenNext)).attributes("disabled")).toBeUndefined()
-		await w.find(sel(TESTIDS.sendTokenNext)).trigger("click")
-		expect(w.emitted("next")).toHaveLength(1)
-		w.unmount()
-	})
-
 	it("keeps mechanism and first-time vocabulary out of the step", () => {
-		const w = step({ selected: TOKENS[0], resolved: resolved("first-time") })
+		const w = step({ selected: TOKENS[0] })
 		expect(w.text().toLowerCase()).not.toMatch(/portal|register|first time/)
 		w.unmount()
 	})

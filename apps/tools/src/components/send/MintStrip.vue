@@ -49,7 +49,8 @@ const l1 = useL1Wallet()
 const minting = ref<string | null>(null)
 const error = ref<string | null>(null)
 
-const status = computed(() => error.value ?? (minting.value ? "Minting — confirm in your Ethereum wallet…" : null))
+/** Only a failure is worth a line; the button itself says a mint is running. */
+const status = computed(() => error.value)
 
 async function mint(token: Mintable): Promise<void> {
 	if (minting.value) return

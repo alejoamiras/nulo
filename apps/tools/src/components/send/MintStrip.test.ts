@@ -65,7 +65,8 @@ describe("MintStrip", () => {
 		await w.findAll(sel(TESTIDS.mintL1))[0]?.trigger("click")
 		expect(w.findAll(sel(TESTIDS.mintL1)).map((b) => b.attributes("disabled"))).toEqual(["", ""])
 		expect(w.findAll(sel(TESTIDS.mintL1))[0]?.text()).toBe("MINTING…")
-		expect(w.find(sel(TESTIDS.mintL1Status)).text()).toContain("confirm")
+		// The button is the whole status; nothing else narrates a running mint.
+		expect(w.find(sel(TESTIDS.mintL1Status)).exists()).toBe(false)
 		release()
 		await flushPromises()
 		expect(writeContract).toHaveBeenCalledWith(expect.objectContaining({ address: MINTABLE, args: [address.value, 100n * 10n ** 6n] }))

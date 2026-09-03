@@ -16,6 +16,8 @@ vi.mock("@/contracts/bridge-generation", () => ({
 	MANIFEST_TOKENS: [
 		{ erc20: "0x70e0ba845a1a0f2da3359c97e0285013525ffc49", decimals: 6, displaySymbol: "USDC", source: "permissionless-mint" },
 	],
+	FEE_JUICE: { asset: "0x000000000000000000000000000000000000fee0" },
+	SWAP: undefined,
 }))
 
 /**
@@ -84,10 +86,7 @@ const TOKEN_STEP = {
 	lookup: null,
 	addError: null,
 	selected: TOKEN,
-	resolved: RESOLVED,
-	resolving: false,
 	selectionError: null,
-	balances: BALANCES,
 }
 const REVIEW = {
 	plan: PLAN,
