@@ -198,7 +198,29 @@ Gates after the round: bridge-core 428, tools 1086, lint 0, typecheck 0.
 Live validation of the seam (also the runbook's registering-sample path): third seed token
 **EURC** `0xc10bcb5a0519934e68b489a3a89ee28af8624d24` (tx `0x23b9e385…2a02`), pre-created on the
 candidate WITHOUT hub registration → portal `0x1b7806120b80f674719ae7e1be0cc039cc10ae34`, EURC/WETH
-pool seeded; then `fuel-testnet.ts --token EURC PRIVATE_RUNS=1`: recorded below.
+pool seeded; then `fuel-testnet.ts --token EURC PRIVATE_RUNS=1` — **green in 7.8 min**: the public
+lane landed as **`register+claim`** (`register_and_claim_public`, fee **4.621 FJ** — the real
+registering sample; EURC is now a registered, ordinary third token), the private lane a plain
+`claim_private` through the FPC (fee 2.845 FJ, exact ceiling 7.10 FJ at that moment). Printed:
+`minFuelFj` 4× = 28.41 FJ (< 29.58, floor stands), `fjPerTx` sample 2.845 FJ, `fjRegister` hint
+**1.776 FJ** (register+claim − plain). Because the public lane registered EURC first, the private
+lane did NOT exercise the sponsor-paid `register_token` path — a fourth token with
+`PUBLIC_RUNS=0` (`d6588bb9`) does that: recorded below.
+
+Round 2 (resumed, on `1de456c0`): "close" — one wallet-boundary miss, one policy point, one known
+gap, one nit.
+- MEDIUM `useSend.ts` `probeHubClaim` simulated with the seam key still in the options (the
+  wallet's option parser spreads unknown keys) — VERIFIED; fixed `bcca8f31`: `claimSendOpts`
+  (exported from `hub-l2.ts`, tested) strips it for the simulation as for the send.
+- MEDIUM "make `registerFee` mandatory when the private token is unregistered" — NOT adopted:
+  reusable fees (the sponsor, an account's own Fee Juice) legitimately pay both transactions, and
+  every script/sandbox caller relies on that; the app's fuel lane always sets the seam. The
+  invariant is stated on the type.
+- MEDIUM the validator pre-deploys the account, so the first-ever-account initialization shape
+  the 2.0M limit reserves headroom for stays unmeasured — the same KNOWN GAP `fuelClaim.ts`
+  documents for the direct lane; follow-up: an extension-driven e2e or a fresh undeployed-account
+  FPC claim.
+- LOW the manifest test now compares the `privateFpc` triple to the descriptor's exact values.
 
 ## Pre-flight the agent completed
 
