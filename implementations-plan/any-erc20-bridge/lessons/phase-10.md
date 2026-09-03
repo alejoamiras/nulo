@@ -452,6 +452,16 @@ All three fixed; the LOW declined.
   as "forbidden breadcrumbs". The ban is on CODE comments; `implementations-plan/**/lessons/` is
   where this repo records exactly these consults.
 
+**Codex round 3** (resumed): one HIGH, my own making in round 2. Awaiting the gas read with
+`submitting` set muted `invalidateReview` for that window, so an account switched during the read
+was ignored and the send would have targeted the live account under a review frozen for the old
+one; the same guard muted the re-resolution behind a backgrounded send (`submitting` spans the
+whole lane), leaving a next review priced first-time. Fixed: the read runs under its own
+`preflighting` lock (buttons held, review live); only a review still standing when the read
+returns goes on to sign; and the invalidation guard exempts a review built while a backgrounded
+send runs — the review that must not move is only the one being signed. Two gated tests pin the
+account switch under the read and the next review behind a backgrounded send.
+
 ## Sign-off
 
 _Owner sign-off: PENDING._

@@ -44,6 +44,7 @@ let grantOutcome: GrantOutcome = "granted"
 /** Whether the connected Aztec account holds gas; null = unknown. */
 const gasHeld = ref<boolean | null>(null)
 const gasHeldRefresh = vi.fn(async () => {})
+const selectedAccount = ref<string | null>(AZTEC_ACCOUNT)
 const ensureGranted = vi.fn(async (): Promise<GrantOutcome> => {
 	if (grantOutcome === "granted") granted.value = [...granted.value, L2_TOKEN]
 	return grantOutcome
@@ -101,7 +102,7 @@ vi.mock("@/composables/useL1Wallet", () => ({
 	useL1Wallet: () => ({ address: ref(L1_ADDRESS), chainId: ref(31337), publicClient: { readContract } }),
 }))
 vi.mock("@/composables/useBridgeWallet", () => ({
-	useBridgeWallet: () => ({ wallet: ref(null), selectedAccount: ref(AZTEC_ACCOUNT), status: ref("connected") }),
+	useBridgeWallet: () => ({ wallet: ref(null), selectedAccount, status: ref("connected") }),
 }))
 vi.mock("@/composables/useBridgeJournal", () => ({
 	useBridgeJournal: () => ({
@@ -324,6 +325,7 @@ describe("SendWizard", () => {
 		epoch = 0
 		gasHeld.value = null
 		gasHeldRefresh.mockReset().mockImplementation(async () => {})
+		selectedAccount.value = AZTEC_ACCOUNT
 		rekeys.value = {}
 		sessionLive.clear()
 		nextResolved = (token) => resolvedToken(token)
@@ -581,7 +583,30 @@ describe("SendWizard", () => {
 		expect(w.findComponent({ name: "AmountStep" }).props("tokenOnlyBlocked")).toContain("holds no gas")
 	})
 
-	it("a backgrounded send that lands re-resolves the token the user is preparing the next send from", async () => {
+	it("an account that switches while confirm reads the gas gate stands the review down; nothing signs", async () => {
+		let releaseRead = (): void => {}
+		gasHeldRefresh.mockImplementation(async () => {
+			await new Promise<void>((resolve) => {
+				releaseRead = resolve
+			})
+		})
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(w.findComponent({ name: "ReviewStep" }).props("busy")).toBe(true)
+		selectedAccount.value = `0x${"20".repeat(32)}`
+		await flushPromises()
+		// The review was stood down under the read; the read returning must not resurrect it.
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
+		releaseRead()
+		await flushPromises()
+		expect(sendFn).not.toHaveBeenCalled()
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
+		expect(w.find(`[data-testid="${TESTIDS.sendReviewStale}"]`).exists()).toBe(true)
+	})
+
+	it("a backgrounded send that lands re-resolves the token, standing down a next review priced from it", async () => {
 		let releaseSend = (): void => {}
 		sendFn.mockImplementation(async () => {
 			sessionLive.add("rec-1")
@@ -597,13 +622,26 @@ describe("SendWizard", () => {
 		await flushPromises()
 		w.findComponent({ name: "BridgeStepper" }).vm.$emit("background")
 		await flushPromises()
-		// The background reset re-resolved once (the token is still first-time at that point).
+		// The background reset re-resolved once (the token is still first-time at that point), and
+		// the user prepares the next send from it while the first is still running.
 		expect(selectFn).toHaveBeenCalledTimes(2)
+		w.findComponent({ name: "TokenStep" }).vm.$emit("next")
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("update:amount", "2")
+		w.findComponent({ name: "AmountStep" }).vm.$emit("update:valid", true)
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
+		await flushPromises()
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(true)
+
+		// The first send lands and may have registered the token: it is re-read, and the review
+		// priced before that read is stood down rather than signed.
 		releaseSend()
 		records.value = records.value.map((r) => (r.id === "rec-1" ? { ...r, completedAt: 2_000 } : r))
 		await flushPromises()
 		expect(selectFn).toHaveBeenCalledTimes(3)
-		expect(w.findComponent({ name: "TokenStep" }).exists()).toBe(true)
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
+		expect(w.find(`[data-testid="${TESTIDS.sendReviewStale}"]`).exists()).toBe(true)
 	})
 
 	it("NEW SEND re-resolves the token — a send that registered it must not be priced as first-time again", async () => {

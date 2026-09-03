@@ -131,6 +131,8 @@ const backgroundedLine = ref<string | null>(null)
 const backgroundedCanonical = computed(() => (backgroundedId.value ? journal.canonicalRecordId(backgroundedId.value) : null))
 const reviewSaid = ref<string | null>(null)
 const submitting = ref(false)
+/** Confirm's read of the gas gate: holds the buttons like a submit, but the review stays live. */
+const preflighting = ref(false)
 /** Record ids that existed before THIS submit — see `adoptRunRecord`. */
 let preSubmitIds = new Set<string>()
 
@@ -154,7 +156,7 @@ const resolved = selection.selected
 const ownedRecord = computed(() => (ownedId.value ? journal.records.value.find((r) => r.id === ownedId.value) : undefined))
 const activeRecord = computed(() => (activeId.value ? journal.records.value.find((r) => r.id === activeId.value) : undefined))
 
-const busy = computed(() => submitting.value || sendFlow.busy.value || exitFlow.busy.value)
+const busy = computed(() => preflighting.value || submitting.value || sendFlow.busy.value || exitFlow.busy.value)
 const flowError = computed(() => sendFlow.error.value ?? exitFlow.error.value)
 
 /** ---- amount ------------------------------------------------------------------------------- */
@@ -453,9 +455,12 @@ function goToStep(index: 0 | 1 | 2): void {
 }
 
 /** A change under the frozen review: the snapshot no longer describes what a confirm would send, so
- *  the wizard stands the review down and says why instead of signing a plan nobody read. */
+ *  the wizard stands the review down and says why instead of signing a plan nobody read. The one
+ *  review that must NOT move is the one being signed; a review built while a backgrounded send is
+ *  still running is a different review and moves like any other. */
 function invalidateReview(): void {
-	if (step.value !== 2 || stage.value !== "wizard" || submitting.value) return
+	const signingThisReview = submitting.value && backgroundedId.value === null
+	if (step.value !== 2 || stage.value !== "wizard" || signingThisReview) return
 	reviewed.value = null
 	step.value = 1
 	reviewStale.value = true
@@ -513,19 +518,33 @@ function adoptRunRecord(): void {
 }
 watch(journal.records, adoptRunRecord)
 
+/**
+ * The gas gate is re-read at CONFIRM, not trusted from when the amount step opened: gas spent
+ * elsewhere meanwhile would strand the deposit at its claim. The read holds the buttons but leaves
+ * the review live, so an account or chain that moves under it stands it down as usual; only a
+ * review still standing when the read returns goes on to sign.
+ */
+async function preflight(target: SendPlan | ExitPlan): Promise<boolean> {
+	if (target.direction !== "l1-to-l2" || target.intent !== "token") return true
+	preflighting.value = true
+	try {
+		await gasHeld.refresh()
+	} finally {
+		preflighting.value = false
+	}
+	if (reviewed.value?.plan !== target || step.value !== 2) return false
+	if (tokenOnlyBlocked.value !== null) {
+		invalidateReview()
+		return false
+	}
+	return true
+}
+
 async function onConfirm(): Promise<void> {
 	const target = reviewed.value?.plan
-	if (!target || submitting.value || stage.value !== "wizard") return
+	if (!target || submitting.value || preflighting.value || stage.value !== "wizard") return
+	if (!(await preflight(target))) return
 	submitting.value = true
-	// The frozen review is what gets signed, but the gas gate is re-read NOW, not trusted from when
-	// the amount step opened: gas spent elsewhere meanwhile would strand the deposit at its claim.
-	// `submitting` holds the buttons while the read runs.
-	if (!isExit.value && target.direction === "l1-to-l2" && target.intent === "token") await gasHeld.refresh()
-	if (tokenOnlyBlocked.value !== null) {
-		submitting.value = false
-		invalidateReview()
-		return
-	}
 	backgroundedId.value = null
 	backgroundedLine.value = null
 	preSubmitIds = new Set(journal.records.value.map((r) => r.id))
