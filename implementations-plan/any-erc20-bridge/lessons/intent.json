@@ -1,5 +1,5 @@
 {
-	"builtAt": "2026-09-03T11:52:24.169Z",
+	"builtAt": "2026-09-03T12:06:08.903Z",
 	"primaryRpc": "https://v5.testnet.rpc.aztec-labs.com",
 	"identity": {
 		"nodeVersion": "5.2.0-nightly.20260815",
@@ -27,7 +27,7 @@
 		"maxTotalEthSpend": "2.0",
 		"maxWethSeed": "1.5"
 	},
-	"startingBalanceEth": 6.396746871147657,
+	"startingBalanceEth": 6.3932331017343245,
 	"artifacts": {
 		"privateFpc": {
 			"address": "0x1a6d21ce5fd80137df0e99632a4ca17e58a42dc8f6c08191a96ca8ae907a1bc0",
@@ -40,7 +40,7 @@
 		}
 	},
 	"source": {
-		"commit": "ad2c0320e6f63af6f4aa5915ce7b89741d26c03f",
+		"commit": "68136c3b80a9e8d8c035ada3255cd37cecd020bc",
 		"treeClean": true,
 		"operationalAllowlist": [
 			"apps/tools/public/testnet-bridge.candidate.json",
