@@ -5,14 +5,14 @@
 	"walletChainId": 1816023401,
 	"bridge": {
 		"l1": {
+			"registry": "0xa0bfb1b494fb49041e5c6e8c2c1be09cd171c6ba",
 			"factory": "0xcb00b6b713f6170e1a42cb8ff933866e46945edc",
 			"implementation": "0x3ffbd5a04c13e500fe477a38979f684a045aaad2",
+			"guardian": "0xfcc2238319ac360e985f1736abb3df6251daf6f5",
 			"router": "0x218e782b748ce61d5c5d48d92dfbe55396353816",
 			"permit2": "0x000000000022d473030f116ddee9f6b43ac78ba3",
-			"feeJuicePortal": "0xb4a9f8eadc8ca944729d61e59a9f491faff237a3",
 			"swapTarget": "0x43857b88e2f625c873c051834fc51558801c4bb3",
-			"registry": "0xa0bfb1b494fb49041e5c6e8c2c1be09cd171c6ba",
-			"guardian": "0xfcc2238319ac360e985f1736abb3df6251daf6f5",
+			"feeJuicePortal": "0xb4a9f8eadc8ca944729d61e59a9f491faff237a3",
 			"swap": {
 				"poolManager": "0xe03a1074c86cfedd5c142c4f04f1a1536e203543",
 				"quoter": "0x61b3f2011a92d183c7dbadbda940a7555ccf9227",
@@ -30,9 +30,9 @@
 					"tickSpacing": 10
 				},
 				"slippageBps": 300,
-				"minFuelFj": "29580299742031535464",
-				"fjPerTx": "3114764656325445862",
-				"fjRegister": "2088297885442291480"
+				"minFuelFj": "29773418555864000000",
+				"fjPerTx": "3577823745897251607",
+				"fjRegister": "1967429819850912960"
 			}
 		},
 		"l2": {
@@ -73,6 +73,32 @@
 				"decimals": 6,
 				"displayName": "Test USDT",
 				"displaySymbol": "USDT",
+				"source": "permissionless-mint",
+				"sourceContract": "MintableERC20",
+				"maxWholePerTx": 1000000
+			},
+			{
+				"erc20": "0xc10bcb5a0519934e68b489a3a89ee28af8624d24",
+				"portal": "0x1b7806120b80f674719ae7e1be0cc039cc10ae34",
+				"l2Token": "0x025c9d3c1f026dd69e7244eea2538f2f7122d33dbd28b11a39fdef988d0fd7e6",
+				"nameWord": "0x0054657374204555524300000000000000000000000000000000000000000000",
+				"symbolWord": "0x0045555243000000000000000000000000000000000000000000000000000000",
+				"decimals": 6,
+				"displayName": "Test EURC",
+				"displaySymbol": "EURC",
+				"source": "permissionless-mint",
+				"sourceContract": "MintableERC20",
+				"maxWholePerTx": 1000000
+			},
+			{
+				"erc20": "0x177ead2a677858e376941390548fcf01a6ebefca",
+				"portal": "0x12c3db4596443e4c211bfe7c9c3d316ce57ad85d",
+				"l2Token": "0x0455dccf6a127a1ce9635495214b5aa36045d69c6ef3114def6043031b17cba9",
+				"nameWord": "0x0054657374204742504300000000000000000000000000000000000000000000",
+				"symbolWord": "0x0047425043000000000000000000000000000000000000000000000000000000",
+				"decimals": 6,
+				"displayName": "Test GBPC",
+				"displaySymbol": "GBPC",
 				"source": "permissionless-mint",
 				"sourceContract": "MintableERC20",
 				"maxWholePerTx": 1000000
