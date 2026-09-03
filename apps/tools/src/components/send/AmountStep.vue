@@ -155,8 +155,6 @@ function onUseAll(): void {
 			<p v-if="amountError" :id="AMOUNT_ERROR_ID" class="err" aria-live="polite" :data-testid="TESTIDS.sendAmountError">{{ amountError }}</p>
 		</div>
 
-		<slot name="nudge" />
-
 		<GasBreakdown
 			v-if="showGas && intent !== 'token'"
 			:token="token"

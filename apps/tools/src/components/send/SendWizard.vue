@@ -701,7 +701,7 @@ onBeforeUnmount(() => {
 	>
 		<template #token>
 			<!-- Renders only when the manifest publishes permissionless-mint tokens, so never on mainnet. -->
-			<MintStrip v-if="!isExit" class="mint" @minted="onMinted" />
+			<MintStrip v-if="!isExit" @minted="onMinted" />
 			<TokenStep
 				:direction="direction"
 				:tokens="catalog.filtered.value"
@@ -810,10 +810,6 @@ onBeforeUnmount(() => {
 	text-decoration: underline;
 	text-underline-offset: 3px;
 	cursor: pointer;
-}
-
-.mint {
-	margin-bottom: 12px;
 }
 
 .stale {

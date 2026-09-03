@@ -114,6 +114,7 @@ async function mint(token: Mintable): Promise<void> {
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
+	margin-bottom: 12px;
 	padding: 10px 12px;
 	border: 1px dashed var(--nulo-outline);
 }
