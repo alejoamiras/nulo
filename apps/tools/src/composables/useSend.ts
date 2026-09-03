@@ -475,6 +475,13 @@ async function performSend(plan: SendPlan, d: SendDeps): Promise<string> {
 	const recipient = d.bridgeWallet.selectedAccount.value
 	if (!wallet || !from) return failWith(d.error, "Connect your Ethereum wallet first.")
 	if (!recipient) return failWith(d.error, "Connect your Aztec wallet first.")
+	// The chain before the grant: a token resolved on another chain would otherwise leave a stale
+	// exact-address grant in the Aztec wallet for an L2 token that never existed.
+	try {
+		await assertL1Chain(d.l1)
+	} catch (e) {
+		return failWith(d.error, e instanceof Error ? e.message : String(e))
+	}
 	// BEFORE the Ethereum signature: a declined or superseded grant must cancel with nothing
 	// signed and nothing on chain.
 	if (plan.intent !== "gas") {

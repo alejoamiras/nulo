@@ -386,7 +386,10 @@ function invalidateReview(): void {
 
 watch(resolved, () => void verifyPortal())
 watch([step, resolved, direction], quoteRoute)
-watch([resolved, amount, intent, isPrivate, gas, () => bridge.selectedAccount.value, () => l1.address.value], invalidateReview)
+watch(
+	[resolved, amount, intent, isPrivate, gas, () => bridge.selectedAccount.value, () => l1.address.value, () => l1.chainId.value],
+	invalidateReview,
+)
 // The grant window closes the moment the send starts signing: from there the prompt is the wallet's.
 watch(
 	() => sendFlow.busy.value,

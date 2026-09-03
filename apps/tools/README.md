@@ -1,203 +1,178 @@
-# @nulo/tools
+# @nulo/tools — the Nulo tools app
 
-The Nulo tools web app for the Aztec Network — a testnet token drip, an L1↔L2 bridge and a fee-juice Fuel tab. Lets the Aztec Foundation team
-(or anyone with a wallet) self-mint test USDC + test ETH on
-**alpha-testnet** through Wonderland's permissionless `Dripper` contract.
+A standard Aztec dApp (it speaks `@aztec/wallet-sdk`; it touches no wallet code) with two tabs:
 
-One screen. Two token cards. Four drip buttons. No backend, no
-rate limit.
+- **Faucet** — self-mint the two test tokens (NULO, 6 dec; OLUN, 18 dec) on testnet through
+  Wonderland's permissionless `Dripper`. One screen, two token cards, four drip buttons. No backend,
+  no rate limit.
+- **Send** — move **any ERC-20** between Ethereum and Aztec through the generation the bundled
+  manifest names (an L1 `PortalFactory` + `SwapBridgeRouter`, one L2 `TokenBridgeHub`), with an
+  optional **gas leg**: a slice of the amount is swapped to Fee Juice on the way in so the arriving
+  account can pay for its own claim. Exits burn on L2 first, then consume on L1.
 
-For the full plan + audit transcripts see [`implementations-plan/faucet/`](../../implementations-plan/faucet/).
+Two build targets (`testnet.tools.nulo.sh`, `tools.nulo.sh`), selected at BUILD time by which vite
+config runs — never at runtime and never from a dashboard variable. A manifest with no `bridge`
+block renders the Send placeholder (both networks until a generation is promoted); the mainnet
+target additionally ships the whole-app placeholder (target-keyed, no faucet tab).
+
+Plans + audits: [`implementations-plan/faucet/`](../../implementations-plan/faucet/) (the faucet) and
+[`implementations-plan/any-erc20-bridge/`](../../implementations-plan/any-erc20-bridge/) (the Send tab).
 
 ## Quick start
 
 ```bash
 # from repo root
 bun install
-bun run --cwd apps/tools dev    # http://localhost:5176
+bun run --cwd apps/tools dev            # testnet target
 ```
 
-Connect with the Nulo extension (or any wallet that speaks
-`@aztec/wallet-sdk`). The tools app uses **discovery** to find wallets: every
-wallet that answers is listed in a picker and you choose explicitly (a
-wallet's name/icon/id are self-claimed, so the picker is a selection, not a
-trust decision — the emoji verification that follows is what proves the
-channel). Your choice is remembered per browser: the next
-Connect briefly re-scans and tries your previous selection; "use a
-different wallet" (or the `switch` action on the connected chip) forgets
-it. Collision detection is best-effort: if multiple wallets claim the
-remembered identity during the scan window, auto-reconnect turns itself
-off and the picker shows all claimants.
+Connect with the Nulo extension (or any wallet that speaks `@aztec/wallet-sdk`). The app uses
+**discovery** to find wallets: every wallet that answers is listed in a picker and you choose
+explicitly (a wallet's name/icon/id are self-claimed, so the picker is a selection, not a trust
+decision — the emoji verification that follows is what proves the channel). Your choice is
+remembered per browser; "use a different wallet" (or the `switch` action on the connected chip)
+forgets it. If multiple wallets claim the remembered identity during the scan window,
+auto-reconnect turns itself off and the picker shows all claimants.
 
-**Multiple accounts**: if your wallet shares more than one account, the
-tools app asks which one to use ("Choose main account") and remembers the
-answer per wallet. The connected chip shows the active account and opens
-a menu to switch anytime — switching drives all tabs (Drip, Bridge,
-Fuel) and is blocked while an operation is running, so nothing ever
-executes under an account other than the one it started with.
+**Multiple accounts**: if your wallet shares more than one account, the app asks which one to use
+and remembers the answer per wallet. The connected chip shows the active account and opens a menu
+to switch anytime — switching drives both tabs and is blocked while an operation is running, so
+nothing executes under an account other than the one it started with.
 
-## Deploy the contracts (one-time)
+The Send tab additionally needs an **Ethereum wallet** (EIP-1193, e.g. MetaMask) on the manifest's
+L1 chain; a wallet on another chain is told so before anything is signed.
 
-The first run requires the maintainer to deploy the `Dripper` + USDC +
-ETH contracts on alpha-testnet. The resulting addresses are written to
-`src/contracts/deployments.json` (and committed).
+## The Send tab
+
+`Token → Amount → Review`, then **Sign & send**: the Aztec wallet's grant prompt for the token, and
+the Ethereum wallet's signature(s) — a Permit2 approval on the token's first use, the seal signature
+for a private send, the deposit signature.
+
+- **Token** — the catalog is the manifest's pre-created tokens plus the community token list
+  (`packages/bridge-core/src/token-list.ts`: one pinned origin, validated, cached, never a logo
+  fetched — every tile is a committed sprite or a monogram). Any address can be pasted; its
+  metadata is read on chain and the portal is derived, never looked up. A token the factory has
+  seen before shows "portal verified" in the review; a first send creates the portal inline and
+  registers the token on its first claim — the only difference the user sees is a one-line note.
+- **Amount** — three choice cards (token only / token + gas / gas only) and one privacy row.
+  Gas is sized from the manifest's calibrated `fjPerTx`/`fjRegister` and re-quoted before signing
+  (`useGasShare`, `useRouteQuote`); a routeless token cannot carry gas and says so.
+- **Review** — a frozen five-line summary + collapsed details (addresses, route, effective rate,
+  the portal's derivation status). The wallet grant for the token's L2 contract is requested right
+  before the signature (`useTokenGrant`), and the journal record is written BEFORE the signature is
+  asked for, so a lost tab never loses a claim secret.
+- **Journal** — every in-flight send/exit, device-local, milestone facts only
+  (`useBridgeJournal` over `@nulo/bridge-core`'s journal engine). At boot each record's token block
+  is re-validated against the live factory registration; a record that disagrees is withheld
+  (`blocked`), never claimed. Records can be exported as a sealed backup and restored.
+- **Exit** (`useHubExit`) — preflights the chain, BOTH pause bits (L1 factory + L2 hub), the hub
+  binding and the balance before authorising a burn, states the burn-before-finish order in the
+  review, and never discards a record whose burn landed (a consume that fails re-reads the Outbox).
+
+## Deploy the faucet contracts (one-time)
+
+The `Dripper` + NULO + OLUN contracts are deployed once per network reset. The script writes
+`src/contracts/deployments.candidate.json` (candidate-first; it refuses the live path without
+`--allow-live-output`) and `live-intent.ts promote` moves it into the committed `deployments.json`.
 
 ```bash
 cd apps/tools
-export DEPLOYER_SECRET="<at-least-32-character-string>"
-export AZTEC_NODE_URL="https://rpc.testnet.aztec-labs.com"   # optional
-bun run deploy:testnet
+export DEPLOYER_SECRET_KEY=0x…  DEPLOYER_SALT=0x…   # or DEPLOYER_SECRET=<passphrase> for a fresh account
+bun run deploy:testnet          # idempotent: skips anything already at its computed address; writes the candidate
+bun run deploy:testnet:dry      # addresses only, no tx
 ```
 
-The deploy script:
-
-- Derives a Schnorr deployer account from `poseidon2(DEPLOYER_SECRET)`.
-- Pays deploy fees via the alpha-testnet **Sponsored FPC** (so the
-  deployer needs no balance).
-- Computes deterministic addresses from salts (Dripper: `1337`,
-  USDC: `4242`, ETH: `4243`).
-- Skips any contract already on-chain at the computed address —
-  idempotent.
-
-Dry-run to compute addresses without sending any tx:
-
-```bash
-bun run deploy:testnet:dry
-```
-
-Commit the resulting `src/contracts/deployments.json` and push.
+The bridge generation (factory + router + hub + pre-created tokens) is deployed by
+`packages/bridge-core/scripts/deploy-generation.ts`, candidate-first, and promoted into
+`public/testnet-bridge.json` by `live-intent.ts promote` — the full runbook is
+`.claude/skills/aztec-update/SKILL.md` Branch B. `bun run verify:deployments` re-derives the faucet
+addresses (and, with `BRIDGE_MANIFEST=<manifest>`, the whole generation) from the committed params;
+it runs inside the build CI gate.
 
 ## Production build + hosting
 
 ```bash
-bun run --cwd apps/tools build      # → apps/tools/dist/
+bun run --cwd apps/tools build:testnet   # → dist/ for testnet.tools.nulo.sh
+bun run --cwd apps/tools build:mainnet   # → dist/ for tools.nulo.sh (placeholder while bridge: null)
 ```
 
-Static output (~6 MB JS, ~7 MB wasm chunks, ~5.5 MB gzipped total).
+Static output. Hosting is **Cloudflare Pages**, one project per target:
 
-Hosting: **Cloudflare Pages** is the recommended fit.
+- Project root: `apps/tools`; install `bun install --frozen-lockfile`; build `bun run build:<target>`; output `dist`.
+- Env (Production AND Preview): `BUN_VERSION=1.4.0` (the image defaults to Bun 1.2.15, which cannot read
+  the repo's v2 lockfile) and `NODE_VERSION=24` (vite loads its config under the ambient Node; the
+  config imports raw `.ts` from `@nulo/resolve-asset`).
 
-- Project root: `apps/tools`
-- Install: `bun install --frozen-lockfile`
-- Build: `bun run build`
-- Output: `dist`
-- Env (Production AND Preview): `BUN_VERSION=1.4.0` — the Pages build image
-  defaults to Bun 1.2.15, which cannot read the repo's v2 lockfile; only this
-  variable selects the Bun version (no version file or `packageManager` is honored).
-
-`bb.js` needs cross-origin isolation. The tools app ships a
-`public/_headers` file with `Cross-Origin-Opener-Policy: same-origin` +
-`Cross-Origin-Embedder-Policy: require-corp` and a tight CSP. Cloudflare
-Pages respects `_headers` natively.
+`bb.js` needs cross-origin isolation. The build GENERATES `dist/_headers` (`vite.config.ts`) with
+COOP/COEP + a tight CSP whose `connect-src` is the target's (`src/lib/network-targets.ts`): the
+Aztec node hosts plus exactly one token-list host. `dist/build.json` + a `<meta name="nulo-build">`
+carry the build id and chain id the release pipeline's `verify-live` reads; `verify:build-target`
+asserts a built `dist/` matches the target it claims.
 
 ## Environment
 
 | Variable | Where it's read | Purpose |
 |---|---|---|
-| `AZTEC_NODE_URL` | `scripts/deploy.ts` only | Override alpha-testnet RPC for deploy |
-| `DEPLOYER_SECRET` | `scripts/deploy.ts` only | Seed for the deployer Schnorr account |
-| `VITE_AZTEC_NODE_URL` | Frontend (account-deployed probe) | Optional node URL the dApp uses |
-| `VITE_EXPLORER_BASE_URL` | Frontend | Base for tx + address explorer links |
-| `VITE_NULO_INSTALL_URL` | Frontend (no-wallet CTA) | Chrome Web Store link, defaults to a generic one |
+| `DEPLOYER_SECRET_KEY` + `DEPLOYER_SALT` (or `DEPLOYER_SECRET`) | `scripts/deploy.ts` only | The faucet deployer account |
+| `AZTEC_NODE_URL` | `scripts/deploy.ts` only | Override the deploy RPC |
+| `VITE_AZTEC_NODE_URL` | Frontend (dev/e2e only) | Override the target's node URL |
+| `VITE_EXPLORER_BASE_URL` | Frontend | Base for L2 explorer links |
+| `VITE_NULO_INSTALL_URL` | Frontend (no-wallet CTA) | Chrome Web Store link |
 
-The deploy env (`AZTEC_NODE_URL`) is deliberately separate from the
-frontend env (`VITE_AZTEC_NODE_URL`). The build never embeds `DEPLOYER_SECRET`.
-
-**Chain identity is NOT an env var.** The L1 chainId + rollup version that
-wallet-sdk discovery matches on are hardcoded in `src/lib/chain-constants.ts`
-(the tools app is testnet-only) — there is deliberately no `VITE_CHAIN_*` override.
-A stale Cloudflare `VITE_CHAIN_VERSION` once shadowed the value and broke the
-wallet handshake in prod ("No network configured for chainId 4138294185"), so
-the env path was removed. The production build also emits `dist/build.json` +
-a `<meta name="nulo-build">` (a matching `buildId` + the testnet `chainId`) that
-the release pipeline's post-deploy `verify-live` check reads.
+The build never embeds a deploy secret. **Chain identity is NOT an env var**: the L1 chain id +
+rollup version live in `src/lib/chain-constants.ts` and the per-target `FaucetTarget`; a stale
+Cloudflare `VITE_CHAIN_VERSION` once shadowed the value and broke the wallet handshake in prod, so
+the env path was removed. The bridge manifest is injected per target at build time
+(`VITE_BRIDGE_MANIFEST_JSON` via vite `define`) and strict-validated at module init — a manifest
+whose chain disagrees with the build target fails the app at boot (`src/lib/build-integrity.ts`).
 
 ## Tests
 
 ```bash
 bun run --cwd apps/tools typecheck   # vue-tsc
-bun run --cwd apps/tools test        # vitest unit + component
-bun run --cwd apps/tools test:e2e    # smoke e2e (mock wallet, jsdom)
+bun run --cwd apps/tools test        # vitest unit + component (jsdom)
+bun run --cwd apps/tools test:e2e    # smoke e2e: faucet + send wizard, mock wallets, jsdom
 ```
 
-The smoke e2e uses a mock wallet provider in jsdom — no real wallet, no
-Aztec network. Manual end-to-end against alpha-testnet is the
-maintainer's responsibility before merging deploy changes.
-
-## Architecture in one diagram
-
-```
-                  ┌──────────────────────────┐
-                  │  Aztec alpha-testnet      │
-                  │   Dripper (permissionless)│
-                  │   USDC (decimals=6)       │
-                  │   ETH (decimals=18)       │
-                  └──────────┬────────────────┘
-                             │ sponsored FPC fee
-                             │
-                       ┌─────▼──────┐
-                       │  Wallet    │  @aztec/wallet-sdk
-                       │  (Nulo)    │  encrypted MessagePort
-                       └─────┬──────┘
-                             │ window.postMessage
-                ┌────────────▼─────────────┐
-                │  apps/tools (this)  │
-                │                          │
-                │  Hero · WalletPanel ·    │
-                │  TokenCard × 2 ·         │
-                │  Toast · Footer          │
-                └──────────────────────────┘
-```
-
-Three composables (no Pinia):
-
-- `useWalletConnection` — discovery → emoji verify → capability approval → `setting-up` (register contracts) → connected
-- `useDrip` — single global in-flight drip; `interaction.request({ fee: new SponsoredFeePaymentMethod(fpc.address) })` embeds the sponsor call so the public-setup-phase passes the allow-list
-- `useTokenBalance` — polls every 15s. `balance_of_public` (public view) via `interaction.simulate({from})` → `SimulationResult.result`; `balance_of_private` (utility) via `wallet.executeUtility(call, opts)` → `UtilityExecutionResult.result[0]`
+The faucet smoke mounts the full app in jsdom against a **mock Aztec wallet** (intercepts
+`aztec-wallet-discovery` and answers canned RPC). The send smoke mounts the Send view over the
+REAL wizard composables and the REAL journal engine, faking only the chain/wallet boundary (the
+manifest, the two wallet sessions, the bridge-core calls that would reach a chain), and drives
+list / paste / grant-at-sign / no-route / first-time / 2-tx private / gas-only /
+exit-with-pause-preflight / placeholder scenarios. No browser, no real wallet, no network. Live
+behaviour is proven by the `packages/bridge-core` sandbox smoke and the testnet canaries, not here.
+See `tests/e2e/README.md`.
 
 ## File layout
 
 ```
 apps/tools/
-├── README.md                 ← you are here
-├── public/_headers           ← COOP/COEP/CSP for cloudflare pages
-├── scripts/deploy.ts         ← one-time deployer; idempotent
+├── public/                    ← testnet-bridge.json + mainnet-bridge.json (the generation manifests), favicon
+├── scripts/                   ← deploy.ts (faucet deployer), verify-deployments.ts, verify-build-target.ts
+├── vite.{testnet,mainnet}.config.mts ← the two build targets (inject the manifest + target)
 ├── src/
-│   ├── App.vue               ← single page
+│   ├── AppShell.vue           ← tabs; both tabs read ONE wallet session
+│   ├── views/                 ← FaucetView, SendView, MainnetPlaceholderView
 │   ├── components/
-│   │   ├── ui/               ← L1/L2 primitives (≥5 cases each)
-│   │   ├── composite/        ← L3 composites (≥10 cases each)
-│   │   └── *.vue             ← orchestration components (WalletPanel, TokenCard, …)
-│   ├── composables/          ← module-singleton state + side effects
-│   ├── contracts/
-│   │   ├── deployments.json  ← committed addresses (post-deploy)
-│   │   └── deployments.ts    ← parses + rebuilds ContractInstance
-│   ├── design/               ← vendored CSS vars from extension
-│   └── lib/                  ← pure helpers
-└── tests/e2e/                ← smoke (mock wallet in jsdom)
+│   │   ├── send/              ← the wizard: WizardShell, StepStrip, TokenStep/TokenList/TokenTile/PasteAddress,
+│   │   │                        AmountStep/ChoiceCards/GasBreakdown, ReviewStep/ReviewDetails, SendWizard
+│   │   ├── Bridge*.vue        ← stepper, receipt, journal cards, wallet panels
+│   │   └── *.vue              ← faucet + connection components
+│   ├── composables/           ← useSend, useHubExit, useTokenCatalog/Selection/Grant, useRouteQuote,
+│   │                            useGasShare, useBridgeJournal, useL1Wallet, useWalletConnection, …
+│   ├── contracts/             ← bridge-generation.ts (manifest reader), deployments.{json,ts}, the FPCs
+│   ├── lib/                   ← capabilities (per-token wallet grants), send-model, network-targets,
+│   │                            chain-constants, build-integrity, bridge-steps, token-display, …
+│   └── constants/tokens.ts    ← the faucet's two tokens
+└── tests/e2e/                 ← faucet-smoke + send-smoke (mock wallets, jsdom)
 ```
-
-See [`implementations-plan/faucet/plan-v2.md`](../../implementations-plan/faucet/plan-v2.md)
-for the full file-by-file walkthrough and the rationale for every
-non-obvious decision.
-
-## Send tab
-
-The second tab — **Send** — moves any ERC-20 between Ethereum and Aztec through the generation the
-bundled manifest names: an L1 `PortalFactory` (one storage-less portal clone per token) and one L2
-`TokenBridgeHub`. A send may carry a **gas leg**: a slice of the amount is swapped to Fee Juice on
-the way in, so the arriving account can pay for its own claim. A manifest with no `bridge` block is a
-placeholder — the tab says so and nothing wires the journal engine to a bridge that isn't there.
 
 ## What this is NOT
 
-Non-goals (from plan-v2 §12):
-
 - No backend, no analytics, no rate limit
-- No network switcher (alpha-testnet only)
-- No custom drip amounts (fixed 1,000 USDC / 1 ETH)
-- No `@nulo/ui` extraction (design tokens vendored)
-- No extension refactor — the tools app does not touch `apps/extension/**`
+- No network switcher — the target is fixed at build time
+- No custom drip amounts (fixed 1,000 NULO / 1 OLUN)
+- No wallet code: the app is a standard dApp over `@aztec/wallet-sdk` and never touches `apps/extension/**`
 - No i18n
 - No swap UI or transfer-between-users — that's the AMM playground
 - **No multi-tab safety.** The bridge journal lives in `localStorage` and its per-record lock and

@@ -30,6 +30,14 @@ vi.mock("@/contracts/bridge-generation", async () => {
 	}
 })
 
+// The chain guard is the send composable's; here it is the one knob `makePub` answers.
+vi.mock("@/composables/useSend", () => ({
+	assertL1Chain: async (l1: { publicClient: { getChainId: () => Promise<number> } }) => {
+		const live = await l1.publicClient.getChainId()
+		if (live !== 31337) throw new Error(`Your Ethereum wallet is on chain ${live}, but this bridge lives on chain 31337.`)
+	},
+}))
+
 const FIXTURE = rawManifest.bridge.tokens
 const USDC = FIXTURE[0]
 const USDT = FIXTURE[1]
@@ -94,6 +102,7 @@ interface Metadata {
 }
 
 interface PubBehaviour {
+	chainId?: number
 	registrations?: Map<string, Registration>
 	metadata?: Metadata
 	l1Balance?: bigint
@@ -120,7 +129,8 @@ function makePub(b: PubBehaviour) {
 	})
 	const call = vi.fn(async (args: { data: Hex }) => ({ data: metadataReturn(b.metadata, args.data) }))
 	const multicall = vi.fn(async () => [{ status: "success", result: b.l1Balance ?? 0n }])
-	return { readContract, call, multicall } as unknown as PublicClient
+	const getChainId = vi.fn(async () => b.chainId ?? 31337)
+	return { readContract, call, multicall, getChainId } as unknown as PublicClient
 }
 
 function makeHub(bindings: Map<string, string>) {
@@ -180,6 +190,15 @@ describe("useTokenSelection", () => {
 		})
 		return { selection, token_for }
 	}
+
+	it("a wallet on another chain resolves nothing - no registration read, no metadata, an error", async () => {
+		const pub = makePub({ registrations, chainId: 1 })
+		const { selection } = harness(pub)
+		await selection.select(selectable(USDC), "l1-to-l2")
+		expect(selection.selected.value).toBeNull()
+		expect(selection.error.value).toMatch(/on chain 1/)
+		expect((pub as unknown as { readContract: { mock: { calls: unknown[] } } }).readContract.mock.calls).toHaveLength(0)
+	})
 
 	it("resolves a registered token to the hub's own binding", async () => {
 		const pub = makePub({ registrations, l1Balance: 500n })

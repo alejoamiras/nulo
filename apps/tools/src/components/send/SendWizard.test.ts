@@ -93,7 +93,7 @@ vi.mock("@/contracts/bridge-generation", () => ({
 	MANIFEST_TOKENS: [],
 }))
 vi.mock("@/composables/useL1Wallet", () => ({
-	useL1Wallet: () => ({ address: ref(L1_ADDRESS), publicClient: { readContract } }),
+	useL1Wallet: () => ({ address: ref(L1_ADDRESS), chainId: ref(31337), publicClient: { readContract } }),
 }))
 vi.mock("@/composables/useBridgeWallet", () => ({
 	useBridgeWallet: () => ({ wallet: ref(null), selectedAccount: ref(AZTEC_ACCOUNT), status: ref("connected") }),

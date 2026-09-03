@@ -76,6 +76,44 @@ Current line: **`@aztec/* = 5.2.0`** (Noir wasm packages `noir-acvm_js` / `noir-
   the SponsoredFPC address is generation-dependent (both generations are deployed and funded on
   testnet — verify with a read-only balance probe before assuming).
 
+## Any-ERC-20 bridge couplings (one generation per network: factory + router + hub)
+
+- **Hub ↔ factory — a circular binding, deployed as one unit.** The L2 hub's address is salted with
+  the L1 factory's address (`salt = Fr(factory)`, `packages/bridge-core/src/manifest-v2.ts`
+  `deriveManifestHub`) and the factory's constructor takes the hub; the router binds the factory and
+  the `FeeJuicePortal` as immutables. `scripts/generation.ts` predicts the factory from the deployer's
+  pending nonce and refuses to broadcast if it moved. A network reset (moved `FeeJuicePortal`) or ANY
+  class-id shift below ⇒ a whole new generation via `deploy-generation.ts`; nothing is re-pinned.
+- **`tokenClassId` ↔ the standards `Token` artifact.** The hub's `token_class_id` is a constructor
+  immutable computed from the installed `@aztec-foundation/aztec-standards` JS artifact; every L2
+  token derives from it (`src/hub-token.ts`, class id pinned by `noir-artifact-classids.test.ts`,
+  address vector by `hub-token.test.ts`); the hub's Noir `token` dep (`Nargo.toml` tag) fixes the
+  selectors it calls on that class. A standards bump that moves the class id cannot be absorbed by a
+  deployed hub; moving the JS pin alone makes every derived L2 token address disagree with the live hub.
+- **Hub → protocol `ContractInstanceRegistry`.** `register_*` calls aztec-nr's
+  `publish_contract_instance_for_public_execution` (the 5.0.1 tag) to publish the derived token — a
+  call into the protocol registry the RUNNING network (the 5.2.0 JS line) must still route. The TXE
+  cannot exercise it; the sandbox smoke's first-time flows are the only pre-live canary
+  (`aztec-update` skill, drift detector 4).
+- **The sandbox runs the JS line, the contracts compile on the Noir line.**
+  `scripts/sandbox/local-network.ts` boots `aztec start --local-network` from
+  `~/.aztec/versions/<@aztec/aztec.js pin>` (read from `packages/bridge-core/package.json`, refuses a
+  partial toolchain); `contracts/bridge/aztec/scripts/compile.sh` pins `AZTEC_HOME` to 5.0.1. Bumping
+  the JS line means installing that version's toolchain for the sandbox WITHOUT touching the Noir pin.
+- **Token-list origin ↔ CSP.** `packages/bridge-core/src/token-list.ts` `TOKEN_LIST_ORIGIN` must be the
+  one list host in every target's `cspConnectSrc` (`apps/tools/src/lib/network-targets.ts`); the
+  `_headers` file is generated from it at build time. Moving the origin without the CSP silently
+  degrades the catalog to manifest-only. `TOKEN_LIST_LIVE=1` on `token-list.test.ts` is the real-origin
+  canary (the list is multi-chain now — entries are validated per chain, never as a whole).
+- **`txe-server` lockfile.** `contracts/bridge/aztec/txe-server/` is the committed mini-project whose
+  frozen lockfile pins the TXE server's dependency set (`run-txe-tests.sh` never `bun add`s). It moves
+  with the Noir line, not the JS line.
+- **Per-token wallet grants (`apps/tools/src/lib/capabilities.ts`).** `buildSendManifest` carries the
+  hub + the WHOLE set of granted tokens (exact L2 addresses; `burn_public`/`burn_private` for the exit
+  authwit) — a new token re-prompts and the approval REPLACES the stored grant, so a request never
+  carries just the newcomer. `useTokenGrant` verifies the returned scope against the request before
+  anything is signed; a wallet-sdk capability reshape reds there, not at send time.
+
 ## After you bump — validation gate
 - `bun run typecheck:all` (exit 0 — verify by exit code + grep, not `| tail`).
 - `bun run test:all` (units across ALL workspaces — plain `bun run test` is extension-only and does NOT carry the account KAT + freeze suites) + `bun run build`.

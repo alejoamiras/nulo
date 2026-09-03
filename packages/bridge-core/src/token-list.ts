@@ -29,9 +29,15 @@ export const tokenListEntrySchema = z.object({
 	logoURI: z.string().optional(),
 })
 
+/**
+ * Entries are validated one by one, AFTER the chain filter: a multi-chain list carries entries whose
+ * shape is foreign to ours (Solana addresses on chain 501000101), and one such entry must not take
+ * the whole catalog down with it. Only the entries on our chain are held to the entry schema; a
+ * malformed one is dropped, never persisted.
+ */
 export const tokenListSchema = z.object({
 	name: z.string(),
-	tokens: z.array(tokenListEntrySchema),
+	tokens: z.array(z.unknown()),
 })
 
 /** The persisted shape: addresses are already lowercased, so the cache is read back byte-strict. */
@@ -124,16 +130,23 @@ async function readCapped(res: Response, byteCap: number, controller: AbortContr
 	return text + decoder.decode()
 }
 
-function narrow(entries: readonly z.infer<typeof tokenListEntrySchema>[], chainId: number, cap: number): CatalogToken[] {
+const onChain = (entry: unknown, chainId: number): boolean =>
+	typeof entry === "object" && entry !== null && (entry as { chainId?: unknown }).chainId === chainId
+
+function narrow(entries: readonly unknown[], chainId: number, cap: number): CatalogToken[] {
 	const tokens: CatalogToken[] = []
 	const seen = new Set<string>()
-	for (const entry of entries) {
-		if (entry.chainId !== chainId) continue
+	for (const raw of entries) {
+		if (!onChain(raw, chainId)) continue
+		const parsed = tokenListEntrySchema.safeParse(raw)
+		if (!parsed.success) continue
+		const entry = parsed.data
 		const address = entry.address.toLowerCase() as Address
 		if (seen.has(address)) continue
 		seen.add(address)
 		const token: CatalogToken = { chainId, address, name: entry.name, symbol: entry.symbol, decimals: entry.decimals }
-		// The logo lands in an <img src>: only https survives, anything else is dropped rather than rendered.
+		// Nothing renders the logo today (tiles are committed sprites or a monogram); it is kept https-only
+		// so no future renderer can ever receive anything else.
 		if (entry.logoURI?.startsWith("https://")) token.logoURI = entry.logoURI
 		tokens.push(token)
 		if (tokens.length === cap) break

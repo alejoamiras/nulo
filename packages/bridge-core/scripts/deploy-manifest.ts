@@ -12,7 +12,7 @@
  * the rename/append survives a crash.
  */
 import { randomBytes } from "node:crypto"
-import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, writeSync } from "node:fs"
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync } from "node:fs"
 import { dirname, join } from "node:path"
 import z from "zod"
 import { evmAddressV2, type ManifestV2, parseManifestV2 } from "../src/manifest-v2"
@@ -168,6 +168,8 @@ function stampIdentity(journal: DeployJournal, identity: DeployIdentity): void {
 
 /** Passing `identity` stamps an empty journal with it and refuses one recorded on another network. */
 export function openDeployJournal(path: string, identity?: DeployIdentity): DeployJournal {
+	// A fresh checkout has no journal dir; the first append would otherwise fail on ENOENT.
+	mkdirSync(dirname(path), { recursive: true })
 	const steps = readDeployJournal(path)
 	const journal: DeployJournal = {
 		steps,

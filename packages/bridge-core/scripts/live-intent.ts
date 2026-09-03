@@ -167,11 +167,28 @@ const OPERATIONAL_ALLOWLIST = [
 	"apps/tools/src/contracts/deployments.candidate.json",
 	"apps/tools/src/contracts/deployments.json",
 	"packages/bridge-core/deploy-journal.jsonl",
+	"packages/bridge-core/deploy-journal/",
 	"implementations-plan/aztec-5.0.0-stable/lessons/",
 	"implementations-plan/aztec-5.0.1-line/lessons/",
 	"implementations-plan/tools-two-network/lessons/",
+	"implementations-plan/any-erc20-bridge/lessons/",
 	"apps/tools/public/testnet-bridge.journal.jsonl",
 ]
+
+/** A file entry matches exactly; only an entry ending in `/` matches by prefix — `deployments.json.ts`
+ *  is not `deployments.json`. */
+const isAllowlistedPath = (p: string): boolean => OPERATIONAL_ALLOWLIST.some((a) => (a.endsWith("/") ? p.startsWith(a) : p === a))
+
+/** A porcelain line is allowlisted only when EVERY path on it is: a rename (`R  old -> new`) names
+ *  two, and an allowlisted source must not launder a non-allowlisted destination. */
+function isNotAllowlisted(line: string): boolean {
+	return !line.slice(3).split(" -> ").every(isAllowlistedPath)
+}
+
+/** The committed intent every build pins the live identity against. A NETWORK RESET is the one
+ *  event this pin is built to refuse, so a reset arc's first committed step is re-pointing it at
+ *  the arc that recorded the new identity — never loosening the check. */
+const NO_RESET_BASELINE = "implementations-plan/aztec-5.0.0-stable/lessons/intent.json"
 
 /** Network-identity pinning against the COMMITTED previous-arc intent: no network reset has
  *  happened on this line (nodeVersion 5.0.0, rollupVersion unchanged), so every node-claimed
@@ -183,7 +200,7 @@ const OPERATIONAL_ALLOWLIST = [
  *  the lessons dir is allowlisted-dirty during live arcs, so a tree read could be
  *  silently re-pointed without tripping tree discipline. */
 function assertNoResetPins(identity: Awaited<ReturnType<typeof probeIdentity>>): void {
-	const previousArc = JSON.parse(git(["show", "HEAD:implementations-plan/aztec-5.0.0-stable/lessons/intent.json"], repoRoot)) as {
+	const previousArc = JSON.parse(git(["show", `HEAD:${NO_RESET_BASELINE}`], repoRoot)) as {
 		identity: { l1ChainId: number; rollupVersion: number }
 		l1: Record<string, string>
 	}
@@ -251,10 +268,7 @@ async function build(intentPath: string): Promise<void> {
 	if (!Number.isFinite(startingBalanceEth)) throw new Error(`could not read starting signer balance — STOP`)
 
 	const commit = git(["rev-parse", "HEAD"], repoRoot)
-	const dirty = run("git", ["status", "--porcelain"], { cwd: repoRoot })
-		.stdout.split("\n")
-		.filter(Boolean)
-		.filter((l) => !OPERATIONAL_ALLOWLIST.some((a) => l.slice(3).startsWith(a)))
+	const dirty = run("git", ["status", "--porcelain"], { cwd: repoRoot }).stdout.split("\n").filter(Boolean).filter(isNotAllowlisted)
 
 	const intent: DeployIntent = {
 		builtAt: new Date().toISOString(),
@@ -331,10 +345,7 @@ function assertIntentCommitted(intent: DeployIntent, intentPath: string): void {
  *  dirty during a live arc. A non-allowlisted source change must be committed (fix-forward, logged
  *  in lessons) before the next broadcast group — never carried silently into a promotion. */
 function assertTreeDiscipline(): void {
-	const dirty = run("git", ["status", "--porcelain"], { cwd: repoRoot })
-		.stdout.split("\n")
-		.filter(Boolean)
-		.filter((l) => !OPERATIONAL_ALLOWLIST.some((a) => l.slice(3).startsWith(a)))
+	const dirty = run("git", ["status", "--porcelain"], { cwd: repoRoot }).stdout.split("\n").filter(Boolean).filter(isNotAllowlisted)
 	if (dirty.length > 0) throw new Error(`non-allowlisted files dirty during the live arc — commit or revert first:\n${dirty.join("\n")}`)
 }
 
@@ -345,10 +356,12 @@ function assertNoSourceDrift(intent: DeployIntent): void {
 	if (!intent.source?.commit) return
 	// The intent is a type-cast JSON file: the commit is validated before it becomes a git argument.
 	if (!COMMIT_SHA.test(intent.source.commit)) throw new Error("intent.source.commit is not a 40-hex commit — STOP")
-	const changed = git(["diff", "--name-only", "--end-of-options", intent.source.commit, "HEAD", "--"], repoRoot)
+	// `--no-renames`: a rename reports only its destination, so a source file moved INTO an allowlisted
+	// dir would vanish from the list — as delete + add, the deleted source path is judged on its own.
+	const changed = git(["diff", "--name-only", "--no-renames", "--end-of-options", intent.source.commit, "HEAD", "--"], repoRoot)
 		.split("\n")
 		.filter(Boolean)
-		.filter((path) => !OPERATIONAL_ALLOWLIST.some((a) => path.startsWith(a)))
+		.filter((path) => !isAllowlistedPath(path))
 	if (changed.length > 0) {
 		throw new Error(
 			`deploy-relevant files changed since the intent was built (commit ${intent.source.commit.slice(0, 12)}):\n` +

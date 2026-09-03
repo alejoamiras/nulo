@@ -1,0 +1,74 @@
+# Phase 10 — Testnet deploy + owner sign-off (Arc 5)
+
+**Status: PENDING — owner-gated.** Everything below the line the agent can drive is prepared;
+the generation deploy signs with the pinned testnet key and the L2 deployer secret, and the
+sign-off is a live wallet-seam walk. Neither is an AFK action (hard limits: secrets, live
+broadcasts under a real key, sign-off).
+
+## Pre-flight the agent completed
+
+- The stack (#536–#540, stack #541) is rebased on `dev` `4df5eae5` with every gate green per commit
+  (`lessons/rebase-onto-dev.md`); the loops converged (arcs 1–5, the cross-arc pass, the rebase
+  verification).
+- The runbook is `.claude/skills/aztec-update/SKILL.md` § Branch B — steps 3–4 and 8–9 are this
+  phase; steps 1–2, 6–7, 10 do not apply (no reset: the testnet identity `11155111/1821665230` is
+  unchanged, so `NO_RESET_BASELINE` holds and `live-intent build` runs as-is).
+- The sandbox rehearsal (Branch B step 3) on the rebased chain: see "Sandbox rehearsal" below.
+- `TOKEN_LIST_LIVE=1` real-origin canary: green (and it caught the list going multi-chain — `lessons/phase-9.md`).
+- The seed tokens (`SEED_TOKENS`) must be the committed fake-USDC / fake-USDT `MintableERC20`
+  addresses on Sepolia, each sorting below WETH (`token < 0xfff9…`) — record them here before the
+  run; `--dry-run` validates only their shape.
+
+## Owner runbook (in order; every command from the repo root)
+
+1. `packages/bridge-core/.env`: `PRIVATE_KEY` (the plan-pinned testnet signer — the conductor
+   refuses any other), `SEPOLIA_RPC_URL`, `BRIDGE_DEPLOYER_SECRET_TESTNET` (≥ 16 chars; the SAME
+   value on every re-run — it derives the L2 deployer; pre-fund that account's fee juice or let the
+   sponsored FPC pay its deploy). The guardian: the conductor records the L1 signer as `guardianL1`
+   and the L2 deployer as `guardianL2` (the dedicated recorded testnet guardian — note both
+   addresses below).
+2. `bun packages/bridge-core/scripts/live-intent.ts build implementations-plan/any-erc20-bridge/lessons/intent.json`
+   → commit the intent.
+3. `SEED_TOKENS=<fakeUSDC>,<fakeUSDT> bun run --cwd packages/bridge-core deploy:generation deploy --dry-run`
+   then the same without `--dry-run` (~15 min of real proofs; journalled — a crash is re-run with
+   the SAME command; read the journal's last line against the chain first).
+4. `bun packages/bridge-core/scripts/live-intent.ts verify <intent>` (no `--candidate`), then the
+   candidate smokes: `smoke-existing-testnet.ts --config apps/tools/public/testnet-bridge.candidate.json`,
+   `smoke-swap-existing-testnet.ts --config …`, `fuel-testnet.ts --config …`.
+5. Calibrate (`fees.json` OUTSIDE the repo; a registering sample needs
+   `pre-create --no-register --seed-pool --token <third mintable>` + `fuel-testnet.ts --token <third>`):
+   `bun run --cwd packages/bridge-core deploy:generation calibrate --config <candidate> --samples <path>/fees.json`.
+6. `live-intent.ts verify <intent> --candidate <candidate>` → **commit the intent** →
+   `live-intent.ts promote <intent> --bridge-only` → commit `apps/tools/public/testnet-bridge.json`.
+7. Canaries: `verify:l1 --config apps/tools/public/testnet-bridge.json --strict` ·
+   `BRIDGE_MANIFEST=public/testnet-bridge.json bun run --cwd apps/tools verify:deployments` ·
+   `fuel-testnet.ts` with `PRIVATE_RUNS=1` · `fee-juice-canary-testnet.ts` · `drip-canary-testnet.ts`.
+8. Deploy `testnet.tools.nulo.sh` (Cloudflare Pages builds from the PR branch as a preview; the
+   production site follows `main`, not `dev` — the promoted manifest reaches it at the next promote).
+
+## Wallet-seam checklist (D34) — owner, live
+
+- [ ] register-and-claim public of a PASTED token: one grant prompt at Sign & send, one claim.
+- [ ] the 2-tx private first claim: `register_token` then `claim_private`, auto-continue, two prompts.
+- [ ] gas-only: the swapped slice arrives as Fee Juice and pays its own claim.
+- [ ] an exit: the burn authwit prompt, burn before finish, the L1 consume.
+- [ ] a paused-exit rejection: `set_exits_paused(true)` from the testnet guardian, the preflight
+      refuses before any burn, unpause.
+
+## Sandbox rehearsal (agent, post-rebase)
+
+`bun run --cwd packages/bridge-core deploy:sandbox --smoke` on the rebased chain (`8737bc83`), the
+5.2.0 JS line, an OWNED local network: **all 16 flows ✅, 6.5 min, exit 0** — (a) public claim,
+(b) private claim + relayed claim + wrong-recipient rejection, (c) token+gas self-paying claim,
+(d) gas-only into the FeeJuicePortal, (e) public + private exits through the Outbox, (f1) relayer-first
+registration, (f2) two concurrent first-time deposits, (f3) portal-only token registering on its first
+claim, (f4) routeless refusal before signing, (g) tampered registration rejected under sponsored /
+fee-juice-with-claim / private-FPC, (h) guardian pause blocks exits and not claims. Calibration
+identical to the P6 run: `fjPerTx=17785608960000`, `fjRegister=11924383920000` (local fee schedule —
+the testnet numbers come from step 5). The conductor path (`generation.ts`, `deploy-manifest.ts`,
+`deploy-sandbox.ts`, the hub-l2 / send-flow modules) is therefore proven on the post-rebase tree
+with dev's journal ports in place.
+
+## Sign-off
+
+_Owner sign-off: PENDING._

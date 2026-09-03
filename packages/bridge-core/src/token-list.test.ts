@@ -114,11 +114,27 @@ describe("loadTokenList", () => {
 		expect(await loadTokenList({ chainId: CHAIN, fetch: fetchImpl, kv })).toEqual({ tokens: [], provenance: "fallback" })
 	})
 
-	it("falls back when the body does not match the token-list schema", async () => {
+	it("falls back when the body is not a token list at all", async () => {
 		const kv = memoryKv()
-		const fetchImpl = fetchReturning(() => streamResponse(listBody([entry(A, { decimals: 999 })])))
+		const fetchImpl = fetchReturning(() => streamResponse(JSON.stringify({ name: "No tokens key" })))
 		expect((await loadTokenList({ chainId: CHAIN, fetch: fetchImpl, kv })).provenance).toBe("fallback")
 		expect(kv.store.has(KEY)).toBe(false)
+	})
+
+	it("drops a malformed entry on our chain and ignores foreign-chain shapes entirely", async () => {
+		const kv = memoryKv()
+		const solana = {
+			chainId: 501_000_101,
+			address: "5mbK36SZ7J19An8jFochhQS4of8g6BwUjbeCSxBSoWdp",
+			name: "michi",
+			symbol: "$MICHI",
+			decimals: 6,
+		}
+		const body = listBody([solana, entry(A, { decimals: 999 }), entry(B)])
+		const result = await loadTokenList({ chainId: CHAIN, fetch: fetchReturning(() => streamResponse(body)), kv })
+
+		expect(result.provenance).toBe("fresh")
+		expect(result.tokens.map((t) => t.address)).toEqual([B.toLowerCase()])
 	})
 
 	it("drops a poisoned cache and refetches instead of serving it", async () => {
@@ -171,4 +187,33 @@ describe("loadTokenList", () => {
 		const result = await loadTokenList({ chainId: CHAIN, fetch: fetchReturning(() => streamResponse(body)), kv })
 		expect(result.tokens.map((t) => t.logoURI)).toEqual(["https://cdn.example/a.png", undefined])
 	})
+})
+
+/**
+ * The real origin, opt-in: `TOKEN_LIST_LIVE=1`. Behaviour only — the origin answers, the schema
+ * holds, the chain filter narrows to Sepolia, and a second load is served from the cache without
+ * a request. Membership is never asserted — not even that Sepolia has entries; the list's contents
+ * are not ours.
+ */
+describe.skipIf(!process.env.TOKEN_LIST_LIVE)("loadTokenList against the real origin", () => {
+	it("fetches Sepolia entries fresh, then serves the cache", async () => {
+		const kv = memoryKv()
+		const calls = { count: 0 }
+		const counting: typeof fetch = (input, init) => {
+			calls.count++
+			return fetch(input, init)
+		}
+		const first = await loadTokenList({ chainId: CHAIN, fetch: counting, kv })
+
+		expect(first.provenance).toBe("fresh")
+		for (const t of first.tokens) {
+			expect(t.chainId).toBe(CHAIN)
+			expect(t.address).toMatch(/^0x[0-9a-f]{40}$/)
+		}
+
+		const second = await loadTokenList({ chainId: CHAIN, fetch: counting, kv })
+		expect(second.provenance).toBe("cache")
+		expect(second.tokens).toEqual(first.tokens)
+		expect(calls.count).toBe(1)
+	}, 30_000)
 })

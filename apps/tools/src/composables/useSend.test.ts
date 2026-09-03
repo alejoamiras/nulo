@@ -364,6 +364,15 @@ describe("useSend", () => {
 		expect(useBridgeJournal().records.value).toHaveLength(0)
 	})
 
+	it("a wallet on another chain is refused BEFORE the grant prompt - no prompt, no signature", async () => {
+		h.chainId.value = 1
+		const send = useSend()
+		expect(await send.send(plan())).toBe("")
+		expect(h.ensureGranted).not.toHaveBeenCalled()
+		expect(h.runSend).not.toHaveBeenCalled()
+		expect(send.error.value).toMatch(/on chain 1/)
+	})
+
 	it("a STALE grant (the selection moved) cancels the same way, with its own copy", async () => {
 		h.ensureGranted.mockImplementation(async () => "stale")
 		const send = useSend()
