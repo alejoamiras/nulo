@@ -5,7 +5,7 @@ import { formatBigInt, trimAddress } from "@/lib/format"
 import type { SelectableToken } from "@/lib/send-model"
 import { TESTIDS } from "@/lib/testids"
 import { checksumAddress, safeDisplay } from "@/lib/token-display"
-import { hasSprite } from "./token-sprite"
+import { hasSprite, monogramBackground, monogramHue } from "./token-sprite"
 
 const props = defineProps<{
 	token: SelectableToken
@@ -27,26 +27,20 @@ const name = computed(() => safeDisplay(props.token.name))
  *  a list can label any address "USDC", and the address is the part that cannot lie. */
 const address = computed(() => (props.token.source === "manifest" ? null : trimAddress(checksumAddress(props.token.address), 8, 6)))
 
+const added = computed(() => props.token.source === "pasted")
+
 const initials = computed(() => symbol.value.slice(0, 2).toUpperCase() || "??")
 
-// A token with no committed mark still needs a STABLE identity: the hue is derived from the
-// chain-qualified key, never from the symbol, so two tokens claiming one ticker never look alike.
-const hue = computed(() => {
-	let hash = 0
-	for (const char of props.token.logoKey) hash = (hash * 31 + char.charCodeAt(0)) % 360
-	return hash
-})
+const hue = computed(() => monogramHue(props.token.logoKey))
 
-const monogramStyle = computed(() => ({
-	background: `repeating-linear-gradient(135deg, hsl(${hue.value} 55% 42%) 0 6px, hsl(${hue.value} 55% 32%) 6px 12px)`,
-}))
+const monogramStyle = computed(() => ({ background: monogramBackground(props.token.logoKey) }))
 
 // A pasted token carries `decimals: -1` until the selection step reads them; formatting against that
 // sentinel would render a nonsense balance, so the row simply shows none.
 const balanceText = computed(() => {
 	const decimals = props.decimals ?? props.token.decimals
 	if (props.balance === undefined || decimals < 0) return null
-	return formatBigInt(props.balance, decimals)
+	return `${formatBigInt(props.balance, decimals)} ${symbol.value}`.trim()
 })
 </script>
 
@@ -69,15 +63,18 @@ const balanceText = computed(() => {
 		</span>
 		<span class="ident">
 			<span class="symbol">{{ symbol }}</span>
-			<span v-if="address" class="address" :data-testid="TESTIDS.sendTokenAddress" :title="checksumAddress(token.address)">
-				{{ address }}
+			<span v-if="name && !added" class="name">{{ name }}</span>
+			<span
+				v-if="address"
+				class="address"
+				:data-testid="TESTIDS.sendTokenAddress"
+				:data-added="added || undefined"
+				:title="checksumAddress(token.address)"
+			>
+				{{ address }}<template v-if="added"> · added by you</template>
 			</span>
-			<span class="name">{{ name }}</span>
 		</span>
-		<span class="trail">
-			<span v-if="balanceText !== null" class="balance">{{ balanceText }}</span>
-			<span class="source" :data-testid="TESTIDS.sendTokenSource" :data-source="token.source">{{ token.source }}</span>
-		</span>
+		<span v-if="balanceText !== null" class="balance">{{ balanceText }}</span>
 	</button>
 </template>
 
@@ -132,12 +129,6 @@ const balanceText = computed(() => {
 	color: var(--txt-primary);
 }
 
-.address {
-	font: 500 10px/1.2 var(--font-mono);
-	color: var(--txt-tertiary);
-	letter-spacing: 0.02em;
-}
-
 .name {
 	font: 500 11px/1.2 var(--font-mono);
 	color: var(--txt-secondary);
@@ -146,24 +137,16 @@ const balanceText = computed(() => {
 	white-space: nowrap;
 }
 
-.trail {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	margin-left: auto;
+.address {
+	font: 500 10px/1.2 var(--font-mono);
+	color: var(--txt-tertiary);
+	letter-spacing: 0.02em;
 }
 
 .balance {
+	margin-left: auto;
 	font: 500 12px/1 var(--font-mono);
 	color: var(--txt-primary);
-}
-
-.source {
-	font: 600 10px/1 var(--font-mono);
-	letter-spacing: 0.08em;
-	text-transform: uppercase;
-	color: var(--txt-tertiary);
-	border: 1px solid var(--nulo-border);
-	padding: 3px 5px;
+	white-space: nowrap;
 }
 </style>

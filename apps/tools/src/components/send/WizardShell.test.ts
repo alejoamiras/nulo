@@ -107,9 +107,9 @@ describe("WizardShell", () => {
 		const w = shell()
 		const live = w.find(sel(TESTIDS.sendStepAnnounce))
 		expect(live.attributes("aria-live")).toBe("polite")
-		expect(live.text()).toBe("Step 1 of 3: Token")
+		expect(live.text()).toBe("Step 1 of 3 — what are you sending?")
 		await w.setProps({ step: 2 })
-		expect(w.find(sel(TESTIDS.sendStepAnnounce)).text()).toBe("Step 3 of 3: Review")
+		expect(w.find(sel(TESTIDS.sendStepAnnounce)).text()).toBe("Step 3 of 3 — check it, then sign.")
 	})
 
 	it("never emits a positive tabindex anywhere in the segment", () => {

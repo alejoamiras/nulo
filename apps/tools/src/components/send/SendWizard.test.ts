@@ -128,6 +128,12 @@ vi.mock("@/composables/useTokenCatalog", () => ({
 		dispose: catalogDispose,
 	}),
 }))
+vi.mock("@/composables/useAddressLookup", () => ({
+	useAddressLookup: () => ({ state: ref(null), dispose: vi.fn() }),
+}))
+vi.mock("@/composables/useRowBalances", () => ({
+	useRowBalances: () => ({ balances: ref({}), refresh: vi.fn(async () => {}), dispose: vi.fn() }),
+}))
 vi.mock("@/composables/useTokenSelection", () => ({
 	useTokenSelection: () => ({
 		selected,
@@ -171,15 +177,16 @@ const stubs = {
 		"direction",
 		"tokens",
 		"search",
-		"provenance",
 		"loading",
 		"catalogError",
+		"lookup",
+		"addError",
 		"selected",
 		"resolved",
 		"resolving",
 		"selectionError",
 		"balances",
-		"pasteError",
+		"rowBalances",
 	]),
 	AmountStep: stub("AmountStep", [
 		"direction",
@@ -650,14 +657,14 @@ describe("SendWizard", () => {
 		expect(releaseForeground).toHaveBeenCalledWith("rec-2")
 	})
 
-	it("a paste that the catalog refuses surfaces on the token step and selects nothing", async () => {
+	it("an address the catalog refuses surfaces on the token step and selects nothing", async () => {
 		addPasted.mockImplementation(() => {
 			throw new Error("The zero address is not a token.")
 		})
 		const w = await wizard()
-		w.findComponent({ name: "TokenStep" }).vm.$emit("paste", "0x0")
+		w.findComponent({ name: "TokenStep" }).vm.$emit("add", "0x0")
 		await flushPromises()
-		expect(w.findComponent({ name: "TokenStep" }).props("pasteError")).toBe("The zero address is not a token.")
+		expect(w.findComponent({ name: "TokenStep" }).props("addError")).toBe("The zero address is not a token.")
 		expect(selectFn).not.toHaveBeenCalled()
 	})
 

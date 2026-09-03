@@ -30,14 +30,13 @@ type Props = {
 	selected: SelectableToken | null
 	balances: Record<string, bigint>
 	loading: boolean
-	provenance: "fresh" | "cache" | "fallback" | "none"
 	empty: boolean
 }
 
 function list(over: Partial<Props> = {}) {
 	return mount(TokenList, {
 		attachTo: document.body,
-		props: { tokens: TOKENS, selected: null, loading: false, provenance: "fresh", empty: false, ...over },
+		props: { tokens: TOKENS, selected: null, loading: false, empty: false, ...over },
 	})
 }
 
@@ -92,23 +91,17 @@ describe("TokenList", () => {
 		w.unmount()
 	})
 
-	it("says where the list came from", () => {
-		const w = list({ provenance: "cache" })
-		const line = w.find(sel(TESTIDS.sendCatalogProvenance))
-		expect(line.attributes("data-provenance")).toBe("cache")
-		expect(line.text()).toContain("last visit")
+	it("says so while loading, and nothing about where the list came from otherwise", () => {
+		const w = list({ loading: true })
+		expect(w.find(sel(TESTIDS.sendCatalogLoading)).text()).toContain("Loading")
+		const settled = list()
+		expect(settled.find(sel(TESTIDS.sendCatalogLoading)).exists()).toBe(false)
+		expect(settled.text().toLowerCase()).not.toMatch(/manifest|list|pasted|cache/)
 		w.unmount()
+		settled.unmount()
 	})
 
-	it("says so while loading, without claiming a provenance it does not have yet", () => {
-		const w = list({ loading: true, provenance: "none" })
-		const line = w.find(sel(TESTIDS.sendCatalogProvenance))
-		expect(line.attributes("data-loading")).toBeDefined()
-		expect(line.text()).toContain("Loading")
-		w.unmount()
-	})
-
-	it("offers the paste route when the filter matches nothing", () => {
+	it("offers the address route when the filter matches nothing", () => {
 		const w = list({ tokens: [], empty: true })
 		expect(w.find(sel(TESTIDS.sendCatalogEmpty)).text()).toContain("Paste")
 		w.unmount()

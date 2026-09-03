@@ -19,13 +19,14 @@ import { HUB, HUB_TOKEN_ARTIFACT, SEND_GENERATION, SWAP } from "@/contracts/brid
 /** Components */
 import BridgeReceipt, { type ReceiptSnapshot } from "@/components/BridgeReceipt.vue"
 import BridgeStepper from "@/components/BridgeStepper.vue"
-import MintTestToken from "@/components/MintTestToken.vue"
 import AmountStep from "./AmountStep.vue"
+import MintStrip from "./MintStrip.vue"
 import ReviewStep from "./ReviewStep.vue"
 import TokenStep from "./TokenStep.vue"
 import WizardShell from "./WizardShell.vue"
 
 /** Composables */
+import { useAddressLookup } from "@/composables/useAddressLookup"
 import { useBridgeBackup } from "@/composables/useBridgeBackup"
 import { useBridgeJournal } from "@/composables/useBridgeJournal"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
@@ -34,6 +35,7 @@ import { useGasShare } from "@/composables/useGasShare"
 import { EXIT_TOKEN_NOT_REGISTERED, useHubExit } from "@/composables/useHubExit"
 import { useL1Wallet } from "@/composables/useL1Wallet"
 import { useRouteQuote } from "@/composables/useRouteQuote"
+import { useRowBalances } from "@/composables/useRowBalances"
 import { useSend } from "@/composables/useSend"
 import { useToast } from "@/composables/useToast"
 import { useTokenCatalog } from "@/composables/useTokenCatalog"
@@ -61,6 +63,17 @@ const addToken = useAddDripToken()
 const { push: pushToast } = useToast()
 
 const catalog = useTokenCatalog()
+const lookup = useAddressLookup({
+	pub: () => l1.publicClient as unknown as PublicClient,
+	query: catalog.search,
+	known: () => catalog.tokens.value,
+	chainId: () => catalog.chainId,
+})
+const rowBalances = useRowBalances({
+	pub: () => l1.publicClient as unknown as PublicClient,
+	owner: () => l1.address.value ?? undefined,
+	tokens: () => catalog.tokens.value,
+})
 const selection = useTokenSelection({
 	pub: () => l1.publicClient as unknown as PublicClient,
 	l1Account: () => l1.address.value ?? undefined,
@@ -83,7 +96,7 @@ const step = ref<0 | 1 | 2>(0)
 const intent = ref<SendIntent>("token")
 const amount = ref("")
 const isPrivate = ref(true)
-const pasteError = ref<string | null>(null)
+const addError = ref<string | null>(null)
 const grantState = ref<"idle" | "pending" | "declined" | "busy">("idle")
 /** What the user tapped, held separately from what the chain came back with: the list must keep the
  *  tapped row lit while it resolves, and a failed resolve leaves nothing selected. */
@@ -132,6 +145,13 @@ const flowError = computed(() => sendFlow.error.value ?? exitFlow.error.value)
 /** ---- amount ------------------------------------------------------------------------------- */
 
 const amountUnits = computed(() => (resolved.value ? parseAmountStrict(amount.value, resolved.value.decimals) : null))
+
+/** What the step strip shows for the amount once the user has moved past it. */
+const amountLabel = computed(() => {
+	const token = resolved.value
+	const units = amountUnits.value
+	return token && units !== null && units > 0n ? `${toDecimalString(units, token.decimals)} ${token.symbol}` : undefined
+})
 
 /** ---- the gas leg -------------------------------------------------------------------------- */
 
@@ -294,18 +314,29 @@ function resetAmount(): void {
 
 async function onSelect(token: SelectableToken): Promise<void> {
 	resetAmount()
-	pasteError.value = null
+	addError.value = null
 	picked.value = token
 	await reselect(token, direction.value)
 }
 
-async function onPaste(address: string): Promise<void> {
-	pasteError.value = null
+/** The looked-up token joins the list under the identity the lookup read, and the search clears so
+ *  the new row is what the user sees selected. */
+async function onAdd(address: string): Promise<void> {
+	addError.value = null
+	const seen = lookup.state.value
+	const identity = seen?.status === "found" && seen.address === address ? seen.identity : undefined
 	try {
-		await onSelect(catalog.addPasted(address))
+		const token = catalog.addPasted(address, identity)
+		catalog.search.value = ""
+		await onSelect(token)
 	} catch (e) {
-		pasteError.value = e instanceof Error ? e.message : "That address could not be added."
+		addError.value = e instanceof Error ? e.message : "That address could not be added."
 	}
+}
+
+function onMinted(): void {
+	void selection.refreshBalances()
+	void rowBalances.refresh()
 }
 
 function onDirection(next: Direction): void {
@@ -540,6 +571,7 @@ function onNewSend(): void {
 	goToStep(0)
 	standDown()
 	void selection.refreshBalances()
+	void rowBalances.refresh()
 }
 
 async function onAddToken(): Promise<void> {
@@ -565,6 +597,8 @@ onBeforeUnmount(() => {
 	routeQuote.dispose()
 	grant.dispose()
 	selection.dispose()
+	rowBalances.dispose()
+	lookup.dispose()
 	catalog.dispose()
 })
 </script>
@@ -590,30 +624,33 @@ onBeforeUnmount(() => {
 		:step="step"
 		:completed="completed"
 		:can-switch-direction="!busy"
+		:token-label="resolved?.symbol"
+		:amount-label="amountLabel"
 		@update:direction="onDirection"
 		@goto="onGoto"
 	>
 		<template #token>
+			<!-- Renders only when the manifest publishes permissionless-mint tokens, so never on mainnet. -->
+			<MintStrip v-if="!isExit" class="mint" @minted="onMinted" />
 			<TokenStep
 				:direction="direction"
 				:tokens="catalog.filtered.value"
 				:search="catalog.search.value"
-				:provenance="catalog.provenance.value"
 				:loading="catalog.loading.value"
 				:catalog-error="catalog.error.value"
+				:lookup="lookup.state.value"
+				:add-error="addError"
 				:selected="picked"
 				:resolved="resolved"
 				:resolving="selection.loading.value"
 				:selection-error="selection.error.value"
 				:balances="selection.balances.value"
-				:paste-error="pasteError"
+				:row-balances="rowBalances.balances.value"
 				@update:search="catalog.search.value = $event"
 				@select="onSelect"
-				@paste="onPaste"
+				@add="onAdd"
 				@next="step = 1"
 			/>
-			<!-- Renders only for a manifest token the generation publishes as permissionless-mint. -->
-			<MintTestToken :erc20="resolved?.address" @minted="selection.refreshBalances()" />
 		</template>
 		<template #amount>
 			<p v-if="reviewStale" class="stale" aria-live="polite" :data-testid="TESTIDS.sendReviewStale">
@@ -663,6 +700,10 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.mint {
+	margin-bottom: 12px;
+}
+
 .stale {
 	margin: 0 0 12px;
 	padding: 8px 10px;

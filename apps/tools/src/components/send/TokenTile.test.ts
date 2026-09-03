@@ -104,6 +104,21 @@ describe("TokenTile", () => {
 		w.unmount()
 	})
 
+	it("a row the user added says so beside its address, and shows no name line", () => {
+		const w = tile({ token: token({ source: "pasted", symbol: "PAXG", name: "Paxos Gold", logoKey: "11155111:0xfeed" }) })
+		const address = w.find(sel(TESTIDS.sendTokenAddress))
+		expect(address.attributes("data-added")).toBeDefined()
+		expect(address.text()).toContain("added by you")
+		expect(w.text()).not.toContain("Paxos Gold")
+		w.unmount()
+	})
+
+	it("names no provenance on any row — the address line is the only tell", () => {
+		const w = tile({ token: token({ source: "list" }) })
+		expect(w.text().toLowerCase()).not.toMatch(/\blist\b|manifest|pasted/)
+		w.unmount()
+	})
+
 	it("shows no balance for a pasted token whose decimals are not read yet", () => {
 		const w = tile({
 			token: token({ source: "pasted", symbol: "", name: "", decimals: -1, logoKey: "11155111:0xfeed" }),
@@ -111,7 +126,6 @@ describe("TokenTile", () => {
 		})
 		expect(w.find(sel(TESTIDS.sendTokenTile)).text()).not.toContain("5")
 		expect(w.find(sel(TESTIDS.sendTokenMonogram)).text()).toBe("??")
-		expect(w.find(sel(TESTIDS.sendTokenSource)).attributes("data-source")).toBe("pasted")
 		w.unmount()
 	})
 })

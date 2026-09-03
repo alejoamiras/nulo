@@ -116,7 +116,7 @@ export const TESTIDS = {
 	receiptNewBridge: "tl-receipt-new-bridge",
 	receiptLink: "tl-receipt-link",
 
-	// The explicit L1 mint of a permissionless test token (NOT the Faucet tab's L2 drips)
+	// The one-tap L1 mints of the manifest's permissionless test tokens (NOT the Drip tab's L2 drips)
 	mintL1Card: "tl-mint-l1-card",
 	mintL1: "tl-mint-l1",
 	mintL1Status: "tl-mint-l1-status",
@@ -135,15 +135,14 @@ export const TESTIDS = {
 	journalStep: "tl-journal-step",
 	journalTxLink: "tl-journal-tx-link",
 
-	// Send wizard - token discovery (catalog + paste) and the reads a selection triggers
+	// Send wizard - token discovery (catalog + address lookup) and the reads a selection triggers
 	sendTokenSearch: "tl-send-token-search",
-	sendTokenSource: "tl-send-token-source",
-	sendCatalogProvenance: "tl-send-catalog-provenance",
+	sendCatalogLoading: "tl-send-catalog-loading",
 	sendCatalogEmpty: "tl-send-catalog-empty",
-	sendPasteInput: "tl-send-paste-input",
-	sendPasteAdd: "tl-send-paste-add",
-	sendPasteError: "tl-send-paste-error",
-	sendTokenState: "tl-send-token-state",
+	sendTokenLookup: "tl-send-token-lookup",
+	sendLookupAdd: "tl-send-lookup-add",
+	sendLookupError: "tl-send-lookup-error",
+	sendTokenSummary: "tl-send-token-summary",
 	sendSelectionError: "tl-send-selection-error",
 	sendBalanceL1: "tl-send-balance-l1",
 	sendBalanceL2Public: "tl-send-balance-l2-public",

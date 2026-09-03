@@ -499,15 +499,22 @@ describe("send wizard smoke", () => {
 		expect(keys.slice(0, MANIFEST_TOKENS.length)).toEqual(MANIFEST_TOKENS.map((t) => keyOf(t.erc20)))
 		expect(keys).toContain(keyOf(LIST_WBTC))
 
-		await w.find(sel(TESTIDS.sendPasteInput)).setValue("0x3333333333333333333333333333333333333333")
-		await w.find(sel(TESTIDS.sendPasteAdd)).trigger("click")
+		// An unlisted address typed into the search is read from the chain and offered for adding; the
+		// added row joins the list under the identity that read produced, and the search clears.
+		await w.find(sel(TESTIDS.sendTokenSearch)).setValue("0x3333333333333333333333333333333333333333")
 		await settle()
-		expect(w.findAll(sel(TESTIDS.sendTokenTile))).toHaveLength(MANIFEST_TOKENS.length + 3)
+		expect(w.find(sel(TESTIDS.sendTokenLookup)).attributes("data-status")).toBe("found")
+		await w.find(sel(TESTIDS.sendLookupAdd)).trigger("click")
+		await settle()
+		const tiles = w.findAll(sel(TESTIDS.sendTokenTile))
+		expect(tiles).toHaveLength(MANIFEST_TOKENS.length + 3)
+		expect(tiles[MANIFEST_TOKENS.length]?.text()).toContain("WBTC")
+		expect(tiles[MANIFEST_TOKENS.length]?.text()).toContain("added by you")
 
-		await w.find(sel(TESTIDS.sendPasteInput)).setValue("0xnope")
-		await w.find(sel(TESTIDS.sendPasteAdd)).trigger("click")
+		await w.find(sel(TESTIDS.sendTokenSearch)).setValue("0xnope")
 		await settle()
-		expect(w.find(sel(TESTIDS.sendPasteError)).exists()).toBe(true)
+		expect(w.find(sel(TESTIDS.sendTokenLookup)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.sendCatalogEmpty)).exists()).toBe(true)
 	})
 
 	it("raises the wallet grant BEFORE the send, and runs it once the wallet grants", async () => {
@@ -604,7 +611,6 @@ describe("send wizard smoke", () => {
 		h.state.portals.set(LIST_WBTC.toLowerCase(), portalOf(LIST_WBTC))
 		const w = await mountView()
 		await pick(w, LIST_WBTC)
-		expect(w.find(sel(TESTIDS.sendTokenState)).attributes("data-state")).toBe("portal-only")
 		await toAmount(w, "1")
 		await toReview(w)
 		expect(w.find(sel(TESTIDS.sendReviewFirstTime)).exists()).toBe(true)

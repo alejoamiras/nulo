@@ -109,6 +109,13 @@ describe("useTokenCatalog", () => {
 		expect(() => c.addPasted(USDC.toUpperCase().replace("0X", "0x"))).toThrow(/already in the list/)
 	})
 
+	it("adds a looked-up token under the identity the contract answered", () => {
+		const c = useTokenCatalog()
+		const added = c.addPasted("0x00000000000000000000000000000000000000c9", { symbol: "LINK", name: "ChainLink Token", decimals: 18 })
+		expect(added).toMatchObject({ source: "pasted", symbol: "LINK", name: "ChainLink Token", decimals: 18 })
+		expect(c.chainId).toBe(MANIFEST.l1ChainId)
+	})
+
 	it("adds a pasted token with no metadata yet, right after the manifest block", () => {
 		const c = useTokenCatalog()
 		const added = c.addPasted(" 0x00000000000000000000000000000000000000B7 ")

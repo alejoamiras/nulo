@@ -26,6 +26,9 @@ export interface SelectableToken {
 	logoKey: string
 }
 
+/** The shape `SelectableToken.logoKey` carries: the committed sprite is keyed by identity, never by symbol. */
+export const logoKeyOf = (chainId: number, address: string): string => `${chainId}:${address}`
+
 /** The L1-attested words the hub derives the L2 token from. */
 export interface TokenWords {
 	nameWord: Hex

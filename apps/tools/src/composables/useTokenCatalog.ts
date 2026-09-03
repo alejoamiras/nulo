@@ -7,7 +7,7 @@ import { type CatalogToken, type KV, loadTokenList, type TokenListProvenance } f
 import type { Address } from "viem"
 import { computed, type ComputedRef, ref, type Ref } from "vue"
 import { IS_PLACEHOLDER, MANIFEST, MANIFEST_TOKENS } from "@/contracts/bridge-generation"
-import type { SelectableToken } from "@/lib/send-model"
+import { logoKeyOf, type SelectableToken, type TokenIdentity } from "@/lib/send-model"
 
 /** `none` = nothing has been loaded yet, or this network has no bridge to load a list for. */
 export type CatalogProvenance = TokenListProvenance | "none"
@@ -19,15 +19,16 @@ export interface UseTokenCatalogHandle {
 	readonly error: Ref<string | null>
 	readonly search: Ref<string>
 	readonly filtered: ComputedRef<SelectableToken[]>
-	addPasted: (address: string) => SelectableToken
+	/** The chain every row lives on — the manifest's, whatever the wallet is connected to. */
+	readonly chainId: number
+	/** Adds a token by address; the identity is the lookup's read of the contract, when there was one. */
+	addPasted: (address: string, identity?: TokenIdentity) => SelectableToken
 	refresh: () => Promise<void>
 	dispose: () => void
 }
 
 const HEX20 = /^0x[0-9a-fA-F]{40}$/
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
-
-const logoKeyOf = (chainId: number, address: string): string => `${chainId}:${address}`
 
 const memoryBacking = new Map<string, string>()
 const memoryKv: KV = {
@@ -156,20 +157,21 @@ export function useTokenCatalog(): UseTokenCatalogHandle {
 		loading.value = false
 	}
 
-	function addPasted(address: string): SelectableToken {
+	function addPasted(address: string, identity?: TokenIdentity): SelectableToken {
 		const trimmed = address.trim()
 		if (!HEX20.test(trimmed)) throw new Error("Enter a token address: 0x followed by 40 hex characters.")
 		const lower = trimmed.toLowerCase() as Address
 		if (lower === ZERO_ADDRESS) throw new Error("The zero address is not a token.")
 		if (tokens.value.some((t) => t.address === lower)) throw new Error("That token is already in the list.")
-		// Symbol, name and decimals are filled by the SELECTION step from the chain; `decimals: -1` is
-		// the sentinel for "not read yet" and must never reach an amount formatter.
+		// The identity is what the lookup read from the contract; without one the SELECTION step fills
+		// it from the chain, and `decimals: -1` is the sentinel for "not read yet" that must never reach
+		// an amount formatter.
 		const token: SelectableToken = {
 			chainId: MANIFEST.l1ChainId,
 			address: lower,
-			symbol: "",
-			name: "",
-			decimals: -1,
+			symbol: identity?.symbol ?? "",
+			name: identity?.name ?? "",
+			decimals: identity?.decimals ?? -1,
 			source: "pasted",
 			logoKey: logoKeyOf(MANIFEST.l1ChainId, lower),
 		}
@@ -183,5 +185,5 @@ export function useTokenCatalog(): UseTokenCatalogHandle {
 		loading.value = false
 	}
 
-	return { tokens, provenance, loading, error, search, filtered, addPasted, refresh, dispose }
+	return { chainId: MANIFEST.l1ChainId, tokens, provenance, loading, error, search, filtered, addPasted, refresh, dispose }
 }
