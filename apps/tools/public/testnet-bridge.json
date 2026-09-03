@@ -3,17 +3,87 @@
 	"network": "testnet",
 	"l1ChainId": 11155111,
 	"walletChainId": 1816023401,
-	"bridge": null,
+	"bridge": {
+		"l1": {
+			"registry": "0xa0bfb1b494fb49041e5c6e8c2c1be09cd171c6ba",
+			"factory": "0xcb00b6b713f6170e1a42cb8ff933866e46945edc",
+			"implementation": "0x3ffbd5a04c13e500fe477a38979f684a045aaad2",
+			"guardian": "0xfcc2238319ac360e985f1736abb3df6251daf6f5",
+			"router": "0x218e782b748ce61d5c5d48d92dfbe55396353816",
+			"permit2": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+			"swapTarget": "0x43857b88e2f625c873c051834fc51558801c4bb3",
+			"feeJuicePortal": "0xb4a9f8eadc8ca944729d61e59a9f491faff237a3",
+			"swap": {
+				"poolManager": "0xe03a1074c86cfedd5c142c4f04f1a1536e203543",
+				"quoter": "0x61b3f2011a92d183c7dbadbda940a7555ccf9227",
+				"multicall3": "0xca11bde05977b3631167028862be2a173976ca11",
+				"weth": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
+				"feeJuice": "0x762c132040fda6183066fa3b14d985ee55aa3c18",
+				"tiers": [
+					{
+						"fee": 3000,
+						"tickSpacing": 60
+					}
+				],
+				"ethFj": {
+					"fee": 987,
+					"tickSpacing": 10
+				},
+				"slippageBps": 300,
+				"minFuelFj": "29580299742031535464",
+				"fjPerTx": "3114764656325445862",
+				"fjRegister": "2088297885442291480"
+			}
+		},
+		"l2": {
+			"hub": {
+				"address": "0x0c1e649c332328319a8c559dbbe7a7290dc91a2487c05372e82c13c8c0715a7f",
+				"salt": "0x000000000000000000000000cb00b6b713f6170e1a42cb8ff933866e46945edc",
+				"constructorArtifact": "constructor",
+				"constructorArgs": [
+					"0x0225da0f4227a139c3d6562b6554750adcdec45fd62d9b16af11da21033ef2cf",
+					"0xcb00b6b713f6170e1a42cb8ff933866e46945edc",
+					"0x1a12051c0f347210d0d8bd062ec81f9e1adb9b211f458b2e678331eb925a9191"
+				]
+			},
+			"guardian": "0x1a12051c0f347210d0d8bd062ec81f9e1adb9b211f458b2e678331eb925a9191",
+			"tokenClassId": "0x0225da0f4227a139c3d6562b6554750adcdec45fd62d9b16af11da21033ef2cf",
+			"tokenArtifactSha256": "24c6455ddb11d71563d1102bdc5d8fb2b559552a1e14eafe659bd93a71d3218c"
+		},
+		"tokens": [
+			{
+				"erc20": "0x8648424f0eae2368555d080c948b622d992651fc",
+				"portal": "0xd97917c37294a073b90e0e6a9ded8345f1fdb757",
+				"l2Token": "0x00242d87a416d2828ff318eb9ef1b1f0746b44116ef2e8c60299b03b790e6502",
+				"nameWord": "0x0054657374205553444300000000000000000000000000000000000000000000",
+				"symbolWord": "0x0055534443000000000000000000000000000000000000000000000000000000",
+				"decimals": 6,
+				"displayName": "Test USDC",
+				"displaySymbol": "USDC",
+				"source": "permissionless-mint",
+				"sourceContract": "MintableERC20",
+				"maxWholePerTx": 1000000
+			},
+			{
+				"erc20": "0x8badb545be5d79f28d516844bf1713cc7a3f238f",
+				"portal": "0x3896dfb982a66ef992020e0fc8066956a3e694bd",
+				"l2Token": "0x14c11c3cb857821b2a2869aa1b61152077585502a5347e9d5e8d9c546a03ed96",
+				"nameWord": "0x0054657374205553445400000000000000000000000000000000000000000000",
+				"symbolWord": "0x0055534454000000000000000000000000000000000000000000000000000000",
+				"decimals": 6,
+				"displayName": "Test USDT",
+				"displaySymbol": "USDT",
+				"source": "permissionless-mint",
+				"sourceContract": "MintableERC20",
+				"maxWholePerTx": 1000000
+			}
+		]
+	},
 	"feeJuice": {
 		"portal": "0xb4a9f8eadc8ca944729d61e59a9f491faff237a3",
 		"asset": "0x762c132040fda6183066fa3b14d985ee55aa3c18",
 		"feeAssetHandler": "0x5602c39a6e9c5ace589f64f754927bcda4f4bfc9",
 		"minFj": "16000000000000000000"
-	},
-	"privateFpc": {
-		"address": "0x1a6d21ce5fd80137df0e99632a4ca17e58a42dc8f6c08191a96ca8ae907a1bc0",
-		"version": "5.0.1",
-		"artifactDigest": "d5a2453cda5cc05026cbda68a57afc5951f73fb08649f66cea8c412be6c54acc"
 	},
 	"privateClaimMode": "salt-v2"
 }

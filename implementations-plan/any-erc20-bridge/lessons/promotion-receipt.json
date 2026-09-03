@@ -1,0 +1,15 @@
+{
+	"promotedAt": "2026-09-03T13:13:32.781Z",
+	"intent": "implementations-plan/any-erc20-bridge/lessons/intent.json",
+	"commitAtPromotion": "b547bbc8f105e2d761f797e0bf13735e9846e2fd",
+	"mode": "bridge-only",
+	"bridge": {
+		"candidateSha256": "a27da4727a75fc7c35893d72cf1bbda68d386a296b3aec7494a0d2f43802ca9a",
+		"live": "apps/tools/public/testnet-bridge.json"
+	},
+	"faucet": {
+		"unchangedSha256": "52a2c87084dfb0abff3c466afa4ee416052385547f6a98996dc1d2ffd1838f94",
+		"live": "apps/tools/src/contracts/deployments.json"
+	},
+	"generation": "network identity and L1 factory carried from the live manifest"
+}

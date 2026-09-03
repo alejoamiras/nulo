@@ -666,8 +666,9 @@ function writeAtomic(target: string, bytes: Buffer, sha: string): void {
 }
 
 /** The receipt the operator commits alongside the promoted files. */
+/** The receipt lives beside the intent it settles, so each arc keeps its own record. */
 function writeReceipt(intentPath: string, mode: string, bridge: unknown, faucet: unknown): string {
-	const receiptPath = join(repoRoot, "implementations-plan/aztec-5.0.1-line/lessons/promotion-receipt.json")
+	const receiptPath = join(dirname(resolvePath(repoRoot, intentPath)), "promotion-receipt.json")
 	mkdirSync(dirname(receiptPath), { recursive: true })
 	const receipt = {
 		promotedAt: new Date().toISOString(),
