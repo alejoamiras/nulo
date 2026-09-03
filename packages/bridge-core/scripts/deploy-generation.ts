@@ -19,6 +19,7 @@ import type { Address } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import type { L1Ctx } from "../src/flows"
 import { type BridgeBlock, type ManifestToken, type ManifestV2, manifestToken, parseManifestV2 } from "../src/manifest-v2"
+import { PRIVATE_FPC_ADDRESS } from "../src/private-fuel"
 import { walletChainIdOf } from "../src/wallet-chain-id"
 import { type CalibrationSample, calibrateFuelBudgets } from "./calibration"
 import { openDeployJournal, readCandidate, writeCandidateAtomically } from "./deploy-manifest"
@@ -167,6 +168,16 @@ function priorSwapBudgets(): { fjPerTx: string; fjRegister: string } {
 	}
 }
 
+/** The canonical PrivateFPC the manifest advertises: the pinned address with the descriptor's
+ *  version + artifact digest, so a reader can tell which FPC generation the fuel lane pays through. */
+function privateFpcBlock(): NonNullable<ManifestV2["privateFpc"]> {
+	const descriptor = JSON.parse(readFileSync(join(here, "..", "src", "private-fpc-canonical.json"), "utf8")) as {
+		aztecVersion: string
+		artifactSha256: string
+	}
+	return { address: PRIVATE_FPC_ADDRESS, version: descriptor.aztecVersion, artifactDigest: descriptor.artifactSha256 }
+}
+
 function buildCandidate(gen: GenerationRecord, addrs: NodeL1, tokens: ManifestToken[]): ManifestV2 {
 	const budgets = priorSwapBudgets()
 	const bridge: BridgeBlock = {
@@ -200,6 +211,7 @@ function buildCandidate(gen: GenerationRecord, addrs: NodeL1, tokens: ManifestTo
 			...(addrs.feeAssetHandler ? { feeAssetHandler: addrs.feeAssetHandler } : {}),
 			minFj: MIN_FJ,
 		},
+		privateFpc: privateFpcBlock(),
 		privateClaimMode: "salt-v2",
 	}
 }
