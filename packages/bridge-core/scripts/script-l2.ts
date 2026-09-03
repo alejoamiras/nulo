@@ -111,9 +111,12 @@ export async function registerHubToken(
 
 /** The L1→L2 message is not in the tree yet — the ONE failure a claim retries. Every other revert
  *  (a wrong amount, a stale leaf, a paused hub) is final and must surface on the first attempt. */
+/** The deposit's message is not in the L2 tree yet — worded by the public `consume` assert
+ *  (`nonexistent L1-to-L2 message`) or the private witness helper (`No L1 to L2 message found`).
+ *  `No non-nullified …` is the opposite case, an already-consumed message: waiting never helps. */
 function isMessageNotSynced(e: unknown): boolean {
 	const msg = e instanceof Error ? e.message : String(e)
-	return /non-nullified L1 to L2 message|L1 to L2 message.*not found|message not found/i.test(msg)
+	return /nonexistent L1-to-L2 message|l1_to_l2_msg_exists|message not in state|(?<!non-nullified )No L1 to L2 message found/i.test(msg)
 }
 
 /** Claim through the hub on the smoke cadence until the deposit's message syncs. Registration of a
