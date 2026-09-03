@@ -1,9 +1,22 @@
 # Phase 10 — Testnet deploy + owner sign-off (Arc 5)
 
-**Status: PENDING — owner-gated.** Everything below the line the agent can drive is prepared;
-the generation deploy signs with the pinned testnet key and the L2 deployer secret, and the
-sign-off is a live wallet-seam walk. Neither is an AFK action (hard limits: secrets, live
-broadcasts under a real key, sign-off).
+**Status: IN PROGRESS — the owner authorized the live arc on 2026-09-03** ("copy it, and you are
+authorized to deploy. Including the seed tokens."). The `packages/bridge-core/.env` came from the
+canonical clone (six keys; nothing was created). The sign-off remains a live wallet-seam walk.
+
+## Live log (2026-09-03)
+
+- Pre-flight: node `5.2.0-nightly.20260815`, identity `11155111/1821665230` (walletChainId
+  `1816023401`), L1 addresses byte-equal to the committed `aztec-5.0.0-stable` baseline → no reset,
+  `NO_RESET_BASELINE` holds. Signer `0xFcc2238319aC360e985f1736aBB3df6251DAF6F5` at 6.3989 ETH,
+  nonce 5276 before the arc. forge 1.7.1, `~/.aztec/versions/5.2.0` installed.
+- **Seed tokens deployed** (`scripts/deploy-seed-tokens.ts`, new: `MintableERC20`, 6 decimals,
+  cap 1,000,000 whole/tx — the sandbox's shape, so the manifest's `maxWholePerTx` is true on chain;
+  the v1 `TestUsdc` `0x032E…2448` has a 1,000 cap and stays v1's):
+  - `USDC` `0x8648424f0eae2368555d080c948b622d992651fc` (tx `0xf8d39341…3178b073`)
+  - `USDT` `0x8badb545be5d79f28d516844bf1713cc7a3f238f` (tx `0x254cb898…779687b6`)
+  Both sort below WETH `0xfff9…`; read back `symbol`/`decimals=6`/`maxMintPerTx=1e12` on Sepolia.
+  `SEED_TOKENS=0x8648424f0eae2368555d080c948b622d992651fc,0x8badb545be5d79f28d516844bf1713cc7a3f238f`
 
 ## Pre-flight the agent completed
 
