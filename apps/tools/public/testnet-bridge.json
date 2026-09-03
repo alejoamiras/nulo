@@ -5,14 +5,14 @@
 	"walletChainId": 1816023401,
 	"bridge": {
 		"l1": {
-			"registry": "0xa0bfb1b494fb49041e5c6e8c2c1be09cd171c6ba",
 			"factory": "0xcb00b6b713f6170e1a42cb8ff933866e46945edc",
 			"implementation": "0x3ffbd5a04c13e500fe477a38979f684a045aaad2",
-			"guardian": "0xfcc2238319ac360e985f1736abb3df6251daf6f5",
 			"router": "0x218e782b748ce61d5c5d48d92dfbe55396353816",
 			"permit2": "0x000000000022d473030f116ddee9f6b43ac78ba3",
-			"swapTarget": "0x43857b88e2f625c873c051834fc51558801c4bb3",
 			"feeJuicePortal": "0xb4a9f8eadc8ca944729d61e59a9f491faff237a3",
+			"swapTarget": "0x43857b88e2f625c873c051834fc51558801c4bb3",
+			"registry": "0xa0bfb1b494fb49041e5c6e8c2c1be09cd171c6ba",
+			"guardian": "0xfcc2238319ac360e985f1736abb3df6251daf6f5",
 			"swap": {
 				"poolManager": "0xe03a1074c86cfedd5c142c4f04f1a1536e203543",
 				"quoter": "0x61b3f2011a92d183c7dbadbda940a7555ccf9227",
@@ -84,6 +84,11 @@
 		"asset": "0x762c132040fda6183066fa3b14d985ee55aa3c18",
 		"feeAssetHandler": "0x5602c39a6e9c5ace589f64f754927bcda4f4bfc9",
 		"minFj": "16000000000000000000"
+	},
+	"privateFpc": {
+		"address": "0x1a6d21ce5fd80137df0e99632a4ca17e58a42dc8f6c08191a96ca8ae907a1bc0",
+		"version": "5.0.1",
+		"artifactDigest": "d5a2453cda5cc05026cbda68a57afc5951f73fb08649f66cea8c412be6c54acc"
 	},
 	"privateClaimMode": "salt-v2"
 }
