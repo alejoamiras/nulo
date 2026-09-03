@@ -475,6 +475,25 @@ const failWith = (error: Ref<string | null>, message: string): string => {
 	return ""
 }
 
+/**
+ * The wallet's token permission, BEFORE the Ethereum signature: a declined or superseded grant
+ * cancels with nothing signed and nothing on chain, and a wallet that errors instead of answering
+ * is a failure the caller reads from `error`, never an exception escaping the click. Resolves to
+ * whether THIS run raised the prompt (the rail shows it as the run's first phase), or to the
+ * refusal to report.
+ */
+async function ensureSendGrant(plan: SendPlan, d: SendDeps): Promise<{ granted: boolean } | { refused: string }> {
+	if (plan.intent === "gas") return { granted: false }
+	const granted = !d.grant.isGranted(plan.token.l2Token)
+	let outcome: GrantOutcome
+	try {
+		outcome = await d.grant.ensureGranted(plan.token, d.epoch)
+	} catch (e) {
+		return { refused: humanizeWalletError(e instanceof Error ? e.message : String(e)) }
+	}
+	return outcome === "granted" ? { granted } : { refused: grantRefusal(outcome) }
+}
+
 async function performSend(plan: SendPlan, d: SendDeps): Promise<string> {
 	d.error.value = null
 	d.stage.value = null
@@ -490,14 +509,9 @@ async function performSend(plan: SendPlan, d: SendDeps): Promise<string> {
 	} catch (e) {
 		return failWith(d.error, e instanceof Error ? e.message : String(e))
 	}
-	// BEFORE the Ethereum signature: a declined or superseded grant must cancel with nothing
-	// signed and nothing on chain.
-	let granted = false
-	if (plan.intent !== "gas") {
-		granted = !d.grant.isGranted(plan.token.l2Token)
-		const outcome = await d.grant.ensureGranted(plan.token, d.epoch)
-		if (outcome !== "granted") return failWith(d.error, grantRefusal(outcome))
-	}
+	const grant = await ensureSendGrant(plan, d)
+	if ("refused" in grant) return failWith(d.error, grant.refused)
+	const { granted } = grant
 	d.busy.value = true
 	try {
 		return await executeSend({

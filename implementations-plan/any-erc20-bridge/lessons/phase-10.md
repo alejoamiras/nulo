@@ -542,6 +542,12 @@ of three LOW fixed, one LOW declined.
   pre-existing (`plan S3/S10`, `plan S15`, "codex post-impl HIGH" in the journal and rail), untouched
   by this branch. They are a repo-wide sweep of their own, not a rider on a UX PR.
 
+**Codex round 7** (resumed): one MED on my round-6 fix — the wizard now recovered from a grant
+that threw, but the send composable never caught it: `ensureGranted` sat outside `performSend`'s
+normalising try/catch, so `error` stayed null and the rejection escaped the click. The grant is now
+awaited under its own catch that files the humanised message; the wizard test asserts the review
+shows it, and `useSend.test.ts` pins that a throwing grant resolves empty with the error set.
+
 ## Sign-off
 
 _Owner sign-off: PENDING._

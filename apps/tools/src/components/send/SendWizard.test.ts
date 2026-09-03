@@ -495,16 +495,21 @@ describe("SendWizard", () => {
 
 	it("a grant that throws (not declines) returns to the wizard and reports it, never a stuck permission screen", async () => {
 		granted.value = []
+		// The send composable normalises a wallet error into its `error` ref and resolves empty; a
+		// rejection here would be its own bug (pinned in useSend.test.ts), so this is the contract.
 		sendFn.mockImplementation(async () => {
-			throw new Error("wallet unreachable")
+			sendError.value = "wallet unreachable"
+			return ""
 		})
 		const w = await wizard()
 		const review = await atReview(w)
 		review.vm.$emit("confirm")
 		await flushPromises()
 		expect(w.findComponent({ name: "BridgeStepper" }).exists()).toBe(false)
-		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(true)
-		expect(w.findComponent({ name: "ReviewStep" }).props("busy")).toBe(false)
+		const back = w.findComponent({ name: "ReviewStep" })
+		expect(back.exists()).toBe(true)
+		expect(back.props("busy")).toBe(false)
+		expect(back.props("error")).toBe("wallet unreachable")
 	})
 
 	it("the wallet's token permission is the stepper's first phase, shown before any record exists", async () => {
