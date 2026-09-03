@@ -248,7 +248,15 @@ fix `4ed9cdbf`: `SendOpts.onClaimSend` — `claimViaHub` fires it once, right be
 transaction (after any registration; never on a registration that throws), stripped from sends and
 simulations with the other seam key; `useSend` passes `fee.onAttempt` through it. Pinned in
 `hub-l2.test.ts` (ordering across all three claim shapes, the throw case, the stripping). Gates:
-bridge-core 429, tools 1086, typecheck 0. Round 4 (resumed): recorded below.
+bridge-core 429, tools 1086, typecheck 0.
+
+Codex round 4 (resumed): "Verdict: the latch placement and wallet-option stripping are correct,
+but the exactly-once callback contract has one race hole." — `hub-l2.ts:144 · low`: a lost public
+registration race fired `onClaimSend` before `register_and_claim_public` and again before the
+fallback plain claim. Fixed `780803dd`: one call before the try (both transactions are the same
+attempt), the lost-race case pinned (`register_and_claim_public → claim_public`, one callback).
+Lint 0; `test:all` at `f6c34d1e` exit 0 (the previous top); re-run at `780803dd`: recorded below.
+Round 5 (resumed): recorded below.
 
 Round 2 (resumed, on `1de456c0`): "close" — one wallet-boundary miss, one policy point, one known
 gap, one nit.
