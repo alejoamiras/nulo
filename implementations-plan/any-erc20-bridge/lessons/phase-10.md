@@ -236,7 +236,19 @@ pushed (`gh stack push`, PR #540).
 Codex round 3 (resume on `1de456c0..f24539dc`): the ChatGPT backend answered 404 on both attempts
 (`turn.failed`, `codex login status` fine) — codex is down; the owner said to wait for it. The
 verification prompt is written (session scratchpad, `codex-p10-fresh-verify.md`, self-contained
-for a fresh session) and runs when the service is back: recorded below.
+for a fresh session) and ran once the service returned.
+
+Codex round 3 (fresh session `01a067d9-8bb6-7d51-b6f8-024b4b3d0e92`, `codex-vTD5Lw2i`, on
+`33d92abf..f24539dc`): "Verdict: fixes are sound against the installed wallet-sdk 5.2 behavior,
+but one medium recovery-state bug remains." — `deposit-flow.ts:646 · medium`: the app's
+`claimAttempt` latch (`fee.onAttempt` in `useSend.ts`) fired BEFORE `claimViaHub`, which now runs
+the sponsored `register_token` first, so a registration that fails (a rejected prompt, a revert)
+spends no fuel yet reads as a pending private fuel claim for the 15-minute stale window. VERIFIED;
+fix `4ed9cdbf`: `SendOpts.onClaimSend` — `claimViaHub` fires it once, right before the claim's own
+transaction (after any registration; never on a registration that throws), stripped from sends and
+simulations with the other seam key; `useSend` passes `fee.onAttempt` through it. Pinned in
+`hub-l2.test.ts` (ordering across all three claim shapes, the throw case, the stripping). Gates:
+bridge-core 429, tools 1086, typecheck 0. Round 4 (resumed): recorded below.
 
 Round 2 (resumed, on `1de456c0`): "close" — one wallet-boundary miss, one policy point, one known
 gap, one nit.
