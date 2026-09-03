@@ -40,8 +40,16 @@ export async function hubExitsPaused(hub: ContractBase, from: string): Promise<b
 	throw new Error(`exits_paused() answered ${JSON.stringify(v)} — not a boolean; refusing to treat the hub as unpaused`)
 }
 
-/** Opaque send options (fee + from + wait); the shape varies by wallet. */
-export type SendOpts = Record<string, unknown>
+/** Opaque send options (fee + from + wait); the shape varies by wallet. `registerFee`, when
+ *  present, pays the private first claim's own `register_token` transaction instead of `fee`: a
+ *  fuel claim's fee consumes the bridged Fee Juice message, which only one transaction can do. */
+export type SendOpts = Record<string, unknown> & { registerFee?: unknown }
+
+/** The registration's options and the claim's, with the seam key stripped from what reaches the wallet. */
+function splitRegisterFee(send: SendOpts): { register: SendOpts; claim: SendOpts } {
+	const { registerFee, ...claim } = send
+	return { register: registerFee === undefined ? claim : { ...claim, fee: registerFee }, claim }
+}
 
 /** Everything the L2 side needs from the L1 receipt + the journal. */
 export interface HubClaimParams {
@@ -126,22 +134,24 @@ async function firstPublicClaim(hub: ContractBase, p: HubClaimParams, send: Send
 }
 
 async function firstPrivateClaim(hub: ContractBase, p: HubClaimParams, send: SendOpts): Promise<HubClaimOutcome> {
+	const { register, claim } = splitRegisterFee(send)
 	let registerTxHash: string | undefined
 	try {
-		registerTxHash = await txHashOf(hub.methods.register_token(...registerArgs(p.token)).send(send as never) as unknown as Sent)
+		registerTxHash = await txHashOf(hub.methods.register_token(...registerArgs(p.token)).send(register as never) as unknown as Sent)
 	} catch (e) {
 		await rethrowUnlessRaceLost(hub, p, e)
 	}
 	// The registration derived the token from the words; a block whose l2Token disagrees is caught
 	// here by name, before a claim on the wrong address burns a transaction.
 	await registeredTokenOf(hub, p)
-	return { path: "register,claim", registerTxHash, claimTxHash: await txHashOf(plainClaim(hub, p, send)) }
+	return { path: "register,claim", registerTxHash, claimTxHash: await txHashOf(plainClaim(hub, p, claim)) }
 }
 
 /** Sends the claim, registering the token first when the hub does not know it yet. */
 export async function claimViaHub(hub: ContractBase, p: HubClaimParams, send: SendOpts): Promise<HubClaimOutcome> {
-	if (await registeredTokenOf(hub, p)) return { path: "claim", claimTxHash: await txHashOf(plainClaim(hub, p, send)) }
-	return p.isPrivate ? firstPrivateClaim(hub, p, send) : firstPublicClaim(hub, p, send)
+	const { claim } = splitRegisterFee(send)
+	if (await registeredTokenOf(hub, p)) return { path: "claim", claimTxHash: await txHashOf(plainClaim(hub, p, claim)) }
+	return p.isPrivate ? firstPrivateClaim(hub, p, send) : firstPublicClaim(hub, p, claim)
 }
 
 export interface HubExitParams {

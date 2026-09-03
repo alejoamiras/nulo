@@ -10,7 +10,7 @@
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { parseManifestV2 } from "@nulo/bridge-core"
+import { PRIVATE_FPC_ADDRESS, parseManifestV2 } from "@nulo/bridge-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -83,7 +83,10 @@ describe("the shipped manifests", () => {
 		expect(m.l1ChainId).toBe(l1ChainId)
 		expect(m.walletChainId).toBe(walletChainId)
 		expect(m.feeJuice.portal).toMatch(/^0x[0-9a-f]{40}$/)
-		expect(m.privateFpc?.address).toBeDefined()
+		// The whole canonical triple, so a manifest that names another FPC, version or artifact reds here.
+		expect(m.privateFpc?.address).toBe(PRIVATE_FPC_ADDRESS)
+		expect(m.privateFpc?.version).toMatch(/^\d+\.\d+\.\d+/)
+		expect(m.privateFpc?.artifactDigest).toMatch(/^[0-9a-f]{64}$/)
 	})
 })
 

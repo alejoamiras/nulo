@@ -55,8 +55,10 @@ export const PRIVATE_FPC_SALT = "0x000000000000000000000000000000000000000000000
  * `FeeJuice.claim` + `mint_and_pay_fee`, one tx). The FPC asserts the bridged amount covers
  * `getFeeLimit` = Σ gasLimit·maxFee — the LIMIT, not the charge — and a wallet given no limits
  * declares the network's per-tx maximum (6.54M L2 gas on testnet, ≈40 FJ at its 2026-09 fees, far
- * above any sensible fuel slice). 2.2× the 909,600 L2 gas a landed testnet claim billed; the fee
- * itself is billed on actual gas, so the margin costs nothing.
+ * above any sensible fuel slice). The FPC credits `amount − max_gas_cost` and refunds nothing, so
+ * every unit of limit above the gas actually used is Fee Juice the claimer forfeits: 2.2× the
+ * 909,600 L2 gas a landed testnet claim billed, the headroom kept for an account whose first-ever
+ * transaction is this claim (its initialization rides along, unmeasured).
  */
 export const PRIVATE_HUB_CLAIM_GAS = { daGas: 100_000, l2Gas: 2_000_000 } as const
 

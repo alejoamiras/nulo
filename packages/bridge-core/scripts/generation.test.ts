@@ -189,7 +189,23 @@ describe("deployGeneration — crash-resume at every journalled step", () => {
 		expect(publishContractClass).toHaveBeenCalledTimes(1)
 
 		// The node said absent, but the publication lost the race: the registry's nullifier rejection,
-		// in the live node's wording, is the same no-op — not a dead generation.
+		// in the live node's wording, is the same no-op — once the node serves the class.
+		const racedClasses = new Set<string>()
+		vi.mocked(publishContractClass).mockImplementationOnce(
+			async () =>
+				({
+					send: async () => {
+						racedClasses.add(reference.l2.tokenClassId)
+						throw new Error("Invalid tx: Existing nullifier")
+					},
+				}) as never,
+		)
+		const raced = fakeChain(5n, 5n, { publishedClasses: racedClasses })
+		const racedJournal = openDeployJournal(join(dir, "classes-raced.jsonl"))
+		answerReads(racedJournal, raced)
+		await expect(deployGeneration(raced.l1, raced.l2, inputs, racedJournal)).resolves.toEqual(reference)
+
+		// The same wording with the class still absent is not a race — nothing was published.
 		vi.mocked(publishContractClass).mockImplementationOnce(
 			async () =>
 				({
@@ -198,10 +214,11 @@ describe("deployGeneration — crash-resume at every journalled step", () => {
 					},
 				}) as never,
 		)
-		const raced = fakeChain(5n)
-		const racedJournal = openDeployJournal(join(dir, "classes-raced.jsonl"))
-		answerReads(racedJournal, raced)
-		await expect(deployGeneration(raced.l1, raced.l2, inputs, racedJournal)).resolves.toEqual(reference)
+		const phantom = fakeChain(5n)
+		const phantomJournal = openDeployJournal(join(dir, "classes-phantom.jsonl"))
+		answerReads(phantomJournal, phantom)
+		await expect(deployGeneration(phantom.l1, phantom.l2, inputs, phantomJournal)).rejects.toThrow(/does not serve it/)
+		expect(phantomJournal.steps.map((s) => s.kind)).toEqual([])
 	})
 
 	it("predicts and pins the factory nonce from the PENDING count, not the mined one", async () => {

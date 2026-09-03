@@ -122,6 +122,9 @@ async function publishIfAbsent(l2: L2Ctx, artifact: Parameters<typeof publishCon
 	} catch (e) {
 		const msg = e instanceof Error ? e.message : String(e)
 		if (!/already|existing nullifier|duplicate nullifier|nullifier already exists/i.test(msg)) throw e
+		// The rejection wording is only evidence; the class being on the node is the fact journalled.
+		if (!(await l2.node.getContractClass(id)))
+			throw new Error(`${label} class publication was rejected (${msg}) yet the node does not serve it — STOP`)
 		console.log(`  ${label} class already published`)
 	}
 }

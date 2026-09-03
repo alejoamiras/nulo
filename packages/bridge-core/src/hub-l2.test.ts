@@ -30,6 +30,7 @@ interface FakeHubOpts {
 
 function fakeHub(opts: FakeHubOpts) {
 	const calls: string[] = []
+	const sentWith: Array<[string, Record<string, unknown>]> = []
 	let registered = opts.registered
 	const views = (): Record<string, unknown> => ({
 		token_for: registered ? (opts.boundTo ?? token.l2Token) : `0x${"0".repeat(64)}`,
@@ -43,8 +44,9 @@ function fakeHub(opts: FakeHubOpts) {
 				if (name.startsWith("exit_")) calls.push(`simulate:${name}`)
 				return {}
 			},
-			send: async () => {
+			send: async (o?: Record<string, unknown>) => {
 				calls.push(name)
+				sentWith.push([name, o ?? {}])
 				if (name.startsWith("register") && opts.failRegister) {
 					registered = opts.registeredAfterFailure ?? true
 					throw new Error(opts.failRegister)
@@ -55,7 +57,7 @@ function fakeHub(opts: FakeHubOpts) {
 		})
 	}
 	const methods = new Proxy({}, { get: (_t, name: string) => method(name) })
-	return { hub: { methods } as unknown as ContractBase, calls }
+	return { hub: { methods } as unknown as ContractBase, calls, sentWith }
 }
 
 const params = (isPrivate: boolean): HubClaimParams => ({
@@ -85,6 +87,28 @@ describe("hub L2 claims", () => {
 			claimTxHash: "0xclaim_private",
 		})
 		expect(calls).toEqual(["register_and_claim_public", "register_token", "claim_private"])
+	})
+
+	it("a private first claim pays its registration with `registerFee`, the claim with `fee`, and the wallet never sees the seam key", async () => {
+		// A fuel claim's fee consumes the bridged Fee Juice message — one transaction can spend it,
+		// so the registration ahead of it must be paid by something else.
+		const { hub, sentWith } = fakeHub({ registered: false })
+		await claimViaHub(hub, params(true), { from: USER, fee: "fuel", registerFee: "sponsor" })
+		expect(sentWith).toEqual([
+			["register_token", { from: USER, fee: "sponsor" }],
+			["claim_private", { from: USER, fee: "fuel" }],
+		])
+		// Without the seam the registration and the claim share one fee, as before.
+		const plain = fakeHub({ registered: false })
+		await claimViaHub(plain.hub, params(true), { from: USER, fee: "fuel" })
+		expect(plain.sentWith.map(([, o]) => o)).toEqual([
+			{ from: USER, fee: "fuel" },
+			{ from: USER, fee: "fuel" },
+		])
+		// A registered token strips it too.
+		const known = fakeHub({ registered: true })
+		await claimViaHub(known.hub, params(true), { from: USER, fee: "fuel", registerFee: "sponsor" })
+		expect(known.sentWith).toEqual([["claim_private", { from: USER, fee: "fuel" }]])
 	})
 
 	it("a lost registration race falls back to the plain claim; any other failure propagates", async () => {
