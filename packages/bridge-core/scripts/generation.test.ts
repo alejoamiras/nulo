@@ -52,6 +52,8 @@ interface ChainOptions {
 	pending?: bigint
 	/** A hub the chain already carries at the derived address, as a crashed earlier run would leave. */
 	landedHub?: ContractInstanceWithAddress
+	/** Class ids the network already carries — on a shared network the Token class is never ours to publish. */
+	publishedClasses?: Set<string>
 }
 
 /** What the deployed contracts answer for every constant read; the factory's `L2_HUB` is per test. */
@@ -117,7 +119,10 @@ function fakeChain(startNonce: bigint, predictedAt = startNonce, opts: ChainOpti
 	)
 	const l2 = {
 		wallet: {},
-		node: { getContract: vi.fn(async () => hub) },
+		node: {
+			getContract: vi.fn(async () => hub),
+			getContractClass: vi.fn(async (id: Fr) => (opts.publishedClasses?.has(id.toString()) ? {} : undefined)),
+		},
 		from: AztecAddress.fromStringUnsafe(GUARDIAN_L2),
 		deployOpts: {},
 		sendOpts: {},
@@ -165,6 +170,38 @@ describe("deployGeneration — crash-resume at every journalled step", () => {
 		expect(record.l2.hub.salt).toBe(`0x${chain.expected.factory().slice(2).padStart(64, "0")}`)
 		expect(record.l2.hub.constructorArgs).toEqual([record.l2.tokenClassId, chain.expected.factory(), GUARDIAN_L2])
 		expect(chain.deployed).toHaveLength(2)
+	})
+
+	it("a class the network already carries is not re-published, and a lost publication race is a no-op", async () => {
+		// The Token class is shared on a live network: the node already answers it, so no publication is
+		// sent for it — only the hub class goes out.
+		const { publishContractClass } = await import("@aztec/aztec.js/deployment")
+		const learn = fakeChain(5n)
+		const learnJournal = openDeployJournal(join(dir, "classes-learn.jsonl"))
+		answerReads(learnJournal, learn)
+		const reference = await deployGeneration(learn.l1, learn.l2, inputs, learnJournal)
+
+		vi.mocked(publishContractClass).mockClear()
+		const shared = fakeChain(5n, 5n, { publishedClasses: new Set([reference.l2.tokenClassId]) })
+		const sharedJournal = openDeployJournal(join(dir, "classes-shared.jsonl"))
+		answerReads(sharedJournal, shared)
+		await expect(deployGeneration(shared.l1, shared.l2, inputs, sharedJournal)).resolves.toEqual(reference)
+		expect(publishContractClass).toHaveBeenCalledTimes(1)
+
+		// The node said absent, but the publication lost the race: the registry's nullifier rejection,
+		// in the live node's wording, is the same no-op — not a dead generation.
+		vi.mocked(publishContractClass).mockImplementationOnce(
+			async () =>
+				({
+					send: async () => {
+						throw new Error("Invalid tx: Existing nullifier")
+					},
+				}) as never,
+		)
+		const raced = fakeChain(5n)
+		const racedJournal = openDeployJournal(join(dir, "classes-raced.jsonl"))
+		answerReads(racedJournal, raced)
+		await expect(deployGeneration(raced.l1, raced.l2, inputs, racedJournal)).resolves.toEqual(reference)
 	})
 
 	it("predicts and pins the factory nonce from the PENDING count, not the mined one", async () => {

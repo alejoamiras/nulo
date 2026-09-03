@@ -106,15 +106,22 @@ async function artifactClassIds(): Promise<{ tokenClassId: string; hubClassId: s
 	return { tokenClassId: token.id.toString(), hubClassId: hub.id.toString() }
 }
 
-/** Publishing a class a second time reverts on the registry's nullifier; that is a no-op, not a failure. */
+/** A class someone else already published (the Token class on a shared network) is a no-op, not a
+ *  failure: the node is asked first, and a publication that still loses the race is recognised by the
+ *  registry's nullifier rejection, whose wording differs across node versions. */
 async function publishIfAbsent(l2: L2Ctx, artifact: Parameters<typeof publishContractClass>[1], label: string): Promise<void> {
+	const { id } = await getContractClassFromArtifact(artifact)
+	if (await l2.node.getContractClass(id)) {
+		console.log(`  ${label} class already published`)
+		return
+	}
 	try {
 		const interaction = await publishContractClass(l2.wallet, artifact)
 		await interaction.send(l2.deployOpts as never)
 		console.log(`  published ${label} class`)
 	} catch (e) {
 		const msg = e instanceof Error ? e.message : String(e)
-		if (!/already|duplicate nullifier|Nullifier already exists/i.test(msg)) throw e
+		if (!/already|existing nullifier|duplicate nullifier|nullifier already exists/i.test(msg)) throw e
 		console.log(`  ${label} class already published`)
 	}
 }
