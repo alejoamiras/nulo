@@ -67,10 +67,13 @@ export const PRIVATE_HUB_CLAIM_GAS = { daGas: 100_000, l2Gas: 2_000_000 } as con
  * Juice (the FPC's `FeeJuice.claim` + `mint_and_pay_fee` ride in its setup). A registration publishes
  * the derived Token instance and binds it in public, so it is the heavier of a first private claim's
  * two transactions. The same no-refund rule applies: the ceiling is forfeited, not the charge.
- * Provisional until a landed registration is measured; the sum with {@link PRIVATE_HUB_CLAIM_GAS}
- * is what a first-time private fueled bridge must carry.
+ * 2.3× the ≈1,763,000 L2 gas a landed testnet registration billed (JPYC, 2026-09-03), the same
+ * headroom policy as the claim; the sum with {@link PRIVATE_HUB_CLAIM_GAS} is what a first-time
+ * private fueled bridge must carry. Measured from an account the canary had already deployed — an
+ * account whose first-ever transaction is this registration carries its initialization on top, a
+ * shape only the extension produces and no canary has billed yet.
  */
-export const PRIVATE_HUB_REGISTER_GAS = { daGas: 100_000, l2Gas: 4_500_000 } as const
+export const PRIVATE_HUB_REGISTER_GAS = { daGas: 100_000, l2Gas: 4_000_000 } as const
 
 /** The PrivateFPC's committed ceiling for a claim — `getFeeLimit` = Σ gasLimit[d]·maxFee[d]. */
 export const privateFpcFeeLimit = (gas: { daGas: number; l2Gas: number }, maxFees: { feePerDaGas: bigint; feePerL2Gas: bigint }): bigint =>

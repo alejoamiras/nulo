@@ -218,14 +218,17 @@ interface DripTokens {
 	readonly eth: AztecAddress
 }
 
-function dripScopes(drip: DripTokens | null): ManifestScopes {
+function dripScopes(drip: DripTokens | null, sponsoredFpc: AztecAddress): ManifestScopes {
 	if (!drip) return { contracts: [], utilities: [], simulatedTransactions: [], transactions: [] }
 	const tokens = [drip.usdc, drip.eth]
+	// The faucet is the one surface the sponsor pays for (testnet only): its grant travels with the
+	// drip scopes, so a network without a faucet carries no sponsor at all.
+	const sponsor = { contract: sponsoredFpc, function: "sponsor_unconditionally" }
 	return {
 		contracts: [drip.dripper, drip.usdc, drip.eth],
 		utilities: each(tokens, ["balance_of_private"]),
-		simulatedTransactions: each(tokens, ["balance_of_public"]),
-		transactions: at(drip.dripper, ["drip_to_public", "drip_to_private"]),
+		simulatedTransactions: [...each(tokens, ["balance_of_public"]), sponsor],
+		transactions: [...at(drip.dripper, ["drip_to_public", "drip_to_private"]), sponsor],
 	}
 }
 
@@ -300,7 +303,7 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 	// All three drip tokens present ⇒ include the drip grants; none ⇒ send+fuel only (mainnet).
 	const drip = dripperAddress && usdcAddress && ethAddress ? { dripper: dripperAddress, usdc: usdcAddress, eth: ethAddress } : null
 	const send = sendScopes(input.hub, input.hubTokens ?? [])
-	const drips = dripScopes(drip)
+	const drips = dripScopes(drip, sponsoredFpcAddress)
 	return manifestOf("nulo-tools", drip ? "Drip + Bridge on Aztec - Nulo" : "Bridge on Aztec - Nulo", input.appUrl ?? defaultUrl(), {
 		contracts: [...send.contracts, ...drips.contracts],
 		utilities: [...drips.utilities, ...send.utilities],

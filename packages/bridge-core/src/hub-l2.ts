@@ -112,15 +112,23 @@ export function claimSendOpts(send: SendOpts): SendOpts {
 	return claim
 }
 
-/** The registration's options, the plain claim's, and the claim's after a registration of its own. */
+/** The registration's options, the plain claim's, and the claim's after a registration of its own.
+ *  The registration's wait never throws on a revert: its fee setup is non-revertible, so a
+ *  registration that reverts in public has still spent what paid for it, and the caller must learn
+ *  its hash rather than a bare error. */
 function splitRegisterFee(send: SendOpts): { register: SendOpts; claim: SendOpts; registeredClaim: SendOpts } {
 	const claim = claimSendOpts(send)
+	const registerWait = { ...((claim.wait as Record<string, unknown> | undefined) ?? {}), dontThrowOnRevert: true }
 	return {
-		register: send.registerFee === undefined ? claim : { ...claim, fee: send.registerFee },
+		register: { ...claim, ...(send.registerFee === undefined ? {} : { fee: send.registerFee }), wait: registerWait },
 		claim,
 		registeredClaim: send.registeredClaimFee === undefined ? claim : { ...claim, fee: send.registeredClaimFee },
 	}
 }
+
+/** A landed transaction that reverted past its setup: the fee is charged and any message its setup
+ *  consumed is spent, but nothing the app phase meant to do happened. */
+const revertedPastSetup = (status: unknown): boolean => /reverted/i.test(String(status ?? ""))
 
 /** Everything the L2 side needs from the L1 receipt + the journal. */
 export interface HubClaimParams {
@@ -153,7 +161,7 @@ export function isRegisterRace(e: unknown): boolean {
 	return /non-nullified L1 to L2 message|already nullified|duplicate nullifier|Nullifier already exists/i.test(msg)
 }
 
-type Sent = Promise<{ receipt: { txHash: unknown } }>
+type Sent = Promise<{ receipt: { txHash: unknown; status?: unknown } }>
 const txHashOf = async (sent: Sent) => String((await sent).receipt.txHash)
 
 export type HubClaimPath = "claim" | "register+claim" | "register,claim"
@@ -241,7 +249,16 @@ async function firstPrivateClaim(hub: ContractBase, p: HubClaimParams, send: Sen
 	let registerTxHash: string | undefined
 	send.onRegisterSend?.()
 	try {
-		registerTxHash = await txHashOf(hub.methods.register_token(...registerArgs(p.token)).send(register as never) as unknown as Sent)
+		const { receipt } = await (hub.methods.register_token(...registerArgs(p.token)).send(register as never) as unknown as Sent)
+		registerTxHash = String(receipt.txHash)
+		if (revertedPastSetup(receipt.status)) {
+			// The registration's setup spent what paid for it before the public half reverted: the
+			// hash is the caller's evidence of that spend, and the claim retries against the credit.
+			send.onRegistered?.(registerTxHash)
+			throw new Error(
+				`hub claim: the registration ${registerTxHash} reverted after its setup spent the bridged gas — retry to claim from the credit it left`,
+			)
+		}
 	} catch (e) {
 		await rethrowUnlessRaceLost(hub, p, e)
 	}

@@ -214,8 +214,17 @@ describe("buildCombinedManifest", () => {
 	const faucetPrefix = {
 		contracts: [DRIPPER.toString(), USDC.toString(), ETH.toString()],
 		utilities: [`${USDC.toString()}::balance_of_private`, `${ETH.toString()}::balance_of_private`],
-		simulated: [`${USDC.toString()}::balance_of_public`, `${ETH.toString()}::balance_of_public`],
-		transactions: [`${DRIPPER.toString()}::drip_to_public`, `${DRIPPER.toString()}::drip_to_private`],
+		// The sponsor travels with the faucet, the one surface it pays for; the send scopes carry none.
+		simulated: [
+			`${USDC.toString()}::balance_of_public`,
+			`${ETH.toString()}::balance_of_public`,
+			`${SPONSORED_FPC.toString()}::sponsor_unconditionally`,
+		],
+		transactions: [
+			`${DRIPPER.toString()}::drip_to_public`,
+			`${DRIPPER.toString()}::drip_to_private`,
+			`${SPONSORED_FPC.toString()}::sponsor_unconditionally`,
+		],
 	}
 
 	it("requests canCreateAuthWit=true (the exit needs a burn auth-wit)", () => {

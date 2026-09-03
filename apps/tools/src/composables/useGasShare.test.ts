@@ -95,17 +95,17 @@ describe("useGasShare", () => {
 	})
 
 	it("a private slice is priced from live fees: pending until they arrive, then the claim's ceiling replaces fjRegister, plus a registration's for a first-time token", async () => {
-		// Fees 10/20 → claim ceiling 2M·20 + 100k·10 = 41M; register ceiling 4.5M·20 + 100k·10 = 91M.
+		// Fees 10/20 → claim ceiling 2M·20 + 100k·10 = 41M; register ceiling 4M·20 + 100k·10 = 81M.
 		const share = useGasShare()
 		expect(share.ceilingsFor(REGISTERED)).toBeNull()
 		expect(share.propose({ amount: AMOUNT, decimals: 6, state: REGISTERED, rate: RATE, isPrivate: true })).toBe("pricing")
 		await share.prime()
 		expect(share.ceilingsFor(REGISTERED)).toBe(41_000_000n)
-		expect(share.ceilingsFor(FIRST_TIME)).toBe(132_000_000n)
+		expect(share.ceilingsFor(FIRST_TIME)).toBe(122_000_000n)
 		const registered = share.propose({ amount: AMOUNT, decimals: 6, state: REGISTERED, rate: RATE, isPrivate: true })
 		const firstTime = share.propose({ amount: AMOUNT, decimals: 6, state: FIRST_TIME, rate: RATE, isPrivate: true })
 		expect(registered).toMatchObject({ fuelFj: 20n * FJ_PER_TX + 41_000_000n })
-		expect(firstTime).toMatchObject({ fuelFj: 20n * FJ_PER_TX + 132_000_000n })
+		expect(firstTime).toMatchObject({ fuelFj: 20n * FJ_PER_TX + 122_000_000n })
 		// A public slice never prices ceilings: the calibrated registration charge stays.
 		expect(share.propose({ amount: AMOUNT, decimals: 6, state: FIRST_TIME, rate: RATE })).toMatchObject({
 			fuelFj: 20n * FJ_PER_TX + FJ_REGISTER,

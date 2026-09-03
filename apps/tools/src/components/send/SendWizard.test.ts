@@ -63,6 +63,11 @@ const setRoute = (outcome: unknown, token: string = ERC20): void => {
 }
 
 const txTarget = ref(20)
+/** The ceilings a private claim sets aside. Negligible by default (the fixtures' slices are tiny);
+ *  the fee-line tests raise them to one transaction's 0.1 FJ, plus a registration's 0.5 FJ for a
+ *  token the hub does not know — the same figures the public line calibrates. */
+const ceilingsFor = vi.fn((state: { kind: string }): bigint => (state.kind === "registered" ? 1n : 6n))
+const realCeilings = () => ceilingsFor.mockImplementation((state) => (state.kind === "registered" ? 10n ** 17n : 6n * 10n ** 17n))
 const proposeFn = vi.fn(() => ({ fuelAmount: 2_000_000n, fuelFj: 5n * 10n ** 18n, capped: null }))
 const gasShareDispose = vi.fn()
 
@@ -173,9 +178,8 @@ vi.mock("@/composables/useGasShare", () => ({
 		txTarget,
 		propose: proposeFn,
 		prime: async () => {},
-		// The ceilings a private claim sets aside: one transaction's (0.1 FJ), plus a registration's
-		// (0.5 FJ) for a token the hub does not know — the same figures the public line calibrates.
-		ceilingsFor: (state: { kind: string }) => (state.kind === "registered" ? 10n ** 17n : 6n * 10n ** 17n),
+		pricingError: ref(null),
+		ceilingsFor,
 		floorFor: (q: bigint) => (q * 97n) / 100n,
 		reset: () => {
 			txTarget.value = 20
@@ -329,6 +333,7 @@ async function atReview(w: Awaited<ReturnType<typeof wizard>>, amount = "1") {
 describe("SendWizard", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		ceilingsFor.mockImplementation((state) => (state.kind === "registered" ? 1n : 6n))
 		catalogTokens.value = [candidate()]
 		selected.value = null
 		balances.value = { l1: 10n ** 9n, l2Public: 5n * 10n ** 8n, l2Private: 3n * 10n ** 8n }
@@ -825,6 +830,7 @@ describe("SendWizard", () => {
 	})
 
 	it("a token-only review says the fee is the gas already held; adding gas names one transaction's cost out of it", async () => {
+		realCeilings()
 		const w = await wizard()
 		let review = await atReview(w)
 		expect(review.props("estimate")).toEqual({
@@ -836,7 +842,9 @@ describe("SendWizard", () => {
 		review.vm.$emit("back")
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
-		setRoute({ kind: "route", route: ROUTE, quoteOut: 10n ** 18n })
+		// 0.02 token of slice at 135 FJ per token = 2.7 FJ, floor 2.619 FJ: the mocked ceilings (0.6 FJ)
+		// leave 2.019 FJ, twenty transactions at the mocked 0.1 FJ each.
+		setRoute({ kind: "route", route: ROUTE, quoteOut: 135n * 10n ** 18n })
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
 		await flushPromises()
@@ -852,27 +860,51 @@ describe("SendWizard", () => {
 	})
 
 	it("a registered token's fee is one transaction alone; a gas-only send counts what the quote divides into", async () => {
+		realCeilings()
 		nextResolved = (token) => resolvedToken(token, HUB_REGISTERED)
 		const w = await wizard()
 		let review = await atReview(w)
 		review.vm.$emit("back")
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
-		setRoute({ kind: "route", route: ROUTE, quoteOut: 10n ** 18n })
+		setRoute({ kind: "route", route: ROUTE, quoteOut: 135n * 10n ** 18n })
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
 		await flushPromises()
 		review = w.findComponent({ name: "ReviewStep" })
 		expect(review.props("estimate").networkFee).toBe("≈ 0.1 FJ")
+		// 2.619 FJ guaranteed less the registered token's 0.1 FJ ceiling: 25 transactions, not the target.
+		expect(review.props("estimate").txCovered).toBe(25)
 
 		review.vm.$emit("back")
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "gas")
+		setRoute({ kind: "route", route: ROUTE, quoteOut: 10n ** 18n })
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
 		await flushPromises()
 		// 1 token (8 decimals) at 1 FJ per token = 1 FJ; 0.1 FJ per transaction.
 		expect(w.findComponent({ name: "ReviewStep" }).props("estimate").txCovered).toBe(10)
+	})
+
+	it("a private slice whose guaranteed floor cannot cover the ceilings a private claim sets aside is refused before any signature", async () => {
+		// 0.02 token at 1 FJ per token = 0.02 FJ, floor 0.0194 FJ, under the mocked 0.6 FJ of ceilings.
+		realCeilings()
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("back")
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
+		setRoute({ kind: "route", route: ROUTE, quoteOut: 10n ** 18n })
+		await flushPromises()
+		const amount = w.findComponent({ name: "AmountStep" })
+		expect(amount.props("gas")).toBeNull()
+		expect(amount.props("gasError")).toMatch(/too small to cover the fees a private claim sets aside/)
+		// A public send of the same slice carries no ceilings: it sizes normally.
+		amount.vm.$emit("update:is-private", false)
+		await flushPromises()
+		expect(w.findComponent({ name: "AmountStep" }).props("gasError")).toBeNull()
+		expect(w.findComponent({ name: "AmountStep" }).props("gas")).not.toBeNull()
 	})
 
 	it("the zero answer is `absent` — the state that means this send creates the clone", async () => {

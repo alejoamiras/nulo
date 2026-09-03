@@ -335,9 +335,9 @@ describe("private fuel fee — the sealed salt is authoritative", () => {
 		}) as Promise<Resolved>
 
 	test("on a first-time token the registration spends the fuel, sized for a registration, and the claim after it pays from the FPC credit", async () => {
-		// Mocked fees 10/20 → register ceiling 4.5M·20 + 100k·10 = 91M, claim ceiling 41M: both must fit.
+		// Mocked fees 10/20 → register ceiling 4M·20 + 100k·10 = 81M, claim ceiling 41M: both must fit.
 		const rec = fueled(SEALED_SALT)
-		rec.fuel = { ...(rec.fuel as object), received: "132000000" } as never
+		rec.fuel = { ...(rec.fuel as object), received: "122000000" } as never
 		const resolved = await resolve(rec, true)
 		expect(resolved).toMatchObject({ kind: "opts" })
 		expect(resolved.opts.registerFee?.paymentMethod).toEqual({ kind: "private-fpc" })
@@ -357,7 +357,7 @@ describe("private fuel fee — the sealed salt is authoritative", () => {
 
 		// An amount that covers one ceiling but not both stops before either transaction.
 		const short = fueled(SEALED_SALT)
-		short.fuel = { ...(short.fuel as object), received: "131999999" } as never
+		short.fuel = { ...(short.fuel as object), received: "121999999" } as never
 		const refused = await resolve(short, true)
 		expect(refused.kind).toBe("stop")
 		expect((refused as unknown as { why: string }).why).toMatch(/registering the token and claiming it/)
@@ -388,6 +388,28 @@ describe("private fuel fee — the sealed salt is authoritative", () => {
 		const unreadable = await resolve(spent, false)
 		expect(unreadable.kind).toBe("stop")
 		expect((unreadable as unknown as { why: string }).why).toMatch(/Couldn't check/)
+	})
+
+	test("spent fuel on a still-unregistered token registers from the credit too: both ceilings, both seams from pay_fee", async () => {
+		// A registration that reverted past its setup spent the fuel without binding the token; its
+		// landed-but-reverted receipt reads as spent, never as pending.
+		const spent = fueled(SEALED_SALT)
+		spent.fuel = { ...(spent.fuel as object), claimAttempt: true, claimTxHash: `0x${"00".repeat(31)}ab` } as never
+		h.receiptStatus = "app_logic_reverted"
+		h.privateFj = 122_000_000n
+		const resolved = await resolve(spent, true)
+		expect(resolved).toMatchObject({ kind: "opts" })
+		expect(resolved.opts.fee?.paymentMethod).toEqual({ kind: "fpc-credit" })
+		expect(resolved.opts.registerFee?.paymentMethod).toEqual({ kind: "fpc-credit" })
+		expect(resolved.opts.registerFee?.gasSettings.gasLimits).toMatchObject(PRIVATE_HUB_REGISTER_GAS)
+		expect(resolved.opts.registeredClaimFee?.gasSettings.gasLimits).toMatchObject(PRIVATE_HUB_CLAIM_GAS)
+		expect(resolved.fuelOnRegister).toBeUndefined()
+		expect(h.calls.some(([n]) => n === "privateMintAndPayFee")).toBe(false)
+
+		h.privateFj = 121_999_999n
+		const short = await resolve(spent, true)
+		expect(short.kind).toBe("stop")
+		expect((short as unknown as { why: string }).why).toMatch(/registering the token and claiming it/)
 	})
 })
 

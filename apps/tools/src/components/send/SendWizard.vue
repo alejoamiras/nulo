@@ -7,6 +7,7 @@ import {
 	type SendDepositRecord,
 	type SendJournalRecord,
 	PERMIT_DEADLINE_SECONDS,
+	type TokenState,
 	PORTAL_FACTORY_ABI,
 	assetKindOf,
 	isSendRecord,
@@ -236,11 +237,25 @@ function buildGas(): { plan: GasLegPlan | null; error: string | null } {
 		return { plan: null, error: "The amount is too small to buy gas and still send a token." }
 	}
 	const quote = outcome.kind === "route" ? (fuelAmount * outcome.quoteOut) / probeIn : fuelAmount
+	const minFuelOutput = floorFor(quote, outcome)
+	const shortfall = intent.value === "gas" ? null : privateSliceShortfall(token.state, minFuelOutput)
+	if (shortfall) return { plan: null, error: shortfall }
 	const route = outcome.kind === "route" ? outcome.route : NO_SWAP
 	return {
-		plan: { fuelAmount, fuelFj: share.fuelFj, quote, minFuelOutput: floorFor(quote, outcome), route, capped: share.capped },
+		plan: { fuelAmount, fuelFj: share.fuelFj, quote, minFuelOutput, route, capped: share.capped },
 		error: null,
 	}
+}
+
+/** A private claim forfeits its fee ceilings before any gas reaches the user: a slice whose
+ *  GUARANTEED floor cannot cover them (the half-of-the-deposit cap ships less than the target while
+ *  the target still counts the ceilings) would cross to Aztec only for the fee ladder to refuse it,
+ *  after the Ethereum deposit is already irreversible — so it is refused here, before a signature. */
+function privateSliceShortfall(state: TokenState, minFuelOutput: bigint): string | null {
+	if (!isPrivate.value) return null
+	const ceilings = gasShare.ceilingsFor(state)
+	if (ceilings === null || minFuelOutput >= ceilings) return null
+	return "The gas slice is too small to cover the fees a private claim sets aside - send a larger amount, or send it publicly."
 }
 
 const gasResult = computed(() => {
@@ -252,7 +267,12 @@ const gasResult = computed(() => {
 	}
 })
 const gas = computed(() => gasResult.value.plan)
-const gasError = computed(() => gasResult.value.error ?? routeQuote.error.value)
+const gasError = computed(
+	() =>
+		gasResult.value.error ??
+		routeQuote.error.value ??
+		(isPrivate.value && intent.value !== "token" ? gasShare.pricingError.value : null),
+)
 
 /** ---- step gating -------------------------------------------------------------------------- */
 
@@ -307,12 +327,23 @@ const plan = computed<SendPlan | ExitPlan | null>(() => {
 
 /** How many Aztec transactions the gas leg covers: what the slice was sized for, or for a gas-only
  *  send (which spends the whole amount) what the quote divides into. */
+/** Transactions the bought gas covers AFTER what the claim path must set aside — counted from the
+ *  floor the swap is signed against, never from the sizing target: a capped slice ships less than
+ *  the target, and the review must not promise what the deposit cannot deliver. */
 function txCoveredOf(target: SendPlan | ExitPlan): number | null {
 	if (target.direction !== "l1-to-l2" || !target.gas || !fjPerTx) return null
-	if (target.intent !== "gas") return gasShare.txTarget.value
-	// A quote under one transaction's budget covers nothing worth counting.
-	const whole = Number(target.gas.quote / fjPerTx)
+	// A gas-only send lands its whole quote as gas; a quote under one transaction's budget covers
+	// nothing worth counting.
+	const guaranteed = target.intent === "gas" ? target.gas.quote : target.gas.minFuelOutput - mandatoryGasOf(target)
+	const whole = guaranteed > 0n ? Number(guaranteed / fjPerTx) : 0
 	return whole >= 1 ? whole : null
+}
+
+/** What a token send's claim path spends before any per-transaction gas: the ceilings a private
+ *  claim forfeits, or the registration a public first claim pays for. */
+function mandatoryGasOf(target: SendPlan): bigint {
+	if (target.isPrivate) return gasShare.ceilingsFor(target.token.state) ?? 0n
+	return target.token.state.kind === "registered" || !SWAP ? 0n : BigInt(SWAP.fjRegister)
 }
 
 /** The claim is the first transaction the bought gas pays for; an unregistered token's claim also
@@ -568,10 +599,15 @@ watch(journal.records, adoptRunRecord)
  */
 async function preflight(snapshot: ReviewSnapshot): Promise<boolean> {
 	const target = snapshot.plan
-	if (target.direction !== "l1-to-l2" || target.intent !== "token") return true
+	if (target.direction !== "l1-to-l2") return true
+	const privateSlice = target.isPrivate && target.intent === "token+gas" ? target.gas : null
+	if (target.intent !== "token" && !privateSlice) return true
 	preflighting.value = true
 	try {
-		await gasHeld.refresh()
+		// A token-only claim needs gas already held; a private slice needs the fees it was priced at
+		// to still hold — both are re-read at the moment of the confirm, never trusted from the review.
+		if (target.intent === "token") await gasHeld.refresh()
+		if (privateSlice) await gasShare.prime()
 	} finally {
 		preflighting.value = false
 	}
@@ -580,7 +616,7 @@ async function preflight(snapshot: ReviewSnapshot): Promise<boolean> {
 	// plan object and let a confirm nobody gave for it resume.
 	if (reviewed.value !== snapshot || step.value !== 2) return false
 	if (snapshot.account !== (bridge.selectedAccount.value ?? "")) return false
-	if (tokenOnlyBlocked.value !== null) {
+	if (tokenOnlyBlocked.value !== null || (privateSlice && privateSliceShortfall(target.token.state, privateSlice.minFuelOutput))) {
 		invalidateReview()
 		return false
 	}

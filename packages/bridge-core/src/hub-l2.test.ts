@@ -40,6 +40,8 @@ interface FakeHubOpts {
 	paused?: boolean | string
 	/** How many claim simulations fail before the claimer's view catches up with the node; traced in `calls`. */
 	claimSimulateFailures?: number
+	/** The receipt status a landed registration reports (a reverted one still has a hash). */
+	registerStatus?: string
 }
 
 function fakeHub(opts: FakeHubOpts) {
@@ -59,6 +61,15 @@ function fakeHub(opts: FakeHubOpts) {
 		claimFailuresLeft--
 		throw new Error("Assertion failed: PublicImmutable not initialized")
 	}
+	// A registration's outcome as scripted: a throw (a lost race or a broken block), a binding, a status.
+	const registrationLands = (): string => {
+		if (opts.failRegister) {
+			registered = opts.registeredAfterFailure ?? true
+			throw new Error(opts.failRegister)
+		}
+		if (opts.registerBinds) registered = true
+		return opts.registerStatus ?? "proposed"
+	}
 	const simulateOf = async (name: string): Promise<unknown> => {
 		const v = views()
 		if (name in v) return { result: v[name] }
@@ -72,12 +83,7 @@ function fakeHub(opts: FakeHubOpts) {
 			send: async (o?: Record<string, unknown>) => {
 				calls.push(name)
 				sentWith.push([name, o ?? {}])
-				if (name.startsWith("register") && opts.failRegister) {
-					registered = opts.registeredAfterFailure ?? true
-					throw new Error(opts.failRegister)
-				}
-				if (name.startsWith("register") && opts.registerBinds) registered = true
-				return { receipt: { txHash: `0x${name}` } }
+				return { receipt: { txHash: `0x${name}`, status: name.startsWith("register") ? registrationLands() : "proposed" } }
 			},
 		})
 	}
@@ -120,14 +126,14 @@ describe("hub L2 claims", () => {
 		const { hub, sentWith } = fakeHub({ registered: false })
 		await claimViaHub(hub, params(true), { from: USER, fee: "fuel", registerFee: "sponsor" })
 		expect(sentWith).toEqual([
-			["register_token", { from: USER, fee: "sponsor" }],
+			["register_token", { from: USER, fee: "sponsor", wait: { dontThrowOnRevert: true } }],
 			["claim_private", { from: USER, fee: "fuel" }],
 		])
 		// Without the seam the registration and the claim share one fee, as before.
 		const plain = fakeHub({ registered: false })
 		await claimViaHub(plain.hub, params(true), { from: USER, fee: "fuel" })
 		expect(plain.sentWith.map(([, o]) => o)).toEqual([
-			{ from: USER, fee: "fuel" },
+			{ from: USER, fee: "fuel", wait: { dontThrowOnRevert: true } },
 			{ from: USER, fee: "fuel" },
 		])
 		// A registered token strips it too.
@@ -156,7 +162,7 @@ describe("hub L2 claims", () => {
 		const own = fakeHub({ registered: false })
 		await claimViaHub(own.hub, params(true), { from: USER, fee: "fuel", registerFee: "fuel", registeredClaimFee: "credit" })
 		expect(own.sentWith).toEqual([
-			["register_token", { from: USER, fee: "fuel" }],
+			["register_token", { from: USER, fee: "fuel", wait: { dontThrowOnRevert: true } }],
 			["claim_private", { from: USER, fee: "credit" }],
 		])
 		// Someone else registered first: this call spent nothing, so the claim is the plain claim
@@ -171,6 +177,34 @@ describe("hub L2 claims", () => {
 		const known = fakeHub({ registered: true })
 		await claimViaHub(known.hub, params(true), { from: USER, fee: "fuel", registerFee: "fuel", registeredClaimFee: "credit" })
 		expect(known.sentWith).toEqual([["claim_private", { from: USER, fee: "fuel" }]])
+	})
+
+	it("a registration that reverts past its setup is reported by hash and the claim is NOT sent — its fee setup spent the fuel", async () => {
+		// The registration's wait must not throw on the revert, or the hash (the only evidence the
+		// bridged gas is now credit at the FPC) would be lost with the error.
+		const order: string[] = []
+		const h = fakeHub({ registered: false, registerStatus: "app_logic_reverted" })
+		await expect(
+			claimViaHub(h.hub, params(true), {
+				from: USER,
+				fee: "fuel",
+				registerFee: "fuel",
+				registeredClaimFee: "credit",
+				wait: { waitForStatus: "proposed" },
+				onRegistered: (hash) => order.push(`onRegistered:${hash}`),
+				onClaimSend: () => order.push("onClaimSend"),
+			}),
+		).rejects.toThrow(/registration 0xregister_token reverted after its setup spent the bridged gas/)
+		expect(order).toEqual(["onRegistered:0xregister_token"])
+		expect(h.calls).toEqual(["register_token"])
+		expect(h.sentWith[0][1].wait).toEqual({ waitForStatus: "proposed", dontThrowOnRevert: true })
+		// The claim's own wait is untouched: a reverted claim must still surface as an error.
+		const clean = fakeHub({ registered: false })
+		await claimViaHub(clean.hub, params(true), { from: USER, wait: { waitForStatus: "proposed" } })
+		expect(clean.sentWith.map(([name, o]) => [name, o.wait])).toEqual([
+			["register_token", { waitForStatus: "proposed", dontThrowOnRevert: true }],
+			["claim_private", { waitForStatus: "proposed" }],
+		])
 	})
 
 	it("a private first claim reports its registration the moment it exists, then waits for the claim to simulate in the claimer's view before sending it", async () => {
