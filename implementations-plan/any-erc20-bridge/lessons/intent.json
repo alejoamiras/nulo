@@ -55,5 +55,6 @@
 			"implementations-plan/any-erc20-bridge/lessons/",
 			"apps/tools/public/testnet-bridge.journal.jsonl"
 		]
-	}
+	},
+	"candidateSha256": "ba7ced36ac19c2a7bc721b82e4c1839a75279f78836746c1871be99cf6c044c0"
 }
