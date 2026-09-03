@@ -470,6 +470,12 @@ the review SNAPSHOT's identity (a re-entered review is a new snapshot) plus the 
 frozen for; a gated test re-enters the review under another account and shows the first confirm
 signs nothing and the new review signs only on its own confirm.
 
+**Codex round 5** (resumed): "Looks ready. no new material findings" — the arc's loop converged
+at d9ce281a. Five rounds; the last three were all on the confirm-time gas read I added in round 1,
+which is the lesson: an `await` inserted between "the user confirmed" and "the send starts" opens
+a window every reactive source can move in, and the review snapshot's identity — not its plan, not
+a flag — is the only thing that says the confirm still applies.
+
 ## Sign-off
 
 _Owner sign-off: PENDING._
