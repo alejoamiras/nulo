@@ -548,6 +548,10 @@ normalising try/catch, so `error` stayed null and the rejection escaped the clic
 awaited under its own catch that files the humanised message; the wizard test asserts the review
 shows it, and `useSend.test.ts` pins that a throwing grant resolves empty with the error set.
 
+**Codex round 8** (resumed): "Ready. … no new material findings" — the round-2 arc converged at
+6104ff11. `/code-review` was NOT run on this round: the owner asked for it to be dropped as too
+token-intensive (2026-09-03); the codex loop is the review from here on.
+
 ## Sign-off
 
 _Owner sign-off: PENDING._
