@@ -136,6 +136,28 @@ canonical clone (six keys; nothing was created). The sign-off remains a live wal
 - The conductor's `deploy-journal/testnet-generation.jsonl` stays local (untracked, allowlisted):
   its run-3 `candidate-written` line carries this machine's absolute path (fixed for future runs in
   `609fa305`), and the brand/path hook refuses it. Every address it holds is recorded above.
+- **Fuel canary, private-FPC lane (the settle canary) — a real app bug found live.** Run 2
+  (1 USDC → 40.397 FJ bridged) was refused by the FPC: `Amount too low to cover gas cost`. Run 3
+  (3 USDC → 117.34 FJ) settled — actual claim fee **1.786 FJ** (≈909,600 L2 gas at
+  `feePerL2Gas` 1.96e12, DA fee 0), public lane 2.585 FJ — so the script's derived "getFeeLimit ≈
+  3.06 FJ" could not explain a 40 FJ rejection. Root cause: `@aztec/wallet-sdk` 5.2.0
+  `base_wallet.js:218` fills `gasLimits ?? maxTxGasLimits` (the node's `txsLimits.gas`: 6,540,000
+  L2 / 117,668 DA), and the PrivateFPC asserts `amount >= Σ gasLimit·maxFee` (the LIMIT, no refund):
+  6.54M × (predicted-worst × 1.5 ≈ 6.2e12) ≈ 40.5 FJ — exactly where the 1 USDC run fell short.
+  The app's direct Fee Juice lane (`fuelClaim.ts`) already documents and handles this with explicit
+  `PRIVATE_CLAIM_GAS`; the hub's private-FPC claim (`deposit-flow.ts` `privateFpcFee`) and the
+  validator declared no limits. The sandbox's fee schedule (6.54M × its fee ≈ 0.00007 FJ) could never
+  show it, and the manifest floor `minFuelFj` = 29.58 FJ was BELOW the live ceiling — a user
+  bridging exactly the floor would have had a private fuel claim the FPC refuses until fees drop.
+  Fix `f25ddbd7`: `PRIVATE_HUB_CLAIM_GAS = { daGas: 100_000, l2Gas: 2_000_000 }` (2.2× the landed
+  claim) + `privateFpcFeeLimit` in `private-fuel.ts`; the app declares the limits and `stop`s a
+  bridged amount under the committed ceiling before the FPC can reject it (`deposit-flow.test.ts`
+  16/16, `private-fuel.test.ts` 11/11, tools 1086, bridge-core 427); the validator declares the same
+  limits and prints the exact ceiling (`Σ limit·committed fee`) instead of a used-gas ratio. Ceiling
+  at today's fees ≈ 12.4 FJ → floor/ceiling ≈ 2.4×; the runbook's 4× policy would put `minFuelFj` at
+  ≈50 FJ — left for the owner (a one-sample number may only raise the floor; raising it re-runs the
+  candidate → verify → promote cycle since the conductor writes the constant). Run 4 (1 USDC, fixed
+  code): recorded below.
 
 ## Pre-flight the agent completed
 
