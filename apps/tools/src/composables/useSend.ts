@@ -25,6 +25,7 @@ import {
 	type SendStage,
 	PERMIT_DEADLINE_SECONDS,
 	PRIVATE_FPC_ADDRESS,
+	claimSendOpts,
 	claimViaHub,
 	deriveBridgeSecret,
 	deriveTokenClaimSecret,
@@ -400,7 +401,7 @@ async function probeHubClaim(hub: HubContract, p: ProbeParams, opts: Record<stri
 	const call = p.isPrivate
 		? hub.methods.claim_private(l2Token, to, p.amount, p.claimValue, new Fr(p.leafIndex))
 		: hub.methods.claim_public(l2Token, to, p.amount, p.claimValue, new Fr(p.leafIndex))
-	return call.simulate(opts as never)
+	return call.simulate(claimSendOpts(opts) as never)
 }
 
 interface SendActors {

@@ -1,7 +1,7 @@
 import type { ContractBase } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
 import { describe, expect, it } from "vitest"
-import { claimViaHub, type HubClaimParams, hubExitsPaused, isRegisterRace, preflightHubExit } from "./hub-l2"
+import { claimSendOpts, claimViaHub, type HubClaimParams, hubExitsPaused, isRegisterRace, preflightHubExit } from "./hub-l2"
 import type { JournalTokenBlock } from "./journal"
 
 const token: JournalTokenBlock = {
@@ -109,6 +109,9 @@ describe("hub L2 claims", () => {
 		const known = fakeHub({ registered: true })
 		await claimViaHub(known.hub, params(true), { from: USER, fee: "fuel", registerFee: "sponsor" })
 		expect(known.sentWith).toEqual([["claim_private", { from: USER, fee: "fuel" }]])
+		// A simulation of the claim uses the same stripped options — the wallet's option parser
+		// spreads unknown keys straight through.
+		expect(claimSendOpts({ from: USER, fee: "fuel", registerFee: "sponsor" })).toEqual({ from: USER, fee: "fuel" })
 	})
 
 	it("a lost registration race falls back to the plain claim; any other failure propagates", async () => {

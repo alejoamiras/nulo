@@ -45,10 +45,17 @@ export async function hubExitsPaused(hub: ContractBase, from: string): Promise<b
  *  fuel claim's fee consumes the bridged Fee Juice message, which only one transaction can do. */
 export type SendOpts = Record<string, unknown> & { registerFee?: unknown }
 
-/** The registration's options and the claim's, with the seam key stripped from what reaches the wallet. */
+/** The claim's own options: the seam key stripped, so nothing but the wallet's vocabulary reaches it —
+ *  a simulation of the claim must use these too. */
+export function claimSendOpts(send: SendOpts): SendOpts {
+	const { registerFee: _registerFee, ...claim } = send
+	return claim
+}
+
+/** The registration's options and the claim's. */
 function splitRegisterFee(send: SendOpts): { register: SendOpts; claim: SendOpts } {
-	const { registerFee, ...claim } = send
-	return { register: registerFee === undefined ? claim : { ...claim, fee: registerFee }, claim }
+	const claim = claimSendOpts(send)
+	return { register: send.registerFee === undefined ? claim : { ...claim, fee: send.registerFee }, claim }
 }
 
 /** Everything the L2 side needs from the L1 receipt + the journal. */
