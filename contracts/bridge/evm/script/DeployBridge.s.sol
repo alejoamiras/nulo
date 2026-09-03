@@ -5,6 +5,7 @@ import "forge-std/Script.sol";
 import {MintableERC20} from "../src/MintableERC20.sol";
 import {UniswapFuelSwap} from "../src/UniswapFuelSwap.sol";
 import {SwapBridgeRouter} from "../src/SwapBridgeRouter.sol";
+import {GenerationDeployer} from "./DeployGeneration.s.sol";
 import {IERC20} from "@oz/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@oz/token/ERC20/utils/SafeERC20.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -120,7 +121,7 @@ contract PoolSetupHelper is IUnlockCallback {
  * script (it owns the portal init + L2 wiring); this script logs the addresses
  * that script consumes. Run against Sepolia or `anvil --fork-url $SEPOLIA_RPC_URL`.
  */
-contract DeployBridge is Script {
+contract DeployBridge is GenerationDeployer {
     using SafeERC20 for IERC20;
 
     // ── Sepolia canonical addresses (from research/recon-testnet.md) ──
@@ -157,7 +158,8 @@ contract DeployBridge is Script {
         UniswapFuelSwap swap = new UniswapFuelSwap(POOL_MANAGER, FEE_JUICE, WETH);
         console.log("UniswapFuelSwap:", address(swap));
 
-        SwapBridgeRouter router = new SwapBridgeRouter(PERMIT2, FEE_JUICE_PORTAL, address(swap));
+        address factory = _resolveFactory();
+        SwapBridgeRouter router = new SwapBridgeRouter(PERMIT2, FEE_JUICE_PORTAL, address(swap), factory);
         console.log("SwapBridgeRouter:", address(router));
 
         PoolSetupHelper helper = new PoolSetupHelper(POOL_MANAGER, FEE_ASSET_HANDLER);

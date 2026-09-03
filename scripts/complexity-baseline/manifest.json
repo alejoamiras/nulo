@@ -1,6 +1,6 @@
 {
 	"biomeVersion": "2.5.9",
-	"generated": "2026-09-02",
+	"generated": "2026-09-03",
 	"rules": {
 		"noExcessiveCognitiveComplexity": {
 			"apps/extension/src/popup/components/modules/send/FeeSettingsCard.test.ts": 1,

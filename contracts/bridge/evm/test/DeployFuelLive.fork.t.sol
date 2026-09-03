@@ -16,6 +16,16 @@ import {SwapBridgeRouter, IUniswapFuelSwap} from "../src/SwapBridgeRouter.sol";
 import {PoolSetupHelper} from "../script/DeployBridge.s.sol";
 import {DeployFuelLive} from "../script/DeployFuelLive.s.sol";
 import {Harness, IPermit2Domain} from "./SwapBridgeRouterPermit2Fork.t.sol";
+import {FakePortalFactory} from "./mocks/RouterMocks.sol";
+
+/// Honest factory model binding ONE live token to ONE live legacy portal, so the router's portal
+/// derivation resolves to the portal this suite observes.
+contract BindingFactory is FakePortalFactory {
+    constructor(address token, address portal) {
+        portalOf[token] = portal;
+        tokenOf[portal] = token;
+    }
+}
 
 /// Forks Sepolia and rehearses the EXACT live topology before the real broadcast:
 /// the LIVE AZLO token (permissionless mint + Permit2 allowance override on the
@@ -63,7 +73,7 @@ contract DeployFuelLiveForkTest is Test {
         cfg = new DeployFuelLive();
         azlo = MintableERC20(LIVE_AZLO);
         swap = new UniswapFuelSwap(POOL_MANAGER, FEE_JUICE, WETH);
-        router = new Harness(PERMIT2, FEE_JUICE_PORTAL, address(swap));
+        router = new Harness(PERMIT2, FEE_JUICE_PORTAL, address(swap), address(new BindingFactory(LIVE_AZLO, LIVE_TOKEN_PORTAL)));
         helper = new PoolSetupHelper(POOL_MANAGER, FEE_ASSET_HANDLER);
 
         azloWethKey = PoolKey({

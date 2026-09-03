@@ -65,7 +65,7 @@ export const SWAP_BRIDGE_ROUTER_ABI = [
 			{ name: "isPrivate", type: "bool", indexed: false },
 		],
 	},
-	// bridge-only + fuel-only (via tokenPortal = FeeJuicePortal) both go through this entrypoint.
+	// bridge-only, plus direct gas for the fee asset (tokenPortal = FeeJuicePortal, public only).
 	{
 		type: "function",
 		name: "bridge",
@@ -107,4 +107,14 @@ export const SWAP_BRIDGE_ROUTER_ABI = [
 			{ name: "isPrivate", type: "bool", indexed: false },
 		],
 	},
+	// Cross-binding readbacks: the router's factory and fee asset must match the manifest's.
+	{ type: "function", name: "FACTORY", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "address" }] },
+	{ type: "function", name: "FEE_ASSET", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "address" }] },
+	{ type: "function", name: "feeJuicePortal", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "address" }] },
+	{ type: "function", name: "swapTarget", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "address" }] },
+	// The portal rule's refusals, decoded for the wizard's error copy.
+	{ type: "error", name: "ForeignPortal", inputs: [] },
+	{ type: "error", name: "FuelOnlyLeg", inputs: [] },
+	{ type: "error", name: "RouteRequired", inputs: [] },
+	{ type: "error", name: "AmountExceedsL2Max", inputs: [] },
 ] as const

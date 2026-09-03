@@ -7,6 +7,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {SwapBridgeRouter} from "../src/SwapBridgeRouter.sol";
 import {UniswapFuelSwap} from "../src/UniswapFuelSwap.sol";
+import {GenerationDeployer} from "./DeployGeneration.s.sol";
 
 interface IERC20Metadata {
     function symbol() external view returns (string memory);
@@ -57,7 +58,7 @@ interface IV4Quoter {
  * REAL DEPLOY (Phase 8 — owner go required):
  *   forge script ... --rpc-url $ETH_RPC_URL --broadcast --slow --verify --private-key $PK
  */
-contract DeployBridgeMainnet is Script {
+contract DeployBridgeMainnet is GenerationDeployer {
     // ── Canonical mainnet addresses ──────────────────────────────────────────
     /// Permit2 singleton — same address on every chain.
     address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
@@ -118,7 +119,8 @@ contract DeployBridgeMainnet is Script {
         UniswapFuelSwap swapTarget = new UniswapFuelSwap(POOL_MANAGER, feeJuiceAsset, WETH);
         console.log("UniswapFuelSwap:", address(swapTarget));
 
-        SwapBridgeRouter router = new SwapBridgeRouter(PERMIT2, feeJuicePortal, address(swapTarget));
+        SwapBridgeRouter router =
+            new SwapBridgeRouter(PERMIT2, feeJuicePortal, address(swapTarget), _resolveFactory());
         console.log("SwapBridgeRouter:", address(router));
 
         vm.stopBroadcast();

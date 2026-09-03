@@ -15,6 +15,7 @@ import {MintableERC20} from "../src/MintableERC20.sol";
 import {SwapBridgeRouter} from "../src/SwapBridgeRouter.sol";
 import {UniswapFuelSwap} from "../src/UniswapFuelSwap.sol";
 import {PoolSetupHelper, IWETH} from "./DeployBridge.s.sol";
+import {GenerationDeployer} from "./DeployGeneration.s.sol";
 
 /**
  * @notice LIVE-Sepolia deployment for the fuel arc: UniswapFuelSwap + SwapBridgeRouter
@@ -32,7 +33,7 @@ import {PoolSetupHelper, IWETH} from "./DeployBridge.s.sol";
  * uninitialized or already within tolerance of the target price - never seeds liquidity
  * into a mispriced pool.
  */
-contract DeployFuelLive is Script {
+contract DeployFuelLive is GenerationDeployer {
     using SafeERC20 for IERC20;
     using StateLibrary for IPoolManager;
     using PoolIdLibrary for PoolKey;
@@ -85,7 +86,7 @@ contract DeployFuelLive is Script {
             ? new UniswapFuelSwap(POOL_MANAGER, FEE_JUICE, WETH)
             : UniswapFuelSwap(payable(vm.envAddress("FUEL_SWAP_ADDRESS")));
         SwapBridgeRouter router = vm.envOr("ROUTER_ADDRESS", address(0)) == address(0)
-            ? new SwapBridgeRouter(PERMIT2, FEE_JUICE_PORTAL, address(swapTarget))
+            ? new SwapBridgeRouter(PERMIT2, FEE_JUICE_PORTAL, address(swapTarget), _resolveFactory())
             : SwapBridgeRouter(vm.envAddress("ROUTER_ADDRESS"));
         console.log("UniswapFuelSwap:", address(swapTarget));
         console.log("SwapBridgeRouter:", address(router));

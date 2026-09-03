@@ -10,7 +10,8 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {UniswapFuelSwap} from "../src/UniswapFuelSwap.sol";
 import {SwapBridgeRouter, IUniswapFuelSwap} from "../src/SwapBridgeRouter.sol";
 import {IV4Quoter} from "../script/DeployBridgeMainnet.s.sol";
-import {Harness, IPermit2Domain, MockTokenPortal} from "./SwapBridgeRouterPermit2Fork.t.sol";
+import {Harness, IPermit2Domain} from "./SwapBridgeRouterPermit2Fork.t.sol";
+import {MockTokenPortal, FakePortalFactory} from "./mocks/RouterMocks.sol";
 
 /// Forks ETHEREUM MAINNET and executes the production two-hop fuel route against the CANONICAL
 /// liquidity the shipped app will ride (D23: mainnet discovers, never seeds): real Circle USDC in
@@ -61,8 +62,11 @@ contract MainnetFuelForkTest is Test {
         user = vm.addr(userPk);
 
         swap = new UniswapFuelSwap(POOL_MANAGER, FEE_JUICE_ASSET, WETH);
-        router = new Harness(PERMIT2, FEE_JUICE_PORTAL, address(swap));
-        tokenPortal = new MockTokenPortal(IERC20(CIRCLE_USDC));
+        // The token leg is out of scope here (it is the clone suites' job); an honest factory
+        // model binds Circle USDC to a recording portal so the router's portal derivation passes.
+        FakePortalFactory factory = new FakePortalFactory();
+        tokenPortal = MockTokenPortal(factory.bind(CIRCLE_USDC));
+        router = new Harness(PERMIT2, FEE_JUICE_PORTAL, address(swap), address(factory));
         swapEthBefore = address(swap).balance;
         routerEthBefore = address(router).balance;
 
