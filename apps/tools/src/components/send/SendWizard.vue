@@ -158,6 +158,8 @@ interface ReviewSnapshot {
 const reviewed = ref<ReviewSnapshot | null>(null)
 /** Set when a change under the frozen review sent the user back to the amount step. */
 const reviewStale = ref(false)
+/** The specific reason, when the stand-down has one worth naming over the generic line. */
+const reviewStaleWhy = ref<string | null>(null)
 
 const isExit = computed(() => direction.value === "l2-to-l1")
 const resolved = selection.selected
@@ -332,9 +334,9 @@ const plan = computed<SendPlan | ExitPlan | null>(() => {
  *  the target, and the review must not promise what the deposit cannot deliver. */
 function txCoveredOf(target: SendPlan | ExitPlan): number | null {
 	if (target.direction !== "l1-to-l2" || !target.gas || !fjPerTx) return null
-	// A gas-only send lands its whole quote as gas; a quote under one transaction's budget covers
+	// A gas-only send lands its whole floor as gas; a floor under one transaction's budget covers
 	// nothing worth counting.
-	const guaranteed = target.intent === "gas" ? target.gas.quote : target.gas.minFuelOutput - mandatoryGasOf(target)
+	const guaranteed = target.gas.minFuelOutput - (target.intent === "gas" ? 0n : mandatoryGasOf(target))
 	const whole = guaranteed > 0n ? Number(guaranteed / fjPerTx) : 0
 	return whole >= 1 ? whole : null
 }
@@ -530,12 +532,13 @@ function goToStep(index: 0 | 1 | 2): void {
  *  the wizard stands the review down and says why instead of signing a plan nobody read. The one
  *  review that must NOT move is the one being signed; a review built while a backgrounded send is
  *  still running is a different review and moves like any other. */
-function invalidateReview(): void {
+function invalidateReview(why?: string): void {
 	const signingThisReview = submitting.value && backgroundedId.value === null
 	if (step.value !== 2 || stage.value !== "wizard" || signingThisReview) return
 	reviewed.value = null
 	step.value = 1
 	reviewStale.value = true
+	reviewStaleWhy.value = why ?? null
 }
 
 watch(resolved, () => void verifyPortal())
@@ -557,7 +560,7 @@ watch(
 		() => l1.address.value,
 		() => l1.chainId.value,
 	],
-	invalidateReview,
+	() => invalidateReview(),
 )
 // The grant window closes the moment the send starts signing: from there the prompt is the wallet's.
 watch(
@@ -600,27 +603,50 @@ watch(journal.records, adoptRunRecord)
 async function preflight(snapshot: ReviewSnapshot): Promise<boolean> {
 	const target = snapshot.plan
 	if (target.direction !== "l1-to-l2") return true
-	const privateSlice = target.isPrivate && target.intent === "token+gas" ? target.gas : null
+	const privateSlice = target.isPrivate && target.intent === "token+gas" ? (target.gas ?? null) : null
 	if (target.intent !== "token" && !privateSlice) return true
-	preflighting.value = true
-	try {
-		// A token-only claim needs gas already held; a private slice needs the fees it was priced at
-		// to still hold — both are re-read at the moment of the confirm, never trusted from the review.
-		if (target.intent === "token") await gasHeld.refresh()
-		if (privateSlice) await gasShare.prime()
-	} finally {
-		preflighting.value = false
-	}
+	const repriced = await preflightReads(target.intent === "token", privateSlice !== null)
 	// The SNAPSHOT must be the one still on screen — not merely its plan, which the wizard caches
 	// across an account switch, so a review re-entered under another account would carry the same
 	// plan object and let a confirm nobody gave for it resume.
 	if (reviewed.value !== snapshot || step.value !== 2) return false
 	if (snapshot.account !== (bridge.selectedAccount.value ?? "")) return false
-	if (tokenOnlyBlocked.value !== null || (privateSlice && privateSliceShortfall(target.token.state, privateSlice.minFuelOutput))) {
-		invalidateReview()
-		return false
+	const why = preflightStandDown(target, privateSlice, repriced)
+	if (why === undefined) return true
+	invalidateReview(why ?? undefined)
+	return false
+}
+
+/** The confirm's re-reads, under the preflighting hold: a token-only claim needs gas already held, a
+ *  private slice needs the fees it was priced at to still hold — neither is trusted from the review.
+ *  Returns whether the fees were re-read. */
+async function preflightReads(tokenOnly: boolean, privateSlice: boolean): Promise<boolean> {
+	preflighting.value = true
+	try {
+		if (tokenOnly) await gasHeld.refresh()
+		return privateSlice ? await gasShare.prime() : true
+	} finally {
+		preflighting.value = false
 	}
-	return true
+}
+
+/** Why the confirm stands the review down: `undefined` = it may proceed, `null` = the generic
+ *  line, a string = the named reason. */
+function preflightStandDown(target: SendPlan, privateSlice: GasLegPlan | null, repriced: boolean): string | null | undefined {
+	if (tokenOnlyBlocked.value !== null) return null
+	if (!privateSlice) return undefined
+	return privateSliceStoodDown(target.token.state, privateSlice.minFuelOutput, repriced) ?? undefined
+}
+
+/** Why a private slice cannot be signed at confirm: the fees could not be re-read (a price nobody
+ *  could refresh is not one to fund an irreversible deposit on), or they moved and the slice no
+ *  longer covers the ceilings. */
+function privateSliceStoodDown(state: TokenState, minFuelOutput: bigint, repriced: boolean): string | null {
+	if (!repriced) return "Aztec's network fees could not be re-read just now, so the gas slice was not confirmed. Try again in a moment."
+	const short = privateSliceShortfall(state, minFuelOutput)
+	return short === null
+		? null
+		: "Aztec's network fees moved while you were on the review: the gas slice no longer covers what a private claim sets aside."
 }
 
 async function onConfirm(): Promise<void> {
@@ -925,7 +951,7 @@ onBeforeUnmount(() => {
 		</template>
 		<template #amount>
 			<p v-if="reviewStale" class="stale" aria-live="polite" :data-testid="TESTIDS.sendReviewStale">
-				Something changed while you were on the review, so it was stood down. Check the amount and review again.
+				{{ reviewStaleWhy ?? "Something changed while you were on the review, so it was stood down." }} Check the amount and review again.
 			</p>
 			<AmountStep
 				v-if="amountToken"

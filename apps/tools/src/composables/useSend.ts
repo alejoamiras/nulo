@@ -409,6 +409,8 @@ function hubClaimSeams(id: string, fee: Extract<HubClaimFee, { kind: "opts" }>) 
 	let registeredHere = false
 	const fuelOnRegistration = () => registeredHere && fee.fuelOnRegister === true
 	const seams: SendOpts = {
+		// The wallet hands the registration's receipt back before it is mined; the node says how it ended.
+		receiptOf: (txHash) => createAztecNodeClient(NODE_URL).getTxReceipt(TxHash.fromString(txHash)),
 		onRegisterSend: () => {
 			if (fee.fuelOnRegister) fee.onAttempt?.()
 		},

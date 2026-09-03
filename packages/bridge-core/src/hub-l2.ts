@@ -95,6 +95,15 @@ export type SendOpts = Record<string, unknown> & {
 	onRegistered?: (txHash: string) => void
 	onClaimSend?: () => void
 	registrationWait?: RegistrationWait
+	/** A node's view of a transaction's receipt. A wallet may hand back the registration's receipt
+	 *  before it is mined (the extension reads it once, immediately), so the registration's fate —
+	 *  mined, reverted past its setup, or dropped — is read here until it is known. */
+	receiptOf?: (txHash: string) => Promise<TxReceiptLike | undefined>
+}
+
+export interface TxReceiptLike {
+	status?: unknown
+	executionResult?: unknown
 }
 
 /** The claim's own options: the seam keys stripped, so nothing but the wallet's vocabulary reaches it —
@@ -107,6 +116,7 @@ export function claimSendOpts(send: SendOpts): SendOpts {
 		onRegistered: _onRegistered,
 		onClaimSend: _onClaimSend,
 		registrationWait: _registrationWait,
+		receiptOf: _receiptOf,
 		...claim
 	} = send
 	return claim
@@ -129,7 +139,32 @@ function splitRegisterFee(send: SendOpts): { register: SendOpts; claim: SendOpts
 /** A landed transaction that reverted past its setup: its block status is a mined one, its
  *  execution result says reverted — the fee is charged and any message its setup consumed is
  *  spent, but nothing the app phase meant to do happened. */
-const revertedPastSetup = (receipt: { executionResult?: unknown }): boolean => /reverted/i.test(String(receipt.executionResult ?? ""))
+const revertedPastSetup = (receipt: TxReceiptLike): boolean => /reverted/i.test(String(receipt.executionResult ?? ""))
+
+type RegistrationFate = "mined" | "reverted" | "dropped" | "unknown"
+
+function fateOf(receipt: TxReceiptLike): RegistrationFate {
+	if (revertedPastSetup(receipt)) return "reverted"
+	const status = String(receipt.status ?? "").toLowerCase()
+	if (/proposed|checkpointed|proven|finalized|success|mined/.test(status)) return "mined"
+	if (status.includes("dropped")) return "dropped"
+	return "unknown"
+}
+
+/** The registration's fate, read from the node until it is known — bounded by the same deadline as
+ *  the claim's visibility wait. Without a node read (or past the deadline) it stays unknown and the
+ *  claim's own simulation decides, as it always did. */
+async function awaitRegistrationFate(first: TxReceiptLike, txHash: string, send: SendOpts): Promise<RegistrationFate> {
+	const { intervalMs, deadlineMs, sleep } = { ...REGISTRATION_WAIT, ...send.registrationWait }
+	const start = Date.now()
+	let receipt = first
+	for (;;) {
+		const fate = fateOf(receipt)
+		if (fate !== "unknown" || !send.receiptOf || Date.now() - start + intervalMs > deadlineMs) return fate
+		await sleep(intervalMs)
+		receipt = (await send.receiptOf(txHash)) ?? receipt
+	}
+}
 
 /** Everything the L2 side needs from the L1 receipt + the journal. */
 export interface HubClaimParams {
@@ -162,7 +197,7 @@ export function isRegisterRace(e: unknown): boolean {
 	return /non-nullified L1 to L2 message|already nullified|duplicate nullifier|Nullifier already exists/i.test(msg)
 }
 
-type Sent = Promise<{ receipt: { txHash: unknown; executionResult?: unknown } }>
+type Sent = Promise<{ receipt: { txHash: unknown } & TxReceiptLike }>
 const txHashOf = async (sent: Sent) => String((await sent).receipt.txHash)
 
 export type HubClaimPath = "claim" | "register+claim" | "register,claim"
@@ -252,7 +287,14 @@ async function firstPrivateClaim(hub: ContractBase, p: HubClaimParams, send: Sen
 	try {
 		const { receipt } = await (hub.methods.register_token(...registerArgs(p.token)).send(register as never) as unknown as Sent)
 		registerTxHash = String(receipt.txHash)
-		if (revertedPastSetup(receipt)) {
+		const fate = await awaitRegistrationFate(receipt, registerTxHash, send)
+		// A dropped registration was never included: nothing was spent, and the whole claim retries.
+		if (fate === "dropped") {
+			throw new Error(
+				`hub claim: the registration ${registerTxHash} was dropped before inclusion — nothing was spent; retry the claim`,
+			)
+		}
+		if (fate === "reverted") {
 			// The registration's setup spent what paid for it before the public half reverted: the
 			// hash is the caller's evidence of that spend, and the claim retries against the credit.
 			send.onRegistered?.(registerTxHash)

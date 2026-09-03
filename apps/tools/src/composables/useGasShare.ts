@@ -50,8 +50,9 @@ export interface UseGasShareHandle {
 	/** The Fee Juice a private claim commits to fee ceilings — the claim's, plus a registration's for
 	 *  a token the hub does not know yet — at the last priced fees; null until priced or once stale. */
 	ceilingsFor: (state: TokenState) => bigint | null
-	/** Price the ceilings from the network's predicted fees. Concurrent calls share one read. */
-	prime: () => Promise<void>
+	/** Price the ceilings from the network's predicted fees; true when a fresh price landed from THIS
+	 *  call. Concurrent calls share one read. */
+	prime: () => Promise<boolean>
 	/** Why the last pricing failed, while no usable price exists; null once one lands. */
 	readonly pricingError: Ref<string | null>
 	/** Back to the default target: a new send is sized from it, never from the last one's. */
@@ -66,20 +67,23 @@ export function useGasShare(): UseGasShareHandle {
 	const txTarget = ref(DEFAULT_TX_TARGET)
 	const fees = ref<{ maxFees: MaxFees; at: number } | null>(null)
 	const pricingError = ref<string | null>(null)
-	let pricing: Promise<void> | null = null
+	let pricing: Promise<boolean> | null = null
 
-	function prime(): Promise<void> {
+	function prime(): Promise<boolean> {
 		if (pricing) return pricing
 		pricing = predictedWorstMinFees(createAztecNodeClient(NETWORK.nodeUrl))
 			.then((predicted) => {
 				fees.value = { maxFees: { feePerDaGas: predicted.feePerDaGas, feePerL2Gas: predicted.feePerL2Gas }, at: Date.now() }
 				pricingError.value = null
+				return true
 			})
 			.catch((e: unknown) => {
 				// Unpriced is a visible state (the slice reads "pricing", the error names why), never a
-				// silently wrong slice; a still-fresh price keeps serving while the refresh failed.
+				// silently wrong slice; a still-fresh price keeps serving while a background refresh
+				// failed — a caller that needs the price to be fresh NOW reads the false instead.
 				if (priced() === null)
 					pricingError.value = `Couldn't read Aztec's network fees to size the gas slice - ${e instanceof Error ? e.message : String(e)}`
+				return false
 			})
 			.finally(() => {
 				pricing = null

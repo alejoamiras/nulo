@@ -63,6 +63,8 @@ const setRoute = (outcome: unknown, token: string = ERC20): void => {
 }
 
 const txTarget = ref(20)
+/** The confirm re-reads the network's fees; false = the read failed, and a private slice is not signed on a stale price. */
+const primeFn = vi.fn(async () => true)
 /** The ceilings a private claim sets aside. Negligible by default (the fixtures' slices are tiny);
  *  the fee-line tests raise them to one transaction's 0.1 FJ, plus a registration's 0.5 FJ for a
  *  token the hub does not know — the same figures the public line calibrates. */
@@ -177,7 +179,7 @@ vi.mock("@/composables/useGasShare", () => ({
 	useGasShare: () => ({
 		txTarget,
 		propose: proposeFn,
-		prime: async () => {},
+		prime: primeFn,
 		pricingError: ref(null),
 		ceilingsFor,
 		floorFor: (q: bigint) => (q * 97n) / 100n,
@@ -883,8 +885,8 @@ describe("SendWizard", () => {
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
 		await flushPromises()
-		// 1 token (8 decimals) at 1 FJ per token = 1 FJ; 0.1 FJ per transaction.
-		expect(w.findComponent({ name: "ReviewStep" }).props("estimate").txCovered).toBe(10)
+		// 1 token (8 decimals) at 1 FJ per token = 1 FJ, guaranteed floor 0.97 FJ; 0.1 FJ per transaction.
+		expect(w.findComponent({ name: "ReviewStep" }).props("estimate").txCovered).toBe(9)
 	})
 
 	it("a private slice whose guaranteed floor cannot cover the ceilings a private claim sets aside is refused before any signature", async () => {
@@ -905,6 +907,26 @@ describe("SendWizard", () => {
 		await flushPromises()
 		expect(w.findComponent({ name: "AmountStep" }).props("gasError")).toBeNull()
 		expect(w.findComponent({ name: "AmountStep" }).props("gas")).not.toBeNull()
+	})
+
+	it("a private slice's confirm re-reads the fees and stands the review down, saying why, when they cannot be read", async () => {
+		const w = await wizard()
+		let review = await atReview(w)
+		review.vm.$emit("back")
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
+		setRoute({ kind: "route", route: ROUTE, quoteOut: 10n ** 18n })
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
+		await flushPromises()
+		review = w.findComponent({ name: "ReviewStep" })
+		expect(review.exists()).toBe(true)
+		primeFn.mockResolvedValueOnce(false)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
+		expect(w.find('[data-testid="tl-send-review-stale"]').text()).toMatch(/network fees could not be re-read/)
+		expect(sendFn).not.toHaveBeenCalled()
 	})
 
 	it("the zero answer is `absent` — the state that means this send creates the clone", async () => {

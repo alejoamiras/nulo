@@ -42,6 +42,8 @@ interface FakeHubOpts {
 	claimSimulateFailures?: number
 	/** The execution result a landed registration reports (a reverted one is mined and has a hash). */
 	registerExecution?: string
+	/** The wallet hands the registration's receipt back before it is mined (the extension's shape). */
+	registerPending?: boolean
 }
 
 function fakeHub(opts: FakeHubOpts) {
@@ -83,11 +85,13 @@ function fakeHub(opts: FakeHubOpts) {
 			send: async (o?: Record<string, unknown>) => {
 				calls.push(name)
 				sentWith.push([name, o ?? {}])
+				const execution = name.startsWith("register") ? registrationLands() : "success"
+				const pending = name.startsWith("register") && opts.registerPending
 				return {
 					receipt: {
 						txHash: `0x${name}`,
-						status: "proposed",
-						executionResult: name.startsWith("register") ? registrationLands() : "success",
+						status: pending ? "pending" : "proposed",
+						executionResult: pending ? undefined : execution,
 					},
 				}
 			},
@@ -211,6 +215,57 @@ describe("hub L2 claims", () => {
 			["register_token", { waitForStatus: "proposed", dontThrowOnRevert: true }],
 			["claim_private", { waitForStatus: "proposed" }],
 		])
+	})
+
+	it("a registration handed back unmined is followed on the node until its fate is known: mined claims on, reverted reports the hash, dropped spent nothing", async () => {
+		const noSleep = { intervalMs: 10, deadlineMs: 1_000, sleep: async () => {} }
+		const receipts = (...answers: Array<{ status: string; executionResult?: string }>) => {
+			const queue = [...answers]
+			return async () => queue.shift() ?? answers[answers.length - 1]
+		}
+		// Mined after one more read: the claim follows as usual.
+		const mined = fakeHub({ registered: false, registerBinds: true, registerPending: true })
+		const outcome = await claimViaHub(mined.hub, params(true), {
+			from: USER,
+			receiptOf: receipts({ status: "pending" }, { status: "proposed", executionResult: "success" }),
+			registrationWait: noSleep,
+		})
+		expect(outcome).toMatchObject({ path: "register,claim", registerTxHash: "0xregister_token", claimTxHash: "0xclaim_private" })
+
+		// Reverted past its setup: the hash is reported, the claim is not sent.
+		const order: string[] = []
+		const reverted = fakeHub({ registered: false, registerPending: true })
+		await expect(
+			claimViaHub(reverted.hub, params(true), {
+				from: USER,
+				receiptOf: receipts({ status: "pending" }, { status: "checkpointed", executionResult: "reverted" }),
+				registrationWait: noSleep,
+				onRegistered: (hash) => order.push(`onRegistered:${hash}`),
+			}),
+		).rejects.toThrow(/reverted after its setup spent the bridged gas/)
+		expect(order).toEqual(["onRegistered:0xregister_token"])
+		expect(reverted.calls).toEqual(["register_token"])
+
+		// Dropped: nothing was spent, nothing is reported, the whole claim retries.
+		order.length = 0
+		const dropped = fakeHub({ registered: false, registerPending: true })
+		await expect(
+			claimViaHub(dropped.hub, params(true), {
+				from: USER,
+				receiptOf: receipts({ status: "pending" }, { status: "dropped" }),
+				registrationWait: noSleep,
+				onRegistered: (hash) => order.push(`onRegistered:${hash}`),
+			}),
+		).rejects.toThrow(/was dropped before inclusion/)
+		expect(order).toEqual([])
+
+		// Without a node read the fate stays unknown and the claim's own simulation decides, as before.
+		const blind = fakeHub({ registered: false, registerBinds: true, registerPending: true })
+		expect(await claimViaHub(blind.hub, params(true), { from: USER, registrationWait: noSleep })).toMatchObject({
+			path: "register,claim",
+		})
+		// The node read never reaches the wallet.
+		expect(mined.sentWith.every(([, o]) => !("receiptOf" in o))).toBe(true)
 	})
 
 	it("a private first claim reports its registration the moment it exists, then waits for the claim to simulate in the claimer's view before sending it", async () => {
