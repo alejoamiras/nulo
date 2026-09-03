@@ -111,7 +111,44 @@ describe("hub L2 claims", () => {
 		expect(known.sentWith).toEqual([["claim_private", { from: USER, fee: "fuel" }]])
 		// A simulation of the claim uses the same stripped options — the wallet's option parser
 		// spreads unknown keys straight through.
-		expect(claimSendOpts({ from: USER, fee: "fuel", registerFee: "sponsor" })).toEqual({ from: USER, fee: "fuel" })
+		expect(claimSendOpts({ from: USER, fee: "fuel", registerFee: "sponsor", onClaimSend: () => {} })).toEqual({
+			from: USER,
+			fee: "fuel",
+		})
+	})
+
+	it("`onClaimSend` fires once, right before the claim's own transaction, after any registration", async () => {
+		// A caller's "claim attempted" latch must not cover a registration that failed without
+		// spending the fuel — so the stage callback is the claim's, never the registration's.
+		const order: string[] = []
+		const onClaimSend = () => order.push("onClaimSend")
+		const privateFirst = fakeHub({ registered: false })
+		await claimViaHub(privateFirst.hub, params(true), { from: USER, fee: "fuel", registerFee: "sponsor", onClaimSend })
+		expect([...privateFirst.calls.slice(0, 1), ...order, ...privateFirst.calls.slice(1)]).toEqual([
+			"register_token",
+			"onClaimSend",
+			"claim_private",
+		])
+		expect(privateFirst.sentWith.every(([, o]) => !("onClaimSend" in o))).toBe(true)
+
+		for (const [hubOpts, isPrivate, expected] of [
+			[{ registered: false }, false, ["register_and_claim_public"]],
+			[{ registered: true }, true, ["claim_private"]],
+		] as const) {
+			order.length = 0
+			const h = fakeHub(hubOpts)
+			await claimViaHub(h.hub, params(isPrivate), { from: USER, fee: "fuel", onClaimSend })
+			expect(order).toEqual(["onClaimSend"])
+			expect(h.calls).toEqual(expected)
+		}
+
+		// A registration that throws (not a lost race) never reaches the callback.
+		order.length = 0
+		const broken = fakeHub({ registered: false, failRegister: "Assertion failed: word does not decompose" })
+		await expect(
+			claimViaHub(broken.hub, params(true), { from: USER, fee: "fuel", registerFee: "sponsor", onClaimSend }),
+		).rejects.toThrow()
+		expect(order).toEqual([])
 	})
 
 	it("a lost registration race falls back to the plain claim; any other failure propagates", async () => {

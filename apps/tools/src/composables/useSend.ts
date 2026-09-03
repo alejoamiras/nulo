@@ -368,9 +368,11 @@ async function buildHubClaim(
 	return {
 		simulate: () => probeHubClaim(hub, params, fee.opts),
 		send: async () => {
-			fee.onAttempt?.()
 			try {
-				const outcome = await claimViaHub(hub, params, fee.opts)
+				// The attempt latch fires with the CLAIM's own transaction: a private first claim registers
+				// the token first, and a registration that fails spends no fuel and must not read as a
+				// pending fuel claim.
+				const outcome = await claimViaHub(hub, params, { ...fee.opts, onClaimSend: fee.onAttempt })
 				fee.onTxHash?.(outcome.claimTxHash)
 				// The ladder paid this claim from the sponsor and left the bridged Fee Juice for a
 				// transaction of its own; fire it now the claim is away, or the gas never arrives.
