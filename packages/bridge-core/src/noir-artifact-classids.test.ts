@@ -37,6 +37,13 @@ const PINS = [
 		path: join(CONTRACTS, "token_bridge", "target", "token_bridge_contract-TokenBridge.json"),
 		classId: "0x2cb5c6341bbae9bb0e78b64cfdd724cb493cc35dca46b122280fdf223b3d8713",
 	},
+	{
+		// The any-ERC-20 hub. Source parity with this artifact is checked by
+		// `contracts/bridge/aztec/scripts/compile.sh --check` (a rebuild must derive this id).
+		name: "TokenBridgeHub",
+		path: join(CONTRACTS, "token_bridge_hub", "target", "token_bridge_hub_contract-TokenBridgeHub.json"),
+		classId: "0x08e8238e48de3370cb952f7689d8697c56d6978e793b7ffc6587ecc768610617",
+	},
 ] as const
 
 describe("committed bridge Noir artifacts — class-id + digest tripwire (5.0.1)", () => {
@@ -48,7 +55,7 @@ describe("committed bridge Noir artifacts — class-id + digest tripwire (5.0.1)
 		})
 	}
 
-	it("both artifacts self-report aztec_version 5.0.1", () => {
+	it("every artifact self-reports aztec_version 5.0.1", () => {
 		for (const pin of PINS) {
 			const raw = JSON.parse(readFileSync(pin.path, "utf8")) as { aztecVersion?: string; aztec_version?: string }
 			expect(raw.aztecVersion ?? raw.aztec_version).toBe("5.0.1")
