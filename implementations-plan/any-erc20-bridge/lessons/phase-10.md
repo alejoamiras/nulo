@@ -595,6 +595,11 @@ Three items, "not much more … great work":
    is back on listed rows, under the name, in tertiary type. The inconsistency the owner noticed IS
    the signal: manifest tokens are the app's own, everything else says which contract it is.
 
+**Codex rounds 9–10** (resumed, on the third-walk delta): round 9 confirmed the quiet re-grant
+(errors still reach `error`; a remembered, still-granted account never re-opens the chooser) and
+raised the listed-row address (fixed as above); round 10: "Ready … no new material findings" —
+converged at 4790018a.
+
 ## Sign-off
 
 _Owner sign-off: PENDING._
