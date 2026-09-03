@@ -271,7 +271,8 @@ async function commandDeploy(): Promise<void> {
 	}
 	const candidate = buildCandidate(gen, addrs, manifestTokens)
 	writeCandidateAtomically(CANDIDATE_PATH, candidate)
-	journal.append({ kind: "candidate-written", path: CANDIDATE_PATH })
+	// Repo-relative: the journal is the generation's record and must not carry a machine's layout.
+	journal.append({ kind: "candidate-written", path: "apps/tools/public/testnet-bridge.candidate.json" })
 	console.log(`\n✅ candidate written to apps/tools/public/testnet-bridge.candidate.json (${mins()})`)
 	console.log("   next: bun scripts/smoke-existing-testnet.ts --config <candidate>, then calibrate, then live-intent promote.")
 }
