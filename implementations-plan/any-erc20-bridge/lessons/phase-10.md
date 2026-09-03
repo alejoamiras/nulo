@@ -435,6 +435,23 @@ holes." 1 HIGH, 3 MED, 3 LOW; all but one LOW fixed.
   row; the selection fails closed on `assertL1Chain` and the row is only a hint, so no live-chain
   watch was added.
 
+**Codex round 2** (resumed): "rekey handling is fixed correctly, but three material gaps remain."
+All three fixed; the LOW declined.
+
+- MED — confirm trusted the gas verdict cached when the amount step opened, so gas spent elsewhere
+  meanwhile could sign a deposit its claim would then strand. `onConfirm` now re-reads the two
+  balances before a token-only deposit signs (the buttons are held by `submitting` while it reads)
+  and stands the review down if the gate closed.
+- MED — the background reset re-resolved the token at once, before the backgrounded send had
+  registered it, so a next send prepared from it kept the first-time pricing. The token is
+  re-resolved again when the backgrounded record completes, which also stands down a review priced
+  for a first send.
+- MED — the promise line used `fuelFj`, the sizing target, which a gas-only send outgrows (the
+  whole amount is swapped): it now states the quote, as the review did.
+- LOW declined — codex asked for the review/codex logs to be struck from `phase-10.md` and the plan
+  as "forbidden breadcrumbs". The ban is on CODE comments; `implementations-plan/**/lessons/` is
+  where this repo records exactly these consults.
+
 ## Sign-off
 
 _Owner sign-off: PENDING._

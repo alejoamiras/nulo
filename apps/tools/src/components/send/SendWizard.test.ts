@@ -43,6 +43,7 @@ const granted = ref<string[]>([])
 let grantOutcome: GrantOutcome = "granted"
 /** Whether the connected Aztec account holds gas; null = unknown. */
 const gasHeld = ref<boolean | null>(null)
+const gasHeldRefresh = vi.fn(async () => {})
 const ensureGranted = vi.fn(async (): Promise<GrantOutcome> => {
 	if (grantOutcome === "granted") granted.value = [...granted.value, L2_TOKEN]
 	return grantOutcome
@@ -135,7 +136,7 @@ vi.mock("@/composables/useTokenCatalog", () => ({
 }))
 vi.mock("@/contracts/hub-binding", () => ({ readHubBinding: async () => undefined }))
 vi.mock("@/composables/useGasHeld", () => ({
-	useGasHeld: () => ({ held: gasHeld, refresh: vi.fn(async () => {}), dispose: vi.fn() }),
+	useGasHeld: () => ({ held: gasHeld, refresh: gasHeldRefresh, dispose: vi.fn() }),
 }))
 vi.mock("@/composables/useAddressLookup", () => ({
 	useAddressLookup: () => ({ state: ref(null), dispose: vi.fn() }),
@@ -322,6 +323,7 @@ describe("SendWizard", () => {
 		selectionError.value = null
 		epoch = 0
 		gasHeld.value = null
+		gasHeldRefresh.mockReset().mockImplementation(async () => {})
 		rekeys.value = {}
 		sessionLive.clear()
 		nextResolved = (token) => resolvedToken(token)
@@ -555,6 +557,53 @@ describe("SendWizard", () => {
 		review.vm.$emit("confirm")
 		await flushPromises()
 		expect(sendFn).not.toHaveBeenCalled()
+	})
+
+	it("confirm re-reads the gas gate before signing a token-only send, holding the buttons meanwhile", async () => {
+		gasHeld.value = true
+		let releaseRead = (): void => {}
+		gasHeldRefresh.mockImplementation(async () => {
+			await new Promise<void>((resolve) => {
+				releaseRead = resolve
+			})
+			gasHeld.value = false
+		})
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(w.findComponent({ name: "ReviewStep" }).props("busy")).toBe(true)
+		expect(sendFn).not.toHaveBeenCalled()
+		releaseRead()
+		await flushPromises()
+		expect(sendFn).not.toHaveBeenCalled()
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
+		expect(w.findComponent({ name: "AmountStep" }).props("tokenOnlyBlocked")).toContain("holds no gas")
+	})
+
+	it("a backgrounded send that lands re-resolves the token the user is preparing the next send from", async () => {
+		let releaseSend = (): void => {}
+		sendFn.mockImplementation(async () => {
+			sessionLive.add("rec-1")
+			records.value = [...records.value, sendRecord("rec-1")]
+			await new Promise<void>((resolve) => {
+				releaseSend = resolve
+			})
+			return "rec-1"
+		})
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		w.findComponent({ name: "BridgeStepper" }).vm.$emit("background")
+		await flushPromises()
+		// The background reset re-resolved once (the token is still first-time at that point).
+		expect(selectFn).toHaveBeenCalledTimes(2)
+		releaseSend()
+		records.value = records.value.map((r) => (r.id === "rec-1" ? { ...r, completedAt: 2_000 } : r))
+		await flushPromises()
+		expect(selectFn).toHaveBeenCalledTimes(3)
+		expect(w.findComponent({ name: "TokenStep" }).exists()).toBe(true)
 	})
 
 	it("NEW SEND re-resolves the token — a send that registered it must not be priced as first-time again", async () => {

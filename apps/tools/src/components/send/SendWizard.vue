@@ -324,7 +324,8 @@ function promisedLine(target: SendPlan | ExitPlan): string {
 	const token = `${toDecimalString(target.amount, target.token.decimals)} ${safeDisplay(target.token.symbol)}`
 	const gasLeg = target.direction === "l1-to-l2" ? target.gas : undefined
 	if (!gasLeg) return token
-	const gas = `≈ ${formatBigInt(gasLeg.fuelFj, 18)} FJ gas`
+	// The quote, as the review showed it — not the sizing target, which a gas-only send outgrows.
+	const gas = `≈ ${formatCompact(gasLeg.quote, 18)} FJ gas`
 	return target.direction === "l1-to-l2" && target.intent === "gas" ? `${gas} from ${token}` : `${token} + ${gas}`
 }
 
@@ -515,14 +516,18 @@ watch(journal.records, adoptRunRecord)
 async function onConfirm(): Promise<void> {
 	const target = reviewed.value?.plan
 	if (!target || submitting.value || stage.value !== "wizard") return
-	// The frozen review is what gets signed, but a gate that closed under it is not the user's to override.
+	submitting.value = true
+	// The frozen review is what gets signed, but the gas gate is re-read NOW, not trusted from when
+	// the amount step opened: gas spent elsewhere meanwhile would strand the deposit at its claim.
+	// `submitting` holds the buttons while the read runs.
+	if (!isExit.value && target.direction === "l1-to-l2" && target.intent === "token") await gasHeld.refresh()
 	if (tokenOnlyBlocked.value !== null) {
+		submitting.value = false
 		invalidateReview()
 		return
 	}
 	backgroundedId.value = null
 	backgroundedLine.value = null
-	submitting.value = true
 	preSubmitIds = new Set(journal.records.value.map((r) => r.id))
 	reviewSaid.value = promisedLine(target)
 	try {
@@ -664,6 +669,18 @@ const backgrounded = computed(() => {
 	const rec = id ? journal.records.value.find((r) => r.id === id) : undefined
 	return rec && !rec.completedAt ? rec : undefined
 })
+
+// A backgrounded send may register the token while the user prepares the next one from it: once
+// it lands, the token is re-resolved, which also stands down a review priced for a first send.
+watch(
+	() => {
+		const id = backgroundedCanonical.value
+		return id ? journal.records.value.find((r) => r.id === id)?.completedAt : undefined
+	},
+	(done) => {
+		if (done && picked.value) void reselect(picked.value, direction.value)
+	},
+)
 
 // The subject is what the review promised, never the record's own amount: a gas-only record files
 // the token amount it swapped, which is not a Fee Juice figure.
