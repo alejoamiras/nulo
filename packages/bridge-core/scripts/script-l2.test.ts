@@ -3,6 +3,7 @@ import type { ContractBase } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
 import type { Wallet } from "@aztec/aztec.js/wallet"
 import { EthAddress } from "@aztec/foundation/eth-address"
+import { computeSiloedPrivateInitializationNullifier } from "@aztec/stdlib/hash"
 import { describe, expect, it } from "vitest"
 import { tokenBridgeHubArtifact } from "../src/artifacts"
 import type { HubClaimParams } from "../src/hub-l2"
@@ -174,33 +175,55 @@ describe("script-l2", () => {
 		).rejects.toThrow(/Balance too low/)
 	})
 
-	it("deployAccountIfAbsent no-ops when the node serves the account, else sends NO_FROM with the fee", async () => {
+	it("deployAccountIfAbsent no-ops when the node serves the account OR its init nullifier exists, else sends NO_FROM with the fee", async () => {
 		const log: string[] = []
-		const served = {
-			node: { getContract: async () => ({}) },
-			manager: {
-				getDeployMethod: async () => {
-					throw new Error("must not deploy")
-				},
+		const from = AztecAddress.fromStringUnsafe(`0x${"1".padStart(64, "0")}`)
+		const instance = { initializationHash: new Fr(7) }
+		const expectedNullifier = await computeSiloedPrivateInitializationNullifier(from, instance.initializationHash)
+		const refusing = {
+			getDeployMethod: async () => {
+				throw new Error("must not deploy")
 			},
-			from: {} as never,
+			getInstance: () => instance,
+		}
+		const served = {
+			node: { getContract: async () => ({}), getNullifierMembershipWitness: async () => undefined },
+			manager: refusing,
+			from,
 			fee: { paymentMethod: "sponsored" },
 			log: (s: string) => log.push(s),
 		}
 		await deployAccountIfAbsent(served as never)
 		expect(log).toEqual([])
 
+		// An account deploy publishes no instance: the node never serves it, only its init nullifier.
+		const witnessed: Fr[] = []
+		const initialized = {
+			...served,
+			node: {
+				getContract: async () => undefined,
+				getNullifierMembershipWitness: async (_b: string, n: Fr) => {
+					witnessed.push(n)
+					return n.equals(expectedNullifier) ? {} : undefined
+				},
+			},
+		}
+		await deployAccountIfAbsent(initialized as never)
+		expect(witnessed).toEqual([expectedNullifier])
+		expect(log).toEqual([])
+
 		let sent: { fee: unknown; from: unknown } | undefined
 		const absent = {
-			node: { getContract: async () => undefined },
+			node: { getContract: async () => undefined, getNullifierMembershipWitness: async () => undefined },
 			manager: {
 				getDeployMethod: async () => ({
 					send: async (o: { fee: unknown; from: unknown }) => {
 						sent = o
 					},
 				}),
+				getInstance: () => instance,
 			},
-			from: {} as never,
+			from,
 			fee: { paymentMethod: "sponsored" },
 			log: (s: string) => log.push(s),
 		}
