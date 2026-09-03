@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** Utils */
 import { computed } from "vue"
-import { toDecimalString, trimAddress } from "@/lib/format"
+import { formatCompact, toDecimalString, trimAddress } from "@/lib/format"
 import type { ExitPlan, SendPlan } from "@/lib/send-model"
 import { TESTIDS } from "@/lib/testids"
 import { safeDisplay } from "@/lib/token-display"
@@ -9,14 +9,22 @@ import { safeDisplay } from "@/lib/token-display"
 /** Components */
 import ReviewDetails, { type PortalState } from "./ReviewDetails.vue"
 
+/** What the view states about the plan, frozen with it: the clock, the fee model, the transaction
+ *  count the gas was sized for. Strings and a count, so this step only repeats them. */
+export interface ReviewEstimate {
+	takes: string
+	networkFee: string
+	/** How many Aztec transactions the gas leg covers; null when the send buys no gas. */
+	txCovered: number | null
+}
+
 const props = defineProps<{
 	plan: SendPlan | ExitPlan
 	portalVerified: PortalState
 	account: string
 	signatureValiditySeconds: number
 	slippageBps: number | null
-	/** Strings, not numbers: the view owns the clock and the fee model, this step only states them. */
-	estimate: { takes: string; networkFee: string }
+	estimate: ReviewEstimate
 	grant: "idle" | "pending" | "declined" | "busy"
 	busy: boolean
 	error: string | null
@@ -39,26 +47,27 @@ const conflict = computed(() => token.value.metadataConflict)
 
 const gas = computed(() => (props.plan.direction === "l1-to-l2" ? props.plan.gas : undefined))
 
-// Every amount on this screen is full precision: a display rounding is a different number from the
-// one being signed, and at two places a small send reads as zero.
+// Every token amount on this screen is full precision: a display rounding is a different number
+// from the one being signed, and at two places a small send reads as zero. The gas figure is a
+// quote, shown compact.
 const sendText = computed(() => `${toDecimalString(props.plan.amount, token.value.decimals)} ${symbol.value}`)
 
-const arrivesText = computed(() => {
-	if (props.plan.direction === "l2-to-l1") {
-		return `${sendText.value} to ${trimAddress(props.plan.recipientL1)} on Ethereum`
-	}
+const tokenArrives = computed(() => {
+	if (props.plan.direction === "l2-to-l1") return `${sendText.value} to ${trimAddress(props.plan.recipientL1)} on Ethereum`
 	const slice = gas.value?.fuelAmount ?? 0n
 	const rest = props.plan.amount > slice ? props.plan.amount - slice : 0n
-	const where = props.plan.isPrivate ? "private" : "public"
-	if (rest === 0n) return `nothing — the whole amount becomes gas in your ${where} Aztec balance`
-	return `${toDecimalString(rest, token.value.decimals)} ${symbol.value} in your ${where} Aztec balance`
+	if (rest === 0n) return null
+	return `${toDecimalString(rest, token.value.decimals)} ${symbol.value}`
 })
 
-const gasText = computed(() => {
-	if (isExit.value) return "Paid on Ethereum when you finish."
-	const plan = gas.value
-	if (!plan) return "None — your first move on Aztec is sponsored."
-	return `${toDecimalString(plan.quote, 18)} FJ`
+const where = computed(() => (props.plan.direction === "l1-to-l2" ? (props.plan.isPrivate ? "private" : "public") : ""))
+
+const gasArrives = computed(() => (gas.value ? `≈ ${formatCompact(gas.value.quote, 18)} FJ` : null))
+
+const gasFor = computed(() => {
+	const n = props.estimate.txCovered
+	if (n === null) return "gas"
+	return `gas for ≈ ${n} ${n === 1 ? "transaction" : "transactions"}`
 })
 
 const firstTime = computed(() => props.plan.direction === "l1-to-l2" && token.value.state.kind !== "registered")
@@ -79,14 +88,13 @@ const confirmDisabled = computed(() => props.busy || props.grant === "pending" |
 			</div>
 			<div class="line" :data-testid="TESTIDS.sendReviewArrives">
 				<dt>Arrives</dt>
-				<dd>{{ arrivesText }}</dd>
-			</div>
-			<div class="line" :data-testid="TESTIDS.sendReviewGas">
-				<dt>Gas</dt>
-				<dd>{{ gasText }}</dd>
+				<dd class="legs">
+					<span v-if="tokenArrives" class="leg">{{ tokenArrives }} <span v-if="where" class="soft-inline">{{ where }}</span></span>
+					<span v-if="gasArrives" class="leg" :data-testid="TESTIDS.sendReviewGas">{{ gasArrives }} <span class="soft-inline">{{ gasFor }}</span></span>
+				</dd>
 			</div>
 			<div class="line" :data-testid="TESTIDS.sendReviewNetworkFee">
-				<dt>Network fee</dt>
+				<dt>Fee</dt>
 				<dd>{{ estimate.networkFee }}</dd>
 			</div>
 			<div class="line" :data-testid="TESTIDS.sendReviewTakes">
@@ -150,7 +158,7 @@ const confirmDisabled = computed(() => props.busy || props.grant === "pending" |
 .lines {
 	display: flex;
 	flex-direction: column;
-	gap: 8px;
+	gap: 10px;
 	margin: 0;
 	padding: 14px 16px;
 	border: 1px solid var(--nulo-outline);
@@ -175,6 +183,17 @@ dd {
 	margin: 0;
 	font: 600 13px/1.4 var(--font-mono);
 	color: var(--txt-primary);
+}
+
+.legs {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+}
+
+.soft-inline {
+	color: var(--txt-secondary);
+	font-weight: 500;
 }
 
 .soft {
@@ -209,7 +228,7 @@ dd {
 }
 
 .btn {
-	padding: 10px 18px;
+	padding: 12px 18px;
 	background: transparent;
 	border: 1px solid var(--nulo-outline);
 	color: var(--txt-primary);
@@ -224,8 +243,15 @@ dd {
 }
 
 .btn.primary {
+	padding: 12px 20px;
+	background: var(--nulo-accent);
 	border-color: var(--nulo-accent);
-	color: var(--nulo-accent);
+	color: var(--txt-inverse);
+}
+
+.btn.primary:hover:not(:disabled) {
+	color: var(--txt-inverse);
+	opacity: 0.9;
 }
 
 .btn:disabled {

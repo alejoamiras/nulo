@@ -89,7 +89,7 @@ vi.mock("@/contracts/bridge-generation", () => ({
 	HUB: { toString: () => AZTEC_ACCOUNT },
 	HUB_TOKEN_ARTIFACT: {},
 	SEND_GENERATION: { factory: FACTORY, implementation: IMPLEMENTATION },
-	SWAP: { slippageBps: 300, fjPerTx: "100000000000000000" },
+	SWAP: { slippageBps: 300, fjPerTx: "100000000000000000", fjRegister: "500000000000000000" },
 	MANIFEST_TOKENS: [],
 }))
 vi.mock("@/composables/useL1Wallet", () => ({
@@ -413,10 +413,10 @@ describe("SendWizard", () => {
 		expect(w.findComponent({ name: "AmountStep" }).props("gas").fuelAmount).toBe(10n ** 8n)
 	})
 
-	it("a token-only review says the network fee is sponsored; adding gas names the budget", async () => {
+	it("a token-only review says the fee is sponsored; adding gas names one transaction's cost out of it", async () => {
 		const w = await wizard()
 		let review = await atReview(w)
-		expect(review.props("estimate").networkFee).toBe("paid by the sponsor")
+		expect(review.props("estimate")).toEqual({ takes: expect.any(String), networkFee: "paid by the sponsor", txCovered: null })
 		review.vm.$emit("back")
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
@@ -425,8 +425,35 @@ describe("SendWizard", () => {
 		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
 		await flushPromises()
 		review = w.findComponent({ name: "ReviewStep" })
-		expect(review.props("estimate").networkFee).toContain("5.00 FJ")
+		// The default token is first-time, so the claim also registers it: one transaction plus the
+		// registration budget.
+		expect(review.props("estimate").networkFee).toBe("≈ 0.6 FJ — the first of those 20, paid from that gas")
+		expect(review.props("estimate").txCovered).toBe(20)
 		expect(review.props("slippageBps")).toBe(300)
+	})
+
+	it("a registered token's fee is one transaction alone; a gas-only send counts what the quote divides into", async () => {
+		nextResolved = (token) => resolvedToken(token, HUB_REGISTERED)
+		const w = await wizard()
+		let review = await atReview(w)
+		review.vm.$emit("back")
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
+		setRoute({ kind: "route", route: ROUTE, quoteOut: 10n ** 18n })
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
+		await flushPromises()
+		review = w.findComponent({ name: "ReviewStep" })
+		expect(review.props("estimate").networkFee).toBe("≈ 0.1 FJ — the first of those 20, paid from that gas")
+
+		review.vm.$emit("back")
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "gas")
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
+		await flushPromises()
+		// 1 token (8 decimals) at 1 FJ per token = 1 FJ; 0.1 FJ per transaction.
+		expect(w.findComponent({ name: "ReviewStep" }).props("estimate").txCovered).toBe(10)
 	})
 
 	it("the zero answer is `absent` — the state that means this send creates the clone", async () => {

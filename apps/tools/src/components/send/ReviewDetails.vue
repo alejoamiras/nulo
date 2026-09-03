@@ -60,9 +60,12 @@ const validityText = computed(() => {
 </script>
 
 <template>
-	<div class="details">
+	<div class="details" :data-open="open || undefined">
 		<button type="button" class="toggle" :aria-expanded="open" :data-testid="TESTIDS.sendReviewDetailsToggle" @click="open = !open">
-			{{ open ? "Hide details" : "Details" }}
+			<span>Details</span>
+			<svg class="chevron" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
+				<path d="M3 5.5 7 9.5 11 5.5" />
+			</svg>
 		</button>
 		<dl v-if="open" class="panel" :data-testid="TESTIDS.sendReviewDetails">
 			<div class="row" :data-testid="TESTIDS.sendReviewToken">
@@ -97,19 +100,22 @@ const validityText = computed(() => {
 .details {
 	display: flex;
 	flex-direction: column;
-	gap: 8px;
+	border: 1px solid var(--nulo-outline);
 }
 
 .toggle {
-	align-self: flex-start;
-	padding: 0;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	width: 100%;
+	padding: 10px 14px;
 	background: transparent;
 	border: none;
 	color: var(--txt-secondary);
-	font: 500 11px/1.4 var(--font-mono);
-	letter-spacing: 0.04em;
-	text-decoration: underline;
-	text-underline-offset: 3px;
+	font: 600 11px/1.4 var(--font-mono);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	text-align: left;
 	cursor: pointer;
 }
 
@@ -117,13 +123,25 @@ const validityText = computed(() => {
 	color: var(--nulo-accent);
 }
 
+.chevron {
+	width: 14px;
+	height: 14px;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.5;
+	transition: transform 0.15s ease;
+}
+
+.details[data-open] .chevron {
+	transform: rotate(180deg);
+}
+
 .panel {
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
 	margin: 0;
-	padding: 12px 14px;
-	border: 1px dashed var(--nulo-outline);
+	padding: 4px 14px 12px;
 }
 
 .row {

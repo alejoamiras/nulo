@@ -21,7 +21,7 @@ import BridgeReceipt, { type ReceiptSnapshot } from "@/components/BridgeReceipt.
 import BridgeStepper from "@/components/BridgeStepper.vue"
 import AmountStep from "./AmountStep.vue"
 import MintStrip from "./MintStrip.vue"
-import ReviewStep from "./ReviewStep.vue"
+import ReviewStep, { type ReviewEstimate } from "./ReviewStep.vue"
 import TokenStep from "./TokenStep.vue"
 import WizardShell from "./WizardShell.vue"
 
@@ -44,7 +44,7 @@ import { useTokenSelection } from "@/composables/useTokenSelection"
 
 /** Utils */
 import { recordTokenBlock } from "@/lib/asset-label"
-import { formatBigInt, parseAmountStrict, toDecimalString } from "@/lib/format"
+import { formatBigInt, formatCompact, parseAmountStrict, toDecimalString } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
 import type { Direction, ExitPlan, GasLegPlan, ResolvedToken, SelectableToken, SendIntent, SendPlan } from "@/lib/send-model"
 
@@ -130,7 +130,7 @@ interface ReviewSnapshot {
 	plan: SendPlan | ExitPlan
 	account: string
 	slippageBps: number | null
-	estimate: { takes: string; networkFee: string }
+	estimate: ReviewEstimate
 }
 const reviewed = ref<ReviewSnapshot | null>(null)
 /** Set when a change under the frozen review sent the user back to the amount step. */
@@ -260,21 +260,37 @@ const plan = computed<SendPlan | ExitPlan | null>(() => {
 	}
 })
 
-function networkFeeOf(target: SendPlan | ExitPlan): string {
+/** How many Aztec transactions the gas leg covers: what the slice was sized for, or for a gas-only
+ *  send (which spends the whole amount) what the quote divides into. */
+function txCoveredOf(target: SendPlan | ExitPlan): number | null {
+	if (target.direction !== "l1-to-l2" || !target.gas || !fjPerTx) return null
+	return target.intent === "gas" ? Number(target.gas.quote / fjPerTx) : gasShare.txTarget.value
+}
+
+/** The claim is the first transaction the bought gas pays for; an unregistered token's claim also
+ *  registers it, which is budgeted on top. */
+function networkFeeOf(target: SendPlan | ExitPlan, txCovered: number | null): string {
 	if (target.direction === "l2-to-l1") return "your Aztec wallet's own fee, then Ethereum gas to finish"
-	if (!target.gas) return "paid by the sponsor"
-	return `≈ ${formatBigInt(target.gas.fuelFj, 18)} FJ, out of the gas you are buying`
+	if (!target.gas || !SWAP || !fjPerTx) return "paid by the sponsor"
+	const feeFj = fjPerTx + (target.token.state.kind === "registered" ? 0n : BigInt(SWAP.fjRegister))
+	const ofThose = txCovered === null ? "" : ` — the first of those ${txCovered}, paid from that gas`
+	return `≈ ${formatCompact(feeFj, 18)} FJ${ofThose}`
 }
 
 /** Freeze the plan AND everything stated about it in one object: a review whose account or fee line
  *  can move independently of the plan is the same hazard in a smaller place. */
 function freezeReview(target: SendPlan | ExitPlan): ReviewSnapshot {
 	const gasLeg = target.direction === "l1-to-l2" ? target.gas : undefined
+	const txCovered = txCoveredOf(target)
 	return {
 		plan: target,
 		account: target.direction === "l2-to-l1" ? target.recipientL1 : (bridge.selectedAccount.value ?? ""),
 		slippageBps: gasLeg && SWAP ? SWAP.slippageBps : null,
-		estimate: { takes: target.direction === "l2-to-l1" ? EXIT_TAKES : DEPOSIT_TAKES, networkFee: networkFeeOf(target) },
+		estimate: {
+			takes: target.direction === "l2-to-l1" ? EXIT_TAKES : DEPOSIT_TAKES,
+			networkFee: networkFeeOf(target, txCovered),
+			txCovered,
+		},
 	}
 }
 

@@ -47,6 +47,7 @@ const EXIT = {
 type Props = {
 	plan: SendPlan | ExitPlan
 	portalVerified: PortalState
+	estimate: { takes: string; networkFee: string; txCovered: number | null }
 	grant: "idle" | "pending" | "declined"
 	busy: boolean
 	error: string | null
@@ -60,7 +61,7 @@ function review(over: Partial<Props> = {}) {
 			account: ACCOUNT,
 			signatureValiditySeconds: 1_800,
 			slippageBps: 50,
-			estimate: { takes: "about 12 minutes", networkFee: "paid by the sponsor" },
+			estimate: { takes: "about 12 minutes", networkFee: "paid by the sponsor", txCovered: null },
 			grant: "idle",
 			busy: false,
 			error: null,
@@ -70,39 +71,51 @@ function review(over: Partial<Props> = {}) {
 }
 
 describe("ReviewStep", () => {
-	it("states the five lines a send is judged on", () => {
+	it("states the four lines a send is judged on", () => {
 		const w = review()
 		expect(w.find(sel(TESTIDS.sendReviewSend)).text()).toContain("10 USDC")
 		expect(w.find(sel(TESTIDS.sendReviewArrives)).text()).toContain("10 USDC")
-		expect(w.find(sel(TESTIDS.sendReviewGas)).text()).toContain("sponsored")
+		expect(w.find(sel(TESTIDS.sendReviewGas)).exists()).toBe(false)
 		expect(w.find(sel(TESTIDS.sendReviewNetworkFee)).text()).toContain("paid by the sponsor")
 		expect(w.find(sel(TESTIDS.sendReviewTakes)).text()).toContain("about 12 minutes")
 		w.unmount()
 	})
 
-	it("takes the gas slice out of what arrives", () => {
-		const w = review({ plan: { ...DEPOSIT, intent: "token+gas", gas: GAS } })
-		expect(w.find(sel(TESTIDS.sendReviewArrives)).text()).toContain("8 USDC")
-		expect(w.find(sel(TESTIDS.sendReviewGas)).text()).toContain("0.3 FJ")
+	it("lists both legs of what arrives: the token less its slice, and the gas with what it covers", () => {
+		const w = review({
+			plan: { ...DEPOSIT, intent: "token+gas", gas: GAS },
+			estimate: { takes: "about 12 minutes", networkFee: "≈ 0.1 FJ — the first of those 3, paid from that gas", txCovered: 3 },
+		})
+		const arrives = w.find(sel(TESTIDS.sendReviewArrives)).text()
+		expect(arrives).toContain("8 USDC")
+		expect(w.find(sel(TESTIDS.sendReviewGas)).text()).toBe("≈ 0.3 FJ gas for ≈ 3 transactions")
+		expect(w.find(sel(TESTIDS.sendReviewNetworkFee)).text()).toContain("the first of those 3")
 		w.unmount()
 	})
 
-	it("says plainly when the whole amount becomes gas", () => {
-		const w = review({ plan: { ...DEPOSIT, intent: "gas", amount: 2_000_000n, gas: GAS } })
-		expect(w.find(sel(TESTIDS.sendReviewArrives)).text()).toContain("the whole amount becomes gas")
+	it("a gas-only send arrives as gas alone", () => {
+		const w = review({
+			plan: { ...DEPOSIT, intent: "gas", amount: 2_000_000n, gas: GAS },
+			estimate: { takes: "about 12 minutes", networkFee: "≈ 0.1 FJ", txCovered: 3 },
+		})
+		const arrives = w.find(sel(TESTIDS.sendReviewArrives)).text()
+		expect(arrives).not.toContain("USDC")
+		expect(arrives).toContain("≈ 0.3 FJ")
 		w.unmount()
 	})
 
 	it("names where the privacy choice lands the tokens", () => {
 		const w = review({ plan: { ...DEPOSIT, isPrivate: false } })
-		expect(w.find(sel(TESTIDS.sendReviewArrives)).text()).toContain("public Aztec balance")
+		expect(w.find(sel(TESTIDS.sendReviewArrives)).text()).toContain("public")
+		expect(w.find(sel(TESTIDS.sendReviewArrives)).text()).not.toContain("private")
 		w.unmount()
 	})
 
-	it("an exit arrives at the Ethereum recipient, and its gas is an Ethereum cost", () => {
-		const w = review({ plan: EXIT })
+	it("an exit arrives at the Ethereum recipient, and its fee is the view's own line", () => {
+		const w = review({ plan: EXIT, estimate: { takes: "long", networkFee: "then Ethereum gas to finish", txCovered: null } })
 		expect(w.find(sel(TESTIDS.sendReviewArrives)).text()).toContain("on Ethereum")
-		expect(w.find(sel(TESTIDS.sendReviewGas)).text()).toContain("when you finish")
+		expect(w.find(sel(TESTIDS.sendReviewGas)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.sendReviewNetworkFee)).text()).toContain("Ethereum gas to finish")
 		w.unmount()
 	})
 
