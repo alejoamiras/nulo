@@ -30,12 +30,15 @@ keeps its contract, except one read that today runs only once the Aztec wallet i
    gas-only shows `Arrives as gas` + `Enough for ≈ N transactions` and nothing else.
 5. **Review step**: Arrives lists both legs; Fee reads `≈ X FJ — the first of those N, paid from
    that gas` (token-only stays `paid by the sponsor`); Details is a bordered row with a chevron.
-6. **First-time false positive**: the hub binding is read whether or not an Aztec account is
-   connected, so a registered token never shows the register path on a plain wallet.
+6. **First-time false positive**: the hub binding is read from the node's public storage (the
+   `token_of` map slot the hub artifact declares), whether or not an Aztec account is connected,
+   so a registered token never shows the register path on a plain wallet.
 7. **Run in background** returns the wizard to step 1 with a slim status strip above it, instead
    of leaving step 3 populated with the finished send.
-8. **Mainnet token-only sends**: no sponsor exists there, so the option is gated: the recipient's
-   Fee Juice balance is read and a zero balance steers to `token + gas`.
+8. **Token-only sends**: the claim self-pays from Fee Juice the account already holds — there is no
+   sponsor on any network (`gateNoFuelClaim` stops with "No gas" otherwise) — so the recipient's
+   public and private Fee Juice are read on the Amount step and two known zeros steer to
+   `token + gas`; the review's fee line says where the fee comes from.
 
 Out of scope: the exit (Aztec → Ethereum) form beyond the shared stepper; the Drip tab; any
 `apps/extension` or wallet-package file.

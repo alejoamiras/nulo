@@ -358,6 +358,39 @@ the testnet numbers come from step 5). The conductor path (`generation.ts`, `dep
 `deploy-sandbox.ts`, the hub-l2 / send-flow modules) is therefore proven on the post-rebase tree
 with dev's journal ports in place.
 
+## Owner walk of the Pages preview → the UX arc (2026-09-03)
+
+The owner walked the preview before signing off and sent the wizard back: the step chips, the paste
+box, the provenance chips, the "First time for this token" label, the mint card, the MAX button, the
+change/done toggle on the gas card, the "out of the gas you are buying" fee line, the gas-only
+"Token arrives = 0" line, and RUN IN BACKGROUND landing on a populated step 3. Two of those were
+not copy: USDC (registered) showed the first-time path on a plain Ethereum wallet, and the
+"network fee" was the whole gas budget captioned as a fee.
+
+A design canvas (four mint variants) was approved with no changes; the mint decision moved to
+variant B (a testnet-only strip, the flow otherwise identical on both networks). The arc is
+[send-wizard-ux](../../send-wizard-ux/plan.md), branch `any-erc20-bridge/ux` above the stack, four
+commits (token step, amount step, review, wizard). Findings while building it:
+
+- **The first-time false positive was the wallet seam.** `useTokenSelection` only read the hub's
+  `token_for` through the connected Aztec wallet, so without one every registered token read as
+  portal-only. The binding is now read from the node's public storage: `token_of` is a
+  `Map<EthAddress, PublicImmutable<AztecAddress>>` at slot 9 of the hub artifact's `storageLayout`,
+  the entry's own slot holds the address (`WithHash` packs the value first), zero means unbound.
+  `hubBindingAt(node, hub, erc20)` in bridge-core; no wallet, no simulate.
+- **A token-only send is never sponsored.** `gateNoFuelClaim` reads the recipient's public and
+  private Fee Juice and STOPS with "No gas (Fee Juice) to claim this no-fuel bridge" when both are
+  zero — on every network, not only mainnet. The review said "paid by the sponsor". It now says
+  "paid from the gas you already hold on Aztec", and the amount step reads the same two balances
+  (`useGasHeld`) and blocks Token alone while both are known to be zero, before any Ethereum
+  signature. Unknown (no account, unreadable) blocks nothing; the claim's gate fails closed.
+- **The fee is one transaction, not the budget.** The review's Fee line is `fjPerTx` (plus
+  `fjRegister` for an unregistered token), stated as the first of the N transactions the bought
+  gas covers; the gas leg itself moved to the Arrives line.
+- **`deriveStorageSlotInMap` is async in 5.2.** The Promise typed through to
+  `getPublicStorageAt` until awaited.
+- The Pages preview for the sign-off is the PR's own; the five-item checklist below is unchanged.
+
 ## Sign-off
 
 _Owner sign-off: PENDING._
