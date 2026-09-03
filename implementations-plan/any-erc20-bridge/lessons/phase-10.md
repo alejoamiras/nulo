@@ -80,7 +80,35 @@ canonical clone (six keys; nothing was created). The sign-off remains a live wal
   the app's classification (`nonexistent L1-to-L2 message` · `l1_to_l2_msg_exists` ·
   `message not in state` · `(?<!non-nullified )No L1 to L2 message found`), consumed surfaces at
   once; unit-pinned with both live wordings. Intent rebuilt → `9da0f5b1`.
-- Smoke run 2: verify → smoke-existing → smoke-swap (fuel excluded: FPC gate).
+- **Smoke run 2 — green.** `smoke-existing`: USDC public (leaf 63292416) + private (63294464),
+  USDT public (63297536) + private (63299584), each claimed via the hub after its message synced
+  (`✅ CANDIDATE smoke PASSED — 2 tokens bridged public + private … 12.3m`). `smoke-swap`: 1 USDC
+  fueled send → quote 40.93 FJ (floor 39.70) → token leaf 63302657 / fuel leaf 63302656 → the
+  self-paying hub claim landed (`✅ FUELED smoke PASSED … 3.5m`, FJ gained 38.334 of 40.930).
+- **Calibration** (`fees.json` in the session scratchpad, outside the repo): the self-paid
+  `claim_public` (tx `0x2ce6bdf3…0104`, block 67877) cost `transactionFee = 2595637213604538218`
+  FJ-wei (= the FJ delta exactly). No registering sample is producible on this node (see the FPC
+  gate above), so the runbook fallback: sandbox register excess `9936986600000` × the fee ratio
+  `2595637213604538218 / 14821340800000 = 175 128.4` = `1740248237868576233` → a synthesized
+  `register_and_claim_public` sample of `4335885451473114451`. `calibrate` wrote
+  **`fjPerTx = 3114764656325445862`** (3.1148 FJ) and **`fjRegister = 2088297885442291480`**
+  (2.0883 FJ); `minFuelFj` stays `29580299742031535464`. Follow-up: replace `fjRegister` with a
+  real registering sample once the private-FPC lane is unblocked (`pre-create --no-register
+  --seed-pool --token <third>` + `fuel-testnet --token <third>`).
+- `verify --candidate`: strict verify-l1 + hub initialization readback green; digest
+  `a27da4727a75fc7c35893d72cf1bbda68d386a296b3aec7494a0d2f43802ca9a` recorded → intent committed
+  `0d85fbb7`.
+- **`promote --bridge-only` is BLOCKED by the same FPC gate** (`live-intent.ts` runs
+  `check-fpc-version --mode require-deployed` inline before the live write). Evidence for the owner's
+  ruling: the pinned FPC `0x1a6d21ce…1bc0` is deployed with `original == current ==
+  0x032bc73c22b1d0ab26cce0c99d7ab71f0078962f9a92b060cc9c5cb87e4cfb08`, which is exactly the class the
+  installed `@alejoamiras/private-fee-juice` 5.0.1 artifact computes — the compat-list string is
+  the gate's only red component; the rollup did not reset, and every 5.0.1-compiled Noir contract
+  this arc touched (hub, Token, the private claims) executed on this node. Owner options:
+  (a) append `"5.2.0-nightly.20260815"` to `compatibleNodeVersions[d5a2453c…]` in
+  `packages/bridge-core/src/private-fpc-canonical.json` (a curated ruling by the descriptor's own
+  policy) → `promote` → `fuel-testnet.ts` `PRIVATE_RUNS=1` as the re-canary; (b) hold the promotion.
+  Never hand-copy the candidate.
 
 ## Pre-flight the agent completed
 
