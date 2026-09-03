@@ -43,9 +43,9 @@ function currencyLabel(address: string): string {
 function routeHops(route: { path: readonly { currency0: string; currency1: string }[]; zeroForOnes: readonly boolean[] }): string[] {
 	const first = route.path[0]
 	if (!first) return []
-	const hops = [route.zeroForOnes[0] ? first.currency0 : first.currency1]
-	route.path.forEach((pool, i) => hops.push(route.zeroForOnes[i] ? pool.currency1 : pool.currency0))
-	return hops.map(currencyLabel)
+	const entry = route.zeroForOnes[0] ? first.currency0 : first.currency1
+	const exits = route.path.map((pool, i) => (route.zeroForOnes[i] ? pool.currency1 : pool.currency0))
+	return [entry, ...exits].map(currencyLabel)
 }
 
 const routeText = computed(() => {
