@@ -260,6 +260,25 @@ Codex round 5 (resumed): "Verdict: `780803dd` correctly makes the public lost-ra
 logical attempt while preserving wallet-option stripping. no new material findings." — the live
 arc's fix loop has converged (rounds 1–5, one fresh session after the outage).
 
+## CI on the promoted manifest, and the preview for the sign-off
+
+PR #540 went red on both `Build Tools` jobs (testnet + mainnet → `quality-status`): the tools
+app's jsdom smoke (`tests/e2e/tools-smoke.test.ts`, run inside the build gate) lost 3 of 8 cases.
+Until P10 the shipped testnet manifest was a placeholder (`bridge: null`), so the smoke never met
+the hub; with the live bridge block, connect-time `registerHubContracts` re-derives the hub and
+every manifest token through the smoke's gutted `getContractInstanceFromInstantiationParams`
+mock (`0x0`), the instantiation check rightly refuses it, the connection wedges in `error`, and
+drip/disconnect cascade. Fix `984dcc60` (test-only): the hub and hub-token instances are pre-baked
+in the smoke like every other contract module there; 20/20 locally. `dev` has not moved since the
+rebase base (`4df5eae5`), so the stack is current.
+
+**Preview for the wallet-seam walk**: Cloudflare Pages builds the tools app per PR branch with the
+testnet values — the project's Pages subdomain is the legacy `nulo-faucet.pages.dev`:
+`https://any-erc20-bridge-docs.nulo-faucet.pages.dev` (branch alias; per-commit
+`https://<deploy-id>.nulo-faucet.pages.dev`). Verified serving the promoted manifest: schema 2,
+walletChainId 1816023401, hub `0x0c1e649c…`, USDC/USDT/EURC/GBPC, `fjPerTx` 3.578 FJ,
+`build.json` `manifestDigest` `ba7ced36…` = the intent's candidate digest, `buildId 0.1.0+984dcc60`.
+
 Round 2 (resumed, on `1de456c0`): "close" — one wallet-boundary miss, one policy point, one known
 gap, one nit.
 - MEDIUM `useSend.ts` `probeHubClaim` simulated with the seam key still in the options (the
