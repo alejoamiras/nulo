@@ -81,6 +81,7 @@ const BRIDGED = TOTAL - FUEL_SLICE
 // FPC credits `amount − max_gas_cost` and refunds nothing, so any pad is Fee Juice the claimer
 // forfeits, and a cap that still falls under the live fee is re-priced on the next attempt.
 const RELIABILITY_PAD = Number(process.env.RELIABILITY_PAD ?? 1)
+const PUBLIC_RUNS = Number(process.env.PUBLIC_RUNS ?? 1)
 const PRIVATE_RUNS = Number(process.env.PRIVATE_RUNS ?? 3)
 const NOFUEL_SPEND_RUNS = Number(process.env.NOFUEL_SPEND_RUNS ?? 0)
 
@@ -454,8 +455,9 @@ async function main() {
 	const { ctx, fpc } = await buildL2(l1, mins)
 
 	// The public lane is the sanity check; the private-FPC lane is what the calibration needs, so run
-	// it repeatedly for a stable getFeeLimit across fee conditions.
-	const runs: VariantRun[] = [await runVariant(ctx, false)]
+	// it repeatedly for a stable getFeeLimit across fee conditions. `PUBLIC_RUNS=0` skips the sanity
+	// lane so a token the hub does not know yet meets the PRIVATE first claim (its own registration).
+	const runs: VariantRun[] = PUBLIC_RUNS > 0 ? [await runVariant(ctx, false)] : []
 	for (let i = 0; i < PRIVATE_RUNS; i++) {
 		console.log(`\n--- private-FPC run ${i + 1}/${PRIVATE_RUNS} ---`)
 		runs.push(await runVariant(ctx, true, true))
