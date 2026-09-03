@@ -57,6 +57,7 @@ import {
 	setRecordStep,
 	updateRecord,
 	useBridgeJournal,
+	markGrantOutcome,
 } from "./useBridgeJournal"
 import {
 	type HubClaimFee,
@@ -107,7 +108,8 @@ export async function assertL1Chain(l1: { publicClient: { getChainId: () => Prom
 }
 
 /** The token block the wizard PREDICTS. The receipt's read-back replaces it. */
-function previewBlock(plan: SendPlan): JournalTokenBlock {
+/** The token block a send files, from the plan: the wizard also renders it before the record exists. */
+export function previewBlock(plan: SendPlan): JournalTokenBlock {
 	return {
 		erc20: plan.token.address.toLowerCase(),
 		portal: plan.token.portal.toLowerCase(),
@@ -169,6 +171,9 @@ function buildSendRecord(i: RecordInputs): SendDepositRecord {
 		...(plan.gas && i.fuelSecretHex && i.fuelSecretHashHex
 			? { fuel: fuelBlockOf(plan.gas, i.fuelSecretHex, i.fuelSecretHashHex, i.fuelSalt) }
 			: {}),
+		// The rail shows REGISTER ahead of time only because the record says so; the hub decides at
+		// claim time regardless.
+		...(!gasOnly && plan.token.state.kind !== "registered" ? { registers: true as const } : {}),
 	}
 	return (gasOnly ? { ...base, intent: "gas" } : { ...base, intent: plan.intent, token: previewBlock(plan) }) as SendDepositRecord
 }
@@ -487,7 +492,9 @@ async function performSend(plan: SendPlan, d: SendDeps): Promise<string> {
 	}
 	// BEFORE the Ethereum signature: a declined or superseded grant must cancel with nothing
 	// signed and nothing on chain.
+	let granted = false
 	if (plan.intent !== "gas") {
+		granted = !d.grant.isGranted(plan.token.l2Token)
 		const outcome = await d.grant.ensureGranted(plan.token, d.epoch)
 		if (outcome !== "granted") return failWith(d.error, grantRefusal(outcome))
 	}
@@ -499,6 +506,7 @@ async function performSend(plan: SendPlan, d: SendDeps): Promise<string> {
 			journal: d.journal,
 			stage: d.stage,
 			error: d.error,
+			granted,
 		})
 	} catch (e) {
 		return failWith(d.error, humanizeWalletError(e instanceof Error ? e.message : String(e)))
@@ -595,6 +603,8 @@ interface RunCtx {
 	journal: ReturnType<typeof useBridgeJournal>
 	stage: Ref<SendStage | null>
 	error: Ref<string | null>
+	/** The wallet's token permission was raised (and granted) by this run, before any signature. */
+	granted?: boolean
 }
 
 /** The row every L1 leg narrates into, opened before the Permit2 approval so its prompt and its
@@ -618,6 +628,9 @@ async function executeSend(ctx: RunCtx): Promise<string> {
 	const prepared = await prepareSecrets(plan, actors.recipient)
 	let id = prepared.id ?? makeProvisionalDepositId()
 	await openSendRecord(id, ctx, prepared)
+	// The permission the wallet just granted happened before the record existed; the rail shows it
+	// as this run's first, done phase.
+	if (ctx.granted) markGrantOutcome(id)
 	try {
 		await ensurePermit2Approval(gen.permit2, plan.amount, id, l1ApprovalCtx(actors), plan.token.address)
 		const res = await runSend(

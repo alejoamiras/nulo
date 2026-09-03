@@ -4,6 +4,7 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Contract } from "@aztec/aztec.js/contracts"
 import {
 	type RouteOutcome,
+	type SendDepositRecord,
 	type SendJournalRecord,
 	PERMIT_DEADLINE_SECONDS,
 	PORTAL_FACTORY_ABI,
@@ -13,7 +14,7 @@ import {
 } from "@nulo/bridge-core"
 import type { Address, PublicClient } from "viem"
 import { computed, onBeforeUnmount, ref, watch } from "vue"
-import { HUB_TOKEN_ARTIFACT, SEND_GENERATION, SWAP } from "@/contracts/bridge-generation"
+import { HUB, HUB_TOKEN_ARTIFACT, SEND_GENERATION, SWAP } from "@/contracts/bridge-generation"
 import { readHubBinding } from "@/contracts/hub-binding"
 
 /** Components */
@@ -28,7 +29,7 @@ import WizardShell from "./WizardShell.vue"
 /** Composables */
 import { useAddressLookup } from "@/composables/useAddressLookup"
 import { useBridgeBackup } from "@/composables/useBridgeBackup"
-import { useBridgeJournal } from "@/composables/useBridgeJournal"
+import { type RecordRuntime, useBridgeJournal } from "@/composables/useBridgeJournal"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
 import { useAddDripToken } from "@/composables/useAddDripToken"
 import { useGasHeld } from "@/composables/useGasHeld"
@@ -37,7 +38,7 @@ import { EXIT_TOKEN_NOT_REGISTERED, useHubExit } from "@/composables/useHubExit"
 import { useL1Wallet } from "@/composables/useL1Wallet"
 import { useRouteQuote } from "@/composables/useRouteQuote"
 import { useRowBalances } from "@/composables/useRowBalances"
-import { useSend } from "@/composables/useSend"
+import { previewBlock, useSend } from "@/composables/useSend"
 import { useToast } from "@/composables/useToast"
 import { useTokenCatalog } from "@/composables/useTokenCatalog"
 import { useTokenGrant } from "@/composables/useTokenGrant"
@@ -115,8 +116,12 @@ const portalVerified = ref<"verified" | "absent" | "unknown" | "mismatch">("unkn
 const amountValid = ref(false)
 
 // The takeover machine: ALL wizard gating keys off `stage`, never the flows' busy, which spans the
-// whole send and would make RUN IN BACKGROUND a no-op.
-const stage = ref<"wizard" | "stepper" | "receipt">("wizard")
+// whole send and would make RUN IN BACKGROUND a no-op. `permit` is the stepper before any record
+// exists: the wallet's token permission is the run's first phase and is asked before anything is
+// signed, so it is shown from a record the wizard builds out of the plan.
+const stage = ref<"wizard" | "permit" | "stepper" | "receipt">("wizard")
+const permitRecord = ref<SendDepositRecord | null>(null)
+const PERMIT_RUNTIME: RecordRuntime = { step: "granting" }
 // The engine's foreground stays the single DISPLAY owner, but the wizard ALSO tracks the id of the
 // record IT started: a foreground-derived "my record" is racy while another surface can re-point it.
 const activeId = journal.activeFlowId
@@ -304,12 +309,13 @@ function txCoveredOf(target: SendPlan | ExitPlan): number | null {
 
 /** The claim is the first transaction the bought gas pays for; an unregistered token's claim also
  *  registers it, which is budgeted on top. */
-function networkFeeOf(target: SendPlan | ExitPlan, txCovered: number | null): string {
-	if (target.direction === "l2-to-l1") return "your Aztec wallet's own fee, then Ethereum gas to finish"
-	if (!target.gas || !SWAP || !fjPerTx) return "paid from the gas you already hold on Aztec"
+function networkFeeOf(target: SendPlan | ExitPlan): { networkFee: string; networkFeeNote: string | null } {
+	if (target.direction === "l2-to-l1") {
+		return { networkFee: "your Aztec wallet's own fee, then Ethereum gas to finish", networkFeeNote: null }
+	}
+	if (!target.gas || !SWAP || !fjPerTx) return { networkFee: "paid from the gas you already hold on Aztec", networkFeeNote: null }
 	const feeFj = fjPerTx + (target.token.state.kind === "registered" ? 0n : BigInt(SWAP.fjRegister))
-	const ofThose = txCovered === null ? "" : ` — the first of those ${txCovered}, paid from that gas`
-	return `≈ ${formatCompact(feeFj, 18)} FJ${ofThose}`
+	return { networkFee: `≈ ${formatCompact(feeFj, 18)} FJ`, networkFeeNote: "taken from the gas that arrives" }
 }
 
 /** Freeze the plan AND everything stated about it in one object: a review whose account or fee line
@@ -323,7 +329,7 @@ function freezeReview(target: SendPlan | ExitPlan): ReviewSnapshot {
 		slippageBps: gasLeg && SWAP ? SWAP.slippageBps : null,
 		estimate: {
 			takes: target.direction === "l2-to-l1" ? EXIT_TAKES : DEPOSIT_TAKES,
-			networkFee: networkFeeOf(target, txCovered),
+			...networkFeeOf(target),
 			txCovered,
 		},
 	}
@@ -519,6 +525,7 @@ function adopt(id: string): void {
 	if (ownedId.value && ownedId.value !== id) journal.releaseForeground(ownedId.value)
 	ownedId.value = id
 	journal.claimForeground(id)
+	permitRecord.value = null
 	stage.value = "stepper"
 }
 
@@ -530,7 +537,7 @@ function adopt(id: string): void {
  * would put its receipt — and this review's promise — on someone else's send.
  */
 function adoptRunRecord(): void {
-	if (!submitting.value || ownedId.value || stage.value !== "wizard") return
+	if (!submitting.value || ownedId.value || (stage.value !== "wizard" && stage.value !== "permit")) return
 	const mine = journal.records.value.find((r) => isSendRecord(r) && !preSubmitIds.has(r.id) && journal.isSessionLive(r.id))
 	if (mine && mine.id !== backgroundedCanonical.value) adopt(mine.id)
 }
@@ -580,10 +587,42 @@ async function onConfirm(): Promise<void> {
 	}
 }
 
+/** The record the permission phase is rendered from: the plan, filed the way the send will file it,
+ *  under a provisional id so nothing offers to back it up. */
+function permitRecordOf(target: SendPlan): SendDepositRecord {
+	const now = Date.now()
+	const base = {
+		schema: 3 as const,
+		id: "dep-pending-permit",
+		direction: "deposit" as const,
+		isPrivate: target.isPrivate,
+		amount: (target.amount - (target.gas?.fuelAmount ?? 0n)).toString(),
+		createdAt: now,
+		updatedAt: now,
+		chainId: catalog.chainId,
+		portal: target.token.portal.toLowerCase(),
+		bridge: HUB?.toString() ?? "",
+		recipient: bridge.selectedAccount.value ?? "",
+		secretHashHex: "",
+		...(target.token.state.kind !== "registered" ? { registers: true as const } : {}),
+	}
+	return { ...base, intent: target.intent === "gas" ? "token" : target.intent, token: previewBlock(target) } as SendDepositRecord
+}
+
 async function runSend(target: SendPlan): Promise<void> {
-	// The grant is raised inside the send, BEFORE anything is signed; surface it while it is open.
-	grantState.value = grant.isGranted(target.token.l2Token) ? "idle" : "pending"
+	// The grant is raised inside the send, BEFORE anything is signed; while it is open the stepper
+	// shows it as the run's first phase.
+	const asking = target.intent !== "gas" && !grant.isGranted(target.token.l2Token)
+	grantState.value = asking ? "pending" : "idle"
+	if (asking) {
+		permitRecord.value = permitRecordOf(target)
+		stage.value = "permit"
+	}
 	const id = await sendFlow.send(target)
+	if (stage.value === "permit") {
+		stage.value = "wizard"
+		permitRecord.value = null
+	}
 	if (id) {
 		// The run NAMES its record; that id wins over whatever the takeover adopted provisionally.
 		// Unless the user sent it to the background meanwhile: the lane resolves only once the whole
@@ -774,8 +813,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+	<BridgeStepper v-if="stage === 'permit' && permitRecord" :record="permitRecord" :runtime="PERMIT_RUNTIME" :can-background="false" />
 	<BridgeStepper
-		v-if="stage === 'stepper' && ownedRecord"
+		v-else-if="stage === 'stepper' && ownedRecord"
 		:record="ownedRecord"
 		@background="onBackground"
 		@backup="backup.exportBridgeWithToast"

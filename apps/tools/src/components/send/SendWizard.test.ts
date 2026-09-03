@@ -181,6 +181,15 @@ vi.mock("@/composables/useGasShare", () => ({
 }))
 vi.mock("@/composables/useSend", () => ({
 	useSend: () => ({ send: sendFn, stage: ref(null), busy: sendBusy, error: sendError, dispose: sendDispose }),
+	previewBlock: (plan: { token: ResolvedToken }) => ({
+		erc20: plan.token.address,
+		portal: plan.token.portal,
+		l2Token: plan.token.l2Token,
+		nameWord: plan.token.words.nameWord,
+		symbolWord: plan.token.words.symbolWord,
+		decimals: plan.token.decimals,
+		displaySymbol: plan.token.symbol,
+	}),
 }))
 vi.mock("@/composables/useHubExit", () => ({
 	EXIT_TOKEN_NOT_REGISTERED: "The bridge hasn't registered this token on Aztec yet, so there is nothing here to withdraw.",
@@ -235,7 +244,7 @@ const stubs = {
 		"error",
 	]),
 	StepStrip: stub("StepStrip", ["steps", "active", "completed"]),
-	BridgeStepper: stub("BridgeStepper", ["record"]),
+	BridgeStepper: stub("BridgeStepper", ["record", "runtime", "canBackground"]),
 	BridgeReceipt: stub("BridgeReceipt", ["snapshot", "ctaLabel", "addTokenBusy"]),
 }
 
@@ -459,6 +468,54 @@ describe("SendWizard", () => {
 		await flushPromises()
 		expect(w.findComponent({ name: "TokenStep" }).exists()).toBe(true)
 		expect(w.findComponent({ name: "TokenStep" }).props("selectionError")).toContain("not an ERC-20")
+	})
+
+	it("the wallet's token permission is the stepper's first phase, shown before any record exists", async () => {
+		granted.value = []
+		let releaseSend = (): void => {}
+		sendFn.mockImplementation(async () => {
+			// The grant is still open inside the send: nothing is in the journal yet.
+			await new Promise<void>((resolve) => {
+				releaseSend = resolve
+			})
+			sessionLive.add("rec-1")
+			records.value = [...records.value, sendRecord("rec-1")]
+			return "rec-1"
+		})
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		const permit = w.findComponent({ name: "BridgeStepper" })
+		expect(permit.exists()).toBe(true)
+		expect(permit.props("record")).toMatchObject({
+			id: "dep-pending-permit",
+			schema: 3,
+			registers: true,
+			token: { displaySymbol: "WBTC" },
+		})
+		expect(permit.props("runtime")).toEqual({ step: "granting" })
+		expect(permit.props("canBackground")).toBe(false)
+		expect(claimForeground).not.toHaveBeenCalled()
+
+		releaseSend()
+		await flushPromises()
+		// The real record takes over the stepper the moment it exists.
+		expect(w.findComponent({ name: "BridgeStepper" }).props("record").id).toBe("rec-1")
+		expect(w.findComponent({ name: "BridgeStepper" }).props("canBackground")).toBeUndefined()
+		expect(claimForeground).toHaveBeenCalledWith("rec-1")
+	})
+
+	it("a declined permission leaves the permission phase and returns to the review, which says so", async () => {
+		granted.value = []
+		grantOutcome = "declined"
+		sendFn.mockImplementation(async () => "")
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(w.findComponent({ name: "BridgeStepper" }).exists()).toBe(false)
+		expect(w.findComponent({ name: "ReviewStep" }).props("grant")).toBe("declined")
 	})
 
 	it("a token-only send is blocked while the account is known to hold no gas, and released by adding gas", async () => {
@@ -731,6 +788,7 @@ describe("SendWizard", () => {
 		expect(review.props("estimate")).toEqual({
 			takes: expect.any(String),
 			networkFee: "paid from the gas you already hold on Aztec",
+			networkFeeNote: null,
 			txCovered: null,
 		})
 		review.vm.$emit("back")
@@ -743,7 +801,8 @@ describe("SendWizard", () => {
 		review = w.findComponent({ name: "ReviewStep" })
 		// The default token is first-time, so the claim also registers it: one transaction plus the
 		// registration budget.
-		expect(review.props("estimate").networkFee).toBe("≈ 0.6 FJ — the first of those 20, paid from that gas")
+		expect(review.props("estimate").networkFee).toBe("≈ 0.6 FJ")
+		expect(review.props("estimate").networkFeeNote).toBe("taken from the gas that arrives")
 		expect(review.props("estimate").txCovered).toBe(20)
 		expect(review.props("slippageBps")).toBe(300)
 	})
@@ -760,7 +819,7 @@ describe("SendWizard", () => {
 		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
 		await flushPromises()
 		review = w.findComponent({ name: "ReviewStep" })
-		expect(review.props("estimate").networkFee).toBe("≈ 0.1 FJ — the first of those 20, paid from that gas")
+		expect(review.props("estimate").networkFee).toBe("≈ 0.1 FJ")
 
 		review.vm.$emit("back")
 		await flushPromises()

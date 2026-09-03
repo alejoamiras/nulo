@@ -563,7 +563,7 @@ describe("send wizard smoke", () => {
 		expect(w.find(sel(TESTIDS.sendGrantDeclined)).exists()).toBe(true)
 	})
 
-	it("a grant that lands after the user picked another token is discarded", async () => {
+	it("while the wallet decides on the permission, the stepper shows it as the first phase and nothing else can move", async () => {
 		markRegistered(LIST_WBTC, LIST_DECIMALS)
 		let release = (): void => {}
 		grantMode.gate = new Promise<void>((r) => {
@@ -575,17 +575,25 @@ describe("send wizard smoke", () => {
 		await toReview(w)
 		await w.find(sel(TESTIDS.sendReviewConfirm)).trigger("click")
 		await settle()
-		expect(w.find(sel(TESTIDS.sendGrantPending)).exists()).toBe(true)
 
-		// Back to the token step and onto another token while the wallet is still deciding.
-		await w.find(`${sel(TESTIDS.sendStep)}[data-index="0"]`).trigger("click")
-		await settle()
-		await pick(w, USDC)
+		// The wizard is gone: the stepper is up on a record the journal does not hold yet, with the
+		// permission as its active first phase, and no way to background or re-pick meanwhile.
+		expect(w.find(sel(TESTIDS.sendStepReview)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.stepper)).attributes("data-id")).toBe("dep-pending-permit")
+		const first = w.findAll(sel(TESTIDS.stepperPhase))[0]
+		expect(first?.attributes("data-phase")).toBe("permit")
+		expect(first?.attributes("data-state")).toBe("active")
+		expect(first?.text()).toContain("Allow reading WBTC state in your Nulo wallet.")
+		expect(w.find(sel(TESTIDS.stepperBackground)).exists()).toBe(false)
+		expect(records()).toHaveLength(0)
 
 		release()
 		await settle()
-		expect(h.fn.runSend).not.toHaveBeenCalled()
-		expect(records()).toHaveLength(0)
+		expect(h.fn.runSend).toHaveBeenCalledTimes(1)
+		expect(w.find(sel(TESTIDS.stepper)).attributes("data-id")).not.toBe("dep-pending-permit")
+		// Granted in this run, the permission stays on the rail as its first, done phase.
+		expect(w.findAll(sel(TESTIDS.stepperPhase))[0]?.attributes("data-phase")).toBe("permit")
+		expect(w.findAll(sel(TESTIDS.stepperPhase))[0]?.attributes("data-state")).toBe("done")
 	})
 
 	it("a token with no fuel route closes the gas choices but still sends the token", async () => {

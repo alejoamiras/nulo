@@ -132,32 +132,25 @@ describe("GasBreakdown", () => {
 		w.unmount()
 	})
 
-	it("keeps how the gas is sized behind a disclosure, with the floor the send is signed against", async () => {
+	it("explains nothing about how the gas is sized — the two arrival lines are the whole card", () => {
 		const w = breakdown({ txTarget: 3 })
-		expect(w.find(sel(TESTIDS.sendGasSizing)).exists()).toBe(false)
-		expect(w.find(sel(TESTIDS.sendGasChange)).attributes("aria-expanded")).toBe("false")
-		await w.find(sel(TESTIDS.sendGasChange)).trigger("click")
-		expect(w.find(sel(TESTIDS.sendGasChange)).attributes("aria-expanded")).toBe("true")
-		expect(w.find(sel(TESTIDS.sendGasSizing)).text()).toContain("≈ 3 transactions")
-		expect(w.find(sel(TESTIDS.sendGasFloor)).text()).toContain("at least 0.285 FJ")
+		expect(w.text()).not.toMatch(/sized|floor|at least|swapped/i)
+		expect(w.findAll("button")).toHaveLength(2)
 		w.unmount()
 	})
 
-	it("never rounds a small slice away — the split shown is the one signed", async () => {
+	it("never rounds a small slice away — the split shown is the one signed", () => {
 		const w = breakdown({ amount: 6_000n, gas: gasPlan({ fuelAmount: 1_000n, quote: 5_000n, minFuelOutput: 4_500n }) })
 		expect(w.find(sel(TESTIDS.sendGasBreakdownToken)).text()).toContain("0.005 USDC")
 		expect(w.find(sel(TESTIDS.sendGasShare)).text()).toContain("0.001 USDC")
 		expect(w.find(sel(TESTIDS.sendGasBreakdownFuel)).text()).toContain("0.000000000000005 FJ")
-		await w.find(sel(TESTIDS.sendGasChange)).trigger("click")
-		expect(w.find(sel(TESTIDS.sendGasFloor)).text()).toContain("0.0000000000000045 FJ")
 		w.unmount()
 	})
 
-	it("says when the slice was capped, inside the disclosure", async () => {
+	it("says when the slice was capped, right under the lines", () => {
 		const w = breakdown({ gas: gasPlan({ capped: "half" }) })
 		expect(w.find(sel(TESTIDS.sendGasBreakdown)).attributes("data-capped")).toBe("half")
-		await w.find(sel(TESTIDS.sendGasChange)).trigger("click")
-		expect(w.find(sel(TESTIDS.sendGasSizing)).text()).toContain("capped at half")
+		expect(w.find(sel(TESTIDS.sendGasBreakdown)).text()).toContain("capped at half")
 		w.unmount()
 	})
 
@@ -168,7 +161,6 @@ describe("GasBreakdown", () => {
 		expect(w.find(sel(TESTIDS.sendGasEnough)).text()).toContain("≈ 10 transactions")
 		expect(w.find(sel(TESTIDS.sendGasBreakdownToken)).exists()).toBe(false)
 		expect(w.find(sel(TESTIDS.sendGasTxTarget)).exists()).toBe(false)
-		expect(w.find(sel(TESTIDS.sendGasChange)).exists()).toBe(false)
 		w.unmount()
 	})
 

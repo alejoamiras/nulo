@@ -14,6 +14,8 @@ import ReviewDetails, { type PortalState } from "./ReviewDetails.vue"
 export interface ReviewEstimate {
 	takes: string
 	networkFee: string
+	/** Where the fee comes from, when it is a number rather than a sentence. */
+	networkFeeNote: string | null
 	/** How many Aztec transactions the gas leg covers; null when the send buys no gas. */
 	txCovered: number | null
 }
@@ -60,7 +62,11 @@ const tokenArrives = computed(() => {
 	return `${toDecimalString(rest, token.value.decimals)} ${symbol.value}`
 })
 
-const where = computed(() => (props.plan.direction === "l1-to-l2" ? (props.plan.isPrivate ? "private" : "public") : ""))
+/** The choice made on the amount step, in the toggle's own words; gas is always a public balance. */
+const visibility = computed(() => {
+	if (props.plan.direction !== "l1-to-l2") return null
+	return props.plan.isPrivate ? { word: "Private", note: "only you can see it" } : { word: "Public", note: "visible on Aztec" }
+})
 
 const gasArrives = computed(() => (gas.value ? `≈ ${formatCompact(gas.value.quote, 18)} FJ` : null))
 
@@ -89,13 +95,17 @@ const confirmDisabled = computed(() => props.busy || props.grant === "pending" |
 			<div class="line" :data-testid="TESTIDS.sendReviewArrives">
 				<dt>Arrives</dt>
 				<dd class="legs">
-					<span v-if="tokenArrives" class="leg">{{ tokenArrives }} <span v-if="where" class="soft-inline">{{ where }}</span></span>
+					<span v-if="tokenArrives" class="leg">{{ tokenArrives }}</span>
 					<span v-if="gasArrives" class="leg" :data-testid="TESTIDS.sendReviewGas">{{ gasArrives }} <span class="soft-inline">{{ gasFor }}</span></span>
 				</dd>
 			</div>
+			<div v-if="visibility" class="line" :data-testid="TESTIDS.sendReviewVisibility" :data-visibility="plan.isPrivate ? 'private' : 'public'">
+				<dt>Visibility</dt>
+				<dd>{{ visibility.word }} <span class="soft-inline">— {{ visibility.note }}</span></dd>
+			</div>
 			<div class="line" :data-testid="TESTIDS.sendReviewNetworkFee">
 				<dt>Fee</dt>
-				<dd>{{ estimate.networkFee }}</dd>
+				<dd>{{ estimate.networkFee }} <span v-if="estimate.networkFeeNote" class="soft-inline">{{ estimate.networkFeeNote }}</span></dd>
 			</div>
 			<div class="line" :data-testid="TESTIDS.sendReviewTakes">
 				<dt>Takes</dt>

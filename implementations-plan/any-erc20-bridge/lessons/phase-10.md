@@ -495,6 +495,29 @@ owner to pick from; the receipt (item 9) is deferred to a later arc at the owner
   so a declined permission costs nothing; raised at claim time it would leave a deposit waiting on
   Ethereum until the user grants it.
 
+**The owner's picks (same day)** — Max: the balance line itself is the tap, no arrow (my take on
+their "B without the arrow": the amount reads as the control by being the only primary-coloured
+text on the line, accent on hover; a plain secondary line would hide the affordance entirely).
+Fee: A — "≈ 3.57 FJ" with "taken from the gas that arrives" as a soft clause. Visibility: B, the
+row named "Visibility", copy "Private — only you can see it" (the owner's point: it is the fee
+juice too, not only the token). Gas sizing: none of the five — the disclosure is gone; the two
+arrival lines are the whole card, the capped note stays when it applies. Permission: A, as a phase
+before DEPOSIT, copy "Allow reading USDC state in your Nulo wallet." Plus: REGISTER was only shown
+after the fact (once `registerTxHash` existed, private only); the record now carries `registers`
+from the plan, so a private send shows REGISTER ahead of CLAIM from the start and a public one
+labels the single tx REGISTER + CLAIM.
+
+- The permission phase is shown without moving the grant: it is still raised before ANY signature
+  (a decline costs nothing), so no journal record exists while the wallet decides. The wizard builds
+  a stand-in record from the plan (provisional id, so nothing offers to back it up), renders the
+  stepper on it with a `granting` runtime override and no RUN IN BACKGROUND, and the real record
+  takes the stepper over the moment the engine files it; the engine marks `grantOutcome` on that
+  record so PERMISSION stays on the rail as the run's first, done phase. The phase rail had to take
+  the override too — it re-derived the phases from the journal on its own.
+- The smoke case "a grant that lands after the user picked another token is discarded" described a
+  path that no longer exists (the review is gone while the wallet decides); it now pins the
+  permission phase instead. The engine's epoch check for a superseded grant stays as the net.
+
 ## Sign-off
 
 _Owner sign-off: PENDING._

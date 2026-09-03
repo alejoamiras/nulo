@@ -84,6 +84,7 @@ export type Attention =
 /** The live narration of what is happening RIGHT NOW for a record - engine steps plus the flows'
  *  L1/L2 legs. Ephemeral display state only - never persisted, never an input to completion logic. */
 export type BridgeStep =
+	| "granting"
 	| "sealing"
 	| "signing"
 	| "approving"
@@ -107,6 +108,8 @@ export interface RecordRuntime {
 	 *  rest of the run. A sufficient allowance never sets it (the step is simply not rendered), and it
 	 *  is absent after a reload - a retry re-checks the allowance idempotently (plan S15). */
 	approveOutcome?: "done"
+	/** The wallet's token permission was raised and granted in THIS run — display-only, like `approveOutcome`. */
+	grantOutcome?: "done"
 	/** Withdraw proving countdown inputs. */
 	provenBlock?: number
 	targetBlock?: number
@@ -666,9 +669,14 @@ export function setRecordStep(id: string, step?: BridgeStep, stepDetail?: string
 	setStep(id, step, stepDetail)
 }
 
-/** Display-only APPROVE outcome (plan S15) - written when a real approval tx lands. */
+/** Display-only APPROVE outcome - written when a real approval tx lands. */
 export function markApproveOutcome(id: string, outcome: "done"): void {
 	setRuntime(id, { approveOutcome: outcome })
+}
+
+/** Display-only PERMISSION outcome - written when this run raised the wallet's token grant. */
+export function markGrantOutcome(id: string): void {
+	setRuntime(id, { grantOutcome: "done" })
 }
 
 /** Surface a flow-leg failure on the record (the stepper/card render it; the engine is untouched). */

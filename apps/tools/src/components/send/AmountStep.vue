@@ -94,7 +94,7 @@ const canContinue = computed(() => {
 
 watch(canContinue, (valid) => emit("update:valid", valid), { immediate: true })
 
-/** The balance is what "Use all" types into the field, so it is written the same way — full precision. */
+/** The balance is what the balance line types into the field, so it is written the same way — full precision. */
 const balanceText = computed(() => (spendable.value === undefined ? "—" : toDecimalString(spendable.value, props.token.decimals)))
 
 const balanceTestid = computed(() => {
@@ -148,12 +148,19 @@ function onUseAll(): void {
 				/>
 				<span class="unit">{{ token.symbol }}</span>
 			</label>
-			<div class="under">
-				<span class="balance" :data-testid="balanceTestid">Balance {{ balanceText }} {{ token.symbol }}</span>
-				<button type="button" class="use-all" :disabled="spendable === undefined" :data-testid="TESTIDS.sendAmountMax" @click="onUseAll">
-					Use all
-				</button>
-			</div>
+			<!-- The balance line IS the max control: tapping it fills the field with the whole balance. -->
+			<button
+				type="button"
+				class="balance-btn"
+				aria-label="Use the whole balance"
+				:disabled="spendable === undefined"
+				:data-testid="TESTIDS.sendAmountMax"
+				@click="onUseAll"
+			>
+				<span class="balance" :data-testid="balanceTestid">
+					<span class="balance-k">Balance</span> {{ balanceText }} {{ token.symbol }}
+				</span>
+			</button>
 			<p v-if="amountError" :id="AMOUNT_ERROR_ID" class="err" aria-live="polite" :data-testid="TESTIDS.sendAmountError">{{ amountError }}</p>
 		</div>
 
@@ -258,32 +265,31 @@ function onUseAll(): void {
 	color: var(--txt-secondary);
 }
 
-.under {
-	display: flex;
-	align-items: baseline;
-	justify-content: space-between;
-	gap: 12px;
+.balance-btn {
+	align-self: flex-start;
+	padding: 0;
+	background: transparent;
+	border: none;
+	color: var(--txt-primary);
+	cursor: pointer;
+}
+
+.balance-btn:hover:not(:disabled) .balance,
+.balance-btn:focus-visible .balance {
+	color: var(--nulo-accent);
+}
+
+.balance-btn:disabled {
+	cursor: default;
 }
 
 .balance {
 	font: 500 12px/1.4 var(--font-mono);
+	color: var(--txt-primary);
+}
+
+.balance-k {
 	color: var(--txt-secondary);
-}
-
-.use-all {
-	padding: 0;
-	background: transparent;
-	border: none;
-	color: var(--nulo-accent);
-	font: 500 12px/1.4 var(--font-mono);
-	text-decoration: underline;
-	text-underline-offset: 3px;
-	cursor: pointer;
-}
-
-.use-all:disabled {
-	cursor: not-allowed;
-	opacity: 0.5;
 }
 
 .err {

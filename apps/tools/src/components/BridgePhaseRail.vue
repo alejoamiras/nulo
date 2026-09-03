@@ -4,7 +4,7 @@ import type { BridgeJournalRecord } from "@nulo/bridge-core"
 import { computed } from "vue"
 
 /** Composables */
-import { useBridgeJournal } from "@/composables/useBridgeJournal"
+import { type RecordRuntime, useBridgeJournal } from "@/composables/useBridgeJournal"
 
 /** Utils */
 import { type BridgePhase, stepperPhases } from "@/lib/bridge-steps"
@@ -12,7 +12,13 @@ import { useNow } from "@/lib/clock"
 import { formatElapsed, trackPhases } from "@/lib/phase-clock"
 import { TESTIDS } from "@/lib/testids"
 
-const props = defineProps<{ record: BridgeJournalRecord; compact?: boolean; retryable?: boolean }>()
+const props = defineProps<{
+	record: BridgeJournalRecord
+	compact?: boolean
+	retryable?: boolean
+	/** Narration for a record the journal does not hold yet (the wizard's permission phase). */
+	runtime?: RecordRuntime
+}>()
 const emit = defineEmits<{ retry: [] }>()
 
 const journal = useBridgeJournal()
@@ -20,7 +26,7 @@ const journal = useBridgeJournal()
 // Shared 1s heartbeat (one app-wide interval - N cards must not mean N timers).
 const now = useNow()
 
-const rt = computed(() => journal.runtime.value[props.record.id] ?? {})
+const rt = computed(() => props.runtime ?? journal.runtime.value[props.record.id] ?? {})
 // `now` drives RENDER ticks only; trackPhases stamps with the real clock internally - stamping
 // with the shared ref once recorded a stale page-load time as a phase start (SEAL showing 5m
 // the instant a bridge began, when the wallet connected long after load).

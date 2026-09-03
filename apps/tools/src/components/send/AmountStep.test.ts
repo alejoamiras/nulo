@@ -146,17 +146,19 @@ describe("AmountStep", () => {
 		w.unmount()
 	})
 
-	it("Use all fills the balance at full precision, not the display rounding", async () => {
+	it("tapping the balance line fills the field at full precision, not the display rounding", async () => {
 		const w = step({ balances: { l1: 12_345_678n } })
 		await w.find(sel(TESTIDS.sendAmountMax)).trigger("click")
 		expect(w.emitted("update:amount")).toEqual([["12.345678"]])
 		w.unmount()
 	})
 
-	it("Use all sits beside the balance and is inert while the balance is unknown", () => {
+	it("the balance line is the max control — no separate link — and inert while the balance is unknown", () => {
 		const w = step({ balances: {} })
 		const max = w.find(sel(TESTIDS.sendAmountMax))
-		expect(max.text()).toBe("Use all")
+		expect(max.text()).toContain("Balance")
+		expect(max.attributes("aria-label")).toBe("Use the whole balance")
+		expect(w.text()).not.toMatch(/use all|max/i)
 		expect(max.attributes("disabled")).toBeDefined()
 		w.unmount()
 	})

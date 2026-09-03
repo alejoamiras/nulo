@@ -188,6 +188,9 @@ export type SendIntent = { intent: "token" | "token+gas"; token: JournalTokenBlo
  */
 export type SendDepositRecord = Omit<DepositJournalRecord, "schema" | "assetKind"> & {
 	schema: 3
+	/** Set when the hub had not registered the token at send time: this send's claim registers it
+	 *  (in its own tx for a private deposit, inside the claim for a public one). */
+	registers?: true
 	/** The L2 registration tx of a first-time private deposit (the claim is the next tx). */
 	registerTxHash?: string
 } & SendIntent

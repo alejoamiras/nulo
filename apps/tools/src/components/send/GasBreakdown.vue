@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Utils */
-import { computed, ref } from "vue"
+import { computed } from "vue"
 import { formatCompact, toDecimalString } from "@/lib/format"
 import type { AmountToken, GasLegPlan, SendIntent } from "@/lib/send-model"
 import { TESTIDS } from "@/lib/testids"
@@ -22,8 +22,6 @@ const emit = defineEmits<{ "update:txTarget": [target: number] }>()
 
 const MAX_TX = 999
 
-const sizing = ref(false)
-
 /** The split the send is signed against, at full precision: a token remainder shown rounded is a
  *  different number from the one leaving the wallet. */
 const tokenArrives = computed(() => {
@@ -34,10 +32,9 @@ const tokenArrives = computed(() => {
 
 const sliceText = computed(() => (props.gas ? toDecimalString(props.gas.fuelAmount, props.token.decimals) : "—"))
 
-// The gas figures are a quote, read at a glance; the exact floor lives in the disclosure.
+// The gas figures are a quote, read at a glance; the floor the send is signed against is the
+// engine's business and the review's slippage line.
 const gasArrives = computed(() => (props.gas ? `≈ ${formatCompact(props.gas.quote, 18)} FJ` : "—"))
-
-const floorText = computed(() => (props.gas ? toDecimalString(props.gas.minFuelOutput, 18) : "—"))
 
 /** Whole transactions the quote covers; null below one — "≈ 0 transactions" would be a lie about a
  *  send that still lands, so the line is simply absent. */
@@ -127,17 +124,7 @@ function onTarget(event: Event): void {
 					<template v-else>{{ gasArrives }} <span class="from" :data-testid="TESTIDS.sendGasShare">from {{ sliceText }} {{ token.symbol }}</span></template>
 				</span>
 			</p>
-			<button type="button" class="disclose" :aria-expanded="sizing" :data-testid="TESTIDS.sendGasChange" @click="sizing = !sizing">
-				How the gas is sized
-			</button>
-			<div v-if="sizing" class="sizing" :data-testid="TESTIDS.sendGasSizing">
-				<p class="sub">
-					{{ sliceText }} {{ token.symbol }} of your amount is swapped for Fee Juice on the way in, sized so ≈ {{ txTarget }}
-					{{ txTarget === 1 ? "transaction" : "transactions" }} on Aztec are covered.
-				</p>
-				<p class="sub" :data-testid="TESTIDS.sendGasFloor">The swap must deliver at least {{ floorText }} FJ, or the send does not go through.</p>
-				<p v-if="cappedNote" class="sub">{{ cappedNote }}</p>
-			</div>
+			<p v-if="cappedNote" class="sub">{{ cappedNote }}</p>
 		</template>
 
 		<template v-else>
@@ -263,28 +250,6 @@ function onTarget(event: Event): void {
 .from {
 	color: var(--txt-secondary);
 	font-weight: 500;
-}
-
-.disclose {
-	align-self: flex-start;
-	padding: 0;
-	background: transparent;
-	border: none;
-	color: var(--txt-tertiary);
-	font: 500 11px/1.4 var(--font-mono);
-	text-decoration: underline;
-	text-underline-offset: 3px;
-	cursor: pointer;
-}
-
-.disclose:hover {
-	color: var(--nulo-accent);
-}
-
-.sizing {
-	display: flex;
-	flex-direction: column;
-	gap: 4px;
 }
 
 .sub {

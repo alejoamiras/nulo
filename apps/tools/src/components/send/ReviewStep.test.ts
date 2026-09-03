@@ -47,7 +47,7 @@ const EXIT = {
 type Props = {
 	plan: SendPlan | ExitPlan
 	portalVerified: PortalState
-	estimate: { takes: string; networkFee: string; txCovered: number | null }
+	estimate: { takes: string; networkFee: string; networkFeeNote: string | null; txCovered: number | null }
 	grant: "idle" | "pending" | "declined"
 	busy: boolean
 	error: string | null
@@ -61,7 +61,12 @@ function review(over: Partial<Props> = {}) {
 			account: ACCOUNT,
 			signatureValiditySeconds: 1_800,
 			slippageBps: 50,
-			estimate: { takes: "about 12 minutes", networkFee: "paid from the gas you already hold on Aztec", txCovered: null },
+			estimate: {
+				takes: "about 12 minutes",
+				networkFee: "paid from the gas you already hold on Aztec",
+				networkFeeNote: null,
+				txCovered: null,
+			},
 			grant: "idle",
 			busy: false,
 			error: null,
@@ -84,19 +89,29 @@ describe("ReviewStep", () => {
 	it("lists both legs of what arrives: the token less its slice, and the gas with what it covers", () => {
 		const w = review({
 			plan: { ...DEPOSIT, intent: "token+gas", gas: GAS },
-			estimate: { takes: "about 12 minutes", networkFee: "≈ 0.1 FJ — the first of those 3, paid from that gas", txCovered: 3 },
+			estimate: {
+				takes: "about 12 minutes",
+				networkFee: "≈ 0.1 FJ",
+				networkFeeNote: "taken from the gas that arrives",
+				txCovered: 3,
+			},
 		})
 		const arrives = w.find(sel(TESTIDS.sendReviewArrives)).text()
 		expect(arrives).toContain("8 USDC")
 		expect(w.find(sel(TESTIDS.sendReviewGas)).text()).toBe("≈ 0.3 FJ gas for ≈ 3 transactions")
-		expect(w.find(sel(TESTIDS.sendReviewNetworkFee)).text()).toContain("the first of those 3")
+		expect(w.find(sel(TESTIDS.sendReviewNetworkFee)).text()).toBe("Fee≈ 0.1 FJ taken from the gas that arrives")
 		w.unmount()
 	})
 
 	it("a gas-only send arrives as gas alone", () => {
 		const w = review({
 			plan: { ...DEPOSIT, intent: "gas", amount: 2_000_000n, gas: GAS },
-			estimate: { takes: "about 12 minutes", networkFee: "≈ 0.1 FJ", txCovered: 3 },
+			estimate: {
+				takes: "about 12 minutes",
+				networkFee: "≈ 0.1 FJ",
+				networkFeeNote: "taken from the gas that arrives",
+				txCovered: 3,
+			},
 		})
 		const arrives = w.find(sel(TESTIDS.sendReviewArrives)).text()
 		expect(arrives).not.toContain("USDC")
@@ -104,17 +119,26 @@ describe("ReviewStep", () => {
 		w.unmount()
 	})
 
-	it("names where the privacy choice lands the tokens", () => {
-		const w = review({ plan: { ...DEPOSIT, isPrivate: false } })
-		expect(w.find(sel(TESTIDS.sendReviewArrives)).text()).toContain("public")
-		expect(w.find(sel(TESTIDS.sendReviewArrives)).text()).not.toContain("private")
-		w.unmount()
+	it("states the visibility choice on its own row, in the toggle's words, never on the amounts", () => {
+		const priv = review()
+		const row = priv.find(sel(TESTIDS.sendReviewVisibility))
+		expect(row.attributes("data-visibility")).toBe("private")
+		expect(row.text()).toContain("Private — only you can see it")
+		expect(priv.find(sel(TESTIDS.sendReviewArrives)).text()).not.toMatch(/private|public/)
+		priv.unmount()
+		const pub = review({ plan: { ...DEPOSIT, isPrivate: false } })
+		expect(pub.find(sel(TESTIDS.sendReviewVisibility)).text()).toContain("Public")
+		pub.unmount()
 	})
 
-	it("an exit arrives at the Ethereum recipient, and its fee is the view's own line", () => {
-		const w = review({ plan: EXIT, estimate: { takes: "long", networkFee: "then Ethereum gas to finish", txCovered: null } })
+	it("an exit arrives at the Ethereum recipient, has no visibility row, and its fee is the view's own line", () => {
+		const w = review({
+			plan: EXIT,
+			estimate: { takes: "long", networkFee: "then Ethereum gas to finish", networkFeeNote: null, txCovered: null },
+		})
 		expect(w.find(sel(TESTIDS.sendReviewArrives)).text()).toContain("on Ethereum")
 		expect(w.find(sel(TESTIDS.sendReviewGas)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.sendReviewVisibility)).exists()).toBe(false)
 		expect(w.find(sel(TESTIDS.sendReviewNetworkFee)).text()).toContain("Ethereum gas to finish")
 		w.unmount()
 	})

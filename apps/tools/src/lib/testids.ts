@@ -154,8 +154,6 @@ export const TESTIDS = {
 	sendGasTxFewer: "tl-send-gas-tx-fewer",
 	sendGasTxMore: "tl-send-gas-tx-more",
 	sendGasShare: "tl-send-gas-share",
-	sendGasSizing: "tl-send-gas-sizing",
-	sendGasFloor: "tl-send-gas-floor",
 	sendGasEnough: "tl-send-gas-enough",
 
 	// Send wizard — shell + steps.
@@ -186,13 +184,13 @@ export const TESTIDS = {
 	sendGasBreakdown: "tl-send-gas-breakdown",
 	sendGasBreakdownToken: "tl-send-gas-breakdown-token",
 	sendGasBreakdownFuel: "tl-send-gas-breakdown-fuel",
-	sendGasChange: "tl-send-gas-change",
 	sendPrivateToggle: "tl-send-private-toggle",
 	sendAmountBack: "tl-send-amount-back",
 	sendAmountNext: "tl-send-amount-next",
 	sendReviewSend: "tl-send-review-send",
 	sendReviewArrives: "tl-send-review-arrives",
 	sendReviewGas: "tl-send-review-gas",
+	sendReviewVisibility: "tl-send-review-visibility",
 	sendReviewNetworkFee: "tl-send-review-network-fee",
 	sendReviewTakes: "tl-send-review-takes",
 	sendReviewFirstTime: "tl-send-review-first-time",

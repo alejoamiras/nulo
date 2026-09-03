@@ -131,7 +131,13 @@ const CASES: Array<[string, Component, Record<string, unknown>]> = [
 	[
 		"ReviewStep",
 		ReviewStep,
-		{ ...REVIEW, estimate: { takes: "3-8 min", networkFee: "own gas", txCovered: 3 }, grant: "idle", busy: false, error: null },
+		{
+			...REVIEW,
+			estimate: { takes: "3-8 min", networkFee: "own gas", networkFeeNote: null, txCovered: 3 },
+			grant: "idle",
+			busy: false,
+			error: null,
+		},
 	],
 	[
 		"ReviewStep (exit)",
@@ -139,7 +145,7 @@ const CASES: Array<[string, Component, Record<string, unknown>]> = [
 		{
 			...REVIEW,
 			plan: EXIT,
-			estimate: { takes: "long", networkFee: "own", txCovered: null },
+			estimate: { takes: "long", networkFee: "own", networkFeeNote: null, txCovered: null },
 			grant: "declined",
 			busy: false,
 			error: "nope",
