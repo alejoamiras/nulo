@@ -1,5 +1,5 @@
 {
-	"builtAt": "2026-09-03T12:31:13.389Z",
+	"builtAt": "2026-09-03T13:12:07.736Z",
 	"primaryRpc": "https://v5.testnet.rpc.aztec-labs.com",
 	"identity": {
 		"nodeVersion": "5.2.0-nightly.20260815",
@@ -27,7 +27,7 @@
 		"maxTotalEthSpend": "2.0",
 		"maxWethSeed": "1.5"
 	},
-	"startingBalanceEth": 5.879331681492562,
+	"startingBalanceEth": 5.877349979413207,
 	"artifacts": {
 		"privateFpc": {
 			"address": "0x1a6d21ce5fd80137df0e99632a4ca17e58a42dc8f6c08191a96ca8ae907a1bc0",
@@ -40,7 +40,7 @@
 		}
 	},
 	"source": {
-		"commit": "d8dea0043afba1e2a0cde6c2fa053dc7aa7d561c",
+		"commit": "71ef45eff1f32e0e954bc6f297de850480287f4f",
 		"treeClean": true,
 		"operationalAllowlist": [
 			"apps/tools/public/testnet-bridge.candidate.json",
@@ -55,6 +55,5 @@
 			"implementations-plan/any-erc20-bridge/lessons/",
 			"apps/tools/public/testnet-bridge.journal.jsonl"
 		]
-	},
-	"candidateSha256": "a27da4727a75fc7c35893d72cf1bbda68d386a296b3aec7494a0d2f43802ca9a"
+	}
 }
