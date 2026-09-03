@@ -142,6 +142,13 @@ describe("hub L2 claims", () => {
 			expect(h.calls).toEqual(expected)
 		}
 
+		// A lost public registration race falls back to the plain claim inside the SAME attempt: once.
+		order.length = 0
+		const raced = fakeHub({ registered: false, failRegister: "No non-nullified L1 to L2 message found for message hash 0xabc" })
+		await claimViaHub(raced.hub, params(false), { from: USER, fee: "fuel", onClaimSend })
+		expect(raced.calls).toEqual(["register_and_claim_public", "claim_public"])
+		expect(order).toEqual(["onClaimSend"])
+
 		// A registration that throws (not a lost race) never reaches the callback.
 		order.length = 0
 		const broken = fakeHub({ registered: false, failRegister: "Assertion failed: word does not decompose" })

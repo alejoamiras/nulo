@@ -133,15 +133,16 @@ async function rethrowUnlessRaceLost(hub: ContractBase, p: HubClaimParams, e: un
 async function firstPublicClaim(hub: ContractBase, p: HubClaimParams, send: SendOpts): Promise<HubClaimOutcome> {
 	const to = AztecAddress.fromStringUnsafe(p.recipient)
 	const claim = claimSendOpts(send)
+	// One attempt, whichever transaction carries it: the registering claim, or the plain claim it
+	// falls back to when someone else registered first.
+	send.onClaimSend?.()
 	try {
-		send.onClaimSend?.()
 		const sent = hub.methods
 			.register_and_claim_public(...registerArgs(p.token), to, p.amount, p.claimValue, new Fr(p.leafIndex))
 			.send(claim as never) as unknown as Sent
 		return { path: "register+claim", claimTxHash: await txHashOf(sent) }
 	} catch (e) {
 		await rethrowUnlessRaceLost(hub, p, e)
-		send.onClaimSend?.()
 		return { path: "claim", claimTxHash: await txHashOf(plainClaim(hub, p, claim)) }
 	}
 }
