@@ -230,7 +230,13 @@ EURC, GBPC — the last two registered by their first claims), the new floor and
 `verify --candidate` (strict verify-l1 on all four tokens + hub readback green, digest
 `ba7ced36…`) → **promoted `f24539dc`** (first attempt died on a DNS blip before any write;
 the retry landed). Live-file canaries: `verify:l1 --strict` ✓, `verify:deployments` ✓ (hub + four
-L2 tokens re-derive). Codex round 3 (resumed) on `1de456c0..f24539dc`: recorded below.
+L2 tokens re-derive). Gates at `f24539dc`: `bun run test:all` exit 0, `bun run lint` exit 0;
+pushed (`gh stack push`, PR #540).
+
+Codex round 3 (resume on `1de456c0..f24539dc`): the ChatGPT backend answered 404 on both attempts
+(`turn.failed`, `codex login status` fine) — codex is down; the owner said to wait for it. The
+verification prompt is written (session scratchpad, `codex-p10-fresh-verify.md`, self-contained
+for a fresh session) and runs when the service is back: recorded below.
 
 Round 2 (resumed, on `1de456c0`): "close" — one wallet-boundary miss, one policy point, one known
 gap, one nit.
