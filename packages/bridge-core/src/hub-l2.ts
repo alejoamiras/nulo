@@ -10,6 +10,7 @@ import { Contract, type ContractBase } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
 import type { Wallet } from "@aztec/aztec.js/wallet"
 import { EthAddress } from "@aztec/foundation/eth-address"
+import { deriveStorageSlotInMap } from "@aztec/stdlib/hash"
 import { tokenBridgeHubArtifact } from "./artifacts"
 import type { JournalTokenBlock } from "./journal"
 
@@ -18,6 +19,29 @@ export function hubAt(wallet: Wallet, hub: string): ContractBase {
 }
 
 const ZERO_FIELD = `0x${"0".repeat(64)}`
+
+/** The one node read the binding needs; the full node client satisfies it. */
+export interface PublicStorageReader {
+	getPublicStorageAt(block: "latest", contract: AztecAddress, slot: Fr): Promise<Fr>
+}
+
+/** The `token_of` map's base slot, from the artifact the hub was deployed from. */
+export function hubTokenOfSlot(): Fr {
+	const slot = tokenBridgeHubArtifact.storageLayout.token_of?.slot
+	if (!slot) throw new Error("the hub artifact declares no token_of storage")
+	return slot
+}
+
+/**
+ * The hub's binding for an ERC-20 without a wallet: the address sits first in the `WithHash`
+ * the map's `PublicImmutable` packs, so the entry's own slot holds it, and zero — the value an
+ * unwritten slot reads as — means unregistered, since the hub never binds to the zero address.
+ */
+export async function hubBindingAt(node: PublicStorageReader, hub: string, erc20: string): Promise<string | undefined> {
+	const slot = await deriveStorageSlotInMap(hubTokenOfSlot(), EthAddress.fromString(erc20))
+	const value = await node.getPublicStorageAt("latest", AztecAddress.fromStringUnsafe(hub), slot)
+	return value.isZero() ? undefined : value.toString()
+}
 
 /** The hub's binding for an ERC-20, or undefined when it has not registered it. */
 export async function hubTokenFor(hub: ContractBase, erc20: string, from: string): Promise<string | undefined> {

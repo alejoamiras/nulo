@@ -11,7 +11,6 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import type { ContractBase } from "@aztec/aztec.js/contracts"
 import {
 	type Erc20Metadata,
-	hubTokenFor,
 	predictPortal,
 	readErc20Balances,
 	readErc20Metadata,
@@ -29,8 +28,8 @@ import type { Direction, MetadataConflict, ResolvedToken, SelectableToken, Token
 export interface TokenSelectionDeps {
 	pub: () => PublicClient | undefined
 	l1Account: () => Address | undefined
-	/** The hub bound to the connected Aztec wallet; undefined until that wallet connects. */
-	hub: () => ContractBase | undefined
+	/** The hub's L2 token for an ERC-20, read from the node — no Aztec wallet needed; undefined when unregistered. */
+	readBinding: (erc20: Address) => Promise<string | undefined>
 	l2Account: () => string | undefined
 	/** The L2 Token contract bound to the connected wallet — async because `Contract.at` is. */
 	tokenContract?: (l2Token: string) => Promise<ContractBase | undefined> | ContractBase | undefined
@@ -155,11 +154,9 @@ export function useTokenSelection(deps: TokenSelectionDeps): UseTokenSelectionHa
 	async function readChain(pub: PublicClient, token: SelectableToken, factory: Address): Promise<ChainReads> {
 		const registration = await readRegistration(pub, factory, token.address)
 		const meta = await readMetadata(pub, token, registration)
-		const hub = deps.hub()
-		const l2Account = deps.l2Account()
-		// No wallet yet: the hub's binding is unknown, so the token reads as at most portal-only and
-		// the claim path decides for real at claim time.
-		const bound = hub && l2Account ? await hubTokenFor(hub, token.address, l2Account) : undefined
+		// The hub only binds a token the factory has registered; without a registration there is
+		// nothing to read, and with one the binding says whether the hub's side is done too.
+		const bound = registration ? await deps.readBinding(token.address) : undefined
 		return { registration, meta, bound }
 	}
 

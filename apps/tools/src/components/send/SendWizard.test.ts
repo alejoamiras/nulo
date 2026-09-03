@@ -41,6 +41,8 @@ const selectFn = vi.fn(async (token: SelectableToken) => {
 
 const granted = ref<string[]>([])
 let grantOutcome: GrantOutcome = "granted"
+/** Whether the connected Aztec account holds gas; null = unknown. */
+const gasHeld = ref<boolean | null>(null)
 const ensureGranted = vi.fn(async (): Promise<GrantOutcome> => {
 	if (grantOutcome === "granted") granted.value = [...granted.value, L2_TOKEN]
 	return grantOutcome
@@ -128,6 +130,10 @@ vi.mock("@/composables/useTokenCatalog", () => ({
 		dispose: catalogDispose,
 	}),
 }))
+vi.mock("@/contracts/hub-binding", () => ({ readHubBinding: async () => undefined }))
+vi.mock("@/composables/useGasHeld", () => ({
+	useGasHeld: () => ({ held: gasHeld, refresh: vi.fn(async () => {}), dispose: vi.fn() }),
+}))
 vi.mock("@/composables/useAddressLookup", () => ({
 	useAddressLookup: () => ({ state: ref(null), dispose: vi.fn() }),
 }))
@@ -169,6 +175,7 @@ vi.mock("@/composables/useHubExit", () => ({
 
 import { predictPortal } from "@nulo/bridge-core"
 import { EXIT_TOKEN_NOT_REGISTERED } from "@/composables/useHubExit"
+import { TESTIDS } from "@/lib/testids"
 import SendWizard from "./SendWizard.vue"
 
 const stub = (name: string, props: string[]) => ({ name, props, template: "<div />" })
@@ -303,6 +310,7 @@ describe("SendWizard", () => {
 		balances.value = { l1: 10n ** 9n, l2Public: 5n * 10n ** 8n, l2Private: 3n * 10n ** 8n }
 		selectionError.value = null
 		epoch = 0
+		gasHeld.value = null
 		nextResolved = (token) => resolvedToken(token)
 		granted.value = [L2_TOKEN]
 		grantOutcome = "granted"
@@ -413,10 +421,67 @@ describe("SendWizard", () => {
 		expect(w.findComponent({ name: "AmountStep" }).props("gas").fuelAmount).toBe(10n ** 8n)
 	})
 
-	it("a token-only review says the fee is sponsored; adding gas names one transaction's cost out of it", async () => {
+	it("a token-only send is blocked while the account is known to hold no gas, and released by adding gas", async () => {
+		gasHeld.value = false
+		const w = await wizard()
+		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
+		await flushPromises()
+		w.findComponent({ name: "TokenStep" }).vm.$emit("next")
+		await flushPromises()
+		const amountStep = () => w.findComponent({ name: "AmountStep" })
+		amountStep().vm.$emit("update:amount", "1")
+		amountStep().vm.$emit("update:valid", true)
+		await flushPromises()
+		expect(amountStep().props("tokenOnlyBlocked")).toContain("holds no gas")
+		// The wizard refuses the review on its own, whatever the step reported.
+		amountStep().vm.$emit("next")
+		await flushPromises()
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
+
+		amountStep().vm.$emit("update:intent", "token+gas")
+		await flushPromises()
+		expect(amountStep().props("tokenOnlyBlocked")).toBeNull()
+
+		amountStep().vm.$emit("update:intent", "token")
+		gasHeld.value = null
+		await flushPromises()
+		expect(amountStep().props("tokenOnlyBlocked")).toBeNull()
+	})
+
+	it("RUN IN BACKGROUND starts the wizard over and keeps a line on the send until it lands", async () => {
+		sendFn.mockImplementation(async () => {
+			records.value = [...records.value, sendRecord("rec-1")]
+			return "rec-1"
+		})
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(w.findComponent({ name: "BridgeStepper" }).exists()).toBe(true)
+
+		w.findComponent({ name: "BridgeStepper" }).vm.$emit("background")
+		await flushPromises()
+		expect(releaseForeground).toHaveBeenCalledWith("rec-1")
+		expect(w.findComponent({ name: "TokenStep" }).exists()).toBe(true)
+		const strip = w.find(`[data-testid="${TESTIDS.sendBackgroundStrip}"]`)
+		expect(strip.text()).toContain("is on its way")
+		expect(strip.find(`[data-testid="${TESTIDS.sendBackgroundActivity}"]`).exists()).toBe(true)
+
+		records.value = records.value.map((r) => (r.id === "rec-1" ? { ...r, completedAt: 2_000 } : r))
+		await flushPromises()
+		expect(w.find(`[data-testid="${TESTIDS.sendBackgroundStrip}"]`).exists()).toBe(false)
+		// The finished send belongs to the journal now, never to a receipt the wizard left behind.
+		expect(w.findComponent({ name: "BridgeReceipt" }).exists()).toBe(false)
+	})
+
+	it("a token-only review says the fee is the gas already held; adding gas names one transaction's cost out of it", async () => {
 		const w = await wizard()
 		let review = await atReview(w)
-		expect(review.props("estimate")).toEqual({ takes: expect.any(String), networkFee: "paid by the sponsor", txCovered: null })
+		expect(review.props("estimate")).toEqual({
+			takes: expect.any(String),
+			networkFee: "paid from the gas you already hold on Aztec",
+			txCovered: null,
+		})
 		review.vm.$emit("back")
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")

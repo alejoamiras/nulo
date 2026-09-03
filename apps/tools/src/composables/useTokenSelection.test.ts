@@ -133,11 +133,9 @@ function makePub(b: PubBehaviour) {
 	return { readContract, call, multicall, getChainId } as unknown as PublicClient
 }
 
-function makeHub(bindings: Map<string, string>) {
-	const token_for = vi.fn((erc20: { toString: () => string }) => ({
-		simulate: async () => ({ result: bindings.get(erc20.toString().toLowerCase()) ?? ZERO_WORD }),
-	}))
-	return { hub: { methods: { token_for } } as unknown as ContractBase, token_for }
+function makeBindingReader(bindings: Map<string, string>) {
+	const readBinding = vi.fn(async (erc20: string) => bindings.get(erc20.toLowerCase()))
+	return { readBinding }
 }
 
 function makeTokenContract(pub: bigint | Error, priv: bigint | Error) {
@@ -179,16 +177,16 @@ describe("useTokenSelection", () => {
 	})
 
 	function harness(pub: PublicClient, over: Partial<Parameters<typeof useTokenSelection>[0]> = {}) {
-		const { hub, token_for } = makeHub(bindings)
+		const { readBinding } = makeBindingReader(bindings)
 		const selection = useTokenSelection({
 			pub: () => pub,
 			l1Account: () => L1_ACCOUNT,
-			hub: () => hub,
+			readBinding,
 			l2Account: () => L2_ACCOUNT,
 			tokenContract: () => makeTokenContract(11n, 22n),
 			...over,
 		})
-		return { selection, token_for }
+		return { selection, readBinding }
 	}
 
 	it("a wallet on another chain resolves nothing - no registration read, no metadata, an error", async () => {
@@ -282,13 +280,21 @@ describe("useTokenSelection", () => {
 		expect(selection.selected.value?.l2Token).toBe(PXO.l2Token)
 	})
 
-	it("does not ask an absent hub for a binding — the token reads as at most portal-only", async () => {
+	it("reads the hub's binding without an Aztec account — a registered token is never a first send on a plain wallet", async () => {
 		const pub = makePub({ registrations })
-		const { selection, token_for } = harness(pub, { hub: () => undefined })
+		const { selection, readBinding } = harness(pub, { l2Account: () => undefined })
 		await selection.select(selectable(USDC), "l1-to-l2")
-		expect(token_for).not.toHaveBeenCalled()
-		expect(selection.selected.value?.state.kind).toBe("portal-only")
+		expect(readBinding).toHaveBeenCalledWith(USDC.erc20.toLowerCase())
+		expect(selection.selected.value?.state.kind).toBe("registered")
 		expect(selection.selected.value?.l2Token).toBe(USDC.l2Token)
+	})
+
+	it("asks for no binding on a token the factory has not registered", async () => {
+		const pub = makePub({ registrations: new Map(), metadata: { name: "Fresh", symbol: "FRS", decimals: 18 } })
+		const { selection, readBinding } = harness(pub)
+		await selection.select(selectable(PXO), "l1-to-l2")
+		expect(readBinding).not.toHaveBeenCalled()
+		expect(selection.selected.value?.state.kind).toBe("first-time")
 	})
 
 	it("drops a superseded selection however late it lands", async () => {

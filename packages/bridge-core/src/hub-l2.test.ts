@@ -1,7 +1,19 @@
+import { AztecAddress } from "@aztec/aztec.js/addresses"
 import type { ContractBase } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
 import { describe, expect, it } from "vitest"
-import { claimSendOpts, claimViaHub, type HubClaimParams, hubExitsPaused, isRegisterRace, preflightHubExit } from "./hub-l2"
+import { EthAddress } from "@aztec/foundation/eth-address"
+import { deriveStorageSlotInMap } from "@aztec/stdlib/hash"
+import {
+	claimSendOpts,
+	claimViaHub,
+	type HubClaimParams,
+	hubBindingAt,
+	hubExitsPaused,
+	hubTokenOfSlot,
+	isRegisterRace,
+	preflightHubExit,
+} from "./hub-l2"
 import type { JournalTokenBlock } from "./journal"
 
 const token: JournalTokenBlock = {
@@ -218,5 +230,31 @@ describe("hub L2 claims", () => {
 		expect(await hubExitsPaused(paused.hub, USER)).toBe(true)
 		expect(paused.calls).toEqual([])
 		await expect(hubExitsPaused(fakeHub({ registered: true, paused: "maybe" }).hub, USER)).rejects.toThrow(/not a boolean/)
+	})
+})
+
+describe("hub binding from public storage", () => {
+	const HUB = `0x00${"33".repeat(31)}`
+
+	function fakeNode(answer: Fr) {
+		const reads: Array<[string, string]> = []
+		return {
+			reads,
+			getPublicStorageAt: async (_block: "latest", contract: { toString(): string }, slot: Fr) => {
+				reads.push([contract.toString(), slot.toString()])
+				return answer
+			},
+		}
+	}
+
+	it("reads the token_of entry at the slot the map derives for the ERC-20, on the hub", async () => {
+		const node = fakeNode(Fr.fromString(token.l2Token))
+		expect(await hubBindingAt(node, HUB, token.erc20)).toBe(token.l2Token)
+		const expected = (await deriveStorageSlotInMap(hubTokenOfSlot(), EthAddress.fromString(token.erc20))).toString()
+		expect(node.reads).toEqual([[AztecAddress.fromStringUnsafe(HUB).toString(), expected]])
+	})
+
+	it("an unwritten slot reads as zero, which is no binding", async () => {
+		expect(await hubBindingAt(fakeNode(Fr.ZERO), HUB, token.erc20)).toBeUndefined()
 	})
 })

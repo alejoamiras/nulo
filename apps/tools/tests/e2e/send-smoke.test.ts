@@ -48,6 +48,8 @@ const h = vi.hoisted(() => ({
 		exitsPaused: false,
 		/** What the exit's read-only preflight sees on Aztec before it authorises a burn. */
 		l2Balance: 5n * 10n ** 8n,
+		/** Whether the Aztec account holds gas for a token-only claim; null = unknown. */
+		gasHeld: { value: null as boolean | null },
 		listGate: null as null | Promise<void>,
 		receiptGate: null as null | Promise<void>,
 		order: [] as string[],
@@ -159,6 +161,13 @@ vi.mock("@aztec/aztec.js/crypto", async (orig) => {
 	}
 })
 
+// The node behind the hub-binding read: a fake whose one method the mocked `hubBindingAt` never calls.
+vi.mock("@aztec/aztec.js/node", () => ({ createAztecNodeClient: () => ({ getPublicStorageAt: async () => undefined }) }))
+// The gas-held read reaches the FeeJuice contract through the wallet; the smoke answers it directly.
+vi.mock("@/composables/useGasHeld", () => ({
+	useGasHeld: () => ({ held: h.state.gasHeld, refresh: async () => {}, dispose: () => {} }),
+}))
+
 vi.mock("@nulo/bridge-core", async (orig) => {
 	const actual = await orig<typeof import("@nulo/bridge-core")>()
 	return {
@@ -172,6 +181,7 @@ vi.mock("@nulo/bridge-core", async (orig) => {
 		preflightHubExit: h.fn.preflightHubExit,
 		hubAt: () => ({ methods: {} }),
 		hubTokenFor: async (_hub: unknown, erc20: string) => h.state.hubTokens.get(erc20.toLowerCase()),
+		hubBindingAt: async (_node: unknown, _hub: string, erc20: string) => h.state.hubTokens.get(erc20.toLowerCase()),
 		hubExitsPaused: async () => h.state.exitsPaused,
 		readRegistration: async (_pub: unknown, _factory: string, erc20: string) => h.state.registrations.get(erc20.toLowerCase()),
 		readErc20Metadata: async () => {
@@ -444,6 +454,7 @@ describe("send wizard smoke", () => {
 		h.state.hubTokens.clear()
 		h.state.portals.clear()
 		h.state.route = null
+		h.state.gasHeld.value = null
 		h.state.withdrawsPaused = false
 		h.state.exitsPaused = false
 		h.state.l2Balance = 5n * 10n ** 8n
@@ -639,6 +650,22 @@ describe("send wizard smoke", () => {
 		await settle()
 		expect(sendRecord()?.completedAt).toBeDefined()
 		expect(w.find(sel(TESTIDS.receipt)).exists()).toBe(true)
+	})
+
+	it("a token-only send on an account with no gas is stopped at the amount step until gas is added to it", async () => {
+		markRegistered(LIST_WBTC, LIST_DECIMALS)
+		h.state.route = ROUTE
+		h.state.gasHeld.value = false
+		const w = await mountView()
+		await pick(w, LIST_WBTC)
+		await toAmount(w, "1", { route: true })
+		expect(w.find(sel(TESTIDS.sendTokenOnlyBlocked)).text()).toContain("holds no gas")
+		expect(w.find(sel(TESTIDS.sendAmountNext)).attributes("disabled")).toBeDefined()
+
+		await w.find(sel(TESTIDS.sendChoiceTokenGas)).trigger("click")
+		await settle()
+		expect(w.find(sel(TESTIDS.sendTokenOnlyBlocked)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.sendAmountNext)).attributes("disabled")).toBeUndefined()
 	})
 
 	it("a gas-only send journals no token block and claims with the secret in its fuel block", async () => {

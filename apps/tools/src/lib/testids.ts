@@ -225,6 +225,10 @@ export const TESTIDS = {
 	mainnetPlaceholder: "tl-mainnet-placeholder",
 	mainnetPlaceholderLink: "tl-mainnet-placeholder-link",
 
+	// A send running in the background: the strip above the wizard and its jump to the journal
+	sendBackgroundStrip: "tl-send-background-strip",
+	sendBackgroundActivity: "tl-send-background-activity",
+
 	// step components
 	sendCatalogError: "tl-send-catalog-error",
 	sendReviewError: "tl-send-review-error",
