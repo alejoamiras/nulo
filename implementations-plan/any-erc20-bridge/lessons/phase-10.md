@@ -17,6 +17,39 @@ canonical clone (six keys; nothing was created). The sign-off remains a live wal
   - `USDT` `0x8badb545be5d79f28d516844bf1713cc7a3f238f` (tx `0x254cb898…779687b6`)
   Both sort below WETH `0xfff9…`; read back `symbol`/`decimals=6`/`maxMintPerTx=1e12` on Sepolia.
   `SEED_TOKENS=0x8648424f0eae2368555d080c948b622d992651fc,0x8badb545be5d79f28d516844bf1713cc7a3f238f`
+- Intent built at `ad2c0320` and committed; `verify` green; `deploy --dry-run` green (L2 deployer
+  `0x1a12051c0f347210d0d8bd062ec81f9e1adb9b211f458b2e678331eb925a9191`, sponsored-FPC-paid).
+- **Deploy run 1 died at the class publication** — `UniswapFuelSwap` landed at
+  `0x43857b88e2f625c873c051834fc51558801c4bb3` (journalled), then `publishContractClass(Token)` was
+  rejected with `Invalid tx: Existing nullifier`: the aztec-standards Token class is already
+  published on the shared testnet (the sandbox is a fresh chain, so the rehearsal never saw this),
+  and `publishIfAbsent`'s no-op regex knew only the `already|duplicate nullifier|Nullifier already
+  exists` wordings. Fix-forward `68136c3b`: ask `node.getContractClass(id)` first, and recognise
+  `Existing nullifier` when a publication still loses the race (unit-pinned). Intent rebuilt at
+  `68136c3b` (the tool refuses a verify after a deploy-relevant source change) → `7d55994f`; the
+  rebuilt baseline is 6.3932 ETH, so the arc's true spend = 6.3967 − final (swap target ≈ 0.0035 ETH
+  is outside the tool's tally).
+- **Deploy run 2 died before the journal** — at `deployAccountIfAbsent`: run 1's account deploy
+  HAD landed (tx `0x117f443d…fcee83`, block 67829, checkpointed, 0.99 FJ sponsored), but an account
+  deploy publishes no instance, so `node.getContract(from)` answers null forever and the helper
+  re-sent the deploy into `Existing nullifier`. Every conductor re-run of a deployer account had
+  this latent (the smokes use fresh accounts; the sandbox never re-runs). Fix-forward `4c7f8bba`:
+  the served-instance fast path stays, then the account's siloed initialization nullifier
+  (`computeSiloedPrivateInitializationNullifier(from, instance.initializationHash)` — the wallet's
+  own `requiresInitialization` check) is asked of the node. Unit-pinned; intent rebuilt → `bef44fbc`.
+- Deploy run 3: resumed from the journal (swap target adopted, account detected, `Token class
+  already published` — the diagnosis confirmed).
+- **PrivateFPC gate is RED on this node** (`check-fpc-version.ts --mode require-deployed`: node
+  `5.2.0-nightly.20260815` is not in the descriptor's compat list `[5.0.0, 5.0.1]`). Pre-existing
+  and owner-ruled: the 5.2.0 JS-line plan's Ask 1 (2026-08-26) chose to LEAVE the testnet map
+  as-is, knowing the gate exact-matches the rotating nightly string. Consequence here:
+  `fuel-testnet.ts` runs that gate inline before any broadcast, so the heavy validator, its
+  `PRIVATE_RUNS=1` settle-canary and the third-token registering sample cannot run on this node.
+  Calibration therefore uses `smoke-swap`'s self-paid `claim_public` (the one paid plain claim
+  the candidate smokes produce) and the runbook's fallback for `fjRegister`: the sandbox's measured
+  register EXCESS scaled by the ratio of the two networks' `claim_public` samples. The private-FPC
+  fuel lane on 5.2.0-nightly stays unproven — an owner call (re-curate the compat list → re-canary),
+  not this arc's.
 
 ## Pre-flight the agent completed
 
