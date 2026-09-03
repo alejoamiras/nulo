@@ -162,7 +162,9 @@ async function awaitRegistrationFate(first: TxReceiptLike, txHash: string, send:
 		const fate = fateOf(receipt)
 		if (fate !== "unknown" || !send.receiptOf || Date.now() - start + intervalMs > deadlineMs) return fate
 		await sleep(intervalMs)
-		receipt = (await send.receiptOf(txHash)) ?? receipt
+		// A read that fails says nothing about the transaction: the fate stays unknown until the
+		// deadline, never an error that would drop out before the hash is journalled.
+		receipt = (await send.receiptOf(txHash).catch(() => undefined)) ?? receipt
 	}
 }
 
@@ -287,6 +289,9 @@ async function firstPrivateClaim(hub: ContractBase, p: HubClaimParams, send: Sen
 	try {
 		const { receipt } = await (hub.methods.register_token(...registerArgs(p.token)).send(register as never) as unknown as Sent)
 		registerTxHash = String(receipt.txHash)
+		// The hash is the caller's evidence of what this transaction did or spent: journalled the
+		// moment it exists, before anything that can still fail — a receipt read, the wait, a revert.
+		send.onRegistered?.(registerTxHash)
 		const fate = await awaitRegistrationFate(receipt, registerTxHash, send)
 		// A dropped registration was never included: nothing was spent, and the whole claim retries.
 		if (fate === "dropped") {
@@ -294,10 +299,9 @@ async function firstPrivateClaim(hub: ContractBase, p: HubClaimParams, send: Sen
 				`hub claim: the registration ${registerTxHash} was dropped before inclusion — nothing was spent; retry the claim`,
 			)
 		}
+		// The registration's setup spent what paid for it before the public half reverted: the
+		// journalled hash proves the spend, and the claim retries against the credit.
 		if (fate === "reverted") {
-			// The registration's setup spent what paid for it before the public half reverted: the
-			// hash is the caller's evidence of that spend, and the claim retries against the credit.
-			send.onRegistered?.(registerTxHash)
 			throw new Error(
 				`hub claim: the registration ${registerTxHash} reverted after its setup spent the bridged gas — retry to claim from the credit it left`,
 			)
@@ -311,10 +315,7 @@ async function firstPrivateClaim(hub: ContractBase, p: HubClaimParams, send: Sen
 	// A lost race means someone else's registration bound the token and this call spent nothing:
 	// the claim is then the plain one, with the plain fee.
 	const claimOpts = registerTxHash === undefined ? claim : registeredClaim
-	if (registerTxHash !== undefined) {
-		send.onRegistered?.(registerTxHash)
-		await awaitClaimVisible(hub, p, claimOpts, registerTxHash, send.registrationWait)
-	}
+	if (registerTxHash !== undefined) await awaitClaimVisible(hub, p, claimOpts, registerTxHash, send.registrationWait)
 	send.onClaimSend?.()
 	return { path: "register,claim", registerTxHash, claimTxHash: await txHashOf(plainClaim(hub, p, claimOpts)) }
 }

@@ -246,7 +246,8 @@ describe("hub L2 claims", () => {
 		expect(order).toEqual(["onRegistered:0xregister_token"])
 		expect(reverted.calls).toEqual(["register_token"])
 
-		// Dropped: nothing was spent, nothing is reported, the whole claim retries.
+		// Dropped: nothing was spent; the hash is still reported (the journal's own receipt probe reads
+		// it as dropped and lets the fuel retry) and the whole claim retries.
 		order.length = 0
 		const dropped = fakeHub({ registered: false, registerPending: true })
 		await expect(
@@ -257,7 +258,25 @@ describe("hub L2 claims", () => {
 				onRegistered: (hash) => order.push(`onRegistered:${hash}`),
 			}),
 		).rejects.toThrow(/was dropped before inclusion/)
-		expect(order).toEqual([])
+		expect(order).toEqual(["onRegistered:0xregister_token"])
+
+		// A node read that fails says nothing: the hash was reported before it, and the poll goes on.
+		order.length = 0
+		let reads = 0
+		const flaky = fakeHub({ registered: false, registerBinds: true, registerPending: true })
+		const flakyOutcome = await claimViaHub(flaky.hub, params(true), {
+			from: USER,
+			receiptOf: async () => {
+				reads++
+				if (reads === 1) throw new Error("node unreachable")
+				return { status: "proposed", executionResult: "success" }
+			},
+			registrationWait: noSleep,
+			onRegistered: (hash) => order.push(`onRegistered:${hash}`),
+		})
+		expect(flakyOutcome).toMatchObject({ path: "register,claim", registerTxHash: "0xregister_token" })
+		expect(order).toEqual(["onRegistered:0xregister_token"])
+		expect(reads).toBe(2)
 
 		// Without a node read the fate stays unknown and the claim's own simulation decides, as before.
 		const blind = fakeHub({ registered: false, registerBinds: true, registerPending: true })
