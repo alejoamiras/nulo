@@ -156,8 +156,15 @@ canonical clone (six keys; nothing was created). The sign-off remains a live wal
   limits and prints the exact ceiling (`Σ limit·committed fee`) instead of a used-gas ratio. Ceiling
   at today's fees ≈ 12.4 FJ → floor/ceiling ≈ 2.4×; the runbook's 4× policy would put `minFuelFj` at
   ≈50 FJ — left for the owner (a one-sample number may only raise the floor; raising it re-runs the
-  candidate → verify → promote cycle since the conductor writes the constant). Run 4 (1 USDC, fixed
-  code): recorded below.
+  candidate → verify → promote cycle since the conductor writes the constant).
+- **Fuel canary run 4 (fixed code, `PRIVATE_RUNS=1`, 1 USDC slice) — green, the settle canary.**
+  Public lane: 38.62 FJ bridged (token leaf 63380481 / fuel leaf 63380480), claim fee 2.606 FJ.
+  Private-FPC lane: 38.37 FJ bridged (leaves 63383553 / 63383552) — the amount the FPC refused in
+  run 2 — **claim settled**, fee 1.762 FJ, exact committed ceiling 6.598 FJ. `✅ 2 fueled runs
+  SETTLED in 7.0m`. Printed `minFuelFj calibration: 26.39 FJ` (4× the ceiling) < the live floor
+  29.58 FJ, so the floor stands (a one-sample number may only raise it). `fjPerTx` sample 2.606 FJ
+  ×1.2 = 3.127 FJ vs the promoted 3.115 FJ (+0.4 %, inside the margin) — not worth a re-promotion;
+  fold into the next calibration.
 
 ## Pre-flight the agent completed
 
