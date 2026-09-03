@@ -32,8 +32,10 @@ import { claimViaHub, type HubClaimOutcome } from "../src/hub-l2"
 import {
 	PRIVATE_FPC_ADDRESS,
 	PRIVATE_FPC_SALT,
+	PRIVATE_HUB_CLAIM_GAS,
 	deriveBridgeSecret,
 	privateFeeJuicePayment,
+	privateFpcFeeLimit,
 	privateMintAndPayFee,
 } from "../src/private-fuel"
 import type { SendResult } from "../src/send-flow"
@@ -161,7 +163,11 @@ async function buildVariantClaimFee(
 				bridgeSalt as Fr,
 				new Fr(result.fuelLeafIndex as bigint),
 			),
-			gasSettings: { teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }), maxFeesPerGas: maxFees },
+			gasSettings: {
+				gasLimits: Gas.from(PRIVATE_HUB_CLAIM_GAS),
+				teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
+				maxFeesPerGas: maxFees,
+			},
 		},
 		maxFees,
 	}
@@ -204,16 +210,10 @@ async function settleVariantClaim(
 	throw new Error(`${p.label}: self-paying claim never SETTLED within budget`)
 }
 
-/**
- * The FPC ceiling (`getFeeLimit`) from the fee ratio: the actual fee is gasUsed·liveBaseFee and the
- * ceiling is gasLimit·committedMaxFees, with gasLimit ≈ gasUsed (padding ≈ 1, teardown 0). The L2-gas
- * component dominates and the committed da fee is zero, so the L2 ratio is the whole scaling.
- */
-async function deriveFeeCeiling(ctx: VariantCtx, actualFee: bigint, committedMaxFees?: GasFees): Promise<bigint | undefined> {
-	if (!committedMaxFees || actualFee <= 0n) return undefined
-	const live = await ctx.node.getCurrentMinFees()
-	return live.feePerL2Gas > 0n ? (actualFee * committedMaxFees.feePerL2Gas) / live.feePerL2Gas : undefined
-}
+/** The FPC ceiling (`getFeeLimit`) the claim committed to: the explicit limits × the committed
+ *  max fees — exact, since the limits are declared rather than left to the network maximum. */
+const feeCeiling = (committedMaxFees?: GasFees): bigint | undefined =>
+	committedMaxFees ? privateFpcFeeLimit(PRIVATE_HUB_CLAIM_GAS, committedMaxFees) : undefined
 
 /** The fee a landed claim actually paid, in FJ-wei. */
 async function landedClaimFee(ctx: VariantCtx, claimTxHash: string): Promise<bigint> {
@@ -263,7 +263,7 @@ async function runVariant(ctx: VariantCtx, isPrivate: boolean, viaFpc = false): 
 	const fjBefore = await ctx.fjBalance()
 	const { outcome, committedMaxFees } = await settleVariantClaim(ctx, { label, isPrivate, result, viaFpc, bridgeSalt })
 	const actualFee = await landedClaimFee(ctx, outcome.claimTxHash)
-	const ceiling = await deriveFeeCeiling(ctx, actualFee, committedMaxFees)
+	const ceiling = feeCeiling(committedMaxFees)
 	console.log(`${label}: ${outcome.path} settled, fee ${actualFee}${ceiling === undefined ? "" : ` | getFeeLimit ≈ ${ceiling}`}`)
 
 	const tokenBal = await ctx.tokenBalance(isPrivate ? "private" : "public")

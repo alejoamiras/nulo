@@ -25,6 +25,7 @@ import {
 	deriveBridgeSecret,
 	deriveTokenClaimSecret,
 	type SendDepositRecord,
+	PRIVATE_HUB_CLAIM_GAS,
 	SWAP_BRIDGE_ROUTER_ABI,
 } from "@nulo/bridge-core"
 import { encodeAbiParameters, keccak256, toHex } from "viem"
@@ -247,7 +248,7 @@ describe("private fuel fee — the sealed salt is authoritative", () => {
 				secret: "0xf",
 				secretHashHex: "0xfh",
 				minOutput: "9",
-				received: "5000",
+				received: "100000000",
 				leafIndex: "8",
 				bridgeSecretSalt,
 			},
@@ -280,6 +281,27 @@ describe("private fuel fee — the sealed salt is authoritative", () => {
 	test("with no envelope opened the journal copy still drives the claim", async () => {
 		await resolvePrivateFuelFee(fueled(TAMPERED_SALT), recipient)
 		expect(paidWith().salt).toBe(TAMPERED_SALT)
+	})
+
+	test("the FPC claim declares explicit gas limits with the 1.5x-padded predicted fees", async () => {
+		// Without limits the wallet declares the network's per-tx maximum and the FPC's ceiling
+		// (limits × fees) outgrows any realistic fuel slice.
+		const fee = await resolvePrivateFuelFee(fueled(SEALED_SALT), recipient, SEALED_SALT)
+		const gas = (
+			fee as { fee: { gasSettings: { gasLimits: { daGas: number; l2Gas: number }; maxFeesPerGas: { feePerL2Gas: bigint } } } }
+		).fee.gasSettings
+		expect({ daGas: gas.gasLimits.daGas, l2Gas: gas.gasLimits.l2Gas }).toEqual(PRIVATE_HUB_CLAIM_GAS)
+		expect(gas.maxFeesPerGas.feePerL2Gas).toBe(30n)
+	})
+
+	test("a bridged amount under the committed ceiling stops before the FPC can reject it", async () => {
+		// Mocked fees 10/20 × 1.5 = 15/30 → ceiling = 2_000_000·30 + 100_000·15 = 61_500_000 FJ-wei.
+		const short = fueled(SEALED_SALT)
+		short.fuel = { ...(short.fuel as object), received: "61499999" } as never
+		const fee = await resolvePrivateFuelFee(short, recipient, SEALED_SALT)
+		expect(fee.kind).toBe("stop")
+		expect((fee as { why: string }).why).toMatch(/fee ceiling/)
+		expect(h.calls.some(([n]) => n === "privateMintAndPayFee")).toBe(false)
 	})
 })
 

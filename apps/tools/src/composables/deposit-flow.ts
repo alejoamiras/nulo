@@ -19,6 +19,7 @@ import {
 	type SendOpts,
 	ERC20_ABI,
 	PRIVATE_FPC_ADDRESS,
+	PRIVATE_HUB_CLAIM_GAS,
 	awaitL1Receipt,
 	deriveBridgeSecret,
 	ensurePermit2Allowance,
@@ -27,6 +28,7 @@ import {
 	isSendRecord,
 	markSealTrusted,
 	predictedWorstMinFees,
+	privateFpcFeeLimit,
 	privateMintAndPayFee,
 	publicFeeJuicePayment,
 	readSendReceiptLeaves,
@@ -413,7 +415,7 @@ export async function resolvePrivateFuelFee(
 					: "private fuel claim pending - waiting for its receipt before retrying",
 		}
 	}
-	return { kind: "fee", fuel: fb, fee: await privateFpcFee(fb, fuelReceived, salt, recipientAddr) }
+	return privateFpcFee(fb, fuelReceived, salt, recipientAddr)
 }
 
 /**
@@ -428,15 +430,30 @@ export async function resolvePrivateFuelFee(
  * during the claim's proving window — a static predicted-worst snapshot can fall below the live fee
  * by inclusion time and get rejected. Each journal-driven claim retry rebuilds this (re-prices).
  */
-async function privateFpcFee(fb: FuelBlock, fuelReceived: bigint, salt: Fr, recipientAddr: AztecAddress) {
+async function privateFpcFee(fb: FuelBlock, fuelReceived: bigint, salt: Fr, recipientAddr: AztecAddress): Promise<PrivateFuelFee> {
 	const fpcAddr = AztecAddress.fromStringUnsafe(fb.fpc ?? PRIVATE_FPC_ADDRESS)
 	const fuelLeaf = new Fr(BigInt(fb.leafIndex as string))
 	const claimMaxFees = (await predictedWorstMinFees(createAztecNodeClient(NODE_URL))).mul(1.5)
+	// The FPC asserts the bridged amount covers the COMMITTED ceiling (limits × capped fees), so a
+	// short amount is refused here rather than reverted there; fees are re-priced on every retry.
+	if (fuelReceived < privateFpcFeeLimit(PRIVATE_HUB_CLAIM_GAS, claimMaxFees)) {
+		return {
+			kind: "stop",
+			why: "The bridged gas is under the private claim's fee ceiling at current network fees - retry when fees ease.",
+		}
+	}
 	return {
-		paymentMethod: privateMintAndPayFee(fpcAddr, fuelReceived, deriveBridgeSecret(salt, recipientAddr), salt, fuelLeaf),
-		gasSettings: {
-			teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
-			maxFeesPerGas: { feePerDaGas: claimMaxFees.feePerDaGas, feePerL2Gas: claimMaxFees.feePerL2Gas },
+		kind: "fee",
+		fuel: fb,
+		fee: {
+			paymentMethod: privateMintAndPayFee(fpcAddr, fuelReceived, deriveBridgeSecret(salt, recipientAddr), salt, fuelLeaf),
+			gasSettings: {
+				// Explicit limits: a wallet given none declares the network's per-tx maximum, and the
+				// FPC's ceiling is limits × fees — the maximum makes it unpayable by any realistic slice.
+				gasLimits: Gas.from(PRIVATE_HUB_CLAIM_GAS),
+				teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
+				maxFeesPerGas: { feePerDaGas: claimMaxFees.feePerDaGas, feePerL2Gas: claimMaxFees.feePerL2Gas },
+			},
 		},
 	}
 }
