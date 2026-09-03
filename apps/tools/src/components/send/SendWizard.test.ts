@@ -172,6 +172,10 @@ vi.mock("@/composables/useGasShare", () => ({
 	useGasShare: () => ({
 		txTarget,
 		propose: proposeFn,
+		prime: async () => {},
+		// The ceilings a private claim sets aside: one transaction's (0.1 FJ), plus a registration's
+		// (0.5 FJ) for a token the hub does not know — the same figures the public line calibrates.
+		ceilingsFor: (state: { kind: string }) => (state.kind === "registered" ? 10n ** 17n : 6n * 10n ** 17n),
 		floorFor: (q: bigint) => (q * 97n) / 100n,
 		reset: () => {
 			txTarget.value = 20
@@ -838,9 +842,11 @@ describe("SendWizard", () => {
 		await flushPromises()
 		review = w.findComponent({ name: "ReviewStep" })
 		// The default token is first-time, so the claim also registers it: one transaction plus the
-		// registration budget.
+		// registration budget — and the default send is private, so the line is the ceilings set aside.
 		expect(review.props("estimate").networkFee).toBe("≈ 0.6 FJ")
-		expect(review.props("estimate").networkFeeNote).toBe("taken from the gas that arrives")
+		expect(review.props("estimate").networkFeeNote).toMatch(
+			/taken from the gas that arrives - a private claim sets aside its fee ceiling/,
+		)
 		expect(review.props("estimate").txCovered).toBe(20)
 		expect(review.props("slippageBps")).toBe(300)
 	})

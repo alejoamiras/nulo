@@ -98,6 +98,8 @@ const grant = useTokenGrant()
 const gasHeld = useGasHeld({ aztec: () => bridge.wallet.value, account: () => bridge.selectedAccount.value ?? undefined })
 const routeQuote = useRouteQuote({ pub: () => l1.publicClient as unknown as PublicClient })
 const gasShare = useGasShare()
+// A private slice is sized from live fees: price them now so the amount step never waits on them.
+void gasShare.prime()
 const sendFlow = useSend({ epoch: selection.epoch })
 const exitFlow = useHubExit()
 
@@ -223,7 +225,10 @@ function buildGas(): { plan: GasLegPlan | null; error: string | null } {
 	if (outcome.kind !== "route" && outcome.kind !== "identity") return { plan: null, error: null }
 	const probeIn = probeAmountOf(token)
 	const rate = outcome.kind === "route" ? { probeIn, probeOut: outcome.quoteOut } : ONE_TO_ONE
-	const share = gasShare.propose({ amount: units, decimals: token.decimals, state: token.state, rate })
+	const share = gasShare.propose({ amount: units, decimals: token.decimals, state: token.state, rate, isPrivate: isPrivate.value })
+	// A private slice is priced from live fees; until they arrive there is nothing to size, like a
+	// route probe still in flight.
+	if (share === "pricing") return { plan: null, error: null }
 	if (!share) return { plan: null, error: "This network has no swap venue, so a send cannot buy gas." }
 	// Gas-only spends the whole amount; the router refuses any other split.
 	const fuelAmount = intent.value === "gas" ? units : share.fuelAmount
@@ -311,12 +316,21 @@ function txCoveredOf(target: SendPlan | ExitPlan): number | null {
 }
 
 /** The claim is the first transaction the bought gas pays for; an unregistered token's claim also
- *  registers it, which is budgeted on top. */
+ *  registers it, which is budgeted on top. A private claim is paid through the PrivateFPC, which
+ *  keeps each transaction's committed fee ceiling rather than its charge — so what leaves the gas
+ *  is the ceiling, priced from live fees, and the review says so. */
 function networkFeeOf(target: SendPlan | ExitPlan): { networkFee: string; networkFeeNote: string | null } {
 	if (target.direction === "l2-to-l1") {
 		return { networkFee: "your Aztec wallet's own fee, then Ethereum gas to finish", networkFeeNote: null }
 	}
 	if (!target.gas || !SWAP || !fjPerTx) return { networkFee: "paid from the gas you already hold on Aztec", networkFeeNote: null }
+	if (target.isPrivate) {
+		const ceilings = gasShare.ceilingsFor(target.token.state)
+		return {
+			networkFee: ceilings === null ? "priced from network fees at claim time" : `≈ ${formatCompact(ceilings, 18)} FJ`,
+			networkFeeNote: "taken from the gas that arrives - a private claim sets aside its fee ceiling, not its exact cost",
+		}
+	}
 	const feeFj = fjPerTx + (target.token.state.kind === "registered" ? 0n : BigInt(SWAP.fjRegister))
 	return { networkFee: `≈ ${formatCompact(feeFj, 18)} FJ`, networkFeeNote: "taken from the gas that arrives" }
 }

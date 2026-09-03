@@ -18,6 +18,10 @@ export interface GasShareInput {
 	fjPerTx: bigint
 	/** Added when the token has no L2 registration yet: that first tx costs more than a transfer. */
 	fjRegister?: bigint
+	/** Fee Juice the claim path forfeits to committed fee ceilings before any per-transaction gas: a
+	 *  claim paid through the PrivateFPC keeps the LIMIT of every transaction it pays, not the charge.
+	 *  Replaces `fjRegister`, which prices a registration at its charge. */
+	fjCeilings?: bigint
 	minFuelFj: bigint
 	/** A dust quote: `probeOut` FeeJuice came out for `probeIn` token in. */
 	rate: { probeIn: bigint; probeOut: bigint }
@@ -44,7 +48,7 @@ export function proposeGasShare(i: GasShareInput): GasShareResult {
 	if (i.rate.probeIn <= 0n) throw new Error("gas-share: probeIn must be positive")
 	if (!Number.isInteger(txTarget) || txTarget < 1) throw new Error("gas-share: txTarget must be an integer >= 1")
 
-	const target = BigInt(txTarget) * i.fjPerTx + (i.fjRegister ?? 0n)
+	const target = BigInt(txTarget) * i.fjPerTx + (i.fjCeilings ?? i.fjRegister ?? 0n)
 	const minBinding = i.minFuelFj > target
 	const fuelFj = minBinding ? i.minFuelFj : target
 

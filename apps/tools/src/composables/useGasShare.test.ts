@@ -1,6 +1,6 @@
 import { signedMinFuelOutput, type TokenState } from "@nulo/bridge-core"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { useGasShare } from "./useGasShare"
+import { type GasShareOutcome, type UseGasShareHandle, useGasShare } from "./useGasShare"
 
 /** The generation's swap block; `undefined` stands in for a network with no venue. */
 const h = vi.hoisted(() => ({ swap: { value: undefined as unknown } }))
@@ -9,6 +9,13 @@ vi.mock("@/contracts/bridge-generation", () => ({
 	get SWAP() {
 		return h.swap.value
 	},
+}))
+vi.mock("@/lib/network", () => ({ NETWORK: { nodeUrl: "http://node.test" } }))
+// The network's predicted fees, as the node answers them (a private slice is priced from these).
+vi.mock("@aztec/aztec.js/node", () => ({
+	createAztecNodeClient: () => ({
+		getCurrentMinFees: async () => ({ feePerDaGas: 10n, feePerL2Gas: 20n }),
+	}),
 }))
 
 const FJ_PER_TX = 100_000_000_000_000_000n
@@ -47,13 +54,27 @@ const PORTAL_ONLY: TokenState = { kind: "portal-only", registration: REGISTRATIO
 const RATE = { probeIn: 1_000_000n, probeOut: 1_000_000_000_000_000_000n }
 const AMOUNT = 1_000_000_000n
 
+/** The public-slice tests never see "pricing": narrow it away so the assertions read the result. */
+function sizedGasShare(): Omit<UseGasShareHandle, "propose"> & {
+	propose: (i: Parameters<UseGasShareHandle["propose"]>[0]) => Exclude<GasShareOutcome, "pricing">
+} {
+	const share = useGasShare()
+	return {
+		...share,
+		propose: (i) => {
+			const r = share.propose(i)
+			return r === "pricing" ? null : r
+		},
+	}
+}
+
 describe("useGasShare", () => {
 	beforeEach(() => {
 		h.swap.value = SWAP_FIXTURE
 	})
 
 	it("sizes a registered token's slice to txTarget × fjPerTx", () => {
-		const { txTarget, propose } = useGasShare()
+		const { txTarget, propose } = sizedGasShare()
 		expect(txTarget.value).toBe(20)
 		const result = propose({ amount: AMOUNT, decimals: 6, state: REGISTERED, rate: RATE })
 		expect(result?.fuelFj).toBe(20n * FJ_PER_TX)
@@ -61,7 +82,7 @@ describe("useGasShare", () => {
 	})
 
 	it("adds fjRegister for a token the hub has not registered yet", () => {
-		const { propose } = useGasShare()
+		const { propose } = sizedGasShare()
 		const registered = propose({ amount: AMOUNT, decimals: 6, state: REGISTERED, rate: RATE })
 		const firstTime = propose({ amount: AMOUNT, decimals: 6, state: FIRST_TIME, rate: RATE })
 		expect(firstTime?.fuelFj).toBe(20n * FJ_PER_TX + FJ_REGISTER)
@@ -69,12 +90,30 @@ describe("useGasShare", () => {
 	})
 
 	it("adds fjRegister for a portal-only token too — its first claim still registers", () => {
-		const { propose } = useGasShare()
+		const { propose } = sizedGasShare()
 		expect(propose({ amount: AMOUNT, decimals: 6, state: PORTAL_ONLY, rate: RATE })?.fuelFj).toBe(20n * FJ_PER_TX + FJ_REGISTER)
 	})
 
+	it("a private slice is priced from live fees: pending until they arrive, then the claim's ceiling replaces fjRegister, plus a registration's for a first-time token", async () => {
+		// Fees 10/20 → claim ceiling 2M·20 + 100k·10 = 41M; register ceiling 4.5M·20 + 100k·10 = 91M.
+		const share = useGasShare()
+		expect(share.ceilingsFor(REGISTERED)).toBeNull()
+		expect(share.propose({ amount: AMOUNT, decimals: 6, state: REGISTERED, rate: RATE, isPrivate: true })).toBe("pricing")
+		await share.prime()
+		expect(share.ceilingsFor(REGISTERED)).toBe(41_000_000n)
+		expect(share.ceilingsFor(FIRST_TIME)).toBe(132_000_000n)
+		const registered = share.propose({ amount: AMOUNT, decimals: 6, state: REGISTERED, rate: RATE, isPrivate: true })
+		const firstTime = share.propose({ amount: AMOUNT, decimals: 6, state: FIRST_TIME, rate: RATE, isPrivate: true })
+		expect(registered).toMatchObject({ fuelFj: 20n * FJ_PER_TX + 41_000_000n })
+		expect(firstTime).toMatchObject({ fuelFj: 20n * FJ_PER_TX + 132_000_000n })
+		// A public slice never prices ceilings: the calibrated registration charge stays.
+		expect(share.propose({ amount: AMOUNT, decimals: 6, state: FIRST_TIME, rate: RATE })).toMatchObject({
+			fuelFj: 20n * FJ_PER_TX + FJ_REGISTER,
+		})
+	})
+
 	it("buys at least the claim minimum when the tx target asks for less", () => {
-		const { txTarget, propose } = useGasShare()
+		const { txTarget, propose } = sizedGasShare()
 		txTarget.value = 1
 		const result = propose({ amount: AMOUNT, decimals: 6, state: REGISTERED, rate: RATE })
 		expect(result?.fuelFj).toBe(MIN_FUEL_FJ)
@@ -82,21 +121,21 @@ describe("useGasShare", () => {
 	})
 
 	it("never diverts more than half the deposit", () => {
-		const { propose } = useGasShare()
+		const { propose } = sizedGasShare()
 		const result = propose({ amount: 10n, decimals: 6, state: REGISTERED, rate: RATE })
 		expect(result?.fuelAmount).toBe(5n)
 		expect(result?.capped).toBe("half")
 	})
 
 	it("sizes the input so the signed floor still reaches the Fee Juice target", () => {
-		const { propose } = useGasShare()
+		const { propose } = sizedGasShare()
 		const result = propose({ amount: AMOUNT, decimals: 6, state: REGISTERED, rate: RATE })
 		const quote = ((result?.fuelAmount ?? 0n) * RATE.probeOut) / RATE.probeIn
 		expect(signedMinFuelOutput(quote, SLIPPAGE_BPS, MIN_FUEL_FJ)).toBeGreaterThanOrEqual(result?.fuelFj ?? 0n)
 	})
 
 	it("re-proposes a bigger slice when the tx target moves", () => {
-		const { txTarget, propose } = useGasShare()
+		const { txTarget, propose } = sizedGasShare()
 		const before = propose({ amount: AMOUNT, decimals: 6, state: REGISTERED, rate: RATE })
 		txTarget.value = 40
 		const after = propose({ amount: AMOUNT, decimals: 6, state: REGISTERED, rate: RATE })
@@ -105,24 +144,24 @@ describe("useGasShare", () => {
 	})
 
 	it("floors a quote at quote × (1 − slippage)", () => {
-		const { floorFor } = useGasShare()
+		const { floorFor } = sizedGasShare()
 		expect(floorFor(10n * MIN_FUEL_FJ)).toBe((10n * MIN_FUEL_FJ * 9900n) / 10_000n)
 	})
 
 	it("never floors below the claim minimum", () => {
-		const { floorFor } = useGasShare()
+		const { floorFor } = sizedGasShare()
 		expect(floorFor(MIN_FUEL_FJ)).toBe(MIN_FUEL_FJ)
 	})
 
 	it("proposes nothing and refuses a floor when the network has no swap venue", () => {
 		h.swap.value = undefined
-		const { propose, floorFor } = useGasShare()
+		const { propose, floorFor } = sizedGasShare()
 		expect(propose({ amount: AMOUNT, decimals: 6, state: REGISTERED, rate: RATE })).toBeNull()
 		expect(() => floorFor(MIN_FUEL_FJ)).toThrow(/no swap venue/)
 	})
 
 	it("propagates bridge-core's input validation rather than inventing a slice", () => {
-		const { propose, floorFor } = useGasShare()
+		const { propose, floorFor } = sizedGasShare()
 		expect(() => propose({ amount: 0n, decimals: 6, state: REGISTERED, rate: RATE })).toThrow(/amount must be positive/)
 		expect(() => propose({ amount: AMOUNT, decimals: 6, state: REGISTERED, rate: { probeIn: 1n, probeOut: 0n } })).toThrow(
 			/probeOut must be positive/,
@@ -131,7 +170,7 @@ describe("useGasShare", () => {
 	})
 
 	it("dispose returns the tx target to its default", () => {
-		const { txTarget, dispose } = useGasShare()
+		const { txTarget, dispose } = sizedGasShare()
 		txTarget.value = 99
 		dispose()
 		expect(txTarget.value).toBe(20)
