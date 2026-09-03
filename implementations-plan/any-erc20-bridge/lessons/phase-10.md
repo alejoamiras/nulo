@@ -205,7 +205,29 @@ registering sample; EURC is now a registered, ordinary third token), the private
 `minFuelFj` 4× = 28.41 FJ (< 29.58, floor stands), `fjPerTx` sample 2.845 FJ, `fjRegister` hint
 **1.776 FJ** (register+claim − plain). Because the public lane registered EURC first, the private
 lane did NOT exercise the sponsor-paid `register_token` path — a fourth token with
-`PUBLIC_RUNS=0` (`d6588bb9`) does that: recorded below.
+`PUBLIC_RUNS=0` (`d6588bb9`) does that.
+
+**GBPC — the seam, live.** Fourth seed token `0x177EaD2a677858e376941390548FcF01A6ebeFCa` (tx
+`0x7ce5738d…9fa85`, nonce 5363; it sat pending for minutes because I let it sign concurrently with
+the EURC canary from the same key — the runbook's "serialize the deployer" rule, relearned — and my
+retry mined a duplicate, unused token at nonce 5364). Pre-created without registration → portal
+`0x12c3db4596443e4c211bfe7c9c3d316ce57ad85d`, pool seeded. `fuel-testnet.ts --token GBPC
+PUBLIC_RUNS=0 PRIVATE_RUNS=1`: three L2 transactions in order — the throwaway account's deploy
+(sponsor, `0x2e5b67d1…d646`), **`register_token` paid by the sponsor (`0x2f31…9c3b`, 5.32 FJ)**,
+two "claim not ready" waits while the message synced, then **`claim_private` paid by the bridged
+fuel through the FPC (`0x139bcd59…1449`, 2.98 FJ)**. The outcome path printed `claim` because the
+retry after the waits found the token registered (codex's "registerTxHash is lost on a throw after
+the registration" — cosmetic here; the registration and the claim both landed). Ceiling 7.44 FJ;
+printed `minFuelFj` 4× = **29.77 FJ > 29.58** — with three live private ceilings (6.60 / 7.10 /
+7.44) that is the full calibration, so the floor is RAISED to `29773418555864000000`
+(`MIN_FUEL_FJ` in `deploy-generation.ts`).
+
+**Recalibration** with every paid claim the validators landed (seven plain samples across both
+lanes, worst 2.98 FJ; the EURC `register_and_claim_public` 4.62 FJ): `fjPerTx` 3.578 FJ,
+`fjRegister` 1.967 FJ (the calibrator's worst-registering minus worst-plain, now measured rather
+than scaled from the sandbox). Candidate rebuilt from the journal with four tokens (USDC, USDT,
+EURC, GBPC — the last two registered by their first claims), the new floor and these budgets →
+`verify --candidate` → promote: recorded below.
 
 Round 2 (resumed, on `1de456c0`): "close" — one wallet-boundary miss, one policy point, one known
 gap, one nit.

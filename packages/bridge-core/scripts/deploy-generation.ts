@@ -60,7 +60,9 @@ const SEPOLIA = {
 const TOKEN_WETH_TIERS = [{ fee: 3000, tickSpacing: 60 }]
 const ETH_FJ = { fee: 987, tickSpacing: 10 }
 const SLIPPAGE_BPS = 300
-const MIN_FUEL_FJ = "29580299742031535464"
+// 4× the worst PrivateFPC ceiling the validator measured over three live private claims on the
+// testnet fee schedule (7.44 FJ, 2026-09-03); a one-sample run may only ever raise it.
+const MIN_FUEL_FJ = "29773418555864000000"
 const MIN_FJ = "16000000000000000000"
 
 const lc = (v: string) => v.toLowerCase() as Address
