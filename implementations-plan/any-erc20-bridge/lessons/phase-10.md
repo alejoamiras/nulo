@@ -391,6 +391,27 @@ commits (token step, amount step, review, wizard). Findings while building it:
   `getPublicStorageAt` until awaited.
 - The Pages preview for the sign-off is the PR's own; the five-item checklist below is unchanged.
 
+**`/code-review medium --fix` on the arc** (a fresh adversarial reviewer over the branch diff, one
+file at a time): 1 HIGH, 5 MED, 5 LOW; all fixed in one commit except two LOWs kept on purpose.
+
+- HIGH — RUN IN BACKGROUND was undone: the send lane resolves only once the whole bridge is done,
+  so `runSend`'s `adopt(id)` fired after the reset, and `adoptRunRecord` re-adopted the record on
+  the engine's next write. Both adopt sites now skip the backgrounded id and the id joins the
+  pre-submit set; the test releases the lane AFTER the background, the one ordering production has.
+- MED — the step strip rendered the raw token symbol (every other surface goes through
+  `safeDisplay`); the node outage on the binding read threw the client's raw error (now a readable
+  fail-closed message — fail-open would bring the false first-time path back on a blip); the gas
+  stepper's text field kept a refused value on screen (snaps back); the disabled outcomes' reason
+  lived only in `title` (now `aria-describedby` too); row balances were keyed on the unfiltered
+  catalog, so a row past the first fifty never showed one (now keyed on the rows on screen and
+  remembered per row).
+- LOW fixed — "≈ 0 transactions" on a quote under one budget; `formatCompact` ate a whole number's
+  zeros at zero decimals; "sponsor" wording in a prop doc and a `data-route` value.
+- LOW kept — the slot-derivation test derives its expectation with the same helper the code uses
+  (the reviewer re-derived it by hand against aztec-nr `with_hash.nr` / `derive_storage_slot_in_map`
+  and found it right; a TXE fixture is the stronger pin and is not worth a toolchain run for a UI
+  hint); one `mintL1` testid on every mint button, disambiguated by `data-symbol`.
+
 ## Sign-off
 
 _Owner sign-off: PENDING._

@@ -61,7 +61,7 @@ function review(over: Partial<Props> = {}) {
 			account: ACCOUNT,
 			signatureValiditySeconds: 1_800,
 			slippageBps: 50,
-			estimate: { takes: "about 12 minutes", networkFee: "paid by the sponsor", txCovered: null },
+			estimate: { takes: "about 12 minutes", networkFee: "paid from the gas you already hold on Aztec", txCovered: null },
 			grant: "idle",
 			busy: false,
 			error: null,
@@ -76,7 +76,7 @@ describe("ReviewStep", () => {
 		expect(w.find(sel(TESTIDS.sendReviewSend)).text()).toContain("10 USDC")
 		expect(w.find(sel(TESTIDS.sendReviewArrives)).text()).toContain("10 USDC")
 		expect(w.find(sel(TESTIDS.sendReviewGas)).exists()).toBe(false)
-		expect(w.find(sel(TESTIDS.sendReviewNetworkFee)).text()).toContain("paid by the sponsor")
+		expect(w.find(sel(TESTIDS.sendReviewNetworkFee)).text()).toContain("paid from the gas you already hold on Aztec")
 		expect(w.find(sel(TESTIDS.sendReviewTakes)).text()).toContain("about 12 minutes")
 		w.unmount()
 	})

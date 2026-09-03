@@ -48,6 +48,7 @@ import { assetDecimals, assetSymbol, recordTokenBlock } from "@/lib/asset-label"
 import { stepperPhases } from "@/lib/bridge-steps"
 import { formatBigInt, formatCompact, parseAmountStrict, toDecimalString } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
+import { safeDisplay } from "@/lib/token-display"
 import type { Direction, ExitPlan, GasLegPlan, ResolvedToken, SelectableToken, SendIntent, SendPlan } from "@/lib/send-model"
 
 /** The rail's own etas, summed and rounded UP — the review must never undersell how long this takes. */
@@ -79,7 +80,7 @@ const lookup = useAddressLookup({
 const rowBalances = useRowBalances({
 	pub: () => l1.publicClient as unknown as PublicClient,
 	owner: () => l1.address.value ?? undefined,
-	tokens: () => catalog.tokens.value,
+	tokens: () => catalog.filtered.value,
 })
 const selection = useTokenSelection({
 	pub: () => l1.publicClient as unknown as PublicClient,
@@ -156,11 +157,15 @@ const flowError = computed(() => sendFlow.error.value ?? exitFlow.error.value)
 
 const amountUnits = computed(() => (resolved.value ? parseAmountStrict(amount.value, resolved.value.decimals) : null))
 
+// The strip's labels render a symbol a list or a pasted contract chose; stripped and capped like
+// every other place it lands.
+const tokenLabel = computed(() => (resolved.value ? safeDisplay(resolved.value.symbol) : undefined))
+
 /** What the step strip shows for the amount once the user has moved past it. */
 const amountLabel = computed(() => {
 	const token = resolved.value
 	const units = amountUnits.value
-	return token && units !== null && units > 0n ? `${toDecimalString(units, token.decimals)} ${token.symbol}` : undefined
+	return token && units !== null && units > 0n ? `${toDecimalString(units, token.decimals)} ${tokenLabel.value}` : undefined
 })
 
 /** ---- the gas leg -------------------------------------------------------------------------- */
@@ -277,7 +282,10 @@ const plan = computed<SendPlan | ExitPlan | null>(() => {
  *  send (which spends the whole amount) what the quote divides into. */
 function txCoveredOf(target: SendPlan | ExitPlan): number | null {
 	if (target.direction !== "l1-to-l2" || !target.gas || !fjPerTx) return null
-	return target.intent === "gas" ? Number(target.gas.quote / fjPerTx) : gasShare.txTarget.value
+	if (target.intent !== "gas") return gasShare.txTarget.value
+	// A quote under one transaction's budget covers nothing worth counting.
+	const whole = Number(target.gas.quote / fjPerTx)
+	return whole >= 1 ? whole : null
 }
 
 /** The claim is the first transaction the bought gas pays for; an unregistered token's claim also
@@ -479,7 +487,7 @@ function adopt(id: string): void {
 function adoptRunRecord(): void {
 	if (!submitting.value || ownedId.value || stage.value !== "wizard") return
 	const mine = journal.records.value.find((r) => isSendRecord(r) && !preSubmitIds.has(r.id) && journal.isSessionLive(r.id))
-	if (mine) adopt(mine.id)
+	if (mine && mine.id !== backgroundedId.value) adopt(mine.id)
 }
 watch(journal.records, adoptRunRecord)
 
@@ -503,7 +511,9 @@ async function runSend(target: SendPlan): Promise<void> {
 	const id = await sendFlow.send(target)
 	if (id) {
 		// The run NAMES its record; that id wins over whatever the takeover adopted provisionally.
-		if (ownedId.value !== id) adopt(id)
+		// Unless the user sent it to the background meanwhile: the lane resolves only once the whole
+		// bridge is done, and re-adopting then would drag the finished send back over a new one.
+		if (ownedId.value !== id && backgroundedId.value !== id) adopt(id)
 		return
 	}
 	// Nothing was sent. A grant that never landed is the reason worth naming on the review.
@@ -512,7 +522,7 @@ async function runSend(target: SendPlan): Promise<void> {
 
 async function runExit(target: ExitPlan): Promise<void> {
 	const id = await exitFlow.exit(target)
-	if (id && ownedId.value !== id) adopt(id)
+	if (id && ownedId.value !== id && backgroundedId.value !== id) adopt(id)
 }
 
 /** ---- stepper → receipt -------------------------------------------------------------------- */
@@ -611,6 +621,9 @@ function onNewSend(): void {
  *  step, with one line above it that follows the send until it lands. */
 function onBackground(): void {
 	backgroundedId.value = ownedId.value
+	// The run is still in flight: neither its record's next write nor its lane resolving may take
+	// the wizard over again (see `adoptRunRecord` / `runSend`).
+	if (ownedId.value) preSubmitIds.add(ownedId.value)
 	onNewSend()
 }
 
@@ -694,7 +707,7 @@ onBeforeUnmount(() => {
 		:step="step"
 		:completed="completed"
 		:can-switch-direction="!busy"
-		:token-label="resolved?.symbol"
+		:token-label="tokenLabel"
 		:amount-label="amountLabel"
 		@update:direction="onDirection"
 		@goto="onGoto"

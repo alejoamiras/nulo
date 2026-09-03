@@ -49,12 +49,15 @@ describe("ChoiceCards", () => {
 		w.unmount()
 	})
 
-	it("disables both gas choices, with the reason on hover, when the token has no route", () => {
+	it("disables both gas choices, with the reason on hover and for assistive tech, when the token has no route", () => {
 		const w = cards({ noRoute: true })
 		expect(w.find(sel(TESTIDS.sendChoiceTokenGas)).attributes("disabled")).toBeDefined()
 		expect(w.find(sel(TESTIDS.sendChoiceGas)).attributes("disabled")).toBeDefined()
 		expect(w.find(sel(TESTIDS.sendChoiceToken)).attributes("disabled")).toBeUndefined()
-		expect(w.find(sel(TESTIDS.sendChoiceGas)).attributes("title")).toContain("can't buy Aztec gas")
+		const gas = w.find(sel(TESTIDS.sendChoiceGas))
+		expect(gas.attributes("title")).toContain("can't buy Aztec gas")
+		expect(w.get(`#${gas.attributes("aria-describedby")}`).text()).toContain("can't buy Aztec gas")
+		expect(w.find(sel(TESTIDS.sendChoiceToken)).attributes("aria-describedby")).toBeUndefined()
 		w.unmount()
 	})
 

@@ -449,8 +449,15 @@ describe("SendWizard", () => {
 	})
 
 	it("RUN IN BACKGROUND starts the wizard over and keeps a line on the send until it lands", async () => {
+		// The send lane resolves only once the whole bridge is done: the record lands first, the
+		// background happens while the lane is still open, and the lane resolves last.
+		let releaseSend = (): void => {}
 		sendFn.mockImplementation(async () => {
+			sessionLive.add("rec-1")
 			records.value = [...records.value, sendRecord("rec-1")]
+			await new Promise<void>((resolve) => {
+				releaseSend = resolve
+			})
 			return "rec-1"
 		})
 		const w = await wizard()
@@ -467,11 +474,22 @@ describe("SendWizard", () => {
 		expect(strip.text()).toContain("is on its way")
 		expect(strip.find(`[data-testid="${TESTIDS.sendBackgroundActivity}"]`).exists()).toBe(true)
 
+		// The engine keeps writing the record: that must not take the wizard over again.
+		records.value = records.value.map((r) => (r.id === "rec-1" ? { ...r, updatedAt: 1_500 } : r))
+		await flushPromises()
+		expect(w.findComponent({ name: "BridgeStepper" }).exists()).toBe(false)
+		expect(claimForeground).toHaveBeenCalledTimes(1)
+
+		// Nor may the lane resolving, nor the record completing: the finished send belongs to the
+		// journal now, never to a receipt the wizard left behind.
+		releaseSend()
+		await flushPromises()
 		records.value = records.value.map((r) => (r.id === "rec-1" ? { ...r, completedAt: 2_000 } : r))
 		await flushPromises()
-		expect(w.find(`[data-testid="${TESTIDS.sendBackgroundStrip}"]`).exists()).toBe(false)
-		// The finished send belongs to the journal now, never to a receipt the wizard left behind.
+		expect(w.findComponent({ name: "BridgeStepper" }).exists()).toBe(false)
 		expect(w.findComponent({ name: "BridgeReceipt" }).exists()).toBe(false)
+		expect(w.find(`[data-testid="${TESTIDS.sendBackgroundStrip}"]`).exists()).toBe(false)
+		expect(claimForeground).toHaveBeenCalledTimes(1)
 	})
 
 	it("a token-only review says the fee is the gas already held; adding gas names one transaction's cost out of it", async () => {

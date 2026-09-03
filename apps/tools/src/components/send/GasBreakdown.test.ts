@@ -121,12 +121,13 @@ describe("GasBreakdown", () => {
 		w.unmount()
 	})
 
-	it("ignores a half-typed or out-of-range target rather than sizing for it", async () => {
+	it("ignores a half-typed or out-of-range target rather than sizing for it, and the field snaps back", async () => {
 		const w = breakdown()
 		const field = w.find(sel(TESTIDS.sendGasTxTarget))
-		await field.setValue("")
-		await field.setValue("0")
-		await field.setValue("5000")
+		for (const junk of ["", "0", "5000"]) {
+			await field.setValue(junk)
+			expect((field.element as HTMLInputElement).value).toBe("20")
+		}
 		expect(w.emitted("update:txTarget")).toBeUndefined()
 		w.unmount()
 	})

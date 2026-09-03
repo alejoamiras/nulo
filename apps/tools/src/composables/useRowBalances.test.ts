@@ -68,9 +68,9 @@ describe("useRowBalances", () => {
 		expect(handle.balances.value).toBe(before)
 	})
 
-	it("re-reads when the rows change, but not when the same rows arrive in a new array", async () => {
+	it("reads only the rows it has not read yet when the visible set changes, and none for the same rows in a new array", async () => {
 		const rows = [token(1)]
-		const { tokens } = harness(rows)
+		const { tokens, handle } = harness(rows)
 		await flushPromises()
 		tokens.value = [...rows]
 		await flushPromises()
@@ -78,6 +78,26 @@ describe("useRowBalances", () => {
 		tokens.value = [...rows, token(2)]
 		await flushPromises()
 		expect(h.readErc20Balances).toHaveBeenCalledTimes(2)
+		expect(h.readErc20Balances.mock.calls[1]?.[2]).toEqual([token(2).address])
+		// A search that narrows the list to rows already read costs nothing; widening it back neither.
+		tokens.value = [token(2)]
+		await flushPromises()
+		tokens.value = [...rows, token(2)]
+		await flushPromises()
+		expect(h.readErc20Balances).toHaveBeenCalledTimes(2)
+		expect(Object.keys(handle.balances.value)).toHaveLength(2)
+	})
+
+	it("forgets everything when the account changes, and re-reads what is on screen on an explicit refresh", async () => {
+		const rows = [token(1)]
+		const { who, handle } = harness(rows)
+		await flushPromises()
+		who.value = "0x1111111111111111111111111111111111111111" as Address
+		await flushPromises()
+		expect(h.readErc20Balances).toHaveBeenCalledTimes(2)
+		expect(h.readErc20Balances.mock.calls[1]?.[1]).toBe(who.value)
+		await handle.refresh()
+		expect(h.readErc20Balances).toHaveBeenCalledTimes(3)
 	})
 
 	it("a superseded read never lands", async () => {

@@ -22,6 +22,8 @@ interface Choice {
 }
 
 const NO_ROUTE_REASON = "This token can't buy Aztec gas on the way in."
+/** Referenced by the disabled cells' `aria-describedby`: one choice group exists at a time. */
+const REASON_ID = "send-choice-no-route"
 
 const choices = computed<Choice[]>(() => {
 	const token: Choice = {
@@ -80,6 +82,7 @@ function move(from: number, delta: number): void {
 			:aria-selected="choice.key === intent"
 			:disabled="!enabled(choice)"
 			:title="enabled(choice) ? undefined : NO_ROUTE_REASON"
+			:aria-describedby="enabled(choice) ? undefined : REASON_ID"
 			:tabindex="choice.key === intent ? 0 : -1"
 			@click="choose(choice)"
 			@keydown.left.prevent="move(index, -1)"
@@ -90,6 +93,8 @@ function move(from: number, delta: number): void {
 			<span class="label">{{ choice.label }}</span>
 			<span class="desc">{{ choice.desc }}</span>
 		</button>
+		<!-- The amount step says this in sight; the disabled cells point assistive tech at it here. -->
+		<span v-if="noRoute && !exitOnly" :id="REASON_ID" class="sr-only">{{ NO_ROUTE_REASON }}</span>
 	</div>
 </template>
 
@@ -138,5 +143,16 @@ function move(from: number, delta: number): void {
 .desc {
 	font: 500 11px/1.4 var(--font-mono);
 	color: var(--txt-secondary);
+}
+
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
 }
 </style>

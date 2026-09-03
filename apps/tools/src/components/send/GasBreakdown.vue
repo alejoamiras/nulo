@@ -39,9 +39,12 @@ const gasArrives = computed(() => (props.gas ? `≈ ${formatCompact(props.gas.qu
 
 const floorText = computed(() => (props.gas ? toDecimalString(props.gas.minFuelOutput, 18) : "—"))
 
+/** Whole transactions the quote covers; null below one — "≈ 0 transactions" would be a lie about a
+ *  send that still lands, so the line is simply absent. */
 const enoughFor = computed(() => {
 	if (!props.gas || !props.fjPerTx || props.fjPerTx <= 0n) return null
-	return Number(props.gas.quote / props.fjPerTx)
+	const whole = Number(props.gas.quote / props.fjPerTx)
+	return whole >= 1 ? whole : null
 })
 
 const CAPPED_NOTE = {
@@ -56,8 +59,12 @@ function setTarget(next: number): void {
 }
 
 function onTarget(event: Event): void {
-	// A blank or junk field is a half-typed edit, not an instruction to size the slice for zero txs.
-	setTarget(Number.parseInt((event.target as HTMLInputElement).value, 10))
+	const field = event.target as HTMLInputElement
+	const next = Number.parseInt(field.value, 10)
+	// A blank or junk field is a half-typed edit, not an instruction to size the slice for zero txs —
+	// and the field snaps back to the target the slice IS sized for, so it never shows another.
+	if (Number.isFinite(next) && next >= 1 && next <= MAX_TX) setTarget(next)
+	else field.value = String(props.txTarget)
 }
 </script>
 

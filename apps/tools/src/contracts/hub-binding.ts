@@ -12,8 +12,18 @@ type NodeClient = ReturnType<typeof createAztecNodeClient>
 
 let node: NodeClient | undefined
 
+/**
+ * Fails closed, in the user's words: a node that cannot be reached must not let a registered token
+ * pass for a first send (the very mistake this read exists to prevent), so the selection reports
+ * the outage instead of guessing.
+ */
 export async function readHubBinding(erc20: string): Promise<string | undefined> {
 	if (!HUB) return undefined
 	node ??= createAztecNodeClient(NETWORK.nodeUrl)
-	return hubBindingAt(node, HUB.toString(), erc20)
+	try {
+		return await hubBindingAt(node, HUB.toString(), erc20)
+	} catch (e) {
+		console.debug(e instanceof Error ? e : new Error("hub binding read failed"))
+		throw new Error("Couldn't reach the Aztec node to read this token's status. Try again in a moment.")
+	}
 }

@@ -72,7 +72,11 @@ export function formatCompact(value: bigint, decimals: number, places = 2): stri
 	const divisor = 10n ** BigInt(decimals)
 	const whole = value / divisor
 	const fraction = value % divisor
-	if (whole > 0n || fraction === 0n) return formatBigInt(value, decimals, places).replace(/\.?0+$/, "")
+	if (whole > 0n || fraction === 0n) {
+		const text = formatBigInt(value, decimals, places)
+		// Only a fraction's zeros are padding; a whole number's are digits.
+		return text.includes(".") ? text.replace(/\.?0+$/, "") : text
+	}
 	const digits = fraction.toString().padStart(decimals, "0")
 	const lead = digits.search(/[1-9]/)
 	return `0.${digits.slice(0, Math.max(places, lead + 2)).replace(/0+$/, "")}`

@@ -8,6 +8,12 @@ describe("formatCompact", () => {
 		expect(formatCompact(0n, 18)).toBe("0")
 	})
 
+	it("keeps a whole number's zeros — only a fraction's are padding", () => {
+		expect(formatCompact(100n, 0)).toBe("100")
+		expect(formatCompact(1_000_000n, 6, 0)).toBe("1")
+		expect(formatCompact(10_000_000n, 6, 0)).toBe("10")
+	})
+
 	it("cuts the fraction to the requested places without rounding", () => {
 		expect(formatCompact(1_239_999n, 6)).toBe("1.23")
 		expect(formatCompact(1_239_999n, 6, 4)).toBe("1.2399")

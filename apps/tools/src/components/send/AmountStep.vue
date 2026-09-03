@@ -27,7 +27,7 @@ const props = defineProps<{
 	gasError: string | null
 	/** A refusal decided above the step (an exit on a token the hub has not bound): shown, and CONTINUE stays off. */
 	blockedReason?: string | null
-	/** Why `token` alone cannot be chosen here (no sponsor on this network); shown, and the intent is steered off it. */
+	/** Why `token` alone cannot continue (the account holds no gas to claim with): shown while it is the choice. */
 	tokenOnlyBlocked?: string | null
 }>()
 const emit = defineEmits<{
@@ -122,7 +122,7 @@ function onUseAll(): void {
 		<p
 			v-if="!isExit && intent === 'token' && tokenOnlyBlocked"
 			class="route"
-			data-route="no-sponsor"
+			data-route="no-gas"
 			aria-live="polite"
 			:data-testid="TESTIDS.sendTokenOnlyBlocked"
 		>
@@ -210,7 +210,7 @@ function onUseAll(): void {
 
 .route[data-route="no-route"],
 .route[data-route="unavailable"],
-.route[data-route="no-sponsor"] {
+.route[data-route="no-gas"] {
 	color: var(--yellow);
 }
 
