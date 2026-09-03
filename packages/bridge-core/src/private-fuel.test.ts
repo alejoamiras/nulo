@@ -16,6 +16,7 @@ import {
 	PRIVATE_FPC_ADDRESS,
 	PRIVATE_FPC_SALT,
 	PRIVATE_HUB_CLAIM_GAS,
+	PRIVATE_HUB_REGISTER_GAS,
 	deriveBridgeSecret,
 	privateFeeJuicePayment,
 	privateFpcFeeLimit,
@@ -216,5 +217,13 @@ describe("privateFpcFeeLimit", () => {
 		// txsLimits.gas on the v5 testnet: daGas 117_668, l2Gas 6_540_000.
 		expect(PRIVATE_HUB_CLAIM_GAS.l2Gas).toBeLessThanOrEqual(6_540_000 / 2)
 		expect(PRIVATE_HUB_CLAIM_GAS.daGas).toBeLessThanOrEqual(117_668)
+	})
+
+	it("a fuel-paying registration declares limits above the claim's and within the per-tx maximum", () => {
+		// The registration publishes a Token instance and binds it in public on top of the FPC's
+		// setup, so it is the heavier of the two; it still has to fit one transaction.
+		expect(PRIVATE_HUB_REGISTER_GAS.l2Gas).toBeGreaterThan(PRIVATE_HUB_CLAIM_GAS.l2Gas)
+		expect(PRIVATE_HUB_REGISTER_GAS.l2Gas).toBeLessThanOrEqual(6_540_000)
+		expect(PRIVATE_HUB_REGISTER_GAS.daGas).toBeLessThanOrEqual(117_668)
 	})
 })

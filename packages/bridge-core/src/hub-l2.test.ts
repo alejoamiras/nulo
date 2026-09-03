@@ -38,24 +38,37 @@ interface FakeHubOpts {
 	/** A successful registration makes the hub know the token (as the real hub does). */
 	registerBinds?: boolean
 	paused?: boolean | string
+	/** How many claim simulations fail before the claimer's view catches up with the node; traced in `calls`. */
+	claimSimulateFailures?: number
 }
 
 function fakeHub(opts: FakeHubOpts) {
 	const calls: string[] = []
 	const sentWith: Array<[string, Record<string, unknown>]> = []
 	let registered = opts.registered
+	let claimFailuresLeft = opts.claimSimulateFailures ?? 0
 	const views = (): Record<string, unknown> => ({
 		token_for: registered ? (opts.boundTo ?? token.l2Token) : `0x${"0".repeat(64)}`,
 		exits_paused: opts.paused ?? false,
 	})
+	// The claimer's view catching up with the node: the first N claim simulations fail as an
+	// uninitialized binding read would, the ones after pass.
+	const simulateClaim = (name: string): void => {
+		calls.push(`simulate:${name}`)
+		if (claimFailuresLeft <= 0) return
+		claimFailuresLeft--
+		throw new Error("Assertion failed: PublicImmutable not initialized")
+	}
+	const simulateOf = async (name: string): Promise<unknown> => {
+		const v = views()
+		if (name in v) return { result: v[name] }
+		if (name.startsWith("exit_")) calls.push(`simulate:${name}`)
+		if (name.startsWith("claim_") && opts.claimSimulateFailures !== undefined) simulateClaim(name)
+		return {}
+	}
 	const method = (name: string) => {
 		return (..._args: unknown[]) => ({
-			simulate: async () => {
-				const v = views()
-				if (name in v) return { result: v[name] }
-				if (name.startsWith("exit_")) calls.push(`simulate:${name}`)
-				return {}
-			},
+			simulate: () => simulateOf(name),
 			send: async (o?: Record<string, unknown>) => {
 				calls.push(name)
 				sentWith.push([name, o ?? {}])
@@ -123,10 +136,97 @@ describe("hub L2 claims", () => {
 		expect(known.sentWith).toEqual([["claim_private", { from: USER, fee: "fuel" }]])
 		// A simulation of the claim uses the same stripped options — the wallet's option parser
 		// spreads unknown keys straight through.
-		expect(claimSendOpts({ from: USER, fee: "fuel", registerFee: "sponsor", onClaimSend: () => {} })).toEqual({
+		expect(
+			claimSendOpts({
+				from: USER,
+				fee: "fuel",
+				registerFee: "sponsor",
+				registeredClaimFee: "credit",
+				onRegisterSend: () => {},
+				onRegistered: () => {},
+				onClaimSend: () => {},
+				registrationWait: { intervalMs: 1 },
+			}),
+		).toEqual({ from: USER, fee: "fuel" })
+	})
+
+	it("when the registration itself spends the fuel, the claim that follows it pays with `registeredClaimFee`; a lost race keeps the plain fee", async () => {
+		// The registration consumed the bridged Fee Juice and left the remainder as credit at the
+		// FPC — the claim draws on that credit, never on the message a second time.
+		const own = fakeHub({ registered: false })
+		await claimViaHub(own.hub, params(true), { from: USER, fee: "fuel", registerFee: "fuel", registeredClaimFee: "credit" })
+		expect(own.sentWith).toEqual([
+			["register_token", { from: USER, fee: "fuel" }],
+			["claim_private", { from: USER, fee: "credit" }],
+		])
+		// Someone else registered first: this call spent nothing, so the claim is the plain claim
+		// with the plain fee — the fuel message is still the claim's to consume.
+		const raced = fakeHub({ registered: false, failRegister: "No non-nullified L1 to L2 message found for message hash 0xabc" })
+		await claimViaHub(raced.hub, params(true), { from: USER, fee: "fuel", registerFee: "fuel", registeredClaimFee: "credit" })
+		expect(raced.sentWith.map(([name, o]) => [name, o.fee])).toEqual([
+			["register_token", "fuel"],
+			["claim_private", "fuel"],
+		])
+		// A registered token never sees either seam.
+		const known = fakeHub({ registered: true })
+		await claimViaHub(known.hub, params(true), { from: USER, fee: "fuel", registerFee: "fuel", registeredClaimFee: "credit" })
+		expect(known.sentWith).toEqual([["claim_private", { from: USER, fee: "fuel" }]])
+	})
+
+	it("a private first claim reports its registration the moment it exists, then waits for the claim to simulate in the claimer's view before sending it", async () => {
+		// The registration is proposed on the node, but the claim reads the binding at the wallet's
+		// synced block, which lags — the claim is sent only once its own simulation passes.
+		const slept: number[] = []
+		const order: string[] = []
+		const h = fakeHub({ registered: false, registerBinds: true, claimSimulateFailures: 2 })
+		const outcome = await claimViaHub(h.hub, params(true), {
 			from: USER,
 			fee: "fuel",
+			onRegisterSend: () => order.push("onRegisterSend"),
+			onRegistered: (hash) => order.push(`onRegistered:${hash}`),
+			onClaimSend: () => order.push("onClaimSend"),
+			registrationWait: { intervalMs: 7, deadlineMs: 1_000, sleep: async (ms) => void slept.push(ms) },
 		})
+		expect(outcome).toEqual({ path: "register,claim", registerTxHash: "0xregister_token", claimTxHash: "0xclaim_private" })
+		expect(h.calls).toEqual([
+			"register_token",
+			"simulate:claim_private",
+			"simulate:claim_private",
+			"simulate:claim_private",
+			"claim_private",
+		])
+		expect(order).toEqual(["onRegisterSend", "onRegistered:0xregister_token", "onClaimSend"])
+		expect(slept).toEqual([7, 7])
+		// The wait uses the claim's own options, seams stripped — what the send will use.
+		expect(h.sentWith.every(([, o]) => !("registrationWait" in o) && !("onRegistered" in o))).toBe(true)
+
+		// A lost race sent no registration: nothing to report, nothing to wait for.
+		const raced = fakeHub({
+			registered: false,
+			failRegister: "No non-nullified L1 to L2 message found for message hash 0xabc",
+			claimSimulateFailures: 0,
+		})
+		order.length = 0
+		await claimViaHub(raced.hub, params(true), {
+			from: USER,
+			onRegisterSend: () => order.push("onRegisterSend"),
+			onRegistered: () => order.push("onRegistered"),
+			onClaimSend: () => order.push("onClaimSend"),
+		})
+		expect(order).toEqual(["onRegisterSend", "onClaimSend"])
+		expect(raced.calls).toEqual(["register_token", "claim_private"])
+
+		// Past the deadline the claim is NOT sent: the failure names the registration so a retry
+		// claims plainly against the now-bound hub.
+		const stuck = fakeHub({ registered: false, registerBinds: true, claimSimulateFailures: Number.POSITIVE_INFINITY })
+		await expect(
+			claimViaHub(stuck.hub, params(true), {
+				from: USER,
+				registrationWait: { intervalMs: 10, deadlineMs: 35, sleep: async () => {} },
+			}),
+		).rejects.toThrow(/registration 0xregister_token landed but the claim is not yet visible.*not initialized/)
+		expect(stuck.calls.filter((c) => c === "claim_private")).toEqual([])
+		expect(stuck.calls.filter((c) => c === "simulate:claim_private").length).toBeGreaterThanOrEqual(2)
 	})
 
 	it("`onClaimSend` fires once, right before the claim's own transaction, after any registration", async () => {

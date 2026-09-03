@@ -6,7 +6,6 @@
 
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Contract } from "@aztec/aztec.js/contracts"
-import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { TxHash, TxStatus } from "@aztec/aztec.js/tx"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
@@ -20,6 +19,7 @@ import {
 	ERC20_ABI,
 	PRIVATE_FPC_ADDRESS,
 	PRIVATE_HUB_CLAIM_GAS,
+	PRIVATE_HUB_REGISTER_GAS,
 	awaitL1Receipt,
 	deriveBridgeSecret,
 	ensurePermit2Allowance,
@@ -28,6 +28,7 @@ import {
 	isSendRecord,
 	markSealTrusted,
 	predictedWorstMinFees,
+	privateFeeJuicePayment,
 	privateFpcFeeLimit,
 	privateMintAndPayFee,
 	publicFeeJuicePayment,
@@ -46,9 +47,17 @@ import {
 	decidePrivateFuelClaim,
 	isPrivateFuelInsufficiency,
 } from "@/lib/fuel-claim-state"
-import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import { isWellFormedTxHash } from "@/lib/claim-receipt"
-import { cacheSecret, currentRecord, isMsgConsumed, markApproveOutcome, runOnLane, setRecordStep, updateRecord } from "./useBridgeJournal"
+import {
+	cacheSecret,
+	currentRecord,
+	isMsgConsumed,
+	isMsgNotReady,
+	markApproveOutcome,
+	runOnLane,
+	setRecordStep,
+	updateRecord,
+} from "./useBridgeJournal"
 import { buildFuelClaimInteraction } from "./fuelClaim"
 import { readBalance } from "./useTokenBalance"
 
@@ -110,7 +119,7 @@ export function patchFuel(
 	id: string,
 	captured: FuelBlock | undefined,
 	patch: Partial<FuelBlock>,
-	topLevel: Partial<DepositJournalRecord> = {},
+	topLevel: Partial<DepositJournalRecord & Pick<SendDepositRecord, "registerTxHash">> = {},
 ): void {
 	const base = (currentRecord(id) as { fuel?: FuelBlock } | undefined)?.fuel ?? captured
 	if (!base) return
@@ -146,31 +155,31 @@ export async function waitForFuelInclusion(txHash: string, tries = 40): Promise<
 	return "pending"
 }
 
-/** Claim a fueled deposit's Fee Juice as a standalone, sponsored tx, INCLUSION-GATED. The FJ
- *  message is recipient-bound, so this is safe whenever fuel isn't known-consumed; an
- *  already-consumed message reverts but still reads INCLUDED (its nullifier exists), which settles
- *  it just the same. `standaloneClaimed` latches ONLY after inclusion - a dropped/timed-out tx
- *  leaves it unset so the card re-offers the action (closes the PROPOSED-latch false-negative). */
+/** Claim a fueled deposit's Fee Juice as a standalone SELF-PAID tx (the claim pays its own fee from
+ *  the Fee Juice it lands — no sponsor, on any network), INCLUSION-GATED. The FJ message is
+ *  recipient-bound, so this is safe whenever fuel isn't known-consumed; an already-consumed message
+ *  reverts but still reads INCLUDED (its nullifier exists), which settles it just the same.
+ *  `standaloneClaimed` latches ONLY after inclusion - a dropped/timed-out tx leaves it unset so the
+ *  card re-offers the action (closes the PROPOSED-latch false-negative). Under a fee spike the
+ *  bridged amount cannot cover its own claim and the builder refuses: the Fee Juice stays claimable
+ *  on Ethereum's side until fees ease, and the card keeps offering it. */
 export async function sendStandaloneFjClaim(
 	aztec: unknown,
 	recipientAddr: AztecAddress,
 	fuel: NonNullable<DepositJournalRecord["fuel"]>,
 	id: string,
 ): Promise<void> {
-	const fpc = await getSponsoredFpcInstance()
-	const sponsored = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
-	const { FeeJuiceContractArtifact } = await import("@aztec/noir-contracts.js/FeeJuice")
-	const fj = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
+	const claimMaxFees = await predictedWorstMinFees(createAztecNodeClient(NODE_URL))
+	const claim = await buildFuelClaimInteraction({ fuel, isPrivate: false } as DepositJournalRecord, {
+		aztec,
+		recipient: recipientAddr,
+		minFloorFj: FUEL_MIN_FJ,
+		maxFeesPerGas: { feePerDaGas: claimMaxFees.feePerDaGas, feePerL2Gas: claimMaxFees.feePerL2Gas },
+		resolvedSecret: fuel.secret,
+	})
 	let receiptTxHash: string
 	try {
-		// Plain `claim`, NOT `claim_and_end_setup`: the sponsored fee payment already ends setup, so
-		// the end-setup variant asserts as an app-phase call (see fuelClaim.ts — same live-caught bug).
-		const { receipt } = (await fj.methods
-			.claim(recipientAddr, BigInt(fuel.received ?? "0"), Fr.fromString(fuel.secret), new Fr(BigInt(fuel.leafIndex ?? "0")))
-			.send({ from: recipientAddr, fee: sponsored, wait: { waitForStatus: TxStatus.PROPOSED } } as never)) as {
-			receipt: { txHash: unknown }
-		}
-		receiptTxHash = String(receipt.txHash)
+		receiptTxHash = (await claim.send()).txHash
 	} catch (e) {
 		// The FJ message is already CONSUMED (nullified) ⇒ the gas is already in the wallet. Self-correct:
 		// settle rather than error, so a false-positive CLAIM YOUR GAS click resolves cleanly. Must be the
@@ -348,12 +357,18 @@ export interface FeeLadderRecord {
 	fuel?: DepositJournalRecord["fuel"]
 }
 
+type FpcFee = { paymentMethod: unknown; gasSettings: unknown }
+
 /** The private-fuel fee, decoupled from the interaction it pays for. "none" = the record is not
- *  on the private-fuel path at all. */
+ *  on the private-fuel path at all. "fee" spends the bridged Fee Juice message: on a first-time
+ *  token (`registers`) the registration goes first and spends it, sized for a registration, and
+ *  `registeredClaimFee` pays the claim that follows from the credit the FPC kept. "credit" is the
+ *  claim of a record whose fuel is already spent — paid from that credit alone. */
 export type PrivateFuelFee =
 	| { kind: "none" }
 	| { kind: "stop"; why: string }
-	| { kind: "fee"; fee: { paymentMethod: unknown; gasSettings: unknown }; fuel: FuelBlock }
+	| { kind: "fee"; fee: FpcFee; fuel: FuelBlock; registers: boolean; registeredClaimFee?: FpcFee }
+	| { kind: "credit"; fee: FpcFee }
 
 /**
  * The salt the private claim is rebuilt from. The envelope's copy is AUTHENTICATED (AES-GCM), the
@@ -379,6 +394,9 @@ export async function resolvePrivateFuelFee(
 	rec: FeeLadderRecord,
 	recipientAddr: AztecAddress,
 	sealedSalt?: string,
+	/** `registers`: this claim registers the token first, so the registration is the transaction
+	 *  that spends the fuel. `aztec`: the wallet, for a claim paid from an already-spent fuel's credit. */
+	ctx: { registers?: boolean; aztec?: unknown } = {},
 ): Promise<PrivateFuelFee> {
 	const fuel = reconcileFuelSalt(rec, sealedSalt)
 	const incomplete = privateIncompleteReason(rec, fuel)
@@ -404,18 +422,47 @@ export async function resolvePrivateFuelFee(
 		attemptAgedOut: fb.claimAttemptAt === undefined || Date.now() - fb.claimAttemptAt > PRIVATE_ATTEMPT_STALE_MS,
 	})
 	log("private fuel claim decision", { id: rec.id, action: decision.action })
-	if (decision.action !== "private-fpc") {
-		// consumed (FJ burned at the FPC; token-reclaim via the FPC pay_fee is a follow-up) or wait —
-		// never re-mint (a second claim double-spends the FJ message), never public.
+	// Spent fuel is never re-minted (a second claim double-spends the FJ message) and never goes
+	// public: the claim it was meant to pay for draws on the credit the FPC kept for this account.
+	if (decision.action === "consumed") return privateCreditFee(fb, recipientAddr, ctx.aztec)
+	if (decision.action !== "private-fpc")
+		return { kind: "stop", why: "private fuel claim pending - waiting for its receipt before retrying" }
+	return privateFpcFee(fb, fuelReceived, salt, recipientAddr, ctx.registers === true)
+}
+
+/** The FPC's explicit gas settings: limits sized to the transaction, teardown zero (it keeps
+ *  `max_gas_cost` within the bridged amount), fees pinned to the predicted worst case. */
+function fpcGasSettings(gas: { daGas: number; l2Gas: number }, maxFees: { feePerDaGas: bigint; feePerL2Gas: bigint }) {
+	return {
+		gasLimits: Gas.from(gas),
+		teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
+		maxFeesPerGas: { feePerDaGas: maxFees.feePerDaGas, feePerL2Gas: maxFees.feePerL2Gas },
+	}
+}
+
+/** A claim paid from the private Fee Juice this account already holds at the FPC (`pay_fee`). */
+function fpcCreditFee(fpcAddr: AztecAddress, maxFees: { feePerDaGas: bigint; feePerL2Gas: bigint }): FpcFee {
+	return { paymentMethod: privateFeeJuicePayment(fpcAddr), gasSettings: fpcGasSettings(PRIVATE_HUB_CLAIM_GAS, maxFees) }
+}
+
+/** The claim of a record whose fuel is already spent (the registration ahead of it, or a prior
+ *  attempt): the FPC holds the remainder as this account's private credit, and `pay_fee` deducts
+ *  the claim's committed ceiling from it — refused here when the credit cannot cover that. */
+async function privateCreditFee(fb: FuelBlock, recipientAddr: AztecAddress, aztec: unknown): Promise<PrivateFuelFee> {
+	if (aztec === undefined) return { kind: "stop", why: "Connect your Aztec wallet to pay this claim from your private gas." }
+	const fpcAddr = AztecAddress.fromStringUnsafe(fb.fpc ?? PRIVATE_FPC_ADDRESS)
+	const [credit, maxFees] = await Promise.all([
+		readFeeJuiceOrNull("private FJ", () => readPrivateFeeJuiceBalance(aztec, recipientAddr)),
+		predictedWorstMinFees(createAztecNodeClient(NODE_URL)),
+	])
+	if (credit === null) return { kind: "stop", why: "Couldn't check your private gas at the fee contract - please try again in a moment." }
+	if (credit < privateFpcFeeLimit(PRIVATE_HUB_CLAIM_GAS, maxFees)) {
 		return {
 			kind: "stop",
-			why:
-				decision.action === "consumed"
-					? "private fuel already consumed - not re-minting (recover via the FPC balance)"
-					: "private fuel claim pending - waiting for its receipt before retrying",
+			why: "Your private gas is under this claim's fee ceiling at current network fees - retry when fees ease, or bridge more gas.",
 		}
 	}
-	return privateFpcFee(fb, fuelReceived, salt, recipientAddr)
+	return { kind: "credit", fee: fpcCreditFee(fpcAddr, maxFees) }
 }
 
 /**
@@ -431,31 +478,41 @@ export async function resolvePrivateFuelFee(
  * window. A rare cap that still falls under the live fee fails recoverably — each journal-driven
  * retry rebuilds this (re-prices). Same policy as the direct Fee Juice lane (fuelClaim.ts).
  */
-async function privateFpcFee(fb: FuelBlock, fuelReceived: bigint, salt: Fr, recipientAddr: AztecAddress): Promise<PrivateFuelFee> {
+async function privateFpcFee(
+	fb: FuelBlock,
+	fuelReceived: bigint,
+	salt: Fr,
+	recipientAddr: AztecAddress,
+	registers: boolean,
+): Promise<PrivateFuelFee> {
 	const fpcAddr = AztecAddress.fromStringUnsafe(fb.fpc ?? PRIVATE_FPC_ADDRESS)
 	const fuelLeaf = new Fr(BigInt(fb.leafIndex as string))
-	const claimMaxFees = await predictedWorstMinFees(createAztecNodeClient(NODE_URL))
-	// The FPC asserts the bridged amount covers the COMMITTED ceiling (limits × capped fees), so a
-	// short amount is refused here rather than reverted there; fees are re-priced on every retry.
-	if (fuelReceived < privateFpcFeeLimit(PRIVATE_HUB_CLAIM_GAS, claimMaxFees)) {
+	const maxFees = await predictedWorstMinFees(createAztecNodeClient(NODE_URL))
+	// The FPC asserts the bridged amount covers the COMMITTED ceiling (limits × capped fees) of the
+	// transaction that spends it, and credits only the remainder: when a registration spends it,
+	// that remainder must still cover the claim's own ceiling. A short amount is refused here rather
+	// than reverted there; fees are re-priced on every retry.
+	const spentBy = registers ? PRIVATE_HUB_REGISTER_GAS : PRIVATE_HUB_CLAIM_GAS
+	const ceiling = privateFpcFeeLimit(spentBy, maxFees) + (registers ? privateFpcFeeLimit(PRIVATE_HUB_CLAIM_GAS, maxFees) : 0n)
+	if (fuelReceived < ceiling) {
 		return {
 			kind: "stop",
-			why: "The bridged gas is under the private claim's fee ceiling at current network fees - retry when fees ease.",
+			why: registers
+				? "The bridged gas is under the fee ceiling of registering the token and claiming it privately at current network fees - retry when fees ease."
+				: "The bridged gas is under the private claim's fee ceiling at current network fees - retry when fees ease.",
 		}
 	}
 	return {
 		kind: "fee",
 		fuel: fb,
+		registers,
 		fee: {
 			paymentMethod: privateMintAndPayFee(fpcAddr, fuelReceived, deriveBridgeSecret(salt, recipientAddr), salt, fuelLeaf),
-			gasSettings: {
-				// Explicit limits: a wallet given none declares the network's per-tx maximum, and the
-				// FPC's ceiling is limits × fees — the maximum makes it unpayable by any realistic slice.
-				gasLimits: Gas.from(PRIVATE_HUB_CLAIM_GAS),
-				teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
-				maxFeesPerGas: { feePerDaGas: claimMaxFees.feePerDaGas, feePerL2Gas: claimMaxFees.feePerL2Gas },
-			},
+			// Explicit limits: a wallet given none declares the network's per-tx maximum, and the
+			// FPC's ceiling is limits × fees — the maximum makes it unpayable by any realistic slice.
+			gasSettings: fpcGasSettings(spentBy, maxFees),
 		},
+		...(registers ? { registeredClaimFee: fpcCreditFee(fpcAddr, maxFees) } : {}),
 	}
 }
 
@@ -491,8 +548,10 @@ export type PublicClaimFee =
 	| { kind: "stop"; why: string; sendWhy?: string }
 	| { kind: "no-fuel" }
 	| { kind: "fjwc"; fee: { paymentMethod: unknown } }
-	| { kind: "sponsored" }
-	| { kind: "sponsored-standalone" }
+	/** The bridged Fee Juice cannot pay this claim (spent, or set aside by the user): the wallet's own gas does. */
+	| { kind: "own-gas" }
+	/** A fee spike: the wallet's own gas pays the claim and the bridged Fee Juice is claimed on its own. */
+	| { kind: "own-gas-standalone" }
 
 /** The NO-fuel gate: the bridge claim has no fresh FJ message to consume, so it self-pays from gas
  *  the account ALREADY holds. The faucet does NOT pre-select a method - it omits the fee and lets
@@ -557,7 +616,7 @@ export async function resolvePublicClaimFee(
 			},
 		}
 	}
-	if (decision.action === "sponsored-plus-standalone-fj") return { kind: "sponsored-standalone" }
+	if (decision.action === "own-gas-plus-standalone-fj") return { kind: "own-gas-standalone" }
 	if (decision.action === "wait") {
 		// The historical wait stop threw a SHORTER message from send than from simulate — preserved.
 		return {
@@ -566,8 +625,8 @@ export async function resolvePublicClaimFee(
 			sendWhy: "fuel claim attempt pending",
 		}
 	}
-	// "sponsored" (user override, or a consumed prior attempt): the plain sponsored default, no flags.
-	return { kind: "sponsored" }
+	// "own-gas" (user override, or a consumed prior attempt): the wallet's own gas, no flags.
+	return { kind: "own-gas" }
 }
 
 /** The journal-side effects a chosen fee owes, run around the wallet call the caller makes. The
@@ -578,8 +637,13 @@ export interface HubClaimLatches {
 	/** A setup-insufficiency throw means the tx was INVALID and the Fee Juice is unconsumed — the
 	 *  one signal that authorises a retry of a private claim. */
 	onFailure?: (e: unknown) => void
-	/** Present when the ladder chose sponsored + a separate Fee Juice claim: the caller fires that
-	 *  best-effort claim after the hub claim is away. */
+	/** The fuel rides on the token's registration rather than on the claim: the attempt and its hash
+	 *  latch against THAT transaction, and `onRegistered` journals the registration's hash as the
+	 *  fuel's in one write. A registration someone else won leaves the fuel on the claim after all. */
+	fuelOnRegister?: boolean
+	onRegistered?: (registerTxHash: string) => void
+	/** Present when the ladder left the bridged Fee Juice for a claim of its own: the caller fires
+	 *  that best-effort self-paid claim after the hub claim is away. */
 	standalone?: FuelBlock
 }
 
@@ -595,37 +659,52 @@ const fjwcLatches = (id: string, fuel?: DepositJournalRecord["fuel"]): HubClaimL
 			}
 		: {}
 
-const privateLatches = (id: string, fuel: FuelBlock): HubClaimLatches => ({
-	onAttempt: () => patchFuel(id, fuel, { claimAttempt: true, claimAttemptAt: Date.now(), setupInsufficiency: false }),
-	onTxHash: (txHash: string) =>
-		patchFuel(id, fuel, { claimAttempt: true, claimAttemptAt: Date.now(), claimTxHash: txHash, setupInsufficiency: false }),
-	onFailure: (e: unknown) => {
-		// Any OTHER throw leaves setupInsufficiency unset ⇒ the next decision WAITS (fail-closed).
-		if (isPrivateFuelInsufficiency(e instanceof Error ? e.message : String(e))) {
-			patchFuel(id, fuel, { claimAttempt: true, claimAttemptAt: Date.now(), setupInsufficiency: true })
-		}
-	},
-})
-
-async function sponsoredHubOpts(base: SendOpts): Promise<SendOpts> {
-	const fpc = await getSponsoredFpcInstance()
-	return { ...base, fee: { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) } }
+const privateLatches = (id: string, fuel: FuelBlock, fuelOnRegister: boolean): HubClaimLatches => {
+	const latchHash = (txHash: string, topLevel: Parameters<typeof patchFuel>[3] = {}) =>
+		patchFuel(id, fuel, { claimAttempt: true, claimAttemptAt: Date.now(), claimTxHash: txHash, setupInsufficiency: false }, topLevel)
+	return {
+		fuelOnRegister,
+		onAttempt: () => patchFuel(id, fuel, { claimAttempt: true, claimAttemptAt: Date.now(), setupInsufficiency: false }),
+		onTxHash: (txHash: string) => latchHash(txHash),
+		...(fuelOnRegister ? { onRegistered: (txHash: string) => latchHash(txHash, { registerTxHash: txHash }) } : {}),
+		onFailure: (e: unknown) => {
+			// The FPC's insufficiency assert and a message the wallet cannot consume yet both refuse
+			// the transaction before it exists, so the fuel is provably unspent and a retry is safe.
+			// Any OTHER throw leaves setupInsufficiency unset ⇒ the next decision WAITS (fail-closed).
+			const msg = e instanceof Error ? e.message : String(e)
+			if (isPrivateFuelInsufficiency(msg) || isMsgNotReady(msg)) {
+				patchFuel(id, fuel, { claimAttempt: true, claimAttemptAt: Date.now(), setupInsufficiency: true })
+			}
+		},
+	}
 }
 
-async function publicHubFee(rec: FeeLadderRecord, base: SendOpts, resolved: PublicClaimFee): Promise<HubClaimFee> {
+async function publicHubFee(
+	rec: FeeLadderRecord,
+	base: SendOpts,
+	resolved: PublicClaimFee,
+	recipientAddr: AztecAddress,
+	aztec: unknown,
+): Promise<HubClaimFee> {
 	if (resolved.kind === "stop") return { kind: "stop", why: resolved.why, sendWhy: resolved.sendWhy }
 	// no-fuel omits the fee entirely so the WALLET's own picker chooses the method.
 	if (resolved.kind === "no-fuel") return { kind: "opts", opts: base }
 	if (resolved.kind === "fjwc") return { kind: "opts", opts: { ...base, fee: resolved.fee }, ...fjwcLatches(rec.id, rec.fuel) }
-	const opts = await sponsoredHubOpts(base)
-	return resolved.kind === "sponsored-standalone" ? { kind: "opts", opts, standalone: rec.fuel } : { kind: "opts", opts }
+	// The bridged Fee Juice cannot pay this claim (a fee spike, a spent prior attempt, or the user's
+	// choice to claim without it): the claim pays from gas the account already holds — the same
+	// self-pay a no-fuel claim makes, so the same gate decides whether there is any — and Fee Juice
+	// still unclaimed is landed by a transaction of its own once fees allow.
+	const own = await gateNoFuelClaim(rec, recipientAddr, aztec)
+	if (own.kind === "stop") return { kind: "stop", why: own.why }
+	return resolved.kind === "own-gas-standalone" ? { kind: "opts", opts: base, standalone: rec.fuel } : { kind: "opts", opts: base }
 }
 
 /**
  * The send options a hub claim carries: the same evidence-driven fee ladder the token-bridge
- * claim uses, resolved without building that claim's interaction. The three modes it can pick are
- * the three the hub is exercised under — sponsored, the bridged Fee Juice paying for its own
- * claim, and the PrivateFPC paying as a third party.
+ * claim uses, resolved without building that claim's interaction. Every mode pays from Fee Juice
+ * the user bridged or already holds — the bridged Fee Juice paying for its own claim, the
+ * PrivateFPC paying as a third party from a fresh claim or from the credit it kept, or the
+ * wallet's own gas. Nothing is ever sponsored, on any network.
  */
 export async function resolveHubClaimSendOpts(ctx: {
 	rec: FeeLadderRecord
@@ -634,18 +713,22 @@ export async function resolveHubClaimSendOpts(ctx: {
 	userOverride: boolean
 	/** The gas salt from this record's unsealed envelope, when the claim opened one. */
 	sealedSalt?: string
+	/** This claim registers the token first (the hub does not know it yet). */
+	registers?: boolean
 }): Promise<HubClaimFee> {
 	const { rec, recipientAddr, aztec, userOverride } = ctx
 	const base: SendOpts = { from: recipientAddr, wait: { waitForStatus: TxStatus.PROPOSED } }
-	const priv = await resolvePrivateFuelFee(rec, recipientAddr, ctx.sealedSalt)
+	const priv = await resolvePrivateFuelFee(rec, recipientAddr, ctx.sealedSalt, { registers: ctx.registers === true, aztec })
 	if (priv.kind === "stop") return { kind: "stop", why: priv.why }
+	if (priv.kind === "credit") return { kind: "opts", opts: { ...base, fee: priv.fee } }
 	if (priv.kind === "fee") {
-		// The fuel fee consumes the bridged Fee Juice message, which only one transaction can do: a
-		// first-time token's own `register_token` ahead of the claim is paid by the sponsor instead.
-		const { fee: registerFee } = await sponsoredHubOpts(base)
-		return { kind: "opts", opts: { ...base, fee: priv.fee, registerFee }, ...privateLatches(rec.id, priv.fuel) }
+		// The fuel fee consumes the bridged Fee Juice message, which only one transaction can do: on
+		// a first-time token the registration goes first and spends it, and the claim that follows
+		// draws on the credit the FPC kept; on a registered token the claim spends it directly.
+		const seams = priv.registers ? { registerFee: priv.fee, registeredClaimFee: priv.registeredClaimFee } : {}
+		return { kind: "opts", opts: { ...base, fee: priv.fee, ...seams }, ...privateLatches(rec.id, priv.fuel, priv.registers) }
 	}
-	return publicHubFee(rec, base, await resolvePublicClaimFee(rec, recipientAddr, aztec, userOverride))
+	return publicHubFee(rec, base, await resolvePublicClaimFee(rec, recipientAddr, aztec, userOverride), recipientAddr, aztec)
 }
 
 // ── the L1 legs a send performs before its claim ─────────────────────────────

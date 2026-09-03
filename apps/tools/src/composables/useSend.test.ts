@@ -696,7 +696,7 @@ describe("useSend", () => {
 		expect(useBridgeJournal().records.value).toHaveLength(0)
 	})
 
-	it("a sponsored hub claim that leaves the bridged gas behind fires the standalone Fee Juice claim", async () => {
+	it("a hub claim paid from the wallet's own gas that leaves the bridged gas behind fires the standalone Fee Juice claim", async () => {
 		h.readRegistration.mockImplementation(async () => frozenRegistration)
 		h.rebuiltL2Token.value = token.l2Token
 		h.resolveHubClaimSendOpts.mockImplementation(async () => ({

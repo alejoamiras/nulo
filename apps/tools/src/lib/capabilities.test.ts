@@ -110,7 +110,6 @@ function expectedSendScopes(tokens: AztecAddress[]) {
 			`${hub}::exit_to_l1_public`,
 			`${hub}::exit_to_l1_private`,
 			...t.flatMap((a) => [`${a}::burn_public`, `${a}::burn_private`]),
-			`${SPONSORED_FPC.toString()}::sponsor_unconditionally`,
 			`${AUTH_REGISTRY}::set_authorized`,
 			`${feeJuiceAddress}::claim_and_end_setup`,
 			`${feeJuiceAddress}::claim`,
@@ -130,14 +129,13 @@ function expectedSendScopes(tokens: AztecAddress[]) {
 			`${hub}::exit_to_l1_public`,
 			`${hub}::exit_to_l1_private`,
 			...t.flatMap((a) => [`${a}::burn_public`, `${a}::burn_private`]),
-			`${SPONSORED_FPC.toString()}::sponsor_unconditionally`,
 			`${AUTH_REGISTRY}::set_authorized`,
 		],
 	}
 }
 
 describe("buildSendManifest", () => {
-	const m = buildSendManifest({ hub: HUB, tokens: [TOKEN_A], sponsoredFpcAddress: SPONSORED_FPC, appUrl: "https://send.test" })
+	const m = buildSendManifest({ hub: HUB, tokens: [TOKEN_A], appUrl: "https://send.test" })
 
 	it("metadata identifies the bridge dApp", () => {
 		expect(m.metadata.name).toBe("nulo-bridge")
@@ -153,7 +151,7 @@ describe("buildSendManifest", () => {
 	})
 
 	it("emits per-token burns and balance reads for EVERY granted token", () => {
-		const two = buildSendManifest({ hub: HUB, tokens: [TOKEN_A, TOKEN_B], sponsoredFpcAddress: SPONSORED_FPC })
+		const two = buildSendManifest({ hub: HUB, tokens: [TOKEN_A, TOKEN_B] })
 		expect(scopes(two)).toEqual(expectedSendScopes([TOKEN_A, TOKEN_B]))
 	})
 
@@ -178,7 +176,7 @@ describe("buildSendManifest", () => {
 	})
 
 	describe("placeholder network (no hub)", () => {
-		const p = buildSendManifest({ tokens: [TOKEN_A, TOKEN_B], sponsoredFpcAddress: SPONSORED_FPC })
+		const p = buildSendManifest({ tokens: [TOKEN_A, TOKEN_B] })
 
 		it("emits no hub scopes and no token scopes at all", () => {
 			const s = scopes(p)
@@ -197,7 +195,6 @@ describe("buildSendManifest", () => {
 				`${feeJuiceAddress}::claim`,
 				`${PRIVATE_FPC_ADDRESS}::mint_and_pay_fee`,
 				`${PRIVATE_FPC_ADDRESS}::pay_fee`,
-				`${SPONSORED_FPC.toString()}::sponsor_unconditionally`,
 				`${AUTH_REGISTRY}::set_authorized`,
 			])
 		})
@@ -265,7 +262,7 @@ describe("buildCombinedManifest", () => {
 })
 
 describe("fuel claim scope (canonical FeeJuice)", () => {
-	const sendInput = { hub: HUB, tokens: [TOKEN_A], sponsoredFpcAddress: SPONSORED_FPC }
+	const sendInput = { hub: HUB, tokens: [TOKEN_A] }
 	const combinedInput = {
 		dripperAddress: DRIPPER,
 		usdcAddress: USDC,

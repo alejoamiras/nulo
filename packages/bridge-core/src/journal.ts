@@ -104,9 +104,10 @@ export interface DepositFuelBlock {
 	/** PRIVATE fuel only — the PrivateFPC L2 address the FJ was deposited to (`fuelRecipient`).
 	 *  Persisted for post-hoc address-drift detection and to rebuild the claim. */
 	fpc?: string
-	/** PRIVATE fuel only — set when the last claim send threw the `mint_and_pay_fee` insufficiency assert
-	 *  (the tx is INVALID pre-inclusion, so the FJ stays unconsumed). The ONE signal that authorises a
-	 *  retry of the private claim without a tx hash (the narrow allow-list); cleared once a hash lands. */
+	/** PRIVATE fuel only — set when the last send was refused before any transaction existed: the
+	 *  `mint_and_pay_fee` insufficiency assert, or a Fee Juice message the wallet could not consume yet
+	 *  (both INVALID pre-inclusion, so the FJ stays unconsumed). The ONE signal that authorises a retry
+	 *  of the private claim without a tx hash (the narrow allow-list); cleared once a hash lands. */
 	setupInsufficiency?: boolean
 }
 

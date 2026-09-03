@@ -62,6 +62,16 @@ export const PRIVATE_FPC_SALT = "0x000000000000000000000000000000000000000000000
  */
 export const PRIVATE_HUB_CLAIM_GAS = { daGas: 100_000, l2Gas: 2_000_000 } as const
 
+/**
+ * Gas LIMITS for the hub's `register_token` when it is the transaction that spends the bridged Fee
+ * Juice (the FPC's `FeeJuice.claim` + `mint_and_pay_fee` ride in its setup). A registration publishes
+ * the derived Token instance and binds it in public, so it is the heavier of a first private claim's
+ * two transactions. The same no-refund rule applies: the ceiling is forfeited, not the charge.
+ * Provisional until a landed registration is measured; the sum with {@link PRIVATE_HUB_CLAIM_GAS}
+ * is what a first-time private fueled bridge must carry.
+ */
+export const PRIVATE_HUB_REGISTER_GAS = { daGas: 100_000, l2Gas: 4_500_000 } as const
+
 /** The PrivateFPC's committed ceiling for a claim — `getFeeLimit` = Σ gasLimit[d]·maxFee[d]. */
 export const privateFpcFeeLimit = (gas: { daGas: number; l2Gas: number }, maxFees: { feePerDaGas: bigint; feePerL2Gas: bigint }): bigint =>
 	BigInt(gas.l2Gas) * maxFees.feePerL2Gas + BigInt(gas.daGas) * maxFees.feePerDaGas

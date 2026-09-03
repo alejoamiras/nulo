@@ -129,14 +129,18 @@ export async function buildFuelClaimInteraction(rec: DepositJournalRecord, deps:
  *  spuriously fail the self-pay budget check (codex round 3). Mirrors BatchCall.simulate's own
  *  non-empty-batch path: [request payload, toSimulateOptions(interaction options)]. */
 function makePayloadSimulator(deps: FuelClaimDeps): PayloadSimulator {
-	const { aztec, recipient } = deps
-	return async (fee) => {
-		const payload = await new BatchCall(aztec as never, []).request({ fee: { paymentMethod: fee.paymentMethod } } as never)
-		return await (aztec as { simulateTx: (p: unknown, o: unknown) => Promise<unknown> }).simulateTx(
-			payload,
-			toSimulateOptions({ from: recipient, fee } as never),
-		)
-	}
+	return (fee) => simulateFeePayload(deps.aztec, deps.recipient, fee)
+}
+
+/** Simulate a fee payment's setup on its own — a carrier-less transaction whose whole body is the
+ *  fee's claim — with the fee's explicit gas settings. The one prompt-free probe of whether a bridged
+ *  Fee Juice message can be spent yet by a transaction the wallet cannot dry-run itself. */
+export async function simulateFeePayload(aztec: unknown, recipient: AztecAddress, fee: { paymentMethod: unknown }): Promise<unknown> {
+	const payload = await new BatchCall(aztec as never, []).request({ fee: { paymentMethod: fee.paymentMethod } } as never)
+	return await (aztec as { simulateTx: (p: unknown, o: unknown) => Promise<unknown> }).simulateTx(
+		payload,
+		toSimulateOptions({ from: recipient, fee } as never),
+	)
 }
 
 /** The two budget guards both branches share, in order: the fail-CLOSED floor (the bridged FJ must

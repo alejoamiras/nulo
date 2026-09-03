@@ -18,7 +18,6 @@ const storageBacking = new Map<string, string>()
 
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { computeSecretHash } from "@aztec/aztec.js/crypto"
-import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { GasFees } from "@aztec/stdlib/gas"
 import {
@@ -27,6 +26,7 @@ import {
 	deriveTokenClaimSecret,
 	type SendDepositRecord,
 	PRIVATE_HUB_CLAIM_GAS,
+	PRIVATE_HUB_REGISTER_GAS,
 	SWAP_BRIDGE_ROUTER_ABI,
 } from "@nulo/bridge-core"
 import { encodeAbiParameters, keccak256, toHex } from "viem"
@@ -42,6 +42,8 @@ const h = vi.hoisted(() => {
 		receiptStatus: undefined as string | undefined,
 		/** The PERSISTED record `currentRecord` answers with; undefined = nothing in the journal. */
 		persisted: undefined as unknown,
+		/** The account's private Fee Juice credit at the FPC; undefined = the read fails. */
+		privateFj: undefined as bigint | undefined,
 	}
 })
 
@@ -50,8 +52,17 @@ vi.mock("@/contracts/bridge-generation", () => ({
 	SWAP: undefined,
 }))
 
-vi.mock("@/contracts/sponsored-fpc", () => ({
-	getSponsoredFpcInstance: async () => ({ address: AztecAddress.fromStringUnsafe(`0x${"5".padStart(64, "0")}`) }),
+// The private Fee Juice held at the FPC, as the wallet's utility read answers it; a throw = unreadable.
+vi.mock("./useTokenBalance", () => ({
+	readBalance: async () => {
+		if (h.privateFj === undefined) throw new Error("balance_of failed")
+		return h.privateFj
+	},
+}))
+vi.mock("@nulo/bridge-core/private-fpc-artifact", () => ({ PrivateFPCContractArtifact: {} }))
+vi.mock("@aztec/aztec.js/contracts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@aztec/aztec.js/contracts")>()),
+	Contract: { at: async () => ({}) },
 }))
 
 vi.mock("./useBridgeJournal", async (importOriginal) => {
@@ -92,6 +103,10 @@ vi.mock("@nulo/bridge-core", async (importOriginal) => ({
 	privateMintAndPayFee: (_fpc: unknown, amount: bigint, secret: { toString(): string }, salt: { toString(): string }) => {
 		h.t("privateMintAndPayFee", { amount, secret: secret.toString(), salt: salt.toString() })
 		return { kind: "private-fpc" }
+	},
+	privateFeeJuicePayment: (fpc: { toString(): string }) => {
+		h.t("privateFeeJuicePayment", { fpc: fpc.toString() })
+		return { kind: "fpc-credit" }
 	},
 }))
 
@@ -303,18 +318,76 @@ describe("private fuel fee — the sealed salt is authoritative", () => {
 		expect(h.calls.some(([n]) => n === "privateMintAndPayFee")).toBe(false)
 	})
 
-	test("the hub ladder pays a first-time token's registration from the sponsor, the claim from the fuel", async () => {
-		const resolved = await resolveHubClaimSendOpts({
-			rec: fueled(SEALED_SALT) as never,
+	type Resolved = {
+		kind: string
+		fuelOnRegister?: boolean
+		onRegistered?: (h: string) => void
+		opts: Record<string, { paymentMethod: unknown; gasSettings: { gasLimits: { daGas: number; l2Gas: number } } } | undefined>
+	}
+	const resolve = (rec: SendDepositRecord, registers: boolean) =>
+		resolveHubClaimSendOpts({
+			rec: rec as never,
 			recipientAddr: recipient,
 			aztec: {},
 			userOverride: false,
 			sealedSalt: SEALED_SALT,
-		})
-		expect(resolved.kind).toBe("opts")
-		const opts = (resolved as unknown as { opts: { fee: { paymentMethod: unknown }; registerFee: { paymentMethod: unknown } } }).opts
-		expect(opts.fee.paymentMethod).toEqual({ kind: "private-fpc" })
-		expect(opts.registerFee.paymentMethod).toBeInstanceOf(SponsoredFeePaymentMethod)
+			registers,
+		}) as Promise<Resolved>
+
+	test("on a first-time token the registration spends the fuel, sized for a registration, and the claim after it pays from the FPC credit", async () => {
+		// Mocked fees 10/20 → register ceiling 4.5M·20 + 100k·10 = 91M, claim ceiling 41M: both must fit.
+		const rec = fueled(SEALED_SALT)
+		rec.fuel = { ...(rec.fuel as object), received: "132000000" } as never
+		const resolved = await resolve(rec, true)
+		expect(resolved).toMatchObject({ kind: "opts" })
+		expect(resolved.opts.registerFee?.paymentMethod).toEqual({ kind: "private-fpc" })
+		expect(resolved.opts.registerFee?.gasSettings.gasLimits).toMatchObject(PRIVATE_HUB_REGISTER_GAS)
+		expect(resolved.opts.registeredClaimFee?.paymentMethod).toEqual({ kind: "fpc-credit" })
+		expect(resolved.opts.registeredClaimFee?.gasSettings.gasLimits).toMatchObject(PRIVATE_HUB_CLAIM_GAS)
+		// A registration someone else wins leaves the fuel on the plain claim, which stays the fuel fee.
+		expect(resolved.opts.fee?.paymentMethod).toEqual({ kind: "private-fpc" })
+		expect(resolved.fuelOnRegister).toBe(true)
+		// The registration's hash is the fuel's hash: one write carries both.
+		resolved.onRegistered?.("0xreg")
+		const write = h.calls.findLast(([n]) => n === "updateRecord")?.[1] as {
+			patch: { registerTxHash?: string; fuel: { claimTxHash?: string } }
+		}
+		expect(write.patch.registerTxHash).toBe("0xreg")
+		expect(write.patch.fuel.claimTxHash).toBe("0xreg")
+
+		// An amount that covers one ceiling but not both stops before either transaction.
+		const short = fueled(SEALED_SALT)
+		short.fuel = { ...(short.fuel as object), received: "131999999" } as never
+		const refused = await resolve(short, true)
+		expect(refused.kind).toBe("stop")
+		expect((refused as unknown as { why: string }).why).toMatch(/registering the token and claiming it/)
+	})
+
+	test("on a registered token the claim spends the fuel itself: no registration seams, no credit fee", async () => {
+		const resolved = await resolve(fueled(SEALED_SALT), false)
+		expect(resolved.opts.fee?.paymentMethod).toEqual({ kind: "private-fpc" })
+		expect(resolved.opts.fee?.gasSettings.gasLimits).toMatchObject(PRIVATE_HUB_CLAIM_GAS)
+		expect(resolved.opts.registerFee).toBeUndefined()
+		expect(resolved.opts.registeredClaimFee).toBeUndefined()
+		expect(resolved.fuelOnRegister).toBe(false)
+		expect(resolved.onRegistered).toBeUndefined()
+	})
+
+	test("spent fuel pays the claim from the FPC credit it left — never re-minted, never public — and only when the credit covers the ceiling", async () => {
+		const spent = fueled(SEALED_SALT)
+		spent.fuel = { ...(spent.fuel as object), claimAttempt: true, claimTxHash: `0x${"00".repeat(31)}ab`, consumed: true } as never
+		h.privateFj = 41_000_000n
+		const resolved = await resolve(spent, false)
+		expect(resolved).toMatchObject({ kind: "opts" })
+		expect(resolved.opts.fee?.paymentMethod).toEqual({ kind: "fpc-credit" })
+		expect(h.calls.some(([n]) => n === "privateMintAndPayFee")).toBe(false)
+
+		h.privateFj = 40_999_999n
+		expect((await resolve(spent, false)).kind).toBe("stop")
+		h.privateFj = undefined
+		const unreadable = await resolve(spent, false)
+		expect(unreadable.kind).toBe("stop")
+		expect((unreadable as unknown as { why: string }).why).toMatch(/Couldn't check/)
 	})
 })
 

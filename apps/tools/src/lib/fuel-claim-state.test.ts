@@ -29,7 +29,7 @@ describe("decideFuelClaim (L14 v3 truth table)", () => {
 
 	it("crash window: included attempt ⇒ sponsored (the FJ message is consumed, even app-reverted)", () => {
 		expect(decideFuelClaim({ ...base, attempt: true, txHashKnown: true, receiptStatus: "included" })).toEqual({
-			action: "sponsored",
+			action: "own-gas",
 			offerManual: false,
 		})
 	})
@@ -48,7 +48,7 @@ describe("decideFuelClaim (L14 v3 truth table)", () => {
 
 	it("fee spike: fuel below margin × min fee ⇒ sponsored + standalone FJ claim", () => {
 		expect(decideFuelClaim({ ...base, fuelReceived: 150n, currentMinFee: 100n })).toEqual({
-			action: "sponsored-plus-standalone-fj",
+			action: "own-gas-plus-standalone-fj",
 			offerManual: false,
 		})
 	})
@@ -63,7 +63,7 @@ describe("decideFuelClaim (L14 v3 truth table)", () => {
 
 	it("user override ⇒ sponsored, regardless of other evidence", () => {
 		expect(decideFuelClaim({ ...base, userOverride: true, attempt: true, txHashKnown: true, receiptStatus: "pending" })).toEqual({
-			action: "sponsored",
+			action: "own-gas",
 			offerManual: false,
 		})
 	})
@@ -85,10 +85,10 @@ describe("decideFuelClaim (L14 v3 truth table)", () => {
 	it("durable consumed=true settles to sponsored when the node is UNREACHABLE (receipt pending)", () => {
 		// The unreachable-node stranding the live-only probe introduced: consumed is the fallback.
 		expect(decideFuelClaim({ ...base, attempt: true, txHashKnown: true, receiptStatus: "pending", consumed: true }).action).toBe(
-			"sponsored",
+			"own-gas",
 		)
 		// And even with no hash (crash mid-prompt) a durable consumed flag settles it.
-		expect(decideFuelClaim({ ...base, attempt: true, consumed: true }).action).toBe("sponsored")
+		expect(decideFuelClaim({ ...base, attempt: true, consumed: true }).action).toBe("own-gas")
 	})
 
 	it("a conclusive dropped receipt OVERRIDES a stale consumed flag (dropped consumed nothing)", () => {
