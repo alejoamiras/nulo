@@ -583,13 +583,21 @@ describe("SendWizard", () => {
 		expect(w.findComponent({ name: "AmountStep" }).props("tokenOnlyBlocked")).toContain("holds no gas")
 	})
 
+	/** Every gas read the wizard starts, in order, each held until the test releases it: the amount
+	 *  step reads on entry (index 0), confirm reads again (index 1), and so on. */
+	function gatedReads(): Array<() => void> {
+		const reads: Array<() => void> = []
+		gasHeldRefresh.mockImplementation(
+			() =>
+				new Promise<void>((resolve) => {
+					reads.push(resolve)
+				}),
+		)
+		return reads
+	}
+
 	it("an account that switches while confirm reads the gas gate stands the review down; nothing signs", async () => {
-		let releaseRead = (): void => {}
-		gasHeldRefresh.mockImplementation(async () => {
-			await new Promise<void>((resolve) => {
-				releaseRead = resolve
-			})
-		})
+		const reads = gatedReads()
 		const w = await wizard()
 		const review = await atReview(w)
 		review.vm.$emit("confirm")
@@ -599,11 +607,43 @@ describe("SendWizard", () => {
 		await flushPromises()
 		// The review was stood down under the read; the read returning must not resurrect it.
 		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
-		releaseRead()
+		reads[1]?.()
 		await flushPromises()
 		expect(sendFn).not.toHaveBeenCalled()
 		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
 		expect(w.find(`[data-testid="${TESTIDS.sendReviewStale}"]`).exists()).toBe(true)
+	})
+
+	it("a review re-entered under another account while the read is pending is never signed by the earlier confirm", async () => {
+		const reads = gatedReads()
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		selectedAccount.value = `0x${"20".repeat(32)}`
+		await flushPromises()
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
+
+		// The same token and amount: the wizard's cached plan is the same object under the new review.
+		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
+		await flushPromises()
+		const again = w.findComponent({ name: "ReviewStep" })
+		expect(again.exists()).toBe(true)
+		expect(again.props("account")).toBe(selectedAccount.value)
+
+		// The first confirm's read returns now: it must sign nothing.
+		reads[1]?.()
+		await flushPromises()
+		expect(sendFn).not.toHaveBeenCalled()
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(true)
+
+		// The new review signs only on its own confirm, after its own read.
+		w.findComponent({ name: "ReviewStep" }).vm.$emit("confirm")
+		await flushPromises()
+		expect(sendFn).not.toHaveBeenCalled()
+		reads.at(-1)?.()
+		await flushPromises()
+		expect(sendFn).toHaveBeenCalledTimes(1)
 	})
 
 	it("a backgrounded send that lands re-resolves the token, standing down a next review priced from it", async () => {

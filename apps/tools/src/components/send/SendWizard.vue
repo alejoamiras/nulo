@@ -524,7 +524,8 @@ watch(journal.records, adoptRunRecord)
  * the review live, so an account or chain that moves under it stands it down as usual; only a
  * review still standing when the read returns goes on to sign.
  */
-async function preflight(target: SendPlan | ExitPlan): Promise<boolean> {
+async function preflight(snapshot: ReviewSnapshot): Promise<boolean> {
+	const target = snapshot.plan
 	if (target.direction !== "l1-to-l2" || target.intent !== "token") return true
 	preflighting.value = true
 	try {
@@ -532,7 +533,11 @@ async function preflight(target: SendPlan | ExitPlan): Promise<boolean> {
 	} finally {
 		preflighting.value = false
 	}
-	if (reviewed.value?.plan !== target || step.value !== 2) return false
+	// The SNAPSHOT must be the one still on screen — not merely its plan, which the wizard caches
+	// across an account switch, so a review re-entered under another account would carry the same
+	// plan object and let a confirm nobody gave for it resume.
+	if (reviewed.value !== snapshot || step.value !== 2) return false
+	if (snapshot.account !== (bridge.selectedAccount.value ?? "")) return false
 	if (tokenOnlyBlocked.value !== null) {
 		invalidateReview()
 		return false
@@ -541,9 +546,10 @@ async function preflight(target: SendPlan | ExitPlan): Promise<boolean> {
 }
 
 async function onConfirm(): Promise<void> {
-	const target = reviewed.value?.plan
-	if (!target || submitting.value || preflighting.value || stage.value !== "wizard") return
-	if (!(await preflight(target))) return
+	const snapshot = reviewed.value
+	const target = snapshot?.plan
+	if (!snapshot || !target || submitting.value || preflighting.value || stage.value !== "wizard") return
+	if (!(await preflight(snapshot))) return
 	submitting.value = true
 	backgroundedId.value = null
 	backgroundedLine.value = null

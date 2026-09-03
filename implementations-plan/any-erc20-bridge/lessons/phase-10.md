@@ -462,6 +462,14 @@ returns goes on to sign; and the invalidation guard exempts a review built while
 send runs — the review that must not move is only the one being signed. Two gated tests pin the
 account switch under the read and the next review behind a backgrounded send.
 
+**Codex round 4** (resumed): one HIGH on that fix. The post-read check compared the review's PLAN
+to the one confirmed, but the wizard's plan is a computed that does not depend on the Aztec
+account: switch accounts during the read, re-enter the review, and the new review carries the same
+plan object — the earlier confirm would resume and sign under the new account. The check is now on
+the review SNAPSHOT's identity (a re-entered review is a new snapshot) plus the account it was
+frozen for; a gated test re-enters the review under another account and shows the first confirm
+signs nothing and the new review signs only on its own confirm.
+
 ## Sign-off
 
 _Owner sign-off: PENDING._
