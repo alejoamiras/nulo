@@ -418,7 +418,7 @@ function hubClaimSeams(id: string, fee: Extract<HubClaimFee, { kind: "opts" }>) 
 			registeredHere = true
 			if (fee.fuelOnRegister && fee.onRegistered) fee.onRegistered(registerTxHash)
 			else updateRecord(id, { registerTxHash } as never)
-			setRecordStep(id, "sending", "registered - waiting for your wallet to sync it")
+			setRecordStep(id, "sending", "registered - preparing the claim")
 		},
 		onClaimSend: () => {
 			if (!fuelOnRegistration()) fee.onAttempt?.()

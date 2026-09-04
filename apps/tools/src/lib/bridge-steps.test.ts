@@ -352,7 +352,7 @@ describe("stepperPhases - send (schema 3) deposit rail", () => {
 			claim: "active",
 			confirm: "pending",
 		})
-		expect(stepperPhases(rec).find((p) => p.key === "claim")?.eta).toMatch(/wait for your wallet to sync/)
+		expect(stepperPhases(rec).find((p) => p.key === "claim")?.eta).toMatch(/a moment, then your signature/)
 	})
 
 	it("before its registration exists, a first-time private send's next signature is REGISTER, not CLAIM", () => {

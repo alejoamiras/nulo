@@ -65,7 +65,9 @@ const spendable = computed(() =>
 const parsed = computed(() => parseAmountStrict(props.amount, props.token.decimals))
 
 const amountError = computed<string | null>(() => {
-	if (props.amount.trim() === "") return null
+	const text = props.amount.trim()
+	// Empty, or a separator with nothing after it yet: an amount still being typed, not a wrong one.
+	if (text === "" || text.endsWith(".")) return null
 	if (parsed.value === null) {
 		return NUMERIC_SHAPE.test(props.amount.trim())
 			? `${props.token.symbol} has ${props.token.decimals} decimal places — use no more than that.`
@@ -96,7 +98,9 @@ function onInput(raw: string): void {
 	}, SETTLE_MS)
 	const [whole = "", fraction] = raw.split(".")
 	const keep = props.token.decimals
-	const cut = fraction === undefined || fraction.length <= keep ? raw : keep === 0 ? whole : `${whole}.${fraction.slice(0, keep)}`
+	// Decimals still unknown (a pasted token being read) cut nothing: there is no place count to cut to.
+	const cut =
+		keep < 0 || fraction === undefined || fraction.length <= keep ? raw : keep === 0 ? whole : `${whole}.${fraction.slice(0, keep)}`
 	emit("update:amount", cut)
 }
 onScopeDispose(() => clearTimeout(settleTimer))
@@ -199,7 +203,7 @@ function onUseAll(): void {
 			:tx-target="txTarget"
 			:fj-per-tx="fjPerTx"
 			:loading="routeLoading"
-			:error="gasError"
+			:error="touched || settled ? gasError : null"
 			@update:tx-target="emit('update:txTarget', $event)"
 		/>
 

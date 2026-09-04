@@ -160,10 +160,7 @@ function depositCopy(rec: DepositRailRecord, rt: RecordRuntime, shape: { gasOnly
 		deposit: "usually under 1 min",
 		sync: "usually 1-4 min",
 		register: "your signature + a few sec",
-		claim:
-			rec.isPrivate && isSendRecord(rec) && rec.registerTxHash
-				? "a short wait for your wallet to sync, then your signature"
-				: "your signature + a few sec",
+		claim: rec.isPrivate && isSendRecord(rec) && rec.registerTxHash ? "a moment, then your signature" : "your signature + a few sec",
 		confirm: "usually 1-2 min",
 	}
 	return { labels, prompts, etas }

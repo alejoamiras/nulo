@@ -106,6 +106,13 @@ describe("AmountStep", () => {
 		w.unmount()
 	})
 
+	it("a trailing separator is an amount still being typed: no red line, and no continuing from it", () => {
+		const w = step({ amount: "1." })
+		expect(w.find(sel(TESTIDS.sendAmountError)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.sendAmountNext)).attributes("disabled")).toBeDefined()
+		w.unmount()
+	})
+
 	it("refuses more decimal places than the token has when they arrive already typed", () => {
 		const w = step({ amount: "1.1234567" })
 		expect(errorText(w)).toContain("6 decimal places")
@@ -141,6 +148,23 @@ describe("AmountStep", () => {
 			expect(w.find(sel(TESTIDS.sendAmountError)).exists()).toBe(false)
 			await input.trigger("blur")
 			expect(errorText(w)).toContain("as a number")
+			w.unmount()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("the gas route's complaint waits for the same pause as the field's own", async () => {
+		vi.useFakeTimers()
+		try {
+			const w = step({ intent: "token+gas", gas: GAS, gasError: "That amount cannot buy gas." })
+			expect(w.find(sel(TESTIDS.sendGasBreakdown)).text()).toContain("cannot buy gas")
+			const input = w.find(sel(TESTIDS.sendAmountInput))
+			await input.setValue("2")
+			await w.setProps({ amount: "2" })
+			expect(w.find(sel(TESTIDS.sendGasBreakdown)).text()).not.toContain("cannot buy gas")
+			await vi.advanceTimersByTimeAsync(700)
+			expect(w.find(sel(TESTIDS.sendGasBreakdown)).text()).toContain("cannot buy gas")
 			w.unmount()
 		} finally {
 			vi.useRealTimers()
