@@ -22,7 +22,7 @@ vi.mock("@aztec/wallet-sdk/manager", () => ({
 	},
 }))
 
-import { createAztecWalletSession, type DiscoveredWallet, parseGrantedAccounts } from "./createAztecWalletSession"
+import { createAztecWalletSession, type DiscoveredWallet, parseGrantedAccounts, parseGrantedContracts } from "./createAztecWalletSession"
 
 // ── Push-driven discovery stream ─────────────────────────────────────
 
@@ -715,11 +715,13 @@ function makeMultiProvider(opts: { id?: string; accounts?: GrantEntry[] } = {}) 
 	return { provider, pending, walletHandle, fireDisconnect: () => disconnectHandler?.() }
 }
 
-function makeSessionWith(over: { registerContracts?: Mock<() => Promise<void>>; isSwitchBlocked?: () => boolean } = {}) {
+function makeSessionWith(
+	over: { registerContracts?: Mock<() => Promise<void>>; isSwitchBlocked?: () => boolean; manifest?: unknown } = {},
+) {
 	const registerContracts = over.registerContracts ?? vi.fn(async () => {})
 	const session = createAztecWalletSession({
 		appId: "test-app",
-		buildManifest: async () => ({}),
+		buildManifest: async () => over.manifest ?? {},
 		registerContracts,
 		isSwitchBlocked: over.isSwitchBlocked,
 	})
@@ -1162,5 +1164,145 @@ describe("legacy app-id migration", () => {
 		expect(s.selectAccount(MA_A)).toBe(true)
 		expect(storedMap()).toEqual([["nulo", MA_A]])
 		expect(localStorage.getItem(LEGACY_SELECTED)).toBe(JSON.stringify([["nulo", MA_B]]))
+	})
+})
+
+// ── The granted contract list: what a per-token feature reads to know it still owes a prompt ──
+
+/** A two-contract request: MA_B carries a transaction AND a simulation scope, MA_C carries none. */
+const REQUEST = {
+	capabilities: [
+		{ type: "accounts", canGet: true },
+		{ type: "contracts", contracts: [MA_B, MA_C], canRegister: true },
+		{ type: "transaction", scope: [{ contract: MA_B, function: "burn_public" }] },
+		{ type: "simulation", utilities: { scope: [{ contract: MA_B, function: "balance_of_private" }] } },
+	],
+}
+
+/** The answer of a wallet that approved the request as asked. */
+const FULL_ANSWER = { granted: REQUEST.capabilities }
+
+describe("parseGrantedContracts", () => {
+	it("intersects the request with the answer, lowercased and in request order", () => {
+		const upper = MA_B.toUpperCase().replace("0X", "0x")
+		const answer = { granted: [{ ...REQUEST.capabilities[1], contracts: [upper, MA_C] }, ...REQUEST.capabilities.slice(2)] }
+		expect(parseGrantedContracts(REQUEST, answer)).toEqual([MA_B, MA_C])
+	})
+
+	it("ignores a contract the app never asked for", () => {
+		const answer = { granted: [{ type: "contracts", contracts: [MA_A, MA_B, MA_C] }, ...REQUEST.capabilities.slice(2)] }
+		expect(parseGrantedContracts(REQUEST, answer)).toEqual([MA_B, MA_C])
+	})
+
+	it("refuses a contract whose requested transaction scope did not come back", () => {
+		const answer = { granted: [REQUEST.capabilities[1], REQUEST.capabilities[3]] }
+		expect(parseGrantedContracts(REQUEST, answer)).toEqual([MA_C])
+	})
+
+	it("refuses a contract whose requested simulation scope did not come back", () => {
+		const answer = { granted: [REQUEST.capabilities[1], REQUEST.capabilities[2]] }
+		expect(parseGrantedContracts(REQUEST, answer)).toEqual([MA_C])
+	})
+
+	it("yields nothing for a wildcard on either side, or a missing capability", () => {
+		const wildcardContracts = { granted: [{ type: "contracts", contracts: "*" }, ...REQUEST.capabilities.slice(2)] }
+		expect(parseGrantedContracts(REQUEST, wildcardContracts)).toEqual([])
+		const wildcardFunction = {
+			granted: [
+				REQUEST.capabilities[1],
+				{ type: "transaction", scope: [{ contract: MA_B, function: "*" }] },
+				REQUEST.capabilities[3],
+			],
+		}
+		expect(parseGrantedContracts(REQUEST, wildcardFunction)).toEqual([])
+		expect(parseGrantedContracts({ capabilities: [{ type: "transaction", scope: "*" }] }, FULL_ANSWER)).toEqual([])
+		expect(parseGrantedContracts(REQUEST, { granted: [{ type: "accounts", accounts: [] }] })).toEqual([])
+		expect(parseGrantedContracts(REQUEST, null)).toEqual([])
+		expect(parseGrantedContracts(null, FULL_ANSWER)).toEqual([])
+	})
+
+	it("skips malformed entries instead of crashing", () => {
+		const request = { capabilities: [{ type: "contracts", contracts: ["0xa1", "not-an-address", null, MA_B] }] }
+		expect(parseGrantedContracts(request, { granted: [{ type: "contracts", contracts: [MA_B] }] })).toEqual([MA_B])
+	})
+})
+
+describe("granted contracts on the session", () => {
+	function makeGrantProvider(contracts?: unknown) {
+		const walletHandle = {
+			requestCapabilities: vi.fn(async () => ({
+				granted: [
+					{ type: "accounts", accounts: [{ alias: "Main", item: MA_A }] },
+					...(contracts === undefined ? [] : [{ type: "contracts", contracts }, ...REQUEST.capabilities.slice(2)]),
+				],
+			})),
+		}
+		const pending = { verificationHash: "deadbeef", confirm: vi.fn(async () => walletHandle), cancel: vi.fn(async () => {}) }
+		const provider = {
+			id: "nulo",
+			name: "Nulo",
+			type: "extension",
+			icon: undefined,
+			establishSecureChannel: vi.fn(async () => pending),
+			disconnect: vi.fn(async () => {}),
+			onDisconnect: vi.fn(() => () => {}),
+		}
+		return { provider, walletHandle }
+	}
+
+	it("publishes the requested contracts the answer covered, scopes included", async () => {
+		const { provider } = makeGrantProvider([MA_B, MA_C])
+		const { session: s } = makeSessionWith({ manifest: REQUEST })
+		await driveThroughGrant(s, provider)
+		expect(s.status.value).toBe("connected")
+		expect(s.grantedContracts.value).toEqual([MA_B, MA_C])
+	})
+
+	it("stays empty when the wallet grants no contracts capability", async () => {
+		const { provider } = makeGrantProvider()
+		const { session: s } = makeSessionWith({ manifest: REQUEST })
+		await driveThroughGrant(s, provider)
+		expect(s.grantedContracts.value).toEqual([])
+	})
+
+	it("is cleared by reset", async () => {
+		const { provider } = makeGrantProvider([MA_B])
+		const { session: s } = makeSessionWith({ manifest: REQUEST })
+		await driveThroughGrant(s, provider)
+		expect(s.grantedContracts.value).toEqual([MA_B])
+		s.reset()
+		expect(s.grantedContracts.value).toEqual([])
+	})
+
+	it("is cleared by disconnect", async () => {
+		const { provider } = makeGrantProvider([MA_B])
+		const { session: s } = makeSessionWith({ manifest: REQUEST })
+		await driveThroughGrant(s, provider)
+		await s.disconnect()
+		expect(s.grantedContracts.value).toEqual([])
+	})
+
+	it("retryCapabilities resolves only once contract registration has finished", async () => {
+		let release: (() => void) | undefined
+		const registerContracts = vi
+			.fn(async () => {})
+			.mockImplementationOnce(async () => {})
+			.mockImplementationOnce(() => new Promise<void>((resolve) => (release = resolve)))
+		const { provider } = makeGrantProvider([MA_B])
+		const { session: s } = makeSessionWith({ registerContracts })
+		await driveThroughGrant(s, provider)
+
+		let settled = false
+		const retry = s.retryCapabilities().then(() => {
+			settled = true
+		})
+		await flush(8)
+		expect(settled).toBe(false)
+		expect(s.status.value).toBe("setting-up")
+
+		release?.()
+		await retry
+		expect(settled).toBe(true)
+		expect(s.status.value).toBe("connected")
 	})
 })

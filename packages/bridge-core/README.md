@@ -10,7 +10,7 @@ and the sandbox deploy script drive these functions; the proven reference for ev
 | File | Purpose |
 |---|---|
 | `l1.ts` | L1 witness/route hashing — the Permit2 `BridgeWitness` typed-data + `hashRoute`/`hashBridgeWitness`, cross-pinned to `SwapBridgeRouter` (Solidity) in `l1.test.ts`. |
-| `l2.ts` | L2 bridge wrappers — `claimPublic`/`claimPrivate` (consume an L1→L2 deposit) + `exitToL1Public`/`exitToL1Private` (start an L2→L1 withdraw). |
+| `hub-l2.ts` | L2 hub wrappers — `claimViaHub` (register-if-first, then consume an L1→L2 deposit) + `exitViaHub`/`preflightHubExit`/`hubExitsPaused` (start an L2→L1 withdraw). |
 | `flows.ts` | Cross-chain orchestrations: `runDeposit` (mint→approve→deposit→poll-claim), `consumeWithdrawal` (proven→witness→Outbox consume), `runSwapBridge` (sign Permit2 witness→`bridgeWithFuel`→read leaf indices). Stage callbacks drive the loading bar; `RecoveryHooks` persist secrets before irreversible txs. |
 | `fee-juice.ts` | `publicFeeJuicePayment` (`FeeJuicePaymentMethodWithClaim` — claim bridged FJ + pay gas in one tx) + `sponsoredFeePayment` (bootstrap FPC) + `feeJuiceAddress`. |
 | `fuel.ts` | Direct Fee-Juice bridge primitives (the **Fuel** flow): `FeeJuicePortalAbi` re-export, `planPublic`/`planPrivateFuelDeposit` (deposit args + secret derivation), `parseFeeJuiceDeposit` (the portal's `DepositToAztecPublic` event), `buildCarrierlessFuelClaimPayload` (the zero-app-call private claim), and the fail-CLOSED `assertFuelClearsFloor`. |

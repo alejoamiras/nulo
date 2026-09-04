@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { formatBigInt, parseAmount, trimAddress } from "./format"
+import { formatBigInt, parseAmount, parseAmountStrict, toDecimalString, trimAddress } from "./format"
 
 describe("formatBigInt", () => {
 	it("formats zero with the requested display places", () => {
@@ -61,5 +61,42 @@ describe("parseAmount (BigInt-safe fixed-decimal parsing)", () => {
 		expect(parseAmount(".", 18)).toBe(0n)
 		expect(parseAmount("1.2.3", 6)).toBe(0n)
 		expect(parseAmount("-5", 6)).toBe(0n)
+	})
+})
+
+describe("parseAmountStrict (field-grade parsing)", () => {
+	it("parses the plain decimals parseAmount parses", () => {
+		expect(parseAmountStrict("100", 6)).toBe(100_000_000n)
+		expect(parseAmountStrict(" 1.5 ", 18)).toBe(1_500_000_000_000_000_000n)
+		expect(parseAmountStrict("0", 6)).toBe(0n)
+	})
+
+	it("refuses more places than the token has instead of truncating them", () => {
+		expect(parseAmountStrict("1.9999999", 6)).toBeNull()
+		expect(parseAmountStrict("1.999999", 6)).toBe(1_999_999n)
+	})
+
+	it("refuses everything that is not a plain decimal number", () => {
+		expect(parseAmountStrict("abc", 6)).toBeNull()
+		expect(parseAmountStrict("", 6)).toBeNull()
+		expect(parseAmountStrict("1.", 6)).toBeNull()
+		expect(parseAmountStrict(".5", 6)).toBeNull()
+		expect(parseAmountStrict("-5", 6)).toBeNull()
+		expect(parseAmountStrict("1e6", 6)).toBeNull()
+		expect(parseAmountStrict("5", -1)).toBeNull()
+	})
+})
+
+describe("toDecimalString", () => {
+	it("drops grouping and trailing zeros so the text can be typed back", () => {
+		expect(toDecimalString(12_345_678n, 6)).toBe("12.345678")
+		expect(toDecimalString(1_500_000n, 6)).toBe("1.5")
+		expect(toDecimalString(1_000_000n, 6)).toBe("1")
+		expect(toDecimalString(0n, 18)).toBe("0")
+	})
+
+	it("round-trips at full precision", () => {
+		const value = 9_007_199_254_740_993_000_000_000_001n
+		expect(parseAmountStrict(toDecimalString(value, 18), 18)).toBe(value)
 	})
 })

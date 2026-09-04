@@ -181,14 +181,13 @@ See [`implementations-plan/faucet/plan-v2.md`](../../implementations-plan/faucet
 for the full file-by-file walkthrough and the rationale for every
 non-obvious decision.
 
-## Fuel tab
+## Send tab
 
-A third tab — **Fuel** — bridges your L1 fee asset ($AZTEC) directly into Aztec **Fee Juice** (gas),
-public or private, with **no swap**. It reuses the bridge's journal/engine (an additive `assetKind`
-discriminant) and the canonical `FeeJuicePortal`; the L2 claim is sponsored (public) or a carrier-less
-Wonderland-FPC tx (private). Composables: `useFuel` (deposit + claim) + `useL1FeeAsset` (L1 balance).
-Local-gates-only today — a full bridge needs the live L2 network (deferred live sign-off). See
-[`implementations-plan/fuel-direct-bridge/`](../../implementations-plan/fuel-direct-bridge/plan.md).
+The second tab — **Send** — moves any ERC-20 between Ethereum and Aztec through the generation the
+bundled manifest names: an L1 `PortalFactory` (one storage-less portal clone per token) and one L2
+`TokenBridgeHub`. A send may carry a **gas leg**: a slice of the amount is swapped to Fee Juice on
+the way in, so the arriving account can pay for its own claim. A manifest with no `bridge` block is a
+placeholder — the tab says so and nothing wires the journal engine to a bridge that isn't there.
 
 ## What this is NOT
 

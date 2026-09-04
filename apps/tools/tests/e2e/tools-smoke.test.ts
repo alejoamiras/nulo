@@ -131,6 +131,15 @@ function makePending(verificationHash = "deadbeef") {
 	}
 }
 
+/** The mainnet-placeholder split loads the shell asynchronously. Warming the module first is what
+ *  makes the mount usable within one flush — the shell's own import graph takes more than a tick. */
+async function mountApp(): Promise<VueWrapper> {
+	await import("@/AppShell.vue")
+	const w = mount(App, { attachTo: document.body })
+	await flushPromises()
+	return w
+}
+
 async function connectThroughPicker(wrapper: VueWrapper) {
 	await wrapper.get(`[data-testid="${TESTIDS.btnConnect}"]`).trigger("click")
 	await flushPromises()
@@ -172,7 +181,7 @@ describe("tools smoke", () => {
 			cancel: () => {},
 			done: Promise.resolve(),
 		}))
-		wrapper = mount(App, { attachTo: document.body })
+		wrapper = await mountApp()
 		await wrapper.get(`[data-testid="${TESTIDS.btnConnect}"]`).trigger("click")
 		await flushPromises()
 		expect(wrapper.text()).toContain("No Aztec wallet detected")
@@ -182,7 +191,7 @@ describe("tools smoke", () => {
 	it("2. discover → emoji modal → confirm → connected", async () => {
 		const pending = makePending()
 		mockEstablishSecureChannel.mockResolvedValueOnce(pending)
-		wrapper = mount(App, { attachTo: document.body })
+		wrapper = await mountApp()
 
 		await connectThroughPicker(wrapper)
 
@@ -201,7 +210,7 @@ describe("tools smoke", () => {
 	it("3. once connected, both token cards render with 0.00 balances", async () => {
 		const pending = makePending()
 		mockEstablishSecureChannel.mockResolvedValueOnce(pending)
-		wrapper = mount(App, { attachTo: document.body })
+		wrapper = await mountApp()
 
 		await connectThroughPicker(wrapper)
 		const confirm = document.querySelector(`[data-testid="${TESTIDS.btnVerifyConfirm}"]`) as HTMLElement
@@ -221,7 +230,7 @@ describe("tools smoke", () => {
 		localStorage.setItem("nulo-tools:preferred-wallet", JSON.stringify({ id: "nulo", name: "Nulo" }))
 		const pending = makePending()
 		mockEstablishSecureChannel.mockResolvedValueOnce(pending)
-		wrapper = mount(App, { attachTo: document.body })
+		wrapper = await mountApp()
 
 		await wrapper.get(`[data-testid="${TESTIDS.btnConnect}"]`).trigger("click")
 		await flushPromises()
@@ -234,7 +243,7 @@ describe("tools smoke", () => {
 		localStorage.setItem("nulo-faucet:preferred-wallet", JSON.stringify({ id: "nulo", name: "Nulo" }))
 		const pending = makePending()
 		mockEstablishSecureChannel.mockResolvedValueOnce(pending)
-		wrapper = mount(App, { attachTo: document.body })
+		wrapper = await mountApp()
 
 		await wrapper.get(`[data-testid="${TESTIDS.btnConnect}"]`).trigger("click")
 		await flushPromises()
@@ -243,25 +252,23 @@ describe("tools smoke", () => {
 		expect(document.querySelector(`[data-testid="${TESTIDS.verificationModal}"]`)).not.toBeNull()
 	})
 
-	it("3b. the Fuel tab has its OWN bridges list (so backgrounded Fuel bridges surface there)", async () => {
-		wrapper = mount(App, { attachTo: document.body })
+	it("3b. the Send tab renders the wizard, and its journal is the only bridges list app-wide", async () => {
+		wrapper = await mountApp()
+		await wrapper.get(`[data-testid="${TESTIDS.tabSend}"]`).trigger("click")
 		await flushPromises()
-		await wrapper.get(`[data-testid="${TESTIDS.tabFuel}"]`).trigger("click")
-		await flushPromises()
-		expect(wrapper.find(`[data-testid="${TESTIDS.fuelView}"]`).isVisible()).toBe(true)
-		expect(wrapper.find(`[data-testid="${TESTIDS.fuelForm}"]`).exists()).toBe(true)
-		// The Fuel tab now mounts its own (fee-juice-filtered) journal so a backgrounded Fuel bridge doesn't
-		// vanish until you visit the Bridge tab. Both tabs are always-mounted (v-show) → two lists app-wide.
-		// The single-toast-owner integrity (only the Bridge mount emits completion toasts; the Fuel mount is
-		// toast-silent) is unit-pinned in BridgeJournal.test.ts.
-		expect(wrapper.findAll(`[data-testid="${TESTIDS.journalEmpty}"]`)).toHaveLength(2)
+		expect(wrapper.find(`[data-testid="${TESTIDS.sendView}"]`).isVisible()).toBe(true)
+		// A network whose manifest carries no bridge renders the placeholder instead of the wizard;
+		// either way the tab owns exactly one journal (the toast owner), never a second copy.
+		const hasBridge = wrapper.find(`[data-testid="${TESTIDS.sendUnavailable}"]`).exists() === false
+		expect(wrapper.find(`[data-testid="${TESTIDS.sendStepStrip}"]`).exists()).toBe(hasBridge)
+		expect(wrapper.findAll(`[data-testid="${TESTIDS.journalEmpty}"]`).length).toBe(hasBridge ? 1 : 0)
 	})
 
 	it("4. clicking 'Drip … to public' fires sendTx and shows a success toast", async () => {
 		const wallet = makeWalletStub()
 		const pending = { verificationHash: "deadbeef", confirm: async () => wallet, cancel: async () => {} }
 		mockEstablishSecureChannel.mockResolvedValueOnce(pending)
-		wrapper = mount(App, { attachTo: document.body })
+		wrapper = await mountApp()
 
 		await connectThroughPicker(wrapper)
 		const confirm = document.querySelector(`[data-testid="${TESTIDS.btnVerifyConfirm}"]`) as HTMLElement
@@ -285,7 +292,7 @@ describe("tools smoke", () => {
 	it("5. clicking disconnect resets back to the connect button", async () => {
 		const pending = makePending()
 		mockEstablishSecureChannel.mockResolvedValueOnce(pending)
-		wrapper = mount(App, { attachTo: document.body })
+		wrapper = await mountApp()
 
 		await connectThroughPicker(wrapper)
 		const confirm = document.querySelector(`[data-testid="${TESTIDS.btnVerifyConfirm}"]`) as HTMLElement

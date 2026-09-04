@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /** Services */
-import { type BridgeJournalRecord, type DepositJournalRecord, assetKindOf, isProvisionalWithdrawId } from "@nulo/bridge-core"
+import { type BridgeJournalRecord, type DepositJournalRecord, assetKindOf, isProvisionalRecordId } from "@nulo/bridge-core"
 import { computed } from "vue"
 
 /** Composables */
 import { useBridgeJournal } from "@/composables/useBridgeJournal"
 
 /** Utils */
-import { assetDecimals, assetSymbol } from "@/lib/asset-label"
+import { assetDecimals, assetSymbol, recordTokenBlock } from "@/lib/asset-label"
 import { isTerminalAttention, stepperPhases } from "@/lib/bridge-steps"
 import { formatBigInt } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
@@ -18,7 +18,7 @@ import BridgePhaseRail from "./BridgePhaseRail.vue"
 const props = defineProps<{ record: BridgeJournalRecord }>()
 const emit = defineEmits<{ background: []; backup: [record: BridgeJournalRecord] }>()
 const exportable = computed(() => {
-	if (isProvisionalWithdrawId(props.record.id)) return false
+	if (isProvisionalRecordId(props.record.id)) return false
 	const r = props.record
 	if (r.direction === "deposit" && r.isPrivate && !(r as DepositJournalRecord).sealedEnvelope) return false
 	return true
@@ -53,9 +53,10 @@ const headline = computed(() => {
 	// A fee-juice (Fuel) record is 18-dec Fee Juice, not the token bridge asset (codex LOW — same class
 	// as the toast/card; the stepper header is the third shared surface).
 	const kind = assetKindOf(props.record)
-	const amount = formatBigInt(BigInt(props.record.amount), assetDecimals(kind))
+	const token = recordTokenBlock(props.record)
+	const amount = formatBigInt(BigInt(props.record.amount), assetDecimals(kind, token))
 	const dir = props.record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM"
-	return `${dir} · ${amount} ${assetSymbol(kind, props.record.isPrivate)} · ${props.record.isPrivate ? "PRIVATE" : "PUBLIC"}`
+	return `${dir} · ${amount} ${assetSymbol(kind, props.record.isPrivate, token)} · ${props.record.isPrivate ? "PRIVATE" : "PUBLIC"}`
 })
 </script>
 

@@ -53,8 +53,8 @@ export interface FuelClaimDeps {
 	 *  missing or corrupted while the sealed copy is intact — trusting it would strand a recoverable
 	 *  deposit (codex post-impl HIGH). The plaintext is a fallback only (legacy records with no salt seal). */
 	resolvedSalt?: string
-	/** PUBLIC: the AUTHORITATIVE claim secret the engine gated on (top-level `rec.secret`). Used in
-	 *  preference to `fuel.secret` so the gate and the claim never read different copies (codex LOW). */
+	/** PUBLIC: the AUTHORITATIVE claim secret the engine gated on. Used in preference to `fuel.secret`
+	 *  so the gate and the claim never read different copies. */
 	resolvedSecret?: string
 	/** Journal-latch callbacks (the wrapper supplies these; this module stays journal-agnostic). */
 	onAttempt?: () => void

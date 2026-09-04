@@ -4,7 +4,9 @@ import { TESTIDS } from "@/lib/testids"
 import BridgeReceipt from "./BridgeReceipt.vue"
 // Token amounts + symbol derive from the LIVE manifest (the cutover changes both); Fee-Juice rows
 // stay 18-dec (FJ is chain-fixed, not token-driven).
-import { BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
+// A journal record with no token block of its own renders under asset-label's generic fallback.
+const BRIDGE_TOKEN_DECIMALS = 18
+const BRIDGE_TOKEN_SYMBOL = "TOKEN"
 const UNIT = 10n ** BigInt(BRIDGE_TOKEN_DECIMALS)
 
 const sel = (t: string) => `[data-testid="${t}"]`
@@ -35,7 +37,7 @@ describe("BridgeReceipt", () => {
 		expect(done.attributes("role")).toBe("img")
 		expect(w.text()).toContain("Ethereum → Aztec")
 		expect(w.text()).toContain("Bridged")
-		expect(w.text()).toContain(`100.00 ${BRIDGE_TOKEN_SYMBOL}`)
+		expect(w.text()).toContain(`100 ${BRIDGE_TOKEN_SYMBOL}`)
 		expect(w.text()).toContain("private")
 		expect(w.text()).toContain("3m 42s")
 		const links = w.findAll(sel(TESTIDS.receiptLink))
@@ -60,7 +62,7 @@ describe("BridgeReceipt", () => {
 		})
 		expect(w.text()).toContain("Aztec → Ethereum")
 		expect(w.text()).toContain("Released")
-		expect(w.text()).toContain(`40.00 ${BRIDGE_TOKEN_SYMBOL}`)
+		expect(w.text()).toContain(`40 ${BRIDGE_TOKEN_SYMBOL}`)
 		// A withdraw never carries gas back to Ethereum — no FJ anywhere.
 		expect(w.text()).not.toContain("FJ")
 		expect(w.findAll(sel(TESTIDS.receiptLink))).toHaveLength(1)
@@ -106,7 +108,7 @@ describe("BridgeReceipt", () => {
 			},
 		})
 		expect(w.text()).toContain("Gas ready")
-		expect(w.text()).toContain("53.00 FJ")
+		expect(w.text()).toContain("53 FJ")
 		expect(w.text()).not.toContain("Private FJ")
 		expect(w.text()).not.toContain("Ready to power")
 	})
@@ -115,7 +117,7 @@ describe("BridgeReceipt", () => {
 		const w = mount(BridgeReceipt, {
 			props: { snapshot: { direction: "deposit" as const, amount: (100n * UNIT).toString(), isPrivate: true } },
 		})
-		expect(w.text()).toContain(`100.00 ${BRIDGE_TOKEN_SYMBOL}`)
+		expect(w.text()).toContain(`100 ${BRIDGE_TOKEN_SYMBOL}`)
 		expect(w.text()).not.toContain("Gas ready")
 		expect(w.text()).not.toContain("Gas used")
 	})
@@ -131,7 +133,7 @@ describe("BridgeReceipt", () => {
 				},
 			},
 		})
-		expect(w.text()).toContain("87.70 Private FJ")
+		expect(w.text()).toContain("87.7 Private FJ")
 		expect(w.text()).not.toContain("Gas used")
 	})
 
@@ -151,7 +153,7 @@ describe("BridgeReceipt", () => {
 			},
 		})
 		expect(w.text()).toContain("Fueled")
-		expect(w.text()).toContain("20.00 Private FJ")
+		expect(w.text()).toContain("20 Private FJ")
 		expect(w.text()).not.toContain("AZLO")
 		expect(w.text()).not.toContain("Bridged")
 		// The Fee-Juice amount IS the hero, so the receiptFuel marker sits on the hero row — exactly one.
@@ -173,8 +175,66 @@ describe("BridgeReceipt", () => {
 				},
 			},
 		})
-		expect(w.text()).toContain("12.50 FJ")
+		expect(w.text()).toContain("12.5 FJ")
 		expect(w.text()).not.toContain("Private FJ")
+	})
+
+	// Schema-3 sends carry their own token identity; the receipt must never format an 8-dec WBTC
+	// amount at the single-token bridge's decimals.
+	it("send receipt: the record's own symbol + decimals, send-specific ids, review-said and the add CTA", async () => {
+		const w = mount(BridgeReceipt, {
+			props: {
+				ctaLabel: "NEW SEND",
+				snapshot: {
+					direction: "deposit" as const,
+					amount: "150000000",
+					isPrivate: true,
+					token: { displaySymbol: "WBTC", decimals: 8 },
+					fuelReceived: "5000000000000000000",
+					reviewSaid: "1.5 WBTC + ≈ 5.00 FJ gas",
+					addTokenLabel: "ADD WBTC TO WALLET",
+				},
+			},
+		})
+		expect(w.find(sel(TESTIDS.sendReceiptToken)).text()).toContain("1.5 WBTC")
+		expect(w.find(sel(TESTIDS.sendReceiptGas)).text()).toContain("5 Private FJ")
+		// The send ids REPLACE receiptFuel on a send, so neither surface can double up.
+		expect(w.findAll(sel(TESTIDS.receiptFuel))).toHaveLength(0)
+		const said = w.find(sel(TESTIDS.sendReceiptReviewSaid))
+		expect(said.text()).toContain("Review said 1.5 WBTC + ≈ 5.00 FJ gas")
+		expect(said.text()).toContain("you got 1.5 WBTC + 5 Private FJ")
+		await w.find(sel(TESTIDS.sendReceiptAddToken)).trigger("click")
+		expect(w.emitted("add-token")).toHaveLength(1)
+	})
+
+	// "Review said X · you got Y" is only a check the reader can make if Y is written the way X was.
+	it("send receipt: a sub-cent amount reads back at full precision, not as zero", () => {
+		const w = mount(BridgeReceipt, {
+			props: {
+				snapshot: {
+					direction: "deposit" as const,
+					amount: "5000",
+					isPrivate: false,
+					token: { displaySymbol: "USDC", decimals: 6 },
+					reviewSaid: "0.005 USDC",
+				},
+			},
+		})
+		expect(w.find(sel(TESTIDS.sendReceiptToken)).text()).toContain("0.005 USDC")
+		expect(w.find(sel(TESTIDS.sendReceiptReviewSaid)).text()).toContain("Review said 0.005 USDC · you got 0.005 USDC")
+	})
+
+	it("send receipt: no add CTA without a token to add, and the CTA disables while adding", () => {
+		const base = { direction: "deposit" as const, amount: "100000000", isPrivate: false, token: { displaySymbol: "WBTC", decimals: 8 } }
+		expect(
+			mount(BridgeReceipt, { props: { snapshot: base } })
+				.find(sel(TESTIDS.sendReceiptAddToken))
+				.exists(),
+		).toBe(false)
+		const w = mount(BridgeReceipt, {
+			props: { snapshot: { ...base, addTokenLabel: "ADD WBTC TO WALLET" }, addTokenBusy: true },
+		})
+		expect(w.find(sel(TESTIDS.sendReceiptAddToken)).attributes("disabled")).toBeDefined()
 	})
 
 	// The `!isFuel` guard on hasFuel keeps the two receiptFuel sites mutually exclusive — a pathological

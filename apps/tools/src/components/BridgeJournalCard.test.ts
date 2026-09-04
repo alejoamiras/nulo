@@ -14,7 +14,7 @@ vi.mock("@/composables/useBridgeJournal", () => ({
 	useBridgeJournal: () => ({ runtime, runDepositClaim, runWithdrawConsume, discard, clearDone }),
 }))
 const claimFuelStandalone = vi.fn(async () => {})
-vi.mock("@/composables/useDeposit", () => ({
+vi.mock("@/composables/fuel-recovery", () => ({
 	claimFuelStandalone: (...a: unknown[]) => claimFuelStandalone(...(a as [])),
 	overrideFuelClaim: vi.fn(),
 	reconcileFuelConsumed: vi.fn(async () => {}),
@@ -42,7 +42,9 @@ import { TESTIDS } from "@/lib/testids"
 import BridgeJournalCard from "./BridgeJournalCard.vue"
 // Amounts + symbol derive from the LIVE manifest (the token cutover changes both — a hardcoded
 // 18-dec "AZLO" fixture breaks on a 6-dec USDC manifest).
-import { BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
+// A journal record with no token block of its own renders under asset-label's generic fallback.
+const BRIDGE_TOKEN_DECIMALS = 18
+const BRIDGE_TOKEN_SYMBOL = "TOKEN"
 const UNIT = 10n ** BigInt(BRIDGE_TOKEN_DECIMALS)
 
 const sel = (t: string) => `[data-testid="${t}"]`
@@ -476,5 +478,36 @@ describe("BridgeJournalCard — account attribution (Options 1+2)", () => {
 		expect(w.find(sel(TESTIDS.journalAccount)).exists()).toBe(false)
 		expect(w.find(sel(TESTIDS.journalSwitchAccount)).exists()).toBe(false)
 		expect(w.find(sel(TESTIDS.journalFinish)).exists()).toBe(true)
+	})
+
+	it("a send card reads its amount at the record's OWN token decimals and symbol", () => {
+		const send = {
+			...deposit({ amount: "150000000", leafIndex: "1" }),
+			schema: 3,
+			intent: "token",
+			token: { erc20: "0xe", portal: "0xp", l2Token: "0xl2", nameWord: "0xn", symbolWord: "0xs", decimals: 8, displaySymbol: "WBTC" },
+		} as unknown as BridgeJournalRecord
+		expect(mountCard(send).text()).toContain("1.50 WBTC")
+	})
+
+	// A blocked record is terminal and its reason is PERSISTED: the card must state it and offer no
+	// run, from the first render — not only after a run has narrated a runtime attention.
+	it("a blocked record states its reason and offers no CLAIM, guidance or retry", () => {
+		const blocked = deposit({ leafIndex: "1", blocked: "This token's registration on Ethereum no longer matches this record." })
+		const w = mountCard(blocked)
+		expect(w.find(sel(TESTIDS.journalAttention)).text()).toContain("no longer matches this record")
+		expect(w.find(sel(TESTIDS.journalClaim)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.journalStage)).exists()).toBe(false)
+	})
+
+	it("a blocked record keeps DISCARD — it is the only way out", () => {
+		const w = mountCard(deposit({ leafIndex: "1", blocked: "stopped for your safety" }))
+		expect(w.find(sel(TESTIDS.journalDiscard)).exists()).toBe(true)
+	})
+
+	it("a blocked WITHDRAW offers no FINISH either", () => {
+		const w = mountCard(withdraw({ exitBlock: 1, blocked: "stopped for your safety" }))
+		expect(w.find(sel(TESTIDS.journalFinish)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.journalAttention)).text()).toContain("stopped for your safety")
 	})
 })

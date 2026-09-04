@@ -88,7 +88,7 @@ function liveElapsed(startedAt?: number): string | null {
 			:key="phase.key"
 			class="phase"
 			:class="phase.state"
-			:data-testid="TESTIDS.stepperPhase"
+			:data-testid="phase.key === 'register' ? TESTIDS.sendStepperRegister : TESTIDS.stepperPhase"
 			:data-phase="phase.key"
 			:data-state="phase.state"
 		>

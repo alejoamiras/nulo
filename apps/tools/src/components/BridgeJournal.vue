@@ -30,6 +30,12 @@ const { push } = useToast()
 const restoreInput = ref<HTMLInputElement | null>(null)
 const restoring = ref(false)
 
+/** A recovery file is a few KB of JSON. The check is on `size` and comes BEFORE `file.text()`,
+ *  because reading is what costs: a multi-gigabyte pick would be decoded whole into memory just to
+ *  be rejected by the validator afterwards. */
+const MAX_RESTORE_BYTES = 1024 * 1024
+const RESTORE_TOO_LARGE = "That file is too large to be a recovery file (the limit is 1 MB)."
+
 const onBackup = backup.exportBridgeWithToast
 
 async function onRestorePick(event: Event) {
@@ -37,6 +43,10 @@ async function onRestorePick(event: Event) {
 	const file = input.files?.[0]
 	input.value = ""
 	if (!file || restoring.value) return
+	if (file.size > MAX_RESTORE_BYTES) {
+		push({ kind: "error", text: RESTORE_TOO_LARGE })
+		return
+	}
 	restoring.value = true
 	try {
 		const rec = await backup.restoreFile(await file.text())

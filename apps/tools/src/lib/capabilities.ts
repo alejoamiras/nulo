@@ -5,7 +5,7 @@ const FEE_JUICE_L2 = AztecAddress.fromStringUnsafe(feeJuiceAddress)
 /** The Wonderland PrivateFPC L2 address (pinned from the installed artifact). The wallet auto-registers
  *  it when a tx USES it as fee payer (`fpc/service.ts`), but the no-fuel-claim gate reads its
  *  `balance_of` BEFORE any such tx, and 5.0.1's registerContract conformance (dev #288) stops the read's
- *  on-the-fly Contract.at() from registering the artifact — so the tools app now pre-registers it at connect
+ *  on-the-fly Contract.at() from registering the artifact — so the app now pre-registers it at connect
  *  (`useWalletConnection` + `@/contracts/private-fpc`) and it is IN `contracts` (registerable). */
 const PRIVATE_FPC_L2 = AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)
 import { AztecAddress } from "@aztec/aztec.js/addresses"
@@ -121,214 +121,194 @@ export function buildDripManifest(input: DripManifestInput): AppManifest {
 	}
 }
 
-export interface BridgeManifestInput {
-	readonly bridgeAddress: AztecAddress
-	readonly tokenAddress: AztecAddress
-	readonly proxyAddress: AztecAddress
+/** Hub entrypoints the wizard SENDS. `register_*` is send-only: an instance the PXE has not seen
+ *  cannot be simulated, so there is no dry-run gate for a first-time token's registration. */
+const HUB_SEND_FUNCTIONS = [
+	"register_token",
+	"register_and_claim_public",
+	"claim_public",
+	"claim_private",
+	"exit_to_l1_public",
+	"exit_to_l1_private",
+] as const
+
+/** Hub sends the deposit dry-runs before it raises the claim prompt. */
+const HUB_SIMULATED_SENDS = ["claim_public", "claim_private", "exit_to_l1_public", "exit_to_l1_private"] as const
+
+/** `#[view]` reads on the hub: the token binding, its portal, and the guardian's exit switch. They
+ *  are `#[external("public")]`, so they route through public_dispatch as tx-shaped simulations —
+ *  `simulation.utilities` is for `#[external("utility")]` only, and mis-scoping surfaces as
+ *  "Function artifact not found". */
+const HUB_VIEW_FUNCTIONS = ["token_for", "portal_for", "exits_paused"] as const
+
+/** The exit authwit's targets on each hub Token. */
+const TOKEN_BURN_FUNCTIONS = ["burn_public", "burn_private"] as const
+
+function at(contract: AztecAddress, functions: readonly string[]): ScopedFunction[] {
+	return functions.map((fn) => ({ contract, function: fn }))
+}
+
+function each(contracts: readonly AztecAddress[], functions: readonly string[]): ScopedFunction[] {
+	return contracts.flatMap((contract) => at(contract, functions))
+}
+
+interface ManifestScopes {
+	readonly contracts: AztecAddress[]
+	readonly utilities: ScopedFunction[]
+	readonly simulatedTransactions: ScopedFunction[]
+	readonly transactions: ScopedFunction[]
+}
+
+/**
+ * The send half of a grant: the hub, the hub Tokens this grant covers, and the fee machinery every
+ * L2 send leans on. A grant with no hub carries no token scopes either — a Token the hub cannot
+ * mint to is not something the app ever calls.
+ */
+function sendScopes(hub: AztecAddress | undefined, tokens: readonly AztecAddress[], sponsoredFpc: AztecAddress): ManifestScopes {
+	const hubTokens = hub ? tokens : []
+	const onHub = (functions: readonly string[]): ScopedFunction[] => (hub ? at(hub, functions) : [])
+	return {
+		contracts: [...(hub ? [hub] : []), ...hubTokens, PRIVATE_FPC_L2],
+		utilities: [
+			...each(hubTokens, ["balance_of_private"]),
+			// No-fuel claim fee source: read the user's PRIVATE Fee Juice held at the PrivateFPC
+			// (abi_utility) to decide whether a no-fuel claim can self-pay from it.
+			{ contract: PRIVATE_FPC_L2, function: "balance_of" },
+		],
+		// The hub's sends are simulatable too (a prompt-free PXE dry-run). The deposit gates its claim
+		// PROMPT on a successful claim SIMULATION - PXE-aware, since the simulate reverts
+		// (l1_to_l2_msg_exists) until the wallet's own PXE can consume the message, which lags the
+		// node's checkpoint. Simulations are read-only; the actual send is still gated by the
+		// (separate) transaction scope.
+		simulatedTransactions: [
+			...each(hubTokens, ["balance_of_public"]),
+			...onHub(HUB_VIEW_FUNCTIONS),
+			...onHub(HUB_SIMULATED_SENDS),
+			...each(hubTokens, TOKEN_BURN_FUNCTIONS),
+			{ contract: sponsoredFpc, function: "sponsor_unconditionally" },
+			{ contract: STANDARD_AUTH_REGISTRY_ADDRESS, function: "set_authorized" },
+			// The fuel claim (canonical FeeJuice, a protocol contract) must be simulatable: the engine's
+			// claim gate dry-runs the token claim WITH the embedded fjwc fee payment.
+			...at(FEE_JUICE_L2, ["claim_and_end_setup", "claim"]),
+			...at(PRIVATE_FPC_L2, ["mint_and_pay_fee", "pay_fee"]),
+			// No-fuel cold-check: read the account's public Fee Juice balance (private FJ is read via
+			// PrivateFPC.balance_of in the utilities scope above).
+			{ contract: FEE_JUICE_L2, function: "balance_of_public" },
+		],
+		transactions: [
+			// The gas claim riding inside a fueled deposit's claim tx (fjwc embedded payment), then the
+			// standalone/sponsored one — an app-phase `claim` may not end setup, the fee payment does.
+			...at(FEE_JUICE_L2, ["claim_and_end_setup", "claim"]),
+			// Private fuel (gas-follows-token): the 2-call cold-start payment run verbatim by the
+			// wallet's EXTERNAL path, plus the self-pay from an existing private FJ balance.
+			...at(PRIVATE_FPC_L2, ["mint_and_pay_fee", "pay_fee"]),
+			...onHub(HUB_SEND_FUNCTIONS),
+			...each(hubTokens, TOKEN_BURN_FUNCTIONS),
+			{ contract: sponsoredFpc, function: "sponsor_unconditionally" },
+			// exit_to_l1 needs a PUBLIC burn auth-wit, which lands on-chain as set_authorized on the
+			// standard auth registry (STANDARD_AUTH_REGISTRY_ADDRESS — derived from the artifact in 5.0,
+			// no longer protocol slot 0x..01). Without this the exit's auth-wit sendTx hits a
+			// transaction-scope violation.
+			{ contract: STANDARD_AUTH_REGISTRY_ADDRESS, function: "set_authorized" },
+		],
+	}
+}
+
+interface DripTokens {
+	readonly dripper: AztecAddress
+	readonly usdc: AztecAddress
+	readonly eth: AztecAddress
+}
+
+function dripScopes(drip: DripTokens | null): ManifestScopes {
+	if (!drip) return { contracts: [], utilities: [], simulatedTransactions: [], transactions: [] }
+	const tokens = [drip.usdc, drip.eth]
+	return {
+		contracts: [drip.dripper, drip.usdc, drip.eth],
+		utilities: each(tokens, ["balance_of_private"]),
+		simulatedTransactions: each(tokens, ["balance_of_public"]),
+		transactions: at(drip.dripper, ["drip_to_public", "drip_to_private"]),
+	}
+}
+
+function manifestOf(name: string, description: string, url: string, scopes: ManifestScopes): AppManifest {
+	return {
+		version: "1.0",
+		metadata: { name, version: "0.1.0", description, url },
+		capabilities: [
+			{ type: "accounts", canGet: true, canCreateAuthWit: true },
+			{ type: "contracts", contracts: scopes.contracts, canRegister: true, canGetMetadata: true },
+			{
+				type: "simulation",
+				utilities: { scope: scopes.utilities },
+				transactions: { scope: scopes.simulatedTransactions },
+			},
+			{ type: "transaction", scope: scopes.transactions },
+		],
+	}
+}
+
+export interface SendManifestInput {
+	/** Absent on a placeholder network — the grant then carries no hub and no token scopes. */
+	readonly hub?: AztecAddress
+	/** The hub Tokens this grant covers: the manifest's set plus every token the wizard has asked
+	 *  for. Exact addresses only — a wildcard Token scope would route burn authwits to silent
+	 *  execution. */
+	readonly tokens: ReadonlyArray<AztecAddress>
 	readonly sponsoredFpcAddress: AztecAddress
 	readonly appUrl?: string
 }
 
 /**
- * Build the wallet-sdk capability manifest for the Bridge tab. Wider than the Drip tab's:
- *  - `accounts.canCreateAuthWit: true` - `exit_to_l1` needs a public burn auth-wit.
- *  - `contracts` = [bridge, token, proxy] (token_bridge, the bridged token, the minter proxy).
- *  - `transaction.scope` covers claim + exit (both privacies), the token burns the exit auth-wit
- *    drives, and the SponsoredFPC sponsor call (Nulo enforces every `exec.calls` entry vs scope).
- *  - `simulation` scopes the token balance reads.
+ * Build the wallet-sdk capability manifest for the Send wizard. Wider than the Drip tab's:
+ *  - `accounts.canCreateAuthWit: true` — an exit needs a burn auth-wit.
+ *  - `contracts` = [hub, ...tokens, PrivateFPC]; the wallet registers each of them.
+ *  - `transaction.scope` covers registration, claim and exit on the hub, the Token burns the exit
+ *    auth-wit drives, the fee-payment calls, and the SponsoredFPC sponsor call (Nulo enforces every
+ *    `exec.calls` entry against the granted tx scope).
  *
- * Scope is refined in F4 once the flows run through the app (a missing entry surfaces as
- * "Function artifact not found").
+ * Growing `tokens` is what makes the wallet re-prompt: the approval replaces the stored grant, so a
+ * request must always carry the WHOLE set, never just the newcomer.
  */
-export function buildBridgeManifest(input: BridgeManifestInput): AppManifest {
-	const { bridgeAddress, tokenAddress, proxyAddress, sponsoredFpcAddress } = input
-	return {
-		version: "1.0",
-		metadata: {
-			name: "nulo-bridge",
-			version: "0.1.0",
-			description: "Bridge assets between Ethereum (L1) and Aztec (L2) - Nulo",
-			url: input.appUrl ?? defaultUrl(),
-		},
-		capabilities: [
-			{ type: "accounts", canGet: true, canCreateAuthWit: true },
-			{
-				type: "contracts",
-				contracts: [bridgeAddress, tokenAddress, proxyAddress],
-				canRegister: true,
-				canGetMetadata: true,
-			},
-			{
-				type: "simulation",
-				utilities: { scope: [{ contract: tokenAddress, function: "balance_of_private" }] },
-				// The fuel claim (canonical FeeJuice, a protocol contract) must be simulatable: the
-				// engine's claim gate dry-runs the token claim WITH the embedded fjwc fee payment.
-				transactions: {
-					scope: [
-						{ contract: tokenAddress, function: "balance_of_public" },
-						{ contract: FEE_JUICE_L2, function: "claim_and_end_setup" },
-						// The standalone/sponsored gas claim uses plain `claim` (an app-phase call may not
-						// end setup — the sponsored fee payment already does).
-						{ contract: FEE_JUICE_L2, function: "claim" },
-					],
-				},
-			},
-			{
-				type: "transaction",
-				scope: [
-					{ contract: bridgeAddress, function: "claim_public" },
-					{ contract: bridgeAddress, function: "claim_private" },
-					{ contract: bridgeAddress, function: "exit_to_l1_public" },
-					{ contract: bridgeAddress, function: "exit_to_l1_private" },
-					{ contract: tokenAddress, function: "burn_public" },
-					{ contract: tokenAddress, function: "burn_private" },
-					{ contract: sponsoredFpcAddress, function: "sponsor_unconditionally" },
-					// The gas claim riding inside a fueled deposit's claim tx (fjwc embedded payment).
-					{ contract: FEE_JUICE_L2, function: "claim_and_end_setup" },
-					// The standalone/sponsored gas claim (app-phase — see the simulation scope note).
-					{ contract: FEE_JUICE_L2, function: "claim" },
-				],
-			},
-		],
-	}
+export function buildSendManifest(input: SendManifestInput): AppManifest {
+	const scopes = sendScopes(input.hub, input.tokens, input.sponsoredFpcAddress)
+	return manifestOf("nulo-bridge", "Bridge assets between Ethereum (L1) and Aztec (L2) - Nulo", input.appUrl ?? defaultUrl(), scopes)
 }
 
 export interface CombinedManifestInput {
-	/** The drip tokens (Dripper/NULO/OLUN). Optional as a set: omit all three for a bridge+fuel-only
-	 *  manifest. The shipped app always supplies them (universal deploys, present on both networks).
-	 *  The bridge + PrivateFPC + FEE_JUICE + auth-registry grants are always present, so
-	 *  private-fuel-paid bridge claims work on both networks. */
+	/** The drip tokens (Dripper/NULO/OLUN) — testnet-only. Omit ALL three on mainnet: the grant then
+	 *  covers the Bridge + fuel (public + private) but NOT the Drip tab, matching the mainnet UI (no
+	 *  Drip tab). The PrivateFPC + FEE_JUICE + auth-registry grants are always present, so
+	 *  private-fuel-paid claims work on both networks. */
 	readonly dripperAddress?: AztecAddress
 	readonly usdcAddress?: AztecAddress
 	readonly ethAddress?: AztecAddress
-	readonly bridgeAddress: AztecAddress
-	readonly tokenAddress: AztecAddress
-	readonly proxyAddress: AztecAddress
+	/** Absent on a placeholder network — no hub, so no hub or token scopes. */
+	readonly hub?: AztecAddress
+	readonly hubTokens?: ReadonlyArray<AztecAddress>
 	readonly sponsoredFpcAddress: AztecAddress
 	readonly appUrl?: string
 }
 
 /**
- * Build ONE manifest covering the Bridge + fuel and — when the three drip tokens are supplied, as the
- * shipped app always does — the Drip tab. The tabs are the same origin = the same app to the wallet,
- * which keys the grant per-app, so two separate manifests collide (the second connect's grant shadows
- * the first, and registerContract for the missing contracts hits a scope violation). One complete
- * manifest, requested once, fixes that. Omitting the drip tokens yields a bridge+fuel-only manifest;
- * the PrivateFPC + FEE_JUICE + auth-registry grants stay in both shapes so private fuel +
- * private-fuel-paid claims work. `canCreateAuthWit: true` because the bridge's `exit_to_l1` needs a
- * public burn auth-wit.
+ * Build ONE manifest covering the Send wizard + fuel, and — when the drip tokens are supplied
+ * (testnet) — the Drip tab too. The tabs are the same origin = the same app to the wallet, which keys
+ * the grant per-app, so two separate manifests collide (the second connect's grant shadows the
+ * first, and registerContract for the missing contracts hits a scope violation). One complete
+ * manifest, requested once, fixes that.
  */
 export function buildCombinedManifest(input: CombinedManifestInput): AppManifest {
-	const { dripperAddress, usdcAddress, ethAddress, bridgeAddress, tokenAddress, proxyAddress, sponsoredFpcAddress } = input
-	// All three drip tokens present ⇒ include the drip grants; none ⇒ bridge+fuel only.
+	const { dripperAddress, usdcAddress, ethAddress, sponsoredFpcAddress } = input
+	// All three drip tokens present ⇒ include the drip grants; none ⇒ send+fuel only (mainnet).
 	const drip = dripperAddress && usdcAddress && ethAddress ? { dripper: dripperAddress, usdc: usdcAddress, eth: ethAddress } : null
-	return {
-		version: "1.0",
-		metadata: {
-			name: "nulo-tools",
-			version: "0.1.0",
-			description: drip ? "Drip + Bridge on Aztec - Nulo" : "Bridge on Aztec - Nulo",
-			url: input.appUrl ?? defaultUrl(),
-		},
-		capabilities: [
-			{ type: "accounts", canGet: true, canCreateAuthWit: true },
-			{
-				type: "contracts",
-				contracts: [
-					bridgeAddress,
-					tokenAddress,
-					proxyAddress,
-					PRIVATE_FPC_L2,
-					...(drip ? [drip.dripper, drip.usdc, drip.eth] : []),
-				],
-				canRegister: true,
-				canGetMetadata: true,
-			},
-			{
-				type: "simulation",
-				utilities: {
-					scope: [
-						...(drip
-							? [
-									{ contract: drip.usdc, function: "balance_of_private" },
-									{ contract: drip.eth, function: "balance_of_private" },
-								]
-							: []),
-						{ contract: tokenAddress, function: "balance_of_private" },
-						// No-fuel claim fee source: read the user's PRIVATE Fee Juice held at the PrivateFPC
-						// (abi_utility) to decide whether a no-fuel claim can self-pay from it.
-						{ contract: PRIVATE_FPC_L2, function: "balance_of" },
-					],
-				},
-				// The bridge tx methods are simulatable too (a prompt-free PXE dry-run). The deposit gates
-				// its claim PROMPT on a successful claim_public SIMULATION - PXE-aware, since the simulate
-				// reverts (l1_to_l2_msg_exists) until the wallet's own PXE can consume the message, which
-				// lags the node's checkpoint. Simulations are read-only, so widening this scope is safe;
-				// the actual send is still gated by the (separate) transaction scope.
-				transactions: {
-					scope: [
-						...(drip
-							? [
-									{ contract: drip.usdc, function: "balance_of_public" },
-									{ contract: drip.eth, function: "balance_of_public" },
-								]
-							: []),
-						{ contract: tokenAddress, function: "balance_of_public" },
-						{ contract: bridgeAddress, function: "claim_public" },
-						{ contract: bridgeAddress, function: "claim_private" },
-						{ contract: bridgeAddress, function: "exit_to_l1_public" },
-						{ contract: bridgeAddress, function: "exit_to_l1_private" },
-						{ contract: tokenAddress, function: "burn_public" },
-						{ contract: tokenAddress, function: "burn_private" },
-						{ contract: sponsoredFpcAddress, function: "sponsor_unconditionally" },
-						{ contract: STANDARD_AUTH_REGISTRY_ADDRESS, function: "set_authorized" },
-						{ contract: FEE_JUICE_L2, function: "claim_and_end_setup" },
-						// Private fuel (gas-follows-token): the 2-call cold-start payment — FeeJuice.claim
-						// then PrivateFPC.mint_and_pay_fee — run verbatim by the wallet's EXTERNAL path.
-						// Simulatable so the private claim can be simulate-gated like the public fjwc one.
-						{ contract: FEE_JUICE_L2, function: "claim" },
-						{ contract: PRIVATE_FPC_L2, function: "mint_and_pay_fee" },
-						// No-fuel claim paid from EXISTING private FJ: PrivateFPC.pay_fee. Simulatable so the
-						// no-fuel claim can be simulate-gated (with the FPC payment) like the fuel paths.
-						{ contract: PRIVATE_FPC_L2, function: "pay_fee" },
-						// No-fuel cold-check: read the account's public Fee Juice balance (private FJ is read via
-						// PrivateFPC.balance_of in the utilities scope above).
-						{ contract: FEE_JUICE_L2, function: "balance_of_public" },
-					],
-				},
-			},
-			{
-				type: "transaction",
-				scope: [
-					...(drip
-						? [
-								{ contract: drip.dripper, function: "drip_to_public" },
-								{ contract: drip.dripper, function: "drip_to_private" },
-							]
-						: []),
-					{ contract: FEE_JUICE_L2, function: "claim_and_end_setup" },
-					// Private fuel: FeeJuice.claim + PrivateFPC.mint_and_pay_fee (the public path uses
-					// claim_and_end_setup above; the private path claims then ends setup via the FPC).
-					{ contract: FEE_JUICE_L2, function: "claim" },
-					{ contract: PRIVATE_FPC_L2, function: "mint_and_pay_fee" },
-					// No-fuel claim self-paying from the user's existing private FJ balance at the FPC.
-					{ contract: PRIVATE_FPC_L2, function: "pay_fee" },
-					{ contract: bridgeAddress, function: "claim_public" },
-					{ contract: bridgeAddress, function: "claim_private" },
-					{ contract: bridgeAddress, function: "exit_to_l1_public" },
-					{ contract: bridgeAddress, function: "exit_to_l1_private" },
-					{ contract: tokenAddress, function: "burn_public" },
-					{ contract: tokenAddress, function: "burn_private" },
-					{ contract: sponsoredFpcAddress, function: "sponsor_unconditionally" },
-					// exit_to_l1 needs a PUBLIC burn auth-wit, which lands on-chain as set_authorized on the
-					// standard auth registry (STANDARD_AUTH_REGISTRY_ADDRESS — derived from the artifact in 5.0,
-					// no longer protocol slot 0x..01). Without this the
-					// withdraw's auth-wit sendTx hits a transaction-scope violation.
-					{ contract: STANDARD_AUTH_REGISTRY_ADDRESS, function: "set_authorized" },
-				],
-			},
-		],
-	}
+	const send = sendScopes(input.hub, input.hubTokens ?? [], sponsoredFpcAddress)
+	const drips = dripScopes(drip)
+	return manifestOf("nulo-tools", drip ? "Drip + Bridge on Aztec - Nulo" : "Bridge on Aztec - Nulo", input.appUrl ?? defaultUrl(), {
+		contracts: [...send.contracts, ...drips.contracts],
+		utilities: [...drips.utilities, ...send.utilities],
+		simulatedTransactions: [...drips.simulatedTransactions, ...send.simulatedTransactions],
+		transactions: [...drips.transactions, ...send.transactions],
+	})
 }
 
 function defaultUrl(): string {

@@ -1,4 +1,4 @@
-import { MANIFEST_CHAIN } from "@/contracts/bridge-deployments"
+import { MANIFEST_CHAIN } from "@/contracts/bridge-generation"
 import { type ToolsTarget, resolveToolsTarget } from "./network-targets"
 
 export interface ManifestChainIdentity {

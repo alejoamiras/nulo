@@ -132,4 +132,14 @@ describe("BridgeStepper", () => {
 		expect(prove?.attributes("data-state")).toBe("active")
 		expect(prove?.text()).toContain("Proven block 5 of 9")
 	})
+
+	it("a send's headline names the record's OWN token, not the deployment's", () => {
+		const send = {
+			...dep({ amount: "150000000" }),
+			schema: 3,
+			intent: "token",
+			token: { erc20: "0xe", portal: "0xp", l2Token: "0xl2", nameWord: "0xn", symbolWord: "0xs", decimals: 8, displaySymbol: "WBTC" },
+		} as never
+		expect(mount(BridgeStepper, { props: { record: send } }).text()).toContain("1.50 WBTC")
+	})
 })

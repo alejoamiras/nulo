@@ -49,8 +49,10 @@ export const TESTNET_TARGET: ToolsTarget = {
 	host: "testnet.tools.nulo.sh",
 	nodeUrl: "https://v5.testnet.rpc.aztec-labs.com",
 	l1ExplorerBaseUrl: "https://sepolia.etherscan.io",
-	// Verbatim the pre-two-network CSP (public/_headers) — the aztec-labs/aztec.network node hosts.
-	cspConnectSrc: "'self' data: blob: https://*.aztec.network wss://*.aztec.network https://*.aztec-labs.com wss://*.aztec-labs.com",
+	// The aztec-labs/aztec.network node hosts, plus the community token list the send wizard's catalog
+	// fetches (`TOKEN_LIST_ORIGIN`) — omitted, the list load fails and the catalog degrades to manifest-only.
+	cspConnectSrc:
+		"'self' data: blob: https://*.aztec.network wss://*.aztec.network https://*.aztec-labs.com wss://*.aztec-labs.com https://tokens.uniswap.org",
 }
 
 export const MAINNET_TARGET: ToolsTarget = {
@@ -63,9 +65,10 @@ export const MAINNET_TARGET: ToolsTarget = {
 	// The Alpha node — the same dRPC host the extension pins (apps/extension .../network/service.ts).
 	nodeUrl: "https://lb.drpc.live/aztec-mainnet/Ak_eT5HA2kbyqamqGTF702cdsdWqLTIR8YdadmahlY6k",
 	l1ExplorerBaseUrl: "https://etherscan.io",
-	// The Alpha node lives at lb.drpc.live — it MUST be in connect-src or the mainnet build can't
-	// reach its own node (the testnet CSP's *.aztec-labs.com does NOT cover it).
-	cspConnectSrc: "'self' data: blob: https://lb.drpc.live wss://lb.drpc.live",
+	// The mainnet build renders a static placeholder: no node handshake, no wallet transport, no token
+	// list. Every remote origin is therefore removed — the narrowest CSP a build can ship, and the one
+	// that makes a stray network call from this target fail loudly instead of reaching a live chain.
+	cspConnectSrc: "'self' data: blob:",
 }
 
 export const TARGETS: Record<ToolsTargetKey, ToolsTarget> = {

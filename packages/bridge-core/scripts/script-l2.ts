@@ -23,7 +23,7 @@ import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifac
 import { tokenBridgeHubArtifact } from "../src/artifacts"
 import { claimViaHub, hubAt, type HubClaimOutcome, type HubClaimParams } from "../src/hub-l2"
 import { deriveHubTokenInstance } from "../src/hub-token"
-import type { SendOpts } from "../src/l2"
+import type { SendOpts } from "../src/hub-l2"
 import type { ManifestToken, ManifestV2 } from "../src/manifest-v2"
 import { type DeployerNetwork, resolveDeployerKeys } from "./deployer-keys"
 

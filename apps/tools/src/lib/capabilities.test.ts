@@ -1,6 +1,7 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec/standard-contracts/auth-registry/constants"
 import { describe, expect, it } from "vitest"
-import { buildBridgeManifest, buildCombinedManifest, buildDripManifest } from "./capabilities"
+import { type AppManifest, buildCombinedManifest, buildDripManifest, buildSendManifest } from "./capabilities"
 
 const DRIPPER = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000001")
 const USDC = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000002")
@@ -15,13 +16,13 @@ describe("buildDripManifest", () => {
 		usdcAddress: USDC,
 		ethAddress: ETH,
 		sponsoredFpcAddress: SPONSORED_FPC,
-		appUrl: "https://tools.test",
+		appUrl: "https://faucet.test",
 	})
 
 	it("populates metadata with the dApp identity and url", () => {
 		expect(m.metadata.name).toBe("nulo-tools")
 		expect(m.metadata.version).toBe("0.1.0")
-		expect(m.metadata.url).toBe("https://tools.test")
+		expect(m.metadata.url).toBe("https://faucet.test")
 	})
 
 	it("requests accounts with canGet=true and canCreateAuthWit=false (no authwit needed)", () => {
@@ -69,261 +70,252 @@ describe("buildDripManifest", () => {
 	})
 })
 
-const BRIDGE = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000007")
-const TOKEN = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000006")
-const PROXY = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000007")
+const HUB = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000007")
+const TOKEN_A = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000008")
+const TOKEN_B = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000009")
+const AUTH_REGISTRY = STANDARD_AUTH_REGISTRY_ADDRESS.toString()
 
-describe("buildBridgeManifest", () => {
-	const m = buildBridgeManifest({
-		bridgeAddress: BRIDGE,
-		tokenAddress: TOKEN,
-		proxyAddress: PROXY,
-		sponsoredFpcAddress: SPONSORED_FPC,
-		appUrl: "https://bridge.test",
-	})
+type Scoped = { contract: { toString(): string }; function: string }
+const label = (s: Scoped) => `${s.contract.toString()}::${s.function}`
+
+function scopes(m: AppManifest) {
+	const contracts = m.capabilities.find((c) => c.type === "contracts")
+	const simulation = m.capabilities.find((c) => c.type === "simulation")
+	const transaction = m.capabilities.find((c) => c.type === "transaction")
+	if (contracts?.type !== "contracts" || simulation?.type !== "simulation" || transaction?.type !== "transaction") {
+		throw new Error("manifest is missing a capability")
+	}
+	return {
+		contracts: contracts.contracts.map((a) => a.toString()),
+		utilities: simulation.utilities.scope.map(label),
+		simulated: simulation.transactions.scope.map(label),
+		transactions: transaction.scope.map(label),
+	}
+}
+
+/** The send half, verbatim — one hub + N Tokens. Every builder that emits it is pinned against this. */
+function expectedSendScopes(tokens: AztecAddress[]) {
+	const t = tokens.map((a) => a.toString())
+	const hub = HUB.toString()
+	return {
+		contracts: [hub, ...t, PRIVATE_FPC_ADDRESS],
+		utilities: [...t.map((a) => `${a}::balance_of_private`), `${PRIVATE_FPC_ADDRESS}::balance_of`],
+		simulated: [
+			...t.map((a) => `${a}::balance_of_public`),
+			`${hub}::token_for`,
+			`${hub}::portal_for`,
+			`${hub}::exits_paused`,
+			`${hub}::claim_public`,
+			`${hub}::claim_private`,
+			`${hub}::exit_to_l1_public`,
+			`${hub}::exit_to_l1_private`,
+			...t.flatMap((a) => [`${a}::burn_public`, `${a}::burn_private`]),
+			`${SPONSORED_FPC.toString()}::sponsor_unconditionally`,
+			`${AUTH_REGISTRY}::set_authorized`,
+			`${feeJuiceAddress}::claim_and_end_setup`,
+			`${feeJuiceAddress}::claim`,
+			`${PRIVATE_FPC_ADDRESS}::mint_and_pay_fee`,
+			`${PRIVATE_FPC_ADDRESS}::pay_fee`,
+			`${feeJuiceAddress}::balance_of_public`,
+		],
+		transactions: [
+			`${feeJuiceAddress}::claim_and_end_setup`,
+			`${feeJuiceAddress}::claim`,
+			`${PRIVATE_FPC_ADDRESS}::mint_and_pay_fee`,
+			`${PRIVATE_FPC_ADDRESS}::pay_fee`,
+			`${hub}::register_token`,
+			`${hub}::register_and_claim_public`,
+			`${hub}::claim_public`,
+			`${hub}::claim_private`,
+			`${hub}::exit_to_l1_public`,
+			`${hub}::exit_to_l1_private`,
+			...t.flatMap((a) => [`${a}::burn_public`, `${a}::burn_private`]),
+			`${SPONSORED_FPC.toString()}::sponsor_unconditionally`,
+			`${AUTH_REGISTRY}::set_authorized`,
+		],
+	}
+}
+
+describe("buildSendManifest", () => {
+	const m = buildSendManifest({ hub: HUB, tokens: [TOKEN_A], sponsoredFpcAddress: SPONSORED_FPC, appUrl: "https://send.test" })
 
 	it("metadata identifies the bridge dApp", () => {
 		expect(m.metadata.name).toBe("nulo-bridge")
-		expect(m.metadata.url).toBe("https://bridge.test")
+		expect(m.metadata.url).toBe("https://send.test")
 	})
 
-	it("requests canCreateAuthWit=true (exit_to_l1 needs a public burn auth-wit)", () => {
-		const cap = m.capabilities.find((c) => c.type === "accounts")
-		expect(cap).toEqual({ type: "accounts", canGet: true, canCreateAuthWit: true })
+	it("requests canCreateAuthWit=true (an exit needs a burn auth-wit)", () => {
+		expect(m.capabilities.find((c) => c.type === "accounts")).toEqual({ type: "accounts", canGet: true, canCreateAuthWit: true })
 	})
 
-	it("declares contracts = [bridge, token, proxy]", () => {
-		const cap = m.capabilities.find((c) => c.type === "contracts")
-		if (cap?.type !== "contracts") throw new Error("contracts cap missing")
-		expect(cap.contracts.map((a) => a.toString())).toEqual([BRIDGE.toString(), TOKEN.toString(), PROXY.toString()])
-		expect(cap.canRegister).toBe(true)
+	it("emits the send scopes verbatim for one token", () => {
+		expect(scopes(m)).toEqual(expectedSendScopes([TOKEN_A]))
 	})
 
-	it("scopes token balance reads (private utility, public view)", () => {
-		const cap = m.capabilities.find((c) => c.type === "simulation")
-		if (cap?.type !== "simulation") throw new Error("simulation cap missing")
-		expect(cap.utilities.scope.map((s) => `${s.contract.toString()}::${s.function}`)).toEqual([
-			`${TOKEN.toString()}::balance_of_private`,
-		])
-		expect(cap.transactions.scope.map((s) => `${s.contract.toString()}::${s.function}`)).toEqual([
-			`${TOKEN.toString()}::balance_of_public`,
-			`${feeJuiceAddress}::claim_and_end_setup`,
-			`${feeJuiceAddress}::claim`,
-		])
+	it("emits per-token burns and balance reads for EVERY granted token", () => {
+		const two = buildSendManifest({ hub: HUB, tokens: [TOKEN_A, TOKEN_B], sponsoredFpcAddress: SPONSORED_FPC })
+		expect(scopes(two)).toEqual(expectedSendScopes([TOKEN_A, TOKEN_B]))
 	})
 
-	it("scopes claim + exit (both privacies) + token burns + sponsor", () => {
-		const cap = m.capabilities.find((c) => c.type === "transaction")
-		if (cap?.type !== "transaction") throw new Error("transaction cap missing")
-		expect(cap.scope.map((s) => s.function)).toEqual([
-			"claim_public",
-			"claim_private",
-			"exit_to_l1_public",
-			"exit_to_l1_private",
-			"burn_public",
-			"burn_private",
-			"sponsor_unconditionally",
-			"claim_and_end_setup",
-			"claim",
-		])
-		const sponsor = cap.scope.find((s) => s.function === "sponsor_unconditionally")
-		expect(sponsor?.contract.toString()).toBe(SPONSORED_FPC.toString())
+	it("grants registration + both claims + both exits on the hub, and simulates everything but the registrations", () => {
+		const s = scopes(m)
+		const hub = HUB.toString()
+		expect(s.transactions).toContain(`${hub}::register_token`)
+		expect(s.transactions).toContain(`${hub}::register_and_claim_public`)
+		// An instance the PXE has not seen cannot be simulated, so a registration is send-only.
+		expect(s.simulated).not.toContain(`${hub}::register_token`)
+		expect(s.simulated).not.toContain(`${hub}::register_and_claim_public`)
+	})
+
+	it("does NOT grant the guardian's pause switch", () => {
+		const s = scopes(m)
+		expect([...s.transactions, ...s.simulated, ...s.utilities].filter((e) => e.includes("set_exits_paused"))).toEqual([])
+	})
+
+	it("uses exact addresses everywhere - no wildcard contract or function", () => {
+		const s = scopes(m)
+		expect([...s.contracts, ...s.utilities, ...s.simulated, ...s.transactions].filter((e) => e.includes("*"))).toEqual([])
+	})
+
+	describe("placeholder network (no hub)", () => {
+		const p = buildSendManifest({ tokens: [TOKEN_A, TOKEN_B], sponsoredFpcAddress: SPONSORED_FPC })
+
+		it("emits no hub scopes and no token scopes at all", () => {
+			const s = scopes(p)
+			const named = [...s.contracts, ...s.utilities, ...s.simulated, ...s.transactions].join("|")
+			expect(named).not.toContain(HUB.toString())
+			expect(named).not.toContain(TOKEN_A.toString())
+			expect(named).not.toContain(TOKEN_B.toString())
+		})
+
+		it("keeps the fee machinery so fuel still works", () => {
+			const s = scopes(p)
+			expect(s.contracts).toEqual([PRIVATE_FPC_ADDRESS])
+			expect(s.utilities).toEqual([`${PRIVATE_FPC_ADDRESS}::balance_of`])
+			expect(s.transactions).toEqual([
+				`${feeJuiceAddress}::claim_and_end_setup`,
+				`${feeJuiceAddress}::claim`,
+				`${PRIVATE_FPC_ADDRESS}::mint_and_pay_fee`,
+				`${PRIVATE_FPC_ADDRESS}::pay_fee`,
+				`${SPONSORED_FPC.toString()}::sponsor_unconditionally`,
+				`${AUTH_REGISTRY}::set_authorized`,
+			])
+		})
 	})
 })
 
 describe("buildCombinedManifest", () => {
-	const m = buildCombinedManifest({
+	const faucetInput = {
 		dripperAddress: DRIPPER,
 		usdcAddress: USDC,
 		ethAddress: ETH,
-		bridgeAddress: BRIDGE,
-		tokenAddress: TOKEN,
-		proxyAddress: PROXY,
 		sponsoredFpcAddress: SPONSORED_FPC,
-		appUrl: "https://app.test",
+	}
+	const m = buildCombinedManifest({ ...faucetInput, hub: HUB, hubTokens: [TOKEN_A, TOKEN_B], appUrl: "https://app.test" })
+
+	/** The faucet half, unchanged by the wizard's arrival. */
+	const faucetPrefix = {
+		contracts: [DRIPPER.toString(), USDC.toString(), ETH.toString()],
+		utilities: [`${USDC.toString()}::balance_of_private`, `${ETH.toString()}::balance_of_private`],
+		simulated: [`${USDC.toString()}::balance_of_public`, `${ETH.toString()}::balance_of_public`],
+		transactions: [`${DRIPPER.toString()}::drip_to_public`, `${DRIPPER.toString()}::drip_to_private`],
+	}
+
+	it("requests canCreateAuthWit=true (the exit needs a burn auth-wit)", () => {
+		expect(m.capabilities.find((c) => c.type === "accounts")).toEqual({ type: "accounts", canGet: true, canCreateAuthWit: true })
 	})
 
-	it("identifies the app as nulo-tools (the name wallets show on approval)", () => {
-		expect(m.metadata.name).toBe("nulo-tools")
+	it("is the send scopes plus the faucet's, with the faucet reads first and its contracts last", () => {
+		const send = expectedSendScopes([TOKEN_A, TOKEN_B])
+		expect(scopes(m)).toEqual({
+			contracts: [...send.contracts, ...faucetPrefix.contracts],
+			utilities: [...faucetPrefix.utilities, ...send.utilities],
+			simulated: [...faucetPrefix.simulated, ...send.simulated],
+			transactions: [...faucetPrefix.transactions, ...send.transactions],
+		})
 	})
 
-	it("requests canCreateAuthWit=true (the bridge's exit needs a public burn auth-wit)", () => {
-		const cap = m.capabilities.find((c) => c.type === "accounts")
-		expect(cap).toEqual({ type: "accounts", canGet: true, canCreateAuthWit: true })
-	})
-
-	it("declares all seven contracts - bridge (bridge, token, proxy) + PrivateFPC + drip (dripper, usdc, eth)", () => {
-		const cap = m.capabilities.find((c) => c.type === "contracts")
-		if (cap?.type !== "contracts") throw new Error("contracts cap missing")
-		expect(cap.contracts.map((a) => a.toString())).toEqual([
-			BRIDGE.toString(),
-			TOKEN.toString(),
-			PROXY.toString(),
-			PRIVATE_FPC_ADDRESS,
-			DRIPPER.toString(),
-			USDC.toString(),
-			ETH.toString(),
-		])
-	})
-
-	// Bridge+fuel-only shape: omit the drip tokens, but the bridge + PrivateFPC + private-fuel scopes
-	// MUST stay so private fuel and private-fuel-paid claims work and the unconditional FPC
+	// The mainnet shape: omit the faucet tokens, but the PrivateFPC + FEE_JUICE + auth-registry scopes
+	// MUST stay so private fuel (DP6) and private-fuel-paid claims work and the unconditional FPC
 	// registration doesn't hit a scope violation.
-	describe("bridge+fuel-only shape (no drip tokens)", () => {
-		const mm = buildCombinedManifest({
-			bridgeAddress: BRIDGE,
-			tokenAddress: TOKEN,
-			proxyAddress: PROXY,
-			sponsoredFpcAddress: SPONSORED_FPC,
+	describe("mainnet shape (no faucet tokens)", () => {
+		const mm = buildCombinedManifest({ hub: HUB, hubTokens: [TOKEN_A], sponsoredFpcAddress: SPONSORED_FPC })
+
+		it("grants hub + token + PrivateFPC and NO faucet tokens", () => {
+			expect(scopes(mm).contracts).toEqual([HUB.toString(), TOKEN_A.toString(), PRIVATE_FPC_ADDRESS])
 		})
-		it("grants bridge + token + proxy + PrivateFPC and NO drip tokens", () => {
-			const cap = mm.capabilities.find((c) => c.type === "contracts")
-			if (cap?.type !== "contracts") throw new Error("contracts cap missing")
-			expect(cap.contracts.map((a) => a.toString())).toEqual([
-				BRIDGE.toString(),
-				TOKEN.toString(),
-				PROXY.toString(),
-				PRIVATE_FPC_ADDRESS,
-			])
-		})
-		it("keeps the private-fuel scopes (mint_and_pay_fee, pay_fee) and drops the drips", () => {
-			const cap = mm.capabilities.find((c) => c.type === "transaction")
-			if (cap?.type !== "transaction") throw new Error("transaction cap missing")
-			const fns = cap.scope.map((s) => s.function)
-			expect(fns).toContain("mint_and_pay_fee")
-			expect(fns).toContain("pay_fee")
-			expect(fns).not.toContain("drip_to_public")
-			expect(fns).not.toContain("drip_to_private")
+
+		it("keeps the private-fuel scopes (mint_and_pay_fee, pay_fee) and drops the faucet drips", () => {
+			const fns = scopes(mm).transactions
+			expect(fns).toContain(`${PRIVATE_FPC_ADDRESS}::mint_and_pay_fee`)
+			expect(fns).toContain(`${PRIVATE_FPC_ADDRESS}::pay_fee`)
+			expect(fns.some((f) => f.includes("drip_to_"))).toBe(false)
 		})
 	})
 
-	it("scopes both drips and the bridge claim/exit/burn + sponsor", () => {
-		const cap = m.capabilities.find((c) => c.type === "transaction")
-		if (cap?.type !== "transaction") throw new Error("transaction cap missing")
-		expect(cap.scope.map((s) => s.function)).toEqual([
-			"drip_to_public",
-			"drip_to_private",
-			"claim_and_end_setup",
-			"claim",
-			"mint_and_pay_fee",
-			"pay_fee",
-			"claim_public",
-			"claim_private",
-			"exit_to_l1_public",
-			"exit_to_l1_private",
-			"burn_public",
-			"burn_private",
-			"sponsor_unconditionally",
-			"set_authorized",
-		])
-	})
+	describe("placeholder network", () => {
+		const p = buildCombinedManifest({ ...faucetInput, hubTokens: [TOKEN_A] })
 
-	it("puts the bridge txs in simulation.transactions too (so the claim can be simulate-gated, prompt-free)", () => {
-		const cap = m.capabilities.find((c) => c.type === "simulation")
-		if (cap?.type !== "simulation") throw new Error("simulation cap missing")
-		const fns = cap.transactions.scope.map((s) => s.function)
-		expect(fns).toContain("balance_of_public")
-		expect(fns).toContain("claim_public")
-		expect(fns).toContain("sponsor_unconditionally")
+		it("keeps the faucet half and emits nothing for the hub or its tokens", () => {
+			const s = scopes(p)
+			expect(s.contracts).toEqual([PRIVATE_FPC_ADDRESS, ...faucetPrefix.contracts])
+			expect(s.transactions.some((f) => f.includes(HUB.toString()) || f.includes(TOKEN_A.toString()))).toBe(false)
+		})
 	})
 })
 
 describe("fuel claim scope (canonical FeeJuice)", () => {
-	const BRIDGE = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000007")
-	const PROXY = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000008")
-	const bridgeInput = () => ({
-		bridgeAddress: BRIDGE,
-		tokenAddress: USDC,
-		proxyAddress: PROXY,
-		sponsoredFpcAddress: SPONSORED_FPC,
-	})
-	const combinedInput = () => ({
+	const sendInput = { hub: HUB, tokens: [TOKEN_A], sponsoredFpcAddress: SPONSORED_FPC }
+	const combinedInput = {
 		dripperAddress: DRIPPER,
 		usdcAddress: USDC,
 		ethAddress: ETH,
 		sponsoredFpcAddress: SPONSORED_FPC,
-		bridgeAddress: BRIDGE,
-		tokenAddress: USDC,
-		proxyAddress: PROXY,
-	})
-	const txScope = (m: ReturnType<typeof buildBridgeManifest>) => {
-		const cap = m.capabilities.find((c) => c.type === "transaction")
-		if (cap?.type !== "transaction") throw new Error("transaction cap missing")
-		return cap.scope as { contract: unknown; function: string }[]
+		hub: HUB,
+		hubTokens: [TOKEN_A],
 	}
-	const simTxScope = (m: ReturnType<typeof buildBridgeManifest>) => {
-		const cap = m.capabilities.find((c) => c.type === "simulation")
-		if (cap?.type !== "simulation") throw new Error("simulation cap missing")
-		return cap.transactions?.scope as { contract: unknown; function: string }[]
-	}
-	const hasFjClaim = (scope: { contract: unknown; function: string }[]) =>
-		scope.some((s) => String(s.contract) === feeJuiceAddress && s.function === "claim_and_end_setup")
 
-	it("bridge manifest scopes the FJ claim for BOTH send and simulate (the fjwc dry-run)", () => {
-		const m = buildBridgeManifest(bridgeInput())
-		expect(hasFjClaim(txScope(m))).toBe(true)
-		expect(hasFjClaim(simTxScope(m))).toBe(true)
+	it("scopes the FJ claim for BOTH send and simulate (the fjwc dry-run) in either builder", () => {
+		for (const m of [buildSendManifest(sendInput), buildCombinedManifest(combinedInput)]) {
+			const s = scopes(m)
+			expect(s.transactions).toContain(`${feeJuiceAddress}::claim_and_end_setup`)
+			expect(s.simulated).toContain(`${feeJuiceAddress}::claim_and_end_setup`)
+		}
 	})
 
-	it("combined manifest scopes the FJ claim identically", () => {
-		const m = buildCombinedManifest(combinedInput())
-		expect(hasFjClaim(txScope(m))).toBe(true)
-		expect(hasFjClaim(simTxScope(m))).toBe(true)
-	})
-
-	const hasPrivateFuel = (scope: { contract: unknown; function: string }[]) =>
-		scope.some((s) => String(s.contract) === feeJuiceAddress && s.function === "claim") &&
-		scope.some((s) => String(s.contract) === PRIVATE_FPC_ADDRESS && s.function === "mint_and_pay_fee")
-
-	it("combined manifest scopes private fuel (FeeJuice.claim + mint_and_pay_fee) for send AND simulate", () => {
-		const m = buildCombinedManifest(combinedInput())
-		expect(hasPrivateFuel(txScope(m))).toBe(true)
-		expect(hasPrivateFuel(simTxScope(m))).toBe(true)
+	it("scopes private fuel (FeeJuice.claim + mint_and_pay_fee) for send AND simulate", () => {
+		const s = scopes(buildCombinedManifest(combinedInput))
+		for (const list of [s.transactions, s.simulated]) {
+			expect(list).toContain(`${feeJuiceAddress}::claim`)
+			expect(list).toContain(`${PRIVATE_FPC_ADDRESS}::mint_and_pay_fee`)
+		}
 	})
 
 	it("includes the PrivateFPC in contracts (pre-registered for the no-fuel private-FJ read under 5.0.1)", () => {
 		// The wallet only auto-registers the FPC when a tx USES it as fee payer; the no-fuel claim gate
 		// reads its balance_of BEFORE that, and 5.0.1's registerContract conformance (dev #288) stops the
-		// read's on-the-fly Contract.at() from registering the artifact — so the tools app pre-registers it.
-		const m = buildCombinedManifest(combinedInput())
-		const cap = m.capabilities.find((c) => c.type === "contracts")
-		if (cap?.type !== "contracts") throw new Error("contracts cap missing")
-		expect(cap.contracts.map(String)).toContain(PRIVATE_FPC_ADDRESS)
+		// read's on-the-fly Contract.at() from registering the artifact — so the faucet pre-registers it.
+		expect(scopes(buildCombinedManifest(combinedInput)).contracts).toContain(PRIVATE_FPC_ADDRESS)
 	})
 
 	it("scopes PrivateFPC.balance_of for the no-fuel private-FJ read (utilities only — it is abi_utility)", () => {
-		const m = buildCombinedManifest(combinedInput())
-		const cap = m.capabilities.find((c) => c.type === "simulation")
-		if (cap?.type !== "simulation") throw new Error("simulation cap missing")
-		const inUtil = (scope: { contract: unknown; function: string }[]) =>
-			scope.some((s) => String(s.contract) === PRIVATE_FPC_ADDRESS && s.function === "balance_of")
-		expect(inUtil(cap.utilities.scope as never)).toBe(true)
+		const s = scopes(buildCombinedManifest(combinedInput))
+		const entry = `${PRIVATE_FPC_ADDRESS}::balance_of`
+		expect(s.utilities).toContain(entry)
 		// It is a utility read — NOT a tx-shaped simulation NOR a send.
-		expect(inUtil(cap.transactions.scope as never)).toBe(false)
-		expect(inUtil(txScope(m))).toBe(false)
+		expect(s.simulated).not.toContain(entry)
+		expect(s.transactions).not.toContain(entry)
 	})
 
-	it("scopes PrivateFPC.pay_fee for the no-fuel private self-pay — BOTH simulate AND send (mirrors mint_and_pay_fee)", () => {
-		const m = buildCombinedManifest(combinedInput())
-		const hasPayFee = (scope: { contract: unknown; function: string }[]) =>
-			scope.some((s) => String(s.contract) === PRIVATE_FPC_ADDRESS && s.function === "pay_fee")
-		expect(hasPayFee(simTxScope(m))).toBe(true)
-		expect(hasPayFee(txScope(m))).toBe(true)
+	it("scopes FeeJuice.balance_of_public for the no-fuel cold-check (simulate only)", () => {
+		const s = scopes(buildCombinedManifest(combinedInput))
+		expect(s.simulated).toContain(`${feeJuiceAddress}::balance_of_public`)
+		expect(s.transactions).not.toContain(`${feeJuiceAddress}::balance_of_public`)
 	})
 
-	it("scopes FeeJuice.balance_of_public for the no-fuel L7 cold-check (simulate only)", () => {
-		const m = buildCombinedManifest(combinedInput())
-		const hasFjBalance = (scope: { contract: unknown; function: string }[]) =>
-			scope.some((s) => String(s.contract) === feeJuiceAddress && s.function === "balance_of_public")
-		expect(hasFjBalance(simTxScope(m))).toBe(true)
-		// It is a read — NOT a send-scoped function.
-		expect(hasFjBalance(txScope(m))).toBe(false)
-	})
-
-	it("the FJ entries are exactly the two claim functions on one protocol contract - no wildcards", () => {
-		const m = buildBridgeManifest(bridgeInput())
-		const fj = txScope(m).filter((s) => String(s.contract) === feeJuiceAddress)
-		expect(fj.map((s) => `${String(s.contract)}::${s.function}`)).toEqual([
+	it("the FJ entries are exactly the claim pair plus the read - no wildcards", () => {
+		const s = scopes(buildSendManifest(sendInput))
+		expect(s.transactions.filter((e) => e.startsWith(feeJuiceAddress))).toEqual([
 			`${feeJuiceAddress}::claim_and_end_setup`,
 			`${feeJuiceAddress}::claim`,
 		])

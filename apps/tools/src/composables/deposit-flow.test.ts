@@ -1,10 +1,7 @@
 // @vitest-environment node
 /**
- * Specification pins for deposit-flow.ts — the post-extraction Layer 2 of the
- * deposit-decomposition plan. Harness-bound pins (witness law, latch ordering, leg traces)
- * live in useDeposit.characterization.test.ts; these are the direct-function pins:
- * secret-derivation math, both fee multipliers, cleanup matrix, re-seal key retention,
- * event parsing, and the fee-juice builder's latch callbacks.
+ * Specification pins for deposit-flow.ts: secret-derivation math, both fee multipliers, the
+ * fee-juice builder's latch callbacks, and the send leg's receipt recovery.
  */
 
 const storageBacking = new Map<string, string>()
@@ -23,30 +20,32 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { Fr } from "@aztec/aztec.js/fields"
 import { GasFees } from "@aztec/stdlib/gas"
-import { EncryptionKey } from "@nulo/wallet-crypto"
-import { type DepositJournalRecord, deriveBridgeSecret, deriveTokenClaimSecret } from "@nulo/bridge-core"
+import {
+	type DepositJournalRecord,
+	deriveBridgeSecret,
+	deriveTokenClaimSecret,
+	type SendDepositRecord,
+	SWAP_BRIDGE_ROUTER_ABI,
+} from "@nulo/bridge-core"
+import { encodeAbiParameters, keccak256, toHex } from "viem"
 import { beforeEach, describe, expect, test, vi } from "vitest"
-import { ref } from "vue"
 
 const h = vi.hoisted(() => {
 	const calls: Array<[string, unknown]> = []
-	return { calls, t: (n: string, d?: unknown) => void calls.push([n, d]), updateRecordThrows: false }
+	return {
+		calls,
+		t: (n: string, d?: unknown) => void calls.push([n, d]),
+		updateRecordThrows: false,
+		/** What the node answers for a claim hash's receipt; unset = throws (unreachable). */
+		receiptStatus: undefined as string | undefined,
+		/** The PERSISTED record `currentRecord` answers with; undefined = nothing in the journal. */
+		persisted: undefined as unknown,
+	}
 })
 
-vi.mock("@/contracts/bridge-deployments", () => ({
-	BRIDGE_TOKEN_SYMBOL: "USDC",
-	BRIDGE_TOKEN_DECIMALS: 6,
-	FUEL_PORTAL: "0x0000000000000000000000000000000000000033",
-	FUEL_ASSET: "0x0000000000000000000000000000000000000044",
-	L1_USDC: "0x00000000000000000000000000000000000000aa",
-	L1_PORTAL: "0x00000000000000000000000000000000000000bb",
-	BRIDGE: { toString: () => "0x2018808f2c17794badb361c02c945582b8198b495a7e8d01154f7eeb7d719c0d" },
-	BRIDGE_PERMIT2: "0x00000000000000000000000000000000000000cc",
-	BRIDGE_ROUTER: "0x00000000000000000000000000000000000000dd",
-	BRIDGE_SWAP_TARGET: "0x00000000000000000000000000000000000000ee",
-	SUPPORTS_SALT_V2: true,
+vi.mock("@/contracts/bridge-generation", () => ({
 	FUEL_MIN_FJ: 1000n,
-	BRIDGE_FUEL: undefined,
+	SWAP: undefined,
 }))
 
 vi.mock("./useBridgeJournal", async (importOriginal) => {
@@ -57,6 +56,7 @@ vi.mock("./useBridgeJournal", async (importOriginal) => {
 			if (h.updateRecordThrows) throw new Error("storage full")
 			h.t("updateRecord", { id, patch })
 		},
+		currentRecord: () => h.persisted,
 		discard: (id: string) => h.t("discard", id),
 		flagRecordError: (id: string, msg: string) => h.t("flagRecordError", { id, msg }),
 	}
@@ -72,10 +72,24 @@ vi.mock("./fuelClaim", () => ({
 vi.mock("@aztec/aztec.js/node", () => ({
 	createAztecNodeClient: () => ({
 		getCurrentMinFees: async () => GasFees.from({ feePerDaGas: 10n, feePerL2Gas: 20n }),
+		getTxReceipt: async () => {
+			if (h.receiptStatus === undefined) throw new Error("node unreachable")
+			return { status: h.receiptStatus }
+		},
 	}),
 }))
 
-import { buildFeeJuiceClaimDep, finalizePrivateEnvelope, handleDepositFailure, parseBridgeWithFuelEvent } from "./deposit-flow"
+// Only the Wonderland payment method is faked, so the salt the private claim actually pays with is
+// observable; every derivation around it stays real.
+vi.mock("@nulo/bridge-core", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@nulo/bridge-core")>()),
+	privateMintAndPayFee: (_fpc: unknown, amount: bigint, secret: { toString(): string }, salt: { toString(): string }) => {
+		h.t("privateMintAndPayFee", { amount, secret: secret.toString(), salt: salt.toString() })
+		return { kind: "private-fpc" }
+	},
+}))
+
+import { buildFeeJuiceClaimDep, recoverDepositLeg, resolvePrivateFuelFee } from "./deposit-flow"
 
 const RECIPIENT = "0x1018808f2c17794badb361c02c945582b8198b495a7e8d01154f7eeb7d719c0d"
 
@@ -102,6 +116,8 @@ function mkRec(over: Partial<DepositJournalRecord> = {}): DepositJournalRecord {
 beforeEach(() => {
 	h.calls.length = 0
 	h.updateRecordThrows = false
+	h.receiptStatus = undefined
+	h.persisted = undefined
 	vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000)
 })
 
@@ -162,107 +178,165 @@ describe("fee-juice claim builder", () => {
 	})
 })
 
-describe("cleanup matrix (handleDepositFailure)", () => {
-	const err = ref<string | null>(null)
-	const rejection = Object.assign(new Error("User rejected the request."), { code: 4001 })
+describe("fee-juice claim builder — a prior claim on the PERSISTED block gates the rebuild", () => {
+	// A field-sized hash: the well-formedness check is 64 hex digits AND the TxHash parser.
+	const HASH = `0x${"00".repeat(31)}ab`
+	const built = () => h.calls.some(([n]) => n === "builderOpts")
+	const stopWhy = async (rec: DepositJournalRecord) => {
+		const dep = await buildFeeJuiceClaimDep(rec, "0xs", undefined, {})
+		return dep.simulate().then(
+			() => undefined,
+			(e: Error) => e.message,
+		)
+	}
 
-	beforeEach(() => {
-		err.value = null
+	test("a consumed block never rebuilds", async () => {
+		expect(await stopWhy(mkRec({ fuel: { ...mkRec().fuel, consumed: true } as never }))).toMatch(/already included/)
+		expect(built()).toBe(false)
 	})
 
-	test("rejection with no depositTxHash discards; approve nuance changes the copy", () => {
-		handleDepositFailure(rejection, "0xspec1", err, () => [mkRec()])
-		expect(h.calls.some(([n]) => n === "discard")).toBe(true)
-		expect(err.value).toBe("Rejected in your wallet - nothing was sent.")
-
-		h.calls.length = 0
-		handleDepositFailure(rejection, "0xspec1", err, () => [mkRec({ approveTxHash: "0xapprove" })])
-		expect(h.calls.some(([n]) => n === "discard")).toBe(true)
-		expect(err.value).toContain("Permit2 approval from this attempt remains active")
+	test("an included prior claim stops; a dropped one rebuilds; a pending or unreachable one waits", async () => {
+		const withHash = mkRec({ fuel: { ...mkRec().fuel, claimTxHash: HASH } as never })
+		h.receiptStatus = "success"
+		expect(await stopWhy(withHash)).toMatch(/already included/)
+		h.receiptStatus = "pending"
+		expect(await stopWhy(withHash)).toMatch(/still pending/)
+		h.receiptStatus = undefined
+		expect(await stopWhy(withHash)).toMatch(/still pending/)
+		expect(built()).toBe(false)
+		h.receiptStatus = "dropped"
+		expect(await stopWhy(withHash)).toBeUndefined()
+		expect(built()).toBe(true)
 	})
 
-	test("rejection AFTER the deposit tx flags instead of discarding; ambiguous failures flag", () => {
-		handleDepositFailure(rejection, "0xspec1", err, () => [mkRec({ depositTxHash: "0xdep" })])
-		expect(h.calls.some(([n]) => n === "discard")).toBe(false)
-		expect(h.calls.some(([n]) => n === "flagRecordError")).toBe(true)
-
-		h.calls.length = 0
-		handleDepositFailure(new Error("boom"), "0xspec1", err, () => [mkRec()])
-		expect(h.calls.some(([n]) => n === "discard")).toBe(false)
-		expect(h.calls.some(([n]) => n === "flagRecordError")).toBe(true)
+	test("a malformed persisted hash is a record fault, not a receipt to wait on", async () => {
+		expect(await stopWhy(mkRec({ fuel: { ...mkRec().fuel, claimTxHash: "0xnothex" } as never }))).toMatch(/malformed/)
+		expect(built()).toBe(false)
 	})
 
-	test("no id or no record: only the error surface is written", () => {
-		handleDepositFailure(new Error("boom"), null, err, () => [])
-		expect(h.calls).toHaveLength(0)
-		expect(err.value).toBeTruthy()
-	})
-})
-
-describe("finalizePrivateEnvelope key lifecycle", () => {
-	test("a failing JOURNAL WRITE retains the key too — the seal succeeded but nothing persisted", async () => {
-		const sealKeys = new Map<string, EncryptionKey>()
-		sealKeys.set("0xspec1", await EncryptionKey.fromPassword("spec-pin-password"))
-		h.updateRecordThrows = true
-		await expect(
-			finalizePrivateEnvelope({
-				id: "0xspec1",
-				sealKeys,
-				secretStr: "0xs",
-				recipient: RECIPIENT,
-				tokenAmountStr: "900",
-				from: "0xef4d9e1f4e9e2dd9e747b53f4be3d04bfa935f2d",
-				leafIndex: "1",
-			}),
-		).rejects.toThrow("storage full")
-		expect(sealKeys.has("0xspec1")).toBe(true)
-
-		// And the success path deletes it — the full lifecycle in one place.
-		h.updateRecordThrows = false
-		await finalizePrivateEnvelope({
-			id: "0xspec1",
-			sealKeys,
-			secretStr: "0xs",
-			recipient: RECIPIENT,
-			tokenAmountStr: "900",
-			from: "0xef4d9e1f4e9e2dd9e747b53f4be3d04bfa935f2d",
-			leafIndex: "1",
-		})
-		expect(sealKeys.has("0xspec1")).toBe(false)
-	})
-
-	test("a failing seal RETAINS the key (retry stays possible); no key is a no-op", async () => {
-		const sealKeys = new Map<string, never>()
-		sealKeys.set("0xspec1", { garbage: true } as never)
-		await expect(
-			finalizePrivateEnvelope({
-				id: "0xspec1",
-				sealKeys: sealKeys as never,
-				secretStr: "0xs",
-				recipient: RECIPIENT,
-				tokenAmountStr: "900",
-				from: "0xef4d9e1f4e9e2dd9e747b53f4be3d04bfa935f2d",
-				leafIndex: "1",
-			}),
-		).rejects.toThrow()
-		expect(sealKeys.has("0xspec1")).toBe(true)
-
-		h.calls.length = 0
-		await finalizePrivateEnvelope({
-			id: "0xother",
-			sealKeys: sealKeys as never,
-			secretStr: "0xs",
-			recipient: RECIPIENT,
-			tokenAmountStr: "900",
-			from: "0xef4d9e1f4e9e2dd9e747b53f4be3d04bfa935f2d",
-			leafIndex: "1",
-		})
-		expect(h.calls).toHaveLength(0)
+	test("the gate reads the PERSISTED block over the captured one, and latches merge into it", async () => {
+		// The captured record has no prior claim; the journal holds one that dropped, plus a field the
+		// captured copy never saw. The latch must carry that field, not overwrite it from the copy.
+		h.persisted = mkRec({ fuel: { ...mkRec().fuel, claimTxHash: HASH, leafIndex: "7" } as never })
+		h.receiptStatus = "dropped"
+		await buildFeeJuiceClaimDep(mkRec(), "0xs", undefined, {})
+		expect(built()).toBe(true)
+		const opts = h.calls.find(([n]) => n === "builderOpts")?.[1] as { onAttempt: () => void }
+		opts.onAttempt()
+		const patch = h.calls
+			.filter(([n]) => n === "updateRecord")
+			.map(([, d]) => (d as { patch: { fuel: unknown } }).patch.fuel)
+			.at(-1)
+		expect(patch).toMatchObject({ leafIndex: "7", claimTxHash: HASH, claimAttempt: true })
 	})
 })
 
-describe("parseBridgeWithFuelEvent", () => {
-	test("no matching event yields undefined (never a guessed shape)", () => {
-		expect(parseBridgeWithFuelEvent([])).toBeUndefined()
+describe("private fuel fee — the sealed salt is authoritative", () => {
+	const SEALED_SALT = new Fr(0x5eaedn).toString()
+	const TAMPERED_SALT = new Fr(0xbadn).toString()
+	const recipient = AztecAddress.fromStringUnsafe(RECIPIENT)
+
+	const fueled = (bridgeSecretSalt: string): SendDepositRecord =>
+		mkRec({
+			schema: 3,
+			intent: "token+gas",
+			isPrivate: true,
+			secret: undefined,
+			fuel: {
+				amount: "10",
+				secret: "0xf",
+				secretHashHex: "0xfh",
+				minOutput: "9",
+				received: "5000",
+				leafIndex: "8",
+				bridgeSecretSalt,
+			},
+		} as never) as unknown as SendDepositRecord
+
+	const paidWith = () => h.calls.find(([n]) => n === "privateMintAndPayFee")?.[1] as { secret: string; salt: string }
+
+	test("a rewritten journal salt loses to the envelope's, and the record is corrected", async () => {
+		const fee = await resolvePrivateFuelFee(fueled(TAMPERED_SALT), recipient, SEALED_SALT)
+
+		expect(fee.kind).toBe("fee")
+		expect(paidWith().salt).toBe(SEALED_SALT)
+		expect(paidWith().secret).toBe(deriveBridgeSecret(Fr.fromString(SEALED_SALT), recipient).toString())
+		// The record is rewritten from the sealed copy, so the next retry no longer disagrees.
+		const patches = h.calls
+			.filter(([n]) => n === "updateRecord")
+			.map(([, d]) => (d as { patch: { fuel: { bridgeSecretSalt: string } } }).patch)
+		expect(patches.at(0)?.fuel.bridgeSecretSalt).toBe(SEALED_SALT)
+		expect((fee as { fuel: { bridgeSecretSalt: string } }).fuel.bridgeSecretSalt).toBe(SEALED_SALT)
+	})
+
+	test("an agreeing journal salt is left alone - no rewrite, same claim", async () => {
+		const fee = await resolvePrivateFuelFee(fueled(SEALED_SALT), recipient, SEALED_SALT)
+
+		expect(fee.kind).toBe("fee")
+		expect(paidWith().salt).toBe(SEALED_SALT)
+		expect(h.calls.filter(([n]) => n === "updateRecord")).toHaveLength(0)
+	})
+
+	test("with no envelope opened the journal copy still drives the claim", async () => {
+		await resolvePrivateFuelFee(fueled(TAMPERED_SALT), recipient)
+		expect(paidWith().salt).toBe(TAMPERED_SALT)
+	})
+})
+
+describe("recoverDepositLeg — send records", () => {
+	const ROUTER = "0x1111111111111111111111111111111111111111" as const
+	const generation = {
+		router: ROUTER,
+		routerAbi: SWAP_BRIDGE_ROUTER_ABI,
+		permit2: "0x000000000022d473030f116ddee9f6b43ac78ba3",
+		factory: "0x3333333333333333333333333333333333333333",
+		implementation: "0x2222222222222222222222222222222222222222",
+		feeJuicePortal: "0x4444444444444444444444444444444444444444",
+		feeAsset: "0x5555555555555555555555555555555555555555",
+		swapTarget: "0x6666666666666666666666666666666666666666",
+		chainId: 31337,
+		hub: `0x${"7".padStart(64, "0")}`,
+		tokenClassId: `0x${"1".padStart(64, "0")}`,
+	} as const
+	const zero32 = `0x${"0".repeat(64)}` as const
+	const bridgeLog = (emitter: string, index: bigint, logIndex: number) => ({
+		address: emitter,
+		logIndex,
+		topics: [keccak256(toHex("Bridge(bytes32,bytes32,uint256,uint256,bytes32,bool)")), zero32],
+		data: encodeAbiParameters(
+			[{ type: "bytes32" }, { type: "uint256" }, { type: "uint256" }, { type: "bytes32" }, { type: "bool" }],
+			[`0x${"b".repeat(64)}`, index, 5n, zero32, false],
+		),
+		blockNumber: 1n,
+		blockHash: zero32,
+		transactionHash: zero32,
+		transactionIndex: 0,
+		removed: false,
+	})
+	const record = {
+		id: "send-1",
+		schema: 3,
+		direction: "deposit",
+		intent: "token",
+		depositTxHash: zero32,
+		chainId: 31337,
+		isPrivate: false,
+	} as unknown as SendDepositRecord
+
+	test("reads the deposit leaf from the router's own event, not the first Inbox leaf", async () => {
+		const client = {
+			getTransactionReceipt: async () => ({
+				status: "success",
+				// A first deposit's receipt: a foreign same-signature log first, then the router's.
+				logs: [bridgeLog("0x00000000000000000000000000000000000e2c20", 999n, 0), bridgeLog(ROUTER, 41n, 1)],
+			}),
+		}
+		await expect(recoverDepositLeg(record, client, generation as never)).resolves.toBe("recovered")
+		expect(h.calls.at(-1)).toEqual(["updateRecord", { id: "send-1", patch: { leafIndex: "41", messageHash: `0x${"b".repeat(64)}` } }])
+	})
+
+	test("a send record without a generation cannot recover", async () => {
+		const client = { getTransactionReceipt: async () => ({ status: "success", logs: [] }) }
+		await expect(recoverDepositLeg(record, client)).rejects.toThrow(/no bridge/)
 	})
 })

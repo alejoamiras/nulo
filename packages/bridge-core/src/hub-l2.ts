@@ -12,7 +12,6 @@ import type { Wallet } from "@aztec/aztec.js/wallet"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { tokenBridgeHubArtifact } from "./artifacts"
 import type { JournalTokenBlock } from "./journal"
-import type { SendOpts } from "./l2"
 
 export function hubAt(wallet: Wallet, hub: string): ContractBase {
 	return Contract.at(AztecAddress.fromStringUnsafe(hub), tokenBridgeHubArtifact, wallet)
@@ -40,6 +39,9 @@ export async function hubExitsPaused(hub: ContractBase, from: string): Promise<b
 	// A safety switch must never read as open because the simulator's answer changed shape.
 	throw new Error(`exits_paused() answered ${JSON.stringify(v)} — not a boolean; refusing to treat the hub as unpaused`)
 }
+
+/** Opaque send options (fee + from + wait); the shape varies by wallet. */
+export type SendOpts = Record<string, unknown>
 
 /** Everything the L2 side needs from the L1 receipt + the journal. */
 export interface HubClaimParams {
@@ -166,10 +168,14 @@ function exitCall(hub: ContractBase, p: HubExitParams) {
 /**
  * The L2 half of the exit preflight: simulating the exit runs the pause assert (public inline,
  * private through its enqueued public call), the portal read and the burn, so a paused hub, an
- * unregistered token or a short balance all surface before any authwit is spent.
+ * unregistered token or a short balance all surface before the exit is sent.
+ *
+ * A private burn resolves its authorization through the witness oracle, so simulating one without
+ * its off-chain authwit fails on the missing witness rather than on the exit itself — pass that
+ * witness through `opts`, exactly as the send does.
  */
-export async function preflightHubExit(hub: ContractBase, p: HubExitParams, from: string): Promise<void> {
-	await exitCall(hub, p).simulate({ from: AztecAddress.fromStringUnsafe(from) } as never)
+export async function preflightHubExit(hub: ContractBase, p: HubExitParams, from: string, opts: SendOpts = {}): Promise<void> {
+	await exitCall(hub, p).simulate({ ...opts, from: AztecAddress.fromStringUnsafe(from) } as never)
 }
 
 export function exitViaHub(hub: ContractBase, p: HubExitParams, send: SendOpts) {

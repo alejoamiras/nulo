@@ -8,7 +8,7 @@ import {Epoch} from "@aztec/core/libraries/TimeLib.sol";
 import {Clones} from "@oz/proxy/Clones.sol";
 import {PortalFactory} from "../src/PortalFactory.sol";
 import {TokenPortalImpl} from "../src/TokenPortalImpl.sol";
-import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./PortalRoundtripFuzz.t.sol";
+import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./mocks/AztecFakes.sol";
 import {PlainERC20} from "./mocks/MetadataERC20s.sol";
 import {PortalImplWithoutPause} from "./mocks/RouterMocks.sol";
 

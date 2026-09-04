@@ -11,7 +11,7 @@ import { waitForProven } from "@aztec/aztec.js/contracts"
 import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { Fr } from "@aztec/aztec.js/fields"
 import type { createAztecNodeClient } from "@aztec/aztec.js/node"
-import { computeL2ToL1MembershipWitness } from "@aztec/stdlib/messaging"
+import { computeL2ToL1MembershipWitness, getL2ToL1MessageLeafId } from "@aztec/stdlib/messaging"
 import { OutboxContract } from "@aztec/ethereum/contracts"
 import { type Abi, type Account, type Address, type Hex, parseEventLogs, type PublicClient, type WalletClient } from "viem"
 import { deriveTokenClaimSecret } from "./claim-secret"
@@ -197,6 +197,9 @@ export interface WithdrawConsumeParams {
 	portalAbi: Abi
 	/** Seconds to wait for the burn's epoch to prove (aztec.js default 600 — raise for slow networks like the live testnet). */
 	provenTimeoutSec?: number
+	/** The consume hash the moment it exists, before its receipt is awaited — a caller with a
+	 *  journal records it here so a crash mid-wait still knows which transaction to finish. */
+	onSent?: (txHash: Hex) => void
 }
 
 /**
@@ -211,7 +214,7 @@ export async function consumeWithdrawal(
 	exitReceipt: { txHash: unknown },
 	p: WithdrawConsumeParams,
 	onStage?: (s: WithdrawFlowStage) => void,
-): Promise<void> {
+): Promise<{ consumeTxHash: Hex }> {
 	onStage?.("proving")
 	await waitForProven(node, exitReceipt as never, (p.provenTimeoutSec ? { provenTimeout: p.provenTimeoutSec } : undefined) as never)
 	const eff = await node.getTxEffect(exitReceipt.txHash as never)
@@ -235,8 +238,31 @@ export async function consumeWithdrawal(
 		args: [p.recipientL1, p.amount, false, BigInt(wit.epochNumber), BigInt(wit.numCheckpointsInEpoch), wit.leafIndex, path] as never,
 		account: l1.account,
 	})
-	await l1.pub.waitForTransactionReceipt({ hash: await l1.wallet.writeContract(req.request as never) })
+	const consumeTxHash = (await l1.wallet.writeContract(req.request as never)) as Hex
+	p.onSent?.(consumeTxHash)
+	await l1.pub.waitForTransactionReceipt({ hash: consumeTxHash })
 	onStage?.("done")
+	return { consumeTxHash }
+}
+
+/**
+ * Whether the Outbox has ALREADY consumed this exit's L2→L1 message. The message names its L1
+ * recipient, so anyone may finish it and the funds still land where the burn said — which is why a
+ * failed consume must ask this before it retries: a message someone else finished can never be
+ * consumed again, and a caller that keeps trying reports a permanent failure over a completed exit.
+ *
+ * Unknowable answers read as NOT consumed (a missing effect, an unproven epoch): a false "already
+ * done" would mark an exit complete whose funds are still sitting in the Outbox.
+ */
+export async function isOutboxMessageConsumed(l1: L1Ctx, node: AztecNodeClient, exitReceipt: { txHash: unknown }): Promise<boolean> {
+	const eff = await node.getTxEffect(exitReceipt.txHash as never)
+	const messageHash = eff?.data.l2ToL1Msgs[0]
+	if (!messageHash) return false
+	const { l1ContractAddresses } = await node.getNodeInfo()
+	const outbox = new OutboxContract(l1.pub as never, l1ContractAddresses.outboxAddress)
+	const wit = await computeL2ToL1MembershipWitness(node, outbox, messageHash, exitReceipt.txHash as never, 0)
+	if (!wit) return false
+	return outbox.hasMessageBeenConsumedAtEpoch(wit.epochNumber, getL2ToL1MessageLeafId(wit))
 }
 
 /** One-tx swap+fuel bridge stages, surfaced to the UI for the loading bar. */

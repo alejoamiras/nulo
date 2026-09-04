@@ -1,37 +1,26 @@
 import type { DepositJournalRecord } from "@nulo/bridge-core"
-import { recoveryKeyFromSignature, recoveryKeyMessage, sealBridgeBackup } from "@nulo/bridge-core"
+import { feeJuiceAddress, predictPortal, recoveryKeyFromSignature, recoveryKeyMessage, sealBridgeBackup } from "@nulo/bridge-core"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ref } from "vue"
 
 const signMessage = vi.fn(async ({ message }: { message: string }) => `0xsig-for:${message.length}`)
 const retainedKey = vi.fn((_id: string) => undefined as unknown)
 
-vi.mock("@/contracts/bridge-deployments", () => ({
-	BRIDGE_FUEL: undefined,
-	L1_USDC: "0xl1token",
-	BRIDGE_TOKEN_SYMBOL: "USDC",
-	BRIDGE_TOKEN_DECIMALS: 6,
-	L1_PORTAL: "0xportal",
-	FUEL_PORTAL: "0xfjportal",
-	FUEL_ASSET: "0xfjasset",
-	FUEL_MIN_FJ: 11000000000000000000n,
-	BRIDGE: { toString: () => "0xbridge" },
-}))
+vi.mock("@/contracts/bridge-generation", () => ({ FUEL_PORTAL: "0xfd05ee8687d4ca828ba3d26ef04b80dd1348e5bd" }))
 vi.mock("./useL1Wallet", () => ({
 	useL1Wallet: () => ({
 		address: ref("0xef4d9e1f4e9e2dd9e747b53f4be3d04bfa935f2d"),
 		ensureWalletClient: () => ({ signMessage }),
 	}),
 }))
-vi.mock("./useDeposit", () => ({
-	getRetainedSealKey: (id: string) => retainedKey(id),
-	providerFingerprint: () => "rabby",
-}))
+vi.mock("./useSend", () => ({ getRetainedSealKey: (id: string) => retainedKey(id) }))
+vi.mock("./deposit-flow", () => ({ providerFingerprint: () => "rabby" }))
 
 import { __resetJournalForTests, addRecord, connectJournalDeps, useBridgeJournal } from "./useBridgeJournal"
 import { useBridgeBackup } from "./useBridgeBackup"
 
-const DEPLOY = { chainId: 11155111, portal: "0xportal", bridge: "0xbridge" }
+// A direct Fee Juice bridge: the one pre-generation shape whose recovery file still restores here.
+const DEPLOY = { chainId: 11155111, portal: "0xfd05ee8687d4ca828ba3d26ef04b80dd1348e5bd", bridge: feeJuiceAddress.toString() }
 
 function publicDeposit(over: Partial<DepositJournalRecord> = {}): DepositJournalRecord {
 	return {
@@ -39,6 +28,7 @@ function publicDeposit(over: Partial<DepositJournalRecord> = {}): DepositJournal
 		id: "0xbk",
 		direction: "deposit",
 		isPrivate: false,
+		assetKind: "fee-juice",
 		amount: "100000000",
 		createdAt: 1,
 		updatedAt: 2,
@@ -140,5 +130,71 @@ describe("useBridgeBackup", () => {
 		const file = await sealBridgeBackup(await recoveryKeyFromSignature("0xsomeone-else"), rec, "0xother")
 		await expect(useBridgeBackup().restoreFile(JSON.stringify(file))).rejects.toThrow(/wasn't sealed by the connected|corrupted/)
 		expect(useBridgeJournal().records.value).toHaveLength(0)
+	})
+
+	describe("send (schema 3) files", () => {
+		const FACTORY = "0x5eb3bc0a489c5a8288765d2336659ebca68fcd00"
+		const IMPLEMENTATION = "0xc95ff0608561b6ba084c78d14f09e9826190f968"
+		const ERC20 = "0x70e0ba845a1a0f2da3359c97e0285013525ffc49"
+		const HUB = `0x${"b".repeat(64)}`
+		const CLONE = predictPortal(FACTORY, IMPLEMENTATION, ERC20)
+
+		const sendRecord = () =>
+			({
+				...publicDeposit(),
+				schema: 3,
+				intent: "token",
+				token: {
+					erc20: ERC20,
+					portal: CLONE,
+					l2Token: `0x${"c".repeat(64)}`,
+					nameWord: `0x${"1".repeat(64)}`,
+					symbolWord: `0x${"2".repeat(64)}`,
+					decimals: 6,
+					displaySymbol: "USDC",
+					registerKey: `0x${"4".repeat(64)}`,
+					registerIndex: "3",
+				},
+				portal: CLONE,
+				bridge: HUB,
+			}) as unknown as DepositJournalRecord
+
+		const wireSend = (validateTokenBlock: () => Promise<string | null>) =>
+			connectJournalDeps({
+				sendBinding: () => ({
+					factory: FACTORY,
+					implementation: IMPLEMENTATION,
+					hub: HUB,
+					feeJuicePortal: "0xfd05ee8687d4ca828ba3d26ef04b80dd1348e5bd",
+				}),
+				validateTokenBlock,
+			})
+
+		async function fileFor(rec: DepositJournalRecord) {
+			const message = recoveryKeyMessage({ chainId: rec.chainId, portal: rec.portal, bridge: rec.bridge, secretHashHex: rec.id })
+			return sealBridgeBackup(await recoveryKeyFromSignature(`0xsig-for:${message.length}`), rec, "0xme")
+		}
+
+		it("a file naming this generation's hub restores once its block still matches the factory", async () => {
+			wireSend(async () => null)
+			const file = await fileFor(sendRecord())
+			const restored = await useBridgeBackup().restoreFile(JSON.stringify(file))
+			expect(restored.schema).toBe(3)
+			expect(useBridgeJournal().records.value).toHaveLength(1)
+		})
+
+		it("a block the factory contradicts is refused - the record is never tracked", async () => {
+			wireSend(async () => "This token's registration on Ethereum no longer matches this record.")
+			const file = await fileFor(sendRecord())
+			await expect(useBridgeBackup().restoreFile(JSON.stringify(file))).rejects.toThrow(/no longer matches/)
+			expect(useBridgeJournal().records.value).toHaveLength(0)
+		})
+
+		it("a file naming another hub never reaches the unseal", async () => {
+			wireSend(async () => null)
+			const file = await fileFor({ ...sendRecord(), bridge: `0x${"9".repeat(64)}` } as DepositJournalRecord)
+			await expect(useBridgeBackup().restoreFile(JSON.stringify(file))).rejects.toThrow(/different bridge deployment/)
+			expect(signMessage).not.toHaveBeenCalled()
+		})
 	})
 })

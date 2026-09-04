@@ -23,6 +23,20 @@ const activeFlowId = ref<string | null>(null)
 vi.mock("@/composables/useBridgeJournal", () => ({
 	useBridgeJournal: () => ({ visibleRecords, lastCompleted, runtime: ref({}), activeFlowId }),
 }))
+
+// The generation reader validates the live manifest at module init, and the wallet session imports
+// it. A bridge-less generation is enough for everything this suite asserts.
+vi.mock("@/contracts/bridge-generation", () => ({
+	HUB: undefined,
+	HUB_ARTIFACT: { name: "TokenBridgeHub" },
+	HUB_TOKEN_ARTIFACT: { name: "Token" },
+	MANIFEST_TOKENS: [],
+	TOKEN_CLASS_ID: undefined,
+	SEND_GENERATION: undefined,
+	IS_PLACEHOLDER: true,
+	rebuildHubInstance: vi.fn(),
+	rebuildHubTokenInstance: vi.fn(),
+}))
 vi.mock("@/composables/useToast", () => ({
 	useToast: () => ({ push }),
 }))
@@ -37,7 +51,9 @@ import BridgeJournal from "./BridgeJournal.vue"
 import BridgeJournalCard from "./BridgeJournalCard.vue"
 // Amounts + symbol derive from the LIVE manifest (the token cutover changes both — a hardcoded
 // 18-dec "AZLO" fixture breaks on a 6-dec USDC manifest).
-import { BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
+// A journal record with no token block of its own renders under asset-label's generic fallback.
+const BRIDGE_TOKEN_DECIMALS = 18
+const BRIDGE_TOKEN_SYMBOL = "TOKEN"
 const UNIT = 10n ** BigInt(BRIDGE_TOKEN_DECIMALS)
 
 const sel = (t: string) => `[data-testid="${t}"]`
@@ -73,6 +89,21 @@ describe("BridgeJournal", () => {
 		await vi.waitFor(() =>
 			expect(push).toHaveBeenCalledWith(expect.objectContaining({ kind: "error", text: expect.stringContaining("already tracked") })),
 		)
+	})
+
+	it("RESTORE: an oversized file is refused by name before it is ever read into memory", async () => {
+		restoreFile.mockClear()
+		const w = mount(BridgeJournal, { global: { stubs: { BridgeJournalCard: true } } })
+		const input = w.find(sel(TESTIDS.journalRestoreInput))
+		const huge = new File(["{}"], "huge.json", { type: "application/json" })
+		Object.defineProperty(huge, "size", { value: 2 * 1024 * 1024, configurable: true })
+		const text = vi.spyOn(huge, "text")
+		Object.defineProperty(input.element, "files", { value: [huge], configurable: true })
+		await input.trigger("change")
+		await nextTick()
+		expect(text).not.toHaveBeenCalled()
+		expect(restoreFile).not.toHaveBeenCalled()
+		expect(push).toHaveBeenCalledWith(expect.objectContaining({ kind: "error", text: expect.stringContaining("too large") }))
 	})
 
 	it("a FOREGROUND completion does not toast (the receipt already announced it)", async () => {

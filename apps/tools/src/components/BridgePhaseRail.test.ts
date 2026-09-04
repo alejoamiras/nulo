@@ -116,4 +116,26 @@ describe("BridgePhaseRail", () => {
 		expect(cell.classes()).toContain("landed")
 		w.unmount()
 	})
+
+	// A first-time PRIVATE send registers the token in a transaction of its own; that phase is the
+	// only one the wizard's e2e selects separately, so it carries its own id.
+	it("full rail: a send's REGISTER phase carries the send id, and no other phase does", () => {
+		const send = {
+			...dep({ id: "0xsend", depositTxHash: "0xt", leafIndex: "7" }),
+			schema: 3,
+			intent: "token",
+			token: { erc20: "0xe", portal: "0xp", l2Token: "0xl2", nameWord: "0xn", symbolWord: "0xs", decimals: 8, displaySymbol: "WBTC" },
+			registerTxHash: "0xreg",
+		} as never
+		const w = mount(BridgePhaseRail, { props: { record: send } })
+		expect(w.find(sel(TESTIDS.sendStepperRegister)).attributes("data-phase")).toBe("register")
+		expect(w.findAll(sel(TESTIDS.stepperPhase)).some((p) => p.attributes("data-phase") === "register")).toBe(false)
+		w.unmount()
+	})
+
+	it("full rail: a record with no register step emits no send-register id", () => {
+		const w = mount(BridgePhaseRail, { props: { record: dep({ depositTxHash: "0xt", leafIndex: "7" }) } })
+		expect(w.find(sel(TESTIDS.sendStepperRegister)).exists()).toBe(false)
+		w.unmount()
+	})
 })

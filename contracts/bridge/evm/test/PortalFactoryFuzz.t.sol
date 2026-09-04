@@ -7,7 +7,7 @@ import {Hash} from "@aztec/core/libraries/crypto/Hash.sol";
 
 import {PortalFactory} from "../src/PortalFactory.sol";
 import {TokenPortalImpl} from "../src/TokenPortalImpl.sol";
-import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./PortalRoundtripFuzz.t.sol";
+import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./mocks/AztecFakes.sol";
 import {WeirdDecimalsERC20} from "./mocks/MetadataERC20s.sol";
 
 /// Exposes the word sanitizer so its totality can be fuzzed directly.

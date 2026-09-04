@@ -24,9 +24,8 @@ import { getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/cont
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
 import { EthAddress } from "@aztec/foundation/eth-address"
-import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { assertManifestTokensDerive, parseManifestV2 } from "@nulo/bridge-core"
-import { bridgeProxyArtifact, tokenBridgeArtifact, tokenBridgeHubArtifact } from "@nulo/bridge-core/artifacts"
+import { tokenBridgeHubArtifact } from "@nulo/bridge-core/artifacts"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import {
@@ -57,74 +56,17 @@ function findToken(data: DeploymentsJson, symbol: "NULO" | "OLUN"): TokenDeploym
 }
 
 /**
- * Bridge-manifest verifier (L10 / fresh-audit F1): OPT-IN via `BRIDGE_MANIFEST`. Rebuilds the L2
- * proxy/token/bridge instances from the manifest's salts+args (same universal-deploy path as
- * deploy-bridge-testnet) and asserts they match the committed addresses — a new artifact that derives
- * a DIFFERENT address than committed would strand the cutover. Also asserts router/permit2/swapTarget
- * are present (C7 — bridge-only now requires them) and `privateClaimMode: "salt-v2"` (L9 interlock).
- * Runs against the CANDIDATE in Phase 6 (`BRIDGE_MANIFEST=…candidate.json`); unset ⇒ skipped, so the
- * default `audit:tools` run (live manifest, pre-cutover) is unaffected.
- */
-async function verifyLegacyBridgeManifest(raw: unknown): Promise<boolean> {
-	const m = raw as {
-		l1: { fuel?: { core?: { router?: string; permit2?: string; swapTarget?: string } }; privateClaimMode?: string; portal: string }
-		l2: {
-			proxy: { address: string; salt: string; constructorArtifact: string }
-			token: { address: string; salt: string; constructorArtifact: string; constructorArgs: [string, string, number] }
-			bridge: { address: string; salt: string; constructorArtifact: string }
-		}
-	}
-	const common = { publicKeys: PublicKeys.default(), deployer: AztecAddress.ZERO } as const
-	const proxy = await getContractInstanceFromInstantiationParams(bridgeProxyArtifact, {
-		...common,
-		constructorArgs: [],
-		salt: new Fr(BigInt(m.l2.proxy.salt)),
-		constructorArtifact: m.l2.proxy.constructorArtifact,
-	})
-	const [name, symbol, decimals] = m.l2.token.constructorArgs
-	const token = await getContractInstanceFromInstantiationParams(TokenContractArtifact, {
-		...common,
-		// 5.0.1 standards Token: constructor_with_minter's 5th param is auth_contract (ZERO = none).
-		constructorArgs: [name, symbol, decimals, proxy.address, AztecAddress.ZERO],
-		salt: new Fr(BigInt(m.l2.token.salt)),
-		constructorArtifact: m.l2.token.constructorArtifact,
-	})
-	const bridge = await getContractInstanceFromInstantiationParams(tokenBridgeArtifact, {
-		...common,
-		constructorArgs: [proxy.address, EthAddress.fromString(m.l1.portal)],
-		salt: new Fr(BigInt(m.l2.bridge.salt)),
-		constructorArtifact: m.l2.bridge.constructorArtifact,
-	})
-
-	let ok = true
-	const pin = (label: string, computed: string, committed: string) => {
-		const good = computed.toLowerCase() === committed.toLowerCase()
-		console.log(`[${good ? "OK" : "DRIFT"}] bridge.${label.padEnd(6)} computed=${computed} committed=${committed}`)
-		if (!good) ok = false
-	}
-	pin("proxy", proxy.address.toString(), m.l2.proxy.address)
-	pin("token", token.address.toString(), m.l2.token.address)
-	pin("bridge", bridge.address.toString(), m.l2.bridge.address)
-
-	if (!m.l1.fuel?.core?.router || !m.l1.fuel?.core?.permit2 || !m.l1.fuel?.core?.swapTarget) {
-		console.error("[FAIL] bridge manifest missing required core router/permit2/swapTarget (C7)")
-		ok = false
-	}
-	if (m.l1.privateClaimMode !== "salt-v2") {
-		console.error(`[FAIL] bridge manifest privateClaimMode is ${m.l1.privateClaimMode ?? "absent"} (want "salt-v2" — L9 interlock)`)
-		ok = false
-	}
-	return ok
-}
-
-/**
- * Generation manifest (schema 2): re-derives the hub from its recorded salt + constructor args and
- * every token from the hub + its words, and asserts both match the committed addresses.
+ * Bridge-manifest verifier, OPT-IN via `BRIDGE_MANIFEST`. Re-derives the hub from its recorded
+ * salt + constructor args and every token from the hub + its words, and asserts both match the
+ * committed addresses — an artifact that derives a different address than committed would strand
+ * the cutover. Unset ⇒ skipped, so the default run against the live manifest is unaffected.
+ *
  * `bridge: null` is the legal placeholder the app renders as such (the build gate runs this against
- * BOTH targets' live manifests); refusing a placeholder is promotion's job, not the build's.
+ * BOTH targets' live manifests); refusing a placeholder is promotion's job (`promotion.ts`), not
+ * the build's.
  */
-async function verifyGenerationManifest(raw: unknown): Promise<boolean> {
-	const m = parseManifestV2(raw)
+async function verifyBridgeManifest(path: string): Promise<boolean> {
+	const m = parseManifestV2(JSON.parse(readFileSync(path, "utf8")))
 	if (!m.bridge) {
 		console.log(`[OK] ${m.network} manifest is a placeholder (bridge: null) — nothing to derive`)
 		return true
@@ -148,12 +90,6 @@ async function verifyGenerationManifest(raw: unknown): Promise<boolean> {
 		return false
 	}
 	return hubOk
-}
-
-/** One manifest file, two generations of shape: the schema field picks the verifier. */
-async function verifyBridgeManifest(path: string): Promise<boolean> {
-	const raw = JSON.parse(readFileSync(path, "utf8")) as { schema?: unknown }
-	return raw.schema === 2 ? verifyGenerationManifest(raw) : verifyLegacyBridgeManifest(raw)
 }
 
 async function main(): Promise<void> {
@@ -182,7 +118,6 @@ async function main(): Promise<void> {
 		if (!ok) allOk = false
 	}
 
-	// L10 / F1: opt-in bridge-manifest verification (Phase 6 candidate). Unset ⇒ skipped.
 	const bridgeManifest = process.env.BRIDGE_MANIFEST
 	if (bridgeManifest) {
 		console.log(`\n=== bridge manifest: ${bridgeManifest} ===`)
@@ -192,7 +127,7 @@ async function main(): Promise<void> {
 	if (!allOk) {
 		console.error(
 			"\nFAIL: a manifest is out of sync with rebuild logic (or missing required bridge config).\n" +
-				"Re-run `bun run deploy:testnet[:dry]` and re-verify the regenerated candidate.\n",
+				"Regenerate the candidate with the generation conductor and re-verify.\n",
 		)
 		process.exit(1)
 	}

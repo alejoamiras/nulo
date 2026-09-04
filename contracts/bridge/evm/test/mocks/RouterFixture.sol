@@ -8,7 +8,7 @@ import {IRegistry} from "@aztec/governance/interfaces/IRegistry.sol";
 import {SwapBridgeRouter, IUniswapFuelSwap} from "../../src/SwapBridgeRouter.sol";
 import {PortalFactory} from "../../src/PortalFactory.sol";
 import {MintableERC20} from "../../src/MintableERC20.sol";
-import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "../PortalRoundtripFuzz.t.sol";
+import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./AztecFakes.sol";
 import {MockPermit2, MockSwap, MockFeeJuicePortal} from "./RouterMocks.sol";
 
 /// The router over the REAL factory: the token leg lands in a genuine portal clone whose deposit

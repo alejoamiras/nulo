@@ -63,23 +63,32 @@ vi.mock("@/contracts/deployments", () => ({
 	rebuildOlunInstance: vi.fn(async () => ({ address: { toString: () => "0x3" } })),
 }))
 
-vi.mock("@/contracts/bridge-deployments", () => ({
-	BRIDGE_FUEL: undefined,
-	L1_USDC: "0xl1token",
-	BRIDGE_TOKEN_SYMBOL: "USDC",
-	BRIDGE_TOKEN_DECIMALS: 6,
-	BRIDGE: { toString: () => "0x4" },
-	BRIDGE_TOKEN: { toString: () => "0x5" },
-	BRIDGE_PROXY: { toString: () => "0x6" },
-	rebuildBridgeInstance: vi.fn(async () => ({ address: { toString: () => "0x4" } })),
-	rebuildBridgeTokenInstance: vi.fn(async () => ({ address: { toString: () => "0x5" } })),
-	rebuildBridgeProxyInstance: vi.fn(async () => ({ address: { toString: () => "0x6" } })),
-}))
+// The generation reader parses the live manifest at module init; the app's own manifest is still
+// v1 during this phase, so the reader is faked down to what the session consumes.
+const HUB_ADDR = `0x${"4".padStart(64, "0")}`
+const MANIFEST_L2_TOKEN = `0x${"5".padStart(64, "0")}`
+const REQUESTED_L2_TOKEN = `0x${"6".padStart(64, "0")}`
+const ZERO_WORD = `0x${"0".repeat(64)}`
 
-vi.mock("@nulo/bridge-core/artifacts", () => ({
-	bridgeProxyArtifact: { name: "BridgeProxy" },
-	tokenBridgeArtifact: { name: "TokenBridge" },
-}))
+vi.mock("@/contracts/bridge-generation", async () => {
+	const { AztecAddress } = await import("@aztec/aztec.js/addresses")
+	return {
+		HUB: AztecAddress.fromStringUnsafe(`0x${"4".padStart(64, "0")}`),
+		HUB_ARTIFACT: { name: "TokenBridgeHub" },
+		HUB_TOKEN_ARTIFACT: { name: "Token" },
+		MANIFEST_TOKENS: [
+			{
+				erc20: "0x1111111111111111111111111111111111111111",
+				l2Token: `0x${"5".padStart(64, "0")}`,
+				nameWord: `0x${"0".repeat(64)}`,
+				symbolWord: `0x${"0".repeat(64)}`,
+				decimals: 6,
+			},
+		],
+		rebuildHubInstance: vi.fn(async () => ({ address: { toString: () => `0x${"4".padStart(64, "0")}` } })),
+		rebuildHubTokenInstance: vi.fn(async (erc20: string) => ({ address: { toString: () => erc20 } })),
+	}
+})
 
 vi.mock("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Dripper.js", () => ({
 	DripperContractArtifact: { name: "Dripper" },
@@ -99,7 +108,16 @@ vi.mock("@/contracts/private-fpc", () => ({
 	}),
 }))
 
-import { extractGrantedAccounts, useWalletConnection, __resetWalletConnectionForTests } from "./useWalletConnection"
+import {
+	extractGrantedAccounts,
+	forgetHubToken,
+	requestHubToken,
+	requestedHubTokens,
+	retainPinnedHubTokens,
+	useWalletConnection,
+	__resetWalletConnectionForTests,
+} from "./useWalletConnection"
+import { rebuildHubTokenInstance } from "@/contracts/bridge-generation"
 import { __resetOpsInFlightForTests, withOperation } from "./useOpsInFlight"
 import { __resetToastsForTests, useToast } from "./useToast"
 import { nextTick } from "vue"
@@ -199,9 +217,10 @@ describe("useWalletConnection", () => {
 		expect(c.status.value).toBe("connected")
 		expect(c.selectedAccount.value).toBe(ADDR_MAIN)
 		expect(c.accounts.value).toEqual([{ address: ADDR_MAIN, alias: "Main" }])
-		// 7 = the combined drip + bridge set (dripper, usdc, eth, proxy, token, bridge) + the PrivateFPC
-		// (pre-registered so the no-fuel-claim private Fee-Juice balance read works under 5.0.1).
-		expect(wallet.registerContract).toHaveBeenCalledTimes(7)
+		// 6 = the drip trio (dripper, usdc, eth) + the hub + the manifest's one token (granted from
+		// the first connect, so this is the only place its instance reaches the wallet) + the
+		// PrivateFPC (pre-registered so the no-fuel-claim private Fee-Juice balance read works).
+		expect(wallet.registerContract).toHaveBeenCalledTimes(6)
 	})
 
 	it("capability rejection lands in 'error' state with the capability-rejected category", async () => {
@@ -410,5 +429,147 @@ describe("selection-notice toasts (D-25/D-29: single module-level owner, exactly
 		// The drain itself must not re-fire (empty-list retrigger is a no-op).
 		await nextTick()
 		expect(toasts.value).toHaveLength(2)
+	})
+})
+
+/** Enough of the manifest's capability shape for a fake wallet to echo (or narrow) the request. */
+type ManifestCapability = { type: string; scope?: { contract: { toString(): string }; function: string }[] }
+
+describe("per-token grant surface", () => {
+	beforeEach(() => {
+		localStorage.clear()
+		__resetWalletConnectionForTests()
+		mockEstablishSecureChannel.mockReset()
+		mockGetAvailableWallets.mockReset()
+		mockGetAvailableWallets.mockImplementation(() => ({ wallets: yieldOne(), cancel: () => {}, done: Promise.resolve() }))
+	})
+
+	const ERC20 = "0x2222222222222222222222222222222222222222"
+	const hubToken = (l2Token: string) => ({
+		l2Token,
+		erc20: ERC20,
+		words: { nameWord: ZERO_WORD as `0x${string}`, symbolWord: ZERO_WORD as `0x${string}` },
+		decimals: 6,
+	})
+
+	async function connectWith(wallet: ReturnType<typeof makeWallet>) {
+		mockEstablishSecureChannel.mockResolvedValue(makePending({ confirmReturns: wallet }))
+		const c = useWalletConnection()
+		await connectAndPick(c)
+		await c.confirmVerification()
+		return c
+	}
+
+	it("requestHubToken is idempotent and keys the set by the lowercase L2 address", () => {
+		requestHubToken(hubToken(REQUESTED_L2_TOKEN.toUpperCase()))
+		requestHubToken(hubToken(REQUESTED_L2_TOKEN))
+		expect(requestedHubTokens().map((t) => t.l2Token)).toEqual([REQUESTED_L2_TOKEN])
+	})
+
+	it("caps the BROWSED tokens at 32, oldest request first, and never evicts a pinned one", () => {
+		const l2Of = (n: number) => `0x${n.toString(16).padStart(64, "0")}`
+		requestHubToken(hubToken(REQUESTED_L2_TOKEN), { pinned: true })
+		for (let n = 1; n <= 40; n++) requestHubToken(hubToken(l2Of(n)))
+
+		const kept = requestedHubTokens().map((t) => t.l2Token)
+		// The wallet truncates its granted list, so the set it is asked for has to stay bounded.
+		expect(kept).toHaveLength(33)
+		expect(kept).toContain(REQUESTED_L2_TOKEN)
+		expect(kept).not.toContain(l2Of(8))
+		expect(kept).toContain(l2Of(9))
+		expect(kept).toContain(l2Of(40))
+	})
+
+	it("a re-request refreshes recency, so a browsed token in use is not the one evicted", () => {
+		const l2Of = (n: number) => `0x${n.toString(16).padStart(64, "0")}`
+		for (let n = 1; n <= 32; n++) requestHubToken(hubToken(l2Of(n)))
+		requestHubToken(hubToken(l2Of(1)))
+		requestHubToken(hubToken(l2Of(33)))
+
+		const kept = requestedHubTokens().map((t) => t.l2Token)
+		expect(kept).toContain(l2Of(1))
+		expect(kept).not.toContain(l2Of(2))
+	})
+
+	it("forgetHubToken drops a token from the requested set, pin and all", () => {
+		requestHubToken(hubToken(REQUESTED_L2_TOKEN), { pinned: true })
+		forgetHubToken(REQUESTED_L2_TOKEN.toUpperCase())
+		expect(requestedHubTokens()).toEqual([])
+	})
+
+	it("retainPinnedHubTokens drops a pin no record needs any more, keeping the ones still named", () => {
+		const stillHeld = `0x${"7".padStart(64, "0")}`
+		requestHubToken(hubToken(REQUESTED_L2_TOKEN), { pinned: true })
+		requestHubToken(hubToken(stillHeld), { pinned: true })
+		retainPinnedHubTokens([stillHeld.toUpperCase()])
+		expect(requestedHubTokens().map((t) => t.l2Token)).toEqual([stillHeld])
+	})
+
+	it("retainPinnedHubTokens never drops a MANIFEST token - the first connect granted it, not the journal", () => {
+		requestHubToken(hubToken(MANIFEST_L2_TOKEN), { pinned: true })
+		retainPinnedHubTokens([])
+		expect(requestedHubTokens().map((t) => t.l2Token)).toEqual([MANIFEST_L2_TOKEN])
+	})
+
+	it("retainPinnedHubTokens leaves BROWSED tokens alone - they were never pinned to begin with", () => {
+		requestHubToken(hubToken(REQUESTED_L2_TOKEN))
+		retainPinnedHubTokens([])
+		expect(requestedHubTokens().map((t) => t.l2Token)).toEqual([REQUESTED_L2_TOKEN])
+	})
+
+	it("the manifest carries the hub plus the manifest's tokens UNION the requested ones", async () => {
+		requestHubToken(hubToken(REQUESTED_L2_TOKEN))
+		const wallet = makeWallet([{ alias: "Main", item: ADDR_MAIN }])
+		await connectWith(wallet)
+
+		const calls = wallet.requestCapabilities.mock.calls as unknown as unknown[][]
+		const manifest = calls[0][0] as { capabilities: Array<{ type: string; contracts?: Array<{ toString(): string }> }> }
+		const contracts = manifest.capabilities.find((cap) => cap.type === "contracts")?.contracts?.map((a) => a.toString())
+		expect(contracts?.slice(0, 3)).toEqual([HUB_ADDR, MANIFEST_L2_TOKEN, REQUESTED_L2_TOKEN])
+	})
+
+	it("registers the hub and every requested token instance", async () => {
+		requestHubToken(hubToken(REQUESTED_L2_TOKEN))
+		const wallet = makeWallet([{ alias: "Main", item: ADDR_MAIN }])
+		await connectWith(wallet)
+
+		expect(rebuildHubTokenInstance).toHaveBeenCalledWith(ERC20, { nameWord: ZERO_WORD, symbolWord: ZERO_WORD, decimals: 6 })
+		// The faucet trio + the hub + the manifest token + the requested token + the PrivateFPC.
+		expect(wallet.registerContract).toHaveBeenCalledTimes(7)
+	})
+
+	/** A wallet that approves the manifest verbatim, optionally after `edit` reshapes what comes back. */
+	function echoingWallet(edit: (capabilities: ManifestCapability[]) => ManifestCapability[] = (caps) => caps) {
+		return {
+			requestCapabilities: vi.fn(async (manifest: { capabilities: ManifestCapability[] }) => ({
+				granted: [{ type: "accounts", accounts: [{ alias: "Main", item: ADDR_MAIN }] }, ...edit(manifest.capabilities)],
+			})),
+			registerContract: vi.fn(async () => {}),
+		}
+	}
+
+	it("publishes the requested contracts the answer covered, lowercased", async () => {
+		const c = await connectWith(echoingWallet() as unknown as ReturnType<typeof makeWallet>)
+		expect(c.grantedContracts.value).toContain(HUB_ADDR)
+		expect(c.grantedContracts.value).toContain(MANIFEST_L2_TOKEN)
+	})
+
+	it("withholds a contract whose requested transaction scope did not come back", async () => {
+		const withoutTxScope = (caps: ManifestCapability[]) =>
+			caps.map((cap) =>
+				cap.type === "transaction"
+					? { ...cap, scope: (cap.scope ?? []).filter((s) => s.contract.toString().toLowerCase() !== MANIFEST_L2_TOKEN) }
+					: cap,
+			)
+		const c = await connectWith(echoingWallet(withoutTxScope) as unknown as ReturnType<typeof makeWallet>)
+		expect(c.grantedContracts.value).toContain(HUB_ADDR)
+		expect(c.grantedContracts.value).not.toContain(MANIFEST_L2_TOKEN)
+	})
+
+	it("clears the granted contracts on disconnect", async () => {
+		const c = await connectWith(echoingWallet() as unknown as ReturnType<typeof makeWallet>)
+		expect(c.grantedContracts.value).toContain(HUB_ADDR)
+		await c.disconnect()
+		expect(c.grantedContracts.value).toEqual([])
 	})
 })

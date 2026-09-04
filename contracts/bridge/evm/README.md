@@ -17,7 +17,7 @@ forge install \
 ```
 
 > **v4-core MUST be `@v4.0.0`** (commit `e50237c4…`). The fuel contracts (`UniswapFuelSwap.sol`,
-> `DeployBridge.s.sol`'s `PoolSetupHelper`) use the pre-1.0 `IPoolManager.SwapParams` /
+> `PoolSetupHelper.sol`) use the pre-1.0 `IPoolManager.SwapParams` /
 > `ModifyLiquidityParams` API; v4-core ≥1.0.0 moved those structs. OZ is pinned to 5.7.0 for
 > `Clones.cloneDeterministicWithImmutableArgs` + `ReentrancyGuardTransient`.
 
@@ -33,7 +33,7 @@ does this automatically):
 bun --cwd ../../../packages/bridge-core scripts/gen-remappings.ts   # writes ./remappings.txt
 forge build
 forge test --no-match-contract Fork                                  # hermetic (CI)
-SEPOLIA_RPC_URL=… forge test --match-contract Fork                   # live Sepolia (opt-in)
+SEPOLIA_RPC_URL=… AZTEC_REGISTRY=… forge test --match-contract Fork   # live Sepolia (opt-in; two suites skip without the registry)
 forge build --ast --force && halmos --match-contract '^Formal'       # symbolic proofs (CI)
 forge snapshot --match-test test_gas_ --no-match-contract Fork --check   # .gas-snapshot (CI)
 ```
@@ -59,8 +59,8 @@ forge snapshot --match-test test_gas_ --no-match-contract Fork --check   # .gas-
 
 ## Tests
 
-**146 hermetic forge tests** (`forge test --no-match-contract Fork`), **13 halmos proofs**
-(`FormalRouterTest 8 · FormalPortalTest 1 · FormalFactoryTest 2 · FormalCloneTest 2`, each with a
+**140 hermetic forge tests** (`forge test --no-match-contract Fork`), **12 halmos proofs**
+(`FormalRouterTest 8 · FormalFactoryTest 2 · FormalCloneTest 2`, each with a
 forge canary proving its complementary case is observable), **live Sepolia fork suites** (real registry/Inbox/FeeJuicePortal, real
 Permit2, real V4 pools, live token metadata), and a committed `.gas-snapshot` for the metered
 first-time vs known `bridge()` calls.
@@ -68,11 +68,11 @@ first-time vs known `bridge()` calls.
 | Layer | Suites |
 |---|---|
 | unit | `PortalFactory`, `SwapBridgeRouter`, `Keystone` (3-way vectors with Noir + TS), `ContentHash`, `WitnessHash`, `RouteValidation` |
-| fuzz | `PortalFactoryFuzz`, `CloneRoundtripFuzz`, `PortalRoundtripFuzz`, `SwapBridgeRouterFuzz`, `RouteGrammarFuzz` |
+| fuzz | `PortalFactoryFuzz`, `CloneRoundtripFuzz`, `SwapBridgeRouterFuzz`, `RouteGrammarFuzz` |
 | invariant | `PortalFactoryInvariant`, `SwapBridgeRouterInvariant` (handler drives create/pause/bridge/fuel-only/identity/donate/sweep/rotate) |
-| symbolic | `FormalFactory`, `FormalClone`, `FormalRouter`, `FormalPortal` — see the header of each for what halmos can and cannot model (it has no sha256, so `createPortal` itself is forge-only) |
+| symbolic | `FormalFactory`, `FormalClone`, `FormalRouter` — see the header of each for what halmos can and cannot model (it has no sha256, so `createPortal` itself is forge-only) |
 | adversarial | `BlackhatFactory` (F-1…F-8), `BlackhatAudit` (F-A…F-M), `BlackhatV4Fork` |
-| fork | `FactoryFork`, `SwapBridgeRouterPermit2Fork`, `DeployBridge.fork`, `BlackhatV4Fork` |
+| fork | `FactoryFork`, `SwapBridgeRouterPermit2Fork`, `DeployFuelLive.fork`, `MainnetFuel.fork`, `BlackhatV4Fork` |
 
 ## Threat model — the factory-bound portal
 

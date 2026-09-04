@@ -4,7 +4,15 @@ import { describe, expect, it, vi } from "vitest"
 import type { L1Ctx } from "./flows"
 import { predictPortal } from "./portal-address"
 import { SWAP_BRIDGE_ROUTER_ABI } from "./router-abi"
-import { runSend, type SendGeneration, type SendParams, sendEntrypoint, sendPortalFor } from "./send-flow"
+import {
+	MissingBridgeAmountError,
+	readSendReceiptLeaves,
+	runSend,
+	type SendGeneration,
+	type SendParams,
+	sendEntrypoint,
+	sendPortalFor,
+} from "./send-flow"
 
 const ROUTER = "0x1111111111111111111111111111111111111111" as const
 const FACTORY = "0x3333333333333333333333333333333333333333" as const
@@ -51,7 +59,7 @@ describe("send-flow — portal + entrypoint derivation", () => {
 
 const logMeta = { blockNumber: 1n, blockHash: ZERO32, transactionHash: ZERO32, transactionIndex: 0, removed: false }
 
-function bridgeLog(index: bigint, key = `0x${"b".repeat(64)}`, emitter: string = ROUTER, logIndex = 0) {
+function bridgeLog(index: bigint, key = `0x${"b".repeat(64)}`, emitter: string = ROUTER, logIndex = 0, amount = 500n) {
 	return {
 		...logMeta,
 		address: emitter,
@@ -59,7 +67,7 @@ function bridgeLog(index: bigint, key = `0x${"b".repeat(64)}`, emitter: string =
 		topics: [keccak256(toHex("Bridge(bytes32,bytes32,uint256,uint256,bytes32,bool)")), RECIPIENT],
 		data: encodeAbiParameters(
 			[{ type: "bytes32" }, { type: "uint256" }, { type: "uint256" }, { type: "bytes32" }, { type: "bool" }],
-			[key as `0x${string}`, index, 500n, ZERO32, false],
+			[key as `0x${string}`, index, amount, ZERO32, false],
 		),
 	}
 }
@@ -157,7 +165,7 @@ describe("send-flow — runSend", () => {
 	})
 
 	it("the fee asset's public gas-only is a bridge() into the FeeJuicePortal whose message is the gas leg", async () => {
-		const { l1, writes, signed } = fakeL1([bridgeLog(3n)])
+		const { l1, writes, signed } = fakeL1([bridgeLog(3n, undefined, ROUTER, 0, 16n)])
 		const p: SendParams = {
 			intent: "gas",
 			erc20: FEE_ASSET,
@@ -335,5 +343,54 @@ describe("send-flow — runSend", () => {
 
 		const onlyForged = fakeL1([forged])
 		await expect(runSend(onlyForged.l1, gen, p)).rejects.toThrow(/emitted 0 Bridge events/)
+	})
+
+	it("recovers a landed send's leaves from its receipt alone, ignoring the register leaf a first deposit also carries", () => {
+		const registerLeaf = {
+			...logMeta,
+			address: FACTORY,
+			logIndex: 0,
+			topics: [keccak256(toHex("MessageSent(bytes32,uint256,bytes32,uint256)"))],
+			data: "0x" as `0x${string}`,
+		}
+		const leaves = readSendReceiptLeaves(gen, "token", ZERO32, [
+			registerLeaf,
+			bridgeLog(41n, `0x${"b".repeat(64)}`, ROUTER, 1),
+		] as never)
+		expect(leaves).toEqual({ tokenLeafIndex: 41n, tokenMessageHashHex: `0x${"b".repeat(64)}` })
+		const gas = readSendReceiptLeaves(gen, "gas", ZERO32, [bridgeLog(3n, undefined, ROUTER, 0, 16n)] as never)
+		expect(gas).toEqual({ fuelLeafIndex: 3n, fuelMessageHashHex: `0x${"b".repeat(64)}`, fuelReceived: 16n })
+		const fueled = readSendReceiptLeaves(gen, "token+gas", ZERO32, [bridgeWithFuelLog(7n, 8n, 123n)] as never)
+		expect(fueled).toMatchObject({ tokenLeafIndex: 7n, fuelLeafIndex: 8n, fuelReceived: 123n })
+	})
+
+	it("refuses a gas-only recovery whose event carries no amount rather than recording zero received", () => {
+		// A router whose Bridge event names no amount: the receipt alone then says nothing about what
+		// landed, and there is no signed amount behind a recovery to stand in for it.
+		const amountlessAbi = [
+			{
+				type: "event",
+				name: "Bridge",
+				inputs: [
+					{ name: "aztecRecipient", type: "bytes32", indexed: true },
+					{ name: "key", type: "bytes32", indexed: false },
+					{ name: "index", type: "uint256", indexed: false },
+				],
+			},
+		] as const
+		const log = {
+			...logMeta,
+			address: ROUTER,
+			logIndex: 0,
+			topics: [keccak256(toHex("Bridge(bytes32,bytes32,uint256)")), RECIPIENT],
+			data: encodeAbiParameters([{ type: "bytes32" }, { type: "uint256" }], [`0x${"b".repeat(64)}` as `0x${string}`, 3n]),
+		}
+		const amountless = { ...gen, routerAbi: amountlessAbi as unknown as typeof gen.routerAbi }
+		expect(() => readSendReceiptLeaves(amountless, "gas", ZERO32, [log] as never)).toThrow(MissingBridgeAmountError)
+		// The token leg never depended on the amount, so it still recovers from the same event.
+		expect(readSendReceiptLeaves(amountless, "token", ZERO32, [log] as never)).toEqual({
+			tokenLeafIndex: 3n,
+			tokenMessageHashHex: `0x${"b".repeat(64)}`,
+		})
 	})
 })

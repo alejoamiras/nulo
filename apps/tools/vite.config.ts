@@ -94,9 +94,10 @@ function readManifest(target: ToolsTarget): string {
 }
 
 /**
- * Write `dist/_headers` (Cloudflare Pages) with the TARGET's CSP `connect-src` — the mainnet build
- * must allow `lb.drpc.live` (the Alpha node), which the testnet CSP does not cover. Generated per
- * build rather than shipped statically so the two deployments can't share one wrong header set (F8).
+ * Write `dist/_headers` (Cloudflare Pages) with the TARGET's CSP `connect-src` — testnet allows the
+ * Aztec node hosts plus `tokens.uniswap.org`, while the mainnet placeholder talks to nothing remote
+ * at all. Generated per build rather than shipped statically so the two deployments can't share one
+ * header set, which would hand the placeholder origins it must never be able to reach.
  */
 function headersPlugin(target: ToolsTarget): Plugin {
 	let root = process.cwd()
@@ -137,7 +138,7 @@ function headersPlugin(target: ToolsTarget): Plugin {
  * The config factory. Each `vite.<target>.config.mts` calls this with its one `ToolsTarget`; the
  * default export builds testnet so the legacy `vite build` (and vitest, which ignores this file) keep
  * working. The target key + its bridge manifest are `define`d into `import.meta.env` so the app
- * (`resolveToolsTarget`, `bridge-deployments`) reads them at runtime; `build.json` gets the target
+ * (`resolveToolsTarget`, `bridge-generation`) reads them at runtime; `build.json` gets the target
  * via the plugin arg (Node scope — a vite alias can't reach here).
  */
 export function makeToolsConfig(target: ToolsTarget): UserConfig {

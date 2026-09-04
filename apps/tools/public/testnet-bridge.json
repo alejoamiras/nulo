@@ -1,81 +1,19 @@
 {
+	"schema": 2,
 	"network": "testnet",
 	"l1ChainId": 11155111,
 	"walletChainId": 1816023401,
-	"l1": {
-		"usdc": "0x032E4F5f21d74AE177b96BeD98E472FFA9D62448",
-		"portal": "0xe0fd81b5ddb13bbb64243d018a6e9c3dfae8d21f",
-		"portalSource": "forked-v1",
-		"token": {
-			"name": "Test USDC",
-			"symbol": "USDC",
-			"decimals": 6,
-			"source": "permissionless-mint",
-			"sourceContract": "TestUsdc",
-			"maxWholePerTx": 1000
-		},
-		"fuel": {
-			"core": {
-				"router": "0x78365a471dfce304f25d0382cdbd65b2b7935820",
-				"permit2": "0x000000000022d473030f116ddee9f6b43ac78ba3",
-				"swapTarget": "0x9c3cf20639a1a1f3fec1db8e6fa3199910db6dba",
-				"swapTargetContract": "UniswapFuelSwap",
-				"feeJuicePortal": "0xb4a9f8eadc8ca944729d61e59a9f491faff237a3"
-			},
-			"swap": {
-				"poolManager": "0xe03a1074c86cfedd5c142c4f04f1a1536e203543",
-				"quoter": "0x61b3f2011a92d183c7dbadbda940a7555ccf9227",
-				"weth": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
-				"feeJuice": "0x762c132040fda6183066fa3b14d985ee55aa3c18",
-				"pools": {
-					"tokenWeth": {
-						"fee": 3000,
-						"tickSpacing": 60
-					},
-					"ethFj": {
-						"fee": 987,
-						"tickSpacing": 10
-					}
-				},
-				"slippageBps": 300,
-				"minFuelFj": "29580299742031535464"
-			}
-		},
-		"feeJuice": {
-			"portal": "0xb4a9f8eadc8ca944729d61e59a9f491faff237a3",
-			"asset": "0x762c132040fda6183066fa3b14d985ee55aa3c18",
-			"feeAssetHandler": "0x5602c39a6e9c5ace589f64f754927bcda4f4bfc9",
-			"minFj": "16000000000000000000"
-		},
-		"privateClaimMode": "salt-v2"
+	"bridge": null,
+	"feeJuice": {
+		"portal": "0xb4a9f8eadc8ca944729d61e59a9f491faff237a3",
+		"asset": "0x762c132040fda6183066fa3b14d985ee55aa3c18",
+		"feeAssetHandler": "0x5602c39a6e9c5ace589f64f754927bcda4f4bfc9",
+		"minFj": "16000000000000000000"
 	},
-	"l2": {
-		"proxy": {
-			"address": "0x2d1b80da0436bf6d7f596c2af453de0c3be253f81fa98aa6b1e2d2aaea32d15b",
-			"salt": 922058256042,
-			"constructorArtifact": "constructor",
-			"constructorArgs": []
-		},
-		"token": {
-			"address": "0x1c81a6d581e065e82d4d3b969020e9d0f899b975ae844f6e4305031ff62be9ae",
-			"salt": 104373458404,
-			"constructorArtifact": "constructor_with_minter",
-			"constructorArgs": [
-				"Test USDC",
-				"USDC",
-				6,
-				"0x2d1b80da0436bf6d7f596c2af453de0c3be253f81fa98aa6b1e2d2aaea32d15b",
-				"0x0000000000000000000000000000000000000000000000000000000000000000"
-			]
-		},
-		"bridge": {
-			"address": "0x19a36d0446010d1d791157d586a7e4a8a3671aa1831bf53752a3a69818be53cb",
-			"salt": 316459049850,
-			"constructorArtifact": "constructor",
-			"constructorArgs": [
-				"0x2d1b80da0436bf6d7f596c2af453de0c3be253f81fa98aa6b1e2d2aaea32d15b",
-				"0xe0fd81b5ddb13bbb64243d018a6e9c3dfae8d21f"
-			]
-		}
-	}
+	"privateFpc": {
+		"address": "0x1a6d21ce5fd80137df0e99632a4ca17e58a42dc8f6c08191a96ca8ae907a1bc0",
+		"version": "5.0.1",
+		"artifactDigest": "d5a2453cda5cc05026cbda68a57afc5951f73fb08649f66cea8c412be6c54acc"
+	},
+	"privateClaimMode": "salt-v2"
 }
