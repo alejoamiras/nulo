@@ -120,6 +120,21 @@ export const preexistingFeeJuicePayment = (sender: AztecAddress): FeePaymentMeth
 })
 
 /**
+ * Name the account's own public Fee Juice as a dApp transaction's payer through the NULO wallet:
+ * the payload carries the sender as payer and no fee call, which that wallet routes as a
+ * requested self-pay (its own Fee Juice method over the preexisting balance, the fee card locked
+ * to it). Only for a wallet that advertises the routing (`getWalletFeatures` → "dapp-self-pay"):
+ * an aztec.js / wallet-sdk EmbeddedWallet routes this same shape as a claim in setup and builds
+ * an invalid transaction — use {@link preexistingFeeJuicePayment} there.
+ */
+export const selfPaidFeeJuicePayment = (sender: AztecAddress): FeePaymentMethod => ({
+	getAsset: () => Promise.resolve(AztecAddress.fromNumberUnsafe(FEE_JUICE_ADDRESS)),
+	getExecutionPayload: () => Promise.resolve(new ExecutionPayload([], [], [], [], sender)),
+	getFeePayer: () => Promise.resolve(sender),
+	getGasSettings: () => undefined,
+})
+
+/**
  * The FeeJuice claim call args for claiming bridged Fee Juice as a standalone payload
  * (mirrors the extension's fee-juice claim; use plain `claim` for an app-phase call — only the
  * fee payload may `claim_and_end_setup`). Use when claiming FJ to balance rather than

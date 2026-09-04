@@ -37,6 +37,7 @@ function applyDecisionTo(session: IDappSessionRef, decision: CapabilityDecision)
 }
 import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
 import { LogLevel, type ILogger } from "@nulo/wallet-core/logger"
+import { DAPP_SELF_PAY_FEATURE, WALLET_FEATURES } from "./wallet-features"
 
 // __VERSION__ is a vite define-injected global at build time; provide it for tests.
 beforeAll(() => {
@@ -1388,6 +1389,32 @@ describe("Phase 0.5: session lookup consolidation (TOCTOU defense)", () => {
 		// Pre-refactor was 2 (enforceCapability + handleRegisterToken).
 		// Post-refactor: 1 captured at dispatch entry; no re-lookup inside the throw path.
 		expect(counter.lookups).toBe(1)
+	})
+})
+
+// ── getWalletFeatures (Nulo-custom) — reachability, no grant ────────────
+
+describe("dispatcher — getWalletFeatures", () => {
+	test("schema patch extends WalletSchema with a 0-arg string[] `getWalletFeatures` entry", async () => {
+		await import("@nulo/wallet-sdk-schema-patch/register")
+		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
+		expect("getWalletFeatures" in WalletSchema).toBe(true)
+		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
+		const entry = (WalletSchema as any).getWalletFeatures
+		expect(entry?.def?.input?.def?.items?.length).toBe(0)
+		expect(entry?.def?.output?.def?.type).toBe("array")
+	})
+
+	test("answers the static list to a session with no grants at all, and names the self-pay routing", async () => {
+		const { writer } = makeSessionWriter(makeSession({ capabilityGrants: [] }))
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async () => ({})) as never,
+		}
+		const dispatcher = new WalletSdkDispatcher(stubNetwork, stubAccount, stubExecution, interaction, writer, noopLogger)
+		const features = (await dispatcher.dispatch("getWalletFeatures", [], ctx)) as readonly string[]
+		expect(features).toEqual(WALLET_FEATURES)
+		expect(features).toContain(DAPP_SELF_PAY_FEATURE)
 	})
 })
 

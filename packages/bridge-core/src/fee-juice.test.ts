@@ -12,6 +12,7 @@ import {
 	predictedWorstMinFees,
 	publicFeeJuicePayment,
 	preexistingFeeJuicePayment,
+	selfPaidFeeJuicePayment,
 	sponsoredFeePayment,
 } from "./fee-juice"
 
@@ -96,6 +97,13 @@ describe("fee-juice", () => {
 		expect(payload.calls).toHaveLength(0)
 		expect(payload.feePayer).toBeUndefined()
 		expect((await method.getFeePayer()).toString()).toBe(sender.toString())
+	})
+
+	test("selfPaidFeeJuicePayment names the sender as payer inside its payload, with no fee call - the shape the Nulo wallet routes as a self-pay", async () => {
+		const sender = AztecAddress.fromNumberUnsafe(0x5e4d)
+		const payload = await selfPaidFeeJuicePayment(sender).getExecutionPayload()
+		expect(payload.calls).toHaveLength(0)
+		expect(payload.feePayer?.toString()).toBe(sender.toString())
 	})
 
 	test("feeJuiceClaimArgs builds the FeeJuice claim tuple verbatim", () => {

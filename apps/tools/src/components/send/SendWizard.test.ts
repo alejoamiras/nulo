@@ -44,6 +44,9 @@ const granted = ref<string[]>([])
 let grantOutcome: GrantOutcome = "granted"
 /** The private Fee Juice the connected Aztec account holds at the fee contract; null = unknown. */
 const gasHeld = ref<bigint | null>(null)
+/** The account's public Fee Juice, and whether the wallet routes it as a dApp-named payer. */
+const gasHeldPublic = ref<bigint | null>(0n)
+const gasHeldSelfPay = ref(false)
 const gasHeldRefresh = vi.fn(async () => {})
 const selectedAccount = ref<string | null>(AZTEC_ACCOUNT)
 const ensureGranted = vi.fn(async (): Promise<GrantOutcome> => {
@@ -147,7 +150,13 @@ vi.mock("@/composables/useTokenCatalog", () => ({
 }))
 vi.mock("@/contracts/hub-binding", () => ({ readHubBinding: async () => undefined }))
 vi.mock("@/composables/useGasHeld", () => ({
-	useGasHeld: () => ({ credit: gasHeld, refresh: gasHeldRefresh, dispose: vi.fn() }),
+	useGasHeld: () => ({
+		credit: gasHeld,
+		publicFeeJuice: gasHeldPublic,
+		selfPay: gasHeldSelfPay,
+		refresh: gasHeldRefresh,
+		dispose: vi.fn(),
+	}),
 }))
 vi.mock("@/composables/useAddressLookup", () => ({
 	useAddressLookup: () => ({ state: ref(null), dispose: vi.fn() }),
@@ -346,6 +355,8 @@ describe("SendWizard", () => {
 		selectionError.value = null
 		epoch = 0
 		gasHeld.value = 10n ** 18n
+		gasHeldPublic.value = 0n
+		gasHeldSelfPay.value = false
 		gasHeldRefresh.mockReset().mockImplementation(async () => {})
 		selectedAccount.value = AZTEC_ACCOUNT
 		rekeys.value = {}
@@ -596,6 +607,62 @@ describe("SendWizard", () => {
 		amountStep().vm.$emit("update:intent", "token")
 		await flushPromises()
 		expect(amountStep().props("intent")).toBe("token")
+	})
+
+	it("public Fee Juice counts as held gas only on a wallet that routes a dApp-named payer, and the review then names the account as payer", async () => {
+		realCeilings()
+		ownGasCeilingFor.mockImplementation(() => 10n ** 16n)
+		gasHeld.value = 0n
+		gasHeldPublic.value = 10n ** 18n
+		const w = await wizard()
+		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
+		await flushPromises()
+		const amountStep = () => w.findComponent({ name: "AmountStep" })
+		expect(amountStep().props("tokenOnlyBlocked")).toContain("holds no gas")
+		gasHeldSelfPay.value = true
+		await flushPromises()
+		expect(amountStep().props("tokenOnlyBlocked")).toBeNull()
+		amountStep().vm.$emit("update:intent", "token")
+		amountStep().vm.$emit("update:amount", "1")
+		amountStep().vm.$emit("update:valid", true)
+		await flushPromises()
+		amountStep().vm.$emit("next")
+		await flushPromises()
+		const review = w.findComponent({ name: "ReviewStep" })
+		expect(review.props("estimate").networkFee).toContain("Fee Juice you already hold")
+		expect(review.props("estimate").networkFeeNote).toContain("your account as its own fee")
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(sendFn).toHaveBeenCalledTimes(1)
+	})
+
+	it("a balance known to cover pays whatever the other read did - public with the private read failed, and the reverse", async () => {
+		realCeilings()
+		ownGasCeilingFor.mockImplementation(() => 10n ** 16n)
+		const enterTokenOnly = async () => {
+			const w = await wizard()
+			w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
+			await flushPromises()
+			const amountStep = () => w.findComponent({ name: "AmountStep" })
+			expect(amountStep().props("tokenOnlyBlocked")).toBeNull()
+			amountStep().vm.$emit("update:intent", "token")
+			amountStep().vm.$emit("update:amount", "1")
+			amountStep().vm.$emit("update:valid", true)
+			await flushPromises()
+			amountStep().vm.$emit("next")
+			await flushPromises()
+			w.findComponent({ name: "ReviewStep" }).vm.$emit("confirm")
+			await flushPromises()
+		}
+		gasHeld.value = null
+		gasHeldPublic.value = 10n ** 18n
+		gasHeldSelfPay.value = true
+		await enterTokenOnly()
+		expect(sendFn).toHaveBeenCalledTimes(1)
+		gasHeld.value = 10n ** 18n
+		gasHeldPublic.value = null
+		await enterTokenOnly()
+		expect(sendFn).toHaveBeenCalledTimes(2)
 	})
 
 	it("a gas slice under the bridge's claim minimum is refused before any signature — the swap would revert on Ethereum", async () => {

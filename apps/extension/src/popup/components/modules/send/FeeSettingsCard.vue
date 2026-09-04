@@ -44,6 +44,10 @@ const props = defineProps({
 	 *  clash with the parent's border. Passing embedded=true strips the root
 	 *  border so the parent can own the single border. */
 	embedded: { type: Boolean, default: false },
+	/** A method the dApp asked for by naming the account itself as payer ("fj" is the one shape):
+	 *  the card shows it, its balance and its cost, and offers no other — the user's saved choice
+	 *  and the network's default never replace it. */
+	lockedMethod: { type: String, default: null },
 })
 
 const FEE_METHOD_LS_KEY = UI_STORAGE_KEYS.FEE_PAYMENT_METHODS
@@ -124,6 +128,9 @@ const showMethodSelector = computed(() => {
 	if (!isCustomMethod.value) return true
 	return useOwnMethod.value
 })
+
+/** The dApp-locked method's fresh row from `methods` (balance-aware), never a saved record. */
+const lockedOption = () => methods.value.find((m) => m.type === props.lockedMethod)
 
 /**
  * Pure derivation of settings from current state. Returns `undefined` while
@@ -292,6 +299,22 @@ const releaseSubscription = () => {
  * resolves against undefined balances), and the gate opens after — degraded
  * included (holding it closed on failure was the frozen-Confirm bug).
  */
+/** The selection a settled init lands on when the user picked nothing meanwhile: the saved one,
+ *  resolved against fresh `methods` by semantic key (never the stored `fpc.name`), else the
+ *  network's default. A dangling saved record (a deleted FPC) simply re-resolves to nothing every
+ *  time — it is deliberately NOT pruned here, since a whole-map write would race
+ *  `persistSelection` / another mounted card and could clobber a newer selection. */
+const settledSelection = (savedRecord) => {
+	const resolved = resolveSavedSelection(savedRecord, methods.value)
+	if (resolved) return resolved
+	// Alpha (mainnet) → Private Fee Juice; every other network → Sponsored FPC (its historical default).
+	const preferred =
+		props.network?.chainId === CHAIN_IDS.MAINNET
+			? methods.value.find((m) => m.type === "private_fpc")
+			: methods.value.find((m) => m.fpc?.type === FpcType.DefaultSponsoredFpc)
+	return preferred ? { ...preferred } : undefined
+}
+
 const commitFromEntry = (scope, reqKey, saved, baseline) => {
 	const entry = balancesStore.entry(scope)
 	if (!entry) return
@@ -304,30 +327,8 @@ const commitFromEntry = (scope, reqKey, saved, baseline) => {
 	registeredFpcs.value = entry.fpc.data ?? []
 
 	const userPickedDuringInit = selectedMethod.value !== baseline
-
-	if (!userPickedDuringInit) {
-		// Resolve saved selection against fresh `methods` by semantic
-		// key — never trust the stored `fpc.name`. Returns undefined
-		// when the saved fpc.id is dangling (e.g. v3→v4 migration wiped
-		// the row, or the user deleted it while the popup was closed).
-		const resolved = resolveSavedSelection(saved[scope.accountAddress], methods.value)
-		if (resolved) {
-			selectedMethod.value = resolved
-		} else {
-			// A dangling saved selection (e.g. a deleted FPC) is simply ignored — it
-			// re-resolves to undefined every time and we fall through to the default. We
-			// deliberately do NOT prune it from storage here: a whole-map write would race
-			// persistSelection / another mounted FeeSettingsCard and could clobber a newer
-			// selection (last-write-wins on a stale snapshot).
-			// Fall through to the network's default method: Alpha (mainnet) → Private Fee
-			// Juice; every other network → Sponsored FPC (its historical default).
-			const preferred =
-				props.network?.chainId === CHAIN_IDS.MAINNET
-					? methods.value.find((m) => m.type === "private_fpc")
-					: methods.value.find((m) => m.fpc?.type === FpcType.DefaultSponsoredFpc)
-			selectedMethod.value = preferred ? { ...preferred } : undefined
-		}
-	}
+	if (props.lockedMethod) selectedMethod.value = lockedOption()
+	else if (!userPickedDuringInit) selectedMethod.value = settledSelection(saved[scope.accountAddress])
 
 	// The gate opens on EVERY settled init — degraded included.
 	committedKey = reqKey
@@ -365,7 +366,10 @@ const identityDrifted = (scope) =>
  *  caller's drift guard cannot observe a rejection). Other failures propagate. */
 const ensureLegsSettled = async (scope) => {
 	try {
-		await balancesStore.ensure(scope, { legs: ["gas", "fpc"] })
+		// A dApp locks the method precisely when the balance just moved (a claim made for this
+		// account): a snapshot inside the reader's TTL would show the old figure and hold Confirm
+		// off, so a locked mount reads fresh.
+		await balancesStore.ensure(scope, { legs: ["gas", "fpc"], forceRefresh: Boolean(props.lockedMethod) })
 		return true
 	} catch (e) {
 		if (e instanceof EnsureSuperseded) return false
@@ -415,7 +419,9 @@ const runInit = async () => {
 		// storage read must not re-apply the pre-fill (it would clobber the
 		// newer run's reconcile or the user's mid-flight pick).
 		if (myRun !== runSeq || !isMounted) return
-		if (saved[props.account.address]) {
+		if (props.lockedMethod) {
+			selectedMethod.value = lockedOption()
+		} else if (saved[props.account.address]) {
 			selectedMethod.value = saved[props.account.address]
 		}
 		// Snapshot the (possibly-prefilled) selection AFTER any pre-fill
@@ -592,7 +598,13 @@ onBeforeUnmount(() => {
 
 		<!-- Method selector -->
 		<template v-if="showMethodSelector">
+			<!-- A method the dApp asked for: shown, never a choice. -->
+			<Flex v-if="lockedMethod" align="center" justify="between" :class="$style.card" data-testid="send-fee-locked">
+				<Text size="13" weight="600" color="primary">Pay fee with</Text>
+				<Text size="13" weight="600" color="primary">Fee Juice · set by the app</Text>
+			</Flex>
 			<FeeMethodSelector
+				v-else
 				:modelValue="selectedMethod"
 				@update:modelValue="handleMethodPicked"
 				:methods="methods"

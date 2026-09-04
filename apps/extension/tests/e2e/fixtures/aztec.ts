@@ -773,3 +773,39 @@ export async function waitForTxMined(aztecConfig: AztecTestConfig, txHash: strin
 		await new Promise((r) => setTimeout(r, 1_000))
 	}
 }
+
+/**
+ * Give an EXTENSION-owned account public Fee Juice it can pay its own fees from: bridge from L1,
+ * wait until the message is claimable (5.0 mints no empty blocks, so a cheap sponsored mint from
+ * the script wallet advances the anchor), then claim to the account. The claim is permissionless
+ * given the secret, so the script wallet's sponsored account can send it for the extension's.
+ */
+export async function fundPublicFeeJuice(
+	wallet: InstanceType<typeof EmbeddedWallet>,
+	node: ReturnType<typeof createAztecNodeClient>,
+	scriptAccount: AztecAddress,
+	aztecConfig: AztecTestConfig,
+	toAddress: string,
+	amount = 1000n * 10n ** 18n,
+): Promise<void> {
+	const feeOptions = await createSponsoredFeeOptions(wallet)
+	const claim = await bridgeFeeJuice(node, toAddress, amount)
+	await waitForL1ToL2Message(node, claim.messageHash.toString(), () =>
+		mintPublicTokens(wallet, aztecConfig.tokenAddress, scriptAccount.toString(), 1n, aztecConfig.minterAddress, feeOptions),
+	)
+	await claimFeeJuice(wallet, toAddress, scriptAccount, claim, feeOptions)
+}
+
+/** The public Fee Juice an address holds, read through the script wallet (`balance_of_public`). */
+export async function readPublicFeeJuice(
+	wallet: InstanceType<typeof EmbeddedWallet>,
+	from: AztecAddress,
+	address: string,
+): Promise<bigint> {
+	const { Contract } = await import("@aztec/aztec.js/contracts")
+	const { FeeJuiceArtifact } = await import("@aztec/protocol-contracts/fee-juice")
+	const feeJuice = await Contract.at(ProtocolContractAddress.FeeJuice, FeeJuiceArtifact, wallet)
+	const answer: unknown = await feeJuice.methods.balance_of_public(AztecAddress.fromStringUnsafe(address)).simulate({ from })
+	const value = typeof answer === "object" && answer !== null && "result" in answer ? (answer as { result: unknown }).result : answer
+	return BigInt(value as bigint | number | string)
+}

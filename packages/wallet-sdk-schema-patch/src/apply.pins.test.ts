@@ -14,16 +14,15 @@ import { applyNuloSchemaPatch } from "./apply"
 const entry = (schema: Record<string, unknown>, key: string) => (schema as any)[key]
 
 describe("applyNuloSchemaPatch pins", () => {
-	test("idempotent: a second application keeps the SAME three entries by identity", () => {
+	test("idempotent: a second application keeps the SAME four entries by identity", () => {
 		const schema: Record<string, unknown> = {}
 		applyNuloSchemaPatch(schema)
-		const first = ["registerToken", "isTokenRegistered", "grantPublicAuthwit"].map((k) => entry(schema, k))
+		const KEYS = ["registerToken", "isTokenRegistered", "grantPublicAuthwit", "getWalletFeatures"]
+		const first = KEYS.map((k) => entry(schema, k))
 		expect(() => applyNuloSchemaPatch(schema)).not.toThrow()
-		const second = ["registerToken", "isTokenRegistered", "grantPublicAuthwit"].map((k) => entry(schema, k))
-		expect(second[0]).toBe(first[0])
-		expect(second[1]).toBe(first[1])
-		expect(second[2]).toBe(first[2])
-		expect(Object.keys(schema).sort()).toEqual(["grantPublicAuthwit", "isTokenRegistered", "registerToken"])
+		const second = KEYS.map((k) => entry(schema, k))
+		for (const i of [0, 1, 2, 3]) expect(second[i]).toBe(first[i])
+		expect(Object.keys(schema).sort()).toEqual(["getWalletFeatures", "grantPublicAuthwit", "isTokenRegistered", "registerToken"])
 	})
 
 	test("registerToken drift message, full text", () => {
@@ -56,10 +55,12 @@ describe("applyNuloSchemaPatch pins", () => {
 			input: z.tuple([schemas.AztecAddress, z.object({ caller: z.string() })]),
 			output: z.string(),
 		})
-		const schema = { registerToken, isTokenRegistered, grantPublicAuthwit }
+		const getWalletFeatures = z.function({ input: z.tuple([]), output: z.array(z.string()) })
+		const schema = { registerToken, isTokenRegistered, grantPublicAuthwit, getWalletFeatures }
 		expect(() => applyNuloSchemaPatch(schema)).not.toThrow()
 		expect(entry(schema, "registerToken")).toBe(registerToken)
 		expect(entry(schema, "isTokenRegistered")).toBe(isTokenRegistered)
 		expect(entry(schema, "grantPublicAuthwit")).toBe(grantPublicAuthwit)
+		expect(entry(schema, "getWalletFeatures")).toBe(getWalletFeatures)
 	})
 })

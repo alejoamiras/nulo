@@ -90,6 +90,20 @@ describe("OperationEstimateReuse.tryConsume — the drift ladder", () => {
 		expect(await reuse.tryConsume("id-1", makeInput())).toBeUndefined()
 	})
 
+	test("a requested self-pay and a picker-chosen Fee Juice build of the same actions never consume each other", async () => {
+		const { reuse } = makeReuse()
+		const feeJuice = { paymentMethod: { kind: "fj" } } as never
+		const selfPay = makeInput({ fee: { requestedPayment: "fj", gasPadding: 1 }, feeSettings: feeJuice })
+		const picked = makeInput({ fee: { gasPadding: 1 }, feeSettings: feeJuice })
+		reuse.stash("self", makeEntry({ fingerprint: fingerprintOperation(selfPay)!, feeSettings: feeJuice }))
+		reuse.stash("picked", makeEntry({ fingerprint: fingerprintOperation(picked)!, feeSettings: feeJuice }))
+		expect(await reuse.tryConsume("self", picked)).toBeUndefined()
+		expect(await reuse.tryConsume("picked", selfPay)).toBeUndefined()
+		// Single-shot: the misses above consumed both slots; the same shape, re-stashed, comes back.
+		reuse.stash("self-again", makeEntry({ fingerprint: fingerprintOperation(selfPay)!, feeSettings: feeJuice }))
+		expect(await reuse.tryConsume("self-again", selfPay)).toBeDefined()
+	})
+
 	test("unknown id misses", async () => {
 		const { reuse } = makeReuse()
 		expect(await reuse.tryConsume("nope", makeInput())).toBeUndefined()

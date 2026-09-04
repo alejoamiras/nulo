@@ -26,6 +26,7 @@ describe("routeHandlerMethod — helper seam pins", () => {
 		const table: Array<[string, string, unknown[]]> = [
 			["requestCapabilities", "handleRequestCapabilities", [{ capabilities: [] }]],
 			["getAccounts", "handleGetAccounts", []],
+			["getWalletFeatures", "handleGetWalletFeatures", []],
 			["batch", "handleBatch", [[]]],
 			["sendTx", "handleSendTx", [{}]],
 			["registerToken", "handleRegisterToken", ["0x1", "0x2"]],

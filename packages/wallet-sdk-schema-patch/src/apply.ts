@@ -43,15 +43,18 @@ const GRANT_CONTENT_SCHEMA = z.object({
 })
 const GRANT_AUTHWIT_SCHEMA = z.function({ input: z.tuple([schemas.AztecAddress, GRANT_CONTENT_SCHEMA]), output: z.string() })
 
+const WALLET_FEATURES_SCHEMA = z.function({ input: z.tuple([]), output: z.array(z.string()) })
+
 /**
  * Mutate `schema` (the wallet-sdk `WalletSchema` singleton) in place, adding the
- * three Nulo-custom method entries. Idempotent when the entries already match our
+ * four Nulo-custom method entries. Idempotent when the entries already match our
  * shape; throws when an upstream entry of the same name has a different signature.
  */
 export function applyNuloSchemaPatch(schema: object): void {
 	patchOrVerifyEntry(schema, "registerToken", PATCHED_SCHEMA, isRegisterTokenShape, "(AztecAddress, AztecAddress) => void")
 	patchOrVerifyEntry(schema, "isTokenRegistered", REGISTERED_QUERY_SCHEMA, isTokenRegisteredShape, "(AztecAddress) => boolean")
 	patchOrVerifyEntry(schema, "grantPublicAuthwit", GRANT_AUTHWIT_SCHEMA, isGrantAuthwitShape, "(AztecAddress, content) => string")
+	patchOrVerifyEntry(schema, "getWalletFeatures", WALLET_FEATURES_SCHEMA, isWalletFeaturesShape, "() => string[]")
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: WalletSchema entries are upstream-typed but the per-key shape is internal to @aztec/aztec.js.
@@ -62,7 +65,7 @@ type SchemaEntry = any
  *  error. The existing entry is left in place by identity either way. */
 function patchOrVerifyEntry(
 	schema: object,
-	key: "registerToken" | "isTokenRegistered" | "grantPublicAuthwit",
+	key: "registerToken" | "isTokenRegistered" | "grantPublicAuthwit" | "getWalletFeatures",
 	patched: SchemaEntry,
 	isCompatibleShape: (existing: SchemaEntry) => boolean,
 	expectedSignature: string,
@@ -95,6 +98,13 @@ function isRegisterTokenShape(existing: SchemaEntry): boolean {
 function isTokenRegisteredShape(existing: SchemaEntry): boolean {
 	const items = existing?.def?.input?.def?.items
 	return items?.length === 1 && items[0] === schemas.AztecAddress && existing?.def?.output?.def?.type === "boolean"
+}
+
+function isWalletFeaturesShape(existing: SchemaEntry): boolean {
+	const items = existing?.def?.input?.def?.items
+	return (
+		items?.length === 0 && existing?.def?.output?.def?.type === "array" && existing?.def?.output?.def?.element?.def?.type === "string"
+	)
 }
 
 function isGrantAuthwitShape(existing: SchemaEntry): boolean {

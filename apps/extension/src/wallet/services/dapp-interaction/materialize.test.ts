@@ -12,6 +12,17 @@ import { describe, expect, test, vi } from "vitest"
 import type { Account } from "@/wallet/services/account/service"
 import type { Network } from "@/wallet/services/network/service"
 import { assertSilentExecutable, materializeRequest, type MaterializeDeps } from "./materialize"
+import { CLAIM_AND_END_SETUP, CLAIM_AND_END_SETUP_SELECTOR, FEE_JUICE_CONTRACT } from "@nulo/wallet-bridge"
+
+const CLAIM = {
+	name: CLAIM_AND_END_SETUP,
+	to: FEE_JUICE_CONTRACT,
+	selector: CLAIM_AND_END_SETUP_SELECTOR,
+	type: "private",
+	isStatic: false,
+	hideMsgSender: false,
+	args: ["0xabc", "0x5", "0x7", "0x9"],
+}
 
 const NETWORK: Network = {
 	id: "net-1",
@@ -81,6 +92,31 @@ describe("materializeRequest", () => {
 			deps,
 		)
 		expect((out as { feeSettings: unknown }).feeSettings).toEqual({ paymentMethod: { kind: "embedded" } })
+	})
+
+	test("aztec_sendTx whose payer is the account itself with no fee call: a self-pay, drafted with NO fee settings", async () => {
+		const deps = makeDeps()
+		const out = await materializeRequest(
+			{
+				kind: "aztec_sendTx",
+				account: "eip155:1337:0xabc",
+				exec: { calls: [{ name: "transfer" }], feePayer: "0xabc" },
+				opts: { from: "0xabc" },
+			} as never,
+			deps,
+		)
+		expect((out as { feeSettings: unknown }).feeSettings).toBeUndefined()
+		// The same payer WITH the Fee Juice contract's setup-ending claim carries its payment: embedded.
+		const claim = await materializeRequest(
+			{
+				kind: "aztec_sendTx",
+				account: "eip155:1337:0xabc",
+				exec: { calls: [CLAIM, { name: "transfer" }], feePayer: "0xabc" },
+				opts: { from: "0xabc" },
+			} as never,
+			deps,
+		)
+		expect((claim as { feeSettings: unknown }).feeSettings).toEqual({ paymentMethod: { kind: "embedded" } })
 	})
 
 	test("aztec_sendTx with no self-fee path: feeSettings undefined (draft)", async () => {

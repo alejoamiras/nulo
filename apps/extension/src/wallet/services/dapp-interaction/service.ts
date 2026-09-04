@@ -16,6 +16,7 @@ import type { WindowManager } from "@/wallet/services/window-manager/window-mana
 import { parseCaipAccount, parseCaipChain, resolveNetworkByChainId } from "@/wallet/utils/caip"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
+import { isSelfPay } from "@nulo/wallet-bridge"
 import { assertSilentExecutable, materializeRequest, type MaterializeDeps } from "./materialize"
 import {
 	DAPP_INTERACTION_SERVICE_NAME,
@@ -517,7 +518,8 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			payload.params.operations.find(
 				(x) =>
 					(x.kind === "send_transaction" && x.fee?.embeddedFeePayment === undefined) ||
-					(x.kind === "aztec_sendTx" && x.exec.feePayer === undefined),
+					// A self-pay spends the account's own Fee Juice, exactly like a send that names no payer.
+					(x.kind === "aztec_sendTx" && (x.exec.feePayer === undefined || isSelfPay(x.exec, x.opts?.from))),
 			)
 		) {
 			return true

@@ -23,6 +23,7 @@ import {
 	awaitL1Receipt,
 	deriveBridgeSecret,
 	ensurePermit2Allowance,
+	feeJuiceAddress,
 	isSealTrusted,
 	isSendRecord,
 	markSealTrusted,
@@ -34,6 +35,7 @@ import {
 	privateMintAndPayFee,
 	publicFeeJuicePayment,
 	readSendReceiptLeaves,
+	selfPaidFeeJuicePayment,
 	sealDepositRecord,
 } from "@nulo/bridge-core"
 import type { Log } from "viem"
@@ -44,11 +46,12 @@ import {
 	PRIVATE_ATTEMPT_STALE_MS,
 	decideFuelClaim,
 	decideFuelLadder,
-	decideOwnGasCredit,
+	decideOwnGasSource,
 	decidePrivateFuelClaim,
 	isPrivateFuelInsufficiency,
 } from "@/lib/fuel-claim-state"
 import { isWellFormedTxHash } from "@/lib/claim-receipt"
+import { DAPP_SELF_PAY_FEATURE, walletSupports } from "@/lib/wallet-features"
 import {
 	cacheSecret,
 	currentRecord,
@@ -201,6 +204,15 @@ export async function sendStandaloneFjClaim(
 	}
 	patchFuel(id, fuel, { standaloneClaimed: true })
 	log("standalone FJ claim confirmed", id)
+}
+
+/** Read the account's PUBLIC Fee Juice balance - what a wallet that routes a dApp-named payer can pay
+ *  a claim from. Uses the FeeJuice contract's `balance_of_public` via the connected wallet (scoped
+ *  in the bridge manifest's simulation); mirrors the wallet's own gas-balance reader. */
+export async function readPublicFeeJuiceBalance(aztec: unknown, recipient: AztecAddress): Promise<bigint> {
+	const { FeeJuiceContractArtifact } = await import("@aztec/noir-contracts.js/FeeJuice")
+	const fj = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
+	return readBalance(aztec as never, fj, "balance_of_public", recipient)
 }
 
 /** Read the account's PRIVATE Fee Juice balance held at the Wonderland PrivateFPC — the remainder a
@@ -562,31 +574,49 @@ export type PublicClaimFee =
 	| { kind: "own-gas"; fee: FpcFee; registerFee?: FpcFee; registeredClaimFee?: FpcFee; standalone?: FuelBlock }
 
 const OWN_GAS_STOPS = {
-	none: 'No gas to claim this bridge with: your account holds no private Fee Juice at the fee contract. Send with "arrive with gas", or bridge gas first.',
-	unverifiable: "Couldn't check your private gas at the fee contract - please try again in a moment.",
-	short: "Your private gas is under this claim's fee ceiling at current network fees - retry when fees ease, or bridge more gas.",
+	none: 'No gas to claim this bridge with: your account holds no Fee Juice the bridge can pay from. Send with "arrive with gas", or bridge gas first.',
+	unverifiable: "Couldn't check your gas - please try again in a moment.",
+	short: "Your gas is under this claim's fee ceiling at current network fees - retry when fees ease, or bridge more gas.",
 } as const
 
-/** A claim with no fresh Fee Juice message of its own pays from the private gas the account ALREADY
- *  holds at the FPC — and only from that. Its public Fee Juice cannot be named as the payer through
- *  the wallet (a payer with no claim call is routed as a claim-in-setup that never ends setup), and
- *  a claim sent without a payer is left to the wallet's picker, whose default is the sponsored FPC
- *  no bridge path may lean on. The read is fail-closed (null = unread). */
+/** The account's own public Fee Juice as the transaction's payer, on a wallet that routes it: the
+ *  wallet sizes the limits from its own estimate and charges the exact fee; the cap is the
+ *  predicted worst fee, so a rise before inclusion cannot reject it. */
+const selfPayFee = (payer: AztecAddress, maxFees: MaxFees): FpcFee => ({
+	paymentMethod: selfPaidFeeJuicePayment(payer),
+	gasSettings: { maxFeesPerGas: { feePerDaGas: maxFees.feePerDaGas, feePerL2Gas: maxFees.feePerL2Gas } },
+})
+
+/** A claim with no fresh Fee Juice message of its own pays from gas the account ALREADY holds, and
+ *  names its payer: the private balance at the FPC, or — on a wallet that routes a dApp-named payer
+ *  — its public Fee Juice. A claim sent without a payer would be left to the wallet's picker, whose
+ *  default is the sponsored FPC no bridge path may lean on; a public payer on a wallet that cannot
+ *  route it builds an invalid transaction, so the wallet is asked first. Reads are fail-closed
+ *  (null = unread). */
 export async function ownGasFee(
 	rec: FeeLadderRecord,
 	recipientAddr: AztecAddress,
 	aztec: unknown,
 	registers: boolean,
 ): Promise<PublicClaimFee> {
-	const [credit, maxFees] = await Promise.all([
+	const publicAllowed = await walletSupports(aztec, DAPP_SELF_PAY_FEATURE)
+	const [pub, credit, maxFees] = await Promise.all([
+		publicAllowed ? readFeeJuiceOrNull("public FJ", () => readPublicFeeJuiceBalance(aztec, recipientAddr)) : Promise.resolve(0n),
 		readFeeJuiceOrNull("private FJ", () => readPrivateFeeJuiceBalance(aztec, recipientAddr)),
 		predictedWorstMinFees(createAztecNodeClient(NODE_URL)),
 	])
 	const shape = { isPrivate: rec.isPrivate, registers }
 	const ceiling = ownGasCeiling(shape, maxFees)
-	const verdict = decideOwnGasCredit({ privateFeeJuice: credit, ceiling })
-	log("own-gas credit", { id: rec.id, verdict, registers, credit: fmtFj(credit), ceiling: fmtFj(ceiling) })
-	if (verdict !== "pays") return { kind: "stop", why: OWN_GAS_STOPS[verdict] }
+	const source = decideOwnGasSource({
+		publicFeeJuice: pub,
+		privateFeeJuice: credit,
+		ceiling,
+		preferPrivate: rec.isPrivate,
+		publicAllowed,
+	})
+	log("own-gas source", { id: rec.id, source, registers, publicAllowed, pub: fmtFj(pub), credit: fmtFj(credit), ceiling: fmtFj(ceiling) })
+	if (source === "public") return { kind: "own-gas", fee: selfPayFee(recipientAddr, maxFees) }
+	if (source !== "private") return { kind: "stop", why: OWN_GAS_STOPS[source] }
 	const fpc = AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)
 	const txs = ownGasTxs(shape)
 	const fee = fpcCreditFee(fpc, maxFees, txs.claim)

@@ -52,7 +52,7 @@ const FROZEN_CAPABILITY_MAP: Record<string, string> = {
 	registerSender: "data",
 }
 
-const FROZEN_EXEMPT = new Set(["getChainInfo", "requestCapabilities", "batch"])
+const FROZEN_EXEMPT = new Set(["getChainInfo", "requestCapabilities", "batch", "getWalletFeatures"])
 
 const FROZEN_METHOD_TO_KIND: Record<string, string> = {
 	getChainInfo: "aztec_getChainInfo",
@@ -112,6 +112,7 @@ const FROZEN_SCOPE_CHECKER: Record<string, unknown> = {
 const DISPATCH_HANDLER_LITERALS = [
 	"requestCapabilities",
 	"getAccounts",
+	"getWalletFeatures",
 	"isTokenRegistered",
 	"sendTx",
 	"registerToken",
@@ -313,6 +314,7 @@ const FROZEN_ARG_GUARDED = new Set([
 ])
 const FROZEN_ARG_UNGUARDED = new Set([
 	"getChainInfo", // reads no args
+	"getWalletFeatures", // reads no args
 	"getAccounts", // reads no args
 	"getAddressBook", // reads no args
 	"sendTx", // exec validation owned by checkSendTx (pinned error); opts optional

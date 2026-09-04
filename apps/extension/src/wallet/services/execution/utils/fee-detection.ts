@@ -1,15 +1,15 @@
+import { type FeeCallLike, classifyFeePayer } from "@nulo/wallet-bridge"
+
 /**
- * Detects whether an ExecutionPayload has an embedded fee payment method,
- * and classifies it as "fjwc" (FeeJuice with claim, payer === sender) or
- * "fpc" (external FPC, payer !== sender).
- *
- * Returns undefined if no embedded fee payment is detected.
+ * The embedded fee payment a payload carries — "fjwc" (the sender claims Fee Juice in setup) or
+ * "fpc" (an external contract pays) — or undefined when it carries none: no payer, or a sender who
+ * only asks to pay from held Fee Juice. That last shape is a requested self-pay, not an embedded
+ * payment: the wallet's own Fee Juice method pays it, and building it as a claim in setup would
+ * never end setup.
  */
-export function detectEmbeddedFeePayment(feePayer: unknown, from: unknown): "fjwc" | "fpc" | undefined {
-	if (feePayer === undefined || feePayer === null) {
-		return undefined
-	}
-	return String(feePayer) === String(from) ? "fjwc" : "fpc"
+export function detectEmbeddedFeePayment(feePayer: unknown, from: unknown, calls?: ReadonlyArray<FeeCallLike>): "fjwc" | "fpc" | undefined {
+	const route = classifyFeePayer(feePayer, from, calls)
+	return route === "fjwc" || route === "fpc" ? route : undefined
 }
 
 /**

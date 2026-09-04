@@ -187,6 +187,12 @@ const METHOD_REGISTRY_SOURCE = {
 		routing: { via: "handler" },
 		argSchema: argsBatch,
 	},
+	getWalletFeatures: {
+		capability: null,
+		exemptReason: "meta-protocol — a static list of what this build routes; no account, network or balance data",
+		routing: { via: "handler" },
+		note: "handler-routed; a dApp asks before naming the account's own Fee Juice as payer (a build without the feature builds that invalid)",
+	},
 
 	// ── accounts ──
 	createAuthWit: {

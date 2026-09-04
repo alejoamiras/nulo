@@ -330,6 +330,37 @@ describe("FeeSettingsCard — mounting & init contract", () => {
 	})
 })
 
+describe("FeeSettingsCard — a method the dApp locked", () => {
+	test("locked to Fee Juice: the saved sponsored choice never replaces it, no selector is offered, settings are Fee Juice", async () => {
+		storageBacking[FEE_METHOD_LS_KEY] = { [account.address]: { type: "fpc", fpc: { id: "s1", type: 1, name: "Sponsor" } } }
+		mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+
+		const w = mount(FeeSettingsCard, { props: baseProps({ lockedMethod: "fj" }), global: { stubs: STUBS } })
+		await flushPromises()
+
+		expect(w.find('[data-testid="send-fee-locked"]').exists()).toBe(true)
+		expect(w.find('[data-testid="fee-method-selector"]').exists()).toBe(false)
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fj" } })
+		// A locked mount reads the balance FRESH: the dApp asked because the balance just moved.
+		expect(mocks.getGasBalances).toHaveBeenCalledWith(expect.anything(), expect.anything(), true)
+		// The lock is the dApp's, not a preference: nothing is persisted for the account.
+		expect((storageBacking[FEE_METHOD_LS_KEY] as Record<string, { type: string }>)[account.address].type).toBe("fpc")
+	})
+
+	test("locked to Fee Juice with none held: no settings, and the get-fee-juice nudge shows", async () => {
+		mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: null })
+
+		const w = mount(FeeSettingsCard, { props: baseProps({ lockedMethod: "fj" }), global: { stubs: STUBS } })
+		await flushPromises()
+
+		const truthy = (w.emitted<unknown[]>("update:modelValue") ?? []).filter((ev) => ev[0] !== undefined && ev[0] !== null)
+		expect(truthy).toEqual([])
+		expect(w.find('[data-testid="send-fee-nudge"]').exists()).toBe(true)
+	})
+})
+
 describe("FeeSettingsCard — user actions", () => {
 	test("picking fj from dropdown: emits valid settings, persists semantic record to storage", async () => {
 		mocks.getFpcs.mockResolvedValue([])

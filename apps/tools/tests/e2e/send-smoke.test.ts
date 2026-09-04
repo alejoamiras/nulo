@@ -50,6 +50,8 @@ const h = vi.hoisted(() => ({
 		l2Balance: 5n * 10n ** 8n,
 		/** Whether the Aztec account holds gas for a token-only claim; null = unknown. */
 		gasHeld: { value: null as bigint | null },
+		gasHeldPublic: { value: 0n as bigint | null },
+		gasHeldSelfPay: { value: false },
 		listGate: null as null | Promise<void>,
 		receiptGate: null as null | Promise<void>,
 		order: [] as string[],
@@ -170,7 +172,13 @@ vi.mock("@aztec/aztec.js/node", () => ({
 }))
 // The gas-held read reaches the FeeJuice contract through the wallet; the smoke answers it directly.
 vi.mock("@/composables/useGasHeld", () => ({
-	useGasHeld: () => ({ credit: h.state.gasHeld, refresh: async () => {}, dispose: () => {} }),
+	useGasHeld: () => ({
+		credit: h.state.gasHeld,
+		publicFeeJuice: h.state.gasHeldPublic,
+		selfPay: h.state.gasHeldSelfPay,
+		refresh: async () => {},
+		dispose: () => {},
+	}),
 }))
 
 vi.mock("@nulo/bridge-core", async (orig) => {

@@ -786,4 +786,8 @@ public registering claim through the FPC.
 
 ## Sign-off
 
-_Owner sign-off: PENDING._
+**Owner sign-off — 2026-09-04.** After the fourth walk (the private first claim on the preview,
+the sponsor leak found and closed, the wallet's dApp-named self-pay shipped as PR #544 above the
+stack, the CADC token minted with its portal created and its pool seeded for the retest), the
+owner wrote: "No more feedback. Happy to sign off on merging the stack." The merge itself
+(`gh stack merge`, landing every PR below the named one) is the owner's action, never the agent's.

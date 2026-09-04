@@ -143,6 +143,7 @@ function encodeFeeOptions(fee: FeeOptions | undefined): string {
 		f ? `${String(f.feePerDaGas)}:${String(f.feePerL2Gas)}` : "-"
 	return [
 		fee.embeddedFeePayment ?? "-",
+		fee.requestedPayment ?? "-",
 		limits(fee.gasLimits),
 		limits(fee.teardownGasLimits),
 		fees(fee.maxFeesPerGas),

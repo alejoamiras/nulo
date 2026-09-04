@@ -16,12 +16,15 @@
  * contract everywhere else.
  */
 
+import { isSelfPay } from "./fee-payer"
 import type { DraftOperation, Operation } from "./operation"
 
 /**
  * True iff `op` is a send-like operation that still needs the user to pick a fee
  * payment method. Legitimate "no fee needed" send-likes (embedded fee payment, or
- * `aztec_sendTx` default-entrypoint / `exec.feePayer`) are treated as ready.
+ * `aztec_sendTx` default-entrypoint / an `exec.feePayer` that carries the payment) are
+ * treated as ready. A payer that is the account itself with no fee call is a requested
+ * self-pay: the payload carries no payment, so its fee settings must exist like any other.
  * Non-send kinds never need fee selection.
  */
 export function requiresFeeSelection(op: DraftOperation): boolean {
@@ -30,7 +33,7 @@ export function requiresFeeSelection(op: DraftOperation): boolean {
 	}
 	if (op.kind === "aztec_sendTx") {
 		const isNoFrom = op.executionMode === "default_entrypoint"
-		const hasEmbeddedFeePayer = op.exec?.feePayer !== undefined
+		const hasEmbeddedFeePayer = op.exec?.feePayer !== undefined && !isSelfPay(op.exec, op.opts?.from)
 		return op.feeSettings === undefined && !isNoFrom && !hasEmbeddedFeePayer
 	}
 	return false
