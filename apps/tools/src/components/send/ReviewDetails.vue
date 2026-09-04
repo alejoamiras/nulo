@@ -57,9 +57,12 @@ const routeText = computed(() => {
 	return `${hops.join(" → ")} on Uniswap v4 (${pools} ${pools === 1 ? "pool" : "pools"}), then the gas leg is bridged.`
 })
 
-const slippageText = computed(() =>
-	props.slippageBps === null ? "Not applicable — this send buys no gas." : `${(props.slippageBps / 100).toFixed(2)}%`,
-)
+const slippageText = computed(() => (props.slippageBps === null ? "—" : `${(props.slippageBps / 100).toFixed(2)}%`))
+
+/** A token-only deposit swaps nothing, so it has no route and no slippage to show; a gas leg has
+ *  both, and an exit keeps the route line for what a burn-and-release is. */
+const buysGas = computed(() => props.plan.direction === "l1-to-l2" && props.plan.gas !== undefined)
+const showsRoute = computed(() => props.plan.direction === "l2-to-l1" || buysGas.value)
 
 /** The clone the money leaves through — the derived address, and what the factory said about it. */
 const portalAddress = computed(() => checksumAddress(props.plan.token.portal))
@@ -100,11 +103,11 @@ const validityText = computed(() => {
 					</a>
 				</dd>
 			</div>
-			<div class="row" :data-testid="TESTIDS.sendReviewRoute">
+			<div v-if="showsRoute" class="row" :data-testid="TESTIDS.sendReviewRoute">
 				<dt>Route</dt>
 				<dd>{{ routeText }}</dd>
 			</div>
-			<div class="row" :data-testid="TESTIDS.sendReviewSlippage">
+			<div v-if="buysGas" class="row" :data-testid="TESTIDS.sendReviewSlippage">
 				<dt>Slippage</dt>
 				<dd>{{ slippageText }}</dd>
 			</div>

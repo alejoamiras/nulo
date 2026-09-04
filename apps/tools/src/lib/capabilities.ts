@@ -164,7 +164,7 @@ interface ManifestScopes {
  * L2 send leans on. A grant with no hub carries no token scopes either — a Token the hub cannot
  * mint to is not something the app ever calls.
  */
-function sendScopes(hub: AztecAddress | undefined, tokens: readonly AztecAddress[], sponsoredFpc: AztecAddress): ManifestScopes {
+function sendScopes(hub: AztecAddress | undefined, tokens: readonly AztecAddress[]): ManifestScopes {
 	const hubTokens = hub ? tokens : []
 	const onHub = (functions: readonly string[]): ScopedFunction[] => (hub ? at(hub, functions) : [])
 	return {
@@ -185,7 +185,6 @@ function sendScopes(hub: AztecAddress | undefined, tokens: readonly AztecAddress
 			...onHub(HUB_VIEW_FUNCTIONS),
 			...onHub(HUB_SIMULATED_SENDS),
 			...each(hubTokens, TOKEN_BURN_FUNCTIONS),
-			{ contract: sponsoredFpc, function: "sponsor_unconditionally" },
 			{ contract: STANDARD_AUTH_REGISTRY_ADDRESS, function: "set_authorized" },
 			// The fuel claim (canonical FeeJuice, a protocol contract) must be simulatable: the engine's
 			// claim gate dry-runs the token claim WITH the embedded fjwc fee payment.
@@ -204,7 +203,6 @@ function sendScopes(hub: AztecAddress | undefined, tokens: readonly AztecAddress
 			...at(PRIVATE_FPC_L2, ["mint_and_pay_fee", "pay_fee"]),
 			...onHub(HUB_SEND_FUNCTIONS),
 			...each(hubTokens, TOKEN_BURN_FUNCTIONS),
-			{ contract: sponsoredFpc, function: "sponsor_unconditionally" },
 			// exit_to_l1 needs a PUBLIC burn auth-wit, which lands on-chain as set_authorized on the
 			// standard auth registry (STANDARD_AUTH_REGISTRY_ADDRESS — derived from the artifact in 5.0,
 			// no longer protocol slot 0x..01). Without this the exit's auth-wit sendTx hits a
@@ -220,14 +218,17 @@ interface DripTokens {
 	readonly eth: AztecAddress
 }
 
-function dripScopes(drip: DripTokens | null): ManifestScopes {
+function dripScopes(drip: DripTokens | null, sponsoredFpc: AztecAddress): ManifestScopes {
 	if (!drip) return { contracts: [], utilities: [], simulatedTransactions: [], transactions: [] }
 	const tokens = [drip.usdc, drip.eth]
+	// The faucet is the one surface the sponsor pays for (testnet only): its grant travels with the
+	// drip scopes, so a network without a faucet carries no sponsor at all.
+	const sponsor = { contract: sponsoredFpc, function: "sponsor_unconditionally" }
 	return {
 		contracts: [drip.dripper, drip.usdc, drip.eth],
 		utilities: each(tokens, ["balance_of_private"]),
-		simulatedTransactions: each(tokens, ["balance_of_public"]),
-		transactions: at(drip.dripper, ["drip_to_public", "drip_to_private"]),
+		simulatedTransactions: [...each(tokens, ["balance_of_public"]), sponsor],
+		transactions: [...at(drip.dripper, ["drip_to_public", "drip_to_private"]), sponsor],
 	}
 }
 
@@ -255,7 +256,6 @@ export interface SendManifestInput {
 	 *  for. Exact addresses only — a wildcard Token scope would route burn authwits to silent
 	 *  execution. */
 	readonly tokens: ReadonlyArray<AztecAddress>
-	readonly sponsoredFpcAddress: AztecAddress
 	readonly appUrl?: string
 }
 
@@ -264,14 +264,15 @@ export interface SendManifestInput {
  *  - `accounts.canCreateAuthWit: true` — an exit needs a burn auth-wit.
  *  - `contracts` = [hub, ...tokens, PrivateFPC]; the wallet registers each of them.
  *  - `transaction.scope` covers registration, claim and exit on the hub, the Token burns the exit
- *    auth-wit drives, the fee-payment calls, and the SponsoredFPC sponsor call (Nulo enforces every
- *    `exec.calls` entry against the granted tx scope).
+ *    auth-wit drives, and the fee-payment calls (Nulo enforces every `exec.calls` entry against
+ *    the granted tx scope). No sponsor: every bridge transaction pays from Fee Juice the user
+ *    bridged or already holds, on every network.
  *
  * Growing `tokens` is what makes the wallet re-prompt: the approval replaces the stored grant, so a
  * request must always carry the WHOLE set, never just the newcomer.
  */
 export function buildSendManifest(input: SendManifestInput): AppManifest {
-	const scopes = sendScopes(input.hub, input.tokens, input.sponsoredFpcAddress)
+	const scopes = sendScopes(input.hub, input.tokens)
 	return manifestOf("nulo-bridge", "Bridge assets between Ethereum (L1) and Aztec (L2) - Nulo", input.appUrl ?? defaultUrl(), scopes)
 }
 
@@ -301,8 +302,8 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 	const { dripperAddress, usdcAddress, ethAddress, sponsoredFpcAddress } = input
 	// All three drip tokens present ⇒ include the drip grants; none ⇒ send+fuel only (mainnet).
 	const drip = dripperAddress && usdcAddress && ethAddress ? { dripper: dripperAddress, usdc: usdcAddress, eth: ethAddress } : null
-	const send = sendScopes(input.hub, input.hubTokens ?? [], sponsoredFpcAddress)
-	const drips = dripScopes(drip)
+	const send = sendScopes(input.hub, input.hubTokens ?? [])
+	const drips = dripScopes(drip, sponsoredFpcAddress)
 	return manifestOf("nulo-tools", drip ? "Drip + Bridge on Aztec - Nulo" : "Bridge on Aztec - Nulo", input.appUrl ?? defaultUrl(), {
 		contracts: [...send.contracts, ...drips.contracts],
 		utilities: [...drips.utilities, ...send.utilities],

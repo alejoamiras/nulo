@@ -11,6 +11,8 @@ const props = defineProps<{
 	/** The token IS the gas asset, so its gas leg needs no swap. */
 	feeAsset: boolean
 	noRoute: boolean
+	/** Why the token alone cannot be chosen (the account holds no gas to claim it with); null = it can. */
+	tokenReason?: string | null
 }>()
 const emit = defineEmits<{ "update:intent": [intent: SendIntent] }>()
 
@@ -23,7 +25,14 @@ interface Choice {
 
 const NO_ROUTE_REASON = "This token can't buy Aztec gas on the way in."
 /** Referenced by the disabled cells' `aria-describedby`: one choice group exists at a time. */
-const REASON_ID = "send-choice-no-route"
+const NO_ROUTE_ID = "send-choice-no-route"
+const NO_GAS_ID = "send-choice-no-gas"
+
+/** The reason a choice is greyed out, or null when it can be taken. */
+function reasonOf(choice: Choice): string | null {
+	if (choice.key === "token") return props.tokenReason ?? null
+	return props.noRoute ? NO_ROUTE_REASON : null
+}
 
 const choices = computed<Choice[]>(() => {
 	const token: Choice = {
@@ -42,7 +51,7 @@ const choices = computed<Choice[]>(() => {
 })
 
 function enabled(choice: Choice): boolean {
-	return choice.key === "token" || !props.noRoute
+	return reasonOf(choice) === null
 }
 
 const cards = useTemplateRef<HTMLElement>("cards")
@@ -81,8 +90,8 @@ function move(from: number, delta: number): void {
 			:data-selected="choice.key === intent || undefined"
 			:aria-selected="choice.key === intent"
 			:disabled="!enabled(choice)"
-			:title="enabled(choice) ? undefined : NO_ROUTE_REASON"
-			:aria-describedby="enabled(choice) ? undefined : REASON_ID"
+			:title="reasonOf(choice) ?? undefined"
+			:aria-describedby="enabled(choice) ? undefined : choice.key === 'token' ? NO_GAS_ID : NO_ROUTE_ID"
 			:tabindex="choice.key === intent ? 0 : -1"
 			@click="choose(choice)"
 			@keydown.left.prevent="move(index, -1)"
@@ -93,8 +102,9 @@ function move(from: number, delta: number): void {
 			<span class="label">{{ choice.label }}</span>
 			<span class="desc">{{ choice.desc }}</span>
 		</button>
-		<!-- The amount step says this in sight; the disabled cells point assistive tech at it here. -->
-		<span v-if="noRoute && !exitOnly" :id="REASON_ID" class="sr-only">{{ NO_ROUTE_REASON }}</span>
+		<!-- The amount step says these in sight; the disabled cells point assistive tech at them here. -->
+		<span v-if="noRoute && !exitOnly" :id="NO_ROUTE_ID" class="sr-only">{{ NO_ROUTE_REASON }}</span>
+		<span v-if="tokenReason && !exitOnly" :id="NO_GAS_ID" class="sr-only">{{ tokenReason }}</span>
 	</div>
 </template>
 

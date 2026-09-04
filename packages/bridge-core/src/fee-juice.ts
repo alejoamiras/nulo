@@ -102,11 +102,15 @@ export const publicFeeJuicePayment = (sender: AztecAddress, claim: FeeJuiceClaim
 export const sponsoredFeePayment = (fpc: AztecAddress): SponsoredFeePaymentMethod => new SponsoredFeePaymentMethod(fpc)
 
 /**
- * Pay L2 gas from the sender's ALREADY-CLAIMED public Fee-Juice balance. aztec.js 5.x ships no
- * class for this because the protocol needs no calls at all — the account entrypoint detects a
- * zero-call fee payload and routes it as PREEXISTING_FEE_JUICE (see aztec.js
- * account_entrypoint_meta_payment_method), with the sender as fee payer. This is the mainnet
- * deploy sequence's steady-state method after the claim-in-tx bootstrap.
+ * Pay L2 gas from the sender's ALREADY-CLAIMED public Fee-Juice balance, through an aztec.js /
+ * wallet-sdk EmbeddedWallet. aztec.js 5.x ships no class for this because the protocol needs no
+ * calls at all: the account entrypoint's meta payment method routes a zero-call fee payload as
+ * PREEXISTING_FEE_JUICE, and wallet-sdk's `completeFeeOptions` routes an ABSENT payer the same
+ * way — while a payload naming the sender as payer is routed as a claim in setup
+ * (FEE_JUICE_WITH_CLAIM), which never ends setup without a `claim_and_end_setup` call. So the
+ * payload must stay empty and name nobody. This is the mainnet deploy sequence's steady-state
+ * method after the claim-in-tx bootstrap. It is NOT a way for a dApp to name the account's public
+ * Fee Juice through the Nulo wallet, where an absent payer means the user's own fee picker.
  */
 export const preexistingFeeJuicePayment = (sender: AztecAddress): FeePaymentMethod => ({
 	getAsset: () => Promise.resolve(AztecAddress.fromNumberUnsafe(FEE_JUICE_ADDRESS)),

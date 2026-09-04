@@ -14,8 +14,8 @@
 
 export type FuelClaimAction =
 	| "fjwc" // token claim pays for itself by claiming the fuel in-tx (the default).
-	| "sponsored" // fuel is gone (consumed by our included attempt, or user chose to skip it).
-	| "sponsored-plus-standalone-fj" // fee spike: claim token sponsored AND claim the FJ standalone.
+	| "own-gas" // fuel is gone (consumed by our included attempt, or user chose to skip it).
+	| "own-gas-plus-standalone-fj" // fee spike: the token claim pays from the wallet's own gas AND the FJ is claimed standalone.
 	| "wait" // no positive evidence yet - keep waiting; never fall back on ambiguity.
 
 export type FuelReceiptStatus = "included" | "dropped" | "pending"
@@ -56,9 +56,9 @@ export const MANUAL_OFFER_THRESHOLD = 3
 export function decideFuelClaim(e: FuelClaimEvidence): FuelClaimDecision {
 	const offerManual = e.persistentFailureCount >= MANUAL_OFFER_THRESHOLD
 
-	// The user's explicit, non-destructive escape: token claims sponsored; the FJ message (if
+	// The user's explicit, non-destructive escape: the token claim pays from the wallet's own gas; the FJ message (if
 	// unconsumed) stays claimable later - fuel is never marked abandoned.
-	if (e.userOverride) return { action: "sponsored", offerManual: false }
+	if (e.userOverride) return { action: "own-gas", offerManual: false }
 
 	// Trigger 1 - our own receipt is ground truth: an INCLUDED fjwc attempt consumed the FJ
 	// message regardless of app-phase outcome. Never re-embed a consumed claim.
@@ -66,20 +66,20 @@ export function decideFuelClaim(e: FuelClaimEvidence): FuelClaimDecision {
 		// A conclusive `dropped` overrides even a (prematurely) persisted consumed flag: a dropped
 		// tx consumed nothing, so retry fjwc.
 		if (e.receiptStatus === "dropped") return { action: "fjwc", offerManual }
-		if (e.receiptStatus === "included" || e.consumed) return { action: "sponsored", offerManual: false }
+		if (e.receiptStatus === "included" || e.consumed) return { action: "own-gas", offerManual: false }
 		// Pending or unprobed (incl. an unreachable node): the tx may still land - wait, never guess.
 		return { action: "wait", offerManual }
 	}
 
 	// Attempt latched but the wallet never returned a hash (crash mid-prompt): the tx MAY have
 	// been sent. A durable consumed flag still settles it; otherwise unknowable ⇒ wait (the manual
-	// escape resolves it safely - sponsored works whether or not the unknown tx consumed the fuel).
-	if (e.attempt) return e.consumed ? { action: "sponsored", offerManual: false } : { action: "wait", offerManual }
+	// escape resolves it safely - own gas works whether or not the unknown tx consumed the fuel).
+	if (e.attempt) return e.consumed ? { action: "own-gas", offerManual: false } : { action: "wait", offerManual }
 
 	// Trigger 2 - fee insufficiency from two record-local quantities: the claimed fuel cannot
-	// cover its own claim tx. Claim the token sponsored AND land the FJ as balance standalone.
+	// cover its own claim tx. Claim the token from the wallet's own gas AND land the FJ as balance standalone.
 	if (e.fuelReceived !== undefined && e.currentMinFee !== undefined && e.fuelReceived < e.currentMinFee * FUEL_FEE_MARGIN) {
-		return { action: "sponsored-plus-standalone-fj", offerManual: false }
+		return { action: "own-gas-plus-standalone-fj", offerManual: false }
 	}
 
 	return { action: "fjwc", offerManual }
@@ -88,7 +88,7 @@ export function decideFuelClaim(e: FuelClaimEvidence): FuelClaimDecision {
 /**
  * The PRIVATE fuel-claim ladder (plan L11, codex 019ec69a "Option A"): a fully SEPARATE decider from
  * the public one above. Its action type makes the privacy invariant structural — it can NEVER return
- * `sponsored` / `sponsored-plus-standalone-fj` (those would link the user). The private claim's fee is
+ * `own-gas` / `own-gas-plus-standalone-fj` (those would link the user). The private claim's fee is
  * always the Wonderland PrivateFPC method; recovery retries that method only, never public.
  *
  * Positive-evidence-only, same as the public ladder:
@@ -97,7 +97,7 @@ export function decideFuelClaim(e: FuelClaimEvidence): FuelClaimDecision {
  *  - a conclusively `dropped` attempt landed nothing ⇒ retry the private claim;
  *  - the ONE retryable no-hash case is a pre-inclusion `mint_and_pay_fee` setup-insufficiency (the
  *    "Amount too low to cover gas cost" assert makes the bundled tx invalid, so the FJ stays unconsumed);
- *  - everything else ambiguous WAITS. Never public/Sponsored on any branch.
+ *  - everything else ambiguous WAITS. Never public on any branch.
  */
 export type PrivateFuelClaimAction =
 	| "private-fpc" // attempt (or retry) the PrivateFPC mint_and_pay_fee claim.
@@ -146,7 +146,7 @@ function decideHashedAttempt(e: PrivateFuelClaimEvidence): { action: PrivateFuel
 
 /** Attempt latched but NO tx hash. Durable consumption still settles it; the setup-insufficiency
  *  assert is the one retryable case; anything else waits until the latch ages out (the wallet
- *  may still return / the tx may still land within the stale window). NEVER public/Sponsored. */
+ *  may still return / the tx may still land within the stale window). NEVER public. */
 function decideHashlessAttempt(e: PrivateFuelClaimEvidence): { action: PrivateFuelClaimAction } {
 	if (e.consumed) return { action: "consumed" }
 	if (e.setupInsufficiency) return { action: "private-fpc" }
@@ -154,38 +154,39 @@ function decideHashlessAttempt(e: PrivateFuelClaimEvidence): { action: PrivateFu
 }
 
 /**
- * Whether to UNBLOCK a NO-fuel bridge claim (the "arrive with gas" toggle OFF), as a pure decision. A
- * no-fuel claim has no fresh L1→L2 Fee-Juice message to consume, so it self-pays from gas the account
- * already holds — public Fee Juice OR the private balance a prior private fuel claim credited at the
- * PrivateFPC. The tools app does NOT pre-select a method: it only decides whether the account has gas to
- * reach the wallet's fee picker, which then selects Public OR Private Fee Juice (or Sponsored). This
- * mirrors the long-standing public path (`fee = undefined` → wallet chooses), now extended so PRIVATE
- * FJ also counts as "has gas" (it's selectable in the picker via `pay_fee`).
+ * Whether the private Fee Juice the account ALREADY holds at the PrivateFPC pays a claim with no
+ * fresh Fee Juice message of its own (a no-fuel bridge, a fee spike, a spent prior attempt, the
+ * user's choice to claim without the bridged gas). That balance is the ONLY payer such a claim can
+ * name: the account's public Fee Juice cannot be named as a dApp transaction's payer through the
+ * wallet (a payer with no claim call is routed as a claim-in-setup that never ends setup), and a
+ * claim sent without a payer is left to the wallet's picker, whose default is the sponsored FPC
+ * that no bridge path may lean on.
  *
- * **Fail-closed reads:** a balance is `bigint | null` where `null` = the read THREW (≠ a real zero). A
- * transient read failure must never fabricate spendable balance NOR a false "no gas": with no KNOWN gas
- * in either balance, `null` in either input yields `unverifiable` (surface "couldn't check — retry"),
- * not `none`.
+ * `ceiling` is what the claim commits to (limits × predicted fees, every transaction it makes): the
+ * FPC deducts exactly that and refunds nothing, so a balance under it is refused before the FPC
+ * refuses it.
+ *
+ * **Fail-closed read:** `null` = the read THREW (≠ a real zero) → `unverifiable` ("couldn't check —
+ * retry"), never a false "no gas".
  */
-export type NoFuelClaimGate =
-	| "allow" // the account holds gas in at least one balance - unblock; the wallet's picker selects the method.
-	| "unverifiable" // a balance read failed and no KNOWN balance holds gas - fail closed ("couldn't check").
-	| "none" // both balances known + zero - a truly cold account.
+export type OwnGasCredit =
+	| "pays" // the private balance covers the ceiling: the FPC pays (`pay_fee`).
+	| "short" // held, but under the ceiling - the FPC would refuse.
+	| "unverifiable" // the read failed - fail closed ("couldn't check").
+	| "none" // known and zero - a truly cold account.
 
-export interface NoFuelClaimGateInputs {
-	/** Public Fee Juice balance (base units), or `null` if the `balance_of_public` read FAILED. */
-	publicFeeJuice: bigint | null
-	/** Private Fee Juice at the PrivateFPC (base units, via `balance_of`), or `null` if that read FAILED. */
+export interface OwnGasCreditInputs {
+	/** Private Fee Juice at the PrivateFPC (base units, via `balance_of`), or `null` if the read FAILED. */
 	privateFeeJuice: bigint | null
+	/** The fee the claim commits to, in Fee Juice base units. */
+	ceiling: bigint
 }
 
-export function decideNoFuelClaimGate(i: NoFuelClaimGateInputs): NoFuelClaimGate {
-	// Any KNOWN gas (in either balance) unblocks — the wallet's fee picker handles selection + the real
-	// sufficiency check, exactly as the public path always has. `> 0` matches the original cold-check.
-	if ((i.publicFeeJuice ?? 0n) > 0n || (i.privateFeeJuice ?? 0n) > 0n) return "allow"
-	// No KNOWN gas. If either read failed, the unknown balance might hold gas - fail closed, don't block.
-	if (i.publicFeeJuice === null || i.privateFeeJuice === null) return "unverifiable"
-	return "none" // both known + zero.
+export function decideOwnGasCredit(i: OwnGasCreditInputs): OwnGasCredit {
+	const credit = i.privateFeeJuice
+	if (credit === null) return "unverifiable"
+	if (credit >= i.ceiling) return "pays"
+	return credit > 0n ? "short" : "none"
 }
 
 /** The exact PrivateFPC `mint_and_pay_fee` insufficiency assert (verified in the installed 215fd08
@@ -202,7 +203,7 @@ export function isPrivateFuelInsufficiency(message: string): boolean {
  * Which fuel ladder a deposit's claim may use — the L11 privacy fence as a routing decision.
  *
  * The two ladders are NOT interchangeable: the public one claims the bridged Fee Juice with a
- * sponsored, publicly-visible tx, which deanonymizes a private bridge. So a private record whose
+ * publicly-visible tx, which deanonymizes a private bridge. So a private record whose
  * private-claim metadata is incomplete — `bridgeSecretSalt` is optional in persisted and backup
  * records, so legacy, partially-restored or tampered ones exist — must FAIL CLOSED instead of
  * falling through to the public ladder, which is what it did before.
@@ -212,7 +213,7 @@ export function isPrivateFuelInsufficiency(message: string): boolean {
  */
 export type FuelLadder =
 	| "private" // PrivateFPC mint_and_pay_fee — the only ladder a private FUELED record may use.
-	| "public" // the sponsored/fjwc/standalone ladder (or the no-fuel fee path): never a private fueled record.
+	| "public" // the own-gas/fjwc/standalone ladder (or the no-fuel fee path): never a private fueled record.
 	| "private-incomplete" // private + fueled but missing claim metadata: refuse BOTH ladders.
 
 export interface FuelLadderInputs {

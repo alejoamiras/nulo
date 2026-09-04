@@ -341,16 +341,29 @@ describe("stepperPhases - send (schema 3) deposit rail", () => {
 		expect(after).toEqual(["seal", "sign", "deposit", "sync", "register", "claim", "confirm"])
 	})
 
-	it("a registration without a claim yet is the ACTIVE phase; CROSSING behind it is done", () => {
-		expect(states(send({ isPrivate: true, leafIndex: "7", registerTxHash: "0xr" }))).toEqual({
+	it("a registration with its hash and no claim yet is DONE; CLAIM is what runs then, narrating the wait for the claimer's view", () => {
+		const rec = send({ isPrivate: true, leafIndex: "7", registerTxHash: "0xr" })
+		expect(states(rec)).toEqual({
 			seal: "done",
 			sign: "done",
 			deposit: "done",
 			sync: "done",
-			register: "active",
-			claim: "pending",
+			register: "done",
+			claim: "active",
 			confirm: "pending",
 		})
+		expect(stepperPhases(rec).find((p) => p.key === "claim")?.eta).toMatch(/a moment, then your signature/)
+	})
+
+	it("before its registration exists, a first-time private send's next signature is REGISTER, not CLAIM", () => {
+		const rec = send({ isPrivate: true, leafIndex: "7", registers: true })
+		expect(states(rec, { claimable: true })).toMatchObject({ sync: "done", register: "active", claim: "pending" })
+		expect(states(rec, { step: "sending" })).toMatchObject({ register: "active", claim: "pending" })
+		// The unseal signature that precedes it is narrated under the same step.
+		const unseal = stepperPhases(rec, { claimable: true, step: "unsealing" }).find((p) => p.key === "register")
+		expect(unseal?.detail).toMatch(/unseal/)
+		// A public first-time send has no REGISTER phase: the claim is the next signature.
+		expect(states(send({ leafIndex: "7", registers: true }), { claimable: true })).toMatchObject({ claim: "active" })
 	})
 
 	it("once the claim is sent the registration reads as a completed step and CONFIRM is active", () => {

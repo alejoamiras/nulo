@@ -42,8 +42,8 @@ const selectFn = vi.fn(async (token: SelectableToken) => {
 
 const granted = ref<string[]>([])
 let grantOutcome: GrantOutcome = "granted"
-/** Whether the connected Aztec account holds gas; null = unknown. */
-const gasHeld = ref<boolean | null>(null)
+/** The private Fee Juice the connected Aztec account holds at the fee contract; null = unknown. */
+const gasHeld = ref<bigint | null>(null)
 const gasHeldRefresh = vi.fn(async () => {})
 const selectedAccount = ref<string | null>(AZTEC_ACCOUNT)
 const ensureGranted = vi.fn(async (): Promise<GrantOutcome> => {
@@ -63,6 +63,15 @@ const setRoute = (outcome: unknown, token: string = ERC20): void => {
 }
 
 const txTarget = ref(20)
+/** The confirm re-reads the network's fees; false = the read failed, and a private slice is not signed on a stale price. */
+const primeFn = vi.fn(async () => true)
+/** The ceilings a private claim sets aside. Negligible by default (the fixtures' slices are tiny);
+ *  the fee-line tests raise them to one transaction's 0.1 FJ, plus a registration's 0.5 FJ for a
+ *  token the hub does not know — the same figures the public line calibrates. */
+const ceilingsFor = vi.fn((state: { kind: string }): bigint => (state.kind === "registered" ? 1n : 6n))
+const realCeilings = () => ceilingsFor.mockImplementation((state) => (state.kind === "registered" ? 10n ** 17n : 6n * 10n ** 17n))
+/** What a token-only claim sets aside from held gas: small by default, so a held balance covers it. */
+const ownGasCeilingFor = vi.fn((): bigint | null => 1n)
 const proposeFn = vi.fn(() => ({ fuelAmount: 2_000_000n, fuelFj: 5n * 10n ** 18n, capped: null }))
 const gasShareDispose = vi.fn()
 
@@ -96,7 +105,7 @@ vi.mock("@/contracts/bridge-generation", () => ({
 	HUB: { toString: () => AZTEC_ACCOUNT },
 	HUB_TOKEN_ARTIFACT: {},
 	SEND_GENERATION: { factory: FACTORY, implementation: IMPLEMENTATION },
-	SWAP: { slippageBps: 300, fjPerTx: "100000000000000000", fjRegister: "500000000000000000" },
+	SWAP: { slippageBps: 300, fjPerTx: "100000000000000000", fjRegister: "500000000000000000", minFuelFj: "1000000" },
 	MANIFEST_TOKENS: [],
 }))
 vi.mock("@/composables/useL1Wallet", () => ({
@@ -138,7 +147,7 @@ vi.mock("@/composables/useTokenCatalog", () => ({
 }))
 vi.mock("@/contracts/hub-binding", () => ({ readHubBinding: async () => undefined }))
 vi.mock("@/composables/useGasHeld", () => ({
-	useGasHeld: () => ({ held: gasHeld, refresh: gasHeldRefresh, dispose: vi.fn() }),
+	useGasHeld: () => ({ credit: gasHeld, refresh: gasHeldRefresh, dispose: vi.fn() }),
 }))
 vi.mock("@/composables/useAddressLookup", () => ({
 	useAddressLookup: () => ({ state: ref(null), dispose: vi.fn() }),
@@ -172,6 +181,10 @@ vi.mock("@/composables/useGasShare", () => ({
 	useGasShare: () => ({
 		txTarget,
 		propose: proposeFn,
+		prime: primeFn,
+		pricingError: ref(null),
+		ceilingsFor,
+		ownGasCeilingFor,
 		floorFor: (q: bigint) => (q * 97n) / 100n,
 		reset: () => {
 			txTarget.value = 20
@@ -325,12 +338,14 @@ async function atReview(w: Awaited<ReturnType<typeof wizard>>, amount = "1") {
 describe("SendWizard", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		ceilingsFor.mockImplementation((state) => (state.kind === "registered" ? 1n : 6n))
+		ownGasCeilingFor.mockImplementation(() => 1n)
 		catalogTokens.value = [candidate()]
 		selected.value = null
 		balances.value = { l1: 10n ** 9n, l2Public: 5n * 10n ** 8n, l2Private: 3n * 10n ** 8n }
 		selectionError.value = null
 		epoch = 0
-		gasHeld.value = null
+		gasHeld.value = 10n ** 18n
 		gasHeldRefresh.mockReset().mockImplementation(async () => {})
 		selectedAccount.value = AZTEC_ACCOUNT
 		rekeys.value = {}
@@ -557,7 +572,7 @@ describe("SendWizard", () => {
 	})
 
 	it("a token-only send is blocked while the account is known to hold no gas, and released by adding gas", async () => {
-		gasHeld.value = false
+		gasHeld.value = 0n
 		const w = await wizard()
 		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
 		await flushPromises()
@@ -566,19 +581,35 @@ describe("SendWizard", () => {
 		amountStep().vm.$emit("update:valid", true)
 		await flushPromises()
 		expect(amountStep().props("tokenOnlyBlocked")).toContain("holds no gas")
-		// The wizard refuses the review on its own, whatever the step reported.
-		amountStep().vm.$emit("next")
-		await flushPromises()
-		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
-
-		amountStep().vm.$emit("update:intent", "token+gas")
-		await flushPromises()
-		expect(amountStep().props("tokenOnlyBlocked")).toBeNull()
-
+		// The default choice moved off the blocked one on its own: the card is greyed out, not chosen,
+		// and a choice forced back onto it bounces off while the verdict stands.
+		expect(amountStep().props("intent")).toBe("token+gas")
 		amountStep().vm.$emit("update:intent", "token")
+		await flushPromises()
+		expect(amountStep().props("intent")).toBe("token+gas")
+		// The reason stays on the step whatever the choice (it greys the card out); the verdict clears
+		// it, and the token alone is a choice again.
+		expect(amountStep().props("tokenOnlyBlocked")).toContain("holds no gas")
 		gasHeld.value = null
 		await flushPromises()
 		expect(amountStep().props("tokenOnlyBlocked")).toBeNull()
+		amountStep().vm.$emit("update:intent", "token")
+		await flushPromises()
+		expect(amountStep().props("intent")).toBe("token")
+	})
+
+	it("a gas slice under the bridge's claim minimum is refused before any signature — the swap would revert on Ethereum", async () => {
+		// 0.02 token at 1e-12 FJ per token: 20,000 wei of gas, under the mocked 1,000,000-wei minimum.
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("back")
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
+		setRoute({ kind: "route", route: ROUTE, quoteOut: 10n ** 6n })
+		await flushPromises()
+		const amount = w.findComponent({ name: "AmountStep" })
+		expect(amount.props("gas")).toBeNull()
+		expect(amount.props("gasError")).toMatch(/buys only ≈ .* FJ of gas, under the ≈ .* FJ minimum a claim needs/)
 	})
 
 	it("RUN IN BACKGROUND starts the wizard over and keeps a line on the send until it lands", async () => {
@@ -666,7 +697,7 @@ describe("SendWizard", () => {
 	it("a no-gas verdict that lands under the frozen review stands it down, and confirm never signs past it", async () => {
 		const w = await wizard()
 		const review = await atReview(w)
-		gasHeld.value = false
+		gasHeld.value = 0n
 		await flushPromises()
 		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
 		expect(w.findComponent({ name: "AmountStep" }).props("tokenOnlyBlocked")).toContain("holds no gas")
@@ -678,13 +709,13 @@ describe("SendWizard", () => {
 	})
 
 	it("confirm re-reads the gas gate before signing a token-only send, holding the buttons meanwhile", async () => {
-		gasHeld.value = true
+		gasHeld.value = 10n ** 18n
 		let releaseRead = (): void => {}
 		gasHeldRefresh.mockImplementation(async () => {
 			await new Promise<void>((resolve) => {
 				releaseRead = resolve
 			})
-			gasHeld.value = false
+			gasHeld.value = 0n
 		})
 		const w = await wizard()
 		const review = await atReview(w)
@@ -697,6 +728,41 @@ describe("SendWizard", () => {
 		expect(sendFn).not.toHaveBeenCalled()
 		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
 		expect(w.findComponent({ name: "AmountStep" }).props("tokenOnlyBlocked")).toContain("holds no gas")
+	})
+
+	it("a review opened before the claim was priced stands down at confirm once the price lands, and one whose figure grew stands down too", async () => {
+		let ceiling: bigint | null = null
+		ownGasCeilingFor.mockImplementation(() => ceiling)
+		const w = await wizard()
+		let review = await atReview(w)
+		expect(review.props("estimate").networkFee).toContain("paid from the private gas")
+		ceiling = 10n ** 16n
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(sendFn).not.toHaveBeenCalled()
+		expect(w.find(`[data-testid="${TESTIDS.sendReviewStale}"]`).text()).toContain("priced after you opened the review")
+		// Stood down to the amount step; re-entered with the price, a figure that then grows past a
+		// tenth is not the one approved.
+		const reenter = async () => {
+			w.findComponent({ name: "AmountStep" }).vm.$emit("update:valid", true)
+			await flushPromises()
+			w.findComponent({ name: "AmountStep" }).vm.$emit("next")
+			await flushPromises()
+			return w.findComponent({ name: "ReviewStep" })
+		}
+		review = await reenter()
+		expect(review.props("estimate").networkFee).toContain("FJ from the private gas")
+		ceiling = 10n ** 16n + 10n ** 15n + 1n
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(sendFn).not.toHaveBeenCalled()
+		expect(w.find(`[data-testid="${TESTIDS.sendReviewStale}"]`).text()).toContain("fees moved")
+		// A figure within the tenth is the one approved: the confirm signs.
+		review = await reenter()
+		ceiling = ceiling + ceiling / 20n
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(sendFn).toHaveBeenCalledTimes(1)
 	})
 
 	/** Every gas read the wizard starts, in order, each held until the test releases it: the amount
@@ -821,52 +887,101 @@ describe("SendWizard", () => {
 	})
 
 	it("a token-only review says the fee is the gas already held; adding gas names one transaction's cost out of it", async () => {
+		realCeilings()
 		const w = await wizard()
 		let review = await atReview(w)
 		expect(review.props("estimate")).toEqual({
 			takes: expect.any(String),
-			networkFee: "paid from the gas you already hold on Aztec",
-			networkFeeNote: null,
+			networkFee: expect.stringContaining("from the private gas you already hold"),
+			networkFeeNote: expect.stringContaining("set aside in full"),
 			txCovered: null,
 		})
 		review.vm.$emit("back")
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
-		setRoute({ kind: "route", route: ROUTE, quoteOut: 10n ** 18n })
+		// 0.02 token of slice at 135 FJ per token = 2.7 FJ, floor 2.619 FJ: the mocked ceilings (0.6 FJ)
+		// leave 2.019 FJ, twenty transactions at the mocked 0.1 FJ each.
+		setRoute({ kind: "route", route: ROUTE, quoteOut: 135n * 10n ** 18n })
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
 		await flushPromises()
 		review = w.findComponent({ name: "ReviewStep" })
 		// The default token is first-time, so the claim also registers it: one transaction plus the
-		// registration budget.
+		// registration budget — and the default send is private, so the line is the ceilings set aside.
 		expect(review.props("estimate").networkFee).toBe("≈ 0.6 FJ")
-		expect(review.props("estimate").networkFeeNote).toBe("taken from the gas that arrives")
+		expect(review.props("estimate").networkFeeNote).toMatch(
+			/taken from the gas that arrives - a private claim sets aside its fee ceiling/,
+		)
 		expect(review.props("estimate").txCovered).toBe(20)
 		expect(review.props("slippageBps")).toBe(300)
 	})
 
 	it("a registered token's fee is one transaction alone; a gas-only send counts what the quote divides into", async () => {
+		realCeilings()
 		nextResolved = (token) => resolvedToken(token, HUB_REGISTERED)
 		const w = await wizard()
 		let review = await atReview(w)
 		review.vm.$emit("back")
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
-		setRoute({ kind: "route", route: ROUTE, quoteOut: 10n ** 18n })
+		setRoute({ kind: "route", route: ROUTE, quoteOut: 135n * 10n ** 18n })
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
 		await flushPromises()
 		review = w.findComponent({ name: "ReviewStep" })
 		expect(review.props("estimate").networkFee).toBe("≈ 0.1 FJ")
+		// 2.619 FJ guaranteed less the registered token's 0.1 FJ ceiling: 25 transactions, not the target.
+		expect(review.props("estimate").txCovered).toBe(25)
 
 		review.vm.$emit("back")
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "gas")
+		setRoute({ kind: "route", route: ROUTE, quoteOut: 10n ** 18n })
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
 		await flushPromises()
-		// 1 token (8 decimals) at 1 FJ per token = 1 FJ; 0.1 FJ per transaction.
-		expect(w.findComponent({ name: "ReviewStep" }).props("estimate").txCovered).toBe(10)
+		// 1 token (8 decimals) at 1 FJ per token = 1 FJ, guaranteed floor 0.97 FJ; 0.1 FJ per transaction.
+		expect(w.findComponent({ name: "ReviewStep" }).props("estimate").txCovered).toBe(9)
+	})
+
+	it("a private slice whose guaranteed floor cannot cover the ceilings a private claim sets aside is refused before any signature", async () => {
+		// 0.02 token at 1 FJ per token = 0.02 FJ, floor 0.0194 FJ, under the mocked 0.6 FJ of ceilings.
+		realCeilings()
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("back")
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
+		setRoute({ kind: "route", route: ROUTE, quoteOut: 10n ** 18n })
+		await flushPromises()
+		const amount = w.findComponent({ name: "AmountStep" })
+		expect(amount.props("gas")).toBeNull()
+		expect(amount.props("gasError")).toMatch(/too small to cover the fees a private claim sets aside/)
+		// A public send of the same slice carries no ceilings: it sizes normally.
+		amount.vm.$emit("update:is-private", false)
+		await flushPromises()
+		expect(w.findComponent({ name: "AmountStep" }).props("gasError")).toBeNull()
+		expect(w.findComponent({ name: "AmountStep" }).props("gas")).not.toBeNull()
+	})
+
+	it("a private slice's confirm re-reads the fees and stands the review down, saying why, when they cannot be read", async () => {
+		const w = await wizard()
+		let review = await atReview(w)
+		review.vm.$emit("back")
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
+		setRoute({ kind: "route", route: ROUTE, quoteOut: 10n ** 18n })
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
+		await flushPromises()
+		review = w.findComponent({ name: "ReviewStep" })
+		expect(review.exists()).toBe(true)
+		primeFn.mockResolvedValueOnce(false)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
+		expect(w.find('[data-testid="tl-send-review-stale"]').text()).toMatch(/network fees could not be re-read/)
+		expect(sendFn).not.toHaveBeenCalled()
 	})
 
 	it("the zero answer is `absent` — the state that means this send creates the clone", async () => {

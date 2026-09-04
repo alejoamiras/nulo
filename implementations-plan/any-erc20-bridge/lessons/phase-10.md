@@ -600,6 +600,190 @@ Three items, "not much more … great work":
 raised the listed-row address (fixed as above); round 10: "Ready … no new material findings" —
 converged at 4790018a.
 
+## The private first claim, re-planned: fuel on the registration, no sponsor anywhere (2026-09-03)
+
+The owner's item (2) from the round-3 walk, and a standing ruling that came with it: **assume
+sponsorship is never available — no bridge path may lean on it, on any network.**
+
+**What was wrong.** "Token + gas, private" on a first-time token was two transactions with two
+payers: `register_token` paid by the SponsoredFPC, then `claim_private` paid by the PrivateFPC's
+`mint_and_pay_fee`. The sponsor does not exist on mainnet (the mainnet app is a placeholder today —
+`App.vue` renders `MainnetPlaceholderView`, `mainnet-bridge.json` has `bridge: null` — so the path
+was unreachable rather than broken, until a mainnet generation ships). And the hand-off between the
+two transactions was a race the owner had hit: `firstPrivateClaim` waited for the register to be
+PROPOSED, checked `token_for` (a public view, simulated against the NODE's latest state) and sent
+`claim_private` at once — a private function whose `portal_of` read runs in the wallet's PXE at
+the PXE's synced anchor block, which lags the node, so the claim's simulation failed on a
+zero portal.
+
+**The plan (branch `any-erc20-bridge/first-claim`, seventh PR of the stack).**
+- The registration spends the bridged Fee Juice (`mint_and_pay_fee` in its setup, sized with the
+  new `PRIVATE_HUB_REGISTER_GAS`); the FPC keeps `amount − max_gas_cost` as the claimer's private
+  credit; the claim after it pays from that credit (`pay_fee`, `PRIVATE_HUB_CLAIM_GAS`). hub-l2
+  seams: `registerFee` / `registeredClaimFee` / `onRegisterSend` / `onRegistered` /
+  `registrationWait`; a lost race keeps the plain claim with the plain fee.
+- The claim is sent only once its own simulation passes in the claimer's wallet (5 s polls,
+  3-minute deadline, the failure names the register hash). The simulation is the one probe that
+  sees exactly what the send will see — the binding AND the FPC credit note from tx 1.
+- The fuel latches follow the transaction that spends the fuel; `onRegistered` journals
+  `registerTxHash` and the fuel hash in one write; a not-yet-consumable message and a dropped tx
+  are provably unspent (retry allowed); spent fuel on an unclaimed token pays the claim (and, if
+  still unregistered, the registration) from the FPC credit instead of dead-ending.
+- No sponsor on any bridge path: the public fee-spike and override/consumed cases pay from the
+  wallet's own gas (gated like a no-fuel claim); the standalone Fee Juice claim self-pays; the
+  sponsor grant travels with the drip scopes alone.
+- The private gas slice is sized from LIVE predicted fees: `fjCeilings` (claim + register ceiling
+  when unregistered) replaces the calibrated `fjRegister`; "pricing" until fees load; a slice whose
+  guaranteed floor cannot cover the ceilings is refused before any signature; the covered count
+  is derived from the floor, never the target; the confirm re-prices and stands the review down.
+
+**Live canary — green on the first run (`fuel-testnet.ts`, fresh token JPYC
+`0xbb38c95cf10cd035f9a2e94ffb61eeb8b32a12fb`, pre-created without registration on the candidate,
+pool seeded, `PUBLIC_RUNS=0 PRIVATE_RUNS=1 FUEL_SLICE_UNITS=2000000`), 4.8 min end to end.**
+Recipient `0x033b7336…68e98`; 2 JPYC → 80.07 FJ bridged to the FPC. Three "claim not ready"
+waits while the messages synced, then `register_token`
+`0x181429d0e5d5216360637c7004a96f6577c46aed415f787a548dc11e4e580ca0` landed paid by the fuel
+(**3.3955 FJ, ≈1,763,076 L2 gas** at that block's L2 price), the claim waited for its own
+simulation to pass in the wallet, then `claim_private` settled paid by `pay_fee` from the credit
+(**1.5818 FJ, ≈821,331 L2 gas**). Path `register,claim`; committed ceiling (both limits) 14.21
+FJ at that moment. The register limit was set from this: **`PRIVATE_HUB_REGISTER_GAS = {daGas
+100_000, l2Gas 4_000_000}`** (2.3×, the claim's headroom policy; provisional 4.5M before the
+measurement). Known gap, same as the claim's (fable H1): the canary's account was already
+deployed — an account whose first-ever transaction is the registration carries its
+initialization on top, and only the extension produces that shape.
+
+**Codex (fresh session `01a06960-e908-7350-a496-274188c9a0c8`), round 1 — "Request changes",
+six findings, all addressed in `fix(bridge): a reverted registration keeps its hash…`:**
+- CRITICAL: a registration that reverts past its non-revertible setup spent the fuel but the
+  wallet's wait threw, so the hash was never journalled and the 15-minute stale window retried a
+  `mint_and_pay_fee` that could only fail as consumed. Fix: the register's wait carries
+  `dontThrowOnRevert`; a reverted receipt fires `onRegistered` with the hash then throws;
+  `fuelReceiptStatus` reads `*_reverted` as included (spent).
+- HIGH: consumed fuel + still-unregistered token had no plan (one ceiling, no register seam).
+  Fix: the credit branch gates both ceilings and supplies `registerFee` + `registeredClaimFee`
+  from `pay_fee`.
+- HIGH: the half-of-the-deposit cap could ship a slice under the mandatory ceilings while the
+  review still promised the target's transaction count. Fix: `privateSliceShortfall` refuses the
+  slice before a signature; `txCoveredOf` counts from the signed floor minus the mandatory part.
+- HIGH: the register limit was not measured against an undeployed account — recorded as the known
+  gap above, not fixable by a canary.
+- MEDIUM: "pricing" was neither fresh nor visible. Fix: `pricingError` surfaces a failed read; a
+  price older than 5 min sizes nothing; the confirm re-primes and invalidates a review whose slice
+  no longer covers the ceilings.
+- MEDIUM: removing the sponsor from `sendScopes` also removed it from the COMBINED manifest, which
+  the testnet drip still needs. Fix: the sponsor now travels with `dripScopes` (both simulate and
+  send), so a network without a faucet carries none.
+
+**Codex round 2 (resumed) — three more, all addressed (`b0991d53`, `08c1c87d`):**
+- HIGH: the extension's dApp executor honours only `NO_WAIT` and reads the receipt ONCE,
+  immediately — so a registration comes back `pending` with no `executionResult`, and a later
+  revert would have surfaced as the three-minute visibility timeout (the hash was already latched,
+  so recovery was safe, only slow and misleading). Fix: `receiptOf` seam — hub-l2 follows the
+  registration on the node until it is mined, reverted (hash reported, then throw) or dropped
+  (nothing spent, retry). Verified against `dapp-send-executor.ts` (the extension is untouched).
+- HIGH: confirm-time repricing failed open — a failed refresh with a ≤5-min cached price let the
+  confirm proceed. Fix: `prime()` reports whether a fresh price landed; the confirm stands the
+  review down with a named reason otherwise.
+- MEDIUM: gas-only coverage counted the optimistic quote. Fix: every leg counts from the signed
+  floor.
+- Also caught on my side: the revert lives in the receipt's `executionResult` ("success" |
+  "reverted"), NOT in `status` (a reverted transaction's status is a mined one) — the first fix
+  read the wrong field.
+
+**Codex round 3 — one HIGH, addressed (`810eb02a`):** a transient `receiptOf` rejection inside
+the fate poll escaped BEFORE `onRegistered`, leaving a hashless fuel attempt that would retry
+`mint_and_pay_fee` against a spent message forever. Fix: the hash is journalled the moment the
+wallet returns it (before the receipt read, the wait, or any judgment), and a failed read leaves
+the fate unknown until the deadline. The dropped case now reports the hash too — the journal's
+own receipt probe reads it as dropped and lets the fuel retry.
+
+**Codex round 4 (`810eb02a`) — converged:** "the hash-loss path is correctly closed; **no new
+material findings**." (Two attempts of this round were killed mid-run right after codex tried a
+`pnpm` command; the third, detached from the session with `setsid nohup`, completed — the same
+long-run rule as the canaries.)
+
+**Cost of the plan, stated plainly for the owner:** a first-time private bridge forfeits two
+committed ceilings (register + claim) from its gas — 14.2 FJ at the canary's fees against 4.98 FJ
+actually charged. That is the price of "no sponsor"; the alternative (one private transaction
+that registers and claims) needs a hub change and a new generation.
+
+## Owner walk — round 4, and the sponsor that leaked through the public ladder (2026-09-04)
+
+**The private first claim worked on the preview** ("worked wonderfully" — AUDC, token + gas,
+private, first-time token: register from the fuel, claim from the credit). Three copy/UX notes
+came back, and one real bug.
+
+**The bug (owner-found, live):** a first-time PUBLIC token + gas send (WETH) reached the wallet's
+confirmation with **Sponsored FPC** as the fee method. The ladder's three no-fee outcomes
+(`no-fuel`, `own-gas`, `own-gas-standalone`) all sent the claim with `fee` omitted so "the
+wallet's own picker chooses" — and the extension's picker defaults to the sponsored FPC on an
+account with no public Fee Juice (`popup/windows/execute/index.vue`: an op with no `exec.feePayer`
+leaves `feeSettings` to the user card). The gate that unblocked it counted the owner's PRIVATE
+balance at the PrivateFPC as "has gas", then handed the choice to a picker that cannot spend it
+by default. Which of the three outcomes fired is not in the log we have; all three are closed.
+
+**First fix (`dcaad5bd`) — rejected by codex, correctly** (resumed session
+`01a06960-e908-7350-a496-274188c9a0c8`, round 5): it named a payer per claim — the account's
+public Fee Juice as the transaction's own fee payer (`preexistingFeeJuicePayment` with the
+sender in its payload), else the private balance through `pay_fee`. Three HIGHs, all verified:
+- The wallet routes any payload whose payer is the sender as `FEE_JUICE_WITH_CLAIM`
+  (`fee-detection.ts` → `embedded-strategy.ts`), and that entrypoint mode "will set itself as the
+  fee payer but NOT end setup phase" — the Fee Juice contract's `claim_and_end_setup` does. With no
+  claim call the app phase never starts: invalid. **A dApp could not name the account's public
+  Fee Juice through the Nulo wallet.** (No fee-mode field crosses the wallet-sdk RPC that the
+  extension reads.) That is now its own PR — `implementations-plan/dapp-preexisting-fee/`.
+- `useSend.ts` computed `registers` as `rec.isPrivate && hubMissing`, so a public first-time claim
+  was sized as a plain claim while hub-l2 sent `register_and_claim_public`; with `pay_fee` that
+  exhausts the limit AFTER the full ceiling is deducted.
+- The wizard's token-only gate (`useGasHeld.verdictOf`) counted any non-zero balance — one wei of
+  credit unlocked the irreversible L1 deposit, and the claim stopped later.
+- MED: a private record silently falling back to a public payer; MED: the public register+claim
+  shape reused the 4M private-registration limit, unmeasured.
+
+**Second fix (`e63ba624`) — a claim from held gas pays ONLY from the private balance at the FPC:**
+- `decideOwnGasCredit({ privateFeeJuice, ceiling })` → pays / short / unverifiable / none; the
+  ceiling comes from the claim's SHAPE via bridge-core's `ownGasTxs` / `ownGasCeiling`: a public
+  claim is one transaction (`PUBLIC_HUB_CLAIM_GAS` 3.0M L2, `PUBLIC_HUB_REGISTER_CLAIM_GAS` 3.5M
+  when the hub does not know the token), a private first-time token sends a registration first
+  (4M + 2M, on the `registerFee` / `registeredClaimFee` seams). The public limits are DERIVED from
+  the landed public-lane fees (plain `claim_public` 2.585 FJ beside a 909,600-gas / 1.786 FJ
+  private claim ≈ 1.32M L2 gas; EURC `register_and_claim_public` 4.621 FJ beside a 2.845 FJ private
+  claim ≈ 1.48M) × the claim's 2.3× headroom — PROVISIONAL, no FPC-billed sample of either exists;
+  the owner's WETH retest on the preview is the first.
+- `useSend.ts` asks the hub whether the token is bound for BOTH privacy modes.
+- The wizard reuses the same ceiling: `useGasHeld.credit`, `useGasShare.ownGasCeilingFor`; the
+  token-only card greys out on an empty OR a short balance once priced; the confirm re-reads the
+  balance and re-prices, and stands the review down unless the balance is KNOWN and covers the
+  fresh ceiling (unread / unpriced / short each named).
+
+**Codex round 6 (`e63ba624`) — one HIGH, mine:** the payload change to `preexistingFeeJuicePayment`
+had broken the mainnet deploy script, because wallet-sdk's own `completeFeeOptions`
+(`base_wallet.js:185-192`) routes a sender payer as a claim in setup exactly as the extension
+does, and only an ABSENT payer as preexisting. Fix `ca1997b5`: the payload is empty again (the
+aztec.js meta method still reads the sender through `getFeePayer()`), the doc states both
+routings; the token-only review shows the ceiling and that the fee contract keeps it in full; a
+caller test pins `registers` for public records; the public limits are documented provisional.
+
+**Codex round 7 (`ca1997b5`) — no HIGH; one MED closed in `b909fc22`:** the review snapshot now
+carries the ceiling it SHOWED; at confirm a review that opened unpriced stands down once the figure
+exists, and one whose figure grew by more than a tenth stands down as moved.
+
+**Codex round 8 (`b909fc22`) — converged:** "no material findings beyond the acknowledged
+provisional public gas limits; the review-disclosure MED is correctly closed." (One LOW, a test
+isolation nit, folded in.) All three gates green at `b909fc22` (network shard 4/5 re-run once for
+the `wallet-locked-mid-session` auth-popup flake).
+
+**Copy/UX (`81ecb35f`):** claim eta → "a moment, then your signature"; registered detail →
+"registered - preparing the claim"; a trailing "." is an amount still being typed (no red line,
+CONTINUE off); the gas breakdown's error waits for the same 700 ms pause / blur as the field's own
+(it was rendered immediately, which is why the debounce "was not really working").
+
+**Owner retest to run on the preview:** the WETH public token + gas first-time send again. With no
+public Fee Juice the claim pays from the private FPC balance — the wallet's confirmation must show
+no fee picker (an embedded, dApp-named payer), and the claim lands at the derived public ceiling
+(3.5M L2 × predicted fee set aside, no refund). That run is also the first billed sample of a
+public registering claim through the FPC.
+
 ## Sign-off
 
 _Owner sign-off: PENDING._

@@ -11,6 +11,7 @@ import {
 	type MinFeeNode,
 	predictedWorstMinFees,
 	publicFeeJuicePayment,
+	preexistingFeeJuicePayment,
 	sponsoredFeePayment,
 } from "./fee-juice"
 
@@ -86,6 +87,15 @@ describe("fee-juice", () => {
 		const fpc = AztecAddress.fromNumberUnsafe(0xf9c)
 		const method = sponsoredFeePayment(fpc)
 		expect((await method.getFeePayer()).toString()).toBe(fpc.toString())
+	})
+
+	test("preexistingFeeJuicePayment keeps its payload empty and names no payer in it - an EmbeddedWallet routes a sender payer as a claim in setup", async () => {
+		const sender = AztecAddress.fromNumberUnsafe(0x5e4d)
+		const method = preexistingFeeJuicePayment(sender)
+		const payload = await method.getExecutionPayload()
+		expect(payload.calls).toHaveLength(0)
+		expect(payload.feePayer).toBeUndefined()
+		expect((await method.getFeePayer()).toString()).toBe(sender.toString())
 	})
 
 	test("feeJuiceClaimArgs builds the FeeJuice claim tuple verbatim", () => {

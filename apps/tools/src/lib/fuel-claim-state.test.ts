@@ -4,7 +4,7 @@ import {
 	PRIVATE_FUEL_INSUFFICIENCY_MSG,
 	decideFuelClaim,
 	decideFuelLadder,
-	decideNoFuelClaimGate,
+	decideOwnGasCredit,
 	decidePrivateFuelClaim,
 	decideStandaloneFuelRecovery,
 	isPrivateFuelInsufficiency,
@@ -29,7 +29,7 @@ describe("decideFuelClaim (L14 v3 truth table)", () => {
 
 	it("crash window: included attempt ⇒ sponsored (the FJ message is consumed, even app-reverted)", () => {
 		expect(decideFuelClaim({ ...base, attempt: true, txHashKnown: true, receiptStatus: "included" })).toEqual({
-			action: "sponsored",
+			action: "own-gas",
 			offerManual: false,
 		})
 	})
@@ -48,7 +48,7 @@ describe("decideFuelClaim (L14 v3 truth table)", () => {
 
 	it("fee spike: fuel below margin × min fee ⇒ sponsored + standalone FJ claim", () => {
 		expect(decideFuelClaim({ ...base, fuelReceived: 150n, currentMinFee: 100n })).toEqual({
-			action: "sponsored-plus-standalone-fj",
+			action: "own-gas-plus-standalone-fj",
 			offerManual: false,
 		})
 	})
@@ -63,7 +63,7 @@ describe("decideFuelClaim (L14 v3 truth table)", () => {
 
 	it("user override ⇒ sponsored, regardless of other evidence", () => {
 		expect(decideFuelClaim({ ...base, userOverride: true, attempt: true, txHashKnown: true, receiptStatus: "pending" })).toEqual({
-			action: "sponsored",
+			action: "own-gas",
 			offerManual: false,
 		})
 	})
@@ -85,10 +85,10 @@ describe("decideFuelClaim (L14 v3 truth table)", () => {
 	it("durable consumed=true settles to sponsored when the node is UNREACHABLE (receipt pending)", () => {
 		// The unreachable-node stranding the live-only probe introduced: consumed is the fallback.
 		expect(decideFuelClaim({ ...base, attempt: true, txHashKnown: true, receiptStatus: "pending", consumed: true }).action).toBe(
-			"sponsored",
+			"own-gas",
 		)
 		// And even with no hash (crash mid-prompt) a durable consumed flag settles it.
-		expect(decideFuelClaim({ ...base, attempt: true, consumed: true }).action).toBe("sponsored")
+		expect(decideFuelClaim({ ...base, attempt: true, consumed: true }).action).toBe("own-gas")
 	})
 
 	it("a conclusive dropped receipt OVERRIDES a stale consumed flag (dropped consumed nothing)", () => {
@@ -170,32 +170,25 @@ describe("decidePrivateFuelClaim (Option A — never public/Sponsored)", () => {
 	})
 })
 
-describe("decideNoFuelClaimGate (unblock-only, fail-closed; wallet picks the method)", () => {
-	it("private FJ present -> allow (the new behavior: private FJ counts, no pre-selection)", () => {
-		expect(decideNoFuelClaimGate({ privateFeeJuice: 150n, publicFeeJuice: 0n })).toBe("allow")
+describe("decideOwnGasCredit (the private balance at the FPC is the only payer a held-gas claim can name)", () => {
+	const at = (privateFeeJuice: bigint | null) => decideOwnGasCredit({ privateFeeJuice, ceiling: 100n })
+
+	it("pays when the balance covers the ceiling, exactly at it included", () => {
+		expect(at(100n)).toBe("pays")
+		expect(at(1_000n)).toBe("pays")
 	})
 
-	it("public FJ present -> allow (the long-standing path)", () => {
-		expect(decideNoFuelClaimGate({ privateFeeJuice: 0n, publicFeeJuice: 200n })).toBe("allow")
+	it("a balance under the ceiling is short - refused before the FPC refuses it, since it refunds nothing", () => {
+		expect(at(99n)).toBe("short")
+		expect(at(1n)).toBe("short")
 	})
 
-	it("both present -> allow", () => {
-		expect(decideNoFuelClaimGate({ privateFeeJuice: 100n, publicFeeJuice: 999n })).toBe("allow")
+	it("known and zero is a cold account", () => {
+		expect(at(0n)).toBe("none")
 	})
 
-	it("both known + zero -> none (a truly cold account)", () => {
-		expect(decideNoFuelClaimGate({ privateFeeJuice: 0n, publicFeeJuice: 0n })).toBe("none")
-	})
-
-	it("FAIL-CLOSED: a read failed (null) + no KNOWN gas -> unverifiable, NOT a false 'no gas'", () => {
-		expect(decideNoFuelClaimGate({ privateFeeJuice: null, publicFeeJuice: 0n })).toBe("unverifiable")
-		expect(decideNoFuelClaimGate({ privateFeeJuice: 0n, publicFeeJuice: null })).toBe("unverifiable")
-		expect(decideNoFuelClaimGate({ privateFeeJuice: null, publicFeeJuice: null })).toBe("unverifiable")
-	})
-
-	it("a KNOWN balance with gas overrides the other read failing (no false unverifiable)", () => {
-		expect(decideNoFuelClaimGate({ privateFeeJuice: 200n, publicFeeJuice: null })).toBe("allow")
-		expect(decideNoFuelClaimGate({ privateFeeJuice: null, publicFeeJuice: 200n })).toBe("allow")
+	it("FAIL-CLOSED: a failed read is unverifiable, never a false 'no gas'", () => {
+		expect(at(null)).toBe("unverifiable")
 	})
 })
 

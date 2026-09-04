@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Utils */
-import { computed, watch } from "vue"
+import { computed, onScopeDispose, ref, watch } from "vue"
 import { parseAmountStrict, toDecimalString } from "@/lib/format"
 import type { AmountToken, Direction, GasLegPlan, SendIntent, TokenBalances } from "@/lib/send-model"
 import { TESTIDS } from "@/lib/testids"
@@ -65,7 +65,9 @@ const spendable = computed(() =>
 const parsed = computed(() => parseAmountStrict(props.amount, props.token.decimals))
 
 const amountError = computed<string | null>(() => {
-	if (props.amount.trim() === "") return null
+	const text = props.amount.trim()
+	// Empty, or a separator with nothing after it yet: an amount still being typed, not a wrong one.
+	if (text === "" || text.endsWith(".")) return null
 	if (parsed.value === null) {
 		return NUMERIC_SHAPE.test(props.amount.trim())
 			? `${props.token.symbol} has ${props.token.decimals} decimal places — use no more than that.`
@@ -76,6 +78,32 @@ const amountError = computed<string | null>(() => {
 	if (max !== undefined && parsed.value > max) return "That's more than your balance."
 	return null
 })
+
+/** A red line waits for the user: it shows once the field is left, or once typing pauses — never on
+ *  the keystroke that made a half-typed amount momentarily wrong. An amount that arrives already
+ *  typed (the balance tap, a re-entered step) is judged at once. */
+const SETTLE_MS = 700
+const touched = ref(false)
+const settled = ref(true)
+let settleTimer: ReturnType<typeof setTimeout> | undefined
+const shownError = computed(() => (touched.value || settled.value ? amountError.value : null))
+
+/** More decimal places than the token has are cut on the way in, never reported: a typed or pasted
+ *  tail the token cannot carry is not a mistake worth a red line. */
+function onInput(raw: string): void {
+	settled.value = false
+	clearTimeout(settleTimer)
+	settleTimer = setTimeout(() => {
+		settled.value = true
+	}, SETTLE_MS)
+	const [whole = "", fraction] = raw.split(".")
+	const keep = props.token.decimals
+	// Decimals still unknown (a pasted token being read) cut nothing: there is no place count to cut to.
+	const cut =
+		keep < 0 || fraction === undefined || fraction.length <= keep ? raw : keep === 0 ? whole : `${whole}.${fraction.slice(0, keep)}`
+	emit("update:amount", cut)
+}
+onScopeDispose(() => clearTimeout(settleTimer))
 
 const showGas = computed(() => !isExit.value && props.intent !== "token")
 
@@ -115,6 +143,7 @@ function onUseAll(): void {
 			:exit-only="isExit"
 			:fee-asset="routeKind === 'identity'"
 			:no-route="routeKind === 'no-route' || routeKind === 'unavailable'"
+			:token-reason="isExit ? null : (tokenOnlyBlocked ?? null)"
 			@update:intent="emit('update:intent', $event)"
 		/>
 
@@ -132,7 +161,7 @@ function onUseAll(): void {
 		</p>
 
 		<div class="amount">
-			<label class="field" :data-invalid="amountError ? 'true' : undefined">
+			<label class="field" :data-invalid="shownError ? 'true' : undefined">
 				<input
 					class="input"
 					type="text"
@@ -140,11 +169,12 @@ function onUseAll(): void {
 					autocomplete="off"
 					placeholder="0"
 					:aria-label="`Amount in ${token.symbol}`"
-					:aria-invalid="amountError ? 'true' : undefined"
-					:aria-describedby="amountError ? AMOUNT_ERROR_ID : undefined"
+					:aria-invalid="shownError ? 'true' : undefined"
+					:aria-describedby="shownError ? AMOUNT_ERROR_ID : undefined"
 					:value="amount"
 					:data-testid="TESTIDS.sendAmountInput"
-					@input="emit('update:amount', ($event.target as HTMLInputElement).value)"
+					@input="onInput(($event.target as HTMLInputElement).value)"
+					@blur="touched = true"
 				/>
 				<span class="unit">{{ token.symbol }}</span>
 			</label>
@@ -161,7 +191,7 @@ function onUseAll(): void {
 					<span class="balance-k">Balance</span> {{ balanceText }} {{ token.symbol }}
 				</span>
 			</button>
-			<p v-if="amountError" :id="AMOUNT_ERROR_ID" class="err" aria-live="polite" :data-testid="TESTIDS.sendAmountError">{{ amountError }}</p>
+			<p v-if="shownError" :id="AMOUNT_ERROR_ID" class="err" aria-live="polite" :data-testid="TESTIDS.sendAmountError">{{ shownError }}</p>
 		</div>
 
 		<GasBreakdown
@@ -173,7 +203,7 @@ function onUseAll(): void {
 			:tx-target="txTarget"
 			:fj-per-tx="fjPerTx"
 			:loading="routeLoading"
-			:error="gasError"
+			:error="touched || settled ? gasError : null"
 			@update:tx-target="emit('update:txTarget', $event)"
 		/>
 

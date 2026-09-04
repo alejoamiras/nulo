@@ -28,11 +28,12 @@ import type { Address } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { feeJuiceAddress, predictedWorstMinFees, publicFeeJuicePayment } from "../src/fee-juice"
 import type { L1Ctx } from "../src/flows"
-import { claimViaHub, type HubClaimOutcome } from "../src/hub-l2"
+import { claimViaHub, type HubClaimOutcome, hubTokenFor } from "../src/hub-l2"
 import {
 	PRIVATE_FPC_ADDRESS,
 	PRIVATE_FPC_SALT,
 	PRIVATE_HUB_CLAIM_GAS,
+	PRIVATE_HUB_REGISTER_GAS,
 	deriveBridgeSecret,
 	privateFeeJuicePayment,
 	privateFpcFeeLimit,
@@ -92,8 +93,6 @@ interface VariantCtx {
 	l1: L1Ctx
 	node: ReturnType<typeof createNode>
 	hub: ContractBase
-	/** The sponsor's fee: pays a first-time token's own registration ahead of a fuel-paid claim. */
-	sponsoredFee: unknown
 	l2Token: ContractBase
 	from: AztecAddress
 	fjBalance: () => Promise<bigint>
@@ -105,7 +104,23 @@ interface VariantRun {
 	actualFee: bigint
 	ceiling?: bigint
 	path: HubClaimOutcome["path"]
+	/** A private first claim's own registration, when this run made one: what it paid and roughly
+	 *  the L2 gas that fee bought — the measurement PRIVATE_HUB_REGISTER_GAS is sized from. */
+	registerFee?: bigint
+	registerL2Gas?: bigint
 }
+
+/** What a landed transaction paid, and the L2 gas that fee corresponds to at its block's price
+ *  (the testnet bills no DA gas, so the whole fee is L2 gas × the block's L2 price). */
+async function landedTx(ctx: VariantCtx, txHash: string): Promise<{ fee: bigint; l2GasApprox?: bigint }> {
+	const receipt = (await ctx.node.getTxReceipt(TxHash.fromString(txHash))) as { transactionFee?: bigint; blockNumber?: number | bigint }
+	const fee = receipt.transactionFee ?? 0n
+	const block = receipt.blockNumber === undefined ? undefined : await ctx.node.getBlock(Number(receipt.blockNumber) as never)
+	const feePerL2Gas = block?.header.globalVariables.gasFees.feePerL2Gas
+	return { fee, l2GasApprox: feePerL2Gas && feePerL2Gas > 0n ? fee / feePerL2Gas : undefined }
+}
+
+const gasNote = (tx: { l2GasApprox?: bigint }): string => (tx.l2GasApprox === undefined ? "" : ` (≈${tx.l2GasApprox} L2 gas)`)
 
 /** The PrivateFPC has no public functions and no initializer, so it needs no on-chain deploy — but
  *  the private kernel oracle needs both preimages locally, and the canonical salt must reproduce the
@@ -143,7 +158,8 @@ async function buildVariantClaimFee(
 	result: SendResult,
 	viaFpc: boolean,
 	bridgeSalt: Fr | undefined,
-): Promise<{ fee: unknown; maxFees?: GasFees }> {
+	registers: boolean,
+): Promise<{ fee: unknown; registerFee?: unknown; registeredClaimFee?: unknown; maxFees?: GasFees }> {
 	const fuelReceived = result.fuelReceived ?? 0n
 	if (!viaFpc) {
 		return {
@@ -157,21 +173,30 @@ async function buildVariantClaimFee(
 		}
 	}
 	const maxFees = (await predictedWorstMinFees(ctx.node)).mul(RELIABILITY_PAD)
+	const fpc = AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)
+	const fuelPayment = privateMintAndPayFee(
+		fpc,
+		fuelReceived,
+		deriveBridgeSecret(bridgeSalt as Fr, ctx.from),
+		bridgeSalt as Fr,
+		new Fr(result.fuelLeafIndex as bigint),
+	)
+	const gasSettings = (gas: { daGas: number; l2Gas: number }) => ({
+		gasLimits: Gas.from(gas),
+		teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
+		maxFeesPerGas: maxFees,
+	})
+	// The fuel message is spent by whichever transaction goes first — a first-time token's own
+	// registration, sized for one, else the claim — and a claim after such a registration draws on
+	// the credit the FPC kept, exactly as the app's ladder does it.
 	return {
-		fee: {
-			paymentMethod: privateMintAndPayFee(
-				AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS),
-				fuelReceived,
-				deriveBridgeSecret(bridgeSalt as Fr, ctx.from),
-				bridgeSalt as Fr,
-				new Fr(result.fuelLeafIndex as bigint),
-			),
-			gasSettings: {
-				gasLimits: Gas.from(PRIVATE_HUB_CLAIM_GAS),
-				teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
-				maxFeesPerGas: maxFees,
-			},
-		},
+		fee: { paymentMethod: fuelPayment, gasSettings: gasSettings(PRIVATE_HUB_CLAIM_GAS) },
+		...(registers
+			? {
+					registerFee: { paymentMethod: fuelPayment, gasSettings: gasSettings(PRIVATE_HUB_REGISTER_GAS) },
+					registeredClaimFee: { paymentMethod: privateFeeJuicePayment(fpc), gasSettings: gasSettings(PRIVATE_HUB_CLAIM_GAS) },
+				}
+			: {}),
 		maxFees,
 	}
 }
@@ -189,7 +214,7 @@ function throwIfFpcBudgetAssert(label: string, fuelReceived: bigint, msg: string
 async function settleVariantClaim(
 	ctx: VariantCtx,
 	p: { label: string; isPrivate: boolean; result: SendResult; viaFpc: boolean; bridgeSalt?: Fr },
-): Promise<{ outcome: HubClaimOutcome; committedMaxFees?: GasFees }> {
+): Promise<{ outcome: HubClaimOutcome; committedMaxFees?: GasFees; registered: boolean }> {
 	const claim = {
 		token: claimTokenBlock(TOKEN, p.result.token as NonNullable<SendResult["token"]>),
 		recipient: ctx.from.toString(),
@@ -201,16 +226,20 @@ async function settleVariantClaim(
 	}
 	for (let i = 0; i < 300; i++) {
 		try {
-			const built = await buildVariantClaimFee(ctx, p.result, p.viaFpc, p.bridgeSalt)
+			// Whether this claim registers the token is a live fact, re-read per attempt like the app does.
+			const registers = p.viaFpc && (await hubTokenFor(ctx.hub, TOKEN.erc20, ctx.from.toString())) === undefined
+			const built = await buildVariantClaimFee(ctx, p.result, p.viaFpc, p.bridgeSalt, registers)
 			const sendOpts = {
 				from: ctx.from,
 				fee: built.fee,
-				// A fuel fee spends the bridged Fee Juice message once; a first-time token's registration
-				// ahead of the claim is the sponsor's, exactly as the app's ladder does it.
-				...(p.viaFpc ? { registerFee: ctx.sponsoredFee } : {}),
+				...(built.registerFee ? { registerFee: built.registerFee, registeredClaimFee: built.registeredClaimFee } : {}),
+				onRegistered: (hash: string) =>
+					console.log(
+						`${p.label}: register_token ${hash} landed — waiting for the claim to pass in this wallet's view (${ctx.mins()})`,
+					),
 				wait: { waitForStatus: TxStatus.PROPOSED },
 			}
-			return { outcome: await claimViaHub(ctx.hub, claim, sendOpts), committedMaxFees: built.maxFees }
+			return { outcome: await claimViaHub(ctx.hub, claim, sendOpts), committedMaxFees: built.maxFees, registered: registers }
 		} catch (e) {
 			throwIfFpcBudgetAssert(p.label, p.result.fuelReceived ?? 0n, e instanceof Error ? e.message : String(e))
 			if (i % 10 === 0) console.log(`${p.label}: claim not ready / re-pricing… (${ctx.mins()})`)
@@ -222,14 +251,11 @@ async function settleVariantClaim(
 
 /** The FPC ceiling (`getFeeLimit`) the claim committed to: the explicit limits × the committed
  *  max fees — exact, since the limits are declared rather than left to the network maximum. */
-const feeCeiling = (committedMaxFees?: GasFees): bigint | undefined =>
-	committedMaxFees ? privateFpcFeeLimit(PRIVATE_HUB_CLAIM_GAS, committedMaxFees) : undefined
-
-/** The fee a landed claim actually paid, in FJ-wei. */
-async function landedClaimFee(ctx: VariantCtx, claimTxHash: string): Promise<bigint> {
-	const receipt = await ctx.node.getTxReceipt(TxHash.fromString(claimTxHash))
-	return receipt.transactionFee ?? 0n
-}
+const feeCeiling = (committedMaxFees?: GasFees, registered = false): bigint | undefined =>
+	committedMaxFees
+		? privateFpcFeeLimit(PRIVATE_HUB_CLAIM_GAS, committedMaxFees) +
+			(registered ? privateFpcFeeLimit(PRIVATE_HUB_REGISTER_GAS, committedMaxFees) : 0n)
+		: undefined
 
 async function sendVariant(ctx: VariantCtx, isPrivate: boolean, viaFpc: boolean, bridgeSalt?: Fr): Promise<SendResult> {
 	const fuel = await planFuelLeg(ctx.l1.pub, SWAP, GENERATION.feeAsset, TOKEN.erc20 as Address, FUEL_SLICE)
@@ -271,10 +297,15 @@ async function runVariant(ctx: VariantCtx, isPrivate: boolean, viaFpc = false): 
 	console.log(`sent: tokenLeaf ${result.tokenLeafIndex}, fuelLeaf ${result.fuelLeafIndex}, fuelReceived ${result.fuelReceived}`)
 
 	const fjBefore = await ctx.fjBalance()
-	const { outcome, committedMaxFees } = await settleVariantClaim(ctx, { label, isPrivate, result, viaFpc, bridgeSalt })
-	const actualFee = await landedClaimFee(ctx, outcome.claimTxHash)
-	const ceiling = feeCeiling(committedMaxFees)
-	console.log(`${label}: ${outcome.path} settled, fee ${actualFee}${ceiling === undefined ? "" : ` | getFeeLimit ≈ ${ceiling}`}`)
+	const { outcome, committedMaxFees, registered } = await settleVariantClaim(ctx, { label, isPrivate, result, viaFpc, bridgeSalt })
+	const claimTx = await landedTx(ctx, outcome.claimTxHash)
+	const registerTx = outcome.registerTxHash === undefined ? undefined : await landedTx(ctx, outcome.registerTxHash)
+	const actualFee = claimTx.fee
+	const ceiling = feeCeiling(committedMaxFees, registered)
+	const registerNote = registerTx === undefined ? "" : ` | register fee ${registerTx.fee}${gasNote(registerTx)}`
+	console.log(
+		`${label}: ${outcome.path} settled, claim fee ${actualFee}${gasNote(claimTx)}${registerNote}${ceiling === undefined ? "" : ` | getFeeLimit ≈ ${ceiling}`}`,
+	)
 
 	const tokenBal = await ctx.tokenBalance(isPrivate ? "private" : "public")
 	if (tokenBal < BRIDGED) throw new Error(`${label}: token balance ${tokenBal} < ${BRIDGED}`)
@@ -285,7 +316,7 @@ async function runVariant(ctx: VariantCtx, isPrivate: boolean, viaFpc = false): 
 		if (fjAfter <= fjBefore) throw new Error(`${label}: no FJ landed as balance (fee ate everything?)`)
 		console.log(`${label}: token balance ${tokenBal}, FJ gained ${fjAfter - fjBefore}`)
 	}
-	return { actualFee, ceiling, path: outcome.path }
+	return { actualFee, ceiling, path: outcome.path, registerFee: registerTx?.fee, registerL2Gas: registerTx?.l2GasApprox }
 }
 
 const worstOf = (values: bigint[]): bigint | undefined => (values.length ? values.reduce((a, b) => (a > b ? a : b)) : undefined)
@@ -312,6 +343,11 @@ function printCalibration(runs: VariantRun[], mins: () => string): void {
 	console.log(`fjPerTx calibration  : ${fjPerTx} — set bridge.l1.swap.fjPerTx${plain === undefined ? " (no plain claim ran)" : ""}`)
 	if (plain !== undefined && registering !== undefined && registering > plain) {
 		console.log(`fjRegister hint      : ${registering - plain} (the first claim's registration surcharge)`)
+	}
+	const registrations = runs.filter((r) => r.registerFee !== undefined)
+	if (registrations.length > 0) {
+		const line = registrations.map((r) => `${r.registerFee}${gasNote({ l2GasApprox: r.registerL2Gas })}`).join(", ")
+		console.log(`register_token fees  : ${line} — PRIVATE_HUB_REGISTER_GAS is sized from that gas with headroom`)
 	}
 }
 
@@ -432,7 +468,6 @@ async function buildL2(l1: L1Ctx, mins: () => string): Promise<{ ctx: VariantCtx
 		l1,
 		node,
 		hub,
-		sponsoredFee,
 		l2Token,
 		from,
 		fjBalance: () => read(feeJuice.methods.balance_of_public(from)),

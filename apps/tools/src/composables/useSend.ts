@@ -20,6 +20,7 @@ import {
 	type Registration,
 	type SendDepositRecord,
 	type SendGasLeg,
+	type SendOpts,
 	type SendParams,
 	type SendResult,
 	type SendStage,
@@ -69,6 +70,7 @@ import {
 	sealPrivateRecord,
 } from "./deposit-flow"
 import { fuelOverrideActive, launchStandaloneFuelClaim } from "./fuel-recovery"
+import { simulateFeePayload } from "./fuelClaim"
 import { useBridgeWallet } from "./useBridgeWallet"
 import { useL1Wallet } from "./useL1Wallet"
 import { withOperation } from "./useOpsInFlight"
@@ -358,9 +360,20 @@ async function buildHubClaim(
 	const aztec = bridgeWallet.wallet.value
 	if (!aztec || !HUB) throw new Error("Connect your Aztec wallet first.")
 	const recipientAddr = AztecAddress.fromStringUnsafe(rec.recipient)
-	const fee = await resolveHubClaimSendOpts({ rec, recipientAddr, aztec, sealedSalt, userOverride: fuelOverrideActive(rec.id) })
-	if (fee.kind === "stop") return stopHandles(fee)
 	const hub = hubAt(aztec as never, HUB.toString())
+	// Whether THIS claim registers the token is a live fact (someone may have registered it since
+	// the send): it decides which transaction spends the fuel, and what a claim from held gas sets
+	// aside; the hub re-checks at send time.
+	const registers = (await hubTokenFor(hub, (rec.token as JournalTokenBlock).erc20, rec.recipient)) === undefined
+	const fee = await resolveHubClaimSendOpts({
+		rec,
+		recipientAddr,
+		aztec,
+		sealedSalt,
+		userOverride: fuelOverrideActive(rec.id),
+		registers,
+	})
+	if (fee.kind === "stop") return stopHandles(fee)
 	const params = {
 		token: rec.token as JournalTokenBlock,
 		recipient: rec.recipient,
@@ -371,16 +384,14 @@ async function buildHubClaim(
 		from: rec.recipient,
 	}
 	return {
-		simulate: () => probeHubClaim(hub, params, fee.opts),
+		simulate: () => probeHubClaim(hub, params, fee.opts, aztec),
 		send: async () => {
+			const { seams, fuelOnRegistration } = hubClaimSeams(rec.id, fee)
 			try {
-				// The attempt latch fires with the CLAIM's own transaction: a private first claim registers
-				// the token first, and a registration that fails spends no fuel and must not read as a
-				// pending fuel claim.
-				const outcome = await claimViaHub(hub, params, { ...fee.opts, onClaimSend: fee.onAttempt })
-				fee.onTxHash?.(outcome.claimTxHash)
-				// The ladder paid this claim from the sponsor and left the bridged Fee Juice for a
-				// transaction of its own; fire it now the claim is away, or the gas never arrives.
+				const outcome = await claimViaHub(hub, params, { ...fee.opts, ...seams })
+				if (!fuelOnRegistration()) fee.onTxHash?.(outcome.claimTxHash)
+				// The ladder left the bridged Fee Juice for a transaction of its own; fire it now the
+				// claim is away, or the gas never arrives.
 				if (fee.standalone) void launchStandaloneFuelClaim(rec.id, aztec, recipientAddr, fee.standalone)
 				return { txHash: outcome.claimTxHash, registerTxHash: outcome.registerTxHash }
 			} catch (e) {
@@ -391,18 +402,49 @@ async function buildHubClaim(
 	}
 }
 
+/** The seams a hub claim hands to bridge-core: the fuel's attempt and hash latch against the
+ *  transaction that actually spends it — the registration when the ladder put the fuel there and
+ *  this call did register, else the claim — and the registration is journalled the moment its hash
+ *  exists, with the wait for the claimer's own view narrated in between. */
+function hubClaimSeams(id: string, fee: Extract<HubClaimFee, { kind: "opts" }>) {
+	let registeredHere = false
+	const fuelOnRegistration = () => registeredHere && fee.fuelOnRegister === true
+	const seams: SendOpts = {
+		// The wallet hands the registration's receipt back before it is mined; the node says how it ended.
+		receiptOf: (txHash) => createAztecNodeClient(NODE_URL).getTxReceipt(TxHash.fromString(txHash)),
+		onRegisterSend: () => {
+			if (fee.fuelOnRegister) fee.onAttempt?.()
+		},
+		onRegistered: (registerTxHash: string) => {
+			registeredHere = true
+			if (fee.fuelOnRegister && fee.onRegistered) fee.onRegistered(registerTxHash)
+			else updateRecord(id, { registerTxHash } as never)
+			setRecordStep(id, "sending", "registered - preparing the claim")
+		},
+		onClaimSend: () => {
+			if (!fuelOnRegistration()) fee.onAttempt?.()
+			if (registeredHere) setRecordStep(id, "sending", "confirm the claim in your Aztec wallet")
+		},
+	}
+	return { seams, fuelOnRegistration }
+}
+
 type HubContract = ReturnType<typeof hubAt>
 type ProbeParams = Parameters<typeof claimViaHub>[1]
 
 /**
  * The consumability probe. A FIRST claim cannot be simulated - registering enqueues the derived
  * Token's constructor, which no wallet can build against an instance it does not hold yet - so
- * for an unregistered token the checkpoint gate is the only readiness authority and this passes.
- * A registered token probes the real claim, which is what makes the engine wait out a message
- * that has not folded into the L2 yet.
+ * for an unregistered token the fuel the registration spends is probed on its own (the fee's
+ * setup as a whole transaction) and otherwise the checkpoint gate is the only readiness
+ * authority. A registered token probes the real claim, which is what makes the engine wait out a
+ * message that has not folded into the L2 yet.
  */
-async function probeHubClaim(hub: HubContract, p: ProbeParams, opts: Record<string, unknown>): Promise<unknown> {
-	if (!(await hubTokenFor(hub, p.token.erc20, p.from))) return {}
+async function probeHubClaim(hub: HubContract, p: ProbeParams, opts: Record<string, unknown>, aztec: unknown): Promise<unknown> {
+	if (!(await hubTokenFor(hub, p.token.erc20, p.from))) {
+		const registerFee = opts.registerFee as { paymentMethod: unknown } | undefined
+		return registerFee ? simulateFeePayload(aztec, AztecAddress.fromStringUnsafe(p.recipient), registerFee) : {}
+	}
 	const to = AztecAddress.fromStringUnsafe(p.recipient)
 	const l2Token = AztecAddress.fromStringUnsafe(p.token.l2Token)
 	const call = p.isPrivate

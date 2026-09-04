@@ -30,7 +30,7 @@ const TOAST_COPY: Record<ErrorCategory, string> = {
 	"no-wallet": "No wallet found. Install Nulo and reload.",
 	network: "Alpha-testnet is not responding. Try again.",
 	"tx-reverted": "Drip transaction reverted - view tx.",
-	"no-fee-asset": "No sponsored fee route available. Wait or report.",
+	"no-fee-asset": "No fee route available. Wait or report.",
 	"account-uninitialized": "Selected account isn't deployed on alpha-testnet. Send any tx from your wallet first.",
 	"contract-not-registered": "Couldn't register the app's contracts with your wallet. Reconnect.",
 	unknown: "Something went wrong. Try again.",

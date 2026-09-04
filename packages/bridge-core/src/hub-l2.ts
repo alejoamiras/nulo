@@ -64,25 +64,108 @@ export async function hubExitsPaused(hub: ContractBase, from: string): Promise<b
 	throw new Error(`exits_paused() answered ${JSON.stringify(v)} — not a boolean; refusing to treat the hub as unpaused`)
 }
 
-/** Opaque send options (fee + from + wait); the shape varies by wallet. Two seam keys ride along and
- *  never reach the wallet: `registerFee` pays the private first claim's own `register_token`
- *  transaction instead of `fee` (a fuel claim's fee consumes the bridged Fee Juice message, which
- *  only one transaction can do), and `onClaimSend` fires right before the CLAIM's transaction is
- *  sent — after any registration — so a caller's "claim attempted" latch never covers a
- *  registration that failed without spending the fuel. */
-export type SendOpts = Record<string, unknown> & { registerFee?: unknown; onClaimSend?: () => void }
+/** How long a private first claim waits for its own registration to become visible to the claimer's
+ *  wallet before the claim is sent. The registration's public effect lands on the node first; the
+ *  claim is a private function that reads it at the wallet's synced block, which lags the node. */
+export interface RegistrationWait {
+	intervalMs?: number
+	deadlineMs?: number
+	sleep?: (ms: number) => Promise<void>
+}
+
+const REGISTRATION_WAIT: Required<RegistrationWait> = {
+	intervalMs: 5_000,
+	deadlineMs: 180_000,
+	sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+}
+
+/** Opaque send options (fee + from + wait); the shape varies by wallet. The seam keys ride along and
+ *  never reach the wallet. A private first claim registers in a transaction of its own, so it has
+ *  two fees: `registerFee` pays `register_token` instead of `fee`, and `registeredClaimFee` pays the
+ *  claim that follows a registration THIS call sent — a fuel claim's fee consumes the bridged Fee
+ *  Juice message, which only one transaction can do, so whichever of the two spends it, the other
+ *  must draw on something else. `onRegisterSend` fires right before the registration is sent and
+ *  `onClaimSend` right before the claim, so a caller can latch "the fuel was spent" against the
+ *  transaction that actually carries it; `onRegistered` delivers the registration's hash as soon
+ *  as it exists, before the claim is awaited. */
+export type SendOpts = Record<string, unknown> & {
+	registerFee?: unknown
+	registeredClaimFee?: unknown
+	onRegisterSend?: () => void
+	onRegistered?: (txHash: string) => void
+	onClaimSend?: () => void
+	registrationWait?: RegistrationWait
+	/** A node's view of a transaction's receipt. A wallet may hand back the registration's receipt
+	 *  before it is mined (the extension reads it once, immediately), so the registration's fate —
+	 *  mined, reverted past its setup, or dropped — is read here until it is known. */
+	receiptOf?: (txHash: string) => Promise<TxReceiptLike | undefined>
+}
+
+export interface TxReceiptLike {
+	status?: unknown
+	executionResult?: unknown
+}
 
 /** The claim's own options: the seam keys stripped, so nothing but the wallet's vocabulary reaches it —
  *  a simulation of the claim must use these too. */
 export function claimSendOpts(send: SendOpts): SendOpts {
-	const { registerFee: _registerFee, onClaimSend: _onClaimSend, ...claim } = send
+	const {
+		registerFee: _registerFee,
+		registeredClaimFee: _registeredClaimFee,
+		onRegisterSend: _onRegisterSend,
+		onRegistered: _onRegistered,
+		onClaimSend: _onClaimSend,
+		registrationWait: _registrationWait,
+		receiptOf: _receiptOf,
+		...claim
+	} = send
 	return claim
 }
 
-/** The registration's options and the claim's. */
-function splitRegisterFee(send: SendOpts): { register: SendOpts; claim: SendOpts } {
+/** The registration's options, the plain claim's, and the claim's after a registration of its own.
+ *  The registration's wait never throws on a revert: its fee setup is non-revertible, so a
+ *  registration that reverts in public has still spent what paid for it, and the caller must learn
+ *  its hash rather than a bare error. */
+function splitRegisterFee(send: SendOpts): { register: SendOpts; claim: SendOpts; registeredClaim: SendOpts } {
 	const claim = claimSendOpts(send)
-	return { register: send.registerFee === undefined ? claim : { ...claim, fee: send.registerFee }, claim }
+	const registerWait = { ...((claim.wait as Record<string, unknown> | undefined) ?? {}), dontThrowOnRevert: true }
+	return {
+		register: { ...claim, ...(send.registerFee === undefined ? {} : { fee: send.registerFee }), wait: registerWait },
+		claim,
+		registeredClaim: send.registeredClaimFee === undefined ? claim : { ...claim, fee: send.registeredClaimFee },
+	}
+}
+
+/** A landed transaction that reverted past its setup: its block status is a mined one, its
+ *  execution result says reverted — the fee is charged and any message its setup consumed is
+ *  spent, but nothing the app phase meant to do happened. */
+const revertedPastSetup = (receipt: TxReceiptLike): boolean => /reverted/i.test(String(receipt.executionResult ?? ""))
+
+type RegistrationFate = "mined" | "reverted" | "dropped" | "unknown"
+
+function fateOf(receipt: TxReceiptLike): RegistrationFate {
+	if (revertedPastSetup(receipt)) return "reverted"
+	const status = String(receipt.status ?? "").toLowerCase()
+	if (/proposed|checkpointed|proven|finalized|success|mined/.test(status)) return "mined"
+	if (status.includes("dropped")) return "dropped"
+	return "unknown"
+}
+
+/** The registration's fate, read from the node until it is known — bounded by the same deadline as
+ *  the claim's visibility wait. Without a node read (or past the deadline) it stays unknown and the
+ *  claim's own simulation decides, as it always did. */
+async function awaitRegistrationFate(first: TxReceiptLike, txHash: string, send: SendOpts): Promise<RegistrationFate> {
+	const { intervalMs, deadlineMs, sleep } = { ...REGISTRATION_WAIT, ...send.registrationWait }
+	const start = Date.now()
+	let receipt = first
+	for (;;) {
+		const fate = fateOf(receipt)
+		if (fate !== "unknown" || !send.receiptOf || Date.now() - start + intervalMs > deadlineMs) return fate
+		await sleep(intervalMs)
+		// A read that fails says nothing about the transaction: the fate stays unknown until the
+		// deadline, never an error that would drop out before the hash is journalled.
+		receipt = (await send.receiptOf(txHash).catch(() => undefined)) ?? receipt
+	}
 }
 
 /** Everything the L2 side needs from the L1 receipt + the journal. */
@@ -116,7 +199,7 @@ export function isRegisterRace(e: unknown): boolean {
 	return /non-nullified L1 to L2 message|already nullified|duplicate nullifier|Nullifier already exists/i.test(msg)
 }
 
-type Sent = Promise<{ receipt: { txHash: unknown } }>
+type Sent = Promise<{ receipt: { txHash: unknown } & TxReceiptLike }>
 const txHashOf = async (sent: Sent) => String((await sent).receipt.txHash)
 
 export type HubClaimPath = "claim" | "register+claim" | "register,claim"
@@ -127,13 +210,41 @@ export interface HubClaimOutcome {
 	claimTxHash: string
 }
 
-function plainClaim(hub: ContractBase, p: HubClaimParams, send: SendOpts): Sent {
+function claimCall(hub: ContractBase, p: HubClaimParams) {
 	const l2Token = AztecAddress.fromStringUnsafe(p.token.l2Token)
 	const to = AztecAddress.fromStringUnsafe(p.recipient)
-	const call = p.isPrivate
+	return p.isPrivate
 		? hub.methods.claim_private(l2Token, to, p.amount, p.claimValue, new Fr(p.leafIndex))
 		: hub.methods.claim_public(l2Token, to, p.amount, p.claimValue, new Fr(p.leafIndex))
-	return call.send(send as never) as unknown as Sent
+}
+
+function plainClaim(hub: ContractBase, p: HubClaimParams, send: SendOpts): Sent {
+	return claimCall(hub, p).send(send as never) as unknown as Sent
+}
+
+/** Polls the claim's own simulation until it passes: the registration is proposed on the node, but
+ *  the claim reads the binding (and, when its fee draws on the credit the registration left at the
+ *  FPC, that credit's note) at the wallet's synced block. A simulation is the one probe that sees
+ *  exactly what the send will see. Any failure keeps polling — the message and the fee were gated
+ *  before the registration was sent, so what remains is visibility — until the deadline, when the
+ *  last failure is surfaced with the registration's hash so a retry claims plainly. */
+async function awaitClaimVisible(hub: ContractBase, p: HubClaimParams, claim: SendOpts, registerTxHash: string, wait?: RegistrationWait) {
+	const { intervalMs, deadlineMs, sleep } = { ...REGISTRATION_WAIT, ...wait }
+	const start = Date.now()
+	for (;;) {
+		try {
+			await claimCall(hub, p).simulate(claim as never)
+			return
+		} catch (e) {
+			if (Date.now() - start + intervalMs > deadlineMs) {
+				const why = e instanceof Error ? e.message : String(e)
+				throw new Error(
+					`hub claim: the registration ${registerTxHash} landed but the claim is not yet visible to your wallet — retry the claim in a moment (${why})`,
+				)
+			}
+		}
+		await sleep(intervalMs)
+	}
 }
 
 /** The hub's binding for the block's ERC-20, refused when it names a different L2 token than the block. */
@@ -172,18 +283,41 @@ async function firstPublicClaim(hub: ContractBase, p: HubClaimParams, send: Send
 }
 
 async function firstPrivateClaim(hub: ContractBase, p: HubClaimParams, send: SendOpts): Promise<HubClaimOutcome> {
-	const { register, claim } = splitRegisterFee(send)
+	const { register, claim, registeredClaim } = splitRegisterFee(send)
 	let registerTxHash: string | undefined
+	send.onRegisterSend?.()
 	try {
-		registerTxHash = await txHashOf(hub.methods.register_token(...registerArgs(p.token)).send(register as never) as unknown as Sent)
+		const { receipt } = await (hub.methods.register_token(...registerArgs(p.token)).send(register as never) as unknown as Sent)
+		registerTxHash = String(receipt.txHash)
+		// The hash is the caller's evidence of what this transaction did or spent: journalled the
+		// moment it exists, before anything that can still fail — a receipt read, the wait, a revert.
+		send.onRegistered?.(registerTxHash)
+		const fate = await awaitRegistrationFate(receipt, registerTxHash, send)
+		// A dropped registration was never included: nothing was spent, and the whole claim retries.
+		if (fate === "dropped") {
+			throw new Error(
+				`hub claim: the registration ${registerTxHash} was dropped before inclusion — nothing was spent; retry the claim`,
+			)
+		}
+		// The registration's setup spent what paid for it before the public half reverted: the
+		// journalled hash proves the spend, and the claim retries against the credit.
+		if (fate === "reverted") {
+			throw new Error(
+				`hub claim: the registration ${registerTxHash} reverted after its setup spent the bridged gas — retry to claim from the credit it left`,
+			)
+		}
 	} catch (e) {
 		await rethrowUnlessRaceLost(hub, p, e)
 	}
 	// The registration derived the token from the words; a block whose l2Token disagrees is caught
 	// here by name, before a claim on the wrong address burns a transaction.
 	await registeredTokenOf(hub, p)
+	// A lost race means someone else's registration bound the token and this call spent nothing:
+	// the claim is then the plain one, with the plain fee.
+	const claimOpts = registerTxHash === undefined ? claim : registeredClaim
+	if (registerTxHash !== undefined) await awaitClaimVisible(hub, p, claimOpts, registerTxHash, send.registrationWait)
 	send.onClaimSend?.()
-	return { path: "register,claim", registerTxHash, claimTxHash: await txHashOf(plainClaim(hub, p, claim)) }
+	return { path: "register,claim", registerTxHash, claimTxHash: await txHashOf(plainClaim(hub, p, claimOpts)) }
 }
 
 /** Sends the claim, registering the token first when the hub does not know it yet. */

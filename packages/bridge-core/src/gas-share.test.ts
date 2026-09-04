@@ -37,6 +37,15 @@ describe("proposeGasShare", () => {
 		})
 	})
 
+	it("committed fee ceilings come on top of the per-transaction gas and replace the registration's charge", () => {
+		// A private claim forfeits the ceilings, so its registration's charge is inside them already.
+		expect(proposeGasShare({ ...BASE, fjRegister: 3_000_000n, fjCeilings: 11_000_000n })).toEqual({
+			fuelAmount: 7_989_691n,
+			fuelFj: 31_000_000n,
+			capped: null,
+		})
+	})
+
 	it("reports 'min' when the floor, not the tx target, sized the buy", () => {
 		expect(proposeGasShare({ ...BASE, minFuelFj: 50_000_000n })).toEqual({
 			fuelAmount: 12_886_598n,

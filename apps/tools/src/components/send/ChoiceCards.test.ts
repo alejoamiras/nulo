@@ -6,7 +6,7 @@ import ChoiceCards from "./ChoiceCards.vue"
 
 const sel = (t: string) => `[data-testid="${t}"]`
 
-type Props = { intent: SendIntent; exitOnly: boolean; feeAsset: boolean; noRoute: boolean }
+type Props = { intent: SendIntent; exitOnly: boolean; feeAsset: boolean; noRoute: boolean; tokenReason?: string | null }
 
 function cards(over: Partial<Props> = {}) {
 	return mount(ChoiceCards, {
@@ -58,6 +58,24 @@ describe("ChoiceCards", () => {
 		expect(gas.attributes("title")).toContain("can't buy Aztec gas")
 		expect(w.get(`#${gas.attributes("aria-describedby")}`).text()).toContain("can't buy Aztec gas")
 		expect(w.find(sel(TESTIDS.sendChoiceToken)).attributes("aria-describedby")).toBeUndefined()
+		w.unmount()
+	})
+
+	it("disables the token-only choice, with its reason on hover and for assistive tech, when the account holds no gas", async () => {
+		const reason = "Your Aztec account holds no gas (Fee Juice) yet."
+		const w = cards({ intent: "token+gas", tokenReason: reason })
+		const token = w.find(sel(TESTIDS.sendChoiceToken))
+		expect(token.attributes("disabled")).toBeDefined()
+		expect(token.attributes("title")).toBe(reason)
+		expect(w.get(`#${token.attributes("aria-describedby")}`).text()).toBe(reason)
+		expect(w.find(sel(TESTIDS.sendChoiceTokenGas)).attributes("disabled")).toBeUndefined()
+		expect(w.find(sel(TESTIDS.sendChoiceGas)).attributes("disabled")).toBeUndefined()
+		await token.trigger("click")
+		expect(w.emitted("update:intent")).toBeUndefined()
+		// ← from the second choice skips the greyed-out token and lands on GAS.
+		await w.find(sel(TESTIDS.sendChoiceTokenGas)).trigger("keydown", { key: "ArrowLeft" })
+		expect(document.activeElement).toBe(w.find(sel(TESTIDS.sendChoiceGas)).element)
+		expect(w.emitted("update:intent")).toEqual([["gas"]])
 		w.unmount()
 	})
 

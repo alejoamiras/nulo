@@ -85,9 +85,12 @@ function syncProgress(depositL2Block?: number, syncBlock?: number): Partial<Reco
 function depositActiveKey(rec: DepositRailRecord, rt: RecordRuntime, registers: boolean): BridgePhase["key"] {
 	const stage = deriveSendDepositStage(rec, { claimable: rt.claimable })
 	if (stage === "done" || stage === "claiming") return "confirm"
-	if (stage === "registering") return registers ? "register" : "claim"
-	if (stage === "claimable") return "claim"
-	if (stage === "syncing") return rt.step === "unsealing" || rt.step === "sending" ? "claim" : "sync"
+	// A registration of its own is complete the moment its hash exists; the claim is what runs then.
+	if (stage === "registering") return "claim"
+	// On a first-time private token the next signature registers it; the claim follows on its own.
+	const next = registers ? "register" : "claim"
+	if (stage === "claimable") return next
+	if (stage === "syncing") return rt.step === "unsealing" || rt.step === "sending" ? next : "sync"
 	return preDepositKey(rec, rt)
 }
 
@@ -103,6 +106,8 @@ function preDepositKey(rec: DepositRailRecord, rt: RecordRuntime): BridgePhase["
 }
 
 /** What the claim's confirmation does, by what rides in that one transaction. */
+const UNSEAL_PROMPT = "Sign in your Ethereum wallet to unseal the recovery secret, then confirm in your Aztec wallet."
+
 function claimPromptOf(fueled: boolean, registersInClaim: boolean): string {
 	if (registersInClaim) {
 		return fueled
@@ -142,11 +147,11 @@ function depositCopy(rec: DepositRailRecord, rt: RecordRuntime, shape: { gasOnly
 				? "Confirm the deposit in your Ethereum wallet - the fuel swap rides along in the same transaction."
 				: "Confirm the deposit in your Ethereum wallet.",
 		sync: "The message is crossing to Aztec - no signature needed.",
-		register: "Confirm in your Aztec wallet - this first bridge registers the token, then claims it.",
-		claim:
+		register:
 			rt.step === "unsealing"
-				? "Sign in your Ethereum wallet to unseal the recovery secret, then confirm in your Aztec wallet."
-				: claimPrompt,
+				? UNSEAL_PROMPT
+				: "Confirm in your Aztec wallet - this first bridge registers the token; the claim follows on its own.",
+		claim: rt.step === "unsealing" ? UNSEAL_PROMPT : claimPrompt,
 		confirm: "Confirming on Aztec - no signature needed.",
 	}
 	const etas: Partial<Record<string, string>> = {
@@ -155,7 +160,7 @@ function depositCopy(rec: DepositRailRecord, rt: RecordRuntime, shape: { gasOnly
 		deposit: "usually under 1 min",
 		sync: "usually 1-4 min",
 		register: "your signature + a few sec",
-		claim: "your signature + a few sec",
+		claim: rec.isPrivate && isSendRecord(rec) && rec.registerTxHash ? "a moment, then your signature" : "your signature + a few sec",
 		confirm: "usually 1-2 min",
 	}
 	return { labels, prompts, etas }

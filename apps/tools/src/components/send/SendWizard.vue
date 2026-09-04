@@ -7,6 +7,7 @@ import {
 	type SendDepositRecord,
 	type SendJournalRecord,
 	PERMIT_DEADLINE_SECONDS,
+	type TokenState,
 	PORTAL_FACTORY_ABI,
 	assetKindOf,
 	isSendRecord,
@@ -62,7 +63,19 @@ const ONE_TO_ONE = { probeIn: 1n, probeOut: 1n }
 const fjPerTx = SWAP ? BigInt(SWAP.fjPerTx) : null
 /** A token-only claim spends gas the account already holds; there is no sponsor to fall back on. */
 const NO_GAS_FOR_TOKEN_ONLY =
-	"Your Aztec account holds no gas (Fee Juice) yet, so the token could not be claimed. Choose Token + gas to arrive with some."
+	"Your Aztec account holds no gas the bridge can claim with (private Fee Juice at the fee contract), so the token alone could not be claimed. Choose Token + gas to arrive with some."
+const SHORT_GAS_FOR_TOKEN_ONLY =
+	"Your Aztec account's private gas is under what this claim sets aside at current network fees. Choose Token + gas to arrive with more, or bridge gas first."
+const UNREAD_GAS_FOR_TOKEN_ONLY =
+	"Your Aztec account's gas could not be read just now, so the claim was not confirmed. Try again in a moment."
+const UNPRICED_TOKEN_ONLY =
+	"Aztec's network fees could not be re-read just now, so a claim from your held gas was not confirmed. Try again in a moment."
+const CEILING_NOW_PRICED_TOKEN_ONLY =
+	"The claim's fee was priced after you opened the review - it now shows what is set aside from your gas. Review it again."
+const CEILING_MOVED_TOKEN_ONLY =
+	"Aztec's network fees moved while you were on the review: the claim now sets aside more of your gas than it showed."
+/** The review's figure is an "≈": a tenth more than it showed is no longer that figure. */
+const CEILING_DRIFT_DIVISOR = 10n
 
 const l1 = useL1Wallet()
 const bridge = useBridgeWallet()
@@ -98,6 +111,8 @@ const grant = useTokenGrant()
 const gasHeld = useGasHeld({ aztec: () => bridge.wallet.value, account: () => bridge.selectedAccount.value ?? undefined })
 const routeQuote = useRouteQuote({ pub: () => l1.publicClient as unknown as PublicClient })
 const gasShare = useGasShare()
+// A private slice is sized from live fees: price them now so the amount step never waits on them.
+void gasShare.prime()
 const sendFlow = useSend({ epoch: selection.epoch })
 const exitFlow = useHubExit()
 
@@ -151,10 +166,15 @@ interface ReviewSnapshot {
 	account: string
 	slippageBps: number | null
 	estimate: ReviewEstimate
+	/** What a token-only deposit's claim was SHOWN to set aside from held gas; null when the review
+	 *  opened unpriced, or for any other plan. */
+	ownGasCeiling: bigint | null
 }
 const reviewed = ref<ReviewSnapshot | null>(null)
 /** Set when a change under the frozen review sent the user back to the amount step. */
 const reviewStale = ref(false)
+/** The specific reason, when the stand-down has one worth naming over the generic line. */
+const reviewStaleWhy = ref<string | null>(null)
 
 const isExit = computed(() => direction.value === "l2-to-l1")
 const resolved = selection.selected
@@ -223,7 +243,10 @@ function buildGas(): { plan: GasLegPlan | null; error: string | null } {
 	if (outcome.kind !== "route" && outcome.kind !== "identity") return { plan: null, error: null }
 	const probeIn = probeAmountOf(token)
 	const rate = outcome.kind === "route" ? { probeIn, probeOut: outcome.quoteOut } : ONE_TO_ONE
-	const share = gasShare.propose({ amount: units, decimals: token.decimals, state: token.state, rate })
+	const share = gasShare.propose({ amount: units, decimals: token.decimals, state: token.state, rate, isPrivate: isPrivate.value })
+	// A private slice is priced from live fees; until they arrive there is nothing to size, like a
+	// route probe still in flight.
+	if (share === "pricing") return { plan: null, error: null }
 	if (!share) return { plan: null, error: "This network has no swap venue, so a send cannot buy gas." }
 	// Gas-only spends the whole amount; the router refuses any other split.
 	const fuelAmount = intent.value === "gas" ? units : share.fuelAmount
@@ -231,11 +254,33 @@ function buildGas(): { plan: GasLegPlan | null; error: string | null } {
 		return { plan: null, error: "The amount is too small to buy gas and still send a token." }
 	}
 	const quote = outcome.kind === "route" ? (fuelAmount * outcome.quoteOut) / probeIn : fuelAmount
+	const minFuelOutput = floorFor(quote, outcome)
+	const shortfall = quoteShortfall(quote) ?? (intent.value === "gas" ? null : privateSliceShortfall(token.state, minFuelOutput))
+	if (shortfall) return { plan: null, error: shortfall }
 	const route = outcome.kind === "route" ? outcome.route : NO_SWAP
 	return {
-		plan: { fuelAmount, fuelFj: share.fuelFj, quote, minFuelOutput: floorFor(quote, outcome), route, capped: share.capped },
+		plan: { fuelAmount, fuelFj: share.fuelFj, quote, minFuelOutput, route, capped: share.capped },
 		error: null,
 	}
+}
+
+/** The bridge refuses gas under its claim minimum on Ethereum (the swap reverts at the router's
+ *  floor), so a quote under it is a deposit that cannot go through — say so before a signature. The
+ *  slice may have been capped at half the amount, far under what the transactions asked for. */
+function quoteShortfall(quote: bigint): string | null {
+	if (!SWAP || quote >= BigInt(SWAP.minFuelFj)) return null
+	return `This amount buys only ≈ ${formatCompact(quote, 18)} FJ of gas, under the ≈ ${formatCompact(BigInt(SWAP.minFuelFj), 18)} FJ minimum a claim needs - send a larger amount.`
+}
+
+/** A private claim forfeits its fee ceilings before any gas reaches the user: a slice whose
+ *  GUARANTEED floor cannot cover them (the half-of-the-deposit cap ships less than the target while
+ *  the target still counts the ceilings) would cross to Aztec only for the fee ladder to refuse it,
+ *  after the Ethereum deposit is already irreversible — so it is refused here, before a signature. */
+function privateSliceShortfall(state: TokenState, minFuelOutput: bigint): string | null {
+	if (!isPrivate.value) return null
+	const ceilings = gasShare.ceilingsFor(state)
+	if (ceilings === null || minFuelOutput >= ceilings) return null
+	return "The gas slice is too small to cover the fees a private claim sets aside - send a larger amount, or send it publicly."
 }
 
 const gasResult = computed(() => {
@@ -247,7 +292,12 @@ const gasResult = computed(() => {
 	}
 })
 const gas = computed(() => gasResult.value.plan)
-const gasError = computed(() => gasResult.value.error ?? routeQuote.error.value)
+const gasError = computed(
+	() =>
+		gasResult.value.error ??
+		routeQuote.error.value ??
+		(isPrivate.value && intent.value !== "token" ? gasShare.pricingError.value : null),
+)
 
 /** ---- step gating -------------------------------------------------------------------------- */
 
@@ -261,9 +311,30 @@ const exitBlocked = computed<string | null>(() => {
 	return isExit.value && token && token.state.kind !== "registered" ? EXIT_TOKEN_NOT_REGISTERED : null
 })
 
-/** A deposit that buys no gas is claimed with gas the account already holds — known to be none. */
-const tokenOnlyBlocked = computed<string | null>(() =>
-	!isExit.value && intent.value === "token" && gasHeld.held.value === false ? NO_GAS_FOR_TOKEN_ONLY : null,
+/** What a claim from the account's held gas sets aside for this token, at the last price; null while unpriced. */
+const ownGasCeiling = computed(() => (resolved.value ? gasShare.ownGasCeilingFor(resolved.value.state, isPrivate.value) : null))
+/** Why the token alone cannot be chosen right now — known as soon as the gas verdict lands, whatever
+ *  the choice on screen, so the card itself can be greyed out and say why. A token-only claim pays
+ *  from the private gas the account holds at the fee contract, and only from that. */
+const tokenOnlyReason = computed<string | null>(() => {
+	if (isExit.value) return null
+	const credit = gasHeld.credit.value
+	if (credit === null) return null
+	if (credit === 0n) return NO_GAS_FOR_TOKEN_ONLY
+	const ceiling = ownGasCeiling.value
+	return ceiling !== null && credit < ceiling ? SHORT_GAS_FOR_TOKEN_ONLY : null
+})
+const tokenOnlyBlocked = computed<string | null>(() => (intent.value === "token" ? tokenOnlyReason.value : null))
+// A gasless account's choice moves off the token alone — at the verdict, and again whenever a new
+// token resets the choice — to the one that can go through; a token that can buy no gas at all
+// leaves the token choice in place, blocked and explained, since nothing else is open.
+watch(
+	[tokenOnlyReason, intent, routeKind],
+	() => {
+		const gasOpen = routeKind.value !== "no-route" && routeKind.value !== "unavailable"
+		if (tokenOnlyReason.value && intent.value === "token" && gasOpen) intent.value = "token+gas"
+	},
+	{ immediate: true },
 )
 
 // The step's verdict decides; the parsed amount is re-read so a reset that unmounts the step (a new
@@ -302,21 +373,51 @@ const plan = computed<SendPlan | ExitPlan | null>(() => {
 
 /** How many Aztec transactions the gas leg covers: what the slice was sized for, or for a gas-only
  *  send (which spends the whole amount) what the quote divides into. */
+/** Transactions the bought gas covers AFTER what the claim path must set aside — counted from the
+ *  floor the swap is signed against, never from the sizing target: a capped slice ships less than
+ *  the target, and the review must not promise what the deposit cannot deliver. */
 function txCoveredOf(target: SendPlan | ExitPlan): number | null {
 	if (target.direction !== "l1-to-l2" || !target.gas || !fjPerTx) return null
-	if (target.intent !== "gas") return gasShare.txTarget.value
-	// A quote under one transaction's budget covers nothing worth counting.
-	const whole = Number(target.gas.quote / fjPerTx)
+	// A gas-only send lands its whole floor as gas; a floor under one transaction's budget covers
+	// nothing worth counting.
+	const guaranteed = target.gas.minFuelOutput - (target.intent === "gas" ? 0n : mandatoryGasOf(target))
+	const whole = guaranteed > 0n ? Number(guaranteed / fjPerTx) : 0
 	return whole >= 1 ? whole : null
 }
 
+/** What a token send's claim path spends before any per-transaction gas: the ceilings a private
+ *  claim forfeits, or the registration a public first claim pays for. */
+function mandatoryGasOf(target: SendPlan): bigint {
+	if (target.isPrivate) return gasShare.ceilingsFor(target.token.state) ?? 0n
+	return target.token.state.kind === "registered" || !SWAP ? 0n : BigInt(SWAP.fjRegister)
+}
+
 /** The claim is the first transaction the bought gas pays for; an unregistered token's claim also
- *  registers it, which is budgeted on top. */
+ *  registers it, which is budgeted on top. A private claim is paid through the PrivateFPC, which
+ *  keeps each transaction's committed fee ceiling rather than its charge — so what leaves the gas
+ *  is the ceiling, priced from live fees, and the review says so. */
 function networkFeeOf(target: SendPlan | ExitPlan): { networkFee: string; networkFeeNote: string | null } {
 	if (target.direction === "l2-to-l1") {
 		return { networkFee: "your Aztec wallet's own fee, then Ethereum gas to finish", networkFeeNote: null }
 	}
-	if (!target.gas || !SWAP || !fjPerTx) return { networkFee: "paid from the gas you already hold on Aztec", networkFeeNote: null }
+	if (!target.gas || !SWAP || !fjPerTx) {
+		// A claim from held gas pays through the fee contract, which keeps the whole ceiling it commits to.
+		const ceiling = gasShare.ownGasCeilingFor(target.token.state, target.isPrivate)
+		return {
+			networkFee:
+				ceiling === null
+					? "paid from the private gas you already hold on Aztec"
+					: `≈ ${formatCompact(ceiling, 18)} FJ from the private gas you already hold`,
+			networkFeeNote: "set aside in full from your gas at the fee contract - the claim's fee ceiling, not its exact cost",
+		}
+	}
+	if (target.isPrivate) {
+		const ceilings = gasShare.ceilingsFor(target.token.state)
+		return {
+			networkFee: ceilings === null ? "priced from network fees at claim time" : `≈ ${formatCompact(ceilings, 18)} FJ`,
+			networkFeeNote: "taken from the gas that arrives - a private claim sets aside its fee ceiling, not its exact cost",
+		}
+	}
 	const feeFj = fjPerTx + (target.token.state.kind === "registered" ? 0n : BigInt(SWAP.fjRegister))
 	return { networkFee: `≈ ${formatCompact(feeFj, 18)} FJ`, networkFeeNote: "taken from the gas that arrives" }
 }
@@ -335,6 +436,10 @@ function freezeReview(target: SendPlan | ExitPlan): ReviewSnapshot {
 			...networkFeeOf(target),
 			txCovered,
 		},
+		ownGasCeiling:
+			target.direction === "l1-to-l2" && target.intent === "token"
+				? gasShare.ownGasCeilingFor(target.token.state, target.isPrivate)
+				: null,
 	}
 }
 
@@ -485,12 +590,13 @@ function goToStep(index: 0 | 1 | 2): void {
  *  the wizard stands the review down and says why instead of signing a plan nobody read. The one
  *  review that must NOT move is the one being signed; a review built while a backgrounded send is
  *  still running is a different review and moves like any other. */
-function invalidateReview(): void {
+function invalidateReview(why?: string): void {
 	const signingThisReview = submitting.value && backgroundedId.value === null
 	if (step.value !== 2 || stage.value !== "wizard" || signingThisReview) return
 	reviewed.value = null
 	step.value = 1
 	reviewStale.value = true
+	reviewStaleWhy.value = why ?? null
 }
 
 watch(resolved, () => void verifyPortal())
@@ -506,13 +612,17 @@ watch(
 		amount,
 		intent,
 		isPrivate,
-		gas,
+		// The gas leg's INPUTS, not the leg itself: a private slice re-prices with every fee tick,
+		// which is not a change the user made — the confirm re-reads the fees and stands the review
+		// down itself when the frozen slice no longer covers them.
+		routeOutcome,
+		gasShare.txTarget,
 		tokenOnlyBlocked,
 		() => bridge.selectedAccount.value,
 		() => l1.address.value,
 		() => l1.chainId.value,
 	],
-	invalidateReview,
+	() => invalidateReview(),
 )
 // The grant window closes the moment the send starts signing: from there the prompt is the wallet's.
 watch(
@@ -554,23 +664,71 @@ watch(journal.records, adoptRunRecord)
  */
 async function preflight(snapshot: ReviewSnapshot): Promise<boolean> {
 	const target = snapshot.plan
-	if (target.direction !== "l1-to-l2" || target.intent !== "token") return true
-	preflighting.value = true
-	try {
-		await gasHeld.refresh()
-	} finally {
-		preflighting.value = false
-	}
+	if (target.direction !== "l1-to-l2") return true
+	const privateSlice = target.isPrivate && target.intent === "token+gas" ? (target.gas ?? null) : null
+	if (target.intent !== "token" && !privateSlice) return true
+	const repriced = await preflightReads(target.intent === "token", privateSlice !== null)
 	// The SNAPSHOT must be the one still on screen — not merely its plan, which the wizard caches
 	// across an account switch, so a review re-entered under another account would carry the same
 	// plan object and let a confirm nobody gave for it resume.
 	if (reviewed.value !== snapshot || step.value !== 2) return false
 	if (snapshot.account !== (bridge.selectedAccount.value ?? "")) return false
-	if (tokenOnlyBlocked.value !== null) {
-		invalidateReview()
-		return false
+	const why = preflightStandDown(target, privateSlice, repriced, snapshot.ownGasCeiling)
+	if (why === undefined) return true
+	invalidateReview(why ?? undefined)
+	return false
+}
+
+/** The confirm's re-reads, under the preflighting hold: a token-only claim needs the gas it will
+ *  pay with to be held and priced, a private slice needs the fees it was priced at to still hold —
+ *  neither is trusted from the review. Returns whether the fees were re-read. */
+async function preflightReads(tokenOnly: boolean, privateSlice: boolean): Promise<boolean> {
+	preflighting.value = true
+	try {
+		if (tokenOnly) await gasHeld.refresh()
+		return privateSlice || tokenOnly ? await gasShare.prime() : true
+	} finally {
+		preflighting.value = false
 	}
-	return true
+}
+
+/** Why the confirm stands the review down: `undefined` = it may proceed, `null` = the generic
+ *  line, a string = the named reason. */
+function preflightStandDown(
+	target: SendPlan,
+	privateSlice: GasLegPlan | null,
+	repriced: boolean,
+	shownCeiling: bigint | null,
+): string | null | undefined {
+	if (tokenOnlyBlocked.value !== null) return null
+	if (target.intent === "token") return tokenOnlyStoodDown(target, repriced, shownCeiling)
+	if (!privateSlice) return undefined
+	return privateSliceStoodDown(target.token.state, privateSlice.minFuelOutput, repriced) ?? undefined
+}
+
+/** Why a token-only send cannot be signed at confirm: the gas it will claim with must be KNOWN to
+ *  cover what the claim sets aside at fees re-read now — an unread balance or an unpriced claim is
+ *  not one to fund an irreversible deposit on — and what is set aside must be what the review
+ *  showed: a figure that only appeared, or grew, after the review opened was never approved. */
+function tokenOnlyStoodDown(target: SendPlan, repriced: boolean, shown: bigint | null): string | undefined {
+	if (!repriced) return UNPRICED_TOKEN_ONLY
+	const credit = gasHeld.credit.value
+	if (credit === null) return UNREAD_GAS_FOR_TOKEN_ONLY
+	const ceiling = gasShare.ownGasCeilingFor(target.token.state, target.isPrivate)
+	if (ceiling === null || credit < ceiling) return SHORT_GAS_FOR_TOKEN_ONLY
+	if (shown === null) return CEILING_NOW_PRICED_TOKEN_ONLY
+	return ceiling > shown + shown / CEILING_DRIFT_DIVISOR ? CEILING_MOVED_TOKEN_ONLY : undefined
+}
+
+/** Why a private slice cannot be signed at confirm: the fees could not be re-read (a price nobody
+ *  could refresh is not one to fund an irreversible deposit on), or they moved and the slice no
+ *  longer covers the ceilings. */
+function privateSliceStoodDown(state: TokenState, minFuelOutput: bigint, repriced: boolean): string | null {
+	if (!repriced) return "Aztec's network fees could not be re-read just now, so the gas slice was not confirmed. Try again in a moment."
+	const short = privateSliceShortfall(state, minFuelOutput)
+	return short === null
+		? null
+		: "Aztec's network fees moved while you were on the review: the gas slice no longer covers what a private claim sets aside."
 }
 
 async function onConfirm(): Promise<void> {
@@ -875,7 +1033,7 @@ onBeforeUnmount(() => {
 		</template>
 		<template #amount>
 			<p v-if="reviewStale" class="stale" aria-live="polite" :data-testid="TESTIDS.sendReviewStale">
-				Something changed while you were on the review, so it was stood down. Check the amount and review again.
+				{{ reviewStaleWhy ?? "Something changed while you were on the review, so it was stood down." }} Check the amount and review again.
 			</p>
 			<AmountStep
 				v-if="amountToken"
@@ -893,7 +1051,7 @@ onBeforeUnmount(() => {
 				:fj-per-tx="fjPerTx"
 				:gas-error="gasError"
 				:blocked-reason="exitBlocked"
-				:token-only-blocked="tokenOnlyBlocked"
+				:token-only-blocked="tokenOnlyReason"
 				@update:valid="amountValid = $event"
 				@update:intent="intent = $event"
 				@update:amount="amount = $event"

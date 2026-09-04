@@ -46,7 +46,7 @@ export async function reconcileFuelConsumed(id: string): Promise<void> {
 
 /**
  * The same standalone claim, launched by the claim lane rather than the card: when the fee ladder
- * pays a hub claim from the sponsor it leaves the bridged Fee Juice unconsumed, and nothing else
+ * pays a hub claim from the wallet's own gas it leaves the bridged Fee Juice unconsumed, and nothing else
  * ever claims it. Best-effort by construction — the tokens are already moving, so a failure is
  * latched on the record (which re-offers CLAIM YOUR GAS once the deposit completes) and never
  * thrown into the claim that succeeded.
@@ -77,7 +77,7 @@ export async function claimFuelStandalone(id: string): Promise<void> {
 	const fuel = rec?.fuel
 	if (!rec || !fuel?.received || !fuel.leafIndex) throw new Error("This bridge has no fuel to claim.")
 	// Same source as the card's affordance, so the button and this guard can never disagree. The
-	// ladder below is public + sponsored, which the privacy fence forbids for private records — and
+	// ladder below is public, which the privacy fence forbids for private records — and
 	// their Fee Juice is bound to the PrivateFPC, so it could not match one anyway.
 	if (
 		decideStandaloneFuelRecovery({

@@ -104,10 +104,15 @@ describe("ReviewDetails", () => {
 		one.unmount()
 	})
 
-	it("says a send with no gas leg swaps nothing", async () => {
+	it("shows neither Route nor Slippage for a token-only send — there is nothing swapped to describe", async () => {
 		const w = await open(details())
-		expect(w.find(sel(TESTIDS.sendReviewRoute)).text()).toContain("no swap")
+		expect(w.find(sel(TESTIDS.sendReviewRoute)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.sendReviewSlippage)).exists()).toBe(false)
+		// The fee asset's gas leg swaps through no pool at all: a route line, saying so.
+		const direct = await open(details({ plan: { ...DEPOSIT, intent: "token+gas", gas: gas(0) } }))
+		expect(direct.find(sel(TESTIDS.sendReviewRoute)).text()).toContain("no swap")
 		w.unmount()
+		direct.unmount()
 	})
 
 	it("describes an exit as a burn and a release", async () => {
@@ -116,15 +121,9 @@ describe("ReviewDetails", () => {
 		w.unmount()
 	})
 
-	it("prints slippage as a percentage", async () => {
-		const w = await open(details({ slippageBps: 125 }))
+	it("prints slippage as a percentage on a send that buys gas", async () => {
+		const w = await open(details({ plan: { ...DEPOSIT, intent: "token+gas", gas: gas(1) }, slippageBps: 125 }))
 		expect(w.find(sel(TESTIDS.sendReviewSlippage)).text()).toContain("1.25%")
-		w.unmount()
-	})
-
-	it("says slippage does not apply when nothing is swapped", async () => {
-		const w = await open(details({ slippageBps: null }))
-		expect(w.find(sel(TESTIDS.sendReviewSlippage)).text()).toContain("Not applicable")
 		w.unmount()
 	})
 
