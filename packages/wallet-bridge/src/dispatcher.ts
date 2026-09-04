@@ -102,6 +102,7 @@ import { CapabilityNotGrantedError, JobCancelledError, walletErrorFromPayload } 
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import { describeExternalId } from "./external-id"
+import { WALLET_FEATURES } from "./wallet-features"
 import type {
 	IAccountReader,
 	IDappInteractionRunner,
@@ -645,6 +646,9 @@ export class WalletSdkDispatcher {
 		if (methodName === "getAccounts") {
 			return this.handleGetAccounts(ctx, dappSession)
 		}
+		if (methodName === "getWalletFeatures") {
+			return this.handleGetWalletFeatures()
+		}
 		if (methodName === "isTokenRegistered") {
 			// A wallet-local registry read: no prompt, no execution op. Scope enforcement above
 			// already required a contracts grant covering args[0].
@@ -698,6 +702,11 @@ export class WalletSdkDispatcher {
 	 *    fallback catches it and sends the full manifest. See wallet-bridge README
 	 *    for the dApp-side parse recipe.
 	 */
+	/** The static feature list: no session data, no prompt. */
+	private async handleGetWalletFeatures(): Promise<readonly string[]> {
+		return WALLET_FEATURES
+	}
+
 	private async handleGetAccounts(ctx: SessionContext, dappSession: IDappSessionRef | undefined): Promise<unknown> {
 		// Phase 0.5: dappSession captured at dispatch entry, not re-looked-up here.
 		if (!dappSession) {
