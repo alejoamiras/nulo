@@ -75,4 +75,7 @@ Branch `any-erc20-bridge/dapp-self-pay`, on top of `any-erc20-bridge/first-claim
   (`GAS_BALANCE_TTL_MS`) — which still held the pre-funding zero, so Confirm never became
   approvable. A locked mount now asks the store for a FRESH read (`forceRefresh`): a dApp locks the
   method precisely when the balance just moved.
-- Codex round 3: PENDING_CODEX_3
+- Codex round 3 (`aa7785c8`) — converged: "no material findings remain in `b22f6ad2..HEAD`." It
+  also cleared the forced gas read on a locked mount against the store's rules (monotonic forced
+  sequence, epoch checks, D4 and D11 intact; one uncached gas RPC per locked popup mount, which
+  the balance-sensitive dApp request warrants).
