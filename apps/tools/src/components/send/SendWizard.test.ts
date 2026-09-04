@@ -339,6 +339,7 @@ describe("SendWizard", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		ceilingsFor.mockImplementation((state) => (state.kind === "registered" ? 1n : 6n))
+		ownGasCeilingFor.mockImplementation(() => 1n)
 		catalogTokens.value = [candidate()]
 		selected.value = null
 		balances.value = { l1: 10n ** 9n, l2Public: 5n * 10n ** 8n, l2Private: 3n * 10n ** 8n }

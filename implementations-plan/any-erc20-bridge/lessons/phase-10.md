@@ -707,6 +707,83 @@ committed ceilings (register + claim) from its gas — 14.2 FJ at the canary's f
 actually charged. That is the price of "no sponsor"; the alternative (one private transaction
 that registers and claims) needs a hub change and a new generation.
 
+## Owner walk — round 4, and the sponsor that leaked through the public ladder (2026-09-04)
+
+**The private first claim worked on the preview** ("worked wonderfully" — AUDC, token + gas,
+private, first-time token: register from the fuel, claim from the credit). Three copy/UX notes
+came back, and one real bug.
+
+**The bug (owner-found, live):** a first-time PUBLIC token + gas send (WETH) reached the wallet's
+confirmation with **Sponsored FPC** as the fee method. The ladder's three no-fee outcomes
+(`no-fuel`, `own-gas`, `own-gas-standalone`) all sent the claim with `fee` omitted so "the
+wallet's own picker chooses" — and the extension's picker defaults to the sponsored FPC on an
+account with no public Fee Juice (`popup/windows/execute/index.vue`: an op with no `exec.feePayer`
+leaves `feeSettings` to the user card). The gate that unblocked it counted the owner's PRIVATE
+balance at the PrivateFPC as "has gas", then handed the choice to a picker that cannot spend it
+by default. Which of the three outcomes fired is not in the log we have; all three are closed.
+
+**First fix (`dcaad5bd`) — rejected by codex, correctly** (resumed session
+`01a06960-e908-7350-a496-274188c9a0c8`, round 5): it named a payer per claim — the account's
+public Fee Juice as the transaction's own fee payer (`preexistingFeeJuicePayment` with the
+sender in its payload), else the private balance through `pay_fee`. Three HIGHs, all verified:
+- The wallet routes any payload whose payer is the sender as `FEE_JUICE_WITH_CLAIM`
+  (`fee-detection.ts` → `embedded-strategy.ts`), and that entrypoint mode "will set itself as the
+  fee payer but NOT end setup phase" — the Fee Juice contract's `claim_and_end_setup` does. With no
+  claim call the app phase never starts: invalid. **A dApp could not name the account's public
+  Fee Juice through the Nulo wallet.** (No fee-mode field crosses the wallet-sdk RPC that the
+  extension reads.) That is now its own PR — `implementations-plan/dapp-preexisting-fee/`.
+- `useSend.ts` computed `registers` as `rec.isPrivate && hubMissing`, so a public first-time claim
+  was sized as a plain claim while hub-l2 sent `register_and_claim_public`; with `pay_fee` that
+  exhausts the limit AFTER the full ceiling is deducted.
+- The wizard's token-only gate (`useGasHeld.verdictOf`) counted any non-zero balance — one wei of
+  credit unlocked the irreversible L1 deposit, and the claim stopped later.
+- MED: a private record silently falling back to a public payer; MED: the public register+claim
+  shape reused the 4M private-registration limit, unmeasured.
+
+**Second fix (`e63ba624`) — a claim from held gas pays ONLY from the private balance at the FPC:**
+- `decideOwnGasCredit({ privateFeeJuice, ceiling })` → pays / short / unverifiable / none; the
+  ceiling comes from the claim's SHAPE via bridge-core's `ownGasTxs` / `ownGasCeiling`: a public
+  claim is one transaction (`PUBLIC_HUB_CLAIM_GAS` 3.0M L2, `PUBLIC_HUB_REGISTER_CLAIM_GAS` 3.5M
+  when the hub does not know the token), a private first-time token sends a registration first
+  (4M + 2M, on the `registerFee` / `registeredClaimFee` seams). The public limits are DERIVED from
+  the landed public-lane fees (plain `claim_public` 2.585 FJ beside a 909,600-gas / 1.786 FJ
+  private claim ≈ 1.32M L2 gas; EURC `register_and_claim_public` 4.621 FJ beside a 2.845 FJ private
+  claim ≈ 1.48M) × the claim's 2.3× headroom — PROVISIONAL, no FPC-billed sample of either exists;
+  the owner's WETH retest on the preview is the first.
+- `useSend.ts` asks the hub whether the token is bound for BOTH privacy modes.
+- The wizard reuses the same ceiling: `useGasHeld.credit`, `useGasShare.ownGasCeilingFor`; the
+  token-only card greys out on an empty OR a short balance once priced; the confirm re-reads the
+  balance and re-prices, and stands the review down unless the balance is KNOWN and covers the
+  fresh ceiling (unread / unpriced / short each named).
+
+**Codex round 6 (`e63ba624`) — one HIGH, mine:** the payload change to `preexistingFeeJuicePayment`
+had broken the mainnet deploy script, because wallet-sdk's own `completeFeeOptions`
+(`base_wallet.js:185-192`) routes a sender payer as a claim in setup exactly as the extension
+does, and only an ABSENT payer as preexisting. Fix `ca1997b5`: the payload is empty again (the
+aztec.js meta method still reads the sender through `getFeePayer()`), the doc states both
+routings; the token-only review shows the ceiling and that the fee contract keeps it in full; a
+caller test pins `registers` for public records; the public limits are documented provisional.
+
+**Codex round 7 (`ca1997b5`) — no HIGH; one MED closed in `b909fc22`:** the review snapshot now
+carries the ceiling it SHOWED; at confirm a review that opened unpriced stands down once the figure
+exists, and one whose figure grew by more than a tenth stands down as moved.
+
+**Codex round 8 (`b909fc22`) — converged:** "no material findings beyond the acknowledged
+provisional public gas limits; the review-disclosure MED is correctly closed." (One LOW, a test
+isolation nit, folded in.) All three gates green at `b909fc22` (network shard 4/5 re-run once for
+the `wallet-locked-mid-session` auth-popup flake).
+
+**Copy/UX (`81ecb35f`):** claim eta → "a moment, then your signature"; registered detail →
+"registered - preparing the claim"; a trailing "." is an amount still being typed (no red line,
+CONTINUE off); the gas breakdown's error waits for the same 700 ms pause / blur as the field's own
+(it was rendered immediately, which is why the debounce "was not really working").
+
+**Owner retest to run on the preview:** the WETH public token + gas first-time send again. With no
+public Fee Juice the claim pays from the private FPC balance — the wallet's confirmation must show
+no fee picker (an embedded, dApp-named payer), and the claim lands at the derived public ceiling
+(3.5M L2 × predicted fee set aside, no refund). That run is also the first billed sample of a
+public registering claim through the FPC.
+
 ## Sign-off
 
 _Owner sign-off: PENDING._
