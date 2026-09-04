@@ -28,6 +28,7 @@ import {
 	isSendRecord,
 	markSealTrusted,
 	predictedWorstMinFees,
+	preexistingFeeJuicePayment,
 	privateFeeJuicePayment,
 	privateFpcFeeLimit,
 	privateMintAndPayFee,
@@ -43,7 +44,7 @@ import {
 	PRIVATE_ATTEMPT_STALE_MS,
 	decideFuelClaim,
 	decideFuelLadder,
-	decideNoFuelClaimGate,
+	decideOwnGasSource,
 	decidePrivateFuelClaim,
 	isPrivateFuelInsufficiency,
 } from "@/lib/fuel-claim-state"
@@ -443,9 +444,12 @@ function fpcGasSettings(gas: { daGas: number; l2Gas: number }, maxFees: { feePer
 	}
 }
 
-/** A claim paid from the private Fee Juice this account already holds at the FPC (`pay_fee`). */
-function fpcCreditFee(fpcAddr: AztecAddress, maxFees: { feePerDaGas: bigint; feePerL2Gas: bigint }): FpcFee {
-	return { paymentMethod: privateFeeJuicePayment(fpcAddr), gasSettings: fpcGasSettings(PRIVATE_HUB_CLAIM_GAS, maxFees) }
+type MaxFees = { feePerDaGas: bigint; feePerL2Gas: bigint }
+
+/** A transaction paid from the private Fee Juice this account already holds at the FPC (`pay_fee`),
+ *  at the ceiling its limits commit to. */
+function fpcCreditFee(fpcAddr: AztecAddress, maxFees: MaxFees, gas: { daGas: number; l2Gas: number } = PRIVATE_HUB_CLAIM_GAS): FpcFee {
+	return { paymentMethod: privateFeeJuicePayment(fpcAddr), gasSettings: fpcGasSettings(gas, maxFees) }
 }
 
 /** The claim of a record whose fuel is already spent (the registration ahead of it, or a prior
@@ -476,15 +480,7 @@ async function privateCreditFee(fb: FuelBlock, recipientAddr: AztecAddress, azte
 		kind: "credit",
 		fee: claim,
 		registers,
-		...(registers
-			? {
-					registerFee: {
-						paymentMethod: privateFeeJuicePayment(fpcAddr),
-						gasSettings: fpcGasSettings(PRIVATE_HUB_REGISTER_GAS, maxFees),
-					},
-					registeredClaimFee: claim,
-				}
-			: {}),
+		...(registers ? { registerFee: fpcCreditFee(fpcAddr, maxFees, PRIVATE_HUB_REGISTER_GAS), registeredClaimFee: claim } : {}),
 	}
 }
 
@@ -569,32 +565,72 @@ function privateFuelSafetyReason(fb: FuelBlock, fuelReceived: bigint): string | 
  *  combinations (a stop with a fee, standalone with fjwc) cannot be constructed. */
 export type PublicClaimFee =
 	| { kind: "stop"; why: string; sendWhy?: string }
-	| { kind: "no-fuel" }
 	| { kind: "fjwc"; fee: { paymentMethod: unknown } }
-	/** The bridged Fee Juice cannot pay this claim (spent, or set aside by the user): the wallet's own gas does. */
-	| { kind: "own-gas" }
-	/** A fee spike: the wallet's own gas pays the claim and the bridged Fee Juice is claimed on its own. */
-	| { kind: "own-gas-standalone" }
+	/** Gas the account already holds pays the claim — its public Fee Juice as the fee payer, or its
+	 *  private balance at the FPC. A private first-time token sends a registration first, on the
+	 *  register seams; `standalone` is bridged Fee Juice a fee spike left for a claim of its own. */
+	| { kind: "own-gas"; fee: FpcFee; registerFee?: FpcFee; registeredClaimFee?: FpcFee; standalone?: FuelBlock }
 
-/** The NO-fuel gate: the bridge claim has no fresh FJ message to consume, so it self-pays from gas
- *  the account ALREADY holds. The faucet does NOT pre-select a method - it omits the fee and lets
- *  the WALLET's fee picker choose Public OR Private Fee Juice (or Sponsored), exactly as the
- *  public path always has. We only UNBLOCK when there is gas in either balance; private FJ at
- *  the PrivateFPC counts (selectable via pay_fee). Reads are fail-closed (null = unread). */
-export async function gateNoFuelClaim(rec: FeeLadderRecord, recipientAddr: AztecAddress, aztec: unknown): Promise<PublicClaimFee> {
-	const [pub, priv] = await Promise.all([
+const NO_GAS_STOP = 'No gas (Fee Juice) to claim this bridge. Enable "arrive with gas", or fund your account first.'
+const UNREAD_GAS_STOP = "Couldn't check your Fee Juice balance - please try again in a moment."
+const PRIVATE_SHORT_STOP =
+	"Your private gas is under this claim's fee ceiling at current network fees - retry when fees ease, or bridge more gas."
+
+/** Public Fee Juice pays as the transaction's own fee payer. The wallet sizes the limits from its
+ *  own estimate; the cap is the predicted worst fee, so a rise before inclusion cannot reject it. */
+const publicSelfPayFee = (payer: AztecAddress, maxFees: MaxFees): FpcFee => ({
+	paymentMethod: preexistingFeeJuicePayment(payer),
+	gasSettings: { maxFeesPerGas: { feePerDaGas: maxFees.feePerDaGas, feePerL2Gas: maxFees.feePerL2Gas } },
+})
+
+/** What a claim from held gas commits to: a public claim registers inside its own transaction, a
+ *  private first-time token sends a registration ahead of the claim. */
+function ownGasShape(rec: FeeLadderRecord, registers: boolean, maxFees: MaxFees) {
+	const twoTx = rec.isPrivate && registers
+	const gas = registers && !twoTx ? PRIVATE_HUB_REGISTER_GAS : PRIVATE_HUB_CLAIM_GAS
+	const ceiling = privateFpcFeeLimit(gas, maxFees) + (twoTx ? privateFpcFeeLimit(PRIVATE_HUB_REGISTER_GAS, maxFees) : 0n)
+	return { twoTx, gas, ceiling }
+}
+
+/** A claim with no fresh Fee Juice message of its own pays from gas the account ALREADY holds, and
+ *  always names which: the wallet's picker never chooses, because its default on an account without
+ *  public Fee Juice is the sponsored FPC, which no bridge path may lean on. Reads are fail-closed
+ *  (null = unread). */
+export async function ownGasFee(
+	rec: FeeLadderRecord,
+	recipientAddr: AztecAddress,
+	aztec: unknown,
+	registers: boolean,
+): Promise<PublicClaimFee> {
+	const [pub, priv, maxFees] = await Promise.all([
 		readFeeJuiceOrNull("public FJ", () => readPublicFeeJuiceBalance(aztec, recipientAddr)),
 		readFeeJuiceOrNull("private FJ", () => readPrivateFeeJuiceBalance(aztec, recipientAddr)),
+		predictedWorstMinFees(createAztecNodeClient(NODE_URL)),
 	])
-	const gate = decideNoFuelClaimGate({ publicFeeJuice: pub, privateFeeJuice: priv })
-	log("no-fuel claim gate", { id: rec.id, gate, pub: fmtFj(pub), priv: fmtFj(priv) })
-	if (gate === "unverifiable") return { kind: "stop", why: "Couldn't check your Fee Juice balance - please try again in a moment." }
-	if (gate === "none")
-		return {
-			kind: "stop",
-			why: 'No gas (Fee Juice) to claim this no-fuel bridge. Enable "arrive with gas", or fund your account first.',
-		}
-	return { kind: "no-fuel" } // "allow": the wallet's fee picker selects the method (Public/Private FJ or Sponsored).
+	const { twoTx, gas, ceiling } = ownGasShape(rec, registers, maxFees)
+	const source = decideOwnGasSource({ publicFeeJuice: pub, privateFeeJuice: priv, ceiling, preferPrivate: rec.isPrivate })
+	log("own-gas source", { id: rec.id, source, registers, pub: fmtFj(pub), priv: fmtFj(priv), ceiling: fmtFj(ceiling) })
+	if (source === "public") return { kind: "own-gas", fee: publicSelfPayFee(recipientAddr, maxFees) }
+	if (source === "private") {
+		const fpc = AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)
+		const fee = fpcCreditFee(fpc, maxFees, gas)
+		const seams = twoTx ? { registerFee: fpcCreditFee(fpc, maxFees, PRIVATE_HUB_REGISTER_GAS), registeredClaimFee: fee } : {}
+		return { kind: "own-gas", fee, ...seams }
+	}
+	if (source === "private-short") return { kind: "stop", why: PRIVATE_SHORT_STOP }
+	return { kind: "stop", why: source === "unverifiable" ? UNREAD_GAS_STOP : NO_GAS_STOP }
+}
+
+/** A fee spike: the claim pays from held gas and the bridged Fee Juice lands by a transaction of its own. */
+async function ownGasWithStandalone(
+	rec: FeeLadderRecord,
+	recipientAddr: AztecAddress,
+	aztec: unknown,
+	registers: boolean,
+	fuel: FuelBlock,
+): Promise<PublicClaimFee> {
+	const own = await ownGasFee(rec, recipientAddr, aztec, registers)
+	return own.kind === "own-gas" ? { ...own, standalone: fuel } : own
 }
 
 /** Fueled records pick their payment from record-specific evidence only. */
@@ -603,9 +639,10 @@ export async function resolvePublicClaimFee(
 	recipientAddr: AztecAddress,
 	aztec: unknown,
 	userOverride: boolean,
+	registers: boolean,
 ): Promise<PublicClaimFee> {
 	const fuel = rec.fuel
-	if (!(fuel?.received && fuel.leafIndex)) return gateNoFuelClaim(rec, recipientAddr, aztec)
+	if (!(fuel?.received && fuel.leafIndex)) return ownGasFee(rec, recipientAddr, aztec, registers)
 	if (fuel.claimTxHash !== undefined && !isWellFormedTxHash(fuel.claimTxHash)) return { kind: "stop", why: MALFORMED_FUEL_HASH }
 	const receiptStatus = fuel.claimTxHash ? await fuelReceiptStatus(fuel.claimTxHash) : undefined
 	// Promote a prior attempt to INCLUSION-GRADE durable evidence: only an `included`
@@ -639,7 +676,7 @@ export async function resolvePublicClaimFee(
 			},
 		}
 	}
-	if (decision.action === "own-gas-plus-standalone-fj") return { kind: "own-gas-standalone" }
+	if (decision.action === "own-gas-plus-standalone-fj") return ownGasWithStandalone(rec, recipientAddr, aztec, registers, fuel)
 	if (decision.action === "wait") {
 		// The historical wait stop threw a SHORTER message from send than from simulate — preserved.
 		return {
@@ -648,8 +685,8 @@ export async function resolvePublicClaimFee(
 			sendWhy: "fuel claim attempt pending",
 		}
 	}
-	// "own-gas" (user override, or a consumed prior attempt): the wallet's own gas, no flags.
-	return { kind: "own-gas" }
+	// "own-gas" (user override, or a consumed prior attempt): gas the account already holds.
+	return ownGasFee(rec, recipientAddr, aztec, registers)
 }
 
 /** The journal-side effects a chosen fee owes, run around the wallet call the caller makes. The
@@ -703,24 +740,12 @@ const privateLatches = (id: string, fuel: FuelBlock, fuelOnRegister: boolean): H
 	}
 }
 
-async function publicHubFee(
-	rec: FeeLadderRecord,
-	base: SendOpts,
-	resolved: PublicClaimFee,
-	recipientAddr: AztecAddress,
-	aztec: unknown,
-): Promise<HubClaimFee> {
+function publicHubFee(rec: FeeLadderRecord, base: SendOpts, resolved: PublicClaimFee): HubClaimFee {
 	if (resolved.kind === "stop") return { kind: "stop", why: resolved.why, sendWhy: resolved.sendWhy }
-	// no-fuel omits the fee entirely so the WALLET's own picker chooses the method.
-	if (resolved.kind === "no-fuel") return { kind: "opts", opts: base }
 	if (resolved.kind === "fjwc") return { kind: "opts", opts: { ...base, fee: resolved.fee }, ...fjwcLatches(rec.id, rec.fuel) }
-	// The bridged Fee Juice cannot pay this claim (a fee spike, a spent prior attempt, or the user's
-	// choice to claim without it): the claim pays from gas the account already holds — the same
-	// self-pay a no-fuel claim makes, so the same gate decides whether there is any — and Fee Juice
-	// still unclaimed is landed by a transaction of its own once fees allow.
-	const own = await gateNoFuelClaim(rec, recipientAddr, aztec)
-	if (own.kind === "stop") return { kind: "stop", why: own.why }
-	return resolved.kind === "own-gas-standalone" ? { kind: "opts", opts: base, standalone: rec.fuel } : { kind: "opts", opts: base }
+	const { fee, registerFee, registeredClaimFee, standalone } = resolved
+	const seams = registerFee ? { registerFee, registeredClaimFee } : {}
+	return { kind: "opts", opts: { ...base, fee, ...seams }, ...(standalone ? { standalone } : {}) }
 }
 
 /**
@@ -756,7 +781,7 @@ export async function resolveHubClaimSendOpts(ctx: {
 		const seams = priv.registers ? { registerFee: priv.fee, registeredClaimFee: priv.registeredClaimFee } : {}
 		return { kind: "opts", opts: { ...base, fee: priv.fee, ...seams }, ...privateLatches(rec.id, priv.fuel, priv.registers) }
 	}
-	return publicHubFee(rec, base, await resolvePublicClaimFee(rec, recipientAddr, aztec, userOverride), recipientAddr, aztec)
+	return publicHubFee(rec, base, await resolvePublicClaimFee(rec, recipientAddr, aztec, userOverride, ctx.registers === true))
 }
 
 // ── the L1 legs a send performs before its claim ─────────────────────────────

@@ -154,38 +154,54 @@ function decideHashlessAttempt(e: PrivateFuelClaimEvidence): { action: PrivateFu
 }
 
 /**
- * Whether to UNBLOCK a NO-fuel bridge claim (the "arrive with gas" toggle OFF), as a pure decision. A
- * no-fuel claim has no fresh L1→L2 Fee-Juice message to consume, so it self-pays from gas the account
- * already holds — public Fee Juice OR the private balance a prior private fuel claim credited at the
- * PrivateFPC. The tools app does NOT pre-select a method: it only decides whether the account has gas to
- * reach the wallet's fee picker, which then selects Public OR Private Fee Juice (or Sponsored). This
- * mirrors the long-standing public path (`fee = undefined` → wallet chooses), now extended so PRIVATE
- * FJ also counts as "has gas" (it's selectable in the picker via `pay_fee`).
+ * Which gas the account ALREADY holds pays a claim with no fresh Fee Juice message of its own (a
+ * no-fuel bridge, a fee spike, a spent prior attempt, the user's choice to claim without the bridged
+ * gas): its public Fee Juice, or the private balance a prior private fuel claim credited at the
+ * PrivateFPC. The choice is made here and sent with the claim — the wallet's own picker never
+ * decides, because its default on an account without public Fee Juice is the sponsored FPC, which
+ * no bridge path may lean on.
  *
- * **Fail-closed reads:** a balance is `bigint | null` where `null` = the read THREW (≠ a real zero). A
- * transient read failure must never fabricate spendable balance NOR a false "no gas": with no KNOWN gas
- * in either balance, `null` in either input yields `unverifiable` (surface "couldn't check — retry"),
- * not `none`.
+ * `ceiling` is the fee the claim commits to (limits × predicted fees): the FPC deducts exactly that
+ * from the private balance, and the protocol requires the public payer to hold it. The preferred
+ * balance pays when it covers the ceiling, else the other; public Fee Juice below it is still sent
+ * (the wallet's own estimate, not this reference, is what the network enforces), a private balance
+ * below it is refused (the FPC would).
+ *
+ * **Fail-closed reads:** a balance is `bigint | null` where `null` = the read THREW (≠ a real zero).
+ * With nothing known to pay, a failed read yields `unverifiable` ("couldn't check — retry"), never a
+ * false "no gas".
  */
-export type NoFuelClaimGate =
-	| "allow" // the account holds gas in at least one balance - unblock; the wallet's picker selects the method.
-	| "unverifiable" // a balance read failed and no KNOWN balance holds gas - fail closed ("couldn't check").
+export type OwnGasSource =
+	| "public" // the account's public Fee Juice pays, as the transaction's own fee payer.
+	| "private" // the private balance at the PrivateFPC pays (`pay_fee`).
+	| "private-short" // only a private balance is known, and it is under the ceiling: the FPC would refuse.
+	| "unverifiable" // a balance read failed and no KNOWN balance can pay - fail closed ("couldn't check").
 	| "none" // both balances known + zero - a truly cold account.
 
-export interface NoFuelClaimGateInputs {
+export interface OwnGasSourceInputs {
 	/** Public Fee Juice balance (base units), or `null` if the `balance_of_public` read FAILED. */
 	publicFeeJuice: bigint | null
 	/** Private Fee Juice at the PrivateFPC (base units, via `balance_of`), or `null` if that read FAILED. */
 	privateFeeJuice: bigint | null
+	/** The fee the claim commits to, in Fee Juice base units. */
+	ceiling: bigint
+	/** A private record prefers its private balance: a public fee payer names the account on chain. */
+	preferPrivate: boolean
 }
 
-export function decideNoFuelClaimGate(i: NoFuelClaimGateInputs): NoFuelClaimGate {
-	// Any KNOWN gas (in either balance) unblocks — the wallet's fee picker handles selection + the real
-	// sufficiency check, exactly as the public path always has. `> 0` matches the original cold-check.
-	if ((i.publicFeeJuice ?? 0n) > 0n || (i.privateFeeJuice ?? 0n) > 0n) return "allow"
-	// No KNOWN gas. If either read failed, the unknown balance might hold gas - fail closed, don't block.
-	if (i.publicFeeJuice === null || i.privateFeeJuice === null) return "unverifiable"
-	return "none" // both known + zero.
+export function decideOwnGasSource(i: OwnGasSourceInputs): OwnGasSource {
+	const pub = i.publicFeeJuice
+	const priv = i.privateFeeJuice
+	const publicCovers = pub !== null && pub >= i.ceiling
+	const privateCovers = priv !== null && priv >= i.ceiling
+	if (i.preferPrivate && privateCovers) return "private"
+	if (publicCovers) return "public"
+	if (privateCovers) return "private"
+	// Neither balance is known to cover the ceiling. An unread public balance might: fail closed.
+	if (pub === null) return "unverifiable"
+	if (pub > 0n) return "public"
+	if (priv === null) return "unverifiable"
+	return priv > 0n ? "private-short" : "none"
 }
 
 /** The exact PrivateFPC `mint_and_pay_fee` insufficiency assert (verified in the installed 215fd08
