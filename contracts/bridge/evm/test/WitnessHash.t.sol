@@ -2,13 +2,22 @@
 pragma solidity >=0.8.27;
 
 import {Test} from "forge-std/Test.sol";
+import {IERC20} from "@oz/token/ERC20/IERC20.sol";
 import {SwapBridgeRouter, IUniswapFuelSwap} from "../src/SwapBridgeRouter.sol";
+import {MockFeeJuicePortal} from "./mocks/RouterMocks.sol";
 
 /// Exposes the internal witness/route hashing so the TS side (bridge-core/l1.ts)
 /// can be pinned byte-for-byte against it (the L1 analogue of the content-hash
 /// keystone — a Permit2 witness mismatch invalidates the signature).
 contract WitnessHarness is SwapBridgeRouter {
-    constructor() SwapBridgeRouter(address(uint160(1)), address(uint160(2)), address(uint160(3))) {}
+    constructor()
+        SwapBridgeRouter(
+            address(uint160(1)),
+            address(new MockFeeJuicePortal(IERC20(address(uint160(2))))),
+            address(uint160(3)),
+            address(uint160(4))
+        )
+    {}
 
     function hRoute(IUniswapFuelSwap.PoolKey[] calldata p, bool[] calldata d) external pure returns (bytes32) {
         return _hashRoute(p, d);

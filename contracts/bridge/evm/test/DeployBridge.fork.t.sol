@@ -5,6 +5,8 @@ import {Test} from "forge-std/Test.sol";
 import {MintableERC20} from "../src/MintableERC20.sol";
 import {UniswapFuelSwap} from "../src/UniswapFuelSwap.sol";
 import {SwapBridgeRouter} from "../src/SwapBridgeRouter.sol";
+import {PortalFactory} from "../src/PortalFactory.sol";
+import {NuloTokenPortal} from "../upstream/NuloTokenPortal.sol";
 import {PoolSetupHelper} from "../script/DeployBridge.s.sol";
 import {IERC20} from "@oz/token/ERC20/IERC20.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
@@ -21,6 +23,7 @@ contract DeployBridgeForkTest is Test {
     address constant FEE_ASSET_HANDLER = 0x5602c39A6E9C5AcE589F64F754927bcDa4f4BFc9;
     address constant FEE_JUICE_PORTAL = 0xb4A9F8EAdC8CA944729D61E59A9f491fAFf237A3;
     address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
+    NuloTokenPortal constant LIVE_PORTAL = NuloTokenPortal(0xE0FD81b5DdB13bbB64243D018a6E9C3dfaE8d21F);
 
     uint24 constant FEE = 3000;
     int24 constant TICK_SPACING = 60;
@@ -48,13 +51,16 @@ contract DeployBridgeForkTest is Test {
 
         MintableERC20 usdc = new MintableERC20("Nulo USDC", "USDC", 6, 1000);
         UniswapFuelSwap swap = new UniswapFuelSwap(POOL_MANAGER, FEE_JUICE, WETH);
-        SwapBridgeRouter router = new SwapBridgeRouter(PERMIT2, FEE_JUICE_PORTAL, address(swap));
+        PortalFactory factory = new PortalFactory(LIVE_PORTAL.registry(), bytes32(uint256(0x4B)), address(this));
+        SwapBridgeRouter router = new SwapBridgeRouter(PERMIT2, FEE_JUICE_PORTAL, address(swap), address(factory));
         PoolSetupHelper helper = new PoolSetupHelper(POOL_MANAGER, FEE_ASSET_HANDLER);
 
         // Wiring assertions (public immutables).
         assertEq(address(router.swapTarget()), address(swap), "router.swapTarget");
         assertEq(address(router.feeJuicePortal()), FEE_JUICE_PORTAL, "router.feeJuicePortal");
         assertEq(address(router.permit2()), PERMIT2, "router.permit2");
+        assertEq(address(router.FACTORY()), address(factory), "router.factory");
+        assertEq(router.FEE_ASSET(), FEE_JUICE, "router.feeAsset == FeeJuicePortal.UNDERLYING()");
         assertEq(usdc.decimals(), 6, "usdc decimals");
 
         PoolKey memory key = PoolKey({

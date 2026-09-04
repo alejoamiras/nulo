@@ -87,6 +87,8 @@ contract CapturingInbox {
     bytes32 public lastSecretHash;
     bytes32 public lastBridge;
     uint256 public lastVersion;
+    address public lastSender;
+    uint256 public sent;
     uint256 private nextIndex;
 
     function sendL2Message(DataStructures.L2Actor calldata actor, bytes32 contentHash, bytes32 secretHash)
@@ -97,6 +99,8 @@ contract CapturingInbox {
         lastSecretHash = secretHash;
         lastBridge = actor.actor;
         lastVersion = actor.version;
+        lastSender = msg.sender;
+        sent++;
         key = keccak256(abi.encode(contentHash, secretHash));
         index = nextIndex++;
     }
