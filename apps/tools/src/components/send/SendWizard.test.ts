@@ -103,7 +103,7 @@ vi.mock("@/contracts/bridge-generation", () => ({
 	HUB: { toString: () => AZTEC_ACCOUNT },
 	HUB_TOKEN_ARTIFACT: {},
 	SEND_GENERATION: { factory: FACTORY, implementation: IMPLEMENTATION },
-	SWAP: { slippageBps: 300, fjPerTx: "100000000000000000", fjRegister: "500000000000000000" },
+	SWAP: { slippageBps: 300, fjPerTx: "100000000000000000", fjRegister: "500000000000000000", minFuelFj: "1000000" },
 	MANIFEST_TOKENS: [],
 }))
 vi.mock("@/composables/useL1Wallet", () => ({
@@ -577,19 +577,35 @@ describe("SendWizard", () => {
 		amountStep().vm.$emit("update:valid", true)
 		await flushPromises()
 		expect(amountStep().props("tokenOnlyBlocked")).toContain("holds no gas")
-		// The wizard refuses the review on its own, whatever the step reported.
-		amountStep().vm.$emit("next")
-		await flushPromises()
-		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
-
-		amountStep().vm.$emit("update:intent", "token+gas")
-		await flushPromises()
-		expect(amountStep().props("tokenOnlyBlocked")).toBeNull()
-
+		// The default choice moved off the blocked one on its own: the card is greyed out, not chosen,
+		// and a choice forced back onto it bounces off while the verdict stands.
+		expect(amountStep().props("intent")).toBe("token+gas")
 		amountStep().vm.$emit("update:intent", "token")
+		await flushPromises()
+		expect(amountStep().props("intent")).toBe("token+gas")
+		// The reason stays on the step whatever the choice (it greys the card out); the verdict clears
+		// it, and the token alone is a choice again.
+		expect(amountStep().props("tokenOnlyBlocked")).toContain("holds no gas")
 		gasHeld.value = null
 		await flushPromises()
 		expect(amountStep().props("tokenOnlyBlocked")).toBeNull()
+		amountStep().vm.$emit("update:intent", "token")
+		await flushPromises()
+		expect(amountStep().props("intent")).toBe("token")
+	})
+
+	it("a gas slice under the bridge's claim minimum is refused before any signature — the swap would revert on Ethereum", async () => {
+		// 0.02 token at 1e-12 FJ per token: 20,000 wei of gas, under the mocked 1,000,000-wei minimum.
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("back")
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
+		setRoute({ kind: "route", route: ROUTE, quoteOut: 10n ** 6n })
+		await flushPromises()
+		const amount = w.findComponent({ name: "AmountStep" })
+		expect(amount.props("gas")).toBeNull()
+		expect(amount.props("gasError")).toMatch(/buys only ≈ .* FJ of gas, under the ≈ .* FJ minimum a claim needs/)
 	})
 
 	it("RUN IN BACKGROUND starts the wizard over and keeps a line on the send until it lands", async () => {

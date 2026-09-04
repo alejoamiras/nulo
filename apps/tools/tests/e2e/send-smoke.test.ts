@@ -669,18 +669,17 @@ describe("send wizard smoke", () => {
 		expect(w.find(sel(TESTIDS.receipt)).exists()).toBe(true)
 	})
 
-	it("a token-only send on an account with no gas is stopped at the amount step until gas is added to it", async () => {
+	it("an account with no gas cannot choose the token alone: the card is greyed out with its reason and the choice moves to token + gas", async () => {
 		markRegistered(LIST_WBTC, LIST_DECIMALS)
 		h.state.route = ROUTE
 		h.state.gasHeld.value = false
 		const w = await mountView()
 		await pick(w, LIST_WBTC)
 		await toAmount(w, "1", { route: true })
-		expect(w.find(sel(TESTIDS.sendTokenOnlyBlocked)).text()).toContain("holds no gas")
-		expect(w.find(sel(TESTIDS.sendAmountNext)).attributes("disabled")).toBeDefined()
-
-		await w.find(sel(TESTIDS.sendChoiceTokenGas)).trigger("click")
-		await settle()
+		const token = w.find(sel(TESTIDS.sendChoiceToken))
+		expect(token.attributes("disabled")).toBeDefined()
+		expect(token.attributes("title")).toContain("holds no gas")
+		expect(w.find(sel(TESTIDS.sendChoiceTokenGas)).attributes("aria-selected")).toBe("true")
 		expect(w.find(sel(TESTIDS.sendTokenOnlyBlocked)).exists()).toBe(false)
 		expect(w.find(sel(TESTIDS.sendAmountNext)).attributes("disabled")).toBeUndefined()
 	})

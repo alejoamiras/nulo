@@ -240,13 +240,21 @@ function buildGas(): { plan: GasLegPlan | null; error: string | null } {
 	}
 	const quote = outcome.kind === "route" ? (fuelAmount * outcome.quoteOut) / probeIn : fuelAmount
 	const minFuelOutput = floorFor(quote, outcome)
-	const shortfall = intent.value === "gas" ? null : privateSliceShortfall(token.state, minFuelOutput)
+	const shortfall = quoteShortfall(quote) ?? (intent.value === "gas" ? null : privateSliceShortfall(token.state, minFuelOutput))
 	if (shortfall) return { plan: null, error: shortfall }
 	const route = outcome.kind === "route" ? outcome.route : NO_SWAP
 	return {
 		plan: { fuelAmount, fuelFj: share.fuelFj, quote, minFuelOutput, route, capped: share.capped },
 		error: null,
 	}
+}
+
+/** The bridge refuses gas under its claim minimum on Ethereum (the swap reverts at the router's
+ *  floor), so a quote under it is a deposit that cannot go through — say so before a signature. The
+ *  slice may have been capped at half the amount, far under what the transactions asked for. */
+function quoteShortfall(quote: bigint): string | null {
+	if (!SWAP || quote >= BigInt(SWAP.minFuelFj)) return null
+	return `This amount buys only ≈ ${formatCompact(quote, 18)} FJ of gas, under the ≈ ${formatCompact(BigInt(SWAP.minFuelFj), 18)} FJ minimum a claim needs - send a larger amount.`
 }
 
 /** A private claim forfeits its fee ceilings before any gas reaches the user: a slice whose
@@ -289,8 +297,20 @@ const exitBlocked = computed<string | null>(() => {
 })
 
 /** A deposit that buys no gas is claimed with gas the account already holds — known to be none. */
-const tokenOnlyBlocked = computed<string | null>(() =>
-	!isExit.value && intent.value === "token" && gasHeld.held.value === false ? NO_GAS_FOR_TOKEN_ONLY : null,
+/** Why the token alone cannot be chosen right now — known as soon as the gas verdict lands, whatever
+ *  the choice on screen, so the card itself can be greyed out and say why. */
+const tokenOnlyReason = computed<string | null>(() => (!isExit.value && gasHeld.held.value === false ? NO_GAS_FOR_TOKEN_ONLY : null))
+const tokenOnlyBlocked = computed<string | null>(() => (intent.value === "token" ? tokenOnlyReason.value : null))
+// A gasless account's choice moves off the token alone — at the verdict, and again whenever a new
+// token resets the choice — to the one that can go through; a token that can buy no gas at all
+// leaves the token choice in place, blocked and explained, since nothing else is open.
+watch(
+	[tokenOnlyReason, intent, routeKind],
+	() => {
+		const gasOpen = routeKind.value !== "no-route" && routeKind.value !== "unavailable"
+		if (tokenOnlyReason.value && intent.value === "token" && gasOpen) intent.value = "token+gas"
+	},
+	{ immediate: true },
 )
 
 // The step's verdict decides; the parsed amount is re-read so a reset that unmounts the step (a new
@@ -969,7 +989,7 @@ onBeforeUnmount(() => {
 				:fj-per-tx="fjPerTx"
 				:gas-error="gasError"
 				:blocked-reason="exitBlocked"
-				:token-only-blocked="tokenOnlyBlocked"
+				:token-only-blocked="tokenOnlyReason"
 				@update:valid="amountValid = $event"
 				@update:intent="intent = $event"
 				@update:amount="amount = $event"

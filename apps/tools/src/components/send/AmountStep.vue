@@ -115,6 +115,7 @@ function onUseAll(): void {
 			:exit-only="isExit"
 			:fee-asset="routeKind === 'identity'"
 			:no-route="routeKind === 'no-route' || routeKind === 'unavailable'"
+			:token-reason="isExit ? null : (tokenOnlyBlocked ?? null)"
 			@update:intent="emit('update:intent', $event)"
 		/>
 
