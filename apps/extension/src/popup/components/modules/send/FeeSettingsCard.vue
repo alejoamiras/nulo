@@ -366,7 +366,10 @@ const identityDrifted = (scope) =>
  *  caller's drift guard cannot observe a rejection). Other failures propagate. */
 const ensureLegsSettled = async (scope) => {
 	try {
-		await balancesStore.ensure(scope, { legs: ["gas", "fpc"] })
+		// A dApp locks the method precisely when the balance just moved (a claim made for this
+		// account): a snapshot inside the reader's TTL would show the old figure and hold Confirm
+		// off, so a locked mount reads fresh.
+		await balancesStore.ensure(scope, { legs: ["gas", "fpc"], forceRefresh: Boolean(props.lockedMethod) })
 		return true
 	} catch (e) {
 		if (e instanceof EnsureSuperseded) return false

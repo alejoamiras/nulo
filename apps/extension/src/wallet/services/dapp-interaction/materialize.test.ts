@@ -20,6 +20,8 @@ const CLAIM = {
 	selector: CLAIM_AND_END_SETUP_SELECTOR,
 	type: "private",
 	isStatic: false,
+	hideMsgSender: false,
+	args: ["0xabc", "0x5", "0x7", "0x9"],
 }
 
 const NETWORK: Network = {

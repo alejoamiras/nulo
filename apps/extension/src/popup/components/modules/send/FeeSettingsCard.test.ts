@@ -342,6 +342,8 @@ describe("FeeSettingsCard — a method the dApp locked", () => {
 		expect(w.find('[data-testid="send-fee-locked"]').exists()).toBe(true)
 		expect(w.find('[data-testid="fee-method-selector"]').exists()).toBe(false)
 		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fj" } })
+		// A locked mount reads the balance FRESH: the dApp asked because the balance just moved.
+		expect(mocks.getGasBalances).toHaveBeenCalledWith(expect.anything(), expect.anything(), true)
 		// The lock is the dApp's, not a preference: nothing is persisted for the account.
 		expect((storageBacking[FEE_METHOD_LS_KEY] as Record<string, { type: string }>)[account.address].type).toBe("fpc")
 	})

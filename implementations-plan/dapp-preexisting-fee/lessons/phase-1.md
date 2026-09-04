@@ -62,4 +62,17 @@ Branch `any-erc20-bridge/dapp-self-pay`, on top of `any-erc20-bridge/first-claim
   delegates to `decideOwnGasSource`. Codex confirmed genuine FJWC is unbroken (aztec.js 5.2.0 emits
   exactly that name/address/selector), the lock survives identity/recommit paths, the fingerprint
   keeps self-pay and picker-FJ apart, and `getWalletFeatures` leaks nothing.
-- Codex round 2: PENDING_CODEX_2
+- Codex round 2: one HIGH — the claim was accepted at ANY position and for ANY recipient.
+  aztec.js prepends the fee payload, and the entrypoint runs every call before the claim inside
+  setup: `[arbitraryCall, realClaim]` would run the arbitrary call in setup, non-revertible; and
+  a genuine claim crediting another account would end setup while the victim pays from held Fee
+  Juice. Fixed: the claim must be `calls[0]`, its four arguments must start with the payer,
+  `isStatic === false`, `hideMsgSender !== true`. LOW: the popup drafts a self-pay on its own
+  (it does not call `materializeRequest`), so a popup-level pin was added (`execute/index.test.ts`:
+  drafted with no fee settings, approve executes nothing until the card supplies Fee Juice).
+- Found by the e2e re-run, not by codex: with the self-pay drafted WITHOUT settings, the locked
+  card derives them from the wallet's gas-balance snapshot — cached for five minutes
+  (`GAS_BALANCE_TTL_MS`) — which still held the pre-funding zero, so Confirm never became
+  approvable. A locked mount now asks the store for a FRESH read (`forceRefresh`): a dApp locks the
+  method precisely when the balance just moved.
+- Codex round 3: PENDING_CODEX_3

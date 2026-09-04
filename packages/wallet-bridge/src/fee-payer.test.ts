@@ -21,6 +21,8 @@ const CLAIM = {
 	selector: CLAIM_AND_END_SETUP_SELECTOR,
 	type: "private",
 	isStatic: false,
+	hideMsgSender: false,
+	args: [SENDER, `0x${"0".repeat(63)}5`, `0x${"0".repeat(63)}7`, `0x${"0".repeat(63)}9`],
 }
 
 describe("the pinned Fee Juice claim", () => {
@@ -35,17 +37,22 @@ describe("the pinned Fee Juice claim", () => {
 			(e: unknown) => (/bad_cast|wasm|WebAssembly/i.test(String(e)) ? "no-hasher" : Promise.reject(e)),
 		)
 		if (computed !== "no-hasher") expect(computed).toBe(CLAIM_AND_END_SETUP_SELECTOR)
-		expect(isClaimAndEndSetup(CLAIM)).toBe(true)
+		expect(isClaimAndEndSetup(CLAIM, SENDER)).toBe(true)
 	})
 
-	test("the name is never what identifies it: wrong address, selector, type or a static call are not the claim", () => {
-		expect(isClaimAndEndSetup({ ...CLAIM, to: FPC })).toBe(false)
-		expect(isClaimAndEndSetup({ ...CLAIM, selector: "0x00000001" })).toBe(false)
-		expect(isClaimAndEndSetup({ ...CLAIM, type: "public" })).toBe(false)
-		expect(isClaimAndEndSetup({ ...CLAIM, isStatic: true })).toBe(false)
-		expect(isClaimAndEndSetup({ name: CLAIM_AND_END_SETUP })).toBe(false)
+	test("the name is never what identifies it: wrong address, selector, type, flags, arity or recipient are not the claim", () => {
+		expect(isClaimAndEndSetup({ ...CLAIM, to: FPC }, SENDER)).toBe(false)
+		expect(isClaimAndEndSetup({ ...CLAIM, selector: "0x00000001" }, SENDER)).toBe(false)
+		expect(isClaimAndEndSetup({ ...CLAIM, type: "public" }, SENDER)).toBe(false)
+		expect(isClaimAndEndSetup({ ...CLAIM, isStatic: true }, SENDER)).toBe(false)
+		expect(isClaimAndEndSetup({ ...CLAIM, isStatic: undefined }, SENDER)).toBe(false)
+		expect(isClaimAndEndSetup({ ...CLAIM, hideMsgSender: true }, SENDER)).toBe(false)
+		expect(isClaimAndEndSetup({ ...CLAIM, args: CLAIM.args.slice(0, 3) }, SENDER)).toBe(false)
+		// A genuine claim that credits someone else must not end setup on this account's transaction.
+		expect(isClaimAndEndSetup({ ...CLAIM, args: [FPC, ...CLAIM.args.slice(1)] }, SENDER)).toBe(false)
+		expect(isClaimAndEndSetup({ name: CLAIM_AND_END_SETUP }, SENDER)).toBe(false)
 		// Address-like objects compare by their string form.
-		expect(isClaimAndEndSetup({ ...CLAIM, to: AztecAddress.fromStringUnsafe(FEE_JUICE_CONTRACT) })).toBe(true)
+		expect(isClaimAndEndSetup({ ...CLAIM, to: AztecAddress.fromStringUnsafe(FEE_JUICE_CONTRACT) }, SENDER)).toBe(true)
 	})
 })
 
@@ -61,8 +68,10 @@ describe("classifyFeePayer", () => {
 		expect(classifyFeePayer("", SENDER, [])).toBe("fpc")
 	})
 
-	test("the sender with the Fee Juice contract's setup-ending claim claims Fee Juice in setup", () => {
-		expect(classifyFeePayer(SENDER, SENDER, [{ name: "transfer" }, CLAIM])).toBe("fjwc")
+	test("the sender whose payload LEADS with the Fee Juice contract's own claim claims Fee Juice in setup", () => {
+		expect(classifyFeePayer(SENDER, SENDER, [CLAIM, { name: "transfer" }])).toBe("fjwc")
+		// Anything before the claim would run inside setup: a claim that does not lead is no claim in setup.
+		expect(classifyFeePayer(SENDER, SENDER, [{ name: "transfer" }, CLAIM])).toBe("self-pay")
 	})
 
 	test("the sender with no such claim asks to pay from held Fee Juice - a claim-named call elsewhere included", () => {
@@ -71,6 +80,7 @@ describe("classifyFeePayer", () => {
 		expect(classifyFeePayer(SENDER, SENDER, undefined)).toBe("self-pay")
 		expect(classifyFeePayer(SENDER, SENDER, [{ ...CLAIM, to: FPC }])).toBe("self-pay")
 		expect(classifyFeePayer(SENDER, SENDER, [{ ...CLAIM, type: "public" }])).toBe("self-pay")
+		expect(classifyFeePayer(SENDER, SENDER, [{ ...CLAIM, args: [FPC, ...CLAIM.args.slice(1)] }])).toBe("self-pay")
 	})
 
 	test("compares addresses by their string form", () => {
@@ -83,6 +93,7 @@ describe("isSelfPay", () => {
 	test("reads the payload it is given", () => {
 		expect(isSelfPay({ feePayer: SENDER, calls: [{ name: "claim_public" }] }, SENDER)).toBe(true)
 		expect(isSelfPay({ feePayer: SENDER, calls: [CLAIM, { name: "claim_public" }] }, SENDER)).toBe(false)
+		expect(isSelfPay({ feePayer: SENDER, calls: [{ name: "claim_public" }, CLAIM] }, SENDER)).toBe(true)
 		expect(isSelfPay({ feePayer: FPC, calls: [] }, SENDER)).toBe(false)
 		expect(isSelfPay({ calls: [] }, SENDER)).toBe(false)
 		expect(isSelfPay(undefined, SENDER)).toBe(false)

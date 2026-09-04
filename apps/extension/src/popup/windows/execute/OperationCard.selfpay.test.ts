@@ -9,16 +9,16 @@ import { CLAIM_AND_END_SETUP, CLAIM_AND_END_SETUP_SELECTOR, FEE_JUICE_CONTRACT }
 import { describe, expect, test } from "vitest"
 import OperationCard from "./OperationCard.vue"
 
+const OWNER = "0xowner0000000000000000000000000000000000000000000000000000000cc"
 const CLAIM = {
 	name: CLAIM_AND_END_SETUP,
 	to: FEE_JUICE_CONTRACT,
 	selector: CLAIM_AND_END_SETUP_SELECTOR,
 	type: "private",
 	isStatic: false,
-	args: [],
+	hideMsgSender: false,
+	args: [OWNER, "0x5", "0x7", "0x9"],
 }
-
-const OWNER = "0xowner0000000000000000000000000000000000000000000000000000000cc"
 const FPC = "0xfpc000000000000000000000000000000000000000000000000000000000dd"
 
 function sendTxOp(exec: Record<string, unknown>) {
@@ -28,7 +28,7 @@ function sendTxOp(exec: Record<string, unknown>) {
 		accountAddress: OWNER,
 		account: { name: "Owner", address: OWNER, profileId: "p1", chainId: 0, index: 0, type: 0, visible: true },
 		feeSettings: { paymentMethod: { kind: "fj" } },
-		exec: { calls: [{ name: "transfer", to: FPC, selector: "0x1", args: [] }], ...exec },
+		exec: { calls: [{ name: "transfer", to: FPC, selector: "0x1", args: [] }] as Array<Record<string, unknown>>, ...exec },
 		opts: { from: OWNER },
 	}
 }

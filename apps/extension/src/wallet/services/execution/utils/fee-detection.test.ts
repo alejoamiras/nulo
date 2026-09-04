@@ -2,8 +2,17 @@ import { CLAIM_AND_END_SETUP, CLAIM_AND_END_SETUP_SELECTOR, FEE_JUICE_CONTRACT }
 import { describe, test, expect } from "vitest"
 import { detectEmbeddedFeePayment, isNoFromRequest } from "./fee-detection"
 
+const SENDER = "0x1a228350bbfa130d71aa1105c93e6432bd8c65476bc46ba579d2dc885e2873d1"
 const CLAIM = [
-	{ name: CLAIM_AND_END_SETUP, to: FEE_JUICE_CONTRACT, selector: CLAIM_AND_END_SETUP_SELECTOR, type: "private", isStatic: false },
+	{
+		name: CLAIM_AND_END_SETUP,
+		to: FEE_JUICE_CONTRACT,
+		selector: CLAIM_AND_END_SETUP_SELECTOR,
+		type: "private",
+		isStatic: false,
+		hideMsgSender: false,
+		args: [SENDER, "0x5", "0x7", "0x9"],
+	},
 ]
 
 describe("detectEmbeddedFeePayment", () => {
@@ -13,8 +22,7 @@ describe("detectEmbeddedFeePayment", () => {
 	})
 
 	test('returns "fjwc" when feePayer equals from AND the payload claims Fee Juice in setup', () => {
-		const addr = "0x1a228350bbfa130d71aa1105c93e6432bd8c65476bc46ba579d2dc885e2873d1"
-		expect(detectEmbeddedFeePayment(addr, addr, CLAIM)).toBe("fjwc")
+		expect(detectEmbeddedFeePayment(SENDER, SENDER, CLAIM)).toBe("fjwc")
 	})
 
 	test("a sender payer with no fee call is a requested self-pay, not an embedded payment", () => {
@@ -38,9 +46,8 @@ describe("detectEmbeddedFeePayment", () => {
 	})
 
 	test("matches when feePayer is an object and from is a string with same value", () => {
-		const addr = "0xabc"
-		const feePayer = { toString: () => addr }
-		expect(detectEmbeddedFeePayment(feePayer, addr, CLAIM)).toBe("fjwc")
+		const feePayer = { toString: () => SENDER }
+		expect(detectEmbeddedFeePayment(feePayer, SENDER, CLAIM)).toBe("fjwc")
 	})
 
 	test('treats empty string feePayer as defined (returns "fpc", not undefined)', () => {

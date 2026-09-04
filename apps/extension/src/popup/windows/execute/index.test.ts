@@ -647,3 +647,52 @@ describe("execute window — init sequencing pins", () => {
 		expect(vm.tokenMetadataError.get("0xtok")).toBeDefined()
 	})
 })
+
+// ── A dApp-requested self-pay at the popup boundary: the parent drafts it with NO fee
+//    settings (the locked card supplies them only once a verified balance can pay), and
+//    approve holds until they exist — so an empty, failed or delayed balance read never
+//    leaves Confirm live over nothing. ──
+describe("execute window — a dApp-requested self-pay", () => {
+	const NETWORK = { id: "n1", chainId: 1, name: "TestNet" }
+	const OWNER = "0xabc"
+	const payloadWith = (exec: Record<string, unknown>) => ({
+		session: { profileId: "p1", dappMetadata: { name: "Test DApp", url: "https://example.com" } },
+		params: { operations: [{ kind: "aztec_sendTx", account: "aztec:1:0xabc", exec, opts: { from: OWNER } }] },
+	})
+	const resolvable = () => {
+		accountServiceCtorMock.mockImplementationOnce(function () {
+			return {
+				getAccount: vi.fn(async (_p: string, _c: number, address: string) => ({ address, chainId: 1, name: `acct-${address}` })),
+				connect: vi.fn(),
+				disconnect: vi.fn(),
+			}
+		})
+		networkServiceCtorMock.mockImplementationOnce(function () {
+			return { getNetworks: vi.fn(async () => [NETWORK]), connect: vi.fn(), disconnect: vi.fn() }
+		} as never)
+	}
+
+	test("drafted with no fee settings; approve executes nothing until the card supplies Fee Juice", async () => {
+		resolvable()
+		payloadToLoad = payloadWith({ calls: [{ name: "transfer", to: "0xtok", selector: "0x1", args: [] }], feePayer: OWNER })
+		w = factory()
+		await completeInit()
+		const vm = w.vm as unknown as ExecVm & { handleFeeUpdate: (index: number, value: unknown) => void }
+		expect(vm.initComplete).toBe(true)
+		expect((vm.operations[0] as { feeSettings?: unknown }).feeSettings).toBeUndefined()
+		await vm.approve()
+		expect(approveInteractionMock).not.toHaveBeenCalled()
+		vm.handleFeeUpdate(0, { paymentMethod: { kind: "fj" } })
+		await vm.approve()
+		expect(approveInteractionMock).toHaveBeenCalledTimes(1)
+	})
+
+	test("a payer that carries its payment is still pre-filled embedded", async () => {
+		resolvable()
+		payloadToLoad = payloadWith({ calls: [], feePayer: "0xfpc" })
+		w = factory()
+		await completeInit()
+		const vm = w.vm as unknown as ExecVm
+		expect((vm.operations[0] as { feeSettings?: unknown }).feeSettings).toEqual({ paymentMethod: { kind: "embedded" } })
+	})
+})
