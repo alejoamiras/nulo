@@ -35,7 +35,7 @@ forge build
 forge test --no-match-contract Fork                                  # hermetic (CI)
 SEPOLIA_RPC_URL=… AZTEC_REGISTRY=… forge test --match-contract Fork   # live Sepolia (opt-in; two suites skip without the registry)
 forge build --ast --force && halmos --match-contract '^Formal'       # symbolic proofs (CI)
-forge snapshot --match-test test_gas_ --no-match-contract Fork --check   # .gas-snapshot (CI)
+forge snapshot --match-test test_gas_ --no-match-contract Fork --check --tolerance 2   # .gas-snapshot (CI)
 ```
 
 ## Contracts
@@ -56,12 +56,27 @@ forge snapshot --match-test test_gas_ --no-match-contract Fork --check   # .gas-
   token's first bridge, **before** the Permit2 pull.
 - **`UniswapFuelSwap`** — V4 multi-hop, hookless, WETH↔ETH unwrap restricted to the last boundary.
 - `MintableERC20` / `TestUsdc` — capped-mint test tokens (testnet only, see INFO-1).
+- `InertSwapTarget` — the mainnet swap target, provably inert: the router refuses `address(0)` and binds
+  the target into every witness, so a bridge-only deployment still needs a non-zero one;
+  `script/PoolSetupHelper.sol` — the V4 pool-init + liquidity helper the seeding scripts deploy.
+
+## Scripts (`script/`)
+
+The live generation is deployed by the TypeScript conductor (`packages/bridge-core/scripts/deploy-generation.ts` —
+nonce-pinned factory prediction, journalled, candidate-first; runbook in `.claude/skills/aztec-update/SKILL.md`
+Branch B). The forge scripts are fixtures and one-job helpers:
+
+- `DeployGeneration.s.sol` — the three constructor argument lists in one place; the fork suites' fixture.
+- `SeedTokenPool.s.sol` — gives a fresh mintable test token its TOKEN/WETH pool leg (the conductor runs it per
+  seeded token; `TOKEN=<erc20>` + `PRIVATE_KEY`). Mainnet needs no seeding — the route rides canonical liquidity.
+- `DeployFuelLive.s.sol` — `DeployFuelLive.fork.t.sol`'s fixture; its one live job is re-seeding the
+  token-independent ETH/FeeJuice pool if the fee asset ever moves (reuse flags + `SEED_ETH_FJ=true`).
 
 ## Tests
 
 **140 hermetic forge tests** (`forge test --no-match-contract Fork`), **12 halmos proofs**
-(`FormalRouterTest 8 · FormalFactoryTest 2 · FormalCloneTest 2`, each with a
-forge canary proving its complementary case is observable), **live Sepolia fork suites** (real registry/Inbox/FeeJuicePortal, real
+(`FormalRouterTest 8 · FormalFactoryTest 2 · FormalCloneTest 2`; the guard-shaped ones carry a
+forge canary proving the property fails without the guard), **live Sepolia fork suites** (real registry/Inbox/FeeJuicePortal, real
 Permit2, real V4 pools, live token metadata), and a committed `.gas-snapshot` for the metered
 first-time vs known `bridge()` calls.
 
@@ -108,7 +123,8 @@ reaches only donated residue).
 ## Value-token hard-blockers (MUST clear before any non-testnet deployment)
 
 - **INFO-1 — `MintableERC20` / `TestUsdc` are not value tokens.** `mint` is permissionless (capped
-  per tx) and every holder is treated as having granted canonical Permit2 infinite allowance.
+  per tx), and `MintableERC20` additionally treats every holder as having granted canonical Permit2
+  infinite allowance (`TestUsdc` does not — it is the plain-allowance control).
   Faucet-by-design and **not** a theft path (Permit2 still needs the holder's signature), but a
   severe footgun if copied to a real asset. A value deployment MUST use a token with
   access-controlled mint and no forced allowance.

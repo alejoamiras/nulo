@@ -19,6 +19,7 @@ import type { Address } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import type { L1Ctx } from "../src/flows"
 import { type BridgeBlock, type ManifestToken, type ManifestV2, manifestToken, parseManifestV2 } from "../src/manifest-v2"
+import { PRIVATE_FPC_ADDRESS } from "../src/private-fuel"
 import { walletChainIdOf } from "../src/wallet-chain-id"
 import { type CalibrationSample, calibrateFuelBudgets } from "./calibration"
 import { openDeployJournal, readCandidate, writeCandidateAtomically } from "./deploy-manifest"
@@ -59,7 +60,9 @@ const SEPOLIA = {
 const TOKEN_WETH_TIERS = [{ fee: 3000, tickSpacing: 60 }]
 const ETH_FJ = { fee: 987, tickSpacing: 10 }
 const SLIPPAGE_BPS = 300
-const MIN_FUEL_FJ = "29580299742031535464"
+// 4× the worst PrivateFPC ceiling the validator measured over three live private claims on the
+// testnet fee schedule (7.44 FJ, 2026-09-03); a one-sample run may only ever raise it.
+const MIN_FUEL_FJ = "29773418555864000000"
 const MIN_FJ = "16000000000000000000"
 
 const lc = (v: string) => v.toLowerCase() as Address
@@ -167,6 +170,16 @@ function priorSwapBudgets(): { fjPerTx: string; fjRegister: string } {
 	}
 }
 
+/** The canonical PrivateFPC the manifest advertises: the pinned address with the descriptor's
+ *  version + artifact digest, so a reader can tell which FPC generation the fuel lane pays through. */
+function privateFpcBlock(): NonNullable<ManifestV2["privateFpc"]> {
+	const descriptor = JSON.parse(readFileSync(join(here, "..", "src", "private-fpc-canonical.json"), "utf8")) as {
+		aztecVersion: string
+		artifactSha256: string
+	}
+	return { address: PRIVATE_FPC_ADDRESS, version: descriptor.aztecVersion, artifactDigest: descriptor.artifactSha256 }
+}
+
 function buildCandidate(gen: GenerationRecord, addrs: NodeL1, tokens: ManifestToken[]): ManifestV2 {
 	const budgets = priorSwapBudgets()
 	const bridge: BridgeBlock = {
@@ -200,6 +213,7 @@ function buildCandidate(gen: GenerationRecord, addrs: NodeL1, tokens: ManifestTo
 			...(addrs.feeAssetHandler ? { feeAssetHandler: addrs.feeAssetHandler } : {}),
 			minFj: MIN_FJ,
 		},
+		privateFpc: privateFpcBlock(),
 		privateClaimMode: "salt-v2",
 	}
 }
@@ -271,7 +285,8 @@ async function commandDeploy(): Promise<void> {
 	}
 	const candidate = buildCandidate(gen, addrs, manifestTokens)
 	writeCandidateAtomically(CANDIDATE_PATH, candidate)
-	journal.append({ kind: "candidate-written", path: CANDIDATE_PATH })
+	// Repo-relative: the journal is the generation's record and must not carry a machine's layout.
+	journal.append({ kind: "candidate-written", path: "apps/tools/public/testnet-bridge.candidate.json" })
 	console.log(`\n✅ candidate written to apps/tools/public/testnet-bridge.candidate.json (${mins()})`)
 	console.log("   next: bun scripts/smoke-existing-testnet.ts --config <candidate>, then calibrate, then live-intent promote.")
 }

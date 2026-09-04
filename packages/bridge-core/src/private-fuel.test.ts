@@ -15,8 +15,10 @@ import {
 	DOM_SEP__FPC_BRIDGE_SECRET,
 	PRIVATE_FPC_ADDRESS,
 	PRIVATE_FPC_SALT,
+	PRIVATE_HUB_CLAIM_GAS,
 	deriveBridgeSecret,
 	privateFeeJuicePayment,
+	privateFpcFeeLimit,
 	privateFuelSecretHash,
 	privateMintAndPayFee,
 } from "./private-fuel"
@@ -198,5 +200,21 @@ describe("privateFeeJuicePayment", () => {
 		expect(payload.calls).toHaveLength(1)
 		expect(payload.calls[0].to.toString()).toBe(PRIVATE_FPC_ADDRESS)
 		expect(payload.calls[0].selector.toString()).toBe("0xb596dfae")
+	})
+})
+
+describe("privateFpcFeeLimit", () => {
+	it("is the FPC's getFeeLimit: Σ gasLimit·maxFee over both dimensions, no padding of its own", () => {
+		const fees = { feePerDaGas: 3n, feePerL2Gas: 7n }
+		expect(privateFpcFeeLimit({ daGas: 100, l2Gas: 1_000 }, fees)).toBe(7_300n)
+		expect(privateFpcFeeLimit(PRIVATE_HUB_CLAIM_GAS, fees)).toBe(
+			BigInt(PRIVATE_HUB_CLAIM_GAS.l2Gas) * 7n + BigInt(PRIVATE_HUB_CLAIM_GAS.daGas) * 3n,
+		)
+	})
+
+	it("the hub claim's declared limits stay well under the network's per-tx maximum, or they recreate the unpayable ceiling", () => {
+		// txsLimits.gas on the v5 testnet: daGas 117_668, l2Gas 6_540_000.
+		expect(PRIVATE_HUB_CLAIM_GAS.l2Gas).toBeLessThanOrEqual(6_540_000 / 2)
+		expect(PRIVATE_HUB_CLAIM_GAS.daGas).toBeLessThanOrEqual(117_668)
 	})
 })

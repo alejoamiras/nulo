@@ -18,6 +18,7 @@ import type { Wallet } from "@aztec/aztec.js/wallet"
 import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
+import { computeSiloedPrivateInitializationNullifier } from "@aztec/stdlib/hash"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { tokenBridgeHubArtifact } from "../src/artifacts"
@@ -110,9 +111,12 @@ export async function registerHubToken(
 
 /** The L1→L2 message is not in the tree yet — the ONE failure a claim retries. Every other revert
  *  (a wrong amount, a stale leaf, a paused hub) is final and must surface on the first attempt. */
+/** The deposit's message is not in the L2 tree yet — worded by the public `consume` assert
+ *  (`nonexistent L1-to-L2 message`) or the private witness helper (`No L1 to L2 message found`).
+ *  `No non-nullified …` is the opposite case, an already-consumed message: waiting never helps. */
 function isMessageNotSynced(e: unknown): boolean {
 	const msg = e instanceof Error ? e.message : String(e)
-	return /non-nullified L1 to L2 message|L1 to L2 message.*not found|message not found/i.test(msg)
+	return /nonexistent L1-to-L2 message|l1_to_l2_msg_exists|message not in state|(?<!non-nullified )No L1 to L2 message found/i.test(msg)
 }
 
 /** Claim through the hub on the smoke cadence until the deposit's message syncs. Registration of a
@@ -192,13 +196,23 @@ export async function sponsoredFpcFee(ewallet: unknown) {
  *  `log` fires with "deploying" before the (minutes-long real proof) send and "deployed"
  *  after; a caller that never logged one of the stages passes a filter. */
 export async function deployAccountIfAbsent(p: {
-	node: { getContract: (a: AztecAddress) => Promise<unknown> }
-	manager: { getDeployMethod: () => Promise<{ send: (o: never) => Promise<unknown> }> }
+	node: {
+		getContract: (a: AztecAddress) => Promise<unknown>
+		getNullifierMembershipWitness: (block: "latest", nullifier: Fr) => Promise<unknown>
+	}
+	manager: {
+		getDeployMethod: () => Promise<{ send: (o: never) => Promise<unknown> }>
+		getInstance: () => { initializationHash: Fr }
+	}
 	from: AztecAddress
 	fee: unknown
 	log: (stage: "deploying" | "deployed") => void
 }): Promise<void> {
 	if (await p.node.getContract(p.from)) return
+	// An account deploy publishes no instance, so the node never "serves" it: its initialization
+	// nullifier is the one on-chain trace, and a re-deploy over it is rejected as an existing nullifier.
+	const initNullifier = await computeSiloedPrivateInitializationNullifier(p.from, p.manager.getInstance().initializationHash)
+	if (await p.node.getNullifierMembershipWitness("latest", initNullifier)) return
 	p.log("deploying")
 	const deployMethod = await p.manager.getDeployMethod()
 	await deployMethod.send({ fee: p.fee, from: "NO_FROM" as never } as never)

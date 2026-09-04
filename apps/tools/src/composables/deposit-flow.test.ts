@@ -18,6 +18,7 @@ const storageBacking = new Map<string, string>()
 
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { computeSecretHash } from "@aztec/aztec.js/crypto"
+import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { GasFees } from "@aztec/stdlib/gas"
 import {
@@ -25,6 +26,7 @@ import {
 	deriveBridgeSecret,
 	deriveTokenClaimSecret,
 	type SendDepositRecord,
+	PRIVATE_HUB_CLAIM_GAS,
 	SWAP_BRIDGE_ROUTER_ABI,
 } from "@nulo/bridge-core"
 import { encodeAbiParameters, keccak256, toHex } from "viem"
@@ -46,6 +48,10 @@ const h = vi.hoisted(() => {
 vi.mock("@/contracts/bridge-generation", () => ({
 	FUEL_MIN_FJ: 1000n,
 	SWAP: undefined,
+}))
+
+vi.mock("@/contracts/sponsored-fpc", () => ({
+	getSponsoredFpcInstance: async () => ({ address: AztecAddress.fromStringUnsafe(`0x${"5".padStart(64, "0")}`) }),
 }))
 
 vi.mock("./useBridgeJournal", async (importOriginal) => {
@@ -89,7 +95,7 @@ vi.mock("@nulo/bridge-core", async (importOriginal) => ({
 	},
 }))
 
-import { buildFeeJuiceClaimDep, recoverDepositLeg, resolvePrivateFuelFee } from "./deposit-flow"
+import { buildFeeJuiceClaimDep, recoverDepositLeg, resolveHubClaimSendOpts, resolvePrivateFuelFee } from "./deposit-flow"
 
 const RECIPIENT = "0x1018808f2c17794badb361c02c945582b8198b495a7e8d01154f7eeb7d719c0d"
 
@@ -153,12 +159,6 @@ describe("fee-juice claim builder", () => {
 		expect(pub.resolvedSalt).toBeUndefined()
 		expect(priv.resolvedSalt).toBe("0xenvsalt")
 		expect(priv.resolvedSecret).toBeUndefined()
-	})
-
-	test("(x1.5 contrast) the private fueled path pads exactly 1.5x — GasFees.mul semantics", () => {
-		const padded = GasFees.from({ feePerDaGas: 10n, feePerL2Gas: 20n }).mul(1.5)
-		expect(padded.feePerDaGas).toBe(15n)
-		expect(padded.feePerL2Gas).toBe(30n)
 	})
 
 	test("latch callbacks write journal-first shapes and insufficiency separately", async () => {
@@ -247,7 +247,7 @@ describe("private fuel fee — the sealed salt is authoritative", () => {
 				secret: "0xf",
 				secretHashHex: "0xfh",
 				minOutput: "9",
-				received: "5000",
+				received: "100000000",
 				leafIndex: "8",
 				bridgeSecretSalt,
 			},
@@ -280,6 +280,41 @@ describe("private fuel fee — the sealed salt is authoritative", () => {
 	test("with no envelope opened the journal copy still drives the claim", async () => {
 		await resolvePrivateFuelFee(fueled(TAMPERED_SALT), recipient)
 		expect(paidWith().salt).toBe(TAMPERED_SALT)
+	})
+
+	test("the FPC claim declares explicit gas limits with the raw predicted-worst fees (no padding)", async () => {
+		// Without limits the wallet declares the network's per-tx maximum and the FPC's ceiling
+		// (limits × fees) outgrows any realistic fuel slice.
+		const fee = await resolvePrivateFuelFee(fueled(SEALED_SALT), recipient, SEALED_SALT)
+		const gas = (
+			fee as { fee: { gasSettings: { gasLimits: { daGas: number; l2Gas: number }; maxFeesPerGas: { feePerL2Gas: bigint } } } }
+		).fee.gasSettings
+		expect({ daGas: gas.gasLimits.daGas, l2Gas: gas.gasLimits.l2Gas }).toEqual(PRIVATE_HUB_CLAIM_GAS)
+		expect(gas.maxFeesPerGas.feePerL2Gas).toBe(20n)
+	})
+
+	test("a bridged amount under the committed ceiling stops before the FPC can reject it", async () => {
+		// Mocked fees 10/20 → ceiling = 2_000_000·20 + 100_000·10 = 41_000_000 FJ-wei.
+		const short = fueled(SEALED_SALT)
+		short.fuel = { ...(short.fuel as object), received: "40999999" } as never
+		const fee = await resolvePrivateFuelFee(short, recipient, SEALED_SALT)
+		expect(fee.kind).toBe("stop")
+		expect((fee as { why: string }).why).toMatch(/fee ceiling/)
+		expect(h.calls.some(([n]) => n === "privateMintAndPayFee")).toBe(false)
+	})
+
+	test("the hub ladder pays a first-time token's registration from the sponsor, the claim from the fuel", async () => {
+		const resolved = await resolveHubClaimSendOpts({
+			rec: fueled(SEALED_SALT) as never,
+			recipientAddr: recipient,
+			aztec: {},
+			userOverride: false,
+			sealedSalt: SEALED_SALT,
+		})
+		expect(resolved.kind).toBe("opts")
+		const opts = (resolved as unknown as { opts: { fee: { paymentMethod: unknown }; registerFee: { paymentMethod: unknown } } }).opts
+		expect(opts.fee.paymentMethod).toEqual({ kind: "private-fpc" })
+		expect(opts.registerFee.paymentMethod).toBeInstanceOf(SponsoredFeePaymentMethod)
 	})
 })
 

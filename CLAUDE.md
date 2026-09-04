@@ -6,6 +6,7 @@ Operating rules for AI assistants (and any contributor) working in this reposito
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — process boundaries, message flow, storage versioning, offscreen lifecycle, session model, concurrency, account contract, fee model, test taxonomy.
 - `packages/<name>/README.md` — per-package purpose, file map, scripts, testing, key invariants.
+- **The any-ERC-20 bridge** — [`packages/bridge-core/README.md`](./packages/bridge-core/README.md) (the generation model, file map, the conductor + verifier scripts, the salt/leaf/portal invariants), [`contracts/bridge/evm/README.md`](./contracts/bridge/evm/README.md) (factory / clone / router threat model, the test layers, the halmos counts), [`contracts/bridge/aztec/README.md`](./contracts/bridge/aztec/README.md) (the hub, the split Noir/JS toolchain, TXE), [`apps/tools/README.md`](./apps/tools/README.md) (the tools app + Send wizard). The tools app is a standard dApp over `@aztec/wallet-sdk` — bridge work never touches `apps/extension/**` or the wallet packages (the one cross-cutting exception is a network reset's chainId cascade, which belongs to the `aztec-update` skill, not to bridge work).
 - [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md) — e2e suite layout, parallel-safe agent runner, helper conventions.
 - [`apps/extension/tests/COMPOSITION-TESTS.md`](./apps/extension/tests/COMPOSITION-TESTS.md) — **normative** rules for the `*.composition.test.ts` layer (drive the real service graph in-process against dumb fakes): when to use it, the hard limits (shallow PXE **and** bb-free **and** no simulate/prove), the failure taxonomy. Read before adding a composition test.
 - [`implementations-plan/README.md`](./implementations-plan/README.md) — planning archive, when to add to it, the milestone-vocabulary key.
@@ -17,6 +18,7 @@ Project skills in [`.claude/skills/`](./.claude/skills/) are the source of truth
 | Learned something about… | Update this skill |
 |---|---|
 | Bumping the `@aztec/*` line — rc bumps, protocol forks, testnet resets | [`aztec-update`](./.claude/skills/aztec-update/) |
+| Deploying / re-deploying a bridge **generation** (factory + router + hub), pre-creating tokens, calibrating `fjPerTx`, promoting a candidate manifest, the live canaries | [`aztec-update`](./.claude/skills/aztec-update/) § Branch B — the generation runbook lives there because a network reset is the only time it runs in full |
 | Writing/running E2E — fixtures, flake root-causes, selector rules, the parallel-safe runner | [`e2e-testing`](./.claude/skills/e2e-testing/) |
 | Debugging the extension — popup/offscreen/SW, DevTools-MCP techniques, network/console gotchas | [`chrome-extension-debug`](./.claude/skills/chrome-extension-debug/) |
 | The code-review protocol — a new review lens, a recurring nit class | [`code-review`](./.claude/skills/code-review/) |

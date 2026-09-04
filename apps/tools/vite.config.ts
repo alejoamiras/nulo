@@ -157,7 +157,7 @@ export function makeToolsConfig(target: ToolsTarget): UserConfig {
 			port: TOOLS_DEV_PORT,
 			strictPort: !process.env.TOOLS_DEV_PORT,
 			// bb.js threaded wasm requires cross-origin isolation. Same headers
-			// ship in production via public/_headers (Cloudflare Pages).
+			// ship in production via the generated dist/_headers (Cloudflare Pages).
 			headers: COOP_COEP_HEADERS,
 		},
 		preview: {

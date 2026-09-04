@@ -23,6 +23,7 @@ import {
 import type { Address, Hex, PublicClient } from "viem"
 import { type Ref, ref, shallowRef } from "vue"
 import { rebuildHubTokenInstance, SEND_GENERATION } from "@/contracts/bridge-generation"
+import { assertL1Chain } from "./useSend"
 import type { Direction, MetadataConflict, ResolvedToken, SelectableToken, TokenBalances, TokenWords } from "@/lib/send-model"
 
 export interface TokenSelectionDeps {
@@ -193,7 +194,12 @@ export function useTokenSelection(deps: TokenSelectionDeps): UseTokenSelectionHa
 		if (!pub) throw new Error("Connect your Ethereum wallet to read this token.")
 		const gen = SEND_GENERATION
 		if (!gen) throw new Error("This network has no bridge.")
+		// Metadata read on another chain is another token's (or nobody's): the decimals would size
+		// the amount and the words would derive the L2 token. Nothing resolves off-chain.
+		await assertL1Chain({ publicClient: pub })
 		const resolved = await toResolved(token, await readChain(pub, token, gen.factory))
+		// Bracketed like the registration validation: a switch DURING the reads is caught here.
+		await assertL1Chain({ publicClient: pub })
 		if (stale(mine)) return
 		selected.value = resolved
 		balances.value = {}

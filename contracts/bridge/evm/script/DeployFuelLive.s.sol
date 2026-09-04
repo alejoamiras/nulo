@@ -18,12 +18,12 @@ import {PoolSetupHelper, IWETH} from "./PoolSetupHelper.sol";
 import {GenerationDeployer} from "./DeployGeneration.s.sol";
 
 /**
- * @notice LIVE-Sepolia deployment for the fuel arc: UniswapFuelSwap + SwapBridgeRouter
- *         against the EXISTING AZLO token + canonical Aztec portals, and the two route
- *         pools (AZLO/WETH + our own ETH/FeeJuice tier).
- *
- *         `DeployBridge.s.sol` stays untouched as the fork-fixture (it deploys a FRESH
- *         6-dec token and assumes its price shape); this script owns the live topology.
+ * @notice Sepolia fuel topology: UniswapFuelSwap + SwapBridgeRouter against the EXISTING
+ *         AZLO token + canonical Aztec portals, and the two route pools (AZLO/WETH + our own
+ *         ETH/FeeJuice tier). The fork fixture for `DeployFuelLive.fork.t.sol`; the live
+ *         generation is deployed by the TypeScript conductor, which leaves this script one
+ *         live job — re-seeding the token-independent ETH/FeeJuice pool when the fee asset
+ *         moves (`SEED_AZLO_WETH=false SEED_ETH_FJ=true` with the reuse flags below).
  *
  * Idempotent split (partial-failure recovery): set `FUEL_SWAP_ADDRESS` / `ROUTER_ADDRESS`
  * to reuse already-deployed contracts and re-run seeding only.

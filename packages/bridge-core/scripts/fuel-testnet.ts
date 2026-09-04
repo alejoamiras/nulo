@@ -32,8 +32,10 @@ import { claimViaHub, type HubClaimOutcome } from "../src/hub-l2"
 import {
 	PRIVATE_FPC_ADDRESS,
 	PRIVATE_FPC_SALT,
+	PRIVATE_HUB_CLAIM_GAS,
 	deriveBridgeSecret,
 	privateFeeJuicePayment,
+	privateFpcFeeLimit,
 	privateMintAndPayFee,
 } from "../src/private-fuel"
 import type { SendResult } from "../src/send-flow"
@@ -75,10 +77,11 @@ const UNIT = 10n ** BigInt(TOKEN.decimals)
 const TOTAL = 10n * UNIT
 const FUEL_SLICE = BigInt(process.env.FUEL_SLICE_UNITS ?? (UNIT / 4n).toString())
 const BRIDGED = TOTAL - FUEL_SLICE
-// Headroom on the committed maxFeesPerGas (over predicted-worst) so one attempt survives base-fee
-// drift during its proving window. The FPC ceiling scales with it, but the bridged FJ dwarfs the
-// few-FJ ceiling, so it never strands the budget.
-const RELIABILITY_PAD = Number(process.env.RELIABILITY_PAD ?? 1.5)
+// The committed maxFeesPerGas is predicted-worst with NO padding by default — the app's policy: the
+// FPC credits `amount − max_gas_cost` and refunds nothing, so any pad is Fee Juice the claimer
+// forfeits, and a cap that still falls under the live fee is re-priced on the next attempt.
+const RELIABILITY_PAD = Number(process.env.RELIABILITY_PAD ?? 1)
+const PUBLIC_RUNS = Number(process.env.PUBLIC_RUNS ?? 1)
 const PRIVATE_RUNS = Number(process.env.PRIVATE_RUNS ?? 3)
 const NOFUEL_SPEND_RUNS = Number(process.env.NOFUEL_SPEND_RUNS ?? 0)
 
@@ -89,6 +92,8 @@ interface VariantCtx {
 	l1: L1Ctx
 	node: ReturnType<typeof createNode>
 	hub: ContractBase
+	/** The sponsor's fee: pays a first-time token's own registration ahead of a fuel-paid claim. */
+	sponsoredFee: unknown
 	l2Token: ContractBase
 	from: AztecAddress
 	fjBalance: () => Promise<bigint>
@@ -161,7 +166,11 @@ async function buildVariantClaimFee(
 				bridgeSalt as Fr,
 				new Fr(result.fuelLeafIndex as bigint),
 			),
-			gasSettings: { teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }), maxFeesPerGas: maxFees },
+			gasSettings: {
+				gasLimits: Gas.from(PRIVATE_HUB_CLAIM_GAS),
+				teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
+				maxFeesPerGas: maxFees,
+			},
 		},
 		maxFees,
 	}
@@ -193,7 +202,14 @@ async function settleVariantClaim(
 	for (let i = 0; i < 300; i++) {
 		try {
 			const built = await buildVariantClaimFee(ctx, p.result, p.viaFpc, p.bridgeSalt)
-			const sendOpts = { from: ctx.from, fee: built.fee, wait: { waitForStatus: TxStatus.PROPOSED } }
+			const sendOpts = {
+				from: ctx.from,
+				fee: built.fee,
+				// A fuel fee spends the bridged Fee Juice message once; a first-time token's registration
+				// ahead of the claim is the sponsor's, exactly as the app's ladder does it.
+				...(p.viaFpc ? { registerFee: ctx.sponsoredFee } : {}),
+				wait: { waitForStatus: TxStatus.PROPOSED },
+			}
 			return { outcome: await claimViaHub(ctx.hub, claim, sendOpts), committedMaxFees: built.maxFees }
 		} catch (e) {
 			throwIfFpcBudgetAssert(p.label, p.result.fuelReceived ?? 0n, e instanceof Error ? e.message : String(e))
@@ -204,16 +220,10 @@ async function settleVariantClaim(
 	throw new Error(`${p.label}: self-paying claim never SETTLED within budget`)
 }
 
-/**
- * The FPC ceiling (`getFeeLimit`) from the fee ratio: the actual fee is gasUsed·liveBaseFee and the
- * ceiling is gasLimit·committedMaxFees, with gasLimit ≈ gasUsed (padding ≈ 1, teardown 0). The L2-gas
- * component dominates and the committed da fee is zero, so the L2 ratio is the whole scaling.
- */
-async function deriveFeeCeiling(ctx: VariantCtx, actualFee: bigint, committedMaxFees?: GasFees): Promise<bigint | undefined> {
-	if (!committedMaxFees || actualFee <= 0n) return undefined
-	const live = await ctx.node.getCurrentMinFees()
-	return live.feePerL2Gas > 0n ? (actualFee * committedMaxFees.feePerL2Gas) / live.feePerL2Gas : undefined
-}
+/** The FPC ceiling (`getFeeLimit`) the claim committed to: the explicit limits × the committed
+ *  max fees — exact, since the limits are declared rather than left to the network maximum. */
+const feeCeiling = (committedMaxFees?: GasFees): bigint | undefined =>
+	committedMaxFees ? privateFpcFeeLimit(PRIVATE_HUB_CLAIM_GAS, committedMaxFees) : undefined
 
 /** The fee a landed claim actually paid, in FJ-wei. */
 async function landedClaimFee(ctx: VariantCtx, claimTxHash: string): Promise<bigint> {
@@ -263,7 +273,7 @@ async function runVariant(ctx: VariantCtx, isPrivate: boolean, viaFpc = false): 
 	const fjBefore = await ctx.fjBalance()
 	const { outcome, committedMaxFees } = await settleVariantClaim(ctx, { label, isPrivate, result, viaFpc, bridgeSalt })
 	const actualFee = await landedClaimFee(ctx, outcome.claimTxHash)
-	const ceiling = await deriveFeeCeiling(ctx, actualFee, committedMaxFees)
+	const ceiling = feeCeiling(committedMaxFees)
 	console.log(`${label}: ${outcome.path} settled, fee ${actualFee}${ceiling === undefined ? "" : ` | getFeeLimit ≈ ${ceiling}`}`)
 
 	const tokenBal = await ctx.tokenBalance(isPrivate ? "private" : "public")
@@ -422,6 +432,7 @@ async function buildL2(l1: L1Ctx, mins: () => string): Promise<{ ctx: VariantCtx
 		l1,
 		node,
 		hub,
+		sponsoredFee,
 		l2Token,
 		from,
 		fjBalance: () => read(feeJuice.methods.balance_of_public(from)),
@@ -444,8 +455,9 @@ async function main() {
 	const { ctx, fpc } = await buildL2(l1, mins)
 
 	// The public lane is the sanity check; the private-FPC lane is what the calibration needs, so run
-	// it repeatedly for a stable getFeeLimit across fee conditions.
-	const runs: VariantRun[] = [await runVariant(ctx, false)]
+	// it repeatedly for a stable getFeeLimit across fee conditions. `PUBLIC_RUNS=0` skips the sanity
+	// lane so a token the hub does not know yet meets the PRIVATE first claim (its own registration).
+	const runs: VariantRun[] = PUBLIC_RUNS > 0 ? [await runVariant(ctx, false)] : []
 	for (let i = 0; i < PRIVATE_RUNS; i++) {
 		console.log(`\n--- private-FPC run ${i + 1}/${PRIVATE_RUNS} ---`)
 		runs.push(await runVariant(ctx, true, true))

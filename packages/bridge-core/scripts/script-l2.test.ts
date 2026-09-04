@@ -3,6 +3,7 @@ import type { ContractBase } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
 import type { Wallet } from "@aztec/aztec.js/wallet"
 import { EthAddress } from "@aztec/foundation/eth-address"
+import { computeSiloedPrivateInitializationNullifier } from "@aztec/stdlib/hash"
 import { describe, expect, it } from "vitest"
 import { tokenBridgeHubArtifact } from "../src/artifacts"
 import type { HubClaimParams } from "../src/hub-l2"
@@ -109,6 +110,11 @@ describe("script-l2", () => {
 			isPrivate: false,
 			from: `0x${"22".repeat(32)}`,
 		}
+		// The public path's assert wording, then the private witness helper's — both mean "not yet".
+		const unsynced = [
+			"Assertion failed: Tried to consume nonexistent L1-to-L2 message 'assert(self.l1_to_l2_msg_exists(message_hash, leaf_index), \"…\")'",
+			"No L1 to L2 message found for message hash 0xabc",
+		]
 		let sends = 0
 		const hub = {
 			methods: new Proxy(
@@ -118,7 +124,7 @@ describe("script-l2", () => {
 						simulate: async () => ({ result: claim.token.l2Token }),
 						send: async () => {
 							sends += 1
-							if (sends < 3) throw new Error("No non-nullified L1 to L2 message found for message hash 0xabc")
+							if (sends <= unsynced.length) throw new Error(unsynced[sends - 1])
 							return { receipt: { txHash: `0x${name}` } }
 						},
 					}),
@@ -133,7 +139,11 @@ describe("script-l2", () => {
 		expect(sends).toBe(3)
 	})
 
-	it("claimTokensUntilSynced surfaces a non-sync failure on the first attempt", async () => {
+	it.each([
+		"Assertion failed: Balance too low",
+		// An already-consumed message: waiting never helps, and it must not be mistaken for unsynced.
+		"No non-nullified L1 to L2 message found for message hash 0xabc",
+	])("claimTokensUntilSynced surfaces a non-sync failure on the first attempt: %s", async (wording) => {
 		const hub = {
 			methods: new Proxy(
 				{},
@@ -141,7 +151,7 @@ describe("script-l2", () => {
 					get: () => () => ({
 						simulate: async () => ({ result: `0x${"11".repeat(32)}` }),
 						send: async () => {
-							throw new Error("Assertion failed: Balance too low")
+							throw new Error(wording)
 						},
 					}),
 				},
@@ -171,36 +181,58 @@ describe("script-l2", () => {
 				intervalMs: 0,
 				attempts: 5,
 			}),
-		).rejects.toThrow(/Balance too low/)
+		).rejects.toThrow(wording)
 	})
 
-	it("deployAccountIfAbsent no-ops when the node serves the account, else sends NO_FROM with the fee", async () => {
+	it("deployAccountIfAbsent no-ops when the node serves the account OR its init nullifier exists, else sends NO_FROM with the fee", async () => {
 		const log: string[] = []
-		const served = {
-			node: { getContract: async () => ({}) },
-			manager: {
-				getDeployMethod: async () => {
-					throw new Error("must not deploy")
-				},
+		const from = AztecAddress.fromStringUnsafe(`0x${"1".padStart(64, "0")}`)
+		const instance = { initializationHash: new Fr(7) }
+		const expectedNullifier = await computeSiloedPrivateInitializationNullifier(from, instance.initializationHash)
+		const refusing = {
+			getDeployMethod: async () => {
+				throw new Error("must not deploy")
 			},
-			from: {} as never,
+			getInstance: () => instance,
+		}
+		const served = {
+			node: { getContract: async () => ({}), getNullifierMembershipWitness: async () => undefined },
+			manager: refusing,
+			from,
 			fee: { paymentMethod: "sponsored" },
 			log: (s: string) => log.push(s),
 		}
 		await deployAccountIfAbsent(served as never)
 		expect(log).toEqual([])
 
+		// An account deploy publishes no instance: the node never serves it, only its init nullifier.
+		const witnessed: Fr[] = []
+		const initialized = {
+			...served,
+			node: {
+				getContract: async () => undefined,
+				getNullifierMembershipWitness: async (_b: string, n: Fr) => {
+					witnessed.push(n)
+					return n.equals(expectedNullifier) ? {} : undefined
+				},
+			},
+		}
+		await deployAccountIfAbsent(initialized as never)
+		expect(witnessed).toEqual([expectedNullifier])
+		expect(log).toEqual([])
+
 		let sent: { fee: unknown; from: unknown } | undefined
 		const absent = {
-			node: { getContract: async () => undefined },
+			node: { getContract: async () => undefined, getNullifierMembershipWitness: async () => undefined },
 			manager: {
 				getDeployMethod: async () => ({
 					send: async (o: { fee: unknown; from: unknown }) => {
 						sent = o
 					},
 				}),
+				getInstance: () => instance,
 			},
-			from: {} as never,
+			from,
 			fee: { paymentMethod: "sponsored" },
 			log: (s: string) => log.push(s),
 		}

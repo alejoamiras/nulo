@@ -75,6 +75,21 @@ vi.mock("@/contracts/private-fpc", () => ({
 	getPrivateFpc: async () => ({ instance: { address: { toString: () => "0xprivfpc" } }, artifact: { name: "PrivateFPC" } }),
 }))
 
+// Same treatment for the generation's hub + hub-token instances the connect registers on a live
+// bridge manifest: their re-derivation runs bb.js address math the gutted aztec.js mocks answer with
+// `0x0`, which the instantiation check rightly refuses. The manifest constants stay real.
+vi.mock("@/contracts/bridge-generation", async (importActual) => {
+	const actual = await importActual<typeof import("@/contracts/bridge-generation")>()
+	const instanceAt = (address: string) => ({ address: { toString: () => address, equals: () => false } })
+	return {
+		...actual,
+		rebuildHubInstance: vi.fn(async () => instanceAt(actual.GENERATION?.l2.hub.address ?? "0xhub")),
+		rebuildHubTokenInstance: vi.fn(async (erc20: string) =>
+			instanceAt(actual.MANIFEST_TOKENS.find((t) => t.erc20.toLowerCase() === erc20.toLowerCase())?.l2Token ?? "0xhubtoken"),
+		),
+	}
+})
+
 vi.mock("@aztec/aztec.js/contracts", () => ({
 	Contract: {
 		at: vi.fn(async () => ({

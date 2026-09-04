@@ -1,7 +1,7 @@
 import type { ContractBase } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
 import { describe, expect, it } from "vitest"
-import { claimViaHub, type HubClaimParams, hubExitsPaused, isRegisterRace, preflightHubExit } from "./hub-l2"
+import { claimSendOpts, claimViaHub, type HubClaimParams, hubExitsPaused, isRegisterRace, preflightHubExit } from "./hub-l2"
 import type { JournalTokenBlock } from "./journal"
 
 const token: JournalTokenBlock = {
@@ -30,6 +30,7 @@ interface FakeHubOpts {
 
 function fakeHub(opts: FakeHubOpts) {
 	const calls: string[] = []
+	const sentWith: Array<[string, Record<string, unknown>]> = []
 	let registered = opts.registered
 	const views = (): Record<string, unknown> => ({
 		token_for: registered ? (opts.boundTo ?? token.l2Token) : `0x${"0".repeat(64)}`,
@@ -43,8 +44,9 @@ function fakeHub(opts: FakeHubOpts) {
 				if (name.startsWith("exit_")) calls.push(`simulate:${name}`)
 				return {}
 			},
-			send: async () => {
+			send: async (o?: Record<string, unknown>) => {
 				calls.push(name)
+				sentWith.push([name, o ?? {}])
 				if (name.startsWith("register") && opts.failRegister) {
 					registered = opts.registeredAfterFailure ?? true
 					throw new Error(opts.failRegister)
@@ -55,7 +57,7 @@ function fakeHub(opts: FakeHubOpts) {
 		})
 	}
 	const methods = new Proxy({}, { get: (_t, name: string) => method(name) })
-	return { hub: { methods } as unknown as ContractBase, calls }
+	return { hub: { methods } as unknown as ContractBase, calls, sentWith }
 }
 
 const params = (isPrivate: boolean): HubClaimParams => ({
@@ -85,6 +87,75 @@ describe("hub L2 claims", () => {
 			claimTxHash: "0xclaim_private",
 		})
 		expect(calls).toEqual(["register_and_claim_public", "register_token", "claim_private"])
+	})
+
+	it("a private first claim pays its registration with `registerFee`, the claim with `fee`, and the wallet never sees the seam key", async () => {
+		// A fuel claim's fee consumes the bridged Fee Juice message — one transaction can spend it,
+		// so the registration ahead of it must be paid by something else.
+		const { hub, sentWith } = fakeHub({ registered: false })
+		await claimViaHub(hub, params(true), { from: USER, fee: "fuel", registerFee: "sponsor" })
+		expect(sentWith).toEqual([
+			["register_token", { from: USER, fee: "sponsor" }],
+			["claim_private", { from: USER, fee: "fuel" }],
+		])
+		// Without the seam the registration and the claim share one fee, as before.
+		const plain = fakeHub({ registered: false })
+		await claimViaHub(plain.hub, params(true), { from: USER, fee: "fuel" })
+		expect(plain.sentWith.map(([, o]) => o)).toEqual([
+			{ from: USER, fee: "fuel" },
+			{ from: USER, fee: "fuel" },
+		])
+		// A registered token strips it too.
+		const known = fakeHub({ registered: true })
+		await claimViaHub(known.hub, params(true), { from: USER, fee: "fuel", registerFee: "sponsor" })
+		expect(known.sentWith).toEqual([["claim_private", { from: USER, fee: "fuel" }]])
+		// A simulation of the claim uses the same stripped options — the wallet's option parser
+		// spreads unknown keys straight through.
+		expect(claimSendOpts({ from: USER, fee: "fuel", registerFee: "sponsor", onClaimSend: () => {} })).toEqual({
+			from: USER,
+			fee: "fuel",
+		})
+	})
+
+	it("`onClaimSend` fires once, right before the claim's own transaction, after any registration", async () => {
+		// A caller's "claim attempted" latch must not cover a registration that failed without
+		// spending the fuel — so the stage callback is the claim's, never the registration's.
+		const order: string[] = []
+		const onClaimSend = () => order.push("onClaimSend")
+		const privateFirst = fakeHub({ registered: false })
+		await claimViaHub(privateFirst.hub, params(true), { from: USER, fee: "fuel", registerFee: "sponsor", onClaimSend })
+		expect([...privateFirst.calls.slice(0, 1), ...order, ...privateFirst.calls.slice(1)]).toEqual([
+			"register_token",
+			"onClaimSend",
+			"claim_private",
+		])
+		expect(privateFirst.sentWith.every(([, o]) => !("onClaimSend" in o))).toBe(true)
+
+		for (const [hubOpts, isPrivate, expected] of [
+			[{ registered: false }, false, ["register_and_claim_public"]],
+			[{ registered: true }, true, ["claim_private"]],
+		] as const) {
+			order.length = 0
+			const h = fakeHub(hubOpts)
+			await claimViaHub(h.hub, params(isPrivate), { from: USER, fee: "fuel", onClaimSend })
+			expect(order).toEqual(["onClaimSend"])
+			expect(h.calls).toEqual(expected)
+		}
+
+		// A lost public registration race falls back to the plain claim inside the SAME attempt: once.
+		order.length = 0
+		const raced = fakeHub({ registered: false, failRegister: "No non-nullified L1 to L2 message found for message hash 0xabc" })
+		await claimViaHub(raced.hub, params(false), { from: USER, fee: "fuel", onClaimSend })
+		expect(raced.calls).toEqual(["register_and_claim_public", "claim_public"])
+		expect(order).toEqual(["onClaimSend"])
+
+		// A registration that throws (not a lost race) never reaches the callback.
+		order.length = 0
+		const broken = fakeHub({ registered: false, failRegister: "Assertion failed: word does not decompose" })
+		await expect(
+			claimViaHub(broken.hub, params(true), { from: USER, fee: "fuel", registerFee: "sponsor", onClaimSend }),
+		).rejects.toThrow()
+		expect(order).toEqual([])
 	})
 
 	it("a lost registration race falls back to the plain claim; any other failure propagates", async () => {

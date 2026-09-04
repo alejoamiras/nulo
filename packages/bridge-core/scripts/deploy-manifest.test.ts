@@ -129,7 +129,7 @@ describe("writeCandidateAtomically", () => {
 
 describe("deploy journal", () => {
 	it("appends steps, reads them back in order, and resumes per-token work by key", () => {
-		const path = join(dir, "deploy.jsonl")
+		const path = join(dir, "journal", "deploy.jsonl")
 		const journal = openDeployJournal(path)
 		expect(journal.steps).toEqual([])
 

@@ -25,6 +25,7 @@ import {
 	type SendStage,
 	PERMIT_DEADLINE_SECONDS,
 	PRIVATE_FPC_ADDRESS,
+	claimSendOpts,
 	claimViaHub,
 	deriveBridgeSecret,
 	deriveTokenClaimSecret,
@@ -367,9 +368,11 @@ async function buildHubClaim(
 	return {
 		simulate: () => probeHubClaim(hub, params, fee.opts),
 		send: async () => {
-			fee.onAttempt?.()
 			try {
-				const outcome = await claimViaHub(hub, params, fee.opts)
+				// The attempt latch fires with the CLAIM's own transaction: a private first claim registers
+				// the token first, and a registration that fails spends no fuel and must not read as a
+				// pending fuel claim.
+				const outcome = await claimViaHub(hub, params, { ...fee.opts, onClaimSend: fee.onAttempt })
 				fee.onTxHash?.(outcome.claimTxHash)
 				// The ladder paid this claim from the sponsor and left the bridged Fee Juice for a
 				// transaction of its own; fire it now the claim is away, or the gas never arrives.
@@ -400,7 +403,7 @@ async function probeHubClaim(hub: HubContract, p: ProbeParams, opts: Record<stri
 	const call = p.isPrivate
 		? hub.methods.claim_private(l2Token, to, p.amount, p.claimValue, new Fr(p.leafIndex))
 		: hub.methods.claim_public(l2Token, to, p.amount, p.claimValue, new Fr(p.leafIndex))
-	return call.simulate(opts as never)
+	return call.simulate(claimSendOpts(opts) as never)
 }
 
 interface SendActors {
@@ -475,6 +478,13 @@ async function performSend(plan: SendPlan, d: SendDeps): Promise<string> {
 	const recipient = d.bridgeWallet.selectedAccount.value
 	if (!wallet || !from) return failWith(d.error, "Connect your Ethereum wallet first.")
 	if (!recipient) return failWith(d.error, "Connect your Aztec wallet first.")
+	// The chain before the grant: a token resolved on another chain would otherwise leave a stale
+	// exact-address grant in the Aztec wallet for an L2 token that never existed.
+	try {
+		await assertL1Chain(d.l1)
+	} catch (e) {
+		return failWith(d.error, e instanceof Error ? e.message : String(e))
+	}
 	// BEFORE the Ethereum signature: a declined or superseded grant must cancel with nothing
 	// signed and nothing on chain.
 	if (plan.intent !== "gas") {

@@ -1,7 +1,7 @@
 /**
- * Full L1↔L2 bridge flow orchestrations — the logic the frontend drives and the
- * sandbox smoke proves, in one place. Each takes a connected L1 (viem) context +
- * an L2 bridge Contract + the deployed addresses, runs the cross-chain dance, and
+ * Cross-chain flow orchestrations the frontend drives and the sandbox smoke proves:
+ * the router deposit legs and the L2→L1 withdraw consumption. Each takes a connected
+ * L1 (viem) context + the generation's addresses, runs the cross-chain dance, and
  * reports stage transitions for the loading bar. Framework-agnostic (no Vue).
  *
  * The proven reference for these sequences is `scripts/deploy-sandbox.ts --smoke`.
