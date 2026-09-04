@@ -63,9 +63,9 @@ const ONE_TO_ONE = { probeIn: 1n, probeOut: 1n }
 const fjPerTx = SWAP ? BigInt(SWAP.fjPerTx) : null
 /** A token-only claim spends gas the account already holds; there is no sponsor to fall back on. */
 const NO_GAS_FOR_TOKEN_ONLY =
-	"Your Aztec account holds no gas the bridge can claim with (private Fee Juice at the fee contract), so the token alone could not be claimed. Choose Token + gas to arrive with some."
+	"Your Aztec account holds no gas the bridge can claim with, so the token alone could not be claimed. Choose Token + gas to arrive with some."
 const SHORT_GAS_FOR_TOKEN_ONLY =
-	"Your Aztec account's private gas is under what this claim sets aside at current network fees. Choose Token + gas to arrive with more, or bridge gas first."
+	"Your Aztec account's gas is under what this claim sets aside at current network fees. Choose Token + gas to arrive with more, or bridge gas first."
 const UNREAD_GAS_FOR_TOKEN_ONLY =
 	"Your Aztec account's gas could not be read just now, so the claim was not confirmed. Try again in a moment."
 const UNPRICED_TOKEN_ONLY =
@@ -313,16 +313,27 @@ const exitBlocked = computed<string | null>(() => {
 
 /** What a claim from the account's held gas sets aside for this token, at the last price; null while unpriced. */
 const ownGasCeiling = computed(() => (resolved.value ? gasShare.ownGasCeilingFor(resolved.value.state, isPrivate.value) : null))
+/** Whether the gas the account holds covers what a token-only claim sets aside: its private balance
+ *  at the fee contract, or — on a wallet that routes a dApp-named payer — its public Fee Juice.
+ *  null while a read is open, or while unpriced with something held (only an empty account is
+ *  known without a price). */
+function heldGasCovers(ceiling: bigint | null): boolean | null {
+	const credit = gasHeld.credit.value
+	const pub = gasHeld.publicFeeJuice.value
+	if (credit === null || pub === null) return null
+	const held = credit > 0n || (gasHeld.selfPay.value && pub > 0n)
+	if (ceiling === null) return held ? null : false
+	return credit >= ceiling || (gasHeld.selfPay.value && pub >= ceiling)
+}
+
 /** Why the token alone cannot be chosen right now — known as soon as the gas verdict lands, whatever
- *  the choice on screen, so the card itself can be greyed out and say why. A token-only claim pays
- *  from the private gas the account holds at the fee contract, and only from that. */
+ *  the choice on screen, so the card itself can be greyed out and say why. */
 const tokenOnlyReason = computed<string | null>(() => {
 	if (isExit.value) return null
-	const credit = gasHeld.credit.value
-	if (credit === null) return null
-	if (credit === 0n) return NO_GAS_FOR_TOKEN_ONLY
-	const ceiling = ownGasCeiling.value
-	return ceiling !== null && credit < ceiling ? SHORT_GAS_FOR_TOKEN_ONLY : null
+	if (heldGasCovers(ownGasCeiling.value) !== false) return null
+	// Public Fee Juice on a wallet that cannot route it as payer is no gas the bridge can claim with.
+	const usablePublic = gasHeld.selfPay.value ? (gasHeld.publicFeeJuice.value ?? 0n) : 0n
+	return gasHeld.credit.value === 0n && usablePublic === 0n ? NO_GAS_FOR_TOKEN_ONLY : SHORT_GAS_FOR_TOKEN_ONLY
 })
 const tokenOnlyBlocked = computed<string | null>(() => (intent.value === "token" ? tokenOnlyReason.value : null))
 // A gasless account's choice moves off the token alone — at the verdict, and again whenever a new
@@ -400,17 +411,7 @@ function networkFeeOf(target: SendPlan | ExitPlan): { networkFee: string; networ
 	if (target.direction === "l2-to-l1") {
 		return { networkFee: "your Aztec wallet's own fee, then Ethereum gas to finish", networkFeeNote: null }
 	}
-	if (!target.gas || !SWAP || !fjPerTx) {
-		// A claim from held gas pays through the fee contract, which keeps the whole ceiling it commits to.
-		const ceiling = gasShare.ownGasCeilingFor(target.token.state, target.isPrivate)
-		return {
-			networkFee:
-				ceiling === null
-					? "paid from the private gas you already hold on Aztec"
-					: `≈ ${formatCompact(ceiling, 18)} FJ from the private gas you already hold`,
-			networkFeeNote: "set aside in full from your gas at the fee contract - the claim's fee ceiling, not its exact cost",
-		}
-	}
+	if (!target.gas || !SWAP || !fjPerTx) return heldGasFeeOf(target)
 	if (target.isPrivate) {
 		const ceilings = gasShare.ceilingsFor(target.token.state)
 		return {
@@ -420,6 +421,29 @@ function networkFeeOf(target: SendPlan | ExitPlan): { networkFee: string; networ
 	}
 	const feeFj = fjPerTx + (target.token.state.kind === "registered" ? 0n : BigInt(SWAP.fjRegister))
 	return { networkFee: `≈ ${formatCompact(feeFj, 18)} FJ`, networkFeeNote: "taken from the gas that arrives" }
+}
+
+/** The fee line of a claim paid from held gas. Public Fee Juice pays as the account itself, at the
+ *  wallet's exact fee; the private balance pays through the fee contract, which keeps the whole
+ *  ceiling it commits to — the same preference the claim's own ladder applies. */
+function heldGasFeeOf(target: SendPlan): { networkFee: string; networkFeeNote: string | null } {
+	const ceiling = gasShare.ownGasCeilingFor(target.token.state, target.isPrivate)
+	const credit = gasHeld.credit.value ?? 0n
+	const pub = gasHeld.publicFeeJuice.value ?? 0n
+	const publicPays = ceiling !== null && gasHeld.selfPay.value && pub >= ceiling && !(target.isPrivate && credit >= ceiling)
+	if (publicPays) {
+		return {
+			networkFee: `up to ≈ ${formatCompact(ceiling, 18)} FJ from the Fee Juice you already hold`,
+			networkFeeNote: "paid by your account as its own fee - your wallet shows the exact fee before you confirm",
+		}
+	}
+	return {
+		networkFee:
+			ceiling === null
+				? "paid from the private gas you already hold on Aztec"
+				: `≈ ${formatCompact(ceiling, 18)} FJ from the private gas you already hold`,
+		networkFeeNote: "set aside in full from your gas at the fee contract - the claim's fee ceiling, not its exact cost",
+	}
 }
 
 /** Freeze the plan AND everything stated about it in one object: a review whose account or fee line
@@ -712,10 +736,11 @@ function preflightStandDown(
  *  showed: a figure that only appeared, or grew, after the review opened was never approved. */
 function tokenOnlyStoodDown(target: SendPlan, repriced: boolean, shown: bigint | null): string | undefined {
 	if (!repriced) return UNPRICED_TOKEN_ONLY
-	const credit = gasHeld.credit.value
-	if (credit === null) return UNREAD_GAS_FOR_TOKEN_ONLY
 	const ceiling = gasShare.ownGasCeilingFor(target.token.state, target.isPrivate)
-	if (ceiling === null || credit < ceiling) return SHORT_GAS_FOR_TOKEN_ONLY
+	if (ceiling === null) return SHORT_GAS_FOR_TOKEN_ONLY
+	const covers = heldGasCovers(ceiling)
+	if (covers === null) return UNREAD_GAS_FOR_TOKEN_ONLY
+	if (!covers) return SHORT_GAS_FOR_TOKEN_ONLY
 	if (shown === null) return CEILING_NOW_PRICED_TOKEN_ONLY
 	return ceiling > shown + shown / CEILING_DRIFT_DIVISOR ? CEILING_MOVED_TOKEN_ONLY : undefined
 }

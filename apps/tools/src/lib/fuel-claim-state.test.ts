@@ -5,6 +5,7 @@ import {
 	decideFuelClaim,
 	decideFuelLadder,
 	decideOwnGasCredit,
+	decideOwnGasSource,
 	decidePrivateFuelClaim,
 	decideStandaloneFuelRecovery,
 	isPrivateFuelInsufficiency,
@@ -189,6 +190,41 @@ describe("decideOwnGasCredit (the private balance at the FPC is the only payer a
 
 	it("FAIL-CLOSED: a failed read is unverifiable, never a false 'no gas'", () => {
 		expect(at(null)).toBe("unverifiable")
+	})
+})
+
+describe("decideOwnGasSource (the public balance joins once the wallet routes a dApp-named payer)", () => {
+	const at = (
+		publicFeeJuice: bigint | null,
+		privateFeeJuice: bigint | null,
+		over: Partial<{ preferPrivate: boolean; publicAllowed: boolean }> = {},
+	) => decideOwnGasSource({ publicFeeJuice, privateFeeJuice, ceiling: 100n, preferPrivate: false, publicAllowed: true, ...over })
+
+	it("a public record prefers its public Fee Juice when it covers; a private record its private balance", () => {
+		expect(at(100n, 100n)).toBe("public")
+		expect(at(100n, 100n, { preferPrivate: true })).toBe("private")
+		expect(at(100n, 99n, { preferPrivate: true })).toBe("public")
+		expect(at(99n, 100n)).toBe("private")
+	})
+
+	it("a balance under the ceiling never pays - not even a public one the wallet would estimate lower", () => {
+		expect(at(99n, 0n)).toBe("short")
+		expect(at(0n, 99n)).toBe("short")
+		expect(at(0n, 0n)).toBe("none")
+	})
+
+	it("FAIL-CLOSED: a failed read with no balance known to cover is unverifiable", () => {
+		expect(at(null, 0n)).toBe("unverifiable")
+		expect(at(0n, null)).toBe("unverifiable")
+		expect(at(null, 100n)).toBe("private")
+		expect(at(100n, null)).toBe("public")
+	})
+
+	it("a wallet that cannot route a public payer keeps the private-only rule, whatever the public balance", () => {
+		expect(at(1_000n, 100n, { publicAllowed: false })).toBe("private")
+		expect(at(1_000n, 99n, { publicAllowed: false })).toBe("short")
+		expect(at(1_000n, 0n, { publicAllowed: false })).toBe("none")
+		expect(at(1_000n, null, { publicAllowed: false })).toBe("unverifiable")
 	})
 })
 

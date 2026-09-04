@@ -46,6 +46,10 @@ const h = vi.hoisted(() => {
 		persisted: undefined as unknown,
 		/** The account's private Fee Juice credit at the FPC; undefined = the read fails. */
 		privateFj: undefined as bigint | undefined,
+		/** The account's public Fee Juice; undefined = the read fails. */
+		publicFj: undefined as bigint | undefined,
+		/** Whether the connected wallet routes a dApp-named public payer. */
+		selfPay: false,
 	}
 })
 
@@ -54,12 +58,17 @@ vi.mock("@/contracts/bridge-generation", () => ({
 	SWAP: undefined,
 }))
 
-// The private Fee Juice held at the FPC, as the wallet's utility read answers it; a throw = unreadable.
+// The Fee Juice balances as the wallet's reads answer them; a throw = unreadable.
 vi.mock("./useTokenBalance", () => ({
-	readBalance: async () => {
-		if (h.privateFj === undefined) throw new Error("balance_of failed")
-		return h.privateFj
+	readBalance: async (_aztec: unknown, _contract: unknown, fn: string) => {
+		const balance = fn === "balance_of_public" ? h.publicFj : h.privateFj
+		if (balance === undefined) throw new Error(`${fn} failed`)
+		return balance
 	},
+}))
+vi.mock("@/lib/wallet-features", () => ({
+	DAPP_SELF_PAY_FEATURE: "dapp-self-pay",
+	walletSupports: async () => h.selfPay,
 }))
 vi.mock("@nulo/bridge-core/private-fpc-artifact", () => ({ PrivateFPCContractArtifact: {} }))
 vi.mock("@aztec/aztec.js/contracts", async (importOriginal) => ({
@@ -110,6 +119,10 @@ vi.mock("@nulo/bridge-core", async (importOriginal) => ({
 		h.t("privateFeeJuicePayment", { fpc: fpc.toString() })
 		return { kind: "fpc-credit" }
 	},
+	selfPaidFeeJuicePayment: (payer: { toString(): string }) => {
+		h.t("selfPaidFeeJuicePayment", { payer: payer.toString() })
+		return { kind: "self-paid-fj" }
+	},
 }))
 
 import { buildFeeJuiceClaimDep, recoverDepositLeg, resolveHubClaimSendOpts, resolvePrivateFuelFee } from "./deposit-flow"
@@ -140,6 +153,8 @@ beforeEach(() => {
 	h.calls.length = 0
 	h.updateRecordThrows = false
 	h.receiptStatus = undefined
+	h.publicFj = undefined
+	h.selfPay = false
 	h.persisted = undefined
 	vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000)
 })
@@ -499,7 +514,7 @@ describe("own gas - a claim with no Fee Juice message of its own pays from the p
 		// Registering costs more, in the same one transaction: under its ceiling the claim stops before the FPC refuses.
 		const short = await resolve(noFuel(false), true)
 		expect(short.kind).toBe("stop")
-		expect(short.why).toMatch(/private gas is under/)
+		expect(short.why).toMatch(/gas is under/)
 		h.privateFj = 71_000_000n
 		const registering = await resolve(noFuel(false), true)
 		expect(registering.opts.fee?.gasSettings.gasLimits).toMatchObject(PUBLIC_HUB_REGISTER_CLAIM_GAS)
@@ -522,6 +537,29 @@ describe("own gas - a claim with no Fee Juice message of its own pays from the p
 		expect(await resolve(noFuel(false), false)).toMatchObject({ kind: "stop", why: expect.stringMatching(/No gas/) })
 		h.privateFj = undefined
 		expect(await resolve(noFuel(false), false)).toMatchObject({ kind: "stop", why: expect.stringMatching(/Couldn't check/) })
-		expect(h.calls.some(([n]) => n === "privateFeeJuicePayment")).toBe(false)
+		expect(h.calls.some(([n]) => n === "privateFeeJuicePayment" || n === "selfPaidFeeJuicePayment")).toBe(false)
+	})
+
+	test("on a wallet that routes a dApp-named payer, public Fee Juice covering the ceiling pays a public claim as the account itself, capped at the predicted fees", async () => {
+		h.selfPay = true
+		h.publicFj = 61_000_000n
+		h.privateFj = 0n
+		const r = await resolve(noFuel(false), false)
+		expect(r.opts.fee?.paymentMethod).toEqual({ kind: "self-paid-fj" })
+		expect(r.opts.fee?.gasSettings).toEqual({ maxFeesPerGas: { feePerDaGas: 10n, feePerL2Gas: 20n } })
+		expect(h.calls.find(([n]) => n === "selfPaidFeeJuicePayment")?.[1]).toEqual({ payer: RECIPIENT })
+		// A private record prefers its private balance when that covers; falls back to the public one otherwise.
+		h.privateFj = 41_000_000n
+		expect((await resolve(noFuel(true), false)).opts.fee?.paymentMethod).toEqual({ kind: "fpc-credit" })
+		h.privateFj = 40_999_999n
+		expect((await resolve(noFuel(true), false)).opts.fee?.paymentMethod).toEqual({ kind: "self-paid-fj" })
+	})
+
+	test("a wallet that cannot route a public payer never gets one, whatever the public balance", async () => {
+		h.selfPay = false
+		h.publicFj = 999_000_000n
+		h.privateFj = 0n
+		expect(await resolve(noFuel(false), false)).toMatchObject({ kind: "stop", why: expect.stringMatching(/No gas/) })
+		expect(h.calls.some(([n]) => n === "selfPaidFeeJuicePayment")).toBe(false)
 	})
 })
