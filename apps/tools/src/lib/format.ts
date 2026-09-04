@@ -63,6 +63,26 @@ export function parseAmountStrict(text: string, decimals: number): bigint | null
 }
 
 /**
+ * A quote for reading, not for signing: grouped thousands and the fraction cut to `places` digits,
+ * but never rounded away — a value too small for `places` shows its first significant digits instead
+ * (`0.000000000000005`, not `0.00`), so a tiny amount can never read as nothing.
+ */
+export function formatCompact(value: bigint, decimals: number, places = 2): string {
+	if (value === 0n) return "0"
+	const divisor = 10n ** BigInt(decimals)
+	const whole = value / divisor
+	const fraction = value % divisor
+	if (whole > 0n || fraction === 0n) {
+		const text = formatBigInt(value, decimals, places)
+		// Only a fraction's zeros are padding; a whole number's are digits.
+		return text.includes(".") ? text.replace(/\.?0+$/, "") : text
+	}
+	const digits = fraction.toString().padStart(decimals, "0")
+	const lead = digits.search(/[1-9]/)
+	return `0.${digits.slice(0, Math.max(places, lead + 2)).replace(/0+$/, "")}`
+}
+
+/**
  * Full-precision, ungrouped text for an amount FIELD - `formatBigInt` groups thousands and clamps the
  * fraction, so its output cannot be typed back into an input without changing the number.
  */

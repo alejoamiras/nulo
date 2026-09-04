@@ -4,37 +4,41 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Contract } from "@aztec/aztec.js/contracts"
 import {
 	type RouteOutcome,
+	type SendDepositRecord,
 	type SendJournalRecord,
 	PERMIT_DEADLINE_SECONDS,
 	PORTAL_FACTORY_ABI,
 	assetKindOf,
-	hubAt,
 	isSendRecord,
 	predictPortal,
 } from "@nulo/bridge-core"
 import type { Address, PublicClient } from "viem"
 import { computed, onBeforeUnmount, ref, watch } from "vue"
 import { HUB, HUB_TOKEN_ARTIFACT, SEND_GENERATION, SWAP } from "@/contracts/bridge-generation"
+import { readHubBinding } from "@/contracts/hub-binding"
 
 /** Components */
 import BridgeReceipt, { type ReceiptSnapshot } from "@/components/BridgeReceipt.vue"
 import BridgeStepper from "@/components/BridgeStepper.vue"
-import MintTestToken from "@/components/MintTestToken.vue"
 import AmountStep from "./AmountStep.vue"
-import ReviewStep from "./ReviewStep.vue"
+import MintStrip from "./MintStrip.vue"
+import ReviewStep, { type ReviewEstimate } from "./ReviewStep.vue"
 import TokenStep from "./TokenStep.vue"
 import WizardShell from "./WizardShell.vue"
 
 /** Composables */
+import { useAddressLookup } from "@/composables/useAddressLookup"
 import { useBridgeBackup } from "@/composables/useBridgeBackup"
-import { useBridgeJournal } from "@/composables/useBridgeJournal"
+import { type RecordRuntime, useBridgeJournal } from "@/composables/useBridgeJournal"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
 import { useAddDripToken } from "@/composables/useAddDripToken"
+import { useGasHeld } from "@/composables/useGasHeld"
 import { useGasShare } from "@/composables/useGasShare"
 import { EXIT_TOKEN_NOT_REGISTERED, useHubExit } from "@/composables/useHubExit"
 import { useL1Wallet } from "@/composables/useL1Wallet"
 import { useRouteQuote } from "@/composables/useRouteQuote"
-import { useSend } from "@/composables/useSend"
+import { useRowBalances } from "@/composables/useRowBalances"
+import { previewBlock, useSend } from "@/composables/useSend"
 import { useToast } from "@/composables/useToast"
 import { useTokenCatalog } from "@/composables/useTokenCatalog"
 import { useTokenGrant } from "@/composables/useTokenGrant"
@@ -42,9 +46,11 @@ import { useTokenSelection } from "@/composables/useTokenSelection"
 
 /** Utils */
 import { recordTokenBlock } from "@/lib/asset-label"
-import { formatBigInt, parseAmountStrict, toDecimalString } from "@/lib/format"
+import { stepperPhases } from "@/lib/bridge-steps"
+import { formatBigInt, formatCompact, parseAmountStrict, toDecimalString } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
-import type { Direction, ExitPlan, GasLegPlan, ResolvedToken, SelectableToken, SendIntent, SendPlan } from "@/lib/send-model"
+import { safeDisplay } from "@/lib/token-display"
+import type { AmountToken, Direction, ExitPlan, GasLegPlan, ResolvedToken, SelectableToken, SendIntent, SendPlan } from "@/lib/send-model"
 
 /** The rail's own etas, summed and rounded UP — the review must never undersell how long this takes. */
 const DEPOSIT_TAKES = "usually 3–8 min end to end"
@@ -52,6 +58,11 @@ const EXIT_TAKES = "tens of minutes — Aztec proves exits in epoch batches"
 /** The fee asset needs no swap, so its gas leg carries no pools at all. */
 const NO_SWAP = { path: [], zeroForOnes: [] }
 const ONE_TO_ONE = { probeIn: 1n, probeOut: 1n }
+/** What one Aztec transaction is budgeted at on this network; null where nothing can buy gas. */
+const fjPerTx = SWAP ? BigInt(SWAP.fjPerTx) : null
+/** A token-only claim spends gas the account already holds; there is no sponsor to fall back on. */
+const NO_GAS_FOR_TOKEN_ONLY =
+	"Your Aztec account holds no gas (Fee Juice) yet, so the token could not be claimed. Choose Token + gas to arrive with some."
 
 const l1 = useL1Wallet()
 const bridge = useBridgeWallet()
@@ -61,10 +72,21 @@ const addToken = useAddDripToken()
 const { push: pushToast } = useToast()
 
 const catalog = useTokenCatalog()
+const lookup = useAddressLookup({
+	pub: () => l1.publicClient as unknown as PublicClient,
+	query: catalog.search,
+	known: () => catalog.tokens.value,
+	chainId: () => catalog.chainId,
+})
+const rowBalances = useRowBalances({
+	pub: () => l1.publicClient as unknown as PublicClient,
+	owner: () => l1.address.value ?? undefined,
+	tokens: () => catalog.filtered.value,
+})
 const selection = useTokenSelection({
 	pub: () => l1.publicClient as unknown as PublicClient,
 	l1Account: () => l1.address.value ?? undefined,
-	hub: () => (bridge.wallet.value && HUB ? hubAt(bridge.wallet.value as never, HUB.toString()) : undefined),
+	readBinding: readHubBinding,
 	l2Account: () => bridge.selectedAccount.value ?? undefined,
 	tokenContract: async (l2Token) => {
 		const wallet = bridge.wallet.value
@@ -73,6 +95,7 @@ const selection = useTokenSelection({
 	},
 })
 const grant = useTokenGrant()
+const gasHeld = useGasHeld({ aztec: () => bridge.wallet.value, account: () => bridge.selectedAccount.value ?? undefined })
 const routeQuote = useRouteQuote({ pub: () => l1.publicClient as unknown as PublicClient })
 const gasShare = useGasShare()
 const sendFlow = useSend({ epoch: selection.epoch })
@@ -83,7 +106,7 @@ const step = ref<0 | 1 | 2>(0)
 const intent = ref<SendIntent>("token")
 const amount = ref("")
 const isPrivate = ref(true)
-const pasteError = ref<string | null>(null)
+const addError = ref<string | null>(null)
 const grantState = ref<"idle" | "pending" | "declined" | "busy">("idle")
 /** What the user tapped, held separately from what the chain came back with: the list must keep the
  *  tapped row lit while it resolves, and a failed resolve leaves nothing selected. */
@@ -93,16 +116,28 @@ const portalVerified = ref<"verified" | "absent" | "unknown" | "mismatch">("unkn
 const amountValid = ref(false)
 
 // The takeover machine: ALL wizard gating keys off `stage`, never the flows' busy, which spans the
-// whole send and would make RUN IN BACKGROUND a no-op.
-const stage = ref<"wizard" | "stepper" | "receipt">("wizard")
+// whole send and would make RUN IN BACKGROUND a no-op. `permit` is the stepper before any record
+// exists: the wallet's token permission is the run's first phase and is asked before anything is
+// signed, so it is shown from a record the wizard builds out of the plan.
+const stage = ref<"wizard" | "permit" | "stepper" | "receipt">("wizard")
+const permitRecord = ref<SendDepositRecord | null>(null)
+const PERMIT_RUNTIME: RecordRuntime = { step: "granting" }
 // The engine's foreground stays the single DISPLAY owner, but the wizard ALSO tracks the id of the
 // record IT started: a foreground-derived "my record" is racy while another surface can re-point it.
 const activeId = journal.activeFlowId
 const ownedId = ref<string | null>(null)
 const receiptSnapshot = ref<ReceiptSnapshot | null>(null)
 const receiptL2Token = ref<string | null>(null)
+/** The record RUN IN BACKGROUND handed to the journal; the wizard keeps a line on it until it completes. */
+const backgroundedId = ref<string | null>(null)
+/** What the review promised for it — the strip's subject, whatever the record's own units are. */
+const backgroundedLine = ref<string | null>(null)
+/** A provisional record is rekeyed once its transaction names it; the wizard follows the rekey. */
+const backgroundedCanonical = computed(() => (backgroundedId.value ? journal.canonicalRecordId(backgroundedId.value) : null))
 const reviewSaid = ref<string | null>(null)
 const submitting = ref(false)
+/** Confirm's read of the gas gate: holds the buttons like a submit, but the review stays live. */
+const preflighting = ref(false)
 /** Record ids that existed before THIS submit — see `adoptRunRecord`. */
 let preSubmitIds = new Set<string>()
 
@@ -115,7 +150,7 @@ interface ReviewSnapshot {
 	plan: SendPlan | ExitPlan
 	account: string
 	slippageBps: number | null
-	estimate: { takes: string; networkFee: string }
+	estimate: ReviewEstimate
 }
 const reviewed = ref<ReviewSnapshot | null>(null)
 /** Set when a change under the frozen review sent the user back to the amount step. */
@@ -126,12 +161,34 @@ const resolved = selection.selected
 const ownedRecord = computed(() => (ownedId.value ? journal.records.value.find((r) => r.id === ownedId.value) : undefined))
 const activeRecord = computed(() => (activeId.value ? journal.records.value.find((r) => r.id === activeId.value) : undefined))
 
-const busy = computed(() => submitting.value || sendFlow.busy.value || exitFlow.busy.value)
+const busy = computed(() => preflighting.value || submitting.value || sendFlow.busy.value || exitFlow.busy.value)
 const flowError = computed(() => sendFlow.error.value ?? exitFlow.error.value)
 
 /** ---- amount ------------------------------------------------------------------------------- */
 
 const amountUnits = computed(() => (resolved.value ? parseAmountStrict(amount.value, resolved.value.decimals) : null))
+
+// The strip's labels render a symbol a list or a pasted contract chose; stripped and capped like
+// every other place it lands.
+/** What the amount step renders against: the chain's answer once it lands FOR THE ROW PICKED, the
+ *  row's own symbol and decimals meanwhile, so picking a row moves on at once instead of waiting on
+ *  a read — and a read still standing from the previous row never dresses the new one. */
+const amountToken = computed<AmountToken | null>(() => {
+	const row = picked.value
+	if (!row) return null
+	const read = resolved.value
+	if (read && read.address === row.address) return read
+	return row.decimals >= 0 ? { symbol: safeDisplay(row.symbol), decimals: row.decimals } : null
+})
+
+const tokenLabel = computed(() => (amountToken.value ? safeDisplay(amountToken.value.symbol) : undefined))
+
+/** What the step strip shows for the amount once the user has moved past it. */
+const amountLabel = computed(() => {
+	const token = resolved.value
+	const units = amountUnits.value
+	return token && units !== null && units > 0n ? `${toDecimalString(units, token.decimals)} ${tokenLabel.value}` : undefined
+})
 
 /** ---- the gas leg -------------------------------------------------------------------------- */
 
@@ -204,11 +261,16 @@ const exitBlocked = computed<string | null>(() => {
 	return isExit.value && token && token.state.kind !== "registered" ? EXIT_TOKEN_NOT_REGISTERED : null
 })
 
+/** A deposit that buys no gas is claimed with gas the account already holds — known to be none. */
+const tokenOnlyBlocked = computed<string | null>(() =>
+	!isExit.value && intent.value === "token" && gasHeld.held.value === false ? NO_GAS_FOR_TOKEN_ONLY : null,
+)
+
 // The step's verdict decides; the parsed amount is re-read so a reset that unmounts the step (a new
 // direction, a new send) cannot leave a stale "valid" standing behind it.
 const amountReady = computed(() => {
 	const units = amountUnits.value
-	return exitBlocked.value === null && amountValid.value && units !== null && units > 0n
+	return exitBlocked.value === null && tokenOnlyBlocked.value === null && amountValid.value && units !== null && units > 0n
 })
 
 const completed = computed(() => (amountReady.value ? 2 : tokenChosen.value ? 1 : 0))
@@ -238,29 +300,52 @@ const plan = computed<SendPlan | ExitPlan | null>(() => {
 	}
 })
 
-function networkFeeOf(target: SendPlan | ExitPlan): string {
-	if (target.direction === "l2-to-l1") return "your Aztec wallet's own fee, then Ethereum gas to finish"
-	if (!target.gas) return "paid by the sponsor"
-	return `≈ ${formatBigInt(target.gas.fuelFj, 18)} FJ, out of the gas you are buying`
+/** How many Aztec transactions the gas leg covers: what the slice was sized for, or for a gas-only
+ *  send (which spends the whole amount) what the quote divides into. */
+function txCoveredOf(target: SendPlan | ExitPlan): number | null {
+	if (target.direction !== "l1-to-l2" || !target.gas || !fjPerTx) return null
+	if (target.intent !== "gas") return gasShare.txTarget.value
+	// A quote under one transaction's budget covers nothing worth counting.
+	const whole = Number(target.gas.quote / fjPerTx)
+	return whole >= 1 ? whole : null
+}
+
+/** The claim is the first transaction the bought gas pays for; an unregistered token's claim also
+ *  registers it, which is budgeted on top. */
+function networkFeeOf(target: SendPlan | ExitPlan): { networkFee: string; networkFeeNote: string | null } {
+	if (target.direction === "l2-to-l1") {
+		return { networkFee: "your Aztec wallet's own fee, then Ethereum gas to finish", networkFeeNote: null }
+	}
+	if (!target.gas || !SWAP || !fjPerTx) return { networkFee: "paid from the gas you already hold on Aztec", networkFeeNote: null }
+	const feeFj = fjPerTx + (target.token.state.kind === "registered" ? 0n : BigInt(SWAP.fjRegister))
+	return { networkFee: `≈ ${formatCompact(feeFj, 18)} FJ`, networkFeeNote: "taken from the gas that arrives" }
 }
 
 /** Freeze the plan AND everything stated about it in one object: a review whose account or fee line
  *  can move independently of the plan is the same hazard in a smaller place. */
 function freezeReview(target: SendPlan | ExitPlan): ReviewSnapshot {
 	const gasLeg = target.direction === "l1-to-l2" ? target.gas : undefined
+	const txCovered = txCoveredOf(target)
 	return {
 		plan: target,
 		account: target.direction === "l2-to-l1" ? target.recipientL1 : (bridge.selectedAccount.value ?? ""),
 		slippageBps: gasLeg && SWAP ? SWAP.slippageBps : null,
-		estimate: { takes: target.direction === "l2-to-l1" ? EXIT_TAKES : DEPOSIT_TAKES, networkFee: networkFeeOf(target) },
+		estimate: {
+			takes: target.direction === "l2-to-l1" ? EXIT_TAKES : DEPOSIT_TAKES,
+			...networkFeeOf(target),
+			txCovered,
+		},
 	}
 }
 
 /** The promise the receipt replays back to the user. */
 function promisedLine(target: SendPlan | ExitPlan): string {
-	const token = `${toDecimalString(target.amount, target.token.decimals)} ${target.token.symbol}`
+	const token = `${toDecimalString(target.amount, target.token.decimals)} ${safeDisplay(target.token.symbol)}`
 	const gasLeg = target.direction === "l1-to-l2" ? target.gas : undefined
-	return gasLeg ? `${token} + ≈ ${formatBigInt(gasLeg.fuelFj, 18)} FJ gas` : token
+	if (!gasLeg) return token
+	// The quote, as the review showed it — not the sizing target, which a gas-only send outgrows.
+	const gas = `≈ ${formatCompact(gasLeg.quote, 18)} FJ gas`
+	return target.direction === "l1-to-l2" && target.intent === "gas" ? `${gas} from ${token}` : `${token} + ${gas}`
 }
 
 /** ---- selection --------------------------------------------------------------------------- */
@@ -292,20 +377,41 @@ function resetAmount(): void {
 	grantState.value = "idle"
 }
 
+/** Picking a row is the whole token step: the wizard moves to the amount at once and reads the
+ *  token behind it; a read that fails brings the user back to the row with the reason. */
 async function onSelect(token: SelectableToken): Promise<void> {
 	resetAmount()
-	pasteError.value = null
+	addError.value = null
 	picked.value = token
+	if (token.decimals >= 0) goToStep(1)
 	await reselect(token, direction.value)
 }
 
-async function onPaste(address: string): Promise<void> {
-	pasteError.value = null
+watch(
+	() => selection.error.value,
+	(failure) => {
+		if (failure) goToStep(0)
+	},
+)
+
+/** The looked-up token joins the list under the identity the lookup read, and the search clears so
+ *  the new row is what the user sees selected. */
+async function onAdd(address: string): Promise<void> {
+	addError.value = null
+	const seen = lookup.state.value
+	const identity = seen?.status === "found" && seen.address === address ? seen.identity : undefined
 	try {
-		await onSelect(catalog.addPasted(address))
+		const token = catalog.addPasted(address, identity)
+		catalog.search.value = ""
+		await onSelect(token)
 	} catch (e) {
-		pasteError.value = e instanceof Error ? e.message : "That address could not be added."
+		addError.value = e instanceof Error ? e.message : "That address could not be added."
 	}
+}
+
+function onMinted(): void {
+	void selection.refreshBalances()
+	void rowBalances.refresh()
 }
 
 function onDirection(next: Direction): void {
@@ -376,9 +482,12 @@ function goToStep(index: 0 | 1 | 2): void {
 }
 
 /** A change under the frozen review: the snapshot no longer describes what a confirm would send, so
- *  the wizard stands the review down and says why instead of signing a plan nobody read. */
+ *  the wizard stands the review down and says why instead of signing a plan nobody read. The one
+ *  review that must NOT move is the one being signed; a review built while a backgrounded send is
+ *  still running is a different review and moves like any other. */
 function invalidateReview(): void {
-	if (step.value !== 2 || stage.value !== "wizard" || submitting.value) return
+	const signingThisReview = submitting.value && backgroundedId.value === null
+	if (step.value !== 2 || stage.value !== "wizard" || signingThisReview) return
 	reviewed.value = null
 	step.value = 1
 	reviewStale.value = true
@@ -386,8 +495,23 @@ function invalidateReview(): void {
 
 watch(resolved, () => void verifyPortal())
 watch([step, resolved, direction], quoteRoute)
+// The gas the account holds decides whether a token-only send may go: re-read on the way into the
+// amount step, and a verdict that lands after the review was frozen stands it down like any change.
+watch(step, (index) => {
+	if (index === 1) void gasHeld.refresh()
+})
 watch(
-	[resolved, amount, intent, isPrivate, gas, () => bridge.selectedAccount.value, () => l1.address.value, () => l1.chainId.value],
+	[
+		resolved,
+		amount,
+		intent,
+		isPrivate,
+		gas,
+		tokenOnlyBlocked,
+		() => bridge.selectedAccount.value,
+		() => l1.address.value,
+		() => l1.chainId.value,
+	],
 	invalidateReview,
 )
 // The grant window closes the moment the send starts signing: from there the prompt is the wallet's.
@@ -404,6 +528,7 @@ function adopt(id: string): void {
 	if (ownedId.value && ownedId.value !== id) journal.releaseForeground(ownedId.value)
 	ownedId.value = id
 	journal.claimForeground(id)
+	permitRecord.value = null
 	stage.value = "stepper"
 }
 
@@ -415,16 +540,47 @@ function adopt(id: string): void {
  * would put its receipt — and this review's promise — on someone else's send.
  */
 function adoptRunRecord(): void {
-	if (!submitting.value || ownedId.value || stage.value !== "wizard") return
+	if (!submitting.value || ownedId.value || (stage.value !== "wizard" && stage.value !== "permit")) return
 	const mine = journal.records.value.find((r) => isSendRecord(r) && !preSubmitIds.has(r.id) && journal.isSessionLive(r.id))
-	if (mine) adopt(mine.id)
+	if (mine && mine.id !== backgroundedCanonical.value) adopt(mine.id)
 }
 watch(journal.records, adoptRunRecord)
 
+/**
+ * The gas gate is re-read at CONFIRM, not trusted from when the amount step opened: gas spent
+ * elsewhere meanwhile would strand the deposit at its claim. The read holds the buttons but leaves
+ * the review live, so an account or chain that moves under it stands it down as usual; only a
+ * review still standing when the read returns goes on to sign.
+ */
+async function preflight(snapshot: ReviewSnapshot): Promise<boolean> {
+	const target = snapshot.plan
+	if (target.direction !== "l1-to-l2" || target.intent !== "token") return true
+	preflighting.value = true
+	try {
+		await gasHeld.refresh()
+	} finally {
+		preflighting.value = false
+	}
+	// The SNAPSHOT must be the one still on screen — not merely its plan, which the wizard caches
+	// across an account switch, so a review re-entered under another account would carry the same
+	// plan object and let a confirm nobody gave for it resume.
+	if (reviewed.value !== snapshot || step.value !== 2) return false
+	if (snapshot.account !== (bridge.selectedAccount.value ?? "")) return false
+	if (tokenOnlyBlocked.value !== null) {
+		invalidateReview()
+		return false
+	}
+	return true
+}
+
 async function onConfirm(): Promise<void> {
-	const target = reviewed.value?.plan
-	if (!target || submitting.value || stage.value !== "wizard") return
+	const snapshot = reviewed.value
+	const target = snapshot?.plan
+	if (!snapshot || !target || submitting.value || preflighting.value || stage.value !== "wizard") return
+	if (!(await preflight(snapshot))) return
 	submitting.value = true
+	backgroundedId.value = null
+	backgroundedLine.value = null
 	preSubmitIds = new Set(journal.records.value.map((r) => r.id))
 	reviewSaid.value = promisedLine(target)
 	try {
@@ -434,13 +590,54 @@ async function onConfirm(): Promise<void> {
 	}
 }
 
+/** The record the permission phase is rendered from: the plan, filed the way the send will file it,
+ *  under a provisional id so nothing offers to back it up. The id is fresh per prompt: the rail's
+ *  phase clock is keyed on it, and a reused id would show the previous prompt's elapsed time. */
+function permitRecordOf(target: SendPlan): SendDepositRecord {
+	const now = Date.now()
+	const base = {
+		schema: 3 as const,
+		id: `dep-pending-permit-${now.toString(36)}`,
+		direction: "deposit" as const,
+		isPrivate: target.isPrivate,
+		amount: (target.amount - (target.gas?.fuelAmount ?? 0n)).toString(),
+		createdAt: now,
+		updatedAt: now,
+		chainId: catalog.chainId,
+		portal: target.token.portal.toLowerCase(),
+		bridge: HUB?.toString() ?? "",
+		recipient: bridge.selectedAccount.value ?? "",
+		secretHashHex: "",
+		...(target.token.state.kind !== "registered" ? { registers: true as const } : {}),
+	}
+	return { ...base, intent: target.intent === "gas" ? "token" : target.intent, token: previewBlock(target) } as SendDepositRecord
+}
+
 async function runSend(target: SendPlan): Promise<void> {
-	// The grant is raised inside the send, BEFORE anything is signed; surface it while it is open.
-	grantState.value = grant.isGranted(target.token.l2Token) ? "idle" : "pending"
-	const id = await sendFlow.send(target)
+	// The grant is raised inside the send, BEFORE anything is signed; while it is open the stepper
+	// shows it as the run's first phase.
+	const asking = target.intent !== "gas" && !grant.isGranted(target.token.l2Token)
+	grantState.value = asking ? "pending" : "idle"
+	if (asking) {
+		permitRecord.value = permitRecordOf(target)
+		stage.value = "permit"
+	}
+	let id = ""
+	try {
+		id = await sendFlow.send(target)
+	} finally {
+		// A lane that threw before filing a record (a grant that errored rather than declined) must not
+		// leave the permission screen up with nothing behind it.
+		if (stage.value === "permit") {
+			stage.value = "wizard"
+			permitRecord.value = null
+		}
+	}
 	if (id) {
 		// The run NAMES its record; that id wins over whatever the takeover adopted provisionally.
-		if (ownedId.value !== id) adopt(id)
+		// Unless the user sent it to the background meanwhile: the lane resolves only once the whole
+		// bridge is done, and re-adopting then would drag the finished send back over a new one.
+		if (ownedId.value !== id && backgroundedCanonical.value !== id) adopt(id)
 		return
 	}
 	// Nothing was sent. A grant that never landed is the reason worth naming on the review.
@@ -449,7 +646,7 @@ async function runSend(target: SendPlan): Promise<void> {
 
 async function runExit(target: ExitPlan): Promise<void> {
 	const id = await exitFlow.exit(target)
-	if (id && ownedId.value !== id) adopt(id)
+	if (id && ownedId.value !== id && backgroundedCanonical.value !== id) adopt(id)
 }
 
 /** ---- stepper → receipt -------------------------------------------------------------------- */
@@ -537,9 +734,62 @@ function onNewSend(): void {
 	receiptL2Token.value = null
 	reviewSaid.value = null
 	resetAmount()
+	gasShare.reset()
 	goToStep(0)
 	standDown()
-	void selection.refreshBalances()
+	// The send that just ran may have registered the token: its state, binding and balances are
+	// re-read rather than carried over, so the next send is priced and worded for what it now is.
+	const token = picked.value
+	if (token) void reselect(token, direction.value)
+	void rowBalances.refresh()
+	void gasHeld.refresh()
+}
+
+/** RUN IN BACKGROUND: the send keeps running in the journal; the wizard starts over from the token
+ *  step, with one line above it that follows the send until it lands. */
+function onBackground(): void {
+	backgroundedId.value = ownedId.value
+	backgroundedLine.value = reviewSaid.value
+	// The run is still in flight: neither its record's next write nor its lane resolving may take
+	// the wizard over again (see `adoptRunRecord` / `runSend`).
+	if (ownedId.value) preSubmitIds.add(ownedId.value)
+	onNewSend()
+}
+
+const backgrounded = computed(() => {
+	const id = backgroundedCanonical.value
+	const rec = id ? journal.records.value.find((r) => r.id === id) : undefined
+	return rec && !rec.completedAt ? rec : undefined
+})
+
+// A backgrounded send may register the token while the user prepares the next one from it: once
+// it lands, the token is re-resolved, which also stands down a review priced for a first send.
+watch(
+	() => {
+		const id = backgroundedCanonical.value
+		return id ? journal.records.value.find((r) => r.id === id)?.completedAt : undefined
+	},
+	(done) => {
+		if (done && picked.value) void reselect(picked.value, direction.value)
+	},
+)
+
+// The subject is what the review promised, never the record's own amount: a gas-only record files
+// the token amount it swapped, which is not a Fee Juice figure.
+const backgroundLine = computed(() => {
+	const rec = backgrounded.value
+	if (!rec) return null
+	const subject = backgroundedLine.value ?? "Your send"
+	const active = stepperPhases(rec, journal.runtime.value[rec.id] ?? {}).find((p) => p.state === "active" || p.state === "failed")
+	if (!active) return `${subject} is on its way.`
+	const eta = active.eta ? ` · ${active.eta}` : ""
+	return active.state === "failed"
+		? `${subject} needs your attention — see Activity.`
+		: `${subject} is on its way — ${active.label.toLowerCase()}${eta}`
+})
+
+function showActivity(): void {
+	document.querySelector<HTMLElement>(`[data-testid="${TESTIDS.journal}"]`)?.scrollIntoView?.({ behavior: "smooth", block: "start" })
 }
 
 async function onAddToken(): Promise<void> {
@@ -563,17 +813,21 @@ onBeforeUnmount(() => {
 	sendFlow.dispose()
 	gasShare.dispose()
 	routeQuote.dispose()
+	gasHeld.dispose()
 	grant.dispose()
 	selection.dispose()
+	rowBalances.dispose()
+	lookup.dispose()
 	catalog.dispose()
 })
 </script>
 
 <template>
+	<BridgeStepper v-if="stage === 'permit' && permitRecord" :record="permitRecord" :runtime="PERMIT_RUNTIME" :can-background="false" />
 	<BridgeStepper
-		v-if="stage === 'stepper' && ownedRecord"
+		v-else-if="stage === 'stepper' && ownedRecord"
 		:record="ownedRecord"
-		@background="standDown"
+		@background="onBackground"
 		@backup="backup.exportBridgeWithToast"
 	/>
 	<BridgeReceipt
@@ -584,45 +838,50 @@ onBeforeUnmount(() => {
 		@new-bridge="onNewSend"
 		@add-token="onAddToken"
 	/>
+	<div v-else class="host">
+	<div v-if="backgroundLine" class="strip" role="status" :data-testid="TESTIDS.sendBackgroundStrip">
+		<span class="dot" aria-hidden="true" />
+		<span class="strip-text">{{ backgroundLine }}</span>
+		<button type="button" class="strip-link" :data-testid="TESTIDS.sendBackgroundActivity" @click="showActivity">Activity</button>
+	</div>
 	<WizardShell
-		v-else
 		:direction="direction"
 		:step="step"
 		:completed="completed"
 		:can-switch-direction="!busy"
+		:token-label="tokenLabel"
+		:amount-label="amountLabel"
 		@update:direction="onDirection"
 		@goto="onGoto"
 	>
 		<template #token>
+			<!-- Renders only when the manifest publishes permissionless-mint tokens, so never on mainnet. -->
+			<MintStrip v-if="!isExit" @minted="onMinted" />
 			<TokenStep
 				:direction="direction"
 				:tokens="catalog.filtered.value"
 				:search="catalog.search.value"
-				:provenance="catalog.provenance.value"
 				:loading="catalog.loading.value"
 				:catalog-error="catalog.error.value"
+				:lookup="lookup.state.value"
+				:add-error="addError"
 				:selected="picked"
-				:resolved="resolved"
-				:resolving="selection.loading.value"
 				:selection-error="selection.error.value"
-				:balances="selection.balances.value"
-				:paste-error="pasteError"
+				:row-balances="rowBalances.balances.value"
 				@update:search="catalog.search.value = $event"
 				@select="onSelect"
-				@paste="onPaste"
-				@next="step = 1"
+				@add="onAdd"
 			/>
-			<!-- Renders only for a manifest token the generation publishes as permissionless-mint. -->
-			<MintTestToken :erc20="resolved?.address" @minted="selection.refreshBalances()" />
 		</template>
 		<template #amount>
 			<p v-if="reviewStale" class="stale" aria-live="polite" :data-testid="TESTIDS.sendReviewStale">
 				Something changed while you were on the review, so it was stood down. Check the amount and review again.
 			</p>
 			<AmountStep
-				v-if="resolved"
+				v-if="amountToken"
 				:direction="direction"
-				:token="resolved"
+				:token="amountToken"
+				:resolving="selection.loading.value"
 				:balances="selection.balances.value"
 				:intent="intent"
 				:amount="amount"
@@ -631,8 +890,10 @@ onBeforeUnmount(() => {
 				:route-kind="routeKind"
 				:route-loading="routeQuote.loading.value"
 				:tx-target="gasShare.txTarget.value"
+				:fj-per-tx="fjPerTx"
 				:gas-error="gasError"
 				:blocked-reason="exitBlocked"
+				:token-only-blocked="tokenOnlyBlocked"
 				@update:valid="amountValid = $event"
 				@update:intent="intent = $event"
 				@update:amount="amount = $event"
@@ -660,9 +921,49 @@ onBeforeUnmount(() => {
 			/>
 		</template>
 	</WizardShell>
+	</div>
 </template>
 
 <style scoped>
+.host {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.strip {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 10px 14px;
+	border: 1px solid var(--nulo-outline);
+	background: var(--card-bg);
+}
+
+.dot {
+	flex: none;
+	width: 8px;
+	height: 8px;
+	background: var(--mint);
+}
+
+.strip-text {
+	font: 500 12px/1.4 var(--font-mono);
+	color: var(--txt-primary);
+}
+
+.strip-link {
+	margin-left: auto;
+	padding: 0;
+	background: transparent;
+	border: none;
+	color: var(--nulo-accent);
+	font: 500 12px/1.4 var(--font-mono);
+	text-decoration: underline;
+	text-underline-offset: 3px;
+	cursor: pointer;
+}
+
 .stale {
 	margin: 0 0 12px;
 	padding: 8px 10px;

@@ -30,14 +30,13 @@ type Props = {
 	selected: SelectableToken | null
 	balances: Record<string, bigint>
 	loading: boolean
-	provenance: "fresh" | "cache" | "fallback" | "none"
 	empty: boolean
 }
 
 function list(over: Partial<Props> = {}) {
 	return mount(TokenList, {
 		attachTo: document.body,
-		props: { tokens: TOKENS, selected: null, loading: false, provenance: "fresh", empty: false, ...over },
+		props: { tokens: TOKENS, selected: null, loading: false, empty: false, ...over },
 	})
 }
 
@@ -74,41 +73,40 @@ describe("TokenList", () => {
 		w.unmount()
 	})
 
-	it("↓ moves focus AND the selection to the next row", async () => {
+	it("↓ moves focus to the next row without picking it — picking is the step, browsing is not", async () => {
 		const w = list()
 		const rows = w.findAll(sel(TESTIDS.sendTokenTile))
 		await rows[0]?.trigger("keydown", { key: "ArrowDown" })
 		expect(document.activeElement).toBe(rows[1]?.element)
-		expect(w.emitted("select")?.[0]).toEqual([TOKENS[1]])
+		expect(w.emitted("select")).toBeUndefined()
+		// The tab stop follows focus, so leaving and re-entering the list lands where the user was.
+		expect(w.findAll(sel(TESTIDS.sendTokenTile)).map((t) => t.attributes("tabindex"))).toEqual(["-1", "0", "-1"])
 		w.unmount()
 	})
 
-	it("↑ from the first row wraps to the last, selecting it", async () => {
+	it("↑ from the first row wraps to the last; Enter on the focused row picks it", async () => {
 		const w = list()
 		const rows = w.findAll(sel(TESTIDS.sendTokenTile))
 		await rows[0]?.trigger("keydown", { key: "ArrowUp" })
 		expect(document.activeElement).toBe(rows[2]?.element)
+		expect(w.emitted("select")).toBeUndefined()
+		// A native button: Enter and Space click it.
+		await rows[2]?.trigger("click")
 		expect(w.emitted("select")?.[0]).toEqual([TOKENS[2]])
 		w.unmount()
 	})
 
-	it("says where the list came from", () => {
-		const w = list({ provenance: "cache" })
-		const line = w.find(sel(TESTIDS.sendCatalogProvenance))
-		expect(line.attributes("data-provenance")).toBe("cache")
-		expect(line.text()).toContain("last visit")
+	it("says so while loading, and nothing about where the list came from otherwise", () => {
+		const w = list({ loading: true })
+		expect(w.find(sel(TESTIDS.sendCatalogLoading)).text()).toContain("Loading")
+		const settled = list()
+		expect(settled.find(sel(TESTIDS.sendCatalogLoading)).exists()).toBe(false)
+		expect(settled.text().toLowerCase()).not.toMatch(/manifest|list|pasted|cache/)
 		w.unmount()
+		settled.unmount()
 	})
 
-	it("says so while loading, without claiming a provenance it does not have yet", () => {
-		const w = list({ loading: true, provenance: "none" })
-		const line = w.find(sel(TESTIDS.sendCatalogProvenance))
-		expect(line.attributes("data-loading")).toBeDefined()
-		expect(line.text()).toContain("Loading")
-		w.unmount()
-	})
-
-	it("offers the paste route when the filter matches nothing", () => {
+	it("offers the address route when the filter matches nothing", () => {
 		const w = list({ tokens: [], empty: true })
 		expect(w.find(sel(TESTIDS.sendCatalogEmpty)).text()).toContain("Paste")
 		w.unmount()

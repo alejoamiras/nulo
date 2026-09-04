@@ -222,12 +222,26 @@ interface SendShape {
 	token?: unknown
 	fuel?: unknown
 	registerTxHash?: unknown
+	registers?: unknown
 }
 
 /** Runs the schema-1/2 validator over the shared facts of a schema-3 record. */
 function validateSendSharedFacts(r: SendShape): BridgeJournalRecord {
 	const sharedSchema = r.direction === "withdraw" || r.fuel === undefined ? 1 : 2
-	return validateBackupRecord({ ...r, schema: sharedSchema, intent: undefined, token: undefined, registerTxHash: undefined })
+	return validateBackupRecord({
+		...r,
+		schema: sharedSchema,
+		intent: undefined,
+		token: undefined,
+		registerTxHash: undefined,
+		registers: undefined,
+	})
+}
+
+/** `registers` is a flag or absent, and only a deposit with a token leg can carry it. */
+function validateRegisters(r: SendShape): void {
+	if (r.registers === undefined) return
+	if (r.registers !== true || r.direction !== "deposit" || r.intent === "gas") throw new Error(INVALID)
 }
 
 function validateSendIntent(r: SendShape): "token" | "token+gas" | "gas" {
@@ -250,13 +264,15 @@ function validateSendRecord(rec: unknown): SendJournalRecord {
 	const r = rec as SendShape | null
 	if (!r || typeof r !== "object" || r.schema !== 3) throw new Error(INVALID)
 	if (r.direction === "deposit" && !isOptionalString(r.registerTxHash)) throw new Error(INVALID)
+	validateRegisters(r)
 	const shared = validateSendSharedFacts(r)
 	const intent = validateSendIntent(r)
 	const registerTxHash = r.direction === "deposit" ? (r.registerTxHash as string | undefined) : undefined
 	if (intent === "gas") return { ...(shared as object), schema: 3, intent, registerTxHash } as SendJournalRecord
 	const token = validateTokenBlock(r.token)
 	if (token.portal.toLowerCase() !== shared.portal.toLowerCase()) throw new Error(INVALID)
-	return { ...(shared as object), schema: 3, intent, token, registerTxHash } as SendJournalRecord
+	const registers = r.registers === true ? { registers: true as const } : {}
+	return { ...(shared as object), schema: 3, intent, token, registerTxHash, ...registers } as SendJournalRecord
 }
 
 /** Any record shape the journal can hold; schema 3 dispatches to its own validator. */

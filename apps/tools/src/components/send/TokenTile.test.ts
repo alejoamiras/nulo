@@ -78,18 +78,21 @@ describe("TokenTile", () => {
 		w.unmount()
 	})
 
-	it("shows the checksummed address under the symbol for anything the app did not publish", () => {
+	it("a listed token shows its name AND its trimmed address on the row — the one line a look-alike cannot fake", () => {
 		const w = tile({ token: token({ source: "list" }) })
 		const row = w.find(sel(TESTIDS.sendTokenAddress))
-		// EIP-55 casing, and the FULL value on the title so the trimmed form is never the only copy.
-		expect(row.attributes("title")).toBe("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
 		expect(row.text()).toBe("0xA0b869…06eB48")
+		expect(row.attributes("data-added")).toBeUndefined()
+		expect(w.find(sel(TESTIDS.sendTokenTile)).text()).toContain("USD Coin")
+		// EIP-55 casing in full on the row's title, so the trimmed form is never the only copy.
+		expect(w.find(sel(TESTIDS.sendTokenTile)).attributes("title")).toBe("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
 		w.unmount()
 	})
 
-	it("shows no address for a manifest token — the app published that row itself", () => {
+	it("shows no address for a manifest token, on the row or on hover — the app published that row itself", () => {
 		const w = tile()
 		expect(w.find(sel(TESTIDS.sendTokenAddress)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.sendTokenTile)).attributes("title")).toBeUndefined()
 		w.unmount()
 	})
 
@@ -104,6 +107,21 @@ describe("TokenTile", () => {
 		w.unmount()
 	})
 
+	it("a row the user added shows its trimmed address and says so, and no name line", () => {
+		const w = tile({ token: token({ source: "pasted", symbol: "PAXG", name: "Paxos Gold", logoKey: "11155111:0xfeed" }) })
+		const address = w.find(sel(TESTIDS.sendTokenAddress))
+		expect(address.attributes("data-added")).toBeDefined()
+		expect(address.text()).toBe("0xA0b869…06eB48 · added by you")
+		expect(w.text()).not.toContain("Paxos Gold")
+		w.unmount()
+	})
+
+	it("names no provenance on any row — the address line is the only tell", () => {
+		const w = tile({ token: token({ source: "list" }) })
+		expect(w.text().toLowerCase()).not.toMatch(/\blist\b|manifest|pasted/)
+		w.unmount()
+	})
+
 	it("shows no balance for a pasted token whose decimals are not read yet", () => {
 		const w = tile({
 			token: token({ source: "pasted", symbol: "", name: "", decimals: -1, logoKey: "11155111:0xfeed" }),
@@ -111,7 +129,6 @@ describe("TokenTile", () => {
 		})
 		expect(w.find(sel(TESTIDS.sendTokenTile)).text()).not.toContain("5")
 		expect(w.find(sel(TESTIDS.sendTokenMonogram)).text()).toBe("??")
-		expect(w.find(sel(TESTIDS.sendTokenSource)).attributes("data-source")).toBe("pasted")
 		w.unmount()
 	})
 })

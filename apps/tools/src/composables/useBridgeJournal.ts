@@ -84,6 +84,7 @@ export type Attention =
 /** The live narration of what is happening RIGHT NOW for a record - engine steps plus the flows'
  *  L1/L2 legs. Ephemeral display state only - never persisted, never an input to completion logic. */
 export type BridgeStep =
+	| "granting"
 	| "sealing"
 	| "signing"
 	| "approving"
@@ -107,6 +108,8 @@ export interface RecordRuntime {
 	 *  rest of the run. A sufficient allowance never sets it (the step is simply not rendered), and it
 	 *  is absent after a reload - a retry re-checks the allowance idempotently (plan S15). */
 	approveOutcome?: "done"
+	/** The wallet's token permission was raised and granted in THIS run — display-only, like `approveOutcome`. */
+	grantOutcome?: "done"
 	/** Withdraw proving countdown inputs. */
 	provenBlock?: number
 	targetBlock?: number
@@ -352,6 +355,21 @@ export function currentRecord(id: string): BridgeJournalRecord | undefined {
 	return loadJournal(deps.kv).find((r) => r.id === id)
 }
 
+/** Every rekey this tab performed, old id → new id, so a surface holding a provisional id can keep
+ *  following its record after the transaction names it. Session-scoped, like `sessionLive`. */
+const rekeyed = ref<Record<string, string>>({})
+
+/** The id a record is filed under now, following every rekey since `id`; `id` itself when none. */
+export function canonicalRecordId(id: string): string {
+	let current = id
+	const seen = new Set<string>()
+	while (rekeyed.value[current] && !seen.has(current)) {
+		seen.add(current)
+		current = rekeyed.value[current] as string
+	}
+	return current
+}
+
 /** Provisional-record upgrade: replace the pending row under the id its own transaction gave it.
  *  Foreground ownership follows the rekey, or the stepper would lose its record mid-watch, and so
  *  does the runtime - the narration and the approve outcome describe the same attempt. */
@@ -359,6 +377,7 @@ export function rekeyJournalRecord(oldId: string, next: BridgeJournalRecord): vo
 	rekeyRecord(deps.kv, oldId, next)
 	if (sessionLive.delete(oldId)) sessionLive.add(next.id)
 	if (activeFlowId.value === oldId) activeFlowId.value = next.id
+	rekeyed.value = { ...rekeyed.value, [oldId]: next.id }
 	const { [oldId]: carried, ...rest } = runtime.value
 	if (carried) runtime.value = { ...rest, [next.id]: { ...carried, ...rest[next.id] } }
 	reload()
@@ -650,9 +669,14 @@ export function setRecordStep(id: string, step?: BridgeStep, stepDetail?: string
 	setStep(id, step, stepDetail)
 }
 
-/** Display-only APPROVE outcome (plan S15) - written when a real approval tx lands. */
+/** Display-only APPROVE outcome - written when a real approval tx lands. */
 export function markApproveOutcome(id: string, outcome: "done"): void {
 	setRuntime(id, { approveOutcome: outcome })
+}
+
+/** Display-only PERMISSION outcome - written when this run raised the wallet's token grant. */
+export function markGrantOutcome(id: string): void {
+	setRuntime(id, { grantOutcome: "done" })
 }
 
 /** Surface a flow-leg failure on the record (the stepper/card render it; the engine is untouched). */
@@ -1445,6 +1469,7 @@ export function useBridgeJournal() {
 		runtime,
 		lastCompleted,
 		activeFlowId,
+		canonicalRecordId,
 		claimForeground,
 		releaseForeground,
 		addRecord,

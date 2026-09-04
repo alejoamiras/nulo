@@ -2,9 +2,23 @@ import { mount } from "@vue/test-utils"
 import { readFileSync, readdirSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { describe, expect, it } from "vitest"
-import type { Component } from "vue"
+import { describe, expect, it, vi } from "vitest"
+import { type Component, ref } from "vue"
+import type { LookupState } from "@/composables/useAddressLookup"
 import type { ExitPlan, GasLegPlan, ResolvedToken, SendPlan, SelectableToken } from "@/lib/send-model"
+
+// The mint strip is the one step component that reaches a wallet and the manifest; both are stood
+// in for so its buttons render and the sweep can reach them.
+vi.mock("@/composables/useL1Wallet", () => ({
+	useL1Wallet: () => ({ address: ref("0xef4d9e1f4e9e2dd9e747b53f4be3d04bfa935f2d"), publicClient: {}, ensureWalletClient: () => null }),
+}))
+vi.mock("@/contracts/bridge-generation", () => ({
+	MANIFEST_TOKENS: [
+		{ erc20: "0x70e0ba845a1a0f2da3359c97e0285013525ffc49", decimals: 6, displaySymbol: "USDC", source: "permissionless-mint" },
+	],
+	FEE_JUICE: { asset: "0x000000000000000000000000000000000000fee0" },
+	SWAP: undefined,
+}))
 
 /**
  * E2E selects only by `data-testid`, so an interactive element without one is unreachable to the
@@ -17,7 +31,7 @@ const INTERACTIVE = 'button, input, select, textarea, [role="tab"], [role="optio
 import AmountStep from "./AmountStep.vue"
 import ChoiceCards from "./ChoiceCards.vue"
 import GasBreakdown from "./GasBreakdown.vue"
-import PasteAddress from "./PasteAddress.vue"
+import MintStrip from "./MintStrip.vue"
 import ReviewDetails from "./ReviewDetails.vue"
 import ReviewStep from "./ReviewStep.vue"
 import SpriteSheet from "./SpriteSheet.vue"
@@ -57,6 +71,23 @@ const GAS: GasLegPlan = {
 const PLAN: SendPlan = { direction: "l1-to-l2", intent: "token+gas", token: RESOLVED, amount: 5_000_000n, isPrivate: true, gas: GAS }
 const EXIT: ExitPlan = { direction: "l2-to-l1", token: RESOLVED, amount: 5_000_000n, isPrivate: true, recipientL1: TOKEN.address }
 const BALANCES = { l1: 9_000_000n, l2Public: 1n, l2Private: 2n }
+const LOOKUP: LookupState = {
+	status: "found",
+	address: "0x779877a7b0d9e8603169ddbd7836e478b4624789",
+	logoKey: "11155111:0x779877a7b0d9e8603169ddbd7836e478b4624789",
+	identity: { symbol: "LINK", name: "ChainLink Token", decimals: 18 },
+}
+const TOKEN_STEP = {
+	direction: "l1-to-l2",
+	tokens: [TOKEN],
+	search: "",
+	loading: false,
+	catalogError: null,
+	lookup: null,
+	addError: null,
+	selected: TOKEN,
+	selectionError: null,
+}
 const REVIEW = {
 	plan: PLAN,
 	portalVerified: "verified",
@@ -80,22 +111,45 @@ const CASES: Array<[string, Component, Record<string, unknown>]> = [
 			routeKind: "route",
 			routeLoading: false,
 			txTarget: 3,
+			fjPerTx: 100_000_000_000_000_000n,
 			gasError: null,
 		},
 	],
 	["ChoiceCards", ChoiceCards, { intent: "token", exitOnly: false, feeAsset: false, noRoute: false }],
-	["GasBreakdown", GasBreakdown, { token: RESOLVED, amount: 5_000_000n, gas: GAS, txTarget: 3, loading: false, error: null }],
-	["PasteAddress", PasteAddress, { error: null }],
+	[
+		"GasBreakdown",
+		GasBreakdown,
+		{ token: RESOLVED, amount: 5_000_000n, intent: "token+gas", gas: GAS, txTarget: 3, fjPerTx: 1n, loading: false, error: null },
+	],
+	[
+		"GasBreakdown (gas)",
+		GasBreakdown,
+		{ token: RESOLVED, amount: 5_000_000n, intent: "gas", gas: GAS, txTarget: 3, fjPerTx: 1n, loading: false, error: null },
+	],
+	["MintStrip", MintStrip, {}],
 	["ReviewDetails", ReviewDetails, REVIEW],
 	[
 		"ReviewStep",
 		ReviewStep,
-		{ ...REVIEW, estimate: { takes: "3-8 min", networkFee: "sponsored" }, grant: "idle", busy: false, error: null },
+		{
+			...REVIEW,
+			estimate: { takes: "3-8 min", networkFee: "own gas", networkFeeNote: null, txCovered: 3 },
+			grant: "idle",
+			busy: false,
+			error: null,
+		},
 	],
 	[
 		"ReviewStep (exit)",
 		ReviewStep,
-		{ ...REVIEW, plan: EXIT, estimate: { takes: "long", networkFee: "own" }, grant: "declined", busy: false, error: "nope" },
+		{
+			...REVIEW,
+			plan: EXIT,
+			estimate: { takes: "long", networkFee: "own", networkFeeNote: null, txCovered: null },
+			grant: "declined",
+			busy: false,
+			error: "nope",
+		},
 	],
 	["SpriteSheet", SpriteSheet, {}],
 	[
@@ -111,29 +165,9 @@ const CASES: Array<[string, Component, Record<string, unknown>]> = [
 			completed: 2,
 		},
 	],
-	[
-		"TokenList",
-		TokenList,
-		{ tokens: [TOKEN], selected: TOKEN, balances: { [TOKEN.logoKey]: 1n }, loading: false, provenance: "fresh", empty: false },
-	],
-	[
-		"TokenStep",
-		TokenStep,
-		{
-			direction: "l1-to-l2",
-			tokens: [TOKEN],
-			search: "",
-			provenance: "fresh",
-			loading: false,
-			catalogError: null,
-			selected: TOKEN,
-			resolved: RESOLVED,
-			resolving: false,
-			selectionError: null,
-			balances: BALANCES,
-			pasteError: null,
-		},
-	],
+	["TokenList", TokenList, { tokens: [TOKEN], selected: TOKEN, balances: { [TOKEN.logoKey]: 1n }, loading: false, empty: false }],
+	["TokenStep", TokenStep, TOKEN_STEP],
+	["TokenStep (lookup)", TokenStep, { ...TOKEN_STEP, lookup: LOOKUP }],
 	["TokenTile", TokenTile, { token: TOKEN, selected: false }],
 	["WizardShell", WizardShell, { direction: "l1-to-l2", step: 0, completed: 2, canSwitchDirection: true }],
 ]
@@ -156,8 +190,9 @@ describe("send-step testid coverage", () => {
 	it.each(CASES)("%s gives every interactive element a data-testid", async (name, component, props) => {
 		const { missing, seen } = await sweep(mount(component, { props, attachTo: document.body }))
 		expect(missing).toEqual([])
-		// A selector that stops matching would otherwise pass silently; only the sprite sheet is inert.
-		expect(seen > 0 || name === "SpriteSheet").toBe(true)
+		// A selector that stops matching would otherwise pass silently; only the sprite sheet and the
+		// gas-only card (two read-only lines) are inert.
+		expect(seen > 0 || name === "SpriteSheet" || name === "GasBreakdown (gas)").toBe(true)
 	})
 
 	it("the orchestrators own no bare controls of their own", () => {

@@ -416,3 +416,62 @@ describe("isTerminalAttention", () => {
 		}
 	})
 })
+
+describe("stepperPhases - the send's permission and registration phases", () => {
+	const token = {
+		erc20: "0x00000000000000000000000000000000000e2c20",
+		portal: "0x00000000000000000000000000000000000000a1",
+		l2Token: `0x${"11".repeat(32)}`,
+		nameWord: `0x00${"4e".repeat(31)}`,
+		symbolWord: `0x00${"54".repeat(31)}`,
+		decimals: 18,
+		displaySymbol: "NTT",
+	}
+	function send(over: Partial<SendDepositRecord> = {}): SendDepositRecord {
+		return {
+			schema: 3,
+			id: "send-1",
+			direction: "deposit",
+			intent: "token",
+			token,
+			isPrivate: false,
+			amount: "1000",
+			createdAt: 1,
+			updatedAt: 1,
+			...DEPLOY,
+			recipient: "0xrecipient",
+			secretHashHex: "0x1",
+			...over,
+		} as SendDepositRecord
+	}
+	const keys = (rec: BridgeJournalRecord, rt: RecordRuntime = {}) => stepperPhases(rec, rt).map((p) => p.key)
+
+	it("PERMISSION renders first, active while the wallet is being asked, in the token's own words", () => {
+		const phases = stepperPhases(send(), { step: "granting" })
+		expect(phases[0]).toMatchObject({
+			key: "permit",
+			label: "PERMISSION",
+			state: "active",
+			detail: "Allow reading NTT state in your Nulo wallet.",
+		})
+		expect(sendActive(send(), { step: "granting" })).toBe("permit")
+	})
+
+	it("PERMISSION stays on the rail, done, once this run's grant went through; a run that asked for none has no such phase", () => {
+		expect(states(send(), { grantOutcome: "done", step: "signing" })).toMatchObject({ permit: "done", sign: "active" })
+		expect(keys(send(), { step: "signing" })).not.toContain("permit")
+	})
+
+	it("a private send that registers the token shows REGISTER ahead of the claim, before any registration tx exists", () => {
+		const rec = send({ isPrivate: true, registers: true })
+		expect(keys(rec)).toEqual(["seal", "sign", "deposit", "sync", "register", "claim", "confirm"])
+		expect(keys(send({ isPrivate: true }))).not.toContain("register")
+	})
+
+	it("a public send that registers the token does it inside the claim: one phase, labelled for both", () => {
+		const rec = send({ registers: true })
+		expect(keys(rec)).not.toContain("register")
+		expect(stepperPhases(rec, {}).find((p) => p.key === "claim")?.label).toBe("REGISTER + CLAIM")
+		expect(stepperPhases(send(), {}).find((p) => p.key === "claim")?.label).toBe("CLAIM")
+	})
+})

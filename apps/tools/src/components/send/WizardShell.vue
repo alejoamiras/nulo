@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, watch } from "vue"
 
 /** Components */
-import StepStrip from "./StepStrip.vue"
+import StepStrip, { type Step } from "./StepStrip.vue"
 
 /** Utils */
 import type { Direction } from "@/lib/send-model"
@@ -14,14 +14,23 @@ const props = defineProps<{
 	completed: number
 	/** False while a send is in flight: switching direction mid-flight would strand the plan on screen. */
 	canSwitchDirection: boolean
+	/** The chosen token and amount, shown on their steps once the user has moved past them. */
+	tokenLabel?: string
+	amountLabel?: string
 }>()
 const emit = defineEmits<{ "update:direction": [Direction]; goto: [number] }>()
 
-const STEPS = [
-	{ key: "token", label: "Token" },
-	{ key: "amount", label: "Amount" },
+const CAPTION = {
+	token: "what are you sending?",
+	amount: "how much, and what should arrive?",
+	review: "check it, then sign.",
+} as const
+
+const steps = computed<Step[]>(() => [
+	{ key: "token", label: "Token", value: props.tokenLabel },
+	{ key: "amount", label: "Amount", value: props.amountLabel },
 	{ key: "review", label: "Review" },
-] as const
+])
 
 const DIRECTIONS = [
 	{ value: "l1-to-l2", label: "Ethereum → Aztec", testid: TESTIDS.sendDirectionDeposit },
@@ -31,7 +40,10 @@ const DIRECTIONS = [
 const segment = ref<HTMLElement | null>(null)
 const panel = ref<HTMLElement | null>(null)
 
-const announcement = computed(() => `Step ${props.step + 1} of ${STEPS.length}: ${STEPS[props.step]?.label ?? ""}`)
+const caption = computed(() => {
+	const key = (["token", "amount", "review"] as const)[props.step]
+	return `Step ${props.step + 1} of ${steps.value.length} — ${CAPTION[key]}`
+})
 
 // A step swap replaces the whole panel, which would otherwise drop focus to <body> and make the
 // keyboard user Tab back in from the top of the page. Not on mount: arriving is not a step change.
@@ -89,9 +101,10 @@ function onArrow(delta: number): void {
 			</button>
 		</div>
 
-		<StepStrip :steps="STEPS" :active="step" :completed="completed" @select="emit('goto', $event)" />
-
-		<p class="announce" aria-live="polite" :data-testid="TESTIDS.sendStepAnnounce">{{ announcement }}</p>
+		<div class="steps">
+			<StepStrip :steps="steps" :active="step" :completed="completed" @select="emit('goto', $event)" />
+			<p class="caption" aria-live="polite" :data-testid="TESTIDS.sendStepAnnounce">{{ caption }}</p>
+		</div>
 
 		<div ref="panel" tabindex="-1" :data-testid="TESTIDS.sendStepPanel">
 			<slot v-if="step === 0" name="token" />
@@ -108,18 +121,19 @@ function onArrow(delta: number): void {
 	gap: 20px;
 	padding: 24px;
 	border: 1px solid var(--nulo-outline);
+	background: var(--card-bg);
 }
 
-/* Announced, never drawn: the strip already shows the step visually. */
-.announce {
-	position: absolute;
-	width: 1px;
-	height: 1px;
-	margin: -1px;
-	padding: 0;
-	overflow: hidden;
-	clip-path: inset(50%);
-	white-space: nowrap;
+.steps {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.caption {
+	margin: 0;
+	font: 500 11.5px/1.4 var(--font-mono);
+	color: var(--txt-tertiary);
 }
 
 .segment {

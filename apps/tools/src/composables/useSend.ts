@@ -57,6 +57,7 @@ import {
 	setRecordStep,
 	updateRecord,
 	useBridgeJournal,
+	markGrantOutcome,
 } from "./useBridgeJournal"
 import {
 	type HubClaimFee,
@@ -107,7 +108,8 @@ export async function assertL1Chain(l1: { publicClient: { getChainId: () => Prom
 }
 
 /** The token block the wizard PREDICTS. The receipt's read-back replaces it. */
-function previewBlock(plan: SendPlan): JournalTokenBlock {
+/** The token block a send files, from the plan: the wizard also renders it before the record exists. */
+export function previewBlock(plan: SendPlan): JournalTokenBlock {
 	return {
 		erc20: plan.token.address.toLowerCase(),
 		portal: plan.token.portal.toLowerCase(),
@@ -169,6 +171,9 @@ function buildSendRecord(i: RecordInputs): SendDepositRecord {
 		...(plan.gas && i.fuelSecretHex && i.fuelSecretHashHex
 			? { fuel: fuelBlockOf(plan.gas, i.fuelSecretHex, i.fuelSecretHashHex, i.fuelSalt) }
 			: {}),
+		// The rail shows REGISTER ahead of time only because the record says so; the hub decides at
+		// claim time regardless.
+		...(!gasOnly && plan.token.state.kind !== "registered" ? { registers: true as const } : {}),
 	}
 	return (gasOnly ? { ...base, intent: "gas" } : { ...base, intent: plan.intent, token: previewBlock(plan) }) as SendDepositRecord
 }
@@ -470,6 +475,25 @@ const failWith = (error: Ref<string | null>, message: string): string => {
 	return ""
 }
 
+/**
+ * The wallet's token permission, BEFORE the Ethereum signature: a declined or superseded grant
+ * cancels with nothing signed and nothing on chain, and a wallet that errors instead of answering
+ * is a failure the caller reads from `error`, never an exception escaping the click. Resolves to
+ * whether THIS run raised the prompt (the rail shows it as the run's first phase), or to the
+ * refusal to report.
+ */
+async function ensureSendGrant(plan: SendPlan, d: SendDeps): Promise<{ granted: boolean } | { refused: string }> {
+	if (plan.intent === "gas") return { granted: false }
+	const granted = !d.grant.isGranted(plan.token.l2Token)
+	let outcome: GrantOutcome
+	try {
+		outcome = await d.grant.ensureGranted(plan.token, d.epoch)
+	} catch (e) {
+		return { refused: humanizeWalletError(e instanceof Error ? e.message : String(e)) }
+	}
+	return outcome === "granted" ? { granted } : { refused: grantRefusal(outcome) }
+}
+
 async function performSend(plan: SendPlan, d: SendDeps): Promise<string> {
 	d.error.value = null
 	d.stage.value = null
@@ -485,12 +509,9 @@ async function performSend(plan: SendPlan, d: SendDeps): Promise<string> {
 	} catch (e) {
 		return failWith(d.error, e instanceof Error ? e.message : String(e))
 	}
-	// BEFORE the Ethereum signature: a declined or superseded grant must cancel with nothing
-	// signed and nothing on chain.
-	if (plan.intent !== "gas") {
-		const outcome = await d.grant.ensureGranted(plan.token, d.epoch)
-		if (outcome !== "granted") return failWith(d.error, grantRefusal(outcome))
-	}
+	const grant = await ensureSendGrant(plan, d)
+	if ("refused" in grant) return failWith(d.error, grant.refused)
+	const { granted } = grant
 	d.busy.value = true
 	try {
 		return await executeSend({
@@ -499,6 +520,7 @@ async function performSend(plan: SendPlan, d: SendDeps): Promise<string> {
 			journal: d.journal,
 			stage: d.stage,
 			error: d.error,
+			granted,
 		})
 	} catch (e) {
 		return failWith(d.error, humanizeWalletError(e instanceof Error ? e.message : String(e)))
@@ -595,6 +617,8 @@ interface RunCtx {
 	journal: ReturnType<typeof useBridgeJournal>
 	stage: Ref<SendStage | null>
 	error: Ref<string | null>
+	/** The wallet's token permission was raised (and granted) by this run, before any signature. */
+	granted?: boolean
 }
 
 /** The row every L1 leg narrates into, opened before the Permit2 approval so its prompt and its
@@ -604,6 +628,9 @@ async function openSendRecord(id: string, ctx: RunCtx, prepared: Prepared): Prom
 	const { plan, actors } = ctx
 	addRecordVerified(buildSendRecord({ ...prepared.inputs, fuelSalt: prepared.fuelSalt, id, plan, recipient: actors.recipient }))
 	markSessionLive(id)
+	// The permission the wallet granted happened before the record existed; it is the run's first,
+	// done phase from the record's first render — the seal's own prompt comes after it.
+	if (ctx.granted) markGrantOutcome(id)
 	// EVERY private send seals, gas-only included: without an envelope its claim material exists
 	// only in this tab's memory, so a reload strands it and a recovery file cannot be exported.
 	if (plan.isPrivate) await sealSend(id, plan, prepared, actors, () => ctx.journal.records.value as ClaimRecord[])

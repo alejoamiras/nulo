@@ -1,10 +1,12 @@
 <script setup lang="ts">
 /** Utils */
 import { computed, ref } from "vue"
+import { FEE_JUICE, SWAP } from "@/contracts/bridge-generation"
+import { etherscanAddressUrl } from "@/lib/explorer"
 import { trimAddress } from "@/lib/format"
 import type { ExitPlan, SendPlan } from "@/lib/send-model"
 import { TESTIDS } from "@/lib/testids"
-import { checksumAddress } from "@/lib/token-display"
+import { checksumAddress, safeDisplay } from "@/lib/token-display"
 
 /**
  * What the factory answered for this token's portal: the derived address (`verified`), no clone yet
@@ -26,26 +28,48 @@ const props = defineProps<{
 // never opens it must still be able to act on the five lines above.
 const open = ref(false)
 
+const NATIVE = "0x0000000000000000000000000000000000000000"
+
+/** A pool currency in the user's words: the token they chose, ETH (native or wrapped), Fee Juice. */
+function currencyLabel(address: string): string {
+	const lower = address.toLowerCase()
+	if (lower === props.plan.token.address.toLowerCase()) return safeDisplay(props.plan.token.symbol)
+	if (lower === NATIVE || lower === SWAP?.weth.toLowerCase()) return "ETH"
+	if (lower === FEE_JUICE.asset.toLowerCase()) return "Fee Juice"
+	return trimAddress(checksumAddress(address))
+}
+
+/** The currencies the swap walks through, in order: each pool is entered on one side and left on the other. */
+function routeHops(route: { path: readonly { currency0: string; currency1: string }[]; zeroForOnes: readonly boolean[] }): string[] {
+	const first = route.path[0]
+	if (!first) return []
+	const entry = route.zeroForOnes[0] ? first.currency0 : first.currency1
+	const exits = route.path.map((pool, i) => (route.zeroForOnes[i] ? pool.currency1 : pool.currency0))
+	return [entry, ...exits].map(currencyLabel)
+}
+
 const routeText = computed(() => {
 	if (props.plan.direction === "l2-to-l1") return "Direct: the hub burns your tokens, the portal releases them on Ethereum."
-	const hops = props.plan.gas?.route.path.length ?? 0
-	return hops === 0 ? "Direct: no swap, the whole amount is bridged." : `Gas swap over ${hops} pool ${hops === 1 ? "hop" : "hops"}.`
+	const route = props.plan.gas?.route
+	const pools = route?.path.length ?? 0
+	if (!route || pools === 0) return "Direct: no swap, the whole amount is bridged."
+	const hops = routeHops(route)
+	return `${hops.join(" → ")} on Uniswap v4 (${pools} ${pools === 1 ? "pool" : "pools"}), then the gas leg is bridged.`
 })
 
 const slippageText = computed(() =>
 	props.slippageBps === null ? "Not applicable — this send buys no gas." : `${(props.slippageBps / 100).toFixed(2)}%`,
 )
 
-const portalText = computed(() => {
+/** The clone the money leaves through — the derived address, and what the factory said about it. */
+const portalAddress = computed(() => checksumAddress(props.plan.token.portal))
+
+const portalState = computed(() => {
 	const registered = props.plan.token.state.kind === "registered"
-	if (props.portalVerified === "absent") return "Portal: will be created by this send at its derived address."
-	if (props.portalVerified === "unknown") return "Portal: could not be read just now — this send still uses the derived address."
-	if (props.portalVerified === "mismatch") {
-		return "Portal: the factory already holds a DIFFERENT address for this token. Do not send until you know why."
-	}
-	return registered
-		? "Portal: verified against the address the factory derives for this token."
-		: "Portal: verified; this send also registers the token on the hub."
+	if (props.portalVerified === "absent") return "created by this send"
+	if (props.portalVerified === "unknown") return "not readable right now — this send still uses it"
+	if (props.portalVerified === "mismatch") return "the factory holds a DIFFERENT address for this token. Do not send until you know why."
+	return registered ? "verified" : "verified — this send also registers the token on Aztec"
 })
 
 /** In FULL, never trimmed: this is the one line that says which contract the money leaves for, and a
@@ -60,14 +84,21 @@ const validityText = computed(() => {
 </script>
 
 <template>
-	<div class="details">
+	<div class="details" :data-open="open || undefined">
 		<button type="button" class="toggle" :aria-expanded="open" :data-testid="TESTIDS.sendReviewDetailsToggle" @click="open = !open">
-			{{ open ? "Hide details" : "Details" }}
+			<span>Details</span>
+			<svg class="chevron" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
+				<path d="M3 5.5 7 9.5 11 5.5" />
+			</svg>
 		</button>
 		<dl v-if="open" class="panel" :data-testid="TESTIDS.sendReviewDetails">
 			<div class="row" :data-testid="TESTIDS.sendReviewToken">
 				<dt>Token</dt>
-				<dd class="full">{{ tokenAddress }}</dd>
+				<dd class="full">
+					<a :href="etherscanAddressUrl(tokenAddress)" target="_blank" rel="noopener noreferrer" :data-testid="TESTIDS.sendReviewTokenLink">
+						{{ tokenAddress }}
+					</a>
+				</dd>
 			</div>
 			<div class="row" :data-testid="TESTIDS.sendReviewRoute">
 				<dt>Route</dt>
@@ -79,7 +110,12 @@ const validityText = computed(() => {
 			</div>
 			<div class="row" :data-testid="TESTIDS.sendReviewPortal" :data-portal="portalVerified">
 				<dt>Portal</dt>
-				<dd>{{ portalText }}</dd>
+				<dd class="full">
+					<a :href="etherscanAddressUrl(portalAddress)" target="_blank" rel="noopener noreferrer" :data-testid="TESTIDS.sendReviewPortalLink">
+						{{ portalAddress }}
+					</a>
+					<span class="state">· {{ portalState }}</span>
+				</dd>
 			</div>
 			<div class="row" :data-testid="TESTIDS.sendReviewAccount">
 				<dt>Account</dt>
@@ -97,19 +133,22 @@ const validityText = computed(() => {
 .details {
 	display: flex;
 	flex-direction: column;
-	gap: 8px;
+	border: 1px solid var(--nulo-outline);
 }
 
 .toggle {
-	align-self: flex-start;
-	padding: 0;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	width: 100%;
+	padding: 10px 14px;
 	background: transparent;
 	border: none;
 	color: var(--txt-secondary);
-	font: 500 11px/1.4 var(--font-mono);
-	letter-spacing: 0.04em;
-	text-decoration: underline;
-	text-underline-offset: 3px;
+	font: 600 11px/1.4 var(--font-mono);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	text-align: left;
 	cursor: pointer;
 }
 
@@ -117,13 +156,25 @@ const validityText = computed(() => {
 	color: var(--nulo-accent);
 }
 
+.chevron {
+	width: 14px;
+	height: 14px;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.5;
+	transition: transform 0.15s ease;
+}
+
+.details[data-open] .chevron {
+	transform: rotate(180deg);
+}
+
 .panel {
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
 	margin: 0;
-	padding: 12px 14px;
-	border: 1px dashed var(--nulo-outline);
+	padding: 4px 14px 12px;
 }
 
 .row {
@@ -151,6 +202,20 @@ dd {
 .full {
 	overflow-wrap: anywhere;
 	color: var(--txt-primary);
+}
+
+.full a {
+	color: var(--txt-primary);
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+
+.full a:hover {
+	color: var(--nulo-accent);
+}
+
+.state {
+	color: var(--txt-secondary);
 }
 
 .row[data-portal="mismatch"] dd {

@@ -23,6 +23,8 @@ export interface UseGasShareHandle {
 	readonly txTarget: Ref<number>
 	propose: (input: GasShareProposal) => GasShareResult | null
 	floorFor: (quote: bigint) => bigint
+	/** Back to the default target: a new send is sized from it, never from the last one's. */
+	reset: () => void
 	dispose: () => void
 }
 
@@ -54,10 +56,12 @@ export function useGasShare(): UseGasShareHandle {
 		return signedMinFuelOutput(quote, swap.slippageBps, BigInt(swap.minFuelFj))
 	}
 
-	function dispose(): void {
-		// A re-entered wizard proposes from the default, never from the last session's target.
+	function reset(): void {
 		txTarget.value = DEFAULT_TX_TARGET
 	}
 
-	return { txTarget, propose, floorFor, dispose }
+	// A re-entered wizard proposes from the default, never from the last session's target.
+	const dispose = reset
+
+	return { txTarget, propose, floorFor, reset, dispose }
 }

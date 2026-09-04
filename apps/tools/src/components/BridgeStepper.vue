@@ -4,7 +4,7 @@ import { type BridgeJournalRecord, type DepositJournalRecord, assetKindOf, isPro
 import { computed } from "vue"
 
 /** Composables */
-import { useBridgeJournal } from "@/composables/useBridgeJournal"
+import { type RecordRuntime, useBridgeJournal } from "@/composables/useBridgeJournal"
 
 /** Utils */
 import { assetDecimals, assetSymbol, recordTokenBlock } from "@/lib/asset-label"
@@ -15,7 +15,17 @@ import { TESTIDS } from "@/lib/testids"
 /** Components */
 import BridgePhaseRail from "./BridgePhaseRail.vue"
 
-const props = defineProps<{ record: BridgeJournalRecord }>()
+// `withDefaults`: an absent boolean prop is cast to false, and backgrounding must stay the default.
+const props = withDefaults(
+	defineProps<{
+		record: BridgeJournalRecord
+		/** Narration for a record the journal does not hold yet (the wizard's permission phase). */
+		runtime?: RecordRuntime
+		/** False while nothing is running in the journal yet: there is nothing to background. */
+		canBackground?: boolean
+	}>(),
+	{ runtime: undefined, canBackground: true },
+)
 const emit = defineEmits<{ background: []; backup: [record: BridgeJournalRecord] }>()
 const exportable = computed(() => {
 	if (isProvisionalRecordId(props.record.id)) return false
@@ -26,12 +36,12 @@ const exportable = computed(() => {
 
 const journal = useBridgeJournal()
 
-const rt = computed(() => journal.runtime.value[props.record.id] ?? {})
+const rt = computed(() => props.runtime ?? journal.runtime.value[props.record.id] ?? {})
 const phases = computed(() => stepperPhases(props.record, rt.value))
 
 const failedPhase = computed(() => phases.value.find((p) => p.state === "failed"))
 
-/** Per-phase retry routing (plan S9): only engine-drivable phases get a RETRY. */
+/** Per-phase retry routing: only engine-drivable phases get a RETRY. */
 const canRetry = computed(() => {
 	const key = failedPhase.value?.key
 	if (!key) return false
@@ -50,8 +60,8 @@ function onRetry() {
 }
 
 const headline = computed(() => {
-	// A fee-juice (Fuel) record is 18-dec Fee Juice, not the token bridge asset (codex LOW — same class
-	// as the toast/card; the stepper header is the third shared surface).
+	// A fee-juice (Fuel) record is 18-dec Fee Juice, not the token bridge asset — the same rule the
+	// toast and the card apply; the stepper header is the third shared surface.
 	const kind = assetKindOf(props.record)
 	const token = recordTokenBlock(props.record)
 	const amount = formatBigInt(BigInt(props.record.amount), assetDecimals(kind, token))
@@ -79,14 +89,16 @@ const headline = computed(() => {
 			</button>
 		</header>
 
-		<BridgePhaseRail :record="record" :retryable="canRetry" @retry="onRetry" />
+		<BridgePhaseRail :record="record" :runtime="runtime" :retryable="canRetry" @retry="onRetry" />
 
-		<div class="actions">
-			<button type="button" class="action subtle" :data-testid="TESTIDS.stepperBackground" @click="emit('background')">
-				RUN IN BACKGROUND
-			</button>
-		</div>
-		<p class="bg-hint">Backgrounding moves this bridge to Your Bridges - it keeps running either way.</p>
+		<template v-if="canBackground !== false">
+			<div class="actions">
+				<button type="button" class="action subtle" :data-testid="TESTIDS.stepperBackground" @click="emit('background')">
+					RUN IN BACKGROUND
+				</button>
+			</div>
+			<p class="bg-hint">Backgrounding moves this bridge to Your Bridges - it keeps running either way.</p>
+		</template>
 	</section>
 </template>
 

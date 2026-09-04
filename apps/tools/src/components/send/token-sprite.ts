@@ -21,6 +21,19 @@ export function hasSprite(logoKey: string): boolean {
 	return SPRITE_KEYS.has(logoKey)
 }
 
+/** A stable hue for a token with no committed mark, from its chain-qualified key — never from the
+ *  symbol, so two tokens claiming one ticker never look alike. */
+export function monogramHue(logoKey: string): number {
+	let hash = 0
+	for (const char of logoKey) hash = (hash * 31 + char.charCodeAt(0)) % 360
+	return hash
+}
+
+export function monogramBackground(logoKey: string): string {
+	const hue = monogramHue(logoKey)
+	return `repeating-linear-gradient(135deg, hsl(${hue} 55% 42%) 0 6px, hsl(${hue} 55% 32%) 6px 12px)`
+}
+
 /** Everything a mark is drawn from. Anything else — `script`, `foreignObject`, `use`, `image`, `a` —
  *  is dropped with its whole subtree rather than sanitised. */
 const ADOPTABLE = new Set(["symbol", "g", "path", "circle", "rect", "ellipse", "polygon", "polyline", "line", "text", "title"])

@@ -48,6 +48,8 @@ const h = vi.hoisted(() => ({
 		exitsPaused: false,
 		/** What the exit's read-only preflight sees on Aztec before it authorises a burn. */
 		l2Balance: 5n * 10n ** 8n,
+		/** Whether the Aztec account holds gas for a token-only claim; null = unknown. */
+		gasHeld: { value: null as boolean | null },
 		listGate: null as null | Promise<void>,
 		receiptGate: null as null | Promise<void>,
 		order: [] as string[],
@@ -159,6 +161,13 @@ vi.mock("@aztec/aztec.js/crypto", async (orig) => {
 	}
 })
 
+// The node behind the hub-binding read: a fake whose one method the mocked `hubBindingAt` never calls.
+vi.mock("@aztec/aztec.js/node", () => ({ createAztecNodeClient: () => ({ getPublicStorageAt: async () => undefined }) }))
+// The gas-held read reaches the FeeJuice contract through the wallet; the smoke answers it directly.
+vi.mock("@/composables/useGasHeld", () => ({
+	useGasHeld: () => ({ held: h.state.gasHeld, refresh: async () => {}, dispose: () => {} }),
+}))
+
 vi.mock("@nulo/bridge-core", async (orig) => {
 	const actual = await orig<typeof import("@nulo/bridge-core")>()
 	return {
@@ -172,6 +181,7 @@ vi.mock("@nulo/bridge-core", async (orig) => {
 		preflightHubExit: h.fn.preflightHubExit,
 		hubAt: () => ({ methods: {} }),
 		hubTokenFor: async (_hub: unknown, erc20: string) => h.state.hubTokens.get(erc20.toLowerCase()),
+		hubBindingAt: async (_node: unknown, _hub: string, erc20: string) => h.state.hubTokens.get(erc20.toLowerCase()),
 		hubExitsPaused: async () => h.state.exitsPaused,
 		readRegistration: async (_pub: unknown, _factory: string, erc20: string) => h.state.registrations.get(erc20.toLowerCase()),
 		readErc20Metadata: async () => {
@@ -416,8 +426,8 @@ async function pick(w: Wrapper, erc20: string): Promise<void> {
 	await settle()
 }
 
+/** Picking a row already moved the wizard to the amount step; this only waits out the route probe. */
 async function toAmount(w: Wrapper, amount: string, opts: { route?: boolean } = {}): Promise<void> {
-	await w.find(sel(TESTIDS.sendTokenNext)).trigger("click")
 	await settle(opts.route ? ROUTE_DEBOUNCE_MS : 0)
 	await w.find(sel(TESTIDS.sendAmountInput)).setValue(amount)
 	await settle()
@@ -444,6 +454,7 @@ describe("send wizard smoke", () => {
 		h.state.hubTokens.clear()
 		h.state.portals.clear()
 		h.state.route = null
+		h.state.gasHeld.value = null
 		h.state.withdrawsPaused = false
 		h.state.exitsPaused = false
 		h.state.l2Balance = 5n * 10n ** 8n
@@ -499,15 +510,26 @@ describe("send wizard smoke", () => {
 		expect(keys.slice(0, MANIFEST_TOKENS.length)).toEqual(MANIFEST_TOKENS.map((t) => keyOf(t.erc20)))
 		expect(keys).toContain(keyOf(LIST_WBTC))
 
-		await w.find(sel(TESTIDS.sendPasteInput)).setValue("0x3333333333333333333333333333333333333333")
-		await w.find(sel(TESTIDS.sendPasteAdd)).trigger("click")
+		// An unlisted address typed into the search is read from the chain and offered for adding; the
+		// added row joins the list under the identity that read produced, and the search clears.
+		await w.find(sel(TESTIDS.sendTokenSearch)).setValue("0x3333333333333333333333333333333333333333")
 		await settle()
-		expect(w.findAll(sel(TESTIDS.sendTokenTile))).toHaveLength(MANIFEST_TOKENS.length + 3)
+		expect(w.find(sel(TESTIDS.sendTokenLookup)).attributes("data-status")).toBe("found")
+		await w.find(sel(TESTIDS.sendLookupAdd)).trigger("click")
+		await settle()
+		// Adding IS picking: the wizard is on the amount step; the row waits in the list behind it.
+		expect(w.find(sel(TESTIDS.sendStepAmount)).exists()).toBe(true)
+		await w.find(sel(TESTIDS.sendAmountBack)).trigger("click")
+		await settle()
+		const tiles = w.findAll(sel(TESTIDS.sendTokenTile))
+		expect(tiles).toHaveLength(MANIFEST_TOKENS.length + 3)
+		expect(tiles[MANIFEST_TOKENS.length]?.text()).toContain("WBTC")
+		expect(tiles[MANIFEST_TOKENS.length]?.text()).toContain("added by you")
 
-		await w.find(sel(TESTIDS.sendPasteInput)).setValue("0xnope")
-		await w.find(sel(TESTIDS.sendPasteAdd)).trigger("click")
+		await w.find(sel(TESTIDS.sendTokenSearch)).setValue("0xnope")
 		await settle()
-		expect(w.find(sel(TESTIDS.sendPasteError)).exists()).toBe(true)
+		expect(w.find(sel(TESTIDS.sendTokenLookup)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.sendCatalogEmpty)).exists()).toBe(true)
 	})
 
 	it("raises the wallet grant BEFORE the send, and runs it once the wallet grants", async () => {
@@ -541,7 +563,7 @@ describe("send wizard smoke", () => {
 		expect(w.find(sel(TESTIDS.sendGrantDeclined)).exists()).toBe(true)
 	})
 
-	it("a grant that lands after the user picked another token is discarded", async () => {
+	it("while the wallet decides on the permission, the stepper shows it as the first phase and nothing else can move", async () => {
 		markRegistered(LIST_WBTC, LIST_DECIMALS)
 		let release = (): void => {}
 		grantMode.gate = new Promise<void>((r) => {
@@ -553,17 +575,25 @@ describe("send wizard smoke", () => {
 		await toReview(w)
 		await w.find(sel(TESTIDS.sendReviewConfirm)).trigger("click")
 		await settle()
-		expect(w.find(sel(TESTIDS.sendGrantPending)).exists()).toBe(true)
 
-		// Back to the token step and onto another token while the wallet is still deciding.
-		await w.find(`${sel(TESTIDS.sendStep)}[data-index="0"]`).trigger("click")
-		await settle()
-		await pick(w, USDC)
+		// The wizard is gone: the stepper is up on a record the journal does not hold yet, with the
+		// permission as its active first phase, and no way to background or re-pick meanwhile.
+		expect(w.find(sel(TESTIDS.sendStepReview)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.stepper)).attributes("data-id")).toMatch(/^dep-pending-permit-/)
+		const first = w.findAll(sel(TESTIDS.stepperPhase))[0]
+		expect(first?.attributes("data-phase")).toBe("permit")
+		expect(first?.attributes("data-state")).toBe("active")
+		expect(first?.text()).toContain("Allow reading WBTC state in your Nulo wallet.")
+		expect(w.find(sel(TESTIDS.stepperBackground)).exists()).toBe(false)
+		expect(records()).toHaveLength(0)
 
 		release()
 		await settle()
-		expect(h.fn.runSend).not.toHaveBeenCalled()
-		expect(records()).toHaveLength(0)
+		expect(h.fn.runSend).toHaveBeenCalledTimes(1)
+		expect(w.find(sel(TESTIDS.stepper)).attributes("data-id")).not.toMatch(/^dep-pending-permit-/)
+		// Granted in this run, the permission stays on the rail as its first, done phase.
+		expect(w.findAll(sel(TESTIDS.stepperPhase))[0]?.attributes("data-phase")).toBe("permit")
+		expect(w.findAll(sel(TESTIDS.stepperPhase))[0]?.attributes("data-state")).toBe("done")
 	})
 
 	it("a token with no fuel route closes the gas choices but still sends the token", async () => {
@@ -604,7 +634,6 @@ describe("send wizard smoke", () => {
 		h.state.portals.set(LIST_WBTC.toLowerCase(), portalOf(LIST_WBTC))
 		const w = await mountView()
 		await pick(w, LIST_WBTC)
-		expect(w.find(sel(TESTIDS.sendTokenState)).attributes("data-state")).toBe("portal-only")
 		await toAmount(w, "1")
 		await toReview(w)
 		expect(w.find(sel(TESTIDS.sendReviewFirstTime)).exists()).toBe(true)
@@ -633,6 +662,22 @@ describe("send wizard smoke", () => {
 		await settle()
 		expect(sendRecord()?.completedAt).toBeDefined()
 		expect(w.find(sel(TESTIDS.receipt)).exists()).toBe(true)
+	})
+
+	it("a token-only send on an account with no gas is stopped at the amount step until gas is added to it", async () => {
+		markRegistered(LIST_WBTC, LIST_DECIMALS)
+		h.state.route = ROUTE
+		h.state.gasHeld.value = false
+		const w = await mountView()
+		await pick(w, LIST_WBTC)
+		await toAmount(w, "1", { route: true })
+		expect(w.find(sel(TESTIDS.sendTokenOnlyBlocked)).text()).toContain("holds no gas")
+		expect(w.find(sel(TESTIDS.sendAmountNext)).attributes("disabled")).toBeDefined()
+
+		await w.find(sel(TESTIDS.sendChoiceTokenGas)).trigger("click")
+		await settle()
+		expect(w.find(sel(TESTIDS.sendTokenOnlyBlocked)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.sendAmountNext)).attributes("disabled")).toBeUndefined()
 	})
 
 	it("a gas-only send journals no token block and claims with the secret in its fuel block", async () => {

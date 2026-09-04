@@ -116,7 +116,7 @@ export const TESTIDS = {
 	receiptNewBridge: "tl-receipt-new-bridge",
 	receiptLink: "tl-receipt-link",
 
-	// The explicit L1 mint of a permissionless test token (NOT the Faucet tab's L2 drips)
+	// The one-tap L1 mints of the manifest's permissionless test tokens (NOT the Drip tab's L2 drips)
 	mintL1Card: "tl-mint-l1-card",
 	mintL1: "tl-mint-l1",
 	mintL1Status: "tl-mint-l1-status",
@@ -135,15 +135,13 @@ export const TESTIDS = {
 	journalStep: "tl-journal-step",
 	journalTxLink: "tl-journal-tx-link",
 
-	// Send wizard - token discovery (catalog + paste) and the reads a selection triggers
+	// Send wizard - token discovery (catalog + address lookup) and the reads a selection triggers
 	sendTokenSearch: "tl-send-token-search",
-	sendTokenSource: "tl-send-token-source",
-	sendCatalogProvenance: "tl-send-catalog-provenance",
+	sendCatalogLoading: "tl-send-catalog-loading",
 	sendCatalogEmpty: "tl-send-catalog-empty",
-	sendPasteInput: "tl-send-paste-input",
-	sendPasteAdd: "tl-send-paste-add",
-	sendPasteError: "tl-send-paste-error",
-	sendTokenState: "tl-send-token-state",
+	sendTokenLookup: "tl-send-token-lookup",
+	sendLookupAdd: "tl-send-lookup-add",
+	sendLookupError: "tl-send-lookup-error",
 	sendSelectionError: "tl-send-selection-error",
 	sendBalanceL1: "tl-send-balance-l1",
 	sendBalanceL2Public: "tl-send-balance-l2-public",
@@ -151,9 +149,12 @@ export const TESTIDS = {
 
 	// Send wizard - the gas leg: the discovered fuel route and the slice it sizes
 	sendRouteStatus: "tl-send-route-status",
+	sendTokenOnlyBlocked: "tl-send-token-only-blocked",
 	sendGasTxTarget: "tl-send-gas-tx-target",
+	sendGasTxFewer: "tl-send-gas-tx-fewer",
+	sendGasTxMore: "tl-send-gas-tx-more",
 	sendGasShare: "tl-send-gas-share",
-	sendGasFloor: "tl-send-gas-floor",
+	sendGasEnough: "tl-send-gas-enough",
 
 	// Send wizard — shell + steps.
 	tabSend: "tl-tab-send",
@@ -173,7 +174,6 @@ export const TESTIDS = {
 	sendTokenLogo: "tl-send-token-logo",
 	sendTokenMonogram: "tl-send-token-monogram",
 	sendTokenAddress: "tl-send-token-address",
-	sendTokenNext: "tl-send-token-next",
 	sendAmountInput: "tl-send-amount-input",
 	sendAmountMax: "tl-send-amount-max",
 	sendAmountError: "tl-send-amount-error",
@@ -184,13 +184,13 @@ export const TESTIDS = {
 	sendGasBreakdown: "tl-send-gas-breakdown",
 	sendGasBreakdownToken: "tl-send-gas-breakdown-token",
 	sendGasBreakdownFuel: "tl-send-gas-breakdown-fuel",
-	sendGasChange: "tl-send-gas-change",
 	sendPrivateToggle: "tl-send-private-toggle",
 	sendAmountBack: "tl-send-amount-back",
 	sendAmountNext: "tl-send-amount-next",
 	sendReviewSend: "tl-send-review-send",
 	sendReviewArrives: "tl-send-review-arrives",
 	sendReviewGas: "tl-send-review-gas",
+	sendReviewVisibility: "tl-send-review-visibility",
 	sendReviewNetworkFee: "tl-send-review-network-fee",
 	sendReviewTakes: "tl-send-review-takes",
 	sendReviewFirstTime: "tl-send-review-first-time",
@@ -204,6 +204,8 @@ export const TESTIDS = {
 	sendReviewMetadataWarning: "tl-send-review-metadata-warning",
 	sendReviewStale: "tl-send-review-stale",
 	sendReviewToken: "tl-send-review-token",
+	sendReviewTokenLink: "tl-send-review-token-link",
+	sendReviewPortalLink: "tl-send-review-portal-link",
 	sendReviewAccount: "tl-send-review-account",
 	sendReviewSignature: "tl-send-review-signature",
 	sendReviewBack: "tl-send-review-back",
@@ -220,6 +222,10 @@ export const TESTIDS = {
 	sendReceiptAddToken: "tl-send-receipt-add-token",
 	mainnetPlaceholder: "tl-mainnet-placeholder",
 	mainnetPlaceholderLink: "tl-mainnet-placeholder-link",
+
+	// A send running in the background: the strip above the wizard and its jump to the journal
+	sendBackgroundStrip: "tl-send-background-strip",
+	sendBackgroundActivity: "tl-send-background-activity",
 
 	// step components
 	sendCatalogError: "tl-send-catalog-error",

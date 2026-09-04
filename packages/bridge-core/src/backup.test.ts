@@ -392,6 +392,14 @@ describe("every persisted optional field is validated by type", () => {
 		expect(() => validateAnyBackupRecord(mutate(sendDepositPublic(), path, bad))).toThrow(/not a valid bridge record/)
 	})
 
+	it("`registers` is a flag or absent, kept on a token deposit, refused anywhere else", () => {
+		expect(validateAnyBackupRecord(sendDepositPublic({ registers: true }))).toMatchObject({ registers: true })
+		expect((validateAnyBackupRecord(sendDepositPublic()) as { registers?: unknown }).registers).toBeUndefined()
+		expect(() => validateAnyBackupRecord(mutate(sendDepositPublic(), "registers", "yes"))).toThrow(/not a valid bridge record/)
+		expect(() => validateAnyBackupRecord(mutate(sendDepositPublic(), "registers", false))).toThrow(/not a valid bridge record/)
+		expect(() => validateAnyBackupRecord({ ...sendDepositGasOnly(), registers: true })).toThrow(/not a valid bridge record/)
+	})
+
 	it.each(WITHDRAW_WRONG)("rejects a send exit whose %s is the wrong type", (path, bad) => {
 		expect(() => validateAnyBackupRecord(mutate(sendExit(), path, bad))).toThrow(/not a valid bridge record/)
 	})

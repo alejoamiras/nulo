@@ -358,6 +358,248 @@ the testnet numbers come from step 5). The conductor path (`generation.ts`, `dep
 `deploy-sandbox.ts`, the hub-l2 / send-flow modules) is therefore proven on the post-rebase tree
 with dev's journal ports in place.
 
+## Owner walk of the Pages preview → the UX arc (2026-09-03)
+
+The owner walked the preview before signing off and sent the wizard back: the step chips, the paste
+box, the provenance chips, the "First time for this token" label, the mint card, the MAX button, the
+change/done toggle on the gas card, the "out of the gas you are buying" fee line, the gas-only
+"Token arrives = 0" line, and RUN IN BACKGROUND landing on a populated step 3. Two of those were
+not copy: USDC (registered) showed the first-time path on a plain Ethereum wallet, and the
+"network fee" was the whole gas budget captioned as a fee.
+
+A design canvas (four mint variants) was approved with no changes; the mint decision moved to
+variant B (a testnet-only strip, the flow otherwise identical on both networks). The arc is
+[send-wizard-ux](../../send-wizard-ux/plan.md), branch `any-erc20-bridge/ux` above the stack, four
+commits (token step, amount step, review, wizard). Findings while building it:
+
+- **The first-time false positive was the wallet seam.** `useTokenSelection` only read the hub's
+  `token_for` through the connected Aztec wallet, so without one every registered token read as
+  portal-only. The binding is now read from the node's public storage: `token_of` is a
+  `Map<EthAddress, PublicImmutable<AztecAddress>>` at slot 9 of the hub artifact's `storageLayout`,
+  the entry's own slot holds the address (`WithHash` packs the value first), zero means unbound.
+  `hubBindingAt(node, hub, erc20)` in bridge-core; no wallet, no simulate.
+- **A token-only send is never sponsored.** `gateNoFuelClaim` reads the recipient's public and
+  private Fee Juice and STOPS with "No gas (Fee Juice) to claim this no-fuel bridge" when both are
+  zero — on every network, not only mainnet. The review said "paid by the sponsor". It now says
+  "paid from the gas you already hold on Aztec", and the amount step reads the same two balances
+  (`useGasHeld`) and blocks Token alone while both are known to be zero, before any Ethereum
+  signature. Unknown (no account, unreadable) blocks nothing; the claim's gate fails closed.
+- **The fee is one transaction, not the budget.** The review's Fee line is `fjPerTx` (plus
+  `fjRegister` for an unregistered token), stated as the first of the N transactions the bought
+  gas covers; the gas leg itself moved to the Arrives line.
+- **`deriveStorageSlotInMap` is async in 5.2.** The Promise typed through to
+  `getPublicStorageAt` until awaited.
+- The Pages preview for the sign-off is the PR's own; the five-item checklist below is unchanged.
+
+**`/code-review medium --fix` on the arc** (a fresh adversarial reviewer over the branch diff, one
+file at a time): 1 HIGH, 5 MED, 5 LOW; all fixed in one commit except two LOWs kept on purpose.
+
+- HIGH — RUN IN BACKGROUND was undone: the send lane resolves only once the whole bridge is done,
+  so `runSend`'s `adopt(id)` fired after the reset, and `adoptRunRecord` re-adopted the record on
+  the engine's next write. Both adopt sites now skip the backgrounded id and the id joins the
+  pre-submit set; the test releases the lane AFTER the background, the one ordering production has.
+- MED — the step strip rendered the raw token symbol (every other surface goes through
+  `safeDisplay`); the node outage on the binding read threw the client's raw error (now a readable
+  fail-closed message — fail-open would bring the false first-time path back on a blip); the gas
+  stepper's text field kept a refused value on screen (snaps back); the disabled outcomes' reason
+  lived only in `title` (now `aria-describedby` too); row balances were keyed on the unfiltered
+  catalog, so a row past the first fifty never showed one (now keyed on the rows on screen and
+  remembered per row).
+- LOW fixed — "≈ 0 transactions" on a quote under one budget; `formatCompact` ate a whole number's
+  zeros at zero decimals; "sponsor" wording in a prop doc and a `data-route` value.
+- LOW kept — the slot-derivation test derives its expectation with the same helper the code uses
+  (the reviewer re-derived it by hand against aztec-nr `with_hash.nr` / `derive_storage_slot_in_map`
+  and found it right; a TXE fixture is the stronger pin and is not worth a toolchain run for a UI
+  hint); one `mintL1` testid on every mint button, disambiguated by `data-symbol`.
+
+**Codex round 1** (session `01a06880-b0b4-79e2-ab58-5e7536d63a5b`, xhigh, read-only): "request
+changes — hub storage lookup is correct, but background rekeying and gas gating still have material
+holes." 1 HIGH, 3 MED, 3 LOW; all but one LOW fixed.
+
+- HIGH — a backgrounded PUBLIC deposit or any withdrawal starts as a provisional record the journal
+  rekeys once its transaction names it; the new id was neither the backgrounded one nor in the
+  pre-submit set, so the wizard re-adopted it. The journal now records every rekey (session-scoped,
+  like `sessionLive`) and exposes `canonicalRecordId`; the wizard follows it in every adopt guard
+  and in the strip's lookup.
+- MED — a no-gas verdict landing AFTER the review was frozen left Sign & send enabled:
+  `tokenOnlyBlocked` joins the review-invalidation sources, `onConfirm` refuses past it, and the
+  amount step re-reads the balances on entry.
+- MED — NEW SEND kept the resolved token, so a token the send had just registered would be priced
+  with `fjRegister` and worded first-time again: the token is re-resolved and the gas target reset.
+- MED — the strip formatted a gas-only record's amount (the swapped token amount) as 18-dec FJ; the
+  strip's subject is now the review's promise line ("≈ 5 FJ gas from 1 WBTC").
+- LOW fixed — non-manifest display symbol/name sanitised once at resolve; two pre-existing
+  BridgeStepper comments naming a plan step and a codex finding rewritten; sponsor wording in the
+  plan and a test fixture.
+- LOW kept — a chain switch during an in-flight lookup could show a wrong-chain identity in the ADD
+  row; the selection fails closed on `assertL1Chain` and the row is only a hint, so no live-chain
+  watch was added.
+
+**Codex round 2** (resumed): "rekey handling is fixed correctly, but three material gaps remain."
+All three fixed; the LOW declined.
+
+- MED — confirm trusted the gas verdict cached when the amount step opened, so gas spent elsewhere
+  meanwhile could sign a deposit its claim would then strand. `onConfirm` now re-reads the two
+  balances before a token-only deposit signs (the buttons are held by `submitting` while it reads)
+  and stands the review down if the gate closed.
+- MED — the background reset re-resolved the token at once, before the backgrounded send had
+  registered it, so a next send prepared from it kept the first-time pricing. The token is
+  re-resolved again when the backgrounded record completes, which also stands down a review priced
+  for a first send.
+- MED — the promise line used `fuelFj`, the sizing target, which a gas-only send outgrows (the
+  whole amount is swapped): it now states the quote, as the review did.
+- LOW declined — codex asked for the review/codex logs to be struck from `phase-10.md` and the plan
+  as "forbidden breadcrumbs". The ban is on CODE comments; `implementations-plan/**/lessons/` is
+  where this repo records exactly these consults.
+
+**Codex round 3** (resumed): one HIGH, my own making in round 2. Awaiting the gas read with
+`submitting` set muted `invalidateReview` for that window, so an account switched during the read
+was ignored and the send would have targeted the live account under a review frozen for the old
+one; the same guard muted the re-resolution behind a backgrounded send (`submitting` spans the
+whole lane), leaving a next review priced first-time. Fixed: the read runs under its own
+`preflighting` lock (buttons held, review live); only a review still standing when the read
+returns goes on to sign; and the invalidation guard exempts a review built while a backgrounded
+send runs — the review that must not move is only the one being signed. Two gated tests pin the
+account switch under the read and the next review behind a backgrounded send.
+
+**Codex round 4** (resumed): one HIGH on that fix. The post-read check compared the review's PLAN
+to the one confirmed, but the wizard's plan is a computed that does not depend on the Aztec
+account: switch accounts during the read, re-enter the review, and the new review carries the same
+plan object — the earlier confirm would resume and sign under the new account. The check is now on
+the review SNAPSHOT's identity (a re-entered review is a new snapshot) plus the account it was
+frozen for; a gated test re-enters the review under another account and shows the first confirm
+signs nothing and the new review signs only on its own confirm.
+
+**Codex round 5** (resumed): "Looks ready. no new material findings" — the arc's loop converged
+at d9ce281a. Five rounds; the last three were all on the confirm-time gas read I added in round 1,
+which is the lesson: an `await` inserted between "the user confirmed" and "the send starts" opens
+a window every reactive source can move in, and the review snapshot's identity — not its plan, not
+a flag — is the only thing that says the confirm still applies.
+
+## Owner walk of the PR #542 preview — round 2 (2026-09-03)
+
+Ten items. Four landed straight away; five are design choices put on a second canvas for the
+owner to pick from; the receipt (item 9) is deferred to a later arc at the owner's request.
+
+- Landed: the "Minting — confirm in your wallet" line goes (the button says MINTING…); picking a
+  row IS the token step — the wizard moves to the amount at once on the row's own symbol and reads
+  the token behind it, CONTINUE held until the read lands, a failed read brings the user back to
+  the row with the reason; the "Checking gas options…" and "sizing…" loaders go (nothing shows
+  until there is an outcome); Details: the token and the portal are Etherscan links on their full
+  addresses, the route names the currencies it walks ("USDC → ETH → Fee Juice on Uniswap v4
+  (2 pools)"), and "Portal: verified…" becomes the address plus one word of state.
+- On the canvas: the max/"Use all" control (item 4), the fee copy (6), where "private" sits on the
+  Arrives line (7), the "How the gas is sized" disclosure (8, four or five ways), and the wallet
+  permission for a new token as a stepper phase — before DEPOSIT or before CLAIM (10).
+- Item 10 has a safety edge the canvas has to show: the grant is raised BEFORE the L1 deposit today
+  so a declined permission costs nothing; raised at claim time it would leave a deposit waiting on
+  Ethereum until the user grants it.
+
+**The owner's picks (same day)** — Max: the balance line itself is the tap, no arrow (my take on
+their "B without the arrow": the amount reads as the control by being the only primary-coloured
+text on the line, accent on hover; a plain secondary line would hide the affordance entirely).
+Fee: A — "≈ 3.57 FJ" with "taken from the gas that arrives" as a soft clause. Visibility: B, the
+row named "Visibility", copy "Private — only you can see it" (the owner's point: it is the fee
+juice too, not only the token). Gas sizing: none of the five — the disclosure is gone; the two
+arrival lines are the whole card, the capped note stays when it applies. Permission: A, as a phase
+before DEPOSIT, copy "Allow reading USDC state in your Nulo wallet." Plus: REGISTER was only shown
+after the fact (once `registerTxHash` existed, private only); the record now carries `registers`
+from the plan, so a private send shows REGISTER ahead of CLAIM from the start and a public one
+labels the single tx REGISTER + CLAIM.
+
+- The permission phase is shown without moving the grant: it is still raised before ANY signature
+  (a decline costs nothing), so no journal record exists while the wallet decides. The wizard builds
+  a stand-in record from the plan (provisional id, so nothing offers to back it up), renders the
+  stepper on it with a `granting` runtime override and no RUN IN BACKGROUND, and the real record
+  takes the stepper over the moment the engine files it; the engine marks `grantOutcome` on that
+  record so PERMISSION stays on the rail as the run's first, done phase. The phase rail had to take
+  the override too — it re-derived the phases from the journal on its own.
+- The smoke case "a grant that lands after the user picked another token is discarded" described a
+  path that no longer exists (the review is gone while the wallet decides); it now pins the
+  permission phase instead. The engine's epoch check for a superseded grant stays as the net.
+
+**Codex round 6** (resumed, on the round-2 delta): "not ready; the core journal/rekey design
+holds, but the delta introduces four material transition/UX regressions." All four MED fixed, two
+of three LOW fixed, one LOW declined.
+
+- MED — a grant that THREW (not declined) left the permission screen up forever: the send's
+  rejection skipped the cleanup after the await. The await is in a `try/finally`; the wizard returns
+  from `permit` either way and the review shows the error.
+- MED — a private send: `openSendRecord` awaited the seal before `markGrantOutcome`, so the record
+  watcher adopted a rail without PERMISSION and the phase was inserted retroactively after SEAL.
+  The outcome is marked right after the record is filed, before the seal.
+- MED — picking token B while A was still resolved rendered the amount step on A's symbol and
+  decimals until B's read landed, and the row-symbol fallback bypassed `safeDisplay`. `amountToken`
+  uses the read only when its address is the picked row's, and sanitises the row's symbol.
+- MED — with picking-as-the-step, ↑/↓ in the list emitted `select` on every row, so the first arrow
+  press left the catalog. Arrows move focus only (the tab stop follows focus); Enter/Space/click
+  pick.
+- LOW fixed — every stand-in record shared one id, so the rail's phase clock carried the previous
+  prompt's elapsed time onto the next (the id is now fresh per prompt); the backup validator let
+  `registers: "yes"` through by spread (it is now `undefined | true`, deposits with a token leg
+  only).
+- LOW declined — codex flagged "plan/phase/review terminology" in comments; the lines it cited are
+  pre-existing (`plan S3/S10`, `plan S15`, "codex post-impl HIGH" in the journal and rail), untouched
+  by this branch. They are a repo-wide sweep of their own, not a rider on a UX PR.
+
+**Codex round 7** (resumed): one MED on my round-6 fix — the wizard now recovered from a grant
+that threw, but the send composable never caught it: `ensureGranted` sat outside `performSend`'s
+normalising try/catch, so `error` stayed null and the rejection escaped the click. The grant is now
+awaited under its own catch that files the humanised message; the wizard test asserts the review
+shows it, and `useSend.test.ts` pins that a throwing grant resolves empty with the error set.
+
+**Codex round 8** (resumed): "Ready. … no new material findings" — the round-2 arc converged at
+6104ff11. `/code-review` was NOT run on this round: the owner asked for it to be dropped as too
+token-intensive (2026-09-03); the codex loop is the review from here on.
+
+CI on ba110529: quality and network e2e green; smoke red on the extension's
+`sw-restart-network.test.ts` ("stopServiceWorker: the service-worker target was still alive 15s
+after close()") — the known runner CDP flake on SW-untouched diffs (this branch touches zero files
+under `apps/extension`). Re-run `--failed` once, per the standing rule; never neutralised. The
+rerun passed: quality, smoke and network e2e all green on ba110529.
+
+## Owner walk of the PR #542 preview — round 3 (2026-09-03)
+
+Three items, "not much more … great work":
+
+1. **The Aztec panel flipped to "Setting up session…" while the wallet asked for the token
+   permission.** Real bug: `retryCapabilities` re-ran the connect statuses (`capability-approval`
+   → `setting-up` → `connected`) on a session that was already connected, so the panel read as a
+   connection lost and re-made while the stepper's own PERMISSION phase was narrating the prompt.
+   A re-grant from a connected session now keeps the status put throughout; a retry from an error
+   state still walks the statuses as a fresh connect does. The session test pins that no status
+   change is observed across a connected re-grant.
+2. **"What happens with Register when the user has no gas?"** — answered from the code, no change:
+   - A private first send is two transactions from the user's account: `register_token` (a PRIVATE
+     hub function whose only public side effect is `_register(erc20, portal, token)` — no account
+     in it), then `claim_private`. A public first send is one: `register_and_claim_public`.
+   - Fueled private: the registration is paid by the SponsoredFPC (the bridged Fee Juice message
+     can be consumed by one transaction only, and that is the claim's, via the PrivateFPC's
+     `mint_and_pay_fee`). Publicly the register tx shows the SponsoredFPC as fee payer and the
+     token's words; the claim shows the PrivateFPC as fee payer. Neither carries the account.
+   - No fuel (the account already holds gas): both transactions go with NO fee option, so the
+     wallet's own picker chooses — exactly what a no-register private claim does today. That is
+     the "same behaviour" asked for. The honest caveat: the picker can choose PUBLIC Fee Juice,
+     which makes the account the visible fee payer of a private claim; that is the wallet's
+     default to fix (out of bridge scope, D34), not something the bridge decides.
+   - No gas at all: unreachable from the wizard since this arc — the amount step blocks Token alone
+     while both balances (public FJ, private FJ at the PrivateFPC) are known zero, and the claim's
+     own gate fails closed. "Register" for such an account happens only through Token + gas, where
+     the sponsor pays the registration.
+3. **UNI and WETH showed addresses in the list.** They come from the remote token list, not the
+   manifest; the row prints the address for every non-manifest token because a list can label any
+   address "USDC". I first moved it to the row's hover title (the approved canvas showed listed
+   tokens with a name), and codex objected (MED): a listed token can copy a trusted token's symbol,
+   name, decimals AND live metadata exactly, which defeats the review's conflict warning, and a
+   hover-only address helps no touch user at the moment of choosing. Codex is right; the address
+   is back on listed rows, under the name, in tertiary type. The inconsistency the owner noticed IS
+   the signal: manifest tokens are the app's own, everything else says which contract it is.
+
+**Codex rounds 9–10** (resumed, on the third-walk delta): round 9 confirmed the quiet re-grant
+(errors still reach `error`; a remembered, still-granted account never re-opens the chooser) and
+raised the listed-row address (fixed as above); round 10: "Ready … no new material findings" —
+converged at 4790018a.
+
 ## Sign-off
 
 _Owner sign-off: PENDING._

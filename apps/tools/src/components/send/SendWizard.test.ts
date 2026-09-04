@@ -27,6 +27,7 @@ const addPasted = vi.fn((address: string) => candidate(address))
 const catalogDispose = vi.fn()
 
 const selected = ref<ResolvedToken | null>(null)
+const selectLoading = ref(false)
 const balances = ref<TokenBalances>({})
 const selectionError = ref<string | null>(null)
 const selectDispose = vi.fn()
@@ -41,6 +42,10 @@ const selectFn = vi.fn(async (token: SelectableToken) => {
 
 const granted = ref<string[]>([])
 let grantOutcome: GrantOutcome = "granted"
+/** Whether the connected Aztec account holds gas; null = unknown. */
+const gasHeld = ref<boolean | null>(null)
+const gasHeldRefresh = vi.fn(async () => {})
+const selectedAccount = ref<string | null>(AZTEC_ACCOUNT)
 const ensureGranted = vi.fn(async (): Promise<GrantOutcome> => {
 	if (grantOutcome === "granted") granted.value = [...granted.value, L2_TOKEN]
 	return grantOutcome
@@ -64,6 +69,8 @@ const gasShareDispose = vi.fn()
 const records = ref<Record<string, unknown>[]>([])
 /** Records THIS tab's engine created — the wizard's provenance test for adopting a run's record. */
 const sessionLive = new Set<string>()
+/** Provisional id → the id the record's transaction gave it. */
+const rekeys = ref<Record<string, string>>({})
 const activeFlowId = ref<string | null>(null)
 const claimForeground = vi.fn((id: string) => {
 	activeFlowId.value = id
@@ -89,14 +96,14 @@ vi.mock("@/contracts/bridge-generation", () => ({
 	HUB: { toString: () => AZTEC_ACCOUNT },
 	HUB_TOKEN_ARTIFACT: {},
 	SEND_GENERATION: { factory: FACTORY, implementation: IMPLEMENTATION },
-	SWAP: { slippageBps: 300 },
+	SWAP: { slippageBps: 300, fjPerTx: "100000000000000000", fjRegister: "500000000000000000" },
 	MANIFEST_TOKENS: [],
 }))
 vi.mock("@/composables/useL1Wallet", () => ({
 	useL1Wallet: () => ({ address: ref(L1_ADDRESS), chainId: ref(31337), publicClient: { readContract } }),
 }))
 vi.mock("@/composables/useBridgeWallet", () => ({
-	useBridgeWallet: () => ({ wallet: ref(null), selectedAccount: ref(AZTEC_ACCOUNT), status: ref("connected") }),
+	useBridgeWallet: () => ({ wallet: ref(null), selectedAccount, status: ref("connected") }),
 }))
 vi.mock("@/composables/useBridgeJournal", () => ({
 	useBridgeJournal: () => ({
@@ -106,6 +113,7 @@ vi.mock("@/composables/useBridgeJournal", () => ({
 		claimForeground,
 		releaseForeground,
 		isSessionLive: (id: string) => sessionLive.has(id),
+		canonicalRecordId: (id: string) => rekeys.value[id] ?? id,
 	}),
 }))
 vi.mock("@/composables/useBridgeBackup", () => ({ useBridgeBackup: () => ({ exportBridgeWithToast: vi.fn() }) }))
@@ -128,11 +136,21 @@ vi.mock("@/composables/useTokenCatalog", () => ({
 		dispose: catalogDispose,
 	}),
 }))
+vi.mock("@/contracts/hub-binding", () => ({ readHubBinding: async () => undefined }))
+vi.mock("@/composables/useGasHeld", () => ({
+	useGasHeld: () => ({ held: gasHeld, refresh: gasHeldRefresh, dispose: vi.fn() }),
+}))
+vi.mock("@/composables/useAddressLookup", () => ({
+	useAddressLookup: () => ({ state: ref(null), dispose: vi.fn() }),
+}))
+vi.mock("@/composables/useRowBalances", () => ({
+	useRowBalances: () => ({ balances: ref({}), refresh: vi.fn(async () => {}), dispose: vi.fn() }),
+}))
 vi.mock("@/composables/useTokenSelection", () => ({
 	useTokenSelection: () => ({
 		selected,
 		balances,
-		loading: ref(false),
+		loading: selectLoading,
 		error: selectionError,
 		epoch: () => epoch,
 		select: selectFn,
@@ -151,10 +169,27 @@ vi.mock("@/composables/useRouteQuote", () => ({
 	useRouteQuote: () => ({ quoted: routeQuoted, loading: ref(false), error: routeError, quote: quoteFn, dispose: routeDispose }),
 }))
 vi.mock("@/composables/useGasShare", () => ({
-	useGasShare: () => ({ txTarget, propose: proposeFn, floorFor: (q: bigint) => (q * 97n) / 100n, dispose: gasShareDispose }),
+	useGasShare: () => ({
+		txTarget,
+		propose: proposeFn,
+		floorFor: (q: bigint) => (q * 97n) / 100n,
+		reset: () => {
+			txTarget.value = 20
+		},
+		dispose: gasShareDispose,
+	}),
 }))
 vi.mock("@/composables/useSend", () => ({
 	useSend: () => ({ send: sendFn, stage: ref(null), busy: sendBusy, error: sendError, dispose: sendDispose }),
+	previewBlock: (plan: { token: ResolvedToken }) => ({
+		erc20: plan.token.address,
+		portal: plan.token.portal,
+		l2Token: plan.token.l2Token,
+		nameWord: plan.token.words.nameWord,
+		symbolWord: plan.token.words.symbolWord,
+		decimals: plan.token.decimals,
+		displaySymbol: plan.token.symbol,
+	}),
 }))
 vi.mock("@/composables/useHubExit", () => ({
 	EXIT_TOKEN_NOT_REGISTERED: "The bridge hasn't registered this token on Aztec yet, so there is nothing here to withdraw.",
@@ -163,6 +198,7 @@ vi.mock("@/composables/useHubExit", () => ({
 
 import { predictPortal } from "@nulo/bridge-core"
 import { EXIT_TOKEN_NOT_REGISTERED } from "@/composables/useHubExit"
+import { TESTIDS } from "@/lib/testids"
 import SendWizard from "./SendWizard.vue"
 
 const stub = (name: string, props: string[]) => ({ name, props, template: "<div />" })
@@ -171,19 +207,18 @@ const stubs = {
 		"direction",
 		"tokens",
 		"search",
-		"provenance",
 		"loading",
 		"catalogError",
+		"lookup",
+		"addError",
 		"selected",
-		"resolved",
-		"resolving",
 		"selectionError",
-		"balances",
-		"pasteError",
+		"rowBalances",
 	]),
 	AmountStep: stub("AmountStep", [
 		"direction",
 		"token",
+		"resolving",
 		"balances",
 		"intent",
 		"amount",
@@ -192,8 +227,10 @@ const stubs = {
 		"routeKind",
 		"routeLoading",
 		"txTarget",
+		"fjPerTx",
 		"gasError",
 		"blockedReason",
+		"tokenOnlyBlocked",
 	]),
 	ReviewStep: stub("ReviewStep", [
 		"plan",
@@ -207,7 +244,7 @@ const stubs = {
 		"error",
 	]),
 	StepStrip: stub("StepStrip", ["steps", "active", "completed"]),
-	BridgeStepper: stub("BridgeStepper", ["record"]),
+	BridgeStepper: stub("BridgeStepper", ["record", "runtime", "canBackground"]),
 	BridgeReceipt: stub("BridgeReceipt", ["snapshot", "ctaLabel", "addTokenBusy"]),
 }
 
@@ -274,9 +311,8 @@ async function wizard() {
 /** Walk the wizard to the review step with a resolved token and a valid amount. The stub stands in
  *  for the real step's own validation, which is what the wizard gates on. */
 async function atReview(w: Awaited<ReturnType<typeof wizard>>, amount = "1") {
+	// Picking a row is the whole token step: the wizard is on the amount step when this resolves.
 	w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
-	await flushPromises()
-	w.findComponent({ name: "TokenStep" }).vm.$emit("next")
 	await flushPromises()
 	w.findComponent({ name: "AmountStep" }).vm.$emit("update:amount", amount)
 	w.findComponent({ name: "AmountStep" }).vm.$emit("update:valid", true)
@@ -294,6 +330,11 @@ describe("SendWizard", () => {
 		balances.value = { l1: 10n ** 9n, l2Public: 5n * 10n ** 8n, l2Private: 3n * 10n ** 8n }
 		selectionError.value = null
 		epoch = 0
+		gasHeld.value = null
+		gasHeldRefresh.mockReset().mockImplementation(async () => {})
+		selectedAccount.value = AZTEC_ACCOUNT
+		rekeys.value = {}
+		sessionLive.clear()
 		nextResolved = (token) => resolvedToken(token)
 		granted.value = [L2_TOKEN]
 		grantOutcome = "granted"
@@ -334,7 +375,6 @@ describe("SendWizard", () => {
 		const w = await wizard()
 		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
 		await flushPromises()
-		w.findComponent({ name: "TokenStep" }).vm.$emit("next")
 		await flushPromises()
 		const amount = w.findComponent({ name: "AmountStep" })
 		amount.vm.$emit("update:amount", "1")
@@ -364,7 +404,6 @@ describe("SendWizard", () => {
 		const w = await wizard()
 		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
 		await flushPromises()
-		w.findComponent({ name: "TokenStep" }).vm.$emit("next")
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:amount", "1")
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
@@ -379,7 +418,6 @@ describe("SendWizard", () => {
 		const w = await wizard()
 		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
 		await flushPromises()
-		w.findComponent({ name: "TokenStep" }).vm.$emit("next")
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:amount", "1")
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
@@ -395,7 +433,6 @@ describe("SendWizard", () => {
 		const w = await wizard()
 		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
 		await flushPromises()
-		w.findComponent({ name: "TokenStep" }).vm.$emit("next")
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:amount", "1")
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "gas")
@@ -404,10 +441,394 @@ describe("SendWizard", () => {
 		expect(w.findComponent({ name: "AmountStep" }).props("gas").fuelAmount).toBe(10n ** 8n)
 	})
 
-	it("a token-only review says the network fee is sponsored; adding gas names the budget", async () => {
+	it("picking a row moves to the amount step at once, on the row's own symbol, and a failed read brings the user back", async () => {
+		let releaseSelect = (): void => {}
+		selectFn.mockImplementationOnce(async (token: SelectableToken) => {
+			selectLoading.value = true
+			await new Promise<void>((resolve) => {
+				releaseSelect = resolve
+			})
+			epoch++
+			selected.value = nextResolved(token)
+			selectLoading.value = false
+		})
+		const w = await wizard()
+		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
+		await flushPromises()
+		const amountStep = w.findComponent({ name: "AmountStep" })
+		expect(amountStep.exists()).toBe(true)
+		expect(amountStep.props("resolving")).toBe(true)
+		expect(amountStep.props("token")).toMatchObject({ symbol: candidate().symbol, decimals: candidate().decimals })
+		releaseSelect()
+		await flushPromises()
+		expect(w.findComponent({ name: "AmountStep" }).props("resolving")).toBe(false)
+
+		// A read that fails returns the user to the row, where the reason is shown.
+		selectionError.value = "That address is not an ERC-20."
+		await flushPromises()
+		expect(w.findComponent({ name: "TokenStep" }).exists()).toBe(true)
+		expect(w.findComponent({ name: "TokenStep" }).props("selectionError")).toContain("not an ERC-20")
+	})
+
+	it("a second row picked while the first is still being read renders on ITS row, sanitised, never the first's answer", async () => {
+		const OTHER = "0x5555555555555555555555555555555555555555"
+		const bidi = `PA${String.fromCodePoint(0x202e)}XG`
+		const w = await wizard()
+		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
+		await flushPromises()
+		expect(w.findComponent({ name: "AmountStep" }).props("token")).toMatchObject({ symbol: "WBTC", decimals: 8 })
+
+		// The first read stands; the user goes back and picks a 6-decimal row with a hostile symbol.
+		selectFn.mockImplementationOnce(async () => {
+			selectLoading.value = true
+		})
+		w.findComponent({ name: "WizardShell" }).vm.$emit("goto", 0)
+		await flushPromises()
+		w.findComponent({ name: "TokenStep" }).vm.$emit("select", { ...candidate(OTHER), symbol: bidi, decimals: 6 })
+		await flushPromises()
+		const token = w.findComponent({ name: "AmountStep" }).props("token")
+		expect(token.decimals).toBe(6)
+		expect(token.symbol).toBe("PAXG")
+		expect(token.symbol).not.toContain(String.fromCodePoint(0x202e))
+		selectLoading.value = false
+	})
+
+	it("a grant that throws (not declines) returns to the wizard and reports it, never a stuck permission screen", async () => {
+		granted.value = []
+		// The send composable normalises a wallet error into its `error` ref and resolves empty; a
+		// rejection here would be its own bug (pinned in useSend.test.ts), so this is the contract.
+		sendFn.mockImplementation(async () => {
+			sendError.value = "wallet unreachable"
+			return ""
+		})
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(w.findComponent({ name: "BridgeStepper" }).exists()).toBe(false)
+		const back = w.findComponent({ name: "ReviewStep" })
+		expect(back.exists()).toBe(true)
+		expect(back.props("busy")).toBe(false)
+		expect(back.props("error")).toBe("wallet unreachable")
+	})
+
+	it("the wallet's token permission is the stepper's first phase, shown before any record exists", async () => {
+		granted.value = []
+		let releaseSend = (): void => {}
+		sendFn.mockImplementation(async () => {
+			// The grant is still open inside the send: nothing is in the journal yet.
+			await new Promise<void>((resolve) => {
+				releaseSend = resolve
+			})
+			sessionLive.add("rec-1")
+			records.value = [...records.value, sendRecord("rec-1")]
+			return "rec-1"
+		})
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		const permit = w.findComponent({ name: "BridgeStepper" })
+		expect(permit.exists()).toBe(true)
+		expect(permit.props("record")).toMatchObject({ schema: 3, registers: true, token: { displaySymbol: "WBTC" } })
+		expect(permit.props("record").id).toMatch(/^dep-pending-permit-/)
+		expect(permit.props("runtime")).toEqual({ step: "granting" })
+		expect(permit.props("canBackground")).toBe(false)
+		expect(claimForeground).not.toHaveBeenCalled()
+
+		releaseSend()
+		await flushPromises()
+		// The real record takes over the stepper the moment it exists.
+		expect(w.findComponent({ name: "BridgeStepper" }).props("record").id).toBe("rec-1")
+		expect(w.findComponent({ name: "BridgeStepper" }).props("canBackground")).toBeUndefined()
+		expect(claimForeground).toHaveBeenCalledWith("rec-1")
+	})
+
+	it("a declined permission leaves the permission phase and returns to the review, which says so", async () => {
+		granted.value = []
+		grantOutcome = "declined"
+		sendFn.mockImplementation(async () => "")
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(w.findComponent({ name: "BridgeStepper" }).exists()).toBe(false)
+		expect(w.findComponent({ name: "ReviewStep" }).props("grant")).toBe("declined")
+	})
+
+	it("a token-only send is blocked while the account is known to hold no gas, and released by adding gas", async () => {
+		gasHeld.value = false
+		const w = await wizard()
+		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
+		await flushPromises()
+		const amountStep = () => w.findComponent({ name: "AmountStep" })
+		amountStep().vm.$emit("update:amount", "1")
+		amountStep().vm.$emit("update:valid", true)
+		await flushPromises()
+		expect(amountStep().props("tokenOnlyBlocked")).toContain("holds no gas")
+		// The wizard refuses the review on its own, whatever the step reported.
+		amountStep().vm.$emit("next")
+		await flushPromises()
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
+
+		amountStep().vm.$emit("update:intent", "token+gas")
+		await flushPromises()
+		expect(amountStep().props("tokenOnlyBlocked")).toBeNull()
+
+		amountStep().vm.$emit("update:intent", "token")
+		gasHeld.value = null
+		await flushPromises()
+		expect(amountStep().props("tokenOnlyBlocked")).toBeNull()
+	})
+
+	it("RUN IN BACKGROUND starts the wizard over and keeps a line on the send until it lands", async () => {
+		// The send lane resolves only once the whole bridge is done: the record lands first, the
+		// background happens while the lane is still open, and the lane resolves last.
+		let releaseSend = (): void => {}
+		sendFn.mockImplementation(async () => {
+			sessionLive.add("rec-1")
+			records.value = [...records.value, sendRecord("rec-1")]
+			await new Promise<void>((resolve) => {
+				releaseSend = resolve
+			})
+			return "rec-1"
+		})
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(w.findComponent({ name: "BridgeStepper" }).exists()).toBe(true)
+
+		w.findComponent({ name: "BridgeStepper" }).vm.$emit("background")
+		await flushPromises()
+		expect(releaseForeground).toHaveBeenCalledWith("rec-1")
+		expect(w.findComponent({ name: "TokenStep" }).exists()).toBe(true)
+		const strip = w.find(`[data-testid="${TESTIDS.sendBackgroundStrip}"]`)
+		expect(strip.text()).toContain("is on its way")
+		expect(strip.find(`[data-testid="${TESTIDS.sendBackgroundActivity}"]`).exists()).toBe(true)
+
+		// The engine keeps writing the record: that must not take the wizard over again.
+		records.value = records.value.map((r) => (r.id === "rec-1" ? { ...r, updatedAt: 1_500 } : r))
+		await flushPromises()
+		expect(w.findComponent({ name: "BridgeStepper" }).exists()).toBe(false)
+		expect(claimForeground).toHaveBeenCalledTimes(1)
+
+		// Nor may the lane resolving, nor the record completing: the finished send belongs to the
+		// journal now, never to a receipt the wizard left behind.
+		releaseSend()
+		await flushPromises()
+		records.value = records.value.map((r) => (r.id === "rec-1" ? { ...r, completedAt: 2_000 } : r))
+		await flushPromises()
+		expect(w.findComponent({ name: "BridgeStepper" }).exists()).toBe(false)
+		expect(w.findComponent({ name: "BridgeReceipt" }).exists()).toBe(false)
+		expect(w.find(`[data-testid="${TESTIDS.sendBackgroundStrip}"]`).exists()).toBe(false)
+		expect(claimForeground).toHaveBeenCalledTimes(1)
+	})
+
+	it("a backgrounded send follows its record through a rekey, and the renamed record is never re-adopted", async () => {
+		let releaseSend = (): void => {}
+		sendFn.mockImplementation(async () => {
+			sessionLive.add("dep-pending-1")
+			records.value = [...records.value, sendRecord("dep-pending-1")]
+			await new Promise<void>((resolve) => {
+				releaseSend = resolve
+			})
+			return "0xfinal"
+		})
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		w.findComponent({ name: "BridgeStepper" }).vm.$emit("background")
+		await flushPromises()
+		expect(w.find(`[data-testid="${TESTIDS.sendBackgroundStrip}"]`).exists()).toBe(true)
+
+		// The deposit transaction names the record: the journal rekeys it, session-live moves with it.
+		sessionLive.delete("dep-pending-1")
+		sessionLive.add("0xfinal")
+		rekeys.value = { "dep-pending-1": "0xfinal" }
+		records.value = records.value.map((r) => (r.id === "dep-pending-1" ? { ...r, id: "0xfinal" } : r))
+		await flushPromises()
+		expect(w.findComponent({ name: "BridgeStepper" }).exists()).toBe(false)
+		expect(w.find(`[data-testid="${TESTIDS.sendBackgroundStrip}"]`).exists()).toBe(true)
+
+		releaseSend()
+		await flushPromises()
+		expect(w.findComponent({ name: "BridgeStepper" }).exists()).toBe(false)
+		expect(claimForeground).toHaveBeenCalledTimes(1)
+
+		records.value = records.value.map((r) => (r.id === "0xfinal" ? { ...r, completedAt: 2_000 } : r))
+		await flushPromises()
+		expect(w.find(`[data-testid="${TESTIDS.sendBackgroundStrip}"]`).exists()).toBe(false)
+		expect(w.findComponent({ name: "BridgeReceipt" }).exists()).toBe(false)
+	})
+
+	it("a no-gas verdict that lands under the frozen review stands it down, and confirm never signs past it", async () => {
+		const w = await wizard()
+		const review = await atReview(w)
+		gasHeld.value = false
+		await flushPromises()
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
+		expect(w.findComponent({ name: "AmountStep" }).props("tokenOnlyBlocked")).toContain("holds no gas")
+		expect(w.find(`[data-testid="${TESTIDS.sendReviewStale}"]`).exists()).toBe(true)
+		// A confirm the frozen review still had in flight sends nothing.
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(sendFn).not.toHaveBeenCalled()
+	})
+
+	it("confirm re-reads the gas gate before signing a token-only send, holding the buttons meanwhile", async () => {
+		gasHeld.value = true
+		let releaseRead = (): void => {}
+		gasHeldRefresh.mockImplementation(async () => {
+			await new Promise<void>((resolve) => {
+				releaseRead = resolve
+			})
+			gasHeld.value = false
+		})
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(w.findComponent({ name: "ReviewStep" }).props("busy")).toBe(true)
+		expect(sendFn).not.toHaveBeenCalled()
+		releaseRead()
+		await flushPromises()
+		expect(sendFn).not.toHaveBeenCalled()
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
+		expect(w.findComponent({ name: "AmountStep" }).props("tokenOnlyBlocked")).toContain("holds no gas")
+	})
+
+	/** Every gas read the wizard starts, in order, each held until the test releases it: the amount
+	 *  step reads on entry (index 0), confirm reads again (index 1), and so on. */
+	function gatedReads(): Array<() => void> {
+		const reads: Array<() => void> = []
+		gasHeldRefresh.mockImplementation(
+			() =>
+				new Promise<void>((resolve) => {
+					reads.push(resolve)
+				}),
+		)
+		return reads
+	}
+
+	it("an account that switches while confirm reads the gas gate stands the review down; nothing signs", async () => {
+		const reads = gatedReads()
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(w.findComponent({ name: "ReviewStep" }).props("busy")).toBe(true)
+		selectedAccount.value = `0x${"20".repeat(32)}`
+		await flushPromises()
+		// The review was stood down under the read; the read returning must not resurrect it.
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
+		reads[1]?.()
+		await flushPromises()
+		expect(sendFn).not.toHaveBeenCalled()
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
+		expect(w.find(`[data-testid="${TESTIDS.sendReviewStale}"]`).exists()).toBe(true)
+	})
+
+	it("a review re-entered under another account while the read is pending is never signed by the earlier confirm", async () => {
+		const reads = gatedReads()
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		selectedAccount.value = `0x${"20".repeat(32)}`
+		await flushPromises()
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
+
+		// The same token and amount: the wizard's cached plan is the same object under the new review.
+		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
+		await flushPromises()
+		const again = w.findComponent({ name: "ReviewStep" })
+		expect(again.exists()).toBe(true)
+		expect(again.props("account")).toBe(selectedAccount.value)
+
+		// The first confirm's read returns now: it must sign nothing.
+		reads[1]?.()
+		await flushPromises()
+		expect(sendFn).not.toHaveBeenCalled()
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(true)
+
+		// The new review signs only on its own confirm, after its own read.
+		w.findComponent({ name: "ReviewStep" }).vm.$emit("confirm")
+		await flushPromises()
+		expect(sendFn).not.toHaveBeenCalled()
+		reads.at(-1)?.()
+		await flushPromises()
+		expect(sendFn).toHaveBeenCalledTimes(1)
+	})
+
+	it("a backgrounded send that lands re-resolves the token, standing down a next review priced from it", async () => {
+		let releaseSend = (): void => {}
+		sendFn.mockImplementation(async () => {
+			sessionLive.add("rec-1")
+			records.value = [...records.value, sendRecord("rec-1")]
+			await new Promise<void>((resolve) => {
+				releaseSend = resolve
+			})
+			return "rec-1"
+		})
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		w.findComponent({ name: "BridgeStepper" }).vm.$emit("background")
+		await flushPromises()
+		// The background reset re-resolved once (the token is still first-time at that point), and
+		// the user prepares the next send from it while the first is still running.
+		expect(selectFn).toHaveBeenCalledTimes(2)
+		w.findComponent({ name: "WizardShell" }).vm.$emit("goto", 1)
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("update:amount", "2")
+		w.findComponent({ name: "AmountStep" }).vm.$emit("update:valid", true)
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
+		await flushPromises()
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(true)
+
+		// The first send lands and may have registered the token: it is re-read, and the review
+		// priced before that read is stood down rather than signed.
+		releaseSend()
+		records.value = records.value.map((r) => (r.id === "rec-1" ? { ...r, completedAt: 2_000 } : r))
+		await flushPromises()
+		expect(selectFn).toHaveBeenCalledTimes(3)
+		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
+		expect(w.find(`[data-testid="${TESTIDS.sendReviewStale}"]`).exists()).toBe(true)
+	})
+
+	it("NEW SEND re-resolves the token — a send that registered it must not be priced as first-time again", async () => {
+		sendFn.mockImplementation(async () => {
+			records.value = [...records.value, sendRecord("rec-1")]
+			return "rec-1"
+		})
+		const w = await wizard()
+		const review = await atReview(w)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		records.value = records.value.map((r) => (r.id === "rec-1" ? { ...r, completedAt: 2_000 } : r))
+		await flushPromises()
+		expect(w.findComponent({ name: "BridgeReceipt" }).exists()).toBe(true)
+		expect(selectFn).toHaveBeenCalledTimes(1)
+		w.findComponent({ name: "BridgeReceipt" }).vm.$emit("new-bridge")
+		await flushPromises()
+		expect(selectFn).toHaveBeenCalledTimes(2)
+		expect(selectFn).toHaveBeenLastCalledWith(candidate(), "l1-to-l2")
+		expect(w.findComponent({ name: "TokenStep" }).exists()).toBe(true)
+	})
+
+	it("a token-only review says the fee is the gas already held; adding gas names one transaction's cost out of it", async () => {
 		const w = await wizard()
 		let review = await atReview(w)
-		expect(review.props("estimate").networkFee).toBe("paid by the sponsor")
+		expect(review.props("estimate")).toEqual({
+			takes: expect.any(String),
+			networkFee: "paid from the gas you already hold on Aztec",
+			networkFeeNote: null,
+			txCovered: null,
+		})
 		review.vm.$emit("back")
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
@@ -416,8 +837,36 @@ describe("SendWizard", () => {
 		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
 		await flushPromises()
 		review = w.findComponent({ name: "ReviewStep" })
-		expect(review.props("estimate").networkFee).toContain("5.00 FJ")
+		// The default token is first-time, so the claim also registers it: one transaction plus the
+		// registration budget.
+		expect(review.props("estimate").networkFee).toBe("≈ 0.6 FJ")
+		expect(review.props("estimate").networkFeeNote).toBe("taken from the gas that arrives")
+		expect(review.props("estimate").txCovered).toBe(20)
 		expect(review.props("slippageBps")).toBe(300)
+	})
+
+	it("a registered token's fee is one transaction alone; a gas-only send counts what the quote divides into", async () => {
+		nextResolved = (token) => resolvedToken(token, HUB_REGISTERED)
+		const w = await wizard()
+		let review = await atReview(w)
+		review.vm.$emit("back")
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
+		setRoute({ kind: "route", route: ROUTE, quoteOut: 10n ** 18n })
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
+		await flushPromises()
+		review = w.findComponent({ name: "ReviewStep" })
+		expect(review.props("estimate").networkFee).toBe("≈ 0.1 FJ")
+
+		review.vm.$emit("back")
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "gas")
+		await flushPromises()
+		w.findComponent({ name: "AmountStep" }).vm.$emit("next")
+		await flushPromises()
+		// 1 token (8 decimals) at 1 FJ per token = 1 FJ; 0.1 FJ per transaction.
+		expect(w.findComponent({ name: "ReviewStep" }).props("estimate").txCovered).toBe(10)
 	})
 
 	it("the zero answer is `absent` — the state that means this send creates the clone", async () => {
@@ -518,7 +967,6 @@ describe("SendWizard", () => {
 		const w = await wizard()
 		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
 		await flushPromises()
-		w.findComponent({ name: "TokenStep" }).vm.$emit("next")
 		await flushPromises()
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:amount", "1")
 		w.findComponent({ name: "AmountStep" }).vm.$emit("update:intent", "token+gas")
@@ -572,10 +1020,9 @@ describe("SendWizard", () => {
 		const w = await wizard()
 		w.findComponent({ name: "WizardShell" }).vm.$emit("update:direction", "l2-to-l1")
 		await flushPromises()
-		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
-		await flushPromises()
-		expect(ensureGranted).toHaveBeenCalledTimes(1)
 		const review = await atReview(w)
+		// Picking the row raised the grant, before any amount was typed.
+		expect(ensureGranted).toHaveBeenCalledTimes(1)
 		expect(review.props("plan")).toEqual(expect.objectContaining({ direction: "l2-to-l1", recipientL1: L1_ADDRESS, amount: 10n ** 8n }))
 		expect(review.props("plan").gas).toBeUndefined()
 		review.vm.$emit("confirm")
@@ -589,8 +1036,6 @@ describe("SendWizard", () => {
 		nextResolved = (token) => resolvedToken(token, HUB_REGISTERED)
 		const w = await wizard()
 		w.findComponent({ name: "WizardShell" }).vm.$emit("update:direction", "l2-to-l1")
-		await flushPromises()
-		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
 		await flushPromises()
 		const review = await atReview(w)
 		expect(review.props("grant")).toBe("pending")
@@ -616,7 +1061,6 @@ describe("SendWizard", () => {
 		const w = await wizard()
 		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
 		await flushPromises()
-		w.findComponent({ name: "TokenStep" }).vm.$emit("next")
 		await flushPromises()
 		w.findComponent({ name: "WizardShell" }).vm.$emit("update:direction", "l2-to-l1")
 		await flushPromises()
@@ -650,14 +1094,14 @@ describe("SendWizard", () => {
 		expect(releaseForeground).toHaveBeenCalledWith("rec-2")
 	})
 
-	it("a paste that the catalog refuses surfaces on the token step and selects nothing", async () => {
+	it("an address the catalog refuses surfaces on the token step and selects nothing", async () => {
 		addPasted.mockImplementation(() => {
 			throw new Error("The zero address is not a token.")
 		})
 		const w = await wizard()
-		w.findComponent({ name: "TokenStep" }).vm.$emit("paste", "0x0")
+		w.findComponent({ name: "TokenStep" }).vm.$emit("add", "0x0")
 		await flushPromises()
-		expect(w.findComponent({ name: "TokenStep" }).props("pasteError")).toBe("The zero address is not a token.")
+		expect(w.findComponent({ name: "TokenStep" }).props("addError")).toBe("The zero address is not a token.")
 		expect(selectFn).not.toHaveBeenCalled()
 	})
 

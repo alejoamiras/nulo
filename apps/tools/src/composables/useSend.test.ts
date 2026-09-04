@@ -353,6 +353,17 @@ describe("useSend", () => {
 		h.runSend.mockImplementation(fakeRunSend())
 	})
 
+	it("a grant that THROWS is a reported failure, not an escaping exception - no send, no record", async () => {
+		h.ensureGranted.mockImplementation(async () => {
+			throw new Error("wallet unreachable")
+		})
+		const send = useSend()
+		await expect(send.send(plan())).resolves.toBe("")
+		expect(h.runSend).not.toHaveBeenCalled()
+		expect(send.error.value).toContain("wallet unreachable")
+		expect(useBridgeJournal().records.value).toHaveLength(0)
+	})
+
 	it("a DECLINED grant cancels before anything is signed - no approval, no send, no record", async () => {
 		h.ensureGranted.mockImplementation(async () => "declined")
 		const send = useSend()

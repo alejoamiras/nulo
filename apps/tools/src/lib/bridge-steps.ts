@@ -20,7 +20,7 @@ import type { RecordRuntime } from "@/composables/useBridgeJournal"
 export type PhaseState = "pending" | "active" | "done" | "failed"
 
 export interface BridgePhase {
-	key: "seal" | "approve" | "sign" | "deposit" | "sync" | "register" | "claim" | "confirm" | "exit" | "prove" | "finish"
+	key: "permit" | "seal" | "approve" | "sign" | "deposit" | "sync" | "register" | "claim" | "confirm" | "exit" | "prove" | "finish"
 	label: string
 	state: PhaseState
 	/** Live narration when active/failed (runtime detail or the phase's signing prompt). */
@@ -94,6 +94,7 @@ function depositActiveKey(rec: DepositRailRecord, rt: RecordRuntime, registers: 
 /** Nothing has crossed yet: the run is at its FIRST prompt, never at a DEPOSIT that never happened. */
 function preDepositKey(rec: DepositRailRecord, rt: RecordRuntime): BridgePhase["key"] {
 	if (rec.depositTxHash) return "deposit"
+	if (rt.step === "granting") return "permit"
 	if (rt.step === "sealing") return "seal"
 	if (rt.step === "signing") return "sign"
 	if (rt.step === "approving") return "approve"
@@ -101,19 +102,35 @@ function preDepositKey(rec: DepositRailRecord, rt: RecordRuntime): BridgePhase["
 	return rec.isPrivate ? "seal" : "sign"
 }
 
-function depositCopy(rec: DepositRailRecord, rt: RecordRuntime, shape: { gasOnly: boolean; fueled: boolean }) {
-	const { gasOnly, fueled } = shape
+/** What the claim's confirmation does, by what rides in that one transaction. */
+function claimPromptOf(fueled: boolean, registersInClaim: boolean): string {
+	if (registersInClaim) {
+		return fueled
+			? "Confirm in your Aztec wallet - one transaction registers the token, then claims your tokens and your gas."
+			: "Confirm in your Aztec wallet - one transaction registers the token and claims it."
+	}
+	return fueled
+		? "Confirm in your Aztec wallet - one transaction claims your tokens and your gas."
+		: "Confirm the claim in your Aztec wallet."
+}
+
+function depositCopy(rec: DepositRailRecord, rt: RecordRuntime, shape: { gasOnly: boolean; fueled: boolean; registersInClaim: boolean }) {
+	const { gasOnly, fueled, registersInClaim } = shape
+	const symbol = isSendRecord(rec) && rec.token ? rec.token.displaySymbol : "this token"
 	const labels: Record<string, string> = {
+		permit: "PERMISSION",
 		seal: "SEAL",
 		approve: "APPROVE",
 		sign: "AUTHORIZE",
 		deposit: fueled ? "DEPOSIT + FUEL" : "DEPOSIT",
 		sync: "CROSSING",
 		register: "REGISTER",
-		claim: gasOnly ? "CLAIM GAS" : "CLAIM",
+		claim: gasOnly ? "CLAIM GAS" : registersInClaim ? "REGISTER + CLAIM" : "CLAIM",
 		confirm: "CONFIRM",
 	}
+	const claimPrompt = claimPromptOf(fueled, registersInClaim)
 	const prompts: Record<string, string> = {
+		permit: `Allow reading ${symbol} state in your Nulo wallet.`,
 		seal: "Sign in your Ethereum wallet - encrypts this bridge's recovery secret. No funds move.",
 		approve: "First time only: approve Permit2 for this token in your Ethereum wallet. No funds move yet.",
 		sign: fueled
@@ -129,12 +146,11 @@ function depositCopy(rec: DepositRailRecord, rt: RecordRuntime, shape: { gasOnly
 		claim:
 			rt.step === "unsealing"
 				? "Sign in your Ethereum wallet to unseal the recovery secret, then confirm in your Aztec wallet."
-				: fueled
-					? "Confirm in your Aztec wallet - one transaction claims your tokens and your gas."
-					: "Confirm the claim in your Aztec wallet.",
+				: claimPrompt,
 		confirm: "Confirming on Aztec - no signature needed.",
 	}
 	const etas: Partial<Record<string, string>> = {
+		permit: "your confirmation in Nulo",
 		sign: "your signature - instant",
 		deposit: "usually under 1 min",
 		sync: "usually 1-4 min",
@@ -146,13 +162,14 @@ function depositCopy(rec: DepositRailRecord, rt: RecordRuntime, shape: { gasOnly
 }
 
 /**
- * The deposit rail, one shape for every deposit record. REGISTER renders only once this bridge has
- * actually registered the token on Aztec in a transaction of its own — a public first claim
- * registers inside the claim itself, so it never earns a step. APPROVE renders only when an
- * approval is part of THIS run (approving now, or done earlier in the session): the flow checks the
- * allowance silently, so an already-approved account never sees a step it does not need, and after
- * a reload the ephemeral outcome is gone and the step is simply not shown — honest, because a retry
- * re-checks the allowance idempotently.
+ * The deposit rail, one shape for every deposit record. A send that registers the token says so on
+ * its record: a PRIVATE one registers in a transaction of its own, so REGISTER is a phase ahead of
+ * CLAIM; a public one registers inside the claim, so CLAIM is relabeled REGISTER + CLAIM. PERMISSION
+ * renders only when the wallet's token grant is part of THIS run (being asked now, or granted
+ * earlier in the run), and APPROVE only when an approval is: the flows check both silently, so a
+ * run that needs neither never sees a step it does not need, and after a reload the ephemeral
+ * outcome is gone and the step is simply not shown — honest, because a retry re-checks
+ * idempotently.
  */
 function depositPhases(rec: DepositRailRecord, rt: RecordRuntime): BridgePhase[] {
 	// A gas-only bridge carries Fee Juice, not a token; a fueled one swaps INSIDE the deposit
@@ -160,8 +177,10 @@ function depositPhases(rec: DepositRailRecord, rt: RecordRuntime): BridgePhase[]
 	const gasOnly = assetKindOf(rec) === "fee-juice"
 	// A gas slice is DECLARED by a send's intent and EVIDENCED by an older record's fuel block.
 	const fueled = !gasOnly && (rec.fuel !== undefined || (isSendRecord(rec) && rec.intent === "token+gas"))
-	const registers = rec.isPrivate && isSendRecord(rec) && rec.registerTxHash !== undefined
+	const registering = isSendRecord(rec) && (rec.registers === true || rec.registerTxHash !== undefined)
+	const registers = rec.isPrivate && registering
 	const keys: BridgePhase["key"][] = [
+		...phaseIf(rt.step === "granting" || rt.grantOutcome === "done", "permit"),
 		...phaseIf(rec.isPrivate, "seal"),
 		...phaseIf(rt.step === "approving" || rt.approveOutcome === "done", "approve"),
 		"sign",
@@ -172,7 +191,7 @@ function depositPhases(rec: DepositRailRecord, rt: RecordRuntime): BridgePhase[]
 		"confirm",
 	]
 	const activeKey = depositActiveKey(rec, rt, registers)
-	const { labels, prompts, etas } = depositCopy(rec, rt, { gasOnly, fueled })
+	const { labels, prompts, etas } = depositCopy(rec, rt, { gasOnly, fueled, registersInClaim: registering && !rec.isPrivate })
 	const progress = activeKey === "sync" ? syncProgress(rec.depositL2Block, rt.syncBlock) : {}
 	// Hash-scoped: light only for the record's CURRENT claim tx, so a dropped/replaced claim can
 	// never inherit a previous attempt's mint dot (any tab).

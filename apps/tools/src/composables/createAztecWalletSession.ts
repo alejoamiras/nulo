@@ -733,8 +733,13 @@ async function retryCapabilities(s: SessionState): Promise<boolean> {
 	const flowEpoch = s.epoch
 	s.activeFlowEpoch = flowEpoch
 	s.error.value = null
-	s.status.value = "capability-approval"
-	await requestCapabilities(s, flowEpoch)
+	// A CONNECTED session asking for one more token stays connected on screen: the wallet's prompt
+	// is the caller's own phase to narrate, and a panel that flips to "awaiting permissions" and
+	// "setting up" reads as a connection lost and re-made. A retry from an error state walks the
+	// statuses as a fresh connect does.
+	const quiet = s.status.value === "connected"
+	if (!quiet) s.status.value = "capability-approval"
+	await requestCapabilities(s, flowEpoch, quiet)
 	return true
 }
 
@@ -765,7 +770,7 @@ async function switchWallet(s: SessionState): Promise<void> {
 // Capability controller — the grant request and the account choice.
 // ---------------------------------------------------------------------------------------------
 
-async function requestCapabilities(s: SessionState, flowEpoch: number): Promise<void> {
+async function requestCapabilities(s: SessionState, flowEpoch: number, quiet = false): Promise<void> {
 	const flowWallet = s.wallet.value
 	const flowProvider = s.provider
 	if (!flowWallet) return
@@ -797,7 +802,7 @@ async function requestCapabilities(s: SessionState, flowEpoch: number): Promise<
 		releaseFlowIfOwner(s, flowEpoch)
 		return
 	}
-	await finishSetup(s, flowEpoch, flowWallet, flowProvider)
+	await finishSetup(s, flowEpoch, flowWallet, flowProvider, quiet)
 }
 
 /** Apply the grant synchronously: publish it, reject an empty one (the caller's catch owns the
@@ -848,12 +853,19 @@ function chooseGrantedAccount(
 
 /** Shared post-selection tail for BOTH the auto path and the choose-account confirm path.
  *  Owns its errors identically for both callers (plan D-20) — it never throws. */
-async function finishSetup(s: SessionState, flowEpoch: number, flowWallet: Wallet, flowProvider: WalletProvider | null): Promise<void> {
+async function finishSetup(
+	s: SessionState,
+	flowEpoch: number,
+	flowWallet: Wallet,
+	flowProvider: WalletProvider | null,
+	/** A re-grant on a session that is already connected: the status stays put throughout. */
+	quiet = false,
+): Promise<void> {
 	try {
 		// The user already clicked Approve - we're now doing post-approval setup (registering
 		// contracts with the wallet's PXE). This can take 2-4s, so a dedicated state keeps the
 		// UI from saying "Awaiting permissions".
-		s.status.value = "setting-up"
+		if (!quiet) s.status.value = "setting-up"
 		await s.config.registerContracts(flowWallet)
 		if (isStale(s, flowEpoch)) {
 			await disconnectStaleSession(flowProvider)

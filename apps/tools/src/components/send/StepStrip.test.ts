@@ -1,17 +1,17 @@
 import { mount } from "@vue/test-utils"
 import { describe, expect, it } from "vitest"
 import { TESTIDS } from "@/lib/testids"
-import StepStrip from "./StepStrip.vue"
+import StepStrip, { type Step } from "./StepStrip.vue"
 
 const sel = (t: string) => `[data-testid="${t}"]`
 
-const STEPS = [
+const STEPS: readonly Step[] = [
 	{ key: "token", label: "Token" },
 	{ key: "amount", label: "Amount" },
 	{ key: "review", label: "Review" },
-] as const
+]
 
-function strip(props: Partial<{ active: number; completed: number }> = {}) {
+function strip(props: Partial<{ steps: readonly Step[]; active: number; completed: number }> = {}) {
 	return mount(StepStrip, {
 		attachTo: document.body,
 		props: { steps: STEPS, active: 1, completed: 1, ...props },
@@ -19,12 +19,31 @@ function strip(props: Partial<{ active: number; completed: number }> = {}) {
 }
 
 describe("StepStrip", () => {
-	it("renders one tab per step inside a tablist", () => {
+	it("renders one tab per step inside a tablist, numbering the steps still ahead", () => {
 		const w = strip()
 		expect(w.find(sel(TESTIDS.sendStepStrip)).attributes("role")).toBe("tablist")
 		const tabs = w.findAll(sel(TESTIDS.sendStep))
 		expect(tabs).toHaveLength(3)
-		expect(tabs.map((t) => t.text())).toEqual(["1Token", "2Amount", "3Review"])
+		// The done step carries a check instead of its number.
+		expect(tabs.map((t) => t.text())).toEqual(["Token", "2Amount", "3Review"])
+		w.unmount()
+	})
+
+	it("a done step shows what was chosen there, and keeps its name for assistive tech", () => {
+		const w = strip({ steps: [{ key: "token", label: "Token", value: "USDC" }, ...STEPS.slice(1)], active: 1, completed: 1 })
+		const first = w.findAll(sel(TESTIDS.sendStep))[0]
+		expect(first?.text()).toBe("USDC")
+		expect(first?.attributes("aria-label")).toBe("Token: USDC")
+		// The value is only shown once the step is behind the user.
+		const again = strip({ steps: [{ key: "token", label: "Token", value: "USDC" }, ...STEPS.slice(1)], active: 0, completed: 0 })
+		expect(again.findAll(sel(TESTIDS.sendStep))[0]?.text()).toBe("1Token")
+		w.unmount()
+		again.unmount()
+	})
+
+	it("lights the rule up to every step the user has reached", () => {
+		const w = strip({ active: 1, completed: 1 })
+		expect(w.findAll(".rule").map((r) => r.attributes("data-reached") !== undefined)).toEqual([true, false])
 		w.unmount()
 	})
 

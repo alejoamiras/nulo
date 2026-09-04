@@ -33,7 +33,8 @@ const GAS = {
 
 type Props = {
 	direction: Direction
-	token: ResolvedToken
+	token: { symbol: string; decimals: number }
+	resolving?: boolean
 	balances: TokenBalances
 	intent: SendIntent
 	amount: string
@@ -42,8 +43,10 @@ type Props = {
 	routeKind: RouteKind | null
 	routeLoading: boolean
 	txTarget: number
+	fjPerTx: bigint | null
 	gasError: string | null
 	blockedReason?: string | null
+	tokenOnlyBlocked?: string | null
 }
 
 function step(over: Partial<Props> = {}) {
@@ -60,6 +63,7 @@ function step(over: Partial<Props> = {}) {
 			routeKind: "route",
 			routeLoading: false,
 			txTarget: 20,
+			fjPerTx: 100_000_000_000_000_000n,
 			gasError: null,
 			...over,
 		},
@@ -83,13 +87,15 @@ describe("AmountStep", () => {
 		w.unmount()
 	})
 
-	it("states the gas route, and that it is still being checked", async () => {
+	it("says nothing about a working route, and states one that cannot buy gas or is still being checked", async () => {
+		expect(step().find(sel(TESTIDS.sendRouteStatus)).exists()).toBe(false)
 		const w = step({ routeKind: "no-route" })
 		const line = w.find(sel(TESTIDS.sendRouteStatus))
 		expect(line.attributes("data-route")).toBe("no-route")
 		expect(line.text()).toContain("can't buy Aztec gas")
+		// A route still being checked shows nothing — no spinner line, no stale outcome.
 		await w.setProps({ routeLoading: true })
-		expect(w.find(sel(TESTIDS.sendRouteStatus)).text()).toContain("Checking gas options")
+		expect(w.find(sel(TESTIDS.sendRouteStatus)).exists()).toBe(false)
 		w.unmount()
 	})
 
@@ -140,17 +146,19 @@ describe("AmountStep", () => {
 		w.unmount()
 	})
 
-	it("MAX fills the balance at full precision, not the display rounding", async () => {
+	it("tapping the balance line fills the field at full precision, not the display rounding", async () => {
 		const w = step({ balances: { l1: 12_345_678n } })
 		await w.find(sel(TESTIDS.sendAmountMax)).trigger("click")
 		expect(w.emitted("update:amount")).toEqual([["12.345678"]])
 		w.unmount()
 	})
 
-	it("MAX is out of the tab order and inert while the balance is unknown", () => {
+	it("the balance line is the max control — no separate link — and inert while the balance is unknown", () => {
 		const w = step({ balances: {} })
 		const max = w.find(sel(TESTIDS.sendAmountMax))
-		expect(max.attributes("tabindex")).toBe("-1")
+		expect(max.text()).toContain("Balance")
+		expect(max.attributes("aria-label")).toBe("Use the whole balance")
+		expect(w.text()).not.toMatch(/use all|max/i)
 		expect(max.attributes("disabled")).toBeDefined()
 		w.unmount()
 	})
@@ -165,7 +173,6 @@ describe("AmountStep", () => {
 
 	it("passes a changed tx target up", async () => {
 		const w = step({ intent: "token+gas", gas: GAS })
-		await w.find(sel(TESTIDS.sendGasChange)).trigger("click")
 		await w.find(sel(TESTIDS.sendGasTxTarget)).setValue("8")
 		expect(w.emitted("update:txTarget")).toEqual([[8]])
 		w.unmount()
@@ -218,7 +225,7 @@ describe("AmountStep", () => {
 
 	it("shows a sub-cent balance instead of rounding it to nothing", () => {
 		const w = step({ balances: { l1: 5_000n } })
-		expect(w.find(sel(TESTIDS.sendBalanceL1)).text()).toBe("Balance: 0.005 USDC")
+		expect(w.find(sel(TESTIDS.sendBalanceL1)).text()).toBe("Balance 0.005 USDC")
 		w.unmount()
 	})
 
@@ -230,6 +237,28 @@ describe("AmountStep", () => {
 		await w.setProps({ amount: "5" })
 		expect(w.find(sel(TESTIDS.sendAmountInput)).attributes("aria-invalid")).toBeUndefined()
 		expect(w.find(sel(TESTIDS.sendAmountInput)).attributes("aria-describedby")).toBeUndefined()
+		w.unmount()
+	})
+
+	it("says why token alone cannot go without gas held, and keeps CONTINUE off until the intent moves", async () => {
+		const w = step({ intent: "token", tokenOnlyBlocked: "Your Aztec account holds no gas yet." })
+		expect(w.find(sel(TESTIDS.sendTokenOnlyBlocked)).text()).toContain("holds no gas")
+		expect(w.find(sel(TESTIDS.sendAmountNext)).attributes("disabled")).toBeDefined()
+		expect(w.emitted("update:valid")?.at(-1)).toEqual([false])
+		await w.setProps({ intent: "token+gas", gas: GAS })
+		expect(w.find(sel(TESTIDS.sendTokenOnlyBlocked)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.sendAmountNext)).attributes("disabled")).toBeUndefined()
+		w.unmount()
+	})
+
+	it("renders on the row's own symbol while the chain is still being read, with CONTINUE off", async () => {
+		const w = step({ token: { symbol: "USDC", decimals: 6 }, resolving: true, balances: {} })
+		expect(w.find(sel(TESTIDS.sendAmountInput)).exists()).toBe(true)
+		expect(w.text()).toContain("USDC")
+		expect(w.text()).not.toMatch(/reading|loading|checking/i)
+		expect(w.find(sel(TESTIDS.sendAmountNext)).attributes("disabled")).toBeDefined()
+		await w.setProps({ resolving: false, balances: { l1: 10_000_000n } })
+		expect(w.find(sel(TESTIDS.sendAmountNext)).attributes("disabled")).toBeUndefined()
 		w.unmount()
 	})
 
