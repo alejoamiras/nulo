@@ -856,8 +856,8 @@ describe("SendWizard", () => {
 		let review = await atReview(w)
 		expect(review.props("estimate")).toEqual({
 			takes: expect.any(String),
-			networkFee: "paid from the gas you already hold on Aztec",
-			networkFeeNote: null,
+			networkFee: expect.stringContaining("from the private gas you already hold"),
+			networkFeeNote: expect.stringContaining("set aside in full"),
 			txCovered: null,
 		})
 		review.vm.$emit("back")

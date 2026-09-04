@@ -86,7 +86,9 @@ export const privateFpcFeeLimit = (gas: { daGas: number; l2Gas: number }, maxFee
  * `claim_public` at 2.585 FJ beside a 909,600-gas private claim at 1.786 FJ ≈ 1,320,000 L2 gas;
  * EURC's `register_and_claim_public` at 4.621 FJ beside a 2.845 FJ private claim ≈ 1,480,000 —
  * with the claim's 2.3× headroom. A first-ever transaction's account initialization rides on top,
- * unmeasured. Re-derive from the first extension-billed sample of each.
+ * unmeasured, and the DA limit is the private lanes' figure, not a public-lane reading. PROVISIONAL
+ * until an extension-billed sample of each shape exists: a fee ratio tracks L2 gas only while both
+ * samples share a fee vector and the DA share stays negligible. Re-derive from those samples.
  */
 export const PUBLIC_HUB_CLAIM_GAS = { daGas: 100_000, l2Gas: 3_000_000 } as const
 export const PUBLIC_HUB_REGISTER_CLAIM_GAS = { daGas: 100_000, l2Gas: 3_500_000 } as const

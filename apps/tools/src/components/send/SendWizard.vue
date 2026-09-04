@@ -391,7 +391,17 @@ function networkFeeOf(target: SendPlan | ExitPlan): { networkFee: string; networ
 	if (target.direction === "l2-to-l1") {
 		return { networkFee: "your Aztec wallet's own fee, then Ethereum gas to finish", networkFeeNote: null }
 	}
-	if (!target.gas || !SWAP || !fjPerTx) return { networkFee: "paid from the gas you already hold on Aztec", networkFeeNote: null }
+	if (!target.gas || !SWAP || !fjPerTx) {
+		// A claim from held gas pays through the fee contract, which keeps the whole ceiling it commits to.
+		const ceiling = gasShare.ownGasCeilingFor(target.token.state, target.isPrivate)
+		return {
+			networkFee:
+				ceiling === null
+					? "paid from the private gas you already hold on Aztec"
+					: `≈ ${formatCompact(ceiling, 18)} FJ from the private gas you already hold`,
+			networkFeeNote: "set aside in full from your gas at the fee contract - the claim's fee ceiling, not its exact cost",
+		}
+	}
 	if (target.isPrivate) {
 		const ceilings = gasShare.ceilingsFor(target.token.state)
 		return {

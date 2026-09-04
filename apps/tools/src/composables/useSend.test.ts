@@ -45,6 +45,8 @@ const h = vi.hoisted(() => ({
 	/** Opt-in per case: run the REAL seal (and its real envelope) after the spy records the call. */
 	realSeal: { on: false },
 	resolveHubClaimSendOpts: vi.fn(async () => ({ kind: "opts", opts: {} }) as Record<string, unknown>),
+	/** What the hub answers for the token's binding; undefined = it does not know the token yet. */
+	hubToken: { value: undefined as string | undefined },
 	sendStandaloneFjClaim: vi.fn(async (_aztec: unknown, _to: unknown, _fuel: unknown, _id: string) => {}),
 	runSend: vi.fn(),
 	rebuiltL2Token: { value: "" as string },
@@ -138,7 +140,7 @@ vi.mock("@nulo/bridge-core", async (importOriginal) => ({
 	runSend: h.runSend,
 	claimViaHub: async () => ({ path: "claim", claimTxHash: "0xhubclaim" }),
 	hubAt: () => ({ methods: {} }),
-	hubTokenFor: async () => undefined,
+	hubTokenFor: async () => h.hubToken.value,
 	readRegistration: h.readRegistration,
 }))
 
@@ -342,6 +344,7 @@ describe("useSend", () => {
 		h.address.value = L1_ACCOUNT
 		h.chainId.value = 31337
 		h.realSeal.on = false
+		h.hubToken.value = undefined
 		// clearAllMocks keeps implementations, so the cases that install a live registration have to
 		// hand the default back or their factory answer leaks into every later send.
 		h.readRegistration.mockImplementation(async () => undefined)
@@ -694,6 +697,24 @@ describe("useSend", () => {
 		expect(h.ensurePermit2Approval).not.toHaveBeenCalled()
 		expect(h.runSend).not.toHaveBeenCalled()
 		expect(useBridgeJournal().records.value).toHaveLength(0)
+	})
+
+	it("the claim asks the hub whether the token is bound, for a public record as much as a private one", async () => {
+		h.readRegistration.mockImplementation(async () => frozenRegistration)
+		h.rebuiltL2Token.value = token.l2Token
+		connectJournalDeps({
+			kv: localStorage,
+			waitMs: async () => {},
+			messageReadiness: async () => ({ checkpoint: 1, anchor: 1 }),
+			claimReceiptStatus: async () => "success",
+		})
+		const registersOf = (call: number) =>
+			(h.resolveHubClaimSendOpts.mock.calls as unknown as Array<[{ registers?: boolean }]>)[call]?.[0]?.registers
+		await useSend().send(plan({ intent: "token", isPrivate: false }))
+		expect(registersOf(0)).toBe(true)
+		h.hubToken.value = token.l2Token
+		await useSend().send(plan({ intent: "token", isPrivate: false }))
+		expect(registersOf(1)).toBe(false)
 	})
 
 	it("a hub claim paid from the wallet's own gas that leaves the bridged gas behind fires the standalone Fee Juice claim", async () => {

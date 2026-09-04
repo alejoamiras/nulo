@@ -89,11 +89,13 @@ describe("fee-juice", () => {
 		expect((await method.getFeePayer()).toString()).toBe(fpc.toString())
 	})
 
-	test("preexistingFeeJuicePayment names the sender as payer inside its empty payload", async () => {
+	test("preexistingFeeJuicePayment keeps its payload empty and names no payer in it - an EmbeddedWallet routes a sender payer as a claim in setup", async () => {
 		const sender = AztecAddress.fromNumberUnsafe(0x5e4d)
-		const payload = await preexistingFeeJuicePayment(sender).getExecutionPayload()
+		const method = preexistingFeeJuicePayment(sender)
+		const payload = await method.getExecutionPayload()
 		expect(payload.calls).toHaveLength(0)
-		expect(payload.feePayer?.toString()).toBe(sender.toString())
+		expect(payload.feePayer).toBeUndefined()
+		expect((await method.getFeePayer()).toString()).toBe(sender.toString())
 	})
 
 	test("feeJuiceClaimArgs builds the FeeJuice claim tuple verbatim", () => {
