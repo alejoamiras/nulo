@@ -16,6 +16,7 @@ import { getErrorData, getErrorMessage } from "@nulo/wallet-core/utils"
 /** Local utilities */
 import { humanizeOperationKind } from "./humanize"
 import { uniqueSignerAccounts, uniqueSignerNetworks } from "./signers"
+import { isSelfPay } from "@nulo/wallet-bridge"
 import { assertExecutableOperation, requiresFeeSelection } from "./operation-validation"
 import type { DraftUIOperation } from "./types"
 
@@ -294,18 +295,24 @@ async function buildOperationsFromPayload(
 			case "aztec_sendTx": {
 				const [network, account] = await getNetworkAndAccount(op.account)
 				const isNoFrom = op.executionMode === "default_entrypoint"
-				// `default_entrypoint` and explicit `exec.feePayer` are dApp-supplied
-				// fee paths (dApp handles fee payment via its own entrypoint).
-				// Pre-fill embedded so the FeeSettingsCard is suppressed; otherwise
-				// leave feeSettings undefined and rely on the user to pick a method.
-				// The `requiresFeeSelection` predicate at approve() gates undefined.
+				// `default_entrypoint` and an `exec.feePayer` that carries its payment are dApp-supplied
+				// fee paths: pre-fill embedded so the FeeSettingsCard is suppressed. A payer that is the
+				// account itself with no fee call asks for the wallet's own Fee Juice: pre-fill it, and
+				// the card renders locked to it. Otherwise leave feeSettings undefined for the user;
+				// the `requiresFeeSelection` predicate at approve() gates undefined.
+				const selfPay = isSelfPay(op.exec, op.opts?.from)
+				const embedded = isNoFrom || (op.exec.feePayer !== undefined && !selfPay)
 				operations.push({
 					...op,
 					network,
 					networkId: network.id,
 					account,
 					accountAddress: account.address,
-					feeSettings: isNoFrom || op.exec.feePayer !== undefined ? { paymentMethod: { kind: "embedded" } } : undefined,
+					feeSettings: embedded
+						? { paymentMethod: { kind: "embedded" } }
+						: selfPay
+							? { paymentMethod: { kind: "fj" } }
+							: undefined,
 				})
 				pushUniqueAccount(accounts, account)
 				break

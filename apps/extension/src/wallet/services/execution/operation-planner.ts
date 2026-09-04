@@ -50,7 +50,7 @@ import type {
 	Operation,
 	SendTransactionOperation,
 } from "./spec"
-import { detectEmbeddedFeePayment } from "./utils/fee-detection"
+import { type FeePayerRoute, classifyFeePayer } from "@nulo/wallet-bridge"
 
 /** The transfer-request value object used below the RPC seam. The wire
  *  (`spec.ts`) stays positional — RPC entry points construct this at the
@@ -72,6 +72,30 @@ export interface ProcessedAztecJsPayload {
 	actions: Action[]
 	feePaymentMethod: AccountFeePaymentMethodOptions
 	feeOptions: FeeOptions
+}
+
+/** The wire fee options of a dApp payload: what its payer route carries (an embedded payment, or a
+ *  requested self-pay), and every cap the dApp set. `maxPriorityFeesPerGas` is plumbed through so
+ *  the standard path's gas settings match what the dApp requested — it used to be dropped here. */
+function feeOptionsOf(
+	route: FeePayerRoute | undefined,
+	opts: SimulateOptions | ProfileOptions | SendOptions<InteractionWaitOptions>,
+): FeeOptions {
+	const maxFeesUpstream = opts.fee?.gasSettings?.maxFeesPerGas
+	const maxPriorityFeesUpstream = opts.fee?.gasSettings?.maxPriorityFeesPerGas
+	return {
+		embeddedFeePayment: route === "fjwc" || route === "fpc" ? route : undefined,
+		requestedPayment: route === "self-pay" ? "fj" : undefined,
+		gasLimits: opts.fee?.gasSettings?.gasLimits,
+		teardownGasLimits: opts.fee?.gasSettings?.teardownGasLimits,
+		maxFeesPerGas: maxFeesUpstream
+			? { feePerDaGas: maxFeesUpstream.feePerDaGas.toString(), feePerL2Gas: maxFeesUpstream.feePerL2Gas.toString() }
+			: undefined,
+		maxPriorityFeesPerGas: maxPriorityFeesUpstream
+			? { feePerDaGas: maxPriorityFeesUpstream.feePerDaGas.toString(), feePerL2Gas: maxPriorityFeesUpstream.feePerL2Gas.toString() }
+			: undefined,
+		gasPadding: 1,
+	}
 }
 
 export class OperationPlanner {
@@ -169,7 +193,7 @@ export class OperationPlanner {
 	/** Parse an Aztec.js `ExecutionPayload` + call-options into a normalized
 	 *  `Action[]` array. Collects capsules, private authwits, extra-hashed
 	 *  args, and encoded calls into a flat list. Also infers the fee
-	 *  payment method from `feePayer` via `detectEmbeddedFeePayment`. */
+	 *  payment method from the payer and the calls via `classifyFeePayer`. */
 	public async processAztecJsPayload(
 		exec: ExecutionPayload,
 		opts: SimulateOptions | ProfileOptions | SendOptions<InteractionWaitOptions>,
@@ -222,31 +246,12 @@ export class OperationPlanner {
 			} satisfies EncodedCallAction)
 		}
 
-		const maxFeesUpstream = opts.fee?.gasSettings?.maxFeesPerGas
-		const maxPriorityFeesUpstream = opts.fee?.gasSettings?.maxPriorityFeesPerGas
-		const feeOptions: FeeOptions = {
-			embeddedFeePayment: detectEmbeddedFeePayment(exec.feePayer, opts.from),
-			gasLimits: opts.fee?.gasSettings?.gasLimits,
-			teardownGasLimits: opts.fee?.gasSettings?.teardownGasLimits,
-			maxFeesPerGas: maxFeesUpstream
-				? { feePerDaGas: maxFeesUpstream.feePerDaGas.toString(), feePerL2Gas: maxFeesUpstream.feePerL2Gas.toString() }
-				: undefined,
-			// Plumbed through so the standard path's gas settings match
-			// what the dApp requested. Previously, this field was dropped
-			// here.
-			maxPriorityFeesPerGas: maxPriorityFeesUpstream
-				? {
-						feePerDaGas: maxPriorityFeesUpstream.feePerDaGas.toString(),
-						feePerL2Gas: maxPriorityFeesUpstream.feePerL2Gas.toString(),
-					}
-				: undefined,
-			gasPadding: 1,
-		}
-
+		const route = classifyFeePayer(exec.feePayer, opts.from, exec.calls)
+		const feeOptions = feeOptionsOf(route, opts)
 		const feePaymentMethod =
-			feeOptions.embeddedFeePayment === "fjwc"
+			route === "fjwc"
 				? AccountFeePaymentMethodOptions.FEE_JUICE_WITH_CLAIM
-				: feeOptions.embeddedFeePayment === "fpc"
+				: route === "fpc"
 					? AccountFeePaymentMethodOptions.EXTERNAL
 					: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE
 

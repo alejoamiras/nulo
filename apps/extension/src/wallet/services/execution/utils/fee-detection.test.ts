@@ -1,15 +1,23 @@
 import { describe, test, expect } from "vitest"
 import { detectEmbeddedFeePayment, isNoFromRequest } from "./fee-detection"
 
+const CLAIM = [{ name: "claim_and_end_setup" }]
+
 describe("detectEmbeddedFeePayment", () => {
 	test("returns undefined when feePayer is undefined or null", () => {
 		expect(detectEmbeddedFeePayment(undefined, "0xabc")).toBeUndefined()
 		expect(detectEmbeddedFeePayment(null, "0xabc")).toBeUndefined()
 	})
 
-	test('returns "fjwc" when feePayer equals from (FeeJuice with claim)', () => {
+	test('returns "fjwc" when feePayer equals from AND the payload claims Fee Juice in setup', () => {
 		const addr = "0x1a228350bbfa130d71aa1105c93e6432bd8c65476bc46ba579d2dc885e2873d1"
-		expect(detectEmbeddedFeePayment(addr, addr)).toBe("fjwc")
+		expect(detectEmbeddedFeePayment(addr, addr, CLAIM)).toBe("fjwc")
+	})
+
+	test("a sender payer with no fee call is a requested self-pay, not an embedded payment", () => {
+		const addr = "0x1a228350bbfa130d71aa1105c93e6432bd8c65476bc46ba579d2dc885e2873d1"
+		expect(detectEmbeddedFeePayment(addr, addr)).toBeUndefined()
+		expect(detectEmbeddedFeePayment(addr, addr, [{ name: "transfer" }])).toBeUndefined()
 	})
 
 	test('returns "fpc" when feePayer differs from from (external FPC)', () => {
@@ -27,7 +35,7 @@ describe("detectEmbeddedFeePayment", () => {
 	test("matches when feePayer is an object and from is a string with same value", () => {
 		const addr = "0xabc"
 		const feePayer = { toString: () => addr }
-		expect(detectEmbeddedFeePayment(feePayer, addr)).toBe("fjwc")
+		expect(detectEmbeddedFeePayment(feePayer, addr, CLAIM)).toBe("fjwc")
 	})
 
 	test('treats empty string feePayer as defined (returns "fpc", not undefined)', () => {

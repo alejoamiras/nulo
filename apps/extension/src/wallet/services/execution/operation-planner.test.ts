@@ -216,6 +216,16 @@ describe("OperationPlanner.processAztecJsPayload", () => {
 		expect(feeOptions.gasPadding).toBe(1)
 	})
 
+	test("a payer that is the sender with no fee call is a requested self-pay: preexisting Fee Juice, the wallet's own method, not embedded", async () => {
+		const planner = new OperationPlanner(makeProfile(), makeTokenService(makeToken()))
+		const from = "0x1a228350bbfa130d71aa1105c93e6432bd8c65476bc46ba579d2dc885e2873d1"
+		const exec = { calls: [], authWitnesses: [], capsules: [], extraHashedArgs: [], feePayer: from } as unknown as ExecutionPayload
+		const { feePaymentMethod: method, feeOptions } = await planner.processAztecJsPayload(exec, { from } as never)
+		expect(method).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		expect(feeOptions.embeddedFeePayment).toBeUndefined()
+		expect(feeOptions.requestedPayment).toBe("fj")
+	})
+
 	// Regression pin: the planner previously extracted only
 	// `maxFeesPerGas` from `opts.fee.gasSettings`, silently dropping
 	// `maxPriorityFeesPerGas`. Both fields are now stringified into the

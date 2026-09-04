@@ -83,6 +83,31 @@ describe("materializeRequest", () => {
 		expect((out as { feeSettings: unknown }).feeSettings).toEqual({ paymentMethod: { kind: "embedded" } })
 	})
 
+	test("aztec_sendTx whose payer is the account itself with no fee call: feeSettings = the wallet's own Fee Juice", async () => {
+		const deps = makeDeps()
+		const out = await materializeRequest(
+			{
+				kind: "aztec_sendTx",
+				account: "eip155:1337:0xabc",
+				exec: { calls: [{ name: "transfer" }], feePayer: "0xabc" },
+				opts: { from: "0xabc" },
+			} as never,
+			deps,
+		)
+		expect((out as { feeSettings: unknown }).feeSettings).toEqual({ paymentMethod: { kind: "fj" } })
+		// The same payer WITH the setup-ending claim carries its payment: embedded.
+		const claim = await materializeRequest(
+			{
+				kind: "aztec_sendTx",
+				account: "eip155:1337:0xabc",
+				exec: { calls: [{ name: "claim_and_end_setup" }, { name: "transfer" }], feePayer: "0xabc" },
+				opts: { from: "0xabc" },
+			} as never,
+			deps,
+		)
+		expect((claim as { feeSettings: unknown }).feeSettings).toEqual({ paymentMethod: { kind: "embedded" } })
+	})
+
 	test("aztec_sendTx with no self-fee path: feeSettings undefined (draft)", async () => {
 		const deps = makeDeps()
 		const out = await materializeRequest(

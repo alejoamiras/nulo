@@ -47,6 +47,7 @@ describe("fingerprintOperation", () => {
 		const base = fingerprintOperation(makeInput({ fee: { gasPadding: 1.05 } }))
 		expect(fingerprintOperation(makeInput({ fee: { gasPadding: 1.1 } }))).not.toBe(base)
 		expect(fingerprintOperation(makeInput({ fee: { gasPadding: 1.05, gasLimits: { daGas: 1, l2Gas: 2 } } }))).not.toBe(base)
+		expect(fingerprintOperation(makeInput({ fee: { gasPadding: 1.05, requestedPayment: "fj" } }))).not.toBe(base)
 		expect(fingerprintOperation(makeInput({ fee: { gasPadding: 1.05, teardownGasLimits: { daGas: 1, l2Gas: 2 } } }))).not.toBe(base)
 		expect(fingerprintOperation(makeInput({ fee: { gasPadding: 1.05, maxFeesPerGas: { feePerDaGas: 1, feePerL2Gas: 2 } } }))).not.toBe(
 			base,

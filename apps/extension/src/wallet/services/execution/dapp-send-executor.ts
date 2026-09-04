@@ -726,7 +726,7 @@ export class DappSendExecutor {
 				// helper's JSDoc for the cap rationale.
 				const maxFeesUpstream = op.opts.fee?.gasSettings?.maxFeesPerGas
 				const feeOpts: FeeOptions = {
-					embeddedFeePayment: detectEmbeddedFeePayment(op.exec?.feePayer, op.opts.from) ?? "fpc",
+					embeddedFeePayment: detectEmbeddedFeePayment(op.exec?.feePayer, op.opts.from, op.exec?.calls) ?? "fpc",
 					gasLimits: op.opts.fee?.gasSettings?.gasLimits,
 					teardownGasLimits: op.opts.fee?.gasSettings?.teardownGasLimits,
 					maxFeesPerGas: maxFeesUpstream

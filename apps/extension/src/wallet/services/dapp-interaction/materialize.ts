@@ -30,6 +30,7 @@
 import type { Account } from "@/wallet/services/account/service"
 import type { Network } from "@/wallet/services/network/service"
 import type { DraftOperation, Operation } from "@nulo/wallet-bridge"
+import { isSelfPay } from "@nulo/wallet-bridge"
 import type { OperationRequest } from "./spec"
 
 export type MaterializeDeps = {
@@ -81,12 +82,20 @@ export async function materializeRequest(request: OperationRequest, deps: Materi
 		case "aztec_sendTx": {
 			const [network, account] = await deps.resolveNetworkAndAccount(request.account)
 			const isNoFrom = request.executionMode === "default_entrypoint"
-			const hasEmbeddedFeePayer = request.exec?.feePayer !== undefined
+			// A payer that is the account itself with no fee call asks for the wallet's own Fee Juice
+			// method; a payer that carries its payment is embedded.
+			const selfPay = isSelfPay(request.exec, request.opts?.from)
+			const hasEmbeddedFeePayer = request.exec?.feePayer !== undefined && !selfPay
 			return {
 				...request,
 				networkId: network.id,
 				accountAddress: account.address,
-				feeSettings: isNoFrom || hasEmbeddedFeePayer ? { paymentMethod: { kind: "embedded" } } : undefined,
+				feeSettings:
+					isNoFrom || hasEmbeddedFeePayer
+						? { paymentMethod: { kind: "embedded" } }
+						: selfPay
+							? { paymentMethod: { kind: "fj" } }
+							: undefined,
 			} as DraftOperation
 		}
 		case "send_transaction": {

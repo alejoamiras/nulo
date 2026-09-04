@@ -16,6 +16,7 @@
  * estimator.
  */
 import FeeSettingsCard from "@/popup/components/modules/send/FeeSettingsCard.vue"
+import { isSelfPay } from "@nulo/wallet-bridge"
 import type { ProfileInfo } from "@/wallet/services/profile/client"
 import type { FeeSettings } from "@/wallet/services/execution/client"
 import type { DappMetadata } from "@/wallet/services/dapp-session/client"
@@ -71,9 +72,15 @@ const isSendTx = (op: UIOperation): op is SendLikeUIOp => op.kind === "send_tran
 
 const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 	if (op.kind === "send_transaction") return op.fee?.embeddedFeePayment !== undefined
-	if (op.kind === "aztec_sendTx") return op.executionMode === "default_entrypoint" || op.exec?.feePayer !== undefined
+	if (op.kind === "aztec_sendTx")
+		return op.executionMode === "default_entrypoint" || (op.exec?.feePayer !== undefined && !isSelfPay(op.exec, op.opts?.from))
 	return false
 }
+
+/** The method a dApp asked for by naming the account itself as payer with no fee call: the card
+ *  locks to it, so the sponsored FPC is never on offer for a transaction the app expects the
+ *  account's own Fee Juice to pay. */
+const requestedMethod = (op: SendLikeUIOp): "fj" | null => (op.kind === "aztec_sendTx" && isSelfPay(op.exec, op.opts?.from) ? "fj" : null)
 </script>
 
 <template>
@@ -236,6 +243,7 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 		<FeeSettingsCard
 			v-else
 			embedded
+			:lockedMethod="requestedMethod(op)"
 			:profile="profile"
 			:network="op.network"
 			:account="op.account"
