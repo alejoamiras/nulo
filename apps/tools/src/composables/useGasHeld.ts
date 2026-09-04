@@ -1,15 +1,17 @@
 /**
- * Whether the connected Aztec account already holds gas: a token-only claim has no bridged Fee
- * Juice to pay itself with, so it spends what the account holds — public Fee Juice, or the private
- * remainder at the PrivateFPC — and cannot land without either. Read ahead of the review so the
- * user is steered to a fueled send before signing anything on Ethereum.
+ * The private Fee Juice the connected Aztec account holds at the PrivateFPC: a token-only claim has
+ * no bridged Fee Juice to pay itself with, so it spends this — and only this. The account's public
+ * Fee Juice cannot be named as a dApp transaction's payer through the wallet (a payer with no claim
+ * call is routed as a claim-in-setup that never ends setup), and a claim sent without a payer is
+ * left to the wallet's picker, whose default is the sponsored FPC no bridge path may lean on. Read
+ * ahead of the review so the user is steered to a fueled send before signing anything on Ethereum.
  *
- * `null` means unknown: no Aztec account yet, or a read that failed. The claim's own gate reads
- * again and fails closed, so an unknown here blocks nothing.
+ * `null` means unknown: no Aztec account yet, or a read that failed. The amount step blocks nothing
+ * on an unknown; the confirm requires a known balance, and the claim's own gate reads again.
  */
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { type Ref, ref, watch } from "vue"
-import { readFeeJuiceOrNull, readPrivateFeeJuiceBalance, readPublicFeeJuiceBalance } from "./deposit-flow"
+import { readFeeJuiceOrNull, readPrivateFeeJuiceBalance } from "./deposit-flow"
 
 export interface GasHeldDeps {
 	aztec: () => unknown
@@ -17,20 +19,13 @@ export interface GasHeldDeps {
 }
 
 export interface UseGasHeldHandle {
-	readonly held: Ref<boolean | null>
+	readonly credit: Ref<bigint | null>
 	refresh: () => Promise<void>
 	dispose: () => void
 }
 
-/** One readable non-zero balance is enough to pay; two readable zeros mean none; anything unread
- *  leaves the answer open rather than claiming an empty account. */
-export function verdictOf(pub: bigint | null, priv: bigint | null): boolean | null {
-	if ((pub ?? 0n) > 0n || (priv ?? 0n) > 0n) return true
-	return pub === null || priv === null ? null : false
-}
-
 export function useGasHeld(deps: GasHeldDeps): UseGasHeldHandle {
-	const held = ref<boolean | null>(null)
+	const credit = ref<bigint | null>(null)
 	let epoch = 0
 	let disposed = false
 
@@ -39,16 +34,13 @@ export function useGasHeld(deps: GasHeldDeps): UseGasHeldHandle {
 		const aztec = deps.aztec()
 		const account = deps.account()
 		if (!aztec || !account) {
-			held.value = null
+			credit.value = null
 			return
 		}
 		const recipient = AztecAddress.fromStringUnsafe(account)
-		const [pub, priv] = await Promise.all([
-			readFeeJuiceOrNull("public FJ", () => readPublicFeeJuiceBalance(aztec, recipient)),
-			readFeeJuiceOrNull("private FJ", () => readPrivateFeeJuiceBalance(aztec, recipient)),
-		])
+		const read = await readFeeJuiceOrNull("private FJ", () => readPrivateFeeJuiceBalance(aztec, recipient))
 		if (disposed || mine !== epoch) return
-		held.value = verdictOf(pub, priv)
+		credit.value = read
 	}
 
 	const stop = watch(
@@ -63,5 +55,5 @@ export function useGasHeld(deps: GasHeldDeps): UseGasHeldHandle {
 		stop()
 	}
 
-	return { held, refresh, dispose }
+	return { credit, refresh, dispose }
 }

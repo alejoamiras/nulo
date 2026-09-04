@@ -12,16 +12,20 @@ import { getContractInstanceFromInstantiationParams } from "@aztec/stdlib/contra
 import { describe, expect, it } from "vitest"
 
 import {
+	deriveBridgeSecret,
 	DOM_SEP__FPC_BRIDGE_SECRET,
+	ownGasCeiling,
+	ownGasTxs,
 	PRIVATE_FPC_ADDRESS,
 	PRIVATE_FPC_SALT,
 	PRIVATE_HUB_CLAIM_GAS,
 	PRIVATE_HUB_REGISTER_GAS,
-	deriveBridgeSecret,
 	privateFeeJuicePayment,
 	privateFpcFeeLimit,
 	privateFuelSecretHash,
 	privateMintAndPayFee,
+	PUBLIC_HUB_CLAIM_GAS,
+	PUBLIC_HUB_REGISTER_CLAIM_GAS,
 } from "./private-fuel"
 
 /**
@@ -225,5 +229,35 @@ describe("privateFpcFeeLimit", () => {
 		expect(PRIVATE_HUB_REGISTER_GAS.l2Gas).toBeGreaterThan(PRIVATE_HUB_CLAIM_GAS.l2Gas)
 		expect(PRIVATE_HUB_REGISTER_GAS.l2Gas).toBeLessThanOrEqual(6_540_000)
 		expect(PRIVATE_HUB_REGISTER_GAS.daGas).toBeLessThanOrEqual(117_668)
+	})
+})
+
+describe("a hub claim paid from held gas", () => {
+	const fees = { feePerDaGas: 3n, feePerL2Gas: 7n }
+
+	it("sends one public transaction, sized for a registration when the hub does not know the token", () => {
+		expect(ownGasTxs({ isPrivate: false, registers: false })).toEqual({ claim: PUBLIC_HUB_CLAIM_GAS })
+		expect(ownGasTxs({ isPrivate: false, registers: true })).toEqual({ claim: PUBLIC_HUB_REGISTER_CLAIM_GAS })
+		expect(ownGasCeiling({ isPrivate: false, registers: true }, fees)).toBe(privateFpcFeeLimit(PUBLIC_HUB_REGISTER_CLAIM_GAS, fees))
+	})
+
+	it("sends a registration ahead of a private claim, and sets both ceilings aside", () => {
+		expect(ownGasTxs({ isPrivate: true, registers: true })).toEqual({
+			claim: PRIVATE_HUB_CLAIM_GAS,
+			register: PRIVATE_HUB_REGISTER_GAS,
+		})
+		expect(ownGasTxs({ isPrivate: true, registers: false })).toEqual({ claim: PRIVATE_HUB_CLAIM_GAS })
+		expect(ownGasCeiling({ isPrivate: true, registers: true }, fees)).toBe(
+			privateFpcFeeLimit(PRIVATE_HUB_CLAIM_GAS, fees) + privateFpcFeeLimit(PRIVATE_HUB_REGISTER_GAS, fees),
+		)
+	})
+
+	it("the public limits keep the claim's headroom over their derived samples and fit one transaction", () => {
+		// Derived samples: ≈1,320,000 (plain) and ≈1,480,000 (registering) L2 gas; 2.3× headroom; txsLimits 6,540,000.
+		expect(PUBLIC_HUB_CLAIM_GAS.l2Gas).toBeGreaterThanOrEqual(1_320_000 * 2.2)
+		expect(PUBLIC_HUB_REGISTER_CLAIM_GAS.l2Gas).toBeGreaterThanOrEqual(1_480_000 * 2.2)
+		expect(PUBLIC_HUB_REGISTER_CLAIM_GAS.l2Gas).toBeLessThanOrEqual(6_540_000)
+		expect(PUBLIC_HUB_CLAIM_GAS.daGas).toBeLessThanOrEqual(117_668)
+		expect(PUBLIC_HUB_REGISTER_CLAIM_GAS.daGas).toBeLessThanOrEqual(117_668)
 	})
 })

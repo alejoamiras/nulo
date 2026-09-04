@@ -63,7 +63,13 @@ const ONE_TO_ONE = { probeIn: 1n, probeOut: 1n }
 const fjPerTx = SWAP ? BigInt(SWAP.fjPerTx) : null
 /** A token-only claim spends gas the account already holds; there is no sponsor to fall back on. */
 const NO_GAS_FOR_TOKEN_ONLY =
-	"Your Aztec account holds no gas (Fee Juice) yet, so the token could not be claimed. Choose Token + gas to arrive with some."
+	"Your Aztec account holds no gas the bridge can claim with (private Fee Juice at the fee contract), so the token alone could not be claimed. Choose Token + gas to arrive with some."
+const SHORT_GAS_FOR_TOKEN_ONLY =
+	"Your Aztec account's private gas is under what this claim sets aside at current network fees. Choose Token + gas to arrive with more, or bridge gas first."
+const UNREAD_GAS_FOR_TOKEN_ONLY =
+	"Your Aztec account's gas could not be read just now, so the claim was not confirmed. Try again in a moment."
+const UNPRICED_TOKEN_ONLY =
+	"Aztec's network fees could not be re-read just now, so a claim from your held gas was not confirmed. Try again in a moment."
 
 const l1 = useL1Wallet()
 const bridge = useBridgeWallet()
@@ -296,10 +302,19 @@ const exitBlocked = computed<string | null>(() => {
 	return isExit.value && token && token.state.kind !== "registered" ? EXIT_TOKEN_NOT_REGISTERED : null
 })
 
-/** A deposit that buys no gas is claimed with gas the account already holds — known to be none. */
+/** What a claim from the account's held gas sets aside for this token, at the last price; null while unpriced. */
+const ownGasCeiling = computed(() => (resolved.value ? gasShare.ownGasCeilingFor(resolved.value.state, isPrivate.value) : null))
 /** Why the token alone cannot be chosen right now — known as soon as the gas verdict lands, whatever
- *  the choice on screen, so the card itself can be greyed out and say why. */
-const tokenOnlyReason = computed<string | null>(() => (!isExit.value && gasHeld.held.value === false ? NO_GAS_FOR_TOKEN_ONLY : null))
+ *  the choice on screen, so the card itself can be greyed out and say why. A token-only claim pays
+ *  from the private gas the account holds at the fee contract, and only from that. */
+const tokenOnlyReason = computed<string | null>(() => {
+	if (isExit.value) return null
+	const credit = gasHeld.credit.value
+	if (credit === null) return null
+	if (credit === 0n) return NO_GAS_FOR_TOKEN_ONLY
+	const ceiling = ownGasCeiling.value
+	return ceiling !== null && credit < ceiling ? SHORT_GAS_FOR_TOKEN_ONLY : null
+})
 const tokenOnlyBlocked = computed<string | null>(() => (intent.value === "token" ? tokenOnlyReason.value : null))
 // A gasless account's choice moves off the token alone — at the verdict, and again whenever a new
 // token resets the choice — to the one that can go through; a token that can buy no gas at all
@@ -641,14 +656,14 @@ async function preflight(snapshot: ReviewSnapshot): Promise<boolean> {
 	return false
 }
 
-/** The confirm's re-reads, under the preflighting hold: a token-only claim needs gas already held, a
- *  private slice needs the fees it was priced at to still hold — neither is trusted from the review.
- *  Returns whether the fees were re-read. */
+/** The confirm's re-reads, under the preflighting hold: a token-only claim needs the gas it will
+ *  pay with to be held and priced, a private slice needs the fees it was priced at to still hold —
+ *  neither is trusted from the review. Returns whether the fees were re-read. */
 async function preflightReads(tokenOnly: boolean, privateSlice: boolean): Promise<boolean> {
 	preflighting.value = true
 	try {
 		if (tokenOnly) await gasHeld.refresh()
-		return privateSlice ? await gasShare.prime() : true
+		return privateSlice || tokenOnly ? await gasShare.prime() : true
 	} finally {
 		preflighting.value = false
 	}
@@ -658,8 +673,20 @@ async function preflightReads(tokenOnly: boolean, privateSlice: boolean): Promis
  *  line, a string = the named reason. */
 function preflightStandDown(target: SendPlan, privateSlice: GasLegPlan | null, repriced: boolean): string | null | undefined {
 	if (tokenOnlyBlocked.value !== null) return null
+	if (target.intent === "token") return tokenOnlyStoodDown(target, repriced)
 	if (!privateSlice) return undefined
 	return privateSliceStoodDown(target.token.state, privateSlice.minFuelOutput, repriced) ?? undefined
+}
+
+/** Why a token-only send cannot be signed at confirm: the gas it will claim with must be KNOWN to
+ *  cover what the claim sets aside at fees re-read now — an unread balance or an unpriced claim is
+ *  not one to fund an irreversible deposit on. */
+function tokenOnlyStoodDown(target: SendPlan, repriced: boolean): string | undefined {
+	if (!repriced) return UNPRICED_TOKEN_ONLY
+	const credit = gasHeld.credit.value
+	if (credit === null) return UNREAD_GAS_FOR_TOKEN_ONLY
+	const ceiling = gasShare.ownGasCeilingFor(target.token.state, target.isPrivate)
+	return ceiling !== null && credit >= ceiling ? undefined : SHORT_GAS_FOR_TOKEN_ONLY
 }
 
 /** Why a private slice cannot be signed at confirm: the fees could not be re-read (a price nobody

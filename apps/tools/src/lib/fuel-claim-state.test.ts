@@ -4,7 +4,7 @@ import {
 	PRIVATE_FUEL_INSUFFICIENCY_MSG,
 	decideFuelClaim,
 	decideFuelLadder,
-	decideOwnGasSource,
+	decideOwnGasCredit,
 	decidePrivateFuelClaim,
 	decideStandaloneFuelRecovery,
 	isPrivateFuelInsufficiency,
@@ -170,45 +170,25 @@ describe("decidePrivateFuelClaim (Option A — never public/Sponsored)", () => {
 	})
 })
 
-describe("decideOwnGasSource (the claim names its payer; the wallet's picker never does)", () => {
-	const at = (publicFeeJuice: bigint | null, privateFeeJuice: bigint | null, preferPrivate = false) =>
-		decideOwnGasSource({ publicFeeJuice, privateFeeJuice, ceiling: 100n, preferPrivate })
+describe("decideOwnGasCredit (the private balance at the FPC is the only payer a held-gas claim can name)", () => {
+	const at = (privateFeeJuice: bigint | null) => decideOwnGasCredit({ privateFeeJuice, ceiling: 100n })
 
-	it("public Fee Juice covering the ceiling pays; a private record prefers a private balance that covers it", () => {
-		expect(at(100n, 100n)).toBe("public")
-		expect(at(100n, 100n, true)).toBe("private")
-		expect(at(100n, 99n, true)).toBe("public")
+	it("pays when the balance covers the ceiling, exactly at it included", () => {
+		expect(at(100n)).toBe("pays")
+		expect(at(1_000n)).toBe("pays")
 	})
 
-	it("the private balance pays when the public one cannot cover the ceiling", () => {
-		expect(at(0n, 100n)).toBe("private")
-		expect(at(99n, 100n)).toBe("private")
+	it("a balance under the ceiling is short - refused before the FPC refuses it, since it refunds nothing", () => {
+		expect(at(99n)).toBe("short")
+		expect(at(1n)).toBe("short")
 	})
 
-	it("public Fee Juice under the ceiling is still sent - the wallet's own estimate is what the network enforces", () => {
-		expect(at(1n, 0n)).toBe("public")
-		expect(at(1n, 99n)).toBe("public")
+	it("known and zero is a cold account", () => {
+		expect(at(0n)).toBe("none")
 	})
 
-	it("a private balance under the ceiling, with no public Fee Juice, is refused before the FPC refuses it", () => {
-		expect(at(0n, 99n)).toBe("private-short")
-	})
-
-	it("both known + zero is a cold account", () => {
-		expect(at(0n, 0n)).toBe("none")
-	})
-
-	it("FAIL-CLOSED: a failed read with nothing known to pay is unverifiable, never a false 'no gas'", () => {
-		expect(at(null, 0n)).toBe("unverifiable")
-		expect(at(0n, null)).toBe("unverifiable")
-		expect(at(null, null)).toBe("unverifiable")
-		expect(at(null, 99n)).toBe("unverifiable")
-	})
-
-	it("a known balance that pays overrides the other read failing", () => {
-		expect(at(100n, null)).toBe("public")
-		expect(at(null, 100n)).toBe("private")
-		expect(at(5n, null)).toBe("public")
+	it("FAIL-CLOSED: a failed read is unverifiable, never a false 'no gas'", () => {
+		expect(at(null)).toBe("unverifiable")
 	})
 })
 

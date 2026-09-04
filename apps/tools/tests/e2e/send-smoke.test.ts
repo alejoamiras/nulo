@@ -49,7 +49,7 @@ const h = vi.hoisted(() => ({
 		/** What the exit's read-only preflight sees on Aztec before it authorises a burn. */
 		l2Balance: 5n * 10n ** 8n,
 		/** Whether the Aztec account holds gas for a token-only claim; null = unknown. */
-		gasHeld: { value: null as boolean | null },
+		gasHeld: { value: null as bigint | null },
 		listGate: null as null | Promise<void>,
 		receiptGate: null as null | Promise<void>,
 		order: [] as string[],
@@ -170,7 +170,7 @@ vi.mock("@aztec/aztec.js/node", () => ({
 }))
 // The gas-held read reaches the FeeJuice contract through the wallet; the smoke answers it directly.
 vi.mock("@/composables/useGasHeld", () => ({
-	useGasHeld: () => ({ held: h.state.gasHeld, refresh: async () => {}, dispose: () => {} }),
+	useGasHeld: () => ({ credit: h.state.gasHeld, refresh: async () => {}, dispose: () => {} }),
 }))
 
 vi.mock("@nulo/bridge-core", async (orig) => {
@@ -459,7 +459,7 @@ describe("send wizard smoke", () => {
 		h.state.hubTokens.clear()
 		h.state.portals.clear()
 		h.state.route = null
-		h.state.gasHeld.value = null
+		h.state.gasHeld.value = 10n ** 18n
 		h.state.withdrawsPaused = false
 		h.state.exitsPaused = false
 		h.state.l2Balance = 5n * 10n ** 8n
@@ -672,7 +672,7 @@ describe("send wizard smoke", () => {
 	it("an account with no gas cannot choose the token alone: the card is greyed out with its reason and the choice moves to token + gas", async () => {
 		markRegistered(LIST_WBTC, LIST_DECIMALS)
 		h.state.route = ROUTE
-		h.state.gasHeld.value = false
+		h.state.gasHeld.value = 0n
 		const w = await mountView()
 		await pick(w, LIST_WBTC)
 		await toAmount(w, "1", { route: true })

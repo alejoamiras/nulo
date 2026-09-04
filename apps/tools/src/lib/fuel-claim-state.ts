@@ -154,54 +154,39 @@ function decideHashlessAttempt(e: PrivateFuelClaimEvidence): { action: PrivateFu
 }
 
 /**
- * Which gas the account ALREADY holds pays a claim with no fresh Fee Juice message of its own (a
- * no-fuel bridge, a fee spike, a spent prior attempt, the user's choice to claim without the bridged
- * gas): its public Fee Juice, or the private balance a prior private fuel claim credited at the
- * PrivateFPC. The choice is made here and sent with the claim — the wallet's own picker never
- * decides, because its default on an account without public Fee Juice is the sponsored FPC, which
- * no bridge path may lean on.
+ * Whether the private Fee Juice the account ALREADY holds at the PrivateFPC pays a claim with no
+ * fresh Fee Juice message of its own (a no-fuel bridge, a fee spike, a spent prior attempt, the
+ * user's choice to claim without the bridged gas). That balance is the ONLY payer such a claim can
+ * name: the account's public Fee Juice cannot be named as a dApp transaction's payer through the
+ * wallet (a payer with no claim call is routed as a claim-in-setup that never ends setup), and a
+ * claim sent without a payer is left to the wallet's picker, whose default is the sponsored FPC
+ * that no bridge path may lean on.
  *
- * `ceiling` is the fee the claim commits to (limits × predicted fees): the FPC deducts exactly that
- * from the private balance, and the protocol requires the public payer to hold it. The preferred
- * balance pays when it covers the ceiling, else the other; public Fee Juice below it is still sent
- * (the wallet's own estimate, not this reference, is what the network enforces), a private balance
- * below it is refused (the FPC would).
+ * `ceiling` is what the claim commits to (limits × predicted fees, every transaction it makes): the
+ * FPC deducts exactly that and refunds nothing, so a balance under it is refused before the FPC
+ * refuses it.
  *
- * **Fail-closed reads:** a balance is `bigint | null` where `null` = the read THREW (≠ a real zero).
- * With nothing known to pay, a failed read yields `unverifiable` ("couldn't check — retry"), never a
- * false "no gas".
+ * **Fail-closed read:** `null` = the read THREW (≠ a real zero) → `unverifiable` ("couldn't check —
+ * retry"), never a false "no gas".
  */
-export type OwnGasSource =
-	| "public" // the account's public Fee Juice pays, as the transaction's own fee payer.
-	| "private" // the private balance at the PrivateFPC pays (`pay_fee`).
-	| "private-short" // only a private balance is known, and it is under the ceiling: the FPC would refuse.
-	| "unverifiable" // a balance read failed and no KNOWN balance can pay - fail closed ("couldn't check").
-	| "none" // both balances known + zero - a truly cold account.
+export type OwnGasCredit =
+	| "pays" // the private balance covers the ceiling: the FPC pays (`pay_fee`).
+	| "short" // held, but under the ceiling - the FPC would refuse.
+	| "unverifiable" // the read failed - fail closed ("couldn't check").
+	| "none" // known and zero - a truly cold account.
 
-export interface OwnGasSourceInputs {
-	/** Public Fee Juice balance (base units), or `null` if the `balance_of_public` read FAILED. */
-	publicFeeJuice: bigint | null
-	/** Private Fee Juice at the PrivateFPC (base units, via `balance_of`), or `null` if that read FAILED. */
+export interface OwnGasCreditInputs {
+	/** Private Fee Juice at the PrivateFPC (base units, via `balance_of`), or `null` if the read FAILED. */
 	privateFeeJuice: bigint | null
 	/** The fee the claim commits to, in Fee Juice base units. */
 	ceiling: bigint
-	/** A private record prefers its private balance: a public fee payer names the account on chain. */
-	preferPrivate: boolean
 }
 
-export function decideOwnGasSource(i: OwnGasSourceInputs): OwnGasSource {
-	const pub = i.publicFeeJuice
-	const priv = i.privateFeeJuice
-	const publicCovers = pub !== null && pub >= i.ceiling
-	const privateCovers = priv !== null && priv >= i.ceiling
-	if (i.preferPrivate && privateCovers) return "private"
-	if (publicCovers) return "public"
-	if (privateCovers) return "private"
-	// Neither balance is known to cover the ceiling. An unread public balance might: fail closed.
-	if (pub === null) return "unverifiable"
-	if (pub > 0n) return "public"
-	if (priv === null) return "unverifiable"
-	return priv > 0n ? "private-short" : "none"
+export function decideOwnGasCredit(i: OwnGasCreditInputs): OwnGasCredit {
+	const credit = i.privateFeeJuice
+	if (credit === null) return "unverifiable"
+	if (credit >= i.ceiling) return "pays"
+	return credit > 0n ? "short" : "none"
 }
 
 /** The exact PrivateFPC `mint_and_pay_fee` insufficiency assert (verified in the installed 215fd08

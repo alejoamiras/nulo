@@ -362,8 +362,9 @@ async function buildHubClaim(
 	const recipientAddr = AztecAddress.fromStringUnsafe(rec.recipient)
 	const hub = hubAt(aztec as never, HUB.toString())
 	// Whether THIS claim registers the token is a live fact (someone may have registered it since
-	// the send), and it decides which transaction spends the fuel; the hub re-checks at send time.
-	const registers = rec.isPrivate && (await hubTokenFor(hub, (rec.token as JournalTokenBlock).erc20, rec.recipient)) === undefined
+	// the send): it decides which transaction spends the fuel, and what a claim from held gas sets
+	// aside; the hub re-checks at send time.
+	const registers = (await hubTokenFor(hub, (rec.token as JournalTokenBlock).erc20, rec.recipient)) === undefined
 	const fee = await resolveHubClaimSendOpts({
 		rec,
 		recipientAddr,

@@ -106,8 +106,10 @@ export const sponsoredFeePayment = (fpc: AztecAddress): SponsoredFeePaymentMetho
  * class for this because the protocol needs no calls at all — the account entrypoint detects a
  * zero-call fee payload and routes it as PREEXISTING_FEE_JUICE (see aztec.js
  * account_entrypoint_meta_payment_method), with the sender as fee payer. This is the mainnet
- * deploy sequence's steady-state method after the claim-in-tx bootstrap, and the way a dApp
- * claim names the account's own Fee Juice as its payer.
+ * deploy sequence's steady-state method after the claim-in-tx bootstrap. It is NOT a way for a
+ * dApp to name the account's public Fee Juice through the Nulo wallet: the wallet routes any
+ * payload whose payer is the sender as a claim-in-setup (FEE_JUICE_WITH_CLAIM), which never ends
+ * setup without a `claim_and_end_setup` call, so the transaction is invalid.
  */
 export const preexistingFeeJuicePayment = (sender: AztecAddress): FeePaymentMethod => ({
 	getAsset: () => Promise.resolve(AztecAddress.fromNumberUnsafe(FEE_JUICE_ADDRESS)),

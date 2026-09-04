@@ -23,12 +23,12 @@ import {
 	awaitL1Receipt,
 	deriveBridgeSecret,
 	ensurePermit2Allowance,
-	feeJuiceAddress,
 	isSealTrusted,
 	isSendRecord,
 	markSealTrusted,
+	ownGasCeiling,
+	ownGasTxs,
 	predictedWorstMinFees,
-	preexistingFeeJuicePayment,
 	privateFeeJuicePayment,
 	privateFpcFeeLimit,
 	privateMintAndPayFee,
@@ -44,7 +44,7 @@ import {
 	PRIVATE_ATTEMPT_STALE_MS,
 	decideFuelClaim,
 	decideFuelLadder,
-	decideOwnGasSource,
+	decideOwnGasCredit,
 	decidePrivateFuelClaim,
 	isPrivateFuelInsufficiency,
 } from "@/lib/fuel-claim-state"
@@ -201,16 +201,6 @@ export async function sendStandaloneFjClaim(
 	}
 	patchFuel(id, fuel, { standaloneClaimed: true })
 	log("standalone FJ claim confirmed", id)
-}
-
-/** Read the account's PUBLIC Fee Juice balance — the cold-account detector for no-fuel claims. Uses the
- *  FeeJuice contract's `balance_of_public` via the connected wallet (scoped in the bridge manifest's
- *  simulation); mirrors the wallet's own gas-balance-reader. */
-export async function readPublicFeeJuiceBalance(aztec: unknown, recipient: AztecAddress): Promise<bigint> {
-	const { FeeJuiceContractArtifact } = await import("@aztec/noir-contracts.js/FeeJuice")
-	const fj = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
-	// readBalance unwraps the SDK's SimulationResult { result } + coerces to bigint (cf. useTokenBalance).
-	return readBalance(aztec as never, fj, "balance_of_public", recipient)
 }
 
 /** Read the account's PRIVATE Fee Juice balance held at the Wonderland PrivateFPC — the remainder a
@@ -566,59 +556,45 @@ function privateFuelSafetyReason(fb: FuelBlock, fuelReceived: bigint): string | 
 export type PublicClaimFee =
 	| { kind: "stop"; why: string; sendWhy?: string }
 	| { kind: "fjwc"; fee: { paymentMethod: unknown } }
-	/** Gas the account already holds pays the claim — its public Fee Juice as the fee payer, or its
-	 *  private balance at the FPC. A private first-time token sends a registration first, on the
-	 *  register seams; `standalone` is bridged Fee Juice a fee spike left for a claim of its own. */
+	/** The private gas the account already holds at the FPC pays the claim. A private first-time
+	 *  token sends a registration first, on the register seams; `standalone` is bridged Fee Juice a
+	 *  fee spike left for a claim of its own. */
 	| { kind: "own-gas"; fee: FpcFee; registerFee?: FpcFee; registeredClaimFee?: FpcFee; standalone?: FuelBlock }
 
-const NO_GAS_STOP = 'No gas (Fee Juice) to claim this bridge. Enable "arrive with gas", or fund your account first.'
-const UNREAD_GAS_STOP = "Couldn't check your Fee Juice balance - please try again in a moment."
-const PRIVATE_SHORT_STOP =
-	"Your private gas is under this claim's fee ceiling at current network fees - retry when fees ease, or bridge more gas."
+const OWN_GAS_STOPS = {
+	none: 'No gas to claim this bridge with: your account holds no private Fee Juice at the fee contract. Send with "arrive with gas", or bridge gas first.',
+	unverifiable: "Couldn't check your private gas at the fee contract - please try again in a moment.",
+	short: "Your private gas is under this claim's fee ceiling at current network fees - retry when fees ease, or bridge more gas.",
+} as const
 
-/** Public Fee Juice pays as the transaction's own fee payer. The wallet sizes the limits from its
- *  own estimate; the cap is the predicted worst fee, so a rise before inclusion cannot reject it. */
-const publicSelfPayFee = (payer: AztecAddress, maxFees: MaxFees): FpcFee => ({
-	paymentMethod: preexistingFeeJuicePayment(payer),
-	gasSettings: { maxFeesPerGas: { feePerDaGas: maxFees.feePerDaGas, feePerL2Gas: maxFees.feePerL2Gas } },
-})
-
-/** What a claim from held gas commits to: a public claim registers inside its own transaction, a
- *  private first-time token sends a registration ahead of the claim. */
-function ownGasShape(rec: FeeLadderRecord, registers: boolean, maxFees: MaxFees) {
-	const twoTx = rec.isPrivate && registers
-	const gas = registers && !twoTx ? PRIVATE_HUB_REGISTER_GAS : PRIVATE_HUB_CLAIM_GAS
-	const ceiling = privateFpcFeeLimit(gas, maxFees) + (twoTx ? privateFpcFeeLimit(PRIVATE_HUB_REGISTER_GAS, maxFees) : 0n)
-	return { twoTx, gas, ceiling }
-}
-
-/** A claim with no fresh Fee Juice message of its own pays from gas the account ALREADY holds, and
- *  always names which: the wallet's picker never chooses, because its default on an account without
- *  public Fee Juice is the sponsored FPC, which no bridge path may lean on. Reads are fail-closed
- *  (null = unread). */
+/** A claim with no fresh Fee Juice message of its own pays from the private gas the account ALREADY
+ *  holds at the FPC — and only from that. Its public Fee Juice cannot be named as the payer through
+ *  the wallet (a payer with no claim call is routed as a claim-in-setup that never ends setup), and
+ *  a claim sent without a payer is left to the wallet's picker, whose default is the sponsored FPC
+ *  no bridge path may lean on. The read is fail-closed (null = unread). */
 export async function ownGasFee(
 	rec: FeeLadderRecord,
 	recipientAddr: AztecAddress,
 	aztec: unknown,
 	registers: boolean,
 ): Promise<PublicClaimFee> {
-	const [pub, priv, maxFees] = await Promise.all([
-		readFeeJuiceOrNull("public FJ", () => readPublicFeeJuiceBalance(aztec, recipientAddr)),
+	const [credit, maxFees] = await Promise.all([
 		readFeeJuiceOrNull("private FJ", () => readPrivateFeeJuiceBalance(aztec, recipientAddr)),
 		predictedWorstMinFees(createAztecNodeClient(NODE_URL)),
 	])
-	const { twoTx, gas, ceiling } = ownGasShape(rec, registers, maxFees)
-	const source = decideOwnGasSource({ publicFeeJuice: pub, privateFeeJuice: priv, ceiling, preferPrivate: rec.isPrivate })
-	log("own-gas source", { id: rec.id, source, registers, pub: fmtFj(pub), priv: fmtFj(priv), ceiling: fmtFj(ceiling) })
-	if (source === "public") return { kind: "own-gas", fee: publicSelfPayFee(recipientAddr, maxFees) }
-	if (source === "private") {
-		const fpc = AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)
-		const fee = fpcCreditFee(fpc, maxFees, gas)
-		const seams = twoTx ? { registerFee: fpcCreditFee(fpc, maxFees, PRIVATE_HUB_REGISTER_GAS), registeredClaimFee: fee } : {}
-		return { kind: "own-gas", fee, ...seams }
+	const shape = { isPrivate: rec.isPrivate, registers }
+	const ceiling = ownGasCeiling(shape, maxFees)
+	const verdict = decideOwnGasCredit({ privateFeeJuice: credit, ceiling })
+	log("own-gas credit", { id: rec.id, verdict, registers, credit: fmtFj(credit), ceiling: fmtFj(ceiling) })
+	if (verdict !== "pays") return { kind: "stop", why: OWN_GAS_STOPS[verdict] }
+	const fpc = AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)
+	const txs = ownGasTxs(shape)
+	const fee = fpcCreditFee(fpc, maxFees, txs.claim)
+	return {
+		kind: "own-gas",
+		fee,
+		...(txs.register ? { registerFee: fpcCreditFee(fpc, maxFees, txs.register), registeredClaimFee: fee } : {}),
 	}
-	if (source === "private-short") return { kind: "stop", why: PRIVATE_SHORT_STOP }
-	return { kind: "stop", why: source === "unverifiable" ? UNREAD_GAS_STOP : NO_GAS_STOP }
 }
 
 /** A fee spike: the claim pays from held gas and the bridged Fee Juice lands by a transaction of its own. */

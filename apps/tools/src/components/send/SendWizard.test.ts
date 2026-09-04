@@ -42,8 +42,8 @@ const selectFn = vi.fn(async (token: SelectableToken) => {
 
 const granted = ref<string[]>([])
 let grantOutcome: GrantOutcome = "granted"
-/** Whether the connected Aztec account holds gas; null = unknown. */
-const gasHeld = ref<boolean | null>(null)
+/** The private Fee Juice the connected Aztec account holds at the fee contract; null = unknown. */
+const gasHeld = ref<bigint | null>(null)
 const gasHeldRefresh = vi.fn(async () => {})
 const selectedAccount = ref<string | null>(AZTEC_ACCOUNT)
 const ensureGranted = vi.fn(async (): Promise<GrantOutcome> => {
@@ -70,6 +70,8 @@ const primeFn = vi.fn(async () => true)
  *  token the hub does not know — the same figures the public line calibrates. */
 const ceilingsFor = vi.fn((state: { kind: string }): bigint => (state.kind === "registered" ? 1n : 6n))
 const realCeilings = () => ceilingsFor.mockImplementation((state) => (state.kind === "registered" ? 10n ** 17n : 6n * 10n ** 17n))
+/** What a token-only claim sets aside from held gas: small by default, so a held balance covers it. */
+const ownGasCeilingFor = vi.fn((): bigint | null => 1n)
 const proposeFn = vi.fn(() => ({ fuelAmount: 2_000_000n, fuelFj: 5n * 10n ** 18n, capped: null }))
 const gasShareDispose = vi.fn()
 
@@ -145,7 +147,7 @@ vi.mock("@/composables/useTokenCatalog", () => ({
 }))
 vi.mock("@/contracts/hub-binding", () => ({ readHubBinding: async () => undefined }))
 vi.mock("@/composables/useGasHeld", () => ({
-	useGasHeld: () => ({ held: gasHeld, refresh: gasHeldRefresh, dispose: vi.fn() }),
+	useGasHeld: () => ({ credit: gasHeld, refresh: gasHeldRefresh, dispose: vi.fn() }),
 }))
 vi.mock("@/composables/useAddressLookup", () => ({
 	useAddressLookup: () => ({ state: ref(null), dispose: vi.fn() }),
@@ -182,6 +184,7 @@ vi.mock("@/composables/useGasShare", () => ({
 		prime: primeFn,
 		pricingError: ref(null),
 		ceilingsFor,
+		ownGasCeilingFor,
 		floorFor: (q: bigint) => (q * 97n) / 100n,
 		reset: () => {
 			txTarget.value = 20
@@ -341,7 +344,7 @@ describe("SendWizard", () => {
 		balances.value = { l1: 10n ** 9n, l2Public: 5n * 10n ** 8n, l2Private: 3n * 10n ** 8n }
 		selectionError.value = null
 		epoch = 0
-		gasHeld.value = null
+		gasHeld.value = 10n ** 18n
 		gasHeldRefresh.mockReset().mockImplementation(async () => {})
 		selectedAccount.value = AZTEC_ACCOUNT
 		rekeys.value = {}
@@ -568,7 +571,7 @@ describe("SendWizard", () => {
 	})
 
 	it("a token-only send is blocked while the account is known to hold no gas, and released by adding gas", async () => {
-		gasHeld.value = false
+		gasHeld.value = 0n
 		const w = await wizard()
 		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
 		await flushPromises()
@@ -693,7 +696,7 @@ describe("SendWizard", () => {
 	it("a no-gas verdict that lands under the frozen review stands it down, and confirm never signs past it", async () => {
 		const w = await wizard()
 		const review = await atReview(w)
-		gasHeld.value = false
+		gasHeld.value = 0n
 		await flushPromises()
 		expect(w.findComponent({ name: "ReviewStep" }).exists()).toBe(false)
 		expect(w.findComponent({ name: "AmountStep" }).props("tokenOnlyBlocked")).toContain("holds no gas")
@@ -705,13 +708,13 @@ describe("SendWizard", () => {
 	})
 
 	it("confirm re-reads the gas gate before signing a token-only send, holding the buttons meanwhile", async () => {
-		gasHeld.value = true
+		gasHeld.value = 10n ** 18n
 		let releaseRead = (): void => {}
 		gasHeldRefresh.mockImplementation(async () => {
 			await new Promise<void>((resolve) => {
 				releaseRead = resolve
 			})
-			gasHeld.value = false
+			gasHeld.value = 0n
 		})
 		const w = await wizard()
 		const review = await atReview(w)

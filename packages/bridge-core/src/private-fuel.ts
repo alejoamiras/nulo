@@ -80,6 +80,36 @@ export const privateFpcFeeLimit = (gas: { daGas: number; l2Gas: number }, maxFee
 	BigInt(gas.l2Gas) * maxFees.feePerL2Gas + BigInt(gas.daGas) * maxFees.feePerDaGas
 
 /**
+ * Gas LIMITS for the hub's PUBLIC claims when the PrivateFPC pays them from gas the account already
+ * holds (`pay_fee`), under the same no-refund ceiling. Neither has been billed through the FPC by a
+ * canary yet: both are derived from landed public-lane fees at their block's L2 price — a plain
+ * `claim_public` at 2.585 FJ beside a 909,600-gas private claim at 1.786 FJ ≈ 1,320,000 L2 gas;
+ * EURC's `register_and_claim_public` at 4.621 FJ beside a 2.845 FJ private claim ≈ 1,480,000 —
+ * with the claim's 2.3× headroom. A first-ever transaction's account initialization rides on top,
+ * unmeasured. Re-derive from the first extension-billed sample of each.
+ */
+export const PUBLIC_HUB_CLAIM_GAS = { daGas: 100_000, l2Gas: 3_000_000 } as const
+export const PUBLIC_HUB_REGISTER_CLAIM_GAS = { daGas: 100_000, l2Gas: 3_500_000 } as const
+
+export type HubGas = { readonly daGas: number; readonly l2Gas: number }
+/** A hub claim paid from held gas, by what it sends: `registers` when the hub does not know the token yet. */
+export type HubClaimShape = { isPrivate: boolean; registers: boolean }
+
+/** The transaction(s) a hub claim paid from held gas makes, with the limits each commits to: a
+ *  public claim registers inside its own transaction, a private first-time token sends a
+ *  registration ahead of the claim. */
+export function ownGasTxs(shape: HubClaimShape): { claim: HubGas; register?: HubGas } {
+	if (!shape.isPrivate) return { claim: shape.registers ? PUBLIC_HUB_REGISTER_CLAIM_GAS : PUBLIC_HUB_CLAIM_GAS }
+	return shape.registers ? { claim: PRIVATE_HUB_CLAIM_GAS, register: PRIVATE_HUB_REGISTER_GAS } : { claim: PRIVATE_HUB_CLAIM_GAS }
+}
+
+/** The private Fee Juice a claim from held gas sets aside: the FPC's ceiling of every transaction it makes. */
+export function ownGasCeiling(shape: HubClaimShape, maxFees: { feePerDaGas: bigint; feePerL2Gas: bigint }): bigint {
+	const txs = ownGasTxs(shape)
+	return privateFpcFeeLimit(txs.claim, maxFees) + (txs.register ? privateFpcFeeLimit(txs.register, maxFees) : 0n)
+}
+
+/**
  * The bridge secret a private-fuel L1 deposit binds to: `poseidon2([salt, claimer], DOM_SEP)`.
  * The claimer reconstructs it from `msg_sender` inside `PrivateFPC.mint_and_pay_fee`, so a RANDOM
  * secret would strand the Fee Juice forever — `flows.ts` MUST inject this for private fuel and never

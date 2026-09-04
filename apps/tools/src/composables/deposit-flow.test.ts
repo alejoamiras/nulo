@@ -28,6 +28,8 @@ import {
 	PRIVATE_HUB_CLAIM_GAS,
 	PRIVATE_HUB_REGISTER_GAS,
 	SWAP_BRIDGE_ROUTER_ABI,
+	PUBLIC_HUB_CLAIM_GAS,
+	PUBLIC_HUB_REGISTER_CLAIM_GAS,
 } from "@nulo/bridge-core"
 import { encodeAbiParameters, keccak256, toHex } from "viem"
 import { beforeEach, describe, expect, test, vi } from "vitest"
@@ -44,8 +46,6 @@ const h = vi.hoisted(() => {
 		persisted: undefined as unknown,
 		/** The account's private Fee Juice credit at the FPC; undefined = the read fails. */
 		privateFj: undefined as bigint | undefined,
-		/** The account's public Fee Juice; undefined = the read fails. */
-		publicFj: undefined as bigint | undefined,
 	}
 })
 
@@ -54,12 +54,11 @@ vi.mock("@/contracts/bridge-generation", () => ({
 	SWAP: undefined,
 }))
 
-// The Fee Juice balances as the wallet's reads answer them; a throw = unreadable.
+// The private Fee Juice held at the FPC, as the wallet's utility read answers it; a throw = unreadable.
 vi.mock("./useTokenBalance", () => ({
-	readBalance: async (_aztec: unknown, _contract: unknown, fn: string) => {
-		const balance = fn === "balance_of_public" ? h.publicFj : h.privateFj
-		if (balance === undefined) throw new Error(`${fn} failed`)
-		return balance
+	readBalance: async () => {
+		if (h.privateFj === undefined) throw new Error("balance_of failed")
+		return h.privateFj
 	},
 }))
 vi.mock("@nulo/bridge-core/private-fpc-artifact", () => ({ PrivateFPCContractArtifact: {} }))
@@ -111,10 +110,6 @@ vi.mock("@nulo/bridge-core", async (importOriginal) => ({
 		h.t("privateFeeJuicePayment", { fpc: fpc.toString() })
 		return { kind: "fpc-credit" }
 	},
-	preexistingFeeJuicePayment: (payer: { toString(): string }) => {
-		h.t("preexistingFeeJuicePayment", { payer: payer.toString() })
-		return { kind: "public-fj" }
-	},
 }))
 
 import { buildFeeJuiceClaimDep, recoverDepositLeg, resolveHubClaimSendOpts, resolvePrivateFuelFee } from "./deposit-flow"
@@ -145,7 +140,6 @@ beforeEach(() => {
 	h.calls.length = 0
 	h.updateRecordThrows = false
 	h.receiptStatus = undefined
-	h.publicFj = undefined
 	h.persisted = undefined
 	vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000)
 })
@@ -479,9 +473,9 @@ describe("recoverDepositLeg — send records", () => {
 	})
 })
 
-describe("own gas - a claim with no Fee Juice message of its own always names its payer", () => {
+describe("own gas - a claim with no Fee Juice message of its own pays from the private balance at the FPC, and names it", () => {
 	const recipient = AztecAddress.fromStringUnsafe(RECIPIENT)
-	type Fee = { paymentMethod: unknown; gasSettings: { gasLimits?: { daGas: number; l2Gas: number }; maxFeesPerGas?: unknown } }
+	type Fee = { paymentMethod: unknown; gasSettings: { gasLimits: { daGas: number; l2Gas: number } } }
 	type Resolved = { kind: string; why?: string; opts: Record<string, Fee | undefined> }
 	const noFuel = (isPrivate: boolean): SendDepositRecord =>
 		mkRec({ schema: 3, intent: "token", isPrivate, secret: undefined, fuel: undefined } as never) as unknown as SendDepositRecord
@@ -494,52 +488,40 @@ describe("own gas - a claim with no Fee Juice message of its own always names it
 			registers,
 		}) as Promise<Resolved>
 
-	// Mocked fees 10/20: claim ceiling 2M·20 + 100k·10 = 41M, register ceiling 4M·20 + 100k·10 = 81M.
-	test("public Fee Juice covering the ceiling pays as the fee payer, capped at the predicted fees", async () => {
-		h.publicFj = 41_000_000n
-		h.privateFj = 0n
-		const r = await resolve(noFuel(false), false)
-		expect(r.opts.fee?.paymentMethod).toEqual({ kind: "public-fj" })
-		expect(r.opts.fee?.gasSettings).toEqual({ maxFeesPerGas: { feePerDaGas: 10n, feePerL2Gas: 20n } })
-		expect(r.opts.registerFee).toBeUndefined()
-		expect(h.calls.find(([n]) => n === "preexistingFeeJuicePayment")?.[1]).toEqual({ payer: RECIPIENT })
-	})
-
-	test("without public Fee Juice the private balance pays through the FPC, sized for a public claim that registers", async () => {
-		h.publicFj = 0n
-		h.privateFj = 81_000_000n
-		const r = await resolve(noFuel(false), true)
-		expect(r.opts.fee?.paymentMethod).toEqual({ kind: "fpc-credit" })
-		expect(r.opts.fee?.gasSettings.gasLimits).toMatchObject(PRIVATE_HUB_REGISTER_GAS)
-		expect(r.opts.registerFee).toBeUndefined()
-		// One unit under the ceiling and the FPC would refuse: stop before it does.
-		h.privateFj = 80_999_999n
+	// Mocked fees 10/20: a public claim's ceiling 3M·20 + 100k·10 = 61M, a registering one 3.5M·20 + 100k·10 = 71M;
+	// a private claim 41M, a private registration 81M.
+	test("a public claim pays through the FPC at the public claim's ceiling, sized for a registration when the hub does not know the token", async () => {
+		h.privateFj = 61_000_000n
+		const plain = await resolve(noFuel(false), false)
+		expect(plain.opts.fee?.paymentMethod).toEqual({ kind: "fpc-credit" })
+		expect(plain.opts.fee?.gasSettings.gasLimits).toMatchObject(PUBLIC_HUB_CLAIM_GAS)
+		expect(plain.opts.registerFee).toBeUndefined()
+		// Registering costs more, in the same one transaction: under its ceiling the claim stops before the FPC refuses.
 		const short = await resolve(noFuel(false), true)
 		expect(short.kind).toBe("stop")
 		expect(short.why).toMatch(/private gas is under/)
+		h.privateFj = 71_000_000n
+		const registering = await resolve(noFuel(false), true)
+		expect(registering.opts.fee?.gasSettings.gasLimits).toMatchObject(PUBLIC_HUB_REGISTER_CLAIM_GAS)
+		expect(registering.opts.registerFee).toBeUndefined()
 	})
 
-	test("a private first-time token registers first, both transactions from the private balance it prefers", async () => {
-		h.publicFj = 999_000_000n
+	test("a private first-time token registers first, both transactions from the balance, refused unless it covers both", async () => {
 		h.privateFj = 122_000_000n
 		const r = await resolve(noFuel(true), true)
 		expect(r.opts.registerFee?.paymentMethod).toEqual({ kind: "fpc-credit" })
 		expect(r.opts.registerFee?.gasSettings.gasLimits).toMatchObject(PRIVATE_HUB_REGISTER_GAS)
 		expect(r.opts.registeredClaimFee?.gasSettings.gasLimits).toMatchObject(PRIVATE_HUB_CLAIM_GAS)
 		expect(r.opts.fee?.paymentMethod).toEqual({ kind: "fpc-credit" })
-		// A private balance short of both ceilings leaves it to the public Fee Juice, one payer for both.
 		h.privateFj = 121_999_999n
-		const pub = await resolve(noFuel(true), true)
-		expect(pub.opts.fee?.paymentMethod).toEqual({ kind: "public-fj" })
-		expect(pub.opts.registerFee).toBeUndefined()
+		expect((await resolve(noFuel(true), true)).kind).toBe("stop")
 	})
 
-	test("nothing to pay with stops, and an unreadable balance stops as unread rather than as empty", async () => {
-		h.publicFj = 0n
+	test("nothing held stops, and an unreadable balance stops as unread rather than as empty - never a payerless claim", async () => {
 		h.privateFj = 0n
 		expect(await resolve(noFuel(false), false)).toMatchObject({ kind: "stop", why: expect.stringMatching(/No gas/) })
-		h.publicFj = undefined
+		h.privateFj = undefined
 		expect(await resolve(noFuel(false), false)).toMatchObject({ kind: "stop", why: expect.stringMatching(/Couldn't check/) })
-		expect(h.calls.some(([n]) => n === "preexistingFeeJuicePayment" || n === "privateFeeJuicePayment")).toBe(false)
+		expect(h.calls.some(([n]) => n === "privateFeeJuicePayment")).toBe(false)
 	})
 })

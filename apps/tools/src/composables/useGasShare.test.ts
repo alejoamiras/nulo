@@ -112,6 +112,17 @@ describe("useGasShare", () => {
 		})
 	})
 
+	it("prices what a claim from held gas sets aside: a public claim's own ceiling, a private first-time token's two", async () => {
+		// Fees 10/20 → public claim 3M·20 + 100k·10 = 61M, registering 3.5M·20 + 100k·10 = 71M; private 41M + 81M.
+		const share = useGasShare()
+		expect(share.ownGasCeilingFor(REGISTERED, false)).toBeNull()
+		await share.prime()
+		expect(share.ownGasCeilingFor(REGISTERED, false)).toBe(61_000_000n)
+		expect(share.ownGasCeilingFor(FIRST_TIME, false)).toBe(71_000_000n)
+		expect(share.ownGasCeilingFor(REGISTERED, true)).toBe(41_000_000n)
+		expect(share.ownGasCeilingFor(PORTAL_ONLY, true)).toBe(122_000_000n)
+	})
+
 	it("buys at least the claim minimum when the tx target asks for less", () => {
 		const { txTarget, propose } = sizedGasShare()
 		txTarget.value = 1

@@ -11,6 +11,7 @@ import {
 	type GasShareResult,
 	PRIVATE_HUB_CLAIM_GAS,
 	PRIVATE_HUB_REGISTER_GAS,
+	ownGasCeiling,
 	predictedWorstMinFees,
 	privateFpcFeeLimit,
 	proposeGasShare,
@@ -50,6 +51,10 @@ export interface UseGasShareHandle {
 	/** The Fee Juice a private claim commits to fee ceilings — the claim's, plus a registration's for
 	 *  a token the hub does not know yet — at the last priced fees; null until priced or once stale. */
 	ceilingsFor: (state: TokenState) => bigint | null
+	/** What a claim paid from the gas the account already holds sets aside for this token — the fee
+	 *  contract's ceiling of every transaction it makes — at the last priced fees; null until priced
+	 *  or once stale. Asks for a fresh price behind a stale one. */
+	ownGasCeilingFor: (state: TokenState, isPrivate: boolean) => bigint | null
 	/** Price the ceilings from the network's predicted fees; true when a fresh price landed from THIS
 	 *  call. Concurrent calls share one read. */
 	prime: () => Promise<boolean>
@@ -110,6 +115,12 @@ export function useGasShare(): UseGasShareHandle {
 		return state.kind === "registered" ? claim : claim + privateFpcFeeLimit(PRIVATE_HUB_REGISTER_GAS, maxFees)
 	}
 
+	function ownGasCeilingFor(state: TokenState, isPrivate: boolean): bigint | null {
+		if (!fees.value || Date.now() - fees.value.at > FEES_FRESH_MS) void prime()
+		const maxFees = priced()
+		return maxFees ? ownGasCeiling({ isPrivate, registers: state.kind !== "registered" }, maxFees) : null
+	}
+
 	/** A private slice's ceilings, or "pricing" while the fees are still on their way. */
 	function privateCeilings(state: TokenState): bigint | "pricing" {
 		if (!fees.value || Date.now() - fees.value.at > FEES_FRESH_MS) void prime()
@@ -150,5 +161,5 @@ export function useGasShare(): UseGasShareHandle {
 	// A re-entered wizard proposes from the default, never from the last session's target.
 	const dispose = reset
 
-	return { txTarget, propose, floorFor, ceilingsFor, prime, pricingError, reset, dispose }
+	return { txTarget, propose, floorFor, ceilingsFor, ownGasCeilingFor, prime, pricingError, reset, dispose }
 }
