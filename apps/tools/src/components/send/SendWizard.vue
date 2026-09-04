@@ -70,6 +70,12 @@ const UNREAD_GAS_FOR_TOKEN_ONLY =
 	"Your Aztec account's gas could not be read just now, so the claim was not confirmed. Try again in a moment."
 const UNPRICED_TOKEN_ONLY =
 	"Aztec's network fees could not be re-read just now, so a claim from your held gas was not confirmed. Try again in a moment."
+const CEILING_NOW_PRICED_TOKEN_ONLY =
+	"The claim's fee was priced after you opened the review - it now shows what is set aside from your gas. Review it again."
+const CEILING_MOVED_TOKEN_ONLY =
+	"Aztec's network fees moved while you were on the review: the claim now sets aside more of your gas than it showed."
+/** The review's figure is an "≈": a tenth more than it showed is no longer that figure. */
+const CEILING_DRIFT_DIVISOR = 10n
 
 const l1 = useL1Wallet()
 const bridge = useBridgeWallet()
@@ -160,6 +166,9 @@ interface ReviewSnapshot {
 	account: string
 	slippageBps: number | null
 	estimate: ReviewEstimate
+	/** What a token-only deposit's claim was SHOWN to set aside from held gas; null when the review
+	 *  opened unpriced, or for any other plan. */
+	ownGasCeiling: bigint | null
 }
 const reviewed = ref<ReviewSnapshot | null>(null)
 /** Set when a change under the frozen review sent the user back to the amount step. */
@@ -427,6 +436,10 @@ function freezeReview(target: SendPlan | ExitPlan): ReviewSnapshot {
 			...networkFeeOf(target),
 			txCovered,
 		},
+		ownGasCeiling:
+			target.direction === "l1-to-l2" && target.intent === "token"
+				? gasShare.ownGasCeilingFor(target.token.state, target.isPrivate)
+				: null,
 	}
 }
 
@@ -660,7 +673,7 @@ async function preflight(snapshot: ReviewSnapshot): Promise<boolean> {
 	// plan object and let a confirm nobody gave for it resume.
 	if (reviewed.value !== snapshot || step.value !== 2) return false
 	if (snapshot.account !== (bridge.selectedAccount.value ?? "")) return false
-	const why = preflightStandDown(target, privateSlice, repriced)
+	const why = preflightStandDown(target, privateSlice, repriced, snapshot.ownGasCeiling)
 	if (why === undefined) return true
 	invalidateReview(why ?? undefined)
 	return false
@@ -681,22 +694,30 @@ async function preflightReads(tokenOnly: boolean, privateSlice: boolean): Promis
 
 /** Why the confirm stands the review down: `undefined` = it may proceed, `null` = the generic
  *  line, a string = the named reason. */
-function preflightStandDown(target: SendPlan, privateSlice: GasLegPlan | null, repriced: boolean): string | null | undefined {
+function preflightStandDown(
+	target: SendPlan,
+	privateSlice: GasLegPlan | null,
+	repriced: boolean,
+	shownCeiling: bigint | null,
+): string | null | undefined {
 	if (tokenOnlyBlocked.value !== null) return null
-	if (target.intent === "token") return tokenOnlyStoodDown(target, repriced)
+	if (target.intent === "token") return tokenOnlyStoodDown(target, repriced, shownCeiling)
 	if (!privateSlice) return undefined
 	return privateSliceStoodDown(target.token.state, privateSlice.minFuelOutput, repriced) ?? undefined
 }
 
 /** Why a token-only send cannot be signed at confirm: the gas it will claim with must be KNOWN to
  *  cover what the claim sets aside at fees re-read now — an unread balance or an unpriced claim is
- *  not one to fund an irreversible deposit on. */
-function tokenOnlyStoodDown(target: SendPlan, repriced: boolean): string | undefined {
+ *  not one to fund an irreversible deposit on — and what is set aside must be what the review
+ *  showed: a figure that only appeared, or grew, after the review opened was never approved. */
+function tokenOnlyStoodDown(target: SendPlan, repriced: boolean, shown: bigint | null): string | undefined {
 	if (!repriced) return UNPRICED_TOKEN_ONLY
 	const credit = gasHeld.credit.value
 	if (credit === null) return UNREAD_GAS_FOR_TOKEN_ONLY
 	const ceiling = gasShare.ownGasCeilingFor(target.token.state, target.isPrivate)
-	return ceiling !== null && credit >= ceiling ? undefined : SHORT_GAS_FOR_TOKEN_ONLY
+	if (ceiling === null || credit < ceiling) return SHORT_GAS_FOR_TOKEN_ONLY
+	if (shown === null) return CEILING_NOW_PRICED_TOKEN_ONLY
+	return ceiling > shown + shown / CEILING_DRIFT_DIVISOR ? CEILING_MOVED_TOKEN_ONLY : undefined
 }
 
 /** Why a private slice cannot be signed at confirm: the fees could not be re-read (a price nobody

@@ -729,6 +729,41 @@ describe("SendWizard", () => {
 		expect(w.findComponent({ name: "AmountStep" }).props("tokenOnlyBlocked")).toContain("holds no gas")
 	})
 
+	it("a review opened before the claim was priced stands down at confirm once the price lands, and one whose figure grew stands down too", async () => {
+		let ceiling: bigint | null = null
+		ownGasCeilingFor.mockImplementation(() => ceiling)
+		const w = await wizard()
+		let review = await atReview(w)
+		expect(review.props("estimate").networkFee).toContain("paid from the private gas")
+		ceiling = 10n ** 16n
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(sendFn).not.toHaveBeenCalled()
+		expect(w.find(`[data-testid="${TESTIDS.sendReviewStale}"]`).text()).toContain("priced after you opened the review")
+		// Stood down to the amount step; re-entered with the price, a figure that then grows past a
+		// tenth is not the one approved.
+		const reenter = async () => {
+			w.findComponent({ name: "AmountStep" }).vm.$emit("update:valid", true)
+			await flushPromises()
+			w.findComponent({ name: "AmountStep" }).vm.$emit("next")
+			await flushPromises()
+			return w.findComponent({ name: "ReviewStep" })
+		}
+		review = await reenter()
+		expect(review.props("estimate").networkFee).toContain("FJ from the private gas")
+		ceiling = 10n ** 16n + 10n ** 15n + 1n
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(sendFn).not.toHaveBeenCalled()
+		expect(w.find(`[data-testid="${TESTIDS.sendReviewStale}"]`).text()).toContain("fees moved")
+		// A figure within the tenth is the one approved: the confirm signs.
+		review = await reenter()
+		ceiling = ceiling + ceiling / 20n
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(sendFn).toHaveBeenCalledTimes(1)
+	})
+
 	/** Every gas read the wizard starts, in order, each held until the test releases it: the amount
 	 *  step reads on entry (index 0), confirm reads again (index 1), and so on. */
 	function gatedReads(): Array<() => void> {
