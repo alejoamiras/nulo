@@ -17,9 +17,7 @@
 			"apps/extension/tests/e2e/fixtures/journal.ts": 3,
 			"apps/tools/src/lib/errors.ts": 1,
 			"apps/tools/src/lib/phase-clock.ts": 1,
-			"packages/bridge-core/scripts/discover-mainnet-fuel.ts": 1,
 			"packages/bridge-core/scripts/fpc-dust-canary-mainnet.ts": 1,
-			"packages/bridge-core/scripts/relay-claim-testnet.ts": 1,
 			"packages/wallet-core/src/base/topology.ts": 1,
 			"packages/wallet-core/src/utils/serialization.ts": 1,
 			"scripts/ci-cd/test-soak/cli.ts": 3,
@@ -27,11 +25,7 @@
 		},
 		"noExcessiveLinesPerFunction": {
 			"apps/extension/src/components/JsonViewer/creator.js": 1,
-			"apps/extension/src/stores/activity.store.ts": 1,
-			"packages/bridge-core/scripts/deploy-sandbox.ts": 1,
-			"packages/bridge-core/scripts/deposit-testnet.ts": 1,
-			"packages/bridge-core/scripts/discover-mainnet-fuel.ts": 1,
-			"packages/bridge-core/scripts/relay-claim-testnet.ts": 1
+			"apps/extension/src/stores/activity.store.ts": 1
 		}
 	},
 	"accepted": [
@@ -176,25 +170,11 @@
 			"sentence": "pending / active / failed / done transitions specify the latest-attempt temporal reducer"
 		},
 		{
-			"file": "packages/bridge-core/scripts/discover-mainnet-fuel.ts",
-			"rule": "noExcessiveCognitiveComplexity",
-			"anchor": "async function main(): Promise<void> {",
-			"accepted": 32,
-			"sentence": "the nested fee-tier cross-product and failed-quote reporting are the discovery matrix"
-		},
-		{
 			"file": "packages/bridge-core/scripts/fpc-dust-canary-mainnet.ts",
 			"rule": "noExcessiveCognitiveComplexity",
 			"anchor": "async function main() {",
 			"accepted": 23,
 			"sentence": "the live canary binds fee sizing, deposit evidence, repriced retries and balance-delta acceptance"
-		},
-		{
-			"file": "packages/bridge-core/scripts/relay-claim-testnet.ts",
-			"rule": "noExcessiveCognitiveComplexity",
-			"anchor": "async function main(): Promise<void> {",
-			"accepted": 22,
-			"sentence": "the wrong-recipient canary and the bounded claim retry are explicit security outcomes of that procedure"
 		},
 		{
 			"file": "packages/wallet-core/src/base/topology.ts",
@@ -251,34 +231,6 @@
 			"anchor": "export const useActivityStore = defineStore(\"activity\", () => {",
 			"accepted": 122,
 			"sentence": "one Pinia closure owns the scoped slices and the ABA-safe mutation fences every action shares"
-		},
-		{
-			"file": "packages/bridge-core/scripts/deploy-sandbox.ts",
-			"rule": "noExcessiveLinesPerFunction",
-			"anchor": "async function main() {",
-			"accepted": 197,
-			"sentence": "shared live handles make L1/L2 deployment, wiring and optional smoke one auditable sandbox recipe"
-		},
-		{
-			"file": "packages/bridge-core/scripts/deposit-testnet.ts",
-			"rule": "noExcessiveLinesPerFunction",
-			"anchor": "async function main() {",
-			"accepted": 155,
-			"sentence": "the deploy → deposit → claim → withdraw proof shares ephemeral addresses and secrets in one custody trace"
-		},
-		{
-			"file": "packages/bridge-core/scripts/discover-mainnet-fuel.ts",
-			"rule": "noExcessiveLinesPerFunction",
-			"anchor": "async function main(): Promise<void> {",
-			"accepted": 87,
-			"sentence": "one evidence transcript links identity checks, pool discovery, quotations and the winning manifest block"
-		},
-		{
-			"file": "packages/bridge-core/scripts/relay-claim-testnet.ts",
-			"rule": "noExcessiveLinesPerFunction",
-			"anchor": "async function main(): Promise<void> {",
-			"accepted": 93,
-			"sentence": "offline validation, wallet setup, contract registration and submission form one ordered custody procedure"
 		}
 	]
 }

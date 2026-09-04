@@ -1,31 +1,34 @@
 /**
- * LIVE-testnet fueled bridge validation (plan P5): drives `runSwapBridge` against the LIVE
- * router/pools, then proves the headline claim on Aztec — a fresh account's claim transaction
- * PAYS FOR ITSELF from the Fee Juice it claims in the same tx (`FeeJuicePaymentMethodWithClaim`),
- * for BOTH the public and private token variants. Also calibrates MIN_FUEL_FJ from the real fee.
+ * LIVE-testnet fueled-send validation: drives the router's fueled entrypoint against the live pools,
+ * then proves the headline claim on Aztec — a fresh account's hub claim PAYS FOR ITSELF out of the
+ * Fee Juice the same send bridged, for both the public and the private-FPC fuel lanes. The fees it
+ * observes are the manifest's `bridge.l1.swap.minFuelFj` and `fjPerTx` calibration.
  *
- * Uses the EXISTING live deployment (testnet-bridge.json + l1.fuel) — nothing is deployed here
- * except the throwaway L2 account (sponsored FPC pays its deployment; fuel pays its claims).
+ * Nothing is deployed: the portal is the factory's clone for the token, the L2 side is the
+ * manifest's hub and the token that hub derives, and only the throwaway L2 account is created
+ * (the sponsored FPC pays its deploy; fuel pays every claim).
  *
  * Real proofs: expect ~30-60 min end to end.
- * Run: bun run scripts/fuel-testnet.ts   (PRIVATE_KEY + SEPOLIA_RPC_URL in packages/bridge-core/.env)
+ * Run: bun run scripts/fuel-testnet.ts --config <manifest> [--token <erc20>]
+ *      (PRIVATE_KEY + SEPOLIA_RPC_URL in packages/bridge-core/.env)
  */
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { loadContractArtifact } from "@aztec/aztec.js/abi"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
+import { Contract, type ContractBase, getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
-import { TxStatus } from "@aztec/aztec.js/tx"
+import { TxHash, TxStatus } from "@aztec/aztec.js/tx"
 import { FeeJuiceContractArtifact } from "@aztec/noir-contracts.js/FeeJuice"
-import { EthAddress } from "@aztec/foundation/eth-address"
 import { Gas, type GasFees } from "@aztec/stdlib/gas"
 import { resolvePackageAsset } from "@nulo/resolve-asset"
+import type { Address } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { feeJuiceAddress, predictedWorstMinFees, publicFeeJuicePayment } from "../src/fee-juice"
-import { runSwapBridge } from "../src/flows"
+import type { L1Ctx } from "../src/flows"
+import { claimViaHub, type HubClaimOutcome } from "../src/hub-l2"
 import {
 	PRIVATE_FPC_ADDRESS,
 	PRIVATE_FPC_SALT,
@@ -33,15 +36,23 @@ import {
 	privateFeeJuicePayment,
 	privateMintAndPayFee,
 } from "../src/private-fuel"
-import { minOutputForSlippage, quoteFuelPath } from "../src/quote"
-import { buildFuelRoute } from "../src/route"
+import type { SendResult } from "../src/send-flow"
+import { runSend } from "../src/send-flow"
 import { runFpcGate } from "./check-fpc-version"
-import { PLAN_PINNED_L1_SIGNER } from "./live-intent"
+import { requirePinnedSigner } from "./live-intent"
 import { evmAbi } from "./script-artifacts"
-import { deployAccountIfAbsent, freshSchnorrAccount, sponsoredFpcFee } from "./script-l2"
-import { createL1Clients, createL2Wallet, createNode, loadManifestFromConfigArg, sepoliaChain, stopwatch } from "./script-bootstrap"
-import { bridgeProxyArtifact, tokenBridgeArtifact } from "../src/artifacts"
-import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
+import { ensureRouterPermit2 } from "./script-l1"
+import { deployAccountIfAbsent, freshSchnorrAccount, registerHub, registerHubToken, sponsoredFpcFee } from "./script-l2"
+import { claimTokenBlock, planFuelLeg, requireSwap, selectToken, sendGenerationOf } from "./script-send"
+import {
+	createL1Clients,
+	createL2Wallet,
+	createNode,
+	loadManifestV2FromConfigArg,
+	requireBridge,
+	sepoliaChain,
+	stopwatch,
+} from "./script-bootstrap"
 
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
@@ -49,148 +60,93 @@ const PRIVATE_KEY = process.env.PRIVATE_KEY as `0x${string}` | undefined
 if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY required (packages/bridge-core/.env)")
 
 const here = dirname(fileURLToPath(import.meta.url))
-const CONFIG = loadManifestFromConfigArg(process.argv, {
+const CONFIG = loadManifestV2FromConfigArg(process.argv, {
 	mode: "fallback",
 	fallbackPath: join(here, "..", "..", "..", "apps", "tools", "public", "testnet-bridge.json"),
-	// biome-ignore lint/suspicious/noExplicitAny: manifest fields are accessed via dynamic property paths without a formal schema, matching the original untyped JSON.parse.
-	parse: (raw) => raw as any,
 })
-const fuel = CONFIG.l1.fuel
-if (!fuel) throw new Error("testnet-bridge.json has no l1.fuel - run the P2 deploy first")
-const core = fuel.core
-const swap = fuel.swap
-if (!swap) throw new Error("testnet-bridge.json has no l1.fuel.swap — this swap-fuel smoke needs the swap stack")
+const BRIDGE = requireBridge(CONFIG)
+const SWAP = requireSwap(BRIDGE)
+const TOKEN = selectToken(BRIDGE, process.argv)
+const GENERATION = sendGenerationOf(CONFIG, BRIDGE)
 
 const sepolia = sepoliaChain(SEPOLIA_RPC)
 
-const TOTAL = 10n * 10n ** 18n // 10 AZLO per variant
-const FUEL_SLICE = 25n * 10n ** 16n // 0.25 AZLO ≈ ~487 FJ at the live rate (the design fill)
-// Headroom on the committed maxFeesPerGas (over predicted-worst) so a single attempt survives base-fee
-// drift during its proving window. Matches base_wallet's general 1.5× minFeePadding. The FPC ceiling
-// scales with it, but the bridged FJ (~hundreds) dwarfs the few-FJ ceiling, so it never strands the budget.
+const UNIT = 10n ** BigInt(TOKEN.decimals)
+const TOTAL = 10n * UNIT
+const FUEL_SLICE = BigInt(process.env.FUEL_SLICE_UNITS ?? (UNIT / 4n).toString())
+const BRIDGED = TOTAL - FUEL_SLICE
+// Headroom on the committed maxFeesPerGas (over predicted-worst) so one attempt survives base-fee
+// drift during its proving window. The FPC ceiling scales with it, but the bridged FJ dwarfs the
+// few-FJ ceiling, so it never strands the budget.
 const RELIABILITY_PAD = Number(process.env.RELIABILITY_PAD ?? 1.5)
+const PRIVATE_RUNS = Number(process.env.PRIVATE_RUNS ?? 3)
+const NOFUEL_SPEND_RUNS = Number(process.env.NOFUEL_SPEND_RUNS ?? 0)
 
-/** Everything one fueled-bridge variant needs — bound once in main, threaded explicitly. */
+const rndNonce = () => BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
 interface VariantCtx {
-	pub: ReturnType<typeof createL1Clients>["pub"]
-	wallet: ReturnType<typeof createL1Clients>["wallet"]
-	account: { address: `0x${string}` }
+	l1: L1Ctx
 	node: ReturnType<typeof createNode>
+	hub: ContractBase
+	l2Token: ContractBase
 	from: AztecAddress
-	azlo: `0x${string}`
-	bridge: Contract
 	fjBalance: () => Promise<bigint>
 	tokenBalance: (kind: "public" | "private") => Promise<bigint>
 	mins: () => string
 }
 
-/** Register the LIVE L2 contracts (instances rebuilt from deploy metadata) + the PrivateFPC. */
-async function registerLiveContracts(ewallet: unknown, mins: () => string) {
-	const registerLive = async (
-		label: string,
-		artifact: unknown,
-		meta: { address: string; salt: number; constructorArtifact: string; constructorArgs: unknown[] },
-	) => {
-		const args = meta.constructorArgs.map((a) =>
-			typeof a === "string" && a.startsWith("0x") && a.length === 66 ? AztecAddress.fromStringUnsafe(a) : a,
-		)
-		const instance = await getContractInstanceFromInstantiationParams(
-			artifact as never,
-			{
-				constructorArgs: args,
-				salt: new Fr(meta.salt),
-				publicKeys: PublicKeys.default(),
-				deployer: AztecAddress.ZERO,
-				constructorArtifact: meta.constructorArtifact,
-			} as never,
-		)
-		if (instance.address.toString() !== meta.address) {
-			throw new Error(`${label}: rebuilt ${instance.address} != recorded ${meta.address}`)
-		}
-		try {
-			await (ewallet as { registerContract: (i: unknown, a: unknown) => Promise<unknown> }).registerContract(
-				instance,
-				artifact as never,
-			)
-		} catch {}
-		return Contract.at(instance.address, artifact as never, ewallet as never)
-	}
-	const l1PortalArg = EthAddress.fromString(CONFIG.l1.portal)
-	const bridgeMeta = { ...CONFIG.l2.bridge, constructorArgs: [CONFIG.l2.bridge.constructorArgs[0], l1PortalArg] }
-	const token = await registerLive("token", TokenContractArtifact, CONFIG.l2.token)
-	const bridge = await registerLive("bridge", tokenBridgeArtifact, bridgeMeta)
-	await registerLive("proxy", bridgeProxyArtifact, CONFIG.l2.proxy)
-	const feeJuice = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, ewallet as never)
+interface VariantRun {
+	actualFee: bigint
+	ceiling?: bigint
+	path: HubClaimOutcome["path"]
+}
 
-	// Register the PrivateFPC locally (instance + class). It has no public functions / no init, so 5.0
-	// needs NO on-chain deploy; the private-kernel oracle DOES need both the instance +
-	// class preimages, so registerContract (not just the class). The canonical salt reproduces the pinned
-	// PRIVATE_FPC_ADDRESS from the 5.0.0 artifact.
-	// The artifact package was RENAMED @alejoamiras/aztec-fee-payment → private-fee-juice
-	// (see src/private-fpc-canonical.json); the old hardcoded root-node_modules path was dead
-	// code on both counts. Resolved layout-agnostically from this declaring workspace.
-	const privateFpcArtifact = loadContractArtifact(
+/** The PrivateFPC has no public functions and no initializer, so it needs no on-chain deploy — but
+ *  the private kernel oracle needs both preimages locally, and the canonical salt must reproduce the
+ *  pinned address or the artifact has drifted. */
+async function registerPrivateFpc(ewallet: unknown, mins: () => string) {
+	const artifact = loadContractArtifact(
 		JSON.parse(
 			readFileSync(
-				resolvePackageAsset("@alejoamiras/private-fee-juice", "target/private_contract-PrivateFPC.json", {
-					from: import.meta.url,
-				}),
+				resolvePackageAsset("@alejoamiras/private-fee-juice", "target/private_contract-PrivateFPC.json", { from: import.meta.url }),
 				"utf8",
 			),
 		),
 	)
-	const privateFpcInstance = await getContractInstanceFromInstantiationParams(
-		privateFpcArtifact as never,
-		{
-			// The CANONICAL salt (fixed from 5.0.0 onward — see private-fuel.ts PRIVATE_FPC_SALT).
-			salt: Fr.fromHexString(PRIVATE_FPC_SALT),
-			publicKeys: PublicKeys.default(),
-			deployer: AztecAddress.ZERO,
-		} as never,
-	)
-	if (privateFpcInstance.address.toString() !== PRIVATE_FPC_ADDRESS) {
-		throw new Error(`PrivateFPC rebuilt ${privateFpcInstance.address} != pinned ${PRIVATE_FPC_ADDRESS} (artifact/version drift)`)
+	const instance = await getContractInstanceFromInstantiationParams(artifact, {
+		salt: Fr.fromHexString(PRIVATE_FPC_SALT),
+		publicKeys: PublicKeys.default(),
+		deployer: AztecAddress.ZERO,
+	})
+	if (instance.address.toString() !== PRIVATE_FPC_ADDRESS) {
+		throw new Error(`PrivateFPC rebuilt ${instance.address} != pinned ${PRIVATE_FPC_ADDRESS} (artifact/version drift)`)
 	}
 	try {
-		await (ewallet as { registerContract: (i: unknown, a: unknown) => Promise<unknown> }).registerContract(
-			privateFpcInstance,
-			privateFpcArtifact as never,
-		)
+		await (ewallet as { registerContract: (i: unknown, a: unknown) => Promise<unknown> }).registerContract(instance, artifact)
 	} catch {}
-	console.log(`live contracts registered (+ PrivateFPC ${PRIVATE_FPC_ADDRESS.slice(0, 12)}…) (${mins()})`)
-	return { token, bridge, feeJuice, privateFpcInstance, privateFpcArtifact }
+	console.log(`PrivateFPC ${PRIVATE_FPC_ADDRESS.slice(0, 12)}… registered (${mins()})`)
+	return { instance, artifact }
 }
 
-type VariantResult = {
-	tokenLeafIndex: bigint
-	fuelLeafIndex: bigint
-	fuelReceived: bigint
-	tokenSecretHex: string
-	fuelSecretHex: string
-}
-
-/** Build the self-paying claim fee for one attempt.
- *  PUBLIC fuel: FeeJuicePaymentMethodWithClaim (pays ACTUAL fee, no upfront budget gate) — fee is static.
- *  PRIVATE-FPC fuel: Wonderland mint_and_pay_fee asserts amount >= getFeeLimit (gasLimit × committed
- *  maxFeesPerGas) UPFRONT, AND the protocol rejects the tx if committed maxFeesPerGas < live base fee at
- *  inclusion. The claim builds+proves minutes before it lands, so a build-time cap can fall below the
- *  risen live fee (observed: a 4% rise broke a static cap, and the retry reused it → stranded). So
- *  RE-PRICE per attempt: fresh predictedWorstMinFees × RELIABILITY_PAD. Repricing tracks the rising base
- *  fee across the sync wait; the pad absorbs intra-attempt drift during proving. The bridged FJ
- *  (~hundreds of FJ) dwarfs the few-FJ ceiling, so the larger cap never strands the FPC budget. */
+/** PUBLIC fuel pays the ACTUAL fee, so its payment is static. PRIVATE-FPC fuel asserts
+ *  `amount >= getFeeLimit` against the COMMITTED maxFeesPerGas, and the protocol rejects a tx whose
+ *  committed cap fell below the live base fee by inclusion time — a claim proves for minutes, so the
+ *  cap is re-priced on every attempt rather than reused. */
 async function buildVariantClaimFee(
 	ctx: VariantCtx,
-	result: VariantResult,
-	fuelViaPrivateFpc: boolean,
+	result: SendResult,
+	viaFpc: boolean,
 	bridgeSalt: Fr | undefined,
 ): Promise<{ fee: unknown; maxFees?: GasFees }> {
-	if (!fuelViaPrivateFpc) {
+	const fuelReceived = result.fuelReceived ?? 0n
+	if (!viaFpc) {
 		return {
 			fee: {
 				paymentMethod: publicFeeJuicePayment(ctx.from, {
-					claimAmount: result.fuelReceived,
-					claimSecret: Fr.fromHexString(result.fuelSecretHex),
-					messageLeafIndex: result.fuelLeafIndex,
+					claimAmount: fuelReceived,
+					claimSecret: Fr.fromHexString(result.fuelSecretHex as string),
+					messageLeafIndex: result.fuelLeafIndex as bigint,
 				}),
 			},
 		}
@@ -200,10 +156,10 @@ async function buildVariantClaimFee(
 		fee: {
 			paymentMethod: privateMintAndPayFee(
 				AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS),
-				result.fuelReceived,
+				fuelReceived,
 				deriveBridgeSecret(bridgeSalt as Fr, ctx.from),
 				bridgeSalt as Fr,
-				new Fr(result.fuelLeafIndex),
+				new Fr(result.fuelLeafIndex as bigint),
 			),
 			gasSettings: { teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }), maxFeesPerGas: maxFees },
 		},
@@ -211,200 +167,151 @@ async function buildVariantClaimFee(
 	}
 }
 
-type ClaimReceipt = { transactionFee?: bigint; gasUsed?: { totalGas?: { daGas: number; l2Gas: number } } }
-
-/** An FPC budget assert is a REAL fail (bridged FJ < committed getFeeLimit) — never a
- *  sync/fee-drift wait to retry through. */
+/** An FPC budget assert means the bridged FJ is below the committed getFeeLimit — a real failure,
+ *  never a sync/fee-drift wait to retry through. */
 function throwIfFpcBudgetAssert(label: string, fuelReceived: bigint, msg: string): void {
 	if (/Amount too low to cover gas cost|max_gas_cost/.test(msg)) {
 		throw new Error(`${label}: FPC budget assert — bridged FJ ${fuelReceived} < committed getFeeLimit. ${msg}`)
 	}
 }
 
-/** The live swap route from the manifest's pool config + a fresh quote for the fuel slice. */
-async function quoteFuelSlice(ctx: VariantCtx): Promise<{ route: ReturnType<typeof buildFuelRoute>; minOut: bigint }> {
-	const route = buildFuelRoute({
-		token: ctx.azlo,
-		weth: swap.weth,
-		feeJuice: swap.feeJuice,
-		tokenWeth: swap.pools.tokenWeth ?? swap.pools.azloWeth,
-		ethFj: swap.pools.ethFj,
-	})
-	const quote = await quoteFuelPath(ctx.pub as never, swap.quoter, route, FUEL_SLICE)
-	const minOut = minOutputForSlippage(quote, swap.slippageBps)
-	console.log(`quote: ${FUEL_SLICE} AZLO-wei → ${quote} FJ-wei (floor ${minOut}) (${ctx.mins()})`)
-	return { route, minOut }
-}
-
-/** The self-paying claim: ONE tx claims the fuel (fee) AND the tokens, retried on the sync
- *  cadence with per-attempt fee re-pricing. An FPC budget assert is a REAL fail (bridged FJ <
- *  ceiling), not a sync/fee-drift wait; "maxFeesPerGas < gasFees" (base fee rose) self-heals
- *  because the next attempt re-prices. */
+/** The self-paying claim, retried on the message-sync cadence. It cannot use the shared fixed-options
+ *  claim loop: the FPC fee has to be rebuilt per attempt (see buildVariantClaimFee). */
 async function settleVariantClaim(
 	ctx: VariantCtx,
-	p: { label: string; isPrivate: boolean; result: VariantResult; fuelViaPrivateFpc: boolean; bridgeSalt: Fr | undefined },
-): Promise<{ receipt: ClaimReceipt; committedMaxFees?: GasFees }> {
-	const bridgedAmount = TOTAL - FUEL_SLICE
-	const tokenSecret = Fr.fromHexString(p.result.tokenSecretHex)
-	const claimMethod = () =>
-		p.isPrivate
-			? ctx.bridge.methods.claim_private(ctx.from, bridgedAmount, tokenSecret, new Fr(p.result.tokenLeafIndex))
-			: ctx.bridge.methods.claim_public(ctx.from, bridgedAmount, tokenSecret, new Fr(p.result.tokenLeafIndex))
-
-	let receipt: ClaimReceipt | undefined
-	let committedMaxFees: GasFees | undefined
-	for (let i = 0; i < 300 && !receipt; i++) {
+	p: { label: string; isPrivate: boolean; result: SendResult; viaFpc: boolean; bridgeSalt?: Fr },
+): Promise<{ outcome: HubClaimOutcome; committedMaxFees?: GasFees }> {
+	const claim = {
+		token: claimTokenBlock(TOKEN, p.result.token as NonNullable<SendResult["token"]>),
+		recipient: ctx.from.toString(),
+		amount: BRIDGED,
+		claimValue: Fr.fromHexString(p.result.tokenClaimValueHex as string),
+		leafIndex: p.result.tokenLeafIndex as bigint,
+		isPrivate: p.isPrivate,
+		from: ctx.from.toString(),
+	}
+	for (let i = 0; i < 300; i++) {
 		try {
-			const built = await buildVariantClaimFee(ctx, p.result, p.fuelViaPrivateFpc, p.bridgeSalt)
-			committedMaxFees = built.maxFees
-			const sent = (await claimMethod().send({
-				from: ctx.from,
-				fee: built.fee,
-				wait: { waitForStatus: TxStatus.PROPOSED },
-			} as never)) as {
-				receipt?: ClaimReceipt
-			}
-			receipt = sent.receipt ?? {}
+			const built = await buildVariantClaimFee(ctx, p.result, p.viaFpc, p.bridgeSalt)
+			const sendOpts = { from: ctx.from, fee: built.fee, wait: { waitForStatus: TxStatus.PROPOSED } }
+			return { outcome: await claimViaHub(ctx.hub, claim, sendOpts), committedMaxFees: built.maxFees }
 		} catch (e) {
-			throwIfFpcBudgetAssert(p.label, p.result.fuelReceived, e instanceof Error ? e.message : String(e))
-			if (i % 10 === 0) console.log(`claim not ready / re-pricing… (${ctx.mins()})`)
-			await new Promise((r) => setTimeout(r, 6000))
+			throwIfFpcBudgetAssert(p.label, p.result.fuelReceived ?? 0n, e instanceof Error ? e.message : String(e))
+			if (i % 10 === 0) console.log(`${p.label}: claim not ready / re-pricing… (${ctx.mins()})`)
+			await sleep(6000)
 		}
 	}
-	if (!receipt) throw new Error(`${p.label}: self-paying claim never SETTLED within budget`)
-	if (committedMaxFees) {
-		console.log(`${p.label}: committed maxFeesPerGas l2=${committedMaxFees.feePerL2Gas} (predicted-worst × ${RELIABILITY_PAD})`)
-	}
-	console.log(`${p.label}: claim SETTLED - one tx claimed tokens AND gas (${ctx.mins()})`)
-	return { receipt, committedMaxFees }
+	throw new Error(`${p.label}: self-paying claim never SETTLED within budget`)
 }
 
-/** Decompose the fee: actual (post-inclusion) vs the FPC ceiling (committed gasLimit × maxFeesPerGas). */
-async function deriveFeeCeiling(
-	ctx: VariantCtx,
-	receipt: ClaimReceipt,
-	committedMaxFees: GasFees | undefined,
-): Promise<bigint | undefined> {
-	const actualFee = receipt.transactionFee ?? 0n
-	if (committedMaxFees && receipt.gasUsed?.totalGas) {
-		const g = receipt.gasUsed.totalGas
-		return BigInt(g.daGas) * committedMaxFees.feePerDaGas + BigInt(g.l2Gas) * committedMaxFees.feePerL2Gas
-	}
-	if (committedMaxFees && actualFee > 0n) {
-		// The receipt doesn't expose gasUsed, so derive the FPC ceiling from the fee ratio: actual fee =
-		// gasUsed·liveBaseFee, the FPC ceiling = gasLimit·committedMaxFees, and gasLimit≈gasUsed (gasPadding≈1,
-		// teardown=0). So ceiling ≈ actualFee · (committedMaxFees / liveBaseFee), using the L2-gas component
-		// (it dominates; committed da-fee is 0). Conservative: if predicted-worst > current, the ceiling
-		// scales up exactly as the committed cap does.
-		const live = await ctx.node.getCurrentMinFees()
-		return live.feePerL2Gas > 0n ? (actualFee * committedMaxFees.feePerL2Gas) / live.feePerL2Gas : undefined
-	}
-	return undefined
+/**
+ * The FPC ceiling (`getFeeLimit`) from the fee ratio: the actual fee is gasUsed·liveBaseFee and the
+ * ceiling is gasLimit·committedMaxFees, with gasLimit ≈ gasUsed (padding ≈ 1, teardown 0). The L2-gas
+ * component dominates and the committed da fee is zero, so the L2 ratio is the whole scaling.
+ */
+async function deriveFeeCeiling(ctx: VariantCtx, actualFee: bigint, committedMaxFees?: GasFees): Promise<bigint | undefined> {
+	if (!committedMaxFees || actualFee <= 0n) return undefined
+	const live = await ctx.node.getCurrentMinFees()
+	return live.feePerL2Gas > 0n ? (actualFee * committedMaxFees.feePerL2Gas) / live.feePerL2Gas : undefined
 }
 
-/** One variant = L1 swap+bridge → self-paying L2 claim. */
-async function runVariant(
-	ctx: VariantCtx,
-	isPrivate: boolean,
-	nonce: bigint,
-	fuelViaPrivateFpc = false,
-): Promise<{ actualFee: bigint; ceiling?: bigint }> {
-	const label = `${isPrivate ? "PRIVATE" : "PUBLIC"}${fuelViaPrivateFpc ? "+FPC-fuel" : ""}`
-	console.log(`\n=== ${label} fueled bridge ===`)
+/** The fee a landed claim actually paid, in FJ-wei. */
+async function landedClaimFee(ctx: VariantCtx, claimTxHash: string): Promise<bigint> {
+	const receipt = await ctx.node.getTxReceipt(TxHash.fromString(claimTxHash))
+	return receipt.transactionFee ?? 0n
+}
 
-	// Private-FPC fuel: the FJ is bridged to the FPC with a claimer-bound secret (deriveBridgeSecret),
-	// so the FPC can reconstruct it inside mint_and_pay_fee. Public fuel lands at the user (random secret).
-	const bridgeSalt = fuelViaPrivateFpc ? Fr.random() : undefined
-	const fuelSecret = bridgeSalt ? deriveBridgeSecret(bridgeSalt, ctx.from) : undefined
-	// Recipient-committed private token leg: inject the per-deposit claim_salt. runSwapBridge derives
-	// the L1-committed secret from (salt, recipient) and echoes the SALT back as tokenSecretHex — which
-	// claim_private re-derives from below. Omitting it trips the F2 fail-closed guard (a random token
-	// secret would strand the deposit against the recipient-committed claim_private).
-	const tokenClaimSalt = isPrivate ? Fr.random() : undefined
-
-	const { route, minOut } = await quoteFuelSlice(ctx)
-
-	const result = (await runSwapBridge(
-		{ pub: ctx.pub, wallet: ctx.wallet, account: ctx.account } as never,
+async function sendVariant(ctx: VariantCtx, isPrivate: boolean, viaFpc: boolean, bridgeSalt?: Fr): Promise<SendResult> {
+	const fuel = await planFuelLeg(ctx.l1.pub, SWAP, GENERATION.feeAsset, TOKEN.erc20 as Address, FUEL_SLICE)
+	console.log(`quote: ${FUEL_SLICE} ${TOKEN.displaySymbol}-units → ${fuel.quote} FJ-wei (floor ${fuel.minFuelOutput}) (${ctx.mins()})`)
+	return runSend(
+		ctx.l1,
+		GENERATION,
 		{
-			router: core.router,
-			routerAbi: evmAbi("SwapBridgeRouter"),
-			permit2: core.permit2,
-			swapTarget: core.swapTarget,
-			tokenPortal: CONFIG.l1.portal,
-			bridgeToken: ctx.azlo,
-			totalAmount: TOTAL,
-			fuelAmount: FUEL_SLICE,
+			intent: "token+gas",
+			erc20: TOKEN.erc20 as Address,
+			amount: TOTAL,
 			aztecRecipient: ctx.from.toString() as `0x${string}`,
-			fuelRecipient: (fuelViaPrivateFpc ? PRIVATE_FPC_ADDRESS : ctx.from.toString()) as `0x${string}`,
-			minFuelOutput: minOut,
-			path: route.path,
-			zeroForOnes: route.zeroForOnes,
 			isPrivate,
-			...(fuelSecret ? { fuelSecret } : {}),
-			...(tokenClaimSalt ? { tokenClaimSalt } : {}),
-			nonce,
+			claimSalt: isPrivate ? Fr.random() : undefined,
+			gas: {
+				fuelAmount: FUEL_SLICE,
+				fuelRecipient: (viaFpc ? PRIVATE_FPC_ADDRESS : ctx.from.toString()) as `0x${string}`,
+				minFuelOutput: fuel.minFuelOutput,
+				path: fuel.path,
+				zeroForOnes: fuel.zeroForOnes,
+				fuelSecret: bridgeSalt ? deriveBridgeSecret(bridgeSalt, ctx.from) : undefined,
+			},
+			nonce: rndNonce(),
 			deadline: BigInt(Math.floor(Date.now() / 1000) + 1800),
-			chainId: 11155111,
-		} as never,
+		},
 		(s) => console.log(`l1: ${s} (${ctx.mins()})`),
-		{ onSecrets: () => console.log("secrets persisted (in-memory for the smoke)") },
-	)) as VariantResult
-	console.log(
-		`bridged: tokenLeaf ${result.tokenLeafIndex}, fuelLeaf ${result.fuelLeafIndex}, fuelReceived ${result.fuelReceived} (${ctx.mins()})`,
 	)
+}
+
+/** One variant = an L1 fueled send → a self-paying L2 hub claim. */
+async function runVariant(ctx: VariantCtx, isPrivate: boolean, viaFpc = false): Promise<VariantRun> {
+	const label = `${isPrivate ? "PRIVATE" : "PUBLIC"}${viaFpc ? "+FPC-fuel" : ""}`
+	console.log(`\n=== ${label} fueled send ===`)
+
+	// Private-FPC fuel binds the Fee Juice to the FPC through a claimer-derived secret, so the FPC can
+	// reconstruct it inside mint_and_pay_fee; public fuel lands at the user with a random secret.
+	const bridgeSalt = viaFpc ? Fr.random() : undefined
+	const result = await sendVariant(ctx, isPrivate, viaFpc, bridgeSalt)
+	console.log(`sent: tokenLeaf ${result.tokenLeafIndex}, fuelLeaf ${result.fuelLeafIndex}, fuelReceived ${result.fuelReceived}`)
 
 	const fjBefore = await ctx.fjBalance()
-	const { receipt, committedMaxFees } = await settleVariantClaim(ctx, { label, isPrivate, result, fuelViaPrivateFpc, bridgeSalt })
-	const actualFee = receipt.transactionFee ?? 0n
-	const ceiling = await deriveFeeCeiling(ctx, receipt, committedMaxFees)
-	console.log(
-		`${label}: actual fee ${actualFee}${ceiling !== undefined ? ` | getFeeLimit (FPC ceiling) ≈ ${ceiling}` : " | getFeeLimit n/a"}`,
-	)
+	const { outcome, committedMaxFees } = await settleVariantClaim(ctx, { label, isPrivate, result, viaFpc, bridgeSalt })
+	const actualFee = await landedClaimFee(ctx, outcome.claimTxHash)
+	const ceiling = await deriveFeeCeiling(ctx, actualFee, committedMaxFees)
+	console.log(`${label}: ${outcome.path} settled, fee ${actualFee}${ceiling === undefined ? "" : ` | getFeeLimit ≈ ${ceiling}`}`)
 
-	const bridgedAmount = TOTAL - FUEL_SLICE
 	const tokenBal = await ctx.tokenBalance(isPrivate ? "private" : "public")
-	console.log(`${label}: token balance ${tokenBal}`)
-	if (tokenBal < bridgedAmount) throw new Error(`${label}: token balance ${tokenBal} < ${bridgedAmount}`)
-	if (!fuelViaPrivateFpc) {
-		// PUBLIC fuel credits the user's PUBLIC FJ balance. PRIVATE-FPC fuel credits the remainder as a
-		// PRIVATE note (not the public balance), so this assert only applies to the public path.
+	if (tokenBal < BRIDGED) throw new Error(`${label}: token balance ${tokenBal} < ${BRIDGED}`)
+	if (!viaFpc) {
+		// FPC fuel credits the remainder as a private note, not the public FJ balance — only the public
+		// lane can assert on the balance.
 		const fjAfter = await ctx.fjBalance()
 		if (fjAfter <= fjBefore) throw new Error(`${label}: no FJ landed as balance (fee ate everything?)`)
-		console.log(`${label}: FJ gained ${fjAfter - fjBefore}`)
+		console.log(`${label}: token balance ${tokenBal}, FJ gained ${fjAfter - fjBefore}`)
 	}
-	return { actualFee, ceiling }
+	return { actualFee, ceiling, path: outcome.path }
 }
 
-/** MIN_FUEL_FJ calibration: 4× the worst FPC CEILING (getFeeLimit), not the actual fee (codex
- *  019ee66b-01a4) — the FPC asserts amount >= getFeeLimit. Falls back to a conservative
- *  actual×4 proxy only if no receipt exposed gasUsed (so the ceiling couldn't be computed).
- *  4× matches the old V4-era floor's forgiveness (~4× headroom) GROUNDED in the real V5
- *  ceiling — the ceiling already bakes in the 1.5× fee pad, so 4× tolerates a further ~4×
- *  base-fee surge. */
-function calibrateMinFuelFj(pubRun: { actualFee: bigint }, privRuns: { actualFee: bigint; ceiling?: bigint }[], mins: () => string): void {
-	const ceilings = privRuns.map((r) => r.ceiling).filter((c): c is bigint => c !== undefined)
-	const worstCeiling = ceilings.length ? ceilings.reduce((a, b) => (a > b ? a : b)) : undefined
-	const worstActual = [pubRun, ...privRuns].map((r) => r.actualFee).reduce((a, b) => (a > b ? a : b), 0n)
-	const basis = worstCeiling ?? worstActual * 4n
-	const FUEL_FEE_MARGIN = 4n
-	const minFuelFj = basis * FUEL_FEE_MARGIN
-	console.log(`\n✅ public + ${privRuns.length} private-FPC runs SETTLED in ${mins()}`)
-	console.log(`private getFeeLimits : ${privRuns.map((r) => r.ceiling ?? "n/a").join(", ")}`)
-	console.log(`private actual fees  : ${privRuns.map((r) => r.actualFee).join(", ")}`)
-	console.log(
-		`MIN_FUEL_FJ calibration: ${minFuelFj} (${FUEL_FEE_MARGIN}× worst ${worstCeiling !== undefined ? "getFeeLimit" : "actual×4 proxy"}) - update testnet-bridge.json l1.fuel.swap.minFuelFj`,
-	)
+const worstOf = (values: bigint[]): bigint | undefined => (values.length ? values.reduce((a, b) => (a > b ? a : b)) : undefined)
+
+/**
+ * `minFuelFj` is 4× the worst FPC CEILING, never the actual fee: the FPC asserts
+ * `amount >= getFeeLimit`, and the ceiling already bakes in the fee pad, so 4× tolerates a further
+ * ~4× base-fee surge. `fjPerTx` is the worst PLAIN claim observed (a registering first claim costs
+ * more, and that difference is what `fjRegister` exists for).
+ */
+function printCalibration(runs: VariantRun[], mins: () => string): void {
+	const ceilings = runs.map((r) => r.ceiling).filter((c): c is bigint => c !== undefined)
+	const worstCeiling = worstOf(ceilings)
+	const worstActual = worstOf(runs.map((r) => r.actualFee)) ?? 0n
+	const minFuelFj = (worstCeiling ?? worstActual * 4n) * 4n
+	console.log(`\n✅ ${runs.length} fueled runs SETTLED in ${mins()}`)
+	console.log(`claim paths          : ${runs.map((r) => r.path).join(", ")}`)
+	console.log(`claim fees (FJ-wei)  : ${runs.map((r) => r.actualFee).join(", ")}`)
+	console.log(`minFuelFj calibration: ${minFuelFj} (4× worst ${worstCeiling === undefined ? "actual×4 proxy" : "getFeeLimit"})`)
+
+	const plain = worstOf(runs.filter((r) => r.path === "claim").map((r) => r.actualFee))
+	const registering = worstOf(runs.filter((r) => r.path !== "claim").map((r) => r.actualFee))
+	const fjPerTx = plain ?? worstActual
+	console.log(`fjPerTx calibration  : ${fjPerTx} — set bridge.l1.swap.fjPerTx${plain === undefined ? " (no plain claim ran)" : ""}`)
+	if (plain !== undefined && registering !== undefined && registering > plain) {
+		console.log(`fjRegister hint      : ${registering - plain} (the first claim's registration surcharge)`)
+	}
 }
 
-/** Spend existing private FJ: a 1-unit public self-transfer paying via PrivateFPC.pay_fee,
- *  repriced per attempt. A pay_fee insufficiency is a real fail; sync/fee-drift retries. */
-async function spendFpcBalanceOnce(ctx: VariantCtx, token: Contract, before: bigint): Promise<void> {
-	let settled = false
-	for (let a = 0; a < 100 && !settled; a++) {
+/** Spend EXISTING private Fee Juice: a 1-unit public self-transfer paid via PrivateFPC.pay_fee,
+ *  re-priced per attempt. A pay_fee insufficiency is a real failure; sync/fee drift retries. */
+async function spendFpcBalanceOnce(ctx: VariantCtx, before: bigint): Promise<void> {
+	for (let a = 0; a < 100; a++) {
 		try {
 			const maxFees = (await predictedWorstMinFees(ctx.node)).mul(RELIABILITY_PAD)
-			await token.methods.transfer_public_to_public(ctx.from, ctx.from, 1n, 0).send({
+			await ctx.l2Token.methods.transfer_public_to_public(ctx.from, ctx.from, 1n, 0).send({
 				from: ctx.from,
 				fee: {
 					paymentMethod: privateFeeJuicePayment(AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)),
@@ -412,87 +319,85 @@ async function spendFpcBalanceOnce(ctx: VariantCtx, token: Contract, before: big
 				},
 				wait: { waitForStatus: TxStatus.PROPOSED },
 			} as never)
-			settled = true
+			return
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : String(e)
 			if (/Amount too low to cover gas cost|max_gas_cost|insufficient/i.test(msg)) {
-				throw new Error(`NO-FUEL-SPEND: pay_fee insufficiency - FPC balance ${before} < reserved cost. ${msg}`)
+				throw new Error(`NO-FUEL-SPEND: pay_fee insufficiency — FPC balance ${before} < reserved cost. ${msg}`)
 			}
-			if (a % 10 === 0) console.log(`no-fuel-spend re-pricing... (${ctx.mins()})`)
-			await new Promise((r) => setTimeout(r, 6000))
+			if (a % 10 === 0) console.log(`no-fuel-spend re-pricing… (${ctx.mins()})`)
+			await sleep(6000)
 		}
 	}
-	if (!settled) throw new Error("NO-FUEL-SPEND: pay_fee tx never SETTLED within budget")
+	throw new Error("NO-FUEL-SPEND: pay_fee tx never SETTLED within budget")
 }
 
-/** Phase 3: NO-FUEL-SPEND proof - a tx self-pays from EXISTING private FJ at the FPC via pay_fee. */
-async function runNoFuelSpendProof(
-	ctx: VariantCtx,
-	p: { ewallet: unknown; token: Contract; privateFpcInstance: { address: AztecAddress }; privateFpcArtifact: unknown; runs: number },
-): Promise<void> {
-	const fpcContract = await Contract.at(p.privateFpcInstance.address, p.privateFpcArtifact as never, p.ewallet as never)
-	const readFpcBalance = async (): Promise<bigint> => {
-		const r = (await fpcContract.methods.balance_of(ctx.from).simulate({ from: ctx.from })) as { result?: bigint } | bigint
+/** A tx self-pays from Fee Juice ALREADY held at the FPC — the lane a user hits after their first send. */
+async function runNoFuelSpendProof(ctx: VariantCtx, fpc: ContractBase, runs: number): Promise<void> {
+	const fpcBalance = async (): Promise<bigint> => {
+		const r = (await fpc.methods.balance_of(ctx.from).simulate({ from: ctx.from } as never)) as { result?: bigint } | bigint
 		return typeof r === "bigint" ? r : (r.result ?? 0n)
 	}
-	for (let i = 0; i < p.runs; i++) {
-		console.log(`\n--- no-fuel-spend run ${i + 1}/${p.runs} ---`)
-		// Seed: a PUBLIC-token + private-FPC-fuel bridge credits the FPC with private FJ AND gives `from`
-		// public tokens to move. The remainder mint_and_pay_fee credits is exactly what pay_fee then spends.
-		await runVariant(ctx, false, rndNonce(), true)
-		const before = await readFpcBalance()
-		console.log(`NO-FUEL-SPEND: FPC private FJ before = ${before}`)
-		if (before <= 0n) throw new Error("NO-FUEL-SPEND: FPC balance 0 after a private fuel run - nothing to spend")
-		await spendFpcBalanceOnce(ctx, p.token, before)
-		const after = await readFpcBalance()
-		if (after >= before) throw new Error(`NO-FUEL-SPEND: FPC balance did not drop (${before} -> ${after}) - pay_fee did not charge`)
-		console.log(
-			`OK NO-FUEL-SPEND run ${i + 1}: tx self-paid from EXISTING private FJ via pay_fee on V5 (FPC ${before} -> ${after}, spent ${before - after}) (${ctx.mins()})`,
-		)
+	for (let i = 0; i < runs; i++) {
+		console.log(`\n--- no-fuel-spend run ${i + 1}/${runs} ---`)
+		// A public-token + private-FPC-fuel send credits the FPC with private FJ AND leaves public
+		// tokens to move; what mint_and_pay_fee credits is exactly what pay_fee then spends.
+		await runVariant(ctx, false, true)
+		const before = await fpcBalance()
+		if (before <= 0n) throw new Error("NO-FUEL-SPEND: FPC balance 0 after a private fuel run — nothing to spend")
+		await spendFpcBalanceOnce(ctx, before)
+		const after = await fpcBalance()
+		if (after >= before) throw new Error(`NO-FUEL-SPEND: FPC balance did not drop (${before} → ${after}) — pay_fee did not charge`)
+		console.log(`OK run ${i + 1}: self-paid from existing private FJ (FPC ${before} → ${after}) (${ctx.mins()})`)
 	}
 }
 
-const rndNonce = () => BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
+async function mintForRuns(l1: L1Ctx, amount: bigint, mins: () => string): Promise<void> {
+	if (TOKEN.source !== "permissionless-mint") {
+		console.log(`${TOKEN.displaySymbol} is canonical — fund the sender yourself (needs ${amount} base units)`)
+		return
+	}
+	const hash = await l1.wallet.writeContract({
+		address: TOKEN.erc20 as Address,
+		abi: evmAbi(TOKEN.sourceContract ?? "MintableERC20"),
+		functionName: "mint",
+		args: [l1.account.address, amount],
+		account: l1.account,
+		chain: l1.wallet.chain,
+	} as never)
+	await l1.pub.waitForTransactionReceipt({ hash })
+	console.log(`minted ${amount} ${TOKEN.displaySymbol} base units (${mins()})`)
+}
 
-async function main() {
-	const mins = stopwatch()
-
-	// FUND-MOVING PREFLIGHT: this canary deposits Fee Juice
-	// and pays fees THROUGH the PrivateFPC at PRIVATE_FPC_ADDRESS — an unrecoverable
-	// loss if that address isn't the deployed, class-correct, version-compatible
-	// contract. The gate runs INLINE here (not as a separate operator command) so it
-	// can never be skipped before the first broadcast.
-	await runFpcGate("require-deployed")
-
-	// ─── L1 (live contracts, viem) ───────────────────────────────────
+async function buildL1(mins: () => string): Promise<L1Ctx> {
 	const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`)
-	if (account.address.toLowerCase() !== PLAN_PINNED_L1_SIGNER.toLowerCase()) {
-		throw new Error(`L1 sender ${account.address} != plan-pinned signer ${PLAN_PINNED_L1_SIGNER} — wrong key; STOP`)
+	const pinned = requirePinnedSigner("testnet")
+	if (account.address.toLowerCase() !== pinned.toLowerCase()) {
+		throw new Error(`L1 sender ${account.address} != pinned signer ${pinned} — wrong key; STOP`)
 	}
 	const { wallet, pub } = createL1Clients({ chain: sepolia, rpcUrl: SEPOLIA_RPC, account })
-	const azlo = CONFIG.l1.usdc as `0x${string}`
-	console.log("L1 sender", account.address, "| AZLO", azlo, "| router", core.router)
+	const l1: L1Ctx = { pub, wallet, account }
+	console.log(`L1 sender ${account.address} | ${TOKEN.displaySymbol} ${TOKEN.erc20} | router ${GENERATION.router}`)
 
-	// Mint enough AZLO for both variants (permissionless, Permit2 pre-approved by the token).
-	const PRIVATE_RUNS = Number(process.env.PRIVATE_RUNS ?? 3) // ≥3 for calibration stability; env-tunable
-	const NOFUEL_SPEND_RUNS = Number(process.env.NOFUEL_SPEND_RUNS ?? 0) // Phase-3 pay_fee proof; each seeds one FPC-fuel run
-	// 1 public sanity + PRIVATE_RUNS calibration + NOFUEL_SPEND_RUNS seed runs + 1 TOTAL headroom.
-	const MINT = BigInt(2 + PRIVATE_RUNS + NOFUEL_SPEND_RUNS) * TOTAL
-	await pub.waitForTransactionReceipt({
-		hash: await wallet.writeContract({
-			address: azlo,
-			abi: evmAbi("MintableERC20") as never,
-			functionName: "mint",
-			args: [account.address, MINT] as never,
-		}),
+	// 1 public sanity + the private calibration runs + one seed per no-fuel-spend run + one TOTAL spare.
+	const mintAmount = BigInt(2 + PRIVATE_RUNS + NOFUEL_SPEND_RUNS) * TOTAL
+	await mintForRuns(l1, mintAmount, mins)
+	await ensureRouterPermit2(l1, {
+		usdc: TOKEN.erc20 as `0x${string}`,
+		usdcAbi: evmAbi(TOKEN.sourceContract ?? "MintableERC20"),
+		permit2: GENERATION.permit2,
+		needed: mintAmount,
+		mins,
 	})
-	console.log(`minted ${MINT / 10n ** 18n} AZLO (${mins()})`)
+	return l1
+}
 
-	// ─── L2 (fresh account, real proofs; sponsored pays ONLY the account deploy) ──
+async function buildL2(l1: L1Ctx, mins: () => string): Promise<{ ctx: VariantCtx; fpc: ContractBase }> {
 	const node = createNode(NODE_URL)
 	const ewallet = await createL2Wallet({ nodeUrl: NODE_URL, proverEnabled: true })
 	const { manager, from } = await freshSchnorrAccount(ewallet as never)
 	console.log("L2 recipient", from.toString())
+
 	const { fee: sponsoredFee } = await sponsoredFpcFee(ewallet)
 	await deployAccountIfAbsent({
 		node,
@@ -500,40 +405,54 @@ async function main() {
 		from,
 		fee: sponsoredFee,
 		log: (stage) =>
-			console.log(
-				stage === "deploying"
-					? `deploying L2 account via sponsored FPC (real proof)… (${mins()})`
-					: `L2 account deployed (${mins()})`,
-			),
+			console.log(stage === "deploying" ? `deploying L2 account (real proof)… (${mins()})` : `L2 account deployed (${mins()})`),
 	})
 
-	const { token, bridge, feeJuice, privateFpcInstance, privateFpcArtifact } = await registerLiveContracts(ewallet, mins)
+	const hub = await registerHub(ewallet as never, BRIDGE.l2.hub)
+	const hubAddress = AztecAddress.fromStringUnsafe(BRIDGE.l2.hub.address)
+	const l2Token = await registerHubToken(ewallet as never, hubAddress, TOKEN, BRIDGE.l2.tokenClassId)
+	const privateFpc = await registerPrivateFpc(ewallet, mins)
+	const feeJuice = Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, ewallet as never)
 
-	const fjBalance = async (): Promise<bigint> =>
-		((await feeJuice.methods.balance_of_public(from).simulate({ from })) as { result?: bigint }).result ??
-		((await feeJuice.methods.balance_of_public(from).simulate({ from })) as unknown as bigint)
-	const tokenBalance = async (kind: "public" | "private"): Promise<bigint> => {
-		const m = kind === "public" ? token.methods.balance_of_public(from) : token.methods.balance_of_private(from)
-		const r = (await m.simulate({ from })) as { result?: bigint }
-		return r.result ?? (r as unknown as bigint)
+	const read = async (call: { simulate: (o: never) => Promise<unknown> }): Promise<bigint> => {
+		const r = (await call.simulate({ from } as never)) as { result?: bigint } | bigint
+		return typeof r === "bigint" ? r : (r.result ?? 0n)
 	}
+	const ctx: VariantCtx = {
+		l1,
+		node,
+		hub,
+		l2Token,
+		from,
+		fjBalance: () => read(feeJuice.methods.balance_of_public(from)),
+		tokenBalance: (kind) =>
+			read(kind === "public" ? l2Token.methods.balance_of_public(from) : l2Token.methods.balance_of_private(from)),
+		mins,
+	}
+	return { ctx, fpc: Contract.at(privateFpc.instance.address, privateFpc.artifact, ewallet as never) }
+}
 
-	const ctx: VariantCtx = { pub, wallet, account, node, from, azlo, bridge, fjBalance, tokenBalance, mins }
+async function main() {
+	const mins = stopwatch()
 
-	// Public fuel = sanity (works pre-fix); the PRIVATE-FPC path is what regressed — run it ≥3× for a
-	// stable getFeeLimit/minFuelFj across fee conditions.
-	const pubRun = await runVariant(ctx, false, rndNonce())
-	const privRuns: { actualFee: bigint; ceiling?: bigint }[] = []
+	// This canary deposits Fee Juice and pays fees THROUGH the pinned PrivateFPC — an unrecoverable
+	// loss if that address is not the deployed, class-correct contract. The gate runs inline so it
+	// cannot be skipped before the first broadcast.
+	await runFpcGate("require-deployed")
+
+	const l1 = await buildL1(mins)
+	const { ctx, fpc } = await buildL2(l1, mins)
+
+	// The public lane is the sanity check; the private-FPC lane is what the calibration needs, so run
+	// it repeatedly for a stable getFeeLimit across fee conditions.
+	const runs: VariantRun[] = [await runVariant(ctx, false)]
 	for (let i = 0; i < PRIVATE_RUNS; i++) {
 		console.log(`\n--- private-FPC run ${i + 1}/${PRIVATE_RUNS} ---`)
-		privRuns.push(await runVariant(ctx, true, rndNonce(), true))
+		runs.push(await runVariant(ctx, true, true))
 	}
+	printCalibration(runs, mins)
 
-	calibrateMinFuelFj(pubRun, privRuns, mins)
-
-	if (NOFUEL_SPEND_RUNS > 0) {
-		await runNoFuelSpendProof(ctx, { ewallet, token, privateFpcInstance, privateFpcArtifact, runs: NOFUEL_SPEND_RUNS })
-	}
+	if (NOFUEL_SPEND_RUNS > 0) await runNoFuelSpendProof(ctx, fpc, NOFUEL_SPEND_RUNS)
 }
 
 main().catch((e) => {

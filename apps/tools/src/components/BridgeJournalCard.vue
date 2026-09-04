@@ -145,6 +145,7 @@ const fuelRecovery = computed(() =>
 		isPrivate: props.record.isPrivate,
 		isFeeJuiceAsset: isFuel.value,
 		schema: props.record.schema,
+		intent: "intent" in props.record ? props.record.intent : undefined,
 		completedAt: props.record.completedAt,
 		fuel: fuel.value,
 	}),

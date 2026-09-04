@@ -10,6 +10,7 @@
  * construction step; call sites keep their exact sequencing.
  */
 import { readFileSync } from "node:fs"
+import { type ManifestV2, parseManifestV2 } from "../src/manifest-v2"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import {
@@ -114,4 +115,18 @@ export function loadManifestFromConfigArg<T>(
 		return opts.parse(JSON.parse(readFileSync(opts.fallbackPath, "utf8")))
 	}
 	return opts.parse(JSON.parse(readFileSync(argv[configArg + 1] as string, "utf8")))
+}
+
+/** The generation manifest (`schema: 2`) from `--config`, strictly parsed; the L2 derivation check is the caller's. */
+export function loadManifestV2FromConfigArg(
+	argv: readonly string[],
+	opts: { mode: "required"; requiredHint?: string } | { mode: "fallback"; fallbackPath: string },
+): ManifestV2 {
+	return loadManifestFromConfigArg(argv, { ...opts, parse: parseManifestV2 })
+}
+
+/** A manifest with no bridge is a placeholder network — every bridge operation refuses it by name. */
+export function requireBridge(m: ManifestV2): NonNullable<ManifestV2["bridge"]> {
+	if (!m.bridge) throw new Error(`manifest for ${m.network} carries no bridge (placeholder network) — STOP`)
+	return m.bridge
 }

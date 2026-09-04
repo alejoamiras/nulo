@@ -1,7 +1,7 @@
 /**
- * LIVE-testnet DIRECT Fee-Juice canary: proves the candidate's `l1.feeJuice` lane end-to-end —
+ * LIVE-testnet DIRECT Fee-Juice canary: proves the manifest's top-level `feeJuice` lane end to end —
  * the one lane `fuel-testnet.ts` does NOT exercise (that one acquires FJ via the swap router).
- * Mirrors the tools app's PUBLIC direct-Fuel flow exactly (useL1FeeAsset + useFuel + fuelClaim):
+ * Mirrors the faucet's PUBLIC direct-Fuel flow exactly (useL1FeeAsset + useFuel + fuelClaim):
  *
  *   1. fail-closed coherence: handler.FEE_ASSET() == asset, portal.UNDERLYING() == asset
  *   2. FeeAssetHandler.mint(owner)            — the wallet's mint button
@@ -24,12 +24,11 @@ import { FeeAssetHandlerAbi } from "@aztec/l1-artifacts"
 import { FeeJuiceContractArtifact } from "@aztec/noir-contracts.js/FeeJuice"
 import { Gas } from "@aztec/stdlib/gas"
 import { privateKeyToAccount } from "viem/accounts"
-import { parseCandidateManifest } from "../src/candidate-schema"
 import { feeJuiceAddress, predictedWorstMinFees, publicFeeJuicePayment } from "../src/fee-juice"
 import { FeeJuicePortalAbi, feeJuiceDepositArgs, parseFeeJuiceDeposit, planPublicFuelDeposit } from "../src/fuel"
 import { ERC20_MIN_ABI } from "./script-l1"
 import { deployAccountIfAbsent, freshSchnorrAccount, sponsoredFpcFee } from "./script-l2"
-import { createL1Clients, createL2Wallet, createNode, loadManifestFromConfigArg, sepoliaChain, stopwatch } from "./script-bootstrap"
+import { createL1Clients, createL2Wallet, createNode, loadManifestV2FromConfigArg, sepoliaChain, stopwatch } from "./script-bootstrap"
 
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
@@ -38,19 +37,17 @@ if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY required (packages/bridge-core/.e
 
 const here = dirname(fileURLToPath(import.meta.url))
 const configArg = process.argv.indexOf("--config")
-// Recomputed (not just derived from loadManifestFromConfigArg) because the error below reports
-// the ACTUAL resolved path, matching whichever of --config / the fallback was used.
+// Recomputed (not just derived from the loader) so the error below names the ACTUAL resolved path,
+// matching whichever of --config / the fallback was used.
 const CONFIG_PATH =
 	configArg !== -1
 		? (process.argv[configArg + 1] as string)
 		: join(here, "..", "..", "..", "apps", "tools", "public", "testnet-bridge.json")
-const CONFIG = loadManifestFromConfigArg(process.argv, {
-	mode: "fallback",
-	fallbackPath: CONFIG_PATH,
-	parse: parseCandidateManifest,
-})
-if (!CONFIG.l1.feeJuice) throw new Error(`${CONFIG_PATH} has no l1.feeJuice block — nothing to canary`)
-const direct = CONFIG.l1.feeJuice
+const CONFIG = loadManifestV2FromConfigArg(process.argv, { mode: "fallback", fallbackPath: CONFIG_PATH })
+const direct = CONFIG.feeJuice
+const FEE_ASSET_HANDLER = direct.feeAssetHandler
+// The mint leg IS the wallet's mint button; without a handler there is no permissionless source.
+if (!FEE_ASSET_HANDLER) throw new Error(`${CONFIG_PATH} carries no feeJuice.feeAssetHandler — nothing to mint from`)
 
 const sepolia = sepoliaChain(SEPOLIA_RPC)
 
@@ -126,7 +123,7 @@ async function depositDirectFj(d: CanaryL1, plan: Awaited<ReturnType<typeof plan
 }
 
 /**
- * The tools app's PUBLIC claim lane — SELF-PAY (fuelClaim.ts): claim the bridged
+ * The faucet's PUBLIC claim lane — SELF-PAY (fuelClaim.ts): claim the bridged
  * FJ and pay THIS tx's fee FROM it in one carrier-less zero-app-call tx (BatchCall([]) +
  * FeeJuicePaymentMethodWithClaim → claim_and_end_setup in the SETUP phase). No Sponsored FPC — the
  * mainnet shape. Setup is the CORRECT home for claim_and_end_setup: the 5.0.0 "149 failed simulates"
@@ -190,7 +187,7 @@ async function main() {
 		owner: account.address,
 		asset: direct.asset as `0x${string}`,
 		portal: direct.portal as `0x${string}`,
-		handler: direct.feeAssetHandler as `0x${string}`,
+		handler: FEE_ASSET_HANDLER as `0x${string}`,
 		minFj: BigInt(direct.minFj),
 		mins,
 	}
@@ -246,7 +243,7 @@ async function main() {
 	console.log(
 		`\n✅ DIRECT Fee-Juice SELF-PAY canary PASSED — mint→deposit(minFj)→self-pay-claim landed ${gained} FJ-wei (fee ${feePaid}) in ${mins()}.`,
 	)
-	console.log("   The l1.feeJuice lane (handler mint + direct portal deposit + zero-app-call self-pay claim) is live.")
+	console.log("   The feeJuice lane (handler mint + direct portal deposit + zero-app-call self-pay claim) is live.")
 }
 
 main().catch((e) => {

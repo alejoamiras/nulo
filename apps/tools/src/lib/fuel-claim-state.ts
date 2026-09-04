@@ -217,17 +217,29 @@ export type FuelLadder =
 
 export interface FuelLadderInputs {
 	isPrivate: boolean
-	/** The DURABLE "this deposit bought fuel" marker: `fuel` is present ⟺ schema 2. A schema-2 record
-	 *  with no fuel block is a corrupted one that still has a live FJ message — classifying it by the
-	 *  block's absence alone would send it down the public ladder. */
-	schema: 1 | 2
+	/** With `intent`, the DURABLE "this deposit bought fuel" marker — see {@link boughtFuel}. */
+	schema: 1 | 2 | 3
+	/** Schema-3 records carry their intent; only a gas-buying one is expected to hold a fuel block. */
+	intent?: "token" | "token+gas" | "gas"
 	fuel?: { received?: string; leafIndex?: string; bridgeSecretSalt?: string }
+}
+
+/**
+ * Whether the deposit bought fuel, read from the record's durable shape rather than the fuel
+ * block's presence: a fueled record whose block was lost is corrupted and still has a live FJ
+ * message, and classifying it by the block's absence alone would send it down the public ladder.
+ * Schema 2 is fueled by definition; schema 3 says so through its intent; schema 1 never is.
+ */
+export function boughtFuel(i: Pick<FuelLadderInputs, "schema" | "intent">): boolean {
+	if (i.schema === 2) return true
+	if (i.schema === 3) return i.intent !== undefined && i.intent !== "token"
+	return false
 }
 
 export function decideFuelLadder(i: FuelLadderInputs): FuelLadder {
 	if (!i.isPrivate) return "public"
-	// Only a genuine no-fuel private deposit (schema 1, no block) has no FJ to protect.
-	if (!i.fuel) return i.schema === 2 ? "private-incomplete" : "public"
+	// Only a genuine no-fuel private deposit has no FJ to protect.
+	if (!i.fuel) return boughtFuel(i) ? "private-incomplete" : "public"
 	const f = i.fuel
 	return f.received && f.leafIndex && f.bridgeSecretSalt ? "private" : "private-incomplete"
 }
@@ -252,7 +264,8 @@ export interface StandaloneFuelRecoveryInputs {
 	isPrivate: boolean
 	/** A direct-Fuel record's completion IS its gas claim — never offer a re-claim for one. */
 	isFeeJuiceAsset: boolean
-	schema: 1 | 2
+	schema: 1 | 2 | 3
+	intent?: FuelLadderInputs["intent"]
 	completedAt?: number
 	fuel?: {
 		received?: string
@@ -266,11 +279,13 @@ export interface StandaloneFuelRecoveryInputs {
 export function decideStandaloneFuelRecovery(i: StandaloneFuelRecoveryInputs): StandaloneFuelRecovery {
 	const f = i.fuel
 	if (i.isFeeJuiceAsset) return "none"
-	if (!f?.received && !(i.isPrivate && i.schema === 2)) return "none"
+	if (!f?.received && !(i.isPrivate && boughtFuel(i))) return "none"
 	if (i.completedAt === undefined) return "none" // an unfinished claim retries via the normal action.
 	if (f?.consumed === true || f?.standaloneClaimed === true) return "none"
 	if (!i.isPrivate) return f?.received ? "offer" : "none"
-	return decideFuelLadder({ isPrivate: true, schema: i.schema, fuel: f }) === "private" ? "private-settled" : "private-unknown"
+	return decideFuelLadder({ isPrivate: true, schema: i.schema, intent: i.intent, fuel: f }) === "private"
+		? "private-settled"
+		: "private-unknown"
 }
 
 /** The terminal record/receipt mismatch: the L1 receipt cannot supply this record's fuel data, so a

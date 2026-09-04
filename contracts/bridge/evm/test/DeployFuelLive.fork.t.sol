@@ -13,7 +13,7 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {MintableERC20} from "../src/MintableERC20.sol";
 import {UniswapFuelSwap} from "../src/UniswapFuelSwap.sol";
 import {SwapBridgeRouter, IUniswapFuelSwap} from "../src/SwapBridgeRouter.sol";
-import {PoolSetupHelper} from "../script/DeployBridge.s.sol";
+import {PoolSetupHelper} from "../script/PoolSetupHelper.sol";
 import {DeployFuelLive} from "../script/DeployFuelLive.s.sol";
 import {Harness, IPermit2Domain} from "./SwapBridgeRouterPermit2Fork.t.sol";
 import {FakePortalFactory} from "./mocks/RouterMocks.sol";

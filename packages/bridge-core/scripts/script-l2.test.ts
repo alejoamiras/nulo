@@ -1,113 +1,177 @@
-import { describe, expect, it } from "vitest"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
+import type { ContractBase } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
-import { PublicKeys } from "@aztec/aztec.js/keys"
-import { bridgeProxyArtifact } from "../src/artifacts"
-import {
-	claimTokensUntilSynced,
-	deployAccountIfAbsent,
-	registerManifestContract,
-	registerManifestTrio,
-	universalDeployInstance,
-} from "./script-l2"
+import type { Wallet } from "@aztec/aztec.js/wallet"
+import { EthAddress } from "@aztec/foundation/eth-address"
+import { describe, expect, it } from "vitest"
+import { tokenBridgeHubArtifact } from "../src/artifacts"
+import type { HubClaimParams } from "../src/hub-l2"
+import { deriveHubTokenInstance } from "../src/hub-token"
+import type { ManifestToken } from "../src/manifest-v2"
+import { claimTokensUntilSynced, deployAccountIfAbsent, deriveInstance, registerHub, registerHubToken } from "./script-l2"
+
+const FACTORY = "0x3333333333333333333333333333333333333333"
+const GUARDIAN = `0x${"0".repeat(61)}ab1`
+/** The installed aztec-standards@5.0.1 Token class — the same pin as noir-artifact-classids.test.ts. */
+const TOKEN_CLASS_ID = "0x0225da0f4227a139c3d6562b6554750adcdec45fd62d9b16af11da21033ef2cf"
+const ERC20 = "0x00000000000000000000000000000000000e2c20"
+const HUB_SALT = `0x${"0".repeat(24)}${FACTORY.slice(2)}`
+
+const hubArgs = [Fr.fromHexString(TOKEN_CLASS_ID), EthAddress.fromString(FACTORY), AztecAddress.fromStringUnsafe(GUARDIAN)]
+
+const manifestToken = (l2Token: string): ManifestToken => ({
+	erc20: ERC20,
+	portal: "0x00000000000000000000000000000000000000a1",
+	l2Token,
+	nameWord: "0x004e756c6f205465737420546f6b656e00000000000000000000000000000000",
+	symbolWord: "0x004e545400000000000000000000000000000000000000000000000000000000",
+	decimals: 18,
+	displayName: "Nulo Test Token",
+	displaySymbol: "NTT",
+	source: "permissionless-mint",
+	sourceContract: "TestUsdc",
+})
+
+/** Records what a script taught the wallet; `Contract.at` only reads the artifact, never the wallet. */
+function fakeWallet() {
+	const registered: { classes: number; instances: string[] } = { classes: 0, instances: [] }
+	const wallet = {
+		registerContractClass: async () => {
+			registered.classes += 1
+		},
+		registerContract: async (instance: { address: { toString: () => string } }) => {
+			registered.instances.push(instance.address.toString())
+		},
+	}
+	return { wallet: wallet as unknown as Wallet, registered }
+}
 
 describe("script-l2", () => {
-	it("universalDeployInstance reproduces the direct universal-deploy computation", async () => {
-		const direct = await getContractInstanceFromInstantiationParams(
-			bridgeProxyArtifact as never,
-			{
-				constructorArgs: [],
-				salt: new Fr(1234),
-				publicKeys: PublicKeys.default(),
-				deployer: AztecAddress.ZERO,
-				constructorArtifact: "constructor",
-			} as never,
-		)
-		const viaHelper = await universalDeployInstance(bridgeProxyArtifact, [], "constructor", 1234)
-		expect(viaHelper.address.toString()).toBe(direct.address.toString())
+	it("deriveInstance is deployer-sensitive: the same salt and args under a different deployer is a different address", async () => {
+		const salt = Fr.fromHexString(HUB_SALT)
+		const universal = await deriveInstance(tokenBridgeHubArtifact, hubArgs, "constructor", salt, AztecAddress.ZERO)
+		const deployed = await deriveInstance(tokenBridgeHubArtifact, hubArgs, "constructor", salt, AztecAddress.fromStringUnsafe(GUARDIAN))
+		expect(universal.address.toString()).not.toBe(deployed.address.toString())
+		expect(universal.deployer.isZero()).toBe(true)
 	})
 
-	it("registerManifestTrio reconstructs constructor args and registers proxy → token → bridge in order", async () => {
-		const { AztecAddress: Addr } = await import("@aztec/aztec.js/addresses")
-		const { EthAddress } = await import("@aztec/foundation/eth-address")
-		const { TokenContractArtifact } = await import("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js")
-		const { tokenBridgeArtifact } = await import("../src/artifacts")
-		const portal = "0x0000000000000000000000000000000000000042"
-
-		// Compute the expected universal-deploy addresses the same way a real deploy records them.
-		const proxyI = await universalDeployInstance(bridgeProxyArtifact, [], "constructor", 11)
-		const tokenI = await universalDeployInstance(
-			TokenContractArtifact,
-			["N", "S", 6, proxyI.address, Addr.ZERO],
-			"constructor_with_minter",
-			22,
-		)
-		const bridgeI = await universalDeployInstance(
-			tokenBridgeArtifact,
-			[proxyI.address, EthAddress.fromString(portal)],
-			"constructor",
-			33,
-		)
-
-		const registered: string[] = []
-		const ewallet = {
-			registerContract: async (instance: { address: { toString: () => string } }) => {
-				registered.push(instance.address.toString())
-			},
+	it("registerHub asserts the recorded address, then registers the class and the instance", async () => {
+		const expected = await deriveInstance(tokenBridgeHubArtifact, hubArgs, "constructor", Fr.fromHexString(HUB_SALT), AztecAddress.ZERO)
+		const record = {
+			address: expected.address.toString(),
+			salt: HUB_SALT,
+			constructorArtifact: "constructor",
+			constructorArgs: [TOKEN_CLASS_ID, FACTORY, GUARDIAN],
 		}
-		const trio = await registerManifestTrio(ewallet, {
-			l1: { portal },
-			l2: {
-				proxy: { address: proxyI.address.toString(), salt: 11, constructorArtifact: "constructor" },
-				token: {
-					address: tokenI.address.toString(),
-					salt: 22,
-					constructorArtifact: "constructor_with_minter",
-					constructorArgs: ["N", "S", 6, proxyI.address.toString()],
-				},
-				bridge: { address: bridgeI.address.toString(), salt: 33, constructorArtifact: "constructor" },
-			},
-		})
-		expect(registered).toEqual([proxyI.address.toString(), tokenI.address.toString(), bridgeI.address.toString()])
-		expect(trio.proxy.address.toString()).toBe(proxyI.address.toString())
-		expect(trio.bridge.address.toString()).toBe(bridgeI.address.toString())
+		const { wallet, registered } = fakeWallet()
+		const hub = await registerHub(wallet, record)
+		expect(hub.address.toString()).toBe(record.address)
+		expect(registered).toEqual({ classes: 1, instances: [record.address] })
+
+		const guard = fakeWallet()
+		await expect(registerHub(guard.wallet, { ...record, address: `0x${"11".repeat(32)}` })).rejects.toThrow(
+			/manifest hub mismatch: derived .* != recorded/,
+		)
 	})
 
-	it("claimTokensUntilSynced selects claim_private vs claim_public and passes the claim pair", async () => {
-		const calls: { fn: string; args: unknown[] }[] = []
-		const bridge = {
-			methods: {
-				claim_private: (...args: unknown[]) => ({
-					send: async () => calls.push({ fn: "claim_private", args }),
-				}),
-				claim_public: (...args: unknown[]) => ({
-					send: async () => calls.push({ fn: "claim_public", args }),
-				}),
+	it("registerHubToken asserts the hub's derivation for the token and registers it", async () => {
+		const hub = AztecAddress.fromStringUnsafe("0x1234000000000000000000000000000000000000000000000000000000000abc")
+		const derived = await deriveHubTokenInstance(hub, ERC20, manifestToken("0x0"), TOKEN_CLASS_ID)
+		const token = manifestToken(derived.address.toString())
+
+		const { wallet, registered } = fakeWallet()
+		const contract = await registerHubToken(wallet, hub, token, TOKEN_CLASS_ID)
+		expect(contract.address.toString()).toBe(token.l2Token)
+		expect(registered.instances).toEqual([token.l2Token])
+
+		const guard = fakeWallet()
+		await expect(registerHubToken(guard.wallet, hub, { ...token, l2Token: `0x${"11".repeat(32)}` }, TOKEN_CLASS_ID)).rejects.toThrow(
+			/manifest token NTT mismatch/,
+		)
+	})
+
+	it("claimTokensUntilSynced retries only while the message is unsynced and returns the claim outcome", async () => {
+		const claim: HubClaimParams = {
+			token: {
+				erc20: ERC20,
+				portal: "0x00000000000000000000000000000000000000a1",
+				l2Token: `0x${"11".repeat(32)}`,
+				nameWord: "0x00",
+				symbolWord: "0x00",
+				decimals: 18,
+				displaySymbol: "NTT",
+				registerIndex: "5",
 			},
-		}
-		const claimValue = new Fr(7)
-		await claimTokensUntilSynced({
-			bridge: bridge as never,
-			isPrivate: true,
-			recipient: "R",
+			recipient: `0x${"22".repeat(32)}`,
 			amount: 5n,
-			claimValue,
+			claimValue: new Fr(7n),
 			leafIndex: 9n,
-			sendOpts: {},
-		})
-		await claimTokensUntilSynced({
-			bridge: bridge as never,
 			isPrivate: false,
-			recipient: "R",
-			amount: 5n,
-			claimValue,
-			leafIndex: 9n,
-			sendOpts: {},
+			from: `0x${"22".repeat(32)}`,
+		}
+		let sends = 0
+		const hub = {
+			methods: new Proxy(
+				{},
+				{
+					get: (_t, name: string) => () => ({
+						simulate: async () => ({ result: claim.token.l2Token }),
+						send: async () => {
+							sends += 1
+							if (sends < 3) throw new Error("No non-nullified L1 to L2 message found for message hash 0xabc")
+							return { receipt: { txHash: `0x${name}` } }
+						},
+					}),
+				},
+			),
+		} as unknown as ContractBase
+
+		expect(await claimTokensUntilSynced({ hub, claim, sendOpts: {}, intervalMs: 0 })).toEqual({
+			path: "claim",
+			claimTxHash: "0xclaim_public",
 		})
-		expect(calls.map((c) => c.fn)).toEqual(["claim_private", "claim_public"])
-		expect(calls[0].args[2]).toBe(claimValue)
-		expect(String(calls[0].args[3])).toBe(String(new Fr(9n)))
+		expect(sends).toBe(3)
+	})
+
+	it("claimTokensUntilSynced surfaces a non-sync failure on the first attempt", async () => {
+		const hub = {
+			methods: new Proxy(
+				{},
+				{
+					get: () => () => ({
+						simulate: async () => ({ result: `0x${"11".repeat(32)}` }),
+						send: async () => {
+							throw new Error("Assertion failed: Balance too low")
+						},
+					}),
+				},
+			),
+		} as unknown as ContractBase
+		await expect(
+			claimTokensUntilSynced({
+				hub,
+				claim: {
+					token: {
+						erc20: ERC20,
+						portal: "0x00000000000000000000000000000000000000a1",
+						l2Token: `0x${"11".repeat(32)}`,
+						nameWord: "0x00",
+						symbolWord: "0x00",
+						decimals: 18,
+						displaySymbol: "NTT",
+					},
+					recipient: `0x${"22".repeat(32)}`,
+					amount: 5n,
+					claimValue: new Fr(7n),
+					leafIndex: 9n,
+					isPrivate: true,
+					from: `0x${"22".repeat(32)}`,
+				},
+				sendOpts: {},
+				intervalMs: 0,
+				attempts: 5,
+			}),
+		).rejects.toThrow(/Balance too low/)
 	})
 
 	it("deployAccountIfAbsent no-ops when the node serves the account, else sends NO_FROM with the fee", async () => {
@@ -144,23 +208,5 @@ describe("script-l2", () => {
 		expect(sent?.from).toBe("NO_FROM")
 		expect(sent?.fee).toEqual({ paymentMethod: "sponsored" })
 		expect(log).toEqual(["deploying", "deployed"])
-	})
-
-	it("registerManifestContract hard-stops on a recorded address that does not recompute", async () => {
-		const neverCalled = {
-			registerContract: async () => {
-				throw new Error("must not register on mismatch")
-			},
-		}
-		await expect(
-			registerManifestContract(neverCalled, {
-				label: "proxy",
-				art: bridgeProxyArtifact,
-				args: [],
-				ctor: "constructor",
-				salt: 1234,
-				address: `0x${"11".repeat(32)}`,
-			}),
-		).rejects.toThrow(/manifest proxy mismatch: recomputed .* != recorded/)
 	})
 })

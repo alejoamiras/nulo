@@ -2,7 +2,14 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, describe, expect, test } from "vitest"
-import { loadManifestFromConfigArg, mainnetChain, sepoliaChain, stopwatch } from "./script-bootstrap"
+import {
+	loadManifestFromConfigArg,
+	loadManifestV2FromConfigArg,
+	mainnetChain,
+	requireBridge,
+	sepoliaChain,
+	stopwatch,
+} from "./script-bootstrap"
 
 describe("chain factories", () => {
 	test("sepoliaChain carries the caller's RPC url in the canonical descriptor", () => {
@@ -79,7 +86,7 @@ describe("loadManifestFromConfigArg", () => {
 		expect(parsed.kind).toBe("candidate")
 	})
 
-	test("the injected parser runs on the loaded JSON (canary keeps parseCandidateManifest)", () => {
+	test("the injected parser runs on the loaded JSON", () => {
 		const p = write("strict.json", { n: 1 })
 		expect(() =>
 			loadManifestFromConfigArg(["x", "y", "--config", p], {
@@ -90,5 +97,22 @@ describe("loadManifestFromConfigArg", () => {
 				},
 			}),
 		).toThrow("schema rejected")
+	})
+
+	test("the v2 loader parses strictly and requireBridge refuses a placeholder network by name", () => {
+		const placeholder = write("placeholder.json", {
+			schema: 2,
+			network: "mainnet",
+			l1ChainId: 1,
+			walletChainId: 2,
+			bridge: null,
+			feeJuice: { portal: `0x${"1".repeat(40)}`, asset: `0x${"2".repeat(40)}`, minFj: "1" },
+			privateClaimMode: "salt-v2",
+		})
+		const m = loadManifestV2FromConfigArg(["x", "y", "--config", placeholder], { mode: "required" })
+		expect(m.bridge).toBeNull()
+		expect(() => requireBridge(m)).toThrow(/mainnet.*placeholder/)
+		const v1 = write("v1.json", { network: "testnet", l1: { usdc: "0x" } })
+		expect(() => loadManifestV2FromConfigArg(["x", "y", "--config", v1], { mode: "required" })).toThrow()
 	})
 })

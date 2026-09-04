@@ -14,7 +14,7 @@ import {MintableERC20} from "../src/MintableERC20.sol";
 import {UniswapFuelSwap} from "../src/UniswapFuelSwap.sol";
 import {SwapBridgeRouter, IUniswapFuelSwap} from "../src/SwapBridgeRouter.sol";
 import {PortalFactory} from "../src/PortalFactory.sol";
-import {PoolSetupHelper} from "../script/DeployBridge.s.sol";
+import {PoolSetupHelper} from "../script/PoolSetupHelper.sol";
 import {NuloTokenPortal} from "../upstream/NuloTokenPortal.sol";
 
 interface IPermit2Domain {

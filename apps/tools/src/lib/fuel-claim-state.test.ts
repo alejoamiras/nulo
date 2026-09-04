@@ -265,6 +265,15 @@ describe("decideStandaloneFuelRecovery — one source for the card and the actio
 		expect(decideFuelLadder({ isPrivate: true, schema: 2, fuel: undefined })).toBe("private-incomplete")
 	})
 
+	it("a schema-3 record is fueled only when its intent bought gas", () => {
+		expect(decideFuelLadder({ isPrivate: true, schema: 3, intent: "token", fuel: undefined })).toBe("public")
+		expect(decideFuelLadder({ isPrivate: true, schema: 3, intent: "token+gas", fuel: undefined })).toBe("private-incomplete")
+		expect(decideStandaloneFuelRecovery({ ...base, isPrivate: true, schema: 3, intent: "token", fuel: undefined })).toBe("none")
+		expect(decideStandaloneFuelRecovery({ ...base, isPrivate: true, schema: 3, intent: "gas", fuel: undefined })).toBe(
+			"private-unknown",
+		)
+	})
+
 	it("a genuine no-fuel private deposit (schema 1) is untouched", () => {
 		expect(decideStandaloneFuelRecovery({ ...base, isPrivate: true, schema: 1, fuel: undefined })).toBe("none")
 		expect(decideFuelLadder({ isPrivate: true, schema: 1, fuel: undefined })).toBe("public")

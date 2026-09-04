@@ -7,7 +7,7 @@ import {UniswapFuelSwap} from "../src/UniswapFuelSwap.sol";
 import {SwapBridgeRouter} from "../src/SwapBridgeRouter.sol";
 import {PortalFactory} from "../src/PortalFactory.sol";
 import {NuloTokenPortal} from "../upstream/NuloTokenPortal.sol";
-import {PoolSetupHelper} from "../script/DeployBridge.s.sol";
+import {PoolSetupHelper} from "../script/PoolSetupHelper.sol";
 import {IERC20} from "@oz/token/ERC20/IERC20.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";

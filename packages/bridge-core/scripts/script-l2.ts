@@ -1,128 +1,143 @@
 /**
- * L2-side helpers shared by the operator scripts: the universal-deploy instance computation
- * (salt + args + deployer=ZERO — the SAME reconstruction the tools app's bridge-deployments
- * runs), manifest-bound contract registration, and the claim-until-synced loop the smoke
- * gates share.
+ * L2-side helpers shared by the operator scripts: deterministic instance derivation, the
+ * manifest-bound hub and hub-token registration (recompute the recorded address, then teach the
+ * wallet the instance), and the claim loop the smoke gates share while an L1→L2 message syncs.
  */
+import type { ContractArtifact } from "@aztec/aztec.js/abi"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
+import {
+	Contract,
+	type ContractBase,
+	type ContractInstanceWithAddress,
+	getContractInstanceFromInstantiationParams,
+} from "@aztec/aztec.js/contracts"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
+import type { Wallet } from "@aztec/aztec.js/wallet"
 import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
-import { bridgeProxyArtifact, tokenBridgeArtifact } from "../src/artifacts"
+import { tokenBridgeHubArtifact } from "../src/artifacts"
+import { claimViaHub, hubAt, type HubClaimOutcome, type HubClaimParams } from "../src/hub-l2"
+import { deriveHubTokenInstance } from "../src/hub-token"
+import type { SendOpts } from "../src/l2"
+import type { ManifestToken, ManifestV2 } from "../src/manifest-v2"
 import { type DeployerNetwork, resolveDeployerKeys } from "./deployer-keys"
 
-/** The deterministic universal-deploy instance: salt + args + publicKeys.default +
- *  deployer=ZERO. One source for the deploy conductors (precompute + journal) and the
- *  smokes (recompute + assert against the manifest). */
-export async function universalDeployInstance(art: unknown, args: unknown[], ctor: string, saltNum: number) {
-	return await getContractInstanceFromInstantiationParams(
-		art as never,
-		{
-			constructorArgs: args,
-			salt: new Fr(saltNum),
-			publicKeys: PublicKeys.default(),
-			deployer: AztecAddress.ZERO,
-			constructorArtifact: ctor,
-		} as never,
+/** The manifest's hub record: address + the salt and constructor args it derives from. */
+export type ManifestHub = NonNullable<ManifestV2["bridge"]>["l2"]["hub"]
+
+/**
+ * The deterministic instance for a set of instantiation params. Both the salt and the deployer are
+ * the caller's: the hub is salted with the full field of its L1 factory, and a hub-derived token
+ * carries the hub itself as deployer — a wrong deployer silently yields a different address.
+ */
+export function deriveInstance(
+	art: ContractArtifact,
+	args: unknown[],
+	ctor: string,
+	salt: Fr,
+	deployer: AztecAddress,
+): Promise<ContractInstanceWithAddress> {
+	return getContractInstanceFromInstantiationParams(art, {
+		constructorArgs: args,
+		salt,
+		publicKeys: PublicKeys.default(),
+		deployer,
+		constructorArtifact: ctor,
+	})
+}
+
+function assertDerived(label: string, instance: ContractInstanceWithAddress, recorded: string): void {
+	const derived = instance.address.toString()
+	if (derived.toLowerCase() !== recorded.toLowerCase()) {
+		throw new Error(`manifest ${label} mismatch: derived ${derived} != recorded ${recorded}`)
+	}
+}
+
+/** Teaching a wallet a contract it already knows throws; that is not a failure worth aborting on. */
+async function teachWallet(wallet: Wallet, instance: ContractInstanceWithAddress, art: ContractArtifact): Promise<void> {
+	try {
+		await wallet.registerContractClass(art)
+	} catch {}
+	try {
+		await wallet.registerContract(instance, art)
+	} catch {}
+}
+
+/**
+ * Register (never deploy) the manifest's hub, asserting the recorded address is what its salt and
+ * constructor args derive. The hub is a universal deploy, so the deployer is zero.
+ */
+/** The hub instance the manifest record derives to; its address commits to every constructor arg. */
+export function deriveHubInstance(hub: ManifestHub): Promise<ContractInstanceWithAddress> {
+	const [tokenClassId, factory, guardian] = hub.constructorArgs
+	return deriveInstance(
+		tokenBridgeHubArtifact,
+		[Fr.fromHexString(String(tokenClassId)), EthAddress.fromString(String(factory)), AztecAddress.fromStringUnsafe(String(guardian))],
+		hub.constructorArtifact,
+		Fr.fromHexString(hub.salt),
+		AztecAddress.ZERO,
 	)
 }
 
-/** Register (NOT deploy) one manifest-recorded L2 contract, asserting the recorded address
- *  recomputes from its salt + args — the same reconstruction the tools app's
- *  bridge-deployments does. Registration failures are swallowed (already registered). */
-export async function registerManifestContract(
-	ewallet: unknown,
-	p: { label: string; art: unknown; args: unknown[]; ctor: string; salt: number; address: string },
-): Promise<Contract> {
-	const instance = await universalDeployInstance(p.art, p.args, p.ctor, p.salt)
-	if (instance.address.toString().toLowerCase() !== p.address.toLowerCase()) {
-		throw new Error(`manifest ${p.label} mismatch: recomputed ${instance.address.toString()} != recorded ${p.address}`)
-	}
-	try {
-		await (ewallet as { registerContract: (i: unknown, a: unknown) => Promise<unknown> }).registerContract(instance, p.art as never)
-	} catch {}
-	console.log(`registered ${p.label}: ${p.address}`)
-	return await Contract.at(instance.address, p.art as never, ewallet as never)
+export async function registerHub(wallet: Wallet, hub: ManifestHub): Promise<ContractBase> {
+	const instance = await deriveHubInstance(hub)
+	assertDerived("hub", instance, hub.address)
+	await teachWallet(wallet, instance, tokenBridgeHubArtifact)
+	return hubAt(wallet, hub.address)
 }
 
-/** Minimal manifest shape the trio registration needs. */
-export interface ManifestL2Trio {
-	l1: { portal: string }
-	l2: {
-		proxy: { address: string; salt: number; constructorArtifact: string }
-		token: { address: string; salt: number; constructorArtifact: string; constructorArgs: unknown[] }
-		bridge: { address: string; salt: number; constructorArtifact: string }
-	}
+/**
+ * Register the L2 Token the hub derives for one manifest token. The wallet needs this instance to
+ * simulate a claim (the hub calls into the Token), and the assert is what proves the manifest names
+ * the address the hub would actually mint to.
+ */
+export async function registerHubToken(
+	wallet: Wallet,
+	hub: AztecAddress,
+	token: ManifestToken,
+	tokenClassId: string,
+): Promise<ContractBase> {
+	const instance = await deriveHubTokenInstance(hub, token.erc20, token, tokenClassId)
+	assertDerived(`token ${token.displaySymbol}`, instance, token.l2Token)
+	await teachWallet(wallet, instance, TokenContractArtifact)
+	return Contract.at(instance.address, TokenContractArtifact, wallet)
 }
 
-/** Register the candidate's proxy → token → bridge from the manifest, in dependency order
- *  (token's minter is the proxy; bridge binds proxy + portal). */
-export async function registerManifestTrio(
-	ewallet: unknown,
-	config: ManifestL2Trio,
-): Promise<{ proxy: Contract; token: Contract; bridge: Contract }> {
-	const proxy = await registerManifestContract(ewallet, {
-		label: "proxy",
-		art: bridgeProxyArtifact,
-		args: [],
-		ctor: config.l2.proxy.constructorArtifact,
-		salt: config.l2.proxy.salt,
-		address: config.l2.proxy.address,
-	})
-	const [tName, tSymbol, tDec] = config.l2.token.constructorArgs as [string, string, number, string]
-	const token = await registerManifestContract(ewallet, {
-		label: "token",
-		art: TokenContractArtifact,
-		// 5.0.1 standards Token: 5th constructor param auth_contract (ZERO).
-		args: [tName, tSymbol, tDec, proxy.address, AztecAddress.ZERO],
-		ctor: config.l2.token.constructorArtifact,
-		salt: config.l2.token.salt,
-		address: config.l2.token.address,
-	})
-	const bridge = await registerManifestContract(ewallet, {
-		label: "bridge",
-		art: tokenBridgeArtifact,
-		args: [proxy.address, EthAddress.fromString(config.l1.portal)],
-		ctor: config.l2.bridge.constructorArtifact,
-		salt: config.l2.bridge.salt,
-		address: config.l2.bridge.address,
-	})
-	return { proxy, token, bridge }
+/** The L1→L2 message is not in the tree yet — the ONE failure a claim retries. Every other revert
+ *  (a wrong amount, a stale leaf, a paused hub) is final and must surface on the first attempt. */
+function isMessageNotSynced(e: unknown): boolean {
+	const msg = e instanceof Error ? e.message : String(e)
+	return /non-nullified L1 to L2 message|L1 to L2 message.*not found|message not found/i.test(msg)
 }
 
-/** Claim the bridged tokens once the L1→L2 message syncs: retry claim_private/claim_public
- *  on the smoke cadence until it lands or the attempt budget runs out. */
+/** Claim through the hub on the smoke cadence until the deposit's message syncs. Registration of a
+ *  first-seen token happens inside the claim, so the outcome names which path ran. */
 export async function claimTokensUntilSynced(p: {
-	bridge: Contract
-	isPrivate: boolean
-	recipient: unknown
-	amount: bigint
-	claimValue: Fr
-	leafIndex: bigint
-	sendOpts: unknown
+	hub: ContractBase
+	claim: HubClaimParams
+	sendOpts: SendOpts
 	attempts?: number
-}): Promise<void> {
+	intervalMs?: number
+}): Promise<HubClaimOutcome> {
 	const attempts = p.attempts ?? 300
-	let claimed = false
-	for (let i = 0; i < attempts && !claimed; i++) {
+	let last: unknown
+	for (let i = 0; i < attempts; i++) {
 		try {
-			// PRIVATE: pass the SALT (claimValue); claim_private re-derives the secret from (salt, recipient).
-			await (p.isPrivate
-				? p.bridge.methods.claim_private(p.recipient, p.amount, p.claimValue, new Fr(p.leafIndex))
-				: p.bridge.methods.claim_public(p.recipient, p.amount, p.claimValue, new Fr(p.leafIndex))
-			).send(p.sendOpts as never)
-			claimed = true
-		} catch {
-			await new Promise((r) => setTimeout(r, 6000))
+			return await claimViaHub(p.hub, p.claim, p.sendOpts)
+		} catch (e) {
+			if (!isMessageNotSynced(e)) throw e
+			last = e
+			await new Promise((r) => setTimeout(r, p.intervalMs ?? 6000))
 		}
 	}
-	if (!claimed) throw new Error(`claim_${p.isPrivate ? "private" : "public"} never succeeded (L1→L2 message not synced within budget)`)
+	throw new Error(
+		`hub claim gave up after ${attempts} attempts — the L1→L2 message never synced (${last instanceof Error ? last.message : String(last)})`,
+	)
 }
 
 /** A throwaway Schnorr account from fresh randomness — the smoke/canary recipient shape. */

@@ -1,5 +1,6 @@
 /**
- * Conformance mirror: `buildFuelRoute` output must satisfy every rule `_validateRoute` enforces
+ * Conformance mirror: `buildFuelRoute` output — and every route `discoverFuelRoute` emits — must
+ * satisfy every rule `_validateRoute` enforces
  * (contracts/bridge/evm/src/UniswapFuelSwap.sol) — first-sell, last-out, hookless, continuity
  * with the WETH↔native unwrap confined to the final boundary, in that one direction only.
  *
@@ -15,7 +16,10 @@
  * file left all eight rejection branches untested and two of them unreachable.
  */
 import { describe, expect, it } from "vitest"
-import type { Address } from "viem"
+import { type Address, encodeFunctionResult } from "viem"
+import type { PoolKey } from "./l1"
+import { type BatchQuoteClient, QUOTER_ABI } from "./quote"
+import { assertRouteGrammar, type DiscoverRouteOptions, discoverFuelRoute } from "./route-discovery"
 import { buildFuelRoute, type FuelRoute, type FuelRouteConfig } from "./route"
 
 const addr = (n: number) => `0x${n.toString(16).padStart(40, "0")}` as Address
@@ -122,5 +126,93 @@ describe("the oracle rejects each rule violation", () => {
 		const route = build(BASE)
 		route.path = [route.path[0]]
 		expect(conformsToRouterRules(route, BASE)).toBe("builder must emit exactly the two-hop production shape")
+	})
+})
+
+/** Every hop quotes the same non-zero amount, so discovery always lands on a route to inspect. */
+const alwaysQuotes: BatchQuoteClient = {
+	readContract: async ({ args }) =>
+		args[0].map(() => ({
+			success: true,
+			returnData: encodeFunctionResult({ abi: QUOTER_ABI, functionName: "quoteExactInputSingle", result: [1_000n, 0n] }),
+		})),
+}
+
+async function discovered(over: Partial<DiscoverRouteOptions> = {}): Promise<FuelRoute> {
+	const outcome = await discoverFuelRoute({
+		client: alwaysQuotes,
+		quoter: addr(0x99),
+		multicall3: addr(0xca11),
+		token: BASE.token,
+		feeAsset: addr(0xfee5),
+		weth: BASE.weth,
+		feeJuice: BASE.feeJuice,
+		tiers: [BASE.tokenWeth],
+		ethFj: BASE.ethFj,
+		probeAmount: 1_000n,
+		...over,
+	})
+	if (outcome.kind !== "route") throw new Error(`expected a route, got ${outcome.kind}`)
+	return outcome.route
+}
+
+describe("discoverFuelRoute emits only conformant routes", () => {
+	it("the tiered two-hop candidate passes the same oracle as the builder", async () => {
+		const route = await discovered()
+		expect(conformsToRouterRules(route, BASE)).toBeNull()
+		expect(() => assertRouteGrammar(route, BASE.token, BASE.weth, BASE.feeJuice)).not.toThrow()
+	})
+
+	it("the WETH one-hop candidate sells native into FeeJuice", async () => {
+		const route = await discovered({ token: BASE.weth })
+		expect(route).toEqual({
+			path: [
+				{ currency0: NATIVE, currency1: BASE.feeJuice, fee: BASE.ethFj.fee, tickSpacing: BASE.ethFj.tickSpacing, hooks: NATIVE },
+			],
+			zeroForOnes: [true],
+		})
+		expect(() => assertRouteGrammar(route, BASE.weth, BASE.weth, BASE.feeJuice)).not.toThrow()
+	})
+})
+
+const pool = (currency0: Address, currency1: Address): PoolKey => ({ currency0, currency1, fee: 500, tickSpacing: 10, hooks: NATIVE })
+
+describe("assertRouteGrammar rejects what the router would revert on", () => {
+	it("a hooked pool", () => {
+		const route = build(BASE)
+		route.path[0].hooks = addr(0xbadbad)
+		expect(() => assertRouteGrammar(route, BASE.token, BASE.weth, BASE.feeJuice)).toThrow("UniswapFuelSwap: hooks not allowed")
+	})
+
+	it("a last hop that outputs something other than FeeJuice", () => {
+		const route = build(BASE)
+		route.path[1].currency1 = addr(0xdeadbe)
+		expect(() => assertRouteGrammar(route, BASE.token, BASE.weth, BASE.feeJuice)).toThrow(
+			"UniswapFuelSwap: last hop must output feeJuice",
+		)
+	})
+
+	it("a native first hop whose input token is not WETH", () => {
+		const route: FuelRoute = { path: [pool(NATIVE, BASE.feeJuice)], zeroForOnes: [true] }
+		expect(() => assertRouteGrammar(route, BASE.token, BASE.weth, BASE.feeJuice)).toThrow(
+			"UniswapFuelSwap: native route requires WETH input",
+		)
+	})
+
+	it("a native→WETH boundary — settlement unwraps, it never wraps back", () => {
+		const route: FuelRoute = {
+			path: [pool(NATIVE, BASE.token), pool(BASE.weth, BASE.feeJuice)],
+			zeroForOnes: [false, true],
+		}
+		expect(() => assertRouteGrammar(route, BASE.token, BASE.weth, BASE.feeJuice)).toThrow("UniswapFuelSwap: hop discontinuity")
+	})
+
+	it("an unwrap that is not on the final boundary", () => {
+		const mid = addr(0xaaaa)
+		const route: FuelRoute = {
+			path: [pool(BASE.token, BASE.weth), pool(NATIVE, mid), pool(mid, BASE.feeJuice)],
+			zeroForOnes: [true, true, true],
+		}
+		expect(() => assertRouteGrammar(route, BASE.token, BASE.weth, BASE.feeJuice)).toThrow("UniswapFuelSwap: hop discontinuity")
 	})
 })
