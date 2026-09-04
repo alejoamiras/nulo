@@ -297,22 +297,18 @@ async function buildOperationsFromPayload(
 				const isNoFrom = op.executionMode === "default_entrypoint"
 				// `default_entrypoint` and an `exec.feePayer` that carries its payment are dApp-supplied
 				// fee paths: pre-fill embedded so the FeeSettingsCard is suppressed. A payer that is the
-				// account itself with no fee call asks for the wallet's own Fee Juice: pre-fill it, and
-				// the card renders locked to it. Otherwise leave feeSettings undefined for the user;
-				// the `requiresFeeSelection` predicate at approve() gates undefined.
-				const selfPay = isSelfPay(op.exec, op.opts?.from)
-				const embedded = isNoFrom || (op.exec.feePayer !== undefined && !selfPay)
+				// account itself with no fee call asks for the wallet's own Fee Juice: the card renders
+				// locked to it and derives the settings once a verified balance can pay — nothing is
+				// pre-filled, so Confirm stays off over an empty or unread balance. Otherwise leave
+				// feeSettings undefined for the user; `requiresFeeSelection` at approve() gates undefined.
+				const embedded = isNoFrom || (op.exec.feePayer !== undefined && !isSelfPay(op.exec, op.opts?.from))
 				operations.push({
 					...op,
 					network,
 					networkId: network.id,
 					account,
 					accountAddress: account.address,
-					feeSettings: embedded
-						? { paymentMethod: { kind: "embedded" } }
-						: selfPay
-							? { paymentMethod: { kind: "fj" } }
-							: undefined,
+					feeSettings: embedded ? { paymentMethod: { kind: "embedded" } } : undefined,
 				})
 				pushUniqueAccount(accounts, account)
 				break

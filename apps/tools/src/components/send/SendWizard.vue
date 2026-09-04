@@ -52,6 +52,7 @@ import { formatBigInt, formatCompact, parseAmountStrict, toDecimalString } from 
 import { TESTIDS } from "@/lib/testids"
 import { safeDisplay } from "@/lib/token-display"
 import type { AmountToken, Direction, ExitPlan, GasLegPlan, ResolvedToken, SelectableToken, SendIntent, SendPlan } from "@/lib/send-model"
+import { type OwnGasSource, decideOwnGasSource } from "@/lib/fuel-claim-state"
 
 /** The rail's own etas, summed and rounded UP — the review must never undersell how long this takes. */
 const DEPOSIT_TAKES = "usually 3–8 min end to end"
@@ -313,27 +314,29 @@ const exitBlocked = computed<string | null>(() => {
 
 /** What a claim from the account's held gas sets aside for this token, at the last price; null while unpriced. */
 const ownGasCeiling = computed(() => (resolved.value ? gasShare.ownGasCeilingFor(resolved.value.state, isPrivate.value) : null))
-/** Whether the gas the account holds covers what a token-only claim sets aside: its private balance
- *  at the fee contract, or — on a wallet that routes a dApp-named payer — its public Fee Juice.
- *  null while a read is open, or while unpriced with something held (only an empty account is
- *  known without a price). */
-function heldGasCovers(ceiling: bigint | null): boolean | null {
+/** Which held gas would pay a token-only claim at this ceiling — the decision the claim's own ladder
+ *  makes, so a balance known to cover pays whatever the other read did — or null while unpriced with
+ *  something held: without a price only an empty account is known. */
+function heldGasSource(ceiling: bigint | null, preferPrivate: boolean): OwnGasSource | null {
 	const credit = gasHeld.credit.value
 	const pub = gasHeld.publicFeeJuice.value
-	if (credit === null || pub === null) return null
-	const held = credit > 0n || (gasHeld.selfPay.value && pub > 0n)
-	if (ceiling === null) return held ? null : false
-	return credit >= ceiling || (gasHeld.selfPay.value && pub >= ceiling)
+	const publicAllowed = gasHeld.selfPay.value
+	if (ceiling === null) {
+		const empty = credit === 0n && pub !== null && (!publicAllowed || pub === 0n)
+		return empty ? "none" : null
+	}
+	return decideOwnGasSource({ publicFeeJuice: pub, privateFeeJuice: credit, ceiling, preferPrivate, publicAllowed })
 }
+const PAYS = new Set<OwnGasSource>(["public", "private"])
 
 /** Why the token alone cannot be chosen right now — known as soon as the gas verdict lands, whatever
- *  the choice on screen, so the card itself can be greyed out and say why. */
+ *  the choice on screen, so the card itself can be greyed out and say why. An unread balance blocks
+ *  nothing here; the confirm requires it read. */
 const tokenOnlyReason = computed<string | null>(() => {
 	if (isExit.value) return null
-	if (heldGasCovers(ownGasCeiling.value) !== false) return null
-	// Public Fee Juice on a wallet that cannot route it as payer is no gas the bridge can claim with.
-	const usablePublic = gasHeld.selfPay.value ? (gasHeld.publicFeeJuice.value ?? 0n) : 0n
-	return gasHeld.credit.value === 0n && usablePublic === 0n ? NO_GAS_FOR_TOKEN_ONLY : SHORT_GAS_FOR_TOKEN_ONLY
+	const source = heldGasSource(ownGasCeiling.value, isPrivate.value)
+	if (source === null || source === "unverifiable" || PAYS.has(source)) return null
+	return source === "none" ? NO_GAS_FOR_TOKEN_ONLY : SHORT_GAS_FOR_TOKEN_ONLY
 })
 const tokenOnlyBlocked = computed<string | null>(() => (intent.value === "token" ? tokenOnlyReason.value : null))
 // A gasless account's choice moves off the token alone — at the verdict, and again whenever a new
@@ -428,10 +431,7 @@ function networkFeeOf(target: SendPlan | ExitPlan): { networkFee: string; networ
  *  ceiling it commits to — the same preference the claim's own ladder applies. */
 function heldGasFeeOf(target: SendPlan): { networkFee: string; networkFeeNote: string | null } {
 	const ceiling = gasShare.ownGasCeilingFor(target.token.state, target.isPrivate)
-	const credit = gasHeld.credit.value ?? 0n
-	const pub = gasHeld.publicFeeJuice.value ?? 0n
-	const publicPays = ceiling !== null && gasHeld.selfPay.value && pub >= ceiling && !(target.isPrivate && credit >= ceiling)
-	if (publicPays) {
+	if (ceiling !== null && heldGasSource(ceiling, target.isPrivate) === "public") {
 		return {
 			networkFee: `up to ≈ ${formatCompact(ceiling, 18)} FJ from the Fee Juice you already hold`,
 			networkFeeNote: "paid by your account as its own fee - your wallet shows the exact fee before you confirm",
@@ -738,9 +738,9 @@ function tokenOnlyStoodDown(target: SendPlan, repriced: boolean, shown: bigint |
 	if (!repriced) return UNPRICED_TOKEN_ONLY
 	const ceiling = gasShare.ownGasCeilingFor(target.token.state, target.isPrivate)
 	if (ceiling === null) return SHORT_GAS_FOR_TOKEN_ONLY
-	const covers = heldGasCovers(ceiling)
-	if (covers === null) return UNREAD_GAS_FOR_TOKEN_ONLY
-	if (!covers) return SHORT_GAS_FOR_TOKEN_ONLY
+	const source = heldGasSource(ceiling, target.isPrivate)
+	if (source === null || source === "unverifiable") return UNREAD_GAS_FOR_TOKEN_ONLY
+	if (!PAYS.has(source)) return SHORT_GAS_FOR_TOKEN_ONLY
 	if (shown === null) return CEILING_NOW_PRICED_TOKEN_ONLY
 	return ceiling > shown + shown / CEILING_DRIFT_DIVISOR ? CEILING_MOVED_TOKEN_ONLY : undefined
 }

@@ -48,5 +48,18 @@ Branch `any-erc20-bridge/dapp-self-pay`, on top of `any-erc20-bridge/first-claim
 - Extension unit + component (full repo suite 5380 → green after SP-1), wallet-bridge 235,
   schema-patch 11, tools 1146 + smoke 21, bridge-core fee tests.
 - Network e2e: `tx-sendTx-selfPay.test.ts` (new) + `tx-sendTx-feePayer.test.ts`, proverless,
-  local agent runner: PENDING_E2E
-- Codex: PENDING_CODEX
+  local agent runner (proverless): both green — the self-pay spec in 53 s, the account's public
+  Fee Juice fell; the existing feePayer (sponsored-FPC payer) spec in 15 s.
+- Codex (fresh session `01a06cff-ae6a-7292-b323-6c21f6c5fbb4`, `xhigh`), round 1: "Do not merge yet" —
+  HIGH: the classifier trusted a call's NAME (`claim_and_end_setup`), which a dApp writes freely;
+  the entrypoint commits target, selector and flags, so a sender-paid payload with a call merely
+  named like the claim would be built as a claim in setup (and with a call that ends setup itself,
+  run dApp calls inside setup on the account's Fee Juice). Fixed: the claim is identified by the
+  Fee Juice contract's address, the pinned selector `0xcbe67243`, private, non-static. MED: a
+  pre-filled `{kind:"fj"}` left Confirm live over an empty/unread balance (the card's watcher never
+  fires from undefined) — a self-pay is now drafted with no settings. MED: the wizard's
+  `heldGasCovers` returned unknown when either read failed even if the other covered — it now
+  delegates to `decideOwnGasSource`. Codex confirmed genuine FJWC is unbroken (aztec.js 5.2.0 emits
+  exactly that name/address/selector), the lock survives identity/recommit paths, the fingerprint
+  keeps self-pay and picker-FJ apart, and `getWalletFeatures` leaks nothing.
+- Codex round 2: PENDING_CODEX_2

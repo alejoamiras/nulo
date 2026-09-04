@@ -1,7 +1,10 @@
+import { CLAIM_AND_END_SETUP, CLAIM_AND_END_SETUP_SELECTOR, FEE_JUICE_CONTRACT } from "@nulo/wallet-bridge"
 import { describe, test, expect } from "vitest"
 import { detectEmbeddedFeePayment, isNoFromRequest } from "./fee-detection"
 
-const CLAIM = [{ name: "claim_and_end_setup" }]
+const CLAIM = [
+	{ name: CLAIM_AND_END_SETUP, to: FEE_JUICE_CONTRACT, selector: CLAIM_AND_END_SETUP_SELECTOR, type: "private", isStatic: false },
+]
 
 describe("detectEmbeddedFeePayment", () => {
 	test("returns undefined when feePayer is undefined or null", () => {
@@ -18,6 +21,8 @@ describe("detectEmbeddedFeePayment", () => {
 		const addr = "0x1a228350bbfa130d71aa1105c93e6432bd8c65476bc46ba579d2dc885e2873d1"
 		expect(detectEmbeddedFeePayment(addr, addr)).toBeUndefined()
 		expect(detectEmbeddedFeePayment(addr, addr, [{ name: "transfer" }])).toBeUndefined()
+		// The claim's NAME on a call to another contract is a label, not the claim.
+		expect(detectEmbeddedFeePayment(addr, addr, [{ ...CLAIM[0], to: addr }])).toBeUndefined()
 	})
 
 	test('returns "fpc" when feePayer differs from from (external FPC)', () => {

@@ -636,6 +636,35 @@ describe("SendWizard", () => {
 		expect(sendFn).toHaveBeenCalledTimes(1)
 	})
 
+	it("a balance known to cover pays whatever the other read did - public with the private read failed, and the reverse", async () => {
+		realCeilings()
+		ownGasCeilingFor.mockImplementation(() => 10n ** 16n)
+		const enterTokenOnly = async () => {
+			const w = await wizard()
+			w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
+			await flushPromises()
+			const amountStep = () => w.findComponent({ name: "AmountStep" })
+			expect(amountStep().props("tokenOnlyBlocked")).toBeNull()
+			amountStep().vm.$emit("update:intent", "token")
+			amountStep().vm.$emit("update:amount", "1")
+			amountStep().vm.$emit("update:valid", true)
+			await flushPromises()
+			amountStep().vm.$emit("next")
+			await flushPromises()
+			w.findComponent({ name: "ReviewStep" }).vm.$emit("confirm")
+			await flushPromises()
+		}
+		gasHeld.value = null
+		gasHeldPublic.value = 10n ** 18n
+		gasHeldSelfPay.value = true
+		await enterTokenOnly()
+		expect(sendFn).toHaveBeenCalledTimes(1)
+		gasHeld.value = 10n ** 18n
+		gasHeldPublic.value = null
+		await enterTokenOnly()
+		expect(sendFn).toHaveBeenCalledTimes(2)
+	})
+
 	it("a gas slice under the bridge's claim minimum is refused before any signature — the swap would revert on Ethereum", async () => {
 		// 0.02 token at 1e-12 FJ per token: 20,000 wei of gas, under the mocked 1,000,000-wei minimum.
 		const w = await wizard()

@@ -5,8 +5,18 @@
  * account is the sponsored FPC).
  */
 import { mount } from "@vue/test-utils"
+import { CLAIM_AND_END_SETUP, CLAIM_AND_END_SETUP_SELECTOR, FEE_JUICE_CONTRACT } from "@nulo/wallet-bridge"
 import { describe, expect, test } from "vitest"
 import OperationCard from "./OperationCard.vue"
+
+const CLAIM = {
+	name: CLAIM_AND_END_SETUP,
+	to: FEE_JUICE_CONTRACT,
+	selector: CLAIM_AND_END_SETUP_SELECTOR,
+	type: "private",
+	isStatic: false,
+	args: [],
+}
 
 const OWNER = "0xowner0000000000000000000000000000000000000000000000000000000cc"
 const FPC = "0xfpc000000000000000000000000000000000000000000000000000000000dd"
@@ -65,8 +75,16 @@ describe("OperationCard — a dApp-requested self-pay", () => {
 				.exists(),
 		).toBe(true)
 		const claiming = sendTxOp({ feePayer: OWNER })
-		claiming.exec.calls = [{ name: "claim_and_end_setup", to: FPC, selector: "0x2", args: [] }, ...claiming.exec.calls]
+		claiming.exec.calls = [CLAIM, ...claiming.exec.calls]
 		expect(mountCard(claiming).find('[data-testid="execute-op-fee-set-badge"]').exists()).toBe(true)
+	})
+
+	test("a call merely NAMED like the claim, to another contract, is still a self-pay: the locked card, never the badge", () => {
+		const impostor = sendTxOp({ feePayer: OWNER })
+		impostor.exec.calls = [{ ...CLAIM, to: FPC }, ...impostor.exec.calls]
+		const w = mountCard(impostor)
+		expect(w.find('[data-testid="execute-op-fee-set-badge"]').exists()).toBe(false)
+		expect(w.find('[data-testid="fee-card"]').attributes("data-locked")).toBe("fj")
 	})
 
 	test("no payer named leaves the fee card free", () => {
