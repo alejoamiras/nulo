@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Utils */
-import { computed, watch } from "vue"
+import { computed, onScopeDispose, ref, watch } from "vue"
 import { parseAmountStrict, toDecimalString } from "@/lib/format"
 import type { AmountToken, Direction, GasLegPlan, SendIntent, TokenBalances } from "@/lib/send-model"
 import { TESTIDS } from "@/lib/testids"
@@ -77,6 +77,30 @@ const amountError = computed<string | null>(() => {
 	return null
 })
 
+/** A red line waits for the user: it shows once the field is left, or once typing pauses — never on
+ *  the keystroke that made a half-typed amount momentarily wrong. An amount that arrives already
+ *  typed (the balance tap, a re-entered step) is judged at once. */
+const SETTLE_MS = 700
+const touched = ref(false)
+const settled = ref(true)
+let settleTimer: ReturnType<typeof setTimeout> | undefined
+const shownError = computed(() => (touched.value || settled.value ? amountError.value : null))
+
+/** More decimal places than the token has are cut on the way in, never reported: a typed or pasted
+ *  tail the token cannot carry is not a mistake worth a red line. */
+function onInput(raw: string): void {
+	settled.value = false
+	clearTimeout(settleTimer)
+	settleTimer = setTimeout(() => {
+		settled.value = true
+	}, SETTLE_MS)
+	const [whole = "", fraction] = raw.split(".")
+	const keep = props.token.decimals
+	const cut = fraction === undefined || fraction.length <= keep ? raw : keep === 0 ? whole : `${whole}.${fraction.slice(0, keep)}`
+	emit("update:amount", cut)
+}
+onScopeDispose(() => clearTimeout(settleTimer))
+
 const showGas = computed(() => !isExit.value && props.intent !== "token")
 
 // Only an outcome is said; a route still being checked shows nothing rather than a spinner line.
@@ -133,7 +157,7 @@ function onUseAll(): void {
 		</p>
 
 		<div class="amount">
-			<label class="field" :data-invalid="amountError ? 'true' : undefined">
+			<label class="field" :data-invalid="shownError ? 'true' : undefined">
 				<input
 					class="input"
 					type="text"
@@ -141,11 +165,12 @@ function onUseAll(): void {
 					autocomplete="off"
 					placeholder="0"
 					:aria-label="`Amount in ${token.symbol}`"
-					:aria-invalid="amountError ? 'true' : undefined"
-					:aria-describedby="amountError ? AMOUNT_ERROR_ID : undefined"
+					:aria-invalid="shownError ? 'true' : undefined"
+					:aria-describedby="shownError ? AMOUNT_ERROR_ID : undefined"
 					:value="amount"
 					:data-testid="TESTIDS.sendAmountInput"
-					@input="emit('update:amount', ($event.target as HTMLInputElement).value)"
+					@input="onInput(($event.target as HTMLInputElement).value)"
+					@blur="touched = true"
 				/>
 				<span class="unit">{{ token.symbol }}</span>
 			</label>
@@ -162,7 +187,7 @@ function onUseAll(): void {
 					<span class="balance-k">Balance</span> {{ balanceText }} {{ token.symbol }}
 				</span>
 			</button>
-			<p v-if="amountError" :id="AMOUNT_ERROR_ID" class="err" aria-live="polite" :data-testid="TESTIDS.sendAmountError">{{ amountError }}</p>
+			<p v-if="shownError" :id="AMOUNT_ERROR_ID" class="err" aria-live="polite" :data-testid="TESTIDS.sendAmountError">{{ shownError }}</p>
 		</div>
 
 		<GasBreakdown

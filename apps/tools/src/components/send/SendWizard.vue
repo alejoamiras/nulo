@@ -574,7 +574,11 @@ watch(
 		amount,
 		intent,
 		isPrivate,
-		gas,
+		// The gas leg's INPUTS, not the leg itself: a private slice re-prices with every fee tick,
+		// which is not a change the user made — the confirm re-reads the fees and stands the review
+		// down itself when the frozen slice no longer covers them.
+		routeOutcome,
+		gasShare.txTarget,
 		tokenOnlyBlocked,
 		() => bridge.selectedAccount.value,
 		() => l1.address.value,

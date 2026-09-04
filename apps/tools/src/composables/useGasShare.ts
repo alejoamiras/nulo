@@ -73,7 +73,13 @@ export function useGasShare(): UseGasShareHandle {
 		if (pricing) return pricing
 		pricing = predictedWorstMinFees(createAztecNodeClient(NETWORK.nodeUrl))
 			.then((predicted) => {
-				fees.value = { maxFees: { feePerDaGas: predicted.feePerDaGas, feePerL2Gas: predicted.feePerL2Gas }, at: Date.now() }
+				const maxFees = { feePerDaGas: predicted.feePerDaGas, feePerL2Gas: predicted.feePerL2Gas }
+				const same =
+					fees.value?.maxFees.feePerDaGas === maxFees.feePerDaGas && fees.value?.maxFees.feePerL2Gas === maxFees.feePerL2Gas
+				// An unchanged price only renews its age: everything sized from it stays as it is, and
+				// nothing watching the slice sees a change that never happened.
+				if (same && fees.value) fees.value.at = Date.now()
+				else fees.value = { maxFees, at: Date.now() }
 				pricingError.value = null
 				return true
 			})

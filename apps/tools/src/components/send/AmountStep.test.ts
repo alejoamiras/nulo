@@ -1,5 +1,5 @@
 import { mount } from "@vue/test-utils"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { Direction, GasLegPlan, ResolvedToken, SendIntent, TokenBalances } from "@/lib/send-model"
 import { TESTIDS } from "@/lib/testids"
 import AmountStep, { type RouteKind } from "./AmountStep.vue"
@@ -106,11 +106,45 @@ describe("AmountStep", () => {
 		w.unmount()
 	})
 
-	it("refuses more decimal places than the token has", () => {
+	it("refuses more decimal places than the token has when they arrive already typed", () => {
 		const w = step({ amount: "1.1234567" })
 		expect(errorText(w)).toContain("6 decimal places")
 		expect(w.find(sel(TESTIDS.sendAmountNext)).attributes("disabled")).toBeDefined()
 		w.unmount()
+	})
+
+	it("cuts extra decimal places on the way in instead of reporting them", async () => {
+		const w = step()
+		await w.find(sel(TESTIDS.sendAmountInput)).setValue("1.1234567")
+		expect(w.emitted("update:amount")).toEqual([["1.123456"]])
+		const whole = step({ token: { symbol: "WHOLE", decimals: 0 } as never })
+		await whole.find(sel(TESTIDS.sendAmountInput)).setValue("12.5")
+		expect(whole.emitted("update:amount")).toEqual([["12"]])
+		w.unmount()
+		whole.unmount()
+	})
+
+	it("a keystroke shows no red line until typing pauses or the field is left", async () => {
+		vi.useFakeTimers()
+		try {
+			const w = step()
+			const input = w.find(sel(TESTIDS.sendAmountInput))
+			await input.setValue("1e")
+			await w.setProps({ amount: "1e" })
+			expect(w.find(sel(TESTIDS.sendAmountError)).exists()).toBe(false)
+			expect(input.attributes("aria-invalid")).toBeUndefined()
+			await vi.advanceTimersByTimeAsync(700)
+			expect(errorText(w)).toContain("as a number")
+			// A fresh keystroke hides it again; leaving the field shows it at once.
+			await input.setValue("1e6")
+			await w.setProps({ amount: "1e6" })
+			expect(w.find(sel(TESTIDS.sendAmountError)).exists()).toBe(false)
+			await input.trigger("blur")
+			expect(errorText(w)).toContain("as a number")
+			w.unmount()
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	it("refuses text that is not a number", () => {
