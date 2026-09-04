@@ -99,3 +99,27 @@ fn fuzz_derive_changes_with_recipient(salt: Field, recipient_field: Field) {
         "recipient neighbor collision in derive_claim_secret",
     );
 }
+
+// ─── Any-ERC-20 generation: the factory's `register` message ────────────────
+// Fourth content-hash vector (PortalFactory.sol ↔ register_hash_lib ↔ bridge-core register-hash.ts)
+// plus the public registration secret hash the factory hard-codes. Vectors: bridge-core
+// scripts/gen-keystone-vectors.ts.
+
+#[test]
+fn register_matches_l1_and_ts() {
+    let token = EthAddress::from_field(0xe2c20);
+    let portal = EthAddress::from_field(0x9017a1);
+    let name_word = 0x004e756c6f205465737420546f6b656e00000000000000000000000000000000;
+    let symbol_word = 0x004e545400000000000000000000000000000000000000000000000000000000;
+    let h = register_hash_lib::get_register_content_hash(token, portal, name_word, symbol_word, 18);
+    assert(h == 0x000d08f46744da94f56ca7a8fcc0b131ca3b48456b03083d107728d8530397a7);
+}
+
+#[test]
+fn register_secret_hash_is_pinned() {
+    assert(register_hash_lib::REGISTER_SECRET == 0);
+    assert(
+        register_hash_lib::register_secret_hash()
+            == 0x1f8eff65d91ed781c2e7a28a2ff99b7f7506b7293121b5ffcf3cd339c84d2250,
+    );
+}
