@@ -108,3 +108,48 @@ No remaining material findings in the revised blueprint. All audit conditions ar
 
 approve
 **Final verdict: `approve`.**
+
+# Post-implementation loop
+
+Fresh session `01a07294-020b-7c93-9355-7ee3b244428b` (gpt-5.6-sol, xhigh, read-only) over the net diff
+from `91074a74`, with plan.md + recon.md, the adversarial ask, and the no-over-engineering +
+comment-quality rules. Triage: `lessons/post-impl.md`.
+
+## Round 1 — response (verbatim, paths made repo-relative)
+
+**High:** None found.
+
+**Medium**
+
+- **The banner offers a switch before the dApp’s chain is known.** [capabilities/index.vue:64](apps/extension/src/popup/windows/capabilities/index.vue:64): missing payload becomes `""`, then chain `0`. While loading, a Testnet wallet therefore exposes “Switch wallet to Local Network,” even for a Testnet request, beside disabled Approve. A generic approval failure also disables Approve without hiding the invitation. Gate the banner/action on completed initialization and absence of a hard error. Both cases reproduced with in-memory component probes; existing tests preload the payload before mounting.
+
+- **Provisioning can write after the target network’s account purge finishes.** [account/service.ts:227](apps/extension/src/wallet/services/account/service.ts:227): creation fences profile deletion only. Deleting the inactive target network invokes `clearChainState`, which does not share provisioning’s lock; suspended derivation can subsequently write an orphan account. A deferred service probe confirmed a row appearing after the purge completed. Coordinate provisioning with chain cleanup and the existing network-liveness check. The dispatcher’s re-read merely returns the late row.
+
+- **A concurrent import can be overwritten.** [account/service.ts:223](apps/extension/src/wallet/services/account/service.ts:223): provisioning locks `Nulo_v1`, whereas `importAccount` locks `Imported`. An import of the same deterministic account can finish during provisioning’s awaits; provisioning then replaces its imported type and user-selected name with derived defaults. This reproduced using the real service methods with mocked crypto. Share the creation/import critical section across account types. The new sequential idempotency test covers neither this race nor the purge race.
+
+**Low**
+
+- **Comments retain incorrect explanations.** [capabilities/index.vue:51](apps/extension/src/popup/windows/capabilities/index.vue:51) still describes chain mismatch as the usual cause of missing accounts—the behavior this PR fixes. The new comment at line 156 also lists “only imported” as an empty-picker cause, although visible imported accounts are returned. Replace these with one accurate explanation of why an empty visible-account list blocks approval.
+
+- **Several new comments narrate obvious code.** Trim the introductory paragraphs in [useNetworkActivation.ts:13](apps/extension/src/composables/useNetworkActivation.ts:13) and [chain-mismatch.ts:14](apps/extension/src/popup/windows/capabilities/chain-mismatch.ts:14), plus the self-evident comments on [Banner’s test ID](packages/design/src/ui/Banner.vue:30) and [DEFAULT_ACCOUNT_NAME](apps/extension/src/wallet/services/account/spec.ts:6). Keep the row-snapshot and unconditional-rejection invariants.
+
+- **One test claims a distinction it cannot detect.** [useNetworkActivation.test.ts:116](apps/extension/src/composables/useNetworkActivation.test.ts:116) claims persistence receives the target rather than the store’s row, but those already match when persistence runs. It duplicates the first test’s target-ID assertion; remove it.
+
+**What looks fine**
+
+Unattended refusal uses derivation’s network-row snapshot; seeded L1 validation and error propagation remain intact.  
+Grant assembly, footer coordination, and `beforeunload`/profile-change rejection remain intact; no dependencies, crypto changes, or log statements were added.  
+233 targeted unit tests passed with one thread worker; four in-memory probes reproduced the findings. No e2e ran.
+
+not converged
+
+## Round 2 — response (verbatim, resumed with the fix diff + the two declined races argued)
+
+**Low — [capabilities/index.vue:79](apps/extension/src/popup/windows/capabilities/index.vue:79):** “The invitation never sits beside a disabled Approve” overstates the invariant: switching and submission intentionally disable Approve while the invitation can remain. Remove the absolute claim or qualify those exceptions.
+
+No remaining material findings. The banner fixes are correct. I accept handling the two storage races separately after confirming both exist in the baseline. The new dApp trigger broadens creation timing, but does not give the dApp control over purge or import.
+
+All 40 targeted unit/component tests passed. No e2e ran.
+
+converged
+**Converged after round 2** (the round-2 Low — an overstated comment — folded before the PR).

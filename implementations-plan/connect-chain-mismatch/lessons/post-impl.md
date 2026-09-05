@@ -26,3 +26,10 @@ Declined (pre-existing, not widened by this change — logged as follow-ups):
   creation's awaits gets overwritten by the derived row. Same shared window, same trigger asymmetry.
   Both are one fix — a chain-scoped critical section shared by creation, import and purge — and belong
   to their own change.
+
+## Round 2 — `converged`
+
+Codex accepted the two declined races as baseline behaviour ("the new dApp trigger broadens creation
+timing, but does not give the dApp control over purge or import"). One Low adopted: the
+`chainBannerState` comment no longer claims an absolute ("never beside a disabled Approve") — the
+footer's momentary holds are named as the exception.

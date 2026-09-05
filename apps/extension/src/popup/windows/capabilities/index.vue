@@ -76,8 +76,8 @@ const expandedCards = ref(new Set<number>())
 // `initComplete` predicate.
 const initComplete = ref(false)
 
-// The invitation never sits beside a disabled Approve: not before init lands (no chain known
-// yet), not on any hard error.
+// "Approve as is" is only offered where approving is possible: not before init lands (no chain
+// known yet), not on a hard error. The footer's own holds (a running switch, a submit) are momentary.
 const chainBannerState = computed(() => {
 	if (!initComplete.value || !dappChain.value || processingError.value?.type === "error") return undefined
 	if (switchedTo.value !== undefined && switchedTo.value === appStore.network?.chainId) return "switched"
