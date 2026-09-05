@@ -15,6 +15,25 @@ export interface CreateWindowOptions {
 	height?: number
 	width?: number
 	focused?: boolean
+	/** Desktop coordinates, SIGNED: a display left of or above the primary is negative. */
+	left?: number
+	top?: number
+}
+
+/** Position and size of an existing window, in signed desktop coordinates. */
+export interface WindowBounds {
+	left?: number
+	top?: number
+	width?: number
+	height?: number
+}
+
+export interface UpdateWindowOptions {
+	focused?: boolean
+	/** Draw the user's attention without changing focus (ignored when already focused). */
+	drawAttention?: boolean
+	/** `normal` restores a minimized window; also exits maximized / fullscreen. */
+	state?: "normal"
 }
 
 export interface WindowPort {
@@ -26,4 +45,11 @@ export interface WindowPort {
 
 	/** Close a window by id. No-op / rejects if it is already closed. */
 	remove(windowId: number): Promise<void>
+
+	/** Focus / restore a window by id. Rejects if it is already closed. */
+	update(windowId: number, options: UpdateWindowOptions): Promise<void>
+
+	/** Bounds of the last-focused NORMAL window (never a popup), or `undefined`
+	 *  when there is none or the lookup fails. Never throws. */
+	getLastFocused(): Promise<WindowBounds | undefined>
 }

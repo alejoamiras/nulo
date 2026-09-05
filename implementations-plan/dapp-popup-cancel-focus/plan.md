@@ -341,7 +341,8 @@ _(green 2026-09-05; `lessons/phase-2.md`. Arc gate: `audit:vue`'s parallel `test
 
 ### Arc 2 — refocus from the Queued card + open on the right display
 
-#### Phase 3 — `WindowPort` grows `update` + `getLastFocused`; `create` accepts `left/top`
+#### Phase 3 — `WindowPort` grows `update` + `getLastFocused`; `create` accepts `left/top` ✓
+_(green 2026-09-05; `lessons/phase-3.md`)_
 - `wallet-core` port types as in the interfaces above; `ChromeWindowsAdapter.update` →
   `chrome.windows.update`; `getLastFocused` → `chrome.windows.getLastFocused({ windowTypes: ["normal"] })`
   wrapped so any throw, or a window without numeric bounds, → `undefined`. `create` forwards `left/top`.
