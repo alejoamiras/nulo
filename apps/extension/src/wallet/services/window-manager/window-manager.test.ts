@@ -388,13 +388,21 @@ describe("WindowManager", () => {
 					release = () => resolve(undefined)
 				})
 
-			const { promise } = manager.openAndAwait<string>(OPTS)
+			const { handleId, promise } = manager.openAndAwait<string>(OPTS)
 			clock.advance(TIMEOUT_MS)
 			await expect(promise).rejects.toMatch(/timed out/i)
+
+			// A re-minted handle under the same id must not be adopted by the
+			// stale lookup either (identity, not membership).
+			const handles = (manager as unknown as { handles: Map<string, unknown> }).handles
+			const impostor = { settled: false }
+			handles.set(handleId, impostor)
 
 			release()
 			await flushCreate()
 			expect(createSpy).not.toHaveBeenCalled()
+			expect(impostor).toEqual({ settled: false })
+			handles.delete(handleId)
 		})
 	})
 
@@ -426,8 +434,8 @@ describe("WindowManager", () => {
 })
 
 describe("centerOn", () => {
-	it("centers on a positive anchor", () => {
-		expect(centerOn({ left: 100, top: 50, width: 1000, height: 600 }, 400, 800)).toEqual({ left: 400, top: -50 })
+	it("centers on a positive anchor, rounding half-pixels", () => {
+		expect(centerOn({ left: 100, top: 50, width: 1001, height: 601 }, 400, 800)).toEqual({ left: 401, top: -49 })
 	})
 
 	it("keeps signed coordinates on an anchor left of / above the primary display", () => {

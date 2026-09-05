@@ -13,9 +13,10 @@
  * at that point — removing the affordance is structurally honest (better than
  * a silent no-op click).
  *
- * While a dApp request is `queued` its approval popup may be open on another
- * display; the card is then a button that emits `focus` (click, Enter, Space)
- * so the parent can ask the SW to bring that window to the front.
+ * At `queued` the card also emits `focus` (whole-card click, or its own button
+ * for keyboard and assistive tech) so the parent can raise the approval popup.
+ * The card itself carries no ARIA role: it contains focusable buttons, and a
+ * button role may not. The whole-card click is a pointer convenience only.
  */
 import { computed, type PropType } from "vue"
 import type { JobStage } from "@nulo/wallet-core/jobs"
@@ -61,29 +62,15 @@ const emit = defineEmits(["cancel", "focus"])
 
 /** `queued` is the only stage at which an approval popup can exist. */
 const focusable = computed(() => Boolean(props.jobId) && props.stage === "queued")
+const showCancel = computed(() => props.cancellable && Boolean(props.jobId) && props.stage !== "submitting")
 
-function onActivate() {
+function onCardClick() {
 	if (focusable.value) emit("focus", props.jobId)
-}
-
-function onKeydown(event: KeyboardEvent) {
-	// Self-targeted only: Enter/Space on the Cancel button must not bubble into a focus.
-	if (!focusable.value || event.target !== event.currentTarget) return
-	if (event.key !== "Enter" && event.key !== " ") return
-	event.preventDefault()
-	emit("focus", props.jobId)
 }
 </script>
 
 <template>
-	<div
-		:class="[$style.card, focusable && $style.focusable]"
-		:tabindex="focusable ? 0 : undefined"
-		:role="focusable ? 'button' : undefined"
-		:title="focusable ? 'Show the approval window' : undefined"
-		@click="onActivate"
-		@keydown="onKeydown"
-	>
+	<div :class="[$style.card, focusable && $style.focusable]" :title="focusable ? 'Show the approval window' : undefined" @click="onCardClick">
 		<TransactionCardLayout
 			:title="title"
 			:icon="icon"
@@ -105,8 +92,19 @@ function onKeydown(event: KeyboardEvent) {
 				<span :class="$style.subtitle" role="status" aria-live="polite" aria-atomic="true">{{ subtitle }}</span>
 			</template>
 
-			<template v-if="cancellable && jobId && stage !== 'submitting'" #actions>
+			<template v-if="focusable || showCancel" #actions>
 				<button
+					v-if="focusable"
+					type="button"
+					:class="$style.action_btn"
+					aria-label="Show the approval window"
+					data-testid="tx-awaiting-focus"
+					@click.stop="emit('focus', jobId)"
+				>
+					<Icon name="expand" size="14" color="secondary" />
+				</button>
+				<button
+					v-if="showCancel"
 					type="button"
 					:class="$style.action_btn"
 					aria-label="Cancel transaction"
@@ -128,10 +126,6 @@ function onKeydown(event: KeyboardEvent) {
 .focusable {
 	display: block;
 	cursor: pointer;
-}
-.focusable:focus-visible {
-	outline: 2px solid var(--nulo-accent);
-	outline-offset: -2px;
 }
 
 /* Subtitle takes whatever horizontal room it can after the chip; truncates

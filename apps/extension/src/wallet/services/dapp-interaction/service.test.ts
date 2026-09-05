@@ -457,8 +457,12 @@ describe("DappInteractionService.focusInteractionWindow (Queued card → bring t
 		expect(internals.windowManager.focus).not.toHaveBeenCalled()
 	})
 
-	test("another profile's popup is never raised → false, manager untouched", async () => {
-		const { svc, internals } = makeService({ getActiveProfile: async () => ({ id: "p2" }) })
+	const denied: Array<[string, () => Promise<{ id: string } | undefined>]> = [
+		["another profile is active", async () => ({ id: "p2" })],
+		["the wallet is locked", async () => undefined],
+	]
+	test.each(denied)("when %s → false, manager untouched", async (_label, getActiveProfile) => {
+		const { svc, internals } = makeService({ getActiveProfile })
 		seedQueued(internals, "i-1", "j-1")
 
 		await expect(svc.focusInteractionWindow("j-1")).resolves.toBe(false)

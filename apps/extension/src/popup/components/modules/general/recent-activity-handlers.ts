@@ -117,12 +117,7 @@ export interface FocusExecutor {
 	focusInteractionWindow(journalId: string): Promise<boolean>
 }
 
-/**
- * Build the handler for `<TransactionAwaitingCard @focus="...">`: asks the SW to
- * bring the queued request's approval popup to the front. A `false` result (no
- * popup yet, or already approved) and a rejection are both silent — the click is
- * a courtesy, never a state change.
- */
+/** Focus is best-effort: queued requests may have no popup, and RPC failures stay silent. */
 export function buildFocusHandler(dapp: FocusExecutor): (jobId: string | null | undefined) => void {
 	return (jobId) => {
 		if (!jobId) return
