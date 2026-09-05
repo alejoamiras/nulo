@@ -86,6 +86,16 @@ export const TESTIDS = {
 	activityTileDrip: "tl-activity-tile-drip",
 	activityUnavailable: "tl-activity-unavailable",
 	dripView: "tl-drip-view",
+	dock: "tl-dock",
+	dockHide: "tl-dock-hide",
+	dockStrip: "tl-dock-strip",
+	dockOpen: "tl-dock-open",
+	dockBadge: "tl-dock-badge",
+	dockGroup: "tl-dock-group",
+	dockAll: "tl-dock-all",
+	activityRow: "tl-activity-row",
+	activityRowOpen: "tl-activity-row-open",
+	activityRowAction: "tl-activity-row-action",
 	themeToggle: "tl-theme-toggle",
 
 	// Send - L1 (Ethereum) wallet

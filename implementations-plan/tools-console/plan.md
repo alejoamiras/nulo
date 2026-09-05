@@ -200,7 +200,7 @@ export function useShell(): { section: Ref<Section>; goTo(s: Section): void; ope
 - Tests: `RailNav.test.ts` (roving tablist ↑/↓ and ←/→, count, testids), `AppShell.test.ts` (three sections, one strip, Activity `v-if`, footer swap, placeholder), `ActivityView.test.ts` (first-visit vs list, foreground record listed), `SendView.test.ts` re-homed, `tools-smoke.test.ts` pins updated, new `tests/e2e/shell-smoke.test.ts` mounting `App.vue`: rail switching, header wallets, dock hidden by default, a completion toast while on Faucet with the dock hidden, background handoff to Activity, every new testid present.
 - **Gate line:** `shell-smoke.test.ts` green.
 
-### Phase 3 — Activity dock
+### Phase 3 ✓ — Activity dock — green 2026-09-05, `lessons/phase-3.md`
 - `ActivityDock.vue`, `DockStrip.vue`, `ActivityRow.vue`; auto-open watch; badge; hide moves focus to the strip; SWITCH gated on `opsBusy`; per-record CLAIM GAS guard.
 - Tests: `ActivityRow.test.ts` (two lines, side slot per group/action, `safeDisplay` + cap, on-screen mark without a button), `ActivityDock.test.ts` (hidden by default, hide/show + focus, badge only when count > 0, auto-open once and not for blocked rows, not mounted on Activity, dispatch per action, SWITCH disabled while `opsBusy`, CLAIM GAS double-activation guarded, background handoff uses the canonical id).
 - **Gate line:** the shell smoke gains the dock cases (badge count vs page buttons agree).

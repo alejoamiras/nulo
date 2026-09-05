@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /** Components */
+import ActivityDock from "./components/ActivityDock.vue"
 import ActivityView from "./views/ActivityView.vue"
 import AppToastRegion from "./components/AppToastRegion.vue"
 import AztecWalletPanel from "./components/AztecWalletPanel.vue"
@@ -29,7 +30,8 @@ const shell = useShell()
 const section = shell.section
 
 // The one place completion toasts come from, whichever section is visible. A network with no
-// bridge generation instantiates none of the journal machinery, here or anywhere.
+// bridge generation instantiates none of the journal machinery, here or anywhere: the feed is
+// built once and handed to the dock, and its absence is what keeps the dock out of the tree.
 if (!IS_PLACEHOLDER) useCompletionToasts()
 const feed = IS_PLACEHOLDER ? null : useActivityFeed()
 const activityCount = computed(() => feed?.count.value ?? 0)
@@ -86,6 +88,9 @@ const header = computed(() => HEADERS[section.value])
 			<BridgeFooter v-else />
 		</div>
 
+		<!-- On Activity the page IS the dock, so it is unmounted there, not merely hidden. -->
+		<ActivityDock v-if="feed && section !== 'activity'" :feed="feed" />
+
 		<AppToastRegion />
 		<!-- ONE picker for the shared session — the panels only trigger connect(). -->
 		<WalletPickerModal />
@@ -96,7 +101,7 @@ const header = computed(() => HEADERS[section.value])
 <style scoped>
 .shell {
 	display: grid;
-	grid-template-columns: 200px minmax(0, 1fr);
+	grid-template-columns: 200px minmax(0, 1fr) auto;
 	min-height: 100vh;
 	color: var(--txt-primary);
 }

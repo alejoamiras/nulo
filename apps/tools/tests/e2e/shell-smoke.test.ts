@@ -25,7 +25,7 @@ vi.mock("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js", as
 	(await import("./fixtures/sdk-boundary")).tokenArtifactModule(),
 )
 
-import { __resetJournalForTests, lastCompleted } from "@/composables/useBridgeJournal"
+import { __resetJournalForTests, addRecord, claimForeground, lastCompleted, releaseForeground } from "@/composables/useBridgeJournal"
 import { __resetDockStateForTests } from "@/composables/useDockState"
 import { __resetDripForTests } from "@/composables/useDrip"
 import { __resetShellForTests } from "@/composables/useShell"
@@ -36,6 +36,25 @@ import { TESTIDS } from "@/lib/testids"
 import { mountApp, resetBoundary } from "./fixtures/sdk-boundary"
 
 const sel = (t: string) => `[data-testid="${t}"]`
+
+/** A deposit whose message has landed (leaf index known): CLAIM is the next step. */
+function claimableDeposit(id: string) {
+	return {
+		schema: 1 as const,
+		id,
+		direction: "deposit" as const,
+		isPrivate: false,
+		amount: "1000000000000000000",
+		createdAt: Date.now() - 60_000,
+		updatedAt: Date.now() - 60_000,
+		recipient: "0x000000000000000000000000000000000000000000000000000000000000000a",
+		secretHashHex: "0x1",
+		leafIndex: "7",
+		chainId: 11155111,
+		portal: "0xportal",
+		bridge: "0xbridge",
+	}
+}
 
 describe("shell smoke", () => {
 	let wrapper: VueWrapper | null = null
@@ -112,6 +131,52 @@ describe("shell smoke", () => {
 		}
 		await flushPromises()
 		expect(wrapper.text()).toContain("to Aztec ✓")
+	})
+
+	it("6. the dock: hidden with no badge; a record that starts needing you opens it once; hidden again, the badge equals the page's buttons", async () => {
+		if (IS_PLACEHOLDER) return
+		wrapper = await mountApp()
+		expect(wrapper.find(sel(TESTIDS.dock)).exists()).toBe(false)
+		expect(wrapper.find(sel(TESTIDS.dockStrip)).exists()).toBe(true)
+		expect(wrapper.find(sel(TESTIDS.dockBadge)).exists()).toBe(false)
+
+		addRecord(claimableDeposit("0xneeds"))
+		await flushPromises()
+		expect(wrapper.find(sel(TESTIDS.dock)).exists()).toBe(true)
+		const actions = wrapper.findAll(sel(TESTIDS.activityRowAction))
+		expect(actions.map((a) => a.text())).toEqual(["CLAIM"])
+		expect(localStorage.getItem("nulo:tools-dock")).toBeNull()
+
+		await wrapper.get(sel(TESTIDS.dockHide)).trigger("click")
+		await flushPromises()
+		expect(wrapper.find(sel(TESTIDS.dock)).exists()).toBe(false)
+		expect(wrapper.get(sel(TESTIDS.dockBadge)).text()).toBe("1")
+
+		// The page agrees with the badge: one CLAIM there, and no dock beside it.
+		await wrapper.get(sel(TESTIDS.tabActivity)).trigger("click")
+		await flushPromises()
+		expect(wrapper.findAll(sel(TESTIDS.journalClaim))).toHaveLength(1)
+		expect(wrapper.find(sel(TESTIDS.dockStrip)).exists()).toBe(false)
+
+		// Back on Send the record is still needing you, and the dock stays as it was left.
+		await wrapper.get(sel(TESTIDS.tabSend)).trigger("click")
+		await flushPromises()
+		expect(wrapper.find(sel(TESTIDS.dock)).exists()).toBe(false)
+		expect(wrapper.get(sel(TESTIDS.dockBadge)).text()).toBe("1")
+	})
+
+	it("7. the record whose stepper is on screen is not in the dock; backgrounding it puts it there", async () => {
+		if (IS_PLACEHOLDER) return
+		wrapper = await mountApp()
+		claimForeground("0xfg")
+		addRecord(claimableDeposit("0xfg"))
+		await flushPromises()
+		expect(wrapper.find(sel(TESTIDS.dock)).exists()).toBe(false)
+		expect(wrapper.find(sel(TESTIDS.dockBadge)).exists()).toBe(false)
+		releaseForeground("0xfg")
+		await flushPromises()
+		expect(wrapper.find(sel(TESTIDS.dock)).exists()).toBe(true)
+		expect(wrapper.get(sel(TESTIDS.activityRow)).attributes("data-record-id")).toBe("0xfg")
 	})
 
 	it("5. the rail's keyboard: arrows move between sections without leaving the tablist", async () => {

@@ -24,6 +24,8 @@ export interface ActivityRowModel {
 	action: ActivityAction
 	/** True for a needs-you row the card alone can resolve (blocked, terminal, stuck before send). */
 	blocked: boolean
+	/** The canonical account a SWITCH row switches to; null unless the action is `switch`. */
+	switchTarget: string | null
 	phase: string
 	amount: string
 	symbol: string
@@ -57,6 +59,7 @@ export function useActivityFeed() {
 				group,
 				action,
 				blocked: group === "needs-you" && action === null,
+				switchTarget: action === "switch" ? state.switchTarget : null,
 				phase: phaseWord(rec, rt),
 				amount: strings.amount,
 				symbol: strings.symbol,
@@ -75,3 +78,5 @@ export function useActivityFeed() {
 
 	return { rows, grouped, count, autoOpenIds, liveIds }
 }
+
+export type ActivityFeed = ReturnType<typeof useActivityFeed>

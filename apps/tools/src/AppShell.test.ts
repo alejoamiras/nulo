@@ -48,6 +48,7 @@ vi.mock("./components/AppToastRegion.vue", () => marker("toasts"))
 vi.mock("./components/WalletPickerModal.vue", () => marker("picker"))
 vi.mock("./components/ChooseAccountModal.vue", () => marker("chooser"))
 vi.mock("./components/ThemeToggle.vue", () => marker("theme"))
+vi.mock("./components/ActivityDock.vue", () => marker("tl-dock"))
 
 import AppShell from "./AppShell.vue"
 
@@ -85,11 +86,14 @@ describe("AppShell", () => {
 		expect(header.get(sel("aztec-panel")).attributes("data-variant")).toBe("bridge")
 		expect(w.find(sel("footer-bridge")).exists()).toBe(true)
 		expect(w.find(sel(TESTIDS.sendView)).isVisible()).toBe(true)
+		expect(w.find(sel(TESTIDS.dock)).exists()).toBe(true)
 		useShell().goTo("activity")
 		await nextTick()
 		expect(w.get(sel(TESTIDS.app)).attributes("data-section")).toBe("activity")
 		expect(w.find(sel(TESTIDS.activityView)).exists()).toBe(true)
 		expect(w.find(sel(TESTIDS.dripView)).isVisible()).toBe(false)
+		// The page is the dock: on Activity the dock is not in the tree at all.
+		expect(w.find(sel(TESTIDS.dock)).exists()).toBe(false)
 	})
 
 	it("ONE strip; the no-wallet CTA is the faucet chip's own, so only there is it excluded", async () => {
@@ -114,6 +118,7 @@ describe("AppShell", () => {
 		const w = mount(AppShell)
 		expect(toastOwners.value).toBe(0)
 		expect(feedInstances.value).toBe(0)
+		expect(w.find(sel(TESTIDS.dock)).exists()).toBe(false)
 		expect(w.get(sel(TESTIDS.tabActivity)).text()).toBe("Activity")
 	})
 })
