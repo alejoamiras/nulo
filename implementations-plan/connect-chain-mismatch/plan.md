@@ -229,7 +229,7 @@ moves, the shell reloads accounts, the banner settles to "switched" → Approve 
   src/wallet/services/account src/wallet/services/network` (exit 0, new tests green) · `bun run lint` ·
   `bun run typecheck` (root; exit 0). Layers: lint/typecheck · unit.
 
-### Phase 2 — `useNetworkActivation` composable (extract, no behavior change)
+### Phase 2 — `useNetworkActivation` composable (extract, no behavior change) ✓
 - New `composables/useNetworkActivation.ts` + `useNetworkActivation.test.ts` (≥10 cases: activated
   with no toast, blocked via the in-flight pre-check without calling persist, blocked from the guard
   with its toast, unconfirmed toast copy, stale silent, the persist/read callbacks are the ones invoked,
