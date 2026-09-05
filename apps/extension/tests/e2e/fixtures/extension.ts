@@ -446,6 +446,22 @@ const pickFirstAccount = async (accountIds: (string | null)[]): Promise<string[]
 
 type TwoAccountDapp = ExtensionContext & { playgroundPage: Page; accountAddresses: string[] }
 
+/** Ground truth from the wallet's own storage — every account and network row, raw (values may
+ *  be serialized strings) — so a "<2 accounts exposed" failure discriminates wrong-chain creation
+ *  from popup-side filtering. */
+function dumpAccountAndNetworkRows(popup: Page): Promise<string> {
+	return popup.evaluate(async () => {
+		const all = await chrome.storage.local.get(null)
+		const out: string[] = []
+		for (const [k, v] of Object.entries(all)) {
+			if (k.startsWith("nulo:core:accounts") || k.startsWith("nulo:core:networks")) {
+				out.push(`${k} => ${(typeof v === "string" ? v : JSON.stringify(v)).slice(0, 400)}`)
+			}
+		}
+		return out.join(" ||| ")
+	})
+}
+
 /** The two-account dApp fixture body, shared by its `transaction` and `transaction-contracts`
  *  variants: a second account created in the setup phase, then the bundle pre-granted to the
  *  first two accounts the cap popup exposes. */
@@ -491,23 +507,8 @@ function firstTwoAccountsFixture(label: string, bundle: "transaction" | "transac
 				// exposes fewer, fail HERE with the ids so the discriminator
 				// (creation failed vs popup filtered) is in the error itself.
 				if (granted.length < 2) {
-					// Ground truth from the wallet's own storage: every account row
-					// with its chainId, so the failure discriminates wrong-chain
-					// creation from popup-side filtering.
-					// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 19 — an in-browser diagnostic scanning exactly the account and network roots in serialized or object form
-					const storedAccounts = await capPopup.evaluate(async () => {
-						const all = await chrome.storage.local.get(null)
-						const out: string[] = []
-						for (const [k, v] of Object.entries(all)) {
-							if (k.startsWith("nulo:core:accounts") || k.startsWith("nulo:core:networks")) {
-								// Raw, no shape assumptions — values may be serialized strings.
-								out.push(`${k} => ${(typeof v === "string" ? v : JSON.stringify(v)).slice(0, 400)}`)
-							}
-						}
-						return out.join(" ||| ")
-					})
 					throw new Error(
-						`capabilities popup exposed only [${accountIds.join(", ")}] — expected the created second account.\nAT-CAP-TIME: ${storedAccounts}\nPOST-CREATE: ${postCreateDump}`,
+						`capabilities popup exposed only [${accountIds.join(", ")}] — expected the created second account.\nAT-CAP-TIME: ${await dumpAccountAndNetworkRows(capPopup)}\nPOST-CREATE: ${postCreateDump}`,
 					)
 				}
 				return granted
