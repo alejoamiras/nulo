@@ -250,6 +250,10 @@ Single arc, single PR: branch `worktree-self-pay-setup-fix` → `dev`, `gh pr cr
 
 **Disputed / open:** production attribution (whether H5 is what the owner hit) rests on A4; the fix and the gate do not.
 
+## ELI5
+
+Artifact: https://claude.ai/code/artifact/6bb17a86-152f-4e9c-a576-75a4de0e3f49 — source `implementations-plan/self-pay-setup-fix/eli5.html` (republish the same file path to update the same URL).
+
 ## Seeds
 
-_(finalised after approval)_
+_(draft in the ELI5; finalised after approval)_
