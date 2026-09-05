@@ -257,7 +257,7 @@ moves, the shell reloads accounts, the banner settles to "switched" → Approve 
   `cd packages/design && bun run test` · `bun run lint` · `bun run typecheck` (exit 0) ·
   `bun run baseline:complexity` reports no manifest change. Layers: lint/typecheck · unit · component.
 
-### Phase 4 — network e2e + fixture note
+### Phase 4 — network e2e + fixture note ✓
 - `tests/e2e/network/cap-chain-mismatch.test.ts`, two tests on `registeredExtensionPerTest` (wallet
   stays on Testnet) → `connectPlayground` (Local Network) → popup waiter armed BEFORE the request →
   request `accounts`:
