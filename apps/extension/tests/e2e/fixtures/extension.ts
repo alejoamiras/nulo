@@ -412,7 +412,7 @@ async function setupConnectedPlayground(
 export async function grantCapBundle(
 	ctx: ExtensionContext,
 	playgroundPage: Page,
-	bundle: "accounts" | "transaction",
+	bundle: "accounts" | "transaction" | "transaction-contracts",
 	pick: (accountIds: (string | null)[], capPopup: Page) => Promise<string[]>,
 ): Promise<string[]> {
 	await playgroundPage.evaluate((b) => {
@@ -443,6 +443,81 @@ const pickFirstAccount = async (accountIds: (string | null)[]): Promise<string[]
 }
 
 // ── Fixtures ────────────────────────────────────────────────────────────
+
+type TwoAccountDapp = ExtensionContext & { playgroundPage: Page; accountAddresses: string[] }
+
+/** The two-account dApp fixture body, shared by its `transaction` and `transaction-contracts`
+ *  variants: a second account created in the setup phase, then the bundle pre-granted to the
+ *  first two accounts the cap popup exposes. */
+function firstTwoAccountsFixture(label: string, bundle: "transaction" | "transaction-contracts") {
+	// biome-ignore lint/correctness/noEmptyPattern: vitest fixture API requires {} destructuring
+	return async ({}: Record<string, never>, use: (v: TwoAccountDapp) => Promise<void>) => {
+		// Captured in the second-account setup step and referenced by the
+		// cap-pick failure message below, so a "<2 accounts exposed" failure
+		// discriminates wrong-chain creation from popup-side filtering.
+		let postCreateDump = ""
+		const { ctx, playgroundPage, phase } = await setupConnectedPlayground(label, async (setupPage, phase) => {
+			// A fresh profile exposes ONE account; multi-account consumers (the
+			// from-characterization + the authwit consume-as-caller flow) need a
+			// real second account in the cap popup, so create it here where the
+			// cost lands in hookTimeout.
+			await phase("createSecondAccount", () => createAccount(setupPage, "Second"))
+			// Persistence assertion: the row rendering proves only the optimistic
+			// appStore push; verify the SERVICE write landed before moving on.
+			await phase("assertSecondAccountPersisted", async () => {
+				postCreateDump = await setupPage.evaluate(async () => {
+					const all = await chrome.storage.local.get(null)
+					return Object.entries(all)
+						.filter(([k]) => k.startsWith("nulo:core:accounts"))
+						.map(([, v]) => (typeof v === "string" ? v : JSON.stringify(v)))
+						.join(" ||| ")
+				})
+				if (!postCreateDump.includes('"Second"')) {
+					throw new Error(`account "Second" not in storage immediately after creation. Stored: ${postCreateDump.slice(0, 600)}`)
+				}
+			})
+		})
+
+		// Pre-grant the `transaction` bundle to the first 1-or-2 accounts the
+		// cap popup exposes. Tests that characterize "wallet picks first session
+		// account regardless of opts.from" rely on 2+ accounts granted — but
+		// tolerate 1 if that's what the wallet exposed (characterization holds
+		// either way).
+		const accountAddresses = await phase("grantFirstTwoAccountsTransactionCap", () =>
+			grantCapBundle(ctx, playgroundPage, bundle, async (accountIds, capPopup) => {
+				const granted = accountIds.slice(0, Math.min(2, accountIds.length)).filter((a): a is string => !!a)
+				if (granted.length === 0) throw new Error("capabilities popup returned no accounts")
+				// The fixture creates a second account upstream; if the cap popup
+				// exposes fewer, fail HERE with the ids so the discriminator
+				// (creation failed vs popup filtered) is in the error itself.
+				if (granted.length < 2) {
+					// Ground truth from the wallet's own storage: every account row
+					// with its chainId, so the failure discriminates wrong-chain
+					// creation from popup-side filtering.
+					// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 19 — an in-browser diagnostic scanning exactly the account and network roots in serialized or object form
+					const storedAccounts = await capPopup.evaluate(async () => {
+						const all = await chrome.storage.local.get(null)
+						const out: string[] = []
+						for (const [k, v] of Object.entries(all)) {
+							if (k.startsWith("nulo:core:accounts") || k.startsWith("nulo:core:networks")) {
+								// Raw, no shape assumptions — values may be serialized strings.
+								out.push(`${k} => ${(typeof v === "string" ? v : JSON.stringify(v)).slice(0, 400)}`)
+							}
+						}
+						return out.join(" ||| ")
+					})
+					throw new Error(
+						`capabilities popup exposed only [${accountIds.join(", ")}] — expected the created second account.\nAT-CAP-TIME: ${storedAccounts}\nPOST-CREATE: ${postCreateDump}`,
+					)
+				}
+				return granted
+			}),
+		)
+
+		await use(Object.assign(ctx, { playgroundPage, accountAddresses }))
+		await ctx.browser.close()
+	}
+}
 
 export const test = base.extend<{
 	/** Fresh browser with extension loaded, no profile. */
@@ -496,6 +571,13 @@ export const test = base.extend<{
 	 *  pattern; the cap-grant inner helper is intentionally duplicated
 	 *  rather than abstracted for the same audit-independence reason. */
 	dappConnectedExtensionWithFirstTwoAccountsCap: ExtensionContext & {
+		playgroundPage: Page
+		accountAddresses: string[]
+	}
+	/** `dappConnectedExtensionWithFirstTwoAccountsCap` with the `transaction-contracts`
+	 *  bundle: the dApp may also register its own contracts (the self-pay phase gate
+	 *  introduces a token whose minter is one of the two granted accounts). */
+	dappConnectedExtensionWithFirstTwoAccountsContractsCap: ExtensionContext & {
 		playgroundPage: Page
 		accountAddresses: string[]
 	}
@@ -619,78 +701,11 @@ export const test = base.extend<{
 	],
 
 	dappConnectedExtensionWithFirstTwoAccountsCap: [
-		// biome-ignore lint/correctness/noEmptyPattern: vitest fixture API requires {} destructuring
-		async ({}, use) => {
-			// Captured in the second-account setup step and referenced by the
-			// cap-pick failure message below, so a "<2 accounts exposed" failure
-			// discriminates wrong-chain creation from popup-side filtering.
-			let postCreateDump = ""
-			const { ctx, playgroundPage, phase } = await setupConnectedPlayground(
-				"dappConnectedExtensionWithFirstTwoAccountsCap",
-				async (setupPage, phase) => {
-					// A fresh profile exposes ONE account; multi-account consumers (the
-					// from-characterization + the authwit consume-as-caller flow) need a
-					// real second account in the cap popup, so create it here where the
-					// cost lands in hookTimeout.
-					await phase("createSecondAccount", () => createAccount(setupPage, "Second"))
-					// Persistence assertion: the row rendering proves only the optimistic
-					// appStore push; verify the SERVICE write landed before moving on.
-					await phase("assertSecondAccountPersisted", async () => {
-						postCreateDump = await setupPage.evaluate(async () => {
-							const all = await chrome.storage.local.get(null)
-							return Object.entries(all)
-								.filter(([k]) => k.startsWith("nulo:core:accounts"))
-								.map(([, v]) => (typeof v === "string" ? v : JSON.stringify(v)))
-								.join(" ||| ")
-						})
-						if (!postCreateDump.includes('"Second"')) {
-							throw new Error(
-								`account "Second" not in storage immediately after creation. Stored: ${postCreateDump.slice(0, 600)}`,
-							)
-						}
-					})
-				},
-			)
-
-			// Pre-grant the `transaction` bundle to the first 1-or-2 accounts the
-			// cap popup exposes. Tests that characterize "wallet picks first session
-			// account regardless of opts.from" rely on 2+ accounts granted — but
-			// tolerate 1 if that's what the wallet exposed (characterization holds
-			// either way).
-			const accountAddresses = await phase("grantFirstTwoAccountsTransactionCap", () =>
-				grantCapBundle(ctx, playgroundPage, "transaction", async (accountIds, capPopup) => {
-					const granted = accountIds.slice(0, Math.min(2, accountIds.length)).filter((a): a is string => !!a)
-					if (granted.length === 0) throw new Error("capabilities popup returned no accounts")
-					// The fixture creates a second account upstream; if the cap popup
-					// exposes fewer, fail HERE with the ids so the discriminator
-					// (creation failed vs popup filtered) is in the error itself.
-					if (granted.length < 2) {
-						// Ground truth from the wallet's own storage: every account row
-						// with its chainId, so the failure discriminates wrong-chain
-						// creation from popup-side filtering.
-						// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 19 — an in-browser diagnostic scanning exactly the account and network roots in serialized or object form
-						const storedAccounts = await capPopup.evaluate(async () => {
-							const all = await chrome.storage.local.get(null)
-							const out: string[] = []
-							for (const [k, v] of Object.entries(all)) {
-								if (k.startsWith("nulo:core:accounts") || k.startsWith("nulo:core:networks")) {
-									// Raw, no shape assumptions — values may be serialized strings.
-									out.push(`${k} => ${(typeof v === "string" ? v : JSON.stringify(v)).slice(0, 400)}`)
-								}
-							}
-							return out.join(" ||| ")
-						})
-						throw new Error(
-							`capabilities popup exposed only [${accountIds.join(", ")}] — expected the created second account.\nAT-CAP-TIME: ${storedAccounts}\nPOST-CREATE: ${postCreateDump}`,
-						)
-					}
-					return granted
-				}),
-			)
-
-			await use(Object.assign(ctx, { playgroundPage, accountAddresses }))
-			await ctx.browser.close()
-		},
+		firstTwoAccountsFixture("dappConnectedExtensionWithFirstTwoAccountsCap", "transaction"),
+		{ scope: "test" },
+	],
+	dappConnectedExtensionWithFirstTwoAccountsContractsCap: [
+		firstTwoAccountsFixture("dappConnectedExtensionWithFirstTwoAccountsContractsCap", "transaction-contracts"),
 		{ scope: "test" },
 	],
 

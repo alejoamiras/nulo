@@ -19,6 +19,7 @@ import { renderConnect, bindConnect } from "./sections/connect"
 import { renderMeta, bindMeta } from "./sections/meta"
 import { renderContracts, bindContracts } from "./sections/contracts"
 import { renderSimulation, bindSimulation } from "./sections/simulation"
+import { renderPhase, bindPhase } from "./sections/phase"
 import { renderTransactions, bindTransactions } from "./sections/transactions"
 import { renderAuthwit, bindAuthwit } from "./sections/authwit"
 import { renderData, bindData } from "./sections/data"
@@ -95,6 +96,7 @@ function render(): void {
 		${renderMeta()}
 		${renderContracts()}
 		${renderSimulation()}
+		${renderPhase()}
 		${renderTransactions()}
 		${renderAuthwit()}
 		${renderData()}
@@ -133,6 +135,7 @@ function bindAll(): void {
 	bindMeta(app)
 	bindContracts(app)
 	bindSimulation(app)
+	bindPhase(app)
 	bindTransactions(app)
 	bindAuthwit(app)
 	bindData(app)
