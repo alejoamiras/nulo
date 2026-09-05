@@ -36,6 +36,18 @@ const TOAST_COPY: Record<ErrorCategory, string> = {
 	unknown: "Something went wrong. Try again.",
 }
 
+/** The sentence a user can act on. A viem error wraps the underlying cause in prose and a version
+ *  line ("An unknown RPC error occurred. Details: … Version: viem@…"); the cause is what to show. */
+export function userMessage(err: unknown, fallback = "Something went wrong. Try again."): string {
+	if (err && typeof err === "object") {
+		const { details, shortMessage } = err as { details?: unknown; shortMessage?: unknown }
+		if (typeof details === "string" && details.trim() !== "") return details.trim()
+		if (typeof shortMessage === "string" && shortMessage.trim() !== "") return shortMessage.trim()
+	}
+	if (err instanceof Error && err.message.trim() !== "") return err.message
+	return fallback
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 21 — ordered overlapping message predicates are the error-classification precedence policy
 export function normalizeError(err: unknown): NormalizedError {
 	const msg = err instanceof Error ? err.message : String(err)

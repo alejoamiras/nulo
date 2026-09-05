@@ -9,17 +9,14 @@ import { useToast } from "@/composables/useToast"
 
 /** Utils */
 import { type BridgeJournalRecord, assetKindOf } from "@nulo/bridge-core"
-import { computed, ref, watch } from "vue"
+import { computed, ref } from "vue"
 import { assetDecimals, assetSymbol } from "@/lib/asset-label"
-import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
 import { formatBigInt } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
 
-// `kind` scopes the list to one asset (the Fuel tab shows fee-juice, the Bridge tab shows the token) so a
-// backgrounded Fuel bridge surfaces under its own tab. `toasts` keeps a SINGLE completion-toast owner across
-// the two mounts (the Bridge instance owns it; the Fuel instance is list-only) — no double toast.
-const props = withDefaults(defineProps<{ kind?: "bridge-token" | "fee-juice"; toasts?: boolean; title?: string }>(), {
-	toasts: true,
+// `kind` scopes the list to one asset kind. Completion toasts are the shell's (`useCompletionToasts`),
+// so a second list never doubles them.
+const props = withDefaults(defineProps<{ kind?: "bridge-token" | "fee-juice"; title?: string }>(), {
 	title: "YOUR BRIDGES",
 })
 
@@ -67,33 +64,6 @@ const sorted = computed(() => {
 	const recs = props.kind ? journal.visibleRecords.value.filter((r) => assetKindOf(r) === props.kind) : journal.visibleRecords.value
 	return [...recs].sort((a, b) => b.createdAt - a.createdAt)
 })
-
-watch(
-	() => journal.lastCompleted.value,
-	(done) => {
-		if (!props.toasts) return // List-only mount (the Fuel tab) — the Bridge mount owns the single toast.
-		if (!done) return
-		// The foreground stepper shows the receipt for this completion - a toast would double it.
-		// Keyed off the SYNCHRONOUS capture, not the live activeFlowId: the form's completion watcher
-		// releases the takeover before this one runs, so the live check would always pass here.
-		if (done.foreground) return
-		// A fee-juice (Fuel) completion is 18-dec Fee Juice, not the token bridge's asset - format + label it
-		// as such so a background Fuel completion isn't announced as the wrong amount of AZLO (codex MEDIUM).
-		const sym = assetSymbol(done.assetKind, done.isPrivate)
-		const amount = formatBigInt(BigInt(done.amount), assetDecimals(done.assetKind))
-		const href = done.txHash ? (done.direction === "deposit" ? explorerTxUrl(done.txHash) : etherscanTxUrl(done.txHash)) : ""
-		push({
-			kind: "ok",
-			text:
-				done.direction === "deposit"
-					? done.assetKind === "fee-juice"
-						? `Fueled Aztec with ${amount} ${sym} ✓`
-						: `Bridged ${amount} ${sym} to Aztec ✓`
-					: `Released ${amount} ${sym} to Ethereum ✓`,
-			link: href ? { label: "view tx", href } : undefined,
-		})
-	},
-)
 </script>
 
 <template>

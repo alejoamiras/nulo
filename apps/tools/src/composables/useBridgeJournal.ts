@@ -1457,8 +1457,8 @@ export function resumeSessionWork(): void {
 	}
 }
 
-/** The render list: completed-and-graced cards are hidden (D3), and the FOREGROUND record is
- *  suppressed (its stepper/receipt is the one surface - plan S12/S13). Records stay in storage. */
+/** Every record except the foregrounded one: while the wizard shows a record's stepper or receipt,
+ *  that is its one surface, so no list renders it a second time. Records stay in storage. */
 export const visibleRecords = computed(() => records.value.filter((r) => r.id !== activeFlowId.value))
 
 export function useBridgeJournal() {

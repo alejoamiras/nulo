@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
+import { useCompletionToasts } from "@/composables/useCompletionToasts"
 import { TESTIDS } from "@/lib/testids"
 import AppToastRegion from "./components/AppToastRegion.vue"
 import ChooseAccountModal from "./components/ChooseAccountModal.vue"
@@ -20,6 +21,9 @@ function defaultTab(): Tab {
 }
 
 const tab = ref<Tab>(defaultTab())
+
+// The one place completion toasts come from, whichever section is visible.
+useCompletionToasts()
 
 /** States with a dedicated in-panel UI never go to the strip: capability
  *  denial has the red morph everywhere; no-wallet has the install CTA on

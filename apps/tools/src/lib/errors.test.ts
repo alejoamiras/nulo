@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { normalizeError } from "./errors"
+import { normalizeError, userMessage } from "./errors"
 
 describe("normalizeError", () => {
 	it("classifies EIP-1193 code=4001 as user-rejected", () => {
@@ -33,5 +33,25 @@ describe("normalizeError", () => {
 	it("falls back to 'unknown' for unrecognized errors", () => {
 		const out = normalizeError(new Error("Some completely opaque internal error"))
 		expect(out.category).toBe("unknown")
+	})
+})
+
+describe("userMessage", () => {
+	it("unwraps a viem-style error to its cause, not the wrapper prose and version line", () => {
+		const viemLike = Object.assign(
+			new Error("An unknown RPC error occurred. Details: Connect your Ethereum wallet first. Version: viem@2.55.17"),
+			{
+				details: "Connect your Ethereum wallet first.",
+				shortMessage: "An unknown RPC error occurred.",
+			},
+		)
+		expect(userMessage(viemLike)).toBe("Connect your Ethereum wallet first.")
+	})
+
+	it("falls back to shortMessage, then the message, then the caller's default", () => {
+		expect(userMessage(Object.assign(new Error("long"), { shortMessage: "Short." }))).toBe("Short.")
+		expect(userMessage(new Error("plain"))).toBe("plain")
+		expect(userMessage(new Error(""), "Could not read this token.")).toBe("Could not read this token.")
+		expect(userMessage(undefined, "x")).toBe("x")
 	})
 })

@@ -17,12 +17,24 @@ function isUnsafeDisplayChar(point: number): boolean {
 	return (point >= 0x200b && point <= 0x200f) || (point >= 0x202a && point <= 0x202e) || (point >= 0x2066 && point <= 0x2069)
 }
 
+/** A persisted sentence (a journal record's stored refusal reason) gets the same strip, with a
+ *  cap sized for prose rather than a symbol. */
+const SENTENCE_MAX = 240
+
+function stripAndCap(text: string, max: number): string {
+	const kept = Array.from(text).filter((ch) => !isUnsafeDisplayChar(ch.codePointAt(0) ?? 0))
+	const cleaned = Array.from(kept.join("").trim())
+	return cleaned.length > max ? `${cleaned.slice(0, max).join("")}…` : cleaned.join("")
+}
+
 /** Sanitize + bound one list- or contract-supplied display string. Iterating code points rather
  *  than UTF-16 units keeps a cap from splitting an emoji surrogate pair mid-name. */
 export function safeDisplay(text: string): string {
-	const kept = Array.from(text).filter((ch) => !isUnsafeDisplayChar(ch.codePointAt(0) ?? 0))
-	const cleaned = Array.from(kept.join("").trim())
-	return cleaned.length > DISPLAY_MAX ? `${cleaned.slice(0, DISPLAY_MAX).join("")}…` : cleaned.join("")
+	return stripAndCap(text, DISPLAY_MAX)
+}
+
+export function safeSentence(text: string): string {
+	return stripAndCap(text, SENTENCE_MAX)
 }
 
 /** EIP-55 form, so the user compares against the same casing their explorer shows. An address the

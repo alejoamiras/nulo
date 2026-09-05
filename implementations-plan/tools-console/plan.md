@@ -185,7 +185,7 @@ export function useShell(): { section: Ref<Section>; goTo(s: Section): void; ope
 
 `<lint>` = `bun run lint` (repo root; includes the complexity baseline check); `<typecheck>` = `bun run --cwd apps/tools typecheck`; `<unit>` = `bun run --cwd apps/tools test`; `<smoke>` = `bun run --cwd apps/tools test:e2e`; `<frozen>` = `git diff --quiet 91074a74 -- apps/tools/src/components/send/TokenStep.vue apps/tools/src/components/send/TokenList.vue apps/tools/src/components/send/TokenTile.vue apps/tools/src/components/send/MintStrip.vue apps/tools/src/components/send/AmountStep.vue apps/tools/src/components/send/ChoiceCards.vue apps/tools/src/components/send/GasBreakdown.vue apps/tools/src/components/send/ReviewStep.vue apps/tools/src/components/send/ReviewDetails.vue` (exit 0 = untouched). Every gate is `<lint> ∧ <typecheck> ∧ <unit> ∧ <smoke> ∧ <frozen>`, all exit 0, plus the phase's own line.
 
-### Phase 1 — Policy, feed, shell state, toast owner (no visible change)
+### Phase 1 ✓ — Policy, feed, shell state, toast owner (no visible change) — green 2026-09-05, `lessons/phase-1.md`
 - `lib/record-policy.ts` extracted from the card; the card wraps it in one `computed`; its 42 tests unchanged and green.
 - `lib/activity.ts` with a decision-table test built from record-shape builders (the style of `bridge-steps.test.ts`) covering every row of recon's table, the blocked/stuck cases, RETRY relabel, SWITCH, CLAIM GAS, **completedAt + busy → done** — plus a **parity pin**: for each fixture, `classify().group` and `.action` match the card's derived `stage`/`showClaim`/`showFinish`/`fuelRecoverable`.
 - `useActivityFeed.ts` (+ test: grouping order, the foreground record absent, blocked rows counted, `age` ticks with `useNow`).
