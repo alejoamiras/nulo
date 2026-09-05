@@ -11,11 +11,8 @@ export interface UseNetworkActivationOptions {
 }
 
 /**
- * Switch the active network from a view with the guard every caller must share: a refusal while a
- * send is in flight, and the admit-before-persist ordering of `activateNetworkGuarded`. Owns the
- * feedback for the outcomes the user must hear about; a caller decides what success looks like.
- * Receives the service callbacks from its parent and holds no subscription, so there is nothing to
- * dispose.
+ * Switch the active network from a view: the in-flight-send refusal, the guarded activation, and
+ * the toasts for the outcomes the user must hear about. Success feedback is the caller's.
  */
 export function useNetworkActivation(options: UseNetworkActivationOptions) {
 	const appStore = useAppStore()

@@ -75,8 +75,9 @@ toast). The identity line reads "is requesting permissions on {dApp chain}".
   account, the same one a later switch would create. Decided, not silently assumed (see Asks).
 - I2 Derivation is never swallowed: a rejection (`unauthorized` from a lock/deletion race, a storage
   failure) propagates as the dApp-side error envelope, like every other dispatch failure. The popup's
-  hard error is reserved for the two declined cases (custom/devnet chain, chain with only hidden or
-  imported rows), where its tooltip names the remedy.
+  hard error is reserved for the cases the wallet declines: a custom/devnet chain, or a chain whose
+  rows are all hidden (a visible imported row is listed by the first read and needs no provisioning);
+  its tooltip names the remedy.
 - I3 After the in-window switch, the pending interaction is unaffected: it is keyed by `requestId` and the
   session's chain, and `approve()` resolves it with CAIP accounts of the dApp chain
   (`capabilities/index.vue:202`); the shell's network watcher only reloads the store (`app.vue:113`).

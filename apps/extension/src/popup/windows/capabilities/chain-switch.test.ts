@@ -21,6 +21,8 @@ const resolveInteractionMock = vi.fn(async () => undefined)
 const onActiveProfileChangedAddMock = vi.fn()
 
 const activateMock = vi.fn()
+/** Resolves immediately unless a test parks it to observe the window before init lands. */
+let getActiveProfileImpl: () => Promise<{ id: string }> = async () => ({ id: "p1" })
 
 const appStoreDefaults = () =>
 	reactive({
@@ -69,7 +71,7 @@ vi.mock("@/utils/core", () => ({
 vi.mock("@/wallet/services/profile/client", () => ({
 	ProfileServiceClient: vi.fn(function () {
 		return {
-			getActiveProfile: vi.fn(async () => ({ id: "p1" })),
+			getActiveProfile: vi.fn(() => getActiveProfileImpl()),
 			connect: vi.fn(),
 			disconnect: vi.fn(),
 			onActiveProfileChanged: { add: onActiveProfileChangedAddMock },
@@ -160,6 +162,7 @@ afterEach(() => {
 	payloadMock = ref(null)
 	isCancelledMock = ref(false)
 	appStoreMock = appStoreDefaults()
+	getActiveProfileImpl = async () => ({ id: "p1" })
 	vi.clearAllMocks()
 })
 
@@ -175,6 +178,16 @@ describe("capabilities window — chain mismatch banner and switch", () => {
 		expect(banner()?.find('[data-testid="cap-switch-network-btn"]').text()).toBe("Switch wallet to Local Network")
 		expect(w?.find('[data-testid="identity-block"]').attributes("data-action-label")).toBe("is requesting permissions on Local Network")
 		expect(approveBtn()?.attributes("disabled")).toBeUndefined()
+	})
+
+	test("no banner before init lands", async () => {
+		let release: (p: { id: string }) => void = () => {}
+		getActiveProfileImpl = () => new Promise((r) => (release = r))
+		await open(payloadFor("0", oneAccount))
+		expect(banner()?.exists()).toBe(false)
+		release({ id: "p1" })
+		await flushPromises()
+		expect(banner()?.attributes("data-state")).toBe("mismatch")
 	})
 
 	test("a session on the active chain renders no banner", async () => {

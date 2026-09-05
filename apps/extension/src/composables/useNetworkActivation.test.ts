@@ -113,10 +113,15 @@ describe("composables/useNetworkActivation", () => {
 		expect(openToastMock).not.toHaveBeenCalled()
 	})
 
-	test("the persist callback receives the target id, not the store's row", async () => {
-		const { activate, persist } = harness()
-		await activate(net("target-id"))
-		expect(persist).toHaveBeenCalledWith("target-id")
+	test("a failed persist with nothing authoritative to read back keeps the admitted target", async () => {
+		const { activate } = harness({
+			persist: async () => {
+				throw new Error("rpc down")
+			},
+			read: async () => null,
+		})
+		await expect(activate(net("new"))).resolves.toBe("unconfirmed")
+		expect(appStoreState.network?.id).toBe("new")
 	})
 
 	test("a successful persist never consults the read callback", async () => {

@@ -27,7 +27,6 @@ defineProps({
 	wide: {
 		type: Boolean,
 	},
-	/** `testId` lands on the action button as `data-testid` — e2e selects by testid only. */
 	action: {
 		type: Object as PropType<{ name: string; callback: () => void; testId?: string }>,
 	},

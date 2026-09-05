@@ -11,11 +11,7 @@ export interface DappChainView {
 	mismatch: boolean
 }
 
-/**
- * Where the dApp's session lives, seen from the wallet: the session's chain (a decimal string on
- * the row) resolved against the profile's networks and compared with the active one. With no
- * active network yet there is nothing to disagree with, so `mismatch` stays false.
- */
+/** The session's chain (a decimal string on the row) against the profile's networks and the active one. */
 export function resolveDappChain(sessionChainId: string, networks: readonly Network[], activeChainId: number | undefined): DappChainView {
 	const chainId = Number(sessionChainId)
 	const network = networks.find((n) => n.chainId === chainId)

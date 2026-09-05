@@ -48,29 +48,22 @@ const availableAccounts = ref<UIAccount[]>([])
 const selectedAccounts = ref<UIAccount[]>([])
 const accountAliases = ref<Record<string, string>>({})
 
-// True when the dApp asked for accounts capability but the wallet resolved
-// the session's chain to a network with zero accounts. The most common cause
-// is a chain-info mismatch — e.g. a dApp sending Fr.ZERO/Fr.ZERO that
-// resolves to the wallet's Local Network seed while the user's accounts
-// live on testnet. Approving here would silently give the dApp a session
-// with `accounts: []` and every subsequent op would fail with "No accounts
-// authorized." Block the approve gate explicitly so the user gets a clear
-// error instead of a confusing downstream failure.
+// True when the dApp asked for accounts but the wallet lists none on the session's chain: the
+// wallet already tried to provision the chain's default account and declined (a user-added
+// network, or a chain whose accounts are all hidden). Approving would grant a session with
+// `accounts: []`, and every later op would fail with "No accounts authorized" — block here.
 const noAccountsAvailable = ref(false)
 
 // The dApp's chain, as the wallet sees it. A dApp connects on ONE chain and everything it does
 // later happens there, whatever the wallet's home screen shows — so a mismatch with the active
 // network is information, never a reason to block.
-const dappChain = computed(() => resolveDappChain(payload.value?.session.chainId ?? "", appStore.networks, appStore.network?.chainId))
+const dappChain = computed(() =>
+	payload.value ? resolveDappChain(payload.value.session.chainId, appStore.networks, appStore.network?.chainId) : undefined,
+)
 const isSwitching = ref(false)
 // The chain the user switched to from THIS window. The done banner shows only while it is still
 // the active one; a later switch elsewhere brings the invitation back.
 const switchedTo = ref<number>()
-const chainBannerState = computed(() => {
-	if (noAccountsAvailable.value) return undefined
-	if (switchedTo.value !== undefined && switchedTo.value === appStore.network?.chainId) return "switched"
-	return dappChain.value.mismatch ? "mismatch" : undefined
-})
 
 const isLoading = ref(false)
 const expandedCards = ref(new Set<number>())
@@ -82,6 +75,14 @@ const expandedCards = ref(new Set<number>())
 // audit-final-merge HIGH #1. Race-safety parallel to execute/index.vue's
 // `initComplete` predicate.
 const initComplete = ref(false)
+
+// The invitation never sits beside a disabled Approve: not before init lands (no chain known
+// yet), not on any hard error.
+const chainBannerState = computed(() => {
+	if (!initComplete.value || !dappChain.value || processingError.value?.type === "error") return undefined
+	if (switchedTo.value !== undefined && switchedTo.value === appStore.network?.chainId) return "switched"
+	return dappChain.value.mismatch ? "mismatch" : undefined
+})
 
 const interactionService = new DappInteractionServiceClient()
 
@@ -153,15 +154,12 @@ const init = async () => {
 					selectedAccounts.value = [...availableAccounts.value]
 				}
 			} else {
-				// The wallet already tried to provision this chain's default account and declined
-				// (a user-added network, or a chain whose only accounts are hidden or imported).
-				// Approving would grant a session with no accounts, and every later op would fail
-				// with a confusing "No accounts authorized" — block here with the remedy instead.
+				const chain = dappChain.value?.name ?? "this chain"
 				noAccountsAvailable.value = true
 				setError(
 					"No accounts on this chain",
-					`This app asked for accounts on ${dappChain.value.name}. Switch the wallet to ${dappChain.value.name} ` +
-						"in Settings to set one up, or unhide one of its accounts, then try again from the app.",
+					`This app asked for accounts on ${chain}. Switch the wallet to ${chain} in Settings to set one up, ` +
+						"or unhide one of its accounts, then try again from the app.",
 					"error",
 				)
 			}
@@ -283,7 +281,7 @@ const { activate: activateNetwork } = useNetworkActivation({
 })
 
 const switchToDappNetwork = async () => {
-	const target = dappChain.value.network
+	const target = dappChain.value?.network
 	if (!target || isSwitching.value || isLoading.value) return
 	isSwitching.value = true
 	try {
@@ -314,12 +312,12 @@ onUnmounted(disposeWindow)
 				:dapp="dapp"
 				:hostname="dappHostname"
 				:hostnameSuspicious="hostnameHasNonAscii"
-				:actionLabel="`is requesting permissions on ${dappChain.name}`"
+				:actionLabel="dappChain ? `is requesting permissions on ${dappChain.name}` : 'is requesting permissions'"
 			/>
 
 			<Flex direction="column" gap="20" :class="$style.sections">
 				<Banner
-					v-if="chainBannerState"
+					v-if="chainBannerState && dappChain"
 					data-testid="cap-chain-banner"
 					:data-state="chainBannerState"
 					:variant="chainBannerState === 'switched' ? 'done' : 'info'"
