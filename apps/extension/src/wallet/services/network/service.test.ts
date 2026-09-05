@@ -17,7 +17,7 @@
 
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import { CHAIN_IDS } from "@/utils/chain-ids"
+import { CHAIN_IDS, LOCAL_L1_CHAIN_ID } from "@/utils/chain-ids"
 import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { LoggerStore } from "@/wallet/logger"
 import { ConfigStore } from "@/wallet/config"
@@ -26,7 +26,7 @@ import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import type { ProfileService } from "@/wallet/services/profile/service"
 import { NetworkService } from "./service"
-import { NodeStatus } from "./spec"
+import { ERR_UNATTENDED_PROBE, NodeStatus } from "./spec"
 import type { Network, NetworkEndpoint } from "./spec"
 
 type NodeInfo = {
@@ -1395,5 +1395,44 @@ describe("NetworkService lock configuration", () => {
 		// into the purge pipeline; queueing behind it is the correct semantic.
 		const lock = (service as unknown as { lock: { maxHoldMs: number | null } }).lock
 		expect(lock.maxHoldMs).toBeNull()
+	})
+})
+
+describe("NetworkService — resolveVerifiedL1ChainId unattended", () => {
+	function makeService(getNodeInfo: ReturnType<typeof vi.fn>) {
+		const factory = new FakeNodeFactory()
+		factory.setOverrides("https://rpc-a.example/", { getNodeInfo: getNodeInfo as unknown as AztecNode["getNodeInfo"] })
+		const browserApi = new FakeBrowserApi()
+		browserApi.reset()
+		const service = new NetworkService(new LoggerStore(new ConfigStore()), browserApi, factory)
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in (no full lifecycle needed)
+		;(service as any).initialized = true
+		return { service, browserApi }
+	}
+	const row = (kind: string, l1ChainId: number) => ({
+		id: "n1",
+		profileId: "p1",
+		chainId: 123,
+		l1ChainId,
+		name: "A",
+		primaryEndpointId: "e1",
+		endpoints: [{ id: "e1", rpcUrl: "https://rpc-a.example/" }],
+		kind,
+	})
+
+	test("a custom row is refused with ERR_UNATTENDED_PROBE and the node is never contacted", async () => {
+		const getNodeInfo = vi.fn().mockResolvedValue({ l1ChainId: 5, rollupVersion: 1 })
+		const { service, browserApi } = makeService(getNodeInfo)
+		await browserApi.storage.local.set({ "nulo:core:networks@n1": JSON.stringify(row("custom", 5)) })
+		await expect(service.resolveVerifiedL1ChainId("p1", 123, { unattended: true })).rejects.toThrow(ERR_UNATTENDED_PROBE)
+		expect(getNodeInfo).not.toHaveBeenCalled()
+	})
+
+	test("a seeded row resolves offline under unattended exactly as attended", async () => {
+		const getNodeInfo = vi.fn()
+		const { service, browserApi } = makeService(getNodeInfo)
+		await browserApi.storage.local.set({ "nulo:core:networks@n1": JSON.stringify(row("local", LOCAL_L1_CHAIN_ID)) })
+		await expect(service.resolveVerifiedL1ChainId("p1", 123, { unattended: true })).resolves.toBe(LOCAL_L1_CHAIN_ID)
+		expect(getNodeInfo).not.toHaveBeenCalled()
 	})
 })

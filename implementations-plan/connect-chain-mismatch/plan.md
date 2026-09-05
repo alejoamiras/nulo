@@ -208,7 +208,7 @@ moves, the shell reloads accounts, the banner settles to "switched" → Approve 
 
 ## Phases
 
-### Phase 1 — the dispatcher provisions the dApp chain's default account
+### Phase 1 — the dispatcher provisions the dApp chain's default account ✓
 - `services-contract.ts`: `IAccountProvisioner.provisionDefaultAccount`; dispatcher constructor param
   `IAccountReader & IAccountProvisioner`.
 - `dispatcher.ts` `loadAvailableAccountsForPopup`: visible rows → if empty, provision then re-read; no

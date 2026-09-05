@@ -28,11 +28,13 @@ import { type ImportedKeysDek, sealImportedSigningKeyV2, unsealImportedSigningKe
 import { AccountAddressInconsistencyError } from "@nulo/extension-messaging/errors"
 import { ImportedKeysRepository } from "./imported-keys-repository"
 import type { AccountIntegrityBlocked } from "../account-integrity/types"
+import { ERR_UNATTENDED_PROBE } from "@/wallet/services/network/spec"
 import {
 	ACCOUNT_SERVICE_NAME,
 	ACCOUNT_STORAGE_ROOT,
 	AccountSchema,
 	AccountType,
+	DEFAULT_ACCOUNT_NAME,
 	ImportedAccountKeySchema,
 	ImportedAccountUnusableError,
 	type ImportedAccountKey,
@@ -208,7 +210,34 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		})
 	}
 
-	private async createAccountInternal(profileId: string, chainId: number, type: AccountType, name: string): Promise<Account> {
+	/**
+	 * Create the chain's default account on a caller's behalf that is NOT the user — a dApp asking
+	 * for accounts on a chain the wallet has never activated. Two limits make that safe unattended:
+	 * a chain that already holds any row (hidden or imported included — the network switch's own
+	 * rule) is left alone, and a chain whose L1 identity would need a live endpoint probe is
+	 * declined rather than probed. Both are no-ops; the caller re-reads the accounts afterwards.
+	 * Every other failure (an `unauthorized` lock/deletion race, storage) propagates.
+	 */
+	public async provisionDefaultAccount(profileId: string, chainId: number): Promise<void> {
+		await this.ensureInitialized()
+		await this.serializePerTuple(profileId, chainId, AccountType.Nulo_v1, async () => {
+			const rows = (await this.liveRows()).filter((x) => x.profileId === profileId && x.chainId === chainId)
+			if (rows.length > 0) return
+			try {
+				await this.createAccountInternal(profileId, chainId, AccountType.Nulo_v1, DEFAULT_ACCOUNT_NAME, { unattended: true })
+			} catch (err) {
+				if (!(err instanceof Error && err.message.startsWith(ERR_UNATTENDED_PROBE))) throw err
+			}
+		})
+	}
+
+	private async createAccountInternal(
+		profileId: string,
+		chainId: number,
+		type: AccountType,
+		name: string,
+		opts?: { unattended?: boolean },
+	): Promise<Account> {
 		if (type !== AccountType.Nulo_v1) {
 			throw new Error("unsupported account type")
 		}
@@ -235,7 +264,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		const index = sameType.length > 0 ? array_max(sameType.map((x) => +x.index)) + 1 : 0
 		// The derivation chain input is the verified EXACT L1 id, never the composite: seeded rows
 		// are checked against in-code constants, custom rows against a live probe (fail-closed).
-		const l1ChainId = await this.networkService.resolveVerifiedL1ChainId(profileId, chainId)
+		const l1ChainId = await this.networkService.resolveVerifiedL1ChainId(profileId, chainId, opts)
 		const secret = await deriveAccountSeed(master, l1ChainId, type, index)
 		const address = (await NuloAccount.new(secret, this.logger)).address.toString()
 		const account: Account = {

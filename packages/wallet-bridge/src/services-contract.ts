@@ -41,6 +41,14 @@ export interface IAccountReader {
 	getAccounts(profileId: string, chainId: number): Promise<IAccountRef[]>
 }
 
+export interface IAccountProvisioner {
+	/** Create the chain's default account when the wallet may do so UNATTENDED — a chain with no
+	 *  rows of any kind whose L1 identity needs no endpoint probe; a no-op otherwise. Rejects on an
+	 *  authorization or storage failure. Returns nothing on purpose: the caller re-reads the accounts,
+	 *  which also settles a row created or hidden concurrently. */
+	provisionDefaultAccount(profileId: string, chainId: number): Promise<void>
+}
+
 /**
  * Optional execution hooks bag. `onExecutionEnqueued` is invoked by the wallet
  * once the approved request has taken its place in the per-(profileId, chainId)
@@ -140,7 +148,7 @@ export interface IDappSessionWriter {
  *  services as separate positional arguments, not this aggregate. */
 export interface IDispatcherServices {
 	networkService: INetworkReader
-	accountService: IAccountReader
+	accountService: IAccountReader & IAccountProvisioner
 	executionService: IExecutionRunner
 	dappInteractionService: IDappInteractionRunner
 	dappSessionService: IDappSessionWriter

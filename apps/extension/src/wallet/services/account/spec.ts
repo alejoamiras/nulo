@@ -3,6 +3,9 @@ import type { Restored } from "@/wallet/base"
 
 export const ACCOUNT_SERVICE_NAME = "account"
 
+/** Display name every auto-created default account starts with. */
+export const DEFAULT_ACCOUNT_NAME = "Account"
+
 /** EntityStorage root for account rows. Frozen:
  *  renaming detaches every existing row; the backup-migration registry pins it. */
 export const ACCOUNT_STORAGE_ROOT = "nulo:core:accounts"

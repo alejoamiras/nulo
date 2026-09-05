@@ -28,6 +28,7 @@ import {
 	ERR_ENDPOINT_CHAIN_MISMATCH,
 	ERR_LAST_ENDPOINT,
 	ERR_PRIMARY_ENDPOINT,
+	ERR_UNATTENDED_PROBE,
 	type Events,
 	type Methods,
 	type Network,
@@ -362,14 +363,20 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	 *
 	 * ONE row read: the probe target and the returned l1ChainId must come from the same
 	 * snapshot — two independent reads could validate one row and return another's value.
+	 *
+	 * `unattended` refuses (`ERR_UNATTENDED_PROBE`) instead of probing, so a caller acting on
+	 * a dApp's request — not the user's — can never make the wallet contact an endpoint. The
+	 * refusal is decided on the SAME row read the derivation uses: a preflight on a separate read
+	 * could be invalidated by a delete-and-re-add landing in between.
 	 */
-	public async resolveVerifiedL1ChainId(profileId: string, chainId: number): Promise<number> {
+	public async resolveVerifiedL1ChainId(profileId: string, chainId: number, opts?: { unattended?: boolean }): Promise<number> {
 		await this.ensureInitialized()
 		const network = (await this.storage.getValues()).find((n) => n.profileId === profileId && n.chainId === chainId)
 		if (!network) throw new Error(`No network for chain ${chainId} in this profile`)
 		const stored = NetworkService.assertCanonicalStoredL1(network)
 		const kind = network.kind ?? "custom"
 		if (SEED_L1_BY_KIND[kind] === undefined) {
+			if (opts?.unattended) throw new Error(`${ERR_UNATTENDED_PROBE}: network ${chainId} needs a live L1 identity check`)
 			const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId) ?? network.endpoints[0]
 			if (!primary) throw new Error("Network has no endpoint to verify its L1 identity against")
 			const probed = await this._probeChainIdentity(primary.rpcUrl, kind)
