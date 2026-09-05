@@ -87,11 +87,17 @@ function tokenAddressFromInstance(): AztecAddress {
 	return AztecAddress.fromStringUnsafe(parsed.address)
 }
 
+/** The canonical PrivateFPC (salt 1, deployer zero — the one the wallet auto-discovers). This
+ *  section targets it everywhere; a `phaseFpc` input naming another address is refused. */
 async function fpcInstance() {
 	const { PrivateFPCContract } = await import("@alejoamiras/private-fee-juice/artifacts/private")
 	// biome-ignore lint/suspicious/noExplicitAny: aztec-stdlib instance mismatch between the FPC package's pinned version and Nulo's
 	const artifact = (PrivateFPCContract as any).artifact
 	const instance = await getContractInstanceFromInstantiationParams(artifact, { salt: new Fr(1n), deployer: AztecAddress.ZERO })
+	const entered = getInput("phaseFpc")
+	if (entered && !AztecAddress.fromStringUnsafe(entered).equals(instance.address)) {
+		throw new Error(`phaseFpc ${entered} is not the canonical PrivateFPC ${instance.address.toString()}`)
+	}
 	return { artifact, instance, PrivateFPCContract }
 }
 
@@ -100,7 +106,7 @@ async function fpcInstance() {
 async function feePaymentMethod() {
 	const route = getInput("phaseFee") || "self-pay"
 	if (route === "self-pay" || route === "external") return null
-	const fpc = AztecAddress.fromStringUnsafe(required("phaseFpc", "phaseFpc"))
+	const fpc = (await fpcInstance()).instance.address
 	const { FPCFeePaymentMethod, PrivateMintAndPayFeePaymentMethod } = await import("@alejoamiras/private-fee-juice/fee-payment-methods")
 	if (route === "fpc-credit") return new FPCFeePaymentMethod(fpc)
 	if (route === "fpc-fuel") {

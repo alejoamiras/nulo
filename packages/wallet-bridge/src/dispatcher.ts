@@ -1309,10 +1309,9 @@ export class WalletSdkDispatcher {
 		}
 
 		if (ACCOUNT_KINDS.has(kind)) {
-			// A simulate or profile must run as the account the dApp named, exactly as
-			// sendTx does: the bridge simulates every claim before sending it, and a
-			// self-paid payload simulated as another session account is classified as
-			// externally paid, leaves the setup phase open, and is rejected by the node.
+			// A simulate or profile runs as the account the dApp named, exactly as sendTx
+			// does: resolving another session account misclassifies a self-paid payload as
+			// externally paid, which leaves the setup phase open.
 			const requestedFrom = FROM_ADDRESSED_KINDS.has(kind) ? requestedFromOf((args[1] as Record<string, unknown>) ?? {}) : undefined
 			const [network, account] = await this.resolveNetworkAndAccount(ctx, dappSession, requestedFrom)
 			return this.buildAccountOperation(kind, args, network.id, account.address)

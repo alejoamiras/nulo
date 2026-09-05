@@ -911,6 +911,7 @@ describe("dispatcher.handleSendTx — opts.from resolution (multi-account sessio
 	const accounts = [
 		{ address: "0xaaa", name: "A", chainId: 0 },
 		{ address: "0xbbb", name: "B", chainId: 0 },
+		{ address: "0xstranger", name: "C", chainId: 0 },
 	]
 	// Empty exec.calls → scope enforcement is vacuously satisfied (mirrors the hook tests).
 	const exec = { calls: [] }
@@ -948,7 +949,7 @@ describe("dispatcher.handleSendTx — opts.from resolution (multi-account sessio
 		expect(captured.account).toBe("aztec:0:0xaaa")
 	})
 
-	test("rejects a `from` outside the session — no silent fallback to the first account", async () => {
+	test("rejects a wallet account outside the session — no silent fallback to the first account", async () => {
 		const { dispatcher, captured } = makeSendTxDispatcher()
 		await expect(dispatcher.dispatch("sendTx", [exec, { from: "0xstranger" }], ctx)).rejects.toThrow(
 			/not authorized for this dApp session/,
@@ -980,9 +981,12 @@ describe("dispatcher — simulateTx / profileTx act as the account named in `opt
 		{ capability: { type: "transaction", scope: "*" }, grantedAt: 1 },
 		{ capability: { type: "simulation", transactions: { scope: "*" }, utilities: { scope: "*" } }, grantedAt: 1 },
 	]
+	// C is a wallet account OUTSIDE the session: the refusal must come from session
+	// membership, not from the address being unknown to the wallet.
 	const accounts = [
 		{ address: "0xaaa", name: "A", chainId: 0 },
 		{ address: "0xbbb", name: "B", chainId: 0 },
+		{ address: "0xccc", name: "C", chainId: 0 },
 	]
 	const exec = { calls: [] }
 
@@ -1020,7 +1024,7 @@ describe("dispatcher — simulateTx / profileTx act as the account named in `opt
 			expect(accountAndFrom(ops[0])).toEqual({ accountAddress: "0xaaa", from: "0xaaa" })
 		})
 
-		test(`${method}: a \`from\` outside the session is refused — never downgraded to the first account`, async () => {
+		test(`${method}: a wallet account outside the session is refused — never downgraded to the first account`, async () => {
 			const { dispatcher, ops } = makeAccountOpDispatcher()
 			await expect(dispatcher.dispatch(method, [exec, { from: "0xccc" }], ctx)).rejects.toThrow(
 				/not authorized for this dApp session/,

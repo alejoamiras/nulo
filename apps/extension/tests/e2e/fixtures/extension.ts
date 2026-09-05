@@ -494,11 +494,8 @@ function firstTwoAccountsFixture(label: string, bundle: "transaction" | "transac
 			})
 		})
 
-		// Pre-grant the `transaction` bundle to the first 1-or-2 accounts the
-		// cap popup exposes. Tests that characterize "wallet picks first session
-		// account regardless of opts.from" rely on 2+ accounts granted — but
-		// tolerate 1 if that's what the wallet exposed (characterization holds
-		// either way).
+		// Pre-grant the bundle to the first two accounts the cap popup exposes;
+		// fewer than two is a setup failure, diagnosed below.
 		const accountAddresses = await phase("grantFirstTwoAccountsTransactionCap", () =>
 			grantCapBundle(ctx, playgroundPage, bundle, async (accountIds, capPopup) => {
 				const granted = accountIds.slice(0, Math.min(2, accountIds.length)).filter((a): a is string => !!a)

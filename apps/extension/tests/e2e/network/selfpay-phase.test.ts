@@ -1,5 +1,9 @@
 import { expect, inject } from "vitest"
 import { TxHash } from "@aztec/stdlib/tx"
+import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { encodeArguments, FunctionSelector, getFunctionArtifactByName } from "@aztec/stdlib/abi"
+import { computeVarArgsHash } from "@aztec/stdlib/hash"
+import { TokenContract } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { ProtocolContractAddress } from "@aztec/aztec.js/protocol"
 import { clickByTestId, openPopup, test, waitForHash } from "../fixtures/extension"
@@ -15,7 +19,14 @@ import {
 	waitForTxMined,
 	type AztecTestConfig,
 } from "../fixtures/aztec"
-import { bridgePrivateFuel, claimPrivateFuel, deployMinterToken, type MinterToken, type PrivateFuel } from "../fixtures/selfpay-phase"
+import {
+	bridgePrivateFuel,
+	claimPrivateFuel,
+	deployMinterToken,
+	type MinterToken,
+	type PrivateFuel,
+	readPublicTokenBalance,
+} from "../fixtures/selfpay-phase"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
@@ -64,6 +75,19 @@ async function setFields(page: Ctx["playgroundPage"], fields: Record<string, str
 }
 
 type MintInputs = { token: MinterToken; from: string; route: FeeRoute; feePayer?: string; fpc?: string; fuel?: PrivateFuel }
+
+/** The mint call's identity the kernel output must carry: `mint_to_private(from, 1)`'s
+ *  selector and args hash, and the selector of the public finalisation it enqueues. */
+async function expectedMintCall(from: string): Promise<{ selector: string; argsHash: string; finalisation: bigint }> {
+	const mint = getFunctionArtifactByName(TokenContract.artifact, "mint_to_private")
+	const finalisation = getFunctionArtifactByName(TokenContract.artifact, "increase_total_supply_internal")
+	const [selector, finalisationSelector, argsHash] = await Promise.all([
+		FunctionSelector.fromNameAndParameters(mint.name, mint.parameters),
+		FunctionSelector.fromNameAndParameters(finalisation.name, finalisation.parameters),
+		computeVarArgsHash(encodeArguments(mint, [AztecAddress.fromStringUnsafe(from), 1n])),
+	])
+	return { selector: selector.toString(), argsHash: argsHash.toString(), finalisation: finalisationSelector.toField().toBigInt() }
+}
 
 function mintFields(i: MintInputs): Record<string, string> {
 	return {
@@ -118,9 +142,11 @@ async function simulateCell(
 	name: string,
 	i: MintInputs,
 	expected: { deployed: boolean; feePayer: string; setup: string[] },
+	probe: () => Promise<string>,
 ): Promise<SimulationSummary> {
 	cell(name)
 	const startedAt = Date.now()
+	const stateBefore = await probe()
 	await setFields(ctx.playgroundPage, mintFields(i))
 	const r = await callExpectingNoPopup(
 		ctx,
@@ -149,6 +175,17 @@ async function simulateCell(
 		s.appCalls.map((c) => lower(c.contract)),
 		`${name}: app-phase public calls`,
 	).toEqual([lower(i.token.address)])
+	// THIS cell's call, not any mint: the frame's selector and args hash, and its enqueue.
+	const want = await expectedMintCall(i.from)
+	const mintFrame = frames(s.entrypoint).find((f) => lower(f.contract) === lower(i.token.address))
+	expect(mintFrame?.selector, `${name}: mint selector`).toBe(want.selector)
+	expect(mintFrame?.argsHash, `${name}: mint args hash`).toBe(want.argsHash)
+	expect(
+		mintFrame?.publicCalls.map((c) => BigInt(c.selector ?? "0")),
+		`${name}: the mint's public finalisation`,
+	).toEqual([want.finalisation])
+	expect(BigInt(s.appCalls[0]?.selector ?? "0"), `${name}: app-phase call is the finalisation`).toBe(want.finalisation)
+	expect(await probe(), `${name}: a simulation moves no state`).toBe(stateBefore)
 	return s
 }
 
@@ -161,6 +198,7 @@ async function sendThroughPopup(ctx: Ctx, method: string, btn: string, approve: 
 	const seq = await snapshotResultSeq(page)
 	const resultP = waitForPgResult(page, method, seq, 300_000)
 	const popupP = waitForPopup(ctx, "execute", { timeout: 90_000 })
+	resultP.catch(() => {})
 	popupP.catch(() => {})
 	await clickByTestId(page, btn)
 	const first = await Promise.race([popupP.then((popup) => ({ popup })), resultP.then((early) => ({ early }))])
@@ -188,8 +226,9 @@ async function sendCell(ctx: Ctx, name: string, i: MintInputs, approve: Paramete
 	await waitForTxMined(aztecConfig as AztecTestConfig, txHash, 240_000)
 	const receipt = await createAztecNodeClient((aztecConfig as AztecTestConfig).nodeUrl).getTxReceipt(TxHash.fromString(txHash))
 	expect(String(receipt.status), `${name}: receipt`).toMatch(/success|finalized|proven/)
+	expect(receipt.transactionFee ?? 0n, `${name}: a fee was charged`).toBeGreaterThan(0n)
 	await expect.poll(() => privateBalance(ctx, i), { timeout: 90_000, interval: 5_000 }).toBe(before + 1n)
-	return receipt.transactionFee ?? 0n
+	return receipt.transactionFee as bigint
 }
 
 /** The service worker's recent log lines matching `match` (Developer Mode must be on). The
@@ -279,6 +318,8 @@ test.skipIf(!hasConfig)(
 			// them, and any wallet-side failure of a cell is reported with its real error.
 			await enableDeveloperLogs(ctx)
 			const fj = (who: string) => readPublicFeeJuice(wallet, scriptAccount, who)
+			const stateOf = (i: MintInputs) => async () =>
+				JSON.stringify({ fj: String(await fj(i.from)), bal: String(await privateBalance(ctx, i)) })
 
 			// ── never-sent: simulate both accounts under self-pay and fuel ──
 			const selfA: MintInputs = { token: tokenA, from: A, route: "self-pay", feePayer: A }
@@ -287,18 +328,42 @@ test.skipIf(!hasConfig)(
 			const fuelBIn: MintInputs = { token: tokenB, from: B, route: "fpc-fuel", fpc, fuel: fuelB }
 			// FeeJuice.claim enqueues the allow-listed `_increase_public_balance` in setup.
 			const FEE_JUICE = ProtocolContractAddress.FeeJuice.toString()
-			await simulateCell(ctx, "never-sent / first / simulate / self-pay", selfA, { deployed: false, feePayer: A, setup: [] })
-			await simulateCell(ctx, "never-sent / first / simulate / fpc-fuel", fuelAIn, {
-				deployed: false,
-				feePayer: fpc,
-				setup: [FEE_JUICE],
-			})
-			await simulateCell(ctx, "never-sent / second / simulate / self-pay", selfB, { deployed: false, feePayer: B, setup: [] })
-			await simulateCell(ctx, "never-sent / second / simulate / fpc-fuel", fuelBIn, {
-				deployed: false,
-				feePayer: fpc,
-				setup: [FEE_JUICE],
-			})
+			await simulateCell(
+				ctx,
+				"never-sent / first / simulate / self-pay",
+				selfA,
+				{ deployed: false, feePayer: A, setup: [] },
+				stateOf(selfA),
+			)
+			await simulateCell(
+				ctx,
+				"never-sent / first / simulate / fpc-fuel",
+				fuelAIn,
+				{
+					deployed: false,
+					feePayer: fpc,
+					setup: [FEE_JUICE],
+				},
+				stateOf(fuelAIn),
+			)
+			await simulateCell(
+				ctx,
+				"never-sent / second / simulate / self-pay",
+				selfB,
+				{ deployed: false, feePayer: B, setup: [] },
+				stateOf(selfB),
+			)
+			await simulateCell(
+				ctx,
+				"never-sent / second / simulate / fpc-fuel",
+				fuelBIn,
+				{
+					deployed: false,
+					feePayer: fpc,
+					setup: [FEE_JUICE],
+				},
+				stateOf(fuelBIn),
+			)
 
 			// ── never-sent: the first send of each account — self-pay on A, fuel on B ──
 			const fjA0 = await fj(A)
@@ -329,8 +394,20 @@ test.skipIf(!hasConfig)(
 				["first", selfA, creditA],
 				["second", selfB, creditBIn],
 			] as const) {
-				await simulateCell(ctx, `deployed / ${who} / simulate / self-pay`, self, { deployed: true, feePayer: self.from, setup: [] })
-				await simulateCell(ctx, `deployed / ${who} / simulate / fpc-credit`, credit, { deployed: true, feePayer: fpc, setup: [] })
+				await simulateCell(
+					ctx,
+					`deployed / ${who} / simulate / self-pay`,
+					self,
+					{ deployed: true, feePayer: self.from, setup: [] },
+					stateOf(self),
+				)
+				await simulateCell(
+					ctx,
+					`deployed / ${who} / simulate / fpc-credit`,
+					credit,
+					{ deployed: true, feePayer: fpc, setup: [] },
+					stateOf(credit),
+				)
 				const fj0 = await fj(self.from)
 				const fee = await sendCell(ctx, `deployed / ${who} / send / self-pay`, self)
 				expect(await fj(self.from), `${who}: paid from its own public Fee Juice`).toBe(fj0 - fee)
@@ -366,11 +443,22 @@ test.skipIf(!hasConfig)(
 			{
 				cell("deployed / second / transfer / send / self-pay")
 				const fjB0 = await fj(B)
+				const tokens = async () => ({
+					sender: await readPublicTokenBalance(config, config.tokenAddress, B),
+					recipient: await readPublicTokenBalance(config, config.tokenAddress, config.minterAddress),
+				})
+				const tokens0 = await tokens()
 				const r = await sendThroughPopup(ctx, "sendTx", "pg-btn-sendTx-feePayer")
 				await assertPgOk(page, r, "transfer send as B, self-paid")
 				await waitForTxMined(config, hashOf(r), 240_000)
 				const receipt = await node.getTxReceipt(TxHash.fromString(hashOf(r)))
-				expect(await fj(B), "B paid the transfer from its own public Fee Juice").toBe(fjB0 - (receipt.transactionFee ?? 0n))
+				const fee = receipt.transactionFee ?? 0n
+				expect(fee, "the transfer was charged a fee").toBeGreaterThan(0n)
+				expect(await fj(B), "B paid the transfer from its own public Fee Juice").toBe(fjB0 - fee)
+				expect(await tokens(), "the transfer moved one token from B to the minter").toEqual({
+					sender: tokens0.sender - 1n,
+					recipient: tokens0.recipient + 1n,
+				})
 			}
 
 			// ── negative control: a public enqueue left in setup is rejected by the node ──
@@ -380,6 +468,7 @@ test.skipIf(!hasConfig)(
 			// the service worker's log trail (retained with Developer Mode on).
 			cell("negative control / second / transfer / simulate / external payer")
 			await setFields(page, { "pg-input-feePayer": A, "pg-input-from": B, "pg-toggle-skipValidation": "on" })
+			const negStartedAt = Date.now()
 			const neg = await callExpectingNoPopup(
 				ctx,
 				page,
@@ -394,7 +483,10 @@ test.skipIf(!hasConfig)(
 				.poll(
 					async () => {
 						const trail = await readSwLogTrail(walletPopup, { match: "Setup function not on allow list", limit: 3 })
-						rejection = Array.isArray(trail) ? trail : []
+						// Only a rejection newer than this call counts, never a retained earlier one.
+						rejection = (Array.isArray(trail) ? trail : []).filter(
+							(e) => Number((e as { timestamp?: number }).timestamp) >= negStartedAt,
+						)
 						return rejection.length
 					},
 					{ timeout: 30_000, interval: 1_000 },

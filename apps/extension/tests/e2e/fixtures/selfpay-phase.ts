@@ -98,8 +98,8 @@ export type PrivateFuel = {
 }
 
 /** Bridge Fee Juice to the PrivateFPC, bound to `claimer`, until the message is readable on L2.
- *  The claim itself is left to the caller: `fundPrivateFpcCredit` claims + hands the mint to
- *  the extension; the fuel path lets the extension's first transaction claim, mint and pay. */
+ *  The claim is the caller's: `claimPrivateFuel` here (then the extension mints the credit), or
+ *  the extension's own first transaction (claim + mint_and_pay_fee). */
 export async function bridgePrivateFuel(
 	config: AztecTestConfig,
 	node: AztecNode,

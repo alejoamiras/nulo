@@ -1,8 +1,7 @@
 /**
- * A test-readable projection of a `TxSimulationResult`: which account ran the
- * entrypoint, who pays, and which public calls the kernel filed under setup
- * (non-revertible), app logic (revertible) and teardown. The raw result is
- * kernel output whose `toJSON` is a byte buffer, so the feed cannot expose it.
+ * A compact projection of a `TxSimulationResult` for the result feed: which account
+ * ran the entrypoint, who pays, and which public calls were filed under setup
+ * (non-revertible), app logic (revertible) and teardown.
  */
 import type { Fr } from "@aztec/aztec.js/fields"
 import type { PrivateCallExecutionResult, TxSimulationResult } from "@aztec/stdlib/tx"
