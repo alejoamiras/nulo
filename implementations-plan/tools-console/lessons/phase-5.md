@@ -35,4 +35,10 @@ Feedback, and what was done with it:
 5. **A dashed border on Activity after RUN IN BACKGROUND.** Reproduced with a seeded backgrounded record: the list renders the card, not the empty state. What showed was the card's own error note for the failed run, styled as a dashed yellow box, which reads like an empty state. The note is now a yellow left rule on a tinted background.
 6. **Multicall for the bridge's balances?** Already the case: `readErc20Balances` in bridge-core is one viem `multicall` (`allowFailure`) over the rows on screen, read as rows come into view and remembered.
 
-**Sign-off:** _pending — round 2 of the walk._
+## Owner's walk — round 2 (2026-09-05)
+
+The bridge failed again, on a different record: `Setup function not on allow list` from the node's validator inside `simulateTx`, after `TokenBridgeHub:claim_private → Token:mint_to_private → HandshakeRegistry:non_interactive_handshake` ran straight after `entrypoint`. The claim paid from the account's own public Fee Juice (`own-gas source: public`, `publicAllowed: true`), the route #544 added: the wallet advertises `dapp-self-pay`, the app sends the claim with the account as payer and no fee call, and the wallet built it with the dApp's calls in the setup phase. `requestedPayment: "fj"` is set by the planner and read by nothing but the fingerprint. The network e2e runs against a sandbox whose setup allow-list is permissive, so CI could not see it. This PR touches no wallet or engine file.
+
+**Owner's decision:** fix #544 first, with an e2e that exercises the real allow-list semantics so a wallet-side fee-path change cannot ship green again. The shell sign-off waits for that arc; PR #546 stays open.
+
+**Sign-off:** _pending — after the self-pay fix arc._
