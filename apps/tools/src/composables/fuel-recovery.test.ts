@@ -1,4 +1,5 @@
-import type { BridgeJournalRecord, DepositJournalRecord } from "@nulo/bridge-core"
+import { AztecAddress } from "@aztec/aztec.js/addresses"
+import type { BridgeJournalRecord, DepositFuelBlock, DepositJournalRecord } from "@nulo/bridge-core"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ref } from "vue"
 
@@ -30,6 +31,7 @@ import {
 	__resetFuelOverridesForTests,
 	claimFuelStandalone,
 	fuelOverrideActive,
+	launchStandaloneFuelClaim,
 	overrideFuelClaim,
 	reconcileFuelConsumed,
 } from "./fuel-recovery"
@@ -145,16 +147,21 @@ describe("claimFuelStandalone", () => {
 		expect(fuel).toMatchObject({ received: "9", leafIndex: "4" })
 	})
 
-	it("a second call while one is in flight joins it — one send, whichever surface pressed", async () => {
+	it("a second start while one is in flight joins it — one send, whichever path started it", async () => {
 		let release = (): void => {}
 		standaloneClaim.mockImplementationOnce(() => new Promise<void>((r) => (release = r)))
-		const first = claimFuelStandalone("0xrec")
-		const second = claimFuelStandalone("0xrec")
-		expect(second).toBe(first)
+		const auto = launchStandaloneFuelClaim("0xrec", {}, AztecAddress.fromStringUnsafe(RECIPIENT), fueled().fuel as DepositFuelBlock)
+		const manual = claimFuelStandalone("0xrec")
 		release()
-		await first
+		await Promise.all([auto, manual])
 		expect(standaloneClaim).toHaveBeenCalledTimes(1)
 		await claimFuelStandalone("0xrec")
 		expect(standaloneClaim).toHaveBeenCalledTimes(2)
+	})
+
+	it("names the owning account without the control characters a restore file can carry", async () => {
+		selectedAccount.value = "0xsomeoneelse"
+		records.value = [fueled({ recipient: `\u202e${RECIPIENT}` })]
+		await expect(claimFuelStandalone("0xrec")).rejects.toThrow(/belongs to 0x1018…9c0d/)
 	})
 })

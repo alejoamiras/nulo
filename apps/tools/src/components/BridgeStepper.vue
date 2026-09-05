@@ -9,8 +9,9 @@ import { type RecordRuntime, useBridgeJournal } from "@/composables/useBridgeJou
 /** Utils */
 import { assetDecimals, assetSymbol, recordTokenBlock } from "@/lib/asset-label"
 import { isTerminalAttention, stepperPhases } from "@/lib/bridge-steps"
-import { formatBigInt } from "@/lib/format"
+import { formatStoredAmount } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
+import { safeDisplay } from "@/lib/token-display"
 
 /** Components */
 import BridgePhaseRail from "./BridgePhaseRail.vue"
@@ -64,9 +65,10 @@ const headline = computed(() => {
 	// toast and the card apply; the stepper header is the third shared surface.
 	const kind = assetKindOf(props.record)
 	const token = recordTokenBlock(props.record)
-	const amount = formatBigInt(BigInt(props.record.amount), assetDecimals(kind, token))
+	const amount = formatStoredAmount(props.record.amount, assetDecimals(kind, token))
 	const dir = props.record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM"
-	return `${dir} · ${amount} ${assetSymbol(kind, props.record.isPrivate, token)} · ${props.record.isPrivate ? "PRIVATE" : "PUBLIC"}`
+	const symbol = safeDisplay(assetSymbol(kind, props.record.isPrivate, token))
+	return `${dir} · ${amount} ${symbol} · ${props.record.isPrivate ? "PRIVATE" : "PUBLIC"}`
 })
 </script>
 

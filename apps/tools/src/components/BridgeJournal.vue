@@ -11,7 +11,7 @@ import { useToast } from "@/composables/useToast"
 import { type BridgeJournalRecord, assetKindOf } from "@nulo/bridge-core"
 import { computed, ref } from "vue"
 import { assetDecimals, assetSymbol } from "@/lib/asset-label"
-import { formatBigInt } from "@/lib/format"
+import { formatStoredAmount } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
 
 // `source` picks the record set: `visible` omits the record the wizard is foregrounding (its stepper
@@ -50,7 +50,7 @@ async function onRestorePick(event: Event) {
 	try {
 		const rec = await backup.restoreFile(await file.text())
 		const kind = assetKindOf(rec)
-		const amount = formatBigInt(BigInt(rec.amount), assetDecimals(kind))
+		const amount = formatStoredAmount(rec.amount, assetDecimals(kind))
 		push({
 			kind: "ok",
 			text: `Restored: ${amount} ${assetSymbol(kind, rec.isPrivate)} ${rec.direction === "deposit" ? "to Aztec" : "to Ethereum"}.`,

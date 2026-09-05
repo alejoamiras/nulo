@@ -36,6 +36,7 @@ import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
 import { isWellFormedTxHash } from "@/lib/claim-receipt"
 import { isReceiptRecordMismatch } from "@/lib/fuel-claim-state"
 import { dropPhaseClock } from "@/lib/phase-clock"
+import { safeAddressText } from "@/lib/token-display"
 import { withOperation } from "./useOpsInFlight"
 
 // Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
@@ -889,7 +890,7 @@ function recipientMismatch(rec: ClaimRecord, id: string): boolean {
 	if (!aztec || !recipientOk || aztec.toLowerCase() !== rec.recipient.toLowerCase()) {
 		setRuntime(id, {
 			attention: "mismatch",
-			note: `This deposit claims to ${rec.recipient}. Switch to that Aztec account to claim.`,
+			note: `This deposit claims to ${safeAddressText(rec.recipient)}. Switch to that Aztec account to claim.`,
 		})
 		return true
 	}

@@ -142,4 +142,16 @@ describe("BridgeStepper", () => {
 		} as never
 		expect(mount(BridgeStepper, { props: { record: send } }).text()).toContain("1.50 WBTC")
 	})
+
+	it("the headline renders a hostile stored symbol and an impossible amount as text it can vouch for", () => {
+		const rec = {
+			...dep({ amount: "1".repeat(120) }),
+			schema: 3,
+			intent: "token",
+			token: { displaySymbol: "US\u202eDC", decimals: 6 },
+		} as unknown as DepositJournalRecord
+		const text = mount(BridgeStepper, { props: { record: rec } }).text()
+		expect(text).toContain("— USDC")
+		expect(text).not.toContain("\u202e")
+	})
 })

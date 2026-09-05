@@ -6,6 +6,7 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { type DepositFuelBlock, type DepositJournalRecord, assetKindOf } from "@nulo/bridge-core"
 import { decideStandaloneFuelRecovery } from "@/lib/fuel-claim-state"
+import { safeAddressText } from "@/lib/token-display"
 import { humanizeWalletError } from "@/lib/wallet-errors"
 import { fuelReceiptStatus, patchFuel, sendStandaloneFjClaim } from "./deposit-flow"
 import { currentRecord, flagRecordError, updateRecord, useBridgeJournal } from "./useBridgeJournal"
@@ -58,7 +59,7 @@ export async function launchStandaloneFuelClaim(
 	fuel: DepositFuelBlock,
 ): Promise<void> {
 	try {
-		await withOperation(() => sendStandaloneFjClaim(aztec, recipient, fuel, id))
+		await joinStandalone(id, () => withOperation(() => sendStandaloneFjClaim(aztec, recipient, fuel, id)))
 	} catch (e) {
 		flagRecordError(
 			id,
@@ -67,18 +68,21 @@ export async function launchStandaloneFuelClaim(
 	}
 }
 
-/** A standalone claim has no record lock, so a second press from any surface (the card, the dock,
- *  a remounted dock) joins the run already in flight instead of sending twice. */
+/** A standalone claim has no record lock, so a second start from any path — the claim lane's
+ *  automatic one, the card, the dock, a remounted dock — joins the run already in flight. */
 const standaloneInFlight = new Map<string, Promise<void>>()
+function joinStandalone(id: string, start: () => Promise<void>): Promise<void> {
+	const running = standaloneInFlight.get(id)
+	if (running) return running
+	const run = start().finally(() => standaloneInFlight.delete(id))
+	standaloneInFlight.set(id, run)
+	return run
+}
 
 /** The card's "CLAIM YOUR GAS" recovery: claims a stranded fuel message after the token side
  *  already completed. Throws so the caller can surface the failure (never silent). */
 export function claimFuelStandalone(id: string): Promise<void> {
-	const running = standaloneInFlight.get(id)
-	if (running) return running
-	const run = claimFuelStandaloneOnce(id).finally(() => standaloneInFlight.delete(id))
-	standaloneInFlight.set(id, run)
-	return run
+	return joinStandalone(id, () => claimFuelStandaloneOnce(id))
 }
 
 async function claimFuelStandaloneOnce(id: string): Promise<void> {
@@ -106,9 +110,8 @@ async function claimFuelStandaloneOnce(id: string): Promise<void> {
 	// account, and run the wallet send inside a tracked operation span.
 	const active = bridgeWallet.selectedAccount.value
 	if (!active || active.toLowerCase() !== rec.recipient.toLowerCase()) {
-		throw new Error(
-			`This gas claim belongs to ${rec.recipient.slice(0, 6)}…${rec.recipient.slice(-4)}. Switch to that account to claim.`,
-		)
+		const shown = safeAddressText(rec.recipient)
+		throw new Error(`This gas claim belongs to ${shown.slice(0, 6)}…${shown.slice(-4)}. Switch to that account to claim.`)
 	}
 	await withOperation(() => sendStandaloneFjClaim(aztec, AztecAddress.fromStringUnsafe(rec.recipient), fuel, id))
 }

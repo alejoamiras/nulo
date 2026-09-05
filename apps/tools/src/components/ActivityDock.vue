@@ -70,11 +70,11 @@ async function toggle(): Promise<void> {
 const FOCUSABLE = 'button:not([disabled]), a[href], [tabindex="0"]'
 
 /** While the overlay is up, Tab cycles inside it and Escape anywhere closes it — unless a wallet
- *  dialog (picker, account chooser, verification) is up, whose own keyboard handling comes first. */
+ *  dialog (picker, account chooser, verification) is up, whose keyboard comes first whether or not
+ *  it took focus. */
 function onKeydown(e: KeyboardEvent): void {
 	if (!overlay.value || !panel.value) return
-	const active = document.activeElement
-	if (active && !panel.value.contains(active) && active.closest("[aria-modal='true']")) return
+	for (const modal of document.querySelectorAll("[aria-modal='true']")) if (modal !== panel.value) return
 	if (e.key === "Escape") return void hide()
 	if (e.key !== "Tab") return
 	const items = panel.value.querySelectorAll<HTMLElement>(FOCUSABLE)

@@ -17,7 +17,6 @@ const props = defineProps<{ activityCount: number }>()
 
 const shell = useShell()
 const rail = useTemplateRef<HTMLElement>("rail")
-/** Under 760px the rail renders as a top row; the tablist says so. */
 const topRow = useMediaQuery("(max-width: 760px)")
 
 const ENTRIES: ReadonlyArray<{ key: Section; label: string; testid: string }> = [

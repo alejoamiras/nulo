@@ -244,4 +244,21 @@ describe("ActivityDock", () => {
 		expect(wide.get(sel(TESTIDS.dock)).attributes("role")).toBeUndefined()
 		expect(wide.find(sel(TESTIDS.dockStrip)).exists()).toBe(false)
 	})
+
+	it("under 1100px a wallet dialog that never took focus still owns the keyboard", async () => {
+		viewport(true)
+		useDockState().show()
+		rows.value = [rowModel({ id: "a", group: "running", action: null })]
+		const w = dock()
+		const modal = document.createElement("div")
+		modal.setAttribute("aria-modal", "true")
+		document.body.appendChild(modal)
+		window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
+		await nextTick()
+		expect(w.find(sel(TESTIDS.dock)).exists()).toBe(true)
+		modal.remove()
+		window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
+		await nextTick()
+		expect(w.find(sel(TESTIDS.dock)).exists()).toBe(false)
+	})
 })
