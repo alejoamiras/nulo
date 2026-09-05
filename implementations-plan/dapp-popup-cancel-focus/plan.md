@@ -8,6 +8,7 @@ eli5_mode: artifact
 budget: recon 1 agent (sonnet); codex plan audit at high until explicit approve; codex post-impl loop ≤3 rounds per arc + 1 cross-arc pass
 validation: typecheck + lint + vitest unit/component/composition on every phase; no e2e (owner answer 2026-09-05)
 recon: recon.md
+approval: owner approved 2026-09-05 (unconditional, after codex r3 conditional approve); seeds final
 ```
 
 ## Summary
@@ -489,7 +490,8 @@ mark the index entry and suggest `agent-worktree done dapp-popup-cancel-focus`.
 
 ## Seeds
 
-_(DRAFT until the approval gate; finalized after)_
+Final (2026-09-05): approved unconditionally at the gate; scope unchanged from the audited plan. Run the
+seed from a session INSIDE this worktree (`agent-worktree resume dapp-popup-cancel-focus`).
 
 ELI5 companion: Artifact `https://claude.ai/code/artifact/9f7c034e-1d73-4172-b378-5e3c61c6413d`
 (source `implementations-plan/dapp-popup-cancel-focus/eli5.html` — redeploy the same file to update).

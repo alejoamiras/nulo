@@ -298,7 +298,8 @@
   </section>
 
   <div class="approval">
-    <h2>Approval decision needed from you</h2>
+    <h2>Approved 2026-09-05</h2>
+    <p>Approved unconditionally at the gate. The list below is what was approved.</p>
     <ul>
       <li>Confirm the scope: PR 1 = cancel closes the window and rejects the dApp with the structured cancel, plus the Reject button's structured "user rejected" code; PR 2 = center on the active window plus click-to-focus from the Queued card.</li>
       <li>Confirm the tier: light, with one Codex review of the plan and the Codex fix loop after each PR's code is done.</li>
@@ -307,12 +308,10 @@
       <li>Confirm the Queued-card rule: clickable only while the transaction is Queued, accepting the occasional no-op click described above.</li>
       <li>No hardening pass is proposed: nothing here touches trust boundaries, secrets, or CI.</li>
     </ul>
-    <p>Reply with one of:</p>
-    <div class="verdicts"><code>approve</code><code>conditional approve (with conditions: ...)</code><code>reject (with blocking findings: ...)</code></div>
   </div>
 
   <section class="seeds">
-    <span class="draft">Draft · finalized after approval</span>
+    <span class="draft">Final · approved 2026-09-05</span>
     <h2>Implementation seeds</h2>
     <p class="muted">Paste exactly one of these into a Claude Code session sitting in the plan's worktree (<code>agent-worktree resume dapp-popup-cancel-focus</code>). <code>/goal</code> keeps working until the condition holds and survives a resume; <code>/loop</code> fires on an interval. They do not compose.</p>
     <p class="warning">Use exactly one per session. Setting one replaces the other.</p>
