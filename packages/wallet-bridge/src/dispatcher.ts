@@ -104,6 +104,7 @@ import { LogLevel } from "@nulo/wallet-core/logger"
 import { describeExternalId } from "./external-id"
 import { WALLET_FEATURES } from "./wallet-features"
 import type {
+	IAccountProvisioner,
 	IAccountReader,
 	IDappInteractionRunner,
 	IDappSessionWriter,
@@ -525,7 +526,7 @@ function assertAuthRelevantArgShape(methodName: string, args: unknown[]): void {
 export class WalletSdkDispatcher {
 	constructor(
 		private readonly networkService: INetworkReader,
-		private readonly accountService: IAccountReader,
+		private readonly accountService: IAccountReader & IAccountProvisioner,
 		private readonly executionService: IExecutionRunner,
 		private readonly dappInteractionService: IDappInteractionRunner,
 		private readonly dappSessionService: IDappSessionWriter,
@@ -1120,9 +1121,16 @@ export class WalletSdkDispatcher {
 		}
 	}
 
+	/** The dApp's chain may be one the user has never activated, so its default account may not
+	 *  exist yet; provisioning it here is what lets the picker list it instead of blocking. The
+	 *  re-read (not the provisioner's result) is what the popup sees — the network switch's pattern. */
 	private async loadAvailableAccountsForPopup(ctx: SessionContext): Promise<Array<{ address: string; name: string; chainId: number }>> {
 		const network = await this.resolveNetwork(ctx)
-		const accounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
+		let accounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
+		if (accounts.length === 0) {
+			await this.accountService.provisionDefaultAccount(ctx.profileId, network.chainId)
+			accounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
+		}
 		return accounts.map((acc) => ({
 			address: acc.address,
 			name: acc.name,

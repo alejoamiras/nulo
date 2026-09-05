@@ -11,7 +11,7 @@
  */
 
 import { managers, initTransactionService } from "@/utils/core"
-import { AccountServiceClient, AccountType } from "@/wallet/services/account/client"
+import { AccountServiceClient, AccountType, DEFAULT_ACCOUNT_NAME } from "@/wallet/services/account/client"
 import { NetworkServiceClient } from "@/wallet/services/network/client"
 import type { ProfileInfo } from "@/wallet/services/profile/client"
 import { useAppStore } from "@/stores/app.store"
@@ -102,7 +102,7 @@ export function useProfileBootstrap() {
 		managers.account?.disconnect()
 		const account = new AccountServiceClient()
 		managers.account = account
-		await account.ensureDefaultAccount(profileId, chainId, AccountType.Nulo_v1, "Account")
+		await account.ensureDefaultAccount(profileId, chainId, AccountType.Nulo_v1, DEFAULT_ACCOUNT_NAME)
 		if (!isCurrent()) return
 		const accounts = await account.getAccounts(profileId, chainId, true)
 		if (!isCurrent()) return

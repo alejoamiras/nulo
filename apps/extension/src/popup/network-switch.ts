@@ -15,7 +15,7 @@
  * await.
  */
 import { createRunFence } from "@/composables/runFence"
-import { AccountType } from "@/wallet/services/account/client"
+import { AccountType, DEFAULT_ACCOUNT_NAME } from "@/wallet/services/account/client"
 
 export interface NetworkSwitchScope {
 	profileId: string
@@ -68,7 +68,7 @@ export function createNetworkSwitchHandler(deps: NetworkSwitchDeps): () => Promi
 		if (!guard()) return
 		deps.setAccounts(accounts)
 		if (accounts.length === 0) {
-			await client.ensureDefaultAccount(scope.profileId, scope.chainId, AccountType.Nulo_v1, "Account")
+			await client.ensureDefaultAccount(scope.profileId, scope.chainId, AccountType.Nulo_v1, DEFAULT_ACCOUNT_NAME)
 			if (!guard()) return
 			accounts = await client.getAccounts(scope.profileId, scope.chainId, true)
 			if (!guard()) return

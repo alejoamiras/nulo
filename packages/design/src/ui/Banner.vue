@@ -28,7 +28,7 @@ defineProps({
 		type: Boolean,
 	},
 	action: {
-		type: Object as PropType<{ name: string; callback: () => void }>,
+		type: Object as PropType<{ name: string; callback: () => void; testId?: string }>,
 	},
 	isLoading: {
 		type: Boolean,
@@ -57,6 +57,7 @@ defineProps({
 
 				<button
 					v-if="action && direction === 'vertical'"
+					:data-testid="action.testId"
 					@click="action.callback()"
 					type="button"
 					:class="$style.action_btn"
@@ -69,6 +70,7 @@ defineProps({
 
 		<button
 			v-if="action && direction === 'horizontal'"
+			:data-testid="action.testId"
 			@click="action.callback()"
 			type="button"
 			:class="$style.action_btn"

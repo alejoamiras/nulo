@@ -13,7 +13,7 @@ import { ServiceCollection } from "@/wallet/base"
 import { LoggerStore } from "@/wallet/logger"
 import { ConfigStore } from "@/wallet/config"
 import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/spec"
-import { NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
+import { ERR_UNATTENDED_LIVE_CHECK, NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
 import { svc } from "../composition-harness"
 import { AccountService } from "./service"
 import { accountRowId } from "./spec"
@@ -483,5 +483,90 @@ describe("AccountService — same-row field editors serialize", () => {
 		const row = JSON.parse((raw as Record<string, string>)[`nulo:core:accounts@${rowId}`])
 		expect(row.name).toBe("B")
 		expect(row.visible).toBe(false)
+	})
+})
+
+describe("AccountService.provisionDefaultAccount — unattended rule", () => {
+	async function makeHarness(resolve: (opts?: { unattended?: boolean }) => Promise<number>) {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const deletion = new ProfileDeletionState()
+		const services = new ServiceCollection()
+		services.add(
+			svc(PROFILE_SERVICE_NAME, {
+				onProfileDeleted: new EventHandler(),
+				getDeletionState: () => deletion,
+				getProfileSecret: () => Promise.resolve(new Fr(42n)),
+			}),
+		)
+		services.add(
+			svc(NETWORK_SERVICE_NAME, {
+				registerChainPurgeSubscriber: () => {},
+				resolveVerifiedL1ChainId: (_profileId: string, _chainId: number, opts?: { unattended?: boolean }) => resolve(opts),
+			}),
+		)
+		const service = new AccountService(new LoggerStore(new ConfigStore()), api)
+		services.add(service)
+		await services.start()
+		return { api, service }
+	}
+
+	const seedRow = (api: FakeBrowserApi, address: string, over: Record<string, unknown>) =>
+		api.storage.local.set({ [`nulo:core:accounts@${accountRowId("p1", 1, address)}`]: JSON.stringify(mkAccount(address, over)) })
+
+	const offline = async () => 1
+
+	test("an empty probe-free chain gets one visible index-0 default account", async () => {
+		const h = await makeHarness(offline)
+		await h.service.provisionDefaultAccount("p1", 1)
+		const rows = await h.service.getAccounts("p1", 1, true)
+		expect(rows).toHaveLength(1)
+		expect(rows[0]).toMatchObject({ index: 0, visible: true, type: 0, name: "Account" })
+	})
+
+	test("the resolver is asked for an unattended verification", async () => {
+		const seen: Array<{ unattended?: boolean } | undefined> = []
+		const h = await makeHarness(async (opts) => {
+			seen.push(opts)
+			return 1
+		})
+		await h.service.provisionDefaultAccount("p1", 1)
+		expect(seen).toEqual([{ unattended: true }])
+	})
+
+	test("a chain whose identity would need a probe is declined: no row, no throw", async () => {
+		const h = await makeHarness(async () => {
+			throw new Error(`${ERR_UNATTENDED_LIVE_CHECK}: needs a live check`)
+		})
+		await h.service.provisionDefaultAccount("p1", 1)
+		expect(await h.service.getAccounts("p1", 1, true)).toEqual([])
+	})
+
+	test("a chain holding only a hidden account is left alone", async () => {
+		const h = await makeHarness(offline)
+		await seedRow(h.api, "0xhidden", { visible: false })
+		await h.service.provisionDefaultAccount("p1", 1)
+		expect((await h.service.getAccounts("p1", 1, true)).map((a) => a.address)).toEqual(["0xhidden"])
+	})
+
+	test("a chain holding only an imported account is left alone", async () => {
+		const h = await makeHarness(offline)
+		await seedRow(h.api, "0ximported", { type: 1 })
+		await h.service.provisionDefaultAccount("p1", 1)
+		expect((await h.service.getAccounts("p1", 1, true)).map((a) => a.address)).toEqual(["0ximported"])
+	})
+
+	test("a second call is a no-op", async () => {
+		const h = await makeHarness(offline)
+		await h.service.provisionDefaultAccount("p1", 1)
+		await h.service.provisionDefaultAccount("p1", 1)
+		expect(await h.service.getAccounts("p1", 1, true)).toHaveLength(1)
+	})
+
+	test("any other resolver failure propagates", async () => {
+		const h = await makeHarness(async () => {
+			throw new Error("Seeded network L1 identity mismatch")
+		})
+		await expect(h.service.provisionDefaultAccount("p1", 1)).rejects.toThrow("identity mismatch")
 	})
 })

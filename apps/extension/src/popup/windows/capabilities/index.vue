@@ -14,7 +14,9 @@ import AccountSelectRow from "./AccountSelectRow.vue"
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { JobCancelledError } from "@nulo/extension-messaging/errors"
 import { formatCaipAccount } from "@/wallet/utils/caip"
+import { requireNetwork } from "@/utils/core"
 import { buildCapabilityItems, buildGrantedAccountsCap, type UICapabilityItem } from "./build-items"
+import { resolveDappChain } from "./chain-mismatch"
 
 /** Services */
 import { type ProfileInfo, ProfileServiceClient } from "@/wallet/services/profile/client"
@@ -26,6 +28,7 @@ import type { Capability } from "@nulo/wallet-bridge"
 import { useDappInteractionPayload } from "@/composables/useDappInteractionPayload"
 import { useDappHostname } from "@/composables/useDappHostname"
 import { useDappApprovalWindow } from "@/composables/useDappApprovalWindow"
+import { useNetworkActivation } from "@/composables/useNetworkActivation"
 
 type UIDappMetadata = DappMetadata & { loadingLogo?: boolean; logoBlobUrl?: string }
 type UIAccount = { address: string; name: string; chainId: number }
@@ -45,15 +48,22 @@ const availableAccounts = ref<UIAccount[]>([])
 const selectedAccounts = ref<UIAccount[]>([])
 const accountAliases = ref<Record<string, string>>({})
 
-// True when the dApp asked for accounts capability but the wallet resolved
-// the session's chain to a network with zero accounts. The most common cause
-// is a chain-info mismatch — e.g. a dApp sending Fr.ZERO/Fr.ZERO that
-// resolves to the wallet's Local Network seed while the user's accounts
-// live on testnet. Approving here would silently give the dApp a session
-// with `accounts: []` and every subsequent op would fail with "No accounts
-// authorized." Block the approve gate explicitly so the user gets a clear
-// error instead of a confusing downstream failure.
+// True when the dApp asked for accounts but the wallet lists none on the session's chain: the
+// wallet already tried to provision the chain's default account and declined (a user-added
+// network, or a chain whose accounts are all hidden). Approving would grant a session with
+// `accounts: []`, and every later op would fail with "No accounts authorized" — block here.
 const noAccountsAvailable = ref(false)
+
+// The dApp's chain, as the wallet sees it. A dApp connects on ONE chain and everything it does
+// later happens there, whatever the wallet's home screen shows — so a mismatch with the active
+// network is information, never a reason to block.
+const dappChain = computed(() =>
+	payload.value ? resolveDappChain(payload.value.session.chainId, appStore.networks, appStore.network?.chainId) : undefined,
+)
+const isSwitching = ref(false)
+// The chain the user switched to from THIS window. The done banner shows only while it is still
+// the active one; a later switch elsewhere brings the invitation back.
+const switchedTo = ref<number>()
 
 const isLoading = ref(false)
 const expandedCards = ref(new Set<number>())
@@ -65,6 +75,14 @@ const expandedCards = ref(new Set<number>())
 // audit-final-merge HIGH #1. Race-safety parallel to execute/index.vue's
 // `initComplete` predicate.
 const initComplete = ref(false)
+
+// "Approve as is" is only offered where approving is possible: not before init lands (no chain
+// known yet), not on a hard error. The footer's own holds (a running switch, a submit) are momentary.
+const chainBannerState = computed(() => {
+	if (!initComplete.value || !dappChain.value || processingError.value?.type === "error") return undefined
+	if (switchedTo.value !== undefined && switchedTo.value === appStore.network?.chainId) return "switched"
+	return dappChain.value.mismatch ? "mismatch" : undefined
+})
 
 const interactionService = new DappInteractionServiceClient()
 
@@ -136,18 +154,12 @@ const init = async () => {
 					selectedAccounts.value = [...availableAccounts.value]
 				}
 			} else {
-				// Accounts requested but none exist on this chain. Mark the
-				// popup as blocked — approving here would silently grant the
-				// dApp a session with no accounts and every later op would
-				// fail with a confusing "No accounts authorized" error. The
-				// surface-level cause is usually a chain-info mismatch
-				// (dApp sending Fr.ZERO that resolves to the wallet's Local
-				// Network seed). Surface an actionable error directly.
+				const chain = dappChain.value?.name ?? "this chain"
 				noAccountsAvailable.value = true
 				setError(
 					"No accounts on this chain",
-					"This dApp is asking for accounts on a chain where you have none. " +
-						"Either switch the wallet's active network or ask the dApp to pin the right chain.",
+					`This app asked for accounts on ${chain}. Switch the wallet to ${chain} in Settings to set one up, ` +
+						"or unhide one of its accounts, then try again from the app.",
 					"error",
 				)
 			}
@@ -212,7 +224,7 @@ const approve = async () => {
 	// Full-lifetime submit latch: `loading` alone only sets pointer-events CSS,
 	// so a keyboard-focused Approve can still emit a click mid-grant — the
 	// handler must self-guard like execute/discover already do.
-	if (isLoading.value) return
+	if (isLoading.value || isSwitching.value) return
 	// Defense in depth: template's `:disabled="!initComplete"` should already
 	// block this, but if Enter / programmatic click slips through during init,
 	// throw loudly instead of silently no-opping (which was the 19-iteration
@@ -254,10 +266,29 @@ const approve = async () => {
 	}
 }
 
+// `reject` stays unconditional: the approval-window shell also fires it on `beforeunload` and on a
+// lock or profile change, and a lock landing mid-switch must still reject the pending request.
+// Only the footer's buttons are held while a switch runs.
 const reject = async () => {
 	if (isInteractionCancelled.value) return
 	rejectViaInteractionService("User rejected")
 	closeWindow(true)
+}
+
+const { activate: activateNetwork } = useNetworkActivation({
+	persist: (id) => requireNetwork().setActiveNetwork(id),
+	read: () => requireNetwork().getActiveNetwork(),
+})
+
+const switchToDappNetwork = async () => {
+	const target = dappChain.value?.network
+	if (!target || isSwitching.value || isLoading.value) return
+	isSwitching.value = true
+	try {
+		if ((await activateNetwork(target)) === "activated") switchedTo.value = target.chainId
+	} finally {
+		isSwitching.value = false
+	}
 }
 
 const profileService = new ProfileServiceClient()
@@ -281,10 +312,31 @@ onUnmounted(disposeWindow)
 				:dapp="dapp"
 				:hostname="dappHostname"
 				:hostnameSuspicious="hostnameHasNonAscii"
-				actionLabel="is requesting permissions"
+				:actionLabel="dappChain ? `is requesting permissions on ${dappChain.name}` : 'is requesting permissions'"
 			/>
 
 			<Flex direction="column" gap="20" :class="$style.sections">
+				<Banner
+					v-if="chainBannerState && dappChain"
+					data-testid="cap-chain-banner"
+					:data-state="chainBannerState"
+					:variant="chainBannerState === 'switched' ? 'done' : 'info'"
+					direction="vertical"
+					wide
+					:action="
+						chainBannerState === 'mismatch' && dappChain.network
+							? { name: `Switch wallet to ${dappChain.name}`, callback: switchToDappNetwork, testId: 'cap-switch-network-btn' }
+							: undefined
+					"
+				>
+					<template v-if="chainBannerState === 'switched'" #title>Wallet switched to {{ dappChain.name }}</template>
+					<template v-else #title>Connecting on {{ dappChain.name }}</template>
+					<template v-if="chainBannerState === 'switched'" #description>Balances and activity now follow {{ dappChain.name }}.</template>
+					<template v-else #description>
+						Your wallet is on {{ appStore.network?.name }}. Approve as is, or switch to see {{ dappChain.name }} balances.
+					</template>
+				</Banner>
+
 				<Flex v-if="needsAccountSelection" direction="column" gap="10" wide>
 					<SectionLabel label="Select accounts to share" :count="availableAccounts.length" />
 
@@ -354,11 +406,11 @@ onUnmounted(disposeWindow)
 			wide-tooltip
 			reject-testid="cap-reject-btn"
 			reject-label="Reject"
-			:reject-disabled="isLoading || !requestId"
+			:reject-disabled="isLoading || isSwitching || !requestId"
 			confirm-testid="cap-approve-btn"
 			confirm-label="Approve"
 			:confirm-loading="isLoading"
-			:confirm-disabled="isLoading || processingError?.type === 'error' || !initComplete"
+			:confirm-disabled="isLoading || isSwitching || processingError?.type === 'error' || !initComplete"
 			@reject="reject"
 			@approve="approve"
 		/>

@@ -29,7 +29,7 @@ withDefaults(
 			<span :class="$style.identity_account">{{ accountLabel }}</span>
 			<template v-if="networkLabel !== undefined">
 				<span :class="$style.identity_sep">·</span>
-				<span :class="[$style.identity_network, warn && $style.identity_warn]">{{ networkLabel }}</span>
+				<span data-testid="identity-network" :class="[$style.identity_network, warn && $style.identity_warn]">{{ networkLabel }}</span>
 			</template>
 		</Flex>
 		<span :class="$style.identity_brand">NULO</span>

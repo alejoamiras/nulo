@@ -18,7 +18,7 @@ vi.mock("vue-router", () => ({
 	useRoute: () => ({ query: { requestId: "req-1" } }),
 }))
 vi.mock("@/stores/app.store", () => ({
-	useAppStore: () => ({ isLogined: true, network: { id: "net-1", chainId: 1 }, account: { address: "0xacct" } }),
+	useAppStore: () => ({ isLogined: true, network: { id: "net-1", chainId: 1 }, networks: [], account: { address: "0xacct" } }),
 }))
 vi.mock("@/wallet/services/profile/client", () => ({
 	ProfileServiceClient: vi.fn(function () {
@@ -91,7 +91,7 @@ beforeEach(() => {
 	resolveInteractionMock.mockResolvedValue(undefined)
 	payloadRef.value = {
 		params: { delta: [{ type: "simulation" }], existingGrants: [], reRequested: [] },
-		session: { dappMetadata: { name: "Test dApp", url: "https://dapp.example" } },
+		session: { chainId: "1", dappMetadata: { name: "Test dApp", url: "https://dapp.example" } },
 	}
 })
 

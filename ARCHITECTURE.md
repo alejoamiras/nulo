@@ -165,6 +165,8 @@ dApps interact via `@aztec/wallet-sdk` over a postMessage-bridged encrypted chan
 
 A `DappSession` is per-`(origin, chainId, profileId)`. When the dApp's profile or chain changes, the session is revoked and re-approval is required. Auto-approve runs when an active session matches the discovery request.
 
+The session's chain is the dApp's, not the wallet's active network: every op runs against it whatever the home screen shows. When a dApp asks for `accounts` on a chain the profile has never activated, the dispatcher provisions that chain's default account first (`IAccountProvisioner.provisionDefaultAccount` — only for a chain with no rows of any kind whose seeded L1 identity needs no endpoint probe; user-added networks are declined), and the capabilities popup names the dApp's chain and offers, never requires, switching the wallet to it.
+
 Capability *bundles* — the playground's helper concept for grouping capabilities into a single approval gesture — are a test-harness construct and live in `apps/playground/`. The wallet does not model bundles internally; they are sugar over `requestCapabilities`.
 
 ## 9. Concurrency model

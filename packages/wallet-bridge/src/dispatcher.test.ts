@@ -7,6 +7,7 @@ import type { Operation } from "./operation"
 import type { OperationResult } from "./operation-result"
 import type {
 	CapabilityDecision,
+	IAccountProvisioner,
 	IAccountReader,
 	IDappInteractionRunner,
 	IDappSessionWriter,
@@ -39,6 +40,10 @@ import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
 import { LogLevel, type ILogger } from "@nulo/wallet-core/logger"
 import { DAPP_SELF_PAY_FEATURE, WALLET_FEATURES } from "./wallet-features"
 
+type AccountFake = IAccountReader & IAccountProvisioner
+/** The wallet declining to provision (its no-op branch) — fixtures that list no accounts stay empty. */
+const declineProvision: IAccountProvisioner["provisionDefaultAccount"] = async () => {}
+
 // __VERSION__ is a vite define-injected global at build time; provide it for tests.
 beforeAll(() => {
 	;(globalThis as { __VERSION__?: string }).__VERSION__ = "test"
@@ -49,9 +54,7 @@ const noopLogger: ILogger = { log: () => {} }
 const stubNetwork: INetworkReader = {
 	getNetworksRaw: async () => [],
 }
-const stubAccount: IAccountReader = {
-	getAccounts: async () => [],
-}
+const stubAccount: AccountFake = { provisionDefaultAccount: declineProvision, getAccounts: async () => [] }
 const stubExecution: IExecutionRunner = {
 	executeOperations: async () => [],
 }
@@ -408,9 +411,7 @@ function makeGetAccountsDispatcher(opts: {
 	}
 	const network: INetworkRef = { id: "net-0", chainId: 0 }
 	const networkReader: INetworkReader = { getNetworksRaw: async () => [network] }
-	const accountReader: IAccountReader = {
-		getAccounts: async () => opts.accounts ?? [],
-	}
+	const accountReader: AccountFake = { provisionDefaultAccount: declineProvision, getAccounts: async () => opts.accounts ?? [] }
 	const interaction: IDappInteractionRunner = {
 		execute: async () => ({}) as never,
 		requestCapabilities: async () => ({ granted: [] }) as CapabilityResult,
@@ -677,7 +678,8 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
 		const a3 = `0x${"33".repeat(32)}`
 		const caip1 = `aztec:0:${a1}`
 		const caip2 = `aztec:0:${a2}`
-		const accountReader: IAccountReader = {
+		const accountReader: AccountFake = {
+			provisionDefaultAccount: declineProvision,
 			getAccounts: async () => [
 				{ address: a1, name: "Name1", chainId: 0 },
 				{ address: a2, name: "Name2", chainId: 0 },
@@ -723,7 +725,7 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
 		// Behavior-preservation pin (codex post-impl biggest-risk): resolveNetwork
 		// runs BEFORE the canGet gate, so a future gate-hoist can't silently turn a
 		// throw into accounts:[]. networkReader returns no networks → resolve throws.
-		const accountReader: IAccountReader = { getAccounts: async () => [] }
+		const accountReader: AccountFake = { provisionDefaultAccount: declineProvision, getAccounts: async () => [] }
 		const networkReader: INetworkReader = { getNetworksRaw: async () => [] }
 		const session = makeSession({
 			capabilityGrants: [
@@ -743,7 +745,10 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
 	test('projection alias falls back to "" when an account has neither alias nor name — Q11', async () => {
 		const a = `0x${"44".repeat(32)}`
 		const caip = `aztec:0:${a}`
-		const accountReader: IAccountReader = { getAccounts: async () => [{ address: a, name: "", chainId: 0 }] }
+		const accountReader: AccountFake = {
+			provisionDefaultAccount: declineProvision,
+			getAccounts: async () => [{ address: a, name: "", chainId: 0 }],
+		}
 		const networkReader: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] }
 		const session = makeSession({
 			accounts: [caip],
@@ -845,7 +850,8 @@ describe("dispatcher sendTx hook forwarding", () => {
 		const network: INetworkReader = {
 			getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
 		}
-		const account: IAccountReader = {
+		const account: AccountFake = {
+			provisionDefaultAccount: declineProvision,
 			getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }],
 		}
 		const dispatcher = new WalletSdkDispatcher(network, account, stubExecution, interaction, writer, noopLogger)
@@ -878,7 +884,10 @@ describe("dispatcher sendTx hook forwarding", () => {
 			requestCapabilities: async () => ({}) as never,
 		}
 		const network: INetworkReader = { getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[] }
-		const account: IAccountReader = { getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }] }
+		const account: AccountFake = {
+			provisionDefaultAccount: declineProvision,
+			getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }],
+		}
 		const dispatcher = new WalletSdkDispatcher(network, account, stubExecution, interaction, writer, noopLogger)
 
 		// No 4th-arg hooks — the per-origin cap must still receive originKey so a
@@ -920,7 +929,7 @@ describe("dispatcher.handleSendTx — opts.from resolution (multi-account sessio
 			requestCapabilities: async () => ({}) as never,
 		}
 		const network: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] as INetworkRef[] }
-		const account: IAccountReader = { getAccounts: async () => accounts }
+		const account: AccountFake = { provisionDefaultAccount: declineProvision, getAccounts: async () => accounts }
 		return {
 			dispatcher: new WalletSdkDispatcher(network, account, stubExecution, interaction, writer, noopLogger),
 			captured,
@@ -1025,7 +1034,8 @@ describe("dispatcher — registerToken reachability + routing", () => {
 		const network: INetworkReader = {
 			getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
 		}
-		const account: IAccountReader = {
+		const account: AccountFake = {
+			provisionDefaultAccount: declineProvision,
 			getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }],
 		}
 		const dispatcher = new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger)
@@ -1071,7 +1081,8 @@ describe("dispatcher — registerToken reachability + routing", () => {
 		const network: INetworkReader = {
 			getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
 		}
-		const account: IAccountReader = {
+		const account: AccountFake = {
+			provisionDefaultAccount: declineProvision,
 			getAccounts: async () => [
 				{ address: "0xacc", name: "main", chainId: 0 },
 				{ address: "0xunauthorized", name: "extra", chainId: 0 },
@@ -1113,13 +1124,16 @@ describe("dispatcher — registerToken reachability + routing", () => {
 		]
 
 		// Branch 1: NO wallet accounts on this profile/chain.
-		const emptyWallet: IAccountReader = { getAccounts: async () => [] }
+		const emptyWallet: AccountFake = { provisionDefaultAccount: declineProvision, getAccounts: async () => [] }
 		const s1 = makeSession({ capabilityGrants: grants, accounts: ["aztec:0:0xacc"] })
 		const d1 = new WalletSdkDispatcher(network, emptyWallet, execution, interaction, makeSessionWriter(s1).writer, noopLogger)
 		await expect(d1.dispatch("registerToken", ["0xacc", "0xdead"], ctx)).rejects.toThrow(/No accounts found for profile/)
 
 		// Branch 2: wallet has accounts but the session's authorized set is EMPTY.
-		const walletAccounts: IAccountReader = { getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }] }
+		const walletAccounts: AccountFake = {
+			provisionDefaultAccount: declineProvision,
+			getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }],
+		}
 		const s2 = makeSession({ capabilityGrants: grants, accounts: [] })
 		const d2 = new WalletSdkDispatcher(network, walletAccounts, execution, interaction, makeSessionWriter(s2).writer, noopLogger)
 		await expect(d2.dispatch("registerToken", ["0xacc", "0xdead"], ctx)).rejects.toThrow(/must call requestCapabilities/)
@@ -1150,7 +1164,8 @@ describe("dispatcher — registerToken reachability + routing", () => {
 		const network: INetworkReader = {
 			getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
 		}
-		const account: IAccountReader = {
+		const account: AccountFake = {
+			provisionDefaultAccount: declineProvision,
 			getAccounts: async () => [
 				{ address: "0xacc", name: "main", chainId: 0 },
 				{ address: "0xunauthorized", name: "extra", chainId: 0 },
@@ -1188,13 +1203,16 @@ describe("dispatcher — registerToken reachability + routing", () => {
 		const grantArgs = ["0xacc", { caller: "0xc", contract: "0xd", method: "m", args: [] }]
 
 		// Branch 1: NO wallet accounts on this profile/chain.
-		const emptyWallet: IAccountReader = { getAccounts: async () => [] }
+		const emptyWallet: AccountFake = { provisionDefaultAccount: declineProvision, getAccounts: async () => [] }
 		const s1 = makeSession({ capabilityGrants: grants, accounts: ["aztec:0:0xacc"] })
 		const d1 = new WalletSdkDispatcher(network, emptyWallet, execution, interaction, makeSessionWriter(s1).writer, noopLogger)
 		await expect(d1.dispatch("grantPublicAuthwit", grantArgs, ctx)).rejects.toThrow(/No accounts found for profile/)
 
 		// Branch 2: wallet has accounts but the session's authorized set is EMPTY.
-		const walletAccounts: IAccountReader = { getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }] }
+		const walletAccounts: AccountFake = {
+			provisionDefaultAccount: declineProvision,
+			getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }],
+		}
 		const s2 = makeSession({ capabilityGrants: grants, accounts: [] })
 		const d2 = new WalletSdkDispatcher(network, walletAccounts, execution, interaction, makeSessionWriter(s2).writer, noopLogger)
 		await expect(d2.dispatch("grantPublicAuthwit", grantArgs, ctx)).rejects.toThrow(/must call requestCapabilities/)
@@ -1349,7 +1367,7 @@ describe("Phase 0.5: session lookup consolidation (TOCTOU defense)", () => {
 	}
 
 	function dispatcherWith(writer: IDappSessionWriter, accounts: IAccountRef[] = []): WalletSdkDispatcher {
-		const accountReader: IAccountReader = { getAccounts: async () => accounts }
+		const accountReader: AccountFake = { provisionDefaultAccount: declineProvision, getAccounts: async () => accounts }
 		const interaction: IDappInteractionRunner = {
 			execute: async () => ({}) as never,
 			requestCapabilities: async () => ({ granted: [] }) as CapabilityResult,
@@ -1822,7 +1840,8 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 		const network: INetworkReader = {
 			getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
 		}
-		const account: IAccountReader = {
+		const account: AccountFake = {
+			provisionDefaultAccount: declineProvision,
 			getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }],
 		}
 		const dispatcher = new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger)
@@ -1872,7 +1891,10 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 		}
 		const execution: IExecutionRunner = { executeOperations: async () => [] as OperationResult[] }
 		const network: INetworkReader = { getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[] }
-		const account: IAccountReader = { getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }] }
+		const account: AccountFake = {
+			provisionDefaultAccount: declineProvision,
+			getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }],
+		}
 		const dispatcher = new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger)
 
 		await expect(
@@ -1908,7 +1930,10 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 		}
 		const execution: IExecutionRunner = { executeOperations: async () => [] as OperationResult[] }
 		const network: INetworkReader = { getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[] }
-		const account: IAccountReader = { getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }] }
+		const account: AccountFake = {
+			provisionDefaultAccount: declineProvision,
+			getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }],
+		}
 		const dispatcher = new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger)
 
 		await expect(
@@ -1958,7 +1983,10 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 		}
 		const execution: IExecutionRunner = { executeOperations: async () => [] as OperationResult[] }
 		const network: INetworkReader = { getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[] }
-		const account: IAccountReader = { getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }] }
+		const account: AccountFake = {
+			provisionDefaultAccount: declineProvision,
+			getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }],
+		}
 		const dispatcher = new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger)
 
 		// Grant for a DIFFERENT contract — must be scope-rejected.
@@ -2125,5 +2153,82 @@ describe("dispatcher session-lookup anchoring", () => {
 		// switch must carry the composing profile's network row so execution
 		// fails closed on the ownership check.
 		expect(seen).toEqual([["test-profile", 0]])
+	})
+})
+
+describe("dispatcher.requestCapabilities provisions the dApp chain's default account", () => {
+	const manifest = { capabilities: [{ type: "accounts", canGet: true, canCreateAuthWit: false }] }
+	const networkReader: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] }
+	const derived = { address: `0x${"aa".repeat(32)}`, name: "Account", chainId: 0 }
+
+	function makeDispatcher(account: AccountFake) {
+		const { writer } = makeSessionWriter(makeSession())
+		const seen: unknown[] = []
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: async (params) => {
+				seen.push(params.availableAccounts)
+				return { granted: [], selectedAccounts: [] }
+			},
+		}
+		return { dispatcher: new WalletSdkDispatcher(networkReader, account, stubExecution, interaction, writer, noopLogger), seen }
+	}
+
+	test("an empty first read provisions once and the popup lists what the re-read returns", async () => {
+		let reads = 0
+		let provisions = 0
+		const account: AccountFake = {
+			getAccounts: async () => (reads++ === 0 ? [] : [derived]),
+			provisionDefaultAccount: async () => {
+				provisions++
+			},
+		}
+		const { dispatcher, seen } = makeDispatcher(account)
+		await dispatcher.dispatch("requestCapabilities", [manifest], ctx)
+		expect(provisions).toBe(1)
+		expect(seen).toEqual([[derived]])
+	})
+
+	test("a non-empty first read never provisions", async () => {
+		let provisions = 0
+		const account: AccountFake = {
+			getAccounts: async () => [derived],
+			provisionDefaultAccount: async () => {
+				provisions++
+			},
+		}
+		const { dispatcher, seen } = makeDispatcher(account)
+		await dispatcher.dispatch("requestCapabilities", [manifest], ctx)
+		expect(provisions).toBe(0)
+		expect(seen).toEqual([[derived]])
+	})
+
+	test("a declined provision with an empty re-read reaches the popup as availableAccounts: []", async () => {
+		const account: AccountFake = { getAccounts: async () => [], provisionDefaultAccount: declineProvision }
+		const { dispatcher, seen } = makeDispatcher(account)
+		await dispatcher.dispatch("requestCapabilities", [manifest], ctx)
+		expect(seen).toEqual([[]])
+	})
+
+	test("a provisioning failure propagates before any popup opens and persists no rejection", async () => {
+		const account: AccountFake = {
+			getAccounts: async () => [],
+			provisionDefaultAccount: async () => {
+				throw new Error("unauthorized")
+			},
+		}
+		const { writer, calls } = makeSessionWriter(makeSession())
+		let popups = 0
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: async () => {
+				popups++
+				return { granted: [] }
+			},
+		}
+		const dispatcher = new WalletSdkDispatcher(networkReader, account, stubExecution, interaction, writer, noopLogger)
+		await expect(dispatcher.dispatch("requestCapabilities", [manifest], ctx)).rejects.toThrow("unauthorized")
+		expect(popups).toBe(0)
+		expect(calls.setRejections).toEqual([])
 	})
 })

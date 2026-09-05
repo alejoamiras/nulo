@@ -218,6 +218,7 @@ declare global {
   const useIncomingTransfers: typeof import('../composables/useIncomingTransfers').useIncomingTransfers
   const useLink: typeof import('vue-router').useLink
   const useModel: typeof import('vue').useModel
+  const useNetworkActivation: typeof import('../composables/useNetworkActivation').useNetworkActivation
   const useNotificationStore: typeof import('../stores/notification.store').useNotificationStore
   const useOutside: typeof import('../composables/outside.js').useOutside
   const usePasskeyCeremony: typeof import('../composables/usePasskeyCeremony').usePasskeyCeremony
@@ -294,6 +295,9 @@ declare global {
   // @ts-ignore
   export type { IncomingTransferServiceLike, ConfigServiceLike, PriceServiceLike, UseIncomingTransfersOptions, UseIncomingTransfersResult } from '../composables/useIncomingTransfers'
   import('../composables/useIncomingTransfers')
+  // @ts-ignore
+  export type { UseNetworkActivationOptions } from '../composables/useNetworkActivation'
+  import('../composables/useNetworkActivation')
   // @ts-ignore
   export type { UsePopupEntityHandlers, UsePopupEntityOptions } from '../composables/usePopupEntity'
   import('../composables/usePopupEntity')
@@ -586,6 +590,7 @@ declare module 'vue' {
     readonly useIncomingTransfers: UnwrapRef<typeof import('../composables/useIncomingTransfers')['useIncomingTransfers']>
     readonly useLink: UnwrapRef<typeof import('vue-router')['useLink']>
     readonly useModel: UnwrapRef<typeof import('vue')['useModel']>
+    readonly useNetworkActivation: UnwrapRef<typeof import('../composables/useNetworkActivation')['useNetworkActivation']>
     readonly useNotificationStore: UnwrapRef<typeof import('../stores/notification.store')['useNotificationStore']>
     readonly useOutside: UnwrapRef<typeof import('../composables/outside.js')['useOutside']>
     readonly usePasskeyCeremony: UnwrapRef<typeof import('../composables/usePasskeyCeremony')['usePasskeyCeremony']>

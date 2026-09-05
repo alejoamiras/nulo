@@ -512,11 +512,12 @@ export const test = base.extend<{
 
 	dappConnectedExtension: [
 		async ({ registeredExtension }, use) => {
-			// CRITICAL: switch to Local Network BEFORE connecting the playground.
-			// The playground passes Fr.ZERO chainInfo (= chainId 0 = Local Network);
-			// without this switch the extension defaults to Testnet, where there are
-			// no accounts → cap-account-item list is empty → every accounts/sendTx/
-			// sim test fails. (Confirmed by Codex audit run 1 — Codex 2026-04-26.)
+			// Switch to Local Network BEFORE connecting the playground. The playground passes
+			// Fr.ZERO chainInfo (= chainId 0 = Local Network) while the e2e build seeds Testnet as
+			// the active network. The wallet now provisions a chain's default account on a dApp's
+			// request, so the mismatch alone no longer empties the account picker (pinned by
+			// cap-chain-mismatch.test.ts) — but sendTx/sim tests need the ACTIVE network on the
+			// sandbox (funded accounts, fee estimation, sync), which only the switch provides.
 			const setupPage = await openPopup(registeredExtension)
 			await waitForHash(setupPage, "#/popup/general", 30_000)
 			await switchToLocalNetwork(setupPage)

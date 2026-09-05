@@ -118,6 +118,8 @@ export const ERR_LAST_ENDPOINT = "LAST_ENDPOINT"
 export const ERR_PRIMARY_ENDPOINT = "PRIMARY_ENDPOINT"
 export const ERR_ACTIVE_NETWORK = "ACTIVE_NETWORK"
 export const ERR_BACKUP_TOO_OLD = "BACKUP_TOO_OLD"
+/** An unattended caller asked to verify a network whose L1 identity needs a live endpoint probe. */
+export const ERR_UNATTENDED_LIVE_CHECK = "UNATTENDED_LIVE_CHECK"
 
 // ── Zod schemas for the RPC boundary ─────────────────────────────────
 
