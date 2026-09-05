@@ -24,8 +24,9 @@ Owner-locked UX (2026-09-05, artifact `Connect on Another Chain`): a neutral ban
 **"Connecting on {dApp chain}"**, body **"Your wallet is on {active}. Approve as is, or switch to see
 {dApp chain} balances."**, one action **"Switch wallet to {dApp chain}"**; after switching the banner
 settles to the done tone **"Wallet switched to {dApp chain}"** / **"Balances and activity now follow
-{dApp chain}."**; Approve stays enabled throughout; the window closes on either decision exactly as
-today (no toast). The identity line reads "is requesting permissions on {dApp chain}".
+{dApp chain}."**; Approve is never blocked by the mismatch itself (the footer is only held for the
+seconds an in-window switch is running); the window closes on either decision exactly as today (no
+toast). The identity line reads "is requesting permissions on {dApp chain}".
 
 ## Assumptions
 
@@ -100,22 +101,31 @@ today (no toast). The identity line reads "is requesting permissions on {dApp ch
 
 **Where it lives / what is reused** (see `recon.md`):
 - `packages/wallet-bridge/src/services-contract.ts` — new `IAccountProvisioner {
-  provisionDefaultAccount(profileId: string, chainId: number): Promise<IAccountRef | null> }`; the
-  dispatcher's constructor takes `IAccountReader & IAccountProvisioner` (`IAccountReader` keeps its
-  honest read-only meaning for `account-order.characterization.test.ts`). TSDoc: derives the chain's
-  default account only when the wallet can do so unattended; `null` = declined; rejects on failure.
+  provisionDefaultAccount(profileId: string, chainId: number): Promise<void> }`; the dispatcher's
+  constructor takes `IAccountReader & IAccountProvisioner` (`IAccountReader` keeps its honest read-only
+  meaning for `account-order.characterization.test.ts`). TSDoc: ensures the chain's default account
+  exists when the wallet may create it UNATTENDED (a chain with no rows of any kind whose L1 identity
+  needs no endpoint probe); a no-op otherwise; rejects on an authorization/storage failure. The caller
+  re-reads accounts afterwards — the method returns nothing on purpose.
 - `apps/extension/src/wallet/services/account/service.ts` — `provisionDefaultAccount(profileId, chainId)`
-  implements the policy in ONE place: `networkService.derivesOffline(profileId, chainId)` false → `null`;
-  any live row on the chain (hidden/imported included) → `null`; else
-  `ensureDefaultAccount(profileId, chainId, AccountType.Nulo_v1, DEFAULT_ACCOUNT_NAME)`. The concrete
-  service then satisfies the contract structurally — no wiring adapter.
-- `apps/extension/src/wallet/services/network/service.ts` — `derivesOffline(profileId, chainId)`:
-  `SEED_L1_BY_KIND[kind ?? "custom"] !== undefined` for the (profile, chain) row; the probe-free set stays
-  private to the service that owns it.
+  under the same per-tuple serialization as `ensureDefaultAccount`: any live row on the chain
+  (hidden/imported included, mirroring `network-switch.ts`'s `getAccounts(…, true)` check) → return;
+  else `createAccountInternal(profileId, chainId, AccountType.Nulo_v1, DEFAULT_ACCOUNT_NAME,
+  { unattended: true })`, whose ONE network lookup refuses to probe (below) — so "offline only" is
+  enforced at the row read that derivation actually uses, not by a preflight a concurrent
+  delete-and-re-add could invalidate. The refusal (`ERR_UNATTENDED_PROBE`) is the one error the method
+  catches and turns into a no-op; everything else propagates. The concrete service satisfies the
+  contract structurally — no wiring adapter.
+- `apps/extension/src/wallet/services/network/service.ts` — `resolveVerifiedL1ChainId(profileId,
+  chainId, opts?: { unattended?: boolean })`: when the row's kind has no seeded constant AND
+  `opts.unattended`, throw `ERR_UNATTENDED_PROBE` instead of probing (`spec.ts` constant, same prefix
+  convention as the other `ERR_*`). Canonical L1 validation of seeded rows is unchanged. The probe-free
+  set stays private to the service that owns it.
 - `packages/wallet-bridge/src/dispatcher.ts` — `loadAvailableAccountsForPopup`: read visible rows → if
-  non-empty, project them; else `provisionDefaultAccount` → project the returned row, or `[]` when
-  declined. No try/catch: a rejection propagates like every other dispatch failure (I2).
-  `handleRequestCapabilities` is untouched (budget).
+  empty, `await provisionDefaultAccount` then re-read visible rows (the switch's own pattern: a row
+  created concurrently, or a derived-then-hidden row, is settled by the re-read, never by the
+  provisioner's return value) → project. No try/catch: a rejection propagates like every other dispatch
+  failure (I2). `handleRequestCapabilities` is untouched (budget).
 - `apps/extension/src/wallet/services/account/spec.ts` — `DEFAULT_ACCOUNT_NAME = "Account"`; the two
   popup call sites use it.
 - `apps/extension/src/composables/useNetworkActivation.ts` (C1) — extracts `[id].vue`'s
@@ -132,21 +142,30 @@ today (no toast). The identity line reads "is requesting permissions on {dApp ch
   name = row name, else `getChainName(chainId)`.
 - `apps/extension/src/popup/windows/capabilities/index.vue` — `dappChain` computed from
   `payload.session.chainId` + `appStore.networks` + `appStore.network`; `switchedTo` + `isSwitching`
-  refs; the banner (`data-testid="cap-chain-banner"`, `data-state="mismatch" | "switched"`) rendered
-  only when `dappChain.mismatch && !noAccountsAvailable` (codex: never show "Approve as is" beside a
-  disabled Approve) and its action only when a matching row exists; `switchToDappNetwork()` ignores
-  re-entry (`isSwitching`) and a pending approve (`isLoading`), calls the composable, sets `switchedTo`
-  on `"activated"`; identity line `is requesting permissions on {name}`; the hard-error tooltip becomes
-  "This app asked for accounts on {name}. Switch the wallet to {name} in Settings to set one up, or
-  unhide one of its accounts, then try again from the app." No change to `approve()`'s grant assembly.
+  refs; the banner (`data-testid="cap-chain-banner"`) has two states and one gate:
+  `data-state="switched"` when `switchedTo` names the CURRENT active chain (the done tone, no action),
+  `data-state="mismatch"` when `dappChain.mismatch` (the invitation + action, only with a matching row);
+  neither renders while `noAccountsAvailable` (codex: never show "Approve as is" beside a disabled
+  Approve). `switchToDappNetwork()` ignores re-entry (`isSwitching`) and a pending approve (`isLoading`),
+  calls the composable, sets `switchedTo` on `"activated"`. **A pending switch and the window's close are
+  coordinated**: while `isSwitching`, the footer's Approve and Reject are disabled and `approve()`
+  early-returns, so a footer decision can never abandon an activation. `reject()` itself stays
+  UNCONDITIONAL — `useDappApprovalWindow` binds it to `beforeunload` and to the lock/profile-change
+  guard (`useDappApprovalWindow.ts:79,103`), and a lock landing mid-switch must still reject the pending
+  interaction while the shell navigates to auth (`app.vue:172`); only the footer button is held. Identity
+  line `is requesting permissions on {name}`; the hard-error tooltip becomes "This app asked for
+  accounts on {name}. Switch the wallet to {name} in Settings to set one up, or unhide one of its
+  accounts, then try again from the app." No change to `approve()`'s grant assembly.
 - `packages/design/src/ui/Banner.vue` — `action.testId?: string` forwarded as `data-testid` on the action
   button (both directions). One test case.
 
-**Critical flow**: dApp `requestCapabilities(accounts)` → dispatcher resolves the dApp chain row → empty
-list → `ensureDefaultAccount` (derive index 0) → re-read → popup opens with the account listed → the
-popup computes `mismatch` from `session.chainId` vs `appStore.network.chainId` → banner → (optional)
-switch via `useNetworkActivation` → `appStore.network` moves, the shell reloads accounts, the banner
-settles → Approve → unchanged `resolveInteraction` → dispatcher persists the grant → window closes.
+**Critical flow**: dApp `requestCapabilities(accounts)` → dispatcher resolves the dApp chain row →
+visible rows empty → `provisionDefaultAccount` (no rows of any kind + probe-free kind → derive index 0;
+otherwise a no-op) → re-read visible rows → popup opens with the account listed (or the hard error) →
+the popup computes `mismatch` from `session.chainId` vs `appStore.network.chainId` → banner →
+(optional) switch via `useNetworkActivation`, Approve/Reject held while it runs → `appStore.network`
+moves, the shell reloads accounts, the banner settles to "switched" → Approve → unchanged
+`resolveInteraction` → dispatcher persists the grant → window closes.
 
 **Trade-offs / alternatives not taken**
 - Carry `{ chainId, name }` in `CapabilityParams` from the dispatcher: rejected — the popup already has
@@ -192,24 +211,29 @@ settles → Approve → unchanged `resolveInteraction` → dispatcher persists t
 ### Phase 1 — the dispatcher provisions the dApp chain's default account
 - `services-contract.ts`: `IAccountProvisioner.provisionDefaultAccount`; dispatcher constructor param
   `IAccountReader & IAccountProvisioner`.
-- `dispatcher.ts` `loadAvailableAccountsForPopup`: visible rows, else provision, else `[]`; no catch.
-- `dispatcher.test.ts`: stub the new method on the fakes (`unreachable`); three new tests — empty list
-  provisions once and lists the returned row; non-empty list never provisions; `null` yields `[]` and the
-  popup payload carries `availableAccounts: []`; a rejection propagates out of `requestCapabilities`.
-  `account-order.characterization.test.ts`: stub only.
-- `network/service.ts` `derivesOffline`; `account/spec.ts` `DEFAULT_ACCOUNT_NAME` (used by
-  `useProfileBootstrap.ts` + `network-switch.ts`); `account/service.ts` `provisionDefaultAccount` +
-  `service.test.ts` cases: derives on an empty probe-free chain (row lands, returned row is visible,
-  index 0); declines (`null`, no row) when `derivesOffline` is false; declines when the chain holds only
-  a hidden row; declines when it holds only an imported row; a second call returns the same row.
+- `dispatcher.ts` `loadAvailableAccountsForPopup`: visible rows → if empty, provision then re-read; no
+  catch.
+- `dispatcher.test.ts`: stub the new method on the fakes (`unreachable`); three new tests — empty first
+  read provisions once and the popup payload lists what the re-read returns; non-empty first read never
+  provisions; a no-op provision + empty re-read yields `availableAccounts: []`; a rejection propagates
+  out of `requestCapabilities` (no popup, no persisted rejection). `account-order.characterization.test.ts`:
+  stub only.
+- `network/spec.ts` `ERR_UNATTENDED_PROBE`; `network/service.ts` `resolveVerifiedL1ChainId` `unattended`
+  option (+ `service.test.ts`: a custom row under `unattended` throws it and never probes; a seeded row
+  resolves as before); `account/spec.ts` `DEFAULT_ACCOUNT_NAME` (used by `useProfileBootstrap.ts` +
+  `network-switch.ts`); `account/service.ts` `provisionDefaultAccount` + `service.test.ts` cases: derives
+  on an empty probe-free chain (one visible index-0 row lands); no-op (no row) when the resolver
+  refuses the probe; no-op when the chain holds only a hidden row; no-op when it holds only an imported
+  row; a second call is a no-op (the row already exists); a non-refusal rejection propagates.
 - **Validation gate**: `cd packages/wallet-bridge && bun run test` · `cd apps/extension && bun run test
   src/wallet/services/account src/wallet/services/network` (exit 0, new tests green) · `bun run lint` ·
   `bun run typecheck` (root; exit 0). Layers: lint/typecheck · unit.
 
 ### Phase 2 — `useNetworkActivation` composable (extract, no behavior change)
-- New `composables/useNetworkActivation.ts` + `useNetworkActivation.test.ts` (≥10 cases: activated,
-  blocked via in-flight pre-check without calling the service, blocked from the guard, unconfirmed toast
-  copy, stale silent, persist/read wiring through `managers.network`, requires `managers.network`).
+- New `composables/useNetworkActivation.ts` + `useNetworkActivation.test.ts` (≥10 cases: activated
+  with no toast, blocked via the in-flight pre-check without calling persist, blocked from the guard
+  with its toast, unconfirmed toast copy, stale silent, the persist/read callbacks are the ones invoked,
+  the target reaches `store.network`, activations serialize, a throwing persist reconciles).
 - `settings/networks/[id].vue` calls it; its two toasts for blocked/unconfirmed move into the composable;
   success toast stays in the page.
 - **Validation gate**: `cd apps/extension && bun run test src/composables/useNetworkActivation.test.ts`
@@ -219,9 +243,16 @@ settles → Approve → unchanged `resolveInteraction` → dispatcher persists t
 - `Banner.vue` `action.testId`; `Banner.test.ts` +1 case.
 - `chain-mismatch.ts` + `chain-mismatch.test.ts` (known row, renamed row, unknown id fallback, no active
   network, same chain).
-- `capabilities/index.vue`: `dappChain`, `switchedTo`, `isSwitching`, the banner (owner copy verbatim,
-  hidden while `noAccountsAvailable`), the action (only with a matching row; re-entry + pending-approve
-  guarded), the identity line; hard-error tooltip updated to name the chain and the remedy.
+- `capabilities/index.vue`: `dappChain`, `switchedTo`, `isSwitching`, the two-state banner (owner copy
+  verbatim, hidden while `noAccountsAvailable`), the action (only with a matching row; re-entry guarded;
+  Approve/Reject held while it runs), the identity line; hard-error tooltip updated to name the chain
+  and the remedy.
+- `capabilities/chain-switch.test.ts` (deterministic component test, sibling of the lifecycle oracle —
+  same mock shape): mismatch renders the banner + action; same chain renders neither; hard error hides
+  the banner; a deferred `activate` holds the footer's Approve/Reject disabled and ignores a second
+  click, then "activated" flips the banner to `switched` and re-enables the footer; a "blocked" result
+  leaves the invitation in place; a profile-change event during the deferred activation still rejects
+  the interaction (lifecycle rejection is unconditional).
 - **Validation gate**: `cd apps/extension && bun run test src/popup/windows/capabilities` +
   `cd packages/design && bun run test` · `bun run lint` · `bun run typecheck` (exit 0) ·
   `bun run baseline:complexity` reports no manifest change. Layers: lint/typecheck · unit · component.
@@ -231,9 +262,10 @@ settles → Approve → unchanged `resolveInteraction` → dispatcher persists t
   stays on Testnet) → `connectPlayground` (Local Network) → popup waiter armed BEFORE the request →
   request `accounts`:
   1. **approve without switching** — `cap-chain-banner[data-state="mismatch"]` text contains
-     "Connecting on Local Network" and "Your wallet is on Testnet"; exactly one `cap-account-item`;
-     `approveCapabilities` → playground result ok, the granted address equals the listed one; the strip
-     (`data-testid="identity-network"` added to `IdentityStrip`) still reads "Testnet".
+     "Connecting on Local Network" and "Your wallet is on Testnet"; exactly one `cap-account-item`; the
+     strip (`data-testid="identity-network"` added to `IdentityStrip`) reads "Testnet" — asserted BEFORE
+     approval, since approval closes the window; `approveCapabilities` → playground result ok, the
+     granted address equals the listed one.
   2. **switch, then approve** — click `cap-switch-network-btn` → `cap-chain-banner[data-state=
      "switched"]` and the strip reads "Local Network" → `approveCapabilities` → result ok, same address.
   Approve/Reject racing a pending switch is guarded in the window (`isSwitching`/`isLoading`), not
@@ -294,8 +326,24 @@ after the codex loop converges. No stack ceremony. `code_review: off`.
   timing test for a lock landing after the secret read (the write is secret-free and identical to an
   in-flight switch's — benign); an e2e for the approve-vs-switch race (non-deterministic). Transcript:
   `audit-codex.md`.
+- Codex round 2 (resumed): **conditional approve** (conditions: enforce offline resolution at use,
+  restore the visible-account re-read, fix success-banner gating, coordinate pending switches with
+  window closure). All four adopted: `unattended` option on `resolveVerifiedL1ChainId` (refusal at the
+  row read derivation uses; `ERR_UNATTENDED_PROBE`) instead of a `derivesOffline` preflight;
+  `provisionDefaultAccount` returns `void` and the dispatcher re-reads; two-state banner keyed on
+  `switchedTo` = current chain; Approve/Reject held while `isSwitching` + a deferred-activation component
+  test. Lows fixed: the "same row" contradiction, the manager-ownership test, the stale critical flow,
+  the no-switch strip asserted before approval. Q3 (row persists after reject): codex sees no harm.
+- Codex round 3 (resumed): Q1 (the refusal throw vs the deletion fence) confirmed clean. One Medium
+  adopted: `reject()` stays unconditional (lifecycle rejection on lock/profile change/`beforeunload`);
+  only the footer's Reject is held while switching, pinned by the deferred-activation test. Low
+  adopted: the "Approve stays enabled throughout" wording.
+- Codex round 4 (resumed): **approve** — "No remaining material findings in the revised blueprint."
 
 ## Seeds
+
+ELI5 companion: Artifact `https://claude.ai/code/artifact/28d9dcd6-3ec4-498a-ae69-82798bca654e`
+(source `implementations-plan/connect-chain-mismatch/eli5.html` — redeploy the same file to update).
 
 Recommended: `/goal` (completion is transcript-observable).
 

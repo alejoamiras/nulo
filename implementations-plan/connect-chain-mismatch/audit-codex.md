@@ -54,3 +54,57 @@ of widening `IAccountReader`.
 Rejected: a timing test for a lock landing after the secret read (the row write is secret-free and
 identical to an in-flight switch — benign); an e2e for approve-vs-switch (a timing race is not a
 deterministic browser test; the guard is a two-line check).
+
+## Round 2 — response (verbatim; resumed with the revised plan + Q1–Q3)
+
+**Q1:** Keep the policy in `NetworkService`; exposing `kind` would move its probe rules across the boundary. **Medium:** a boolean preflight alone cannot guarantee offline derivation. A seeded row can be deleted and replaced with a custom row before `ensureDefaultAccount` reaches its separate network lookup, which can then probe. Enforce “offline only” at the resolver’s actual row read, preserving canonical L1 validation (`apps/extension/src/wallet/services/network/service.ts:489`, `:442`, `:368`).
+
+**Q2:** No High findings. Remaining findings:
+
+- **Medium — Restore the visible-account re-read.** Between the initial empty read and provisioning, another caller can create an account. Provisioning then returns `null`, producing a false empty popup. Conversely, after provisioning’s empty check, another caller can create/hide a derived account; `ensureDefaultAccount` can return that hidden row, which the revised dispatcher would project directly. Re-read visible accounts after provisioning, including after `null`; this restores the reusable switch pattern (`apps/extension/src/wallet/services/account/service.ts:198`, `:205`, `:297`; `apps/extension/src/popup/network-switch.ts:73`).
+
+- **Medium — The success banner cannot render.** The planned `mismatch && !noAccountsAvailable` condition becomes false when activation sets the target network. Include a separate confirmed-success branch, tied to the current chain, while keeping the invitation/action mismatch-only (`implementations-plan/connect-chain-mismatch/plan.md:136`; `apps/extension/src/utils/guarded-network-activation.ts:63`).
+
+- **Medium — Switch guards protect only one ordering.** They prevent starting another switch or switching during approval; they do not protect a switch already waiting when Approve/Reject closes the window. Activation awaits a journal refresh before persistence, so closing can abandon the requested switch. Coordinate switch completion/cancellation with closing. A deferred-promise component test makes this deterministic; no timing-dependent e2e is necessary (`apps/extension/src/stores/app.store.ts:213`; `apps/extension/src/utils/guarded-network-activation.ts:67`; `apps/extension/src/popup/windows/capabilities/index.vue:242`, `:260`).
+
+- **Low — Reconcile contradictory instructions.** “Any row → null” contradicts “a second call returns the same row”; Phase 2 still tests manager ownership; the critical flow still describes the old implementation (`implementations-plan/connect-chain-mismatch/plan.md:109`, `:204`, `:212`, `:146`). Also assert the no-switch strip before approval or reopen a wallet popup afterward—the approval window closes (`apps/extension/src/popup/windows/capabilities/index.vue:242`).
+
+The separate provisioner contract and injected activation callbacks otherwise fit the reuse map.
+
+**Q3:** I see no concrete harm justifying deletion on rejection, or a mandatory test for the benign post-secret-read lock case. The persisted account contains public identity/metadata, while capability grants are applied separately after the interaction returns (`apps/extension/src/wallet/services/account/service.ts:241`; `packages/wallet-bridge/src/dispatcher.ts:1107`). Reject-time deletion could instead remove a default another concurrent flow has begun using.
+
+conditional approve (with conditions: enforce offline resolution at use, restore visible-account re-reading, fix success-banner gating, and coordinate pending switches with window closure)
+
+## Round 2 — triage
+
+All four conditions adopted: `unattended` option on `resolveVerifiedL1ChainId` (refusal at the row read
+derivation uses, `ERR_UNATTENDED_PROBE`) instead of a `derivesOffline` preflight; `provisionDefaultAccount`
+returns `void` and the dispatcher re-reads visible rows; two-state banner keyed on `switchedTo` = the
+current chain; footer held while `isSwitching` + a deferred-activation component test. Lows fixed (the
+"same row" contradiction, the manager-ownership test case, the stale critical flow, the no-switch strip
+asserted before approval). Q3: no harm in the row persisting after a reject — kept.
+
+## Round 3 — response (verbatim)
+
+**Q1:** The sentinel throw is clean with respect to the deletion fence. `capture()` only reads the epoch; it acquires no reservation requiring cleanup. The resolver runs before derivation, persistence, and `onAccountAdded`, so catching this specific refusal leaves no write to validate or undo. Preserve the existing capture-before-await ordering and propagate every other error (`apps/extension/src/wallet/services/profile/profile-deletion-state.ts:51`; `apps/extension/src/wallet/services/account/service.ts:224`, `:238`, `:254`).
+
+One **Medium** remains: the new `reject()` guard also blocks **lifecycle cancellation**. `useDappApprovalWindow` invokes that same callback on lock/profile change and `beforeunload`; it is not exclusively the Reject-button handler (`apps/extension/src/composables/useDappApprovalWindow.ts:79`, `:103`; `apps/extension/src/popup/windows/capabilities/index.vue:110`). If locking occurs during activation, rejection becomes a no-op while the shell navigates to authentication, leaving the interaction pending (`apps/extension/src/popup/app.vue:172`).
+
+Guard only the footer’s rejection action; keep lifecycle rejection unconditional. Extend the deferred-activation test with a lock/profile-change event. Actual browser closure already has background cancellation through `WindowManager`, but that does not cover merely navigating away (`apps/extension/src/wallet/services/window-manager/window-manager.ts:102`).
+
+**Low:** Update “Approve stays enabled throughout” to acknowledge the newly authorized switching exception (`implementations-plan/connect-chain-mismatch/plan.md:27`, `:150`).
+
+conditional approve (with conditions: preserve unconditional lifecycle rejection while guarding footer decisions during switching, and pin it with the deferred-activation test)
+
+## Round 3 — triage
+
+Q1 clean. Medium adopted: `reject()` stays unconditional (lifecycle rejection on lock / profile change /
+`beforeunload`); only the footer's Reject is held while switching; the component test gains a
+profile-change-during-activation case. Low adopted: the "Approve stays enabled throughout" wording.
+
+## Round 4 — response (verbatim)
+
+No remaining material findings in the revised blueprint. All audit conditions are addressed.
+
+approve
+**Final verdict: `approve`.**

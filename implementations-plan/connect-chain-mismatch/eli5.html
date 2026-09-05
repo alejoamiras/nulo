@@ -73,8 +73,8 @@ code { font-family: var(--font-mono); font-size: 13px; }
 		<div class="phases">
 			<div class="phase">
 				<h3>1. The wallet prepares the account on demand</h3>
-				<p>When an app asks for accounts on a network with none yet, the wallet derives that network's default account first, then lists it. Same routine the network switch already uses. If preparing fails, the popup keeps today's clear error.</p>
-				<p class="gate">Proves itself by: wallet-bridge unit tests (derives once when empty, never when not, logs and stays empty on failure) + lint + typecheck. <code>bun run test</code> in packages/wallet-bridge · <code>bun run lint</code> · <code>bun run typecheck</code></p>
+				<p>When an app asks for accounts on a network with none yet, the wallet derives that network's default account first, then lists it. Same routine the network switch already uses, with two limits: never for a user-added network that needs a live node check, and never when the chain already has any account (even a hidden one). Those cases keep today's error, now naming the network and the remedy.</p>
+				<p class="gate">Proves itself by: wallet-bridge + service unit tests (prepares once when empty, never when not, refuses the node check, re-reads the list) + lint + typecheck. <code>bun run test</code> in packages/wallet-bridge · <code>bun run lint</code> · <code>bun run typecheck</code></p>
 			</div>
 			<div class="phase">
 				<h3>2. One shared "switch network" routine</h3>
@@ -83,12 +83,12 @@ code { font-family: var(--font-mono); font-size: 13px; }
 			</div>
 			<div class="phase">
 				<h3>3. The popup says which network, and offers the switch</h3>
-				<p>A quiet banner: "Connecting on Testnet. Your wallet is on Alpha V5. Approve as is, or switch to see Testnet balances." with one action, "Switch wallet to Testnet". After switching it reads "Wallet switched to Testnet". Approve is never blocked by this. The line under the app's name says "is requesting permissions on Testnet".</p>
+				<p>A quiet banner: "Connecting on Testnet. Your wallet is on Alpha V5. Approve as is, or switch to see Testnet balances." with one action, "Switch wallet to Testnet". After switching it reads "Wallet switched to Testnet". Approve is never blocked by this; the buttons are only held for the seconds a switch is running. The line under the app's name says "is requesting permissions on Testnet".</p>
 				<p class="gate">Proves itself by: unit tests for the chain lookup, the design Banner test, popup tests, lint, typecheck, and the complexity baseline unchanged. <code>bun run test src/popup/windows/capabilities</code> · <code>bun run baseline:complexity</code></p>
 			</div>
 			<div class="phase">
 				<h3>4. A real browser test of the exact bug</h3>
-				<p>The test wallet stays on Testnet, the test app connects on Local Network, asks for accounts, sees the banner and an account, clicks the switch, approves, and the app receives the account. Fully inside the local sandbox.</p>
+				<p>The test wallet stays on Testnet, the test app connects on Local Network, asks for accounts, sees the banner and an account. One test approves as is; the other clicks the switch first. Both check the app receives the address. Fully inside the local sandbox.</p>
 				<p class="gate">Proves itself by: the new network e2e spec green, plus the existing accounts spec. <code>bun run e2e:agent tests/e2e/network/cap-chain-mismatch.test.ts</code></p>
 			</div>
 			<div class="phase">
@@ -107,14 +107,14 @@ code { font-family: var(--font-mono); font-size: 13px; }
 	<div>
 		<h2>Open questions</h2>
 		<ul>
-			<li><b>Custom networks.</b> Preparing an account on a user-added network checks that network's node first. An app connecting on such a network makes the wallet do that check once. Accepted: the node is the user's own, and a failed check falls back to the clear error.</li>
-			<li><b>Failure handling.</b> If preparing the account fails, the popup shows the existing error rather than the app receiving a raw exception. Codex is asked to weigh this.</li>
+			<li><b>Custom networks.</b> Preparing an account on a user-added network would mean contacting its node. Decided after codex: an app never gets to trigger that; such networks keep the clear error until you switch to them yourself.</li>
+			<li><b>Failure handling.</b> If preparing the account genuinely fails (a lock landing at the wrong instant), the app receives an error like any other failed request. Decided after codex: a failure is not evidence that you have no account.</li>
 		</ul>
 	</div>
 
 	<div class="verdict" id="verdict">
 		<span class="tag">Codex audit</span>
-		<p id="verdict_text">Pending: the plan is with codex (xhigh). The verdict lands here.</p>
+		<p id="verdict_text"><b>approve</b> after four rounds. Round 1 tightened the rule for when the wallet may prepare an account unattended (never for a network that needs a live node check, never when the chain already has any account) and stopped hiding failures; round 2 fixed a race in how the list is re-read, the banner’s settled state, and holding Approve while a switch runs; round 3 kept the window’s lifecycle rejection unconditional; round 4: “No remaining material findings.”</p>
 	</div>
 
 	<div class="approval">
