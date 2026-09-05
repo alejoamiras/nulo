@@ -71,11 +71,16 @@ const amountSymbol = computed(() => safeDisplay(assetSymbol(props.snapshot.asset
 // Fuel rides IN only on a token deposit: a withdraw never carries gas, and a Fuel bridge IS the gas (no split).
 // The `!isFuel` guard keeps hasFuel and isFuel mutually exclusive, so the receiptFuel testid is never duplicated.
 const hasFuel = computed(() => isDeposit.value && !isFuel.value && !!props.snapshot.fuelReceived)
-const usedDisplay = computed(() => (props.snapshot.fuelUsed ? toDecimalString(BigInt(props.snapshot.fuelUsed), 18) : null))
+/** The fuel figures come from the journal record, so an impossible stored string reads as a dash. */
+const fuelUsed = computed(() =>
+	props.snapshot.fuelUsed && isStoredAmount(props.snapshot.fuelUsed) ? BigInt(props.snapshot.fuelUsed) : null,
+)
+const usedDisplay = computed(() => (props.snapshot.fuelUsed ? (fuelUsed.value === null ? "—" : toDecimalString(fuelUsed.value, 18)) : null))
 /** Gas READY = received − used (the net the user can spend next); used unknown ⇒ the full received. */
 const availableDisplay = computed(() => {
 	if (!props.snapshot.fuelReceived) return null
-	const available = BigInt(props.snapshot.fuelReceived) - (props.snapshot.fuelUsed ? BigInt(props.snapshot.fuelUsed) : 0n)
+	if (!isStoredAmount(props.snapshot.fuelReceived)) return "—"
+	const available = BigInt(props.snapshot.fuelReceived) - (fuelUsed.value ?? 0n)
 	return toDecimalString(available < 0n ? 0n : available, 18)
 })
 

@@ -57,3 +57,17 @@ VERDICT: request changes. 0 HIGH · 3 MED · 1 LOW · 1 NIT. All verified; the t
 
 Gate after the round: lint 0 · typecheck 0 · unit 96 files / 1237 · smoke 3 files / 28 · frozen diff exit 0.
 
+## Round 4 — resumed, over `cd4b9098`
+
+VERDICT: request changes. 0 HIGH · 2 MED · 1 LOW · 0 NIT; no regression in the fixes. The plan's "still material after 3 rounds → surface to the owner" clause is noted: every finding since round 2 has been the one persisted-text class at a further site, each a one-line guard, so the loop continues one more round and the class is recorded for the owner below rather than each site.
+
+| # | Finding | Action |
+|---|---|---|
+| 1 | MED — the receipt's Gas ready / Gas used parse `fuelReceived` / `fuelUsed` unbounded | **Fixed.** `isStoredAmount` gates both; an impossible string reads `—`. Test added. |
+| 2 | MED — the two sealer mismatch notes interpolate `sealerL1` raw | **Fixed.** `safeAddressText` on both; comparisons keep the raw string. Test: a bidi-carrying sealer is named without it. |
+| 3 | LOW — the remembered wallet name is capped but not stripped | **Fixed.** The alias filter runs before the cap. Test added. |
+
+Gate after the round: lint 0 · typecheck 0 · unit 96 files / 1240 · smoke 3 files / 28 · frozen diff exit 0.
+
+**For the owner — the class behind rounds 2–4.** Every string a journal record or restore file carries (`amount`, `fuel.received`, `fuel.used`, `recipient`, `sealerL1`, `blocked`, `token.displaySymbol`) is validated for shape at load but not for width or character class, and the app has many display sites that read them. This branch guards each site it touched or that a sweep found; the durable fix is to bound and strip at the loader (bridge-core's record validator) so no display site can be missed. That is a bridge-core change outside this plan's scope and is left as a follow-up.
+

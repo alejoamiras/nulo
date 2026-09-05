@@ -266,7 +266,7 @@ function readPreferredFor(storageKey: string | null): PreferredWallet | null {
 		if (typeof parsed !== "object" || parsed === null) return null
 		const { id, name } = parsed as { id?: unknown; name?: unknown }
 		if (typeof id !== "string" || typeof name !== "string") return null
-		return { id, name: truncateName(name, PREFERRED_NAME_MAX) }
+		return { id, name: truncateName(name.replace(UNSAFE_ALIAS_CHARS, "").trim(), PREFERRED_NAME_MAX) }
 	} catch {
 		return null
 	}

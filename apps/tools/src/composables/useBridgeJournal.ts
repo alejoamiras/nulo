@@ -583,7 +583,10 @@ async function resolvePrivateSecret(rec: ClaimRecord): Promise<{ secretHex: stri
 	}
 	const connected = deps.connectedL1?.()?.toLowerCase() ?? null
 	if (rec.sealerL1 && connected && connected !== rec.sealerL1.toLowerCase()) {
-		setRuntime(rec.id, { attention: "mismatch", note: `Connect the Ethereum account that sealed this record (${rec.sealerL1}).` })
+		setRuntime(rec.id, {
+			attention: "mismatch",
+			note: `Connect the Ethereum account that sealed this record (${safeAddressText(rec.sealerL1)}).`,
+		})
 		return null
 	}
 	const binding = { chainId: rec.chainId, portal: rec.portal, bridge: rec.bridge, secretHashHex: rec.secretHashHex }
@@ -600,7 +603,7 @@ async function resolvePrivateSecret(rec: ClaimRecord): Promise<{ secretHex: stri
 	if (envelope.sealerL1 && connected && envelope.sealerL1.toLowerCase() !== connected) {
 		setRuntime(rec.id, {
 			attention: "mismatch",
-			note: `This record was sealed by ${envelope.sealerL1} - connect that Ethereum account.`,
+			note: `This record was sealed by ${safeAddressText(envelope.sealerL1)} - connect that Ethereum account.`,
 		})
 		return null
 	}
