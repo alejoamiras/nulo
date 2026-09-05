@@ -4,10 +4,6 @@ import { TEST_PASSWORD } from "./fixtures/constants"
 import { test, openPopup, waitForHash, clickByTestId, replaceInputValue, withTimeoutMessage } from "./fixtures/extension"
 import { acceptConfirmPopup, ensureUnlocked, lockWallet, navigateByHash, stopServiceWorker } from "./fixtures/helpers"
 
-// The kill primitive lives in fixtures/helpers.ts (`stopServiceWorker`): an unattached
-// `Target.closeTarget` from the browser session, awaiting the ORIGINAL target's destruction.
-// Its doc records why `worker().close()` and `Runtime.terminateExecution` are both wrong.
-
 /** Post-restart readiness: chrome.storage.session RETAINS the dead worker's
  *  heartbeat while the extension stays loaded, so the gate requires a
  *  timestamp STRICTLY NEWER than the pre-kill snapshot — truthy alone passes
@@ -41,11 +37,9 @@ async function readLiveness(page: Page): Promise<number> {
 
 // Chrome's MV3 lifecycle recycle — the idle worker is killed, the next event
 // respawns it cold — is where storage migrations, service init and cold-boot
-// races actually break. `stopServiceWorker` above is what makes these tests
-// mean anything: an earlier version used `Runtime.terminateExecution`, which
-// leaves this worker running (measured in deflake-round-3 `lessons/phase-3.md`),
-// so every test here passed against a worker that never died and the one test
-// requiring a real restart failed.
+// races actually break. `stopServiceWorker` (fixtures/helpers.ts) is what makes
+// these tests mean anything: a kill that leaves the worker running lets every
+// test here pass against a worker that never died.
 test("extension survives SW stop+respawn: lock → kill SW → unlock → general", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general")
@@ -118,8 +112,7 @@ test("strict mode default ON: unlock → kill SW → expect lock screen on respa
  * version posted to ConfigService over `chrome.runtime.sendMessage` to stay
  * independent of layout, but wallet services listen on PORTS — the SW's only
  * onMessage listener returns false — so the flag never actually changed and this
- * test asserted a silent restore that strict mode had never been turned off for
- * (deflake-round-3 `lessons/phase-3.md`).
+ * test asserted a silent restore that strict mode had never been turned off for.
  */
 // SKIP — three distinct blockers, all measured, none of them "flaky CI":
 //  1. The original setup was dead. It flipped strictSecurityMode by posting to

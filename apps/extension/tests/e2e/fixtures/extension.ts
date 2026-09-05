@@ -129,6 +129,24 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 		)
 	}
 
+	// `onInstalled` opens the extension's first-run tab; its id lands in session storage last, after
+	// the async `tabs.create`. Close it BEFORE marking onboarding complete: an onboarding page that
+	// mounts and reads the completed flag replaces itself with a popup window and drops the tracked
+	// id, which would leave an untracked extension page in this browser instead. Every e2e drives the
+	// popup flows directly; the tab-flow specs open their own tab through `openOnboarding`.
+	await blankPage.evaluate(async () => {
+		const key = "nulo:onboarding:tab-id"
+		for (let attempt = 0; attempt < 20; attempt++) {
+			const id = (await chrome.storage.session.get(key))[key]
+			if (typeof id === "number") {
+				await chrome.tabs.remove(id).catch(() => {})
+				await chrome.storage.session.remove(key)
+				return
+			}
+			await new Promise((r) => setTimeout(r, 250))
+		}
+	})
+
 	// Default: bypass the new onboarding tab flow for all e2e tests. Existing
 	// tests (registration, import-paths, passkey-paths, etc.) drive the
 	// popup-based create/import flows directly via openPopup. Setting
@@ -140,20 +158,13 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 		await chrome.storage.local.set({ "nulo:onboarding:completed": true })
 	})
 
-	// `onInstalled` already opened the first-run tab (or is about to — the open is async and its
-	// id lands in session storage last). Close it: the flag above makes it dead weight, and left
-	// open it is an extra extension page in every browser — one more client keeping the service
-	// worker awake, one more realm re-routing itself on every lock — that no test asked for.
+	// If the tab id never surfaced above, the tab may still mount now, read the flag, and replace
+	// itself with a popup window that nothing else will ever close — sweep it.
 	await blankPage.evaluate(async () => {
-		const key = "nulo:onboarding:tab-id"
-		for (let attempt = 0; attempt < 20; attempt++) {
-			const id = (await chrome.storage.session.get(key))[key]
-			if (typeof id === "number") {
-				await chrome.tabs.remove(id).catch(() => {})
-				await chrome.storage.session.remove(key)
-				return
-			}
-			await new Promise((r) => setTimeout(r, 250))
+		const popupUrl = chrome.runtime.getURL("src/popup/index.html")
+		for (const win of await chrome.windows.getAll({ windowTypes: ["popup"], populate: true })) {
+			if (win.id !== undefined && win.tabs?.some((tab) => tab.url?.startsWith(popupUrl)))
+				await chrome.windows.remove(win.id).catch(() => {})
 		}
 	})
 

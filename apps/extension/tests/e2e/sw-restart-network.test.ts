@@ -4,10 +4,6 @@ import { TEST_PASSWORD } from "./fixtures/constants"
 import { test, openPopup, waitForHash, clickByTestId, replaceInputValue } from "./fixtures/extension"
 import { lockWallet, stopServiceWorker } from "./fixtures/helpers"
 
-// The kill primitive lives in fixtures/helpers.ts (`stopServiceWorker`): an unattached
-// `Target.closeTarget` from the browser session, awaiting the ORIGINAL target's destruction.
-// Its doc records why `worker().close()` and `Runtime.terminateExecution` are both wrong.
-
 /** Readiness after the restart: session storage retains the pre-kill heartbeat,
  *  so a truthy check passes instantly against a stale value and the next UI wait
  *  races the booting worker. Requiring a STRICTLY NEWER timestamp is what makes
@@ -16,7 +12,7 @@ import { lockWallet, stopServiceWorker } from "./fixtures/helpers"
  *  It is only meaningful because `stopServiceWorker` above waits for the old
  *  target to be GONE. Against a kill that leaves the worker running, a fresh
  *  timestamp arrives from its ordinary heartbeat within HEARTBEAT_INTERVAL_MS
- *  and proves nothing (deflake-round-3 `lessons/phase-3.md`). */
+ *  and proves nothing. */
 async function waitForLiveness(page: Page, afterTs: number): Promise<void> {
 	await page.waitForFunction(
 		async (priorTs: number) => {
