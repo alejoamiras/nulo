@@ -91,7 +91,7 @@ code{font-family:var(--mono);font-size:.92em}
 @media (max-width:640px){h1{font-size:34px}.facts,.rules,.verdicts{grid-template-columns:1fr}.facts div{border-right:0;border-bottom:1px solid var(--line)}}
 </style>
 <main>
-<p class="eyebrow">Blueprint · tools app · mid tier · 2026-09-05</p>
+<p class="eyebrow">Blueprint · tools app · mid tier · approved 2026-09-05</p>
 <h1>Console Blueprint</h1>
 <p class="lede">Turn the round-3 Console mock into the real tools app: a left rail, wallet chips in the header, the wizard card with its step rail, and the Activity dock that lists your bridges as two-line rows and hides to a strip with one badge. The three bridge steps you signed off (token, amount, review) do not change by a single byte.</p>
 <div class="facts">
@@ -164,11 +164,11 @@ code{font-family:var(--mono);font-size:.92em}
 
 <ul style="margin-top:22px">
   <li><b>(a) Dock buttons</b> — Claim, Finish, Retry, Switch account, Claim gas. Never Discard. <span style="color:var(--mint)">ok</span></li>
-  <li><b>(b) Blocked bridges</b> — count in the badge, never pop the dock open. <span style="color:var(--sand)">explained above</span></li>
+  <li><b>(b) Blocked bridges</b> — count in the badge, never pop the dock open. <span style="color:var(--mint)">yes</span></li>
   <li><b>(c) Auto-open</b> — once per bridge, remembered across reloads and tabs; never overrides your explicit "hide". <span style="color:var(--mint)">ok</span></li>
   <li><b>(d) Networks without a bridge</b> — no dock, no Activity list; the note instead. <span style="color:var(--mint)">ok</span>, explained above</li>
   <li><b>(e) Breakpoints</b> — 1100px (dock becomes a panel) and 760px (rail becomes a top row). <span style="color:var(--mint)">ok</span></li>
-  <li><b>(f) The bridge on screen</b> — not in the dock until you background it. <span style="color:var(--sand)">explained above</span></li>
+  <li><b>(f) The bridge on screen</b> — not in the dock until you background it. <span style="color:var(--mint)">fair</span></li>
 </ul>
 
 <h2>Small fixes now inside this plan</h2>
@@ -181,21 +181,20 @@ code{font-family:var(--mono);font-size:.92em}
 </ul>
 
 <div class="approval">
-  <h3>What I need from you</h3>
+  <h3>Approved</h3>
+  <p style="font-size:14px;color:var(--sec)">Owner, 2026-09-05: (a) ok · (b) yes · (c) ok · (d) ok · (e) ok · (f) fair. The list below is what that approval covered.</p>
   <ul>
     <li>Confirm the scope: shell + dock + card chrome, frozen steps, single PR into dev.</li>
     <li>Confirm the tier (mid) and the gates: lint, typecheck, unit, tools smoke and the frozen check every phase; your walk last.</li>
-    <li>Confirm (b) and (f) now that they are explained, or say what you would change.</li>
     <li>No <code>/harden</code> pass is proposed: the change touches no trust boundary.</li>
-    <li>Reply <b>approve</b>, <b>conditional approve</b> (with conditions), or <b>reject</b> (with what blocks).</li>
   </ul>
 </div>
 
 <h2>Implementation seeds</h2>
-<p style="font-size:14px;color:var(--sec)">Drafts until you approve; I will finalise them against the approved scope. Paste exactly one into a session that is already inside the <code>tools-console</code> worktree (<code>agent-worktree resume tools-console</code>).</p>
+<p style="font-size:14px;color:var(--sec)">Final, against the approved scope. Paste exactly one into a session that is already inside the <code>tools-console</code> worktree (<code>agent-worktree resume tools-console</code>).</p>
 <p class="warn">Use exactly ONE per session. They do not compose.</p>
 <div class="seed rec"><h3>/goal <span>Recommended</span></h3>
-<pre>/goal All five phases marked ✓ in implementations-plan/tools-console/plan.md (the per-phase headers in the file — not the chat, not the task list), each ✓ backed by that phase's validation gate as defined in plan.md reported passing in the transcript (`bun run lint`, `bun run --cwd apps/tools typecheck`, `bun run --cwd apps/tools test`, `bun run --cwd apps/tools test:e2e`, and the frozen-steps `git diff --quiet` all exit 0, plus each phase's own line); for each phase the agent has printed `LESSONS_FILE=implementations-plan/tools-console/lessons/phase-N.md` in the transcript; `/code-review` was NOT run (plan.md says code_review: off); the codex fix loop over the net diff from origin/dev converged, evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; Phase 5's owner sign-off is recorded in lessons/phase-5.md; a single PR from worktree-tools-console into dev exists on GitHub, created only after the loop converged (`gh pr view` output in the transcript); `bun run lint` and `bun run --cwd apps/tools test` both report exit 0 in the transcript.</pre></div>
+<pre>/goal All five phases marked ✓ in implementations-plan/tools-console/plan.md (the per-phase headers in the file — not the chat, not the task list), each ✓ backed by that phase's validation gate as defined in plan.md reported passing in the transcript: `bun run lint`, `bun run --cwd apps/tools typecheck`, `bun run --cwd apps/tools test`, `bun run --cwd apps/tools test:e2e`, and `git diff --quiet 91074a74 -- &lt;the nine frozen step files listed in plan.md&gt;` all exit 0, plus each phase's own gate line (Phase 1: the parity pin green and BridgeJournalCard.test.ts byte-identical to 91074a74; Phase 2: shell-smoke.test.ts green; Phase 3: the shell smoke's dock cases green; Phase 4: the frozen diff quoted; Phase 5: `bun run audit:vue` and `bun run --cwd apps/tools build:testnet` exit 0 and the owner's preview sign-off recorded in implementations-plan/tools-console/lessons/phase-5.md); for each phase the agent has printed `LESSONS_FILE=implementations-plan/tools-console/lessons/phase-N.md` in the transcript; `/code-review` was NOT run (plan.md says code_review: off); the codex fix loop over the net diff from 91074a74 converged, evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; the six owner-confirmed choices (a)–(f) in plan.md's Assumptions are implemented as written, including no DISCARD in the dock and the foreground record absent from the Send dock; a single PR from worktree-tools-console into dev exists on GitHub, created only after the loop converged (`gh pr view` output in the transcript); `bun run lint` and `bun run --cwd apps/tools test` both report exit 0 in the transcript.</pre></div>
 <div class="seed"><h3>/loop 15m <span style="color:var(--tert)">Alternative</span></h3>
 <pre>/loop 15m Drive implementations-plan/tools-console forward. Never idle waiting for my input. Each firing:
 1. Reality check: read implementations-plan/tools-console/plan.md and lessons/ (authoritative state — not the chat); native task list empty? rebuild it from plan.md, one task per remaining step; run `git status` and `git log --oneline -5`. If a PR exists, `gh pr view --json statusCheckRollup` (no --watch). Without a PR, `gh run list --branch $(git branch --show-current) --limit 1 --json status,databaseId`.

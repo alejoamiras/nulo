@@ -3,7 +3,7 @@ plan: tools-console
 tier: mid
 code_review: off
 eli5_mode: artifact
-status: audited (codex ×2 + fable, all conditional-approve; every condition folded in below); owner round 1 (2026-09-05) accepted (a)(c)(d)(e), asked for context on (b)(d)(f) and pulled the small follow-ups into scope — awaiting final approval
+status: APPROVED 2026-09-05 — owner accepted all six choices (a)–(f) after the illustrated explanations and pulled the small follow-ups into scope; seeds final; implementing
 base: 91074a74 (origin/dev at planning time; the frozen-step check diffs against this SHA)
 created: 2026-09-05
 ---
@@ -179,7 +179,7 @@ export function useShell(): { section: Ref<Section>; goTo(s: Section): void; ope
 
 **Asks**
 - Resolved at Phase 0: done = pixel-faithful round-3 ✔ · gates ✔ · `/code-review` off ✔ · dock hidden by default ✔ · mint strip stays ✔ · Activity uses the first-visit state ✔.
-- **Need an explicit yes/no at the gate** (codex final: product choices, not defaults): (a) the dock offers CLAIM / FINISH / RETRY / SWITCH / CLAIM GAS, never DISCARD — **owner: ok**; (b) blocked records count in the badge but never auto-open — owner asked for context, explained in the ELI5 with a figure; (c) auto-open is session-only and once per record across reloads and tabs — **owner: ok**; (d) on placeholder networks the dock and Activity list do not instantiate — **owner: ok** (context added to the ELI5); (e) breakpoints 1100 / 760 — **owner: ok**; (f) the foreground record is hidden from the Send dock — owner asked what it means, explained in the ELI5 with a before/after figure.
+- **Confirmed by the owner (2026-09-05), all six:** (a) the dock offers CLAIM / FINISH / RETRY / SWITCH / CLAIM GAS, never DISCARD; (b) blocked records count in the badge but never auto-open; (c) auto-open is session-only and once per record across reloads and tabs; (d) on placeholder networks the dock and Activity list do not instantiate; (e) breakpoints 1100 / 760; (f) the foreground record is hidden from the Send dock until backgrounded (the mock's *on screen* row is dropped). Round-1 answers: (a)(c)(d)(e) ok; (b)(f) confirmed after the illustrated ELI5 explanations.
 
 ## Phases
 
@@ -273,10 +273,8 @@ Single arc, single PR: branch `worktree-tools-console` → `dev`, opened with `g
 
 ## Seeds
 
-ELI5 companion (Artifact): https://claude.ai/code/artifact/c0bc1ef8-a11b-4889-8778-fb5af28d14db — source `implementations-plan/tools-console/eli5.html` (republish the same path to update). The seeds below are DRAFTS until the approval gate; the ELI5 carries the same text.
-
-Recommended: `/goal` (completion is transcript-observable). Alternative: `/loop 15m`, verbatim in the ELI5. Use exactly one per session, inside the `tools-console` worktree.
+ELI5 companion (Artifact): https://claude.ai/code/artifact/c0bc1ef8-a11b-4889-8778-fb5af28d14db — source `implementations-plan/tools-console/eli5.html` (republish the same path to update). **Final** (post-approval, 2026-09-05). Recommended: `/goal` — completion is transcript-observable. Alternative `/loop 15m` is in the ELI5. Use exactly one per session, inside the `tools-console` worktree (`agent-worktree resume tools-console`).
 
 ```
-/goal All five phases marked ✓ in implementations-plan/tools-console/plan.md (the per-phase headers in the file — not the chat, not the task list), each ✓ backed by that phase's validation gate as defined in plan.md reported passing in the transcript (`bun run lint`, `bun run --cwd apps/tools typecheck`, `bun run --cwd apps/tools test`, `bun run --cwd apps/tools test:e2e`, and the frozen-steps `git diff --quiet` all exit 0, plus each phase's own line); for each phase the agent has printed `LESSONS_FILE=implementations-plan/tools-console/lessons/phase-N.md` in the transcript; `/code-review` was NOT run (plan.md says code_review: off); the codex fix loop over the net diff from origin/dev converged, evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; Phase 5's owner sign-off is recorded in lessons/phase-5.md; a single PR from worktree-tools-console into dev exists on GitHub, created only after the loop converged (`gh pr view` output in the transcript); `bun run lint` and `bun run --cwd apps/tools test` both report exit 0 in the transcript.
+/goal All five phases marked ✓ in implementations-plan/tools-console/plan.md (the per-phase headers in the file — not the chat, not the task list), each ✓ backed by that phase's validation gate as defined in plan.md reported passing in the transcript: `bun run lint`, `bun run --cwd apps/tools typecheck`, `bun run --cwd apps/tools test`, `bun run --cwd apps/tools test:e2e`, and `git diff --quiet 91074a74 -- <the nine frozen step files listed in plan.md>` all exit 0, plus each phase's own gate line (Phase 1: the parity pin green and BridgeJournalCard.test.ts byte-identical to 91074a74; Phase 2: shell-smoke.test.ts green; Phase 3: the shell smoke's dock cases green; Phase 4: the frozen diff quoted; Phase 5: `bun run audit:vue` and `bun run --cwd apps/tools build:testnet` exit 0 and the owner's preview sign-off recorded in implementations-plan/tools-console/lessons/phase-5.md); for each phase the agent has printed `LESSONS_FILE=implementations-plan/tools-console/lessons/phase-N.md` in the transcript; `/code-review` was NOT run (plan.md says code_review: off); the codex fix loop over the net diff from 91074a74 converged, evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; the six owner-confirmed choices (a)–(f) in plan.md's Assumptions are implemented as written, including no DISCARD in the dock and the foreground record absent from the Send dock; a single PR from worktree-tools-console into dev exists on GitHub, created only after the loop converged (`gh pr view` output in the transcript); `bun run lint` and `bun run --cwd apps/tools test` both report exit 0 in the transcript.
 ```
