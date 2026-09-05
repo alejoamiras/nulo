@@ -52,8 +52,12 @@ Arc 2 stacks on arc 1 (both touch `DappInteractionService`'s journal-id lookup a
   read by `execute()`'s pre-popup short-circuit (`service.ts:254-262`). That read happens BEFORE two
   awaits (`isConfirmationNeeded`, `service.ts:264`; the interaction lock, `:295`) and the `storage.set`
   at `:321` — a cancel landing in that span is seen by neither the short-circuit nor a subscriber.
-- F4 `OperationJournalService.transitionOperation` emits `onOperationUpdated` with the updated record
-  under the journal mutex (`operation-journal/service.ts:297-332`). `DappInteractionService.init()`
+  `interaction()` exposes no registration boundary: it returns `pending`, which settles with the popup
+  outcome (`:282, :323-327`), so `execute()` cannot act "after registration" — only `interaction()` can.
+- F4 `OperationJournalService.transitionOperation` takes the transition lock, WRITES storage, THEN emits
+  `onOperationUpdated` with the updated record (`operation-journal/service.ts:297-332`); `getOperation`
+  is deliberately lock-free (`:86-87`), so a read is ordered against a transition only by storage
+  linearizability (write complete → visible), never by the mutex. `DappInteractionService.init()`
   already holds `this.operationJournal` (`service.ts:82-89`). SW-service-to-SW-service event wiring in
   `init()` is an established pattern (`execution/service.ts:356-382` `wireCacheInvalidation`).
 - F5 `WindowManager.cancel(handleId, reason: string)` → `_settle` rejects the handle promise with the
@@ -145,8 +149,8 @@ Arc 2 stacks on arc 1 (both touch `DappInteractionService`'s journal-id lookup a
 ## Architecture & Implementation (compact)
 
 **Reuse / location.** No new files except tests. Arc 1 lives in `WindowManager` (accept an `Error` as
-the cancel reason), `DappInteractionService` (journal subscription + post-registration reconciliation +
-journal-keyed lookup; `rejectInteraction` wraps its reason in `UserRejectedError`) and the wallet-sdk
+the cancel reason), `DappInteractionService` (journal subscription + a reconciliation read inside `interaction()` right
+after registration + journal-keyed lookup; `rejectInteraction` wraps its reason in `UserRejectedError`) and the wallet-sdk
 error envelope (one new mapping). Arc 2 extends the `WindowPort` contract in `wallet-core` and both
 adapters, adds two methods to `WindowManager`, one RPC to `DappInteractionService`, one emit to
 `TransactionAwaitingCard`, one pure handler builder, and the wiring in `RecentActivityView`.
@@ -184,19 +188,27 @@ focusInteractionWindow(journalId: string): boolean
 3. `WindowManager._settle` closes the window and rejects the handle promise with the Error instance →
    `handleSendTx` throws it → the wallet-sdk catch-all maps it to `4001 / JOB_CANCELLED` (F5) → the
    record leaves `storage` via the existing `finally` one microtask later (F5).
-4. **Registration gap (codex r1 High).** `interaction()` registers the record after two awaits (F3).
-   After `withLock` returns (record in `storage`, popup create in flight) and only when
-   `hooks?.queuedJournalId` is set, `execute()` awaits one journal re-read: stage ≠ `queued` →
-   `cancelInteractionForJournal(journalId)`. A cancel BEFORE registration is caught by the re-read; a
-   cancel AFTER registration is caught by the subscription; the journal mutex orders the two. The
-   in-flight `create` then finds its handle settled and closes the window it made (F8, dev's fence).
-   Approval cannot bypass this: the re-read completes before the popup could possibly load and click,
-   and `cancelledAt` refuses a click that somehow does.
+4. **Registration gap (codex r1 High, r2 High).** `interaction()` registers the record after two awaits
+   and exposes no registration boundary (F3), so the reconciliation lives INSIDE `interaction()`:
+   immediately after `storage.set(id, interaction)` (still within `withLock`, or right after it — before
+   `return pending`), and only when `hooks?.queuedJournalId` is set, it fires
+   `void this.reconcileCancelledJournal(journalId)`: one lock-free `getOperation`; stage ≠ `queued` →
+   `cancelInteractionForJournal(journalId)`; a failed read is logged and ignored. Fire-and-forget: the
+   caller's `pending` is what rejects, promptly, through the settle — never the read. Ordering (no mutex
+   involved, F4): the journal writes before it emits, and the reconciliation read starts after
+   `storage.set`. A cancel whose event fired BEFORE registration has completed its write, so the read
+   sees `cancelled`. A cancel whose write completes AFTER the read started emits after registration,
+   so the subscription's scan finds the record. Either way exactly one path cancels; the other is an
+   idempotent miss. The in-flight `create` then finds its handle settled and closes the window it made
+   (F8, dev's fence). A failed reconciliation read does not orphan the window: the handle still owns
+   it, Reject works, and an Approve is refused by the claim helper (step 5).
 5. Races: Approve arriving after step 2 is refused (`cancelledAt` for one microtask, then `"Invalid
-   id"`; F7). Approve arriving BEFORE step 2 has already deleted the record (`service.ts:107`), so the
-   scan finds nothing and the lane's controller + claim helper own the cancel
-   (`claim-helper.ts:127-134`) — unchanged behavior. A second `cancelled` event is a no-op (record gone
-   or `cancelledAt` set). The popup's own `beforeunload` reject is a no-op (F6).
+   id"`; F7). Approve arriving BEFORE step 2 — including DURING a still-pending reconciliation read —
+   has already deleted the record (`service.ts:107`), so the scan finds nothing and the lane's
+   controller + claim helper own the cancel (`claim-helper.ts:127-134`, pinned by
+   `claim-helper.test.ts:130-136`) — unchanged behavior; `cancelledAt` cannot guard a cancel not yet
+   observed and is not asked to. A second `cancelled` event is a no-op (record gone or `cancelledAt`
+   set). The popup's own `beforeunload` reject is a no-op (F6).
 
 **Critical flow, arc 2.** (a) `openAndAwait` keeps returning `{ handleId, promise }` synchronously; the
 async chain becomes `getLastFocused()` (never throws) → identity check `handles.get(handleId) === handle`
@@ -247,9 +259,12 @@ rejection → `false`, never a throw.
 - **Cross-dApp.** A dApp cannot cancel another dApp's popup (no dApp-reachable path) and cannot forge a
   journal transition.
 - **Focus RPC scoping.** `focusInteractionWindow` returns `false` unless the interaction's session
-  profile is the active profile, so a stale page of a locked or switched profile cannot pull another
-  profile's approval window to the front. It returns a boolean; a guessed 16-hex journal id learns only
-  "a popup exists for the active profile".
+  profile is the active profile. That scopes the TARGET (only the active profile's popups can ever be
+  raised), not the caller: same-extension sender auth does not bind a page to a profile, so a page
+  opened under profile A that learns a profile-B journal id after a switch to B passes the check —
+  and raises a window B is entitled to see. No caller-binding exists in the RPC layer today and none is
+  added. It returns a boolean; a guessed 16-hex journal id learns only "a popup exists for the active
+  profile".
 - **Information exposure.** Window bounds from `getLastFocused` carry no page content and never leave
   the SW. No URLs or payloads are logged by the new code.
 - **Wrong-window focus.** `focus(handleId)` acts only on the window id the manager created for that
@@ -283,8 +298,8 @@ the named new tests pass.
 #### Phase 2 — journal-driven cancel in `DappInteractionService` + post-registration reconciliation
 - `init()`: `this.operationJournal.onOperationUpdated.add((rec) => { if (rec.progress.stage === "cancelled") this.cancelInteractionForJournal(rec.id) })`.
 - `cancelInteractionForJournal(journalId)` per the arc-1 flow step 2. Idempotent.
-- `execute()`: after `interaction()` has registered the record (F3), and only with `hooks?.queuedJournalId`,
-  re-read the journal; stage ≠ `queued` → `cancelInteractionForJournal(journalId)` (flow step 4). The
+- `interaction()`: right after `storage.set`, and only with `hooks?.queuedJournalId`,
+  `void this.reconcileCancelledJournal(journalId)` (flow step 4; never throws; fire-and-forget). The
   pre-popup short-circuit (`service.ts:254-262`) stays as the cheap early exit.
 - Unit tests (`dapp-interaction/service.test.ts`, existing harness, handler invoked directly): (1) live
   interaction with `hooks.queuedJournalId = J`, cancelled event for J → `windowManager.cancel` called
@@ -293,7 +308,11 @@ the named new tests pass.
   calls; (4) two events → one cancel; (5) Approve after the event and BEFORE cleanup throws
   `JobCancelledError` (the mocked manager never rejects, so the record persists — this pins the
   first-claim-wins order, F7); (6) registration-gap regression: the journal stub reports `cancelled` on
-  the post-registration re-read → the interaction is cancelled without any event.
+  the post-registration read (no event ever fires) → `windowManager.cancel` called once with a
+  `JobCancelledError{jobId}`; (7) deferred-read/approval interleaving: the read is parked, Approve
+  lands (record deleted, `executeOperations` invoked), the read then resolves `cancelled` → no manager
+  cancel, no throw (the cancelled journal record is the claim helper's to refuse — already pinned by
+  `claim-helper.test.ts:130-136`); (8) a rejecting read → no cancel, no throw, window still owned.
 - Composition test (`dapp-interaction/service.composition.test.ts`, mirroring
   `execution/service.composition.test.ts:106-157`): REAL `OperationJournalService` on `FakeBrowserApi`,
   REAL `WindowManager` on the same `FakeBrowserApi.windows` + `MockClock`, `DappInteractionService`
@@ -318,11 +337,15 @@ the named new tests pass.
   `chrome.windows.update`; `getLastFocused` → `chrome.windows.getLastFocused({ windowTypes: ["normal"] })`
   wrapped so any throw, or a window without numeric bounds, → `undefined`. `create` forwards `left/top`.
 - `FakeWindowsAdapter`: record `creates: CreateWindowOptions[]` and `updates: Array<{ windowId; options }>`;
-  a settable `lastFocused: WindowBounds | undefined` (and a `lastFocusedThrows` switch to exercise the
-  never-throws contract at the manager); `update` on a non-live id rejects (mirrors Chrome).
-- Tests (`fake-browser-api.test.ts`): the fake records `create` options and `update` calls; `update` on a
-  closed id rejects. (`ChromeWindowsAdapter` has no test harness today — `core/adapters/` tests only
-  the clock adapter — the filtering/fallback contract is pinned at the manager through the fake.)
+  a settable `lastFocused: WindowBounds | undefined`; `update` on a non-live id rejects (mirrors
+  Chrome). The fake honors the port contract (`getLastFocused` never throws) — no throw switch.
+- Tests: `fake-browser-api.test.ts` — the fake records `create` options and `update` calls; `update` on a
+  closed id rejects. NEW `apps/extension/src/core/adapters/chrome-browser-api.test.ts` (sibling of
+  `clock-ticker-adapter.test.ts`), driving `new RealChromeBrowserApi().windows`
+  (`chrome-browser-api.ts:199-204`) against the `chrome` global the suite already stubs
+  (`tests/vitest.setup.ts:89`): (a) `getLastFocused` calls `chrome.windows.getLastFocused` with
+  `{ windowTypes: ["normal"] }` and returns the bounds; (b) a throwing `getLastFocused`, and a window
+  with non-numeric bounds, both yield `undefined`; (c) `update` forwards `windowId` + options.
 - **Validation gate**: `bun run --cwd packages/wallet-core typecheck && bun run --cwd packages/wallet-core test && bun run typecheck && bun run lint`
   → exit 0. Layers: typecheck/lint · unit.
 
@@ -336,8 +359,7 @@ the named new tests pass.
   → `true`; missing handle/window or an `update` rejection → `false`.
 - Tests (`window-manager.test.ts`): with `lastFocused` set, `create` receives the centered `left/top`
   (one positive-anchor case and one NEGATIVE-anchor case, e.g. `left: -1920, width: 1920` + popup 400 →
-  `left: -1160`); without it, no `left/top`; `lastFocused` throwing → create still happens without
-  `left/top`; timeout elapsing DURING the lookup → no `create` call and the promise rejects with the
+  `left: -1160`); without it, no `left/top`; timeout elapsing DURING the lookup → no `create` call and the promise rejects with the
   timeout; `focus` → `update` called with the exact options and `true`; unknown handle → `false`;
   `update` rejecting → `false`. `centerOn` unit cases: positive, negative, missing bounds → `{}` (the
   manager tests do not repeat the arithmetic). The existing slow-create tests (`:269`, `:302`) park
@@ -437,6 +459,16 @@ mark the index entry and suggest `agent-worktree done dapp-popup-cancel-focus`.
   Rejected: a `ChromeWindowsAdapter` unit test (no harness for `chrome.*` adapters in the repo; the
   contract is pinned through the fake at the manager); tightening `transitionOperation`'s RPC (out of
   scope). Transcript: `audit-codex.md`.
+- Codex round 2 (resumed): **reject** (blocking: `execute()` cannot observe registration — `interaction()`
+  returns the settlement promise — so the r1 fix was unimplementable as written). Adopted: the
+  reconciliation read moved INSIDE `interaction()` right after `storage.set`, fire-and-forget, never
+  throwing (flow step 4); the ordering proof rewritten on write-before-emit + lock-free reads (F4),
+  dropping the mutex and "faster than a click" claims; the deferred-read/approval interleaving and the
+  failed-read case added as unit tests (7)(8); the `lastFocusedThrows` fake switch dropped for two
+  real `ChromeWindowsAdapter` tests through `RealChromeBrowserApi().windows` + the suite's `chrome`
+  stub; the focus-RPC guarantee restated as target-scoped, not caller-bound; recon's Absences line
+  fixed. Owner scope addition (Reject → `UserRejectedError` → 4001, A5) added to Phase 1 between
+  rounds 2 and 3 and sent to codex in round 3.
 
 ## Seeds
 

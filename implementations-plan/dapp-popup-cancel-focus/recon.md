@@ -29,6 +29,6 @@ verified by the driver against the tree before drafting. Paths are repo-relative
 ## Absences (search trails)
 
 - No SW-side journal subscriber: `grep -rn "onOperationUpdated\|onOperationAdded\|onOperationDeleted" apps/extension/src` (all hits popup-side or the journal itself).
-- No `getLastFocused` / `drawAttention` / `windows.update` in SW code: `grep -rn "getLastFocused\|drawAttention\|windows\.update" apps/extension/src packages/wallet-core/src` → only the two popup-page focus precedents above.
+- No `getLastFocused` / `drawAttention` anywhere, and no `windows.update` behind `WindowPort`: `grep -rn "getLastFocused\|drawAttention\|windows\.update" apps/extension/src packages/wallet-core/src` → `windows.update` hits only in `wallet/utils/onboarding-tab.ts:36` (SW-side, raw `chrome.*`) and `popup/pages/settings/advanced/index.vue:37` (popup-side); neither goes through the port or the fake.
 - No e2e helper for feed-cancel or refocus: `tests/e2e/fixtures/popups.ts` read in full.
 - No journal-id → interaction RPC: `dapp-interaction/spec.ts` `Methods` read in full.
