@@ -80,10 +80,11 @@ type MintInputs = { token: MinterToken; from: string; route: FeeRoute; feePayer?
  *  selector and args hash, and the selector of the public finalisation it enqueues. */
 async function expectedMintCall(from: string): Promise<{ selector: string; argsHash: string; finalisation: bigint }> {
 	const mint = getFunctionArtifactByName(TokenContract.artifact, "mint_to_private")
-	const finalisation = getFunctionArtifactByName(TokenContract.artifact, "increase_total_supply_internal")
+	// The loaded artifact carries public functions only through `public_dispatch`; the
+	// internal finalisation's selector comes from its signature.
 	const [selector, finalisationSelector, argsHash] = await Promise.all([
 		FunctionSelector.fromNameAndParameters(mint.name, mint.parameters),
-		FunctionSelector.fromNameAndParameters(finalisation.name, finalisation.parameters),
+		FunctionSelector.fromSignature("increase_total_supply_internal(u128)"),
 		computeVarArgsHash(encodeArguments(mint, [AztecAddress.fromStringUnsafe(from), 1n])),
 	])
 	return { selector: selector.toString(), argsHash: argsHash.toString(), finalisation: finalisationSelector.toField().toBigInt() }
