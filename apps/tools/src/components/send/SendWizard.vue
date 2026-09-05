@@ -856,7 +856,7 @@ function snapshotOf(rec: SendJournalRecord): ReceiptSnapshot {
 		l1TxHash: rec.depositTxHash,
 		l2TxHash: rec.claimTxHash,
 		fuelReceived: rec.fuel?.received,
-		addTokenLabel: token ? `ADD ${token.displaySymbol} TO WALLET` : undefined,
+		addTokenLabel: token ? `ADD ${safeDisplay(token.displaySymbol)} TO WALLET` : undefined,
 	}
 }
 

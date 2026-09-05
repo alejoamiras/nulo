@@ -14,6 +14,7 @@ describe("ActivityRow", () => {
 		const w = mountRow(row())
 		expect(w.get(".amt").text()).toBe("0.5 WETH")
 		expect(w.get(".meta").text()).toBe("ETH → Aztec · public + gas")
+		expect(w.get(sel(TESTIDS.activityRowOpen)).attributes("aria-label")).toBe("Open 0.5 WETH, ETH → Aztec, public + gas, 26m ago")
 		expect(w.get(sel(TESTIDS.activityRowAction)).text()).toBe("CLAIM")
 		expect(w.get(sel(TESTIDS.activityRowAction)).classes()).toContain("filled")
 	})

@@ -1,7 +1,7 @@
 import { watch } from "vue"
 import { assetDecimals, assetSymbol } from "@/lib/asset-label"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
-import { formatBigInt } from "@/lib/format"
+import { formatStoredAmount } from "@/lib/format"
 import { useBridgeJournal } from "./useBridgeJournal"
 import { useToast } from "./useToast"
 
@@ -10,7 +10,7 @@ type Completed = NonNullable<ReturnType<typeof useBridgeJournal>["lastCompleted"
 /** A fee-juice completion is 18-dec Fee Juice, not the token's asset: label it as such. */
 function completionText(done: Completed): string {
 	const sym = assetSymbol(done.assetKind, done.isPrivate)
-	const amount = formatBigInt(BigInt(done.amount), assetDecimals(done.assetKind))
+	const amount = formatStoredAmount(done.amount, assetDecimals(done.assetKind))
 	if (done.direction !== "deposit") return `Released ${amount} ${sym} to Ethereum ✓`
 	return done.assetKind === "fee-juice" ? `Fueled Aztec with ${amount} ${sym} ✓` : `Bridged ${amount} ${sym} to Aztec ✓`
 }

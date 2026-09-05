@@ -42,3 +42,18 @@ VERDICT: request changes. 0 HIGH · 5 MED · 0 LOW · 1 NIT — every one a sibl
 
 Gate after the round: lint 0 · typecheck 0 · unit 96 files / 1237 · smoke 3 files / 28 · frozen diff exit 0.
 
+## Round 3 — resumed, over `69b38acc`
+
+VERDICT: request changes. 0 HIGH · 3 MED · 1 LOW · 1 NIT. All verified; the three MEDs are the same persisted-text class at sites round 2 did not name, so this round also swept the whole app for the pattern (`formatBigInt(BigInt(`, `\${…recipient`, `assetSymbol(`/`displaySymbol` interpolations, `.blocked` reads) and fixed the two the sweep found on top.
+
+| # | Finding | Action |
+|---|---|---|
+| 1 | MED — `guardBlocked` copies the raw `blocked` reason into `runtime.note`, which the phase rail renders | **Fixed.** `safeSentence` at the copy. |
+| 2 | MED — the completion toast formats `lastCompleted.amount` unbounded | **Fixed.** `formatStoredAmount`. |
+| 3 | MED — the permission phase interpolates the stored symbol raw ("Allow reading …") | **Fixed.** `safeDisplay` in `bridge-steps.ts`; the stepper headline test now also renders the prompt (`runtime: { step: "granting" }`). |
+| — | Sweep: the receipt's amount (`toDecimalString(BigInt(…))`) and symbol, and the wizard's `ADD <symbol> TO WALLET` label | **Fixed.** `isStoredAmount` (exported from `format.ts`, the same width rule) gates the receipt's parse; `safeDisplay` on both symbols. |
+| 4 | LOW — moving the meta out of the button left two same-amount rows announcing alike | **Fixed.** The amount button carries `aria-label="Open <amount> <symbol>, <route>, <visibility>, <age>"`. Tested. |
+| 5 | NIT — a CSS comment narrating the grid; the click comment too long | **Fixed.** |
+
+Gate after the round: lint 0 · typecheck 0 · unit 96 files / 1237 · smoke 3 files / 28 · frozen diff exit 0.
+

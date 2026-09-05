@@ -150,8 +150,9 @@ describe("BridgeStepper", () => {
 			intent: "token",
 			token: { displaySymbol: "US\u202eDC", decimals: 6 },
 		} as unknown as DepositJournalRecord
-		const text = mount(BridgeStepper, { props: { record: rec } }).text()
+		const text = mount(BridgeStepper, { props: { record: rec, runtime: { step: "granting" } } }).text()
 		expect(text).toContain("— USDC")
+		expect(text).toContain("USDC")
 		expect(text).not.toContain("\u202e")
 	})
 })

@@ -55,8 +55,7 @@ const side = computed(() => {
 	return "blocked"
 })
 
-// The whole row opens the record for the mouse; the amount is the keyboard's button for it, and
-// the action button stops the click so acting never also navigates.
+// Action clicks must not also open Activity.
 function onAct(): void {
 	if (action.value && !disabled.value) emit("act", props.row.id, action.value)
 }
@@ -73,7 +72,13 @@ function onAct(): void {
 		@click="emit('open', row.id)"
 	>
 		<span class="dot" :class="row.group" aria-hidden="true" />
-		<button type="button" class="amt" :data-testid="TESTIDS.activityRowOpen" @click.stop="emit('open', row.id)">
+		<button
+			type="button"
+			class="amt"
+			:aria-label="`Open ${row.amount} ${row.symbol}, ${row.route}, ${row.visibility}, ${row.age}`"
+			:data-testid="TESTIDS.activityRowOpen"
+			@click.stop="emit('open', row.id)"
+		>
 			{{ row.amount }} <small>{{ row.symbol }}</small>
 		</button>
 		<span class="meta">{{ meta.head }}<b>{{ meta.visibility }}</b>{{ meta.tail }}</span>
@@ -159,7 +164,6 @@ function onAct(): void {
 	color: var(--txt-secondary);
 }
 
-/* Row two runs under the side slot; a button spanning both rows takes that space back. */
 .meta {
 	grid-column: 2 / 4;
 	grid-row: 2;

@@ -36,7 +36,7 @@ import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
 import { isWellFormedTxHash } from "@/lib/claim-receipt"
 import { isReceiptRecordMismatch } from "@/lib/fuel-claim-state"
 import { dropPhaseClock } from "@/lib/phase-clock"
-import { safeAddressText } from "@/lib/token-display"
+import { safeAddressText, safeSentence } from "@/lib/token-display"
 import { withOperation } from "./useOpsInFlight"
 
 // Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
@@ -536,7 +536,7 @@ export async function validateSendRecordBlock(rec: BridgeJournalRecord): Promise
 /** A record the chain has contradicted never runs again - only discarding it clears the state. */
 function guardBlocked(rec: BridgeJournalRecord): boolean {
 	if (!rec.blocked) return true
-	setRuntime(rec.id, { attention: "stale-deployment", note: rec.blocked })
+	setRuntime(rec.id, { attention: "stale-deployment", note: safeSentence(rec.blocked) })
 	return false
 }
 

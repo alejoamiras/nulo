@@ -8,6 +8,7 @@ import {
 	isSendRecord,
 } from "@nulo/bridge-core"
 import type { RecordRuntime } from "@/composables/useBridgeJournal"
+import { safeDisplay } from "@/lib/token-display"
 
 /**
  * The ONE narration view-model (plan S3/S10): maps a record + its runtime onto the phase rail
@@ -121,7 +122,7 @@ function claimPromptOf(fueled: boolean, registersInClaim: boolean): string {
 
 function depositCopy(rec: DepositRailRecord, rt: RecordRuntime, shape: { gasOnly: boolean; fueled: boolean; registersInClaim: boolean }) {
 	const { gasOnly, fueled, registersInClaim } = shape
-	const symbol = isSendRecord(rec) && rec.token ? rec.token.displaySymbol : "this token"
+	const symbol = isSendRecord(rec) && rec.token ? safeDisplay(rec.token.displaySymbol) : "this token"
 	const labels: Record<string, string> = {
 		permit: "PERMISSION",
 		seal: "SEAL",
