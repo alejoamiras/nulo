@@ -138,7 +138,7 @@ playground → wallet-sdk `aztec_simulateTx { exec: { calls: [mint_to_private], 
 
 `<lint>` = `bun run lint`; `<ext-typecheck>` = `bun run --cwd apps/extension typecheck`; `<ext-unit>` = `bun run --cwd apps/extension test`; `<wb>` = `bun run --cwd packages/wallet-bridge typecheck && bun run --cwd packages/wallet-bridge test`; `<pg>` = `bun run --cwd apps/playground typecheck`; `<network> <file>` = `bun run --cwd apps/extension e2e:agent <file>` (owns anvil + node + playground per worktree; run solo). Every gate is `<lint>` exit 0 plus the phase's own lines.
 
-### Phase 0 — Dispatcher honours the dApp's `from` on `simulateTx` and `profileTx`
+### Phase 0 ✓ — Dispatcher honours the dApp's `from` on `simulateTx` and `profileTx`
 - `dispatcher.ts` + pins; playground `pg-input-from` + `pg-toggle-skipValidation` + `pg-input-feePayer` wiring; `sim-from-selfpay.test.ts`.
 - **Gate:** `<wb>` exit 0 with the new pins; `<ext-typecheck>`, `<ext-unit>`, `<pg>` exit 0; `<network> sim-from-selfpay.test.ts` green with validation ON and resolved = accounts[1] in the log; the reversal on `898a3b99`'s dispatcher quoted in `lessons/phase-0.md` (resolved = accounts[0] ≠ payer = accounts[1], route `fpc`, option `EXTERNAL`, the authorization error), preconditions asserted first; neighbours `<network>` `sim-methods`, `multi-account-from`, `tx-sendTx-selfPay`, `authwit-lifecycle` green.
 
@@ -192,6 +192,8 @@ Rows 1–40 (revs 1–5) are recorded in this file's git history (`git log -p --
 | 43 | A2: the private-gas variant used to work | **Adopted.** PrivateFPC credit cells (via `bridgeForMint`) are required in the gate, not a follow-up. |
 | 44 | A6: honouring `from` on simulate/profile is the correct behaviour | **Confirmed.** |
 | 45 | A3: canary as follow-up | **Confirmed.** |
+| 46 | Implementation finding (Phase 1 design): the literal matrix `{never-sent} × {send} × {both fee variants}` is infeasible on two accounts — an account's FIRST send deploys it, and the PrivateFPC *credit* (`pay_fee`) needs a prior `PrivateFPC.mint` sent AS the account, which is itself that first send | **Adopted.** The private route splits into its two real dApp shapes: `fpc-fuel` (FeeJuice.claim + `mint_and_pay_fee` — the bridge's first-claim path, valid on a never-sent account) and `fpc-credit` (`pay_fee` from held credit — deployed accounts only). Never-sent send cells: one per account (self-pay on one, fpc-fuel on the other); deployed cells: the full `{first, second} × {simulate, send} × {self-pay, fpc-credit}`; never-sent simulate cells: both accounts × {self-pay, fpc-fuel}. |
+| 47 | Implementation finding (Phase 0): the SW log trail is retained only with Developer Mode on | **Adopted.** The gate's account oracle is the kernel output — the fee payer and the entrypoint frame of the simulation summary the playground projects (`simulation-summary.ts`) — not a log line. |
 
 **Open:** A7 — the owner's confirmation of the reshaped gate.
 
