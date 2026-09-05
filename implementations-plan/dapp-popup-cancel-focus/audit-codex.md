@@ -79,3 +79,52 @@ Looks fine:
 - Passing an Error instance through the local handle is appropriate; no serialization boundary intervenes (`dispatcher.ts:871`; `error-envelope.ts:32`).
 - Approval-first cancellation already uses cancelled results reconstructed into `JobCancelledError` (`execution/rpc-cancel.ts:69`; `dispatcher.ts:159`).
 - The bounded WindowPort extension and new focus RPC fit existing ownership; leaving unused token plumbing untouched is reasonable.
+
+## Round 2 — follow-up prompt (resumed session)
+
+```
+Round 2. I revised the plan against all nine of your findings. Re-read `implementations-plan/dapp-popup-cancel-focus/plan.md` (fully rewritten) and the corrected `recon.md` row on window focus, then re-review under the same four asks (adversarial/security, assumption attack, implementation critique, recon check) plus the test plan.
+
+What changed, finding by finding:
+1. Registration gap → new "Critical flow, arc 1" step 4 + Phase 2: after `interaction()` registers the record, `execute()` re-reads the journal (only with `hooks.queuedJournalId`); stage ≠ queued → `cancelInteractionForJournal`. Subscription covers cancels after registration; the re-read covers cancels before; the journal mutex orders them. The in-flight `create` then finds its handle settled and dev's fence closes the window it made. Unit regression test (6) added.
+2. Clamping → `centerOn` is signed, no clamping; negative-anchor test (`left: -1920, width: 1920` + 400 → `-1160`); wording "centered on", not "inside" (I4 rewritten).
+3. F6/F7 → restated: the typed `JobCancelledError` refusal covers only the microtask before the `finally` deletes the record; `"Invalid id"` after. No tombstone (listed under alternatives not taken). Unit test (5) is explicitly the pre-cleanup case with the mocked manager.
+4. Security → trust domain restated: any extension page can already `transitionOperation` to `cancelled` (F9 now records `operation-journal/service.ts:47`), the subscriber proves state not user intent; consequence bounded to a denied approval. `focusInteractionWindow` now checks the interaction's `payload.session.profileId` against the active profile → `false` otherwise.
+5. Identity fences → arc-2 flow (a) + Phase 4: synchronous return kept; identity compare (`handles.get(handleId) === handle`) after the lookup, existing post-create check + orphan removal untouched; slow-create tests park after creation starts; `flushCreate` gains a tick.
+6. Keyboard/parent wiring → Phase 5: `tabindex="0"` + `role="button"` only at `queued`; Enter/Space handled only when `event.target === event.currentTarget`; `preventDefault` on Space; `@click.stop` on the cancel button; both render sites (`:812`, `:871`); client disconnected at `:779-784`. Tests for Enter on the cancel button emitting `cancel` only.
+7. Tests → Phase 2 gains a composition test mirroring `execution/service.composition.test.ts:106-157` (real journal on FakeBrowserApi + real WindowManager on the same FakeBrowserApi + `ServiceCollection` of stubs so `init()` wires the subscription for real): two interactions, cancel A → A's window removed, A's `execute()` promise rejects with `JobCancelledError{jobId:A}`, cleanup, B untouched, late `rejectInteraction(A)` harmless. Registration-gap regression and keyboard isolation added. A `ChromeWindowsAdapter` unit test is REJECTED: `core/adapters/` has no harness for `chrome.*` adapters (only `clock-ticker-adapter.test.ts`); the never-throws/filtering contract is pinned at the manager through the fake (`lastFocusedThrows` switch). Tell me if you think that rejection is wrong.
+8. I5 → rewritten as owner decision A6 (queued-only eligibility; dead clicks possible pre-popup and post-approve pre-claim), surfaced at the gate. I2 keeps the Space-switching limitation explicit and notes `state:"normal"` exits maximized/fullscreen.
+9. Recon → the `onboarding-tab.ts:36` SW-side precedent is now recorded; validation note mentions lint's complexity check and `audit:vue`'s build.
+
+Be as critical as in round 1. Verify the new step-4 reconciliation actually closes the gap you found (walk the interleavings: cancel before `isConfirmationNeeded`, during the lock wait, between `storage.set` and the re-read, after the re-read). Check that the composition test as specified is buildable with the existing harness pieces (`ServiceCollection`, `FakeBrowserApi.windows`, `MockClock`, `OperationJournalService(logger, api)`), and that `DappInteractionService.init()` can be driven through `collection.start()` given its `services.get(...)` list at `service.ts:82-89`.
+
+Response shape (≤ 700 words): one-line verdict in EXACTLY one of `approve` | `conditional approve (with conditions: ...)` | `reject (with blocking findings: ...)`; then findings tagged [High|Medium|Low] and bucketed (Security / Facts / Inferences / Asks / Implementation / Recon / Tests) with file:line; then "looks fine".
+```
+
+## Round 2 — response
+
+reject (with blocking findings: post-registration reconciliation still lacks an implementable registration boundary)
+
+Confidence: high. `P` = `implementations-plan/dapp-popup-cancel-focus`; `S` = `apps/extension/src/wallet/services`.
+
+1. **[High] Implementation — `execute()` cannot await registration through the existing interface.** `interaction()` returns the eventual approval/execution result, adopting `pending`; awaiting it waits for settlement, not `storage.set` (`S/dapp-interaction/service.ts:282,321,327`). Calling it without awaiting also does not establish registration because its lock acquisition awaits. Therefore `P/plan.md:187,286` still permits implementing the original gap. Put reconciliation **inside `interaction()` after registration**, or explicitly expose registration separately from settlement. Specify rejection handling while reconciliation runs: cancellation must promptly reject the original caller even if the journal read is delayed; a failed read must not orphan the window.
+
+2. **[Medium] Facts / Inferences — the ordering proof is wrong.** `getOperation()` is explicitly lock-free (`S/operation-journal/service.ts:86,401`); the mutex does not order this read against approval. Nor must storage I/O finish before a popup loads (`P/plan.md:193`). With a correct registration boundary:
+   - Cancellation before confirmation checking or during lock acquisition is recovered by reconciliation.
+   - Cancellation between registration and reconciliation, or afterward, is caught by the subscription.
+   - Approval during reconciliation deletes the interaction before the scan (`S/dapp-interaction/service.ts:117`); `cancelledAt` cannot guard a cancellation not yet observed.
+
+   Remove the speed assumption. Add a deferred-read/approval interleaving proving the existing claim-helper cancellation path preserves the result (`S/execution/claim-helper.ts:127`). A stub that merely returns `cancelled` on its second call does not test these boundaries.
+
+3. **[Medium] Tests — rejecting the adapter test is unjustified.** A fake cannot establish that production passes `windowTypes:["normal"]` or catches Chrome failures. `RealChromeBrowserApi().windows` already exposes the concrete adapter, and the test setup already stubs `chrome` (`apps/extension/src/core/adapters/chrome-browser-api.ts:199`; `apps/extension/tests/vitest.setup.ts:89`). Two small tests can verify filtered lookup and failure/missing-bounds fallback. Replace the fake’s `lastFocusedThrows` machinery with those tests: it contradicts the declared never-throws port contract and tests a different layer (`P/plan.md:318,321`). No new harness abstraction is needed.
+
+4. **[Low] Security — the profile check scopes the target, not the caller.** The claim that a stale profile-A page cannot focus profile B’s popup is too strong: after switching to B, that page can supply B’s journal ID and pass the proposed check (`P/plan.md:249`). Same-extension sender authentication does not bind pages to profiles (`packages/extension-messaging/src/core/sender-auth.ts:17`). Keep the useful target-profile guard, but describe its actual guarantee; no broader authorization redesign is required.
+
+5. **[Low] Recon — the correction is incomplete.** The reuse row is corrected, but `P/recon.md:32` still asserts no SW-side `windows.update`. Re-running the search finds `S/../utils/onboarding-tab.ts:36`. Remove the contradictory absence claim.
+
+**Looks fine**
+
+- **The composition harness is buildable by source inspection.** Register stubs for Profile, Network, Account, DappSession and Execution, plus the real journal and interaction service (`S/dapp-interaction/service.ts:82`). `collection.start()` invokes service initialization (`packages/wallet-core/src/base/index.ts:65`; `packages/extension-messaging/src/core/base-service.ts:64`). Include `getProfiles` for journal creation and `tryGetDappSession` for `execute()`; force confirmation (`S/operation-journal/service.ts:228`; `S/dapp-interaction/service.ts:418,508`). Fake windows and MockClock satisfy the manager’s constructor.
+- Signed centering, both identity fences, keyboard isolation, both render sites and client cleanup address the prior findings (`P/plan.md:330,355,363`).
+- Journal subscription and Error-instance propagation remain appropriate; no additional architectural layer is warranted.
+- Gate commands exist, including complexity checking and the build (`package.json:24,38`; `apps/extension/package.json:22`; `packages/wallet-core/package.json:19`). A6 now states the dead-click tradeoff explicitly (`P/plan.md:139`).

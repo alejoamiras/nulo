@@ -257,7 +257,7 @@
             <span class="n">3</span>
             <div class="body">
               <p><b>Teach the wallet's window layer two more moves.</b> The thin layer that wraps Chrome's window API gains "focus this window" and "where is the window the user last used". Its test double gains the same, so everything above it stays unit-testable without a browser.</p>
-              <p class="proof">Proves itself by: <b>typecheck, lint, and the shared package's unit tests</b> for the test double.</p>
+              <p class="proof">Proves itself by: <b>typecheck, lint, the shared package's unit tests</b> for the test double, and two tests of the real Chrome adapter against a stubbed browser: it asks only for normal windows, and a failure or missing bounds falls back to "no anchor" instead of throwing.</p>
             </div>
           </li>
           <li class="phase">
