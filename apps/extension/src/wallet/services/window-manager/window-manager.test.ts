@@ -67,6 +67,25 @@ describe("WindowManager", () => {
 		expect(removeSpy).toHaveBeenCalledWith(FIRST_WINDOW_ID)
 	})
 
+	it("cancel with an Error rejects with that same instance and calls windows.remove", async () => {
+		const removeSpy = vi.spyOn(browser.windows, "remove")
+		const reason = new Error("typed rejection")
+
+		const { handleId, promise } = manager.openAndAwait<string>({
+			url: "popup.html",
+			width: 400,
+			height: 600,
+			timeoutMs: TIMEOUT_MS,
+			kind: "test",
+		})
+		await flushCreate()
+
+		manager.cancel(handleId, reason)
+
+		await expect(promise).rejects.toBe(reason)
+		expect(removeSpy).toHaveBeenCalledWith(FIRST_WINDOW_ID)
+	})
+
 	it("timeout rejects promise and calls windows.remove", async () => {
 		const removeSpy = vi.spyOn(browser.windows, "remove")
 

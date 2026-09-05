@@ -25,6 +25,7 @@ import {
 	TooManyPendingError,
 	DuplicateInitializationError,
 	UnsupportedMethodError,
+	UserRejectedError,
 } from "@nulo/extension-messaging/errors"
 import type { WalletResponse } from "@aztec/wallet-sdk/types"
 
@@ -37,6 +38,16 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 				walletErrorCode: JobCancelledError.CODE,
 				jobId: (error.details as { jobId?: string } | undefined)?.jobId,
 			},
+		}
+	}
+	if (error instanceof UserRejectedError) {
+		// Same 4001 as JOB_CANCELLED (both mean "the user said no"); the
+		// discriminator keeps pre-approval Reject and mid-flight cancel apart for
+		// dApp telemetry. The message passes through: it is wallet-authored.
+		return {
+			code: 4001,
+			message: error.message,
+			data: { walletErrorCode: UserRejectedError.CODE },
 		}
 	}
 	if (error instanceof CapabilityNotGrantedError) {

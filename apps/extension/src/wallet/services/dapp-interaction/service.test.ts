@@ -19,7 +19,7 @@ import type { ILogger } from "@/wallet/logger"
 import { type LocalTxOrigin, OriginType } from "@/wallet/services/transaction/service"
 import type { WindowManager } from "@/wallet/services/window-manager/window-manager"
 import { describe, expect, test, vi } from "vitest"
-import { JobCancelledError } from "@nulo/extension-messaging/errors"
+import { JobCancelledError, UserRejectedError } from "@nulo/extension-messaging/errors"
 import { DappInteractionService } from "./service"
 import type { DappInteraction, ExecutionHooks } from "./spec"
 
@@ -245,6 +245,21 @@ describe("DappInteractionService cancellation linearization (first service claim
 		// The record survives until window dismissal — overlay + cleanup rely on it.
 		expect(internals.storage.has("i-1")).toBe(true)
 		await expect(svc.isInteractionCancelled("i-1")).resolves.toBe(true)
+	})
+
+	test("rejectInteraction hands the window manager a UserRejectedError carrying the reason", async () => {
+		const { svc, internals } = makeService({})
+		seed(internals, "i-r")
+		const cancel = (internals as unknown as { windowManager: { cancel: ReturnType<typeof vi.fn> } }).windowManager.cancel
+
+		await svc.rejectInteraction("i-r", "User rejected")
+
+		expect(cancel).toHaveBeenCalledTimes(1)
+		const [handleId, reason] = cancel.mock.calls[0] as [string, unknown]
+		expect(handleId).toBe("handle-i-r")
+		expect(reason).toBeInstanceOf(UserRejectedError)
+		expect((reason as UserRejectedError).message).toBe("User rejected")
+		expect(internals.storage.has("i-r")).toBe(false)
 	})
 
 	test("approve claimed first → later cancel finds nothing, approval proceeds exactly once", async () => {

@@ -6,6 +6,7 @@ import {
 	RpcDisconnectedError,
 	RpcTimeoutError,
 	TooManyPendingError,
+	UserRejectedError,
 } from "@nulo/extension-messaging/errors"
 import { DuplicateInitializationError, UnsupportedMethodError } from "@nulo/extension-messaging/errors"
 import { unwrapOperationResult } from "@nulo/wallet-bridge"
@@ -19,6 +20,15 @@ describe("toWalletResponseError", () => {
 			code: 4001,
 			message: "Cancelled",
 			data: { walletErrorCode: JobCancelledError.CODE, jobId: "j-1" },
+		})
+	})
+
+	test("UserRejectedError → {code:4001, walletErrorCode USER_REJECTED} (popup Reject, distinct from JOB_CANCELLED)", () => {
+		const env = toWalletResponseError(new UserRejectedError("User rejected"))
+		expect(env).toEqual({
+			code: 4001,
+			message: "User rejected",
+			data: { walletErrorCode: UserRejectedError.CODE },
 		})
 	})
 

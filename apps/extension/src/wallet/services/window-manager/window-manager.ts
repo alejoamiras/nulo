@@ -32,7 +32,7 @@ export type AwaitedWindow<T> = {
 
 type Handle<T> = {
 	resolve: (value: T) => void
-	reject: (reason: string) => void
+	reject: (reason: unknown) => void
 	windowId: number | undefined
 	settled: boolean
 	unsubOnRemoved: Unsubscribe | null
@@ -55,7 +55,7 @@ export class WindowManager {
 		} while (this.handles.has(handleId))
 
 		let resolve!: (value: T) => void
-		let reject!: (reason: string) => void
+		let reject!: (reason: unknown) => void
 
 		const promise = new Promise<T>((res, rej) => {
 			resolve = res
@@ -128,7 +128,9 @@ export class WindowManager {
 		this._settle(handleId, value, undefined)
 	}
 
-	public cancel(handleId: string, reason: string): void {
+	/** An `Error` reason reaches the awaiting caller as that same instance — the
+	 *  wallet-sdk envelope classifies dApp-facing errors by class, never by text. */
+	public cancel(handleId: string, reason: string | Error): void {
 		this._settle(handleId, undefined, reason)
 	}
 
@@ -166,7 +168,7 @@ export class WindowManager {
 		handle.reject("Window closed by user.")
 	}
 
-	private _settle(handleId: string, value: unknown, error: string | undefined): void {
+	private _settle(handleId: string, value: unknown, error: string | Error | undefined): void {
 		const handle = this.handles.get(handleId)
 		if (!handle) return
 		if (handle.settled) {

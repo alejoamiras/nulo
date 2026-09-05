@@ -282,7 +282,8 @@ the named new tests pass.
 
 ### Arc 1 — cancel closes the popup
 
-#### Phase 1 — `WindowManager.cancel` carries an `Error`; Reject reaches the dApp as 4001
+#### Phase 1 — `WindowManager.cancel` carries an `Error`; Reject reaches the dApp as 4001 ✓
+_(green 2026-09-05; `lessons/phase-1.md`. Gate note: root `bun run typecheck` lacks `vue-tsc` in a worktree — the equivalent `bun run --cwd apps/extension typecheck` is what every gate below means by "typecheck".)_
 - `cancel(handleId, reason: string | Error)`; `Handle.reject: (reason: unknown) => void`; `_settle`
   passes the value through unchanged. Existing string callers unaffected (existing string-cancel test
   at `window-manager.test.ts:52` stays as the string case).
