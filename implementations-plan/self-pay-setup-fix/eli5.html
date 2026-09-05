@@ -108,7 +108,7 @@
   <div class="meta">
     <b>Plan</b><span><code>implementations-plan/self-pay-setup-fix/plan.md</code> on branch <code>worktree-self-pay-setup-fix</code>, from <code>dev</code> at 898a3b99</span>
     <b>Delivery</b><span>one PR into <code>dev</code>; the console shell PR (#546) waits behind it</span>
-    <b>Reviews</b><span>codex (reject → folded in) · fable (conditional approve → folded in) · a fresh codex final pass (below)</span>
+    <b>Reviews</b><span>codex round 1 (reject → folded in) · fable (conditional approve → folded in) · codex fresh pass over rev 2 (reject → folded in) · a second fresh pass over rev 3 (below)</span>
     <b>Code review</b><span>off, per your standing directive; the codex fix loop is the review</span>
   </div>
 
@@ -129,7 +129,8 @@
       </div>
     </div>
     <p>The wallet only says "setup is over" when it knows the account itself is paying. To know that, it compares who the app named as payer with the account the request is running as. On testnet the two did not match, so the wallet built the transaction as if someone else were paying, never ended setup, and the mint landed on the wrong side of the line.</p>
-    <p>Why did they not match? The wallet has one code path for <em>sending</em> a transaction and another for <em>simulating</em> it first (the bridge always simulates a claim before sending). The sending path was fixed months ago to run as the account the app names. The simulating path still runs as the <strong>first</strong> account in the session, whatever the app asked for. With two accounts granted and the second one selected, the simulation ran as the wrong account. Both reviewers found this in the code; it is not a guess.</p>
+    <p>Why did they not match? The wallet has one code path for <em>sending</em> a transaction and another for <em>simulating</em> it first (the bridge always simulates a claim before sending). The sending path was fixed months ago to run as the account the app names. The simulating path (and its sibling, profiling) still runs as the <strong>first</strong> account in the session, whatever the app asked for. With two accounts granted and the second one selected, the simulation ran as the wrong account. Both reviewers found this in the code; it is not a guess. Whether it is exactly what <em>your</em> session hit depends on question A4 below.</p>
+    <p>Your first failed attempt (the private-gas route, "unknown nullifier") is a different symptom and is not explained by this. It gets its own candidate in the diagnosis phase: something the transaction read that the network had not settled yet at the moment of the simulation.</p>
     <p>The green test we already had could not see it: it uses one account, and it only sends.</p>
   </section>
 
@@ -143,20 +144,20 @@
     <div class="phase">
       <div class="n">0</div>
       <div><h3>Run the simulation as the account the app named</h3>
-        <p>One change in the wallet's request dispatcher, so simulate, profile, utility reads and signing all honour the app's account the same way sending already does — and refuse an account the app was never granted. Plus the cheapest possible repro: a two-account session simulating a self-paid transfer.</p>
-        <p class="proves"><b>Proves itself by:</b> unit tests in the wallet bridge; the two-account e2e green now and demonstrably red on the old code; its neighbour tests still green.</p></div>
+        <p>One change in the wallet's request dispatcher so simulate and profile honour the app's account the same way sending already does, and refuse an account the app was never granted. Utility reads and signing already name their account correctly and stay as they are (pinned by tests). Plus the cheapest possible repro: a two-account session simulating a self-paid transfer, with the node's validation switched on.</p>
+        <p class="proves"><b>Proves itself by:</b> unit tests in the wallet bridge; the two-account e2e green now, and on the old code red for the exact documented reason (wrong account, external payer, the node's error); its neighbour tests still green.</p></div>
     </div>
     <div class="phase">
       <div class="n">1</div>
       <div><h3>The gate: a real bridge claim, through the real wallet, on a real node</h3>
-        <p>The test harness deploys the bridge onto its local network (the same node software as testnet, enforcing the same setup rules), deposits from Ethereum to the extension's account, and drives the exact hub claim the tools app makes, paying from held gas. Eight cells: an account that has never sent × one that has; the first granted account × the second; simulate × send. Every landed cell must show a successful receipt, the token arriving, and the fee leaving; every simulate must reach the node's validator.</p>
-        <p class="proves"><b>Proves itself by:</b> every cell ends in success or in a node-side error (never a harness failure); the bridge package's own smoke unchanged.</p></div>
+        <p>The test harness deploys the bridge onto its local network (the same node software as testnet, enforcing the same setup rules — the harness checks nobody widened the list), deposits from Ethereum to the extension's account, and drives the exact hub claim the tools app makes, paying from held gas. Eight cells: an account that has never sent × one that has; the first granted account × the second; simulate × send. Every landed cell must show a successful receipt, the token arriving, and the fee leaving; every simulate must reach the node's validator. Two more cases: the bridge package's own claim orchestration on a token the bridge has not registered yet (so registration and the visibility poll really run), and a deliberately wrong transaction that the node must reject, proving the check is live.</p>
+        <p class="proves"><b>Proves itself by:</b> every cell named in the log and ending in success or in a node-side error (never a harness failure); the wrong transaction rejected; the bridge package's own smoke unchanged.</p></div>
     </div>
     <div class="phase">
       <div class="n">2</div>
       <div><h3>Diagnose whatever is still red</h3>
-        <p>Each red cell is recorded with what the wallet actually used: which account, which fee route, which option. A table of explanations, each with the observation that would disprove it. If everything is green, the conclusion is not "done" but "go back to production evidence": one claim on testnet with a debug line that says which route the wallet took.</p>
-        <p class="proves"><b>Proves itself by:</b> the lessons file names one surviving explanation with its evidence, or records the production re-run.</p></div>
+        <p>Each red cell is recorded with what the wallet actually used: which account, which fee route, which option it encoded, where the setup boundary sat relative to every public call. Each candidate explanation comes with an experiment and the outcome it predicts, so a conclusion is a cause, not a pattern. If everything is green, the conclusion is not "done": your answer to A4 decides whether the production failure is attributed, and if it cannot be, the plan says so and you decide whether the PR waits.</p>
+        <p class="proves"><b>Proves itself by:</b> the lessons file names each surviving explanation with its experiment's observed outcome, or records the unresolved attribution honestly.</p></div>
     </div>
     <div class="phase">
       <div class="n">3</div>
@@ -167,8 +168,8 @@
     <div class="phase">
       <div class="n">4</div>
       <div><h3>Make it a required check</h3>
-        <p>The new tests get their own CI job (they deploy a bridge, too heavy for the shared pool), the job builds the Ethereum contracts it needs, and the change filter learns every folder the fee path and the harness depend on. All of it pinned by the repo's CI-gating tests so nobody can loosen it quietly.</p>
-        <p class="proves"><b>Proves itself by:</b> a clean CI run of the job on this branch, linked in the lessons.</p></div>
+        <p>The new tests get their own CI job (they deploy a bridge, too heavy for the shared pool), the job builds the Ethereum contracts it needs, and the change filter learns every folder the fee path and the harness depend on. All of it pinned by the repo's CI-gating tests so nobody can loosen it quietly, and the branch's protection rules are read back to prove the status is actually required, not just present.</p>
+        <p class="proves"><b>Proves itself by:</b> a clean CI run of the job on the branch's final commit with every cell named, plus the branch-protection read-out, linked in the lessons.</p></div>
     </div>
     <div class="phase">
       <div class="n">5</div>
@@ -191,7 +192,7 @@
       </tbody>
     </table>
     </div>
-    <p class="cap">Before the fix, the two marked cells are expected to reproduce the production error on the local node. After it, all eight pass. One more case runs the bridge package's own claim orchestration end to end (register → poll → send), the way the tools app does it.</p>
+    <p class="cap">Before the fix, the two marked cells are expected to reproduce the production error on the local node. After it, all eight pass. Two more cases sit beside the matrix: the bridge package's own claim orchestration on an unregistered token (register → poll → send, the way the tools app does it), and a deliberately wrong transaction the node must reject.</p>
   </section>
 
   <section>
@@ -200,7 +201,7 @@
       <li><strong>Why the existing test was green.</strong> It used one account and only sent. The bug lives in the simulate path with two accounts. Neither dimension was in any test; the plan adds both as axes, not as one-off cases.</li>
       <li><strong>Why the fix comes before the big test.</strong> The defect is visible in the code today and has a two-minute repro. Building the bridge harness first would have meant three hours to confirm what a unit test confirms in seconds. The harness still gets built: your requirement is the real claim shape, and that is what the gate drives.</li>
       <li><strong>Why not drive the tools UI itself.</strong> The claim needs an Ethereum wallet in the browser for the deposit and a journal record for the card; the playground drives the identical wallet-SDK call chain with a tenth of the fixture. Driving the tools UI is a sensible follow-up; the harness can already start it.</li>
-      <li><strong>Why the first review said "reject".</strong> The first draft guessed a fix on the wrong path, wrote gates in commands that only cover the extension, and did not know the CI runner never builds the Ethereum contracts the harness needs. All of it is folded in; the decision ledger in plan.md lists each finding and what changed.</li>
+      <li><strong>Why two reviews said "reject".</strong> The first draft guessed a fix on the wrong path, wrote gates in commands that only cover the extension, and did not know the CI runner never builds the Ethereum contracts the harness needs. The second draft still aimed the fix at two wallet methods that were never broken, would have let the cheap repro skip the node's validation, and put the CI job in the wrong workflow. All of it is folded in; the decision ledger in plan.md (30 rows) lists each finding and what changed.</li>
     </ul>
   </section>
 
@@ -209,9 +210,9 @@
     <ul>
       <li><strong>A2 · the private-gas variant.</strong> Attempt it in Phase 5, but do not hold the PR for it if the credit funding cannot be built in one phase. Default: attempt, PR does not wait.</li>
       <li><strong>A3 · a nightly testnet canary</strong> of the claim. Separate work after this lands. Default: follow-up.</li>
-      <li><strong>A4 · your session.</strong> Did the tools session have two or more accounts granted, with the failing one not the first? Only needed if the matrix is all green after Phase 0.</li>
-      <li><strong>A5 · CI time.</strong> The new job deploys a bridge per run, roughly 8–12 minutes on top of the pool. Default: accept.</li>
-      <li><strong>A6 · a behaviour change.</strong> Apps that simulate, profile or read as a specific account in a multi-account session will now get that account instead of the first one. Default: yes; it is the documented follow-up of the earlier send-path fix.</li>
+      <li><strong>A4 · your session.</strong> Did the tools session have two or more accounts granted, with the failing one not the first? (The account chooser; the wallet's log line <code>handleSendTx: account=</code>; the registration and claim hashes from the journal.) This is the only evidence that ties the found defect to what you hit; without it the fix and the gate still stand, but attribution stays open.</li>
+      <li><strong>A5 · CI time.</strong> The new job deploys a bridge per run — an unmeasured estimate of 8–12 minutes on top of the pool until Phase 4 measures it. Default: accept, revisit with the number.</li>
+      <li><strong>A6 · a behaviour change.</strong> Apps that simulate or profile as a specific account in a multi-account session will now get that account instead of the first one. Default: yes; it is the documented follow-up of the earlier send-path fix.</li>
     </ul>
   </section>
 
@@ -228,7 +229,8 @@
     <div class="verdicts">
       <div><b>codex r1</b><span>reject — five findings on the first draft, all adopted (ledger rows 2–7, 9, 11–17)</span></div>
       <div><b>fable r1</b><span>conditional approve — found the root cause (H5) in the code; conditions adopted (rows 1, 3, 5, 7–10, 18)</span></div>
-      <div><b>codex final</b><span id="final-verdict">pending — a fresh session over the revised plan and the ledger</span></div>
+      <div><b>codex fresh</b><span>reject on rev 2 — Phase 0 aimed at two methods that were never broken, the cheap repro would skip validation, CI job mislocated; all folded into rev 3 (ledger rows 20–30)</span></div>
+      <div><b>codex final</b><span id="final-verdict">pending — a second fresh session over rev 3 and the ledger</span></div>
     </div>
   </div>
 
@@ -237,7 +239,7 @@
     <p class="warn"><b>Use exactly one per session.</b> They do not compose; setting one replaces the other. The session must run inside the plan's worktree (<code>agent-worktree resume self-pay-setup-fix</code>).</p>
     <div class="seed">
       <div class="head"><strong>Recommended: /goal</strong><span>completion is transcript-observable</span></div>
-      <pre>/goal All six phases (0–5) marked ✓ in implementations-plan/self-pay-setup-fix/plan.md (the per-phase headers in the file — not the chat, not the task list), each ✓ backed by that phase's validation gate as defined in plan.md reported passing in the transcript — every phase: `bun run lint` exit 0 plus its own lines (Phase 0: `bun run --cwd packages/wallet-bridge typecheck` and `test` exit 0 with the new dispatcher pins, `bun run --cwd apps/extension typecheck` and `test` exit 0, `bun run --cwd apps/playground typecheck` exit 0, `sim-from-selfpay.test.ts` green via `bun run --cwd apps/extension e2e:agent` AND quoted red against 898a3b99's dispatcher, neighbours sim-methods / multi-account-from / tx-sendTx-selfPay / authwit-lifecycle green; Phase 1: `bun run --cwd packages/bridge-core typecheck` and `test` exit 0, `deploy:sandbox -- --smoke` exit 0, `bridge-claim-selfpay.test.ts` with every cell ending in success or a node-origin error and zero fixture-origin failures, red cells quoted; Phase 2: lessons/phase-2.md naming one surviving explanation with its evidence or the all-green branch's production evidence; Phase 3: all public self-pay cells green and the neighbour list green; Phase 4: `bun run lint:actions` and `bun run test:ci-gating` exit 0 and a linked green workflow_dispatch of the network workflow with the heavy-bridge job; Phase 5: the private-credit cells green or the boundary recorded); for each phase `LESSONS_FILE=implementations-plan/self-pay-setup-fix/lessons/phase-N.md` printed in the transcript; `/code-review` NOT run (plan.md says code_review: off); the codex fix loop over the net diff from 898a3b99 converged, evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; a single PR from worktree-self-pay-setup-fix into dev exists on GitHub, created only after the loop converged (`gh pr view` output in the transcript); `bun run lint` and `bun run --cwd apps/extension test` both report exit 0 in the transcript.</pre>
+      <pre>/goal All six phases (0–5) marked ✓ in implementations-plan/self-pay-setup-fix/plan.md (the per-phase headers in the file — not the chat, not the task list), each ✓ backed by that phase's validation gate as defined in plan.md reported passing in the transcript — every phase: `bun run lint` exit 0 plus its own lines (Phase 0: `bun run --cwd packages/wallet-bridge typecheck` and `test` exit 0 with the new dispatcher pins (simulate/profile honour `from`, unauthorized refused, utility scopes and createAuthWit unchanged), `bun run --cwd apps/extension typecheck` and `test` exit 0, `bun run --cwd apps/playground typecheck` exit 0, `sim-from-selfpay.test.ts` green with validation ON via `bun run --cwd apps/extension e2e:agent`, AND its reversal on 898a3b99's dispatcher quoted showing resolved = accounts[0], payer = accounts[1], route fpc, option EXTERNAL and the node's "Setup function not on allow list", neighbours sim-methods / multi-account-from / tx-sendTx-selfPay / authwit-lifecycle green; Phase 1: `bun run --cwd packages/bridge-core typecheck` and `test` exit 0, `deploy:sandbox -- --smoke` exit 0, `bridge-claim-selfpay.test.ts` with the negative control rejected, TX_PUBLIC_SETUP_ALLOWLIST asserted unset, every matrix cell named in the log and ending in success or a node-origin error, the PXO case with path "register,claim", zero fixture-origin failures, red cells quoted; Phase 2: lessons/phase-2.md naming each surviving explanation with its intervention's observed outcome, or the all-green branch with A4's evidence or "production attribution unresolved"; Phase 3: all public self-pay cells and the PXO case green and the neighbour list green (claim cells under real proving if init/PXE code changed); Phase 4: `bun run lint:actions` and `bun run test:ci-gating` exit 0, a linked green workflow_dispatch on the final commit with `network-e2e-heavy-bridge` green and every cell named, and `gh api` branch protection for dev quoted with network-e2e-status required; Phase 5: the private-credit cells green or the boundary recorded); for each phase `LESSONS_FILE=implementations-plan/self-pay-setup-fix/lessons/phase-N.md` printed in the transcript; `/code-review` NOT run (plan.md says code_review: off); the codex fix loop over the net diff from 898a3b99 converged, evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; a single PR from worktree-self-pay-setup-fix into dev exists on GitHub, created only after the loop converged (`gh pr view` output in the transcript); `bun run lint` and `bun run --cwd apps/extension test` both report exit 0 in the transcript.</pre>
     </div>
     <div class="seed alt">
       <div class="head"><strong>Alternative: /loop 15m</strong><span>interval-driven fallback</span></div>
