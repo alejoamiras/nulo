@@ -129,23 +129,26 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 		)
 	}
 
-	// `onInstalled` opens the extension's first-run tab; its id lands in session storage last, after
-	// the async `tabs.create`. Close it BEFORE marking onboarding complete: an onboarding page that
-	// mounts and reads the completed flag replaces itself with a popup window and drops the tracked
-	// id, which would leave an untracked extension page in this browser instead. Every e2e drives the
-	// popup flows directly; the tab-flow specs open their own tab through `openOnboarding`.
-	await blankPage.evaluate(async () => {
+	// `onInstalled` opens the extension's first-run tab and stores its id in session storage; both
+	// happen during the worker's boot, which the liveness wait above has already seen complete, so
+	// the poll is a bound, not a race we expect to lose. Close the tab BEFORE marking onboarding
+	// complete: an onboarding page that mounts and reads the completed flag replaces itself with a
+	// popup window and drops the tracked id, leaving an untracked extension page in this browser.
+	// Every e2e drives the popup flows directly; the tab-flow specs open their own tab.
+	const firstRunTabClosed = await blankPage.evaluate(async () => {
 		const key = "nulo:onboarding:tab-id"
 		for (let attempt = 0; attempt < 20; attempt++) {
 			const id = (await chrome.storage.session.get(key))[key]
 			if (typeof id === "number") {
 				await chrome.tabs.remove(id).catch(() => {})
 				await chrome.storage.session.remove(key)
-				return
+				return true
 			}
 			await new Promise((r) => setTimeout(r, 250))
 		}
+		return false
 	})
+	if (!firstRunTabClosed) console.warn("[launchExtension] no first-run tab id within 5s — an onboarding page may linger")
 
 	// Default: bypass the new onboarding tab flow for all e2e tests. Existing
 	// tests (registration, import-paths, passkey-paths, etc.) drive the
@@ -156,16 +159,6 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 	// in their own setup before driving the tab.
 	await blankPage.evaluate(async () => {
 		await chrome.storage.local.set({ "nulo:onboarding:completed": true })
-	})
-
-	// If the tab id never surfaced above, the tab may still mount now, read the flag, and replace
-	// itself with a popup window that nothing else will ever close — sweep it.
-	await blankPage.evaluate(async () => {
-		const popupUrl = chrome.runtime.getURL("src/popup/index.html")
-		for (const win of await chrome.windows.getAll({ windowTypes: ["popup"], populate: true })) {
-			if (win.id !== undefined && win.tabs?.some((tab) => tab.url?.startsWith(popupUrl)))
-				await chrome.windows.remove(win.id).catch(() => {})
-		}
 	})
 
 	await blankPage.close()

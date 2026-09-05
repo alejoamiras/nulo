@@ -1685,19 +1685,23 @@ export async function deleteNetworkRow(page: Page, name: string): Promise<void> 
 	await page.waitForFunction((sel: string) => !document.querySelector(sel), { timeout: 5_000 }, rowSelector)
 }
 
+const STOP_WORKER_BUDGET_MS = 15_000
+const WORKER_PROBE_BUDGET_MS = 2_000
+
 /** The worker global's creation time: only a new worker instance produces a newer value. Read
- *  through a session of its own, detached before the promise settles. */
-async function readWorkerTimeOrigin(target: Target): Promise<number> {
+ *  through a session of its own, bounded so a wedged round trip cannot hold the caller past its
+ *  budget; the detach is never awaited — the session is released as soon as the read settles. */
+async function readWorkerTimeOrigin(target: Target, budgetMs: number): Promise<number> {
 	const session = await target.createCDPSession()
 	try {
-		const { result } = await session.send("Runtime.evaluate", { expression: "performance.timeOrigin", returnByValue: true })
+		const read = session.send("Runtime.evaluate", { expression: "performance.timeOrigin", returnByValue: true })
+		const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("worker probe timed out")), budgetMs))
+		const { result } = await Promise.race([read, timeout])
 		return Number(result.value)
 	} finally {
-		await session.detach().catch(() => {})
+		session.detach().catch(() => {})
 	}
 }
-
-const STOP_WORKER_BUDGET_MS = 15_000
 
 /**
  * Terminate the extension's service worker and wait until the ORIGINAL worker instance is gone.
@@ -1717,7 +1721,7 @@ const STOP_WORKER_BUDGET_MS = 15_000
 export async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
 	const isExtensionWorker = (t: Target) => t.type() === "service_worker" && t.url().includes(ext.extensionId)
 	const swTarget = await ext.browser.waitForTarget(isExtensionWorker, { timeout: STOP_WORKER_BUDGET_MS })
-	const originBefore = await readWorkerTimeOrigin(swTarget)
+	const originBefore = await readWorkerTimeOrigin(swTarget, WORKER_PROBE_BUDGET_MS)
 
 	let settled = false
 	let onDestroyed: (target: Target) => void = () => {}
@@ -1743,7 +1747,7 @@ export async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
 			await new Promise((r) => setTimeout(r, 2_000))
 			while (!settled) {
 				const live = ext.browser.targets().find(isExtensionWorker)
-				const origin = live ? await readWorkerTimeOrigin(live).catch(() => undefined) : undefined
+				const origin = live ? await readWorkerTimeOrigin(live, WORKER_PROBE_BUDGET_MS).catch(() => undefined) : undefined
 				if (origin !== undefined && origin > originBefore) return
 				await new Promise((r) => setTimeout(r, 250))
 			}
@@ -1766,6 +1770,6 @@ export async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
 		settled = true
 		if (deadlineTimer) clearTimeout(deadlineTimer)
 		ext.browser.off("targetdestroyed", onDestroyed)
-		await browserSession.detach().catch(() => {})
+		browserSession.detach().catch(() => {})
 	}
 }

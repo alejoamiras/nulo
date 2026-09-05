@@ -37,3 +37,28 @@ Adopted:
   from the touched specs.
 
 Re-validated under `taskset -c 0,1`, retry 0: the SW-restart trio × 4 rounds, 4/4.
+
+## Round 2 — `not converged` (2 Medium, 1 Low) — response (verbatim)
+
+- **Medium — CDP work still escapes the deadline** ([helpers.ts:1746](apps/extension/tests/e2e/fixtures/helpers.ts:1746), [helpers.ts:1769](apps/extension/tests/e2e/fixtures/helpers.ts:1769)). **Confidence: high.** `Promise.race` does not cancel the losing probe; `settled` cannot interrupt its pending evaluation, leaving its worker session attached after rejection. Detaching the browser session does not detach that separately created session. Furthermore, the awaited browser-session detach remains outside the deadline. Source-based simulations confirmed rejection at 15 seconds with a worker session still attached, and a stalled browser detach keeping the helper pending beyond 20 seconds. Bound probe operations, clean up their sessions when the race settles, and bound final cleanup.
+
+- **Medium — the popup sweep misses a later mount** ([extension.ts:165](apps/extension/tests/e2e/fixtures/extension.ts:165)). **Confidence: high.** In the explicitly anticipated case where the tab ID misses the five-second poll, `windows.getAll()` can complete before onboarding mounts and creates its replacement popup. The fixture then returns with cleanup finished; the popup appears afterward. Executing the actual cleanup and redirect snippets in that order reproduced this. Cleanup must synchronize with startup-page completion or closure; one window snapshot cannot cover future creation.
+
+- **Low — two comment violations remain.** **Confidence: high.** [sw-restart-network.test.ts:13](apps/extension/tests/e2e/sw-restart-network.test.ts:13) still promises the old *target* is gone; change that to worker instance. Remove “codex audit catch” from [sw-resilience.test.ts:205](apps/extension/tests/e2e/sw-resilience.test.ts:205).
+
+not converged
+
+## Round 2 — triage
+
+Adopted:
+- M: the losing probe kept its worker session attached past the deadline and the browser-session
+  detach was awaited outside it. Each probe now races `Runtime.evaluate` against a 2 s budget and
+  releases its session without awaiting; the browser session's detach is fire-and-forget too.
+- M: the popup sweep could run before a late onboarding mount. Rather than synchronize with a page we
+  are trying not to have, the fixture states the invariant it relies on — the tab id is stored during
+  the worker's boot, which the liveness wait has already seen complete — and reports a miss with a
+  `console.warn` instead of pretending a one-shot window snapshot covers the future. The sweep is gone.
+- L: "old target to be GONE" → "old worker INSTANCE"; the "(codex audit catch)" review reference
+  dropped from a pre-existing comment in the touched file.
+
+Re-validated under `taskset -c 0,1`, retry 0: the SW-restart trio × 3 rounds, 3/3; no warning fired.

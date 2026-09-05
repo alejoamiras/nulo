@@ -202,7 +202,7 @@ test.skip("strict mode OFF (opt-out): unlock → toggle off → relock+unlock �
  * gap; this test fails if anyone reintroduces the setInterval-only
  * pattern.
  *
- * Note on existence vs timestamp comparison (codex audit catch):
+ * Existence vs timestamp comparison:
  * chrome.storage.session survives SW termination while the extension
  * stays loaded, so an existence check would pass on the stale pre-restart
  * value and miss the regression. Fresh-timestamp comparison is the

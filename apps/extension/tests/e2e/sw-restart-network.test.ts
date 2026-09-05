@@ -9,8 +9,8 @@ import { lockWallet, stopServiceWorker } from "./fixtures/helpers"
  *  races the booting worker. Requiring a STRICTLY NEWER timestamp is what makes
  *  this causal.
  *
- *  It is only meaningful because `stopServiceWorker` above waits for the old
- *  target to be GONE. Against a kill that leaves the worker running, a fresh
+ *  It is only meaningful because `stopServiceWorker` waits for the old worker
+ *  INSTANCE to be gone. Against a kill that leaves it running, a fresh
  *  timestamp arrives from its ordinary heartbeat within HEARTBEAT_INTERVAL_MS
  *  and proves nothing. */
 async function waitForLiveness(page: Page, afterTs: number): Promise<void> {
