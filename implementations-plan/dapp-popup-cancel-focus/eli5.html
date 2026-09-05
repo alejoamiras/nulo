@@ -1,0 +1,340 @@
+<title>Popup Cancel and Refocus</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #F6F7F9;
+    --panel: #FFFFFF;
+    --ink: #1A1E26;
+    --muted: #5C6474;
+    --hair: #D8DCE3;
+    --accent: #0F7C86;
+    --accent-soft: #E3F1F3;
+    --cancel: #B0402C;
+    --cancel-soft: #F8E9E5;
+    --code-bg: #EEF0F4;
+    --font-display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+    --font-body: "IBM Plex Sans", "Segoe UI", Roboto, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #14171C;
+      --panel: #1B1F26;
+      --ink: #E8EAEE;
+      --muted: #9AA3B2;
+      --hair: #2B313B;
+      --accent: #3FB7C1;
+      --accent-soft: #14343A;
+      --cancel: #E3705A;
+      --cancel-soft: #3A221D;
+      --code-bg: #232830;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #14171C;
+    --panel: #1B1F26;
+    --ink: #E8EAEE;
+    --muted: #9AA3B2;
+    --hair: #2B313B;
+    --accent: #3FB7C1;
+    --accent-soft: #14343A;
+    --cancel: #E3705A;
+    --cancel-soft: #3A221D;
+    --code-bg: #232830;
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.6;
+  }
+  .page {
+    max-width: 68ch;
+    margin: 0 auto;
+    padding: 3rem 1.25rem 5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 2.75rem;
+  }
+  h1, h2, h3 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    line-height: 1.15;
+    text-wrap: balance;
+    margin: 0;
+  }
+  h1 { font-size: 2.4rem; letter-spacing: -0.01em; }
+  h2 { font-size: 1.45rem; }
+  h3 { font-size: 1.05rem; font-weight: 500; }
+  p { margin: 0; }
+  section { display: flex; flex-direction: column; gap: 1rem; }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .lede { font-size: 1.1rem; color: var(--ink); }
+  .muted { color: var(--muted); }
+  code, pre { font-family: var(--font-mono); font-size: 0.86rem; }
+  code { background: var(--code-bg); padding: 0.05em 0.35em; border-radius: 3px; }
+  pre {
+    background: var(--code-bg);
+    padding: 1rem 1.1rem;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    line-height: 1.5;
+    border-left: 3px solid var(--hair);
+  }
+  pre code { background: none; padding: 0; }
+  ul, ol { margin: 0; padding-left: 1.25rem; display: flex; flex-direction: column; gap: 0.45rem; }
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* The header figure: two displays, the popup on the wrong one. */
+  .figure { display: flex; flex-direction: column; gap: 0.5rem; }
+  .figure svg { width: 100%; height: auto; display: block; }
+  .figure .caption { font-size: 0.85rem; color: var(--muted); }
+
+  /* Rubric */
+  table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+  th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--hair); vertical-align: top; }
+  th { font-weight: 600; font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+  td.score { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .table-wrap { overflow-x: auto; }
+
+  /* Arcs: two blocks, the second literally stacked on the first. */
+  .stack { display: flex; flex-direction: column; gap: 0; }
+  .arc {
+    background: var(--panel);
+    border: 1px solid var(--hair);
+    padding: 1.4rem 1.5rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+  }
+  .arc + .arc { border-top: 0; }
+  .arc-1 { border-left: 4px solid var(--cancel); }
+  .arc-2 { border-left: 4px solid var(--accent); }
+  .arc-head { display: flex; flex-direction: column; gap: 0.25rem; }
+  .arc-head .eyebrow.cancel { color: var(--cancel); }
+  .arc-head .eyebrow.focus { color: var(--accent); }
+  .phases { display: flex; flex-direction: column; gap: 1rem; padding-left: 0; list-style: none; }
+  .phase { display: grid; grid-template-columns: 2.4rem 1fr; gap: 0.6rem; }
+  .phase .n {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--muted);
+    padding-top: 0.25rem;
+  }
+  .phase .body { display: flex; flex-direction: column; gap: 0.35rem; }
+  .proof { font-size: 0.88rem; color: var(--muted); }
+  .proof b { color: var(--ink); font-weight: 600; }
+  .stack-note {
+    font-size: 0.85rem;
+    color: var(--muted);
+    padding: 0.5rem 1.5rem;
+    border-left: 1px dashed var(--hair);
+    margin-left: 1.5rem;
+  }
+
+  .approval {
+    background: var(--accent-soft);
+    border: 1px solid var(--hair);
+    padding: 1.3rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+  }
+  .approval ul { gap: 0.55rem; }
+  .verdicts { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .verdicts code { background: var(--panel); border: 1px solid var(--hair); padding: 0.25em 0.55em; }
+
+  .seeds { border-top: 1px solid var(--hair); padding-top: 2.25rem; gap: 1.25rem; }
+  .seed { display: flex; flex-direction: column; gap: 0.6rem; }
+  .seed.recommended pre { border-left-color: var(--accent); }
+  .warning { color: var(--cancel); font-weight: 600; font-size: 0.92rem; }
+  .draft {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--cancel);
+    border: 1px solid currentColor;
+    padding: 0.1em 0.5em;
+    align-self: flex-start;
+  }
+  .footer { font-size: 0.85rem; color: var(--muted); }
+  @media (prefers-reduced-motion: no-preference) {
+    .arc { transition: border-color 0.2s ease; }
+  }
+</style>
+
+<div class="page">
+  <header>
+    <section>
+      <p class="eyebrow">Blueprint · light · two stacked PRs · Nulo extension</p>
+      <h1>Popup Cancel and Refocus</h1>
+      <p class="lede">When a dApp asks the wallet to send a transaction, the wallet opens a small approval window. Two things are wrong with it today: cancelling the transaction from the wallet's own activity feed leaves that window open, and on a Mac with several displays the window can open somewhere you are not looking, with no way to bring it back. This plan fixes both, in two separate pull requests so each fix can be checked on its own.</p>
+    </section>
+  </header>
+
+  <section class="figure" aria-label="Two displays; the approval window opened on the one you are not looking at">
+    <svg viewBox="0 0 640 220" role="img" aria-labelledby="fig-title">
+      <title id="fig-title">Two displays. The dApp tab is on the left display; the 400 by 800 approval window opened on the right one.</title>
+      <!-- left display: the one you're looking at -->
+      <rect x="10" y="20" width="300" height="180" rx="6" fill="var(--panel)" stroke="var(--hair)" stroke-width="2"/>
+      <rect x="24" y="34" width="272" height="22" fill="var(--code-bg)"/>
+      <rect x="32" y="40" width="90" height="10" rx="2" fill="var(--hair)"/>
+      <text x="40" y="100" font-family="IBM Plex Sans, sans-serif" font-size="13" fill="var(--ink)">dApp tab · "Queued..."</text>
+      <text x="40" y="122" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--muted)">you are here</text>
+      <!-- right display: where the popup went -->
+      <rect x="330" y="20" width="300" height="180" rx="6" fill="var(--panel)" stroke="var(--hair)" stroke-width="2"/>
+      <rect x="500" y="50" width="70" height="140" rx="3" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+      <text x="535" y="126" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--accent)">400×800</text>
+      <text x="345" y="100" font-family="IBM Plex Sans, sans-serif" font-size="13" fill="var(--ink)">approval window</text>
+      <text x="345" y="122" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--muted)">other display / Space</text>
+    </svg>
+    <p class="caption">The approval window is a fixed 400 by 800 popup. Chrome opens it near whichever of its windows was last active, which on a multi-display Mac is often not the one showing the dApp.</p>
+  </section>
+
+  <section>
+    <h2>Why a light plan, and why two PRs</h2>
+    <p>The blueprint rubric counts how many risk dimensions are high. None are, so the lightest tier applies: one plan, one outside review by Codex, then implementation. You asked for two PRs so the cancel fix can be verified before the focus work lands on top of it.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Dimension</th><th>Score</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>Novelty</td><td class="score">low</td><td>Every piece has a precedent in the codebase; recon found the exact patterns to copy.</td></tr>
+          <tr><td>Blast radius</td><td class="score">low</td><td>Only the dApp approval popup and the Queued card. Sends from the wallet's own UI are untouched.</td></tr>
+          <tr><td>Irreversibility</td><td class="score">low</td><td>No stored data changes. A revert is a plain revert.</td></tr>
+          <tr><td>Migration cost</td><td class="score">none</td><td>Nothing persisted changes shape.</td></tr>
+          <tr><td>External coupling</td><td class="score">low</td><td>Chrome's window API, already in use. One behavior needs a manual check on your Mac (see open questions).</td></tr>
+          <tr><td>Security sensitivity</td><td class="score">low</td><td>No new way for a website to reach the wallet. The new call is only reachable from the wallet's own pages.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>The plan, phase by phase</h2>
+    <div class="stack">
+      <div class="arc arc-1">
+        <div class="arc-head">
+          <p class="eyebrow cancel">PR 1 · cancel closes the window</p>
+          <h3>Cancelling from the activity feed closes the approval window and tells the dApp "cancelled by user"</h3>
+        </div>
+        <ol class="phases">
+          <li class="phase">
+            <span class="n">1</span>
+            <div class="body">
+              <p><b>Let the window manager carry a real error.</b> Today, when the wallet closes an approval window itself, the dApp receives a bare text message that the wallet then hides behind a generic "could not process the request". The window manager learns to pass a proper error object through, so the dApp gets the same structured "cancelled by user" signal it already gets when you cancel mid-proof.</p>
+              <p class="proof">Proves itself by: <b>typecheck, lint, and the window manager's unit tests</b>, including one that the error object arrives at the dApp side unchanged.</p>
+            </div>
+          </li>
+          <li class="phase">
+            <span class="n">2</span>
+            <div class="body">
+              <p><b>Make the wallet notice its own cancel.</b> The wallet's transaction journal already announces every status change. The service that owns approval windows now listens for "cancelled", finds the matching open window, marks the request cancelled so a late Approve click is refused, closes the window, and rejects the dApp's request. If the transaction was already approved, the existing cancel path keeps handling it and nothing changes.</p>
+              <p class="proof">Proves itself by: <b>typecheck, lint, and unit tests</b> for: cancel closes the right window once; an unknown or already-approved transaction is ignored; a second cancel does nothing; Approve after a cancel is refused. Then the repo's full pre-PR gate.</p>
+            </div>
+          </li>
+        </ol>
+      </div>
+      <p class="stack-note">PR 2 stacks on PR 1: it reuses the "find the window for this transaction" lookup that PR 1 introduces.</p>
+      <div class="arc arc-2">
+        <div class="arc-head">
+          <p class="eyebrow focus">PR 2 · open in the right place, and come back when clicked</p>
+          <h3>The approval window opens on the display you are using, and clicking the Queued card brings it to the front</h3>
+        </div>
+        <ol class="phases">
+          <li class="phase">
+            <span class="n">3</span>
+            <div class="body">
+              <p><b>Teach the wallet's window layer two more moves.</b> The thin layer that wraps Chrome's window API gains "focus this window" and "where is the window the user last used". Its test double gains the same, so everything above it stays unit-testable without a browser.</p>
+              <p class="proof">Proves itself by: <b>typecheck, lint, and the shared package's unit tests</b> for the test double.</p>
+            </div>
+          </li>
+          <li class="phase">
+            <span class="n">4</span>
+            <div class="body">
+              <p><b>Open centered on the active window; be able to refocus.</b> Before opening an approval window, the wallet asks Chrome which normal window was last active and centers the popup inside it. This is what stops the popup landing on the wrong display in the first place. The window manager also gains "bring this window to the front", which un-minimizes it and asks the system for attention. Passkey prompts use the same code, so they get the positioning for free.</p>
+              <p class="proof">Proves itself by: <b>typecheck, lint, and window manager unit tests</b> for the centering math, the "no active window" fallback, a timeout during the lookup, and focus on a live, missing, or already-closed window. Plus a manual check on your Mac that focusing actually switches Spaces (this cannot be tested headlessly).</p>
+            </div>
+          </li>
+          <li class="phase">
+            <span class="n">5</span>
+            <div class="body">
+              <p><b>Make the Queued card clickable.</b> While a dApp transaction is waiting for your approval, its card in the activity feed becomes clickable (with a "Show the approval window" hint). Clicking asks the wallet to bring that window forward. The existing cancel button on the card keeps working and does not trigger the click. At any other stage the card is not clickable, because there is no window to show.</p>
+              <p class="proof">Proves itself by: <b>typecheck, lint, and component plus unit tests</b> for: click at "queued" asks for the window; click at other stages does nothing; the cancel button still cancels and never focuses; the wallet-side lookup returns true or false, never an error. Then the repo's full pre-PR gate.</p>
+            </div>
+          </li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Human context</h2>
+    <ul>
+      <li><b>"Queued"</b> is the card the activity feed shows from the moment a dApp's request arrives until you approve it. Its small × is the cancel you used. Today that cancel only updates the wallet's journal; the approval window is a separate process that never hears about it.</li>
+      <li><b>Why the wallet must close the window, not the window itself.</b> The approval window can be mid-load when you cancel, so a message sent to it can be lost. Only the wallet's background service knows the window's identity and the dApp's waiting request, so it is the one place that can close the window and answer the dApp in a single step.</li>
+      <li><b>The "cancelled by user" signal.</b> dApps already understand the wallet's structured cancel code (4001, "JOB_CANCELLED") from the mid-proof cancel. PR 1 reuses it exactly, so a dApp sees no new error shape.</li>
+      <li><b>macOS Spaces.</b> Chrome opens a popup near its last-active window, which can sit on another display or another Space. Centering the popup on the last-active normal window attacks the cause; the click-to-focus is the recovery when it still happens.</li>
+      <li><b>What is deliberately left alone.</b> The window's own Reject button also reaches the dApp as the generic "could not process" message today. That is a separate, one-line follow-up if you want it; this plan does not touch it.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Open questions</h2>
+    <ul>
+      <li><b>Does focusing switch Spaces on your Mac?</b> The plan asks Chrome to focus the window, draw attention to it, and restore it if minimized, in one call. The tests prove the call is made; only you can confirm Chrome moves you to the right Space. This is a manual check in phase 4, not a blocker for approval.</li>
+      <li><b>Reject to the dApp</b> (see "left alone" above): keep out of scope, or fold in as a one-liner in PR 1? Default: out of scope.</li>
+    </ul>
+  </section>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm the scope: PR 1 = cancel closes the window and rejects the dApp with the structured cancel; PR 2 = center on the active window plus click-to-focus from the Queued card. Reject-to-dApp stays out.</li>
+      <li>Confirm the tier: light, with one Codex review of the plan and the Codex fix loop after each PR's code is done.</li>
+      <li>Confirm validation: typecheck, lint, and unit or component tests on every phase; no end-to-end runs (focus is not observable headlessly, and the cancel path is fully unit-testable).</li>
+      <li>Confirm delivery: two stacked PRs against <code>dev</code>, opened only after both fix loops and a final cross-PR pass converge. Merging stays your call.</li>
+      <li>No hardening pass is proposed: nothing here touches trust boundaries, secrets, or CI.</li>
+    </ul>
+    <p>Reply with one of:</p>
+    <div class="verdicts"><code>approve</code><code>conditional approve (with conditions: ...)</code><code>reject (with blocking findings: ...)</code></div>
+  </div>
+
+  <section class="seeds">
+    <span class="draft">Draft · finalized after approval</span>
+    <h2>Implementation seeds</h2>
+    <p class="muted">Paste exactly one of these into a Claude Code session sitting in the plan's worktree (<code>agent-worktree resume dapp-popup-cancel-focus</code>). <code>/goal</code> keeps working until the condition holds and survives a resume; <code>/loop</code> fires on an interval. They do not compose.</p>
+    <p class="warning">Use exactly one per session. Setting one replaces the other.</p>
+
+    <div class="seed recommended">
+      <h3>Recommended: /goal</h3>
+      <pre><code>/goal All five phases marked ✓ in implementations-plan/dapp-popup-cancel-focus/plan.md (the phase headers in the file — not the chat), each ✓ backed by its validation gate reported passing in the transcript; for each phase the agent has printed `LESSONS_FILE=implementations-plan/dapp-popup-cancel-focus/lessons/phase-N.md`; `/code-review` was NOT run (code_review: off); the codex fix loop converged for arc 1 at its boundary (before `gh stack add`), for arc 2 at its boundary, and for the final cross-arc pass — each convergence evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; a two-PR stack exists on GitHub created only after all three loops converged (`gh stack view` output in the transcript) with `gh pr checks` green on both; `bun run test` and `bun run lint` both report exit 0 in the transcript.</code></pre>
+    </div>
+
+    <div class="seed">
+      <h3>Alternative: /loop 15m</h3>
+      <pre><code>/loop 15m Drive implementations-plan/dapp-popup-cancel-focus forward. Never idle waiting for my input. Each firing:
+1. Reality check: read implementations-plan/dapp-popup-cancel-focus/plan.md and lessons/ (authoritative state — not the chat); task list empty? rebuild it from plan.md's phase headers; run `git status` and `git log --oneline -5`; if PRs exist, `gh stack view` and `gh pr view --json statusCheckRollup` (no --watch).
+2. Waiting on CI is fine — confirm it is progressing (`gh run watch <run-id>` up to 10 minutes); use the wait to review the diff or prep the next phase.
+3. No task in hand? Pick the next pending phase from plan.md. After each meaningful edit run `bun run lint` and `bun run --cwd apps/extension test <touched paths>`; then commit and `gh stack push` (`gh stack sync` if dev or a lower arc moved).
+4. Stuck, or facing a decision you'd normally bring to me? Call `/codex high` with full context, reach a defensible decision, act, and log consult + verdict in lessons/phase-N.md. Hard limits stay hard: never merge, never publish, never expand scope beyond plan.md.
+5. Same step failed 5 times? Stop retrying; reassess with codex, then continue on the agreed path.
+6. Phase green? Green means the phase's validation gate in plan.md passes. Paste the result, mark ✓ in plan.md, file the lessons entry, print `LESSONS_FILE=implementations-plan/dapp-popup-cancel-focus/lessons/phase-N.md`, advance. Arc boundary (after phase 2, after phase 5)? Run the arc's codex loop per plan.md's Post-implementation section until a round yields nothing material, THEN `gh stack add dapp-popup-cancel-focus/focus` (after arc 1) or the cross-arc pass (after arc 2).
+7. All phases ✓ and all three loops converged? Delivery per plan.md: `gh stack sync`, `gh stack submit --auto`, `gh pr edit` bodies, `gh pr checks --watch`. Then the wrap-up report: what shipped, every contested decision with ELI5 context, open items. Surface and stop.
+Keep the native task list current; plan.md stays the source of truth.</code></pre>
+    </div>
+  </section>
+
+  <p class="footer">Full plan with the engineering detail, audit log, and verified assumptions: <code>implementations-plan/dapp-popup-cancel-focus/plan.md</code> in the plan's worktree. Recon: <code>recon.md</code> beside it.</p>
+</div>

@@ -6,7 +6,7 @@ driver: claude-code
 code_review: off            # owner answer 2026-09-05: the codex fix loop is the review
 eli5_mode: artifact
 budget: recon 1 agent (sonnet); codex plan audit at high until explicit approve; codex post-impl loop ≤3 rounds per arc + 1 cross-arc pass
-validation: typecheck + lint + vitest unit/component on every phase; no e2e (owner answer 2026-09-05)
+validation: typecheck + lint + vitest unit/component/composition on every phase; no e2e (owner answer 2026-09-05)
 recon: recon.md
 ```
 
@@ -19,10 +19,13 @@ Two related gaps in the dApp approval popup (the window the wallet opens when a 
    Approve there silently fails after the window closes (the claim helper refuses the cancelled record).
    Arc 1 makes the service worker (SW) react to the journal's `cancelled` transition: it flags the
    interaction, closes the popup, and rejects the dApp's promise with the structured `4001` cancel error
-   the mid-prove cancel already produces. Owner decision: close immediately, no overlay.
+   the mid-prove cancel already produces. A journal re-read right after the interaction is registered
+   closes the window in which a cancel lands before the subscription can see the interaction. Owner
+   decision: close immediately, no overlay.
 2. **The popup can open on the wrong display / macOS Space and there is no way to bring it back.** Arc 2
-   positions the popup inside the last-focused Chrome window at creation, and makes the "Queued" card in
-   the activity feed clickable: a click asks the SW to focus the popup's window.
+   centers the popup on the last-focused normal Chrome window at creation (signed desktop coordinates
+   preserved, so displays left of or above the primary work), and makes the "Queued" card in the
+   activity feed clickable: a click asks the SW to focus the popup's window.
 
 Arc 2 stacks on arc 1 (both touch `DappInteractionService`'s journal-id lookup and `WindowManager`).
 
@@ -44,8 +47,9 @@ Arc 2 stacks on arc 1 (both touch `DappInteractionService`'s journal-id lookup a
 - F3 The journal record and the live interaction are linked by `hooks.queuedJournalId`: minted at
   message arrival (`wallet-sdk/background.ts:398-453`), threaded via `IExecutionHooks`
   (`services-contract.ts:71-75`), stored on the record (`dapp-interaction/spec.ts:64-81`), and already
-  read by `execute()`'s pre-popup short-circuit (`service.ts:254-262`), which only covers a cancel
-  that lands BEFORE the popup opens.
+  read by `execute()`'s pre-popup short-circuit (`service.ts:254-262`). That read happens BEFORE two
+  awaits (`isConfirmationNeeded`, `service.ts:264`; the interaction lock, `:295`) and the `storage.set`
+  at `:321` — a cancel landing in that span is seen by neither the short-circuit nor a subscriber.
 - F4 `OperationJournalService.transitionOperation` emits `onOperationUpdated` with the updated record
   under the journal mutex (`operation-journal/service.ts:297-332`). `DappInteractionService.init()`
   already holds `this.operationJournal` (`service.ts:82-89`). SW-service-to-SW-service event wiring in
@@ -53,34 +57,49 @@ Arc 2 stacks on arc 1 (both touch `DappInteractionService`'s journal-id lookup a
 - F5 `WindowManager.cancel(handleId, reason: string)` → `_settle` rejects the handle promise with the
   bare string and calls `windows.remove` (`window-manager.ts:169-200`); a second settle on the same
   handle is ignored (`:172-176`); the interaction record is deleted in `handle.promise.finally`
-  (`service.ts:318-320`). The dApp-facing envelope maps ONLY `Error` subclasses: `JobCancelledError` →
-  `{ code: 4001, data: { walletErrorCode: "JOB_CANCELLED", jobId } }` (`error-envelope.ts:31-41`); a
-  string falls to `UNCLASSIFIED_ERROR_MESSAGE` (`:132-140`). `JobCancelledError`'s ctor is
-  `(message = "Transaction cancelled by user", details?: { jobId?: string })` (`errors.ts:122-128`).
+  (`service.ts:323`), i.e. one microtask after the rejection. The dApp-facing envelope maps ONLY `Error`
+  subclasses: `JobCancelledError` → `{ code: 4001, data: { walletErrorCode: "JOB_CANCELLED", jobId } }`
+  (`error-envelope.ts:31-41`); a string falls to `UNCLASSIFIED_ERROR_MESSAGE` (`:132-140`).
+  `JobCancelledError`'s ctor is `(message = "Transaction cancelled by user", details?: { jobId?: string })`
+  (`errors.ts:122-128`). No serialization boundary sits between the handle promise and the wallet-sdk
+  catch-all (`dispatcher.ts:871` → `background.ts:925-934`), so the instance survives.
 - F6 On an SW-initiated `windows.remove`, the popup's `beforeunload` → `reject()` → `rejectInteraction`
   is a silent no-op once the record is gone (`service.ts:148-155`), and the execute window's `reject()`
-  short-circuits when `isInteractionCancelled` is set (`execute/index.vue:472-480`), which the
-  `onInteractionCancelled` broadcast + `isInteractionCancelled` replay set (`useDappInteractionPayload.ts:74-100`).
-  Frozen oracles pin overlay/no-double-reject, not window closing (`execute/index.test.ts:411,423,528,557`).
-- F7 `approveInteraction` refuses with `JobCancelledError` when `cancelledAt` is set, BEFORE claiming
-  (`service.ts:97-114`, "first service claim wins"); the popup renders that refusal as the cancelled
-  state, not an error banner (`execute/index.vue:417-423`).
+  short-circuits when `isInteractionCancelled` is set (`execute/index.vue:472-480`). Frozen oracles pin
+  overlay/no-double-reject, not window closing (`execute/index.test.ts:411,423,528,557`).
+- F7 `approveInteraction` refuses with `JobCancelledError` when `cancelledAt` is set (`service.ts:107-115`)
+  and with `"Invalid id"` when the record is gone (`:105-107`); both refuse BEFORE claiming, so
+  execution never starts either way. After the new cancel settles the handle, the record is gone one
+  microtask later (F5), so the typed refusal covers only that microtask; the untyped one covers the rest.
+  The popup renders the typed refusal as the cancelled state (`execute/index.vue:417-423`) — moot once
+  the window is being removed.
 - F8 `WindowPort` is `create/onRemoved/remove` only (`packages/wallet-core/src/ports/window-port.ts:12-29`);
   `CreateWindowOptions` has no `left/top`. Real adapter `chrome-browser-api.ts:161-181`; fake
-  `fake-browser-api.ts:216-252` (+ `closeByUser`, `reset`). `WindowManager.openAndAwait` is the sole
+  `fake-browser-api.ts:216-252` (+ `closeByUser`, `reset`). `WindowManager.openAndAwait` returns its
+  handle SYNCHRONOUSLY and chains `create` fire-and-forget (`window-manager.ts:51-120`); it is the sole
   creator of approval AND passkey popups (`passkey/service.ts:122-128`), passes only
-  `type/url/width/height`, and (dev) closes a window whose handle was lost mid-create (`window-manager.ts:83-97`).
+  `type/url/width/height`, and (dev) compares handle IDENTITY after create and closes a window whose
+  handle was lost mid-create (`:83-97, :110-114`). The slow-create tests advance the clock immediately
+  after `openAndAwait()` (`window-manager.test.ts:269, 302`).
 - F9 Popup↔SW RPC methods are declared three times and compiler-checked: `Methods` (`spec.ts:105-120`),
   `defineRpcMethods` (`service.ts:54-60`), `definePassthroughsExhaustive` (`client.ts:23-29`). Ports from
-  non-extension senders are refused (`extension-messaging/src/background/service.ts:44-47`), so these
-  methods are reachable only from extension pages, never from a dApp or content script.
-- F10 Prior art for focusing a window from popup code: `settings/advanced/index.vue:34-42`
-  (`chrome.windows.update(id, { focused: true })`). The settled card is clickable via a root `div.row`
-  with `cursor: pointer` and `@click.stop` on inner links (`modules/activity/TransactionCard.vue:188-212`);
-  the parent binds `@click` on the component (`RecentActivityView.vue:844-853`).
+  non-extension senders are refused (`extension-messaging/src/background/service.ts:44-47`,
+  `core/sender-auth.ts:17`): these methods are reachable from ANY page of this extension, never from a
+  dApp or content script. `OperationJournalService.transitionOperation` is itself RPC-exposed
+  (`operation-journal/service.ts:47`) with no profile check — an extension page can already move a
+  record to `cancelled` directly; only `cancelJob` carries the profile gate (`execution-lane.ts:174-177`).
+- F10 SW-side prior art for focusing a window: `wallet/utils/onboarding-tab.ts:32-38`
+  (`chrome.windows.update(tab.windowId, { focused: true })`); popup-side: `settings/advanced/index.vue:34-42`.
+  The settled card is clickable via a root `div.row` with `cursor: pointer` and `@click.stop` on inner
+  links (`modules/activity/TransactionCard.vue:188-212`); the parent binds `@click` on the component.
+  `RecentActivityView.vue` renders the journal-driven `TransactionAwaitingCard` at TWO sites (`:812`,
+  `:871`) and disconnects its service clients in `onBeforeUnmount` (`:779-784`).
 - F11 Real validation commands: root `bun run typecheck` (vue-tsc over apps/extension), `bun run lint`
-  (biome), `bun run test` (extension vitest on Bun), `bun run --cwd packages/wallet-core test|typecheck`,
-  `bun run audit:vue` (typecheck:all + test + lint in parallel, then build) as the documented pre-PR gate.
+  (biome + the complexity-baseline check), `bun run test` (extension vitest on Bun),
+  `bun run --cwd packages/wallet-core test|typecheck`, `bun run audit:vue` (typecheck:all + test + lint
+  in parallel, THEN `build`) as the documented pre-PR gate. A composition harness with a REAL
+  `OperationJournalService` on `FakeBrowserApi` + a `ServiceCollection` of stubs exists
+  (`execution/service.composition.test.ts:106-157`).
 
 ### Inferences (unverified — for the audit to attack)
 - I1 A `windows.remove` issued by the SW while the popup is mid-`init()` (before its `beforeunload`
@@ -88,36 +107,40 @@ Arc 2 stacks on arc 1 (both touch `DappInteractionService`'s journal-id lookup a
   (`getInteractionPayload`, `rejectInteraction`) fail or no-op against a deleted record without side
   effects. The popup process dies with the window.
 - I2 Chrome accepts `chrome.windows.update(id, { focused: true, drawAttention: true, state: "normal" })`
-  in one call and, on macOS, switches to the Space holding the window. `drawAttention` is documented as
-  taking effect only when the window is NOT focused, so combining it is safe; `state: "normal"` restores
-  a minimized popup and is a no-op otherwise. To be confirmed on the owner's machine (Phase 4 lesson).
+  in one call (the API contract allows the combination); whether macOS then switches to the Space
+  holding the window is UNPROVEN and owner-verified in Phase 4. `state: "normal"` restores a minimized
+  popup and also exits a maximized/fullscreen one — acceptable for a 400×800 approval popup.
 - I3 Leaving `cancelInteraction(cancellationToken)` and the `cancellationToken` field untouched is the
-  right scope call: they are the (unwired) dApp-side cancel channel, not this bug, and removing them is
-  churn codex can raise in the post-impl loop if it disagrees.
+  right scope call: they are the (unwired) dApp-side cancel channel, not this bug.
 - I4 Centering the popup on the last-focused NORMAL window (`windowTypes: ["normal"]`) is the right
   anchor: the dApp tab lives in a normal window, and excluding `popup` windows avoids anchoring on
-  another approval popup. Chrome clamps out-of-display coordinates, so no display-bounds query is needed.
-- I5 A `queued` record is the only stage at which a card click can find a window: the popup closes on
-  approve (`execute/index.vue:412`), and `pending+` records have no live interaction. The card is
-  therefore clickable at `queued` only; at `queued` before the popup exists (session FIFO wait) the RPC
-  returns `false` and the click is a visible no-op — acceptable.
+  another approval popup. Desktop coordinates are SIGNED (a display left of or above the primary has
+  negative `left`/`top`); the centering math must preserve the sign, never clamp. A popup larger than
+  the anchor is centered on it, not fitted inside it. Chrome clamps to the display it lands on.
+- I5 A `windows.remove` racing a `windows.update` (focus) on the same id: `update` rejects, `focus`
+  returns `false`. No further hazard.
 
 ### Asks (resolved 2026-09-05 with the owner)
-- A1 Validation layers: fast layers + unit/component tests on every phase; no e2e.
+- A1 Validation layers: fast layers + unit/component/composition tests on every phase; no e2e.
 - A2 `/code-review`: off.
 - A3 Cancel UX: the popup closes immediately; the dApp gets the structured 4001 cancel. No overlay.
 - A4 Arc 2 scope: click-to-refocus AND creation-time positioning.
 - A5 Out of scope, declared: the popup's own Reject reaches the dApp as `UNCLASSIFIED_ERROR_MESSAGE`
   today (bare string, F5) although `UserRejectedError` exists unmapped. Unchanged by this plan; a
   one-line follow-up if the owner wants Reject → 4001 parity.
+- A6 Card eligibility rule (decision, surfaced at the gate): the Queued card is clickable at stage
+  `queued` only. A `queued` record does NOT prove a window exists — none in the pre-popup session-FIFO
+  wait, and none after Approve while the request waits for the execution mutex (`service.ts:117`,
+  `execution-lane.ts:278`). Those clicks return `false` and are visible no-ops. The alternative (a
+  journal flag "popup open") adds a write on every popup open/close for a cosmetic gain; not taken.
 
 ## Architecture & Implementation (compact)
 
 **Reuse / location.** No new files except tests. Arc 1 lives entirely in `WindowManager` (accept an
-`Error` as the cancel reason) and `DappInteractionService` (journal subscription + journal-keyed
-lookup). Arc 2 extends the `WindowPort` contract in `wallet-core` and both adapters, adds two methods to
-`WindowManager`, one RPC to `DappInteractionService`, one emit to `TransactionAwaitingCard`, one pure
-handler builder, and one wiring line in `RecentActivityView`.
+`Error` as the cancel reason) and `DappInteractionService` (journal subscription + post-registration
+reconciliation + journal-keyed lookup). Arc 2 extends the `WindowPort` contract in `wallet-core` and both
+adapters, adds two methods to `WindowManager`, one RPC to `DappInteractionService`, one emit to
+`TransactionAwaitingCard`, one pure handler builder, and the wiring in `RecentActivityView`.
 
 **Key interfaces.**
 ```ts
@@ -129,13 +152,13 @@ export interface WindowPort {
   create(options: CreateWindowOptions): Promise<CreatedWindow>
   onRemoved(listener): Unsubscribe
   remove(windowId: number): Promise<void>
-  update(windowId: number, options: UpdateWindowOptions): Promise<void>          // new
+  update(windowId: number, options: UpdateWindowOptions): Promise<void>          // new; rejects on a closed id
   getLastFocused(): Promise<WindowBounds | undefined>                             // new; never throws
 }
 // window-manager.ts
-cancel(handleId: string, reason: string | Error): void                            // arc 1: Error passes through to reject()
+cancel(handleId: string, reason: string | Error): void                            // arc 1: the value reaches reject() unchanged
 focus(handleId: string): Promise<boolean>                                         // arc 2
-export function centerIn(anchor: WindowBounds | undefined, width: number, height: number): { left?: number; top?: number }  // arc 2, pure
+export function centerOn(anchor: WindowBounds | undefined, width: number, height: number): { left?: number; top?: number }  // arc 2, pure, signed
 // dapp-interaction spec.ts Methods (arc 2)
 focusInteractionWindow(journalId: string): boolean
 ```
@@ -145,33 +168,46 @@ focusInteractionWindow(journalId: string): boolean
    `onOperationUpdated(record)` (F1, F4).
 2. `DappInteractionService.init()` subscribes; on `record.progress.stage === "cancelled"` it calls
    `cancelInteractionForJournal(record.id)`: linear scan of `storage` for `hooks?.queuedJournalId ===
-   record.id`; return if none or `cancelledAt` already set; set `cancelledAt` (first-claim-wins, F7);
-   `emit("onInteractionCancelled", interaction.id)` (so a still-alive popup short-circuits its own
-   reject, F6); `windowManager.cancel(interaction.handleId, new JobCancelledError("Transaction cancelled
-   by user", { jobId: record.id }))`.
+   record.id`; return if none or `cancelledAt` already set; set `cancelledAt`;
+   `emit("onInteractionCancelled", interaction.id)` (a still-alive popup short-circuits its own reject,
+   F6); `windowManager.cancel(interaction.handleId, new JobCancelledError("Transaction cancelled by
+   user", { jobId: record.id }))`.
 3. `WindowManager._settle` closes the window and rejects the handle promise with the Error instance →
    `handleSendTx` throws it → the wallet-sdk catch-all maps it to `4001 / JOB_CANCELLED` (F5) → the
-   record leaves `storage` via the existing `finally` (F5).
-4. Races: approve arriving after step 2 is refused by `cancelledAt` (F7). Approve arriving BEFORE step 2
-   has already deleted the record (`service.ts:107`), so the scan finds nothing and the lane's
-   controller + claim helper own the cancel (`claim-helper.ts:127-134`) — unchanged behavior.
+   record leaves `storage` via the existing `finally` one microtask later (F5).
+4. **Registration gap (codex r1 High).** `interaction()` registers the record after two awaits (F3).
+   After `withLock` returns (record in `storage`, popup create in flight) and only when
+   `hooks?.queuedJournalId` is set, `execute()` awaits one journal re-read: stage ≠ `queued` →
+   `cancelInteractionForJournal(journalId)`. A cancel BEFORE registration is caught by the re-read; a
+   cancel AFTER registration is caught by the subscription; the journal mutex orders the two. The
+   in-flight `create` then finds its handle settled and closes the window it made (F8, dev's fence).
+   Approval cannot bypass this: the re-read completes before the popup could possibly load and click,
+   and `cancelledAt` refuses a click that somehow does.
+5. Races: Approve arriving after step 2 is refused (`cancelledAt` for one microtask, then `"Invalid
+   id"`; F7). Approve arriving BEFORE step 2 has already deleted the record (`service.ts:107`), so the
+   scan finds nothing and the lane's controller + claim helper own the cancel
+   (`claim-helper.ts:127-134`) — unchanged behavior. A second `cancelled` event is a no-op (record gone
+   or `cancelledAt` set). The popup's own `beforeunload` reject is a no-op (F6).
 
-**Critical flow, arc 2.** (a) `openAndAwait`: `await windows.getLastFocused()` (never throws) →
-`centerIn(bounds, width, height)` → `create({ ..., left, top })`; if the handle was settled during the
-await (timeout), skip the create. (b) Card click at `queued` → `buildFocusHandler(dappInteractionClient)`
-→ RPC `focusInteractionWindow(jobId)` → scan by `hooks.queuedJournalId` → `windowManager.focus(handleId)`
-→ `windows.update(windowId, { focused: true, drawAttention: true, state: "normal" })` → `true`; any miss →
-`false`, never a throw.
+**Critical flow, arc 2.** (a) `openAndAwait` keeps returning `{ handleId, promise }` synchronously; the
+async chain becomes `getLastFocused()` (never throws) → identity check `handles.get(handleId) === handle`
+(a timeout during the lookup → skip `create`) → `create({ ..., ...centerOn(bounds, width, height) })` →
+the EXISTING post-create identity check + orphan removal. (b) Card click at `queued` →
+`buildFocusHandler(dappInteractionClient)` → RPC `focusInteractionWindow(jobId)` → scan by
+`hooks.queuedJournalId` → the interaction's `payload.session.profileId` must equal the active profile
+(else `false`; mirrors `cancelJob`'s gate) → `windowManager.focus(handleId)` →
+`windows.update(windowId, { focused: true, drawAttention: true, state: "normal" })` → `true`; any miss or
+rejection → `false`, never a throw.
 
 **File-level change map.**
 - Arc 1: `apps/extension/src/wallet/services/window-manager/window-manager.ts` (+test);
-  `apps/extension/src/wallet/services/dapp-interaction/service.ts` (+test).
+  `apps/extension/src/wallet/services/dapp-interaction/service.ts` (+unit test, +composition test).
 - Arc 2: `packages/wallet-core/src/ports/window-port.ts`; `packages/wallet-core/src/testing/fake-browser-api.ts`
   (+test); `apps/extension/src/core/adapters/chrome-browser-api.ts`; `window-manager.ts` (+test);
   `dapp-interaction/{spec,service,client}.ts` (+test); `components/composite/activity/TransactionAwaitingCard.vue`
   (+test); `popup/components/modules/general/recent-activity-handlers.ts` (+test);
-  `popup/components/modules/general/RecentActivityView.vue`; `packages/wallet-core/README.md` if it
-  enumerates `WindowPort` methods.
+  `popup/components/modules/general/RecentActivityView.vue` (both render sites + client disconnect);
+  `packages/wallet-core/README.md` if it enumerates `WindowPort` methods.
 
 **Alternatives not taken.**
 - Have `ExecutionLane.cancelJob` call `DappInteractionService` directly: inverts the dependency
@@ -182,26 +218,34 @@ await (timeout), skip the create. (b) Card click at `queued` → `buildFocusHand
   acts. SW-side settle is the only path that closes the window AND rejects the promise atomically.
 - Keep the string reason and map `"Transaction cancelled by user"` by text in the envelope: the
   envelope's own doc forbids text matching (`error-envelope.ts:125-131`).
+- A tombstone keeping the record (with `cancelledAt`) alive after settle so a late Approve gets the
+  typed refusal: preserves an overlay contract the owner discarded; `"Invalid id"` refuses just as hard.
 - Raw `chrome.windows.*` from the feed for focus: the popup page does not know the approval window's id;
   only the SW's handle map does.
 
 ## Security & Adversarial Considerations
 
-- **Threat model.** Two trust boundaries: dApp → SW (wallet-sdk messages via the content relay) and
-  extension pages → SW (RPC ports). Neither arc adds a dApp-reachable surface: the journal subscription
-  is SW-internal, and `focusInteractionWindow` is an internal RPC refused for non-extension senders (F9).
-- **Cancel authority.** Unchanged: `ExecutionLane.cancelJob` gates on the active profile owning the
-  record (`execution-lane.ts:174-177`). The new subscriber trusts only records the journal itself
-  transitioned; it never accepts an id from a message.
-- **Denial-of-approval.** A dApp cannot cancel another dApp's popup: the only cancel path is the user's
-  click through the profile-gated RPC. A dApp cannot forge a journal `cancelled` transition.
-- **Information exposure.** `focusInteractionWindow` returns a boolean; a guessed 16-hex journal id
-  from another extension page would learn only "a popup exists". Window bounds from `getLastFocused`
-  carry no page content and never leave the SW. No URLs or payloads are logged by the new code.
+- **Trust boundaries.** dApp → SW (wallet-sdk messages via the content relay) and extension pages → SW
+  (RPC ports, same-extension sender only, F9). Neither arc adds a dApp-reachable surface: the journal
+  subscription is SW-internal, and `focusInteractionWindow` is an internal RPC.
+- **What an extension page can already do.** Any page of this extension can call
+  `transitionOperation` (F9) and move a record to `cancelled` without `cancelJob`'s profile gate. The
+  new subscriber therefore fires on any `cancelled` transition an extension page produces, not only on
+  the user's click — that is the EXISTING extension-page trust domain, stated here explicitly, not a
+  new grant. The consequence of an abuse is a closed popup and a 4001 to the dApp: a denial of one
+  approval, never an execution. Tightening `transitionOperation` is out of scope.
+- **Cross-dApp.** A dApp cannot cancel another dApp's popup (no dApp-reachable path) and cannot forge a
+  journal transition.
+- **Focus RPC scoping.** `focusInteractionWindow` returns `false` unless the interaction's session
+  profile is the active profile, so a stale page of a locked or switched profile cannot pull another
+  profile's approval window to the front. It returns a boolean; a guessed 16-hex journal id learns only
+  "a popup exists for the active profile".
+- **Information exposure.** Window bounds from `getLastFocused` carry no page content and never leave
+  the SW. No URLs or payloads are logged by the new code.
 - **Wrong-window focus.** `focus(handleId)` acts only on the window id the manager created for that
-  handle; `update` on a closed id rejects and is swallowed as `false`.
-- **Input validation.** `journalId` is validated as a non-empty string at the RPC boundary (mirroring
-  `rejectInteraction`'s id handling); the scan is over ≤ a handful of live records.
+  handle; `update` on a closed id rejects and is swallowed as `false` (I5).
+- **Input validation.** `journalId` is validated as a non-empty string at the RPC boundary; the scan is
+  over ≤ a handful of live records.
 - **Supply chain / crypto / least privilege.** No new dependencies, no new permissions (`windows` API
   is already used), no CI/workflow changes, no secrets. N/A for crypto.
 
@@ -214,27 +258,42 @@ the named new tests pass.
 
 #### Phase 1 — `WindowManager.cancel` carries an `Error`
 - `cancel(handleId, reason: string | Error)`; `Handle.reject: (reason: unknown) => void`; `_settle`
-  passes the value through unchanged. Existing string callers unaffected.
-- Test (`window-manager.test.ts`): `cancel(handleId, err)` rejects `promise` with that SAME instance and
-  still calls `windows.remove`; a string reason still rejects with the string.
+  passes the value through unchanged. Existing string callers unaffected (existing string-cancel test
+  at `window-manager.test.ts:52` stays as the string case).
+- Test (`window-manager.test.ts`): `cancel(handleId, err)` rejects `promise` with that SAME instance
+  (`toBe`) and still calls `windows.remove`.
 - **Validation gate**: `bun run typecheck && bun run lint && bun run --cwd apps/extension test src/wallet/services/window-manager`
-  → exit 0, new cases green. Layers: typecheck/lint · unit.
+  → exit 0, new case green. Layers: typecheck/lint · unit.
 
-#### Phase 2 — journal-driven cancel in `DappInteractionService`
+#### Phase 2 — journal-driven cancel in `DappInteractionService` + post-registration reconciliation
 - `init()`: `this.operationJournal.onOperationUpdated.add((rec) => { if (rec.progress.stage === "cancelled") this.cancelInteractionForJournal(rec.id) })`.
-- `cancelInteractionForJournal(journalId)` per the arc-1 flow (set `cancelledAt` → emit → `windowManager.cancel(handleId, new JobCancelledError(..., { jobId }))`). Idempotent.
-- Tests (`dapp-interaction/service.test.ts`, existing harness): (1) live interaction with
-  `hooks.queuedJournalId = J`, cancelled event for J → `windowManager.cancel` called once with the
-  handle id and a `JobCancelledError` whose `details.jobId === J`, `onInteractionCancelled` emitted,
-  `cancelledAt` set; (2) event for an unknown id → no calls; (3) record already approved (deleted) →
-  no calls; (4) two events → one cancel; (5) approve after the cancelled event throws `JobCancelledError`
-  (F7 still holds). Existing `error-envelope.test.ts` already pins `JobCancelledError → 4001`; add no
-  duplicate.
+- `cancelInteractionForJournal(journalId)` per the arc-1 flow step 2. Idempotent.
+- `execute()`: after `interaction()` has registered the record (F3), and only with `hooks?.queuedJournalId`,
+  re-read the journal; stage ≠ `queued` → `cancelInteractionForJournal(journalId)` (flow step 4). The
+  pre-popup short-circuit (`service.ts:254-262`) stays as the cheap early exit.
+- Unit tests (`dapp-interaction/service.test.ts`, existing harness, handler invoked directly): (1) live
+  interaction with `hooks.queuedJournalId = J`, cancelled event for J → `windowManager.cancel` called
+  once with the handle id and a `JobCancelledError` whose `details.jobId === J`, `onInteractionCancelled`
+  emitted, `cancelledAt` set; (2) unknown id → no calls; (3) record already deleted (approved) → no
+  calls; (4) two events → one cancel; (5) Approve after the event and BEFORE cleanup throws
+  `JobCancelledError` (the mocked manager never rejects, so the record persists — this pins the
+  first-claim-wins order, F7); (6) registration-gap regression: the journal stub reports `cancelled` on
+  the post-registration re-read → the interaction is cancelled without any event.
+- Composition test (`dapp-interaction/service.composition.test.ts`, mirroring
+  `execution/service.composition.test.ts:106-157`): REAL `OperationJournalService` on `FakeBrowserApi`,
+  REAL `WindowManager` on the same `FakeBrowserApi.windows` + `MockClock`, `DappInteractionService`
+  started through a `ServiceCollection` of stubs (`init()` wires the subscription for real). Two live
+  interactions A and B (two `execute()` calls with distinct `queuedJournalId`s, both records created at
+  `queued`); `transitionOperation(A, cancelled)` → `windows.remove` called with A's window id only →
+  A's `execute()` promise rejects with a `JobCancelledError` carrying `jobId = A` → A's record is gone
+  from `storage`, B's remains and B's window is open → a late `rejectInteraction(A)` is a no-op. Existing
+  `error-envelope.test.ts` already pins `JobCancelledError → 4001`; add no duplicate.
 - Docs: one sentence in `ARCHITECTURE.md`'s dApp-interaction/cancel description if it narrates the
-  cancel path (check; skip if absent). Comments in code: the two invariants only (first-claim-wins order;
-  why the Error instance, not a string).
+  cancel path (check; skip if absent). Comments in code: the invariants only (why the Error instance;
+  why the re-read after registration; first-claim-wins order).
 - **Validation gate**: `bun run typecheck && bun run lint && bun run --cwd apps/extension test src/wallet/services/dapp-interaction src/wallet/services/window-manager src/wallet/services/wallet-sdk/error-envelope.test.ts`
-  → exit 0. Then the arc gate: `bun run audit:vue` → exit 0. Layers: typecheck/lint · unit.
+  → exit 0. Then the arc gate: `bun run audit:vue` → exit 0 (includes the build). Layers: typecheck/lint ·
+  unit · composition.
 - **Arc boundary**: run the arc-1 codex loop (Post-implementation §), THEN `gh stack add`.
 
 ### Arc 2 — refocus from the Queued card + open on the right display
@@ -242,47 +301,59 @@ the named new tests pass.
 #### Phase 3 — `WindowPort` grows `update` + `getLastFocused`; `create` accepts `left/top`
 - `wallet-core` port types as in the interfaces above; `ChromeWindowsAdapter.update` →
   `chrome.windows.update`; `getLastFocused` → `chrome.windows.getLastFocused({ windowTypes: ["normal"] })`
-  wrapped so any throw or a window without bounds → `undefined`. `create` forwards `left/top`.
+  wrapped so any throw, or a window without numeric bounds, → `undefined`. `create` forwards `left/top`.
 - `FakeWindowsAdapter`: record `creates: CreateWindowOptions[]` and `updates: Array<{ windowId; options }>`;
-  a settable `lastFocused: WindowBounds | undefined`; `update` on a non-live id rejects (mirrors Chrome).
-- Test (`fake-browser-api.test.ts`): the fake records `create` options and `update` calls; `update` on a
-  closed id rejects.
+  a settable `lastFocused: WindowBounds | undefined` (and a `lastFocusedThrows` switch to exercise the
+  never-throws contract at the manager); `update` on a non-live id rejects (mirrors Chrome).
+- Tests (`fake-browser-api.test.ts`): the fake records `create` options and `update` calls; `update` on a
+  closed id rejects. (`ChromeWindowsAdapter` has no test harness today — `core/adapters/` tests only
+  the clock adapter — the filtering/fallback contract is pinned at the manager through the fake.)
 - **Validation gate**: `bun run --cwd packages/wallet-core typecheck && bun run --cwd packages/wallet-core test && bun run typecheck && bun run lint`
   → exit 0. Layers: typecheck/lint · unit.
 
-#### Phase 4 — `WindowManager` positions on open and can focus a handle
-- `centerIn(anchor, width, height)` exported pure helper: `left = anchor.left + (anchor.width - width) / 2`,
-  same for `top`, both floored and clamped at 0; `{}` when the anchor or any bound is missing.
-- `openAndAwait`: await `getLastFocused()`; if the handle is gone (timeout during the await) return
-  without creating; else `create({ ..., ...centerIn(...) })`.
+#### Phase 4 — `WindowManager` centers on open and can focus a handle
+- `centerOn(anchor, width, height)` exported pure helper: `left = round(anchor.left + (anchor.width - width) / 2)`,
+  same for `top`; SIGNED, no clamping; `{}` when the anchor or any of its four bounds is missing.
+- `openAndAwait` per the arc-2 flow (a): synchronous return preserved; `getLastFocused()` first; identity
+  check `handles.get(handleId) === handle` BEFORE `create` (timeout during the lookup → no create); the
+  existing post-create identity check + orphan removal untouched.
 - `focus(handleId)`: handle with a `windowId` → `update(windowId, { focused: true, drawAttention: true, state: "normal" })`
   → `true`; missing handle/window or an `update` rejection → `false`.
-- Tests (`window-manager.test.ts`): with `lastFocused` set, `create` receives the centered `left/top`;
-  without it, no `left/top`; timeout elapsing during the `getLastFocused` await → no `create` call
-  and the promise rejects with the timeout; `focus` → `update` called with the exact options and
-  `true`; `focus` on an unknown handle → `false`; `focus` when `update` rejects → `false`. Add `centerIn`
-  cases: centered, clamped at 0, missing bounds → `{}`.
-- Lesson to record: whether Chrome on the owner's Mac honors `focused + drawAttention + state` in one
-  call and switches Space (I2) — owner-verified manually, since focus is not headless-observable.
+- Tests (`window-manager.test.ts`): with `lastFocused` set, `create` receives the centered `left/top`
+  (one positive-anchor case and one NEGATIVE-anchor case, e.g. `left: -1920, width: 1920` + popup 400 →
+  `left: -1160`); without it, no `left/top`; `lastFocused` throwing → create still happens without
+  `left/top`; timeout elapsing DURING the lookup → no `create` call and the promise rejects with the
+  timeout; `focus` → `update` called with the exact options and `true`; unknown handle → `false`;
+  `update` rejecting → `false`. `centerOn` unit cases: positive, negative, missing bounds → `{}` (the
+  manager tests do not repeat the arithmetic). The existing slow-create tests (`:269`, `:302`) park
+  AFTER creation starts (release the lookup, then advance the clock), since the lookup now precedes
+  `create`; `flushCreate` gains the extra tick.
+- Lesson to record (owner-verified, manual): does Chrome on the owner's Mac honor the combined
+  `update` and switch Space (I2)?
 - **Validation gate**: `bun run typecheck && bun run lint && bun run --cwd apps/extension test src/wallet/services/window-manager`
   → exit 0. Layers: typecheck/lint · unit.
 
 #### Phase 5 — RPC + clickable Queued card
 - `spec.ts` `Methods.focusInteractionWindow(journalId: string): boolean`; service implementation = scan by
-  `hooks?.queuedJournalId` → `windowManager.focus(handleId)`; add the string to `defineRpcMethods` and
-  the client passthrough list (F9).
-- `TransactionAwaitingCard.vue`: new prop-free behavior — when `jobId && stage === "queued"`, the root is
-  clickable (`cursor: pointer`, `role="button"`, `title="Show the approval window"`, Enter/Space via
-  `@keydown`), emitting `("focus", jobId)`; the cancel button gets `@click.stop`. No copy change to the
-  "Queued..." subtitle.
+  `hooks?.queuedJournalId` → active-profile check against `payload.session.profileId` →
+  `windowManager.focus(handleId)`; add the string to `defineRpcMethods` and the client passthrough list (F9).
+- `TransactionAwaitingCard.vue`: when `jobId && stage === "queued"`, the root is focusable and clickable —
+  `tabindex="0"`, `role="button"`, `title="Show the approval window"`, `cursor: pointer`; `@click` and a
+  keydown handler for Enter/Space that acts ONLY when `event.target === event.currentTarget` (so the
+  cancel button's own Enter/Space never bubbles into a focus) and calls `preventDefault` on Space;
+  emits `("focus", jobId)`. The cancel button gets `@click.stop`. Otherwise no `tabindex`, no role, no
+  cursor. No copy change to the "Queued..." subtitle.
 - `recent-activity-handlers.ts`: `buildFocusHandler(client: { focusInteractionWindow(id): Promise<boolean> })`
   → `(jobId) => { if (!jobId) return; client.focusInteractionWindow(jobId).catch(() => {}) }`.
 - `RecentActivityView.vue`: instantiate `DappInteractionServiceClient` alongside the other clients,
-  `@focus="onFocusInFlight"` on the journal-driven `TransactionAwaitingCard` only.
-- Tests: card — `queued` + jobId click emits `focus` with the id; `proving` click emits nothing; cancel
-  button click emits `cancel` only (no `focus`); handlers — `buildFocusHandler` calls through with the
-  id and swallows a rejection, no-ops on a falsy id; service — `focusInteractionWindow` finds by journal
-  id and returns the manager's boolean; unknown id → `false`.
+  disconnect it in `onBeforeUnmount` with them (`:779-784`), and bind `@focus="onFocusInFlight"` on BOTH
+  journal-driven `TransactionAwaitingCard` sites (`:812`, `:871`), not on the orphan/fallback cards.
+- Tests: card — `queued` + jobId click emits `focus` with the id; Enter and Space on the card emit
+  `focus`; Enter on the cancel button emits `cancel` only; click on the cancel button emits `cancel`
+  only; `proving` click emits nothing and the root carries no `tabindex`/`role`. handlers —
+  `buildFocusHandler` calls through with the id, swallows a rejection, no-ops on a falsy id. service —
+  `focusInteractionWindow` finds by journal id and returns the manager's boolean; unknown id → `false`;
+  foreign profile → `false` and the manager is not called.
 - Docs: `packages/wallet-core/README.md` (if it lists `WindowPort` methods) and the extension's
   `ARCHITECTURE.md` popup-lifecycle paragraph get one sentence each.
 - **Validation gate**: `bun run typecheck && bun run lint && bun run --cwd apps/extension test src/components/composite/activity src/popup/components/modules/general src/wallet/services/dapp-interaction`
@@ -336,13 +407,28 @@ mark the index entry and suggest `agent-worktree done dapp-popup-cancel-focus`.
 
 ## Audit log
 
-_(filled by the codex plan audit)_
+- Codex round 1 (session `01a072e1-d77c-7200-b8f9-927bcf300e22`, GPT-6 Astra `high`): **reject**
+  (blocking: a cancel landing between `execute()`'s journal read and the interaction's registration is
+  seen by neither defense; clamping centered coordinates at zero breaks displays left of / above the
+  primary). Adopted: post-registration journal re-read (flow step 4, Phase 2 + regression test); signed
+  `centerOn` with a negative-anchor test; F6/F7 restated (typed refusal only until the `finally`
+  deletes the record, then `"Invalid id"` — no tombstone); trust domain restated (any extension page can
+  already `transitionOperation`; the subscriber proves state, not user intent) and `focusInteractionWindow`
+  scoped to the active profile; both identity fences kept around the new pre-create await, slow-create
+  tests park after creation starts; `tabindex`, self-targeted Enter/Space, Space `preventDefault`, both
+  render sites, client disconnect; a composition test with the real journal + real manager, a
+  registration-gap regression, keyboard-isolation cases; I5 rewritten as decision A6 (dead clicks
+  possible in two windows); recon's false absence fixed (`onboarding-tab.ts:36` is SW-side focus).
+  Rejected: a `ChromeWindowsAdapter` unit test (no harness for `chrome.*` adapters in the repo; the
+  contract is pinned through the fake at the manager); tightening `transitionOperation`'s RPC (out of
+  scope). Transcript: `audit-codex.md`.
 
 ## Seeds
 
 _(DRAFT until the approval gate; finalized after)_
 
-ELI5 companion: _(Artifact URL recorded after publish; source `implementations-plan/dapp-popup-cancel-focus/eli5.html`)_
+ELI5 companion: Artifact `https://claude.ai/code/artifact/9f7c034e-1d73-4172-b378-5e3c61c6413d`
+(source `implementations-plan/dapp-popup-cancel-focus/eli5.html` — redeploy the same file to update).
 
 Recommended: `/goal` (completion is transcript-observable).
 
