@@ -62,3 +62,28 @@ Adopted:
   dropped from a pre-existing comment in the touched file.
 
 Re-validated under `taskset -c 0,1`, retry 0: the SW-restart trio × 3 rounds, 3/3; no warning fired.
+
+## Round 3 — `not converged` (2 Medium) — response (verbatim)
+
+- **Medium — attachment remains outside the probe budget** ([helpers.ts:1695](apps/extension/tests/e2e/fixtures/helpers.ts:1695)). **Confidence: high.** The two-second timer starts only after `createCDPSession()` resolves. Puppeteer’s attachment therefore retains the 300-second protocol timeout. The initial read also precedes the outer 15-second race; a fallback attachment can finish after that race settles and still start evaluating. A source-based simulation remained pending after five seconds with **no probe timer started**. Include attachment in the budget and detach any session arriving after cancellation. Fire-and-forget detach requests release; it does not establish that release has completed.
+
+- **Medium — the onboarding “invariant” is not enforced** ([extension.ts:132](apps/extension/tests/e2e/fixtures/extension.ts:132)). **Confidence: high.** `onInstalled` invokes `void openOrFocusOnboardingTab()` independently of runtime startup. The liveness write never awaits that promise. A simulation using the actual functions published liveness while `tabs.create` remained pending, exhausted the poll, logged the warning, flipped completion, then stored the late tab ID. The replacement-popup race therefore remains; the comment incorrectly claims synchronization. A small deterministic alternative is to require the existing tab-ID wait to succeed on fresh installs and fail setup on expiry, while allowing persisted-profile launches without an install tab. That preserves the timeout and avoids returning a contaminated fixture.
+
+not converged
+
+## Round 3 — triage
+
+Both adopted (refinements of the two threads, not new scope):
+- M: `createCDPSession()` sat outside the probe budget (Puppeteer's attach carries the 300 s protocol
+  timeout). The whole probe — attach + evaluate — now races the 2 s budget, and a session that arrives
+  after the race settled is released when it does (`probe.then(detach, detach)`).
+- M: my "the tab id lands during boot" claim was wrong — `onInstalled` fires `void
+  openOrFocusOnboardingTab()` and nothing in the boot awaits it, so liveness can precede the id.
+  Codex's cheaper deterministic alternative adopted: on a fresh profile the id is REQUIRED within the
+  existing 5 s poll and `launchExtension` throws otherwise (an untracked page is a setup failure, not a
+  warning); a reused `userDataDir` was installed by an earlier launch, opens no tab, and keeps the poll
+  as a courtesy.
+
+Validated: the SW-restart trio × 3 rounds under `taskset -c 0,1` retry 0 → 3/3; full smoke on all cores
+with `NULO_E2E_MIGRATION_FIXTURE=1` → 31/31 files (every fixture launches a fresh profile, so the
+requirement held on every launch; the `userDataDir` specs `migration` and `import-dead-rpc` green).

@@ -28,7 +28,9 @@ can still park the host at the instant of the stop (1 residual in ~25 kills with
 close alone). So the wait accepts a second proof next to the identity-keyed `targetdestroyed`: the
 worker's `performance.timeOrigin`, read before the stop and, from 2 s after it, re-read on
 whatever worker target is live — a newer value is a new instance under whatever host Chrome gave
-it. Same 15 s budget; no timeout moved. The two inline mirrors (`sw-resilience.test.ts`,
+it. The wait is ONE race of destroy / witness / 15 s deadline, and every probe (attach included)
+races its own 2 s budget and releases its session without awaiting, so no CDP round trip can hold
+the helper past the budget. No timeout moved. The two inline mirrors (`sw-resilience.test.ts`,
 `sw-restart-network.test.ts`) now import the helper — three copies of a primitive this subtle is
 exactly how the next drift starts.
 
@@ -53,10 +55,13 @@ lands on a URL another page already has.
 
 **The lingering page.** Every e2e browser carried the extension's first-run tab — opened by
 `chrome.runtime.onInstalled` before `launchExtension` seeds `nulo:onboarding:completed` — on
-`#/onboarding/welcome` or `#/popup/register`: an unowned extension realm that re-routes itself on
-every lock and keeps one more client on the service worker. `launchExtension` now closes it (tab id
-from `nulo:onboarding:tab-id` in session storage). The onboarding specs open their own tab via
-`openOnboarding` and are unaffected (full smoke green with the change).
+`#/onboarding/welcome`, or, when the flag flipped before it mounted, replaced by a popup window on
+`#/popup/register` (`onboarding/app.vue` `openPopupWindowAndClose`, which also drops the tracked id):
+an unowned extension realm that re-routes itself on every lock and keeps one more client on the
+service worker. `launchExtension` now closes the tab BEFORE flipping the flag; on a fresh profile the
+tab id (`nulo:onboarding:tab-id`) is required within the 5 s poll and setup fails otherwise, since
+nothing in the worker's boot awaits the tab open; a reused `userDataDir` opens no tab. The onboarding
+specs open their own tab via `openOnboarding` and are unaffected (full smoke 31/31 with the change).
 
 ## Validation (all under `taskset -c 0,1`, `NULO_E2E_RETRY=0`)
 

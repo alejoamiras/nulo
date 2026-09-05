@@ -1,4 +1,4 @@
-import type { Page, Target } from "puppeteer"
+import type { CDPSession, Page, Target } from "puppeteer"
 import { TEST_PASSWORD } from "./constants"
 import { type ExtensionContext, clickByTestId, clickSelector, replaceInputValue, withTimeoutMessage } from "./extension"
 
@@ -1688,18 +1688,29 @@ export async function deleteNetworkRow(page: Page, name: string): Promise<void> 
 const STOP_WORKER_BUDGET_MS = 15_000
 const WORKER_PROBE_BUDGET_MS = 2_000
 
-/** The worker global's creation time: only a new worker instance produces a newer value. Read
- *  through a session of its own, bounded so a wedged round trip cannot hold the caller past its
- *  budget; the detach is never awaited — the session is released as soon as the read settles. */
+/** The worker global's creation time: only a new worker instance produces a newer value. The
+ *  whole probe — attach included, since Puppeteer's attach carries the 300 s protocol timeout — races
+ *  the budget; a session that arrives after the race settled is released when it does. Release is
+ *  requested, never awaited: the caller's budget must not depend on Chrome answering a detach. */
 async function readWorkerTimeOrigin(target: Target, budgetMs: number): Promise<number> {
-	const session = await target.createCDPSession()
-	try {
-		const read = session.send("Runtime.evaluate", { expression: "performance.timeOrigin", returnByValue: true })
-		const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("worker probe timed out")), budgetMs))
-		const { result } = await Promise.race([read, timeout])
+	let session: CDPSession | undefined
+	const probe = (async () => {
+		session = await target.createCDPSession()
+		const { result } = await session.send("Runtime.evaluate", { expression: "performance.timeOrigin", returnByValue: true })
 		return Number(result.value)
+	})()
+	let timer: ReturnType<typeof setTimeout> | undefined
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(new Error("worker probe timed out")), budgetMs)
+	})
+	try {
+		return await Promise.race([probe, timeout])
 	} finally {
-		session.detach().catch(() => {})
+		if (timer) clearTimeout(timer)
+		probe.then(
+			() => session?.detach().catch(() => {}),
+			() => session?.detach().catch(() => {}),
+		)
 	}
 }
 

@@ -129,12 +129,14 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 		)
 	}
 
-	// `onInstalled` opens the extension's first-run tab and stores its id in session storage; both
-	// happen during the worker's boot, which the liveness wait above has already seen complete, so
-	// the poll is a bound, not a race we expect to lose. Close the tab BEFORE marking onboarding
-	// complete: an onboarding page that mounts and reads the completed flag replaces itself with a
-	// popup window and drops the tracked id, leaving an untracked extension page in this browser.
-	// Every e2e drives the popup flows directly; the tab-flow specs open their own tab.
+	// `onInstalled` opens the extension's first-run tab and stores its id in session storage. Nothing
+	// in the worker's boot awaits that open, so the id can land after liveness; on a fresh profile
+	// the install is certain, so the id is REQUIRED — a launch that cannot find it would hand the
+	// test an untracked extension page, and that is a setup failure, not a warning. A reused profile
+	// (`userDataDir`) was installed by an earlier launch and opens no tab; there the poll is only a
+	// courtesy. Close the tab BEFORE marking onboarding complete: an onboarding page that mounts and
+	// reads the completed flag replaces itself with a popup window and drops the tracked id. Every
+	// e2e drives the popup flows directly; the tab-flow specs open their own tab.
 	const firstRunTabClosed = await blankPage.evaluate(async () => {
 		const key = "nulo:onboarding:tab-id"
 		for (let attempt = 0; attempt < 20; attempt++) {
@@ -148,7 +150,9 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 		}
 		return false
 	})
-	if (!firstRunTabClosed) console.warn("[launchExtension] no first-run tab id within 5s — an onboarding page may linger")
+	if (!firstRunTabClosed && !userDataDir) {
+		throw new Error("launchExtension: the first-run onboarding tab never registered its id within 5s of liveness")
+	}
 
 	// Default: bypass the new onboarding tab flow for all e2e tests. Existing
 	// tests (registration, import-paths, passkey-paths, etc.) drive the
