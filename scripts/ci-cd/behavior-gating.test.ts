@@ -11,7 +11,7 @@
  * that step this guard would never run on a PR and the whole mechanism would be hollow.
  */
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 const ROOT = join(import.meta.dir, "..", "..")
@@ -160,5 +160,30 @@ describe("CI behavior-gating guard", () => {
     expect(dedicated, "frozen-account-canary must run in a dedicated prover-ON job").toContain(
       "tests/e2e/network/frozen-account-canary.test.ts",
     )
+  })
+
+  // The self-pay phase gate — the wallet simulating and sending as the account a dApp names,
+  // with the node's setup allow-list enforced — must keep running on every PR: the matrix in a
+  // dedicated heavy job at retry 0 (a retry would re-mask an intermittent wallet regression),
+  // the cheap two-account simulate in the shard pool (never excluded, so it cannot drop out).
+  test("network-e2e keeps the self-pay phase gate in place at retry 0", () => {
+    // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
+    const wf = Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows/pr-network-e2e.yml"), "utf8")) as any
+    const words = (v: unknown): string[] => (typeof v === "string" ? v.split(/\s+/).filter(Boolean) : [])
+    // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
+    const jobs = Object.entries(wf.jobs) as [string, any][]
+
+    const matrix = jobs.find(([, job]) => words(job.with?.test_files).includes("tests/e2e/network/selfpay-phase.test.ts"))
+    expect(matrix, "selfpay-phase must run in a dedicated test_files job").toBeDefined()
+    expect(String(matrix?.[1].with?.retry), "selfpay-phase runs at retry 0").toBe("0")
+    expect(matrix?.[1].with?.proverless, "selfpay-phase runs proverless like the other heavy fee flows").toBe(true)
+
+    const pool = jobs.find(([, job]) => job.with?.exclude_files)
+    expect(words(pool?.[1].with?.exclude_files), "sim-from-selfpay stays in the shard pool").not.toContain(
+      "tests/e2e/network/sim-from-selfpay.test.ts",
+    )
+    expect(String(pool?.[1].with?.retry), "the shard pool runs at retry 0").toBe("0")
+    expect(existsSync(join(ROOT, "apps/extension/tests/e2e/network/sim-from-selfpay.test.ts")), "sim-from-selfpay exists").toBe(true)
+    expect(existsSync(join(ROOT, "apps/extension/tests/e2e/network/selfpay-phase.test.ts")), "selfpay-phase exists").toBe(true)
   })
 })
