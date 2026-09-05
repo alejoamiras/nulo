@@ -277,7 +277,7 @@ moves, the shell reloads accounts, the banner settles to "switched" → Approve 
   (exit 0). Run the network suite alone on the host (memory: concurrent load mass-fails it). Layers: e2e
   (sandbox).
 
-### Phase 5 — docs + wrap
+### Phase 5 — docs + wrap ✓
 - `apps/extension/tests/e2e/README.md` gets one line on the mismatch spec if the README lists specs;
   `implementations-plan/index.md` status; lessons per phase.
 - **Validation gate**: `bun run audit:vue` (typecheck ∥ test ∥ lint, then build; exit 0) ·
