@@ -28,7 +28,7 @@ a red `selfpay-phase` blocks a merge.
 commit; the two later commits are docs only): run 33997790992 —
 https://github.com/alejoamiras/nulo/actions/runs/33997790992
 
-_(results and wall-time recorded when the run completes)_
+
 
 ### Run 33997790992 (`workflow_dispatch`, commit `b6f3949a`, pre-rebase)
 
