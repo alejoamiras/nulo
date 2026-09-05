@@ -1,4 +1,4 @@
-import type { Page, Target } from "puppeteer"
+import type { CDPSession, Page, Target } from "puppeteer"
 import { TEST_PASSWORD } from "./constants"
 import { type ExtensionContext, clickByTestId, clickSelector, replaceInputValue, withTimeoutMessage } from "./extension"
 
@@ -1685,38 +1685,108 @@ export async function deleteNetworkRow(page: Page, name: string): Promise<void> 
 	await page.waitForFunction((sel: string) => !document.querySelector(sel), { timeout: 5_000 }, rowSelector)
 }
 
+const STOP_WORKER_BUDGET_MS = 15_000
+const WORKER_PROBE_BUDGET_MS = 2_000
+
+/** The worker global's creation time: only a new worker instance produces a newer value. The
+ *  whole probe — attach included, since Puppeteer's attach carries the 300 s protocol timeout — races
+ *  the budget. An attached session is released the moment the budget expires (a session left on a
+ *  stopping worker is the very hazard `stopServiceWorker` exists to avoid), and one that attaches
+ *  after expiry is released without evaluating. Release is requested, never awaited: the caller's
+ *  budget must not depend on Chrome answering a detach. */
+async function readWorkerTimeOrigin(target: Target, budgetMs: number): Promise<number> {
+	let session: CDPSession | undefined
+	let expired = false
+	const release = () => session?.detach().catch(() => {})
+	const probe = (async () => {
+		session = await target.createCDPSession()
+		if (expired) throw new Error("worker probe attached after its budget")
+		const { result } = await session.send("Runtime.evaluate", { expression: "performance.timeOrigin", returnByValue: true })
+		return Number(result.value)
+	})()
+	let timer: ReturnType<typeof setTimeout> | undefined
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => {
+			expired = true
+			release()
+			reject(new Error("worker probe timed out"))
+		}, budgetMs)
+	})
+	try {
+		return await Promise.race([probe, timeout])
+	} finally {
+		if (timer) clearTimeout(timer)
+		probe.then(release, release)
+	}
+}
+
 /**
- * Terminate the extension's service worker and wait until the ORIGINAL target
- * is gone.
+ * Terminate the extension's service worker and wait until the ORIGINAL worker instance is gone.
  *
- * `worker.close()` is the only Puppeteer call that actually kills an MV3
- * service worker — `Runtime.terminateExecution` leaves it running. The
- * destruction listener is armed BEFORE the close and keyed on Target object
- * identity rather than a target id, so a fast replacement cannot be mistaken
- * for the original surviving: without that, a restart test passes against a
- * worker that never died.
+ * Chrome parks a stopped worker's DevTools host while any session is attached and hands that host
+ * to the worker's next start; an MV3 extension worker restarts within milliseconds of stopping. A
+ * stop issued through an attached session (Puppeteer's `worker.close()`) therefore often leaves
+ * the restarted worker under the original target id, and `targetdestroyed` never fires. So the
+ * stop is an UNATTACHED `Target.closeTarget` from the browser session, and "gone" has two proofs:
+ * the identity-keyed `targetdestroyed` (the fast path), or — because a session this helper does
+ * not own, such as Puppeteer's own auto-attach on every worker start, can still park the host —
+ * a newer `performance.timeOrigin` on whichever worker target is live. The fallback probes attach
+ * only after a normal destroy would long have landed; a still-stopping worker met by that attach is
+ * parked, not resurrected, and cannot yield a newer origin. `Runtime.terminateExecution` is not an
+ * alternative — it leaves the worker running.
  */
 export async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
-	const swTarget = await ext.browser.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId), {
-		timeout: 15_000,
-	})
+	const isExtensionWorker = (t: Target) => t.type() === "service_worker" && t.url().includes(ext.extensionId)
+	const swTarget = await ext.browser.waitForTarget(isExtensionWorker, { timeout: STOP_WORKER_BUDGET_MS })
+	const originBefore = await readWorkerTimeOrigin(swTarget, WORKER_PROBE_BUDGET_MS)
 
-	const destroyed = new Promise<void>((resolve, reject) => {
-		const timer = setTimeout(() => {
-			ext.browser.off("targetdestroyed", onDestroyed)
-			reject(new Error("stopServiceWorker: the service-worker target was still alive 15s after close()"))
-		}, 15_000)
-		function onDestroyed(target: Target) {
-			if (target !== swTarget) return
-			clearTimeout(timer)
-			ext.browser.off("targetdestroyed", onDestroyed)
-			resolve()
+	let settled = false
+	let onDestroyed: (target: Target) => void = () => {}
+	const destroyed = new Promise<void>((resolve) => {
+		onDestroyed = (target) => {
+			if (target === swTarget) resolve()
 		}
-		ext.browser.on("targetdestroyed", onDestroyed)
 	})
+	ext.browser.on("targetdestroyed", onDestroyed)
 
-	const worker = await swTarget.worker()
-	if (!worker) throw new Error("stopServiceWorker: service-worker target exposed no worker to close")
-	await worker.close()
-	await destroyed
+	const browserSession = await ext.browser.target().createCDPSession()
+	let deadlineTimer: ReturnType<typeof setTimeout> | undefined
+	try {
+		// The id comes from the browser's own target list (public protocol), matched on the same
+		// predicate as the Target above, so no private `_targetId` read is needed.
+		const { targetInfos } = await browserSession.send("Target.getTargets")
+		const info = targetInfos.find((t) => t.type === "service_worker" && t.url.includes(ext.extensionId))
+		if (!info) throw new Error("stopServiceWorker: the browser lists no service-worker target for the extension")
+		const { success } = await browserSession.send("Target.closeTarget", { targetId: info.targetId })
+		if (!success) throw new Error("stopServiceWorker: Target.closeTarget reported failure")
+
+		const restarted = (async () => {
+			await new Promise((r) => setTimeout(r, 2_000))
+			while (!settled) {
+				const live = ext.browser.targets().find(isExtensionWorker)
+				const origin = live ? await readWorkerTimeOrigin(live, WORKER_PROBE_BUDGET_MS).catch(() => undefined) : undefined
+				if (origin !== undefined && origin > originBefore) return
+				await new Promise((r) => setTimeout(r, 250))
+			}
+		})()
+		const deadline = new Promise<never>((_, reject) => {
+			deadlineTimer = setTimeout(
+				() =>
+					reject(
+						new Error(
+							`stopServiceWorker: the service-worker target was still alive ${STOP_WORKER_BUDGET_MS / 1000}s after close()`,
+						),
+					),
+				STOP_WORKER_BUDGET_MS,
+			)
+		})
+		// One race, so a probe stuck in a CDP round trip can neither hide the destroy event nor
+		// outlive the budget.
+		await Promise.race([destroyed, restarted, deadline])
+	} finally {
+		settled = true
+		if (deadlineTimer) clearTimeout(deadlineTimer)
+		ext.browser.off("targetdestroyed", onDestroyed)
+		browserSession.detach().catch(() => {})
+	}
 }

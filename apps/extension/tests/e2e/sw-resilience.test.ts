@@ -1,59 +1,8 @@
 import { expect } from "vitest"
-import type { Page, Target } from "puppeteer"
+import type { Page } from "puppeteer"
 import { TEST_PASSWORD } from "./fixtures/constants"
-import {
-	test,
-	openPopup,
-	waitForHash,
-	clickByTestId,
-	replaceInputValue,
-	withTimeoutMessage,
-	type ExtensionContext,
-} from "./fixtures/extension"
-import { acceptConfirmPopup, ensureUnlocked, lockWallet, navigateByHash } from "./fixtures/helpers"
-
-/** Terminate the SW and WAIT for it to be gone, approximating MV3's
- *  idle-suspend recycle.
- *
- *  `worker().close()` is Chrome's documented way to test service-worker
- *  termination with Puppeteer; for a service-worker target puppeteer implements
- *  it as `Target.closeTarget` + detach. The obvious-looking alternative,
- *  `Runtime.terminateExecution`, does NOT end this worker — measured: the target
- *  survives, the session record survives, the wallet stays unlocked, and
- *  `nulo:liveness` merely advances by one HEARTBEAT_INTERVAL_MS, which is enough
- *  to satisfy a post-kill liveness gate without any respawn having occurred
- *  (deflake-round-3 `lessons/phase-3.md`).
- *
- *  Returning only once the ORIGINAL target id is gone is what makes the tests
- *  below mean anything: without it they pass against a worker that never died. */
-async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
-	const swTarget = await ext.browser.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId), {
-		timeout: 15_000,
-	})
-
-	// Arm the destruction listener BEFORE closing: puppeteer reports the very
-	// Target object that went away, so identity is object equality rather than a
-	// private `_targetId` read, and a fast replacement cannot be mistaken for the
-	// original surviving.
-	const destroyed = new Promise<void>((resolve, reject) => {
-		const timer = setTimeout(() => {
-			ext.browser.off("targetdestroyed", onDestroyed)
-			reject(new Error("stopServiceWorker: the service-worker target was still alive 15s after close()"))
-		}, 15_000)
-		function onDestroyed(target: Target) {
-			if (target !== swTarget) return
-			clearTimeout(timer)
-			ext.browser.off("targetdestroyed", onDestroyed)
-			resolve()
-		}
-		ext.browser.on("targetdestroyed", onDestroyed)
-	})
-
-	const worker = await swTarget.worker()
-	if (!worker) throw new Error("stopServiceWorker: service-worker target exposed no worker to close")
-	await worker.close()
-	await destroyed
-}
+import { test, openPopup, waitForHash, clickByTestId, replaceInputValue, withTimeoutMessage } from "./fixtures/extension"
+import { acceptConfirmPopup, ensureUnlocked, lockWallet, navigateByHash, stopServiceWorker } from "./fixtures/helpers"
 
 /** Post-restart readiness: chrome.storage.session RETAINS the dead worker's
  *  heartbeat while the extension stays loaded, so the gate requires a
@@ -88,11 +37,9 @@ async function readLiveness(page: Page): Promise<number> {
 
 // Chrome's MV3 lifecycle recycle — the idle worker is killed, the next event
 // respawns it cold — is where storage migrations, service init and cold-boot
-// races actually break. `stopServiceWorker` above is what makes these tests
-// mean anything: an earlier version used `Runtime.terminateExecution`, which
-// leaves this worker running (measured in deflake-round-3 `lessons/phase-3.md`),
-// so every test here passed against a worker that never died and the one test
-// requiring a real restart failed.
+// races actually break. `stopServiceWorker` (fixtures/helpers.ts) is what makes
+// these tests mean anything: a kill that leaves the worker running lets every
+// test here pass against a worker that never died.
 test("extension survives SW stop+respawn: lock → kill SW → unlock → general", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general")
@@ -165,8 +112,7 @@ test("strict mode default ON: unlock → kill SW → expect lock screen on respa
  * version posted to ConfigService over `chrome.runtime.sendMessage` to stay
  * independent of layout, but wallet services listen on PORTS — the SW's only
  * onMessage listener returns false — so the flag never actually changed and this
- * test asserted a silent restore that strict mode had never been turned off for
- * (deflake-round-3 `lessons/phase-3.md`).
+ * test asserted a silent restore that strict mode had never been turned off for.
  */
 // SKIP — three distinct blockers, all measured, none of them "flaky CI":
 //  1. The original setup was dead. It flipped strictSecurityMode by posting to
@@ -256,7 +202,7 @@ test.skip("strict mode OFF (opt-out): unlock → toggle off → relock+unlock �
  * gap; this test fails if anyone reintroduces the setInterval-only
  * pattern.
  *
- * Note on existence vs timestamp comparison (codex audit catch):
+ * Existence vs timestamp comparison:
  * chrome.storage.session survives SW termination while the extension
  * stays loaded, so an existence check would pass on the stale pre-restart
  * value and miss the regression. Fresh-timestamp comparison is the

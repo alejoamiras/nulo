@@ -1,51 +1,18 @@
 import { expect } from "vitest"
-import type { Page, Target } from "puppeteer"
+import type { Page } from "puppeteer"
 import { TEST_PASSWORD } from "./fixtures/constants"
-import { test, openPopup, waitForHash, clickByTestId, replaceInputValue, type ExtensionContext } from "./fixtures/extension"
-import { lockWallet } from "./fixtures/helpers"
-
-// Mirrors the helpers in sw-resilience.test.ts. Kept inline rather than
-// extracted because the SW-restart shape is the test-case under test —
-// making it a fixture would hide the lifecycle from the reader.
-
-async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
-	const swTarget = await ext.browser.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId), {
-		timeout: 15_000,
-	})
-
-	// Arm the destruction listener BEFORE closing: puppeteer reports the very
-	// Target object that went away, so identity is object equality rather than a
-	// private `_targetId` read, and a fast replacement cannot be mistaken for the
-	// original surviving.
-	const destroyed = new Promise<void>((resolve, reject) => {
-		const timer = setTimeout(() => {
-			ext.browser.off("targetdestroyed", onDestroyed)
-			reject(new Error("stopServiceWorker: the service-worker target was still alive 15s after close()"))
-		}, 15_000)
-		function onDestroyed(target: Target) {
-			if (target !== swTarget) return
-			clearTimeout(timer)
-			ext.browser.off("targetdestroyed", onDestroyed)
-			resolve()
-		}
-		ext.browser.on("targetdestroyed", onDestroyed)
-	})
-
-	const worker = await swTarget.worker()
-	if (!worker) throw new Error("stopServiceWorker: service-worker target exposed no worker to close")
-	await worker.close()
-	await destroyed
-}
+import { test, openPopup, waitForHash, clickByTestId, replaceInputValue } from "./fixtures/extension"
+import { lockWallet, stopServiceWorker } from "./fixtures/helpers"
 
 /** Readiness after the restart: session storage retains the pre-kill heartbeat,
  *  so a truthy check passes instantly against a stale value and the next UI wait
  *  races the booting worker. Requiring a STRICTLY NEWER timestamp is what makes
  *  this causal.
  *
- *  It is only meaningful because `stopServiceWorker` above waits for the old
- *  target to be GONE. Against a kill that leaves the worker running, a fresh
+ *  It is only meaningful because `stopServiceWorker` waits for the old worker
+ *  INSTANCE to be gone. Against a kill that leaves it running, a fresh
  *  timestamp arrives from its ordinary heartbeat within HEARTBEAT_INTERVAL_MS
- *  and proves nothing (deflake-round-3 `lessons/phase-3.md`). */
+ *  and proves nothing. */
 async function waitForLiveness(page: Page, afterTs: number): Promise<void> {
 	await page.waitForFunction(
 		async (priorTs: number) => {
