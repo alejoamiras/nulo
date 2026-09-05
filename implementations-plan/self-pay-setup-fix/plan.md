@@ -142,14 +142,14 @@ playground → wallet-sdk `aztec_simulateTx { exec: { calls: [mint_to_private], 
 - `dispatcher.ts` + pins; playground `pg-input-from` + `pg-toggle-skipValidation` + `pg-input-feePayer` wiring; `sim-from-selfpay.test.ts`.
 - **Gate:** `<wb>` exit 0 with the new pins; `<ext-typecheck>`, `<ext-unit>`, `<pg>` exit 0; `<network> sim-from-selfpay.test.ts` green with validation ON and resolved = accounts[1] in the log; the reversal on `898a3b99`'s dispatcher quoted in `lessons/phase-0.md` (resolved = accounts[0] ≠ payer = accounts[1], route `fpc`, option `EXTERNAL`, the authorization error), preconditions asserted first; neighbours `<network>` `sim-methods`, `multi-account-from`, `tx-sendTx-selfPay`, `authwit-lifecycle` green.
 
-### Phase 1 — The playground gate
+### Phase 1 ✓ — The playground gate
 - Fixtures (`deployMinterToken`, `fundPrivateFpcCredit`, the signer queue); `mint-private` section; `selfpay-phase.test.ts` (matrix, negative control, env/list assertions, pre-fix reversal).
 - **Gate:** `<pg>` exit 0; `<ext-typecheck>`, `<ext-unit>` exit 0; `<network> selfpay-phase.test.ts` — the negative control rejected with the production error text, `TX_PUBLIC_SETUP_ALLOWLIST` asserted unset and the effective list recorded, every cell named in the log and ending in the success oracles or a node/PXE-origin error, zero fixture-origin failures; the pre-fix reversal quoted in `lessons/phase-1.md`. Red node-origin cells are recorded verbatim and are NOT a pass of Phase 2.
 
-### Phase 2 — Diagnosis (skipped when Phase 1 is all green after Phase 0)
+### Phase 2 ✓ — Diagnosis (skipped when Phase 1 is all green after Phase 0)
 - **Gate:** `lessons/phase-2.md` names each surviving explanation with its intervention's observed outcome, or records "no red cells"; `<lint>`, `<ext-typecheck>`, `<ext-unit>` exit 0.
 
-### Phase 3 — Remaining fix (if any) + pins
+### Phase 3 ✓ — Remaining fix (if any) + pins
 - **Gate:** `<ext-unit>` (+ `<wb>` / `bun run --cwd packages/aztec-runtime test` as touched) exit 0; `<network> selfpay-phase.test.ts` GREEN on every cell, both fee variants; neighbours green: `tx-sendTx-selfPay`, `tx-sendTx-feePayer`, `tx-sendTx-sponsoredFpc`, `tx-sendTx-noFrom`, `sim-methods`, `multi-account-from`, `authwit-lifecycle`, `fee-methods`; if initialization or PXE behaviour changed, the cells rerun under real proving.
 
 ### Phase 4 — The gate in CI
