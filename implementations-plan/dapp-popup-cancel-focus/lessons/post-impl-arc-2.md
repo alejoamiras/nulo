@@ -66,3 +66,10 @@ tuple of async fns); biome clean on the touched files.
   the lifecycle fences and target-profile authorization hold.
 
 Re-validation: activity suite 4 files, 66 tests, exit 0; extension typecheck 0 errors; biome clean.
+
+### Round 3 (resumed) — `clean`
+"Reviewed through `23d9abd5`; no remaining material findings." Codex re-ran the four activity suites
+itself (66 passed) and confirmed the 36px/20px reservations, the count derived from the real button
+predicates, and that the accessibility, lifecycle and authorization fixes hold. Loop converged after
+three rounds (the plan's ceiling, reached without a scope smell: r1 a11y structure, r2 a layout
+consequence of r1's fix, r3 clean).
