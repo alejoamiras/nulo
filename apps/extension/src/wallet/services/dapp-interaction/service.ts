@@ -86,6 +86,39 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		this.dappSessionService = services.get(DappSessionService.name)
 		this.executionService = services.get(ExecutionService.name)
 		this.operationJournal = services.get(OperationJournalService.name)
+		// A feed cancel lands in the journal only (`cancelJob` → queued → cancelled);
+		// the open approval popup and the dApp's pending promise learn of it here.
+		this.operationJournal.onOperationUpdated.add((record) => {
+			if (record.progress.stage === "cancelled") this.cancelInteractionForJournal(record.id)
+		})
+	}
+
+	/** Close the approval popup of a live interaction whose queued journal
+	 *  record was cancelled, rejecting the dApp with the structured cancel.
+	 *  Idempotent; a miss is normal — an already-approved request has left
+	 *  `storage`, and the claim helper refuses its cancelled record instead. */
+	private cancelInteractionForJournal(journalId: string): void {
+		const interaction = [...this.storage.values()].find((x) => x.hooks?.queuedJournalId === journalId)
+		if (!interaction || interaction.cancelledAt !== undefined) return
+		// Flag first so a racing approve refuses (first service claim wins),
+		// broadcast so a live popup skips its own reject on unload, then settle
+		// — which is what closes the window.
+		interaction.cancelledAt = Date.now()
+		this.emit("onInteractionCancelled", interaction.id)
+		this.windowManager.cancel(interaction.handleId, new JobCancelledError("Transaction cancelled by user", { jobId: journalId }))
+	}
+
+	/** The subscription cannot see an interaction registered after the cancel
+	 *  fired; one read after registration closes that gap. The journal writes
+	 *  before it emits, so a cancel this read misses emits after registration
+	 *  and the subscription catches it. Fire-and-forget: settlement never waits
+	 *  on storage, and a failed read leaves the window owned by its handle. */
+	private async reconcileCancelledJournal(journalId: string): Promise<void> {
+		const record = await this.operationJournal.getOperation(journalId).catch((err: unknown) => {
+			this.logDebug(`reconcile: journal read failed for ${journalId}: ${getErrorMessage(err)}`)
+			return undefined
+		})
+		if (record && record.progress.stage !== "queued") this.cancelInteractionForJournal(journalId)
 	}
 
 	public async getInteractionPayload(id: string): Promise<ExecutionPayload | CapabilityPayload | DiscoveryPayload> {
@@ -327,6 +360,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 				this.storage.delete(id)
 			})
 		})
+		if (hooks?.queuedJournalId) void this.reconcileCancelledJournal(hooks.queuedJournalId)
 		return pending
 	}
 

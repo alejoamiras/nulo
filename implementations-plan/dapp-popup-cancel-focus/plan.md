@@ -303,7 +303,8 @@ _(green 2026-09-05; `lessons/phase-1.md`. Gate note: root `bun run typecheck` la
 - **Validation gate**: `bun run typecheck && bun run lint && bun run --cwd apps/extension test src/wallet/services/window-manager src/wallet/services/wallet-sdk/error-envelope.test.ts src/wallet/services/dapp-interaction && bun run --cwd packages/wallet-bridge test`
   → exit 0, new cases green. Layers: typecheck/lint · unit.
 
-#### Phase 2 — journal-driven cancel in `DappInteractionService` + post-registration reconciliation
+#### Phase 2 — journal-driven cancel in `DappInteractionService` + post-registration reconciliation ✓
+_(green 2026-09-05; `lessons/phase-2.md`. Arc gate: `audit:vue`'s parallel `test` leg timed out 20 untouched crypto/integration tests under load; the same four layers run sequentially are green — typecheck:all 14/14, lint, 5443/5443, build.)_
 - `init()`: `this.operationJournal.onOperationUpdated.add((rec) => { if (rec.progress.stage === "cancelled") this.cancelInteractionForJournal(rec.id) })`.
 - `cancelInteractionForJournal(journalId)` per the arc-1 flow step 2. Idempotent.
 - `interaction()`: right after `storage.set`, and only with `hooks?.queuedJournalId`,

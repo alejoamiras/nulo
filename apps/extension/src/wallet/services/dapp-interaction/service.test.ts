@@ -40,6 +40,10 @@ type Internals = {
 	executionService: { executeOperations: (...args: unknown[]) => Promise<unknown> }
 	dappSessionService: { tryGetDappSession: (id: string) => Promise<{ profileId: string } | undefined> }
 	silentInteraction: (payload: unknown, hooks?: ExecutionHooks) => Promise<unknown>
+	operationJournal: { getOperation: (id: string) => Promise<unknown> }
+	windowManager: { cancel: ReturnType<typeof vi.fn>; settle: ReturnType<typeof vi.fn> }
+	cancelInteractionForJournal: (journalId: string) => void
+	reconcileCancelledJournal: (journalId: string) => Promise<void>
 }
 
 function makeService(overrides: {
@@ -292,5 +296,133 @@ describe("DappInteractionService cancellation linearization (first service claim
 		await expect(svc.isInteractionCancelled("i-3")).resolves.toBe(true)
 		// An unknown id reads false, never throws (replay must be safe pre-load).
 		await expect(svc.isInteractionCancelled("missing")).resolves.toBe(false)
+	})
+})
+
+describe("DappInteractionService journal-driven cancel (a feed cancel closes the popup)", () => {
+	const seedQueued = (internals: Internals, id: string, journalId: string) => {
+		internals.storage.set(id, {
+			id,
+			payload: emptyPayload,
+			handleId: `handle-${id}`,
+			cancellationToken: id,
+			hooks: { queuedJournalId: journalId },
+		})
+	}
+	const cancelCalls = (internals: Internals) => internals.windowManager.cancel.mock.calls as Array<[string, unknown]>
+
+	test("cancelled journal record → manager.cancel once with the handle id and a JobCancelledError carrying the jobId; broadcast + flag", () => {
+		const { svc, internals } = makeService({})
+		seedQueued(internals, "i-1", "j-1")
+		const broadcast: string[] = []
+		svc.onInteractionCancelled.add((id) => broadcast.push(id))
+
+		internals.cancelInteractionForJournal("j-1")
+
+		expect(cancelCalls(internals)).toHaveLength(1)
+		const [handleId, reason] = cancelCalls(internals)[0]
+		expect(handleId).toBe("handle-i-1")
+		expect(reason).toBeInstanceOf(JobCancelledError)
+		expect((reason as JobCancelledError).details).toEqual({ jobId: "j-1" })
+		expect(broadcast).toEqual(["i-1"])
+		expect(internals.storage.get("i-1")?.cancelledAt).toBeTypeOf("number")
+	})
+
+	test("unknown journal id → nothing happens", () => {
+		const { internals } = makeService({})
+		seedQueued(internals, "i-1", "j-1")
+
+		internals.cancelInteractionForJournal("j-other")
+
+		expect(cancelCalls(internals)).toHaveLength(0)
+		expect(internals.storage.get("i-1")?.cancelledAt).toBeUndefined()
+	})
+
+	test("already-approved interaction (record gone) → nothing; the claim helper owns that cancel", async () => {
+		const executeOperations = vi.fn(async () => [])
+		const { svc, internals } = makeService({ executeOperations })
+		seedQueued(internals, "i-1", "j-1")
+
+		await svc.approveInteraction("i-1", [], origin)
+		internals.cancelInteractionForJournal("j-1")
+		await flush()
+
+		expect(cancelCalls(internals)).toHaveLength(0)
+		expect(executeOperations).toHaveBeenCalledTimes(1)
+	})
+
+	test("a second cancelled event is a no-op", () => {
+		const { internals } = makeService({})
+		seedQueued(internals, "i-1", "j-1")
+
+		internals.cancelInteractionForJournal("j-1")
+		internals.cancelInteractionForJournal("j-1")
+
+		expect(cancelCalls(internals)).toHaveLength(1)
+	})
+
+	test("approve after the cancelled event and before cleanup is refused with JobCancelledError", async () => {
+		const executeOperations = vi.fn(async () => [])
+		const { svc, internals } = makeService({ executeOperations })
+		seedQueued(internals, "i-1", "j-1")
+
+		internals.cancelInteractionForJournal("j-1")
+		await expect(svc.approveInteraction("i-1", [], origin)).rejects.toBeInstanceOf(JobCancelledError)
+		await flush()
+		expect(executeOperations).not.toHaveBeenCalled()
+	})
+
+	test("reconcile: the post-registration read reports cancelled → cancel once, no event needed", async () => {
+		const { internals } = makeService({})
+		seedQueued(internals, "i-1", "j-1")
+		internals.operationJournal = { getOperation: async () => ({ progress: { stage: "cancelled" } }) }
+
+		await internals.reconcileCancelledJournal("j-1")
+
+		expect(cancelCalls(internals)).toHaveLength(1)
+		expect(cancelCalls(internals)[0][1]).toBeInstanceOf(JobCancelledError)
+	})
+
+	test("reconcile: the read reports queued → nothing", async () => {
+		const { internals } = makeService({})
+		seedQueued(internals, "i-1", "j-1")
+		internals.operationJournal = { getOperation: async () => ({ progress: { stage: "queued" } }) }
+
+		await internals.reconcileCancelledJournal("j-1")
+
+		expect(cancelCalls(internals)).toHaveLength(0)
+	})
+
+	test("reconcile: a read still pending when Approve lands → no cancel, no throw; execution proceeds", async () => {
+		const executeOperations = vi.fn(async () => [])
+		const { svc, internals } = makeService({ executeOperations })
+		seedQueued(internals, "i-1", "j-1")
+		let release!: (record: unknown) => void
+		internals.operationJournal = {
+			getOperation: () =>
+				new Promise((resolve) => {
+					release = resolve
+				}),
+		}
+
+		const reconcile = internals.reconcileCancelledJournal("j-1")
+		await svc.approveInteraction("i-1", [], origin)
+		release({ progress: { stage: "cancelled" } })
+		await reconcile
+		await flush()
+
+		expect(cancelCalls(internals)).toHaveLength(0)
+		expect(executeOperations).toHaveBeenCalledTimes(1)
+	})
+
+	test("reconcile: a rejecting read → no cancel, no throw; the window stays owned", async () => {
+		const { internals } = makeService({})
+		seedQueued(internals, "i-1", "j-1")
+		internals.operationJournal = { getOperation: async () => Promise.reject(new Error("storage down")) }
+
+		await expect(internals.reconcileCancelledJournal("j-1")).resolves.toBeUndefined()
+
+		expect(cancelCalls(internals)).toHaveLength(0)
+		expect(internals.storage.has("i-1")).toBe(true)
 	})
 })
