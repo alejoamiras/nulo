@@ -69,9 +69,12 @@ async function toggle(): Promise<void> {
 
 const FOCUSABLE = 'button:not([disabled]), a[href], [tabindex="0"]'
 
-/** While the overlay is up, Tab cycles inside it and Escape anywhere closes it. */
+/** While the overlay is up, Tab cycles inside it and Escape anywhere closes it — unless a wallet
+ *  dialog (picker, account chooser, verification) is up, whose own keyboard handling comes first. */
 function onKeydown(e: KeyboardEvent): void {
 	if (!overlay.value || !panel.value) return
+	const active = document.activeElement
+	if (active && !panel.value.contains(active) && active.closest("[aria-modal='true']")) return
 	if (e.key === "Escape") return void hide()
 	if (e.key !== "Tab") return
 	const items = panel.value.querySelectorAll<HTMLElement>(FOCUSABLE)
@@ -100,7 +103,7 @@ onScopeDispose(() => window.removeEventListener("keydown", onKeydown))
 
 watch(props.feed.autoOpenIds, (ids) => dock.autoOpenFor(ids, props.feed.liveIds.value), { immediate: true })
 
-/** `claimFuelStandalone` takes no record lock, so a second press mid-flight is refused here. */
+/** Which rows show CLAIMING…; the entry point itself joins a run already in flight. */
 const gasInFlight = ref<ReadonlySet<string>>(new Set())
 async function claimGas(id: string): Promise<void> {
 	if (gasInFlight.value.has(id)) return
@@ -133,7 +136,7 @@ function acting(row: ActivityRowModel): boolean {
 </script>
 
 <template>
-	<DockStrip v-if="!dock.open.value || narrow" ref="strip" :count="feed.count.value" @open="toggle" />
+	<DockStrip v-if="!dock.open.value || narrow" ref="strip" :count="feed.count.value" :open="dock.open.value" @open="toggle" />
 	<aside
 		v-if="dock.open.value"
 		ref="panel"

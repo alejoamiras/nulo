@@ -67,9 +67,21 @@ export async function launchStandaloneFuelClaim(
 	}
 }
 
+/** A standalone claim has no record lock, so a second press from any surface (the card, the dock,
+ *  a remounted dock) joins the run already in flight instead of sending twice. */
+const standaloneInFlight = new Map<string, Promise<void>>()
+
 /** The card's "CLAIM YOUR GAS" recovery: claims a stranded fuel message after the token side
  *  already completed. Throws so the caller can surface the failure (never silent). */
-export async function claimFuelStandalone(id: string): Promise<void> {
+export function claimFuelStandalone(id: string): Promise<void> {
+	const running = standaloneInFlight.get(id)
+	if (running) return running
+	const run = claimFuelStandaloneOnce(id).finally(() => standaloneInFlight.delete(id))
+	standaloneInFlight.set(id, run)
+	return run
+}
+
+async function claimFuelStandaloneOnce(id: string): Promise<void> {
 	const bridgeWallet = useBridgeWallet()
 	const aztec = bridgeWallet.wallet.value
 	if (!aztec) throw new Error("Connect your Aztec wallet first.")

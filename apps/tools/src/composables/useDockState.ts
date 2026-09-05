@@ -1,3 +1,4 @@
+import { JOURNAL_KEY } from "@nulo/bridge-core"
 import { ref } from "vue"
 
 /**
@@ -44,11 +45,28 @@ export function readSeen(): Set<string> {
 	}
 }
 
+/** Ids the stored journal holds at this instant. The caller's `liveIds` can lag another tab's
+ *  write until the storage event lands; a record that tab just hid must not be pruned meanwhile. */
+function storedJournalIds(): Set<string> {
+	try {
+		const parsed: unknown = JSON.parse(localStorage.getItem(JOURNAL_KEY) ?? "null")
+		const records = parsed && typeof parsed === "object" ? (parsed as { records?: unknown }).records : undefined
+		return new Set(
+			Array.isArray(records)
+				? records.map((r) => (r as { id?: unknown })?.id).filter((id): id is string => typeof id === "string")
+				: [],
+		)
+	} catch {
+		return new Set()
+	}
+}
+
 /** Pruned to records that still exist: the journal never evicts an unfinished record, so a cap
  *  could forget a live bridge, while ids of discarded records would only accumulate. */
 function writeSeen(seen: Set<string>, liveIds: ReadonlySet<string>): void {
 	try {
-		localStorage.setItem(DOCK_SEEN_KEY, JSON.stringify([...seen].filter((id) => liveIds.has(id))))
+		const stored = storedJournalIds()
+		localStorage.setItem(DOCK_SEEN_KEY, JSON.stringify([...seen].filter((id) => liveIds.has(id) || stored.has(id))))
 	} catch {
 		// best-effort
 	}

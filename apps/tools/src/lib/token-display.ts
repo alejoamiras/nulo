@@ -37,6 +37,11 @@ export function safeSentence(text: string): string {
 	return stripAndCap(text, SENTENCE_MAX)
 }
 
+/** An address-shaped persisted string for display: stripped, capped past any real address length. */
+export function safeAddressText(text: string): string {
+	return stripAndCap(text, 80)
+}
+
 /** EIP-55 form, so the user compares against the same casing their explorer shows. An address the
  *  checksummer refuses is rendered verbatim rather than dropped — hiding it would be worse. */
 export function checksumAddress(address: string): string {

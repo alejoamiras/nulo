@@ -14,11 +14,11 @@ import { ageWords } from "@/lib/activity"
 import { assetDecimals, assetSymbol, recordTokenBlock } from "@/lib/asset-label"
 import { useNow } from "@/lib/clock"
 import { IS_MAINNET } from "@/lib/network"
-import { formatBigInt } from "@/lib/format"
+import { formatStoredAmount } from "@/lib/format"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
 import { accountOf, recordState } from "@/lib/record-policy"
 import { TESTIDS } from "@/lib/testids"
-import { safeDisplay, safeSentence } from "@/lib/token-display"
+import { safeAddressText, safeDisplay, safeSentence } from "@/lib/token-display"
 import { claimFuelStandalone, overrideFuelClaim, reconcileFuelConsumed } from "@/composables/fuel-recovery"
 
 /** Components */
@@ -62,8 +62,11 @@ const state = computed(() => recordState(props.record, rt.value, walletView.valu
 // (their FINISH is an L1 action the account guard ignores).
 const { busy: opsBusy } = useOpsInFlight()
 
+/** Display copy only: the raw recipient still drives matching. A restore file can carry any string
+ *  here, so control and bidi characters are stripped before it can pose as an account. */
 function shortAddr(a: string): string {
-	return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a
+	const clean = safeAddressText(a)
+	return clean.length > 12 ? `${clean.slice(0, 6)}…${clean.slice(-4)}` : clean
 }
 
 const acct = computed(() => accountOf(props.record, walletView.value))
@@ -96,7 +99,7 @@ const fuelAmount = computed(() => {
 	if (!f) return null
 	// Gas naming by surface: private bridges land "Private FJ", public land "FJ".
 	const label = props.record.isPrivate ? "Private FJ" : "FJ"
-	return f.received ? `+ ${formatBigInt(BigInt(f.received), 18)} ${label}` : `+ ${label} gas`
+	return f.received ? `+ ${formatStoredAmount(f.received, 18)} ${label}` : `+ ${label} gas`
 })
 // The explicit, non-destructive escape: claim the tokens with the gas the account already holds; the FJ message (if
 // unconsumed) stays claimable later. Offered only when a fueled claim is stuck on an error.
@@ -219,7 +222,7 @@ const txLinks = computed(() => {
 
 const amountKind = computed(() => (state.value.isFuel ? "fee-juice" : "bridge-token"))
 const tokenBlock = computed(() => recordTokenBlock(props.record))
-const amountDisplay = computed(() => formatBigInt(BigInt(props.record.amount), assetDecimals(amountKind.value, tokenBlock.value)))
+const amountDisplay = computed(() => formatStoredAmount(props.record.amount, assetDecimals(amountKind.value, tokenBlock.value)))
 // The symbol is the record's own persisted text (a restore file can carry anything): same guard as the token list.
 const amountSymbol = computed(() => safeDisplay(assetSymbol(amountKind.value, props.record.isPrivate, tokenBlock.value)))
 
@@ -260,7 +263,7 @@ function onDiscard() {
 					v-if="acct"
 					class="acct"
 					:class="{ other: !acct.active }"
-					:title="acct.addr"
+					:title="safeAddressText(acct.addr)"
 					:data-testid="TESTIDS.journalAccount"
 				>{{ acct.alias ?? shortAddr(acct.addr) }}<span v-if="acct.alias" class="acct-addr">{{ shortAddr(acct.addr) }}</span></span>
 			</span>

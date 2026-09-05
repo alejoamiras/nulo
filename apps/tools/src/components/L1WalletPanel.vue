@@ -35,9 +35,6 @@ const { address, isConnected, wrongChain, isConnecting, connect, disconnect, swi
 	display: inline-flex;
 	align-items: center;
 	gap: 10px;
-	/* One 48px baseline across every wallet surface — the design system's `large` Button height,
-	   which the connect buttons also use. The vertical padding is real so the inner address block
-	   is inset from this border rather than pressed against it. */
 	min-height: 40px;
 	padding: 0 12px;
 	box-sizing: border-box;

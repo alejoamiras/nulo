@@ -5,14 +5,10 @@ import type { ActivityRowModel } from "@/composables/useActivityFeed"
 import type { ActivityAction } from "@/lib/activity"
 import { TESTIDS } from "@/lib/testids"
 
-/**
- * One record as two lines: the amount, then route · visibility · age. The side slot holds the one
- * thing the record asks of you (a button), the phase it is in (a word), or `Bridged ✓`. Nothing
- * here explains why — that is the card's job, one click away on the Activity page.
- */
+/** A dock row never explains why: the word or button here, the reasons on the card it opens. */
 const props = defineProps<{
 	row: ActivityRowModel
-	/** The row's own action is running (CLAIM GAS has no engine lock, so the dock keeps one). */
+	/** The row's own action is running. */
 	acting?: boolean
 	/** SWITCH is refused while another operation runs — the same gate the card applies. */
 	switchLocked?: boolean
@@ -44,11 +40,7 @@ const title = computed(() => (action.value === "switch" && props.switchLocked ? 
  *  shows two filled calls. */
 const filled = computed(() => props.row.group === "needs-you")
 
-const meta = computed(() => {
-	const r = props.row
-	const tail = r.group === "needs-you" ? "" : ` · ${r.age}`
-	return { head: `${r.route} · `, visibility: r.visibility, tail }
-})
+const meta = computed(() => ({ head: `${props.row.route} · `, visibility: props.row.visibility, tail: ` · ${props.row.age}` }))
 
 const side = computed(() => {
 	const r = props.row
@@ -113,7 +105,6 @@ function onAct(): void {
 
 .dot.running {
 	background: var(--txt-primary);
-	animation: pulse 2.4s ease-in-out infinite;
 }
 
 .dot.done {
@@ -122,22 +113,6 @@ function onAct(): void {
 
 .dot.needs-you {
 	background: var(--nulo-accent);
-}
-
-@keyframes pulse {
-	0%,
-	100% {
-		opacity: 0.25;
-	}
-	50% {
-		opacity: 1;
-	}
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.dot.running {
-		animation: none;
-	}
 }
 
 .body {

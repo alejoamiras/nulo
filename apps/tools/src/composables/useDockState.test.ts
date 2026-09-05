@@ -58,4 +58,12 @@ describe("useDockState", () => {
 		localStorage.setItem(DOCK_SEEN_KEY, "{not json")
 		expect(readSeen().size).toBe(0)
 	})
+
+	it("keeps an id the stored journal holds even when this tab's record list has not caught up", () => {
+		const dock = useDockState()
+		localStorage.setItem("nulo-bridge:journal:v1", JSON.stringify({ schema: 1, records: [{ id: "from-other-tab" }] }))
+		localStorage.setItem(DOCK_SEEN_KEY, JSON.stringify(["from-other-tab", "gone"]))
+		dock.hide(["a"], live)
+		expect([...readSeen()].sort()).toEqual(["a", "from-other-tab"])
+	})
 })

@@ -157,14 +157,6 @@ function liveElapsed(startedAt?: number): string | null {
 	}
 }
 
-@media (prefers-reduced-motion: reduce) {
-	.pulse,
-	.phase.done .glyph,
-	.cell.done {
-		animation: none;
-	}
-}
-
 .bar-line {
 	display: flex;
 	gap: 8px;
@@ -352,5 +344,14 @@ function liveElapsed(startedAt?: number): string | null {
 .strip-clock {
 	font: 500 11px/1 var(--font-mono);
 	color: var(--txt-secondary);
+}
+
+/* Last on purpose: same specificity as the rules above, so order is what makes this win. */
+@media (prefers-reduced-motion: reduce) {
+	.pulse,
+	.phase.done .glyph,
+	.cell.done {
+		animation: none;
+	}
 }
 </style>

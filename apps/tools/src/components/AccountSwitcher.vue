@@ -6,9 +6,8 @@ import { switchActiveAccount, useWalletConnection } from "@/composables/useWalle
 import { TESTIDS } from "@/lib/testids"
 
 /**
- * The connected account chip + dropdown switcher (plan: Proposal D, stages 2-4).
- * Shared by both AztecWalletPanel variants — both read the SAME session
- * singleton, so switching here drives every tab.
+ * The connected account chip + dropdown switcher. Shared by both AztecWalletPanel variants — both
+ * read the SAME session singleton, so switching here drives every section.
  *
  * The trigger is ONE button holding only non-interactive content; the copy
  * affordance lives in the menu rows as a SIBLING of the selection button, so no
@@ -214,9 +213,6 @@ onBeforeUnmount(() => {
 	display: inline-flex;
 	align-items: center;
 	gap: 10px;
-	/* One 48px baseline across every wallet surface — the design system's `large` Button height,
-	   which the connect buttons also use. The vertical padding is real so the inner address block
-	   is inset from this border rather than pressed against it. */
 	min-height: 40px;
 	padding: 0 12px;
 	box-sizing: border-box;

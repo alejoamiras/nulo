@@ -144,4 +144,17 @@ describe("claimFuelStandalone", () => {
 		expect(id).toBe("0xrec")
 		expect(fuel).toMatchObject({ received: "9", leafIndex: "4" })
 	})
+
+	it("a second call while one is in flight joins it — one send, whichever surface pressed", async () => {
+		let release = (): void => {}
+		standaloneClaim.mockImplementationOnce(() => new Promise<void>((r) => (release = r)))
+		const first = claimFuelStandalone("0xrec")
+		const second = claimFuelStandalone("0xrec")
+		expect(second).toBe(first)
+		release()
+		await first
+		expect(standaloneClaim).toHaveBeenCalledTimes(1)
+		await claimFuelStandalone("0xrec")
+		expect(standaloneClaim).toHaveBeenCalledTimes(2)
+	})
 })

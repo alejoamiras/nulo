@@ -4,8 +4,8 @@ import { ref } from "vue"
 import { TESTIDS } from "@/lib/testids"
 
 /** The hidden dock: a chevron to reopen it, a vertical label, and one badge that exists only while
- *  a bridge needs you. Running never badges. */
-defineProps<{ count: number }>()
+ *  a bridge needs you and the dock is closed (open, its buttons are the signal). Running never badges. */
+defineProps<{ count: number; open?: boolean }>()
 const emit = defineEmits<{ open: [] }>()
 
 const openEl = ref<HTMLButtonElement | null>(null)
@@ -19,11 +19,11 @@ defineExpose({ focus: () => openEl.value?.focus() })
 			type="button"
 			class="open"
 			:data-testid="TESTIDS.dockOpen"
-			:aria-label="count > 0 ? `Show activity, ${count} need you` : 'Show activity'"
+			:aria-label="open ? 'Hide activity' : count > 0 ? `Show activity, ${count} need you` : 'Show activity'"
 			@click="emit('open')"
 		>
-			‹
-			<span v-if="count > 0" class="badge" :data-testid="TESTIDS.dockBadge">{{ count }}</span>
+			{{ open ? "›" : "‹" }}
+			<span v-if="count > 0 && !open" class="badge" :data-testid="TESTIDS.dockBadge">{{ count }}</span>
 		</button>
 		<span class="lbl" aria-hidden="true">Activity</span>
 	</aside>

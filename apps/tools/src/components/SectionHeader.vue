@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { TESTIDS } from "@/lib/testids"
 
-/** The section's title line and, on the right, whatever wallet chips the section needs. */
 defineProps<{ title: string; subline: string }>()
 </script>
 
 <template>
-	<header class="head" :data-testid="TESTIDS.sectionHeader">
+	<header class="header" :data-testid="TESTIDS.sectionHeader">
 		<div class="titles">
 			<h1>{{ title }}</h1>
 			<p class="sub">{{ subline }}</p>
@@ -16,7 +15,7 @@ defineProps<{ title: string; subline: string }>()
 </template>
 
 <style scoped>
-.head {
+.header {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
@@ -53,5 +52,19 @@ h1 {
 	align-items: center;
 	gap: 8px;
 	flex: none;
+}
+
+@media (max-width: 760px) {
+	.header {
+		flex-wrap: wrap;
+		height: auto;
+		min-height: 72px;
+		padding: 12px 16px;
+	}
+
+	.wallets {
+		flex: 1 0 100%;
+		flex-wrap: wrap;
+	}
 }
 </style>

@@ -1,5 +1,5 @@
-import { flushPromises, mount } from "@vue/test-utils"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { computed, nextTick, ref } from "vue"
 import type { ActivityFeed, ActivityRowModel } from "@/composables/useActivityFeed"
 import { __resetDockStateForTests, DOCK_KEY, DOCK_SEEN_KEY, useDockState } from "@/composables/useDockState"
@@ -42,6 +42,7 @@ const feed: ActivityFeed = {
 	liveIds: computed(() => new Set(rows.value.map((r) => r.id))),
 }
 
+enableAutoUnmount(afterEach)
 const dock = () => mount(ActivityDock, { props: { feed }, attachTo: document.body })
 
 /** jsdom has no `matchMedia`; a stub answers only the dock's narrow query. */
@@ -186,14 +187,18 @@ describe("ActivityDock", () => {
 
 	it("under 1100px an open dock is a dialog over the page, the strip stays, and Escape closes it back to the strip", async () => {
 		viewport(true)
-		rows.value = [rowModel({ id: "a", group: "running", action: null })]
+		rows.value = [rowModel({ id: "a", action: null, blocked: true })]
 		const w = dock()
+		expect(w.get(sel(TESTIDS.dockBadge)).text()).toBe("1")
 		await w.get(sel(TESTIDS.dockOpen)).trigger("click")
 		await nextTick()
 		const panel = w.get(sel(TESTIDS.dock))
 		expect(panel.attributes("role")).toBe("dialog")
 		expect(panel.classes()).toContain("overlay")
 		expect(w.find(sel(TESTIDS.dockStrip)).exists()).toBe(true)
+		// Open, the buttons are the signal: the strip drops its badge and its chevron now hides.
+		expect(w.find(sel(TESTIDS.dockBadge)).exists()).toBe(false)
+		expect(w.get(sel(TESTIDS.dockOpen)).attributes("aria-label")).toBe("Hide activity")
 		// An explicit open takes focus in; the strip's chevron now closes.
 		expect(document.activeElement).toBe(w.get(sel(TESTIDS.dockHide)).element)
 		window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
@@ -217,6 +222,20 @@ describe("ActivityDock", () => {
 		const back = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, cancelable: true })
 		window.dispatchEvent(back)
 		expect(document.activeElement).toBe(last)
+
+		// A wallet dialog on top owns the keyboard: the dock neither traps Tab nor closes on Escape.
+		const modal = document.createElement("div")
+		modal.setAttribute("aria-modal", "true")
+		modal.innerHTML = "<button>pick</button>"
+		document.body.appendChild(modal)
+		modal.querySelector("button")?.focus()
+		const stolen = new KeyboardEvent("keydown", { key: "Tab", cancelable: true })
+		window.dispatchEvent(stolen)
+		expect(stolen.defaultPrevented).toBe(false)
+		window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
+		await nextTick()
+		expect(w.find(sel(TESTIDS.dock)).exists()).toBe(true)
+		modal.remove()
 		w.unmount()
 
 		viewport(false)

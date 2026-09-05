@@ -1,5 +1,5 @@
 import { mount } from "@vue/test-utils"
-import { beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { __resetShellForTests, useShell } from "@/composables/useShell"
 import { TESTIDS } from "@/lib/testids"
 import RailNav from "./RailNav.vue"
@@ -8,6 +8,7 @@ const sel = (t: string) => `[data-testid="${t}"]`
 
 describe("RailNav", () => {
 	beforeEach(() => __resetShellForTests())
+	afterEach(() => vi.unstubAllGlobals())
 
 	it("is one roving tablist: the active section is the only Tab stop", () => {
 		const w = mount(RailNav, { props: { activityCount: 0 } })
@@ -38,5 +39,19 @@ describe("RailNav", () => {
 		const w = mount(RailNav, { props: { activityCount: 2 } })
 		expect(w.get(sel(TESTIDS.tabActivity)).text()).toContain("2")
 		expect(w.find(".count").classes()).not.toContain("hot")
+	})
+
+	it("announces horizontal once it renders as the top row", () => {
+		vi.stubGlobal("matchMedia", (query: string) => ({
+			matches: query === "(max-width: 760px)",
+			media: query,
+			addEventListener() {},
+			removeEventListener() {},
+		}))
+		expect(
+			mount(RailNav, { props: { activityCount: 0 } })
+				.get(sel(TESTIDS.tabs))
+				.attributes("aria-orientation"),
+		).toBe("horizontal")
 	})
 })

@@ -71,4 +71,13 @@ describe("BridgeJournalCard — persisted text is stripped and capped", () => {
 		expect(note.text().endsWith("…")).toBe(true)
 		expect(note.text()).not.toContain("\u202e")
 	})
+
+	it("a recipient carrying bidi controls is shown and tooltipped without them; an impossible amount is a dash", () => {
+		const hostile = `0x\u202e${"a".repeat(64)}`
+		const w = mount(BridgeJournalCard, { props: { record: deposit({ leafIndex: "1", recipient: hostile, amount: "1".repeat(120) }) } })
+		const acct = w.get(sel(TESTIDS.journalAccount))
+		expect(acct.text()).not.toContain("\u202e")
+		expect(acct.attributes("title")).not.toContain("\u202e")
+		expect(w.text()).toContain("— TOKEN")
+	})
 })

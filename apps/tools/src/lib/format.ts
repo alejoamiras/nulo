@@ -13,6 +13,15 @@
  * Trailing zeros within `displayPlaces` are kept - predictable column
  * alignment matters more than terse output for a tools app.
  */
+/** A uint256 has at most 78 decimal digits; anything longer (or non-numeric) is a tampered record. */
+const AMOUNT_RE = /^\d{1,78}$/
+
+/** A persisted base-unit amount, formatted — or a dash when the stored string is not a possible
+ *  chain amount, so a hostile journal or restore file cannot make every render parse a huge number. */
+export function formatStoredAmount(raw: string, decimals: number, displayPlaces = 2): string {
+	return AMOUNT_RE.test(raw) ? formatBigInt(BigInt(raw), decimals, displayPlaces) : "—"
+}
+
 export function formatBigInt(value: bigint, decimals: number, displayPlaces = 2): string {
 	const divisor = 10n ** BigInt(decimals)
 	const whole = value / divisor

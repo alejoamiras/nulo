@@ -8,7 +8,7 @@ import { type BridgeJournalRecord, type DepositJournalRecord, assetKindOf } from
 import type { RecordRuntime } from "@/composables/useBridgeJournal"
 import { assetDecimals, assetSymbol, recordTokenBlock } from "@/lib/asset-label"
 import { stepperPhases } from "@/lib/bridge-steps"
-import { formatBigInt } from "@/lib/format"
+import { formatStoredAmount } from "@/lib/format"
 import type { RecordState } from "@/lib/record-policy"
 import { safeDisplay } from "@/lib/token-display"
 
@@ -86,7 +86,7 @@ export function rowStrings(rec: BridgeJournalRecord): { amount: string; symbol: 
 	const kind = assetKindOf(rec)
 	const token = recordTokenBlock(rec)
 	return {
-		amount: formatBigInt(BigInt(rec.amount), assetDecimals(kind, token)),
+		amount: formatStoredAmount(rec.amount, assetDecimals(kind, token)),
 		symbol: safeDisplay(assetSymbol(kind, rec.isPrivate, token)),
 	}
 }

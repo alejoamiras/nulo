@@ -2,6 +2,8 @@
 /** Composables */
 import { type Section, useShell } from "@/composables/useShell"
 
+import { useMediaQuery } from "@/composables/useMediaQuery"
+
 /** Utils */
 import { useTemplateRef } from "vue"
 import { TESTIDS } from "@/lib/testids"
@@ -15,6 +17,8 @@ const props = defineProps<{ activityCount: number }>()
 
 const shell = useShell()
 const rail = useTemplateRef<HTMLElement>("rail")
+/** Under 760px the rail renders as a top row; the tablist says so. */
+const topRow = useMediaQuery("(max-width: 760px)")
 
 const ENTRIES: ReadonlyArray<{ key: Section; label: string; testid: string }> = [
 	{ key: "send", label: "Send", testid: TESTIDS.tabSend },
@@ -32,7 +36,14 @@ function move(from: number, delta: number): void {
 </script>
 
 <template>
-	<nav ref="rail" class="rail" role="tablist" aria-label="Sections" aria-orientation="vertical" :data-testid="TESTIDS.tabs">
+	<nav
+		ref="rail"
+		class="rail"
+		role="tablist"
+		aria-label="Sections"
+		:aria-orientation="topRow ? 'horizontal' : 'vertical'"
+		:data-testid="TESTIDS.tabs"
+	>
 		<button
 			v-for="(entry, index) in ENTRIES"
 			:key="entry.key"
