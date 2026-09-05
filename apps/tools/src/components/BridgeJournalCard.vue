@@ -460,7 +460,7 @@ function onDiscard() {
 
 .amt-fuel {
 	margin-left: 6px;
-	color: var(--mint);
+	color: var(--txt-secondary);
 	font-weight: 500;
 }
 
@@ -473,8 +473,9 @@ function onDiscard() {
 }
 
 .tag.private {
-	color: var(--nulo-accent);
-	border-color: var(--nulo-accent);
+	color: var(--txt-primary);
+	border-color: transparent;
+	background: color-mix(in srgb, var(--txt-primary) 10%, transparent);
 }
 
 .acct {
@@ -529,21 +530,6 @@ function onDiscard() {
 	font: 600 12px/1.5 var(--font-mono);
 }
 
-.pulse {
-	color: var(--nulo-accent);
-	animation: pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes pulse {
-	0%,
-	100% {
-		opacity: 0.25;
-	}
-	50% {
-		opacity: 1;
-	}
-}
-
 .links {
 	display: flex;
 	gap: 12px;
@@ -557,7 +543,7 @@ function onDiscard() {
 }
 
 .links a:hover {
-	color: var(--nulo-accent);
+	color: var(--txt-primary);
 }
 
 .attention {
@@ -585,8 +571,8 @@ function onDiscard() {
 }
 
 .action:hover:not(:disabled) {
-	border-color: var(--nulo-accent);
-	color: var(--nulo-accent);
+	border-color: var(--txt-primary);
+	color: var(--txt-primary);
 }
 
 .action.danger:hover:not(:disabled) {

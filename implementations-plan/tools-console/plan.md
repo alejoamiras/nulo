@@ -205,7 +205,7 @@ export function useShell(): { section: Ref<Section>; goTo(s: Section): void; ope
 - Tests: `ActivityRow.test.ts` (two lines, side slot per group/action, `safeDisplay` + cap, on-screen mark without a button), `ActivityDock.test.ts` (hidden by default, hide/show + focus, badge only when count > 0, auto-open once and not for blocked rows, not mounted on Activity, dispatch per action, SWITCH disabled while `opsBusy`, CLAIM GAS double-activation guarded, background handoff uses the canonical id).
 - **Gate line:** the shell smoke gains the dock cases (badge count vs page buttons agree).
 
-### Phase 4 — Wizard card, in-flight stepper, glow budget, responsive
+### Phase 4 ✓ — Wizard card, in-flight stepper, glow budget, responsive — green 2026-09-05, `lessons/phase-4.md`
 - `StepStrip` `orientation="vertical"` + hints; `WizardShell` card head + rail | panel; `BridgePhaseRail`/`BridgeStepper` timeline restyle (pulse only on the full rail, reduced-motion honoured); tag/elapsed colours; breakpoints (overlay with Escape + focus trap; rail-to-top).
 - Tests: `StepStrip.test.ts` (vertical, ↑/↓, hints, testids), `WizardShell.test.ts` (existing pins + card head), `BridgePhaseRail.test.ts` (no pulse in compact), `ActivityDock.test.ts` overlay keyboard cases.
 - **Gate line:** `<frozen>` explicitly re-run and quoted.

@@ -97,7 +97,7 @@ const headline = computed(() => {
 					RUN IN BACKGROUND
 				</button>
 			</div>
-			<p class="bg-hint">Backgrounding moves this bridge to Your Bridges - it keeps running either way.</p>
+			<p class="bg-hint">Backgrounding moves this bridge to Activity — it keeps running either way.</p>
 		</template>
 	</section>
 </template>
@@ -107,6 +107,9 @@ const headline = computed(() => {
 	display: flex;
 	flex-direction: column;
 	gap: 16px;
+	padding: 22px 24px 24px;
+	border: 1px solid var(--nulo-outline);
+	background: var(--card-bg);
 }
 
 .stepper h3 {
@@ -129,18 +132,18 @@ const headline = computed(() => {
 }
 
 .action {
-	padding: 8px 14px;
+	padding: 12px 18px;
 	background: transparent;
 	border: 1px solid var(--nulo-outline);
 	color: var(--txt-primary);
 	font: 600 12px/1 var(--font-mono);
-	letter-spacing: 0.05em;
+	letter-spacing: 0.06em;
 	cursor: pointer;
 }
 
 .action:hover {
-	border-color: var(--nulo-accent);
-	color: var(--nulo-accent);
+	border-color: var(--txt-primary);
+	color: var(--txt-primary);
 }
 
 .action.subtle {

@@ -8,13 +8,14 @@ import { claimFuelStandalone } from "@/composables/fuel-recovery"
 import type { ActivityFeed, ActivityRowModel } from "@/composables/useActivityFeed"
 import { useBridgeJournal } from "@/composables/useBridgeJournal"
 import { useDockState } from "@/composables/useDockState"
+import { useMediaQuery } from "@/composables/useMediaQuery"
 import { useOpsInFlight } from "@/composables/useOpsInFlight"
 import { useShell } from "@/composables/useShell"
 import { useToast } from "@/composables/useToast"
 import { switchActiveAccount } from "@/composables/useWalletConnection"
 
 /** Utils */
-import { computed, nextTick, ref, watch } from "vue"
+import { computed, nextTick, onScopeDispose, ref, watch } from "vue"
 import type { ActivityAction } from "@/lib/activity"
 import { userMessage } from "@/lib/errors"
 import { TESTIDS } from "@/lib/testids"
@@ -34,6 +35,11 @@ const { push } = useToast()
 const { busy: opsBusy } = useOpsInFlight()
 
 const strip = ref<{ focus(): void } | null>(null)
+const panel = ref<HTMLElement | null>(null)
+
+/** Under 1100px the open dock leaves the grid and floats over the page; the strip stays put. */
+const narrow = useMediaQuery("(max-width: 1100px)")
+const overlay = computed(() => dock.open.value && narrow.value)
 
 const groups = computed(() => {
 	const g = props.feed.grouped.value
@@ -51,6 +57,46 @@ async function hide(): Promise<void> {
 	await nextTick()
 	strip.value?.focus()
 }
+
+/** The strip's chevron: opens the dock, or closes the overlay it sits beside. Focus moves into the
+ *  overlay only on this explicit open — an auto-open must not take the keyboard away from a form. */
+async function toggle(): Promise<void> {
+	if (dock.open.value) return hide()
+	dock.show()
+	await nextTick()
+	if (overlay.value) panel.value?.querySelector<HTMLElement>("button")?.focus()
+}
+
+const FOCUSABLE = 'button:not([disabled]), a[href], [tabindex="0"]'
+
+/** While the overlay is up, Tab cycles inside it and Escape anywhere closes it. */
+function onKeydown(e: KeyboardEvent): void {
+	if (!overlay.value || !panel.value) return
+	if (e.key === "Escape") return void hide()
+	if (e.key !== "Tab") return
+	const items = panel.value.querySelectorAll<HTMLElement>(FOCUSABLE)
+	const first = items[0]
+	const last = items[items.length - 1]
+	if (!first || !last) return
+	const outside = !panel.value.contains(document.activeElement)
+	if (e.shiftKey && (outside || document.activeElement === first)) {
+		e.preventDefault()
+		last.focus()
+	} else if (!e.shiftKey && (outside || document.activeElement === last)) {
+		e.preventDefault()
+		first.focus()
+	}
+}
+
+watch(
+	overlay,
+	(on) => {
+		if (on) window.addEventListener("keydown", onKeydown)
+		else window.removeEventListener("keydown", onKeydown)
+	},
+	{ immediate: true },
+)
+onScopeDispose(() => window.removeEventListener("keydown", onKeydown))
 
 watch(props.feed.autoOpenIds, (ids) => dock.autoOpenFor(ids, props.feed.liveIds.value), { immediate: true })
 
@@ -87,7 +133,17 @@ function acting(row: ActivityRowModel): boolean {
 </script>
 
 <template>
-	<aside v-if="dock.open.value" class="dock" :data-testid="TESTIDS.dock">
+	<DockStrip v-if="!dock.open.value || narrow" ref="strip" :count="feed.count.value" @open="toggle" />
+	<aside
+		v-if="dock.open.value"
+		ref="panel"
+		class="dock"
+		:class="{ overlay }"
+		:role="overlay ? 'dialog' : undefined"
+		:aria-modal="overlay || undefined"
+		:aria-label="overlay ? 'Activity' : undefined"
+		:data-testid="TESTIDS.dock"
+	>
 		<div class="head">
 			<h2>Activity</h2>
 			<button type="button" class="hide" :data-testid="TESTIDS.dockHide" @click="hide">Hide ›</button>
@@ -112,7 +168,6 @@ function acting(row: ActivityRowModel): boolean {
 			<span>{{ total }} {{ total === 1 ? "record" : "records" }}</span>
 		</div>
 	</aside>
-	<DockStrip v-else ref="strip" :count="feed.count.value" @open="dock.show" />
 </template>
 
 <style scoped>
@@ -200,5 +255,23 @@ function acting(row: ActivityRowModel): boolean {
 	font: 500 10.5px/1 var(--font-mono);
 	letter-spacing: 0.06em;
 	color: var(--txt-tertiary);
+}
+
+.dock.overlay {
+	position: fixed;
+	top: 0;
+	right: 44px;
+	bottom: 0;
+	z-index: 20;
+	max-height: none;
+	background: var(--app-bg);
+	box-shadow: -14px 0 34px rgba(0, 0, 0, 0.18);
+}
+
+@media (max-width: 760px) {
+	.dock.overlay {
+		width: auto;
+		left: 0;
+	}
 }
 </style>

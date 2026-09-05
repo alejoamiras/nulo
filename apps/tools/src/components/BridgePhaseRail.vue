@@ -126,8 +126,10 @@ function liveElapsed(startedAt?: number): string | null {
 
 <style scoped>
 /* ---------- shared ---------- */
+/* The one pulse on the page: the full rail's live glyph, slow. The compact rails (journal cards,
+   several per page) never animate, and reduced motion stops this one too. */
 .pulse {
-	animation: pulse 1.2s ease-in-out infinite;
+	animation: pulse 2.4s ease-in-out infinite;
 }
 
 @keyframes pulse {
@@ -155,6 +157,14 @@ function liveElapsed(startedAt?: number): string | null {
 	}
 }
 
+@media (prefers-reduced-motion: reduce) {
+	.pulse,
+	.phase.done .glyph,
+	.cell.done {
+		animation: none;
+	}
+}
+
 .bar-line {
 	display: flex;
 	gap: 8px;
@@ -164,7 +174,7 @@ function liveElapsed(startedAt?: number): string | null {
 
 .bar {
 	font: 600 12px/1 var(--font-mono);
-	color: var(--nulo-accent);
+	color: var(--txt-primary);
 	letter-spacing: 0.1em;
 }
 
@@ -179,39 +189,56 @@ function liveElapsed(startedAt?: number): string | null {
 	font: 500 12px/1.5 var(--font-mono);
 }
 
-/* ---------- full rail ---------- */
+/* ---------- full rail: a timeline down one spine ---------- */
 .rail.full {
+	position: relative;
 	list-style: none;
 	margin: 0;
 	padding: 0;
 	display: flex;
 	flex-direction: column;
-	gap: 10px;
 }
 
 .phase {
+	position: relative;
 	display: grid;
-	grid-template-columns: 20px auto 1fr;
-	column-gap: 10px;
+	grid-template-columns: 22px minmax(0, 1fr) auto;
+	column-gap: 12px;
 	align-items: baseline;
-	padding: 8px 10px;
-	border: 1px solid var(--nulo-outline);
+	padding: 9px 0;
 }
 
-.phase.active {
-	border-color: var(--nulo-accent);
+.phase::before {
+	content: "";
+	position: absolute;
+	left: 10.5px;
+	top: 0;
+	bottom: 0;
+	width: 1px;
+	background: var(--nulo-border);
 }
 
-.phase.failed {
-	border-color: var(--red);
+.phase:first-child::before {
+	top: 50%;
+}
+
+.phase:last-child::before {
+	bottom: 50%;
 }
 
 .phase.pending {
-	opacity: 0.55;
+	opacity: 0.5;
 }
 
 .glyph {
-	font: 600 13px/1 var(--font-mono);
+	position: relative;
+	z-index: 1;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	font: 600 12px/1 var(--font-mono);
 	color: var(--txt-secondary);
 }
 
@@ -241,22 +268,22 @@ function liveElapsed(startedAt?: number): string | null {
 	letter-spacing: 0.06em;
 }
 
-.took {
-	justify-self: start;
-	font: 500 11px/1 var(--font-mono);
-	color: var(--mint);
-}
-
+.took,
 .clock {
-	justify-self: start;
+	justify-self: end;
 	font: 500 11px/1 var(--font-mono);
 	color: var(--txt-secondary);
+	text-align: right;
 }
 
 .phase .detail,
 .phase .bar-line,
 .phase .retry {
 	grid-column: 2 / -1;
+}
+
+.phase .detail {
+	margin-top: 6px;
 }
 
 .retry {
@@ -299,8 +326,7 @@ function liveElapsed(startedAt?: number): string | null {
 }
 
 .cell.active {
-	color: var(--nulo-accent);
-	animation: pulse 1.2s ease-in-out infinite;
+	color: var(--txt-primary);
 }
 
 .cell.active.landed {

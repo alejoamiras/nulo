@@ -169,4 +169,34 @@ const header = computed(() => HEADERS[section.value])
 .strip-slot:empty {
 	display: none;
 }
+
+@media (max-width: 760px) {
+	.shell {
+		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-rows: auto minmax(0, 1fr);
+	}
+
+	.rail {
+		grid-column: 1 / -1;
+		flex-direction: row;
+		align-items: center;
+		gap: 12px;
+		padding: 10px 12px;
+		border-right: 0;
+		border-bottom: 1px solid var(--nulo-outline);
+	}
+
+	.brand {
+		padding: 0 6px 0 0;
+	}
+
+	.rail-foot {
+		margin-top: 0;
+		margin-left: auto;
+	}
+
+	.body {
+		padding: 20px 16px 32px;
+	}
+}
 </style>

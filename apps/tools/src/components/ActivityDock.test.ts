@@ -44,6 +44,16 @@ const feed: ActivityFeed = {
 
 const dock = () => mount(ActivityDock, { props: { feed }, attachTo: document.body })
 
+/** jsdom has no `matchMedia`; a stub answers only the dock's narrow query. */
+function viewport(narrow: boolean): void {
+	vi.stubGlobal("matchMedia", (query: string) => ({
+		matches: narrow && query === "(max-width: 1100px)",
+		media: query,
+		addEventListener() {},
+		removeEventListener() {},
+	}))
+}
+
 describe("ActivityDock", () => {
 	beforeEach(() => {
 		localStorage.clear()
@@ -52,6 +62,7 @@ describe("ActivityDock", () => {
 		__resetDockStateForTests()
 		__resetShellForTests()
 		vi.clearAllMocks()
+		vi.unstubAllGlobals()
 		document.body.innerHTML = ""
 	})
 
@@ -171,5 +182,47 @@ describe("ActivityDock", () => {
 		await w.get(sel(TESTIDS.dockAll)).trigger("click")
 		expect(useShell().section.value).toBe("activity")
 		expect(useShell().highlightedId.value).toBeNull()
+	})
+
+	it("under 1100px an open dock is a dialog over the page, the strip stays, and Escape closes it back to the strip", async () => {
+		viewport(true)
+		rows.value = [rowModel({ id: "a", group: "running", action: null })]
+		const w = dock()
+		await w.get(sel(TESTIDS.dockOpen)).trigger("click")
+		await nextTick()
+		const panel = w.get(sel(TESTIDS.dock))
+		expect(panel.attributes("role")).toBe("dialog")
+		expect(panel.classes()).toContain("overlay")
+		expect(w.find(sel(TESTIDS.dockStrip)).exists()).toBe(true)
+		// An explicit open takes focus in; the strip's chevron now closes.
+		expect(document.activeElement).toBe(w.get(sel(TESTIDS.dockHide)).element)
+		window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
+		await nextTick()
+		expect(w.find(sel(TESTIDS.dock)).exists()).toBe(false)
+		expect(document.activeElement).toBe(w.get(sel(TESTIDS.dockOpen)).element)
+	})
+
+	it("under 1100px Tab wraps inside the open dock; at full width it is an ordinary panel", async () => {
+		viewport(true)
+		rows.value = [rowModel({ id: "a", group: "running", action: null })]
+		const w = dock()
+		await w.get(sel(TESTIDS.dockOpen)).trigger("click")
+		await nextTick()
+		const last = w.get(sel(TESTIDS.dockAll)).element as HTMLElement
+		last.focus()
+		const tab = new KeyboardEvent("keydown", { key: "Tab", cancelable: true })
+		window.dispatchEvent(tab)
+		expect(tab.defaultPrevented).toBe(true)
+		expect(document.activeElement).toBe(w.get(sel(TESTIDS.dockHide)).element)
+		const back = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, cancelable: true })
+		window.dispatchEvent(back)
+		expect(document.activeElement).toBe(last)
+		w.unmount()
+
+		viewport(false)
+		useDockState().show()
+		const wide = dock()
+		expect(wide.get(sel(TESTIDS.dock)).attributes("role")).toBeUndefined()
+		expect(wide.find(sel(TESTIDS.dockStrip)).exists()).toBe(false)
 	})
 })

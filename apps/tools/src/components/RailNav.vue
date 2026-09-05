@@ -88,13 +88,24 @@ function move(from: number, delta: number): void {
 }
 
 .entry:focus-visible {
-	outline: 2px solid var(--nulo-accent);
-	outline-offset: -2px;
+	outline: 1px solid var(--txt-primary);
+	outline-offset: -1px;
 }
 
 .count {
 	margin-left: auto;
 	font: 500 11px/1 var(--font-mono);
 	color: var(--txt-secondary);
+}
+
+@media (max-width: 760px) {
+	.rail {
+		flex-direction: row;
+		gap: 4px;
+	}
+
+	.entry.on {
+		box-shadow: inset 0 -2px 0 var(--txt-primary);
+	}
 }
 </style>
