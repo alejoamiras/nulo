@@ -206,7 +206,7 @@ focusInteractionWindow(journalId: string): boolean
    id"`; F7). Approve arriving BEFORE step 2 — including DURING a still-pending reconciliation read —
    has already deleted the record (`service.ts:107`), so the scan finds nothing and the lane's
    controller + claim helper own the cancel (`claim-helper.ts:127-134`, pinned by
-   `claim-helper.test.ts:130-136`) — unchanged behavior; `cancelledAt` cannot guard a cancel not yet
+   `claim-helper.test.ts:250-258`, the already-cancelled-record case) — unchanged behavior; `cancelledAt` cannot guard a cancel not yet
    observed and is not asked to. A second `cancelled` event is a no-op (record gone or `cancelledAt`
    set). The popup's own `beforeunload` reject is a no-op (F6).
 
@@ -288,11 +288,17 @@ the named new tests pass.
 - `rejectInteraction(id, reason)`: `this.windowManager.cancel(handleId, new UserRejectedError(reason))`
   (A5). `error-envelope.ts`: `UserRejectedError` → `{ code: 4001, message, data: { walletErrorCode: UserRejectedError.CODE } }`,
   placed with the other classified throws.
+- The reason string passed through is popup-authored today (the three windows pass the literal
+  `"User rejected"`). The envelope forwards `error.message`, so a future caller must never route a
+  dApp-influenced string into `rejectInteraction`'s reason — one comment at the mapping says so.
 - Tests: `window-manager.test.ts` — `cancel(handleId, err)` rejects `promise` with that SAME instance
   (`toBe`) and still calls `windows.remove`. `error-envelope.test.ts` — `UserRejectedError` → 4001 +
   `USER_REJECTED`, mirroring the `JobCancelledError` case at `:16-23`. `dapp-interaction/service.test.ts` —
   `rejectInteraction` hands the manager a `UserRejectedError` carrying the reason.
-- **Validation gate**: `bun run typecheck && bun run lint && bun run --cwd apps/extension test src/wallet/services/window-manager src/wallet/services/wallet-sdk/error-envelope.test.ts src/wallet/services/dapp-interaction`
+  `packages/wallet-bridge/src/dispatcher.test.ts:133-146` — the capability-reject fixture throws a
+  `UserRejectedError` instance and the test asserts the dispatcher rethrows that SAME instance
+  (keeping its rejection-persistence assertions), so a future loss of the typed error is caught.
+- **Validation gate**: `bun run typecheck && bun run lint && bun run --cwd apps/extension test src/wallet/services/window-manager src/wallet/services/wallet-sdk/error-envelope.test.ts src/wallet/services/dapp-interaction && bun run --cwd packages/wallet-bridge test`
   → exit 0, new cases green. Layers: typecheck/lint · unit.
 
 #### Phase 2 — journal-driven cancel in `DappInteractionService` + post-registration reconciliation
@@ -312,7 +318,7 @@ the named new tests pass.
   `JobCancelledError{jobId}`; (7) deferred-read/approval interleaving: the read is parked, Approve
   lands (record deleted, `executeOperations` invoked), the read then resolves `cancelled` → no manager
   cancel, no throw (the cancelled journal record is the claim helper's to refuse — already pinned by
-  `claim-helper.test.ts:130-136`); (8) a rejecting read → no cancel, no throw, window still owned.
+  `claim-helper.test.ts:250-258`); (8) a rejecting read → no cancel, no throw, window still owned.
 - Composition test (`dapp-interaction/service.composition.test.ts`, mirroring
   `execution/service.composition.test.ts:106-157`): REAL `OperationJournalService` on `FakeBrowserApi`,
   REAL `WindowManager` on the same `FakeBrowserApi.windows` + `MockClock`, `DappInteractionService`
@@ -346,8 +352,9 @@ the named new tests pass.
   (`tests/vitest.setup.ts:89`): (a) `getLastFocused` calls `chrome.windows.getLastFocused` with
   `{ windowTypes: ["normal"] }` and returns the bounds; (b) a throwing `getLastFocused`, and a window
   with non-numeric bounds, both yield `undefined`; (c) `update` forwards `windowId` + options.
-- **Validation gate**: `bun run --cwd packages/wallet-core typecheck && bun run --cwd packages/wallet-core test && bun run typecheck && bun run lint`
-  → exit 0. Layers: typecheck/lint · unit.
+- **Validation gate**: `bun run --cwd packages/wallet-core typecheck && bun run --cwd packages/wallet-core test && bun run typecheck && bun run lint && bun run --cwd apps/extension test src/core/adapters/chrome-browser-api.test.ts`
+  → exit 0 (codex r3 condition: the adapter tests run in THIS gate, not only at the arc gate). Layers:
+  typecheck/lint · unit.
 
 #### Phase 4 — `WindowManager` centers on open and can focus a handle
 - `centerOn(anchor, width, height)` exported pure helper: `left = round(anchor.left + (anchor.width - width) / 2)`,
@@ -469,6 +476,16 @@ mark the index entry and suggest `agent-worktree done dapp-popup-cancel-focus`.
   stub; the focus-RPC guarantee restated as target-scoped, not caller-bound; recon's Absences line
   fixed. Owner scope addition (Reject → `UserRejectedError` → 4001, A5) added to Phase 1 between
   rounds 2 and 3 and sent to codex in round 3.
+- Codex round 3 (resumed): **conditional approve** (condition: Phase 3's gate must run the new
+  `chrome-browser-api.test.ts` — adopted, gate amended). Lows adopted: the wallet-bridge capability-reject
+  fixture throws a `UserRejectedError` instance and asserts the same instance is rethrown
+  (`dispatcher.test.ts:133-146`), gate extended with `bun run --cwd packages/wallet-bridge test`; the
+  claim-helper reference corrected to the already-cancelled case (`:250-258`); recon's A5 row updated.
+  Codex confirmed: the registration gap is closed for successful reads and best-effort under storage
+  failure; fire-and-forget reconciliation keeps settlement prompt; capability Reject changes only the
+  wire error, not rejection persistence (`dispatcher.ts:1098`; README already documents
+  `4001 / USER_REJECTED` at `wallet-bridge/README.md:111`); discovery stays untyped; the pass-through
+  message is safe for today's three literal callers (note added to Phase 1).
 
 ## Seeds
 

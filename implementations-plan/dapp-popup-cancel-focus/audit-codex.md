@@ -128,3 +128,40 @@ Confidence: high. `P` = `implementations-plan/dapp-popup-cancel-focus`; `S` = `a
 - Signed centering, both identity fences, keyboard isolation, both render sites and client cleanup address the prior findings (`P/plan.md:330,355,363`).
 - Journal subscription and Error-instance propagation remain appropriate; no additional architectural layer is warranted.
 - Gate commands exist, including complexity checking and the build (`package.json:24,38`; `apps/extension/package.json:22`; `packages/wallet-core/package.json:19`). A6 now states the dead-click tradeoff explicitly (`P/plan.md:139`).
+
+## Round 3 — follow-up prompt (resumed session)
+
+```
+Round 3. Re-read `implementations-plan/dapp-popup-cancel-focus/plan.md` and `recon.md`. Changes since round 2, by your finding:
+
+1. [High] Registration boundary → the reconciliation now lives INSIDE `interaction()`, immediately after `storage.set(id, interaction)` and before `return pending`: `void this.reconcileCancelledJournal(journalId)` (only with `hooks?.queuedJournalId`), fire-and-forget, one lock-free `getOperation`, stage ≠ queued → `cancelInteractionForJournal`, a failed read logged and ignored. The caller's `pending` is what rejects promptly (via the settle), never the read. A failed read leaves the window owned by its handle (Reject works; Approve is refused by the claim helper). See F3 (registration boundary fact) and "Critical flow, arc 1" step 4.
+2. [Medium] Ordering proof → rewritten on F4 (journal writes storage THEN emits; `getOperation` is lock-free, `operation-journal/service.ts:86-87`): a cancel whose event preceded registration has completed its write, so the post-`storage.set` read sees `cancelled`; a cancel whose write completes after the read started emits after registration, so the subscription's scan finds the record. Mutex and "faster than a click" claims removed. Step 5: Approve during a pending reconciliation deletes the record → scan miss → claim helper refuses (`claim-helper.ts:127-134`, pinned by `claim-helper.test.ts:130-136`). Unit tests (7) deferred-read/approval interleaving and (8) rejecting read added.
+3. [Medium] Adapter tests → adopted. `lastFocusedThrows` dropped (the fake honors the never-throws contract). New `apps/extension/src/core/adapters/chrome-browser-api.test.ts` drives `new RealChromeBrowserApi().windows` against the suite's stubbed `chrome` global: `windowTypes:["normal"]` forwarded + bounds returned; throwing / non-numeric bounds → `undefined`; `update` forwards. Phase 3.
+4. [Low] Focus RPC → restated as target-scoped (only the active profile's popups can be raised), explicitly NOT caller-bound; no redesign.
+5. [Low] recon.md Absences line corrected (`onboarding-tab.ts:36` and `settings/advanced/index.vue:37` are the two `windows.update` hits; neither goes through the port).
+
+NEW SCOPE from the owner between rounds (please review it too): A5 is now IN scope. Phase 1 adds one line in `rejectInteraction` — `this.windowManager.cancel(handleId, new UserRejectedError(reason))` — and one envelope mapping in `wallet-sdk/error-envelope.ts`: `UserRejectedError` → `{ code: 4001, message, data: { walletErrorCode: "USER_REJECTED" } }`, kept distinct from `JOB_CANCELLED` per `errors.ts:116-119`. Tests: envelope case mirroring the `JobCancelledError` one; `rejectInteraction` hands the manager a `UserRejectedError`. I verified nothing SW-side string-matches the reject reason (only the three popup callers and a journal display string) and discovery's catch-all is untyped (`background.ts:672-676`). Attack this: does routing capability/discovery rejections through a typed 4001 change any dApp-visible contract that a test or the wallet-bridge README pins? Is `message` from the popup leak-free enough to pass through (it is wallet-authored: "User rejected")?
+
+Same four asks, same rigor. Walk the interleavings once more against the NEW placement. Then give the verdict in EXACTLY one of: `approve` | `conditional approve (with conditions: ...)` | `reject (with blocking findings: ...)`. ≤ 600 words; findings tagged and bucketed with file:line; then "looks fine".
+```
+
+## Round 3 — response
+
+conditional approve (with conditions: run the new Chrome adapter tests in Phase 3’s validation gate)
+
+Confidence: high. `P` = `implementations-plan/dapp-popup-cancel-focus`; `S` = `apps/extension/src/wallet/services`.
+
+- **[Medium] Tests — Phase 3 does not execute its new adapter tests.** The gate runs wallet-core tests, typecheck and lint, while `chrome-browser-api.test.ts` belongs to the extension suite (`P/plan.md:343,349`). Append `bun run --cwd apps/extension test src/core/adapters/chrome-browser-api.test.ts`. The later arc gate would catch failures, but Phase 3 could currently be marked green without testing its production adapter.
+
+- **[Low] Tests — strengthen an existing capability test instead of adding another harness.** Change the rejection fixture to throw a `UserRejectedError` instance and assert that the dispatcher rejects with that same instance, retaining the rejection-persistence assertions (`packages/wallet-bridge/src/dispatcher.test.ts:133`). Its current message-only assertion would miss future loss of the structured error type.
+
+- **[Low] Facts / Recon — two stale references remain.** Recon still calls Reject mapping out of scope (`P/recon.md:13`). The cited `claim-helper.test.ts:130` exercises cancellation during scope refiling; the direct already-cancelled-record regression is at `S/execution/claim-helper.test.ts:250`. These are documentation corrections, not architectural objections.
+
+**Looks fine**
+
+- **The registration gap is now closed for successful reads.** Cancellation before confirmation checking or during the interaction-lock wait is recovered by the post-registration read: an event emitted before registration follows a completed journal write. Cancellation between registration and the read, during the read, or after it is covered by the subscriber (`S/operation-journal/service.ts:331,401`; `P/plan.md:191`). Duplicate observation settles once. Approval winning first deletes the interaction and delegates cancellation to the existing claim path (`S/dapp-interaction/service.ts:117`; `S/execution/claim-helper.ts:127`). No popup-speed assumption remains.
+- **Fire-and-forget reconciliation preserves prompt settlement.** A delayed read cannot hold the caller’s result hostage. Ignoring a failed read leaves an owned window and the existing claim-time cancellation check; it does mean automatic closure is best-effort under storage failure, as the plan now acknowledges (`P/plan.md:195`).
+- **Capability Reject intentionally changes the wire error, without changing rejection persistence.** The dispatcher persists denied capabilities and rethrows the original error (`packages/wallet-bridge/src/dispatcher.ts:1098`). The README already documents `4001 / USER_REJECTED` (`packages/wallet-bridge/README.md:111`); the existing test asserts rejection and persistence, not a string wire envelope (`dispatcher.test.ts:142`).
+- **Discovery does not become a structured 4001 response.** Its catch discards the exception and calls `rejectDiscovery(requestId)` (`S/wallet-sdk/background.ts:673`). The plan correctly leaves this transport unchanged.
+- **The message is safe for current callers.** Execute, capabilities and discovery all pass the literal `"User rejected"` (`apps/extension/src/popup/windows/execute/index.vue:478`, `capabilities/index.vue:274`, `discover/index.vue:130`). This supports passing today’s message; it does not make arbitrary future RPC reasons safe automatically.
+- Signed centering, identity checks, target-profile scoping and the corrected focus reuse map remain sound. No additional abstraction, permission or dependency is needed.
