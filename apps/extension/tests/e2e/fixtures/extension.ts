@@ -140,6 +140,23 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 		await chrome.storage.local.set({ "nulo:onboarding:completed": true })
 	})
 
+	// `onInstalled` already opened the first-run tab (or is about to — the open is async and its
+	// id lands in session storage last). Close it: the flag above makes it dead weight, and left
+	// open it is an extra extension page in every browser — one more client keeping the service
+	// worker awake, one more realm re-routing itself on every lock — that no test asked for.
+	await blankPage.evaluate(async () => {
+		const key = "nulo:onboarding:tab-id"
+		for (let attempt = 0; attempt < 20; attempt++) {
+			const id = (await chrome.storage.session.get(key))[key]
+			if (typeof id === "number") {
+				await chrome.tabs.remove(id).catch(() => {})
+				await chrome.storage.session.remove(key)
+				return
+			}
+			await new Promise((r) => setTimeout(r, 250))
+		}
+	})
+
 	await blankPage.close()
 
 	return { browser, extensionId, consoleErrors: [], pageErrors: [] }

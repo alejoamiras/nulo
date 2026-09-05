@@ -1,41 +1,12 @@
 import { expect } from "vitest"
-import type { Page, Target } from "puppeteer"
+import type { Page } from "puppeteer"
 import { TEST_PASSWORD } from "./fixtures/constants"
-import { test, openPopup, waitForHash, clickByTestId, replaceInputValue, type ExtensionContext } from "./fixtures/extension"
-import { lockWallet } from "./fixtures/helpers"
+import { test, openPopup, waitForHash, clickByTestId, replaceInputValue } from "./fixtures/extension"
+import { lockWallet, stopServiceWorker } from "./fixtures/helpers"
 
-// Mirrors the helpers in sw-resilience.test.ts. Kept inline rather than
-// extracted because the SW-restart shape is the test-case under test —
-// making it a fixture would hide the lifecycle from the reader.
-
-async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
-	const swTarget = await ext.browser.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId), {
-		timeout: 15_000,
-	})
-
-	// Arm the destruction listener BEFORE closing: puppeteer reports the very
-	// Target object that went away, so identity is object equality rather than a
-	// private `_targetId` read, and a fast replacement cannot be mistaken for the
-	// original surviving.
-	const destroyed = new Promise<void>((resolve, reject) => {
-		const timer = setTimeout(() => {
-			ext.browser.off("targetdestroyed", onDestroyed)
-			reject(new Error("stopServiceWorker: the service-worker target was still alive 15s after close()"))
-		}, 15_000)
-		function onDestroyed(target: Target) {
-			if (target !== swTarget) return
-			clearTimeout(timer)
-			ext.browser.off("targetdestroyed", onDestroyed)
-			resolve()
-		}
-		ext.browser.on("targetdestroyed", onDestroyed)
-	})
-
-	const worker = await swTarget.worker()
-	if (!worker) throw new Error("stopServiceWorker: service-worker target exposed no worker to close")
-	await worker.close()
-	await destroyed
-}
+// The kill primitive lives in fixtures/helpers.ts (`stopServiceWorker`): an unattached
+// `Target.closeTarget` from the browser session, awaiting the ORIGINAL target's destruction.
+// Its doc records why `worker().close()` and `Runtime.terminateExecution` are both wrong.
 
 /** Readiness after the restart: session storage retains the pre-kill heartbeat,
  *  so a truthy check passes instantly against a stale value and the next UI wait

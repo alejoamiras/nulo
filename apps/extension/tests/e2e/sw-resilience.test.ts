@@ -1,59 +1,12 @@
 import { expect } from "vitest"
-import type { Page, Target } from "puppeteer"
+import type { Page } from "puppeteer"
 import { TEST_PASSWORD } from "./fixtures/constants"
-import {
-	test,
-	openPopup,
-	waitForHash,
-	clickByTestId,
-	replaceInputValue,
-	withTimeoutMessage,
-	type ExtensionContext,
-} from "./fixtures/extension"
-import { acceptConfirmPopup, ensureUnlocked, lockWallet, navigateByHash } from "./fixtures/helpers"
+import { test, openPopup, waitForHash, clickByTestId, replaceInputValue, withTimeoutMessage } from "./fixtures/extension"
+import { acceptConfirmPopup, ensureUnlocked, lockWallet, navigateByHash, stopServiceWorker } from "./fixtures/helpers"
 
-/** Terminate the SW and WAIT for it to be gone, approximating MV3's
- *  idle-suspend recycle.
- *
- *  `worker().close()` is Chrome's documented way to test service-worker
- *  termination with Puppeteer; for a service-worker target puppeteer implements
- *  it as `Target.closeTarget` + detach. The obvious-looking alternative,
- *  `Runtime.terminateExecution`, does NOT end this worker — measured: the target
- *  survives, the session record survives, the wallet stays unlocked, and
- *  `nulo:liveness` merely advances by one HEARTBEAT_INTERVAL_MS, which is enough
- *  to satisfy a post-kill liveness gate without any respawn having occurred
- *  (deflake-round-3 `lessons/phase-3.md`).
- *
- *  Returning only once the ORIGINAL target id is gone is what makes the tests
- *  below mean anything: without it they pass against a worker that never died. */
-async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
-	const swTarget = await ext.browser.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId), {
-		timeout: 15_000,
-	})
-
-	// Arm the destruction listener BEFORE closing: puppeteer reports the very
-	// Target object that went away, so identity is object equality rather than a
-	// private `_targetId` read, and a fast replacement cannot be mistaken for the
-	// original surviving.
-	const destroyed = new Promise<void>((resolve, reject) => {
-		const timer = setTimeout(() => {
-			ext.browser.off("targetdestroyed", onDestroyed)
-			reject(new Error("stopServiceWorker: the service-worker target was still alive 15s after close()"))
-		}, 15_000)
-		function onDestroyed(target: Target) {
-			if (target !== swTarget) return
-			clearTimeout(timer)
-			ext.browser.off("targetdestroyed", onDestroyed)
-			resolve()
-		}
-		ext.browser.on("targetdestroyed", onDestroyed)
-	})
-
-	const worker = await swTarget.worker()
-	if (!worker) throw new Error("stopServiceWorker: service-worker target exposed no worker to close")
-	await worker.close()
-	await destroyed
-}
+// The kill primitive lives in fixtures/helpers.ts (`stopServiceWorker`): an unattached
+// `Target.closeTarget` from the browser session, awaiting the ORIGINAL target's destruction.
+// Its doc records why `worker().close()` and `Runtime.terminateExecution` are both wrong.
 
 /** Post-restart readiness: chrome.storage.session RETAINS the dead worker's
  *  heartbeat while the extension stays loaded, so the gate requires a
