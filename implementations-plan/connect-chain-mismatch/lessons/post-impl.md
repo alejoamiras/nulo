@@ -33,3 +33,13 @@ Codex accepted the two declined races as baseline behaviour ("the new dApp trigg
 timing, but does not give the dApp control over purge or import"). One Low adopted: the
 `chainBannerState` comment no longer claims an absolute ("never beside a disabled Approve") — the
 footer's momentary holds are named as the exception.
+
+## PR #545 — CI round 1
+
+All seven network-e2e jobs red while every shard's tests PASSED (shard 1: 19/20, the rest likewise).
+The failing step was the post-test bundle guard in `_network-e2e.yml`: `grep -RnE '(PROBE|nulo:probe:|
+VITE_E2E_PROBE)' dist/chrome` — the new error constant's VALUE `"UNATTENDED_PROBE"` shipped in the
+bundle and matched the uppercase `PROBE` token (the guard exists to keep e2e probe strings out of
+release builds). Renamed to `ERR_UNATTENDED_LIVE_CHECK = "UNATTENDED_LIVE_CHECK"`; no other uppercase
+`PROBE` token exists in shipped source (lowercase `probeNodeStatus` does not match). Lesson: a string
+constant that ends up in `dist/` must not contain `PROBE`; the guard is case-sensitive.

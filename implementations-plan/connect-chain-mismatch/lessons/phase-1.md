@@ -7,7 +7,7 @@ Status: ✓ (2026-09-05)
   dispatcher takes `IAccountReader & IAccountProvisioner`; `loadAvailableAccountsForPopup` = visible read
   → (empty) provision → visible re-read.
 - `AccountService.provisionDefaultAccount`: per-tuple serialized; any live row (hidden/imported) → no-op;
-  else `createAccountInternal(…, { unattended: true })`, catching ONLY `ERR_UNATTENDED_PROBE`.
+  else `createAccountInternal(…, { unattended: true })`, catching ONLY `ERR_UNATTENDED_LIVE_CHECK`.
 - `NetworkService.resolveVerifiedL1ChainId(…, { unattended })` refuses to probe non-seeded kinds.
 - `DEFAULT_ACCOUNT_NAME` replaces the two literal `"Account"` call sites.
 

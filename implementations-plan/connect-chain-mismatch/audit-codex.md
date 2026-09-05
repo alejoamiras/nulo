@@ -78,7 +78,7 @@ conditional approve (with conditions: enforce offline resolution at use, restore
 ## Round 2 — triage
 
 All four conditions adopted: `unattended` option on `resolveVerifiedL1ChainId` (refusal at the row read
-derivation uses, `ERR_UNATTENDED_PROBE`) instead of a `derivesOffline` preflight; `provisionDefaultAccount`
+derivation uses, `ERR_UNATTENDED_LIVE_CHECK`) instead of a `derivesOffline` preflight; `provisionDefaultAccount`
 returns `void` and the dispatcher re-reads visible rows; two-state banner keyed on `switchedTo` = the
 current chain; footer held while `isSwitching` + a deferred-activation component test. Lows fixed (the
 "same row" contradiction, the manager-ownership test case, the stale critical flow, the no-switch strip

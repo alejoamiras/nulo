@@ -28,7 +28,7 @@ import { type ImportedKeysDek, sealImportedSigningKeyV2, unsealImportedSigningKe
 import { AccountAddressInconsistencyError } from "@nulo/extension-messaging/errors"
 import { ImportedKeysRepository } from "./imported-keys-repository"
 import type { AccountIntegrityBlocked } from "../account-integrity/types"
-import { ERR_UNATTENDED_PROBE } from "@/wallet/services/network/spec"
+import { ERR_UNATTENDED_LIVE_CHECK } from "@/wallet/services/network/spec"
 import {
 	ACCOUNT_SERVICE_NAME,
 	ACCOUNT_STORAGE_ROOT,
@@ -226,7 +226,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			try {
 				await this.createAccountInternal(profileId, chainId, AccountType.Nulo_v1, DEFAULT_ACCOUNT_NAME, { unattended: true })
 			} catch (err) {
-				if (!(err instanceof Error && err.message.startsWith(ERR_UNATTENDED_PROBE))) throw err
+				if (!(err instanceof Error && err.message.startsWith(ERR_UNATTENDED_LIVE_CHECK))) throw err
 			}
 		})
 	}

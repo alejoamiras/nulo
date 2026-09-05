@@ -114,12 +114,12 @@ toast). The identity line reads "is requesting permissions on {dApp chain}".
   else `createAccountInternal(profileId, chainId, AccountType.Nulo_v1, DEFAULT_ACCOUNT_NAME,
   { unattended: true })`, whose ONE network lookup refuses to probe (below) — so "offline only" is
   enforced at the row read that derivation actually uses, not by a preflight a concurrent
-  delete-and-re-add could invalidate. The refusal (`ERR_UNATTENDED_PROBE`) is the one error the method
+  delete-and-re-add could invalidate. The refusal (`ERR_UNATTENDED_LIVE_CHECK`) is the one error the method
   catches and turns into a no-op; everything else propagates. The concrete service satisfies the
   contract structurally — no wiring adapter.
 - `apps/extension/src/wallet/services/network/service.ts` — `resolveVerifiedL1ChainId(profileId,
   chainId, opts?: { unattended?: boolean })`: when the row's kind has no seeded constant AND
-  `opts.unattended`, throw `ERR_UNATTENDED_PROBE` instead of probing (`spec.ts` constant, same prefix
+  `opts.unattended`, throw `ERR_UNATTENDED_LIVE_CHECK` instead of probing (`spec.ts` constant, same prefix
   convention as the other `ERR_*`). Canonical L1 validation of seeded rows is unchanged. The probe-free
   set stays private to the service that owns it.
 - `packages/wallet-bridge/src/dispatcher.ts` — `loadAvailableAccountsForPopup`: read visible rows → if
@@ -219,7 +219,7 @@ moves, the shell reloads accounts, the banner settles to "switched" → Approve 
   provisions; a no-op provision + empty re-read yields `availableAccounts: []`; a rejection propagates
   out of `requestCapabilities` (no popup, no persisted rejection). `account-order.characterization.test.ts`:
   stub only.
-- `network/spec.ts` `ERR_UNATTENDED_PROBE`; `network/service.ts` `resolveVerifiedL1ChainId` `unattended`
+- `network/spec.ts` `ERR_UNATTENDED_LIVE_CHECK`; `network/service.ts` `resolveVerifiedL1ChainId` `unattended`
   option (+ `service.test.ts`: a custom row under `unattended` throws it and never probes; a seeded row
   resolves as before); `account/spec.ts` `DEFAULT_ACCOUNT_NAME` (used by `useProfileBootstrap.ts` +
   `network-switch.ts`); `account/service.ts` `provisionDefaultAccount` + `service.test.ts` cases: derives
@@ -330,7 +330,7 @@ after the codex loop converges. No stack ceremony. `code_review: off`.
 - Codex round 2 (resumed): **conditional approve** (conditions: enforce offline resolution at use,
   restore the visible-account re-read, fix success-banner gating, coordinate pending switches with
   window closure). All four adopted: `unattended` option on `resolveVerifiedL1ChainId` (refusal at the
-  row read derivation uses; `ERR_UNATTENDED_PROBE`) instead of a `derivesOffline` preflight;
+  row read derivation uses; `ERR_UNATTENDED_LIVE_CHECK`) instead of a `derivesOffline` preflight;
   `provisionDefaultAccount` returns `void` and the dispatcher re-reads; two-state banner keyed on
   `switchedTo` = current chain; Approve/Reject held while `isSwitching` + a deferred-activation component
   test. Lows fixed: the "same row" contradiction, the manager-ownership test, the stale critical flow,

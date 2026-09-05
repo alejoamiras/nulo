@@ -13,7 +13,7 @@ import { ServiceCollection } from "@/wallet/base"
 import { LoggerStore } from "@/wallet/logger"
 import { ConfigStore } from "@/wallet/config"
 import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/spec"
-import { ERR_UNATTENDED_PROBE, NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
+import { ERR_UNATTENDED_LIVE_CHECK, NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
 import { svc } from "../composition-harness"
 import { AccountService } from "./service"
 import { accountRowId } from "./spec"
@@ -536,7 +536,7 @@ describe("AccountService.provisionDefaultAccount — unattended rule", () => {
 
 	test("a chain whose identity would need a probe is declined: no row, no throw", async () => {
 		const h = await makeHarness(async () => {
-			throw new Error(`${ERR_UNATTENDED_PROBE}: needs a live check`)
+			throw new Error(`${ERR_UNATTENDED_LIVE_CHECK}: needs a live check`)
 		})
 		await h.service.provisionDefaultAccount("p1", 1)
 		expect(await h.service.getAccounts("p1", 1, true)).toEqual([])

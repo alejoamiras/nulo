@@ -26,7 +26,7 @@ import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import type { ProfileService } from "@/wallet/services/profile/service"
 import { NetworkService } from "./service"
-import { ERR_UNATTENDED_PROBE, NodeStatus } from "./spec"
+import { ERR_UNATTENDED_LIVE_CHECK, NodeStatus } from "./spec"
 import type { Network, NetworkEndpoint } from "./spec"
 
 type NodeInfo = {
@@ -1420,11 +1420,11 @@ describe("NetworkService — resolveVerifiedL1ChainId unattended", () => {
 		kind,
 	})
 
-	test("a custom row is refused with ERR_UNATTENDED_PROBE and the node is never contacted", async () => {
+	test("a custom row is refused with ERR_UNATTENDED_LIVE_CHECK and the node is never contacted", async () => {
 		const getNodeInfo = vi.fn().mockResolvedValue({ l1ChainId: 5, rollupVersion: 1 })
 		const { service, browserApi } = makeService(getNodeInfo)
 		await browserApi.storage.local.set({ "nulo:core:networks@n1": JSON.stringify(row("custom", 5)) })
-		await expect(service.resolveVerifiedL1ChainId("p1", 123, { unattended: true })).rejects.toThrow(ERR_UNATTENDED_PROBE)
+		await expect(service.resolveVerifiedL1ChainId("p1", 123, { unattended: true })).rejects.toThrow(ERR_UNATTENDED_LIVE_CHECK)
 		expect(getNodeInfo).not.toHaveBeenCalled()
 	})
 
