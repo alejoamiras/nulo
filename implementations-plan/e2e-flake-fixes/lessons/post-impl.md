@@ -120,4 +120,14 @@ applied without a round 5 rather than shipped as open items:
   pre-existing leak paths (worker discovery / liveness timeouts), which used to rely on the next
   global-setup's pkill.
 
-No further codex round: the residue is the owner's to re-open if they want a fifth pass.
+The owner asked for one more pass before merge (round 5, below).
+
+## Round 5 (owner-requested, on the round-4 fix commit) — `converged` — response (verbatim)
+
+No remaining findings in this diff. **Confidence: high.**
+
+Source-based simulations passed for probe expiry, late attachment cleanup, fresh/reused profiles, and browser cleanup after setup failures. No E2E configs ran.
+
+converged
+
+Loop closed at five rounds: 1–4 each `not converged` with two or three Mediums, all adopted; 5 clean.
