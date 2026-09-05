@@ -1,0 +1,135 @@
+<title>Connect on Another Chain Plan</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;700&display=swap">
+<style>
+:root {
+	color-scheme: dark;
+	--font-headline: "Space Grotesk", system-ui, sans-serif;
+	--font-body: "Inter", system-ui, sans-serif;
+	--font-mono: "JetBrains Mono", ui-monospace, monospace;
+	--page-bg: #0a0908;
+	--surface: #141312;
+	--surface-low: #1d1b1a;
+	--accent: #f8f1e7;
+	--border: #231f1c;
+	--outline: #4a463f;
+	--secondary: #999187;
+	--txt: #f5f0e6;
+	--green: #14ae5c;
+}
+@media (prefers-color-scheme: light) {
+	:root:not([data-theme="dark"]) {
+		color-scheme: light;
+		--page-bg: #f5f5f7; --surface: #ffffff; --surface-low: #f0efec; --accent: #a8480c;
+		--border: #d8d4cc; --outline: #c9c5bd; --secondary: #6b655c; --txt: rgba(0,0,0,0.88);
+	}
+}
+:root[data-theme="light"] {
+	color-scheme: light;
+	--page-bg: #f5f5f7; --surface: #ffffff; --surface-low: #f0efec; --accent: #a8480c;
+	--border: #d8d4cc; --outline: #c9c5bd; --secondary: #6b655c; --txt: rgba(0,0,0,0.88);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page-bg); color: var(--txt); font-family: var(--font-body); font-size: 15px; line-height: 1.55; }
+.page { max-width: 720px; margin: 0 auto; padding: 40px 20px 72px; display: flex; flex-direction: column; gap: 32px; }
+.eyebrow { font-family: var(--font-mono); font-size: 10px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--secondary); }
+h1 { margin: 6px 0 0; font-family: var(--font-headline); font-size: 28px; font-weight: 700; line-height: 1.15; letter-spacing: -0.01em; text-wrap: balance; }
+h2 { margin: 0 0 10px; font-family: var(--font-headline); font-size: 13px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--secondary); }
+p { margin: 0; }
+p + p { margin-top: 10px; }
+b { font-weight: 600; }
+ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+.phases { display: flex; flex-direction: column; gap: 12px; }
+.phase { padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--outline); }
+.phase h3 { margin: 0 0 6px; font-family: var(--font-headline); font-size: 15px; font-weight: 700; }
+.phase .gate { margin-top: 8px; font-size: 13px; color: var(--secondary); }
+.phase .gate code { font-family: var(--font-mono); font-size: 12px; color: var(--txt); }
+.verdict { padding: 14px 16px; border: 1px solid var(--border); background: var(--surface-low); }
+.verdict .tag { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--green); }
+.approval { padding: 16px; border: 1px solid var(--border); border-left: 3px solid var(--accent); background: var(--surface); }
+.seeds pre { margin: 0; padding: 14px; background: var(--surface); border: 1px solid var(--border); white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; overflow-x: auto; }
+.seed_head { display: flex; align-items: baseline; gap: 10px; margin: 16px 0 8px; }
+.seed_head h3 { margin: 0; font-family: var(--font-headline); font-size: 14px; font-weight: 700; }
+.pill { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); padding: 1px 6px; }
+.warn { font-size: 13px; color: var(--secondary); }
+.muted { font-size: 13px; color: var(--secondary); }
+code { font-family: var(--font-mono); font-size: 13px; }
+</style>
+
+<div class="page">
+	<div>
+		<span class="eyebrow">Blueprint · light · connect-chain-mismatch</span>
+		<h1>Connect on another chain without a dead end</h1>
+	</div>
+
+	<p>When an app on Testnet asks to connect while the wallet sits on Alpha V5, the wallet says you have no account on Testnet and refuses. You do have one: it just has not been written down yet, because the wallet only prepares an account for the network you are currently looking at. This plan makes the wallet prepare it the moment an app asks, tells you plainly which network the app is on, and offers to move the wallet there. You can also just approve and stay where you are.</p>
+
+	<div>
+		<h2>Why this tier</h2>
+		<p>Light. Novelty low (the derivation already exists), blast radius low (one popup and one dispatcher helper), nothing irreversible, no migration, no external service, and security sensitivity low: the app can only pick among networks the wallet already knows, and you still choose which account to share. Zero high-risk dimensions.</p>
+	</div>
+
+	<div>
+		<h2>Phases</h2>
+		<div class="phases">
+			<div class="phase">
+				<h3>1. The wallet prepares the account on demand</h3>
+				<p>When an app asks for accounts on a network with none yet, the wallet derives that network's default account first, then lists it. Same routine the network switch already uses. If preparing fails, the popup keeps today's clear error.</p>
+				<p class="gate">Proves itself by: wallet-bridge unit tests (derives once when empty, never when not, logs and stays empty on failure) + lint + typecheck. <code>bun run test</code> in packages/wallet-bridge · <code>bun run lint</code> · <code>bun run typecheck</code></p>
+			</div>
+			<div class="phase">
+				<h3>2. One shared "switch network" routine</h3>
+				<p>The Settings page already switches networks safely (it refuses while a send is in flight and recovers if the save fails). That routine moves into a small shared piece so the connect popup uses the exact same rules and messages.</p>
+				<p class="gate">Proves itself by: ten-plus unit cases on the shared routine + lint + typecheck. <code>bun run test src/composables/useNetworkActivation.test.ts</code> in apps/extension</p>
+			</div>
+			<div class="phase">
+				<h3>3. The popup says which network, and offers the switch</h3>
+				<p>A quiet banner: "Connecting on Testnet. Your wallet is on Alpha V5. Approve as is, or switch to see Testnet balances." with one action, "Switch wallet to Testnet". After switching it reads "Wallet switched to Testnet". Approve is never blocked by this. The line under the app's name says "is requesting permissions on Testnet".</p>
+				<p class="gate">Proves itself by: unit tests for the chain lookup, the design Banner test, popup tests, lint, typecheck, and the complexity baseline unchanged. <code>bun run test src/popup/windows/capabilities</code> · <code>bun run baseline:complexity</code></p>
+			</div>
+			<div class="phase">
+				<h3>4. A real browser test of the exact bug</h3>
+				<p>The test wallet stays on Testnet, the test app connects on Local Network, asks for accounts, sees the banner and an account, clicks the switch, approves, and the app receives the account. Fully inside the local sandbox.</p>
+				<p class="gate">Proves itself by: the new network e2e spec green, plus the existing accounts spec. <code>bun run e2e:agent tests/e2e/network/cap-chain-mismatch.test.ts</code></p>
+			</div>
+			<div class="phase">
+				<h3>5. Docs and wrap</h3>
+				<p>Plan index, lessons, the e2e README line, and the full local gate.</p>
+				<p class="gate">Proves itself by: <code>bun run audit:vue</code> green (typecheck, tests, lint, build).</p>
+			</div>
+		</div>
+	</div>
+
+	<div>
+		<h2>Human context</h2>
+		<p>Accounts in Nulo are per network: the same secret gives a different address on Alpha V5 and on Testnet. The wallet writes an address down only when it first needs it, so a wallet that has only ever been on Alpha has no Testnet address on file. Apps connect to one network of their choosing, and everything the app does later happens on that network regardless of what the wallet's home screen shows. That is why "just approve" is safe today whenever the address exists, and why preparing it on demand closes the gap.</p>
+	</div>
+
+	<div>
+		<h2>Open questions</h2>
+		<ul>
+			<li><b>Custom networks.</b> Preparing an account on a user-added network checks that network's node first. An app connecting on such a network makes the wallet do that check once. Accepted: the node is the user's own, and a failed check falls back to the clear error.</li>
+			<li><b>Failure handling.</b> If preparing the account fails, the popup shows the existing error rather than the app receiving a raw exception. Codex is asked to weigh this.</li>
+		</ul>
+	</div>
+
+	<div class="verdict" id="verdict">
+		<span class="tag">Codex audit</span>
+		<p id="verdict_text">Pending: the plan is with codex (xhigh). The verdict lands here.</p>
+	</div>
+
+	<div class="approval">
+		<h2>Approval</h2>
+		<p>The owner pre-approved the direction in chat on 2026-09-05 ("move forward into implementing") and locked the copy. Scope: the five phases above, single PR into <code>dev</code>, no <code>/code-review</code>, codex fix loop at the end, PR babysat to green and squash-merged. Out of scope: the discover window, hidden-account edge cases, any change to how apps declare their network.</p>
+	</div>
+
+	<section class="seeds">
+		<h2>Implementation seeds</h2>
+		<p class="warn">Use exactly one per session. They do not compose. The session must run inside the plan's worktree (<code>agent-worktree resume connect-chain-mismatch</code>).</p>
+		<div class="seed_head"><h3>/goal</h3><span class="pill">Recommended</span></div>
+		<pre>/goal All five phases marked ✓ in implementations-plan/connect-chain-mismatch/plan.md (the phase headers in the file), each ✓ backed by its validation gate reported passing in the transcript; for each phase the agent has printed `LESSONS_FILE=implementations-plan/connect-chain-mismatch/lessons/phase-N.md`; `/code-review` was NOT run (code_review: off); the post-implementation codex fix loop converged (a resumed codex pass reporting no new material findings, quoted in the transcript); a single PR against dev exists, created only after the loop converged (`gh pr view` output in the transcript) and `gh pr checks` shows quality-status, smoke-e2e-status and network-e2e-status green; the PR was squash-merged (`gh pr view --json state` = MERGED in the transcript); `bun run test` and `bun run lint` both report exit 0 in the transcript.</pre>
+		<div class="seed_head"><h3>/loop 15m</h3><span class="muted">alternative</span></div>
+		<pre>/loop 15m Drive implementations-plan/connect-chain-mismatch forward. Never idle waiting for my input. Each firing: 1) read plan.md + lessons/ (authoritative state), rebuild the task list from plan.md if empty, `git status`, `git log --oneline -5`; if a PR exists, `gh pr view --json statusCheckRollup`. 2) Waiting on CI is fine: confirm it progresses (`gh run watch` up to 10 min), use the wait to review the diff. 3) No task in hand? take the next pending step; after each edit run `bun run lint` + the touched package's `bun run test`; commit → push. 4) Stuck or facing a decision? `/codex xhigh`, go back and forth, act, log the consult in lessons/phase-N.md; never publish/deploy, never expand scope. 5) Same step failed 5 times? reassess with codex. 6) Phase green = its validation gate in plan.md passes: paste the result, mark ✓, write lessons, print `LESSONS_FILE=implementations-plan/connect-chain-mismatch/lessons/phase-N.md`. 7) All ✓? close out per plan.md's Post-implementation section: codex audit over the net diff (adversarial ask + no-over-engineering + comment-quality rules), fix/commit/resume until no material findings (≤3 rounds), then `gh pr create` against dev, `gh pr checks --watch`, squash-merge when the three required gates are green, then a wrap-up report.</pre>
+	</section>
+
+	<p class="muted">Full plan: <code>implementations-plan/connect-chain-mismatch/plan.md</code> · recon: <code>recon.md</code> · lessons: <code>lessons/</code></p>
+</div>
