@@ -52,3 +52,17 @@ Re-validation: `src/components/composite/activity src/popup/components/modules/g
 src/wallet/services/dapp-interaction src/wallet/services/window-manager` → 16 files, 244 tests, exit
 0; extension typecheck 0 errors (after annotating the `test.each` fixture — TS7024 on an `as const`
 tuple of async fns); biome clean on the touched files.
+
+### Round 2 (resumed) — `findings` (one Medium)
+- **[Medium] Two buttons exceed the layout's reserved action space.** `TransactionCardLayout` reserves
+  20px of right padding for ONE 16px icon button (`.wrapper_has_actions`); the sibling focus button
+  makes the absolutely positioned group 32px wide, so it could overlap long title/origin content. Codex
+  ran the four affected suites itself (97 passed). Adopted: a new `actionCount` prop on the layout
+  (default 1) adds `.wrapper_two_actions { padding-right: 36px }` when > 1; the awaiting card passes
+  `(focusable ? 1 : 0) + (showCancel ? 1 : 0)`. Pinned with a test that mounts the REAL layout (not
+  the stub): two buttons → `wrapper_two_actions` present; one button → `wrapper_has_actions` only.
+  The 20px reservation for the single-button case is untouched.
+- Codex confirmed the round-1 fixes (nesting, identity gap, locked-profile denial, comments) and that
+  the lifecycle fences and target-profile authorization hold.
+
+Re-validation: activity suite 4 files, 66 tests, exit 0; extension typecheck 0 errors; biome clean.

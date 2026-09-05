@@ -187,5 +187,17 @@ describe("composite/TransactionAwaitingCard", () => {
 			const w = mountCard({ cancellable: true, jobId: null, stage: "queued" })
 			expect(w.find('[data-testid="tx-awaiting-focus"]').exists()).toBe(false)
 		})
+
+		test("with the REAL layout, two buttons widen the reserved action space; one button keeps the 20px reservation", () => {
+			const { TransactionCardLayout: _stub, ...stubs } = STUBS
+			const real = (props: Record<string, unknown>) => mount(TransactionAwaitingCard, { props, global: { stubs } })
+
+			const two = real({ cancellable: true, jobId: "abc123", stage: "queued", title: "A very long dApp title that fills the row" })
+			expect(two.html()).toMatch(/wrapper_two_actions/)
+
+			const one = real({ cancellable: true, jobId: "abc123", stage: "proving" })
+			expect(one.html()).toMatch(/wrapper_has_actions/)
+			expect(one.html()).not.toMatch(/wrapper_two_actions/)
+		})
 	})
 })

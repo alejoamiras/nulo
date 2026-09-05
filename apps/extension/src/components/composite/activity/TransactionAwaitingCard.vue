@@ -77,6 +77,7 @@ function onCardClick() {
 			:amount="amount"
 			:amountSymbol="amountSymbol"
 			:stage="stage"
+			:actionCount="(focusable ? 1 : 0) + (showCancel ? 1 : 0)"
 			testId="tx-awaiting-card"
 		>
 			<template #badge>
