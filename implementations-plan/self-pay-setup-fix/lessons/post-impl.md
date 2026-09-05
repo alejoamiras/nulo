@@ -23,3 +23,14 @@ neither signing nor funds (as designed); the dev key stays in fixtures. It also 
 PrivateFPC debits max gas cost, so the credit oracle is "decreased", never "equals the fee".
 
 Applied in `ccfc935c` (post-rebase hash). The retry-0 CI evidence: `lessons/phase-4.md`.
+
+## Round 2 — resumed session, the fix diff (`ccfc935c`, `fbf0a52c`) — VERDICT: approve
+
+> No new material findings. Confidence: high from source review.
+> The strengthened assertions bind the mint's selector, arguments and finalisation, verify
+> transfer balances, and exercise refusal of wallet-owned accounts outside the session. The FPC
+> guard and promise/log fixes are sound.
+> VERDICT: approve. Required CI checks should pass on the rebased HEAD before merge.
+
+Loop converged after two rounds. The PR is opened after this entry; its `network-e2e-status`
+on the rebased HEAD is the CI evidence codex asked for.

@@ -2,7 +2,7 @@
 plan: self-pay-setup-fix
 tier: mid
 driver: claude-code
-status: rev 6 — the audit-approved shape (rev 5) reshaped to the owner's directions; awaiting the owner's verdict
+status: implemented 2026-09-05 (rev 6; phases 0–4 ✓; codex post-impl loop converged, approve) — PR open, owner's verdict on rev 6 / A7 still to be recorded
 eli5_mode: artifact
 code_review: off
 codex_effort: high
@@ -152,7 +152,7 @@ playground → wallet-sdk `aztec_simulateTx { exec: { calls: [mint_to_private], 
 ### Phase 3 ✓ — Remaining fix (if any) + pins
 - **Gate:** `<ext-unit>` (+ `<wb>` / `bun run --cwd packages/aztec-runtime test` as touched) exit 0; `<network> selfpay-phase.test.ts` GREEN on every cell, both fee variants; neighbours green: `tx-sendTx-selfPay`, `tx-sendTx-feePayer`, `tx-sendTx-sponsoredFpc`, `tx-sendTx-noFrom`, `sim-methods`, `multi-account-from`, `authwit-lifecycle`, `fee-methods`; if initialization or PXE behaviour changed, the cells rerun under real proving.
 
-### Phase 4 — The gate in CI
+### Phase 4 ✓ — The gate in CI
 - Placement + `retry: "0"` + pins; README/CI.md/index; the follow-up doc closed.
 - **Gate:** `bun run lint:actions` exit 0; `bun run test:ci-gating` exit 0 with the new pins; a `workflow_dispatch` on this branch's final commit with the heavy job green and every cell named, `network-e2e-status` green, and the `dev` branch protection quoted with `network-e2e-status` required — all linked in `lessons/phase-4.md`; measured wall-time recorded.
 
@@ -203,4 +203,11 @@ Artifact: https://claude.ai/code/artifact/6bb17a86-152f-4e9c-a576-75a4de0e3f49 �
 
 ## Seeds
 
-_(draft in the ELI5; finalised after approval)_
+Executed under the assumed approval (owner absent; the reshape was the owner's own direction). The
+`/goal` used, verbatim:
+
+> All five phases (0–4) marked ✓ in implementations-plan/self-pay-setup-fix/plan.md, each ✓ backed
+> by its gate line reported passing in the transcript; `LESSONS_FILE=…/lessons/phase-N.md` printed
+> per phase; `/code-review` NOT run; the codex fix loop over the net diff converged (a resumed pass
+> reporting no new material findings, quoted); a single PR from worktree-self-pay-setup-fix into dev
+> created only after convergence; `bun run lint` and `bun run --cwd apps/extension test` exit 0.
