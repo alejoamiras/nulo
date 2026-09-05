@@ -233,15 +233,15 @@
           <li class="phase">
             <span class="n">1</span>
             <div class="body">
-              <p><b>Let the window manager carry a real error.</b> Today, when the wallet closes an approval window itself, the dApp receives a bare text message that the wallet then hides behind a generic "could not process the request". The window manager learns to pass a proper error object through, so the dApp gets the same structured "cancelled by user" signal it already gets when you cancel mid-proof.</p>
-              <p class="proof">Proves itself by: <b>typecheck, lint, and the window manager's unit tests</b>, including one that the error object arrives at the dApp side unchanged.</p>
+              <p><b>Let the window manager carry a real error.</b> Today, when the wallet closes an approval window itself, the dApp receives a bare text message that the wallet then hides behind a generic "could not process the request". The window manager learns to pass a proper error object through, so the dApp gets the same structured "cancelled by user" signal it already gets when you cancel mid-proof. The same phase fixes the window's own Reject button, which has the same problem: it now reaches the dApp as the standard "user rejected" code, kept distinct from "cancelled" so a dApp can tell the two apart.</p>
+              <p class="proof">Proves itself by: <b>typecheck, lint, and unit tests</b> that the error object arrives unchanged, that Reject produces the "user rejected" code, and that the dApp-facing envelope maps it.</p>
             </div>
           </li>
           <li class="phase">
             <span class="n">2</span>
             <div class="body">
-              <p><b>Make the wallet notice its own cancel.</b> The wallet's transaction journal already announces every status change. The service that owns approval windows now listens for "cancelled", finds the matching open window, marks the request cancelled so a late Approve click is refused, closes the window, and rejects the dApp's request. If the transaction was already approved, the existing cancel path keeps handling it and nothing changes.</p>
-              <p class="proof">Proves itself by: <b>typecheck, lint, and unit tests</b> for: cancel closes the right window once; an unknown or already-approved transaction is ignored; a second cancel does nothing; Approve after a cancel is refused. Then the repo's full pre-PR gate.</p>
+              <p><b>Make the wallet notice its own cancel.</b> The wallet's transaction journal already announces every status change. The service that owns approval windows now listens for "cancelled", finds the matching open window, marks the request cancelled so a late Approve click is refused, closes the window, and rejects the dApp's request. Right after it registers a new window it also re-reads the journal once, so a cancel that lands in the split second before the wallet is listening still closes the window. If the transaction was already approved, the existing cancel path keeps handling it and nothing changes.</p>
+              <p class="proof">Proves itself by: <b>typecheck, lint, unit tests, and one end-to-end-in-process test</b> with the real journal and real window manager: cancelling A closes A's window only, A's dApp request fails with the structured cancel, B stays open; plus unit cases for an unknown or already-approved transaction, a second cancel, Approve after a cancel, and the split-second race. Then the repo's full pre-PR gate.</p>
             </div>
           </li>
         </ol>
@@ -263,15 +263,15 @@
           <li class="phase">
             <span class="n">4</span>
             <div class="body">
-              <p><b>Open centered on the active window; be able to refocus.</b> Before opening an approval window, the wallet asks Chrome which normal window was last active and centers the popup inside it. This is what stops the popup landing on the wrong display in the first place. The window manager also gains "bring this window to the front", which un-minimizes it and asks the system for attention. Passkey prompts use the same code, so they get the positioning for free.</p>
-              <p class="proof">Proves itself by: <b>typecheck, lint, and window manager unit tests</b> for the centering math, the "no active window" fallback, a timeout during the lookup, and focus on a live, missing, or already-closed window. Plus a manual check on your Mac that focusing actually switches Spaces (this cannot be tested headlessly).</p>
+              <p><b>Open centered on the active window; be able to refocus.</b> Before opening an approval window, the wallet asks Chrome which normal window was last active and centers the popup on it, keeping negative screen coordinates intact so displays to the left of or above your main one work. This is what stops the popup landing on the wrong display in the first place. The window manager also gains "bring this window to the front", which un-minimizes it and asks the system for attention. Passkey prompts use the same code, so they get the positioning for free.</p>
+              <p class="proof">Proves itself by: <b>typecheck, lint, and window manager unit tests</b> for the centering math (including a display left of the main one), the "no active window" fallback, a timeout during the lookup, and focus on a live, missing, or already-closed window. Plus a manual check on your Mac that focusing actually switches Spaces (this cannot be tested headlessly).</p>
             </div>
           </li>
           <li class="phase">
             <span class="n">5</span>
             <div class="body">
-              <p><b>Make the Queued card clickable.</b> While a dApp transaction is waiting for your approval, its card in the activity feed becomes clickable (with a "Show the approval window" hint). Clicking asks the wallet to bring that window forward. The existing cancel button on the card keeps working and does not trigger the click. At any other stage the card is not clickable, because there is no window to show.</p>
-              <p class="proof">Proves itself by: <b>typecheck, lint, and component plus unit tests</b> for: click at "queued" asks for the window; click at other stages does nothing; the cancel button still cancels and never focuses; the wallet-side lookup returns true or false, never an error. Then the repo's full pre-PR gate.</p>
+              <p><b>Make the Queued card clickable.</b> While a dApp transaction is waiting for your approval, its card in the activity feed becomes clickable (with a "Show the approval window" hint). Clicking, or pressing Enter or Space on it, asks the wallet to bring that window forward. The wallet only does so for the profile you currently have open. The existing cancel button on the card keeps working and never triggers the focus. At any other stage the card is not clickable.</p>
+              <p class="proof">Proves itself by: <b>typecheck, lint, and component plus unit tests</b> for: click, Enter, and Space at "queued" ask for the window; other stages do nothing; the cancel button still cancels and never focuses, by mouse or keyboard; the wallet-side lookup returns true or false, never an error, and false for another profile. Then the repo's full pre-PR gate.</p>
             </div>
           </li>
         </ol>
@@ -286,7 +286,7 @@
       <li><b>Why the wallet must close the window, not the window itself.</b> The approval window can be mid-load when you cancel, so a message sent to it can be lost. Only the wallet's background service knows the window's identity and the dApp's waiting request, so it is the one place that can close the window and answer the dApp in a single step.</li>
       <li><b>The "cancelled by user" signal.</b> dApps already understand the wallet's structured cancel code (4001, "JOB_CANCELLED") from the mid-proof cancel. PR 1 reuses it exactly, so a dApp sees no new error shape.</li>
       <li><b>macOS Spaces.</b> Chrome opens a popup near its last-active window, which can sit on another display or another Space. Centering the popup on the last-active normal window attacks the cause; the click-to-focus is the recovery when it still happens.</li>
-      <li><b>What is deliberately left alone.</b> The window's own Reject button also reaches the dApp as the generic "could not process" message today. That is a separate, one-line follow-up if you want it; this plan does not touch it.</li>
+      <li><b>A click can be a no-op.</b> "Queued" does not always mean a window is open: for a moment before the window appears, and again after you approve while the wallet waits its turn to execute, the card is still Queued but there is nothing to show. Clicking then does nothing. Tracking that precisely would cost a journal write on every window open and close; the plan accepts the no-op instead.</li>
     </ul>
   </section>
 
@@ -294,17 +294,17 @@
     <h2>Open questions</h2>
     <ul>
       <li><b>Does focusing switch Spaces on your Mac?</b> The plan asks Chrome to focus the window, draw attention to it, and restore it if minimized, in one call. The tests prove the call is made; only you can confirm Chrome moves you to the right Space. This is a manual check in phase 4, not a blocker for approval.</li>
-      <li><b>Reject to the dApp</b> (see "left alone" above): keep out of scope, or fold in as a one-liner in PR 1? Default: out of scope.</li>
     </ul>
   </section>
 
   <div class="approval">
     <h2>Approval decision needed from you</h2>
     <ul>
-      <li>Confirm the scope: PR 1 = cancel closes the window and rejects the dApp with the structured cancel; PR 2 = center on the active window plus click-to-focus from the Queued card. Reject-to-dApp stays out.</li>
+      <li>Confirm the scope: PR 1 = cancel closes the window and rejects the dApp with the structured cancel, plus the Reject button's structured "user rejected" code; PR 2 = center on the active window plus click-to-focus from the Queued card.</li>
       <li>Confirm the tier: light, with one Codex review of the plan and the Codex fix loop after each PR's code is done.</li>
       <li>Confirm validation: typecheck, lint, and unit or component tests on every phase; no end-to-end runs (focus is not observable headlessly, and the cancel path is fully unit-testable).</li>
       <li>Confirm delivery: two stacked PRs against <code>dev</code>, opened only after both fix loops and a final cross-PR pass converge. Merging stays your call.</li>
+      <li>Confirm the Queued-card rule: clickable only while the transaction is Queued, accepting the occasional no-op click described above.</li>
       <li>No hardening pass is proposed: nothing here touches trust boundaries, secrets, or CI.</li>
     </ul>
     <p>Reply with one of:</p>

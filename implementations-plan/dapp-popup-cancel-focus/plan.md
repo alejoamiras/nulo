@@ -21,7 +21,9 @@ Two related gaps in the dApp approval popup (the window the wallet opens when a 
    interaction, closes the popup, and rejects the dApp's promise with the structured `4001` cancel error
    the mid-prove cancel already produces. A journal re-read right after the interaction is registered
    closes the window in which a cancel lands before the subscription can see the interaction. Owner
-   decision: close immediately, no overlay.
+   decision: close immediately, no overlay. Owner addition (2026-09-05): the popup's own Reject also
+   reaches the dApp structured — `UserRejectedError` → `4001 / USER_REJECTED` — instead of the
+   unclassified string it collapses to today.
 2. **The popup can open on the wrong display / macOS Space and there is no way to bring it back.** Arc 2
    centers the popup on the last-focused normal Chrome window at creation (signed desktop coordinates
    preserved, so displays left of or above the primary work), and makes the "Queued" card in the
@@ -125,9 +127,15 @@ Arc 2 stacks on arc 1 (both touch `DappInteractionService`'s journal-id lookup a
 - A2 `/code-review`: off.
 - A3 Cancel UX: the popup closes immediately; the dApp gets the structured 4001 cancel. No overlay.
 - A4 Arc 2 scope: click-to-refocus AND creation-time positioning.
-- A5 Out of scope, declared: the popup's own Reject reaches the dApp as `UNCLASSIFIED_ERROR_MESSAGE`
-  today (bare string, F5) although `UserRejectedError` exists unmapped. Unchanged by this plan; a
-  one-line follow-up if the owner wants Reject → 4001 parity.
+- A5 IN SCOPE (owner, 2026-09-05: "let's do the one-line follow-up here too"): the popup's Reject
+  reaches the dApp as `UNCLASSIFIED_ERROR_MESSAGE` today (bare string, F5). Phase 1 makes
+  `rejectInteraction` reject with a `UserRejectedError` (`errors.ts:100-104`, CODE `USER_REJECTED`,
+  already used popup-side for auth/export/import flows) and maps it in the envelope to
+  `{ code: 4001, data: { walletErrorCode: "USER_REJECTED" } }` — distinct from `JOB_CANCELLED` for
+  telemetry, as `errors.ts:116-119` documents; the wallet-bridge README's dApp recipe keys on
+  `code === 4001`. Nothing SW-side string-matches the reject reason (searched `"User rejected"`: only
+  the three popup callers and a journal display string). Discovery's catch-all is untyped
+  (`background.ts:672-676`) and unaffected.
 - A6 Card eligibility rule (decision, surfaced at the gate): the Queued card is clickable at stage
   `queued` only. A `queued` record does NOT prove a window exists — none in the pre-popup session-FIFO
   wait, and none after Approve while the request waits for the execution mutex (`service.ts:117`,
@@ -136,9 +144,10 @@ Arc 2 stacks on arc 1 (both touch `DappInteractionService`'s journal-id lookup a
 
 ## Architecture & Implementation (compact)
 
-**Reuse / location.** No new files except tests. Arc 1 lives entirely in `WindowManager` (accept an
-`Error` as the cancel reason) and `DappInteractionService` (journal subscription + post-registration
-reconciliation + journal-keyed lookup). Arc 2 extends the `WindowPort` contract in `wallet-core` and both
+**Reuse / location.** No new files except tests. Arc 1 lives in `WindowManager` (accept an `Error` as
+the cancel reason), `DappInteractionService` (journal subscription + post-registration reconciliation +
+journal-keyed lookup; `rejectInteraction` wraps its reason in `UserRejectedError`) and the wallet-sdk
+error envelope (one new mapping). Arc 2 extends the `WindowPort` contract in `wallet-core` and both
 adapters, adds two methods to `WindowManager`, one RPC to `DappInteractionService`, one emit to
 `TransactionAwaitingCard`, one pure handler builder, and the wiring in `RecentActivityView`.
 
@@ -201,7 +210,8 @@ rejection → `false`, never a throw.
 
 **File-level change map.**
 - Arc 1: `apps/extension/src/wallet/services/window-manager/window-manager.ts` (+test);
-  `apps/extension/src/wallet/services/dapp-interaction/service.ts` (+unit test, +composition test).
+  `apps/extension/src/wallet/services/dapp-interaction/service.ts` (+unit test, +composition test);
+  `apps/extension/src/wallet/services/wallet-sdk/error-envelope.ts` (+test).
 - Arc 2: `packages/wallet-core/src/ports/window-port.ts`; `packages/wallet-core/src/testing/fake-browser-api.ts`
   (+test); `apps/extension/src/core/adapters/chrome-browser-api.ts`; `window-manager.ts` (+test);
   `dapp-interaction/{spec,service,client}.ts` (+test); `components/composite/activity/TransactionAwaitingCard.vue`
@@ -256,14 +266,19 @@ the named new tests pass.
 
 ### Arc 1 — cancel closes the popup
 
-#### Phase 1 — `WindowManager.cancel` carries an `Error`
+#### Phase 1 — `WindowManager.cancel` carries an `Error`; Reject reaches the dApp as 4001
 - `cancel(handleId, reason: string | Error)`; `Handle.reject: (reason: unknown) => void`; `_settle`
   passes the value through unchanged. Existing string callers unaffected (existing string-cancel test
   at `window-manager.test.ts:52` stays as the string case).
-- Test (`window-manager.test.ts`): `cancel(handleId, err)` rejects `promise` with that SAME instance
-  (`toBe`) and still calls `windows.remove`.
-- **Validation gate**: `bun run typecheck && bun run lint && bun run --cwd apps/extension test src/wallet/services/window-manager`
-  → exit 0, new case green. Layers: typecheck/lint · unit.
+- `rejectInteraction(id, reason)`: `this.windowManager.cancel(handleId, new UserRejectedError(reason))`
+  (A5). `error-envelope.ts`: `UserRejectedError` → `{ code: 4001, message, data: { walletErrorCode: UserRejectedError.CODE } }`,
+  placed with the other classified throws.
+- Tests: `window-manager.test.ts` — `cancel(handleId, err)` rejects `promise` with that SAME instance
+  (`toBe`) and still calls `windows.remove`. `error-envelope.test.ts` — `UserRejectedError` → 4001 +
+  `USER_REJECTED`, mirroring the `JobCancelledError` case at `:16-23`. `dapp-interaction/service.test.ts` —
+  `rejectInteraction` hands the manager a `UserRejectedError` carrying the reason.
+- **Validation gate**: `bun run typecheck && bun run lint && bun run --cwd apps/extension test src/wallet/services/window-manager src/wallet/services/wallet-sdk/error-envelope.test.ts src/wallet/services/dapp-interaction`
+  → exit 0, new cases green. Layers: typecheck/lint · unit.
 
 #### Phase 2 — journal-driven cancel in `DappInteractionService` + post-registration reconciliation
 - `init()`: `this.operationJournal.onOperationUpdated.add((rec) => { if (rec.progress.stage === "cancelled") this.cancelInteractionForJournal(rec.id) })`.
@@ -396,7 +411,7 @@ Two arcs, two stacked PRs via `gh stack` (installed: `github/gh-stack v0.0.1`). 
 
 | Arc | Phases | Branch | Stacks on |
 |---|---|---|---|
-| 1 `fix(dapp): cancelling a queued dApp tx closes its approval popup` | 1–2 | `worktree-dapp-popup-cancel-focus` (`gh stack init --adopt worktree-dapp-popup-cancel-focus --base dev`) | `dev` |
+| 1 `fix(dapp): feed cancel closes the approval popup; reject reaches the dApp as 4001` | 1–2 | `worktree-dapp-popup-cancel-focus` (`gh stack init --adopt worktree-dapp-popup-cancel-focus --base dev`) | `dev` |
 | 2 `feat(popup): approval window opens on the active display and refocuses from the Queued card` | 3–5 | `dapp-popup-cancel-focus/focus` (`gh stack add dapp-popup-cancel-focus/focus`) | arc 1 |
 
 PR titles ≤ 93 chars (squash subject + ` (#NN)` must stay ≤ 100). Submit only after step 4 above:
