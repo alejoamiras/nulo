@@ -1690,27 +1690,33 @@ const WORKER_PROBE_BUDGET_MS = 2_000
 
 /** The worker global's creation time: only a new worker instance produces a newer value. The
  *  whole probe — attach included, since Puppeteer's attach carries the 300 s protocol timeout — races
- *  the budget; a session that arrives after the race settled is released when it does. Release is
- *  requested, never awaited: the caller's budget must not depend on Chrome answering a detach. */
+ *  the budget. An attached session is released the moment the budget expires (a session left on a
+ *  stopping worker is the very hazard `stopServiceWorker` exists to avoid), and one that attaches
+ *  after expiry is released without evaluating. Release is requested, never awaited: the caller's
+ *  budget must not depend on Chrome answering a detach. */
 async function readWorkerTimeOrigin(target: Target, budgetMs: number): Promise<number> {
 	let session: CDPSession | undefined
+	let expired = false
+	const release = () => session?.detach().catch(() => {})
 	const probe = (async () => {
 		session = await target.createCDPSession()
+		if (expired) throw new Error("worker probe attached after its budget")
 		const { result } = await session.send("Runtime.evaluate", { expression: "performance.timeOrigin", returnByValue: true })
 		return Number(result.value)
 	})()
 	let timer: ReturnType<typeof setTimeout> | undefined
 	const timeout = new Promise<never>((_, reject) => {
-		timer = setTimeout(() => reject(new Error("worker probe timed out")), budgetMs)
+		timer = setTimeout(() => {
+			expired = true
+			release()
+			reject(new Error("worker probe timed out"))
+		}, budgetMs)
 	})
 	try {
 		return await Promise.race([probe, timeout])
 	} finally {
 		if (timer) clearTimeout(timer)
-		probe.then(
-			() => session?.detach().catch(() => {}),
-			() => session?.detach().catch(() => {}),
-		)
+		probe.then(release, release)
 	}
 }
 

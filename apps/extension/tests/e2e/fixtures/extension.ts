@@ -1,3 +1,4 @@
+import { existsSync, readdirSync } from "node:fs"
 import puppeteer, { TimeoutError, type Browser, type Page, type ConsoleMessage } from "puppeteer"
 import { test as base, inject } from "vitest"
 import {
@@ -34,6 +35,10 @@ export interface ExtensionContext {
 export async function launchExtension(opts: { userDataDir?: string; waitForLiveness?: boolean } = {}): Promise<ExtensionContext> {
 	const { userDataDir, waitForLiveness = true } = opts
 	const extensionPath = inject("extensionPath")
+	// Read before Chrome writes the profile: `onInstalled` fires with reason "install" — the only
+	// reason that opens the first-run tab — exactly when the profile has never held the extension.
+	// A caller's freshly created empty `userDataDir` is therefore a fresh install, not a reuse.
+	const freshProfile = !userDataDir || !existsSync(userDataDir) || readdirSync(userDataDir).length === 0
 
 	// Headless `true` (the modern default in Puppeteer 24+) supports MV3
 	// extensions (offscreen docs, SW, chrome.storage, chrome.runtime.Port).
@@ -80,6 +85,22 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 		protocolTimeout: 300_000,
 	})
 
+	try {
+		const extensionId = await settleLaunchedExtension(browser, { freshProfile, waitForLiveness })
+		return { browser, extensionId, consoleErrors: [], pageErrors: [] }
+	} catch (err) {
+		// Nothing else holds this browser yet; an escaping error would strand its Chrome.
+		await browser.close().catch(() => {})
+		throw err
+	}
+}
+
+/** Discover the extension id, wait for the worker, close the first-run tab and mark onboarding
+ *  complete. Returns the extension id. */
+async function settleLaunchedExtension(
+	browser: Browser,
+	{ freshProfile, waitForLiveness }: { freshProfile: boolean; waitForLiveness: boolean },
+): Promise<string> {
 	// Discover extension ID from service worker target
 	const workerTarget = await browser.waitForTarget(
 		(target) => target.type() === "service_worker" && target.url().includes("service-worker-loader"),
@@ -133,10 +154,10 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 	// in the worker's boot awaits that open, so the id can land after liveness; on a fresh profile
 	// the install is certain, so the id is REQUIRED — a launch that cannot find it would hand the
 	// test an untracked extension page, and that is a setup failure, not a warning. A reused profile
-	// (`userDataDir`) was installed by an earlier launch and opens no tab; there the poll is only a
-	// courtesy. Close the tab BEFORE marking onboarding complete: an onboarding page that mounts and
-	// reads the completed flag replaces itself with a popup window and drops the tracked id. Every
-	// e2e drives the popup flows directly; the tab-flow specs open their own tab.
+	// was installed by an earlier launch and opens no tab; there the poll is only a courtesy. Close
+	// the tab BEFORE marking onboarding complete: an onboarding page that mounts and reads the
+	// completed flag replaces itself with a popup window and drops the tracked id. Every e2e drives
+	// the popup flows directly; the tab-flow specs open their own tab.
 	const firstRunTabClosed = await blankPage.evaluate(async () => {
 		const key = "nulo:onboarding:tab-id"
 		for (let attempt = 0; attempt < 20; attempt++) {
@@ -150,7 +171,7 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 		}
 		return false
 	})
-	if (!firstRunTabClosed && !userDataDir) {
+	if (!firstRunTabClosed && freshProfile) {
 		throw new Error("launchExtension: the first-run onboarding tab never registered its id within 5s of liveness")
 	}
 
@@ -167,7 +188,7 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 
 	await blankPage.close()
 
-	return { browser, extensionId, consoleErrors: [], pageErrors: [] }
+	return extensionId
 }
 
 /** Open the onboarding tab directly. Use in tests that exercise the tab

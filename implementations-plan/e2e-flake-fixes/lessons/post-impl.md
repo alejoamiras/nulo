@@ -87,3 +87,37 @@ Both adopted (refinements of the two threads, not new scope):
 Validated: the SW-restart trio × 3 rounds under `taskset -c 0,1` retry 0 → 3/3; full smoke on all cores
 with `NULO_E2E_MIGRATION_FIXTURE=1` → 31/31 files (every fixture launches a fresh profile, so the
 requirement held on every launch; the `userDataDir` specs `migration` and `import-dead-rpc` green).
+
+## Round 4 (final verdict) — `not converged` (3 Medium) — response (verbatim)
+
+- **Medium — timed-out probes still retain sessions** ([helpers.ts:1710](apps/extension/tests/e2e/fixtures/helpers.ts:1710)). `probe.then(detach, detach)` waits for evaluation to finish, even after timeout. A late attachment also starts evaluation before releasing its session. Both cases reproduced with **zero detach requests after timeout**, until evaluation eventually replied. Request detach immediately when an attached probe times out; skip evaluation and detach immediately when attachment arrives late.
+
+- **Medium — `userDataDir` does not establish a reused profile** ([extension.ts:153](apps/extension/tests/e2e/fixtures/extension.ts:153)). `backup-roundtrip.test.ts:98` and `migration.test.ts:115` create empty directories before passing them here. Those fresh installs bypass the requirement and can still return with a late onboarding page. Determine whether the extension was previously installed rather than treating every supplied directory as reused.
+
+- **Medium — the new setup failure leaks Chrome** ([extension.ts:154](apps/extension/tests/e2e/fixtures/extension.ts:154)). Throwing loses the browser handle before fixture teardown receives it. The failure-path simulation confirmed no browser closure. Close the browser owned by this launch before rejecting.
+
+Confidence: high; verified through source inspection and isolated simulations. No E2E configs ran.
+
+not converged
+
+## Round 4 — triage
+
+The loop's hard stop is round 3; round 4 was the final-verdict pass. It did not converge, but all
+three findings are mechanical refinements of the two threads already under review, so they were
+applied without a round 5 rather than shipped as open items:
+
+- M (timed-out probes retained their session): the timeout handler now detaches an attached session
+  immediately, and an attach that lands after expiry throws before evaluating and is released by the
+  rejection handler. A session parked on a stopping worker is the exact hazard the helper exists to
+  avoid, so this one was a correctness gap, not a nicety.
+- M (`userDataDir` ≠ reused profile): `backup-roundtrip`, `migration` and `import-dead-rpc` all pass a
+  freshly `mkdtemp`'d empty dir on first launch, so the requirement silently skipped them. Freshness is
+  now read from the filesystem BEFORE Chrome writes the profile (`!userDataDir`, missing, or empty);
+  the wallet's `onInstalled` listener opens the tab only for `reason === "install"`, which is exactly
+  the never-installed case, so the two notions coincide.
+- M (a failed settle stranded Chrome): the post-launch settle moved into `settleLaunchedExtension`,
+  and `launchExtension` closes the browser it owns before rethrowing. This also covers the
+  pre-existing leak paths (worker discovery / liveness timeouts), which used to rely on the next
+  global-setup's pkill.
+
+No further codex round: the residue is the owner's to re-open if they want a fifth pass.
