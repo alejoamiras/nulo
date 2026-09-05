@@ -117,6 +117,9 @@ export type Methods = {
 	rejectInteraction(id: string, reason: string): void
 	/** Replay read for popups that mount after the cancel broadcast fired. */
 	isInteractionCancelled(id: string): boolean
+	/** Bring the approval popup of the live interaction for `journalId` to the
+	 *  front. `false` when there is none, or it belongs to another profile. */
+	focusInteractionWindow(journalId: string): boolean
 }
 
 export type Events = {

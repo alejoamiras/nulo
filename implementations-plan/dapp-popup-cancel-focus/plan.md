@@ -382,7 +382,8 @@ _(green 2026-09-05; `lessons/phase-4.md`; owner Space-switch check pending, reco
 - **Validation gate**: `bun run typecheck && bun run lint && bun run --cwd apps/extension test src/wallet/services/window-manager`
   → exit 0. Layers: typecheck/lint · unit.
 
-#### Phase 5 — RPC + clickable Queued card
+#### Phase 5 — RPC + clickable Queued card ✓
+_(green 2026-09-05; `lessons/phase-5.md`)_
 - `spec.ts` `Methods.focusInteractionWindow(journalId: string): boolean`; service implementation = scan by
   `hooks?.queuedJournalId` → active-profile check against `payload.session.profileId` →
   `windowManager.focus(handleId)`; add the string to `defineRpcMethods` and the client passthrough list (F9).

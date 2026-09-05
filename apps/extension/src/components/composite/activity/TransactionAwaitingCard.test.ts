@@ -142,4 +142,44 @@ describe("composite/TransactionAwaitingCard", () => {
 			expect(events?.[0]).toEqual(["abc123"])
 		})
 	})
+
+	describe("focus surface (queued only)", () => {
+		test("at queued the card is a button: click, Enter and Space emit 'focus' with the jobId", async () => {
+			const w = mountCard({ cancellable: true, jobId: "abc123", stage: "queued" })
+			const root = w.find('[role="button"]')
+			expect(root.exists()).toBe(true)
+			expect(root.attributes("tabindex")).toBe("0")
+			expect(root.attributes("title")).toBe("Show the approval window")
+
+			await root.trigger("click")
+			await root.trigger("keydown", { key: "Enter" })
+			await root.trigger("keydown", { key: " " })
+			expect(w.emitted("focus")).toEqual([["abc123"], ["abc123"], ["abc123"]])
+		})
+
+		test("the cancel button never focuses: its click emits only 'cancel'; its Enter emits nothing", async () => {
+			const w = mountCard({ cancellable: true, jobId: "abc123", stage: "queued" })
+			const cancel = w.find('[data-testid="tx-awaiting-cancel"]')
+
+			await cancel.trigger("click")
+			await cancel.trigger("keydown", { key: "Enter" })
+			expect(w.emitted("cancel")).toEqual([["abc123"]])
+			expect(w.emitted("focus")).toBeUndefined()
+		})
+
+		test("past queued the card is inert: no role, no tabindex, click emits nothing", async () => {
+			const w = mountCard({ cancellable: true, jobId: "abc123", stage: "proving" })
+			expect(w.find('[role="button"]').exists()).toBe(false)
+			expect(w.attributes("tabindex")).toBeUndefined()
+
+			await w.trigger("click")
+			await w.trigger("keydown", { key: "Enter" })
+			expect(w.emitted("focus")).toBeUndefined()
+		})
+
+		test("queued without a jobId is inert (nothing to focus)", () => {
+			const w = mountCard({ cancellable: true, jobId: null, stage: "queued" })
+			expect(w.find('[role="button"]').exists()).toBe(false)
+		})
+	})
 })

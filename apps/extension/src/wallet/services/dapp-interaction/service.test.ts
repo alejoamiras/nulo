@@ -41,7 +41,7 @@ type Internals = {
 	dappSessionService: { tryGetDappSession: (id: string) => Promise<{ profileId: string } | undefined> }
 	silentInteraction: (payload: unknown, hooks?: ExecutionHooks) => Promise<unknown>
 	operationJournal: { getOperation: (id: string) => Promise<unknown> }
-	windowManager: { cancel: ReturnType<typeof vi.fn>; settle: ReturnType<typeof vi.fn> }
+	windowManager: { cancel: ReturnType<typeof vi.fn>; settle: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn> }
 	cancelInteractionForJournal: (journalId: string) => void
 	reconcileCancelledJournal: (journalId: string) => Promise<void>
 }
@@ -51,7 +51,7 @@ function makeService(overrides: {
 	getActiveProfile?: () => Promise<{ id: string } | undefined>
 	tryGetDappSession?: (id: string) => Promise<{ profileId: string } | undefined>
 }) {
-	const windowManager = { detach: vi.fn(), settle: vi.fn(), cancel: vi.fn() } as unknown as WindowManager
+	const windowManager = { detach: vi.fn(), settle: vi.fn(), cancel: vi.fn(), focus: vi.fn(async () => true) } as unknown as WindowManager
 	const svc = new DappInteractionService(noopLogger, windowManager)
 	const internals = svc as unknown as Internals
 	internals.profileService = {
@@ -426,5 +426,42 @@ describe("DappInteractionService journal-driven cancel (a feed cancel closes the
 
 		expect(cancelCalls(internals)).toHaveLength(0)
 		expect(internals.storage.has("i-1")).toBe(true)
+	})
+})
+
+describe("DappInteractionService.focusInteractionWindow (Queued card → bring the popup forward)", () => {
+	const seedQueued = (internals: Internals, id: string, journalId: string) => {
+		internals.storage.set(id, {
+			id,
+			payload: emptyPayload,
+			handleId: `handle-${id}`,
+			cancellationToken: id,
+			hooks: { queuedJournalId: journalId },
+		})
+	}
+
+	test("finds the interaction by journal id and returns the manager's answer", async () => {
+		const { svc, internals } = makeService({})
+		seedQueued(internals, "i-1", "j-1")
+
+		await expect(svc.focusInteractionWindow("j-1")).resolves.toBe(true)
+		expect(internals.windowManager.focus).toHaveBeenCalledWith("handle-i-1")
+	})
+
+	test("unknown journal id, or an empty one → false, manager untouched", async () => {
+		const { svc, internals } = makeService({})
+		seedQueued(internals, "i-1", "j-1")
+
+		await expect(svc.focusInteractionWindow("j-other")).resolves.toBe(false)
+		await expect(svc.focusInteractionWindow("")).resolves.toBe(false)
+		expect(internals.windowManager.focus).not.toHaveBeenCalled()
+	})
+
+	test("another profile's popup is never raised → false, manager untouched", async () => {
+		const { svc, internals } = makeService({ getActiveProfile: async () => ({ id: "p2" }) })
+		seedQueued(internals, "i-1", "j-1")
+
+		await expect(svc.focusInteractionWindow("j-1")).resolves.toBe(false)
+		expect(internals.windowManager.focus).not.toHaveBeenCalled()
 	})
 })
