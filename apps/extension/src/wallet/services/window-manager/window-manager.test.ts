@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { FakeBrowserApi, MockClock } from "@nulo/wallet-core/testing"
 import type { ILogger } from "@/wallet/logger"
-import { WindowManager } from "./window-manager"
+import { centerOn, WindowManager } from "./window-manager"
 
 const TIMEOUT_MS = 5_000
 
@@ -10,10 +10,9 @@ const nullLogger: ILogger = { log: () => {} } as unknown as ILogger
 /** First window created per test always gets id 1000 (FakeBrowserApi resets on new instance). */
 const FIRST_WINDOW_ID = 1000
 
-/** Two-tick flush so the async windows.create().then() handler runs. */
+/** Macrotask flush: drains the getLastFocused → create → continuation chain. */
 async function flushCreate(): Promise<void> {
-	await Promise.resolve()
-	await Promise.resolve()
+	await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 describe("WindowManager", () => {
@@ -198,8 +197,9 @@ describe("WindowManager", () => {
 			timeoutMs: TIMEOUT_MS,
 			kind: "test",
 		})
-		await flushCreate()
 
+		// No flush first: a macrotask boundary before the handler attaches would
+		// surface the rejection as unhandled.
 		await expect(promise).rejects.toMatch(/failed to open window/i)
 	})
 
@@ -308,6 +308,8 @@ describe("WindowManager", () => {
 			timeoutMs: TIMEOUT_MS,
 			kind: "test",
 		})
+		// Park AFTER creation starts: the timeout must land while create is in flight.
+		await flushCreate()
 		clock.advance(TIMEOUT_MS)
 		await expect(promise).rejects.toMatch(/timed out/i)
 		expect(removeSpy).not.toHaveBeenCalled()
@@ -340,6 +342,7 @@ describe("WindowManager", () => {
 			timeoutMs: TIMEOUT_MS,
 			kind: "test",
 		})
+		await flushCreate()
 		clock.advance(TIMEOUT_MS)
 		await expect(promise).rejects.toMatch(/timed out/i)
 
@@ -353,5 +356,86 @@ describe("WindowManager", () => {
 		expect(removeSpy).toHaveBeenCalledWith(FIRST_WINDOW_ID)
 		expect((impostor as { windowId?: number }).windowId).toBeUndefined()
 		handles.delete(handleId)
+	})
+
+	describe("positioning on the last-focused window", () => {
+		const OPTS = { url: "popup.html", width: 400, height: 800, timeoutMs: TIMEOUT_MS, kind: "test" }
+		/** Test-only surface of FakeWindowsAdapter. */
+		const fake = () => browser.windows as unknown as { lastFocused?: unknown; creates: Array<Record<string, unknown>> }
+
+		it("centers on the anchor, signed — a display left of the primary keeps its negative left", async () => {
+			fake().lastFocused = { left: -1920, top: 0, width: 1920, height: 1080 }
+
+			manager.openAndAwait<string>(OPTS)
+			await flushCreate()
+
+			expect(fake().creates[0]).toMatchObject({ type: "popup", width: 400, height: 800, left: -1160, top: 140 })
+		})
+
+		it("no last-focused window → create carries no left/top (Chrome picks)", async () => {
+			manager.openAndAwait<string>(OPTS)
+			await flushCreate()
+
+			expect(fake().creates[0]).not.toHaveProperty("left")
+			expect(fake().creates[0]).not.toHaveProperty("top")
+		})
+
+		it("a timeout during the bounds lookup skips create entirely", async () => {
+			const createSpy = vi.spyOn(browser.windows, "create")
+			let release!: () => void
+			browser.windows.getLastFocused = () =>
+				new Promise((resolve) => {
+					release = () => resolve(undefined)
+				})
+
+			const { promise } = manager.openAndAwait<string>(OPTS)
+			clock.advance(TIMEOUT_MS)
+			await expect(promise).rejects.toMatch(/timed out/i)
+
+			release()
+			await flushCreate()
+			expect(createSpy).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("focus", () => {
+		const OPTS = { url: "popup.html", width: 400, height: 800, timeoutMs: TIMEOUT_MS, kind: "test" }
+		const updates = () => (browser.windows as unknown as { updates: unknown[] }).updates
+
+		it("a live handle → update(focused + drawAttention + state normal) and true", async () => {
+			const { handleId } = manager.openAndAwait<string>(OPTS)
+			await flushCreate()
+
+			await expect(manager.focus(handleId)).resolves.toBe(true)
+			expect(updates()).toEqual([{ windowId: FIRST_WINDOW_ID, options: { focused: true, drawAttention: true, state: "normal" } }])
+		})
+
+		it("an unknown handle → false, no update", async () => {
+			await expect(manager.focus("nope")).resolves.toBe(false)
+			expect(updates()).toEqual([])
+		})
+
+		it("a rejecting update (window closed underneath) → false", async () => {
+			const { handleId } = manager.openAndAwait<string>(OPTS)
+			await flushCreate()
+			vi.spyOn(browser.windows, "update").mockRejectedValueOnce(new Error("No window with id"))
+
+			await expect(manager.focus(handleId)).resolves.toBe(false)
+		})
+	})
+})
+
+describe("centerOn", () => {
+	it("centers on a positive anchor", () => {
+		expect(centerOn({ left: 100, top: 50, width: 1000, height: 600 }, 400, 800)).toEqual({ left: 400, top: -50 })
+	})
+
+	it("keeps signed coordinates on an anchor left of / above the primary display", () => {
+		expect(centerOn({ left: -1920, top: -1080, width: 1920, height: 1080 }, 400, 800)).toEqual({ left: -1160, top: -940 })
+	})
+
+	it("missing anchor or any missing bound → {} so Chrome picks", () => {
+		expect(centerOn(undefined, 400, 800)).toEqual({})
+		expect(centerOn({ left: 0, top: 0, width: 1920 }, 400, 800)).toEqual({})
 	})
 })

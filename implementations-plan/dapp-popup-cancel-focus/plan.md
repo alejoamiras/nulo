@@ -360,7 +360,8 @@ _(green 2026-09-05; `lessons/phase-3.md`)_
   → exit 0 (codex r3 condition: the adapter tests run in THIS gate, not only at the arc gate). Layers:
   typecheck/lint · unit.
 
-#### Phase 4 — `WindowManager` centers on open and can focus a handle
+#### Phase 4 — `WindowManager` centers on open and can focus a handle ✓
+_(green 2026-09-05; `lessons/phase-4.md`; owner Space-switch check pending, recorded there)_
 - `centerOn(anchor, width, height)` exported pure helper: `left = round(anchor.left + (anchor.width - width) / 2)`,
   same for `top`; SIGNED, no clamping; `{}` when the anchor or any of its four bounds is missing.
 - `openAndAwait` per the arc-2 flow (a): synchronous return preserved; `getLastFocused()` first; identity
