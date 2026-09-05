@@ -37,7 +37,7 @@ Trace of attempt 2: `SimulatedSchnorrAccount:entrypoint → TokenBridgeHub:claim
 | H1 | The dApp `simulateTx` path (stubbed account) does not end setup for a self-pay payload — the 5.2.0 `SimulatedSchnorrAccount` stub, or the init-wrapped simulate, diverges from the real entrypoint | attempt 2's exact error in `simulateTx`, while `sendTx` (real account) passes — matching the green e2e | both failures are in `simulateTx`; the trace names the stub | the 5.1 stub source delegates to `AccountActions::entrypoint` (same branches) |
 | H2 | Route ↔ strategy mismatch: the build runs with `EXTERNAL` (an `fpc`/embedded kind) for a self-pay payload, so nobody ends setup | the same error on send and simulate | `service.ts:965` dispatches on `kind` alone; no core invariant | the popup locks `kind` to fj for self-pay and #544's e2e passes |
 | H3 | The never-sent (init-wrapped) shape × self-pay × a nested public enqueue is itself invalid on 5.2.0 | fails only on a never-sent account | attempt 1's "unknown nullifier at index 0" is the documented uninitialized-account symptom; owner unsure of the account's state | the mapper's ordering argument: `end_setup` fires inside the nested entrypoint before the app calls |
-| H4 | The bridge's `simulate(claim)` sends a payload shape that classifies differently from its `send` (e.g. no `feePayer` on simulate, or `from` mismatch) | fails on simulate only, for reasons visible in the wire payload | the wallet-sdk builds simulate and send payloads on different code paths | untested |
+| H4 | The bridge's `simulate(claim)` sends a payload shape that classifies differently from its `send` (e.g. no `feePayer` on simulate, or `from` mismatch) | fails on simulate only, for reasons visible in the wire payload | — | **largely refuted at the SDK layer:** aztec.js 5.2.0 `ContractFunctionInteraction.simulate()` and `BaseContractInteraction.send()` both call `this.request(options)`, which merges the fee payment method's payload (`feePayer`) identically (`contract_function_interaction.js:55-65,113-114`); only the wallet-side handling of `aztec_simulateTx` vs `aztec_sendTx` differs (H1) |
 
 ## Search trails for the absences
 
@@ -47,3 +47,14 @@ Trace of attempt 2: `SimulatedSchnorrAccount:entrypoint → TokenBridgeHub:claim
 - No allow-list override anywhere: `txPublicSetupAllowListExtend|Setup function not on allow list` → only historical prose in `fuel-direct-bridge/`.
 - No never-sent fixture as a primitive: `neverSent|never-sent|undeployed` under `tests/e2e/fixtures` → none (it is the ambient default).
 - No `ContractInstanceRegistry` concept in the repo.
+
+## After the dual audit (rev 2)
+
+- **H5 (added, code-verified):** `packages/wallet-bridge/src/dispatcher.ts:1299-1301` resolves every ACCOUNT_KIND (`aztec_simulateTx`, `aztec_profileTx`, `aztec_executeUtility`, `aztec_createAuthWit`) without the requested `from`, and `:1368-1376` overwrites `opts.from` with the session's first wallet-ordered account; only `handleSendTx` (`:834-838`) honours it (PR #110; `implementations-plan/network-e2e-required/FOLLOWUP-opts-from-clobber.md` names the remaining methods). A self-pay payload from account B simulated as A → `classifyFeePayer(B, A)` = `fpc` → `EXTERNAL` → no `end_setup` → the PXE's kernelless split (`contract_function_simulator.js:441-455`) files every public call as setup → the production error, on simulate only. Prime suspect.
+- **H1 demoted:** the installed 5.2.0 stub's embedded source delegates to `AccountActions::entrypoint` (same fee branches); the kernelless split honours a nested `end_setup`.
+- **H2 cannot explain a simulate failure:** `executeAztecSimulateTxStandard` never enters `buildAndEstimateTxRequest`.
+- **H3 weakened:** the green `tx-sendTx-selfPay` is never-sent + `PREEXISTING` + a public enqueue after `end_setup`; the trace's root frame (account entrypoint, no multicall) suggests attempt 2's account was deployed.
+- **H4 refuted** at the SDK (above).
+- Prior-art row addendum: `implementations-plan/network-e2e-required/FOLLOWUP-opts-from-clobber.md`.
+- Harness facts corrected: the tools server is opt-in (`TOOLS_DEV_PORT`); `deploy-sandbox.ts` attaches to an existing network via `SANDBOX_L1_RPC`/`SANDBOX_NODE_URL` (`scripts/sandbox/local-network.ts:373-383`) and writes `sandbox-deploy/sandbox.json`; `claimCall` is module-private; the `transaction` capability bundle lacks `contracts.canRegister` (`apps/playground/src/lib/bundles.ts:75-89`); the playground's simulate button sets `skipTxValidation: true` (`sections/simulation.ts:76`); EVM artifacts are untracked and forge-built only in `_bridge-contracts.yml`.
+
