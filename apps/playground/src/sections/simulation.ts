@@ -17,6 +17,7 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { getWallet } from "../lib/wallet"
 import { logCall } from "../lib/log"
+import { summarizeSimulation } from "../lib/simulation-summary"
 import { getInput, getState, setState } from "../state"
 
 export function renderSimulation(): string {
@@ -25,6 +26,15 @@ export function renderSimulation(): string {
 	return `
 		<fieldset class="pg-section">
 			<legend>Simulation</legend>
+			<div class="pg-row">
+				<label>From (override): <input data-testid="pg-input-from" name="simFrom" type="text" placeholder="0x... (defaults to selected account)" /></label>
+				<label>Tx validation:
+					<select data-testid="pg-toggle-skipValidation" name="skipValidation">
+						<option value="skip">skipped</option>
+						<option value="on">on</option>
+					</select>
+				</label>
+			</div>
 			<div class="pg-row">
 				<button data-testid="pg-btn-simulateTx-transfer" type="button" ${dis}>simulateTx (transfer)</button>
 				<button data-testid="pg-btn-profileTx" type="button" ${dis}>profileTx</button>
@@ -45,11 +55,23 @@ async function buildTransferPayload() {
 	// biome-ignore lint/suspicious/noExplicitAny: structural typing across SDK boundary
 	const token: any = await TokenContract.at(AztecAddress.fromStringUnsafe(tokenAddress), wallet as any)
 
+	// The override names BOTH the transfer's owner and `opts.from`, so the payload is
+	// exactly what a dApp acting as that account would build. `feePayer` (shared with the
+	// sendTx section) names the account itself for a self-paid simulation.
 	const s = getState()
-	const fromAddr = s.selectedAccount ? AztecAddress.fromStringUnsafe(s.selectedAccount) : AztecAddress.fromStringUnsafe(recipient)
+	const from = getInput("simFrom") || s.selectedAccount || recipient
+	const fromAddr = AztecAddress.fromStringUnsafe(from)
 	const interaction = token.methods.transfer_public_to_public(fromAddr, AztecAddress.fromStringUnsafe(recipient), BigInt(amount), 0n)
 	const exec = await interaction.request()
-	return { exec, fromAddr }
+	const feePayer = getInput("feePayer")
+	// biome-ignore lint/suspicious/noExplicitAny: ExecutionPayload doesn't include feePayer in this version's types
+	const payload: any = feePayer ? { ...exec, feePayer: AztecAddress.fromStringUnsafe(feePayer) } : exec
+	return { exec: payload, fromAddr }
+}
+
+/** The node's tx validators (setup allow-list, fee, phases) run only when validation is on. */
+function skipTxValidation(): boolean {
+	return getInput("skipValidation") !== "on"
 }
 
 function safe<T>(method: string, fn: () => Promise<T>): () => Promise<void> {
@@ -73,7 +95,8 @@ export function bindSimulation(root: HTMLElement): void {
 		safe("simulateTx", async () => {
 			const wallet = getWallet()!
 			const { exec, fromAddr } = await buildTransferPayload()
-			return wallet.simulateTx(exec, { from: fromAddr, skipFeeEnforcement: true, skipTxValidation: true })
+			const result = await wallet.simulateTx(exec, { from: fromAddr, skipFeeEnforcement: true, skipTxValidation: skipTxValidation() })
+			return summarizeSimulation(result)
 		}),
 	)
 
