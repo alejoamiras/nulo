@@ -45,3 +45,14 @@ Shard 4's red is the locked-session flake dev root-caused in #548 (`122149ad`), 
 this branch's base `898a3b99`; the file is untouched by this branch. The branch is now rebased
 onto that commit; the PR's own `network-e2e-status` is the clean proof. The gate itself —
 `selfpay-phase` on the heavy runner at retry 0 — passed first time on a GitHub runner.
+
+### PR #549 (`pull_request`, rebased HEAD `de8e48fc`) — all required gates green
+
+| check | result |
+|---|---|
+| `quality-status` | pass |
+| `smoke-e2e-status` | pass |
+| `network-e2e-status` | **pass** — all five shards (shard 4 included, on the #548 fix), both heavy jobs, the canary |
+| `Run / heavy / fee-methods + selfpay-phase` | pass, retry 0 — the second green on a GitHub runner |
+
+`LESSONS_FILE=implementations-plan/self-pay-setup-fix/lessons/phase-4.md`
