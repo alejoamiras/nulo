@@ -14,7 +14,9 @@ import AccountSelectRow from "./AccountSelectRow.vue"
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { JobCancelledError } from "@nulo/extension-messaging/errors"
 import { formatCaipAccount } from "@/wallet/utils/caip"
+import { requireNetwork } from "@/utils/core"
 import { buildCapabilityItems, buildGrantedAccountsCap, type UICapabilityItem } from "./build-items"
+import { resolveDappChain } from "./chain-mismatch"
 
 /** Services */
 import { type ProfileInfo, ProfileServiceClient } from "@/wallet/services/profile/client"
@@ -26,6 +28,7 @@ import type { Capability } from "@nulo/wallet-bridge"
 import { useDappInteractionPayload } from "@/composables/useDappInteractionPayload"
 import { useDappHostname } from "@/composables/useDappHostname"
 import { useDappApprovalWindow } from "@/composables/useDappApprovalWindow"
+import { useNetworkActivation } from "@/composables/useNetworkActivation"
 
 type UIDappMetadata = DappMetadata & { loadingLogo?: boolean; logoBlobUrl?: string }
 type UIAccount = { address: string; name: string; chainId: number }
@@ -54,6 +57,20 @@ const accountAliases = ref<Record<string, string>>({})
 // authorized." Block the approve gate explicitly so the user gets a clear
 // error instead of a confusing downstream failure.
 const noAccountsAvailable = ref(false)
+
+// The dApp's chain, as the wallet sees it. A dApp connects on ONE chain and everything it does
+// later happens there, whatever the wallet's home screen shows — so a mismatch with the active
+// network is information, never a reason to block.
+const dappChain = computed(() => resolveDappChain(payload.value?.session.chainId ?? "", appStore.networks, appStore.network?.chainId))
+const isSwitching = ref(false)
+// The chain the user switched to from THIS window. The done banner shows only while it is still
+// the active one; a later switch elsewhere brings the invitation back.
+const switchedTo = ref<number>()
+const chainBannerState = computed(() => {
+	if (noAccountsAvailable.value) return undefined
+	if (switchedTo.value !== undefined && switchedTo.value === appStore.network?.chainId) return "switched"
+	return dappChain.value.mismatch ? "mismatch" : undefined
+})
 
 const isLoading = ref(false)
 const expandedCards = ref(new Set<number>())
@@ -136,18 +153,15 @@ const init = async () => {
 					selectedAccounts.value = [...availableAccounts.value]
 				}
 			} else {
-				// Accounts requested but none exist on this chain. Mark the
-				// popup as blocked — approving here would silently grant the
-				// dApp a session with no accounts and every later op would
-				// fail with a confusing "No accounts authorized" error. The
-				// surface-level cause is usually a chain-info mismatch
-				// (dApp sending Fr.ZERO that resolves to the wallet's Local
-				// Network seed). Surface an actionable error directly.
+				// The wallet already tried to provision this chain's default account and declined
+				// (a user-added network, or a chain whose only accounts are hidden or imported).
+				// Approving would grant a session with no accounts, and every later op would fail
+				// with a confusing "No accounts authorized" — block here with the remedy instead.
 				noAccountsAvailable.value = true
 				setError(
 					"No accounts on this chain",
-					"This dApp is asking for accounts on a chain where you have none. " +
-						"Either switch the wallet's active network or ask the dApp to pin the right chain.",
+					`This app asked for accounts on ${dappChain.value.name}. Switch the wallet to ${dappChain.value.name} ` +
+						"in Settings to set one up, or unhide one of its accounts, then try again from the app.",
 					"error",
 				)
 			}
@@ -212,7 +226,7 @@ const approve = async () => {
 	// Full-lifetime submit latch: `loading` alone only sets pointer-events CSS,
 	// so a keyboard-focused Approve can still emit a click mid-grant — the
 	// handler must self-guard like execute/discover already do.
-	if (isLoading.value) return
+	if (isLoading.value || isSwitching.value) return
 	// Defense in depth: template's `:disabled="!initComplete"` should already
 	// block this, but if Enter / programmatic click slips through during init,
 	// throw loudly instead of silently no-opping (which was the 19-iteration
@@ -254,10 +268,29 @@ const approve = async () => {
 	}
 }
 
+// `reject` stays unconditional: the approval-window shell also fires it on `beforeunload` and on a
+// lock or profile change, and a lock landing mid-switch must still reject the pending request.
+// Only the footer's buttons are held while a switch runs.
 const reject = async () => {
 	if (isInteractionCancelled.value) return
 	rejectViaInteractionService("User rejected")
 	closeWindow(true)
+}
+
+const { activate: activateNetwork } = useNetworkActivation({
+	persist: (id) => requireNetwork().setActiveNetwork(id),
+	read: () => requireNetwork().getActiveNetwork(),
+})
+
+const switchToDappNetwork = async () => {
+	const target = dappChain.value.network
+	if (!target || isSwitching.value || isLoading.value) return
+	isSwitching.value = true
+	try {
+		if ((await activateNetwork(target)) === "activated") switchedTo.value = target.chainId
+	} finally {
+		isSwitching.value = false
+	}
 }
 
 const profileService = new ProfileServiceClient()
@@ -281,10 +314,31 @@ onUnmounted(disposeWindow)
 				:dapp="dapp"
 				:hostname="dappHostname"
 				:hostnameSuspicious="hostnameHasNonAscii"
-				actionLabel="is requesting permissions"
+				:actionLabel="`is requesting permissions on ${dappChain.name}`"
 			/>
 
 			<Flex direction="column" gap="20" :class="$style.sections">
+				<Banner
+					v-if="chainBannerState"
+					data-testid="cap-chain-banner"
+					:data-state="chainBannerState"
+					:variant="chainBannerState === 'switched' ? 'done' : 'info'"
+					direction="vertical"
+					wide
+					:action="
+						chainBannerState === 'mismatch' && dappChain.network
+							? { name: `Switch wallet to ${dappChain.name}`, callback: switchToDappNetwork, testId: 'cap-switch-network-btn' }
+							: undefined
+					"
+				>
+					<template v-if="chainBannerState === 'switched'" #title>Wallet switched to {{ dappChain.name }}</template>
+					<template v-else #title>Connecting on {{ dappChain.name }}</template>
+					<template v-if="chainBannerState === 'switched'" #description>Balances and activity now follow {{ dappChain.name }}.</template>
+					<template v-else #description>
+						Your wallet is on {{ appStore.network?.name }}. Approve as is, or switch to see {{ dappChain.name }} balances.
+					</template>
+				</Banner>
+
 				<Flex v-if="needsAccountSelection" direction="column" gap="10" wide>
 					<SectionLabel label="Select accounts to share" :count="availableAccounts.length" />
 
@@ -354,11 +408,11 @@ onUnmounted(disposeWindow)
 			wide-tooltip
 			reject-testid="cap-reject-btn"
 			reject-label="Reject"
-			:reject-disabled="isLoading || !requestId"
+			:reject-disabled="isLoading || isSwitching || !requestId"
 			confirm-testid="cap-approve-btn"
 			confirm-label="Approve"
 			:confirm-loading="isLoading"
-			:confirm-disabled="isLoading || processingError?.type === 'error' || !initComplete"
+			:confirm-disabled="isLoading || isSwitching || processingError?.type === 'error' || !initComplete"
 			@reject="reject"
 			@approve="approve"
 		/>

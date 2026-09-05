@@ -239,7 +239,7 @@ moves, the shell reloads accounts, the banner settles to "switched" → Approve 
 - **Validation gate**: `cd apps/extension && bun run test src/composables/useNetworkActivation.test.ts`
   · `bun run lint` · `bun run typecheck` (exit 0). Layers: lint/typecheck · unit.
 
-### Phase 3 — the popup: banner, switch action, identity line
+### Phase 3 — the popup: banner, switch action, identity line ✓
 - `Banner.vue` `action.testId`; `Banner.test.ts` +1 case.
 - `chain-mismatch.ts` + `chain-mismatch.test.ts` (known row, renamed row, unknown id fallback, no active
   network, same chain).

@@ -82,6 +82,7 @@ const appStoreDefaults = () =>
 		isLogined: true,
 		account: { name: "TestAccount" },
 		network: { name: "TestNet" },
+		networks: [],
 		pageAwaitingAuth: "",
 	})
 let appStoreMock = appStoreDefaults()
@@ -390,7 +391,7 @@ describe("capabilities window — shell lifecycle frozen oracle", () => {
 	test("a raced approve refused with JobCancelledError classifies as CANCELLED, not an error", async () => {
 		resolveInteractionMock.mockRejectedValueOnce(new JobCancelledError())
 		// Minimal payload so init() reaches initComplete (empty delta = no account gating).
-		payloadToLoad = { params: { delta: [], existingGrants: [] } }
+		payloadToLoad = { params: { delta: [], existingGrants: [] }, session: { chainId: "1" } }
 		w = factory()
 		await completeInit()
 		const vm = w.vm as unknown as { approve: () => Promise<void> }
