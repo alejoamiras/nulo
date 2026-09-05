@@ -3,7 +3,7 @@ plan: tools-console
 tier: mid
 code_review: off
 eli5_mode: artifact
-status: audited (codex ×2 + fable, all conditional-approve; every condition folded in below) — awaiting owner approval
+status: audited (codex ×2 + fable, all conditional-approve; every condition folded in below); owner round 1 (2026-09-05) accepted (a)(c)(d)(e), asked for context on (b)(d)(f) and pulled the small follow-ups into scope — awaiting final approval
 base: 91074a74 (origin/dev at planning time; the frozen-step check diffs against this SHA)
 created: 2026-09-05
 ---
@@ -16,9 +16,9 @@ Owner answers (Phase 0, 2026-09-05): done = round-3 mock, pixel-faithful, both t
 
 ## Scope
 
-**In.** `AppShell` rail + header + dock layout; three sections (Send, Faucet, Activity); flat wallet chips; `WizardShell` card with a vertical `StepStrip`; a two-line `ActivityRow`; a pure record policy shared by the page card and the dock row; record grouping + needs-you count; dock open/hidden preference with the once-per-record auto-open; the completion toast moved to a shell-level owner; the quieted in-flight stepper (timeline, 2.4s pulse, secondary elapsed); the glow budget applied to shell components; Activity page with the first-visit state; responsive fallbacks; tests inline; a shell-level smoke; README file map.
+**In.** `AppShell` rail + header + dock layout; three sections (Send, Faucet, Activity); flat wallet chips; one Aztec wallet panel (the near-duplicate `WalletPanel`/`BridgeWalletPanel` merged, since the header relocates both anyway); `WizardShell` card with a vertical `StepStrip`; a two-line `ActivityRow`; a pure record policy shared by the page card and the dock row; record grouping + needs-you count; dock open/hidden preference with the once-per-record auto-open; the completion toast moved to a shell-level owner; the quieted in-flight stepper (timeline, 2.4s pulse, secondary elapsed); the glow budget applied to shell components; Activity page with the first-visit state; responsive fallbacks; tests inline; a shell-level smoke; README file map. **Small fixes pulled in at the owner's request:** the raw viem error string when a token is picked with no Ethereum wallet (`useTokenSelection.select` surfaces `e.message`, which for a viem `BaseError` is `An unknown RPC error occurred. Details: … Version: viem@…`; the throw is the custom transport in `useL1Wallet.ts:34`); the page card rendering persisted `blocked` text and `displaySymbol` raw; the stale plan-referencing comment at `useBridgeJournal.ts:1460`; the README's `FaucetView` name.
 
-**Out.** The frozen steps (`TokenStep`, `TokenList`, `TokenTile`, `MintStrip`, `AmountStep`, `ChoiceCards`, `GasBreakdown`, `ReviewStep`, `ReviewDetails`); the wallet extension; the journal engine's behaviour; unifying `WalletPanel`/`BridgeWalletPanel` (pre-existing duplication, follow-up); the mainnet placeholder; the receipt; the raw viem error string on token selection (separate one-line fix). Sanitising `blocked`/`displaySymbol` on the **page card** is pre-existing and is a follow-up; the **dock** never renders either string raw (see Security).
+**Out.** The frozen steps (`TokenStep`, `TokenList`, `TokenTile`, `MintStrip`, `AmountStep`, `ChoiceCards`, `GasBreakdown`, `ReviewStep`, `ReviewDetails`); the wallet extension; the journal engine's behaviour; the mainnet placeholder; the receipt.
 
 ## Acceptance criteria (the round-3 rules)
 
@@ -42,7 +42,7 @@ AppShell.vue  (grid: rail 200 | main 1fr | dock 300 | strip 44)
 ├── useCompletionToasts()      called ONCE here — the completion-toast watcher, moved out of BridgeJournal
 ├── RailNav.vue                roving tablist: Send · Faucet · Activity (plain count)
 ├── SectionHeader.vue          title + subline + <slot name="wallets">
-│     Send/Activity: L1WalletPanel + BridgeWalletPanel   Faucet: WalletPanel
+│     Send/Activity: L1WalletPanel + AztecWalletPanel   Faucet: AztecWalletPanel installCta
 ├── ConnectionErrorStrip       one instance, exclude per section (unchanged)
 ├── main
 │   ├── SendView.vue           wizard only (wallets + journal moved out); IS_PLACEHOLDER gate kept
@@ -117,10 +117,12 @@ export function useShell(): { section: Ref<Section>; goTo(s: Section): void; ope
 | `apps/tools/src/views/ActivityView.vue` (new) | hosts the page-list `BridgeJournal`; passes a `firstVisit` slot that replaces the dashed empty block with the two tiles — the restore control, its 1 MB pre-read cap, input reset and `restoring` guard stay in `BridgeJournal` |
 | `apps/tools/src/lib/record-policy.ts`, `lib/activity.ts`, `composables/useActivityFeed.ts`, `useShell.ts`, `useDockState.ts`, `useCompletionToasts.ts` (new) | above, each with a colocated test |
 | `apps/tools/src/components/BridgeJournal.vue` | page list only: `toasts` prop and watcher removed; reads `records` |
-| `apps/tools/src/components/BridgeJournalCard.vue` | one `computed(recordState)` replaces the inline gates; UI state and watchers stay; private tag restyle; no behaviour change (42 tests pin it) |
+| `apps/tools/src/components/BridgeJournalCard.vue` | one `computed(recordState)` replaces the inline gates; UI state and watchers stay; private tag restyle; `blocked` and `displaySymbol` render through `safeDisplay` with a length cap; otherwise no behaviour change (42 tests pin it) |
 | `apps/tools/src/components/BridgePhaseRail.vue`, `BridgeStepper.vue` | timeline spine, `.took` secondary, pulse 2.4s on the full rail only, active label ink |
 | `apps/tools/src/components/send/StepStrip.vue`, `WizardShell.vue` | `orientation`, hints, card head; slots/testids preserved |
 | `apps/tools/src/components/AccountSwitcher.vue`, `L1WalletPanel.vue` | flat chip; testids preserved |
+| `apps/tools/src/components/AztecWalletPanel.vue` (new; replaces `WalletPanel.vue` + `BridgeWalletPanel.vue`) | one component over the one session singleton; props: the testid pair (`status`/`account`/`btnConnect`… vs `bridgeL2Status`/`bridgeL2Account`/`bridgeL2Connect`…) and `installCta` (the Install-Nulo block, Faucet only); the two test files merge into one |
+| `apps/tools/src/composables/useTokenSelection.ts`, `lib/errors.ts` | `select` reports `userMessage(e)` (viem `BaseError` → its `details`, else `shortMessage`, else `message`); with no Ethereum wallet connected the balance read is skipped (balances simply absent) and a pasted address reports "Connect your Ethereum wallet first." |
 | `apps/tools/src/views/SendView.vue`, `DripView.vue`, `SendView.test.ts` | drop hero + wallets row; the tests that pin the heading, wallets and journal move to the shell tests |
 | `apps/tools/src/components/send/SendWizard.vue` | `showActivity` → `useShell().openActivity` |
 | `apps/tools/src/lib/testids.ts` | new ids above |
@@ -146,7 +148,7 @@ export function useShell(): { section: Ref<Section>; goTo(s: Section): void; ope
 ## Security & Adversarial Considerations
 
 - **Threat model.** A static dApp; the shell holds no keys. Attack surface is the journal (local, attacker-controllable via restore files) and the token list (validated upstream). No `v-html`; all record strings render as text nodes.
-- **Persisted attacker text.** `blocked` (`journal.ts:65`) and `displaySymbol` (`asset-label.ts:24`) are persisted record fields a restore file can carry. The dock never renders `blocked` (the word *Blocked* instead) and passes amount/symbol through `safeDisplay` with a length cap, so a look-alike or bidi string cannot spoof a row. The page card's existing raw render is pre-existing and listed as a follow-up.
+- **Persisted attacker text.** `blocked` (`journal.ts:65`) and `displaySymbol` (`asset-label.ts:24`) are persisted record fields a restore file can carry. The dock never renders `blocked` (the word *Blocked* instead) and passes amount/symbol through `safeDisplay` with a length cap, so a look-alike or bidi string cannot spoof a row. The page card gets the same `safeDisplay` + cap in Phase 1 (pulled in at the owner's request).
 - **Destructive actions.** DISCARD is never reachable from the dock; it stays behind the card's two-step arm.
 - **Restore path.** The Activity first-visit state reuses `BridgeJournal`'s restore control unchanged (1 MB pre-read cap, input reset, `restoring` guard, validation, error toast); no second restore path exists.
 - **Busy gating.** Row actions honour `opsBusy` the way the card does; classification is display-only, the engine re-validates every run.
@@ -177,7 +179,7 @@ export function useShell(): { section: Ref<Section>; goTo(s: Section): void; ope
 
 **Asks**
 - Resolved at Phase 0: done = pixel-faithful round-3 ✔ · gates ✔ · `/code-review` off ✔ · dock hidden by default ✔ · mint strip stays ✔ · Activity uses the first-visit state ✔.
-- **Need an explicit yes/no at the gate** (codex final: product choices, not defaults): (a) the dock offers CLAIM / FINISH / RETRY / SWITCH / CLAIM GAS, never DISCARD; (b) blocked records count in the badge but never auto-open; (c) auto-open is session-only and once per record across reloads and tabs; (d) on placeholder networks the dock and Activity list do not instantiate; (e) breakpoints 1100 / 760; (f) the foreground record is hidden from the Send dock (deviation from the mock).
+- **Need an explicit yes/no at the gate** (codex final: product choices, not defaults): (a) the dock offers CLAIM / FINISH / RETRY / SWITCH / CLAIM GAS, never DISCARD — **owner: ok**; (b) blocked records count in the badge but never auto-open — owner asked for context, explained in the ELI5 with a figure; (c) auto-open is session-only and once per record across reloads and tabs — **owner: ok**; (d) on placeholder networks the dock and Activity list do not instantiate — **owner: ok** (context added to the ELI5); (e) breakpoints 1100 / 760 — **owner: ok**; (f) the foreground record is hidden from the Send dock — owner asked what it means, explained in the ELI5 with a before/after figure.
 
 ## Phases
 
@@ -190,10 +192,11 @@ export function useShell(): { section: Ref<Section>; goTo(s: Section): void; ope
 - Rewrite the comment at `useBridgeJournal.ts:1460-1461` to state the one-surface rule without plan references.
 - `useShell.ts` (+ test: default section by host; `openActivity` sets section + highlight; reset), `useDockState.ts` (+ test: default hidden; preference read/write and allowlist; seen-set persist, prune-to-live-ids and shape check; `autoOpenFor` opens once per id and re-reads storage (a synthetic cross-tab hide is honoured); `hide(ids)` marks them seen; auto-open leaves the preference alone).
 - `useCompletionToasts.ts` extracted verbatim; `BridgeJournal` loses `toasts`; `BridgeJournal.test.ts` toast cases move to `useCompletionToasts.test.ts`; `AppShell` calls it once.
+- Small fixes: `lib/errors.ts` `userMessage(err)` (+ test with a viem `BaseError` fixture); `useTokenSelection.select` uses it and skips the balance read when no Ethereum wallet is connected (+ tests: viem error → plain sentence; no wallet → no balance read, pasted address → the connect sentence); the card renders `blocked`/`displaySymbol` through `safeDisplay` + cap (+ two card tests: a bidi/look-alike symbol and a 400-char `blocked` string).
 - **Gate line:** the parity pin is green; `BridgeJournalCard.test.ts` is byte-identical to `origin/dev`.
 
 ### Phase 2 — Shell: rail, header, sections
-- `RailNav.vue`, `SectionHeader.vue`, `ActivityView.vue` (first-visit state + page list over `records`), `AppShell.vue` grid; `SendView`/`DripView` lose hero + wallets; strip exclude per section; footers swap; placeholder gating; `SendWizard.showActivity` → shell; flat chips in `AccountSwitcher`/`L1WalletPanel`.
+- `RailNav.vue`, `SectionHeader.vue`, `ActivityView.vue` (first-visit state + page list over `records`), `AppShell.vue` grid; `SendView`/`DripView` lose hero + wallets; strip exclude per section; footers swap; placeholder gating; `SendWizard.showActivity` → shell; flat chips in `AccountSwitcher`/`L1WalletPanel`; `AztecWalletPanel.vue` replaces the two Aztec panels (both testid sets kept via props; `WalletPanel.test.ts` + `BridgeWalletPanel.test.ts` merge into `AztecWalletPanel.test.ts` with every existing case).
 - Tests: `RailNav.test.ts` (roving tablist ↑/↓ and ←/→, count, testids), `AppShell.test.ts` (three sections, one strip, Activity `v-if`, footer swap, placeholder), `ActivityView.test.ts` (first-visit vs list, foreground record listed), `SendView.test.ts` re-homed, `tools-smoke.test.ts` pins updated, new `tests/e2e/shell-smoke.test.ts` mounting `App.vue`: rail switching, header wallets, dock hidden by default, a completion toast while on Faucet with the dock hidden, background handoff to Activity, every new testid present.
 - **Gate line:** `shell-smoke.test.ts` green.
 
@@ -266,6 +269,7 @@ Single arc, single PR: branch `worktree-tools-console` → `dev`, opened with `g
 | 25 | Final: `<frozen>` against a mutable `origin/dev` (LOW) | **Adopted.** Diffs against `91074a74`. |
 | 26 | Final: Fact 1 wording (MED) | **Corrected.** |
 | 27 | Final: product choices need explicit owner confirmation (MED) | **Adopted.** Listed as gate questions (a)–(f). |
+| 28 | Owner round 1: (a)(c)(d)(e) ok; (b)(f) need context; pull the small follow-ups in | **Adopted.** ELI5 gains illustrated explanations of (b), (d), (f); the viem message, the card sanitising and the Aztec-panel merge join Phases 1–2. |
 
 ## Seeds
 

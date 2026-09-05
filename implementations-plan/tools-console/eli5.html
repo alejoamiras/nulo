@@ -51,6 +51,43 @@ pre{margin:0;padding:16px 18px;background:var(--soft);border:1px solid var(--lin
 .warn{margin-top:14px;font:600 13px/1.5 var(--mono);color:var(--sand)}
 .muted{font-size:13px;color:var(--tert);margin-top:40px}
 code{font-family:var(--mono);font-size:.92em}
+
+/* figures for the explained choices */
+.fig{margin-top:14px;border:1px solid var(--line);background:var(--soft);padding:16px;display:grid;gap:14px}
+.fig.two{grid-template-columns:1fr 1fr}
+.fig .cap{grid-column:1/-1;font:500 12px/1.6 var(--mono);color:var(--tert)}
+.fig .cap b{color:var(--sec)}
+.mini{background:var(--card);border:1px solid var(--line);display:grid;grid-template-columns:minmax(0,1fr) 108px;min-height:150px;font-family:var(--mono);font-size:10.5px;line-height:1.35;overflow:hidden}
+.mini.nodock{grid-template-columns:minmax(0,1fr) 22px}
+.mini .main{padding:12px 14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.mini .t{font:700 12px/1 var(--head);color:var(--ink)}
+.mini .step{display:flex;gap:8px;align-items:baseline;color:var(--sec)}
+.mini .step i{font-style:normal;width:10px;color:var(--mint)}
+.mini .step i.on{color:var(--accent)}
+.mini .step i.off{color:var(--tert)}
+.mini .box{border:1px solid var(--line);padding:8px 10px;color:var(--sec)}
+.mini .dock{border-left:1px solid var(--line);padding:10px;display:flex;flex-direction:column;gap:8px}
+.mini .dock .h{font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--tert);display:flex;justify-content:space-between}
+.mini .row{display:grid;grid-template-columns:8px 1fr auto;column-gap:5px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
+.mini .row .d{width:5px;height:5px;background:var(--sec)}
+.mini .row .d.live{background:var(--ink)}
+.mini .row .d.needs{background:var(--accent)}
+.mini .row .a{color:var(--ink);font-weight:600;grid-column:2}
+.mini .row .m{grid-column:2/4;color:var(--tert);font-size:9.5px}
+.mini .row .side{grid-column:3;grid-row:1;color:var(--sec);font-size:9px;letter-spacing:.06em;text-transform:uppercase}
+.mini .row .side.btn{background:var(--accent);color:var(--card);padding:4px 7px;font-weight:700;grid-row:1/3;text-transform:none;letter-spacing:.04em}
+.mini .strip{border-left:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding-top:8px;gap:8px;position:relative}
+.mini .strip .badge{position:absolute;top:4px;right:2px;min-width:12px;height:12px;background:var(--accent);color:var(--card);font:700 8px/12px var(--mono);text-align:center;padding:0 3px}
+.mini .strip .lbl{writing-mode:vertical-rl;font:500 8px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--tert);margin-top:14px}
+.mini .ghost{border:1px dashed var(--line);padding:6px 8px;color:var(--tert);font-size:9.5px}
+.mini .rail{display:flex;gap:10px;font-size:10px;color:var(--sec);border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:2px}
+.mini .rail b{color:var(--ink);font-weight:600}
+.explain{margin-top:22px}
+.explain h3{font-size:17px}
+.explain p{font-size:14.5px;color:var(--sec);margin-top:6px}
+.explain p b{color:var(--ink)}
+@media (max-width:640px){.fig.two{grid-template-columns:1fr}}
+
 @media (max-width:640px){h1{font-size:34px}.facts,.rules,.verdicts{grid-template-columns:1fr}.facts div{border-right:0;border-bottom:1px solid var(--line)}}
 </style>
 <main>
@@ -96,15 +133,51 @@ code{font-family:var(--mono);font-size:.92em}
 <div class="verdicts" style="margin-top:12px"><div class="verdict"><b>Codex · final, fresh context</b>"Hide the foreground record from the Send dock, fix completion precedence and dock mounting, make seen-state retention explicit, guard Claim gas, use canonical handoff ids, preserve the restore-file safeguards, and get owner confirmation for the product choices." All folded in; the confirmation is the list below.<span class="tag">conditional approve</span></div><div class="verdict"><b>What that pass added</b>Done beats busy when both are true; the "seen" list is pruned to live bridges instead of capped; a second Claim gas click cannot start a second claim; the restore link on the first-visit page is the existing guarded one, not a copy.</div></div>
 
 <h2>Six choices that need your yes or no</h2>
-<p>These follow from your answers and the mock, but the reviewers were right that they are product calls, not defaults. Say "approve" to accept all six, or name the ones you want changed.</p>
+<p>You said ok to (a), (c), (d) and (e). Here are the three you asked about, with pictures. Say "approve" to accept all six, or name the ones you want changed.</p>
+
+<div class="explain"><h3>(b) A blocked bridge counts in the badge but never pops the dock open</h3>
+<p><b>What "blocked" means.</b> When the app starts, it re-checks every saved bridge against the chain. If the chain disagrees with what the bridge file says — the token's portal on Ethereum is not the one recorded, or the record came from a previous bridge generation — the app refuses to ever run that bridge again. That is a blocked bridge. The only thing you can do with it is discard it, from its full card on the Activity page.</p>
+<p><b>The choice.</b> It still needs a decision from you, so it counts in the badge on the strip. But there is nothing the dock can do with it, so the dock never opens itself for it — otherwise it would reopen on every reload until you discard it. In the dock it shows the word "Blocked" and no button; clicking the row takes you to its card.</p>
+<div class="fig two">
+  <div class="mini nodock"><div class="main"><div class="t">Send</div><div class="box">Token · what are you sending?</div><div class="box" style="min-height:52px">USDC · USDT · EURC …</div></div><div class="strip"><span style="color:var(--tert)">‹</span><span class="badge">1</span><span class="lbl">Activity</span></div></div>
+  <div class="mini"><div class="main"><div class="t">Send</div><div class="box">Token · what are you sending?</div><div class="box" style="min-height:52px">USDC · USDT · EURC …</div></div><div class="dock"><div class="h"><span>Needs you</span><span>1</span></div><div class="row"><span class="d needs"></span><span class="a">0.5 WETH</span><span class="side">Blocked</span><span class="m">ETH → Aztec · public</span></div><div class="h" style="margin-top:6px"><span>Running</span><span>0</span></div></div></div>
+  <div class="cap"><b>Left:</b> dock hidden — the badge says one bridge needs you. <b>Right:</b> dock open — the blocked bridge shows the word, no button. Neither state opened the dock by itself.</div>
+</div></div>
+
+<div class="explain"><h3>(d) Networks without a bridge get no dock and no Activity list</h3>
+<p><b>What a "network without a bridge" is.</b> The tools app is built per network from a manifest. Right after a testnet reset (before the bridge is redeployed), and on mainnet today, that manifest has no bridge in it. On those networks the Send page already shows "Bridging is being upgraded" and, on purpose, starts none of the bridge machinery underneath.</p>
+<p><b>The choice.</b> Keep that rule for the new parts: no dock, no strip, and the Activity page shows the same note. The faucet keeps working. Nothing bridge-related runs until a bridge exists.</p>
+<div class="fig two">
+  <div class="mini nodock" style="grid-template-columns:1fr"><div class="main"><div class="rail"><span>Send</span><span>Faucet</span><b>Activity</b></div><div class="t">Activity</div><div class="ghost">Bridging is being upgraded. Back with the next generation on this network. The faucet keeps working meanwhile.</div></div></div>
+  <div class="mini nodock" style="grid-template-columns:1fr"><div class="main"><div class="rail"><span>Send</span><b>Faucet</b><span>Activity</span></div><div class="t">Faucet</div><div class="box">NULO · fixed drip 1,000</div><div class="box">OLUN · fixed drip 1</div></div></div>
+  <div class="cap"><b>Left:</b> Activity on a network without a bridge — the note, no list, no strip. <b>Right:</b> the faucet is unaffected.</div>
+</div></div>
+
+<div class="explain"><h3>(f) The bridge on screen is not listed in the dock</h3>
+<p><b>The situation.</b> You press Sign &amp; send. The Send page turns into the progress view for that bridge (the phase list: Permission ✓, Seal ✓, Crossing …). The round-3 mock also showed that same bridge in the dock, as a row marked "on screen".</p>
+<p><b>The rule I was held to.</b> The journal engine has a written rule: while the progress view is showing a bridge, that bridge appears nowhere else — the receipt and progress view are its one surface. Both Codex passes ruled the plan must keep it. So the dock skips that one bridge while you are watching it. The moment you press <b>Run in background</b>, the progress view goes away and the bridge appears in the dock under Running. Every other bridge is in the dock the whole time.</p>
+<div class="fig two">
+  <div class="mini"><div class="main"><div class="t">Bridging · 250 USDC</div><div class="step"><i>✓</i>Permission</div><div class="step"><i>✓</i>Seal</div><div class="step"><i>✓</i>Deposit + fuel</div><div class="step"><i class="on">●</i>Crossing · 2m 14s</div><div class="step"><i class="off">○</i>Claim</div><div class="box" style="margin-top:4px;align-self:flex-start">Run in background</div></div><div class="dock"><div class="h"><span>Needs you</span><span>1</span></div><div class="row"><span class="d needs"></span><span class="a">0.5 WETH</span><span class="side btn">Claim</span><span class="m">ETH → Aztec · public</span></div><div class="h" style="margin-top:6px"><span>Running</span><span>1</span></div><div class="row"><span class="d live"></span><span class="a">100 UNI</span><span class="side">prove</span><span class="m">Aztec → ETH · 1h ago</span></div></div></div>
+  <div class="mini"><div class="main"><div class="t">Send</div><div class="ghost">● Bridging 250 USDC · crossing · <u>Activity</u></div><div class="box">Token · what are you sending?</div><div class="box" style="min-height:40px">USDC · USDT · EURC …</div></div><div class="dock"><div class="h"><span>Needs you</span><span>1</span></div><div class="row"><span class="d needs"></span><span class="a">0.5 WETH</span><span class="side btn">Claim</span><span class="m">ETH → Aztec · public</span></div><div class="h" style="margin-top:6px"><span>Running</span><span>2</span></div><div class="row"><span class="d live"></span><span class="a">250 USDC</span><span class="side">crossing</span><span class="m">ETH → Aztec · private + gas</span></div><div class="row"><span class="d live"></span><span class="a">100 UNI</span><span class="side">prove</span><span class="m">Aztec → ETH · 1h ago</span></div></div></div>
+  <div class="cap"><b>Left:</b> the 250 USDC bridge is on screen, so the dock lists the other two only. <b>Right:</b> after Run in background — the wizard resets, the status strip narrates, and 250 USDC now sits in the dock under Running.</div>
+</div></div>
+
+<ul style="margin-top:22px">
+  <li><b>(a) Dock buttons</b> — Claim, Finish, Retry, Switch account, Claim gas. Never Discard. <span style="color:var(--mint)">ok</span></li>
+  <li><b>(b) Blocked bridges</b> — count in the badge, never pop the dock open. <span style="color:var(--sand)">explained above</span></li>
+  <li><b>(c) Auto-open</b> — once per bridge, remembered across reloads and tabs; never overrides your explicit "hide". <span style="color:var(--mint)">ok</span></li>
+  <li><b>(d) Networks without a bridge</b> — no dock, no Activity list; the note instead. <span style="color:var(--mint)">ok</span>, explained above</li>
+  <li><b>(e) Breakpoints</b> — 1100px (dock becomes a panel) and 760px (rail becomes a top row). <span style="color:var(--mint)">ok</span></li>
+  <li><b>(f) The bridge on screen</b> — not in the dock until you background it. <span style="color:var(--sand)">explained above</span></li>
+</ul>
+
+<h2>Small fixes now inside this plan</h2>
+<p style="font-size:14.5px;color:var(--sec)">At your request these ride along instead of waiting for a follow-up PR.</p>
 <ul>
-  <li><b>(a) Dock buttons:</b> Claim, Finish, Retry, Switch account, Claim gas. Never Discard.</li>
-  <li><b>(b) Blocked bridges:</b> count in the badge, never pop the dock open.</li>
-  <li><b>(c) Auto-open:</b> once per bridge, remembered across reloads and tabs; it never overrides your explicit "hide".</li>
-  <li><b>(d) Networks without a bridge:</b> no dock, no Activity list; the Activity page shows the same "being upgraded" note as Send.</li>
-  <li><b>(e) Breakpoints:</b> 1100px (dock becomes a panel) and 760px (rail becomes a top row). The app had none before.</li>
-  <li><b>(f) The bridge on screen</b> is not listed in the dock while its progress view is open beside it.</li>
-  <li><b>Follow-ups, not in this PR:</b> the raw viem error when picking a token with no Ethereum wallet; sanitising stored text on the full card; merging the two near-identical wallet panels.</li>
+  <li><b>The raw viem error.</b> Pick a token with no Ethereum wallet connected and today you get "An unknown RPC error occurred. Details: Connect your Ethereum wallet first. Version: viem@2.55.17". The wallet check throws inside the Ethereum client, and viem wraps it. Fix: unwrap viem's error to its plain sentence, and do not try to read balances at all until an Ethereum wallet is connected. Phase 1.</li>
+  <li><b>Stored text on the full card.</b> A bridge file can carry a token symbol or a "blocked" reason written by whoever made the file. The card will pass both through the same look-alike and length guard the token list already uses. Phase 1.</li>
+  <li><b>Two near-identical Aztec wallet panels</b> (the Faucet one and the Send one) become one component, since the header takes both anyway. Phase 2.</li>
+  <li>A stale code comment that references an old plan, and the README naming a file that no longer exists. Phases 1 and 5.</li>
 </ul>
 
 <div class="approval">
@@ -112,7 +185,7 @@ code{font-family:var(--mono);font-size:.92em}
   <ul>
     <li>Confirm the scope: shell + dock + card chrome, frozen steps, single PR into dev.</li>
     <li>Confirm the tier (mid) and the gates: lint, typecheck, unit, tools smoke and the frozen check every phase; your walk last.</li>
-    <li>Answer the six choices above (a)–(f).</li>
+    <li>Confirm (b) and (f) now that they are explained, or say what you would change.</li>
     <li>No <code>/harden</code> pass is proposed: the change touches no trust boundary.</li>
     <li>Reply <b>approve</b>, <b>conditional approve</b> (with conditions), or <b>reject</b> (with what blocks).</li>
   </ul>
