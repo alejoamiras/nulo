@@ -24,3 +24,9 @@ surface.
 
 Re-validation after the fixes: `bun run --cwd apps/extension test src/wallet/services/dapp-interaction src/wallet/services/wallet-sdk/error-envelope.test.ts`
 → 4 files, 58 tests, exit 0; biome on the touched files clean.
+
+## Round 2 (resumed) — `clean`
+"All three previous findings are resolved in the committed diff; no remaining material findings."
+Codex re-confirmed the reconciliation placement, the interleavings, the `test.each` predicate pin, the
+revised comments, and that the arc adds no RPC/permission/dependency/crypto surface. Loop converged
+after two rounds; arc-1 branch is the stack's layer 1.
