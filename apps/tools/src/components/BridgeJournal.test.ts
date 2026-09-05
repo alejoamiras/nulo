@@ -55,7 +55,6 @@ const BRIDGE_TOKEN_SYMBOL = "TOKEN"
 const UNIT = 10n ** BigInt(BRIDGE_TOKEN_DECIMALS)
 
 const sel = (t: string) => `[data-testid="${t}"]`
-const GOOD_HASH = `0x${"ab".repeat(32)}`
 const recOf = (over: Partial<BridgeJournalRecord>): BridgeJournalRecord =>
 	({ id: "0x", direction: "deposit", isPrivate: false, amount: (1n * UNIT).toString(), createdAt: 1, ...over }) as BridgeJournalRecord
 
