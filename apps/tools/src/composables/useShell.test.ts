@@ -1,12 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest"
-import { __resetShellForTests, defaultSection, useShell } from "./useShell"
+import { __resetShellForTests, useShell } from "./useShell"
 
 describe("useShell", () => {
 	beforeEach(() => __resetShellForTests())
 
-	it("lands on the faucet unless the host is a bridge.* one", () => {
-		expect(defaultSection()).toBe("drip")
-		expect(useShell().section.value).toBe("drip")
+	it("lands on the bridge", () => {
+		expect(useShell().section.value).toBe("send")
 	})
 
 	it("goTo switches the section; openActivity switches and highlights a record", () => {

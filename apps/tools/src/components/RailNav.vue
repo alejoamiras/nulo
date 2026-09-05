@@ -20,7 +20,7 @@ const rail = useTemplateRef<HTMLElement>("rail")
 const topRow = useMediaQuery("(max-width: 760px)")
 
 const ENTRIES: ReadonlyArray<{ key: Section; label: string; testid: string }> = [
-	{ key: "send", label: "Send", testid: TESTIDS.tabSend },
+	{ key: "send", label: "Bridge", testid: TESTIDS.tabSend },
 	{ key: "drip", label: "Faucet", testid: TESTIDS.tabDrip },
 	{ key: "activity", label: "Activity", testid: TESTIDS.tabActivity },
 ]

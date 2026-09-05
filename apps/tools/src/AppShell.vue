@@ -41,7 +41,7 @@ const activityCount = computed(() => feed?.count.value ?? 0)
 const stripExclude = computed(() => (section.value === "drip" ? ["no-wallet", "capability-rejected"] : ["capability-rejected"]))
 
 const HEADERS = {
-	send: { title: "Send", subline: "Any ERC-20 · Ethereum ↔ Aztec · public or private · arrive with gas" },
+	send: { title: "Bridge", subline: "Any ERC-20 · Ethereum ↔ Aztec · public or private · arrive with gas" },
 	drip: { title: "Faucet", subline: "Alpha-testnet only · fixed amounts · permissionless dripper · no rate limit" },
 	activity: { title: "Activity", subline: "Every bridge this browser started or restored, with its next step" },
 } as const
@@ -84,8 +84,10 @@ const header = computed(() => HEADERS[section.value])
 				<ActivityView v-if="section === 'activity'" />
 			</div>
 
-			<Footer v-if="section === 'drip'" />
-			<BridgeFooter v-else />
+			<div class="foot">
+				<Footer v-if="section === 'drip'" />
+				<BridgeFooter v-else />
+			</div>
 		</div>
 
 		<!-- On Activity the page IS the dock, so it is unmounted there, not merely hidden. -->
@@ -170,6 +172,10 @@ const header = computed(() => HEADERS[section.value])
 	display: none;
 }
 
+.foot {
+	padding: 0 36px;
+}
+
 @media (max-width: 760px) {
 	.shell {
 		grid-template-columns: minmax(0, 1fr) auto;
@@ -197,6 +203,10 @@ const header = computed(() => HEADERS[section.value])
 
 	.body {
 		padding: 20px 16px 32px;
+	}
+
+	.foot {
+		padding: 0 16px;
 	}
 }
 </style>

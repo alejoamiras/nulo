@@ -552,7 +552,8 @@ function onDiscard() {
 .attention {
 	margin: 0;
 	padding: 8px 10px;
-	border: 1px dashed var(--yellow);
+	border-left: 2px solid var(--yellow);
+	background: color-mix(in srgb, var(--yellow) 8%, transparent);
 	color: var(--txt-secondary);
 	font: 500 12px/1.5 var(--font-mono);
 }

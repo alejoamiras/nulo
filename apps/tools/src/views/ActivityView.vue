@@ -35,7 +35,7 @@ const firstVisit = computed(() => (journal?.records.value.length ?? 0) === 0)
 					<p class="lede">Public or private. A send you background or lose track of lands on this page, with its next step.</p>
 					<div class="tiles">
 						<button type="button" class="tile primary" :data-testid="TESTIDS.activityTileSend" @click="shell.goTo('send')">
-							<b>Send tokens</b><span>Ethereum ↔ Aztec · any ERC-20 · public or private</span><i aria-hidden="true">→</i>
+							<b>Bridge tokens</b><span>Ethereum ↔ Aztec · any ERC-20 · public or private</span><i aria-hidden="true">→</i>
 						</button>
 						<button type="button" class="tile" :data-testid="TESTIDS.activityTileDrip" @click="shell.goTo('drip')">
 							<b>Get test tokens</b><span>NULO · OLUN · fixed drip · no rate limit</span><i aria-hidden="true">→</i>

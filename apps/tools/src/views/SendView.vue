@@ -30,7 +30,7 @@ import { TESTIDS } from "@/lib/testids"
 	flex-direction: column;
 	gap: 28px;
 	width: 100%;
-	max-width: 760px;
+	max-width: 900px;
 }
 
 .sub {

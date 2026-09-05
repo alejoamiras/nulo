@@ -3,7 +3,7 @@
 A standard Aztec dApp (it speaks `@aztec/wallet-sdk`; it touches no wallet code) with three
 sections on a left rail:
 
-- **Send** — move **any ERC-20** between Ethereum and Aztec through the generation the bundled
+- **Bridge** (the landing section) — move **any ERC-20** between Ethereum and Aztec through the generation the bundled
   manifest names (an L1 `PortalFactory` + `SwapBridgeRouter`, one L2 `TokenBridgeHub`), with an
   optional **gas leg**: a slice of the amount is swapped to Fee Juice on the way in so the arriving
   account can pay for its own claim. Exits burn on L2 first, then consume on L1.
@@ -23,7 +23,7 @@ block renders the Send placeholder (both networks until a generation is promoted
 target additionally ships the whole-app placeholder (target-keyed, no faucet).
 
 Plans + audits: [`implementations-plan/faucet/`](../../implementations-plan/faucet/) (the faucet),
-[`implementations-plan/any-erc20-bridge/`](../../implementations-plan/any-erc20-bridge/) (the Send
+[`implementations-plan/any-erc20-bridge/`](../../implementations-plan/any-erc20-bridge/) (the Bridge
 section) and [`implementations-plan/tools-console/`](../../implementations-plan/tools-console/) (the
 shell: rail, header chips, dock).
 
@@ -48,10 +48,10 @@ and remembers the answer per wallet. The connected chip shows the active account
 to switch anytime — switching drives every section and is blocked while an operation is running, so
 nothing executes under an account other than the one it started with.
 
-The Send section additionally needs an **Ethereum wallet** (EIP-1193, e.g. MetaMask) on the manifest's
+The Bridge section additionally needs an **Ethereum wallet** (EIP-1193, e.g. MetaMask) on the manifest's
 L1 chain; a wallet on another chain is told so before anything is signed.
 
-## The Send section
+## The Bridge section
 
 `Token → Amount → Review` down a vertical step rail inside one card, then **Sign & send**: the
 Aztec wallet's grant prompt for the token, and

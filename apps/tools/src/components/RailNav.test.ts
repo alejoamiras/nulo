@@ -13,15 +13,16 @@ describe("RailNav", () => {
 	it("is one roving tablist: the active section is the only Tab stop", () => {
 		const w = mount(RailNav, { props: { activityCount: 0 } })
 		expect(w.get(sel(TESTIDS.tabs)).attributes("role")).toBe("tablist")
-		expect(w.get(sel(TESTIDS.tabDrip)).attributes("tabindex")).toBe("0")
-		expect(w.get(sel(TESTIDS.tabSend)).attributes("tabindex")).toBe("-1")
+		expect(w.get(sel(TESTIDS.tabSend)).attributes("tabindex")).toBe("0")
+		expect(w.get(sel(TESTIDS.tabSend)).text()).toBe("Bridge")
+		expect(w.get(sel(TESTIDS.tabDrip)).attributes("tabindex")).toBe("-1")
 		expect(w.get(sel(TESTIDS.tabActivity)).attributes("aria-selected")).toBe("false")
 	})
 
 	it("clicking switches the shell's section; arrows walk the list and wrap", async () => {
 		const w = mount(RailNav, { props: { activityCount: 0 }, attachTo: document.body })
-		await w.get(sel(TESTIDS.tabSend)).trigger("click")
-		expect(useShell().section.value).toBe("send")
+		await w.get(sel(TESTIDS.tabDrip)).trigger("click")
+		expect(useShell().section.value).toBe("drip")
 		await w.get(sel(TESTIDS.tabSend)).trigger("keydown", { key: "ArrowUp" })
 		expect(useShell().section.value).toBe("activity")
 		expect(document.activeElement).toBe(w.get(sel(TESTIDS.tabActivity)).element)

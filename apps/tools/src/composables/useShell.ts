@@ -8,12 +8,7 @@ import { ref } from "vue"
 export type Section = "send" | "drip" | "activity"
 
 /** A `bridge.*` host lands on Send; everywhere else the faucet is the front door. */
-export function defaultSection(): Section {
-	if (typeof window !== "undefined" && window.location.hostname.startsWith("bridge")) return "send"
-	return "drip"
-}
-
-const section = ref<Section>(defaultSection())
+const section = ref<Section>("send")
 const highlightedId = ref<string | null>(null)
 
 export function useShell() {
@@ -31,6 +26,6 @@ export function useShell() {
 
 /** Test-only: back to the boot state. */
 export function __resetShellForTests(): void {
-	section.value = defaultSection()
+	section.value = "send"
 	highlightedId.value = null
 }
