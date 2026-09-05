@@ -71,3 +71,9 @@ Gate after the round: lint 0 · typecheck 0 · unit 96 files / 1240 · smoke 3 f
 
 **For the owner — the class behind rounds 2–4.** Every string a journal record or restore file carries (`amount`, `fuel.received`, `fuel.used`, `recipient`, `sealerL1`, `blocked`, `token.displaySymbol`) is validated for shape at load but not for width or character class, and the app has many display sites that read them. This branch guards each site it touched or that a sweep found; the durable fix is to bound and strip at the loader (bridge-core's record validator) so no display site can be missed. That is a bridge-core change outside this plan's scope and is left as a follow-up.
 
+## Round 5 — resumed, over `f90be302` — converged
+
+Codex, verbatim: "No remaining HIGH or MED findings verified in the net diff from `91074a74`. The fixes in `f90be302` address the reported scenarios without a material regression. Remaining validator hardening belongs to the documented bridge-core follow-up. Typecheck and 13 targeted suites (250 tests) passed. No e2e commands ran; no files changed. VERDICT: approve".
+
+Five rounds, one session (`01a07273-63f8-7c92-bc4e-bf91007c0ff6`); 26 findings verified and fixed, 0 rejected; the PR opens now.
+
