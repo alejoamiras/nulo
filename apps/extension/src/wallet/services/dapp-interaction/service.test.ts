@@ -372,10 +372,12 @@ describe("DappInteractionService journal-driven cancel (a feed cancel closes the
 		expect(executeOperations).not.toHaveBeenCalled()
 	})
 
-	test("reconcile: the post-registration read reports cancelled → cancel once, no event needed", async () => {
+	// Any stage past `queued` means the record moved on without this popup —
+	// the same predicate as the pre-popup short-circuit, not only `cancelled`.
+	test.each(["cancelled", "failed"])("reconcile: the post-registration read reports %s → cancel once, no event needed", async (stage) => {
 		const { internals } = makeService({})
 		seedQueued(internals, "i-1", "j-1")
-		internals.operationJournal = { getOperation: async () => ({ progress: { stage: "cancelled" } }) }
+		internals.operationJournal = { getOperation: async () => ({ progress: { stage } }) }
 
 		await internals.reconcileCancelledJournal("j-1")
 

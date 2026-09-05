@@ -41,9 +41,9 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 		}
 	}
 	if (error instanceof UserRejectedError) {
-		// Same 4001 as JOB_CANCELLED (both mean "the user said no"); the
-		// discriminator keeps pre-approval Reject and mid-flight cancel apart for
-		// dApp telemetry. The message passes through: it is wallet-authored.
+		// USER_REJECTED distinguishes the popup's Reject from a journal
+		// cancellation (JOB_CANCELLED); same 4001. The message passes through:
+		// it is wallet-authored.
 		return {
 			code: 4001,
 			message: error.message,

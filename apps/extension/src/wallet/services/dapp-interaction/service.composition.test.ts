@@ -1,14 +1,8 @@
 /**
- * Composition test: the REAL OperationJournalService FSM + the REAL WindowManager
- * (on one FakeBrowserApi) + DappInteractionService started through a
- * ServiceCollection, so `init()` wires the journal subscription for real. No PXE,
- * no proving, no browser (COMPOSITION-TESTS.md D1–D6 trivially hold).
- *
- * Proves the feed-cancel contract end to end in process: a `queued → cancelled`
- * transition closes exactly the cancelled request's window, rejects that
- * request's `execute()` promise with the structured cancel, and leaves a
- * sibling request untouched — including when the cancel lands before the
- * interaction is registered (the reconciliation read).
+ * Real OperationJournalService FSM + real WindowManager on one FakeBrowserApi;
+ * DappInteractionService started through a ServiceCollection so `init()` wires
+ * the journal subscription. Stubbed: profile, network, account, dApp session,
+ * execution. No PXE, no proving, no browser.
  */
 import { describe, expect, test, vi } from "vitest"
 import { JobCancelledError, UserRejectedError } from "@nulo/extension-messaging/errors"
@@ -178,7 +172,7 @@ describe("DappInteractionService × OperationJournalService × WindowManager (fe
 		const resultC = await outcomeC
 		expect("err" in resultC && resultC.err).toBeInstanceOf(JobCancelledError)
 		expect(("err" in resultC ? (resultC.err as JobCancelledError) : undefined)?.details).toEqual({ jobId: recC.id })
-		// The window was created after the handle settled; the manager closes it.
+		// Reconciliation closes the window that was opened after the cancellation.
 		await flush()
 		await flush()
 		const windowC = await h.windowIdOf(0)

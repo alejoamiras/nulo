@@ -100,9 +100,8 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 	private cancelInteractionForJournal(journalId: string): void {
 		const interaction = [...this.storage.values()].find((x) => x.hooks?.queuedJournalId === journalId)
 		if (!interaction || interaction.cancelledAt !== undefined) return
-		// Flag first so a racing approve refuses (first service claim wins),
-		// broadcast so a live popup skips its own reject on unload, then settle
-		// — which is what closes the window.
+		// Flag before broadcasting or settling so a racing approve cannot claim
+		// the interaction; the settle is what closes the window.
 		interaction.cancelledAt = Date.now()
 		this.emit("onInteractionCancelled", interaction.id)
 		this.windowManager.cancel(interaction.handleId, new JobCancelledError("Transaction cancelled by user", { jobId: journalId }))
