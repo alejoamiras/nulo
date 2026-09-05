@@ -14,11 +14,13 @@ import { assetDecimals, assetSymbol } from "@/lib/asset-label"
 import { formatBigInt } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
 
-// `kind` scopes the list to one asset kind. Completion toasts are the shell's (`useCompletionToasts`),
-// so a second list never doubles them.
-const props = withDefaults(defineProps<{ kind?: "bridge-token" | "fee-juice"; title?: string }>(), {
-	title: "YOUR BRIDGES",
-})
+// `source` picks the record set: `visible` omits the record the wizard is foregrounding (its stepper
+// is that record's one surface); `all` is for the Activity page, where no stepper is on screen.
+// `kind` scopes the list to one asset kind. Completion toasts are the shell's (`useCompletionToasts`).
+const props = withDefaults(
+	defineProps<{ kind?: "bridge-token" | "fee-juice"; title?: string; source?: "visible" | "all"; highlightedId?: string | null }>(),
+	{ title: "YOUR BRIDGES", source: "visible", highlightedId: null },
+)
 
 const journal = useBridgeJournal()
 const backup = useBridgeBackup()
@@ -61,7 +63,8 @@ async function onRestorePick(event: Event) {
 }
 
 const sorted = computed(() => {
-	const recs = props.kind ? journal.visibleRecords.value.filter((r) => assetKindOf(r) === props.kind) : journal.visibleRecords.value
+	const all = props.source === "all" ? journal.records.value : journal.visibleRecords.value
+	const recs = props.kind ? all.filter((r) => assetKindOf(r) === props.kind) : all
 	return [...recs].sort((a, b) => b.createdAt - a.createdAt)
 })
 </script>
@@ -90,20 +93,29 @@ const sorted = computed(() => {
 			/>
 		</Flex>
 		<div v-if="sorted.length === 0" class="empty-state" :data-testid="TESTIDS.journalEmpty">
-			<span class="empty-headline">NOTHING PENDING YET</span>
-			<span class="empty-sub">
-				Bridges you background or lose track of land here.
-				<button
-					type="button"
-					class="empty-link"
-					:data-testid="TESTIDS.journalRestoreLink"
-					@click="restoreInput?.click()"
-				>Restore</button>
-				a saved bridge from its recovery file.
-			</span>
+			<slot name="empty">
+				<span class="empty-headline">NOTHING PENDING YET</span>
+				<span class="empty-sub">
+					Bridges you background or lose track of land here.
+					<button
+						type="button"
+						class="empty-link"
+						:data-testid="TESTIDS.journalRestoreLink"
+						@click="restoreInput?.click()"
+					>Restore</button>
+					a saved bridge from its recovery file.
+				</span>
+			</slot>
 		</div>
 		<Flex v-else direction="column" gap="10">
-			<BridgeJournalCard v-for="rec in sorted" :key="rec.id" :record="rec" @backup="onBackup" />
+			<BridgeJournalCard
+				v-for="rec in sorted"
+				:key="rec.id"
+				:record="rec"
+				:class="{ highlighted: rec.id === props.highlightedId }"
+				:data-highlighted="rec.id === props.highlightedId || undefined"
+				@backup="onBackup"
+			/>
 		</Flex>
 	</Flex>
 </template>
@@ -185,5 +197,10 @@ const sorted = computed(() => {
 
 .hidden-input {
 	display: none;
+}
+
+/* The record the shell opened Activity for: an ink rule, no fill, no accent. */
+.highlighted {
+	box-shadow: -14px 0 0 -12px var(--txt-primary);
 }
 </style>

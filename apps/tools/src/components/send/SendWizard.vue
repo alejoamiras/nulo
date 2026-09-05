@@ -28,6 +28,7 @@ import TokenStep from "./TokenStep.vue"
 import WizardShell from "./WizardShell.vue"
 
 /** Composables */
+import { useShell } from "@/composables/useShell"
 import { useAddressLookup } from "@/composables/useAddressLookup"
 import { useBridgeBackup } from "@/composables/useBridgeBackup"
 import { type RecordRuntime, useBridgeJournal } from "@/composables/useBridgeJournal"
@@ -81,6 +82,7 @@ const CEILING_DRIFT_DIVISOR = 10n
 const l1 = useL1Wallet()
 const bridge = useBridgeWallet()
 const journal = useBridgeJournal()
+const shell = useShell()
 const backup = useBridgeBackup()
 const addToken = useAddDripToken()
 const { push: pushToast } = useToast()
@@ -971,8 +973,9 @@ const backgroundLine = computed(() => {
 		: `${subject} is on its way — ${active.label.toLowerCase()}${eta}`
 })
 
+/** A provisional record can be rekeyed before Activity opens: hand over the canonical id. */
 function showActivity(): void {
-	document.querySelector<HTMLElement>(`[data-testid="${TESTIDS.journal}"]`)?.scrollIntoView?.({ behavior: "smooth", block: "start" })
+	shell.openActivity(backgroundedCanonical.value ?? backgroundedId.value ?? undefined)
 }
 
 async function onAddToken(): Promise<void> {

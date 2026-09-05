@@ -220,6 +220,7 @@ vi.mock("@/composables/useHubExit", () => ({
 
 import { predictPortal } from "@nulo/bridge-core"
 import { EXIT_TOKEN_NOT_REGISTERED } from "@/composables/useHubExit"
+import { __resetShellForTests, useShell } from "@/composables/useShell"
 import { TESTIDS } from "@/lib/testids"
 import SendWizard from "./SendWizard.vue"
 
@@ -703,7 +704,11 @@ describe("SendWizard", () => {
 		expect(w.findComponent({ name: "TokenStep" }).exists()).toBe(true)
 		const strip = w.find(`[data-testid="${TESTIDS.sendBackgroundStrip}"]`)
 		expect(strip.text()).toContain("is on its way")
-		expect(strip.find(`[data-testid="${TESTIDS.sendBackgroundActivity}"]`).exists()).toBe(true)
+		// Its Activity link hands the shell THIS record, so the page opens with it highlighted.
+		await strip.get(`[data-testid="${TESTIDS.sendBackgroundActivity}"]`).trigger("click")
+		expect(useShell().section.value).toBe("activity")
+		expect(useShell().highlightedId.value).toBe("rec-1")
+		__resetShellForTests()
 
 		// The engine keeps writing the record: that must not take the wizard over again.
 		records.value = records.value.map((r) => (r.id === "rec-1" ? { ...r, updatedAt: 1_500 } : r))

@@ -7,7 +7,7 @@ import { TESTIDS } from "@/lib/testids"
 
 /**
  * The connected account chip + dropdown switcher (plan: Proposal D, stages 2-4).
- * Shared by WalletPanel and BridgeWalletPanel — both read the SAME session
+ * Shared by both AztecWalletPanel variants — both read the SAME session
  * singleton, so switching here drives every tab.
  *
  * The trigger is ONE button holding only non-interactive content; the copy
@@ -217,8 +217,8 @@ onBeforeUnmount(() => {
 	/* One 48px baseline across every wallet surface — the design system's `large` Button height,
 	   which the connect buttons also use. The vertical padding is real so the inner address block
 	   is inset from this border rather than pressed against it. */
-	min-height: 48px;
-	padding: 5px 12px;
+	min-height: 40px;
+	padding: 0 12px;
 	box-sizing: border-box;
 	border: 1px solid var(--nulo-outline);
 	background: transparent;
@@ -232,28 +232,23 @@ onBeforeUnmount(() => {
 }
 
 .chip .net {
-	color: var(--txt-secondary);
-	font: 500 11px/1 var(--font-mono);
+	color: var(--txt-tertiary);
+	font: 500 10px/1 var(--font-mono);
 	letter-spacing: 0.12em;
 	text-transform: uppercase;
 }
 
-/* Name over address in one filled capsule — the same fill/border the shared AddressDisplay gives the
-   Ethereum chip, and the same two-line shape as the menu rows this chip opens. */
+/* One border per chip: name and address sit on one line inside it, no inner box. */
 .identity {
 	display: inline-flex;
-	flex-direction: column;
-	justify-content: center;
-	gap: 2px;
+	align-items: baseline;
+	gap: 6px;
 	min-width: 0;
-	padding: 4px 10px;
-	border: 1px solid var(--nulo-outline);
-	background: var(--nulo-surface-low);
 }
 
 .identity .name {
 	color: var(--txt-primary);
-	font: 600 12px/1.1 var(--font-body);
+	font: 600 12.5px/1.1 var(--font-body);
 	max-width: 18ch;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -262,13 +257,14 @@ onBeforeUnmount(() => {
 
 .identity .addr {
 	color: var(--txt-secondary);
-	font: 400 10.5px/1.1 var(--font-mono);
+	font: 400 11px/1.1 var(--font-mono);
+	white-space: nowrap;
 }
 
-/* Unnamed account: the address carries the capsule alone, at AddressDisplay's own weight. */
+/* Unnamed account: the address carries the chip alone, at the Ethereum chip's weight. */
 .identity.solo .addr {
 	color: var(--txt-primary);
-	font-size: 13px;
+	font-size: 12.5px;
 }
 
 /* Sharp corners like every other nulo surface — the rounded Popover recipe was the odd one out. The

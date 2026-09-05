@@ -10,7 +10,7 @@
 export const TESTIDS = {
 	app: "tl-app",
 
-	// Wallet connection - drives WalletPanel + Hero status
+	// Wallet connection - drives the faucet AztecWalletPanel
 	status: "tl-status",
 	btnConnect: "tl-btn-connect",
 	btnDisconnect: "tl-btn-disconnect",
@@ -75,9 +75,17 @@ export const TESTIDS = {
 	// Toast
 	toast: "tl-toast",
 
-	// Shell tabs (Faucet | Send)
+	// Shell: the rail (Send | Faucet | Activity), the section header, the Activity page.
 	tabs: "tl-tabs",
 	tabDrip: "tl-tab-drip",
+	tabActivity: "tl-tab-activity",
+	sectionHeader: "tl-section-header",
+	activityView: "tl-activity-view",
+	activityFirstVisit: "tl-activity-first-visit",
+	activityTileSend: "tl-activity-tile-send",
+	activityTileDrip: "tl-activity-tile-drip",
+	activityUnavailable: "tl-activity-unavailable",
+	dripView: "tl-drip-view",
 	themeToggle: "tl-theme-toggle",
 
 	// Send - L1 (Ethereum) wallet

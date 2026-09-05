@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { defineComponent, nextTick } from "vue"
 
 // Mock the wallet-sdk and aztec node clients so importing the singleton composable
-// doesn't trip on missing browser-only globals (same set as WalletPanel.test.ts).
+// doesn't trip on missing browser-only globals (same set as AztecWalletPanel.test.ts).
 vi.mock("@aztec/wallet-sdk/manager", () => ({
 	WalletManager: { configure: () => ({ getAvailableWallets: () => ({}) }) },
 }))
@@ -54,7 +54,7 @@ const TokenCardStub = defineComponent({
 
 function mountView() {
 	return mount(DripView, {
-		global: { stubs: { TokenCard: TokenCardStub, WalletPanel: true } },
+		global: { stubs: { TokenCard: TokenCardStub } },
 	})
 }
 

@@ -14,155 +14,43 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { mount, type VueWrapper } from "@vue/test-utils"
-import { flushPromises } from "@vue/test-utils"
+import { flushPromises, type VueWrapper } from "@vue/test-utils"
 
-const mockEstablishSecureChannel = vi.fn()
-const mockDisconnectProvider = vi.fn(async () => {})
-const mockProvider = {
-	id: "nulo",
-	name: "Nulo",
-	establishSecureChannel: mockEstablishSecureChannel,
-	disconnect: mockDisconnectProvider,
-	isDisconnected: () => false,
-	onDisconnect: () => () => {},
-}
+// The mock bodies live in the fixture (shared with shell-smoke); vi.mock itself must be declared here.
+vi.mock("@aztec/wallet-sdk/manager", async () => (await import("./fixtures/sdk-boundary")).walletManagerModule())
+vi.mock("@/lib/emoji", async () => (await import("./fixtures/sdk-boundary")).emojiModule())
+vi.mock("@aztec/aztec.js/node", async () => (await import("./fixtures/sdk-boundary")).aztecNodeModule())
+vi.mock("@/contracts/deployments", async () => (await import("./fixtures/sdk-boundary")).deploymentsModule())
+vi.mock("@/contracts/sponsored-fpc", async () => (await import("./fixtures/sdk-boundary")).sponsoredFpcModule())
+vi.mock("@/contracts/private-fpc", async () => (await import("./fixtures/sdk-boundary")).privateFpcModule())
+vi.mock("@/contracts/bridge-generation", async (importActual) =>
+	(await import("./fixtures/sdk-boundary")).bridgeGenerationModule(importActual),
+)
+vi.mock("@aztec/aztec.js/contracts", async () => (await import("./fixtures/sdk-boundary")).aztecContractsModule())
+vi.mock("@aztec/aztec.js/addresses", async (importActual) => importActual())
+vi.mock("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Dripper.js", async () =>
+	(await import("./fixtures/sdk-boundary")).dripperArtifactModule(),
+)
+vi.mock("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js", async () =>
+	(await import("./fixtures/sdk-boundary")).tokenArtifactModule(),
+)
 
-async function* yieldOne() {
-	yield mockProvider
-}
-
-async function* yieldNone(): AsyncGenerator<typeof mockProvider, void, unknown> {
-	// no providers
-}
-
-const mockGetAvailableWallets = vi.fn(() => ({
-	wallets: yieldOne(),
-	cancel: () => {},
-	done: Promise.resolve(),
-}))
-
-vi.mock("@aztec/wallet-sdk/manager", () => ({
-	WalletManager: { configure: () => ({ getAvailableWallets: mockGetAvailableWallets }) },
-}))
-
-vi.mock("@/lib/emoji", () => ({
-	hashToEmoji: () => "🟢🔵🟡🟣🔴⚪⚫🟠🟤",
-	toGrid: (s: string) => Array.from(s).slice(0, 9),
-}))
-
-vi.mock("@aztec/aztec.js/node", () => ({
-	createAztecNodeClient: () => ({ getContract: async () => ({}) }),
-}))
-
-vi.mock("@/contracts/deployments", () => ({
-	DRIPPER: { toString: () => "0xdripper", equals: () => false },
-	NULO: { toString: () => "0xusdc", equals: () => false },
-	OLUN: { toString: () => "0xeth", equals: () => false },
-	rebuildDripperInstance: vi.fn(async () => ({ address: { toString: () => "0xdripper" } })),
-	rebuildNuloInstance: vi.fn(async () => ({ address: { toString: () => "0xusdc" } })),
-	rebuildOlunInstance: vi.fn(async () => ({ address: { toString: () => "0xeth" } })),
-}))
-
-vi.mock("@/contracts/sponsored-fpc", () => ({
-	getSponsoredFpcInstance: async () => ({ address: { toString: () => "0xfpc" } }),
-}))
-
-// Pre-baked like every other contract module here: the real getPrivateFpc dynamically imports the
-// PrivateFPC artifact + runs loadContractArtifact/derivation, which the gutted aztec.js mocks can't
-// support - unmocked, the connect-time registration rejects and status wedges at "setting-up".
-vi.mock("@/contracts/private-fpc", () => ({
-	getPrivateFpc: async () => ({ instance: { address: { toString: () => "0xprivfpc" } }, artifact: { name: "PrivateFPC" } }),
-}))
-
-// Same treatment for the generation's hub + hub-token instances the connect registers on a live
-// bridge manifest: their re-derivation runs bb.js address math the gutted aztec.js mocks answer with
-// `0x0`, which the instantiation check rightly refuses. The manifest constants stay real.
-vi.mock("@/contracts/bridge-generation", async (importActual) => {
-	const actual = await importActual<typeof import("@/contracts/bridge-generation")>()
-	const instanceAt = (address: string) => ({ address: { toString: () => address, equals: () => false } })
-	return {
-		...actual,
-		rebuildHubInstance: vi.fn(async () => instanceAt(actual.GENERATION?.l2.hub.address ?? "0xhub")),
-		rebuildHubTokenInstance: vi.fn(async (erc20: string) =>
-			instanceAt(actual.MANIFEST_TOKENS.find((t) => t.erc20.toLowerCase() === erc20.toLowerCase())?.l2Token ?? "0xhubtoken"),
-		),
-	}
-})
-
-vi.mock("@aztec/aztec.js/contracts", () => ({
-	Contract: {
-		at: vi.fn(async () => ({
-			methods: {
-				balance_of_public: () => ({ request: async () => ({ call: "balance_of_public" }) }),
-				balance_of_private: () => ({ request: async () => ({ call: "balance_of_private" }) }),
-				drip_to_public: () => ({ request: async () => ({ calls: [{ target: "public" }] }) }),
-				drip_to_private: () => ({ request: async () => ({ calls: [{ target: "private" }] }) }),
-			},
-		})),
-	},
-	getContractInstanceFromInstantiationParams: vi.fn(async () => ({ address: { toString: () => "0x0" } })),
-}))
-
-vi.mock("@aztec/aztec.js/addresses", async (importActual) => {
-	const actual = await importActual<typeof import("@aztec/aztec.js/addresses")>()
-	return actual
-})
-
-vi.mock("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Dripper.js", () => ({
-	DripperContractArtifact: { name: "Dripper" },
-}))
-vi.mock("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js", () => ({
-	TokenContractArtifact: { name: "Token" },
-}))
-
-import App from "@/App.vue"
-import { __resetWalletConnectionForTests } from "@/composables/useWalletConnection"
+import { __resetDockStateForTests } from "@/composables/useDockState"
 import { __resetDripForTests } from "@/composables/useDrip"
+import { __resetShellForTests } from "@/composables/useShell"
 import { __resetToastsForTests } from "@/composables/useToast"
+import { __resetWalletConnectionForTests } from "@/composables/useWalletConnection"
 import { TESTIDS } from "@/lib/testids"
-
-function makeWalletStub() {
-	return {
-		requestCapabilities: vi.fn(async () => ({
-			granted: [
-				{
-					type: "accounts",
-					accounts: [{ alias: "Main", item: "0x000000000000000000000000000000000000000000000000000000000000000a" }],
-				},
-			],
-		})),
-		registerContract: vi.fn(async () => {}),
-		executeUtility: vi.fn(async () => 0n),
-		sendTx: vi.fn(async () => ({ txHash: "0xtxabcdef" })),
-	}
-}
-
-function makePending(verificationHash = "deadbeef") {
-	return {
-		verificationHash,
-		confirm: vi.fn(async () => makeWalletStub()),
-		cancel: vi.fn(async () => {}),
-	}
-}
-
-/** The mainnet-placeholder split loads the shell asynchronously. Warming the module first is what
- *  makes the mount usable within one flush — the shell's own import graph takes more than a tick. */
-async function mountApp(): Promise<VueWrapper> {
-	await import("@/AppShell.vue")
-	const w = mount(App, { attachTo: document.body })
-	await flushPromises()
-	return w
-}
-
-async function connectThroughPicker(wrapper: VueWrapper) {
-	await wrapper.get(`[data-testid="${TESTIDS.btnConnect}"]`).trigger("click")
-	await flushPromises()
-	const pickerRow = document.querySelector(`[data-testid="${TESTIDS.walletPickerConnect}"]`) as HTMLElement | null
-	expect(pickerRow).not.toBeNull()
-	pickerRow?.click()
-	await flushPromises()
-}
+import {
+	connectThroughPicker,
+	makePending,
+	makeWalletStub,
+	mockEstablishSecureChannel,
+	mockGetAvailableWallets,
+	mountApp,
+	resetBoundary,
+	yieldNone,
+} from "./fixtures/sdk-boundary"
 
 describe("tools smoke", () => {
 	let wrapper: VueWrapper | null = null
@@ -172,15 +60,9 @@ describe("tools smoke", () => {
 		__resetWalletConnectionForTests()
 		__resetDripForTests()
 		__resetToastsForTests()
-		mockEstablishSecureChannel.mockReset()
-		mockDisconnectProvider.mockReset()
-		mockDisconnectProvider.mockImplementation(async () => {})
-		mockGetAvailableWallets.mockReset()
-		mockGetAvailableWallets.mockImplementation(() => ({
-			wallets: yieldOne(),
-			cancel: () => {},
-			done: Promise.resolve(),
-		}))
+		__resetShellForTests()
+		__resetDockStateForTests()
+		resetBoundary()
 	})
 
 	afterEach(() => {
@@ -267,16 +149,20 @@ describe("tools smoke", () => {
 		expect(document.querySelector(`[data-testid="${TESTIDS.verificationModal}"]`)).not.toBeNull()
 	})
 
-	it("3b. the Send tab renders the wizard, and its journal is the only bridges list app-wide", async () => {
+	it("3b. the Send section renders the wizard; the bridges list lives on Activity alone", async () => {
 		wrapper = await mountApp()
 		await wrapper.get(`[data-testid="${TESTIDS.tabSend}"]`).trigger("click")
 		await flushPromises()
 		expect(wrapper.find(`[data-testid="${TESTIDS.sendView}"]`).isVisible()).toBe(true)
-		// A network whose manifest carries no bridge renders the placeholder instead of the wizard;
-		// either way the tab owns exactly one journal (the toast owner), never a second copy.
+		// A network whose manifest carries no bridge renders the placeholder instead of the wizard.
 		const hasBridge = wrapper.find(`[data-testid="${TESTIDS.sendUnavailable}"]`).exists() === false
 		expect(wrapper.find(`[data-testid="${TESTIDS.sendStepStrip}"]`).exists()).toBe(hasBridge)
-		expect(wrapper.findAll(`[data-testid="${TESTIDS.journalEmpty}"]`).length).toBe(hasBridge ? 1 : 0)
+		expect(wrapper.findAll(`[data-testid="${TESTIDS.journal}"]`).length).toBe(0)
+		await wrapper.get(`[data-testid="${TESTIDS.tabActivity}"]`).trigger("click")
+		await flushPromises()
+		// Exactly one list, on Activity; a bridge-less network shows its notice there instead.
+		expect(wrapper.findAll(`[data-testid="${TESTIDS.journal}"]`).length).toBe(hasBridge ? 1 : 0)
+		expect(wrapper.find(`[data-testid="${TESTIDS.activityUnavailable}"]`).exists()).toBe(!hasBridge)
 	})
 
 	it("4. clicking 'Drip … to public' fires sendTx and shows a success toast", async () => {
