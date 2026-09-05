@@ -1,22 +1,31 @@
 # @nulo/tools — the Nulo tools app
 
-A standard Aztec dApp (it speaks `@aztec/wallet-sdk`; it touches no wallet code) with two tabs:
+A standard Aztec dApp (it speaks `@aztec/wallet-sdk`; it touches no wallet code) with three
+sections on a left rail:
 
-- **Faucet** — self-mint the two test tokens (NULO, 6 dec; OLUN, 18 dec) on testnet through
-  Wonderland's permissionless `Dripper`. One screen, two token cards, four drip buttons. No backend,
-  no rate limit.
 - **Send** — move **any ERC-20** between Ethereum and Aztec through the generation the bundled
   manifest names (an L1 `PortalFactory` + `SwapBridgeRouter`, one L2 `TokenBridgeHub`), with an
   optional **gas leg**: a slice of the amount is swapped to Fee Juice on the way in so the arriving
   account can pay for its own claim. Exits burn on L2 first, then consume on L1.
+- **Faucet** — self-mint the two test tokens (NULO, 6 dec; OLUN, 18 dec) on testnet through
+  Wonderland's permissionless `Dripper`. Two token cards, four drip buttons. No backend, no rate
+  limit.
+- **Activity** — every bridge this browser started or restored, as full cards with their next
+  step, backup and restore. Beside Send and Faucet the same records sit in a collapsible **dock**
+  (two-line rows grouped Needs you / Running / Done; one badge on the 44px strip while something
+  needs you), which opens itself once per record that starts needing you and never for a blocked
+  one. The wallet chips live in each section's header; one Aztec panel serves both the faucet
+  and the bridge.
 
 Two build targets (`testnet.tools.nulo.sh`, `tools.nulo.sh`), selected at BUILD time by which vite
 config runs — never at runtime and never from a dashboard variable. A manifest with no `bridge`
 block renders the Send placeholder (both networks until a generation is promoted); the mainnet
-target additionally ships the whole-app placeholder (target-keyed, no faucet tab).
+target additionally ships the whole-app placeholder (target-keyed, no faucet).
 
-Plans + audits: [`implementations-plan/faucet/`](../../implementations-plan/faucet/) (the faucet) and
-[`implementations-plan/any-erc20-bridge/`](../../implementations-plan/any-erc20-bridge/) (the Send tab).
+Plans + audits: [`implementations-plan/faucet/`](../../implementations-plan/faucet/) (the faucet),
+[`implementations-plan/any-erc20-bridge/`](../../implementations-plan/any-erc20-bridge/) (the Send
+section) and [`implementations-plan/tools-console/`](../../implementations-plan/tools-console/) (the
+shell: rail, header chips, dock).
 
 ## Quick start
 
@@ -36,15 +45,16 @@ auto-reconnect turns itself off and the picker shows all claimants.
 
 **Multiple accounts**: if your wallet shares more than one account, the app asks which one to use
 and remembers the answer per wallet. The connected chip shows the active account and opens a menu
-to switch anytime — switching drives both tabs and is blocked while an operation is running, so
+to switch anytime — switching drives every section and is blocked while an operation is running, so
 nothing executes under an account other than the one it started with.
 
-The Send tab additionally needs an **Ethereum wallet** (EIP-1193, e.g. MetaMask) on the manifest's
+The Send section additionally needs an **Ethereum wallet** (EIP-1193, e.g. MetaMask) on the manifest's
 L1 chain; a wallet on another chain is told so before anything is signed.
 
-## The Send tab
+## The Send section
 
-`Token → Amount → Review`, then **Sign & send**: the Aztec wallet's grant prompt for the token, and
+`Token → Amount → Review` down a vertical step rail inside one card, then **Sign & send**: the
+Aztec wallet's grant prompt for the token, and
 the Ethereum wallet's signature(s) — a Permit2 approval on the token's first use, the seal signature
 for a private send, the deposit signature.
 
@@ -64,7 +74,11 @@ for a private send, the deposit signature.
 - **Journal** — every in-flight send/exit, device-local, milestone facts only
   (`useBridgeJournal` over `@nulo/bridge-core`'s journal engine). At boot each record's token block
   is re-validated against the live factory registration; a record that disagrees is withheld
-  (`blocked`), never claimed. Records can be exported as a sealed backup and restored.
+  (`blocked`), never claimed. Records can be exported as a sealed backup and restored. The record
+  whose stepper is on screen is the stepper's alone: the dock lists it only once it is backgrounded
+  (`visibleRecords`); the Activity page lists every record. The page card and the dock row read one
+  pure policy (`lib/record-policy.ts`), so the dock never offers a button the card would refuse —
+  and it offers no DISCARD at all.
 - **Exit** (`useHubExit`) — preflights the chain, BOTH pause bits (L1 factory + L2 hub), the hub
   binding and the balance before authorising a burn, states the burn-before-finish order in the
   review, and never discards a record whose burn landed (a consume that fails re-reads the Outbox).
@@ -131,11 +145,14 @@ whose chain disagrees with the build target fails the app at boot (`src/lib/buil
 ```bash
 bun run --cwd apps/tools typecheck   # vue-tsc
 bun run --cwd apps/tools test        # vitest unit + component (jsdom)
-bun run --cwd apps/tools test:e2e    # smoke e2e: faucet + send wizard, mock wallets, jsdom
+bun run --cwd apps/tools test:e2e    # smoke e2e: shell + faucet + send wizard, mock wallets, jsdom
 ```
 
-The faucet smoke mounts the full app in jsdom against a **mock Aztec wallet** (intercepts
-`aztec-wallet-discovery` and answers canned RPC). The send smoke mounts the Send view over the
+The faucet and shell smokes mount the full app in jsdom against a **mock Aztec wallet** (intercepts
+`aztec-wallet-discovery` and answers canned RPC; the mock bodies live once in
+`tests/e2e/fixtures/sdk-boundary.ts`). The shell smoke walks the rail, the header chips, the
+Activity page, the cross-section completion toast and the dock (auto-open once, badge equals the
+page's buttons, the foreground record absent). The send smoke mounts the Send view over the
 REAL wizard composables and the REAL journal engine, faking only the chain/wallet boundary (the
 manifest, the two wallet sessions, the bridge-core calls that would reach a chain), and drives
 list / paste / grant-at-sign / no-route / first-time / 2-tx private / gas-only /
@@ -151,20 +168,24 @@ apps/tools/
 ├── scripts/                   ← deploy.ts (faucet deployer), verify-deployments.ts, verify-build-target.ts
 ├── vite.{testnet,mainnet}.config.mts ← the two build targets (inject the manifest + target)
 ├── src/
-│   ├── AppShell.vue           ← tabs; both tabs read ONE wallet session
-│   ├── views/                 ← FaucetView, SendView, MainnetPlaceholderView
+│   ├── AppShell.vue           ← rail | main | dock grid; owns the ONE completion-toast watcher and the activity feed
+│   ├── views/                 ← DripView, SendView, ActivityView, MainnetPlaceholderView
 │   ├── components/
-│   │   ├── send/              ← the wizard: WizardShell, StepStrip, TokenStep/TokenList/TokenTile/PasteAddress,
-│   │   │                        AmountStep/ChoiceCards/GasBreakdown, ReviewStep/ReviewDetails, SendWizard
-│   │   ├── Bridge*.vue        ← stepper, receipt, journal cards, wallet panels
+│   │   ├── send/              ← the wizard: WizardShell (the card), StepStrip (the vertical rail), TokenStep/TokenList/
+│   │   │                        TokenTile/PasteAddress, AmountStep/ChoiceCards/GasBreakdown, ReviewStep/ReviewDetails, SendWizard
+│   │   ├── RailNav, SectionHeader, ActivityDock/DockStrip/ActivityRow ← the shell
+│   │   ├── AztecWalletPanel, L1WalletPanel, AccountSwitcher, ConnectionErrorStrip ← the header chips
+│   │   ├── Bridge*.vue        ← stepper + phase rail, receipt, journal page list + cards
 │   │   └── *.vue              ← faucet + connection components
 │   ├── composables/           ← useSend, useHubExit, useTokenCatalog/Selection/Grant, useRouteQuote,
-│   │                            useGasShare, useBridgeJournal, useL1Wallet, useWalletConnection, …
+│   │                            useGasShare, useBridgeJournal, useL1Wallet, useWalletConnection,
+│   │                            useShell, useDockState, useActivityFeed, useCompletionToasts, …
 │   ├── contracts/             ← bridge-generation.ts (manifest reader), deployments.{json,ts}, the FPCs
 │   ├── lib/                   ← capabilities (per-token wallet grants), send-model, network-targets,
-│   │                            chain-constants, build-integrity, bridge-steps, token-display, …
+│   │                            chain-constants, build-integrity, bridge-steps, token-display,
+│   │                            record-policy (card + dock gates), activity (grouping + row words), …
 │   └── constants/tokens.ts    ← the faucet's two tokens
-└── tests/e2e/                 ← faucet-smoke + send-smoke (mock wallets, jsdom)
+└── tests/e2e/                 ← tools-smoke + shell-smoke + send-smoke (mock wallets, jsdom); fixtures/sdk-boundary.ts
 ```
 
 ## What this is NOT
