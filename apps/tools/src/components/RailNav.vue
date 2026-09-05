@@ -38,7 +38,7 @@ function move(from: number, delta: number): void {
 <template>
 	<nav
 		ref="rail"
-		class="rail"
+		class="nav"
 		role="tablist"
 		aria-label="Sections"
 		:aria-orientation="topRow ? 'horizontal' : 'vertical'"
@@ -68,7 +68,7 @@ function move(from: number, delta: number): void {
 </template>
 
 <style scoped>
-.rail {
+.nav {
 	display: flex;
 	flex-direction: column;
 	gap: 2px;
@@ -110,7 +110,7 @@ function move(from: number, delta: number): void {
 }
 
 @media (max-width: 760px) {
-	.rail {
+	.nav {
 		flex-direction: row;
 		gap: 4px;
 	}

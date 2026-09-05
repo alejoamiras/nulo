@@ -10,10 +10,10 @@ const sel = (t: string) => `[data-testid="${t}"]`
 const mountRow = (r: ActivityRowModel, extra: Record<string, unknown> = {}) => mount(ActivityRow, { props: { row: r, ...extra } })
 
 describe("ActivityRow", () => {
-	it("is two lines: the amount, then route · visibility · age, with the button in the side slot", () => {
+	it("is two lines: the amount, then route · visibility; a button in the side slot takes the age's room", () => {
 		const w = mountRow(row())
 		expect(w.get(".amt").text()).toBe("0.5 WETH")
-		expect(w.get(".meta").text()).toBe("ETH → Aztec · public + gas · 26m ago")
+		expect(w.get(".meta").text()).toBe("ETH → Aztec · public + gas")
 		expect(w.get(sel(TESTIDS.activityRowAction)).text()).toBe("CLAIM")
 		expect(w.get(sel(TESTIDS.activityRowAction)).classes()).toContain("filled")
 	})
@@ -50,12 +50,14 @@ describe("ActivityRow", () => {
 		expect(gas.classes()).not.toContain("filled")
 	})
 
-	it("emits act with its id and action; open from the body", async () => {
+	it("emits act with its id and action — never open with it; the row and its amount button open", async () => {
 		const w = mountRow(row())
 		await w.get(sel(TESTIDS.activityRowAction)).trigger("click")
 		expect(w.emitted("act")).toEqual([["rec-1", "claim"]])
+		expect(w.emitted("open")).toBeUndefined()
 		await w.get(sel(TESTIDS.activityRowOpen)).trigger("click")
-		expect(w.emitted("open")).toEqual([["rec-1"]])
+		await w.get(sel(TESTIDS.activityRow)).trigger("click")
+		expect(w.emitted("open")).toEqual([["rec-1"], ["rec-1"]])
 	})
 
 	it("SWITCH is disabled while another operation runs, with the card's reason; acting rows are busy and inert", async () => {

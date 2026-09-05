@@ -40,7 +40,13 @@ const title = computed(() => (action.value === "switch" && props.switchLocked ? 
  *  shows two filled calls. */
 const filled = computed(() => props.row.group === "needs-you")
 
-const meta = computed(() => ({ head: `${props.row.route} · `, visibility: props.row.visibility, tail: ` · ${props.row.age}` }))
+/** With a button in the side slot the meta line has only its own column, so the age goes: at the
+ *  dock's width "route · private + gas · 26m ago" would truncate under the button. */
+const meta = computed(() => ({
+	head: `${props.row.route} · `,
+	visibility: props.row.visibility,
+	tail: action.value ? "" : ` · ${props.row.age}`,
+}))
 
 const side = computed(() => {
 	const r = props.row
@@ -49,6 +55,8 @@ const side = computed(() => {
 	return "blocked"
 })
 
+// The whole row opens the record for the mouse; the amount is the keyboard's button for it, and
+// the action button stops the click so acting never also navigates.
 function onAct(): void {
 	if (action.value && !disabled.value) emit("act", props.row.id, action.value)
 }
@@ -62,12 +70,13 @@ function onAct(): void {
 		:data-record-id="row.id"
 		:data-group="row.group"
 		:data-action="action ?? undefined"
+		@click="emit('open', row.id)"
 	>
 		<span class="dot" :class="row.group" aria-hidden="true" />
-		<button type="button" class="body" :data-testid="TESTIDS.activityRowOpen" @click="emit('open', row.id)">
-			<span class="amt">{{ row.amount }} <small>{{ row.symbol }}</small></span>
-			<span class="meta">{{ meta.head }}<b>{{ meta.visibility }}</b>{{ meta.tail }}</span>
+		<button type="button" class="amt" :data-testid="TESTIDS.activityRowOpen" @click.stop="emit('open', row.id)">
+			{{ row.amount }} <small>{{ row.symbol }}</small>
 		</button>
+		<span class="meta">{{ meta.head }}<b>{{ meta.visibility }}</b>{{ meta.tail }}</span>
 		<button
 			v-if="action"
 			type="button"
@@ -77,7 +86,7 @@ function onAct(): void {
 			:title="title"
 			:aria-busy="acting || undefined"
 			:data-testid="TESTIDS.activityRowAction"
-			@click="onAct"
+			@click.stop="onAct"
 		>
 			{{ label }}
 		</button>
@@ -91,12 +100,16 @@ function onAct(): void {
 	display: grid;
 	grid-template-columns: 12px minmax(0, 1fr) auto;
 	column-gap: 8px;
+	row-gap: 5px;
 	align-items: center;
 	padding: 10px 0 11px 12px;
 	border-top: 1px solid var(--nulo-border);
+	cursor: pointer;
 }
 
 .dot {
+	grid-column: 1;
+	grid-row: 1;
 	display: inline-block;
 	width: 6px;
 	height: 6px;
@@ -115,30 +128,25 @@ function onAct(): void {
 	background: var(--nulo-accent);
 }
 
-.body {
-	display: flex;
-	flex-direction: column;
-	gap: 5px;
+.amt {
+	grid-column: 2;
+	grid-row: 1;
 	min-width: 0;
 	padding: 0;
 	border: 0;
 	background: transparent;
-	color: inherit;
-	text-align: left;
-	cursor: pointer;
-}
-
-.body:focus-visible {
-	outline: 1px solid var(--txt-primary);
-	outline-offset: 2px;
-}
-
-.amt {
 	font: 600 12.5px/1 var(--font-mono);
 	color: var(--txt-primary);
+	text-align: left;
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
+	cursor: pointer;
+}
+
+.amt:focus-visible {
+	outline: 1px solid var(--txt-primary);
+	outline-offset: 2px;
 }
 
 .amt small {
@@ -151,12 +159,19 @@ function onAct(): void {
 	color: var(--txt-secondary);
 }
 
+/* Row two runs under the side slot; a button spanning both rows takes that space back. */
 .meta {
+	grid-column: 2 / 4;
+	grid-row: 2;
 	font: 500 10.5px/1.3 var(--font-mono);
 	color: var(--txt-tertiary);
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
+}
+
+.has-button .meta {
+	grid-column: 2;
 }
 
 .meta b {
@@ -165,6 +180,8 @@ function onAct(): void {
 }
 
 .side {
+	grid-column: 3;
+	grid-row: 1;
 	font: 500 10.5px/1 var(--font-mono);
 	letter-spacing: 0.06em;
 	text-transform: uppercase;
@@ -182,6 +199,7 @@ function onAct(): void {
 }
 
 .btn {
+	grid-row: 1 / 3;
 	padding: 8px 12px;
 	border: 1px solid var(--txt-primary);
 	background: transparent;
