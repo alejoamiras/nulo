@@ -8,7 +8,9 @@ import WizardShell from "./WizardShell.vue"
 const sel = (t: string) => `[data-testid="${t}"]`
 
 // The step components are the other half of the wizard; the shell only has to place them.
-const stubs = { StepStrip: { name: "StepStrip", props: ["steps", "active", "completed"], template: "<div data-strip />" } }
+const stubs = {
+	StepStrip: { name: "StepStrip", props: ["steps", "active", "completed", "orientation"], template: "<div data-strip />" },
+}
 
 function shell(props: Partial<{ direction: Direction; step: 0 | 1 | 2; completed: number; canSwitchDirection: boolean }> = {}) {
 	return mount(WizardShell, {
@@ -69,11 +71,20 @@ describe("WizardShell", () => {
 		expect(w.emitted("update:direction")).toBeUndefined()
 	})
 
-	it("hands the strip the three steps plus the active and completed indices", () => {
+	it("hands the strip the three steps plus the active and completed indices, as a vertical rail with hints", () => {
 		const strip = shell({ step: 1, completed: 1 }).findComponent({ name: "StepStrip" })
 		expect(strip.props("steps").map((s: { label: string }) => s.label)).toEqual(["Token", "Amount", "Review"])
+		expect(strip.props("steps").every((s: { hint?: string }) => !!s.hint)).toBe(true)
+		expect(strip.props("orientation")).toBe("vertical")
 		expect(strip.props("active")).toBe(1)
 		expect(strip.props("completed")).toBe(1)
+	})
+
+	it("the card head counts the step beside the direction tabs; the live caption is off-screen but present", () => {
+		const w = shell({ step: 2, completed: 2 })
+		expect(w.get(".position").text()).toBe("Step 3 of 3")
+		expect(w.get(".position").attributes("aria-hidden")).toBe("true")
+		expect(w.get(sel(TESTIDS.sendStepAnnounce)).classes()).toContain("sr-only")
 	})
 
 	it("forwards the strip's select as goto", () => {

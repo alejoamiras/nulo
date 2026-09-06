@@ -99,4 +99,32 @@ describe("StepStrip", () => {
 		expect(w.emitted("select")).toEqual([[0], [2]])
 		w.unmount()
 	})
+
+	it("vertical: says so for assistive tech, stacks the hints, drops the rules, and ↑/↓ move like ←/→", async () => {
+		const w = mount(StepStrip, {
+			props: { steps: STEPS.map((s, i) => ({ ...s, hint: `hint ${i}` })), active: 1, completed: 1, orientation: "vertical" },
+			attachTo: document.body,
+		})
+		expect(w.get(sel(TESTIDS.sendStepStrip)).attributes("aria-orientation")).toBe("vertical")
+		expect(w.findAll(".rule")).toHaveLength(0)
+		expect(w.findAll(".hint").map((h) => h.text())).toEqual(["hint 0", "hint 1", "hint 2"])
+		await w.findAll(sel(TESTIDS.sendStep))[1]?.trigger("keydown", { key: "ArrowUp" })
+		expect(w.emitted("select")).toEqual([[0]])
+		expect(document.activeElement).toBe(w.findAll(sel(TESTIDS.sendStep))[0]?.element)
+		await w.findAll(sel(TESTIDS.sendStep))[0]?.trigger("keydown", { key: "ArrowDown" })
+		expect(w.emitted("select")).toEqual([[0], [1]])
+		w.unmount()
+	})
+
+	it("horizontal: ↑/↓ are not navigation, and hints stay off the strip", async () => {
+		const w = mount(StepStrip, {
+			props: { steps: STEPS.map((s) => ({ ...s, hint: "h" })), active: 1, completed: 1 },
+			attachTo: document.body,
+		})
+		expect(w.get(sel(TESTIDS.sendStepStrip)).attributes("aria-orientation")).toBe("horizontal")
+		expect(w.findAll(".hint")).toHaveLength(0)
+		await w.findAll(sel(TESTIDS.sendStep))[1]?.trigger("keydown", { key: "ArrowUp" })
+		expect(w.emitted("select")).toBeUndefined()
+		w.unmount()
+	})
 })

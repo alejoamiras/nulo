@@ -590,6 +590,19 @@ describe("useBridgeJournal engine", () => {
 		expect(isSealTrusted(kv, DEPLOY.chainId, SEALER, "rabby")).toBe(true)
 	})
 
+	it("⑧b a sealer string carrying bidi controls is named in the note without them", async () => {
+		const deps = baseDeps(kv)
+		const hostile = `\u202e${SEALER}`
+		const rec = mkDeposit("0xbidi", { isPrivate: true, secret: undefined, sealerL1: hostile })
+		rec.sealedEnvelope = await sealEnvelopeFor(rec)
+		connectJournalDeps({ ...deps, claim: smartClaimFake(), signL1: vi.fn(async () => SIG), connectedL1: () => "0xsomeoneelse" })
+		addRecord(rec)
+		await runDepositClaim("0xbidi")
+		const note = useBridgeJournal().runtime.value["0xbidi"]?.note ?? ""
+		expect(note).toContain(SEALER)
+		expect(note).not.toContain("\u202e")
+	})
+
 	it("⑧d a tampered non-string recipient never loads as a record at all, so nothing can be claimed for it", async () => {
 		const deps = baseDeps(kv)
 		const claim = smartClaimFake()

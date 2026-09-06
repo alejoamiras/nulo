@@ -28,6 +28,7 @@ import TokenStep from "./TokenStep.vue"
 import WizardShell from "./WizardShell.vue"
 
 /** Composables */
+import { useShell } from "@/composables/useShell"
 import { useAddressLookup } from "@/composables/useAddressLookup"
 import { useBridgeBackup } from "@/composables/useBridgeBackup"
 import { type RecordRuntime, useBridgeJournal } from "@/composables/useBridgeJournal"
@@ -67,6 +68,11 @@ const NO_GAS_FOR_TOKEN_ONLY =
 	"Your Aztec account holds no gas the bridge can claim with, so the token alone could not be claimed. Choose Token + gas to arrive with some."
 const SHORT_GAS_FOR_TOKEN_ONLY =
 	"Your Aztec account's gas is under what this claim sets aside at current network fees. Choose Token + gas to arrive with more, or bridge gas first."
+/** A private claim never pays from public Fee Juice: the payer is public and would link the account to the deposit. */
+const NO_PRIVATE_GAS_FOR_TOKEN_ONLY =
+	"A private bridge claims only with private gas, and your Aztec account holds no gas at the fee contract. Choose Token + gas to arrive with some."
+const SHORT_PRIVATE_GAS_FOR_TOKEN_ONLY =
+	"A private bridge claims only with private gas, and yours is under what this claim sets aside at current network fees. Choose Token + gas to arrive with more."
 const UNREAD_GAS_FOR_TOKEN_ONLY =
 	"Your Aztec account's gas could not be read just now, so the claim was not confirmed. Try again in a moment."
 const UNPRICED_TOKEN_ONLY =
@@ -81,6 +87,7 @@ const CEILING_DRIFT_DIVISOR = 10n
 const l1 = useL1Wallet()
 const bridge = useBridgeWallet()
 const journal = useBridgeJournal()
+const shell = useShell()
 const backup = useBridgeBackup()
 const addToken = useAddDripToken()
 const { push: pushToast } = useToast()
@@ -317,15 +324,16 @@ const ownGasCeiling = computed(() => (resolved.value ? gasShare.ownGasCeilingFor
 /** Which held gas would pay a token-only claim at this ceiling — the decision the claim's own ladder
  *  makes, so a balance known to cover pays whatever the other read did — or null while unpriced with
  *  something held: without a price only an empty account is known. */
-function heldGasSource(ceiling: bigint | null, preferPrivate: boolean): OwnGasSource | null {
+function heldGasSource(ceiling: bigint | null, privateBridge: boolean): OwnGasSource | null {
 	const credit = gasHeld.credit.value
 	const pub = gasHeld.publicFeeJuice.value
 	const publicAllowed = gasHeld.selfPay.value
 	if (ceiling === null) {
-		const empty = credit === 0n && pub !== null && (!publicAllowed || pub === 0n)
+		const publicEmpty = pub !== null && (!publicAllowed || pub === 0n)
+		const empty = credit === 0n && (privateBridge || publicEmpty)
 		return empty ? "none" : null
 	}
-	return decideOwnGasSource({ publicFeeJuice: pub, privateFeeJuice: credit, ceiling, preferPrivate, publicAllowed })
+	return decideOwnGasSource({ publicFeeJuice: pub, privateFeeJuice: credit, ceiling, privateBridge, publicAllowed })
 }
 const PAYS = new Set<OwnGasSource>(["public", "private"])
 
@@ -336,6 +344,7 @@ const tokenOnlyReason = computed<string | null>(() => {
 	if (isExit.value) return null
 	const source = heldGasSource(ownGasCeiling.value, isPrivate.value)
 	if (source === null || source === "unverifiable" || PAYS.has(source)) return null
+	if (isPrivate.value) return source === "none" ? NO_PRIVATE_GAS_FOR_TOKEN_ONLY : SHORT_PRIVATE_GAS_FOR_TOKEN_ONLY
 	return source === "none" ? NO_GAS_FOR_TOKEN_ONLY : SHORT_GAS_FOR_TOKEN_ONLY
 })
 const tokenOnlyBlocked = computed<string | null>(() => (intent.value === "token" ? tokenOnlyReason.value : null))
@@ -854,7 +863,7 @@ function snapshotOf(rec: SendJournalRecord): ReceiptSnapshot {
 		l1TxHash: rec.depositTxHash,
 		l2TxHash: rec.claimTxHash,
 		fuelReceived: rec.fuel?.received,
-		addTokenLabel: token ? `ADD ${token.displaySymbol} TO WALLET` : undefined,
+		addTokenLabel: token ? `ADD ${safeDisplay(token.displaySymbol)} TO WALLET` : undefined,
 	}
 }
 
@@ -971,8 +980,9 @@ const backgroundLine = computed(() => {
 		: `${subject} is on its way — ${active.label.toLowerCase()}${eta}`
 })
 
+/** A provisional record can be rekeyed before Activity opens: hand over the canonical id. */
 function showActivity(): void {
-	document.querySelector<HTMLElement>(`[data-testid="${TESTIDS.journal}"]`)?.scrollIntoView?.({ behavior: "smooth", block: "start" })
+	shell.openActivity(backgroundedCanonical.value ?? backgroundedId.value ?? undefined)
 }
 
 async function onAddToken(): Promise<void> {

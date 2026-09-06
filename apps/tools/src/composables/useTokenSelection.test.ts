@@ -189,6 +189,24 @@ describe("useTokenSelection", () => {
 		return { selection, readBinding }
 	}
 
+	it("a viem-wrapped transport error surfaces as its plain sentence, not the wrapper", async () => {
+		const pub = makePub({ registrations })
+		const wrapped = Object.assign(
+			new Error("An unknown RPC error occurred. Details: Connect your Ethereum wallet first. Version: viem@2.55.17"),
+			{
+				details: "Connect your Ethereum wallet first.",
+				shortMessage: "An unknown RPC error occurred.",
+			},
+		)
+		;(pub as unknown as { getChainId: () => Promise<number> }).getChainId = async () => {
+			throw wrapped
+		}
+		const { selection } = harness(pub)
+		await selection.select(selectable(USDC), "l1-to-l2")
+		expect(selection.selected.value).toBeNull()
+		expect(selection.error.value).toBe("Connect your Ethereum wallet first.")
+	})
+
 	it("a wallet on another chain resolves nothing - no registration read, no metadata, an error", async () => {
 		const pub = makePub({ registrations, chainId: 1 })
 		const { selection } = harness(pub)

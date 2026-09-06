@@ -197,14 +197,20 @@ describe("decideOwnGasSource (the public balance joins once the wallet routes a 
 	const at = (
 		publicFeeJuice: bigint | null,
 		privateFeeJuice: bigint | null,
-		over: Partial<{ preferPrivate: boolean; publicAllowed: boolean }> = {},
-	) => decideOwnGasSource({ publicFeeJuice, privateFeeJuice, ceiling: 100n, preferPrivate: false, publicAllowed: true, ...over })
+		over: Partial<{ privateBridge: boolean; publicAllowed: boolean }> = {},
+	) => decideOwnGasSource({ publicFeeJuice, privateFeeJuice, ceiling: 100n, privateBridge: false, publicAllowed: true, ...over })
 
-	it("a public record prefers its public Fee Juice when it covers; a private record its private balance", () => {
+	it("a public record prefers its public Fee Juice when it covers, else its private balance", () => {
 		expect(at(100n, 100n)).toBe("public")
-		expect(at(100n, 100n, { preferPrivate: true })).toBe("private")
-		expect(at(100n, 99n, { preferPrivate: true })).toBe("public")
 		expect(at(99n, 100n)).toBe("private")
+	})
+
+	it("a private bridge pays only from its private balance - public Fee Juice never pays it, however much is held", () => {
+		expect(at(100n, 100n, { privateBridge: true })).toBe("private")
+		expect(at(100n, 99n, { privateBridge: true })).toBe("short")
+		expect(at(10n ** 21n, 0n, { privateBridge: true })).toBe("none")
+		expect(at(10n ** 21n, null, { privateBridge: true })).toBe("unverifiable")
+		expect(at(null, 100n, { privateBridge: true })).toBe("private")
 	})
 
 	it("a balance under the ceiling never pays - not even a public one the wallet would estimate lower", () => {

@@ -26,10 +26,16 @@ const CAPTION = {
 	review: "check it, then sign.",
 } as const
 
+const HINT = {
+	token: "what are you sending?",
+	amount: "how much, what arrives",
+	review: "check it, then sign",
+} as const
+
 const steps = computed<Step[]>(() => [
-	{ key: "token", label: "Token", value: props.tokenLabel },
-	{ key: "amount", label: "Amount", value: props.amountLabel },
-	{ key: "review", label: "Review" },
+	{ key: "token", label: "Token", value: props.tokenLabel, hint: HINT.token },
+	{ key: "amount", label: "Amount", value: props.amountLabel, hint: HINT.amount },
+	{ key: "review", label: "Review", hint: HINT.review },
 ])
 
 const DIRECTIONS = [
@@ -40,9 +46,10 @@ const DIRECTIONS = [
 const segment = ref<HTMLElement | null>(null)
 const panel = ref<HTMLElement | null>(null)
 
+const position = computed(() => `Step ${props.step + 1} of ${steps.value.length}`)
 const caption = computed(() => {
 	const key = (["token", "amount", "review"] as const)[props.step]
-	return `Step ${props.step + 1} of ${steps.value.length} — ${CAPTION[key]}`
+	return `${position.value} — ${CAPTION[key]}`
 })
 
 // A step swap replaces the whole panel, which would otherwise drop focus to <body> and make the
@@ -73,86 +80,86 @@ function onArrow(delta: number): void {
 
 <template>
 	<section class="wizard">
-		<div
-			ref="segment"
-			class="segment"
-			role="tablist"
-			aria-label="Send direction"
-			:data-testid="TESTIDS.sendDirection"
-			:data-direction="direction"
-			:data-locked="!canSwitchDirection"
-		>
-			<button
-				v-for="option in DIRECTIONS"
-				:key="option.value"
-				type="button"
-				role="tab"
-				class="seg"
-				:class="{ sel: direction === option.value }"
-				:aria-selected="direction === option.value"
-				:tabindex="direction === option.value ? 0 : -1"
-				:disabled="!canSwitchDirection"
-				:data-testid="option.testid"
-				@click="pick(option.value)"
-				@keydown.left.prevent="onArrow(-1)"
-				@keydown.right.prevent="onArrow(1)"
+		<div class="head">
+			<div
+				ref="segment"
+				class="segment"
+				role="tablist"
+				aria-label="Send direction"
+				:data-testid="TESTIDS.sendDirection"
+				:data-direction="direction"
+				:data-locked="!canSwitchDirection"
 			>
-				{{ option.label }}
-			</button>
+				<button
+					v-for="option in DIRECTIONS"
+					:key="option.value"
+					type="button"
+					role="tab"
+					class="seg"
+					:class="{ sel: direction === option.value }"
+					:aria-selected="direction === option.value"
+					:tabindex="direction === option.value ? 0 : -1"
+					:disabled="!canSwitchDirection"
+					:data-testid="option.testid"
+					@click="pick(option.value)"
+					@keydown.left.prevent="onArrow(-1)"
+					@keydown.right.prevent="onArrow(1)"
+				>
+					{{ option.label }}
+				</button>
+			</div>
+			<span class="position" aria-hidden="true">{{ position }}</span>
 		</div>
 
-		<div class="steps">
-			<StepStrip :steps="steps" :active="step" :completed="completed" @select="emit('goto', $event)" />
-			<p class="caption" aria-live="polite" :data-testid="TESTIDS.sendStepAnnounce">{{ caption }}</p>
-		</div>
+		<!-- The live caption carries the step's name and hint to assistive tech; sighted users read
+		     them off the rail, so it stays out of the layout. -->
+		<p class="sr-only" aria-live="polite" :data-testid="TESTIDS.sendStepAnnounce">{{ caption }}</p>
 
-		<div ref="panel" tabindex="-1" :data-testid="TESTIDS.sendStepPanel">
-			<slot v-if="step === 0" name="token" />
-			<slot v-else-if="step === 1" name="amount" />
-			<slot v-else name="review" />
+		<div class="body">
+			<StepStrip :steps="steps" :active="step" :completed="completed" orientation="vertical" @select="emit('goto', $event)" />
+			<div ref="panel" class="panel" tabindex="-1" :data-testid="TESTIDS.sendStepPanel">
+				<slot v-if="step === 0" name="token" />
+				<slot v-else-if="step === 1" name="amount" />
+				<slot v-else name="review" />
+			</div>
 		</div>
 	</section>
 </template>
 
 <style scoped>
 .wizard {
-	display: flex;
-	flex-direction: column;
-	gap: 20px;
-	padding: 24px;
+	width: 100%;
 	border: 1px solid var(--nulo-outline);
 	background: var(--card-bg);
 }
 
-.steps {
+.head {
 	display: flex;
-	flex-direction: column;
-	gap: 10px;
-}
-
-.caption {
-	margin: 0;
-	font: 500 11.5px/1.4 var(--font-mono);
-	color: var(--txt-tertiary);
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 0 20px;
+	border-bottom: 1px solid var(--nulo-outline);
 }
 
 .segment {
-	display: grid;
-	grid-template-columns: 1fr 1fr;
-	gap: 4px;
-	padding: 4px;
-	background: color-mix(in srgb, var(--txt-primary) 4%, transparent);
+	display: flex;
+	gap: 20px;
 }
 
+/* Underline tabs: the chosen direction is ink on a 2px rule that sits on the head's border. */
 .seg {
-	padding: 10px 14px;
+	margin-bottom: -1px;
+	padding: 15px 0 13px;
+	border: 0;
+	border-bottom: 2px solid transparent;
 	background: transparent;
-	border: none;
 	color: var(--txt-secondary);
-	font: 600 13px/1 var(--font-mono);
-	letter-spacing: 0.04em;
+	font: 600 11.5px/1 var(--font-mono);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
 	cursor: pointer;
-	transition: background 0.15s ease, color 0.15s ease;
+	transition: color 0.15s ease;
 }
 
 .seg:hover:not(:disabled) {
@@ -161,11 +168,62 @@ function onArrow(delta: number): void {
 
 .seg.sel {
 	color: var(--txt-primary);
-	background: color-mix(in srgb, var(--txt-primary) 10%, transparent);
+	border-bottom-color: var(--txt-primary);
 }
 
 .seg:disabled {
 	cursor: not-allowed;
 	opacity: 0.6;
+}
+
+.seg:focus-visible {
+	outline: 1px solid var(--txt-primary);
+	outline-offset: 2px;
+}
+
+.position {
+	flex: none;
+	font: 500 11px/1 var(--font-mono);
+	color: var(--txt-tertiary);
+}
+
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	white-space: nowrap;
+	border: 0;
+}
+
+.body {
+	display: grid;
+	grid-template-columns: 168px minmax(0, 1fr);
+}
+
+.body > :first-child {
+	border-right: 1px solid var(--nulo-outline);
+}
+
+.panel {
+	padding: 20px;
+}
+
+.panel:focus {
+	outline: none;
+}
+
+@media (max-width: 760px) {
+	.body {
+		grid-template-columns: 1fr;
+	}
+
+	.body > :first-child {
+		border-right: 0;
+		border-bottom: 1px solid var(--nulo-outline);
+	}
 }
 </style>

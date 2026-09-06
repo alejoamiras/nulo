@@ -24,6 +24,7 @@ import { type Ref, ref, shallowRef } from "vue"
 import { rebuildHubTokenInstance, SEND_GENERATION } from "@/contracts/bridge-generation"
 import { assertL1Chain } from "./useSend"
 import type { Direction, MetadataConflict, ResolvedToken, SelectableToken, TokenBalances, TokenWords } from "@/lib/send-model"
+import { userMessage } from "@/lib/errors"
 import { safeDisplay } from "@/lib/token-display"
 
 export interface TokenSelectionDeps {
@@ -219,7 +220,7 @@ export function useTokenSelection(deps: TokenSelectionDeps): UseTokenSelectionHa
 			if (stale(mine)) return
 			selected.value = null
 			balances.value = {}
-			error.value = e instanceof Error ? e.message : "Could not read this token."
+			error.value = userMessage(e, "Could not read this token.")
 		}
 		if (!stale(mine)) loading.value = false
 	}

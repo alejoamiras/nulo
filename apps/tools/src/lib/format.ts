@@ -2,6 +2,17 @@
  * Formatting helpers. Tiny and stable - no Aztec deps.
  */
 
+/** A uint256 has at most 78 decimal digits; anything longer (or non-numeric) is a tampered record. */
+export function isStoredAmount(raw: string): boolean {
+	return /^\d{1,78}$/.test(raw)
+}
+
+/** A persisted base-unit amount, formatted — or a dash when the stored string is not a possible
+ *  chain amount, so a hostile journal or restore file cannot make every render parse a huge number. */
+export function formatStoredAmount(raw: string, decimals: number, displayPlaces = 2): string {
+	return isStoredAmount(raw) ? formatBigInt(BigInt(raw), decimals, displayPlaces) : "—"
+}
+
 /**
  * Format a fixed-decimal bigint amount into a human-readable string.
  *

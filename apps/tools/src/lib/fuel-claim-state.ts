@@ -194,21 +194,24 @@ export function decideOwnGasCredit(i: OwnGasCreditInputs): OwnGasCredit {
  * dApp-named payer (`publicAllowed`, from the wallet's feature probe; false keeps the private-only
  * rule above). Either balance pays only when it covers the ceiling — the public reference ceiling
  * is conservative next to the wallet's own estimate, but an irreversible deposit is never signed
- * on a balance that might not — with the preferred balance first: a private record prefers its
- * private balance (a public payer names the account on chain), a public record its public one
- * (the wallet charges the exact fee, the FPC keeps the whole ceiling).
+ * on a balance that might not. A PRIVATE bridge pays only from its private balance, whatever the
+ * public one holds: a transaction's fee payer is public, and the claim publicly raises the token's
+ * supply by the bridged amount, so an account paying its own fee links itself to the L1 deposit.
+ * A public bridge prefers its public balance (the wallet charges the exact fee; the FPC keeps the
+ * whole ceiling).
  */
 export type OwnGasSource = "public" | "private" | "short" | "unverifiable" | "none"
 
 export interface OwnGasSourceInputs extends OwnGasCreditInputs {
 	/** Public Fee Juice (base units), or `null` if the `balance_of_public` read FAILED; ignored unless allowed. */
 	publicFeeJuice: bigint | null
-	preferPrivate: boolean
+	/** The bridge is private: only the private balance may pay (the fence above). */
+	privateBridge: boolean
 	publicAllowed: boolean
 }
 
 export function decideOwnGasSource(i: OwnGasSourceInputs): OwnGasSource {
-	if (!i.publicAllowed) {
+	if (i.privateBridge || !i.publicAllowed) {
 		const credit = decideOwnGasCredit(i)
 		return credit === "pays" ? "private" : credit
 	}
@@ -216,7 +219,6 @@ export function decideOwnGasSource(i: OwnGasSourceInputs): OwnGasSource {
 	const priv = i.privateFeeJuice
 	const publicCovers = pub !== null && pub >= i.ceiling
 	const privateCovers = priv !== null && priv >= i.ceiling
-	if (i.preferPrivate && privateCovers) return "private"
 	if (publicCovers) return "public"
 	if (privateCovers) return "private"
 	if (pub === null || priv === null) return "unverifiable"

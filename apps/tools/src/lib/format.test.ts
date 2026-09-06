@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { formatBigInt, formatCompact, parseAmount, parseAmountStrict, toDecimalString, trimAddress } from "./format"
+import { formatBigInt, formatCompact, formatStoredAmount, parseAmount, parseAmountStrict, toDecimalString, trimAddress } from "./format"
 
 describe("formatCompact", () => {
 	it("groups thousands and drops trailing zeros", () => {
@@ -123,5 +123,15 @@ describe("toDecimalString", () => {
 	it("round-trips at full precision", () => {
 		const value = 9_007_199_254_740_993_000_000_000_001n
 		expect(parseAmountStrict(toDecimalString(value, 18), 18)).toBe(value)
+	})
+})
+
+describe("formatStoredAmount", () => {
+	it("formats a possible chain amount and dashes anything else — a 79-digit string never reaches BigInt", () => {
+		expect(formatStoredAmount("1000000", 6)).toBe("1.00")
+		expect(formatStoredAmount("9".repeat(78), 18)).not.toBe("—")
+		expect(formatStoredAmount("9".repeat(79), 18)).toBe("—")
+		expect(formatStoredAmount("12abc", 6)).toBe("—")
+		expect(formatStoredAmount("", 6)).toBe("—")
 	})
 })

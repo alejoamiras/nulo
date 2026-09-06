@@ -435,6 +435,11 @@ describe("tri-audit round pins", () => {
 		expect(s.discoveredWallets.value).toHaveLength(1)
 	})
 
+	it("a remembered wallet name with control or bidi characters in storage is shown without them", () => {
+		localStorage.setItem("test-app:preferred-wallet", JSON.stringify({ id: "nulo", name: "Nu\u202elo\u0000" }))
+		expect(makeSession().preferredWalletName.value).toBe("Nulo")
+	})
+
 	it("truncateName is code-point-safe (no split surrogate pairs)", async () => {
 		const { truncateName } = await import("./createAztecWalletSession")
 		const emojiName = "🦊".repeat(50)
