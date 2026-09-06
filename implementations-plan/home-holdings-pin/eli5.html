@@ -104,24 +104,23 @@ pre { font-family: var(--mono); font-size: 12px; line-height: 1.5; background: v
 	<p><b>Why reuse the "hide dust" setting?</b> One number for what counts as dust across the wallet. Its description widens to say it covers holdings too.</p>
 	<p><b>What is not in this plan:</b> pasting an address into the search to add a token (agreed direction, next plan), manual ordering of pins, any marks or controls on rows, backing up pins, a horizontal token strip.</p>
 
-	<h2>Open questions</h2>
-	<div class="q"><div class="t">Send picker rows</div><p>You chose "the Send picker reuses the same list component". Both audits argued that what you actually want is the same order plus a search box, and that reusing the full component drags per-row price lookups and a button variant into a popup for no visible gain. The plan delivers order + search with the picker's existing rows. <b>Say the word if you want identical rows.</b></p></div>
-	<div class="q"><div class="t">The "Home is full" popup</div><p>The mockup showed the three pinned symbols as chips. The plan reuses the existing confirm popup in a one-button mode with the symbols written inline in the sentence. Cheaper by a file, a registration line and a test suite. <b>Flip to a dedicated popup if you want the chips.</b></p></div>
+	<h2>Decisions you made at the gate</h2>
+	<div class="q"><div class="t">Send picker rows — decided</div><p>The picker keeps its current rows and gains the shared order plus a search box past three tokens. Your words: "same order + search it's ok".</p></div>
+	<div class="q"><div class="t">The "Home is full" popup — decided</div><p>The existing confirm popup in a one-button mode, the three pinned symbols written inline in the sentence. Your words: "(1) is the right approach".</p></div>
 	<div class="q"><div class="t">Small defaults the plan chose for you</div><p>No fold inside the Send picker; picker search appears only past three tokens; the list forgets its search when you close it; pinned tokens without a price sort after pinned tokens with one; with fiat display off, only empty tokens fold (there are no prices to judge dust by); pins are per chain, not per network endpoint.</p></div>
 
 	<div class="approval">
-		<h2>Approval decision needed from you</h2>
+		<h2>Approved 2026-09-06</h2>
 		<ul>
-			<li>Confirm scope: four tabs, Home capped at three, Holdings page with search/sort/fold, pin/unpin from the token menu with a popup at the cap, old balance-display popup deleted.</li>
-			<li>Confirm the two simplifications above, or flip either.</li>
-			<li>Confirm the tier (mid) and the validation plan: unit tests every phase, smoke on a fresh build at arc ends, targeted network tests per arc, the full network suite sharded at the end.</li>
-			<li>Confirm delivery: three stacked pull requests, opened only after the code-quality loops finish. No code review pass beyond the Codex loop (your choice).</li>
-			<li>No security-hardening pass is scheduled: nothing here touches trust boundaries, secrets or CI.</li>
-			<li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+			<li>Scope: four tabs, Home capped at three, Holdings page with search/sort/fold, pin/unpin from the token menu with a popup at the cap, old balance-display popup deleted.</li>
+			<li>Tier mid. Validation: unit tests every phase, smoke on a fresh build at arc ends, targeted network tests per arc, the full network suite sharded at the end.</li>
+			<li>Delivery: three stacked pull requests, opened only after the code-quality loops finish. No code review pass beyond the Codex loop.</li>
+			<li>No security-hardening pass scheduled: nothing here touches trust boundaries, secrets or CI.</li>
+			<li>Final Codex verdict on the plan: conditional approve; its three technical conditions are folded in and its fourth (record your two decisions) is met above.</li>
 		</ul>
 	</div>
 
-	<h2>Implementation seeds (draft — finalized after approval)</h2>
+	<h2>Implementation seeds (final)</h2>
 	<p>Run exactly one of these in a Claude session started <b>inside the worktree on the homelab</b> (the plan's Bootstrap section lists the commands). <code>/goal</code> keeps the session working until the condition holds and survives a resume; <code>/loop</code> fires on an interval. Pick one.</p>
 	<p class="warning">Use exactly ONE per session. They don't compose — setting one replaces the other.</p>
 
