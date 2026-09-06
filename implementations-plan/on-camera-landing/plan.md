@@ -65,7 +65,7 @@ The approved prototype is committed beside this plan as `prototype.html` (the ar
 - Pass: all exit 0; the emitted CSS in `apps/landing/dist/assets/*.css` references `/assets/*.woff2` URLs for Space Grotesk, InterVariable and JetBrains Mono, and those files exist.
 - Layers: typecheck · lint · unit · build.
 
-### Phase 2 — Renderer: `feed.ts` + tests + `feed-dom.ts` + `scripts/headers.ts`
+### Phase 2 ✓ — Renderer: `feed.ts` + tests + `feed-dom.ts` + `scripts/headers.ts`
 - Implement the pure renderer and the DOM layer as described; the `_headers` parser and the `preview.headers` wiring.
 - `feed.test.ts` (vitest node, fixed seeds, times chosen far apart): shape and alphabet in one case (exactly `rows` lines of `cols` glyphs, every glyph in the ramp); determinism (same seed and time ⇒ identical string; a time 5 s later ⇒ a different string); gain 0 ⇒ all spaces; a Bayer fixture (a constant mid-grey input through `quantize` reproduces the known 4×4 threshold pattern); the subject blob raises mean glyph density in its 8-cell neighbourhood versus the same frame without it. `headers.test.ts`: parses the `/*` block into a header map and ignores path-scoped blocks.
 - Assumptions: no jsdom is needed; the DOM layer is exercised by the Phase 3 browser pass.
