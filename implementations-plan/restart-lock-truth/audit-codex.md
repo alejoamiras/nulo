@@ -1,0 +1,21 @@
+# Codex plan audit — 2026-09-06 (xhigh, read-only, fresh session)
+
+Verdict: `plan needs changes`. All five findings adopted; see plan.md § Audit outcome.
+
+Confidence: high. Static audit; no tests run.
+
+- **High — A stale boot can eject a live unlock.** The locked lookup can finish, then await candidate selection ([boot-session.ts:47](apps/extension/src/popup/boot-session.ts:47)). An unlock event starts—or completes—bootstrap meanwhile. Boot’s `loadProfileSeq` still matches, so the proposed increment overwrites the newer event’s ownership and clears authenticated state. Moreover, `runFencedBootstrap` only fences failure bookkeeping; it **does not cancel bootstrap mutations** ([profile-bootstrap.ts:19](apps/extension/src/popup/profile-bootstrap.ts:19)). **Fix:** capture `profileEventSeq` before the lookup and check both captured sequences immediately before destructive mutation. Same-profile/store-boolean comparison cannot distinguish this race; another lookup alone also races. Extract the small orchestration seam and add deferred-promise interleaving tests—pure decision tests and ordered service emits cannot prove it.
+
+- **Medium — An early Lock click can still leave the shell stranded.** Strict-password restore silently deletes the record ([session-manager.ts:545](apps/extension/src/wallet/services/profile/session-manager.ts:545)). Header then sets `isLogined=false` before calling Lock ([Header.vue:24](apps/extension/src/components/Header.vue:24)). Close has neither memory nor persistence to emit over, while the proposed logged-in-only boot trigger now misses cleanup. **Fix:** account for an explicit pending lock independently of that boolean. Keep the passkey exemption specifically `isPasskeyRoute && !hasProfile`, matching [app.vue:215](apps/extension/src/popup/app.vue:215); a blanket passkey-route exemption preserves stale authenticated state.
+
+- **Medium — The planned canary click conflicts with successful automatic locking.** Reconnect cleanup hides `header-lock` ([Header.vue:272](apps/extension/src/components/Header.vue:272)), so stage 4’s mandatory click can time out precisely when phase 2 works. **Fix:** assert automatic auth landing in the canary. Add cheap smoke coverage keeping the original popup open, including Lock clicked before reconnect settles. Existing smoke closes that page ([sw-resilience.test.ts:89](apps/extension/tests/e2e/sw-resilience.test.ts:89)). Prover-ON ×2 is useful integration evidence but cannot replace deterministic race tests.
+
+- **Medium — Failed baseline reads can still produce false liveness.** Existing readers convert errors to zero ([sw-resilience.test.ts:27](apps/extension/tests/e2e/sw-resilience.test.ts:27)); retained old timestamps then satisfy `>0` even after moving the read. **Fix:** require a successful, finite, positive post-stop baseline. Otherwise the approach is sound: sampling the replacement’s initial write merely costs another 10-second tick.
+
+- **Low — Recon omits one eligible caller.** The skipped strict-OFF test also calls `waitForLiveness` ([sw-resilience.test.ts:183](apps/extension/tests/e2e/sw-resilience.test.ts:183)). Migrate it while retaining its skip: seven eligible callers, nine total. The first-heartbeat deadline and cold-discovery wake constraint justify the two exemptions; no third baseline exemption appeared.
+
+Service ordering itself is sound: installation/emission and generation bump share `open()`’s mutex; close either emits before that successor or observes its committed generation and returns ([session-manager.ts:294](apps/extension/src/wallet/services/profile/session-manager.ts:294)). `silentClose()` remains separate; guarded deletion/integrity callers retain their existing single emit. Treating read errors as present is defensible for conservative UI invalidation, **not proof of deletion**; retain the RPC read-back failure.
+
+Service-only repairs the next passkey Lock click but leaves stale UI between reconnect and that click. Keep popup reconciliation and the existing auth guards; repair its ordering. No excluded bearer/timeout work is required, and no material scope creep appears.
+
+plan needs changes
