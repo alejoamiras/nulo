@@ -77,6 +77,17 @@ function makeService(overrides: {
 // session.profileId matches makeService's default getActiveProfile ({ id: "p1" })
 // so the executeAndResolve active-profile guard passes.
 const emptyPayload = { params: { operations: [] }, session: { profileId: "p1" } } as unknown as DappInteraction["payload"]
+
+/** A live popup interaction for a queued dApp request whose journal record is `journalId`. */
+const seedQueued = (internals: Internals, id: string, journalId: string) => {
+	internals.storage.set(id, {
+		id,
+		payload: emptyPayload,
+		handleId: `handle-${id}`,
+		cancellationToken: id,
+		hooks: { queuedJournalId: journalId },
+	})
+}
 const origin: LocalTxOrigin = { type: OriginType.DAPP, name: "test-dapp" }
 
 describe("DappInteractionService forwards execution hooks (does not fire the baton release)", () => {
@@ -300,15 +311,6 @@ describe("DappInteractionService cancellation linearization (first service claim
 })
 
 describe("DappInteractionService journal-driven cancel (a feed cancel closes the popup)", () => {
-	const seedQueued = (internals: Internals, id: string, journalId: string) => {
-		internals.storage.set(id, {
-			id,
-			payload: emptyPayload,
-			handleId: `handle-${id}`,
-			cancellationToken: id,
-			hooks: { queuedJournalId: journalId },
-		})
-	}
 	const cancelCalls = (internals: Internals) => internals.windowManager.cancel.mock.calls as Array<[string, unknown]>
 
 	test("cancelled journal record → manager.cancel once with the handle id and a JobCancelledError carrying the jobId; broadcast + flag", () => {
@@ -430,16 +432,6 @@ describe("DappInteractionService journal-driven cancel (a feed cancel closes the
 })
 
 describe("DappInteractionService.focusInteractionWindow (Queued card → bring the popup forward)", () => {
-	const seedQueued = (internals: Internals, id: string, journalId: string) => {
-		internals.storage.set(id, {
-			id,
-			payload: emptyPayload,
-			handleId: `handle-${id}`,
-			cancellationToken: id,
-			hooks: { queuedJournalId: journalId },
-		})
-	}
-
 	test("finds the interaction by journal id and returns the manager's answer", async () => {
 		const { svc, internals } = makeService({})
 		seedQueued(internals, "i-1", "j-1")

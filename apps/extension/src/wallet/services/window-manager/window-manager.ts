@@ -96,7 +96,7 @@ export class WindowManager {
 		this.windows
 			.getLastFocused()
 			.then((anchor) => {
-				// Settled during the lookup (timeout) — nothing to open.
+				// A timeout or cancel during the bounds lookup must prevent creation.
 				if (this.handles.get(handleId) !== handle) return undefined
 				return this.windows.create({
 					type: "popup",

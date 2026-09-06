@@ -278,7 +278,6 @@ const executionService = new ExecutionServiceClient()
 const pendingCancelJobIds = ref(new Set())
 const onCancelInFlight = buildCancelHandler(executionService, (jobId) => pendingCancelJobIds.value.add(jobId))
 
-/** Queued-card click: bring the dApp approval popup back to the front. */
 const dappInteractionService = new DappInteractionServiceClient()
 const onFocusInFlight = buildFocusHandler(dappInteractionService)
 

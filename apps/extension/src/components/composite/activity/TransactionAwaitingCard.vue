@@ -13,10 +13,9 @@
  * at that point — removing the affordance is structurally honest (better than
  * a silent no-op click).
  *
- * At `queued` the card also emits `focus` (whole-card click, or its own button
- * for keyboard and assistive tech) so the parent can raise the approval popup.
  * The card itself carries no ARIA role: it contains focusable buttons, and a
- * button role may not. The whole-card click is a pointer convenience only.
+ * button role may not. The whole-card click is a pointer convenience only; the
+ * `focus` button is the accessible control.
  */
 import { computed, type PropType } from "vue"
 import type { JobStage } from "@nulo/wallet-core/jobs"
