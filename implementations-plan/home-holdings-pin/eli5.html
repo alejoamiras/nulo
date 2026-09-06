@@ -67,14 +67,16 @@ pre { font-family: var(--mono); font-size: 12px; line-height: 1.5; background: v
 		<div><div class="k">External</div><div class="v low">low</div></div>
 		<div><div class="k">Security</div><div class="v low">low</div></div>
 	</div>
-	<p><b>Mid.</b> Nothing here is novel or irreversible, no data migrates, no third party is involved. The one thing with reach is the bottom navigation, which every end-to-end test walks through; the plan keeps the existing route and test hooks so that reach stays contained. Mid buys two independent plan audits (Codex and a second Claude) plus a final fresh-eyes Codex pass, which is what caught the four blocking issues below before anyone wrote code.</p>
+	<p><b>Mid.</b> Nothing here is novel or irreversible, no data migrates, no third party is involved. The one thing with reach is the bottom navigation, which every end-to-end test walks through; the plan keeps the existing route and test hooks so that reach stays contained. Mid buys two independent plan audits (Codex and a second Claude) plus a final fresh-eyes Codex pass; between them they rejected the plan twice and caught the issues below before anyone wrote code.</p>
 
 	<h2>What the audits changed</h2>
 	<ul>
 		<li><b>Pins remember the token's contract address, not its internal number.</b> Internal numbers get reused when a token is deleted and another is added, so a stale pin could have attached itself to the wrong token.</li>
 		<li><b>Every browser test that checks the popup must build it first.</b> The smoke suite only checks that a build exists; without this step it would silently test old code.</li>
 		<li><b>The full network test suite runs one shard at a time</b> from one checkout. Running shards in parallel from the same folder makes them kill each other's browser.</li>
-		<li><b>Token names and symbols come from contracts and are capped at 32 characters</b> wherever the pin flow shows them, so a hostile token can't wreck the popup.</li>
+		<li><b>Token names and symbols come from contracts and are capped at 32 characters</b> wherever the pin flow shows them, so a hostile token can't wreck the popup. Balance strings and decimals are parsed in one guarded place; a malformed row stays visible and unpriced instead of crashing a list.</li>
+		<li><b>Every list filters by the chain you're on.</b> The wallet's balance store returns a shared address's rows from every chain; the new Holdings page, the Send picker and Home now keep only the active chain's rows, so a testnet balance can never sneak into a mainnet total or a pin.</li>
+		<li><b>Deleting a token unpins exactly that token</b>, on that token's own profile and chain, and never touches other pins.</li>
 		<li><b>Two simplifications</b>, both flagged for you below: the Send screen's token picker keeps its current rows and only gains the new order and a search box, and the "Home is full" message reuses the existing confirm popup in a one-button mode instead of a brand-new popup.</li>
 	</ul>
 
@@ -105,7 +107,7 @@ pre { font-family: var(--mono); font-size: 12px; line-height: 1.5; background: v
 	<h2>Open questions</h2>
 	<div class="q"><div class="t">Send picker rows</div><p>You chose "the Send picker reuses the same list component". Both audits argued that what you actually want is the same order plus a search box, and that reusing the full component drags per-row price lookups and a button variant into a popup for no visible gain. The plan delivers order + search with the picker's existing rows. <b>Say the word if you want identical rows.</b></p></div>
 	<div class="q"><div class="t">The "Home is full" popup</div><p>The mockup showed the three pinned symbols as chips. The plan reuses the existing confirm popup in a one-button mode with the symbols written inline in the sentence. Cheaper by a file, a registration line and a test suite. <b>Flip to a dedicated popup if you want the chips.</b></p></div>
-	<div class="q"><div class="t">Small defaults the plan chose for you</div><p>No fold inside the Send picker; picker search appears only past three tokens; the list forgets its search when you close it; pinned tokens without a price sort after pinned tokens with one; the dust fold works even when fiat display is off; pins are per chain, not per network endpoint.</p></div>
+	<div class="q"><div class="t">Small defaults the plan chose for you</div><p>No fold inside the Send picker; picker search appears only past three tokens; the list forgets its search when you close it; pinned tokens without a price sort after pinned tokens with one; with fiat display off, only empty tokens fold (there are no prices to judge dust by); pins are per chain, not per network endpoint.</p></div>
 
 	<div class="approval">
 		<h2>Approval decision needed from you</h2>

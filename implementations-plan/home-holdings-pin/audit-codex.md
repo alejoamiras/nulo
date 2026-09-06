@@ -44,3 +44,19 @@ Verdict: `reject (with blocking findings: incomplete chain isolation, unsafe num
 | 12 | Low | Bootstrap: `jq` is required by `agent.sh:55`; the Bun check only warned; machine paths in a committed plan. **Verified.** | **Adopted.** Tool loop exits on a missing tool; Bun check exits; the plan names "the canonical clone per `~/.agents/clones.md`" and no machine path. |
 | 13 | Low | Fact 17 understates `audit:vue` (`typecheck:all`). **Verified** (`package.json:38`). | **Adopted.** |
 | — | — | Sides with: `ConfirmPopup` single mode (with a callback-absent case and an informational→destructive regression), "Home is full", `SettingItem` rows. | Recorded in the ledger; the regression test added to Phase 6. |
+
+# Final pass — round 2 (resumed with the r4 changes)
+
+Verdict: `reject (with blocking findings: malformed rows still reach unsafe rendering code, and the new unknown classification overrides pin priority)`. Confirmed every r4 adoption; seven remaining/new findings, all adopted in r5.
+
+| # | Sev | Finding (verified?) | Disposition |
+|---|---|---|---|
+| 1 | High | The numeric helpers guard ordering/folding, but `TokenCard` parses its own props (`TokenCard.vue:34` `BigInt(...)`, its own `usePrices` lookup) and the plan allowed only CSS there. **Verified.** | **Adopted.** `TokenCard` parses through `parseRawBalance` / `safeFiatOf` and renders `—` for a malformed row; `TokenList` tests mount the REAL `TokenCard` with a malformed balance and `decimals: 500`. |
+| 2 | High | `classifyRow` returned `unknown` before checking pins, so a malformed pinned token fell outside Home's cap; unknown rows' effect on the aggregate's `partial` was unspecified. **Verified** (r4 text). | **Adopted.** Pin membership is classified first and never depends on the row's numbers; a malformed row counts as an unpriced holding → `partial`. Tests for both. |
+| 3 | Medium | `BalanceView` still fetched across chains (`BalanceView.vue:190`), so the aggregate-only hero could disagree with Holdings; Phase 3 lacked an explicit Holdings foreign-chain regression. **Verified.** | **Adopted.** `forChain` on BalanceView's fetch + events (Scope 3, Phase 2 test); a colocated `holdings.test.ts` case for a foreign-chain row. |
+| 4 | Medium | A known-set snapshot taken at enqueue could prune a token added-and-pinned afterwards. | **Adopted.** The known set is read live at run time through the getter; a test covers the add-then-pin ordering. |
+| 5 | Medium | `/^\d+$/` accepts `"00"` and arbitrarily long strings; a 33rd chain could make a successful write vanish on the next read. | **Adopted.** Canonical safe-integer spelling required; the chain being written is always kept when trimming to 32. |
+| 6 | Medium | Only the symbol was clipped; the name/fiat line (`TokenCard.vue:102`) was unbounded. **Verified.** | **Adopted.** Both lines clipped; test with a long symbol AND long name. |
+| 7 | Low | A stale "loss bounded to one pin" sentence remained in Trade-offs. | **Adopted.** Removed. |
+
+Support retained for `SettingItem` rows, `ConfirmPopup` single mode and "Home is full".
