@@ -2,7 +2,7 @@
 plan: private-exit-fence
 tier: light
 driver: claude-code
-status: implemented 2026-09-06; phase 1 ✓; codex loop converged (approve); PR open
+status: merged 2026-09-06 as PR #554 (phase 1 ✓; codex loop converged, approve); phase 2 — the exit canary — measured `PRIVATE_HUB_EXIT_GAS` on the sandbox 2026-09-06 (lessons/phase-2.md), PR open
 eli5_mode: none (owner-directed follow-up of #546's fence; no ELI5)
 code_review: off
 codex_effort: high
@@ -99,6 +99,6 @@ composable, as the deposit fence does.
 | # | Point | Decision |
 |---|---|---|
 | 1 | Where the fence lives | The composable commits the payer; the wizard refuses early. Same split as the deposit fence. |
-| 2 | Exit gas limits | Reuse the claim's measured limits as the ceiling (an upper bound for a lighter transaction); a measured `PRIVATE_HUB_EXIT_GAS` is a canary follow-up. |
+| 2 | Exit gas limits | Reuse the claim's measured limits as the ceiling (an upper bound for a lighter transaction); a measured `PRIVATE_HUB_EXIT_GAS` is a canary follow-up. **Done in phase 2 (2026-09-06):** the sandbox smoke's FPC-paid private exit billed 826,543 L2 / 1,696 DA; the constant is now `{ daGas: 50_000, l2Gas: 1_900_000 }` (2.3× / 29×), see `lessons/phase-2.md`. |
 | 3 | The "no app-set fee" rule | Kept for public exits and re-scoped: the pin becomes "a public exit carries no app-set fee; a private exit names the PrivateFPC". |
 | 4 | Sponsored FPC for private exits | No: the sponsor's `sponsor_unconditionally` is a public call paid by a public contract — the payer is not the user, but the sponsor is absent on mainnet (owner ruling 2026-09-03, "no sponsorship on bridge paths") and the fence must not depend on it. |

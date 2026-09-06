@@ -406,8 +406,8 @@ describe("useHubExit", () => {
 	})
 
 	// The PrivateFPC's `getFeeLimit` over the exit's limits at the mocked fees:
-	// 100_000·10 + 2_000_000·20 = 41_000_000.
-	const EXIT_CEILING = 41_000_000n
+	// 50_000·10 + 1_900_000·20 = 38_500_000.
+	const EXIT_CEILING = 38_500_000n
 
 	it("a private exit names the PrivateFPC as payer, from the credit the account holds, at the committed ceiling", async () => {
 		h.privateBalance = EXIT_CEILING
@@ -417,7 +417,7 @@ describe("useHubExit", () => {
 		const opts = h.exitViaHub.mock.calls[0][2] as { fee?: { paymentMethod: unknown; gasSettings: Record<string, unknown> } }
 		expect(opts.fee?.paymentMethod).toBeDefined()
 		expect(opts.fee?.gasSettings).toEqual({
-			gasLimits: { daGas: 100_000, l2Gas: 2_000_000 },
+			gasLimits: { daGas: 50_000, l2Gas: 1_900_000 },
 			teardownGasLimits: { daGas: 0, l2Gas: 0 },
 			maxFeesPerGas: { feePerDaGas: 10n, feePerL2Gas: 20n },
 		})
