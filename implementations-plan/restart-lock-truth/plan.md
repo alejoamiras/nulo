@@ -126,7 +126,9 @@ Asks: none blocking. Codex is asked to attack A2 and the fence rule in item 2.
   - unit: `bun run --cwd apps/extension test`.
   - smoke trio (`sw-resilience`, `sw-restart-network`, `imported-account-lifecycle`) under
     `taskset -c 0,1` with `--retry=0` × 3; full smoke once.
-  - `connect-locked-queue-sw-restart` + `cold-wake-discovery` proverless, two cores, retry 0 × 2.
+  - `connect-locked-queue-sw-restart` + `cold-wake-discovery` + `backup-restore-sw-restart` (the
+    import page stays open across the kill — every spec that keeps a page open across
+    `stopServiceWorker` belongs here) proverless, two cores, retry 0 × 2.
   - `passkey-execution-canary` prover-ON, two cores, retry 0 × 2 (the product pin);
     `frozen-account-canary` prover-ON once.
 - Gate: `bun run lint`, `bun run --cwd apps/extension typecheck`.

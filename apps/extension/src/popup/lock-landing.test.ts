@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest"
 import { decideLockLanding } from "./lock-landing"
 
-const base = { hasProfile: false, onAuthRequiredRoute: false, isPasskeyRoute: false, hasCandidate: true }
+const base = { hasProfile: false, onAuthRequiredRoute: false, isPasskeyRoute: false, hasCandidate: true, reconnect: false }
 
 describe("decideLockLanding", () => {
 	test("a passkey-interaction route with no profile owns its ceremony: hold", () => {
@@ -25,5 +25,11 @@ describe("decideLockLanding", () => {
 
 	test("a profile selected on a page that needs no session (auth, register): settle", () => {
 		expect(decideLockLanding({ ...base, hasProfile: true })).toBe("settle")
+	})
+
+	test("a reconnect never selects a candidate: a no-profile page (import mid-restore) keeps its flow", () => {
+		expect(decideLockLanding({ ...base, reconnect: true })).toBe("settle")
+		// The restart lock itself is unaffected by the reason for the run.
+		expect(decideLockLanding({ ...base, reconnect: true, hasProfile: true, onAuthRequiredRoute: true })).toBe("lock")
 	})
 })

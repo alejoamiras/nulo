@@ -71,3 +71,30 @@ converged
 
 Loop closed at three rounds: 1 (fence covered one action of three; docs overstated), 2 (a run
 superseded by an event skipped its completion flags), 3 clean. No open items.
+
+## CI red after the loop: `backup-restore-sw-restart` scenario A (shard 3/5)
+
+Verdict text: "PRODUCT BUG (pre-finalize crash, page alive): the disconnect reached the page but
+the designed rollback never completed within 150000ms". Reproduced locally at two cores, retry 0,
+deterministic — not in the ledger, and this spec was NOT in the plan's battery (it uses the
+restore-gate rendezvous, not a liveness gate, so recon's caller table did not list it; the
+plan's "two proverless restart specs" omitted it). That omission is the process lesson.
+
+Mechanism: the spec keeps the IMPORT page open across the mid-restore kill. With the sync watcher,
+the reconnect ran a boot for the first time; the restore had not finalized, so the lookup resolved
+`locked`; the import page has no selected profile and the orphan sits in the profile list, so
+`decideLockLanding` returned `select-and-auth` and routed the page to `/popup/auth` — unmounting
+the composable that owns the rollback and the `[data-restore-stage]` marker the test polls. The
+pre-existing `landOnLockScreen` had the same branch; it never ran on a reconnect because the
+watcher never fired.
+
+Fix: a reconnect run never selects a candidate (`reconnect` in `LockLandingState`; the watcher
+passes it; mount and RETRY do not). A no-profile page that survives a restart — import
+mid-restore, register, reset — keeps its flow; the restart lock (`hasProfile` + auth-required
+route) is unchanged. `shouldAdvanceToGeneral` leaves only the auth/register routes, so no other
+reconnect path can navigate a page. Unit 21/21; the spec green after the fix (below).
+
+Re-validated after the fix (two cores, retry 0): `backup-restore-sw-restart` 3/3 (scenario A
+converges in 59s); `sw-resilience` + `sw-restart-network` + `migration` + `import-paths` × 2 →
+2/2; passkey canary prover-ON green; `connect-locked-queue-sw-restart` + `cold-wake-discovery`
+green. `backup-restore-sw-restart` is added to this plan's battery in `plan.md`.

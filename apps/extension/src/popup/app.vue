@@ -221,11 +221,12 @@ const settleUndecidedBoot = (outcome, candidate) => {
 /** No open session. Which way the shell goes is `decideLockLanding` over the shell's state at
  *  action time; `reconcileLockedBoot` fences the `lock` action against an unlock that landed
  *  through the event path while the lookup was in flight. */
-const lockLandingState = (result) => ({
+const lockLandingState = (result, reconnect) => ({
 	hasProfile: !!appStore.profile,
 	onAuthRequiredRoute: !!route.meta.isAuthRequired,
 	isPasskeyRoute: !!route.meta.isPasskeyInteraction,
 	hasCandidate: !!result.candidate,
+	reconnect,
 })
 const lockLandingActions = {
 	selectAndAuth: (result) => {
@@ -247,7 +248,7 @@ const lockLandingActions = {
 // the newer run's (or the user's own unlock's) state.
 let loadProfileSeq = 0
 
-const loadProfile = async () => {
+const loadProfile = async ({ reconnect = false } = {}) => {
 	const seq = ++loadProfileSeq
 	const isCurrent = () => seq === loadProfileSeq
 	// A new run supersedes any earlier give-up: it may well succeed this time. A retry of a
@@ -269,7 +270,7 @@ const loadProfile = async () => {
 				lastActiveProfileId: getLastActiveProfileId,
 				isCurrent,
 			}),
-		decide: (locked) => decideLockLanding(lockLandingState(locked)),
+		decide: (locked) => decideLockLanding(lockLandingState(locked, reconnect)),
 		act: lockLandingActions,
 	})
 	// The core fenced itself before resolving; this caller resumes a microtask later, and a
@@ -371,7 +372,7 @@ watch(
 watch(
 	() => isBackgroundConnected.value,
 	(connected) => {
-		if (connected) loadProfile()
+		if (connected) loadProfile({ reconnect: true })
 	},
 	{ flush: "sync" },
 )

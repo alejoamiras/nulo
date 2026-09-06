@@ -8,6 +8,11 @@
  * decision on the ROUTE rather than the logged-in flag matters — the header flips that flag
  * before the worker answers a Lock click, so a flag-keyed decision would leave such a popup
  * parked on the page it was showing.
+ *
+ * A reconnect run never SELECTS a candidate: a page with no profile selected that survives a
+ * restart owns its own flow (an import mid-restore, the register or reset rituals), and routing
+ * it to the lock screen would unmount that flow. Selecting the candidate is the initial boot's
+ * landing, and a user-pressed RETRY's.
  */
 
 export interface LockLandingState {
@@ -19,6 +24,8 @@ export interface LockLandingState {
 	isPasskeyRoute: boolean
 	/** The lock screen has a profile to unlock. */
 	hasCandidate: boolean
+	/** The run was started by a worker reconnect, not by mount or RETRY. */
+	reconnect: boolean
 }
 
 export type LockLandingAction =
@@ -33,6 +40,6 @@ export type LockLandingAction =
 
 export function decideLockLanding(state: LockLandingState): LockLandingAction {
 	if (state.isPasskeyRoute && !state.hasProfile) return "passkey-hold"
-	if (!state.hasProfile) return state.hasCandidate ? "select-and-auth" : "settle"
+	if (!state.hasProfile) return state.hasCandidate && !state.reconnect ? "select-and-auth" : "settle"
 	return state.onAuthRequiredRoute ? "lock" : "settle"
 }
