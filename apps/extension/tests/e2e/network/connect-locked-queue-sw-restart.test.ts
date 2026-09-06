@@ -1,43 +1,12 @@
-import type { Page, Target } from "puppeteer"
+import type { Page } from "puppeteer"
 import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
-import { clickByTestId, type ExtensionContext, openPopup, test, waitForHash } from "../fixtures/extension"
-import { ensureUnlocked, lockWallet } from "../fixtures/helpers"
+import { clickByTestId, openPopup, test, waitForHash } from "../fixtures/extension"
+import { ensureUnlocked, lockWallet, stopServiceWorker } from "../fixtures/helpers"
 import { openPlayground } from "../fixtures/playground"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
-
-// Mirrors the helpers in sw-restart-network.test.ts / sw-resilience.test.ts.
-// Kept inline rather than extracted because the SW-restart shape is the
-// test-case under test — making it a fixture would hide the lifecycle from the
-// reader. `worker().close()` + targetdestroyed-by-object-identity is the only
-// verified-real kill (Runtime.terminateExecution leaves the worker alive).
-
-async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
-	const swTarget = await ext.browser.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId), {
-		timeout: 15_000,
-	})
-
-	const destroyed = new Promise<void>((resolve, reject) => {
-		const timer = setTimeout(() => {
-			ext.browser.off("targetdestroyed", onDestroyed)
-			reject(new Error("stopServiceWorker: the service-worker target was still alive 15s after close()"))
-		}, 15_000)
-		function onDestroyed(target: Target) {
-			if (target !== swTarget) return
-			clearTimeout(timer)
-			ext.browser.off("targetdestroyed", onDestroyed)
-			resolve()
-		}
-		ext.browser.on("targetdestroyed", onDestroyed)
-	})
-
-	const worker = await swTarget.worker()
-	if (!worker) throw new Error("stopServiceWorker: service-worker target exposed no worker to close")
-	await worker.close()
-	await destroyed
-}
 
 /** Strictly-newer liveness heartbeat = the REPLACEMENT worker booted (the
  *  pre-kill value survives in chrome.storage.session, so truthy checks lie). */

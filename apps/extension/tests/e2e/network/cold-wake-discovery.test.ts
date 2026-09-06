@@ -1,42 +1,13 @@
-import type { Page, Target } from "puppeteer"
+import type { Page } from "puppeteer"
 import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
-import { type ExtensionContext, openPopup, test, waitForHash } from "../fixtures/extension"
-import { ensureUnlocked } from "../fixtures/helpers"
+import { openPopup, test, waitForHash } from "../fixtures/extension"
+import { ensureUnlocked, stopServiceWorker } from "../fixtures/helpers"
 import { clickPgButton, openPlayground } from "../fixtures/playground"
 import { approveDiscover, approveVerify, waitForPopup } from "../fixtures/popups"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
-
-// Mirrors the helper in connect-locked-queue-sw-restart.test.ts. Kept inline
-// rather than extracted because the SW-restart shape is the test-case under
-// test. `worker().close()` + targetdestroyed-by-object-identity is the only
-// verified-real kill.
-async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
-	const swTarget = await ext.browser.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId), {
-		timeout: 15_000,
-	})
-
-	const destroyed = new Promise<void>((resolve, reject) => {
-		const timer = setTimeout(() => {
-			ext.browser.off("targetdestroyed", onDestroyed)
-			reject(new Error("stopServiceWorker: the service-worker target was still alive 15s after close()"))
-		}, 15_000)
-		function onDestroyed(target: Target) {
-			if (target !== swTarget) return
-			clearTimeout(timer)
-			ext.browser.off("targetdestroyed", onDestroyed)
-			resolve()
-		}
-		ext.browser.on("targetdestroyed", onDestroyed)
-	})
-
-	const worker = await swTarget.worker()
-	if (!worker) throw new Error("stopServiceWorker: service-worker target exposed no worker to close")
-	await worker.close()
-	await destroyed
-}
 
 /** Strictly-newer liveness on an extension page = the REPLACEMENT worker woke
  *  AND finished boot (the pre-kill value survives in chrome.storage.session). */

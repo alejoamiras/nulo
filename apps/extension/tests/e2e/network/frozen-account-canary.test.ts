@@ -25,7 +25,7 @@ import { expect, inject } from "vitest"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, openPopup, test, waitForHash, type ExtensionContext } from "../fixtures/extension"
-import { ensureUnlocked, getAccountAddress, revealSeedPhrase } from "../fixtures/helpers"
+import { ensureUnlocked, findServiceWorkerTarget, getAccountAddress, revealSeedPhrase, stopServiceWorker } from "../fixtures/helpers"
 import { assertPgOk, formatPgMismatch, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, approveVerify, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import { TEST_PASSWORD } from "../fixtures/constants"
@@ -39,22 +39,15 @@ test("agent-runner contract: a live sandbox must be configured (no false skip)",
 	}
 })
 
-/** Mirrors backup-restore-sw-restart.test.ts: an ABSENT SW target means Chrome's MV3 reaper
- *  already delivered the restart this stage exists to exercise, so it proceeds to recovery. */
-async function stopServiceWorker(ctx: ExtensionContext): Promise<void> {
-	const swTarget = await ctx.browser
-		.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ctx.extensionId), { timeout: 5_000 })
-		.catch(() => null)
-	if (!swTarget) {
-		console.warn("[frozen-canary] no live SW target — Chrome already killed it; proceeding to recovery")
+/** A prover-ON stage can outlast Chrome's idle reaper, and nothing here wakes a worker: an absent
+ *  target IS the restart this stage exercises, so recovery proceeds; a present one gets the real
+ *  kill, whose failures propagate. */
+async function restartServiceWorker(ctx: ExtensionContext): Promise<void> {
+	if (!findServiceWorkerTarget(ctx)) {
+		console.warn("[frozen-canary] no live SW target — Chrome already stopped it; proceeding to recovery")
 		return
 	}
-	const swSession = await swTarget.createCDPSession()
-	try {
-		await swSession.send("Runtime.terminateExecution")
-	} catch {
-		// Session dies along with the SW; swallow disconnect noise.
-	}
+	await stopServiceWorker(ctx)
 }
 
 /** `grantPublicAuthwit` resolves to a bare tx-hash string; `sendTx` (NO_WAIT) resolves to
@@ -202,16 +195,15 @@ test.skipIf(!hasConfig)(
 
 		// ── Stage 5: SW restart → recovery re-derives and still operates ──
 		step("terminating the service worker")
-		// Snapshot liveness BEFORE the kill: session storage retains the pre-kill
-		// heartbeat, so a truthy check passes instantly against a stale value and
-		// the next UI wait races the worker. Strictly-newer at least proves the
-		// worker is live and writing now — it does NOT prove a respawn, since the
-		// terminate leaves this worker running and its heartbeat supplies a fresh
-		// timestamp on its own (deflake-round-3 `lessons/phase-3.md`). The stage's
-		// real assertion — that the frozen account still re-derives and operates —
-		// is unaffected. The snapshot MUST run in an extension page: chrome.storage
-		// is undefined on the playground page, where the catch's 0 would let the
-		// stale heartbeat satisfy the gate.
+		// Snapshot liveness BEFORE the kill: session storage retains the dead
+		// worker's heartbeat, so a truthy check passes instantly against a stale
+		// value and the next UI wait races the replacement. Strictly-newer is a
+		// bound, not a proof: the heartbeat ticks every 10s, so the old worker's
+		// final tick can land between this snapshot and the kill and satisfy the
+		// gate on its own; the recovery waits below carry their own budgets. The
+		// snapshot MUST run in an extension page: chrome.storage is undefined on
+		// the playground page, where the catch's 0 would let the stale heartbeat
+		// satisfy the gate.
 		const snapshotPopup = await openPopup(ctx)
 		const preKillLiveness = await snapshotPopup.evaluate(async () => {
 			try {
@@ -226,7 +218,7 @@ test.skipIf(!hasConfig)(
 		// the read itself broke (wrong page type), which would silently degrade
 		// the strictly-newer gate back to truthy.
 		expect(preKillLiveness).toBeGreaterThan(0)
-		await stopServiceWorker(ctx)
+		await restartServiceWorker(ctx)
 
 		const recoveryPopup = await openPopup(ctx)
 		await recoveryPopup.waitForFunction(

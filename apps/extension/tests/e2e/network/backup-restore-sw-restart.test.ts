@@ -45,7 +45,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect, inject } from "vitest"
-import type { Page, Target } from "puppeteer"
+import type { Page } from "puppeteer"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import {
 	clickByTestId,
@@ -60,6 +60,7 @@ import {
 	captureBalanceBaseline,
 	ensureUnlocked,
 	getAccountAddress,
+	stopServiceWorker,
 	switchToLocalNetwork,
 	waitForFreshBalanceRow,
 	waitForTokenCardAmount,
@@ -90,34 +91,6 @@ test("agent-runner contract: a live sandbox must be configured (no false skip)",
 		expect(hasConfig).toBe(true)
 	}
 })
-
-/** Terminate the SW and wait for the ORIGINAL target's destruction —
- *  `worker().close()` is Chrome's documented termination primitive; object
- *  identity on `targetdestroyed` proves THIS worker died (a fast replacement
- *  cannot be mistaken for it). `Runtime.terminateExecution` is not a kill:
- *  it aborts the running script and leaves the worker alive. */
-async function stopServiceWorker(ctx: ExtensionContext): Promise<void> {
-	const swTarget = await ctx.browser.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ctx.extensionId), {
-		timeout: 15_000,
-	})
-	const destroyed = new Promise<void>((resolve, reject) => {
-		const timer = setTimeout(() => {
-			ctx.browser.off("targetdestroyed", onDestroyed)
-			reject(new Error("stopServiceWorker: the service-worker target was still alive 15s after close()"))
-		}, 15_000)
-		function onDestroyed(target: Target) {
-			if (target !== swTarget) return
-			clearTimeout(timer)
-			ctx.browser.off("targetdestroyed", onDestroyed)
-			resolve()
-		}
-		ctx.browser.on("targetdestroyed", onDestroyed)
-	})
-	const worker = await swTarget.worker()
-	if (!worker) throw new Error("stopServiceWorker: service-worker target exposed no worker to close")
-	await worker.close()
-	await destroyed
-}
 
 /** Page-side disconnect probe: an owned port (the SW's service collection
  *  claims "profile") whose `onDisconnect` timestamps the moment Chrome
