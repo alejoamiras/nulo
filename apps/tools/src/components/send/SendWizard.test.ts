@@ -619,6 +619,8 @@ describe("SendWizard", () => {
 		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
 		await flushPromises()
 		const amountStep = () => w.findComponent({ name: "AmountStep" })
+		amountStep().vm.$emit("update:isPrivate", false)
+		await flushPromises()
 		expect(amountStep().props("tokenOnlyBlocked")).toContain("holds no gas")
 		gasHeldSelfPay.value = true
 		await flushPromises()
@@ -637,6 +639,36 @@ describe("SendWizard", () => {
 		expect(sendFn).toHaveBeenCalledTimes(1)
 	})
 
+	it("a private send never claims with public Fee Juice: token-only stays blocked on a full public balance and the choice moves to Token + gas", async () => {
+		realCeilings()
+		ownGasCeilingFor.mockImplementation(() => 10n ** 16n)
+		gasHeld.value = 0n
+		gasHeldPublic.value = 10n ** 21n
+		gasHeldSelfPay.value = true
+		const w = await wizard()
+		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
+		await flushPromises()
+		const amountStep = () => w.findComponent({ name: "AmountStep" })
+		expect(amountStep().props("isPrivate")).toBe(true)
+		expect(amountStep().props("tokenOnlyBlocked")).toContain("claims only with private gas")
+		expect(amountStep().props("intent")).toBe("token+gas")
+		amountStep().vm.$emit("update:intent", "token")
+		await flushPromises()
+		expect(amountStep().props("intent")).toBe("token+gas")
+		// Private credit under the ceiling is short, not none; enough of it releases the choice.
+		gasHeld.value = 10n ** 15n
+		await flushPromises()
+		expect(amountStep().props("tokenOnlyBlocked")).toContain("under what this claim sets aside")
+		gasHeld.value = 10n ** 17n
+		await flushPromises()
+		expect(amountStep().props("tokenOnlyBlocked")).toBeNull()
+		// The same public balance pays a PUBLIC send of the same token.
+		gasHeld.value = 0n
+		amountStep().vm.$emit("update:isPrivate", false)
+		await flushPromises()
+		expect(amountStep().props("tokenOnlyBlocked")).toBeNull()
+	})
+
 	it("a balance known to cover pays whatever the other read did - public with the private read failed, and the reverse", async () => {
 		realCeilings()
 		ownGasCeilingFor.mockImplementation(() => 10n ** 16n)
@@ -645,6 +677,8 @@ describe("SendWizard", () => {
 			w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
 			await flushPromises()
 			const amountStep = () => w.findComponent({ name: "AmountStep" })
+			amountStep().vm.$emit("update:isPrivate", false)
+			await flushPromises()
 			expect(amountStep().props("tokenOnlyBlocked")).toBeNull()
 			amountStep().vm.$emit("update:intent", "token")
 			amountStep().vm.$emit("update:amount", "1")

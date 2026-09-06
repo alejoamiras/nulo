@@ -578,6 +578,12 @@ const OWN_GAS_STOPS = {
 	unverifiable: "Couldn't check your gas - please try again in a moment.",
 	short: "Your gas is under this claim's fee ceiling at current network fees - retry when fees ease, or bridge more gas.",
 } as const
+/** A private bridge's claim is never paid from public Fee Juice (see `decideOwnGasSource`). */
+const PRIVATE_OWN_GAS_STOPS = {
+	none: "A private bridge pays its claim only from private gas, and your account holds none at the fee contract - paying from public Fee Juice would link your account to this bridge. Bridge gas privately first.",
+	unverifiable: "Couldn't check your private gas - please try again in a moment.",
+	short: "Your private gas is under this claim's fee ceiling at current network fees - retry when fees ease, or bridge more gas privately.",
+} as const
 
 /** The account's own public Fee Juice as the transaction's payer, on a wallet that routes it: the
  *  wallet sizes the limits from its own estimate and charges the exact fee; the cap is the
@@ -611,12 +617,12 @@ export async function ownGasFee(
 		publicFeeJuice: pub,
 		privateFeeJuice: credit,
 		ceiling,
-		preferPrivate: rec.isPrivate,
+		privateBridge: rec.isPrivate,
 		publicAllowed,
 	})
 	log("own-gas source", { id: rec.id, source, registers, publicAllowed, pub: fmtFj(pub), credit: fmtFj(credit), ceiling: fmtFj(ceiling) })
 	if (source === "public") return { kind: "own-gas", fee: selfPayFee(recipientAddr, maxFees) }
-	if (source !== "private") return { kind: "stop", why: OWN_GAS_STOPS[source] }
+	if (source !== "private") return { kind: "stop", why: (rec.isPrivate ? PRIVATE_OWN_GAS_STOPS : OWN_GAS_STOPS)[source] }
 	const fpc = AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)
 	const txs = ownGasTxs(shape)
 	const fee = fpcCreditFee(fpc, maxFees, txs.claim)
