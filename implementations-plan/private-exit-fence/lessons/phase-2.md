@@ -104,6 +104,11 @@ private recursion — the readings match it, so the per-note increment is the pr
 two-point fit. The upstream Schnorr artifact the smoke deploys matches the frozen one's source; not
 a sizing blocker.
 
+Round 3 over `fc3eb67d`: **approve, converged** — the zero-credit precondition establishes the
+inventory, selection uses the send's own ceiling, credit reconciliation and the nullifier delta
+corroborate the fixture, the corrected arithmetic supports the constant, the private-payer fence
+is intact.
+
 ## Follow-ups (not in this arc)
 
 - **Per-network admission limits.** `assertGasLimitsWithinNetworkLimits` is a hard refusal. The
