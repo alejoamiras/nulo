@@ -105,7 +105,7 @@ If any check fails, setup reaps the stale children and cold-starts a fresh stack
 CI runs the network suite as a **5-shard GitHub Actions matrix** (`.github/workflows/pr-network-e2e.yml`). Each shard:
 
 - Is its own ubuntu-latest VM — own anvil, own aztec node, own playground vite, own Chrome
-- Gets roughly a fifth of the network test files (77 gated files today, 1 env-gated probe skipped), assigned deterministically by vitest's `--shard=N/M` (SHA-1 hash of filename); the six files with a dedicated lane (`fee-methods`, `selfpay-phase`, `concurrent-sendtx-confirm`, `transfers`, `tx-sendTx-default`, `frozen-account-canary`) are excluded from the pool — `scripts/ci-cd/behavior-gating.test.ts` pins that list against the lanes
+- Gets roughly a fifth of the network test files (80 files today, 1 of them an env-gated probe skipped by default), assigned deterministically by vitest's `--shard=N/M` (SHA-1 hash of filename); the six files with a dedicated lane (`fee-methods`, `selfpay-phase`, `concurrent-sendtx-confirm`, `transfers`, `tx-sendTx-default`, `frozen-account-canary`) are excluded from the pool — `scripts/ci-cd/behavior-gating.test.ts` pins that list against the lanes
 - Runs in parallel with the other 4 shards
 
 **Wall time**: ~10–15 min (vs ~35–45 min unsharded). CPU minutes: ~25% more than serial (each shard pays the ~30s anvil+aztec boot cost), but the wall-time win is dramatic.
