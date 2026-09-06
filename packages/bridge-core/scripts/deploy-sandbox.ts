@@ -613,8 +613,10 @@ async function privateCreditOf(s: Smoke, fpc: ContractBase): Promise<bigint> {
 }
 
 /** The private exit's fee source, funded the way a user's is: Fee Juice bridged straight to the
- *  PrivateFPC under a claimer-bound secret, then minted into the account's credit. Sized so the
- *  exit's whole ceiling fits with a balance left to read afterwards. */
+ *  PrivateFPC under a claimer-bound secret, claimed into the FPC's public balance, then minted into
+ *  the account's credit — `mint` proves the claim by reading its nullifier rather than consuming
+ *  the message itself (`mint_and_pay_fee` is the one-transaction form). Sized so the exit's whole
+ *  ceiling fits with a balance left to read afterwards. */
 async function flowPrivateGasCredit(s: Smoke): Promise<string> {
 	const fpc = await privateFpc(s)
 	const ceiling = privateFpcFeeLimit(PRIVATE_HUB_EXIT_GAS, await predictedWorstMinFees(s.l2.node))
@@ -640,11 +642,13 @@ async function flowPrivateGasCredit(s: Smoke): Promise<string> {
 		},
 	})
 	await waitForL1ToL2Message(s.l2.node, res.fuelMessageHashHex as string, { forceBlock: s.l2.forceBlock })
+	const leafIndex = new Fr(res.fuelLeafIndex as bigint)
 	const before = await privateCreditOf(s, fpc)
-	await fpc.methods.mint(amount, salt, new Fr(res.fuelLeafIndex as bigint)).send(s.l2.sendOpts as never)
+	await s.feeJuiceL2.methods.claim(fpc.address, amount, deriveBridgeSecret(salt, s.l2.from), leafIndex).send(s.l2.sendOpts as never)
+	await fpc.methods.mint(amount, salt, leafIndex).send(s.l2.sendOpts as never)
 	const gained = (await privateCreditOf(s, fpc)) - before
 	if (gained < amount) throw new Error(`private credit rose by ${gained}, expected ${amount}`)
-	return `bridge() to the PrivateFPC, PrivateFPC.mint credited ${gained} FJ-wei of private gas to account[0]`
+	return `bridge() to the PrivateFPC, FeeJuice.claim then PrivateFPC.mint credited ${gained} FJ-wei of private gas to account[0]`
 }
 
 /** What the app names for a private exit: the FPC's `pay_fee` from held credit under the exit's
