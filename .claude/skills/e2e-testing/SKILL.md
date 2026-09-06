@@ -259,18 +259,18 @@ by identity because plain popup pages change URL under a lock redirect.
 
 - **Worker readiness is the heartbeat**, not the target: `browser.waitForTarget(service_worker)`
   means Chrome registered the script; `launchExtension` waits for `nulo:liveness` in
-  `chrome.storage.session` (30s). After a restart, gate on a heartbeat STRICTLY NEWER than the last
-  value the OLD worker wrote (the value survives it in storage; a truthy check lies). The heartbeat
-  ticks every 10s, so a snapshot taken BEFORE the kill can be beaten by the old worker's final tick
-  and pass before any replacement boots. A read taken AFTER `stopServiceWorker` returns is a safe
-  threshold — the old instance is gone, so anything newer than it came from a replacement — but it
-  may already BE the replacement's first write, in which case "strictly newer" waits one more tick;
-  that is fine for a recovery gate and wrong for a test that times the FIRST heartbeat
-  (`sw-resilience`), which must keep its pre-kill baseline and reason about the window. The callers
-  today snapshot pre-kill; the gap is not always absorbed downstream, so do not copy the pattern
-  into a new test without a downstream wait that would fail on a dead replacement. Read from an
-  extension page; a 0 means an invalid or unavailable baseline (no `chrome.storage`, key missing, or
-  the read failed), never a value to gate on.
+  `chrome.storage.session` (30s). After a restart, gate with `waitForWorkerLiveness(page, afterTs)`
+  on a heartbeat STRICTLY NEWER than `afterTs` (the dead worker's value survives in storage; a
+  truthy check lies), and take `afterTs` from `readLivenessBaseline(page)` AFTER `stopServiceWorker`
+  returned: the old instance is gone by then, so anything newer came from a replacement. The
+  heartbeat ticks every 10s, so a baseline read BEFORE the kill can be beaten by the old worker's
+  final tick and pass before any replacement boots. A post-stop read may already be the
+  replacement's first write, which costs one more tick — fine for a recovery gate, wrong for the
+  one test that TIMES the first heartbeat (`sw-resilience`), which keeps its pre-kill baseline on
+  purpose, as does `cold-wake-discovery`, which may not touch an extension page between the kill and
+  its click. `readLivenessBaseline` throws unless the read is a finite positive value: a failed
+  read turned into 0 would let any retained timestamp satisfy the gate. Read from an extension page
+  (`chrome.storage` is undefined on the playground).
 - **Read `chrome.storage` from an extension page**, never through a session on the worker target:
   that attachment is exactly what parks the worker's DevTools host across a restart (§3), and a page
   outlives the worker. `openPopup`, or the blank popup inside `launchExtension`.
@@ -302,15 +302,18 @@ by identity because plain popup pages change URL under a lock redirect.
   kill at `service-restore` must roll back, a kill at `account-state` must recover. The
   `restore-gate` rendezvous anchors the kill at the named phase; a torn refusal is the failure
   (`network/backup-restore-sw-restart.test.ts`).
-- **A popup that outlives a worker restart keeps a logged-in shell.** Under strict security the
-  replacement worker has no in-memory session; the reconnecting popup's boot lands `locked`, but
-  `landOnLockScreen` only routes to auth when no profile is selected, so an already-logged-in popup
-  stays put with `isLogined` true. Its next Lock click emits no `onActiveProfileChanged`
-  (`SessionManager.close()` emits only over an in-memory session), so nothing navigates. A passkey
-  profile's persisted record survives the restart (never silently restored) and is cleared by that
-  click; a password profile's bearerless record was already dropped at boot. A test that keeps a
-  popup open across `stopServiceWorker` locks by waiting for the record to be gone and then navigates
-  itself; a fresh `openPopup` boots from storage and lands on auth by itself (ledger #29).
+- **A popup that outlives a worker restart locks itself on reconnect.** The replacement worker
+  holds no session (a passkey profile's record survives on disk, never silently restored; a strict
+  password profile's bearerless record is dropped at boot), while the popup keeps its store. Its
+  reconnect boot resolves `locked` and, under an auth-required route with a profile selected,
+  enters the locked state through the same routine the lock event runs (`popup/lock-landing.ts`
+  decides; `popup/reconcile-locked-boot.ts` fences the action against an unlock that landed
+  through the event path meanwhile — the boot path never bumps the event sequence). An explicit
+  Lock over such a worker always announces itself: `lockActiveProfile` emits when `close()` had no
+  in-memory session to emit over. A test that keeps a popup open across `stopServiceWorker`
+  therefore waits for `#/popup/auth` to arrive on its own and never clicks Lock (the reconnect
+  cleanup hides the control); `sw-resilience`'s open-popup test and the passkey canary's stage 4
+  are the pins (ledger #29).
 - **The playground sends every tx `NO_WAIT`**: `waitForPgResult` proves the node accepted the
   submission (a real proof on the canary lane), not mining. A test that needs the block waits on the
   node (`waitForTxMined` in `fixtures/aztec.ts`), as both canaries do; the wallet-UI `transfers` flow
@@ -515,7 +518,7 @@ the sanctioned response.
 | 26 | random early-stage timeouts in unrelated tooling after many local runs | sandbox datadir on tmpfs pinned RAM via deleted-but-open LMDB files | datadir on real disk + `e2e:reap` (#310) | fixed |
 | 27 | `authwit-lifecycle` revoke pin passed before revoke existed | `handleSendTx` ignored a session-authorised `opts.from` (sent as account A) | `resolveNetworkAndAccount(requestedFrom)` | fixed, `network-e2e-required` |
 | 28 | every check green, `mergeStateStatus: BLOCKED` on a labelled PR | duplicate concurrency-cancelled runs leave FAILURE aggregators; the believed "latest-per-name" mechanism was refuted by measurement | `pr-quick.yml` dropped `labeled` triggers; blocks remain unexplained | **open** — capture evidence before remedying |
-| 29 | `passkey-execution-canary`: `waitForHash(#/popup/auth)` 15s timeout after the header lock, first seen on the first REAL restart the stage ever ran | the replacement worker holds no in-memory session, so `SessionManager.close()` clears the persisted record without emitting `onActiveProfileChanged`; the event-driven redirect never fires and the open popup keeps its page (`e2e-skill-refresh/lessons/phase-1.md`) | harness: wait for the record to be gone, then `navigateByHash("#/popup/auth")`; product shape is the owner's call | fixed in the harness; **product edge open** |
+| 29 | `passkey-execution-canary`: `waitForHash(#/popup/auth)` 15s timeout after the header lock, first seen on the first REAL restart the stage ever ran | the replacement worker holds no in-memory session, so `SessionManager.close()` clears the persisted record without emitting `onActiveProfileChanged`; the event-driven redirect never fires; the reconnect boot's `locked` result routed only when no profile was selected, so the open popup kept its page (`e2e-skill-refresh/lessons/phase-1.md`) | product: `lockActiveProfile` emits when `close()` did not; a locked reconnect boot under an auth-required route locks the shell, fenced against the event path; harness: post-stop liveness baselines, the canary asserts the automatic landing (`restart-lock-truth`) | fixed |
 
 ## 6. Editing the harness
 
