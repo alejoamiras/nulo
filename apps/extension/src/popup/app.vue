@@ -11,6 +11,7 @@ import { shouldAdvanceToGeneral } from "./should-advance-to-general"
 import { resolveBootSession } from "./boot-session"
 import { decideLockLanding } from "./lock-landing"
 import { reconcileLockedBoot } from "./reconcile-locked-boot"
+import { applyBootOutcome } from "./apply-boot-outcome"
 import { defaultConfig } from "@/wallet/config"
 import { AccountServiceClient } from "@/wallet/services/account/client"
 import { createNetworkSwitchHandler } from "@/popup/network-switch"
@@ -273,25 +274,28 @@ const loadProfile = async () => {
 	})
 	// The core fenced itself before resolving; this caller resumes a microtask later, and a
 	// reconnect can bump the sequence in between — fence again here, never on the core's word.
-	if (result.kind === "superseded" || !isCurrent()) return
-	// An event landed while the lookup was in flight: the event path owns the outcome, and this
-	// run's profile list and candidate are stale — apply nothing.
-	if (result.kind === "event-superseded") return
-	// A decision — of any kind — ends the retrying presentation; a newer run owns the next one.
-	bootRetrying.value = false
-	appStore.profiles = result.profiles
-	if (result.kind === "unreachable") return settleUndecidedBoot("unreachable", result.candidate)
-	if (result.kind === "failed") {
-		console.error("activation bootstrap failed for the open session", { profileId: result.profile.id })
-		return settleUndecidedBoot("failed", undefined)
-	}
-	// The reconcile already acted on a lock, under its fences.
-	if (result.kind === "locked") return
+	if (!isCurrent()) return
+	applyBootOutcome(result, bootOutcomeShell)
+}
 
-	appStore.isSessionChecked = true
+/** The shell as `applyBootOutcome` drives it. */
+const bootOutcomeShell = {
+	setRetrying: (retrying) => {
+		bootRetrying.value = retrying
+	},
+	setProfiles: (profiles) => {
+		appStore.profiles = profiles
+	},
+	markChecked: () => {
+		appStore.isSessionChecked = true
+	},
+	settleUndecided: settleUndecidedBoot,
+	logFailed: (profileId) => console.error("activation bootstrap failed for the open session", { profileId }),
 	// Only advance into the authed area if the session survived bootstrap (a lock
 	// mid-bootstrap leaves stillActive=false). See shouldAdvanceToGeneral.
-	if (shouldAdvanceToGeneral(result.stillActive, route.name)) router.push("/popup/general")
+	advance: (stillActive) => {
+		if (shouldAdvanceToGeneral(stillActive, route.name)) router.push("/popup/general")
+	},
 }
 
 onBeforeMount(async () => {

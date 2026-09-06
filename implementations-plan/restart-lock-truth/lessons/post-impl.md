@@ -35,3 +35,26 @@ Confirmed by codex: only the one watcher became synchronous; the client marks Co
 invoking `onConnected`, so a run started inside the callback completes its first RPC; the read-back
 throws before the new emit; all seven baselines are post-stop and not vacuous; the canary's 60s
 automatic landing replaces a 60s poll with a stronger assertion.
+
+## Round 2 — `not converged` (1 Medium) — response (verbatim)
+
+- **Medium — superseded boot leaves completion flags stuck (high confidence).** [app.vue:279](apps/extension/src/popup/app.vue:279) returns before clearing `bootRetrying` or settling `isSessionChecked`. Neither profile-event branch settles those flags.
+
+  Reproduced using the actual shell functions: retry a failed boot; a lock event arrives during the lookup and routes to auth; reconciliation returns `event-superseded`. The wallet is locked, but `bootRetrying` remains true, hiding authentication ([auth.vue:62](apps/extension/src/popup/pages/auth.vue:62)) and disabling RETRY. Recovery requires another reconnect or reopening the popup. On initial boot, the same return can leave `isSessionChecked=false`.
+
+  **Fix:** settle these completion flags for the still-current run before returning, while continuing to discard stale profiles, candidates, and routing actions. Add caller-level regression tests for initial boot and failed-boot retry superseded by a profile event; the seam-only tests cannot detect this.
+
+My unit rerun executed no tests because worker startup timed out. The separate Bun reproduction succeeded. No Vitest E2E configs ran.
+
+not converged
+
+## Round 2 — triage
+
+Adopted. The `event-superseded` early return skipped the completion bookkeeping every finished run
+owes: `bootRetrying` stayed true (auth form withheld, RETRY disabled) and on an initial boot
+`isSessionChecked` stayed false. The post-reconcile dispatch moved out of `app.vue` into
+`popup/apply-boot-outcome.ts` (`applyBootOutcome(outcome, shell)`), pure over a six-method shell
+interface, with the caller-level cases codex asked for: superseded by a run → nothing;
+superseded by an event → `retrying=false` + `checked`, no list, no candidate, no route; locked,
+unreachable, failed, active as before. `app.vue` keeps only the `isCurrent()` re-check and the
+shell wiring. Popup unit dir 742/742.
