@@ -121,3 +121,22 @@ page never selects" (`pageEstablished = reconnect && route.matched.length > 0`):
   in place — on an established page or with no candidate) and wired through `settleUndecidedBoot`.
 Codex's caller sweep found no further spec that keeps a page open across a kill outside the
 battery. Popup unit dir 751/751.
+
+## Round 5 (final verdict on the round-4 fold) — `converged` — response (verbatim)
+
+No remaining material findings (high confidence).
+
+Probes using the actual caller wiring confirmed both round-4 fixes: rejected initial navigation recovers to auth; established import pages survive both `locked` and `unreachable` reconnects. Authenticated-page locking remains intact, and a superseded mount cannot overwrite the reconnect outcome.
+
+No Vitest E2E configs ran.
+
+converged
+
+Loop closed at five rounds: 1–2 on the original diff (fence coverage; superseded-run flags), 3
+clean, 4 on the CI fix (lost mount-time boot; the unreachable landing), 5 clean. No open items.
+
+Local note: during the round-4 re-validation, `migration.test.ts`'s "crash mid-migration
+converges" went red ONCE in a five-file batch at two cores, then 4/4 solo and 5/5 in two more
+identical batch rounds. Its crash is a whole-browser close + relaunch, not `stopServiceWorker`, so
+no reconnect path runs there; treated as a two-core load flake with no fingerprint captured
+(the batch grep kept only the failing line). If it recurs, capture the error text first.
