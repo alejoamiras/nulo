@@ -75,7 +75,7 @@ The approved prototype is committed beside this plan as `prototype.html` (the ar
 - Pass: exit 0; `feed.test.ts` and `headers.test.ts` green; no complexity findings.
 - Layers: typecheck · lint · unit.
 
-### Phase 3 — Page: markup, styles, wiring, deletions
+### Phase 3 ✓ — Page: markup, styles, wiring, deletions
 - Rewrite `index.html` body from `prototype.html` with the copy corrections from the Asks; `{{release_url}}` on "Add to Chrome" (bar, hero, CTA) and "Releases"; "Tools" → `https://testnet.tools.nulo.sh`; "Source on GitHub" → the repo; "How it works" → `#see`; the skip link and `<main>` kept; the record panel titled "Public record · illustrative".
 - Write `page.css`; delete `reveal.ts` and the five old stylesheets; `main.ts` calls `mountPage()`.
 

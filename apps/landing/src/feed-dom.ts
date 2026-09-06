@@ -38,6 +38,12 @@ function sizeFeed(feed: Feed, cell: Cell): void {
 	feed.rows = Math.min(MAX_ROWS, Math.ceil(feed.host.clientHeight / cell.height) + 1)
 }
 
+function placeBox(box: HTMLElement | null, time: number): void {
+	if (!box) return
+	const p = subjectAt(time)
+	box.style.cssText = `left:${(p.x * 100).toFixed(1)}%;top:${(p.y * 100).toFixed(1)}%`
+}
+
 function drawFeed(feed: Feed, field: Field, time: number, pan: { x: number; y: number }): void {
 	feed.pre.textContent = renderFrame(field, {
 		cols: feed.cols,
@@ -139,8 +145,7 @@ function startLoop(feeds: Feed[], field: Field, hero: HTMLElement | null, loop: 
 		pan.x += (target.x - pan.x) * 0.08
 		pan.y += (target.y - pan.y) * 0.08
 		for (const feed of feeds) if (visible(feed.host)) drawFeed(feed, field, time, pan)
-		const p = subjectAt(time)
-		if (box) box.style.cssText = `left:${(p.x * 100).toFixed(1)}%;top:${(p.y * 100).toFixed(1)}%`
+		placeBox(box, time)
 		if (label) label.textContent = BOX_LABELS[Math.floor(time / 3) % BOX_LABELS.length] as string
 	}
 	requestAnimationFrame(frame)
@@ -163,7 +168,9 @@ export async function mountPage(): Promise<void> {
 	const layout = () => {
 		const cell = measureCell(feeds[0]?.pre ?? document.createElement("pre"))
 		for (const feed of feeds) sizeFeed(feed, cell)
-		if (still) for (const feed of feeds) drawFeed(feed, field, 0, { x: 0, y: 0 })
+		if (!still) return
+		for (const feed of feeds) drawFeed(feed, field, 0, { x: 0, y: 0 })
+		placeBox(document.querySelector<HTMLElement>("[data-box]"), 0)
 	}
 	await fontsReady()
 	layout()

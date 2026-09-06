@@ -3,10 +3,10 @@
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>NULO | See nothing. Own everything.</title>
+		<title>NULO | Nothing to see. Everything to own.</title>
 		<meta
 			name="description"
-			content="NULO — Privacy-first self-custody wallet for the Aztec network. Private by default. Native by design."
+			content="Nulo is a wallet for Aztec, a blockchain where your balance and your payments are private unless you decide otherwise. Everything is recorded. What can be read is up to you."
 		/>
 		<meta name="theme-color" content="#0A0908" />
 		<meta name="x-canary" content="nulo-landing" />
@@ -15,258 +15,208 @@
 		<!-- Open Graph -->
 		<meta property="og:type" content="website" />
 		<meta property="og:url" content="https://nulo.sh/" />
-		<meta property="og:title" content="NULO | See nothing. Own everything." />
+		<meta property="og:title" content="NULO | Nothing to see. Everything to own." />
 		<meta
 			property="og:description"
-			content="Privacy-first self-custody wallet for the Aztec network. Private by default. Native by design."
+			content="A wallet for Aztec. Your balance and your payments are private unless you decide otherwise. Everything is recorded. What can be read is up to you."
 		/>
 		<meta property="og:site_name" content="NULO" />
 		<meta name="twitter:card" content="summary_large_image" />
-		<meta name="twitter:title" content="NULO | See nothing. Own everything." />
+		<meta name="twitter:title" content="NULO | Nothing to see. Everything to own." />
 		<meta
 			name="twitter:description"
-			content="Privacy-first self-custody wallet for the Aztec network. Private by default. Native by design."
+			content="A wallet for Aztec. Your balance and your payments are private unless you decide otherwise. Everything is recorded. What can be read is up to you."
 		/>
 
 		<!-- Favicon -->
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-
 	</head>
 	<body>
-		<!-- Scroll progress indicator -->
-		<div class="scroll-progress" aria-hidden="true"></div>
-
-		<!-- Cursor spotlight (desktop only, injected positioning via JS) -->
-		<div class="spotlight" aria-hidden="true"></div>
-
-		<!-- Skip to content (a11y) -->
 		<a class="skip-link" href="#main">Skip to content</a>
 
-		<!-- Demo / preview status banner — always visible -->
-		<aside class="demo-banner" role="status" aria-label="Demo status">
-			<span class="demo-banner__dot" aria-hidden="true"></span>
-			<p class="demo-banner__text">
-				<strong>Demo build</strong>
-				<span class="demo-banner__sep" aria-hidden="true">·</span>
-				Nulo is a preview, not a production wallet
-				<span class="demo-banner__sep" aria-hidden="true">·</span>
-				No security audit
-				<span class="demo-banner__sep" aria-hidden="true">·</span>
-				Aztec testnet only
-				<span class="demo-banner__sep" aria-hidden="true">·</span>
-				Do not use with real funds
-			</p>
-		</aside>
+		<!-- The monitor-wall grain behind the whole page; decorative, drawn by script. -->
+		<pre class="grain" data-feed="grain" data-gain="0.75" data-drift="0.6" aria-hidden="true"></pre>
 
-		<!-- Navigation -->
-		<nav class="nav" aria-label="Main navigation">
-			<a class="nav__logo" href="/" aria-label="NULO home">NULO</a>
-			<div class="nav__actions">
-				<a class="nav__link" href="https://testnet.tools.nulo.sh">Tools</a>
-				<a class="nav__cta" href="{{release_url}}">Add to Chrome</a>
+		<header class="bar">
+			<div class="wrap">
+				<a class="brand" href="/" aria-label="NULO home"><i aria-hidden="true"></i>NULO</a>
+				<nav aria-label="Main navigation">
+					<a href="#see">How it works</a>
+					<a href="https://testnet.tools.nulo.sh">Tools</a>
+					<a class="btn" href="{{release_url}}">Add to Chrome</a>
+				</nav>
 			</div>
-		</nav>
+		</header>
 
-		<!-- Main Content -->
 		<main id="main">
-			<!-- Hero -->
-			<section class="section hero" aria-label="Hero">
-				<h1 class="hero__title">
-					<span class="hero__line">Nothing to see.</span>
-					<span class="hero__line">Everything to own.</span>
-				</h1>
-				<div class="hero__subtitle-grid">
-					<div class="hero__subtitle-col">
-						<p class="hero__subtitle">
-							The internet-native coordination layer.
-							<strong>Private by default. Native by design.</strong>
-						</p>
-						<div class="hero__divider" aria-hidden="true"></div>
-					</div>
-				</div>
-			</section>
+			<section class="hero" data-feed-host="hero" aria-labelledby="hero-title">
+				<pre class="feed" data-feed="hero" data-gain="1.15" data-drift="1.2" aria-hidden="true"></pre>
+				<p class="sr-only">Behind this text, a camera feed rendered in characters: the public blockchain, watching, and reading nothing.</p>
 
-			<!-- Install -->
-			<section
-				class="section trust"
-				id="install"
-				data-reveal
-				aria-label="Install"
-			>
-				<div class="trust__inner">
-					<p class="trust__line">
-						Self-custody wallet for Aztec. Private by default. Zero external
-						requests.
+				<div class="overlay" aria-hidden="true">
+					<i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+					<div class="slug rec"><i></i>REC</div>
+					<div class="slug ts" data-clock>2026-09-06 20:41:07</div>
+					<div class="slug cam">CAM 03 · THE BLOCKCHAIN · PUBLIC FEED<small>anyone can watch · kept forever</small></div>
+					<div class="slug sig">recorded <b>everything</b><br />readable <b>what you chose</b></div>
+					<div class="box" data-box style="left: 76%; top: 50%"><i data-box-label>SUBJECT · NOTHING TO SEE</i></div>
+				</div>
+
+				<button class="pause" type="button" data-pause aria-pressed="false">Pause</button>
+
+				<div class="plate hero__plate">
+					<h1 id="hero-title">You're on camera.<br />You choose what it sees.</h1>
+					<p>
+						Nulo is a wallet for Aztec, a blockchain where your balance and your payments are private unless you
+						decide otherwise. Everything is recorded. What can be read is up to you.
 					</p>
-					<div class="trust__actions">
-						<a class="trust__cta-primary" href="{{release_url}}">Add to Chrome</a>
-						<a class="trust__cta-secondary" href="{{release_url}}">Release notes</a>
-					</div>
-					<p class="trust__micro">
-						Self-custody &middot; Encrypted &middot; No telemetry &middot;
-						Chrome extension
-					</p>
-				</div>
-			</section>
-
-			<!-- Values: Private, Simple, Yours -->
-			<section
-				class="section values"
-				data-reveal-stagger
-				aria-label="Core values"
-			>
-				<div class="values__grid">
-					<div class="values__item">
-						<h2 class="values__heading">Private.</h2>
-						<p class="values__text">
-							A manifesto of your digital presence, visible only to you.
-							Sovereignty is not a feature, it is the bedrock.
-						</p>
-					</div>
-					<div class="values__item">
-						<h2 class="values__heading">Simple.</h2>
-						<p class="values__text">
-							The complexity of the frontier, distilled into a single click.
-							Coordination without friction.
-						</p>
-					</div>
-					<div class="values__item">
-						<h2 class="values__heading">Yours.</h2>
-						<p class="values__text">
-							One-click connection to the frontier. No intermediaries. No
-							compromise. Just you and your assets.
-						</p>
+					<div class="cta">
+						<a class="btn" href="{{release_url}}">Add to Chrome</a>
+						<a class="btn ghost" href="#see">See what the camera sees</a>
+						<small>free · about 30 seconds</small>
 					</div>
 				</div>
 			</section>
 
-			<!-- Quote -->
-			<section class="section quote" data-reveal-quote aria-label="Vision statement">
-				<div class="quote__inner">
-					<h2 class="quote__text" data-quote-words>
-						"A coordination layer where everything you do is encrypted by
-						default."
+			<section class="s" id="see" aria-labelledby="see-title">
+				<div class="wrap">
+					<p class="eb"><b>01</b> same moment, two screens</p>
+					<h2 class="h2" id="see-title">
+						The blockchain records that something happened. You decide who can read what.
 					</h2>
-					<div class="quote__line" aria-hidden="true"></div>
-				</div>
-			</section>
-
-			<!-- Extension Preview / Wallet Mockup -->
-			<section
-				class="section wallet-section"
-				data-reveal
-				aria-label="Extension preview"
-			>
-				<div class="wallet-section__inner">
-					<div class="wallet-section__mockup">
-						<div
-							class="wallet"
-							role="img"
-							aria-label="NULO wallet preview showing portfolio balance and token holdings"
-						>
-							<!-- Wallet Header -->
-							<div class="wallet__header">
-								<div class="wallet__version">NULO v1.0</div>
-								<svg
-									class="wallet__settings-icon"
-									width="20"
-									height="20"
-									viewBox="0 0 24 24"
-									fill="none"
-									stroke="currentColor"
-									stroke-width="1.5"
-									aria-hidden="true"
-								>
-									<path
-										d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"
-									/>
-									<circle cx="12" cy="12" r="3" />
-								</svg>
-							</div>
-
-							<!-- Balance -->
-							<div class="wallet__balance">
-								<p class="wallet__balance-label">Total Liquidity</p>
-								<p class="wallet__balance-value">$42,904.00</p>
-							</div>
-
-							<!-- Assets -->
-							<div class="wallet__assets">
-								<div class="wallet__asset">
-									<div class="wallet__asset-left">
-										<div
-											class="wallet__asset-icon wallet__asset-icon--eth"
-										>
-											Ξ
-										</div>
-										<div>
-											<p class="wallet__asset-name">ETH</p>
-											<p class="wallet__asset-sub">Ethereum Native</p>
-										</div>
-									</div>
-									<div class="wallet__asset-right">
-										<p class="wallet__asset-amount">12.40</p>
-										<p class="wallet__asset-usd">$32,548.12</p>
-									</div>
-								</div>
-								<div class="wallet__asset">
-									<div class="wallet__asset-left">
-										<div
-											class="wallet__asset-icon wallet__asset-icon--aztec"
-										>
-											A
-										</div>
-										<div>
-											<p class="wallet__asset-name">AZTEC</p>
-											<p class="wallet__asset-sub">Private Layer</p>
-										</div>
-									</div>
-									<div class="wallet__asset-right">
-										<p class="wallet__asset-amount">842.10</p>
-										<p class="wallet__asset-usd">$10,355.88</p>
-									</div>
+					<div class="two">
+						<div class="plate panel">
+							<div class="ttl"><span class="eb">public feed · what anyone can see</span><span class="eb">illustrative</span></div>
+							<div class="mini" data-feed-host="mini">
+								<pre class="feed" data-feed="mini" data-gain="0.9" data-drift="0.8" aria-hidden="true"></pre>
+								<div class="rows">
+									<div class="row"><span>someone paid someone</span><b>tuesday 09:42</b></div>
+									<div class="row"><span>how much</span><b>—</b></div>
+									<div class="row"><span>who</span><b>—</b></div>
 								</div>
 							</div>
-
-							<!-- Action -->
-							<div class="wallet__action">
-								<button class="wallet__action-btn" type="button">
-									Manage Assets
-								</button>
+						</div>
+						<div class="plate panel">
+							<div class="ttl"><span class="eb">your screen · what you see</span><span class="eb">private</span></div>
+							<div class="clean">
+								<div class="row">
+									<div class="l">Sent to Ana<small>Tuesday 09:42 · private</small></div>
+									<div class="r">−100.00 USDC</div>
+								</div>
+								<div class="row">
+									<div class="l">Your balance<small>only you can see this</small></div>
+									<div class="r">1,800.00 USDC<small>private</small></div>
+								</div>
+								<div class="row">
+									<div class="l">Public balance<small>anyone can see this one, on purpose</small></div>
+									<div class="r">650.00 USDC<small>public</small></div>
+								</div>
 							</div>
 						</div>
 					</div>
+					<p class="cap">
+						Private is the default. When you want a payment on the record, you make it public, and Nulo labels it
+						so you always know which is which. A few tokens only work in public. Nulo tells you before you send.
+					</p>
+				</div>
+			</section>
 
-					<div class="wallet-section__copy">
-						<span class="wallet-section__label">The Instrument</span>
-						<h2 class="wallet-section__title">
-							A tool for the new sovereign.
-						</h2>
-						<p class="wallet-section__desc">
-							Designed with the precision of an analog instrument and the
-							weight of a physical ledger. We don't build apps. We forge
-							coordination layers.
+			<section class="s" aria-labelledby="does-title">
+				<div class="wrap">
+					<p class="eb"><b>02</b> three things, plainly</p>
+					<h2 class="h2" id="does-title">What Nulo does for you.</h2>
+					<div class="three">
+						<div class="plate">
+							<span class="eb">yours</span>
+							<h3>Your money stays with you.</h3>
+							<p>
+								Nobody holds it for you. Your keys live on your computer, protected by your password or your
+								passkey, and Nulo helps you keep them safe.
+							</p>
+						</div>
+						<div class="plate">
+							<span class="eb">your call</span>
+							<h3>You decide what's seen.</h3>
+							<p>Private by default. Public when you say so. Nulo always shows you which is which.</p>
+						</div>
+						<div class="plate">
+							<span class="eb">in control</span>
+							<h3>Apps have to ask.</h3>
+							<p>
+								When a website wants to do something with your wallet, Nulo shows you exactly what it wants, in
+								plain words, before anything happens. You say yes or no.
+							</p>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			<section class="s" aria-labelledby="record-title">
+				<div class="wrap log">
+					<div>
+						<p class="eb"><b>03</b> the whole recording</p>
+						<h2 class="h2" id="record-title">Here's everything the public gets. Go ahead and read it.</h2>
+						<p class="lead">
+							This is the shape of the record the blockchain keeps of your activity: proof that things happened,
+							and no way to tell what, except the entries you chose to make public. Those are there in plain
+							words, because you wanted them to be. It's the one place on this page we let the technical words
+							in.
+						</p>
+					</div>
+					<div class="plate rec-pan">
+						<div class="ttl">
+							<span class="eb"><i class="dot" aria-hidden="true"></i>public record · illustrative</span>
+							<span class="eb" data-record-count>4,312 entries</span>
+						</div>
+						<p class="sr-only">A sample of the public record: nullifiers, commitments and encrypted logs, with a public payment now and then. The values are made up to show the shape.</p>
+						<div class="ledger" data-record aria-hidden="true">
+							<div><b>nullifier </b> 0x8f2c…a91e</div>
+							<div><b>commitment</b> 0x31d0…7b4c</div>
+							<div><b>log       </b> 0x6e0b…c2d7 (encrypted)</div>
+							<div class="record__public">public     40.00 USDC → 0x77be…02aa  (you chose this one)</div>
+							<div><b>nullifier </b> 0x0c7a…13f9</div>
+							<div><b>commitment</b> 0x9b41…e05d</div>
+							<div><b>log       </b> 0x4d1a…f082 (encrypted)</div>
+							<div><b>nullifier </b> 0x22e8…5b60</div>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			<section class="s notice-s" aria-label="Preview notice">
+				<div class="wrap">
+					<div class="plate notice">
+						<span class="tag">Preview build</span>
+						<p>
+							Nulo is a preview and hasn't been audited yet. Use small amounts you can afford to lose, or the test
+							network, and tell us what breaks.
 						</p>
 					</div>
 				</div>
 			</section>
 
-			<!-- Final CTA -->
-			<section class="section cta" data-reveal aria-label="Call to action">
-				<h2 class="cta__title">Own your<br />next click.</h2>
-				<div class="cta__actions">
-					<a class="cta__btn" href="{{release_url}}">Add to Chrome</a>
-					<a class="cta__btn-secondary" href="https://github.com/alejoamiras/nulo">Source on GitHub</a>
+			<section class="final" aria-labelledby="final-title">
+				<div class="wrap">
+					<p class="eb">nothing to see · everything to own</p>
+					<h2 id="final-title">Nothing to see.<br />Everything to own.</h2>
+					<div class="cta">
+						<a class="btn" href="{{release_url}}">Add to Chrome</a>
+						<a class="btn ghost" href="https://github.com/alejoamiras/nulo">Source on GitHub</a>
+						<small>free · about 30 seconds · chrome &amp; firefox</small>
+					</div>
 				</div>
 			</section>
 		</main>
 
-		<!-- Footer -->
-		<footer class="footer">
-			<div class="footer__links">
-				<a href="https://github.com/alejoamiras/nulo">GitHub</a>
-				<a href="https://testnet.tools.nulo.sh">Tools</a>
-					<a href="{{release_url}}">Releases</a>
+		<footer>
+			<div class="wrap">
+				<span>nulo.sh</span>
+				<span>
+					<a href="https://github.com/alejoamiras/nulo">github</a> ·
+					<a href="https://testnet.tools.nulo.sh">tools</a> ·
+					<a href="{{release_url}}">releases</a>
+				</span>
+				<span>preview build</span>
 			</div>
 		</footer>
 
