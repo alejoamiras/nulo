@@ -215,6 +215,9 @@ vi.mock("@/composables/deposit-flow", async (orig) => {
 		...actual,
 		ensurePermit2Approval: h.fn.ensurePermit2Approval,
 		resolveHubClaimSendOpts: async () => ({ kind: "opts", opts: {} }),
+		// The private exit's fee reads the credit at the PrivateFPC (a 2.2 MB artifact import in the
+		// real reader, which outlasts the harness's zero-delay settle); the wizard's held-gas stub answers.
+		readPrivateFeeJuiceBalance: async () => h.state.gasHeld.value ?? 0n,
 		recoverDepositLeg: async () => "recovered",
 		buildFeeJuiceClaimDep: h.fn.buildFeeJuiceClaimDep,
 		// The real seal caches the salt so the in-session claim needs no signature; keep that, drop
@@ -744,7 +747,7 @@ describe("send wizard smoke", () => {
 		expect(records()).toHaveLength(0)
 	})
 
-	it("an unpaused exit burns through the hub", async () => {
+	it("an unpaused private exit burns through the hub, its fee paid by the fee contract from private gas", async () => {
 		markRegistered(USDC, 6)
 		const w = await mountView()
 		await w.find(sel(TESTIDS.sendDirectionExit)).trigger("click")
@@ -758,6 +761,22 @@ describe("send wizard smoke", () => {
 
 		expect(h.fn.readContract).toHaveBeenCalledWith(expect.objectContaining({ functionName: "withdrawsPaused" }))
 		expect(h.fn.exitViaHub).toHaveBeenCalledTimes(1)
+		const opts = h.fn.exitViaHub.mock.calls[0][2] as { fee?: { paymentMethod: unknown; gasSettings: { gasLimits: unknown } } }
+		expect(opts.fee?.paymentMethod).toBeDefined()
+		expect(opts.fee?.gasSettings.gasLimits).toEqual({ daGas: 100_000, l2Gas: 2_000_000 })
+	})
+
+	it("a private exit with no private gas is blocked before the review - a public payer would link the account to it", async () => {
+		markRegistered(USDC, 6)
+		h.state.gasHeld.value = 0n
+		const w = await mountView()
+		await w.find(sel(TESTIDS.sendDirectionExit)).trigger("click")
+		await settle()
+		await pick(w, USDC)
+		await settle()
+		expect(w.find(sel(TESTIDS.sendAmountBlocked)).text()).toContain("pays its fee only from private gas")
+		expect(h.fn.exitViaHub).not.toHaveBeenCalled()
+		expect(records()).toHaveLength(0)
 	})
 
 	it("a network with no bridge renders the placeholder and instantiates nothing", async () => {

@@ -73,6 +73,13 @@ const NO_PRIVATE_GAS_FOR_TOKEN_ONLY =
 	"A private bridge claims only with private gas, and your Aztec account holds no gas at the fee contract. Choose Token + gas to arrive with some."
 const SHORT_PRIVATE_GAS_FOR_TOKEN_ONLY =
 	"A private bridge claims only with private gas, and yours is under what this claim sets aside at current network fees. Choose Token + gas to arrive with more."
+/** A private exit's fee is paid by the fee contract from private gas; a public payer would link the account to it. */
+const NO_PRIVATE_GAS_FOR_EXIT =
+	"A private withdrawal pays its fee only from private gas, and your Aztec account holds none at the fee contract. Bridge gas privately first, or withdraw publicly."
+const SHORT_PRIVATE_GAS_FOR_EXIT =
+	"A private withdrawal pays its fee only from private gas, and yours is under what it sets aside at current network fees. Bridge more gas privately, or withdraw publicly."
+const UNREAD_GAS_FOR_EXIT =
+	"Your Aztec account's private gas could not be read just now, so the withdrawal was not confirmed. Try again in a moment."
 const UNREAD_GAS_FOR_TOKEN_ONLY =
 	"Your Aztec account's gas could not be read just now, so the claim was not confirmed. Try again in a moment."
 const UNPRICED_TOKEN_ONLY =
@@ -316,8 +323,19 @@ const tokenChosen = computed(() => resolved.value !== null)
  *  balance to spend, no ceiling to check the amount against, and no burn the hub could authorize. */
 const exitBlocked = computed<string | null>(() => {
 	const token = resolved.value
-	return isExit.value && token && token.state.kind !== "registered" ? EXIT_TOKEN_NOT_REGISTERED : null
+	if (!isExit.value || !token) return null
+	if (token.state.kind !== "registered") return EXIT_TOKEN_NOT_REGISTERED
+	return isPrivate.value ? privateExitReason() : null
 })
+
+/** Why a private exit cannot go right now: the fee contract pays it from the account's private gas,
+ *  which must cover the ceiling once priced. Read the same way as a token-only claim's held gas,
+ *  with the same "unread blocks nothing here, the confirm requires it read" rule. */
+function privateExitReason(): string | null {
+	const source = heldGasSource(ownGasCeiling.value, true)
+	if (source === null || source === "unverifiable" || PAYS.has(source)) return null
+	return source === "none" ? NO_PRIVATE_GAS_FOR_EXIT : SHORT_PRIVATE_GAS_FOR_EXIT
+}
 
 /** What a claim from the account's held gas sets aside for this token, at the last price; null while unpriced. */
 const ownGasCeiling = computed(() => (resolved.value ? gasShare.ownGasCeilingFor(resolved.value.state, isPrivate.value) : null))
@@ -421,7 +439,15 @@ function mandatoryGasOf(target: SendPlan): bigint {
  *  is the ceiling, priced from live fees, and the review says so. */
 function networkFeeOf(target: SendPlan | ExitPlan): { networkFee: string; networkFeeNote: string | null } {
 	if (target.direction === "l2-to-l1") {
-		return { networkFee: "your Aztec wallet's own fee, then Ethereum gas to finish", networkFeeNote: null }
+		if (!target.isPrivate) return { networkFee: "your Aztec wallet's own fee, then Ethereum gas to finish", networkFeeNote: null }
+		const ceiling = gasShare.ownGasCeilingFor(target.token.state, true)
+		return {
+			networkFee:
+				ceiling === null
+					? "paid from the private gas you already hold on Aztec, then Ethereum gas to finish"
+					: `≈ ${formatCompact(ceiling, 18)} FJ from the private gas you already hold, then Ethereum gas to finish`,
+			networkFeeNote: "set aside in full from your gas at the fee contract - the withdrawal's fee ceiling, not its exact cost",
+		}
 	}
 	if (!target.gas || !SWAP || !fjPerTx) return heldGasFeeOf(target)
 	if (target.isPrivate) {
@@ -697,7 +723,7 @@ watch(journal.records, adoptRunRecord)
  */
 async function preflight(snapshot: ReviewSnapshot): Promise<boolean> {
 	const target = snapshot.plan
-	if (target.direction !== "l1-to-l2") return true
+	if (target.direction === "l2-to-l1") return target.isPrivate ? privateExitPreflight(snapshot) : true
 	const privateSlice = target.isPrivate && target.intent === "token+gas" ? (target.gas ?? null) : null
 	if (target.intent !== "token" && !privateSlice) return true
 	const repriced = await preflightReads(target.intent === "token", privateSlice !== null)
@@ -710,6 +736,26 @@ async function preflight(snapshot: ReviewSnapshot): Promise<boolean> {
 	if (why === undefined) return true
 	invalidateReview(why ?? undefined)
 	return false
+}
+
+/** A private exit's confirm re-reads the private gas its fee is paid from, exactly as a token-only
+ *  claim does; the composable refuses again before any authwit if the balance moved meanwhile. */
+async function privateExitPreflight(snapshot: ReviewSnapshot): Promise<boolean> {
+	const repriced = await preflightReads(true, false)
+	if (reviewed.value !== snapshot || step.value !== 2) return false
+	const why = privateExitStoodDown(snapshot.plan.token.state, repriced)
+	if (why === undefined) return true
+	invalidateReview(why)
+	return false
+}
+
+function privateExitStoodDown(state: TokenState, repriced: boolean): string | undefined {
+	if (!repriced) return UNPRICED_TOKEN_ONLY
+	const ceiling = gasShare.ownGasCeilingFor(state, true)
+	const source = ceiling === null ? null : heldGasSource(ceiling, true)
+	if (source === null || source === "unverifiable") return UNREAD_GAS_FOR_EXIT
+	if (PAYS.has(source)) return undefined
+	return source === "none" ? NO_PRIVATE_GAS_FOR_EXIT : SHORT_PRIVATE_GAS_FOR_EXIT
 }
 
 /** The confirm's re-reads, under the preflighting hold: a token-only claim needs the gas it will

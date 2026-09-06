@@ -1251,6 +1251,44 @@ describe("SendWizard", () => {
 		expect(exitFn).toHaveBeenCalledTimes(1)
 	})
 
+	it("a private exit is blocked without private gas and moves nothing; a public exit with the same balances goes through", async () => {
+		realCeilings()
+		ownGasCeilingFor.mockImplementation(() => 10n ** 16n)
+		gasHeld.value = 0n
+		gasHeldPublic.value = 10n ** 21n
+		gasHeldSelfPay.value = true
+		nextResolved = (token) => resolvedToken(token, HUB_REGISTERED)
+		const w = await wizard()
+		w.findComponent({ name: "WizardShell" }).vm.$emit("update:direction", "l2-to-l1")
+		await flushPromises()
+		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
+		await flushPromises()
+		const amountStep = () => w.findComponent({ name: "AmountStep" })
+		expect(amountStep().props("isPrivate")).toBe(true)
+		expect(amountStep().props("blockedReason")).toContain("withdrawal pays its fee only from private gas")
+		// Enough credit releases it, and the review prices the private gas set aside.
+		gasHeld.value = 10n ** 17n
+		await flushPromises()
+		expect(amountStep().props("blockedReason")).toBeNull()
+		amountStep().vm.$emit("update:amount", "1")
+		amountStep().vm.$emit("update:valid", true)
+		await flushPromises()
+		amountStep().vm.$emit("next")
+		await flushPromises()
+		const review = w.findComponent({ name: "ReviewStep" })
+		expect(review.props("estimate").networkFee).toContain("FJ from the private gas you already hold")
+		// The credit gone by confirm: the re-read stands the review down and signs nothing.
+		gasHeld.value = 0n
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(exitFn).not.toHaveBeenCalled()
+		expect(w.find(`[data-testid="${TESTIDS.sendReviewStale}"]`).text()).toContain("only from private gas")
+		// A public exit needs no private gas at all.
+		w.findComponent({ name: "AmountStep" }).vm.$emit("update:isPrivate", false)
+		await flushPromises()
+		expect(w.findComponent({ name: "AmountStep" }).props("blockedReason")).toBeNull()
+	})
+
 	it("a grant outcome for a superseded selection is discarded", async () => {
 		granted.value = []
 		grantOutcome = "stale"
