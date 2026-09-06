@@ -80,6 +80,7 @@ const SHORT_PRIVATE_GAS_FOR_EXIT =
 	"A private withdrawal pays its fee only from private gas, and yours is under what it sets aside at current network fees. Bridge more gas privately, or withdraw publicly."
 const UNREAD_GAS_FOR_EXIT =
 	"Your Aztec account's private gas could not be read just now, so the withdrawal was not confirmed. Try again in a moment."
+const UNPRICED_EXIT = "Aztec's network fees could not be re-read just now, so the withdrawal was not confirmed. Try again in a moment."
 const UNREAD_GAS_FOR_TOKEN_ONLY =
 	"Your Aztec account's gas could not be read just now, so the claim was not confirmed. Try again in a moment."
 const UNPRICED_TOKEN_ONLY =
@@ -88,6 +89,10 @@ const CEILING_NOW_PRICED_TOKEN_ONLY =
 	"The claim's fee was priced after you opened the review - it now shows what is set aside from your gas. Review it again."
 const CEILING_MOVED_TOKEN_ONLY =
 	"Aztec's network fees moved while you were on the review: the claim now sets aside more of your gas than it showed."
+const CEILING_NOW_PRICED_EXIT =
+	"The withdrawal's fee was priced after you opened the review - it now shows what is set aside from your private gas. Review it again."
+const CEILING_MOVED_EXIT =
+	"Aztec's network fees moved while you were on the review: the withdrawal now sets aside more of your private gas than it showed."
 /** The review's figure is an "≈": a tenth more than it showed is no longer that figure. */
 const CEILING_DRIFT_DIVISOR = 10n
 
@@ -181,8 +186,8 @@ interface ReviewSnapshot {
 	account: string
 	slippageBps: number | null
 	estimate: ReviewEstimate
-	/** What a token-only deposit's claim was SHOWN to set aside from held gas; null when the review
-	 *  opened unpriced, or for any other plan. */
+	/** What a token-only deposit's claim, or a private exit, was SHOWN to set aside from held gas;
+	 *  null when the review opened unpriced, or for any other plan. */
 	ownGasCeiling: bigint | null
 }
 const reviewed = ref<ReviewSnapshot | null>(null)
@@ -495,11 +500,13 @@ function freezeReview(target: SendPlan | ExitPlan): ReviewSnapshot {
 			...networkFeeOf(target),
 			txCovered,
 		},
-		ownGasCeiling:
-			target.direction === "l1-to-l2" && target.intent === "token"
-				? gasShare.ownGasCeilingFor(target.token.state, target.isPrivate)
-				: null,
+		ownGasCeiling: setsAsideHeldGas(target) ? gasShare.ownGasCeilingFor(target.token.state, target.isPrivate) : null,
 	}
+}
+
+/** The plans whose fee comes out of gas the account already holds: a token-only deposit's claim, a private exit. */
+function setsAsideHeldGas(target: SendPlan | ExitPlan): boolean {
+	return target.direction === "l2-to-l1" ? target.isPrivate : target.intent === "token"
 }
 
 /** The promise the receipt replays back to the user. */
@@ -743,19 +750,23 @@ async function preflight(snapshot: ReviewSnapshot): Promise<boolean> {
 async function privateExitPreflight(snapshot: ReviewSnapshot): Promise<boolean> {
 	const repriced = await preflightReads(true, false)
 	if (reviewed.value !== snapshot || step.value !== 2) return false
-	const why = privateExitStoodDown(snapshot.plan.token.state, repriced)
+	const why = privateExitStoodDown(snapshot.plan.token.state, repriced, snapshot.ownGasCeiling)
 	if (why === undefined) return true
 	invalidateReview(why)
 	return false
 }
 
-function privateExitStoodDown(state: TokenState, repriced: boolean): string | undefined {
-	if (!repriced) return UNPRICED_TOKEN_ONLY
+/** Same rule as a token-only claim: the credit must be known to cover the ceiling at fees re-read
+ *  now, and that ceiling must be the one the review showed (a figure that only appeared, or grew
+ *  past a tenth, after the review opened was never approved — the FPC keeps the whole ceiling). */
+function privateExitStoodDown(state: TokenState, repriced: boolean, shown: bigint | null): string | undefined {
+	if (!repriced) return UNPRICED_EXIT
 	const ceiling = gasShare.ownGasCeilingFor(state, true)
 	const source = ceiling === null ? null : heldGasSource(ceiling, true)
-	if (source === null || source === "unverifiable") return UNREAD_GAS_FOR_EXIT
-	if (PAYS.has(source)) return undefined
-	return source === "none" ? NO_PRIVATE_GAS_FOR_EXIT : SHORT_PRIVATE_GAS_FOR_EXIT
+	if (ceiling === null || source === null || source === "unverifiable") return UNREAD_GAS_FOR_EXIT
+	if (!PAYS.has(source)) return source === "none" ? NO_PRIVATE_GAS_FOR_EXIT : SHORT_PRIVATE_GAS_FOR_EXIT
+	if (shown === null) return CEILING_NOW_PRICED_EXIT
+	return ceiling > shown + shown / CEILING_DRIFT_DIVISOR ? CEILING_MOVED_EXIT : undefined
 }
 
 /** The confirm's re-reads, under the preflighting hold: a token-only claim needs the gas it will
@@ -822,7 +833,7 @@ async function onConfirm(): Promise<void> {
 	preSubmitIds = new Set(journal.records.value.map((r) => r.id))
 	reviewSaid.value = promisedLine(target)
 	try {
-		await (target.direction === "l2-to-l1" ? runExit(target) : runSend(target))
+		await (target.direction === "l2-to-l1" ? runExit(target, snapshot.ownGasCeiling) : runSend(target))
 	} finally {
 		submitting.value = false
 	}
@@ -882,8 +893,10 @@ async function runSend(target: SendPlan): Promise<void> {
 	grantState.value = grant.isGranted(target.token.l2Token) ? "idle" : "declined"
 }
 
-async function runExit(target: ExitPlan): Promise<void> {
-	const id = await exitFlow.exit(target)
+async function runExit(target: ExitPlan, approvedCeiling: bigint | null): Promise<void> {
+	// The bound the review showed, plus the same tenth the confirm tolerates.
+	const bound = approvedCeiling === null ? undefined : approvedCeiling + approvedCeiling / CEILING_DRIFT_DIVISOR
+	const id = await exitFlow.exit(target, bound)
 	if (id && ownedId.value !== id && backgroundedCanonical.value !== id) adopt(id)
 }
 

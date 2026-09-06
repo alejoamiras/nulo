@@ -89,12 +89,14 @@ export function buildExitSendOpts(from: AztecAddress) {
  *  a transaction whose L2→L1 message states the L1 recipient and amount; the account as payer
  *  links the two. Refused before any authwit exists when the credit is under the committed
  *  ceiling (limits × predicted worst fees; the FPC keeps the whole ceiling). */
-export async function privateExitFee(aztec: unknown, from: AztecAddress) {
+export async function privateExitFee(aztec: unknown, from: AztecAddress, approvedCeiling?: bigint) {
 	const [credit, maxFees] = await Promise.all([
 		readFeeJuiceOrNull("private FJ", () => readPrivateFeeJuiceBalance(aztec, from)),
 		predictedWorstMinFees(createAztecNodeClient(NODE_URL)),
 	])
 	const ceiling = privateFpcFeeLimit(PRIVATE_HUB_EXIT_GAS, maxFees)
+	// The FPC keeps the whole ceiling: a price above what the review showed is a fee nobody approved.
+	if (approvedCeiling !== undefined && ceiling > approvedCeiling) throw new ExitNeedsPrivateGasError("repriced")
 	if (credit === null) throw new ExitNeedsPrivateGasError("unverifiable")
 	if (credit < ceiling) throw new ExitNeedsPrivateGasError(credit === 0n ? "none" : "short")
 	return {
@@ -108,9 +110,10 @@ export async function privateExitFee(aztec: unknown, from: AztecAddress) {
 }
 
 const PRIVATE_EXIT_STOPS = {
-	none: "A private withdrawal pays its fee only from private gas, and your account holds none at the fee contract - paying from your wallet's default would link your account to it. Bridge gas privately first. Nothing was sent.",
+	none: "A private withdrawal pays its fee only from private gas, and your account holds none at the fee contract - your wallet's default could name your account as the public fee payer. Bridge gas privately first. Nothing was sent.",
 	short: "Your private gas is under what a private withdrawal sets aside at current network fees - retry when fees ease, or bridge more gas privately. Nothing was sent.",
 	unverifiable: "Couldn't check your private gas - please try again in a moment. Nothing was sent.",
+	repriced: "Aztec's network fees rose past what the review showed for this withdrawal. Review it again. Nothing was sent.",
 } as const
 
 export class ExitNeedsPrivateGasError extends Error {
@@ -317,6 +320,7 @@ interface ExitCtx {
 	from: string
 	fromAddr: AztecAddress
 	plan: ExitPlan
+	approvedCeiling?: bigint
 	nonce: Fr
 	sendOpts: ReturnType<typeof buildExitSendOpts>
 	/** The private exit's payer, read in the preflight; a public exit has none. */
@@ -418,7 +422,7 @@ async function readOnlyPreflight(ctx: ExitCtx, l1: ReturnType<typeof useL1Wallet
 	await assertExitsOpen(l1, ctx.aztec, ctx.from)
 	await assertHubBinding(ctx)
 	await assertExitBalance(ctx)
-	if (ctx.plan.isPrivate) ctx.fee = await privateExitFee(ctx.aztec, ctx.fromAddr)
+	if (ctx.plan.isPrivate) ctx.fee = await privateExitFee(ctx.aztec, ctx.fromAddr, ctx.approvedCeiling)
 }
 
 /**
@@ -442,8 +446,9 @@ async function authorizeExit(ctx: ExitCtx, open: () => void): Promise<ExitAuth> 
 }
 
 export interface HubExitComposable {
-	/** The record id, or "" when the exit was refused before anything was authorised (see `error`). */
-	exit(plan: ExitPlan): Promise<string>
+	/** The record id, or "" when the exit was refused before anything was authorised (see `error`).
+	 *  `approvedCeiling`: the private gas the review showed set aside; a higher price at send refuses. */
+	exit(plan: ExitPlan, approvedCeiling?: bigint): Promise<string>
 	busy: Ref<boolean>
 	error: Ref<string | null>
 	/** Which side refused the exit before anything was authorised — a state the user waits out, not a failure. */
@@ -475,7 +480,7 @@ function openExitRecord(base: SendWithdrawRecord, isPrivate: boolean): void {
  *  that replaced it, must refuse here rather than at the authwit. */
 export const EXIT_NOT_GRANTED = "Your wallet hasn't granted access to this token - pick it again to request access. Nothing was sent."
 
-async function performExit(plan: ExitPlan, d: ExitDeps): Promise<string> {
+async function performExit(plan: ExitPlan, d: ExitDeps, approvedCeiling?: bigint): Promise<string> {
 	d.error.value = null
 	const aztec = d.bridgeWallet.wallet.value
 	const from = d.bridgeWallet.selectedAccount.value
@@ -491,6 +496,7 @@ async function performExit(plan: ExitPlan, d: ExitDeps): Promise<string> {
 			from,
 			fromAddr: AztecAddress.fromStringUnsafe(from),
 			plan,
+			approvedCeiling,
 			nonce: Fr.random(),
 			sendOpts: buildExitSendOpts(AztecAddress.fromStringUnsafe(from)),
 			token: await Contract.at(AztecAddress.fromStringUnsafe(plan.token.l2Token), TokenContractArtifact, aztec as never),
@@ -556,9 +562,9 @@ export function useHubExit(): HubExitComposable {
 	let disposed = false
 
 	return {
-		exit: (plan: ExitPlan) => {
+		exit: (plan: ExitPlan, approvedCeiling?: bigint) => {
 			paused.value = null
-			return disposed ? Promise.resolve("") : withOperation(() => performExit(plan, deps))
+			return disposed ? Promise.resolve("") : withOperation(() => performExit(plan, deps, approvedCeiling))
 		},
 		busy,
 		error,

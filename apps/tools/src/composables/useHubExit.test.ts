@@ -426,6 +426,16 @@ describe("useHubExit", () => {
 		expect(sim.fee).toBe(opts.fee)
 	})
 
+	it("a private exit priced above the bound the review approved is refused, however much credit is held", async () => {
+		h.privateBalance = 10n * EXIT_CEILING
+		const exit = useHubExit()
+		expect(await exit.exit(plan({ isPrivate: true }), EXIT_CEILING - 1n)).toBe("")
+		expect(exit.error.value).toMatch(/fees rose past what the review showed/)
+		expect(h.createAuthWit).not.toHaveBeenCalled()
+		expect(useBridgeJournal().records.value).toHaveLength(0)
+		expect(await exit.exit(plan({ isPrivate: true }), EXIT_CEILING)).toBe(EXIT_TX)
+	})
+
 	it("a private exit short of private gas is refused before any authwit, opens no record, and says why", async () => {
 		h.privateBalance = EXIT_CEILING - 1n
 		const exit = useHubExit()
@@ -438,7 +448,7 @@ describe("useHubExit", () => {
 		h.privateBalance = 5_000_000_000n
 		h.fpcCredit = 0n
 		expect(await exit.exit(plan({ isPrivate: true }))).toBe("")
-		expect(exit.error.value).toMatch(/only from private gas.*link your account/)
+		expect(exit.error.value).toMatch(/only from private gas.*public fee payer/)
 	})
 
 	it("journals a schema-3 exit bound to THIS token's clone and the hub, keyed by its exit tx", async () => {

@@ -96,7 +96,7 @@ const sendBusy = ref(false)
 const sendFn = vi.fn(async (): Promise<string> => "")
 const sendDispose = vi.fn()
 const exitError = ref<string | null>(null)
-const exitFn = vi.fn(async (): Promise<string> => "")
+const exitFn = vi.fn(async (_plan: unknown, _approvedCeiling?: bigint): Promise<string> => "")
 const exitDispose = vi.fn()
 
 const readContract = vi.fn(async () => "0x0000000000000000000000000000000000000000")
@@ -1277,9 +1277,33 @@ describe("SendWizard", () => {
 		await flushPromises()
 		const review = w.findComponent({ name: "ReviewStep" })
 		expect(review.props("estimate").networkFee).toContain("FJ from the private gas you already hold")
-		// The credit gone by confirm: the re-read stands the review down and signs nothing.
-		gasHeld.value = 0n
+		// Fees up by more than a tenth under the review, credit ample: the confirm signs nothing — the
+		// fee contract would keep the whole new ceiling, which nobody approved.
+		gasHeld.value = 10n ** 21n
+		ownGasCeilingFor.mockImplementation(() => 10n ** 16n + 10n ** 15n + 1n)
 		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(exitFn).not.toHaveBeenCalled()
+		expect(w.find(`[data-testid="${TESTIDS.sendReviewStale}"]`).text()).toContain("fees moved")
+		// Back at the review with the price steady: the exit is sent with the approved bound (the
+		// shown figure plus the tenth the confirm tolerates).
+		ownGasCeilingFor.mockImplementation(() => 10n ** 16n)
+		const step = w.findComponent({ name: "AmountStep" })
+		step.vm.$emit("update:amount", "1")
+		step.vm.$emit("update:valid", true)
+		await flushPromises()
+		step.vm.$emit("next")
+		await flushPromises()
+		const again = w.findComponent({ name: "ReviewStep" })
+		again.vm.$emit("confirm")
+		await flushPromises()
+		expect(exitFn).toHaveBeenCalledTimes(1)
+		expect(exitFn.mock.calls[0]?.[1]).toBe(10n ** 16n + 10n ** 15n)
+		// The exit stub refuses, so the review stays up. The credit gone by the next confirm: the
+		// re-read stands the review down and signs nothing.
+		exitFn.mockClear()
+		gasHeld.value = 0n
+		again.vm.$emit("confirm")
 		await flushPromises()
 		expect(exitFn).not.toHaveBeenCalled()
 		expect(w.find(`[data-testid="${TESTIDS.sendReviewStale}"]`).text()).toContain("only from private gas")
