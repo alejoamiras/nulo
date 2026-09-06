@@ -9,7 +9,7 @@ import { AccountService } from "@/wallet/services/account/service"
 import { DappSessionService, AccessLevel, type DappSession } from "@/wallet/services/dapp-session/service"
 import { ExecutionService, type Operation, type OperationKind } from "@/wallet/services/execution/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
-import { JobCancelledError } from "@nulo/extension-messaging/errors"
+import { JobCancelledError, UserRejectedError } from "@nulo/extension-messaging/errors"
 import { OriginType, type LocalTxOrigin } from "@/wallet/services/transaction/service"
 import { getRandomHex, Lock } from "@/wallet/utils"
 import type { WindowManager } from "@/wallet/services/window-manager/window-manager"
@@ -86,6 +86,38 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		this.dappSessionService = services.get(DappSessionService.name)
 		this.executionService = services.get(ExecutionService.name)
 		this.operationJournal = services.get(OperationJournalService.name)
+		// A feed cancel lands in the journal only (`cancelJob` → queued → cancelled);
+		// the open approval popup and the dApp's pending promise learn of it here.
+		this.operationJournal.onOperationUpdated.add((record) => {
+			if (record.progress.stage === "cancelled") this.cancelInteractionForJournal(record.id)
+		})
+	}
+
+	/** Close the approval popup of a live interaction whose queued journal
+	 *  record was cancelled, rejecting the dApp with the structured cancel.
+	 *  Idempotent; a miss is normal — an already-approved request has left
+	 *  `storage`, and the claim helper refuses its cancelled record instead. */
+	private cancelInteractionForJournal(journalId: string): void {
+		const interaction = [...this.storage.values()].find((x) => x.hooks?.queuedJournalId === journalId)
+		if (!interaction || interaction.cancelledAt !== undefined) return
+		// Flag before broadcasting or settling so a racing approve cannot claim
+		// the interaction; the settle is what closes the window.
+		interaction.cancelledAt = Date.now()
+		this.emit("onInteractionCancelled", interaction.id)
+		this.windowManager.cancel(interaction.handleId, new JobCancelledError("Transaction cancelled by user", { jobId: journalId }))
+	}
+
+	/** The subscription cannot see an interaction registered after the cancel
+	 *  fired; one read after registration closes that gap. The journal writes
+	 *  before it emits, so a cancel this read misses emits after registration
+	 *  and the subscription catches it. Fire-and-forget: settlement never waits
+	 *  on storage, and a failed read leaves the window owned by its handle. */
+	private async reconcileCancelledJournal(journalId: string): Promise<void> {
+		const record = await this.operationJournal.getOperation(journalId).catch((err: unknown) => {
+			this.logDebug(`reconcile: journal read failed for ${journalId}: ${getErrorMessage(err)}`)
+			return undefined
+		})
+		if (record && record.progress.stage !== "queued") this.cancelInteractionForJournal(journalId)
 	}
 
 	public async getInteractionPayload(id: string): Promise<ExecutionPayload | CapabilityPayload | DiscoveryPayload> {
@@ -151,7 +183,10 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			return
 		}
 		this.storage.delete(id)
-		this.windowManager.cancel(interactionRequest.handleId, reason)
+		// Typed so the dApp sees EIP-1193 4001 / USER_REJECTED. `reason` is
+		// popup-authored and forwarded verbatim to the dApp — never route a
+		// dApp-influenced string here.
+		this.windowManager.cancel(interactionRequest.handleId, new UserRejectedError(reason))
 	}
 
 	private async executeAndResolve(
@@ -324,6 +359,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 				this.storage.delete(id)
 			})
 		})
+		if (hooks?.queuedJournalId) void this.reconcileCancelledJournal(hooks.queuedJournalId)
 		return pending
 	}
 

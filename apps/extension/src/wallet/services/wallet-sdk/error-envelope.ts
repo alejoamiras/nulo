@@ -25,6 +25,7 @@ import {
 	TooManyPendingError,
 	DuplicateInitializationError,
 	UnsupportedMethodError,
+	UserRejectedError,
 } from "@nulo/extension-messaging/errors"
 import type { WalletResponse } from "@aztec/wallet-sdk/types"
 
@@ -37,6 +38,16 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 				walletErrorCode: JobCancelledError.CODE,
 				jobId: (error.details as { jobId?: string } | undefined)?.jobId,
 			},
+		}
+	}
+	if (error instanceof UserRejectedError) {
+		// USER_REJECTED distinguishes the popup's Reject from a journal
+		// cancellation (JOB_CANCELLED); same 4001. The message passes through:
+		// it is wallet-authored.
+		return {
+			code: 4001,
+			message: error.message,
+			data: { walletErrorCode: UserRejectedError.CODE },
 		}
 	}
 	if (error instanceof CapabilityNotGrantedError) {

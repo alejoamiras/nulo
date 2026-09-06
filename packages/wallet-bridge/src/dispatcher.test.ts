@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll } from "vitest"
-import { CapabilityNotGrantedError, JobCancelledError } from "@nulo/extension-messaging/errors"
+import { CapabilityNotGrantedError, JobCancelledError, UserRejectedError } from "@nulo/extension-messaging/errors"
 import { unwrapOperationResult, WalletSdkDispatcher } from "./dispatcher"
 import type { Capability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
 import type { CapabilityResult } from "./dapp-interaction-protocol"
@@ -133,13 +133,16 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 	test("user-reject persists rejection for all delta items, then re-throws", async () => {
 		const session = makeSession()
 		const { writer, calls } = makeSessionWriter(session)
+		// The popup's Reject arrives as this typed instance; the dispatcher must
+		// rethrow it unchanged so the wallet-sdk envelope can classify it as 4001.
+		const rejection = new UserRejectedError("User rejected")
 		const dispatcher = makeDispatcher(writer, async () => {
-			throw new Error("User rejected")
+			throw rejection
 		})
 
 		const manifest = { capabilities: [{ type: "data" }, { type: "contracts" }] }
 
-		await expect(dispatcher.dispatch("requestCapabilities", [manifest], ctx)).rejects.toThrow("User rejected")
+		await expect(dispatcher.dispatch("requestCapabilities", [manifest], ctx)).rejects.toBe(rejection)
 
 		expect(calls.setRejections).toHaveLength(1)
 		const rejected = calls.setRejections[0]
