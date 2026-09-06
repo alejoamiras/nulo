@@ -47,3 +47,17 @@ Cosmetic: the phase-3 migration script's first pass matched only two of the loca
 comments; a broadened pattern finished the other five. `grep` for `waitForLiveness(` /
 `readLiveness(` over `tests/e2e` is the completeness check (only `ensureUnlocked`'s diagnostic
 closure remains, which is not a gate).
+
+## The finding the open-popup pin produced first (2026-09-06)
+
+First battery: the new open-popup test timed out waiting for `#/popup/auth` (and the strict-mode
+test behind it failed as a cascade, inheriting a locked wallet). The popup never re-ran its boot
+on reconnect: `background/client.ts`'s `onDisconnect` calls `disconnect()` then `connect()`, and
+`chrome.runtime.connect` returns at once (it wakes a dead worker asynchronously), so
+`isBackgroundConnected` goes false → true inside ONE synchronous callback. `app.vue`'s watcher on
+that flag was batched (default flush), saw no net change, and never called `loadProfile()`. The
+2026-09-02 comment "mount and each background reconnect start a run" was true only for reconnects
+that straddled a tick. Fix: `{ flush: "sync" }` on that watcher, so the false and the true both
+fire and the true starts the run. With it, the open popup locks itself in ~5s under two cores;
+`sw-resilience` 4/4 at `--retry=0`. `EventHandler.add` dedupes, so the run's repeated
+`onActiveProfileChanged.add` stacks nothing.
