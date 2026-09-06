@@ -5,7 +5,9 @@
 - **Worktree**: `home-holdings-pin` / branch `worktree-home-holdings-pin` off `dev@2a3d2d87` (#556). Created on the Mac, pushed, **executed on the homelab** in a fresh session — § Bootstrap is written for that session.
 - **Owner decisions (2026-09-06)**: four tabs HOME · HOLDINGS · HISTORY · SETTINGS; Home shows three token rows and a "View all"; a Holdings page with search, value/name sort, and one fold for empty + under-dust tokens reusing the EXISTING dust setting; "Pin to Home" / "Unpin from Home" in the token page's "⋯" menu, cap 3, a 4th pin opens an informational popup; **no chip, glyph or control on rows**; the Send picker shows the same order and gets search; the balance-display popup is retired; no horizontal strip; paste-an-address-to-add is a later plan.
 - **Design reference**: the round-4b mockups (interactive, shared pin state) live at the Claude Artifact `https://claude.ai/code/artifact/1b64e873-a804-4262-8818-55d6481b7bef`. Everything a fresh session needs from them is restated in § Scope and § Copy; the artifact is for taste, not for facts.
-- **Revision**: r3 — r2 folded codex round 1 (`audit-codex.md`, reject → adopted); r3 folds the fable audit (`audit-fable.md`, conditional approve → adopted, two of its recommendations taken and flagged at the gate).
+- **ELI5**: Artifact `https://claude.ai/code/artifact/5366dd8f-9f9e-413a-833d-44168c159aec`, source
+  `implementations-plan/home-holdings-pin/eli5.html` (redeploy the same file to update the same URL).
+- **Revision**: r4 — r2 folded codex round 1 (`audit-codex.md`, reject → adopted); r3 folded the fable audit (`audit-fable.md`, conditional approve → adopted, two of its recommendations taken and flagged at the gate); r4 folds the fresh-context final codex pass (reject → adopted: chain isolation, numeric parsing, pin-write scope).
 
 ## Why
 
@@ -38,38 +40,47 @@ In:
    (`holdings-summary`: fiat total + "N tokens", "priced assets only" when partial; the fiat figure
    hidden under the fiat kill-switch), a loading state (design `LoadingState`) until the first fetch
    resolves, an error line if it throws, then one `TokenList`.
-5. **`TokenList`** (new L4 module, presentational, Holdings is its one consumer): sticky search
-   (`holdings-search`, symbol/name substring + contract prefix, literal, no sanitizer), a section
+5. **`TokenList`** (new L4 module, presentational, Holdings is its one consumer): sticky search — a
+   native `<input data-testid="holdings-search">` in a bordered wrapper, so e2e never needs a
+   structural selector (symbol/name substring + contract prefix, literal, no sanitizer), a section
    header with the count and a value/name sort toggle (`holdings-sort`), pinned rows above a dashed
    rule (`token-list-divider`), the rest in sort order, one fold row (`holdings-fold`) hiding empty
    and under-dust tokens with the label `N hidden · X empty · Y under $T` (or `N empty` when the
-   threshold is 0), and the existing `ListStatusMessage variant="no-results"` for a miss. Rows are the
-   unchanged `TokenCard`. Local state (query, sort, fold) lives in the component and resets whenever
-   it mounts.
+   threshold is 0), and the existing `ListStatusMessage variant="no-results"` for a miss. Rows are
+   `TokenCard`, whose symbol span gains a `max-width` + ellipsis (its only change) so a hostile
+   symbol cannot push the balance off the row. Local state (query, sort, fold) lives in the component
+   and resets whenever it mounts. Every row the page or the picker handles is **chain-scoped**:
+   `getTokenBalances` filters by account only and the service holds every chain's tokens for the
+   profile, so consumers filter `tb.token.chainId === network.chainId` themselves (Fact 20).
 6. **Dust**: the Holdings fold reuses `incomingDustUsdThreshold` and the bigint predicate in
    `utils/incoming-dust.ts` through a generic alias; the config schema bounds the threshold; the
-   Settings → Appearance copy widens from "receipts" to "receipts and holdings". The fold applies
-   regardless of the fiat kill-switch (it is a data filter, like the incoming feed's, which does not
-   consult `showFiatValues`). Pinned and never-synced tokens never fold.
+   Settings → Appearance copy widens from "receipts" to "receipts and holdings". Under the fiat
+   kill-switch the price service returns no quotes (`price/service.ts:138`), so the dust half of the
+   fold fails open and only empty tokens fold — the same behaviour the incoming feed already has.
+   Pinned and never-synced tokens never fold.
 7. **Send picker**: `SelectTokenPopup.vue` keeps its `SettingItem` rows (each gains
-   `data-testid="select-token-row"` + `data-symbol`), orders them with `orderTokenRows` (pinned first,
-   then value), and shows a search `Input` above the list when more than `HOME_TOKEN_ROWS` tokens
-   exist. No fold in the picker (an empty token is unsendable anyway; hiding rows inside a popup is
-   odd). The selection contract (`cacheStore.activeTokenIdx = token.id`, emit close) and the "Manage
-   tokens" row are unchanged. **Gate question**: the owner picked "same component as Holdings"; the
-   audits argued that same order + search meets the intent at a fraction of the cost (no per-row
-   price clients in a popup, no `TokenCard` button variant). Flip at the gate if identical rows are
-   wanted.
+   `data-testid="select-token-row"` + `data-symbol`), but fetches the account's BALANCES (chain-scoped)
+   instead of bare tokens and orders them with the same `orderTokenRows` as Home (pinned first, then
+   value — one `PriceServiceClient` for the popup, not one per row), and shows a search field above
+   the list when more than `HOME_TOKEN_ROWS` tokens exist. No fold in the picker (an empty token is
+   unsendable anyway; hiding rows inside a popup is odd). The selection contract
+   (`cacheStore.activeTokenIdx = token.id`, emit close) and the "Manage tokens" row are unchanged.
+   **Gate question**: the owner picked "same component as Holdings"; the audits argued that same
+   order + search meets the intent at a fraction of the cost (no per-row price clients in a popup, no
+   `TokenCard` button variant). Flip at the gate if identical rows are wanted.
 8. **Pins**: `usePinnedTokens` composable owning the key `nulo:ui:pinnedTokens@${profileId}` →
    `Record<chainId, contract[]>` (lowercase contract addresses, ≤ 3, keyed by the chain id as a
    string — the token set's own scope) behind the storage facade. Contracts, not ids: token ids are
    max+1 reallocatable, so an id could pin a successor token; a re-added token keeping its pin is the
-   intended behaviour. The cap counts only pins that intersect the current token set; dangling
-   entries are pruned on the next write. `pin()` returns `"full"` at the cap. `onTokenDeleted`
-   cleanup scoped to the EVENT's `profileId` + `chainId`, plus a re-read on `chrome.storage.onChanged`.
-   Writes are serialised per key inside one JS context; two contexts (popup + side panel) writing at
-   the same instant are last-writer-wins and can lose at most one pin, which the next read shows
-   honestly.
+   intended behaviour. The cap counts only pins that intersect the current chain's token set;
+   dangling entries are pruned only by an ordinary `pin`/`unpin` whose scope still matches and whose
+   token list is loaded. `pin()` returns `"full"` at the cap. `onTokenDeleted` cleanup removes ONLY
+   the event's contract from the EVENT's `profileId` + `chainId` list (never prunes, never touches
+   another list), plus a re-read on `chrome.storage.onChanged`. Writes are serialised per key inside
+   one JS context; every queued operation captures its scope when enqueued and drops itself if the
+   scope changed by the time it runs. Two contexts (popup + side panel) writing at the same instant
+   are last-writer-wins: a whole-map write from one context can overwrite the other context's
+   unseen changes, on any chain. Accepted for v1 and stated here; readers converge on the next read.
 9. **Token page menu**: the "⋯" trigger gets `data-testid="token-menu-trigger"`; one `DropdownItem`
    (`token-menu-pin`, `data-pinned`) reading "Pin to Home" or "Unpin from Home". A refused pin opens
    the existing confirm popup in a new **single-action** mode (`cacheStore.confirm.single = true`
@@ -103,16 +114,18 @@ Out (deliberately):
   no migration; the key is simply never read again).
 - Showing the balance-refresh dot or in-flight import rows on Holdings (Home keeps them).
 - A cross-context write lock for pins (see Scope 8). A `TokenCard` select/button variant.
+- Fixing the same missing chain filter anywhere else it may exist today (`TokensView` gets it
+  because Phase 2 rewrites its ordering step; nothing else is touched for it).
 
 ## Bootstrap on the homelab (fresh machine, fresh session)
 
 The plan was written on the Mac; the branch is pushed. On the homelab, in a zsh **login** shell (bun,
 claude, codex and agent-worktree live in `~/.bun/bin`, `~/.local/bin` and nvm). Read
-`~/.agents/machine.md` and `~/.agents/clones.md` first; the canonical clone there is
-`/home/homelab/Projects/nulo` (confirmed 2026-09-06) — never create a second clone.
+`~/.agents/machine.md` and `~/.agents/clones.md` first; the canonical clone is the one clones.md
+lists (its `nulo` row was confirmed present on 2026-09-06) — never create a second clone.
 
 ```bash
-cd "$(awk -F'→ ' '/^- nulo /{print $2}' ~/.agents/clones.md | awk '{print $1}' | sed "s#~#$HOME#")" 2>/dev/null || cd ~/Projects/nulo
+cd <the canonical nulo clone listed in ~/.agents/clones.md>   # one clone per machine; never a second one
 git fetch origin
 # first time on this machine:
 git worktree add --track -b worktree-home-holdings-pin \
@@ -120,8 +133,8 @@ git worktree add --track -b worktree-home-holdings-pin \
 # if the local branch already exists (a previous fetch/checkout), use this form instead:
 #   git worktree add .claude/worktrees/home-holdings-pin worktree-home-holdings-pin
 cd .claude/worktrees/home-holdings-pin
-bun --version | grep -q '^1\.[4-9]' || echo "NEED bun >= 1.4"   # lockfile v2 needs 1.4+
-node --version; tmux -V; google-chrome --version; anvil --version | head -1
+bun --version | grep -q '^1\.[4-9]' || { echo "NEED bun >= 1.4 (lockfile v2)"; exit 1; }
+for t in node tmux jq google-chrome anvil; do command -v "$t" >/dev/null || { echo "MISSING $t"; exit 1; }; done   # jq: agent.sh reads the port pack with it
 bun install --frozen-lockfile                        # installs the git hooks too (prepare)
 agent-worktree register home-holdings-pin --status "approved: implementing phase 1"
 codex login status                                   # must say logged in; the loops need it
@@ -155,7 +168,8 @@ Five pieces, all inside `apps/extension`; no package boundary moves, no new depe
 
 ```
 pure helpers (src/utils/, unit-tested, no Vue)
-  token-order.ts        classifyRow, compareTokenRows, orderTokenRows, capTokenRows, HOME_TOKEN_ROWS
+  token-amount.ts       parseRawBalance, isValidDecimals, safeFiatOf — the only parsers of hostile row data
+  token-order.ts        classifyRow, compareTokenRows, orderTokenRows, capTokenRows, forChain, HOME_TOKEN_ROWS
   token-fold.ts         isHiddenHolding, foldLabel
   token-search.ts       matchesQuery
   token-aggregate.ts    aggregateFiat (lifted out of BalanceView)
@@ -184,16 +198,22 @@ part and stays); Holdings owns `TokenList`; Send keeps its own rows. All three s
 ### Key interfaces
 
 ```ts
+// src/utils/token-amount.ts — pure; the ONE place hostile balance strings and decimals are parsed
+export const MAX_DECIMALS = 77                       // 10n ** 77n is the largest power that stays cheap; larger is rejected, never computed
+export function isValidDecimals(d: unknown): d is number   // Number.isInteger(d) && 0 <= d <= MAX_DECIMALS
+export function parseRawBalance(tb: TokenBalanceInfo): bigint | undefined   // public + private; undefined on any malformed or negative string
+export function safeFiatOf(fiatOf: FiatOf): FiatOf   // wraps a fiatOf: undefined when parseRawBalance or isValidDecimals fails, never throws
+
 // src/utils/token-order.ts — pure
 export const HOME_TOKEN_ROWS = 3                     // Home's row budget AND the pin cap: one number by design
 export type FiatOf = (tb: TokenBalanceInfo) => bigint | undefined   // micro-USD; undefined = unpriced
 export type OrderCtx = { pinnedContracts: ReadonlySet<string>; fiatOf: FiatOf }
-export type RowClass = "pinned" | "held-priced" | "held-unpriced" | "unsynced" | "empty"
+export type RowClass = "pinned" | "held-priced" | "held-unpriced" | "unsynced" | "empty" | "unknown"   // unknown = malformed row: visible, unpriced, never folds
 export function classifyRow(tb: TokenBalanceInfo, ctx: OrderCtx): RowClass
 export function compareTokenRows(a: TokenBalanceInfo, b: TokenBalanceInfo, ctx: OrderCtx): number
 export function orderTokenRows(rows: TokenBalanceInfo[], ctx: OrderCtx): TokenBalanceInfo[]   // never mutates input
 export function capTokenRows<T>(rows: T[], budget = HOME_TOKEN_ROWS): { shown: T[]; overflow: number }
-// The Send picker orders TokenInfo[] (no balances): orderTokens(tokens, pinnedContracts) — pinned first, then name.
+export function forChain<T extends { token: { chainId: number } }>(rows: T[], chainId: number): T[]   // the chain filter every consumer applies
 
 // src/utils/token-fold.ts — pure
 export function isHiddenHolding(tb, p: { pinned: boolean; usdRate: number | undefined; thresholdMicro: bigint }): boolean
@@ -213,7 +233,7 @@ export const PINNED_TOKENS_MAX = HOME_TOKEN_ROWS
 export function usePinnedTokens(deps: {
   tokenService: Pick<TokenServiceClient, "onTokenDeleted">
   getScope: () => { profileId: string; chainId: number } | undefined
-  knownContracts: () => ReadonlySet<string>          // the caller's current token set (lowercase); cap + pruning use it
+  knownContracts: () => ReadonlySet<string> | undefined   // the caller's CURRENT-CHAIN token set (lowercase); undefined = not loaded yet → no pruning, cap counts stored entries
 }): {
   pinnedContracts: ComputedRef<ReadonlySet<string>>  // this scope's list ∩ knownContracts
   isPinned(contract: string): boolean
@@ -242,35 +262,46 @@ Everything else about the popup is untouched.
   uses; disposed after its client disconnects); `pinnedContracts` from `usePinnedTokens` with a
   `TokenServiceClient` TokensView constructs for it (`knownContracts` = the fetched rows' contracts).
 - **Holdings**: `pages/holdings.vue` owns a `TokenBalanceServiceClient` + `useEntityCrud({ fetch,
-  added, updated, deleted, mode: "incremental", accept: tb => tb.account === appStore.account?.address })`
-  over `getTokenBalances(undefined, account.address)`; ONE `watch(() => [profile.id, account.address,
+  added, updated, deleted, mode: "incremental", accept: tb => tb.account === appStore.account?.address && tb.token.chainId === appStore.network?.chainId })`
+  over `forChain(await getTokenBalances(undefined, account.address), network.chainId)` — the service
+  returns every chain's rows for a shared address (Fact 20); ONE `watch(() => [profile.id, account.address,
   network.id])` calls `refresh({ clear: true })` (the TokensView idiom); `tokenBalanceService.onConnected`
   calls `refresh()` (the resnapshot idiom — a port reconnect can drop events; `onConnected` is on the
   base `ServiceClient`); a null scope renders the loading state and fetches nothing. It also owns a
   `PriceServiceClient` + `usePrices`, a `ConfigServiceClient` (`getValue("incomingDustUsdThreshold")`
   + `onUpdate`), and a `TokenServiceClient` for `usePinnedTokens`. Summary via `aggregateFiat`;
   everything else goes to `TokenList`.
-- **Send**: `SelectTokenPopup` on `show` fetches tokens as today (scope captured before the await; a
-  stale result is dropped), plus a `TokenServiceClient`-backed `usePinnedTokens` created on show and
-  disposed on hide; rows = `orderTokens(tokens, pinnedContracts)` filtered by `matchesQuery` when the
-  search is visible. Selecting sets `cacheStore.activeTokenIdx = token.id` and emits close, so
+- **Send**: `SelectTokenPopup` on `show` fetches the account's balances (`forChain(getTokenBalances(undefined,
+  account.address), chainId)`; scope captured before the await, a stale result dropped), creates one
+  `PriceServiceClient` + `usePrices` and a `TokenServiceClient`-backed `usePinnedTokens` (all disposed
+  on hide); rows = `orderTokenRows(rows, { pinnedContracts, fiatOf })` filtered by `matchesQuery`
+  when the search is visible — the SAME order as Home, by construction. Each `SettingItem` shows the
+  symbol as today. Selecting sets `cacheStore.activeTokenIdx = tb.token.id` and emits close, so
   `send.vue`'s resolution order (`?tokenId` → `activeTokenIdx` → `tokens[0]`) is untouched. A token
-  deleted while open disappears through the existing `onTokenDeleted` handler.
+  deleted while open disappears through `onTokenBalanceDeleted`.
 - **Pin**: token page → `pins.pin(contract)` → `"pinned"` (toast "Pinned to Home") | `"full"` →
   fetch the chain's tokens, map the pinned contracts to symbols (bounded), set
   `cacheStore.confirm = { single: true, title, description, confirm_text: "Got it" }`,
   `popupStore.open("confirm")` | `"already"` (no-op). `unpin` → toast "Unpinned from Home". The menu
   closes on action (existing behaviour). Home re-reads pins on mount and on `chrome.storage.onChanged`.
-- **Deletion**: `tokenService.onTokenDeleted(event)` → read `pinnedTokensKey(event.profileId)`,
-  remove `event.contract` from the `event.chainId` list, write — regardless of the active scope
-  (`token/spec.ts:220-225`). If it was the active scope, `pinnedContracts` updates.
-- **Storage write path**: `pin`/`unpin`/cleanup enqueue on a module-level `Map<key, Promise>` chain
+- **Deletion**: `tokenService.onTokenDeleted(event)` → enqueue on `pinnedTokensKey(event.profileId)`
+  → read + validate → remove ONLY `event.contract` from the `String(event.chainId)` list → write. It
+  never prunes and never touches another list, whatever the active scope is
+  (`token/spec.ts:220-225`). If the event matches the active scope, `pinnedContracts` updates.
+- **Ordinary writes** (`pin`/`unpin`): the operation captures `getScope()` and `knownContracts()`
+  when ENQUEUED; when it runs, it re-reads the scope and drops itself (resolving `"already"`/no-op)
+  if the scope changed. Pruning of dangling entries happens here only, and only when the captured
+  `knownContracts` is loaded (not `undefined`) and matches the running scope — so a foreign scope's
+  list is never pruned against the wrong token set. The cap counts stored entries when the set is not
+  loaded yet, and `entries ∩ knownContracts` when it is.
+- **Storage read/write path**: every operation enqueues on a module-level `Map<key, Promise>` chain
   (one per storage key, shared by every instance in the context); inside the chain:
-  `storageLocalGet(key)` → validate the whole map (non-object → `{}`; non-array values dropped; each
-  list → strings → lowercase `0x` + 64 hex → de-duplicated → truncated to the cap) → intersect the
-  scope's list with `knownContracts()` (prune) → mutate → `storageLocalSet` with the sanitized map
-  (junk sibling keys are never re-persisted). A rejected write logs, leaves the chain usable, and
-  re-reads. Reads use the same validation.
+  `storageLocalGet(key)` → validate the whole map (not a plain object, or an array → `{}`; only own
+  enumerable entries; keys must match `/^\d+$/` (a canonical chain id) or are dropped; values must be
+  arrays or are dropped; at most 32 chains kept; each list → strings → lowercase `0x` + 64 hex →
+  de-duplicated → truncated to the cap) → mutate → `storageLocalSet` with the sanitized map, so junk
+  keys are never re-persisted and the key cannot grow. A rejected write logs, leaves the chain usable,
+  and re-reads. Reads use the same validation.
 
 ### File-level change map
 
@@ -278,7 +309,8 @@ Everything else about the popup is untouched.
 |---|---|
 | `src/popup/components/Navigation.vue` | four entries; `general` relabelled HOME with icon `home`; new `holdings` entry |
 | `src/popup/pages/holdings.vue` | **new** TS page, `{ "meta": { "isAuthRequired": true, "showBottomNav": true } }` |
-| `src/utils/token-order.ts` (+ `.test.ts`) | **new** pure classes, comparator, cap, `orderTokens` for `TokenInfo[]` |
+| `src/utils/token-amount.ts` (+ `.test.ts`) | **new** pure parsers: `parseRawBalance`, `isValidDecimals`, `safeFiatOf` |
+| `src/utils/token-order.ts` (+ `.test.ts`) | **new** pure classes (incl. `unknown`), comparator, cap, `forChain` |
 | `src/utils/token-fold.ts` (+ `.test.ts`) | **new** pure fold predicate + label |
 | `src/utils/token-search.ts` (+ `.test.ts`) | **new** pure matcher |
 | `src/utils/token-aggregate.ts` (+ `.test.ts`) | **new**, lifted from `BalanceView.vue` L106-126 |
@@ -292,7 +324,8 @@ Everything else about the popup is untouched.
 | `src/popup/components/popups/SelectBalanceTypePopup.vue` | **delete** |
 | `src/popup/components/popups/PopupManager.vue` | remove `select_balance_type` |
 | `src/popup/components/popups/ConfirmPopup.vue` (+ test) | `single` mode |
-| `src/popup/components/popups/SelectTokenPopup.vue` (+ test) | ordered rows, `select-token-row` + `data-symbol`, search `Input` past three tokens |
+| `src/popup/components/popups/SelectTokenPopup.vue` (+ test) | fetches chain-scoped balances + one price client; rows ordered by `orderTokenRows`; `select-token-row` + `data-symbol` + `data-selected`; native search input past three tokens |
+| `src/popup/components/modules/general/TokenCard.vue` (+ test) | `.symbol` gains `max-width` + ellipsis (its only change) |
 | `src/popup/pages/tokens/[id].vue` | `token-menu-trigger`; `token-menu-pin` item; `usePinnedTokens`; toasts; single-action confirm on `"full"` |
 | `src/stores/app.store.ts` + `app.store.shape.pins.test.ts` | remove `displayOption` from the store and the pinned key list |
 | `src/popup/pages/settings/appearance.vue` | copy: "Hide dust receipts" → applies to holdings too |
@@ -303,47 +336,52 @@ Everything else about the popup is untouched.
 | `apps/extension/tests/e2e/README.md` | new helpers in the workarounds/helpers table |
 | `implementations-plan/index.md` | entry |
 
-`TokenCard.vue` is not touched.
-
 ### Algorithms
 
-**Row classes** (`classifyRow`): `raw = BigInt(public ?? 0) + BigInt(private ?? 0)`; `unsynced =
-raw === 0n && updatedAt === 0` (the projector never ran — `TokenCard.vue:50` renders a spinner for
-it); `pinned` if the contract is in `pinnedContracts`; else `held-priced` if `raw > 0n` and
-`fiatOf(tb) !== undefined`; else `held-unpriced` if `raw > 0n`; else `unsynced`; else `empty`.
-Emptiness is classified BEFORE price, so a priced token with a zero balance never outranks a funded
-unpriced one.
+**Parsing** (`token-amount.ts`): `parseRawBalance` returns `undefined` for any balance string that
+is not a non-negative integer literal (`BigInt` inside a try, sign checked) and `isValidDecimals`
+rejects non-integers and anything above `MAX_DECIMALS = 77` BEFORE any exponentiation. `safeFiatOf`
+wraps the price lookup with both checks. Every consumer — classes, fold, aggregate, the picker —
+goes through these; nothing else in the feature calls `BigInt(...)` on a row.
+
+**Row classes** (`classifyRow`): `raw = parseRawBalance(tb)`; `undefined` → `unknown` (visible,
+unpriced, never folds, ordered after `unsynced`); `unsynced = raw === 0n && updatedAt === 0` (the
+projector never ran — `TokenCard.vue:50` renders a spinner for it); `pinned` if the contract is in
+`pinnedContracts`; else `held-priced` if `raw > 0n` and `fiatOf(tb) !== undefined`; else
+`held-unpriced` if `raw > 0n`; else `unsynced`; else `empty`. Emptiness is classified BEFORE price,
+so a priced token with a zero balance never outranks a funded unpriced one.
 
 **Comparator** (`compareTokenRows`): class rank in the order above; inside `pinned` and
 `held-priced`: fiat desc, unpriced pinned after priced pinned; inside every other class:
 `stringCompare(name)`; final tiebreak `localeCompare(symbol)`. Unpriced is a class, never coerced
 to $0 — the aggregate treats unpriced as "not counted", and sorting must not contradict it. Under
 the fiat kill-switch `fiatOf` returns `undefined` for every row, so everything but pinned orders by
-name and the summary shows no figure. `orderTokens(tokens, pinned)` (no balances) is pinned first,
-then `stringCompare(name)`.
+name and the summary shows no figure. The Send picker uses the same function over the same rows.
 
 **Cap**: `capTokenRows(rows, 3)` → `{ shown: rows.slice(0, 3), overflow: rows.length - shown.length }`.
 "View all" renders iff `overflow > 0`. Pinned tokens with a zero balance are still ranked first and
 therefore shown (dimmed like any empty row) — explicit beats automatic.
 
-**Fold**: `isHiddenHolding` = `!pinned && !unsynced && (raw === 0n || !isAmountAboveDustThreshold({ amountRaw: raw.toString(), decimals, usdRate, thresholdMicro }))`.
+**Fold**: `isHiddenHolding` = `cls !== "pinned" && cls !== "unsynced" && cls !== "unknown" && (raw === 0n || !isAmountAboveDustThreshold({ amountRaw: raw.toString(), decimals, usdRate, thresholdMicro }))`.
 The predicate fails OPEN (threshold 0, no rate, unparseable, invalid decimals → shown), so an
-unpriced token with a balance never folds. `foldLabel`: `hidden === 0` → no row; `thresholdUsd === 0`
+unpriced token with a balance never folds. Under the fiat kill-switch there are no rates, so only
+empty rows fold. `foldLabel`: `hidden === 0` → no row; `thresholdUsd === 0`
 → `${hidden} empty`; else `${hidden} hidden · ${empty} empty · ${dust} under $${thresholdUsd}`.
 
 **Search** (`matchesQuery`): `q = query.trim().toLowerCase()`; empty `q` matches all; otherwise
 `symbol.toLowerCase().includes(q) || name.toLowerCase().includes(q) || (q.startsWith("0x") &&
-contract.toLowerCase().startsWith(q))`. No `RegExp`, no sanitizer, `maxLength` 80. Pinned/rest/fold
+contract.toLowerCase().startsWith(q))`. No `RegExp`, no sanitizer, `maxlength="80"`. Pinned/rest/fold
 partition is computed AFTER the filter; the divider renders only when both partitions are
 non-empty; the fold row only when the hidden partition is non-empty; `ListStatusMessage
-variant="no-results"` when all three are empty and `q` is non-empty. The `holdings-search` testid
-lands on the design `Input`'s root wrapper (`Input.vue:252`): e2e drives
-`[data-testid="holdings-search"] input` with `replaceInputValue`.
+variant="no-results"` when all three are empty and `q` is non-empty. The search is a native
+`<input data-testid="holdings-search">` (the design `Input` puts its testid on a wrapper, which
+would force a structural selector); e2e drives it with `replaceInputValue`.
 
-**Pin toggle**: `pin(c)`: enqueue → read+validate → prune to `knownContracts()` → if includes →
-`"already"`; if `length >= PINNED_TOKENS_MAX` → `"full"` (no write); else append, write, `"pinned"`.
-`unpin(c)`: enqueue → read → filter → write. `chrome.storage.onChanged` for the key → `refresh()`
-(the `syncedRef` precedent: re-read through the facade, never trust the event's value).
+**Pin toggle**: `pin(c)`: enqueue (capturing scope + known set) → scope still current? else no-op →
+read+validate → prune to the captured known set if loaded → if includes → `"already"`; if
+`length >= PINNED_TOKENS_MAX` → `"full"` (no write); else append, write, `"pinned"`. `unpin(c)`:
+same guard → read → filter → write. `chrome.storage.onChanged` for the key → `refresh()` (the
+`syncedRef` precedent: re-read through the facade, never trust the event's value).
 
 ### Trade-offs & alternatives not taken
 
@@ -406,9 +444,12 @@ lands on the design `Input`'s root wrapper (`Input.vue:252`): e2e drives
    `undefined` at every layer (`composables/usePrices.ts:72-80`); the composable calls
    `refreshIfStale()` at construction (`:35`); only USDC-pegged contracts and Fee Juice are priced
    (`services/price/price-map.ts:55-72`), and under the e2e agent (`VITE_NULO_E2E_PRICE_MAP=1`,
-   `agent.sh:88,103`) every sandbox contract maps to `usd-coin`. `fiat-send.test.ts:26-33` seeds a
-   quote by writing `nulo:core:token-prices` and reloading. `showFiatValues` gates fiat rendering
-   (`BalanceView.vue:82-90`); the incoming dust filter does not consult it.
+   `agent.sh:88,103`) every sandbox contract maps to `usd-coin` — so a seeded quote prices every
+   sandbox token. `fiat-send.test.ts:26-33` seeds a quote by writing `nulo:core:token-prices` and
+   reloading. `showFiatValues` gates fiat rendering (`BalanceView.vue:82-90`) AND the price
+   service's `getQuotes()` returns `{}` when it is off (`price/service.ts:138`), which is how the
+   incoming dust filter (`incoming-transfer/service.ts:596`) goes inert under the kill-switch.
+   `tokenAmountToUsdMicro` exponentiates `decimals` without validating it (`price/convert.ts:71-75`).
 7. `incomingDustUsdThreshold` is `z.number().nonnegative().default(0)` (`wallet/config/config.ts:45-49`),
    edited in `settings/appearance.vue:74-98` (`dust-threshold-input`; copy at `:232-233`), applied at
    read time by `IncomingTransferService.applyDustFilter` (`incoming-transfer/service.ts:577-608`)
@@ -454,7 +495,8 @@ lands on the design `Input`'s root wrapper (`Input.vue:252`): e2e drives
     installs its own in-memory backing (`BalanceView.test.ts:121-156`, `app.store.test.ts:41-49`).
 17. Scripts: `bun run lint` (biome + complexity baseline, 15/80 per function), `bun run typecheck`
     (vue-tsc on the extension), `bun run test` (extension vitest on Bun), `bun run build`,
-    `bun run audit:vue` (typecheck ∥ test ∥ lint, then build), `bun run test:e2e` (smoke, Node
+    `bun run audit:vue` (`typecheck:all` — every `@nulo/*` package — ∥ test ∥ lint, then build;
+    `package.json:38`), `bun run test:e2e` (smoke, Node
     Puppeteer — requires a prior `bun run build`: `tests/e2e/global-setup-smoke.ts:38` only checks
     that `dist/chrome` exists), `bun run e2e:agent [files|--shard=N/5]` (network; builds the wallet
     itself; owns anvil + sandbox; `NULO_E2E_PROVERLESS=1` for the fast build; the full pool includes
@@ -467,17 +509,26 @@ lands on the design `Input`'s root wrapper (`Input.vue:252`): e2e drives
     `packages/design/src/fonts/MaterialSymbolsOutlined.woff2` (3,972 glyphs). `home` and `push_pin`
     are present (checked 2026-09-06 with `uvx --with brotli --from fonttools python -c "from
     fontTools.ttLib import TTFont; print({n: n in set(TTFont('packages/design/src/fonts/MaterialSymbolsOutlined.woff2').getGlyphOrder()) for n in ['home','push_pin']})"`).
-19. `gh stack` v0.0.1 is installed on the Mac and the homelab; the homelab has Chrome, foundry
-    (anvil), bun, claude, agent-worktree, uv, a non-interactive signing key, and its canonical clone
-    at `/home/homelab/Projects/nulo`.
+19. `gh stack` v0.0.1 is installed on the Mac and (over ssh, 2026-09-06) on the homelab, which also
+    has Chrome, foundry (anvil), bun, claude, agent-worktree, uv, a non-interactive signing key, and
+    a `nulo` row in its `~/.agents/clones.md`. Remote facts; § Bootstrap re-checks each one.
+20. `TokenBalanceService.getTokenBalances(tokenId?, accountAddress?)` filters rows by token id and
+    account only (`token-balance/service.ts:183-197`); its live-token map is loaded with
+    `getTokensRaw(profile.id)` for EVERY chain of the profile (`:160`, `:460`), and identical account
+    addresses across chains are a supported state (`:563-576`). A consumer that wants one chain's
+    rows must filter `tb.token.chainId` itself; `TokensView.vue` does not today (it keys only on
+    `network.id` for sync state, `:191,264,295,350`).
+21. `TokenCard.vue`'s `.symbol` style (`:163-169`) sets no `max-width`, `overflow` or ellipsis.
 
 ### Inferences (unverified, attackable)
 
 1. A Home cap of 3 strands no existing e2e selector: no test imports more than two tokens on top of
    the fixture's one (`fixtures/extension.ts:761,850,992`; `profile-reimport-matrix`,
-   `imported-account-execution` import two). The real exposure is first-card helpers
-   (`fiat-send.test.ts:47`, `navigateToTokenDetail`) — fixture tokens are unpriced, so name order is
-   preserved, and the symbol-aware helper removes the dependence where a test cares.
+   `imported-account-execution` import two). The real exposure is first-card identity, not count:
+   under the agent build every sandbox token is price-mappable, so a seeded quote or a funded-vs-empty
+   difference can change which card is first. Phase 2 audits every direct first-card selector
+   (`fiat-send.test.ts:47`, `receive-unregistered.test.ts:62,103`, `navigateToTokenDetail` callers)
+   and pins each to a symbol where the test cares which token it opens.
 2. Extra `PriceServiceClient`s (TokensView, holdings page) are cheap: the price service caches and
    throttles refreshes (`services/price/service.ts:145`) and `usePrices`' ticker only re-evaluates
    freshness. Moderate confidence.
@@ -496,10 +547,12 @@ lands on the design `Input`'s root wrapper (`Input.vue:252`): e2e drives
   **three stacked PRs**.
 - Decided by the plan on the owner's behalf (cheap to flip): no fold in the Send picker; picker
   search appears only past three tokens; list state resets on every open; unpriced pinned tokens
-  sort after priced pinned ones; the fold ignores the fiat kill-switch; pins are per chain, not per
-  network row.
+  sort after priced pinned ones; under the fiat kill-switch only empty rows fold; pins are per
+  chain, not per network row.
 
-No unresolved Asks.
+Two Asks are open **by design** and are put to the owner at the approval gate, not assumed: the
+Send-picker rows (Scope 7) and the popup's implementation (Scope 9). The implementing session must
+not start until both are recorded in this section as decided.
 
 ## Phases
 
@@ -533,25 +586,33 @@ exit 0; four hashes in the spec. Layers: lint/typecheck · unit · smoke.
 
 #### Phase 2 — Home order, cap, "View all", aggregate-only hero
 
-- `src/utils/token-order.ts` + tests: classes, comparator (pinned set is a parameter, empty until
-  Arc C), `orderTokenRows` (copy, never mutates), `orderTokens`, `capTokenRows`, `HOME_TOKEN_ROWS`.
-  Cases: priced desc; priced-zero below unpriced-funded; unsynced above empty; name order inside
-  classes; kill-switch (all `undefined`) → name order; overflow.
+- `src/utils/token-amount.ts` + tests: `parseRawBalance` (malformed, negative, huge, non-string →
+  `undefined`), `isValidDecimals` (non-integer, negative, 78 → false; 0 and 77 → true),
+  `safeFiatOf` (never throws; the wrapped fiat function is not called on invalid rows).
+- `src/utils/token-order.ts` + tests: classes incl. `unknown`, comparator (pinned set is a
+  parameter, empty until Arc C), `orderTokenRows` (copy, never mutates), `capTokenRows`, `forChain`,
+  `HOME_TOKEN_ROWS`. Cases: priced desc; priced-zero below unpriced-funded; unsynced above empty;
+  unknown visible and last-but-empty; name order inside classes; kill-switch (all `undefined`) → name
+  order; overflow; `forChain` drops a same-address row from another chain.
 - `src/utils/token-aggregate.ts` + tests: `aggregateFiat` lifted from `BalanceView`.
 - `TokensView.vue`: a `PriceServiceClient` + `usePrices` (disposed in `onBeforeUnmount` AFTER the
-  service disconnects, per the cleanup-order rule), `orderTokenRows` + `capTokenRows`, section title
+  service disconnects, per the cleanup-order rule), `forChain` on the fetched rows and in the
+  balance-event handlers (Fact 20), `orderTokenRows(rows, { pinnedContracts, fiatOf: safeFiatOf(...) })`
+  + `capTokenRows`, section title
   **HOLDINGS** with the total count, `tokens-view-all` link (`router.push("/popup/holdings")`) when
   `overflow > 0`. `TokensView.test.ts`: add a `vi.mock("@/wallet/services/price/client")` factory
   (the composable calls `refreshIfStale()` at construction — Fact 6) so the existing sync-state
-  cases keep passing, then two new cases — order with a seeded quote, and cap/overflow.
+  cases keep passing, then three new cases — order with a seeded quote, cap/overflow, and a
+  same-address row from another chain not rendering.
 - Retire the display option: delete `SelectBalanceTypePopup.vue`, its `PopupManager` lines, the
   `displayOption` ref in `app.store.ts` and the key in `app.store.shape.pins.test.ts`; `BalanceView`
   shows the aggregate over both sides unless `tokenBalance` is passed; remove load/save + watchers;
   `BalanceView.test.ts`: replace the S-A matrix with three cases (aggregate with prices, partial
   caption, fiat kill-switch hides the figure) and keep the deletion cases as "list stays consistent".
 - `helpers.ts`: `navigateToTokenDetail(page, symbol?)` selects
-  `[data-testid="tokens-card"]:has([data-symbol="<symbol>"])` when given; audit every caller and pass
-  the symbol where the test cares which token opens.
+  `[data-testid="tokens-card"]:has([data-symbol="<symbol>"])` when given; audit every caller AND
+  every direct first-card selector (`fiat-send.test.ts:47`, `receive-unregistered.test.ts:62,103`)
+  and pass the symbol where the test cares which token opens (Inference 1).
 
 Validation gate — `<fast>`; `<smoke>`; network, targeted:
 `NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/tokens.test.ts tests/e2e/network/default-token-seeding.test.ts tests/e2e/network/fiat-send.test.ts tests/e2e/network/incoming-public-transfers.test.ts`.
@@ -567,41 +628,46 @@ and `gh stack add home-holdings-pin/holdings`.
 #### Phase 3 — TokenList and the Holdings page
 
 - `incoming-dust.ts`: export `isAmountAboveDustThreshold`; `isReceiptAboveDustThreshold` becomes an
-  alias; move `10n ** BigInt(decimals)` inside the try; tests for an extreme threshold, invalid
-  decimals (negative, non-integer, > 77), malformed balances → all fail open. `config.ts`: bound the
-  threshold with `.max(1_000_000)` (+ schema test).
+  alias; validate `decimals` with `isValidDecimals` BEFORE exponentiating and keep every bigint
+  operation inside the try; tests for an extreme threshold, invalid decimals (negative, non-integer,
+  78), malformed balances → all fail open without computing. `config.ts`: bound the threshold with
+  `.max(1_000_000)` (+ schema test). `TokenCard.vue`: `.symbol` gains `max-width` + ellipsis (+ a
+  long-symbol render test).
 - `src/utils/token-fold.ts`, `token-search.ts` + tests: hidden classes, pinned/unsynced exempt, label
   variants; query matching incl. `0x` prefix and punctuation symbols (`A+B`, `$X`).
 - `TokenList.vue` + `TokenList.test.ts` covering: filter by symbol/name/contract; sort toggle; pinned
-  partition + divider presence rules; fold label variants and expand; pinned and unsynced never fold;
-  no-results; empty rows; `dustThresholdUsd = 0` folds empties only. Keep every computed under the
-  complexity budget (split partition / fold / label into helpers).
+  partition + divider presence rules; fold label variants and expand; pinned, unsynced and unknown
+  never fold; a malformed balance row renders (visible) and never throws; no-results; empty rows;
+  `dustThresholdUsd = 0` folds empties only. Keep every computed under the complexity budget (split
+  partition / fold / label into helpers).
 - `pages/holdings.vue`: summary (`holdings-summary`), loading/error states, clients and watches as in
   § Data & control flow, `TokenList`. Copy per § Copy.
 - `settings/appearance.vue`: dust copy widened.
 - `tests/e2e/network/holdings.test.ts`: import one extra token (`importToken`, two tokens on Home),
   seed a quote for the funded sandbox token exactly as `fiat-send.test.ts:26-33` does, open Holdings:
   the priced token is the first `tokens-card`, both render real balances, typing a symbol into
-  `[data-testid="holdings-search"] input` keeps only it, a miss shows the no-results message, the
-  sort toggle flips its label and the first card.
+  `[data-testid="holdings-search"]` keeps only it, a miss shows the no-results message, the sort
+  toggle flips its label and the first card.
 
 Validation gate — `<fast>`; `NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/holdings.test.ts tests/e2e/network/tokens.test.ts`.
 Pass: exit 0; every listed TokenList behaviour has a green case. Layers: lint/typecheck · unit/component · network (targeted).
 
 #### Phase 4 — Send picker order and search
 
-- `SelectTokenPopup.vue`: rows ordered with `orderTokens(tokens, pinnedContracts)` (pins from a
-  `usePinnedTokens` created on show, disposed on hide — until Arc C, an empty set), each `SettingItem`
-  gets `data-testid="select-token-row"` + `:data-symbol`; a search `Input` (`select-token-search`,
-  no sanitizer) above the list when `tokens.length > HOME_TOKEN_ROWS`, filtering with `matchesQuery`;
-  "Manage tokens" row unchanged. `SelectTokenPopup.test.ts` (new): order, search visibility rule,
-  filter, select sets `activeTokenIdx` to the TOKEN id and emits close. `send.vue` untouched.
+- `SelectTokenPopup.vue`: on show fetch the account's balances through `forChain`, one
+  `PriceServiceClient` + `usePrices` (disposed on hide), rows ordered with
+  `orderTokenRows(rows, { pinnedContracts, fiatOf })` (pins from a `usePinnedTokens` created on show,
+  disposed on hide — until Arc C, an empty set), each `SettingItem` gets
+  `data-testid="select-token-row"` + `:data-symbol` + `:data-selected`; a native search input
+  (`select-token-search`, no sanitizer) above the list when `rows.length > HOME_TOKEN_ROWS`, filtering
+  with `matchesQuery`; "Manage tokens" row unchanged. `SelectTokenPopup.test.ts` (new): value order
+  with a mocked quote, pinned first, search visibility rule, filter, select sets `activeTokenIdx` to
+  the TOKEN id (`tb.token.id`) and emits close, a foreign-chain row is not listed. `send.vue` untouched.
 - `helpers.ts`: `selectSendToken(page, symbol)` — click `send-token-trigger`, click
   `[data-testid="select-token-row"][data-symbol="<symbol>"]`, wait for the popup to close.
 - `tests/e2e/network/send-picker.test.ts`: with two tokens present (the sandbox token + one
   `importToken`), open Send, pick the other token, assert `send-token-trigger` shows its symbol,
-  reopen the picker and assert its row carries the check icon (existing `check-circle` → assert via a
-  `data-selected` attribute added to the row).
+  reopen the picker and assert its row carries `data-selected="true"`.
 
 Validation gate — `<fast>`; `<smoke>`;
 `NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/send-picker.test.ts tests/e2e/network/transfers.test.ts tests/e2e/network/send-amount-clamp.test.ts tests/e2e/network/fiat-send.test.ts`.
@@ -616,13 +682,16 @@ loop; THEN `gh stack add home-holdings-pin/pins`.
 
 - `storage-keys.ts`: `export const pinnedTokensKey = (profileId: string) => \`nulo:ui:pinnedTokens@${profileId}\``.
 - `usePinnedTokens.ts` + `usePinnedTokens.test.ts` covering: read validation of hostile shapes
-  (non-object map, non-array values, non-strings, bad hex, duplicates, > 3) and that the sanitized
-  map is what gets written back; pin returns pinned/full/already; unpin; cap counts only known
-  contracts (three dangling entries do not make it full; they are pruned on the next write); per-chain
-  isolation; scope change refresh; a deletion event for another profile writes that profile's key,
-  not the active one; a deletion missed while disconnected is pruned by the next read; concurrent
-  `pin`/`unpin` in one context serialise (the last state is consistent); a rejected write leaves the
-  chain usable; `onChanged` triggers a re-read; dispose unsubscribes. Test setup: an in-memory
+  (array root, non-object map, non-canonical chain keys, non-array values, non-strings, bad hex,
+  duplicates, > 3, > 32 chains) and that the sanitized map is what gets written back; pin returns
+  pinned/full/already; unpin; cap counts only known contracts once loaded (three dangling entries do
+  not make it full; they are pruned by the next ordinary write) and stored entries while the set is
+  not loaded (no pruning then); per-chain isolation; scope change refresh; an operation enqueued
+  under one scope and run after a switch is a no-op; a deletion event for ANOTHER profile removes
+  only that contract from that profile's own chain list and leaves its other pins intact; a
+  deletion missed while disconnected is pruned by the next ordinary write; concurrent `pin`/`unpin`
+  in one context serialise (the last state is consistent); a rejected write leaves the chain usable;
+  `onChanged` triggers a re-read; dispose unsubscribes. Test setup: an in-memory
   `chrome.storage.local` + `onChanged` (the `app.store.test.ts:41-49` shape) and a fake
   `onTokenDeleted` `EventHandler`.
 
@@ -631,7 +700,10 @@ Validation gate — `<fast>`. Pass: exit 0, composable suite green. Layers: lint
 #### Phase 6 — the menu item, the popup, and the order everywhere
 
 - `ConfirmPopup.vue`: `single` mode (+ `ConfirmPopup.test.ts` cases: single hides Cancel, relabels the
-  button, the button closes without a callback; non-single unchanged).
+  button, the button closes without a callback; non-single unchanged; a regression that opens an
+  informational confirm and then a destructive one and asserts Cancel, `confirm_color` and any
+  `confirmation_text` gate are back — every caller resets `cacheStore.confirm` fields it sets, so the
+  single flag must be cleared on close like the others).
 - `pages/tokens/[id].vue`: `data-testid="token-menu-trigger"` on the "⋯" button; `usePinnedTokens`
   (parent owns the `TokenServiceClient` it already has; `knownContracts` from a
   `getTokens(profile.id, network.chainId)` fetched on mount); `token-menu-pin` item with the two labels
@@ -684,16 +756,22 @@ moved), rerun `<fast>` and `<smoke>` on the synced tip before submitting.
 - **Threat surface**: UI-only change, no new permissions, no network calls, no new dependencies
   (`git diff --exit-code dev -- bun.lock` at every arc boundary). Attackers reach it through storage
   contents, token metadata and the settings value.
-- **Hostile storage**: the pins key is validated on every read as a MAP (non-object → `{}`,
-  non-array values dropped) and per list (strings → lowercase `0x` + 64 hex → de-duplicated →
-  truncated to the cap); the sanitized map is what gets written back, so junk sibling keys are never
-  re-persisted and cannot grow the key. A poisoned map can at most reorder rows.
-- **Hostile token metadata**: symbols and names come from contracts. They render through Vue
-  interpolation (escaped) in rows, in the confirm popup and in toasts; every symbol the pin flow
-  renders is bounded with `sanitizeWireString(…, 32)`; long strings in rows are clipped by the
-  existing row CSS; the search compares lowercase strings and never builds HTML or regexes from input
-  (`String.prototype.includes`, no `RegExp`). Duplicate symbols are possible and are never used as
-  identity — contracts are.
+- **Hostile storage**: the pins key is validated on every read as a MAP (array or non-object root
+  → `{}`; own enumerable entries only; keys must be canonical chain ids `/^\d+$/`; values must be
+  arrays; at most 32 chains) and per list (strings → lowercase `0x` + 64 hex → de-duplicated →
+  truncated to the cap); the sanitized map is what gets written back, so junk keys are never
+  re-persisted and the key cannot grow. A poisoned map can at most reorder rows.
+- **Hostile balances and metadata**: balance strings and `decimals` come from storage rows fed by
+  contracts. `parseRawBalance` / `isValidDecimals` are the only parsers; a malformed row classifies
+  as `unknown` (visible, unpriced, never folded) and no exponent is ever computed for `decimals > 77`.
+  Symbols and names render through Vue interpolation (escaped) in rows, in the confirm popup and in
+  toasts; every symbol the pin flow renders is bounded with `sanitizeWireString(…, 32)`; `TokenCard`'s
+  symbol gets a `max-width` + ellipsis so a long symbol cannot displace the balance; the search
+  compares lowercase strings and never builds HTML or regexes from input (`String.prototype.includes`,
+  no `RegExp`). Duplicate symbols are possible and are never used as identity — contracts are.
+- **Chain isolation**: every consumer filters rows by the active chain (`forChain`), because the
+  balance service returns a shared address's rows from every chain (Fact 20). Pins, the cap, the
+  fold, the aggregate and the picker all see one chain.
 - **Search input**: local state, never persisted, never sent anywhere; no sanitizer (it would
   mangle symbols), `maxLength` 80.
 - **Numeric path**: the threshold is bounded in the schema (`max(1_000_000)`) so
@@ -701,9 +779,10 @@ moved), rerun `<fast>` and `<smoke>` on the synced tip before submitting.
   and fails open, so a malformed balance or an absurd `decimals` can never throw out of a render.
 - **Dust and prices**: the fold fails open (unknown price → shown), so a price-feed failure can never
   hide a holding; pinned tokens are exempt so a hostile threshold cannot hide what the user chose.
-- **Deletion**: removing a token drops its contract from the deleted token's OWN profile + chain
-  list (never the active profile's); a dangling contract that appears anyway (storage edited, event
-  missed) is ignored by ordering, pruned on the next write, and never counts toward the cap.
+- **Deletion**: removing a token drops ONLY its contract from the deleted token's OWN profile +
+  chain list (never the active profile's, never a sibling list); a dangling contract that appears
+  anyway (storage edited, event missed) is ignored by ordering, pruned by the next scope-matching
+  write, and never counts toward the cap once the token set is loaded.
 - **Least privilege / supply chain**: nothing new; CI's frozen lockfile and 7-day min-age policies
   are untouched.
 
@@ -804,7 +883,18 @@ below it — the owner's call, never autonomous.
   symbols fetch, `useEntityCrud`'s real API, the glyph check, bootstrap wording) adopted in r3; both
   recommendations (picker rows, confirm single mode) taken and flagged at the gate. Inference 4
   resolved to Fact 18.
-- **Final fresh-context codex pass**: _pending_.
+- **Final fresh-context codex pass, round 1** (`audit-codex.md` § Final pass, Astra `high`, new
+  session): `reject` — Holdings and the pins' known set were not chain-scoped (the balance service
+  returns a shared address's rows from every chain); hostile balance strings and `decimals` reached
+  `BigInt`/exponentiation outside the guarded predicate; the pin write path pruned against the
+  caller's set even for a foreign profile's deletion; plus mediums (kill-switch makes the dust half
+  inert, symbol overflow in rows, the picker's "same order" needed balances, a structural selector,
+  map validation gaps, `jq` in bootstrap, machine paths in a committed plan, an overclaimed "at most
+  one pin lost"). All adopted in r4 (`forChain` everywhere, `token-amount.ts` parsers and the
+  `unknown` class, deletion removes only the event contract with scope-captured queued ops, native
+  search input, canonical-key map validation, the picker on balances + one price client, symbol
+  `max-width`). It sided with the confirm single mode, "Home is full", and the `SettingItem` rows.
+- **Final pass, round 2 (resumed with the r4 diff)**: _pending_.
 
 ## Seeds
 

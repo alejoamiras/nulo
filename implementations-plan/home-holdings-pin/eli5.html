@@ -1,0 +1,142 @@
+<title>Home + Holdings Plan</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root {
+	--bg: #f5f5f7; --surface: #ffffff; --surface-low: #f0efec; --border: rgba(124, 116, 104, 0.3);
+	--txt: rgba(0, 0, 0, 0.88); --txt-2: #6b655c; --txt-3: rgba(0, 0, 0, 0.58);
+	--accent: #a8480c; --good: #109373; --warn: #c38700;
+	--headline: "Space Grotesk", system-ui, sans-serif; --body: "Inter", system-ui, sans-serif; --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--bg: #0f0e0d; --surface: #141312; --surface-low: #1d1b1a; --border: rgba(74, 70, 63, 0.5);
+		--txt: #f5f0e6; --txt-2: #999187; --txt-3: rgba(245, 240, 230, 0.62);
+		--accent: #f8f1e7; --good: #18d2a5; --warn: #e6c525;
+	}
+}
+:root[data-theme="dark"] {
+	--bg: #0f0e0d; --surface: #141312; --surface-low: #1d1b1a; --border: rgba(74, 70, 63, 0.5);
+	--txt: #f5f0e6; --txt-2: #999187; --txt-3: rgba(245, 240, 230, 0.62);
+	--accent: #f8f1e7; --good: #18d2a5; --warn: #e6c525;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--txt); font-family: var(--body); font-size: 15px; line-height: 1.6; }
+main { max-width: 760px; margin: 0 auto; padding: 40px 24px 96px; }
+.eyebrow { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--txt-2); }
+h1 { font-family: var(--headline); font-weight: 700; font-size: 36px; line-height: 1.05; letter-spacing: -0.03em; text-transform: uppercase; margin: 8px 0 16px; text-wrap: balance; }
+h2 { font-family: var(--headline); font-weight: 700; font-size: 20px; letter-spacing: -0.02em; text-transform: uppercase; margin: 48px 0 12px; }
+h3 { font-family: var(--headline); font-weight: 700; font-size: 15px; letter-spacing: -0.01em; margin: 0 0 6px; }
+p { margin: 0 0 12px; color: var(--txt-3); max-width: 66ch; }
+p b, li b { color: var(--txt); font-weight: 600; }
+ul { margin: 0 0 12px; padding-left: 20px; color: var(--txt-3); max-width: 66ch; }
+li { margin-bottom: 6px; }
+.phase { margin: 14px 0; padding: 14px 18px; border-left: 3px solid var(--border); background: var(--surface); }
+.phase .arc { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--txt-2); }
+.phase p { margin: 6px 0 0; }
+.gate { font-family: var(--mono); font-size: 12px; color: var(--txt-2); margin-top: 8px; }
+.gate b { color: var(--good); font-weight: 500; }
+.approval { margin: 20px 0; padding: 18px 22px; border: 2px solid var(--accent); background: var(--surface); }
+.approval h2 { margin-top: 0; }
+.tier { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin: 12px 0 16px; }
+.tier div { padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); }
+.tier .k { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--txt-2); }
+.tier .v { font-family: var(--headline); font-weight: 700; font-size: 14px; margin-top: 2px; }
+.tier .v.low { color: var(--good); } .tier .v.mid { color: var(--warn); }
+code { font-family: var(--mono); font-size: 0.9em; }
+pre { font-family: var(--mono); font-size: 12px; line-height: 1.5; background: var(--surface-low); border: 1px solid var(--border); padding: 14px 16px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; color: var(--txt); }
+.seed { margin: 14px 0; padding: 14px 18px; border-left: 3px solid var(--border); background: var(--surface); }
+.seed.rec { border-left-color: var(--accent); }
+.warning { color: var(--warn); font-weight: 600; margin: 12px 0; }
+.q { margin: 12px 0; padding-left: 14px; border-left: 2px solid var(--border); }
+.q .t { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--txt-2); }
+.muted { color: var(--txt-2); font-size: 13px; }
+</style>
+
+<main>
+	<div class="eyebrow">Blueprint · mid tier · plan lives at implementations-plan/home-holdings-pin/plan.md</div>
+	<h1>Home + Holdings Plan</h1>
+	<p>Today the wallet's first tab lists every token alphabetically under the big balance. That works with two tokens and falls apart with twenty-five: the valuable ones sink below test tokens, the recent-transactions feed scrolls off the screen, and every "pick a token" list grows without limit. This plan gives the wallet a <b>Home</b> tab that shows at most three tokens, a <b>Holdings</b> tab that owns the full list with a search box, and a way to <b>pin</b> up to three tokens to Home from each token's own menu.</p>
+	<p class="muted">Written on your Mac, executed by a fresh session on the homelab. The plan file is self-contained: bootstrap steps, every decision, every test.</p>
+
+	<h2>Why this tier</h2>
+	<div class="tier">
+		<div><div class="k">Novelty</div><div class="v low">low</div></div>
+		<div><div class="k">Blast radius</div><div class="v mid">medium</div></div>
+		<div><div class="k">Irreversible</div><div class="v low">low</div></div>
+		<div><div class="k">Migration</div><div class="v low">low</div></div>
+		<div><div class="k">External</div><div class="v low">low</div></div>
+		<div><div class="k">Security</div><div class="v low">low</div></div>
+	</div>
+	<p><b>Mid.</b> Nothing here is novel or irreversible, no data migrates, no third party is involved. The one thing with reach is the bottom navigation, which every end-to-end test walks through; the plan keeps the existing route and test hooks so that reach stays contained. Mid buys two independent plan audits (Codex and a second Claude) plus a final fresh-eyes Codex pass, which is what caught the four blocking issues below before anyone wrote code.</p>
+
+	<h2>What the audits changed</h2>
+	<ul>
+		<li><b>Pins remember the token's contract address, not its internal number.</b> Internal numbers get reused when a token is deleted and another is added, so a stale pin could have attached itself to the wrong token.</li>
+		<li><b>Every browser test that checks the popup must build it first.</b> The smoke suite only checks that a build exists; without this step it would silently test old code.</li>
+		<li><b>The full network test suite runs one shard at a time</b> from one checkout. Running shards in parallel from the same folder makes them kill each other's browser.</li>
+		<li><b>Token names and symbols come from contracts and are capped at 32 characters</b> wherever the pin flow shows them, so a hostile token can't wreck the popup.</li>
+		<li><b>Two simplifications</b>, both flagged for you below: the Send screen's token picker keeps its current rows and only gains the new order and a search box, and the "Home is full" message reuses the existing confirm popup in a one-button mode instead of a brand-new popup.</li>
+	</ul>
+
+	<h2>Phases</h2>
+	<p class="muted">Three arcs, three stacked pull requests. A phase is "green" only when its listed proof passes.</p>
+
+	<div class="phase"><div class="arc">Arc A · PR 1</div><h3>Phase 1 — Four tabs and an empty Holdings page</h3><p>Rename the first tab to HOME, add a HOLDINGS tab that opens an empty page. The web address of Home does not change, so nothing else in the app or the tests moves.</p><div class="gate">Proves itself by: <b>lint + typecheck + unit tests, the built popup's navigation smoke test walking all four tabs, and a check that the new icons exist in the bundled font.</b></div></div>
+
+	<div class="phase"><div class="arc">Arc A · PR 1</div><h3>Phase 2 — Home shows three tokens, ordered by value</h3><p>Home orders tokens by what they're worth (pinned ones first, once pins exist), shows three, and offers a "View all" link when more exist. The old, unreachable "choose what the big balance shows" popup is deleted; the big balance always shows your total.</p><div class="gate">Proves itself by: <b>unit tests for the ordering rules (including empty and unpriced tokens), lint + typecheck, the full smoke suite on a fresh build, and four targeted network tests that click Home's token rows.</b></div></div>
+
+	<div class="phase"><div class="arc">Arc B · PR 2</div><h3>Phase 3 — The Holdings page</h3><p>The full list: a total at the top, a search box that stays put while you scroll, a value/name sort, pinned tokens above a dashed line, and one fold that tucks away empty tokens and anything under your existing "hide dust" threshold. Nothing is ever hidden without a row saying how many are hidden.</p><div class="gate">Proves itself by: <b>unit tests for search, fold and dust rules (including hostile numbers), component tests for the list, and a network test that opens Holdings with real balances, sees a priced token rank first, searches, and sorts.</b></div></div>
+
+	<div class="phase"><div class="arc">Arc B · PR 2</div><h3>Phase 4 — The Send screen's token picker</h3><p>The picker uses the same order as Home and Holdings and gets a search box once you have more than three tokens. Picking a token works exactly as before.</p><div class="gate">Proves itself by: <b>a component test for order and search, lint + typecheck, the smoke suite on a fresh build, and a new network test that actually picks a different token on the Send screen (none existed before).</b></div></div>
+
+	<div class="phase"><div class="arc">Arc C · PR 3</div><h3>Phase 5 — Remembering pins</h3><p>A small, well-guarded piece of state: which tokens are pinned, per profile and per chain, at most three, cleaned up when a token is deleted, and validated on every read so a corrupted value can only ever reorder rows.</p><div class="gate">Proves itself by: <b>unit tests for every rule: the cap, hostile stored values, deletion cleanup across profiles, concurrent pin clicks, and network switching.</b></div></div>
+
+	<div class="phase"><div class="arc">Arc C · PR 3</div><h3>Phase 6 — "Pin to Home" in the token menu</h3><p>Each token's "⋯" menu gains "Pin to Home" or "Unpin from Home". When three are already pinned, a popup titled "Home is full" names them and asks you to unpin one first. Home, Holdings and the Send picker all honour the pins.</p><div class="gate">Proves itself by: <b>component tests for the menu states and the popup, lint + typecheck, the smoke suite on a fresh build, and a network test that pins from a token page, sees it first on Home, reopens the popup, and unpins.</b></div></div>
+
+	<div class="phase"><div class="arc">Arc C · PR 3</div><h3>Phase 7 — The whole network suite</h3><p>Every network test, run shard by shard in a terminal session that survives the agent process. Optional two-at-a-time mode only after the first shard shows memory headroom.</p><div class="gate">Proves itself by: <b>all five shard logs ending in exit 0.</b></div></div>
+
+	<h2>Human context</h2>
+	<p><b>Why not a star on every row?</b> It read as "everything is starred", and stars in wallets read as "verified". The action lives where every other per-token action already lives: the token's own menu. Rows carry no marks; position is the signal.</p>
+	<p><b>Why three?</b> Home's balance, gas, buttons and three rows fit above the fold with the Recent transactions header still visible. A fourth row pushes it under.</p>
+	<p><b>Why contracts, not internal numbers, for pins?</b> The wallet reuses internal token numbers after a deletion. A contract address is the token's real identity on a chain, and a re-added token keeping its pin is what you'd expect.</p>
+	<p><b>Why reuse the "hide dust" setting?</b> One number for what counts as dust across the wallet. Its description widens to say it covers holdings too.</p>
+	<p><b>What is not in this plan:</b> pasting an address into the search to add a token (agreed direction, next plan), manual ordering of pins, any marks or controls on rows, backing up pins, a horizontal token strip.</p>
+
+	<h2>Open questions</h2>
+	<div class="q"><div class="t">Send picker rows</div><p>You chose "the Send picker reuses the same list component". Both audits argued that what you actually want is the same order plus a search box, and that reusing the full component drags per-row price lookups and a button variant into a popup for no visible gain. The plan delivers order + search with the picker's existing rows. <b>Say the word if you want identical rows.</b></p></div>
+	<div class="q"><div class="t">The "Home is full" popup</div><p>The mockup showed the three pinned symbols as chips. The plan reuses the existing confirm popup in a one-button mode with the symbols written inline in the sentence. Cheaper by a file, a registration line and a test suite. <b>Flip to a dedicated popup if you want the chips.</b></p></div>
+	<div class="q"><div class="t">Small defaults the plan chose for you</div><p>No fold inside the Send picker; picker search appears only past three tokens; the list forgets its search when you close it; pinned tokens without a price sort after pinned tokens with one; the dust fold works even when fiat display is off; pins are per chain, not per network endpoint.</p></div>
+
+	<div class="approval">
+		<h2>Approval decision needed from you</h2>
+		<ul>
+			<li>Confirm scope: four tabs, Home capped at three, Holdings page with search/sort/fold, pin/unpin from the token menu with a popup at the cap, old balance-display popup deleted.</li>
+			<li>Confirm the two simplifications above, or flip either.</li>
+			<li>Confirm the tier (mid) and the validation plan: unit tests every phase, smoke on a fresh build at arc ends, targeted network tests per arc, the full network suite sharded at the end.</li>
+			<li>Confirm delivery: three stacked pull requests, opened only after the code-quality loops finish. No code review pass beyond the Codex loop (your choice).</li>
+			<li>No security-hardening pass is scheduled: nothing here touches trust boundaries, secrets or CI.</li>
+			<li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+		</ul>
+	</div>
+
+	<h2>Implementation seeds (draft — finalized after approval)</h2>
+	<p>Run exactly one of these in a Claude session started <b>inside the worktree on the homelab</b> (the plan's Bootstrap section lists the commands). <code>/goal</code> keeps the session working until the condition holds and survives a resume; <code>/loop</code> fires on an interval. Pick one.</p>
+	<p class="warning">Use exactly ONE per session. They don't compose — setting one replaces the other.</p>
+
+	<div class="seed rec"><h3>Recommended for this plan: /goal</h3><p class="muted">Every completion signal is visible in the transcript (phase ✓ marks in the plan file, gate output, codex verdicts, the PR stack), so the evaluator can check it.</p>
+<pre>/goal All seven phases marked ✓ in implementations-plan/home-holdings-pin/plan.md (the phase headers in the file — not the chat, not the task list), each ✓ backed by that phase's validation gate reported passing in the transcript (smoke gates preceded by `bun run build`; network gates read from their tmux log ending EXIT=0); for each phase the agent has printed `LESSONS_FILE=implementations-plan/home-holdings-pin/lessons/phase-N.md`; `/code-review` was NOT run (code_review is off); the codex fix loop converged for each of the three arcs at its boundary AND for the final cross-arc pass, each convergence evidenced by a resumed codex pass reporting no new material findings quoted in the transcript; the three-PR stack exists on GitHub, created only after all loops converged (`gh stack view` output in the transcript); `bun run test` and `bun run lint` both report exit 0 in the transcript.</pre></div>
+
+	<div class="seed"><h3>Alternative: /loop 15m</h3>
+<pre>/loop 15m Drive implementations-plan/home-holdings-pin forward. Never idle waiting for my input. Each firing:
+1. **Reality check**: read implementations-plan/home-holdings-pin/plan.md and lessons/ (authoritative state — not the chat); native task list empty (fresh session)? rebuild it from plan.md, one task per remaining phase; run `git status` and `git log --oneline -5`. If a PR exists, `gh stack view`. Without a PR, `gh run list --branch $(git branch --show-current) --limit 1 --json status,databaseId`.
+2. **Waiting on CI or a tmux e2e run is fine** — confirm it's progressing (`gh run watch &lt;run-id&gt;` up to 10 minutes; `tail -n2 ~/.cache/hhp-*.log`); use the wait to prep the next phase or strengthen tests. Don't start work that conflicts with the in-flight change.
+3. **No task in hand?** Pick the next pending phase from plan.md and start it. After each meaningful edit run `bun run lint && bun run typecheck && bun run test`. Commit (signed — the homelab signs non-interactively) → `git push` (before the stack exists) / `gh stack push` (after).
+4. **Stuck, or facing a decision you'd normally bring to me?** Don't wait. Call `/codex high` with full context and go back and forth until you two reach a defensible decision, then act on it. Log every consult + verdict in lessons/phase-N.md. Hard limits stay hard: never merge to dev or main, never publish or deploy, never expand scope beyond plan.md; if a decision requires crossing one, surface it and hold.
+5. **Same step failed 5 times?** Stop retrying; reassess the approach with codex, then continue down the agreed path.
+6. **Phase green?** "Green" means THE PHASE'S VALIDATION GATE as written in plan.md passes (smoke = build first; network = tmux log ends EXIT=0). Run the full gate, paste the result, mark ✓ in plan.md, file the lessons entry, print `LESSONS_FILE=implementations-plan/home-holdings-pin/lessons/phase-N.md`, advance. Arc boundary crossed (per plan.md's Delivery section)? `bun run audit:vue` green and the lockfile unchanged, then the arc's codex loop FIRST (plan.md § Post-implementation: arc diff + plan + ledger + arc map + the no-over-engineering and comment-quality rules, resume until a round yields nothing material) — THEN `gh stack init`/`gh stack add` per plan.md.
+7. **All seven phases ✓?** Run the final cross-arc codex pass (FRESH session, net diff from dev@2a3d2d87, cross-arc ask, same loop-until-clean), then Delivery per plan.md — the FIRST time any PR is opened: `gh stack sync` if dev moved and rerun the fast + smoke gates, `gh stack submit --auto`, `gh pr edit` bodies, `gh pr checks --watch`. Then write the wrap-up report: what shipped, every contentious decision codex and I debated with ELI5 context, open items. Surface and stop.
+
+Keep the native task list current; plan.md stays the source of truth.</pre></div>
+
+	<p class="muted">Full plan: implementations-plan/home-holdings-pin/plan.md · audits: audit-codex.md, audit-fable.md · recon: recon.md · lessons land in lessons/ during implementation.</p>
+</main>
