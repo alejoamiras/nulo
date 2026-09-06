@@ -455,6 +455,15 @@ evidence + the owner's manual focus check for arc 2) → `gh pr checks --watch`.
 `quality-status`, `smoke-e2e-status`, `network-e2e-status`. `gh stack merge` is the owner's call. Then
 mark the index entry and suggest `agent-worktree done dapp-popup-cancel-focus`.
 
+## Delivery log
+
+- 2026-09-05: all five phases ✓; arc-1 loop converged (r2 clean), arc-2 loop converged (r3 clean),
+  cross-arc pass converged (r2 clean); final local gate `bun run lint` exit 0 and `bun run test`
+  (3 workers) 437 files / 5470 tests exit 0. `gh stack submit --auto` → PR #550
+  (`worktree-dapp-popup-cancel-focus` → `dev`) and PR #551 (`dapp-popup-cancel-focus/focus` → #550).
+  Open: CI checks; the owner's macOS Space-switch check (`lessons/phase-4.md`); `gh stack merge` is
+  the owner's call.
+
 ## Audit log
 
 - Codex round 1 (session `01a072e1-d77c-7200-b8f9-927bcf300e22`, GPT-6 Astra `high`): **reject**
