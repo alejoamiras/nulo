@@ -60,3 +60,14 @@ Verdict: `reject (with blocking findings: malformed rows still reach unsafe rend
 | 7 | Low | A stale "loss bounded to one pin" sentence remained in Trade-offs. | **Adopted.** Removed. |
 
 Support retained for `SettingItem` rows, `ConfirmPopup` single mode and "Home is full".
+
+# Final pass — round 3 (resumed with the r5 changes)
+
+Verdict: **`conditional approve (with conditions: reconcile the pin-write algorithm, ensure pruning uses a current token list, enforce the chain limit after mutation, and record the two open owner decisions)`**. Confidence high. Findings 1, 2, 3, 6, 7 of round 2 confirmed addressed; no architectural redesign needed.
+
+| # | Sev | Condition | Disposition |
+|---|---|---|---|
+| 1 | Medium | § Algorithms still captured the known set at enqueue while § Data flow said "live". **Verified** (r5 text). | **Adopted (r6).** The pin-toggle algorithm reads storage, re-checks the scope, `await`s the known set, re-checks the scope again, then prunes/mutates. |
+| 2 | Medium | A getter over a mount-only token fetch is not current: the token page would not know a token added-and-pinned elsewhere. **Verified** (r5 Phase 6). | **Adopted (r6).** `knownContracts` is an authoritative (optionally async) getter read at write time; the token page fetches `getTokens(profile.id, chainId)` inside it; the Phase 6 test changes the mocked list between mount and the click. |
+| 3 | Medium | The 32-chain cap was applied during validation, before the mutation, so a 32-chain map plus a new pin could persist 33 and lose the new chain on the next read. | **Adopted (r6).** Cap applied after the mutation, the written chain always kept; test: 32-chain map → new-chain pin → 32 persisted → refresh keeps the pin. |
+| 4 | — | Record the two open owner decisions before implementation. | **This is the approval gate**: the Send-picker rows and the popup implementation are asked explicitly there and written into § Asks before the homelab session starts. |

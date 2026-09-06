@@ -7,7 +7,7 @@
 - **Design reference**: the round-4b mockups (interactive, shared pin state) live at the Claude Artifact `https://claude.ai/code/artifact/1b64e873-a804-4262-8818-55d6481b7bef`. Everything a fresh session needs from them is restated in § Scope and § Copy; the artifact is for taste, not for facts.
 - **ELI5**: Artifact `https://claude.ai/code/artifact/5366dd8f-9f9e-413a-833d-44168c159aec`, source
   `implementations-plan/home-holdings-pin/eli5.html` (redeploy the same file to update the same URL).
-- **Revision**: r5 — final-pass round 2 folded (pins classified before parsing, TokenCard guarded, chain filter on the hero, live known set, canonical map keys); r4 folded the fresh-context final codex pass (chain isolation, numeric parsing, pin-write scope); r2 folded codex round 1 (`audit-codex.md`, reject → adopted); r3 folded the fable audit (`audit-fable.md`, conditional approve → adopted, two of its recommendations taken and flagged at the gate); r4 folds the fresh-context final codex pass (reject → adopted: chain isolation, numeric parsing, pin-write scope).
+- **Revision**: r6 — final-pass round 3 conditions folded (pin write reads the live token list after the storage await; token page fetches the list at write time; chain cap applied after mutation); r5 — final-pass round 2 folded (pins classified before parsing, TokenCard guarded, chain filter on the hero, live known set, canonical map keys); r4 folded the fresh-context final codex pass (chain isolation, numeric parsing, pin-write scope); r2 folded codex round 1 (`audit-codex.md`, reject → adopted); r3 folded the fable audit (`audit-fable.md`, conditional approve → adopted, two of its recommendations taken and flagged at the gate); r4 folds the fresh-context final codex pass (reject → adopted: chain isolation, numeric parsing, pin-write scope).
 
 ## Why
 
@@ -237,7 +237,11 @@ export const PINNED_TOKENS_MAX = HOME_TOKEN_ROWS
 export function usePinnedTokens(deps: {
   tokenService: Pick<TokenServiceClient, "onTokenDeleted">
   getScope: () => { profileId: string; chainId: number } | undefined
-  knownContracts: () => ReadonlySet<string> | undefined   // the caller's CURRENT-CHAIN token set (lowercase); undefined = not loaded yet → no pruning, cap counts stored entries
+  knownContracts: () => Promise<ReadonlySet<string> | undefined> | ReadonlySet<string> | undefined
+  // The CURRENT-CHAIN token set (lowercase), read AT WRITE TIME — never cached by the composable.
+  // Callers that hold a live list (TokensView, Holdings, the picker) return it; the token page, which
+  // loads one token, returns `tokenService.getTokens(profile.id, chainId)` mapped to contracts so a
+  // token added elsewhere since mount is known. undefined = not loaded → no pruning, cap counts stored entries.
 }): {
   pinnedContracts: ComputedRef<ReadonlySet<string>>  // this scope's list ∩ knownContracts
   isPinned(contract: string): boolean
@@ -296,22 +300,25 @@ Everything else about the popup is untouched.
   (`token/spec.ts:220-225`). If the event matches the active scope, `pinnedContracts` updates.
 - **Ordinary writes** (`pin`/`unpin`): the operation captures `getScope()` when ENQUEUED; when it
   runs, it re-reads the scope and drops itself (resolving `"already"`/no-op) if the scope changed.
-  The known set is read LIVE at run time through the `knownContracts()` getter (never snapshotted —
-  a snapshot taken before a token was added-and-pinned would prune the new pin). Pruning of dangling
-  entries happens here only, and only when that live set is loaded (not `undefined`) — so a foreign
-  scope's list is never pruned against the wrong token set. The cap counts stored entries when the
-  set is not loaded yet, and `entries ∩ knownContracts` when it is.
+  The known set is obtained AFTER the storage read through `await knownContracts()` (never
+  snapshotted — a snapshot taken before a token was added-and-pinned would prune the new pin), and
+  the scope is re-checked after that await too. Pruning of dangling entries happens here only, and
+  only when that set is loaded (not `undefined`) — so a foreign scope's list is never pruned against
+  the wrong token set. The cap counts stored entries when the set is not loaded yet, and
+  `entries ∩ knownContracts` when it is.
 - **Storage read/write path**: every operation enqueues on a module-level `Map<key, Promise>` chain
   (one per storage key, shared by every instance in the context); inside the chain:
   `storageLocalGet(key)` → validate the whole map (not a plain object, or an array → `{}`; only own
   enumerable entries; a key is kept only if it is the canonical spelling of a safe non-negative
   integer — `Number.isSafeInteger(Number(k)) && Number(k) >= 0 && String(Number(k)) === k`, so `"00"`,
   `"1e3"` and 400-digit strings are dropped; values must be arrays or are dropped; each list →
-  strings → lowercase `0x` + 64 hex → de-duplicated → truncated to the cap; if more than 32 chains
-  remain, the chain being written is always kept and the surplus is dropped from the OTHER keys in
-  iteration order, so a successful write can never vanish on the next read) → mutate →
-  `storageLocalSet` with the sanitized map, so junk keys are never re-persisted and the key cannot
-  grow. A rejected write logs, leaves the chain usable, and re-reads. Reads use the same validation.
+  strings → lowercase `0x` + 64 hex → de-duplicated → truncated to the cap) → mutate → apply the
+  32-chain cap AFTER the mutation (the chain being written is always kept; the surplus is dropped
+  from the OTHER keys in iteration order, so a map that already holds 32 chains plus a new pin
+  persists 32 and the new pin survives the next read) → `storageLocalSet` with the sanitized map, so
+  junk keys are never re-persisted and the key cannot grow. A rejected write logs, leaves the chain
+  usable, and re-reads. Reads use the same validation (with the 32 cap applied on read as well, in
+  the same order).
 
 ### File-level change map
 
@@ -393,11 +400,13 @@ variant="no-results"` when all three are empty and `q` is non-empty. The search 
 `<input data-testid="holdings-search">` (the design `Input` puts its testid on a wrapper, which
 would force a structural selector); e2e drives it with `replaceInputValue`.
 
-**Pin toggle**: `pin(c)`: enqueue (capturing scope + known set) → scope still current? else no-op →
-read+validate → prune to the captured known set if loaded → if includes → `"already"`; if
-`length >= PINNED_TOKENS_MAX` → `"full"` (no write); else append, write, `"pinned"`. `unpin(c)`:
-same guard → read → filter → write. `chrome.storage.onChanged` for the key → `refresh()` (the
-`syncedRef` precedent: re-read through the facade, never trust the event's value).
+**Pin toggle**: `pin(c)`: enqueue (capturing the scope only) → `storageLocalGet` + validate →
+scope still current? else no-op → `known = await knownContracts()` (authoritative, fetched NOW —
+see Key interfaces) → scope still current? else no-op → prune the scope's list to `known` if it is
+loaded → if includes → `"already"`; if `length >= PINNED_TOKENS_MAX` → `"full"` (no write); else
+append → apply the 32-chain cap AFTER the mutation, keeping this chain → write → `"pinned"`.
+`unpin(c)`: same guards → filter → cap → write. `chrome.storage.onChanged` for the key →
+`refresh()` (the `syncedRef` precedent: re-read through the facade, never trust the event's value).
 
 ### Trade-offs & alternatives not taken
 
@@ -715,8 +724,8 @@ loop; THEN `gh stack add home-holdings-pin/pins`.
   not loaded (no pruning then); a token added-and-pinned after an earlier operation was enqueued is
   NOT pruned by that operation (the known set is read live); per-chain isolation; scope change
   refresh; an operation enqueued under one scope and run after a switch is a no-op; map validation
-  drops `"00"`, `"1e3"` and oversized keys and never drops the chain being written when trimming to
-  32; a deletion event for ANOTHER profile removes
+  drops `"00"`, `"1e3"` and oversized keys; a 32-chain map plus a pin on a new chain persists 32
+  chains with the new pin intact after a refresh; a deletion event for ANOTHER profile removes
   only that contract from that profile's own chain list and leaves its other pins intact; a
   deletion missed while disconnected is pruned by the next ordinary write; concurrent `pin`/`unpin`
   in one context serialise (the last state is consistent); a rejected write leaves the chain usable;
@@ -734,8 +743,10 @@ Validation gate — `<fast>`. Pass: exit 0, composable suite green. Layers: lint
   `confirmation_text` gate are back — every caller resets `cacheStore.confirm` fields it sets, so the
   single flag must be cleared on close like the others).
 - `pages/tokens/[id].vue`: `data-testid="token-menu-trigger"` on the "⋯" button; `usePinnedTokens`
-  (parent owns the `TokenServiceClient` it already has; `knownContracts` from a
-  `getTokens(profile.id, network.chainId)` fetched on mount); `token-menu-pin` item with the two labels
+  (parent owns the `TokenServiceClient` it already has; `knownContracts` is an async getter that
+  calls `getTokens(profile.id, network.chainId)` at write time, so a token added elsewhere since
+  mount is known; the test drives it through a mocked token client whose list changes between
+  mount and the click); `token-menu-pin` item with the two labels
   and `data-pinned`; toasts; on `"full"` map the pinned contracts to symbols from that token list,
   bound each with `sanitizeWireString(…, 32)`, fill `cacheStore.confirm` and open `confirm`. Rendered
   check of the `push_pin` glyph (Fact 18 already covers it; a screenshot from the pin e2e is enough).
@@ -935,7 +946,13 @@ below it — the owner's call, never autonomous.
   helpers and renders `—`, name line clipped, `forChain` in BalanceView, live known-set getter,
   canonical-key validation with the written chain always kept, unknown rows make the aggregate
   partial. Support retained for the `SettingItem` rows, the confirm single mode and "Home is full".
-- **Final pass, round 3 (resumed with the r5 diff)**: _pending_.
+- **Final pass, round 3 (resumed with the r5 diff)**: **`conditional approve (with conditions:
+  reconcile the pin-write algorithm, ensure pruning uses a current token list, enforce the chain
+  limit after mutation, and record the two open owner decisions)`**. The first three are folded in
+  r6 (the pin-toggle algorithm reads the known set after the storage await with a scope re-check;
+  `knownContracts` is an authoritative async getter — the token page fetches at write time; the
+  32-chain cap is applied after the mutation keeping the written chain, with a 32→33 test). The
+  fourth is the approval gate itself: the two open Asks are put to the owner there.
 
 ## Seeds
 
