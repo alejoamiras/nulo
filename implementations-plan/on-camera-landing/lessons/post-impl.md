@@ -19,3 +19,7 @@ Adopted, all verified in the code and then in the browser:
 | Comments narrating code; the "solid plate" rule overstated (headings use a halo, per the approved prototype) | trimmed; rule reworded in page.css and README | — |
 
 Rejected: none. Committed as `fix(landing): pause covers every motion; per-feed cell metrics; box follows the capped grid`.
+
+## Round 2 — VERDICT: clean
+
+Resumed session over the fix commit `b36fc6b8`: "No material problems introduced or left unresolved … Confidence: high." Codex could not run vitest in its read-only sandbox (workers timed out) and did not rerun the browser checks; both were run here (10 tests passed; browser probe in round 1 above). Loop converged.
