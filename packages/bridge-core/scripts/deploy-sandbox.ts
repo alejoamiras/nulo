@@ -682,24 +682,55 @@ async function exitCeiling(s: Smoke): Promise<bigint> {
 	return privateFpcFeeLimit(PRIVATE_HUB_EXIT_GAS, await predictedWorstMinFees(s.l2.node))
 }
 
+/** The actor's credit notes as the flows created them. `pay_fee` selects notes largest-first until
+ *  the ceiling is covered and returns the remainder as one change note, so this inventory says how
+ *  many notes an exit spends — what its gas sample is labelled with, and what the landed
+ *  transaction's nullifier count is checked against. */
+const creditNotes: bigint[] = []
+const byValueDesc = (a: bigint, b: bigint) => (b > a ? 1 : b < a ? -1 : 0)
+const sumOf = (notes: bigint[]) => notes.reduce((s, n) => s + n, 0n)
+
+/** How many notes `pay_fee` selects for this ceiling from the inventory. */
+function notesSelectedFor(ceiling: bigint): number {
+	let sum = 0n
+	const sorted = [...creditNotes].sort(byValueDesc)
+	for (let i = 0; i < sorted.length; i++) {
+		sum += sorted[i] as bigint
+		if (sum >= ceiling) return i + 1
+	}
+	throw new Error(`the held notes (${creditNotes.join(", ")}) do not cover the ceiling ${ceiling}`)
+}
+
+/** Replays the selection on the inventory once the exit has landed. */
+function spendNotes(count: number, ceiling: bigint): void {
+	creditNotes.sort(byValueDesc)
+	const spent = sumOf(creditNotes.splice(0, count))
+	if (spent > ceiling) creditNotes.push(spent - ceiling)
+}
+
 /** One note worth 1.4× the ceiling: the exit that spends it selects exactly one, and the change it
- *  leaves (≈0.4×) is small enough to be one of the three the fragmented exit needs. */
+ *  leaves (≈0.4×) is small enough to be one of the three the fragmented exit needs. Starts from
+ *  nothing: credit a re-attached run already holds would make the note shape unknowable. */
 async function flowPrivateGasOneNote(s: Smoke): Promise<string> {
 	const fpc = await privateFpc(s)
+	const held = await privateCreditOf(s, fpc)
+	if (held !== 0n) throw new Error(`the actor already holds ${held} FJ-wei of private gas; the note inventory cannot be established`)
 	const gained = await mintPrivateGasNote(s, fpc, ((await exitCeiling(s)) * 14n) / 10n)
+	creditNotes.push(gained)
 	return `bridge() to the PrivateFPC, FeeJuice.claim then PrivateFPC.mint credited ${gained} FJ-wei as one note`
 }
 
 /** Two more notes of 0.45× the ceiling each. Beside the first exit's change (≈0.4×) no note and no
  *  pair covers a ceiling, so the next exit's `pay_fee` has to select all three — past the two the
- *  FPC reads first, into its recursion — which is the shape an account that keeps bridging leaves. */
+ *  FPC reads first, into its recursion — which is the shape an account that keeps bridging leaves.
+ *  The send re-checks that shape at its own ceiling before spending anything. */
 async function flowPrivateGasFragmented(s: Smoke): Promise<string> {
 	const fpc = await privateFpc(s)
 	const each = ((await exitCeiling(s)) * 45n) / 100n
-	const a = await mintPrivateGasNote(s, fpc, each)
-	const b = await mintPrivateGasNote(s, fpc, each)
+	creditNotes.push(await mintPrivateGasNote(s, fpc, each), await mintPrivateGasNote(s, fpc, each))
 	const held = await privateCreditOf(s, fpc)
-	return `two notes of ${a} and ${b} FJ-wei minted; ${held} FJ-wei held across three notes, none covering a ceiling`
+	if (held !== sumOf(creditNotes)) throw new Error(`the credit ${held} is not the inventory's ${sumOf(creditNotes)}`)
+	return `notes of ${creditNotes.join(", ")} FJ-wei held (${held} in all); none covers a ceiling, nor does any pair`
 }
 
 type HubGasLimits = { daGas: number; l2Gas: number }
@@ -722,6 +753,10 @@ async function privateExitFee(s: Smoke): Promise<{ fee: Record<string, unknown>;
 
 interface ExitGasSample {
 	label: string
+	/** Credit notes `pay_fee` spent, per the inventory. */
+	notes: number
+	/** Nullifiers the landed transaction emitted: each spent note is one, so two samples differ by their note difference. */
+	nullifiers: number
 	simulated: { l2Gas: number; daGas: number }
 	fee: bigint
 	feePerL2Gas: bigint
@@ -735,18 +770,20 @@ const exitGasSamples: ExitGasSample[] = []
 
 /** The landed exit's bill beside its simulation, and what the FPC took from the credit. Fails the
  *  flow rather than record a hole: missing evidence, a landed fee that is not the simulated gas at
- *  the block's prices, or a deduction that is not the ceiling would each make the reading worthless. */
+ *  the block's prices, a deduction that is not the ceiling, or a nullifier count that does not move
+ *  with the notes spent since the previous sample would each make the reading worthless. */
 async function sampleExitGas(
 	s: Smoke,
-	label: string,
+	sample: { label: string; notes: number },
 	txHash: string,
 	sim: { gasUsed?: GasUsed },
 	paid: { charged: bigint; ceiling: bigint; limits: HubGasLimits },
 ): Promise<void> {
-	const receipt = await s.l2.node.getTxReceipt(TxHash.fromString(txHash))
+	const { label, notes } = sample
+	const receipt = await s.l2.node.getTxReceipt(TxHash.fromString(txHash), { includeTxEffect: true })
 	const billed = sim.gasUsed?.billedGas
-	if (!billed || receipt.transactionFee === undefined || receipt.blockNumber === undefined) {
-		throw new Error(`${label}: the exit's gas evidence is incomplete (simulated gas, landed fee or block missing)`)
+	if (!billed || receipt.transactionFee === undefined || receipt.blockNumber === undefined || !receipt.txEffect) {
+		throw new Error(`${label}: the exit's gas evidence is incomplete (simulated gas, landed fee, block or effects missing)`)
 	}
 	const fees = (await s.l2.node.getBlockData(receipt.blockNumber))?.header.globalVariables.gasFees
 	if (!fees) throw new Error(`${label}: block ${receipt.blockNumber} has no gas prices to bill the exit at`)
@@ -756,8 +793,17 @@ async function sampleExitGas(
 	}
 	if (paid.charged !== paid.ceiling)
 		throw new Error(`${label}: the FPC charged ${paid.charged}, not the ceiling ${paid.ceiling} it commits to`)
+	const nullifiers = receipt.txEffect.nullifiers.length
+	const prev = exitGasSamples.at(-1)
+	if (prev && nullifiers - prev.nullifiers !== notes - prev.notes) {
+		throw new Error(
+			`${label}: ${nullifiers} nullifiers after ${prev.nullifiers} (${prev.label}) is not ${notes - prev.notes} more spent note(s)`,
+		)
+	}
 	exitGasSamples.push({
 		label,
+		notes,
+		nullifiers,
 		simulated: { l2Gas: billed.l2Gas, daGas: billed.daGas },
 		fee: receipt.transactionFee,
 		feePerL2Gas: fees.feePerL2Gas,
@@ -775,7 +821,8 @@ function reportExitGas(): void {
 	}
 	for (const x of exitGasSamples) {
 		record(
-			`ℹ private exit (${x.label}) via PrivateFPC.pay_fee: simulated billed l2Gas=${x.simulated.l2Gas} daGas=${x.simulated.daGas}; ` +
+			`ℹ private exit (${x.label}: ${x.notes} credit note(s) spent, ${x.nullifiers} nullifiers) via PrivateFPC.pay_fee: ` +
+				`simulated billed l2Gas=${x.simulated.l2Gas} daGas=${x.simulated.daGas}; ` +
 				`landed fee=${x.fee} FJ-wei = that gas at the block's feePerL2Gas=${x.feePerL2Gas} feePerDaGas=${x.feePerDaGas}; ` +
 				`credit charged ${x.charged} = the ceiling under declared limits l2Gas=${x.limits.l2Gas} daGas=${x.limits.daGas} ` +
 				`(PRIVATE_HUB_EXIT_GAS l2Gas=${PRIVATE_HUB_EXIT_GAS.l2Gas} daGas=${PRIVATE_HUB_EXIT_GAS.daGas}, or this network's per-tx max where lower)`,
@@ -792,6 +839,8 @@ interface ExitPlan {
 	isPrivate: boolean
 	/** Names a private exit's gas sample in the report. */
 	label?: string
+	/** The credit notes the private exit's `pay_fee` is expected to spend (default 1); the send refuses when the inventory at its ceiling says otherwise. */
+	notes?: number
 }
 
 async function exitAuthwit(s: Smoke, p: ExitPlan, nonce: Fr): Promise<{ authWitnesses?: unknown[] }> {
@@ -813,7 +862,12 @@ type ExitReceipt = { txHash: unknown }
  *  read, burn) before any authwit is spent and rides the sponsor; a private one carries its witness
  *  and is paid by the PrivateFPC from held credit — its simulation is read for gas, and the credit
  *  around the send for what the FPC kept. */
-async function sendExit(s: Smoke, exit: HubExitParams, extra: { authWitnesses?: unknown[] }, label: string): Promise<ExitReceipt> {
+async function sendExit(
+	s: Smoke,
+	exit: HubExitParams,
+	extra: { authWitnesses?: unknown[] },
+	sample: { label: string; notes: number },
+): Promise<ExitReceipt> {
 	const from = s.l2.from.toString()
 	if (!exit.isPrivate) {
 		await preflightHubExit(s.hub, exit, from)
@@ -822,10 +876,20 @@ async function sendExit(s: Smoke, exit: HubExitParams, extra: { authWitnesses?: 
 	}
 	const fpc = await privateFpc(s)
 	const { fee, ceiling, limits } = await privateExitFee(s)
+	// The ceiling is priced now, not when the notes were minted: the shape is checked at this price.
+	const selecting = notesSelectedFor(ceiling)
+	if (selecting !== sample.notes) {
+		throw new Error(
+			`${sample.label}: at the ceiling ${ceiling} pay_fee selects ${selecting} note(s), not ${sample.notes}; the fixture lost its shape`,
+		)
+	}
 	const sim = await simulateHubExit(s.hub, exit, from, { ...extra, fee })
 	const before = await privateCreditOf(s, fpc)
 	const { receipt } = (await exitViaHub(s.hub, exit, { ...s.l2.sendOpts, ...extra, fee })) as unknown as { receipt: ExitReceipt }
-	await sampleExitGas(s, label, String(receipt.txHash), sim, { charged: before - (await privateCreditOf(s, fpc)), ceiling, limits })
+	const after = await privateCreditOf(s, fpc)
+	await sampleExitGas(s, sample, String(receipt.txHash), sim, { charged: before - after, ceiling, limits })
+	spendNotes(selecting, ceiling)
+	if (after !== sumOf(creditNotes)) throw new Error(`${sample.label}: the credit ${after} is not the inventory's ${sumOf(creditNotes)}`)
 	return receipt
 }
 
@@ -840,7 +904,7 @@ async function runExit(s: Smoke, p: ExitPlan): Promise<string> {
 		authwitNonce,
 		isPrivate: p.isPrivate,
 	}
-	const receipt = await sendExit(s, exit, extra, p.label ?? "private")
+	const receipt = await sendExit(s, exit, extra, { label: p.label ?? "private", notes: p.notes ?? 1 })
 
 	const erc20Balance = async () =>
 		(await s.l1.pub.readContract({
@@ -1168,11 +1232,11 @@ async function runSmoke(base: Sandbox, manifest: ManifestV2): Promise<void> {
 	const unit = 10n ** BigInt(usdc.decimals)
 	await flow("(e) public exit → L1 withdraw", () => runExit(s, { token: usdc, l2Token: usdcL2, amount: 10n * unit, isPrivate: false }))
 	await flow("(e) private exit paid from one credit note → L1 withdraw", () =>
-		runExit(s, { token: usdc, l2Token: usdcL2, amount: 5n * unit, isPrivate: true, label: "one note" }),
+		runExit(s, { token: usdc, l2Token: usdcL2, amount: 5n * unit, isPrivate: true, label: "one note", notes: 1 }),
 	)
 	await flow("(d) private gas → two more notes, none covering a ceiling", () => flowPrivateGasFragmented(s))
 	await flow("(e) private exit paid across three credit notes → L1 withdraw", () =>
-		runExit(s, { token: usdc, l2Token: usdcL2, amount: 5n * unit, isPrivate: true, label: "three notes" }),
+		runExit(s, { token: usdc, l2Token: usdcL2, amount: 5n * unit, isPrivate: true, label: "three notes", notes: 3 }),
 	)
 	await flow("(f1) relayer registers before the depositor claims", () => flowRelayerFirstRegister(s))
 	await flow("(f2) two concurrent first-time deposits", () => flowConcurrentFirstClaims(s))

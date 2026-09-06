@@ -24,9 +24,16 @@ credit — and report what it billed. Worktree `private-exit-gas-canary`.
   pair covers a ceiling, so the next `pay_fee` must select all three — past the two the FPC reads
   first, into its recursion.
 - **(e) private exit paid across three credit notes**: the same exit, the multi-note shape.
-- **The sample fails closed**: missing simulated gas, landed fee or block prices throws; so does a
-  landed fee that is not `billedGas.computeFee(blockFees)`, or a deduction that is not the ceiling.
-  The report prints one line per exit. The sponsored private exit is gone: the app never names it.
+- **The sample fails closed**: missing simulated gas, landed fee, block prices or tx effects throws;
+  so does a landed fee that is not `billedGas.computeFee(blockFees)`, or a deduction that is not the
+  ceiling. The report prints one line per exit. The sponsored private exit is gone: the app never
+  names it.
+- **The note shape is asserted, not assumed**: the flows keep an inventory of the credit notes they
+  minted (starting from a zero balance, so a re-attached run with prior credit fails explicitly);
+  before each private exit the send prices its own ceiling and refuses unless largest-first
+  selection over the inventory spends exactly the advertised count; after it, the inventory replays
+  the spend and must equal the credit read back; and the landed transaction's nullifier count must
+  move from the previous sample's by exactly the extra notes spent (each spent note is one nullifier).
 
 ## Runs
 
@@ -37,6 +44,7 @@ credit — and report what it billed. Worktree `private-exit-gas-canary`.
 | 3 | `(e) private exit` — `Declared DA gas limit (100000) exceeds the maximum this network allows per tx (55882)` | The wallet-sdk's `assertGasLimitsWithinNetworkLimits` refuses any declared limit above the node's `txsLimits.gas`. Testnet admits 117,668 DA; this local network 55,882. The smoke clamps its declared limits to the node's maximum and reports them beside the constant; the app's claim constants keep testnet's 100,000 — a target network admitting less would refuse the claims outright. |
 | 4 | all 16 flows green, 7.0 min; genesis actor, one note | first reading (below) |
 | 5 | all 18 flows green; Schnorr actor, one-note and three-note exits | the readings below; codex round 1's two measurement gaps closed |
+| 6 | all 18 flows green with the shape assertions; readings identical; the landed exits carried 5 and 7 nullifiers | two more notes = two more nullifiers = 61,600 more L2 gas, 30,800 each |
 
 ## The readings (aztec 5.2.0 local network, PrivateFPC 5.0.1; every landed fee equals the simulated billed gas at its block's `feePerL2Gas` 10,200,000, `feePerDaGas` 0; every deduction equals the ceiling)
 
@@ -59,9 +67,13 @@ credit — and report what it billed. Worktree `private-exit-gas-canary`.
 `PRIVATE_HUB_EXIT_GAS = { daGas: 50_000, l2Gas: 1_900_000 }` (was `= PRIVATE_HUB_CLAIM_GAS`,
 `{ 100_000, 2_000_000 }`):
 
-- **L2 1,900,000**: 2.3× the one-note reading, 2.14× the three-note one; the ≈1,010,000 above the
-  three-note bill covers some thirty-five further notes at ≈30,800 each — the shape an account that
-  keeps bridging accumulates (each claim's leftover is a note).
+- **L2 1,900,000**: 2.3× the one-note reading, 2.14× the three-note one; the ≈1,012,000 above the
+  three-note bill covers thirty-two further notes at 30,800 each (thirty-five spent in all, the
+  headroom shared with the burn's token-note nullifiers) — the shape an account that keeps bridging
+  accumulates (each claim's leftover is a note). The increment is the protocol's own metering, not a
+  fit: 5.2.0's `meterGasUsed` charges 30,800 L2 gas per nullifier in a transaction with public
+  execution and 32 DA gas per field, and private recursion adds no circuit-size charge — so no
+  discontinuity waits at the FPC's next note-batch boundary.
 - **DA 50,000**: 28× the three-note bill; sits under the 55,882 a local network admits, so the smoke's
   clamp is a no-op. The claim's 100,000 DA was never a measurement (its comment says DA fee 0).
 - What it costs the user at testnet's 2026-09 `feePerL2Gas` ≈ 1.96e12: ≈3.7 FJ set aside per private
@@ -82,6 +94,16 @@ zero DA price (adopted: reworded in `deploy-sandbox.ts` and `private-fuel.ts`). 
 supported; held credit implies a prior transaction, so first-ever initialization is outside this
 shape; no fence weakened.
 
+Round 2 over `a9f78081`: **the sizing converges**; one MED — "three notes" was advertised, not
+enforced: funding and sending price the ceiling separately, and a re-attached run keeps earlier
+credit (adopted: the note inventory, the send-time selection check, the credit-vs-inventory
+equality and the nullifier-count delta, run 6); one LOW — the headroom arithmetic (thirty-two
+beyond three, thirty-four beyond one, thirty-five in all; adopted). Codex also read the installed
+5.2.0 metering: 30,800 L2 gas per nullifier with public execution, 32 DA per field, no charge for
+private recursion — the readings match it, so the per-note increment is the protocol's, not a
+two-point fit. The upstream Schnorr artifact the smoke deploys matches the frozen one's source; not
+a sizing blocker.
+
 ## Follow-ups (not in this arc)
 
 - **Per-network admission limits.** `assertGasLimitsWithinNetworkLimits` is a hard refusal. The
@@ -89,5 +111,6 @@ shape; no fence weakened.
   If a target network ever admits less, the app has to read `txsLimits.gas` and clamp (as the smoke
   does) or size per network; today it would refuse with the wallet-sdk's message and no bridge-side
   explanation.
-- **Deep fragmentation.** Thirty-five notes of headroom is a projection from two points; an account
-  that has bridged that many times without an exit is the case to measure before trusting it.
+- **Deep fragmentation.** Thirty-two further notes is the metering model applied, not a measured
+  point; an account that has bridged that many times without an exit is the case to measure before
+  trusting it.

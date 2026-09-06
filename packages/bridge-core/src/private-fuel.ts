@@ -82,9 +82,11 @@ export const PRIVATE_HUB_REGISTER_GAS = { daGas: 100_000, l2Gas: 4_000_000 } as 
  * 5.2.0 local network (2026-09-06), where the landed fee equals the simulated billed gas at the
  * block's prices: an exit spending ONE credit note billed 826,543 L2 gas — the same as a genesis
  * initializerless account and as a Nulo-derivation Schnorr account — and one spending THREE
- * fragmented notes billed 888,143, so each further note `pay_fee` selects costs ≈30,800. 1,900,000
- * is 2.3× the one-note reading and leaves room for some thirty-five notes beyond it, the shape an
- * account that keeps bridging accumulates (each claim's leftover is a note). DA is 28× the 1,760 the
+ * fragmented notes billed 888,143: each further note `pay_fee` selects is one more nullifier, and the
+ * protocol meters 30,800 L2 gas per nullifier in a transaction with public execution. 1,900,000 is
+ * 2.3× the one-note reading and leaves room for thirty-two notes beyond the three-note one (the
+ * headroom is shared with the burn's token-note nullifiers), the shape an account that keeps
+ * bridging accumulates (each claim's leftover is a note). DA is 28× the 1,760 the
  * three-note exit billed (a burn, an L2→L1 message, the spent notes' nullifiers and the FPC's change
  * note are the data it carries) and sits under the 55,882 a local network admits per transaction —
  * a network that admits less than a declared limit refuses the transaction outright
