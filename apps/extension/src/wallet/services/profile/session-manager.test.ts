@@ -293,8 +293,29 @@ describe("SessionManager", () => {
 
 		test("is a no-op (no emit) when already closed", async () => {
 			const { emits, manager } = setup()
-			await manager.close()
+			await expect(manager.close()).resolves.toBe(false)
 			expect(emits).toEqual([])
+		})
+
+		test("reports whether it emitted: true over an in-memory session", async () => {
+			const { emits, manager } = setup()
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)), dekBuffer())
+			emits.length = 0
+			await expect(manager.close()).resolves.toBe(true)
+			expect(emits).toEqual([undefined])
+		})
+
+		test("a restarted worker: deletes the persisted-only record, emits nothing, reports false", async () => {
+			// A fresh manager over a surviving record is what an explicit lock sees after an
+			// MV3 restart that restored no session (a passkey profile). The record is cleared
+			// and nothing is emitted — announcing the lock is the caller's job on `false`.
+			const { api } = setup()
+			await seedSession(api, { profile: "pid", since: Date.now(), lockedAt: Date.now() + 60_000 })
+			const { emits, manager } = setupFromExistingApi(api)
+			await expect(manager.close()).resolves.toBe(false)
+			expect(emits).toEqual([])
+			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
+			expect(SESSION_STORAGE_ROOT in raw).toBe(false)
 		})
 	})
 

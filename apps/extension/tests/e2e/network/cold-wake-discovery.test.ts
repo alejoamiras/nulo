@@ -2,29 +2,12 @@ import type { Page } from "puppeteer"
 import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import { openPopup, test, waitForHash } from "../fixtures/extension"
-import { ensureUnlocked, stopServiceWorker } from "../fixtures/helpers"
+import { ensureUnlocked, readLivenessBaseline, stopServiceWorker, waitForWorkerLiveness } from "../fixtures/helpers"
 import { clickPgButton, openPlayground } from "../fixtures/playground"
 import { approveDiscover, approveVerify, waitForPopup } from "../fixtures/popups"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
-
-/** Strictly-newer liveness on an extension page = the REPLACEMENT worker woke
- *  AND finished boot (the pre-kill value survives in chrome.storage.session). */
-async function waitForLivenessOn(page: Page, afterTs: number): Promise<void> {
-	await page.waitForFunction(
-		async (priorTs: number) => {
-			try {
-				const result = await chrome.storage.session.get("nulo:liveness")
-				return Number(result["nulo:liveness"] ?? 0) > priorTs
-			} catch {
-				return false
-			}
-		},
-		{ timeout: 60_000, polling: 500 },
-		afterTs,
-	)
-}
 
 /**
  * Cold-wake discovery loss: a dApp's discovery message is what WAKES a dead
@@ -49,14 +32,11 @@ test.skipIf(!hasConfig)(
 		// connection to the SW.
 		const popupPage = await openPopup(ext)
 		await waitForHash(popupPage, "#/popup/general")
-		const baseline = await popupPage.evaluate(async () => {
-			try {
-				const r = await chrome.storage.session.get("nulo:liveness")
-				return Number(r["nulo:liveness"] ?? 0)
-			} catch {
-				return 0
-			}
-		})
+		// Pre-kill baseline BY NECESSITY: no extension page may be touched between
+		// the kill and the discovery click (the click must be the first wake), so
+		// there is nowhere to read a post-stop value. The old worker's last tick
+		// can land in the window before the kill; the 60s wait absorbs it.
+		const baseline = await readLivenessBaseline(popupPage)
 		// Recurring alarms (the 1-minute journal reaper) could warm the worker
 		// between the kill and the click and false-green the pre-fix run —
 		// clear them all so the click is provably the first wake event.
@@ -85,7 +65,7 @@ test.skipIf(!hasConfig)(
 		// slow cold boot could red the wait for the wrong reason. The probe
 		// popup itself cannot resurrect a lost message.
 		const probe = await openPopup(ext)
-		await waitForLivenessOn(probe, baseline)
+		await waitForWorkerLiveness(probe, baseline, { timeoutMs: 60_000 })
 
 		// Strict security mode (default ON) means an SW kill drops the session:
 		// the replayed discovery lands on a LOCKED wallet and is QUEUED, not

@@ -2,39 +2,11 @@ import type { Page } from "puppeteer"
 import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, openPopup, test, waitForHash } from "../fixtures/extension"
-import { ensureUnlocked, lockWallet, stopServiceWorker } from "../fixtures/helpers"
+import { ensureUnlocked, lockWallet, readLivenessBaseline, stopServiceWorker, waitForWorkerLiveness } from "../fixtures/helpers"
 import { openPlayground } from "../fixtures/playground"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
-
-/** Strictly-newer liveness heartbeat = the REPLACEMENT worker booted (the
- *  pre-kill value survives in chrome.storage.session, so truthy checks lie). */
-async function waitForLiveness(page: Page, afterTs: number): Promise<void> {
-	await page.waitForFunction(
-		async (priorTs: number) => {
-			try {
-				const result = await chrome.storage.session.get("nulo:liveness")
-				return Number(result["nulo:liveness"] ?? 0) > priorTs
-			} catch {
-				return false
-			}
-		},
-		{ timeout: 30_000, polling: 500 },
-		afterTs,
-	)
-}
-
-async function readLiveness(page: Page): Promise<number> {
-	return await page.evaluate(async () => {
-		try {
-			const r = await chrome.storage.session.get("nulo:liveness")
-			return Number(r["nulo:liveness"] ?? 0)
-		} catch {
-			return 0
-		}
-	})
-}
 
 /** The toolbar badge text, read from an extension page. The badge is
  *  Chrome-level state that SURVIVES an SW kill — which is exactly how a lost
@@ -75,14 +47,13 @@ test.skipIf(!hasConfig)(
 		expect(ext.browser.targets().some((t) => t.url().includes("#/windows/discover"))).toBe(false)
 		expect(await readBadgeText(popupPage)).toBe("1")
 
-		// Kill the SW for real; the popup page holds the pre-kill liveness baseline.
-		const baseline = await readLiveness(popupPage)
+		// Kill the SW for real.
 		await popupPage.close()
 		await stopServiceWorker(ext)
 
 		// Re-open the popup (wakes the replacement worker) and wait for its boot.
 		const popupPage2 = await openPopup(ext)
-		await waitForLiveness(popupPage2, baseline)
+		await waitForWorkerLiveness(popupPage2, await readLivenessBaseline(popupPage2))
 
 		// Boot reconciliation: the ghost badge is cleared BEFORE any unlock/drain.
 		await popupPage2.waitForFunction(async () => (await chrome.action.getBadgeText({})) === "", { timeout: 10_000, polling: 250 })

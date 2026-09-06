@@ -25,7 +25,15 @@ import { expect, inject } from "vitest"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, openPopup, test, waitForHash, type ExtensionContext } from "../fixtures/extension"
-import { ensureUnlocked, findServiceWorkerTarget, getAccountAddress, revealSeedPhrase, stopServiceWorker } from "../fixtures/helpers"
+import {
+	ensureUnlocked,
+	findServiceWorkerTarget,
+	getAccountAddress,
+	readLivenessBaseline,
+	revealSeedPhrase,
+	stopServiceWorker,
+	waitForWorkerLiveness,
+} from "../fixtures/helpers"
 import { assertPgOk, formatPgMismatch, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, approveVerify, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import { TEST_PASSWORD } from "../fixtures/constants"
@@ -195,44 +203,13 @@ test.skipIf(!hasConfig)(
 
 		// ── Stage 5: SW restart → recovery re-derives and still operates ──
 		step("terminating the service worker")
-		// Snapshot liveness BEFORE the kill: session storage retains the dead
-		// worker's heartbeat, so a truthy check passes instantly against a stale
-		// value and the next UI wait races the replacement. Strictly-newer is a
-		// bound, not a proof: the heartbeat ticks every 10s, so the old worker's
-		// final tick can land between this snapshot and the kill and satisfy the
-		// gate on its own; the recovery waits below carry their own budgets. The
-		// snapshot MUST run in an extension page: chrome.storage is undefined on
-		// the playground page, where the catch's 0 would let the stale heartbeat
-		// satisfy the gate.
-		const snapshotPopup = await openPopup(ctx)
-		const preKillLiveness = await snapshotPopup.evaluate(async () => {
-			try {
-				const r = await chrome.storage.session.get("nulo:liveness")
-				return Number(r["nulo:liveness"] ?? 0)
-			} catch {
-				return 0
-			}
-		})
-		await snapshotPopup.close()
-		// The SW has heartbeat through four stages by now — a zero snapshot means
-		// the read itself broke (wrong page type), which would silently degrade
-		// the strictly-newer gate back to truthy.
-		expect(preKillLiveness).toBeGreaterThan(0)
 		await restartServiceWorker(ctx)
 
+		// Session storage retains the dead worker's heartbeat, so the gate needs a
+		// STRICTLY NEWER value; the baseline is read after the stop, from an
+		// extension page (chrome.storage is undefined on the playground page).
 		const recoveryPopup = await openPopup(ctx)
-		await recoveryPopup.waitForFunction(
-			async (priorTs: number) => {
-				try {
-					const result = await chrome.storage.session.get("nulo:liveness")
-					return Number(result["nulo:liveness"] ?? 0) > priorTs
-				} catch {
-					return false
-				}
-			},
-			{ timeout: 30_000, polling: 500 },
-			preKillLiveness,
-		)
+		await waitForWorkerLiveness(recoveryPopup, await readLivenessBaseline(recoveryPopup))
 		await recoveryPopup.waitForFunction(() => window.location.hash.length > 2, { timeout: 60_000 })
 		// Post-restart the lock decision IS the activation bootstrap, which the next wait budgets
 		// at 120s — the helper's default 30s measured the same bootstrap with a shorter clock and

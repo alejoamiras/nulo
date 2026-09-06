@@ -690,6 +690,45 @@ describe("ProfileService integration", () => {
 		}, 30_000)
 	})
 
+	describe("lockActiveProfile announces the lock exactly once", () => {
+		test("over an in-memory session: close() emits, the service adds nothing", async () => {
+			const { service } = await makeService()
+			await service.createProfile("P", "pass1234")
+			const events: unknown[] = []
+			service.onActiveProfileChanged.add((p) => events.push(p))
+			await service.lockActiveProfile()
+			expect(events).toEqual([undefined])
+		}, 30_000)
+
+		test("after a restart that restored no session (passkey): the record is deleted and the lock is announced", async () => {
+			const { api, service } = await makeService()
+			await service.createPasskeyProfile("PK")
+			// A restarted worker never silently restores a passkey session: the persisted
+			// record survives, memory is empty (`restore()` returns before `open`).
+			const { service: rebooted } = await makeServiceFromExistingApi(api)
+			expect(await rebooted.getActiveProfile()).toBeUndefined()
+			expect(SESSION_STORAGE_ROOT in (await api.storage.session.get(SESSION_STORAGE_ROOT))).toBe(true)
+			const events: unknown[] = []
+			rebooted.onActiveProfileChanged.add((p) => events.push(p))
+			await rebooted.lockActiveProfile()
+			expect(events).toEqual([undefined])
+			expect(SESSION_STORAGE_ROOT in (await api.storage.session.get(SESSION_STORAGE_ROOT))).toBe(false)
+		}, 30_000)
+
+		test("after a restart that already dropped the record (strict password): the lock is still announced", async () => {
+			const { api, service } = await makeService({ strict: true })
+			await service.createProfile("P", "pass1234")
+			// Strict mode persists no bearer; `restore()` drops the bearerless record at boot.
+			const { service: rebooted } = await makeServiceFromExistingApi(api, { strict: true })
+			expect(await rebooted.getActiveProfile()).toBeUndefined()
+			expect(SESSION_STORAGE_ROOT in (await api.storage.session.get(SESSION_STORAGE_ROOT))).toBe(false)
+			const events: unknown[] = []
+			rebooted.onActiveProfileChanged.add((p) => events.push(p))
+			await rebooted.lockActiveProfile()
+			expect(events).toEqual([undefined])
+		}, 30_000)
+	})
+
 	describe("recovery-phrase round trip (NULO-ACCOUNT-KDF v2)", () => {
 		test("create → export words → re-import → the SAME master secret", async () => {
 			const { service } = await makeService()
