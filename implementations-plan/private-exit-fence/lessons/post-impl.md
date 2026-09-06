@@ -22,3 +22,11 @@ with teardown zero; the wizard's stand-in ceiling cannot add the REGISTER limit 
 requires a registered token.
 
 Applied in the follow-up commit; round 2 below.
+
+## Round 2 — resumed session, the fix diff (`76840c26`) — VERDICT: approve
+
+> No new material findings. All four fixes verified. The frozen ceiling's 10% tolerance is applied
+> once, and the final composable pricing check enforces that bound before any authwit. No
+> public-payer fallback was introduced. VERDICT: approve
+
+Loop converged after two rounds; the PR opens after this entry.

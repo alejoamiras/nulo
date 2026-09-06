@@ -2,7 +2,7 @@
 plan: private-exit-fence
 tier: light
 driver: claude-code
-status: approved by the owner in chat 2026-09-06 ("Clear the worktrees and fix (1)"); implementing
+status: implemented 2026-09-06; phase 1 ✓; codex loop converged (approve); PR open
 eli5_mode: none (owner-directed follow-up of #546's fence; no ELI5)
 code_review: off
 codex_effort: high
@@ -86,7 +86,7 @@ composable, as the deposit fence does.
 
 `<lint>` = `bun run lint`; `<typecheck>` = `bun run --cwd apps/tools typecheck`; `<unit>` = `bun run --cwd apps/tools test`; `<smoke>` = `bun run --cwd apps/tools test:e2e`; `<frozen>` = `git diff --quiet dd93d141 -- <the nine step files>`; `<bc>` = `bun run --cwd packages/bridge-core test`.
 
-### Phase 1 — the fence
+### Phase 1 ✓ — the fence
 - Constant, composable fee + refusal, wizard gate + confirm re-read + review line, pins, ledger row in `implementations-plan/tools-console/plan.md`, README.
 - **Gate:** `<lint>` ∧ `<typecheck>` ∧ `<unit>` ∧ `<smoke>` ∧ `<frozen>` ∧ `<bc>` all exit 0; the exit pins named above green; `LESSONS_FILE=implementations-plan/private-exit-fence/lessons/phase-1.md`.
 
