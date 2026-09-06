@@ -41,4 +41,39 @@ The bridge failed again, on a different record: `Setup function not on allow lis
 
 **Owner's decision:** fix #544 first, with an e2e that exercises the real allow-list semantics so a wallet-side fee-path change cannot ship green again. The shell sign-off waits for that arc; PR #546 stays open.
 
-**Sign-off:** _pending — after the self-pay fix arc._
+## The self-pay fix arc landed in a PR (2026-09-05, later the same day)
+
+`implementations-plan/self-pay-setup-fix/` — PR #549 into dev, all three required gates green.
+The wallet-bridge dispatcher built `simulateTx`/`profileTx` as the session's FIRST account and
+overwrote the dApp's `opts.from` (sendTx had been fixed in #110): the owner's claim from the
+second account ran as the first, classified as externally paid, never ended setup — round 2's
+`Setup function not on allow list`. Round 1's `unknown nullifier` is the same wrong-account
+selection on the private-credit path (the FPC's `pay_fee` read the first account's credit). The
+fix is one dispatcher change; the gate is a playground-driven network e2e on the node's real
+allow-list, in the heavy CI job at retry 0.
+
+## Post-arc re-verification (branch rebased onto dev at `122149ad`, #548)
+
+| gate line | result |
+|---|---|
+| `<frozen>` (diff --quiet against `91074a74` over the nine step files) | exit 0 |
+| `<lint>` | exit 0 (30 pre-existing warnings, complexity baseline OK) |
+| `<typecheck>` (`bun run --cwd apps/tools typecheck`) | exit 0 |
+| `<unit>` (`bun run --cwd apps/tools test`) | 96 files, 1240 tests passed |
+| `<smoke>` (`bun run --cwd apps/tools test:e2e`) | 3 files, 28 tests passed |
+| `bun run --cwd apps/tools build:testnet` | exit 0 (`✓ built in 1.30s`) |
+| `bun run audit:vue` | exit 0 — typecheck ∥ 435 unit files ∥ lint, then the extension build (`✓ built in 5.40s`) |
+
+## Owner's walk — round 3: what to do
+
+1. Merge PR #549 (or build the extension from `worktree-self-pay-setup-fix`) and load that build —
+   the bridge from a second account only works with the dispatcher fix in the extension.
+2. Open the preview `https://worktree-tools-console.nulo-faucet.pages.dev` (`/build.json` names
+   the served commit; it should be this branch's rebased HEAD).
+3. Walk: one send to the first claim from the SECOND granted account (the failing case), one
+   faucet drip, dock hide / show / auto-open, the 1100 and 760 boundaries, keyboard-only rail +
+   dock, both themes.
+4. Replace the line below with `**Sign-off:** <your words>, <date>` and push (or say it in chat
+   and the agent records it).
+
+**Sign-off:** _pending — the owner's round-3 walk on the preview with the fixed extension._
