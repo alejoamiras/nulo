@@ -73,7 +73,7 @@ opens a new recovery popup, was green.
 Every post-restart liveness gate in the suite snapshots the heartbeat BEFORE the kill and waits for
 strictly newer. The heartbeat ticks every 10s (`runtime.ts` `HEARTBEAT_INTERVAL_MS`), so the old
 worker's final tick can land between the snapshot and the kill and satisfy the gate before any
-replacement boots; the later UI waits absorb it today. The honest threshold is a read taken AFTER
-`stopServiceWorker` returns (the old instance is gone, so that value is final). Eight callers; a
+replacement boots; the later UI waits usually absorb it, not always. A safe threshold is a read taken AFTER
+`stopServiceWorker` returns (the old instance is gone, so anything newer came from a replacement; the read may already be the replacement's first write, which costs one more tick — fine for recovery gates, wrong for `sw-resilience`'s first-heartbeat timing, which keeps its baseline). Eight callers; a
 separate mechanical PR, recorded in the skill's product-couplings section so nobody copies the
 pattern meanwhile.

@@ -46,3 +46,40 @@ sentence, which is exactly the falsification the round was asked for. All adopte
   popup force-clear consequence stated precisely; worker-target evaluate reframed as the
   host-parking hazard; console interception scoped to sniffed methods; both canaries await mining.
 - L lessons: an open port is not a keepalive — traffic is.
+
+## Round 2 — `not converged` (3 Medium, 5 Low) — response (verbatim)
+
+Confidence: **high**.
+
+- **Medium — [Skill:343](.claude/skills/e2e-testing/SKILL.md:343):** Incoming polling neither takes a phase selector nor writes `held`. It matches `{profileId, networkId, accountAddress, contract, txHash}` and writes `{phase:"discovery-held", txHash}` to a separate status key (`chrome-storage-incoming-poll-gate.ts:15,50,77`). Describe the two protocols separately.
+
+- **Medium — [Skill:262](.claude/skills/e2e-testing/SKILL.md:262):** A post-stop storage read can already contain the replacement’s heartbeat; it is not necessarily the old worker’s final value. Waiting for another tick is unsuitable as a mechanical replacement in the first-heartbeat timing test (`sw-resilience.test.ts:211`). Correct this and the lessons’ claim that later waits always absorb the weakness.
+
+- **Medium — [Skill:348](.claude/skills/e2e-testing/SKILL.md:348):** Journal stage `proving` is written before entering the gate (`execution-coordinator.ts:195,147`) and remains during actual proving. Require evidence excluding timeout release; the journal stage alone does not prove parking.
+
+- **Low — [Skill:184](.claude/skills/e2e-testing/SKILL.md:184):** `dappConnectedExtension` consumes and mutates `registeredExtension` (`extension.ts:560,572`). Document this shared-browser exception.
+
+- **Low — [Skill:249](.claude/skills/e2e-testing/SKILL.md:249):** “Changes nothing reactive” remains false (`popup.store.ts:18`). Say the open boolean stays true despite reactive payload/order updates.
+
+- **Low — [Skill:98](.claude/skills/e2e-testing/SKILL.md:98):** Delete unconditional “does not error.” At line 116, change “guard themselves” to “need their own guards”; `default-token-seeding.test.ts:27` lacks one.
+
+- **Low — [Skill:163](.claude/skills/e2e-testing/SKILL.md:163):** `probe` is a reusable-workflow input, not an exposed dispatch option. Name `_network-e2e.yml`’s `probe == "1"` condition.
+
+- **Low — [Skill:265](.claude/skills/e2e-testing/SKILL.md:265):** Zero also means missing data or another read failure (`sw-resilience.test.ts:224`). Say “invalid/unavailable baseline.”
+
+Deferring caller changes is reasonable. The follow-up must preserve cold-wake’s prohibition on opening an extension page before the discovery click. The frozen-canary comment is accurate.
+
+not converged
+
+## Round 2 — triage
+
+All adopted: the two ack protocols described separately (restore gate acks `held` on its record;
+the incoming-poll gate matches five fields and publishes phases on a status key); the journal's
+`proving` stage no longer offered as proof of a park; the post-stop read described honestly (it may
+be the replacement's first write — fine for recovery gates, wrong for `sw-resilience`'s
+first-heartbeat timing) and the lessons' "later waits absorb it" softened; "does not error" made
+unconditional-free and "guard themselves" → "need their own guard" with `default-token-seeding` as
+the unguarded example; `probe` named as the reusable workflow's input; `dappConnectedExtension`'s
+shared-browser exception documented; the popup-store sentence made precise; a 0 baseline read as
+invalid/unavailable. Codex confirmed deferring the eight-caller threshold change and noted the
+constraint for that follow-up: cold-wake must not open an extension page before the discovery click.

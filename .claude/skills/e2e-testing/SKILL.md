@@ -95,8 +95,8 @@ stranger on a reused port fails identity).
 
 Several fixtures are compiled INTO the bundle by `VITE_NULO_E2E_*` flags and tree-shaken out
 otherwise: the proverless `ProofGate`, the restore and incoming-poll gates, the migration fixture,
-the token-seed reader, the price map. Against an unarmed dist a test that needs one does not error —
-the hook is gone, optional chaining no-ops, and an unguarded test polls into a multi-minute timeout
+the token-seed reader, the price map. Against an unarmed dist nothing raises by itself — the hook is
+gone, optional chaining no-ops, and an unguarded test polls into a multi-minute timeout
 that looks exactly like a product bug (a guarded one fails fast in its `beforeAll` stamp check). A
 runtime env var can never arm a build-time flag.
 
@@ -113,7 +113,8 @@ runtime env var can never arm a build-time flag.
 - A file that depends on the PROVERLESS build carries the `@requires-proverless` marker (the only
   marker `agent.sh` scans) AND a `beforeAll` that greps the loaded bundle for the stamp
   (`account-switch-isolation.test.ts` is the idiom) — the belt for direct vitest invocations. Other
-  armed features guard themselves at runtime (`backup-migration.test.ts` throws with the remedy).
+  armed features need their own guard (`backup-migration.test.ts` throws with the remedy;
+  `default-token-seeding.test.ts` has none and simply times out unarmed).
 
 ### Env vars the suite reads
 
@@ -160,8 +161,9 @@ runtime env var can never arm a build-time flag.
   `accelerator-server` and `VITE_NULO_ACCELERATOR_REQUIRED=1` (`transfers`, `tx-sendTx-default`,
   `frozen-account-canary`) — a canary run with zero `Proving succeeded` lines fails; the
   `disable_accelerator` dispatch input (or the `NULO_E2E_DISABLE_ACCELERATOR` variable) is the
-  rollback to WASM. Exit 86 retries the agent once. After every run except a `probe` dispatch the
-  built bundle is grepped for `(PROBE|nulo:probe:|VITE_E2E_PROBE)` and any hit fails the workflow:
+  rollback to WASM. Exit 86 retries the agent once. After every run the built bundle is grepped for
+  `(PROBE|nulo:probe:|VITE_E2E_PROBE)` and any hit fails the workflow (`_network-e2e.yml` skips the
+  grep only when its `probe` input is `"1"`, a caller-set investigation mode, not a dispatch option):
   string constants shipped in `dist/` must not contain `PROBE`.
   `scripts/ci-cd/behavior-gating.test.ts` pins the filters and the exclude list against the lanes.
 - **Nightly** (`nightly.yml`, the only scheduled workflow) mirrors the lanes with config-default
@@ -181,8 +183,9 @@ enforces it, so a reviewer has to.
 
 ### Start from the right fixture (`fixtures/extension.ts`)
 
-Each fixture launches its own browser and builds its own starting state; they are siblings, not a
-chain. Pick by the state you need and the scope you can afford:
+Each fixture builds its own starting state; they are siblings, not a chain, with one exception:
+`dappConnectedExtension` takes `registeredExtension`'s browser and mutates it (the file's registered
+and connected states share one Chrome). Pick by the state you need and the scope you can afford:
 
 | Fixture | Starting state | Scope |
 |---|---|---|
@@ -245,9 +248,9 @@ by identity because plain popup pages change URL under a lock redirect.
   prefer a stable id or badge for any row whose display name is not unique by construction.
 - **Helpers state their starting route** or navigate there (`importToken`, `switchAccountByAddress`
   need `#/popup/general`).
-- **Drive a popup to its own closing action.** `popupStore.open()` on a key whose open flag is
-  already true changes nothing reactive, so a popup whose DOM was force-cleared while the store
-  still says open will not remount on the next open of that key.
+- **Drive a popup to its own closing action.** `popupStore.open()` on a key that is already open
+  updates the payload and order reactively but leaves the open flag true, so a popup whose DOM was
+  force-cleared while the store still says open will not remount on the next open of that key.
 - **Prove the disruption happened**, not only the downstream state — a test whose kill never killed
   passed for months for reasons unrelated to its subject (ledger #16–19). Red-team a pin by removing
   what it guards: if it still passes, another gate was holding it.
@@ -259,10 +262,15 @@ by identity because plain popup pages change URL under a lock redirect.
   `chrome.storage.session` (30s). After a restart, gate on a heartbeat STRICTLY NEWER than the last
   value the OLD worker wrote (the value survives it in storage; a truthy check lies). The heartbeat
   ticks every 10s, so a snapshot taken BEFORE the kill can be beaten by the old worker's final tick
-  and pass before any replacement boots; the honest threshold is a read taken AFTER
-  `stopServiceWorker` returns (the old instance is gone, so that value is final). The callers today
-  still snapshot pre-kill — their later waits absorb the gap, but do not copy the pattern. Read from an
-  extension page; a snapshot of 0 means the page had no `chrome.storage`.
+  and pass before any replacement boots. A read taken AFTER `stopServiceWorker` returns is a safe
+  threshold — the old instance is gone, so anything newer than it came from a replacement — but it
+  may already BE the replacement's first write, in which case "strictly newer" waits one more tick;
+  that is fine for a recovery gate and wrong for a test that times the FIRST heartbeat
+  (`sw-resilience`), which must keep its pre-kill baseline and reason about the window. The callers
+  today snapshot pre-kill; the gap is not always absorbed downstream, so do not copy the pattern
+  into a new test without a downstream wait that would fail on a dead replacement. Read from an
+  extension page; a 0 means an invalid or unavailable baseline (no `chrome.storage`, key missing, or
+  the read failed), never a value to gate on.
 - **Read `chrome.storage` from an extension page**, never through a session on the worker target:
   that attachment is exactly what parks the worker's DevTools host across a restart (§3), and a page
   outlives the worker. `openPopup`, or the blank popup inside `launchExtension`.
@@ -340,13 +348,17 @@ helper's own 15s `waitForTarget` throws — nothing in it wakes one.
 
 Stage gates are `chrome.storage.session` rendezvous compiled in by the proverless build, each with
 its own protocol: `proof-gate.ts` is presence-only and parks a tx right before `pxe.proveTx`;
-`restore-gate.ts` and `incoming-poll-gate.ts` carry a payload naming the phase and the worker ACKS
-by writing `held` — "armed" is not "reached", so wait for the ack (`waitForRestoreGateHeld`,
-`waitForIncomingPollPhase`) before killing or asserting; `token-seeds.ts` is a separately armed
-reader that must be written before the trigger. A gate's safety timeout (20s on the proof gate)
-RELEASES with a loud log rather than failing the test, so a test that depends on the hold asserts
-the parked stage it expects to see (the journal `proving` record, the ack) and never infers the hold
-from a later outcome. Always release in `finally`.
+`restore-gate.ts` names the phase (`service-restore` / `account-state`) and the worker ACKS by
+writing `held` on the same record; `incoming-poll-gate.ts` matches a hold on `{profileId,
+networkId, accountAddress, contract, txHash}` and publishes `discovery-held` / `released` /
+`committed` on a separate status key. "Armed" is not "reached": wait for the ack
+(`waitForRestoreGateHeld`, `waitForIncomingPollPhase`) before killing or asserting. `token-seeds.ts`
+is a separately armed reader that must be written before the trigger. A gate's safety timeout
+(15–20s) RELEASES with a loud log rather than failing the test, and the journal's `proving` stage is
+written before the proof gate is entered and stays through real proving, so it does not prove a
+park: a test that depends on the hold needs evidence that excludes a timed-out release (the ack, a
+stage that can only exist while held, or an in-flight count that stays put across the window).
+Always release in `finally`.
 
 ## 4. Diagnose a red run
 
