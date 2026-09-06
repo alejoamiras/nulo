@@ -91,3 +91,10 @@ this PR, at the owner's direction — `75cf8868`, ledger row 20, codex-reviewed 
 **Sign-off:** owner, 2026-09-06 — "I think it's working"; directed: merge #549, add the
 private-gas fence on top of this PR, codex-review that implementation, babysit CI to green and
 merge. Recorded by the agent from chat.
+
+## Final gate on `d10d710c` (the fence + the sign-off, rebased on dev at `e0ac80cf` = #549)
+
+`<frozen>` exit 0 · `<lint>` exit 0 · `<typecheck>` exit 0 · `<unit>` 96 files / 1243 tests ·
+`<smoke>` 3 files / 28 tests · `build:testnet` exit 0 · `audit:vue` exit 0 (435 files; the first
+run after the rebase reported 2 because this worktree's install predated #549's playground
+dependency — `bun install --frozen-lockfile`, then green).
