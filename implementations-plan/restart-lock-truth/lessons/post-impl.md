@@ -98,3 +98,26 @@ Re-validated after the fix (two cores, retry 0): `backup-restore-sw-restart` 3/3
 converges in 59s); `sw-resilience` + `sw-restart-network` + `migration` + `import-paths` × 2 →
 2/2; passkey canary prover-ON green; `connect-locked-queue-sw-restart` + `cold-wake-discovery`
 green. `backup-restore-sw-restart` is added to this plan's battery in `plan.md`.
+
+## Round 4 (post-convergence, on the CI fix) — `not converged` (2 Medium) — response (verbatim)
+
+- **Medium — high confidence:** [lock-landing.ts:43](apps/extension/src/popup/lock-landing.ts:43) strands initial boot if a disconnect rejects the route guard’s first `getProfiles()`. `router.isReady()` rejects, preventing mount’s boot; the successful reconnect then settles without selecting a profile or navigating. Reproduced with the real guard/router and extracted caller: blank route, no RETRY banner; the previous decision reaches auth. **Fix:** preserve candidate landing when initial navigation has not completed, while protecting established page flows.
+
+- **Medium — high confidence:** [app.vue:217](apps/extension/src/popup/app.vue:217) still selects the orphan and pushes auth when reconnect returns `unreachable`. A successful profile-list read followed by exhausted active-session reads bypasses the new rule and can unmount the import rollback owner. Reproduced through the actual boot pipeline. **Fix:** apply the same flow-preservation policy to unreachable dispatch, displaying recovery in place.
+
+The caller sweep found no additional retained extension page outside the listed battery. No Vitest E2E configs ran.
+
+not converged
+
+## Round 4 — triage
+
+Both adopted; the rule sharpened from "a reconnect never selects" to "a run over an ESTABLISHED
+page never selects" (`pageEstablished = reconnect && route.matched.length > 0`):
+- M: a mount-time boot lost to a rejected `router.isReady()` (a disconnect rejecting the guard's
+  first read) makes the reconnect the only boot the popup gets; with the route unresolved it must
+  still select the candidate and land on auth. It does now (`pageEstablished` false).
+- M: the `unreachable` landing had the same select-and-push branch. Extracted as
+  `decideUnreachableLanding` (`auth` with a profile; `select-and-auth` with no page; `stay` — banner
+  in place — on an established page or with no candidate) and wired through `settleUndecidedBoot`.
+Codex's caller sweep found no further spec that keeps a page open across a kill outside the
+battery. Popup unit dir 751/751.

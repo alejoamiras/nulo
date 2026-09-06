@@ -9,7 +9,7 @@ import { isPrefersDarkScheme, persistThemeHint } from "@/utils/general"
 import { getLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { shouldAdvanceToGeneral } from "./should-advance-to-general"
 import { resolveBootSession } from "./boot-session"
-import { decideLockLanding } from "./lock-landing"
+import { decideLockLanding, decideUnreachableLanding } from "./lock-landing"
 import { reconcileLockedBoot } from "./reconcile-locked-boot"
 import { applyBootOutcome } from "./apply-boot-outcome"
 import { defaultConfig } from "@/wallet/config"
@@ -210,23 +210,25 @@ provide("bootRetrying", bootRetrying)
  *  and the auth page needs a selected profile to submit against); unreachable with no profile
  *  known, and a failed bootstrap over an OPEN session, are NOT locks — re-entering a password
  *  repairs neither — so the popup stays put and the banner's RETRY is the recovery. */
-const settleUndecidedBoot = (outcome, candidate) => {
+const settleUndecidedBoot = (outcome, candidate, pageEstablished) => {
 	bootOutcome.value = outcome
 	appStore.isSessionChecked = true
 	if (outcome !== "unreachable") return
-	if (!appStore.profile && candidate) appStore.profile = candidate
-	if (appStore.profile) router.push("/popup/auth")
+	const action = decideUnreachableLanding({ hasProfile: !!appStore.profile, hasCandidate: !!candidate, pageEstablished })
+	if (action === "stay") return
+	if (action === "select-and-auth") appStore.profile = candidate
+	router.push("/popup/auth")
 }
 
 /** No open session. Which way the shell goes is `decideLockLanding` over the shell's state at
  *  action time; `reconcileLockedBoot` fences the `lock` action against an unlock that landed
  *  through the event path while the lookup was in flight. */
-const lockLandingState = (result, reconnect) => ({
+const lockLandingState = (result, pageEstablished) => ({
 	hasProfile: !!appStore.profile,
 	onAuthRequiredRoute: !!route.meta.isAuthRequired,
 	isPasskeyRoute: !!route.meta.isPasskeyInteraction,
 	hasCandidate: !!result.candidate,
-	reconnect,
+	pageEstablished,
 })
 const lockLandingActions = {
 	selectAndAuth: (result) => {
@@ -250,6 +252,10 @@ let loadProfileSeq = 0
 
 const loadProfile = async ({ reconnect = false } = {}) => {
 	const seq = ++loadProfileSeq
+	// A reconnect over a resolved route reaches a mounted page that owns its flow; a reconnect
+	// before the router resolved is the only boot this popup will get (the mount-time run was
+	// lost when a disconnect rejected the guard's first read) and must still land somewhere.
+	const pageEstablished = reconnect && route.matched.length > 0
 	const isCurrent = () => seq === loadProfileSeq
 	// A new run supersedes any earlier give-up: it may well succeed this time. A retry of a
 	// FAILED boot keeps the auth form withheld until a run DECIDES — latched, not recomputed:
@@ -270,17 +276,17 @@ const loadProfile = async ({ reconnect = false } = {}) => {
 				lastActiveProfileId: getLastActiveProfileId,
 				isCurrent,
 			}),
-		decide: (locked) => decideLockLanding(lockLandingState(locked, reconnect)),
+		decide: (locked) => decideLockLanding(lockLandingState(locked, pageEstablished)),
 		act: lockLandingActions,
 	})
 	// The core fenced itself before resolving; this caller resumes a microtask later, and a
 	// reconnect can bump the sequence in between — fence again here, never on the core's word.
 	if (!isCurrent()) return
-	applyBootOutcome(result, bootOutcomeShell)
+	applyBootOutcome(result, bootOutcomeShell(pageEstablished))
 }
 
 /** The shell as `applyBootOutcome` drives it. */
-const bootOutcomeShell = {
+const bootOutcomeShell = (pageEstablished) => ({
 	setRetrying: (retrying) => {
 		bootRetrying.value = retrying
 	},
@@ -290,14 +296,14 @@ const bootOutcomeShell = {
 	markChecked: () => {
 		appStore.isSessionChecked = true
 	},
-	settleUndecided: settleUndecidedBoot,
+	settleUndecided: (outcome, candidate) => settleUndecidedBoot(outcome, candidate, pageEstablished),
 	logFailed: (profileId) => console.error("activation bootstrap failed for the open session", { profileId }),
 	// Only advance into the authed area if the session survived bootstrap (a lock
 	// mid-bootstrap leaves stillActive=false). See shouldAdvanceToGeneral.
 	advance: (stillActive) => {
 		if (shouldAdvanceToGeneral(stillActive, route.name)) router.push("/popup/general")
 	},
-}
+})
 
 onBeforeMount(async () => {
 	await router.isReady()

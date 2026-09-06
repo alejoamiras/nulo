@@ -9,10 +9,11 @@
  * before the worker answers a Lock click, so a flag-keyed decision would leave such a popup
  * parked on the page it was showing.
  *
- * A reconnect run never SELECTS a candidate: a page with no profile selected that survives a
- * restart owns its own flow (an import mid-restore, the register or reset rituals), and routing
- * it to the lock screen would unmount that flow. Selecting the candidate is the initial boot's
- * landing, and a user-pressed RETRY's.
+ * A run over an ESTABLISHED page never selects a candidate: a page with no profile selected that
+ * survives a restart owns its own flow (an import mid-restore, the register or reset rituals), and
+ * routing it to the lock screen would unmount that flow. Selecting the candidate is the landing of
+ * a run that has no page yet — the initial boot, a RETRY, or a reconnect whose mount-time boot was
+ * lost before the router resolved (a disconnect that rejected the route guard's first read).
  */
 
 export interface LockLandingState {
@@ -24,8 +25,8 @@ export interface LockLandingState {
 	isPasskeyRoute: boolean
 	/** The lock screen has a profile to unlock. */
 	hasCandidate: boolean
-	/** The run was started by a worker reconnect, not by mount or RETRY. */
-	reconnect: boolean
+	/** A reconnect run over a route that already resolved: the mounted page owns its flow. */
+	pageEstablished: boolean
 }
 
 export type LockLandingAction =
@@ -40,6 +41,29 @@ export type LockLandingAction =
 
 export function decideLockLanding(state: LockLandingState): LockLandingAction {
 	if (state.isPasskeyRoute && !state.hasProfile) return "passkey-hold"
-	if (!state.hasProfile) return state.hasCandidate && !state.reconnect ? "select-and-auth" : "settle"
+	if (!state.hasProfile) return state.hasCandidate && !state.pageEstablished ? "select-and-auth" : "settle"
 	return state.onAuthRequiredRoute ? "lock" : "settle"
+}
+
+export interface UnreachableLandingState {
+	hasProfile: boolean
+	hasCandidate: boolean
+	pageEstablished: boolean
+}
+
+export type UnreachableLandingAction =
+	/** Select the candidate and go to the lock screen (the password path is the recovery). */
+	| "select-and-auth"
+	/** A profile is already selected: the lock screen is the recovery. */
+	| "auth"
+	/** Show the retry banner in place; an established page keeps its flow, and with no profile
+	 *  known there is nothing to unlock. */
+	| "stay"
+
+/** Where the shell goes when the service stayed unreachable across the boot's backoff. Same
+ *  flow-preservation rule as `decideLockLanding`: an established page is never routed away to
+ *  select a candidate. */
+export function decideUnreachableLanding(state: UnreachableLandingState): UnreachableLandingAction {
+	if (state.hasProfile) return "auth"
+	return state.hasCandidate && !state.pageEstablished ? "select-and-auth" : "stay"
 }
