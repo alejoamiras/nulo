@@ -2,43 +2,7 @@ import { expect } from "vitest"
 import type { Page } from "puppeteer"
 import { TEST_PASSWORD } from "./fixtures/constants"
 import { test, openPopup, waitForHash, clickByTestId, replaceInputValue } from "./fixtures/extension"
-import { lockWallet, stopServiceWorker } from "./fixtures/helpers"
-
-/** Readiness after the restart: session storage retains the pre-kill heartbeat,
- *  so a truthy check passes instantly against a stale value and the next UI wait
- *  races the booting worker. Requiring a STRICTLY NEWER timestamp is what makes
- *  this causal.
- *
- *  It is only meaningful because `stopServiceWorker` waits for the old worker
- *  INSTANCE to be gone. Against a kill that leaves it running, a fresh
- *  timestamp arrives from its ordinary heartbeat within HEARTBEAT_INTERVAL_MS
- *  and proves nothing. */
-async function waitForLiveness(page: Page, afterTs: number): Promise<void> {
-	await page.waitForFunction(
-		async (priorTs: number) => {
-			try {
-				const result = await chrome.storage.session.get("nulo:liveness")
-				return Number(result["nulo:liveness"] ?? 0) > priorTs
-			} catch {
-				return false
-			}
-		},
-		{ timeout: 30_000, polling: 500 },
-		afterTs,
-	)
-}
-
-/** Read the current liveness heartbeat (0 when absent/unreadable). */
-async function readLiveness(page: Page): Promise<number> {
-	return await page.evaluate(async () => {
-		try {
-			const r = await chrome.storage.session.get("nulo:liveness")
-			return Number(r["nulo:liveness"] ?? 0)
-		} catch {
-			return 0
-		}
-	})
-}
+import { lockWallet, readLivenessBaseline, stopServiceWorker, waitForWorkerLiveness } from "./fixtures/helpers"
 
 // The active chain (`Network.id`) and the chain's primary endpoint
 // (`Network.primaryEndpointId`) live in `chrome.storage.local`. SW
@@ -64,13 +28,12 @@ test("SW restart preserves active network + primary endpoint", async ({ register
 	expect(Object.keys(before.networkRows).length).toBeGreaterThan(0)
 
 	await lockWallet(page)
-	const preKillLiveness = await readLiveness(page)
 	await page.close()
 
 	await stopServiceWorker(registeredExtension)
 
 	const page2 = await openPopup(registeredExtension)
-	await waitForLiveness(page2, preKillLiveness)
+	await waitForWorkerLiveness(page2, await readLivenessBaseline(page2))
 	await waitForHash(page2, "#/popup/auth", 15_000)
 
 	// Unlock

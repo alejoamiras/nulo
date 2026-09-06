@@ -36,7 +36,14 @@ import {
 	waitForHash,
 	type ExtensionContext,
 } from "../fixtures/extension"
-import { createAccount, findServiceWorkerTarget, navigateByHash, stopServiceWorker, switchToLocalNetwork } from "../fixtures/helpers"
+import {
+	createAccount,
+	findServiceWorkerTarget,
+	readLivenessBaseline,
+	stopServiceWorker,
+	switchToLocalNetwork,
+	waitForWorkerLiveness,
+} from "../fixtures/helpers"
 import { registerPasskeyProfile, setupPasskeyVirtualAuth } from "../fixtures/passkey"
 import { assertPgOk, formatPgMismatch, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
@@ -161,47 +168,18 @@ test.skipIf(!hasConfig)(
 			step("authwit consumed; B's ctor-deploy tx MINED")
 
 			// ── Stage 4: SW restart → ceremony re-unlock in the SAME FTN → still operates ──
-			// Liveness snapshot must run in an extension page; the anchor popup is one.
-			const preKillLiveness = await anchorPopup.evaluate(async () => {
-				try {
-					const r = await chrome.storage.session.get("nulo:liveness")
-					return Number(r["nulo:liveness"] ?? 0)
-				} catch {
-					return 0
-				}
-			})
-			expect(preKillLiveness).toBeGreaterThan(0)
 			step("terminating the service worker")
 			await restartServiceWorker(ctx)
 
-			await anchorPopup.waitForFunction(
-				async (priorTs: number) => {
-					try {
-						const result = await chrome.storage.session.get("nulo:liveness")
-						return Number(result["nulo:liveness"] ?? 0) > priorTs
-					} catch {
-						return false
-					}
-				},
-				{ timeout: 30_000, polling: 500 },
-				preKillLiveness,
-			)
-			step("SW rebooted; driving the passkey re-unlock in the SAME FrameTreeNode")
-			// Passkey sessions are never silently restored — the replacement worker holds no
-			// in-memory session, while the anchor popup's store is stale (isLogined still true) and a
-			// bare `location.hash = "#/popup/auth"` gets bounced by the router before auth mounts.
-			// The header's lock flips the local store first, then asks the worker to lock — and
-			// `SessionManager.close()` emits `onActiveProfileChanged(undefined)` only when a session
-			// was open in memory, so after a real restart the persisted record is cleared WITHOUT
-			// the event that would route this popup to /popup/auth. Wait for the authoritative lock
-			// (record gone), then navigate: the store already reads locked, so the guard admits the
-			// route. The popup stays open (same FTN = same virtual authenticator = same credential).
-			await clickByTestId(anchorPopup, "header-lock")
-			await anchorPopup.waitForFunction(async () => !(await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"], {
-				timeout: 60_000,
-				polling: 200,
-			})
-			await navigateByHash(anchorPopup, "#/popup/auth")
+			// The anchor popup stays open (same FTN = same virtual authenticator = same
+			// credential), so it is the extension page the post-stop baseline is read from.
+			await waitForWorkerLiveness(anchorPopup, await readLivenessBaseline(anchorPopup))
+			step("SW rebooted; the anchor popup must lock itself in the SAME FrameTreeNode")
+			// Passkey sessions are never silently restored: the replacement worker holds no
+			// session while this popup's store still says authenticated. Its reconnect boot
+			// resolves `locked` under an auth-required page and enters the locked state on its
+			// own — no Lock click here; the reconnect cleanup hides the header's lock control.
+			await waitForHash(anchorPopup, "#/popup/auth", 60_000)
 			await anchorPopup.waitForSelector('[data-testid="auth-submit"]', { visible: true, timeout: 15_000 })
 			await anchorPopup.waitForFunction(
 				() => {

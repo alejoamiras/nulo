@@ -2,38 +2,15 @@ import { expect } from "vitest"
 import type { Page } from "puppeteer"
 import { TEST_PASSWORD } from "./fixtures/constants"
 import { test, openPopup, waitForHash, clickByTestId, replaceInputValue, withTimeoutMessage } from "./fixtures/extension"
-import { acceptConfirmPopup, ensureUnlocked, lockWallet, navigateByHash, stopServiceWorker } from "./fixtures/helpers"
-
-/** Post-restart readiness: chrome.storage.session RETAINS the dead worker's
- *  heartbeat while the extension stays loaded, so the gate requires a
- *  timestamp STRICTLY NEWER than the pre-kill snapshot — truthy alone passes
- *  before the replacement worker boots (see the regression pin below). */
-async function waitForLiveness(page: Page, afterTs: number): Promise<void> {
-	await page.waitForFunction(
-		async (priorTs: number) => {
-			try {
-				const result = await chrome.storage.session.get("nulo:liveness")
-				return Number(result["nulo:liveness"] ?? 0) > priorTs
-			} catch {
-				return false
-			}
-		},
-		{ timeout: 30_000, polling: 500 },
-		afterTs,
-	)
-}
-
-/** Read the current liveness heartbeat (0 when absent/unreadable). */
-async function readLiveness(page: Page): Promise<number> {
-	return await page.evaluate(async () => {
-		try {
-			const r = await chrome.storage.session.get("nulo:liveness")
-			return Number(r["nulo:liveness"] ?? 0)
-		} catch {
-			return 0
-		}
-	})
-}
+import {
+	acceptConfirmPopup,
+	ensureUnlocked,
+	lockWallet,
+	navigateByHash,
+	readLivenessBaseline,
+	stopServiceWorker,
+	waitForWorkerLiveness,
+} from "./fixtures/helpers"
 
 // Chrome's MV3 lifecycle recycle — the idle worker is killed, the next event
 // respawns it cold — is where storage migrations, service init and cold-boot
@@ -45,16 +22,16 @@ test("extension survives SW stop+respawn: lock → kill SW → unlock → genera
 	await waitForHash(page, "#/popup/general")
 
 	await lockWallet(page)
-	const preKillLiveness = await readLiveness(page)
 	await page.close()
 
 	await stopServiceWorker(registeredExtension)
 
 	// Open a fresh popup. The popup app's SW client will trigger the SW to
 	// spawn cold, write the liveness heartbeat, and serve the locked-state
-	// initial route (/popup/auth).
+	// initial route (/popup/auth). The baseline is read AFTER the stop: the
+	// old instance is gone, so anything newer is the replacement's.
 	const page2 = await openPopup(registeredExtension)
-	await waitForLiveness(page2, preKillLiveness)
+	await waitForWorkerLiveness(page2, await readLivenessBaseline(page2))
 
 	// Locked from before reload, so we land on auth
 	await waitForHash(page2, "#/popup/auth", 15_000)
@@ -81,17 +58,40 @@ test("extension survives SW stop+respawn: lock → kill SW → unlock → genera
  * the previous test by NOT calling `lockWallet()` — proves the lock
  * comes from strict mode, not from explicit user action.
  */
+// A popup that stays OPEN across the kill keeps its store (a selected profile, an authenticated
+// page). The replacement worker holds no session, so the popup's reconnect boot must lock it on
+// its own — nothing here clicks Lock. Pre-fix the shell stayed on general with a dead session
+// behind it, and the next Lock click stripped the header without navigating.
+test("an open popup outlives the kill: it locks itself on reconnect and unlocks again", async ({ registeredExtension }) => {
+	const page = await openPopup(registeredExtension)
+	await ensureUnlocked(page)
+	await waitForHash(page, "#/popup/general")
+
+	await stopServiceWorker(registeredExtension)
+
+	await waitForWorkerLiveness(page, await readLivenessBaseline(page))
+	await waitForHash(page, "#/popup/auth", 30_000)
+	await page.waitForFunction(async () => !(await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"], {
+		timeout: 10_000,
+		polling: 200,
+	})
+
+	await ensureUnlocked(page)
+	await waitForHash(page, "#/popup/general", 15_000)
+	expect(registeredExtension.pageErrors).toEqual([])
+	await page.close()
+})
+
 test("strict mode default ON: unlock → kill SW → expect lock screen on respawn", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general")
 	// Note: deliberately NO lockWallet() call. Strict mode is the lock.
-	const preKillLiveness = await readLiveness(page)
 	await page.close()
 
 	await stopServiceWorker(registeredExtension)
 
 	const page2 = await openPopup(registeredExtension)
-	await waitForLiveness(page2, preKillLiveness)
+	await waitForWorkerLiveness(page2, await readLivenessBaseline(page2))
 
 	// Strict ON: persisted Session has no passhash → restore() silentCloses
 	// → popup boots locked → /popup/auth. This route assertion IS the
@@ -174,13 +174,12 @@ test.skip("strict mode OFF (opt-out): unlock → toggle off → relock+unlock �
 	await replaceInputValue(page, '[data-testid="auth-password-input"]', TEST_PASSWORD)
 	await clickByTestId(page, "auth-submit")
 	await waitForHash(page, "#/popup/general", 10_000)
-	const preKillLiveness = await readLiveness(page)
 	await page.close()
 
 	await stopServiceWorker(registeredExtension)
 
 	const page2 = await openPopup(registeredExtension)
-	await waitForLiveness(page2, preKillLiveness)
+	await waitForWorkerLiveness(page2, await readLivenessBaseline(page2))
 
 	// Lenient mode: bearer cached → silent restore → directly into /popup/general.
 	// (No lock screen; user wouldn't see it under strict OFF.)
@@ -219,16 +218,12 @@ test("regression: liveness signal lands within HEARTBEAT_INTERVAL_MS of SW respa
 	await ensureUnlocked(page)
 	await waitForHash(page, "#/popup/general")
 
-	// Snapshot the liveness timestamp BEFORE killing the SW. The new
-	// value after respawn must be strictly greater than this.
-	const beforeLiveness = (await page.evaluate(async () => {
-		try {
-			const r = await chrome.storage.session.get("nulo:liveness")
-			return Number(r["nulo:liveness"] ?? 0)
-		} catch {
-			return 0
-		}
-	})) as number
+	// Snapshot the liveness timestamp BEFORE killing the SW — deliberately, unlike
+	// the recovery gates above: this test TIMES the replacement's first write, and
+	// a baseline read after the stop could already be that write, costing a full
+	// tick and breaking the bound below. The old worker's last tick can land in
+	// the window before the kill; the 10s budget is what absorbs it.
+	const beforeLiveness = await readLivenessBaseline(page)
 	await page.close()
 
 	await stopServiceWorker(registeredExtension)

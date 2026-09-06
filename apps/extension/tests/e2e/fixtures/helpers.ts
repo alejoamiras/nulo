@@ -1800,3 +1800,42 @@ export async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
 		browserSession.detach().catch(() => {})
 	}
 }
+
+/** The heartbeat the worker writes to `chrome.storage.session` (`nulo:liveness`), read from an
+ *  extension page. Throws unless the read succeeds with a finite positive value: a failed read
+ *  turned into 0 would let ANY retained timestamp satisfy a strictly-newer gate. */
+export async function readLivenessBaseline(page: Page): Promise<number> {
+	const value = await page.evaluate(async () => {
+		const r = await chrome.storage.session.get("nulo:liveness")
+		return Number(r["nulo:liveness"] ?? Number.NaN)
+	})
+	if (!Number.isFinite(value) || value <= 0) {
+		throw new Error(`readLivenessBaseline: no usable heartbeat on this page (read ${String(value)})`)
+	}
+	return value
+}
+
+/**
+ * Wait until a worker writes a heartbeat STRICTLY NEWER than `afterTs`. The dead worker's value
+ * survives in `chrome.storage.session`, so a truthy check passes before any replacement boots.
+ *
+ * Take `afterTs` from `readLivenessBaseline` AFTER `stopServiceWorker` resolved: the old instance
+ * is gone by then, so anything newer came from a replacement. That read may already be the
+ * replacement's first write, which costs one more tick (`HEARTBEAT_INTERVAL_MS`, 10s) — fine for
+ * a recovery gate, wrong for a test that TIMES the first heartbeat, which keeps a pre-kill
+ * baseline on purpose.
+ */
+export async function waitForWorkerLiveness(page: Page, afterTs: number, opts: { timeoutMs?: number } = {}): Promise<void> {
+	await page.waitForFunction(
+		async (priorTs: number) => {
+			try {
+				const result = await chrome.storage.session.get("nulo:liveness")
+				return Number(result["nulo:liveness"] ?? 0) > priorTs
+			} catch {
+				return false
+			}
+		},
+		{ timeout: opts.timeoutMs ?? 30_000, polling: 500 },
+		afterTs,
+	)
+}
