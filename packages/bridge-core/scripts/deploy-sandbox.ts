@@ -1,8 +1,10 @@
 /**
  * Deploys ONE bridge generation onto a private local network and, with `--smoke`, drives every
  * user-visible flow against the manifest it just wrote: deposits (public, private, relayed,
- * token+gas, gas-only), exits (public and private, through to the L1 release), the four
- * first-time-token shapes, a rejected registration, and the guardian's exit pause.
+ * token+gas, gas-only, private gas into PrivateFPC credit), exits (public on the sponsor, private
+ * paid from that credit — its billed gas is reported, the reading `PRIVATE_HUB_EXIT_GAS` is sized
+ * from — both through to the L1 release), the four first-time-token shapes, a rejected
+ * registration, and the guardian's exit pause.
  *
  * The network is this run's own (`scripts/sandbox/local-network.ts`) — its ports are claimed, its
  * data lives on real disk, and teardown signals only the process groups this run spawned.
@@ -25,7 +27,7 @@ import type { Wallet } from "@aztec/aztec.js/wallet"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { TestERC20Abi } from "@aztec/l1-artifacts"
 import { FeeJuiceContractArtifact } from "@aztec/noir-contracts.js/FeeJuice"
-import { Gas, GasFees } from "@aztec/stdlib/gas"
+import { Gas, GasFees, type GasUsed } from "@aztec/stdlib/gas"
 import { PrivateFPCContract } from "@alejoamiras/private-fee-juice/artifacts/private"
 import { registerInitialLocalNetworkAccountsInWallet } from "@aztec/wallets/testing"
 import { type Address, defineChain, type Hex } from "viem"
@@ -33,10 +35,27 @@ import { privateKeyToAccount } from "viem/accounts"
 import { feeJuiceAddress, predictedWorstMinFees, publicFeeJuicePayment } from "../src/fee-juice"
 import { consumeWithdrawal, type L1Ctx } from "../src/flows"
 import { TOKEN_PORTAL_ABI } from "../src/factory-abi"
-import { claimViaHub, exitViaHub, type HubClaimOutcome, hubExitsPaused, hubTokenFor, preflightHubExit } from "../src/hub-l2"
+import {
+	claimViaHub,
+	exitViaHub,
+	type HubClaimOutcome,
+	type HubExitParams,
+	hubExitsPaused,
+	hubTokenFor,
+	preflightHubExit,
+	simulateHubExit,
+} from "../src/hub-l2"
 import type { JournalTokenBlock } from "../src/journal"
 import type { BridgeBlock, ManifestToken, ManifestV2 } from "../src/manifest-v2"
-import { deriveBridgeSecret, PRIVATE_FPC_ADDRESS, PRIVATE_FPC_SALT, privateMintAndPayFee } from "../src/private-fuel"
+import {
+	deriveBridgeSecret,
+	PRIVATE_FPC_ADDRESS,
+	PRIVATE_FPC_SALT,
+	PRIVATE_HUB_EXIT_GAS,
+	privateFeeJuicePayment,
+	privateFpcFeeLimit,
+	privateMintAndPayFee,
+} from "../src/private-fuel"
 import { discoverFuelRoute } from "../src/route-discovery"
 import { buildFuelRoute } from "../src/route"
 import { runSend, type SendParams, type SendResult } from "../src/send-flow"
@@ -578,6 +597,110 @@ async function flowGasOnly(s: Smoke): Promise<string> {
 	return `bridge() into the FeeJuicePortal, +${gained} FJ-wei claimed as fee juice`
 }
 
+// ─── Private gas held at the PrivateFPC ──────────────────────────────────────
+
+/** The pinned PrivateFPC as this wallet sees it, deployed at the canonical salt when the chain has none. */
+async function privateFpc(s: Smoke): Promise<ContractBase> {
+	await ensurePrivateFpc(s)
+	const at = await PrivateFPCContract.at(AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS), s.l2.wallet as never)
+	return at as unknown as ContractBase
+}
+
+/** The account's credit at the FPC — `balance_of` is a utility, read through the wallet's own PXE. */
+async function privateCreditOf(s: Smoke, fpc: ContractBase): Promise<bigint> {
+	const r = (await fpc.methods.balance_of(s.l2.from).simulate({ from: s.l2.from } as never)) as { result?: bigint } | bigint
+	return typeof r === "bigint" ? r : (r.result ?? 0n)
+}
+
+/** The private exit's fee source, funded the way a user's is: Fee Juice bridged straight to the
+ *  PrivateFPC under a claimer-bound secret, then minted into the account's credit. Sized so the
+ *  exit's whole ceiling fits with a balance left to read afterwards. */
+async function flowPrivateGasCredit(s: Smoke): Promise<string> {
+	const fpc = await privateFpc(s)
+	const ceiling = privateFpcFeeLimit(PRIVATE_HUB_EXIT_GAS, await predictedWorstMinFees(s.l2.node))
+	const amount = 2n * ceiling > 20n * MIN_FJ ? 2n * ceiling : 20n * MIN_FJ
+	const feeAsset = s.deployment.feeJuice
+	await writeL1(s.l1, feeAsset, TestERC20Abi, "mint", [s.l1.account.address, amount])
+	await ensureRouterPermit2(s.l1, { usdc: feeAsset, usdcAbi: TestERC20Abi, permit2: PERMIT2, needed: amount, mins: s.mins })
+	const salt = Fr.random()
+	const res = await send(s, s.l1, {
+		intent: "gas",
+		erc20: feeAsset,
+		amount,
+		aztecRecipient: s.l2.from.toString() as Hex,
+		isPrivate: false,
+		gas: {
+			fuelAmount: amount,
+			fuelRecipient: PRIVATE_FPC_ADDRESS as Hex,
+			minFuelOutput: amount,
+			path: [],
+			zeroForOnes: [],
+			// The FPC rebuilds this secret from the claimer inside `mint`; a random one would strand the Fee Juice.
+			fuelSecret: deriveBridgeSecret(salt, s.l2.from),
+		},
+	})
+	await waitForL1ToL2Message(s.l2.node, res.fuelMessageHashHex as string, { forceBlock: s.l2.forceBlock })
+	const before = await privateCreditOf(s, fpc)
+	await fpc.methods.mint(amount, salt, new Fr(res.fuelLeafIndex as bigint)).send(s.l2.sendOpts as never)
+	const gained = (await privateCreditOf(s, fpc)) - before
+	if (gained < amount) throw new Error(`private credit rose by ${gained}, expected ${amount}`)
+	return `bridge() to the PrivateFPC, PrivateFPC.mint credited ${gained} FJ-wei of private gas to account[0]`
+}
+
+/** What the app names for a private exit: the FPC's `pay_fee` from held credit under the exit's
+ *  limits at the predicted worst fee — the ceiling the FPC keeps in full. */
+async function privateExitFee(s: Smoke): Promise<{ fee: Record<string, unknown>; ceiling: bigint }> {
+	const maxFeesPerGas = await predictedWorstMinFees(s.l2.node)
+	const fee = {
+		paymentMethod: privateFeeJuicePayment(AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)),
+		gasSettings: { gasLimits: Gas.from(PRIVATE_HUB_EXIT_GAS), teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }), maxFeesPerGas },
+	}
+	return { fee, ceiling: privateFpcFeeLimit(PRIVATE_HUB_EXIT_GAS, maxFeesPerGas) }
+}
+
+interface ExitGasSample {
+	simulated: { l2Gas: number; daGas: number }
+	fee: bigint
+	feePerL2Gas: bigint
+	feePerDaGas: bigint
+	charged: bigint
+	ceiling: bigint
+}
+
+let exitGasSample: ExitGasSample | undefined
+
+/** The landed exit's bill beside its simulation, and what the FPC took from the credit. */
+async function sampleExitGas(s: Smoke, txHash: string, sim: { gasUsed?: GasUsed }, charged: bigint, ceiling: bigint): Promise<void> {
+	const receipt = await s.l2.node.getTxReceipt(TxHash.fromString(txHash))
+	const block = receipt.blockNumber === undefined ? undefined : await s.l2.node.getBlockData(receipt.blockNumber)
+	const fees = block?.header.globalVariables.gasFees
+	const billed = sim.gasUsed?.billedGas
+	exitGasSample = {
+		simulated: { l2Gas: billed?.l2Gas ?? 0, daGas: billed?.daGas ?? 0 },
+		fee: receipt.transactionFee ?? 0n,
+		feePerL2Gas: fees?.feePerL2Gas ?? 0n,
+		feePerDaGas: fees?.feePerDaGas ?? 0n,
+		charged,
+		ceiling,
+	}
+}
+
+/** What `PRIVATE_HUB_EXIT_GAS` is sized from: the simulation's billed gas, the landed fee at its
+ *  block's prices, and the credit the FPC actually kept against the ceiling it was promised. */
+function reportExitGas(): void {
+	const x = exitGasSample
+	if (!x) {
+		record("ℹ private exit gas: no PrivateFPC-paid exit landed — PRIVATE_HUB_EXIT_GAS not measured")
+		return
+	}
+	const l2FromFee = x.feePerL2Gas === 0n ? "n/a" : String((x.fee - BigInt(x.simulated.daGas) * x.feePerDaGas) / x.feePerL2Gas)
+	record(
+		`ℹ private exit via PrivateFPC.pay_fee: simulated billed l2Gas=${x.simulated.l2Gas} daGas=${x.simulated.daGas}; ` +
+			`landed fee=${x.fee} FJ-wei at feePerL2Gas=${x.feePerL2Gas} feePerDaGas=${x.feePerDaGas} (≈${l2FromFee} L2 gas); ` +
+			`credit charged ${x.charged} vs ceiling ${x.ceiling} under limits l2Gas=${PRIVATE_HUB_EXIT_GAS.l2Gas} daGas=${PRIVATE_HUB_EXIT_GAS.daGas}`,
+	)
+}
+
 // ─── Exits ───────────────────────────────────────────────────────────────────
 
 interface ExitPlan {
@@ -600,10 +723,32 @@ async function exitAuthwit(s: Smoke, p: ExitPlan, nonce: Fr): Promise<{ authWitn
 	return { authWitnesses: [await s.l2.wallet.createAuthWit(s.l2.from, intent as never)] }
 }
 
+type ExitReceipt = { txHash: unknown }
+
+/** Sends the exit the way the app does. A public one runs the preflight (pause assert, portal
+ *  read, burn) before any authwit is spent and rides the sponsor; a private one carries its witness
+ *  and is paid by the PrivateFPC from held credit — its simulation is read for gas, and the credit
+ *  around the send for what the FPC kept. */
+async function sendExit(s: Smoke, exit: HubExitParams, extra: { authWitnesses?: unknown[] }): Promise<ExitReceipt> {
+	const from = s.l2.from.toString()
+	if (!exit.isPrivate) {
+		await preflightHubExit(s.hub, exit, from)
+		const { receipt } = (await exitViaHub(s.hub, exit, { ...s.l2.sendOpts, ...extra })) as unknown as { receipt: ExitReceipt }
+		return receipt
+	}
+	const fpc = await privateFpc(s)
+	const { fee, ceiling } = await privateExitFee(s)
+	const sim = await simulateHubExit(s.hub, exit, from, { ...extra, fee })
+	const before = await privateCreditOf(s, fpc)
+	const { receipt } = (await exitViaHub(s.hub, exit, { ...s.l2.sendOpts, ...extra, fee })) as unknown as { receipt: ExitReceipt }
+	await sampleExitGas(s, String(receipt.txHash), sim, before - (await privateCreditOf(s, fpc)), ceiling)
+	return receipt
+}
+
 async function runExit(s: Smoke, p: ExitPlan): Promise<string> {
 	const authwitNonce = Fr.random()
 	const extra = await exitAuthwit(s, p, authwitNonce)
-	const exit = {
+	const exit: HubExitParams = {
 		l2Token: p.token.l2Token,
 		recipientL1: s.l1.account.address,
 		amount: p.amount,
@@ -611,10 +756,7 @@ async function runExit(s: Smoke, p: ExitPlan): Promise<string> {
 		authwitNonce,
 		isPrivate: p.isPrivate,
 	}
-	// The public preflight runs the pause assert, the portal read and the burn before any authwit is
-	// spent; the private one cannot (its simulation needs the witness the send carries).
-	if (!p.isPrivate) await preflightHubExit(s.hub, exit, s.l2.from.toString())
-	const { receipt } = (await exitViaHub(s.hub, exit, { ...s.l2.sendOpts, ...extra })) as unknown as { receipt: { txHash: unknown } }
+	const receipt = await sendExit(s, exit, extra)
 
 	const erc20Balance = async () =>
 		(await s.l1.pub.readContract({
@@ -938,10 +1080,11 @@ async function runSmoke(base: Sandbox, manifest: ManifestV2): Promise<void> {
 	const usdtL2 = await s.l2TokenOf(tokenBlockOf(usdt))
 	await flow("(c) token+gas, self-paying claim", () => flowTokenPlusGas(s, usdt, usdtL2))
 	await flow("(d) gas-only with the fee asset", () => flowGasOnly(s))
+	await flow("(d) private gas → PrivateFPC credit", () => flowPrivateGasCredit(s))
 	await flow("(e) public exit → L1 withdraw", () =>
 		runExit(s, { token: usdc, l2Token: usdcL2, amount: 10n * 10n ** BigInt(usdc.decimals), isPrivate: false }),
 	)
-	await flow("(e) private exit → L1 withdraw", () =>
+	await flow("(e) private exit paid from PrivateFPC credit → L1 withdraw", () =>
 		runExit(s, { token: usdc, l2Token: usdcL2, amount: 5n * 10n ** BigInt(usdc.decimals), isPrivate: true }),
 	)
 	await flow("(f1) relayer registers before the depositor claims", () => flowRelayerFirstRegister(s))
@@ -953,6 +1096,7 @@ async function runSmoke(base: Sandbox, manifest: ManifestV2): Promise<void> {
 	await optionalFlow("(g) rejected registration, private FPC", () => flowRejectedRegistration(s, "private-fpc"))
 	await flow("(h) guardian pause blocks exits, not claims", () => flowGuardianPause(s, usdc))
 	reportFuelBudgets()
+	reportExitGas()
 }
 
 /** What an operator copies into `bridge.l1.swap.{fjPerTx,fjRegister}` for a network whose fees these were. */

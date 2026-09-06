@@ -10,6 +10,7 @@ import { Contract, type ContractBase } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
 import type { Wallet } from "@aztec/aztec.js/wallet"
 import { EthAddress } from "@aztec/foundation/eth-address"
+import type { GasUsed } from "@aztec/stdlib/gas"
 import { deriveStorageSlotInMap } from "@aztec/stdlib/hash"
 import { tokenBridgeHubArtifact } from "./artifacts"
 import type { JournalTokenBlock } from "./journal"
@@ -361,6 +362,13 @@ function exitCall(hub: ContractBase, p: HubExitParams) {
  */
 export async function preflightHubExit(hub: ContractBase, p: HubExitParams, from: string, opts: SendOpts = {}): Promise<void> {
 	await exitCall(hub, p).simulate({ ...opts, from: AztecAddress.fromStringUnsafe(from) } as never)
+}
+
+/** The preflight with the simulation's gas usage attached — the reading a gas limit is sized from.
+ *  `billedGas` is what the sequencer charges for: it counts the teardown LIMIT, not teardown's use. */
+export function simulateHubExit(hub: ContractBase, p: HubExitParams, from: string, opts: SendOpts = {}): Promise<{ gasUsed?: GasUsed }> {
+	const simulate = exitCall(hub, p).simulate({ ...opts, from: AztecAddress.fromStringUnsafe(from), includeMetadata: true } as never)
+	return simulate as unknown as Promise<{ gasUsed?: GasUsed }>
 }
 
 export function exitViaHub(hub: ContractBase, p: HubExitParams, send: SendOpts) {
