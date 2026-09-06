@@ -651,15 +651,21 @@ async function flowPrivateGasCredit(s: Smoke): Promise<string> {
 	return `bridge() to the PrivateFPC, FeeJuice.claim then PrivateFPC.mint credited ${gained} FJ-wei of private gas to account[0]`
 }
 
+type HubGasLimits = { daGas: number; l2Gas: number }
+
 /** What the app names for a private exit: the FPC's `pay_fee` from held credit under the exit's
- *  limits at the predicted worst fee — the ceiling the FPC keeps in full. */
-async function privateExitFee(s: Smoke): Promise<{ fee: Record<string, unknown>; ceiling: bigint }> {
-	const maxFeesPerGas = await predictedWorstMinFees(s.l2.node)
+ *  limits at the predicted worst fee — the ceiling the FPC keeps in full. The limits are clamped to
+ *  what this network admits per transaction: a local network caps DA gas far below the app's
+ *  constant (testnet admits it), and the clamp changes nothing the reading measures. */
+async function privateExitFee(s: Smoke): Promise<{ fee: Record<string, unknown>; ceiling: bigint; limits: HubGasLimits }> {
+	const [maxFeesPerGas, info] = await Promise.all([predictedWorstMinFees(s.l2.node), s.l2.node.getNodeInfo()])
+	const max = info.txsLimits.gas
+	const limits = { daGas: Math.min(PRIVATE_HUB_EXIT_GAS.daGas, max.daGas), l2Gas: Math.min(PRIVATE_HUB_EXIT_GAS.l2Gas, max.l2Gas) }
 	const fee = {
 		paymentMethod: privateFeeJuicePayment(AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)),
-		gasSettings: { gasLimits: Gas.from(PRIVATE_HUB_EXIT_GAS), teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }), maxFeesPerGas },
+		gasSettings: { gasLimits: Gas.from(limits), teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }), maxFeesPerGas },
 	}
-	return { fee, ceiling: privateFpcFeeLimit(PRIVATE_HUB_EXIT_GAS, maxFeesPerGas) }
+	return { fee, ceiling: privateFpcFeeLimit(limits, maxFeesPerGas), limits }
 }
 
 interface ExitGasSample {
@@ -669,12 +675,18 @@ interface ExitGasSample {
 	feePerDaGas: bigint
 	charged: bigint
 	ceiling: bigint
+	limits: HubGasLimits
 }
 
 let exitGasSample: ExitGasSample | undefined
 
 /** The landed exit's bill beside its simulation, and what the FPC took from the credit. */
-async function sampleExitGas(s: Smoke, txHash: string, sim: { gasUsed?: GasUsed }, charged: bigint, ceiling: bigint): Promise<void> {
+async function sampleExitGas(
+	s: Smoke,
+	txHash: string,
+	sim: { gasUsed?: GasUsed },
+	paid: { charged: bigint; ceiling: bigint; limits: HubGasLimits },
+): Promise<void> {
 	const receipt = await s.l2.node.getTxReceipt(TxHash.fromString(txHash))
 	const block = receipt.blockNumber === undefined ? undefined : await s.l2.node.getBlockData(receipt.blockNumber)
 	const fees = block?.header.globalVariables.gasFees
@@ -684,8 +696,7 @@ async function sampleExitGas(s: Smoke, txHash: string, sim: { gasUsed?: GasUsed 
 		fee: receipt.transactionFee ?? 0n,
 		feePerL2Gas: fees?.feePerL2Gas ?? 0n,
 		feePerDaGas: fees?.feePerDaGas ?? 0n,
-		charged,
-		ceiling,
+		...paid,
 	}
 }
 
@@ -701,7 +712,8 @@ function reportExitGas(): void {
 	record(
 		`ℹ private exit via PrivateFPC.pay_fee: simulated billed l2Gas=${x.simulated.l2Gas} daGas=${x.simulated.daGas}; ` +
 			`landed fee=${x.fee} FJ-wei at feePerL2Gas=${x.feePerL2Gas} feePerDaGas=${x.feePerDaGas} (≈${l2FromFee} L2 gas); ` +
-			`credit charged ${x.charged} vs ceiling ${x.ceiling} under limits l2Gas=${PRIVATE_HUB_EXIT_GAS.l2Gas} daGas=${PRIVATE_HUB_EXIT_GAS.daGas}`,
+			`credit charged ${x.charged} vs ceiling ${x.ceiling} under declared limits l2Gas=${x.limits.l2Gas} daGas=${x.limits.daGas} ` +
+			`(PRIVATE_HUB_EXIT_GAS l2Gas=${PRIVATE_HUB_EXIT_GAS.l2Gas} daGas=${PRIVATE_HUB_EXIT_GAS.daGas}, clamped to this network's per-tx max)`,
 	)
 }
 
@@ -741,11 +753,11 @@ async function sendExit(s: Smoke, exit: HubExitParams, extra: { authWitnesses?: 
 		return receipt
 	}
 	const fpc = await privateFpc(s)
-	const { fee, ceiling } = await privateExitFee(s)
+	const { fee, ceiling, limits } = await privateExitFee(s)
 	const sim = await simulateHubExit(s.hub, exit, from, { ...extra, fee })
 	const before = await privateCreditOf(s, fpc)
 	const { receipt } = (await exitViaHub(s.hub, exit, { ...s.l2.sendOpts, ...extra, fee })) as unknown as { receipt: ExitReceipt }
-	await sampleExitGas(s, String(receipt.txHash), sim, before - (await privateCreditOf(s, fpc)), ceiling)
+	await sampleExitGas(s, String(receipt.txHash), sim, { charged: before - (await privateCreditOf(s, fpc)), ceiling, limits })
 	return receipt
 }
 
