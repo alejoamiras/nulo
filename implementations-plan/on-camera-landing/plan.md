@@ -84,7 +84,7 @@ The approved prototype is committed beside this plan as `prototype.html` (the ar
 - Pass: exit 0 on all; then `bun run --cwd apps/landing preview` and a Playwright pass that (a) confirms the response carries the `Content-Security-Policy` header from `_headers` and the console has no CSP violation or error, (b) screenshots 1400×900 and 390×844 with the feed drawn and the plate and buttons legible, (c) tabs through bar → hero buttons → Pause → section links with a visible focus ring, (d) with `prefers-reduced-motion: reduce` emulated the feed is a still frame and Pause is absent or inert, (e) Pause stops the loop (two frames 1 s apart are identical) and Play resumes it, (f) the record panel never exceeds 16 rows after 30 s, (g) under 4× CPU throttling at 390×844 the main thread stays responsive (long tasks < 50 ms) — recorded in `lessons/phase-3.md` with the cold-load font requests (which faces, sizes, and whether layout shifted).
 - Layers: typecheck · lint · unit · build · manual browser (CSP, a11y, motion, perf).
 
-### Phase 4 — Docs, index, final read
+### Phase 4 ✓ — Docs, index, final read
 - `apps/landing/README.md` file map and key notes (renderer, overrides, fonts from the package, `preview.headers`, no CI build job); `implementations-plan/index.md`; lessons.
 - Re-read every visible string against the copy rule and the corrected claims (Asks 1–2).
 
