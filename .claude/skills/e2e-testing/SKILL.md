@@ -156,7 +156,7 @@ runtime env var can never arm a build-time flag.
   Required check `smoke-e2e-status` on both branches.
 - **Network** — `pr-network-e2e.yml` → `_network-e2e.yml`. Filter `extension-network`, label
   `e2e:network`. Lanes: 5 vitest shards (`--shard=N/5`, SHA-1 of the file path, proverless, retry 0,
-  the 5 dedicated files excluded); two heavy single-file lanes (`fee-methods`,
+  the 6 dedicated files excluded); two heavy lanes (`fee-methods` + `selfpay-phase`, and
   `concurrent-sendtx-confirm`, proverless); the **canary** lane prover-ON with the SHA-256-pinned
   `accelerator-server` and `VITE_NULO_ACCELERATOR_REQUIRED=1` (`transfers`, `tx-sendTx-default`,
   `frozen-account-canary`) — a canary run with zero `Proving succeeded` lines fails; the
@@ -193,7 +193,7 @@ and connected states share one Chrome). Pick by the state you need and the scope
 | `freshExtensionPerTest` | same, relaunched per test | test |
 | `registeredExtension` / `…PerTest` | one password profile on `#/popup/general` | file / test |
 | `dappConnectedExtension` / `…PerTest` | playground handshake done | file / test |
-| `dappConnectedExtensionWithAccountsCap`, `…WithTransactionCap`, `…WithFirstTwoAccountsCap` | handshake plus the named capability grant | test |
+| `dappConnectedExtensionWithAccountsCap`, `…WithTransactionCap`, `…WithFirstTwoAccountsCap`, `…WithFirstTwoAccountsContractsCap` | handshake plus the named capability grant | test |
 | `localNetworkExtension` | profile switched to the sandbox network | file |
 | `tokenReadyExtension`, `feeJuiceReadyExtension`, `feeJuiceImportedExtension` | funded token / fee-juice states on the sandbox | file |
 
