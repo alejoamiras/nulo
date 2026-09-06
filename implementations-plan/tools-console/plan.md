@@ -210,7 +210,7 @@ export function useShell(): { section: Ref<Section>; goTo(s: Section): void; ope
 - Tests: `StepStrip.test.ts` (vertical, ↑/↓, hints, testids), `WizardShell.test.ts` (existing pins + card head), `BridgePhaseRail.test.ts` (no pulse in compact), `ActivityDock.test.ts` overlay keyboard cases.
 - **Gate line:** `<frozen>` explicitly re-run and quoted.
 
-### Phase 5 — Preview walk + docs
+### Phase 5 ✓ — Preview walk + docs
 - `bun run audit:vue` exit 0 (typecheck ∥ unit ∥ lint, then build); `bun run --cwd apps/tools build:testnet` exit 0; push; the Cloudflare branch preview builds.
 - Owner walks the preview: one send to the first claim, one faucet drip, dock hide/show/auto-open, the 1100 and 760 boundaries, keyboard-only rail + dock, both themes. Feedback lands in `lessons/phase-5.md` and is fixed in place.
 - README file map + shell description; `implementations-plan/index.md` entry.
@@ -261,6 +261,7 @@ Single arc, single PR: branch `worktree-tools-console` → `dev`, opened with `g
 | 17 | Final: `v-show` keeps the dock rendered on Activity, against criterion 8 (MED) | **Adopted.** `v-if`. |
 | 18 | Final ruling on `opsBusy`: it protects account switching, not run concurrency (record-local `busy` + `withRecordLock` do) | **Adopted.** SWITCH only. |
 | 19 | Final: `busy → running` before `completedAt → done` inverts the card's precedence (HIGH) | **Adopted.** Completion first; `completedAt + busy` fixture. |
+| 20 | Owner, round-3 walk (2026-09-06): a private token bridged with no gas bought paid its claim from PUBLIC Fee Juice — "should have been blocked at the bridge, it doxxes the user"; hard block at send time; no escape for stuck records (pre-production) | **Adopted, in this PR** (`75cf8868`): `decideOwnGasSource` takes `privateBridge` — a private bridge pays only from its PrivateFPC credit at both gates (the wizard's token-only choice and the claim ladder), with messages that say why. The nine frozen step files stay untouched; the fence lives in the wizard's gate and the shared decision. |
 | 20 | Final: a 64-id seen cap can forget a live bridge (unfinished records are never evicted); `hide()` had no input; cross-tab (HIGH) | **Adopted.** Prune to live ids, `hide(ids)`, re-read storage per call. |
 | 21 | Final: CLAIM GAS has no record lock → double activation (MED) | **Adopted.** Dock-local per-record in-flight set. |
 | 22 | Final: background handoff must use `backgroundedCanonical` (MED) | **Adopted.** |

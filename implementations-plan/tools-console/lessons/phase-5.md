@@ -76,4 +76,18 @@ allow-list, in the heavy CI job at retry 0.
 4. Replace the line below with `**Sign-off:** <your words>, <date>` and push (or say it in chat
    and the agent records it).
 
-**Sign-off:** _pending — the owner's round-3 walk on the preview with the fixed extension._
+## Owner's walk — round 3 (2026-09-06, extension built from #549's head, sent to the Mac)
+
+The owner: "I think it's working." One finding on the way: a private token bridged without buying
+gas was claimed with the account's PUBLIC Fee Juice — "should have been blocked at the bridge
+instance, we should never allow it because it ends up doxxing the user" (the fee payer is public
+and the claim publicly raises the token's supply by the bridged amount; the FPC as payer breaks
+that link). Not a shell defect; the app's own-gas ladder and the wizard's gate shared a
+*preference* for private gas, not a fence (the L11 fence covered only fueled records). Owner's
+decisions: hard block at send time; no escape hatch for stuck records (pre-production). Fixed in
+this PR, at the owner's direction — `75cf8868`, ledger row 20, codex-reviewed on its own
+(`lessons/post-impl.md`).
+
+**Sign-off:** owner, 2026-09-06 — "I think it's working"; directed: merge #549, add the
+private-gas fence on top of this PR, codex-review that implementation, babysit CI to green and
+merge. Recorded by the agent from chat.

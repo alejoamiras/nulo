@@ -77,3 +77,18 @@ Codex, verbatim: "No remaining HIGH or MED findings verified in the net diff fro
 
 Five rounds, one session (`01a07273-63f8-7c92-bc4e-bf91007c0ff6`); 26 findings verified and fixed, 0 rejected; the PR opens now.
 
+
+## The private-gas fence (owner's round-3 finding, `75cf8868`) — its own codex pass
+
+Reviewed alone, at the owner's direction, fresh session `01a0747f-166e-7880-aca0-a1df70fb60cf`,
+`high`, read-only, over that one commit's diff plus the surrounding code.
+
+> No actionable findings … Private token claims cannot select public Fee Juice through the changed
+> helper. Both production callers pass `privateBridge`; no `preferPrivate` call sites remain.
+> Fueled private records resolve before `fjwc` or `userOverride`; consumed-fuel recovery stays on
+> PrivateFPC credit, and standalone recovery rejects private records. Registration fees also retain
+> the private payer. … VERDICT: approve
+
+Informational, for a follow-up: private EXITS are wallet-paid (`useHubExit.ts:76` supplies no
+fee), so a private exit can name a public payer — the same leak class in the other direction; not
+in this PR's scope.
