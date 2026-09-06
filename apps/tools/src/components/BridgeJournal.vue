@@ -9,19 +9,18 @@ import { useToast } from "@/composables/useToast"
 
 /** Utils */
 import { type BridgeJournalRecord, assetKindOf } from "@nulo/bridge-core"
-import { computed, ref, watch } from "vue"
+import { computed, ref } from "vue"
 import { assetDecimals, assetSymbol } from "@/lib/asset-label"
-import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
-import { formatBigInt } from "@/lib/format"
+import { formatStoredAmount } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
 
-// `kind` scopes the list to one asset (the Fuel tab shows fee-juice, the Bridge tab shows the token) so a
-// backgrounded Fuel bridge surfaces under its own tab. `toasts` keeps a SINGLE completion-toast owner across
-// the two mounts (the Bridge instance owns it; the Fuel instance is list-only) — no double toast.
-const props = withDefaults(defineProps<{ kind?: "bridge-token" | "fee-juice"; toasts?: boolean; title?: string }>(), {
-	toasts: true,
-	title: "YOUR BRIDGES",
-})
+// `source` picks the record set: `visible` omits the record the wizard is foregrounding (its stepper
+// is that record's one surface); `all` is for the Activity page, where no stepper is on screen.
+// `kind` scopes the list to one asset kind. Completion toasts are the shell's (`useCompletionToasts`).
+const props = withDefaults(
+	defineProps<{ kind?: "bridge-token" | "fee-juice"; title?: string; source?: "visible" | "all"; highlightedId?: string | null }>(),
+	{ title: "YOUR BRIDGES", source: "visible", highlightedId: null },
+)
 
 const journal = useBridgeJournal()
 const backup = useBridgeBackup()
@@ -51,7 +50,7 @@ async function onRestorePick(event: Event) {
 	try {
 		const rec = await backup.restoreFile(await file.text())
 		const kind = assetKindOf(rec)
-		const amount = formatBigInt(BigInt(rec.amount), assetDecimals(kind))
+		const amount = formatStoredAmount(rec.amount, assetDecimals(kind))
 		push({
 			kind: "ok",
 			text: `Restored: ${amount} ${assetSymbol(kind, rec.isPrivate)} ${rec.direction === "deposit" ? "to Aztec" : "to Ethereum"}.`,
@@ -64,36 +63,10 @@ async function onRestorePick(event: Event) {
 }
 
 const sorted = computed(() => {
-	const recs = props.kind ? journal.visibleRecords.value.filter((r) => assetKindOf(r) === props.kind) : journal.visibleRecords.value
+	const all = props.source === "all" ? journal.records.value : journal.visibleRecords.value
+	const recs = props.kind ? all.filter((r) => assetKindOf(r) === props.kind) : all
 	return [...recs].sort((a, b) => b.createdAt - a.createdAt)
 })
-
-watch(
-	() => journal.lastCompleted.value,
-	(done) => {
-		if (!props.toasts) return // List-only mount (the Fuel tab) — the Bridge mount owns the single toast.
-		if (!done) return
-		// The foreground stepper shows the receipt for this completion - a toast would double it.
-		// Keyed off the SYNCHRONOUS capture, not the live activeFlowId: the form's completion watcher
-		// releases the takeover before this one runs, so the live check would always pass here.
-		if (done.foreground) return
-		// A fee-juice (Fuel) completion is 18-dec Fee Juice, not the token bridge's asset - format + label it
-		// as such so a background Fuel completion isn't announced as the wrong amount of AZLO (codex MEDIUM).
-		const sym = assetSymbol(done.assetKind, done.isPrivate)
-		const amount = formatBigInt(BigInt(done.amount), assetDecimals(done.assetKind))
-		const href = done.txHash ? (done.direction === "deposit" ? explorerTxUrl(done.txHash) : etherscanTxUrl(done.txHash)) : ""
-		push({
-			kind: "ok",
-			text:
-				done.direction === "deposit"
-					? done.assetKind === "fee-juice"
-						? `Fueled Aztec with ${amount} ${sym} ✓`
-						: `Bridged ${amount} ${sym} to Aztec ✓`
-					: `Released ${amount} ${sym} to Ethereum ✓`,
-			link: href ? { label: "view tx", href } : undefined,
-		})
-	},
-)
 </script>
 
 <template>
@@ -120,20 +93,29 @@ watch(
 			/>
 		</Flex>
 		<div v-if="sorted.length === 0" class="empty-state" :data-testid="TESTIDS.journalEmpty">
-			<span class="empty-headline">NOTHING PENDING YET</span>
-			<span class="empty-sub">
-				Bridges you background or lose track of land here.
-				<button
-					type="button"
-					class="empty-link"
-					:data-testid="TESTIDS.journalRestoreLink"
-					@click="restoreInput?.click()"
-				>Restore</button>
-				a saved bridge from its recovery file.
-			</span>
+			<slot name="empty">
+				<span class="empty-headline">NOTHING PENDING YET</span>
+				<span class="empty-sub">
+					Bridges you background or lose track of land here.
+					<button
+						type="button"
+						class="empty-link"
+						:data-testid="TESTIDS.journalRestoreLink"
+						@click="restoreInput?.click()"
+					>Restore</button>
+					a saved bridge from its recovery file.
+				</span>
+			</slot>
 		</div>
 		<Flex v-else direction="column" gap="10">
-			<BridgeJournalCard v-for="rec in sorted" :key="rec.id" :record="rec" @backup="onBackup" />
+			<BridgeJournalCard
+				v-for="rec in sorted"
+				:key="rec.id"
+				:record="rec"
+				:class="{ highlighted: rec.id === props.highlightedId }"
+				:data-highlighted="rec.id === props.highlightedId || undefined"
+				@backup="onBackup"
+			/>
 		</Flex>
 	</Flex>
 </template>
@@ -215,5 +197,10 @@ watch(
 
 .hidden-input {
 	display: none;
+}
+
+/* The record the shell opened Activity for: an ink rule, no fill, no accent. */
+.highlighted {
+	box-shadow: -14px 0 0 -12px var(--txt-primary);
 }
 </style>

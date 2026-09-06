@@ -1,74 +1,98 @@
 <script setup lang="ts">
-import { computed, ref } from "vue"
-import { TESTIDS } from "@/lib/testids"
+/** Components */
+import ActivityDock from "./components/ActivityDock.vue"
+import ActivityView from "./views/ActivityView.vue"
 import AppToastRegion from "./components/AppToastRegion.vue"
-import ChooseAccountModal from "./components/ChooseAccountModal.vue"
-import WalletPickerModal from "./components/WalletPickerModal.vue"
+import AztecWalletPanel from "./components/AztecWalletPanel.vue"
 import BridgeFooter from "./components/BridgeFooter.vue"
-import ThemeToggle from "./components/ThemeToggle.vue"
-import Footer from "./components/Footer.vue"
+import ChooseAccountModal from "./components/ChooseAccountModal.vue"
 import ConnectionErrorStrip from "./components/ConnectionErrorStrip.vue"
 import DripView from "./views/DripView.vue"
+import Footer from "./components/Footer.vue"
+import L1WalletPanel from "./components/L1WalletPanel.vue"
+import RailNav from "./components/RailNav.vue"
+import SectionHeader from "./components/SectionHeader.vue"
 import SendView from "./views/SendView.vue"
+import ThemeToggle from "./components/ThemeToggle.vue"
+import WalletPickerModal from "./components/WalletPickerModal.vue"
 
-type Tab = "drip" | "send"
+/** Composables */
+import { useActivityFeed } from "@/composables/useActivityFeed"
+import { useCompletionToasts } from "@/composables/useCompletionToasts"
+import { useShell } from "@/composables/useShell"
 
-/** A `bridge.*` host lands on the send tab; everywhere else the drip tab is the front door. */
-function defaultTab(): Tab {
-	if (typeof window !== "undefined" && window.location.hostname.startsWith("bridge")) return "send"
-	return "drip"
-}
+/** Utils */
+import { computed } from "vue"
+import { IS_PLACEHOLDER } from "@/contracts/bridge-generation"
+import { TESTIDS } from "@/lib/testids"
 
-const tab = ref<Tab>(defaultTab())
+const shell = useShell()
+const section = shell.section
 
-/** States with a dedicated in-panel UI never go to the strip: capability
- *  denial has the red morph everywhere; no-wallet has the install CTA on
- *  the drip tab only (send has no CTA, so it shows here). */
-const stripExclude = computed(() => (tab.value === "drip" ? ["no-wallet", "capability-rejected"] : ["capability-rejected"]))
+// The one place completion toasts come from, whichever section is visible. A network with no
+// bridge generation instantiates none of the journal machinery, here or anywhere: the feed is
+// built once and handed to the dock, and its absence is what keeps the dock out of the tree.
+if (!IS_PLACEHOLDER) useCompletionToasts()
+const feed = IS_PLACEHOLDER ? null : useActivityFeed()
+const activityCount = computed(() => feed?.count.value ?? 0)
+
+/** States with a dedicated in-panel UI never go to the strip: capability denial has the red morph
+ *  everywhere; no-wallet has the install CTA on the faucet only (the others have no CTA, so it shows here). */
+const stripExclude = computed(() => (section.value === "drip" ? ["no-wallet", "capability-rejected"] : ["capability-rejected"]))
+
+const HEADERS = {
+	send: { title: "Bridge", subline: "Any ERC-20 · Ethereum ↔ Aztec · public or private · arrive with gas" },
+	drip: { title: "Faucet", subline: "Alpha-testnet only · fixed amounts · permissionless dripper · no rate limit" },
+	activity: { title: "Activity", subline: "Every bridge this browser started or restored, with its next step" },
+} as const
+const header = computed(() => HEADERS[section.value])
 </script>
 
 <template>
-	<main class="page" :data-testid="TESTIDS.app">
-		<div class="topbar">
-		<nav class="tabs" :data-testid="TESTIDS.tabs">
-			<button
-				type="button"
-				class="tab"
-				:class="{ active: tab === 'drip' }"
-				:aria-selected="tab === 'drip'"
-				:data-testid="TESTIDS.tabDrip"
-				@click="tab = 'drip'"
-			>
-				Drip
-			</button>
-			<button
-				type="button"
-				class="tab"
-				:class="{ active: tab === 'send' }"
-				:aria-selected="tab === 'send'"
-				:data-testid="TESTIDS.tabSend"
-				@click="tab = 'send'"
-			>
-				Send
-			</button>
-		</nav>
-			<ThemeToggle />
+	<main class="shell" :data-testid="TESTIDS.app" :data-section="section">
+		<aside class="rail">
+			<div class="brand"><span class="mark" aria-hidden="true" /><span>Nulo <em>tools</em></span></div>
+			<RailNav :activity-count="activityCount" />
+			<div class="rail-foot">
+				<ThemeToggle />
+			</div>
+		</aside>
+
+		<div class="main">
+			<SectionHeader :title="header.title" :subline="header.subline">
+				<template #wallets>
+					<template v-if="section === 'drip'">
+						<AztecWalletPanel variant="faucet" />
+					</template>
+					<template v-else>
+						<L1WalletPanel />
+						<AztecWalletPanel variant="bridge" />
+					</template>
+				</template>
+			</SectionHeader>
+
+			<div class="body">
+				<!-- ONE strip for the shared session, above whichever view is active — the views stay
+				     mounted (v-show), so per-view strips would render duplicate alerts/testids with
+				     diverging dismissal state. -->
+				<ConnectionErrorStrip class="strip-slot" :exclude="stripExclude" />
+
+				<!-- v-show (not v-if): Send and Faucet keep their local state across switches; both read
+				     the ONE wallet session singleton. Activity has no local state of its own. -->
+				<DripView v-show="section === 'drip'" />
+				<SendView v-show="section === 'send'" />
+				<ActivityView v-if="section === 'activity'" />
+			</div>
+
+			<div class="foot">
+				<Footer v-if="section === 'drip'" />
+				<BridgeFooter v-else />
+			</div>
 		</div>
 
-		<!-- ONE strip for the shared session, above whichever view is active — the views stay
-		     mounted (v-show), so per-view strips would render duplicate alerts/testids with
-		     diverging dismissal state. -->
-		<ConnectionErrorStrip class="strip-slot" :exclude="stripExclude" />
+		<!-- On Activity the page IS the dock, so it is unmounted there, not merely hidden. -->
+		<ActivityDock v-if="feed && section !== 'activity'" :feed="feed" />
 
-		<!-- v-show (not v-if): keep the views mounted so the (single, shared) wallet session and
-		     each view's local state persist across tab switches. Both tabs read ONE session
-		     singleton (useBridgeWallet re-exports useWalletConnection) — one connection, one
-		     grant, one active account. -->
-		<DripView v-show="tab === 'drip'" />
-		<SendView v-show="tab === 'send'" />
-
-		<Footer v-if="tab === 'drip'" />
-		<BridgeFooter v-else />
 		<AppToastRegion />
 		<!-- ONE picker for the shared session — the panels only trigger connect(). -->
 		<WalletPickerModal />
@@ -77,53 +101,112 @@ const stripExclude = computed(() => (tab.value === "drip" ? ["no-wallet", "capab
 </template>
 
 <style scoped>
-.strip-slot {
-	margin-bottom: 24px;
+.shell {
+	display: grid;
+	grid-template-columns: 200px minmax(0, 1fr) auto;
+	min-height: 100vh;
+	color: var(--txt-primary);
 }
 
-.page {
-	max-width: 760px;
-	margin: 0 auto;
-	padding: 80px 32px 96px;
-	color: var(--txt-primary);
+.rail {
 	display: flex;
 	flex-direction: column;
-	gap: 32px;
+	padding: 18px 12px 20px;
+	border-right: 1px solid var(--nulo-outline);
 }
 
-.topbar {
+.brand {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
-	gap: 16px;
-}
-
-.tabs {
-	display: flex;
-	gap: 4px;
-	padding: 4px;
-	background: color-mix(in srgb, var(--txt-primary) 4%, transparent);
-}
-
-.tab {
-	font-family: var(--font-headline, inherit);
-	font-weight: 600;
-	font-size: 15px;
+	gap: 10px;
+	padding: 6px 10px 24px;
+	font-family: var(--font-headline);
+	font-weight: 700;
+	font-size: 14px;
 	letter-spacing: -0.01em;
+}
+
+.brand em {
+	font-style: normal;
+	font-weight: 500;
 	color: var(--txt-secondary);
-	background: transparent;
-	border: none;
-	padding: 10px 20px;
-	cursor: pointer;
-	transition: background 0.15s ease, color 0.15s ease;
 }
 
-.tab:hover {
-	color: var(--txt-primary);
+.mark {
+	position: relative;
+	flex: none;
+	width: 18px;
+	height: 18px;
+	border: 2px solid var(--txt-primary);
+	border-radius: 50%;
 }
 
-.tab.active {
-	color: var(--txt-primary);
-	background: color-mix(in srgb, var(--txt-primary) 10%, transparent);
+.mark::after {
+	content: "";
+	position: absolute;
+	inset: 4px;
+	border-radius: 50%;
+	background: var(--txt-primary);
+}
+
+.rail-foot {
+	margin-top: auto;
+	padding: 0 2px;
+}
+
+.main {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.body {
+	display: flex;
+	flex-direction: column;
+	gap: 24px;
+	flex: 1;
+	padding: 28px 36px 40px;
+}
+
+.strip-slot:empty {
+	display: none;
+}
+
+.foot {
+	padding: 0 36px;
+}
+
+@media (max-width: 760px) {
+	.shell {
+		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-rows: auto minmax(0, 1fr);
+	}
+
+	.rail {
+		grid-column: 1 / -1;
+		flex-direction: row;
+		align-items: center;
+		gap: 12px;
+		padding: 10px 12px;
+		border-right: 0;
+		border-bottom: 1px solid var(--nulo-outline);
+	}
+
+	.brand {
+		padding: 0 6px 0 0;
+	}
+
+	.rail-foot {
+		margin-top: 0;
+		margin-left: auto;
+	}
+
+	.body {
+		padding: 20px 16px 32px;
+	}
+
+	.foot {
+		padding: 0 16px;
+	}
 }
 </style>

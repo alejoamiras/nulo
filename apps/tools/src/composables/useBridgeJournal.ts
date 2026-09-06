@@ -36,6 +36,7 @@ import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
 import { isWellFormedTxHash } from "@/lib/claim-receipt"
 import { isReceiptRecordMismatch } from "@/lib/fuel-claim-state"
 import { dropPhaseClock } from "@/lib/phase-clock"
+import { safeAddressText, safeSentence } from "@/lib/token-display"
 import { withOperation } from "./useOpsInFlight"
 
 // Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
@@ -535,7 +536,7 @@ export async function validateSendRecordBlock(rec: BridgeJournalRecord): Promise
 /** A record the chain has contradicted never runs again - only discarding it clears the state. */
 function guardBlocked(rec: BridgeJournalRecord): boolean {
 	if (!rec.blocked) return true
-	setRuntime(rec.id, { attention: "stale-deployment", note: rec.blocked })
+	setRuntime(rec.id, { attention: "stale-deployment", note: safeSentence(rec.blocked) })
 	return false
 }
 
@@ -582,7 +583,10 @@ async function resolvePrivateSecret(rec: ClaimRecord): Promise<{ secretHex: stri
 	}
 	const connected = deps.connectedL1?.()?.toLowerCase() ?? null
 	if (rec.sealerL1 && connected && connected !== rec.sealerL1.toLowerCase()) {
-		setRuntime(rec.id, { attention: "mismatch", note: `Connect the Ethereum account that sealed this record (${rec.sealerL1}).` })
+		setRuntime(rec.id, {
+			attention: "mismatch",
+			note: `Connect the Ethereum account that sealed this record (${safeAddressText(rec.sealerL1)}).`,
+		})
 		return null
 	}
 	const binding = { chainId: rec.chainId, portal: rec.portal, bridge: rec.bridge, secretHashHex: rec.secretHashHex }
@@ -599,7 +603,7 @@ async function resolvePrivateSecret(rec: ClaimRecord): Promise<{ secretHex: stri
 	if (envelope.sealerL1 && connected && envelope.sealerL1.toLowerCase() !== connected) {
 		setRuntime(rec.id, {
 			attention: "mismatch",
-			note: `This record was sealed by ${envelope.sealerL1} - connect that Ethereum account.`,
+			note: `This record was sealed by ${safeAddressText(envelope.sealerL1)} - connect that Ethereum account.`,
 		})
 		return null
 	}
@@ -889,7 +893,7 @@ function recipientMismatch(rec: ClaimRecord, id: string): boolean {
 	if (!aztec || !recipientOk || aztec.toLowerCase() !== rec.recipient.toLowerCase()) {
 		setRuntime(id, {
 			attention: "mismatch",
-			note: `This deposit claims to ${rec.recipient}. Switch to that Aztec account to claim.`,
+			note: `This deposit claims to ${safeAddressText(rec.recipient)}. Switch to that Aztec account to claim.`,
 		})
 		return true
 	}
@@ -1457,8 +1461,8 @@ export function resumeSessionWork(): void {
 	}
 }
 
-/** The render list: completed-and-graced cards are hidden (D3), and the FOREGROUND record is
- *  suppressed (its stepper/receipt is the one surface - plan S12/S13). Records stay in storage. */
+/** Every record except the foregrounded one: while the wizard shows a record's stepper or receipt,
+ *  that is its one surface, so no list renders it a second time. Records stay in storage. */
 export const visibleRecords = computed(() => records.value.filter((r) => r.id !== activeFlowId.value))
 
 export function useBridgeJournal() {

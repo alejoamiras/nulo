@@ -3,8 +3,6 @@ import { enableAutoUnmount, mount } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { nextTick, ref } from "vue"
 
-// Each mount registers a watcher on the module-shared lastCompleted; without unmounting, zombie instances
-// from earlier tests fire on a later test's completion (breaks the toasts=false single-owner assertion).
 enableAutoUnmount(afterEach)
 
 const visibleRecords = ref<BridgeJournalRecord[]>([])
@@ -57,7 +55,6 @@ const BRIDGE_TOKEN_SYMBOL = "TOKEN"
 const UNIT = 10n ** BigInt(BRIDGE_TOKEN_DECIMALS)
 
 const sel = (t: string) => `[data-testid="${t}"]`
-const GOOD_HASH = `0x${"ab".repeat(32)}`
 const recOf = (over: Partial<BridgeJournalRecord>): BridgeJournalRecord =>
 	({ id: "0x", direction: "deposit", isPrivate: false, amount: (1n * UNIT).toString(), createdAt: 1, ...over }) as BridgeJournalRecord
 
@@ -106,51 +103,9 @@ describe("BridgeJournal", () => {
 		expect(push).toHaveBeenCalledWith(expect.objectContaining({ kind: "error", text: expect.stringContaining("too large") }))
 	})
 
-	it("a FOREGROUND completion does not toast (the receipt already announced it)", async () => {
-		// `foreground` is the SYNCHRONOUS capture from completion time - the live activeFlowId is
-		// already released (null) by the time this watcher runs, so it cannot be the key.
-		mount(BridgeJournal, { global: { stubs: { BridgeJournalCard: true } } })
-		lastCompleted.value = {
-			id: "0xfg",
-			direction: "deposit",
-			amount: (100n * UNIT).toString(),
-			isPrivate: false,
-			txHash: GOOD_HASH,
-			foreground: true,
-		}
-		await nextTick()
-		expect(push).not.toHaveBeenCalled()
-	})
-
 	it("renders the empty state from visibleRecords (the hide filter feeds this list)", () => {
 		const w = mount(BridgeJournal, { global: { stubs: { BridgeJournalCard: true } } })
 		expect(w.find(sel(TESTIDS.journalEmpty)).exists()).toBe(true)
-	})
-
-	it("a completion pushes the toast with the explorer link (pin for the lastCompleted watcher)", async () => {
-		const w = mount(BridgeJournal, { global: { stubs: { BridgeJournalCard: true } } })
-		lastCompleted.value = { id: "0xa", direction: "deposit", amount: (100n * UNIT).toString(), isPrivate: false, txHash: GOOD_HASH }
-		await nextTick()
-		expect(push).toHaveBeenCalledWith(
-			expect.objectContaining({
-				kind: "ok",
-				text: expect.stringContaining(`Bridged 100.00 ${BRIDGE_TOKEN_SYMBOL} to Aztec`),
-				link: expect.objectContaining({ href: expect.stringContaining(GOOD_HASH) }),
-			}),
-		)
-		expect(w.exists()).toBe(true)
-	})
-
-	it("withdraw completions toast the Ethereum wording with the etherscan link", async () => {
-		mount(BridgeJournal, { global: { stubs: { BridgeJournalCard: true } } })
-		lastCompleted.value = { id: "0xb", direction: "withdraw", amount: (40n * UNIT).toString(), isPrivate: true, txHash: GOOD_HASH }
-		await nextTick()
-		expect(push).toHaveBeenCalledWith(
-			expect.objectContaining({
-				text: expect.stringContaining(`Released 40.00 ${BRIDGE_TOKEN_SYMBOL} to Ethereum`),
-				link: expect.objectContaining({ href: `https://sepolia.etherscan.io/tx/${GOOD_HASH}` }),
-			}),
-		)
 	})
 
 	it("kind='fee-juice' lists ONLY fuel records (the Fuel tab's own bridges)", () => {
@@ -159,33 +114,5 @@ describe("BridgeJournal", () => {
 		const cards = w.findAllComponents(BridgeJournalCard)
 		expect(cards).toHaveLength(1)
 		expect(cards[0].props("record")).toMatchObject({ id: "0xfuel" })
-	})
-
-	it("toasts=false suppresses the completion toast (the Fuel tab's list-only mount — single toast owner)", async () => {
-		mount(BridgeJournal, { props: { toasts: false }, global: { stubs: { BridgeJournalCard: true } } })
-		lastCompleted.value = {
-			id: "0xc",
-			direction: "deposit",
-			amount: (15n * 10n ** 18n).toString(), // Fee Juice — ALWAYS 18-dec, independent of the bridged token
-			isPrivate: false,
-			assetKind: "fee-juice",
-			txHash: GOOD_HASH,
-		}
-		await nextTick()
-		expect(push).not.toHaveBeenCalled()
-	})
-
-	it("a fee-juice completion toasts as Fee Juice, not the token (private → Private FJ)", async () => {
-		mount(BridgeJournal, { global: { stubs: { BridgeJournalCard: true } } })
-		lastCompleted.value = {
-			id: "0xfj",
-			direction: "deposit",
-			amount: (15n * 10n ** 18n).toString(), // Fee Juice — ALWAYS 18-dec, independent of the bridged token
-			isPrivate: true,
-			assetKind: "fee-juice",
-			txHash: GOOD_HASH,
-		}
-		await nextTick()
-		expect(push).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining("Fueled Aztec with 15.00 Private FJ") }))
 	})
 })

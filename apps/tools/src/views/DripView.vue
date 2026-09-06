@@ -2,9 +2,9 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { computed } from "vue"
 import TokenCard from "@/components/TokenCard.vue"
-import WalletPanel from "@/components/WalletPanel.vue"
 import { useWalletConnection } from "@/composables/useWalletConnection"
 import { IS_MAINNET } from "@/lib/network"
+import { TESTIDS } from "@/lib/testids"
 import { DRIP_TOKENS } from "@/constants/tokens"
 import { NULO, OLUN } from "@/contracts/deployments"
 
@@ -21,23 +21,16 @@ const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.from
 </script>
 
 <template>
-	<Flex direction="column" gap="32">
-		<Flex tag="header" direction="column" gap="16" class="hero">
-			<h1>DRIP TEST ASSETS</h1>
-			<p v-if="IS_MAINNET" class="sub">
-				Play tokens on Aztec mainnet. Connect an Aztec wallet and mint fixed NULO or OLUN into a
-				public or private balance. No real value — each mint pays a small fee-juice fee from your
-				wallet (bridge some fuel first).
-			</p>
-			<p v-else class="sub">
-				Alpha-testnet only. Connect an Aztec wallet and mint fixed NULO or OLUN into a public or
-				private balance. Internal drip. No real value.
-			</p>
-		</Flex>
-
-		<section class="wallets">
-			<WalletPanel />
-		</section>
+	<Flex direction="column" gap="24" class="drip" :data-testid="TESTIDS.dripView">
+		<p v-if="IS_MAINNET" class="sub">
+			Play tokens on Aztec mainnet. Connect an Aztec wallet and mint fixed NULO or OLUN into a
+			public or private balance. No real value — each mint pays a small fee-juice fee from your
+			wallet (bridge some fuel first).
+		</p>
+		<p v-else class="sub">
+			Connect an Aztec wallet and mint fixed NULO or OLUN into a public or private balance. Internal
+			drip. No real value.
+		</p>
 
 		<!--
 		Cards always render so the page never collapses into the header
@@ -61,20 +54,12 @@ const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.from
 </template>
 
 <style scoped>
-.hero {
-	margin-bottom: 8px;
+.drip {
+	width: 100%;
+	max-width: 860px;
 }
 
-.hero h1 {
-	font-family: var(--font-headline);
-	font-weight: 700;
-	font-size: 44px;
-	letter-spacing: -0.02em;
-	line-height: 1.04;
-	margin: 0;
-}
-
-.hero .sub {
+.sub {
 	color: var(--txt-secondary);
 	font-size: 16px;
 	max-width: 62ch;
@@ -82,16 +67,6 @@ const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.from
 	line-height: 1.55;
 }
 
-.wallets {
-	display: flex;
-	flex-direction: row;
-	flex-wrap: wrap;
-	align-items: center;
-	gap: 12px 16px;
-	padding: 16px 0;
-	border-top: 1px solid var(--nulo-outline);
-	border-bottom: 1px solid var(--nulo-outline);
-}
 
 .cards {
 	display: grid;

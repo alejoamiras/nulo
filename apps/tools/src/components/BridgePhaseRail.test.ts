@@ -108,12 +108,14 @@ describe("BridgePhaseRail", () => {
 		w.unmount()
 	})
 
-	it("compact rail: the landed active cell carries the landed class", () => {
+	it("compact rail: the landed active cell carries the landed class, and no compact cell ever pulses", () => {
 		runtime.value = { "0xrail": { confirmLandedTxHash: "0xc" } }
 		const w = mount(BridgePhaseRail, { props: { record: dep({ claimTxHash: "0xc" }), compact: true } })
 		const cell = w.find('[data-phase="confirm"][data-state="active"]')
 		expect(cell.exists()).toBe(true)
 		expect(cell.classes()).toContain("landed")
+		// The page may show many compact rails; the pulse belongs to the full rail alone.
+		expect(w.findAll(".pulse")).toHaveLength(0)
 		w.unmount()
 	})
 

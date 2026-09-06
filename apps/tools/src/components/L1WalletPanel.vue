@@ -35,20 +35,25 @@ const { address, isConnected, wrongChain, isConnecting, connect, disconnect, swi
 	display: inline-flex;
 	align-items: center;
 	gap: 10px;
-	/* One 48px baseline across every wallet surface — the design system's `large` Button height,
-	   which the connect buttons also use. The vertical padding is real so the inner address block
-	   is inset from this border rather than pressed against it. */
-	min-height: 48px;
-	padding: 5px 12px;
+	min-height: 40px;
+	padding: 0 12px;
 	box-sizing: border-box;
 	border: 1px solid var(--nulo-outline);
 }
 
 .chip .label {
-	color: var(--txt-secondary);
-	font: 500 11px/1 var(--font-mono);
+	color: var(--txt-tertiary);
+	font: 500 10px/1 var(--font-mono);
 	letter-spacing: 0.12em;
 	text-transform: uppercase;
+}
+
+/* One border per chip: the address keeps its copy-on-click, not its own box. */
+.chip :deep(.address) {
+	border: 0;
+	background: transparent;
+	padding: 0;
+	font-size: 12.5px;
 }
 
 .wrong-chain {

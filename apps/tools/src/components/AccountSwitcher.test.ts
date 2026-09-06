@@ -2,7 +2,7 @@ import { mount } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { TESTIDS } from "@/lib/testids"
 
-// Same SDK-boundary mocks as WalletPanel.test.ts: the switcher reads the REAL session
+// Same SDK-boundary mocks as AztecWalletPanel.test.ts: the switcher reads the REAL session
 // singleton, whose refs the tests set directly.
 vi.mock("@aztec/wallet-sdk/manager", () => ({
 	WalletManager: { configure: () => ({ getAvailableWallets: () => ({}) }) },

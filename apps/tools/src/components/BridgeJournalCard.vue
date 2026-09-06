@@ -1,14 +1,6 @@
 <script setup lang="ts">
 /** Services */
-import {
-	type BridgeJournalRecord,
-	type DepositJournalRecord,
-	type WithdrawJournalRecord,
-	assetKindOf,
-	deriveDepositStage,
-	deriveWithdrawStage,
-	isProvisionalRecordId,
-} from "@nulo/bridge-core"
+import { type BridgeJournalRecord, type DepositJournalRecord, type WithdrawJournalRecord, isProvisionalRecordId } from "@nulo/bridge-core"
 import { computed, ref, watch } from "vue"
 
 /** Composables */
@@ -18,14 +10,15 @@ import { useOpsInFlight } from "@/composables/useOpsInFlight"
 import { switchActiveAccount } from "@/composables/useWalletConnection"
 
 /** Utils */
+import { ageWords } from "@/lib/activity"
 import { assetDecimals, assetSymbol, recordTokenBlock } from "@/lib/asset-label"
-import { decideStandaloneFuelRecovery } from "@/lib/fuel-claim-state"
-import { isTerminalAttention } from "@/lib/bridge-steps"
 import { useNow } from "@/lib/clock"
 import { IS_MAINNET } from "@/lib/network"
-import { formatBigInt } from "@/lib/format"
+import { formatStoredAmount } from "@/lib/format"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
+import { accountOf, recordState } from "@/lib/record-policy"
 import { TESTIDS } from "@/lib/testids"
+import { safeAddressText, safeDisplay, safeSentence } from "@/lib/token-display"
 import { claimFuelStandalone, overrideFuelClaim, reconcileFuelConsumed } from "@/composables/fuel-recovery"
 
 /** Components */
@@ -56,58 +49,45 @@ watch(discardArmed, (armed) => {
 })
 
 const rt = computed(() => journal.runtime.value[props.record.id] ?? {})
-
-// ── Account attribution (Options 1+2 follow-up) ─────────────────────────────
-// Deposits persist their Aztec-side account (`recipient`); withdraws only persist recipientL1,
-// so withdraw cards carry no account tag by design (and their FINISH is an L1 action the
-// account guard deliberately ignores).
 const bridgeWallet = useBridgeWallet()
+const walletView = computed(() => ({
+	status: bridgeWallet.status.value,
+	selectedAccount: bridgeWallet.selectedAccount.value,
+	accounts: bridgeWallet.accounts.value,
+}))
+// The gates live in the shared policy so the activity dock and this card can never disagree.
+const state = computed(() => recordState(props.record, rt.value, walletView.value))
+
+// Deposits persist their Aztec-side account (`recipient`); withdraws carry no account tag by design
+// (their FINISH is an L1 action the account guard ignores).
 const { busy: opsBusy } = useOpsInFlight()
 
+/** Display copy only: the raw recipient still drives matching. A restore file can carry any string
+ *  here, so control and bidi characters are stripped before it can pose as an account. */
 function shortAddr(a: string): string {
-	return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a
+	const clean = safeAddressText(a)
+	return clean.length > 12 ? `${clean.slice(0, 6)}…${clean.slice(-4)}` : clean
 }
 
-const acct = computed(() => {
-	if (props.record.direction !== "deposit") return null
-	const addr = (props.record as DepositJournalRecord).recipient
-	// The journal is persisted state (localStorage) — a tampered record can carry a non-string
-	// recipient; rendering must never crash on it (codex labels-round MED).
-	if (typeof addr !== "string" || addr.length === 0) return null
-	const lower = addr.toLowerCase()
-	const granted = bridgeWallet.accounts.value.find((a) => a.address.toLowerCase() === lower)
-	return {
-		addr,
-		/** Canonical grant address — selectAccount() matches exact strings, never record casing. */
-		canonical: granted?.address ?? null,
-		alias: granted?.alias || null,
-		active: (bridgeWallet.selectedAccount.value ?? "").toLowerCase() === lower,
-	}
-})
+const acct = computed(() => accountOf(props.record, walletView.value))
 
-/** Option 2: deposit claim actions are account-guarded — when the record belongs to ANOTHER
- *  granted account, offer the one-click switch instead of bouncing off the guard's note. A
- *  recipient that is NOT in the current grant keeps the normal action (the engine's mismatch
+/** When the record belongs to ANOTHER granted account, offer the one-click switch instead of bouncing
+ *  off the guard's note. A recipient outside the grant keeps the normal action (the engine's mismatch
  *  guard explains why it refuses). */
-const offerSwitch = computed(() => {
-	const a = acct.value
-	// Status gate (codex labels-round MED): selectAccount() rejects unless connected — a switch
-	// button during setting-up/error states would be an enabled no-op.
-	return bridgeWallet.status.value === "connected" && !!a && !a.active && a.canonical !== null
-})
+const offerSwitch = computed(() => state.value.ownedByOther)
 const switchLabel = computed(() => {
 	const a = acct.value
 	return a ? `SWITCH TO ${(a.alias ?? shortAddr(a.addr)).toUpperCase()}` : ""
 })
 function onSwitchAccount() {
-	const canonical = acct.value?.canonical
+	const canonical = state.value.switchTarget
 	if (canonical) switchActiveAccount(canonical)
 }
 
 // A DIRECT Fuel record (assetKind "fee-juice") IS Fee Juice — no token leg. Its `fuel` block mirrors the
-// amount, so the token-bridge surfaces (the AZLO amount line, the "+FJ" add-on, "CLAIM WITHOUT FUEL") would
-// double-count or mislabel it. Branch those off this flag; swap-fuel + token records are unaffected (codex LOW).
-const isFuel = computed(() => assetKindOf(props.record) === "fee-juice")
+// amount, so the token-bridge surfaces (the amount line, the "+FJ" add-on, "CLAIM WITHOUT FUEL") would
+// double-count or mislabel it. Branch those off this flag; swap-fuel + token records are unaffected.
+const isFuel = computed(() => state.value.isFuel)
 
 /** Fuel surface (schema-2 deposits): the received-FJ line + the L14 manual escape. */
 const fuel = computed(() => {
@@ -119,17 +99,11 @@ const fuelAmount = computed(() => {
 	if (!f) return null
 	// Gas naming by surface: private bridges land "Private FJ", public land "FJ".
 	const label = props.record.isPrivate ? "Private FJ" : "FJ"
-	return f.received ? `+ ${formatBigInt(BigInt(f.received), 18)} ${label}` : `+ ${label} gas`
+	return f.received ? `+ ${formatStoredAmount(f.received, 18)} ${label}` : `+ ${label} gas`
 })
 // The explicit, non-destructive escape: claim the tokens with the gas the account already holds; the FJ message (if
 // unconsumed) stays claimable later. Offered only when a fueled claim is stuck on an error.
-const showClaimWithoutFuel = computed(
-	() =>
-		fuel.value !== undefined &&
-		!isFuel.value &&
-		!props.record.completedAt &&
-		(attention.value === "error" || attention.value === "unknown-outcome"),
-)
+const showClaimWithoutFuel = computed(() => state.value.showClaimWithoutFuel)
 function onClaimWithoutFuel() {
 	overrideFuelClaim(props.record.id)
 	onAction()
@@ -137,20 +111,10 @@ function onClaimWithoutFuel() {
 
 // Post-completion fuel recovery: the token side finished but the FJ was neither consumed by an
 // fjwc claim nor landed standalone - offer to claim it now (it pays its own claim, safe to retry; a
-// reverting "already claimed" just clears the affordance). Closes both stranding paths the
-// post-impl audit flagged.
-// Shared with `claimFuelStandalone`'s own guard, so the affordance and the action can never disagree.
-const fuelRecovery = computed(() =>
-	decideStandaloneFuelRecovery({
-		isPrivate: props.record.isPrivate,
-		isFeeJuiceAsset: isFuel.value,
-		schema: props.record.schema,
-		intent: "intent" in props.record ? props.record.intent : undefined,
-		completedAt: props.record.completedAt,
-		fuel: fuel.value,
-	}),
-)
-const fuelRecoverable = computed(() => fuelRecovery.value === "offer")
+// reverting "already claimed" just clears the affordance). Shared with `claimFuelStandalone`'s own
+// guard, so the affordance and the action can never disagree.
+const fuelRecovery = computed(() => state.value.fuelRecovery)
+const fuelRecoverable = computed(() => state.value.fuelRecoverable)
 /** Private bridge whose private-claim metadata is incomplete: its gas state is genuinely unknown and
  *  the public recovery must not be offered — so say so rather than showing nothing. Deliberately
  *  advertises no action: this renders only on COMPLETED records, which re-run no claim, so any
@@ -181,29 +145,16 @@ async function onClaimGas() {
 		fuelRecovering.value = false
 	}
 }
-const busy = computed(() => !!rt.value.busy)
-
-const stage = computed(() => {
-	if (props.record.direction === "deposit") {
-		const rec = props.record as DepositJournalRecord
-		return deriveDepositStage(rec, { claimable: rt.value.claimable ?? !!rec.leafIndex })
-	}
-	const rec = props.record as WithdrawJournalRecord
-	return deriveWithdrawStage(rec, { proven: rt.value.proven ?? false })
-})
-
-const attention = computed(() => rt.value.attention)
+const busy = computed(() => state.value.busy)
+const stage = computed(() => state.value.stage)
+const attention = computed(() => state.value.attention)
 /** Persisted refusal: a re-read of the chain contradicted this record's own token facts. It never
- *  runs again, and unlike the runtime attention it survives a reload — so the card must state the
- *  reason and offer nothing from the moment it renders, not only after a run has narrated one. */
-const blocked = computed(() => props.record.blocked)
-// Every attention except a deployment mismatch is retryable: the runs re-validate all guards
-// idempotently, so pressing CLAIM/FINISH after fixing the cause (switching accounts, etc.) is
-// exactly the recovery path - hiding the button stranded those states until a reload.
-const actionable = computed(() => !blocked.value && !isTerminalAttention(attention.value))
+ *  runs again, and unlike the runtime attention it survives a reload — so the card states the
+ *  reason from the moment it renders. The text is persisted, so a restore file can carry anything:
+ *  stripped and capped like every other stored string before it is shown. */
+const blocked = computed(() => (state.value.blocked === undefined ? undefined : safeSentence(state.value.blocked)))
+const actionable = computed(() => state.value.actionable)
 
-/** Guidance for an IDLE card only: while the engine drives (busy) the rail narrates live, and a
- *  done card's stamp says everything - a parallel stage line would just repeat them. */
 /** Guidance for an IDLE card only: while the engine drives (busy) the rail narrates live, and a
  *  done card's stamp says everything - a parallel stage line would just repeat them. */
 const stageLabel = computed(() => {
@@ -245,24 +196,9 @@ const stageLabel = computed(() => {
 })
 
 // Buttons appear only when PRESSING them does something: never while the engine is driving.
-// A "depositing" record WITH a recorded depositTxHash is the stranded L1-timeout shape - the
-// engine's deposit-leg recovery makes CLAIM meaningful there (it re-derives the leg from the
-// mined receipt and continues); only a genuinely pre-send record keeps the button hidden.
-const idle = computed(() => !rt.value.busy)
-const depositLegRecoverable = computed(
-	() => props.record.direction === "deposit" && stage.value === "depositing" && !!(props.record as DepositJournalRecord).depositTxHash,
-)
-const showClaim = computed(
-	() =>
-		props.record.direction === "deposit" &&
-		stage.value !== "done" &&
-		(stage.value !== "depositing" || depositLegRecoverable.value) &&
-		actionable.value &&
-		idle.value,
-)
-const showFinish = computed(
-	() => props.record.direction === "withdraw" && stage.value !== "done" && stage.value !== "exiting" && actionable.value && idle.value,
-)
+const idle = computed(() => !state.value.busy)
+const showClaim = computed(() => state.value.showClaim)
+const showFinish = computed(() => state.value.showFinish)
 
 /** Soft notes only (e.g. the 30-min "still confirming"): ANY attention's note renders in the
  *  rail's failed phase - a parallel line here would double it. A blocked record is the exception:
@@ -284,19 +220,14 @@ const txLinks = computed(() => {
 	return links.filter((l) => l.href !== "")
 })
 
-const amountKind = computed(() => assetKindOf(props.record))
+const amountKind = computed(() => (state.value.isFuel ? "fee-juice" : "bridge-token"))
 const tokenBlock = computed(() => recordTokenBlock(props.record))
-const amountDisplay = computed(() => formatBigInt(BigInt(props.record.amount), assetDecimals(amountKind.value, tokenBlock.value)))
-const amountSymbol = computed(() => assetSymbol(amountKind.value, props.record.isPrivate, tokenBlock.value))
+const amountDisplay = computed(() => formatStoredAmount(props.record.amount, assetDecimals(amountKind.value, tokenBlock.value)))
+// The symbol is the record's own persisted text (a restore file can carry anything): same guard as the token list.
+const amountSymbol = computed(() => safeDisplay(assetSymbol(amountKind.value, props.record.isPrivate, tokenBlock.value)))
 
 const now = useNow()
-const age = computed(() => {
-	const mins = Math.max(0, Math.round((now.value - props.record.createdAt) / 60_000))
-	if (mins < 1) return "just now"
-	if (mins < 60) return `${mins}m ago`
-	const hours = Math.round(mins / 60)
-	return hours < 48 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`
-})
+const age = computed(() => ageWords(props.record.createdAt, now.value))
 
 function onAction() {
 	if (props.record.direction === "deposit") void journal.runDepositClaim(props.record.id)
@@ -332,7 +263,7 @@ function onDiscard() {
 					v-if="acct"
 					class="acct"
 					:class="{ other: !acct.active }"
-					:title="acct.addr"
+					:title="safeAddressText(acct.addr)"
 					:data-testid="TESTIDS.journalAccount"
 				>{{ acct.alias ?? shortAddr(acct.addr) }}<span v-if="acct.alias" class="acct-addr">{{ shortAddr(acct.addr) }}</span></span>
 			</span>
@@ -532,7 +463,7 @@ function onDiscard() {
 
 .amt-fuel {
 	margin-left: 6px;
-	color: var(--mint);
+	color: var(--txt-secondary);
 	font-weight: 500;
 }
 
@@ -545,8 +476,9 @@ function onDiscard() {
 }
 
 .tag.private {
-	color: var(--nulo-accent);
-	border-color: var(--nulo-accent);
+	color: var(--txt-primary);
+	border-color: transparent;
+	background: color-mix(in srgb, var(--txt-primary) 10%, transparent);
 }
 
 .acct {
@@ -601,21 +533,6 @@ function onDiscard() {
 	font: 600 12px/1.5 var(--font-mono);
 }
 
-.pulse {
-	color: var(--nulo-accent);
-	animation: pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes pulse {
-	0%,
-	100% {
-		opacity: 0.25;
-	}
-	50% {
-		opacity: 1;
-	}
-}
-
 .links {
 	display: flex;
 	gap: 12px;
@@ -629,13 +546,14 @@ function onDiscard() {
 }
 
 .links a:hover {
-	color: var(--nulo-accent);
+	color: var(--txt-primary);
 }
 
 .attention {
 	margin: 0;
 	padding: 8px 10px;
-	border: 1px dashed var(--yellow);
+	border-left: 2px solid var(--yellow);
+	background: color-mix(in srgb, var(--yellow) 8%, transparent);
 	color: var(--txt-secondary);
 	font: 500 12px/1.5 var(--font-mono);
 }
@@ -657,8 +575,8 @@ function onDiscard() {
 }
 
 .action:hover:not(:disabled) {
-	border-color: var(--nulo-accent);
-	color: var(--nulo-accent);
+	border-color: var(--txt-primary);
+	color: var(--txt-primary);
 }
 
 .action.danger:hover:not(:disabled) {

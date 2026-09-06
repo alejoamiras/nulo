@@ -280,7 +280,8 @@ by identity because plain popup pages change URL under a lock redirect.
   (`console._log`). `pageerror` is reliable for uncaught throws and rejections. `readSwLogTrail`
   (`fixtures/journal.ts`, `nulo:logs`, 2s flush debounce, bounded) reads the worker's log ring — but
   that flush is gated on `developerMode`, which e2e profiles do not enable, so it returns an empty
-  trail unless the test turned Developer Mode on first; empty means not retained. An error the app
+  trail unless the test turned Developer Mode on first (the toggles on `#/popup/settings/advanced`,
+  see the playground subsection); empty means not retained. An error the app
   catches and merely logs reaches neither fixture array. Assert on DOM, storage, or stage evidence
   instead. Approval sub-windows carry no listeners at all.
 - **`chrome.runtime.reload()` disables an unpacked `--load-extension` build** (every later
@@ -314,6 +315,46 @@ by identity because plain popup pages change URL under a lock redirect.
   submission (a real proof on the canary lane), not mining. A test that needs the block waits on the
   node (`waitForTxMined` in `fixtures/aztec.ts`), as both canaries do; the wallet-UI `transfers` flow
   waits through prove → mine in the popup itself.
+
+### Driving the wallet through the playground (dApp-shaped tests)
+
+From `implementations-plan/self-pay-setup-fix/` (2026-09-05); `network/selfpay-phase.test.ts` is
+the pattern.
+
+- **The dApp never sees the wallet's real error.** A failed `simulateTx` / `sendTx` reaches the feed
+  as `"The wallet could not process the request."` (the scrubbed envelope, by design). The reason
+  is in the worker's log trail, retained only with Developer Mode on: toggle
+  `settings-toggle-developerMode` + `settings-toggle-debugMode` on `#/popup/settings/advanced`
+  (reach it with `navigateByHash`, not `page.goto`), then `readSwLogTrail(popup, { match })`,
+  polling for an entry with `timestamp >= <the cell's start>` past the 2s flush debounce
+  (`swTrail` in the spec).
+- **Wait for the popup AND the feed, not the popup alone.** When the wallet rejects before opening
+  the execute popup, a bare `waitForPopup` is a blind 60s timeout. Race `waitForPgResult(method,
+  seq)` against `waitForPopup` (`sendThroughPopup` in the spec) and fail with the feed row's message.
+- **`opts.additionalScopes` admits SESSION accounts only** (`scope-enforcement.ts`). The canonical
+  PrivateFPC harness passes `additionalScopes: [fpc]` to an EmbeddedWallet; through a dApp session
+  that is refused before the popup. Drop it — the FPC mint reads no note the scope would unlock.
+- **`executeUtility` returns raw return fields** (`UtilityExecutionResult { result: Fr[] }`). Decode
+  in the playground (`decodeFromAbi(call.returnTypes, out.result)`) so the feed carries a string the
+  test can `BigInt`.
+- **A simulation's kernel output is not feed-readable** (`publicInputs.toJSON()` is a byte buffer).
+  `apps/playground/src/lib/simulation-summary.ts` projects it: fee payer, private frames
+  (contract / selector / argsHash), public call requests per phase (setup = non-revertible, app =
+  revertible, teardown). Bind a simulate oracle to its call with
+  `FunctionSelector.fromNameAndParameters` + `computeVarArgsHash(encodeArguments(fn, args))`; the
+  loaded artifact exposes public functions only via `public_dispatch`, so an internal public
+  function's selector comes from `FunctionSelector.fromSignature("name(u128)")`.
+- **"Deployed" from the wallet's side**: the script cannot compute an extension account's
+  initialization nullifier (no signing key, no instance). Read it from the summary — a never-sent
+  account is simulated init-wrapped (root frame = the multicall entrypoint, the account nested); a
+  deployed one runs its own entrypoint at the root.
+- **Private balances and the PrivateFPC credit are notes only the extension's PXE holds** — read
+  them through `executeUtility` with `scopes: [account]`, never script-side. Public balances (Fee
+  Juice, `balance_of_public`) read script-side.
+- **Never-sent × PrivateFPC credit cannot exist**: `PrivateFPC.mint` must be sent AS the claimer,
+  which deploys it. The never-sent private shape is the fuel method (`FeeJuice.claim +
+  mint_and_pay_fee`); credit (`pay_fee`) is deployed-only. The FPC debits MAX gas cost, so assert the
+  credit DECREASED, never that it equals the receipt fee.
 
 ## 3. Kill or restart the service worker
 

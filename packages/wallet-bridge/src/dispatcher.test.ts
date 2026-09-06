@@ -911,6 +911,7 @@ describe("dispatcher.handleSendTx — opts.from resolution (multi-account sessio
 	const accounts = [
 		{ address: "0xaaa", name: "A", chainId: 0 },
 		{ address: "0xbbb", name: "B", chainId: 0 },
+		{ address: "0xstranger", name: "C", chainId: 0 },
 	]
 	// Empty exec.calls → scope enforcement is vacuously satisfied (mirrors the hook tests).
 	const exec = { calls: [] }
@@ -948,7 +949,7 @@ describe("dispatcher.handleSendTx — opts.from resolution (multi-account sessio
 		expect(captured.account).toBe("aztec:0:0xaaa")
 	})
 
-	test("rejects a `from` outside the session — no silent fallback to the first account", async () => {
+	test("rejects a wallet account outside the session — no silent fallback to the first account", async () => {
 		const { dispatcher, captured } = makeSendTxDispatcher()
 		await expect(dispatcher.dispatch("sendTx", [exec, { from: "0xstranger" }], ctx)).rejects.toThrow(
 			/not authorized for this dApp session/,
@@ -967,6 +968,101 @@ describe("dispatcher.handleSendTx — opts.from resolution (multi-account sessio
 		await dispatcher.dispatch("sendTx", [exec, { from: "NO_FROM" }], ctx)
 		expect(captured.account).toBe("aztec:0:0xaaa")
 		expect(captured.executionMode).toBe("default_entrypoint")
+	})
+})
+
+describe("dispatcher — simulateTx / profileTx act as the account named in `opts.from`", () => {
+	// A dApp connected to A and B that simulates or profiles `from: B` must have the
+	// operation built as B. The bridge simulates every claim before sending it; a
+	// self-paid payload built as A is classified as externally paid, leaves the
+	// setup phase open, and the node rejects it. Same contract as sendTx above.
+	const grants = [
+		{ capability: { type: "accounts", canGet: true, canCreateAuthWit: true }, grantedAt: 1 },
+		{ capability: { type: "transaction", scope: "*" }, grantedAt: 1 },
+		{ capability: { type: "simulation", transactions: { scope: "*" }, utilities: { scope: "*" } }, grantedAt: 1 },
+	]
+	// C is a wallet account OUTSIDE the session: the refusal must come from session
+	// membership, not from the address being unknown to the wallet.
+	const accounts = [
+		{ address: "0xaaa", name: "A", chainId: 0 },
+		{ address: "0xbbb", name: "B", chainId: 0 },
+		{ address: "0xccc", name: "C", chainId: 0 },
+	]
+	const exec = { calls: [] }
+
+	function makeAccountOpDispatcher(): { dispatcher: WalletSdkDispatcher; ops: Operation[] } {
+		const session = makeSession({ capabilityGrants: grants as never, accounts: ["aztec:0:0xaaa", "aztec:0:0xbbb"] })
+		const { writer } = makeSessionWriter(session)
+		const ops: Operation[] = []
+		const execution: IExecutionRunner = {
+			executeOperations: async (batch: Operation[]) => {
+				ops.push(...batch)
+				return [{ status: "ok", result: "0xr" }] as OperationResult[]
+			},
+		}
+		const interaction: IDappInteractionRunner = { execute: async () => [] as never, requestCapabilities: async () => ({}) as never }
+		const network: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] as INetworkRef[] }
+		const account: AccountFake = { provisionDefaultAccount: declineProvision, getAccounts: async () => accounts }
+		return { dispatcher: new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger), ops }
+	}
+
+	function accountAndFrom(op: Operation | undefined): { accountAddress?: string; from?: unknown } {
+		const o = op as { accountAddress?: string; opts?: { from?: unknown } } | undefined
+		return { accountAddress: o?.accountAddress, from: o?.opts?.from }
+	}
+
+	for (const method of ["simulateTx", "profileTx"] as const) {
+		test(`${method}: \`from: B\` runs as B (accountAddress and opts.from), not the first account`, async () => {
+			const { dispatcher, ops } = makeAccountOpDispatcher()
+			await dispatcher.dispatch(method, [exec, { from: "0xbbb", skipTxValidation: false }], ctx)
+			expect(accountAndFrom(ops[0])).toEqual({ accountAddress: "0xbbb", from: "0xbbb" })
+		})
+
+		test(`${method}: \`from: A\` runs as A when A is explicitly requested`, async () => {
+			const { dispatcher, ops } = makeAccountOpDispatcher()
+			await dispatcher.dispatch(method, [exec, { from: "0xaaa" }], ctx)
+			expect(accountAndFrom(ops[0])).toEqual({ accountAddress: "0xaaa", from: "0xaaa" })
+		})
+
+		test(`${method}: a wallet account outside the session is refused — never downgraded to the first account`, async () => {
+			const { dispatcher, ops } = makeAccountOpDispatcher()
+			await expect(dispatcher.dispatch(method, [exec, { from: "0xccc" }], ctx)).rejects.toThrow(
+				/not authorized for this dApp session/,
+			)
+			expect(ops).toHaveLength(0)
+		})
+
+		test(`${method}: no \`from\` → first session account (unchanged)`, async () => {
+			const { dispatcher, ops } = makeAccountOpDispatcher()
+			await dispatcher.dispatch(method, [exec, {}], ctx)
+			expect(accountAndFrom(ops[0])).toEqual({ accountAddress: "0xaaa", from: "0xaaa" })
+		})
+
+		test(`${method}: NO_FROM → first session account (unchanged)`, async () => {
+			const { dispatcher, ops } = makeAccountOpDispatcher()
+			await dispatcher.dispatch(method, [exec, { from: "NO_FROM" }], ctx)
+			expect(accountAndFrom(ops[0])).toEqual({ accountAddress: "0xaaa", from: "0xaaa" })
+		})
+	}
+
+	test("executeUtility keeps resolving the first session account; its account is `opts.scopes`, not `opts.from`", async () => {
+		const { dispatcher, ops } = makeAccountOpDispatcher()
+		await dispatcher.dispatch(
+			"executeUtility",
+			[
+				{ to: "0xc", name: "balance_of" },
+				{ scopes: ["0xbbb"], from: "0xbbb" },
+			],
+			ctx,
+		)
+		expect(accountAndFrom(ops[0])).toEqual({ accountAddress: "0xaaa", from: "0xaaa" })
+		expect((ops[0] as { opts?: { scopes?: unknown } }).opts?.scopes).toEqual(["0xbbb"])
+	})
+
+	test("createAuthWit keeps signing as `args[0]` through its own handler", async () => {
+		const { dispatcher, ops } = makeAccountOpDispatcher()
+		await dispatcher.dispatch("createAuthWit", ["0xbbb", { caller: "0xc", call: { to: "0xd", name: "transfer", args: [] } }], ctx)
+		expect(accountAndFrom(ops[0]).accountAddress).toBe("0xbbb")
 	})
 })
 

@@ -178,6 +178,18 @@ function isNoFromRequest(from: unknown): boolean {
 	return from === "NO_FROM"
 }
 
+/** The account a dApp names in `opts.from`, or `undefined` when it names none
+ *  (omitted, `null`, or the NO_FROM sentinel). Shared by sendTx, simulateTx and
+ *  profileTx so all three resolve the SAME account for the same options. */
+function requestedFromOf(rawOpts: Record<string, unknown>): string | undefined {
+	return isNoFromRequest(rawOpts.from) || rawOpts.from == null ? undefined : String(rawOpts.from)
+}
+
+/** Operation kinds whose wallet-sdk `opts.from` names the account to act as.
+ *  `aztec_executeUtility` is deliberately absent: its account is `opts.scopes`,
+ *  and `aztec_createAuthWit` resolves `args[0]` in its own handler. */
+const FROM_ADDRESSED_KINDS: ReadonlySet<Operation["kind"]> = new Set(["aztec_simulateTx", "aztec_profileTx"])
+
 /** Compare two `accounts` capability shapes by the fields that affect
  *  authority. `canGet` and `canCreateAuthWit` are coerced via `Boolean(...)`
  *  so `undefined` is treated as `false` (matches the default semantics in
@@ -834,7 +846,7 @@ export class WalletSdkDispatcher {
 		// the account the dApp wants to send from. Resolve to THAT account (validated against
 		// the session) instead of defaulting to the first session account, which silently
 		// ignored a multi-account dApp's choice and could send from the wrong account.
-		const requestedFrom = isNoFrom || rawOpts.from == null ? undefined : String(rawOpts.from)
+		const requestedFrom = requestedFromOf(rawOpts)
 		const [_network, account] = await this.resolveNetworkAndAccount(ctx, dappSession, requestedFrom)
 		const caipAccount = formatCaipAccount(ctx.chainId, account.address)
 		this.logger.log(
@@ -1297,7 +1309,11 @@ export class WalletSdkDispatcher {
 		}
 
 		if (ACCOUNT_KINDS.has(kind)) {
-			const [network, account] = await this.resolveNetworkAndAccount(ctx, dappSession)
+			// A simulate or profile runs as the account the dApp named, exactly as sendTx
+			// does: resolving another session account misclassifies a self-paid payload as
+			// externally paid, which leaves the setup phase open.
+			const requestedFrom = FROM_ADDRESSED_KINDS.has(kind) ? requestedFromOf((args[1] as Record<string, unknown>) ?? {}) : undefined
+			const [network, account] = await this.resolveNetworkAndAccount(ctx, dappSession, requestedFrom)
 			return this.buildAccountOperation(kind, args, network.id, account.address)
 		}
 

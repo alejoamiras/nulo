@@ -9,8 +9,9 @@ import { type RecordRuntime, useBridgeJournal } from "@/composables/useBridgeJou
 /** Utils */
 import { assetDecimals, assetSymbol, recordTokenBlock } from "@/lib/asset-label"
 import { isTerminalAttention, stepperPhases } from "@/lib/bridge-steps"
-import { formatBigInt } from "@/lib/format"
+import { formatStoredAmount } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
+import { safeDisplay } from "@/lib/token-display"
 
 /** Components */
 import BridgePhaseRail from "./BridgePhaseRail.vue"
@@ -64,9 +65,10 @@ const headline = computed(() => {
 	// toast and the card apply; the stepper header is the third shared surface.
 	const kind = assetKindOf(props.record)
 	const token = recordTokenBlock(props.record)
-	const amount = formatBigInt(BigInt(props.record.amount), assetDecimals(kind, token))
+	const amount = formatStoredAmount(props.record.amount, assetDecimals(kind, token))
 	const dir = props.record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM"
-	return `${dir} · ${amount} ${assetSymbol(kind, props.record.isPrivate, token)} · ${props.record.isPrivate ? "PRIVATE" : "PUBLIC"}`
+	const symbol = safeDisplay(assetSymbol(kind, props.record.isPrivate, token))
+	return `${dir} · ${amount} ${symbol} · ${props.record.isPrivate ? "PRIVATE" : "PUBLIC"}`
 })
 </script>
 
@@ -97,7 +99,7 @@ const headline = computed(() => {
 					RUN IN BACKGROUND
 				</button>
 			</div>
-			<p class="bg-hint">Backgrounding moves this bridge to Your Bridges - it keeps running either way.</p>
+			<p class="bg-hint">Backgrounding moves this bridge to Activity — it keeps running either way.</p>
 		</template>
 	</section>
 </template>
@@ -107,6 +109,9 @@ const headline = computed(() => {
 	display: flex;
 	flex-direction: column;
 	gap: 16px;
+	padding: 22px 24px 24px;
+	border: 1px solid var(--nulo-outline);
+	background: var(--card-bg);
 }
 
 .stepper h3 {
@@ -129,18 +134,18 @@ const headline = computed(() => {
 }
 
 .action {
-	padding: 8px 14px;
+	padding: 12px 18px;
 	background: transparent;
 	border: 1px solid var(--nulo-outline);
 	color: var(--txt-primary);
 	font: 600 12px/1 var(--font-mono);
-	letter-spacing: 0.05em;
+	letter-spacing: 0.06em;
 	cursor: pointer;
 }
 
 .action:hover {
-	border-color: var(--nulo-accent);
-	color: var(--nulo-accent);
+	border-color: var(--txt-primary);
+	color: var(--txt-primary);
 }
 
 .action.subtle {

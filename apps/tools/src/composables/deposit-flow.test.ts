@@ -548,11 +548,21 @@ describe("own gas - a claim with no Fee Juice message of its own pays from the p
 		expect(r.opts.fee?.paymentMethod).toEqual({ kind: "self-paid-fj" })
 		expect(r.opts.fee?.gasSettings).toEqual({ maxFeesPerGas: { feePerDaGas: 10n, feePerL2Gas: 20n } })
 		expect(h.calls.find(([n]) => n === "selfPaidFeeJuicePayment")?.[1]).toEqual({ payer: RECIPIENT })
-		// A private record prefers its private balance when that covers; falls back to the public one otherwise.
+	})
+
+	test("a private record pays only from its private balance: public Fee Juice never pays it, and the stop says why", async () => {
+		h.selfPay = true
+		h.publicFj = 999_000_000n
 		h.privateFj = 41_000_000n
 		expect((await resolve(noFuel(true), false)).opts.fee?.paymentMethod).toEqual({ kind: "fpc-credit" })
 		h.privateFj = 40_999_999n
-		expect((await resolve(noFuel(true), false)).opts.fee?.paymentMethod).toEqual({ kind: "self-paid-fj" })
+		expect(await resolve(noFuel(true), false)).toMatchObject({ kind: "stop", why: expect.stringMatching(/private gas is under/) })
+		h.privateFj = 0n
+		expect(await resolve(noFuel(true), false)).toMatchObject({
+			kind: "stop",
+			why: expect.stringMatching(/only from private gas.*link your account/),
+		})
+		expect(h.calls.some(([n]) => n === "selfPaidFeeJuicePayment")).toBe(false)
 	})
 
 	test("a wallet that cannot route a public payer never gets one, whatever the public balance", async () => {

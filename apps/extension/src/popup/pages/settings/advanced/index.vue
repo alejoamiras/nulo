@@ -165,7 +165,11 @@ onBeforeUnmount(() => {
 							<Text size="12" weight="500" color="tertiary">{{ settings[sk].description }}</Text>
 						</Flex>
 
-						<Toggle @update:modelValue="updateSetting(sk, $event)" :modelValue="settings[sk].model.value" />
+						<Toggle
+							:data-testid="`settings-toggle-${sk}`"
+							@update:modelValue="updateSetting(sk, $event)"
+							:modelValue="settings[sk].model.value"
+						/>
 					</Flex>
 				</template>
 

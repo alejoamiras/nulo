@@ -50,8 +50,11 @@ async function buildTransferExec(callCount = 1) {
 	const wallet = getWallet()!
 	// biome-ignore lint/suspicious/noExplicitAny: structural typing across SDK boundary
 	const token: any = await TokenContract.at(AztecAddress.fromStringUnsafe(tokenAddress), wallet as any)
+	// `simFrom` (the Simulation section's override) names the acting account for sends too, so
+	// a multi-account test can send from the second granted account.
 	const s = getState()
-	const fromAddr = s.selectedAccount ? AztecAddress.fromStringUnsafe(s.selectedAccount) : AztecAddress.fromStringUnsafe(recipient)
+	const from = getInput("simFrom") || s.selectedAccount || recipient
+	const fromAddr = AztecAddress.fromStringUnsafe(from)
 	const toAddr = AztecAddress.fromStringUnsafe(recipient)
 
 	// Build N transfer calls. For the chunked variant (callCount > 5) we issue

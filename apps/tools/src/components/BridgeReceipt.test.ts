@@ -256,4 +256,23 @@ describe("BridgeReceipt", () => {
 		expect(w.text()).toContain("Fueled")
 		expect(w.text()).not.toContain("Gas ready")
 	})
+
+	it("fuel figures a storage update could have replaced with impossible strings read as dashes", () => {
+		const w = mount(BridgeReceipt, {
+			props: {
+				snapshot: {
+					direction: "deposit" as const,
+					amount: "150000000000000000",
+					isPrivate: false,
+					fuelReceived: "9".repeat(90),
+					fuelUsed: "12abc",
+					startedAt: 0,
+					completedAt: 1_000,
+				},
+			},
+		})
+		expect(w.text()).toContain("Gas ready")
+		expect(w.text()).toContain("—")
+		expect(w.text()).not.toContain("9".repeat(20))
+	})
 })
