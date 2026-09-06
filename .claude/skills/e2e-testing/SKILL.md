@@ -1,674 +1,487 @@
 ---
 name: e2e-testing
-description: Write and run E2E tests for the Nulo browser extension using Vitest + Puppeteer. Use when user says "write e2e test", "add e2e", "browser test", "test extension", "puppeteer test", or wants to test extension UI flows.
+description: Write, run, and deflake the Nulo extension's Puppeteer e2e suites (smoke + network). Use when the user says "e2e", "smoke", "network suite", "puppeteer", "flaky test", "stopServiceWorker", "e2e:agent", or wants to test an extension UI or dApp flow end to end.
 ---
 
-# E2E Testing — Vitest + Puppeteer (Chrome Extension)
-
-## Stack
-
-- **Vitest** — test runner
-- **Puppeteer** — browser automation via Chrome DevTools Protocol
-- Extensions require `headless: false`
-
-## Debugging
-
-When tests fail, **don't speculate — instrument**:
-- Write a standalone debug script (`npx tsx tests/e2e/debug.ts`) that launches the extension and logs page state, console messages, request failures, and hash over time
-- Use Chrome DevTools MCP on the dev extension to compare working vs broken behavior
-- Verify assumptions about Puppeteer/Chrome APIs before coding fixes
-
-## Writing New Tests
-
-Before writing any test, **explore the actual UI first** using Chrome DevTools MCP (`chrome-extension-debug` skill):
-1. Open the extension page in Chrome (`chrome-extension://<ID>/src/popup/index.html`)
-2. Take snapshots to see what elements, text, and structure are on each page
-3. Click through the flow manually to understand what changes at each step
-4. Note exactly what's visible after each action — these become your assertions
-
-This prevents guessing at selectors and ensures tests assert on real observable state.
-
-## Best Practices
-
-- Collect `console.error` and `pageerror` events during each test, assert empty at the end — catches silent JS errors that assertions miss
-- **Assert post-action state, not just navigation.** A route change alone doesn't prove a flow worked. After registration, verify the account address is rendered, network is shown, etc. After any mutation, check its observable side effects.
-- **Browser-per-file isolation.** Each test file launches its own browser via `test.extend()` with `scope: "file"`. This is the only reliable way to get independent extension tests — shared browsers leak SW in-memory state between files.
-
-## Gotchas
-
-- **SW "target found" ≠ ready.** `browser.waitForTarget(type=service_worker)` only means Chrome registered the script. The SW may still be loading WASM, config, or initializing services. Poll an app-specific readiness signal (e.g. `chrome.storage.session` heartbeat) before opening pages.
-- **Puppeteer SW evaluate ≠ extension context.** `chrome.storage` and other extension APIs aren't available when calling `evaluate()` on a service worker target. Open an actual extension page to access these APIs.
-- Route transitions are async (e.g. registration) — poll `window.location.hash`, don't wait for text
-- Modals/overlays don't change the route — detect by snapshot content
-- Many interactive elements are divs, not `<button>` — use `text/` selectors in puppeteer
-- `networkidle0` will timeout on extension pages (persistent connections) — use `domcontentloaded`
-- Don't filter console errors as "benign" — investigate and fix them. Previous "benign" errors turned out to be a broken favicon path and missing SW readiness check.
-- **Never use `chrome.runtime.reload()` for state reset** — it kills the extension and all its page contexts, crashing the browser connection. Use browser-per-file isolation instead.
-- **Vitest orders files by mtime, not alphabetically** — don't rely on file execution order. Design tests to be order-independent via fixtures.
-- **`Button.vue` doesn't set HTML `disabled` attribute** — it uses CSS `pointer-events: none` instead. `btn.disabled` is always `false`. To check if a Button is enabled, use `getComputedStyle(btn).pointerEvents !== "none"`. If you skip this, click handlers like `handleMint` silently return early via their own `if (!isAllowed) return` guard.
-- **An instant `page.$$` count can read 0 on a stably-populated feed.** Vue lists that refresh by ARRAY REPLACEMENT swap their children inside a sub-frame window; a count read landing in it sees 0 while 250ms samples on either side show every card. POSITIVE count assertions must poll (`waitForFunction(count >= N)`); ZERO assertions may stay instant (a dip can't false-fail a zero — pair them with a MutationObserver for flash detection). A `waitForSelector` resolving does NOT make the very next `$$` safe.
-- **Vitest swallows console output for PASSING tests** — instrumentation that `console.log`s yields data only on failure. Write debug samples to a file (`appendFileSync` to a tmp path) so passing runs produce evidence too.
-- **Inline sampling loops HEAL the race they're hunting.** A sampler inserted between the wait and the assertion delays the assertion past the dip → the flake "disappears" under instrumentation. Run the sampler in a detached promise at the ORIGINAL assertion timing and await it after the assertions.
-- **Verify what a run actually executed before reasoning from it.** Editing/reverting a test file while an `e2e:agent` sandbox is still building means vitest reads the file as of test-phase start, not launch — a "pass with instrumentation" may have run without it.
-
-## CI-log + flake forensics (learned the hard way, THREE sessions running)
-
-- **`gh run view --log` interleaves the STEP'S SOURCE SCRIPT with runtime output.** Every line of the
-  workflow's `run:` block is echoed with near-identical timestamps before execution — grepping the log
-  for strings like `exit 86` or `retrying` will match the SOURCE and fake a runtime event. Two separate
-  sessions "confirmed" a boot-retry/port-collision story from source echoes. Discipline: match on
-  timestamps advancing, count actual invocation markers (`[e2e:agent] resolving ports...` appears once
-  per real attempt), and pull logs via `gh api .../jobs/<id>/logs` when the CLI view returns empty.
-- **`[aztec-node] Error: Address already in use` during sandbox boot is COSMETIC on aztec 5.0.1.** The
-  `aztec start --local-network` wrapper (`~/.aztec/versions/<v>/…/scripts/aztec.sh`) launches its OWN
-  `anvil --port "$ANVIL_PORT"` even though global-setup already started ours on that port; the inner
-  bind fails, the wrapper continues, the node boots fine (~30s). Do not diagnose port collisions from
-  this line alone — check whether the node reached ready + deployments after it.
-- **Sandbox-boot signature `deploy_aztec_l1_contracts … required arguments were not provided:
-  --batch` → node never healthy → exit 86 = a `~/.aztec/current` DRIFT poisoning forge resolution
-  (ROOT-CAUSED + FIXED 2026-08-06).** `@aztec/ethereum`'s `resolveFoundryBinary` checks
-  `$FORGE_BIN` → **`~/.aztec/current/internal-bin/forge`** → `~/.aztec/current/bin/aztec-forge` →
-  `~/.foundry/bin` → PATH — the `current` checks outrank PATH, so global-setup's internal-bin PATH
-  prepend never protected the L1 deploy. Any `aztec-up install` on the machine re-points `current`; an install carrying a newer
-  forge fork (whose `forge script` requires `--batch`) then breaks the deploy for EVERY version's
-  boot, deterministically, while CI stays green (fresh runners have `current` == the pin). Fix in
-  `global-setup.ts`: resolve the whole toolchain from the repo's `@aztec/aztec.js` pin
-  (`~/.aztec/versions/<pin>`, CI's own rule) and export `FORGE_BIN`/`ANVIL_BIN` into the node spawn
-  env (the resolver's highest-priority source). Diagnosis discipline: global-setup truncates
-  `[aztec-node]` lines to 200 chars — the missing-argument NAMES get cut off; reproduce the boot
-  manually to see full stderr before theorizing. The cosmetic os-error-98 line precedes this as
-  usual — don't conflate.
-- **Full-backup import has a bounded two-stage clock**: restore (slow on hosted runners) THEN possibly
-  the app's own 30s recovery wait before it routes (`import.vue` completeImportWithRecovery). Any
-  navigation wait below restore+30s+margin fails STRUCTURALLY whenever the recovery leg runs — it looks
-  like flake because fast bootstraps skip the leg. Import-driver nav waits are sized 300s; affected
-  spec budgets 900s.
-- **The seeded-ACTIVE network is baked at build time and fresh-extension flows bootstrap on it** before
-  any fixture can switch. CI egress to the public Alpha mainnet RPC blackholes, and each blocked call
-  eats the node client's full 60s-abort × retry envelope — so e2e builds pin
-  `VITE_NULO_E2E_DEFAULT_NET=testnet` (smoke workflow + agent.sh; never ships, prod default unaffected).
-- **Never relaunch `e2e:agent` immediately after killing a run mid-flight.** Observed: a TaskStop'd
-  run's sandbox was still dying when the relaunch booted; the fresh suite then collapsed mid-run with
-  mass timeouts (28 passed, then 32 files of unrelated-looking failures). The `os error 48` boot line
-  is NOT the tell — it also appears on fully green runs (see the cosmetic-anvil bullet above). Before
-  relaunching after a kill, verify no aztec/anvil survivors hold the previous run's ports; when a run
-  collapses mid-suite like this, suspect the environment before the code.
-- **Vitest globalSetup contract (FIXED, was silent for the suite's whole life)**: with a `default`
-  export present, a named `teardown` export is IGNORED — the teardown must be the default's RETURN
-  value (vitest loader: `if (m.default) return { file, setup: m.default }`). Both `global-setup.ts`
-  and `global-setup-smoke.ts` had the dead-named-teardown bug; both now return the teardown, and a
-  setup that fails midway tears down what it already started before rethrowing.
-- **Do NOT add bash signal traps around foreground vitest** (tried, review-killed with empirical
-  proof): bash DEFERS INT/TERM traps until the foreground child exits, so a trap can never fire
-  during the build/suite windows it would protect — and a deferred trap that fires after the child
-  finishes CLOBBERS the real exit code (green run → 130; exit-86 → retry swallowed). Pre-vitest the
-  agent owns no processes; sandbox lifecycle belongs to the TS side: the wired global teardown
-  (ownership-gated, KILL-escalated), its signal hooks (fire-and-forget kills, lock left in place as
-  the reap record), and the next run's liveness-checked orphan reap via the progressively-written
-  `owned.json` (pids recorded per-spawn, not post-deploy).
-- **Lock-ownership rule**: only the run that WROTE `owned.json` may clear it; the reuse path updates
-  deployment fields in place without claiming ownership (overwriting with an empty pid map orphans
-  the prior run's live sandbox beyond reap).
-- **Release-gate tradeoff (deliberate, owner-visible)**: the encrypted backup-roundtrip SKIPS on
-  artifact smoke runs (`NULO_E2E_ARTIFACT_RUN=1`, the explicit flag set for BOTH artifact delivery
-  paths — never key on bare `EXTENSION_PATH`): prod-shaped builds seed Alpha-active and CI cannot
-  reach that RPC. Coverage lives on every PR via the pinned in-job build; the release gate keeps
-  every other smoke test. Revisit if an official CI-reachable mainnet RPC appears.
-- **A kill-recovery test must model ALL designed outcomes, not just the flattering one.** The
-  sw-restart-mid-restore test flaked for months (silent 240s park, ≥4 red CI runs) because a
-  PRE-finalize SW kill triggers the import composable's designed rollback (`deleteProfile` of the
-  orphan → wallet legitimately resets to register), while the test only accepted the recovery
-  outcome. Under CI proving load the restore stretches, the kill lands pre-finalize more often, and
-  the "flake" was the product doing exactly what it was coded to do. Map the implementation's
-  outcome space (read the error paths, not just the happy path) BEFORE writing the assertion.
-  Three hardening rules for the accepted alternate leg (each closed a codex-audit finding):
-  (1) *completion signal, not first-visible effect* — the profile row vanishes in `deleteProfile`'s
-  phase 1, but the deletion TOMBSTONE (`nulo:core:profile-tombstones@`) clears only after the
-  coordinator's full purge, so "row gone" alone accepts a half-done or wedged purge;
-  (2) *provenance-gate the alternate leg* — a clean register end-state is only PROVEN rollback if
-  the row demonstrably existed first (the mid-restore marker); without that it's equally consistent
-  with a restore that crashed before creating anything, which must FAIL;
-  (3) *converge the legs* — never `return` early around the test's load-bearing assertions; drive
-  the product's designed retry path so the on-chain checks execute on EVERY pass, or a required
-  gate can sit green for weeks while its raison-d'être assertions never run.
-- **One-shot route checks race vue-router settling — use settle loops.** `ensureUnlocked` samples the
-  hash ONCE and no-ops off-auth; a fresh popup transiently shows `/popup` (an index route that
-  immediately pushes general) before the guard settles on auth, so a one-shot sample in that window
-  means nobody ever types the password. Recovery waits should loop: general → done; auth → unlock →
-  re-check; terminal-reset route → verify completion via raw storage (row AND tombstone gone, see
-  above) before ending the wait. Always fall through to the loop's sleep after an unlock attempt
-  (oscillation must not hot-spin), and record the LAST unlock error into the timeout diagnostics —
-  a swallowed `.catch(() => {})` turns a selector regression into an opaque park.
-- **Instrument long navigation waits with a route-trajectory recorder** (poll `window.location.hash`
-  on an interval and push transitions into a `window.__nuloRouteTrace` array — vue-router's hash
-  history navigates via pushState, so `hashchange`/`popstate` listeners see NOTHING). On timeout,
-  dump trace + parked hash + storage key names into the thrown Error message (vitest prints it with
-  the failure; console.error can interleave away from the test's block in CI logs). A silent
-  multi-minute park is undiagnosable from CI logs after the fact.
-
-## References
-
-- [Chrome Extension Testing with Puppeteer (official)](https://developer.chrome.com/docs/extensions/how-to/test/puppeteer)
-- [Puppeteer API](https://pptr.dev/api)
-- [Puppeteer Chrome Extensions guide](https://pptr.dev/guides/chrome-extensions)
-- [MetaMask e2e test setup](https://github.com/MetaMask/metamask-extension) — see `test/e2e/`
-
-- **tmpfs exhaustion after many network-e2e runs**: each run leaves a `/tmp/nulo-aztec-<pid>-<ts>`
-  sandbox data dir (~hundreds of MB); `/tmp` is RAM-backed tmpfs, so ~15 runs in a day ate 12 GB
-  of RAM and Chrome/extension pages started timing out at RANDOM early stages (popup boot, popup
-  windows) with healthy-looking load averages. If unrelated e2e stages start flaking rotationally
-  on a long-lived box, check `df -h /tmp` FIRST and `rm -rf /tmp/nulo-aztec-*` between sessions
-  (no run active). Diagnosed 2026-07-20 — a green suite at 20:00 degraded to rotating boot
-  timeouts by 22:00 with identical code (verified via a pre-change checkout that failed the same
-  way).
-
-## backup-restore-sw-restart: two DESIGNED outcomes, not one
-
-The mid-restore SW-kill scenario has two legitimate endings, decided by where the kill lands
-relative to `finalizeRestore` (the test asserts BOTH since #308 — do not "fix" a rollback ending
-back into a recovery expectation):
-
-- **RECOVERED** (kill post-finalize): reopen → auth → unlock → general, registrations survive.
-- **ROLLED BACK** (kill pre-finalize): the import page's catch deletes the orphan profile — the
-  reopened popup has zero profiles and legitimately routes to REGISTER. The test asserts the
-  rollback completed (row gone, tombstone cleared) and then re-imports cleanly.
-
-Two flake mechanisms this design killed (worth remembering as PATTERNS):
-
-1. **One-shot route sampling parks flows.** The fresh popup can transiently show `/popup` (an
-   index route that immediately pushes general) before the auth guard settles. A helper that
-   samples the hash ONCE (`ensureUnlocked`'s "not on auth → return") no-ops in that window —
-   nobody ever types the password and the downstream long wait parks silently. Use a settle LOOP
-   around unlock, never a single sample.
-2. **vue-router hash navigation fires NO `hashchange`** (it navigates via pushState). A
-   `hashchange`-listener route recorder logs nothing; record routes by POLLING (see the test's
-   `__nuloRouteTrace`).
-
-Related product gap (tracked separately): restore writes networks with Local LAST, and recovery
-seeds defaults only when ZERO network rows exist — a kill mid-network-writes leaves the profile
-without "Local" permanently.
-
-## Deflake-arc lessons (2026-08-11, `implementations-plan/e2e-deflake/`)
-
-- **`navigateByHash`'s hash-equality wait proves nothing about router commitment.**
-  Setting `location.hash` updates the URL synchronously; a competing in-flight
-  `router.push` then supersedes the navigation and the hash REVERTS — the destination
-  page never mounts and any following selector wait parks. Reproduced solo/idle
-  (load-independent logic race). Fix pattern: settle-STABLE navigation — destination
-  selector mounted AND hash held continuously across a monotonic dwell; one
-  re-navigation for the characterized race; a second revert fails loudly (recurring
-  redirects are a product signal, never normalized). See `resetProfile`.
-- **A plain `waitForFunction` is NEVER a stability check** — it resolves on its first
-  truthy poll; `timeout` is a ceiling, not a dwell. A real dwell tracks continuity
-  in page state (`performance.now()` marker nulled on any deviation) and returns true
-  only after N continuous ms. (Round-2 codex catch — the fake version shipped first.)
-- **Write-gated retries starve on silent failures.** The token-balance projection
-  pipeline persists NO failure record (unlike the gas pipeline post-#355), so
-  "attempt still running" and "attempt failed" are indistinguishable from storage.
-  A retry that waits for the previous attempt's WRITE before re-kicking locks up
-  after one silent failure — bound the re-kick cadence with a documented envelope;
-  keep the ACCEPTANCE signal causal (freshness + exact value).
-- **Freshness-gate imported-state assertions.** An imported backup already carries
-  the expected balances with nonzero `updatedAt` — a value-only poll can pass with
-  ZERO post-import sync. Capture the baseline `updatedAt` first; require
-  `> baseline` AND the exact raw value AND a card-scoped render assert.
-- **Purge completion = row (proven present pre-submit) + exact tombstone + owned
-  roots all gone.** `reset.vue` AWAITS the full purge before navigating — route
-  waits sized for a hop race the cascade. Tombstone absence ALONE is also true
-  before deletion starts. See `captureSoleProfileId` + `waitForProfilePurged`.
-- **Execute popup: "op rows rendered" ≠ "approvable".** `waitForExecuteContent`
-  is strictly weaker than the confirm button's native `disabled` (init + metadata +
-  fee-selection gates). Wait on the LIVE disabled attribute + `pointerEvents`
-  (`waitForExecuteApprovable`) — never re-derive the Vue boolean logic. Timings are
-  appended to `.e2e-state/exec-approvable-timings.log` (1–402ms warm; CI cold-shard
-  multiplier is the budget rationale).
-- **Preserve FULL gate-run logs (tee to a file), never bare `tail`.** A clipped
-  failure block cost a diagnosis once; the very next preserved red was root-caused
-  from its dump in minutes.
-- **CI setup no longer installs foundry-toolchain** — the aztec pin's `internal-bin`
-  (own pinned+retried foundry) is the only consumed toolchain, now preflight-asserted
-  in `setup-aztec` (fails loudly if an installer regression drops it).
-- **The smoke `backup-roundtrip` post-import route wait is OPEN (owner)**: the route
-  is gated on `isLogined`, flipped only after the RPC-bound `syncTransactions`
-  against the seeded public testnet — an RPC-dependency, not a timeout problem.
-  Diagnostics (route trace + parked-state dump) are armed; do NOT raise the bound.
-
-## PR-workflow silence — check mergeability first
-
-If a push to a PR branch triggers NO workflows at all (not even Quality; only Cloudflare checks
-appear), check `gh pr view <n> --json mergeStateStatus` — a `DIRTY` (conflicted) PR gets no
-`pull_request` merge-ref, so ALL pull_request-triggered workflows silently skip. Fix = merge the
-base branch in and push; the run fires immediately. Don't debug the workflows.
-
-## Local resource leaks: the sandbox datadir is on tmpfs (RAM)
-
-`global-setup.ts` puts `AZTEC_DATA_DIR` under `tmpdir()` — i.e. **tmpfs, which is RAM-backed**.
-Each run's aztec LMDB store can be multiple GB. The reaper (owned.json lock, liveness-checked
-orphan reap, kill-by-process-group) only runs at the START of the NEXT e2e run, so when you STOP
-running e2e the last run's orphans are never reaped. An orphaned aztec process holds its datadir
-open even after the dir is `rm`'d → the space stays pinned **in RAM as a deleted-but-open file** →
-swap fills → the box thrashes.
-
-### Symptom you'll hit first (it doesn't look like an e2e problem)
-
-Under this pressure your OWN tooling breaks before any test does:
-- The agent shell's stdout capture fails — commands that print output return "exit 1" with no
-  output, while no-output commands (`true`, `rm`) still succeed. (Redirect to a REAL-disk file and
-  `Read` it — `df -h /tmp; free -h > ~/x.txt` — to see through the broken capture.)
-- In-page e2e operations time out spuriously (e.g. `backup-roundtrip`'s 30s `DecompressionStream`
-  capture). A test that is GREEN on CI but RED locally with a timeout is very likely this, not code.
-
-### Diagnose
-
-`df -h /tmp` shows high "used" but `du -sh /tmp/*` sums to far less → the gap is deleted-open files
-held by LIVE processes. `ps -eo pid,rss,etimes,cmd | grep -E 'aztec|anvil'` finds the holders.
-
-### Recover (order matters)
-
-1. Kill the HOLDERS first — `rm` alone won't reclaim RAM while a process holds the fd open. Prefer
-   killing by process-group from the run's `owned.json` (kill `-pgid`). `pkill -f nulo-aztec` /
-   `pkill -f anvil` is the orphan-recovery LAST resort — it can hit ANOTHER agent's live run
-   (kill by owned pgid, not by name; see the run-isolation rule).
-2. Then `rm -rf /tmp/nulo-aztec-* /tmp/nulo-e2e-*` and `sync`.
-3. Confirm recovery: a plain `echo` through the shell works again.
-
-### Avoid
-
-- **Reap your own runs at session end**, not just implicitly at next-run-start. After a burst of
-  `e2e:agent` runs, kill the owned pgids + clear the datadirs before walking away.
-- Don't spin up e2e in a throwaway worktree (e.g. an A/B baseline) and then `git worktree remove`
-  it without reaping its sandbox first — that orphans its holders.
-- **Best fix (infra, separate PR): move `AZTEC_DATA_DIR` off tmpfs onto real disk** (`~/.cache/…`
-  or the gitignored `.e2e-state/…`). Then a leaked run wastes cheap disk you reap later instead of
-  RAM that breaks the machine.
-
-## Build-time-armed tests: silent-unarmed-run trap (bitten twice — 2026-08)
-
-Several e2e fixtures are compiled INTO the wallet bundle at BUILD time via `VITE_NULO_E2E_*` flags
-(proverless incoming-poll gate, migration-fixture sentinels). A test that needs one of these,
-run against an UNARMED dist, does not error — the hook is tree-shaken out, `?.` no-ops, and the
-test polls into a multi-minute timeout that looks exactly like a product bug or machine flake.
-Both suffered instances: `backup-migration.test.ts` (env set at runtime but dist built unarmed)
-and `account-switch-isolation.test.ts` (bare `bun run e2e:agent <file>` builds unarmed; CI always
-arms, so it's deterministically red locally / green on CI). Third instance (2026-08-15): a
-mid-session PRODUCTION build (`bun run build:chrome` to package the extension for manual install)
-silently OVERWROTE the armed dist — the next `test:e2e` run failed its 5 migration tests with
-90s waits, twice, and read as branch breakage. The same 5 deterministic failures across runs is
-the un-armed signature (load flake scatters; disarming repeats exactly). **After ANY other build
-in the session, re-arm before smoke**: `VITE_NULO_E2E_MIGRATION_FIXTURE=1
-VITE_NULO_E2E_DEFAULT_NET=testnet bun run build:chrome` (CI parity, `_smoke-e2e.yml`).
-Fourth instance (2026-08-12): `bun run audit:vue` ends with a plain `build` — running it as a
-pre-push gate silently un-arms the dist, so the armed-smoke gate that follows it reds on the
-same 90s-import signature. Gate ordering matters: audit:vue first, THEN the armed build, THEN
-armed smoke.
-
-### Rules
-
-- **A runtime env var can never arm a build-time flag.** Arming is `VITE_…=1` at `bun run build`
-  time; the runtime twin only tells the TEST the dist is supposed to be armed.
-- **Every build-armed test file carries a formal marker** (`@requires-proverless` today) that
-  `scripts/e2e/agent.sh` scans BEFORE spending ports/build — unarmed runs are refused with the
-  exact remedial command. Add a marker (+ scan clause) when introducing a new build-armed fixture.
-- **Every build-armed test file also carries a `beforeAll` dist preflight** (grep the loaded
-  extension's `assets/*.js` for the compile-time stamp; hard-abort with the remedial command) —
-  the belt for direct-vitest invocations that bypass agent.sh. Idioms:
-  `backup-migration.test.ts` (arming-contract test), `account-switch-isolation.test.ts`
-  (beforeAll stamp scan).
-- **Diagnosing "deterministic local red, CI green" on a gated test**: FIRST grep the local dist
-  for the fixture's stamp/strings (`grep -rl "NULO_E2E_PROVERLESS_BUILD_STAMP" dist/chrome`)
-  before suspecting timing or hardware — absence proves an unarmed build in seconds.
-
-## Suite-wide mass failure across UNRELATED files (timeouts, retry x2 everywhere)
-
-If a full `e2e:agent` run fails DOZENS of unrelated files while a targeted run of the same
-files is green, suspect the RUN ENVIRONMENT before any code path:
-
-1. **Concurrent heavy load on the same host is the #1 cause.** A full vitest suite,
-   `audit:vue` (build + tests), or a proving run executing in PARALLEL with the e2e suite
-   starves the sandbox and the browser — 25s silent-call timeouts and 70s feed waits blow
-   across the board. Run the e2e suite ALONE; treat its wall-clock as reserved.
-2. **`[aztec-node] Error: Address already in use (os error 98)` printed once at node boot is
-   BENIGN** — it appears in green runs too (a sub-service retries on another port). Do NOT
-   chase it as the root cause of a red suite.
-3. Orphaned sandboxes from dead runs (ppid 1, old `lstart`, absent from `~/.agents/ports.md`)
-   are still worth reaping — by OWN pgid only (`kill -TERM -<pgid>`), never `pkill -f` —
-   but verify the claim: in the observed incident the orphans held unrelated ports and the
-   re-run reproduced the boot line anyway.
-4. A green isolated re-run of a few failed files confirms environment, not code. Re-run the
-   full suite solo before touching any test.
-
-### CI variant: every shard dead at sandbox BOOT with the same module/setup error
-
-When the whole CI network matrix (all shards + heavies + canary) fails identically at
-`e2e-setup` while local solo runs are green, suspect the FRESH toolchain install, not the
-tests (2026-08-12: `snappy@7.4.0` published that day broke every fresh `aztec-up` install with
-`ERR_MODULE_NOT_FOUND: @napi-rs/snappy-wasm32-wasi`; local runs never saw it because the
-pre-existing `~/.aztec` predated the publish). Protocol: (1) read the FIRST error in the
-`[aztec-node]` boot log — the `Address already in use (os error 98)` line above it is benign
-noise (see rule 2); (2) correlate `registry.npmjs.org/<pkg>` publish times against the failure
-window; (3) reproduce with a bare `npm install <pkg>@<ver>` + load-check OUTSIDE CI before
-burning reruns — if it reproduces, reruns can NEVER go green and the fix is a toolchain pin
-(see the `aztec-update` skill), not patience. Two same-signature rerun failures = stop
-assuming "transient".
-
-## Deflake-round-2 lessons (2026-08-14, `implementations-plan/deflake-round-2/`)
-
-- **A wait is only as honest as the SIGNAL it polls.** Visibility (`offsetParent`) is a
-  rendering artifact: a `<Transition>`-leaving dropdown keeps its items visible while the
-  component state is already closed — a one-shot sample mid-close reads "open", skips the
-  trigger, and the option click times out (the appearance retry-flake, reproduced under CPU
-  load). Gate on STATE attributes (`data-dropdown-open`, `data-toggle-active`), never on a
-  visibility snapshot; expose the state attribute if it doesn't exist.
-- **Retry-masked flakes are now diagnosable from CI**: `RetryErrorReporter` (all three e2e
-  configs, single-owned in `vite.shared.ts#e2eReporters`) prints the retained first-attempt
-  errors of retried passes. NOTE: an explicit `reporters` list suppresses vitest's auto-added
-  `github-actions` annotations reporter — `e2eReporters()` re-adds it; never inline a
-  reporters array in a config.
-- **Local flake repro recipe**: run the file with `--retry=0` (first-attempt errors become
-  terminal) in batches, no-load baseline first, then under OWNED CPU hogs (setsid + kill by
-  pgid). One failing run with the real waiter identified beats 30 green speculation cycles.
-- **Red-team a pin against deletion of what it guards.** A disabled-binding pin that passes
-  with the binding term removed pins nothing (the harness's OTHER gates held it disabled) —
-  establish the enabled state first, flip exactly the guarded flag, assert the transition.
-- **An exactness upgrade finds producer dirt the fuzzy assert absorbed** (block-forcing mints
-  accumulating raw dust the display rounding hid) — audit every producer feeding an assert
-  you tighten, especially fixtures with no current consumer (no run can red on them).
-- **Verify the primitive does what its name says, before hardening anything built on it.**
-  `Runtime.terminateExecution` does NOT end the extension's service worker: the target
-  survives, `chrome.storage.session` survives, the wallet stays unlocked, and
-  `nulo:liveness` merely advances by one HEARTBEAT_INTERVAL_MS — enough to satisfy a
-  post-kill liveness gate with no respawn having happened. Chrome's documented method is
-  `await (await target.worker()).close()`; assert the ORIGINAL target is destroyed (arm a
-  `targetdestroyed` listener before closing and compare Target object identity — not
-  puppeteer's private `_targetId`). Two arcs hardened waits on top of the fake kill before
-  anyone measured it.
-- **A passing test is a claim, not evidence, until you know WHY it passes.** With a kill
-  that never killed, three of four SW-lifecycle tests passed for reasons unrelated to their
-  subject, and no number of re-runs could have shown that. When a test's premise involves a
-  disruptive action, assert the disruption actually occurred.
-- **Setup steps can be silently dead.** Driving a wallet service from a page via
-  `chrome.runtime.sendMessage` does NOTHING — services listen on PORTS, and the SW's only
-  `onMessage` listener returns false. A config toggle written that way never applied, so
-  the test asserted a behaviour its own setup had not enabled. Assert the setup took effect
-  (read the state back) before depending on it.
-- **Verify the storage key and the stored SHAPE before concluding from a read.**
-  `ValueStorage` persists `JSON.stringify(value)`, so `chrome.storage.*.get()` returns a
-  STRING, not the object; and config lives at `nulo:config`, not `nulo:core:config`. Both
-  cost a debugging cycle in one arc: a shape check that could never be true, and a probe
-  whose "absent before and after" proved nothing.
-- **Deterministic failure and flake are cheap to tell apart** — three identical solo runs at
-  `--retry=0`. A skip note asserting "intrinsically flaky" survived months without that
-  check, and was wrong.
-- **Duplicate check-runs from labeled PR opens do not explain the observed blocks.** Opening a labeled
-  PR fires opened+labeled events; the concurrency-cancelled duplicates leave FAILURE
-  aggregator check-runs beside the survivors' successes on the same SHA. A measured probe
-  (deflake-round-3 `lessons/phase-1.md`) shows the PR going CLEAN once the survivors land,
-  with those FAILUREs still present, so a duplicate FAILURE alone is not what blocks a
-  merge. Round 2's blocks were observed with all gates green and remain UNEXPLAINED, so
-  treat this as "the known mechanism does not hold", not "duplicates can never matter".
-  **Do not reflex-push an empty commit.**
-  If you see BLOCKED with every gate terminal-green, CAPTURE FIRST — full
-  `/commits/<sha>/check-runs`, repeated `mergeStateStatus` reads over ≥2 minutes, and the
-  base branch's protection config — because two arcs have now destroyed that state by
-  remedying immediately, and the round-2 blocks remain unexplained.
-
-## Deflake-round-4 lessons (2026-08-18, `implementations-plan/deflake-round-4/`)
-
-- **Deterministic kill anchoring: the RestoreGate rendezvous.** "Kill the SW
-  mid-restore" is only a real test if the kill provably lands while a restore
-  RPC is in flight at a KNOWN phase. The pattern (sibling of the proof gate):
-  a `chrome.storage.session` record armed by the test (`{at}`), ACKNOWLEDGED
-  by the SW-side handler (`{at, held:true}`), and only then killed — "armed"
-  must never be mistaken for "reached". The gate's own safety timer dies with
-  the killed worker, so the TEST's `finally` owns cleanup; the armed record
-  survives in session storage and will re-park the next import if left behind.
-- **A PR with ABSENT (not red) Actions is a mergeability symptom.** GitHub
-  builds no merge ref for a CONFLICTING PR and therefore runs no
-  `pull_request` workflows at all — zero check-runs, no failure anywhere.
-  Check `gh pr view --json mergeable,mergeStateStatus` before debugging CI.
-- **Terminal predicates over pages that can navigate must count
-  "already-routed" as terminal.** A clean import flips its stage attribute and
-  auto-routes between two polls; the attribute unmounts with the page, so a
-  predicate watching only in-page state starves against a COMPLETED flow
-  (`stage=<unbound>` in the diagnostics = the page moved on).
-- **Guard variables rot silently — grep the runner.** Two agent-contract
-  tests checked an env var NOTHING sets (`NULO_E2E_REQUIRE_CONFIG` vs the
-  runner's actual `E2E_REQUIRE_SETUP=1`) and were inert across seven evidence
-  runs. When copying a guard pattern, grep the runner/script for the exact
-  variable name it exports.
-- **De-vacuize failure-path pins.** A rejection mock proves nothing unless
-  the test also proves the mocked call RAN (`toHaveBeenCalled`) — a fixture
-  missing the slice that routes execution to the mock makes every assert pass
-  trivially. Both review lenses independently caught the same vacuous pin.
-- **`@requires-proverless` marks gate-dependent files.** The agent runner
-  refuses prover-ON invocations of marked files pre-build (exit 2) instead of
-  letting them hang at a held-wait for minutes. Any test whose mechanism is
-  compiled out of prover-ON builds needs the marker; keep a prover-capable
-  sibling file carrying the surface's prover-ON coverage.
-- **The e2e consoleErrors capture cannot see app `console.*`** (popup-side
-  console API calls never reach the fixture's CDP stream; browser-emitted
-  entries do) — consoleErrors-based assertions are weaker than they look.
-  Since root-caused and CLOSED permanent-by-design — see the
-  Import-stage-deadlines lessons below for the mechanism + channels.
-
-
-## Import-stage-deadlines lessons (2026-08-18, `implementations-plan/import-stage-deadlines/`)
-
-- **`consoleErrors` is structurally blind to app `console.*` — permanent, by
-  product design.** The console-sniffer (first module script in the popup/
-  onboarding/offscreen entry pages; the setup page carries none) reroutes
-  `console.*` over LoggerService RPC to the SW
-  realm; the native page console never fires on the success path, so
-  `page.on("console")` sees only BROWSER-emitted entries (Chrome's bindings
-  hold a pre-patch reference). Never "fix" a test by hunting page console
-  output that cannot exist. Channels that DO work (probe-verified,
-  `_probe-console-capture.test.ts` under `NULO_E2E_CONSOLE_PROBE=1`):
-  `pageerror` for uncaught throws + unhandled rejections; `readSwLogTrail`
-  (`fixtures/journal.ts`) for app logs — delayed 2s (flush debounce) and
-  bounded, so POLL past the debounce. Residual: an error the app catches and
-  merely logs is invisible to BOTH fixture arrays (`consoleErrors` AND
-  `pageErrors`; it does reach the SW log ring) — assert on DOM/storage/stage
-  evidence instead. Full residual list: the flake-ledger's closed
-  consoleErrors entry.
-- **Observe stage markers with a pre-armed MutationObserver + ONE final
-  read — never a poll loop.** `importFullBackup` arms an observer on
-  `[data-restore-stage]` BEFORE submit (baseline-seeded, so a stale
-  pre-submit value can't read as this attempt's transition) and reads the
-  buffer once when the unchanged 300s hash wait settles. A 200ms evaluate
-  loop would add ~1,500 page evaluations per wait and perturb the timing it
-  measures; the success route is a HASH route (same window), so the buffer
-  survives to the final read. Stages Vue coalesces into one render produce
-  NO mutation — report them unobserved, never as 0ms rows
-  (`restoring:account-state` rendered in 0/30 campaign imports).
-- **A 300s lapse now reports the labeled stage trajectory** (failure
-  terminals, the Continue-gated DEGRADED-partial-success screen — which is
-  NOT a failure state — and the `finished`+`#/popup/auth` activation
-  fallback) instead of a bare TimeoutError. Labels only, never early exits:
-  the settled classification (measured, both proving modes) yielded no
-  stage warranting an e2e early-fail window.
-- **The armed-build discipline applies to SMOKE, not just the network
-  runner**: a plain `bun run build:chrome` fails backup-migration's
-  arming-contract test by design. Mirror `_smoke-e2e.yml`
-  (`VITE_NULO_E2E_MIGRATION_FIXTURE=1` + `VITE_NULO_E2E_DEFAULT_NET=testnet`
-  at build, `NULO_E2E_MIGRATION_FIXTURE=1` at run) for local smoke.
-
-## Imported-account coverage arc lessons (2026-08-20, `feat/kdf-v2-e2e-coverage`)
-
-- **`popupStore.open()` on an already-open key is not a reactive change — a
-  DOM-cleared popup goes PERMANENTLY dead.** The store is a plain
-  `popups[key] = {...}` map with no open-guard; `:show="isOpened(key)"`
-  never re-fires when the key is re-set. So the sequence *preview-only popup
-  left open → `closeStuckPopup` force-removes its teleported DOM → later
-  `open()` on the same key* leaves `:show` true, DOM gone, and no amount of
-  clicking (even kick-until-rendered) revives it. **Any helper that opens a
-  store-tracked popup and does NOT drive it to its self-closing action must
-  close it THROUGH the UI** (`popup-close-btn` on `PopupHeader`, added for
-  exactly this) — `closeStuckPopup` is for stuck *transition remnants*, not
-  a substitute for closing. The failure surfaces far from the cause: the
-  NEXT open attempt times out on a healthy-looking page.
-- **Never match an imported account row by name.** An import carries the
-  SOURCE profile's account name, so it routinely collides with the target's
-  own derived row (both "Account" by default) and a `data-account-name`
-  `.find()` silently exports the WRONG row — a wrong-target pass/fail, not
-  an error. Scope through `account-imported-badge` → `closest(row)`.
-- **Destructive scenarios get `retry: 0`** (the `transfers.test.ts` rule,
-  sharpened): a scenario that changes the profile password or corrupts
-  storage mid-test cannot re-enter — every retry fails on the mutated state
-  (wrong password at unlock) and buries the original failure under
-  unrelated symptoms. One honest fail beats three misleading ones.
-- **Post-unlock/bootstrap routing can yank a just-navigated route.**
-  `bootstrapActiveProfile` may push `/popup/general` LATE; a hash
-  navigation issued in that window gets unmounted under its own
-  `waitForSelector`. Gate follow-on navigation on hash STABILITY (~1.5s
-  unchanged, bounded) rather than on reaching the hash once.
-- **Helpers that assume `/popup/general` say so nowhere** — `importToken`
-  (tokens-menu trigger) and `switchAccountByAddress` (header selector) both
-  need the home screen; a caller parked on a settings page times out on a
-  2s internal wait with no useful message. Navigate to general first.
-
-## Post-unlock navigation races (2026-08-23, `implementations-plan/mac-identity-binding/` phase 2)
-
-A smoke failure whose captured page state is a HEALTHY wallet (right account, balances
-rendered) while a `navigateByHash`/agree-gate wait times out is usually NOT the awaited
-element's bug — it's a navigation race yanking the page elsewhere mid-wait. Four such races
-(fixed 2026-08-23) all lived in the window between an accepted unlock and `isLogined`
-flipping at the END of the activation bootstrap: that window is ~100ms warm but SECONDS on a
-starved 2-core CI runner, which is why these fire in CI and "never reproduce" locally.
-
-- Reproduce with `taskset -c 0,1 bun run --cwd apps/extension test:e2e <files>` (~40%
-  failure rate pre-fix). Freeze the tree during comparison loops, run them solo on the host.
-- Attribute with a throwaway probe test that wraps `$router.push/replace` + `hashchange`
-  in-page and records stacks; match stack chunk+offset against the built bundle to name the
-  pusher. Guessing from symptoms produced wrong fixes; attribution produced right ones.
-- The four mechanisms + residuals: `implementations-plan/mac-identity-binding/lessons/phase-2-smoke-deflake.md`.
-  Guard-vs-bootstrap decisions now live in `apps/extension/src/popup/auth-guard.ts` — extend
-  that decision core (it's unit-tested) rather than re-adding flag checks in the router guard.
-
-## Testing product flows that call `chrome.runtime.reload()` (2026-08-24, `implementations-plan/migration-lifecycle/`)
-
-The standing rule above ("never use `runtime.reload()` for state reset") gained a second face: the PRODUCT now calls it legitimately (the migration barrier's Retry button — a deterministic restart, since popup close doesn't kill the SW). Under `--load-extension`, Chrome DISABLES the unpacked extension on `runtime.reload()`: every later `chrome-extension://` goto fails `net::ERR_BLOCKED_BY_CLIENT` until a browser restart — no retry loop recovers it.
-
-Harness pattern: click the button, wait briefly for its pre-reload storage write to land (belt — the handler awaits the write before reloading), then `browser.close()` + relaunch over the same `userDataDir`. Design the product flow so convergence is IMPOSSIBLE without the button's side effect (the migration gate short-circuits without the one-shot token), and the relaunch-based assertion proves the whole chain — no in-harness reload observation needed. Worked example: `tests/e2e/migration.test.ts` `retryAndReopen`.
-
-## The SW-kill load flake: `stopServiceWorker: still alive 15s` (2026-08-28)
-
-`stopServiceWorker` (inline in `sw-resilience.test.ts` and `sw-restart-network.test.ts`) arms a
-`targetdestroyed` listener, closes the worker, and rejects after 15s if the ORIGINAL target object
-never comes back destroyed. That identity check is deliberate and worth keeping — it is what stops
-the tests passing against a worker that never died. But its deadline is wall-clock, so on a starved
-runner the event lands late (or the worker takes longer than 15s to actually terminate) and the
-helper reports a lifecycle failure that never happened.
-
-**Fingerprint.** `Error: stopServiceWorker: the service-worker target was still alive 15s after
-close()`, thrown from `sw-resilience.test.ts` / `sw-restart-network.test.ts`, on a diff that
-touches no service-worker lifecycle code. Usually accompanied by `TimeoutError: Waiting failed:
-15000ms exceeded` from the same file.
-
-**It is load-correlated, not random.** Observed four times in one afternoon across four different
-PRs (#475, #476, #477, #478) while six PRs ran the full smoke + network suites concurrently; every
-one passed on a plain re-run of the same commit. On a quiet queue it is rare.
-
-**All three retries failing does NOT mean it is real** — this is the trap, because everywhere else
-in this repo that heuristic holds. Vitest's retries run back-to-back inside the SAME starved
-window, so a load flake exhausts the whole retry budget and presents exactly like a deterministic
-failure. Use the *diff* as the discriminator instead of the retry count: no SW-lifecycle change in
-the diff plus this fingerprint plus a busy queue ⇒ re-run before investigating.
-
-**Response.** `gh run rerun <run-id> --failed`, once. If it reproduces on a quiet queue, it is
-real and the helper's 15s deadline is the first thing to question — not the product. Never
-neutralize the assertion: the identity check is load-bearing (see the deflake-round-3
-`lessons/phase-3.md` note above), and a lengthened deadline hides a genuine
-worker-refuses-to-die regression.
-
-**If it becomes frequent enough to matter**, the fix is not a bigger constant: make the wait
-deadline-free and let the test's own timeout bound it, or assert the worker's death by a positive
-signal (a fresh target with a different id) rather than by the absence of an event.
-
-## The SW-restart auth-popup flake: `ensureUnlocked: lock state never settled` (2026-09-02)
-
-**Fingerprint.** `Error: ensureUnlocked: lock state never settled within 30s (hash: #/popup/auth,
-session record: well-formed, password field: true)` from `frozen-account-canary.test.ts` right
-after `stopServiceWorker`, on the prover-ON canary lane, on a diff touching no session or popup
-code. Seen on #509, #526 and once more the same week; every rerun passed.
-
-**Two mechanisms produce the identical state.** After the restart the recovery popup boots
-`loadProfile`: `getActiveProfile()` (waits for the profile service's init, restore included) →
-`bootstrapActiveProfile` (networks, account, transactions) → `/popup/general`, while the route
-guard parks the popup on `/popup/auth` with the password field mounted and the session record
-still well-formed — the "mid-decision" state `ensureUnlocked` refuses to act on by design.
-(1) *Slow*: on a starved runner (five shards + heavy lanes + real proving) that bootstrap
-outlives 30s while the test's own next wait allows 120s for the same bootstrap. (2) *Stalled*
-(codex, 2026-09-02): the first request after a restart can REJECT while the worker is still
-booting; `loadProfile` had no rejection path, so `isSessionChecked` stayed false for good, the
-guard answers "auth" without retrying while it is false, and a silent restore emits no event that
-could rescue the popup — a product stall, not a slow one, and a longer budget alone would hide it.
-
-**Fix (both).** Product: the boot sequence is a pure core (`popup/boot-session.ts`,
-`resolveBootSession`, unit-tested for every outcome) over the guard's backoff
-(`lookupActiveProfileWithBackoff`, one overall 60s deadline). When the service stays unreachable
-the check settles: with a known profile it lands on the lock screen (the password path is a
-recovery, and the auth page needs a selected profile); with none known it stays put. A bootstrap
-that throws over an OPEN session is `failed`, never a lock. Both render `data-boot-outcome` on the
-shell and a banner with RETRY (`boot-retry`), and the settings read can no longer abort the
-sequence. Every run is generation-fenced (mount + each background reconnect starts one; a run
-that awaited past a newer one commits nothing) and a new run clears the marker first. Harness:
-`ensureUnlocked` NEVER types on the marker — a reconnect can clear it between a read and a
-keystroke — it presses the product's RETRY once and resumes waiting for a real decision; a second
-give-up fails the test with the outcome's name (a product boot failure must not pass as a slow
-bootstrap). `{ decisionBudgetMs }` covers the genuinely slow case (the canary passes its 120s
-envelope); the timeout reports whether the service-worker heartbeat advanced — read that
-neutrally: it proves the worker wrote, not that the bootstrap will finish.
-
-## Editing `global-setup.ts` (stage split, 2026-09-02)
-
-`setup` is a coordinator over stage functions (`reconcilePriorLock`, `ensureAnvil`,
-`ensureAztecNode` + `spawnAztecNode`, `ensureDevServer`, `finishBoot`, `provideWithoutSandbox`).
-Rules that came out of the split's two audits, each guarding a real failure mode:
-
-- **Probe first, gate second.** Every `ensure*` starts with its health probe; the binary / pin
-  gates sit inside the "not already running" branch. Hoisting a gate above the probe makes a run
-  with a healthy pre-existing node and an unusable pin throw under `E2E_REQUIRE_SETUP=1`.
-- **`markBootStarted()` stays in the coordinator**, between `writeProvisionalLock()` and the first
-  spawn. Its position IS the exit-86 contract: a missing-binary FATAL after it is a retryable boot
-  failure; moving it earlier makes lock reconciliation retryable, later drops the retry.
-- **Ownership order after a spawn is handle → `weStarted* = true` → `recordSpawnedPid()`**, before
-  listeners and the readiness wait (`currentPids` reads the flag; a pid recorded after the wait
-  reopens the cancel-window orphan leak). `ensureDevServer` takes `setHandle` / `setStarted`
-  callbacks for exactly this reason — never return-then-assign.
-- **Never reset a `weStarted*` flag on a kill path.** Teardown's data-dir removal keys off
-  `weStartedNode`; the kill paths null the handle only.
-- **The reuse path owns nothing**: no provisional lock, `weOwnLock` stays false, `clearLock()` is
-  reachable only under `if (priorLock)` after a reap, and `markBootReady()` fires without
-  `markBootStarted()` (intended: nothing to retry).
-- **Skip exits share provides, not cleanup**: a missing aztec CLI leaves anvil alive until
-  teardown; a node that never becomes healthy kills node THEN anvil. Cleanup stays in the stage,
-  `provideWithoutSandbox` + `return` in the coordinator, so a lost or doubled `provide` is visible.
-- **Log pipes are per-child data**: anvil is stderr-only with `address already in use` in its
-  needle set and keeps its own `once("exit")`; only the two Vite servers share a pipe.
-- **Proof for a change here** (there is no deterministic unit seam for a boot): full network suite on CI, the
-  reuse drill (direct vitest on a pinned port pack, `kill -9` the vitest group after deploy, run
-  again → `reusing prior sandbox (identity check passed)`), the reap drill (a following
-  `e2e:agent` run → `prior lock is for different ports — reaping orphans`), the fail-loud negative
-  (empty `HOME` + strict mode on free ports → the anvil FATAL before any spawn), and the trimmed-line
-  + string-literal multiset diffs (only wrapper lines and templated log strings may differ).
-
-## The cold-shard approvable flake: `multicall-chunked` `feeMethod:null` (2026-09-01)
-
-**Fingerprint.** `tx-sendTx-multicall-chunked (#33)` red with `waitForExecuteApprovable: not
-approvable after 10000ms: {"btnInDom":true,"btnDisabled":true,…,"feeMethod":null,"opCount":1}`,
-while `#32` (the 3-call multicall in the same file, same execute popup, same fee selector) passes
-in the same shard. First seen on PR #515 (shard 1/5), a diff that touched no estimation code; the
-shard's aztec-node boot had also logged `Address already in use` — a contended runner.
-
-**Why it is timing, not rendering.** `feeMethod` is read from the selector trigger's
-`data-fee-method`, which is bound to `modelValue?.subtitle` — null means the fee-estimation pipeline
-had not yet picked a default method, upstream of anything the popup draws. The chunked variant
-simulates 7 transfers, the heaviest estimation in the suite, and `approveExecute` runs it under the
-default 10s `approvableTimeoutMs` (no cold-path override in the test). On a warm host the same spec
-reaches approvable in a fraction of that: locally both cases pass, #33 in ~15s end-to-end.
-
-**Response.** `gh run rerun <run-id> --failed`, once. A second identical failure on a quiet queue:
-run `bun run e2e:agent tests/e2e/network/tx-sendTx-multicall.test.ts` locally first (proverless
-boots in ~2 min) before touching either the test's budget or the estimation code. If it ever
-recurs on a diff that touches estimation or the execute popup, the diff is the suspect — the
-fingerprint alone does not clear it.
+# E2E testing — Vitest + Puppeteer on the Nulo extension
+
+This skill owns the Puppeteer layer under `apps/extension/tests/e2e/`: how to run it, how to write a
+test that stays green, how to kill the service worker for real, how to tell a flake from a break, and
+the ledger of every flake this repo has root-caused. Boundaries:
+
+- Live debugging of a running extension (DevTools MCP, the Logger page) → `chrome-extension-debug`.
+- The generic parallel-agent isolation pattern (ports, process groups, data dirs) → `run-isolation`;
+  this skill describes THIS repo's instance of it.
+- The in-process tier below e2e (real service graph over dumb fakes) →
+  `apps/extension/tests/COMPOSITION-TESTS.md`. Escalate to e2e the moment an assertion needs
+  simulation, proving, real derivation, or Barretenberg.
+- Layout, per-file purposes, and the helper table → `apps/extension/tests/e2e/README.md`.
+
+Every rule below names the code that carries it. If a name here does not resolve on the tree, the
+tree wins — fix the skill in the same PR.
+
+## 1. Run it
+
+### The three configs
+
+| Suite | Config | Includes | Global setup | Timeouts (test/hook) | Retry |
+|---|---|---|---|---|---|
+| smoke | `vitest.e2e.config.ts` | `tests/e2e/*.test.ts` | `global-setup-smoke.ts` (no sandbox) | 60s / 90s | 2 in config (three attempts); `--retry=0` on the CLI to override |
+| network | `vitest.e2e.network.config.ts` | `tests/e2e/network/**` | `global-setup.ts` (anvil + aztec node + playground) | 30s / 300s | `NULO_E2E_RETRY` ?? 2 (three attempts) |
+| all | `vitest.e2e.all.config.ts` | both | `global-setup.ts` | 30s / 300s | `NULO_E2E_RETRY` ?? 2 |
+
+All three run `pool: "forks"`, `isolate: true`, `fileParallelism: false` — one Chrome per file,
+files sequential. All three take `reporters: e2eReporters()` from `vite.shared.ts`: an explicit
+reporters array suppresses vitest's automatic `github-actions` annotator, so that function re-adds it
+and appends `RetryErrorReporter` (prints the first-attempt errors of a test that passed on retry).
+Never inline a reporters array in a config.
+
+Commands (root `package.json`):
+
+```bash
+cd apps/extension && bun run test:e2e [files]            # smoke — no sandbox
+bun run e2e:agent [files] [--shard=N/M]                  # network — owns a sandbox per run
+NULO_E2E_PROVERLESS=1 bun run e2e:agent [files]          # network, proverless build (CI's shard pool)
+bun run test:e2e:all                                     # smoke + network on one sandbox
+bun run e2e:reap                                         # kill leftover sandboxes by owned pid
+```
+
+`test:e2e:network` at the root runs the config bare: no port pack, no armed build, `global-setup.ts`
+falls back to `8545/8080/8880/40400/5174`. Use it only against a sandbox you already own.
+
+### Hazards that mass-fail a run
+
+- **Both global setups `pkill` every Chrome loaded from THIS dist path** at setup (smoke also at
+  teardown). Parallel worktrees are safe; smoke and network on ONE worktree are not. Tell a
+  reviewer running locally not to invoke any e2e config.
+- **Heavy suites run alone on the host.** A concurrent `audit:vue`, a proving run, or a second
+  suite starves the sandbox and the browsers; the signature is timeouts across unrelated files.
+  Rerun before triage. Shard for wall-clock (`--shard=N/M` across agents), never overlap.
+- **Always `cd` to the app dir for `test:e2e`.** The tool shell's cwd persists across calls and
+  parallel calls race on it; a root `test:e2e` hits the extension suites anyway and the pkill fires.
+- **Reap at session end**, not at the next run: `bun run e2e:reap`. Orphans hold their LMDB store
+  open; the data dir is on real disk (`~/.cache/nulo-e2e`, `lockfile.ts` `E2E_DATA_ROOT`), so RAM is
+  not pinned, but ports and CPU are.
+
+### The agent runner — `apps/extension/scripts/e2e/agent.sh`
+
+1. Scans the target files for `@requires-proverless`; any hit without `NULO_E2E_PROVERLESS=1` exits 2
+   with the remedy. Prover-ON is the default; the proverless build is a double opt-in
+   (`VITE_NULO_E2E_PROVERLESS=1` + `_CONFIRM=1`) and mutually exclusive with
+   `VITE_NULO_ACCELERATOR_REQUIRED`.
+2. Claims a fresh port pack (`resolve-ports.ts`: bind-and-release in a static window below the
+   kernel's ephemeral floor, written to the worktree-local `.e2e-state/ports.json`). There is no
+   host-wide registry file; safety is probabilistic plus the bind test.
+3. Builds the wallet armed: `VITE_LOCAL_NETWORK_RPC_URL` (this sandbox), `VITE_NULO_E2E_DEFAULT_NET=
+   testnet`, `VITE_NULO_E2E_PRICE_MAP=1`, `VITE_NULO_E2E_MIGRATION_FIXTURE=1`,
+   `VITE_NULO_E2E_TOKEN_SEEDS=1` + `_CONFIRM=1`, plus the proverless pair when asked. Then greps
+   `dist/chrome` for every stamp it just armed and exits 2 on a miss — before spending a sandbox.
+4. Runs vitest with `E2E_REQUIRE_SETUP=1` (a sandbox or deploy failure is `FATAL`, never a silent
+   `describe.skipIf` — the suite once showed `61 skipped, exit 0` for weeks) and the runtime
+   declarations the tests read (`NULO_E2E_MIGRATION_FIXTURE=1`, the `*_URL`s).
+5. `classify-exit.ts` maps the run through `.e2e-state/{boot-started,boot-ready,tests-started}`:
+   boot started, never ready, no test ran → exit 86 (CI retries the agent once on 86 only); anything
+   else passes through. A test that ran cannot masquerade as infra.
+
+Reuse never happens under `e2e:agent` (fresh ports every run); `reconcilePriorLock` in
+`global-setup.ts` only reaps the previous pack. Reuse fires for a bare repeated `vitest run
+--config vitest.e2e.network.config.ts` with stable env: pids alive, endpoints healthy, and the
+node's `l1ContractAddresses` equal to the lock's (a stranger on a reused port fails identity).
+
+### Build-armed tests
+
+Several fixtures are compiled INTO the bundle by `VITE_NULO_E2E_*` flags and tree-shaken out
+otherwise: the proverless `ProofGate`, the restore and incoming-poll gates, the migration fixture,
+the token-seed reader, the price map. Against an unarmed dist a test that needs one does not error —
+the hook is gone, optional chaining no-ops, and the test polls into a multi-minute timeout that
+looks exactly like a product bug. A runtime env var can never arm a build-time flag.
+
+- The signature is the SAME deterministic set of failures run after run (load flake scatters).
+- Diagnose before theorising: `grep -rl NULO_E2E_PROVERLESS_BUILD_STAMP apps/extension/dist/chrome`
+  (or the stamp of the feature in question). A later plain `bun run build` — including the one at
+  the end of `bun run audit:vue` — silently disarms the dist.
+- Smoke needs the migration fixture armed AND declared: build with
+  `VITE_NULO_E2E_MIGRATION_FIXTURE=1 VITE_NULO_E2E_DEFAULT_NET=testnet bun run build:chrome`, run
+  with `NULO_E2E_MIGRATION_FIXTURE=1` (what `_smoke-e2e.yml` does). `migration.test.ts` skips
+  without the declaration; `backup-migration.test.ts` throws with the remedy.
+- A new build-armed test file carries the `@requires-proverless` marker (scanned by `agent.sh`)
+  AND a `beforeAll` that greps the loaded bundle for the stamp (`account-switch-isolation.test.ts`
+  is the idiom) — the belt for direct vitest invocations.
+
+### Env vars the suite reads
+
+| Var | Meaning |
+|---|---|
+| `HEADLESS=0` | windowed Chrome; default is headless (`launchExtension`) |
+| `NULO_E2E_RETRY` | vitest `retry` for the network and all configs (default 2); smoke ignores it — pass `--retry=0` |
+| `E2E_REQUIRE_SETUP=1` | sandbox/deploy failures are fatal (set by `agent.sh`) |
+| `NULO_E2E_PROVERLESS=1` | `agent.sh` arms the proverless build pair |
+| `NULO_E2E_MIGRATION_FIXTURE=1` | runtime declaration that the dist carries the migration fixture |
+| `NULO_E2E_ARTIFACT_RUN=1` | smoke against a built artifact (release/nightly): blocks the price host, skips the encrypted `backup-roundtrip` spec; set for BOTH artifact paths, never keyed on bare `EXTENSION_PATH` |
+| `EXTENSION_PATH` | smoke: load this unpacked dir instead of `dist/chrome` |
+| `NULO_E2E_DATA_ROOT` | sandbox data-dir root (default `~/.cache/nulo-e2e`) |
+| `NULO_E2E_STAGE_LOG=1` (+`_OUT`) | append per-import stage-trajectory records (`helpers/import-stage-timing.ts`) |
+| `NULO_E2E_OPENPOPUP_LOG=1` | log `openPopup`'s fast-path/fallback timing |
+| `NULO_E2E_CONSOLE_PROBE=1`, `NULO_E2E_PROBE=1` | enable the two `_probe-*` files (skipped by default; probes, not gates) |
+| `NULO_E2E_STANDARD_CONTRACTS=1` | opt `tx-sendTx-delegated-authwit` into the standard-contracts variant |
+| `ANVIL_URL`, `AZTEC_NODE_URL`, `PLAYGROUND_URL`, `TOOLS_URL`, `TOOLS_DEV_PORT`, `*_PORT` | the port pack (`agent.sh` exports them from `ports.json`) |
+| `VITE_NULO_FEE_MULTIPLIER` | build-time fee envelope widening; CI sets `10` to absorb devnet base-fee drift |
+
+### Retry policy is a per-class decision
+
+- PR gates run `retry: 0` (`pr-network-e2e.yml` passes it on every lane; smoke's config keeps 2).
+  A masked flake in a required gate is worse than a visible one.
+- Nightly omits the input, so the config default (2) plus the exit-86 boot retry applies: absorb,
+  then ship.
+- Per-test `retry: 0` is mandatory for DESTRUCTIVE scenarios (a password change, a MAC tamper, a
+  profile delete mid-file): a retry re-enters against mutated state and buries the real failure
+  (`imported-account-lifecycle`, `frozen-account-canary`, `transfers` say why at the top).
+- Never add a per-test `retry: 1|2` to hide a flake; root-cause it (§4) or file it in the ledger.
+  Smoke's config-level 2 exists because the smoke gate is required on every PR; it is not licence
+  for per-test overrides, and a local repro always runs at 0.
+
+### CI topology
+
+- **Smoke** — `pr-smoke-e2e.yml` → `_smoke-e2e.yml`. Runs on PRs to `main`, on PRs to `dev` whose
+  diff trips the `smoke-surface` paths filter, or with the `e2e:smoke` label; 20-minute job; in-job
+  armed build by default, or an artifact (`artifact_name` / `extension_path`) for nightly/release.
+  Required check `smoke-e2e-status` on both branches.
+- **Network** — `pr-network-e2e.yml` → `_network-e2e.yml`. Filter `extension-network`, label
+  `e2e:network`. Lanes: 5 vitest shards (`--shard=N/5`, SHA-1 of the file path, proverless, retry 0,
+  the 5 dedicated files excluded); two heavy single-file lanes (`fee-methods`,
+  `concurrent-sendtx-confirm`, proverless); the **canary** lane prover-ON with the SHA-256-pinned
+  `accelerator-server` and `VITE_NULO_ACCELERATOR_REQUIRED=1` (`transfers`, `tx-sendTx-default`,
+  `frozen-account-canary`) — a canary run with zero `Proving succeeded` lines fails. Exit 86 retries
+  the agent once. After every run the built bundle is grepped for `(PROBE|nulo:probe:|VITE_E2E_PROBE)`
+  and any hit fails the workflow: string constants shipped in `dist/` must not contain `PROBE`.
+  `scripts/ci-cd/behavior-gating.test.ts` pins the filters and the exclude list against the lanes.
+- **Nightly** (`nightly.yml`, the only scheduled workflow) mirrors the lanes with config-default
+  retries and publishes a prerelease on full green. **Soak** (`network-e2e-soak.yml`) is manual,
+  N iterations at retry 0.
+- A red required gate is a flake → rerun once, or breakage → fix. Never advisory, never
+  `continue-on-error`, never removed from the required set (CLAUDE.md § Quality gates).
+
+## 2. Write a test
+
+### Selectors
+
+Only `data-testid` (rows: `data-<entity>-id` / `data-<entity>-name`). Never text, role, aria-label,
+placeholder, class, or structure. `waitForToast` is the one sanctioned text assertion. If an element
+has no testid, add one BEFORE the test. This is convention plus review — no lint rule or scanner
+enforces it, so a reviewer has to.
+
+### Start from the right fixture (`fixtures/extension.ts`)
+
+`extension` (fresh install, liveness reached, first-run tab closed) → `registeredExtension` (one
+password profile on `#/popup/general`) → `dappConnectedExtension` (playground handshake done) →
+`…WithAccountsCap` / `…WithTransactionCap` / `…WithFirstTwoAccountsCap` → `localNetworkExtension` →
+`tokenReadyExtension` / `feeJuiceReadyExtension` / `feeJuiceImportedExtension`. The default scope
+is `"file"`; `freshExtensionPerTest`, `registeredExtensionPerTest` and `dappConnectedExtensionPerTest`
+relaunch per test for specs that mutate the profile. One browser per file is the isolation unit;
+shared browsers leak worker memory between files. Design files order-independent.
+
+### Never bypass the helpers
+
+`clickByTestId` / `clickSelector` (not `page.click` / `handle.click` — raw CDP element clicks hang in
+`Runtime.callFunctionOn`), `typeIntoInput` / `replaceInputValue` (not `handle.type`),
+`patchPagePolling` (auto-applied by every page opener: `raf` polling is throttled on unfocused tabs,
+so waits use `polling: 200`), `withTimeoutMessage` (turns a bare `TimeoutError` into a diagnostic
+without swallowing frame-detach or CDP-disconnect errors), `closeStuckPopup` (a `<Transition>` stuck
+mid-leave under headless rAF throttling — only after asserting the real post-mutation signal, never
+as a substitute for closing through the UI). `waitForPopup` matches a NEW `#/windows/<kind>` target by
+URL because every interaction URL carries a unique `requestId`; `callExpectingNoPopup` diffs targets
+by identity because plain popup pages change URL under a lock redirect.
+
+### What to assert
+
+- **Post-action state, not the route.** A hash change proves nothing; assert the rendered address,
+  the persisted row, the updated balance.
+- **Positive counts poll; zero counts may be instant.** Vue lists that refresh by array replacement
+  swap children inside a sub-frame window; `page.$$` right after a resolved `waitForSelector` can
+  read 0. Pair a zero assertion with a MutationObserver if a flash matters.
+- **State attributes, not visibility.** `offsetParent` and bounding rects are paint artefacts; a
+  leaving `<Transition>` is visible while `isOpen` is already false. Gate on `data-dropdown-open`,
+  `data-toggle-active`, `data-restore-stage`, `data-boot-outcome`; add one if it is missing.
+- **Freshness-gated balances.** An imported backup already carries the expected value. Capture
+  `captureBalanceBaseline` first and require `updatedAt` newer AND the exact raw value AND the
+  token-scoped render (`waitForFreshBalanceRow`, `waitForTokenCardAmount`); body-text scans
+  false-match `$1,000.00` and `11,000`.
+- **Approvable ≠ rendered.** The execute confirm button also gates on fee estimation. Use
+  `waitForExecuteApprovable`, which reads the live `disabled` AND `pointer-events`; `Button` binds
+  the HTML attribute only when it renders a real `<button>`, and the CSS class is the universal
+  signal. Cold callers pass 120s (`frozen-account-canary`, `cancel-mid-prove`).
+- **A wait is only as honest as its signal.** `waitForFunction` resolves on the first truthy poll —
+  it is a ceiling, not a dwell. A settled check tracks continuity (`resetProfile`'s
+  `__nuloResetNavTrace`: navigate, require the destination selector AND the hash to hold across a
+  short dwell, allow exactly one re-navigation, fail on a second).
+- **Lock state comes from storage.** `ensureUnlocked` reads `nulo:core:session`, presses the
+  product's `boot-retry` once if the shell reports an unreachable boot, never types on a stale
+  marker, and proves the unlock by a newer well-formed record. Password profiles only.
+- **Storage reads: key and shape.** `ValueStorage` persists `JSON.stringify(value)` — a raw
+  `chrome.storage.local.get` returns a string; config lives at `nulo:config`. Verify both before
+  concluding "absent".
+- **Rows by badge or id, never by name.** An imported account carries its source profile's name and
+  collides with the target's default row (`helpers/account-io.ts`).
+- **Helpers state their starting route** or navigate there (`importToken`, `switchAccountByAddress`
+  need `#/popup/general`).
+- **Drive a popup to its own closing action.** `popupStore.open()` on an already-open key is not
+  reactive; a force-cleared popup is dead for the rest of the file.
+- **Prove the disruption happened**, not only the downstream state — a test whose kill never killed
+  passed for months for reasons unrelated to its subject (ledger #16–19). Red-team a pin by removing
+  what it guards: if it still passes, another gate was holding it.
+
+### Product couplings the harness respects
+
+- **Worker readiness is the heartbeat**, not the target: `browser.waitForTarget(service_worker)`
+  means Chrome registered the script; `launchExtension` waits for `nulo:liveness` in
+  `chrome.storage.session` (30s). After a restart, gate on a STRICTLY NEWER heartbeat than a snapshot
+  taken in an extension page before the kill (the value survives the old worker; a truthy check lies;
+  a snapshot of 0 means you read from a page without `chrome.storage`).
+- **`evaluate` on the worker target is not the extension context.** `chrome.storage` and friends
+  are read from an extension page (`openPopup`, the blank popup in `launchExtension`).
+- **`consoleErrors` is structurally blind to app `console.*`.** The console sniffer reroutes every
+  page's `console.*` to the worker's LoggerService before the app mounts; `page.on("console")` sees
+  only browser-emitted entries. `pageerror` is reliable for uncaught throws and rejections;
+  `readSwLogTrail` (`fixtures/journal.ts`, `nulo:logs`, 2s flush debounce, bounded) is the app-log
+  channel; an error the app catches and merely logs reaches neither fixture array. Assert on DOM,
+  storage, or stage evidence instead. Approval sub-windows carry no listeners at all.
+- **`chrome.runtime.reload()` disables an unpacked `--load-extension` build** (every later
+  `chrome-extension://` goto is `ERR_BLOCKED_BY_CLIENT`). Never use it for harness state reset; when
+  the product calls it (the migration barrier's Retry), click, wait for the pre-reload write, then
+  `browser.close()` and relaunch over the same `userDataDir` (`migration.test.ts` `retryAndReopen`).
+- **The first-run onboarding tab.** `onInstalled` (`reason === "install"`) opens it before
+  `launchExtension` can seed `nulo:onboarding:completed`; the fixture closes it by the id the worker
+  stores in `nulo:onboarding:tab-id` BEFORE flipping the flag (a mounted onboarding page that reads the
+  flag replaces itself with a popup window and drops the id). On a fresh profile the id is required
+  within 5s and the launch fails otherwise; a reused `userDataDir` opens no tab. Onboarding specs open
+  their own tab via `openOnboarding`.
+- **Passkeys: the virtual authenticator is per FrameTreeNode**, not per browser context, and PRF
+  state is not serialisable over CDP. Register, lock/unlock and reset→import are drivable in the SAME
+  popup (`fixtures/passkey.ts` `setupPasskeyVirtualAuth`); cross-popup and cross-authenticator flows
+  are not (`implementations-plan/passkey-e2e/PRF-NON-PORTABLE.md`). Keep the anchor popup open.
+- **A mid-restore kill is two deliberately gated scenarios**, each enforcing its own contract: a
+  kill at `service-restore` must roll back, a kill at `account-state` must recover. The
+  `restore-gate` rendezvous anchors the kill at the named phase; a torn refusal is the failure
+  (`network/backup-restore-sw-restart.test.ts`).
+- **A popup that outlives a worker restart keeps a logged-in shell.** Under strict security the
+  replacement worker has no in-memory session; the reconnecting popup's boot lands `locked`, but
+  `landOnLockScreen` only routes to auth when no profile is selected, so an already-logged-in popup
+  stays put with `isLogined` true. Its next Lock click clears the persisted record WITHOUT the
+  `onActiveProfileChanged` event (`SessionManager.close()` emits only over an in-memory session), so
+  nothing navigates. A test that keeps a popup open across `stopServiceWorker` must lock by waiting
+  for the record to vanish and then navigate itself; a fresh `openPopup` boots from storage and lands
+  on auth by itself (ledger #29).
+- **The playground sends every tx `NO_WAIT`**: `waitForPgResult` proves the node accepted the
+  submission (a real proof on the canary lane), not mining. Wallet-UI `transfers` is the one test that
+  waits through prove → mine.
+
+## 3. Kill or restart the service worker
+
+There is ONE helper: `stopServiceWorker(ext)` in `fixtures/helpers.ts`. Import it; never copy it,
+never call `worker.close()` or `Runtime.terminateExecution` in a test.
+
+Why, in six lines. Chrome parks a stopped worker's DevTools host while any CDP session is attached and
+hands that host — same target id — to the worker's next start, which under MV3 is milliseconds away.
+Puppeteer's `worker.close()` is attach → `Target.closeTarget` → detach, so under load the stop lands
+before the detach, the restarted worker inherits the old target, and `targetdestroyed` never fires
+(three lost stops in sixteen under two cores). The helper sends `Target.closeTarget` from an
+UNATTACHED browser-level session and races three outcomes: `targetdestroyed` by object identity, a
+`performance.timeOrigin` strictly newer than the pre-stop reading on whichever worker target is live
+(only a new instance can produce it; Puppeteer's own transient auto-attach can still park a host), and
+a 15s deadline. Every probe races its own 2s budget, attach included, and releases its session without
+awaiting. `Runtime.terminateExecution` aborts running scripts and leaves the worker alive with its
+memory, session record and heartbeat intact — a test built on it exercises nothing.
+
+After the call, the OLD instance is gone. Whether a new one is running depends on the test: a page
+holding a port reconnects and wakes it at once; `cold-wake-discovery` closes the popup, clears the
+alarms, and opens the dApp page BEFORE the kill (a content script injects without messaging) so the
+click is provably the first wake event, then asserts no worker target exists before clicking. Then
+gate on the strictly-newer heartbeat from an extension page (§2), and expect the popup's boot path
+(`popup/boot-session.ts`, `auth-guard.ts`): under strict security a restart drops the session, so
+`ensureUnlocked` with a budget sized to the bootstrap (120s on the prover-ON canary) is the
+recovery, not a route wait.
+
+A stage that can outlast Chrome's idle reaper (a prover-ON canary) checks `findServiceWorkerTarget`
+first: an absent worker is already the restart, so it proceeds to recovery with a warning; a present
+one gets the real kill (`restartServiceWorker` in the two canaries). Called with no worker alive, the
+helper's own 15s `waitForTarget` throws — nothing in it wakes one.
+
+Stage gates (proverless build only, `chrome.storage.session` presence keys): `proof-gate.ts` parks
+a tx right before `pxe.proveTx`; `restore-gate.ts` parks a restore at `service-restore` or
+`account-state` and ACKS — "armed" is not "reached", wait for `held` before killing;
+`incoming-poll-gate.ts` parks an incoming scan post-discovery; `token-seeds.ts` must be written before
+the trigger. Always release in `finally`; a per-test timeout above the gate's safety timeout so a
+forgotten release fails with the gate's message, not vitest's.
+
+## 4. Diagnose a red run
+
+### Flake or breakage
+
+- A red gate is one of two things. Rerun once on a genuine flake fingerprint; fix breakage. Never
+  neutralise the signal.
+- **Discriminators**: the failure MOVES between reruns (different victims) and the captured page is a
+  healthy wallet parked on the wrong route → flake; the SAME test fails three identical solo runs at
+  retry 0 → real. All three retries red is NOT proof of breakage: retries run back to back
+  inside the same starved window. Use the diff — no change near the failing subsystem plus a known
+  fingerprint plus a busy queue → rerun first.
+- Count fixture SHARING, not failures: twenty-two "identical" reds that share one fixture's setup
+  call are one bug (`implementations-plan/e2e-full-network-recovery/lessons/the-actual-bug.md`).
+
+### Reproduce like CI
+
+```bash
+cd apps/extension
+taskset -c 0,1 bun run test:e2e --retry=0 tests/e2e/<file>.test.ts                       # smoke, ×N rounds
+NULO_E2E_RETRY=0 NULO_E2E_PROVERLESS=1 taskset -c 0,1 bun run e2e:agent tests/e2e/network/<file>.test.ts
+NULO_E2E_RETRY=0 taskset -c 0,1 bun run e2e:agent tests/e2e/network/frozen-account-canary.test.ts   # prover-ON
+```
+
+Two cores is the amplifier: races that live in a 100ms window on a workstation widen to seconds. Run
+the loop alone on the host, freeze the tree between rounds, and validate the fix under the SAME
+amplifier (three rounds green is the bar this repo has used; `implementations-plan/e2e-flake-fixes/`
+shows a 3/16 → 0/16 before/after). A fix is not "raise the constant": a bigger deadline hides the
+worker that refused to die.
+
+### Evidence channels
+
+- `pageerror` (uncaught throws, unhandled rejections) and `readSwLogTrail` (poll past the 2s
+  debounce; empty means not retained, not nothing happened).
+- Do not rely on console output from a passing test reaching you. Probe by writing uniquely-keyed
+  records to `chrome.storage` from inside the extension and dumping them to a real-disk JSONL with
+  `appendFileSync`; test the dump path with one no-op probe first. Probe files are
+  `_probe-*.test.ts`, env-gated, skipped by default; product-side probe strings must never ship (the
+  CI `PROBE` grep).
+- An inline sampler between the wait and the assertion HEALS the race it hunts. Run the sampler in a
+  detached promise at the original assertion timing and await it afterwards.
+- A route trajectory must POLL `location.hash` (vue-router uses `pushState`; `hashchange` never
+  fires). A stage trajectory uses a pre-armed MutationObserver on the marker plus ONE final read
+  bounded by its own small race — a 200ms poll adds ~1,500 evaluations and perturbs what it measures;
+  an unbounded final read can hang the 300s `protocolTimeout` on a wedged renderer.
+- Attribute a navigation race by wrapping `$router.push/replace` with stack capture in a throwaway
+  probe and matching the chunk file + byte offset against the built bundle
+  (`implementations-plan/mac-identity-binding/lessons/phase-2-smoke-deflake.md`: four correct fixes
+  where symptom-guessing produced wrong ones).
+- `.e2e-state/exec-approvable-timings.log` (every `waitForExecuteApprovable`), `NULO_E2E_STAGE_LOG`
+  records, `RetryErrorReporter` output, and `.e2e-state/` uploaded by CI on failure.
+- Probe first, hypothesise second. Prototype a disruptive primitive (kill, disconnect, reload) in a
+  twenty-line probe before hardening any wait on it — two arcs hardened waits on a kill that never
+  killed.
+
+### CI log forensics
+
+- `gh run view --log` echoes the step's SOURCE script with near-identical timestamps before runtime
+  output; grepping for `exit 86` or `retrying` matches the source and fabricates an event (two
+  sessions confirmed a nonexistent boot-retry story this way). Use
+  `gh api repos/{owner}/{repo}/actions/jobs/<id>/logs`, match on timestamps advancing, count real
+  invocation markers, and mine at attempt level for reruns that cleared a first-attempt red.
+- `[aztec-node] Address already in use (os error 98)` at boot is cosmetic (the wrapper's inner anvil
+  loses a bind the setup already holds). The fatal boot signature is
+  `deploy_aztec_l1_contracts … required arguments were not provided: --batch` — a `~/.aztec/current`
+  drift; the setup resolves the toolchain from the pinned `@aztec/aztec.js` and exports
+  `FORGE_BIN`/`ANVIL_BIN` into the node's env.
+- A PR with ABSENT (not red) Actions is a CONFLICTING PR: GitHub builds no merge ref. Check
+  `gh pr view --json mergeable,mergeStateStatus` before debugging CI.
+- Every visible check green but `mergeStateStatus: BLOCKED`: capture `/commits/<sha>/check-runs`
+  and repeated `mergeStateStatus` reads over two minutes BEFORE any remedy — an empty commit destroys
+  the evidence (the duplicate-aggregator residue is still open, ledger #28).
+
+### Certifying a deflake
+
+A qualifying green run: all required checks green, `run_attempt == 1` on every job, zero retry
+markers in RUNTIME logs, no exit-86 annotation, the workload jobs ran BY NAME (a paths-filter skip is
+not a pass). Certification triggers are empty commits so N consecutive greens describe ONE tree; any
+change to what is certified resets the count.
+
+## 5. Flake ledger
+
+Every named fingerprint with a root cause. Full stories live in the linked plans; `(open)` rows carry
+the sanctioned response.
+
+| # | Fingerprint | Mechanism | Fix | Status |
+|---|---|---|---|---|
+| 1 | `stopServiceWorker: the service-worker target was still alive 15s after close()` (also `Target.detachFromTarget: No session with given id`) | attached `worker.close()` races Chrome's parked DevTools host; restarted worker keeps the target id | unattached `Target.closeTarget` + `performance.timeOrigin` witness (`fixtures/helpers.ts`) | fixed, `e2e-flake-fixes` (2026-09-05) |
+| 2 | `Expected no popup but 1 new popup target(s) appeared: …#/popup/auth` (`wallet-locked-mid-session`) | URL-keyed popup diff; an existing page re-routed to `#/popup/auth` under the lock redirect; the unowned first-run tab fed it | identity-keyed diff in `callExpectingNoPopup`; `launchExtension` closes the first-run tab before the flag flip | fixed, `e2e-flake-fixes` |
+| 3 | `ensureUnlocked: lock state never settled within 30s (hash: #/popup/auth, …)` after a restart on the prover-ON canary | slow bootstrap under load, AND a first post-restart RPC rejection with no retry path (`isSessionChecked` stuck) | `resolveBootSession` + `lookupActiveProfileWithBackoff` (60s), `data-boot-outcome` + `boot-retry`; harness presses retry once, `decisionBudgetMs: 120_000` on the canary | fixed (2026-09-02) |
+| 4 | `waitForExecuteApprovable: not approvable after 10000ms: {…feeMethod:null…}` on `tx-sendTx-multicall-chunked (#33)` while #32 passes | cold-shard fee estimation on the heaviest (7-call) simulation under the default 10s budget | none yet | **open** — rerun once; a second red on a quiet queue → run the file locally before touching the budget or estimation |
+| 5 | canary prove-duration variance: `transfers` blows its 600s prove wait, or the canary's grant returns `status:"error"` on code-identical pushes | shared-runner prover-ON duration variance | `pg-error-text` dump on mismatch; sanctioned rerun | **open** — owner decision if it recurs (budget vs runner size) |
+| 6 | `TimeoutError: 10000ms exceeded` in `clickByTestId("execute-confirm-btn")` | "ops rendered" ≠ approvable (fee estimation settle) | `waitForExecuteApprovable`; 120s for cold callers | fixed, `e2e-deflake` |
+| 7 | `TimeoutError: 5000ms exceeded` at `resetProfile`'s first selector | one-shot hash-equality wait raced vue-router; a competing `router.push` reverted the hash | settle-stable navigation with a monotonic dwell and one bounded re-navigation | fixed, `e2e-deflake` |
+| 8 | `TimeoutError: 120000ms exceeded` in the old `waitForBalance` | freshness-blind body-text balance scan | `waitForFreshBalanceRow`; `waitForBalance` retired | fixed, `e2e-deflake`, `deflake-round-2` |
+| 9 | `TimeoutError: 30000ms exceeded` waiting for the post-reset route (`opfs-storage`) | route wait raced the awaited purge cascade; tombstone absence is ambiguous | `captureSoleProfileId` + `waitForProfilePurged` first, route second | fixed, `e2e-deflake` |
+| 10 | `TimeoutError: 90000ms exceeded` after a full-backup import (`backup-roundtrip`) | route gated on `isLogined`, which waited on an RPC-bound sync | bounded 45s account-state preflight + registration budget | fixed (2026-08-13) |
+| 11 | `theme-dark-btn` click timeout in `appearance` | one-shot `offsetParent` sample raced the dropdown's leave transition | `data-dropdown-open` / `data-toggle-active` gates | fixed, `deflake-round-2` |
+| 12 | `connectPlayground:awaitVerifyPopup — Timed out after waiting 30000ms` | approval popups' `:disabled` omitted `!requestId`; a click after mount but before `loadInteractionPayload` hit a silent early return | `!requestId` / `!session` in every `:disabled` gate | fixed, `network-followups` (19 investigation rounds) |
+| 13 | `waitForPgResult` 30s timeout on the SECOND RPC of every `dappConnectedExtension` test | `handleSetActive` read a route-param computed after an `await`; the helper's own navigation made it `undefined`, so the popup's network watcher bailed | snapshot the reactive value before the `await` | fixed, `e2e-full-network-recovery` |
+| 14 | every fixture times out at 30s polling `nulo:liveness`; `__dirname` in `dist/chrome/assets/noirc_abi_wasm-*.js` | dual-bundle package lost its `module` field and the worker got the Node CJS build | conditional `exports` map in the patch | fixed, `e2e-network-recovery` |
+| 15 | `61 skipped`, exit 0 | deploy failure provided `aztecTestConfig: undefined`; every `describe.skipIf` skipped | `E2E_REQUIRE_SETUP=1` fail-loud | fixed, `e2e-network-recovery` |
+| 16 | `sw-resilience` "strict mode ON → lock on respawn" skipped as "intrinsically flaky" | the kill never killed (`Runtime.terminateExecution`) | real kill; the test passed for the first time | fixed, `deflake-round-3` |
+| 17 | `sw-resilience` "strict OFF → silent restore" premise never held | config toggle sent via `chrome.runtime.sendMessage` to a port-only service; silently dropped | drive the real Settings toggle and assert the flag | fixed, `deflake-round-3` |
+| 18 | stale post-restart heartbeat satisfied a truthy liveness gate | the dead worker's value survives in `chrome.storage.session` | strictly-newer gate against a pre-kill snapshot | fixed, `deflake-round-2` |
+| 19 | `backup-restore-sw-restart` / `frozen-account-canary` restart stage vacuous | same fake kill | `restore-gate` rendezvous rewrite (`deflake-round-4`); canaries consolidated onto the shared helper (`e2e-skill-refresh`) | fixed |
+| 20 | `"Client disconnected"` from `deleteProfile` ~800ms after a real mid-restore kill | messaging client flipped to connected on a doomed port; the gap-issued call was rejected client-side | rollback gated on the worker's liveness advancing | fixed, `deflake-round-4` |
+| 21 | `pxe op rejected: profile <id> is deleted (generation superseded)` after delete + same-id re-import | offscreen lifecycle map conflated the erased incarnation with its successor | fall-through for `deleted(different-gen)`; `profile-reimport-matrix` pins it | fixed upstream |
+| 22 | `importFullBackup` 300s lapse (`backup-restore-sw-restart` designed retry) | one undifferentiated wait spanning restore + activation | labelled stage trajectory on lapse; no stage warranted an early-fail window (30 imports measured) | closed, `import-stage-deadlines` |
+| 23 | `consoleErrors` empty on a visibly logged app error | console sniffer (§2) | permanent by design; use `pageerror` + `readSwLogTrail` | closed |
+| 24 | deterministic 5 migration reds at ~90s locally, green in CI | unarmed dist (`VITE_NULO_E2E_*` flags) | markers + stamp preflight + `agent.sh` assertions | fixed |
+| 25 | `foundryup` HTTP 502 in CI setup | unpinned, unconsumed toolchain step | step deleted; bundled toolchain asserted in `setup-aztec` | fixed, `e2e-deflake` |
+| 26 | random early-stage timeouts in unrelated tooling after many local runs | sandbox datadir on tmpfs pinned RAM via deleted-but-open LMDB files | datadir on real disk + `e2e:reap` (#310) | fixed |
+| 27 | `authwit-lifecycle` revoke pin passed before revoke existed | `handleSendTx` ignored a session-authorised `opts.from` (sent as account A) | `resolveNetworkAndAccount(requestedFrom)` | fixed, `network-e2e-required` |
+| 28 | every check green, `mergeStateStatus: BLOCKED` on a labelled PR | duplicate concurrency-cancelled runs leave FAILURE aggregators; the believed "latest-per-name" mechanism was refuted by measurement | `pr-quick.yml` dropped `labeled` triggers; blocks remain unexplained | **open** — capture evidence before remedying |
+| 29 | `passkey-execution-canary`: `waitForHash(#/popup/auth)` 15s timeout after the header lock, first seen on the first REAL restart the stage ever ran | the replacement worker holds no in-memory session, so `SessionManager.close()` clears the persisted record without emitting `onActiveProfileChanged`; the event-driven redirect never fires and the open popup keeps its page (`e2e-skill-refresh/lessons/phase-1.md`) | harness: wait for the record to be gone, then `navigateByHash("#/popup/auth")`; product shape is the owner's call | fixed in the harness; **product edge open** |
+
+## 6. Editing the harness
+
+### `global-setup.ts` is a coordinator over stage functions
+
+`reconcilePriorLock`, `ensureAnvil`, `ensureAztecNode` + `spawnAztecNode`, `ensureDevServer`,
+`finishBoot`, `provideWithoutSandbox`. Rules from its audits, each guarding a real failure:
+
+- **Probe first, gate second.** Every `ensure*` starts with its health probe; binary and pin gates
+  sit inside the "not already running" branch, or a healthy pre-existing node with an unusable pin
+  throws under `E2E_REQUIRE_SETUP=1`.
+- **`markBootStarted()` stays between `writeProvisionalLock()` and the first spawn.** Its position
+  is the exit-86 contract.
+- **Ownership order after a spawn: handle → `weStarted* = true` → `recordSpawnedPid()`**, before
+  listeners and the readiness wait; `ensureDevServer` takes `setHandle`/`setStarted` callbacks for
+  this reason. Never reset a `weStarted*` flag on a kill path; teardown's data-dir removal keys off it.
+- **The reuse path owns nothing**: no provisional lock, `weOwnLock` false, `clearLock()` only under
+  `if (priorLock)` after a reap; `markBootReady()` without `markBootStarted()`.
+- **Skip exits share provides, not cleanup**: cleanup in the stage, `provideWithoutSandbox` +
+  `return` in the coordinator.
+- **Log pipes are per child**; anvil is stderr-only with `address already in use` in its needle set.
+- **The default export's RETURN VALUE is the teardown.** A named `teardown` export beside a default is
+  silently ignored by vitest (both setups leaked for the suite's whole life).
+- **No bash signal trap in `agent.sh`**: bash defers INT/TERM until the foreground child exits, so a
+  trap protects nothing and clobbers the classified exit code; `process.on("exit")` in the setup does
+  a synchronous best-effort SIGTERM and never clears the lock (a survivor must stay findable).
+- **Proof for a change here**: the full network suite on CI, the reuse drill (bare vitest twice on a
+  pinned pack → `reusing prior sandbox (identity check passed)`), the reap drill (`e2e:agent` after →
+  `prior lock is for different ports — reaping orphans`), the fail-loud negative (empty `HOME` on
+  free ports → the anvil FATAL before any spawn).
+
+### Adding a build-armed feature
+
+Static import behind an `if (import.meta.env.VITE_NULO_E2E_X)` guard so DCE removes it — a dynamic
+`import()` emits a chunk that SHIPS from a dead branch; double opt-in (`_CONFIRM`) for anything that
+changes execution semantics; a `*_BUILD_STAMP` string; the `agent.sh` bundle assertion; the CI
+negative grep; the `@requires-*` marker + `beforeAll` stamp check on every file that needs it. The
+trust boundary in prod is the absent listener, not `chrome.storage` access.
+
+### Adding a stage gate
+
+Presence-only `chrome.storage.session` key (present = hold), `remove()` on release AND on a loud
+safety timeout, placed so it is not a new cancel checkpoint (the proof gate sits after the
+coordinator's pre-prove `checkCancelled` and before the post-prove one).
+
+## 7. References
+
+- `apps/extension/tests/e2e/README.md` — layout, per-file purposes, helper table, what each
+  worktree owns.
+- `CI.md` § e2e, `.github/workflows/{pr-smoke-e2e,_smoke-e2e,pr-network-e2e,_network-e2e,nightly,
+  network-e2e-soak}.yml`.
+- Plans (`implementations-plan/`): `e2e-flake-fixes` (the parked-host mechanism, five codex rounds),
+  `e2e-deflake` (+ `flake-ledger.md`), `deflake-round-2`, `deflake-round-3` (the kill primitive
+  measured), `deflake-round-4` (crash-truth suite), `import-stage-deadlines`, `mac-identity-binding`
+  (post-unlock races), `e2e-full-network-recovery` (probe-first), `e2e-network-recovery`,
+  `network-e2e-required`, `network-followups`, `parallel-e2e-isolation`, `e2e-proverless-stub`,
+  `passkey-e2e`, `migration-lifecycle`, `e2e-skill-refresh` (this rewrite).
