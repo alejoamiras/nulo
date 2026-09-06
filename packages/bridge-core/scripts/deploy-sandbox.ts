@@ -30,6 +30,7 @@ import { FeeJuiceContractArtifact } from "@aztec/noir-contracts.js/FeeJuice"
 import { Gas, GasFees, type GasUsed } from "@aztec/stdlib/gas"
 import { PrivateFPCContract } from "@alejoamiras/private-fee-juice/artifacts/private"
 import { registerInitialLocalNetworkAccountsInWallet } from "@aztec/wallets/testing"
+import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { type Address, defineChain, type Hex } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { feeJuiceAddress, predictedWorstMinFees, publicFeeJuicePayment } from "../src/fee-juice"
@@ -66,7 +67,7 @@ import { deployGeneration, type GenerationRecord, type L2Ctx, preCreateToken, wa
 import { startLocalNetwork } from "./sandbox/local-network"
 import { evmArtifact } from "./script-artifacts"
 import { ensureRouterPermit2 } from "./script-l1"
-import { claimTokensUntilSynced, registerHub, registerHubToken, sponsoredFpcFee } from "./script-l2"
+import { claimTokensUntilSynced, deployAccountIfAbsent, registerHub, registerHubToken, sponsoredFpcFee } from "./script-l2"
 import { sendGenerationOf } from "./script-send"
 import { createL1Clients, createL1PublicClient, createL2Wallet, createNode, stopwatch } from "./script-bootstrap"
 
@@ -219,17 +220,46 @@ interface Sandbox {
 	mins: () => string
 }
 
+/** The actor's key material is a fixed sandbox constant of the same kind as anvil's KEY_0 — not a
+ *  credential — so a `--keep` re-attach finds the deployer that owns the generation. */
+const SANDBOX_ACTOR_SECRET = Fr.fromHexString("0x00000000000000000000000000000000000000000000000000005a5db0c7a0b1")
+const SANDBOX_ACTOR_SALT = new Fr(1)
+
+/** The smoke acts as the account shape the extension deploys — a constructor-based Schnorr account
+ *  under Nulo's key derivation, deployed through the sponsor — not as a genesis account: those are
+ *  initializerless, a different entrypoint, and every gas reading here is taken as the actor. */
+async function sandboxActor(wallet: unknown, node: L2Ctx["node"], fee: unknown): Promise<AztecAddress> {
+	const { signingKey, secretKey } = await deriveNuloAccountKeys(SANDBOX_ACTOR_SECRET)
+	const ewallet = wallet as {
+		createSchnorrAccount: (
+			secretKey: unknown,
+			salt: Fr,
+			signingKey: unknown,
+		) => Promise<{ getAccount: () => Promise<{ getAddress: () => AztecAddress }> }>
+	}
+	const manager = await ewallet.createSchnorrAccount(secretKey, SANDBOX_ACTOR_SALT, signingKey)
+	const from = (await manager.getAccount()).getAddress()
+	await deployAccountIfAbsent({
+		node: node as never,
+		manager: manager as never,
+		from,
+		fee,
+		log: (stage) => console.log(`  actor account ${stage}: ${from.toString()}`),
+	})
+	return from
+}
+
 async function buildL2(nodeUrl: string): Promise<{ l2: L2Ctx; a1: AztecAddress; relayerOpts: Record<string, unknown> }> {
 	const node = createNode(nodeUrl)
 	// Proving off: this is a local correctness loop, not a proof-system gate.
 	const wallet = await createL2Wallet({ nodeUrl, proverEnabled: false })
-	// A local network pre-deploys its funded accounts at genesis; deriving fresh ones would produce
-	// accounts nothing has funded.
+	// A local network pre-deploys its funded accounts at genesis; the relayer is one of them.
 	const accounts = await registerInitialLocalNetworkAccountsInWallet(wallet as never)
-	const [from, relayer] = accounts
-	if (!from || !relayer) throw new Error("the local network served fewer than two funded accounts")
+	const relayer = accounts[1]
+	if (!relayer) throw new Error("the local network served fewer than two funded accounts")
 	const { fee } = await sponsoredFpcFee(wallet)
 	const paid = { ...fee, gasSettings: FEE_CEILING }
+	const from = await sandboxActor(wallet, node, paid)
 	const sendOpts = { from, fee: paid, wait: { waitForStatus: TxStatus.PROPOSED } }
 	// This network builds a block only when a transaction arrives, so the L1→L2 anchor stands still
 	// between flows. Revoking a random, never-granted public authwit is the cheapest universally
@@ -612,15 +642,11 @@ async function privateCreditOf(s: Smoke, fpc: ContractBase): Promise<bigint> {
 	return typeof r === "bigint" ? r : (r.result ?? 0n)
 }
 
-/** The private exit's fee source, funded the way a user's is: Fee Juice bridged straight to the
- *  PrivateFPC under a claimer-bound secret, claimed into the FPC's public balance, then minted into
- *  the account's credit — `mint` proves the claim by reading its nullifier rather than consuming
- *  the message itself (`mint_and_pay_fee` is the one-transaction form). Sized so the exit's whole
- *  ceiling fits with a balance left to read afterwards. */
-async function flowPrivateGasCredit(s: Smoke): Promise<string> {
-	const fpc = await privateFpc(s)
-	const ceiling = privateFpcFeeLimit(PRIVATE_HUB_EXIT_GAS, await predictedWorstMinFees(s.l2.node))
-	const amount = 2n * ceiling > 20n * MIN_FJ ? 2n * ceiling : 20n * MIN_FJ
+/** One credit note, funded the way a user's is: Fee Juice bridged straight to the PrivateFPC under
+ *  a claimer-bound secret, claimed into the FPC's public balance, then minted into the actor's
+ *  credit — `mint` proves the claim by reading its nullifier rather than consuming the message
+ *  itself (`mint_and_pay_fee` is the one-transaction form). Returns the credit gained. */
+async function mintPrivateGasNote(s: Smoke, fpc: ContractBase, amount: bigint): Promise<bigint> {
 	const feeAsset = s.deployment.feeJuice
 	await writeL1(s.l1, feeAsset, TestERC20Abi, "mint", [s.l1.account.address, amount])
 	await ensureRouterPermit2(s.l1, { usdc: feeAsset, usdcAbi: TestERC20Abi, permit2: PERMIT2, needed: amount, mins: s.mins })
@@ -648,15 +674,41 @@ async function flowPrivateGasCredit(s: Smoke): Promise<string> {
 	await fpc.methods.mint(amount, salt, leafIndex).send(s.l2.sendOpts as never)
 	const gained = (await privateCreditOf(s, fpc)) - before
 	if (gained < amount) throw new Error(`private credit rose by ${gained}, expected ${amount}`)
-	return `bridge() to the PrivateFPC, FeeJuice.claim then PrivateFPC.mint credited ${gained} FJ-wei of private gas to account[0]`
+	return gained
+}
+
+/** The exit's ceiling at today's predicted worst fees under the app's limits. */
+async function exitCeiling(s: Smoke): Promise<bigint> {
+	return privateFpcFeeLimit(PRIVATE_HUB_EXIT_GAS, await predictedWorstMinFees(s.l2.node))
+}
+
+/** One note worth 1.4× the ceiling: the exit that spends it selects exactly one, and the change it
+ *  leaves (≈0.4×) is small enough to be one of the three the fragmented exit needs. */
+async function flowPrivateGasOneNote(s: Smoke): Promise<string> {
+	const fpc = await privateFpc(s)
+	const gained = await mintPrivateGasNote(s, fpc, ((await exitCeiling(s)) * 14n) / 10n)
+	return `bridge() to the PrivateFPC, FeeJuice.claim then PrivateFPC.mint credited ${gained} FJ-wei as one note`
+}
+
+/** Two more notes of 0.45× the ceiling each. Beside the first exit's change (≈0.4×) no note and no
+ *  pair covers a ceiling, so the next exit's `pay_fee` has to select all three — past the two the
+ *  FPC reads first, into its recursion — which is the shape an account that keeps bridging leaves. */
+async function flowPrivateGasFragmented(s: Smoke): Promise<string> {
+	const fpc = await privateFpc(s)
+	const each = ((await exitCeiling(s)) * 45n) / 100n
+	const a = await mintPrivateGasNote(s, fpc, each)
+	const b = await mintPrivateGasNote(s, fpc, each)
+	const held = await privateCreditOf(s, fpc)
+	return `two notes of ${a} and ${b} FJ-wei minted; ${held} FJ-wei held across three notes, none covering a ceiling`
 }
 
 type HubGasLimits = { daGas: number; l2Gas: number }
 
 /** What the app names for a private exit: the FPC's `pay_fee` from held credit under the exit's
  *  limits at the predicted worst fee — the ceiling the FPC keeps in full. The limits are clamped to
- *  what this network admits per transaction: a local network caps DA gas far below the app's
- *  constant (testnet admits it), and the clamp changes nothing the reading measures. */
+ *  what this network admits per transaction (a local network caps DA gas far below testnet's
+ *  117,668): a no-op at the app's limits, and where it ever binds the report shows the declared
+ *  limits beside the constant, since a lower ceiling is a different deduction and note selection. */
 async function privateExitFee(s: Smoke): Promise<{ fee: Record<string, unknown>; ceiling: bigint; limits: HubGasLimits }> {
 	const [maxFeesPerGas, info] = await Promise.all([predictedWorstMinFees(s.l2.node), s.l2.node.getNodeInfo()])
 	const max = info.txsLimits.gas
@@ -669,6 +721,7 @@ async function privateExitFee(s: Smoke): Promise<{ fee: Record<string, unknown>;
 }
 
 interface ExitGasSample {
+	label: string
 	simulated: { l2Gas: number; daGas: number }
 	fee: bigint
 	feePerL2Gas: bigint
@@ -678,43 +731,56 @@ interface ExitGasSample {
 	limits: HubGasLimits
 }
 
-let exitGasSample: ExitGasSample | undefined
+const exitGasSamples: ExitGasSample[] = []
 
-/** The landed exit's bill beside its simulation, and what the FPC took from the credit. */
+/** The landed exit's bill beside its simulation, and what the FPC took from the credit. Fails the
+ *  flow rather than record a hole: missing evidence, a landed fee that is not the simulated gas at
+ *  the block's prices, or a deduction that is not the ceiling would each make the reading worthless. */
 async function sampleExitGas(
 	s: Smoke,
+	label: string,
 	txHash: string,
 	sim: { gasUsed?: GasUsed },
 	paid: { charged: bigint; ceiling: bigint; limits: HubGasLimits },
 ): Promise<void> {
 	const receipt = await s.l2.node.getTxReceipt(TxHash.fromString(txHash))
-	const block = receipt.blockNumber === undefined ? undefined : await s.l2.node.getBlockData(receipt.blockNumber)
-	const fees = block?.header.globalVariables.gasFees
 	const billed = sim.gasUsed?.billedGas
-	exitGasSample = {
-		simulated: { l2Gas: billed?.l2Gas ?? 0, daGas: billed?.daGas ?? 0 },
-		fee: receipt.transactionFee ?? 0n,
-		feePerL2Gas: fees?.feePerL2Gas ?? 0n,
-		feePerDaGas: fees?.feePerDaGas ?? 0n,
-		...paid,
+	if (!billed || receipt.transactionFee === undefined || receipt.blockNumber === undefined) {
+		throw new Error(`${label}: the exit's gas evidence is incomplete (simulated gas, landed fee or block missing)`)
 	}
+	const fees = (await s.l2.node.getBlockData(receipt.blockNumber))?.header.globalVariables.gasFees
+	if (!fees) throw new Error(`${label}: block ${receipt.blockNumber} has no gas prices to bill the exit at`)
+	const priced = billed.computeFee(fees).toBigInt()
+	if (priced !== receipt.transactionFee) {
+		throw new Error(`${label}: landed fee ${receipt.transactionFee} ≠ simulated billed gas at the block's prices ${priced}`)
+	}
+	if (paid.charged !== paid.ceiling)
+		throw new Error(`${label}: the FPC charged ${paid.charged}, not the ceiling ${paid.ceiling} it commits to`)
+	exitGasSamples.push({
+		label,
+		simulated: { l2Gas: billed.l2Gas, daGas: billed.daGas },
+		fee: receipt.transactionFee,
+		feePerL2Gas: fees.feePerL2Gas,
+		feePerDaGas: fees.feePerDaGas,
+		...paid,
+	})
 }
 
-/** What `PRIVATE_HUB_EXIT_GAS` is sized from: the simulation's billed gas, the landed fee at its
- *  block's prices, and the credit the FPC actually kept against the ceiling it was promised. */
+/** What `PRIVATE_HUB_EXIT_GAS` is sized from: per exit, the simulation's billed gas (the landed fee
+ *  equals it at the block's prices — asserted above), and the ceiling the FPC kept in full. */
 function reportExitGas(): void {
-	const x = exitGasSample
-	if (!x) {
+	if (exitGasSamples.length === 0) {
 		record("ℹ private exit gas: no PrivateFPC-paid exit landed — PRIVATE_HUB_EXIT_GAS not measured")
 		return
 	}
-	const l2FromFee = x.feePerL2Gas === 0n ? "n/a" : String((x.fee - BigInt(x.simulated.daGas) * x.feePerDaGas) / x.feePerL2Gas)
-	record(
-		`ℹ private exit via PrivateFPC.pay_fee: simulated billed l2Gas=${x.simulated.l2Gas} daGas=${x.simulated.daGas}; ` +
-			`landed fee=${x.fee} FJ-wei at feePerL2Gas=${x.feePerL2Gas} feePerDaGas=${x.feePerDaGas} (≈${l2FromFee} L2 gas); ` +
-			`credit charged ${x.charged} vs ceiling ${x.ceiling} under declared limits l2Gas=${x.limits.l2Gas} daGas=${x.limits.daGas} ` +
-			`(PRIVATE_HUB_EXIT_GAS l2Gas=${PRIVATE_HUB_EXIT_GAS.l2Gas} daGas=${PRIVATE_HUB_EXIT_GAS.daGas}, clamped to this network's per-tx max)`,
-	)
+	for (const x of exitGasSamples) {
+		record(
+			`ℹ private exit (${x.label}) via PrivateFPC.pay_fee: simulated billed l2Gas=${x.simulated.l2Gas} daGas=${x.simulated.daGas}; ` +
+				`landed fee=${x.fee} FJ-wei = that gas at the block's feePerL2Gas=${x.feePerL2Gas} feePerDaGas=${x.feePerDaGas}; ` +
+				`credit charged ${x.charged} = the ceiling under declared limits l2Gas=${x.limits.l2Gas} daGas=${x.limits.daGas} ` +
+				`(PRIVATE_HUB_EXIT_GAS l2Gas=${PRIVATE_HUB_EXIT_GAS.l2Gas} daGas=${PRIVATE_HUB_EXIT_GAS.daGas}, or this network's per-tx max where lower)`,
+		)
+	}
 }
 
 // ─── Exits ───────────────────────────────────────────────────────────────────
@@ -724,6 +790,8 @@ interface ExitPlan {
 	l2Token: ContractBase
 	amount: bigint
 	isPrivate: boolean
+	/** Names a private exit's gas sample in the report. */
+	label?: string
 }
 
 async function exitAuthwit(s: Smoke, p: ExitPlan, nonce: Fr): Promise<{ authWitnesses?: unknown[] }> {
@@ -745,7 +813,7 @@ type ExitReceipt = { txHash: unknown }
  *  read, burn) before any authwit is spent and rides the sponsor; a private one carries its witness
  *  and is paid by the PrivateFPC from held credit — its simulation is read for gas, and the credit
  *  around the send for what the FPC kept. */
-async function sendExit(s: Smoke, exit: HubExitParams, extra: { authWitnesses?: unknown[] }): Promise<ExitReceipt> {
+async function sendExit(s: Smoke, exit: HubExitParams, extra: { authWitnesses?: unknown[] }, label: string): Promise<ExitReceipt> {
 	const from = s.l2.from.toString()
 	if (!exit.isPrivate) {
 		await preflightHubExit(s.hub, exit, from)
@@ -757,7 +825,7 @@ async function sendExit(s: Smoke, exit: HubExitParams, extra: { authWitnesses?: 
 	const sim = await simulateHubExit(s.hub, exit, from, { ...extra, fee })
 	const before = await privateCreditOf(s, fpc)
 	const { receipt } = (await exitViaHub(s.hub, exit, { ...s.l2.sendOpts, ...extra, fee })) as unknown as { receipt: ExitReceipt }
-	await sampleExitGas(s, String(receipt.txHash), sim, { charged: before - (await privateCreditOf(s, fpc)), ceiling, limits })
+	await sampleExitGas(s, label, String(receipt.txHash), sim, { charged: before - (await privateCreditOf(s, fpc)), ceiling, limits })
 	return receipt
 }
 
@@ -772,7 +840,7 @@ async function runExit(s: Smoke, p: ExitPlan): Promise<string> {
 		authwitNonce,
 		isPrivate: p.isPrivate,
 	}
-	const receipt = await sendExit(s, exit, extra)
+	const receipt = await sendExit(s, exit, extra, p.label ?? "private")
 
 	const erc20Balance = async () =>
 		(await s.l1.pub.readContract({
@@ -1096,12 +1164,15 @@ async function runSmoke(base: Sandbox, manifest: ManifestV2): Promise<void> {
 	const usdtL2 = await s.l2TokenOf(tokenBlockOf(usdt))
 	await flow("(c) token+gas, self-paying claim", () => flowTokenPlusGas(s, usdt, usdtL2))
 	await flow("(d) gas-only with the fee asset", () => flowGasOnly(s))
-	await flow("(d) private gas → PrivateFPC credit", () => flowPrivateGasCredit(s))
-	await flow("(e) public exit → L1 withdraw", () =>
-		runExit(s, { token: usdc, l2Token: usdcL2, amount: 10n * 10n ** BigInt(usdc.decimals), isPrivate: false }),
+	await flow("(d) private gas → one PrivateFPC credit note", () => flowPrivateGasOneNote(s))
+	const unit = 10n ** BigInt(usdc.decimals)
+	await flow("(e) public exit → L1 withdraw", () => runExit(s, { token: usdc, l2Token: usdcL2, amount: 10n * unit, isPrivate: false }))
+	await flow("(e) private exit paid from one credit note → L1 withdraw", () =>
+		runExit(s, { token: usdc, l2Token: usdcL2, amount: 5n * unit, isPrivate: true, label: "one note" }),
 	)
-	await flow("(e) private exit paid from PrivateFPC credit → L1 withdraw", () =>
-		runExit(s, { token: usdc, l2Token: usdcL2, amount: 5n * 10n ** BigInt(usdc.decimals), isPrivate: true }),
+	await flow("(d) private gas → two more notes, none covering a ceiling", () => flowPrivateGasFragmented(s))
+	await flow("(e) private exit paid across three credit notes → L1 withdraw", () =>
+		runExit(s, { token: usdc, l2Token: usdcL2, amount: 5n * unit, isPrivate: true, label: "three notes" }),
 	)
 	await flow("(f1) relayer registers before the depositor claims", () => flowRelayerFirstRegister(s))
 	await flow("(f2) two concurrent first-time deposits", () => flowConcurrentFirstClaims(s))
