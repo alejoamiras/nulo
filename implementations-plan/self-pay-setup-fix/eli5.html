@@ -1,0 +1,256 @@
+<title>Self-Pay Setup Fix</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --paper: #f7f5f0;
+    --ink: #1d1b17;
+    --ink-2: #57534a;
+    --ink-3: #8a857a;
+    --rule: #dcd7cb;
+    --panel: #efece4;
+    --accent: #0f6e63;
+    --accent-ink: #f7f5f0;
+    --bad: #b3341e;
+    --good: #2f7a3a;
+    --font-display: "Fraunces", Georgia, serif;
+    --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #151412;
+      --ink: #ece8de;
+      --ink-2: #b4aea2;
+      --ink-3: #7f796e;
+      --rule: #2e2b26;
+      --panel: #1e1c19;
+      --accent: #5fc3b4;
+      --accent-ink: #0f1513;
+      --bad: #e8735c;
+      --good: #6fbf7a;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #151412;
+    --ink: #ece8de;
+    --ink-2: #b4aea2;
+    --ink-3: #7f796e;
+    --rule: #2e2b26;
+    --panel: #1e1c19;
+    --accent: #5fc3b4;
+    --accent-ink: #0f1513;
+    --bad: #e8735c;
+    --good: #6fbf7a;
+    color-scheme: dark;
+  }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  main { max-width: 68ch; margin: 0 auto; padding: 48px 20px 80px; display: flex; flex-direction: column; gap: 40px; }
+  h1 { font-family: var(--font-display); font-weight: 600; font-size: 40px; line-height: 1.05; letter-spacing: -0.01em; margin: 0 0 12px; text-wrap: balance; }
+  h2 { font-family: var(--font-body); font-weight: 600; font-size: 20px; margin: 0 0 12px; text-wrap: balance; }
+  h3 { font-family: var(--font-body); font-weight: 600; font-size: 16px; margin: 0 0 6px; }
+  p { margin: 0 0 12px; }
+  p:last-child { margin-bottom: 0; }
+  .eyebrow { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 8px; }
+  .lede { font-size: 18px; color: var(--ink-2); }
+  section { display: flex; flex-direction: column; gap: 12px; }
+  .meta { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; font-size: 14px; color: var(--ink-2); padding: 14px 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+  .meta b { font-weight: 500; color: var(--ink-3); font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
+  code { font-family: var(--font-mono); font-size: 0.9em; }
+  pre { font-family: var(--font-mono); font-size: 13px; line-height: 1.5; background: var(--panel); border: 1px solid var(--rule); padding: 14px 16px; overflow-x: auto; white-space: pre-wrap; margin: 0; }
+  .phase { display: grid; grid-template-columns: 56px 1fr; gap: 0 16px; padding: 14px 0; border-top: 1px solid var(--rule); }
+  .phase:last-of-type { border-bottom: 1px solid var(--rule); }
+  .phase .n { font-family: var(--font-mono); font-size: 13px; color: var(--accent); padding-top: 3px; }
+  .phase .proves { font-size: 14px; color: var(--ink-2); margin-top: 6px; }
+  .phase .proves b { font-weight: 500; color: var(--ink-3); }
+  /* the phase timeline: the subject's own picture */
+  .tl { display: grid; grid-template-columns: 1fr auto 1fr; align-items: stretch; border: 1px solid var(--rule); background: var(--panel); font-family: var(--font-mono); font-size: 12.5px; }
+  .tl > div { padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+  .tl .setup { border-right: 1px dashed var(--rule); }
+  .tl .mark { justify-content: center; align-items: center; color: var(--accent); font-weight: 500; padding: 12px 10px; }
+  .tl .lbl { text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-3); font-size: 10.5px; }
+  .tl .call { display: flex; gap: 8px; align-items: baseline; }
+  .tl .call i { font-style: normal; width: 8px; height: 8px; flex: none; margin-top: 4px; }
+  .tl .ok i { background: var(--good); }
+  .tl .no i { background: var(--bad); }
+  .tl .no { color: var(--bad); }
+  .cap { font-size: 13.5px; color: var(--ink-2); }
+  table { border-collapse: collapse; width: 100%; font-family: var(--font-mono); font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-weight: 500; color: var(--ink-3); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; }
+  .tablewrap { overflow-x: auto; }
+  .cell-bad { color: var(--bad); }
+  ul { margin: 0; padding-left: 20px; }
+  li { margin-bottom: 6px; }
+  .approval { border-left: 3px solid var(--accent); background: var(--panel); padding: 16px 20px; }
+  .approval h2 { margin-bottom: 8px; }
+  .verdicts { display: grid; grid-template-columns: 1fr; gap: 8px; font-size: 14px; }
+  .verdicts div { display: grid; grid-template-columns: 96px 1fr; gap: 12px; }
+  .verdicts b { font-family: var(--font-mono); font-weight: 500; font-size: 12px; color: var(--ink-3); letter-spacing: 0.06em; text-transform: uppercase; padding-top: 2px; }
+  .seed { border: 1px solid var(--rule); }
+  .seed .head { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 16px; border-bottom: 1px solid var(--rule); font-size: 14px; }
+  .seed .head span { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+  .seed pre { border: 0; background: transparent; }
+  .seed.alt .head span { color: var(--ink-3); }
+  .warn { font-size: 14px; color: var(--ink-2); }
+  .warn b { color: var(--bad); font-weight: 600; }
+  a { color: var(--accent); }
+</style>
+
+<main>
+  <header>
+    <div class="eyebrow">Blueprint · mid · rev 6 · reshaped to your answers, awaiting you</div>
+    <h1>Self-Pay Setup Fix</h1>
+    <p class="lede">The bridge's "pay the claim from the gas you already hold" route broke on testnet. We know why (you confirmed the trigger), and this plan fixes it and adds a test on the wallet's own playground that would have caught it, so a change to the wallet's fee path can never ship green again. No bridge deployment in the test harness: your call, and the right one.</p>
+  </header>
+
+  <div class="meta">
+    <b>Plan</b><span><code>implementations-plan/self-pay-setup-fix/plan.md</code> on branch <code>worktree-self-pay-setup-fix</code>, from <code>dev</code> at 898a3b99</span>
+    <b>Delivery</b><span>one PR into <code>dev</code>, touching the wallet bridge, the extension's tests and the playground only; the console shell PR (#546) waits behind it</span>
+    <b>Reviews</b><span>five rounds: codex r1 (reject) · fable (conditional approve) · three fresh codex passes over revs 2, 3, 4 (reject, reject, conditional approve) — 40 ledger rows, every finding adopted</span>
+    <b>Code review</b><span>off, per your standing directive; the codex fix loop is the review</span>
+  </div>
+
+  <section>
+    <h2>What actually went wrong</h2>
+    <p>Every Aztec transaction starts with a short <em>setup</em> part where only a few approved things may happen (paying the fee, an authorisation registry write). The account contract is supposed to say "setup is over" (<code>end_setup</code>) before it runs whatever the app asked for. The node refuses any other public call it finds inside setup, and it says so with exactly the error you saw: <em>Setup function not on allow list</em>.</p>
+    <div class="tl" aria-label="Where the rejected call sat">
+      <div class="setup">
+        <span class="lbl">setup</span>
+        <span class="call ok"><i></i>pay from own Fee Juice</span>
+        <span class="call no"><i></i>mint the bridged token (rejected here)</span>
+      </div>
+      <div class="mark">end_setup</div>
+      <div>
+        <span class="lbl">app</span>
+        <span class="call ok"><i></i>claim the message, mint the token</span>
+        <span class="cap">where the mint belongs</span>
+      </div>
+    </div>
+    <p>The wallet only says "setup is over" when it knows the account itself is paying. To know that, it compares who the app named as payer with the account the request is running as. On testnet the two did not match, so the wallet built the transaction as if someone else were paying, never ended setup, and the mint landed on the wrong side of the line.</p>
+    <p>Why did they not match? The wallet has one code path for <em>sending</em> a transaction and another for <em>simulating</em> it first (the bridge always simulates a claim before sending). The sending path was fixed months ago to run as the account the app names. The simulating path (and its sibling, profiling) still runs as the <strong>first</strong> account in the session, whatever the app asked for. With two accounts granted and the second one selected, the simulation ran as the wrong account. Both reviewers found this in the code, and you confirmed the session had two accounts with the failing one second: this is what you hit.</p>
+    <p>Your first failed attempt (the private-gas route, "unknown nullifier") most likely has the same cause seen from the other side: the fee contract deducts from whoever is executing, so running as the wrong account reads the wrong account's credit. It used to work, so it is in the gate, not a follow-up; if it stays red after the fix, the diagnosis phase treats it as its own problem.</p>
+    <p>The green test we already had could not see it: it uses one account, and it only sends.</p>
+  </section>
+
+  <section>
+    <h2>Why this is a <code>mid</code> plan</h2>
+    <p>Two of the six risk dimensions are high: blast radius (every bridge claim, and every app that simulates as the wallet) and external coupling (the node's rules, two Aztec versions in play). The other four are low, and the design space is small and fully mapped, so a dual audit fits better than three parallel plans. You invoked mid; the reviews agreed.</p>
+  </section>
+
+  <section>
+    <h2>The phases</h2>
+    <div class="phase">
+      <div class="n">0</div>
+      <div><h3>Run the simulation as the account the app named</h3>
+        <p>One change in the wallet's request dispatcher so simulate and profile honour the app's account the same way sending already does, and refuse an account the app was never granted. Utility reads and signing already name their account correctly and stay as they are (pinned by tests). Plus the cheapest possible repro: a two-account session simulating a self-paid transfer, with the node's validation switched on.</p>
+        <p class="proves"><b>Proves itself by:</b> unit tests in the wallet bridge; the two-account e2e green now, and on the old code red for the exact documented reason (wrong account, external payer, the node's error); its neighbour tests still green.</p></div>
+    </div>
+    <div class="phase">
+      <div class="n">1</div>
+      <div><h3>The gate: the same wallet path, on the playground, on a real node</h3>
+        <p>No bridge deployment. The harness's local node runs the same software as testnet and enforces the same setup rules (the test checks nobody widened the list). The playground drives the exact shape the bridge claim has inside the wallet: a private call that finishes with a public one, paid by the account itself. Concretely, a "mint to private" on a token the account is allowed to mint — that is the very call the bridge's claim makes underneath. Sixteen cells: an account that has never sent × one that has; the first granted account × the second; simulate × send; paying from public gas × from the private-gas credit. Every landed cell must show a successful receipt, the balance moving, and the fee leaving; every simulate must reach the node's validator and be tied to its own request. Plus a deliberately wrong transaction — the account executing, another account named as payer, no fee call — that the node must reject with the exact error you saw, proving the check is live.</p>
+        <p class="proves"><b>Proves itself by:</b> every cell named in the log and ending in success or in a node-side error (never a harness failure); the wrong transaction rejected with your error text; the old code shown to run as the wrong account.</p></div>
+    </div>
+    <div class="phase">
+      <div class="n">2</div>
+      <div><h3>Diagnose whatever is still red (skipped if nothing is)</h3>
+        <p>Each red cell is recorded with what the wallet actually used: which account, which fee route, which option it encoded, where the setup boundary sat relative to every public call. Each candidate explanation comes with an experiment and the outcome it predicts, so a conclusion is a cause, not a pattern.</p>
+        <p class="proves"><b>Proves itself by:</b> the lessons file names each surviving explanation with its experiment's observed outcome, or records "no red cells".</p></div>
+    </div>
+    <div class="phase">
+      <div class="n">3</div>
+      <div><h3>Any remaining fix</h3>
+        <p>The smallest change at the diagnosed spot, with its unit test. The extra "guard" the first draft proposed is dropped unless the diagnosis shows it is needed: it sat on a path the failure never took.</p>
+        <p class="proves"><b>Proves itself by:</b> all eight public self-pay cells green; the neighbouring wallet tests green.</p></div>
+    </div>
+    <div class="phase">
+      <div class="n">4</div>
+      <div><h3>Make it a required check</h3>
+        <p>The cheap test joins the shared pool; the matrix joins the existing heavy job that already runs the private-gas fixtures, with retries switched off so a flaky pass cannot hide a regression. The change filter already covers the wallet bridge, the extension and the playground. Placement is pinned by the repo's CI-gating tests so nobody can loosen it quietly, and the branch's protection rules are read back to prove the status is actually required, not just present.</p>
+        <p class="proves"><b>Proves itself by:</b> a clean CI run on the branch's final commit with every cell named, the measured run time, plus the branch-protection read-out, linked in the lessons.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The test matrix</h2>
+    <div class="tablewrap">
+    <table>
+      <thead><tr><th>account state</th><th>which account</th><th>simulate</th><th>send</th></tr></thead>
+      <tbody>
+        <tr><td>never sent</td><td>first granted</td><td>must pass</td><td>must pass</td></tr>
+        <tr><td>never sent</td><td>second granted</td><td class="cell-bad">wrong account on the old code</td><td>must pass</td></tr>
+        <tr><td>has sent</td><td>first granted</td><td>must pass</td><td>must pass</td></tr>
+        <tr><td>has sent</td><td>second granted</td><td class="cell-bad">wrong account on the old code</td><td>must pass</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p class="cap">The table runs twice, once paying from public gas and once from the private-gas credit: sixteen cells. On the old code the two marked cells run as the wrong account and fail on the token's own permission check first (that is the proof of the wrong account); the exact node error you saw is reproduced by the deliberately wrong transaction beside the matrix. After the fix, all sixteen pass.</p>
+  </section>
+
+  <section>
+    <h2>Human context</h2>
+    <ul>
+      <li><strong>Why the existing test was green.</strong> It used one account and only sent. The bug lives in the simulate path with two accounts. Neither dimension was in any test; the plan adds both as axes, not as one-off cases.</li>
+      <li><strong>Why the fix comes before the big test.</strong> The defect is visible in the code today and has a two-minute repro. Building the bridge harness first would have meant three hours to confirm what a unit test confirms in seconds. The harness still gets built: your requirement is the real claim shape, and that is what the gate drives.</li>
+      <li><strong>Why no bridge deployment (your A5).</strong> Five review rounds designed a harness that deployed the whole bridge per run: a forge build in CI, a dedicated job, script changes in the bridge package. All of that bought the literal hub call — but the defect is in the wallet, and the node judges the wallet's transaction the same way whether the public call underneath comes from the hub or from a token mint. The playground reproduces the mechanism, the exact error text, and both fee routes, with nothing outside the extension, its tests and the playground. The real hub claim stays covered by the bridge package's own smoke and, later, a testnet canary.</li>
+      <li><strong>Why three reviews said "reject" before one approved (and why rev 6 was not re-audited).</strong> The first draft guessed a fix on the wrong path, wrote gates in commands that only cover the extension, and did not know the CI runner never builds the Ethereum contracts the harness needs. The second draft still aimed the fix at two wallet methods that were never broken, would have let the cheap repro skip the node's validation, and put the CI job in the wrong workflow. The third draft's cheap repro could not reach the node's check at all, and its simulation oracle could not tell one claim from another. All of it is folded in; the decision ledger in plan.md (40 rows) lists each finding and what changed. Each round found something real; that is the review working, not the plan failing. Rev 6 removes the audited bridge harness on your instruction and keeps every audited rule for the tests themselves (validation on, argument-bound simulate checks, the negative control, no retries, branch-protection proof); it adds no new mechanism, so it was not sent round again.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Open questions</h2>
+    <ul>
+      <li><strong>A2 · the private-gas variant</strong> — you said it used to work, so it is in the gate (the private-gas half of the sixteen cells), not a follow-up.</li>
+      <li><strong>A3 · a nightly testnet canary</strong> — follow-up, as you said.</li>
+      <li><strong>A4 · your session</strong> — two accounts, the failing one second. Attribution settled.</li>
+      <li><strong>A5 · no bridge deployment</strong> — adopted; the run time is measured in Phase 4 rather than estimated.</li>
+      <li><strong>A6 · the behaviour change</strong> — confirmed as the correct behaviour.</li>
+      <li><strong>A7 · one thing to confirm.</strong> The reshaped gate proves the wallet's phase layout and account identity on the node's real rules using the hub claim's inner call, but it does not drive the hub contract itself. Driving the tools app end to end stays a follow-up. Say if you want that inside this arc after all.</li>
+    </ul>
+  </section>
+
+  <div class="approval">
+    <h2>Your approval</h2>
+    <ul>
+      <li>Confirm scope: wallet fix + the playground gate (both fee routes) + CI pins; the tools app, the bridge package and the contracts untouched.</li>
+      <li>Confirm tier <code>mid</code>.</li>
+      <li>Confirm the validation plan: per-package lint/typecheck/unit on every phase; the network e2e on phases 0, 1, 3; a dispatched CI run on phase 4.</li>
+      <li>Confirm delivery: one PR into <code>dev</code>, opened after the codex fix loop; #546 rebases after it.</li>
+      <li>Answer A7.</li>
+      <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    </ul>
+    <div class="verdicts">
+      <div><b>codex r1</b><span>reject — five findings on the first draft, all adopted (ledger rows 2–7, 9, 11–17)</span></div>
+      <div><b>fable r1</b><span>conditional approve — found the root cause (H5) in the code; conditions adopted (rows 1, 3, 5, 7–10, 18)</span></div>
+      <div><b>codex fresh</b><span>reject on rev 2 — Phase 0 aimed at two methods that were never broken, the cheap repro would skip validation, CI job mislocated; all folded into rev 3 (ledger rows 20–30)</span></div>
+      <div><b>codex fresh 2</b><span>reject on rev 3 — the cheap repro's reversal would die on token authorisation before the node's check; a simulation that "returned" proved nothing since the claim returns no value; folded into rev 4 (rows 31–36)</span></div>
+      <div><b>codex final</b><span id="final-verdict"><strong>conditional approve</strong> on rev 4 — four editorial conditions (the Phase 0 gate line, binding the simulation to this claim's exact arguments, settlement checks on the registration case, one assumption widened), all applied in rev 5 (rows 37–40)</span></div>
+      <div><b>rev 6</b><span>your answers folded in (rows 41–45): the bridge harness removed, the private-gas route made mandatory, attribution settled</span></div>
+    </div>
+  </div>
+
+  <section>
+    <h2>Implementation seeds <span class="cap">(draft until approval)</span></h2>
+    <p class="warn"><b>Use exactly one per session.</b> They do not compose; setting one replaces the other. The session must run inside the plan's worktree (<code>agent-worktree resume self-pay-setup-fix</code>).</p>
+    <div class="seed">
+      <div class="head"><strong>Recommended: /goal</strong><span>completion is transcript-observable</span></div>
+      <pre>/goal All five phases (0–4) marked ✓ in implementations-plan/self-pay-setup-fix/plan.md (the per-phase headers in the file — not the chat, not the task list), each ✓ backed by that phase's validation gate as defined in plan.md reported passing in the transcript — every phase: `bun run lint` exit 0 plus its own lines (Phase 0: `bun run --cwd packages/wallet-bridge typecheck` and `test` exit 0 with the new dispatcher pins (simulate/profile honour `from`, unauthorized refused, utility scopes and createAuthWit unchanged), `bun run --cwd apps/extension typecheck` and `test` exit 0, `bun run --cwd apps/playground typecheck` exit 0, `sim-from-selfpay.test.ts` green with validation ON via `bun run --cwd apps/extension e2e:agent`, AND its reversal on 898a3b99's dispatcher quoted showing resolved = accounts[0], payer = accounts[1], route fpc, option EXTERNAL and the node's "Setup function not on allow list", neighbours sim-methods / multi-account-from / tx-sendTx-selfPay / authwit-lifecycle green; Phase 1: `bun run --cwd apps/playground typecheck` exit 0, `selfpay-phase.test.ts` via `bun run --cwd apps/extension e2e:agent` with the negative control rejected with "Setup function not on allow list", TX_PUBLIC_SETUP_ALLOWLIST asserted unset and the effective list recorded, every matrix cell (both fee variants) named in the log and ending in the success oracles or a node-origin error, zero fixture-origin failures, the pre-fix reversal quoted, red cells quoted; Phase 2: lessons/phase-2.md naming each surviving explanation with its intervention's observed outcome, or "no red cells"; Phase 3: every cell of `selfpay-phase.test.ts` green in both fee variants and the neighbour list green (cells under real proving if init/PXE code changed); Phase 4: `bun run lint:actions` and `bun run test:ci-gating` exit 0 with the placement pins, a linked green workflow_dispatch on the final commit with every cell named and the measured wall-time recorded, and `gh api` branch protection for dev quoted with network-e2e-status required); for each phase `LESSONS_FILE=implementations-plan/self-pay-setup-fix/lessons/phase-N.md` printed in the transcript; `/code-review` NOT run (plan.md says code_review: off); the codex fix loop over the net diff from 898a3b99 converged, evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; a single PR from worktree-self-pay-setup-fix into dev exists on GitHub, created only after the loop converged (`gh pr view` output in the transcript); `bun run lint` and `bun run --cwd apps/extension test` both report exit 0 in the transcript.</pre>
+    </div>
+    <div class="seed alt">
+      <div class="head"><strong>Alternative: /loop 15m</strong><span>interval-driven fallback</span></div>
+      <pre>/loop 15m Drive implementations-plan/self-pay-setup-fix forward. Never idle waiting for my input. Each firing:
+1. Reality check: read implementations-plan/self-pay-setup-fix/plan.md and lessons/ (authoritative state — not the chat); native task list empty? rebuild it from plan.md's phase headers; `git status`, `git log --oneline -5`; a PR exists? `gh pr view --json statusCheckRollup` (no --watch); no PR but a pushed branch? `gh run list --branch $(git branch --show-current) --limit 1 --json status,databaseId`.
+2. Waiting on CI is fine — confirm it is progressing (`gh run watch <id>` up to 10 min); use the wait to prep the next phase. Never weaken a gate.
+3. No task in hand? Take the next pending phase from plan.md. After each meaningful edit run the fast layers for the touched packages (`bun run lint`, the package's `typecheck`/`test`). Network e2e via `bun run --cwd apps/extension e2e:agent <file>`, solo, never two suites at once. Commit small, signed, conventional; push the feature branch.
+4. Stuck or facing a decision you would bring to me? Call `/codex high` with the captures and decide together; log it in lessons/phase-N.md. Hard limits stay hard: never merge, never publish, never widen scope beyond plan.md, never relax the sandbox allow-list or a CI gate.
+5. Same step failed 5 times? Stop retrying; reassess with codex.
+6. Phase green? "Green" = its validation gate in plan.md, commands and pass criteria. Paste the result, mark ✓ in plan.md, write lessons/phase-N.md, print `LESSONS_FILE=implementations-plan/self-pay-setup-fix/lessons/phase-N.md`, `agent-worktree status self-pay-setup-fix "phase N green: <next>"`, advance.
+7. All five phases ✓? Post-implementation per plan.md: no `/code-review` (code_review: off); `/codex high` over the net diff from 898a3b99 with plan.md, the ledger, the adversarial ask and the plan's no-over-engineering + comment-quality rules; fix, commit, resume the same session — until a round yields nothing material (3 rounds still churning → surface and stop). Then `gh pr create` into dev (the first time any PR is opened), `gh pr checks --watch`, the wrap-up report (what shipped, every contentious decision with its ELI5, open items). Surface and stop.
+Keep the task list current; plan.md stays the source of truth.</pre>
+    </div>
+  </section>
+
+  <p class="cap">Full plan: <code>implementations-plan/self-pay-setup-fix/plan.md</code> · recon: <code>recon.md</code> · audits: <code>audit-codex.md</code>, <code>audit-fable.md</code> · lessons: <code>lessons/</code></p>
+</main>
