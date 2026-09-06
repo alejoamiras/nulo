@@ -12,12 +12,16 @@
  * `stage === "submitting"` because the FSM forbids `submitting → cancelled`
  * at that point — removing the affordance is structurally honest (better than
  * a silent no-op click).
+ *
+ * The card itself carries no ARIA role: it contains focusable buttons, and a
+ * button role may not. The whole-card click is a pointer convenience only; the
+ * `focus` button is the accessible control.
  */
-import type { PropType } from "vue"
+import { computed, type PropType } from "vue"
 import type { JobStage } from "@nulo/wallet-core/jobs"
 import TransactionCardLayout from "./TransactionCardLayout.vue"
 
-defineProps({
+const props = defineProps({
 	title: { type: String, default: "Creating transaction" },
 	/** Default kept terse on purpose. The orphan-fallback render paths in
 	 *  `RecentActivityView.vue` mount this card without an explicit subtitle,
@@ -53,46 +57,77 @@ defineProps({
 	stage: { type: String as PropType<JobStage | null>, default: null },
 })
 
-const emit = defineEmits(["cancel"])
+const emit = defineEmits(["cancel", "focus"])
+
+/** `queued` is the only stage at which an approval popup can exist. */
+const focusable = computed(() => Boolean(props.jobId) && props.stage === "queued")
+const showCancel = computed(() => props.cancellable && Boolean(props.jobId) && props.stage !== "submitting")
+
+function onCardClick() {
+	if (focusable.value) emit("focus", props.jobId)
+}
 </script>
 
 <template>
-	<TransactionCardLayout
-		:title="title"
-		:icon="icon"
-		:amount="amount"
-		:amountSymbol="amountSymbol"
-		:stage="stage"
-		testId="tx-awaiting-card"
-	>
-		<template #badge>
-			<Spinner size="10" color="--nulo-accent" />
-		</template>
+	<div :class="[$style.card, focusable && $style.focusable]" :title="focusable ? 'Show the approval window' : undefined" @click="onCardClick">
+		<TransactionCardLayout
+			:title="title"
+			:icon="icon"
+			:amount="amount"
+			:amountSymbol="amountSymbol"
+			:stage="stage"
+			:actionCount="(focusable ? 1 : 0) + (showCancel ? 1 : 0)"
+			testId="tx-awaiting-card"
+		>
+			<template #badge>
+				<Spinner size="10" color="--nulo-accent" />
+			</template>
 
-		<template v-if="transferTypeLabel || originLabel" #title-trailing>
-			<span :class="$style.title_sep">·</span>
-			<span :class="$style.transfer_chip">{{ transferTypeLabel || originLabel }}</span>
-		</template>
+			<template v-if="transferTypeLabel || originLabel" #title-trailing>
+				<span :class="$style.title_sep">·</span>
+				<span :class="$style.transfer_chip">{{ transferTypeLabel || originLabel }}</span>
+			</template>
 
-		<template #secondary>
-			<span :class="$style.subtitle" role="status" aria-live="polite" aria-atomic="true">{{ subtitle }}</span>
-		</template>
+			<template #secondary>
+				<span :class="$style.subtitle" role="status" aria-live="polite" aria-atomic="true">{{ subtitle }}</span>
+			</template>
 
-		<template v-if="cancellable && jobId && stage !== 'submitting'" #actions>
-			<button
-				type="button"
-				:class="$style.action_btn"
-				aria-label="Cancel transaction"
-				data-testid="tx-awaiting-cancel"
-				@click="emit('cancel', jobId)"
-			>
-				<Icon name="close" size="14" color="secondary" />
-			</button>
-		</template>
-	</TransactionCardLayout>
+			<template v-if="focusable || showCancel" #actions>
+				<button
+					v-if="focusable"
+					type="button"
+					:class="$style.action_btn"
+					aria-label="Show the approval window"
+					data-testid="tx-awaiting-focus"
+					@click.stop="emit('focus', jobId)"
+				>
+					<Icon name="expand" size="14" color="secondary" />
+				</button>
+				<button
+					v-if="showCancel"
+					type="button"
+					:class="$style.action_btn"
+					aria-label="Cancel transaction"
+					data-testid="tx-awaiting-cancel"
+					@click.stop="emit('cancel', jobId)"
+				>
+					<Icon name="close" size="14" color="secondary" />
+				</button>
+			</template>
+		</TransactionCardLayout>
+	</div>
 </template>
 
 <style module>
+.card {
+	display: contents;
+}
+
+.focusable {
+	display: block;
+	cursor: pointer;
+}
+
 /* Subtitle takes whatever horizontal room it can after the chip; truncates
  * with ellipsis when the chip pushes back. min-width: 0 + flex: 0 1 auto
  * let it shrink below its intrinsic width inside the Flex parent. */

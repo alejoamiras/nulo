@@ -26,4 +26,5 @@ definePassthroughsExhaustive<Methods>()(DappInteractionServiceClient.prototype, 
 	"resolveInteraction",
 	"rejectInteraction",
 	"isInteractionCancelled",
+	"focusInteractionWindow",
 ])

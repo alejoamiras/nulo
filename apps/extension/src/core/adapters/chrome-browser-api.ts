@@ -22,6 +22,8 @@ import type {
 	BrowserApi,
 	CreatedWindow,
 	CreateWindowOptions,
+	UpdateWindowOptions,
+	WindowBounds,
 	MessageListener,
 	MessagePortLike,
 	RuntimePort,
@@ -177,6 +179,23 @@ class ChromeWindowsAdapter implements WindowPort {
 
 	public async remove(windowId: number): Promise<void> {
 		await chrome.windows.remove(windowId)
+	}
+
+	public async update(windowId: number, options: UpdateWindowOptions): Promise<void> {
+		await chrome.windows.update(windowId, options)
+	}
+
+	public async getLastFocused(): Promise<WindowBounds | undefined> {
+		try {
+			// `normal` only: anchoring on another approval popup would stack popups
+			// on top of each other instead of on the dApp's window.
+			const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] })
+			const { left, top, width, height } = win ?? {}
+			if ([left, top, width, height].some((n) => typeof n !== "number")) return undefined
+			return { left, top, width, height }
+		} catch {
+			return undefined
+		}
 	}
 }
 

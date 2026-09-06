@@ -62,6 +62,8 @@ defineProps({
 	txStatus: { type: String, default: undefined },
 	txHash: { type: String, default: undefined },
 	stage: { type: String as PropType<JobStage | null>, default: null },
+	/** Number of 16px icon buttons in `#actions`; sizes the right-side reservation (see `.wrapper_two_actions`). */
+	actionCount: { type: Number, default: 1 },
 })
 
 /**
@@ -106,7 +108,7 @@ function hasActionsContent() {
 		:data-tx-status="txStatus"
 		:data-tx-hash="txHash"
 		:data-stage="stage"
-		:class="[$style.wrapper, hasActionsContent() && $style.wrapper_has_actions]"
+		:class="[$style.wrapper, hasActionsContent() && $style.wrapper_has_actions, hasActionsContent() && actionCount > 1 && $style.wrapper_two_actions]"
 	>
 		<Flex align="center" gap="16" :class="$style.left_content">
 			<Flex align="center" justify="center" :class="$style.activity_icon">
@@ -158,6 +160,11 @@ function hasActionsContent() {
  */
 .wrapper_has_actions {
 	padding-right: 20px;
+}
+
+/* Two 16px buttons: 32px + the same 4px breathing room. */
+.wrapper_two_actions {
+	padding-right: 36px;
 }
 
 /* `top: 6px` puts the X visually just below the card's top edge — anchored

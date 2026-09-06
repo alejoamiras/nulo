@@ -96,7 +96,7 @@ const sendBusy = ref(false)
 const sendFn = vi.fn(async (): Promise<string> => "")
 const sendDispose = vi.fn()
 const exitError = ref<string | null>(null)
-const exitFn = vi.fn(async (): Promise<string> => "")
+const exitFn = vi.fn(async (_plan: unknown, _approvedCeiling?: bigint): Promise<string> => "")
 const exitDispose = vi.fn()
 
 const readContract = vi.fn(async () => "0x0000000000000000000000000000000000000000")
@@ -1249,6 +1249,68 @@ describe("SendWizard", () => {
 		review.vm.$emit("confirm")
 		await flushPromises()
 		expect(exitFn).toHaveBeenCalledTimes(1)
+	})
+
+	it("a private exit is blocked without private gas and moves nothing; a public exit with the same balances goes through", async () => {
+		realCeilings()
+		ownGasCeilingFor.mockImplementation(() => 10n ** 16n)
+		gasHeld.value = 0n
+		gasHeldPublic.value = 10n ** 21n
+		gasHeldSelfPay.value = true
+		nextResolved = (token) => resolvedToken(token, HUB_REGISTERED)
+		const w = await wizard()
+		w.findComponent({ name: "WizardShell" }).vm.$emit("update:direction", "l2-to-l1")
+		await flushPromises()
+		w.findComponent({ name: "TokenStep" }).vm.$emit("select", candidate())
+		await flushPromises()
+		const amountStep = () => w.findComponent({ name: "AmountStep" })
+		expect(amountStep().props("isPrivate")).toBe(true)
+		expect(amountStep().props("blockedReason")).toContain("withdrawal pays its fee only from private gas")
+		// Enough credit releases it, and the review prices the private gas set aside.
+		gasHeld.value = 10n ** 17n
+		await flushPromises()
+		expect(amountStep().props("blockedReason")).toBeNull()
+		amountStep().vm.$emit("update:amount", "1")
+		amountStep().vm.$emit("update:valid", true)
+		await flushPromises()
+		amountStep().vm.$emit("next")
+		await flushPromises()
+		const review = w.findComponent({ name: "ReviewStep" })
+		expect(review.props("estimate").networkFee).toContain("FJ from the private gas you already hold")
+		// Fees up by more than a tenth under the review, credit ample: the confirm signs nothing — the
+		// fee contract would keep the whole new ceiling, which nobody approved.
+		gasHeld.value = 10n ** 21n
+		ownGasCeilingFor.mockImplementation(() => 10n ** 16n + 10n ** 15n + 1n)
+		review.vm.$emit("confirm")
+		await flushPromises()
+		expect(exitFn).not.toHaveBeenCalled()
+		expect(w.find(`[data-testid="${TESTIDS.sendReviewStale}"]`).text()).toContain("fees moved")
+		// Back at the review with the price steady: the exit is sent with the approved bound (the
+		// shown figure plus the tenth the confirm tolerates).
+		ownGasCeilingFor.mockImplementation(() => 10n ** 16n)
+		const step = w.findComponent({ name: "AmountStep" })
+		step.vm.$emit("update:amount", "1")
+		step.vm.$emit("update:valid", true)
+		await flushPromises()
+		step.vm.$emit("next")
+		await flushPromises()
+		const again = w.findComponent({ name: "ReviewStep" })
+		again.vm.$emit("confirm")
+		await flushPromises()
+		expect(exitFn).toHaveBeenCalledTimes(1)
+		expect(exitFn.mock.calls[0]?.[1]).toBe(10n ** 16n + 10n ** 15n)
+		// The exit stub refuses, so the review stays up. The credit gone by the next confirm: the
+		// re-read stands the review down and signs nothing.
+		exitFn.mockClear()
+		gasHeld.value = 0n
+		again.vm.$emit("confirm")
+		await flushPromises()
+		expect(exitFn).not.toHaveBeenCalled()
+		expect(w.find(`[data-testid="${TESTIDS.sendReviewStale}"]`).text()).toContain("only from private gas")
+		// A public exit needs no private gas at all.
+		w.findComponent({ name: "AmountStep" }).vm.$emit("update:isPrivate", false)
+		await flushPromises()
+		expect(w.findComponent({ name: "AmountStep" }).props("blockedReason")).toBeNull()
 	})
 
 	it("a grant outcome for a superseded selection is discarded", async () => {

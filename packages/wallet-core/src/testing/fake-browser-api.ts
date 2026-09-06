@@ -21,6 +21,8 @@ import type {
 	BrowserApi,
 	CreatedWindow,
 	CreateWindowOptions,
+	UpdateWindowOptions,
+	WindowBounds,
 	MessageListener,
 	MessagePortLike,
 	MessageSender,
@@ -217,11 +219,27 @@ class FakeWindowsAdapter implements WindowPort {
 	private nextId = 1000
 	private readonly live = new Set<number>()
 	private readonly removedListeners: Array<(id: number) => void> = []
+	/** Test-only: every `create` call's options, in order. */
+	public readonly creates: CreateWindowOptions[] = []
+	/** Test-only: every `update` call, in order. */
+	public readonly updates: Array<{ windowId: number; options: UpdateWindowOptions }> = []
+	/** Test-only: what `getLastFocused` returns. */
+	public lastFocused: WindowBounds | undefined
 
-	public async create(_options: CreateWindowOptions): Promise<CreatedWindow> {
+	public async create(options: CreateWindowOptions): Promise<CreatedWindow> {
+		this.creates.push(options)
 		const id = this.nextId++
 		this.live.add(id)
 		return { id }
+	}
+
+	public async update(windowId: number, options: UpdateWindowOptions): Promise<void> {
+		if (!this.live.has(windowId)) throw new Error(`No window with id: ${windowId}.`)
+		this.updates.push({ windowId, options })
+	}
+
+	public async getLastFocused(): Promise<WindowBounds | undefined> {
+		return this.lastFocused
 	}
 
 	public onRemoved(listener: (windowId: number) => void): Unsubscribe {
@@ -248,6 +266,9 @@ class FakeWindowsAdapter implements WindowPort {
 	public reset(): void {
 		this.live.clear()
 		this.removedListeners.length = 0
+		this.creates.length = 0
+		this.updates.length = 0
+		this.lastFocused = undefined
 	}
 }
 
