@@ -83,3 +83,15 @@ the unguarded example; `probe` named as the reusable workflow's input; `dappConn
 shared-browser exception documented; the popup-store sentence made precise; a 0 baseline read as
 invalid/unavailable. Codex confirmed deferring the eight-caller threshold change and noted the
 constraint for that follow-up: cold-wake must not open an extension page before the discovery click.
+
+## Round 3 — `converged` — response (verbatim)
+
+No remaining material findings (high confidence). The deferred liveness follow-up remains appropriate, provided it preserves the first-heartbeat timing and cold-wake constraints.
+
+converged
+
+Loop closed at three rounds: 1 and 2 `not converged` (documentation precision only, code confirmed
+in round 1), 3 clean. Open items for the owner: the product edge (an open popup outlives a restart
+logged-in; `lessons/phase-1.md`) and the eight-caller post-stop liveness threshold follow-up, which
+must keep `sw-resilience`'s pre-kill baseline for its first-heartbeat timing and must not open an
+extension page in `cold-wake-discovery` before the discovery click.
