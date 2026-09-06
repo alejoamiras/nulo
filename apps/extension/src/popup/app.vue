@@ -356,13 +356,17 @@ watch(
 	},
 )
 
+// `flush: "sync"` is load-bearing: the port client reconnects synchronously inside its own
+// disconnect callback (a dead worker is woken by `chrome.runtime.connect`, which returns at
+// once), so the flag goes false → true in ONE tick and a batched watcher sees no change at all.
+// Every worker restart under an open popup must start a boot run, or the shell keeps a session
+// that no longer exists.
 watch(
 	() => isBackgroundConnected.value,
-	() => {
-		if (isBackgroundConnected.value) {
-			loadProfile()
-		}
+	(connected) => {
+		if (connected) loadProfile()
 	},
+	{ flush: "sync" },
 )
 
 onBeforeUnmount(() => {
