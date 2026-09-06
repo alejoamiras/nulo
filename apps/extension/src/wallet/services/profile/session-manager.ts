@@ -344,16 +344,22 @@ export class SessionManager {
 	 *  iff a session was actually open (idempotent when already closed).
 	 *  Safe to call multiple times.
 	 *
+	 *  Returns whether it emitted. A worker that restarted holds no in-memory
+	 *  session while the persisted record may still exist, so an explicit lock
+	 *  that reaches here emits nothing — the caller that owns the user's intent
+	 *  (`lockActiveProfile`) announces the lock itself on `false`.
+	 *
 	 *  `expected` (the expiry path passes the session it OBSERVED): when the
 	 *  active session is no longer that exact object, a successor already
 	 *  replaced it — this stale close must not touch the successor's
 	 *  in-memory state or artifacts, so it returns untouched. */
-	public async close(expected?: ActiveSession): Promise<void> {
+	public async close(expected?: ActiveSession): Promise<boolean> {
+		let emitted = false
 		try {
 			// Identity guard — synchronous, so there is no TOCTOU between the
 			// check and the in-memory head below.
 			if (expected && this.activeSession !== expected) {
-				return
+				return false
 			}
 			const gen = this.sessionGeneration
 			// B-01: memory-first + asymmetric-to-open. Clear the in-memory session
@@ -366,6 +372,7 @@ export class SessionManager {
 			if (this.activeSession) {
 				zeroize(this.activeSession.dek)
 				this.activeSession = undefined
+				emitted = true
 				this.onChange(undefined)
 			}
 			// The ARTIFACT SECTION: a successor open that COMMITTED (bumped the
@@ -393,6 +400,7 @@ export class SessionManager {
 		} catch (error) {
 			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to close profile session", getErrorMessage(error))
 		}
+		return emitted
 	}
 
 	/** True iff a session record is still persisted in storage. Used by

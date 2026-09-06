@@ -853,7 +853,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	public async lockActiveProfile(): Promise<void> {
 		await this.ensureInitialized()
 		return this.runExclusive(async () => {
-			await this.sessionManager.close()
+			const emitted = await this.sessionManager.close()
 			// B-01 post-close read-back: `close()` is memory-first and swallows a
 			// storage-delete failure (so clearLockAlarm always runs), but an
 			// explicit lock that leaves the persisted bearer alive would silently
@@ -862,6 +862,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (await this.sessionManager.hasPersistedSession()) {
 				throw new Error("Lock did not persist — the session record could not be cleared; retry")
 			}
+			// A restarted worker holds no in-memory session, so `close()` emits
+			// nothing over a record it just deleted (or over none at all, when
+			// `restore()` already dropped a bearerless record). The user asked to
+			// lock and the read-back proved it: announce it, or the popups that
+			// route on this event stay rendered as authenticated.
+			if (!emitted) this.emit("onActiveProfileChanged", undefined)
 		})
 	}
 
