@@ -137,8 +137,10 @@ Skill bullet + ledger #29 → fixed (this plan); liveness bullet names the helpe
 
 ## Security & adversarial considerations
 
-- The new emit fires only when a persisted record was actually deleted; it cannot be triggered by
-  a caller that has nothing to close, and it never runs inside `open()`. A forged
+- The new emit fires only from `lockActiveProfile`, after the persistence read-back proved the
+  lock — including when there was nothing left to delete (the user asked to lock; announcing an
+  already-locked state is idempotent for every handler). It never runs inside `open()` or any
+  `isActive()`-gated close. A forged
   `onActiveProfileChanged` from a page is already impossible (events are service → client only).
 - The popup-side lock is strictly more conservative: it moves a popup that a dead worker left
   logged-in to the lock screen. The risk is ejecting a LIVE session on a stale `locked` result; the

@@ -302,18 +302,23 @@ by identity because plain popup pages change URL under a lock redirect.
   kill at `service-restore` must roll back, a kill at `account-state` must recover. The
   `restore-gate` rendezvous anchors the kill at the named phase; a torn refusal is the failure
   (`network/backup-restore-sw-restart.test.ts`).
-- **A popup that outlives a worker restart locks itself on reconnect.** The replacement worker
-  holds no session (a passkey profile's record survives on disk, never silently restored; a strict
-  password profile's bearerless record is dropped at boot), while the popup keeps its store. Its
-  reconnect boot resolves `locked` and, under an auth-required route with a profile selected,
-  enters the locked state through the same routine the lock event runs (`popup/lock-landing.ts`
-  decides; `popup/reconcile-locked-boot.ts` fences the action against an unlock that landed
-  through the event path meanwhile — the boot path never bumps the event sequence). An explicit
-  Lock over such a worker always announces itself: `lockActiveProfile` emits when `close()` had no
-  in-memory session to emit over. A test that keeps a popup open across `stopServiceWorker`
-  therefore waits for `#/popup/auth` to arrive on its own and never clicks Lock (the reconnect
-  cleanup hides the control); `sw-resilience`'s open-popup test and the passkey canary's stage 4
-  are the pins (ledger #29).
+- **A popup that outlives a worker restart locks itself on reconnect — when the restart is a
+  lock.** The port client reconnects synchronously inside its own disconnect callback, so the
+  shell's connected flag flips false → true in one tick; `app.vue` watches it with `flush: "sync"`
+  so every reconnect starts a boot run (a batched watcher saw no change and never did). That run
+  resolves `locked` when the replacement worker restored no session — a passkey profile (its
+  record survives on disk, never silently restored) or a strict-mode password profile (bearerless
+  record dropped at boot); a lenient password session restores and the run stays `active`. Under an
+  auth-required popup route with a profile selected, `locked` enters the locked state through the
+  same routine the lock event runs (`popup/lock-landing.ts` decides; `popup/reconcile-locked-boot.ts`
+  reports `event-superseded` instead of acting when any event landed during the lookup — the boot
+  path never bumps the event sequence). Approval windows (`#/windows/*`) carry no
+  `isAuthRequired` meta, so there the run only settles; they gate their content on `isLogined`
+  themselves. An explicit Lock over such a worker always announces itself: `lockActiveProfile`
+  emits when `close()` had no in-memory session to emit over. A test that keeps a popup open across
+  `stopServiceWorker` waits for `#/popup/auth` to arrive on its own and never clicks Lock (the
+  reconnect cleanup hides the control); `sw-resilience`'s open-popup test and the passkey canary's
+  stage 4 are the pins (ledger #29).
 - **The playground sends every tx `NO_WAIT`**: `waitForPgResult` proves the node accepted the
   submission (a real proof on the canary lane), not mining. A test that needs the block waits on the
   node (`waitForTxMined` in `fixtures/aztec.ts`), as both canaries do; the wallet-UI `transfers` flow
@@ -518,7 +523,7 @@ the sanctioned response.
 | 26 | random early-stage timeouts in unrelated tooling after many local runs | sandbox datadir on tmpfs pinned RAM via deleted-but-open LMDB files | datadir on real disk + `e2e:reap` (#310) | fixed |
 | 27 | `authwit-lifecycle` revoke pin passed before revoke existed | `handleSendTx` ignored a session-authorised `opts.from` (sent as account A) | `resolveNetworkAndAccount(requestedFrom)` | fixed, `network-e2e-required` |
 | 28 | every check green, `mergeStateStatus: BLOCKED` on a labelled PR | duplicate concurrency-cancelled runs leave FAILURE aggregators; the believed "latest-per-name" mechanism was refuted by measurement | `pr-quick.yml` dropped `labeled` triggers; blocks remain unexplained | **open** — capture evidence before remedying |
-| 29 | `passkey-execution-canary`: `waitForHash(#/popup/auth)` 15s timeout after the header lock, first seen on the first REAL restart the stage ever ran | the replacement worker holds no in-memory session, so `SessionManager.close()` clears the persisted record without emitting `onActiveProfileChanged`; the event-driven redirect never fires; the reconnect boot's `locked` result routed only when no profile was selected, so the open popup kept its page (`e2e-skill-refresh/lessons/phase-1.md`) | product: `lockActiveProfile` emits when `close()` did not; a locked reconnect boot under an auth-required route locks the shell, fenced against the event path; harness: post-stop liveness baselines, the canary asserts the automatic landing (`restart-lock-truth`) | fixed |
+| 29 | `passkey-execution-canary`: `waitForHash(#/popup/auth)` 15s timeout after the header lock, first seen on the first REAL restart the stage ever ran | the replacement worker holds no in-memory session, so `SessionManager.close()` clears the persisted record without emitting `onActiveProfileChanged`; the event-driven redirect never fires; the reconnect boot's `locked` result routed only when no profile was selected, so the open popup kept its page (`e2e-skill-refresh/lessons/phase-1.md`) | product: `lockActiveProfile` emits when `close()` did not; the connected-flag watcher is `flush: "sync"` (a synchronous reconnect never fired the batched one, so no boot run ever ran for an open popup); a locked reconnect boot under an auth-required route locks the shell, fenced against the event path; harness: post-stop liveness baselines, the canary asserts the automatic landing (`restart-lock-truth`) | fixed |
 
 ## 6. Editing the harness
 

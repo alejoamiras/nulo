@@ -274,6 +274,9 @@ const loadProfile = async () => {
 	// The core fenced itself before resolving; this caller resumes a microtask later, and a
 	// reconnect can bump the sequence in between — fence again here, never on the core's word.
 	if (result.kind === "superseded" || !isCurrent()) return
+	// An event landed while the lookup was in flight: the event path owns the outcome, and this
+	// run's profile list and candidate are stale — apply nothing.
+	if (result.kind === "event-superseded") return
 	// A decision — of any kind — ends the retrying presentation; a newer run owns the next one.
 	bootRetrying.value = false
 	appStore.profiles = result.profiles
@@ -282,7 +285,7 @@ const loadProfile = async () => {
 		console.error("activation bootstrap failed for the open session", { profileId: result.profile.id })
 		return settleUndecidedBoot("failed", undefined)
 	}
-	// A lock landed inside the reconcile, under its fences.
+	// The reconcile already acted on a lock, under its fences.
 	if (result.kind === "locked") return
 
 	appStore.isSessionChecked = true
