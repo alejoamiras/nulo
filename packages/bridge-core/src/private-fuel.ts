@@ -77,15 +77,18 @@ export const PRIVATE_HUB_REGISTER_GAS = { daGas: 100_000, l2Gas: 4_000_000 } as 
 
 /**
  * Gas LIMITS for the hub's `exit_to_l1_private` paid through the PrivateFPC's `pay_fee` from held
- * credit, under the same no-refund ceiling (the sandbox smoke proves it: the credit drops by exactly
- * `getFeeLimit`, never by the fee). 2.3× the 826,543 L2 gas the smoke's private exit billed on a
- * 5.2.0 local network (`deploy-sandbox.ts --smoke`, 2026-09-06; the landed fee at its block's price
- * agrees with the simulation to the gas unit) — the register's headroom rather than the claim's,
- * because that exit spent ONE credit note and `pay_fee`'s note selection grows with the notes an
- * account has accumulated. DA is 29× the 1,696 the same exit billed (a burn, an L2→L1 message and
- * the FPC's change note are its whole data footprint) and sits under the 55,882 a local network
- * admits per transaction — a network that admits less than a declared limit refuses the transaction
- * outright (`assertGasLimitsWithinNetworkLimits`), which is why the claim's 100,000 DA is not reused.
+ * credit, under the same no-refund ceiling (the sandbox smoke asserts it on every run: the credit
+ * drops by exactly `getFeeLimit`, never by the fee). Sized from `deploy-sandbox.ts --smoke` on a
+ * 5.2.0 local network (2026-09-06), where the landed fee equals the simulated billed gas at the
+ * block's prices: an exit spending ONE credit note billed 826,543 L2 gas — the same as a genesis
+ * initializerless account and as a Nulo-derivation Schnorr account — and one spending THREE
+ * fragmented notes billed 888,143, so each further note `pay_fee` selects costs ≈30,800. 1,900,000
+ * is 2.3× the one-note reading and leaves room for some thirty-five notes beyond it, the shape an
+ * account that keeps bridging accumulates (each claim's leftover is a note). DA is 28× the 1,760 the
+ * three-note exit billed (a burn, an L2→L1 message, the spent notes' nullifiers and the FPC's change
+ * note are the data it carries) and sits under the 55,882 a local network admits per transaction —
+ * a network that admits less than a declared limit refuses the transaction outright
+ * (`assertGasLimitsWithinNetworkLimits`), which is why the claim's 100,000 DA is not reused.
  */
 export const PRIVATE_HUB_EXIT_GAS = { daGas: 50_000, l2Gas: 1_900_000 } as const
 
