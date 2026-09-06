@@ -61,3 +61,14 @@ that straddled a tick. Fix: `{ flush: "sync" }` on that watcher, so the false an
 fire and the true starts the run. With it, the open popup locks itself in ~5s under two cores;
 `sw-resilience` 4/4 at `--retry=0`. `EventHandler.add` dedupes, so the run's repeated
 `onActiveProfileChanged.add` stacks nothing.
+
+## Validation (second battery, after the watcher fix)
+
+| Leg | Result |
+|---|---|
+| unit (extension) | green |
+| smoke trio (`sw-resilience` incl. the new open-popup pin, `sw-restart-network`, `imported-account-lifecycle`), two cores, `--retry=0` × 3 | 3/3 |
+| full smoke | 31/31 |
+| `connect-locked-queue-sw-restart` + `cold-wake-discovery`, proverless, two cores, retry 0 × 2 | 2/2 |
+| `passkey-execution-canary`, prover-ON, two cores, retry 0 × 2 — the anchor popup locks itself, ceremony re-unlock, post-restart tx mined | 2/2 |
+| `frozen-account-canary`, prover-ON | green |
