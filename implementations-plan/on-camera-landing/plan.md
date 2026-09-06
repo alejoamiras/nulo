@@ -5,7 +5,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: recon 1 agent · codex high · code-review off
-status: audited — awaiting approval
+status: approved 2026-09-06 (conditional: copy per Asks 1–2) — implementing
 ---
 
 # On Camera — rebuild `apps/landing` as the feed page
@@ -124,11 +124,11 @@ The approved prototype is committed beside this plan as `prototype.html` (the ar
 - Cloudflare Pages' `nulo` project builds the landing today with its prebuild script, so it runs `bun install` somewhere in the workspace and Bun ≥ 1.4 (the v2 lockfile requires it); adding a workspace dependency needs nothing more. Unverified: the dashboard is out of repo (Ask 4).
 - InterVariable's extra weight is acceptable for a marketing page on the owner's chosen dependency; the Phase 3 cold-load observation decides whether a preload is added.
 
-**Asks** (the approval gate resolves these)
-1. **"Testnet only" is false for real installs** (Fact 10): the current banner and README say it, the wallet ships mainnet-active. Proposed notice copy: "Nulo is a preview and hasn't been audited yet. Use small amounts you can afford to lose, or the test network, and tell us what breaks." Confirm or supply wording.
-2. **"You choose what's seen" is true only where a token supports both modes** (Fact 11). Proposed: keep the hero line and add to the promise "Private is the default wherever a token allows it; a few tokens are public-only, and Nulo shows you which." Confirm.
-3. Title `NULO | Nothing to see. Everything to own.`; OG and Twitter titles and descriptions updated together to the hero's plain line; no version number on the page. Default: yes.
-4. Cloudflare `nulo` project: confirm build command, root/output dirs and `BUN_VERSION` ≥ 1.4 for Production and Preview (dashboard-only). Default: assumed working as today; the first Pages build after merge is the proof.
+**Asks** — resolved at the gate (owner, 2026-09-06: conditional approve)
+1. **"Testnet only" is false for real installs** (Fact 10). Owner: correct. Notice copy: "Nulo is a preview and hasn't been audited yet. Use small amounts you can afford to lose, or the test network, and tell us what breaks."
+2. **"You choose what's seen" is true only where a token supports both modes** (Fact 11). Owner rejected the verbose qualifier; wants marketing register. Locked copy: promise heading "You decide what's seen." body "Private by default. Public when you say so. Nulo always shows you which is which." The per-token nuance lives in the caption under the two screens: "A few tokens only work in public. Nulo tells you before you send." Hero unchanged: "You're on camera. You choose what it sees."
+3. Title `NULO | Nothing to see. Everything to own.`; OG and Twitter titles and descriptions updated together; no version number. Default accepted.
+4. Cloudflare `nulo` project left as-is; the first Pages build after merge is the proof. Default accepted.
 
 ## Post-implementation hardening
 

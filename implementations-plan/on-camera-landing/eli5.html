@@ -52,12 +52,12 @@ code{font-family:var(--mo);font-size:.92em}
 <li><b>What stays true on the page.</b> Private by default, public by choice and labelled, password or passkey, testnet only, not audited yet. The old warning banner's facts live on in the preview-notice plate.</li>
 </ul>
 
-<h2>Open questions (two need your word)</h2>
+<h2>Decisions taken at the gate (approved 2026-09-06)</h2>
 <ul>
-<li><b>"Testnet only" is not true.</b> The old banner and the README say it, but a real install of the wallet starts on Alpha mainnet; only the test builds pin testnet. The page can't say "testnet only". Proposed notice: <i>"Nulo is a preview and hasn't been audited yet. Use small amounts you can afford to lose, or the test network, and tell us what breaks."</i> Confirm, or give me the wording you want.</li>
-<li><b>"You choose what's seen" is true where a token allows it.</b> A few tokens are public-only and the wallet switches to public for them. Proposed: keep the hero line, and add to the promise <i>"Private is the default wherever a token allows it; a few tokens are public-only, and Nulo shows you which."</i> Confirm.</li>
-<li>Browser-tab title "NULO | Nothing to see. Everything to own." and the search/social titles and descriptions updated together; no version number on the page. <span class="muted">Default: yes.</span></li>
-<li>Cloudflare: the landing's build command, folders and Bun version live only in the dashboard. Nothing in the plan changes them; the first deploy after merge is the proof. <span class="muted">Default: assumed working as today.</span></li>
+<li><b>"Testnet only" is gone.</b> The notice now reads: <i>"Nulo is a preview and hasn't been audited yet. Use small amounts you can afford to lose, or the test network, and tell us what breaks."</i></li>
+<li><b>Privacy promise, marketing register.</b> Heading <i>"You decide what's seen."</i>, body <i>"Private by default. Public when you say so. Nulo always shows you which is which."</i> The fine print (a few tokens only work in public) sits in the caption under the two screens: <i>"A few tokens only work in public. Nulo tells you before you send."</i></li>
+<li>Tab title "NULO | Nothing to see. Everything to own."; social titles and descriptions updated together; no version number on the page.</li>
+<li>Cloudflare left as it is; the first deploy after merge is the proof.</li>
 </ul>
 
 <h2>Codex audit</h2>
@@ -76,7 +76,7 @@ code{font-family:var(--mo);font-size:.92em}
 </ul>
 </div>
 
-<h2>Implementation seeds (draft until approval)</h2>
+<h2>Implementation seeds (final)</h2>
 <p class="muted">Paste exactly one into the session that sits inside the plan's worktree. They don't compose.</p>
 <div class="phase rec"><h3>Recommended: /goal</h3>
 <pre>/goal All four phases marked ✓ in implementations-plan/on-camera-landing/plan.md, each ✓ backed by its validation gate reported passing in the transcript; `LESSONS_FILE=implementations-plan/on-camera-landing/lessons/phase-N.md` printed for each phase; `/code-review` NOT run (code_review is off); the codex fix loop converged on the net diff, evidenced by a resumed codex pass reporting no new material findings quoted in the transcript; one PR from worktree-on-camera-landing to dev exists (`gh pr view` in the transcript), created only after the loop converged; `gh pr checks` reports every required check green in the transcript; `bun run --cwd apps/landing test` and `bun run lint` both report exit 0 in the transcript.</pre></div>
