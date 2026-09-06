@@ -54,7 +54,7 @@ The approved prototype is committed beside this plan as `prototype.html` (the ar
 
 ## Phases
 
-### Phase 1 — Foundation: dependency, base stylesheet, overrides, fonts
+### Phase 1 ✓ — Foundation: dependency, base stylesheet, overrides, fonts
 - Add `@nulo/design` to `apps/landing/package.json` dependencies; `bun install` (lockfile changes and is committed).
 - `main.ts` imports `@nulo/design/base.css` then `./styles/overrides.css`; write `overrides.css`.
 - Remove the landing's `@font-face` blocks, `public/fonts/*` and the preload links.
