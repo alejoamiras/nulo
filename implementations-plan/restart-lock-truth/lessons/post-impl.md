@@ -58,3 +58,16 @@ interface, with the caller-level cases codex asked for: superseded by a run → 
 superseded by an event → `retrying=false` + `checked`, no list, no candidate, no route; locked,
 unreachable, failed, active as before. `app.vue` keeps only the `isCurrent()` re-check and the
 shell wiring. Popup unit dir 742/742.
+
+## Round 3 — `converged` — response (verbatim)
+
+No remaining findings (high confidence).
+
+Bun probes against the actual shell wiring verified that event supersession clears retrying and marks the session checked without applying stale profiles, candidates, or routes. Supersession by a newer run leaves that run’s flags untouched.
+
+No Vitest E2E configs ran.
+
+converged
+
+Loop closed at three rounds: 1 (fence covered one action of three; docs overstated), 2 (a run
+superseded by an event skipped its completion flags), 3 clean. No open items.
