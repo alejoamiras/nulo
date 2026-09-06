@@ -31,3 +31,9 @@ not run vitest in its read-only sandbox (EPERM on a temp dir) — conclusions ar
 Re-validation: `src/wallet/services/dapp-interaction src/components/composite/activity
 src/wallet/services/window-manager src/popup/components/modules/general` → 16 files, 245 tests, exit 0;
 biome clean; extension typecheck 0 errors.
+
+## Round 2 (resumed) — `clean`
+"Verified through `cfc1d85f` … No remaining material findings across cancellation/focus ordering,
+journal lookup consistency, plan alignment, or wallet security boundaries." Codex ran 9 suites (227
+tests) itself this time. The owner's macOS Space-switch check stays the one open item. Cross-arc pass
+converged after two rounds; delivery follows.
