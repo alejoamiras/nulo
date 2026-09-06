@@ -9,6 +9,8 @@ import { isPrefersDarkScheme, persistThemeHint } from "@/utils/general"
 import { getLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { shouldAdvanceToGeneral } from "./should-advance-to-general"
 import { resolveBootSession } from "./boot-session"
+import { decideLockLanding } from "./lock-landing"
+import { reconcileLockedBoot } from "./reconcile-locked-boot"
 import { defaultConfig } from "@/wallet/config"
 import { AccountServiceClient } from "@/wallet/services/account/client"
 import { createNetworkSwitchHandler } from "@/popup/network-switch"
@@ -162,6 +164,12 @@ const onActiveProfileChanged = async (profile) => {
 		// Cached list stands in; the cleanup below runs regardless.
 	}
 	if (seq !== profileEventSeq) return
+	enterLockedState(profiles)
+}
+
+/** The popup's locked state, entered from the lock event and from a boot-time session check
+ *  that finds no session under an authenticated page (a worker restart). */
+const enterLockedState = (profiles) => {
 	popupStore.closeAll()
 	appStore.isLogined = false
 	// Every cached scope goes with the lock, so no profile's activity outlives
@@ -209,17 +217,28 @@ const settleUndecidedBoot = (outcome, candidate) => {
 	if (appStore.profile) router.push("/popup/auth")
 }
 
-/** No open session: land on the lock screen with its profile selected, or stay put on a
- *  passkey-interaction route (which owns its own ceremony). */
-const landOnLockScreen = (candidate) => {
-	if (route.meta.isPasskeyInteraction && !appStore.profile) return
-	if (!appStore.profile && candidate) {
-		appStore.profile = candidate
+/** No open session. Which way the shell goes is `decideLockLanding` over the shell's state at
+ *  action time; `reconcileLockedBoot` fences the `lock` action against an unlock that landed
+ *  through the event path while the lookup was in flight. */
+const lockLandingState = (result) => ({
+	hasProfile: !!appStore.profile,
+	onAuthRequiredRoute: !!route.meta.isAuthRequired,
+	isPasskeyRoute: !!route.meta.isPasskeyInteraction,
+	hasCandidate: !!result.candidate,
+})
+const lockLandingActions = {
+	selectAndAuth: (result) => {
+		appStore.profile = result.candidate
 		appStore.isSessionChecked = true
 		router.push("/popup/auth")
-		return
-	}
-	appStore.isSessionChecked = true
+	},
+	lock: (result) => {
+		appStore.isSessionChecked = true
+		enterLockedState(result.profiles)
+	},
+	settle: () => {
+		appStore.isSessionChecked = true
+	},
 }
 
 // Generation fence for loadProfile: mount and every background reconnect start a run, and a
@@ -238,12 +257,19 @@ const loadProfile = async () => {
 	managers.profile.onActiveProfileChanged.add(onActiveProfileChanged)
 	managers.profile.onImportedKeysDegraded.add(onImportedKeysDegraded)
 
-	const result = await resolveBootSession({
-		getProfiles: () => managers.profile.getProfiles(),
-		getActiveProfile: () => managers.profile.getActiveProfile(),
-		bootstrap: (profile) => bootstrapActiveProfile(profile),
-		lastActiveProfileId: getLastActiveProfileId,
+	const result = await reconcileLockedBoot({
+		readEventSeq: () => profileEventSeq,
 		isCurrent,
+		lookup: () =>
+			resolveBootSession({
+				getProfiles: () => managers.profile.getProfiles(),
+				getActiveProfile: () => managers.profile.getActiveProfile(),
+				bootstrap: (profile) => bootstrapActiveProfile(profile),
+				lastActiveProfileId: getLastActiveProfileId,
+				isCurrent,
+			}),
+		decide: (locked) => decideLockLanding(lockLandingState(locked)),
+		act: lockLandingActions,
 	})
 	// The core fenced itself before resolving; this caller resumes a microtask later, and a
 	// reconnect can bump the sequence in between — fence again here, never on the core's word.
@@ -256,7 +282,8 @@ const loadProfile = async () => {
 		console.error("activation bootstrap failed for the open session", { profileId: result.profile.id })
 		return settleUndecidedBoot("failed", undefined)
 	}
-	if (result.kind === "locked") return landOnLockScreen(result.candidate)
+	// A lock landed inside the reconcile, under its fences.
+	if (result.kind === "locked") return
 
 	appStore.isSessionChecked = true
 	// Only advance into the authed area if the session survived bootstrap (a lock
