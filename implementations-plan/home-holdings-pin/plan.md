@@ -7,7 +7,8 @@
 - **Design reference**: the round-4b mockups (interactive, shared pin state) live at the Claude Artifact `https://claude.ai/code/artifact/1b64e873-a804-4262-8818-55d6481b7bef`. Everything a fresh session needs from them is restated in § Scope and § Copy; the artifact is for taste, not for facts.
 - **ELI5**: Artifact `https://claude.ai/code/artifact/5366dd8f-9f9e-413a-833d-44168c159aec`, source
   `implementations-plan/home-holdings-pin/eli5.html` (redeploy the same file to update the same URL).
-- **Revision**: r6 — final-pass round 3 conditions folded (pin write reads the live token list after the storage await; token page fetches the list at write time; chain cap applied after mutation); r5 — final-pass round 2 folded (pins classified before parsing, TokenCard guarded, chain filter on the hero, live known set, canonical map keys); r4 folded the fresh-context final codex pass (chain isolation, numeric parsing, pin-write scope); r2 folded codex round 1 (`audit-codex.md`, reject → adopted); r3 folded the fable audit (`audit-fable.md`, conditional approve → adopted, two of its recommendations taken and flagged at the gate); r4 folds the fresh-context final codex pass (reject → adopted: chain isolation, numeric parsing, pin-write scope).
+- **Status**: **APPROVED 2026-09-06** (owner, at the gate; both open Asks decided). Implementation next, on the homelab.
+- **Revision**: r7 — approval recorded, seeds final; r6 — final-pass round 3 conditions folded (pin write reads the live token list after the storage await; token page fetches the list at write time; chain cap applied after mutation); r5 — final-pass round 2 folded (pins classified before parsing, TokenCard guarded, chain filter on the hero, live known set, canonical map keys); r4 folded the fresh-context final codex pass (chain isolation, numeric parsing, pin-write scope); r2 folded codex round 1 (`audit-codex.md`, reject → adopted); r3 folded the fable audit (`audit-fable.md`, conditional approve → adopted, two of its recommendations taken and flagged at the gate); r4 folds the fresh-context final codex pass (reject → adopted: chain isolation, numeric parsing, pin-write scope).
 
 ## Why
 
@@ -69,9 +70,7 @@ In:
    the list when more than `HOME_TOKEN_ROWS` tokens exist. No fold in the picker (an empty token is
    unsendable anyway; hiding rows inside a popup is odd). The selection contract
    (`cacheStore.activeTokenIdx = token.id`, emit close) and the "Manage tokens" row are unchanged.
-   **Gate question**: the owner picked "same component as Holdings"; the audits argued that same
-   order + search meets the intent at a fraction of the cost (no per-row price clients in a popup, no
-   `TokenCard` button variant). Flip at the gate if identical rows are wanted.
+   Owner-confirmed at the gate: same order + search, existing rows.
 8. **Pins**: `usePinnedTokens` composable owning the key `nulo:ui:pinnedTokens@${profileId}` →
    `Record<chainId, contract[]>` (lowercase contract addresses, ≤ 3, keyed by the chain id as a
    string — the token set's own scope) behind the storage facade. Contracts, not ids: token ids are
@@ -576,9 +575,10 @@ append → apply the 32-chain cap AFTER the mutation, keeping this chain → wri
   sort after priced pinned ones; under the fiat kill-switch only empty rows fold; pins are per
   chain, not per network row.
 
-Two Asks are open **by design** and are put to the owner at the approval gate, not assumed: the
-Send-picker rows (Scope 7) and the popup's implementation (Scope 9). The implementing session must
-not start until both are recorded in this section as decided.
+The two gate Asks were **decided by the owner at the gate (2026-09-06)**: the Send picker keeps its
+existing rows with the shared order + search (Scope 7, "same order + search it's ok"); the
+"Home is full" popup is the existing confirm popup in single-action mode with the symbols inline
+(Scope 9, "(1) is the right approach"). No unresolved Asks.
 
 ## Phases
 
@@ -910,11 +910,10 @@ below it — the owner's call, never autonomous.
 - **Rejected**: pins on the Token entity; TokensView `variant`; `TokenCard` select mode; a dedicated
   `PinLimitPopup`; disabling the menu item when full; a second dust threshold; renaming the Home
   route; a cross-context write lock (deferred with a named fallback); pins keyed by id or by network.
-- **Still disputed, for the final codex pass and the owner**: (1) codex preferred a dedicated popup
-  file, fable a `ConfirmPopup` single mode — r3 takes the mode as the smaller diff; (2) codex
-  preferred the popup title "Pin limit reached" — the owner-approved "Home is full" stays; (3) the
-  owner picked "Send picker reuses the same component" — r3 delivers same order + search with the
-  existing rows, flagged at the gate.
+- **Resolved at the gate (owner, 2026-09-06)**: (1) the `ConfirmPopup` single mode over a dedicated
+  popup file — owner: "(1) is the right approach"; (2) the popup title stays "Home is full" (the final
+  codex pass retained it); (3) the Send picker delivers same order + search with its existing rows —
+  owner: "same order + search it's ok". Nothing disputed remains.
 
 ## Audit outcome
 
@@ -952,11 +951,14 @@ below it — the owner's call, never autonomous.
   r6 (the pin-toggle algorithm reads the known set after the storage await with a scope re-check;
   `knownContracts` is an authoritative async getter — the token page fetches at write time; the
   32-chain cap is applied after the mutation keeping the written chain, with a 32→33 test). The
-  fourth is the approval gate itself: the two open Asks are put to the owner there.
+  fourth was met at the approval gate: both Asks recorded in § Assumptions.
+- **Owner approval (2026-09-06)**: approved at the gate with both open Asks decided (same order +
+  search for the picker; the confirm popup's single mode). Seeds finalized below.
 
 ## Seeds
 
-_Draft until the approval gate; finalized after approval._
+Finalized after the owner's approval (2026-09-06). Paste ONE into a Claude session started inside
+the worktree on the homelab (§ Bootstrap). `/goal` is the recommended one.
 
 ```
 /goal All seven phases marked ✓ in implementations-plan/home-holdings-pin/plan.md (the phase headers in the file — not the chat, not the task list), each ✓ backed by that phase's validation gate reported passing in the transcript (smoke gates preceded by `bun run build`; network gates read from their tmux log ending EXIT=0); for each phase the agent has printed `LESSONS_FILE=implementations-plan/home-holdings-pin/lessons/phase-N.md`; `/code-review` was NOT run (code_review is off); the codex fix loop converged for each of the three arcs at its boundary AND for the final cross-arc pass, each convergence evidenced by a resumed codex pass reporting no new material findings quoted in the transcript; the three-PR stack exists on GitHub, created only after all loops converged (`gh stack view` output in the transcript); `bun run test` and `bun run lint` both report exit 0 in the transcript.
