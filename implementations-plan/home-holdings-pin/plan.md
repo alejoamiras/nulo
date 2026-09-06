@@ -587,9 +587,12 @@ before the phase is marked ✓ in this file. The fast layers run after every mea
 phase too. `<fast>` and `<smoke>` below mean:
 
 ```bash
-<fast>  = bun run lint && bun run typecheck && bun run test
+<fast>  = bun run lint && bun run --cwd apps/extension typecheck && bun run test
 <smoke> = bun run build && bun run test:e2e          # the smoke runner does not build (Fact 17)
 ```
+
+(The root `bun run typecheck` names `vue-tsc` directly and fails on a fresh worktree with
+`command not found`; the per-package script is what CI's `typecheck:all` runs — Phase 1 lesson.)
 
 Network gates run in tmux: `tmux new-session -d -s hhp-<phase> "cd $PWD && NULO_E2E_PROVERLESS=1 bun run e2e:agent <files> > ~/.cache/hhp-<phase>.log 2>&1; echo EXIT=\$? >> ~/.cache/hhp-<phase>.log"`,
 then poll `tail -n1 ~/.cache/hhp-<phase>.log` until it reads `EXIT=…`. `EXIT=86` is an infra boot
@@ -597,7 +600,7 @@ failure (`bun run e2e:reap`, rerun); anything else non-zero is a real failure.
 
 ### Arc A — nav + Home (branch `worktree-home-holdings-pin`)
 
-#### Phase 1 — four tabs and an empty Holdings page
+#### Phase 1 — four tabs and an empty Holdings page ✓ (2026-09-06, Mac)
 
 - `Navigation.vue`: `[general → HOME (home icon), holdings → HOLDINGS, activity, settings]`.
 - `pages/holdings.vue`: route block, app header, a `SectionLabel label="Holdings"` placeholder body,

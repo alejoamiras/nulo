@@ -302,10 +302,17 @@ export async function reopenAndRecoverAfterImport(page: Page, password = TEST_PA
 
 // ── Navigation ─────────────────────────────────────────────────────────
 
-/** Click a bottom navigation tab. */
-export async function clickNavTab(page: Page, tab: "activity" | "general" | "settings"): Promise<void> {
+/** Click a bottom navigation tab. `general` is the HOME tab (the route name never changed). */
+export async function clickNavTab(page: Page, tab: "activity" | "general" | "holdings" | "settings"): Promise<void> {
 	await page.waitForSelector(`[data-testid="nav-${tab}"]`, { visible: true, timeout: 5_000 })
 	await clickByTestId(page, `nav-${tab}`)
+}
+
+/** Open the Holdings tab and wait for its page to mount. */
+export async function openHoldings(page: Page): Promise<void> {
+	await clickNavTab(page, "holdings")
+	await page.waitForFunction(() => window.location.hash === "#/popup/holdings", { timeout: 5_000 })
+	await page.waitForSelector('[data-testid="holdings-page"]', { visible: true, timeout: 5_000 })
 }
 
 /** Navigate to a settings sub-page by URL segments. Only the first segment

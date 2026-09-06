@@ -1,12 +1,20 @@
 <script setup>
 const route = useRoute()
 
+// The Home tab keeps the `general` route name and path: the manifest cold-opens it, two
+// redirect pages and the sub-page-header fallback point at it, and every e2e asserts its hash.
 const navigationLinks = [
 	{
 		name: "general",
 		path: "/popup/general",
+		materialIcon: "home",
+		label: "HOME",
+	},
+	{
+		name: "holdings",
+		path: "/popup/holdings",
 		materialIcon: "account_balance_wallet",
-		label: "ASSETS",
+		label: "HOLDINGS",
 	},
 	{
 		name: "activity",
