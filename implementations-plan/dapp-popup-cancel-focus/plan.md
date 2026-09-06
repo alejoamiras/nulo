@@ -341,7 +341,8 @@ _(green 2026-09-05; `lessons/phase-2.md`. Arc gate: `audit:vue`'s parallel `test
 
 ### Arc 2 — refocus from the Queued card + open on the right display
 
-#### Phase 3 — `WindowPort` grows `update` + `getLastFocused`; `create` accepts `left/top`
+#### Phase 3 — `WindowPort` grows `update` + `getLastFocused`; `create` accepts `left/top` ✓
+_(green 2026-09-05; `lessons/phase-3.md`)_
 - `wallet-core` port types as in the interfaces above; `ChromeWindowsAdapter.update` →
   `chrome.windows.update`; `getLastFocused` → `chrome.windows.getLastFocused({ windowTypes: ["normal"] })`
   wrapped so any throw, or a window without numeric bounds, → `undefined`. `create` forwards `left/top`.
@@ -359,7 +360,8 @@ _(green 2026-09-05; `lessons/phase-2.md`. Arc gate: `audit:vue`'s parallel `test
   → exit 0 (codex r3 condition: the adapter tests run in THIS gate, not only at the arc gate). Layers:
   typecheck/lint · unit.
 
-#### Phase 4 — `WindowManager` centers on open and can focus a handle
+#### Phase 4 — `WindowManager` centers on open and can focus a handle ✓
+_(green 2026-09-05; `lessons/phase-4.md`; owner Space-switch check pending, recorded there)_
 - `centerOn(anchor, width, height)` exported pure helper: `left = round(anchor.left + (anchor.width - width) / 2)`,
   same for `top`; SIGNED, no clamping; `{}` when the anchor or any of its four bounds is missing.
 - `openAndAwait` per the arc-2 flow (a): synchronous return preserved; `getLastFocused()` first; identity
@@ -380,7 +382,8 @@ _(green 2026-09-05; `lessons/phase-2.md`. Arc gate: `audit:vue`'s parallel `test
 - **Validation gate**: `bun run typecheck && bun run lint && bun run --cwd apps/extension test src/wallet/services/window-manager`
   → exit 0. Layers: typecheck/lint · unit.
 
-#### Phase 5 — RPC + clickable Queued card
+#### Phase 5 — RPC + clickable Queued card ✓
+_(green 2026-09-05; `lessons/phase-5.md`)_
 - `spec.ts` `Methods.focusInteractionWindow(journalId: string): boolean`; service implementation = scan by
   `hooks?.queuedJournalId` → active-profile check against `payload.session.profileId` →
   `windowManager.focus(handleId)`; add the string to `defineRpcMethods` and the client passthrough list (F9).
@@ -451,6 +454,21 @@ PR titles ≤ 93 chars (squash subject + ` (#NN)` must stay ≤ 100). Submit onl
 evidence + the owner's manual focus check for arc 2) → `gh pr checks --watch`. Required gates on `dev`:
 `quality-status`, `smoke-e2e-status`, `network-e2e-status`. `gh stack merge` is the owner's call. Then
 mark the index entry and suggest `agent-worktree done dapp-popup-cancel-focus`.
+
+## Delivery log
+
+- 2026-09-05: all five phases ✓; arc-1 loop converged (r2 clean), arc-2 loop converged (r3 clean),
+  cross-arc pass converged (r2 clean); final local gate `bun run lint` exit 0 and `bun run test`
+  (3 workers) 437 files / 5470 tests exit 0. `gh stack submit --auto` → PR #550
+  (`worktree-dapp-popup-cancel-focus` → `dev`) and PR #551 (`dapp-popup-cancel-focus/focus` → #550).
+  Open: CI checks; the owner's macOS Space-switch check (`lessons/phase-4.md`); `gh stack merge` is
+  the owner's call.
+- 2026-09-06 00:57Z–01:10Z: GitHub Actions created NO check suite for either PR (`opened` and the
+  later `synchronize` both ignored; only the Cloudflare/Vercel/Railway apps reacted), while other
+  branches' PR runs an hour earlier were normal. Recovered per `pr-quick.yml`'s own comment:
+  `gh workflow run <pr-quick|pr-smoke-e2e|pr-network-e2e>.yml --ref <branch>` on both branches
+  (dispatch force-runs the label-gated e2e suites). Runs 34002813159 / 34002814921 (Quality),
+  34002823685 / 34002826511 (Smoke), 34002825193 / 34002827822 (Network).
 
 ## Audit log
 

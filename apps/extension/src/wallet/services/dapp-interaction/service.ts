@@ -57,6 +57,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		"resolveInteraction",
 		"rejectInteraction",
 		"isInteractionCancelled",
+		"focusInteractionWindow",
 	)
 	public static name = DAPP_INTERACTION_SERVICE_NAME
 
@@ -272,6 +273,19 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 
 	public async isInteractionCancelled(id: string): Promise<boolean> {
 		return this.storage.get(id)?.cancelledAt !== undefined
+	}
+
+	public async focusInteractionWindow(journalId: string): Promise<boolean> {
+		if (typeof journalId !== "string" || journalId.length === 0) return false
+		const interaction = [...this.storage.values()].find((x) => x.hooks?.queuedJournalId === journalId)
+		if (!interaction) return false
+		// Any extension page can name any journal id; only the active profile's
+		// popups may be raised.
+		const payload = interaction.payload
+		const sessionProfileId = "session" in payload ? payload.session.profileId : undefined
+		const active = await this.profileService.getActiveProfile()
+		if (!active || sessionProfileId !== active.id) return false
+		return this.windowManager.focus(interaction.handleId)
 	}
 
 	public async execute(params: ExecutionParams, cancellationToken?: string, hooks?: ExecutionHooks): Promise<ExecutionResult> {

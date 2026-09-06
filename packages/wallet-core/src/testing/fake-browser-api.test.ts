@@ -109,5 +109,25 @@ describe("FakeBrowserApi", () => {
 			await api.windows.remove(win.id as number)
 			expect(removedId).toBe(win.id)
 		})
+
+		test("records create options and update calls; update on a closed id rejects", async () => {
+			const windows = api.windows as unknown as {
+				creates: unknown[]
+				updates: unknown[]
+				lastFocused: unknown
+			}
+			const win = await api.windows.create({ url: "https://example", left: -1160, top: 40 })
+			expect(windows.creates).toEqual([{ url: "https://example", left: -1160, top: 40 }])
+
+			await api.windows.update(win.id as number, { focused: true, drawAttention: true, state: "normal" })
+			expect(windows.updates).toEqual([{ windowId: win.id, options: { focused: true, drawAttention: true, state: "normal" } }])
+
+			await api.windows.remove(win.id as number)
+			await expect(api.windows.update(win.id as number, { focused: true })).rejects.toThrow(/No window/)
+
+			await expect(api.windows.getLastFocused()).resolves.toBeUndefined()
+			windows.lastFocused = { left: 0, top: 0, width: 1920, height: 1080 }
+			await expect(api.windows.getLastFocused()).resolves.toEqual({ left: 0, top: 0, width: 1920, height: 1080 })
+		})
 	})
 })

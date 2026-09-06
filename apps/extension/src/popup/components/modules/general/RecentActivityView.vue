@@ -13,6 +13,7 @@ import { OperationJournalServiceClient } from "@/wallet/services/operation-journ
 import { IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 import { TaskServiceClient } from "@/wallet/services/task/client"
+import { DappInteractionServiceClient } from "@/wallet/services/dapp-interaction/client"
 import { ContentKind, TaskStatus } from "@/wallet/services/task/spec"
 import { TokenServiceClient } from "@/wallet/services/token/client"
 import { PriceServiceClient } from "@/wallet/services/price/client"
@@ -26,7 +27,7 @@ import { stageSubtitle } from "@/utils/card-subtitle"
 import { ACTIVITY_FEED_KINDS, buildJournalTerminalCardProps, journalTerminalDisplay, sanitizeJournalSubtitle } from "@/utils/journal-state"
 import { formatTransferType, humanizeMethodName } from "@/utils/tx-enrichment"
 import { receivedLabel, resolveReceivedType } from "@/utils/received-display"
-import { buildCancelHandler, filterPendingDoubleRender, isMatchingTask } from "./recent-activity-handlers"
+import { buildCancelHandler, buildFocusHandler, filterPendingDoubleRender, isMatchingTask } from "./recent-activity-handlers"
 import { buildRecentActivityRows, remainingRowSlots } from "./recent-activity-rows"
 
 /** Composables */
@@ -276,6 +277,9 @@ const executionService = new ExecutionServiceClient()
  *  correlation has no such fragility. */
 const pendingCancelJobIds = ref(new Set())
 const onCancelInFlight = buildCancelHandler(executionService, (jobId) => pendingCancelJobIds.value.add(jobId))
+
+const dappInteractionService = new DappInteractionServiceClient()
+const onFocusInFlight = buildFocusHandler(dappInteractionService)
 
 /** Shared account / network / token scoping for journal-record filters.
  *  Same rules apply to in-flight and recently-terminal surfaces. */
@@ -781,6 +785,7 @@ onBeforeUnmount(() => {
 	tokenService.disconnect()
 	journalService.disconnect()
 	executionService.disconnect()
+	dappInteractionService.disconnect()
 	incomingTransferService.disconnect()
 	configService.disconnect()
 	incomingPrices.dispose()
@@ -823,6 +828,7 @@ onBeforeUnmount(() => {
 				:jobId="op.id"
 				:stage="op.progress?.stage ?? null"
 				@cancel="onCancelInFlight"
+				@focus="onFocusInFlight"
 			/>
 			<!-- Orphan executingTask fallback: an active TaskService entry
 			     with no matching journal record (rare; legacy paths /
@@ -882,6 +888,7 @@ onBeforeUnmount(() => {
 				:jobId="op.id"
 				:stage="op.progress?.stage ?? null"
 				@cancel="onCancelInFlight"
+				@focus="onFocusInFlight"
 			/>
 			<TransactionAwaitingCard
 				v-if="hasOrphanExecutingTask"
