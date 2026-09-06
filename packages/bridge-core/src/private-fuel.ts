@@ -75,11 +75,24 @@ export const PRIVATE_HUB_CLAIM_GAS = { daGas: 100_000, l2Gas: 2_000_000 } as con
  */
 export const PRIVATE_HUB_REGISTER_GAS = { daGas: 100_000, l2Gas: 4_000_000 } as const
 
-/** Gas LIMITS for the hub's `exit_to_l1_private` paid through the PrivateFPC's `pay_fee`. PROVISIONAL:
- *  the claim's measured limits, reused until a canary bills a private exit — a burn plus `pay_fee`'s
- *  note selection (which can recurse) is not bounded by a mint's measurement. Size from the canary
- *  when it lands; the FPC keeps the whole ceiling, so headroom is Fee Juice the account forfeits. */
-export const PRIVATE_HUB_EXIT_GAS = PRIVATE_HUB_CLAIM_GAS
+/**
+ * Gas LIMITS for the hub's `exit_to_l1_private` paid through the PrivateFPC's `pay_fee` from held
+ * credit, under the same no-refund ceiling (the sandbox smoke asserts it on every run: the credit
+ * drops by exactly `getFeeLimit`, never by the fee). Sized from `deploy-sandbox.ts --smoke` on a
+ * 5.2.0 local network (2026-09-06), where the landed fee equals the simulated billed gas at the
+ * block's prices: an exit spending ONE credit note billed 826,543 L2 gas — the same as a genesis
+ * initializerless account and as a Nulo-derivation Schnorr account — and one spending THREE
+ * fragmented notes billed 888,143: each further note `pay_fee` selects is one more nullifier, and the
+ * protocol meters 30,800 L2 gas per nullifier in a transaction with public execution. 1,900,000 is
+ * 2.3× the one-note reading and leaves room for thirty-two notes beyond the three-note one (the
+ * headroom is shared with the burn's token-note nullifiers), the shape an account that keeps
+ * bridging accumulates (each claim's leftover is a note). DA is 28× the 1,760 the
+ * three-note exit billed (a burn, an L2→L1 message, the spent notes' nullifiers and the FPC's change
+ * note are the data it carries) and sits under the 55,882 a local network admits per transaction —
+ * a network that admits less than a declared limit refuses the transaction outright
+ * (`assertGasLimitsWithinNetworkLimits`), which is why the claim's 100,000 DA is not reused.
+ */
+export const PRIVATE_HUB_EXIT_GAS = { daGas: 50_000, l2Gas: 1_900_000 } as const
 
 /** The PrivateFPC's committed ceiling for a claim — `getFeeLimit` = Σ gasLimit[d]·maxFee[d]. */
 export const privateFpcFeeLimit = (gas: { daGas: number; l2Gas: number }, maxFees: { feePerDaGas: bigint; feePerL2Gas: bigint }): bigint =>

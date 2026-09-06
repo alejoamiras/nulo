@@ -406,18 +406,18 @@ describe("useHubExit", () => {
 	})
 
 	// The PrivateFPC's `getFeeLimit` over the exit's limits at the mocked fees:
-	// 100_000·10 + 2_000_000·20 = 41_000_000.
-	const EXIT_CEILING = 41_000_000n
+	// 50_000·10 + 1_900_000·20 = 38_500_000.
+	const EXIT_CEILING = 38_500_000n
 
 	it("a private exit names the PrivateFPC as payer, from the credit the account holds, at the committed ceiling", async () => {
-		h.privateBalance = EXIT_CEILING
+		h.fpcCredit = EXIT_CEILING
 		const exit = useHubExit()
 		const id = await exit.exit(plan({ isPrivate: true }))
 		expect(id).toBe(EXIT_TX)
 		const opts = h.exitViaHub.mock.calls[0][2] as { fee?: { paymentMethod: unknown; gasSettings: Record<string, unknown> } }
 		expect(opts.fee?.paymentMethod).toBeDefined()
 		expect(opts.fee?.gasSettings).toEqual({
-			gasLimits: { daGas: 100_000, l2Gas: 2_000_000 },
+			gasLimits: { daGas: 50_000, l2Gas: 1_900_000 },
 			teardownGasLimits: { daGas: 0, l2Gas: 0 },
 			maxFeesPerGas: { feePerDaGas: 10n, feePerL2Gas: 20n },
 		})
@@ -427,7 +427,7 @@ describe("useHubExit", () => {
 	})
 
 	it("a private exit priced above the bound the review approved is refused, however much credit is held", async () => {
-		h.privateBalance = 10n * EXIT_CEILING
+		h.fpcCredit = 10n * EXIT_CEILING
 		const exit = useHubExit()
 		expect(await exit.exit(plan({ isPrivate: true }), EXIT_CEILING - 1n)).toBe("")
 		expect(exit.error.value).toMatch(/fees rose past what the review showed/)
@@ -437,7 +437,7 @@ describe("useHubExit", () => {
 	})
 
 	it("a private exit short of private gas is refused before any authwit, opens no record, and says why", async () => {
-		h.privateBalance = EXIT_CEILING - 1n
+		h.fpcCredit = EXIT_CEILING - 1n
 		const exit = useHubExit()
 		expect(await exit.exit(plan({ isPrivate: true }))).toBe("")
 		expect(exit.error.value).toMatch(/private gas is under/)

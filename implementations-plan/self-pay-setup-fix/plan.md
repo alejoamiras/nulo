@@ -2,7 +2,7 @@
 plan: self-pay-setup-fix
 tier: mid
 driver: claude-code
-status: implemented 2026-09-05 (rev 6; phases 0–4 ✓; codex post-impl loop converged, approve) — PR open, owner's verdict on rev 6 / A7 still to be recorded
+status: closed 2026-09-06 (rev 6; phases 0–4 ✓; codex post-impl loop converged, approve; merged as PR #549; owner approved rev 6 / A7 on 2026-09-06)
 eli5_mode: artifact
 code_review: off
 codex_effort: high
@@ -132,7 +132,7 @@ playground → wallet-sdk `aztec_simulateTx { exec: { calls: [mint_to_private], 
 - A4. Two accounts, the failing one second — **yes**. H5 is attributed.
 - A5. No bridge deployment; playground-only gate — **adopted** (this revision). Wall-time measured in Phase 4 instead of estimated.
 - A6. Honouring the dApp's `from` on simulate/profile — **yes**, "the actual correct behaviour".
-- **A7 (open):** confirm this reshaped gate is what you want: it proves the wallet's phase layout and account identity on the node's real rules with the hub claim's inner call, but it does not drive the hub itself; the tools-UI drive stays a follow-up.
+- **A7 (closed 2026-09-06 — the owner approved the reshaped gate as implemented, rows 46–47 included):** confirm this reshaped gate is what you want: it proves the wallet's phase layout and account identity on the node's real rules with the hub claim's inner call, but it does not drive the hub itself; the tools-UI drive stays a follow-up.
 
 ## Phases
 
@@ -179,7 +179,7 @@ Single arc, single PR: branch `worktree-self-pay-setup-fix` → `dev`, `gh pr cr
 - **Codex final (`01a0734f-565f-7a42-a3c0-0271421fa6ee`)** over rev 2 — `audit-codex-final.md`. VERDICT: reject.
 - **Codex final 2 (`01a07359-b66f-7792-a730-129d3d48cf0f`)** over rev 3 — `audit-codex-final-2.md`. VERDICT: reject.
 - **Codex final 3 (`01a07364-bc96-73c0-a16c-98251485e91c`)** over rev 4 — `audit-codex-final-3.md`. VERDICT: **conditional approve**; the four conditions applied in rev 5.
-- **Rev 6** reshapes the gate on the owner's directions (A2, A4, A5, A6). The audited wallet fix, the account-identity invariant, the validation-ON rule, the argument-bound simulate oracle, the negative control, `retry: "0"` and the branch-protection proof are carried over unchanged; the bridge-deploy fixture, the forge composite, the dedicated job and the bridge-core changes are removed. Open Ask A7 is the owner's confirmation of that reshape.
+- **Rev 6** reshapes the gate on the owner's directions (A2, A4, A5, A6). The audited wallet fix, the account-identity invariant, the validation-ON rule, the argument-bound simulate oracle, the negative control, `retry: "0"` and the branch-protection proof are carried over unchanged; the bridge-deploy fixture, the forge composite, the dedicated job and the bridge-core changes are removed. Ask A7 — the owner's confirmation of that reshape — was approved on 2026-09-06 (row 48).
 
 ## Decision ledger
 
@@ -194,8 +194,9 @@ Rows 1–40 (revs 1–5) are recorded in this file's git history (`git log -p --
 | 45 | A3: canary as follow-up | **Confirmed.** |
 | 46 | Implementation finding (Phase 1 design): the literal matrix `{never-sent} × {send} × {both fee variants}` is infeasible on two accounts — an account's FIRST send deploys it, and the PrivateFPC *credit* (`pay_fee`) needs a prior `PrivateFPC.mint` sent AS the account, which is itself that first send | **Adopted.** The private route splits into its two real dApp shapes: `fpc-fuel` (FeeJuice.claim + `mint_and_pay_fee` — the bridge's first-claim path, valid on a never-sent account) and `fpc-credit` (`pay_fee` from held credit — deployed accounts only). Never-sent send cells: one per account (self-pay on one, fpc-fuel on the other); deployed cells: the full `{first, second} × {simulate, send} × {self-pay, fpc-credit}`; never-sent simulate cells: both accounts × {self-pay, fpc-fuel}. |
 | 47 | Implementation finding (Phase 0): the SW log trail is retained only with Developer Mode on | **Adopted.** The gate's account oracle is the kernel output — the fee payer and the entrypoint frame of the simulation summary the playground projects (`simulation-summary.ts`) — not a log line. |
+| 48 | Owner (2026-09-06): A7 confirmed — the playground-only gate as implemented, rows 46–47 included | **Approved.** The reshape stands; no change to the code or the gate. |
 
-**Open:** A7 — the owner's confirmation of the reshaped gate.
+**Open:** none.
 
 ## ELI5
 
