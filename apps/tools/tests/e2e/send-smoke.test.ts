@@ -763,7 +763,7 @@ describe("send wizard smoke", () => {
 		expect(h.fn.exitViaHub).toHaveBeenCalledTimes(1)
 		const opts = h.fn.exitViaHub.mock.calls[0][2] as { fee?: { paymentMethod: unknown; gasSettings: { gasLimits: unknown } } }
 		expect(opts.fee?.paymentMethod).toBeDefined()
-		expect(opts.fee?.gasSettings.gasLimits).toEqual({ daGas: 100_000, l2Gas: 2_000_000 })
+		expect(opts.fee?.gasSettings.gasLimits).toEqual({ daGas: 50_000, l2Gas: 1_900_000 })
 	})
 
 	it("a private exit with no private gas is blocked before the review - a public payer would link the account to it", async () => {

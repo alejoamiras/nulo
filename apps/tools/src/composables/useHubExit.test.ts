@@ -410,7 +410,7 @@ describe("useHubExit", () => {
 	const EXIT_CEILING = 38_500_000n
 
 	it("a private exit names the PrivateFPC as payer, from the credit the account holds, at the committed ceiling", async () => {
-		h.privateBalance = EXIT_CEILING
+		h.fpcCredit = EXIT_CEILING
 		const exit = useHubExit()
 		const id = await exit.exit(plan({ isPrivate: true }))
 		expect(id).toBe(EXIT_TX)
@@ -427,7 +427,7 @@ describe("useHubExit", () => {
 	})
 
 	it("a private exit priced above the bound the review approved is refused, however much credit is held", async () => {
-		h.privateBalance = 10n * EXIT_CEILING
+		h.fpcCredit = 10n * EXIT_CEILING
 		const exit = useHubExit()
 		expect(await exit.exit(plan({ isPrivate: true }), EXIT_CEILING - 1n)).toBe("")
 		expect(exit.error.value).toMatch(/fees rose past what the review showed/)
@@ -437,7 +437,7 @@ describe("useHubExit", () => {
 	})
 
 	it("a private exit short of private gas is refused before any authwit, opens no record, and says why", async () => {
-		h.privateBalance = EXIT_CEILING - 1n
+		h.fpcCredit = EXIT_CEILING - 1n
 		const exit = useHubExit()
 		expect(await exit.exit(plan({ isPrivate: true }))).toBe("")
 		expect(exit.error.value).toMatch(/private gas is under/)
