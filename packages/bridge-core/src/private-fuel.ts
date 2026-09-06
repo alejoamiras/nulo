@@ -75,6 +75,12 @@ export const PRIVATE_HUB_CLAIM_GAS = { daGas: 100_000, l2Gas: 2_000_000 } as con
  */
 export const PRIVATE_HUB_REGISTER_GAS = { daGas: 100_000, l2Gas: 4_000_000 } as const
 
+/** Gas LIMITS for the hub's `exit_to_l1_private` paid through the PrivateFPC's `pay_fee`. PROVISIONAL:
+ *  the claim's measured limits, reused until a canary bills a private exit — a burn plus `pay_fee`'s
+ *  note selection (which can recurse) is not bounded by a mint's measurement. Size from the canary
+ *  when it lands; the FPC keeps the whole ceiling, so headroom is Fee Juice the account forfeits. */
+export const PRIVATE_HUB_EXIT_GAS = PRIVATE_HUB_CLAIM_GAS
+
 /** The PrivateFPC's committed ceiling for a claim — `getFeeLimit` = Σ gasLimit[d]·maxFee[d]. */
 export const privateFpcFeeLimit = (gas: { daGas: number; l2Gas: number }, maxFees: { feePerDaGas: bigint; feePerL2Gas: bigint }): bigint =>
 	BigInt(gas.l2Gas) * maxFees.feePerL2Gas + BigInt(gas.daGas) * maxFees.feePerDaGas
