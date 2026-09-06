@@ -105,7 +105,7 @@ If any check fails, setup reaps the stale children and cold-starts a fresh stack
 CI runs the network suite as a **5-shard GitHub Actions matrix** (`.github/workflows/pr-network-e2e.yml`). Each shard:
 
 - Is its own ubuntu-latest VM — own anvil, own aztec node, own playground vite, own Chrome
-- Gets ~9 of the 45 network test files, assigned deterministically by vitest's `--shard=N/M` (SHA-1 hash of filename)
+- Gets roughly a fifth of the network test files (77 gated files today, 1 env-gated probe skipped), assigned deterministically by vitest's `--shard=N/M` (SHA-1 hash of filename); the five files with a dedicated lane (`fee-methods`, `concurrent-sendtx-confirm`, `transfers`, `tx-sendTx-default`, `frozen-account-canary`) are excluded from the pool — `scripts/ci-cd/behavior-gating.test.ts` pins that list against the lanes
 - Runs in parallel with the other 4 shards
 
 **Wall time**: ~10–15 min (vs ~35–45 min unsharded). CPU minutes: ~25% more than serial (each shard pays the ~30s anvil+aztec boot cost), but the wall-time win is dramatic.
@@ -162,7 +162,7 @@ Anti-throttle Chrome flags live in `launchExtension` (`extension.ts`):
 
 ## Known failures + triage
 
-The full network suite is currently **46 / 66 passing**. The 18 remaining failures are tracked in `implementations-plan/network-test-triage/plan.md` and bucketed as: importToken cascade (14), contacts-sender (3 — that file has since been reworked into `senders-advanced.test.ts` by the contacts↔sender decoupling), data-registerSender (1). None are infrastructure regressions from this work — they predate the parallel-isolation refactor.
+The network suite is a required PR gate at retry 0 (`network-e2e-status`); there is no standing list of failing files. Open flake fingerprints, their sanctioned responses, and the history of every root-caused one live in the flake ledger of the `e2e-testing` skill (`.claude/skills/e2e-testing/SKILL.md` § Flake ledger). A red gate is a known fingerprint → rerun once, or breakage → fix; never a neutralised check.
 
 ## What's owned per worktree (parallel-safety summary)
 

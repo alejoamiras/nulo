@@ -36,7 +36,7 @@ import {
 	waitForHash,
 	type ExtensionContext,
 } from "../fixtures/extension"
-import { createAccount, switchToLocalNetwork } from "../fixtures/helpers"
+import { createAccount, findServiceWorkerTarget, navigateByHash, stopServiceWorker, switchToLocalNetwork } from "../fixtures/helpers"
 import { registerPasskeyProfile, setupPasskeyVirtualAuth } from "../fixtures/passkey"
 import { assertPgOk, formatPgMismatch, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
@@ -50,25 +50,18 @@ test("agent-runner contract: a live sandbox must be configured (no false skip)",
 	}
 })
 
-/** Duplicated verbatim from frozen-account-canary.test.ts (kept file-local there by design —
- *  that file is the KDF-bump gate and stays untouched by this arc). */
-async function stopServiceWorker(ctx: ExtensionContext): Promise<void> {
-	const swTarget = await ctx.browser
-		.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ctx.extensionId), { timeout: 5_000 })
-		.catch(() => null)
-	if (!swTarget) {
-		console.warn("[passkey-canary] no live SW target — Chrome already killed it; proceeding to recovery")
+/** A prover-ON stage can outlast Chrome's idle reaper, and nothing here wakes a worker: an absent
+ *  target IS the restart this stage exercises, so recovery proceeds; a present one gets the real
+ *  kill, whose failures propagate. */
+async function restartServiceWorker(ctx: ExtensionContext): Promise<void> {
+	if (!findServiceWorkerTarget(ctx)) {
+		console.warn("[passkey-canary] no live SW target — Chrome already stopped it; proceeding to recovery")
 		return
 	}
-	const swSession = await swTarget.createCDPSession()
-	try {
-		await swSession.send("Runtime.terminateExecution")
-	} catch {
-		// Session dies along with the SW; swallow disconnect noise.
-	}
+	await stopServiceWorker(ctx)
 }
 
-/** Duplicated from frozen-account-canary.test.ts (see stopServiceWorker note). */
+/** Duplicated from frozen-account-canary.test.ts. */
 function txHashOf(resultJson: unknown): string {
 	const candidate =
 		typeof resultJson === "string"
@@ -80,7 +73,7 @@ function txHashOf(resultJson: unknown): string {
 	return candidate
 }
 
-/** Duplicated from frozen-account-canary.test.ts (see stopServiceWorker note). */
+/** Duplicated from frozen-account-canary.test.ts. */
 async function setPgInputs(page: import("puppeteer").Page, values: Record<string, string>): Promise<void> {
 	await page.evaluate((entries: Record<string, string>) => {
 		for (const [name, v] of Object.entries(entries)) {
@@ -179,7 +172,7 @@ test.skipIf(!hasConfig)(
 			})
 			expect(preKillLiveness).toBeGreaterThan(0)
 			step("terminating the service worker")
-			await stopServiceWorker(ctx)
+			await restartServiceWorker(ctx)
 
 			await anchorPopup.waitForFunction(
 				async (priorTs: number) => {
@@ -194,14 +187,21 @@ test.skipIf(!hasConfig)(
 				preKillLiveness,
 			)
 			step("SW rebooted; driving the passkey re-unlock in the SAME FrameTreeNode")
-			// Passkey sessions are never silently restored — the SW-side session is gone. But the
-			// anchor popup's IN-MEMORY store is stale (isLogined still true), so a bare
-			// `location.hash = "#/popup/auth"` gets bounced by the router before auth mounts
-			// (observed on the first live run). Drive the app's own lock path instead — it flips
-			// the local store first, exactly like passkey-paths' lock+unlock leg; the popup stays
-			// open (same FTN = same virtual authenticator = same credential).
+			// Passkey sessions are never silently restored — the replacement worker holds no
+			// in-memory session, while the anchor popup's store is stale (isLogined still true) and a
+			// bare `location.hash = "#/popup/auth"` gets bounced by the router before auth mounts.
+			// The header's lock flips the local store first, then asks the worker to lock — and
+			// `SessionManager.close()` emits `onActiveProfileChanged(undefined)` only when a session
+			// was open in memory, so after a real restart the persisted record is cleared WITHOUT
+			// the event that would route this popup to /popup/auth. Wait for the authoritative lock
+			// (record gone), then navigate: the store already reads locked, so the guard admits the
+			// route. The popup stays open (same FTN = same virtual authenticator = same credential).
 			await clickByTestId(anchorPopup, "header-lock")
-			await waitForHash(anchorPopup, "#/popup/auth", 15_000)
+			await anchorPopup.waitForFunction(async () => !(await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"], {
+				timeout: 60_000,
+				polling: 200,
+			})
+			await navigateByHash(anchorPopup, "#/popup/auth")
 			await anchorPopup.waitForSelector('[data-testid="auth-submit"]', { visible: true, timeout: 15_000 })
 			await anchorPopup.waitForFunction(
 				() => {

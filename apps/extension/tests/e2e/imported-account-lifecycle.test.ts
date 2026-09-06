@@ -20,48 +20,13 @@
  * imported row genuinely foreign, i.e. exactly the material the DEK isolates.
  */
 import { expect } from "vitest"
-import type { Page, Target } from "puppeteer"
+import type { Page } from "puppeteer"
 import { TEST_PASSWORD } from "./fixtures/constants"
-import {
-	clickByTestId,
-	launchExtension,
-	openPopup,
-	registerProfile,
-	replaceInputValue,
-	test,
-	waitForHash,
-	type ExtensionContext,
-} from "./fixtures/extension"
-import { changePassword, closeStuckPopup, ensureUnlocked, lockWallet, waitForToast } from "./fixtures/helpers"
+import { clickByTestId, launchExtension, openPopup, registerProfile, replaceInputValue, test, waitForHash } from "./fixtures/extension"
+import { changePassword, closeStuckPopup, ensureUnlocked, lockWallet, stopServiceWorker, waitForToast } from "./fixtures/helpers"
 import { confirmImport, exportAccountBody, exportImportedAccountBody, gotoAccounts, previewImport } from "./helpers/account-io"
 
 const NEW_PASSWORD = "changed-password-9"
-
-/** Duplicated verbatim from `sw-resilience.test.ts` (kept file-local there by design): a REAL
- *  MV3 worker kill is `Target.closeTarget` via `worker.close()`, and returning only once the
- *  ORIGINAL target is destroyed is what makes the post-kill assertions mean anything. */
-async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
-	const swTarget = await ext.browser.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId), {
-		timeout: 15_000,
-	})
-	const destroyed = new Promise<void>((resolve, reject) => {
-		const timer = setTimeout(() => {
-			ext.browser.off("targetdestroyed", onDestroyed)
-			reject(new Error("stopServiceWorker: the service-worker target was still alive 15s after close()"))
-		}, 15_000)
-		function onDestroyed(target: Target) {
-			if (target !== swTarget) return
-			clearTimeout(timer)
-			ext.browser.off("targetdestroyed", onDestroyed)
-			resolve()
-		}
-		ext.browser.on("targetdestroyed", onDestroyed)
-	})
-	const worker = await swTarget.worker()
-	if (!worker) throw new Error("stopServiceWorker: service-worker target exposed no worker to close")
-	await worker.close()
-	await destroyed
-}
 
 /** The re-export-preview probe: export the IMPORTED (badge-carrying) row and preview the body —
  *  the previewed address must equal `expectedAddress`. Passing requires the profile DEK to unseal

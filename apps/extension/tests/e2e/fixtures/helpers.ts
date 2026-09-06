@@ -1720,6 +1720,16 @@ async function readWorkerTimeOrigin(target: Target, budgetMs: number): Promise<n
 	}
 }
 
+function isServiceWorkerTarget(ext: ExtensionContext, t: Target): boolean {
+	return t.type() === "service_worker" && t.url().includes(ext.extensionId)
+}
+
+/** The extension's service-worker target, or undefined while Chrome runs none (MV3 reaps an idle
+ *  worker; a caller that must tolerate that decides here instead of waiting for one to appear). */
+export function findServiceWorkerTarget(ext: ExtensionContext): Target | undefined {
+	return ext.browser.targets().find((t) => isServiceWorkerTarget(ext, t))
+}
+
 /**
  * Terminate the extension's service worker and wait until the ORIGINAL worker instance is gone.
  *
@@ -1736,7 +1746,7 @@ async function readWorkerTimeOrigin(target: Target, budgetMs: number): Promise<n
  * alternative — it leaves the worker running.
  */
 export async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
-	const isExtensionWorker = (t: Target) => t.type() === "service_worker" && t.url().includes(ext.extensionId)
+	const isExtensionWorker = (t: Target) => isServiceWorkerTarget(ext, t)
 	const swTarget = await ext.browser.waitForTarget(isExtensionWorker, { timeout: STOP_WORKER_BUDGET_MS })
 	const originBefore = await readWorkerTimeOrigin(swTarget, WORKER_PROBE_BUDGET_MS)
 
