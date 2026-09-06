@@ -1,8 +1,4 @@
-/**
- * Character-rendered "camera feed": value noise, an optional bright subject, ordered dithering
- * into a five-glyph ramp. Pure and DOM-free so it can be unit-tested and drawn anywhere a
- * monospace string fits.
- */
+/** A camera-feed frame as text: value noise, an optional bright subject, Bayer-dithered into five glyphs. */
 
 /** Darkest to brightest. Index 0 is a space so quiet areas render as nothing. */
 export const RAMP = [" ", ".", ":", "+", "%"] as const
@@ -32,13 +28,12 @@ export type FrameOptions = {
 	offsetY?: number
 	/** Brightness multiplier before quantisation; 0 renders an all-space frame. */
 	gain: number
-	/** Draw the brighter tracked subject. */
 	subject: boolean
 }
 
 export type Point = { x: number; y: number }
 
-/** mulberry32: tiny, deterministic, good enough for texture. */
+/** mulberry32. */
 function prng(seed: number): () => number {
 	let s = seed >>> 0
 	return () => {

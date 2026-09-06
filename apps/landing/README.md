@@ -33,7 +33,7 @@ Marketing landing page for the wallet (nulo.sh). Standalone Vite app; ships inde
 
 - **No framework, no library.** Vanilla DOM + Vite. The feed is text in a `<pre>`, redrawn as a string; no canvas, no WebGL.
 - **Tokens and fonts come from `@nulo/design/base.css`** (declared as a workspace dependency), so the site and the wallet share one palette. Vite hashes the package fonts into `/assets/`; only the faces the page uses are fetched. `overrides.css` undoes the popup-specific globals; add page styling to `page.css`, never to the package.
-- **Two design rules.** Anything meant to be read sits on a solid plate, never on the grain. The grain runs behind every section uninterrupted.
+- **Two design rules.** Copy, buttons and panels sit on solid plates; section headings sit on the grain with a dark halo. The grain runs behind every section uninterrupted.
 - **Copy rule.** No wallet jargon above the fold; the technical words (nullifier, commitment, log) appear only inside the public-record panel, which is labelled illustrative because its values are generated locally.
 - **CSP.** `public/_headers` is the policy; preview applies it too. No inline scripts, no CDN, no remote fonts.
 - **Independent ship.** Builds and deploys (Cloudflare Pages, from `main`) without the extension. CI lints, typechecks and unit-tests this package on every PR but does not build it; run `bun run --cwd apps/landing build` locally before opening a PR.

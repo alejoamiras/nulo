@@ -1,8 +1,4 @@
-/**
- * Reads the site-wide (`/*`) block of a Cloudflare Pages `_headers` file so `vite preview` can
- * serve the same response headers Pages does. Path-scoped blocks are ignored: preview only needs
- * the policy that applies to every response.
- */
+/** The site-wide (`/*`) block of a Cloudflare Pages `_headers` file, so `vite preview` mirrors it. */
 export function siteHeaders(text: string): Record<string, string> {
 	const headers: Record<string, string> = {}
 	let inSiteBlock = false

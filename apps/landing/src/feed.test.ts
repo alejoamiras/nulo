@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { BAYER4, createField, quantize, RAMP, renderFrame, subjectAt } from "./feed"
+import { createField, quantize, RAMP, renderFrame, subjectAt } from "./feed"
 
 const field = createField(7)
 const base = { cols: 40, rows: 12, time: 1.5, gain: 1.15, subject: false }
@@ -51,15 +51,6 @@ describe("renderFrame", () => {
 describe("quantize", () => {
 	it("reproduces the Bayer threshold pattern for a constant mid-grey", () => {
 		const pattern = [0, 1, 2, 3].map((y) => [0, 1, 2, 3].map((x) => quantize(0.5, x, y)).join(""))
-		const expected = [0, 1, 2, 3].map((y) =>
-			[0, 1, 2, 3]
-				.map((x) => {
-					const t = (BAYER4[y] as readonly number[])[x] as number
-					return Math.min(4, Math.max(0, Math.floor(2.5 + ((t + 0.5) / 16 - 0.5) * 1.4)))
-				})
-				.join(""),
-		)
-		expect(pattern).toEqual(expected)
-		expect(new Set(pattern.join("")).size).toBeGreaterThan(1)
+		expect(pattern).toEqual(["1222", "2232", "2212", "3222"])
 	})
 })

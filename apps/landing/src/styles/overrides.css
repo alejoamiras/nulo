@@ -1,8 +1,4 @@
-/*
- * Corrections to @nulo/design/base.css for a web page. The package stylesheet is written for
- * the wallet popup: links are blue, focus rings are removed, text is unselectable and scrollbars
- * are hidden. Loaded immediately after it; page presentation lives in page.css.
- */
+/* Restores the document defaults @nulo/design/base.css suppresses for the popup. Loads right after it. */
 
 html {
 	scroll-behavior: smooth;

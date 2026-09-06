@@ -4,6 +4,7 @@ import { siteHeaders } from "./headers"
 const sample = `/*
   Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
   Content-Security-Policy: default-src 'self'; script-src 'self'
+  Link: <https://example.test/fonts.css>; rel=preload
 
 /*.html
   Cache-Control: public, max-age=60, must-revalidate
@@ -17,6 +18,7 @@ describe("siteHeaders", () => {
 		expect(siteHeaders(sample)).toEqual({
 			"Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
 			"Content-Security-Policy": "default-src 'self'; script-src 'self'",
+			Link: "<https://example.test/fonts.css>; rel=preload",
 		})
 	})
 

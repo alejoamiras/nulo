@@ -1,6 +1,6 @@
 /*
- * Page presentation. Two rules hold the design together: anything meant to be read sits on a
- * solid plate (never on the grain), and the grain runs behind every section uninterrupted.
+ * Page presentation. Copy, buttons and panels sit on solid plates; section headings sit on the grain
+ * with a dark halo; the grain runs behind every section uninterrupted.
  */
 
 :root {
@@ -53,8 +53,6 @@ p {
 	top: 12px;
 }
 
-/* ── the grain, the feeds ── */
-
 .grain,
 .feed {
 	margin: 0;
@@ -87,8 +85,6 @@ footer {
 	position: relative;
 	z-index: 1;
 }
-
-/* ── plates ── */
 
 .plate {
 	position: relative;
@@ -175,8 +171,6 @@ footer {
 	text-transform: uppercase;
 }
 
-/* ── bar ── */
-
 .bar {
 	position: sticky;
 	top: 0;
@@ -218,7 +212,7 @@ footer {
 	color: var(--txt-body);
 }
 
-.bar nav a:hover {
+.bar nav a:not(.btn):hover {
 	color: var(--txt-primary);
 }
 
@@ -226,8 +220,6 @@ footer {
 	padding: 10px 16px;
 	font-size: 14px;
 }
-
-/* ── hero ── */
 
 .hero {
 	position: relative;
@@ -406,8 +398,6 @@ footer {
 	max-width: 44ch;
 	margin-bottom: 24px;
 }
-
-/* ── sections ── */
 
 section.s {
 	padding: 72px 0;
@@ -710,6 +700,11 @@ footer .wrap a:hover {
 	.slug.ts {
 		display: none;
 	}
+}
+
+.is-paused .slug.rec i,
+.is-paused .rec-pan .dot {
+	animation-play-state: paused;
 }
 
 @media (prefers-reduced-motion: reduce) {
