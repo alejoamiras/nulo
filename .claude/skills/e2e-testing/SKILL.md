@@ -51,22 +51,21 @@ falls back to `8545/8080/8880/40400/5174`. Use it only against a sandbox you alr
 
 ### Hazards that mass-fail a run
 
-- **Both global setups `pkill` every Chrome loaded from THIS dist path** at setup (smoke also at
-  teardown). Parallel worktrees are safe; smoke and network on ONE worktree are not. Tell a
-  reviewer running locally not to invoke any e2e config.
+- **Both global setups `pkill` every Chrome loaded from THIS dist path**, at setup and at teardown.
+  Parallel worktrees are safe; smoke and network on ONE worktree are not. Tell a reviewer running
+  locally not to invoke any e2e config.
 - **Heavy suites run alone on the host.** A concurrent `audit:vue`, a proving run, or a second
   suite starves the sandbox and the browsers; the signature is timeouts across unrelated files.
   Rerun before triage. Shard for wall-clock (`--shard=N/M` across agents), never overlap.
-- **Always `cd` to the app dir for `test:e2e`.** The tool shell's cwd persists across calls and
-  parallel calls race on it; a root `test:e2e` hits the extension suites anyway and the pkill fires.
 - **Reap at session end**, not at the next run: `bun run e2e:reap`. Orphans hold their LMDB store
   open; the data dir is on real disk (`~/.cache/nulo-e2e`, `lockfile.ts` `E2E_DATA_ROOT`), so RAM is
   not pinned, but ports and CPU are.
 
 ### The agent runner — `apps/extension/scripts/e2e/agent.sh`
 
-1. Scans the target files for `@requires-proverless`; any hit without `NULO_E2E_PROVERLESS=1` exits 2
-   with the remedy. Prover-ON is the default; the proverless build is a double opt-in
+1. Scans the file paths passed as arguments (or all of `tests/e2e/network` when none) for
+   `@requires-proverless`; any hit without `NULO_E2E_PROVERLESS=1` exits 2 with the remedy. A vitest
+   name filter is not a path — pass the file. Prover-ON is the default; the proverless build is a double opt-in
    (`VITE_NULO_E2E_PROVERLESS=1` + `_CONFIRM=1`) and mutually exclusive with
    `VITE_NULO_ACCELERATOR_REQUIRED`.
 2. Claims a fresh port pack (`resolve-ports.ts`: bind-and-release in a static window below the
@@ -74,8 +73,10 @@ falls back to `8545/8080/8880/40400/5174`. Use it only against a sandbox you alr
    host-wide registry file; safety is probabilistic plus the bind test.
 3. Builds the wallet armed: `VITE_LOCAL_NETWORK_RPC_URL` (this sandbox), `VITE_NULO_E2E_DEFAULT_NET=
    testnet`, `VITE_NULO_E2E_PRICE_MAP=1`, `VITE_NULO_E2E_MIGRATION_FIXTURE=1`,
-   `VITE_NULO_E2E_TOKEN_SEEDS=1` + `_CONFIRM=1`, plus the proverless pair when asked. Then greps
-   `dist/chrome` for every stamp it just armed and exits 2 on a miss — before spending a sandbox.
+   `VITE_NULO_E2E_TOKEN_SEEDS=1` + `_CONFIRM=1`, plus the proverless pair when asked. Then asserts
+   the bundle before spending a sandbox (exit 2 on a miss): the sandbox URL literal, the
+   migration-fixture stamp, the token-seed stamp and key, the accelerator stamp when armed, the
+   proverless stamp when armed, the fee multiplier when set. The price map has no stamp check.
 4. Runs vitest with `E2E_REQUIRE_SETUP=1` (a sandbox or deploy failure is `FATAL`, never a silent
    `describe.skipIf` — the suite once showed `61 skipped, exit 0` for weeks) and the runtime
    declarations the tests read (`NULO_E2E_MIGRATION_FIXTURE=1`, the `*_URL`s).
@@ -84,29 +85,35 @@ falls back to `8545/8080/8880/40400/5174`. Use it only against a sandbox you alr
    else passes through. A test that ran cannot masquerade as infra.
 
 Reuse never happens under `e2e:agent` (fresh ports every run); `reconcilePriorLock` in
-`global-setup.ts` only reaps the previous pack. Reuse fires for a bare repeated `vitest run
---config vitest.e2e.network.config.ts` with stable env: pids alive, endpoints healthy, and the
-node's `l1ContractAddresses` equal to the lock's (a stranger on a reused port fails identity).
+`global-setup.ts` only reaps the previous pack. A normal run's teardown kills what it spawned and
+clears its lock, so reuse fires only when a prior pack SURVIVED (a `kill -9` of the vitest group
+after deploy) and the next bare `vitest run --config vitest.e2e.network.config.ts` carries the same
+ports: pids alive, endpoints healthy, and the node's `l1ContractAddresses` equal to the lock's (a
+stranger on a reused port fails identity).
 
 ### Build-armed tests
 
 Several fixtures are compiled INTO the bundle by `VITE_NULO_E2E_*` flags and tree-shaken out
 otherwise: the proverless `ProofGate`, the restore and incoming-poll gates, the migration fixture,
 the token-seed reader, the price map. Against an unarmed dist a test that needs one does not error —
-the hook is gone, optional chaining no-ops, and the test polls into a multi-minute timeout that
-looks exactly like a product bug. A runtime env var can never arm a build-time flag.
+the hook is gone, optional chaining no-ops, and an unguarded test polls into a multi-minute timeout
+that looks exactly like a product bug (a guarded one fails fast in its `beforeAll` stamp check). A
+runtime env var can never arm a build-time flag.
 
 - The signature is the SAME deterministic set of failures run after run (load flake scatters).
 - Diagnose before theorising: `grep -rl NULO_E2E_PROVERLESS_BUILD_STAMP apps/extension/dist/chrome`
   (or the stamp of the feature in question). A later plain `bun run build` — including the one at
   the end of `bun run audit:vue` — silently disarms the dist.
-- Smoke needs the migration fixture armed AND declared: build with
-  `VITE_NULO_E2E_MIGRATION_FIXTURE=1 VITE_NULO_E2E_DEFAULT_NET=testnet bun run build:chrome`, run
-  with `NULO_E2E_MIGRATION_FIXTURE=1` (what `_smoke-e2e.yml` does). `migration.test.ts` skips
-  without the declaration; `backup-migration.test.ts` throws with the remedy.
-- A new build-armed test file carries the `@requires-proverless` marker (scanned by `agent.sh`)
-  AND a `beforeAll` that greps the loaded bundle for the stamp (`account-switch-isolation.test.ts`
-  is the idiom) — the belt for direct vitest invocations.
+- Smoke needs its fixtures armed AND the migration one declared: build with
+  `VITE_NULO_E2E_MIGRATION_FIXTURE=1 VITE_NULO_E2E_DEFAULT_NET=testnet VITE_NULO_E2E_TOKEN_SEEDS=1
+  VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 bun run build:chrome` (the seed pair keeps the fresh wallet off
+  the live seed RPC — `_smoke-e2e.yml` says why), run with `NULO_E2E_MIGRATION_FIXTURE=1`.
+  `migration.test.ts` skips without the declaration; `backup-migration.test.ts` throws with the
+  remedy.
+- A file that depends on the PROVERLESS build carries the `@requires-proverless` marker (the only
+  marker `agent.sh` scans) AND a `beforeAll` that greps the loaded bundle for the stamp
+  (`account-switch-isolation.test.ts` is the idiom) — the belt for direct vitest invocations. Other
+  armed features guard themselves at runtime (`backup-migration.test.ts` throws with the remedy).
 
 ### Env vars the suite reads
 
@@ -142,8 +149,8 @@ looks exactly like a product bug. A runtime env var can never arm a build-time f
 
 ### CI topology
 
-- **Smoke** — `pr-smoke-e2e.yml` → `_smoke-e2e.yml`. Runs on PRs to `main`, on PRs to `dev` whose
-  diff trips the `smoke-surface` paths filter, or with the `e2e:smoke` label; 20-minute job; in-job
+- **Smoke** — `pr-smoke-e2e.yml` → `_smoke-e2e.yml`. Runs when the diff trips the `smoke-surface`
+  paths filter, when the PR targets `main`, on the `e2e:smoke` label, or on dispatch; 20-minute job; in-job
   armed build by default, or an artifact (`artifact_name` / `extension_path`) for nightly/release.
   Required check `smoke-e2e-status` on both branches.
 - **Network** — `pr-network-e2e.yml` → `_network-e2e.yml`. Filter `extension-network`, label
@@ -151,9 +158,11 @@ looks exactly like a product bug. A runtime env var can never arm a build-time f
   the 5 dedicated files excluded); two heavy single-file lanes (`fee-methods`,
   `concurrent-sendtx-confirm`, proverless); the **canary** lane prover-ON with the SHA-256-pinned
   `accelerator-server` and `VITE_NULO_ACCELERATOR_REQUIRED=1` (`transfers`, `tx-sendTx-default`,
-  `frozen-account-canary`) — a canary run with zero `Proving succeeded` lines fails. Exit 86 retries
-  the agent once. After every run the built bundle is grepped for `(PROBE|nulo:probe:|VITE_E2E_PROBE)`
-  and any hit fails the workflow: string constants shipped in `dist/` must not contain `PROBE`.
+  `frozen-account-canary`) — a canary run with zero `Proving succeeded` lines fails; the
+  `disable_accelerator` dispatch input (or the `NULO_E2E_DISABLE_ACCELERATOR` variable) is the
+  rollback to WASM. Exit 86 retries the agent once. After every run except a `probe` dispatch the
+  built bundle is grepped for `(PROBE|nulo:probe:|VITE_E2E_PROBE)` and any hit fails the workflow:
+  string constants shipped in `dist/` must not contain `PROBE`.
   `scripts/ci-cd/behavior-gating.test.ts` pins the filters and the exclude list against the lanes.
 - **Nightly** (`nightly.yml`, the only scheduled workflow) mirrors the lanes with config-default
   retries and publishes a prerelease on full green. **Soak** (`network-e2e-soak.yml`) is manual,
@@ -172,13 +181,22 @@ enforces it, so a reviewer has to.
 
 ### Start from the right fixture (`fixtures/extension.ts`)
 
-`extension` (fresh install, liveness reached, first-run tab closed) → `registeredExtension` (one
-password profile on `#/popup/general`) → `dappConnectedExtension` (playground handshake done) →
-`…WithAccountsCap` / `…WithTransactionCap` / `…WithFirstTwoAccountsCap` → `localNetworkExtension` →
-`tokenReadyExtension` / `feeJuiceReadyExtension` / `feeJuiceImportedExtension`. The default scope
-is `"file"`; `freshExtensionPerTest`, `registeredExtensionPerTest` and `dappConnectedExtensionPerTest`
-relaunch per test for specs that mutate the profile. One browser per file is the isolation unit;
-shared browsers leak worker memory between files. Design files order-independent.
+Each fixture launches its own browser and builds its own starting state; they are siblings, not a
+chain. Pick by the state you need and the scope you can afford:
+
+| Fixture | Starting state | Scope |
+|---|---|---|
+| `extension` | fresh install, liveness reached, first-run tab closed | file |
+| `freshExtensionPerTest` | same, relaunched per test | test |
+| `registeredExtension` / `…PerTest` | one password profile on `#/popup/general` | file / test |
+| `dappConnectedExtension` / `…PerTest` | playground handshake done | file / test |
+| `dappConnectedExtensionWithAccountsCap`, `…WithTransactionCap`, `…WithFirstTwoAccountsCap` | handshake plus the named capability grant | test |
+| `localNetworkExtension` | profile switched to the sandbox network | file |
+| `tokenReadyExtension`, `feeJuiceReadyExtension`, `feeJuiceImportedExtension` | funded token / fee-juice states on the sandbox | file |
+
+A file-scoped browser is shared by the file's tests, so a test that mutates the profile takes a
+`PerTest` fixture. Shared browsers leak worker memory between files, which is why the unit is the
+file and never the run. Design files order-independent.
 
 ### Never bypass the helpers
 
@@ -196,9 +214,11 @@ by identity because plain popup pages change URL under a lock redirect.
 
 - **Post-action state, not the route.** A hash change proves nothing; assert the rendered address,
   the persisted row, the updated balance.
-- **Positive counts poll; zero counts may be instant.** Vue lists that refresh by array replacement
-  swap children inside a sub-frame window; `page.$$` right after a resolved `waitForSelector` can
-  read 0. Pair a zero assertion with a MutationObserver if a flash matters.
+- **Positive counts poll; a zero count is instant only AFTER completion evidence.** Vue lists that
+  refresh by array replacement swap children inside a sub-frame window; `page.$$` right after a
+  resolved `waitForSelector` can read 0. An absence read before the action's own completion signal
+  proves nothing either — wait for that signal (or observe for a bounded window), then read zero;
+  pair it with a MutationObserver if a flash matters.
 - **State attributes, not visibility.** `offsetParent` and bounding rects are paint artefacts; a
   leaving `<Transition>` is visible while `isOpen` is already false. Gate on `data-dropdown-open`,
   `data-toggle-active`, `data-restore-stage`, `data-boot-outcome`; add one if it is missing.
@@ -220,12 +240,14 @@ by identity because plain popup pages change URL under a lock redirect.
 - **Storage reads: key and shape.** `ValueStorage` persists `JSON.stringify(value)` — a raw
   `chrome.storage.local.get` returns a string; config lives at `nulo:config`. Verify both before
   concluding "absent".
-- **Rows by badge or id, never by name.** An imported account carries its source profile's name and
-  collides with the target's default row (`helpers/account-io.ts`).
+- **Imported-account rows by badge, never by name.** An imported account carries its source
+  profile's name and collides with the target's own default-named row (`helpers/account-io.ts`);
+  prefer a stable id or badge for any row whose display name is not unique by construction.
 - **Helpers state their starting route** or navigate there (`importToken`, `switchAccountByAddress`
   need `#/popup/general`).
-- **Drive a popup to its own closing action.** `popupStore.open()` on an already-open key is not
-  reactive; a force-cleared popup is dead for the rest of the file.
+- **Drive a popup to its own closing action.** `popupStore.open()` on a key whose open flag is
+  already true changes nothing reactive, so a popup whose DOM was force-cleared while the store
+  still says open will not remount on the next open of that key.
 - **Prove the disruption happened**, not only the downstream state — a test whose kill never killed
   passed for months for reasons unrelated to its subject (ledger #16–19). Red-team a pin by removing
   what it guards: if it still passes, another gate was holding it.
@@ -234,17 +256,25 @@ by identity because plain popup pages change URL under a lock redirect.
 
 - **Worker readiness is the heartbeat**, not the target: `browser.waitForTarget(service_worker)`
   means Chrome registered the script; `launchExtension` waits for `nulo:liveness` in
-  `chrome.storage.session` (30s). After a restart, gate on a STRICTLY NEWER heartbeat than a snapshot
-  taken in an extension page before the kill (the value survives the old worker; a truthy check lies;
-  a snapshot of 0 means you read from a page without `chrome.storage`).
-- **`evaluate` on the worker target is not the extension context.** `chrome.storage` and friends
-  are read from an extension page (`openPopup`, the blank popup in `launchExtension`).
-- **`consoleErrors` is structurally blind to app `console.*`.** The console sniffer reroutes every
-  page's `console.*` to the worker's LoggerService before the app mounts; `page.on("console")` sees
-  only browser-emitted entries. `pageerror` is reliable for uncaught throws and rejections;
-  `readSwLogTrail` (`fixtures/journal.ts`, `nulo:logs`, 2s flush debounce, bounded) is the app-log
-  channel; an error the app catches and merely logs reaches neither fixture array. Assert on DOM,
-  storage, or stage evidence instead. Approval sub-windows carry no listeners at all.
+  `chrome.storage.session` (30s). After a restart, gate on a heartbeat STRICTLY NEWER than the last
+  value the OLD worker wrote (the value survives it in storage; a truthy check lies). The heartbeat
+  ticks every 10s, so a snapshot taken BEFORE the kill can be beaten by the old worker's final tick
+  and pass before any replacement boots; the honest threshold is a read taken AFTER
+  `stopServiceWorker` returns (the old instance is gone, so that value is final). The callers today
+  still snapshot pre-kill — their later waits absorb the gap, but do not copy the pattern. Read from an
+  extension page; a snapshot of 0 means the page had no `chrome.storage`.
+- **Read `chrome.storage` from an extension page**, never through a session on the worker target:
+  that attachment is exactly what parks the worker's DevTools host across a restart (§3), and a page
+  outlives the worker. `openPopup`, or the blank popup inside `launchExtension`.
+- **`consoleErrors` is structurally blind to app `console.*`.** The console sniffer, first script in
+  every extension page, reroutes the sniffed `console.*` methods to the worker's LoggerService, so
+  `page.on("console")` sees only browser-emitted entries and the sniffer's saved originals
+  (`console._log`). `pageerror` is reliable for uncaught throws and rejections. `readSwLogTrail`
+  (`fixtures/journal.ts`, `nulo:logs`, 2s flush debounce, bounded) reads the worker's log ring — but
+  that flush is gated on `developerMode`, which e2e profiles do not enable, so it returns an empty
+  trail unless the test turned Developer Mode on first; empty means not retained. An error the app
+  catches and merely logs reaches neither fixture array. Assert on DOM, storage, or stage evidence
+  instead. Approval sub-windows carry no listeners at all.
 - **`chrome.runtime.reload()` disables an unpacked `--load-extension` build** (every later
   `chrome-extension://` goto is `ERR_BLOCKED_BY_CLIENT`). Never use it for harness state reset; when
   the product calls it (the migration barrier's Retry), click, wait for the pre-reload write, then
@@ -266,14 +296,16 @@ by identity because plain popup pages change URL under a lock redirect.
 - **A popup that outlives a worker restart keeps a logged-in shell.** Under strict security the
   replacement worker has no in-memory session; the reconnecting popup's boot lands `locked`, but
   `landOnLockScreen` only routes to auth when no profile is selected, so an already-logged-in popup
-  stays put with `isLogined` true. Its next Lock click clears the persisted record WITHOUT the
-  `onActiveProfileChanged` event (`SessionManager.close()` emits only over an in-memory session), so
-  nothing navigates. A test that keeps a popup open across `stopServiceWorker` must lock by waiting
-  for the record to vanish and then navigate itself; a fresh `openPopup` boots from storage and lands
-  on auth by itself (ledger #29).
+  stays put with `isLogined` true. Its next Lock click emits no `onActiveProfileChanged`
+  (`SessionManager.close()` emits only over an in-memory session), so nothing navigates. A passkey
+  profile's persisted record survives the restart (never silently restored) and is cleared by that
+  click; a password profile's bearerless record was already dropped at boot. A test that keeps a
+  popup open across `stopServiceWorker` locks by waiting for the record to be gone and then navigates
+  itself; a fresh `openPopup` boots from storage and lands on auth by itself (ledger #29).
 - **The playground sends every tx `NO_WAIT`**: `waitForPgResult` proves the node accepted the
-  submission (a real proof on the canary lane), not mining. Wallet-UI `transfers` is the one test that
-  waits through prove → mine.
+  submission (a real proof on the canary lane), not mining. A test that needs the block waits on the
+  node (`waitForTxMined` in `fixtures/aztec.ts`), as both canaries do; the wallet-UI `transfers` flow
+  waits through prove → mine in the popup itself.
 
 ## 3. Kill or restart the service worker
 
@@ -306,12 +338,15 @@ first: an absent worker is already the restart, so it proceeds to recovery with 
 one gets the real kill (`restartServiceWorker` in the two canaries). Called with no worker alive, the
 helper's own 15s `waitForTarget` throws — nothing in it wakes one.
 
-Stage gates (proverless build only, `chrome.storage.session` presence keys): `proof-gate.ts` parks
-a tx right before `pxe.proveTx`; `restore-gate.ts` parks a restore at `service-restore` or
-`account-state` and ACKS — "armed" is not "reached", wait for `held` before killing;
-`incoming-poll-gate.ts` parks an incoming scan post-discovery; `token-seeds.ts` must be written before
-the trigger. Always release in `finally`; a per-test timeout above the gate's safety timeout so a
-forgotten release fails with the gate's message, not vitest's.
+Stage gates are `chrome.storage.session` rendezvous compiled in by the proverless build, each with
+its own protocol: `proof-gate.ts` is presence-only and parks a tx right before `pxe.proveTx`;
+`restore-gate.ts` and `incoming-poll-gate.ts` carry a payload naming the phase and the worker ACKS
+by writing `held` — "armed" is not "reached", so wait for the ack (`waitForRestoreGateHeld`,
+`waitForIncomingPollPhase`) before killing or asserting; `token-seeds.ts` is a separately armed
+reader that must be written before the trigger. A gate's safety timeout (20s on the proof gate)
+RELEASES with a loud log rather than failing the test, so a test that depends on the hold asserts
+the parked stage it expects to see (the journal `proving` record, the ack) and never infers the hold
+from a later outcome. Always release in `finally`.
 
 ## 4. Diagnose a red run
 
@@ -454,8 +489,9 @@ the sanctioned response.
 - **No bash signal trap in `agent.sh`**: bash defers INT/TERM until the foreground child exits, so a
   trap protects nothing and clobbers the classified exit code; `process.on("exit")` in the setup does
   a synchronous best-effort SIGTERM and never clears the lock (a survivor must stay findable).
-- **Proof for a change here**: the full network suite on CI, the reuse drill (bare vitest twice on a
-  pinned pack → `reusing prior sandbox (identity check passed)`), the reap drill (`e2e:agent` after →
+- **Proof for a change here**: the full network suite on CI, the reuse drill (bare vitest on a
+  pinned pack, `kill -9` the vitest group after deploy so the pack survives, run again →
+  `reusing prior sandbox (identity check passed)`), the reap drill (`e2e:agent` after →
   `prior lock is for different ports — reaping orphans`), the fail-loud negative (empty `HOME` on
   free ports → the anvil FATAL before any spawn).
 
@@ -464,8 +500,10 @@ the sanctioned response.
 Static import behind an `if (import.meta.env.VITE_NULO_E2E_X)` guard so DCE removes it — a dynamic
 `import()` emits a chunk that SHIPS from a dead branch; double opt-in (`_CONFIRM`) for anything that
 changes execution semantics; a `*_BUILD_STAMP` string; the `agent.sh` bundle assertion; the CI
-negative grep; the `@requires-*` marker + `beforeAll` stamp check on every file that needs it. The
-trust boundary in prod is the absent listener, not `chrome.storage` access.
+negative grep; on every file that needs it, a `beforeAll` stamp check — plus the
+`@requires-proverless` marker if the feature rides the proverless build (no other marker is
+scanned; a new build flag needs its own runner guard). The trust boundary in prod is the absent
+listener, not `chrome.storage` access.
 
 ### Adding a stage gate
 

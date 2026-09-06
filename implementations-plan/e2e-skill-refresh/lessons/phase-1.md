@@ -59,10 +59,21 @@ FrameTreeNode, same virtual authenticator). Green on the first run after the cha
 
 **Product finding (reported to the owner, NOT changed here — out of scope).** An open popup that
 survives a worker restart keeps a logged-in shell over a worker with no session; the next Lock click
-strips the header without navigating. Reachable only when the worker dies under an open popup (a
-port keeps an MV3 worker alive, so this is crash/update territory, not the idle reaper). Two
+strips the header without navigating. Reachable whenever the worker dies under an open popup: an
+open port by itself does not extend the MV3 idle timer (traffic on it does — the wallet's 10s
+heartbeat and the popup's RPCs are what keep the worker up), plus crashes and updates. Two
 candidate shapes, owner's call: (a) `SessionManager.close()` emits when it deletes a persisted
 record even without an in-memory session; (b) `landOnLockScreen` treats a `locked` result over a
 popup whose store says logged-in as a lock (flip `isLogined`, push auth). Fresh popups are
 unaffected (they boot from storage and land on auth), which is why `frozen-account-canary`, which
 opens a new recovery popup, was green.
+
+## Follow-up surfaced by the codex loop (not changed here)
+
+Every post-restart liveness gate in the suite snapshots the heartbeat BEFORE the kill and waits for
+strictly newer. The heartbeat ticks every 10s (`runtime.ts` `HEARTBEAT_INTERVAL_MS`), so the old
+worker's final tick can land between the snapshot and the kill and satisfy the gate before any
+replacement boots; the later UI waits absorb it today. The honest threshold is a read taken AFTER
+`stopServiceWorker` returns (the old instance is gone, so that value is final). Eight callers; a
+separate mechanical PR, recorded in the skill's product-couplings section so nobody copies the
+pattern meanwhile.
