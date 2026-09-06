@@ -463,6 +463,12 @@ mark the index entry and suggest `agent-worktree done dapp-popup-cancel-focus`.
   (`worktree-dapp-popup-cancel-focus` → `dev`) and PR #551 (`dapp-popup-cancel-focus/focus` → #550).
   Open: CI checks; the owner's macOS Space-switch check (`lessons/phase-4.md`); `gh stack merge` is
   the owner's call.
+- 2026-09-06 00:57Z–01:10Z: GitHub Actions created NO check suite for either PR (`opened` and the
+  later `synchronize` both ignored; only the Cloudflare/Vercel/Railway apps reacted), while other
+  branches' PR runs an hour earlier were normal. Recovered per `pr-quick.yml`'s own comment:
+  `gh workflow run <pr-quick|pr-smoke-e2e|pr-network-e2e>.yml --ref <branch>` on both branches
+  (dispatch force-runs the label-gated e2e suites). Runs 34002813159 / 34002814921 (Quality),
+  34002823685 / 34002826511 (Smoke), 34002825193 / 34002827822 (Network).
 
 ## Audit log
 
