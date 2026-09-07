@@ -126,3 +126,65 @@ The 80-line limit is **per production function**, not per file (`CLAUDE.md:82`).
 5. Add the privacy HTML entry and fix the missing test invocations. Preserve the existing release ZIP pipeline.
 
 VERDICT: reject (with blocking findings: deprecated and incorrectly interpreted publishing API; unsafe dry-run wiring and unverified credential boundary; coupled Firefox failure; inaccurate data-use claims and unsupported no-remote-code conclusion)
+
+## Round 2 — VERDICT: reject
+
+(Resumed session over the revised plan at `4da4aa60`; every finding re-verified in the code before adoption: `release.yml:11/:184/:266/:368`, `setup-bun/action.yml:28`, `dapp-interaction/service.ts:313/:558/:627`, `offscreen/index.ts:100-122`.)
+
+---
+
+## 1. Adversarial / security
+
+**High — The new environment policy would break existing releases. Confidence: high.**  
+`implementations-plan/chrome-store-launch/plan.md:124` restricts shared `production` to tags `v*`. But releases run on **push to `main`** (`.github/workflows/release.yml:11`), and `attach-assets` and `refresh-landing` already use `production` (`:266`, `:368`). GitHub checks the workflow’s `GITHUB_REF`; checking out a tag’s SHA does not change it. Ordinary releases would therefore be blocked even with Chrome publishing disabled. Adding reviewers also makes those previously automatic jobs interactive.
+
+Smallest fix: permit the intended `main` workflow ref and document that review now applies to existing production jobs. If approval should apply exclusively to Chrome publishing, use a dedicated environment for its credentials. Explicitly document the dispatch `--ref` separately from the `tag` input. [GitHub environment rules](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments).
+
+**High — Ask 4 still proposes an explanation containing unsupported and incorrect claims. Confidence: high on confirmation behavior; moderate on store interpretation.**  
+`plan.md:126` says contract execution happens “only after the user approves the request in the confirmation window.” That is not universally true: `apps/extension/src/wallet/services/dapp-interaction/service.ts:313` takes a silent execution path when confirmation is unnecessary; the decision at `:558` uses the session’s confirmation threshold. Utility execution is classified as `PrivateData` at `:627`. Prior capability approval and per-request confirmation are different.
+
+“Isolated from extension APIs” also needs a precise technical qualification. PXE is initialized in an offscreen document that uses `chrome.runtime` (`apps/extension/src/offscreen/index.ts:100`, `:122`). A restricted bytecode instruction set may provide isolation, but that is not demonstrated merely by calling the runtime bundled or offscreen. Google specifically addresses interpreters of externally supplied logic and separately describes exempt isolated contexts.
+
+Remove the universal claim about other Aztec wallets. Describe the actual bytecode/oracle boundary and authorization behavior, and keep policy classification unresolved until that evidence supports the answer. Owner confirmation cannot establish technical facts. [MV3 requirements](https://developer.chrome.com/docs/webstore/program-policies/mv3-requirements).
+
+## 2. Assumption attack
+
+**Facts — Medium: the setup composite always installs dependencies. Confidence: high.**  
+`plan.md:44` specifies the repo’s `setup-bun` composite while asserting “no `bun install`.” Its implementation unconditionally runs `bun install --frozen-lockfile` (`.github/actions/setup-bun/action.yml:28`).
+
+Use pinned `oven-sh/setup-bun` directly for this dependency-free job. Otherwise the proposed security boundary unnecessarily includes workspace dependency installation before the credential-bearing step.
+
+**Inferences — Medium: twelve polling attempts do not establish a time bound. Confidence: high.**  
+`plan.md:42` specifies “12 × 10 s,” but no request timeout or polling deadline. A stalled response can consume the job timeout without completing the advertised polling sequence.
+
+Specify abortable requests and an overall deadline. Test exhausted polling and assert that publish is never called afterward. Also explicitly fail closed on absent, unspecified or `NOT_FOUND` upload state; these are possible responses, not success. [Upload states](https://developer.chrome.com/docs/webstore/api/reference/rest/v2/UploadState), [fetchStatus contract](https://developer.chrome.com/docs/webstore/api/reference/rest/v2/publishers.items/fetchStatus).
+
+**Asks — High: Ask 2 must distinguish workflow ref from release tag; Ask 4 must distinguish consent from factual verification.**  
+These remain the unresolved decisions described above. Neither can safely retain its current proposed wording.
+
+## 3. Implementation critique
+
+**High — The revised Chrome job still omits the skipped-ancestor guard. Confidence: high.**  
+The condition at `plan.md:44` adds `needs.attach-assets.result == 'success'` but still lacks a status-check function. This retains the exact dispatch skip-propagation problem documented in `.github/workflows/release.yml:184`.
+
+Use the existing explicit pattern:
+
+```yaml
+if: |
+  always() && !cancelled() &&
+  github.event.inputs.publish_chrome == 'true' &&
+  needs.resolve.result == 'success' &&
+  needs.attach-assets.result == 'success'
+```
+
+The account-session dry run must verify that this job actually **executed**, rather than accepting a green workflow where it was skipped.
+
+**Low — `page.css` alone cannot reproduce the landing shell. Confidence: high.**  
+`plan.md:40` now specifies only `page.css`. The homepage loads design base styles, landing overrides and page styles, in that order (`apps/landing/src/main.ts:1`). `page.css:15` depends on `--font-headline`; document colors and typography also come from the omitted files (`apps/landing/src/styles/overrides.css:13`).
+
+Load the same three stylesheets through the static HTML entry. No JavaScript is needed. The proposed zero-console-error check would not detect missing CSS variables or incorrect typography.
+
+**Low — The final publish summary contradicts the accepted states. Confidence: high.**  
+`plan.md:42` always prints “submitted for review,” including for `STAGED` and already-published results. `STAGED` means approved and awaiting publication; it will not automatically become live merely because the job succeeded. Emit the actual state and corresponding next action. [Item states](https://developer.chrome.com/docs/webstore/api/reference/rest/v2/ItemState).
+
+VERDICT: reject (with blocking findings: tag-only protection would block existing main releases; Chrome dispatch still lacks the skipped-ancestor guard; remote-code explanation still asserts unsupported isolation and incorrect per-request confirmation)
