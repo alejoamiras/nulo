@@ -694,7 +694,7 @@ and `gh stack add home-holdings-pin/holdings`.
 Validation gate — `<fast>`; `NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/holdings.test.ts tests/e2e/network/tokens.test.ts`.
 Pass: exit 0; every listed TokenList behaviour has a green case. Layers: lint/typecheck · unit/component · network (targeted).
 
-#### Phase 4 — Send picker order and search
+#### Phase 4 — Send picker order and search ✓ (2026-09-06, Mac)
 
 - `SelectTokenPopup.vue`: on show fetch the account's balances through `forChain`, one
   `PriceServiceClient` + `usePrices` (disposed on hide), rows ordered with
