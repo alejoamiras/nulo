@@ -64,7 +64,7 @@ the invariants above are explicit; the audits decide whether that is enough.
 
 ## Phases
 
-### Phase 1 — packages (A1, A3, B1, B2, B3, B5)
+### Phase 1 — packages (A1, A3, B1, B2, B3, B5) ✓
 
 New tests: `listener-bag.test.ts` (first-vs-all removal, add/remove during a caller-owned dispatch); `method-scope-checkers` pins that a non-boolean `addressBook` grant (`"yes"`) is still denied.
 

@@ -34,6 +34,7 @@ import type {
 	Unsubscribe,
 	WindowPort,
 } from "../ports"
+import { createListenerBag, type ListenerBag } from "./listener-bag"
 
 // ── Storage ───────────────────────────────────────────────────────────
 
@@ -88,69 +89,57 @@ class FakeStorageAdapter implements StoragePort {
 // ports). We ship a minimal in-memory port broker so popup↔SW tests can run.
 
 interface PortRegistry {
-	listeners: Array<(port: MessagePortLike) => void>
+	listeners: ListenerBag<(port: MessagePortLike) => void>
 	ports: Map<string, MessagePortLike[]>
 }
 
 function newPortRegistry(): PortRegistry {
-	return { listeners: [], ports: new Map() }
+	return { listeners: createListenerBag(), ports: new Map() }
 }
 
 function linkedPortPair(name: string): { client: MessagePortLike; server: MessagePortLike } {
-	const clientMsgListeners: Array<(msg: unknown) => void> = []
-	const serverMsgListeners: Array<(msg: unknown) => void> = []
-	const clientDisconnectListeners: Array<() => void> = []
-	const serverDisconnectListeners: Array<() => void> = []
+	const clientMsgListeners = createListenerBag<(msg: unknown) => void>()
+	const serverMsgListeners = createListenerBag<(msg: unknown) => void>()
+	const clientDisconnectListeners = createListenerBag<() => void>()
+	const serverDisconnectListeners = createListenerBag<() => void>()
 	let disconnected = false
 
 	const disconnectBoth = () => {
 		if (disconnected) return
 		disconnected = true
-		for (const l of clientDisconnectListeners) l()
-		for (const l of serverDisconnectListeners) l()
+		for (const l of clientDisconnectListeners.items) l()
+		for (const l of serverDisconnectListeners.items) l()
 	}
 
 	const client: MessagePortLike = {
 		name,
 		postMessage: (m) => {
-			if (!disconnected) for (const l of serverMsgListeners) l(m)
+			if (!disconnected) for (const l of serverMsgListeners.items) l(m)
 		},
 		disconnect: disconnectBoth,
 		onMessage: (l) => {
-			clientMsgListeners.push(l)
-			return () => {
-				const i = clientMsgListeners.indexOf(l)
-				if (i >= 0) clientMsgListeners.splice(i, 1)
-			}
+			clientMsgListeners.add(l)
+			return () => clientMsgListeners.remove(l)
 		},
 		onDisconnect: (l) => {
-			clientDisconnectListeners.push(l)
-			return () => {
-				const i = clientDisconnectListeners.indexOf(l)
-				if (i >= 0) clientDisconnectListeners.splice(i, 1)
-			}
+			clientDisconnectListeners.add(l)
+			return () => clientDisconnectListeners.remove(l)
 		},
 	}
 
 	const server: MessagePortLike = {
 		name,
 		postMessage: (m) => {
-			if (!disconnected) for (const l of clientMsgListeners) l(m)
+			if (!disconnected) for (const l of clientMsgListeners.items) l(m)
 		},
 		disconnect: disconnectBoth,
 		onMessage: (l) => {
-			serverMsgListeners.push(l)
-			return () => {
-				const i = serverMsgListeners.indexOf(l)
-				if (i >= 0) serverMsgListeners.splice(i, 1)
-			}
+			serverMsgListeners.add(l)
+			return () => serverMsgListeners.remove(l)
 		},
 		onDisconnect: (l) => {
-			serverDisconnectListeners.push(l)
-			return () => {
-				const i = serverDisconnectListeners.indexOf(l)
-				if (i >= 0) serverDisconnectListeners.splice(i, 1)
-			}
+			serverDisconnectListeners.add(l)
+			return () => serverDisconnectListeners.remove(l)
 		},
 	}
 
@@ -180,16 +169,13 @@ class FakeRuntimeAdapter implements RuntimePort {
 	public connect(options: { name: string }): MessagePortLike {
 		const pair = linkedPortPair(options.name)
 		// Notify any onConnect listeners (in creation order).
-		for (const l of this.portRegistry.listeners) l(pair.server)
+		for (const l of this.portRegistry.listeners.items) l(pair.server)
 		return pair.client
 	}
 
 	public onConnect(listener: (port: MessagePortLike) => void): Unsubscribe {
-		this.portRegistry.listeners.push(listener)
-		return () => {
-			const i = this.portRegistry.listeners.indexOf(listener)
-			if (i >= 0) this.portRegistry.listeners.splice(i, 1)
-		}
+		this.portRegistry.listeners.add(listener)
+		return () => this.portRegistry.listeners.remove(listener)
 	}
 
 	public getURL(path: string): string {
@@ -218,7 +204,7 @@ class FakeRuntimeAdapter implements RuntimePort {
 class FakeWindowsAdapter implements WindowPort {
 	private nextId = 1000
 	private readonly live = new Set<number>()
-	private readonly removedListeners: Array<(id: number) => void> = []
+	private readonly removedListeners = createListenerBag<(id: number) => void>()
 	/** Test-only: every `create` call's options, in order. */
 	public readonly creates: CreateWindowOptions[] = []
 	/** Test-only: every `update` call, in order. */
@@ -243,29 +229,26 @@ class FakeWindowsAdapter implements WindowPort {
 	}
 
 	public onRemoved(listener: (windowId: number) => void): Unsubscribe {
-		this.removedListeners.push(listener)
-		return () => {
-			const i = this.removedListeners.indexOf(listener)
-			if (i >= 0) this.removedListeners.splice(i, 1)
-		}
+		this.removedListeners.add(listener)
+		return () => this.removedListeners.remove(listener)
 	}
 
 	public async remove(windowId: number): Promise<void> {
 		if (this.live.delete(windowId)) {
-			for (const l of this.removedListeners) l(windowId)
+			for (const l of this.removedListeners.items) l(windowId)
 		}
 	}
 
 	/** Test-only: fire onRemoved for `windowId` as if the user closed it. */
 	public closeByUser(windowId: number): void {
 		if (this.live.delete(windowId)) {
-			for (const l of this.removedListeners) l(windowId)
+			for (const l of this.removedListeners.items) l(windowId)
 		}
 	}
 
 	public reset(): void {
 		this.live.clear()
-		this.removedListeners.length = 0
+		this.removedListeners.items.length = 0
 		this.creates.length = 0
 		this.updates.length = 0
 		this.lastFocused = undefined
@@ -310,7 +293,7 @@ export class FakeBrowserApi implements BrowserApi {
 	 */
 	public reset(): void {
 		fakeBrowser.reset()
-		this.portRegistry.listeners.length = 0
+		this.portRegistry.listeners.items.length = 0
 		this.portRegistry.ports.clear()
 		;(this.windows as FakeWindowsAdapter).reset()
 	}

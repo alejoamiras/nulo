@@ -23,6 +23,7 @@
  */
 
 import type { ILogger, LogLevel } from "@nulo/wallet-core/logger"
+import { createListenerBag } from "@nulo/wallet-core/testing"
 import { afterEach, beforeEach, type Mock, vi } from "vitest"
 
 type Fn = (...args: unknown[]) => void
@@ -116,7 +117,7 @@ const mockClientPort = (service: string) => {
 }
 
 // ── Background SERVICE side (chrome.runtime.onConnect) ──────────────────
-const connectListeners: Array<(port: unknown) => void> = []
+const connectListeners = createListenerBag<(port: unknown) => void>()
 
 /** Service-side view of a connected client port. */
 export interface ServiceClientHandle {
@@ -136,8 +137,8 @@ export interface ServiceClientHandle {
  * returns handles to drive the service and read its responses.
  */
 export const connectServiceClient = (service: string): ServiceClientHandle => {
-	const inbound: Fn[] = []
-	const disconnectListeners: Fn[] = []
+	const inbound = createListenerBag<Fn>()
+	const disconnectListeners = createListenerBag<Fn>()
 	const postMessageMock = vi.fn()
 	const port = {
 		name: service,
@@ -145,34 +146,24 @@ export const connectServiceClient = (service: string): ServiceClientHandle => {
 		sender: { id: chrome.runtime.id } as chrome.runtime.MessageSender,
 		postMessage: postMessageMock,
 		disconnect: vi.fn(),
-		onMessage: {
-			addListener: (l: Fn) => inbound.push(l),
-			removeListener: (l: Fn) => {
-				for (let i = inbound.length - 1; i >= 0; i--) if (inbound[i] === l) inbound.splice(i, 1)
-			},
-		},
-		onDisconnect: {
-			addListener: (l: Fn) => disconnectListeners.push(l),
-			removeListener: (l: Fn) => {
-				for (let i = disconnectListeners.length - 1; i >= 0; i--) if (disconnectListeners[i] === l) disconnectListeners.splice(i, 1)
-			},
-		},
+		onMessage: { addListener: inbound.add, removeListener: inbound.removeAll },
+		onDisconnect: { addListener: disconnectListeners.add, removeListener: disconnectListeners.removeAll },
 	}
-	for (const listener of [...connectListeners]) listener(port)
+	for (const listener of [...connectListeners.items]) listener(port)
 	return {
 		sendToService: (message: unknown) => {
-			for (const l of [...inbound]) l(message, port)
+			for (const l of [...inbound.items]) l(message, port)
 		},
 		captureResponse: () => postMessageMock,
 		disconnect: () => {
-			for (const l of [...disconnectListeners]) l(port)
+			for (const l of [...disconnectListeners.items]) l(port)
 		},
 		port,
 	}
 }
 
 // ── Shared sendMessage (offscreen client send + offscreen service) ──────
-const messageListeners: Fn[] = []
+const messageListeners = createListenerBag<Fn>()
 const sendMessageMock: Mock<Fn> = vi.fn()
 
 /** Invoke every `chrome.runtime.onMessage` listener — drives offscreen client
@@ -182,7 +173,7 @@ export const emitMessage = (message: unknown) => {
 	// same-extension sender (matching `runtime.id`, no `tab`) so contract tests
 	// exercise the message path rather than tripping the sender gate.
 	const sender = { id: chrome.runtime.id } as chrome.runtime.MessageSender
-	for (const listener of [...messageListeners]) listener(message, sender)
+	for (const listener of [...messageListeners.items]) listener(message, sender)
 }
 
 /** The `vi.fn` backing `chrome.runtime.sendMessage`. */
@@ -213,20 +204,8 @@ beforeEach(() => {
 			connect: vi.fn().mockImplementation((_: unknown, { name }: { name: string }) => mockClientPort(name)),
 			getContexts: vi.fn(),
 			getURL: vi.fn(),
-			onConnect: {
-				addListener: (listener: (port: unknown) => void) => connectListeners.push(listener),
-				removeListener: (listener: (port: unknown) => void) => {
-					for (let i = connectListeners.length - 1; i >= 0; i--)
-						if (connectListeners[i] === listener) connectListeners.splice(i, 1)
-				},
-			},
-			onMessage: {
-				addListener: (listener: Fn) => messageListeners.push(listener),
-				removeListener: (listener: Fn) => {
-					for (let i = messageListeners.length - 1; i >= 0; i--)
-						if (messageListeners[i] === listener) messageListeners.splice(i, 1)
-				},
-			},
+			onConnect: { addListener: connectListeners.add, removeListener: connectListeners.removeAll },
+			onMessage: { addListener: messageListeners.add, removeListener: messageListeners.removeAll },
 			sendMessage: sendMessageMock,
 		},
 	})
@@ -238,7 +217,7 @@ afterEach(() => {
 	portMessageListeners.clear()
 	portDisconnectListeners.clear()
 	sendPortMessageMocks.clear()
-	messageListeners.splice(0)
-	connectListeners.splice(0)
+	messageListeners.items.splice(0)
+	connectListeners.items.splice(0)
 	sendMessageMock.mockReset()
 })

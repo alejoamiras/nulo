@@ -9,6 +9,8 @@
  * chrome/webext semantic when no keys are passed). EntityStorage relies
  * on that for `getAll`/`getKeys`/`getValues`.
  */
+
+import { prefixedEntries } from "./prefixed-entries"
 export type MinimalStorageArea = {
 	get(keys?: string | string[]): Promise<Record<string, unknown>>
 	set(items: Record<string, unknown>): Promise<void>
@@ -192,35 +194,29 @@ export class EntityStorage<T> {
 	}
 
 	public async getAll(): Promise<Array<[string, T]>> {
-		const path = `${this.root}@`
-		const res = await this.storage.get()
 		const out: Array<[string, T]> = []
-		for (const [k, v] of Object.entries(res)) {
-			if (!k.startsWith(path)) continue
+		for (const [k, id, v] of await this.scopedRows()) {
 			const entity = this.decodeRow(k, v)
-			if (entity !== undefined) out.push([k.substring(path.length), entity])
+			if (entity !== undefined) out.push([id, entity])
 		}
 		return out
 	}
 
 	public async getKeys(): Promise<Array<string>> {
-		const path = `${this.root}@`
-		const res = await this.storage.get()
-		return Object.keys(res)
-			.filter((k) => k.startsWith(path))
-			.map((k) => k.substring(path.length))
+		return (await this.scopedRows()).map(([, id]) => id)
 	}
 
 	public async getValues(): Promise<Array<T>> {
-		const path = `${this.root}@`
-		const res = await this.storage.get()
 		const out: T[] = []
-		for (const [k, v] of Object.entries(res)) {
-			if (!k.startsWith(path)) continue
+		for (const [k, , v] of await this.scopedRows()) {
 			const entity = this.decodeRow(k, v)
 			if (entity !== undefined) out.push(entity)
 		}
 		return out
+	}
+
+	private async scopedRows(): Promise<Array<[key: string, id: string, value: unknown]>> {
+		return prefixedEntries(await this.storage.get(), `${this.root}@`)
 	}
 
 	/**
@@ -235,13 +231,10 @@ export class EntityStorage<T> {
 	 * key a predicate off) — a serialized repair path, not the read path, cleans those.
 	 */
 	public async rawEntries(): Promise<Array<[string, unknown]>> {
-		const path = `${this.root}@`
-		const res = await this.storage.get()
 		const out: Array<[string, unknown]> = []
-		for (const [k, v] of Object.entries(res)) {
-			if (!k.startsWith(path)) continue
+		for (const [, id, v] of await this.scopedRows()) {
 			try {
-				out.push([k.substring(path.length), JSON.parse(v as string)])
+				out.push([id, JSON.parse(v as string)])
 			} catch {
 				// unparseable value — no readable predicate field; leave it.
 			}
@@ -256,13 +249,9 @@ export class EntityStorage<T> {
 	 *  the race window; exclusion comes from the caller's key-attribution or
 	 *  lock. Non-string values skipped. */
 	public async rawStringEntries(): Promise<Array<[string, string]>> {
-		const path = `${this.root}@`
-		const res = await this.storage.get()
 		const out: Array<[string, string]> = []
-		for (const [k, v] of Object.entries(res)) {
-			if (!k.startsWith(path)) continue
-			if (typeof v !== "string") continue
-			out.push([k.substring(path.length), v])
+		for (const [, id, v] of await this.scopedRows()) {
+			if (typeof v === "string") out.push([id, v])
 		}
 		return out
 	}

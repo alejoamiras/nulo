@@ -716,15 +716,26 @@ export class WalletSdkDispatcher {
 	 *    for the dApp-side parse recipe.
 	 */
 	/** The static feature list: no session data, no prompt. */
+	private logDebug(message: string): void {
+		this.logger.log("wallet-sdk", LogLevel.Debug, message)
+	}
+
+	private logWarn(message: string): void {
+		this.logger.log("wallet-sdk", LogLevel.Warn, message)
+	}
+
+	/** `dappSession` is captured at dispatch entry and never re-looked-up here. */
+	private requireSession(dappSession: IDappSessionRef | undefined, ctx: SessionContext): asserts dappSession is IDappSessionRef {
+		if (!dappSession) throw new Error(`No dApp session found for origin ${ctx.origin}`)
+	}
+
 	private async handleGetWalletFeatures(): Promise<readonly string[]> {
 		return WALLET_FEATURES
 	}
 
 	private async handleGetAccounts(ctx: SessionContext, dappSession: IDappSessionRef | undefined): Promise<unknown> {
 		// Phase 0.5: dappSession captured at dispatch entry, not re-looked-up here.
-		if (!dappSession) {
-			throw new Error(`No dApp session found for origin ${ctx.origin}`)
-		}
+		this.requireSession(dappSession, ctx)
 
 		// Fast path.
 		if (dappSession.accounts && dappSession.accounts.length > 0) {
@@ -737,21 +748,13 @@ export class WalletSdkDispatcher {
 		const grants = dappSession.capabilityGrants ?? []
 		const hasAccountsGrant = grants.some((g) => g.capability.type === "accounts")
 		if (hasAccountsGrant) {
-			this.logger.log(
-				"wallet-sdk",
-				LogLevel.Warn,
-				`Desync: accounts grant exists but session.accounts is empty for session ${describeExternalId(ctx.sessionId)}`,
-			)
+			this.logWarn(`Desync: accounts grant exists but session.accounts is empty for session ${describeExternalId(ctx.sessionId)}`)
 			return []
 		}
 
 		// Pre-grant: throw structured 4100 so the dApp's fallback fires. Log level
 		// is Debug because a misbehaving dApp may re-fire getAccounts() per render.
-		this.logger.log(
-			"wallet-sdk",
-			LogLevel.Debug,
-			`getAccounts pre-grant from ${ctx.origin} — throwing CAPABILITY_NOT_GRANTED to nudge requestCapabilities()`,
-		)
+		this.logDebug(`getAccounts pre-grant from ${ctx.origin} — throwing CAPABILITY_NOT_GRANTED to nudge requestCapabilities()`)
 		throw new CapabilityNotGrantedError("accounts")
 	}
 
@@ -849,26 +852,14 @@ export class WalletSdkDispatcher {
 		const requestedFrom = requestedFromOf(rawOpts)
 		const [_network, account] = await this.resolveNetworkAndAccount(ctx, dappSession, requestedFrom)
 		const caipAccount = formatCaipAccount(ctx.chainId, account.address)
-		this.logger.log(
-			"wallet-sdk",
-			LogLevel.Debug,
-			`handleSendTx: account=${account.address}, chainId=${ctx.chainId}, origin=${ctx.origin}`,
-		)
+		this.logDebug(`handleSendTx: account=${account.address}, chainId=${ctx.chainId}, origin=${ctx.origin}`)
 
-		if (!dappSession) {
-			throw new Error(`No dApp session found for origin ${ctx.origin}`)
-		}
-		this.logger.log(
-			"wallet-sdk",
-			LogLevel.Debug,
-			`handleSendTx: session=${dappSession.id}, sessionAccounts=${JSON.stringify(dappSession.accounts)}`,
-		)
+		this.requireSession(dappSession, ctx)
+		this.logDebug(`handleSendTx: session=${dappSession.id}, sessionAccounts=${JSON.stringify(dappSession.accounts)}`)
 
 		const opts = isNoFrom ? rawOpts : { ...rawOpts, from: account.address }
 		const execPayload = args[0] as Record<string, unknown> | undefined
-		this.logger.log(
-			"wallet-sdk",
-			LogLevel.Debug,
+		this.logDebug(
 			`handleSendTx: isNoFrom=${isNoFrom}, exec.feePayer=${execPayload?.feePayer}, exec.calls=${(execPayload?.calls as unknown[] | undefined)?.length}, additionalScopes=${JSON.stringify(rawOpts.additionalScopes)}`,
 		)
 
@@ -911,9 +902,7 @@ export class WalletSdkDispatcher {
 		dappSession: IDappSessionRef | undefined,
 		grants: GrantedCapabilityRecord[],
 	): Promise<unknown> {
-		if (!dappSession) {
-			throw new Error(`No dApp session found for origin ${ctx.origin}`)
-		}
+		this.requireSession(dappSession, ctx)
 		const requestedFrom = String(args[0])
 		const [network, account] = await this.resolveNetworkAndAccount(ctx, dappSession, requestedFrom)
 		const messageHashOrIntent = args[1] as AztecCreateAuthWitOperation["messageHashOrIntent"]
@@ -963,9 +952,7 @@ export class WalletSdkDispatcher {
 	 */
 	private async handleRegisterToken(args: unknown[], ctx: SessionContext, dappSession: IDappSessionRef | undefined): Promise<unknown> {
 		// Phase 0.5: dappSession captured at dispatch entry.
-		if (!dappSession) {
-			throw new Error(`No dApp session found for origin ${ctx.origin}`)
-		}
+		this.requireSession(dappSession, ctx)
 
 		// Resolve the dApp-supplied account through the SAME session-authorization
 		// helper sendTx/createAuthWit use — one implementation of "which account
@@ -1004,9 +991,7 @@ export class WalletSdkDispatcher {
 		ctx: SessionContext,
 		dappSession: IDappSessionRef | undefined,
 	): Promise<unknown> {
-		if (!dappSession) {
-			throw new Error(`No dApp session found for origin ${ctx.origin}`)
-		}
+		this.requireSession(dappSession, ctx)
 
 		// Same shared session-authorization resolve as registerToken/sendTx.
 		const requestedAccount = String(args[0])
@@ -1060,9 +1045,7 @@ export class WalletSdkDispatcher {
 		dappSession: IDappSessionRef | undefined,
 	): Promise<unknown> {
 		// Phase 0.5: dappSession captured at dispatch entry.
-		if (!dappSession) {
-			throw new Error(`No dApp session found for origin ${ctx.origin}`)
-		}
+		this.requireSession(dappSession, ctx)
 
 		const requestedCapabilities = (manifest?.capabilities ?? []) as Record<string, unknown>[]
 		if (requestedCapabilities.length === 0) {
@@ -1258,11 +1241,7 @@ export class WalletSdkDispatcher {
 			// pre-grant calls), and is paired with the live-transport teardown
 			// in wallet-sdk/background.ts that prevents the channel from
 			// staying useful after revocation.
-			this.logger.log(
-				"wallet-sdk",
-				LogLevel.Debug,
-				`${methodName} from ${_ctx.origin} — no DappSession found; throwing CAPABILITY_NOT_GRANTED (F-006 fail-closed)`,
-			)
+			this.logDebug(`${methodName} from ${_ctx.origin} — no DappSession found; throwing CAPABILITY_NOT_GRANTED (F-006 fail-closed)`)
 			throw new CapabilityNotGrantedError(requiredType)
 		}
 
@@ -1273,11 +1252,7 @@ export class WalletSdkDispatcher {
 			// pre-grant throw must not spam the log. The existing log-noise
 			// pattern at handleGetAccounts is preserved here for any method
 			// reaching enforceCapability without the required grant type.
-			this.logger.log(
-				"wallet-sdk",
-				LogLevel.Debug,
-				`${methodName} from ${_ctx.origin} — throwing CAPABILITY_NOT_GRANTED to nudge requestCapabilities()`,
-			)
+			this.logDebug(`${methodName} from ${_ctx.origin} — throwing CAPABILITY_NOT_GRANTED to nudge requestCapabilities()`)
 			// CapabilityNotGrantedError is the public contract — dApps substring-
 			// match on the error code and message. The plain `Error` form was a
 			// pre-Phase-1 mistake; F-003's removal of `getAccounts` from
