@@ -167,17 +167,11 @@ watch(
 }
 
 .header {
-	padding-top: 4px;
+	composes: header from "./popup-shared.module.css";
 }
 
 .pre_title {
-	font-family: var(--font-headline);
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 0.2em;
-	text-transform: uppercase;
-
-	color: var(--nulo-secondary);
+	composes: pre_title from "./popup-shared.module.css";
 }
 
 .toggle_row {

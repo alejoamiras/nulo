@@ -65,14 +65,11 @@ const router = useRouter()
 
 <style module>
 .wrapper {
-	flex: 1;
-	overflow: auto;
-	background: var(--app-bg);
-	scrollbar-gutter: stable;
+	composes: wrapper from "../settings-page.module.css";
 }
 
 .content {
-	padding: 16px 24px var(--nav-clearance) 24px;
+	composes: content from "../settings-page.module.css";
 }
 
 .id_row {

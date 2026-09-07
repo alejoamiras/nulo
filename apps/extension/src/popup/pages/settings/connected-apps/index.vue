@@ -187,14 +187,11 @@ onBeforeUnmount(() => {
 
 <style module>
 .wrapper {
-	flex: 1;
-	overflow: auto;
-	scrollbar-gutter: stable;
-	background: var(--app-bg);
+	composes: wrapper from "../settings-page.module.css";
 }
 
 .content {
-	padding: 16px 24px var(--nav-clearance) 24px;
+	composes: content from "../settings-page.module.css";
 }
 
 .row {
