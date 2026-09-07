@@ -1,6 +1,7 @@
 /**
  * The Send picker over chain-scoped balance rows: the shared order, the search box past Home's
- * budget, the filter, selection writing the TOKEN id, and the teardown on hide.
+ * budget, the filter, selection writing the TOKEN id, the scope fence on a slow fetch, a fetch
+ * rejected by the hide, the reconnect resnapshot, and the teardown on hide / unmount.
  */
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
@@ -25,6 +26,7 @@ const H = vi.hoisted(() => {
 		balanceAdded: makeEvent(),
 		balanceUpdated: makeEvent(),
 		balanceDeleted: makeEvent(),
+		balanceConnected: makeEvent(),
 		quotesUpdated: makeEvent(),
 		priceConnected: makeEvent(),
 		quotes: { current: {} as Record<string, unknown> },
@@ -39,6 +41,7 @@ vi.mock("@/wallet/services/token-balance/client", () => ({
 	TokenBalanceServiceClient: vi.fn(function () {
 		return {
 			disconnect: H.balanceDisconnect,
+			onConnected: H.balanceConnected,
 			onTokenBalanceAdded: H.balanceAdded,
 			onTokenBalanceUpdated: H.balanceUpdated,
 			onTokenBalanceDeleted: H.balanceDeleted,
@@ -89,13 +92,15 @@ const MAINNET = CHAIN_IDS.MAINNET
 // Mainnet cUSD is a price-mapped contract; with a `usd-coin` quote seeded it is the one priced row.
 const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
 const ACCOUNT = `0x${"a".repeat(64)}`
+const OTHER_ACCOUNT = `0x${"b".repeat(64)}`
 
+/** The balance row id and the token id differ on purpose: selection must write the TOKEN id. */
 const row = (
 	id: number,
 	symbol: string,
 	over: Partial<{ chainId: number; contract: string; publicBalance: string; account: string }> = {},
 ) => ({
-	id,
+	id: id + 100,
 	account: over.account ?? ACCOUNT,
 	token: {
 		id,
@@ -166,7 +171,18 @@ describe("SelectTokenPopup", () => {
 		expect(wrapper.find('[data-testid="select-token-no-results"]').exists()).toBe(true)
 	})
 
-	test("selecting a row writes the TOKEN id, marks it selected, and closes", async () => {
+	test("a query stops filtering once a deletion shrinks the list under the search threshold", async () => {
+		const wrapper = await mountOpen([row(1, "ALPHA"), row(2, "BETA"), row(3, "GAMMA"), row(4, "DELTA")])
+		await wrapper.find('[data-testid="select-token-search"]').setValue("delta")
+		expect(rowSymbols(wrapper)).toEqual(["DELTA"])
+
+		H.balanceDeleted.emit(row(4, "DELTA"))
+		await nextTick()
+		expect(wrapper.find('[data-testid="select-token-search"]').exists()).toBe(false)
+		expect(rowSymbols(wrapper)).toEqual(["ALPHA", "BETA", "GAMMA"])
+	})
+
+	test("selecting a row writes the TOKEN id (not the balance row id), marks it selected, and closes", async () => {
 		const wrapper = await mountOpen([row(7, "ONE"), row(9, "TWO")])
 		expect(wrapper.findAll('[data-testid="select-token-row"]').map((el) => el.attributes("data-selected"))).toEqual(["false", "false"])
 
@@ -178,12 +194,64 @@ describe("SelectTokenPopup", () => {
 		expect(wrapper.find('[data-testid="select-token-row"][data-symbol="TWO"]').attributes("data-selected")).toBe("true")
 	})
 
-	test("hiding clears the list and query and tears down both clients", async () => {
+	test("a fetch for the previous account that resolves late never lands; the scope change refetches", async () => {
+		const pending = new Map<string, (rows: ReturnType<typeof row>[]) => void>()
+		H.getTokenBalances.mockImplementation(
+			(_id: unknown, account: string) =>
+				new Promise((resolve) => {
+					pending.set(account, resolve)
+				}),
+		)
+		const wrapper = mount(SelectTokenPopup, { props: { show: false }, global: { stubs: STUBS } })
+		await wrapper.setProps({ show: true })
+		await flushPromises()
+
+		H.store.current.account = { address: OTHER_ACCOUNT }
+		await flushPromises()
+		pending.get(OTHER_ACCOUNT)?.([row(2, "THEIRS", { account: OTHER_ACCOUNT })])
+		await flushPromises()
+		pending.get(ACCOUNT)?.([row(1, "MINE")])
+		await flushPromises()
+		expect(rowSymbols(wrapper)).toEqual(["THEIRS"])
+	})
+
+	test("a fetch rejected by the hide is swallowed; one rejected while open shows the error line", async () => {
+		let reject: ((e: Error) => void) | undefined
+		H.getTokenBalances.mockImplementation(
+			() =>
+				new Promise((_resolve, rej) => {
+					reject = rej
+				}),
+		)
+		const wrapper = mount(SelectTokenPopup, { props: { show: false }, global: { stubs: STUBS } })
+		await wrapper.setProps({ show: true })
+		await flushPromises()
+		await wrapper.setProps({ show: false })
+		reject?.(new Error("port closed"))
+		await flushPromises()
+
+		await wrapper.setProps({ show: true })
+		await flushPromises()
+		reject?.(new Error("service failed"))
+		await flushPromises()
+		expect(wrapper.find('[data-testid="select-token-error"]').exists()).toBe(true)
+		expect(rowSymbols(wrapper)).toEqual([])
+	})
+
+	test("a reconnect while open resnapshots the list", async () => {
+		const wrapper = await mountOpen([row(1, "A")])
+		H.getTokenBalances.mockResolvedValue([row(1, "A"), row(2, "B")])
+		H.balanceConnected.emit()
+		await flushPromises()
+		expect(rowSymbols(wrapper)).toEqual(["A", "B"])
+	})
+
+	test("hiding clears the list and query and disconnects the balance client; unmount tears down prices", async () => {
 		const wrapper = await mountOpen([row(1, "A"), row(2, "B"), row(3, "C"), row(4, "D")])
 		await wrapper.find('[data-testid="select-token-search"]').setValue("a")
 		await wrapper.setProps({ show: false })
-		expect(H.priceDisconnect).toHaveBeenCalledTimes(1)
 		expect(H.balanceDisconnect).toHaveBeenCalledTimes(1)
+		expect(H.priceDisconnect).not.toHaveBeenCalled()
 
 		// Re-open: the list is fetched fresh and the query is gone.
 		H.getTokenBalances.mockResolvedValue([row(1, "A"), row(2, "B"), row(3, "C"), row(4, "D")])
@@ -191,13 +259,17 @@ describe("SelectTokenPopup", () => {
 		await flushPromises()
 		expect(rowSymbols(wrapper)).toEqual(["A", "B", "C", "D"])
 		expect((wrapper.find('[data-testid="select-token-search"]').element as HTMLInputElement).value).toBe("")
+
+		wrapper.unmount()
+		expect(H.priceDisconnect).toHaveBeenCalledTimes(1)
 	})
 
-	test("a balance added while open joins the list only when it belongs to the active scope", async () => {
+	test("a balance added or updated while open counts only when it belongs to the active scope", async () => {
 		const wrapper = await mountOpen([row(1, "A")])
 		H.balanceAdded.emit(row(2, "OTHER_CHAIN", { chainId: MAINNET + 1 }))
-		H.balanceAdded.emit(row(3, "OTHER_ACCOUNT", { account: `0x${"b".repeat(64)}` }))
+		H.balanceAdded.emit(row(3, "OTHER_ACCOUNT", { account: OTHER_ACCOUNT }))
 		H.balanceAdded.emit(row(4, "MINE"))
+		H.balanceUpdated.emit({ ...row(1, "A"), token: { ...row(1, "A").token, symbol: "A2" }, account: OTHER_ACCOUNT })
 		await nextTick()
 		expect(rowSymbols(wrapper)).toEqual(["A", "MINE"])
 	})

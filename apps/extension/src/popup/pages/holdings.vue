@@ -72,14 +72,25 @@ function onConfigUpdate(prop: { key: string; value: unknown }) {
 	if (prop.key === "showFiatValues") showFiatValues.value = prop.value !== false
 	if (prop.key === "incomingDustUsdThreshold") dustThresholdUsd.value = Number(prop.value) || 0
 }
-configService.getValue("showFiatValues").then((v) => {
-	showFiatValues.value = v !== false
-})
-configService.getValue("incomingDustUsdThreshold").then((v) => {
-	dustThresholdUsd.value = Number(v) || 0
-})
+// Leaving the page rejects any read still in flight; the defaults stand in that case. A reconnect
+// may have dropped an update, so the values are read again on every connect.
+function readConfig() {
+	configService
+		.getValue("showFiatValues")
+		.then((v) => {
+			showFiatValues.value = v !== false
+		})
+		.catch(() => undefined)
+	configService
+		.getValue("incomingDustUsdThreshold")
+		.then((v) => {
+			dustThresholdUsd.value = Number(v) || 0
+		})
+		.catch(() => undefined)
+}
+readConfig()
+configService.onConnected.add(readConfig)
 
-/** Pins land in a later arc; the empty set keeps the order value-first until then. */
 const pinnedContracts = new Set<string>()
 
 const aggregate = computed(() => aggregateFiat(rows.value, fiatOf))
@@ -98,6 +109,7 @@ onBeforeUnmount(() => {
 	tokenBalanceService.disconnect()
 	prices.dispose()
 	priceService.disconnect()
+	configService.onConnected.remove(readConfig)
 	configService.disconnect()
 })
 </script>

@@ -1,0 +1,36 @@
+# Arc B — post-implementation codex loop
+
+Base = Arc A's tip; diff = phases 3–4 (`apps/extension`). Astra at `high`, read-only, session
+`01a0796f-f4a5-7b71-9c8d-c3817c689c42`.
+
+## Round 1 — verdict `reject`, seven findings, all verified and taken
+
+1. **High — the Send picker had no scope fence.** A fetch for account A resolving after a switch to
+   B installed A's rows (`props.show` was the only guard), and loaded rows survived a scope change.
+   Fix: the scope is captured before the fetch, a load generation drops superseded results, a
+   scope watcher reloads while shown, updates are gated on scope like adds. New case: two deferred
+   fetches resolved out of order → only the new account's rows.
+2. **Medium — `usePrices` was constructed inside the show watcher**; its `useTicker` registers
+   `onUnmounted`, which needs a component instance, so every open leaked a ticker user (Vue warned).
+   Fix: the composable lives with the component (constructed in setup, disposed before its client
+   disconnects on unmount); only the balance client is per-open.
+3. **Medium — no rejection handling.** Hiding the picker disconnects its port, which rejects the
+   pending fetch → an unhandled rejection; Holdings' config reads had the same hole on navigation.
+   Fix: the picker's load catches (swallowed after a hide, `select-token-error` while open);
+   Holdings' reads catch and keep the defaults. New cases for both rejection paths.
+4. **Medium — a query outlived its search box.** Four rows → search "delta" → a deletion leaves
+   three → the box disappears but the query kept filtering everything out. Fix: the filter applies
+   only while the box is shown. New case.
+5. **Medium — reconnect recovery.** The picker never resnapshotted on `onConnected`; Holdings
+   resnapshotted balances but not config. Fix: both subscribe (the picker skips the connect its own
+   load opens, via an in-flight counter). New cases for both.
+6. **Low — weak fixtures.** The TokenList and e2e Holdings sort-toggle checks used rows whose value
+   and name orders coincide; the picker's balance-row id equalled the token id. Fix: the unit
+   fixtures now rank differently under each sort (`ZED` 3000 vs `ETH` 1), the e2e extra token is
+   `ZED` ("ZED Token" sorts after "TestToken"), and picker rows carry `id = tokenId + 100`.
+7. **Low — comments.** "Pins land in a later arc" deleted from Holdings and the picker; TokenList's
+   empty `.wrapper` rule and its binding removed.
+
+Not taken: the Holdings deferred-fetch scope-switch case — `useEntityCrud.refresh` already fences
+stale fetches with its own sequence (`useEntityCrud.ts:80-97`) and its suite covers it; the page
+adds nothing to that path. The e2e Holdings spec's renamed token runs again in Phase 6's gate.

@@ -87,7 +87,7 @@ const toggleSort = () => {
 </script>
 
 <template>
-	<Flex direction="column" gap="12" :class="$style.wrapper">
+	<Flex direction="column" gap="12">
 		<div :class="$style.sticky">
 			<label :class="$style.search">
 				<MaterialIcon name="search" :size="16" color="secondary" />
@@ -140,10 +140,6 @@ const toggleSort = () => {
 </template>
 
 <style module>
-.wrapper {
-	/* no extra styling needed */
-}
-
 .sticky {
 	position: sticky;
 	top: 0;

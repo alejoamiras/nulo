@@ -97,13 +97,13 @@ describe("TokenList — order, search, sort", () => {
 	test("the sort toggle flips to name order and back", async () => {
 		const w = mountList({
 			rows: [row(1, "ZED", { privateBalance: ONE }), row(2, "ETH", { privateBalance: ONE })],
-			fiatOf: fiatBy({ ETH: 3_000n, ZED: 1n }),
+			fiatOf: fiatBy({ ETH: 1n, ZED: 3_000n }),
 		})
 		await flushPromises()
-		expect(symbols(w)).toEqual(["ETH", "ZED"])
+		expect(symbols(w)).toEqual(["ZED", "ETH"])
 		await w.find('[data-testid="holdings-sort"]').trigger("click")
 		expect(w.find('[data-testid="holdings-sort"]').attributes("data-sort")).toBe("name")
-		expect(symbols(w)).toEqual(["ETH", "ZED"]) // ETH Token < ZED Token by name too
+		expect(symbols(w)).toEqual(["ETH", "ZED"]) // ETH Token < ZED Token by name
 		await w.find('[data-testid="holdings-sort"]').trigger("click")
 		expect(w.find('[data-testid="holdings-sort"]').attributes("data-sort")).toBe("value")
 	})

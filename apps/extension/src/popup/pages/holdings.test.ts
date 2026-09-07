@@ -39,12 +39,15 @@ vi.mock("@/wallet/services/price/client", () => ({
 		}
 	}),
 }))
+const configEvents = { update: new EventHandler(), connected: new EventHandler() }
+let configValues: Record<string, unknown> = { showFiatValues: true, incomingDustUsdThreshold: 0 }
 vi.mock("@/wallet/services/config/client", () => ({
 	ConfigServiceClient: vi.fn(function () {
 		return {
 			disconnect: vi.fn(),
-			onUpdate: new EventHandler(),
-			getValue: vi.fn().mockImplementation(async (key: string) => (key === "showFiatValues" ? true : 0)),
+			onUpdate: configEvents.update,
+			onConnected: configEvents.connected,
+			getValue: vi.fn().mockImplementation(async (key: string) => configValues[key]),
 		}
 	}),
 }))
@@ -111,6 +114,7 @@ afterEach(() => {
 	seedRows = []
 	fetchError = undefined
 	mockQuotes = {}
+	configValues = { showFiatValues: true, incomingDustUsdThreshold: 0 }
 	vi.clearAllMocks()
 })
 
@@ -144,6 +148,19 @@ describe("holdings page", () => {
 
 		const symbols = w.findAll('[data-testid="token-symbol"]').map((s) => s.attributes("data-symbol"))
 		expect(symbols).toEqual(["AAA", "BBB"])
+	})
+
+	test("a reconnect rereads the config: a fiat switch flipped while detached takes effect", async () => {
+		installStorage()
+		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
+		seedRows = [row("b1", "AAA", CHAIN_IDS.MAINNET, CUSD)]
+		const w = await mountPage()
+		expect(w.find('[data-testid="holdings-summary"]').text()).toContain("$")
+
+		configValues = { showFiatValues: false, incomingDustUsdThreshold: 0 }
+		configEvents.connected.invoke(undefined as never)
+		await flushPromises()
+		expect(w.find('[data-testid="holdings-summary"]').text()).not.toContain("$")
 	})
 
 	test("a failed fetch shows the error line, not an empty list", async () => {

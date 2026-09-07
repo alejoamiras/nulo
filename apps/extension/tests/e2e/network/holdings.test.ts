@@ -1,7 +1,7 @@
 /**
  * The Holdings tab against a real funded wallet: value order with a seeded quote, real balances
  * on every row, search by symbol (hit and miss), the sort toggle, and the fold hiding an empty
- * token. Two deployed tokens join the fixture's TST: RICH (funded above TST) and EMPTY (never
+ * token. Two deployed tokens join the fixture's TST: ZED (funded above TST) and EMPTY (never
  * minted, so its projected balance is a genuine 0). Each import is waited for with the fixture's
  * freshness-gated row check, so the assertions never race the balance projector.
  */
@@ -24,7 +24,7 @@ test.skipIf(!hasConfig)(
 	{ timeout: 420_000 },
 	async ({ tokenReadyExtension }) => {
 		const extras = [
-			{ symbol: "RICH", amount: 5000n * ONE },
+			{ symbol: "ZED", amount: 5000n * ONE },
 			{ symbol: "EMPTY", amount: 0n },
 		]
 		const { deployExtraTokensForAccount } = await import("../fixtures/aztec")
@@ -58,7 +58,7 @@ test.skipIf(!hasConfig)(
 			() =>
 				[...document.querySelectorAll('[data-testid="holdings-page"] [data-testid="token-symbol"]')]
 					.map((el) => (el as HTMLElement).dataset.symbol)
-					.join(",") === "RICH,TST",
+					.join(",") === "ZED,TST",
 			{ timeout: 60_000 },
 		)
 		expect(await page.$eval('[data-testid="holdings-count"]', (el) => el.textContent?.trim())).toBe("3")
@@ -96,12 +96,12 @@ test.skipIf(!hasConfig)(
 		await page.waitForSelector('[data-testid="holdings-no-results"]', { visible: true, timeout: 5_000 })
 		await replaceInputValue(page, '[data-testid="holdings-search"]', "")
 
-		// ── Sort toggle flips the label; "RICH Token" < "TestToken" by name, so RICH stays first.
+		// ── Sort toggle flips the label and the order: "TestToken" < "ZED Token" by name.
 		await clickByTestId(page, "holdings-sort")
 		await page.waitForFunction(() => document.querySelector('[data-testid="holdings-sort"]')?.getAttribute("data-sort") === "name", {
 			timeout: 5_000,
 		})
-		expect((await listedSymbols(page)).slice(0, 2)).toEqual(["RICH", "TST"])
+		expect((await listedSymbols(page)).slice(0, 2)).toEqual(["TST", "ZED"])
 
 		expect(tokenReadyExtension.consoleErrors).toEqual([])
 		expect(tokenReadyExtension.pageErrors).toEqual([])

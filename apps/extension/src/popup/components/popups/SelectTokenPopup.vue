@@ -2,7 +2,7 @@
 /**
  * The Send token picker. Lists the active account's tokens on the active chain in the same order
  * as Home and Holdings (pinned, then by value), with a search box once the list outgrows Home's
- * budget. Clients connect on show and are torn down on hide — the popup stays mounted.
+ * budget. The balance client connects on show and is torn down on hide — the popup stays mounted.
  */
 
 /** Components */
@@ -41,38 +41,50 @@ const displaceIdx = computed(() => {
 
 const rows = ref([])
 const query = ref("")
+const loadError = ref(false)
 
-/** One price client per open; the composable is disposed BEFORE its client disconnects. */
+/** Prices order the rows; the composable owns a shared ticker, so it lives with the component. */
 const priceService = new PriceServiceClient()
-const prices = shallowRef(null)
-const fiatOf = safeFiatOf((tb) => prices.value?.tokenFiatMicro(tb.token, parseRawBalance(tb)))
-/** Pins land in a later arc; the empty set keeps the order value-first until then. */
+const prices = usePrices(priceService)
+const fiatOf = safeFiatOf((tb) => prices.tokenFiatMicro(tb.token, parseRawBalance(tb)))
 const pinnedContracts = new Set()
 
 const searchable = computed(() => rows.value.length > HOME_TOKEN_ROWS)
 const listed = computed(() => {
-	const matching = rows.value.filter((tb) => matchesQuery(tb.token, query.value))
+	// A query typed while the box was shown must not keep filtering once the box is gone.
+	const matching = searchable.value ? rows.value.filter((tb) => matchesQuery(tb.token, query.value)) : rows.value
 	return orderTokenRows(matching, { pinnedContracts, fiatOf })
 })
 const noResults = computed(() => rows.value.length > 0 && listed.value.length === 0)
 
-const onActiveScope = (tb) => tb.account === appStore.account?.address && tb.token.chainId === appStore.network?.chainId
+const activeScope = () => {
+	const account = appStore.account?.address
+	const chainId = appStore.network?.chainId
+	return account && chainId !== undefined ? { account, chainId } : undefined
+}
+const inActiveScope = (tb) => tb.account === appStore.account?.address && tb.token?.chainId === appStore.network?.chainId
 
 const tokenBalanceService = new TokenBalanceServiceClient()
 tokenBalanceService.onTokenBalanceAdded.add(onBalanceAdded)
 tokenBalanceService.onTokenBalanceUpdated.add(onBalanceUpdated)
 tokenBalanceService.onTokenBalanceDeleted.add(onBalanceDeleted)
+tokenBalanceService.onConnected.add(onReconnected)
 function onBalanceAdded(tb) {
-	if (!props.show || !onActiveScope(tb)) return
+	if (!props.show || !inActiveScope(tb)) return
 	if (!rows.value.some((r) => r.id === tb.id)) rows.value.push(tb)
 }
 function onBalanceUpdated(tb) {
+	if (!inActiveScope(tb)) return
 	const idx = rows.value.findIndex((r) => r.id === tb.id)
 	if (idx !== -1) rows.value[idx] = tb
 }
 function onBalanceDeleted(tb) {
 	const idx = rows.value.findIndex((r) => r.id === tb.id)
 	if (idx !== -1) rows.value.splice(idx, 1)
+}
+// A reconnect may have dropped events; the connect a load itself opens is skipped — it will land.
+function onReconnected() {
+	if (props.show && fetchesInFlight === 0) void load()
 }
 
 const handleSelectToken = (id) => {
@@ -85,27 +97,55 @@ const handleManageTokens = () => {
 	popupStore.closeAll()
 }
 
-const open = async () => {
-	prices.value = usePrices(priceService)
-	const all = await tokenBalanceService.getTokenBalances(undefined, appStore.account?.address)
-	// The popup may have closed while the fetch was in flight.
-	if (!props.show) return
-	rows.value = forChain(all, appStore.network?.chainId)
+// The scope is captured before the fetch; a response for an older scope, or one that arrives after
+// the popup closed (the hide disconnects the port, which rejects the request), is dropped.
+let loadGeneration = 0
+let fetchesInFlight = 0
+const load = async () => {
+	const generation = ++loadGeneration
+	const scope = activeScope()
+	rows.value = []
+	loadError.value = false
+	if (!scope) return
+	let all
+	fetchesInFlight++
+	try {
+		all = await tokenBalanceService.getTokenBalances(undefined, scope.account)
+	} catch {
+		if (props.show && generation === loadGeneration) loadError.value = true
+		return
+	} finally {
+		fetchesInFlight--
+	}
+	if (!props.show || generation !== loadGeneration) return
+	rows.value = forChain(all, scope.chainId)
 }
 
 const close = () => {
+	loadGeneration++
 	rows.value = []
 	query.value = ""
-	prices.value?.dispose()
-	prices.value = null
-	priceService.disconnect()
+	loadError.value = false
 	tokenBalanceService.disconnect()
 }
 
 watch(
 	() => props.show,
-	() => (props.show ? open() : close()),
+	() => (props.show ? load() : close()),
 )
+watch(
+	() => [appStore.account?.address, appStore.network?.chainId],
+	() => {
+		if (props.show) void load()
+	},
+)
+
+onBeforeUnmount(() => {
+	tokenBalanceService.onConnected.remove(onReconnected)
+	tokenBalanceService.disconnect()
+	prices.dispose()
+	priceService.disconnect()
+})
 </script>
 
 <template>
@@ -133,7 +173,8 @@ watch(
 				</label>
 
 				<ItemsContainer>
-					<ListStatusMessage v-if="noResults" variant="no-results" testid="select-token-no-results" />
+					<span v-if="loadError" :class="$style.error" data-testid="select-token-error">Couldn't load tokens</span>
+					<ListStatusMessage v-else-if="noResults" variant="no-results" testid="select-token-no-results" />
 					<SettingItem
 						v-for="tb in listed"
 						:key="tb.id"
@@ -195,5 +236,13 @@ watch(
 	&::placeholder {
 		color: var(--nulo-outline);
 	}
+}
+
+.error {
+	padding: 12px 16px;
+
+	font-family: var(--font-mono);
+	font-size: 12px;
+	color: var(--nulo-secondary);
 }
 </style>
