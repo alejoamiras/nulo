@@ -95,3 +95,9 @@ import" was wrong (`:314` still uses it) — kept.
   the invariant). One known, invisible text-node difference stays: `TokenMetadataPopup`'s table labels render without
   the single spaces the old spans carried inside them (Vue trims around a standalone interpolation; inline
   whitespace inside a span has no layout effect). Loop converged in two rounds.
+
+## Phase 3 — full local gate ✓ (0871fccd, clean index; the later commit touches one comment and this file)
+
+`bun run lint` exit 0 · `bun run typecheck:all` exit 0 · `bun run test` exit 0 (458 files, 5,626 tests) ·
+`bun run --cwd apps/extension build:chrome` exit 0 with `git diff --exit-code --stat -- apps/extension/src/types/` exit 0 ·
+no `nulo:e2e:` marker in `dist/chrome`.

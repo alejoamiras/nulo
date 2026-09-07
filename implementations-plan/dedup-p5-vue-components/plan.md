@@ -6,7 +6,7 @@ code_review: off
 eli5_mode: readme-row
 worktree: .claude/worktrees/dedup-p5-vue-components (branch worktree-dedup-p5-vue-components, on top of worktree-dedup-p4-vue-shells / PR #569)
 ledger: implementations-plan/dedup-ledger (phase P5)
-status: final fresh-context codex pass conditional-approve 2026-09-07, all four conditions adopted; approved under the ledger README's pre-approval rule; implementing
+status: all three phases ✓ 2026-09-07; codex post-implementation loop converged in 2 rounds (session 01a07d0a-849e-7093-8fad-06b8a8fa91eb); delivering
 ---
 
 # P5 — shared field, list-sync and card pieces for popups and windows
@@ -81,7 +81,7 @@ Net ≈ −280 lines.
 
 Each phase: implement → `bun run lint` → `bun run --cwd apps/extension typecheck` → the touched suites → commit.
 
-### Phase 1 — provable moves (L2, K3, K8, N8, L5, M5, M1)
+### Phase 1 — provable moves (L2, K3, K8, N8, L5, M5, M1) ✓
 
 Merges, the composite adoption, the table-driven rows, three partials, `ScopePatternList`. Parity cases — L2
 (rendered, on the existing shallow harness with a `token` prop): the token fallback card vs the account fallback
@@ -95,7 +95,7 @@ the panel still renders all three lists (real `ScopeAddress` registered). Gate: 
 `capabilities`, `import` and `popups` suites green; `build:chrome` 0, the three partials inspected in the emitted CSS
 (including the fee row's static-hover override), `components.d.ts` committed.
 
-### Phase 2 — popup pieces (N2, N3, N7)
+### Phase 2 — popup pieces (N2, N3, N7) ✓
 
 `FieldWarning` in the design package (parity: exact row and attrs, slot copy, hidden→shown→hidden inside a real
 `Transition`, warning-A→warning-B across a `v-if`/`v-else-if` pair inside a real `Transition`, no attribute leak);
@@ -108,7 +108,7 @@ copy; allow and reject share the latch; a reopen starts a new pending decision b
 old settlement does not unlock it; a changed identity does not close; the symbol is captured before the await).
 Adoption in the nine warning popups and the two FPC popups; their existing suites green. Build + `components.d.ts`.
 
-### Phase 3 — full local gate
+### Phase 3 — full local gate ✓
 
 `bun run lint && bun run typecheck:all && bun run test`, `build:chrome` + `git diff --exit-code --stat --
 apps/extension/src/types/`, the `nulo:e2e:` marker grep.
@@ -202,6 +202,8 @@ Then `gh pr checks <n>` watched; red = flake → re-run once, red again → fix 
 | Low: "Phase 4"/"four phases" wording; N7's symbol capture follows the latch | yes | corrected |
 
 Approval follows from the ledger README's pre-approval rule (final verdict conditional-approve, every condition adopted, scope ⊆ the phase's ids, no Tier-4 id, no user-visible change).
+
+**Post-implementation codex fix loop** (`/codex high`, one session `01a07d0a-849e-7093-8fad-06b8a8fa91eb` resumed once; detail in `lessons/phase-1.md`): round 1 *"no new material findings"* with four low test/comment items → 0871fccd (after the full gate's resolver-pin catch, 7f4bd275); round 2 *"no new material findings"*, one comment nit adopted after. Converged in two rounds.
 
 ## Seeds
 
