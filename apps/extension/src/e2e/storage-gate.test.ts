@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { ChromeStorageIncomingPollGate, INCOMING_POLL_HOLD_KEY, INCOMING_POLL_STATUS_KEY } from "./chrome-storage-incoming-poll-gate"
 import { ChromeStorageRestoreGate, RESTORE_GATE_KEY } from "./chrome-storage-restore-gate"
 import { waitForStorageRelease } from "./storage-gate"
 
@@ -8,8 +9,14 @@ function makeFakeStorage() {
 	const emit = (key: string, newValue: unknown) => {
 		for (const l of [...listeners]) l({ [key]: { newValue } as chrome.storage.StorageChange }, "session")
 	}
+	// Runs once, inside the next read, so a test can land a write between a gate's subscription and its re-check.
+	let beforeNextGet: (() => void) | undefined
 	const session = {
-		get: async (key: string) => (store.has(key) ? { [key]: store.get(key) } : {}),
+		get: async (key: string) => {
+			beforeNextGet?.()
+			beforeNextGet = undefined
+			return store.has(key) ? { [key]: store.get(key) } : {}
+		},
 		set: async (obj: Record<string, unknown>) => {
 			for (const [k, v] of Object.entries(obj)) {
 				store.set(k, v)
@@ -28,7 +35,15 @@ function makeFakeStorage() {
 			if (i >= 0) listeners.splice(i, 1)
 		},
 	}
-	return { session, onChanged, store, listenerCount: () => listeners.length }
+	return {
+		session,
+		onChanged,
+		store,
+		listenerCount: () => listeners.length,
+		beforeNextGet: (fn: () => void) => {
+			beforeNextGet = fn
+		},
+	}
 }
 
 let fake: ReturnType<typeof makeFakeStorage>
@@ -97,25 +112,54 @@ describe("waitForStorageRelease", () => {
 
 describe("ChromeStorageRestoreGate over waitForStorageRelease", () => {
 	test("a record naming another hold point does not hold", async () => {
-		await fake.session.set({ [RESTORE_GATE_KEY]: { at: "other", held: false } })
-		await expect(new ChromeStorageRestoreGate().waitAt("networks" as never)).resolves.toBeUndefined()
+		await fake.session.set({ [RESTORE_GATE_KEY]: { at: "account-state", held: false } })
+		await expect(new ChromeStorageRestoreGate().waitAt("service-restore")).resolves.toBeUndefined()
 		expect(fake.listenerCount()).toBe(0)
 	})
 
-	test("a matching hold point holds until the record is removed, then clears the key", async () => {
-		await fake.session.set({ [RESTORE_GATE_KEY]: { at: "networks", held: false } })
+	test("a matching hold point acknowledges, holds, and clears the key itself once released", async () => {
+		await fake.session.set({ [RESTORE_GATE_KEY]: { at: "service-restore", held: false } })
 		let released = false
-		const waiting = new ChromeStorageRestoreGate().waitAt("networks" as never).then(() => {
+		const waiting = new ChromeStorageRestoreGate().waitAt("service-restore").then(() => {
 			released = true
 		})
 		await Promise.resolve()
 		await Promise.resolve()
 		await Promise.resolve()
 		expect(released).toBe(false)
-		expect(fake.store.get(RESTORE_GATE_KEY)).toEqual({ at: "networks", held: true })
+		expect(fake.store.get(RESTORE_GATE_KEY)).toEqual({ at: "service-restore", held: true })
 		await fake.session.remove(RESTORE_GATE_KEY)
 		await waiting
 		expect(released).toBe(true)
 		expect(fake.store.has(RESTORE_GATE_KEY)).toBe(false)
+	})
+
+	test("a hold point that changed under the post-subscription re-check releases and clears the key", async () => {
+		await fake.session.set({ [RESTORE_GATE_KEY]: { at: "service-restore", held: false } })
+		const waiting = new ChromeStorageRestoreGate().waitAt("service-restore")
+		// The first read has already run; the next one is the helper's re-check.
+		fake.beforeNextGet(() => fake.store.set(RESTORE_GATE_KEY, { at: "account-state", held: false }))
+		await expect(waiting).resolves.toBeUndefined()
+		expect(fake.store.has(RESTORE_GATE_KEY)).toBe(false)
+		expect(fake.listenerCount()).toBe(0)
+	})
+})
+
+describe("ChromeStorageIncomingPollGate over waitForStorageRelease", () => {
+	const hold = { profileId: "p", networkId: "n", accountAddress: "a", contract: "c", txHash: "t" }
+	const match = { ...hold, txHashes: ["t"] }
+
+	test("the safety timeout releases the waiter and leaves the HOLD key for the test to read", async () => {
+		vi.useFakeTimers()
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+		await fake.session.set({ [INCOMING_POLL_HOLD_KEY]: hold })
+		const waiting = new ChromeStorageIncomingPollGate().waitIfArmed(match)
+		await vi.advanceTimersByTimeAsync(15_000)
+		await expect(waiting).resolves.toBe("t")
+		expect(fake.store.get(INCOMING_POLL_HOLD_KEY)).toEqual(hold)
+		expect(fake.store.get(INCOMING_POLL_STATUS_KEY)).toEqual({ phase: "released", txHash: "t" })
+		expect(warn).toHaveBeenCalledTimes(1)
+		expect(fake.listenerCount()).toBe(0)
+		warn.mockRestore()
 	})
 })

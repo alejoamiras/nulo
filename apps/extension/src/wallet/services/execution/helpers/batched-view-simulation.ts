@@ -429,7 +429,6 @@ function settleSlowArm<T>(slowSettled: PromiseSettledResult<T>): T {
 	throw slowSettled.reason
 }
 
-/** Unpack fast-arm results into the per-original-index output arrays. */
 /** Decode one arm's return values or log and leave the slot empty. Logs the arity, never the values:
  *  these are private call returns. */
 function decodeInto(
@@ -454,6 +453,7 @@ function decodeInto(
 	}
 }
 
+/** Unpack fast-arm results into the per-original-index output arrays. */
 function unpackFastArm(
 	fastResults: TxSimulationResult[],
 	leadingFast: ClassifiedTx[],

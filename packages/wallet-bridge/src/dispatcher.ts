@@ -712,6 +712,11 @@ export class WalletSdkDispatcher {
 		if (!dappSession) throw new Error(`No dApp session found for origin ${ctx.origin}`)
 	}
 
+	/** The static feature list: no session data, no prompt. */
+	private async handleGetWalletFeatures(): Promise<readonly string[]> {
+		return WALLET_FEATURES
+	}
+
 	/**
 	 * Return accounts for the current session's profile and chain.
 	 * Scoped to session accounts only and uses per-app aliases.
@@ -728,11 +733,6 @@ export class WalletSdkDispatcher {
 	 *    fallback catches it and sends the full manifest. See wallet-bridge README
 	 *    for the dApp-side parse recipe.
 	 */
-	/** The static feature list: no session data, no prompt. */
-	private async handleGetWalletFeatures(): Promise<readonly string[]> {
-		return WALLET_FEATURES
-	}
-
 	private async handleGetAccounts(ctx: SessionContext, dappSession: IDappSessionRef | undefined): Promise<unknown> {
 		this.requireSession(dappSession, ctx)
 
@@ -1215,9 +1215,6 @@ export class WalletSdkDispatcher {
 		_ctx: SessionContext,
 		dappSession: IDappSessionRef | undefined,
 	): GrantedCapabilityRecord[] {
-		// here. Method is now synchronous; callers that did `await this.enforceCapability(...)`
-		// can drop the await (no behavior change because the promise resolved
-		// synchronously when the inner lookup was the only async point).
 		if (isCapabilityExempt(methodName)) return []
 
 		const requiredType = getRequiredCapability(methodName)
