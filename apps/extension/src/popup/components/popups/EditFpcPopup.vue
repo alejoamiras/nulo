@@ -1,4 +1,5 @@
 <script setup>
+import { FieldWarning } from "@nulo/design"
 /** Services */
 import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 

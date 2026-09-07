@@ -1,4 +1,5 @@
 <script setup>
+import { FieldWarning } from "@nulo/design"
 import { isValidHex } from "@/utils/string"
 
 /** Services */

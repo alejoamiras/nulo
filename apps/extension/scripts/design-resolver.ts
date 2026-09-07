@@ -15,7 +15,6 @@ export const NULO_DESIGN_COMPONENTS = new Set([
 	"Badge",
 	"BrutalistTitle",
 	"Checkbox",
-	"FieldWarning",
 	"SectionLabel",
 	"Toggle",
 	// round 2 — P2 Spinner family

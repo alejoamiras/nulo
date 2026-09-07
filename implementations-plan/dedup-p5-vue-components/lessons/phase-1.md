@@ -71,3 +71,7 @@ import" was wrong (`:314` still uses it) — kept.
   the `fade-enter-active` class on the entering element; a bare boolean attr reaches an untyped stub prop as `""`.
 - Gate: lint 0 · extension typecheck 0 · popups + composite suites green · design package 38 files / 319 tests ·
   `build:chrome` 0 (`components.d.ts` gained `FieldWarning` and moved `ProcessingErrorNote`).
+- Full-gate catch: `scripts/design-resolver.test.ts` pins `NULO_DESIGN_COMPONENTS` to the names whose extension SFC was
+  deleted and migrated; a brand-new primitive has no such history, so `FieldWarning` left the resolver and the nine
+  popups import it explicitly from `@nulo/design` (`components.d.ts` no longer lists it). Resolver + popups suites,
+  lint, typecheck and the build green again.

@@ -1,4 +1,5 @@
 <script setup>
+import { FieldWarning } from "@nulo/design"
 /** Utils */
 import { managers } from "@/utils/core"
 

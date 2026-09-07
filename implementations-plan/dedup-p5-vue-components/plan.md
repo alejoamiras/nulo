@@ -24,8 +24,9 @@ Net ≈ −280 lines.
 ### Popups (N2, N3, N7, N8)
 
 - **`FieldWarning`** (N2, `@nulo/design/ui/FieldWarning.vue` — L2 primitives live in the design package, the
-  extension's `components/ui/` holds only the three host-coupled wrappers; exported from the package index and added to
-  the resolver's `NULO_DESIGN_COMPONENTS`, tested in the package): the `Flex align=center gap=6 > Icon warning 12 red +
+  extension's `components/ui/` holds only the three host-coupled wrappers; exported from the package index and imported
+  explicitly by the nine popups — `scripts/design-resolver.test.ts` pins the resolver set to names whose local SFC was
+  deleted, which a new primitive never had; tested in the package): the `Flex align=center gap=6 > Icon warning 12 red +
   Text 12/600/primary` row with a default slot for the copy. Every one of the fourteen rows sits inside a
   `<Transition name="fade">` (twelve elements; `EditProfilePopup` and `NewNetworkPopup` hold a `v-if`/`v-else-if`
   pair each): each row becomes `<FieldWarning v-if|v-else-if="…">copy</FieldWarning>` in the same position with the
