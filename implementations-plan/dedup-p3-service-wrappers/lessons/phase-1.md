@@ -36,3 +36,11 @@ Base: `worktree-dedup-p2-adopt-helpers` (PR #566). Scope: ledger ids D1 D2 D3 D4
 - C6: `decodeInto(...)` logs the defensive arity form at all three arms, comment moved onto it.
 - F2: `resolveTokenFns(artifact)` iterates `Object.values(TOKEN_FN_DESCRIPTORS)` by `descriptor.kind` into one typed record (one cast at the accumulator); the `TokenInterface` literal stays explicit.
 - Gate: lint 0 · extension typecheck 0 · 56 test files / 722 tests (execution, token, fpc).
+
+## Phase 4 — repositories, composables, utils, e2e seams (D2, H4, I1, I2) ✓
+
+- D2 (own commit): `decodeRow(schema, raw)` in `wallet/utils/raw-row.ts` + wallet-core's `prefixedEntries`; the four repositories shrank by ~55 lines while keeping their raw presence reads, tri-state lookup, compare-and-delete and audit comments in place. `raw-row.test.ts` pins absent / valid / corrupt (including a non-string value).
+- H4: `useFullscreenPopupSetting` returns `{ showFullscreen, start, dispose }`; `PopupCard.vue` owns `onMounted(start)` / `onBeforeUnmount(dispose)`. The vitest config auto-imports only `vue` and `vue-router`, so an SFC's bare composable must be supplied with `vi.stubGlobal` in a component test (the repo's existing pattern) — a `vi.mock` of the module does not define the global. `PopupCard.test.ts` pins start-then-dispose.
+- I1: `waitForStorageRelease({ key, stillHeld, timeoutMs, onTimeout, onFinish? })` under `src/e2e/`; restore's `stillHeld` is `(await this.read())?.at === at`; proof and restore clear their key in `onFinish`, incoming-poll passes none. Tests cover release-with-onFinish-before-resolve, the check-then-subscribe race, the timeout, and the restore wrapper's matching vs other hold point.
+- I2: `COMPRESSION_FORMATS` drives filename, mime and detection; the `.compressed` fallback and the octet-stream default stay.
+- Gate: lint 0 (complexity baseline unchanged) · extension typecheck 0 · 108 test files / 1,552 tests across the Phase 4 paths.

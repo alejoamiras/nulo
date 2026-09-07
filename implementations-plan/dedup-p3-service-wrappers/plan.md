@@ -80,7 +80,7 @@ New tests: `network/client.test.ts` (invalid params → no request; invalid resu
 
 **Validation gate**: `bun run lint && bun run --cwd apps/extension typecheck && (bun run --cwd apps/extension test src/wallet/services/execution src/wallet/services/token src/wallet/services/fpc)`. Pass: exit 0 each. Layers: lint/typecheck + unit + composition.
 
-### Phase 4 — repositories, composables, utils, e2e seams (D2, H4, I1, I2)
+### Phase 4 — repositories, composables, utils, e2e seams (D2, H4, I1, I2) ✓
 
 New tests: `components/Popup/PopupCard.test.ts` (start on mount, dispose on unmount); `e2e/storage-gate.test.ts` (release-between-check-and-subscribe race, timeout, `onFinish` before resolve) plus one wrapper case per gate (restore: matching vs changed hold point); `restore-pending-repository` / `blocked-repository` pin one `storage.get(key)` call per lookup. D2 lands as its own commit.
 
