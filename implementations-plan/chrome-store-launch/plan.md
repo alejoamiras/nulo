@@ -5,135 +5,137 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: recon 1 agent · codex high · code-review off
-status: draft
+status: revised after codex round 1 (reject) — awaiting round 2
 ---
 
 # Chrome Web Store launch — the repo half
 
-Everything the store submission needs that lives in the repo: the store name, a real icon set, the promo tile and screenshots, the listing copy and permission justifications, a privacy page on nulo.sh, and a working `publish-chrome-store` job. The account side (Google Workspace for `hello@nulo.sh`, the developer account and its $5 fee, 2FA, identity/trader declaration, the first manual unlisted upload, the OAuth client + refresh token) is a separate interactive session with the owner present; this plan produces every input that session consumes and the CI that runs after it.
+Everything the store submission needs that lives in the repo: the store name, a real icon set, the promo tile and screenshots, the listing copy with behavioural permission justifications and honest data-use answers, a privacy page on nulo.sh, and a working, Chrome-only `publish-chrome-store` job on the current (v2) Chrome Web Store API. The account side (Google Workspace for `hello@nulo.sh`, the developer account and its $5 fee, 2FA, identity/trader declaration, the first manual unlisted upload, the OAuth client + refresh token, the GitHub environment protections) is a separate interactive session with the owner present; this plan produces every input that session consumes, including a checklist for it.
 
-Owner decisions taken in chat (2026-09-07): store title **Nulo V5** (V6 will be a second listing later); publisher identity is a Google Workspace account `hello@nulo.sh`; first upload is **Unlisted**; the CI publish stays **opt-in** (`publish_marketplaces=true`).
+Owner decisions taken in chat (2026-09-07): store title **Nulo V5** (a "Nulo V6" listing will exist later; see the coexistence caveat); publisher identity is a Google Workspace account `hello@nulo.sh`; first upload is **Unlisted**; the CI publish stays **opt-in**.
 
 ## Scope
 
 **In**
-- `apps/extension`: `displayName` → `Nulo V5`; generated icons `src/assets/icons/{16,32,48,128}.png` from the 512×512 source via `Bun.Image`, manifest `icons` map updated; `store/` directory with `listing.md` (title, summary, description, single-purpose statement, per-permission justifications, data-use disclosure answers), `promo-440x280.png`, `screenshot-{1..3}-1280x800.png`; `scripts/store-assets.ts` (icons + promo tile) and `scripts/store-screenshots.ts` (Puppeteer on the e2e fixtures, run locally, outputs committed).
-- `apps/landing`: `privacy.html` at `/privacy` (multi-page Vite input), a footer link from the home page, sitemap entry.
-- `scripts/release/publish-chrome-store.ts` (+ test) and `publish-chrome-store-run.ts`: token refresh, upload, publish (with `publishTarget` default/trustedTesters), dry-run; `release.yml` `publish-chrome-store` job body replaced; `CI.md` and `CLAUDE.md` § Release runbook updated (the "Known limitations" note and a "Marketplace publish" subsection).
-- `apps/extension/README.md` file map for the new dirs.
+- `apps/extension`: `displayName` → `Nulo V5`; generated icons `src/assets/icons/{16,32,48,128}.png` from the 512×512 source with `Bun.Image` (resize + PNG encode verified on Bun 1.4.0), manifest `icons` map updated; `store/listing.md`; `store/promo-440x280.png`; `store/screenshot-{1,2,3}-1280x800.png`; `scripts/store-icons.ts` (+ a `--check` drift test), `scripts/store-art.ts` (Puppeteer renders HTML templates to PNG: the tile, and the screenshot frames around real popup captures), `tests/e2e/store-captures.test.ts` (opt-in, `describe.skipIf(!process.env.STORE_CAPTURES)`, uses the smoke fixtures to capture the popup at 360×600), `scripts/store-listing.test.ts` (listing invariants).
+- `apps/landing`: `privacy.html` at `/privacy` (second Vite input, static, no script), a footer link, sitemap entry.
+- `scripts/release/publish-chrome-store.ts` (+ test) and `publish-chrome-store-run.ts`; `release.yml`: new `publish_chrome` input, job body replaced, Bun setup, checkout at the release SHA; `CI.md` and `CLAUDE.md` § Release runbook: a "Marketplace publish" subsection with the account-session checklist.
+- `apps/extension/README.md` file map.
 
 **Out**
-- Firefox/AMO (`gecko.id`, `publish-firefox-amo`): later plan.
-- Any dashboard/account action, and the secrets themselves (owner pastes them into the `production` environment).
-- The `nulo.sh/help/*` and `nulo.sh/forms/*` links the popup already points at (still 404 on the landing); noted as a follow-up, not a store blocker.
+- Firefox/AMO: `publish-firefox-amo` stays stubbed behind its own (still absent) input; `publish_marketplaces` is renamed away so enabling Chrome can never trip Firefox's `exit 1`.
+- Any dashboard/account action, and the secrets themselves.
+- The `nulo.sh/help/*` and `nulo.sh/forms/*` links the popup points at (404 today): follow-up, not a store blocker.
 
 ## Architecture & Implementation
 
-**Store assets (`apps/extension/scripts/store-assets.ts`).** `Bun.Image` decodes `src/assets/logo.png` (512×512) and writes 16/32/48/128 PNGs into `src/assets/icons/`; it composes the 440×280 promo tile (bone ring mark centred on charcoal `#0a0908`, wordmark rendered by drawing the landing's ring + "NULO" text is not possible without a font rasteriser, so the tile is the mark alone on charcoal at 2× and downscaled — matching the favicon language). Idempotent; a `--check` flag fails when the committed files differ from a regeneration, run inside `apps/extension`'s `test` via a small vitest case so drift is caught.
+**Icons (`apps/extension/scripts/store-icons.ts`).** `Bun.Image` decodes `src/assets/logo.png` and writes 16/32/48/128 PNGs into `src/assets/icons/`. `--check` regenerates in memory and fails on a byte difference; `scripts/store-icons.test.ts` runs that check (the extension's vitest config includes `scripts/**/*.test.ts`). Deterministic on the pinned Bun.
 
-**Screenshots (`apps/extension/scripts/store-screenshots.ts`).** Boots the built Chrome extension with `launchExtension` + `registerProfile` from `tests/e2e/fixtures/extension.ts`, opens the popup route, sets a 1280×800 viewport on a page that embeds the popup at 360×600 centred on the landing's charcoal with the section caption ("Private by default", "Send privately", "Apps have to ask"), and saves three PNGs. Local-only (needs a display-less Chrome, which the smoke fixtures already handle); not run in CI.
+**Promo tile and screenshot frames (`apps/extension/scripts/store-art.ts`).** Puppeteer (already a devDependency) renders two HTML templates under `store/templates/` to PNG: the 440×280 tile (ring mark + "NULO V5" wordmark in Space Grotesk from `@nulo/design`'s font files, charcoal ground) and a 1280×800 frame that embeds a popup capture as a data URI beside a one-line caption. Local-only; outputs are committed.
 
-**Listing copy (`apps/extension/store/listing.md`).** Sections mirror the dashboard form so the interactive session is copy-paste: Title (`Nulo V5`, 45-char max), Summary (≤ 132 chars), Description, Category (Productivity → Developer Tools, or Finance), Language, Single purpose, Permission justifications (`storage`/`unlimitedStorage`: local wallet state; `offscreen`: runs the Aztec private execution environment off the popup; `alarms`: lock timer and balance refresh; `sidePanel`: the wallet as a side panel; `downloads`: user-initiated backup export; content script on `*://*/*`: the Aztec wallet-sdk discovery relay, no page DOM access; host `https://nulo.sh/`: WebAuthn passkey RP ID; `http://127.0.0.1/*`: local sandbox RPC), Remote code: No, Data use: collects no user data, the CoinGecko price query is a fixed id set (no user-specific data), privacy policy URL `https://nulo.sh/privacy`.
+**Popup captures (`apps/extension/tests/e2e/store-captures.test.ts`).** An opt-in vitest file in the smoke suite (so `inject("extensionPath")` and the fixtures work as designed): `registerProfile`, then `page.setViewport({width: 360, height: 600})` and screenshots of Home (`#/popup/general`), Send (`#/popup/send`) and Settings → Security (`#/popup/settings/security`) into `store/captures/`. No funded account or dApp session is needed for these three; the captions carry the claims.
 
-**Privacy page (`apps/landing/privacy.html`).** Same shell as the home page (bar, plates, footer; no feed), plain language, effective date, sections: what stays on your device, what leaves it (your chosen RPC node; the CoinGecko price query and how to turn it off), what we never collect, backups you export, passkeys, contact `hello@nulo.sh`, changes. Vite: `build.rollupOptions.input = { main: "index.html", privacy: "privacy.html" }`; the release plugin's token guard passes on a token-free page; `sitemap.xml` gains `/privacy`.
+**Listing copy (`apps/extension/store/listing.md`).** Sections mirror the dashboard form. Justifications are behavioural: `storage`/`unlimitedStorage` (wallet state and the local Aztec database, which can exceed the default quota); `offscreen` (the private execution environment runs in an offscreen document because the service worker cannot host it); `alarms` (auto-lock and balance refresh timers); `sidePanel` (the wallet as a side panel); `downloads` (user-initiated backup and key exports only); content script on `*://*/*` with `all_frames` (the Aztec wallet-sdk discovery relay; dApps may run inside iframes; the script relays messages and does not read page contents); host `https://nulo.sh/` (the origin bound to the passkey RP ID `nulo.sh`); `http://127.0.0.1/*` (a local sandbox node; HTTP is accepted for loopback only, HTTPS everywhere else). Data-use answers are drafted from the data flows (Ask 3 below): the extension handles authentication data (keys, passwords: local, encrypted) and financial data (balances, history: local, plaintext in `chrome.storage.local`); it transmits transactions and balance queries to the RPC node (dRPC defaults with Alpha mainnet active on first run, or the user's own) and one fixed-id price query to CoinGecko while unlocked (toggle in Settings → Appearance); the developer operates no server and collects nothing; not sold, not used for unrelated purposes. `scripts/store-listing.test.ts` asserts: every manifest permission and host permission has a justification heading, title ≤ 45 chars, summary ≤ 132 chars, the privacy URL is present.
 
-**Publish script.** `publish-chrome-store.ts` is pure: `buildRequests({clientId, clientSecret, refreshToken, extensionId, zipBytes, publishTarget})` returns the three requests (POST `oauth2.googleapis.com/token`, PUT `www.googleapis.com/upload/chromewebstore/v1.1/items/{id}`, POST `.../items/{id}/publish?publishTarget=`) and `interpret(uploadJson, publishJson)` maps `uploadState`/`status[]` to pass/fail (`SUCCESS`; `ITEM_PENDING_REVIEW` counts as success; anything else fails with the `itemError` text). `-run.ts` reads env (`CWS_*`, `VERSION`, `DRY_RUN`, `PUBLISH_TARGET`), fails loudly when any secret is empty, does the fetches, prints one summary line. Injectable `fetch` for the tests (token exchange, upload failure, in-review, dry-run makes no network call).
+**Privacy page (`apps/landing/privacy.html`).** Static HTML using `page.css` only (no feed script), same bar/plates/footer, effective date, sections: what stays on your device (and that metadata is plaintext on disk), what leaves it (RPC node incl. the defaults; CoinGecko and its toggle), what we never collect, backups you export (yours; we never see them), passkeys, deleting your data (profile reset; uninstall), contact `hello@nulo.sh`, changes. Vite: `build.rollupOptions.input = { main: "index.html", privacy: "privacy.html" }`; the release plugin's token guard passes on a token-free page; `sitemap.xml` gains `/privacy`.
 
-**Workflow.** `publish-chrome-store` keeps its gate and environment; the step becomes `bun scripts/release/publish-chrome-store-run.ts` with `env` from `secrets.CWS_*`, `VERSION` and `DRY_RUN` from `resolve`. `publishTarget` defaults to `trustedTesters` until the listing is public (a `workflow_dispatch` input `cws_target` with default `trustedTesters`).
+**Publish script (v2 API).** `publish-chrome-store.ts` is pure and credential-free: `tokenRequest(clientId, clientSecret, refreshToken)` builds the POST to `https://oauth2.googleapis.com/token`; `uploadRequest(publisherId, itemId, token, zip)` the `POST https://chromewebstore.googleapis.com/upload/v2/publishers/{p}/items/{i}:upload` (media); `statusRequest` the `GET …:fetchStatus`; `publishRequest` the `POST …:publish` with `{ publishType: "DEFAULT_PUBLISH" }`; `interpretUpload(json)` → `SUCCEEDED | IN_PROGRESS | FAILED`; `interpretPublish(json)` → `state`, where `PENDING_REVIEW` and `STAGED` mean **submitted** (the job's success), `PUBLISHED`/`PUBLISHED_TO_TESTERS` mean live, anything else fails with the bounded `reason`/`description` list. `-run.ts` reads `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`, `CWS_PUBLISHER_ID`, `CWS_ITEM_ID`, `ZIP_PATH`, `VERSION`, `DRY_RUN`; parses `DRY_RUN` strictly (`true`/`false` only, anything else exits 1); with `DRY_RUN=true` it validates inputs, checks the zip's `manifest.json` `version_name` equals `VERSION` and prints the plan with **zero network calls**; otherwise: token → `::add-mask::` on the access token → upload → poll `fetchStatus` (bounded: 12 × 10 s) until `SUCCEEDED`/`FAILED` → publish → print one summary line (`submitted for review`, item id, crxVersion). Logging contract: never a request object, header, token response or raw exception; errors are sanitized to the API's `reason`/`description` strings truncated to 200 chars; non-JSON bodies are reported by status code only. Tests: fake secrets like `SECRET-A1B2` are asserted absent from captured output on every error path; dry-run makes no fetch call; upload `IN_PROGRESS` then `SUCCEEDED`; `FAILED`; publish `PENDING_REVIEW` (success) and `REJECTED` (failure); non-JSON 502.
+
+**Workflow.** `workflow_dispatch` input `publish_chrome` (boolean, default false; description: "Upload the release zip to the Chrome Web Store and submit it for review"); the old `publish_marketplaces` is removed (Firefox's stub gets `if: false` with a comment until AMO is wired). The job: `needs: [resolve, attach-assets]`, `if: github.event.inputs.publish_chrome == 'true' && needs.attach-assets.result == 'success'`, `environment: production`, `actions/checkout@v7` with `ref: ${{ needs.resolve.outputs.sha }}` (the publisher script runs from the release commit, not the dispatch ref), the repo's `setup-bun` composite (no `bun install`: the script has no dependencies), download artifact `release-${VERSION}`, `sha256sum -c SHASUMS256.txt --ignore-missing` on the Chrome zip, then `bun scripts/release/publish-chrome-store-run.ts` with `ZIP_PATH=dist/release/nulo-chrome-${VERSION}.zip` and `DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}`. Secrets are set only on that step's `env`.
 
 **File-level change map.**
 
 | Action | Path |
 |---|---|
-| modify | `apps/extension/package.json` (`displayName`), `manifest/manifest.config.ts` (icons map), `README.md` |
-| add | `apps/extension/src/assets/icons/{16,32,48,128}.png`, `apps/extension/scripts/store-assets.ts`, `scripts/store-assets.test.ts`, `scripts/store-screenshots.ts`, `store/listing.md`, `store/promo-440x280.png`, `store/screenshot-{1,2,3}-1280x800.png` |
-| add | `apps/landing/privacy.html`, `src/styles/privacy.css` (if the page needs more than `page.css`) |
+| modify | `apps/extension/package.json` (`displayName`), `manifest/manifest.config.ts` (icons map), `README.md`, `vitest.e2e.config.ts` (include the opt-in capture file if its glob does not already) |
+| add | `apps/extension/src/assets/icons/{16,32,48,128}.png`, `scripts/store-icons.ts`, `scripts/store-icons.test.ts`, `scripts/store-art.ts`, `scripts/store-listing.test.ts`, `tests/e2e/store-captures.test.ts`, `store/listing.md`, `store/templates/{tile,frame}.html`, `store/captures/*.png`, `store/promo-440x280.png`, `store/screenshot-{1,2,3}-1280x800.png` |
+| add | `apps/landing/privacy.html` |
 | modify | `apps/landing/index.html` (footer link), `vite.config.ts` (inputs), `public/sitemap.xml`, `README.md` |
 | add | `scripts/release/publish-chrome-store.ts`, `publish-chrome-store.test.ts`, `publish-chrome-store-run.ts` |
-| modify | `.github/workflows/release.yml` (job body + `cws_target` input), `CI.md`, `CLAUDE.md` (Release runbook: marketplace subsection) |
+| modify | `.github/workflows/release.yml` (input rename, job body, Firefox `if: false`), `CI.md`, `CLAUDE.md` (Release runbook: marketplace subsection + account-session checklist) |
 
-**Trade-offs.** `chrome-webstore-upload-cli` would be ~10 lines of YAML but adds a third-party package holding the publish credential and hits the 7-day age gate; the REST surface is three calls and the repo already has the tested-runner pattern. Screenshots could be hand-made in a design tool; a script makes them reproducible when the popup changes. The promo tile is the bare mark rather than a wordmark because there is no font rasteriser in the toolchain; it matches the favicon and the store shows the title beside it.
+**Trade-offs.** v2 over v1: v1 support ends 2026-10-15, and its status vocabulary is different (`OK`, `ITEM_PENDING_REVIEW` as an error). A fetch script over `chrome-webstore-upload-cli`: no third-party code holds the credential and no 7-day age gate. Committed icons with a drift check over build-time generation: four static files, reviewable. Puppeteer-rendered art over `Bun.Image` compositing: `Bun.Image` has no draw/compose; Chromium is already in the toolchain. Screenshot capture inside vitest over a standalone script: the fixtures require vitest's `inject`.
 
 ## Phases
 
-### Phase 1 — Icons, store name, promo tile
-- `displayName: "Nulo V5"`; `store-assets.ts` generating icons + promo tile; manifest icons map; the `--check` vitest case.
-- Assumptions: `Bun.Image` resize + PNG encode on Bun 1.4.0 (verified present as a function; the gate proves the API).
+### Phase 1 — Icons and store name
+- `displayName: "Nulo V5"`; `store-icons.ts` + test; manifest icons map.
 
 **Validation gate**
-- Commands: `bun run --cwd apps/extension check:rp-id && bun run --cwd apps/extension typecheck && bun run --cwd apps/extension test -- scripts/store-assets && bun run lint && bun run --cwd apps/extension build:chrome`
-- Pass: exit 0; `dist/chrome/manifest.json` `name` is `Nulo V5` and `icons` lists four distinct files; `file` reports the four PNGs at their sizes; `bun run --cwd apps/extension test:e2e` (smoke) green (the manifest name appears in e2e fixtures? verified by the run).
+- Commands: `bun run --cwd apps/extension typecheck && bun run --cwd apps/extension test -- scripts/store-icons && bun run lint && bun run --cwd apps/extension build:chrome && bun run --cwd apps/extension test:e2e`
+- Pass: exit 0 (build runs `check:rp-id` first); `dist/chrome/manifest.json` has `name: "Nulo V5"` and four distinct icon paths; `file` reports 16/32/48/128; the smoke suite is green on the renamed build.
 - Layers: typecheck · lint · unit · build · smoke e2e.
 
-### Phase 2 — Listing copy + screenshots
-- `store/listing.md`; `store-screenshots.ts`; three committed PNGs.
-- Assumptions: the smoke fixtures boot headless Chrome on this host (they do for `test:e2e`).
+### Phase 2 — Captures, art, listing
+- `store-captures.test.ts` run with `STORE_CAPTURES=1` against the Phase 1 build; `store-art.ts`; `listing.md`; `store-listing.test.ts`.
 
 **Validation gate**
-- Commands: `bun run --cwd apps/extension build:chrome && bun apps/extension/scripts/store-screenshots.ts && bun run lint`
-- Pass: exit 0; three 1280×800 PNGs (checked with `file`); every permission in `dist/chrome/manifest.json` has a justification paragraph in `listing.md` (a vitest case `store/listing.test.ts` asserts the set equality); summary ≤ 132 chars, title ≤ 45 (same test).
-- Layers: lint · unit · build · manual look at the PNGs.
+- Commands: `STORE_CAPTURES=1 bun run --cwd apps/extension test:e2e -- tests/e2e/store-captures.test.ts && bun apps/extension/scripts/store-art.ts && bun run --cwd apps/extension test -- scripts/store-listing && bun run lint`
+- Pass: exit 0; `file` reports three 360×600 captures, one 440×280 tile, three 1280×800 frames; the listing test is green (permission set equality, length caps, privacy URL).
+- Layers: unit · smoke e2e (opt-in file) · lint · manual look at the PNGs.
 
 ### Phase 3 — Privacy page
-- `privacy.html`, footer link, Vite inputs, sitemap; copy from `SECURITY.md` facts in plain language.
+- `privacy.html`, footer link, Vite inputs, sitemap.
 
 **Validation gate**
-- Commands: `bun run --cwd apps/landing typecheck && bun run --cwd apps/landing test && bun run lint && bun run --cwd apps/landing build && ! grep -q '{{' apps/landing/dist/privacy.html && ! grep -q '{{' apps/landing/dist/index.html`
-- Pass: exit 0; `dist/privacy.html` exists; `bun run --cwd apps/landing preview` + a Playwright load of `/privacy` under the real CSP with 0 console errors and the home footer link resolving; sitemap lists both URLs.
-- Layers: typecheck · lint · unit · build · manual browser.
+- Commands: `bun run --cwd apps/landing typecheck && bun run --cwd apps/landing test && bun run lint && bun run --cwd apps/landing build && ! grep -q '{{' apps/landing/dist/privacy.html && ! grep -q '{{' apps/landing/dist/index.html && grep -q '/privacy' apps/landing/dist/sitemap.xml`
+- Pass: exit 0; then `bun run --cwd apps/landing preview` and a Playwright load of `/privacy` and of the home footer link, with the CSP header present and 0 console errors, recorded in `lessons/phase-3.md`.
+- Layers: typecheck · lint · unit · build · browser.
 
-### Phase 4 — Publish script + workflow + docs
-- `publish-chrome-store{,.test,-run}.ts`; `release.yml` job body + `cws_target` input; `CI.md` and `CLAUDE.md` runbook; `apps/extension/README.md`.
+### Phase 4 — Publish script, workflow, docs
+- `publish-chrome-store{,.test,-run}.ts`; `release.yml`; `CI.md`; `CLAUDE.md`; `apps/extension/README.md`.
 
 **Validation gate**
-- Commands: `bun run test:release && bun run lint && bun run lint:actions && DRY_RUN=true CWS_CLIENT_ID=x CWS_CLIENT_SECRET=x CWS_REFRESH_TOKEN=x CWS_EXTENSION_ID=x VERSION=0.0.0 bun scripts/release/publish-chrome-store-run.ts`
-- Pass: exit 0; the dry run prints the planned upload without a network call; a run with an empty secret exits 1 with `::error::`; actionlint clean.
+- Commands: `bun run test:release && bun run lint && bun run lint:actions && DRY_RUN=true CWS_CLIENT_ID=x CWS_CLIENT_SECRET=x CWS_REFRESH_TOKEN=x CWS_PUBLISHER_ID=x CWS_ITEM_ID=x VERSION=<v> ZIP_PATH=<a local release zip> bun scripts/release/publish-chrome-store-run.ts`
+- Pass: exit 0; the dry run prints the plan and makes no network call (the test suite proves it with an injected fetch that throws); `DRY_RUN=maybe` exits 1; an empty secret exits 1 with `::error::`; actionlint clean; `release.yml` has no remaining `publish_marketplaces` reference.
 - Layers: unit · lint · actionlint · dry-run.
 
 ## Security & Adversarial Considerations
 
-- **The publish credential is the crown jewel.** `CWS_REFRESH_TOKEN` + client id/secret can push any code to every user. Kept in the `production` GitHub environment (reviewer-gated), consumed by one in-repo script with no third-party dependency, never printed (the runner logs status only), and the job stays opt-in per dispatch. Rotation: revoke the OAuth client in Cloud Console; the runner fails loudly on 401.
-- **What gets published is the same zip attached to the GitHub Release** (`release-<v>` artifact), so the SHASUMS on the release are the checksums of what the store received.
-- **Store review honesty.** Permission justifications match the manifest exactly (the listing test enforces set equality); "no remote code" is true (CSP `script-src 'self' 'wasm-unsafe-eval'`); the data-use answers match `SECURITY.md`; the privacy page discloses the CoinGecko query and the user-chosen RPC.
-- **Privacy page** is static, same CSP, no forms, no scripts beyond the shared bundle.
-- **Screenshots and fixtures** use the e2e fixture accounts, not real keys; the script runs locally only.
-- **Supply chain**: no new packages. `Bun.Image` and `fetch` are runtime built-ins.
-- **Renaming the extension** (`Nulo (V5)` → `Nulo V5`) changes no id, key, or storage; unpacked dev installs simply show the new name.
+- **The publish credential can push code to every user.** Mitigations in this plan: one in-repo, dependency-free script; secrets on a single step's `env`; the access token masked; a logging contract with tests; the script checked out at the release SHA so a dispatch against another branch cannot substitute the publisher; the zip verified against the release's SHASUMS and its `version_name` against the tag before upload. **What this plan cannot do**: the `production` environment currently has no required reviewers, no deployment-branch/tag policy, and admins can bypass (read from the GitHub API on 2026-09-07). Any repository writer can dispatch `release.yml`. Ask 2 puts the environment protections on the account-session checklist; until they are set, the input stays off.
+- **Provenance**: the published bytes are the `attach-assets` artifact, the same zip on the GitHub Release with its SHASUMS; nothing is rebuilt in the credential-bearing job.
+- **Honesty surface**: the data-use answers are written from the data flows, not from a slogan; the remote-code answer is an explicit owner decision (Ask 4) with a drafted reviewer explanation; permission justifications are behavioural and tested for coverage.
+- **V6 coexistence**: Google's spam policy rejects duplicate functionality. V6 will need a stated, distinct purpose (a different Aztec protocol regime with a different address derivation, not interoperable) in its listing; a version suffix alone is not a guarantee. Not a V5 blocker.
+- **Privacy page**: static, same CSP, no forms.
+- **Screenshots** use fixture profiles only.
+- **Supply chain**: no new packages.
 
 ## Assumptions
 
 **Facts**
-1. `apps/extension/package.json#displayName` is `Nulo (V5)`; `manifest.config.ts` sets `name: displayName || name`, `version` from semver → 4 ints, `host_permissions: ["https://nulo.sh/", "http://127.0.0.1/*"]`, `permissions: [alarms, offscreen, storage, sidePanel, unlimitedStorage, downloads]`, content script on `*://*/*`.
-2. `https://nulo.sh/` is the passkey RP ID; `scripts/check-rp-id.ts` fails the build if the manifest drops it (`SECURITY.md:24-40`; `build:chrome` runs `check:rp-id` first).
-3. `src/assets/logo.png` is 512×512 RGB; the manifest points all four icon sizes at it.
-4. `release.yml` `attach-assets` uploads `nulo-chrome-<v>.zip` as artifact `release-<v>`; `publish-chrome-store` (504–523) downloads it, is gated on `publish_marketplaces == 'true'`, uses `environment: production`, and its body is `exit 1`.
-5. `Bun.Image` is a function on the pinned Bun 1.4.0; the `my-stack` skill lists it as the sharp/jimp replacement.
-6. `apps/landing/vite.config.ts` has no `rollupOptions.input`; `release-html-plugin` runs on every HTML entry and only throws on the four known tokens.
-7. `SECURITY.md` § External price feed: CoinGecko fixed-id query every ~3 min while unlocked and `showFiatValues` on (default, toggle in Settings → Appearance); § Storage privacy: master secret and guard AES-GCM encrypted, metadata plaintext in `chrome.storage.local`.
-8. `tests/e2e/fixtures/extension.ts` exports `launchExtension`, `registerProfile`, `openPopup`; Puppeteer is a devDependency.
-9. `bunfig.toml` `minimumReleaseAge = 604800`; CI installs `--frozen-lockfile`.
+1. `apps/extension/package.json#displayName` is `Nulo (V5)`; `manifest.config.ts` uses it as `name`; `permissions: [alarms, offscreen, storage, sidePanel, unlimitedStorage, downloads]`; `host_permissions: ["https://nulo.sh/", "http://127.0.0.1/*"]`; content script `*://*/*`, `all_frames: true`, relay only (`content.ts:1-9`); CSP `script-src 'self' 'wasm-unsafe-eval'`.
+2. The passkey RP ID is `nulo.sh`; `https://nulo.sh/` is the host permission that binds it; `scripts/check-rp-id.ts` runs in `build:chrome` (`SECURITY.md:24-40`, `package.json:11`).
+3. `src/assets/logo.png` is 512×512 RGB. `Bun.Image` on Bun 1.4.0 decodes it, resizes and encodes PNG (probed); its prototype has `resize/png/flip/rotate/modulate` and no compose/draw.
+4. `release.yml`: `resolve` outputs `tag`, `version`, `sha`, `is_prerelease` only; `attach-assets` reads `DRY_RUN` from `github.event.inputs.dry_run || 'false'` and uploads `release-<v>` (both zips + SHASUMS); `publish-chrome-store` and `publish-firefox-amo` are both gated on `publish_marketplaces` and both `exit 1`; the `status` aggregator fails on either; the Chrome job has no Bun setup and checks out the dispatch ref.
+5. The `production` environment: no reviewers, no wait timer, no branch policy, `can_admins_bypass: true`.
+6. `tests/e2e/fixtures/extension.ts` calls vitest's `inject("extensionPath")`; the module cannot be imported outside a vitest run. `apps/extension/vitest.config.ts` includes `scripts/**/*.test.ts`; the smoke config runs `tests/e2e/*.test.ts`.
+7. `package.json` has `test:release` (`bun test scripts/release/`), run in CI by `_unit-tests.yml`; `lint:actions` is actionlint.
+8. Chrome Web Store API v1 "will only be supported until 15th October 2026". v2: upload `POST https://chromewebstore.googleapis.com/upload/v2/publishers/{p}/items/{i}:upload`, `fetchStatus` `GET …:fetchStatus` (`lastAsyncUploadState`, `submittedItemRevisionStatus.state`), publish `POST …:publish` (`publishType`), `UploadState` ∈ {SUCCEEDED, IN_PROGRESS, FAILED, NOT_FOUND}, `ItemState` ∈ {PENDING_REVIEW, STAGED, PUBLISHED, PUBLISHED_TO_TESTERS, REJECTED, CANCELLED}; scope `https://www.googleapis.com/auth/chromewebstore`; the API publishes with the item's existing visibility.
+9. `SECURITY.md`: metadata (accounts, contacts, dApp sessions, balances, history) plaintext in `chrome.storage.local`; master secret AES-GCM; CoinGecko fixed-id query every ~3 min while unlocked, toggle `showFiatValues`; default networks are dRPC endpoints with Alpha mainnet active (`network/service.ts:97-105`); the wallet accepts dApp-supplied contract artifacts and executes them in the bundled PXE simulator.
+10. `apps/landing/vite.config.ts` has no `rollupOptions.input`; `release-html-plugin` runs on every HTML entry.
 
 **Inferences**
-- The Chrome Web Store API v1.1 endpoints and the `uploadState`/`status` shapes are as documented today (token: `https://oauth2.googleapis.com/token`; upload: PUT `https://www.googleapis.com/upload/chromewebstore/v1.1/items/{id}`; publish: POST `https://www.googleapis.com/chromewebstore/v1.1/items/{id}/publish`). The first real dispatch is the proof; the dry-run only proves the plumbing.
-- The store accepts the release zip as-is (the folder is zipped at its root: `manifest.json` at top level; verified by `attach-assets`'s `cd dist/release/chrome && zip -r ../… .`).
-- The listing category: "Productivity" is where most wallets sit; the owner can change it in the form.
+- The v2 media upload accepts the zip as the request body with `Content-Type: application/zip` (the reference documents an empty JSON body plus media); the first real dispatch confirms it, the dry run does not.
+- `registerProfile` alone yields a Home, Send and Settings screen presentable enough for screenshots (empty balances read as "0"); if not, captions and a seeded token list cover it.
+- Category "Productivity" is acceptable; changeable in the form.
 
-**Asks** (defaults unless the owner objects at the gate)
-1. Rename to `Nulo V5` now (before the first upload the name is free to change; after, the store shows whatever the uploaded manifest says). Default: yes.
-2. Promo tile as the bare ring mark on charcoal (no wordmark). Default: yes.
-3. First CI publish target `trustedTesters` until the listing is public. Default: yes.
-4. `hello@nulo.sh` as the privacy page's contact. Default: yes.
+**Asks**
+1. **Rename to `Nulo V5`** (decided in chat; recorded, not re-asked).
+2. **GitHub environment protections before the first real publish**: required reviewer (the owner) on `production`, deployment policy limited to tags `v*`, admin bypass off. Owner action in the account session; the plan documents it. Default: required before `publish_chrome` is ever set.
+3. **Data-use disclosure**: the drafted answers say the extension handles authentication and financial data locally, transmits to the RPC node and CoinGecko, and the developer collects nothing. Confirm this framing (the earlier "collects no user data" is withdrawn as inaccurate).
+4. **Remote-code answer**: the wallet executes dApp-supplied contract bytecode inside the bundled PXE simulator and prover. This is data interpreted by shipped code, isolated from extension APIs, and only after the user approves the request in the confirmation window; the same is true of every Aztec wallet. Proposed answer: "No remote code" with that explanation in the reviewer notes. Owner confirms or asks for a policy consult first.
+5. **Distribution stays Unlisted**; the API preserves the dashboard's visibility. No trusted-testers default (withdrawn).
 
 ## Post-implementation hardening
 
-Not scheduled by this plan. Note for the release calendar: `/harden security` before the listing goes public (the store makes the wallet reachable by strangers; the README's "not audited" warning stays on the listing until then).
+`/harden security` before the listing goes public; the "not audited" statement stays on the listing until then.
 
 ## Post-implementation
 
 Executed by the implementing session from this file. `code_review` is `off`.
 
-1. **Codex audit** (`/codex high`): net diff from `b47b9bf4`, this plan, `recon.md`, `audit-codex.md`; asks: adversarial review with the publish credential as the target (leak paths in logs, the dry-run, the workflow env), honesty of the listing and privacy copy against the code, the script's error handling; plus the two rules below.
-2. **Iterative fix loop**: verify claims against the repo; fix; commit; log in `lessons/`; resume the same session; repeat until no material findings, stop and surface after 3 rounds.
+1. **Codex audit** (`/codex high`): net diff from `b47b9bf4`, this plan, `recon.md`, `audit-codex.md`; asks: the publish credential as the target (log leaks, dry-run, workflow env, checkout ref), honesty of listing and privacy copy against the code, script error handling and the polling bound; plus the two rules below.
+2. **Iterative fix loop**: verify claims against the repo; fix; commit; log in `lessons/`; resume the same session; repeat until no material findings; stop and surface after 3 rounds.
 3. **Delivery** below.
 
 **No-over-engineering rule** (verbatim in every codex prompt): "Report bugs and small, targeted improvements only. Do not propose speculative abstractions, extra configuration surface, new layers, or rewrites — the smallest change that fixes each real problem. If code works and is clear, leave it alone."
@@ -142,11 +144,15 @@ Executed by the implementing session from this file. `code_review` is `off`.
 
 ## Delivery
 
-Single arc, one PR `worktree-chrome-store-launch` → `dev`: `feat(store): chrome web store listing assets, privacy page, and publish job`. Touches `apps/extension/**` and `.github/workflows/**`, so smoke + network e2e and actionlint run. Diagnose reds before re-running. Merge is the owner's call. After merge, the interactive session: Workspace → developer account → manual unlisted upload of the next release zip (with the new name and icons) → OAuth client + refresh token → four secrets into `production` → first `workflow_dispatch` with `publish_marketplaces=true`, `cws_target=trustedTesters`.
+Single arc, one PR `worktree-chrome-store-launch` → `dev`: `feat(store): chrome web store listing, privacy page, and v2 publish job`. Touches `apps/extension/**` and `.github/workflows/**`, so smoke + network e2e and actionlint run; diagnose reds before re-running. Merge is the owner's call.
+
+**Account-session checklist (after merge, owner present)**: Workspace + `hello@nulo.sh` → developer account, fee, 2FA, identity/trader → dashboard: new item from the next release's `nulo-chrome-<v>.zip`, listing from `store/listing.md`, art from `store/`, privacy URL, Unlisted, submit → note Publisher ID and Item ID → Cloud Console: enable the Chrome Web Store API, OAuth client, refresh token via OAuth Playground with scope `chromewebstore` → GitHub: `production` reviewers + tag policy + bypass off, secrets `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`, `CWS_PUBLISHER_ID`, `CWS_ITEM_ID` → first `workflow_dispatch` with `dry_run=true, publish_chrome=true`, then for real on the next release (its manifest version must exceed the manually uploaded one).
 
 ## Audit — codex
 
-_Pending._
+**Round 1 (GPT-6 Astra, high): reject.** Blocking findings, all verified and adopted: v1 API deprecated (support ends 2026-10-15) and its status vocabulary misread → v2 with `fetchStatus` polling and `PENDING_REVIEW`/`STAGED` as "submitted"; `DRY_RUN` was read from `resolve`, which has no such output → from the dispatch input with strict parsing and a zero-network test; the `production` environment has no protections and the job checked out the dispatch ref → checkout at the release SHA, secrets on one step, protections on the account checklist (Ask 2); enabling `publish_marketplaces` would also fire Firefox's `exit 1` → `publish_chrome` input, Firefox `if: false`; no Bun setup in the job → the `setup-bun` composite; "collects no user data" inaccurate → data-flow disclosures (Ask 3); CSP does not answer the remote-code question given dApp-supplied contract bytecode → Ask 4 with a drafted explanation; `trustedTesters` contradicted the owner's Unlisted choice → withdrawn (Ask 5); RP ID misstated → `nulo.sh`; fixtures need vitest → opt-in test file; `Bun.Image` cannot compose → Puppeteer-rendered art; listing test outside vitest's include → moved to `scripts/`; Phase 2 never ran its tests → fixed; the runner's comment style must not copy the verbose history comments; V6 coexistence not guaranteed by a suffix → noted. Nothing rejected. Transcript: `audit-codex.md`.
+
+**Round 2:** _pending._
 
 ## Seeds
 
