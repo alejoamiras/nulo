@@ -1,0 +1,159 @@
+---
+plan: dedup-p2-adopt-helpers
+tier: light
+driver: claude-code
+code_review: off
+eli5_mode: readme-row
+worktree: .claude/worktrees/dedup-p2-adopt-helpers (branch worktree-dedup-p2-adopt-helpers, on top of worktree-dedup-p1-delete / PR #561)
+ledger: implementations-plan/dedup-ledger (phase P2)
+status: drafted 2026-09-07 — codex audit pending
+---
+
+# P2 — adopt the helper that already exists
+
+Seventeen ledger findings (X2 X3 X6 X1 E1 H3 J5 H1 C3 C8 L4 K2 M7 G2 G3 D5 L6) share one shape: a
+helper exists, and a call site re-typed it inline. This phase replaces every such copy with an import.
+No behaviour changes, no new abstractions beyond four tiny helpers the ledger already calls for, ≈−290
+net lines. Scope is exactly those ids; a finding that turns out unsafe on contact is skipped and logged.
+
+## Architecture & Implementation
+
+**Reuse vs new** (from `recon.md`): 11 rows reuse existing code as-is or by delegation; 4 add a helper
+next to an existing sibling; 2 are in-file hoists.
+
+New or moved helpers, each in the lowest layer that already has every consumer above it:
+
+| Helper | Home | Contract |
+|---|---|---|
+| `deferred<T>(): PromiseWithResolvers<T>` | `packages/wallet-core/src/utils/deferred.ts`, exported from `@nulo/wallet-core/utils` (promoted from `rw-guard.ts`'s module-private copy) | `{ promise, resolve, reject }`; no platform polyfill assumed |
+| `copyWithToast(value, openToast, successLabel, opts?)` | `apps/extension/src/utils/clipboard.ts` beside `copyToClipboard` | fixes the failure toast (`Couldn't copy`, `warning`, 3 000 ms); `opts.icon`, `opts.sanitize` pass through; `copyAddressToClipboard` becomes a one-line delegate |
+| `isNewPasswordValid(password, repeated)`, `newPasswordHint(password, repeated)` | `apps/extension/src/utils/password.ts` (new, pure) | valid ⇔ `password.length >= 8 && password === repeated`; hint = the existing 4-branch string verbatim |
+| `randomIdNotIn(taken: (id) => boolean, length = 8)` | `apps/extension/src/wallet/services/id-allocators.ts` beside `nextRandomId` | sync sibling for in-memory maps; `nextRandomId` unchanged |
+| `requireArtifact(instances, artifacts, address)` | moved to `execution/contract-resolver.ts`, exported | throws exactly `"Contract not found"` / `"Contract artifact not found"` |
+| `buildIncomingCardProps(inc, token, amountFiat)` | `modules/general/recent-activity-rows.ts` beside `buildJournalTerminalCardProps` | pure; callers keep their own token/fiat lookup |
+| `isEmbeddedFeePayment(op)` | `popup/windows/execute/operation-validation.ts` | structural param `{ kind, fee?, executionMode?, exec?, opts? }`; both `index.vue` branches and `OperationCard.hasEmbeddedFee` call it |
+
+Call-site rewrites (no new code): X2 → `errorMessageFromUnknown` at 39 sites (wallet-core sites import
+`../utils/errors`; every other package imports `@nulo/wallet-core/utils`); X6 → `toBase64`/`fromBase64`
+at 2 sites; H3 + J5 → `createRunFence()` at 4 sites (`begin()` both captures and bumps, so a bare
+"invalidate on close" becomes `fence.begin()` with the closure discarded; `useProfileBootstrap` stores the
+run's `isCurrent` closure in its in-flight map instead of a generation number); E1 → `nextRandomId` at the
+async site, `randomIdNotIn` at the two sync sites; C8 → a private `reject(estimateId, reason)` mirroring
+`OperationEstimateReuse`; G2 → `log()` delegates to `logWithContext(undefined, …)`; G3 → hoist the
+`FunctionCall`; D5 → private `patchAccountField`; L6 → local `readMap(key)`; M7 → `formatLogData`.
+
+**Critical flow that must not change:** `dapp-session/integrity.ts` (X6) keeps its `try/catch` around
+decoding so a malformed MAC still returns `false` rather than throwing; `fromBase64` throws on bad input
+exactly like `Buffer.from` did not — the catch is what preserves the fail-closed verify.
+
+**Alternative not taken:** native `Promise.withResolvers()` for X3. TS 5.9.3 types it and Chrome/Bun
+ship it, but the Firefox build's floor is not pinned in the manifest; a wallet-core export costs six lines
+and needs no platform assumption.
+
+## Phases
+
+### Phase 1 — cross-package helpers (X2, X3, X6)
+
+Replace the 39 inline error ternaries (delete `migrator.ts`'s local `message()`), the 6 deferred-promise
+copies (new `deferred.ts` + `rw-guard.ts` adoption), and the 2 `Buffer` base64 sites.
+
+**Validation gate** — commands, from the worktree root:
+`bun run lint && bun run typecheck:all && bun run --cwd packages/wallet-core test && bun run --cwd packages/extension-messaging test && bun run --cwd packages/aztec-runtime test && (cd apps/extension && bun --bun vitest run src/wallet/services/execution/execution-mutex.test.ts src/wallet/services/wallet-sdk/session-baton.test.ts src/wallet/services/window-manager/window-manager.test.ts src/wallet/services/dapp-session/integrity.test.ts src/composables/useFullBackupImport.test.ts)`.
+Pass: every command exit 0. Layers: lint/typecheck + unit.
+
+### Phase 2 — service and utility helpers (E1, C3, C8, D5, G2, G3)
+
+**Validation gate**: `bun run lint && bun run --cwd apps/extension typecheck && (cd apps/extension && bun --bun vitest run src/wallet/services/task src/wallet/services/window-manager src/wallet/services/dapp-interaction src/wallet/services/execution/tx-request-builder.pins.test.ts src/wallet/services/execution/authwit-discoverer.test.ts src/wallet/services/execution/helpers/batched-view-simulation.test.ts src/wallet/services/execution/transfer-estimate-reuse.test.ts src/wallet/services/account src/wallet/logger src/wallet/services/token)`.
+Pass: exit 0 each. Layers: lint/typecheck + unit.
+
+### Phase 3 — UI-side helpers (X1, H1, H3, J5, K2, L4, L6, M7)
+
+**Validation gate**: `bun run lint && bun run --cwd apps/extension typecheck && (cd apps/extension && bun --bun vitest run src/utils src/components/header-copy-address.test.ts src/composables src/popup/windows/execute src/popup/components/modules/general src/popup/components/modules/activity src/popup/components/modules/send src/popup/pages/settings src/components/composite/import src/components/JsonViewer src/components/LogsViewer)`.
+Pass: exit 0 each; new `password.test.ts` and the extended `clipboard.test.ts` green. Layers:
+lint/typecheck + unit + component.
+
+### Phase 4 — full local gate
+
+**Validation gate**: `bun run lint && bun run typecheck:all && bun run test`. Pass: exit 0 each, quoted
+in the transcript. No e2e locally (CI's smoke + network run on the PR).
+
+## Security & Adversarial Considerations
+
+- **Threat surface unchanged.** No trust boundary moves; every rewrite is a call-site substitution of a
+  helper with identical semantics for the inputs those sites produce.
+- **X6 / `integrity.ts`** is the one crypto-adjacent site (HMAC over a dApp session row). Decoding
+  changes, the comparison does not; the `try/catch` stays so malformed input verifies `false`. Covered by
+  `integrity.test.ts`, which must keep its malformed-MAC case green.
+- **X2** never changes what reaches a log line: the helper returns the same string the ternary did for
+  `Error`, string, `null`, `undefined` and everything else. Logging policy (CLAUDE.md) is untouched.
+- **X1** keeps `sanitize: true` on the address wrapper; the general helper defaults `sanitize` to
+  `false`, exactly what the 17 sites pass today.
+- **Supply chain**: no dependency added or bumped.
+
+## Assumptions
+
+**Facts (verified in the worktree)**
+1. `errorMessageFromUnknown` — `packages/wallet-core/src/utils/errors.ts:8`; `@nulo/wallet-core`'s
+   `package.json` exports `./utils` → `src/utils/index.ts`. 39 inline ternary sites in 30 files.
+2. `nextRandomId(storage, length = 8)` — `apps/extension/src/wallet/services/id-allocators.ts:39`;
+   `TaskService.startNewTask` (`task/service.ts:103`) and `WindowManager.openAndAwait`
+   (`window-manager.ts:64`) return synchronously; `DappInteractionService.requestCapabilities` is async.
+3. `createRunFence()` — `src/composables/runFence.ts:13`, adopted by `popup/network-switch.ts` and
+   `RecentActivityView.vue`.
+4. `copyToClipboard` — `src/utils/clipboard.ts:30`; `copyAddressToClipboard` —
+   `src/components/header-copy-address.ts:11`, its only caller `Header.vue`. 17 `copyToClipboard(` SFC
+   sites.
+5. `toBase64`/`fromBase64` — `packages/wallet-core/src/utils/encoding.ts:21,34`.
+6. `requireArtifact` — `execution/tx-request-builder.ts:546`, module-private.
+7. `formatLogData` — `src/components/JsonViewer/logs-format.ts:44`.
+8. TypeScript 5.9.3 in the isolated store; `lib` is `["ESNext", "DOM", "WebWorker"]`.
+
+**Inferences (unverified — the audit should attack these)**
+- The 17 copy sites all pass the identical failure toast; any site with a different failure label keeps
+  its inline call (checked during Phase 3, logged if so).
+- `useProfileImportFlow`'s extra `!repeatedPassword.value` check is implied by
+  `password === repeated && password.length >= 8`, so the shared predicate is equivalent.
+- The `background.ts:779-783` deferred site has no reject path that the shared helper would change.
+
+**Asks** — none open. The README's owner decisions pre-answer tier, review setting, delivery and approval.
+
+## Post-implementation
+
+1. `code_review` is `off`: `/code-review` is NOT run.
+2. **Codex audit** (`/codex high`, GPT-6 Astra): send the net diff `git diff worktree-dedup-p1-delete...HEAD -- . ':!implementations-plan'`,
+   this plan, `recon.md`, the ledger rows, an adversarial/security ask, and — verbatim — the two rules:
+   *"Report bugs and small, targeted improvements only. Do not propose speculative abstractions, extra
+   configuration surface, new layers, or rewrites — the smallest change that fixes each real problem. If
+   code works and is clear, leave it alone."* and *"Audit the comments for value per character. Flag any
+   comment that narrates what the code visibly does, restates its line, references implementation plans /
+   phases / reviews, or spends a paragraph where a sentence works — and flag places where a non-obvious
+   invariant or constraint deserves a comment it doesn't have. Comments are permanent context every future
+   reader, human or LLM, pays to re-read: they must be few, dense, and exact."* Tell codex not to run the
+   vitest e2e configs.
+3. **Fix loop**: verify each claim against the tree, apply accepted fixes, commit, log the round in
+   `lessons/phase-N.md`, RESUME the same codex session with the fix diff. Repeat until a round reports no
+   new material findings (quote it). Still material after 3 rounds → surface and hold.
+4. **Delivery** (below) — the first and only time a PR is opened for this phase.
+
+## Delivery
+
+Single arc = this branch, one PR, stacked on P1: `gh stack submit --auto --open` from this worktree
+(the stack metadata is mirrored into this worktree's gitdir), then `gh pr edit <n>` with the ledger title
+`refactor: adopt the shared helpers that call sites re-typed inline` and a body listing ids addressed,
+ids skipped with reasons, net LOC, the Phase 4 gate output and the codex rounds. Then
+`gh pr checks <n> --watch`; red = flake → re-run once, red again → fix or hold. Green → README row P2 =
+`open #<n> · green`, `agent-worktree status`, print `LESSONS_FILE=implementations-plan/dedup-p2-adopt-helpers/lessons/phase-4.md`.
+**Never merge**; the owner lands the stack bottom-up.
+
+## Audit log
+
+_(filled by the codex audit round — adopted / rejected findings)_
+
+## Seeds
+
+The session-level `/goal` in `implementations-plan/dedup-ledger/README.md` is already driving this phase
+and supersedes a plan-local seed. For a fresh session picking up only this phase:
+
+```
+/goal All four phases marked ✓ in implementations-plan/dedup-p2-adopt-helpers/plan.md, each ✓ backed by its validation gate quoted passing; `LESSONS_FILE=implementations-plan/dedup-p2-adopt-helpers/lessons/phase-N.md` printed per phase; `/code-review` NOT run; the codex fix loop converged with a resumed pass reporting no new material findings, quoted; the PR opened via `gh stack submit` on worktree-dedup-p2-adopt-helpers with base worktree-dedup-p1-delete only after the loop converged, `gh pr checks` all green, no merge command run.
+```
