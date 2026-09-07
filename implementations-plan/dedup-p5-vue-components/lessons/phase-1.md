@@ -12,4 +12,18 @@ Base: `worktree-dedup-p4-vue-shells` (PR #569). Scope: ledger ids N1 N2 N3 N4 N5
 
 ## Dual audit
 
+Codex (`audit-codex.md`) and Fable (`audit-fable.md`) both landed on conditional-approve and both asked for a hybrid.
+Agreed: skip N1 (three sites carry side effects, six tear down on hide or never) and M5's toggle (a 4-of-7 adoption);
+keep N2 with the `v-if`/`v-else-if` branches intact inside their Transitions; L2 reads `props.token`; M1 imports
+`getMethodLabel` directly and keeps `formatScope`/`fnLabel` in the component. Split: N4 (codex skip, fable keep) →
+skipped; N7 (codex skip, fable keep) → kept with the reject/latch cases; I5 (codex: CSF indexing breaks on a factory)
+→ skipped. Full ledger in `plan.md`.
+
+## Skipped ids
+
+- **N1**, **N4**, **N5**, **M6**, **I5**, **M5's toggle**, **N3's sender site**, **K3's action-row extraction**,
+  **N8's `trimAddress`** — reasons in `plan.md` § Decision ledger.
+
+## Final codex pass
+
 (pending)
