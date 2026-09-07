@@ -7,6 +7,7 @@ import { usePrices } from "@/composables/usePrices"
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
+import { isValidDecimals, parseRawBalance } from "@/utils/token-amount"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -30,17 +31,25 @@ const props = defineProps({
 })
 
 const token = computed(() => props.tokenBalance.token)
-const decimals = computed(() => token.value?.decimals || 0)
-const publicRaw = computed(() => BigInt(props.tokenBalance?.publicBalance || 0))
-const privateRaw = computed(() => BigInt(props.tokenBalance?.privateBalance || 0))
-const totalBalance = computed(() => balanceFormatted(privateRaw.value + publicRaw.value, decimals.value, 10).value)
+// Row numbers come from storage rows that contracts fed: a side that is not a non-negative
+// integer literal, or a `decimals` outside 0..77, makes the row "unknown" — rendered as a dash,
+// never parsed into BigInt or an exponent.
+const isMalformed = computed(
+	() => !props.tokenBalance || parseRawBalance(props.tokenBalance) === undefined || !isValidDecimals(token.value?.decimals),
+)
+const decimals = computed(() => (isMalformed.value ? 0 : token.value.decimals))
+const publicRaw = computed(() => (isMalformed.value ? 0n : BigInt(props.tokenBalance.publicBalance || 0)))
+const privateRaw = computed(() => (isMalformed.value ? 0n : BigInt(props.tokenBalance.privateBalance || 0)))
+const totalBalance = computed(() =>
+	isMalformed.value ? "—" : balanceFormatted(privateRaw.value + publicRaw.value, decimals.value, 10).value,
+)
 
-/** B1: holding fiat value between amount and split — absent when unpriced.
+/** Holding fiat value between amount and split — absent when unpriced.
  *  The client lifecycle lives here (row-level) because TokenCard is mounted
  *  per-row from the tokens list; the shared cache keeps this cheap. */
 const priceService = new PriceServiceClient()
 const prices = usePrices(priceService)
-const fiatLabel = computed(() => prices.tokenFiatLabel(token.value, privateRaw.value + publicRaw.value))
+const fiatLabel = computed(() => (isMalformed.value ? undefined : prices.tokenFiatLabel(token.value, privateRaw.value + publicRaw.value)))
 onBeforeUnmount(() => {
 	prices.dispose()
 	priceService.disconnect()
@@ -114,8 +123,8 @@ const syncFailed = computed(() => !!props.tokenBalance?.syncFailure && !props.to
 			<span :class="$style.loading_text">{{ description }}</span>
 		</Flex>
 		<Flex v-else direction="column" align="end" gap="2">
-			<span :class="[$style.amount, syncFailed && $style.amount_stale]">{{ totalBalance || 0 }}</span>
-			<span :class="$style.detail">
+			<span :class="[$style.amount, syncFailed && $style.amount_stale]" :data-malformed="isMalformed || undefined">{{ totalBalance || 0 }}</span>
+			<span v-if="!isMalformed" :class="$style.detail">
 				<span :class="$style.icon_private"><Icon name="lock" size="9" /></span>
 				{{ privateFormatted }}
 				<span :class="$style.pub_group">
@@ -160,12 +169,19 @@ const syncFailed = computed(() => !!props.tokenBalance?.syncFailure && !props.to
 	pointer-events: none;
 }
 
+/* Symbol and subtitle are contract-supplied: clipped so a hostile string cannot push the
+   balance off the row. */
 .symbol {
 	font-family: var(--font-headline);
 	font-weight: 700;
 	font-size: 14px;
 	letter-spacing: -0.02em;
 	color: var(--txt-primary);
+
+	max-width: 160px;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
 }
 
 .type_label {
@@ -186,6 +202,11 @@ const syncFailed = computed(() => !!props.tokenBalance?.syncFailure && !props.to
 	font-family: var(--font-mono);
 	font-size: 10px;
 	color: var(--nulo-secondary);
+
+	max-width: 160px;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
 }
 
 .detail {

@@ -78,11 +78,9 @@ const anyRefreshing = computed(() => tokenBalances.value.some((tb) => tb.isUpdat
 const priceService = new PriceServiceClient()
 const prices = usePrices(priceService)
 const fiatOf = safeFiatOf((tb) => prices.tokenFiatMicro(tb.token, parseRawBalance(tb)))
-/** Pins land in a later arc; the empty set keeps the order value-first until then. */
 const pinnedContracts = new Set()
 
 const orderedTokenBalances = computed(() => orderTokenRows(tokenBalances.value, { pinnedContracts, fiatOf }))
-/** Home shows a fixed budget of rows; the rest live on the Holdings tab. */
 const homeRows = computed(() => capTokenRows(orderedTokenBalances.value))
 const shownTokenBalances = computed(() => homeRows.value.shown)
 const overflowCount = computed(() => homeRows.value.overflow)

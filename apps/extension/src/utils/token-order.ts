@@ -62,6 +62,12 @@ export function compareTokenRows<T extends OrderableRow>(a: T, b: T, ctx: OrderC
 	const ca = classifyRow(a, ctx)
 	const cb = classifyRow(b, ctx)
 	if (ca !== cb) return CLASS_RANK[ca] - CLASS_RANK[cb]
+	if (ca === "pinned") {
+		// A malformed pin keeps its slot but sits behind every readable pin, priced or not.
+		const ua = isUnknownRow(a)
+		const ub = isUnknownRow(b)
+		if (ua !== ub) return ua ? 1 : -1
+	}
 	if (ca === "pinned" || ca === "held-priced") {
 		const byFiat = compareByFiat(a, b, ctx)
 		if (byFiat !== 0) return byFiat

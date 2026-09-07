@@ -33,6 +33,8 @@ const SEED = [
 ]
 
 let seedRows: typeof SEED = SEED
+/** Tests that need a fetch to resolve on cue replace this for the duration of the case. */
+let fetchRows: (account?: string) => Promise<typeof SEED> = async () => seedRows
 
 vi.mock("@/wallet/services/token-balance/client", () => ({
 	TokenBalanceServiceClient: vi.fn(function () {
@@ -46,7 +48,7 @@ vi.mock("@/wallet/services/token-balance/client", () => ({
 				}),
 				remove: vi.fn(),
 			},
-			getTokenBalances: vi.fn().mockImplementation(async () => seedRows),
+			getTokenBalances: vi.fn().mockImplementation((_id: unknown, account?: string) => fetchRows(account)),
 			refreshTokenBalance: vi.fn(),
 		}
 	}),
@@ -154,6 +156,7 @@ afterEach(() => {
 	mockQuotes = {}
 	mockShowFiat = true
 	seedRows = SEED
+	fetchRows = async () => seedRows
 })
 
 describe("BalanceView — Home aggregate", () => {
@@ -207,6 +210,27 @@ describe("BalanceView — Home aggregate", () => {
 		const { wrapper } = await mountView()
 
 		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("$1,250.00")
+	})
+
+	test("a fetch for the previous account that resolves late never overwrites the current one", async () => {
+		mockQuotes = FRESH()
+		const pending = new Map<string, (rows: typeof SEED) => void>()
+		fetchRows = (account?: string) =>
+			new Promise((resolve) => {
+				pending.set(account ?? "", resolve)
+			})
+		const { wrapper, appStore } = await mountView()
+
+		appStore.account = { address: "0xother" } as never
+		await flushPromises()
+		// The new account's rows land first…
+		pending.get("0xother")?.([{ ...SEED[1], account: "0xother" }])
+		await flushPromises()
+		expect(wrapper.find('[data-testid="balance-amount"]').text()).not.toContain("1,249")
+		// …then the stale response for the old account arrives and must be dropped.
+		pending.get("0xacct")?.(SEED)
+		await flushPromises()
+		expect(wrapper.find('[data-testid="balance-amount"]').text()).not.toContain("1,249")
 	})
 
 	test("deleting a row keeps the list consistent (the aggregate drops it)", async () => {

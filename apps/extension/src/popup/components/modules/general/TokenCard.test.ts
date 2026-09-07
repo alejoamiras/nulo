@@ -193,6 +193,34 @@ describe("TokenCard", () => {
 	})
 })
 
+describe("TokenCard — hostile rows", () => {
+	test("a malformed balance renders a dash with no split and never throws", async () => {
+		const w = factory({ updatedAt: 1, publicBalance: "1.5", privateBalance: "0" })
+		await flushPromises()
+		const amount = w.find('[data-malformed="true"]')
+		expect(amount.exists()).toBe(true)
+		expect(amount.text()).toBe("—")
+		expect(w.findAll('[data-testid="stub-icon"]')).toHaveLength(0)
+		expect(w.find('[data-testid="token-fiat"]').exists()).toBe(false)
+	})
+
+	test("an absurd decimals value is treated the same way (no exponent is ever computed)", async () => {
+		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
+		const w = factory({ updatedAt: 1, publicBalance: "1" }, { chainId: CHAIN_IDS.MAINNET, contract: CUSD, decimals: 500 })
+		await flushPromises()
+		expect(w.find('[data-malformed="true"]').text()).toBe("—")
+		expect(w.find('[data-testid="token-fiat"]').exists()).toBe(false)
+	})
+
+	test("a long symbol and a long name both render clipped, with the balance still present", async () => {
+		const w = factory({ updatedAt: 1, publicBalance: (7n * 10n ** 18n).toString() }, { symbol: "S".repeat(400), name: "N".repeat(400) })
+		await flushPromises()
+		expect(w.find('[data-testid="token-symbol"]').text()).toHaveLength(400)
+		expect(w.find("[data-malformed]").exists()).toBe(false)
+		expect(w.text()).toContain("7")
+	})
+})
+
 describe("TokenCard — R5 layout (subtitle left, lock/globe split right)", () => {
 	test("priced: fiat fills the subtitle slot; no PRIVATE/PUBLIC label anywhere", async () => {
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 0.999857, fetchedAt: Date.now(), providerUpdatedAt: null } }

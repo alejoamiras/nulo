@@ -404,4 +404,22 @@ describe("TokensView — Home order and cap", () => {
 		await nextTick()
 		expect(cardSymbols(wrapper)).toEqual(["A"])
 	})
+
+	test("hostile rows reach the REAL card without throwing: a dash for the malformed ones, the good row intact", async () => {
+		H.getTokenBalances.mockResolvedValue([
+			namedRow(1, "GOOD", { chainId: MAINNET }),
+			namedRow(2, "FRACTION", { chainId: MAINNET, publicBalance: "1.5" }),
+			{
+				...namedRow(3, "DECIMALS", { chainId: MAINNET }),
+				token: { ...namedRow(3, "DECIMALS").token, chainId: MAINNET, decimals: 500 },
+			},
+		])
+		const wrapper = mount(TokensView, { shallow: true, global: { stubs: { TokenCard: false } } })
+		await flushPromises()
+
+		const cards = wrapper.findAll('[data-testid="tokens-card"]')
+		expect(cards).toHaveLength(3)
+		expect(cards.map((c) => c.find('[data-testid="token-symbol"]').attributes("data-symbol"))).toEqual(["GOOD", "DECIMALS", "FRACTION"])
+		expect(cards.filter((c) => c.find("[data-malformed]").exists())).toHaveLength(2)
+	})
 })

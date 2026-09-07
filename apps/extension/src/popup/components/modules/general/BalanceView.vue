@@ -135,9 +135,17 @@ function onBalanceDeleted(tb) {
 	tokenBalances.value = tokenBalances.value.filter((_tb) => _tb.id !== tb.id)
 }
 
+// A fetch for one scope may resolve after the user moved on; only the latest request may land.
+let fetchGeneration = 0
 async function fetchTokenBalances() {
-	const rows = await tokenBalanceService.getTokenBalances(undefined, appStore.account?.address)
-	tokenBalances.value = forChain(rows, appStore.network?.chainId)
+	const generation = ++fetchGeneration
+	const address = appStore.account?.address
+	const chainId = appStore.network?.chainId
+	tokenBalances.value = []
+	if (!address) return
+	const rows = await tokenBalanceService.getTokenBalances(undefined, address)
+	if (generation !== fetchGeneration) return
+	tokenBalances.value = forChain(rows, chainId)
 }
 
 watch(

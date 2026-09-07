@@ -69,6 +69,15 @@ describe("orderTokenRows", () => {
 		expect(out.map((r) => r.token.symbol)).toEqual(["B", "A", "BAD", "RICH", "MORE"])
 	})
 
+	test("a malformed pin sorts behind a valid unpriced pin, whatever their names", () => {
+		const pins = new Set(["0xa_bad", "0xz_good"])
+		const rows = [
+			row("A_BAD", { contract: "0xa_bad", publicBalance: "x", name: "A" }),
+			row("Z_GOOD", { contract: "0xz_good", privateBalance: "1", name: "Z" }),
+		]
+		expect(orderTokenRows(rows, ctx({}, pins)).map((r) => r.token.symbol)).toEqual(["Z_GOOD", "A_BAD"])
+	})
+
 	test("fiat kill-switch (everything unpriced) falls back to name order among held rows", () => {
 		const rows = [row("B", { privateBalance: "1", name: "Bravo" }), row("A", { privateBalance: "9", name: "Alpha" })]
 		expect(orderTokenRows(rows, ctx({})).map((r) => r.token.symbol)).toEqual(["A", "B"])

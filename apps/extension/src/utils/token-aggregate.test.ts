@@ -21,6 +21,16 @@ describe("aggregateFiat", () => {
 		expect(out).toEqual({ micro: 100n, priced: 1, holdings: 2, partial: true })
 	})
 
+	test("a zero-balance row with invalid decimals is still a malformed holding → partial", () => {
+		const bad = { ...row("BAD"), token: { symbol: "BAD", decimals: 500 } }
+		expect(aggregateFiat([row("A", "10"), bad], fiatBy({ A: 100n, BAD: 999n }))).toEqual({
+			micro: 100n,
+			priced: 1,
+			holdings: 2,
+			partial: true,
+		})
+	})
+
 	test("nothing held → $0.00 and not partial", () => {
 		expect(aggregateFiat([row("A"), row("B")], fiatBy({}))).toEqual({ micro: 0n, priced: 0, holdings: 0, partial: false })
 	})

@@ -630,8 +630,8 @@ exit 0; four hashes in the spec. Layers: lint/typecheck · unit · smoke.
   `forChain` drops a same-address row from another chain.
 - `src/utils/token-aggregate.ts` + tests: `aggregateFiat` lifted from `BalanceView`; a malformed row
   is a holding with no price → `partial`.
-- `TokensView.vue`: a `PriceServiceClient` + `usePrices` (disposed in `onBeforeUnmount` AFTER the
-  service disconnects, per the cleanup-order rule), `forChain` on the fetched rows and in the
+- `TokensView.vue`: a `PriceServiceClient` + `usePrices` (disposed in `onBeforeUnmount` BEFORE its
+  own client disconnects — the order `send.vue` already uses for `usePrices`), `forChain` on the fetched rows and in the
   balance-event handlers (Fact 20), `orderTokenRows(rows, { pinnedContracts, fiatOf: safeFiatOf(...) })`
   + `capTokenRows`, section title
   **HOLDINGS** with the total count, `tokens-view-all` link (`router.push("/popup/holdings")`) when
