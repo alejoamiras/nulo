@@ -6,7 +6,7 @@ code_review: off
 eli5_mode: readme-row
 worktree: .claude/worktrees/dedup-p4-vue-shells (branch worktree-dedup-p4-vue-shells, on top of worktree-dedup-p3-service-wrappers / PR #568)
 ledger: implementations-plan/dedup-ledger (phase P4)
-status: codex plan audit conditional-approve 2026-09-07, all seven conditions adopted; approved under the ledger README's pre-approval rule; implementing
+status: all four phases ✓ 2026-09-07; codex post-implementation loop converged in 2 rounds (session 01a07cd2-6f9a-7981-9125-62e53b23a59f); delivering
 ---
 
 # P4 — share the page shells and style partials
@@ -94,7 +94,7 @@ regenerates and is committed.
 Each phase: implement → `bun run lint` → `bun run --cwd apps/extension typecheck` → the touched suites → commit.
 Gates quote exit codes in `lessons/phase-1.md`.
 
-### Phase 1 — partials (J1, J3, L1, K9, K10, N6, N9, L3, J2's classes)
+### Phase 1 — partials (J1, J3, L1, K9, K10, N6, N9, L3, J2's classes) ✓
 
 Write the six partials, replace the consumer bodies with `composes:`. Gate: `send/*.test.ts`, `windows/execute`,
 `general/*` and popups suites green; `build:chrome` exit 0; the emitted `dist/chrome` CSS inspected, not just counted:
@@ -102,7 +102,7 @@ each partial rule once, each consumer mapped to two tokens, the skeleton's `anim
 `@keyframes`, the popups' local `:hover .icons` rules intact, the partial rule preceding its consumers (vitest processes
 no CSS, so the build output is the only parity evidence); `git diff --stat -- apps/extension/src/types/` empty.
 
-### Phase 2 — popup shells (J2, J4, M2)
+### Phase 2 — popup shells (J2, J4, M2) ✓
 
 `SettingsPageShell`, `AsyncListStatus`, `BarrierOverlay` and their parity matrices (ten cases each, the L3 minimum,
 every case a parity claim): shell — root element and attrs fall through, header title/backTo, trailing actions forwarded
@@ -113,7 +113,7 @@ replacement, default-slot placement after the detail. Tests mount the real extra
 components automatically). `MigrationBarrier`, `AccountIntegrityBarrier`, `TokensView`, `RecentActivityView` and the
 five settings pages' existing suites stay green. Build + `components.d.ts` committed.
 
-### Phase 3 — onboarding + entries (K1, K7, K5, K6, K11)
+### Phase 3 — onboarding + entries (K1, K7, K5, K6, K11) ✓
 
 The four onboarding components and their parity tests (explainer: card copy and order, step, testids, continue/skip
 emits, lede; name field: model updates, `input` emit, alert only with an error, shake class, `focus()` reaches the
@@ -121,7 +121,7 @@ input, the forwarded attrs; back link: testid, route push; skip link: testid, cl
 `accelerator`/`create`/`import` adopt them; `installConsoleForwarding` + a test (the hooks forward with the client tag;
 a disconnect rejection logs at debug). `OnboardingPage`/`StepIndicator` suites stay green. Build + `components.d.ts`.
 
-### Phase 4 — full local gate
+### Phase 4 — full local gate ✓
 
 `bun run lint && bun run typecheck:all && bun run test`, `build:chrome` + `git diff --exit-code --stat --
 apps/extension/src/types/`, the `nulo:e2e:` marker grep on `dist/chrome`.
@@ -231,6 +231,8 @@ watched; red = flake → re-run once, red again → fix or hold. Green → READM
 | Notes DOES reset `error` on refetch | yes (`notes/index.vue:115`) | J4 reasoning corrected |
 
 Rejected: none. Owner ask surfaced: none. Approval follows from the ledger README's pre-approval rule (final verdict conditional-approve, every condition adopted, scope ⊆ the phase's ids, no Tier-4 id, no user-visible change).
+
+**Post-implementation codex fix loop** (`/codex high`, one session `01a07cd2-6f9a-7981-9125-62e53b23a59f` resumed once; detail in `lessons/phase-1.md`): round 1 *"no new material findings"* with four low test/comment items → 007da0af; round 2 *"no new material findings"*, one comment attribution corrected after. Converged in two rounds.
 
 ## Seeds
 

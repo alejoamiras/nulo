@@ -96,3 +96,8 @@ no `nulo:e2e:` marker in `dist/chrome`.
 - **Round 2** (on 007da0af): *"no new material findings"* — every round-1 item verified addressed; one low comment
   correction adopted after the verdict (the explainer's container-query note now attributes the side padding to the
   app shell, with `OnboardingPage` as the query container). Loop converged in two rounds.
+
+## Phase 4 re-run on the converged tree (007da0af; the two later commits touch comments only, lint 0) ✓
+
+`bun run lint` exit 0 · `bun run typecheck:all` exit 0 · `bun run test` exit 0 ( Test Files 455 passed | 2 skipped (457)  Tests 5591 passed | 2 skipped | 7 todo (5600) ) · `build:chrome` exit 0 ·
+generated `src/types/` unchanged · no `nulo:e2e:` marker in `dist/chrome`.
