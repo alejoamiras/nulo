@@ -32,7 +32,7 @@ function decodeField(value: { toString: () => string }, type: NoteFieldType): st
 	}
 }
 
-/** A note field that is absent or unrenderable renders as "" / 0 instead of failing the row. */
+/** A note field whose read throws renders as "" / 0 instead of failing the whole row. */
 const safeString = (read: () => { toString(): string }): string => {
 	try {
 		return read().toString()

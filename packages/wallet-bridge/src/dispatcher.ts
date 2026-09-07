@@ -699,6 +699,19 @@ export class WalletSdkDispatcher {
 		return undefined
 	}
 
+	private logDebug(message: string): void {
+		this.logger.log("wallet-sdk", LogLevel.Debug, message)
+	}
+
+	private logWarn(message: string): void {
+		this.logger.log("wallet-sdk", LogLevel.Warn, message)
+	}
+
+	/** `dappSession` is captured at dispatch entry and never re-looked-up here. */
+	private requireSession(dappSession: IDappSessionRef | undefined, ctx: SessionContext): asserts dappSession is IDappSessionRef {
+		if (!dappSession) throw new Error(`No dApp session found for origin ${ctx.origin}`)
+	}
+
 	/**
 	 * Return accounts for the current session's profile and chain.
 	 * Scoped to session accounts only and uses per-app aliases.
@@ -716,25 +729,11 @@ export class WalletSdkDispatcher {
 	 *    for the dApp-side parse recipe.
 	 */
 	/** The static feature list: no session data, no prompt. */
-	private logDebug(message: string): void {
-		this.logger.log("wallet-sdk", LogLevel.Debug, message)
-	}
-
-	private logWarn(message: string): void {
-		this.logger.log("wallet-sdk", LogLevel.Warn, message)
-	}
-
-	/** `dappSession` is captured at dispatch entry and never re-looked-up here. */
-	private requireSession(dappSession: IDappSessionRef | undefined, ctx: SessionContext): asserts dappSession is IDappSessionRef {
-		if (!dappSession) throw new Error(`No dApp session found for origin ${ctx.origin}`)
-	}
-
 	private async handleGetWalletFeatures(): Promise<readonly string[]> {
 		return WALLET_FEATURES
 	}
 
 	private async handleGetAccounts(ctx: SessionContext, dappSession: IDappSessionRef | undefined): Promise<unknown> {
-		// Phase 0.5: dappSession captured at dispatch entry, not re-looked-up here.
 		this.requireSession(dappSession, ctx)
 
 		// Fast path.
@@ -842,7 +841,6 @@ export class WalletSdkDispatcher {
 		dappSession: IDappSessionRef | undefined,
 		hooks?: DispatchHooks,
 	): Promise<unknown> {
-		// Phase 0.5: dappSession captured at dispatch entry.
 		const rawOpts = (args[1] as Record<string, unknown>) ?? {}
 		const isNoFrom = isNoFromRequest(rawOpts.from)
 		// An explicit `from` (a real address — not the NO_FROM sentinel, not omitted) names
@@ -951,7 +949,6 @@ export class WalletSdkDispatcher {
 	 * authorized account.
 	 */
 	private async handleRegisterToken(args: unknown[], ctx: SessionContext, dappSession: IDappSessionRef | undefined): Promise<unknown> {
-		// Phase 0.5: dappSession captured at dispatch entry.
 		this.requireSession(dappSession, ctx)
 
 		// Resolve the dApp-supplied account through the SAME session-authorization
@@ -1044,7 +1041,6 @@ export class WalletSdkDispatcher {
 		ctx: SessionContext,
 		dappSession: IDappSessionRef | undefined,
 	): Promise<unknown> {
-		// Phase 0.5: dappSession captured at dispatch entry.
 		this.requireSession(dappSession, ctx)
 
 		const requestedCapabilities = (manifest?.capabilities ?? []) as Record<string, unknown>[]
@@ -1219,7 +1215,6 @@ export class WalletSdkDispatcher {
 		_ctx: SessionContext,
 		dappSession: IDappSessionRef | undefined,
 	): GrantedCapabilityRecord[] {
-		// Phase 0.5: dappSession captured at dispatch entry; no async lookup
 		// here. Method is now synchronous; callers that did `await this.enforceCapability(...)`
 		// can drop the await (no behavior change because the promise resolved
 		// synchronously when the inner lookup was the only async point).
@@ -1438,7 +1433,6 @@ export class WalletSdkDispatcher {
 		dappSession: IDappSessionRef | undefined,
 		requestedFrom?: string,
 	): Promise<[INetworkRef, IAccountRef]> {
-		// Phase 0.5: dappSession captured at dispatch entry; no inline lookup here.
 		const network = await this.resolveNetwork(ctx)
 		const allAccounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
 		if (allAccounts.length === 0) {

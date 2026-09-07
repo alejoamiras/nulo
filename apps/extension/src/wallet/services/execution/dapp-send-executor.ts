@@ -486,9 +486,8 @@ export class DappSendExecutor {
 					parentTask,
 					checkCancelled,
 					markJournal,
-					// One post-send closure owns BOTH the activity record AND the public-authwit
-					// index write. grantPublicAuthwit routes here (kind: send_transaction), so this
-					// is where a granted authwit is recorded — pending, reconciled by tx outcome.
+					// grantPublicAuthwit routes here (kind: send_transaction), so this is where a granted
+					// authwit is recorded.
 					recordTransaction: this.sentTxRecorder({
 						origin,
 						network,
@@ -595,10 +594,6 @@ export class DappSendExecutor {
 						const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
 						return extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
 					},
-					// One post-send closure owns BOTH the activity record AND the public-authwit
-					// index write, so ordering is explicit. Recording here (not at build) is what
-					// keeps estimate/reject from leaking a grant; the rows land `pending` and are
-					// reconciled by the tx's on-chain outcome (onTransactionUpdated).
 					recordTransaction: this.sentTxRecorder({
 						origin,
 						network,

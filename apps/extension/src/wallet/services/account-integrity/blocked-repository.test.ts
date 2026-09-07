@@ -1,5 +1,5 @@
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
-import { beforeEach, describe, expect, test } from "vitest"
+import { beforeEach, describe, expect, test, vi } from "vitest"
 import { AccountIntegrityBlockedRepository } from "./blocked-repository"
 import { ACCOUNT_INTEGRITY_BLOCKED_ROOT, type AccountIntegrityBlocked } from "./types"
 
@@ -22,6 +22,15 @@ describe("AccountIntegrityBlockedRepository", () => {
 		api = new FakeBrowserApi()
 		api.reset()
 		repo = new AccountIntegrityBlockedRepository(api.storage.local)
+	})
+
+	test("get and isBlocked each read their key exactly once; a corrupt row blocks but does not decode", async () => {
+		await api.storage.local.set({ [`${ACCOUNT_INTEGRITY_BLOCKED_ROOT}@p1`]: "{broken" })
+		const get = vi.spyOn(api.storage.local, "get")
+		expect(await repo.get("p1")).toBeUndefined()
+		expect(await repo.isBlocked("p1")).toBe(true)
+		expect(get).toHaveBeenCalledTimes(2)
+		for (const call of get.mock.calls) expect(call[0]).toBe(`${ACCOUNT_INTEGRITY_BLOCKED_ROOT}@p1`)
 	})
 
 	test("set → get round-trips; isBlocked flips; clear removes", async () => {

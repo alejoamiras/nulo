@@ -84,7 +84,7 @@ export class TombstoneRepository {
 	 *  a corrupt tombstone whose profile row is absent is a phase-1-done,
 	 *  purge-PENDING deletion (the tombstone is written BEFORE the row is deleted),
 	 *  so auto-dropping it would fail OPEN — abandoning a real in-progress deletion
-	 *  + reopening the id for reuse. Both plan auditors flagged auto-repair as unsafe. */
+	 *  + reopening the id for reuse. */
 	public async corruptIds(): Promise<string[]> {
 		return prefixedEntries(await this.storage.get(), `${PROFILE_TOMBSTONE_ROOT}@`)
 			.filter(([, , v]) => decodeRow(TombstoneSchema, v).kind !== "valid")

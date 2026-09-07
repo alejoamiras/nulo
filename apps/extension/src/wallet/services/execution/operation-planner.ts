@@ -127,7 +127,11 @@ export class OperationPlanner {
 		}
 		const token = await this.tokenService.getTokenRaw(tokenId)
 
-		const transfer = TRANSFER_FN_BY_TYPE[transferType]
+		// A plain index would coerce "0" / ["0"] and reach inherited names; the enum is numeric and own.
+		const transfer =
+			typeof transferType === "number" && Object.hasOwn(TRANSFER_FN_BY_TYPE, transferType)
+				? TRANSFER_FN_BY_TYPE[transferType]
+				: undefined
 		if (!transfer) throw new Error("Invalid transfer type")
 		const tokenFn = token[transfer.field]
 		if (!tokenFn) throw new Error("Transfer type not supported")

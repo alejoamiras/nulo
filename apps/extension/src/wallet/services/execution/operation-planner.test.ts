@@ -189,6 +189,25 @@ describe("OperationPlanner.buildTransferOperation", () => {
 		).rejects.toThrow(/Transfer type not supported/)
 	})
 
+	test.each([
+		["a numeric string", "0"],
+		["an array", ["0"]],
+		["an inherited property name", "toString"],
+	])("throws 'Invalid transfer type' for %s (no key coercion)", async (_label, transferType) => {
+		const planner = new OperationPlanner(makeProfile(), makeTokenService(makeToken()))
+		await expect(
+			planner.buildTransferOperation({
+				networkId: "n",
+				accountAddress: "0xa",
+				tokenId: 1,
+				transferType: transferType as never,
+				recipientAddress: "0xb",
+				amount: 1n,
+				feeSettings: DEFAULT_FEE_SETTINGS,
+			}),
+		).rejects.toThrow(/Invalid transfer type/)
+	})
+
 	test("throws 'Invalid transfer type' for an unknown enum value", async () => {
 		const planner = new OperationPlanner(makeProfile(), makeTokenService(makeToken()))
 		await expect(
