@@ -434,15 +434,28 @@ describe("TokensView — Home order and cap", () => {
 		await flushPromises()
 		expect(cardSymbols(wrapper)).toEqual(["OLD"])
 
+		// The task snapshot is awaited before the balances: rows must already be gone while it hangs.
+		const tasksPending = deferred<unknown[]>()
+		H.getTasks.mockReturnValue(tasksPending.promise)
 		const pending = deferred<unknown[]>()
 		H.getTokenBalances.mockReturnValue(pending.promise)
 		H.store.current.network = { id: "net-other", chainId: MAINNET + 1 }
 		await flushPromises()
 		expect(cardSymbols(wrapper)).toEqual([])
 
+		tasksPending.resolve([])
+		await flushPromises()
+		expect(cardSymbols(wrapper)).toEqual([])
 		pending.resolve([namedRow(2, "NEW", { chainId: MAINNET + 1 })])
 		await flushPromises()
 		expect(cardSymbols(wrapper)).toEqual(["NEW"])
+
+		// A task snapshot that rejects does not block the balances.
+		H.getTasks.mockRejectedValueOnce(new Error("port closed"))
+		H.getTokenBalances.mockResolvedValue([namedRow(3, "AFTER", { chainId: MAINNET + 2 })])
+		H.store.current.network = { id: "net-third", chainId: MAINNET + 2 }
+		await flushPromises()
+		expect(cardSymbols(wrapper)).toEqual(["AFTER"])
 
 		H.getTokenBalances.mockRejectedValue(new Error("port closed"))
 		H.store.current.network = { id: "net-main", chainId: MAINNET }

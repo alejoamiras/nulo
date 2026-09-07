@@ -90,14 +90,16 @@ const queues = new Map<string, Promise<unknown>>()
 const enqueue = <T>(key: string, op: () => Promise<T>): Promise<T> => {
 	const prev = queues.get(key) ?? Promise.resolve()
 	const run = prev.then(op, op)
-	queues.set(
-		key,
-		run.catch(() => undefined),
-	)
+	const tail = run
+		.catch(() => undefined)
+		.then(() => {
+			// The last op on this key releases its entry; a newer op that has since taken over keeps it.
+			if (queues.get(key) === tail) queues.delete(key)
+		})
+	queues.set(key, tail)
 	return run
 }
 
-/** One write's world: its captured scope, whether that scope still holds, the token set and the sink. */
 type WriteCtx = {
 	scope: PinScope
 	live: () => boolean
@@ -155,9 +157,10 @@ export interface UsePinnedTokensDeps {
 
 /**
  * Per-profile "Pin to Home" state behind the storage facade. Every write captures its scope and
- * re-checks it after each await; a switch in between makes it a no-op. Two contexts writing at
- * once are last-writer-wins on the whole map (accepted). The parent calls `refresh()` on a profile
- * switch and `dispose()` on unmount.
+ * requires it to equal the store's at each checkpoint after an await (so a scope that changed and
+ * changed back still lands, on the scope it captured); a disposed instance writes nothing. Two
+ * contexts writing at once are last-writer-wins on the whole map (accepted). The parent calls
+ * `refresh()` on a profile switch and `dispose()` on unmount.
  */
 export function usePinnedTokens(deps: UsePinnedTokensDeps) {
 	const map = ref<PinMap>({})
@@ -200,7 +203,7 @@ export function usePinnedTokens(deps: UsePinnedTokensDeps) {
 
 	const writeCtx = (scope: PinScope): WriteCtx => ({
 		scope,
-		live: () => scopeStillIs(scope),
+		live: () => !disposed && scopeStillIs(scope),
 		known: async () => deps.knownContracts(),
 		write: (next) => writeMap(scope.profileId, next),
 	})

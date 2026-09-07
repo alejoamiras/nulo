@@ -30,3 +30,19 @@ read-only, session `01a07b4e-df1b-7d73-beda-8b9020cf8115`.
 Test-harness lesson: a `DropdownItem` stub that both re-emits `click` and lets the parent's
 `@click` fall through fires twice; the second, queued pin then hung on a never-resolved mock and
 starved the next case's queue. Declare `emits` on such stubs.
+
+## Round 2 — verdict `approve with fixes`, five findings, all taken
+
+1. **Medium — a disposed instance still completed an in-flight write** (its `knownContracts`
+   getter could even reconnect the page's disconnected token client). Fix: ordinary writes' `live()`
+   also requires `!disposed`; deletion cleanup stays independent. New case.
+2. **Medium — Home cleared its rows only after the task snapshot resolved.** Fix: the watcher clears
+   rows and refreshes pins at entry, before any await, and a rejected task snapshot no longer blocks
+   the balances. The scope-change case now holds `getTasks` and also rejects it once.
+3. **Low — the write queue kept one settled promise per touched key.** Fix: the tail deletes its
+   entry when it is still the map's tail.
+4. **Low — the refresh-fence case did not prove the fence** (both held reads saw the newer seed).
+   Fix: the in-memory storage snapshots at call time and holds only pin-map reads, released
+   individually; the newer read lands first, the older one is dropped. Plus a disposed-mid-write case.
+5. **Low — comments.** The composable doc now describes equality at checkpoints (a scope that
+   changed and changed back lands on the scope it captured); the `WriteCtx` paraphrase is gone.

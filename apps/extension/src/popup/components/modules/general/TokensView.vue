@@ -381,10 +381,13 @@ watch(
 	async () => {
 		scopeGen++
 		syncByContract.value = new Map()
+		// The previous scope's rows go now, before any await, so they are never ordered under the
+		// new scope's pins; pins refresh on their own, not behind the task snapshot.
+		tokenBalances.value = []
+		void pins.refresh()
 		// Tasks first: fetchTokenBalances derives isUpdating from the snapshot.
-		await fetchTasks()
+		await fetchTasks().catch(() => undefined)
 		await fetchTokenBalances()
-		await pins.refresh()
 	},
 )
 onMounted(async () => {

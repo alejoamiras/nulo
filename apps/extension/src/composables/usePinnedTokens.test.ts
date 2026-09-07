@@ -15,12 +15,16 @@ function memoryStorage() {
 	const data = new Map<string, unknown>()
 	const listeners = new Set<Listener>()
 	let failNextSet = false
-	let gate: Promise<void> | null = null
+	let holding = false
+	const held: Array<() => void> = []
 	const local = {
+		// The snapshot is taken at call time; while holding, a pin-map read waits for a release (the
+		// facade's migration-flag read that precedes it is never held, so one read = one held entry).
 		get: vi.fn(async (keys?: string | string[]) => {
-			if (gate) await gate
 			const list = typeof keys === "string" ? [keys] : (keys ?? [...data.keys()])
-			return Object.fromEntries(list.filter((k) => data.has(k)).map((k) => [k, data.get(k)]))
+			const snapshot = Object.fromEntries(list.filter((k) => data.has(k)).map((k) => [k, data.get(k)]))
+			if (holding && list.some((k) => k.startsWith("nulo:ui:pinnedTokens@"))) await new Promise<void>((r) => held.push(r))
+			return snapshot
 		}),
 		set: vi.fn(async (items: Record<string, unknown>) => {
 			if (failNextSet) {
@@ -47,16 +51,17 @@ function memoryStorage() {
 		failNextSet: () => {
 			failNextSet = true
 		},
-		/** Hold every `get` until the returned release runs (reads issued meanwhile resolve together). */
+		/** Hold every `get` issued from now on; `release(i)` delivers the i-th held read, `releaseAll` the rest. */
 		holdGets() {
-			let release!: () => void
-			gate = new Promise<void>((r) => {
-				release = () => {
-					gate = null
-					r()
-				}
-			})
-			return release
+			holding = true
+			held.length = 0
+			return {
+				release: (i: number) => held[i]?.(),
+				releaseAll: () => {
+					holding = false
+					for (const r of held.splice(0)) r()
+				},
+			}
 		},
 		/** Simulate another context's write: store + notify without going through `set`'s mock count. */
 		external(key: string, value: unknown) {
@@ -318,28 +323,45 @@ describe("usePinnedTokens", () => {
 		known = new Set([C]) // the NEW chain's tokens: pruning with them would erase A and B
 		const pins = make()
 		await pins.refresh()
-		const release = storage.holdGets()
+		const gate = storage.holdGets()
 		const op = pins.pin(C)
 		await new Promise((r) => setTimeout(r, 0))
 		state.scope = { profileId: "p1", chainId: 8 }
-		release()
+		gate.releaseAll()
 		expect(await op).toBe("stale")
 		expect(storage.data.get(pinnedTokensKey("p1"))).toEqual({ "7": [A, B] })
 		expect(storage.local.set).not.toHaveBeenCalled()
 		pins.dispose()
 	})
 
+	test("a write in flight when the instance is disposed lands nothing", async () => {
+		const pins = make()
+		await pins.refresh()
+		const gate = storage.holdGets()
+		const op = pins.pin(A)
+		await new Promise((r) => setTimeout(r, 0))
+		pins.dispose()
+		gate.releaseAll()
+		expect(await op).toBe("stale")
+		expect(storage.local.set).not.toHaveBeenCalled()
+	})
+
 	test("an older refresh resolving after a newer one never rolls the pins back", async () => {
 		storage.data.set(pinnedTokensKey("p1"), { "7": [A] })
 		const pins = make()
-		const release = storage.holdGets()
-		const first = pins.refresh()
+		const gate = storage.holdGets()
+		const first = pins.refresh() // its snapshot holds A
 		await new Promise((r) => setTimeout(r, 0))
 		storage.data.set(pinnedTokensKey("p1"), { "7": [B] })
-		const second = pins.refresh()
-		release()
-		await Promise.all([first, second])
+		const second = pins.refresh() // its snapshot holds B
+		await new Promise((r) => setTimeout(r, 0))
+		gate.release(1)
+		await second
 		expect([...pins.pinnedContracts.value]).toEqual([B])
+		gate.release(0)
+		await first
+		expect([...pins.pinnedContracts.value]).toEqual([B])
+		gate.releaseAll()
 		pins.dispose()
 	})
 
