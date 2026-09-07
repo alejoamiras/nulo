@@ -297,13 +297,24 @@ describe("BalanceView — Home aggregate", () => {
 		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("$0.00")
 	})
 
-	test("a failed snapshot stays hidden until the client reconnects, then the resnapshot lands", async () => {
+	test("the mount's own connect is not a reconnect; a port drop mid-fetch resnapshots and the figure lands", async () => {
 		mockQuotes = FRESH()
+		let rejectFirst: ((e: Error) => void) | undefined
 		let calls = 0
-		fetchRows = () => (calls++ === 0 ? Promise.reject(new Error("port closed")) : Promise.resolve(SEED))
+		fetchRows = () =>
+			calls++ === 0
+				? new Promise((_resolve, rej) => {
+						rejectFirst = rej
+					})
+				: Promise.resolve(SEED)
 		const { wrapper } = await mountView()
+		connectedHandler?.()
+		await flushPromises()
+		expect(calls).toBe(1)
 		expect(wrapper.find('[data-testid="balance-amount"]').text()).toBe("")
 
+		// The client rejects the pending request and reconnects synchronously, before the rejection settles.
+		rejectFirst?.(new Error("port closed"))
 		connectedHandler?.()
 		await flushPromises()
 		expect(calls).toBe(2)
