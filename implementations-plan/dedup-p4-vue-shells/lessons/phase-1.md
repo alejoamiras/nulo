@@ -101,3 +101,9 @@ no `nulo:e2e:` marker in `dist/chrome`.
 
 `bun run lint` exit 0 · `bun run typecheck:all` exit 0 · `bun run test` exit 0 ( Test Files 455 passed | 2 skipped (457)  Tests 5591 passed | 2 skipped | 7 todo (5600) ) · `build:chrome` exit 0 ·
 generated `src/types/` unchanged · no `nulo:e2e:` marker in `dist/chrome`.
+
+## Stack rebase onto dev (2026-09-07, after #558 #560 #562 #563 #564 landed)
+
+- dev deleted `SelectBalanceTypePopup.vue` (the holdings work); the rebase took the deletion, so N9's `select_row`
+  partial now has three consumers (`SelectFpcPopup`, `SelectNetworksPopup`, `ImportContactsPopup`). Post-rebase gate:
+  lint 0, typecheck 0, 131 files / 1,335 tests across the touched dirs, build 0, generated types unchanged.
