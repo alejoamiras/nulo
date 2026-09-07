@@ -1,4 +1,5 @@
 import type { StorageArea } from "@nulo/wallet-core/ports"
+import { decodeRow } from "@/wallet/utils/raw-row"
 import {
 	ACCOUNT_INTEGRITY_BLOCKED_ROOT,
 	ACCOUNT_INTEGRITY_VERIFIED_ROOT,
@@ -27,14 +28,8 @@ export class AccountIntegrityBlockedRepository {
 
 	public async get(profileId: string): Promise<AccountIntegrityBlocked | undefined> {
 		const res = await this.storage.get(this.key(profileId))
-		const raw = res[this.key(profileId)]
-		if (typeof raw !== "string") return undefined
-		try {
-			const parsed = AccountIntegrityBlockedSchema.safeParse(JSON.parse(raw))
-			return parsed.success ? parsed.data : undefined
-		} catch {
-			return undefined
-		}
+		const row = decodeRow(AccountIntegrityBlockedSchema, res[this.key(profileId)])
+		return row.kind === "valid" ? row.value : undefined
 	}
 
 	/** Fail-closed: derived from RAW keys, so a corrupt record still blocks its profile. */
@@ -62,14 +57,8 @@ export class AccountIntegrityVerifiedStampRepository {
 
 	public async get(profileId: string): Promise<AccountIntegrityVerifiedStamp | undefined> {
 		const res = await this.storage.get(this.key(profileId))
-		const raw = res[this.key(profileId)]
-		if (typeof raw !== "string") return undefined
-		try {
-			const parsed = VerifiedStampSchema.safeParse(JSON.parse(raw))
-			return parsed.success ? parsed.data : undefined
-		} catch {
-			return undefined
-		}
+		const row = decodeRow(VerifiedStampSchema, res[this.key(profileId)])
+		return row.kind === "valid" ? row.value : undefined
 	}
 
 	public async set(profileId: string, stamp: AccountIntegrityVerifiedStamp): Promise<void> {
