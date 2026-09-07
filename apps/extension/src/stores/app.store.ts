@@ -29,7 +29,6 @@ import { OperationJournalServiceClient } from "@/wallet/services/operation-journ
 export const useAppStore = defineStore("app", () => {
 	const _isHomeScreenOpened = ref(false)
 	const isLoading = ref(false)
-	const displayOption = ref("total_account_value")
 	const onboarding = createOnboardingFlag()
 
 	const profile = ref<ProfileInfo>()
@@ -66,7 +65,6 @@ export const useAppStore = defineStore("app", () => {
 		_isHomeScreenOpened,
 		isLoading,
 		awaitingTransactions: feed.awaitingTransactions,
-		displayOption,
 		profile,
 		profiles,
 		isRegistered,

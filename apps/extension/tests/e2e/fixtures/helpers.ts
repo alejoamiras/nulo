@@ -302,10 +302,17 @@ export async function reopenAndRecoverAfterImport(page: Page, password = TEST_PA
 
 // ── Navigation ─────────────────────────────────────────────────────────
 
-/** Click a bottom navigation tab. */
-export async function clickNavTab(page: Page, tab: "activity" | "general" | "settings"): Promise<void> {
+/** Click a bottom navigation tab. `general` is the HOME tab (the route name never changed). */
+export async function clickNavTab(page: Page, tab: "activity" | "general" | "holdings" | "settings"): Promise<void> {
 	await page.waitForSelector(`[data-testid="nav-${tab}"]`, { visible: true, timeout: 5_000 })
 	await clickByTestId(page, `nav-${tab}`)
+}
+
+/** Open the Holdings tab and wait for its page to mount. */
+export async function openHoldings(page: Page): Promise<void> {
+	await clickNavTab(page, "holdings")
+	await page.waitForFunction(() => window.location.hash === "#/popup/holdings", { timeout: 5_000 })
+	await page.waitForSelector('[data-testid="holdings-page"]', { visible: true, timeout: 5_000 })
 }
 
 /** Navigate to a settings sub-page by URL segments. Only the first segment
@@ -784,18 +791,23 @@ export async function getDisplayedBalance(page: Page): Promise<string> {
 
 // ── Token Detail ──────────────────────────────────────────────────────
 
-/** Navigate to the token detail page by clicking the first token card.
+/** Navigate to the token detail page by clicking a token card on Home — the one carrying
+ *  `symbol`, or the first card when no symbol is given. Home orders cards by value, so a test
+ *  that cares which token opens must name it.
  *  Uses dispatchEvent instead of Puppeteer's coordinate-based click because
  *  the router-link <a> has href=null and Puppeteer's click doesn't reliably
  *  trigger Vue Router's navigation handler on it. */
-export async function navigateToTokenDetail(page: Page): Promise<void> {
+export async function navigateToTokenDetail(page: Page, symbol?: string): Promise<void> {
+	const selector = symbol
+		? `[data-testid="tokens-card"]:has([data-testid="token-symbol"][data-symbol="${symbol}"])`
+		: '[data-testid="tokens-card"]'
 	// Wait for the token card to render (balance must load from PXE)
-	await page.waitForSelector('[data-testid="tokens-card"]', { visible: true, timeout: 30_000 })
+	await page.waitForSelector(selector, { visible: true, timeout: 30_000 })
 	// Dispatch a click event directly on the <a> — triggers Vue Router's handler
-	await page.evaluate(() => {
-		const a = document.querySelector('[data-testid="tokens-card"]') as HTMLElement
+	await page.evaluate((sel: string) => {
+		const a = document.querySelector(sel) as HTMLElement
 		a?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window, button: 0 }))
-	})
+	}, selector)
 	await page.waitForFunction(() => window.location.hash.includes("#/popup/tokens/"), { timeout: 10_000 })
 	await page.waitForSelector('[data-testid="balance-amount"]', { visible: true, timeout: 15_000 })
 }

@@ -19,6 +19,7 @@ declare global {
   const FEE_JUICE_DECIMALS: typeof import('../utils/fee-estimation').FEE_JUICE_DECIMALS
   const FEE_METHODS: typeof import('../utils/tx-enrichment').FEE_METHODS
   const FileTooLargeError: typeof import('../utils/files').FileTooLargeError
+  const HOME_TOKEN_ROWS: typeof import('../utils/token-order').HOME_TOKEN_ROWS
   const IMPORT_ACTIVATION_TIMEOUT_MS: typeof import('../composables/completeImportWithRecovery').IMPORT_ACTIVATION_TIMEOUT_MS
   const IMPORT_CHAIN_SYNC_TOTAL_BUDGET_MS: typeof import('../composables/importChainSync').IMPORT_CHAIN_SYNC_TOTAL_BUDGET_MS
   const IMPORT_PREFLIGHT_BUDGET_MS: typeof import('../composables/importChainSync').IMPORT_PREFLIGHT_BUDGET_MS
@@ -31,12 +32,14 @@ declare global {
   const MAX_BACKUP_FILE_BYTES: typeof import('../utils/full-backup-helpers').MAX_BACKUP_FILE_BYTES
   const MAX_CONTACT_IMPORT_BYTES: typeof import('../utils/contacts-export-format').MAX_CONTACT_IMPORT_BYTES
   const MAX_CONTACT_IMPORT_ROWS: typeof import('../utils/contacts-export-format').MAX_CONTACT_IMPORT_ROWS
+  const MAX_DECIMALS: typeof import('../utils/token-amount').MAX_DECIMALS
   const TESTNET_L1_CHAIN_ID: typeof import('../utils/chain-ids').TESTNET_L1_CHAIN_ID
   const TESTNET_ROLLUP_VERSION: typeof import('../utils/chain-ids').TESTNET_ROLLUP_VERSION
   const THEME_HINT_KEY: typeof import('../utils/general').THEME_HINT_KEY
   const TOAST_DURATION: typeof import('../composables/toast.js').TOAST_DURATION
   const UnlockTimeoutError: typeof import('../composables/unlockWait').UnlockTimeoutError
   const activateNetworkGuarded: typeof import('../utils/guarded-network-activation').activateNetworkGuarded
+  const aggregateFiat: typeof import('../utils/token-aggregate').aggregateFiat
   const applyOutcome: typeof import('../composables/full-backup-restore').applyOutcome
   const assembleFullBackup: typeof import('../utils/full-backup-helpers').assembleFullBackup
   const awaitLivenessAdvance: typeof import('../utils/background-liveness').awaitLivenessAdvance
@@ -47,11 +50,14 @@ declare global {
   const buildFeeEstimate: typeof import('../utils/fee-estimation').buildFeeEstimate
   const buildJournalTerminalCardProps: typeof import('../utils/journal-state').buildJournalTerminalCardProps
   const buildRestoreSecret: typeof import('../composables/full-backup-restore').buildRestoreSecret
+  const capTokenRows: typeof import('../utils/token-order').capTokenRows
   const capitalize: typeof import('../utils/string').capitalize
   const categoricalLabel: typeof import('../utils/journal-state').categoricalLabel
   const clampDecimals: typeof import('../utils/amount').clampDecimals
+  const classifyRow: typeof import('../utils/token-order').classifyRow
   const collectRestoreErrors: typeof import('../utils/full-backup-helpers').collectRestoreErrors
   const comma: typeof import('../utils/amount').comma
+  const compareTokenRows: typeof import('../utils/token-order').compareTokenRows
   const completeImportWithRecovery: typeof import('../composables/completeImportWithRecovery').completeImportWithRecovery
   const compressData: typeof import('../utils/files').compressData
   const computeMaxFee: typeof import('../utils/fee-estimation').computeMaxFee
@@ -70,6 +76,7 @@ declare global {
   const effectScope: typeof import('vue').effectScope
   const feeJuicePricingFromUsd: typeof import('../utils/fee-estimation').feeJuicePricingFromUsd
   const feeToUsd: typeof import('../utils/fee-estimation').feeToUsd
+  const forChain: typeof import('../utils/token-order').forChain
   const formatBaseUnits: typeof import('../utils/amount').formatBaseUnits
   const formatCallSummary: typeof import('../utils/tx-enrichment').formatCallSummary
   const formatFeeJuice: typeof import('../utils/fee-estimation').formatFeeJuice
@@ -110,7 +117,9 @@ declare global {
   const isReceiptAboveDustThreshold: typeof import('../utils/incoming-dust').isReceiptAboveDustThreshold
   const isRef: typeof import('vue').isRef
   const isShallow: typeof import('vue').isShallow
+  const isUnknownRow: typeof import('../utils/token-order').isUnknownRow
   const isValidAmount: typeof import('../utils/amount').isValidAmount
+  const isValidDecimals: typeof import('../utils/token-amount').isValidDecimals
   const isValidHex: typeof import('../utils/string').isValidHex
   const journalTerminalDisplay: typeof import('../utils/journal-state').journalTerminalDisplay
   const managers: typeof import('../utils/core').managers
@@ -135,8 +144,10 @@ declare global {
   const onUnmounted: typeof import('vue').onUnmounted
   const onUpdated: typeof import('vue').onUpdated
   const onWatcherCleanup: typeof import('vue').onWatcherCleanup
+  const orderTokenRows: typeof import('../utils/token-order').orderTokenRows
   const parseAmountToBaseUnits: typeof import('../utils/amount').parseAmountToBaseUnits
   const parseContactsExport: typeof import('../utils/contacts-export-format').parseContactsExport
+  const parseRawBalance: typeof import('../utils/token-amount').parseRawBalance
   const parseTransferIntent: typeof import('../utils/transfer-intent').parseTransferIntent
   const persistThemeHint: typeof import('../utils/general').persistThemeHint
   const pickFile: typeof import('../utils/files').pickFile
@@ -173,6 +184,7 @@ declare global {
   const rollbackCreatedProfile: typeof import('../composables/full-backup-restore').rollbackCreatedProfile
   const runImportChainSync: typeof import('../composables/importChainSync').runImportChainSync
   const runRestoreFailurePath: typeof import('../composables/full-backup-restore').runRestoreFailurePath
+  const safeFiatOf: typeof import('../utils/token-amount').safeFiatOf
   const sanitizeJournalSubtitle: typeof import('../utils/journal-state').sanitizeJournalSubtitle
   const sanitizeString: typeof import('../utils/string').sanitizeString
   const scrubUrls: typeof import('../utils/scrub-urls').scrubUrls
@@ -368,6 +380,15 @@ declare global {
   export type { ReceivedType, FromDisplay } from '../utils/received-display'
   import('../utils/received-display')
   // @ts-ignore
+  export type { Aggregate } from '../utils/token-aggregate'
+  import('../utils/token-aggregate')
+  // @ts-ignore
+  export type { FiatOf } from '../utils/token-amount'
+  import('../utils/token-amount')
+  // @ts-ignore
+  export type { OrderableRow, OrderCtx, RowClass } from '../utils/token-order'
+  import('../utils/token-order')
+  // @ts-ignore
   export type { TransferIntent } from '../utils/transfer-intent'
   import('../utils/transfer-intent')
   // @ts-ignore
@@ -391,6 +412,7 @@ declare module 'vue' {
     readonly FEE_JUICE_DECIMALS: UnwrapRef<typeof import('../utils/fee-estimation')['FEE_JUICE_DECIMALS']>
     readonly FEE_METHODS: UnwrapRef<typeof import('../utils/tx-enrichment')['FEE_METHODS']>
     readonly FileTooLargeError: UnwrapRef<typeof import('../utils/files')['FileTooLargeError']>
+    readonly HOME_TOKEN_ROWS: UnwrapRef<typeof import('../utils/token-order')['HOME_TOKEN_ROWS']>
     readonly IMPORT_ACTIVATION_TIMEOUT_MS: UnwrapRef<typeof import('../composables/completeImportWithRecovery')['IMPORT_ACTIVATION_TIMEOUT_MS']>
     readonly IMPORT_CHAIN_SYNC_TOTAL_BUDGET_MS: UnwrapRef<typeof import('../composables/importChainSync')['IMPORT_CHAIN_SYNC_TOTAL_BUDGET_MS']>
     readonly IMPORT_PREFLIGHT_BUDGET_MS: UnwrapRef<typeof import('../composables/importChainSync')['IMPORT_PREFLIGHT_BUDGET_MS']>
@@ -403,12 +425,14 @@ declare module 'vue' {
     readonly MAX_BACKUP_FILE_BYTES: UnwrapRef<typeof import('../utils/full-backup-helpers')['MAX_BACKUP_FILE_BYTES']>
     readonly MAX_CONTACT_IMPORT_BYTES: UnwrapRef<typeof import('../utils/contacts-export-format')['MAX_CONTACT_IMPORT_BYTES']>
     readonly MAX_CONTACT_IMPORT_ROWS: UnwrapRef<typeof import('../utils/contacts-export-format')['MAX_CONTACT_IMPORT_ROWS']>
+    readonly MAX_DECIMALS: UnwrapRef<typeof import('../utils/token-amount')['MAX_DECIMALS']>
     readonly TESTNET_L1_CHAIN_ID: UnwrapRef<typeof import('../utils/chain-ids')['TESTNET_L1_CHAIN_ID']>
     readonly TESTNET_ROLLUP_VERSION: UnwrapRef<typeof import('../utils/chain-ids')['TESTNET_ROLLUP_VERSION']>
     readonly THEME_HINT_KEY: UnwrapRef<typeof import('../utils/general')['THEME_HINT_KEY']>
     readonly TOAST_DURATION: UnwrapRef<typeof import('../composables/toast.js')['TOAST_DURATION']>
     readonly UnlockTimeoutError: UnwrapRef<typeof import('../composables/unlockWait')['UnlockTimeoutError']>
     readonly activateNetworkGuarded: UnwrapRef<typeof import('../utils/guarded-network-activation')['activateNetworkGuarded']>
+    readonly aggregateFiat: UnwrapRef<typeof import('../utils/token-aggregate')['aggregateFiat']>
     readonly applyOutcome: UnwrapRef<typeof import('../composables/full-backup-restore')['applyOutcome']>
     readonly assembleFullBackup: UnwrapRef<typeof import('../utils/full-backup-helpers')['assembleFullBackup']>
     readonly awaitLivenessAdvance: UnwrapRef<typeof import('../utils/background-liveness')['awaitLivenessAdvance']>
@@ -419,11 +443,14 @@ declare module 'vue' {
     readonly buildFeeEstimate: UnwrapRef<typeof import('../utils/fee-estimation')['buildFeeEstimate']>
     readonly buildJournalTerminalCardProps: UnwrapRef<typeof import('../utils/journal-state')['buildJournalTerminalCardProps']>
     readonly buildRestoreSecret: UnwrapRef<typeof import('../composables/full-backup-restore')['buildRestoreSecret']>
+    readonly capTokenRows: UnwrapRef<typeof import('../utils/token-order')['capTokenRows']>
     readonly capitalize: UnwrapRef<typeof import('../utils/string')['capitalize']>
     readonly categoricalLabel: UnwrapRef<typeof import('../utils/journal-state')['categoricalLabel']>
     readonly clampDecimals: UnwrapRef<typeof import('../utils/amount')['clampDecimals']>
+    readonly classifyRow: UnwrapRef<typeof import('../utils/token-order')['classifyRow']>
     readonly collectRestoreErrors: UnwrapRef<typeof import('../utils/full-backup-helpers')['collectRestoreErrors']>
     readonly comma: UnwrapRef<typeof import('../utils/amount')['comma']>
+    readonly compareTokenRows: UnwrapRef<typeof import('../utils/token-order')['compareTokenRows']>
     readonly completeImportWithRecovery: UnwrapRef<typeof import('../composables/completeImportWithRecovery')['completeImportWithRecovery']>
     readonly compressData: UnwrapRef<typeof import('../utils/files')['compressData']>
     readonly computeMaxFee: UnwrapRef<typeof import('../utils/fee-estimation')['computeMaxFee']>
@@ -442,6 +469,7 @@ declare module 'vue' {
     readonly effectScope: UnwrapRef<typeof import('vue')['effectScope']>
     readonly feeJuicePricingFromUsd: UnwrapRef<typeof import('../utils/fee-estimation')['feeJuicePricingFromUsd']>
     readonly feeToUsd: UnwrapRef<typeof import('../utils/fee-estimation')['feeToUsd']>
+    readonly forChain: UnwrapRef<typeof import('../utils/token-order')['forChain']>
     readonly formatBaseUnits: UnwrapRef<typeof import('../utils/amount')['formatBaseUnits']>
     readonly formatCallSummary: UnwrapRef<typeof import('../utils/tx-enrichment')['formatCallSummary']>
     readonly formatFeeJuice: UnwrapRef<typeof import('../utils/fee-estimation')['formatFeeJuice']>
@@ -482,7 +510,9 @@ declare module 'vue' {
     readonly isReceiptAboveDustThreshold: UnwrapRef<typeof import('../utils/incoming-dust')['isReceiptAboveDustThreshold']>
     readonly isRef: UnwrapRef<typeof import('vue')['isRef']>
     readonly isShallow: UnwrapRef<typeof import('vue')['isShallow']>
+    readonly isUnknownRow: UnwrapRef<typeof import('../utils/token-order')['isUnknownRow']>
     readonly isValidAmount: UnwrapRef<typeof import('../utils/amount')['isValidAmount']>
+    readonly isValidDecimals: UnwrapRef<typeof import('../utils/token-amount')['isValidDecimals']>
     readonly isValidHex: UnwrapRef<typeof import('../utils/string')['isValidHex']>
     readonly journalTerminalDisplay: UnwrapRef<typeof import('../utils/journal-state')['journalTerminalDisplay']>
     readonly managers: UnwrapRef<typeof import('../utils/core')['managers']>
@@ -507,8 +537,10 @@ declare module 'vue' {
     readonly onUnmounted: UnwrapRef<typeof import('vue')['onUnmounted']>
     readonly onUpdated: UnwrapRef<typeof import('vue')['onUpdated']>
     readonly onWatcherCleanup: UnwrapRef<typeof import('vue')['onWatcherCleanup']>
+    readonly orderTokenRows: UnwrapRef<typeof import('../utils/token-order')['orderTokenRows']>
     readonly parseAmountToBaseUnits: UnwrapRef<typeof import('../utils/amount')['parseAmountToBaseUnits']>
     readonly parseContactsExport: UnwrapRef<typeof import('../utils/contacts-export-format')['parseContactsExport']>
+    readonly parseRawBalance: UnwrapRef<typeof import('../utils/token-amount')['parseRawBalance']>
     readonly parseTransferIntent: UnwrapRef<typeof import('../utils/transfer-intent')['parseTransferIntent']>
     readonly persistThemeHint: UnwrapRef<typeof import('../utils/general')['persistThemeHint']>
     readonly pickFile: UnwrapRef<typeof import('../utils/files')['pickFile']>
@@ -545,6 +577,7 @@ declare module 'vue' {
     readonly rollbackCreatedProfile: UnwrapRef<typeof import('../composables/full-backup-restore')['rollbackCreatedProfile']>
     readonly runImportChainSync: UnwrapRef<typeof import('../composables/importChainSync')['runImportChainSync']>
     readonly runRestoreFailurePath: UnwrapRef<typeof import('../composables/full-backup-restore')['runRestoreFailurePath']>
+    readonly safeFiatOf: UnwrapRef<typeof import('../utils/token-amount')['safeFiatOf']>
     readonly sanitizeJournalSubtitle: UnwrapRef<typeof import('../utils/journal-state')['sanitizeJournalSubtitle']>
     readonly sanitizeString: UnwrapRef<typeof import('../utils/string')['sanitizeString']>
     readonly scrubUrls: UnwrapRef<typeof import('../utils/scrub-urls')['scrubUrls']>

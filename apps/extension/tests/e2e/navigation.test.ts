@@ -1,6 +1,6 @@
 import { expect } from "vitest"
 import { test, openPopup, waitForHash } from "./fixtures/extension"
-import { clickNavTab } from "./fixtures/helpers"
+import { clickNavTab, openHoldings } from "./fixtures/helpers"
 
 test("settings page shows all sections", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
@@ -38,9 +38,11 @@ test("activity page shows empty state", async ({ registeredExtension }) => {
 	expect(registeredExtension.pageErrors).toEqual([])
 })
 
-test("bottom navigation switches between pages", async ({ registeredExtension }) => {
+test("bottom navigation switches between all four pages", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general")
+
+	await openHoldings(page)
 
 	await clickNavTab(page, "activity")
 	await waitForHash(page, "#/popup/activity")
