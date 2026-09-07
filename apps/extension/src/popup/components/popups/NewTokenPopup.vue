@@ -11,7 +11,7 @@ import { isValidHex } from "@/utils/string"
 /** Composables */
 import { useToast } from "@/composables/toast"
 import { useFormState } from "@/composables/useFormState"
-import { isPopupSubmitKey } from "@/composables/usePopupEntity"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast, TOAST_DURATION } = useToast()
 
 /** Store */
@@ -263,26 +263,15 @@ const handleAddToken = async () => {
 	}
 }
 
-watch(
+usePopupEntity(
 	() => props.show,
-	async () => {
-		if (!props.show) {
-			activeBalanceWait?.abort()
-			activeBalanceWait = null
-			form.reset()
-			error.value = null
-			phase.value = "idle"
-			document.removeEventListener("keydown", onKeydown)
-			taskService.disconnect()
-			tokenBalanceService.disconnect()
-			tokenService.disconnect()
-		} else {
-			// Reset transient state on open. The close branch already clears
-			// `error.value`, but the submit handler's catch block runs as a
-			// microtask AFTER the close branch — so an in-flight RPC that
-			// rejected with "Client disconnected" during the close cascade
-			// can write to `error.value` after our null-reset and stick around
-			// for the next open. Re-clearing here is the cheapest defense.
+	{
+		submit: handleAddToken,
+		onShow: async () => {
+			// Reset transient state on open. The hide branch already clears `error.value`, but the submit
+			// handler's catch block runs as a microtask AFTER it — so an in-flight RPC that rejected with
+			// "Client disconnected" during the close cascade can write to `error.value` after the null-reset
+			// and stick around for the next open. Re-clearing here is the cheapest defense.
 			error.value = null
 			phase.value = "idle"
 			tokens.value = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
@@ -290,14 +279,20 @@ watch(
 				contractTerm.value = cacheStore.preselectedTokenAddressToAdd
 				cacheStore.preselectedTokenAddressToAdd = ""
 			}
-			document.addEventListener("keydown", onKeydown)
-		}
+		},
+		onHide: () => {
+			activeBalanceWait?.abort()
+			activeBalanceWait = null
+			form.reset()
+			error.value = null
+			phase.value = "idle"
+			taskService.disconnect()
+			tokenBalanceService.disconnect()
+			tokenService.disconnect()
+		},
 	},
+	{ submitWaitsForShow: true },
 )
-
-const onKeydown = (e) => {
-	if (isPopupSubmitKey(e)) handleAddToken()
-}
 </script>
 
 <template>

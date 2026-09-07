@@ -340,6 +340,7 @@
     "useActivityStore": true,
     "useAppStore": true,
     "useAttrs": true,
+    "useAuthRegistryStatus": true,
     "useBalancesStore": true,
     "useCacheStore": true,
     "useCssModule": true,

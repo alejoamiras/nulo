@@ -226,3 +226,17 @@ describe("usePopupEntity", () => {
 		expect(submit).toHaveBeenCalledOnce()
 	})
 })
+
+describe("usePopupEntity — submitKey", () => {
+	it("a custom predicate replaces the input-only Enter guard", async () => {
+		const submit = vi.fn()
+		const show = ref(false)
+		cleanup.push(mount(show, { submit }, { submitKey: (e) => e.key === "Enter" }))
+		show.value = true
+		await nextTick()
+		pressKey(document.body, "Enter") // no input focused — the default guard would drop this
+		expect(submit).toHaveBeenCalledTimes(1)
+		pressKey(makeInput(), "Escape")
+		expect(submit).toHaveBeenCalledTimes(1)
+	})
+})

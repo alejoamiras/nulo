@@ -8,6 +8,8 @@ import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejectio
 
 /** Composables */
 import { useToast } from "@/composables/toast"
+import { useAuthRegistryStatus } from "@/composables/useAuthRegistryStatus"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -28,38 +30,14 @@ const props = defineProps({
 })
 
 const authwitsService = new AuthRegistryServiceClient()
-authwitsService.onRegistryEnabled.add(onRegistryEnabled)
-authwitsService.onRegistryDisabled.add(onRegistryDisabled)
-function onRegistryEnabled(account) {
-	if (appStore.account?.address === account) {
-		isRegistryEnabled.value = true
-	}
-}
-function onRegistryDisabled(account) {
-	if (appStore.account?.address === account) {
-		isRegistryEnabled.value = false
-	}
-}
+const registry = useAuthRegistryStatus(authwitsService, () => appStore.account?.address)
+const { isRegistryEnabled, isLoading, error } = registry
+onBeforeUnmount(() => registry.dispose())
 
 const authwits = ref([])
 const chunkedAuthwits = ref([])
 const chunksCount = computed(() => chunkedAuthwits.value.length)
-const isRegistryEnabled = ref(undefined)
-const isLoading = ref(false)
-const error = ref()
 const isErrorOccurred = computed(() => !!error.value)
-
-async function fetchRegistryStatus() {
-	isLoading.value = true
-
-	try {
-		isRegistryEnabled.value = await authwitsService.getRegistryEnabled(appStore.account.address)
-	} catch (err) {
-		error.value = err
-	} finally {
-		isLoading.value = false
-	}
-}
 
 function chunkAuthwits() {
 	chunkedAuthwits.value = authwits.value
@@ -146,36 +124,30 @@ function showChunkContent(chunk) {
 	popupStore.open("data_viewer")
 }
 
-watch(
+// No input to focus here: a global Enter confirms. The handler owns the latch and the fee check; the
+// error gate mirrors the button's :disabled, which the handler does not check itself.
+usePopupEntity(
 	() => props.show,
-	async () => {
-		if (props.show) {
-			await fetchRegistryStatus()
+	{
+		submit: () => {
+			if (!isErrorOccurred.value) handleRevokeAuthwits()
+		},
+		onShow: async () => {
+			await registry.fetch()
 
 			authwits.value = cacheStore.preselectedAuthwits
 			chunkAuthwits()
-
-			document.addEventListener("keydown", onKeydown)
-		} else {
+		},
+		onHide: () => {
 			authwits.value = []
 			chunkedAuthwits.value = []
-			isRegistryEnabled.value = undefined
-			isLoading.value = false
-			error.value = null
+			registry.reset()
 
 			authwitsService.disconnect()
-
-			document.removeEventListener("keydown", onKeydown)
-		}
+		},
 	},
+	{ submitWaitsForShow: true, submitKey: (e) => e.key === "Enter" },
 )
-
-const onKeydown = (e) => {
-	// Mirror the full button :disabled gate (template uses
-	// `!isAllowedToExecute || isErrorOccurred`) AND add isLoading so
-	// rapid Enter doesn't re-enter the handler while a request is in flight.
-	if (e.key === "Enter" && isAllowedToExecute.value && !isErrorOccurred.value && !isLoading.value) handleRevokeAuthwits()
-}
 </script>
 
 <template>

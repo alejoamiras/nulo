@@ -5,7 +5,7 @@ driver: claude-code
 code_review: off
 worktree: .claude/worktrees/dedup-followups (branch worktree-dedup-followups, on dev @ 49a58417)
 ledger: implementations-plan/dedup-ledger (X5, N5) + the three bugs the stack pinned
-status: drafted 2026-09-07; implementing
+status: phases 1–3 ✓ 2026-09-07; full gate + codex loop running
 ---
 
 # Dedup follow-ups — three pinned bugs, X5 + N5
@@ -63,16 +63,16 @@ submit handlers keep writing `isLoading`/`error` through them — plus `fetch`, 
 
 ## Phases
 
-1. **Bugfixes** — `OperationActionRow` + `safeWire`, the token popup guard, the hook rename at five sites.
+1. ✓ **Bugfixes** — `OperationActionRow` + `safeWire`, the token popup guard, the hook rename at five sites.
    Tests: `OperationCard.test.ts` gains the simulate-authwit case and the send parity case; the token popup's
    `(BUG PIN)` becomes "hidden until the token resolves, no render error"; `console-forwarding.test.ts` asserts
    the `nuloOn` hooks and an untouched `window.onerror`. Gate: lint, extension typecheck, the four suites.
-2. **X5 + N5** — the option, the composable (+ a 7-case suite: fetch ok / fetch throws / loading flag / own vs
+2. ✓ **X5 + N5** — the option, the composable (+ a 7-case suite: fetch ok / fetch throws / loading flag / own vs
    foreign account events / reset / dispose), the three popups. Their existing suites (Enter gates, latch pins,
    the token popup's flow) stay green; `usePopupEntity.test.ts` gains a `submitKey` case. Gate: lint, typecheck,
    the suites, `build:chrome` + `git diff --exit-code --stat -- apps/extension/src/types/` (a new composable and
    a new component regenerate the declarations).
-3. **Docs** — ledger rows X5 / N5 marked done, this plan's phases ✓, lessons.
+3. ✓ **Docs** — ledger rows X5 / N5 marked done, this plan's phases ✓, lessons.
 4. **Full local gate** — `bun run lint && bun run typecheck:all && bun run test`, build + types diff.
 
 ## Post-implementation

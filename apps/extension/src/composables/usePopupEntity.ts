@@ -37,6 +37,9 @@ export type UsePopupEntityOptions = {
 	 *  need this — their re-entrancy latches stop DOUBLE submits, not a
 	 *  premature FIRST submit against an incomplete list. */
 	submitWaitsForShow?: boolean
+	/** Which keydown fires `submit`. Default: Enter while an `<input>`/`<textarea>` is focused; a popup
+	 *  with no input (the authwit registry confirmations) accepts a global Enter. */
+	submitKey?: (e: KeyboardEvent) => boolean
 }
 
 /**
@@ -70,7 +73,7 @@ export function usePopupEntity(show: () => boolean, handlers: UsePopupEntityHand
 
 	const onKeydown = (e: KeyboardEvent) => {
 		if (options.submitWaitsForShow && pendingShowToken !== null) return
-		if (isPopupSubmitKey(e)) handlers.submit()
+		if ((options.submitKey ?? isPopupSubmitKey)(e)) handlers.submit()
 	}
 	// The watcher is ASYNC and awaits the handlers so their rejections travel
 	// Vue's watcher error channel (onErrorCaptured / app errorHandler /
