@@ -41,10 +41,10 @@ Do not start Phase 1 before the answers; on a reset, do not run any `--broadcast
 - The two noir patches: rename `patches/@aztec%2Fnoir-{acvm_js,noirc_abi}@<v>.patch` + the `patchedDependencies` keys in the root package.json.
 - `bunfig.toml` `minimumReleaseAgeExcludes`: fresh publishes are min-age-blocked, and the gate bites TRANSITIVES too — enumerate every `@aztec/*` name from `bun.lock` (~30), plus the three `@alejoamiras/*`. Date the comment; a follow-up PR removes the excludes after they age past 7 days.
 
-**The lockfile ritual** — `bun install` after editing the pins. Bun #25305 is CLOSED on Bun 1.4:
-targeted re-resolution now holds transitives to the min-age gate, so `rm bun.lock` is NO LONGER
-the default (a full regen re-gates every already-locked version and invites unrelated churn).
-Keep it as the last resort for unresolvable conflicts only.
+**The lockfile ritual** — `bun install` after editing the pins. Targeted re-resolution holds
+transitives to the min-age gate (Bun ≥ 1.4), so a plain install is the default; `rm bun.lock` is
+the last resort for unresolvable conflicts only (a full regen re-gates every already-locked
+version and invites unrelated churn).
 - ⚠️ `bunfig.toml` pins `linker = "isolated"` (since the 2026-08 isolated-linker arc) — do NOT
   change it. The old hoisting assumptions were made layout-agnostic via `@nulo/resolve-asset` +
   generated remappings; `apps/extension/scripts/layout-identity.test.ts` is the executable
@@ -65,7 +65,7 @@ Keep it as the last resort for unresolvable conflicts only.
   `--package-lock-only` makes audit a no-op ("found no dependencies to audit") — which is why
   earlier bumps never transcribed a passing run.
 
-**API churn**: `bun run typecheck:all` is the fast-fail — **but typecheck is NOT sufficient on a fork-class bump.** Surfaces typecheck can't see (5.0-fork precedent): copied/adapted upstream logic (fee options, gas math) that must be re-diffed against the new upstream; the three `nulo-schema-patch.ts` copies (extension/tools/playground — they throw at RUNTIME if the wallet-sdk schema shape moved; `test:all` exercises them, typecheck doesn't); and native-proving required-mode (`VITE_NULO_ACCELERATOR_REQUIRED`) surviving the proving-stack change. Port mechanically and behavior-preserving; wrap renamed upstream APIs inside our service layer so OUR RPC surfaces don't ripple (precedent: PXE senders → tagging-secret sources, wrapped in `PxeService`). Non-mechanical churn (a removed API we depend on) → stop, `/codex` triage, re-plan.
+**API churn**: `bun run typecheck:all` is the fast-fail — **but typecheck is NOT sufficient on a fork-class bump.** Surfaces typecheck can't see (5.0-fork precedent): copied/adapted upstream logic (fee options, gas math) that must be re-diffed against the new upstream; the `@nulo/wallet-sdk-schema-patch` package (it extends `WalletSchema` at runtime and throws if the wallet-sdk schema shape moved; its `apply.test.ts` and `packages/wallet-bridge/src/dispatcher.test.ts` under `test:all` exercise it, typecheck doesn't); and native-proving required-mode (`VITE_NULO_ACCELERATOR_REQUIRED`) surviving the proving-stack change. Port mechanically and behavior-preserving; wrap renamed upstream APIs inside our service layer so OUR RPC surfaces don't ripple (precedent: PXE senders → tagging-secret sources, wrapped in `PxeService`). Non-mechanical churn (a removed API we depend on) → stop, `/codex` triage, re-plan.
 
 **The Noir surface** (skipping this makes the drift check a false negative):
 - `contracts/bridge/aztec/scripts/compile.sh` pins the toolchain (`AZTEC_HOME`, default `~/.aztec/versions/5.0.1` — `aztec-up install <v>` first) and lists the crates to compile (`token_bridge_hub`, `keystone`; `claim_secret` + `register_hash` are libraries the hub pulls in).
