@@ -107,7 +107,7 @@ no `nulo:e2e:` marker in `dist/chrome`.
 - Rebased bottom-up in the five worktrees (P1: `index.md` and `TokensView.vue`, where dev renamed the list and
   P1 removed the mint branch; P2: two import blocks; P3 clean; P4: dev's deletion of `SelectBalanceTypePopup` taken;
   P5: the generated `components.d.ts` entry order). Each branch re-ran lint, typecheck, its touched suites and the
-  build green; the tip's full gate on 1464e73a: lint 0 · typecheck:all 0 · test 0 (458 files / 5,627 tests) · build 0 ·
+  build green; the tip's full gate on 1464e73a: lint 0 · typecheck:all 0 · test 0 (469 files / 5,731 tests) · build 0 ·
   generated types unchanged · no e2e marker. All five branches pushed atomically with `--force-with-lease`; the
   push's concurrency guard cancelled the first duplicate runs (their aggregators read as failed until the queued
   reruns supersede them).
