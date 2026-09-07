@@ -46,3 +46,7 @@ Base: `worktree-dedup-p1-delete` (PR #561). Scope: ledger ids X2 X3 X6 X1 E1 H3 
 
 - **Round 1** (`/codex high`, GPT-6 Astra, session `01a07c52-b605-7cf1-bf4c-e0d0398a0c3d`): *conditional approve*. One real regression: `openEncryptedBackup` decoded the untrimmed file text with the strict `fromBase64` while the detector had validated `text.trim()`, so a protected backup padded with non-breaking spaces detected fine and then failed to decrypt (codex reproduced it under Bun). Fixed with `fromBase64(sealed.trim())` plus a regression test that seals a real backup, wraps it in U+00A0 and decrypts through `decryptBackup()`. Also applied: two missed property-access X2 sites (`useFullBackupImport.ts`, wallet-core `base/index.ts`); the `send_transaction` embedded-fee copy in `materialize.ts`; two more sync collision loops (`network/service.ts` `_fresh8`, `passkey/service.ts`) onto `randomIdNotIn`; four unused Vue import specifiers; `requireArtifact` had landed between `findFunctionByName` and its doc comment; comment trims (`patchAccountField`, `password.ts`, and review-provenance tags in `ScopeAddress.vue`, `ScopeClassId.vue`, `transfer-estimate-reuse.ts`). Tests: 33 files / 537 + wallet-core 244 pass.
 - **Round 2** (resumed, same session): *"Approve — no new material findings."* Loop converged.
+
+## Final gate (62b4acf4)
+
+`bun run lint` exit 0 · `bun run typecheck:all` exit 0 · `bun run test` exit 0 (441 files, 5,519 tests).
