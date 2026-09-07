@@ -226,11 +226,11 @@ onBeforeUnmount(() => {
 				/>
 			</Flex>
 
-			<!-- D8 dust filter: hide incoming receipts worth less than this USD value. -->
+			<!-- One dust threshold for the wallet: the activity feed's receipts AND the Holdings fold. -->
 			<Flex justify="between" align="center" gap="12">
 				<Flex direction="column" gap="6">
-					<Text size="13" weight="600" color="primary"> Hide dust receipts </Text>
-					<Text size="12" weight="500" color="tertiary">Hide receipts below this value. 0 turns it off.</Text>
+					<Text size="13" weight="600" color="primary"> Hide dust </Text>
+					<Text size="12" weight="500" color="tertiary">Hide receipts and holdings below this value. 0 turns it off.</Text>
 				</Flex>
 
 				<!-- type="text" (not number) so there are no spinner arrows widening the field; the $ prefix

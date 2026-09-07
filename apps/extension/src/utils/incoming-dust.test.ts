@@ -1,5 +1,29 @@
 import { describe, expect, test } from "vitest"
-import { isReceiptAboveDustThreshold, usdThresholdToMicro } from "./incoming-dust"
+import { isAmountAboveDustThreshold, isReceiptAboveDustThreshold, usdThresholdToMicro } from "./incoming-dust"
+
+describe("isAmountAboveDustThreshold hardening", () => {
+	const threshold = usdThresholdToMicro(0.01)
+
+	test("the receipt name is the same predicate", () => {
+		expect(isReceiptAboveDustThreshold).toBe(isAmountAboveDustThreshold)
+	})
+
+	test("invalid decimals (negative, fractional, above 77) → fail OPEN without computing", () => {
+		for (const decimals of [-1, 1.5, 78, 10_000, Number.NaN]) {
+			expect(isAmountAboveDustThreshold({ amountRaw: "1", decimals, usdRate: 2, thresholdMicro: threshold }), String(decimals)).toBe(
+				true,
+			)
+		}
+	})
+
+	test("decimals 77 (the ceiling) still evaluates", () => {
+		expect(isAmountAboveDustThreshold({ amountRaw: "1", decimals: 77, usdRate: 2, thresholdMicro: threshold })).toBe(false)
+	})
+
+	test("a huge threshold from a bounded config still converts without overflow", () => {
+		expect(usdThresholdToMicro(1_000_000)).toBe(1_000_000_000_000n)
+	})
+})
 
 describe("usdThresholdToMicro", () => {
 	test("converts USD to micro-USD; 0 / invalid → 0n (off)", () => {

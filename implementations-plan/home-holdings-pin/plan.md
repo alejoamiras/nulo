@@ -662,7 +662,7 @@ and `gh stack add home-holdings-pin/holdings`.
 
 ### Arc B — Holdings page + TokenList + Send picker (branch `home-holdings-pin/holdings`)
 
-#### Phase 3 — TokenList and the Holdings page
+#### Phase 3 — TokenList and the Holdings page ✓ (2026-09-06, Mac)
 
 - `incoming-dust.ts`: export `isAmountAboveDustThreshold`; `isReceiptAboveDustThreshold` becomes an
   alias; validate `decimals` with `isValidDecimals` BEFORE exponentiating and keep every bigint

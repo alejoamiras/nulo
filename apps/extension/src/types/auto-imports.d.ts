@@ -76,6 +76,7 @@ declare global {
   const effectScope: typeof import('vue').effectScope
   const feeJuicePricingFromUsd: typeof import('../utils/fee-estimation').feeJuicePricingFromUsd
   const feeToUsd: typeof import('../utils/fee-estimation').feeToUsd
+  const foldLabel: typeof import('../utils/token-fold').foldLabel
   const forChain: typeof import('../utils/token-order').forChain
   const formatBaseUnits: typeof import('../utils/amount').formatBaseUnits
   const formatCallSummary: typeof import('../utils/tx-enrichment').formatCallSummary
@@ -106,8 +107,10 @@ declare global {
   const initAppServiceContext: typeof import('../utils/core').initAppServiceContext
   const initTransactionService: typeof import('../utils/core').initTransactionService
   const inject: typeof import('vue').inject
+  const isAmountAboveDustThreshold: typeof import('../utils/incoming-dust').isAmountAboveDustThreshold
   const isBackgroundConnected: typeof import('../utils/core').isBackgroundConnected
   const isForeignProfile: typeof import('../utils/activity-rows').isForeignProfile
+  const isHiddenHolding: typeof import('../utils/token-fold').isHiddenHolding
   const isInFlightSend: typeof import('../utils/in-flight-send').isInFlightSend
   const isPopupSubmitKey: typeof import('../composables/usePopupEntity').isPopupSubmitKey
   const isPrefersDarkScheme: typeof import('../utils/general').isPrefersDarkScheme
@@ -124,6 +127,7 @@ declare global {
   const journalTerminalDisplay: typeof import('../utils/journal-state').journalTerminalDisplay
   const managers: typeof import('../utils/core').managers
   const markRaw: typeof import('vue').markRaw
+  const matchesQuery: typeof import('../utils/token-search').matchesQuery
   const migrationIdle: typeof import('../utils/storage').migrationIdle
   const nextTick: typeof import('vue').nextTick
   const normalizeAllIds: typeof import('../utils/full-backup-helpers').normalizeAllIds
@@ -469,6 +473,7 @@ declare module 'vue' {
     readonly effectScope: UnwrapRef<typeof import('vue')['effectScope']>
     readonly feeJuicePricingFromUsd: UnwrapRef<typeof import('../utils/fee-estimation')['feeJuicePricingFromUsd']>
     readonly feeToUsd: UnwrapRef<typeof import('../utils/fee-estimation')['feeToUsd']>
+    readonly foldLabel: UnwrapRef<typeof import('../utils/token-fold')['foldLabel']>
     readonly forChain: UnwrapRef<typeof import('../utils/token-order')['forChain']>
     readonly formatBaseUnits: UnwrapRef<typeof import('../utils/amount')['formatBaseUnits']>
     readonly formatCallSummary: UnwrapRef<typeof import('../utils/tx-enrichment')['formatCallSummary']>
@@ -499,8 +504,10 @@ declare module 'vue' {
     readonly initAppServiceContext: UnwrapRef<typeof import('../utils/core')['initAppServiceContext']>
     readonly initTransactionService: UnwrapRef<typeof import('../utils/core')['initTransactionService']>
     readonly inject: UnwrapRef<typeof import('vue')['inject']>
+    readonly isAmountAboveDustThreshold: UnwrapRef<typeof import('../utils/incoming-dust')['isAmountAboveDustThreshold']>
     readonly isBackgroundConnected: UnwrapRef<typeof import('../utils/core')['isBackgroundConnected']>
     readonly isForeignProfile: UnwrapRef<typeof import('../utils/activity-rows')['isForeignProfile']>
+    readonly isHiddenHolding: UnwrapRef<typeof import('../utils/token-fold')['isHiddenHolding']>
     readonly isInFlightSend: UnwrapRef<typeof import('../utils/in-flight-send')['isInFlightSend']>
     readonly isPopupSubmitKey: UnwrapRef<typeof import('../composables/usePopupEntity')['isPopupSubmitKey']>
     readonly isPrefersDarkScheme: UnwrapRef<typeof import('../utils/general')['isPrefersDarkScheme']>
@@ -517,6 +524,7 @@ declare module 'vue' {
     readonly journalTerminalDisplay: UnwrapRef<typeof import('../utils/journal-state')['journalTerminalDisplay']>
     readonly managers: UnwrapRef<typeof import('../utils/core')['managers']>
     readonly markRaw: UnwrapRef<typeof import('vue')['markRaw']>
+    readonly matchesQuery: UnwrapRef<typeof import('../utils/token-search')['matchesQuery']>
     readonly migrationIdle: UnwrapRef<typeof import('../utils/storage')['migrationIdle']>
     readonly nextTick: UnwrapRef<typeof import('vue')['nextTick']>
     readonly normalizeAllIds: UnwrapRef<typeof import('../utils/full-backup-helpers')['normalizeAllIds']>
