@@ -6,6 +6,7 @@ import { useAppStore } from "@/stores/app.store"
 import { ACCOUNT_INTEGRITY_BLOCKED_ROOT } from "@/wallet/services/account-integrity/types"
 import { installChromeStorage } from "../../tests/helpers/chrome-storage-mock"
 import AccountIntegrityBarrier from "./AccountIntegrityBarrier.vue"
+import BarrierOverlay from "./composite/BarrierOverlay.vue"
 
 // Router-aware route, controllable per test. `route.name` is what the barrier reads.
 const mockRoute = reactive<{ name: string }>({ name: "popup-general" })
@@ -35,7 +36,7 @@ function mountBarrier(presentedProfileId: string | undefined = "p1") {
 	const pinia = createTestingPinia({ stubActions: false })
 	const appStore = useAppStore(pinia)
 	appStore.profile = presentedProfileId ? ({ id: presentedProfileId } as never) : undefined
-	const wrapper = mount(AccountIntegrityBarrier, { global: { stubs, plugins: [pinia] } })
+	const wrapper = mount(AccountIntegrityBarrier, { global: { stubs, components: { BarrierOverlay }, plugins: [pinia] } })
 	return wrapper
 }
 

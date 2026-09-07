@@ -958,30 +958,14 @@ onBeforeUnmount(() => {
 }
 
 .empty_state {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 8px;
-
-	padding: 32px 16px;
-	border: 1px dashed var(--nulo-border);
-
-	text-align: center;
+	composes: empty_state from "./list-empty.module.css";
 }
 
 .empty_headline {
-	font-family: var(--font-headline);
-	font-size: 14px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
+	composes: empty_headline from "./list-empty.module.css";
 }
 
 .empty_sub {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	line-height: 1.4;
-	color: var(--nulo-outline);
+	composes: empty_sub from "./list-empty.module.css";
 }
 </style>

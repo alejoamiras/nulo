@@ -62,12 +62,7 @@ const emit = defineEmits(["update:modelValue", "open", "close"])
 }
 
 .fee_label {
-	font-family: var(--font-headline);
-	font-size: 10px;
-	font-weight: 700;
-	text-transform: uppercase;
-	letter-spacing: 0.1em;
-	color: var(--nulo-secondary);
+	composes: fee_label from "./fee-shared.module.css";
 }
 
 .fee_value {

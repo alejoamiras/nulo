@@ -24,7 +24,7 @@ worktree dir == plan dir == branch suffix (`worktree-<slug>`). Phase 1 needs no 
 | P1 | `dedup-p1-delete` | direct + codex loop | M4 I6 B4 E3 E2 C4 I3 I4 | 325 | `refactor(extension): delete dead code and make the access-level map exhaustive` | open #561 · green |
 | P2 | `dedup-p2-adopt-helpers` | `/blueprint light` | X2 X3 X6 X1 E1 H3 J5 H1 C3 C8 L4 K2 M7 G2 G3 D5 L6 | 287 | `refactor: adopt the shared helpers that call sites re-typed inline` | open #566 · green |
 | P3 | `dedup-p3-service-wrappers` | `/blueprint mid` | D1 D2 D3 D4 G1 C1 C2 C5 C6 F1 F2 F3 E4 E6 B1 B2 B3 B5 A1 A3 H2 H4 X4 I1 I2 | 742 | `refactor(services): collapse the repeated wrappers in the service and utility layer` | open #568 · green |
-| P4 | `dedup-p4-vue-shells` | `/blueprint light` | J1 J2 J3 J4 K1 K7 K4 K5 K6 K9 K10 K11 L1 L3 N6 N9 M2 M3 | 1,132 | `refactor(popup): share the page shells and style partials across pages and windows` | ☐ |
+| P4 | `dedup-p4-vue-shells` | `/blueprint light` | J1 J2 J3 J4 K1 K7 K4 K5 K6 K9 K10 K11 L1 L3 N6 N9 M2 M3 | 1,132 | `refactor(popup): share the page shells and style partials across pages and windows` | open #569 · green |
 | P5 | `dedup-p5-vue-components` | `/blueprint mid` | N1 N2 N3 N4 N5 N7 N8 L2 L5 K3 K8 M1 M5 M6 I5 | 670 | `refactor(popup): shared field, list-sync and card pieces for popups and windows` | ☐ |
 | — | deferred (Tier 4) | owner call | A2 A4 B6 C7 D6 D7 D8 E5 X5 | — | not in scope — byte-frozen ciphertext framing, KAT-pinned bit math, audit-hardened session and purge code | — |
 
@@ -38,6 +38,15 @@ spans packages but changes no behaviour. P3 is TypeScript in the service and uti
 reviewers found real audit trails, so it gets the dual (codex + fable) audit. P4 is CSS partials and
 page-shell components with every `data-testid` preserved verbatim. P5 is Vue components and composables
 whose extraction changes rendering paths, so it gets the dual audit too.
+
+**P4 in one paragraph.** The popup, the approval windows and onboarding had dozens of `<style module>` blocks and page
+scaffolds pasted between files. Where only the styles repeated, one CSS-module partial now holds them and each file
+says `composes: <class> from "./<partial>"` — first use in the repo, verified in the built stylesheet, templates and
+testids untouched. Where the markup repeated too, a small presentational component took it: a settings page frame, a
+loading/error block for the list pages, the barriers' blocking card, the onboarding explainer, name field, back and skip
+links, and one console forwarder for the two entry files. Four ids were skipped or narrowed on contact because the copies
+were not actually identical (K4, M3, the `ListStatusMessage` adoptions, the `useEntityCrud` move); reasons are in
+`implementations-plan/dedup-p4-vue-shells/lessons/phase-1.md`. Net: 65 source files, −527 lines, +475 lines of parity tests.
 
 ## Rules for every phase
 

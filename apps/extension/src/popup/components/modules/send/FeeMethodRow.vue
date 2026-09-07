@@ -49,33 +49,11 @@ defineProps({
 
 <style module>
 .detail_row {
-	background: transparent;
-	overflow: hidden;
-	border-top: 1px solid rgba(74, 70, 63, 0.2);
-
-	padding: 10px 12px;
+	composes: detail_row from "./fee-shared.module.css";
 }
 
 .skeleton {
-	display: inline-block;
-	width: 60px;
-	height: 12px;
-	background: linear-gradient(
-		90deg,
-		var(--nulo-surface-high) 25%,
-		var(--nulo-surface) 50%,
-		var(--nulo-surface-high) 75%
-	);
-	background-size: 200% 100%;
-	animation: shimmer 1.5s infinite;
+	composes: skeleton from "./fee-shared.module.css";
 }
 
-@keyframes shimmer {
-	0% {
-		background-position: 200% 0;
-	}
-	100% {
-		background-position: -200% 0;
-	}
-}
 </style>

@@ -10,7 +10,7 @@
  * future refactor can't silently re-introduce nested-`<main>`.
  *
  * Hosts a CSS container (`container-type: inline-size`,
- * `container-name: onboarding-page`) so `learn.vue`'s 3-card grid can
+ * `container-name: onboarding-page`) so the explainer's 3-card grid can
  * stack via container query — viewport-based queries would have to
  * account for app.vue's 24+24 px horizontal padding, which is fragile.
  */

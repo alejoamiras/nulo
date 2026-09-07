@@ -685,11 +685,7 @@ onBeforeUnmount(() => {
 }
 
 .detail_row {
-	background: transparent;
-	overflow: hidden;
-	border-top: 1px solid rgba(74, 70, 63, 0.2);
-
-	padding: 10px 12px;
+	composes: detail_row from "./fee-shared.module.css";
 }
 
 .link {

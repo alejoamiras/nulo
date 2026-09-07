@@ -75,163 +75,147 @@ const handleCopyAddress = (target) => {
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.wrapper" data-testid="manage-accounts-page">
-		<SubPageHeader title="Manage Accounts" :backTo="'/popup/settings'" />
+	<SettingsPageShell title="Manage Accounts" :backTo="'/popup/settings'" gap="40" data-testid="manage-accounts-page">
+		<Flex direction="column" gap="16">
+			<SectionLabel label="Accounts" :count="appStore.accounts.length" />
 
-		<Flex direction="column" gap="40" :class="$style.content">
-			<Flex direction="column" gap="16">
-				<SectionLabel label="Accounts" :count="appStore.accounts.length" />
+			<ItemsContainer>
+				<SettingItem
+					v-for="account in accounts"
+					@click="handleSelectAccount(account)"
+					:title="account.name"
+					:icon="account?.address === appStore.account?.address ? 'check-circle' : 'circle'"
+					:iconFillColor="account?.address === appStore.account?.address ? 'primary' : 'tertiary'"
+					data-testid="manage-accounts-row"
+					:data-account-name="account.name"
+				>
+					<!-- Imported marker on the DESCRIPTION line in the address's own mono voice (owner
+					     pick: option B + V4). Exactly ONE truncation mechanism: the address's head span
+					     clips with a CSS ellipsis while the marker and the 4-char tail never shrink, so
+					     the line adapts to whatever width the action icons leave instead of a guessed
+					     trim length fighting the wrapper's own ellipsis. -->
+					<template #description>
+						<Text size="11" weight="500" color="tertiary" mono :class="$style.desc_line">
+							<template v-if="account.type === AccountType.Imported">
+								<span data-testid="account-imported-badge" :class="$style.desc_fixed">imported</span>
+								<span :class="$style.desc_fixed">&nbsp;&#183;&nbsp;</span>
+							</template>
+							<span :class="$style.addr_head">{{ account.address.slice(0, -4) }}</span>
+							<span :class="$style.desc_fixed">{{ account.address.slice(-4) }}</span>
+						</Text>
+					</template>
+					<template #right>
+						<Flex align="center" gap="8">
+							<Tooltip position="end" delay="350">
+								<Icon
+									@click.stop="handleCopyAddress(account.address)"
+									name="copy"
+									size="14"
+									color="tertiary"
+									hoverColor="primary"
+									:class="$style.icon_btn"
+								/>
 
-				<ItemsContainer>
-					<SettingItem
-						v-for="account in accounts"
-						@click="handleSelectAccount(account)"
-						:title="account.name"
-						:icon="account?.address === appStore.account?.address ? 'check-circle' : 'circle'"
-						:iconFillColor="account?.address === appStore.account?.address ? 'primary' : 'tertiary'"
-						data-testid="manage-accounts-row"
-						:data-account-name="account.name"
-					>
-						<!-- Imported marker on the DESCRIPTION line in the address's own mono voice (owner
-						     pick: option B + V4). Exactly ONE truncation mechanism: the address's head span
-						     clips with a CSS ellipsis while the marker and the 4-char tail never shrink, so
-						     the line adapts to whatever width the action icons leave instead of a guessed
-						     trim length fighting the wrapper's own ellipsis. -->
-						<template #description>
-							<Text size="11" weight="500" color="tertiary" mono :class="$style.desc_line">
-								<template v-if="account.type === AccountType.Imported">
-									<span data-testid="account-imported-badge" :class="$style.desc_fixed">imported</span>
-									<span :class="$style.desc_fixed">&nbsp;&#183;&nbsp;</span>
-								</template>
-								<span :class="$style.addr_head">{{ account.address.slice(0, -4) }}</span>
-								<span :class="$style.desc_fixed">{{ account.address.slice(-4) }}</span>
-							</Text>
-						</template>
-						<template #right>
-							<Flex align="center" gap="8">
-								<Tooltip position="end" delay="350">
+								<template #content>Copy account address</template>
+							</Tooltip>
+
+							<Tooltip v-if="canExportAccounts" position="end" delay="350">
+								<Icon
+									@click.stop="handleExportAccount(account)"
+									name="upload-outline"
+									size="14"
+									color="tertiary"
+									hoverColor="primary"
+									:class="$style.icon_btn"
+									data-testid="account-export-btn"
+								/>
+
+								<template #content>Export account</template>
+							</Tooltip>
+
+							<Tooltip position="end" delay="350">
+								<Icon
+									@click.stop="handleEditAccount(account)"
+									name="edit"
+									size="14"
+									color="tertiary"
+									:class="$style.icon_btn"
+									data-testid="account-edit-btn"
+								/>
+
+								<template #content>Edit account</template>
+							</Tooltip>
+
+							<Tooltip position="end" delay="350">
+								<div data-testid="account-hide" @click.stop="handleHideAccount(account)">
 									<Icon
-										@click.stop="handleCopyAddress(account.address)"
-										name="copy"
+										name="close-circle"
 										size="14"
 										color="tertiary"
-										hoverColor="primary"
-										:class="$style.icon_btn"
+										:class="[$style.icon_btn, accounts.length === 1 && $style.disabled]"
 									/>
+								</div>
 
-									<template #content>Copy account address</template>
-								</Tooltip>
+								<template #content> Hide account </template>
+							</Tooltip>
+						</Flex>
+					</template>
+				</SettingItem>
+			</ItemsContainer>
 
-								<Tooltip v-if="canExportAccounts" position="end" delay="350">
-									<Icon
-										@click.stop="handleExportAccount(account)"
-										name="upload-outline"
-										size="14"
-										color="tertiary"
-										hoverColor="primary"
-										:class="$style.icon_btn"
-										data-testid="account-export-btn"
-									/>
-
-									<template #content>Export account</template>
-								</Tooltip>
-
-								<Tooltip position="end" delay="350">
-									<Icon
-										@click.stop="handleEditAccount(account)"
-										name="edit"
-										size="14"
-										color="tertiary"
-										:class="$style.icon_btn"
-										data-testid="account-edit-btn"
-									/>
-
-									<template #content>Edit account</template>
-								</Tooltip>
-
-								<Tooltip position="end" delay="350">
-									<div data-testid="account-hide" @click.stop="handleHideAccount(account)">
-										<Icon
-											name="close-circle"
-											size="14"
-											color="tertiary"
-											:class="[$style.icon_btn, accounts.length === 1 && $style.disabled]"
-										/>
-									</div>
-
-									<template #content> Hide account </template>
-								</Tooltip>
-							</Flex>
-						</template>
-					</SettingItem>
-				</ItemsContainer>
-
-				<Flex gap="10">
-					<Button
-						@click="popupStore.open('new_account')"
-						wide
-						variant="primary"
-						size="large"
-						data-testid="accounts-new-btn"
-					>
-						Add account
-					</Button>
-					<Button
-						@click="router.push('/popup/settings/accounts/import')"
-						wide
-						variant="primary_outline"
-						size="large"
-						data-testid="accounts-import-btn"
-					>
-						Import account
-					</Button>
-				</Flex>
-			</Flex>
-
-			<Flex v-if="hiddenAccounts.length" direction="column" gap="12">
-				<Flex align="center" justify="between">
-					<Text size="13" weight="600" color="body"> Hidden accounts </Text>
-
-					<Text size="13" weight="600" color="secondary">
-						{{ hiddenAccounts.length }}
-					</Text>
-				</Flex>
-
-				<ItemsContainer description="Click on an account you want to make visible">
-					<SettingItem
-						v-for="account in hiddenAccounts"
-						@click="handleShowAccount(account)"
-						:title="account.name"
-						:description="account.address"
-						data-testid="manage-accounts-hidden-row"
-						:data-account-name="account.name"
-					>
-						<template #icon>
-							<AccountAvatar :name="account.name" :address="account.address" :size="20" />
-						</template>
-						<template #right>
-							<Icon name="arrow-back-up" size="14" color="secondary" />
-						</template>
-					</SettingItem>
-				</ItemsContainer>
+			<Flex gap="10">
+				<Button
+					@click="popupStore.open('new_account')"
+					wide
+					variant="primary"
+					size="large"
+					data-testid="accounts-new-btn"
+				>
+					Add account
+				</Button>
+				<Button
+					@click="router.push('/popup/settings/accounts/import')"
+					wide
+					variant="primary_outline"
+					size="large"
+					data-testid="accounts-import-btn"
+				>
+					Import account
+				</Button>
 			</Flex>
 		</Flex>
 
-	</Flex>
+		<Flex v-if="hiddenAccounts.length" direction="column" gap="12">
+			<Flex align="center" justify="between">
+				<Text size="13" weight="600" color="body"> Hidden accounts </Text>
+
+				<Text size="13" weight="600" color="secondary">
+					{{ hiddenAccounts.length }}
+				</Text>
+			</Flex>
+
+			<ItemsContainer description="Click on an account you want to make visible">
+				<SettingItem
+					v-for="account in hiddenAccounts"
+					@click="handleShowAccount(account)"
+					:title="account.name"
+					:description="account.address"
+					data-testid="manage-accounts-hidden-row"
+					:data-account-name="account.name"
+				>
+					<template #icon>
+						<AccountAvatar :name="account.name" :address="account.address" :size="20" />
+					</template>
+					<template #right>
+						<Icon name="arrow-back-up" size="14" color="secondary" />
+					</template>
+				</SettingItem>
+			</ItemsContainer>
+		</Flex>
+	</SettingsPageShell>
 </template>
 
 <style module>
-.wrapper {
-	flex: 1;
-	overflow: auto;
-	background: var(--app-bg);
-	scrollbar-gutter: stable;
-}
-
-.content {
-	padding: 16px 24px var(--nav-clearance) 24px;
-}
-
 .desc_line {
 	display: flex;
 	max-width: 100%;

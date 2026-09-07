@@ -128,15 +128,7 @@ onBeforeUnmount(() => {
 
 <template>
 	<OnboardingPage :gap="24" :data-restore-stage="restoreStage">
-		<button
-			type="button"
-			:class="$style.back"
-			data-testid="onboarding-import-back"
-			@click="router.push('/onboarding/welcome')"
-		>
-			<MaterialIcon name="chevron_left" :size="14" />
-			<span>Back</span>
-		</button>
+		<OnboardingBackLink testid="onboarding-import-back" />
 		<StepIndicator :current="1" />
 		<header :class="$style.hero">
 			<BrutalistTitle main="Import" sub="Profile" />
@@ -144,26 +136,13 @@ onBeforeUnmount(() => {
 			<Text size="14" color="secondary" height="150">Restore from a recovery phrase, passkey, or full backup.</Text>
 		</header>
 
-		<Flex direction="column" gap="8">
-			<Text size="11" weight="700" color="secondary" :class="$style.section_label">Profile name</Text>
-			<div :class="[shakeName && $style.shake]">
-				<Input
-					ref="nameInputRef"
-					v-model="profileName"
-					type="text"
-					placeholder="My Profile"
-					:maxLength="32"
-					:error="!!nameError"
-					:ariaInvalid="!!nameError"
-					sanitize
-					data-testid="onboarding-name-input"
-					@input="handleNameInput"
-				/>
-			</div>
-			<Text v-if="nameError" size="12" color="red" height="150" role="alert">
-				{{ nameError }}
-			</Text>
-		</Flex>
+		<OnboardingProfileNameField
+			ref="nameInputRef"
+			v-model="profileName"
+			:error="nameError"
+			:shake="shakeName"
+			@input="handleNameInput"
+		/>
 
 		<ImportMethodPicker
 			v-if="!selectedImportOption"
@@ -274,31 +253,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style module>
-.back {
-	align-self: flex-start;
-	display: inline-flex;
-	align-items: center;
-	gap: 4px;
-	background: transparent;
-	border: none;
-	color: var(--txt-secondary);
-	font-family: var(--font-mono);
-	font-size: 11px;
-	letter-spacing: 0.08em;
-	text-transform: uppercase;
-	cursor: pointer;
-	padding: 4px 8px 4px 0;
-	transition: color 0.15s var(--bezier);
-}
-.back:hover {
-	color: var(--txt-primary);
-}
-.back:focus-visible {
-	outline: 2px dotted var(--nulo-accent);
-	outline-offset: 2px;
-	color: var(--txt-primary);
-}
-
 .hero {
 	padding: 8px 0 16px;
 	display: flex;
@@ -312,26 +266,8 @@ onBeforeUnmount(() => {
 	background: var(--nulo-accent);
 }
 
-.section_label {
-	font-family: var(--font-headline);
-	text-transform: uppercase;
-	letter-spacing: 0.18em;
-}
-
 .ctas {
 	margin-top: 8px;
 }
 
-@keyframes shakeInput {
-	0% { transform: translateX(0); }
-	20% { transform: translateX(-4px); }
-	40% { transform: translateX(4px); }
-	60% { transform: translateX(-3px); }
-	80% { transform: translateX(2px); }
-	100% { transform: translateX(0); }
-}
-
-.shake {
-	animation: shakeInput 0.4s ease;
-}
 </style>

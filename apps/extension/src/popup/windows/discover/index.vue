@@ -184,21 +184,11 @@ onUnmounted(disposeWindow)
 
 <style module>
 .wrapper {
-	overflow: hidden;
-	flex: 1;
-
-	display: flex;
-	flex-direction: column;
-
-	background: var(--app-bg);
-	border-top: 2px solid var(--nulo-accent);
+	composes: approval_wrapper from "../window-shell.module.css";
 }
 
 .scroll_area {
-	flex: 1;
-	min-height: 0;
-	overflow: auto;
-	scrollbar-gutter: stable;
+	composes: scroll_area from "../window-shell.module.css";
 }
 
 .body {

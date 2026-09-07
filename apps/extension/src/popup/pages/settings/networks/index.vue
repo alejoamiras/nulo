@@ -26,54 +26,38 @@ const networks = computed(() =>
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.wrapper">
-		<SubPageHeader title="Manage Networks" :backTo="'/popup/settings'" />
+	<SettingsPageShell title="Manage Networks" :backTo="'/popup/settings'" gap="16">
+		<SectionLabel label="Networks" :count="networks.length" />
 
-		<Flex direction="column" gap="16" :class="$style.content">
-			<SectionLabel label="Networks" :count="networks.length" />
+		<ItemsContainer>
+			<SettingItem
+				v-for="network in networks"
+				:key="network.id"
+				:to="`/popup/settings/networks/${network.id}`"
+				:title="network.name"
+				data-testid="network-row"
+				:data-network-id="network.id"
+				:data-network-name="network.name"
+			>
+				<template #dot>
+					<div v-if="appStore.network?.id === network.id" :class="$style.active_dot" data-testid="network-active-dot" />
+				</template>
+				<template #right>
+					<Flex align="center" gap="8">
+						<Badge v-if="appStore.network?.id === network.id" variant="info" data-testid="network-active-badge">Active</Badge>
+						<MaterialIcon name="chevron_right" :size="18" color="secondary" :class="$style.chevron" />
+					</Flex>
+				</template>
+			</SettingItem>
+		</ItemsContainer>
 
-			<ItemsContainer>
-				<SettingItem
-					v-for="network in networks"
-					:key="network.id"
-					:to="`/popup/settings/networks/${network.id}`"
-					:title="network.name"
-					data-testid="network-row"
-					:data-network-id="network.id"
-					:data-network-name="network.name"
-				>
-					<template #dot>
-						<div v-if="appStore.network?.id === network.id" :class="$style.active_dot" data-testid="network-active-dot" />
-					</template>
-					<template #right>
-						<Flex align="center" gap="8">
-							<Badge v-if="appStore.network?.id === network.id" variant="info" data-testid="network-active-badge">Active</Badge>
-							<MaterialIcon name="chevron_right" :size="18" color="secondary" :class="$style.chevron" />
-						</Flex>
-					</template>
-				</SettingItem>
-			</ItemsContainer>
-
-			<Button @click="popupStore.open('new_network')" wide variant="primary" size="large" data-testid="network-new-btn">
-				Add network
-			</Button>
-		</Flex>
-
-	</Flex>
+		<Button @click="popupStore.open('new_network')" wide variant="primary" size="large" data-testid="network-new-btn">
+			Add network
+		</Button>
+	</SettingsPageShell>
 </template>
 
 <style module>
-.wrapper {
-	flex: 1;
-	overflow: auto;
-	background: var(--app-bg);
-	scrollbar-gutter: stable;
-}
-
-.content {
-	padding: 16px 24px var(--nav-clearance) 24px;
-}
-
 .icon_btn {
 	transition: all 0.2s var(--bezier);
 

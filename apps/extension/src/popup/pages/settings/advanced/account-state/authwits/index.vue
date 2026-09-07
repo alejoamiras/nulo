@@ -172,14 +172,7 @@ onBeforeUnmount(() => {
 				@clear="searchTerm = ''"
 			/>
 
-			<LoadingState v-if="isFetchingAuthwits" label="FETCHING AUTHWITS" />
-
-			<Tooltip v-else-if="isErrorOccurred" wide>
-				<Banner :action="{ name: 'Try again', callback: handleRefetch }" variant="error" wide>
-					Something went wrong
-				</Banner>
-				<template #content>{{ error }}</template>
-			</Tooltip>
+			<AsyncListStatus v-if="isFetchingAuthwits || isErrorOccurred" :loading="isFetchingAuthwits" :error="error" label="FETCHING AUTHWITS" @retry="handleRefetch" />
 
 			<Flex v-else-if="filteredAuthwits.length" direction="column" gap="8">
 				<AuthwitCard
@@ -200,14 +193,11 @@ onBeforeUnmount(() => {
 
 <style module>
 .wrapper {
-	flex: 1;
-	overflow: auto;
-	background: var(--app-bg);
-	scrollbar-gutter: stable;
+	composes: wrapper from "../../../../../../components/composite/settings-page.module.css";
 }
 
 .content {
-	padding: 16px 24px var(--nav-clearance) 24px;
+	composes: content from "../../../../../../components/composite/settings-page.module.css";
 }
 
 .icon_btn {
