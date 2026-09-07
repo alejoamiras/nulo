@@ -76,7 +76,7 @@ New tests: `network/client.test.ts` (invalid params → no request; invalid resu
 
 **Validation gate**: `bun run lint && bun run --cwd apps/extension typecheck && (bun run --cwd apps/extension test src/wallet/services/profile src/wallet/services/network src/wallet/services/account-state src/wallet/services/window-manager src/wallet/services/wallet-sdk src/wallet/services/note src/wallet/services/token-balance src/wallet/services/incoming-transfer src/wallet/base)`. Pass: exit 0 each. Layers: lint/typecheck + unit + composition.
 
-### Phase 3 — execution and token introspection (C1, C5, C6, F2)
+### Phase 3 — execution and token introspection (C1, C5, C6, F2) ✓
 
 **Validation gate**: `bun run lint && bun run --cwd apps/extension typecheck && (bun run --cwd apps/extension test src/wallet/services/execution src/wallet/services/token src/wallet/services/fpc)`. Pass: exit 0 each. Layers: lint/typecheck + unit + composition.
 

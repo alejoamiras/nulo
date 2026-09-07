@@ -113,6 +113,22 @@ export interface DappSendExecutorLane {
 	markJournal(journalId: string | undefined, progress: JobProgress, error?: JobError | null): Promise<void>
 }
 
+type AddTransactionArgs = Parameters<DappSendExecutorDeps["addTransaction"]>
+
+/** What the post-send record needs from a built send, whichever arm built it. */
+interface SentTx {
+	origin: AddTransactionArgs[0]
+	network: Network
+	account: { address: { toString(): string } }
+	txCalls: AddTransactionArgs[3]
+	nonce: { toString(): string }
+	feePaymentMethod: AddTransactionArgs[5]
+	txRequest: Parameters<typeof getEstimatedFee>[0]
+	fence: AddTransactionArgs[10]
+	networkId: AddTransactionArgs[11]
+	pendingPublicAuthwits: Parameters<DappSendExecutorDeps["recordPendingAuthwits"]>[1]
+}
+
 export interface DappSendExecutorDeps {
 	planner: OperationPlanner
 	txBuilder: TxRequestBuilder
@@ -378,6 +394,32 @@ export class DappSendExecutor {
 		}
 	}
 
+	/** One post-send closure owns BOTH the activity record AND the public-authwit index write, so the
+	 *  ordering is explicit. Recording here (not at build) is what keeps estimate/reject from leaking a
+	 *  grant; the rows land `pending` and are reconciled by the tx's on-chain outcome. */
+	private sentTxRecorder(sent: SentTx): (hash: string) => Promise<void> {
+		return async (hash) => {
+			const account = sent.account.address.toString()
+			await this.deps.addTransaction(
+				sent.origin,
+				sent.network.chainId,
+				account,
+				sent.txCalls,
+				sent.nonce.toString(),
+				sent.feePaymentMethod,
+				hash,
+				primaryEndpointUrl(sent.network),
+				getEstimatedFee(sent.txRequest),
+				getGasDetails(sent.txRequest),
+				sent.fence,
+				sent.networkId,
+			)
+			if (sent.pendingPublicAuthwits.length > 0) {
+				await this.deps.recordPendingAuthwits(account, sent.pendingPublicAuthwits, hash)
+			}
+		}
+	}
+
 	public async executeSendTransaction(
 		op: SendTransactionOperation,
 		origin: LocalTxOrigin,
@@ -447,25 +489,18 @@ export class DappSendExecutor {
 					// One post-send closure owns BOTH the activity record AND the public-authwit
 					// index write. grantPublicAuthwit routes here (kind: send_transaction), so this
 					// is where a granted authwit is recorded — pending, reconciled by tx outcome.
-					recordTransaction: async (hash) => {
-						await this.deps.addTransaction(
-							origin,
-							network.chainId,
-							account.address.toString(),
-							txCalls,
-							nonce.toString(),
-							feePaymentMethod,
-							hash,
-							primaryEndpointUrl(network),
-							getEstimatedFee(txRequest),
-							getGasDetails(txRequest),
-							fence,
-							op.networkId,
-						)
-						if (pendingPublicAuthwits.length > 0) {
-							await this.deps.recordPendingAuthwits(account.address.toString(), pendingPublicAuthwits, hash)
-						}
-					},
+					recordTransaction: this.sentTxRecorder({
+						origin,
+						network,
+						account,
+						txCalls,
+						nonce,
+						feePaymentMethod,
+						txRequest,
+						fence,
+						networkId: op.networkId,
+						pendingPublicAuthwits,
+					}),
 				})
 				return txHash.toString()
 			},
@@ -564,25 +599,18 @@ export class DappSendExecutor {
 					// index write, so ordering is explicit. Recording here (not at build) is what
 					// keeps estimate/reject from leaking a grant; the rows land `pending` and are
 					// reconciled by the tx's on-chain outcome (onTransactionUpdated).
-					recordTransaction: async (hash) => {
-						await this.deps.addTransaction(
-							origin,
-							network.chainId,
-							account.address.toString(),
-							txCalls,
-							nonce.toString(),
-							feePaymentMethod,
-							hash,
-							primaryEndpointUrl(network),
-							getEstimatedFee(txRequest),
-							getGasDetails(txRequest),
-							fence,
-							op.networkId,
-						)
-						if (pendingPublicAuthwits.length > 0) {
-							await this.deps.recordPendingAuthwits(account.address.toString(), pendingPublicAuthwits, hash)
-						}
-					},
+					recordTransaction: this.sentTxRecorder({
+						origin,
+						network,
+						account,
+						txCalls,
+						nonce,
+						feePaymentMethod,
+						txRequest,
+						fence,
+						networkId: op.networkId,
+						pendingPublicAuthwits,
+					}),
 				})
 
 				if (op.opts.wait === "NO_WAIT") {

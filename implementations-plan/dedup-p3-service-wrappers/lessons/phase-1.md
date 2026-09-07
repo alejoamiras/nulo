@@ -28,3 +28,11 @@ Base: `worktree-dedup-p2-adopt-helpers` (PR #566). Scope: ledger ids D1 D2 D3 D4
 - F3 (own commit): `invalidateAndDelete` is synchronous and returns `repo.delete`'s promise; test pins the fence-before-delete order and promise identity.
 - X4 (own commit): `startPollScheduler(map, key, poll, labels)`; scenario pins map-before-kick for both arms.
 - Gate: lint 0 · extension typecheck 0 · 53 test files / 834 tests (incl. the three new ones).
+
+## Phase 3 — execution and token introspection (C1, C5, C6, F2) ✓
+
+- C1: `sentTxRecorder(sent: SentTx)` builds the post-send closure both arms pass; `SentTx`'s field types are read off `DappSendExecutorDeps["addTransaction"]`'s parameter tuple and the fee-detail helpers, so no extra imports.
+- C5: `TRANSFER_FN_BY_TYPE` (`as const satisfies Record<TransferType, …>`) replaces the four-case switch; the two error strings are unchanged and `operation-planner.test.ts` still exercises every branch.
+- C6: `decodeInto(...)` logs the defensive arity form at all three arms, comment moved onto it.
+- F2: `resolveTokenFns(artifact)` iterates `Object.values(TOKEN_FN_DESCRIPTORS)` by `descriptor.kind` into one typed record (one cast at the accumulator); the `TokenInterface` literal stays explicit.
+- Gate: lint 0 · extension typecheck 0 · 56 test files / 722 tests (execution, token, fpc).
