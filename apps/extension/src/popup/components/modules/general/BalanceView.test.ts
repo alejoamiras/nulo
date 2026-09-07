@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 let deletedHandler: ((tb: unknown) => void) | undefined
 let addedHandler: ((tb: unknown) => void) | undefined
+let connectedHandler: (() => void) | undefined
 const noopEvent = { add: vi.fn(), remove: vi.fn() }
 
 const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
@@ -41,6 +42,12 @@ vi.mock("@/wallet/services/token-balance/client", () => ({
 	TokenBalanceServiceClient: vi.fn(function () {
 		return {
 			disconnect: vi.fn(),
+			onConnected: {
+				add: vi.fn((fn: () => void) => {
+					connectedHandler = fn
+				}),
+				remove: vi.fn(),
+			},
 			onTokenBalanceAdded: {
 				add: vi.fn((fn: (tb: unknown) => void) => {
 					addedHandler = fn
@@ -160,6 +167,7 @@ afterEach(() => {
 	vi.clearAllMocks()
 	deletedHandler = undefined
 	addedHandler = undefined
+	connectedHandler = undefined
 	mockQuotes = {}
 	mockShowFiat = true
 	seedRows = SEED
@@ -283,10 +291,23 @@ describe("BalanceView — Home aggregate", () => {
 		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("$1,250.00")
 
 		expect(deletedHandler).toBeTypeOf("function")
-		deletedHandler?.({ id: "b1", token: { id: "tok-1" } })
+		deletedHandler?.(SEED[0])
 		await flushPromises()
 
 		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("$0.00")
+	})
+
+	test("a failed snapshot stays hidden until the client reconnects, then the resnapshot lands", async () => {
+		mockQuotes = FRESH()
+		let calls = 0
+		fetchRows = () => (calls++ === 0 ? Promise.reject(new Error("port closed")) : Promise.resolve(SEED))
+		const { wrapper } = await mountView()
+		expect(wrapper.find('[data-testid="balance-amount"]').text()).toBe("")
+
+		connectedHandler?.()
+		await flushPromises()
+		expect(calls).toBe(2)
+		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("$1,249.82")
 	})
 })
 

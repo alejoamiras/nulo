@@ -142,12 +142,19 @@ function onBalanceUpdated(tb) {
 }
 function onBalanceDeleted(tb) {
 	tokenBalances.value = tokenBalances.value.filter((_tb) => _tb.id !== tb.id)
-	markDirty()
+	if (inActiveScope(tb)) markDirty()
+}
+// A reconnect may have dropped events, and a snapshot that failed with the port leaves the figure
+// hidden: resnapshot. The connect that a fetch itself opens is skipped — that fetch will land.
+tokenBalanceService.onConnected.add(onReconnected)
+function onReconnected() {
+	if (fetchesInFlight === 0) void fetchTokenBalances()
 }
 
 // A fetch for one scope may resolve after the user moved on; only the latest request may land,
 // and a snapshot overtaken by a live event is refetched rather than applied.
 let fetchGeneration = 0
+let fetchesInFlight = 0
 async function fetchTokenBalances() {
 	const generation = ++fetchGeneration
 	const address = appStore.account?.address
@@ -159,7 +166,15 @@ async function fetchTokenBalances() {
 		isLoaded.value = true
 		return
 	}
-	const rows = await tokenBalanceService.getTokenBalances(undefined, address)
+	let rows
+	fetchesInFlight++
+	try {
+		rows = await tokenBalanceService.getTokenBalances(undefined, address)
+	} catch {
+		return
+	} finally {
+		fetchesInFlight--
+	}
 	if (generation !== fetchGeneration) return
 	if (fetchDirty) return fetchTokenBalances()
 	tokenBalances.value = forChain(rows, chainId)
@@ -176,6 +191,7 @@ onMounted(async () => {
 	await fetchTokenBalances()
 })
 onBeforeUnmount(() => {
+	tokenBalanceService.onConnected.remove(onReconnected)
 	tokenBalanceService.disconnect()
 	prices.dispose()
 	priceService.disconnect()

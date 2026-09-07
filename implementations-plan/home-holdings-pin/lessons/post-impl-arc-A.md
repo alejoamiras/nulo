@@ -39,3 +39,18 @@ no display-option readers, no new logging) matched the tree.
 4. **Low — plan.md's data-flow section had the other contradictory dispose sentence.** Corrected.
 
 Codex confirmed the round-1 race test fails with the generation check removed.
+
+## Round 3 — verdict `approve with fixes`, two findings, both taken (hard stop reached)
+
+1. **Medium — a rejected snapshot left the figure hidden for good** (nothing retried; events only
+   marked dirty). Fix: the fetch catches its failure and the client's `onConnected` resnapshots,
+   scope-fenced by the generation; the connect a fetch opens itself is skipped (in-flight counter)
+   so a mount does not fetch twice; the listener is removed before `disconnect()`. New case: first
+   fetch rejects, `onConnected` fires, the resnapshot lands.
+2. **Low — a deletion outside the active scope marked the snapshot stale.** Fix: `inActiveScope`
+   gate, as for add/update; the deletion test now passes a complete row.
+
+Codex's "looks fine": the dirty/refetch loop cannot self-trigger (`getTokenBalances` emits no
+events; bursts converge), `isLoaded` does not touch the prop-based token hero, both dispose
+sentences corrected. **The plan's hard stop is 3 rounds: these two fixes are applied and gated
+locally but were not re-reviewed by codex in this arc's loop — the cross-arc pass covers them.**
