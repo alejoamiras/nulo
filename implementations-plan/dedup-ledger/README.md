@@ -21,7 +21,7 @@ worktree dir == plan dir == branch suffix (`worktree-<slug>`). Phase 1 needs no 
 
 | # | Slug | Mode | Finding ids (see ledger.md) | ≈LOC | PR title (≤ 93 chars, becomes the squash subject) | Status |
 |---|---|---|---|--:|---|---|
-| P1 | `dedup-p1-delete` | direct + codex loop | M4 I6 B4 E3 E2 C4 I3 I4 | 325 | `refactor(extension): delete dead code and make the access-level map exhaustive` | ☐ |
+| P1 | `dedup-p1-delete` | direct + codex loop | M4 I6 B4 E3 E2 C4 I3 I4 | 325 | `refactor(extension): delete dead code and make the access-level map exhaustive` | wip |
 | P2 | `dedup-p2-adopt-helpers` | `/blueprint light` | X2 X3 X6 X1 E1 H3 J5 H1 C3 C8 L4 K2 M7 G2 G3 D5 L6 | 287 | `refactor: adopt the shared helpers that call sites re-typed inline` | ☐ |
 | P3 | `dedup-p3-service-wrappers` | `/blueprint mid` | D1 D2 D3 D4 G1 C1 C2 C5 C6 F1 F2 F3 E4 E6 B1 B2 B3 B5 A1 A3 H2 H4 X4 I1 I2 | 742 | `refactor(services): collapse the repeated wrappers in the service and utility layer` | ☐ |
 | P4 | `dedup-p4-vue-shells` | `/blueprint light` | J1 J2 J3 J4 K1 K7 K4 K5 K6 K9 K10 K11 L1 L3 N6 N9 M2 M3 | 1,132 | `refactor(popup): share the page shells and style partials across pages and windows` | ☐ |
