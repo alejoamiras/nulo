@@ -71,6 +71,7 @@ declare module 'vue' {
     RouterView: typeof import('vue-router')['RouterView']
     ScopeAddress: typeof import('./../components/ScopeAddress.vue')['default']
     ScopeClassId: typeof import('./../components/ScopeClassId.vue')['default']
+    ScopePatternList: typeof import('./../components/composite/capabilities/ScopePatternList.vue')['default']
     SearchField: typeof import('./../components/composite/SearchField.vue')['default']
     SecretCountdownClose: typeof import('./../components/composite/SecretCountdownClose.vue')['default']
     SecretRevealCard: typeof import('./../components/composite/SecretRevealCard.vue')['default']

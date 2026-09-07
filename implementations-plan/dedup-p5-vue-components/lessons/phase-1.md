@@ -31,3 +31,26 @@ with both disputed calls; four conditions adopted — K3's merged branch keyed b
 mount), rendered L2 parity cases, tighter N3/M1/N7/N8 test contracts (the FPC harnesses could not see a missing
 error note), and `FieldWarning` homed in `@nulo/design/ui` per the L0–L6 table. Fable's "drop the panel's sanitizer
 import" was wrong (`:314` still uses it) — kept.
+
+## Phase 1 — provable moves (L2, K3, K8, N8, L5, M5's partial, M1) ✓
+
+- L2: one feed block keyed on token presence, `showFallbackAwaiting` shared by the rows computed and the fallback
+  card; the block-pair diff was asserted identical (modulo the two known lines and the comments) before deleting the
+  second. K3: one branch, `:key="op.kind"` on its root `Flex`. K8: `DappIdentityBlock` in verify (the seven CSS classes
+  were md5-identical), the unused sanitizer import gone. N8: a two-section table drives the six rows. L5/M5: two
+  `composes:` partials. M1: `ScopePatternList` owns `formatScope`/`fnLabel`; the panel keeps `sanitizeWireString`
+  for its unknown-type branch; `capability-shared.module.css` serves both.
+- Script gotcha: the brace matcher took `formatScope`'s return-type literal as its body and split the function
+  across the two files; repaired by hand. Test gotchas: a template-level auto-imported util (`humanizeMethodName`)
+  is reached through `global.mocks`, not `vi.stubGlobal` (the instance proxy does not consult window globals);
+  `TokenMetadataPopup` reads `token.contract` on the render before its first fetch resolves — a pre-existing
+  swallowed render error, pinned as `(BUG PIN)` with an `errorHandler` rather than changed.
+- Tests: `ScopePatternList` (11 parity cases), `OperationCard` (same rows for both kinds; a kind switch with a new
+  destination remounts the payload subtree), `TokenMetadataPopup` (one mixed-boolean fixture: order, labels, keys,
+  icons), `RecentActivityView` (+5 rendered cases on the shallow harness: token vs account fallback, orphan suppresses
+  the fallback, both empty states, the token-presence flip remounts the root); the panel suite registers the real
+  list.
+- Gate: lint 0 · extension typecheck 0 · 50 files / 480 tests across `general tx windows capabilities import popups`
+  · `build:chrome` 0; emitted CSS: `disclosure_toggle`, `detail_list`/`bullet`/`mono` once each, `section*` at their
+  three files, two-token mappings at every consumer, `.fee_row_static`'s hover override intact; `components.d.ts`
+  gained `ScopePatternList`.

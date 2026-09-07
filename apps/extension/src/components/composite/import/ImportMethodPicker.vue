@@ -34,18 +34,10 @@ const props = defineProps({
 
 <style module>
 .section_last {
-	display: flex;
-	flex-direction: column;
-	gap: 12px;
-	padding: 20px 0;
+	composes: section_last from "./import-shared.module.css";
 }
 
 .section_label {
-	font-family: var(--font-headline);
-	font-size: 11px;
-	font-weight: 700;
-	text-transform: uppercase;
-	letter-spacing: 0.18em;
-	color: var(--nulo-secondary);
+	composes: section_label from "./import-shared.module.css";
 }
 </style>

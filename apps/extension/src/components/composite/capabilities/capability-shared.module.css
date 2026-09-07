@@ -1,0 +1,13 @@
+.detail_list {
+	padding-left: 4px;
+}
+
+.bullet {
+	flex-shrink: 0;
+	line-height: 1.5;
+}
+
+.mono {
+	font-family: var(--font-mono);
+	letter-spacing: 0.04em;
+}
