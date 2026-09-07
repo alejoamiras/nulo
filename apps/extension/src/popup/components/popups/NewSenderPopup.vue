@@ -112,10 +112,7 @@ usePopupEntity(() => props.show, {
 				>
 					<template #right>
 						<Transition name="fade">
-							<Flex v-if="error.type === 'validation'" align="center" gap="6">
-								<Icon name="warning" size="12" color="red" />
-								<Text size="12" weight="600" color="primary"> {{ error.title }} </Text>
-							</Flex>
+							<FieldWarning v-if="error.type === 'validation'">{{ error.title }}</FieldWarning>
 						</Transition>
 					</template>
 				</Input>

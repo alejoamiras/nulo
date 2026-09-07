@@ -9,6 +9,8 @@ defineProps({
 	title: { type: String, default: "" },
 	/** Raw error detail; shown in the tooltip body. */
 	tooltip: { type: [String, Object], default: "" },
+	/** The info glyph's colour: the contact popups keep the primary tone, the FPC popups flag in red. */
+	color: { type: String, default: "primary" },
 })
 </script>
 
@@ -23,11 +25,7 @@ defineProps({
 			:style="{ marginTop: '-12px' }"
 		>
 			<Flex align="center" wide>
-				<Icon
-					name="info"
-					size="14"
-					color="primary"
-				/>
+				<Icon name="info" size="14" :color="color" />
 
 				<Text size="12" weight="600" color="secondary" :style="{ paddingLeft: '4px' }">
 					{{ title }}

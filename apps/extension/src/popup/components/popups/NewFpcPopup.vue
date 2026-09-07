@@ -150,10 +150,7 @@ watch(
 		>
 			<template #right>
 				<Transition name="fade">
-					<Flex v-if="isAlreadyExist" align="center" gap="6">
-						<Icon name="warning" size="12" color="red" />
-						<Text size="12" weight="600" color="primary"> Already exist </Text>
-					</Flex>
+					<FieldWarning v-if="isAlreadyExist">Already exist</FieldWarning>
 				</Transition>
 			</template>
 		</Input>
@@ -167,43 +164,13 @@ watch(
 		>
 			<template #right>
 				<Transition name="fade">
-					<Flex v-if="!isValidAddress && fpcAddressTerm" align="center" gap="6">
-						<Icon name="warning" size="12" color="red" />
-						<Text size="12" weight="600" color="primary"> Invalid FPC address </Text>
-					</Flex>
+					<FieldWarning v-if="!isValidAddress && fpcAddressTerm">Invalid FPC address</FieldWarning>
 				</Transition>
 			</template>
 		</Input>
 
 		<template #aboveSubmit>
-			<Transition name="fade">
-				<Tooltip
-					v-if="processingError.show"
-					side="top"
-					position="start"
-					wide
-					:disabled="!processingError.tooltip"
-					:style="{ marginTop: '-12px' }"
-				>
-					<Flex align="center" wide>
-						<Icon
-							name="info"
-							size="14"
-							:color="processingError.type === 'warning' ? 'orange' : 'red'"
-						/>
-
-						<Text size="12" weight="600" color="secondary" :style="{ paddingLeft: '4px' }">
-							{{ processingError.title }}
-						</Text>
-					</Flex>
-
-					<template #content>
-						<Text size="12" color="secondary">
-							{{ processingError.tooltip }}
-						</Text>
-					</template>
-				</Tooltip>
-			</Transition>
+			<ProcessingErrorNote :show="processingError.show" :title="processingError.title" :tooltip="processingError.tooltip" color="red" />
 		</template>
 	</FormPopup>
 </template>

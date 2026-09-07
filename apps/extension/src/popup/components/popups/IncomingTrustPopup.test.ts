@@ -286,3 +286,106 @@ describe("IncomingTrustPopup — decision handlers (B-26, B-28)", () => {
 		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ label: "Now showing receives for TST" }))
 	})
 })
+
+describe("IncomingTrustPopup — one decision path for allow and reject", () => {
+	const mountShown = async () => {
+		const w = mount(IncomingTrustPopup, { props: { show: true }, global: { stubs: STUBS } })
+		await flushPromises()
+		return w
+	}
+	const clickReject = (w: ReturnType<typeof mount>) => w.find('[data-testid="incoming-trust-reject"]').trigger("click")
+	const clickAllow = (w: ReturnType<typeof mount>) => w.find('[data-testid="incoming-trust-allow"]').trigger("click")
+
+	test("reject that returns true toasts the hiding copy with the info icon, closes once and releases the latch", async () => {
+		rejectMock.mockResolvedValueOnce(true)
+		const w = await mountShown()
+		await clickReject(w)
+		await flushPromises()
+		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ label: "Hiding receives from TST", icon: "info" }))
+		expect(w.emitted("onClose")?.length).toBe(1)
+		await clickReject(w)
+		expect(rejectMock).toHaveBeenCalledTimes(2)
+	})
+
+	test.each([[false], [undefined]])(
+		"reject that returns %s does not toast success but still closes once and releases the latch",
+		async (value) => {
+			rejectMock.mockResolvedValueOnce(value)
+			const w = await mountShown()
+			await clickReject(w)
+			await flushPromises()
+			expect(openToastMock).not.toHaveBeenCalled()
+			expect(w.emitted("onClose")?.length).toBe(1)
+			await clickReject(w)
+			expect(rejectMock).toHaveBeenCalledTimes(2)
+		},
+	)
+
+	test("a reject that throws toasts the failure copy, closes once and releases the latch", async () => {
+		rejectMock.mockRejectedValueOnce(new Error("boom"))
+		const w = await mountShown()
+		await clickReject(w)
+		await flushPromises()
+		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ label: "Couldn't update trust state", icon: "warning" }))
+		expect(w.emitted("onClose")?.length).toBe(1)
+		await clickReject(w)
+		expect(rejectMock).toHaveBeenCalledTimes(2)
+	})
+
+	test("allow and reject share the latch: a reject during an in-flight allow is dropped", async () => {
+		let resolveAllow!: (v: boolean) => void
+		allowMock.mockImplementationOnce(() => new Promise((r) => (resolveAllow = r)))
+		const w = await mountShown()
+		await clickAllow(w)
+		await clickReject(w)
+		expect(rejectMock).not.toHaveBeenCalled()
+		resolveAllow(true)
+		await flushPromises()
+		expect(w.emitted("onClose")?.length).toBe(1)
+	})
+
+	test("a reopen starts a new decision before the old one settles; the old settlement does not unlock the new prompt", async () => {
+		let resolveOld!: (v: boolean) => void
+		let resolveNew!: (v: boolean) => void
+		allowMock
+			.mockImplementationOnce(() => new Promise((r) => (resolveOld = r)))
+			.mockImplementationOnce(() => new Promise((r) => (resolveNew = r)))
+		const w = await mountShown()
+		await clickAllow(w) // old decision in flight
+		await w.setProps({ show: false })
+		await w.setProps({ show: true }) // the queue moved on: generation bump, latch cleared
+		await flushPromises()
+		await clickAllow(w) // new decision in flight
+		expect(allowMock).toHaveBeenCalledTimes(2)
+		resolveOld(true)
+		await flushPromises()
+		await clickAllow(w) // the old settlement must not have unlocked the new prompt
+		expect(allowMock).toHaveBeenCalledTimes(2)
+		resolveNew(true)
+		await flushPromises()
+		await clickAllow(w)
+		expect(allowMock).toHaveBeenCalledTimes(3)
+	})
+
+	test("a reject completing after the active prompt changed does not emit close", async () => {
+		let resolveReject!: (v: boolean) => void
+		rejectMock.mockImplementationOnce(() => new Promise((r) => (resolveReject = r)))
+		const w = await mountShown()
+		await clickReject(w)
+		cacheStoreState.incomingTrust.contract = `0x${"ef".repeat(32)}`
+		resolveReject(true)
+		await flushPromises()
+		expect(w.emitted("onClose")).toBeUndefined()
+	})
+
+	test("the reject toast uses the symbol captured at click, not a mid-RPC switch", async () => {
+		let resolveReject!: (v: boolean) => void
+		rejectMock.mockImplementationOnce(() => new Promise((r) => (resolveReject = r)))
+		const w = await mountShown()
+		await clickReject(w)
+		cacheStoreState.incomingTrust.tokenSymbol = "OTHER"
+		resolveReject(true)
+		await flushPromises()
+		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ label: "Hiding receives from TST" }))
+	})
+})

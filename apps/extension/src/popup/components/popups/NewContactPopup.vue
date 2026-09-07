@@ -4,7 +4,7 @@ import { isValidHex } from "@/utils/string"
 
 /** Components */
 import ContactFormFields from "@/popup/components/modules/settings/contacts/ContactFormFields.vue"
-import ProcessingErrorNote from "@/popup/components/modules/settings/contacts/ProcessingErrorNote.vue"
+import ProcessingErrorNote from "@/components/composite/ProcessingErrorNote.vue"
 
 /** Services */
 import { ContactServiceClient } from "@/wallet/services/contact/client"

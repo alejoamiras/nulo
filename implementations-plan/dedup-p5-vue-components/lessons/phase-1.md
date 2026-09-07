@@ -54,3 +54,20 @@ import" was wrong (`:314` still uses it) — kept.
   · `build:chrome` 0; emitted CSS: `disclosure_toggle`, `detail_list`/`bullet`/`mono` once each, `section*` at their
   three files, two-token mappings at every consumer, `.fee_row_static`'s hover override intact; `components.d.ts`
   gained `ScopePatternList`.
+
+## Phase 2 — popup pieces (N2, N3, N7) ✓
+
+- N2: `FieldWarning` lives in `@nulo/design/ui` (exported, resolver-listed, 5-case package test incl. the real fade
+  Transition for hidden→shown→hidden and the `v-if`/`v-else-if` pair); the fourteen rows became one tag each in the
+  same branch positions, so every Transition still toggles the same children.
+- N3: `ProcessingErrorNote` moved to `components/composite/` with a `color` prop (default primary); the two FPC popups
+  pass `color="red"`; the contact popups' explicit imports follow. The FPC harnesses' `FormPopup` stub now renders
+  `aboveSubmit` and registers the real note, and each suite has a failed-submit case that sees it.
+- N7: `decide(action, label, icon)` holds the latch, the generation token, the key capture and re-check; the callers
+  build the label in the same tick. Eight new cases pin the reject path (true / false / undefined / throw with toast,
+  close count and latch release), the shared latch, the reopen-then-old-settlement sequence, the changed-identity
+  guard and the captured symbol.
+- Test gotchas: `findComponent(Transition)` does not resolve Vue's functional Transition — the fade is asserted through
+  the `fade-enter-active` class on the entering element; a bare boolean attr reaches an untyped stub prop as `""`.
+- Gate: lint 0 · extension typecheck 0 · popups + composite suites green · design package 38 files / 319 tests ·
+  `build:chrome` 0 (`components.d.ts` gained `FieldWarning` and moved `ProcessingErrorNote`).
