@@ -1,5 +1,7 @@
 import { z } from "zod"
 import type { StorageArea } from "@nulo/wallet-core/ports"
+import { prefixedEntries } from "@nulo/wallet-core/storage"
+import { decodeRow } from "@/wallet/utils/raw-row"
 
 export const PROFILE_TOMBSTONE_ROOT = "nulo:core:profile-tombstones"
 
@@ -48,7 +50,8 @@ export class TombstoneRepository {
 
 	public async get(id: string): Promise<Tombstone | undefined> {
 		const res = await this.storage.get(this.key(id))
-		return this.parse(res[this.key(id)])
+		const row = decodeRow(TombstoneSchema, res[this.key(id)])
+		return row.kind === "valid" ? row.value : undefined
 	}
 
 	/** Clear ONLY if the live tombstone still matches the epoch we wrote — a
@@ -61,23 +64,16 @@ export class TombstoneRepository {
 	/** RESERVED ids from RAW keys — NEVER decodes, so a corrupt tombstone still
 	 *  reserves its id (fail-CLOSED against id-reuse). */
 	public async reservedIds(): Promise<Set<string>> {
-		const all = await this.storage.get()
-		const prefix = `${PROFILE_TOMBSTONE_ROOT}@`
-		const ids = new Set<string>()
-		for (const k of Object.keys(all)) if (k.startsWith(prefix)) ids.add(k.slice(prefix.length))
-		return ids
+		return new Set(prefixedEntries(await this.storage.get(), `${PROFILE_TOMBSTONE_ROOT}@`).map(([, id]) => id))
 	}
 
 	/** VALID payloads only (drives resume/cleanup) — skips a corrupt row but
 	 *  NEVER removes it (it stays reserved + surfaces "deletion pending"). */
 	public async validPayloads(): Promise<Tombstone[]> {
-		const all = await this.storage.get()
-		const prefix = `${PROFILE_TOMBSTONE_ROOT}@`
 		const out: Tombstone[] = []
-		for (const [k, v] of Object.entries(all)) {
-			if (!k.startsWith(prefix)) continue
-			const parsed = this.parse(v)
-			if (parsed) out.push(parsed)
+		for (const [, , v] of prefixedEntries(await this.storage.get(), `${PROFILE_TOMBSTONE_ROOT}@`)) {
+			const row = decodeRow(TombstoneSchema, v)
+			if (row.kind === "valid") out.push(row.value)
 		}
 		return out
 	}
@@ -88,25 +84,10 @@ export class TombstoneRepository {
 	 *  a corrupt tombstone whose profile row is absent is a phase-1-done,
 	 *  purge-PENDING deletion (the tombstone is written BEFORE the row is deleted),
 	 *  so auto-dropping it would fail OPEN — abandoning a real in-progress deletion
-	 *  + reopening the id for reuse. Both plan auditors flagged auto-repair as unsafe. */
+	 *  + reopening the id for reuse. */
 	public async corruptIds(): Promise<string[]> {
-		const all = await this.storage.get()
-		const prefix = `${PROFILE_TOMBSTONE_ROOT}@`
-		const out: string[] = []
-		for (const [k, v] of Object.entries(all)) {
-			if (!k.startsWith(prefix)) continue
-			if (!this.parse(v)) out.push(k.slice(prefix.length))
-		}
-		return out
-	}
-
-	private parse(raw: unknown): Tombstone | undefined {
-		if (typeof raw !== "string") return undefined
-		try {
-			const p = TombstoneSchema.safeParse(JSON.parse(raw))
-			return p.success ? p.data : undefined
-		} catch {
-			return undefined
-		}
+		return prefixedEntries(await this.storage.get(), `${PROFILE_TOMBSTONE_ROOT}@`)
+			.filter(([, , v]) => decodeRow(TombstoneSchema, v).kind !== "valid")
+			.map(([, id]) => id)
 	}
 }

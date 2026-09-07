@@ -831,24 +831,31 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	private startScheduler(profileId: string, networkId: string, accountAddress: string): void {
 		const key = this.schedulerKey(networkId, accountAddress)
 		if (this.schedulers.has(key)) return
-		// The epoch this scheduler belongs to. A hydrate/clear bumps the epoch at its
-		// entry but only tears the old intervals down at its COMMIT — so between the
-		// two, an old interval can still fire. Bail its tick if the epoch has moved:
-		// otherwise the scan it starts would capture the NEW epoch and commit stale
-		// old-profile work under it.
+		this.startPollScheduler(this.schedulers, key, () => this.poll(profileId, networkId, accountAddress), {
+			tick: "Poll failed",
+			initial: "Initial poll failed",
+		})
+	}
+
+	/** One interval per key, fenced to the epoch it was born in. A hydrate/clear bumps the epoch at
+	 *  its entry but only tears the old intervals down at its COMMIT — so between the two, an old
+	 *  interval can still fire; its tick bails, otherwise the scan it starts would capture the NEW
+	 *  epoch and commit stale old-profile work under it. The map is written BEFORE the immediate
+	 *  first poll, which exists so first-receive doesn't wait one full interval after SW restart /
+	 *  token-add. */
+	private startPollScheduler(
+		schedulers: Map<string, ReturnType<typeof setInterval>>,
+		key: string,
+		poll: () => Promise<void>,
+		labels: { tick: string; initial: string },
+	): void {
 		const bornAtEpoch = this.serviceEpoch
 		const interval = setInterval(() => {
 			if (this.serviceEpoch !== bornAtEpoch) return
-			this.poll(profileId, networkId, accountAddress).catch((err) => {
-				this.logWarn(`Poll failed: ${getErrorMessage(err)}`)
-			})
+			poll().catch((err) => this.logWarn(`${labels.tick}: ${getErrorMessage(err)}`))
 		}, this.pollIntervalMs)
-		this.schedulers.set(key, interval)
-		// Kick once immediately so first-receive doesn't wait one full
-		// interval after SW restart / token-add.
-		this.poll(profileId, networkId, accountAddress).catch((err) => {
-			this.logWarn(`Initial poll failed: ${getErrorMessage(err)}`)
-		})
+		schedulers.set(key, interval)
+		poll().catch((err) => this.logWarn(`${labels.initial}: ${getErrorMessage(err)}`))
 	}
 
 	private publicSchedulerKey(networkId: string, contract: string): string {
@@ -860,16 +867,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		const key = this.publicSchedulerKey(networkId, contract)
 		this.publicWatched.set(key, { profileId, networkId, contract })
 		if (this.publicSchedulers.has(key)) return
-		// Same creation-epoch fence as the note arm: an old interval firing during a
-		// newer hydrate's construction window must not start a scan under the bumped epoch.
-		const bornAtEpoch = this.serviceEpoch
-		const interval = setInterval(() => {
-			if (this.serviceEpoch !== bornAtEpoch) return
-			this.pollPublic(key).catch((err) => this.logWarn(`Public poll failed: ${getErrorMessage(err)}`))
-		}, this.pollIntervalMs)
-		this.publicSchedulers.set(key, interval)
-		// Kick once immediately (parity with the note arm).
-		this.pollPublic(key).catch((err) => this.logWarn(`Initial public poll failed: ${getErrorMessage(err)}`))
+		this.startPollScheduler(this.publicSchedulers, key, () => this.pollPublic(key), {
+			tick: "Public poll failed",
+			initial: "Initial public poll failed",
+		})
 	}
 
 	/** Tear down the public-event scheduler for `(networkId, contract)`. */

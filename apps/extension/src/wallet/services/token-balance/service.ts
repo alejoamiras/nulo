@@ -86,6 +86,14 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	 *  projection survives it. */
 	private readonly invalidatedBalanceIds = new Set<number>()
 
+	/** Fence first, then delete: an in-flight projection must not resurrect the id. Deliberately not
+	 *  `async` — callers await the repo's own promise, so no extra microtask lands between the delete
+	 *  and their emit decision. */
+	private invalidateAndDelete(id: number): Promise<void> {
+		this.invalidatedBalanceIds.add(id)
+		return this.repo.delete(id)
+	}
+
 	public constructor(
 		logger: ILogger,
 		browserApi: BrowserApi,
@@ -405,8 +413,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		// first: an in-flight projection must not resurrect the id.
 		for (const row of plan.staleIdentity) {
 			if (gen !== this.profileGeneration) return undefined
-			this.invalidatedBalanceIds.add(row.id)
-			await this.repo.delete(row.id)
+			await this.invalidateAndDelete(row.id)
 		}
 
 		for (const row of plan.staleTokens) {
@@ -520,8 +527,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 			// so a successor context can re-mint this id — its rows must not be
 			// deleted by the departed token's handler.
 			for (const tb of (await this.repo.getAll()).filter((x) => rowMatchesToken(x, token))) {
-				this.invalidatedBalanceIds.add(tb.id)
-				await this.repo.delete(tb.id)
+				await this.invalidateAndDelete(tb.id)
 				this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb, token))
 			}
 		})
@@ -539,8 +545,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		// creation whose `repo.set` settles after this snapshot survives the purge.
 		await this.lock.withLock(async () => {
 			for (const tb of (await this.repo.getAll()).filter((x) => set.has(x.token) && x.profileId === profileId)) {
-				this.invalidatedBalanceIds.add(tb.id)
-				await this.repo.delete(tb.id)
+				await this.invalidateAndDelete(tb.id)
 				// Delete-before-emit (the repo-wide purge invariant); decorate only
 				// with the row's OWN token, never a reused id's successor.
 				const live = this.tokens.get(tb.token)
@@ -575,8 +580,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 			for (const tb of (await this.repo.getAll()).filter(
 				(row) => row.profileId === profileId && keys.has(`${row.chainId}:${row.account}`),
 			)) {
-				this.invalidatedBalanceIds.add(tb.id)
-				await this.repo.delete(tb.id)
+				await this.invalidateAndDelete(tb.id)
 				// Delete-before-emit (the repo-wide purge invariant). The scope's profile
 				// is typically NOT active here (restore finalize) — emit only when the map
 				// holds the row's OWN token, never a reused id's successor.

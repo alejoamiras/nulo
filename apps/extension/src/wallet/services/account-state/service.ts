@@ -61,25 +61,17 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 	public async getAccounts(networkId: string): Promise<string[]> {
 		await this.ensureInitialized()
 		const network = await this.networkService.getNetwork(networkId)
-		try {
-			const accounts = await this.pxeService.getRegisteredAccounts(networkInfoFrom(network))
-			return accounts.map((x) => x.address.toString())
-		} catch (error) {
-			this.logError("Failed to fetch registered accounts", getErrorMessage(error))
-			throw new Error("PXE request failed")
-		}
+		return this.viaPxe("fetch registered accounts", async () =>
+			(await this.pxeService.getRegisteredAccounts(networkInfoFrom(network))).map((x) => x.address.toString()),
+		)
 	}
 
 	public async getSenders(networkId: string): Promise<string[]> {
 		await this.ensureInitialized()
 		const network = await this.networkService.getNetwork(networkId)
-		try {
-			const senders = await this.pxeService.getSenders(networkInfoFrom(network))
-			return senders.map((x) => x.toString())
-		} catch (error) {
-			this.logError("Failed to fetch registered senders", getErrorMessage(error))
-			throw new Error("PXE request failed")
-		}
+		return this.viaPxe("fetch registered senders", async () =>
+			(await this.pxeService.getSenders(networkInfoFrom(network))).map((x) => x.toString()),
+		)
 	}
 
 	/** Union of registered sender addresses across every network in the
@@ -119,37 +111,38 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 		await this.ensureInitialized()
 		const network = await this.networkService.getNetwork(networkId)
 		const info = networkInfoFrom(network)
-		try {
+		return this.viaPxe("register sender", async () => {
 			const sender = (await this.pxeService.registerSender(info, AztecAddress.fromStringUnsafe(address))).toString()
 			this.emit("onSenderAdded", sender)
 			return sender
-		} catch (error) {
-			this.logError("Failed to register sender", getErrorMessage(error))
-			throw new Error("PXE request failed")
-		}
+		})
 	}
 
 	public async deleteSender(networkId: string, address: string): Promise<string> {
 		await this.ensureInitialized()
 		const network = await this.networkService.getNetwork(networkId)
-		try {
+		return this.viaPxe("remove sender", async () => {
 			await this.pxeService.removeSender(networkInfoFrom(network), AztecAddress.fromStringUnsafe(address))
 			this.emit("onSenderDeleted", address)
 			return address
-		} catch (error) {
-			this.logError("Failed to remove sender", getErrorMessage(error))
-			throw new Error("PXE request failed")
-		}
+		})
 	}
 
 	public async getContracts(networkId: string): Promise<string[]> {
 		await this.ensureInitialized()
 		const network = await this.networkService.getNetwork(networkId)
+		return this.viaPxe("fetch registered contracts", async () =>
+			(await this.pxeService.getContracts(networkInfoFrom(network))).map((x) => x.toString()),
+		)
+	}
+
+	/** Every PXE failure surfaces as the same opaque error; the cause goes to the log. The network
+	 *  lookup stays outside so a missing network keeps its own error. */
+	private async viaPxe<T>(action: string, fn: () => Promise<T>): Promise<T> {
 		try {
-			const contracts = await this.pxeService.getContracts(networkInfoFrom(network))
-			return contracts.map((x) => x.toString())
+			return await fn()
 		} catch (error) {
-			this.logError("Failed to fetch registered contracts", getErrorMessage(error))
+			this.logError(`Failed to ${action}`, getErrorMessage(error))
 			throw new Error("PXE request failed")
 		}
 	}

@@ -70,6 +70,11 @@ export async function handleSessionEstablished(
 	// including the missing-row early return that previously leaked (B-13).
 	const marker = deps.pendingVerification.get(session.sessionId)
 	const isNewConnection = marker !== undefined
+	const terminateWith = (message: string): false => {
+		deps.logger.log("wallet-sdk-bg", LogLevel.Warn, message)
+		deps.terminateSession(session.sessionId)
+		return false
+	}
 	try {
 		// A STALE marker is a DEAD approval: an approved handshake parked past
 		// the freshness window must terminate, never soften into reconnect
@@ -82,37 +87,25 @@ export async function handleSessionEstablished(
 		// `!trustedVerification` gate; the 90 s TTL is NOT a security boundary
 		// and nothing may lean on it as one.
 		if (marker && isPendingVerificationStale(marker)) {
-			deps.logger.log(
-				"wallet-sdk-bg",
-				LogLevel.Warn,
+			return terminateWith(
 				`Session ${describeExternalId(session.sessionId)} established on chain ${chainId} on a stale approval — terminating`,
 			)
-			deps.terminateSession(session.sessionId)
-			return false
 		}
 		const dappSession = await deps.dappSessionService.tryGetDappSessionByOriginAndChain(session.origin, chainId)
 		if (!dappSession) {
 			// Revoked between approveDiscovery and key-exchange — terminate so the dApp
 			// can't ride a stale approval into a live ActiveSession (F-006).
-			deps.logger.log(
-				"wallet-sdk-bg",
-				LogLevel.Warn,
+			return terminateWith(
 				`Session ${describeExternalId(session.sessionId)} on chain ${chainId} has no DappSession — terminating to honor revocation`,
 			)
-			deps.terminateSession(session.sessionId)
-			return false
 		}
 		// The approving profile must be the validating one: a profile switch
 		// between Allow and key-exchange completion otherwise re-resolves the
 		// row under the NEW profile and would bind an old approval to it.
 		if (marker && dappSession.profileId !== marker.profileId) {
-			deps.logger.log(
-				"wallet-sdk-bg",
-				LogLevel.Warn,
+			return terminateWith(
 				`Session ${describeExternalId(session.sessionId)} on chain ${chainId} runs under profile ${dappSession.profileId} but was approved under ${marker.profileId} — terminating`,
 			)
-			deps.terminateSession(session.sessionId)
-			return false
 		}
 		// Upstream inserts into `activeSessions` BEFORE this handler runs, so a
 		// profile-switch teardown can have terminated this session mid-validation.

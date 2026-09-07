@@ -429,6 +429,30 @@ function settleSlowArm<T>(slowSettled: PromiseSettledResult<T>): T {
 	throw slowSettled.reason
 }
 
+/** Decode one arm's return values or log and leave the slot empty. Logs the arity, never the values:
+ *  these are private call returns. */
+function decodeInto(
+	decoded: AbiDecoded[],
+	index: number,
+	types: Parameters<typeof decodeFromAbi>[0],
+	values: Parameters<typeof decodeFromAbi>[1],
+	logger: ILogger | undefined,
+	label: string,
+): void {
+	try {
+		decoded[index] = decodeFromAbi(types, values)
+	} catch (error) {
+		logger?.log(
+			LOG_SOURCE,
+			LogLevel.Error,
+			label,
+			types,
+			{ returnValueCount: Array.isArray(values) ? values.length : 0 },
+			getErrorMessage(error),
+		)
+	}
+}
+
 /** Unpack fast-arm results into the per-original-index output arrays. */
 function unpackFastArm(
 	fastResults: TxSimulationResult[],
@@ -447,19 +471,7 @@ function unpackFastArm(
 		const tuple = leadingFast[k]
 		const values = fastReturns[k]?.values ?? []
 		encoded[tuple.originalIndex] = values
-		try {
-			decoded[tuple.originalIndex] = decodeFromAbi(tuple.returnTypes, values)
-		} catch (error) {
-			logger?.log(
-				LOG_SOURCE,
-				LogLevel.Error,
-				"Failed to decode fast-arm simulation results",
-				tuple.returnTypes,
-				// Arity, never the values: these are private call returns.
-				{ returnValueCount: values.length },
-				getErrorMessage(error),
-			)
-		}
+		decodeInto(decoded, tuple.originalIndex, tuple.returnTypes, values, logger, "Failed to decode fast-arm simulation results")
 	}
 }
 
@@ -486,18 +498,7 @@ function unpackSlowArm(
 	for (const [call, i, j, types] of slowTuples) {
 		const values = (call.type === FunctionType.PUBLIC ? publicReturn[j] : privateReturn[j]).values ?? []
 		encoded[i] = values
-		try {
-			decoded[i] = decodeFromAbi(types, values)
-		} catch (error) {
-			logger?.log(
-				LOG_SOURCE,
-				LogLevel.Error,
-				"Failed to decode simulation results",
-				types,
-				{ returnValueCount: values.length },
-				getErrorMessage(error),
-			)
-		}
+		decodeInto(decoded, i, types, values, logger, "Failed to decode simulation results")
 	}
 }
 
@@ -513,18 +514,7 @@ async function awaitUtilityResults(
 ): Promise<void> {
 	for (const [promise, i, types] of utilityLaunched) {
 		const { result: values } = await promise
-		try {
-			decoded[i] = decodeFromAbi(types, values)
-		} catch (error) {
-			logger?.log(
-				LOG_SOURCE,
-				LogLevel.Error,
-				"Failed to decode utility simulation results",
-				types,
-				{ returnValueCount: Array.isArray(values) ? values.length : 0 },
-				getErrorMessage(error),
-			)
-		}
+		decodeInto(decoded, i, types, values, logger, "Failed to decode utility simulation results")
 		encoded[i] = values
 	}
 }

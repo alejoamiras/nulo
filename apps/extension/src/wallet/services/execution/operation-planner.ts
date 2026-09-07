@@ -36,6 +36,14 @@ import type { ProfileService } from "@/wallet/services/profile/service"
 import type { TokenService, Token } from "@/wallet/services/token/service"
 import { createTokenFn, TOKEN_FN_DESCRIPTORS } from "@/wallet/services/token/functions"
 import { TransferType } from "@/wallet/services/transaction/spec"
+
+/** Which token function each transfer type executes; a type outside this table is invalid. */
+const TRANSFER_FN_BY_TYPE = {
+	[TransferType.Private]: { field: "transferPrivateFn", descriptor: TOKEN_FN_DESCRIPTORS.transferPrivate },
+	[TransferType.PrivateToPublic]: { field: "transferPrivateToPublicFn", descriptor: TOKEN_FN_DESCRIPTORS.transferPrivateToPublic },
+	[TransferType.Public]: { field: "transferPublicFn", descriptor: TOKEN_FN_DESCRIPTORS.transferPublic },
+	[TransferType.PublicToPrivate]: { field: "transferPublicToPrivateFn", descriptor: TOKEN_FN_DESCRIPTORS.transferPublicToPrivate },
+} as const satisfies Record<TransferType, { field: string; descriptor: unknown }>
 import type { Fn } from "@/wallet/utils/fn"
 import { pickPrimaryMethod } from "@/utils/primary-method"
 import type {
@@ -119,52 +127,16 @@ export class OperationPlanner {
 		}
 		const token = await this.tokenService.getTokenRaw(tokenId)
 
-		let fn: Fn
-		let args: unknown[]
-		switch (transferType) {
-			case TransferType.Private: {
-				if (!token.transferPrivateFn) {
-					throw new Error("Transfer type not supported")
-				}
-				fn = createTokenFn(TOKEN_FN_DESCRIPTORS.transferPrivate, token.transferPrivateFn.name, token.transferPrivateFn.impl)
-				args = fn.buildArgs(accountAddress, recipientAddress, amount)
-				break
-			}
-			case TransferType.PrivateToPublic: {
-				if (!token.transferPrivateToPublicFn) {
-					throw new Error("Transfer type not supported")
-				}
-				fn = createTokenFn(
-					TOKEN_FN_DESCRIPTORS.transferPrivateToPublic,
-					token.transferPrivateToPublicFn.name,
-					token.transferPrivateToPublicFn.impl,
-				)
-				args = fn?.buildArgs(accountAddress, recipientAddress, amount)
-				break
-			}
-			case TransferType.Public: {
-				if (!token.transferPublicFn) {
-					throw new Error("Transfer type not supported")
-				}
-				fn = createTokenFn(TOKEN_FN_DESCRIPTORS.transferPublic, token.transferPublicFn.name, token.transferPublicFn.impl)
-				args = fn?.buildArgs(accountAddress, recipientAddress, amount)
-				break
-			}
-			case TransferType.PublicToPrivate: {
-				if (!token.transferPublicToPrivateFn) {
-					throw new Error("Transfer type not supported")
-				}
-				fn = createTokenFn(
-					TOKEN_FN_DESCRIPTORS.transferPublicToPrivate,
-					token.transferPublicToPrivateFn.name,
-					token.transferPublicToPrivateFn.impl,
-				)
-				args = fn?.buildArgs(accountAddress, recipientAddress, amount)
-				break
-			}
-			default:
-				throw new Error("Invalid transfer type")
-		}
+		// A plain index would coerce "0" / ["0"] and reach inherited names; the enum is numeric and own.
+		const transfer =
+			typeof transferType === "number" && Object.hasOwn(TRANSFER_FN_BY_TYPE, transferType)
+				? TRANSFER_FN_BY_TYPE[transferType]
+				: undefined
+		if (!transfer) throw new Error("Invalid transfer type")
+		const tokenFn = token[transfer.field]
+		if (!tokenFn) throw new Error("Transfer type not supported")
+		const fn: Fn = createTokenFn(transfer.descriptor, tokenFn.name, tokenFn.impl)
+		const args = fn.buildArgs(accountAddress, recipientAddress, amount)
 		const selector = await fn.getSelector()
 		const encodedArgs = fn.encodeArgs(args)
 

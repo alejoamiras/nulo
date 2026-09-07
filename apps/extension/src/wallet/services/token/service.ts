@@ -37,7 +37,24 @@ import {
 	type Methods,
 	type Events,
 } from "./spec"
-import { createViewTokenFn, getDefaultTokenFn, getTokenFnCandidates, TOKEN_FN_DESCRIPTORS } from "./functions"
+import {
+	createViewTokenFn,
+	getDefaultTokenFn,
+	getTokenFnCandidates,
+	TOKEN_FN_DESCRIPTORS,
+	type TokenArtifact,
+	type TokenFnKind,
+} from "./functions"
+
+/** Every token-function kind resolved against one artifact, keyed by each descriptor's own `kind`. */
+function resolveTokenFns(artifact: TokenArtifact) {
+	const out = {} as Record<TokenFnKind, { candidates: ReturnType<typeof getTokenFnCandidates>; fn: ReturnType<typeof getDefaultTokenFn> }>
+	for (const descriptor of Object.values(TOKEN_FN_DESCRIPTORS)) {
+		const candidates = getTokenFnCandidates(descriptor, artifact)
+		out[descriptor.kind] = { candidates, fn: getDefaultTokenFn(descriptor, candidates) }
+	}
+	return out
+}
 import { getTokenInfo, isTokenComplete } from "./utils"
 
 export * from "./functions"
@@ -609,60 +626,29 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 
 			await ensureRegistered(pxe, contract, instance, artifact)
 
-			const getNameFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getName, artifact)
-			const getNameFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.getName, getNameFnCandidates)
-
-			const getSymbolFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getSymbol, artifact)
-			const getSymbolFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.getSymbol, getSymbolFnCandidates)
-
-			const getDecimalsFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getDecimals, artifact)
-			const getDecimalsFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.getDecimals, getDecimalsFnCandidates)
-
-			const balanceOfPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.balanceOfPrivate, artifact)
-			const balanceOfPrivateFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.balanceOfPrivate, balanceOfPrivateFnCandidates)
-
-			const balanceOfPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.balanceOfPublic, artifact)
-			const balanceOfPublicFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.balanceOfPublic, balanceOfPublicFnCandidates)
-
-			const transferPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPublic, artifact)
-			const transferPublicFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.transferPublic, transferPublicFnCandidates)
-
-			const transferPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPrivate, artifact)
-			const transferPrivateFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.transferPrivate, transferPrivateFnCandidates)
-
-			const transferPrivateToPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPrivateToPublic, artifact)
-			const transferPrivateToPublicFn = getDefaultTokenFn(
-				TOKEN_FN_DESCRIPTORS.transferPrivateToPublic,
-				transferPrivateToPublicFnCandidates,
-			)
-
-			const transferPublicToPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPublicToPrivate, artifact)
-			const transferPublicToPrivateFn = getDefaultTokenFn(
-				TOKEN_FN_DESCRIPTORS.transferPublicToPrivate,
-				transferPublicToPrivateFnCandidates,
-			)
+			const fns = resolveTokenFns(artifact)
 
 			const result: TokenInterface = {
 				chainId: network.chainId,
 				contract,
-				getNameFn: getNameFn?.getImpl(),
-				getNameFnCandidates: getNameFnCandidates.map((x) => x.getImpl()),
-				getSymbolFn: getSymbolFn?.getImpl(),
-				getSymbolFnCandidates: getSymbolFnCandidates.map((x) => x.getImpl()),
-				getDecimalsFn: getDecimalsFn?.getImpl(),
-				getDecimalsFnCandidates: getDecimalsFnCandidates.map((x) => x.getImpl()),
-				balanceOfPublicFn: balanceOfPublicFn?.getImpl(),
-				balanceOfPublicFnCandidates: balanceOfPublicFnCandidates.map((x) => x.getImpl()),
-				balanceOfPrivateFn: balanceOfPrivateFn?.getImpl(),
-				balanceOfPrivateFnCandidates: balanceOfPrivateFnCandidates.map((x) => x.getImpl()),
-				transferPublicFn: transferPublicFn?.getImpl(),
-				transferPublicFnCandidates: transferPublicFnCandidates.map((x) => x.getImpl()),
-				transferPrivateFn: transferPrivateFn?.getImpl(),
-				transferPrivateFnCandidates: transferPrivateFnCandidates.map((x) => x.getImpl()),
-				transferPublicToPrivateFn: transferPublicToPrivateFn?.getImpl(),
-				transferPublicToPrivateFnCandidates: transferPublicToPrivateFnCandidates.map((x) => x.getImpl()),
-				transferPrivateToPublicFn: transferPrivateToPublicFn?.getImpl(),
-				transferPrivateToPublicFnCandidates: transferPrivateToPublicFnCandidates.map((x) => x.getImpl()),
+				getNameFn: fns.getName.fn?.getImpl(),
+				getNameFnCandidates: fns.getName.candidates.map((x) => x.getImpl()),
+				getSymbolFn: fns.getSymbol.fn?.getImpl(),
+				getSymbolFnCandidates: fns.getSymbol.candidates.map((x) => x.getImpl()),
+				getDecimalsFn: fns.getDecimals.fn?.getImpl(),
+				getDecimalsFnCandidates: fns.getDecimals.candidates.map((x) => x.getImpl()),
+				balanceOfPublicFn: fns.balanceOfPublic.fn?.getImpl(),
+				balanceOfPublicFnCandidates: fns.balanceOfPublic.candidates.map((x) => x.getImpl()),
+				balanceOfPrivateFn: fns.balanceOfPrivate.fn?.getImpl(),
+				balanceOfPrivateFnCandidates: fns.balanceOfPrivate.candidates.map((x) => x.getImpl()),
+				transferPublicFn: fns.transferPublic.fn?.getImpl(),
+				transferPublicFnCandidates: fns.transferPublic.candidates.map((x) => x.getImpl()),
+				transferPrivateFn: fns.transferPrivate.fn?.getImpl(),
+				transferPrivateFnCandidates: fns.transferPrivate.candidates.map((x) => x.getImpl()),
+				transferPublicToPrivateFn: fns.transferPublicToPrivate.fn?.getImpl(),
+				transferPublicToPrivateFnCandidates: fns.transferPublicToPrivate.candidates.map((x) => x.getImpl()),
+				transferPrivateToPublicFn: fns.transferPrivateToPublic.fn?.getImpl(),
+				transferPrivateToPublicFnCandidates: fns.transferPrivateToPublic.candidates.map((x) => x.getImpl()),
 				isComplete: false,
 			}
 			result.isComplete = isTokenComplete(result)

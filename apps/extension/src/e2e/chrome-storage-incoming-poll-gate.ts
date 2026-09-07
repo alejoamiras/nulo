@@ -1,4 +1,5 @@
 import type { IncomingPollGate, IncomingPollMatch } from "./incoming-poll-gate"
+import { waitForStorageRelease } from "./storage-gate"
 
 /**
  * Storage keys the incoming-poll gate uses. HOLD is written by the test (armed
@@ -81,36 +82,15 @@ export class ChromeStorageIncomingPollGate implements IncomingPollGate {
 	/** Block while the HOLD key is present; resolve when the test removes it or
 	 *  the safety timeout fires. Event-driven (mirrors {@link ChromeStorageProofGate}). */
 	private async blockUntilReleased(): Promise<void> {
-		await new Promise<void>((resolve) => {
-			let settled = false
-			const finish = (reason: "released" | "timeout"): void => {
-				if (settled) return
-				settled = true
-				chrome.storage.onChanged.removeListener(onChange)
-				clearTimeout(timer)
-				if (reason === "timeout") {
-					console.warn(
-						`[e2e-proverless] incoming-poll gate safety timeout after ${SAFETY_TIMEOUT_MS}ms — releasing. ` +
-							`A test set "${INCOMING_POLL_HOLD_KEY}" but never cleared it.`,
-					)
-				}
-				resolve()
-			}
-
-			const onChange = (changes: Record<string, chrome.storage.StorageChange>, area: string): void => {
-				if (area === "session" && INCOMING_POLL_HOLD_KEY in changes && changes[INCOMING_POLL_HOLD_KEY].newValue === undefined) {
-					finish("released")
-				}
-			}
-
-			const timer = setTimeout(() => finish("timeout"), SAFETY_TIMEOUT_MS)
-			chrome.storage.onChanged.addListener(onChange)
-
-			// Re-check after subscribing: closes the release-between-check-and-
-			// subscribe race.
-			chrome.storage.session.get(INCOMING_POLL_HOLD_KEY).then((rec) => {
-				if (rec[INCOMING_POLL_HOLD_KEY] === undefined) finish("released")
-			})
+		await waitForStorageRelease({
+			key: INCOMING_POLL_HOLD_KEY,
+			stillHeld: async () => (await chrome.storage.session.get(INCOMING_POLL_HOLD_KEY))[INCOMING_POLL_HOLD_KEY] !== undefined,
+			timeoutMs: SAFETY_TIMEOUT_MS,
+			onTimeout: () =>
+				console.warn(
+					`[e2e-proverless] incoming-poll gate safety timeout after ${SAFETY_TIMEOUT_MS}ms — releasing. ` +
+						`A test set "${INCOMING_POLL_HOLD_KEY}" but never cleared it.`,
+				),
 		})
 	}
 }

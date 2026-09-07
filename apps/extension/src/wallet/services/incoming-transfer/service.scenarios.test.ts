@@ -2322,6 +2322,48 @@ describe("IncomingTransferService — lock-races (Phase 7 pins for the global se
 		expect([...(watched.get(key) ?? [])].sort()).toEqual([tokenA.contract, tokenB.contract].sort())
 	})
 
+	test("both scheduler arms register their interval BEFORE the immediate first poll", async () => {
+		vi.useFakeTimers()
+		try {
+			const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+			const { service } = await bootService({
+				profile: makeProfileStub({ id: "p1" }),
+				network: makeNetworkStub(),
+				account: accountStub,
+				token: makeTokenStub([tokenA]),
+			})
+			await vi.advanceTimersByTimeAsync(0)
+			const s = service as never as {
+				schedulers: Map<string, unknown>
+				publicSchedulers: Map<string, unknown>
+				startScheduler(profileId: string, networkId: string, account: string): void
+				startPublicScheduler(profileId: string, networkId: string, contract: string): void
+				schedulerKey(networkId: string, account: string): string
+				publicSchedulerKey(networkId: string, contract: string): string
+				poll(...a: unknown[]): Promise<void>
+				pollPublic(key: string): Promise<void>
+			}
+			const noteKey = s.schedulerKey("n1", "0xfresh")
+			const publicKey = s.publicSchedulerKey("n1", "0xfreshcontract")
+			let noteMapAtKick: boolean | undefined
+			let publicMapAtKick: boolean | undefined
+			vi.spyOn(s, "poll").mockImplementation(async () => {
+				noteMapAtKick = s.schedulers.has(noteKey)
+			})
+			vi.spyOn(s, "pollPublic").mockImplementation(async () => {
+				publicMapAtKick = s.publicSchedulers.has(publicKey)
+			})
+
+			s.startScheduler("p1", "n1", "0xfresh")
+			s.startPublicScheduler("p1", "n1", "0xfreshcontract")
+
+			expect(noteMapAtKick).toBe(true)
+			expect(publicMapAtKick).toBe(true)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
 	test("(B-20 stale-tick PIN) an old scheduler ticking during a hydration's construction window does not scan", async () => {
 		vi.useFakeTimers()
 		try {

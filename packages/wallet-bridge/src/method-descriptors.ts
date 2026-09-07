@@ -321,52 +321,48 @@ export const METHOD_REGISTRY: Record<string, MethodDescriptor> = METHOD_REGISTRY
 
 // ── Derivations (each replaces a former hand-maintained table) ─────────
 
-export function deriveCapabilityMap(registry: Record<string, MethodDescriptor>): Record<string, CapabilityType> {
-	const out: Record<string, CapabilityType> = {}
+/** Method → projected value for every descriptor whose projection is defined. */
+function deriveRecord<V>(registry: Record<string, MethodDescriptor>, project: (d: MethodDescriptor) => V | undefined): Record<string, V> {
+	const out: Record<string, V> = {}
 	for (const [method, d] of Object.entries(registry)) {
-		if (d.capability !== null) out[method] = d.capability
+		const v = project(d)
+		if (v !== undefined) out[method] = v
 	}
 	return out
+}
+
+/** The defined projections of every descriptor, as a set. */
+function deriveSet<V>(registry: Record<string, MethodDescriptor>, project: (method: string, d: MethodDescriptor) => V | undefined): Set<V> {
+	const out = new Set<V>()
+	for (const [method, d] of Object.entries(registry)) {
+		const v = project(method, d)
+		if (v !== undefined) out.add(v)
+	}
+	return out
+}
+
+export function deriveCapabilityMap(registry: Record<string, MethodDescriptor>): Record<string, CapabilityType> {
+	return deriveRecord(registry, (d) => d.capability ?? undefined)
 }
 
 export function deriveExemptSet(registry: Record<string, MethodDescriptor>): Set<string> {
-	const out = new Set<string>()
-	for (const [method, d] of Object.entries(registry)) {
-		if (d.exemptReason !== undefined) out.add(method)
-	}
-	return out
+	return deriveSet(registry, (method, d) => (d.exemptReason !== undefined ? method : undefined))
 }
 
 export function deriveMethodToKind(registry: Record<string, MethodDescriptor>): Record<string, OperationKind> {
-	const out: Record<string, OperationKind> = {}
-	for (const [method, d] of Object.entries(registry)) {
-		if (d.routing.via !== "handler") out[method] = d.routing.kind
-	}
-	return out
+	return deriveRecord(registry, (d) => (d.routing.via !== "handler" ? d.routing.kind : undefined))
 }
 
 export function deriveNetworkOnlyKinds(registry: Record<string, MethodDescriptor>): Set<OperationKind> {
-	const out = new Set<OperationKind>()
-	for (const d of Object.values(registry)) {
-		if (d.routing.via === "network-operation") out.add(d.routing.kind)
-	}
-	return out
+	return deriveSet(registry, (_, d) => (d.routing.via === "network-operation" ? d.routing.kind : undefined))
 }
 
 export function deriveAccountKinds(registry: Record<string, MethodDescriptor>): Set<OperationKind> {
-	const out = new Set<OperationKind>()
-	for (const d of Object.values(registry)) {
-		if (d.routing.via === "account-operation") out.add(d.routing.kind)
-	}
-	return out
+	return deriveSet(registry, (_, d) => (d.routing.via === "account-operation" ? d.routing.kind : undefined))
 }
 
 export function deriveScopeCheckerMap(registry: Record<string, MethodDescriptor>): Record<string, ScopeCheck> {
-	const out: Record<string, ScopeCheck> = {}
-	for (const [method, d] of Object.entries(registry)) {
-		if (d.scopeCheck !== undefined) out[method] = d.scopeCheck
-	}
-	return out
+	return deriveRecord(registry, (d) => d.scopeCheck)
 }
 
 /** The exact set of dApp RPC method names the dispatcher supports — the literal

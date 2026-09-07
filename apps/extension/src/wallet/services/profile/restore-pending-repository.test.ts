@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import type { StorageArea } from "@nulo/wallet-core/ports"
 import { RESTORE_PENDING_ROOT, RestorePendingRepository } from "./restore-pending-repository"
@@ -13,6 +13,18 @@ function makeRepo(): { repo: RestorePendingRepository; storage: StorageArea } {
 const MARKER = { profileId: "p1", pxeGeneration: "gen-1", at: 123 }
 
 describe("RestorePendingRepository", () => {
+	test("get reads its key exactly once and decides absent / valid / corrupt from that read", async () => {
+		const { repo, storage } = makeRepo()
+		const get = vi.spyOn(storage, "get")
+		expect(await repo.get("p1")).toEqual({ kind: "absent" })
+		await repo.write(MARKER)
+		expect(await repo.get("p1")).toEqual({ kind: "valid", marker: MARKER })
+		await storage.set({ [`${RESTORE_PENDING_ROOT}@p1`]: "{broken" })
+		expect(await repo.get("p1")).toEqual({ kind: "corrupt" })
+		expect(get).toHaveBeenCalledTimes(3)
+		for (const call of get.mock.calls) expect(call[0]).toBe(`${RESTORE_PENDING_ROOT}@p1`)
+	})
+
 	test("absent by default; write → valid; delete → absent", async () => {
 		const { repo } = makeRepo()
 		expect(await repo.get("p1")).toEqual({ kind: "absent" })

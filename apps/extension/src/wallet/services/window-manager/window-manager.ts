@@ -175,6 +175,10 @@ export class WindowManager {
 	public detach(handleId: string): void {
 		const handle = this.handles.get(handleId)
 		if (!handle || handle.settled) return
+		this.stopWatching(handle)
+	}
+
+	private stopWatching(handle: Handle<unknown>): void {
 		if (handle.timeoutHandle !== null) {
 			this.clock.clearTimeout(handle.timeoutHandle)
 			handle.timeoutHandle = null
@@ -209,14 +213,7 @@ export class WindowManager {
 		handle.settled = true
 		this.handles.delete(handleId)
 
-		if (handle.timeoutHandle !== null) {
-			this.clock.clearTimeout(handle.timeoutHandle)
-			handle.timeoutHandle = null
-		}
-		if (handle.unsubOnRemoved !== null) {
-			handle.unsubOnRemoved()
-			handle.unsubOnRemoved = null
-		}
+		this.stopWatching(handle)
 
 		if (handle.windowId !== undefined) {
 			this.windows.remove(handle.windowId).catch(() => {

@@ -9,7 +9,10 @@ const props = defineProps({
 	},
 })
 
-const showFullscreen = useFullscreenPopupSetting()
+const { showFullscreen, start, dispose } = useFullscreenPopupSetting()
+
+onMounted(start)
+onBeforeUnmount(dispose)
 </script>
 
 <template>

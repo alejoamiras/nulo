@@ -1,6 +1,7 @@
 import type { ServiceSpec } from "@/wallet/base"
 import { ServiceClient } from "@nulo/extension-messaging/background"
 import { validateParams, validateResult } from "@nulo/extension-messaging/zod"
+import type { ZodType } from "zod"
 import { LoggerServiceClient } from "@/wallet/services/logger/client"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import {
@@ -32,70 +33,60 @@ export class NetworkServiceClient extends ServiceClient<Methods, Events> impleme
 		super(NETWORK_SERVICE_NAME, new LoggerServiceClient(), name)
 	}
 
+	/** Validates outgoing params and the incoming result against the method's schema; the raw
+	 *  params (not zod's copy) are what go over the wire. */
+	private async call<K extends keyof Methods & keyof typeof NetworkMethodSchemas>(
+		method: K,
+		params: Parameters<Methods[K]>,
+	): Promise<ReturnType<Methods[K]>> {
+		const schema = NetworkMethodSchemas[method] as { params: ZodType<unknown>; result: ZodType<unknown> }
+		validateParams(schema.params, params, method)
+		const result = await this.request(method, ...params)
+		return validateResult(schema.result, result, method) as ReturnType<Methods[K]>
+	}
+
 	public async getOrInitNetworks(): Promise<Network[]> {
-		validateParams(NetworkMethodSchemas.getOrInitNetworks.params, [], "getOrInitNetworks")
-		const result = await this.request("getOrInitNetworks")
-		return validateResult(NetworkMethodSchemas.getOrInitNetworks.result, result, "getOrInitNetworks")
+		return this.call("getOrInitNetworks", [])
 	}
 
 	public async getNetworks(chainId?: number): Promise<Network[]> {
-		validateParams(NetworkMethodSchemas.getNetworks.params, [chainId], "getNetworks")
-		const result = await this.request("getNetworks", chainId)
-		return validateResult(NetworkMethodSchemas.getNetworks.result, result, "getNetworks")
+		return this.call("getNetworks", [chainId])
 	}
 
 	public async getNetwork(id: string): Promise<Network> {
-		validateParams(NetworkMethodSchemas.getNetwork.params, [id], "getNetwork")
-		const result = await this.request("getNetwork", id)
-		return validateResult(NetworkMethodSchemas.getNetwork.result, result, "getNetwork")
+		return this.call("getNetwork", [id])
 	}
 
 	public async addNetwork(name: string, rpcUrl: string): Promise<Network> {
-		validateParams(NetworkMethodSchemas.addNetwork.params, [name, rpcUrl], "addNetwork")
-		const result = await this.request("addNetwork", name, rpcUrl)
-		return validateResult(NetworkMethodSchemas.addNetwork.result, result, "addNetwork")
+		return this.call("addNetwork", [name, rpcUrl])
 	}
 
 	public async renameNetwork(id: string, name: string): Promise<Network> {
-		validateParams(NetworkMethodSchemas.renameNetwork.params, [id, name], "renameNetwork")
-		const result = await this.request("renameNetwork", id, name)
-		return validateResult(NetworkMethodSchemas.renameNetwork.result, result, "renameNetwork")
+		return this.call("renameNetwork", [id, name])
 	}
 
 	public async deleteNetwork(id: string): Promise<Network> {
-		validateParams(NetworkMethodSchemas.deleteNetwork.params, [id], "deleteNetwork")
-		const result = await this.request("deleteNetwork", id)
-		return validateResult(NetworkMethodSchemas.deleteNetwork.result, result, "deleteNetwork")
+		return this.call("deleteNetwork", [id])
 	}
 
 	public async setActiveNetwork(id: string): Promise<Network> {
-		validateParams(NetworkMethodSchemas.setActiveNetwork.params, [id], "setActiveNetwork")
-		const result = await this.request("setActiveNetwork", id)
-		return validateResult(NetworkMethodSchemas.setActiveNetwork.result, result, "setActiveNetwork")
+		return this.call("setActiveNetwork", [id])
 	}
 
 	public async getActiveNetwork(): Promise<Network | null> {
-		validateParams(NetworkMethodSchemas.getActiveNetwork.params, [], "getActiveNetwork")
-		const result = await this.request("getActiveNetwork")
-		return validateResult(NetworkMethodSchemas.getActiveNetwork.result, result, "getActiveNetwork")
+		return this.call("getActiveNetwork", [])
 	}
 
 	public async getPrimaryNetwork(): Promise<Network | null> {
-		validateParams(NetworkMethodSchemas.getPrimaryNetwork.params, [], "getPrimaryNetwork")
-		const result = await this.request("getPrimaryNetwork")
-		return validateResult(NetworkMethodSchemas.getPrimaryNetwork.result, result, "getPrimaryNetwork")
+		return this.call("getPrimaryNetwork", [])
 	}
 
 	public async setActiveForProfile(profileId: string, networkId: string): Promise<string> {
-		validateParams(NetworkMethodSchemas.setActiveForProfile.params, [profileId, networkId], "setActiveForProfile")
-		const result = await this.request("setActiveForProfile", profileId, networkId)
-		return validateResult(NetworkMethodSchemas.setActiveForProfile.result, result, "setActiveForProfile")
+		return this.call("setActiveForProfile", [profileId, networkId])
 	}
 
 	public async addEndpoint(networkId: string, label: string | undefined, rpcUrl: string): Promise<NetworkEndpoint> {
-		validateParams(NetworkMethodSchemas.addEndpoint.params, [networkId, label, rpcUrl], "addEndpoint")
-		const result = await this.request("addEndpoint", networkId, label, rpcUrl)
-		return validateResult(NetworkMethodSchemas.addEndpoint.result, result, "addEndpoint")
+		return this.call("addEndpoint", [networkId, label, rpcUrl])
 	}
 
 	public async updateEndpoint(
@@ -104,32 +95,22 @@ export class NetworkServiceClient extends ServiceClient<Methods, Events> impleme
 		label: string | undefined,
 		rpcUrl: string,
 	): Promise<NetworkEndpoint> {
-		validateParams(NetworkMethodSchemas.updateEndpoint.params, [networkId, endpointId, label, rpcUrl], "updateEndpoint")
-		const result = await this.request("updateEndpoint", networkId, endpointId, label, rpcUrl)
-		return validateResult(NetworkMethodSchemas.updateEndpoint.result, result, "updateEndpoint")
+		return this.call("updateEndpoint", [networkId, endpointId, label, rpcUrl])
 	}
 
 	public async deleteEndpoint(networkId: string, endpointId: string): Promise<NetworkEndpoint> {
-		validateParams(NetworkMethodSchemas.deleteEndpoint.params, [networkId, endpointId], "deleteEndpoint")
-		const result = await this.request("deleteEndpoint", networkId, endpointId)
-		return validateResult(NetworkMethodSchemas.deleteEndpoint.result, result, "deleteEndpoint")
+		return this.call("deleteEndpoint", [networkId, endpointId])
 	}
 
 	public async setPrimaryEndpoint(networkId: string, endpointId: string): Promise<Network> {
-		validateParams(NetworkMethodSchemas.setPrimaryEndpoint.params, [networkId, endpointId], "setPrimaryEndpoint")
-		const result = await this.request("setPrimaryEndpoint", networkId, endpointId)
-		return validateResult(NetworkMethodSchemas.setPrimaryEndpoint.result, result, "setPrimaryEndpoint")
+		return this.call("setPrimaryEndpoint", [networkId, endpointId])
 	}
 
 	public async getNodeStatus(networkId: string): Promise<NodeStatus> {
-		validateParams(NetworkMethodSchemas.getNodeStatus.params, [networkId], "getNodeStatus")
-		const result = await this.request("getNodeStatus", networkId)
-		return validateResult(NetworkMethodSchemas.getNodeStatus.result, result, "getNodeStatus")
+		return this.call("getNodeStatus", [networkId])
 	}
 
 	public async probeNodeStatus(networkId: string, timeoutMs: number): Promise<NodeStatus> {
-		validateParams(NetworkMethodSchemas.probeNodeStatus.params, [networkId, timeoutMs], "probeNodeStatus")
-		const result = await this.request("probeNodeStatus", networkId, timeoutMs)
-		return validateResult(NetworkMethodSchemas.probeNodeStatus.result, result, "probeNodeStatus")
+		return this.call("probeNodeStatus", [networkId, timeoutMs])
 	}
 }
