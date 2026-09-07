@@ -1,23 +1,15 @@
 /**
- * Pins the `onBalanceDeleted` ordering contract: the home view's display
- * selection must reset when the *currently displayed* token's balance is
- * deleted. `tokenToDisplay` is computed from `tokenBalances`, so the
- * selected-token check has to read the PRE-delete list. A regression that
- * filtered the list before the check left `displayOption` pointing at the
- * deleted token, sticking the home balance on a stale/blank selection — these
- * tests fail against that ordering.
- *
- * Mounted (not exercised via e2e) because the bug only manifests through the
- * computed's reactive recompute; the network suites never delete the displayed
- * balance, which is exactly why it slipped through.
+ * BalanceView renders two heroes: the account aggregate on Home (over the active chain's rows
+ * only — the balance service returns a shared address's rows from every chain) and a per-token
+ * hero when the token page passes `tokenBalance`. Mounted because the aggregate's partial flag and
+ * the kill-switch slot are computed-driven and the network suites never exercise a foreign-chain
+ * row on a shared address.
  */
 
 import { flushPromises, mount } from "@vue/test-utils"
 import { createTestingPinia } from "@pinia/testing"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
-// Captures the handler the component registers on onTokenBalanceDeleted so the
-// test can drive a deletion directly.
 let deletedHandler: ((tb: unknown) => void) | undefined
 const noopEvent = { add: vi.fn(), remove: vi.fn() }
 
@@ -34,7 +26,7 @@ const SEED = [
 	{
 		id: "b2",
 		account: "0xacct",
-		token: { id: "tok-2", symbol: "BBB", decimals: 18, chainId: 1, contract: "0xunmapped" },
+		token: { id: "tok-2", symbol: "BBB", decimals: 18, chainId: CHAIN_IDS.MAINNET, contract: "0xunmapped" },
 		publicBalance: (5n * 10n ** 18n).toString(),
 		privateBalance: "0",
 	},
@@ -60,13 +52,7 @@ vi.mock("@/wallet/services/token-balance/client", () => ({
 	}),
 }))
 
-vi.mock("@/wallet/services/token/client", () => ({
-	TokenServiceClient: vi.fn(function () {
-		return { disconnect: vi.fn(), onTokenDeleted: noopEvent }
-	}),
-}))
-
-// Controllable fiat kill-switch for the S-A state-matrix cases.
+// Controllable fiat kill-switch.
 let mockShowFiat = true
 vi.mock("@/wallet/services/config/client", () => ({
 	ConfigServiceClient: vi.fn(function () {
@@ -78,7 +64,7 @@ vi.mock("@/wallet/services/config/client", () => ({
 	}),
 }))
 
-// Controllable price feed for the A1 fiat cases: tests set `mockQuotes`.
+// Controllable price feed: tests set `mockQuotes`.
 let mockQuotes: Record<string, unknown> = {}
 vi.mock("@/wallet/services/price/client", () => ({
 	PriceServiceClient: vi.fn(function () {
@@ -100,24 +86,31 @@ import { CHAIN_IDS } from "@/utils/chain-ids"
 import { useAppStore } from "@/stores/app.store"
 import BalanceView from "./BalanceView.vue"
 
-async function mountView() {
+const FRESH = () => ({
+	"usd-coin": { coingeckoId: "usd-coin", usd: 0.999857, fetchedAt: Date.now(), providerUpdatedAt: null },
+})
+
+async function mountView(props: Record<string, unknown> = {}) {
 	const pinia = createTestingPinia({ stubActions: false })
 	const appStore = useAppStore(pinia)
-	// Set before mount so onMounted's migration reads valid profile/network/account.
 	appStore.profile = { id: "p1" } as never
-	appStore.network = { id: "n1" } as never
+	appStore.network = { id: "n1", chainId: CHAIN_IDS.MAINNET } as never
 	appStore.account = { address: "0xacct" } as never
-	appStore.displayOption = "total_account_value"
 
-	const wrapper = mount(BalanceView, { shallow: true, global: { plugins: [pinia] } })
+	const wrapper = mount(BalanceView, {
+		props,
+		shallow: true,
+		global: {
+			plugins: [pinia],
+			stubs: { Icon: { template: '<i data-testid="stub-icon" :data-name="name" />', props: ["name", "size"] } },
+		},
+	})
 	await flushPromises()
 	return { wrapper, appStore }
 }
 
-// The shared chrome stub (tests/vitest.setup.ts) leaves chrome.storage.local
-// undefined; the real app store (useSyncedRef) and BalanceView's display-option
-// load/save both touch it. Provide a minimal in-memory backing that supports
-// both the callback (useSyncedRef) and promise (BalanceView) call styles.
+// The shared chrome stub (tests/vitest.setup.ts) leaves chrome.storage.local undefined; the real
+// app store (useSyncedRef) touches it. Provide a minimal in-memory backing.
 beforeEach(() => {
 	const backing: Record<string, unknown> = {}
 	const local = {
@@ -163,198 +156,96 @@ afterEach(() => {
 	seedRows = SEED
 })
 
-describe("BalanceView onBalanceDeleted", () => {
-	test("deleting the displayed token's balance resets displayOption to total_account_value", async () => {
-		const { appStore } = await mountView()
-		appStore.displayOption = "tok-1"
-		await flushPromises()
-
-		expect(deletedHandler).toBeTypeOf("function")
-		deletedHandler?.({ id: "b1", token: { id: "tok-1" } })
-
-		expect(appStore.displayOption).toBe("total_account_value")
-	})
-
-	test("deleting a non-displayed balance leaves displayOption unchanged", async () => {
-		const { appStore } = await mountView()
-		appStore.displayOption = "tok-1"
-		await flushPromises()
-
-		deletedHandler?.({ id: "b2", token: { id: "tok-2" } })
-
-		expect(appStore.displayOption).toBe("tok-1")
-	})
-})
-
-describe("BalanceView fiat (A1)", () => {
-	const FRESH = () => ({
-		"usd-coin": { coingeckoId: "usd-coin", usd: 0.999857, fetchedAt: Date.now(), providerUpdatedAt: null },
-	})
-
-	test("selected priced token shows the ≈ fiat secondary line", async () => {
+describe("BalanceView — Home aggregate", () => {
+	test("renders the real aggregate over priced tokens with the partial caption", async () => {
 		mockQuotes = FRESH()
-		const { wrapper, appStore } = await mountView()
-		appStore.displayOption = "tok-1"
-		await flushPromises()
-
-		const fiat = wrapper.find('[data-testid="balance-fiat"]')
-		expect(fiat.exists()).toBe(true)
-		expect(fiat.text()).toBe("≈ $1,249.82") // (1,000 + 250) cUSD at $0.999857
-	})
-
-	test("selected UNPRICED token shows no fiat element at all", async () => {
-		mockQuotes = FRESH()
-		const { wrapper, appStore } = await mountView()
-		appStore.displayOption = "tok-2"
-		await flushPromises()
-
-		expect(wrapper.find('[data-testid="balance-fiat"]').exists()).toBe(false)
-	})
-
-	test("Account Value renders the REAL aggregate over priced tokens + partial label", async () => {
-		mockQuotes = FRESH()
-		const { wrapper, appStore } = await mountView()
-		appStore.displayOption = "total_account_value"
-		await flushPromises()
+		const { wrapper } = await mountView()
 
 		// Only tok-1 is priced → aggregate = its fiat value, flagged partial.
 		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("$1,249.82")
 		expect(wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(true)
 	})
 
-	test("private-only aggregate sums only private sides", async () => {
-		mockQuotes = FRESH()
-		const { wrapper, appStore } = await mountView()
-		appStore.displayOption = "total_private_balances"
-		await flushPromises()
-
-		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("$999.86") // 1,000 cUSD private
-	})
-
 	test("no priced tokens → $0.00 with the 'priced assets only' caption, never an em-dash", async () => {
 		mockQuotes = {}
-		const { wrapper, appStore } = await mountView()
-		appStore.displayOption = "total_account_value"
-		await flushPromises()
+		const { wrapper } = await mountView()
 
 		const amount = wrapper.find('[data-testid="balance-amount"]').text()
 		expect(amount).toContain("$0.00")
 		expect(amount).not.toContain("—")
 		expect(wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(true)
 	})
-})
 
-describe("BalanceView state matrix (S-A)", () => {
-	test("EMPTY wallet (zero balances) → a truthful $0.00, not a dash", async () => {
-		mockQuotes = {}
-		const { wrapper, appStore } = await mountView()
-		appStore.displayOption = "total_account_value"
-		deletedHandler?.({ id: "b1", token: { id: "tok-1" } })
-		deletedHandler?.({ id: "b2", token: { id: "tok-2" } })
-		await flushPromises()
-
-		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("$0.00")
-	})
-
-	test("tokens held but none priced → $0.00 flagged partial (no em-dash)", async () => {
-		mockQuotes = {}
-		const { wrapper, appStore } = await mountView()
-		appStore.displayOption = "total_account_value"
-		await flushPromises()
-
-		const text = wrapper.find('[data-testid="balance-amount"]').text()
-		expect(text).toContain("$0.00")
-		expect(text).not.toContain("—")
-		expect(wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(true)
-	})
-
-	test("registered-but-EMPTY unpriced rows are $0.00 holdings, not a pricing gap (no em-dash)", async () => {
-		mockQuotes = {}
-		seedRows = [
-			{
-				id: "b9",
-				account: "0xacct",
-				token: { id: "tok-9", symbol: "ZZZ", decimals: 18, chainId: 1, contract: "0xunmapped9" },
-				publicBalance: "0",
-				privateBalance: "0",
-			},
-		]
-		const { wrapper, appStore } = await mountView()
-		appStore.displayOption = "total_account_value"
-		await flushPromises()
-
-		const text = wrapper.find('[data-testid="balance-amount"]').text()
-		expect(text).toContain("$0.00")
-		expect(text).not.toContain("—")
-	})
-
-	test("a priced holding + an unpriced ZERO row is NOT 'partial' — zero rows are not holdings", async () => {
-		mockQuotes = {
-			"usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null },
-		}
+	test("a priced holding + an unpriced ZERO row is NOT partial — zero rows are not holdings", async () => {
+		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
 		seedRows = [
 			SEED[0],
 			{
 				id: "b9",
 				account: "0xacct",
-				token: { id: "tok-9", symbol: "ZZZ", decimals: 18, chainId: 1, contract: "0xunmapped9" },
+				token: { id: "tok-9", symbol: "ZZZ", decimals: 18, chainId: CHAIN_IDS.MAINNET, contract: "0xunmapped9" },
 				publicBalance: "0",
 				privateBalance: "0",
 			},
 		]
-		const { wrapper, appStore } = await mountView()
-		appStore.displayOption = "total_account_value"
-		await flushPromises()
+		const { wrapper } = await mountView()
 
 		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("$1,250.00")
 		expect(wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(false)
 	})
 
-	test("fiat OFF + aggregate selected → the number slot is GONE (space reclaimed)", async () => {
+	test("fiat OFF → the number slot is GONE (space reclaimed)", async () => {
 		mockShowFiat = false
-		const { wrapper, appStore } = await mountView()
-		appStore.displayOption = "total_account_value"
-		await flushPromises()
+		const { wrapper } = await mountView()
 
 		expect(wrapper.find('[data-testid="balance-amount"]').exists()).toBe(false)
 	})
 
-	test("fiat OFF + a TOKEN selected → token display stays (explicit user pick)", async () => {
-		mockShowFiat = false
-		const { wrapper, appStore } = await mountView()
-		appStore.displayOption = "tok-1"
+	test("a same-address row from ANOTHER chain is not counted", async () => {
+		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
+		seedRows = [SEED[0], { ...SEED[0], id: "b-foreign", token: { ...SEED[0].token, id: "tok-f", chainId: CHAIN_IDS.TESTNET } }]
+		const { wrapper } = await mountView()
+
+		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("$1,250.00")
+	})
+
+	test("deleting a row keeps the list consistent (the aggregate drops it)", async () => {
+		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
+		const { wrapper } = await mountView()
+		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("$1,250.00")
+
+		expect(deletedHandler).toBeTypeOf("function")
+		deletedHandler?.({ id: "b1", token: { id: "tok-1" } })
 		await flushPromises()
 
-		expect(wrapper.find('[data-testid="balance-amount"]').exists()).toBe(true)
+		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("$0.00")
 	})
 })
 
-describe("BalanceView — private/public breakdown vocabulary", () => {
-	test("token mode renders the lock/globe pair (bone lock = private, globe = public) with both values", async () => {
-		mockShowFiat = true
-		mockQuotes = {}
-		// Same setup as mountView, plus an explicit Icon stub — the auto-import resolver doesn't run
-		// in this suite (Vue warns "Failed to resolve component: Icon" under bare shallow mount).
-		const pinia = createTestingPinia({ stubActions: false })
-		const appStore = useAppStore(pinia)
-		appStore.profile = { id: "p1" } as never
-		appStore.network = { id: "n1" } as never
-		appStore.account = { address: "0xacct" } as never
-		appStore.displayOption = "total_account_value"
-		const wrapper = mount(BalanceView, {
-			shallow: true,
-			global: {
-				plugins: [pinia],
-				stubs: { Icon: { template: '<i data-testid="stub-icon" :data-name="name" />', props: ["name", "size"] } },
-			},
-		})
-		await flushPromises()
-		appStore.displayOption = "tok-1"
-		await flushPromises()
+describe("BalanceView — token hero (tokenBalance prop)", () => {
+	test("a priced token shows its amount, the ≈ fiat line and the lock/globe split", async () => {
+		mockQuotes = FRESH()
+		const { wrapper } = await mountView({ tokenBalance: SEED[0] })
 
+		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("AAA")
+		expect(wrapper.find('[data-testid="balance-fiat"]').text()).toBe("≈ $1,249.82") // (1,000 + 250) cUSD at $0.999857
 		const icons = wrapper.findAll('[data-testid="stub-icon"]')
 		expect(icons.map((i) => i.attributes("data-name"))).toEqual(["lock", "globe"])
 		expect(wrapper.find('[data-testid="private-balance-value"]').text()).toBe("1,000")
 		expect(wrapper.find('[data-testid="public-balance-value"]').text()).toBe("250")
+	})
+
+	test("an UNPRICED token shows no fiat element at all", async () => {
+		mockQuotes = FRESH()
+		const { wrapper } = await mountView({ tokenBalance: SEED[1] })
+
+		expect(wrapper.find('[data-testid="balance-fiat"]').exists()).toBe(false)
+	})
+
+	test("fiat OFF still shows the token hero (it is a balance, not a fiat figure)", async () => {
+		mockShowFiat = false
+		const { wrapper } = await mountView({ tokenBalance: SEED[0] })
+
+		expect(wrapper.find('[data-testid="balance-amount"]').exists()).toBe(true)
 	})
 })

@@ -10,8 +10,15 @@ import { TaskServiceClient } from "@/wallet/services/task/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import { OperationJournalServiceClient } from "@/wallet/services/operation-journal/client"
 import { BACKFILL_INDICATOR_THRESHOLD_BLOCKS, IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
+import { PriceServiceClient } from "@/wallet/services/price/client"
 
+/** Utils */
 import { stringCompare } from "@/utils/string"
+import { parseRawBalance, safeFiatOf } from "@/utils/token-amount"
+import { capTokenRows, forChain, orderTokenRows } from "@/utils/token-order"
+
+/** Composables */
+import { usePrices } from "@/composables/usePrices"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -66,14 +73,19 @@ const visibleTokenImports = computed(() => {
 const tokenBalances = ref([])
 /** Any row's balance projection in flight → the section-header activity dot. */
 const anyRefreshing = computed(() => tokenBalances.value.some((tb) => tb.isUpdating))
-const sortedTokenBalances = computed(() => {
-	return tokenBalances.value.sort((a, b) => {
-		const tokenA = a.token
-		const tokenB = b.token
 
-		return stringCompare(tokenA.name, tokenB.name)
-	})
-})
+/** Prices order the rows; the client is disconnected AFTER the composable is disposed (cleanup order). */
+const priceService = new PriceServiceClient()
+const prices = usePrices(priceService)
+const fiatOf = safeFiatOf((tb) => prices.tokenFiatMicro(tb.token, parseRawBalance(tb)))
+/** Pins land in a later arc; the empty set keeps the order value-first until then. */
+const pinnedContracts = new Set()
+
+const orderedTokenBalances = computed(() => orderTokenRows(tokenBalances.value, { pinnedContracts, fiatOf }))
+/** Home shows a fixed budget of rows; the rest live on the Holdings tab. */
+const homeRows = computed(() => capTokenRows(orderedTokenBalances.value))
+const shownTokenBalances = computed(() => homeRows.value.shown)
+const overflowCount = computed(() => homeRows.value.overflow)
 
 const taskService = new TaskServiceClient()
 taskService.onTaskCreated.add(onTaskCreated)
@@ -178,7 +190,8 @@ tokenBalanceService.onTokenBalanceAdded.add(onBalanceAdded)
 tokenBalanceService.onTokenBalanceUpdated.add(onBalanceUpdated)
 tokenBalanceService.onTokenBalanceDeleted.add(onBalanceDeleted)
 function onBalanceAdded(tb) {
-	if (tb.account !== appStore.account.address) return
+	// The balance service fans a shared address's rows out from every chain; keep the active one.
+	if (tb.account !== appStore.account.address || tb.token?.chainId !== appStore.network?.chainId) return
 
 	tokenBalances.value.push({
 		...tb,
@@ -306,7 +319,8 @@ async function fetchTokenBalances() {
 	// Guard the outer race with the same scope generation: a rapid account/network switch fires two
 	// fetches; the one that RESOLVES last would otherwise write its (older) balances + reseed and win.
 	const scopeAtStart = scopeGen
-	const balances = (await tokenBalanceService.getTokenBalances(undefined, appStore.account?.address)).map((tb) => ({
+	const rows = forChain(await tokenBalanceService.getTokenBalances(undefined, appStore.account?.address), appStore.network?.chainId)
+	const balances = rows.map((tb) => ({
 		...tb,
 		isUpdating: tasks.value.some((t) => t.content.tbId === tb.id && !t.finishedAt),
 		isMinting: tasks.value.some((t) => t.content.name === tb.token.name && t.content.symbol === tb.token.symbol && !t.finishedAt),
@@ -371,6 +385,8 @@ onBeforeUnmount(() => {
 	incomingTransferService.onIncomingSyncStateChanged.remove(onSyncStateChanged)
 	incomingTransferService.onConnected.remove(seedSyncStates)
 	incomingTransferService.disconnect()
+	prices.dispose()
+	priceService.disconnect()
 })
 </script>
 
@@ -378,14 +394,21 @@ onBeforeUnmount(() => {
 	<Flex direction="column" gap="12" :class="$style.wrapper">
 		<Flex align="end" justify="between" :class="$style.section_header">
 			<Flex align="center" gap="8">
-				<span :class="$style.header_title">TOKEN BALANCES</span>
+				<span :class="$style.header_title">HOLDINGS</span>
+				<span v-if="tokenBalances.length" :class="$style.header_count" data-testid="tokens-count">{{ tokenBalances.length }}</span>
 				<!-- The ONE refresh-activity signal for the whole list (per-row indication is deliberately
 				     silent — batch refreshes would animate every row). Same vocabulary as the gas card's
 				     activity dot: grey pulse = a shown value being re-verified. -->
 				<span v-if="anyRefreshing" :class="$style.refreshing_dot" data-testid="tokens-refreshing" aria-hidden="true" />
 			</Flex>
 
-			<Flex align="center" gap="6">
+			<Flex align="center" gap="10">
+				<span
+					v-if="overflowCount > 0"
+					@click="router.push('/popup/holdings')"
+					data-testid="tokens-view-all"
+					:class="$style.view_all"
+				>View all</span>
 				<Dropdown>
 					<Button variant="secondary" size="micro" data-testid="tokens-menu-trigger">
 						<Icon name="dots" size="12" color="secondary" />
@@ -432,10 +455,10 @@ onBeforeUnmount(() => {
 			<template v-if="newTokens.length">
 				<TokenCard v-for="t in newTokens" :newToken="t" />
 			</template>
-			<template v-if="sortedTokenBalances.length">
-				<TokenCard v-for="tb in sortedTokenBalances" :tokenBalance="tb" :backfilling="isBackfilling(tb.token.contract)" />
+			<template v-if="shownTokenBalances.length">
+				<TokenCard v-for="tb in shownTokenBalances" :key="tb.id" :tokenBalance="tb" :backfilling="isBackfilling(tb.token.contract)" />
 			</template>
-			<template v-if="!newTokens.length && !sortedTokenBalances.length && !visibleTokenImports.length">
+			<template v-if="!newTokens.length && !shownTokenBalances.length && !visibleTokenImports.length">
 				<div :class="$style.empty_state">
 					<span :class="$style.empty_headline">NOTHING HERE YET</span>
 					<span :class="$style.empty_sub">
@@ -494,6 +517,29 @@ onBeforeUnmount(() => {
 	letter-spacing: 0.1em;
 	text-transform: uppercase;
 	color: var(--nulo-secondary);
+}
+
+.header_count {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	color: var(--nulo-outline);
+}
+
+/* Same voice as RecentActivityView's "View Archives" link. */
+.view_all {
+	font-family: var(--font-headline);
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	color: var(--nulo-outline);
+	cursor: pointer;
+
+	transition: color 0.2s var(--bezier);
+
+	&:hover {
+		color: var(--nulo-accent);
+	}
 }
 
 .token_list {

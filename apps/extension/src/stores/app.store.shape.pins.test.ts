@@ -37,7 +37,6 @@ import { useAppStore } from "./app.store"
 const STATE_KEYS = [
 	"_isHomeScreenOpened",
 	"isLoading",
-	"displayOption",
 	"onboardingCompleted",
 	"profile",
 	"profiles",
@@ -81,7 +80,6 @@ const RETURN_ORDER = [
 	"_isHomeScreenOpened",
 	"isLoading",
 	"awaitingTransactions",
-	"displayOption",
 	"profile",
 	"profiles",
 	"isRegistered",

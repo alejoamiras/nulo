@@ -22,7 +22,6 @@ import NewSenderPopup from "./NewSenderPopup.vue"
 import NewTokenPopup from "./NewTokenPopup.vue"
 import ReceivePopup from "./ReceivePopup.vue"
 import RevokeAuthwitsPopup from "./RevokeAuthwitsPopup.vue"
-import SelectBalanceTypePopup from "./SelectBalanceTypePopup.vue"
 import SelectFpcPopup from "./SelectFpcPopup.vue"
 import SelectNetworksPopup from "./SelectNetworksPopup.vue"
 import SelectProfilePopup from "./SelectProfilePopup.vue"
@@ -338,7 +337,6 @@ onBeforeUnmount(() => {
 	<TokenMetadataPopup :show="popupStore.isOpened('token_metadata')" @onClose="popupStore.close('token_metadata')" />
 	<NewTokenPopup :show="popupStore.isOpened('new_token')" @onClose="popupStore.close('new_token')" />
 	<SelectTokenPopup :show="popupStore.isOpened('select_token')" @onClose="popupStore.close('select_token')" />
-	<SelectBalanceTypePopup :show="popupStore.isOpened('select_balance_type')" @onClose="popupStore.close('select_balance_type')" />
 
 
 	<NewFpcPopup :show="popupStore.isOpened('new_fpc')" @onClose="popupStore.close('new_fpc')" />

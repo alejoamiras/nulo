@@ -588,11 +588,15 @@ phase too. `<fast>` and `<smoke>` below mean:
 
 ```bash
 <fast>  = bun run lint && bun run --cwd apps/extension typecheck && bun run test
-<smoke> = bun run build && bun run test:e2e          # the smoke runner does not build (Fact 17)
+<smoke> = VITE_NULO_E2E_MIGRATION_FIXTURE=1 bun run --cwd apps/extension build:chrome \
+          && NULO_E2E_MIGRATION_FIXTURE=1 bun run test:e2e
 ```
 
 (The root `bun run typecheck` names `vue-tsc` directly and fails on a fresh worktree with
-`command not found`; the per-package script is what CI's `typecheck:all` runs — Phase 1 lesson.)
+`command not found`; the per-package script is what CI's `typecheck:all` runs — Phase 1 lesson.
+The smoke runner does not build (Fact 17), and the smoke suite's backup-migration contract
+requires the build AND the run to be armed exactly as `_smoke-e2e.yml:69-105` does; an unarmed
+`bun run build && bun run test:e2e` fails three specs by design — Phase 2 lesson.)
 
 Network gates run in tmux: `tmux new-session -d -s hhp-<phase> "cd $PWD && NULO_E2E_PROVERLESS=1 bun run e2e:agent <files> > ~/.cache/hhp-<phase>.log 2>&1; echo EXIT=\$? >> ~/.cache/hhp-<phase>.log"`,
 then poll `tail -n1 ~/.cache/hhp-<phase>.log` until it reads `EXIT=…`. `EXIT=86` is an infra boot
@@ -613,7 +617,7 @@ Validation gate — `<fast>`; `bun run build && bun run --cwd apps/extension tes
 the glyph one-liner from Fact 18 prints `{'home': True, 'push_pin': True}` on this machine. Pass:
 exit 0; four hashes in the spec. Layers: lint/typecheck · unit · smoke.
 
-#### Phase 2 — Home order, cap, "View all", aggregate-only hero
+#### Phase 2 — Home order, cap, "View all", aggregate-only hero ✓ (2026-09-06, Mac)
 
 - `src/utils/token-amount.ts` + tests: `parseRawBalance` (malformed, negative, huge, non-string →
   `undefined`), `isValidDecimals` (non-integer, negative, 78 → false; 0 and 77 → true),

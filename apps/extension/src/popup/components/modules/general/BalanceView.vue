@@ -2,18 +2,18 @@
 /** Components */
 import ActionButtonsView from "./ActionButtonsView.vue"
 import GasBalanceCard from "./GasBalanceCard.vue"
-import { Dropdown } from "@/components/ui/Dropdown"
 
 /** Services */
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
-import { TokenServiceClient } from "@/wallet/services/token/client"
 import { PriceServiceClient } from "@/wallet/services/price/client"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
 import { copyToClipboard } from "@/utils/clipboard"
-import { storageLocalGet, storageLocalSet } from "@/utils/storage"
+import { parseRawBalance, safeFiatOf } from "@/utils/token-amount"
+import { aggregateFiat } from "@/utils/token-aggregate"
+import { forChain } from "@/utils/token-order"
 
 /** Composables */
 import { usePrices } from "@/composables/usePrices"
@@ -22,14 +22,9 @@ const { openToast } = useToast()
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
-import { usePopupStore } from "@/stores/popup.store"
-import { useCacheStore } from "@/stores/cache.store"
 const appStore = useAppStore()
-const popupStore = usePopupStore()
-const cacheStore = useCacheStore()
 
-const router = useRouter()
-
+/** Home shows the account aggregate; the token page passes its own balance for a per-token hero. */
 const props = defineProps({
 	tokenBalance: {
 		type: Object,
@@ -40,38 +35,30 @@ const props = defineProps({
 
 const tokenBalances = ref([])
 
-const tokenToDisplay = computed(
-	() => props.tokenBalance?.token || tokenBalances.value.find((tb) => tb.token.id === appStore.displayOption)?.token,
-)
-const tokenBalanceToDisplay = computed(() => {
-	return props.tokenBalance || tokenBalances.value.find((tb) => tb.token.id === tokenToDisplay.value?.id)
-})
+const tokenToDisplay = computed(() => props.tokenBalance?.token)
 const showFullBalance = ref(false)
 const totalTokenBalance = computed(() => {
-	if (!tokenBalanceToDisplay.value) return { value: 0 }
+	if (!props.tokenBalance) return { value: 0 }
 
 	// Sum raw base units in bigint domain — no float pivot, no precision loss
 	// even at 18 decimals.
-	const decimals = tokenBalanceToDisplay.value?.token?.decimals || 0
-	const publicRaw = BigInt(tokenBalanceToDisplay.value?.publicBalance || 0)
-	const privateRaw = BigInt(tokenBalanceToDisplay.value?.privateBalance || 0)
-	const totalRaw = publicRaw + privateRaw
+	const decimals = props.tokenBalance.token?.decimals || 0
+	const publicRaw = BigInt(props.tokenBalance.publicBalance || 0)
+	const privateRaw = BigInt(props.tokenBalance.privateBalance || 0)
 
-	return balanceFormatted(totalRaw, decimals, showFullBalance.value ? undefined : 20)
+	return balanceFormatted(publicRaw + privateRaw, decimals, showFullBalance.value ? undefined : 20)
 })
 
 const privateBalanceFormatted = computed(() => {
-	if (!tokenBalanceToDisplay.value) return "0"
-	const decimals = tokenBalanceToDisplay.value?.token?.decimals || 0
-	return balanceFormatted(tokenBalanceToDisplay.value?.privateBalance || 0, decimals, 10).value
+	if (!props.tokenBalance) return "0"
+	return balanceFormatted(props.tokenBalance.privateBalance || 0, props.tokenBalance.token?.decimals || 0, 10).value
 })
 const publicBalanceFormatted = computed(() => {
-	if (!tokenBalanceToDisplay.value) return "0"
-	const decimals = tokenBalanceToDisplay.value?.token?.decimals || 0
-	return balanceFormatted(tokenBalanceToDisplay.value?.publicBalance || 0, decimals, 10).value
+	if (!props.tokenBalance) return "0"
+	return balanceFormatted(props.tokenBalance.publicBalance || 0, props.tokenBalance.token?.decimals || 0, 10).value
 })
 
-/** Live prices (A1). Parent owns the client lifecycle; the composable owns
+/** Live prices. Parent owns the client lifecycle; the composable owns
  *  freshness. Every fiat element below renders ONLY with a usable quote —
  *  no price means no dollar figure, never a fake $0.00. */
 const priceService = new PriceServiceClient()
@@ -90,48 +77,23 @@ configService.getValue("showFiatValues").then((v) => {
 })
 
 const displayedRawTotal = computed(() => {
-	if (!tokenBalanceToDisplay.value) return 0n
-	return BigInt(tokenBalanceToDisplay.value?.publicBalance || 0) + BigInt(tokenBalanceToDisplay.value?.privateBalance || 0)
+	if (!props.tokenBalance) return 0n
+	return BigInt(props.tokenBalance.publicBalance || 0) + BigInt(props.tokenBalance.privateBalance || 0)
 })
 
-/** A1 secondary line for a selected token: `≈ $x.xx`, or undefined (hidden). */
+/** Secondary line for the token hero: `≈ $x.xx`, or undefined (hidden). */
 const displayedTokenFiat = computed(() => {
 	if (!tokenToDisplay.value) return undefined
 	return prices.tokenFiatLabel(tokenToDisplay.value, displayedRawTotal.value)
 })
 
-/** Which balance sides the active aggregate option sums. */
-const aggregateSides = computed(() => ({
-	private: appStore.displayOption !== "total_public_balances",
-	public: appStore.displayOption !== "total_private_balances",
-}))
-
-/** Real fiat aggregate over priced HOLDINGS: Σ balance × price (micro-USD).
- *  A zero-balance row is worth exactly $0.00 whether priced or not, so it
- *  counts as neither a holding nor a pricing gap — a registered-but-empty
- *  token must not flag the aggregate as partial. */
-const aggregate = computed(() => {
-	let micro = 0n
-	let priced = 0
-	let holdings = 0
-	for (const tb of tokenBalances.value) {
-		let raw = 0n
-		if (aggregateSides.value.private) raw += BigInt(tb.privateBalance || 0)
-		if (aggregateSides.value.public) raw += BigInt(tb.publicBalance || 0)
-		if (raw === 0n) continue
-		holdings += 1
-		const value = prices.tokenFiatMicro(tb.token, raw)
-		if (value === undefined) continue
-		micro += value
-		priced += 1
-	}
-	return { micro, priced, holdings }
-})
+const fiatOf = safeFiatOf((tb) => prices.tokenFiatMicro(tb.token, parseRawBalance(tb)))
+const aggregate = computed(() => aggregateFiat(tokenBalances.value, fiatOf))
 
 /** Always a dollar figure — holdings that lack a price count as $0.00 and
  *  the "priced assets only" caption owns the honesty, never an em-dash. */
 const aggregateFiatDisplay = computed(() => prices.formatUsdMicro(aggregate.value.micro))
-const isAggregatePartial = computed(() => aggregate.value.priced < aggregate.value.holdings)
+const isAggregatePartial = computed(() => aggregate.value.partial)
 
 const handleCopy = (value, label) => {
 	void copyToClipboard(value, openToast, {
@@ -150,12 +112,16 @@ const handleTokenBalanceClick = async () => {
 	handleCopy(balance, "Balance")
 }
 
+// The balance service returns a shared address's rows from every chain of the profile; the
+// aggregate is over the active chain only.
+const onActiveChain = (tb) => tb.token?.chainId === appStore.network?.chainId
+
 const tokenBalanceService = new TokenBalanceServiceClient()
 tokenBalanceService.onTokenBalanceAdded.add(onBalanceAdded)
 tokenBalanceService.onTokenBalanceUpdated.add(onBalanceUpdated)
 tokenBalanceService.onTokenBalanceDeleted.add(onBalanceDeleted)
 function onBalanceAdded(tb) {
-	if (tb.account !== appStore.account.address) return
+	if (tb.account !== appStore.account?.address || !onActiveChain(tb)) return
 
 	tokenBalances.value.push(tb)
 }
@@ -166,88 +132,25 @@ function onBalanceUpdated(tb) {
 	}
 }
 function onBalanceDeleted(tb) {
-	// tokenToDisplay is computed from tokenBalances, so the selected-token check
-	// must read the pre-delete list — capture it BEFORE filtering, otherwise the
-	// recompute returns undefined and the displayOption reset never fires
-	// (deleting the displayed balance would leave the home view stuck on a stale
-	// selection). Maintaining the list here also stops the deleted row lingering
-	// until the next full fetch.
-	const wasDisplayed = !props.tokenBalance && tokenToDisplay.value?.id === tb.token.id
 	tokenBalances.value = tokenBalances.value.filter((_tb) => _tb.id !== tb.id)
-	if (wasDisplayed) {
-		appStore.displayOption = "total_account_value"
-	}
-}
-
-const tokenService = new TokenServiceClient()
-tokenService.onTokenDeleted.add(onTokenDeleted)
-function onTokenDeleted(token) {
-	if (!props.tokenBalance && tokenToDisplay.value?.id === token.id) {
-		appStore.displayOption = "total_account_value"
-	}
 }
 
 async function fetchTokenBalances() {
-	tokenBalances.value = await tokenBalanceService.getTokenBalances(undefined, appStore.account?.address)
-}
-
-async function loadBalanceDisplayOption(profileId, networkId) {
-	const key = `nulo:ui:balanceDisplayOption@${profileId}`
-
-	const result = await storageLocalGet(key)
-	const optionsMap = result[key] || {}
-
-	let option = optionsMap[networkId]
-
-	if (!option) {
-		option = "total_account_value"
-		optionsMap[networkId] = option
-		await storageLocalSet({ [key]: optionsMap })
-	}
-
-	appStore.displayOption = option
-}
-async function saveBalanceDisplayOption(profileId, networkId, option) {
-	const key = `nulo:ui:balanceDisplayOption@${profileId}`
-
-	const result = await storageLocalGet(key)
-	const optionsMap = result[key] || {}
-
-	if (optionsMap[networkId] !== option) {
-		optionsMap[networkId] = option
-		await storageLocalSet({ [key]: optionsMap })
-	}
+	const rows = await tokenBalanceService.getTokenBalances(undefined, appStore.account?.address)
+	tokenBalances.value = forChain(rows, appStore.network?.chainId)
 }
 
 watch(
-	() => appStore.network,
-	async () => {
-		await loadBalanceDisplayOption(appStore.profile.id, appStore.network.id)
-	},
-)
-watch(
-	() => appStore.account,
+	() => [appStore.account?.address, appStore.network?.chainId],
 	async () => {
 		await fetchTokenBalances()
-		if (!tokenToDisplay.value) {
-			appStore.displayOption = "total_account_value"
-		}
-	},
-)
-watch(
-	() => appStore.displayOption,
-	async () => {
-		await saveBalanceDisplayOption(appStore.profile.id, appStore.network.id, appStore.displayOption)
 	},
 )
 onMounted(async () => {
 	await fetchTokenBalances()
-
-	await loadBalanceDisplayOption(appStore.profile.id, appStore.network.id)
 })
 onBeforeUnmount(() => {
 	tokenBalanceService.disconnect()
-	tokenService.disconnect()
 	prices.dispose()
 	priceService.disconnect()
 	configService.disconnect()

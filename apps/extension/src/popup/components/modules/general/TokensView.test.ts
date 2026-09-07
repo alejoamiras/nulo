@@ -44,6 +44,9 @@ const H = vi.hoisted(() => {
 		journalUpdated: makeEvent(),
 		journalDeleted: makeEvent(),
 		journalConnected: makeEvent(),
+		quotesUpdated: makeEvent(),
+		priceConnected: makeEvent(),
+		quotes: { current: {} as Record<string, unknown> },
 		store: { current: null as unknown as ReturnType<typeof createAppStoreHarness> },
 	}
 })
@@ -102,6 +105,18 @@ vi.mock("@/wallet/services/incoming-transfer/client", async () => {
 		}),
 	}
 })
+// The view orders rows by price: `usePrices` calls `refreshIfStale()` at construction, so the
+// client must answer. Tests seed `H.quotes` to price a token.
+vi.mock("@/wallet/services/price/client", () => ({
+	PriceServiceClient: vi.fn(function () {
+		return {
+			disconnect: vi.fn(),
+			onQuotesUpdated: H.quotesUpdated,
+			onConnected: H.priceConnected,
+			refreshIfStale: vi.fn().mockImplementation(async () => H.quotes.current),
+		}
+	}),
+}))
 vi.mock("@/wallet/services/task/spec", () => ({ ContentKind: H.ContentKind }))
 vi.mock("@/stores/app.store", () => ({ useAppStore: () => H.store.current }))
 vi.mock("@/stores/popup.store", () => ({ usePopupStore: () => ({ open: vi.fn() }) }))
@@ -110,6 +125,7 @@ vi.mock("vue-router", async (importOriginal) => {
 	return { ...mod, useRouter: () => ({ push: vi.fn() }) }
 })
 
+import { CHAIN_IDS } from "@/utils/chain-ids"
 import { BACKFILL_INDICATOR_THRESHOLD_BLOCKS } from "@/wallet/services/incoming-transfer/spec"
 import TokenCard from "./TokenCard.vue"
 import TokensView from "./TokensView.vue"
@@ -131,6 +147,22 @@ const balanceRow = (contract = CONTRACT) => ({
 	privateBalance: "0",
 	updatedAt: 1,
 })
+/** A distinct row; `over` patches the token and the balance in one call. */
+const namedRow = (id: number, symbol: string, over: Partial<{ chainId: number; contract: string; publicBalance: string }> = {}) => ({
+	...balanceRow(over.contract ?? `0x${symbol.toLowerCase()}`),
+	id,
+	token: {
+		id,
+		chainId: over.chainId ?? 1,
+		contract: over.contract ?? `0x${symbol.toLowerCase()}`,
+		name: `${symbol} Token`,
+		symbol,
+		decimals: 18,
+	},
+	publicBalance: over.publicBalance ?? "1",
+})
+const cardSymbols = (wrapper: ReturnType<typeof mount>) =>
+	wrapper.findAllComponents(TokenCard).map((c) => (c.props("tokenBalance") as { token: { symbol: string } }).token.symbol)
 
 const cardBackfilling = (wrapper: ReturnType<typeof mount>, contract = CONTRACT): boolean | undefined => {
 	const card = wrapper
@@ -146,6 +178,7 @@ describe("TokensView — §3 sync-state guards", () => {
 		// the shared setup unstubs globals between tests.
 		vi.stubGlobal("useTicker", () => ({ value: Date.now() }))
 		H.store.current = createAppStoreHarness()
+		H.quotes.current = {}
 		H.getTasks.mockResolvedValue([])
 		H.getOperations.mockResolvedValue([])
 		H.getTokenBalances.mockResolvedValue([balanceRow()])
@@ -311,5 +344,64 @@ describe("TokensView — §3 sync-state guards", () => {
 		dA.resolve({ state: "backfilling", blocksBehind: 100 })
 		await flushPromises()
 		expect(cardBackfilling(wrapper)).toBe(false) // stayed at the fresh scope's caught-up, not clobbered
+	})
+})
+
+describe("TokensView — Home order and cap", () => {
+	// Mainnet cUSD is a price-mapped contract; with a `usd-coin` quote seeded it is the one priced row.
+	const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
+	const MAINNET = CHAIN_IDS.MAINNET
+
+	beforeEach(() => {
+		vi.stubGlobal("useTicker", () => ({ value: Date.now() }))
+		H.store.current = createAppStoreHarness()
+		H.store.current.network = { id: "net-main", chainId: MAINNET }
+		H.quotes.current = {}
+		H.getTasks.mockResolvedValue([])
+		H.getOperations.mockResolvedValue([])
+		H.getSyncState.mockResolvedValue({ state: "caught-up", blocksBehind: 0 })
+	})
+
+	test("a priced token ranks first; unpriced held tokens follow by name; an empty row is last", async () => {
+		H.quotes.current = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
+		H.getTokenBalances.mockResolvedValue([
+			namedRow(3, "ZED", { chainId: MAINNET }),
+			namedRow(1, "PRICED", { contract: CUSD, chainId: MAINNET }),
+			namedRow(4, "EMPTY", { chainId: MAINNET, publicBalance: "0" }),
+			namedRow(2, "ALPHA", { chainId: MAINNET }),
+		])
+		const wrapper = mount(TokensView, { shallow: true })
+		await flushPromises()
+		expect(cardSymbols(wrapper)).toEqual(["PRICED", "ALPHA", "ZED"])
+		expect(wrapper.find('[data-testid="tokens-count"]').text()).toBe("4")
+	})
+
+	test("Home shows at most three rows and a View-all link with the overflow", async () => {
+		H.getTokenBalances.mockResolvedValue([1, 2, 3, 4, 5].map((i) => namedRow(i, `T${i}`, { chainId: MAINNET })))
+		const wrapper = mount(TokensView, { shallow: true })
+		await flushPromises()
+
+		expect(cardSymbols(wrapper)).toHaveLength(3)
+		expect(wrapper.find('[data-testid="tokens-view-all"]').exists()).toBe(true)
+	})
+
+	test("three or fewer tokens: every row shows and there is no View-all link", async () => {
+		H.getTokenBalances.mockResolvedValue([namedRow(1, "A", { chainId: MAINNET }), namedRow(2, "B", { chainId: MAINNET })])
+		const wrapper = mount(TokensView, { shallow: true })
+		await flushPromises()
+
+		expect(cardSymbols(wrapper)).toHaveLength(2)
+		expect(wrapper.find('[data-testid="tokens-view-all"]').exists()).toBe(false)
+	})
+
+	test("a same-address row from ANOTHER chain is not rendered (fetch and live add)", async () => {
+		H.getTokenBalances.mockResolvedValue([namedRow(1, "A", { chainId: MAINNET }), namedRow(2, "FOREIGN", { chainId: 1 })])
+		const wrapper = mount(TokensView, { shallow: true })
+		await flushPromises()
+		expect(cardSymbols(wrapper)).toEqual(["A"])
+
+		H.balanceAdded.emit(namedRow(3, "LATE", { chainId: 1 }))
+		await nextTick()
+		expect(cardSymbols(wrapper)).toEqual(["A"])
 	})
 })
