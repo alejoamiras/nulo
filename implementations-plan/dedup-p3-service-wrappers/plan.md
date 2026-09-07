@@ -6,7 +6,7 @@ code_review: off
 eli5_mode: readme-row
 worktree: .claude/worktrees/dedup-p3-service-wrappers (branch worktree-dedup-p3-service-wrappers, on top of worktree-dedup-p2-adopt-helpers / PR #566)
 ledger: implementations-plan/dedup-ledger (phase P3)
-status: dual audit 2026-09-07 (codex conditional, fable conditional) consolidated below; final fresh-context codex pass pending
+status: approved 2026-09-07 under the ledger README's pre-approval rule — dual audit + final fresh-context codex pass all conditional, every condition adopted below; implementing
 ---
 
 # P3 — collapse the repeated wrappers in the service and utility layer
@@ -36,7 +36,7 @@ D2 (four repositories in two service folders).
 | C6 | module-private `decodeInto(decoded, index, types, values, logger, label)` logging `Array.isArray(values) ? values.length : 0` at all three arms (the utility arm's form); the "arity, never the values" comment moves onto it | log-and-continue, same fields |
 | F1 | module-level `safeString(read: () => { toString(): string })` / `safeNumber(read: () => unknown)` | `""` / `0` on throw |
 | F2 | local `resolveTokenFns(artifact): Record<TokenFnKind, { candidates; fn }>` iterating `Object.values(TOKEN_FN_DESCRIPTORS)` by `descriptor.kind` (one cast at the accumulator); the `TokenInterface` literal stays explicit | identical descriptor per kind; public shape untouched |
-| F3 | `private async invalidateAndDelete(id)` — the fence-first add + `repo.delete` pair, at all four sites (`:406-410` too) | every loop keeps its filter, its lock, its epoch fence and decides its emit AFTER the await, as today |
+| F3 | `private invalidateAndDelete(id): Promise<void>` — SYNCHRONOUS body: adds the id to `invalidatedBalanceIds` then returns `this.repo.delete(id)` itself (no `async`, so `await` sees the very same promise and no microtask is inserted before the live-token check and emit); at all four sites | every loop keeps its filter, its lock, its epoch fence and decides its emit AFTER the await, as today; a test pins fence-before-delete and promise passthrough |
 | E4 | `private stopWatching(handle)` | timeout cleared before the `onRemoved` unsubscribe, both nulled |
 | E6 | local `terminateWith(msg): false` inside `handleSessionEstablished` | same source, level and messages |
 | X4 | `private startPollScheduler(schedulers: Map<string, Timer>, key, poll: () => Promise<void>, labels: { tick; initial })` — captures the epoch at creation, writes the map BEFORE the initial kick, keeps both messages; the public arm still updates `publicWatched` before calling it | born-at-epoch fence and comments preserved; each arm keeps its own map |
@@ -45,10 +45,10 @@ D2 (four repositories in two service folders).
 | B3 | `private logDebug/logWarn(msg, ...rest)` on the dispatcher | `"wallet-sdk"` source, same levels, same text |
 | B5 | `private requireSession(dappSession, ctx): IDappSessionRef` called exactly where each guard sits today (the `handleSendTx` guard stays AFTER `resolveNetworkAndAccount`); no second lookup | throws before any use, same message, same error precedence |
 | A1 | the five scans call `prefixedEntries(await this.storage.get(), \`${this.root}@\`)` yielding `[key, id, value]` (the full key feeds `decodeRow(k, v)`) | five public methods keep their return shapes |
-| A3 | `createListenerBag<T>()` in `wallet-core/src/testing/listener-bag.ts` with `add`, `remove` (first occurrence) and `removeAll`; adopted at the flat sites only (`fake-browser-api.ts` ×6, `transport-harness.ts` ×4); the harness's per-service keyed maps stay | first-vs-all removal preserved per site; test-only |
+| A3 | `createListenerBag<T>()` in `wallet-core/src/testing/listener-bag.ts` exposing a STABLE `items` array plus `add`, `remove` (first occurrence) and `removeAll`; dispatch loops stay caller-owned over `items` (the fake iterates the live array, the harness iterates a `[...snapshot]`, as today); adopted at the flat sites only | first-vs-all removal and live-vs-snapshot dispatch preserved per site; the bag test covers add/remove during dispatch; test-only |
 | H2 | **skipped** — `awaitProfileActivation` rejects at once on a matching `bootstrapFailure`, so a failed bootstrap would enter recovery immediately instead of after the 30 s wait: a failure-path timing change | — |
 | H4 | `useFullscreenPopupSetting()` returns `{ showFullscreen, start, dispose }`; `PopupCard.vue` calls `start()` in `onMounted`, `dispose()` in `onBeforeUnmount`; the composable test's host calls them too and a new `PopupCard.test.ts` pins the order | mount/unmount order identical |
-| I1 | `waitForStorageRelease({ key, stillHeld: () => Promise<boolean>, timeoutMs, onTimeout, onFinish? })` in `src/e2e/storage-gate.ts` | event-driven release, safety timeout, the re-check after subscribe uses each gate's own predicate (restore: `still?.at !== at`); proof and restore pass `onFinish` to remove their key, incoming-poll does not |
+| I1 | `waitForStorageRelease({ key, stillHeld: () => Promise<boolean>, timeoutMs, onTimeout, onFinish? })` in `src/e2e/storage-gate.ts`; `stillHeld` resolves TRUE while the gate is still held (restore: `still?.at === at`; proof/incoming: the key is still present) and the helper finishes as released when it resolves false | event-driven release, safety timeout, re-check after subscribe; `onFinish` runs fire-and-forget BEFORE resolve (proof and restore remove their key there, incoming-poll passes none); wrapper-level tests per gate cover matching vs changed hold points |
 | I2 | `COMPRESSION_FORMATS` table driving the three lookups | same extensions, mimes and detection aliases |
 
 **Critical flows that must not change**: D2's raw presence reads and tri-state single-key lookup, F3's
@@ -66,11 +66,13 @@ the invariants above are explicit; the audits decide whether that is enough.
 
 ### Phase 1 — packages (A1, A3, B1, B2, B3, B5)
 
-**Validation gate**: `bun run lint && bun run typecheck:all && bun run --cwd packages/wallet-core test && bun run --cwd packages/extension-messaging test && bun run --cwd packages/wallet-bridge test`. Pass: exit 0 each; `listener-bag.test.ts` green. Layers: lint/typecheck + unit.
+New tests: `listener-bag.test.ts` (first-vs-all removal, add/remove during a caller-owned dispatch); `method-scope-checkers` pins that a non-boolean `addressBook` grant (`"yes"`) is still denied.
+
+**Validation gate**: `bun run lint && bun run typecheck:all && bun run --cwd packages/wallet-core test && bun run --cwd packages/extension-messaging test && bun run --cwd packages/wallet-bridge test`. Pass: exit 0 each. Layers: lint/typecheck + unit.
 
 ### Phase 2 — clients and small service helpers (D1, G1, D3, D4, E4, E6, F1, F3, X4)
 
-New tests: `network/client.test.ts` (invalid params → no request; invalid result → throw). F3 and X4 land as their own commits.
+New tests: `network/client.test.ts` (invalid params → no request; invalid result → throw); `token-balance` pins fence-before-delete and that `invalidateAndDelete` returns the repo's own promise; `incoming-transfer` pins map-before-kick for BOTH scheduler arms (the existing scenario at `service.scenarios.test.ts:2325` covers only the note arm's stale tick). F3 and X4 land as their own commits.
 
 **Validation gate**: `bun run lint && bun run --cwd apps/extension typecheck && (bun run --cwd apps/extension test src/wallet/services/profile src/wallet/services/network src/wallet/services/account-state src/wallet/services/window-manager src/wallet/services/wallet-sdk src/wallet/services/note src/wallet/services/token-balance src/wallet/services/incoming-transfer src/wallet/base)`. Pass: exit 0 each. Layers: lint/typecheck + unit + composition.
 
@@ -80,13 +82,13 @@ New tests: `network/client.test.ts` (invalid params → no request; invalid resu
 
 ### Phase 4 — repositories, composables, utils, e2e seams (D2, H4, I1, I2)
 
-New tests: `components/Popup/PopupCard.test.ts` (start on mount, dispose on unmount), `e2e/storage-gate.test.ts` (release-between-check-and-subscribe race, timeout, `onFinish`), `wallet-core/src/testing/listener-bag.test.ts` (first-vs-all removal; lands with Phase 1). D2 lands as its own commit.
+New tests: `components/Popup/PopupCard.test.ts` (start on mount, dispose on unmount); `e2e/storage-gate.test.ts` (release-between-check-and-subscribe race, timeout, `onFinish` before resolve) plus one wrapper case per gate (restore: matching vs changed hold point); `restore-pending-repository` / `blocked-repository` pin one `storage.get(key)` call per lookup. D2 lands as its own commit.
 
 **Validation gate**: `bun run lint && bun run --cwd apps/extension typecheck && (bun run --cwd apps/extension test src/wallet/services/profile src/wallet/services/account-integrity src/wallet/services/backup src/composables src/components/Popup src/e2e src/utils src/popup/pages)`. Pass: exit 0 each; `bun run baseline:complexity` reports no manifest change unless a directive was deleted on merit. Layers: lint/typecheck + unit + component.
 
 ### Phase 5 — full local gate
 
-**Validation gate**: `bun run lint && bun run typecheck:all && bun run test && bun run --cwd apps/extension build:chrome && git diff --exit-code --stat -- apps/extension/src/types/`. Pass: exit 0 each, quoted (the build regenerates `src/types/`; CI asserts it unchanged — P2 learned this the hard way). No e2e locally; CI runs smoke and network on the PR.
+**Validation gate**: from a clean index (`git status --porcelain` empty), `bun run lint && bun run typecheck:all && bun run test && bun run --cwd apps/extension build:chrome && git diff --exit-code --stat HEAD -- apps/extension/src/types/ && test -z "$(git status --porcelain -- apps/extension/src/types/)"`, then the production-marker grep CI runs after the build (`.github/workflows/_build-extension.yml` § bundle hygiene, replicated verbatim against `apps/extension/dist`). Pass: exit 0 each, quoted (the build regenerates `src/types/` and CI asserts it unchanged; the marker grep proves the e2e gate helper stayed out of the bundle). No e2e locally; CI runs smoke and network on the PR.
 
 ## Security & Adversarial Considerations
 
@@ -199,7 +201,7 @@ row P3 = `open #<n> · green`, `agent-worktree status`, print
 
 - **Codex** (`/codex high`, GPT-6 Astra, session `01a07c5f-47c3-76c0-9ea4-db0d61eeb178`): *conditional approve* — skip H2; B1 address extraction and `=== true`; B5 no re-lookup; D2 one-read tri-state and raw presence; C2 restricted set; F3 emit after the await, 4th site; X4 map + order; I1 `isReleased` + settlement callbacks; A3 first-vs-all; add client/PopupCard/listener/gate/scheduler tests; single arc. Every condition adopted or superseded by fable's stricter one (C2 skipped outright).
 - **Fable** (`Agent` Plan leg, Fable 5.1; report in `audit-fable.md`): *conditional approve* — B1 two comparisons; B5 no hoist; D2 as functions with a raw single-key read, shared with A1; D4 network outside the try; C2 microtask delta named or dropped; X4 helper owns the map write; H2 logged as a deviation; Facts 5/6 corrected; A1 yields the full key; A3 flat sites only; C6 defensive count; F2 typed record; I1 `stillHeld`/`onFinish`; D1's declaration-merge directive; `cd` chains avoided in gates. Every condition adopted (H2 skipped rather than logged as a deviation).
-- **Final fresh-context codex pass**: pending.
+- **Final fresh-context codex pass** (`/codex high`, new session `01a07c71-bc75-7f10-b79a-c6b0274446f5`): *conditional approve* — F3's helper must be synchronous (an `async` wrapper re-introduces the microtask that excluded C2; reproduced under Bun); I1's `stillHeld` polarity stated explicitly (restore: `still?.at === at`) with wrapper-level tests and `onFinish` before resolve; A3 must keep live-array vs snapshot dispatch (stable `items`, caller-owned loops) with a mutation-during-dispatch test; schedule the X4 both-arms map-before-kick test, the B1 non-boolean address-book denial pin and the D2 single-read pin; build gate from a clean index against `HEAD`, plus the production-marker grep; recon rows for the class-shaped D2, C2 and H2 marked superseded; keep H2 and C2 skipped. Every condition adopted above. Approval follows from the ledger README's pre-approval rule.
 
 ## Seeds
 
