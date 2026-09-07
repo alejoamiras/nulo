@@ -5,7 +5,7 @@ driver: claude-code
 code_review: off
 worktree: .claude/worktrees/dedup-followups (branch worktree-dedup-followups, on dev @ 49a58417)
 ledger: implementations-plan/dedup-ledger (X5, N5) + the three bugs the stack pinned
-status: phases 1–3 ✓ 2026-09-07; full gate + codex loop running
+status: all phases ✓ 2026-09-07; codex loop converged in 2 rounds (session 01a07da0-9fc0-7662-a002-0f8b5071df1e); delivering
 ---
 
 # Dedup follow-ups — three pinned bugs, X5 + N5
@@ -73,7 +73,7 @@ submit handlers keep writing `isLoading`/`error` through them — plus `fetch`, 
    the suites, `build:chrome` + `git diff --exit-code --stat -- apps/extension/src/types/` (a new composable and
    a new component regenerate the declarations).
 3. ✓ **Docs** — ledger rows X5 / N5 marked done, this plan's phases ✓, lessons.
-4. **Full local gate** — `bun run lint && bun run typecheck:all && bun run test`, build + types diff.
+4. ✓ **Full local gate** — `bun run lint && bun run typecheck:all && bun run test`, build + types diff.
 
 ## Post-implementation
 
@@ -85,4 +85,4 @@ configs"; resume the same session per round until "no new material findings". Th
 
 ## Audit log
 
-(post-implementation only)
+**Codex fix loop** (`/codex high`, GPT-6 Astra, one session resumed once): round 1 *"no new material findings"* with low test/comment items → 02cbdabc; round 2 *"no new material findings"*. Detail in `lessons/phase-1.md`.

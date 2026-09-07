@@ -54,3 +54,10 @@ Ledger rows X5 and N5 marked done; plan phases ✓.
   the token popup, row and `safeWire` comments are one sentence each (the last now states the control stripping
   and the ellipsis). Test gotcha: a fallthrough `data-testid` on a stub overrides the stub`s own, so the address
   stubs are selected by their `data-address` attribute.
+- **Round 2** (on 02cbdabc): *"no new material findings"* — every round-1 item verified, the strengthened cases
+  judged proportionate, no new teardown or focus regression, no executable reader of the old sink names. Loop
+  converged in two rounds.
+
+## Full gate re-run on the converged tree (02cbdabc) ✓
+
+`bun run lint` 0 · `bun run typecheck:all` 0 · `bun run test` 0 (470 files / 5,741 tests) · `build:chrome` 0 · generated `src/types/` unchanged.
