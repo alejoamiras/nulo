@@ -1,4 +1,5 @@
 <script setup>
+import { FieldWarning } from "@nulo/design"
 /** Services */
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
 
@@ -149,14 +150,8 @@ usePopupEntity(() => props.show, {
 				>
 					<template #right>
 						<Transition name="fade">
-							<Flex v-if="isCollision" align="center" gap="6">
-								<Icon name="warning" size="12" color="red" />
-								<Text size="12" weight="600" color="primary"> Name in use </Text>
-							</Flex>
-							<Flex v-else-if="isUnchanged" align="center" gap="6">
-								<Icon name="warning" size="12" color="red" />
-								<Text size="12" weight="600" color="primary"> Already exist </Text>
-							</Flex>
+							<FieldWarning v-if="isCollision"> Name in use </FieldWarning>
+							<FieldWarning v-else-if="isUnchanged"> Already exist </FieldWarning>
 						</Transition>
 					</template>
 				</Input>

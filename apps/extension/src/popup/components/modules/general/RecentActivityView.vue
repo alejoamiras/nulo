@@ -92,8 +92,7 @@ const recentActivityRows = computed(() => {
 	// chain here so the math matches the DOM.
 	const journalCount = renderedInFlightOps.value.length
 	const orphanCount = hasOrphanExecutingTask.value ? 1 : 0
-	const fallbackRendered =
-		journalCount === 0 && orphanCount === 0 && (props.token ? isTokenAwaitingTx.value : awaitingAccountTxs.value.length > 0)
+	const fallbackRendered = journalCount === 0 && orphanCount === 0 && showFallbackAwaiting.value
 	const remaining = remainingRowSlots({ journalCount, orphanCount, fallbackRendered, budget: ROW_BUDGET })
 	if (remaining === 0) return []
 	// Layer-A containment (defense-in-depth): scope tx rows to the active
@@ -125,6 +124,7 @@ const isTokenAwaitingTx = computed(() => {
 const awaitingAccountTxs = computed(() => {
 	return appStore.awaitingTransactions.filter((t) => t.account === appStore.account?.address)
 })
+const showFallbackAwaiting = computed(() => (props.token ? isTokenAwaitingTx.value : awaitingAccountTxs.value.length > 0))
 
 /** Unified in-flight task: covers both dapp-initiated (ExecuteOperation) and
  *  UI-initiated (Transfer) sends. The backend emits task+subtasks with progress
@@ -789,7 +789,8 @@ onBeforeUnmount(() => {
 
 <template>
 	<Flex
-		v-if="token && (executingTask || showJournalAwaiting || isTokenAwaitingTx || recentActivityRows.length)"
+		v-if="executingTask || showJournalAwaiting || showFallbackAwaiting || recentActivityRows.length"
+		:key="token ? 'token' : 'account'"
 		direction="column"
 		gap="16"
 		data-testid="activity-feed-root"
@@ -836,63 +837,9 @@ onBeforeUnmount(() => {
 				:amount="executingAmount"
 				:amountSymbol="executingAmountSymbol"
 			/>
-			<TransactionAwaitingCard v-else-if="!renderedInFlightOps.length && isTokenAwaitingTx" />
+			<TransactionAwaitingCard v-else-if="!renderedInFlightOps.length && showFallbackAwaiting" />
 			<!-- Chronological merge of terminal journal records + settled chain
 			     txs. Branch by row.type. -->
-			<template v-for="row in recentActivityRows" :key="row.key">
-				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectTx(row.tx)" />
-				<TransactionIncomingCard
-					v-else-if="row.type === 'incoming'"
-					v-bind="incomingCardProps(row.inc)"
-					@click="handleSelectIncoming(row.inc)"
-				/>
-				<TransactionTerminalCard
-					v-else-if="row.type === 'journal' && journalTerminalCardProps(row.op)"
-					v-bind="journalTerminalCardProps(row.op)"
-					@click="handleSelectTerminal(row.op)"
-				/>
-			</template>
-		</div>
-	</Flex>
-	<Flex
-		v-else-if="!token && (executingTask || showJournalAwaiting || recentActivityRows.length || awaitingAccountTxs.length)"
-		direction="column"
-		gap="16"
-		data-testid="activity-feed-root"
-		:data-active-account="appStore.account?.address"
-	>
-		<Flex align="end" justify="between" :class="$style.section_header">
-			<span :class="$style.header_title">RECENT TRANSACTIONS</span>
-			<span @click="router.push('/popup/activity')" :class="$style.archive_link">View Archives</span>
-		</Flex>
-
-		<div :class="$style.list">
-			<TransactionAwaitingCard
-				v-for="op in renderedInFlightOps"
-				:key="`awaiting:${op.id}`"
-				:title="cardTitleFor(op)"
-				:subtitle="cardSubtitleFor(op)"
-				:icon="cardIconFor(op)"
-				:originLabel="cardOriginLabelFor(op)"
-				:amount="cardAmountFor(op)"
-				:amountSymbol="cardAmountSymbolFor(op)"
-				:transferTypeLabel="cardTransferTypeFor(op)"
-				:cancellable="true"
-				:jobId="op.id"
-				:stage="op.progress?.stage ?? null"
-				@cancel="onCancelInFlight"
-				@focus="onFocusInFlight"
-			/>
-			<TransactionAwaitingCard
-				v-if="hasOrphanExecutingTask"
-				:title="executingProgressTitle"
-				:subtitle="executingProgressSubtitle"
-				:icon="isUiTransfer ? 'arrow-narrow-up-right' : 'zap'"
-				:originLabel="executingOriginLabel"
-				:amount="executingAmount"
-				:amountSymbol="executingAmountSymbol"
-			/>
-			<TransactionAwaitingCard v-else-if="!renderedInFlightOps.length && awaitingAccountTxs.length" />
 			<template v-for="row in recentActivityRows" :key="row.key">
 				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectTx(row.tx)" />
 				<TransactionIncomingCard

@@ -1,4 +1,5 @@
 <script setup>
+import { FieldWarning } from "@nulo/design"
 /** Utils */
 import { managers } from "@/utils/core"
 import { activateNetworkGuarded } from "@/utils/guarded-network-activation"
@@ -169,10 +170,7 @@ usePopupEntity(() => props.show, {
 		>
 			<template #right>
 				<Transition name="fade">
-					<Flex v-if="isNameAlreadyExist" align="center" gap="6">
-						<Icon name="warning" size="12" color="red" />
-						<Text size="12" weight="600" color="primary"> Already exists </Text>
-					</Flex>
+					<FieldWarning v-if="isNameAlreadyExist"> Already exists </FieldWarning>
 				</Transition>
 			</template>
 		</Input>
@@ -186,14 +184,8 @@ usePopupEntity(() => props.show, {
 		>
 			<template #right>
 				<Transition name="fade">
-					<Flex v-if="isUrlHasError" align="center" gap="6">
-						<Icon name="warning" size="12" color="red" />
-						<Text size="12" weight="600" color="primary"> Failed to fetch network info </Text>
-					</Flex>
-					<Flex v-else-if="isUrlAlreadyExist" align="center" gap="6">
-						<Icon name="warning" size="12" color="red" />
-						<Text size="12" weight="600" color="primary"> Already exists </Text>
-					</Flex>
+					<FieldWarning v-if="isUrlHasError"> Failed to fetch network info </FieldWarning>
+					<FieldWarning v-else-if="isUrlAlreadyExist"> Already exists </FieldWarning>
 				</Transition>
 			</template>
 		</Input>

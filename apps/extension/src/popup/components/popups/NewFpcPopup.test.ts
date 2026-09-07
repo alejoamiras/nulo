@@ -45,7 +45,7 @@ const STUBS = {
 	FormPopup: {
 		props: ["show", "submitLabel", "submitDisabled", "submitLoading", "displaceIdx", "submitTestId", "title"],
 		emits: ["onClose", "submit"],
-		template: `<div :data-submit-disabled="String(submitDisabled)"><slot /><button data-testid="form-submit" :disabled="submitDisabled" @click="$emit('submit')">go</button><slot name="belowSubmit" /></div>`,
+		template: `<div :data-submit-disabled="String(submitDisabled)"><slot /><slot name="aboveSubmit" /><button data-testid="form-submit" :disabled="submitDisabled" @click="$emit('submit')">go</button><slot name="belowSubmit" /></div>`,
 	},
 	Input: {
 		props: ["modelValue", "label"],
@@ -53,13 +53,14 @@ const STUBS = {
 		template: `<label><input :data-input-label="label" :value="modelValue" @input="$emit('update:modelValue', $event.target.value)" /><slot name="right" /></label>`,
 	},
 	Tooltip: { template: "<div><slot /><slot name='content' /></div>" },
-	Icon: { template: "<i />" },
+	Icon: { props: ["name", "color"], template: `<i :data-name="name" :data-color="color" />` },
 	Text: { template: "<span><slot /></span>" },
 	Flex: { template: "<div><slot /></div>" },
 	Transition: { template: "<div><slot /></div>" },
 }
 
 import NewFpcPopup from "./NewFpcPopup.vue"
+import ProcessingErrorNote from "@/components/composite/ProcessingErrorNote.vue"
 
 const VALID_HEX = `0x${"b".repeat(64)}`
 
@@ -75,7 +76,7 @@ function pressEnterOnBody() {
 const wrappers: VueWrapper[] = []
 
 async function mountShown(): Promise<VueWrapper> {
-	const w = mount(NewFpcPopup, { props: { show: false }, global: { stubs: STUBS } })
+	const w = mount(NewFpcPopup, { props: { show: false }, global: { stubs: STUBS, components: { ProcessingErrorNote } } })
 	wrappers.push(w)
 	await w.setProps({ show: true })
 	await flushPromises()
@@ -166,5 +167,18 @@ describe("NewFpcPopup — Enter wiring + initialization window", () => {
 		pressEnterOnInput()
 		await flushPromises()
 		expect(fpcServiceMock.addFpc).not.toHaveBeenCalled()
+	})
+})
+
+describe("NewFpcPopup — the processing error note", () => {
+	test("a failed add renders the shared note above the submit button and keeps the popup open", async () => {
+		fpcServiceMock.addFpc.mockRejectedValueOnce(new Error("boom"))
+		const w = await mountShown()
+		await fillForm(w)
+		pressEnterOnInput()
+		await flushPromises()
+		expect(w.text()).toContain("Failed to add FPC.")
+		expect(w.find("i[data-name='info']").attributes("data-color")).toBe("red")
+		expect(w.emitted("onClose")).toBeFalsy()
 	})
 })

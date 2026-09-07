@@ -1,4 +1,5 @@
 <script setup>
+import { FieldWarning } from "@nulo/design"
 /** Composables */
 import { useToast, TOAST_DURATION } from "@/composables/toast"
 const { openToast } = useToast()
@@ -124,10 +125,7 @@ usePopupEntity(() => props.show, {
 		>
 			<template #right>
 				<Transition name="fade">
-					<Flex v-if="isNameAlreadyExist" align="center" gap="6">
-						<Icon name="warning" size="12" color="red" />
-						<Text size="12" weight="600" color="primary"> Already exists </Text>
-					</Flex>
+					<FieldWarning v-if="isNameAlreadyExist"> Already exists </FieldWarning>
 				</Transition>
 			</template>
 		</Input>

@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest"
 import { mount } from "@vue/test-utils"
 
 import CapabilityDetailPanel from "./CapabilityDetailPanel.vue"
+import ScopePatternList from "./ScopePatternList.vue"
 
 /**
  * `ScopeAddress` is stubbed so the panel test stays a pure DOM test —
@@ -30,8 +31,11 @@ const STUBS = {
 // Tests use minimal Capability shapes; cast to bypass the tagged-union
 // requirements (accounts capability requires `accounts` field, etc.).
 const mountPanel = (capability: Record<string, unknown>, granted = false) =>
-	// biome-ignore lint/suspicious/noExplicitAny: test fixture
-	mount(CapabilityDetailPanel, { props: { capability: capability as any, granted }, global: { stubs: STUBS } })
+	mount(CapabilityDetailPanel, {
+		// biome-ignore lint/suspicious/noExplicitAny: test fixture
+		props: { capability: capability as any, granted },
+		global: { stubs: STUBS, components: { ScopePatternList } },
+	})
 
 describe("composite/CapabilityDetailPanel", () => {
 	test("accounts capability with canGet:true renders the v2.1 read-addresses row", () => {

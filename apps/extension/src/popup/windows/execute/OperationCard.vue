@@ -387,8 +387,8 @@ const requestedMethod = (op: SendLikeUIOp): "fj" | null => (op.kind === "aztec_s
 				<AddressDisplay :address="op.address.toString()" />
 			</Flex>
 		</template>
-		<template v-else-if="op.kind === 'aztec_simulateTx'">
-			<Flex :class="$style.prop">
+		<template v-else-if="op.kind === 'aztec_simulateTx' || op.kind === 'aztec_profileTx'">
+			<Flex :key="op.kind" :class="$style.prop">
 				<Text size="12" color="secondary">Payload:</Text>
 				<Flex direction="column" gap="4">
 					<Text
@@ -417,26 +417,6 @@ const requestedMethod = (op: SendLikeUIOp): "fj" | null => (op.kind === "aztec_s
 				<Text size="12" weight="600" color="primary">
 					{{ humanizeMethodName(safe(op.call.name ?? op.call.selector.toString(), 64)) }}
 				</Text>
-			</Flex>
-		</template>
-		<template v-else-if="op.kind === 'aztec_profileTx'">
-			<Flex :class="$style.prop">
-				<Text size="12" color="secondary">Payload:</Text>
-				<Flex direction="column" gap="4">
-					<Text
-						v-for="(call, j) in op.exec.calls"
-						:key="`${index}:${j}`"
-						data-testid="execute-op-payload-row"
-						:data-call-name="call.name ?? ''"
-						:data-call-to="call.to?.toString() ?? ''"
-						size="12"
-						color="primary"
-					>
-						<Text weight="600">{{ humanizeMethodName(safe(call.name ?? call.selector, 64)) }}</Text>
-						<Text color="secondary"> on </Text>
-						<AddressDisplay :address="call.to" />
-					</Text>
-				</Flex>
 			</Flex>
 		</template>
 		<template v-else-if="op.kind === 'aztec_registerContract'">

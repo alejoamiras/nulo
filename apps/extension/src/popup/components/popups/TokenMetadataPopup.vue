@@ -29,6 +29,24 @@ const props = defineProps({
 })
 
 const token = ref()
+const capabilitySections = [
+	{
+		title: "Private Methods",
+		rows: [
+			{ label: "Balances", key: "hasPrivateBalances" },
+			{ label: "Transfers", key: "hasPrivateTransfers" },
+			{ label: "Private to public", key: "hasPrivateToPublicTransfers" },
+		],
+	},
+	{
+		title: "Public Methods",
+		rows: [
+			{ label: "Balances", key: "hasPublicBalances" },
+			{ label: "Transfers", key: "hasPublicTransfers" },
+			{ label: "Public to private", key: "hasPublicToPrivateTransfers" },
+		],
+	},
+]
 const tokenService = new TokenServiceClient()
 tokenService.onTokenDeleted.add(onTokenDeleted)
 function onTokenDeleted(token) {
@@ -117,91 +135,20 @@ watch(
 						</Tooltip>
 					</Flex>
 
-					<Flex align="center" gap="6" style="margin-top: 10px">
-						<Text size="12" weight="600" color="secondary">Private Methods</Text>
-					</Flex>
-
-					<Flex align="center" justify="between">
-						<Flex direction="column" gap="6">
-							<Text size="12" weight="600" color="tertiary"> Balances </Text>
-							<Text size="11" weight="600" color="secondary" mono> hasPrivateBalances </Text>
+					<template v-for="section in capabilitySections" :key="section.title">
+						<Flex align="center" gap="6" style="margin-top: 10px">
+							<Text size="12" weight="600" color="secondary">{{ section.title }}</Text>
 						</Flex>
 
-						<Icon
-							:name="token.hasPrivateBalances ? 'check-circle' : 'close-circle'"
-							size="12"
-							:color="token.hasPrivateBalances ? 'green' : 'red'"
-						/>
-					</Flex>
+						<Flex v-for="row in section.rows" :key="row.key" align="center" justify="between">
+							<Flex direction="column" gap="6">
+								<Text size="12" weight="600" color="tertiary"> {{ row.label }} </Text>
+								<Text size="11" weight="600" color="secondary" mono> {{ row.key }} </Text>
+							</Flex>
 
-					<Flex align="center" justify="between">
-						<Flex direction="column" gap="6">
-							<Text size="12" weight="600" color="tertiary"> Transfers </Text>
-							<Text size="11" weight="600" color="secondary" mono> hasPrivateTransfers </Text>
+							<Icon :name="token[row.key] ? 'check-circle' : 'close-circle'" size="12" :color="token[row.key] ? 'green' : 'red'" />
 						</Flex>
-
-						<Icon
-							:name="token.hasPrivateTransfers ? 'check-circle' : 'close-circle'"
-							size="12"
-							:color="token.hasPrivateTransfers ? 'green' : 'red'"
-						/>
-					</Flex>
-
-					<Flex align="center" justify="between">
-						<Flex direction="column" gap="6">
-							<Text size="12" weight="600" color="tertiary"> Private to public </Text>
-							<Text size="11" weight="600" color="secondary" mono> hasPrivateToPublicTransfers </Text>
-						</Flex>
-
-						<Icon
-							:name="token.hasPrivateToPublicTransfers ? 'check-circle' : 'close-circle'"
-							size="12"
-							:color="token.hasPrivateToPublicTransfers ? 'green' : 'red'"
-						/>
-					</Flex>
-
-					<Flex align="center" gap="6" style="margin-top: 10px">
-						<Text size="12" weight="600" color="secondary">Public Methods</Text>
-					</Flex>
-
-					<Flex align="center" justify="between">
-						<Flex direction="column" gap="6">
-							<Text size="12" weight="600" color="tertiary"> Balances </Text>
-							<Text size="11" weight="600" color="secondary" mono> hasPublicBalances </Text>
-						</Flex>
-
-						<Icon
-							:name="token.hasPublicBalances ? 'check-circle' : 'close-circle'"
-							size="12"
-							:color="token.hasPublicBalances ? 'green' : 'red'"
-						/>
-					</Flex>
-
-					<Flex align="center" justify="between">
-						<Flex direction="column" gap="6">
-							<Text size="12" weight="600" color="tertiary"> Transfers </Text>
-							<Text size="11" weight="600" color="secondary" mono> hasPublicTransfers </Text>
-						</Flex>
-
-						<Icon
-							:name="token.hasPublicTransfers ? 'check-circle' : 'close-circle'"
-							size="12"
-							:color="token.hasPublicTransfers ? 'green' : 'red'"
-						/>
-					</Flex>
-
-					<Flex align="center" justify="between">
-						<Flex direction="column" gap="6">
-							<Text size="12" weight="600" color="tertiary"> Public to private </Text>
-							<Text size="11" weight="600" color="secondary" mono> hasPublicToPrivateTransfers</Text>
-						</Flex>
-
-						<Icon
-							:name="token.hasPublicToPrivateTransfers ? 'check-circle' : 'close-circle'"
-							size="12"
-							:color="token.hasPublicToPrivateTransfers ? 'green' : 'red'"
-						/>
-					</Flex>
+					</template>
 				</Flex>
 
 				<Button @click="emit('onClose')" wide variant="primary_outline" size="medium"> Close </Button>

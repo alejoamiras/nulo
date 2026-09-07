@@ -25,7 +25,7 @@ worktree dir == plan dir == branch suffix (`worktree-<slug>`). Phase 1 needs no 
 | P2 | `dedup-p2-adopt-helpers` | `/blueprint light` | X2 X3 X6 X1 E1 H3 J5 H1 C3 C8 L4 K2 M7 G2 G3 D5 L6 | 287 | `refactor: adopt the shared helpers that call sites re-typed inline` | open #566 · green |
 | P3 | `dedup-p3-service-wrappers` | `/blueprint mid` | D1 D2 D3 D4 G1 C1 C2 C5 C6 F1 F2 F3 E4 E6 B1 B2 B3 B5 A1 A3 H2 H4 X4 I1 I2 | 742 | `refactor(services): collapse the repeated wrappers in the service and utility layer` | open #568 · green |
 | P4 | `dedup-p4-vue-shells` | `/blueprint light` | J1 J2 J3 J4 K1 K7 K4 K5 K6 K9 K10 K11 L1 L3 N6 N9 M2 M3 | 1,132 | `refactor(popup): share the page shells and style partials across pages and windows` | open #569 · green |
-| P5 | `dedup-p5-vue-components` | `/blueprint mid` | N1 N2 N3 N4 N5 N7 N8 L2 L5 K3 K8 M1 M5 M6 I5 | 670 | `refactor(popup): shared field, list-sync and card pieces for popups and windows` | ☐ |
+| P5 | `dedup-p5-vue-components` | `/blueprint mid` | N1 N2 N3 N4 N5 N7 N8 L2 L5 K3 K8 M1 M5 M6 I5 | 670 | `refactor(popup): shared field, list-sync and card pieces for popups and windows` | open #570 · green |
 | — | deferred (Tier 4) | owner call | A2 A4 B6 C7 D6 D7 D8 E5 X5 | — | not in scope — byte-frozen ciphertext framing, KAT-pinned bit math, audit-hardened session and purge code | — |
 
 **Status values** (the implementing session writes the first two; the owner's merge produces the third):
@@ -47,6 +47,17 @@ loading/error block for the list pages, the barriers' blocking card, the onboard
 links, and one console forwarder for the two entry files. Four ids were skipped or narrowed on contact because the copies
 were not actually identical (K4, M3, the `ListStatusMessage` adoptions, the `useEntityCrud` move); reasons are in
 `implementations-plan/dedup-p4-vue-shells/lessons/phase-1.md`. Net: 65 source files, −527 lines, +475 lines of parity tests.
+
+**P5 in one paragraph.** The last phase went after the popup dialogs, the activity and tx modules, the execute/verify
+windows and the capability/import composites, where the ledger saw duplicated Vue pieces and duplicated script shapes.
+Two auditors read the plan against a safest-first alternative and a fresh codex pass read the decision trail; the result
+is a hybrid: ten ids landed (a `FieldWarning` primitive in the design package for fourteen warning rows, one shared
+error note, one decision path for the trust popup's allow and reject, table-driven capability rows, one activity feed
+block, one simulate/profile branch, the identity composite in verify, a scope-pattern list, three style partials) and
+five were skipped because the copies were not the same thing or the abstraction cost more than the duplication
+(N1 N4 N5 M6 I5, plus three narrowed ids); reasons in `implementations-plan/dedup-p5-vue-components/plan.md` §
+Decision ledger. Net: 30 source files, −342 lines, +538 lines of parity tests. The whole stack was then rebased onto
+dev and every PR re-ran green.
 
 ## Rules for every phase
 

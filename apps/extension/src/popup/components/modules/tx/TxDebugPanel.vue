@@ -98,24 +98,7 @@ const formatTimestamp = (timestamp) => {
 
 <style module>
 .debug_toggle {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	width: 100%;
-
-	padding: 0;
-	background: transparent;
-	border: none;
-	cursor: pointer;
-
-	color: inherit;
-	text-align: inherit;
-
-	transition: opacity 0.2s ease;
-
-	&:hover {
-		opacity: 0.8;
-	}
+	composes: disclosure_toggle from "./tx-shared.module.css";
 }
 
 .details_box {

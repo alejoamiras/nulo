@@ -6,9 +6,6 @@ import EmojiGrid from "@/components/composite/general/EmojiGrid.vue"
 import { onMounted, onUnmounted } from "vue"
 import { hashToEmoji } from "@aztec/wallet-sdk/crypto"
 
-/** Utils */
-import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
-
 /** Services */
 import { DappSessionServiceClient, type DappSession, type DappMetadata } from "@/wallet/services/dapp-session/client"
 import { type Account, AccountServiceClient } from "@/wallet/services/account/client"
@@ -69,8 +66,6 @@ const hostnameHasNonAscii = computed(() => {
 	}
 	return h.split(".").some((label) => label.startsWith("xn--"))
 })
-
-const sanitizedDappName = computed(() => (dapp.value?.name ? sanitizeWireString(dapp.value.name, 64) : ""))
 
 const dappSessionService = new DappSessionServiceClient()
 
@@ -191,30 +186,12 @@ onUnmounted(() => {
 
 		<Flex direction="column" :class="$style.scroll_area">
 			<!-- dApp identity block -->
-			<Flex align="center" gap="12" :class="$style.dapp_block">
-			<div :class="$style.dapp_logo_wrapper">
-				<Icon v-if="dapp?.loadingLogo" :loading="true" name="dapp" size="24" color="tertiary" />
-				<img v-else-if="dapp?.logoBlobUrl" :src="dapp?.logoBlobUrl" :class="$style.dapp_logo" alt="" />
-				<Icon v-else name="dapp" size="24" color="tertiary" />
-			</div>
-
-			<Flex direction="column" gap="4" wide :class="$style.dapp_info">
-				<Flex align="center" gap="6">
-					<span :class="$style.dapp_hostname">{{ dappHostname }}</span>
-					<Tooltip v-if="hostnameHasNonAscii" position="start">
-						<Icon name="warning" size="12" color="orange" />
-						<template #content>
-							<Text size="12" color="secondary" :style="{ lineHeight: '1.3' }">
-								This hostname contains non-ASCII or punycoded characters. Verify carefully — some characters can imitate Latin letters.
-							</Text>
-						</template>
-					</Tooltip>
-				</Flex>
-				<span v-if="sanitizedDappName" :class="$style.dapp_name">{{ sanitizedDappName }}</span>
-				<span :class="$style.dapp_action">{{ isReconnect ? "Reconnected" : "Connection established" }}</span>
-			</Flex>
-		</Flex>
-
+			<DappIdentityBlock
+				:dapp="dapp"
+				:hostname="dappHostname"
+				:hostnameSuspicious="hostnameHasNonAscii"
+				:actionLabel="isReconnect ? 'Reconnected' : 'Connection established'"
+			/>
 			<!-- Verification section -->
 			<Flex v-if="emojis" direction="column" gap="12" :class="$style.verification">
 				<SectionLabel label="Connection verification" />
@@ -252,66 +229,6 @@ onUnmounted(() => {
 
 .scroll_area {
 	composes: scroll_area from "../window-shell.module.css";
-}
-
-/* ── dApp identity block ───────────────────────────────────────── */
-
-.dapp_block {
-	flex-shrink: 0;
-
-	padding: 16px;
-	border-bottom: 1px solid var(--nulo-border);
-}
-
-.dapp_logo_wrapper {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	flex-shrink: 0;
-
-	width: 40px;
-	height: 40px;
-
-	background: var(--nulo-surface);
-	border: 1px solid var(--nulo-border);
-}
-
-.dapp_logo {
-	width: 40px;
-	height: 40px;
-	object-fit: cover;
-}
-
-.dapp_info {
-	min-width: 0;
-}
-
-.dapp_hostname {
-	font-family: var(--font-headline);
-	font-size: 14px;
-	font-weight: 700;
-	letter-spacing: 0.01em;
-	color: var(--txt-primary);
-
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.dapp_name {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	color: var(--nulo-secondary);
-
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.dapp_action {
-	font-family: var(--font-body);
-	font-size: 12px;
-	color: var(--nulo-secondary);
 }
 
 /* ── Verification section ──────────────────────────────────────── */

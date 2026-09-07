@@ -101,26 +101,18 @@ function payloadKey() {
 	return `${t.profileId ?? ""}|${t.networkId ?? ""}|${t.contract ?? ""}`
 }
 
-async function handleAllow() {
+/** The label and the key are captured before the await: the active prompt can change mid-RPC. */
+async function decide(action, successLabel, successIcon) {
 	if (isSubmitting.value) return
 	isSubmitting.value = true
 	const myGen = ++submitGeneration
-	// B-28: capture the label + key BEFORE awaiting. The active identity can
-	// switch mid-RPC, reassigning `cacheStore.incomingTrust`, which would make
-	// `tokenSymbol.value` resolve against the NEXT payload.
-	const symbol = tokenSymbol.value
 	const key = payloadKey()
 	try {
-		// setTrustAllow returns true when the trust flip was applied, false
-		// when the service refused (stale-popup race — token deleted between
-		// Pending emit and click), undefined if the closure wasn't bound.
-		// Show the success toast ONLY on explicit true so an IPC boundary
-		// that drops the return value (defensive — codex final-audit High)
-		// doesn't mislead the user.
-		const ok = await cacheStore.incomingTrust.allow?.()
-		if (ok === true) {
-			openToast({ label: `Now showing receives for ${symbol}`, icon: "check" })
-		}
+		// true: the trust flip was applied; false: the service refused (stale-popup race — token deleted
+		// between the Pending emit and the click); undefined: the closure wasn't bound. Only explicit true
+		// earns the success toast, so a boundary that drops the return value can't mislead the user.
+		const ok = await action?.()
+		if (ok === true) openToast({ label: successLabel, icon: successIcon })
 	} catch {
 		openToast({ label: "Couldn't update trust state", icon: "warning" })
 	} finally {
@@ -128,25 +120,8 @@ async function handleAllow() {
 	}
 	if (payloadKey() === key) emit("onClose")
 }
-
-async function handleReject() {
-	if (isSubmitting.value) return
-	isSubmitting.value = true
-	const myGen = ++submitGeneration
-	const symbol = tokenSymbol.value
-	const key = payloadKey()
-	try {
-		const ok = await cacheStore.incomingTrust.reject?.()
-		if (ok === true) {
-			openToast({ label: `Hiding receives from ${symbol}`, icon: "info" })
-		}
-	} catch {
-		openToast({ label: "Couldn't update trust state", icon: "warning" })
-	} finally {
-		if (submitGeneration === myGen) isSubmitting.value = false
-	}
-	if (payloadKey() === key) emit("onClose")
-}
+const handleAllow = () => decide(cacheStore.incomingTrust.allow, `Now showing receives for ${tokenSymbol.value}`, "check")
+const handleReject = () => decide(cacheStore.incomingTrust.reject, `Hiding receives from ${tokenSymbol.value}`, "info")
 
 // Initial focus on the expand toggle so a keyboard-only user lands on
 // the verification surface first — they should be reading the contract

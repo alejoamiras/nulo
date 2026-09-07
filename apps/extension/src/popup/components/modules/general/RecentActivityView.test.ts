@@ -490,3 +490,62 @@ describe("RecentActivityView — scope-triple containment (N-23)", () => {
 		expect(vm.journalOps.map((o: { id: string }) => o.id)).not.toContain("op-stale")
 	})
 })
+
+describe("RecentActivityView — one feed block for token and account views", () => {
+	const TOKEN = { contract: "0xtok", symbol: "TOK" }
+	const mountFeed = (props: Record<string, unknown> = {}) => mount(RecentActivityView, { shallow: true, props })
+	const awaitingCards = (w: ReturnType<typeof mountFeed>) => w.findAllComponents({ name: "TransactionAwaitingCard" })
+	const root = (w: ReturnType<typeof mountFeed>) => w.find("[data-testid='activity-feed-root']")
+
+	test("a token feed shows the fallback awaiting card only for that token's pending tx", async () => {
+		H.store.current.awaitingTransactions = [{ account: ACCT_A, contract: "0xother" }]
+		const w = mountFeed({ token: TOKEN })
+		await flushPromises()
+		expect(awaitingCards(w)).toHaveLength(0)
+		H.store.current.awaitingTransactions = [{ account: ACCT_A, contract: TOKEN.contract }]
+		await flushPromises()
+		expect(awaitingCards(w)).toHaveLength(1)
+		expect(root(w).exists()).toBe(true)
+	})
+
+	test("an account feed shows the fallback awaiting card for any of the account's pending txs, not a foreign account's", async () => {
+		H.store.current.awaitingTransactions = [{ account: ACCT_FOREIGN, contract: "0xany" }]
+		const w = mountFeed()
+		await flushPromises()
+		expect(root(w).exists()).toBe(false)
+		H.store.current.awaitingTransactions = [{ account: ACCT_A, contract: "0xany" }]
+		await flushPromises()
+		expect(awaitingCards(w)).toHaveLength(1)
+	})
+
+	test("an orphan executing task suppresses the fallback card: one awaiting card, not two", async () => {
+		H.getTasks.mockResolvedValue([uiTransferTask(ACCT_A)])
+		H.store.current.awaitingTransactions = [{ account: ACCT_A, contract: "0xany" }]
+		const w = mountFeed()
+		await flushPromises()
+		expect(vmOf(w).hasOrphanExecutingTask).toBe(true)
+		expect(awaitingCards(w)).toHaveLength(1)
+	})
+
+	test("empty states: a token feed says NOTHING HERE YET with the symbol, an account feed renders nothing", async () => {
+		const withToken = mountFeed({ token: TOKEN })
+		await flushPromises()
+		expect(withToken.text()).toContain("NOTHING HERE YET")
+		expect(withToken.text()).toContain("Send or receive TOK to see activity here.")
+		const withoutToken = mountFeed()
+		await flushPromises()
+		expect(root(withoutToken).exists()).toBe(false)
+		expect(withoutToken.text()).not.toContain("NOTHING HERE YET")
+	})
+
+	test("a token-presence flip remounts the feed root", async () => {
+		H.store.current.awaitingTransactions = [{ account: ACCT_A, contract: TOKEN.contract }]
+		const w = mountFeed()
+		await flushPromises()
+		const before = root(w).element
+		await w.setProps({ token: TOKEN })
+		await flushPromises()
+		expect(root(w).exists()).toBe(true)
+		expect(root(w).element).not.toBe(before)
+	})
+})
