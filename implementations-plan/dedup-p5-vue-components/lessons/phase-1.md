@@ -101,3 +101,13 @@ import" was wrong (`:314` still uses it) — kept.
 `bun run lint` exit 0 · `bun run typecheck:all` exit 0 · `bun run test` exit 0 (458 files, 5,626 tests) ·
 `bun run --cwd apps/extension build:chrome` exit 0 with `git diff --exit-code --stat -- apps/extension/src/types/` exit 0 ·
 no `nulo:e2e:` marker in `dist/chrome`.
+
+## Stack rebase onto dev (2026-09-07, after #558 #560 #562 #563 #564 landed)
+
+- Rebased bottom-up in the five worktrees (P1: `index.md` and `TokensView.vue`, where dev renamed the list and
+  P1 removed the mint branch; P2: two import blocks; P3 clean; P4: dev's deletion of `SelectBalanceTypePopup` taken;
+  P5: the generated `components.d.ts` entry order). Each branch re-ran lint, typecheck, its touched suites and the
+  build green; the tip's full gate on 1464e73a: lint 0 · typecheck:all 0 · test 0 (458 files / 5,627 tests) · build 0 ·
+  generated types unchanged · no e2e marker. All five branches pushed atomically with `--force-with-lease`; the
+  push's concurrency guard cancelled the first duplicate runs (their aggregators read as failed until the queued
+  reruns supersede them).
