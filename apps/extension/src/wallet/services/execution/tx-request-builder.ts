@@ -61,7 +61,7 @@ import { StepContent, type TaskService, type WrappedTask } from "@/wallet/servic
 import type { TxCall } from "@/wallet/services/transaction/service"
 import { getAuthRegistryAddress, getSetAuthorizedFn, getSetAuthorizedSelector } from "@/wallet/utils/auth-registry"
 import type { AuthwitDiscoverer } from "./authwit-discoverer"
-import { type ContractResolver, findFunctionByName, findFunctionBySelector } from "./contract-resolver"
+import { type ContractResolver, findFunctionByName, findFunctionBySelector, requireArtifact } from "./contract-resolver"
 import type { Action, AuthwitContent, AztecSendTxOperation } from "./spec"
 
 const LOG_SOURCE = "TxRequestBuilder"
@@ -319,14 +319,7 @@ export class TxRequestBuilder {
 			throw new Error(`DefaultEntrypoint requires exactly 1 call, got ${rawCalls.length}`)
 		}
 		const call = await FunctionCall.schema.parseAsync(rawCalls[0])
-		const noFromInstance = instances.get(call.to.toString())
-		if (!noFromInstance) {
-			throw new Error("Contract not found")
-		}
-		const noFromArtifact = artifacts.get(noFromInstance.currentContractClassId.toString())
-		if (!noFromArtifact) {
-			throw new Error("Contract artifact not found")
-		}
+		const noFromArtifact = requireArtifact(instances, artifacts, call.to.toString())
 		const noFromFn = await findFunctionBySelector(noFromArtifact, call.selector.toString())
 		if (!noFromFn) {
 			throw new Error("Method not found")
@@ -539,20 +532,6 @@ async function buildSetAuthorizedCall(messageHash: Fr): Promise<{ functionCall: 
 		functionCall,
 		txCall: { contract: getAuthRegistryAddress().toString(), method: fn.name, args: [messageHash, true] },
 	}
-}
-
-/** Sync guard ladder shared by the call/encoded_call arms — error strings
- *  frozen by call site. */
-function requireArtifact(instances: ResolvedInstances, artifacts: ResolvedArtifacts, address: string) {
-	const instance = instances.get(address)
-	if (!instance) {
-		throw new Error("Contract not found")
-	}
-	const artifact = artifacts.get(instance.currentContractClassId.toString())
-	if (!artifact) {
-		throw new Error("Contract artifact not found")
-	}
-	return artifact
 }
 
 function resolveCallFn(action: Extract<Action, { kind: "call" }>, instances: ResolvedInstances, artifacts: ResolvedArtifacts) {

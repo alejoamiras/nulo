@@ -62,7 +62,7 @@ copies (new `deferred.ts` + `rw-guard.ts` adoption), and the 2 `Buffer` base64 s
 `bun run lint && bun run typecheck:all && bun run --cwd packages/wallet-core test && bun run --cwd packages/extension-messaging test && bun run --cwd packages/aztec-runtime test && (cd apps/extension && bun --bun vitest run src/wallet/services/execution/execution-mutex.test.ts src/wallet/services/wallet-sdk/session-baton.test.ts src/wallet/services/window-manager/window-manager.test.ts src/wallet/services/dapp-session/integrity.test.ts src/composables/useFullBackupImport.test.ts src/wallet/utils/offscreen.test.ts src/wallet/services/wallet-sdk)`.
 Pass: every command exit 0. Layers: lint/typecheck + unit.
 
-### Phase 2 — service and utility helpers (E1, C3, C8, D5, G2, G3)
+### Phase 2 — service and utility helpers (E1, C3, C8, D5, G2, G3) ✓
 
 `patchAccountField` keeps everything both methods do today: the profile/chain ownership check under the
 tuple lock, unchanged-value suppression, and emit-after-write ordering.

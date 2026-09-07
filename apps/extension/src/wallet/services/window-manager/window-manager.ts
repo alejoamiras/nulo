@@ -12,7 +12,7 @@
  */
 
 import { LogLevel, type ILogger } from "@/wallet/logger"
-import { getRandomHex } from "@/wallet/utils"
+import { randomIdNotIn } from "@/wallet/services/id-allocators"
 import type { ClockPort, TimerHandle, WindowBounds, WindowPort } from "@nulo/wallet-core/ports"
 import type { Unsubscribe } from "@nulo/wallet-core/ports"
 import { deferred, errorMessageFromUnknown } from "@nulo/wallet-core/utils"
@@ -63,10 +63,7 @@ export class WindowManager {
 	) {}
 
 	public openAndAwait<T>(opts: OpenAndAwaitOpts): AwaitedWindow<T> {
-		let handleId: string
-		do {
-			handleId = getRandomHex(8)
-		} while (this.handles.has(handleId))
+		const handleId = randomIdNotIn((id) => this.handles.has(id))
 
 		const { promise, resolve, reject } = deferred<T>()
 

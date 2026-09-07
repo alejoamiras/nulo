@@ -40,6 +40,19 @@ const LOG_SOURCE = "ContractResolver"
  *  execution layer depend on a name collision resolving to the
  *  dispatch-able entry. Returns `undefined` when absent; callers own
  *  their (frozen) error text. */
+/** Guard ladder over pre-resolved maps; the error strings are frozen by their call sites. */
+export function requireArtifact(
+	instances: Map<string, ContractInstanceWithAddress>,
+	artifacts: Map<string, ContractArtifact>,
+	address: string,
+): ContractArtifact {
+	const instance = instances.get(address)
+	if (!instance) throw new Error("Contract not found")
+	const artifact = artifacts.get(instance.currentContractClassId.toString())
+	if (!artifact) throw new Error("Contract artifact not found")
+	return artifact
+}
+
 export function findFunctionByName(artifact: ContractArtifact, name: string): FunctionAbi | undefined {
 	return artifact.functions.find((x) => x.name === name) ?? artifact.nonDispatchPublicFunctions.find((x) => x.name === name)
 }

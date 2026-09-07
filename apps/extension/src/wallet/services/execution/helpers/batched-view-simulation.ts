@@ -137,7 +137,7 @@ import { assertLiveChainIdentity, chainInfoFrom } from "@nulo/aztec-runtime/util
 import type { CallAction, EncodedCallAction } from "@nulo/wallet-bridge"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { type ILogger, LogLevel } from "@/wallet/logger"
-import { type ContractResolver, findFunctionByName, findFunctionBySelector } from "../contract-resolver"
+import { type ContractResolver, findFunctionByName, findFunctionBySelector, requireArtifact } from "../contract-resolver"
 import { getBlockHeaderAnchor } from "./block-header-anchor"
 
 const LOG_SOURCE = "batched-view-simulation"
@@ -606,10 +606,7 @@ async function classifyCall(
 	artifacts: Map<string, ContractArtifact>,
 ): Promise<ClassifiedCall> {
 	if (call.kind === "call") {
-		const instance = instances.get(call.contract)
-		if (!instance) throw new Error("Contract not found")
-		const artifact = artifacts.get(instance.currentContractClassId.toString())
-		if (!artifact) throw new Error("Contract artifact not found")
+		const artifact = requireArtifact(instances, artifacts, call.contract)
 		const fn = findFunctionByName(artifact, call.method)
 		if (!fn) throw new Error("Method not found")
 		const fnSelector = await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters)
@@ -646,10 +643,7 @@ async function classifyCall(
 	}
 
 	// encoded_call kind
-	const instance = instances.get(call.to)
-	if (!instance) throw new Error("Contract not found")
-	const artifact = artifacts.get(instance.currentContractClassId.toString())
-	if (!artifact) throw new Error("Contract artifact not found")
+	const artifact = requireArtifact(instances, artifacts, call.to)
 	const fn = await findFunctionBySelector(artifact, call.selector)
 	if (!fn) throw new Error("Method not found")
 

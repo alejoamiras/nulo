@@ -36,7 +36,7 @@ import z from "zod"
 import type { ILogger } from "@/wallet/logger"
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
-import { findFunctionByName, findFunctionBySelector } from "./contract-resolver"
+import { findFunctionByName, findFunctionBySelector, requireArtifact } from "./contract-resolver"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import type { Action, AddPrivateAuthwitAction, CallAuthwitContent, EncodedCallAuthwitContent, IntentAuthwitContent } from "./spec"
@@ -139,14 +139,7 @@ export class AuthwitDiscoverer {
 		instances: Map<string, ContractInstanceWithAddress>,
 		artifacts: Map<string, ContractArtifact>,
 	): Promise<Fr> {
-		const instance = instances.get(content.contract)
-		if (!instance) {
-			throw new Error("Contract not found")
-		}
-		const artifact = artifacts.get(instance.currentContractClassId.toString())
-		if (!artifact) {
-			throw new Error("Contract artifact not found")
-		}
+		const artifact = requireArtifact(instances, artifacts, content.contract)
 		const fn = findFunctionByName(artifact, content.method)
 		if (!fn) {
 			throw new Error("Method not found")
@@ -188,14 +181,7 @@ export class AuthwitDiscoverer {
 		// let a dApp supply name/type/isStatic/returnTypes to skip the lookup and
 		// obtain an authwit over a selector that did not match the claimed name. The
 		// fields set below are ABI truth; any dApp-supplied values are overwritten.
-		const instance = instances.get(content.to)
-		if (!instance) {
-			throw new Error("Contract not found")
-		}
-		const artifact = artifacts.get(instance.currentContractClassId.toString())
-		if (!artifact) {
-			throw new Error("Contract artifact not found")
-		}
+		const artifact = requireArtifact(instances, artifacts, content.to)
 		const fn = await findFunctionBySelector(artifact, content.selector)
 		if (!fn) {
 			throw new Error("Method not found")

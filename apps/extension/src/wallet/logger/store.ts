@@ -51,21 +51,7 @@ export class LoggerStore implements ILoggerStore {
 	}
 
 	public log(source: string, level: LogLevel, ...data: unknown[]): void {
-		if (level < this.logLevel) {
-			return
-		}
-		const log: Log = {
-			id: this.nextId++,
-			timestamp: Date.now(),
-			source,
-			level,
-			context: "sw",
-			data: trim(data) as unknown[],
-		}
-		this.logs.add(log)
-		this.scheduleFlush()
-		this.onLog.invoke(log)
-		print(log)
+		this.logWithContext(undefined, source, level, ...data)
 	}
 
 	/** Log with explicit context (used by LoggerService for offscreen/popup forwarding). */
