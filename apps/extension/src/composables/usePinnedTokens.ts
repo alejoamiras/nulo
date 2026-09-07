@@ -7,11 +7,9 @@ import type { TokenDeleted } from "@/wallet/services/token/spec"
 
 /** Pins fill Home's row budget, never more. */
 export const PINNED_TOKENS_MAX = HOME_TOKEN_ROWS
-/** Chains a profile can hold pins for; the oldest other chain is evicted past it. */
+/** Chains a profile can hold pins for; other chains are evicted in key iteration order past it. */
 export const PINNED_TOKENS_MAX_CHAINS = 32
 
-/** Canonical decimal chain id: no sign, no leading zero, no exponent, within safe-integer digits. */
-const CHAIN_KEY_RE = /^(0|[1-9]\d{0,15})$/
 const CONTRACT_RE = /^0x[0-9a-f]{64}$/
 
 /** Chain id (as a string) → lowercase contracts, at most `PINNED_TOKENS_MAX` each. */
@@ -25,7 +23,12 @@ export const pinScopeOf = (profileId: string | undefined, chainId: number | unde
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v)
 
-/** Lowercase, address-shaped, de-duplicated, capped; anything else in the list is dropped. */
+/** A chain key is the canonical decimal form of a safe integer: no sign, no leading zero, no exponent. */
+const isChainKey = (key: string) => {
+	const n = Number(key)
+	return Number.isSafeInteger(n) && n >= 0 && String(n) === key
+}
+
 function sanitizeContracts(value: unknown): string[] {
 	if (!Array.isArray(value)) return []
 	const contracts: string[] = []
@@ -38,18 +41,13 @@ function sanitizeContracts(value: unknown): string[] {
 	return contracts
 }
 
-/**
- * The stored map is user-controlled bytes (a backup import or another context may have written it),
- * so every read rebuilds it: unknown roots become empty, non-canonical chain keys and non-address
- * entries are dropped, duplicates collapse, lists are capped, and only the first
- * `PINNED_TOKENS_MAX_CHAINS` chains survive.
- */
+/** The stored map is untrusted bytes (a backup import or another context wrote it): rebuild it on every read. */
 export function sanitizePinMap(raw: unknown): PinMap {
 	if (!isRecord(raw)) return {}
 	const out: PinMap = {}
 	for (const [key, value] of Object.entries(raw)) {
 		if (Object.keys(out).length >= PINNED_TOKENS_MAX_CHAINS) break
-		if (!CHAIN_KEY_RE.test(key)) continue
+		if (!isChainKey(key)) continue
 		const contracts = sanitizeContracts(value)
 		if (contracts.length > 0) out[key] = contracts
 	}
@@ -69,7 +67,7 @@ const liveList = (list: string[], known: ReadonlySet<string> | undefined) => {
 	return list.filter((c) => lower.has(c))
 }
 
-/** Evict the oldest OTHER chains until the map fits, so the chain being written always survives. */
+/** Evict other chains, in key iteration order, until the map fits — the chain being written survives. */
 const withChainBudget = (next: PinMap, keep: string) => {
 	for (const key of Object.keys(next)) {
 		if (Object.keys(next).length <= PINNED_TOKENS_MAX_CHAINS) break
@@ -82,6 +80,61 @@ const setChain = (next: PinMap, chainKey: string, list: string[]) => {
 	if (list.length > 0) next[chainKey] = list
 	else delete next[chainKey]
 	return next
+}
+
+/**
+ * Writes are serialised per storage key across every instance in this context: an unmounted
+ * page's pending write and a newly mounted page's write to the same profile never interleave.
+ */
+const queues = new Map<string, Promise<unknown>>()
+const enqueue = <T>(key: string, op: () => Promise<T>): Promise<T> => {
+	const prev = queues.get(key) ?? Promise.resolve()
+	const run = prev.then(op, op)
+	queues.set(
+		key,
+		run.catch(() => undefined),
+	)
+	return run
+}
+
+/** One write's world: its captured scope, whether that scope still holds, the token set and the sink. */
+type WriteCtx = {
+	scope: PinScope
+	live: () => boolean
+	known: () => Promise<ReadonlySet<string> | undefined>
+	write: (next: PinMap) => Promise<void>
+}
+
+async function pinOp(ctx: WriteCtx, contract: string): Promise<PinResult> {
+	if (!ctx.live()) return "stale"
+	const c = contract.toLowerCase()
+	const chainKey = String(ctx.scope.chainId)
+	const next = await readPinMap(ctx.scope.profileId)
+	if (!ctx.live()) return "stale"
+	const stored = next[chainKey] ?? []
+	if (stored.includes(c)) return "already"
+	const known = await ctx.known()
+	if (!ctx.live()) return "stale"
+	const list = liveList(stored, known)
+	if (list.length >= PINNED_TOKENS_MAX) return "full"
+	list.push(c)
+	await ctx.write(withChainBudget(setChain(next, chainKey, list), chainKey))
+	return "pinned"
+}
+
+async function unpinOp(ctx: WriteCtx, contract: string): Promise<void> {
+	if (!ctx.live()) return
+	const c = contract.toLowerCase()
+	const chainKey = String(ctx.scope.chainId)
+	const next = await readPinMap(ctx.scope.profileId)
+	if (!ctx.live()) return
+	const stored = next[chainKey] ?? []
+	const known = await ctx.known()
+	if (!ctx.live()) return
+	const list = liveList(stored, known).filter((x) => x !== c)
+	// Nothing removed and nothing pruned: skip the write so no onChanged round-trip fires.
+	if (list.length === stored.length) return
+	await ctx.write(setChain(next, chainKey, list))
 }
 
 export interface UsePinnedTokensDeps {
@@ -101,15 +154,16 @@ export interface UsePinnedTokensDeps {
 }
 
 /**
- * Per-profile "Pin to Home" state behind the storage facade. Writes from one context are
- * serialised and each captures its scope when enqueued; a context switch in between makes it a
- * no-op. Two contexts writing at once are last-writer-wins on the whole map (accepted). The
- * parent calls `refresh()` on a profile switch and `dispose()` on unmount.
+ * Per-profile "Pin to Home" state behind the storage facade. Every write captures its scope and
+ * re-checks it after each await; a switch in between makes it a no-op. Two contexts writing at
+ * once are last-writer-wins on the whole map (accepted). The parent calls `refresh()` on a profile
+ * switch and `dispose()` on unmount.
  */
 export function usePinnedTokens(deps: UsePinnedTokensDeps) {
 	const map = ref<PinMap>({})
 	const loadedProfile = ref<string | undefined>()
-	let queue: Promise<unknown> = Promise.resolve()
+	let refreshGeneration = 0
+	let disposed = false
 
 	const scopeStillIs = (scope: PinScope | undefined): scope is PinScope => {
 		const now = deps.getScope()
@@ -118,7 +172,7 @@ export function usePinnedTokens(deps: UsePinnedTokensDeps) {
 
 	const writeMap = async (profileId: string, next: PinMap) => {
 		await storageLocalSet({ [pinnedTokensKey(profileId)]: next })
-		if (loadedProfile.value === profileId) map.value = next
+		if (!disposed && loadedProfile.value === profileId) map.value = next
 	}
 
 	const pinnedContracts: ComputedRef<ReadonlySet<string>> = computed(() => {
@@ -129,7 +183,9 @@ export function usePinnedTokens(deps: UsePinnedTokensDeps) {
 
 	const isPinned = (contract: string) => pinnedContracts.value.has(contract.toLowerCase())
 
+	/** Only the latest refresh may land; an older read resolving late, or one after dispose, is dropped. */
 	const refresh = async () => {
+		const generation = ++refreshGeneration
 		const scope = deps.getScope()
 		if (!scope) {
 			map.value = {}
@@ -137,54 +193,33 @@ export function usePinnedTokens(deps: UsePinnedTokensDeps) {
 			return
 		}
 		const next = await readPinMap(scope.profileId)
-		// A switch during the read: the later refresh owns the state.
-		if (deps.getScope()?.profileId !== scope.profileId) return
+		if (disposed || generation !== refreshGeneration || deps.getScope()?.profileId !== scope.profileId) return
 		map.value = next
 		loadedProfile.value = scope.profileId
 	}
 
-	/** Serialise every write; each op sees the map as the previous one left it. */
-	const enqueue = <T>(op: () => Promise<T>): Promise<T> => {
-		const run = queue.then(op, op)
-		queue = run.catch(() => undefined)
-		return run
-	}
+	const writeCtx = (scope: PinScope): WriteCtx => ({
+		scope,
+		live: () => scopeStillIs(scope),
+		known: async () => deps.knownContracts(),
+		write: (next) => writeMap(scope.profileId, next),
+	})
 
 	const pin = (contract: string): Promise<PinResult> => {
 		const scope = deps.getScope()
-		return enqueue(async () => {
-			if (!scopeStillIs(scope)) return "stale"
-			const c = contract.toLowerCase()
-			const chainKey = String(scope.chainId)
-			const next = await readPinMap(scope.profileId)
-			const stored = next[chainKey] ?? []
-			if (stored.includes(c)) return "already"
-			const list = liveList(stored, await deps.knownContracts())
-			if (list.length >= PINNED_TOKENS_MAX) return "full"
-			list.push(c)
-			await writeMap(scope.profileId, withChainBudget(setChain(next, chainKey, list), chainKey))
-			return "pinned"
-		})
+		if (!scope) return Promise.resolve("stale")
+		return enqueue(pinnedTokensKey(scope.profileId), () => pinOp(writeCtx(scope), contract))
 	}
 
 	const unpin = (contract: string): Promise<void> => {
 		const scope = deps.getScope()
-		return enqueue(async () => {
-			if (!scopeStillIs(scope)) return
-			const c = contract.toLowerCase()
-			const chainKey = String(scope.chainId)
-			const next = await readPinMap(scope.profileId)
-			const stored = next[chainKey] ?? []
-			const list = liveList(stored, await deps.knownContracts()).filter((x) => x !== c)
-			// Nothing removed and nothing pruned: skip the write so no onChanged round-trip fires.
-			if (list.length === stored.length) return
-			await writeMap(scope.profileId, setChain(next, chainKey, list))
-		})
+		if (!scope) return Promise.resolve()
+		return enqueue(pinnedTokensKey(scope.profileId), () => unpinOp(writeCtx(scope), contract))
 	}
 
 	/** Deletion cleanup touches ONLY the event's own profile + chain entry, and never prunes. */
 	const onTokenDeleted = (token: TokenDeleted) => {
-		void enqueue(async () => {
+		void enqueue(pinnedTokensKey(token.profileId), async () => {
 			const c = token.contract.toLowerCase()
 			const chainKey = String(token.chainId)
 			const next = await readPinMap(token.profileId)
@@ -211,6 +246,7 @@ export function usePinnedTokens(deps: UsePinnedTokensDeps) {
 	chrome.storage.onChanged.addListener(onChanged)
 
 	const dispose = () => {
+		disposed = true
 		chrome.storage.onChanged.removeListener(onChanged)
 		deps.tokenService?.onTokenDeleted.remove(onTokenDeleted)
 	}

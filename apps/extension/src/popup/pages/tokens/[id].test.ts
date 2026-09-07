@@ -29,6 +29,7 @@ const H = vi.hoisted(() => {
 		balanceUpdated: makeEvent(),
 		openToast: vi.fn(),
 		popupOpen: vi.fn(),
+		popupIsOpened: vi.fn(() => false),
 		store: { current: null as unknown as Record<string, unknown> },
 		cache: { current: null as unknown as { confirm: Record<string, unknown>; activeTokenIdx: unknown } },
 	}
@@ -58,7 +59,9 @@ vi.mock("@/wallet/services/token-balance/client", () => ({
 vi.mock("@/composables/toast.js", () => ({ useToast: () => ({ openToast: H.openToast }) }))
 vi.mock("@/stores/app.store", () => ({ useAppStore: () => H.store.current }))
 vi.mock("@/stores/cache.store", () => ({ useCacheStore: () => H.cache.current }))
-vi.mock("@/stores/popup.store", () => ({ usePopupStore: () => ({ open: H.popupOpen, closeAll: vi.fn() }) }))
+vi.mock("@/stores/popup.store", () => ({
+	usePopupStore: () => ({ open: H.popupOpen, isOpened: H.popupIsOpened, closeAll: vi.fn() }),
+}))
 vi.mock("vue-router", async (importOriginal) => {
 	const mod = await importOriginal<typeof import("vue-router")>()
 	return { ...mod, useRoute: () => ({ params: { id: "1" } }), useRouter: () => ({ push: vi.fn() }) }
@@ -73,10 +76,12 @@ const STUBS = {
 	SubPageHeader: { template: "<div><slot /><slot name='trailing' /><slot name='actions' /></div>" },
 	// The page imports `Dropdown` from the family index, whose SFC is named DropdownRoot.
 	DropdownRoot: { template: "<div><slot /><slot name='popup' /></div>" },
-	DropdownItem: { template: "<div v-bind='$attrs' @click=\"$emit('click')\"><slot /></div>", inheritAttrs: false },
+	// `emits` keeps the parent's @click out of $attrs, so a click fires the handler exactly once.
+	DropdownItem: { emits: ["click"], template: "<div v-bind='$attrs' @click=\"$emit('click')\"><slot /></div>", inheritAttrs: false },
 	DropdownDivider: { template: "<hr />" },
 	Tooltip: { template: "<div><slot /><slot name='content' /></div>" },
 	BalanceView: { template: "<div />" },
+	Banner: { template: "<div><slot /></div>" },
 	RecentActivityView: { template: "<div />" },
 	MaterialIcon: { template: "<i />" },
 	Icon: { template: "<i />" },
@@ -117,6 +122,7 @@ const pinItem = (wrapper: ReturnType<typeof mount>) => wrapper.find('[data-testi
 describe("token page — Pin to Home", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		H.popupIsOpened.mockReturnValue(false)
 		H.tokenDeleted.clear()
 		H.balanceUpdated.clear()
 		installStorage()
@@ -162,12 +168,15 @@ describe("token page — Pin to Home", () => {
 	test("a fourth pin opens the single-action Home is full popup naming the pinned symbols", async () => {
 		installStorage({ [pinnedTokensKey("p1")]: { "7": [addr(2), addr(3), addr(4)] } })
 		const wrapper = await mountPage()
+		// A stale callback left in the store must not survive into the informational popup.
+		H.cache.current.confirm.callback = vi.fn()
 		await pinItem(wrapper).trigger("click")
 		await flushPromises()
 
 		expect(backing[pinnedTokensKey("p1")]).toEqual({ "7": [addr(2), addr(3), addr(4)] })
 		expect(H.openToast).not.toHaveBeenCalled()
 		expect(H.popupOpen).toHaveBeenCalledWith("confirm")
+		expect(H.cache.current.confirm.callback).toBeUndefined()
 		expect(H.cache.current.confirm).toMatchObject({ single: true, title: "Home is full", confirm_text: "Got it" })
 		expect(H.cache.current.confirm.description).toBe("Home shows up to 3 pinned tokens. Unpin one of these to pin AAA: BBB, CCC, DDD")
 	})
@@ -182,6 +191,32 @@ describe("token page — Pin to Home", () => {
 		await flushPromises()
 		expect(H.popupOpen).toHaveBeenCalledWith("confirm")
 		expect(H.cache.current.confirm.description).toContain("BBB, CCC, DDD")
+	})
+
+	test("a confirm opened while the symbols were being fetched is left alone", async () => {
+		installStorage({ [pinnedTokensKey("p1")]: { "7": [addr(2), addr(3), addr(4)] } })
+		const resolvers: Array<(t: unknown) => void> = []
+		const wrapper = await mountPage()
+		H.getTokens.mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					resolvers.push(resolve)
+				}),
+		)
+		await pinItem(wrapper).trigger("click")
+		await flushPromises()
+		// The cap check's token read resolves → "full" → the popup's own symbol read starts.
+		resolvers.shift()?.(H.tokens.current)
+		await flushPromises()
+		// Meanwhile the user opened a destructive confirm (e.g. Remove token).
+		const callback = vi.fn()
+		H.cache.current.confirm = { description: "remove?", callback }
+		H.popupIsOpened.mockReturnValue(true)
+		resolvers.shift()?.(H.tokens.current)
+		await flushPromises()
+
+		expect(H.popupOpen).not.toHaveBeenCalledWith("confirm")
+		expect(H.cache.current.confirm).toEqual({ description: "remove?", callback })
 	})
 
 	test("a hostile symbol is bounded in the popup copy", async () => {

@@ -15,8 +15,10 @@ function memoryStorage() {
 	const data = new Map<string, unknown>()
 	const listeners = new Set<Listener>()
 	let failNextSet = false
+	let gate: Promise<void> | null = null
 	const local = {
 		get: vi.fn(async (keys?: string | string[]) => {
+			if (gate) await gate
 			const list = typeof keys === "string" ? [keys] : (keys ?? [...data.keys()])
 			return Object.fromEntries(list.filter((k) => data.has(k)).map((k) => [k, data.get(k)]))
 		}),
@@ -44,6 +46,17 @@ function memoryStorage() {
 		onChanged,
 		failNextSet: () => {
 			failNextSet = true
+		},
+		/** Hold every `get` until the returned release runs (reads issued meanwhile resolve together). */
+		holdGets() {
+			let release!: () => void
+			gate = new Promise<void>((r) => {
+				release = () => {
+					gate = null
+					r()
+				}
+			})
+			return release
 		},
 		/** Simulate another context's write: store + notify without going through `set`'s mock count. */
 		external(key: string, value: unknown) {
@@ -111,6 +124,7 @@ describe("sanitizePinMap", () => {
 				"1e3": [A],
 				"-1": [A],
 				"12345678901234567": [A],
+				"9999999999999999": [A],
 				"7": "not-a-list",
 				"8": [1, null, "0xzz", `0x${"a".repeat(63)}`, A.toUpperCase(), A, B],
 			}),
@@ -297,6 +311,46 @@ describe("usePinnedTokens", () => {
 		storage.external(pinnedTokensKey("p1"), { "7": [D] })
 		await settle()
 		expect([...pins.pinnedContracts.value]).toEqual([C])
+	})
+
+	test("a chain switch during the storage read makes the write a no-op: the old chain is never pruned", async () => {
+		storage.data.set(pinnedTokensKey("p1"), { "7": [A, B] })
+		known = new Set([C]) // the NEW chain's tokens: pruning with them would erase A and B
+		const pins = make()
+		await pins.refresh()
+		const release = storage.holdGets()
+		const op = pins.pin(C)
+		await new Promise((r) => setTimeout(r, 0))
+		state.scope = { profileId: "p1", chainId: 8 }
+		release()
+		expect(await op).toBe("stale")
+		expect(storage.data.get(pinnedTokensKey("p1"))).toEqual({ "7": [A, B] })
+		expect(storage.local.set).not.toHaveBeenCalled()
+		pins.dispose()
+	})
+
+	test("an older refresh resolving after a newer one never rolls the pins back", async () => {
+		storage.data.set(pinnedTokensKey("p1"), { "7": [A] })
+		const pins = make()
+		const release = storage.holdGets()
+		const first = pins.refresh()
+		await new Promise((r) => setTimeout(r, 0))
+		storage.data.set(pinnedTokensKey("p1"), { "7": [B] })
+		const second = pins.refresh()
+		release()
+		await Promise.all([first, second])
+		expect([...pins.pinnedContracts.value]).toEqual([B])
+		pins.dispose()
+	})
+
+	test("writes serialise across instances of the same profile: two pages pinning at once keep both", async () => {
+		const page1 = make()
+		const page2 = make()
+		await Promise.all([page1.refresh(), page2.refresh()])
+		expect(await Promise.all([page1.pin(A), page2.pin(B)])).toEqual(["pinned", "pinned"])
+		expect(storage.data.get(pinnedTokensKey("p1"))).toEqual({ "7": [A, B] })
+		page1.dispose()
+		page2.dispose()
 	})
 
 	test("a profile switch needs refresh; until then the pins read empty, never the old profile's", async () => {

@@ -28,6 +28,21 @@ Implemented on the Mac, 2026-09-07, on `home-holdings-pin/pins` after both arc l
 - Docs: CLAUDE.md's L4 block names the holdings module and the `src/utils` token-row helpers; the e2e
   README gains a feature-helper table; the plan index entry is updated.
 
+## Gate notes
+- The first two full `bun run test` runs on this tip red on unrelated files with worker-start and
+  5s timeouts ("Timeout waiting for worker to respond", `RPC 'log' timed out`) while the machine
+  sat at load 18: an e2e run killed mid-flight had left an anvil + aztec + playground group alive
+  (the next run's node logged `Address already in use` and crawled — the Holdings spec took 41
+  minutes to fail). `bun run e2e:reap` reaped the owned group; after that the extension suite ran
+  green (447 files with `--maxWorkers=4`, the four files whose forks had not started rerun alone) and
+  the network specs ran at their usual speed. Lesson: when everything slows at once, reap first.
+- A benign `[aztec-node] Error: Address already in use` still prints at every sandbox boot (a
+  secondary listener); a passing run shows it too, so it is not the signal.
+- Network specs that deploy state (`send-picker`, `pin-to-home`, `home-cap`, `holdings`) must not be
+  judged on vitest retries: a retry re-deploys the extra token into the same fixture, so attempt 2
+  legitimately lists `ALT` twice and attempt 3 has four tokens. Run them with `NULO_E2E_RETRY=0`
+  when a first attempt fails; `send-picker` passed alone in 57s that way.
+
 ## Test notes
 - Stubbing the dropdown in the token page test needs the SFC's own name (`DropdownRoot`), not the
   index export name (`Dropdown`); with the real component the items live in a teleport that only

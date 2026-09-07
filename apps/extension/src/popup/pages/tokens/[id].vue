@@ -126,16 +126,25 @@ const pins = usePinnedTokens({
 void pins.refresh()
 const isPinned = computed(() => !!token.value && pins.isPinned(token.value.contract))
 
+// The symbols are fetched, so the result is fenced: a scope or token change, an unmount, or a
+// confirm opened meanwhile (which may carry a destructive callback) must not be overwritten.
+let unmounted = false
 const showHomeFull = async () => {
 	const s = scope()
-	if (!s) return
+	const subject = token.value
+	if (!s || !subject) return
 	const tokens = await tokenService.getTokens(s.profileId, s.chainId)
+	const still = scope()
+	if (unmounted || token.value !== subject || still?.profileId !== s.profileId || still.chainId !== s.chainId) return
+	if (popupStore.isOpened("confirm")) return
 	const symbolOf = new Map(tokens.map((t) => [t.contract.toLowerCase(), sanitizeWireString(t.symbol, 32)]))
-	const pinned = [...pins.pinnedContracts.value].map((c) => symbolOf.get(c)).filter((s) => s !== undefined)
-	cacheStore.confirm.single = true
-	cacheStore.confirm.title = "Home is full"
-	cacheStore.confirm.description = `Home shows up to 3 pinned tokens. Unpin one of these to pin ${sanitizeWireString(token.value.symbol, 32)}: ${pinned.join(", ")}`
-	cacheStore.confirm.confirm_text = "Got it"
+	const pinned = [...pins.pinnedContracts.value].map((c) => symbolOf.get(c)).filter((x) => x !== undefined)
+	cacheStore.confirm = {
+		single: true,
+		title: "Home is full",
+		description: `Home shows up to 3 pinned tokens. Unpin one of these to pin ${sanitizeWireString(subject.symbol, 32)}: ${pinned.join(", ")}`,
+		confirm_text: "Got it",
+	}
 	popupStore.open("confirm")
 }
 
@@ -184,6 +193,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+	unmounted = true
 	tokenService.disconnect()
 	tokenBalanceService.disconnect()
 	pins.dispose()
