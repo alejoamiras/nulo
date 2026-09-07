@@ -742,7 +742,7 @@ loop; THEN `gh stack add home-holdings-pin/pins`.
 
 Validation gate — `<fast>`. Pass: exit 0, composable suite green. Layers: lint/typecheck · unit.
 
-#### Phase 6 — the menu item, the popup, and the order everywhere
+#### Phase 6 — the menu item, the popup, and the order everywhere ✓ (2026-09-07, Mac)
 
 - `ConfirmPopup.vue`: `single` mode (+ `ConfirmPopup.test.ts` cases: single hides Cancel, relabels the
   button, the button closes without a callback; non-single unchanged; a regression that opens an

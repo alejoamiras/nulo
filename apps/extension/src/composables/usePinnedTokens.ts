@@ -158,9 +158,10 @@ export interface UsePinnedTokensDeps {
 /**
  * Per-profile "Pin to Home" state behind the storage facade. Every write captures its scope and
  * requires it to equal the store's at each checkpoint after an await (so a scope that changed and
- * changed back still lands, on the scope it captured); a disposed instance writes nothing. Two
- * contexts writing at once are last-writer-wins on the whole map (accepted). The parent calls
- * `refresh()` on a profile switch and `dispose()` on unmount.
+ * changed back still lands, on the scope it captured); after `dispose()` an ordinary write stops at
+ * its next checkpoint, while a queued deletion cleanup may still finish. Two contexts writing at
+ * once are last-writer-wins on the whole map (accepted). The parent calls `refresh()` on a profile
+ * switch and `dispose()` on unmount.
  */
 export function usePinnedTokens(deps: UsePinnedTokensDeps) {
 	const map = ref<PinMap>({})

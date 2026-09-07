@@ -463,6 +463,22 @@ describe("TokensView — Home order and cap", () => {
 		expect(cardSymbols(wrapper)).toEqual([])
 	})
 
+	test("an unmount during the scope watcher's task snapshot stops the balance fetch that would reconnect", async () => {
+		H.getTokenBalances.mockResolvedValue([namedRow(1, "OLD", { chainId: MAINNET })])
+		const wrapper = mount(TokensView, { shallow: true })
+		await flushPromises()
+		const fetchesBefore = H.getTokenBalances.mock.calls.length
+
+		const tasksPending = deferred<unknown[]>()
+		H.getTasks.mockReturnValue(tasksPending.promise)
+		H.store.current.network = { id: "net-other", chainId: MAINNET + 1 }
+		await flushPromises()
+		wrapper.unmount()
+		tasksPending.resolve([])
+		await flushPromises()
+		expect(H.getTokenBalances.mock.calls.length).toBe(fetchesBefore)
+	})
+
 	test("hostile rows reach the REAL card without throwing: a dash for the malformed ones, the good row intact", async () => {
 		H.getTokenBalances.mockResolvedValue([
 			namedRow(1, "GOOD", { chainId: MAINNET }),

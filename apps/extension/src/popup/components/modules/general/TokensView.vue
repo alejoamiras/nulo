@@ -385,8 +385,11 @@ watch(
 		// new scope's pins; pins refresh on their own, not behind the task snapshot.
 		tokenBalances.value = []
 		void pins.refresh()
+		const gen = scopeGen
 		// Tasks first: fetchTokenBalances derives isUpdating from the snapshot.
 		await fetchTasks().catch(() => undefined)
+		// A newer scope, or the unmount (which bumps the generation), owns the balances now.
+		if (scopeGen !== gen) return
 		await fetchTokenBalances()
 	},
 )
@@ -399,6 +402,7 @@ onMounted(async () => {
 	await fetchTokenBalances()
 })
 onBeforeUnmount(() => {
+	scopeGen++
 	taskService.disconnect()
 	tokenBalanceService.disconnect()
 	journalService.disconnect()

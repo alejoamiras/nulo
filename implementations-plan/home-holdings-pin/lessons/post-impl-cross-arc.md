@@ -46,3 +46,17 @@ starved the next case's queue. Declare `emits` on such stubs.
    individually; the newer read lands first, the older one is dropped. Plus a disposed-mid-write case.
 5. **Low — comments.** The composable doc now describes equality at checkpoints (a scope that
    changed and changed back lands on the scope it captured); the `WriteCtx` paraphrase is gone.
+
+## Round 3 — verdict `approve with fixes`, two findings, both taken (hard stop reached)
+
+1. **Medium — Home's scope watcher could reconnect its balance client after unmount** (the
+   unmount's disconnect rejected the task snapshot, the new catch swallowed it, and the balance
+   fetch that followed reopened the port with nothing left to close it). Fix: the watcher captures
+   `scopeGen`, the unmount bumps it, and the balance fetch runs only if the generation still holds.
+   New case: unmount during a held task snapshot → no further balance fetch.
+2. **Low — the composable doc overstated disposal**; it now says an ordinary write stops at its
+   next checkpoint while a queued deletion cleanup may finish.
+
+Codex's "looks fine": queue cleanup rejection-safe, disposal checkpoints, the fence test now real,
+no further confirm-state changes. **The plan's hard stop is 3 rounds: these two fixes are applied
+and gated locally, not re-reviewed.**
