@@ -60,7 +60,7 @@ const STUBS = {
 	SettingItem: { props: ["title", "description", "icon", "size", "raw"], template: "<div />" },
 	ItemsContainer: { template: "<div><slot /></div>" },
 	Tooltip: { template: "<div><slot /><slot name='content' /></div>" },
-	Icon: { template: "<i />" },
+	Icon: { props: ["name", "color"], template: `<i :data-name="name" :data-color="color" />` },
 	Text: { template: "<span><slot /></span>" },
 	Flex: { template: "<div><slot /></div>" },
 	Transition: { template: "<div><slot /></div>" },
@@ -182,6 +182,7 @@ describe("EditFpcPopup — the processing error note", () => {
 		pressEnterOnInput()
 		await flushPromises()
 		expect(w.text()).toContain("boom")
+		expect(w.find("i[data-name='info']").attributes("data-color")).toBe("red")
 		expect(w.emitted("onClose")).toBeFalsy()
 	})
 })

@@ -6,8 +6,6 @@ import EmojiGrid from "@/components/composite/general/EmojiGrid.vue"
 import { onMounted, onUnmounted } from "vue"
 import { hashToEmoji } from "@aztec/wallet-sdk/crypto"
 
-/** Utils */
-
 /** Services */
 import { DappSessionServiceClient, type DappSession, type DappMetadata } from "@/wallet/services/dapp-session/client"
 import { type Account, AccountServiceClient } from "@/wallet/services/account/client"
@@ -232,8 +230,6 @@ onUnmounted(() => {
 .scroll_area {
 	composes: scroll_area from "../window-shell.module.css";
 }
-
-/* ── dApp identity block ───────────────────────────────────────── */
 
 /* ── Verification section ──────────────────────────────────────── */
 

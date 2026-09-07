@@ -84,6 +84,18 @@ describe("ProcessingErrorNote — glyph colour and tooltip geometry", () => {
 		expect(mountNote({ tooltip: "boom" }).find("[data-testid='note']").attributes("data-disabled")).toBe("false")
 	})
 
+	test("an object-valued tooltip renders its serialized detail", () => {
+		const w = mountNote({ tooltip: { code: "E_DUP", message: "duplicate" } })
+		expect(w.find("[data-testid='note']").attributes("data-disabled")).toBe("false")
+		expect(w.text()).toContain("duplicate")
+	})
+
+	test("a colour change after mount reaches the glyph", async () => {
+		const w = mountNote({})
+		await w.setProps({ color: "red" })
+		expect(w.find("[data-testid='glyph']").attributes("data-color")).toBe("red")
+	})
+
 	test("the fade transition wraps the tooltip", async () => {
 		const w = mountNote({ show: false })
 		await w.setProps({ show: true })

@@ -170,7 +170,7 @@ usePopupEntity(() => props.show, {
 		>
 			<template #right>
 				<Transition name="fade">
-					<FieldWarning v-if="isNameAlreadyExist">Already exists</FieldWarning>
+					<FieldWarning v-if="isNameAlreadyExist"> Already exists </FieldWarning>
 				</Transition>
 			</template>
 		</Input>
@@ -184,8 +184,8 @@ usePopupEntity(() => props.show, {
 		>
 			<template #right>
 				<Transition name="fade">
-					<FieldWarning v-if="isUrlHasError">Failed to fetch network info</FieldWarning>
-					<FieldWarning v-else-if="isUrlAlreadyExist">Already exists</FieldWarning>
+					<FieldWarning v-if="isUrlHasError"> Failed to fetch network info </FieldWarning>
+					<FieldWarning v-else-if="isUrlAlreadyExist"> Already exists </FieldWarning>
 				</Transition>
 			</template>
 		</Input>

@@ -125,7 +125,7 @@ usePopupEntity(() => props.show, {
 		>
 			<template #right>
 				<Transition name="fade">
-					<FieldWarning v-if="isNameAlreadyExist">Already exists</FieldWarning>
+					<FieldWarning v-if="isNameAlreadyExist"> Already exists </FieldWarning>
 				</Transition>
 			</template>
 		</Input>

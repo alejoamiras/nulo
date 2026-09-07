@@ -12,15 +12,7 @@ function formatScope(scope: Scope): { isWildcard: boolean; patterns: ScopePatter
 	return { isWildcard: true, patterns: [] }
 }
 
-/**
- * Render-time function-id sanitizer. `humanizeMethodName` is many-to-one
- * lossy (transfer, transfer_in_private, and transfer_private_to_private
- * all collapse to "Transfer (private)"), so we always show the RAW
- * sanitized method id and only attach the friendly label when
- * `METHOD_LABELS` knows it. Length cap of 64 handles legitimate Aztec
- * method names (the longest builtins are < 40 chars) while clamping
- * pathological wire values.
- */
+/** Friendly labels are lossy (several raw ids share one), so the sanitized raw id always renders and a label only annotates it; 64 covers every builtin name. */
 function fnLabel(fn: string): string {
 	return sanitizeWireString(fn, 64)
 }

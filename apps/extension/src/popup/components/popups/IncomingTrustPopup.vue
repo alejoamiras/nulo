@@ -101,13 +101,7 @@ function payloadKey() {
 	return `${t.profileId ?? ""}|${t.networkId ?? ""}|${t.contract ?? ""}`
 }
 
-/**
- * One decision path for both buttons. The latch drops re-entry while a decision is in flight; only the
- * decision that set it clears it (`myGen`), so a slow handler from a prior prompt can't unlock the next
- * one. The symbol reaches here already captured (the label is built by the caller in the same tick) and
- * the payload key is captured before the await, because the active identity can switch mid-RPC; the key
- * is re-checked before closing so a late decision never dismisses a prompt the user hasn't decided on.
- */
+/** Both buttons decide through here; the caller builds the label before the latch, the key is captured before the await. */
 async function decide(action, successLabel, successIcon) {
 	if (isSubmitting.value) return
 	isSubmitting.value = true

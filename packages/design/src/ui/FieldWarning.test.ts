@@ -34,7 +34,7 @@ describe("ui/FieldWarning", () => {
 		expect(copy.text()).toBe("Already exist")
 	})
 
-	test("interpolated copy renders through the slot", () => {
+	test("interpolated copy renders through the slot and follows the page's state", async () => {
 		const Host = defineComponent({
 			components: { FieldWarning },
 			props: { errorText: String },
@@ -42,6 +42,14 @@ describe("ui/FieldWarning", () => {
 		})
 		const w = mount(Host, { props: { errorText: "RPC didn't respond. Check the URL." }, global: { stubs: STUBS } })
 		expect(w.find("[data-testid='copy']").text()).toBe("RPC didn't respond. Check the URL.")
+		await w.setProps({ errorText: "Wrong chain — this network is chain 1." })
+		expect(w.find("[data-testid='copy']").text()).toBe("Wrong chain — this network is chain 1.")
+	})
+
+	test("static copy keeps the spaces the old span carried around it", () => {
+		const Host = defineComponent({ components: { FieldWarning }, template: `<FieldWarning> Already exist </FieldWarning>` })
+		const w = mount(Host, { global: { stubs: STUBS } })
+		expect(w.find("[data-testid='copy']").element.textContent).toBe(" Already exist ")
 	})
 
 	test("leaks no attributes of its own onto the row", () => {
@@ -59,8 +67,12 @@ describe("ui/FieldWarning", () => {
 		expect(w.find("[data-testid='row']").exists()).toBe(false)
 		await w.setProps({ show: true })
 		await nextTick()
-		expect(w.find("[data-testid='row']").exists()).toBe(true)
+		expect(w.find("[data-testid='row']").classes()).toContain("fade-enter-active")
+		await frame()
+		expect(w.find("[data-testid='row']").classes()).not.toContain("fade-enter-active")
 		await w.setProps({ show: false })
+		await nextTick()
+		expect(w.find("[data-testid='row']").classes()).toContain("fade-leave-active")
 		await frame()
 		expect(w.find("[data-testid='row']").exists()).toBe(false)
 	})
@@ -73,9 +85,16 @@ describe("ui/FieldWarning", () => {
 		})
 		const w = mount(Host, { props: { a: true, b: false }, global: { stubs: { ...STUBS, transition: false } } })
 		expect(w.find("[data-testid='copy']").text()).toBe("Name in use")
+		const first = w.find("[data-testid='row']").element
 		await w.setProps({ a: false, b: true })
+		await nextTick()
+		const during = w.findAll("[data-testid='row']")
+		expect(during.map((r) => r.text())).toEqual(["Name in use", "Already exist"])
+		expect(during[0]?.classes()).toContain("fade-leave-active")
+		expect(during[1]?.classes()).toContain("fade-enter-active")
 		await frame()
-		const copies = w.findAll("[data-testid='copy']").map((c) => c.text())
-		expect(copies).toEqual(["Already exist"])
+		const rows = w.findAll("[data-testid='row']")
+		expect(rows.map((r) => r.text())).toEqual(["Already exist"])
+		expect(rows[0]?.element).not.toBe(first)
 	})
 })

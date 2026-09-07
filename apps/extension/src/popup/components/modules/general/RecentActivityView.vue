@@ -124,7 +124,6 @@ const isTokenAwaitingTx = computed(() => {
 const awaitingAccountTxs = computed(() => {
 	return appStore.awaitingTransactions.filter((t) => t.account === appStore.account?.address)
 })
-/** The single fallback awaiting card: the token's own pending tx on a token feed, any of the account's otherwise. */
 const showFallbackAwaiting = computed(() => (props.token ? isTokenAwaitingTx.value : awaitingAccountTxs.value.length > 0))
 
 /** Unified in-flight task: covers both dapp-initiated (ExecuteOperation) and

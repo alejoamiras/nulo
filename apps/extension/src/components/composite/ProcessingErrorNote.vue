@@ -1,15 +1,8 @@
 <script setup>
-/**
- * The save-failure note the contact popups render above their submit
- * button: an info line with the error detail behind a tooltip. The
- * tooltip is disabled when there is no detail to show.
- */
 defineProps({
 	show: Boolean,
 	title: { type: String, default: "" },
-	/** Raw error detail; shown in the tooltip body. */
 	tooltip: { type: [String, Object], default: "" },
-	/** The info glyph's colour: the contact popups keep the primary tone, the FPC popups flag in red. */
 	color: { type: String, default: "primary" },
 })
 </script>

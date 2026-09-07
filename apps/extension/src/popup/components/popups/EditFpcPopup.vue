@@ -247,7 +247,7 @@ watch(
 		>
 			<template #right>
 				<Transition name="fade">
-					<FieldWarning v-if="isAlreadyExist">Already exist</FieldWarning>
+					<FieldWarning v-if="isAlreadyExist"> Already exist </FieldWarning>
 				</Transition>
 			</template>
 		</Input>
@@ -262,7 +262,7 @@ watch(
 		>
 			<template #right>
 				<Transition name="fade">
-					<FieldWarning v-if="!isAddressValid && addressTerm">Invalid address</FieldWarning>
+					<FieldWarning v-if="!isAddressValid && addressTerm"> Invalid address </FieldWarning>
 				</Transition>
 			</template>
 		</Input>

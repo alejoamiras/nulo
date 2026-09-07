@@ -151,7 +151,7 @@ watch(
 		>
 			<template #right>
 				<Transition name="fade">
-					<FieldWarning v-if="isAlreadyExist">Already exist</FieldWarning>
+					<FieldWarning v-if="isAlreadyExist"> Already exist </FieldWarning>
 				</Transition>
 			</template>
 		</Input>
@@ -165,7 +165,7 @@ watch(
 		>
 			<template #right>
 				<Transition name="fade">
-					<FieldWarning v-if="!isValidAddress && fpcAddressTerm">Invalid FPC address</FieldWarning>
+					<FieldWarning v-if="!isValidAddress && fpcAddressTerm"> Invalid FPC address </FieldWarning>
 				</Transition>
 			</template>
 		</Input>

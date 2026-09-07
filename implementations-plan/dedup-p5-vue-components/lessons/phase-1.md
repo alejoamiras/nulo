@@ -75,3 +75,18 @@ import" was wrong (`:314` still uses it) — kept.
   deleted and migrated; a brand-new primitive has no such history, so `FieldWarning` left the resolver and the nine
   popups import it explicitly from `@nulo/design` (`components.d.ts` no longer lists it). Resolver + popups suites,
   lint, typecheck and the build green again.
+
+## Phase 3 — full local gate and the codex fix loop
+
+- First full run on 959bb7b8: 457/460 files green, one red — `scripts/design-resolver.test.ts` (the resolver pin);
+  fixed in 7f4bd275 by importing `FieldWarning` explicitly.
+
+### Codex fix loop (`/codex high`, GPT-6 Astra, session `01a07d0a-849e-7093-8fad-06b8a8fa91eb`, resumed each round)
+
+- **Round 1** (on 959bb7b8): *"no new material findings"* — `decide()`, the feed condition and key, the keyed branch,
+  the verify block, the fourteen warning conditions and the note sites all judged parity-preserving; four low items
+  adopted: the eleven static warning rows keep the spaces the old spans carried (asserted via `textContent` from a
+  compiled host template — VTU's string slots trim), the sanitizer case strips a control character inside the kept
+  prefix instead of trailing markup, the fade cases assert `fade-enter-active`/`fade-leave-active` and the branch
+  swap's element replacement, both FPC suites assert the note's red glyph, the note suite reaches ten cases (object
+  tooltip, reactive colour), and the `decide()`/`fnLabel`/note/feed/verify comments lost their narration.

@@ -65,12 +65,13 @@ describe("composite/ScopePatternList", () => {
 		expect(w.text()).not.toContain("·")
 	})
 
-	test("the raw function id is sanitized and capped at 64 characters", () => {
-		const long = `${"a".repeat(70)}<b>`
+	test("the raw function id has control characters stripped and is capped at 64 characters", () => {
+		const long = `ab\u0007cd${"a".repeat(70)}`
 		const w = mountList([{ contract: "0xabc", function: long }])
-		expect(w.text()).toContain("a".repeat(64))
-		expect(w.text()).not.toContain("a".repeat(65))
-		expect(w.text()).not.toContain("<b>")
+		const text = w.text()
+		expect(text).not.toContain("\u0007")
+		expect(text).toContain(`abcd${"a".repeat(60)}`)
+		expect(text).not.toContain("a".repeat(61))
 	})
 
 	test("each pattern is one row, in order", () => {
