@@ -103,7 +103,7 @@ describe("TokenList — order, search, sort", () => {
 		expect(symbols(w)).toEqual(["ZED", "ETH"])
 		await w.find('[data-testid="holdings-sort"]').trigger("click")
 		expect(w.find('[data-testid="holdings-sort"]').attributes("data-sort")).toBe("name")
-		expect(symbols(w)).toEqual(["ETH", "ZED"]) // ETH Token < ZED Token by name
+		expect(symbols(w)).toEqual(["ETH", "ZED"])
 		await w.find('[data-testid="holdings-sort"]').trigger("click")
 		expect(w.find('[data-testid="holdings-sort"]').attributes("data-sort")).toBe("value")
 	})

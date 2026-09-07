@@ -14,6 +14,7 @@ const H = vi.hoisted(() => {
 		return {
 			add: (fn: (x?: unknown) => void) => handlers.add(fn),
 			remove: (fn: (x?: unknown) => void) => handlers.delete(fn),
+			clear: () => handlers.clear(),
 			emit: (x?: unknown) => {
 				for (const fn of [...handlers]) fn(x)
 			},
@@ -129,6 +130,9 @@ async function mountOpen(rows: ReturnType<typeof row>[]) {
 describe("SelectTokenPopup", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		// Mounted popups from earlier cases still hold their handlers on the shared events.
+		for (const ev of [H.balanceAdded, H.balanceUpdated, H.balanceDeleted, H.balanceConnected, H.quotesUpdated, H.priceConnected])
+			ev.clear()
 		H.quotes.current = {}
 		H.cache.activeTokenIdx = undefined
 		H.store.current = createAppStoreHarness()
@@ -238,12 +242,39 @@ describe("SelectTokenPopup", () => {
 		expect(rowSymbols(wrapper)).toEqual([])
 	})
 
-	test("a reconnect while open resnapshots the list", async () => {
-		const wrapper = await mountOpen([row(1, "A")])
-		H.getTokenBalances.mockResolvedValue([row(1, "A"), row(2, "B")])
+	test("the connect a load opens is not a reconnect; a port drop mid-load reloads with no error shown", async () => {
+		let rejectFirst: ((e: Error) => void) | undefined
+		H.getTokenBalances
+			.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, rej) => {
+						rejectFirst = rej
+					}),
+			)
+			.mockResolvedValue([row(1, "A"), row(2, "B")])
+		const wrapper = mount(SelectTokenPopup, { props: { show: false }, global: { stubs: STUBS } })
+		await wrapper.setProps({ show: true })
+		await flushPromises()
+		// The load's own connect.
 		H.balanceConnected.emit()
 		await flushPromises()
+		expect(H.getTokenBalances).toHaveBeenCalledTimes(1)
+
+		// The client rejects the pending request and reconnects synchronously, before the rejection settles.
+		rejectFirst?.(new Error("port closed"))
+		H.balanceConnected.emit()
+		await flushPromises()
+		expect(H.getTokenBalances).toHaveBeenCalledTimes(2)
+		expect(wrapper.find('[data-testid="select-token-error"]').exists()).toBe(false)
 		expect(rowSymbols(wrapper)).toEqual(["A", "B"])
+
+		// A hide resets the count: the next show's first connect is again its own.
+		await wrapper.setProps({ show: false })
+		await wrapper.setProps({ show: true })
+		await flushPromises()
+		H.balanceConnected.emit()
+		await flushPromises()
+		expect(H.getTokenBalances).toHaveBeenCalledTimes(3)
 	})
 
 	test("hiding clears the list and query and disconnects the balance client; unmount tears down prices", async () => {

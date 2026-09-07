@@ -82,9 +82,13 @@ function onBalanceDeleted(tb) {
 	const idx = rows.value.findIndex((r) => r.id === tb.id)
 	if (idx !== -1) rows.value.splice(idx, 1)
 }
-// A reconnect may have dropped events; the connect a load itself opens is skipped — it will land.
+// The first connect after a show is the one the load itself opened. Any later connect is a port
+// drop and reconnect: the request that was in flight has been rejected, so reload — the new
+// generation fences that rejection out.
+let connectsSinceShow = 0
 function onReconnected() {
-	if (props.show && fetchesInFlight === 0) void load()
+	connectsSinceShow++
+	if (props.show && connectsSinceShow > 1) void load()
 }
 
 const handleSelectToken = (id) => {
@@ -100,7 +104,6 @@ const handleManageTokens = () => {
 // The scope is captured before the fetch; a response for an older scope, or one that arrives after
 // the popup closed (the hide disconnects the port, which rejects the request), is dropped.
 let loadGeneration = 0
-let fetchesInFlight = 0
 const load = async () => {
 	const generation = ++loadGeneration
 	const scope = activeScope()
@@ -108,14 +111,11 @@ const load = async () => {
 	loadError.value = false
 	if (!scope) return
 	let all
-	fetchesInFlight++
 	try {
 		all = await tokenBalanceService.getTokenBalances(undefined, scope.account)
 	} catch {
 		if (props.show && generation === loadGeneration) loadError.value = true
 		return
-	} finally {
-		fetchesInFlight--
 	}
 	if (!props.show || generation !== loadGeneration) return
 	rows.value = forChain(all, scope.chainId)
@@ -123,6 +123,7 @@ const load = async () => {
 
 const close = () => {
 	loadGeneration++
+	connectsSinceShow = 0
 	rows.value = []
 	query.value = ""
 	loadError.value = false

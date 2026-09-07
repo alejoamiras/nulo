@@ -163,6 +163,17 @@ describe("holdings page", () => {
 		expect(w.find('[data-testid="holdings-summary"]').text()).not.toContain("$")
 	})
 
+	test("rejected config reads keep the defaults and never surface as an error", async () => {
+		installStorage()
+		seedRows = [row("b1", "AAA", CHAIN_IDS.MAINNET)]
+		configValues = new Proxy({}, { get: () => Promise.reject(new Error("port closed")) })
+		const w = await mountPage()
+
+		expect(w.find('[data-testid="holdings-error"]').exists()).toBe(false)
+		expect(w.findAll('[data-testid="token-symbol"]')).toHaveLength(1)
+		expect(w.find('[data-testid="holdings-summary"]').text()).toContain("1 tokens")
+	})
+
 	test("a failed fetch shows the error line, not an empty list", async () => {
 		installStorage()
 		fetchError = new Error("port closed")

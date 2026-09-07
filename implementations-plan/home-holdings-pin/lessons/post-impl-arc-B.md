@@ -34,3 +34,24 @@ Base = Arc A's tip; diff = phases 3–4 (`apps/extension`). Astra at `high`, rea
 Not taken: the Holdings deferred-fetch scope-switch case — `useEntityCrud.refresh` already fences
 stale fetches with its own sequence (`useEntityCrud.ts:80-97`) and its suite covers it; the page
 adds nothing to that path. The e2e Holdings spec's renamed token runs again in Phase 6's gate.
+
+## Round 2 — verdict `approve with fixes`, three findings, all verified and taken
+
+1. **Medium — the reconnect guard was wrong in both the picker AND Arc A's `BalanceView`.**
+   `ServiceClient.onDisconnect` rejects the pending request and reconnects synchronously
+   (`extension-messaging/src/background/client.ts:65-79`), so `onConnected` fired while the
+   in-flight counter was still 1: the recovery load was suppressed and the rejected load then
+   showed the error (codex reproduced "two connections, one request, error displayed"). Arc A's
+   round-3 test had emitted the reconnect only after the rejection settled, which is not the real
+   order. Fix in both: count connects — the first after a show (mount, for the hero) is the one the
+   load opened; every later one is a reconnect and reloads, the new generation fencing the
+   rejection out; the picker resets the count on hide. Both tests now reject and reconnect in the
+   client's order. The `BalanceView` fix is committed here on Arc B and cherry-picked down to Arc A.
+2. **Medium — the picker's price feed refreshed at mount while LOCKED.** `PopupManager` mounts every
+   popup unconditionally and `refreshIfStale` requires the fiat switch but no profile
+   (`price/service.ts:145`), so a locked wallet could reach the price provider. Fix: the picker is
+   mounted only while `appStore.isLogined` (which also disconnects it on lock).
+3. **Low — a narrating comment** in the TokenList sort case deleted.
+
+Also added on codex's aside: a Holdings case where both config reads reject (defaults stand, no
+error line).
