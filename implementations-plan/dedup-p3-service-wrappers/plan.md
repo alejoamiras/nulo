@@ -6,15 +6,14 @@ code_review: off
 eli5_mode: readme-row
 worktree: .claude/worktrees/dedup-p3-service-wrappers (branch worktree-dedup-p3-service-wrappers, on top of worktree-dedup-p2-adopt-helpers / PR #566)
 ledger: implementations-plan/dedup-ledger (phase P3)
-status: drafted 2026-09-07 — dual audit (codex + fable) pending
+status: dual audit 2026-09-07 (codex conditional, fable conditional) consolidated below; final fresh-context codex pass pending
 ---
 
 # P3 — collapse the repeated wrappers in the service and utility layer
 
 Twenty-five ledger findings (D1 D2 D3 D4 G1 C1 C2 C5 C6 F1 F2 F3 E4 E6 B1 B2 B3 B5 A1 A3 H2 H4 X4 I1
-I2), all TypeScript below the Vue layer: a wrapper, guard or scan written out N times where one private
-helper or one table carries it. ≈−740 net lines, no behaviour change, no new public surface beyond four
-small helpers named in `recon.md`. Scope is exactly those ids; anything unsafe on contact is skipped and
+I2; **H2 and C2 skipped after audit**, see the decision ledger), all TypeScript below the Vue layer: a wrapper, guard or scan written out N times where one private
+helper or one table carries it. ≈−660 net lines, no behaviour change, no new public surface beyond the small helpers named below. Scope is exactly those ids; anything unsafe on contact is skipped and
 logged.
 
 ## Architecture & Implementation
@@ -26,35 +25,35 @@ D2 (four repositories in two service folders).
 
 | Id | Helper and home | Contract kept |
 |---|---|---|
-| D1 | `definePassthroughsExhaustive<Methods>()(ProfileServiceClient.prototype, [...22 names])` + `interface ProfileServiceClient extends MethodsSpec<Methods> {}` | the same 22 RPC names; the factory's type check refuses a missing or extra name |
-| G1 | `private call<K extends keyof Methods>(method: K, params: Parameters<Methods[K]>): Promise<ReturnType<Methods[K]>>` in `network/client.ts` | `validateParams` → `request` → `validateResult` with the same per-method schema and label |
-| D2 | `RawPrefixedStore<T>` (`apps/extension/src/wallet/utils/raw-prefixed-store.ts`): `key(id)`, `get(id)`, `set(id, v)`, `remove(id)`, `rawIds()`, `validPayloads()`, `corruptIds()` over a `StorageArea`, root and zod schema; each repository becomes a thin wrapper with its current public methods | corrupt rows still count as present (`rawIds` is raw), parse failures still yield `undefined`, no auto-repair |
+| D1 | `definePassthroughsExhaustive<Methods>()(ProfileServiceClient.prototype, [...22 names])` + `interface ProfileServiceClient extends MethodsSpec<Methods> {}` with the same `biome-ignore lint/suspicious/noUnsafeDeclarationMerging` directive the other 16 clients carry; `subscribeActiveProfile` stays hand-written | the same 22 RPC names; the factory's type check refuses a missing or extra name |
+| G1 | `private call<K extends keyof Methods>(method: K, params: Parameters<Methods[K]>): Promise<ReturnType<Methods[K]>>` in `network/client.ts`, forwarding the RAW `params` to `request` (not zod's copy) | `validateParams` → `request` → `validateResult` with the same per-method schema and label; a new `client.test.ts` pins invalid params → no request, invalid result → throw |
+| D2 | two functions, not a class: `decodeRow(schema, raw): { kind: "absent" } \| { kind: "corrupt" } \| { kind: "valid"; value }` in `apps/extension/src/wallet/utils/raw-row.ts`, and `prefixedEntries(all, prefix): Array<[key, id, value]>` exported from `packages/wallet-core/src/storage/prefixed-entries.ts` (shared with A1). Each repository keeps its own single-key reads, presence checks and compare-and-delete beside its audit comments and calls the two functions for the decode and the scan | `isBlocked` stays a raw single-key presence read; `RestorePendingRepository.get` stays tri-state from ONE read; storage failures propagate; no auto-repair |
 | D3 | `private async toRecovery(credential): Promise<PasskeyRecovery>` | same calls, same order, same fields |
-| D4 | `private async viaPxe<T>(networkId, action, fn: (info) => Promise<T>)` | `ensureInitialized` stays at each public method; log verb and `"PXE request failed"` unchanged |
+| D4 | `private async viaPxe<T>(action, fn: () => Promise<T>)` wrapping only the try/catch; `ensureInitialized` and `getNetwork(networkId)` stay outside it at each public method | a missing network keeps its own error (never relabelled "PXE request failed"); log verb and message unchanged |
 | C1 | `private recordSentTx(ctx): (hash: string) => Promise<void>` | argument order to `addTransaction` unchanged |
-| C2 | `runTaskStep<T>(task, fn)` in `execution/task-step.ts` | `complete()` after `fn` resolves, `fail(error)` then rethrow on reject; only catches of exactly that shape migrate |
+| C2 | **skipped** — an `async` wrapper adds a microtask between the awaited step and `task.complete()`; `execution/mark-failed-unless-cancelled.ts:11-19` records that exact ordering class as a past regression, and `buildNoFrom` completes before building its return value while `sendTxTask` classifies before failing | — |
 | C5 | `TRANSFER_FN_BY_TYPE: Record<TransferType, { field; descriptor }>` | `"Transfer type not supported"` / `"Invalid transfer type"` verbatim |
-| C6 | module-private `decodeInto(decoded, index, types, values, logger, label)` | log-and-continue, same log fields |
+| C6 | module-private `decodeInto(decoded, index, types, values, logger, label)` logging `Array.isArray(values) ? values.length : 0` at all three arms (the utility arm's form); the "arity, never the values" comment moves onto it | log-and-continue, same fields |
 | F1 | module-level `safeString(read: () => { toString(): string })` / `safeNumber(read: () => unknown)` | `""` / `0` on throw |
-| F2 | loop over the kind list into `candidatesByKind` / `fnByKind` maps; the `TokenInterface` literal stays explicit | identical descriptor per kind; public shape untouched |
-| F3 | `private async deleteAndInvalidate(row, emitAs: Token \| undefined)` | each loop keeps its filter, its epoch fence and decides `emitAs` itself |
+| F2 | local `resolveTokenFns(artifact): Record<TokenFnKind, { candidates; fn }>` iterating `Object.values(TOKEN_FN_DESCRIPTORS)` by `descriptor.kind` (one cast at the accumulator); the `TokenInterface` literal stays explicit | identical descriptor per kind; public shape untouched |
+| F3 | `private async invalidateAndDelete(id)` — the fence-first add + `repo.delete` pair, at all four sites (`:406-410` too) | every loop keeps its filter, its lock, its epoch fence and decides its emit AFTER the await, as today |
 | E4 | `private stopWatching(handle)` | timeout cleared before the `onRemoved` unsubscribe, both nulled |
 | E6 | local `terminateWith(msg): false` inside `handleSessionEstablished` | same source, level and messages |
-| X4 | `private startPollScheduler(key, poll, label)` | born-at-epoch fence and both comments preserved; initial poll still fired |
-| B1 | `contractsAddressChecker(method, flag)` and `addressBookChecker(method)` factories; the five exported checker names stay | error strings verbatim, `grantsOfType`/`inAddressList` semantics unchanged |
+| X4 | `private startPollScheduler(schedulers: Map<string, Timer>, key, poll: () => Promise<void>, labels: { tick; initial })` — captures the epoch at creation, writes the map BEFORE the initial kick, keeps both messages; the public arm still updates `publicWatched` before calling it | born-at-epoch fence and comments preserved; each arm keeps its own map |
+| B1 | two module-private cores with their own comparison: `requireContractsGrant(method, address, flag, grants)` (truthy flag, as today) under `checkRegisterContract` / `checkGetContractMetadata` / `checkIsTokenRegistered`, each keeping its own address extraction (`instance?.address ?? instance` vs `args[0]`); `requireAddressBookGrant(method, grants)` (`=== true`, as today) under the two data checkers | error strings verbatim; `grantsOfType` / `inAddressList` / the no-grant early return unchanged |
 | B2 | module-private `deriveRecord(registry, project)` / `deriveSet(registry, project)`; six exported derive functions stay | frozen-oracle outputs identical |
 | B3 | `private logDebug/logWarn(msg, ...rest)` on the dispatcher | `"wallet-sdk"` source, same levels, same text |
-| B5 | `private requireSession(dappSession, ctx): IDappSessionRef` | throws before any use, same message |
-| A1 | `private async scopedEntries(): Promise<Array<[id, unknown]>>` | five public methods keep their return shapes |
-| A3 | `createListenerBag<T>()` in `wallet-core/src/testing/listener-bag.ts` (exported from `testing/index.ts`); the messaging harness wraps it as `{ addListener, removeListener }` | same add/remove semantics; test-only |
-| H2 | delete `waitForProfileActive.ts` + its test; `import.vue` calls `awaitProfileActivation(appStore, id, ms)` | the third signal (`bootstrapFailure`) now also rejects, which is what `auth.vue` already relies on |
-| H4 | `useFullscreenPopupSetting()` returns `{ showFullscreen, start, dispose }`; `PopupCard.vue` calls `start()` in `onMounted`, `dispose()` in `onBeforeUnmount` at the same points | mount/unmount order identical |
-| I1 | `waitForStorageRelease(key, { timeoutMs, onTimeout })` in `src/e2e/storage-gate.ts` | event-driven release, safety timeout, re-check after subscribe |
+| B5 | `private requireSession(dappSession, ctx): IDappSessionRef` called exactly where each guard sits today (the `handleSendTx` guard stays AFTER `resolveNetworkAndAccount`); no second lookup | throws before any use, same message, same error precedence |
+| A1 | the five scans call `prefixedEntries(await this.storage.get(), \`${this.root}@\`)` yielding `[key, id, value]` (the full key feeds `decodeRow(k, v)`) | five public methods keep their return shapes |
+| A3 | `createListenerBag<T>()` in `wallet-core/src/testing/listener-bag.ts` with `add`, `remove` (first occurrence) and `removeAll`; adopted at the flat sites only (`fake-browser-api.ts` ×6, `transport-harness.ts` ×4); the harness's per-service keyed maps stay | first-vs-all removal preserved per site; test-only |
+| H2 | **skipped** — `awaitProfileActivation` rejects at once on a matching `bootstrapFailure`, so a failed bootstrap would enter recovery immediately instead of after the 30 s wait: a failure-path timing change | — |
+| H4 | `useFullscreenPopupSetting()` returns `{ showFullscreen, start, dispose }`; `PopupCard.vue` calls `start()` in `onMounted`, `dispose()` in `onBeforeUnmount`; the composable test's host calls them too and a new `PopupCard.test.ts` pins the order | mount/unmount order identical |
+| I1 | `waitForStorageRelease({ key, stillHeld: () => Promise<boolean>, timeoutMs, onTimeout, onFinish? })` in `src/e2e/storage-gate.ts` | event-driven release, safety timeout, the re-check after subscribe uses each gate's own predicate (restore: `still?.at !== at`); proof and restore pass `onFinish` to remove their key, incoming-poll does not |
 | I2 | `COMPRESSION_FORMATS` table driving the three lookups | same extensions, mimes and detection aliases |
 
-**Critical flows that must not change**: D2's "corrupt row still blocks" reads (`rawIds()` vs
-`validPayloads()`), C2's catch shapes (none of the migrated catches may call `maybeRethrowAsRpcCancel`),
-F3's epoch fence, X4's born-at-epoch check, B1/B5's fail-closed throws.
+**Critical flows that must not change**: D2's raw presence reads and tri-state single-key lookup, F3's
+epoch fence and delete-before-emit, X4's born-at-epoch check and map-before-kick, B1's two comparisons and
+per-checker address extraction, B5's guard placement, D4's network lookup outside the PXE try.
 
 **Alternative considered — risk-tiered split** (the competing outline for the audit): ship the 19
 low-risk ids in this arc and hold the six the ledger marks medium (D2, F2, F3, X4, H2, G1) for a follow-up
@@ -67,23 +66,27 @@ the invariants above are explicit; the audits decide whether that is enough.
 
 ### Phase 1 — packages (A1, A3, B1, B2, B3, B5)
 
-**Validation gate**: `bun run lint && bun run typecheck:all && bun run --cwd packages/wallet-core test && bun run --cwd packages/extension-messaging test && bun run --cwd packages/wallet-bridge test`. Pass: exit 0 each. Layers: lint/typecheck + unit.
+**Validation gate**: `bun run lint && bun run typecheck:all && bun run --cwd packages/wallet-core test && bun run --cwd packages/extension-messaging test && bun run --cwd packages/wallet-bridge test`. Pass: exit 0 each; `listener-bag.test.ts` green. Layers: lint/typecheck + unit.
 
 ### Phase 2 — clients and small service helpers (D1, G1, D3, D4, E4, E6, F1, F3, X4)
 
-**Validation gate**: `bun run lint && bun run --cwd apps/extension typecheck && (cd apps/extension && bun --bun vitest run src/wallet/services/profile src/wallet/services/network src/wallet/services/account-state src/wallet/services/window-manager src/wallet/services/wallet-sdk src/wallet/services/note src/wallet/services/token-balance src/wallet/services/incoming-transfer src/wallet/base)`. Pass: exit 0 each. Layers: lint/typecheck + unit + composition.
+New tests: `network/client.test.ts` (invalid params → no request; invalid result → throw). F3 and X4 land as their own commits.
 
-### Phase 3 — execution and token introspection (C1, C2, C5, C6, F2)
+**Validation gate**: `bun run lint && bun run --cwd apps/extension typecheck && (bun run --cwd apps/extension test src/wallet/services/profile src/wallet/services/network src/wallet/services/account-state src/wallet/services/window-manager src/wallet/services/wallet-sdk src/wallet/services/note src/wallet/services/token-balance src/wallet/services/incoming-transfer src/wallet/base)`. Pass: exit 0 each. Layers: lint/typecheck + unit + composition.
 
-**Validation gate**: `bun run lint && bun run --cwd apps/extension typecheck && (cd apps/extension && bun --bun vitest run src/wallet/services/execution src/wallet/services/token src/wallet/services/fpc)`. Pass: exit 0 each. Layers: lint/typecheck + unit + composition.
+### Phase 3 — execution and token introspection (C1, C5, C6, F2)
 
-### Phase 4 — repositories, composables, utils, e2e seams (D2, H2, H4, I1, I2)
+**Validation gate**: `bun run lint && bun run --cwd apps/extension typecheck && (bun run --cwd apps/extension test src/wallet/services/execution src/wallet/services/token src/wallet/services/fpc)`. Pass: exit 0 each. Layers: lint/typecheck + unit + composition.
 
-**Validation gate**: `bun run lint && bun run --cwd apps/extension typecheck && (cd apps/extension && bun --bun vitest run src/wallet/services/profile src/wallet/services/account-integrity src/wallet/services/backup src/composables src/components/Popup src/e2e src/utils src/popup/pages)`. Pass: exit 0 each; `bun run baseline:complexity` reports no manifest change unless a directive was deleted on merit. Layers: lint/typecheck + unit + component.
+### Phase 4 — repositories, composables, utils, e2e seams (D2, H4, I1, I2)
+
+New tests: `components/Popup/PopupCard.test.ts` (start on mount, dispose on unmount), `e2e/storage-gate.test.ts` (release-between-check-and-subscribe race, timeout, `onFinish`), `wallet-core/src/testing/listener-bag.test.ts` (first-vs-all removal; lands with Phase 1). D2 lands as its own commit.
+
+**Validation gate**: `bun run lint && bun run --cwd apps/extension typecheck && (bun run --cwd apps/extension test src/wallet/services/profile src/wallet/services/account-integrity src/wallet/services/backup src/composables src/components/Popup src/e2e src/utils src/popup/pages)`. Pass: exit 0 each; `bun run baseline:complexity` reports no manifest change unless a directive was deleted on merit. Layers: lint/typecheck + unit + component.
 
 ### Phase 5 — full local gate
 
-**Validation gate**: `bun run lint && bun run typecheck:all && bun run test`. Pass: exit 0 each, quoted. No e2e locally; CI runs smoke and network on the PR.
+**Validation gate**: `bun run lint && bun run typecheck:all && bun run test && bun run --cwd apps/extension build:chrome && git diff --exit-code --stat -- apps/extension/src/types/`. Pass: exit 0 each, quoted (the build regenerates `src/types/`; CI asserts it unchanged — P2 learned this the hard way). No e2e locally; CI runs smoke and network on the PR.
 
 ## Security & Adversarial Considerations
 
@@ -115,23 +118,22 @@ the invariants above are explicit; the audits decide whether that is enough.
 5. `operation-planner.ts` has 4 `case TransferType.` arms; `batched-view-simulation.ts` logs
    `Failed to decode` 3×; `note/service.ts` has 8 `private safe*`; `token/service.ts` has 9
    `FnCandidates = getTokenFnCandidates` pairs; `token-balance/service.ts` adds to
-   `invalidatedBalanceIds` 3×; `window-manager.ts` nulls `unsubOnRemoved` 3×; `session-established.ts`
-   calls `terminateSession` 4×; `incoming-transfer/service.ts` has 2 `private start*Scheduler`.
+   `invalidatedBalanceIds` 4× (`:408` without an emit, `:523`, `:542`, `:578`); `window-manager.ts` nulls `unsubOnRemoved` 3×; `session-established.ts`
+   calls `terminateSession` 4× (three in the log-terminate-return shape); `incoming-transfer/service.ts` has 2 `private start*Scheduler`.
 6. wallet-bridge: 16 `Scope violation` strings, 6 exported `derive*`, 7 `"wallet-sdk",` log calls,
    6 `No dApp session found for origin` throws. wallet-core `entity_storage.ts` builds
-   `` `${this.root}@` `` 5×; the two test fakes splice listeners 6× each.
+   `` `${this.root}@` `` 11×, five of them as scans (`:194-268`); the two test fakes splice listeners 6× each.
 7. `waitForProfileActive` is referenced only by its own file, `unlockWait.ts`'s doc and
    `popup/pages/import.vue`; `useFullscreenPopupSetting`'s only consumer is `components/Popup/PopupCard.vue`.
 8. The three `src/e2e/chrome-storage-*-gate.ts` files each carry a safety timeout; `utils/files.ts` has 3
    switches.
 
-**Inferences (unverified — the audits should attack these)**
-- All 22 profile-client methods are pure forwards (no argument or result transformation).
-- Every `task.fail(error); throw error` catch outside `rpc-cancel.ts` has exactly that shape and does not
-  call `maybeRethrowAsRpcCancel`.
-- `import.vue`'s catch around `waitForActive` does not depend on the rejection's message text or class.
-- A runtime list of `TokenFnKind` exists (or `Object.keys(TOKEN_FN_DESCRIPTORS)` equals it).
-- `fullscreenPopupSetting.test.ts` pins the mount/unmount order that H4 must preserve.
+**Inferences — resolved by the audits**
+- All 22 profile-client methods are pure forwards: true (`subscribeActiveProfile` is client-side and stays).
+- Every `task.fail` catch outside `rpc-cancel.ts` is bare: true except `sendTxTask` (classifies first) — moot, C2 is skipped.
+- `completeImportWithRecovery`'s catch ignores the rejection: true, but the earlier rejection on `bootstrapFailure` is itself a timing change — H2 skipped.
+- No runtime `TokenFnKind` list; `TOKEN_FN_DESCRIPTORS` (`satisfies Record<TokenFnKind, …>`) is iterated by `descriptor.kind` with one cast.
+- `fullscreenPopupSetting.test.ts` pins mount → `getValue` and unmount → `disconnect` through a synthetic host, not through `PopupCard`; the host adopts `start`/`dispose` and a `PopupCard.test.ts` is added.
 
 **Asks** — none open; tier, review setting, delivery and approval are pre-answered in the ledger README.
 The one design fork (single arc vs risk-tiered split) is resolved by the audits under the pre-approval
@@ -139,7 +141,32 @@ rule, not by the owner.
 
 ## Decision ledger
 
-_(filled after the dual audit: chosen outline, rejected alternatives with reasons, unresolved disagreements)_
+**Outline**: single arc (both auditors). Rejected: the risk-tiered split — a sixth PR buys no coverage the
+medium ids lack, and the real risks were design shape (D2, H2, C2), fixed here, not merge order. Focused
+commits: D2, F3, X4 and each skipped id's log entry land on their own.
+
+**Skipped ids** (logged in lessons): **H2** — the superset wait rejects immediately on a matching
+`bootstrapFailure`, so a failed bootstrap would enter recovery at once instead of after 30 s; a
+failure-path timing change under the zero-behaviour-change rule (codex + fable). **C2** — an `async`
+wrapper inserts a microtask before `task.complete()`; `mark-failed-unless-cancelled.ts` records that
+ordering class as a past regression, `buildNoFrom` completes before constructing its return value and
+`sendTxTask` classifies before failing (fable named the tick; codex wanted the restricted set) — the ~40
+lines are not worth an unpinned ordering change.
+
+**Reshaped**: D2 from a seven-method class to two functions (fable; codex independently required a
+one-read tri-state and raw presence, which the functions leave in the repositories); the scan function is
+shared with A1 (fable connected them). B1 split into two cores keeping each pair's own comparison
+(truthy vs `=== true`) and `registerContract`'s own address extraction (both). B5 guards stay in place
+— hoisting the `handleSendTx` one would change which error a session-less send gets (fable). D4's
+`getNetwork` stays outside the try (both). F3 shrinks to the fence-first add + delete pair at four sites,
+emit decisions untouched (codex). X4's helper takes the map and writes it before the initial kick (both).
+I1 gains `stillHeld` and `onFinish` (both). A3 keeps first-vs-all removal and leaves the keyed maps
+(both). C6 adopts the defensive count everywhere (fable). F2 becomes a typed record with one cast (fable
+over codex's two maps). G1 forwards raw params and gains a client test (both).
+
+**Unresolved disagreements**: none material. Codex accepted a restricted C2; fable's microtask point
+decided it. Codex wanted `RawPrefixedStore` if it exposed one-read state; fable's function shape satisfies
+the same constraint with less surface.
 
 ## Post-implementation
 
@@ -170,7 +197,9 @@ row P3 = `open #<n> · green`, `agent-worktree status`, print
 
 ## Audit log
 
-_(codex + fable verdicts, adopted / rejected findings, then the final fresh-context codex pass)_
+- **Codex** (`/codex high`, GPT-6 Astra, session `01a07c5f-47c3-76c0-9ea4-db0d61eeb178`): *conditional approve* — skip H2; B1 address extraction and `=== true`; B5 no re-lookup; D2 one-read tri-state and raw presence; C2 restricted set; F3 emit after the await, 4th site; X4 map + order; I1 `isReleased` + settlement callbacks; A3 first-vs-all; add client/PopupCard/listener/gate/scheduler tests; single arc. Every condition adopted or superseded by fable's stricter one (C2 skipped outright).
+- **Fable** (`Agent` Plan leg, Fable 5.1; report in `audit-fable.md`): *conditional approve* — B1 two comparisons; B5 no hoist; D2 as functions with a raw single-key read, shared with A1; D4 network outside the try; C2 microtask delta named or dropped; X4 helper owns the map write; H2 logged as a deviation; Facts 5/6 corrected; A1 yields the full key; A3 flat sites only; C6 defensive count; F2 typed record; I1 `stillHeld`/`onFinish`; D1's declaration-merge directive; `cd` chains avoided in gates. Every condition adopted (H2 skipped rather than logged as a deviation).
+- **Final fresh-context codex pass**: pending.
 
 ## Seeds
 
