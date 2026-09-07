@@ -22,8 +22,8 @@ worktree dir == plan dir == branch suffix (`worktree-<slug>`). Phase 1 needs no 
 | # | Slug | Mode | Finding ids (see ledger.md) | ≈LOC | PR title (≤ 93 chars, becomes the squash subject) | Status |
 |---|---|---|---|--:|---|---|
 | P1 | `dedup-p1-delete` | direct + codex loop | M4 I6 B4 E3 E2 C4 I3 I4 | 325 | `refactor(extension): delete dead code and make the access-level map exhaustive` | open #561 · green |
-| P2 | `dedup-p2-adopt-helpers` | `/blueprint light` | X2 X3 X6 X1 E1 H3 J5 H1 C3 C8 L4 K2 M7 G2 G3 D5 L6 | 287 | `refactor: adopt the shared helpers that call sites re-typed inline` | wip |
-| P3 | `dedup-p3-service-wrappers` | `/blueprint mid` | D1 D2 D3 D4 G1 C1 C2 C5 C6 F1 F2 F3 E4 E6 B1 B2 B3 B5 A1 A3 H2 H4 X4 I1 I2 | 742 | `refactor(services): collapse the repeated wrappers in the service and utility layer` | ☐ |
+| P2 | `dedup-p2-adopt-helpers` | `/blueprint light` | X2 X3 X6 X1 E1 H3 J5 H1 C3 C8 L4 K2 M7 G2 G3 D5 L6 | 287 | `refactor: adopt the shared helpers that call sites re-typed inline` | open #566 · green |
+| P3 | `dedup-p3-service-wrappers` | `/blueprint mid` | D1 D2 D3 D4 G1 C1 C2 C5 C6 F1 F2 F3 E4 E6 B1 B2 B3 B5 A1 A3 H2 H4 X4 I1 I2 | 742 | `refactor(services): collapse the repeated wrappers in the service and utility layer` | wip |
 | P4 | `dedup-p4-vue-shells` | `/blueprint light` | J1 J2 J3 J4 K1 K7 K4 K5 K6 K9 K10 K11 L1 L3 N6 N9 M2 M3 | 1,132 | `refactor(popup): share the page shells and style partials across pages and windows` | ☐ |
 | P5 | `dedup-p5-vue-components` | `/blueprint mid` | N1 N2 N3 N4 N5 N7 N8 L2 L5 K3 K8 M1 M5 M6 I5 | 670 | `refactor(popup): shared field, list-sync and card pieces for popups and windows` | ☐ |
 | — | deferred (Tier 4) | owner call | A2 A4 B6 C7 D6 D7 D8 E5 X5 | — | not in scope — byte-frozen ciphertext framing, KAT-pinned bit math, audit-hardened session and purge code | — |
@@ -52,8 +52,10 @@ whose extraction changes rendering paths, so it gets the dual audit too.
 - **Comments** follow CLAUDE.md "Code-comment style": say what the code can't; no plan or phase
   references in code.
 - **Local gate before a PR is opened** (run from the repo root of the phase worktree, quote the exit codes):
-  `bun run lint && bun run typecheck:all && bun run test`. Do not run e2e locally; CI runs smoke and
-  network. When asking codex to review, say explicitly: *do not run the vitest e2e configs* (its
+  `bun run lint && bun run typecheck:all && bun run test`, plus `bun run --cwd apps/extension build:chrome` followed by
+  `git diff --exit-code --stat -- apps/extension/src/types/` whenever the phase adds or removes an exported symbol under
+  `src/utils`, `src/composables`, `src/stores` or `src/components` (the build regenerates the auto-import declarations and CI
+  asserts them unchanged). Do not run e2e locally; CI runs smoke and network. When asking codex to review, say explicitly: *do not run the vitest e2e configs* (its
   global-setup kills the Chromes another gate owns).
 - **Codex fix loop** (`/codex high`): the phase's net diff + this README's rules + an adversarial /
   security ask + no-over-engineering + comment-quality. Apply accepted fixes, commit, RESUME the same codex
