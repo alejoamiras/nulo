@@ -6,7 +6,7 @@ for (const method of ["trace", "debug", "log", "info", "warn", "error"] as const
 	console[`_${method}`] = original
 	// biome-ignore lint/suspicious/noExplicitAny: console.* genuinely accepts any arguments
 	console[method] = (...args: any[]) => {
-		const overridden = self[`on${method}`]
+		const overridden = self[`nuloOn${method}`]
 		if (!overridden) {
 			pendingLogs.push(args)
 			return
@@ -16,7 +16,7 @@ for (const method of ["trace", "debug", "log", "info", "warn", "error"] as const
 				try {
 					overridden(...data)
 				} catch (error) {
-					original(`Error in self.on${method}`, error)
+					original(`Error in self.nuloOn${method}`, error)
 					original(...data)
 				}
 			}
@@ -25,7 +25,7 @@ for (const method of ["trace", "debug", "log", "info", "warn", "error"] as const
 		try {
 			overridden(...args)
 		} catch (error) {
-			original(`Error in self.on${method}`, error)
+			original(`Error in self.nuloOn${method}`, error)
 			original(...args)
 		}
 	}

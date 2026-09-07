@@ -1,3 +1,4 @@
+import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 /**
  * Operation-kind humanizer for the execute popup window.
  *
@@ -37,3 +38,6 @@ export function humanizeOperationKind(kind: string): string {
 	if (out.length === 0) return out
 	return `${out[0].toUpperCase()}${out.substring(1)}`
 }
+
+/** A wire string bounded to `max` code points, or "" when absent. */
+export const safeWire = (s: string | undefined, max: number): string => (s ? sanitizeWireString(s, max) : "")

@@ -42,14 +42,13 @@ const stubs = {
 
 describe("popups/TokenMetadataPopup", () => {
 	test("renders the six capability rows in order with their labels, property names and icons", async () => {
-		// (BUG PIN) The card reads `token.contract` on the render that precedes the first fetch; Vue swallows that
-		// TypeError and the next render succeeds. Preserved verbatim; the handler keeps the test on the rows.
 		const renderErrors = vi.fn()
 		const w = mount(TokenMetadataPopup, { props: { show: false }, global: { stubs, config: { errorHandler: renderErrors } } })
 		await w.setProps({ show: true })
+		// Nothing renders (and nothing throws) until the token resolves; the popup then opens with the rows.
+		expect(w.text()).toBe("")
 		await flushPromises()
-		expect(renderErrors).toHaveBeenCalled()
-		expect(renderErrors.mock.calls[0]?.[0]).toBeInstanceOf(TypeError)
+		expect(renderErrors).not.toHaveBeenCalled()
 		const text = w.text()
 		for (const key of Object.keys(TOKEN).filter((k) => k.startsWith("has"))) expect(text).toContain(key)
 		const keys = [

@@ -66,7 +66,7 @@ const clock = new SystemClock()
 // LoggerStore so everything ends up in a single log pipe.
 for (const [method, level] of consoleMethods) {
 	// biome-ignore lint/suspicious/noExplicitAny: dynamic console hijack on ServiceWorkerGlobalScope
-	;(self as any)[`on${method}`] = (...args: unknown[]) => {
+	;(self as any)[`nuloOn${method}`] = (...args: unknown[]) => {
 		logger.log("wallet", level, ...args)
 	}
 }
