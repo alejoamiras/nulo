@@ -44,3 +44,11 @@ Base: `worktree-dedup-p2-adopt-helpers` (PR #566). Scope: ledger ids D1 D2 D3 D4
 - I1: `waitForStorageRelease({ key, stillHeld, timeoutMs, onTimeout, onFinish? })` under `src/e2e/`; restore's `stillHeld` is `(await this.read())?.at === at`; proof and restore clear their key in `onFinish`, incoming-poll passes none. Tests cover release-with-onFinish-before-resolve, the check-then-subscribe race, the timeout, and the restore wrapper's matching vs other hold point.
 - I2: `COMPRESSION_FORMATS` drives filename, mime and detection; the `.compressed` fallback and the octet-stream default stay.
 - Gate: lint 0 (complexity baseline unchanged) · extension typecheck 0 · 108 test files / 1,552 tests across the Phase 4 paths.
+
+## Phase 5 — full local gate ✓ (efab8c0a, clean index)
+
+`bun run lint` exit 0 · `bun run typecheck:all` exit 0 · `bun run test` exit 0 (446 files, 5,528 tests) · `bun run --cwd apps/extension build:chrome` exit 0 with `git diff --exit-code --stat HEAD -- apps/extension/src/types/` exit 0 and no untracked generated file · the CI production-marker grep replicated against `apps/extension/dist/chrome` finds nothing (the e2e gate helper stayed out of the bundle).
+
+## Codex fix loop
+
+(pending)

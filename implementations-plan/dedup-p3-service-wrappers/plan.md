@@ -86,7 +86,7 @@ New tests: `components/Popup/PopupCard.test.ts` (start on mount, dispose on unmo
 
 **Validation gate**: `bun run lint && bun run --cwd apps/extension typecheck && (bun run --cwd apps/extension test src/wallet/services/profile src/wallet/services/account-integrity src/wallet/services/backup src/composables src/components/Popup src/e2e src/utils src/popup/pages)`. Pass: exit 0 each; `bun run baseline:complexity` reports no manifest change unless a directive was deleted on merit. Layers: lint/typecheck + unit + component.
 
-### Phase 5 — full local gate
+### Phase 5 — full local gate ✓
 
 **Validation gate**: from a clean index (`git status --porcelain` empty), `bun run lint && bun run typecheck:all && bun run test && bun run --cwd apps/extension build:chrome && git diff --exit-code --stat HEAD -- apps/extension/src/types/ && test -z "$(git status --porcelain -- apps/extension/src/types/)"`, then the production-marker grep CI runs after the build (`.github/workflows/_build-extension.yml` § bundle hygiene, replicated verbatim against `apps/extension/dist`). Pass: exit 0 each, quoted (the build regenerates `src/types/` and CI asserts it unchanged; the marker grep proves the e2e gate helper stayed out of the bundle). No e2e locally; CI runs smoke and network on the PR.
 
