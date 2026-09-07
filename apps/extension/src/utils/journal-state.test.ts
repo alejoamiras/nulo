@@ -35,7 +35,7 @@ function recordWith(overrides: Partial<OperationRecord> = {}): OperationRecord {
 	}
 }
 
-// Icon-name regression pin (Phase 1 codex/opus audit).
+// Icon-name regression pin.
 // v0.15.3 shipped invented icon names (`circle-minus`, `refresh-cw`) that
 // don't exist in the `@nulo/design` icon set. Icon.vue silently rendered empty SVG.
 // These tests assert the canonical names actually present in the icon set,
