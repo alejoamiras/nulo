@@ -14,9 +14,8 @@ export function isPopupSubmitKey(e: KeyboardEvent): boolean {
 
 /** Handlers a plain create/edit popup wires into its show/hide lifecycle. */
 export type UsePopupEntityHandlers = {
-	/** The popup's primary submit — fired on Enter pressed WHILE an
-	 *  `<input>` / `<textarea>` is focused (matches the hand-rolled per-popup
-	 *  keydown guard; a global Enter must NOT trigger it). */
+	/** The popup's primary submit — fired on the keydown `submitKey` accepts; by default Enter pressed
+	 *  WHILE an `<input>` / `<textarea>` is focused, so a global Enter does not submit a form popup. */
 	submit: () => void
 	/** Ran when the popup becomes visible, AFTER the keydown listener is
 	 *  installed. Optional (e.g. connect a client / populate / focus). May be
@@ -37,6 +36,9 @@ export type UsePopupEntityOptions = {
 	 *  need this — their re-entrancy latches stop DOUBLE submits, not a
 	 *  premature FIRST submit against an incomplete list. */
 	submitWaitsForShow?: boolean
+	/** Which keydown fires `submit`. Default: Enter while an `<input>`/`<textarea>` is focused; a popup
+	 *  with no input (the authwit registry confirmations) accepts a global Enter. */
+	submitKey?: (e: KeyboardEvent) => boolean
 }
 
 /**
@@ -45,7 +47,7 @@ export type UsePopupEntityOptions = {
  * popup hand-rolled identically:
  *   - on SHOW: install the keydown listener, then run `onShow`.
  *   - on HIDE: remove the keydown listener, then run `onHide`.
- *   - Enter (only while an `<input>`/`<textarea>` is focused) fires `submit`.
+ *   - the keydown `submitKey` accepts (default: Enter while an `<input>`/`<textarea>` is focused) fires `submit`.
  *   - on SCOPE DISPOSE (unmount included): remove the listener.
  *
  * Behavior-preserving vs the hand-rolled copies: same listener add/remove
@@ -70,7 +72,7 @@ export function usePopupEntity(show: () => boolean, handlers: UsePopupEntityHand
 
 	const onKeydown = (e: KeyboardEvent) => {
 		if (options.submitWaitsForShow && pendingShowToken !== null) return
-		if (isPopupSubmitKey(e)) handlers.submit()
+		if ((options.submitKey ?? isPopupSubmitKey)(e)) handlers.submit()
 	}
 	// The watcher is ASYNC and awaits the handlers so their rejections travel
 	// Vue's watcher error channel (onErrorCaptured / app errorHandler /

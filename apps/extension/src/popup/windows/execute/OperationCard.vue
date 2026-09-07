@@ -22,13 +22,11 @@ import type { FeeSettings } from "@/wallet/services/execution/client"
 import type { DappMetadata } from "@/wallet/services/dapp-session/client"
 import type { Account } from "@/wallet/services/account/client"
 import type { Network } from "@/wallet/services/network/client"
-import { humanizeOperationKind } from "./humanize"
+import OperationActionRow from "./OperationActionRow.vue"
+import { humanizeOperationKind, safeWire } from "./humanize"
 import type { DraftAztecSendTxOperation, DraftSendTransactionOperation, DraftUIOperation } from "./types"
 import { parseTransferIntent, type TransferIntent } from "@/utils/transfer-intent"
-import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 import { isEmbeddedFeePayment } from "./operation-validation"
-
-const safe = (s: string | undefined, max: number): string => (s ? sanitizeWireString(s, max) : "")
 
 // `DraftUIOperation` is the shared honest type (Phase 2 follow-up). Send-like
 // `feeSettings` is optional during user editing — the card v-models it via
@@ -107,63 +105,7 @@ const requestedMethod = (op: SendLikeUIOp): "fj" | null => (op.kind === "aztec_s
 				<Flex direction="column" gap="4">
 					<!-- send_transaction has actions[]; aztec_sendTx has exec.calls[] -->
 					<template v-if="op.kind === 'send_transaction'">
-						<Text
-							v-for="(action, j) in op.actions"
-							:key="`${index}:${j}`"
-							data-testid="execute-op-payload-row"
-							size="12"
-							color="primary"
-						>
-							<template v-if="action.kind === 'call' || action.kind === 'encoded_call'">
-								<Text weight="600">
-									{{ humanizeMethodName(safe(action.kind === "call" ? action.method : (action.name ?? action.selector), 64)) }}
-								</Text>
-								<Text color="secondary"> on </Text>
-								<AddressDisplay :address="action.kind === 'call' ? action.contract : action.to" />
-							</template>
-							<!-- add_public_authwit grants a PERSISTED on-chain spend
-								authorization to a named caller. Surface the spender +
-								method + contract + args so the user SEES who they are
-								authorizing and to do what — not a generic label (audit F2). -->
-							<template v-else-if="action.kind === 'add_public_authwit'">
-								<Text weight="600">Authorize public spend</Text>
-								<template v-if="action.content.kind === 'call'">
-									<Text color="secondary"> — spender </Text>
-									<AddressDisplay data-testid="execute-authwit-spender" :address="action.content.caller" />
-									<Text color="secondary"> for </Text>
-									<Text weight="600">{{ humanizeMethodName(safe(action.content.method, 64)) }}</Text>
-									<Text color="secondary"> on </Text>
-									<AddressDisplay :address="action.content.contract" />
-									<template v-if="action.content.args?.length">
-										<Text color="secondary"> args </Text>
-										<Text data-testid="execute-authwit-args">{{ action.content.args.map((a) => safe(String(a), 48)).join(", ") }}</Text>
-									</template>
-								</template>
-								<!-- Non-`call` authwit content kinds: unreachable from the current
-									grant producer (hardcodes `call`), but render their identifying
-									fields defensively so a future producer can never hide a spend
-									target behind an opaque label (verification-audit condition). -->
-								<template v-else-if="action.content.kind === 'encoded_call'">
-									<Text color="secondary"> — spender </Text>
-									<AddressDisplay data-testid="execute-authwit-spender" :address="action.content.caller" />
-									<Text color="secondary"> for </Text>
-									<Text weight="600">{{ humanizeMethodName(safe(action.content.name ?? action.content.selector, 64)) }}</Text>
-									<Text color="secondary"> on </Text>
-									<AddressDisplay :address="action.content.to" />
-								</template>
-								<template v-else-if="action.content.kind === 'intent'">
-									<Text color="secondary"> — consumer </Text>
-									<AddressDisplay data-testid="execute-authwit-spender" :address="action.content.consumer" />
-								</template>
-								<template v-else>
-									<Text color="secondary"> — message hash </Text>
-									<Text data-testid="execute-authwit-spender">{{ action.content.messageHash }}</Text>
-								</template>
-							</template>
-							<template v-else>
-								{{ action.kind.replace("_", " ") }}
-							</template>
-						</Text>
+						<OperationActionRow v-for="(action, j) in op.actions" :key="`${index}:${j}`" :action="action" />
 					</template>
 					<template v-else-if="op.kind === 'aztec_sendTx'">
 						<!-- F-008 / Phase 7: structured args on PRIMARY surface for
@@ -181,7 +123,7 @@ const requestedMethod = (op: SendLikeUIOp): "fj" | null => (op.kind === "aztec_s
 								size="12"
 								color="primary"
 							>
-								<Text weight="600">{{ humanizeMethodName(safe(call.name ?? call.selector, 64)) }}</Text>
+								<Text weight="600">{{ humanizeMethodName(safeWire(call.name ?? call.selector, 64)) }}</Text>
 								<Text color="secondary"> on </Text>
 								<AddressDisplay :address="call.to" />
 							</Text>
@@ -230,7 +172,7 @@ const requestedMethod = (op: SendLikeUIOp): "fj" | null => (op.kind === "aztec_s
 			<Icon name="check-circle" size="14" color="green" />
 			<Text size="13" weight="500" color="secondary">
 				Fee payment method set by
-				<Text size="13" weight="600" color="primary">{{ safe(dapp?.name, 64) || 'the app' }}</Text>
+				<Text size="13" weight="600" color="primary">{{ safeWire(dapp?.name, 64) || 'the app' }}</Text>
 			</Text>
 		</Flex>
 
@@ -298,7 +240,7 @@ const requestedMethod = (op: SendLikeUIOp): "fj" | null => (op.kind === "aztec_s
 				<Flex :class="$style.prop">
 					<Flex gap="6">
 						<Text size="14" weight="600" color="primary" data-testid="register-token-symbol">
-							{{ safe(tokenMetadata.symbol, 32) }}
+							{{ safeWire(tokenMetadata.symbol, 32) }}
 						</Text>
 						<Text
 							v-if="tokenMetadata.name && tokenMetadata.name.toLowerCase() !== tokenMetadata.symbol.toLowerCase()"
@@ -306,7 +248,7 @@ const requestedMethod = (op: SendLikeUIOp): "fj" | null => (op.kind === "aztec_s
 							color="secondary"
 							data-testid="register-token-name"
 						>
-							· {{ safe(tokenMetadata.name, 64) }}
+							· {{ safeWire(tokenMetadata.name, 64) }}
 						</Text>
 					</Flex>
 					<Text size="12" color="tertiary" data-testid="register-token-decimals">
@@ -332,24 +274,7 @@ const requestedMethod = (op: SendLikeUIOp): "fj" | null => (op.kind === "aztec_s
 			<Flex :class="$style.prop">
 				<Text size="12" color="secondary">Payload:</Text>
 				<Flex direction="column" gap="4">
-					<Text
-						v-for="(action, j) in op.actions"
-						:key="`${index}:${j}`"
-						data-testid="execute-op-payload-row"
-						size="12"
-						color="primary"
-					>
-						<template v-if="action.kind === 'call' || action.kind === 'encoded_call'">
-							<Text weight="600">
-								{{ humanizeMethodName(safe(action.kind === "call" ? action.method : (action.name ?? action.selector), 64)) }}
-							</Text>
-							<Text color="secondary"> on </Text>
-							<AddressDisplay :address="action.kind === 'call' ? action.contract : action.to" />
-						</template>
-						<template v-else>
-							{{ action.kind.replace("_", " ") }}
-						</template>
-					</Text>
+					<OperationActionRow v-for="(action, j) in op.actions" :key="`${index}:${j}`" :action="action" />
 				</Flex>
 			</Flex>
 		</template>
@@ -360,7 +285,7 @@ const requestedMethod = (op: SendLikeUIOp): "fj" | null => (op.kind === "aztec_s
 			</Flex>
 			<Flex :class="$style.prop">
 				<Text size="12" color="secondary">Function:</Text>
-				<Text size="12" weight="600" color="primary">{{ humanizeMethodName(safe(op.method, 64)) }}</Text>
+				<Text size="12" weight="600" color="primary">{{ humanizeMethodName(safeWire(op.method, 64)) }}</Text>
 			</Flex>
 		</template>
 		<template v-else-if="op.kind === 'aztec_getContractClassMetadata'">
@@ -400,7 +325,7 @@ const requestedMethod = (op: SendLikeUIOp): "fj" | null => (op.kind === "aztec_s
 						size="12"
 						color="primary"
 					>
-						<Text weight="600">{{ humanizeMethodName(safe(call.name ?? call.selector, 64)) }}</Text>
+						<Text weight="600">{{ humanizeMethodName(safeWire(call.name ?? call.selector, 64)) }}</Text>
 						<Text color="secondary"> on </Text>
 						<AddressDisplay :address="call.to" />
 					</Text>
@@ -415,7 +340,7 @@ const requestedMethod = (op: SendLikeUIOp): "fj" | null => (op.kind === "aztec_s
 			<Flex :class="$style.prop">
 				<Text size="12" color="secondary">Function:</Text>
 				<Text size="12" weight="600" color="primary">
-					{{ humanizeMethodName(safe(op.call.name ?? op.call.selector.toString(), 64)) }}
+					{{ humanizeMethodName(safeWire(op.call.name ?? op.call.selector.toString(), 64)) }}
 				</Text>
 			</Flex>
 		</template>
@@ -426,7 +351,7 @@ const requestedMethod = (op: SendLikeUIOp): "fj" | null => (op.kind === "aztec_s
 			</Flex>
 			<Flex v-if="op.artifact" :class="$style.prop">
 				<Text size="12" color="secondary">Artifact:</Text>
-				<Text size="12" color="primary">{{ safe(op.artifact.name, 64) || "(custom)" }}</Text>
+				<Text size="12" color="primary">{{ safeWire(op.artifact.name, 64) || "(custom)" }}</Text>
 			</Flex>
 		</template>
 		<template v-else-if="op.kind === 'aztec_createAuthWit'">
@@ -450,7 +375,7 @@ const requestedMethod = (op: SendLikeUIOp): "fj" | null => (op.kind === "aztec_s
 					<Text size="12" weight="600" color="primary">
 						{{
 							humanizeMethodName(
-								safe(
+								safeWire(
 									(op.messageHashOrIntent as { call: { name?: string; selector?: { toString(): string } } }).call.name ??
 										(op.messageHashOrIntent as { call: { selector?: { toString(): string } } }).call.selector?.toString() ??
 										"",

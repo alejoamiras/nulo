@@ -41,7 +41,7 @@ if (myInstanceToken !== null) {
 const logger = new LoggerServiceClient("offscreen")
 for (const [method, level] of consoleMethods) {
 	// biome-ignore lint/suspicious/noExplicitAny: dynamic global property + console varargs
-	;(self as any)[`on${method}`] = (...args: any[]) => {
+	;(self as any)[`nuloOn${method}`] = (...args: any[]) => {
 		logger.log("pxe", level, ...args)
 	}
 }

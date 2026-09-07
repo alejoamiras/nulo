@@ -12,7 +12,7 @@ export function installConsoleForwarding(client: string): LoggerServiceClient {
 	const logger = new LoggerServiceClient(client)
 	const hooks = self as unknown as Record<string, (...args: unknown[]) => void>
 	for (const [method, level] of consoleMethods) {
-		hooks[`on${method}`] = (...args: unknown[]) => logger.log("ui", level, ...args)
+		hooks[`nuloOn${method}`] = (...args: unknown[]) => logger.log("ui", level, ...args)
 	}
 	self.onunhandledrejection = (e: PromiseRejectionEvent) => {
 		const level = isClientDisconnectRejection(e.reason) ? LogLevel.Debug : LogLevel.Error

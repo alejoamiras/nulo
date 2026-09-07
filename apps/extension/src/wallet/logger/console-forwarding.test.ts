@@ -15,7 +15,7 @@ import { installConsoleForwarding } from "./console-forwarding"
 
 type Hooks = Record<string, (...args: unknown[]) => void>
 
-const hookNames = [...consoleMethods.map(([method]) => `on${method}`), "onunhandledrejection"]
+const hookNames = [...consoleMethods.map(([method]) => `nuloOn${method}`), "onunhandledrejection", "onerror"]
 let installed: Array<[string, unknown]> = []
 beforeEach(() => {
 	log.mockClear()
@@ -32,17 +32,17 @@ describe("installConsoleForwarding", () => {
 		const hooks = self as unknown as Hooks
 		for (const [method, level] of consoleMethods) {
 			log.mockClear()
-			hooks[`on${method}`]?.(`via ${method}`, { n: 1 })
+			hooks[`nuloOn${method}`]?.(`via ${method}`, { n: 1 })
 			expect(log).toHaveBeenCalledTimes(1)
 			expect(log).toHaveBeenCalledWith("ui", level, `via ${method}`, { n: 1 })
 		}
 	})
 
-	test("(BUG PIN) the error hook lands on window.onerror, so a script error is logged with the handler's raw arguments", () => {
-		// The entry files always wrote `self.onerror` for console.error; preserved verbatim in the extraction.
+	test("leaves window.onerror alone: console.error forwarding has its own sink", () => {
+		const before = self.onerror
 		installConsoleForwarding("popup")
-		;(self as unknown as Hooks).onerror?.("Uncaught boom", "popup.js", 3, 7)
-		expect(log).toHaveBeenCalledWith("ui", LogLevel.Error, "Uncaught boom", "popup.js", 3, 7)
+		expect(self.onerror).toBe(before)
+		expect(typeof (self as unknown as Hooks).nuloOnerror).toBe("function")
 	})
 
 	test("a client-disconnect rejection logs at debug, anything else at error, both as error data", () => {

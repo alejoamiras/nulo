@@ -77,7 +77,7 @@ watch(
 </script>
 
 <template>
-	<Popup :show @onClose="emit('onClose')" :displaceIdx="popupStore.popups.token_metadata?.order">
+	<Popup :show="show && !!token" @onClose="emit('onClose')" :displaceIdx="popupStore.popups.token_metadata?.order">
 		<PopupCard :displaceIdx>
 			<Flex wide direction="column" gap="20" :class="$style.wrapper">
 				<Text size="14" weight="600" color="primary"> Token Metadata </Text>
