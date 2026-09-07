@@ -19,3 +19,12 @@ Base: `worktree-dedup-p2-adopt-helpers` (PR #566). Scope: ledger ids D1 D2 D3 D4
 - B2: `deriveRecord` / `deriveSet` module-private; the six exported derive functions keep their signatures; frozen-oracle tests unchanged.
 - B3 / B5: `logDebug` / `logWarn` wrappers (7 sites); `requireSession` is a TypeScript assertion method so each of the six guards stays a one-line in-place narrowing at its original position.
 - Gate: `bun run lint` 0 · `bun run typecheck:all` 0 · wallet-core 246, extension-messaging 202, wallet-bridge 262 tests pass.
+
+## Phase 2 — clients and small service helpers (D1, G1, D3, D4, E4, E6, F1, F3, X4) ✓
+
+- D1: the factory alone was not enough — `ServiceClient` ships an untyped `restore(...unknown[])` convenience stub, and a class member shadows a declaration-merged interface method, so the merged `restore` type collapsed to `(...unknown[]) => Promise<unknown>` and `useFullBackupImport` stopped typechecking. `restore` keeps a typed override (same forward) and stays in the exhaustive list; the other 21 are generated. Worth knowing before P4/P5 touch any client whose `Methods` has a `restore`/`backup` key.
+- G1: `NetworkMethodSchemas[method]` under a generic key is a union of every schema, so the helper reads it through the erased `{ params: ZodType<unknown>; result: ZodType<unknown> }` shape and casts the validated result to `ReturnType<Methods[K]>`; raw params go to `request`. New `client.test.ts` pins invalid params → no port message, invalid result → `ValidationError` (the port mock only exists after `connect()`).
+- D4 keeps `getNetwork` outside `viaPxe`; E6's closure sits right after the marker read; F1's two helpers are module-level; D3 types the credential as `Awaited<ReturnType<PasskeyService["getKey"]>>`.
+- F3 (own commit): `invalidateAndDelete` is synchronous and returns `repo.delete`'s promise; test pins the fence-before-delete order and promise identity.
+- X4 (own commit): `startPollScheduler(map, key, poll, labels)`; scenario pins map-before-kick for both arms.
+- Gate: lint 0 · extension typecheck 0 · 53 test files / 834 tests (incl. the three new ones).

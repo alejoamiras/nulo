@@ -70,7 +70,7 @@ New tests: `listener-bag.test.ts` (first-vs-all removal, add/remove during a cal
 
 **Validation gate**: `bun run lint && bun run typecheck:all && bun run --cwd packages/wallet-core test && bun run --cwd packages/extension-messaging test && bun run --cwd packages/wallet-bridge test`. Pass: exit 0 each. Layers: lint/typecheck + unit.
 
-### Phase 2 — clients and small service helpers (D1, G1, D3, D4, E4, E6, F1, F3, X4)
+### Phase 2 — clients and small service helpers (D1, G1, D3, D4, E4, E6, F1, F3, X4) ✓
 
 New tests: `network/client.test.ts` (invalid params → no request; invalid result → throw); `token-balance` pins fence-before-delete and that `invalidateAndDelete` returns the repo's own promise; `incoming-transfer` pins map-before-kick for BOTH scheduler arms (the existing scenario at `service.scenarios.test.ts:2325` covers only the note arm's stale tick). F3 and X4 land as their own commits.
 
