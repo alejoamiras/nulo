@@ -144,15 +144,9 @@ function goNext() {
 			>
 				Continue
 			</Button>
-			<button
-				v-else-if="status === 'not-detected' || status === 'no-bb'"
-				type="button"
-				:class="$style.skipLink"
-				data-testid="onboarding-accelerator-skip"
-				@click="handleSkip"
-			>
+			<OnboardingSkipLink v-else-if="status === 'not-detected' || status === 'no-bb'" testid="onboarding-accelerator-skip" @click="handleSkip">
 				Skip. Proving will run in your browser.
-			</button>
+			</OnboardingSkipLink>
 		</div>
 	</OnboardingPage>
 </template>
@@ -286,26 +280,4 @@ function goNext() {
 	margin-top: 8px;
 }
 
-.skipLink {
-	background: transparent;
-	border: none;
-	color: var(--txt-secondary);
-	font-family: var(--font-mono);
-	font-size: 11px;
-	letter-spacing: 0.08em;
-	text-transform: uppercase;
-	cursor: pointer;
-	padding: 6px 12px;
-	transition: color 0.15s var(--bezier);
-}
-
-.skipLink:hover {
-	color: var(--txt-primary);
-}
-
-.skipLink:focus-visible {
-	outline: 2px dotted var(--nulo-accent);
-	outline-offset: 2px;
-	color: var(--txt-primary);
-}
 </style>

@@ -60,3 +60,19 @@ Base: `worktree-dedup-p3-service-wrappers` (PR #568). Scope: ledger ids J1 J2 J3
 - Stub gotcha: a bare boolean attr (`wide`) reaches an untyped stub prop as `""`; type the stub prop `Boolean`.
 - Gate: lint 0 · extension typecheck 0 · 64 files / 678 tests (`components`, `pages`, `general`) + the 12-case
   `AsyncListStatus` suite · `build:chrome` 0; `components.d.ts` gained the three entries and is committed.
+
+## Phase 3 — onboarding + entries (K1, K7, K5, K6, K11) ✓
+
+- `OnboardingExplainer` (learn/fees are now route meta + cards + handlers + one tag; the explainer owns
+  `OnboardingPage :gap="40"`, the hero, the grid with its container query, the actions and the "Skip intro" link),
+  `OnboardingSkipLink` (also the accelerator's `v-else-if` skip), `OnboardingProfileNameField` (the `Input` attrs
+  forwarded verbatim; `focus()` exposed for `useProfileNameField`'s error restore, whose ref is typed `{ focus }`),
+  `OnboardingBackLink` (testid only). The learn page's template comment about the skip route was dropped: its script
+  comment already carries the constraint, and the template line it annotated no longer exists there.
+- `installConsoleForwarding(client)` in `wallet/logger/console-forwarding.ts`, imported directly by both entries; the
+  copied `noExplicitAny` suppression is gone (the hooks are typed as `Record<string, (...args: unknown[]) => void>`).
+- Test gotchas: `useRouter` inside an auto-imported SFC is the real vue-router import under vitest, so the back link's
+  test mocks `vue-router` (the repo's pattern), not a global; the design `Input`'s root is a wrapper `div`, so the
+  `onboarding-name-input` testid lands on that root exactly as before and the tests assert on the input inside it.
+- Gate: lint 0 · extension typecheck 0 · onboarding + logger suites green (28 component cases + 2 forwarding cases +
+  the existing page/composable suites) · `build:chrome` 0; `components.d.ts` gained the four onboarding entries.
