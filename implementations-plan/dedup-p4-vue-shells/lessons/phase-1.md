@@ -22,4 +22,9 @@ Base: `worktree-dedup-p3-service-wrappers` (PR #568). Scope: ledger ids J1 J2 J3
 
 ## Codex plan audit
 
-(pending)
+`/codex high` (GPT-6 Astra, session `01a07cb9-c178-7562-ab43-7d0f685a3e8f`): *conditional approve*, seven conditions, all verified and adopted (table in `plan.md` § Audit log). The two that changed the design: J2's shell must forward `#trailing` as a named slot and leave three exceptional pages on a partial; M3 is skipped (two chip variants and a two-chip case). Notes' error reset corrected the J4 reasoning.
+
+## Skipped ids (after the audit)
+
+- **M3** — the Incoming chip is accent-coloured and non-shrinking, the settled card's chip lacks the nowrap rules and renders two chips when both labels exist; a single `chip` prop on the layout cannot preserve that.
+- **L3 (LSM adoption)** — `ListStatusMessage.empty_sub` adds `width:100%` and `overflow-wrap:break-word`; the two views compose a partial instead.
