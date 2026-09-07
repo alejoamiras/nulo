@@ -812,6 +812,37 @@ export async function navigateToTokenDetail(page: Page, symbol?: string): Promis
 	await page.waitForSelector('[data-testid="balance-amount"]', { visible: true, timeout: 15_000 })
 }
 
+/** Import a token from Home and wait for its projected balance row to carry `expectedPublicRaw`
+ *  and a fresher timestamp than before the import — the discipline every multi-token spec needs so
+ *  its assertions never race the balance projector. */
+export async function importTokenAndWaitForBalance(
+	page: Page,
+	account: string,
+	contract: string,
+	expectedPublicRaw: string,
+): Promise<void> {
+	const baseline = await captureBalanceBaseline(page, account, contract)
+	await importToken(page, contract)
+	await waitForFreshBalanceRow(page, {
+		account,
+		tokenContract: contract,
+		expectedPublicRaw,
+		baselineUpdatedAt: baseline,
+		timeoutMs: 90_000,
+	})
+}
+
+/** Seed a fresh $1 USDC quote (the agent build maps every sandbox contract to `usd-coin`) and
+ *  remount the popup so the stale-on-connect read adopts it. Resolves on Home. */
+export async function seedUsdQuoteAndReload(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		const state = { "usd-coin": { coingeckoId: "usd-coin", usd: 1.0, fetchedAt: Date.now(), providerUpdatedAt: null } }
+		return chrome.storage.local.set({ "nulo:core:token-prices": JSON.stringify(state) })
+	})
+	await page.reload({ waitUntil: "domcontentloaded" })
+	await page.waitForFunction(() => window.location.hash === "#/popup/general", { timeout: 15_000 })
+}
+
 /** On the Send page, open the token picker, choose the row for `symbol`, and wait for the popup to
  *  close with the trigger showing that symbol. */
 export async function selectSendToken(page: Page, symbol: string): Promise<void> {

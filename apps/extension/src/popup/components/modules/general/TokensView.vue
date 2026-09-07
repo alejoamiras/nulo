@@ -1,5 +1,6 @@
 <script setup>
 /** Components */
+import { SectionLabel } from "@nulo/design"
 import { Dropdown } from "@/components/ui/Dropdown"
 import TokenCard from "./TokenCard.vue"
 import TokenImportRow from "./TokenImportRow.vue"
@@ -419,8 +420,7 @@ onBeforeUnmount(() => {
 	<Flex direction="column" gap="12" :class="$style.wrapper">
 		<Flex align="end" justify="between" :class="$style.section_header">
 			<Flex align="center" gap="8">
-				<span :class="$style.header_title">HOLDINGS</span>
-				<span v-if="tokenBalances.length" :class="$style.header_count" data-testid="tokens-count">{{ tokenBalances.length }}</span>
+				<SectionLabel label="Holdings" :count="tokenBalances.length || null" countTestid="tokens-count" />
 				<!-- The ONE refresh-activity signal for the whole list (per-row indication is deliberately
 				     silent — batch refreshes would animate every row). Same vocabulary as the gas card's
 				     activity dot: grey pulse = a shown value being re-verified. -->
@@ -533,21 +533,6 @@ onBeforeUnmount(() => {
 	.refreshing_dot {
 		animation: none;
 	}
-}
-
-.header_title {
-	font-family: var(--font-headline);
-	font-size: 12px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
-}
-
-.header_count {
-	font-family: var(--font-mono);
-	font-size: 10px;
-	color: var(--nulo-outline);
 }
 
 /* Same voice as RecentActivityView's "View Archives" link. */

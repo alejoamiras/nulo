@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
 import { nextTick } from "vue"
 import { createAppStoreHarness } from "../../../../../tests/helpers/app-store-harness"
+import { installChromeStorage } from "../../../../../tests/helpers/chrome-storage-mock"
 
 const H = vi.hoisted(() => {
 	const makeEvent = () => {
@@ -130,27 +131,9 @@ import { BACKFILL_INDICATOR_THRESHOLD_BLOCKS } from "@/wallet/services/incoming-
 import TokenCard from "./TokenCard.vue"
 import TokensView from "./TokensView.vue"
 
-// The pinned-token composable reads storage at mount and subscribes to onChanged; the shared
-// chrome stub leaves both undefined.
+// The pinned-token composable reads storage at mount and subscribes to onChanged.
 beforeEach(() => {
-	const backing: Record<string, unknown> = {}
-	const g = globalThis as unknown as { chrome: Record<string, unknown> }
-	g.chrome = {
-		...g.chrome,
-		storage: {
-			local: {
-				get: async (keys: string | string[]) => {
-					const out: Record<string, unknown> = {}
-					for (const k of Array.isArray(keys) ? keys : [keys]) if (k in backing) out[k] = backing[k]
-					return out
-				},
-				set: async (items: Record<string, unknown>) => {
-					Object.assign(backing, items)
-				},
-			},
-			onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
-		},
-	}
+	installChromeStorage()
 })
 
 function deferred<T>() {
@@ -393,7 +376,8 @@ describe("TokensView — Home order and cap", () => {
 			namedRow(4, "EMPTY", { chainId: MAINNET, publicBalance: "0" }),
 			namedRow(2, "ALPHA", { chainId: MAINNET }),
 		])
-		const wrapper = mount(TokensView, { shallow: true })
+		// The count lives inside the design package's SectionLabel; let it render.
+		const wrapper = mount(TokensView, { shallow: true, global: { stubs: { SectionLabel: false } } })
 		await flushPromises()
 		expect(cardSymbols(wrapper)).toEqual(["PRICED", "ALPHA", "ZED"])
 		expect(wrapper.find('[data-testid="tokens-count"]').text()).toBe("4")

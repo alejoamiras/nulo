@@ -68,6 +68,7 @@ vi.mock("vue-router", async (importOriginal) => {
 })
 
 import TokenPage from "./[id].vue"
+import { type ChromeStorageMock, installChromeStorage } from "../../../../tests/helpers/chrome-storage-mock"
 
 const addr = (n: number) => `0x${n.toString(16).padStart(64, "0")}`
 const tok = (id: number, symbol: string) => ({ id, contract: addr(id), symbol, name: `${symbol} Token`, decimals: 18, chainId: 7 })
@@ -89,27 +90,7 @@ const STUBS = {
 	Text: { template: "<span><slot /></span>" },
 }
 
-let backing: Record<string, unknown>
-function installStorage(seed: Record<string, unknown> = {}) {
-	backing = { ...seed }
-	const g = globalThis as unknown as { chrome: Record<string, unknown> }
-	g.chrome = {
-		...g.chrome,
-		storage: {
-			local: {
-				get: async (keys: string | string[]) => {
-					const out: Record<string, unknown> = {}
-					for (const k of Array.isArray(keys) ? keys : [keys]) if (k in backing) out[k] = backing[k]
-					return out
-				},
-				set: async (items: Record<string, unknown>) => {
-					Object.assign(backing, items)
-				},
-			},
-			onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
-		},
-	}
-}
+let storage: ChromeStorageMock
 
 async function mountPage() {
 	const wrapper = mount(TokenPage, { global: { stubs: STUBS } })
@@ -125,7 +106,7 @@ describe("token page — Pin to Home", () => {
 		H.popupIsOpened.mockReturnValue(false)
 		H.tokenDeleted.clear()
 		H.balanceUpdated.clear()
-		installStorage()
+		storage = installChromeStorage()
 		H.tokens.current = [tok(1, "AAA"), tok(2, "BBB"), tok(3, "CCC"), tok(4, "DDD")]
 		H.getToken.mockImplementation(async () => H.tokens.current[0])
 		H.getTokens.mockImplementation(async () => H.tokens.current)
@@ -148,7 +129,7 @@ describe("token page — Pin to Home", () => {
 		const wrapper = await mountPage()
 		await pinItem(wrapper).trigger("click")
 		await flushPromises()
-		expect(backing[pinnedTokensKey("p1")]).toEqual({ "7": [addr(1)] })
+		expect(storage.data[pinnedTokensKey("p1")]).toEqual({ "7": [addr(1)] })
 		expect(H.openToast).toHaveBeenCalledWith({ label: "Pinned to Home" })
 		await nextTick()
 		expect(pinItem(wrapper).text()).toContain("Unpin from Home")
@@ -156,24 +137,24 @@ describe("token page — Pin to Home", () => {
 	})
 
 	test("a pinned token's item unpins on click", async () => {
-		installStorage({ [pinnedTokensKey("p1")]: { "7": [addr(1), addr(2)] } })
+		storage = installChromeStorage({ [pinnedTokensKey("p1")]: { "7": [addr(1), addr(2)] } })
 		const wrapper = await mountPage()
 		expect(pinItem(wrapper).attributes("data-pinned")).toBe("true")
 		await pinItem(wrapper).trigger("click")
 		await flushPromises()
-		expect(backing[pinnedTokensKey("p1")]).toEqual({ "7": [addr(2)] })
+		expect(storage.data[pinnedTokensKey("p1")]).toEqual({ "7": [addr(2)] })
 		expect(H.openToast).toHaveBeenCalledWith({ label: "Unpinned from Home" })
 	})
 
 	test("a fourth pin opens the single-action Home is full popup naming the pinned symbols", async () => {
-		installStorage({ [pinnedTokensKey("p1")]: { "7": [addr(2), addr(3), addr(4)] } })
+		storage = installChromeStorage({ [pinnedTokensKey("p1")]: { "7": [addr(2), addr(3), addr(4)] } })
 		const wrapper = await mountPage()
 		// A stale callback left in the store must not survive into the informational popup.
 		H.cache.current.confirm.callback = vi.fn()
 		await pinItem(wrapper).trigger("click")
 		await flushPromises()
 
-		expect(backing[pinnedTokensKey("p1")]).toEqual({ "7": [addr(2), addr(3), addr(4)] })
+		expect(storage.data[pinnedTokensKey("p1")]).toEqual({ "7": [addr(2), addr(3), addr(4)] })
 		expect(H.openToast).not.toHaveBeenCalled()
 		expect(H.popupOpen).toHaveBeenCalledWith("confirm")
 		expect(H.cache.current.confirm.callback).toBeUndefined()
@@ -183,7 +164,7 @@ describe("token page — Pin to Home", () => {
 
 	test("the cap and the popup read the token list at click time: a token added after mount counts", async () => {
 		// Only two pinned contracts are known at mount; the third pinned token appears before the click.
-		installStorage({ [pinnedTokensKey("p1")]: { "7": [addr(2), addr(3), addr(4)] } })
+		storage = installChromeStorage({ [pinnedTokensKey("p1")]: { "7": [addr(2), addr(3), addr(4)] } })
 		H.tokens.current = [tok(1, "AAA"), tok(2, "BBB"), tok(3, "CCC")]
 		const wrapper = await mountPage()
 		H.tokens.current = [tok(1, "AAA"), tok(2, "BBB"), tok(3, "CCC"), tok(4, "DDD")]
@@ -194,7 +175,7 @@ describe("token page — Pin to Home", () => {
 	})
 
 	test("a confirm opened while the symbols were being fetched is left alone", async () => {
-		installStorage({ [pinnedTokensKey("p1")]: { "7": [addr(2), addr(3), addr(4)] } })
+		storage = installChromeStorage({ [pinnedTokensKey("p1")]: { "7": [addr(2), addr(3), addr(4)] } })
 		const resolvers: Array<(t: unknown) => void> = []
 		const wrapper = await mountPage()
 		H.getTokens.mockImplementation(
@@ -220,7 +201,7 @@ describe("token page — Pin to Home", () => {
 	})
 
 	test("a hostile symbol is bounded in the popup copy", async () => {
-		installStorage({ [pinnedTokensKey("p1")]: { "7": [addr(2), addr(3), addr(4)] } })
+		storage = installChromeStorage({ [pinnedTokensKey("p1")]: { "7": [addr(2), addr(3), addr(4)] } })
 		H.tokens.current = [tok(1, "AAA"), tok(2, `${"X".repeat(40)}​`), tok(3, "CCC"), tok(4, "DDD")]
 		const wrapper = await mountPage()
 		await pinItem(wrapper).trigger("click")

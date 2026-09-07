@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
 import { nextTick } from "vue"
 import { createAppStoreHarness } from "../../../../tests/helpers/app-store-harness"
+import { installChromeStorage } from "../../../../tests/helpers/chrome-storage-mock"
 
 const H = vi.hoisted(() => {
 	const makeEvent = () => {
@@ -127,32 +128,11 @@ async function mountOpen(rows: ReturnType<typeof row>[]) {
 	return wrapper
 }
 
-/** The pinned-token composable reads storage on load and subscribes to onChanged. */
-function installStorage(seed: Record<string, unknown> = {}) {
-	const backing: Record<string, unknown> = { ...seed }
-	const g = globalThis as unknown as { chrome: Record<string, unknown> }
-	g.chrome = {
-		...g.chrome,
-		storage: {
-			local: {
-				get: async (keys: string | string[]) => {
-					const out: Record<string, unknown> = {}
-					for (const k of Array.isArray(keys) ? keys : [keys]) if (k in backing) out[k] = backing[k]
-					return out
-				},
-				set: async (items: Record<string, unknown>) => {
-					Object.assign(backing, items)
-				},
-			},
-			onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
-		},
-	}
-}
-
 describe("SelectTokenPopup", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
-		installStorage()
+		// The pinned-token composable reads storage on load and subscribes to onChanged.
+		installChromeStorage()
 		// Mounted popups from earlier cases still hold their handlers on the shared events.
 		for (const ev of [H.balanceAdded, H.balanceUpdated, H.balanceDeleted, H.balanceConnected, H.quotesUpdated, H.priceConnected])
 			ev.clear()

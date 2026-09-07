@@ -8,7 +8,7 @@
 
 import { expect, inject } from "vitest"
 import { test, openPopup, waitForHash, clickByTestId } from "../fixtures/extension"
-import { captureBalanceBaseline, importToken, waitForFreshBalanceRow } from "../fixtures/helpers"
+import { importTokenAndWaitForBalance, seedUsdQuoteAndReload } from "../fixtures/helpers"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -35,24 +35,10 @@ test.skipIf(!hasConfig)(
 		const page = await openPopup(tokenReadyExtension)
 		await waitForHash(page, "#/popup/general")
 		for (const { symbol, amount } of extras) {
-			const baseline = await captureBalanceBaseline(page, tokenReadyExtension.accountAddress, addresses[symbol])
-			await importToken(page, addresses[symbol])
-			await waitForFreshBalanceRow(page, {
-				account: tokenReadyExtension.accountAddress,
-				tokenContract: addresses[symbol],
-				expectedPublicRaw: amount.toString(),
-				baselineUpdatedAt: baseline,
-				timeoutMs: 90_000,
-			})
+			await importTokenAndWaitForBalance(page, tokenReadyExtension.accountAddress, addresses[symbol], amount.toString())
 		}
 
-		// Seed a quote so every sandbox token is priced; remount so the stale-on-connect read adopts it.
-		await page.evaluate(() => {
-			const state = { "usd-coin": { coingeckoId: "usd-coin", usd: 1.0, fetchedAt: Date.now(), providerUpdatedAt: null } }
-			return chrome.storage.local.set({ "nulo:core:token-prices": JSON.stringify(state) })
-		})
-		await page.reload({ waitUntil: "domcontentloaded" })
-		await waitForHash(page, "#/popup/general")
+		await seedUsdQuoteAndReload(page)
 
 		await page.waitForFunction(
 			() =>

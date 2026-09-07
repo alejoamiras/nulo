@@ -55,6 +55,7 @@ vi.mock("@/wallet/services/config/client", () => ({
 import { CHAIN_IDS } from "@/utils/chain-ids"
 import { useAppStore } from "@/stores/app.store"
 import Holdings from "./holdings.vue"
+import { installChromeStorage } from "../../../tests/helpers/chrome-storage-mock"
 
 const STUBS = {
 	Flex: { template: "<div><slot /></div>" },
@@ -87,29 +88,6 @@ async function mountPage() {
 	return wrapper
 }
 
-// The shared chrome stub leaves chrome.storage.local undefined; the real app store touches it.
-function installStorage() {
-	const backing: Record<string, unknown> = {}
-	const g = globalThis as unknown as { chrome: Record<string, unknown> }
-	g.chrome = {
-		...g.chrome,
-		storage: {
-			local: {
-				get: async (keys: string | string[]) => {
-					const out: Record<string, unknown> = {}
-					for (const k of Array.isArray(keys) ? keys : [keys]) if (k in backing) out[k] = backing[k]
-					return out
-				},
-				set: async (items: Record<string, unknown>) => {
-					Object.assign(backing, items)
-				},
-				remove: async () => {},
-			},
-			onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
-		},
-	}
-}
-
 afterEach(() => {
 	seedRows = []
 	fetchError = undefined
@@ -120,7 +98,7 @@ afterEach(() => {
 
 describe("holdings page", () => {
 	test("lists the active chain's rows, counts them, and skips a same-address row from another chain", async () => {
-		installStorage()
+		installChromeStorage()
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
 		seedRows = [
 			row("b1", "AAA", CHAIN_IDS.MAINNET, CUSD),
@@ -138,7 +116,7 @@ describe("holdings page", () => {
 	})
 
 	test("a live add for another chain is ignored; one for this chain lands", async () => {
-		installStorage()
+		installChromeStorage()
 		seedRows = [row("b1", "AAA", CHAIN_IDS.MAINNET)]
 		const w = await mountPage()
 
@@ -151,7 +129,7 @@ describe("holdings page", () => {
 	})
 
 	test("a reconnect rereads the config: a fiat switch flipped while detached takes effect", async () => {
-		installStorage()
+		installChromeStorage()
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 1, fetchedAt: Date.now(), providerUpdatedAt: null } }
 		seedRows = [row("b1", "AAA", CHAIN_IDS.MAINNET, CUSD)]
 		const w = await mountPage()
@@ -164,7 +142,7 @@ describe("holdings page", () => {
 	})
 
 	test("rejected config reads keep the defaults and never surface as an error", async () => {
-		installStorage()
+		installChromeStorage()
 		seedRows = [row("b1", "AAA", CHAIN_IDS.MAINNET)]
 		configValues = new Proxy({}, { get: () => Promise.reject(new Error("port closed")) })
 		const w = await mountPage()
@@ -175,7 +153,7 @@ describe("holdings page", () => {
 	})
 
 	test("a failed fetch shows the error line, not an empty list", async () => {
-		installStorage()
+		installChromeStorage()
 		fetchError = new Error("port closed")
 		const w = await mountPage()
 

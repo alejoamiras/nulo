@@ -7,6 +7,7 @@
 
 /** Components */
 import ListStatusMessage from "@/components/composite/ListStatusMessage.vue"
+import SearchField from "@/components/composite/SearchField.vue"
 
 /** Services */
 import { PriceServiceClient } from "@/wallet/services/price/client"
@@ -165,19 +166,7 @@ onBeforeUnmount(() => {
 			</PopupHeader>
 
 			<Flex wide direction="column" gap="24" :class="$style.wrapper">
-				<label v-if="searchable" :class="$style.search">
-					<MaterialIcon name="search" :size="16" color="secondary" />
-					<input
-						v-model="query"
-						type="text"
-						placeholder="Search tokens"
-						maxlength="80"
-						autocomplete="off"
-						spellcheck="false"
-						data-testid="select-token-search"
-						:class="$style.search_input"
-					/>
-				</label>
+				<SearchField v-if="searchable" v-model="query" placeholder="Search tokens" testid="select-token-search" />
 
 				<ItemsContainer>
 					<span v-if="loadError" :class="$style.error" data-testid="select-token-error">Couldn't load tokens</span>
@@ -215,34 +204,6 @@ onBeforeUnmount(() => {
 <style module>
 .wrapper {
 	padding: 0 20px 24px 20px;
-}
-
-.search {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-
-	height: 36px;
-	padding: 0 10px;
-	border: 1px solid var(--nulo-outline);
-	background: var(--nulo-surface);
-	cursor: text;
-}
-
-.search_input {
-	flex: 1;
-	min-width: 0;
-
-	font-family: var(--font-mono);
-	font-size: 12px;
-	color: var(--txt-primary);
-	background: transparent;
-	border: none;
-	outline: none;
-
-	&::placeholder {
-		color: var(--nulo-outline);
-	}
 }
 
 .error {

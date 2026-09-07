@@ -6,7 +6,7 @@
 
 import { expect, inject } from "vitest"
 import { test, openPopup, waitForHash, clickByTestId } from "../fixtures/extension"
-import { captureBalanceBaseline, importToken, selectSendToken, waitForFreshBalanceRow } from "../fixtures/helpers"
+import { importTokenAndWaitForBalance, selectSendToken } from "../fixtures/helpers"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -25,15 +25,7 @@ test.skipIf(!hasConfig)(
 
 		const page = await openPopup(tokenReadyExtension)
 		await waitForHash(page, "#/popup/general")
-		const baseline = await captureBalanceBaseline(page, tokenReadyExtension.accountAddress, addresses.ALT)
-		await importToken(page, addresses.ALT)
-		await waitForFreshBalanceRow(page, {
-			account: tokenReadyExtension.accountAddress,
-			tokenContract: addresses.ALT,
-			expectedPublicRaw: (25n * ONE).toString(),
-			baselineUpdatedAt: baseline,
-			timeoutMs: 90_000,
-		})
+		await importTokenAndWaitForBalance(page, tokenReadyExtension.accountAddress, addresses.ALT, (25n * ONE).toString())
 
 		await clickByTestId(page, "actions-send")
 		await page.waitForSelector('[data-testid="send-token-trigger"]', { visible: true, timeout: 15_000 })
