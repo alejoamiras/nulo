@@ -32,6 +32,22 @@ function decodeField(value: { toString: () => string }, type: NoteFieldType): st
 	}
 }
 
+/** A note field that is absent or unrenderable renders as "" / 0 instead of failing the row. */
+const safeString = (read: () => { toString(): string }): string => {
+	try {
+		return read().toString()
+	} catch {
+		return ""
+	}
+}
+const safeNumber = (read: () => unknown): number => {
+	try {
+		return Number(read())
+	} catch {
+		return 0
+	}
+}
+
 export class NoteService extends Service<Methods> implements ServiceSpec<Methods> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()("getNotes", "getNotesRaw", "getBlockTimestamp")
 	public static name = NOTE_SERVICE_NAME
@@ -104,26 +120,26 @@ export class NoteService extends Service<Methods> implements ServiceSpec<Methods
 				const parsed = await this.parseNote(network, note, classIdByContract, noteSchemas)
 				res.push({
 					...parsed,
-					siloedNullifier: this.safeSiloedNullifier(note),
-					noteHash: this.safeNoteHash(note),
-					l2BlockNumber: this.safeBlockNumber(note),
-					txIndexInBlock: this.safeTxIndex(note),
-					noteIndexInTx: this.safeNoteIndex(note),
+					siloedNullifier: safeString(() => note.siloedNullifier),
+					noteHash: safeString(() => note.noteHash),
+					l2BlockNumber: safeNumber(() => note.l2BlockNumber),
+					txIndexInBlock: safeNumber(() => note.txIndexInBlock),
+					noteIndexInTx: safeNumber(() => note.noteIndexInTx),
 				})
 			} catch (error) {
 				const message = getErrorMessage(error)
 				this.logError("Failed to parse note", message)
 				res.push({
-					contract: this.safeContractAddress(note),
-					storageSlot: this.safeStorageSlot(note),
-					txHash: this.safeTxHash(note),
+					contract: safeString(() => note.contractAddress),
+					storageSlot: safeString(() => note.storageSlot),
+					txHash: safeString(() => note.txHash),
 					rawContent: [],
 					renderError: message,
-					siloedNullifier: this.safeSiloedNullifier(note),
-					noteHash: this.safeNoteHash(note),
-					l2BlockNumber: this.safeBlockNumber(note),
-					txIndexInBlock: this.safeTxIndex(note),
-					noteIndexInTx: this.safeNoteIndex(note),
+					siloedNullifier: safeString(() => note.siloedNullifier),
+					noteHash: safeString(() => note.noteHash),
+					l2BlockNumber: safeNumber(() => note.l2BlockNumber),
+					txIndexInBlock: safeNumber(() => note.txIndexInBlock),
+					noteIndexInTx: safeNumber(() => note.noteIndexInTx),
 				})
 			}
 		}
@@ -138,70 +154,6 @@ export class NoteService extends Service<Methods> implements ServiceSpec<Methods
 		} catch (error) {
 			this.logWarn("Failed to load note schemas; falling back to raw rendering", getErrorMessage(error))
 			return {}
-		}
-	}
-
-	private safeContractAddress(note: NoteDao): string {
-		try {
-			return note.contractAddress.toString()
-		} catch {
-			return ""
-		}
-	}
-
-	private safeStorageSlot(note: NoteDao): string {
-		try {
-			return note.storageSlot.toString()
-		} catch {
-			return ""
-		}
-	}
-
-	private safeTxHash(note: NoteDao): string {
-		try {
-			return note.txHash.toString()
-		} catch {
-			return ""
-		}
-	}
-
-	private safeSiloedNullifier(note: NoteDao): string {
-		try {
-			return note.siloedNullifier.toString()
-		} catch {
-			return ""
-		}
-	}
-
-	private safeNoteHash(note: NoteDao): string {
-		try {
-			return note.noteHash.toString()
-		} catch {
-			return ""
-		}
-	}
-
-	private safeBlockNumber(note: NoteDao): number {
-		try {
-			return Number(note.l2BlockNumber)
-		} catch {
-			return 0
-		}
-	}
-
-	private safeTxIndex(note: NoteDao): number {
-		try {
-			return Number(note.txIndexInBlock)
-		} catch {
-			return 0
-		}
-	}
-
-	private safeNoteIndex(note: NoteDao): number {
-		try {
-			return Number(note.noteIndexInTx)
-		} catch {
-			return 0
 		}
 	}
 

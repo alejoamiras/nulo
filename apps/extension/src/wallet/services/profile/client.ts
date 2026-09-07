@@ -1,5 +1,5 @@
-import type { Restored, ServiceSpec } from "@/wallet/base"
-import { ServiceClient } from "@nulo/extension-messaging/background"
+import type { MethodsSpec, Restored, ServiceSpec } from "@/wallet/base"
+import { ServiceClient, definePassthroughsExhaustive } from "@nulo/extension-messaging/background"
 import { LoggerServiceClient } from "@/wallet/services/logger/client"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
@@ -7,6 +7,11 @@ import { PROFILE_SERVICE_NAME, type ProfileInfo, type Events, type Methods, type
 
 export * from "./spec"
 
+// Declaration-merge the passthrough signatures onto the class type. Bodies are
+// installed at runtime by `definePassthroughs`; this is what satisfies
+// `implements ServiceSpec` and gives consumers full inference.
+export interface ProfileServiceClient extends MethodsSpec<Methods> {}
+// biome-ignore lint/suspicious/noUnsafeDeclarationMerging: the merged interface's methods ARE installed — at runtime by definePassthroughsExhaustive below, whose signature proves the name list covers every Methods key, so no advertised method is missing.
 export class ProfileServiceClient extends ServiceClient<Methods, Events> implements ServiceSpec<Methods, Events> {
 	public readonly onProfileAdded = new EventHandler<ProfileInfo>()
 	public readonly onProfileUpdated = new EventHandler<ProfileInfo>()
@@ -18,87 +23,9 @@ export class ProfileServiceClient extends ServiceClient<Methods, Events> impleme
 		super(PROFILE_SERVICE_NAME, new LoggerServiceClient(), name)
 	}
 
-	public getActiveProfile(): Promise<ProfileInfo | undefined> {
-		return this.request("getActiveProfile")
-	}
-
-	public getProfiles(): Promise<ProfileInfo[]> {
-		return this.request("getProfiles")
-	}
-
-	public generateProfileId(): Promise<string> {
-		return this.request("generateProfileId")
-	}
-
-	public createProfile(name: string, password: string): Promise<ProfileInfo> {
-		return this.request("createProfile", name, password)
-	}
-
-	public createPasskeyProfile(name: string, credentialData?: PasskeyCredentialData): Promise<ProfileInfo> {
-		return this.request("createPasskeyProfile", name, credentialData)
-	}
-
-	public unlockProfile(id: string, password: string): Promise<ProfileInfo> {
-		return this.request("unlockProfile", id, password)
-	}
-
-	public unlockPasskeyProfile(id: string, credentialData?: PasskeyCredentialData): Promise<ProfileInfo> {
-		return this.request("unlockPasskeyProfile", id, credentialData)
-	}
-
-	public getPasskeyCredentialId(id: string): Promise<string> {
-		return this.request("getPasskeyCredentialId", id)
-	}
-
-	public lockActiveProfile(): Promise<void> {
-		return this.request("lockActiveProfile")
-	}
-
-	public refreshSession(): Promise<void> {
-		return this.request("refreshSession")
-	}
-
-	public changeProfileName(id: string, newName: string): Promise<ProfileInfo> {
-		return this.request("changeProfileName", id, newName)
-	}
-
-	public changeProfilePassword(id: string, oldPassword: string, newPassword: string): Promise<ProfileInfo> {
-		return this.request("changeProfilePassword", id, oldPassword, newPassword)
-	}
-
-	public confirmProfileOperation(id: string, password?: string): Promise<boolean> {
-		return this.request("confirmProfileOperation", id, password)
-	}
-
-	public deleteProfile(id: string): Promise<ProfileInfo> {
-		return this.request("deleteProfile", id)
-	}
-
-	public importMnemonic(name: string, mnemonic: string[], password: string, allowDuplicate?: boolean): Promise<ProfileInfo> {
-		return this.request("importMnemonic", name, mnemonic, password, allowDuplicate)
-	}
-
-	public importPasskey(name: string, credentialData?: PasskeyCredentialData, allowDuplicate?: boolean): Promise<ProfileInfo> {
-		return this.request("importPasskey", name, credentialData, allowDuplicate)
-	}
-
-	public exportPlain(id: string, password?: string, credentialData?: PasskeyCredentialData): Promise<string> {
-		return this.request("exportPlain", id, password, credentialData)
-	}
-
-	public exportBackupMaterial(id: string, password: string): Promise<{ masterKey: string; entropy: string; importedKeysDek: string }> {
-		return this.request("exportBackupMaterial", id, password)
-	}
-
-	public getProfileDekSealed(id: string): Promise<string> {
-		return this.request("getProfileDekSealed", id)
-	}
-
-	public exportMnemonic(id: string, password: string): Promise<string[]> {
-		return this.request("exportMnemonic", id, password)
-	}
-
-	public restore(
+	/** Declared here (and re-installed by the exhaustive list below) because the base client's
+	 *  untyped `restore(...unknown[])` convenience stub would otherwise shadow the merged signature. */
+	public override restore(
 		profile: ProfileInfo,
 		secret: RestoreSecret,
 		password?: string,
@@ -106,10 +33,6 @@ export class ProfileServiceClient extends ServiceClient<Methods, Events> impleme
 		allowDuplicate?: boolean,
 	): Promise<Restored<ProfileInfo>> {
 		return this.request("restore", profile, secret, password, credentialData, allowDuplicate)
-	}
-
-	public finalizeRestore(id: string, password?: string): Promise<ProfileInfo> {
-		return this.request("finalizeRestore", id, password)
 	}
 
 	/**
@@ -169,3 +92,29 @@ export class ProfileServiceClient extends ServiceClient<Methods, Events> impleme
 		}
 	}
 }
+// Every RPC method is a pure request-passthrough (`subscribeActiveProfile` above is client-side
+// composition, not an RPC); the installer's signature checks the name list in both directions.
+definePassthroughsExhaustive<Methods>()(ProfileServiceClient.prototype, [
+	"getActiveProfile",
+	"getProfiles",
+	"generateProfileId",
+	"createProfile",
+	"createPasskeyProfile",
+	"unlockProfile",
+	"unlockPasskeyProfile",
+	"getPasskeyCredentialId",
+	"lockActiveProfile",
+	"refreshSession",
+	"changeProfileName",
+	"changeProfilePassword",
+	"confirmProfileOperation",
+	"deleteProfile",
+	"importMnemonic",
+	"importPasskey",
+	"exportPlain",
+	"exportBackupMaterial",
+	"getProfileDekSealed",
+	"exportMnemonic",
+	"restore",
+	"finalizeRestore",
+])
