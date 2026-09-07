@@ -6,7 +6,7 @@ code_review: off
 eli5_mode: readme-row
 worktree: .claude/worktrees/dedup-p2-adopt-helpers (branch worktree-dedup-p2-adopt-helpers, on top of worktree-dedup-p1-delete / PR #561)
 ledger: implementations-plan/dedup-ledger (phase P2)
-status: codex conditional-approve 2026-09-07, every condition adopted below — approved per the ledger README's pre-approval rule; implementing
+status: all phases ✓ 2026-09-07; codex post-implementation loop converged in 2 rounds (session 01a07c52-b605-7cf1-bf4c-e0d0398a0c3d); delivering
 ---
 
 # P2 — adopt the helper that already exists
