@@ -150,80 +150,65 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.wrapper">
-		<SubPageHeader title="Contacts" :backTo="'/popup/settings'">
-			<template #trailing>
-				<Dropdown>
-					<button type="button" :class="$style.icon_btn" aria-label="Contact actions">
-						<MaterialIcon name="more_vert" :size="18" color="secondary" />
-					</button>
+	<SettingsPageShell title="Contacts" :backTo="'/popup/settings'" gap="12">
+		<template #trailing>
+			<Dropdown>
+				<button type="button" :class="$style.icon_btn" aria-label="Contact actions">
+					<MaterialIcon name="more_vert" :size="18" color="secondary" />
+				</button>
 
-					<template #popup>
-						<DropdownItem @click="importContacts">
-							<Flex align="center" gap="8">
-								<Icon name="upload-outline" size="14" color="secondary" />
-								Import contacts
-							</Flex>
-						</DropdownItem>
-						<DropdownItem @click="exportContacts" :disabled="!contacts.length">
-							<Flex align="center" gap="8">
-								<Icon name="download-outline" size="14" color="secondary" />
-								Export contacts
-							</Flex>
-						</DropdownItem>
-					</template>
-				</Dropdown>
-			</template>
-		</SubPageHeader>
+				<template #popup>
+					<DropdownItem @click="importContacts">
+						<Flex align="center" gap="8">
+							<Icon name="upload-outline" size="14" color="secondary" />
+							Import contacts
+						</Flex>
+					</DropdownItem>
+					<DropdownItem @click="exportContacts" :disabled="!contacts.length">
+						<Flex align="center" gap="8">
+							<Icon name="download-outline" size="14" color="secondary" />
+							Export contacts
+						</Flex>
+					</DropdownItem>
+				</template>
+			</Dropdown>
+		</template>
 
-		<Flex direction="column" gap="12" :class="$style.content">
-			<SectionLabel label="Contacts" :count="sortedContacts.length" />
+		<SectionLabel label="Contacts" :count="sortedContacts.length" />
 
-			<ItemsContainer v-if="sortedContacts.length">
-				<ContactRow
-					v-for="c in sortedContacts"
-					:key="c.id"
-					:contact="c"
-					:isSender="isContactSender(c.address)"
-					@select="handleClickContact"
-					@copy="handleCopyContactAddress"
-					@edit="handleEditContact"
-					@delete="handleDeleteContact"
-				/>
-			</ItemsContainer>
-
-			<ListStatusMessage
-				v-else
-				headline="NO CONTACTS YET"
-				sub="Save the people you send to or receive from often."
-				testid="contacts-empty"
+		<ItemsContainer v-if="sortedContacts.length">
+			<ContactRow
+				v-for="c in sortedContacts"
+				:key="c.id"
+				:contact="c"
+				:isSender="isContactSender(c.address)"
+				@select="handleClickContact"
+				@copy="handleCopyContactAddress"
+				@edit="handleEditContact"
+				@delete="handleDeleteContact"
 			/>
+		</ItemsContainer>
 
-			<Button
-				@click="popupStore.open('new_contact')"
-				wide
-				variant="primary"
-				size="large"
-				data-testid="contacts-new-btn"
-			>
-				Add contact
-			</Button>
-		</Flex>
-	</Flex>
+		<ListStatusMessage
+			v-else
+			headline="NO CONTACTS YET"
+			sub="Save the people you send to or receive from often."
+			testid="contacts-empty"
+		/>
+
+		<Button
+			@click="popupStore.open('new_contact')"
+			wide
+			variant="primary"
+			size="large"
+			data-testid="contacts-new-btn"
+		>
+			Add contact
+		</Button>
+	</SettingsPageShell>
 </template>
 
 <style module>
-.wrapper {
-	composes: wrapper from "../settings-page.module.css";
-}
-
-.content {
-	composes: content from "../settings-page.module.css";
-}
-
-
-
-
 .icon_btn {
 	display: flex;
 	align-items: center;

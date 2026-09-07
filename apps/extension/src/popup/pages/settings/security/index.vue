@@ -144,82 +144,70 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.wrapper">
-		<SubPageHeader title="Security" :backTo="'/popup/settings'" />
+	<SettingsPageShell title="Security" :backTo="'/popup/settings'" gap="32">
+		<LoadingState v-if="isLoading" label="FETCHING SETTINGS" />
 
-		<Flex direction="column" gap="32" :class="$style.content">
-			<LoadingState v-if="isLoading" label="FETCHING SETTINGS" />
-
-			<template v-if="!isLoading">
-				<!-- Strict Security Mode -->
-				<Flex justify="between" align="center" data-testid="setting-strict-security-mode">
-					<Flex direction="column" gap="6">
-						<Text size="13" weight="600" color="primary">Strict security mode</Text>
-						<Text size="12" weight="500" color="tertiary">
-							More secure, asks for your password more often. Recommended.
-						</Text>
-					</Flex>
-
-					<Toggle
-						:modelValue="strictSecurityMode"
-						@update:modelValue="onStrictToggle"
-						data-testid="strict-security-toggle"
-					/>
+		<template v-if="!isLoading">
+			<!-- Strict Security Mode -->
+			<Flex justify="between" align="center" data-testid="setting-strict-security-mode">
+				<Flex direction="column" gap="6">
+					<Text size="13" weight="600" color="primary">Strict security mode</Text>
+					<Text size="12" weight="500" color="tertiary">
+						More secure, asks for your password more often. Recommended.
+					</Text>
 				</Flex>
 
-				<!-- Auto-lock Timeout -->
-				<Flex justify="between" align="center">
-					<Flex direction="column" gap="6">
-						<Flex align="end" gap="6">
-							<Text size="13" weight="600" color="primary">Auto-lock Timeout</Text>
-							<Tooltip v-if="notification.show">
-								<Icon name="info" color="secondary" size="14" />
-								<template #content>
-									<Flex align="center" :class="$style.tooltip">
-										<Text size="12" color="secondary">{{ notification.text }}</Text>
-									</Flex>
-								</template>
-							</Tooltip>
-						</Flex>
-						<Text size="12" weight="500" color="tertiary">Automatic wallet locking (minutes)</Text>
-					</Flex>
+				<Toggle
+					:modelValue="strictSecurityMode"
+					@update:modelValue="onStrictToggle"
+					data-testid="strict-security-toggle"
+				/>
+			</Flex>
 
-					<Input
-						v-model="sessionTtlMinutes"
-						type="text"
-						subtype="int"
-						:max="MAX_SESSION_TTL"
-						placeholder="30"
-						:class="$style.input"
-						data-testid="auto-lock-input"
-					/>
+			<!-- Auto-lock Timeout -->
+			<Flex justify="between" align="center">
+				<Flex direction="column" gap="6">
+					<Flex align="end" gap="6">
+						<Text size="13" weight="600" color="primary">Auto-lock Timeout</Text>
+						<Tooltip v-if="notification.show">
+							<Icon name="info" color="secondary" size="14" />
+							<template #content>
+								<Flex align="center" :class="$style.tooltip">
+									<Text size="12" color="secondary">{{ notification.text }}</Text>
+								</Flex>
+							</template>
+						</Tooltip>
+					</Flex>
+					<Text size="12" weight="500" color="tertiary">Automatic wallet locking (minutes)</Text>
 				</Flex>
 
-				<!-- Backup -->
-				<ItemsContainer>
-					<SettingItem
-						size="large"
-						title="Backup profile"
-						description="Get your recovery phrase"
-						icon="download"
-						to="/popup/settings/security/export"
-						data-testid="backup-link-btn"
-					/>
-				</ItemsContainer>
-			</template>
-		</Flex>
-	</Flex>
+				<Input
+					v-model="sessionTtlMinutes"
+					type="text"
+					subtype="int"
+					:max="MAX_SESSION_TTL"
+					placeholder="30"
+					:class="$style.input"
+					data-testid="auto-lock-input"
+				/>
+			</Flex>
+
+			<!-- Backup -->
+			<ItemsContainer>
+				<SettingItem
+					size="large"
+					title="Backup profile"
+					description="Get your recovery phrase"
+					icon="download"
+					to="/popup/settings/security/export"
+					data-testid="backup-link-btn"
+				/>
+			</ItemsContainer>
+		</template>
+	</SettingsPageShell>
 </template>
 
 <style module>
-.wrapper {
-	composes: wrapper from "../settings-page.module.css";
-}
-
-.content {
-	composes: content from "../settings-page.module.css";
-}
-
 .tooltip {
 	max-width: 200px;
 

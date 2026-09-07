@@ -4,9 +4,10 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 import { SCHEMA_BLOCKED_KEY, SCHEMA_DEGRADED_KEY, SCHEMA_RETRY_REQUESTED_KEY } from "@/wallet/storage/migrations"
 import { installChromeStorage } from "../../tests/helpers/chrome-storage-mock"
 import MigrationBarrier from "./MigrationBarrier.vue"
+import BarrierOverlay from "./composite/BarrierOverlay.vue"
 
 const stubs = { Spinner: true, MaterialIcon: true, Teleport: true }
-const mountBarrier = () => mount(MigrationBarrier, { global: { stubs } })
+const mountBarrier = () => mount(MigrationBarrier, { global: { stubs, components: { BarrierOverlay } } })
 
 describe("MigrationBarrier", () => {
 	beforeEach(() => {

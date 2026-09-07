@@ -123,55 +123,35 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.wrapper">
-		<SubPageHeader title="Manage FPCs" :backTo="'/popup/settings'" />
+	<SettingsPageShell title="Manage FPCs" :backTo="'/popup/settings'" gap="20">
+		<!-- The synthetic Public Fee Juice anchor is hardcoded + network-
+			independent, so the list (anchor first) always renders. Loading /
+			error apply only to the storage/protocol-backed rows and show
+			below — without this, no PXE (smoke / offline) left the whole list,
+			including the always-present anchor, hidden behind the spinner. -->
+		<Flex direction="column" gap="16">
+			<SectionLabel label="FPCs" :count="displayedRows.length" />
 
-		<Flex direction="column" gap="20" :class="$style.content">
-			<!-- The synthetic Public Fee Juice anchor is hardcoded + network-
-				independent, so the list (anchor first) always renders. Loading /
-				error apply only to the storage/protocol-backed rows and show
-				below — without this, no PXE (smoke / offline) left the whole list,
-				including the always-present anchor, hidden behind the spinner. -->
-			<Flex direction="column" gap="16">
-				<SectionLabel label="FPCs" :count="displayedRows.length" />
+			<ItemsContainer>
+				<FpcRow
+					v-for="row in displayedRows"
+					:key="row.id"
+					:fpc="row"
+					:synthetic="isSyntheticRow(row) ? 'public-fj' : undefined"
+					:protectedRow="!!row.isProtocol"
+					:nonEditable="row.isProtocol && row.type === FpcType.PrivateFpc"
+					@copyAddress="handleCopyAddress"
+					@edit="handleEdit"
+					@delete="handleDelete"
+				/>
+			</ItemsContainer>
 
-				<ItemsContainer>
-					<FpcRow
-						v-for="row in displayedRows"
-						:key="row.id"
-						:fpc="row"
-						:synthetic="isSyntheticRow(row) ? 'public-fj' : undefined"
-						:protectedRow="!!row.isProtocol"
-						:nonEditable="row.isProtocol && row.type === FpcType.PrivateFpc"
-						@copyAddress="handleCopyAddress"
-						@edit="handleEdit"
-						@delete="handleDelete"
-					/>
-				</ItemsContainer>
-
-				<LoadingState v-if="isLoading" label="FETCHING FPCS" />
-
-				<Tooltip v-else-if="error" wide>
-					<Banner :action="{ name: 'Try again', callback: () => refreshFpcs() }" variant="error" wide>
-						Something went wrong
-					</Banner>
-					<template #content>{{ error }}</template>
-				</Tooltip>
-			</Flex>
-
-			<Button @click="popupStore.open('new_fpc')" wide variant="primary" size="large" data-testid="fpc-new-btn">
-				Add FPC
-			</Button>
+			<AsyncListStatus v-if="isLoading || error" :loading="isLoading" :error="error" label="FETCHING FPCS" @retry="refreshFpcs()" />
 		</Flex>
-	</Flex>
+
+		<Button @click="popupStore.open('new_fpc')" wide variant="primary" size="large" data-testid="fpc-new-btn">
+			Add FPC
+		</Button>
+	</SettingsPageShell>
 </template>
 
-<style module>
-.wrapper {
-	composes: wrapper from "../settings-page.module.css";
-}
-
-.content {
-	composes: content from "../settings-page.module.css";
-}
-</style>

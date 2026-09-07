@@ -100,10 +100,10 @@ const handleOpen = (target) => {
 
 <style module>
 .wrapper {
-	composes: wrapper from "./settings-page.module.css";
+	composes: wrapper from "../../../components/composite/settings-page.module.css";
 }
 
 .content {
-	composes: content from "./settings-page.module.css";
+	composes: content from "../../../components/composite/settings-page.module.css";
 }
 </style>

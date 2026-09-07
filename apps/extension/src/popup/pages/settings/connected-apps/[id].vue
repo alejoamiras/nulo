@@ -174,141 +174,129 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex v-if="session" direction="column" :class="$style.wrapper">
-		<SubPageHeader title="Connected App" :backTo="'/popup/settings/connected-apps'">
-			<template #trailing>
-				<Dropdown>
-					<button type="button" :class="$style.icon_btn" aria-label="Session actions">
-						<MaterialIcon name="more_vert" :size="18" color="secondary" />
-					</button>
+	<SettingsPageShell title="Connected App" :backTo="'/popup/settings/connected-apps'" gap="24" v-if="session">
+		<template #trailing>
+			<Dropdown>
+				<button type="button" :class="$style.icon_btn" aria-label="Session actions">
+					<MaterialIcon name="more_vert" :size="18" color="secondary" />
+				</button>
 
-					<template #popup>
-						<DropdownItem @click="handleDropSession">
-							<Flex align="center" gap="8">
-								<Icon name="log-out" size="14" color="secondary" />
-								Disconnect session
-							</Flex>
-						</DropdownItem>
+				<template #popup>
+					<DropdownItem @click="handleDropSession">
+						<Flex align="center" gap="8">
+							<Icon name="log-out" size="14" color="secondary" />
+							Disconnect session
+						</Flex>
+					</DropdownItem>
+				</template>
+			</Dropdown>
+		</template>
+
+		<!-- Identity block -->
+		<Flex align="center" gap="12" wide>
+			<Icon v-if="session.loadingLogo" :loading="true" name="dapp" size="40" color="tertiary" />
+			<img
+				v-else-if="session.dappMetadata.logoBlobUrl"
+				:src="session.dappMetadata.logoBlobUrl"
+				:class="$style.logo"
+				alt=""
+			/>
+			<Icon v-else name="dapp" size="40" color="tertiary" />
+
+			<Flex direction="column" gap="4" wide>
+				<Text size="14" weight="600" color="primary">
+					{{ session.dappMetadata.name ?? "Unknown dapp" }}
+				</Text>
+				<Text size="12" weight="500" color="tertiary" selectable>
+					{{ session.dappMetadata.url }}
+				</Text>
+				<Text v-if="expiryFormatted" size="11" color="tertiary">
+					Expires {{ expiryFormatted }}
+				</Text>
+			</Flex>
+		</Flex>
+
+		<!-- Shared accounts -->
+		<Flex direction="column" gap="10" wide>
+			<SectionLabel label="Shared accounts" :count="accounts.length" />
+
+			<ItemsContainer v-if="accounts.length">
+				<SettingItem
+					v-for="acc in accounts"
+					:key="`${acc.chainId}:${acc.address}`"
+					materialIcon="account_balance_wallet"
+					:title="getAccountAlias(acc)"
+					:description="`${getChainName(acc.chainId).toUpperCase()} · ${trimAddress(acc.address, 6, 4, '...')}`"
+					raw
+				>
+					<template #right>
+						<Tooltip position="end" delay="350">
+							<Icon
+								@click.stop="handleCopyAddress(acc.address)"
+								name="copy"
+								size="14"
+								color="tertiary"
+								:class="$style.action_icon"
+							/>
+							<template #content>Copy address</template>
+						</Tooltip>
 					</template>
-				</Dropdown>
-			</template>
-		</SubPageHeader>
+				</SettingItem>
+			</ItemsContainer>
+		</Flex>
 
-		<Flex direction="column" gap="24" :class="$style.content">
-			<!-- Identity block -->
-			<Flex align="center" gap="12" wide>
-				<Icon v-if="session.loadingLogo" :loading="true" name="dapp" size="40" color="tertiary" />
-				<img
-					v-else-if="session.dappMetadata.logoBlobUrl"
-					:src="session.dappMetadata.logoBlobUrl"
-					:class="$style.logo"
-					alt=""
-				/>
-				<Icon v-else name="dapp" size="40" color="tertiary" />
+		<!-- Session allowances -->
+		<Flex v-if="hasSessionAllowances" direction="column" gap="10" wide>
+			<SectionLabel label="Session allowances" />
 
-				<Flex direction="column" gap="4" wide>
-					<Text size="14" weight="600" color="primary">
-						{{ session.dappMetadata.name ?? "Unknown dapp" }}
-					</Text>
-					<Text size="12" weight="500" color="tertiary" selectable>
-						{{ session.dappMetadata.url }}
-					</Text>
-					<Text v-if="expiryFormatted" size="11" color="tertiary">
-						Expires {{ expiryFormatted }}
-					</Text>
-				</Flex>
-			</Flex>
-
-			<!-- Shared accounts -->
-			<Flex direction="column" gap="10" wide>
-				<SectionLabel label="Shared accounts" :count="accounts.length" />
-
-				<ItemsContainer v-if="accounts.length">
-					<SettingItem
-						v-for="acc in accounts"
-						:key="`${acc.chainId}:${acc.address}`"
-						materialIcon="account_balance_wallet"
-						:title="getAccountAlias(acc)"
-						:description="`${getChainName(acc.chainId).toUpperCase()} · ${trimAddress(acc.address, 6, 4, '...')}`"
-						raw
-					>
-						<template #right>
-							<Tooltip position="end" delay="350">
-								<Icon
-									@click.stop="handleCopyAddress(acc.address)"
-									name="copy"
-									size="14"
-									color="tertiary"
-									:class="$style.action_icon"
-								/>
-								<template #content>Copy address</template>
-							</Tooltip>
-						</template>
-					</SettingItem>
-				</ItemsContainer>
-			</Flex>
-
-			<!-- Session allowances -->
-			<Flex v-if="hasSessionAllowances" direction="column" gap="10" wide>
-				<SectionLabel label="Session allowances" />
-
-				<Flex v-if="sessionChainName" align="start" gap="4">
-					<Text size="13" weight="600" color="secondary">Network:</Text>
-					<Text size="13" color="secondary" :style="{ lineHeight: '1.2' }">
-						{{ sessionChainName }}
-					</Text>
-				</Flex>
-
-				<Flex align="start" gap="4">
-					<Text size="13" weight="600" color="secondary">Methods:</Text>
-					<Text size="13" color="secondary" :style="{ lineHeight: '1.2' }">{{ methods.join(", ") }}</Text>
-				</Flex>
-
-				<Flex align="start" gap="4">
-					<Text size="13" weight="600" color="secondary">Events:</Text>
-					<Text v-if="events.length" size="13" color="secondary" :style="{ lineHeight: '1.2' }">
-						{{ events.join(", ") }}
-					</Text>
-					<Text v-else size="13" color="tertiary" :style="{ lineHeight: '1.2' }">no allowances given</Text>
-				</Flex>
-			</Flex>
-
-			<!-- Confirmation policy -->
-			<Flex direction="column" gap="10" wide>
-				<SectionLabel label="Confirmation policy" />
-				<Text size="13" color="secondary" :style="{ lineHeight: '1.4' }">
-					{{
-						confirmationPolicies.find((x) => x.confirmationLevel === session?.confirmationLevel)?.description ?? "Unknown"
-					}}
+			<Flex v-if="sessionChainName" align="start" gap="4">
+				<Text size="13" weight="600" color="secondary">Network:</Text>
+				<Text size="13" color="secondary" :style="{ lineHeight: '1.2' }">
+					{{ sessionChainName }}
 				</Text>
 			</Flex>
 
-			<!-- Granted permissions -->
-			<Flex v-if="grantedCapabilities.length" direction="column" gap="10" wide>
-				<SectionLabel label="Granted permissions" :count="grantedCapabilities.length" />
-				<GrantedCapabilitiesList :grants="grantedCapabilities" />
+			<Flex align="start" gap="4">
+				<Text size="13" weight="600" color="secondary">Methods:</Text>
+				<Text size="13" color="secondary" :style="{ lineHeight: '1.2' }">{{ methods.join(", ") }}</Text>
 			</Flex>
 
-			<!-- Connection verification -->
-			<DappSessionVerification
-				v-if="verificationEmojis"
-				:emojis="verificationEmojis"
-				:isTrusted="isTrusted"
-				@toggleTrust="toggleTrust"
-			/>
+			<Flex align="start" gap="4">
+				<Text size="13" weight="600" color="secondary">Events:</Text>
+				<Text v-if="events.length" size="13" color="secondary" :style="{ lineHeight: '1.2' }">
+					{{ events.join(", ") }}
+				</Text>
+				<Text v-else size="13" color="tertiary" :style="{ lineHeight: '1.2' }">no allowances given</Text>
+			</Flex>
 		</Flex>
-	</Flex>
+
+		<!-- Confirmation policy -->
+		<Flex direction="column" gap="10" wide>
+			<SectionLabel label="Confirmation policy" />
+			<Text size="13" color="secondary" :style="{ lineHeight: '1.4' }">
+				{{
+					confirmationPolicies.find((x) => x.confirmationLevel === session?.confirmationLevel)?.description ?? "Unknown"
+				}}
+			</Text>
+		</Flex>
+
+		<!-- Granted permissions -->
+		<Flex v-if="grantedCapabilities.length" direction="column" gap="10" wide>
+			<SectionLabel label="Granted permissions" :count="grantedCapabilities.length" />
+			<GrantedCapabilitiesList :grants="grantedCapabilities" />
+		</Flex>
+
+		<!-- Connection verification -->
+		<DappSessionVerification
+			v-if="verificationEmojis"
+			:emojis="verificationEmojis"
+			:isTrusted="isTrusted"
+			@toggleTrust="toggleTrust"
+		/>
+	</SettingsPageShell>
 </template>
 
 <style module>
-.wrapper {
-	composes: wrapper from "../settings-page.module.css";
-}
-
-.content {
-	composes: content from "../settings-page.module.css";
-}
-
 .logo {
 	width: 40px;
 	height: 40px;

@@ -199,83 +199,60 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex v-if="appStore.isLogined" direction="column" :class="$style.wrapper">
-		<SubPageHeader title="Notes" :backTo="'/popup/settings/advanced/account-state'" />
+	<SettingsPageShell title="Notes" :backTo="'/popup/settings/advanced/account-state'" gap="16" v-if="appStore.isLogined">
+		<Input
+			v-if="notes.length"
+			v-model="searchTerm"
+			icon="search"
+			placeholder="Search by type, contract, name or location"
+			clearable
+			@clear="searchTerm = ''"
+		/>
 
-		<Flex direction="column" gap="16" :class="$style.content">
-			<Input
-				v-if="notes.length"
-				v-model="searchTerm"
-				icon="search"
-				placeholder="Search by type, contract, name or location"
-				clearable
-				@clear="searchTerm = ''"
-			/>
+		<AsyncListStatus v-if="isFetchingNotes || isErrorOccurred" :loading="isFetchingNotes" :error="error" label="FETCHING NOTES" @retry="fetchNotes(true)" />
 
-			<LoadingState v-if="isFetchingNotes" label="FETCHING NOTES" />
-
-			<Tooltip v-else-if="isErrorOccurred" wide>
-				<Banner :action="{ name: 'Try again', callback: () => fetchNotes(true) }" variant="error" wide>
-					Something went wrong
-				</Banner>
-
-				<template #content>
-					{{ error }}
-				</template>
-			</Tooltip>
-
-			<Flex v-else-if="filteredDisplayNotes.length" direction="column" gap="8">
-				<div
-					v-for="display in filteredDisplayNotes"
-					:key="display.key"
-					@click="handleOpenNote(display)"
-					:class="[$style.card, display.renderError && $style.card_error]"
-					:style="{ borderLeftColor: display.borderColor }"
-				>
-					<div :class="$style.header">
-						<span :class="$style.type">
-							{{ display.type }}<span v-if="display.contractName" :class="$style.contract_name"> · {{ display.contractName }}</span>
-						</span>
-						<span v-if="display.contractTrim" :class="$style.contract">{{ display.contractTrim }}</span>
-					</div>
-
-					<span v-if="display.location" :class="$style.location">{{ display.location }}</span>
-
-					<div v-if="display.kvEntries.length" :class="$style.kv_grid">
-						<template v-for="entry in display.kvEntries" :key="entry.key">
-							<span :class="$style.kv_key">{{ entry.key }}</span>
-							<span :class="[$style.kv_val, entry.isLongHex && $style.kv_val_wrap]">{{ entry.value }}</span>
-						</template>
-					</div>
-
-					<div v-else-if="display.rawLines.length" :class="$style.raw">
-						<span v-for="(el, i) in display.rawLines" :key="i" :class="$style.raw_line">{{ el }}</span>
-					</div>
-
-					<div v-if="display.renderError" :class="$style.render_error">
-						<span :class="$style.render_error_label">RENDER ERROR</span>
-						<span :class="$style.render_error_msg">{{ display.renderError }}</span>
-					</div>
+		<Flex v-else-if="filteredDisplayNotes.length" direction="column" gap="8">
+			<div
+				v-for="display in filteredDisplayNotes"
+				:key="display.key"
+				@click="handleOpenNote(display)"
+				:class="[$style.card, display.renderError && $style.card_error]"
+				:style="{ borderLeftColor: display.borderColor }"
+			>
+				<div :class="$style.header">
+					<span :class="$style.type">
+						{{ display.type }}<span v-if="display.contractName" :class="$style.contract_name"> · {{ display.contractName }}</span>
+					</span>
+					<span v-if="display.contractTrim" :class="$style.contract">{{ display.contractTrim }}</span>
 				</div>
-			</Flex>
 
-			<ListStatusMessage v-else-if="filteredDisplayNotes.length === 0 && searchTerm" variant="no-results" />
+				<span v-if="display.location" :class="$style.location">{{ display.location }}</span>
 
-			<ListStatusMessage v-else headline="NO NOTES YET" sub="Notes from your account contracts will appear here." />
+				<div v-if="display.kvEntries.length" :class="$style.kv_grid">
+					<template v-for="entry in display.kvEntries" :key="entry.key">
+						<span :class="$style.kv_key">{{ entry.key }}</span>
+						<span :class="[$style.kv_val, entry.isLongHex && $style.kv_val_wrap]">{{ entry.value }}</span>
+					</template>
+				</div>
+
+				<div v-else-if="display.rawLines.length" :class="$style.raw">
+					<span v-for="(el, i) in display.rawLines" :key="i" :class="$style.raw_line">{{ el }}</span>
+				</div>
+
+				<div v-if="display.renderError" :class="$style.render_error">
+					<span :class="$style.render_error_label">RENDER ERROR</span>
+					<span :class="$style.render_error_msg">{{ display.renderError }}</span>
+				</div>
+			</div>
 		</Flex>
 
-	</Flex>
+		<ListStatusMessage v-else-if="filteredDisplayNotes.length === 0 && searchTerm" variant="no-results" />
+
+		<ListStatusMessage v-else headline="NO NOTES YET" sub="Notes from your account contracts will appear here." />
+	</SettingsPageShell>
 </template>
 
 <style module>
-.wrapper {
-	composes: wrapper from "../../../settings-page.module.css";
-}
-
-.content {
-	composes: content from "../../../settings-page.module.css";
-}
-
 .card {
 	display: flex;
 	flex-direction: column;
@@ -445,8 +422,5 @@ onBeforeUnmount(() => {
 	overflow-wrap: anywhere;
 	line-height: 1.4;
 }
-
-
-
 
 </style>

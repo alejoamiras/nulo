@@ -68,63 +68,18 @@ onBeforeUnmount(() => {
 	<Teleport to="body">
 		<!-- Deliberately: NO seed input, NO external links, NO delete CTA — deletion stays the
 		     settings flow; this screen only explains and blocks. -->
-		<div v-if="isBlocked" :class="$style.wrapper" data-testid="account-integrity-blocked">
-			<div :class="$style.card">
-				<MaterialIcon name="warning" size="24" color="--red" />
-				<span :class="$style.title">ACCOUNT VERIFICATION FAILED</span>
-				<span :class="$style.sub" data-testid="account-integrity-blocked-copy">
-					This version of the wallet derives a different address than this profile's accounts were
-					created with, so the profile has been locked. Your recovery phrase still derives your accounts
-					on a compatible version of Nulo. Never enter your recovery phrase anywhere in response to this
-					message — no legitimate screen will ask for it.
-				</span>
-				<span :class="$style.detail">
-					Install a compatible wallet version, then unlock from the lock screen to re-run
-					verification. Your data on this device is untouched.
-				</span>
-			</div>
-		</div>
+		<BarrierOverlay v-if="isBlocked" testid="account-integrity-blocked" subTestid="account-integrity-blocked-copy">
+			<template #title>ACCOUNT VERIFICATION FAILED</template>
+			<template #sub>
+				This version of the wallet derives a different address than this profile's accounts were
+				created with, so the profile has been locked. Your recovery phrase still derives your accounts
+				on a compatible version of Nulo. Never enter your recovery phrase anywhere in response to this
+				message — no legitimate screen will ask for it.
+			</template>
+			<template #detail>
+				Install a compatible wallet version, then unlock from the lock screen to re-run
+				verification. Your data on this device is untouched.
+			</template>
+		</BarrierOverlay>
 	</Teleport>
 </template>
-
-<style module>
-.wrapper {
-	position: fixed;
-	inset: 0;
-
-	display: flex;
-	justify-content: center;
-	align-items: center;
-
-	background-color: rgba(10, 9, 8, 0.92);
-	z-index: 10000;
-}
-
-.card {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 8px;
-
-	max-width: 280px;
-	text-align: center;
-}
-
-.title {
-	font-family: var(--font-headline);
-	font-weight: 700;
-	font-size: 14px;
-	color: var(--txt-primary);
-}
-
-.sub {
-	font-size: 12px;
-	color: var(--txt-secondary);
-}
-
-.detail {
-	font-size: 10px;
-	color: var(--txt-tertiary);
-	word-break: break-word;
-}
-</style>

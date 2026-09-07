@@ -42,6 +42,21 @@ Base: `worktree-dedup-p3-service-wrappers` (PR #568). Scope: ledger ids J1 J2 J3
   with `src/types/` unchanged. Emitted CSS: each partial rule once (`select_row`, `approval_wrapper`, `scroll_area`,
   `viewer_wrapper`, `json_viewer`, `detail_row`, `fee_label`, `empty_state`, `amount_value`, `hero_meta` …); consumer
   → partial two-token mappings 4/4 approval windows, 2/2 viewers, 4/4 `detail_row`, 3/3 `fee_label`, 3/3 `skeleton`,
-  4/4 select rows, 2/2 headers, 3/3 detail pages, 2/2 empty states, 18/19 settings wrappers and 18/19 contents; the
+  4/4 select rows, 2/2 headers, 3/3 detail pages, 2/2 empty states, 19/19 settings wrappers and contents (counted as partial-token occurrences across the page chunks); the
   composed skeleton's `animation` names the partial's emitted `@keyframes`; the partial's `select_row` rule precedes
   the consumers' rules in the stylesheet. (`AmountCard.vue` owns a separate shimmer — not an L1 site, untouched.)
+
+## Phase 2 — popup shells (J2, J4, M2) ✓
+
+- `SettingsPageShell` (16 pages; `about`, `appearance`, `authwits` keep their markup and compose the partial, which now
+  lives beside the shell in `components/composite/`), `AsyncListStatus` (5 list pages, the page's own retry handler
+  and toast untouched), `BarrierOverlay` (both barriers keep their `Teleport`, copy and testids; the copy stays as slot
+  text so Vue condenses it exactly as before). The page rewrite was scripted from the exact opening/closing markup —
+  two wrapper shapes (`v-if` before `direction` on four pages, after the class on one) and two closings (blank line or
+  not before the outer `</Flex>`); the body dedents by one tab.
+- The three existing suites that mount these parents (`MigrationBarrier`, `AccountIntegrityBarrier`, the networks
+  settings page) register the real extracted child: vitest auto-registers nothing, so an unregistered
+  `<BarrierOverlay>` would have rendered an empty custom element and the copy assertions would have gone silent.
+- Stub gotcha: a bare boolean attr (`wide`) reaches an untyped stub prop as `""`; type the stub prop `Boolean`.
+- Gate: lint 0 · extension typecheck 0 · 64 files / 678 tests (`components`, `pages`, `general`) + the 12-case
+  `AsyncListStatus` suite · `build:chrome` 0; `components.d.ts` gained the three entries and is committed.

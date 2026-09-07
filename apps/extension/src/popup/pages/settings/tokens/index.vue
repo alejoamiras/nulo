@@ -74,60 +74,47 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.wrapper">
-		<SubPageHeader title="Manage Tokens" :backTo="'/popup/settings'" />
+	<SettingsPageShell title="Manage Tokens" :backTo="'/popup/settings'" gap="16">
+		<SectionLabel label="Tokens" :count="tokens.length" />
 
-		<Flex direction="column" gap="16" :class="$style.content">
-			<SectionLabel label="Tokens" :count="tokens.length" />
+		<ItemsContainer v-if="tokens.length">
+			<SettingItem
+				v-for="token in tokens"
+				:title="token.symbol"
+				:description="token.name"
+				icon="banknote"
+				raw
+				data-testid="token-row"
+			>
+				<template #right>
+					<Flex align="center" gap="8">
+						<Tooltip position="end" delay="350">
+							<Icon
+								v-if="appStore.networks.length > 1"
+								@click.stop="handleDelete(token)"
+								name="close-circle"
+								size="14"
+								color="tertiary"
+								data-testid="token-delete"
+								:class="$style.icon_btn"
+							/>
 
-			<ItemsContainer v-if="tokens.length">
-				<SettingItem
-					v-for="token in tokens"
-					:title="token.symbol"
-					:description="token.name"
-					icon="banknote"
-					raw
-					data-testid="token-row"
-				>
-					<template #right>
-						<Flex align="center" gap="8">
-							<Tooltip position="end" delay="350">
-								<Icon
-									v-if="appStore.networks.length > 1"
-									@click.stop="handleDelete(token)"
-									name="close-circle"
-									size="14"
-									color="tertiary"
-									data-testid="token-delete"
-									:class="$style.icon_btn"
-								/>
+							<template #content> Delete token </template>
+						</Tooltip>
+					</Flex>
+				</template>
+			</SettingItem>
+		</ItemsContainer>
 
-								<template #content> Delete token </template>
-							</Tooltip>
-						</Flex>
-					</template>
-				</SettingItem>
-			</ItemsContainer>
+		<ListStatusMessage v-else headline="NO TOKENS YET" sub="Import tokens to track balances and send or receive." />
 
-			<ListStatusMessage v-else headline="NO TOKENS YET" sub="Import tokens to track balances and send or receive." />
-
-			<Button @click="popupStore.open('new_token')" wide variant="primary" size="large" data-testid="token-import-btn">
-				Import token
-			</Button>
-		</Flex>
-
-	</Flex>
+		<Button @click="popupStore.open('new_token')" wide variant="primary" size="large" data-testid="token-import-btn">
+			Import token
+		</Button>
+	</SettingsPageShell>
 </template>
 
 <style module>
-.wrapper {
-	composes: wrapper from "../settings-page.module.css";
-}
-
-.content {
-	composes: content from "../settings-page.module.css";
-}
-
 .icon_btn {
 	cursor: pointer;
 
@@ -137,7 +124,5 @@ onBeforeUnmount(() => {
 		fill: var(--txt-primary);
 	}
 }
-
-
 
 </style>

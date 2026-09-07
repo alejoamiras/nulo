@@ -94,90 +94,67 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.wrapper">
-		<SubPageHeader title="Senders" :backTo="'/popup/settings/advanced/account-state'" />
+	<SettingsPageShell title="Senders" :backTo="'/popup/settings/advanced/account-state'" gap="16">
+		<AsyncListStatus v-if="isLoading || error" :loading="isLoading" :error="error" label="FETCHING SENDERS" @retry="fetchSenders()" />
 
-		<Flex direction="column" gap="16" :class="$style.content">
-			<LoadingState v-if="isLoading" label="FETCHING SENDERS" />
+		<Flex v-else-if="senders.length" direction="column" gap="8">
+			<Flex v-for="sender in senders" justify="between" :class="$style.card" data-testid="sender-row" :data-sender-address="sender">
+				<Flex align="center" gap="10">
+					<Icon name="user" size="16" color="tertiary" />
 
-			<Tooltip v-else-if="error" wide>
-				<Banner :action="{ name: 'Try again', callback: () => fetchSenders() }" variant="error" wide>
-					Something went wrong
-				</Banner>
+					<AddressDisplay @onAddressClick="handleCopyAddress(sender)" size="14" weight="600" color="secondary" :address="sender" :formatter="(addr) => trimAddress(addr, 8, 8)" />
+					<!-- <Text @click="handleCopyAddress(sender)" size="14" weight="600" color="secondary"> {{ trimAddress(sender, 8, 8) }} </Text> -->
+				</Flex>
 
-				<template #content>
-					{{ error }}
-				</template>
-			</Tooltip>
+				<Flex align="center" gap="8">
+					<Tooltip position="end" delay="350">
+						<Icon
+							v-if="copiedAddress !== sender"
+							@click.stop="handleCopyAddress(sender)"
+							name="copy"
+							size="14"
+							color="tertiary"
+							:class="$style.icon_btn"
+						/>
+						<Icon
+							v-else-if="copiedAddress === sender"
+							name="check-circle"
+							size="14"
+							color="green"
+							:style="{ transition: 'all 0.2s ease' }"
+						/>
 
-			<Flex v-else-if="senders.length" direction="column" gap="8">
-				<Flex v-for="sender in senders" justify="between" :class="$style.card" data-testid="sender-row" :data-sender-address="sender">
-					<Flex align="center" gap="10">
-						<Icon name="user" size="16" color="tertiary" />
+						<template #content> Copy address </template>
+					</Tooltip>
+					<Tooltip position="end" delay="350">
+						<Icon
+							@click.stop="handleDelete(sender)"
+							name="close-circle"
+							size="14"
+							color="tertiary"
+							:class="$style.icon_btn"
+							data-testid="sender-delete"
+						/>
 
-						<AddressDisplay @onAddressClick="handleCopyAddress(sender)" size="14" weight="600" color="secondary" :address="sender" :formatter="(addr) => trimAddress(addr, 8, 8)" />
-						<!-- <Text @click="handleCopyAddress(sender)" size="14" weight="600" color="secondary"> {{ trimAddress(sender, 8, 8) }} </Text> -->
-					</Flex>
-
-					<Flex align="center" gap="8">
-						<Tooltip position="end" delay="350">
-							<Icon
-								v-if="copiedAddress !== sender"
-								@click.stop="handleCopyAddress(sender)"
-								name="copy"
-								size="14"
-								color="tertiary"
-								:class="$style.icon_btn"
-							/>
-							<Icon
-								v-else-if="copiedAddress === sender"
-								name="check-circle"
-								size="14"
-								color="green"
-								:style="{ transition: 'all 0.2s ease' }"
-							/>
-
-							<template #content> Copy address </template>
-						</Tooltip>
-						<Tooltip position="end" delay="350">
-							<Icon
-								@click.stop="handleDelete(sender)"
-								name="close-circle"
-								size="14"
-								color="tertiary"
-								:class="$style.icon_btn"
-								data-testid="sender-delete"
-							/>
-
-							<template #content> Delete sender </template>
-						</Tooltip>
-					</Flex>
+						<template #content> Delete sender </template>
+					</Tooltip>
 				</Flex>
 			</Flex>
-
-			<ListStatusMessage
-				v-else
-				headline="NO SENDERS YET"
-				sub="Most transfers are detected automatically. Add a sender only for transfers delivered with address-derived tagging."
-			/>
-
-			<Button @click="popupStore.open('new_sender')" wide variant="primary" size="large" data-testid="senders-add-btn">
-				Add sender
-			</Button>
 		</Flex>
 
-	</Flex>
+		<ListStatusMessage
+			v-else
+			headline="NO SENDERS YET"
+			sub="Most transfers are detected automatically. Add a sender only for transfers delivered with address-derived tagging."
+		/>
+
+		<Button @click="popupStore.open('new_sender')" wide variant="primary" size="large" data-testid="senders-add-btn">
+			Add sender
+		</Button>
+	</SettingsPageShell>
 </template>
 
 <style module>
-.wrapper {
-	composes: wrapper from "../../../settings-page.module.css";
-}
-
-.content {
-	composes: content from "../../../settings-page.module.css";
-}
-
 .card {
 	border-radius: 0;
 	border: 1px solid var(--nulo-border);
@@ -204,7 +181,5 @@ onBeforeUnmount(() => {
 		fill: var(--txt-primary);
 	}
 }
-
-
 
 </style>

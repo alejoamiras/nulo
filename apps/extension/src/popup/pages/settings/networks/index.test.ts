@@ -3,6 +3,7 @@ import { mount } from "@vue/test-utils"
 import { nextTick } from "vue"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { useAppStore } from "@/stores/app.store"
+import SettingsPageShell from "@/components/composite/SettingsPageShell.vue"
 import NetworksIndex from "./index.vue"
 
 // The app store's setup runs `useSyncedRef` → `chrome.storage.local` on instantiation; stub it.
@@ -33,6 +34,7 @@ function mountList(activeId: string) {
 	const wrapper = mount(NetworksIndex, {
 		global: {
 			plugins: [createTestingPinia({ createSpy: vi.fn })],
+			components: { SettingsPageShell },
 			stubs: {
 				// SettingItem stub renders `to` (proving the row is a keyboard-activatable link, not a
 				// click-only div) + the #right slot (where the active badge lives). $attrs forwards the

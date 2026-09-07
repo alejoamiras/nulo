@@ -119,13 +119,11 @@ onBeforeUnmount(() => {
 
 <template>
 	<Teleport to="body">
-		<div v-if="state === 'blocked'" :class="$style.wrapper" data-testid="migration-blocked">
-			<div :class="$style.card">
-				<MaterialIcon name="warning" size="24" color="--red" />
-				<span :class="$style.title">{{ blockedCopy.title }}</span>
-				<span :class="$style.sub">{{ blockedCopy.sub }}</span>
-				<span :class="$style.detail" data-testid="migration-blocked-detail">{{ blocked.detail }}</span>
-				<button
+		<BarrierOverlay v-if="state === 'blocked'" testid="migration-blocked" detailTestid="migration-blocked-detail">
+			<template #title>{{ blockedCopy.title }}</template>
+			<template #sub>{{ blockedCopy.sub }}</template>
+			<template #detail>{{ blocked.detail }}</template>
+			<button
 					v-if="!blocked.terminal"
 					type="button"
 					:class="$style.retryBtn"
@@ -134,17 +132,14 @@ onBeforeUnmount(() => {
 					@click="requestRetry"
 				>
 					{{ retryRequested ? "Restarting…" : retryOnCooldown ? "Retrying…" : "Retry update" }}
-				</button>
-			</div>
-		</div>
+			</button>
+		</BarrierOverlay>
 
-		<div v-else-if="state === 'updating'" :class="$style.wrapper" data-testid="migration-updating">
-			<div :class="$style.card">
-				<Spinner size="24" color="--txt-primary" />
-				<span :class="$style.title">UPDATING</span>
-				<span :class="$style.sub">Adapting your saved data to the new version</span>
-			</div>
-		</div>
+		<BarrierOverlay v-else-if="state === 'updating'" testid="migration-updating">
+			<template #icon><Spinner size="24" color="--txt-primary" /></template>
+			<template #title>UPDATING</template>
+			<template #sub>Adapting your saved data to the new version</template>
+		</BarrierOverlay>
 
 		<div v-else-if="state === 'degraded'" :class="$style.banner" data-testid="migration-degraded">
 			<span :class="$style.bannerText">Part of the last update didn't apply — some data may look outdated.</span>
@@ -154,46 +149,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style module>
-.wrapper {
-	position: fixed;
-	inset: 0;
-
-	display: flex;
-	justify-content: center;
-	align-items: center;
-
-	background-color: rgba(10, 9, 8, 0.92);
-	z-index: 10000;
-}
-
-.card {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 8px;
-
-	max-width: 280px;
-	text-align: center;
-}
-
-.title {
-	font-family: var(--font-headline);
-	font-weight: 700;
-	font-size: 14px;
-	color: var(--txt-primary);
-}
-
-.sub {
-	font-size: 12px;
-	color: var(--txt-secondary);
-}
-
-.detail {
-	font-size: 10px;
-	color: var(--txt-tertiary);
-	word-break: break-word;
-}
-
 .banner {
 	position: fixed;
 	top: 0;
