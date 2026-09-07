@@ -812,6 +812,26 @@ export async function navigateToTokenDetail(page: Page, symbol?: string): Promis
 	await page.waitForSelector('[data-testid="balance-amount"]', { visible: true, timeout: 15_000 })
 }
 
+/** On the Send page, open the token picker, choose the row for `symbol`, and wait for the popup to
+ *  close with the trigger showing that symbol. */
+export async function selectSendToken(page: Page, symbol: string): Promise<void> {
+	await clickByTestId(page, "send-token-trigger")
+	const rowSelector = `[data-testid="select-token-row"][data-symbol="${symbol}"]`
+	await page.waitForSelector(rowSelector, { visible: true, timeout: 15_000 })
+	await page.evaluate((sel: string) => {
+		;(document.querySelector(sel) as HTMLElement)?.click()
+	}, rowSelector)
+	await page.waitForFunction(
+		(sel: string, sym: string) => {
+			if (document.querySelector(sel)) return false
+			return document.querySelector('[data-testid="send-token-symbol"]')?.textContent?.trim() === sym
+		},
+		{ timeout: 10_000 },
+		rowSelector,
+		symbol,
+	)
+}
+
 /** Read the private and public balance values from the token detail page's BalanceView breakdown. */
 export async function getTokenDetailBalances(page: Page): Promise<{ privateBalance: string; publicBalance: string }> {
 	await page.waitForSelector('[data-testid="private-balance-value"]', { visible: true, timeout: 10_000 })

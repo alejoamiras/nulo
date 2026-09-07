@@ -143,16 +143,19 @@ export async function createTestWallet(url = LOCAL_NODE_URL) {
  */
 const E2E_FEE_GAS = { maxFeesPerGas: new GasFees(10n ** 13n, 10n ** 13n) }
 
-/** Deploy a Token contract with a minter address. Returns the token contract address. */
+/** Deploy a Token contract with a minter address. Returns the token contract address.
+ *  `symbol` lets a test deploy several distinguishable tokens (Home and Holdings select by it). */
 export async function deployTestToken(
 	wallet: InstanceType<typeof EmbeddedWallet>,
 	minterAddress: AztecAddress,
 	feeOptions: { paymentMethod: SponsoredFeePaymentMethod },
+	symbol = "TST",
+	name = symbol === "TST" ? "TestToken" : `${symbol} Token`,
 ): Promise<string> {
 	const { contract } = await TokenContract.deployWithOpts(
 		{ method: "constructor_with_minter", wallet },
-		"TestToken",
-		"TST",
+		name,
+		symbol,
 		18,
 		minterAddress,
 		// 5.0.1 standards added a 5th `auth_contract` param to constructor_with_minter — pass ZERO
@@ -691,6 +694,38 @@ export async function mintPublicTokensForAccount(
 	try {
 		const feeOptions = await createSponsoredFeeOptions(wallet)
 		await mintPublicTokens(wallet, aztecConfig.tokenAddress, accountAddress, amount, aztecConfig.minterAddress, feeOptions)
+	} finally {
+		await cleanup()
+	}
+}
+
+/**
+ * Deploy extra tokens (distinct symbols) with the sandbox minter and mint a public balance of each
+ * to `accountAddress`. Home's three-row cap and the Holdings list need more than the one fixture
+ * token to prove ordering; `amount` per symbol lets a test rank them by value with a seeded quote.
+ * Returns the contract address per symbol.
+ */
+export async function deployExtraTokensForAccount(
+	aztecConfig: AztecTestConfig,
+	accountAddress: string,
+	tokens: ReadonlyArray<{ symbol: string; amount: bigint }>,
+): Promise<Record<string, string>> {
+	const { wallet, accounts, cleanup } = await createTestWallet(aztecConfig.nodeUrl)
+	try {
+		const minter = accounts[0]
+		if (minter.toString() !== aztecConfig.minterAddress) {
+			throw new Error(`deployExtraTokensForAccount: minter mismatch ${minter} vs ${aztecConfig.minterAddress}`)
+		}
+		const feeOptions = await createSponsoredFeeOptions(wallet)
+		const out: Record<string, string> = {}
+		for (const t of tokens) {
+			const address = await deployTestToken(wallet, minter, feeOptions, t.symbol)
+			if (t.amount > 0n) {
+				await mintPublicTokens(wallet, address, accountAddress, t.amount, aztecConfig.minterAddress, feeOptions)
+			}
+			out[t.symbol] = address
+		}
+		return out
 	} finally {
 		await cleanup()
 	}

@@ -336,7 +336,8 @@ onBeforeUnmount(() => {
 
 	<TokenMetadataPopup :show="popupStore.isOpened('token_metadata')" @onClose="popupStore.close('token_metadata')" />
 	<NewTokenPopup :show="popupStore.isOpened('new_token')" @onClose="popupStore.close('new_token')" />
-	<SelectTokenPopup :show="popupStore.isOpened('select_token')" @onClose="popupStore.close('select_token')" />
+	<!-- Mounted only while unlocked: its price feed refreshes at setup, which must never run locked. -->
+	<SelectTokenPopup v-if="appStore.isLogined" :show="popupStore.isOpened('select_token')" @onClose="popupStore.close('select_token')" />
 
 
 	<NewFpcPopup :show="popupStore.isOpened('new_fpc')" @onClose="popupStore.close('new_fpc')" />

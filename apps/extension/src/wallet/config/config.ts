@@ -46,7 +46,8 @@ export const ConfigSchema = z.object({
 	// value is BELOW this threshold is hidden from the activity feed at read time (display-only —
 	// the record + the balance refresh persist). `0` (default) = filter OFF. Fails OPEN (shown) when
 	// a token has no CoinGecko mapping or only a stale quote.
-	incomingDustUsdThreshold: z.number().nonnegative().default(0),
+	// Bounded so the micro-USD conversion can never overflow to Infinity.
+	incomingDustUsdThreshold: z.number().nonnegative().max(1_000_000).default(0),
 
 	// Developer
 	developerMode: z.boolean().default(false),
