@@ -5,7 +5,7 @@ driver: claude-code
 eli5_mode: artifact
 code_review: off
 budget: recon 1 agent · codex high · code-review off
-status: revised after codex rounds 1–2 (reject, reject) — awaiting round 3
+status: codex approved (round 3) — awaiting owner approval
 ---
 
 # Chrome Web Store launch — the repo half
@@ -156,9 +156,11 @@ Single arc, one PR `worktree-chrome-store-launch` → `dev`: `feat(store): chrom
 
 **Round 2: reject.** Verified and adopted: a tag-only/reviewer rule on the shared `production` environment would block or stall `push: main` releases → a dedicated `chrome-web-store` environment, dispatch documented as `--ref main`; the Chrome job lacked the `always() && !cancelled()` guard the file documents at line 184 → added, and the dry-run acceptance is "the job ran"; the `setup-bun` composite always installs → pinned `oven-sh/setup-bun`, no install; polling had no time bound and no fail-closed states → per-request timeouts, a 3-minute deadline, `NOT_FOUND`/unspecified fail closed, exhausted polling never publishes (tested); the summary always said "submitted" → prints the actual state; `page.css` alone cannot style the privacy page → its own entry importing the same three stylesheets; the remote-code explanation asserted per-request confirmation (false: the silent path) and isolation (unproven) → Ask 4 rewritten as a fact-finding task (`store/remote-code.md`) plus an owner policy call with "get a policy read first" as the default. Nothing rejected.
 
-**Round 3:** _pending._
+**Round 3: approve.** "No remaining material findings in the revised implementation plan. Confidence: high. Approval covers repo implementation; the documented account and policy prerequisites still apply before submission."
 
 ## Seeds
+
+ELI5 companion: the Artifact at `https://claude.ai/code/artifact/ddcdedbb-fa48-4c77-b0c1-019578b7576a`, published from `implementations-plan/chrome-store-launch/eli5.html` (redeploy the same file to update it).
 
 Recommended: `/goal`.
 

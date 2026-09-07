@@ -33,7 +33,7 @@ code{font-family:var(--mo);font-size:.92em}
 <h1>Getting Nulo V5 onto the Chrome Web Store</h1>
 <p>This plan does the half that lives in the repo: the store name, real icons, the promo tile and screenshots, the listing text with honest answers to Google's questions, a privacy page on nulo.sh, and a publish button in the release workflow that talks to the store's current API. The half that needs you in the room (creating the Workspace account, paying the fee, the first upload, the API credentials, locking down the GitHub environment) is written up as a checklist at the end, for the session where I drive the browser and you supply the codes.</p>
 
-<p><span class="tag hi">tier · light</span><span class="tag">recon 1 agent</span><span class="tag">codex rounds 1–2 reject → revised; round 3 in plan.md</span><span class="tag">code-review off</span><span class="tag">one PR to dev</span></p>
+<p><span class="tag hi">tier · light</span><span class="tag">recon 1 agent</span><span class="tag">codex: reject, reject, approve</span><span class="tag">code-review off</span><span class="tag">one PR to dev</span></p>
 
 <h2>Why light</h2>
 <p>Every piece is bounded and reversible: a rename, generated images, text files, a static page, and one workflow job that stays switched off until you flip it. The one genuinely dangerous thing, the store credential, is handled by the plan's security section and the checklist, not by more ceremony.</p>
@@ -58,7 +58,7 @@ code{font-family:var(--mo);font-size:.92em}
 <h2 style="border:0;margin:0 0 8px;padding:0">Approval needed from you</h2>
 <ul>
 <li>Scope: the four phases above; nothing on the account side happens in this PR.</li>
-<li>Tier: light, codex audits (round 1 reject, round 2 pending in the plan file).</li>
+<li>Tier: light; codex rejected twice, approved the third draft.</li>
 <li>Validation: per-phase gates above; the smoke suite runs on the renamed build.</li>
 <li>Delivery: one PR to dev; I watch checks; you merge.</li>
 <li>The four decisions above.</li>
