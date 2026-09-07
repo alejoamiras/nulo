@@ -8,7 +8,6 @@
 
 import { mount } from "@vue/test-utils"
 import { describe, expect, test } from "vitest"
-import OperationActionRow from "./OperationActionRow.vue"
 import OperationCard from "./OperationCard.vue"
 
 const SPENDER = "0xspender000000000000000000000000000000000000000000000000000000aa"
@@ -56,7 +55,6 @@ describe("OperationCard — add_public_authwit (audit F2)", () => {
 			props: { op: authwitOp() as never, index: 0 },
 			global: {
 				stubs,
-				components: { OperationActionRow },
 				// Auto-imported template helpers aren't resolved in an isolated mount.
 				mocks: {
 					trimAddress: (a: string) => a,
@@ -91,7 +89,6 @@ describe("OperationCard — add_public_authwit (audit F2)", () => {
 			props: { op: op as never, index: 0 },
 			global: {
 				stubs,
-				components: { OperationActionRow },
 				mocks: {
 					trimAddress: (a: string) => a,
 					humanizeMethodName: (m: string) => m,

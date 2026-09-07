@@ -2,7 +2,6 @@ import { mount } from "@vue/test-utils"
 import { describe, expect, test, vi } from "vitest"
 import { trimAddress } from "@/utils/string"
 import { humanizeMethodName } from "@/utils/tx-enrichment"
-import OperationActionRow from "./OperationActionRow.vue"
 import OperationCard from "./OperationCard.vue"
 
 const mounts = vi.hoisted(() => ({ count: 0 }))
@@ -30,7 +29,6 @@ const execOp = (kind: "aztec_simulateTx" | "aztec_profileTx", to: string) => ({
 	opts: {},
 })
 
-// The template reaches this util through the build's auto-import; vitest registers none, so it rides on the instance.
 const authwitOp = (kind: "send_transaction" | "simulate_transaction") => ({
 	kind,
 	account: { name: "Owner", address: "0xacct" },
@@ -38,7 +36,13 @@ const authwitOp = (kind: "send_transaction" | "simulate_transaction") => ({
 		{ kind: "call", contract: "0xtoken", method: "transfer", args: [] },
 		{
 			kind: "add_public_authwit",
-			content: { kind: "call", caller: "0xspender", contract: "0xtoken", method: "transfer_in_public", args: ["1", "2"] },
+			content: {
+				kind: "call",
+				caller: "0xspender",
+				contract: "0xtoken",
+				method: "transfer_in_public",
+				args: ["1", `ab\u0007cd${"x".repeat(60)}`],
+			},
 		},
 	],
 })
@@ -46,7 +50,8 @@ const authwitOp = (kind: "send_transaction" | "simulate_transaction") => ({
 const mountCard = (op: unknown) =>
 	mount(OperationCard, {
 		props: { op: op as never, index: 0 },
-		global: { stubs, components: { OperationActionRow }, mocks: { humanizeMethodName, trimAddress } },
+		// The template reaches these utils through the build's auto-import; vitest registers none.
+		global: { stubs, mocks: { humanizeMethodName, trimAddress } },
 	})
 
 describe("windows/execute/OperationCard", () => {
@@ -77,9 +82,11 @@ describe("windows/execute/OperationCard — action rows", () => {
 			const rows = w.findAll("[data-testid='execute-op-payload-row']")
 			expect(rows).toHaveLength(2)
 			expect(rows[1]?.text()).toContain("Authorize public spend")
-			expect(rows[1]?.find("[data-testid='execute-authwit-spender']").attributes("data-address")).toBe("0xspender")
+			const addresses = rows[1]?.findAll("i[data-address]").map((a) => a.attributes("data-address"))
+			expect(addresses).toEqual(["0xspender", "0xtoken"])
 			expect(rows[1]?.text()).toContain("Transfer (public)")
-			expect(rows[1]?.find("[data-testid='execute-authwit-args']").text()).toBe("1, 2")
+			// Args are wire strings: control characters stripped, capped at 48 code points plus an ellipsis.
+			expect(rows[1]?.find("[data-testid='execute-authwit-args']").text()).toBe(`1, abcd${"x".repeat(44)}…`)
 			expect(rows[1]?.text()).not.toContain("add public authwit")
 		},
 	)

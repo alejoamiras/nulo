@@ -39,5 +39,5 @@ export function humanizeOperationKind(kind: string): string {
 	return `${out[0].toUpperCase()}${out.substring(1)}`
 }
 
-/** A wire string bounded to `max` code points, or "" when absent. */
+/** A wire string with control characters stripped and, past `max` code points, truncated with an ellipsis; "" when absent. */
 export const safeWire = (s: string | undefined, max: number): string => (s ? sanitizeWireString(s, max) : "")

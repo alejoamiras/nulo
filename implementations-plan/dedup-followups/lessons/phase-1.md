@@ -37,10 +37,20 @@ Base: dev @ 49a58417. Scope: the three bugs the dedup stack pinned, plus ledger 
 
 Ledger rows X5 and N5 marked done; plan phases ✓.
 
-## Phase 4 — full local gate
 
-(pending)
+## Phase 4 — full local gate ✓ (0521d179)
 
-## Codex fix loop
+`bun run lint` 0 · `bun run typecheck:all` 0 · `bun run test` 0 (470 files / 5,741 tests) · `build:chrome` 0 · generated
+`src/types/` unchanged.
 
-(pending)
+## Codex fix loop (`/codex high`, GPT-6 Astra, session `01a07da0-9fc0-7662-a002-0f8b5071df1e`, resumed each round)
+
+- **Round 1** (on 0521d179): *"no new material findings"* — the extracted row matched the send branch after
+  normalisation, X5 preserved timing/predicates/latches/order, N5 kept the live account comparison, no executable
+  reader of the old hook names anywhere. Low items adopted: the authwit case asserts the contract address and a
+  control-character + overlength arg (sanitised, capped at 48 + ellipsis); both card suites stopped registering
+  the row child (production imports it; the registration had masked that); `usePopupEntity` docs say the
+  input-only Enter guard is the default; the two authwit popups lost the stale "caller-side duplication" wording;
+  the token popup, row and `safeWire` comments are one sentence each (the last now states the control stripping
+  and the ellipsis). Test gotcha: a fallthrough `data-testid` on a stub overrides the stub`s own, so the address
+  stubs are selected by their `data-address` attribute.

@@ -15,9 +15,8 @@ defineProps<{ action: Action }>()
 			<Text color="secondary"> on </Text>
 			<AddressDisplay :address="action.kind === 'call' ? action.contract : action.to" />
 		</template>
-		<!-- add_public_authwit grants a PERSISTED on-chain spend authorization to a named caller. Surface the
-			spender + method + contract + args so the user SEES who they are authorizing and to do what — never a
-			generic label. -->
+		<!-- A public authwit is a persisted on-chain spend authorization: the spender, method, contract and args
+			must be visible, never a generic label. -->
 		<template v-else-if="action.kind === 'add_public_authwit'">
 			<Text weight="600">Authorize public spend</Text>
 			<template v-if="action.content.kind === 'call'">
@@ -32,9 +31,8 @@ defineProps<{ action: Action }>()
 					<Text data-testid="execute-authwit-args">{{ action.content.args.map((a) => safeWire(String(a), 48)).join(", ") }}</Text>
 				</template>
 			</template>
-			<!-- The non-`call` content kinds are unreachable from the current grant producer (it hardcodes `call`);
-				their identifying fields still render so a future producer can never hide a spend target behind an
-				opaque label. -->
+			<!-- Unreachable from today's grant producer (it hardcodes `call`); rendered so a future producer can
+				never hide a spend target behind an opaque label. -->
 			<template v-else-if="action.content.kind === 'encoded_call'">
 				<Text color="secondary"> — spender </Text>
 				<AddressDisplay data-testid="execute-authwit-spender" :address="action.content.caller" />

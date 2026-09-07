@@ -268,10 +268,7 @@ usePopupEntity(
 	{
 		submit: handleAddToken,
 		onShow: async () => {
-			// Reset transient state on open. The hide branch already clears `error.value`, but the submit
-			// handler's catch block runs as a microtask AFTER it — so an in-flight RPC that rejected with
-			// "Client disconnected" during the close cascade can write to `error.value` after the null-reset
-			// and stick around for the next open. Re-clearing here is the cheapest defense.
+			// Cleared again on open: a disconnect rejection can repopulate the error after hide reset it.
 			error.value = null
 			phase.value = "idle"
 			tokens.value = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)

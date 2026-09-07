@@ -63,9 +63,8 @@ const isAllowedToExecute = computed(() => {
 })
 
 async function handleRevokeAuthwits() {
-	// Full-lifetime submit latch, handler-owned: every route (keydown, click,
-	// any future caller) self-checks here — the caller-side `!isLoading`
-	// duplication in onKeydown/:disabled is defense-in-depth, not the guard.
+	// Full-lifetime submit latch, handler-owned: every route (keydown, click, any future caller)
+	// self-checks here; the button's :disabled is defense-in-depth, not the guard.
 	if (isLoading.value) return
 	// `isAllowedToExecute` is a computed ref — must dereference `.value`.
 	// Pre-fix this guard was a no-op (refs are always truthy as objects);
