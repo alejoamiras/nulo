@@ -19,7 +19,12 @@ const STUBS = {
 	},
 }
 
-const frame = () => new Promise((r) => setTimeout(r, 60))
+// The fade has no CSS duration, so Vue ends it on the next animation frames; a loaded runner can take longer than
+// one frame to get there, so wait for the observable end state instead of a fixed delay.
+const until = async (done: () => boolean) => {
+	for (let i = 0; i < 200 && !done(); i++) await new Promise((r) => setTimeout(r, 10))
+	expect(done()).toBe(true)
+}
 
 describe("ui/FieldWarning", () => {
 	test("is the warning row: a centred 6-gap flex with the red 12px warning glyph and 12/600 primary copy", () => {
@@ -68,13 +73,11 @@ describe("ui/FieldWarning", () => {
 		await w.setProps({ show: true })
 		await nextTick()
 		expect(w.find("[data-testid='row']").classes()).toContain("fade-enter-active")
-		await frame()
-		expect(w.find("[data-testid='row']").classes()).not.toContain("fade-enter-active")
+		await until(() => !w.find("[data-testid='row']").classes().includes("fade-enter-active"))
 		await w.setProps({ show: false })
 		await nextTick()
 		expect(w.find("[data-testid='row']").classes()).toContain("fade-leave-active")
-		await frame()
-		expect(w.find("[data-testid='row']").exists()).toBe(false)
+		await until(() => !w.find("[data-testid='row']").exists())
 	})
 
 	test("a v-if / v-else-if pair inside one Transition swaps warning A for warning B", async () => {
@@ -92,7 +95,7 @@ describe("ui/FieldWarning", () => {
 		expect(during.map((r) => r.text())).toEqual(["Name in use", "Already exist"])
 		expect(during[0]?.classes()).toContain("fade-leave-active")
 		expect(during[1]?.classes()).toContain("fade-enter-active")
-		await frame()
+		await until(() => w.findAll("[data-testid='row']").length === 1)
 		const rows = w.findAll("[data-testid='row']")
 		expect(rows.map((r) => r.text())).toEqual(["Already exist"])
 		expect(rows[0]?.element).not.toBe(first)
