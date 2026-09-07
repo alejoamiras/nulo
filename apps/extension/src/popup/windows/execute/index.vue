@@ -17,7 +17,7 @@ import { getErrorData, getErrorMessage } from "@nulo/wallet-core/utils"
 import { humanizeOperationKind } from "./humanize"
 import { uniqueSignerAccounts, uniqueSignerNetworks } from "./signers"
 import { isSelfPay } from "@nulo/wallet-bridge"
-import { assertExecutableOperation, requiresFeeSelection } from "./operation-validation"
+import { assertExecutableOperation, isEmbeddedFeePayment, requiresFeeSelection } from "./operation-validation"
 import type { DraftUIOperation } from "./types"
 
 /** Services */
@@ -294,21 +294,18 @@ async function buildOperationsFromPayload(
 			}
 			case "aztec_sendTx": {
 				const [network, account] = await getNetworkAndAccount(op.account)
-				const isNoFrom = op.executionMode === "default_entrypoint"
-				// `default_entrypoint` and an `exec.feePayer` that carries its payment are dApp-supplied
-				// fee paths: pre-fill embedded so the FeeSettingsCard is suppressed. A payer that is the
-				// account itself with no fee call asks for the wallet's own Fee Juice: the card renders
-				// locked to it and derives the settings once a verified balance can pay — nothing is
+				// A dApp-supplied fee path pre-fills embedded so the FeeSettingsCard is suppressed. A
+				// requested self-pay (the account named as payer with no fee call) renders the card locked
+				// to Fee Juice and derives the settings once a verified balance can pay — nothing is
 				// pre-filled, so Confirm stays off over an empty or unread balance. Otherwise leave
 				// feeSettings undefined for the user; `requiresFeeSelection` at approve() gates undefined.
-				const embedded = isNoFrom || (op.exec.feePayer !== undefined && !isSelfPay(op.exec, op.opts?.from))
 				operations.push({
 					...op,
 					network,
 					networkId: network.id,
 					account,
 					accountAddress: account.address,
-					feeSettings: embedded ? { paymentMethod: { kind: "embedded" } } : undefined,
+					feeSettings: isEmbeddedFeePayment(op) ? { paymentMethod: { kind: "embedded" } } : undefined,
 				})
 				pushUniqueAccount(accounts, account)
 				break
@@ -325,7 +322,7 @@ async function buildOperationsFromPayload(
 					networkId: network.id,
 					account,
 					accountAddress: account.address,
-					feeSettings: op.fee?.embeddedFeePayment !== undefined ? { paymentMethod: { kind: "embedded" } } : undefined,
+					feeSettings: isEmbeddedFeePayment(op) ? { paymentMethod: { kind: "embedded" } } : undefined,
 				})
 				pushUniqueAccount(accounts, account)
 				break

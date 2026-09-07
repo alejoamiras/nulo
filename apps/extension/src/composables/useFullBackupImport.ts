@@ -41,6 +41,7 @@ export type { RestoreStage, RestoreStatus } from "./full-backup-restore"
 import type { RestoreStage, RestoreStatus } from "./full-backup-restore"
 import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 import { fromBase64 } from "@/wallet/utils"
+import { isNewPasswordValid } from "@/utils/password"
 
 /** Bound on dropped-balance records. This path never reaches the collector, so it carries no cap
  *  of its own — and a hostile backup can ship tens of thousands of un-relinkable rows. */
@@ -744,10 +745,11 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 
 	const isAllowedToImportBackup = computed(() => {
 		if (!selectedBackup.value?.profileType || !selectedBackup.value?.backup) return false
-		if (selectedBackup.value?.profileType === "password") {
-			if (!opts.password.value || opts.password.value !== opts.repeatedPassword.value || opts.password.value.length < 8) {
-				return false
-			}
+		if (
+			selectedBackup.value?.profileType === "password" &&
+			!isNewPasswordValid(opts.password.value ?? "", opts.repeatedPassword.value ?? "")
+		) {
+			return false
 		}
 		return true
 	})

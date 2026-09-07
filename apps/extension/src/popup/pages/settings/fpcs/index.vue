@@ -12,7 +12,7 @@ import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 
 /** Utils */
 import { stringCompare } from "@/utils/string"
-import { copyToClipboard } from "@/utils/clipboard"
+import { copyWithToast } from "@/utils/clipboard"
 import { UI_STORAGE_KEYS } from "@/popup/constants/storage-keys"
 import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 
@@ -73,10 +73,7 @@ const displayedRows = computed(() => [PUBLIC_FJ_ROW, ...(fpcs.value ?? [])])
 
 /** Handlers */
 const handleCopyAddress = (address) => {
-	void copyToClipboard(address, openToast, {
-		success: { label: "FPC's address is copied" },
-		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
-	})
+	void copyWithToast(address, openToast, "FPC's address is copied")
 }
 
 const handleEdit = (fpc) => {

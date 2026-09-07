@@ -1,4 +1,5 @@
 <script setup>
+import { newPasswordHint } from "@/utils/password"
 /**
  * Renders the full-backup-restore form: file picker, error/warning
  * banners, decryption-password section (when the backup is encrypted),
@@ -23,12 +24,7 @@ const repeatedPassword = defineModel("repeatedPassword", { default: "" })
 const isPasswordType = ref(true)
 const isDecryptionPasswordType = ref(true)
 
-const passwordHint = computed(() => {
-	if (!password.value || password.value?.length < 8) return "At least 8 characters"
-	if (password.value !== repeatedPassword.value) return "Passwords don't match"
-	if (password.value?.length > 24) return "Long enough. Don't forget it."
-	return "Strong password"
-})
+const passwordHint = computed(() => newPasswordHint(password.value ?? "", repeatedPassword.value ?? ""))
 </script>
 
 <template>

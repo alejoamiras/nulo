@@ -28,6 +28,16 @@ Base: `worktree-dedup-p1-delete` (PR #561). Scope: ledger ids X2 X3 X6 X1 E1 H3 
 - G2 / G3: `log()` delegates with `undefined` context (→ `"sw"`); `simulate()` builds its `FunctionCall` once.
 - Gate: lint 0 · extension typecheck 0 · 38 test files / 586 tests pass.
 
-## Phase 3 — UI-side helpers (X1, H1, H3, K2, L4, L6, M7)
+## Phase 3 — UI-side helpers (X1, H1, H3, K2, L4, L6, M7) ✓
+
+- X1: `copyWithToast(text, openToast, successLabel, { sanitize? })` beside the primitive; 17 sites collapse to one line each (two keep `sanitize: true`); `copyAddressToClipboard`, `IncomingTrustPopup.vue` and `received-copy.ts` untouched (different guard or failure copy).
+- H1: `utils/password.ts` (`isNewPasswordValid`, `newPasswordHint`) with its own test; six sites adopt it, the passkey and current-password conditions stay at the sites.
+- H3: `useProfileBootstrap` keeps a module-level `createRunFence()`; the in-flight map stores each run's `isCurrent` closure, so the identity-guarded cleanup is unchanged. `runFence.ts`'s header no longer names the file as pending.
+- K2: `isEmbeddedFeePayment(op: FeePathFields)` lives in wallet-bridge beside `requiresFeeSelection` (which now delegates); `materialize.ts`, `execute/index.vue` (both branches) and `OperationCard.vue` call it; a parity test pins gate ⇔ predicate over seven drafts.
+- L4: `buildIncomingCardProps` in `utils/received-display.ts`; both callers keep their token/fiat lookup.
+- L6 / M7: `readSavedFeeMethods()` local helper; `logs-csv.ts` calls `formatLogData` directly (its array branch was the same code).
+- Gate: lint 0 · extension typecheck 0 · wallet-bridge typecheck 0 (after narrowing the parity test's draft types) · 101 extension test files / 1,420 tests · wallet-bridge 261 tests.
+
+## Phase 4 — full local gate
 
 (in progress)

@@ -53,3 +53,19 @@ export function resolveFromDisplay(record: IncomingTransferRecord): FromDisplay 
 	if (isMagic(record.from)) return { kind: "private" }
 	return { kind: "address", address: record.from }
 }
+
+/** Props of the incoming-transfer activity card; callers supply their own token and fiat lookups. */
+export function buildIncomingCardProps(
+	inc: IncomingTransferRecord,
+	token: { symbol?: string; decimals?: number } | undefined,
+	amountFiat: string | null,
+) {
+	return {
+		tokenSymbol: token?.symbol || "Token",
+		amountRaw: inc.amountRaw,
+		tokenDecimals: token?.decimals || 0,
+		txHash: inc.txHash,
+		amountFiat,
+		receivedLabel: receivedLabel(resolveReceivedType(inc)),
+	}
+}

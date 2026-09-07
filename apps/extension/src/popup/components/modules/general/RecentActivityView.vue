@@ -26,7 +26,7 @@ import { balanceFormatted } from "@/utils/amount.js"
 import { stageSubtitle } from "@/utils/card-subtitle"
 import { ACTIVITY_FEED_KINDS, buildJournalTerminalCardProps, journalTerminalDisplay, sanitizeJournalSubtitle } from "@/utils/journal-state"
 import { formatTransferType, humanizeMethodName } from "@/utils/tx-enrichment"
-import { receivedLabel, resolveReceivedType } from "@/utils/received-display"
+import { buildIncomingCardProps, receivedLabel, resolveReceivedType } from "@/utils/received-display"
 import { buildCancelHandler, buildFocusHandler, filterPendingDoubleRender, isMatchingTask } from "./recent-activity-handlers"
 import { buildRecentActivityRows, remainingRowSlots } from "./recent-activity-rows"
 
@@ -245,14 +245,7 @@ const { incomingTransfers, dispose: disposeIncomingTransfers } = useIncomingTran
 })
 function incomingCardProps(inc) {
 	const token = inc.tokenId !== undefined ? tokenById(inc.tokenId) : undefined
-	return {
-		tokenSymbol: token?.symbol || "Token",
-		amountRaw: inc.amountRaw,
-		tokenDecimals: token?.decimals || 0,
-		txHash: inc.txHash,
-		amountFiat: token ? (incomingPrices.tokenFiatLabel(token, BigInt(inc.amountRaw || 0)) ?? null) : null,
-		receivedLabel: receivedLabel(resolveReceivedType(inc)),
-	}
+	return buildIncomingCardProps(inc, token, token ? (incomingPrices.tokenFiatLabel(token, BigInt(inc.amountRaw || 0)) ?? null) : null)
 }
 function handleSelectIncoming(inc) {
 	// Dedicated received-detail page (D5-A), replacing the old redirect to the token page.

@@ -6,4 +6,4 @@
  * popup + this window's tests keep importing from `./operation-validation`.
  */
 
-export { assertExecutableOperation, requiresFeeSelection } from "@nulo/wallet-bridge"
+export { assertExecutableOperation, isEmbeddedFeePayment, requiresFeeSelection } from "@nulo/wallet-bridge"

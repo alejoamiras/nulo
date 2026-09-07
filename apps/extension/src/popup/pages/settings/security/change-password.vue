@@ -23,6 +23,7 @@ import CollapsingHeroLayout from "@/components/composite/CollapsingHeroLayout.vu
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
+import { isNewPasswordValid, newPasswordHint } from "@/utils/password"
 const appStore = useAppStore()
 
 const router = useRouter()
@@ -52,19 +53,11 @@ const handlePasswordInput = () => {
 	unexpectedErrorMessage.value = ""
 }
 
-const passwordHint = computed(() => {
-	if (!newPassword.value || newPassword.value.length < 8) return "At least 8 characters"
-	if (newPassword.value !== repeatedNewPassword.value) return "Passwords don't match"
-	if (newPassword.value.length > 24) return "Long enough. Don't forget it."
-	return "Strong password"
-})
+const passwordHint = computed(() => newPasswordHint(newPassword.value ?? "", repeatedNewPassword.value ?? ""))
 
-const isAllowedToChange = computed(() => {
-	if (!currentPassword.value?.length || !newPassword.value?.length || !repeatedNewPassword.value?.length) return false
-	if (newPassword.value.length < 8) return false
-	if (newPassword.value !== repeatedNewPassword.value) return false
-	return true
-})
+const isAllowedToChange = computed(
+	() => !!currentPassword.value?.length && isNewPasswordValid(newPassword.value ?? "", repeatedNewPassword.value ?? ""),
+)
 
 const isLoading = ref(false)
 const handleChangePassword = async () => {

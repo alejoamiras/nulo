@@ -20,7 +20,7 @@ const { openToast } = useToast()
 import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
 import { useCacheStore } from "@/stores/cache.store"
-import { copyToClipboard } from "@/utils/clipboard"
+import { copyWithToast } from "@/utils/clipboard"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 const cacheStore = useCacheStore()
@@ -70,10 +70,7 @@ const handleShowAccount = (acc) => {
 }
 
 const handleCopyAddress = (target) => {
-	void copyToClipboard(target, openToast, {
-		success: { label: "Address is copied" },
-		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
-	})
+	void copyWithToast(target, openToast, "Address is copied")
 }
 </script>
 

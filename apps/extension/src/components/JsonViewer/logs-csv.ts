@@ -1,4 +1,4 @@
-import { type LogEntry, formatArg, formatLogData, getLogLevelName } from "./logs-format"
+import { type LogEntry, formatLogData, getLogLevelName } from "./logs-format"
 
 const MAX_CELL_LENGTH = 32_760
 
@@ -15,7 +15,7 @@ export function buildLogsCsv(logs: LogEntry[]): string {
 		const time = new Date(log.timestamp).toISOString()
 		const source = log.source
 		const level = getLogLevelName(log.level)
-		for (const cell of splitIntoCells(computeData(log))) {
+		for (const cell of splitIntoCells(formatLogData(log.data))) {
 			rows.push([time, source, level, cell])
 		}
 	}
@@ -45,14 +45,4 @@ function splitIntoCells(data: string): string[] {
 		i += MAX_CELL_LENGTH
 	}
 	return cells
-}
-
-function computeData(log: LogEntry): string {
-	if (Array.isArray(log.data) && log.data.length) {
-		return log.data
-			.map(formatArg)
-			.filter((x) => x !== undefined)
-			.join(" ")
-	}
-	return formatLogData(log.data)
 }

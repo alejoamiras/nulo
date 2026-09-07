@@ -51,6 +51,7 @@ const props = defineProps({
 })
 
 const FEE_METHOD_LS_KEY = UI_STORAGE_KEYS.FEE_PAYMENT_METHODS
+const readSavedFeeMethods = async () => (await storageLocalGet(FEE_METHOD_LS_KEY))[FEE_METHOD_LS_KEY] || {}
 
 const settings = defineModel()
 
@@ -188,7 +189,7 @@ watch(derivedSettings, (val) => {
  * `onBalanceUpdated`.
  */
 const persistSelection = async (method) => {
-	const fpms = (await storageLocalGet(FEE_METHOD_LS_KEY))[FEE_METHOD_LS_KEY] || {}
+	const fpms = await readSavedFeeMethods()
 	fpms[props.account.address] = method
 	await storageLocalSet({ [FEE_METHOD_LS_KEY]: fpms })
 
@@ -414,7 +415,7 @@ const runInit = async () => {
 		// dropdown trigger displays the user's last-used method while the
 		// fetch is in flight. The `isInitComplete` gate ensures this
 		// pre-fill doesn't drive settings derivation against stale state.
-		const saved = (await storageLocalGet(FEE_METHOD_LS_KEY))[FEE_METHOD_LS_KEY] || {}
+		const saved = await readSavedFeeMethods()
 		// A newer run owns the card now: a superseded run resuming from its
 		// storage read must not re-apply the pre-fill (it would clobber the
 		// newer run's reconcile or the user's mid-flight pick).
@@ -495,7 +496,7 @@ const recommit = async () => {
 	// baseline, so the reconcile is skipped instead of re-applying a stale
 	// storage snapshot over the pick.
 	const baseline = selectedMethod.value
-	const saved = (await storageLocalGet(FEE_METHOD_LS_KEY))[FEE_METHOD_LS_KEY] || {}
+	const saved = await readSavedFeeMethods()
 	// Re-validate AFTER the await: an identity switch during the storage read
 	// must not let this late commit re-open the gate with the OLD identity's
 	// data (the switch closed it; only the new identity's init may commit).

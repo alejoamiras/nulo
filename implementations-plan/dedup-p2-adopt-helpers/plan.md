@@ -70,7 +70,7 @@ tuple lock, unchanged-value suppression, and emit-after-write ordering.
 **Validation gate**: `bun run lint && bun run --cwd apps/extension typecheck && (cd apps/extension && bun --bun vitest run src/wallet/services/task src/wallet/services/window-manager src/wallet/services/dapp-interaction src/wallet/services/execution/tx-request-builder.pins.test.ts src/wallet/services/execution/authwit-discoverer.test.ts src/wallet/services/execution/helpers/batched-view-simulation.test.ts src/wallet/services/execution/transfer-estimate-reuse.test.ts src/wallet/services/account src/wallet/logger src/wallet/services/token)`.
 Pass: exit 0 each. Layers: lint/typecheck + unit.
 
-### Phase 3 — UI-side helpers (X1, H1, H3, K2, L4, L6, M7)
+### Phase 3 — UI-side helpers (X1, H1, H3, K2, L4, L6, M7) ✓
 
 **Validation gate**: `bun run lint && bun run --cwd apps/extension typecheck && (cd apps/extension && bun --bun vitest run src/utils src/components/header-copy-address.test.ts src/composables src/popup/windows/execute src/popup/components/modules/general src/popup/components/modules/activity src/popup/components/modules/send src/popup/pages/settings src/components/composite/import src/components/JsonViewer) && bun run --cwd packages/wallet-bridge test`.
 Pass: exit 0 each; new `password.test.ts` and the extended `clipboard.test.ts` green. Layers:
