@@ -141,15 +141,3 @@ export interface IDappSessionWriter {
 	 *  half-written row (B-14). Rejects if the session was revoked meanwhile. */
 	applyCapabilityDecision(id: string, decision: CapabilityDecision): Promise<IDappSessionRef>
 }
-
-/** Aggregated services dependency container. Exported for consumers
- *  that want to build a dispatcher test fixture without knowing the
- *  individual interface names — the constructor takes the five
- *  services as separate positional arguments, not this aggregate. */
-export interface IDispatcherServices {
-	networkService: INetworkReader
-	accountService: IAccountReader & IAccountProvisioner
-	executionService: IExecutionRunner
-	dappInteractionService: IDappInteractionRunner
-	dappSessionService: IDappSessionWriter
-}

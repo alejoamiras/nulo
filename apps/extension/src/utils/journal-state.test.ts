@@ -37,10 +37,10 @@ function recordWith(overrides: Partial<OperationRecord> = {}): OperationRecord {
 
 // Icon-name regression pin (Phase 1 codex/opus audit).
 // v0.15.3 shipped invented icon names (`circle-minus`, `refresh-cw`) that
-// don't exist in `assets/icons.json`. Icon.vue silently rendered empty SVG.
+// don't exist in the `@nulo/design` icon set. Icon.vue silently rendered empty SVG.
 // These tests assert the canonical names actually present in the icon set,
 // so a future regression to an invented name fails CI.
-describe("journalTerminalDisplay — icon names match assets/icons.json", () => {
+describe("journalTerminalDisplay — icon names exist in the @nulo/design icon set", () => {
 	test("cancelled → `cancel`", () => {
 		const op = recordWith({ progress: { stage: "cancelled" }, error: null })
 		expect(journalTerminalDisplay(op)?.icon).toBe("cancel")

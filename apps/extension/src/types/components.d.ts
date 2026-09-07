@@ -34,7 +34,6 @@ declare module 'vue' {
     DropdownTitle: typeof import('./../components/ui/Dropdown/DropdownTitle.vue')['default']
     DropdownTrigger: typeof import('./../components/ui/Dropdown/DropdownTrigger.vue')['default']
     EmojiGrid: typeof import('./../components/composite/general/EmojiGrid.vue')['default']
-    FeeJuiceCard: typeof import('./../components/composite/send/FeeJuiceCard.vue')['default']
     Flex: typeof import('@nulo/design')['Flex']
     FormPopup: typeof import('./../components/composite/FormPopup.vue')['default']
     GlobalLoader: typeof import('./../components/GlobalLoader.vue')['default']

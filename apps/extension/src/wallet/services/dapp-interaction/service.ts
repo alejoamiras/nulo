@@ -50,6 +50,31 @@ const CANCELLED_BEFORE_APPROVAL = "Request was cancelled before approval"
 
 const INTERACTION_TIMEOUT_MS = 10 * 60 * 1000
 
+/** The confirmation gate keys off the strongest level in a batch; a kind missing here is a
+ *  compile error, never a silent AccessLevel.None. */
+const OPERATION_ACCESS_LEVEL: Record<OperationKind, AccessLevel> = {
+	register_token: AccessLevel.AppState,
+	register_contract: AccessLevel.PxeState,
+	register_sender: AccessLevel.PxeState,
+	simulate_transaction: AccessLevel.PrivateData,
+	simulate_utility: AccessLevel.PrivateData,
+	send_transaction: AccessLevel.Transactions,
+	aztec_getContractClassMetadata: AccessLevel.PxeState,
+	aztec_getContractMetadata: AccessLevel.PxeState,
+	aztec_getPrivateEvents: AccessLevel.PrivateData,
+	aztec_getChainInfo: AccessLevel.PublicData,
+	aztec_registerSender: AccessLevel.PxeState,
+	aztec_getAddressBook: AccessLevel.AppState,
+	aztec_registerContract: AccessLevel.PxeState,
+	aztec_simulateTx: AccessLevel.PrivateData,
+	aztec_executeUtility: AccessLevel.PrivateData,
+	aztec_profileTx: AccessLevel.PrivateData,
+	aztec_sendTx: AccessLevel.Transactions,
+	// Transactions (not PrivateData): an authwit grants transaction-level authority,
+	// so a popup-routed authwit fires the confirmation gate (accessLevel >= confirmationLevel).
+	aztec_createAuthWit: AccessLevel.Transactions,
+}
+
 export class DappInteractionService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()(
 		"getInteractionPayload",
@@ -589,53 +614,8 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 	private getAccessLevel(ops: OperationRequest[]): AccessLevel {
 		let level = AccessLevel.None
 		for (const op of ops) {
-			level = Math.max(level, this.getOperationAccessLevel(op.kind))
+			level = Math.max(level, OPERATION_ACCESS_LEVEL[op.kind])
 		}
 		return level
-	}
-
-	private getOperationAccessLevel(kind: OperationKind): AccessLevel {
-		switch (kind) {
-			case "register_token":
-				return AccessLevel.AppState
-			case "register_contract":
-				return AccessLevel.PxeState
-			case "register_sender":
-				return AccessLevel.PxeState
-			case "simulate_transaction":
-				return AccessLevel.PrivateData
-			case "simulate_utility":
-				return AccessLevel.PrivateData
-			case "send_transaction":
-				return AccessLevel.Transactions
-			case "aztec_getContractClassMetadata":
-				return AccessLevel.PxeState
-			case "aztec_getContractMetadata":
-				return AccessLevel.PxeState
-			case "aztec_getPrivateEvents":
-				return AccessLevel.PrivateData
-			case "aztec_getChainInfo":
-				return AccessLevel.PublicData
-			case "aztec_registerSender":
-				return AccessLevel.PxeState
-			case "aztec_getAddressBook":
-				return AccessLevel.AppState
-			case "aztec_registerContract":
-				return AccessLevel.PxeState
-			case "aztec_simulateTx":
-				return AccessLevel.PrivateData
-			case "aztec_executeUtility":
-				return AccessLevel.PrivateData
-			case "aztec_profileTx":
-				return AccessLevel.PrivateData
-			case "aztec_sendTx":
-				return AccessLevel.Transactions
-			case "aztec_createAuthWit":
-				// Transactions (not PrivateData): an authwit grants transaction-level authority,
-				// so a popup-routed authwit fires the confirmation gate (accessLevel >= confirmationLevel).
-				return AccessLevel.Transactions
-			default:
-				return AccessLevel.None
-		}
 	}
 }

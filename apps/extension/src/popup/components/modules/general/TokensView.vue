@@ -31,18 +31,6 @@ const popupStore = usePopupStore()
 const router = useRouter()
 
 const tasks = ref([])
-const newTokens = computed(() => {
-	return tasks.value
-		.filter(
-			(t) =>
-				t.content.kind === ContentKind.TokenMint &&
-				t.content.account === appStore.account.address &&
-				!tokenBalances.value?.some((tb) => tb.token.name === t.content.name && tb.token.symbol === t.content.symbol) &&
-				!t.finishedAt,
-		)
-		.map((t) => t.content)
-		.sort((a, b) => stringCompare(a.name, b.name))
-})
 
 /** Phase 2.5: in-flight + recently-failed token-import journal records.
  *  Renders as TokenImportRow above the existing TokenCard list. Succeeded
@@ -112,17 +100,6 @@ function onTaskCreated(task) {
 			}
 
 			break
-		case ContentKind.TokenMint:
-			if (task.content.account !== appStore.account?.address) return
-
-			idx = tokenBalances.value.findIndex((tb) => tb.token.name === task.content.name && tb.token.symbol === task.content.symbol)
-			if (idx !== -1) {
-				tokenBalances.value[idx].isMinting = true
-			} else {
-				tasks.value.push(task)
-			}
-
-			break
 
 		default:
 			break
@@ -145,20 +122,6 @@ function onTaskUpdated(task) {
 			}
 
 			break
-		case ContentKind.TokenMint:
-			idx = tasks.value.findIndex((t) => t.id === task.id)
-			if (idx !== -1 && task.finishedAt) {
-				tasks.value.splice(idx, 1)
-
-				const tbIdx = tokenBalances.value.findIndex(
-					(tb) => tb.token.name === task.content.name && tb.token.symbol === task.content.symbol && tb.isMinting,
-				)
-				if (tbIdx !== -1) {
-					tokenBalances.value[tbIdx].isMinting = false
-				}
-			}
-
-			break
 		default:
 			break
 	}
@@ -173,14 +136,6 @@ function onTaskDeleted(task) {
 			idx = tokenBalances.value.findIndex((tb) => tb.id === task.content.tbId)
 			if (idx !== -1) {
 				tokenBalances.value[idx].isUpdating = false
-			}
-
-			break
-
-		case ContentKind.TokenMint:
-			idx = tasks.value.findIndex((t) => t.id === task.id)
-			if (idx !== -1) {
-				tasks.value.splice(idx, 1)
 			}
 
 			break
@@ -358,11 +313,7 @@ async function fetchTasks() {
 	const scopeAtStart = scopeGen
 	const all = await taskService.getTasks()
 	if (scopeGen !== scopeAtStart) return
-	tasks.value = all.filter(
-		(t) =>
-			(t.content.kind === ContentKind.BalanceUpdate || t.content.kind === ContentKind.TokenMint) &&
-			t.content.account === appStore.account?.address,
-	)
+	tasks.value = all.filter((t) => t.content.kind === ContentKind.BalanceUpdate && t.content.account === appStore.account?.address)
 }
 
 // A reconnect (SW restart) may have dropped terminal task events — resnapshot AND reapply the
@@ -477,13 +428,10 @@ onBeforeUnmount(() => {
 			<template v-if="visibleTokenImports.length">
 				<TokenImportRow v-for="op in visibleTokenImports" :key="op.id" :op="op" />
 			</template>
-			<template v-if="newTokens.length">
-				<TokenCard v-for="t in newTokens" :newToken="t" />
-			</template>
 			<template v-if="shownTokenBalances.length">
 				<TokenCard v-for="tb in shownTokenBalances" :key="tb.id" :tokenBalance="tb" :backfilling="isBackfilling(tb.token.contract)" />
 			</template>
-			<template v-if="!newTokens.length && !shownTokenBalances.length && !visibleTokenImports.length">
+			<template v-if="!shownTokenBalances.length && !visibleTokenImports.length">
 				<div :class="$style.empty_state">
 					<span :class="$style.empty_headline">NOTHING HERE YET</span>
 					<span :class="$style.empty_sub">

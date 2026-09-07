@@ -89,15 +89,12 @@ export class ViewExecutor {
 		const pxe = this.deps.pxeService.getPXE(networkInfoFrom(network))
 
 		const registeredContracts = new Set<string>((await pxe.getContracts()).map((x) => x.toString()))
+		const [_, instance] = await this.deps.resolver.resolveInstance(pxe, op.contract)
+		const [__, artifact] = await this.deps.resolver.resolveArtifact(pxe, instance.currentContractClassId.toString())
 		if (!registeredContracts.has(op.contract)) {
-			const [_, instance] = await this.deps.resolver.resolveInstance(pxe, op.contract)
-			const [__, artifact] = await this.deps.resolver.resolveArtifact(pxe, instance.currentContractClassId.toString())
 			this.deps.logDebug("Register contract")
 			await pxe.registerContract({ instance, artifact })
 		}
-
-		const [_, instance] = await this.deps.resolver.resolveInstance(pxe, op.contract)
-		const [__, artifact] = await this.deps.resolver.resolveArtifact(pxe, instance.currentContractClassId.toString())
 
 		const fn = findFunctionByName(artifact, op.method)
 		if (!fn) {

@@ -89,7 +89,7 @@ describe("refreshBalances — the disconnect must not cancel its own refresh RPC
 				}),
 		)
 
-		const done = refreshBalances(10, [{ address: "0xa" }])
+		const done = refreshBalances([{ address: "0xa" }])
 		await new Promise((r) => setTimeout(r, 0))
 
 		expect(tbMock.refreshTokenBalance).toHaveBeenCalledTimes(1)
@@ -105,7 +105,7 @@ describe("refreshBalances — the disconnect must not cancel its own refresh RPC
 	test("a thrown balance read still releases the connection (the throw path used to leak it)", async () => {
 		tbMock.getTokenBalances.mockRejectedValue(new Error("port closed"))
 
-		await expect(refreshBalances(10, [{ address: "0xa" }])).rejects.toThrow("port closed")
+		await expect(refreshBalances([{ address: "0xa" }])).rejects.toThrow("port closed")
 		expect(tbMock.refreshTokenBalance).not.toHaveBeenCalled()
 		expect(tbMock.disconnect).toHaveBeenCalledTimes(1)
 	})
@@ -125,7 +125,7 @@ describe("refreshBalances — the disconnect must not cancel its own refresh RPC
 		)
 		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
-		const done = refreshBalances(10, [{ address: "0xa" }])
+		const done = refreshBalances([{ address: "0xa" }])
 		await new Promise((r) => setTimeout(r, 0))
 
 		// The first refresh has already rejected while the second is still in flight — a

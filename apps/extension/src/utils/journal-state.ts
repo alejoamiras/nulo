@@ -74,12 +74,12 @@ export interface JournalTerminalDisplay {
  * Canonical icon names per visual state. Centralized to prevent
  * invented-name regressions: the original v0.15.3 implementation
  * shipped `circle-minus` and `refresh-cw` (Material-Icons-style names)
- * which don't exist in `apps/extension/src/assets/icons.json` — the
+ * which don't exist in the `@nulo/design` icon set — the
  * `Icon` component silently renders empty SVG paths for missing names
  * (no console error), so the bug only surfaced during user QA.
  *
- * Every entry MUST match a key in `icons.json`. If a future state needs
- * a new icon, grep that file first.
+ * Every entry MUST be a key of `@nulo/design`'s `internal/icons.json`. If a
+ * future state needs a new icon, grep that file first.
  */
 const ICONS = {
 	cancelled: "cancel",

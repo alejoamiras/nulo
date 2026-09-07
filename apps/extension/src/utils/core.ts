@@ -139,7 +139,9 @@ export const getNetwork = (): NetworkServiceClient | null => managers.network
 export const getTransaction = (): TransactionServiceClient | null => managers.transaction
 export const getAccount = (): AccountServiceClient | null => managers.account
 
-export async function refreshBalances(_minutes: number | undefined, accounts: Array<{ address: string }>): Promise<void> {
+const BALANCE_STALE_AFTER_MS = 30 * 60_000
+
+export async function refreshBalances(accounts: Array<{ address: string }>): Promise<void> {
 	if (!accounts?.length) return
 
 	const tokenBalanceService = new TokenBalanceServiceClient()
@@ -149,20 +151,14 @@ export async function refreshBalances(_minutes: number | undefined, accounts: Ar
 			tokenBalances.push(...(await tokenBalanceService.getTokenBalances(undefined, acc.address)))
 		}
 
-		function checkAge(updatedAt: number, minutes?: number): boolean {
-			if (!minutes) return true
-			const now = Date.now()
-			const diff = now - updatedAt
-			return diff >= minutes * 60 * 1_000
-		}
-
 		// The refreshes must settle BEFORE the disconnect: tearing the port down with them
 		// in flight rejected the client's own pending calls, so the refresh outcome was lost
 		// (and surfaced only as unhandled rejections). allSettled so one failed token's
 		// refresh doesn't cut short the others.
 		const refreshes: Array<Promise<unknown>> = []
 		for (const tb of tokenBalances) {
-			if (checkAge(tb.updatedAt, 30)) refreshes.push(tokenBalanceService.refreshTokenBalance(tb.id as number))
+			if (Date.now() - tb.updatedAt >= BALANCE_STALE_AFTER_MS)
+				refreshes.push(tokenBalanceService.refreshTokenBalance(tb.id as number))
 		}
 		for (const result of await Promise.allSettled(refreshes)) {
 			if (result.status === "rejected") console.error(result.reason)

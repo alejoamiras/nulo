@@ -378,18 +378,6 @@ function collectAccountStateErrors(data: unknown[]): unknown[] | null {
 }
 
 /**
- * Rewrite `*.{idKey}` references inside `backup.data` to `newId`, after
- * profile/network restore returns a different id than the source backup.
- *
- * `oldId` SCOPES the rewrite: only rows whose `idKey` currently equals `oldId`
- * are rewritten (required when a key is multi-valued across the backup —
- * `networkId`, where each of N networks maps to its OWN new id; an all-rows
- * rewrite would graft every child onto the LAST network). Omit `oldId` for a
- * single-valued key (`profileId` — exactly one profile per backup): all rows
- * are rewritten, which also NORMALIZES any hostile row whose `profileId` ≠ the
- * real one, so a crafted backup cannot smuggle a foreign owner.
- */
-/**
  * Rewrite EVERY row's `idKey` to `newId`, ignoring its current value. For a
  * single-valued key like `profileId`: a full backup is exactly one profile's
  * data, so every child row must bind to the created profile — this normalizes
