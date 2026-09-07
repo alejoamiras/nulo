@@ -90,3 +90,8 @@ import" was wrong (`:314` still uses it) — kept.
   prefix instead of trailing markup, the fade cases assert `fade-enter-active`/`fade-leave-active` and the branch
   swap's element replacement, both FPC suites assert the note's red glyph, the note suite reaches ten cases (object
   tooltip, reactive colour), and the `decide()`/`fnLabel`/note/feed/verify comments lost their narration.
+- **Round 2** (on 0871fccd): *"no new material findings"* — the nine explicit imports, the export and the resolver
+  removal verified; the sharpened tests accepted. One comment nit adopted after the verdict (`decide()`'s doc names
+  the invariant). One known, invisible text-node difference stays: `TokenMetadataPopup`'s table labels render without
+  the single spaces the old spans carried inside them (Vue trims around a standalone interpolation; inline
+  whitespace inside a span has no layout effect). Loop converged in two rounds.

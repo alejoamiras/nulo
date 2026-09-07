@@ -101,7 +101,7 @@ function payloadKey() {
 	return `${t.profileId ?? ""}|${t.networkId ?? ""}|${t.contract ?? ""}`
 }
 
-/** Both buttons decide through here; the caller builds the label before the latch, the key is captured before the await. */
+/** The label and the key are captured before the await: the active prompt can change mid-RPC. */
 async function decide(action, successLabel, successIcon) {
 	if (isSubmitting.value) return
 	isSubmitting.value = true
