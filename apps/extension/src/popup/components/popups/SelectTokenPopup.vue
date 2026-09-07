@@ -18,6 +18,7 @@ import { HOME_TOKEN_ROWS, forChain, orderTokenRows } from "@/utils/token-order"
 import { matchesQuery } from "@/utils/token-search"
 
 /** Composables */
+import { pinScopeOf, usePinnedTokens } from "@/composables/usePinnedTokens"
 import { usePrices } from "@/composables/usePrices"
 
 /** Store */
@@ -47,13 +48,16 @@ const loadError = ref(false)
 const priceService = new PriceServiceClient()
 const prices = usePrices(priceService)
 const fiatOf = safeFiatOf((tb) => prices.tokenFiatMicro(tb.token, parseRawBalance(tb)))
-const pinnedContracts = new Set()
+const pins = usePinnedTokens({
+	getScope: () => pinScopeOf(appStore.profile?.id, appStore.network?.chainId),
+	knownContracts: () => new Set(rows.value.map((tb) => tb.token.contract)),
+})
 
 const searchable = computed(() => rows.value.length > HOME_TOKEN_ROWS)
 const listed = computed(() => {
 	// A query typed while the box was shown must not keep filtering once the box is gone.
 	const matching = searchable.value ? rows.value.filter((tb) => matchesQuery(tb.token, query.value)) : rows.value
-	return orderTokenRows(matching, { pinnedContracts, fiatOf })
+	return orderTokenRows(matching, { pinnedContracts: pins.pinnedContracts.value, fiatOf })
 })
 const noResults = computed(() => rows.value.length > 0 && listed.value.length === 0)
 
@@ -110,6 +114,7 @@ const load = async () => {
 	rows.value = []
 	loadError.value = false
 	if (!scope) return
+	void pins.refresh()
 	let all
 	try {
 		all = await tokenBalanceService.getTokenBalances(undefined, scope.account)
@@ -146,6 +151,7 @@ onBeforeUnmount(() => {
 	tokenBalanceService.disconnect()
 	prices.dispose()
 	priceService.disconnect()
+	pins.dispose()
 })
 </script>
 

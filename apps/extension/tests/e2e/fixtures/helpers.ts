@@ -832,6 +832,27 @@ export async function selectSendToken(page: Page, symbol: string): Promise<void>
 	)
 }
 
+/** On a token page, open the "⋯" menu and click the pin item (Pin to Home / Unpin from Home);
+ *  resolves once the menu has closed on the click. */
+export async function pinFromTokenPage(page: Page): Promise<void> {
+	await clickByTestId(page, "token-menu-trigger")
+	await page.waitForSelector('[data-testid="token-menu-pin"]', { visible: true, timeout: 5_000 })
+	await page.evaluate(() => {
+		;(document.querySelector('[data-testid="token-menu-pin"]') as HTMLElement)?.click()
+	})
+	await page.waitForSelector('[data-testid="token-menu-pin"]', { hidden: true, timeout: 5_000 })
+}
+
+/** On a token page, read the pin item's `data-pinned` ("true" | "false") and close the menu again. */
+export async function readPinState(page: Page): Promise<string | undefined> {
+	await clickByTestId(page, "token-menu-trigger")
+	await page.waitForSelector('[data-testid="token-menu-pin"]', { visible: true, timeout: 5_000 })
+	const state = await page.$eval('[data-testid="token-menu-pin"]', (el) => (el as HTMLElement).dataset.pinned)
+	await page.keyboard.press("Escape")
+	await page.waitForSelector('[data-testid="token-menu-pin"]', { hidden: true, timeout: 5_000 })
+	return state
+}
+
 /** Read the private and public balance values from the token detail page's BalanceView breakdown. */
 export async function getTokenDetailBalances(page: Page): Promise<{ privateBalance: string; publicBalance: string }> {
 	await page.waitForSelector('[data-testid="private-balance-value"]', { visible: true, timeout: 10_000 })

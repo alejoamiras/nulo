@@ -23,10 +23,12 @@ import { TokenServiceClient } from "@/wallet/services/token/client"
 
 /** Composables */
 import { useToast } from "@/composables/toast.js"
+import { pinScopeOf, usePinnedTokens } from "@/composables/usePinnedTokens"
 const { openToast } = useToast()
 
 /** Utils */
 import { copyToClipboard } from "@/utils/clipboard"
+import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -108,6 +110,47 @@ const handleCopy = (value, label) => {
 	})
 }
 
+const scope = () => pinScopeOf(appStore.profile?.id, appStore.network?.chainId)
+// The known set is read at write time from the service, so a token added elsewhere since mount
+// still counts toward the cap and is never pruned.
+const pins = usePinnedTokens({
+	tokenService,
+	getScope: scope,
+	knownContracts: async () => {
+		const s = scope()
+		if (!s) return undefined
+		const tokens = await tokenService.getTokens(s.profileId, s.chainId)
+		return new Set(tokens.map((t) => t.contract.toLowerCase()))
+	},
+})
+void pins.refresh()
+const isPinned = computed(() => !!token.value && pins.isPinned(token.value.contract))
+
+const showHomeFull = async () => {
+	const s = scope()
+	if (!s) return
+	const tokens = await tokenService.getTokens(s.profileId, s.chainId)
+	const symbolOf = new Map(tokens.map((t) => [t.contract.toLowerCase(), sanitizeWireString(t.symbol, 32)]))
+	const pinned = [...pins.pinnedContracts.value].map((c) => symbolOf.get(c)).filter((s) => s !== undefined)
+	cacheStore.confirm.single = true
+	cacheStore.confirm.title = "Home is full"
+	cacheStore.confirm.description = `Home shows up to 3 pinned tokens. Unpin one of these to pin ${sanitizeWireString(token.value.symbol, 32)}: ${pinned.join(", ")}`
+	cacheStore.confirm.confirm_text = "Got it"
+	popupStore.open("confirm")
+}
+
+const handleTogglePin = async () => {
+	if (!token.value) return
+	if (isPinned.value) {
+		await pins.unpin(token.value.contract)
+		openToast({ label: "Unpinned from Home" })
+		return
+	}
+	const result = await pins.pin(token.value.contract)
+	if (result === "pinned") openToast({ label: "Pinned to Home" })
+	if (result === "full") await showHomeFull()
+}
+
 const handleDeleteToken = () => {
 	cacheStore.confirm.description = "Removing a token only affects the display in the UI and it does not affect the token balance"
 	cacheStore.confirm.callback = async () => {
@@ -133,9 +176,17 @@ onMounted(async () => {
 	scheduleRefresh()
 })
 
+watch(
+	() => [appStore.profile?.id, appStore.network?.chainId],
+	() => {
+		void pins.refresh()
+	},
+)
+
 onBeforeUnmount(() => {
 	tokenService.disconnect()
 	tokenBalanceService.disconnect()
+	pins.dispose()
 	cacheStore.activeTokenIdx = null
 })
 </script>
@@ -166,11 +217,17 @@ onBeforeUnmount(() => {
 				</Tooltip>
 
 				<Dropdown>
-					<button type="button" :class="$style.icon_btn" aria-label="Token actions">
+					<button type="button" :class="$style.icon_btn" aria-label="Token actions" data-testid="token-menu-trigger">
 						<MaterialIcon name="more_vert" :size="18" color="secondary" />
 					</button>
 
 					<template #popup>
+						<DropdownItem @click="handleTogglePin" data-testid="token-menu-pin" :data-pinned="isPinned ? 'true' : 'false'">
+							<Flex align="center" gap="8">
+								<MaterialIcon name="push_pin" :size="14" color="primary" />
+								{{ isPinned ? "Unpin from Home" : "Pin to Home" }}
+							</Flex>
+						</DropdownItem>
 						<DropdownItem @click="handleCopy(token?.contract, 'Token address')">
 							<Flex align="center" gap="8">
 								<Icon name="copy" size="14" color="primary" />

@@ -130,6 +130,29 @@ import { BACKFILL_INDICATOR_THRESHOLD_BLOCKS } from "@/wallet/services/incoming-
 import TokenCard from "./TokenCard.vue"
 import TokensView from "./TokensView.vue"
 
+// The pinned-token composable reads storage at mount and subscribes to onChanged; the shared
+// chrome stub leaves both undefined.
+beforeEach(() => {
+	const backing: Record<string, unknown> = {}
+	const g = globalThis as unknown as { chrome: Record<string, unknown> }
+	g.chrome = {
+		...g.chrome,
+		storage: {
+			local: {
+				get: async (keys: string | string[]) => {
+					const out: Record<string, unknown> = {}
+					for (const k of Array.isArray(keys) ? keys : [keys]) if (k in backing) out[k] = backing[k]
+					return out
+				},
+				set: async (items: Record<string, unknown>) => {
+					Object.assign(backing, items)
+				},
+			},
+			onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
+		},
+	}
+})
+
 function deferred<T>() {
 	let resolve!: (v: T) => void
 	const promise = new Promise<T>((r) => {

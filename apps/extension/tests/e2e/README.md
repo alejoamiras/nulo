@@ -152,6 +152,17 @@ A Puppeteer/Chrome interaction layer regressed somewhere between sandbox ABI ver
 | `closeStuckPopup(page)` | waiting for the popup to unmount after a confirm/submit | Vue `<Transition>` sticks mid-enter / mid-leave under headless Chrome rAF throttling — `slide-enter-from + slide-enter-active` never advances. Helper force-removes the `#popup` teleport children + dim backdrop AFTER asserting the actual post-mutation signal (row appeared, contact deleted, etc.). |
 | `withTimeoutMessage(wait, message)` | `.catch(() => { throw new Error("...") })` around a wait | A bare catch relabels frame detaches, CDP disconnects and page crashes as "the state never settled", burying a real fault under a plausible-looking flake. This converts `TimeoutError` only, rethrows everything else untouched, and keeps the original as `cause`. Pass a function when the message has to read live page state — prefer that form, so the failure says what WAS observed. |
 
+Feature helpers in `fixtures/helpers.ts` (all `data-testid`-driven; reuse them rather than re-deriving the click sequence):
+
+| Helper | Does |
+|---|---|
+| `clickNavTab(page, "general" \| "holdings" \| "activity" \| "settings")` / `openHoldings(page)` | Bottom-nav navigation, waits for the route hash. |
+| `navigateToTokenDetail(page, symbol?)` | Opens a token page from its Home card (`symbol` picks the card when more than one token is listed). |
+| `importToken(page, contract)` + `captureBalanceBaseline` / `waitForFreshBalanceRow` | Imports a token and waits for its projected balance row — pair them for every import so assertions never race the projector. |
+| `selectSendToken(page, symbol)` | On the Send page, picks a token in the picker and waits for the trigger to show it. |
+| `pinFromTokenPage(page)` / `readPinState(page)` | Token page "⋯" menu: toggle Pin to Home; read the item's `data-pinned`. |
+| `deployExtraTokensForAccount(config, account, [{ symbol, amount }])` (`fixtures/aztec.ts`) | Deploys and mints extra sandbox tokens for multi-token scenarios. |
+
 Anti-throttle Chrome flags live in `launchExtension` (`extension.ts`):
 
 ```

@@ -197,7 +197,12 @@ Six layers, low → high. A layer can import only from layers below it. Enforced
 
 [L4] feature modules   src/popup/components/modules/
                        BalanceView, FeeSettingsCard, TokenCard, ContactRow, ...
+                       modules/holdings/TokenList — presentational over rows the page hands in.
                        Service-bound. Cannot import L5 pages or L6 windows.
+                       Token-row policy lives in pure helpers under src/utils/ (token-amount,
+                       token-order, token-aggregate, token-fold, token-search): Home, Holdings and
+                       the Send picker all order rows through orderTokenRows and never parse a
+                       balance themselves.
 
 [L5] popups + windows  src/popup/components/popups/, src/popup/windows/
                        Orchestration. May own service-client lifecycle.

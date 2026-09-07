@@ -18,6 +18,7 @@ import { parseRawBalance, safeFiatOf } from "@/utils/token-amount"
 import { capTokenRows, forChain, orderTokenRows } from "@/utils/token-order"
 
 /** Composables */
+import { usePinnedTokens, pinScopeOf } from "@/composables/usePinnedTokens"
 import { usePrices } from "@/composables/usePrices"
 
 /** Store */
@@ -78,9 +79,14 @@ const anyRefreshing = computed(() => tokenBalances.value.some((tb) => tb.isUpdat
 const priceService = new PriceServiceClient()
 const prices = usePrices(priceService)
 const fiatOf = safeFiatOf((tb) => prices.tokenFiatMicro(tb.token, parseRawBalance(tb)))
-const pinnedContracts = new Set()
 
-const orderedTokenBalances = computed(() => orderTokenRows(tokenBalances.value, { pinnedContracts, fiatOf }))
+const pins = usePinnedTokens({
+	getScope: () => pinScopeOf(appStore.profile?.id, appStore.network?.chainId),
+	knownContracts: () => new Set(tokenBalances.value.map((tb) => tb.token.contract)),
+})
+void pins.refresh()
+
+const orderedTokenBalances = computed(() => orderTokenRows(tokenBalances.value, { pinnedContracts: pins.pinnedContracts.value, fiatOf }))
 const homeRows = computed(() => capTokenRows(orderedTokenBalances.value))
 const shownTokenBalances = computed(() => homeRows.value.shown)
 const overflowCount = computed(() => homeRows.value.overflow)
@@ -378,6 +384,7 @@ watch(
 		// Tasks first: fetchTokenBalances derives isUpdating from the snapshot.
 		await fetchTasks()
 		await fetchTokenBalances()
+		await pins.refresh()
 	},
 )
 onMounted(async () => {
@@ -397,6 +404,7 @@ onBeforeUnmount(() => {
 	incomingTransferService.disconnect()
 	prices.dispose()
 	priceService.disconnect()
+	pins.dispose()
 })
 </script>
 

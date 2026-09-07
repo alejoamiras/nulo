@@ -30,6 +30,8 @@ const displaceIdx = computed(() => {
 })
 
 const isDestructive = computed(() => cacheStore.confirm.confirm_color === "red")
+/** Informational use: one button, no Cancel, no callback required; cleared with the rest on close. */
+const isSingle = computed(() => cacheStore.confirm.single === true)
 
 const confirmationInputEl = useTemplateRef("confirmationInputEl")
 const confirmationTerm = ref()
@@ -58,7 +60,7 @@ async function handlePasskeyConfirmation() {
 }
 
 const handleConfirm = () => {
-	cacheStore.confirm.callback()
+	cacheStore.confirm.callback?.()
 	emit("onClose")
 }
 
@@ -133,6 +135,7 @@ watch(
 
 				<Flex gap="12">
 					<Button
+						v-if="!isSingle"
 						@click="emit('onClose')"
 						wide
 						variant="primary_outline"

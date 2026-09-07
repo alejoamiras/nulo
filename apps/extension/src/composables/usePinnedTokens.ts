@@ -19,6 +19,10 @@ export type PinMap = Record<string, string[]>
 export type PinScope = { profileId: string; chainId: number }
 export type PinResult = "pinned" | "full" | "already" | "stale"
 
+/** The store's profile and chain as a pin scope, or undefined while either is missing. */
+export const pinScopeOf = (profileId: string | undefined, chainId: number | undefined): PinScope | undefined =>
+	profileId !== undefined && chainId !== undefined ? { profileId, chainId } : undefined
+
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v)
 
 /** Lowercase, address-shaped, de-duplicated, capped; anything else in the list is dropped. */
@@ -81,8 +85,12 @@ const setChain = (next: PinMap, chainKey: string, list: string[]) => {
 }
 
 export interface UsePinnedTokensDeps {
-	/** The parent owns the client; the composable only subscribes to deletions. */
-	tokenService: { onTokenDeleted: Pick<EventHandler<TokenDeleted>, "add" | "remove"> }
+	/**
+	 * The parent's token client, when it has one: the composable only subscribes to deletions, and
+	 * one subscriber anywhere is enough — a dangling pin is never displayed and is pruned by the
+	 * next write, so read-only surfaces may omit it.
+	 */
+	tokenService?: { onTokenDeleted: Pick<EventHandler<TokenDeleted>, "add" | "remove"> }
 	getScope: () => PinScope | undefined
 	/**
 	 * The current chain's token contracts (any case), read at WRITE time so a token added elsewhere
@@ -192,7 +200,7 @@ export function usePinnedTokens(deps: UsePinnedTokensDeps) {
 			)
 		})
 	}
-	deps.tokenService.onTokenDeleted.add(onTokenDeleted)
+	deps.tokenService?.onTokenDeleted.add(onTokenDeleted)
 
 	/** Another context wrote this profile's key: re-read rather than trust the event's value. */
 	const onChanged = (changes: Record<string, unknown>, area: string) => {
@@ -204,7 +212,7 @@ export function usePinnedTokens(deps: UsePinnedTokensDeps) {
 
 	const dispose = () => {
 		chrome.storage.onChanged.removeListener(onChanged)
-		deps.tokenService.onTokenDeleted.remove(onTokenDeleted)
+		deps.tokenService?.onTokenDeleted.remove(onTokenDeleted)
 	}
 
 	return { pinnedContracts, isPinned, pin, unpin, refresh, dispose }
