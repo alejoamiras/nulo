@@ -3,7 +3,7 @@
 import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 
 /** Utils */
-import { copyToClipboard } from "@/utils/clipboard"
+import { copyWithToast } from "@/utils/clipboard"
 import { isValidHex } from "@/utils/string"
 
 /** Composables */
@@ -16,6 +16,7 @@ const { openToast } = useToast()
 import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
 import { useCacheStore } from "@/stores/cache.store"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 const cacheStore = useCacheStore()
@@ -121,7 +122,7 @@ const handleUpdateFpc = async () => {
 		emit("onClose")
 		openToast({ label: "FPC is updated" })
 	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err)
+		const msg = errorMessageFromUnknown(err)
 		processingError.value = {
 			show: true,
 			title: msg,
@@ -150,10 +151,7 @@ const onFpcDeleted = (fpc) => {
 	fpcs.value = fpcs.value.filter((f) => f.id !== fpc.id)
 }
 const handleCopyAddress = () => {
-	void copyToClipboard(fpcToEdit.value.address, openToast, {
-		success: { label: "FPC's address is copied" },
-		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
-	})
+	void copyWithToast(fpcToEdit.value.address, openToast, "FPC's address is copied")
 }
 
 usePopupEntity(

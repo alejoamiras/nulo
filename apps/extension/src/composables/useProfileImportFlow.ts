@@ -6,9 +6,11 @@ import { useFullBackupImport } from "@/composables/useFullBackupImport"
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
 import { useProfileNameField } from "@/composables/useProfileNameField"
 import { FileTooLargeError, pickFile } from "@/utils"
-import { copyToClipboard } from "@/utils/clipboard"
+import { copyWithToast } from "@/utils/clipboard"
 import { MAX_BACKUP_FILE_BYTES } from "@/utils/full-backup-helpers"
 import { managers } from "@/utils/core"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
+import { isNewPasswordValid } from "@/utils/password"
 
 /**
  * Shared orchestration for the profile-IMPORT flow, consumed by both the
@@ -62,16 +64,13 @@ function useImportErrorState(openToast: UseProfileImportFlowOptions["openToast"]
 	// message as tooltip. Replaces popup's prior `fillError("unknown", err)`,
 	// which put the Error object in the title slot and rendered "[object Object]".
 	function fillUnknownImportError(err: unknown) {
-		fillError("unknown", "Import failed", err instanceof Error ? err.message : String(err))
+		fillError("unknown", "Import failed", errorMessageFromUnknown(err))
 	}
 
 	const isCopied = ref(false)
 	function handleCopyError() {
 		isCopied.value = true
-		void copyToClipboard(`${error.value.title}${error.value.tooltip ? `: ${error.value.tooltip}` : ""}`, openToast, {
-			success: { label: "Error is copied" },
-			failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
-		})
+		void copyWithToast(`${error.value.title}${error.value.tooltip ? `: ${error.value.tooltip}` : ""}`, openToast, "Error is copied")
 		setTimeout(() => {
 			isCopied.value = false
 		}, 1_500)
@@ -278,11 +277,7 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 
 	// Name check is excluded on purpose — name is validated at submit time so
 	// an empty name shakes the input instead of silently disabling the buttons.
-	const isAllowedToContinue = computed(() => {
-		if (!password.value || password.value.length < 8) return false
-		if (!repeatedPassword.value || password.value !== repeatedPassword.value) return false
-		return true
-	})
+	const isAllowedToContinue = computed(() => isNewPasswordValid(password.value ?? "", repeatedPassword.value ?? ""))
 	const isAllowedToImportBySeedPhrase = computed(() => {
 		if (!isAllowedToContinue.value) return false
 		return seedPhrase.value?.split(" ").length === 24 && password.value.length >= 8

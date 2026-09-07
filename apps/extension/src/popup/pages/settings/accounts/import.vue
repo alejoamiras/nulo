@@ -26,6 +26,7 @@ const { openToast } = useToast()
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 const appStore = useAppStore()
 
 const router = useRouter()
@@ -88,7 +89,7 @@ const handlePreview = async () => {
 		previewAddress.value = address
 	} catch (err) {
 		if (gen !== generation) return
-		error.value = err instanceof Error ? err.message : String(err)
+		error.value = errorMessageFromUnknown(err)
 	} finally {
 		isBusy.value = false
 	}
@@ -130,7 +131,7 @@ const handleConfirmImport = async () => {
 		else router.replace("/popup/settings/accounts")
 	} catch (err) {
 		if (isStale()) return
-		error.value = err instanceof Error ? err.message : String(err)
+		error.value = errorMessageFromUnknown(err)
 	} finally {
 		isBusy.value = false
 	}

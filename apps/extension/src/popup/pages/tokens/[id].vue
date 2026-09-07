@@ -27,7 +27,7 @@ import { pinScopeOf, usePinnedTokens } from "@/composables/usePinnedTokens"
 const { openToast } = useToast()
 
 /** Utils */
-import { copyToClipboard } from "@/utils/clipboard"
+import { copyWithToast } from "@/utils/clipboard"
 import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 
 /** Store */
@@ -104,10 +104,7 @@ watch(
 const handleRefreshBalance = () => scheduleRefresh()
 
 const handleCopy = (value, label) => {
-	void copyToClipboard(value, openToast, {
-		success: { label: `${label} is copied` },
-		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
-	})
+	void copyWithToast(value, openToast, `${label} is copied`)
 }
 
 const scope = () => pinScopeOf(appStore.profile?.id, appStore.network?.chainId)

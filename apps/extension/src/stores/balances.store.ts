@@ -45,6 +45,7 @@ import { FpcServiceClient } from "@/wallet/services/fpc/client"
 import type { FpcInfo } from "@/wallet/services/fpc/spec"
 import { TransactionServiceClient } from "@/wallet/services/transaction/client"
 import { TxStatus } from "@/wallet/services/transaction/spec"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 
 export type BalanceScope = ActivityScope
 export type SliceStatus = "idle" | "fetching" | "ready" | "degraded"
@@ -510,7 +511,7 @@ class BalancesCore {
 				"getGasBalances",
 			)
 		} catch (err) {
-			failed = err instanceof Error ? err.message : String(err)
+			failed = errorMessageFromUnknown(err)
 		}
 		if (this.isGasRunStale(key, scope, epoch, opts, mySeq)) return
 		const entry = this.entries.value[key]
@@ -548,7 +549,7 @@ class BalancesCore {
 				"getFpcs",
 			)
 		} catch (err) {
-			failed = err instanceof Error ? err.message : String(err)
+			failed = errorMessageFromUnknown(err)
 		}
 		if (this.epochOf(scope.profileId) !== epoch) return
 		const entry = this.entries.value[key]

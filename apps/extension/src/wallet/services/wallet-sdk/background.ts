@@ -63,7 +63,7 @@ import {
 	type SessionContext,
 	WalletSdkDispatcher,
 } from "@nulo/wallet-bridge"
-import { getErrorMessage, KeyedLock } from "@nulo/wallet-core/utils"
+import { getErrorMessage, KeyedLock, deferred } from "@nulo/wallet-core/utils"
 import { approveOrRollbackDiscoverySession } from "./discovery-approval"
 import { failQueuedIfUnclaimed, tryCreateQueuedJournal } from "./queued-journal"
 import { chainSendTxWithVouching } from "./queued-wait-vouching"
@@ -777,10 +777,7 @@ async function runDiscoveryPopup(discovery: PendingDiscovery, chainId: string, d
 
 	// Store a promise that resolves when the popup completes so duplicate
 	// discoveries can await it.
-	let resolvePopup: () => void
-	const popupPromise = new Promise<void>((r) => {
-		resolvePopup = r
-	})
+	const { promise: popupPromise, resolve: resolvePopup } = deferred()
 	pendingDiscoveryPromises.set(dedupeKey, popupPromise)
 
 	try {
@@ -834,7 +831,7 @@ async function runDiscoveryPopup(discovery: PendingDiscovery, chainId: string, d
 			)
 		}
 	} finally {
-		resolvePopup!()
+		resolvePopup()
 		pendingDiscoveryPromises.delete(dedupeKey)
 	}
 }

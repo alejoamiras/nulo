@@ -12,9 +12,10 @@
  */
 
 import { LogLevel, type ILogger } from "@/wallet/logger"
-import { getRandomHex } from "@/wallet/utils"
+import { randomIdNotIn } from "@/wallet/services/id-allocators"
 import type { ClockPort, TimerHandle, WindowBounds, WindowPort } from "@nulo/wallet-core/ports"
 import type { Unsubscribe } from "@nulo/wallet-core/ports"
+import { deferred, errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 
 /** Center a `width`×`height` window on `anchor`. Signed arithmetic: a display
  *  left of or above the primary has negative coordinates, so never clamp.
@@ -62,18 +63,9 @@ export class WindowManager {
 	) {}
 
 	public openAndAwait<T>(opts: OpenAndAwaitOpts): AwaitedWindow<T> {
-		let handleId: string
-		do {
-			handleId = getRandomHex(8)
-		} while (this.handles.has(handleId))
+		const handleId = randomIdNotIn((id) => this.handles.has(id))
 
-		let resolve!: (value: T) => void
-		let reject!: (reason: unknown) => void
-
-		const promise = new Promise<T>((res, rej) => {
-			resolve = res
-			reject = rej
-		})
+		const { promise, resolve, reject } = deferred<T>()
 
 		const handle: Handle<T> = {
 			resolve,
@@ -141,7 +133,7 @@ export class WindowManager {
 				handle.unsubOnRemoved = unsub
 			})
 			.catch((err: unknown) => {
-				const msg = err instanceof Error ? err.message : String(err)
+				const msg = errorMessageFromUnknown(err)
 				this.logger.log("window-manager", LogLevel.Error, `[${opts.kind}/${handleId}] window.create threw: ${msg}`)
 				this._settle(handleId, undefined, msg)
 			})

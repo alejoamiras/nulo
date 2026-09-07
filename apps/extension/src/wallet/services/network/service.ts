@@ -10,11 +10,11 @@ import type { ILogger } from "@/wallet/logger"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
-import { nextRandomId, preferOrReallocId } from "@/wallet/services/id-allocators"
+import { nextRandomId, preferOrReallocId, randomIdNotIn } from "@/wallet/services/id-allocators"
 import { purgeMalformedRows } from "@/wallet/services/purge-rows"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { EntityStorage } from "@/wallet/storage"
-import { getRandomHex, Lock } from "@/wallet/utils"
+import { Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
@@ -973,11 +973,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 
 	private _fresh8(taken: string[]): string {
 		const seen = new Set(taken)
-		let id: string
-		do {
-			id = getRandomHex(8)
-		} while (seen.has(id))
-		return id
+		return randomIdNotIn((id) => seen.has(id))
 	}
 
 	/**

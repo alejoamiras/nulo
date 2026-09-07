@@ -10,10 +10,11 @@ import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
-import { copyToClipboard } from "@/utils/clipboard"
+import { copyWithToast } from "@/utils/clipboard"
 import { isValidDecimals, parseRawBalance, safeFiatOf } from "@/utils/token-amount"
 import { aggregateFiat } from "@/utils/token-aggregate"
 import { forChain } from "@/utils/token-order"
+import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 
 /** Composables */
 import { usePrices } from "@/composables/usePrices"
@@ -96,10 +97,7 @@ const aggregateFiatDisplay = computed(() => prices.formatUsdMicro(aggregate.valu
 const isAggregatePartial = computed(() => aggregate.value.partial)
 
 const handleCopy = (value, label) => {
-	void copyToClipboard(value, openToast, {
-		success: { label: `${label} is copied` },
-		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
-	})
+	void copyWithToast(value, openToast, `${label} is copied`)
 }
 const handleTokenBalanceClick = async () => {
 	let balance = totalTokenBalance.value?.value

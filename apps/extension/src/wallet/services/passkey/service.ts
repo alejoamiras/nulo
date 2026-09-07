@@ -3,7 +3,7 @@ import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { PASSKEY_SERVICE_NAME, PASSKEY_TIMEOUT, type Methods, type PasskeyCredentialData, type PasskeyRequest } from "./spec"
 import { PasskeyCredential } from "@nulo/wallet-crypto"
-import { getRandomHex } from "@/wallet/utils"
+import { randomIdNotIn } from "@/wallet/services/id-allocators"
 import type { WindowManager } from "@/wallet/services/window-manager/window-manager"
 
 export * from "./spec"
@@ -114,10 +114,7 @@ export class PasskeyService extends Service<Methods> implements ServiceSpec<Meth
 	}
 
 	private async openWindowAndWait(request: PasskeyRequest): Promise<PasskeyCredential> {
-		let id: string
-		do {
-			id = getRandomHex(8)
-		} while (this.pending.has(id))
+		const id = randomIdNotIn((candidate) => this.pending.has(candidate))
 
 		const handle = this.windowManager.openAndAwait<PasskeyCredential>({
 			url: chrome.runtime.getURL(`src/popup/index.html#/windows/passkey?requestId=${id}`),

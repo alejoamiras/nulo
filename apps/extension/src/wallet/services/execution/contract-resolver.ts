@@ -35,6 +35,19 @@ import type { Action, AddPrivateAuthwitAction, AddPublicAuthwitAction, CallAuthw
 
 const LOG_SOURCE = "ContractResolver"
 
+/** Guard ladder over pre-resolved maps; the error strings are frozen by their call sites. */
+export function requireArtifact(
+	instances: Map<string, ContractInstanceWithAddress>,
+	artifacts: Map<string, ContractArtifact>,
+	address: string,
+): ContractArtifact {
+	const instance = instances.get(address)
+	if (!instance) throw new Error("Contract not found")
+	const artifact = artifacts.get(instance.currentContractClassId.toString())
+	if (!artifact) throw new Error("Contract artifact not found")
+	return artifact
+}
+
 /** Find a function ABI by name. Lookup order is FROZEN: `functions[]`
  *  first, then `nonDispatchPublicFunctions[]` — callers across the
  *  execution layer depend on a name collision resolving to the

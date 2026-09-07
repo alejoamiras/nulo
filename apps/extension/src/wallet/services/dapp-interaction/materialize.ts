@@ -30,7 +30,7 @@
 import type { Account } from "@/wallet/services/account/service"
 import type { Network } from "@/wallet/services/network/service"
 import type { DraftOperation, Operation } from "@nulo/wallet-bridge"
-import { isSelfPay } from "@nulo/wallet-bridge"
+import { isEmbeddedFeePayment } from "@nulo/wallet-bridge"
 import type { OperationRequest } from "./spec"
 
 export type MaterializeDeps = {
@@ -81,27 +81,23 @@ export async function materializeRequest(request: OperationRequest, deps: Materi
 		}
 		case "aztec_sendTx": {
 			const [network, account] = await deps.resolveNetworkAndAccount(request.account)
-			const isNoFrom = request.executionMode === "default_entrypoint"
-			// A payer that carries its payment is embedded. A payer that is the account itself with no
-			// fee call asks for the wallet's own Fee Juice method, and starts with NO settings: the fee
-			// card, locked to Fee Juice, derives them only once a verified balance can pay — a
-			// pre-filled method would leave Confirm live over an empty or unread balance.
-			const hasEmbeddedFeePayer = request.exec?.feePayer !== undefined && !isSelfPay(request.exec, request.opts?.from)
+			// A requested self-pay (the account named as payer with no fee call) starts with NO
+			// settings: the fee card, locked to Fee Juice, derives them only once a verified balance
+			// can pay — a pre-filled method would leave Confirm live over an empty or unread balance.
 			return {
 				...request,
 				networkId: network.id,
 				accountAddress: account.address,
-				feeSettings: isNoFrom || hasEmbeddedFeePayer ? { paymentMethod: { kind: "embedded" } } : undefined,
+				feeSettings: isEmbeddedFeePayment(request) ? { paymentMethod: { kind: "embedded" } } : undefined,
 			} as DraftOperation
 		}
 		case "send_transaction": {
 			const [network, account] = await deps.resolveNetworkAndAccount(request.account)
-			const hasEmbeddedFee = request.fee?.embeddedFeePayment !== undefined
 			return {
 				...request,
 				networkId: network.id,
 				accountAddress: account.address,
-				feeSettings: hasEmbeddedFee ? { paymentMethod: { kind: "embedded" } } : undefined,
+				feeSettings: isEmbeddedFeePayment(request) ? { paymentMethod: { kind: "embedded" } } : undefined,
 			} as DraftOperation
 		}
 		default: {

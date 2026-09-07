@@ -39,6 +39,9 @@ import {
 
 export type { RestoreStage, RestoreStatus } from "./full-backup-restore"
 import type { RestoreStage, RestoreStatus } from "./full-backup-restore"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
+import { fromBase64 } from "@/wallet/utils"
+import { isNewPasswordValid } from "@/utils/password"
 
 /** Bound on dropped-balance records. This path never reaches the collector, so it carries no cap
  *  of its own — and a hostile backup can ship tens of thousands of un-relinkable rows. */
@@ -388,7 +391,8 @@ async function openEncryptedBackup(
 	if (isStale()) return { kind: "stale" }
 	const key = await EncryptionKey.fromPasshash(passhash)
 	if (isStale()) return { kind: "stale" }
-	const encryptedBytes = new Uint8Array(Buffer.from(sealed, "base64"))
+	// The detector accepted `sealed.trim()`; decode the same bytes (a saved file may carry padding).
+	const encryptedBytes = fromBase64(sealed.trim())
 	const decryptedBytes = await key.decrypt(encryptedBytes)
 	if (isStale()) return { kind: "stale" }
 	const decodedJson = new TextDecoder().decode(decryptedBytes)
@@ -434,8 +438,7 @@ async function restoreProfileStep(
 		return null
 	}
 	if (newProfile.restoreError) {
-		const errMsg = newProfile.restoreError instanceof Error ? newProfile.restoreError.message : String(newProfile.restoreError)
-		applyOutcome(io, { kind: "fail", title: "Import failed", message: errMsg })
+		applyOutcome(io, { kind: "fail", title: "Import failed", message: errorMessageFromUnknown(newProfile.restoreError) })
 		return null
 	}
 	return newProfile
@@ -545,7 +548,7 @@ async function executeRestore(
 		applyOutcome(io, {
 			kind: "fail",
 			title: "Couldn't open the imported profile",
-			message: err instanceof Error ? err.message : String(err),
+			message: errorMessageFromUnknown(err),
 		})
 		return null
 	}
@@ -742,10 +745,11 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 
 	const isAllowedToImportBackup = computed(() => {
 		if (!selectedBackup.value?.profileType || !selectedBackup.value?.backup) return false
-		if (selectedBackup.value?.profileType === "password") {
-			if (!opts.password.value || opts.password.value !== opts.repeatedPassword.value || opts.password.value.length < 8) {
-				return false
-			}
+		if (
+			selectedBackup.value?.profileType === "password" &&
+			!isNewPasswordValid(opts.password.value ?? "", opts.repeatedPassword.value ?? "")
+		) {
+			return false
 		}
 		return true
 	})

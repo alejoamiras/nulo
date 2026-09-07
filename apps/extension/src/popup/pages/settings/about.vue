@@ -14,16 +14,13 @@ import { useToast } from "@/composables/toast"
 const { openToast } = useToast()
 
 /** Utils */
-import { copyToClipboard } from "@/utils/clipboard"
+import { copyWithToast } from "@/utils/clipboard"
 
 const version = __VERSION__
 const aztecVersion = __AZTEC_VERSION__
 
 const handleCopy = (target) => {
-	void copyToClipboard(target, openToast, {
-		success: { label: "Version is copied" },
-		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
-	})
+	void copyWithToast(target, openToast, "Version is copied")
 }
 
 const handleOpen = (target) => {

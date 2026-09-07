@@ -1,6 +1,6 @@
 import { ValueStorage } from "@/wallet/storage"
 import { Lock } from "@/wallet/utils"
-import { EventHandler } from "@nulo/wallet-core/utils"
+import { EventHandler, errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 import { type Config, type ConfigKey, type ConfigProp, ConfigSchema, defaultConfig } from "./config"
 import type { IConfigStore } from "."
 
@@ -31,7 +31,7 @@ export class ConfigStore implements IConfigStore {
 			// runtime's `Promise.all`, so a propagating throw aborts the whole boot.
 			// Swallow it and continue on defaults; the bad value stays in storage
 			// for diagnosis / a future migration.
-			console.error(`ConfigStore.load: undecodable config, booting on defaults — ${err instanceof Error ? err.message : String(err)}`)
+			console.error(`ConfigStore.load: undecodable config, booting on defaults — ${errorMessageFromUnknown(err)}`)
 			return
 		}
 		if (storedConfig && typeof storedConfig === "object") {

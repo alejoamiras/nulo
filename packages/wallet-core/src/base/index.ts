@@ -1,4 +1,5 @@
 import type { EventHandler } from "../utils/event-handler"
+import { errorMessageFromUnknown } from "../utils/errors"
 import { topologicalPhases } from "./topology"
 
 export type EventsMap = Record<string, unknown>
@@ -81,9 +82,7 @@ export class ServiceCollection {
 				// The message folds each ROOT CAUSE in, not just names: a failed
 				// boot's log line prints message/stack only, and with retry vetoed
 				// for the SW lifetime that line is the entire post-mortem.
-				const summary = failures
-					.map((f) => `${f.name}: ${f.r.reason instanceof Error ? f.r.reason.message : String(f.r.reason)}`)
-					.join("; ")
+				const summary = failures.map((f) => `${f.name}: ${errorMessageFromUnknown(f.r.reason)}`).join("; ")
 				throw new AggregateError(
 					failures.map((f) => f.r.reason),
 					`ServiceCollection.start failed in phase — ${summary}`,

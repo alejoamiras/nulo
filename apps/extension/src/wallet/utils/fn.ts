@@ -65,21 +65,6 @@ export async function simulate(
 	const fnSelector = await viewFn.getSelector()
 	const encodedArgs = viewFn.encodeArgs(args)
 
-	if (viewFn.type === FunctionType.UTILITY) {
-		const call = new FunctionCall(
-			viewFn.name,
-			contractAddress,
-			fnSelector,
-			viewFn.type,
-			false,
-			viewFn.isStatic,
-			encodedArgs,
-			viewFn.getReturnTypes(),
-		)
-		const { result } = await pxe.executeUtility(call, { scopes: [account.address] })
-		return viewFn.unpackResult(result)
-	}
-
 	const call = new FunctionCall(
 		viewFn.name,
 		contractAddress,
@@ -90,6 +75,11 @@ export async function simulate(
 		encodedArgs,
 		viewFn.getReturnTypes(),
 	)
+
+	if (viewFn.type === FunctionType.UTILITY) {
+		const { result } = await pxe.executeUtility(call, { scopes: [account.address] })
+		return viewFn.unpackResult(result)
+	}
 
 	const payload = new ExecutionPayload([call], [], [], [])
 	const txRequest = await account.buildTxExecutionRequest(

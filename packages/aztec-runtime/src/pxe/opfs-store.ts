@@ -30,6 +30,7 @@ import { AztecSQLiteOPFSStore } from "@aztec/kv-store/sqlite-opfs"
 import { SqliteEncryptionError } from "@aztec/kv-store/sqlite-opfs"
 import { DatabaseVersion } from "@aztec/stdlib/database-version/version"
 import { chainDataDir, PXE_DATA_DIR_ROOT, type ChainCoordinates } from "./chain-coordinates"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 
 /** The store key did not decrypt the existing store — a wrong/rotated per-profile key, NOT
  *  corruption and NOT absence. Fail-closed and distinct so callers never silently re-create. */
@@ -213,7 +214,7 @@ export async function initStoreVersionStamp(store: AztecSQLiteOPFSStore, rollupA
 				mismatch = `schema version changed (stored ${storedVersion.schemaVersion} != current ${PXE_DATA_SCHEMA_VERSION_PIN})`
 			}
 		} catch (err) {
-			mismatch = `stamp failed to parse (${err instanceof Error ? err.message : String(err)})`
+			mismatch = `stamp failed to parse (${errorMessageFromUnknown(err)})`
 		}
 		if (mismatch) {
 			// REFUSE, do not wipe (D-B2v3). The store's bytes are preserved for the operator.

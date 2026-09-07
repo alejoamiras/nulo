@@ -18,6 +18,7 @@ const { openToast, TOAST_DURATION } = useToast()
 import { useAppStore } from "@/stores/app.store"
 import { useCacheStore } from "@/stores/cache.store"
 import { usePopupStore } from "@/stores/popup.store"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 const appStore = useAppStore()
 const cacheStore = useCacheStore()
 const popupStore = usePopupStore()
@@ -254,7 +255,7 @@ const handleAddToken = async () => {
 				break
 		}
 	} catch (err) {
-		error.value = err instanceof Error ? err.message : String(err)
+		error.value = errorMessageFromUnknown(err)
 		balanceWait?.abort()
 	} finally {
 		activeBalanceWait = null

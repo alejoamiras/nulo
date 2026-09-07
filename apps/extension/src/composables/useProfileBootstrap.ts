@@ -15,6 +15,7 @@ import { AccountServiceClient, AccountType, DEFAULT_ACCOUNT_NAME } from "@/walle
 import { NetworkServiceClient } from "@/wallet/services/network/client"
 import type { ProfileInfo } from "@/wallet/services/profile/client"
 import { useAppStore } from "@/stores/app.store"
+import { createRunFence } from "@/composables/runFence"
 
 /**
  * B-27: single-flight the activation core per profile id, module-level so it
@@ -27,7 +28,7 @@ import { useAppStore } from "@/stores/app.store"
  * original threw and mis-routed to "needs unlock". A same-profile caller whose
  * run is still the current generation joins it instead of starting its own.
  */
-const inFlightBootstraps = new Map<string, { gen: number; promise: Promise<void> }>()
+const inFlightBootstraps = new Map<string, { isCurrent: () => boolean; promise: Promise<void> }>()
 
 /**
  * B-27 (generation fence): per-id single-flight covers same-profile recovery,
@@ -40,7 +41,7 @@ const inFlightBootstraps = new Map<string, { gen: number; promise: Promise<void>
  * be the current generation, so a re-activation of a superseded profile starts
  * fresh rather than adopting an aborted run.
  */
-let bootstrapGeneration = 0
+const bootstrapFence = createRunFence()
 
 export function useProfileBootstrap() {
 	const appStore = useAppStore()
@@ -121,10 +122,9 @@ export function useProfileBootstrap() {
 		// Join only a STILL-CURRENT same-profile run (same-profile recovery). A run
 		// that a newer activation already superseded is aborting, so re-activating
 		// this profile must start fresh rather than adopt it.
-		if (existing && existing.gen === bootstrapGeneration) return existing.promise
+		if (existing?.isCurrent()) return existing.promise
 		// A new bootstrap supersedes any older in-flight one (of ANY profile).
-		const myGeneration = ++bootstrapGeneration
-		const isCurrent = () => bootstrapGeneration === myGeneration
+		const isCurrent = bootstrapFence.begin()
 		const promise = (async () => {
 			await initNetworks(isCurrent)
 			if (!isCurrent()) return
@@ -136,7 +136,7 @@ export function useProfileBootstrap() {
 			// Identity-guard: only clear the slot if it still holds THIS run.
 			if (inFlightBootstraps.get(profileId)?.promise === promise) inFlightBootstraps.delete(profileId)
 		})
-		inFlightBootstraps.set(profileId, { gen: myGeneration, promise })
+		inFlightBootstraps.set(profileId, { isCurrent, promise })
 		return promise
 	}
 

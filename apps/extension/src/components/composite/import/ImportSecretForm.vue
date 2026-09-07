@@ -1,4 +1,5 @@
 <script setup>
+import { newPasswordHint } from "@/utils/password"
 /**
  * Renders the recovery-phrase input plus the new+confirm password section.
  * The visibility toggles for both the secret field and the password field
@@ -24,12 +25,7 @@ const repeatedPassword = defineModel("repeatedPassword", { default: "" })
 const isPasswordType = ref(true)
 const hideCredentials = ref(true)
 
-const passwordHint = computed(() => {
-	if (!password.value || password.value?.length < 8) return "At least 8 characters"
-	if (password.value !== repeatedPassword.value) return "Passwords don't match"
-	if (password.value?.length > 24) return "Long enough. Don't forget it."
-	return "Strong password"
-})
+const passwordHint = computed(() => newPasswordHint(password.value ?? "", repeatedPassword.value ?? ""))
 </script>
 
 <template>

@@ -11,6 +11,7 @@ import type { ClockPort, TimerHandle } from "@nulo/wallet-core/ports"
 import type { BackgroundTickerPort, TickerHandle } from "@nulo/wallet-core/ports"
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@/wallet/logger"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 
 export class ClockTickerAdapter implements BackgroundTickerPort {
 	public constructor(
@@ -35,7 +36,7 @@ export class ClockTickerAdapter implements BackgroundTickerPort {
 			try {
 				await onTick()
 			} catch (err) {
-				this.logger?.log(this.logSource, LogLevel.Error, `Ticker error: ${err instanceof Error ? err.message : String(err)}`)
+				this.logger?.log(this.logSource, LogLevel.Error, `Ticker error: ${errorMessageFromUnknown(err)}`)
 			} finally {
 				running = false
 				if (pending && !cancelled) {

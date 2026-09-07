@@ -36,6 +36,15 @@ export async function nextNumericId(storage: { getKeys(): Promise<string[]> }): 
 	return candidate
 }
 
+/** Sync sibling of `nextRandomId` for in-memory registries. */
+export function randomIdNotIn(taken: (id: string) => boolean, length = 8): string {
+	let id: string
+	do {
+		id = getRandomHex(length)
+	} while (taken(id))
+	return id
+}
+
 export async function nextRandomId(storage: { contains(id: string): Promise<boolean> }, length = 8): Promise<string> {
 	let id: string
 	do {

@@ -18,7 +18,7 @@ import { useEntityCrud } from "@/composables/useEntityCrud"
 const { openToast } = useToast()
 
 /** Utils */
-import { copyToClipboard } from "@/utils/clipboard"
+import { copyWithToast } from "@/utils/clipboard"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -60,10 +60,7 @@ watch(
 const handleCopyAddress = (address) => {
 	copiedAddress.value = address
 
-	void copyToClipboard(address, openToast, {
-		success: { label: "Sender's address is copied" },
-		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
-	})
+	void copyWithToast(address, openToast, "Sender's address is copied")
 
 	setTimeout(() => {
 		copiedAddress.value = ""

@@ -11,7 +11,8 @@ import { ExecutionService, type Operation, type OperationKind } from "@/wallet/s
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { JobCancelledError, UserRejectedError } from "@nulo/extension-messaging/errors"
 import { OriginType, type LocalTxOrigin } from "@/wallet/services/transaction/service"
-import { getRandomHex, Lock } from "@/wallet/utils"
+import { randomIdNotIn } from "@/wallet/services/id-allocators"
+import { Lock } from "@/wallet/utils"
 import type { WindowManager } from "@/wallet/services/window-manager/window-manager"
 import { parseCaipAccount, parseCaipChain, resolveNetworkByChainId } from "@/wallet/utils/caip"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
@@ -367,11 +368,8 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		// promise after release.
 		let pending!: Promise<ExecutionResult | CapabilityResult | DiscoveryResult>
 		await this.lock.withLock(async () => {
-			let id: string
-			do {
-				// 16 bytes / 128 bits (codex-round-1 defense-in-depth).
-				id = getRandomHex(16)
-			} while (this.storage.has(id))
+			// 128-bit: the id names the request in a popup URL.
+			const id = randomIdNotIn((candidate) => this.storage.has(candidate), 16)
 
 			const handle = this.windowManager.openAndAwait<ExecutionResult | CapabilityResult | DiscoveryResult>({
 				url: chrome.runtime.getURL(`src/popup/index.html#/windows/${type}?requestId=${id}`),

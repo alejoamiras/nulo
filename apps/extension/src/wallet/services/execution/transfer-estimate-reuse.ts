@@ -153,8 +153,7 @@ export class TransferEstimateReuse {
 
 		// TTL gate
 		if (Date.now() - entry.builtAt > ESTIMATE_REUSE_TTL_MS) {
-			this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: stale (TTL)`)
-			return undefined
+			return this.reject(estimateId, "stale (TTL)")
 		}
 
 		// Input byte-for-byte match
@@ -167,30 +166,26 @@ export class TransferEstimateReuse {
 			entry.amount !== inputs.amount ||
 			entry.feeSettingsHash !== fingerprintFeeSettings(inputs.feeSettings)
 		) {
-			this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: input drift`)
-			return undefined
+			return this.reject(estimateId, "input drift")
 		}
 
 		// Active-profile drift. `getNetwork` and `getAccountContract` already
 		// fail closed for cross-profile leakage, but rejecting reuse here
 		// avoids confusing downstream errors when the user swapped profiles
-		// between estimate and confirm. (codex audit NICE-TO-HAVE #2)
+		// between estimate and confirm.
 		const profile = await this.deps.getActiveProfile()
 		if (!profile || profile.id !== entry.profileId) {
-			this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: profile drift`)
-			return undefined
+			return this.reject(estimateId, "profile drift")
 		}
 
-		// Endpoint identity (codex audit gap — primary can change at runtime)
+		// Endpoint identity: the primary can change at runtime.
 		const network = await this.deps.getNetwork(inputs.networkId)
 		const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
 		if (!primary) {
-			this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: no primary endpoint`)
-			return undefined
+			return this.reject(estimateId, "no primary endpoint")
 		}
 		if (primary.id !== entry.primaryEndpointId || primary.rpcUrl !== entry.primaryEndpointUrl) {
-			this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: primary endpoint changed`)
-			return undefined
+			return this.reject(estimateId, "primary endpoint changed")
 		}
 
 		// Base fee snapshot. Compare the cached entry's fingerprint
@@ -210,26 +205,27 @@ export class TransferEstimateReuse {
 			// must reproduce the exact `GasFees.mul` product the build finalized.
 			const expectedFingerprint = fingerprintBaseFee(new GasFees(basis.feePerDaGas, basis.feePerL2Gas).mul(multiplier))
 			if (expectedFingerprint !== entry.baseFeeFingerprint) {
-				this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: base fee changed`)
-				return undefined
+				return this.reject(estimateId, "base fee changed")
 			}
 		} catch (error) {
 			// Conservative: if we can't verify, don't reuse.
-			this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: base fee fetch failed: ${getErrorMessage(error)}`)
-			return undefined
+			return this.reject(estimateId, `base fee fetch failed: ${getErrorMessage(error)}`)
 		}
 
 		// Pending-tx drift. New same-account pending txs since estimate
 		// can consume notes the cached private-transfer TxRequest selected.
-		// Rebuild rather than risk a note-exhaustion failure mid-flight.
-		// (codex audit SHOULD-FIX #2 partial — PXE rebuild detection
-		// remains deferred; conservative TTL bounds that risk.)
+		// Rebuild rather than risk a note-exhaustion failure mid-flight. PXE rebuild
+		// detection stays deferred; the conservative TTL bounds that risk.
 		const currentHashes = this.deps.getPendingForAccount(inputs.accountAddress).map((tx) => tx.hash)
 		if (pendingHashesChanged(currentHashes, entry.pendingHashes)) {
-			this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: pending tx set changed`)
-			return undefined
+			return this.reject(estimateId, "pending tx set changed")
 		}
 
 		return entry
+	}
+
+	private reject(estimateId: string, reason: string): undefined {
+		this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: ${reason}`)
+		return undefined
 	}
 }

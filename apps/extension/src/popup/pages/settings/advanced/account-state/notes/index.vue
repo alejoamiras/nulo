@@ -44,6 +44,7 @@ const { openToast } = useToast()
 import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
 import { useCacheStore } from "@/stores/cache.store"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 const cacheStore = useCacheStore()
@@ -75,7 +76,7 @@ const displayNotes = computed(() => {
 		try {
 			items.push(buildDisplayNote(note))
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err)
+			const message = errorMessageFromUnknown(err)
 			console.warn("[notes] failed to build display row:", message, note)
 			items.push({
 				key: `err-${items.length}`,

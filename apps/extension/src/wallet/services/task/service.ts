@@ -3,7 +3,7 @@ import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import type { TxOrigin } from "@/wallet/services/transaction/service"
-import { getRandomHex } from "@/wallet/utils"
+import { randomIdNotIn } from "@/wallet/services/id-allocators"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import {
 	TASK_SERVICE_NAME,
@@ -44,10 +44,7 @@ export class TaskService extends Service<Methods, Events> implements ServiceSpec
 	}
 
 	private createTask(content: ITaskContent, parentId?: string, origin?: TxOrigin, status: TaskStatus = TaskStatus.Pending): WrappedTask {
-		let taskId: string
-		do {
-			taskId = getRandomHex(8)
-		} while (this.tasks.has(taskId))
+		const taskId = randomIdNotIn((id) => this.tasks.has(id))
 
 		const parent = parentId ? this.getTaskById(parentId) : undefined
 		if (parent?.finishedAt) {

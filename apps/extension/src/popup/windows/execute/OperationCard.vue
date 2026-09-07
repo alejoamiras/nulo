@@ -26,6 +26,7 @@ import { humanizeOperationKind } from "./humanize"
 import type { DraftAztecSendTxOperation, DraftSendTransactionOperation, DraftUIOperation } from "./types"
 import { parseTransferIntent, type TransferIntent } from "@/utils/transfer-intent"
 import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
+import { isEmbeddedFeePayment } from "./operation-validation"
 
 const safe = (s: string | undefined, max: number): string => (s ? sanitizeWireString(s, max) : "")
 
@@ -69,13 +70,6 @@ const emit = defineEmits<(e: "updateFeeSettings", index: number, value: FeeSetti
 // to the send-like subtype downstream (lets us access `op.feeSettings`
 // without TS complaining that non-send kinds don't carry that field).
 const isSendTx = (op: UIOperation): op is SendLikeUIOp => op.kind === "send_transaction" || op.kind === "aztec_sendTx"
-
-const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
-	if (op.kind === "send_transaction") return op.fee?.embeddedFeePayment !== undefined
-	if (op.kind === "aztec_sendTx")
-		return op.executionMode === "default_entrypoint" || (op.exec?.feePayer !== undefined && !isSelfPay(op.exec, op.opts?.from))
-	return false
-}
 
 /** The method a dApp asked for by naming the account itself as payer with no fee call: the card
  *  locks to it, so the sponsored FPC is never on offer for a transaction the app expects the
@@ -226,7 +220,7 @@ const requestedMethod = (op: SendLikeUIOp): "fj" | null => (op.kind === "aztec_s
 		<div :class="$style.op_divider" />
 
 		<Flex
-			v-if="hasEmbeddedFee(op)"
+			v-if="isEmbeddedFeePayment(op)"
 			data-testid="execute-op-fee-set-badge"
 			align="center"
 			gap="8"

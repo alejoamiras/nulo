@@ -1882,6 +1882,24 @@ describe("crash-rollback liveness gate", () => {
 	})
 })
 
+describe("useFullBackupImport — decryptBackup accepts the padding the detector accepted", () => {
+	it("decrypts a protected file whose base64 is wrapped in non-breaking spaces", async () => {
+		const key = await EncryptionKey.fromPasshash(await EncryptionKey.getPasshash("pass1234"))
+		const plain = new TextEncoder().encode(JSON.stringify({ data: { profile: { type: "password", name: "Padded" } } }))
+		const sealed = btoa(String.fromCharCode(...(await key.encrypt(plain))))
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		c.selectedBackup.value = { name: "padded.txt", backup: `\u00a0\u00a0${sealed}\n\u00a0`, type: "encrypted", profileType: null }
+		c.decryptionPassword.value = "pass1234"
+
+		await c.decryptBackup()
+
+		expect(c.selectedBackup.value?.profileType).toBe("password")
+		expect(c.parsedBackupName.value).toBe("Padded")
+		expect(opts.fillError).not.toHaveBeenCalled()
+	})
+})
+
 describe("useFullBackupImport — decryptBackup stale-selection fence", () => {
 	it("a decrypt superseded by a re-pick publishes nothing and leaves the new state alone", async () => {
 		const opts = makeOpts()

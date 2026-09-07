@@ -11,7 +11,7 @@ import { useAppStore } from "@/stores/app.store.ts"
 import { usePopupStore } from "@/stores/popup.store.ts"
 
 /** Utils */
-import { copyToClipboard } from "@/utils/clipboard"
+import { copyWithToast } from "@/utils/clipboard"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 
@@ -27,10 +27,7 @@ const displaceIdx = computed(() => {
 const account = computed(() => appStore.account)
 
 const handleCopyAddress = () => {
-	void copyToClipboard(appStore.account.address, openToast, {
-		success: { label: "Address is copied" },
-		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
-	})
+	void copyWithToast(appStore.account.address, openToast, "Address is copied")
 }
 
 watch(

@@ -14,6 +14,8 @@
  * BackgroundConnectionHandler.
  */
 
+import { deferred } from "@nulo/wallet-core/utils"
+
 export interface SessionBaton {
 	/** Resolves when the handler signals FIFO-release. Stored in the
 	 *  `sessionQueues` map; the NEXT message's handler awaits this. */
@@ -25,10 +27,7 @@ export interface SessionBaton {
 
 /** Create a fresh baton + release callback for a session-FIFO slot. */
 export function createSessionBaton(): SessionBaton {
-	let resolveBaton!: () => void
-	const baton = new Promise<void>((resolve) => {
-		resolveBaton = resolve
-	})
+	const { promise: baton, resolve: resolveBaton } = deferred()
 	let released = false
 	const releaseFifo = () => {
 		if (released) return

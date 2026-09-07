@@ -7,7 +7,7 @@ import { useToast } from "@/composables/toast"
 const { openToast } = useToast()
 
 /** Utils */
-import { copyToClipboard } from "@/utils/clipboard"
+import { copyWithToast } from "@/utils/clipboard"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -40,10 +40,7 @@ function onTokenDeleted(token) {
 }
 
 const handleCopyAddress = () => {
-	void copyToClipboard(token.value.contract, openToast, {
-		success: { label: "Contract address is copied" },
-		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
-	})
+	void copyWithToast(token.value.contract, openToast, "Contract address is copied")
 }
 
 watch(

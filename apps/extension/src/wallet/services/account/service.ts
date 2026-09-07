@@ -300,36 +300,30 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		return this.tupleLocks.withLock(`${profileId}:${chainId}:${type}`, op)
 	}
 
-	public async changeAccountName(profileId: string, chainId: number, address: string, name: string): Promise<Account | undefined> {
-		// Whole-row read-modify-write: serialize per row key with the sibling
-		// field editor, or whichever write lands second reverts the other field.
-		return this.tupleLocks.withLock(accountRowId(profileId, chainId, address), async () => {
-			const account = await this.storage.get(accountRowId(profileId, chainId, address))
-			if (account?.profileId !== profileId || account.chainId !== chainId) {
-				return undefined
-			}
-			if (account.name !== name) {
-				account.name = name
-				await this.storage.set(accountRowIdOf(account), account)
-				this.emit("onAccountUpdated", account)
-			}
-			return account
-		})
+	public changeAccountName(profileId: string, chainId: number, address: string, name: string): Promise<Account | undefined> {
+		return this.patchAccountField(profileId, chainId, address, "name", name)
 	}
 
-	public async changeAccountVisibility(
+	public changeAccountVisibility(profileId: string, chainId: number, address: string, visible: boolean): Promise<Account | undefined> {
+		return this.patchAccountField(profileId, chainId, address, "visible", visible)
+	}
+
+	/** Whole-row read-modify-write under the row's tuple lock: two field editors racing
+	 *  would otherwise revert each other. */
+	private patchAccountField<K extends "name" | "visible">(
 		profileId: string,
 		chainId: number,
 		address: string,
-		visible: boolean,
+		field: K,
+		value: Account[K],
 	): Promise<Account | undefined> {
 		return this.tupleLocks.withLock(accountRowId(profileId, chainId, address), async () => {
 			const account = await this.storage.get(accountRowId(profileId, chainId, address))
 			if (account?.profileId !== profileId || account.chainId !== chainId) {
 				return undefined
 			}
-			if (account.visible !== visible) {
-				account.visible = visible
+			if (account[field] !== value) {
+				account[field] = value
 				await this.storage.set(accountRowIdOf(account), account)
 				this.emit("onAccountUpdated", account)
 			}

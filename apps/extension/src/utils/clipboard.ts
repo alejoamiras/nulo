@@ -41,3 +41,13 @@ export async function copyToClipboard(
 	openToast({ label: opts.success.label, icon: opts.success.icon ?? "copy" }, opts.success.duration)
 	return true
 }
+
+/** The toast pair every plain copy button shares; sites whose failure copy differs keep
+ *  calling `copyToClipboard` directly. */
+export function copyWithToast(text: string, openToast: ToastFn, successLabel: string, opts: { sanitize?: boolean } = {}): Promise<boolean> {
+	return copyToClipboard(text, openToast, {
+		success: { label: successLabel },
+		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
+		sanitize: opts.sanitize,
+	})
+}

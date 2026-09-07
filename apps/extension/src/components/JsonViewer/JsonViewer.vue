@@ -15,7 +15,7 @@ import { useToast } from "@/composables/toast"
 const { openToast } = useToast()
 
 /** Utils */
-import { copyToClipboard } from "@/utils/clipboard"
+import { copyWithToast } from "@/utils/clipboard"
 
 /** Services */
 import { customViewerTheme } from "./theme.js"
@@ -75,10 +75,7 @@ const isCopied = ref(false)
 const handleCopy = () => {
 	isCopied.value = true
 
-	void copyToClipboard(JSON.stringify(props.data), openToast, {
-		success: { label: "Data is copied" },
-		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
-	})
+	void copyWithToast(JSON.stringify(props.data), openToast, "Data is copied")
 
 	setTimeout(() => {
 		isCopied.value = false
