@@ -49,7 +49,7 @@ function handleClick() {
 	// Strip invisible / control chars before clipboard, but DO NOT truncate.
 	// The user sees a trimmed display and expects to copy the full value; the
 	// strip step keeps an attacker from injecting bidi-overrides etc. into
-	// what the user pastes. (codex post-impl §3)
+	// what the user pastes.
 	void copyWithToast(props.address, openToast, "Address is copied", { sanitize: true })
 }
 </script>

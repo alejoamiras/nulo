@@ -391,7 +391,8 @@ async function openEncryptedBackup(
 	if (isStale()) return { kind: "stale" }
 	const key = await EncryptionKey.fromPasshash(passhash)
 	if (isStale()) return { kind: "stale" }
-	const encryptedBytes = fromBase64(sealed)
+	// The detector accepted `sealed.trim()`; decode the same bytes (a saved file may carry padding).
+	const encryptedBytes = fromBase64(sealed.trim())
 	const decryptedBytes = await key.decrypt(encryptedBytes)
 	if (isStale()) return { kind: "stale" }
 	const decodedJson = new TextDecoder().decode(decryptedBytes)
@@ -437,8 +438,7 @@ async function restoreProfileStep(
 		return null
 	}
 	if (newProfile.restoreError) {
-		const errMsg = newProfile.restoreError instanceof Error ? newProfile.restoreError.message : String(newProfile.restoreError)
-		applyOutcome(io, { kind: "fail", title: "Import failed", message: errMsg })
+		applyOutcome(io, { kind: "fail", title: "Import failed", message: errorMessageFromUnknown(newProfile.restoreError) })
 		return null
 	}
 	return newProfile

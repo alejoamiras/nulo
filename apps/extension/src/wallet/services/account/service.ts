@@ -309,8 +309,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	}
 
 	/** Whole-row read-modify-write under the row's tuple lock: two field editors racing
-	 *  would otherwise revert each other. Rejects a row another profile or chain owns;
-	 *  writes and emits only when the value actually changes. */
+	 *  would otherwise revert each other. */
 	private patchAccountField<K extends "name" | "visible">(
 		profileId: string,
 		chainId: number,

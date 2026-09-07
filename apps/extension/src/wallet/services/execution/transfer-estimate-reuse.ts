@@ -172,13 +172,13 @@ export class TransferEstimateReuse {
 		// Active-profile drift. `getNetwork` and `getAccountContract` already
 		// fail closed for cross-profile leakage, but rejecting reuse here
 		// avoids confusing downstream errors when the user swapped profiles
-		// between estimate and confirm. (codex audit NICE-TO-HAVE #2)
+		// between estimate and confirm.
 		const profile = await this.deps.getActiveProfile()
 		if (!profile || profile.id !== entry.profileId) {
 			return this.reject(estimateId, "profile drift")
 		}
 
-		// Endpoint identity (codex audit gap — primary can change at runtime)
+		// Endpoint identity: the primary can change at runtime.
 		const network = await this.deps.getNetwork(inputs.networkId)
 		const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
 		if (!primary) {
@@ -214,9 +214,8 @@ export class TransferEstimateReuse {
 
 		// Pending-tx drift. New same-account pending txs since estimate
 		// can consume notes the cached private-transfer TxRequest selected.
-		// Rebuild rather than risk a note-exhaustion failure mid-flight.
-		// (codex audit SHOULD-FIX #2 partial — PXE rebuild detection
-		// remains deferred; conservative TTL bounds that risk.)
+		// Rebuild rather than risk a note-exhaustion failure mid-flight. PXE rebuild
+		// detection stays deferred; the conservative TTL bounds that risk.
 		const currentHashes = this.deps.getPendingForAccount(inputs.accountAddress).map((tx) => tx.hash)
 		if (pendingHashesChanged(currentHashes, entry.pendingHashes)) {
 			return this.reject(estimateId, "pending tx set changed")

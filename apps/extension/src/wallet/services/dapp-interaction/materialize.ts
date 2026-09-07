@@ -93,12 +93,11 @@ export async function materializeRequest(request: OperationRequest, deps: Materi
 		}
 		case "send_transaction": {
 			const [network, account] = await deps.resolveNetworkAndAccount(request.account)
-			const hasEmbeddedFee = request.fee?.embeddedFeePayment !== undefined
 			return {
 				...request,
 				networkId: network.id,
 				accountAddress: account.address,
-				feeSettings: hasEmbeddedFee ? { paymentMethod: { kind: "embedded" } } : undefined,
+				feeSettings: isEmbeddedFeePayment(request) ? { paymentMethod: { kind: "embedded" } } : undefined,
 			} as DraftOperation
 		}
 		default: {

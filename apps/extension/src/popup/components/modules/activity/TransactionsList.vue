@@ -25,7 +25,7 @@ import TransactionIncomingCard from "@/components/composite/activity/Transaction
 import { PriceServiceClient } from "@/wallet/services/price/client"
 import { usePrices } from "@/composables/usePrices"
 import { buildJournalTerminalCardProps } from "@/utils/journal-state"
-import { buildIncomingCardProps, receivedLabel, resolveReceivedType } from "@/utils/received-display"
+import { buildIncomingCardProps } from "@/utils/received-display"
 
 const router = useRouter()
 

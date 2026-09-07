@@ -1,4 +1,3 @@
-/** The wallet's one new-password rule: at least 8 characters, repeated exactly. */
 export function isNewPasswordValid(password: string, repeated: string): boolean {
 	return password.length >= 8 && password === repeated
 }

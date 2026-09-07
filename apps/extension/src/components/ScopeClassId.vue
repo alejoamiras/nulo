@@ -20,7 +20,7 @@ const props = defineProps<{ id: string }>()
 const { openToast } = useToast()
 
 function handleClick() {
-	// Same stripping-without-truncation rule as ScopeAddress (codex post-impl §3).
+	// Same stripping-without-truncation rule as ScopeAddress.
 	void copyWithToast(props.id, openToast, "Class id is copied", { sanitize: true })
 }
 </script>

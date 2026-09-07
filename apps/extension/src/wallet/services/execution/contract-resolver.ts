@@ -35,11 +35,6 @@ import type { Action, AddPrivateAuthwitAction, AddPublicAuthwitAction, CallAuthw
 
 const LOG_SOURCE = "ContractResolver"
 
-/** Find a function ABI by name. Lookup order is FROZEN: `functions[]`
- *  first, then `nonDispatchPublicFunctions[]` — callers across the
- *  execution layer depend on a name collision resolving to the
- *  dispatch-able entry. Returns `undefined` when absent; callers own
- *  their (frozen) error text. */
 /** Guard ladder over pre-resolved maps; the error strings are frozen by their call sites. */
 export function requireArtifact(
 	instances: Map<string, ContractInstanceWithAddress>,
@@ -53,6 +48,11 @@ export function requireArtifact(
 	return artifact
 }
 
+/** Find a function ABI by name. Lookup order is FROZEN: `functions[]`
+ *  first, then `nonDispatchPublicFunctions[]` — callers across the
+ *  execution layer depend on a name collision resolving to the
+ *  dispatch-able entry. Returns `undefined` when absent; callers own
+ *  their (frozen) error text. */
 export function findFunctionByName(artifact: ContractArtifact, name: string): FunctionAbi | undefined {
 	return artifact.functions.find((x) => x.name === name) ?? artifact.nonDispatchPublicFunctions.find((x) => x.name === name)
 }
