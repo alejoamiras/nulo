@@ -50,6 +50,7 @@ declare global {
   const browser: typeof import('webextension-polyfill')
   const buildActivityRows: typeof import('../utils/activity-rows').buildActivityRows
   const buildFeeEstimate: typeof import('../utils/fee-estimation').buildFeeEstimate
+  const buildIncomingCardProps: typeof import('../utils/received-display').buildIncomingCardProps
   const buildJournalTerminalCardProps: typeof import('../utils/journal-state').buildJournalTerminalCardProps
   const buildRestoreSecret: typeof import('../composables/full-backup-restore').buildRestoreSecret
   const capTokenRows: typeof import('../utils/token-order').capTokenRows
@@ -66,6 +67,7 @@ declare global {
   const computed: typeof import('vue').computed
   const confirmationPolicies: typeof import('../utils/confirmation-policies').confirmationPolicies
   const copyToClipboard: typeof import('../utils/clipboard').copyToClipboard
+  const copyWithToast: typeof import('../utils/clipboard').copyWithToast
   const createApp: typeof import('vue').createApp
   const createRunFence: typeof import('../composables/runFence').createRunFence
   const customRef: typeof import('vue').customRef
@@ -114,6 +116,7 @@ declare global {
   const isForeignProfile: typeof import('../utils/activity-rows').isForeignProfile
   const isHiddenHolding: typeof import('../utils/token-fold').isHiddenHolding
   const isInFlightSend: typeof import('../utils/in-flight-send').isInFlightSend
+  const isNewPasswordValid: typeof import('../utils/password').isNewPasswordValid
   const isPopupSubmitKey: typeof import('../composables/usePopupEntity').isPopupSubmitKey
   const isPrefersDarkScheme: typeof import('../utils/general').isPrefersDarkScheme
   const isProxy: typeof import('vue').isProxy
@@ -131,6 +134,7 @@ declare global {
   const markRaw: typeof import('vue').markRaw
   const matchesQuery: typeof import('../utils/token-search').matchesQuery
   const migrationIdle: typeof import('../utils/storage').migrationIdle
+  const newPasswordHint: typeof import('../utils/password').newPasswordHint
   const nextTick: typeof import('vue').nextTick
   const normalizeAllIds: typeof import('../utils/full-backup-helpers').normalizeAllIds
   const normalizeAmount: typeof import('../utils/amount').normalizeAmount
@@ -455,6 +459,7 @@ declare module 'vue' {
     readonly browser: UnwrapRef<typeof import('webextension-polyfill')>
     readonly buildActivityRows: UnwrapRef<typeof import('../utils/activity-rows')['buildActivityRows']>
     readonly buildFeeEstimate: UnwrapRef<typeof import('../utils/fee-estimation')['buildFeeEstimate']>
+    readonly buildIncomingCardProps: UnwrapRef<typeof import('../utils/received-display')['buildIncomingCardProps']>
     readonly buildJournalTerminalCardProps: UnwrapRef<typeof import('../utils/journal-state')['buildJournalTerminalCardProps']>
     readonly buildRestoreSecret: UnwrapRef<typeof import('../composables/full-backup-restore')['buildRestoreSecret']>
     readonly capTokenRows: UnwrapRef<typeof import('../utils/token-order')['capTokenRows']>
@@ -471,6 +476,7 @@ declare module 'vue' {
     readonly computed: UnwrapRef<typeof import('vue')['computed']>
     readonly confirmationPolicies: UnwrapRef<typeof import('../utils/confirmation-policies')['confirmationPolicies']>
     readonly copyToClipboard: UnwrapRef<typeof import('../utils/clipboard')['copyToClipboard']>
+    readonly copyWithToast: UnwrapRef<typeof import('../utils/clipboard')['copyWithToast']>
     readonly createApp: UnwrapRef<typeof import('vue')['createApp']>
     readonly createRunFence: UnwrapRef<typeof import('../composables/runFence')['createRunFence']>
     readonly customRef: UnwrapRef<typeof import('vue')['customRef']>
@@ -519,6 +525,7 @@ declare module 'vue' {
     readonly isForeignProfile: UnwrapRef<typeof import('../utils/activity-rows')['isForeignProfile']>
     readonly isHiddenHolding: UnwrapRef<typeof import('../utils/token-fold')['isHiddenHolding']>
     readonly isInFlightSend: UnwrapRef<typeof import('../utils/in-flight-send')['isInFlightSend']>
+    readonly isNewPasswordValid: UnwrapRef<typeof import('../utils/password')['isNewPasswordValid']>
     readonly isPopupSubmitKey: UnwrapRef<typeof import('../composables/usePopupEntity')['isPopupSubmitKey']>
     readonly isPrefersDarkScheme: UnwrapRef<typeof import('../utils/general')['isPrefersDarkScheme']>
     readonly isProxy: UnwrapRef<typeof import('vue')['isProxy']>
@@ -536,6 +543,7 @@ declare module 'vue' {
     readonly markRaw: UnwrapRef<typeof import('vue')['markRaw']>
     readonly matchesQuery: UnwrapRef<typeof import('../utils/token-search')['matchesQuery']>
     readonly migrationIdle: UnwrapRef<typeof import('../utils/storage')['migrationIdle']>
+    readonly newPasswordHint: UnwrapRef<typeof import('../utils/password')['newPasswordHint']>
     readonly nextTick: UnwrapRef<typeof import('vue')['nextTick']>
     readonly normalizeAllIds: UnwrapRef<typeof import('../utils/full-backup-helpers')['normalizeAllIds']>
     readonly normalizeAmount: UnwrapRef<typeof import('../utils/amount')['normalizeAmount']>

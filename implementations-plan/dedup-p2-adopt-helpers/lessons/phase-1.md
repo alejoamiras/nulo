@@ -50,3 +50,7 @@ Base: `worktree-dedup-p1-delete` (PR #561). Scope: ledger ids X2 X3 X6 X1 E1 H3 
 ## Final gate (62b4acf4)
 
 `bun run lint` exit 0 · `bun run typecheck:all` exit 0 · `bun run test` exit 0 (441 files, 5,519 tests).
+
+## CI round 1
+
+`Build Chrome` failed on "Assert the build left generated sources unchanged": `src/utils/**` exports are auto-imported, so the four new helpers (`copyWithToast`, `isNewPasswordValid`, `newPasswordHint`, `buildIncomingCardProps`) changed `src/types/auto-imports.d.ts` and `.eslintrc-auto-import.json`. Reproduced with `bun run --cwd apps/extension build:chrome`, committed the regenerated files. Lesson for every later phase: the local gate must include the build whenever a phase adds or removes an exported symbol under `src/utils`, `src/composables`, `src/stores` or `src/components`.
