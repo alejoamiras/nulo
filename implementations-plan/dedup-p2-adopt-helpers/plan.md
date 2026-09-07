@@ -76,7 +76,7 @@ Pass: exit 0 each. Layers: lint/typecheck + unit.
 Pass: exit 0 each; new `password.test.ts` and the extended `clipboard.test.ts` green. Layers:
 lint/typecheck + unit + component.
 
-### Phase 4 — full local gate
+### Phase 4 — full local gate ✓
 
 **Validation gate**: `bun run lint && bun run typecheck:all && bun run test`. Pass: exit 0 each, quoted
 in the transcript. No e2e locally (CI's smoke + network run on the PR).

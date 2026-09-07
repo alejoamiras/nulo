@@ -38,6 +38,10 @@ Base: `worktree-dedup-p1-delete` (PR #561). Scope: ledger ids X2 X3 X6 X1 E1 H3 
 - L6 / M7: `readSavedFeeMethods()` local helper; `logs-csv.ts` calls `formatLogData` directly (its array branch was the same code).
 - Gate: lint 0 · extension typecheck 0 · wallet-bridge typecheck 0 (after narrowing the parity test's draft types) · 101 extension test files / 1,420 tests · wallet-bridge 261 tests.
 
-## Phase 4 — full local gate
+## Phase 4 — full local gate ✓
 
-(in progress)
+`bun run lint` exit 0 · `bun run typecheck:all` exit 0 · `bun run test` exit 0 (441 files, 5,518 tests) at 36711cea. The pre-commit hook surfaced two leftover imports (`formatArg`, `isSelfPay`) as warnings; removed before the commit was finalised.
+
+## Codex fix loop
+
+(pending)
