@@ -93,3 +93,6 @@ no `nulo:e2e:` marker in `dist/chrome`.
   check; the seven component openers lost their narration (two kept a constraint), the explainer's container-query
   comment and the forwarder's doc shrank, and journal's "mirrors tx" comments above composed classes went. An HTML
   comment inside the `<Input …/>` tag broke the SFC ("Duplicate attribute"); it lives above the tag.
+- **Round 2** (on 007da0af): *"no new material findings"* — every round-1 item verified addressed; one low comment
+  correction adopted after the verdict (the explainer's container-query note now attributes the side padding to the
+  app shell, with `OnboardingPage` as the query container). Loop converged in two rounds.

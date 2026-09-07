@@ -60,8 +60,8 @@ const emit = defineEmits(["continue", "skip"])
 	border: 1px solid var(--nulo-border);
 }
 
-/* Container query, not viewport: OnboardingPage adds 24+24 px of side padding, and under 540 px of
- * container width three columns leave the card copy ~130 px. */
+/* Container query, not viewport: the app shell adds 24+24 px of side padding around OnboardingPage (the
+ * query container), and under 540 px of container width three columns leave the card copy ~130 px. */
 @container onboarding-page (max-width: 540px) {
 	.grid {
 		grid-template-columns: 1fr;
