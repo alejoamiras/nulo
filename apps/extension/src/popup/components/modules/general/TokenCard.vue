@@ -112,7 +112,7 @@ const syncFailed = computed(() => !!props.tokenBalance?.syncFailure && !props.to
 		</Flex>
 
 		<Flex
-			v-if="isInitialSync && !syncFailed"
+			v-if="isInitialSync && !syncFailed && !isMalformed"
 			align="center"
 			gap="6"
 			data-testid="token-balance-loading"

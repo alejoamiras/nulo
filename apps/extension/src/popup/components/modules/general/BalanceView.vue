@@ -114,18 +114,27 @@ const handleTokenBalanceClick = async () => {
 
 // The balance service returns a shared address's rows from every chain of the profile; the
 // aggregate is over the active chain only.
-const onActiveChain = (tb) => tb.token?.chainId === appStore.network?.chainId
+const inActiveScope = (tb) => tb.account === appStore.account?.address && tb.token?.chainId === appStore.network?.chainId
+
+/** False while the active scope's snapshot is in flight: the figure is hidden, not shown as $0.00. */
+const isLoaded = ref(false)
+// A snapshot in flight is older than any event that lands meanwhile; the event marks it stale.
+let fetchDirty = false
+const markDirty = () => {
+	if (!isLoaded.value) fetchDirty = true
+}
 
 const tokenBalanceService = new TokenBalanceServiceClient()
 tokenBalanceService.onTokenBalanceAdded.add(onBalanceAdded)
 tokenBalanceService.onTokenBalanceUpdated.add(onBalanceUpdated)
 tokenBalanceService.onTokenBalanceDeleted.add(onBalanceDeleted)
 function onBalanceAdded(tb) {
-	if (tb.account !== appStore.account?.address || !onActiveChain(tb)) return
-
+	if (!inActiveScope(tb)) return
 	tokenBalances.value.push(tb)
+	markDirty()
 }
 function onBalanceUpdated(tb) {
+	if (inActiveScope(tb)) markDirty()
 	const idx = tokenBalances.value.findIndex((_tb) => _tb.id === tb.id)
 	if (idx !== -1) {
 		tokenBalances.value[idx] = tb
@@ -133,19 +142,28 @@ function onBalanceUpdated(tb) {
 }
 function onBalanceDeleted(tb) {
 	tokenBalances.value = tokenBalances.value.filter((_tb) => _tb.id !== tb.id)
+	markDirty()
 }
 
-// A fetch for one scope may resolve after the user moved on; only the latest request may land.
+// A fetch for one scope may resolve after the user moved on; only the latest request may land,
+// and a snapshot overtaken by a live event is refetched rather than applied.
 let fetchGeneration = 0
 async function fetchTokenBalances() {
 	const generation = ++fetchGeneration
 	const address = appStore.account?.address
 	const chainId = appStore.network?.chainId
 	tokenBalances.value = []
-	if (!address) return
+	isLoaded.value = false
+	fetchDirty = false
+	if (!address) {
+		isLoaded.value = true
+		return
+	}
 	const rows = await tokenBalanceService.getTokenBalances(undefined, address)
 	if (generation !== fetchGeneration) return
+	if (fetchDirty) return fetchTokenBalances()
 	tokenBalances.value = forChain(rows, chainId)
+	isLoaded.value = true
 }
 
 watch(
@@ -179,13 +197,13 @@ onBeforeUnmount(() => {
 					{{ totalTokenBalance.value }}
 					<span :class="$style.balance_symbol">{{ tokenToDisplay?.symbol }}</span>
 				</template>
-				<template v-else>{{ aggregateFiatDisplay }}</template>
+				<template v-else-if="isLoaded">{{ aggregateFiatDisplay }}</template>
 			</div>
 
 			<div v-if="tokenToDisplay && displayedTokenFiat" data-testid="balance-fiat" :class="$style.fiat_line">
 				{{ displayedTokenFiat }}
 			</div>
-			<div v-if="!tokenToDisplay && isAggregatePartial" data-testid="balance-fiat-partial" :class="$style.fiat_partial">
+			<div v-if="!tokenToDisplay && isLoaded && isAggregatePartial" data-testid="balance-fiat-partial" :class="$style.fiat_partial">
 				priced assets only
 			</div>
 

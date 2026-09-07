@@ -11,6 +11,7 @@ import { createTestingPinia } from "@pinia/testing"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 let deletedHandler: ((tb: unknown) => void) | undefined
+let addedHandler: ((tb: unknown) => void) | undefined
 const noopEvent = { add: vi.fn(), remove: vi.fn() }
 
 const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
@@ -40,7 +41,12 @@ vi.mock("@/wallet/services/token-balance/client", () => ({
 	TokenBalanceServiceClient: vi.fn(function () {
 		return {
 			disconnect: vi.fn(),
-			onTokenBalanceAdded: noopEvent,
+			onTokenBalanceAdded: {
+				add: vi.fn((fn: (tb: unknown) => void) => {
+					addedHandler = fn
+				}),
+				remove: vi.fn(),
+			},
 			onTokenBalanceUpdated: noopEvent,
 			onTokenBalanceDeleted: {
 				add: vi.fn((fn: (tb: unknown) => void) => {
@@ -153,6 +159,7 @@ beforeEach(() => {
 afterEach(() => {
 	vi.clearAllMocks()
 	deletedHandler = undefined
+	addedHandler = undefined
 	mockQuotes = {}
 	mockShowFiat = true
 	seedRows = SEED
@@ -231,6 +238,43 @@ describe("BalanceView — Home aggregate", () => {
 		pending.get("0xacct")?.(SEED)
 		await flushPromises()
 		expect(wrapper.find('[data-testid="balance-amount"]').text()).not.toContain("1,249")
+	})
+
+	test("while the snapshot is in flight the figure and caption are hidden, not shown as $0.00", async () => {
+		mockQuotes = FRESH()
+		let resolveFetch: ((rows: typeof SEED) => void) | undefined
+		fetchRows = () =>
+			new Promise((resolve) => {
+				resolveFetch = resolve
+			})
+		const { wrapper } = await mountView()
+		expect(wrapper.find('[data-testid="balance-amount"]').text()).toBe("")
+		expect(wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(false)
+
+		resolveFetch?.(SEED)
+		await flushPromises()
+		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("$1,249.82")
+		expect(wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(true)
+	})
+
+	test("a live add that lands during the fetch outranks the older snapshot: it is refetched, not overwritten", async () => {
+		mockQuotes = FRESH()
+		let resolveFirst: ((rows: typeof SEED) => void) | undefined
+		let calls = 0
+		// The first snapshot is empty and slow; a refetch sees the funded state.
+		fetchRows = () =>
+			calls++ === 0
+				? new Promise((resolve) => {
+						resolveFirst = resolve
+					})
+				: Promise.resolve(SEED)
+		const { wrapper } = await mountView()
+
+		addedHandler?.(SEED[0])
+		resolveFirst?.([])
+		await flushPromises()
+		expect(calls).toBe(2)
+		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("$1,249.82")
 	})
 
 	test("deleting a row keeps the list consistent (the aggregate drops it)", async () => {

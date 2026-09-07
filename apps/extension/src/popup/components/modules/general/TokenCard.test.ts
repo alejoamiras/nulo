@@ -212,6 +212,13 @@ describe("TokenCard — hostile rows", () => {
 		expect(w.find('[data-testid="token-fiat"]').exists()).toBe(false)
 	})
 
+	test("a malformed row that never synced shows the dash, not the loading block", async () => {
+		const w = factory({ updatedAt: 0, publicBalance: "1.5", privateBalance: "0" })
+		await flushPromises()
+		expect(w.find('[data-malformed="true"]').text()).toBe("—")
+		expect(w.find('[data-testid="token-balance-loading"]').exists()).toBe(false)
+	})
+
 	test("a long symbol and a long name both render clipped, with the balance still present", async () => {
 		const w = factory({ updatedAt: 1, publicBalance: (7n * 10n ** 18n).toString() }, { symbol: "S".repeat(400), name: "N".repeat(400) })
 		await flushPromises()

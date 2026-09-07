@@ -24,3 +24,18 @@ session `01a0793e-ad76-7842-b60f-f74d9018c920`.
 
 Not taken: nothing. Codex's "looks fine" list (tabs, cap, count, overflow, both live-add guards,
 no display-option readers, no new logging) matched the tree.
+
+## Round 2 — verdict `approve with fixes`, four findings, all verified and taken
+
+1. **Medium — a snapshot in flight could still overwrite a newer live event** (the generation only
+   fenced other fetches). Fix: any in-scope balance event during a fetch marks it dirty; a dirty
+   snapshot is discarded and refetched. New case: add during the fetch, then the empty first
+   snapshot resolves → the hero keeps the funded figure and the fetch count is 2.
+2. **Medium — clearing the list on a scope change showed `$0.00` (no caption) for the whole
+   request.** Fix: an `isLoaded` flag; the figure and the partial caption render only once the
+   scope's snapshot landed. New case: empty figure while deferred, the value after.
+3. **Low — `TokenCard`'s never-synced branch won over the malformed branch** ("Loading balance…"
+   for `updatedAt: 0` + `"1.5"`). Fix: the loading block also requires `!isMalformed`. New case.
+4. **Low — plan.md's data-flow section had the other contradictory dispose sentence.** Corrected.
+
+Codex confirmed the round-1 race test fails with the generation check removed.

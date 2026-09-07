@@ -266,7 +266,7 @@ Everything else about the popup is untouched.
 - **Home**: `TokensView` fetches balances as today → `orderTokenRows(rows, { pinnedContracts, fiatOf })`
   → `capTokenRows` → renders `shown` with `TokenCard`, plus "View all" when `overflow > 0`.
   `fiatOf` comes from a `PriceServiceClient` + `usePrices` owned by TokensView (the shape BalanceView
-  uses; disposed after its client disconnects); `pinnedContracts` from `usePinnedTokens` with a
+  uses; disposed before its client disconnects); `pinnedContracts` from `usePinnedTokens` with a
   `TokenServiceClient` TokensView constructs for it (`knownContracts` = a getter over the fetched
   rows' contracts, `undefined` until the first fetch resolves). `BalanceView`'s aggregate applies the
   same `forChain` to its own fetch and event handlers (Scope 3).
