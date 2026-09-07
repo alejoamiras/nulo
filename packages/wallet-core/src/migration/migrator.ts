@@ -35,6 +35,7 @@
 
 import type { Migration, MigrationContext, MigrationResult, MinimalStorageArea, StorageRef } from "./types"
 import { StagingArea } from "./staging"
+import { errorMessageFromUnknown } from "../utils/errors"
 
 /** The engine's own durable keys. The whole `nulo:schema:` prefix is reserved:
  *  footprints never include it and migrations may not write into it. */
@@ -141,7 +142,7 @@ export class Migrator {
 		} catch (err) {
 			return {
 				kind: "needs-recovery",
-				reason: `unexpected storage failure during migration: ${message(err)}`,
+				reason: `unexpected storage failure during migration: ${errorMessageFromUnknown(err)}`,
 				retryable: true,
 				// "Free" ONLY when no bump landed this run — a throw can escape
 				// after a successful bump (e.g. the journal clear that follows
@@ -259,7 +260,7 @@ export class Migrator {
 				const attempts = await this.bumpAttempts(m.version, "restore")
 				return {
 					kind: "needs-recovery",
-					reason: `failed to restore after migration ${m.version} failed: ${message(restoreErr)} (migration error: ${message(err)})`,
+					reason: `failed to restore after migration ${m.version} failed: ${errorMessageFromUnknown(restoreErr)} (migration error: ${errorMessageFromUnknown(err)})`,
 					retryable: attempts < this.maxRetries,
 				}
 			}
@@ -274,7 +275,7 @@ export class Migrator {
 				kind: "failed",
 				version: m.version,
 				breaking: m.breaking,
-				reason: message(err),
+				reason: errorMessageFromUnknown(err),
 				attempts,
 				terminal: attempts >= this.maxRetries,
 			}
@@ -352,7 +353,7 @@ export class Migrator {
 			const attempts = await this.bumpAttempts(backup.version, "restore")
 			return {
 				kind: "needs-recovery",
-				reason: `failed to restore backup for interrupted migration ${backup.version}: ${message(err)}`,
+				reason: `failed to restore backup for interrupted migration ${backup.version}: ${errorMessageFromUnknown(err)}`,
 				retryable: attempts < this.maxRetries,
 			}
 		}
@@ -449,8 +450,4 @@ export class Migrator {
 		for (const k of keys) if (k in got) out[k] = got[k]
 		return out
 	}
-}
-
-function message(err: unknown): string {
-	return err instanceof Error ? err.message : String(err)
 }

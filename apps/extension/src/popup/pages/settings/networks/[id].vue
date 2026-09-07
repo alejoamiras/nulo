@@ -23,6 +23,7 @@ const { activate: activateNetwork } = useNetworkActivation({
 import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
 import { useCacheStore } from "@/stores/cache.store"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 const cacheStore = useCacheStore()
@@ -105,7 +106,7 @@ const handleDeleteEndpoint = (endpoint) => {
 			await refreshNetworks()
 			openToast({ label: "Endpoint deleted" })
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err)
+			const msg = errorMessageFromUnknown(err)
 			if (msg.includes("PRIMARY_ENDPOINT")) {
 				openToast({ label: "Make another endpoint primary first.", icon: "warning" }, TOAST_DURATION.LONG)
 			} else if (msg.includes("LAST_ENDPOINT")) {
@@ -132,7 +133,7 @@ const handleDeleteNetwork = () => {
 			openToast({ label: "Chain deleted" })
 			router.replace("/popup/settings/networks")
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err)
+			const msg = errorMessageFromUnknown(err)
 			if (msg.startsWith("ACTIVE_NETWORK")) {
 				openToast({ label: "Switch to another chain before deleting this one.", icon: "warning" }, TOAST_DURATION.LONG)
 			} else {

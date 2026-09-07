@@ -41,6 +41,7 @@ import type { IPXE } from "@/wallet/services/pxe/client"
 import { StepContent, type TaskService, type WrappedTask } from "@/wallet/services/task/service"
 import { type ProofGate, NOOP_PROOF_GATE } from "@/e2e/proof-gate"
 import { DuplicateInitializationError } from "@nulo/extension-messaging/errors"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 
 /** Journal patches the shared pipeline tail emits. Structural subset of
  *  the operation-journal patch shape — callers bind their own journal id
@@ -93,7 +94,7 @@ export interface ProveAndSendContext<TOffchain = unknown> {
  *  race and prescribe an infinite retry. Mined REVERTED receipts carry NO
  *  error data and are never classified. */
 function isExistingNullifierError(error: unknown): boolean {
-	const message = error instanceof Error ? error.message : String(error)
+	const message = errorMessageFromUnknown(error)
 	return /existing nullifier/i.test(message)
 }
 
@@ -167,7 +168,7 @@ export class ExecutionCoordinator {
 		} catch (error) {
 			const classified =
 				initializesAccount === true && isExistingNullifierError(error)
-					? new DuplicateInitializationError(undefined, { cause: error instanceof Error ? error.message : String(error) })
+					? new DuplicateInitializationError(undefined, { cause: errorMessageFromUnknown(error) })
 					: error
 			task.fail(classified)
 			throw classified

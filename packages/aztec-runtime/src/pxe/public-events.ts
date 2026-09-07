@@ -35,6 +35,7 @@ import { type LogResult, LogCursor, Tag } from "@aztec/stdlib/logs"
 // (protocol test) token, so the class gate + event metadata must come from aztec-standards.
 import { TokenContract, TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import z from "zod"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 
 export type PublicEventLogger = (level: "warn" | "debug", msg: string, ...rest: unknown[]) => void
 
@@ -382,7 +383,7 @@ function decodePublicTransfer(entry: LogResult, log?: PublicEventLogger): Public
 			logIndexWithinTx: entry.logIndexWithinTx,
 		}
 	} catch (err) {
-		log?.("warn", "public-events: skipping a malformed Transfer log", err instanceof Error ? err.message : String(err))
+		log?.("warn", "public-events: skipping a malformed Transfer log", errorMessageFromUnknown(err))
 		return undefined
 	}
 }
@@ -434,11 +435,7 @@ export async function resolveTokenClassStatus(
 		try {
 			instance = await node.getContract(contractAddress, param)
 		} catch (err) {
-			log?.(
-				"debug",
-				`public-events: class gate unresolved (node getContract threw at ${label})`,
-				err instanceof Error ? err.message : String(err),
-			)
+			log?.("debug", `public-events: class gate unresolved (node getContract threw at ${label})`, errorMessageFromUnknown(err))
 			return "unresolved"
 		}
 		if (!instance) return "unresolved"

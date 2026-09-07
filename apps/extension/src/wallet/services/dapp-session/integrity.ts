@@ -16,6 +16,7 @@
  */
 
 import type { DappSession } from "./spec"
+import { toBase64 } from "@nulo/wallet-core/utils"
 
 /** The signed view of a row: everything except the `mac` field itself. */
 export type SignableDappSession = Omit<DappSession, "mac">
@@ -48,7 +49,7 @@ function stableStringify(value: unknown): string {
 /** HMAC-SHA256 the canonical row; returns the MAC as base64. */
 export async function signDappSession(key: CryptoKey, row: SignableDappSession): Promise<string> {
 	const mac = await crypto.subtle.sign("HMAC", key, canonicalizeDappSession(row))
-	return Buffer.from(new Uint8Array(mac)).toString("base64")
+	return toBase64(new Uint8Array(mac))
 }
 
 /** Constant-time (WebCrypto `verify`) check of a row against its stored MAC. */

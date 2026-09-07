@@ -53,7 +53,7 @@ and needs no platform assumption.
 
 ## Phases
 
-### Phase 1 — cross-package helpers (X2, X3, X6)
+### Phase 1 — cross-package helpers (X2, X3, X6) ✓
 
 Replace the 39 inline error ternaries (delete `migrator.ts`'s local `message()`), the 6 deferred-promise
 copies (new `deferred.ts` + `rw-guard.ts` adoption), and the 2 `Buffer` base64 sites.

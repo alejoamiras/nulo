@@ -22,6 +22,7 @@ import { TOKEN_SERVICE_NAME } from "@/wallet/services/token/spec"
 import { TokenServiceClient } from "@/wallet/services/token/client"
 import { AccountStateServiceClient } from "@/wallet/services/account-state/client"
 import { runImportChainSync } from "./importChainSync"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 
 export type RestoreStatus = "" | "progress" | "failed" | "finished" | null | undefined
 
@@ -192,7 +193,7 @@ export async function resolvePasskeyCredential(
 		// again — without it, the Import button stays disabled because the page's
 		// status guard only re-enables on "" / null / undefined.
 		if (err instanceof UserRejectedError) return { kind: "silent-reset" }
-		return { kind: "fail", title: "Couldn't authenticate", message: err instanceof Error ? err.message : String(err) }
+		return { kind: "fail", title: "Couldn't authenticate", message: errorMessageFromUnknown(err) }
 	}
 }
 
@@ -360,7 +361,7 @@ export async function restoreAccountsStage(
 		// this now fires only for a genuine repeat of the same account. The RPC layer
 		// (`extension-messaging/client.ts`) reconstructs that as an `Error` instance on the
 		// client — so match on `.message`, not via string-equality on `err` itself.
-		const msg = err instanceof Error ? err.message : String(err)
+		const msg = errorMessageFromUnknown(err)
 		if (msg === "Duplicate account") {
 			// NetworkService.onProfileDeleted cascades — purges this profile's networks
 			// automatically. No explicit cleanup needed.

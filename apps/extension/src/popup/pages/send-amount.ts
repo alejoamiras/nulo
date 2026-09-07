@@ -10,6 +10,7 @@
  */
 
 import { parseAmountToBaseUnits } from "@/utils/amount"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 
 export type ValidateSendAmountReason = "empty" | "invalid" | "tooManyDecimals" | "belowMinimum" | "exceedsBalance" | "decimalsUnknown"
 
@@ -36,7 +37,7 @@ function parseToBaseUnits(
 	try {
 		return { ok: true, value: parseAmountToBaseUnits(trimmed, tokenDecimals) }
 	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err)
+		const msg = errorMessageFromUnknown(err)
 		return { ok: false, reason: msg.includes("too many decimals") ? "tooManyDecimals" : "invalid" }
 	}
 }

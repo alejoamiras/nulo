@@ -39,6 +39,7 @@ import {
 	PublicTransferPageSchema,
 } from "./public-events"
 import { PXEProxy } from "./proxy"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 
 /**
  * Base PXE service client. Chrome-agnostic: does no offscreen
@@ -146,7 +147,7 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 		try {
 			return await super.request(method, ...args)
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err)
+			const message = errorMessageFromUnknown(err)
 			const profileId = (args[0] as NetworkInfo | undefined)?.profileId
 			if (method === "provisionChainStoreKey" || !message.includes("PXE_STORE_KEY_MISSING") || !profileId || !this.storeKeyProvider) {
 				throw err

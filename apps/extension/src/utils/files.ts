@@ -1,3 +1,5 @@
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
+
 const mimeByExtension: Record<string, string> = {
 	".json": "application/json;charset=utf-8",
 	".txt": "text/plain;charset=utf-8",
@@ -281,7 +283,7 @@ export async function compressData(data: string | ArrayBuffer | Blob | ReadableS
 		const response = new Response(compressedStream)
 		return await response.blob()
 	} catch (err) {
-		throw new Error(`Failed to compress data: ${err instanceof Error ? err.message : String(err)}`)
+		throw new Error(`Failed to compress data: ${errorMessageFromUnknown(err)}`)
 	}
 }
 

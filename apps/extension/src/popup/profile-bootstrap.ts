@@ -1,3 +1,5 @@
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
+
 export interface FencedBootstrapDeps {
 	profileId: string
 	bootstrap: () => Promise<void>
@@ -21,7 +23,7 @@ export async function runFencedBootstrap(deps: FencedBootstrapDeps): Promise<voi
 	} catch (err) {
 		console.error("bootstrap failed", err)
 		if (!deps.isCurrent()) return
-		deps.setFailure({ profileId: deps.profileId, message: err instanceof Error ? err.message : String(err) })
+		deps.setFailure({ profileId: deps.profileId, message: errorMessageFromUnknown(err) })
 		if (deps.shouldToast()) deps.toast()
 	}
 }

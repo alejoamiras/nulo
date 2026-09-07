@@ -39,6 +39,8 @@ import {
 
 export type { RestoreStage, RestoreStatus } from "./full-backup-restore"
 import type { RestoreStage, RestoreStatus } from "./full-backup-restore"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
+import { fromBase64 } from "@/wallet/utils"
 
 /** Bound on dropped-balance records. This path never reaches the collector, so it carries no cap
  *  of its own — and a hostile backup can ship tens of thousands of un-relinkable rows. */
@@ -388,7 +390,7 @@ async function openEncryptedBackup(
 	if (isStale()) return { kind: "stale" }
 	const key = await EncryptionKey.fromPasshash(passhash)
 	if (isStale()) return { kind: "stale" }
-	const encryptedBytes = new Uint8Array(Buffer.from(sealed, "base64"))
+	const encryptedBytes = fromBase64(sealed)
 	const decryptedBytes = await key.decrypt(encryptedBytes)
 	if (isStale()) return { kind: "stale" }
 	const decodedJson = new TextDecoder().decode(decryptedBytes)
@@ -545,7 +547,7 @@ async function executeRestore(
 		applyOutcome(io, {
 			kind: "fail",
 			title: "Couldn't open the imported profile",
-			message: err instanceof Error ? err.message : String(err),
+			message: errorMessageFromUnknown(err),
 		})
 		return null
 	}

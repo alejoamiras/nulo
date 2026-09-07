@@ -9,6 +9,7 @@ import { FileTooLargeError, pickFile } from "@/utils"
 import { copyToClipboard } from "@/utils/clipboard"
 import { MAX_BACKUP_FILE_BYTES } from "@/utils/full-backup-helpers"
 import { managers } from "@/utils/core"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 
 /**
  * Shared orchestration for the profile-IMPORT flow, consumed by both the
@@ -62,7 +63,7 @@ function useImportErrorState(openToast: UseProfileImportFlowOptions["openToast"]
 	// message as tooltip. Replaces popup's prior `fillError("unknown", err)`,
 	// which put the Error object in the title slot and rendered "[object Object]".
 	function fillUnknownImportError(err: unknown) {
-		fillError("unknown", "Import failed", err instanceof Error ? err.message : String(err))
+		fillError("unknown", "Import failed", errorMessageFromUnknown(err))
 	}
 
 	const isCopied = ref(false)

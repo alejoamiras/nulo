@@ -22,6 +22,7 @@ import CollapsingHeroLayout from "@/components/composite/CollapsingHeroLayout.vu
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 const appStore = useAppStore()
 
 const router = useRouter()
@@ -78,7 +79,7 @@ const handleChangePassword = async () => {
 		if (err instanceof Error && err.message === "Invalid profile old password") {
 			isWrongCurrentPassword.value = true
 		} else {
-			unexpectedErrorMessage.value = err instanceof Error ? err.message : String(err)
+			unexpectedErrorMessage.value = errorMessageFromUnknown(err)
 		}
 	} finally {
 		isLoading.value = false

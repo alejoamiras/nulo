@@ -10,6 +10,8 @@
  * callable from both the service worker (restore producers) and the popup
  * (the error-log consumer).
  */
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
+
 export function toRestoreError(err: unknown): string {
-	return err instanceof Error ? err.message : String(err)
+	return errorMessageFromUnknown(err)
 }

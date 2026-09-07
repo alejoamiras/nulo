@@ -1,5 +1,5 @@
 import { type ILogger, LogLevel } from "@nulo/wallet-core/logger"
-import { jsonSanitize } from "@nulo/wallet-core/utils"
+import { jsonSanitize, errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { decodeResult } from "./decode"
@@ -208,7 +208,7 @@ export abstract class BaseServiceClient<TRequests extends MethodsMap, TEvents ex
 			// Malformed `resultIsJson` payload. Fail closed: settle (which clears
 			// the pending entry) with an error, rather than letting the throw
 			// escape this listener and leak the request until its timeout.
-			const message = cause instanceof Error ? cause.message : String(cause)
+			const message = errorMessageFromUnknown(cause)
 			this.settle(content.requestId, { reject: new Error(`Malformed response payload: ${message}`) }, "rejected")
 			return
 		}

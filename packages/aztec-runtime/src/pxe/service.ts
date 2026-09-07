@@ -33,7 +33,7 @@ const AccessScopesSchema = z.array(AztecAddress.schema)
 import type { ServiceSpec } from "@nulo/wallet-core/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/offscreen"
 import type { ILogger } from "@nulo/wallet-core/logger"
-import { ReadWriteGuard } from "@nulo/wallet-core/utils"
+import { ReadWriteGuard, errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 import type { NetworkInfo } from "./chain-runtime"
 import { ChainRuntimeRegistry, ProductionPxeFactory, PXE_STORE_KEY_MISSING, type PxeFactory } from "./chain-runtime"
 import { PXE_DATA_DIR_ROOT, chainDataDir, chainDataDirPrefix, chainRegistryKey, chainRegistryKeyPrefix } from "./chain-coordinates"
@@ -204,9 +204,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		// would deadlock the reset flow. The deferred sweep is race-safe against that in-flight
 		// deletion: the profile row still exists while its purge runs (the coordinator deletes
 		// the row LAST), so the sweep skips it; every removal is idempotent + NotFound-swallowed.
-		void this.sweepOrphanStores().catch((err) =>
-			this.logWarn("deferred orphan-store sweep failed", err instanceof Error ? err.message : String(err)),
-		)
+		void this.sweepOrphanStores().catch((err) => this.logWarn("deferred orphan-store sweep failed", errorMessageFromUnknown(err)))
 
 		// NOTE: PXE cleanup on profile deletion is NO LONGER a fire-and-forget
 		// `onProfileDeleted` subscriber (it raced the cascade + unconditionally
@@ -353,7 +351,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// and continue the cascade so the local known-bundle still has a chance.
 			this.logWarn(
 				`getContractInstance: node lookup failed for ${address.toString()}, continuing cascade`,
-				err instanceof Error ? err.message : String(err),
+				errorMessageFromUnknown(err),
 			)
 			instance = undefined
 		}
@@ -926,7 +924,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 * ALSO fails still surfaces at the caller. Everything else stays error.
 	 */
 	private logOpFailure(kind: "READ" | "WRITE", label: string, start: number, err: unknown): void {
-		const message = err instanceof Error ? err.message : String(err)
+		const message = errorMessageFromUnknown(err)
 		if (message.includes(PXE_STORE_KEY_MISSING)) {
 			this.logDebug(`[${kind}] ${label} pre-provision miss after ${Date.now() - start}ms (client re-provisions + retries)`)
 		} else {

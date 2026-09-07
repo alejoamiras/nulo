@@ -12,6 +12,7 @@ const { openToast } = useToast()
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
+import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 
@@ -124,7 +125,7 @@ function toastNonActivatedOutcome(result) {
 }
 
 function reportCreateFailure(error) {
-	const msg = error instanceof Error ? error.message : String(error)
+	const msg = errorMessageFromUnknown(error)
 	if (msg.startsWith("DUPLICATE_CHAIN")) {
 		// Smart-add: chain already exists in profile. Surface this clearly
 		// so the user knows to use Settings → Networks → [chain] → Add endpoint.
