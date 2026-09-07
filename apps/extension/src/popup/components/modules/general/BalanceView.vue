@@ -11,7 +11,7 @@ import { ConfigServiceClient } from "@/wallet/services/config/client"
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
 import { copyToClipboard } from "@/utils/clipboard"
-import { parseRawBalance, safeFiatOf } from "@/utils/token-amount"
+import { isValidDecimals, parseRawBalance, safeFiatOf } from "@/utils/token-amount"
 import { aggregateFiat } from "@/utils/token-aggregate"
 import { forChain } from "@/utils/token-order"
 
@@ -37,25 +37,29 @@ const tokenBalances = ref([])
 
 const tokenToDisplay = computed(() => props.tokenBalance?.token)
 const showFullBalance = ref(false)
+/** The token hero reads a stored row: a malformed side or invalid decimals renders a dash, never throws. */
+const heroSides = computed(() => {
+	const tb = props.tokenBalance
+	if (!tb || !isValidDecimals(tb.token?.decimals)) return undefined
+	const publicRaw = parseRawBalance({ publicBalance: tb.publicBalance })
+	const privateRaw = parseRawBalance({ privateBalance: tb.privateBalance })
+	if (publicRaw === undefined || privateRaw === undefined) return undefined
+	return { publicRaw, privateRaw, decimals: tb.token.decimals }
+})
 const totalTokenBalance = computed(() => {
 	if (!props.tokenBalance) return { value: 0 }
-
-	// Sum raw base units in bigint domain — no float pivot, no precision loss
-	// even at 18 decimals.
-	const decimals = props.tokenBalance.token?.decimals || 0
-	const publicRaw = BigInt(props.tokenBalance.publicBalance || 0)
-	const privateRaw = BigInt(props.tokenBalance.privateBalance || 0)
-
-	return balanceFormatted(publicRaw + privateRaw, decimals, showFullBalance.value ? undefined : 20)
+	const sides = heroSides.value
+	if (!sides) return { value: "—" }
+	return balanceFormatted(sides.publicRaw + sides.privateRaw, sides.decimals, showFullBalance.value ? undefined : 20)
 })
 
 const privateBalanceFormatted = computed(() => {
-	if (!props.tokenBalance) return "0"
-	return balanceFormatted(props.tokenBalance.privateBalance || 0, props.tokenBalance.token?.decimals || 0, 10).value
+	const sides = heroSides.value
+	return sides ? balanceFormatted(sides.privateRaw, sides.decimals, 10).value : "—"
 })
 const publicBalanceFormatted = computed(() => {
-	if (!props.tokenBalance) return "0"
-	return balanceFormatted(props.tokenBalance.publicBalance || 0, props.tokenBalance.token?.decimals || 0, 10).value
+	const sides = heroSides.value
+	return sides ? balanceFormatted(sides.publicRaw, sides.decimals, 10).value : "—"
 })
 
 /** Live prices. Parent owns the client lifecycle; the composable owns
@@ -76,15 +80,11 @@ configService.getValue("showFiatValues").then((v) => {
 	showFiatValues.value = v !== false
 })
 
-const displayedRawTotal = computed(() => {
-	if (!props.tokenBalance) return 0n
-	return BigInt(props.tokenBalance.publicBalance || 0) + BigInt(props.tokenBalance.privateBalance || 0)
-})
-
-/** Secondary line for the token hero: `≈ $x.xx`, or undefined (hidden). */
+/** Secondary line for the token hero: `≈ $x.xx`, or undefined (hidden, also for a malformed row). */
 const displayedTokenFiat = computed(() => {
-	if (!tokenToDisplay.value) return undefined
-	return prices.tokenFiatLabel(tokenToDisplay.value, displayedRawTotal.value)
+	const sides = heroSides.value
+	if (!tokenToDisplay.value || !sides) return undefined
+	return prices.tokenFiatLabel(tokenToDisplay.value, sides.publicRaw + sides.privateRaw)
 })
 
 const fiatOf = safeFiatOf((tb) => prices.tokenFiatMicro(tb.token, parseRawBalance(tb)))

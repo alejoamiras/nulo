@@ -405,6 +405,28 @@ describe("TokensView — Home order and cap", () => {
 		expect(cardSymbols(wrapper)).toEqual(["A"])
 	})
 
+	test("a scope change clears the previous rows before the new fetch resolves; a rejected fetch leaves none", async () => {
+		H.getTokenBalances.mockResolvedValue([namedRow(1, "OLD", { chainId: MAINNET })])
+		const wrapper = mount(TokensView, { shallow: true })
+		await flushPromises()
+		expect(cardSymbols(wrapper)).toEqual(["OLD"])
+
+		const pending = deferred<unknown[]>()
+		H.getTokenBalances.mockReturnValue(pending.promise)
+		H.store.current.network = { id: "net-other", chainId: MAINNET + 1 }
+		await flushPromises()
+		expect(cardSymbols(wrapper)).toEqual([])
+
+		pending.resolve([namedRow(2, "NEW", { chainId: MAINNET + 1 })])
+		await flushPromises()
+		expect(cardSymbols(wrapper)).toEqual(["NEW"])
+
+		H.getTokenBalances.mockRejectedValue(new Error("port closed"))
+		H.store.current.network = { id: "net-main", chainId: MAINNET }
+		await flushPromises()
+		expect(cardSymbols(wrapper)).toEqual([])
+	})
+
 	test("hostile rows reach the REAL card without throwing: a dash for the malformed ones, the good row intact", async () => {
 		H.getTokenBalances.mockResolvedValue([
 			namedRow(1, "GOOD", { chainId: MAINNET }),

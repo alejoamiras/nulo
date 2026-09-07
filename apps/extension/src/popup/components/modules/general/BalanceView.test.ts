@@ -323,6 +323,18 @@ describe("BalanceView — Home aggregate", () => {
 })
 
 describe("BalanceView — token hero (tokenBalance prop)", () => {
+	test("a malformed row renders dashes for the amount and both sides, no fiat, and never throws", async () => {
+		mockQuotes = FRESH()
+		const { wrapper } = await mountView({ tokenBalance: { ...SEED[0], publicBalance: "1.5" } })
+		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("—")
+		expect(wrapper.find('[data-testid="private-balance-value"]').text()).toBe("—")
+		expect(wrapper.find('[data-testid="public-balance-value"]').text()).toBe("—")
+		expect(wrapper.find('[data-testid="balance-fiat"]').exists()).toBe(false)
+
+		const bad = await mountView({ tokenBalance: { ...SEED[0], token: { ...SEED[0].token, decimals: 500 } } })
+		expect(bad.wrapper.find('[data-testid="balance-amount"]').text()).toContain("—")
+	})
+
 	test("a priced token shows its amount, the ≈ fiat line and the lock/globe split", async () => {
 		mockQuotes = FRESH()
 		const { wrapper } = await mountView({ tokenBalance: SEED[0] })

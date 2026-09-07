@@ -316,8 +316,20 @@ function refreshBalances() {
 async function fetchTokenBalances() {
 	// Guard the outer race with the same scope generation: a rapid account/network switch fires two
 	// fetches; the one that RESOLVES last would otherwise write its (older) balances + reseed and win.
+	// The previous scope's rows go before the await so they are never ordered under the new scope's
+	// pins, and a rejected fetch leaves an empty list rather than a foreign one.
 	const scopeAtStart = scopeGen
-	const rows = forChain(await tokenBalanceService.getTokenBalances(undefined, appStore.account?.address), appStore.network?.chainId)
+	const address = appStore.account?.address
+	const chainId = appStore.network?.chainId
+	tokenBalances.value = []
+	if (!address) return
+	let fetched
+	try {
+		fetched = await tokenBalanceService.getTokenBalances(undefined, address)
+	} catch {
+		return
+	}
+	const rows = forChain(fetched, chainId)
 	const balances = rows.map((tb) => ({
 		...tb,
 		isUpdating: tasks.value.some((t) => t.content.tbId === tb.id && !t.finishedAt),
