@@ -771,7 +771,7 @@ Validation gate — `<fast>`; `<smoke>`;
 `NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/pin-to-home.test.ts tests/e2e/network/holdings.test.ts tests/e2e/network/send-picker.test.ts tests/e2e/network/tokens.test.ts`.
 Pass: exit 0. Layers: lint/typecheck · unit/component · smoke · network (targeted).
 
-#### Phase 7 — final full network suite, sharded
+#### Phase 7 — final full network suite, sharded ✓ (2026-09-07, Mac — 5 shards across two worktrees, 184 specs, 0 failures)
 
 Default — sequential, one worktree, one tmux session (safe; ~1.5–3 h):
 
