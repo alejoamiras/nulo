@@ -160,7 +160,7 @@ Single arc, one PR `worktree-chrome-store-launch` → `dev`: `feat(store): chrom
 
 ## Seeds
 
-ELI5 companion: the Artifact at `https://claude.ai/code/artifact/82028d03-b774-4cf1-a053-13afc884167a`, published from `implementations-plan/chrome-store-launch/eli5.html` (redeploy the same file to update it).
+ELI5 companion: the Artifact at `https://claude.ai/code/artifact/cd9de3f4-99d2-4691-a357-934a885d1114`, published from `implementations-plan/chrome-store-launch/eli5.html` (redeploy the same file to update it).
 
 Recommended: `/goal`.
 
