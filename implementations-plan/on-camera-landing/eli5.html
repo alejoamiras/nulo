@@ -1,0 +1,86 @@
+<title>On Camera Landing Plan</title>
+<style>
+:root{--bg:#f4f1ea;--panel:#fbf9f4;--ink:#171410;--mute:#6b645b;--rule:#d9d2c6;--acc:#8a5a2b;--acc-ink:#fff;--tag:#ece5d9;--mo:"JetBrains Mono",ui-monospace,Menlo,monospace;--sg:"Space Grotesk",system-ui,sans-serif;--in:"Inter",system-ui,sans-serif}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0c0b0a;--panel:#14120f;--ink:#ece6da;--mute:#9a9184;--rule:#2a2622;--acc:#d1a56a;--acc-ink:#0c0b0a;--tag:#1f1b16}}
+:root[data-theme="dark"]{--bg:#0c0b0a;--panel:#14120f;--ink:#ece6da;--mute:#9a9184;--rule:#2a2622;--acc:#d1a56a;--acc-ink:#0c0b0a;--tag:#1f1b16}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--in);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+main{max-width:760px;margin:0 auto;padding:48px 24px 96px}
+h1,h2,h3{font-family:var(--sg);letter-spacing:-.02em;text-wrap:balance;margin:0}
+h1{font-size:38px;line-height:1.05;margin-bottom:12px}
+h2{font-size:22px;margin:44px 0 12px;padding-top:20px;border-top:1px solid var(--rule)}
+h3{font-size:17px;margin:0 0 6px}
+p{margin:0 0 12px}
+.eb{font-family:var(--mo);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--mute);margin-bottom:10px}
+.phase{padding:16px 18px;border:1px solid var(--rule);background:var(--panel);margin:12px 0;border-radius:3px}
+.phase .gate{font-size:14px;color:var(--mute);margin:8px 0 0}
+.phase .gate b{color:var(--ink);font-weight:600}
+ul{padding-left:20px;margin:0 0 12px}
+li{margin:4px 0}
+.approval{padding:18px 20px;border-left:3px solid var(--acc);background:var(--panel);margin:16px 0}
+.tag{display:inline-block;font-family:var(--mo);font-size:11px;letter-spacing:.08em;text-transform:uppercase;background:var(--tag);color:var(--mute);padding:4px 8px;border-radius:2px;margin-right:6px}
+.tag.hi{background:var(--acc);color:var(--acc-ink)}
+pre{font-family:var(--mo);font-size:12.5px;line-height:1.55;background:var(--panel);border:1px solid var(--rule);padding:14px 16px;white-space:pre-wrap;word-break:break-word;border-radius:3px;overflow-x:auto}
+.warn{font-weight:600;color:var(--acc)}
+.rec{border-color:var(--acc)}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:8px 0 12px}
+th{text-align:left;font-family:var(--mo);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);font-weight:500;padding:6px 8px;border-bottom:1px solid var(--rule)}
+td{padding:7px 8px;border-bottom:1px solid var(--rule);vertical-align:top}
+.muted{color:var(--mute);font-size:14px}
+code{font-family:var(--mo);font-size:.92em}
+</style>
+<main>
+<p class="eb">blueprint · light · on-camera-landing · 2026-09-06</p>
+<h1>Rebuild nulo.sh as the On Camera page</h1>
+<p>Replace the current landing with the design you approved: the character-rendered camera feed, every readable thing on a solid plate, plain copy about the user's control, the two screens, the three promises, the live public record, the preview notice, and the call to action. It stays a small static Vite page with no framework, no library and no WebGL. Colours and fonts now come from the wallet's own design package, so the site and the wallet can't drift apart.</p>
+
+<p><span class="tag hi">tier · light</span><span class="tag">recon 1 agent</span><span class="tag">codex at high</span><span class="tag">code-review off</span><span class="tag">one PR to dev</span></p>
+
+<h2>Why light</h2>
+<p>All six risk dimensions score low: nothing new for the team (Vite + TypeScript we already use), a marketing page that ships on its own, nothing to migrate, no external service beyond the release info and Cloudflare Pages that already work, and no security surface beyond the page's existing content-security policy. One codex audit is enough.</p>
+
+<h2>Phases</h2>
+<div class="phase"><h3>1 · Foundation</h3><p>Point the landing at the wallet's design stylesheet, undo the few things that stylesheet does that a website shouldn't (blue links, unselectable text, hidden scrollbars), and stop shipping the landing's own copies of the fonts.</p><p class="gate"><b>Proves itself by:</b> install, typecheck, lint, unit tests and a production build all green, and the three fonts present in the built output.</p></div>
+<div class="phase"><h3>2 · The renderer</h3><p>The feed is a small pure function: given a size, a time and a seed it returns the frame as text. A thin layer puts that text on the page, keeps it to about 30 frames a second, pauses it when off-screen or in a hidden tab, and shows a single still frame for people who asked for reduced motion.</p><p class="gate"><b>Proves itself by:</b> unit tests on the pure function (right size, only the five glyphs, same input gives the same frame, the subject blob brightens where it should, zero gain gives blank) plus typecheck and lint.</p></div>
+<div class="phase"><h3>3 · The page</h3><p>The approved markup and styles go in (with the two copy corrections); the old sections, animations and stylesheets go out. The "Add to Chrome" links keep pointing at the latest release exactly as today. The public record is labelled illustrative, and a Pause button sits in the hero corner.</p><p class="gate"><b>Proves itself by:</b> the full check set, a production build with no leftover template tokens, then a browser pass on the built page under the real security policy: feed drawn at desktop and phone width, plate and buttons readable, keyboard focus visible, reduced motion gives a still frame, Pause stops it, the record never grows past 16 rows, and a throttled phone stays responsive.</p></div>
+<div class="phase"><h3>4 · Docs and last read</h3><p>Update the landing's README, add the plan to the index, and re-read every visible sentence against the copy rule: no wallet jargon above the fold.</p><p class="gate"><b>Proves itself by:</b> the full check set green and the README's file list matching the folder.</p></div>
+
+<h2>Human context</h2>
+<ul>
+<li><b>Why depend on the design package instead of copying colours?</b> You chose it at the clarifying step so the palette can't drift. The price is a small override file (the package's stylesheet was written for the wallet popup, where links are blue and text isn't selectable) and about 180 kB of styles and fonts the page doesn't use. If that weight ever matters, the fix is a slimmer tokens-only export from the package, not a landing-side copy.</li>
+<li><b>Why is the build only checked locally?</b> The repo's CI lints, typechecks and unit-tests the landing on every PR, but nothing in CI builds it; Cloudflare builds it on deploy. Each phase gate runs the build locally. A CI build job is listed as a follow-up, not part of this PR.</li>
+<li><b>What stays true on the page.</b> Private by default, public by choice and labelled, password or passkey, testnet only, not audited yet. The old warning banner's facts live on in the preview-notice plate.</li>
+</ul>
+
+<h2>Decisions taken at the gate (approved 2026-09-06)</h2>
+<ul>
+<li><b>"Testnet only" is gone.</b> The notice now reads: <i>"Nulo is a preview and hasn't been audited yet. Use small amounts you can afford to lose, or the test network, and tell us what breaks."</i></li>
+<li><b>Privacy promise, marketing register.</b> Heading <i>"You decide what's seen."</i>, body <i>"Private by default. Public when you say so. Nulo always shows you which is which."</i> The fine print (a few tokens only work in public) sits in the caption under the two screens: <i>"A few tokens only work in public. Nulo tells you before you send."</i></li>
+<li>Tab title "NULO | Nothing to see. Everything to own."; social titles and descriptions updated together; no version number on the page.</li>
+<li>Cloudflare left as it is; the first deploy after merge is the proof.</li>
+</ul>
+
+<h2>Codex audit</h2>
+<p><b>Verdict: conditional approve.</b> Codex checked the plan against the code and found the two copy problems above (the mainnet default, the per-token privacy switch), plus a set of engineering gaps I have folded in: the preview server now applies the real security policy so the browser check means something; the public record is labelled illustrative; the animation has hard size caps, a Pause button and a throttled-phone check; the skip link and main landmark stay and the copy exists before scripts run; the CSS override plan had a self-referencing variable and a focus rule the package would have beaten; two gate commands would have passed or failed for the wrong reason. It also caught that this PR will run the full smoke and network test suites (the lockfile changes), so a red check gets diagnosed, never re-run blindly. Nothing was rejected. Full transcript: <code>implementations-plan/on-camera-landing/audit-codex.md</code>.</p>
+
+<div class="approval">
+<h2 style="border:0;margin:0 0 8px;padding:0">Approval needed from you</h2>
+<ul>
+<li>Scope: full replacement of the landing, as prototyped; nothing outside <code>apps/landing</code>.</li>
+<li>Tier: light, one codex audit.</li>
+<li>Validation: typecheck + lint + unit + local build on every phase, plus a browser pass on phase 3 under the real security policy (keyboard, reduced motion, pause, throttled phone).</li>
+<li>Delivery: one PR to dev after the codex fix loop; the full test suites will run (~30 min); I watch checks until green; you merge.</li>
+<li>The two copy corrections above, and the two defaults (title/description, no version number; Cloudflare as-is).</li>
+<li>No <code>/harden</code> scheduled.</li>
+<li>Reply with: approve · conditional approve (conditions) · reject (blocking findings).</li>
+</ul>
+</div>
+
+<h2>Implementation seeds (final)</h2>
+<p class="muted">Paste exactly one into the session that sits inside the plan's worktree. They don't compose.</p>
+<div class="phase rec"><h3>Recommended: /goal</h3>
+<pre>/goal All four phases marked ✓ in implementations-plan/on-camera-landing/plan.md, each ✓ backed by its validation gate reported passing in the transcript; `LESSONS_FILE=implementations-plan/on-camera-landing/lessons/phase-N.md` printed for each phase; `/code-review` NOT run (code_review is off); the codex fix loop converged on the net diff, evidenced by a resumed codex pass reporting no new material findings quoted in the transcript; one PR from worktree-on-camera-landing to dev exists (`gh pr view` in the transcript), created only after the loop converged; `gh pr checks` reports every required check green in the transcript; `bun run --cwd apps/landing test` and `bun run lint` both report exit 0 in the transcript.</pre></div>
+<h3>Alternative: /loop 15m</h3>
+<pre>/loop 15m Drive implementations-plan/on-camera-landing forward. Never idle waiting for my input. Each firing: 1. Reality check: read plan.md and lessons/ (authoritative state); rebuild the task list from plan.md if empty; `git status`, `git log --oneline -5`; if a PR exists, `gh pr view --json statusCheckRollup`. 2. Waiting on CI is fine — confirm it is progressing (`gh run watch` up to 10 min); use the wait to review the diff. 3. No task in hand? Take the next pending phase; after each meaningful edit run `bun run lint` and `bun run --cwd apps/landing test`; commit and push. 4. Stuck or facing a decision? Call `/codex high` with full context, decide, log the consult in lessons/phase-N.md; never merge, publish, deploy or expand scope. 5. Same step failed 5 times? Reassess with codex. 6. Phase green (its validation gate as written in plan.md passes)? Paste the result, mark ✓ in plan.md, write lessons, print `LESSONS_FILE=…`, advance. 7. All phases ✓? Run the codex fix loop from plan.md's Post-implementation section (code_review is off: no /code-review) until a round yields nothing material, then `gh pr create` to dev, `gh pr checks --watch`, write the wrap-up, surface and stop.</pre>
+<p class="warn">Use exactly one per session.</p>
+</main>
