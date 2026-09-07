@@ -11,7 +11,7 @@ Maintains project documentation by analyzing git history and syncing CLAUDE.md w
 
 1. `git log -1 --format="%H" -- CLAUDE.md` → find baseline
 2. `git diff <hash>..HEAD --name-only` → list changed files
-3. Read CLAUDE.md → identify sections → map changes → propose → apply → check master
+3. Read CLAUDE.md → identify sections → map changes → propose → apply → check `dev`
 
 ## Workflow
 
@@ -87,24 +87,24 @@ After engineer approval:
 2. Apply changes matching existing style
 3. Add new sections in appropriate locations
 
-### Phase 5: Resolve Master Conflicts (AFTER applying updates)
+### Phase 5: Resolve conflicts with `dev` (after applying updates)
 
 ```bash
-git diff master -- CLAUDE.md
+git diff dev -- CLAUDE.md
 ```
 
-**IMPORTANT:** Run AFTER applying updates to catch:
-- Sections modified in master that we also modified
-- New sections added in master we might overwrite
+Run this after applying updates so it catches:
+- Sections modified on `dev` that we also modified
+- New sections added on `dev` we might overwrite
 
-**If master differs:**
-1. `git show master:CLAUDE.md` → fetch master version
+**If `dev` differs:**
+1. `git show dev:CLAUDE.md` → fetch the `dev` version
 2. Identify conflicting sections
 3. Merge: keep additions from both, prefer more complete version
 4. Show engineer the diff before finalizing
 
 **Conflict strategy:**
-- Only in master → keep it
+- Only on `dev` → keep it
 - Only in current → keep it
 - Both modified → merge carefully, ask if unclear
 
@@ -112,7 +112,7 @@ git diff master -- CLAUDE.md
 
 Before finalizing:
 - [ ] All identified changes documented
-- [ ] No merge conflicts with master
+- [ ] No merge conflicts with `dev`
 - [ ] Matches existing formatting style
 - [ ] Cross-references still valid
 
