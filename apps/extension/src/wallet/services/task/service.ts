@@ -214,11 +214,6 @@ export class TaskService extends Service<Methods, Events> implements ServiceSpec
 		return this.getRootTasks()
 	}
 
-	public getTasksSync(): Task[] {
-		this.cleanupStaleTasks()
-		return this.getRootTasks()
-	}
-
 	private getRootTasks(): Task[] {
 		return Array.from(this.tasks.values()).filter((t) => !t.parentId)
 	}

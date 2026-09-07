@@ -38,7 +38,7 @@ const H = vi.hoisted(() => {
 	return {
 		makeEvent,
 		// enum shapes shared by the service-spec mocks AND the fixtures below
-		ContentKind: { Step: 0, BalanceUpdate: 1, TokenMint: 2, ExecuteOperation: 3, Transfer: 4, RevokeAuthwits: 5 },
+		ContentKind: { Step: 0, BalanceUpdate: 1, ExecuteOperation: 2, Transfer: 3, RevokeAuthwits: 4 },
 		TaskStatus: { Pending: 0, Processing: 1, Finished: 2 },
 		OriginType: { UI: 0, DAPP: 1 },
 		TxStatus: { Pending: 0, Dropped: 1, Proposed: 2, Checkpointed: 3, Proven: 4, Finalized: 5 },

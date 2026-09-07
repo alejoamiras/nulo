@@ -188,7 +188,7 @@ const handleUnlockWallet = async () => {
 		void advancePastAuth()
 
 		void appStore.syncTransactions().catch((err) => console.error(err))
-		void refreshBalances(10, appStore.accounts).catch((err) => console.error(err))
+		void refreshBalances(appStore.accounts).catch((err) => console.error(err))
 	} catch (err) {
 		console.error(err)
 	}

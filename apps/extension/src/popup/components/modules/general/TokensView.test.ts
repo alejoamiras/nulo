@@ -27,7 +27,7 @@ const H = vi.hoisted(() => {
 	}
 	return {
 		makeEvent,
-		ContentKind: { Step: 0, BalanceUpdate: 1, TokenMint: 2 },
+		ContentKind: { Step: 0, BalanceUpdate: 1 },
 		getTasks: vi.fn(),
 		getOperations: vi.fn(),
 		getTokenBalances: vi.fn(),

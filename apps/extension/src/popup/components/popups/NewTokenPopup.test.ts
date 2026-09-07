@@ -67,7 +67,7 @@ vi.mock("@/wallet/services/task/client", () => ({
 }))
 // ContentKind is imported separately by the popup; mirror the enum exactly.
 vi.mock("@/wallet/services/task/spec", () => ({
-	ContentKind: { Step: 0, BalanceUpdate: 1, TokenMint: 2, ExecuteOperation: 3, Transfer: 4, RevokeAuthwits: 5 },
+	ContentKind: { Step: 0, BalanceUpdate: 1, ExecuteOperation: 2, Transfer: 3, RevokeAuthwits: 4 },
 }))
 
 vi.mock("@/stores/app.store", () => ({
