@@ -1,7 +1,7 @@
 import { CLIENT_DISCONNECTED_MESSAGE } from "@nulo/extension-messaging/errors"
-import { LogLevel } from "@nulo/wallet-core/logger"
+import { consoleMethods, LogLevel } from "@nulo/wallet-core/logger"
 import { getErrorData } from "@nulo/wallet-core/utils"
-import { beforeEach, describe, expect, test, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 const log = vi.hoisted(() => vi.fn())
 vi.mock("@/wallet/services/logger/client", () => ({
@@ -15,17 +15,34 @@ import { installConsoleForwarding } from "./console-forwarding"
 
 type Hooks = Record<string, (...args: unknown[]) => void>
 
-beforeEach(() => log.mockClear())
+const hookNames = [...consoleMethods.map(([method]) => `on${method}`), "onunhandledrejection"]
+let installed: Array<[string, unknown]> = []
+beforeEach(() => {
+	log.mockClear()
+	installed = hookNames.map((name) => [name, (self as unknown as Hooks)[name]])
+})
+afterEach(() => {
+	for (const [name, value] of installed) (self as unknown as Record<string, unknown>)[name] = value
+})
 
 describe("installConsoleForwarding", () => {
-	test("hooks every console method to the ui source at its mapped level, under the client tag", () => {
+	test("hooks all six console methods to the ui source at their mapped levels, under the client tag", () => {
 		const client = installConsoleForwarding("popup") as unknown as { tag: string }
 		expect(client.tag).toBe("popup")
 		const hooks = self as unknown as Hooks
-		hooks.onwarn?.("careful", { n: 1 })
-		hooks.ondebug?.("trace me")
-		expect(log).toHaveBeenNthCalledWith(1, "ui", LogLevel.Warn, "careful", { n: 1 })
-		expect(log).toHaveBeenNthCalledWith(2, "ui", LogLevel.Debug, "trace me")
+		for (const [method, level] of consoleMethods) {
+			log.mockClear()
+			hooks[`on${method}`]?.(`via ${method}`, { n: 1 })
+			expect(log).toHaveBeenCalledTimes(1)
+			expect(log).toHaveBeenCalledWith("ui", level, `via ${method}`, { n: 1 })
+		}
+	})
+
+	test("(BUG PIN) the error hook lands on window.onerror, so a script error is logged with the handler's raw arguments", () => {
+		// The entry files always wrote `self.onerror` for console.error; preserved verbatim in the extraction.
+		installConsoleForwarding("popup")
+		;(self as unknown as Hooks).onerror?.("Uncaught boom", "popup.js", 3, 7)
+		expect(log).toHaveBeenCalledWith("ui", LogLevel.Error, "Uncaught boom", "popup.js", 3, 7)
 	})
 
 	test("a client-disconnect rejection logs at debug, anything else at error, both as error data", () => {

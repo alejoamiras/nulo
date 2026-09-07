@@ -76,3 +76,20 @@ Base: `worktree-dedup-p3-service-wrappers` (PR #568). Scope: ledger ids J1 J2 J3
   `onboarding-name-input` testid lands on that root exactly as before and the tests assert on the input inside it.
 - Gate: lint 0 · extension typecheck 0 · onboarding + logger suites green (28 component cases + 2 forwarding cases +
   the existing page/composable suites) · `build:chrome` 0; `components.d.ts` gained the four onboarding entries.
+
+## Phase 4 — full local gate ✓ (ae39b8d4, clean index)
+
+`bun run lint` exit 0 · `bun run typecheck:all` exit 0 · `bun run test` exit 0 (455 files, 5,590 tests) ·
+`bun run --cwd apps/extension build:chrome` exit 0 with `git diff --exit-code --stat -- apps/extension/src/types/` exit 0 ·
+no `nulo:e2e:` marker in `dist/chrome`.
+
+## Codex fix loop (`/codex high`, GPT-6 Astra, session `01a07cd2-6f9a-7981-9125-62e53b23a59f`, resumed each round)
+
+- **Round 1** (on ae39b8d4): *"no new material findings"* — parity sound, four low items adopted: the forwarding test
+  now walks all six console mappings, restores the hooks it installs and pins the pre-existing `window.onerror`
+  collision; the name-field tests assert the exact sanitized+truncated value, one forwarded native event and the
+  error clearing `aria-invalid`; the shell's bound-title case became a post-mount title change and the duplicate
+  slot case became a parent `v-if` transition; the overlay's duplicate order case became the condensed multi-line copy
+  check; the seven component openers lost their narration (two kept a constraint), the explainer's container-query
+  comment and the forwarder's doc shrank, and journal's "mirrors tx" comments above composed classes went. An HTML
+  comment inside the `<Input …/>` tag broke the SFC ("Duplicate attribute"); it lives above the tag.

@@ -354,7 +354,6 @@ onBeforeUnmount(() => {
 	padding: 4px 20px 24px 20px;
 }
 
-/* Hero — mirrors tx/[id].vue */
 .hero_meta {
 	composes: hero_meta from "../detail-page.module.css";
 }
@@ -363,7 +362,6 @@ onBeforeUnmount(() => {
 	composes: tx_time from "../detail-page.module.css";
 }
 
-/* Amount block — verbatim from tx/[id].vue tokens */
 .amount_value {
 	composes: amount_value from "../detail-page.module.css";
 }
@@ -372,7 +370,6 @@ onBeforeUnmount(() => {
 	composes: amount_symbol from "../detail-page.module.css";
 }
 
-/* Mirrors tx/[id].vue's amount_fiat. */
 .amount_fiat {
 	composes: amount_fiat from "../detail-page.module.css";
 }
@@ -416,7 +413,6 @@ onBeforeUnmount(() => {
 	word-break: break-all;
 }
 
-/* Details box — mirrors tx/[id].vue details_box */
 .details_box {
 	composes: details_box from "../detail-page.module.css";
 }
@@ -455,7 +451,6 @@ onBeforeUnmount(() => {
 	margin: 0;
 }
 
-/* Empty state — mirrors tx/[id].vue */
 .empty_headline {
 	composes: empty_headline from "../detail-page.module.css";
 }

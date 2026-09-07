@@ -1,9 +1,5 @@
 <script setup>
-/**
- * The full-screen blocking card the barriers render: a glyph, a headline, then the optional sub and
- * detail lines and whatever the parent appends (a retry control). The parent owns the Teleport and the
- * condition; this only lays the card out.
- */
+/** The detail span follows the slot's presence, not its content: an empty detail still renders. */
 defineProps({
 	testid: { type: String, default: undefined },
 	subTestid: { type: String, default: undefined },

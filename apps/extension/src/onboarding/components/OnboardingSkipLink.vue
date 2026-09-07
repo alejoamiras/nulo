@@ -1,5 +1,4 @@
 <script setup>
-/** The quiet text button under an onboarding step's primary action. */
 defineProps({
 	testid: { type: String, required: true },
 })

@@ -38,9 +38,10 @@ describe("SettingsPageShell", () => {
 		expect(w.find("header").attributes("data-back")).toBe("/popup/settings/advanced")
 	})
 
-	test("a bound title renders like a static one", () => {
+	test("a title change after mount reaches the header", async () => {
 		const w = mountShell({ title: "Devnet" })
-		expect(w.find("header").attributes("data-title")).toBe("Devnet")
+		await w.setProps({ title: "Testnet" })
+		expect(w.find("header").attributes("data-title")).toBe("Testnet")
 	})
 
 	test("forwards the trailing slot into the header only when a page provides it", () => {
@@ -66,9 +67,18 @@ describe("SettingsPageShell", () => {
 		expect(w.element.className).not.toMatch(/gap--/)
 	})
 
-	test("the default slot renders inside the content column, after the header", () => {
-		const w = mountShell({}, { default: "<section data-testid='body' />" })
-		expect(w.find("header + div [data-testid='body']").exists()).toBe(true)
+	test("a page's v-if on the shell renders nothing until its record loads, then the whole frame", async () => {
+		const Page = {
+			components: { SettingsPageShell },
+			data: () => ({ network: null as { name: string } | null }),
+			template: `<div><SettingsPageShell v-if="network" :title="network.name" backTo="/popup/settings/networks"><p>rows</p></SettingsPageShell></div>`,
+		}
+		const w = mount(Page, { global: { components: { Flex, SubPageHeader } } })
+		expect(w.find("header").exists()).toBe(false)
+		expect(w.find("p").exists()).toBe(false)
+		await w.setData({ network: { name: "Devnet" } })
+		expect(w.find("header").attributes("data-title")).toBe("Devnet")
+		expect(w.find("header + div p").text()).toBe("rows")
 	})
 
 	test("trailing content never leaks into the content column", () => {

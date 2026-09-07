@@ -1,8 +1,5 @@
 <script setup>
-/**
- * The profile-name field of the create and import steps. The page's `useProfileNameField` owns the
- * value, the error and the shake; this owns the markup and exposes `focus()` for its error restore.
- */
+/** `focus()` is exposed so the page's name validation can return focus to the field on failure. */
 defineProps({
 	modelValue: { type: String, default: "" },
 	error: { type: String, default: "" },
@@ -17,6 +14,7 @@ defineExpose({ focus: () => inputRef.value?.focus() })
 	<Flex direction="column" gap="8">
 		<Text size="11" weight="700" color="secondary" :class="$style.section_label">Profile name</Text>
 		<div :class="[shake && $style.shake]">
+			<!-- `Input` emits no `input` of its own; the listener rides the native event bubbling through its root. -->
 			<Input
 				ref="inputRef"
 				:modelValue="modelValue"

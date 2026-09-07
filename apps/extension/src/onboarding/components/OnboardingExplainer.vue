@@ -1,5 +1,4 @@
 <script setup>
-/** A three-card onboarding explainer step: hero, numbered cards, continue and skip. */
 defineProps({
 	step: { type: Number, required: true },
 	titleMain: { type: String, required: true },
@@ -61,11 +60,8 @@ const emit = defineEmits(["continue", "skip"])
 	border: 1px solid var(--nulo-border);
 }
 
-/* Stack when OnboardingPage's container shrinks below 540 px. Below that,
- * each card's usable text width (after 24 px side padding) drops under
- * ~130 px — too cramped for the existing card copy. Container query (not
- * viewport @media) because the shell adds 24+24 px horizontal padding,
- * which a viewport-based rule would have to subtract. */
+/* Container query, not viewport: OnboardingPage adds 24+24 px of side padding, and under 540 px of
+ * container width three columns leave the card copy ~130 px. */
 @container onboarding-page (max-width: 540px) {
 	.grid {
 		grid-template-columns: 1fr;

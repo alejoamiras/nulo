@@ -1,5 +1,4 @@
 <script setup>
-/** A list page's fetch states: the loading line, else the error banner with its retry, else nothing. */
 defineProps({
 	loading: { type: Boolean, default: false },
 	error: { default: null },

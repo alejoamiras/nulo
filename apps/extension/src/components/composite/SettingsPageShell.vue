@@ -1,8 +1,4 @@
 <script setup>
-/**
- * The settings sub-page frame: scrolling wrapper, sub-page header, padded content column. Pages vary only
- * the header's title and back target, the content gap and the header's trailing actions.
- */
 defineProps({
 	title: { type: String, required: true },
 	backTo: { type: String, required: true },

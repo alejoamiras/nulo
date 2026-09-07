@@ -1,5 +1,4 @@
 <script setup>
-/** The chevron link back to the welcome step; the two profile pages differ only in their testid. */
 defineProps({
 	testid: { type: String, required: true },
 })

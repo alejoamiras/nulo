@@ -76,10 +76,21 @@ describe("BarrierOverlay", () => {
 		expect(w.text()).toContain("<script>alert(1)</script> — no legitimate screen will ask for it.")
 	})
 
-	test("the parent's extra content lands after the detail, inside the card", () => {
-		const w = mountOverlay({}, { title: "T", detail: "D", default: "<button data-testid='retry'>Retry</button>" })
-		const card = w.element.firstElementChild
-		expect(card?.lastElementChild?.getAttribute("data-testid")).toBe("retry")
-		expect(card?.lastElementChild?.previousElementSibling?.textContent).toBe("D")
+	test("multi-line slot copy from a parent template condenses to the single-spaced text the old spans rendered", () => {
+		const Parent = {
+			components: { BarrierOverlay },
+			template: `<BarrierOverlay subTestid="copy">
+				<template #title>ACCOUNT VERIFICATION FAILED</template>
+				<template #sub>
+					This version of the wallet derives a different address than this profile's accounts were
+					created with, so the profile has been locked. Never enter your recovery phrase anywhere in
+					response to this message — no legitimate screen will ask for it.
+				</template>
+			</BarrierOverlay>`,
+		}
+		const w = mount(Parent, { global: { stubs } })
+		expect(w.find("[data-testid='copy']").text()).toBe(
+			"This version of the wallet derives a different address than this profile's accounts were created with, so the profile has been locked. Never enter your recovery phrase anywhere in response to this message — no legitimate screen will ask for it.",
+		)
 	})
 })
