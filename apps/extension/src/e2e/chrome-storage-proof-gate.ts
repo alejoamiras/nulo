@@ -1,4 +1,5 @@
 import type { ProofGate } from "./proof-gate"
+import { waitForStorageRelease } from "./storage-gate"
 
 /**
  * Storage key the e2e proof gate watches. A test sets it (any value) to
@@ -46,38 +47,17 @@ export class ChromeStorageProofGate implements ProofGate {
 	public async wait(): Promise<void> {
 		if (!(await this.isHeld())) return
 
-		await new Promise<void>((resolve) => {
-			let settled = false
-			const finish = (reason: "released" | "timeout"): void => {
-				if (settled) return
-				settled = true
-				chrome.storage.onChanged.removeListener(onChange)
-				clearTimeout(timer)
-				if (reason === "timeout") {
-					console.warn(
-						`[e2e-proverless] proof gate safety timeout after ${SAFETY_TIMEOUT_MS}ms — releasing. ` +
-							`A test set "${PROOF_GATE_KEY}" but never cleared it.`,
-					)
-				}
-				// Clear so a forgotten hold can't bleed into a later test.
-				chrome.storage.session.remove(PROOF_GATE_KEY).catch(() => {})
-				resolve()
-			}
-
-			const onChange = (changes: Record<string, chrome.storage.StorageChange>, area: string): void => {
-				if (area === "session" && PROOF_GATE_KEY in changes && changes[PROOF_GATE_KEY].newValue === undefined) {
-					finish("released")
-				}
-			}
-
-			const timer = setTimeout(() => finish("timeout"), SAFETY_TIMEOUT_MS)
-			chrome.storage.onChanged.addListener(onChange)
-
-			// Re-check after subscribing: closes the release-between-check-and-
-			// subscribe race (key removed in the gap would otherwise be missed).
-			this.isHeld().then((stillHeld) => {
-				if (!stillHeld) finish("released")
-			})
+		await waitForStorageRelease({
+			key: PROOF_GATE_KEY,
+			stillHeld: () => this.isHeld(),
+			timeoutMs: SAFETY_TIMEOUT_MS,
+			onTimeout: () =>
+				console.warn(
+					`[e2e-proverless] proof gate safety timeout after ${SAFETY_TIMEOUT_MS}ms — releasing. ` +
+						`A test set "${PROOF_GATE_KEY}" but never cleared it.`,
+				),
+			// Clear so a forgotten hold can't bleed into a later test.
+			onFinish: () => chrome.storage.session.remove(PROOF_GATE_KEY).catch(() => {}),
 		})
 	}
 

@@ -1,4 +1,5 @@
 import type { RestoreGate, RestoreGateHoldPoint } from "./restore-gate"
+import { waitForStorageRelease } from "./storage-gate"
 
 /**
  * Storage key the e2e restore gate watches. A test arms it with
@@ -44,37 +45,17 @@ export class ChromeStorageRestoreGate implements RestoreGate {
 			await chrome.storage.session.set({ [RESTORE_GATE_KEY]: { at, held: true } })
 		}
 
-		await new Promise<void>((resolve) => {
-			let settled = false
-			const finish = (reason: "released" | "timeout"): void => {
-				if (settled) return
-				settled = true
-				chrome.storage.onChanged.removeListener(onChange)
-				clearTimeout(timer)
-				if (reason === "timeout") {
-					console.warn(
-						`[e2e-restore-gate] safety timeout after ${SAFETY_TIMEOUT_MS}ms at "${at}" — releasing. ` +
-							`A test armed "${RESTORE_GATE_KEY}" but never killed nor cleared.`,
-					)
-				}
-				chrome.storage.session.remove(RESTORE_GATE_KEY).catch(() => {})
-				resolve()
-			}
-
-			const onChange = (changes: Record<string, chrome.storage.StorageChange>, area: string): void => {
-				if (area === "session" && RESTORE_GATE_KEY in changes && changes[RESTORE_GATE_KEY].newValue === undefined) {
-					finish("released")
-				}
-			}
-
-			const timer = setTimeout(() => finish("timeout"), SAFETY_TIMEOUT_MS)
-			chrome.storage.onChanged.addListener(onChange)
-
-			// Re-check after subscribing: closes the release-between-check-and-
-			// subscribe race.
-			this.read().then((still) => {
-				if (still?.at !== at) finish("released")
-			})
+		await waitForStorageRelease({
+			key: RESTORE_GATE_KEY,
+			// Held only while the record still names THIS hold point.
+			stillHeld: async () => (await this.read())?.at === at,
+			timeoutMs: SAFETY_TIMEOUT_MS,
+			onTimeout: () =>
+				console.warn(
+					`[e2e-restore-gate] safety timeout after ${SAFETY_TIMEOUT_MS}ms at "${at}" — releasing. ` +
+						`A test armed "${RESTORE_GATE_KEY}" but never killed nor cleared.`,
+				),
+			onFinish: () => chrome.storage.session.remove(RESTORE_GATE_KEY).catch(() => {}),
 		})
 	}
 

@@ -195,52 +195,28 @@ function isCompressionStreamSupported(): boolean {
 	}
 }
 
+const COMPRESSION_FORMATS: Record<CompressionFormat, { extension: string; mimeType: string; detectedFrom: readonly string[] }> = {
+	gzip: { extension: ".gz", mimeType: "application/gzip", detectedFrom: [".gz", ".gzip"] },
+	deflate: { extension: ".zz", mimeType: "application/octet-stream", detectedFrom: [".zz", ".deflate"] },
+	"deflate-raw": { extension: ".df", mimeType: "application/octet-stream", detectedFrom: [".df", ".raw"] },
+}
+
 function getCompressedFilename(originalFilename: string, compressionFormat: CompressionFormat): string {
+	const format = COMPRESSION_FORMATS[compressionFormat]
+	if (!format) return `${originalFilename}.compressed`
 	const extension = getExtension(originalFilename)
 	const baseName = extension ? originalFilename.slice(0, -extension.length) : originalFilename
-
-	switch (compressionFormat) {
-		case "gzip":
-			return `${baseName}.gz`
-		case "deflate":
-			return `${baseName}.zz`
-		case "deflate-raw":
-			return `${baseName}.df`
-		default:
-			return `${originalFilename}.compressed`
-	}
+	return `${baseName}${format.extension}`
 }
 
 function getCompressedMimeType(compressionFormat: CompressionFormat): string {
-	switch (compressionFormat) {
-		case "gzip":
-			return "application/gzip"
-		case "deflate":
-		case "deflate-raw":
-			return "application/octet-stream"
-		default:
-			return "application/octet-stream"
-	}
+	return COMPRESSION_FORMATS[compressionFormat]?.mimeType ?? "application/octet-stream"
 }
 
 function getCompressionFormat(filename?: string): CompressionFormat | null {
 	if (!filename) return null
-
 	const extension = getExtension(filename)
-	switch (extension) {
-		case ".gz":
-		case ".gzip":
-			return "gzip"
-		case ".zz":
-		case ".deflate":
-			return "deflate"
-		case ".df":
-		case ".raw":
-			return "deflate-raw"
-
-		default:
-			return null
-	}
+	return supportedCompressionFormats.find((format) => COMPRESSION_FORMATS[format].detectedFrom.includes(extension)) ?? null
 }
 
 export async function compressData(data: string | ArrayBuffer | Blob | ReadableStream, format: CompressionFormat): Promise<Blob> {
