@@ -6,7 +6,7 @@ code_review: off
 eli5_mode: readme-row
 worktree: .claude/worktrees/dedup-p5-vue-components (branch worktree-dedup-p5-vue-components, on top of worktree-dedup-p4-vue-shells / PR #569)
 ledger: implementations-plan/dedup-ledger (phase P5)
-status: dual audit consolidated 2026-09-07 (hybrid of Plan A and outline B); awaiting the fresh-context codex pass
+status: final fresh-context codex pass conditional-approve 2026-09-07, all four conditions adopted; approved under the ledger README's pre-approval rule; implementing
 ---
 
 # P5 — shared field, list-sync and card pieces for popups and windows
@@ -23,8 +23,10 @@ Net ≈ −280 lines.
 
 ### Popups (N2, N3, N7, N8)
 
-- **`FieldWarning`** (N2, `src/components/ui/`, L2): the `Flex align=center gap=6 > Icon warning 12 red + Text
-  12/600/primary` row with a default slot for the copy. Every one of the fourteen rows sits inside a
+- **`FieldWarning`** (N2, `@nulo/design/ui/FieldWarning.vue` — L2 primitives live in the design package, the
+  extension's `components/ui/` holds only the three host-coupled wrappers; exported from the package index and added to
+  the resolver's `NULO_DESIGN_COMPONENTS`, tested in the package): the `Flex align=center gap=6 > Icon warning 12 red +
+  Text 12/600/primary` row with a default slot for the copy. Every one of the fourteen rows sits inside a
   `<Transition name="fade">` (twelve elements; `EditProfilePopup` and `NewNetworkPopup` hold a `v-if`/`v-else-if`
   pair each): each row becomes `<FieldWarning v-if|v-else-if="…">copy</FieldWarning>` in the same position with the
   same branch structure, so the Transition still sees the same toggled children; nothing is collapsed into changing
@@ -38,8 +40,8 @@ Net ≈ −280 lines.
   `finally` and the key re-check before `emit("onClose")` move into the one helper in that order, with the invariant
   comments (not the review narration); the callers build the label at call time
   (`decide(cacheStore.incomingTrust.allow, \`Now showing receives for ${tokenSymbol.value}\`, "check")`), so the
-  label is evaluated before the latch as today. The reject path is untested today; the phase adds the cases that pin
-  the shared helper (below).
+  label is evaluated synchronously at call time, the symbol capture inside the helper keeps its position after the
+  latch as today. The reject path is untested today; the phase adds the cases that pin the shared helper (below).
 - **N8**: `TokenMetadataPopup`'s six rows become a `capabilitySections` table and one `v-for` per section (private,
   public), same order, same wrappers; the address markup (`slice(0,6) + ••• + slice(-4)`) is unchanged.
 
@@ -52,8 +54,10 @@ Net ≈ −280 lines.
   two comments the first block carries are kept once; the trailing `v-else-if="token"` empty state is untouched.
 - **L5**: `modules/tx/tx-shared.module.css` `disclosure_toggle`; `.fee_row_toggle`/`.debug_toggle` compose it; the
   two chevrons (different sizes and guards) stay.
-- **K3**: `v-else-if="op.kind === 'aztec_simulateTx' || op.kind === 'aztec_profileTx'"`; nothing else in
-  `OperationCard` moves (the action-row extraction would change what `simulate_transaction` renders).
+- **K3**: `v-else-if="op.kind === 'aztec_simulateTx' || op.kind === 'aztec_profileTx'"` with `:key="op.kind"` on
+  the branch's root `Flex`, so a kind change still remounts the subtree the way two compiler-keyed branches did
+  (`AddressDisplay` resolves its contact name only on mount); nothing else in `OperationCard` moves (the action-row
+  extraction would change what `simulate_transaction` renders).
 - **K8**: `verify/index.vue` renders `<DappIdentityBlock :dapp :hostname="dappHostname" :hostnameSuspicious="hostnameHasNonAscii" :actionLabel="isReconnect ? 'Reconnected' : 'Connection established'" />`;
   its inline block, its seven CSS classes (md5-identical to the composite's), `sanitizedDappName` and the now-unused
   `sanitizeWireString` import go; the hostname computeds stay (the composite takes them as props, as the other three
@@ -64,9 +68,10 @@ Net ≈ −280 lines.
 - **`ScopePatternList`** (M1, `components/composite/capabilities/`): prop `scope` (raw); `formatScope` and
   `fnLabel` move into the component (their only callers were the three lists), `getMethodLabel` is imported from
   `@/utils/tx-enrichment` and called with both arguments (the FeeJuice contract guard depends on the second),
-  `ScopeAddress` renders the contract. `detail_list`/`bullet`/`mono` are also used by the panel's other sections,
-  so they move to `capability-shared.module.css` and both files compose them. Three blocks become three tags;
-  `sanitizeWireString` leaves the panel if nothing else uses it.
+  `ScopeAddress` renders the contract; index keys and the two branch roots are kept. `detail_list`/`bullet`/`mono`
+  are also used by the panel's other sections, so they move to `capability-shared.module.css` and both files compose
+  them. Three blocks become three tags; the panel keeps its `sanitizeWireString` import (the unknown-type branch
+  uses it).
 - **M5**: `components/composite/import/import-shared.module.css` (`section`, `section_last`, `section_label`)
   composed by the three forms (`.section` ≡ `.section_last`; both names kept). The visibility toggle is skipped
   (decision ledger).
@@ -77,23 +82,30 @@ Each phase: implement → `bun run lint` → `bun run --cwd apps/extension typec
 
 ### Phase 1 — provable moves (L2, K3, K8, N8, L5, M5, M1)
 
-Merges, the composite adoption, the table-driven rows, three partials, `ScopePatternList` (parity cases: wildcard
-scope, empty patterns, a pattern with a wildcard contract, an address pattern renders `ScopeAddress`, a wildcard
-function, a raw sanitized function name, a known method label (with the contract argument) and an unknown one,
-the third-party `claim` case, and the panel still renders all three lists — real `ScopeAddress` registered).
-Gate: `general`, `tx`, `execute`, `capabilities`, `import` and `popups` suites green; `build:chrome` 0, the three
-partials inspected in the emitted CSS, `components.d.ts` committed.
+Merges, the composite adoption, the table-driven rows, three partials, `ScopePatternList`. Parity cases — L2
+(rendered, on the existing shallow harness with a `token` prop): the token fallback card vs the account fallback
+card, journal + orphan cards coexisting with the fallback suppressed, both empty states, a token-presence flip
+remounts the root, cancel/click forwarding through the fixtures; K3: a new `OperationCard` case switches
+`aztec_simulateTx` → `aztec_profileTx` with a changed destination and sees the payload subtree remount; N8: one
+mixed-boolean fixture checks the six labels, property names and icons in order; M1: wildcard scope, a non-array
+scope falls back to wildcard, empty patterns, a wildcard contract, an address pattern renders `ScopeAddress`, a
+wildcard function, a raw sanitized function name, a known method label with the contract argument and an unknown one,
+the panel still renders all three lists (real `ScopeAddress` registered). Gate: `general`, `tx`, `execute`,
+`capabilities`, `import` and `popups` suites green; `build:chrome` 0, the three partials inspected in the emitted CSS
+(including the fee row's static-hover override), `components.d.ts` committed.
 
 ### Phase 2 — popup pieces (N2, N3, N7)
 
-`FieldWarning` (parity: exact row and attrs, slot copy, hidden→shown→hidden inside a real `Transition`,
-warning-A→warning-B across a `v-if`/`v-else-if` pair inside a real `Transition`, no attribute leak);
-`ProcessingErrorNote` move + `color` (+2 cases: default primary, red; the moved test stays green);
-`decide()` in the trust popup with the reject path pinned (reject explicit-true toasts "Hiding receives", false
-and undefined do not toast, a throwing reject toasts the failure copy, allow and reject share the latch, a decision
-settling after a reopen does not unlock the new prompt, a changed identity does not close, the symbol is captured
-before the await). Adoption in the nine warning popups and the two FPC popups; their existing suites green. Build +
-`components.d.ts`.
+`FieldWarning` in the design package (parity: exact row and attrs, slot copy, hidden→shown→hidden inside a real
+`Transition`, warning-A→warning-B across a `v-if`/`v-else-if` pair inside a real `Transition`, no attribute leak);
+`ProcessingErrorNote` move + `color` (the moved suite plus: default primary, red, the fade transition wraps the
+tooltip, the tooltip geometry props (`side`/`position`/`wide`/`:disabled`/margin) and an adoption check in each FPC
+popup suite, whose `FormPopup` stub gains the `aboveSubmit` slot so a missing note is detectable); `decide()` in the
+trust popup with the reject path pinned (each outcome asserts the toast, the close count and the latch release:
+reject explicit-true toasts "Hiding receives", false and undefined do not toast, a throwing reject toasts the failure
+copy; allow and reject share the latch; a reopen starts a new pending decision before the old one settles and the
+old settlement does not unlock it; a changed identity does not close; the symbol is captured before the await).
+Adoption in the nine warning popups and the two FPC popups; their existing suites green. Build + `components.d.ts`.
 
 ### Phase 3 — full local gate
 
@@ -167,7 +179,7 @@ variants, the N2 Transition count 12/14, N3's three shapes, N4's two strings, M5
 
 Single arc = this branch, one PR, stacked on P4: `gh stack submit --auto --open` from this worktree, then
 `gh pr edit <n>` with the ledger title `refactor(popup): shared field, list-sync and card pieces for popups and windows`
-and a body listing ids addressed, ids skipped with reasons, net LOC, the Phase 4 gate output and the codex rounds.
+and a body listing ids addressed, ids skipped with reasons, net LOC, the Phase 3 gate output and the codex rounds.
 Then `gh pr checks <n>` watched; red = flake → re-run once, red again → fix or hold. Green → README row P5 =
 `open #<n> · green`, `agent-worktree status`, print `LESSONS_FILE=implementations-plan/dedup-p5-vue-components/lessons/phase-1.md`.
 **Never merge**; the owner lands the stack bottom-up.
@@ -178,7 +190,17 @@ Then `gh pr checks <n>` watched; red = flake → re-run once, red again → fix 
 
 **Fable audit** (`Agent` Plan leg, Fable 5.1; transcript `audit-fable.md`): *conditional approve, hybrid* — N1 false for three sites and wrong on lifecycle for six; the toggle is a 4-of-7 adoption; `getMethodLabel` is a util import, `formatScope`/`fnLabel` belong in the component, the list needs its own CSS; N4 needs the error-clearing emit; N7's reject path is untested and the +1 case is mandatory; all fourteen N2 rows are inside Transitions; K8 must drop the unused `sanitizeWireString` import; L2 parity is e2e-only. Every condition adopted (N4 skipped rather than plumbed).
 
-**Final fresh-context codex pass**: (pending)
+**Final fresh-context codex pass** (`/codex high`, new session `01a07cf7-270d-7041-ae3d-f177d02bd136`; transcript `audit-codex-final.md`): *conditional approve* — agrees with N4 skipped and N7 kept. Conditions, all verified and adopted:
+
+| Finding | Verified | Decision |
+|---|---|---|
+| K3: merging the two branches loses the compiler-keyed remount; `AddressDisplay` resolves its contact name on mount only | yes (`AddressDisplay.vue:67`) | `:key="op.kind"` on the merged branch root; a switching case with a changed destination |
+| L2: the existing suite mounts shallow without `token`, so the merge is unpinned | yes (`RecentActivityView.test.ts:219`) | rendered parity cases listed in Phase 1 |
+| Tests: N3's L3 minimum and the FPC harnesses' missing `aboveSubmit`; M1's non-array fallback; N7's outcome cases must assert close count and latch release, the reopen case must start a new decision first; N8 one mixed fixture; keep the panel's sanitizer import | yes (`NewFpcPopup.test.ts:42`, `CapabilityDetailPanel.vue:21,314`) | written into Phases 1–2 |
+| N2: an L2 primitive belongs to `@nulo/design/ui` per CLAUDE.md, not the extension's `components/ui/` | yes (CLAUDE.md § L0–L6) | `FieldWarning` lives in the design package, exported and added to the resolver |
+| Low: "Phase 4"/"four phases" wording; N7's symbol capture follows the latch | yes | corrected |
+
+Approval follows from the ledger README's pre-approval rule (final verdict conditional-approve, every condition adopted, scope ⊆ the phase's ids, no Tier-4 id, no user-visible change).
 
 ## Seeds
 
@@ -186,5 +208,5 @@ The session-level `/goal` in `implementations-plan/dedup-ledger/README.md` is al
 supersedes a plan-local seed. For a fresh session picking up only this phase:
 
 ```
-/goal All four phases marked ✓ in implementations-plan/dedup-p5-vue-components/plan.md, each ✓ backed by its validation gate quoted passing; `LESSONS_FILE=implementations-plan/dedup-p5-vue-components/lessons/phase-1.md` printed; `/code-review` NOT run; the codex fix loop converged with a resumed pass reporting no new material findings, quoted; the PR opened via `gh stack submit` on worktree-dedup-p5-vue-components with base worktree-dedup-p4-vue-shells only after the loop converged, `gh pr checks` all green, no merge command run.
+/goal All three phases marked ✓ in implementations-plan/dedup-p5-vue-components/plan.md, each ✓ backed by its validation gate quoted passing; `LESSONS_FILE=implementations-plan/dedup-p5-vue-components/lessons/phase-1.md` printed; `/code-review` NOT run; the codex fix loop converged with a resumed pass reporting no new material findings, quoted; the PR opened via `gh stack submit` on worktree-dedup-p5-vue-components with base worktree-dedup-p4-vue-shells only after the loop converged, `gh pr checks` all green, no merge command run.
 ```

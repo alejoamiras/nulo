@@ -26,4 +26,8 @@ skipped; N7 (codex skip, fable keep) → kept with the reject/latch cases; I5 (c
 
 ## Final codex pass
 
-(pending)
+`/codex high`, fresh session `01a07cf7-270d-7041-ae3d-f177d02bd136` (`audit-codex-final.md`): *conditional approve*, agrees
+with both disputed calls; four conditions adopted — K3's merged branch keyed by `op.kind` (AddressDisplay resolves on
+mount), rendered L2 parity cases, tighter N3/M1/N7/N8 test contracts (the FPC harnesses could not see a missing
+error note), and `FieldWarning` homed in `@nulo/design/ui` per the L0–L6 table. Fable's "drop the panel's sanitizer
+import" was wrong (`:314` still uses it) — kept.
