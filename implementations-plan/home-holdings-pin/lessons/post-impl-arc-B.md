@@ -55,3 +55,9 @@ adds nothing to that path. The e2e Holdings spec's renamed token runs again in P
 
 Also added on codex's aside: a Holdings case where both config reads reject (defaults stand, no
 error line).
+
+## Round 3 — verdict `approve`, no material findings
+
+Codex re-probed against the real transport: reconnect during a load recovers; hiding during a
+reconnect load leaves no rows and no error; reopening fetches; the lock path clears the popup store
+before `isLogined` flips, so the `v-if` cannot strand a `select_token` entry. Loop closed.
