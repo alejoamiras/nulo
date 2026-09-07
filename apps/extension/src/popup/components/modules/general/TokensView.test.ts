@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
 import { nextTick } from "vue"
 import { createAppStoreHarness } from "../../../../../tests/helpers/app-store-harness"
+import { installChromeStorage } from "../../../../../tests/helpers/chrome-storage-mock"
 
 const H = vi.hoisted(() => {
 	const makeEvent = () => {
@@ -129,6 +130,11 @@ import { CHAIN_IDS } from "@/utils/chain-ids"
 import { BACKFILL_INDICATOR_THRESHOLD_BLOCKS } from "@/wallet/services/incoming-transfer/spec"
 import TokenCard from "./TokenCard.vue"
 import TokensView from "./TokensView.vue"
+
+// The pinned-token composable reads storage at mount and subscribes to onChanged.
+beforeEach(() => {
+	installChromeStorage()
+})
 
 function deferred<T>() {
 	let resolve!: (v: T) => void
@@ -370,7 +376,8 @@ describe("TokensView — Home order and cap", () => {
 			namedRow(4, "EMPTY", { chainId: MAINNET, publicBalance: "0" }),
 			namedRow(2, "ALPHA", { chainId: MAINNET }),
 		])
-		const wrapper = mount(TokensView, { shallow: true })
+		// The count lives inside the design package's SectionLabel; let it render.
+		const wrapper = mount(TokensView, { shallow: true, global: { stubs: { SectionLabel: false } } })
 		await flushPromises()
 		expect(cardSymbols(wrapper)).toEqual(["PRICED", "ALPHA", "ZED"])
 		expect(wrapper.find('[data-testid="tokens-count"]').text()).toBe("4")
@@ -411,20 +418,49 @@ describe("TokensView — Home order and cap", () => {
 		await flushPromises()
 		expect(cardSymbols(wrapper)).toEqual(["OLD"])
 
+		// The task snapshot is awaited before the balances: rows must already be gone while it hangs.
+		const tasksPending = deferred<unknown[]>()
+		H.getTasks.mockReturnValue(tasksPending.promise)
 		const pending = deferred<unknown[]>()
 		H.getTokenBalances.mockReturnValue(pending.promise)
 		H.store.current.network = { id: "net-other", chainId: MAINNET + 1 }
 		await flushPromises()
 		expect(cardSymbols(wrapper)).toEqual([])
 
+		tasksPending.resolve([])
+		await flushPromises()
+		expect(cardSymbols(wrapper)).toEqual([])
 		pending.resolve([namedRow(2, "NEW", { chainId: MAINNET + 1 })])
 		await flushPromises()
 		expect(cardSymbols(wrapper)).toEqual(["NEW"])
+
+		// A task snapshot that rejects does not block the balances.
+		H.getTasks.mockRejectedValueOnce(new Error("port closed"))
+		H.getTokenBalances.mockResolvedValue([namedRow(3, "AFTER", { chainId: MAINNET + 2 })])
+		H.store.current.network = { id: "net-third", chainId: MAINNET + 2 }
+		await flushPromises()
+		expect(cardSymbols(wrapper)).toEqual(["AFTER"])
 
 		H.getTokenBalances.mockRejectedValue(new Error("port closed"))
 		H.store.current.network = { id: "net-main", chainId: MAINNET }
 		await flushPromises()
 		expect(cardSymbols(wrapper)).toEqual([])
+	})
+
+	test("an unmount during the scope watcher's task snapshot stops the balance fetch that would reconnect", async () => {
+		H.getTokenBalances.mockResolvedValue([namedRow(1, "OLD", { chainId: MAINNET })])
+		const wrapper = mount(TokensView, { shallow: true })
+		await flushPromises()
+		const fetchesBefore = H.getTokenBalances.mock.calls.length
+
+		const tasksPending = deferred<unknown[]>()
+		H.getTasks.mockReturnValue(tasksPending.promise)
+		H.store.current.network = { id: "net-other", chainId: MAINNET + 1 }
+		await flushPromises()
+		wrapper.unmount()
+		tasksPending.resolve([])
+		await flushPromises()
+		expect(H.getTokenBalances.mock.calls.length).toBe(fetchesBefore)
 	})
 
 	test("hostile rows reach the REAL card without throwing: a dash for the malformed ones, the good row intact", async () => {

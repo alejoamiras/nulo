@@ -7,6 +7,7 @@
 
 /** Components */
 import ListStatusMessage from "@/components/composite/ListStatusMessage.vue"
+import SearchField from "@/components/composite/SearchField.vue"
 
 /** Services */
 import { PriceServiceClient } from "@/wallet/services/price/client"
@@ -18,6 +19,7 @@ import { HOME_TOKEN_ROWS, forChain, orderTokenRows } from "@/utils/token-order"
 import { matchesQuery } from "@/utils/token-search"
 
 /** Composables */
+import { pinScopeOf, usePinnedTokens } from "@/composables/usePinnedTokens"
 import { usePrices } from "@/composables/usePrices"
 
 /** Store */
@@ -47,13 +49,16 @@ const loadError = ref(false)
 const priceService = new PriceServiceClient()
 const prices = usePrices(priceService)
 const fiatOf = safeFiatOf((tb) => prices.tokenFiatMicro(tb.token, parseRawBalance(tb)))
-const pinnedContracts = new Set()
+const pins = usePinnedTokens({
+	getScope: () => pinScopeOf(appStore.profile?.id, appStore.network?.chainId),
+	knownContracts: () => new Set(rows.value.map((tb) => tb.token.contract)),
+})
 
 const searchable = computed(() => rows.value.length > HOME_TOKEN_ROWS)
 const listed = computed(() => {
 	// A query typed while the box was shown must not keep filtering once the box is gone.
 	const matching = searchable.value ? rows.value.filter((tb) => matchesQuery(tb.token, query.value)) : rows.value
-	return orderTokenRows(matching, { pinnedContracts, fiatOf })
+	return orderTokenRows(matching, { pinnedContracts: pins.pinnedContracts.value, fiatOf })
 })
 const noResults = computed(() => rows.value.length > 0 && listed.value.length === 0)
 
@@ -110,6 +115,7 @@ const load = async () => {
 	rows.value = []
 	loadError.value = false
 	if (!scope) return
+	void pins.refresh()
 	let all
 	try {
 		all = await tokenBalanceService.getTokenBalances(undefined, scope.account)
@@ -146,6 +152,7 @@ onBeforeUnmount(() => {
 	tokenBalanceService.disconnect()
 	prices.dispose()
 	priceService.disconnect()
+	pins.dispose()
 })
 </script>
 
@@ -159,19 +166,7 @@ onBeforeUnmount(() => {
 			</PopupHeader>
 
 			<Flex wide direction="column" gap="24" :class="$style.wrapper">
-				<label v-if="searchable" :class="$style.search">
-					<MaterialIcon name="search" :size="16" color="secondary" />
-					<input
-						v-model="query"
-						type="text"
-						placeholder="Search tokens"
-						maxlength="80"
-						autocomplete="off"
-						spellcheck="false"
-						data-testid="select-token-search"
-						:class="$style.search_input"
-					/>
-				</label>
+				<SearchField v-if="searchable" v-model="query" placeholder="Search tokens" testid="select-token-search" />
 
 				<ItemsContainer>
 					<span v-if="loadError" :class="$style.error" data-testid="select-token-error">Couldn't load tokens</span>
@@ -209,34 +204,6 @@ onBeforeUnmount(() => {
 <style module>
 .wrapper {
 	padding: 0 20px 24px 20px;
-}
-
-.search {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-
-	height: 36px;
-	padding: 0 10px;
-	border: 1px solid var(--nulo-outline);
-	background: var(--nulo-surface);
-	cursor: text;
-}
-
-.search_input {
-	flex: 1;
-	min-width: 0;
-
-	font-family: var(--font-mono);
-	font-size: 12px;
-	color: var(--txt-primary);
-	background: transparent;
-	border: none;
-	outline: none;
-
-	&::placeholder {
-		color: var(--nulo-outline);
-	}
 }
 
 .error {

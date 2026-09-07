@@ -6,7 +6,9 @@
  */
 import type { PropType } from "vue"
 import { computed, ref } from "vue"
+import { SectionLabel } from "@nulo/design"
 import ListStatusMessage from "@/components/composite/ListStatusMessage.vue"
+import SearchField from "@/components/composite/SearchField.vue"
 import TokenCard from "@/popup/components/modules/general/TokenCard.vue"
 import { usdThresholdToMicro } from "@/utils/incoming-dust"
 import { stringCompare } from "@/utils/string"
@@ -89,26 +91,11 @@ const toggleSort = () => {
 <template>
 	<Flex direction="column" gap="12">
 		<div :class="$style.sticky">
-			<label :class="$style.search">
-				<MaterialIcon name="search" :size="16" color="secondary" />
-				<input
-					v-model="query"
-					type="text"
-					placeholder="Search tokens"
-					maxlength="80"
-					autocomplete="off"
-					spellcheck="false"
-					data-testid="holdings-search"
-					:class="$style.search_input"
-				/>
-			</label>
+			<SearchField v-model="query" placeholder="Search tokens" testid="holdings-search" />
 		</div>
 
 		<Flex align="end" justify="between">
-			<span :class="$style.header_title">
-				ALL HOLDINGS
-				<span :class="$style.header_count" data-testid="holdings-count">{{ visibleCount }}</span>
-			</span>
+			<SectionLabel label="All holdings" :count="visibleCount" countTestid="holdings-count" />
 			<button type="button" @click="toggleSort" data-testid="holdings-sort" :data-sort="sort" :class="$style.sort">
 				{{ sort === "value" ? "BY VALUE" : "A–Z" }}
 			</button>
@@ -147,52 +134,6 @@ const toggleSort = () => {
 
 	padding: 4px 0 6px;
 	background: var(--app-bg);
-}
-
-.search {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-
-	height: 36px;
-	padding: 0 10px;
-	border: 1px solid var(--nulo-outline);
-	background: var(--nulo-surface);
-	cursor: text;
-}
-
-.search_input {
-	flex: 1;
-	min-width: 0;
-
-	font-family: var(--font-mono);
-	font-size: 12px;
-	color: var(--txt-primary);
-
-	&::placeholder {
-		color: var(--nulo-outline);
-	}
-}
-
-.header_title {
-	display: inline-flex;
-	align-items: baseline;
-	gap: 8px;
-
-	font-family: var(--font-headline);
-	font-size: 12px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
-}
-
-.header_count {
-	font-family: var(--font-mono);
-	font-size: 10px;
-	font-weight: 400;
-	letter-spacing: 0;
-	color: var(--nulo-outline);
 }
 
 .sort {

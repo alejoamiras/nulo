@@ -24,6 +24,7 @@ import { forChain } from "@/utils/token-order"
 
 /** Composables */
 import { useEntityCrud } from "@/composables/useEntityCrud"
+import { pinScopeOf, usePinnedTokens } from "@/composables/usePinnedTokens"
 import { usePrices } from "@/composables/usePrices"
 
 /** Store */
@@ -91,7 +92,11 @@ function readConfig() {
 readConfig()
 configService.onConnected.add(readConfig)
 
-const pinnedContracts = new Set<string>()
+const pins = usePinnedTokens({
+	getScope: () => pinScopeOf(appStore.profile?.id, activeChainId()),
+	knownContracts: () => new Set(rows.value.map((tb) => tb.token.contract)),
+})
+void pins.refresh()
 
 const aggregate = computed(() => aggregateFiat(rows.value, fiatOf))
 const aggregateDisplay = computed(() => prices.formatUsdMicro(aggregate.value.micro))
@@ -100,6 +105,7 @@ watch(
 	() => [appStore.profile?.id, appStore.account?.address, appStore.network?.chainId],
 	() => {
 		void refresh({ clear: true })
+		void pins.refresh()
 	},
 )
 
@@ -111,6 +117,7 @@ onBeforeUnmount(() => {
 	priceService.disconnect()
 	configService.onConnected.remove(readConfig)
 	configService.disconnect()
+	pins.dispose()
 })
 </script>
 
@@ -129,7 +136,7 @@ onBeforeUnmount(() => {
 			<TokenList
 				v-else
 				:rows="rows"
-				:pinnedContracts="pinnedContracts"
+				:pinnedContracts="pins.pinnedContracts.value"
 				:fiatOf="fiatOf"
 				:usdRateOf="usdRateOf"
 				:dustThresholdUsd="dustThresholdUsd"

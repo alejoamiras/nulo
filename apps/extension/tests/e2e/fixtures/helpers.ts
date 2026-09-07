@@ -812,6 +812,37 @@ export async function navigateToTokenDetail(page: Page, symbol?: string): Promis
 	await page.waitForSelector('[data-testid="balance-amount"]', { visible: true, timeout: 15_000 })
 }
 
+/** Import a token from Home and wait for its projected balance row to carry `expectedPublicRaw`
+ *  and a fresher timestamp than before the import — the discipline every multi-token spec needs so
+ *  its assertions never race the balance projector. */
+export async function importTokenAndWaitForBalance(
+	page: Page,
+	account: string,
+	contract: string,
+	expectedPublicRaw: string,
+): Promise<void> {
+	const baseline = await captureBalanceBaseline(page, account, contract)
+	await importToken(page, contract)
+	await waitForFreshBalanceRow(page, {
+		account,
+		tokenContract: contract,
+		expectedPublicRaw,
+		baselineUpdatedAt: baseline,
+		timeoutMs: 90_000,
+	})
+}
+
+/** Seed a fresh $1 USDC quote (the agent build maps every sandbox contract to `usd-coin`) and
+ *  remount the popup so the stale-on-connect read adopts it. Resolves on Home. */
+export async function seedUsdQuoteAndReload(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		const state = { "usd-coin": { coingeckoId: "usd-coin", usd: 1.0, fetchedAt: Date.now(), providerUpdatedAt: null } }
+		return chrome.storage.local.set({ "nulo:core:token-prices": JSON.stringify(state) })
+	})
+	await page.reload({ waitUntil: "domcontentloaded" })
+	await page.waitForFunction(() => window.location.hash === "#/popup/general", { timeout: 15_000 })
+}
+
 /** On the Send page, open the token picker, choose the row for `symbol`, and wait for the popup to
  *  close with the trigger showing that symbol. */
 export async function selectSendToken(page: Page, symbol: string): Promise<void> {
@@ -830,6 +861,27 @@ export async function selectSendToken(page: Page, symbol: string): Promise<void>
 		rowSelector,
 		symbol,
 	)
+}
+
+/** On a token page, open the "⋯" menu and click the pin item (Pin to Home / Unpin from Home);
+ *  resolves once the menu has closed on the click. */
+export async function pinFromTokenPage(page: Page): Promise<void> {
+	await clickByTestId(page, "token-menu-trigger")
+	await page.waitForSelector('[data-testid="token-menu-pin"]', { visible: true, timeout: 5_000 })
+	await page.evaluate(() => {
+		;(document.querySelector('[data-testid="token-menu-pin"]') as HTMLElement)?.click()
+	})
+	await page.waitForSelector('[data-testid="token-menu-pin"]', { hidden: true, timeout: 5_000 })
+}
+
+/** On a token page, read the pin item's `data-pinned` ("true" | "false") and close the menu again. */
+export async function readPinState(page: Page): Promise<string | undefined> {
+	await clickByTestId(page, "token-menu-trigger")
+	await page.waitForSelector('[data-testid="token-menu-pin"]', { visible: true, timeout: 5_000 })
+	const state = await page.$eval('[data-testid="token-menu-pin"]', (el) => (el as HTMLElement).dataset.pinned)
+	await page.keyboard.press("Escape")
+	await page.waitForSelector('[data-testid="token-menu-pin"]', { hidden: true, timeout: 5_000 })
+	return state
 }
 
 /** Read the private and public balance values from the token detail page's BalanceView breakdown. */

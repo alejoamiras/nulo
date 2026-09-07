@@ -1,5 +1,6 @@
 <script setup>
 /** Components */
+import { SectionLabel } from "@nulo/design"
 import { Dropdown } from "@/components/ui/Dropdown"
 import TokenCard from "./TokenCard.vue"
 import TokenImportRow from "./TokenImportRow.vue"
@@ -18,6 +19,7 @@ import { parseRawBalance, safeFiatOf } from "@/utils/token-amount"
 import { capTokenRows, forChain, orderTokenRows } from "@/utils/token-order"
 
 /** Composables */
+import { usePinnedTokens, pinScopeOf } from "@/composables/usePinnedTokens"
 import { usePrices } from "@/composables/usePrices"
 
 /** Store */
@@ -78,9 +80,14 @@ const anyRefreshing = computed(() => tokenBalances.value.some((tb) => tb.isUpdat
 const priceService = new PriceServiceClient()
 const prices = usePrices(priceService)
 const fiatOf = safeFiatOf((tb) => prices.tokenFiatMicro(tb.token, parseRawBalance(tb)))
-const pinnedContracts = new Set()
 
-const orderedTokenBalances = computed(() => orderTokenRows(tokenBalances.value, { pinnedContracts, fiatOf }))
+const pins = usePinnedTokens({
+	getScope: () => pinScopeOf(appStore.profile?.id, appStore.network?.chainId),
+	knownContracts: () => new Set(tokenBalances.value.map((tb) => tb.token.contract)),
+})
+void pins.refresh()
+
+const orderedTokenBalances = computed(() => orderTokenRows(tokenBalances.value, { pinnedContracts: pins.pinnedContracts.value, fiatOf }))
 const homeRows = computed(() => capTokenRows(orderedTokenBalances.value))
 const shownTokenBalances = computed(() => homeRows.value.shown)
 const overflowCount = computed(() => homeRows.value.overflow)
@@ -375,8 +382,15 @@ watch(
 	async () => {
 		scopeGen++
 		syncByContract.value = new Map()
+		// The previous scope's rows go now, before any await, so they are never ordered under the
+		// new scope's pins; pins refresh on their own, not behind the task snapshot.
+		tokenBalances.value = []
+		void pins.refresh()
+		const gen = scopeGen
 		// Tasks first: fetchTokenBalances derives isUpdating from the snapshot.
-		await fetchTasks()
+		await fetchTasks().catch(() => undefined)
+		// A newer scope, or the unmount (which bumps the generation), owns the balances now.
+		if (scopeGen !== gen) return
 		await fetchTokenBalances()
 	},
 )
@@ -389,6 +403,7 @@ onMounted(async () => {
 	await fetchTokenBalances()
 })
 onBeforeUnmount(() => {
+	scopeGen++
 	taskService.disconnect()
 	tokenBalanceService.disconnect()
 	journalService.disconnect()
@@ -397,6 +412,7 @@ onBeforeUnmount(() => {
 	incomingTransferService.disconnect()
 	prices.dispose()
 	priceService.disconnect()
+	pins.dispose()
 })
 </script>
 
@@ -404,8 +420,7 @@ onBeforeUnmount(() => {
 	<Flex direction="column" gap="12" :class="$style.wrapper">
 		<Flex align="end" justify="between" :class="$style.section_header">
 			<Flex align="center" gap="8">
-				<span :class="$style.header_title">HOLDINGS</span>
-				<span v-if="tokenBalances.length" :class="$style.header_count" data-testid="tokens-count">{{ tokenBalances.length }}</span>
+				<SectionLabel label="Holdings" :count="tokenBalances.length || null" countTestid="tokens-count" />
 				<!-- The ONE refresh-activity signal for the whole list (per-row indication is deliberately
 				     silent — batch refreshes would animate every row). Same vocabulary as the gas card's
 				     activity dot: grey pulse = a shown value being re-verified. -->
@@ -518,21 +533,6 @@ onBeforeUnmount(() => {
 	.refreshing_dot {
 		animation: none;
 	}
-}
-
-.header_title {
-	font-family: var(--font-headline);
-	font-size: 12px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
-}
-
-.header_count {
-	font-family: var(--font-mono);
-	font-size: 10px;
-	color: var(--nulo-outline);
 }
 
 /* Same voice as RecentActivityView's "View Archives" link. */
