@@ -1,0 +1,192 @@
+<title>Tools Self-Testing Blueprint</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #f4f6f7; --panel: #ffffff; --ink: #16222c; --muted: #586a77; --rule: #d3dbe1;
+    --accent: #1e5a86; --accent-soft: #e3eef7; --ok: #276b57; --ok-soft: #dff0e9;
+    --warn: #a3471f; --warn-soft: #f9e7dd; --code-bg: #eef2f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0f161c; --panel: #16202a; --ink: #e4ebf0; --muted: #97a7b3; --rule: #2a3742;
+      --accent: #7db6e6; --accent-soft: #1c2f40; --ok: #6cc5a5; --ok-soft: #163229;
+      --warn: #e6905f; --warn-soft: #3c2418; --code-bg: #1c2731;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0f161c; --panel: #16202a; --ink: #e4ebf0; --muted: #97a7b3; --rule: #2a3742;
+    --accent: #7db6e6; --accent-soft: #1c2f40; --ok: #6cc5a5; --ok-soft: #163229;
+    --warn: #e6905f; --warn-soft: #3c2418; --code-bg: #1c2731;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif; font-size: 17px; line-height: 1.55; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 48px 24px 96px; }
+  .eyebrow { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+  h1 { font-family: "Newsreader", Georgia, serif; font-weight: 600; font-size: 40px; line-height: 1.1; margin: 0 0 14px; text-wrap: balance; letter-spacing: -.01em; }
+  h2 { font-family: "Newsreader", Georgia, serif; font-weight: 600; font-size: 27px; margin: 44px 0 12px; text-wrap: balance; }
+  h3 { font-size: 17px; font-weight: 600; margin: 0 0 6px; }
+  p { margin: 0 0 12px; text-wrap: pretty; }
+  ul, ol { margin: 0 0 12px; padding-left: 22px; }
+  li { margin-bottom: 6px; }
+  li::marker { color: var(--muted); }
+  code { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .86em; background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+  pre { background: var(--code-bg); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px; overflow-x: auto; font-size: 13px; line-height: 1.5; margin: 0 0 14px; white-space: pre-wrap; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .lede { font-size: 19px; color: var(--muted); margin: 0 0 8px; }
+  .verdicts { display: grid; gap: 8px; margin: 16px 0 0; }
+  .verdict { display: grid; grid-template-columns: 96px 1fr; gap: 12px; padding: 10px 14px; background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; font-size: 15px; }
+  .verdict .k { font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); padding-top: 2px; }
+  .arc { margin: 18px 0 0; }
+  .arc-title { font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 26px 0 8px; }
+  .phase { display: grid; grid-template-columns: 34px 1fr; gap: 12px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; margin-bottom: 8px; }
+  .phase .n { font-family: "JetBrains Mono", monospace; font-size: 13px; color: var(--accent); padding-top: 2px; }
+  .phase p { margin: 0 0 6px; }
+  .gate { font-size: 14px; color: var(--muted); }
+  .gate b { color: var(--ok); font-weight: 600; }
+  .callout { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 12px 16px; border-radius: 0 6px 6px 0; margin: 0 0 14px; }
+  .callout.warn { border-left-color: var(--warn); background: var(--warn-soft); }
+  .callout.ok { border-left-color: var(--ok); background: var(--ok-soft); }
+  .callout p:last-child { margin-bottom: 0; }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--panel); margin: 0 0 14px; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  tr:last-child td { border-bottom: 0; }
+  .seed { border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px; background: var(--panel); margin: 0 0 14px; }
+  .seed.rec { border-color: var(--ok); }
+  .seed h3 { margin-bottom: 8px; }
+  .tag { display: inline-block; font-family: "JetBrains Mono", monospace; font-size: 11px; letter-spacing: .05em; padding: 2px 7px; border-radius: 3px; vertical-align: middle; background: var(--ok-soft); color: var(--ok); margin-left: 8px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  @media (max-width: 600px) { h1 { font-size: 32px; } .verdict { grid-template-columns: 1fr; gap: 4px; } }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">nulo · blueprint mid · plan: implementations-plan/tools-self-testing · 2026-09-08</p>
+  <h1>Tools tests itself, the bridge tests itself, and CI says which is which</h1>
+  <p class="lede">Today the bridge's real round-trip check is a script someone runs by hand, and the tools app has never been driven in a real browser. This plan turns both into gates that run on every relevant pull request, without the Nulo extension anywhere in the loop, and renames the CI checks so a red one tells you which product broke.</p>
+
+  <div class="verdicts">
+    <div class="verdict"><div class="k">Codex r1</div><div>Reject. Every blocking finding was adopted: the local build had to be a real build target, not a dev-mode trick; the test wallet needed the schema patch and a stricter origin check; the flows must not share state; CI jobs must build the contracts first; the enumerated matrix replaced a loose spec list.</div></div>
+    <div class="verdict"><div class="k">Fable r1</div><div>Conditional approve with five conditions. All five are in the plan.</div></div>
+    <div class="verdict"><div class="k">Codex final</div><div id="final-verdict">Pending at the time of publishing; see plan.md § Audit verdicts.</div></div>
+  </div>
+
+  <h2>Why this tier</h2>
+  <p><strong>mid</strong>. Novelty is medium-high (nobody has yet connected Aztec's embedded wallet to a dApp through the wallet-sdk's iframe channel; a half-day spike de-risks it before anything is built on it). Blast radius is medium (renaming a required check blocks merges only until a one-command update). Irreversibility, migration cost, external coupling, and security sensitivity are all low. One dimension high-ish, none irreversible: <code>mid</code>, with two independent reviewers instead of one.</p>
+
+  <h2>What you decided already</h2>
+  <ul>
+    <li><strong>Gas leg on the sandbox</strong>: a stand-in Uniswap "quoter" that answers the app's price questions at a fixed rate, over the fixed-rate swap mock that already exists. Real Uniswap math stays proven by the existing Sepolia-fork contract test.</li>
+    <li><strong>Rename the required checks</strong> to app-prefixed names, with a one-command script you run right before merging the rename.</li>
+    <li><strong>New gates are advisory first</strong>; after seven days of first-try green, you promote them to required with the same script.</li>
+    <li><strong>The full matrix runs in both layers</strong>: once through the code the app calls (fast, per-flow pass/fail) and once through the real UI in a browser (slower, sharded across runners).</li>
+    <li><strong>No <code>/code-review</code></strong> in the loops; the codex fix loop is the review.</li>
+  </ul>
+
+  <h2>The three arcs</h2>
+
+  <p class="arc-title">Arc 1 · CI names say the app · one pull request</p>
+  <div class="phase"><div class="n">1</div><div>
+    <h3>Rename workflows, checks, labels, and docs; ship the protection script</h3>
+    <p>"Smoke e2e" becomes "Extension smoke e2e", "Network e2e" becomes "Extension network e2e", the contracts check becomes "bridge-contracts-status"; the quality check keeps its neutral name. Every doc and script that hardcodes the old names is updated. A script prints and, on request, applies the new required-check names to both protected branches, refusing if the live settings changed under it, and prints the rollback.</p>
+    <p class="gate"><b>Proves itself by:</b> workflow lint + the CI-gating unit test green; a repo-wide search finds only the new names; the PR itself shows the new check names green.</p>
+  </div></div>
+
+  <p class="arc-title">Arc 2 · Bridge integration suite · one pull request, stacked on arc 1</p>
+  <div class="phase"><div class="n">2</div><div>
+    <h3>Turn the sandbox script into a library and stop fetching from the internet</h3>
+    <p>The 1,358-line smoke script is split into modules (boot, fixtures, accounts, flows) with no hidden shared state, so each flow can run on its own. The two canonical Ethereum contracts the sandbox copies from a public Sepolia node are vendored into the repo with an independently checked fingerprint. Per-flow timings are recorded for the first time.</p>
+    <p class="gate"><b>Proves itself by:</b> package typecheck + unit tests green; the existing smoke still passes end to end with no network fetch in its log.</p>
+  </div></div>
+  <div class="phase"><div class="n">3</div><div>
+    <h3>Make the gas leg reachable; add the missing flows</h3>
+    <p>A small test-only contract answers the app's price questions exactly as the swap mock will settle them, so "arrive with gas" paths work locally. The sandbox's bridge description gains the swap block the app looks for. Flows that never existed are added: private token+gas, private gas-only, sends from accounts with no gas at all, a withdrawal attempted before it is provable, and more.</p>
+    <p class="gate"><b>Proves itself by:</b> the contracts' own test suite green including the new contract; the smoke green including the new flows.</p>
+  </div></div>
+  <div class="phase"><div class="n">4</div><div>
+    <h3>Every flow becomes a named test; the faucet joins the sandbox</h3>
+    <p>A vitest suite boots the local network once, then runs one file per family (deposits, gas leg, fee states, registration races, exits, pause, drip, recovery), each with its own fresh accounts and tokens. The faucet's Dripper and its two test tokens are deployed on the sandbox too.</p>
+    <p class="gate"><b>Proves itself by:</b> <code>test:integration</code> green with every matrix cell listed as its own test; the everyday unit run untouched.</p>
+  </div></div>
+  <div class="phase"><div class="n">5</div><div>
+    <h3>CI runs it on every contracts or bridge change</h3>
+    <p>A new job installs the right Aztec toolchain, builds the contracts, and runs the suite, on any PR touching the contracts, the bridge library, or the published bridge description files. The Noir hub's own test suite is tried in CI too; if the runner cannot host it, that is recorded and the job dropped.</p>
+    <p class="gate"><b>Proves itself by:</b> workflow lint + gating test green locally; the arc's PR shows the job green.</p>
+  </div></div>
+
+  <p class="arc-title">Arc 3 · Tools in a real browser · one pull request, stacked on arc 2</p>
+  <div class="phase"><div class="n">6</div><div>
+    <h3>Spike: can an embedded wallet connect to tools through the standard wallet channel?</h3>
+    <p>Half a day, nothing permanent. A tiny page hosts Aztec's embedded wallet behind the wallet-sdk's iframe handler; tools is pointed at it; one connection and one faucet drip must land. Each known risk is checked and written down: the 10-second discovery window, the cross-origin headers, the SDK's floating panel, and where the "pay from my own public gas" behavior plugs in.</p>
+    <p class="gate"><b>Proves itself by:</b> a drip receipt on screen and the balance moving on chain; a go / no-go note per risk, with the fallback route recorded if any is no-go.</p>
+  </div></div>
+  <div class="phase"><div class="n">7</div><div>
+    <h3>A real "local" build target for tools</h3>
+    <p>Tools currently knows two networks, testnet and mainnet, chosen at build time. A third, "local", points at the sandbox and carries its identity and the test wallet's address, injected at build time so nothing leaks into the other two builds. The faucet's addresses become target-aware too.</p>
+    <p class="gate"><b>Proves itself by:</b> tools' typecheck, unit and jsdom smoke green; a local build passes the target verifier and contains the sandbox addresses; a testnet build contains none of them.</p>
+  </div></div>
+  <div class="phase"><div class="n">8</div><div>
+    <h3>Playwright scaffold, the fake Ethereum wallet, first flow</h3>
+    <p>Playwright drives Chromium. An 80-line fake Ethereum wallet is injected into the page (it signs with one of the local chain's well-known dev keys). Every request that would leave the machine is blocked, and the public token list is served from a file. A runner script boots the sandbox, builds tools, checks the build really contains the sandbox addresses, runs the tests, and cleans up only what it started.</p>
+    <p class="gate"><b>Proves itself by:</b> one deposit flow green first try; nothing left running afterwards; zero outside requests recorded.</p>
+  </div></div>
+  <div class="phase"><div class="n">9</div><div>
+    <h3>The matrix in the browser</h3>
+    <p>Thirty-four cells, each a named test: deposits (token only, token + gas, gas only; public and private; first-time and repeat), every "not enough gas" message, recovery after an interrupted claim, declined permissions, wrong Ethereum network, exits (public, private from one note and from three, paused, no credit), the token catalog and paste-to-add, the mint strip, the faucet, backups and the dock. Two wallet profiles: a plain wallet with only standard methods, and one that also advertises the "pay from held public gas" feature.</p>
+    <p class="gate"><b>Proves itself by:</b> the whole suite green first try, locally and split in two shards; timings recorded to size CI.</p>
+  </div></div>
+  <div class="phase"><div class="n">10</div><div>
+    <h3>CI for the tools suite; delete the dead extension plumbing; docs</h3>
+    <p>A "Tools e2e" workflow with a "tools-e2e-status" check runs on any PR touching tools, the contracts, or the bridge library, sharded. The extension's test runner loses the unused hooks it kept for driving tools. CI.md, CLAUDE.md, and the app README describe the new gates and who promotes them.</p>
+    <p class="gate"><b>Proves itself by:</b> workflow lint + gating test + the extension smoke green locally; the arc's PR shows every shard and the status check green first try.</p>
+  </div></div>
+
+  <h2>Human context</h2>
+  <p><strong>Why not drive tools with the Nulo extension?</strong> Because tools must work with every wallet that speaks the standard, and the extension must work with every dApp. Testing them against each other proves the pair, not either product, and couples two release trains. The embedded test wallet is a third-party wallet as far as tools can tell, which is exactly the claim to prove.</p>
+  <p><strong>Why a fake Uniswap?</strong> The sandbox has no Uniswap. Forking Sepolia would still not help: the local network mints its own Fee Juice, so Sepolia's pools cannot price it. A fixed-rate stand-in that answers the same questions the real quoter does exercises all of the app's routing code; the real pool math is already proven against Sepolia by a contract test.</p>
+  <p><strong>Why not snapshot the chain between tests?</strong> Rewinding the Ethereum side looks like a reorg to the Aztec node and desyncs it. Fresh accounts and fresh tokens per test file are cheaper and honest.</p>
+  <p><strong>Why the rename needs a script.</strong> Required checks are matched by name in the branch settings. The moment the rename merges, the old names stop appearing, so the settings must switch at the same time. The script makes that a single command with a rollback.</p>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li><strong>The spike might say no.</strong> Nobody has run Aztec's embedded wallet behind the SDK's iframe handler against a real dApp. If it cannot complete the handshake, the fallback is a wallet that imitates the extension's message channel, which is a bigger phase and gets re-planned. Everything in arcs 1 and 2 stands regardless.</li>
+    <li><strong>Can the CI runner host the Noir hub's test oracle?</strong> Unknown until phase 5 tries; the job is dropped with evidence if not.</li>
+    <li><strong>How many browser shards?</strong> Nothing is timed today. Phases 2 and 9 measure; the shard count follows.</li>
+  </ul>
+
+  <div class="callout">
+    <h3>Approval decision needed from you</h3>
+    <ul>
+      <li>Confirm the scope and exclusions (no real Uniswap on the sandbox, no browser proving, no extension-driven tools tests, Chromium only).</li>
+      <li>Confirm the tier: <code>mid</code>.</li>
+      <li>Confirm the new check names: <code>extension-smoke-e2e-status</code>, <code>extension-network-e2e-status</code>, <code>bridge-contracts-status</code>, <code>tools-e2e-status</code>; <code>quality-status</code> unchanged.</li>
+      <li>Confirm the delivery: three stacked pull requests (arc 1 → arc 2 → arc 3), opened only after the quality loops converge; you merge, and you run the protection script right before merging arc 1.</li>
+      <li>Confirm the promotion rule: seven days of first-try green, then you add the two new checks to the required set.</li>
+      <li>Hardening: none scheduled; revisit <code>/harden security</code> before the tools publish milestone.</li>
+      <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <h2>Implementation seeds <span class="muted">(draft until approved)</span></h2>
+  <p class="muted">Paste exactly one into the implementing session, started inside the plan's worktree (<code>agent-worktree resume tools-self-testing</code>). They don't compose: setting one replaces the other.</p>
+
+  <div class="seed rec">
+    <h3>Recommended: <code>/goal</code><span class="tag">completion is transcript-observable</span></h3>
+<pre><code>/goal All 10 phases marked ✓ in implementations-plan/tools-self-testing/plan.md (the per-phase headers in the file — not the chat, not the task list), each ✓ backed by its phase's validation gate as written in plan.md reported passing in the transcript; for each phase the agent has printed `LESSONS_FILE=implementations-plan/tools-self-testing/lessons/phase-N.md`; `/code-review` was NOT run (plan.md says code_review: off); the codex fix loop converged for each of the three arcs at its boundary AND for the final cross-arc pass, each convergence evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; the three-PR stack exists on GitHub, created only after all loops converged (`gh stack view` output in the transcript), with the arc-1 PR body naming the `scripts/ci-cd/required-checks.sh --apply` step for the owner; `bun run test:all` and `bun run lint && bun run lint:actions` both report exit 0 in the transcript.</code></pre>
+  </div>
+
+  <div class="seed">
+    <h3>Alternative: <code>/loop 15m</code></h3>
+<pre><code>/loop 15m Drive implementations-plan/tools-self-testing forward. Never idle waiting for my input. Each firing:
+1. Reality check: read implementations-plan/tools-self-testing/plan.md and lessons/ (authoritative state — not the chat); native task list empty? rebuild it from plan.md, one task per remaining phase; `git status` and `git log --oneline -5`. If PRs exist, `gh stack view` and `gh pr view --json statusCheckRollup` (no --watch). Without a PR, `gh run list --branch $(git branch --show-current) --limit 1 --json status,databaseId`.
+2. Waiting on CI is fine — confirm it is progressing (`gh run watch <id>` up to 10 minutes; stuck past that → inspect logs, log as blocked in lessons). Use the wait: review the diff, prep the next phase, strengthen tests.
+3. No task in hand? Pick the next pending phase from plan.md and start it. After each meaningful edit run `bun run lint` and the touched package's `test`. Commit → push (`gh stack push`; `gh stack sync` if dev or a lower arc moved).
+4. Stuck, or facing a decision you'd normally bring to me? Don't wait. `/codex high` with full context, go back and forth to a defensible decision, act on it, log consult + verdict in lessons/phase-N.md. Hard limits stay hard: never merge, never publish, never expand scope beyond plan.md, never run `scripts/ci-cd/required-checks.sh --apply` (owner-only); surface and hold if a decision needs one.
+5. Same step failed 5 times? Stop retrying; reassess with codex, continue on the agreed path.
+6. Phase green? Green means THE PHASE'S VALIDATION GATE as written in plan.md passes. Run the full gate, paste the result, mark ✓ in plan.md, file the lessons entry, print `LESSONS_FILE=implementations-plan/tools-self-testing/lessons/phase-N.md`, advance. Arc boundary (after phases 1, 5, 10)? Run the arc's codex loop FIRST (`/codex high` with the arc map + the plan's no-over-engineering + comment-quality rules, until a round yields nothing material; do NOT run /code-review) — THEN `gh stack add <next-arc-branch>`.
+7. All phases ✓? Close out per plan.md § Post-implementation: the FRESH cross-arc codex pass over the net diff from 036709d8 until clean; then Delivery — the FIRST time any PR is opened: `gh stack sync`, `gh stack submit --auto`, `gh pr edit` bodies (arc 1 names the owner's required-checks step), `gh pr checks --watch`; a red new-workflow check is fixed on its arc branch and re-pushed. Write the wrap-up: what shipped, every contentious decision codex and I debated with ELI5 context, open items. Surface and stop.
+Keep the native task list current (plan.md stays the source of truth).</code></pre>
+  </div>
+
+  <p class="muted">Technical detail (architecture, interfaces, the full 34-cell matrix, assumptions, audit transcripts) lives in the repo at <code>implementations-plan/tools-self-testing/</code>.</p>
+</div>
