@@ -6,7 +6,7 @@ eli5_mode: artifact
 code_review: off            # owner directive 2026-09-03 — the codex fix loop is the review
 budget: recon 2 mappers + prior 4-agent research sweep; codex at high; no wide fan-out
 base: origin/dev @ 036709d8
-status: v3.1 — resumed-pass findings folded in; awaiting the resumed verdict
+status: v3.2 — approved by both audit legs (conditional, all conditions adopted); at the owner approval gate
 ---
 
 # tools-self-testing
@@ -150,7 +150,7 @@ export async function installL1Wallet(page: Page, o: { rpcUrl: string; privateKe
 
 1. `apps/tools/scripts/e2e/agent.sh`: resolve a port pack (anvil, aztec, aztec-admin, aztec-p2p, tools, test-wallet) → `bun run --cwd packages/bridge-core sandbox:up --artifacts "$RUN_DIR"` boots anvil + local network (asserts the RPC/admin listeners, keeps the admin key), builds `forge out/` if absent, deploys fixtures, writes `handle.json` + `manifest.json` + `deployments.json` → `NULO_SANDBOX_ARTIFACTS=$RUN_DIR bun run --cwd apps/tools build:local --outDir "$RUN_DIR/dist"` (the loader feeds `define`; manifest path and outDir are per run, never `public/`) → asserts the bundle contains the node URL and the test-wallet URL → `playwright test [--shard=i/n]` → reap owned pgids.
 2. Playwright `webServer` serves `$RUN_DIR/dist` via `vite preview` on `127.0.0.1:<tools>` with COOP/COEP AND the generated CSP (`frame-src` = wallet origin), and the test-wallet build on `127.0.0.1:<tw>` (COEP `require-corp` + `Cross-Origin-Resource-Policy: cross-origin` + CSP `frame-ancestors http://127.0.0.1:<tools>`). `global-setup.ts` only parses `handle.json`. The isolation fixture asserts `crossOriginIsolated === true` in the tools page AND inside the wallet frame.
-3. Per spec file (one browser context, `serial`): `installL1Wallet` with that file's L1 actor key; egress fixture routes `tokens.uniswap.org` to `fixtures/token-list.json` and aborts any non-loopback request (asserted at teardown); the file declares its cells, so the fixture allocates ONE actor per cell up front (`newActor()` ×N in Node) and adds them all to the wallet (`frame.evaluate(addAccount(secret))` ×N) BEFORE tools connects — tools takes its account list from the capability grant (`createAztecWalletSession.ts:786, 819`), refuses an empty wallet (`:822`), and refuses to select an ungranted address (`:931`), so accounts must exist before the grant and are never added afterwards; `page.goto(tools)`; connect L1 → connect Aztec: picker lists the test wallet (`webWallets` discovery) → emoji modal → confirm; capability grant (all N accounts) → approve; the wallet-panel fixture shrinks the SDK's floating iframe panel (`iframe_provider.js:146-162`) so it never covers a testid.
+3. Per spec file (one browser context, `serial`): `installL1Wallet` with that file's L1 actor key; egress fixture routes `tokens.uniswap.org` to `fixtures/token-list.json` and aborts any non-loopback request (asserted at teardown); the file declares its cells, so the fixture allocates its whole actor pool up front (`newActor()` × (N+2) in Node, the 2 being retry spares; **N+2 ≤ 16**, tools' `MAX_GRANTED_ACCOUNTS` (`createAztecWalletSession.ts:74, 989`) — a file needing more is split) and hands the seeds to the wallet through a **context-level init script** (`context.addInitScript`, which runs in every document of the context including the session iframe the SDK creates only inside `establishSecureChannel` (`iframe_provider.js:57-67`); the script sets `window.__nuloTestWalletSeeds` when `location.origin` is the wallet origin) — the wallet's lazy `getWallet` imports every seed before returning, so the capability grant already lists the entire pool; tools takes its account list from that grant (`createAztecWalletSession.ts:786, 819`), refuses an empty wallet (`:822`), and refuses to select an ungranted address (`:931`), so nothing is added after the grant; `page.goto(tools)`; connect L1 → connect Aztec: the picker lists three test wallets, one per profile (`webWalletUrls = [tw/?profile=plain, ?profile=selfpay, ?profile=full]`) and the spec picks its profile by testid → emoji modal → confirm; capability grant (the whole pool) → approve, and the fixture asserts every allocated address survived grant parsing (present in the switcher); the wallet-panel fixture shrinks the SDK's floating iframe panel (`iframe_provider.js:146-162`) so it never covers a testid.
 4. Per test (cell): `fundFeeFixture(actor, cell.fixture)` on-chain just in time → the tools account switcher selects that cell's actor (testid) → the flow by testids → assertions read journal/receipt testids and, where the UI cannot show it, the chain via `openSandbox(handle)`; every cell states its expected payer and balance/note postconditions in the test. A retry gets a fresh actor from the file's spare pool (allocated N+2), never a reused one.
 5. Isolation: actors per cell (never reused across cells or retries); registration cells allocate a fresh token; pause/rate mutations restore in `finally`; deployer/relayer operations go through the harness mutex; the chain is never snapshotted; `workers: 1` per sandbox, parallelism only via shards (each shard boots its own sandbox).
 
@@ -215,7 +215,7 @@ Arc 3 (tools browser e2e): `apps/tools/package.json` (`@playwright/test` devDep 
 | 11 | token only, private, credit under ceiling → private `short` | plain | credit = ceiling/2 | – | ✓ |
 | 12 | token only, `unverifiable` (node read aborted) | plain | any | – | ✓ (`page.route` abort) |
 | 13 | token + gas, public, fueled claim (`fjwc`), nothing held | plain | none | ✓ | ✓ |
-| 13b | token + gas, public, fueled, only public FJ held (public FJ untouched) | selfpay | publicFj ≥ ceiling | ✓ | ✓ |
+| 13b | token + gas, public, fueled, only public FJ held — conservation: `after = before + claimed − fees charged` (the fueled claim lands bridged FJ in the sender's own tx, `fee-juice.ts:92-96`) | selfpay | publicFj ≥ ceiling | ✓ | ✓ |
 | 14 | token + gas, public, fueled, only credit held (credit untouched) | plain | credit ≥ ceiling | ✓ | ✓ |
 | 15 | token + gas, private, private fuel → credit pays the claim | plain | none | ✓ | ✓ |
 | 15b | token + gas, private, only public FJ held (never touched — private fence) | selfpay | publicFj ≥ ceiling | ✓ | ✓ |
@@ -225,7 +225,7 @@ Arc 3 (tools browser e2e): `apps/tools/package.json` (`@playwright/test` devDep 
 | 18b | gas only, identity route, public, public FJ already held (adds to it) | selfpay | publicFj ≥ ceiling | ✓ | ✓ |
 | 19 | gas only, fee-asset identity route, private | plain | none | ✓ | ✓ |
 | 20 | gas only, swapped (non-fee token), public + private | plain | none | ✓ | ✓ |
-| 20b | gas only, swapped, public, only public FJ held (untouched) | selfpay | publicFj ≥ ceiling | ✓ | ✓ |
+| 20b | gas only, swapped, public, only public FJ held — conservation: `after = before + claimed − fees charged` | selfpay | publicFj ≥ ceiling | ✓ | ✓ |
 | 21 | gas only, WETH single-hop route, public + private | plain | none | ✓ | ✓ |
 | 22 | routeless token → gas choices greyed, token-only still sends | plain | credit ≥ ceiling | ✓ (no-route) | ✓ |
 | 23 | discovered route feeds the send (real facade quote) | plain | none | ✓ | ✓ (route status testid) |
@@ -352,7 +352,7 @@ Fast layers on every gate: `bun run lint` + `bun run typecheck:all` + the touche
 - I1. With `start()` first, lazy ephemeral wallet, CORP + COEP on the wallet page, `allowedOrigins` and the CSP `frame-src`, the embedded wallet completes tools' handshake without SDK changes. Phase 7 tests this.
 - I2. The local network accepts proverless txs from a browser PXE as from the Node `EmbeddedWallet`.
 - I3. The `selfpay` wrapper at `sendTx`/`simulateTx` (strip the self-payer unless a `claim_and_end_setup` call to the protocol FeeJuice address is present) yields `PREEXISTING_FEE_JUICE` for held-FJ sends and leaves fueled claims intact. Phase 7 proves both by simulation and send.
-- I11. Creating a file's N+2 actors in the ephemeral wallet before the grant, and granting them all, keeps the account switcher deterministic and costs no PXE re-sync per cell (Phase 8 measures).
+- I11. Importing a file's N+2 ≤ 16 seeds inside the session iframe's `getWallet` (before it returns for `requestCapabilities`) keeps the grant complete and the switcher deterministic, and costs no PXE re-sync per cell (Phase 8 measures the import time; if it threatens the 10 s handshake budget, the seeds import moves to `onSessionEstablished` with a readiness wait before the grant).
 - I4. The `setup-aztec` runner can run the TXE oracle at the 5.0.1 toolchain; Phase 5 tests it and drops the job if not.
 - I5. Playwright's Chromium honors the served COOP/COEP/CSP so both frames are `crossOriginIsolated` (asserted, not assumed, from Phase 8).
 - I6. Shard count and the 30-minute budget: unmeasured; Phases 2 and 9 measure and size.
@@ -403,6 +403,8 @@ Hardening: not scheduled. Revisit `/harden security` before the tools store/publ
 
 **Adopted from the resumed final pass on v3 (reject)**: actors created per file before the grant, spares for retries (High); the fueled-claim discriminator is address + `claim_and_end_setup` selector (High); `selfpay` implements the patched methods it lacks as explicit `Unsupported wallet method` throws, tools maps exactly the two phrasings (Medium → cell 35); public-exit and first-time fixtures carry concrete budgets (High → cells 3, 4, 27); public-only fueled variants and the consumed-recovery split (Medium → 13b, 15b, 18b, 20b, 24a/b); the cut-over snapshot is reviewed in a separate earlier step (Medium).
 
+**Adopted from the v3.1 verdict (conditional approve, 3 conditions)**: seeds reach the SESSION iframe (created only in `establishSecureChannel`) via a context-level init script and are imported inside `getWallet` before the grant; the pool is bounded by `MAX_GRANTED_ACCOUNTS = 16`, granted whole, and every address is asserted present after grant parsing; cells 13b/20b assert conservation (`after = before + claimed − fees`) instead of "untouched". All three folded in → v3.2.
+
 **Rejected / not taken**: fable's `packages/sandbox-harness` workspace (export entry gives the boundary; revisit at a third consumer); a bootstrap dispatch workflow (the PR run is the proof); a forge selector test for the facade (redundant with the vitest ABI pin).
 
 **Disputed / settled by the spike**: I3's seam (payload-aware wrapper); the SDK panel shrink; I10's per-cell account cost.
@@ -413,8 +415,14 @@ Hardening: not scheduled. Revisit `/harden security` before the tools store/publ
 - Fable round 1 (Fable 5.1, Plan agent): **conditional approve** (5 conditions) — all adopted; `audit-fable.md`.
 - Codex final fresh-context pass on v2 (GPT-6 Astra, high): **reject** — all blocking findings adopted into v3; `audit-codex.md` § Final pass.
 - Codex resumed pass on v3 (same session): **reject** — six findings, all adopted (v3.1); `audit-codex.md` § Resumed pass.
-- Codex resumed verdict on v3.1: pending.
+- Codex resumed verdict on v3.1 (same session): **conditional approve** (conditions: initialize actors in the session wallet before its grant; bound and grant the entire actor pool; conservation assertions for public FJ) — all three folded into v3.2; `audit-codex.md` § Verdict on v3.1.
+
+**Gate status**: codex `conditional approve` with every condition adopted; fable `conditional approve` with every condition adopted; no unresolved Asks; no unaddressed High findings.
+
+## ELI5 companion
+
+Artifact: https://claude.ai/code/artifact/692e1280-7864-4339-bc1f-0cc1429d6239 — source `implementations-plan/tools-self-testing/eli5.html` (republish the same file to keep the URL).
 
 ## Seeds (DRAFT — finalized after approval)
 
-See the ELI5 artifact. `<test>` = `bun run test:all`, `<lint>` = `bun run lint && bun run lint:actions`.
+Both seeds are embedded in the ELI5 (Recommended: `/goal`; alternative: `/loop 15m`). `<test>` = `bun run test:all`, `<lint>` = `bun run lint && bun run lint:actions`. Paste exactly one into a session started inside this worktree (`agent-worktree resume tools-self-testing`).

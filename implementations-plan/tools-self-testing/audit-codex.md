@@ -138,3 +138,30 @@ Confidence: **high**. References to `plan.md` mean `implementations-plan/tools-s
 - Served CSP, isolation assertions, app/chain guards, and honest node-exposure documentation.
 - Per-branch protection sequencing, preservation of unrelated checks, and Delivery-time PR validation.
 - Successful optional add-token coverage through the `full` profile.
+
+---
+
+# Verdict on plan v3.1 (same session, GPT-6 Astra @ high)
+
+Three conditions, all verified and adopted into v3.2 (see `plan.md` § Decision ledger).
+
+---
+
+VERDICT: conditional approve (conditions: initialize actors in the session wallet before its grant, bound and grant the entire actor pool, and clarify public-FJ balance assertions)
+
+Confidence: **high**. `plan.md` below refers to `implementations-plan/tools-self-testing/plan.md`.
+
+- **[High][impl] The pre-grant initialization now has a lifecycle ordering problem.** Step 3 calls `frame.evaluate(addAccount(...))` before navigating tools or connecting (`plan.md:153`). The SDK creates the actual session iframe only during `establishSecureChannel` (`apps/tools/node_modules/@aztec/wallet-sdk/dest/iframe/provider/iframe_provider.js:57–67`). Populating another page would not populate this ephemeral wallet. Pass the file’s actor seeds into the session iframe’s bootstrap, and have its lazy `getWallet` finish importing them before returning for `requestCapabilities`. Keep discovery startup immediate.
+
+- **[Medium][impl] Bound the pool and grant the spares too.** I11 assumes all N+2 actors remain selectable (`plan.md:355`), but tools caps granted accounts at **16** and drops later entries (`apps/tools/src/composables/createAztecWalletSession.ts:74`, `:989`). Require `N+2 ≤ 16`, splitting files when necessary, and assert every allocated address survives grant parsing. Step 3 currently says “all N accounts,” whereas retries select the extra two (`plan.md:153–154`); explicitly grant the entire pool.
+
+- **[Medium][coverage] Replace “public FJ untouched” with a conservation assertion.** Cells 13b and 20b use that wording, while 18b correctly says the public arrival adds to the balance (`plan.md:218`, `:225`, `:228`). Public fueled payment claims bridged FJ into the sender’s payment transaction (`packages/bridge-core/src/fee-juice.ts:92–96`). Assert `after = before + claimed − charged fees` across the relevant transactions. The initial funds remaining available must not become an erroneous `after === before` expectation.
+
+**Resolved**
+
+- Address-and-selector discrimination for `claim_and_end_setup`.
+- Explicit unsupported implementations on selfpay and narrowly scoped error mapping.
+- First-time claim and public-exit fee budgets.
+- Added public-only fee variants and separate consumed-recovery outcomes.
+- Separately reviewed protection snapshots and per-branch cut-over.
+- Pre-grant actor allocation is the right approach; the two lifecycle/pool conditions above finish specifying it.
