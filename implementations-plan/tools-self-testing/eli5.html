@@ -68,7 +68,7 @@
   <div class="verdicts">
     <div class="verdict"><div class="k">Codex r1</div><div>Reject. Every blocking finding was adopted: the local build had to be a real build target, not a dev-mode trick; the test wallet needed the schema patch and a stricter origin check; the flows must not share state; CI jobs must build the contracts first; the enumerated matrix replaced a loose spec list.</div></div>
     <div class="verdict"><div class="k">Fable r1</div><div>Conditional approve with five conditions. All five are in the plan.</div></div>
-    <div class="verdict"><div class="k">Codex final</div><div id="final-verdict">Pending at the time of publishing; see plan.md § Audit verdicts.</div></div>
+    <div class="verdict"><div class="k">Codex final</div><div>Fresh-context pass on v2: reject. Its findings became v3: no sponsored fees in any tools cell (the app forbids them), the local target lands before the spike, app-owned decisions are tested only in the browser, the wallet page defends itself the way the SDK expects, and the branch-protection switch happens per branch. <span id="final-verdict">A resumed pass on v3 found six more (account grants, the fueled-claim discriminator, explicit fee budgets); all adopted into v3.1. Verdict on v3.1: see plan.md § Audit verdicts.</span></div></div>
   </div>
 
   <h2>Why this tier</h2>
@@ -77,7 +77,7 @@
   <h2>What you decided already</h2>
   <ul>
     <li><strong>Gas leg on the sandbox</strong>: a stand-in Uniswap "quoter" that answers the app's price questions at a fixed rate, over the fixed-rate swap mock that already exists. Real Uniswap math stays proven by the existing Sepolia-fork contract test.</li>
-    <li><strong>Rename the required checks</strong> to app-prefixed names, with a one-command script you run right before merging the rename.</li>
+    <li><strong>Rename the required checks</strong> to app-prefixed names, with a one-command script you run per branch: on <code>dev</code> right before merging the rename, on <code>main</code> right before merging the first promote that carries it.</li>
     <li><strong>New gates are advisory first</strong>; after seven days of first-try green, you promote them to required with the same script.</li>
     <li><strong>The full matrix runs in both layers</strong>: once through the code the app calls (fast, per-flow pass/fail) and once through the real UI in a browser (slower, sharded across runners).</li>
     <li><strong>No <code>/code-review</code></strong> in the loops; the codex fix loop is the review.</li>
@@ -116,14 +116,14 @@
 
   <p class="arc-title">Arc 3 · Tools in a real browser · one pull request, stacked on arc 2</p>
   <div class="phase"><div class="n">6</div><div>
-    <h3>Spike: can an embedded wallet connect to tools through the standard wallet channel?</h3>
-    <p>Half a day, nothing permanent. A tiny page hosts Aztec's embedded wallet behind the wallet-sdk's iframe handler; tools is pointed at it; one connection and one faucet drip must land. Each known risk is checked and written down: the 10-second discovery window, the cross-origin headers, the SDK's floating panel, and where the "pay from my own public gas" behavior plugs in.</p>
-    <p class="gate"><b>Proves itself by:</b> a drip receipt on screen and the balance moving on chain; a go / no-go note per risk, with the fallback route recorded if any is no-go.</p>
+    <h3>A real "local" build target for tools</h3>
+    <p>Tools currently knows two networks, testnet and mainnet, chosen at build time. A third, "local", points at the sandbox and carries its identity, the faucet's local addresses and the test wallet's address, injected at build time so nothing leaks into the other two builds. One small compatibility fix rides along: a wallet that simply lacks the "add token" method is treated as unsupported, not as an error.</p>
+    <p class="gate"><b>Proves itself by:</b> tools' typecheck, unit and jsdom smoke green; a local build passes the target verifier and contains the sandbox addresses; testnet and mainnet builds contain none of them.</p>
   </div></div>
   <div class="phase"><div class="n">7</div><div>
-    <h3>A real "local" build target for tools</h3>
-    <p>Tools currently knows two networks, testnet and mainnet, chosen at build time. A third, "local", points at the sandbox and carries its identity and the test wallet's address, injected at build time so nothing leaks into the other two builds. The faucet's addresses become target-aware too.</p>
-    <p class="gate"><b>Proves itself by:</b> tools' typecheck, unit and jsdom smoke green; a local build passes the target verifier and contains the sandbox addresses; a testnet build contains none of them.</p>
+    <h3>Spike: can an embedded wallet connect to tools through the standard wallet channel?</h3>
+    <p>Half a day, nothing permanent. A tiny page hosts Aztec's embedded wallet behind the wallet-sdk's iframe handler; the real local build of tools (from the previous phase) is pointed at it; one connection, one added account and one faucet drip must land. Each known risk is checked and written down: the 10-second discovery window, the cross-origin headers, the SDK's floating panel, and where the "pay from my own public gas" behavior plugs in.</p>
+    <p class="gate"><b>Proves itself by:</b> a drip receipt on screen and the balance moving on chain; a go / no-go note per risk, with the fallback route recorded if any is no-go.</p>
   </div></div>
   <div class="phase"><div class="n">8</div><div>
     <h3>Playwright scaffold, the fake Ethereum wallet, first flow</h3>
@@ -132,7 +132,7 @@
   </div></div>
   <div class="phase"><div class="n">9</div><div>
     <h3>The matrix in the browser</h3>
-    <p>Thirty-four cells, each a named test: deposits (token only, token + gas, gas only; public and private; first-time and repeat), every "not enough gas" message, recovery after an interrupted claim, declined permissions, wrong Ethereum network, exits (public, private from one note and from three, paused, no credit), the token catalog and paste-to-add, the mint strip, the faucet, backups and the dock. Two wallet profiles: a plain wallet with only standard methods, and one that also advertises the "pay from held public gas" feature.</p>
+    <p>Forty-four cells, each a named test with its exact starting balances and expected payer: deposits (token only, token + gas, gas only; public and private; first-time and repeat), every "not enough gas" message, recovery after an interrupted claim, declined permissions, wrong Ethereum network, exits (public, private from one note and from three, paused, no credit), the token catalog and paste-to-add, the mint strip, the faucet, backups and the dock. Three wallet profiles: a plain wallet with only standard methods, one that also advertises and routes "pay from held public gas", and one that additionally offers the add-token convenience. No cell relies on sponsored fees: the app forbids them on every bridge path, so plain-wallet sends pay from private credit the harness funds first.</p>
     <p class="gate"><b>Proves itself by:</b> the whole suite green first try, locally and split in two shards; timings recorded to size CI.</p>
   </div></div>
   <div class="phase"><div class="n">10</div><div>
