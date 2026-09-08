@@ -6,7 +6,7 @@ eli5_mode: artifact
 code_review: off            # owner directive 2026-09-03 — the codex fix loop is the review
 budget: recon 2 mappers + prior 4-agent research sweep; codex at high; no wide fan-out
 base: origin/dev @ 036709d8
-status: v3.2 — approved by both audit legs (conditional, all conditions adopted); at the owner approval gate
+status: APPROVED 2026-09-08 (owner, no conditions) — implementing
 ---
 
 # tools-self-testing
@@ -423,6 +423,14 @@ Hardening: not scheduled. Revisit `/harden security` before the tools store/publ
 
 Artifact: https://claude.ai/code/artifact/692e1280-7864-4339-bc1f-0cc1429d6239 — source `implementations-plan/tools-self-testing/eli5.html` (republish the same file to keep the URL).
 
-## Seeds (DRAFT — finalized after approval)
+## Seeds (FINAL — approved 2026-09-08, no conditions)
 
-Both seeds are embedded in the ELI5 (Recommended: `/goal`; alternative: `/loop 15m`). `<test>` = `bun run test:all`, `<lint>` = `bun run lint && bun run lint:actions`. Paste exactly one into a session started inside this worktree (`agent-worktree resume tools-self-testing`).
+Paste exactly one into a session running INSIDE this worktree (`agent-worktree resume tools-self-testing`, or the session that homed here). They don't compose. `/code-review` is never run (`code_review: off`). `scripts/ci-cd/required-checks.sh --apply` and any merge are owner-only.
+
+**Recommended — `/goal`:**
+
+```
+/goal All 10 phases marked ✓ in implementations-plan/tools-self-testing/plan.md (the per-phase headers in the file — not the chat, not the task list), each ✓ backed by its phase's validation gate as written in plan.md reported passing in the transcript; for each phase the agent has printed `LESSONS_FILE=implementations-plan/tools-self-testing/lessons/phase-N.md`; `/code-review` was NOT run (plan.md says code_review: off); the codex fix loop converged for each of the three arcs at its boundary AND for the final cross-arc pass, each convergence evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; the three-PR stack exists on GitHub, created only after all loops converged (`gh stack view` output in the transcript), with the arc-1 PR body naming the `scripts/ci-cd/required-checks.sh --apply` step for the owner; `bun run test:all` and `bun run lint && bun run lint:actions` both report exit 0 in the transcript.
+```
+
+**Alternative — `/loop 15m`:** the full prompt is embedded in the ELI5 artifact (identical dispositions: never idle, codex for decisions, hard limits: never merge, never publish, never run `required-checks.sh --apply`, never expand scope).
