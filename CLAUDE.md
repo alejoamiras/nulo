@@ -6,10 +6,24 @@ Operating rules for AI assistants (and any contributor) working in this reposito
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — process boundaries, message flow, storage versioning, offscreen lifecycle, session model, concurrency, account contract, fee model, test taxonomy.
 - `packages/<name>/README.md` — per-package purpose, file map, scripts, testing, key invariants.
-- **The any-ERC-20 bridge** — [`packages/bridge-core/README.md`](./packages/bridge-core/README.md) (the generation model, file map, the conductor + verifier scripts, the salt/leaf/portal invariants), [`contracts/bridge/evm/README.md`](./contracts/bridge/evm/README.md) (factory / clone / router threat model, the test layers, the halmos counts), [`contracts/bridge/aztec/README.md`](./contracts/bridge/aztec/README.md) (the hub, the split Noir/JS toolchain, TXE), [`apps/tools/README.md`](./apps/tools/README.md) (the tools app + Send wizard). The tools app is a standard dApp over `@aztec/wallet-sdk` — bridge work never touches `apps/extension/**` or the wallet packages (the one cross-cutting exception is a network reset's chainId cascade, which belongs to the `aztec-update` skill, not to bridge work).
+- **The any-ERC-20 bridge** — [`packages/bridge-core/README.md`](./packages/bridge-core/README.md) (the generation model, file map, the conductor + verifier scripts, the salt/leaf/portal invariants), [`contracts/bridge/evm/README.md`](./contracts/bridge/evm/README.md) (factory / clone / router threat model, the test layers, the halmos counts), [`contracts/bridge/aztec/README.md`](./contracts/bridge/aztec/README.md) (the hub, the split Noir/JS toolchain, TXE), [`apps/tools/README.md`](./apps/tools/README.md) (the tools app + Send wizard). The tools app is a standard dApp over `@aztec/wallet-sdk` — see **§ Two products, one repo** below for the independence rule (bridge work never touches `apps/extension/**` or the wallet packages).
 - [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md) — e2e suite layout, parallel-safe agent runner, helper conventions.
 - [`apps/extension/tests/COMPOSITION-TESTS.md`](./apps/extension/tests/COMPOSITION-TESTS.md) — **normative** rules for the `*.composition.test.ts` layer (drive the real service graph in-process against dumb fakes): when to use it, the hard limits (shallow PXE **and** bb-free **and** no simulate/prove), the failure taxonomy. Read before adding a composition test.
 - [`implementations-plan/README.md`](./implementations-plan/README.md) — planning archive, when to add to it, the milestone-vocabulary key.
+
+## Two products, one repo — each works and tests itself
+
+This repo ships **two independent products** that happen to share a monorepo and a design system. They sit on opposite sides of the `@aztec/wallet-sdk` protocol, and the contract for each is stated against the *whole ecosystem*, not against the other:
+
+- **`apps/extension` is a wallet.** It must work with **every wallet-sdk dApp** in the Aztec ecosystem. Its e2e drive the extension against [`apps/playground`](./apps/playground/README.md) — a deliberately generic dApp — never against `apps/tools`.
+- **`apps/tools` is a dApp.** It must work with **every wallet-sdk-compatible wallet**. Its e2e drive the tools UI against an embedded, wallet-sdk-compatible test wallet and an injected EIP-1193 L1 wallet — never against the Nulo extension. The Nulo-custom RPCs (`registerToken`, `isTokenRegistered`, `grantPublicAuthwit`, via `@nulo/wallet-sdk-schema-patch`) are optional enhancements a non-Nulo wallet lacks: they must **fail open** (the Drip "add to wallet" convenience, not the bridge critical path). The core Send / Exit / Drip flows use only standard wallet-sdk surface (`requestCapabilities`, `registerContract`, `executeUtility`, `simulateTx`, `sendTx`, `createAuthWit`).
+
+Rules that follow:
+
+- **Neither app's quality gate depends on the other app.** No test in one app's suite boots, builds, installs, or selects the other. A change to the extension never needs a tools e2e to go green and vice versa; the shared packages below them are what CI gates in common.
+- **"Nulo extension driving Nulo tools" is a manual pre-release smoke, not a CI gate.** It proves the pair, not either product.
+- **The only sanctioned cross-cut is network identity**: a reset's chainId cascade (`apps/tools/src/lib/chain-constants.ts` mirrors the extension's network-service seeds) and the deployed-address mirrors (the extension's default-token / price entries quote `apps/tools/public/*-bridge.json`), both owned by the `aztec-update` skill. Bridge work never touches `apps/extension/**` or the wallet packages; wallet work never touches `apps/tools/**` or `packages/bridge-core/**`.
+- **Shared code lives in a package, never in the other app.** Anything both need (`@nulo/design`, `@nulo/wallet-crypto` key derivation, `@nulo/wallet-sdk-schema-patch`, `@nulo/resolve-asset`) is a workspace package with its own tests; an app importing from the other app's `src/` is a layering violation.
 
 ## Skills own their domains — route new lessons to them
 
