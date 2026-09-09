@@ -69,4 +69,5 @@ stricter reconnect driver, with a slow-frame regression cell.
 accounting (`lessons/phase-9.md` § Delivery, cell 1), a change to what the suite asserts, not to what
 it drives. Run 5: five of six shards green; shard 4 lost cell 12 to the generic stand-down under the
 confirm's own reads (`lessons/phase-9.md` § Delivery), the same shape as run 3's cell 2 — the
-wizard's log names the input from run 6 on.
+wizard's log names the input from run 6 on. **Run 6** (`b272913b`, the final commit): all six shards
+green at retry 0, `tools-e2e-status` green, every other check on the three PRs green.
