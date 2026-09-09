@@ -48,6 +48,8 @@ Accepted by codex as fine: `claimPayment`'s deduction check, the `payer: "own"` 
 
 **Round 3** (same session, `high`, on `0d1cfc84` after smoke 15.0 min green and integration 35/35) — verdict **"Not ready"**, one finding: disabling the admin API key disables authentication only; the CLI still starts the admin JSON-RPC server on every interface (`aztec_start_action.js:108`), and the plan's Security section keeps that key ON. Adopted the pre-configured hash mechanism instead (row 1 above). Everything else in round 2 confirmed sound.
 
+**Round 4** (same session, `high`, on `a62ae2b0` after smoke 14.8 min green under the hash) — the hash mechanism confirmed sound; one medium: the child inherited `process.env`, so a shell carrying `AZTEC_DISABLE_ADMIN_API_KEY` would still switch the authentication off (the node reads that flag before the hash). The child's environment now drops that switch and `AZTEC_RESET_ADMIN_API_KEY` explicitly.
+
 ## TXE attempt
 
 `contracts/bridge/aztec/scripts/run-txe-tests.sh` with the installed 5.0.1 toolchain: **65 tests passed, exit 0** (`txe-phase5.log`) — the oracle server boots from the committed `txe-server` mini-project and the hub crate's whole `src/test/` suite runs. The `txe` job stays in `_bridge-contracts.yml`; if it fails on the runner for toolchain reasons the evidence goes here and the job is dropped in the fix loop.

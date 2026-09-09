@@ -352,8 +352,11 @@ function spawnAnvil(tool: Toolchain, port: number, logFile: string): ChildProces
 function nodeEnv(tool: Toolchain, anvilUrl: string): NodeJS.ProcessEnv {
 	const forge = join(tool.internalBin, "forge")
 	const anvil = join(tool.internalBin, "anvil")
+	// A shell that disables or resets the admin key would override the hash below: the node reads
+	// those switches first. The child never inherits them.
+	const { AZTEC_DISABLE_ADMIN_API_KEY: _disable, AZTEC_RESET_ADMIN_API_KEY: _reset, ...inherited } = process.env
 	return {
-		...process.env,
+		...inherited,
 		PATH: `${tool.internalBin}${delimiter}${process.env.PATH ?? ""}`,
 		// Drops the sequencer's per-block transaction floor so a single tx makes a block. It does NOT
 		// make the chain tick on its own — this network still builds a block only when a transaction
