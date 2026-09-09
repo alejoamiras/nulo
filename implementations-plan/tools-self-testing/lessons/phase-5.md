@@ -37,7 +37,7 @@ Decisions taken without the owner (plan § Autonomy): cell 32's scope (positive-
 
 | # | Finding | Call |
 |---|---|---|
-| 1 | the node PRINTS its admin API key on a fresh data directory (`aztec_start_action.js:139`, `userLog`, unfiltered) and the harness now persists that output — three log files under `~/.cache/nulo-bridge-sandbox/logs/` carried the "ADMIN API KEY (save this…)" block | real → the node runs with `AZTEC_DISABLE_ADMIN_API_KEY=true` (nothing here calls the admin API); no key is minted, so nothing to redact across chunk boundaries |
+| 1 | the node PRINTS its admin API key on a fresh data directory (`aztec_start_action.js:139`, `userLog`, unfiltered) and the harness now persists that output — three log files under `~/.cache/nulo-bridge-sandbox/logs/` carried the "ADMIN API KEY (save this…)" block | real → first answered with `AZTEC_DISABLE_ADMIN_API_KEY=true`, which round 3 rejected: that disables the *authentication*, not the listener, and the plan keeps the admin key ON (§ Security). Now `AZTEC_ADMIN_API_KEY_HASH` is a random 64-hex hash no key matches — authenticated, locked for the run, nothing printed, nothing persisted (the node only writes a hash file for a key it minted) |
 | 2 | the log sink ends on the child's `exit`, which can precede the streams' last chunks | real → ends on `close` |
 | 3 | the handle advertises keys 1–12 but anvil funds its default ten accounts (indices 0–9) | real (indices 10–12 were unfunded; the browser files use 1–7 today) → anvil starts with `--accounts 16` |
 | 4 | the tampered registration counted ANY exception as the rejection | real → only `No L1 to L2 message found` counts; anything else rethrows with its message |
@@ -45,6 +45,8 @@ Decisions taken without the owner (plan § Autonomy): cell 32's scope (positive-
 | 6 | plan row 32 + the arc-2 ledger entry were uncommitted, mixed with arc-3 hunks | real → only those hunks staged (`git apply --cached` of the filtered diff), committed with the fixes |
 
 Accepted by codex as fine: `claimPayment`'s deduction check, the `payer: "own"` fee sum, the fresh actors, the private variants, the alias, the forge rebuild, the race regex, the single-writer restriction and positive-only cell 32.
+
+**Round 3** (same session, `high`, on `0d1cfc84` after smoke 15.0 min green and integration 35/35) — verdict **"Not ready"**, one finding: disabling the admin API key disables authentication only; the CLI still starts the admin JSON-RPC server on every interface (`aztec_start_action.js:108`), and the plan's Security section keeps that key ON. Adopted the pre-configured hash mechanism instead (row 1 above). Everything else in round 2 confirmed sound.
 
 ## TXE attempt
 

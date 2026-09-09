@@ -8,6 +8,7 @@
  * (a no-op `stop()`), which is how `--keep` is re-entered.
  */
 import { type ChildProcess, execFileSync, spawn } from "node:child_process"
+import { randomBytes } from "node:crypto"
 import {
 	accessSync,
 	closeSync,
@@ -359,9 +360,10 @@ function nodeEnv(tool: Toolchain, anvilUrl: string): NodeJS.ProcessEnv {
 		// arrives, which is why the L1→L2 waits carry a `forceBlock`.
 		SEQ_MIN_TX_PER_BLOCK: "0",
 		ETHEREUM_HOSTS: anvilUrl,
-		// A fresh data directory makes the node mint an admin API key and PRINT it — into the log
-		// file this run keeps and CI uploads. Nothing here calls the admin API; no key, no leak.
-		AZTEC_DISABLE_ADMIN_API_KEY: "true",
+		// The admin listener stays authenticated, behind a key hash nothing matches: a key the node
+		// mints itself is PRINTED — into the log this run keeps and CI uploads — and disabling the key
+		// would leave the admin API open on every interface. Nothing here needs that API.
+		AZTEC_ADMIN_API_KEY_HASH: randomBytes(32).toString("hex"),
 		// `@aztec/ethereum`'s resolver reads `~/.aztec/current/internal-bin/forge` ahead of PATH; these
 		// overrides are its highest-priority source and the only way to pin the L1 deploy to this version.
 		...(isExecutable(forge) ? { FORGE_BIN: forge } : {}),
