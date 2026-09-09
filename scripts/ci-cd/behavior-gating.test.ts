@@ -65,11 +65,41 @@ function assertGraphCovered(patterns: string[], target: string, label: string) {
   }
 }
 
-const FILTER_WORKFLOWS = ["pr-quick.yml", "pr-smoke-e2e.yml", "pr-network-e2e.yml", "actionlint.yml"]
+const FILTER_WORKFLOWS = ["pr-quick.yml", "pr-extension-smoke-e2e.yml", "pr-extension-network-e2e.yml", "bridge-contracts.yml", "actionlint.yml"]
+
+/**
+ * The check-run each PR workflow's aggregator job produces. Branch protection matches these BY
+ * NAME (CLAUDE.md § Branching), so a renamed job that isn't repointed there blocks every merge —
+ * this pin fails first. `required-checks.ts` renames the protection to the same names.
+ */
+const AGGREGATOR_CHECKS: Record<string, string> = {
+  "pr-quick.yml": "quality-status",
+  "pr-extension-smoke-e2e.yml": "extension-smoke-e2e-status",
+  "pr-extension-network-e2e.yml": "extension-network-e2e-status",
+  "bridge-contracts.yml": "bridge-contracts-status",
+}
+
+describe("CI aggregator check names", () => {
+  test("each PR workflow's status job produces its documented check-run name", () => {
+    for (const [file, name] of Object.entries(AGGREGATOR_CHECKS)) {
+      // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
+      const wf = Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows", file), "utf8")) as any
+      expect(wf.jobs.status?.name, `${file}: jobs.status.name`).toBe(name)
+      expect(wf.jobs.status?.if, `${file}: the aggregator must always run`).toBe("always()")
+    }
+  })
+
+  test("the protection runbook renames onto exactly these names", async () => {
+    const { RENAMES } = await import("./required-checks")
+    for (const target of Object.values(RENAMES)) {
+      expect(Object.values(AGGREGATOR_CHECKS), `rename target '${target}' must be a produced check`).toContain(target)
+    }
+  })
+})
 
 describe("CI behavior-gating guard", () => {
-  const smoke = filtersOf("pr-smoke-e2e.yml")["smoke-surface"]
-  const network = filtersOf("pr-network-e2e.yml")["extension-network"]
+  const smoke = filtersOf("pr-extension-smoke-e2e.yml")["smoke-surface"]
+  const network = filtersOf("pr-extension-network-e2e.yml")["extension-network"]
   const quick = filtersOf("pr-quick.yml")
 
   test("NO `!` negation patterns anywhere (the dorny some-quantifier footgun)", () => {
@@ -138,7 +168,7 @@ describe("CI behavior-gating guard", () => {
   // mechanically (the workflow's own "keep in sync" comment can't).
   test("network-e2e proverless-exclusions == the union of the dedicated jobs' test_files", () => {
     // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
-    const wf = Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows/pr-network-e2e.yml"), "utf8")) as any
+    const wf = Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows/pr-extension-network-e2e.yml"), "utf8")) as any
     const words = (v: unknown): string[] => (typeof v === "string" ? v.split(/\s+/).filter(Boolean) : [])
 
     let excluded: string[] = []
@@ -168,7 +198,7 @@ describe("CI behavior-gating guard", () => {
   // the cheap two-account simulate in the shard pool (never excluded, so it cannot drop out).
   test("network-e2e keeps the self-pay phase gate in place at retry 0", () => {
     // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
-    const wf = Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows/pr-network-e2e.yml"), "utf8")) as any
+    const wf = Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows/pr-extension-network-e2e.yml"), "utf8")) as any
     const words = (v: unknown): string[] => (typeof v === "string" ? v.split(/\s+/).filter(Boolean) : [])
     // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
     const jobs = Object.entries(wf.jobs) as [string, any][]

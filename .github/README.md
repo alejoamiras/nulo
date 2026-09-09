@@ -9,8 +9,9 @@ These `status` aggregators are what branch protection on `main` / `dev` requires
 | Workflow | Required check-run | Required on | Runs when | What it checks |
 |---|---|---|---|---|
 | `pr-quick.yml` | `quality-status` | dev + main | every PR to `main` / `dev` | commitlint, lint, typecheck, units, chrome+firefox build |
-| `pr-smoke-e2e.yml` | `smoke-e2e-status` | dev + main | PR to `main`, OR `e2e:smoke` label, OR `smoke-surface` paths-filter | chrome build + puppeteer smoke (18 files, 67 tests, 7 quarantined) |
-| `pr-network-e2e.yml` | `network-e2e-status` | dev + main | PR to `main`, OR `e2e:network` label, OR `extension-network` paths-filter | full network e2e (anvil + Aztec sandbox + playground) |
+| `pr-extension-smoke-e2e.yml` | `extension-smoke-e2e-status` | dev + main | PR to `main`, OR `e2e:extension-smoke` label, OR `smoke-surface` paths-filter | chrome build + puppeteer smoke (18 files, 67 tests, 7 quarantined) |
+| `pr-extension-network-e2e.yml` | `extension-network-e2e-status` | dev + main | PR to `main`, OR `e2e:extension-network` label, OR `extension-network` paths-filter | full network e2e (anvil + Aztec sandbox + playground) |
+| `bridge-contracts.yml` | `bridge-contracts-status` (not required yet) | — | when `contracts/bridge/**` or the bridge-core remappings/workflow change | forge hermetic + halmos + keystone nargo + hub artifact parity + sole-consumer guard |
 | `actionlint.yml` | `Status` (not required) | — | when `.github/workflows/**` or shell scripts change | actionlint + shellcheck |
 | `release.yml` | `status` (not required) | — | manual `workflow_dispatch` only | full quality bar + build + smoke against artifact + (optional) tag + GitHub Release |
 | `nightly.yml` | `status` (not required) | — | schedule (03:23 UTC daily) + manual dispatch | full quality bar incl. network suite → prerelease GitHub Release from dev (`v<ver>-nightly.<YYDDD>`) |
@@ -26,8 +27,8 @@ Reusables live as `.github/workflows/_*.yml` and are called from top-level workf
 | `_lint-and-typecheck.yml` | `pr-quick`, `release`, `nightly` |
 | `_unit-tests.yml` | `pr-quick`, `release`, `nightly` |
 | `_build-extension.yml` | `pr-quick`, `release`, `nightly` |
-| `_smoke-e2e.yml` | `pr-quick`, `release`, `nightly` |
-| `_network-e2e.yml` | `pr-network-e2e`, `release` (stable channel only), `nightly` |
+| `_extension-smoke-e2e.yml` | `pr-quick`, `release`, `nightly` |
+| `_extension-network-e2e.yml` | `pr-extension-network-e2e`, `release` (stable channel only), `nightly` |
 
 Composite actions live in `.github/actions/` and are shared step fragments used inside jobs.
 
@@ -36,14 +37,14 @@ Composite actions live in `.github/actions/` and are shared step fragments used 
 | `setup-bun` | checkout + bun + install cache + `bun install --frozen-lockfile` |
 | `setup-aztec` | Foundry + Aztec CLI matching the `@aztec/aztec.js` version |
 | `setup-puppeteer` | warm `~/.cache/puppeteer` |
-| `setup-accelerator-server` | download + SHA-256 verify + install the headless `accelerator-server` binary (Linux x86_64) for CI proving. Used by `_network-e2e.yml`. See [CI.md](../CI.md#accelerator-in-ci). |
+| `setup-accelerator-server` | download + SHA-256 verify + install the headless `accelerator-server` binary (Linux x86_64) for CI proving. Used by `_extension-network-e2e.yml`. See [CI.md](../CI.md#accelerator-in-ci). |
 
 ## Triggers cheat-sheet
 
 - Push a commit on a feature branch → no CI runs; local pre-commit hook handles biome + commitlint.
-- Open a PR to `dev` → `pr-quick` runs. `pr-smoke-e2e` and `pr-network-e2e` run only if their paths-filter trips OR their respective label is on the PR.
-- Open a PR to `main` → `pr-quick`, `pr-smoke-e2e`, `pr-network-e2e` all run unconditionally.
-- Add `e2e:smoke` or `e2e:network` to an open PR → that workflow fires a fresh run immediately (`labeled` is a subscribed event type; no push needed). Removing the label re-evaluates the gate (`unlabeled`).
+- Open a PR to `dev` → `pr-quick` runs. `pr-extension-smoke-e2e` and `pr-extension-network-e2e` run only if their paths-filter trips OR their respective label is on the PR.
+- Open a PR to `main` → `pr-quick`, `pr-extension-smoke-e2e`, `pr-extension-network-e2e` all run unconditionally.
+- Add `e2e:extension-smoke` or `e2e:extension-network` to an open PR → that workflow fires a fresh run immediately (`labeled` is a subscribed event type; no push needed). Removing the label re-evaluates the gate (`unlabeled`).
 - Click "Run workflow" on `release.yml` → manual release (must supply `version` + `channel`).
 - Every night at 03:23 UTC → `nightly.yml` builds current dev and publishes a prerelease GitHub Release (skips itself when dev HEAD already has tonight's nightly; manual dispatch offers `force` + `dry_run`).
 
@@ -51,8 +52,8 @@ Composite actions live in `.github/actions/` and are shared step fragments used 
 
 | Label | Effect |
 |---|---|
-| `e2e:smoke` | Force the smoke e2e suite to run on this PR (auto-runs when `smoke-surface` filter trips). |
-| `e2e:network` | Force the network e2e suite to run on this PR (auto-runs when `extension-network` filter trips). |
+| `e2e:extension-smoke` | Force the smoke e2e suite to run on this PR (auto-runs when `smoke-surface` filter trips). |
+| `e2e:extension-network` | Force the network e2e suite to run on this PR (auto-runs when `extension-network` filter trips). |
 
 ## Branches
 

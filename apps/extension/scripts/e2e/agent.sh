@@ -214,7 +214,7 @@ VITEST_EXIT=$?
 set -e
 
 # Map an infra-boot failure (sandbox never became ready AND no test ran) to exit
-# 86 so _network-e2e.yml retries the agent ONCE. Any other non-zero — including a
+# 86 so _extension-network-e2e.yml retries the agent ONCE. Any other non-zero — including a
 # real test failure — passes through unchanged and is never retried. The
 # classifier reads the .e2e-state boot markers written by global-setup + the
 # network setupFile.

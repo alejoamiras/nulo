@@ -66,8 +66,8 @@ The package layer hierarchy (`wallet-core` → … → `extension`) is enforced 
 bun run dev                   # Chrome extension dev server, port 8088
 bun run build                 # Production Chrome build
 bun run test                  # Unit + component tests (vitest)
-bun run test:e2e              # Smoke e2e (no Aztec sandbox)
-bun run e2e:agent             # Network e2e — owns anvil + aztec + playground per worktree
+bun run test:e2e              # Extension smoke e2e (no Aztec sandbox)
+bun run e2e:agent             # Extension network e2e — owns anvil + aztec + playground per worktree
 bun run audit:vue             # One-shot pre-PR gate: typecheck → test → lint → build
 bun run lint                  # biome check
 bun run format                # biome format --write

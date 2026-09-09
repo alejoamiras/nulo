@@ -368,7 +368,7 @@ composite action. Trust posture:
 
 - **Version + SHA-256 pinned in repo.** The composite action requires
   callers to pass `expected_sha256`; the workflow
-  ([`_network-e2e.yml`](./.github/workflows/_network-e2e.yml)) pins it as
+  ([`_extension-network-e2e.yml`](./.github/workflows/_extension-network-e2e.yml)) pins it as
   a literal. Bumping the version requires updating both fields together
   in the same PR. Reviewers MUST treat any change to the binary URL,
   version, or expected hash as security-relevant.
@@ -385,7 +385,7 @@ composite action. Trust posture:
      curl -sSfL https://github.com/alejoamiras/aztec-accelerator/releases/download/accelerator-v<VER>/accelerator-server-<VER>-linux-x86_64.tar.gz \
        | tar -xzO accelerator-server | shasum -a 256
      ```
-  2. Update `version` AND `expected_sha256` in `_network-e2e.yml`'s
+  2. Update `version` AND `expected_sha256` in `_extension-network-e2e.yml`'s
      `setup-accelerator-server` step in one commit.
   3. CI re-hashes the binary on EVERY install (cache-miss + cache-hit);
      mismatch is loud (workflow goes red).

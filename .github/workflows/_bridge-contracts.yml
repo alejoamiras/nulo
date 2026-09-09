@@ -1,4 +1,4 @@
-name: Bridge contracts
+name: _Bridge contracts (reusable)
 
 # Runs the L1 (Foundry) and L2 (Noir) contract suites for contracts/bridge/**.
 #

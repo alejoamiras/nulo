@@ -28,8 +28,8 @@ interface GateSpec {
 }
 
 const GATES: GateSpec[] = [
-  { file: ".github/workflows/pr-network-e2e.yml", filterVar: "NETWORK" },
-  { file: ".github/workflows/pr-smoke-e2e.yml", filterVar: "SMOKE" },
+  { file: ".github/workflows/pr-extension-network-e2e.yml", filterVar: "NETWORK" },
+  { file: ".github/workflows/pr-extension-smoke-e2e.yml", filterVar: "SMOKE" },
 ]
 
 /**

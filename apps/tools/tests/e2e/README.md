@@ -1,6 +1,6 @@
 # apps/tools/tests/e2e
 
-Smoke e2e for the tools app — jsdom, no browser, no real wallet, no network:
+Extension smoke e2e for the tools app — jsdom, no browser, no real wallet, no network:
 
 ```bash
 bun run --cwd apps/tools test:e2e
