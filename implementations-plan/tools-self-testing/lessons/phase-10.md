@@ -12,7 +12,7 @@
 - `.github/workflows/pr-tools-e2e.yml` (`name: Tools e2e`): the `tools-e2e` filter is positive-only
   and literal per dependency (the tools graph's `src/**` + `package.json`, `contracts/bridge/**`,
   `packages/bridge-core/**`, root config, `patches/**`, the two workflows, the three actions); the
-  `e2e:tools` label (with `labeled`/`unlabeled` triggers) or a dispatch forces a run; 4 shards;
+  `e2e:tools` label (with `labeled`/`unlabeled` triggers) or a dispatch forces a run; 6 shards (from the phase-9 durations);
   `tools-e2e-status` is the exact-state aggregator, `pull-requests: read` on `changes`, `fetch-depth: 0`.
 - `scripts/ci-cd/behavior-gating.test.ts`: the new workflow joins the negation scan, the aggregator
   pin (`tools-e2e-status`) and gets its own graph test (`assertGraphCovered(…, "tools")` + the

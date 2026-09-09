@@ -21,7 +21,7 @@ each decision points at the consult that settled it.
 2. **Arc 2 — `tools-self-testing/bridge-integration`.** `gh stack sync` after arc 1 lands, then merge.
    Adds `bridge-contracts-status`'s `integration` job (the sandbox suite) — advisory until you promote it.
 3. **Arc 3 — `tools-self-testing/tools-browser-e2e`.** `gh stack sync`, then merge. Adds
-   `tools-e2e-status` (4 shards) — advisory until you promote it.
+   `tools-e2e-status` (6 shards) — advisory until you promote it.
 
 `gh stack merge` lands the named PR and everything below it; the three are ordered for that.
 

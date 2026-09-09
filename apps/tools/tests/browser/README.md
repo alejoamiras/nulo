@@ -73,7 +73,7 @@ The wallet accepts only tools' app id and the sandbox's chain, is framed only by
 
 ## CI
 
-`.github/workflows/pr-tools-e2e.yml` → `_tools-e2e.yml`, 4 shards (`--shard=i/4`), one sandbox
+`.github/workflows/pr-tools-e2e.yml` → `_tools-e2e.yml`, 6 shards (`--shard=i/6`), one sandbox
 each, `tools-e2e-status` as the aggregator; runs on the `tools-e2e` paths-filter or the `e2e:tools`
 label. Traces (`retain-on-failure`) and the sandbox's logs are uploaded when a shard fails.
 

@@ -114,7 +114,31 @@ payer and reads its postconditions from the chain through the harness.
 
 ## Durations
 
-_(filled from the sharded full runs — the shard count in `pr-tools-e2e.yml` follows them)_
+The full fresh run on this host (`bun run e2e:tools`, one worker, retry 0, 2026-09-09):
+**51 passed in 44.0 min** (2,755 s wall clock: ≈6 min to boot the sandbox and build the two apps,
+37.8 min of cells). Per family, from the reporter's own timings:
+
+| Family | Cells | Time |
+|---|---|---|
+| `deposit-token` | 6 | 7.6 min |
+| `deposit-gas-only` | 8 | 6.2 min |
+| `deposit-token-gas` | 7 | 6.0 min |
+| `exits` | 5 | 5.3 min |
+| `fee-states` | 6 | 3.9 min |
+| `spike` | 4 | 2.4 min |
+| `tokens` | 4 | 1.9 min |
+| `activity` | 2 | 1.4 min |
+| `drip` | 4 | 1.3 min |
+| `recovery` | 2 | 1.0 min |
+| `l1-wallet` | 3 | 0.8 min |
+| total | 51 | 37.8 min |
+
+**Shard count: 6.** Every shard boots its own sandbox and builds both apps (≈6 min here, more on a
+GitHub runner) before its share of cells; Playwright splits by test count, so a shard can draw the
+heavy deposit families. Four shards would carry ≈9.5 min of cells each — on a runner half this
+host's speed that is ≈19 min of cells plus a slower boot, brushing the 30-minute cap. Six shards
+carry ≈6.3 min each and leave the cap room. The two half-shard runs (`--shard=1/2`, `2/2`) below
+are the gate's evidence that sharding partitions cleanly; the count in `pr-tools-e2e.yml` is six.
 
 ## Gate
 
