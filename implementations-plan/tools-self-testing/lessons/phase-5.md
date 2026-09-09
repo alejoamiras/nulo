@@ -50,6 +50,8 @@ Accepted by codex as fine: `claimPayment`'s deduction check, the `payer: "own"` 
 
 **Round 4** (same session, `high`, on `a62ae2b0` after smoke 14.8 min green under the hash) — the hash mechanism confirmed sound; one medium: the child inherited `process.env`, so a shell carrying `AZTEC_DISABLE_ADMIN_API_KEY` would still switch the authentication off (the node reads that flag before the hash). The child's environment now drops that switch and `AZTEC_RESET_ADMIN_API_KEY` explicitly.
 
+**Round 5** (same session, `high`, on `ac366409`) — verdict: **"no new material findings — high confidence."** The arc-2 loop converged here; the four fix commits on `tools-self-testing/bridge-integration` are `33568d4d`, `0d1cfc84`, `a62ae2b0`, `ac366409`.
+
 ## TXE attempt
 
 `contracts/bridge/aztec/scripts/run-txe-tests.sh` with the installed 5.0.1 toolchain: **65 tests passed, exit 0** (`txe-phase5.log`) — the oracle server boots from the committed `txe-server` mini-project and the hub crate's whole `src/test/` suite runs. The `txe` job stays in `_bridge-contracts.yml`; if it fails on the runner for toolchain reasons the evidence goes here and the job is dropped in the fix loop.
