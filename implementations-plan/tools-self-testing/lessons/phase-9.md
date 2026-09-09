@@ -142,4 +142,6 @@ are the gate's evidence that sharding partitions cleanly; the count in `pr-tools
 
 ## Gate
 
-_(`bun run e2e:tools` at retry 0, then `--shard=1/2` and `--shard=2/2`)_
+Full run at retry 0: **51 passed (44.0m)**, `EXIT=0` (the run phase 8's gate quotes, on `669de738`).
+Half-shards, each on its own fresh sandbox, retry 0: `--shard=1/2` → **27 passed (25.0m)**, `EXIT=0`, 1,615 s; `--shard=2/2` → **24 passed (17.8m)**, `EXIT=0`, 1,183 s.
+Durations above; the shard count chosen from them is six (`cfe79e91`).

@@ -297,11 +297,11 @@ Fast layers on every gate: `bun run lint` + `bun run typecheck:all` + the touche
 - Checks, each recorded in `lessons/phase-7.md`: discovery lists the wallet within 10 s; emoji modal → confirm; capability grant round-trips; `addAccount` → the account appears in the tools switcher; one public drip lands (receipt testid + balance via the harness); `crossOriginIsolated` true in both frames; the floating panel's position and whether a shrink fixture suffices; the `selfpay` wrapper: a held-public-FJ send simulates AND sends, and a genuine fueled claim still routes as a claim.
 - **Validation gate**: transcript shows the drip receipt and balance move; `lessons/phase-7.md` records go / no-go per check. No-go fallback recorded there: the test wallet speaks the extension transport through an `addInitScript` relay shim (re-plan as its own phase). Layers: manual e2e.
 
-#### Phase 8: Playwright scaffold, L1 shim, first cell, agent runner
+#### Phase 8 ✓: Playwright scaffold, L1 shim, first cell, agent runner
 - `@playwright/test` (exact pin), `playwright.config.ts`, `tests/browser/tsconfig.json` (+ `typecheck` script), `vitest.config.ts` exclude, `global-setup.ts`, fixtures (`l1-wallet`, `sandbox`, `actor`, `wallet-panel`, `egress`, `isolation`), `pages/*.ts`, `specs/connect-and-deposit.spec.ts` (cell 1), `apps/tools/scripts/e2e/agent.sh` + reap, root scripts `e2e:tools`, `e2e:tools:reap`.
 - **Validation gate**: `bun run e2e:tools` exit 0 with cell 1 green at retry 0; `e2e:tools:reap` afterwards reports nothing to reap; the egress fixture reports zero non-loopback requests; both frames isolated. Layers: e2e (live sandbox, real browser).
 
-#### Phase 9: The matrix
+#### Phase 9 ✓: The matrix
 - Specs by family: `deposit-token`, `deposit-token-gas`, `deposit-gas-only`, `fee-states`, `recovery`, `l1-wallet`, `exits`, `tokens`, `drip`, `activity`; every "B" cell in the table is a named test with its fixture and postconditions; profiles via the wallet URL query.
 - **Validation gate**: `bun run e2e:tools` exit 0 at retry 0; `bun run e2e:tools -- --shard=1/2` and `--shard=2/2` both exit 0; durations pasted into `lessons/phase-9.md` and the CI shard count chosen from them. Layers: e2e.
 

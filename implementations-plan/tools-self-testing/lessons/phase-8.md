@@ -63,4 +63,9 @@ from it too.
 
 ## Gate
 
-_(filled when `bun run e2e:tools` runs clean at retry 0)_
+`bun run e2e:tools` on a fresh sandbox at retry 0 (2026-09-09, `669de738`): **51 passed (44.0m)**,
+`EXIT=0`, 2,755 s wall clock — cell 1 (`connect-and-deposit.spec.ts`) green with its credit funded
+to the wallet's ceiling exactly. The egress fixture asserts an empty blocked-request record at every
+test's teardown (`fixtures/test.ts`, "every request stayed on loopback"), so the 51 passes are 51
+zero-egress runs; both frames' isolation is the spike's first cell (44, "isolation in both frames",
+16.2 s). `bun run e2e:tools:reap` after the runs: `[e2e:tools] nothing to reap`, and the port registry holds no rows.
