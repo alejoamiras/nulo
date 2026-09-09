@@ -71,6 +71,26 @@ payer and reads its postconditions from the chain through the harness.
   never decided a cell, but it is the first place to look if a token-only card is greyed as
   unverifiable on a fresh profile.
 
+## Arc-3 codex loop
+
+**Round 1** (GPT-6 Astra, `high`, the whole arc-3 diff + plan + lessons + the adversarial ask) — verdict **"Not ready for PR"**, 13 findings. Verified against the code, all adopted:
+
+| # | Finding | Call |
+|---|---|---|
+| 1 | `verify-build-target <target>` without `--dist` excluded its own positional (`args[-1 + 1]`) | real → only the value after `--dist` is not the target |
+| 2 | the fee probe asked the wallet with NO cap, so a cap-honoring wallet (Nulo) answered with its padded default and the app then bound it to 1.5× — worse than the 1× it had | real → the probe PROPOSES the app's cap (the node's worst prediction, both spellings); Nulo answers with it, a stock wallet with what it will really submit under; `wallet-fee-budget.test.ts` pins both policies |
+| 3 | worker fixtures keyed only on `{cells, l1Index}` — two files with equal values share a worker and exhaust one pool | real → every spec names itself in `family`, a worker option the pool refuses to run without |
+| 4 | `useGasShare.invalidate()` could adopt an outstanding read's result; a probe in flight across `forgetWalletFees()` repopulated the cache | real → generation/epoch counters on both |
+| 5 | the deployment-identity check whitelisted the root keys recursively, emptying every nested object | real → deep key-sorted canonical form |
+| 6 | the browser ports were bind-tested, never claimed in the host registry; the sandbox's allocator ignored the registry | real → `registerHostPorts`/`releaseHostPorts` (bridge-core), the resolver claims under the run id and the reaper releases; `reservePort` skips registered ports |
+| 7 | a `sandbox.pid` left after a normal teardown lets a later `reap` kill a recycled pgid | real → the file is removed after the stop; the reaper checks the group leader is `sandbox:up` |
+| 8 | cell 22 derived its token from a half-shaped block and skipped the assertion on failure | real → the record's own read-back block; exact token gain and exact credit deduction |
+| 9 | weak postconditions (`≥ 0n`, `> 0n`, first-time cells without token gains) | real → exact private balances and both L1 releases (28), `credit = fuel − ceiling` (15, 15b, 16, 19), exact token gains (3) |
+| 10 | "nothing authorized" read from Ethereum signatures only | real → the test wallet counts calls per method; `nothingSubmitted` asserts no `createAuthWit`/`sendTx` (29, 30, 31) |
+| 11 | 24a's reload raced the claim's submission; the claim click was swallowed | real → the claim's `sendTx` is refused once (`failNext`) so the interruption is deterministic; the reloaded page's wallet must send it |
+| 12 | cells 20/21 lacked private variants; 24b and 25's second half claimed in the matrix | real → 20p/21p added (credit = fuel − the fuel claim's ceiling, `PRIVATE_FUEL_CLAIM_GAS` now a bridge-core constant); matrix rows 24b/25 say what is staged |
+| 13 | the aggregator read an empty filter verdict as "skipped" | real → `scripts/ci-cd/aggregate-status.sh` with a truth-table test; an empty verdict is an error |
+
 ## Durations
 
 _(filled from the sharded full runs — the shard count in `pr-tools-e2e.yml` follows them)_

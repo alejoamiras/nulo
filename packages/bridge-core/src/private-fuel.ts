@@ -63,6 +63,27 @@ export const PRIVATE_FPC_SALT = "0x000000000000000000000000000000000000000000000
 export const PRIVATE_HUB_CLAIM_GAS = { daGas: 100_000, l2Gas: 2_000_000 } as const
 
 /**
+ * Gas LIMITS of a standalone Fee Juice claim (a gas-only bridge's own claim, no token leg). The
+ * empty `BatchCall([])` the public claim rides gives the estimator nothing, so the limits MUST be
+ * explicit (else they default to the per-tx MAX and `max_gas_cost` blows past the bridged amount).
+ * The protocol asserts the claimed balance clears `getFeeLimit() = Σ gasLimit[d] × maxFee[d]`, so
+ * these also drive the app's budget check, and the FPC keeps that product of the private one — what
+ * a private fuel claim leaves as credit is the fuel minus it. PUBLIC is CALIBRATED from the live
+ * fee-juice canary (a landed `claim_and_end_setup` billed l2Gas 659_123 / daGas 224 → a ~2.3× margin)
+ * and sits far below the private two-call limit so an oversized limit cannot shrink the fee-spike
+ * headroom under the FUEL_MIN_FJ floor (a 2× spike at 4M would graze the 16e18 floor). PRIVATE
+ * covers `FeeJuice.claim` + `mint_and_pay_fee`.
+ * KNOWN GAP (fable audit H1, bounded): a wallet whose FIRST-EVER tx is this claim carries account
+ * initialization on top (the extension wraps [ctor, entrypoint] when the init nullifier is absent) —
+ * a shape neither limit was measured against. The fresh-selfpay canary proved the EMBEDDED wallet
+ * can't model it (no init wrap: the undeployed entrypoint fails on its key note before gas matters),
+ * so the extension-shape cost stays unmeasured. Recoverable, not stranding: after ANY other tx
+ * initializes the account, RETRY claims normally. Measure via an extension-driven e2e before mainnet.
+ */
+export const PUBLIC_FUEL_CLAIM_GAS = { daGas: 3_000, l2Gas: 1_500_000 } as const
+export const PRIVATE_FUEL_CLAIM_GAS = { daGas: 100_000, l2Gas: 4_000_000 } as const
+
+/**
  * Gas LIMITS for the hub's `register_token` when it is the transaction that spends the bridged Fee
  * Juice (the FPC's `FeeJuice.claim` + `mint_and_pay_fee` ride in its setup). A registration publishes
  * the derived Token instance and binds it in public, so it is the heavier of a first private claim's

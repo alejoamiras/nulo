@@ -51,6 +51,9 @@ function faultFor(method: string, args: unknown[]): Error | undefined {
 	line("warn", `injected fault on ${method}: ${message}`)
 	return new Error(message)
 }
+/** How often each wallet method was asked, since this frame loaded — what "nothing was submitted" is read from. */
+const calls: Record<string, number> = {}
+
 function traced(wallet: TestWallet): TestWallet {
 	return new Proxy(wallet, {
 		get(target, prop, receiver) {
@@ -58,6 +61,7 @@ function traced(wallet: TestWallet): TestWallet {
 			if (typeof value !== "function" || typeof prop !== "string") return value
 			return (...args: unknown[]) => {
 				const id = ++callSeq
+				calls[prop] = (calls[prop] ?? 0) + 1
 				const t0 = performance.now()
 				line("info", `→ ${prop} #${id}`)
 				const settle = (mark: string) => line("info", `${mark} ${prop} #${id} ${Math.round(performance.now() - t0)}ms`)
@@ -112,6 +116,7 @@ window.__nuloTestWallet = {
 	ready: () => boot().then(() => undefined),
 	addAccount: async (secret, salt = "1") => (await boot()).importSeed({ secret, salt } as Seed).then((a) => a.toString()),
 	accounts: async () => (await boot()).getAccounts().then((list) => list.map((a) => a.item.toString())),
+	calls: () => ({ ...calls }),
 	failNext: (method, pattern, message = `test wallet: injected failure of ${method}`) => {
 		fault = { method, pattern, message }
 	},

@@ -20,7 +20,9 @@ if [ "${1:-}" = "reap" ]; then
   for pidfile in "$APP_DIR"/.e2e-state/*/sandbox.pid; do
     [ -f "$pidfile" ] || continue
     pgid=$(cat "$pidfile")
-    if [ -n "$pgid" ] && kill -0 -- "-$pgid" 2>/dev/null; then
+    # A number alone is not ownership: the kernel recycles pids, so the group's leader must still be
+    # the sandbox command this checkout started, or the file is stale and only gets removed.
+    if [ -n "$pgid" ] && kill -0 -- "-$pgid" 2>/dev/null && ps -o args= -p "$pgid" 2>/dev/null | grep -q 'sandbox:up'; then
       found=1
       echo "[e2e:tools] reaping sandbox pgid $pgid ($(dirname "$pidfile"))"
       kill -TERM -- "-$pgid" 2>/dev/null || true
@@ -54,6 +56,12 @@ reap() {
     kill -TERM -- "-$SANDBOX_PID" 2>/dev/null || true
     for _ in $(seq 1 60); do kill -0 "$SANDBOX_PID" 2>/dev/null || break; sleep 1; done
     kill -KILL -- "-$SANDBOX_PID" 2>/dev/null || true
+  fi
+  # A pid file that outlives its group would let a later `reap` mistake a recycled pgid for ours.
+  [ "${NULO_E2E_KEEP:-}" = "1" ] || rm -f "$STATE_DIR/sandbox.pid"
+  # The browser ports' registry rows belong to this run alone; a kept run keeps them claimed.
+  if [ "${NULO_E2E_KEEP:-}" != "1" ] && [ -z "${NULO_E2E_ATTACH:-}" ] && [ -f "$STATE_DIR/ports.json" ]; then
+    bun scripts/e2e/resolve-ports.ts --release "$STATE_DIR" "$RUN_ID" 2>/dev/null || true
   fi
 }
 trap reap EXIT
@@ -98,7 +106,7 @@ if [ -n "${NULO_E2E_ATTACH:-}" ]; then
   [ -f "$STATE_DIR/ports.json" ] || { log "FATAL: $STATE_DIR/ports.json missing — nothing to attach to"; exit 2; }
 else
   log "resolving ports"
-  bun scripts/e2e/resolve-ports.ts "$STATE_DIR"
+  bun scripts/e2e/resolve-ports.ts "$STATE_DIR" "$RUN_ID" "$$"
 fi
 TOOLS_PORT=$(jq -r .tools "$STATE_DIR/ports.json")
 WALLET_PORT=$(jq -r .testWallet "$STATE_DIR/ports.json")

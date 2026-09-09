@@ -230,8 +230,8 @@ Arc 3 (tools browser e2e): `apps/tools/package.json` (`@playwright/test` devDep 
 | 22 | routeless token → gas choices greyed, token-only still sends | plain | credit ≥ ceiling | ✓ (no-route) | ✓ |
 | 23 | discovered route feeds the send (real facade quote) | plain | none | ✓ | ✓ (route status testid) |
 | 24a | interrupted fueled claim, recovery: pending / dropped branches complete; consumed branch on a plain wallet with no credit ends in the `none` stop (`deposit-flow.ts:700` → `ownGasFee`, public payer feature-gated) | plain | none | – | ✓ (reload mid-claim; `fuel-claim-state.ts:63`) |
-| 24b | consumed branch completes from held public FJ | selfpay | publicFj ≥ ceiling | – | ✓ |
-| 25 | grant declined → nothing signed; grant for a left selection discarded | plain | – | – | ✓ |
+| 24b | consumed branch completes from held public FJ — NOT STAGED: a claim included with its app phase reverted cannot be produced from outside the wallet on the automine network (`lessons/phase-9.md`) | selfpay | publicFj ≥ ceiling | – | – |
+| 25 | grant declined → nothing signed (staged: the wallet's declined grant on a fresh token); the "grant for a left selection discarded" half is NOT STAGED — the test wallet answers prompts synchronously (`lessons/phase-9.md`) | plain | – | – | ✓ (declined half) |
 | 26 | L1 signature rejected; L1 account change; L1 wrong chain → chip + switch | plain | – | – | ✓ |
 | 27 | exit public (authwit tx + exit tx both paid by the wallet default = the actor's public FJ) | plain | publicFj ≥ 2 tx budgets; assert the drop | ✓ | ✓ |
 | 28 | exit private from 1 note / from 3 notes | plain | credit 1 note / 3 notes | ✓ | ✓ |

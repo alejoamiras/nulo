@@ -7,7 +7,7 @@ import { expect, test } from "../fixtures/test"
 import { connectAztec, tid } from "../pages/connect"
 import { balancesShown, drip } from "../pages/drip"
 
-test.use({ cells: 4, l1Index: 6 })
+test.use({ family: "drip", cells: 4, l1Index: 6 })
 
 async function nuloToken(run: { artifactsDir: string }, wallet: unknown) {
 	const record = JSON.parse(readFileSync(join(run.artifactsDir, "deployments.json"), "utf8")) as DripDeploymentRecord

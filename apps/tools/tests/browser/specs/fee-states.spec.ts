@@ -10,7 +10,7 @@ import { connectAztec, tid, walletFrame } from "../pages/connect"
 import { walletCeiling } from "../pages/fees"
 import { connectL1, openSend, reviewDeposit, setVisibility, startDeposit } from "../pages/send"
 
-test.use({ cells: 6, l1Index: 3 })
+test.use({ family: "fee-states", cells: 6, l1Index: 3 })
 
 const USDC = 10n ** 6n
 const L1 = 31337

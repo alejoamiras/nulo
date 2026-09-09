@@ -2,11 +2,11 @@
 import { balanceOf, freshToken, mint, setRoutable } from "@nulo/bridge-core/sandbox"
 import { TESTIDS } from "../../../src/lib/testids"
 import { expect, test } from "../fixtures/test"
-import { connectAztec, driveToConnected, tid, walletFrame } from "../pages/connect"
+import { connectAztec, driveToConnected, tid, walletCalls, walletFrame } from "../pages/connect"
 import { depositRecords } from "../pages/journal"
 import { confirmReview, connectL1, openSend, reviewDeposit } from "../pages/send"
 
-test.use({ cells: 2, l1Index: 4 })
+test.use({ family: "recovery", cells: 2, l1Index: 4 })
 
 const USDC = 10n ** 6n
 const L1 = 31337
@@ -16,6 +16,7 @@ const reconnected = (page: import("@playwright/test").Page, account: string) => 
 
 test("cell 24a — a fueled deposit interrupted by a reload after the Ethereum leg is claimed from the journal", async ({
 	page,
+	run,
 	sandbox,
 	actor,
 	l1,
@@ -30,9 +31,13 @@ test("cell 24a — a fueled deposit interrupted by a reload after the Ethereum l
 	await connectL1(page)
 	await connectAztec(page, { profile: "plain", account: actor.address })
 	await reviewDeposit(page, { l1ChainId: L1, erc20: usdt.erc20, amount: "100", intent: "token+gas", isPrivate: false })
+	// The interruption is made deterministic: the first transaction this page's wallet is asked to
+	// send — the claim — is refused, so the Ethereum leg lands and the claim provably never left.
+	const frame = walletFrame(page, run.testWalletOrigin, "plain")
+	await frame.evaluate(() => window.__nuloTestWallet!.failNext("sendTx", undefined, "test wallet: the claim is held"))
 	await confirmReview(page)
-	// The Ethereum leg is done the moment the journal holds the deposit's hash; the claim is still ahead.
 	await expect.poll(async () => (await depositRecords(page)).at(-1)?.depositTxHash, { timeout: 180_000 }).toBeTruthy()
+	await expect.poll(async () => (await walletCalls(page, run.testWalletOrigin, "plain")).sendTx ?? 0, { timeout: 180_000 }).toBe(1)
 	expect((await depositRecords(page)).at(-1)?.claimTxHash, "interrupted before the claim").toBeUndefined()
 
 	await page.reload()
@@ -42,12 +47,19 @@ test("cell 24a — a fueled deposit interrupted by a reload after the Ethereum l
 	await page.locator(tid(TESTIDS.tabActivity)).click()
 	const card = page.locator(tid(TESTIDS.journalCard)).first()
 	await expect(card).toBeVisible()
-	// Claimable again after the sync: the card offers the claim, or resumes it on its own.
+	// The card offers the claim again, or resumes it on its own; either way the claim is a
+	// transaction THIS page's wallet sends, from the journal alone.
 	const claim = card.locator(tid(TESTIDS.journalClaim))
-	await claim.click({ timeout: 180_000 }).catch(() => {})
+	const done = page.locator(`${tid(TESTIDS.journalCard)}[data-stage="done"]`)
+	await expect(claim.or(done).first()).toBeVisible({ timeout: 180_000 })
+	if (await claim.isVisible()) await claim.click()
 	await expect(card).toHaveAttribute("data-stage", "done", { timeout: 8 * 60_000 })
 
 	expect((await depositRecords(page)).at(-1)?.claimTxHash, "the claim landed from the journal").toBeTruthy()
+	expect(
+		(await walletCalls(page, run.testWalletOrigin, "plain")).sendTx ?? 0,
+		"sent by the reloaded page's wallet",
+	).toBeGreaterThanOrEqual(1)
 	expect((await balanceOf(usdtL2, actor.actor.address, "public")) - before).toBeGreaterThan(0n)
 })
 

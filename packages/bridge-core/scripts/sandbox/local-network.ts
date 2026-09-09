@@ -89,14 +89,18 @@ function tryBind(port: number): Promise<PortReservation | null> {
 async function reservePort(): Promise<PortReservation> {
 	const hi = Math.max(STATIC_LO + 256, (await ephemeralFloor()) - FLOOR_GUARD)
 	const span = hi - STATIC_LO
+	// A port another run claimed in the registry is taken even while nothing listens on it yet.
+	const claimed = registeredPorts()
 	for (let i = 0; i < MAX_STATIC_TRIES && span >= 256; i++) {
-		const reservation = await tryBind(STATIC_LO + Math.floor(Math.random() * span))
+		const candidate = STATIC_LO + Math.floor(Math.random() * span)
+		if (claimed.has(candidate)) continue
+		const reservation = await tryBind(candidate)
 		if (reservation) return reservation
 	}
 	throw new Error(`no free loopback port in [${STATIC_LO}, ${hi}) after ${MAX_STATIC_TRIES} probes — the static window is exhausted`)
 }
 
-export interface SandboxPorts {
+export type SandboxPorts = {
 	anvil: number
 	aztec: number
 	aztecAdmin: number
@@ -152,10 +156,26 @@ async function withRegistry(mutate: (lines: string[]) => string[]): Promise<bool
 
 const ownerCell = (runId: string) => `| ${runId} |`
 
-async function registerPorts(runId: string, ports: SandboxPorts, pidHint: number): Promise<void> {
+/** Every port the registry lists, whoever claimed it; empty when the host keeps no registry. */
+function registeredPorts(): Set<number> {
+	const ports = new Set<number>()
+	if (!existsSync(REGISTRY)) return ports
+	for (const line of readFileSync(REGISTRY, "utf8").split("\n")) {
+		const port = Number.parseInt(line.split("|")[1]?.trim() ?? "", 10)
+		if (Number.isInteger(port)) ports.add(port)
+	}
+	return ports
+}
+
+/**
+ * Claim ports in the host registry under `runId`, one row per service (`<label>-<service>`), so
+ * every other run on this host — this package's sandboxes included — picks around them from the
+ * moment they are resolved, not from the moment something listens on them.
+ */
+export async function registerHostPorts(runId: string, label: string, ports: Record<string, number>, pidHint: number): Promise<void> {
 	const claimed = new Date().toISOString()
 	const rows = Object.entries(ports).map(
-		([service, port]) => `| ${port} | bridge-sandbox-${service} | ${runId} | ${REPO_ROOT} | ${pidHint} | ${claimed} |`,
+		([service, port]) => `| ${port} | ${label}-${service} | ${runId} | ${REPO_ROOT} | ${pidHint} | ${claimed} |`,
 	)
 	await withRegistry((lines) => {
 		const body = lines.filter((l) => l.trim().length > 0)
@@ -163,14 +183,17 @@ async function registerPorts(runId: string, ports: SandboxPorts, pidHint: number
 	})
 }
 
-/** A registry that stayed locked keeps this run's rows forever; the warning is what makes the leak
- *  recoverable by hand. It never throws — a registry hiccup must not fail an otherwise clean run. */
-async function releasePorts(runId: string, ports: SandboxPorts): Promise<void> {
+/** Drop every row `runId` owns. A registry that stayed locked keeps them; the warning is what makes
+ *  the leak recoverable by hand. Never throws — a registry hiccup must not fail an otherwise clean run. */
+export async function releaseHostPorts(runId: string, ports: Record<string, number>): Promise<void> {
 	if (await withRegistry((lines) => lines.filter((l) => !l.includes(ownerCell(runId))))) return
 	console.warn(
 		`[sandbox] ${REGISTRY} stayed locked — remove the rows owned by ${runId} (ports ${Object.values(ports).join(", ")}) by hand`,
 	)
 }
+
+const registerPorts = (runId: string, ports: SandboxPorts, pidHint: number) => registerHostPorts(runId, "bridge-sandbox", ports, pidHint)
+const releasePorts = (runId: string, ports: SandboxPorts) => releaseHostPorts(runId, ports)
 
 // ─── Toolchain ───────────────────────────────────────────────────────────────
 

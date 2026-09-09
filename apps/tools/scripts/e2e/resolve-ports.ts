@@ -1,13 +1,17 @@
 /**
  * Two loopback ports for one browser run — the tools preview and the test wallet — bind-tested
  * from the static window below the kernel's ephemeral range, so the resolve → build → serve gap
- * cannot lose them to an outgoing connection's source port. The sandbox reserves its own four.
+ * cannot lose them to an outgoing connection's source port, and claimed in the host registry under
+ * the run's id so every other run on the host (the sandbox this run boots next included) picks
+ * around them. The sandbox reserves its own four the same way.
  *
- *   bun scripts/e2e/resolve-ports.ts <state-dir>   → writes <state-dir>/ports.json
+ *   bun scripts/e2e/resolve-ports.ts <state-dir> <run-id> <pid>   → writes <state-dir>/ports.json
+ *   bun scripts/e2e/resolve-ports.ts --release <state-dir> <run-id>  → drops the run's registry rows
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { createServer } from "node:net"
 import { join } from "node:path"
+import { registerHostPorts, releaseHostPorts } from "@nulo/bridge-core/sandbox"
 
 const STATIC_LO = 10_000
 const FLOOR_GUARD = 512
@@ -43,10 +47,18 @@ async function reserve(taken: Set<number>): Promise<number> {
 	throw new Error("resolve-ports: no free port in the static window")
 }
 
-const stateDir = process.argv[2]
-if (!stateDir) throw new Error("resolve-ports: <state-dir> required")
-const taken = new Set<number>()
-const ports = { tools: await reserve(taken), testWallet: await reserve(taken), resolvedAt: new Date().toISOString() }
-mkdirSync(stateDir, { recursive: true })
-writeFileSync(join(stateDir, "ports.json"), `${JSON.stringify(ports, null, 2)}\n`)
-console.log(`[e2e:tools] tools=:${ports.tools} test-wallet=:${ports.testWallet}`)
+if (process.argv[2] === "--release") {
+	const [stateDir, runId] = process.argv.slice(3)
+	if (!stateDir || !runId) throw new Error("resolve-ports: --release <state-dir> <run-id>")
+	const stored = JSON.parse(readFileSync(join(stateDir, "ports.json"), "utf8")) as { tools: number; testWallet: number }
+	await releaseHostPorts(runId, { tools: stored.tools, testWallet: stored.testWallet })
+} else {
+	const [stateDir, runId, pid] = process.argv.slice(2)
+	if (!stateDir || !runId) throw new Error("resolve-ports: <state-dir> <run-id> [pid] required")
+	const taken = new Set<number>()
+	const ports = { tools: await reserve(taken), testWallet: await reserve(taken), resolvedAt: new Date().toISOString() }
+	await registerHostPorts(runId, "tools-e2e", { tools: ports.tools, testWallet: ports.testWallet }, Number(pid) || process.pid)
+	mkdirSync(stateDir, { recursive: true })
+	writeFileSync(join(stateDir, "ports.json"), `${JSON.stringify(ports, null, 2)}\n`)
+	console.log(`[e2e:tools] tools=:${ports.tools} test-wallet=:${ports.testWallet}`)
+}

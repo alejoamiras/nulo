@@ -36,11 +36,15 @@ interface Fixtures {
 	page: Page
 }
 
-/** Worker-scoped = per spec file: `l1Index` differs per file, so files never share a worker or a pool. */
+/** Worker-scoped = per spec file: Playwright reuses a worker across files whose worker options
+ *  agree, so every file names itself in `family` and gets a worker — and a pool — of its own. */
 interface WorkerFixtures {
+	/** The spec file's own name — `test.use({ family: "exits" })` — unique per file, never shared. */
+	family: string
 	/** How many cells the file declares — `test.use({ cells: N })` at the top of a spec. */
 	cells: number
-	/** Which anvil key this file signs with — `test.use({ l1Index: i })`, unique per file. */
+	/** Which anvil key this file signs with — `test.use({ l1Index: i })`. Files may share one: with
+	 *  a single worker they run in sequence, and a shard runs on a sandbox of its own. */
 	l1Index: number
 	run: RunEnv
 	sandbox: SandboxAccess
@@ -50,6 +54,7 @@ interface WorkerFixtures {
 }
 
 export const test = base.extend<Fixtures, WorkerFixtures>({
+	family: ["", { option: true, scope: "worker" }],
 	cells: [1, { option: true, scope: "worker" }],
 	l1Index: [0, { option: true, scope: "worker" }],
 
@@ -90,7 +95,8 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
 	],
 
 	pool: [
-		async ({ sandbox, cells }, use) => {
+		async ({ sandbox, cells, family }, use) => {
+			if (!family) throw new Error("a spec file must name itself: test.use({ family: <its name>, cells, l1Index })")
 			const n = cells + SPARES
 			if (n > MAX_POOL)
 				throw new Error(`a file declaring ${cells} cells needs ${n} actors, above the grant cap of ${MAX_POOL} — split it`)

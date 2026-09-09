@@ -6,6 +6,8 @@ export interface TestWalletControl {
 	ready: () => Promise<void>
 	addAccount: (secret: `0x${string}`, salt?: string) => Promise<string>
 	accounts: () => Promise<string[]>
+	/** How many times each wallet method was called since this frame loaded (`sendTx`, `createAuthWit`, …). */
+	calls: () => Record<string, number>
 	/** Fault injection: the next `method` call whose serialized arguments contain `pattern` (any
 	 *  call when omitted) rejects with `message` instead of running — one shot. */
 	failNext: (method: string, pattern?: string, message?: string) => void

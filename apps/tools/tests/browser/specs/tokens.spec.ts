@@ -1,12 +1,13 @@
 /** Tokens (cells 22, 23, 34, 37): the catalog, the paste lookup, the route verdicts, the L1 mint strip. */
-import { balanceOf, freshToken, mint, mintPrivateGasNote, privateFpc } from "@nulo/bridge-core/sandbox"
+import { balanceOf, freshToken, mint, mintPrivateGasNote, privateCreditOf, privateFpc } from "@nulo/bridge-core/sandbox"
 import { TESTIDS } from "../../../src/lib/testids"
 import { expect, test } from "../fixtures/test"
 import { connectAztec, tid } from "../pages/connect"
 import { walletCeiling } from "../pages/fees"
+import { depositRecords } from "../pages/journal"
 import { confirmReview, connectL1, openSend, pasteToken, reviewDeposit, setVisibility, startDeposit, waitForReceipt } from "../pages/send"
 
-test.use({ cells: 4, l1Index: 2 })
+test.use({ family: "tokens", cells: 4, l1Index: 2 })
 
 const USDC = 10n ** 6n
 const L1 = 31337
@@ -84,6 +85,7 @@ test("cell 22 — a routeless token greys the gas choices with the reason; the t
 	const ceiling = await walletCeiling(actor, { isPrivate: false, registers: true })
 	const fpc = await privateFpc(actor.s)
 	await mintPrivateGasNote(actor.s, fpc, (ceiling * 14n) / 10n)
+	const creditBefore = await privateCreditOf(actor.s, fpc)
 
 	await page.goto("/")
 	await openSend(page)
@@ -100,8 +102,12 @@ test("cell 22 — a routeless token greys the gas choices with the reason; the t
 	await expect(page.locator(tid(TESTIDS.sendStepReview))).toBeVisible()
 	await confirmReview(page)
 	await waitForReceipt(page)
-	const nortL2 = await actor.s.l2TokenOf({ erc20: nort } as never).catch(() => null)
-	if (nortL2) expect(await balanceOf(nortL2, actor.actor.address, "public")).toBeGreaterThan(0n)
+	// The send read the token's block back from the factory; the harness derives the L2 token from it.
+	const record = (await depositRecords(page)).at(-1)
+	expect(record?.token?.erc20.toLowerCase(), "the record names the token").toBe(nort.toLowerCase())
+	const nortL2 = await actor.s.l2TokenOf(record?.token as never)
+	expect(await balanceOf(nortL2, actor.actor.address, "public"), "the whole token arrived, no slice taken").toBe(10n ** 18n)
+	expect(await privateCreditOf(actor.s, fpc), "the credit paid exactly the register + claim ceiling").toBe(creditBefore - ceiling)
 })
 
 test("cell 23 — a discovered route is what the review shows: the hops and the slippage floor", async ({ page, sandbox, actor, l1 }) => {

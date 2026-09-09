@@ -2,10 +2,11 @@
 import { balanceOf, fundPublicFeeJuice, mint, mintFeeAsset, privateCreditOf, privateFpc } from "@nulo/bridge-core/sandbox"
 import { expect, test } from "../fixtures/test"
 import { connectAztec } from "../pages/connect"
+import { walletFuelClaimCeiling } from "../pages/fees"
 import { fuelConservation } from "../pages/journal"
 import { confirmReview, connectL1, openSend, reviewDeposit, waitForReceipt } from "../pages/send"
 
-test.use({ cells: 6, l1Index: 5 })
+test.use({ family: "deposit-gas-only", cells: 6, l1Index: 5 })
 
 const USDC = 10n ** 6n
 const FJ = 10n ** 18n
@@ -66,11 +67,54 @@ test("cell 19 — plain, identity route, private: the Fee Juice becomes credit a
 	const fpc = await privateFpc(actor.s)
 	const creditBefore = await privateCreditOf(actor.s, fpc)
 	const fjBefore = await balanceOf(actor.s.feeJuiceL2, actor.actor.address, "public")
+	const kept = await walletFuelClaimCeiling(actor)
 	await bridgeGas(page, { profile: "plain", account: actor.address, erc20: feeAsset, amount: "5", isPrivate: true, viaLookup: true })
-	const credit = await privateCreditOf(actor.s, fpc)
-	expect(credit, "credit grew by the fuel minus what the FPC kept").toBeGreaterThan(creditBefore)
-	expect(credit - creditBefore).toBeLessThanOrEqual(5n * FJ)
+	expect(await privateCreditOf(actor.s, fpc), "credit = the fuel minus exactly the claim's ceiling").toBe(creditBefore + 5n * FJ - kept)
 	expect(await balanceOf(actor.s.feeJuiceL2, actor.actor.address, "public"), "nothing public was touched").toBe(fjBefore)
+})
+
+test("cell 20p — plain, a swapped token, private: the venue's Fee Juice becomes credit, minus the claim's ceiling", async ({
+	page,
+	sandbox,
+	actor,
+	l1,
+}) => {
+	const { usdt } = sandbox.tokens
+	await mint(sandbox.clients.l1, usdt.erc20 as `0x${string}`, l1.address, 30n * USDC)
+	const fpc = await privateFpc(actor.s)
+	const creditBefore = await privateCreditOf(actor.s, fpc)
+	const fjBefore = await balanceOf(actor.s.feeJuiceL2, actor.actor.address, "public")
+	const kept = await walletFuelClaimCeiling(actor)
+	await bridgeGas(page, { profile: "plain", account: actor.address, erc20: usdt.erc20, amount: "30", isPrivate: true })
+	const { received } = await fuelConservation(page, actor.s.l2.node)
+	expect(received, "the mock venue's fixed rate makes the fuel exact").toBe(30n * USDC * RATE)
+	expect(await privateCreditOf(actor.s, fpc)).toBe(creditBefore + received - kept)
+	expect(await balanceOf(actor.s.feeJuiceL2, actor.actor.address, "public"), "nothing public was touched").toBe(fjBefore)
+})
+
+test("cell 21p — plain, WETH, private: the single-hop route's Fee Juice becomes credit, minus the claim's ceiling", async ({
+	page,
+	sandbox,
+	actor,
+	l1,
+}) => {
+	const weth = sandbox.clients.deployment.tokens.weth
+	const units = 2n * 10n ** 6n
+	await mint(sandbox.clients.l1, weth, l1.address, units)
+	const fpc = await privateFpc(actor.s)
+	const creditBefore = await privateCreditOf(actor.s, fpc)
+	const kept = await walletFuelClaimCeiling(actor)
+	await bridgeGas(page, {
+		profile: "plain",
+		account: actor.address,
+		erc20: weth,
+		amount: "0.000000000002",
+		isPrivate: true,
+		viaLookup: true,
+	})
+	const { received } = await fuelConservation(page, actor.s.l2.node)
+	expect(received).toBe(units * RATE)
+	expect(await privateCreditOf(actor.s, fpc)).toBe(creditBefore + received - kept)
 })
 
 test("cell 20 — plain, a swapped token, public: the venue's Fee Juice lands, minus the claim's fee", async ({

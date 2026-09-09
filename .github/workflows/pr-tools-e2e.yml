@@ -104,21 +104,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/ci-cd/aggregate-status.sh
+          sparse-checkout-cone-mode: false
       - name: Aggregate results
-        run: |
-          # Exact state machine, not a failure denylist — a shard that never ran must not read as green.
-          RUN="${{ needs.changes.outputs.run }}"
-          if [ "${{ needs.changes.result }}" != "success" ]; then
-            echo "::error::Detect changes did not succeed: ${{ needs.changes.result }}"
-            exit 1
-          fi
-          case "$RUN" in
-            true) want="success" ;;
-            false|"") want="skipped" ;;
-            *) echo "::error::changes.outputs.run is not true/false: '$RUN'"; exit 1 ;;
-          esac
-          if [ "${{ needs.shards.result }}" != "$want" ]; then
-            echo "::error::filter said run=$RUN, so the shards must be '$want' — got '${{ needs.shards.result }}'"
-            exit 1
-          fi
-          echo "Tools e2e gate passed (or was skipped — no relevant changes)."
+        # The exact state machine lives in a script with its own truth-table test; an empty filter
+        # verdict is an error there, never a skip.
+        run: bash scripts/ci-cd/aggregate-status.sh "${{ needs.changes.result }}" "${{ needs.changes.outputs.run }}" "${{ needs.shards.result }}"

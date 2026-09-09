@@ -84,6 +84,7 @@ export function useGasShare(deps: GasShareDeps = {}): UseGasShareHandle {
 	const fees = ref<{ maxFees: MaxFees; at: number } | null>(null)
 	const pricingError = ref<string | null>(null)
 	let pricing: Promise<boolean> | null = null
+	let generation = 0
 
 	/** The wallet's figure when an account is connected, the node's prediction before that. */
 	function readMaxFees(): Promise<MaxFees> {
@@ -95,8 +96,11 @@ export function useGasShare(deps: GasShareDeps = {}): UseGasShareHandle {
 
 	function prime(): Promise<boolean> {
 		if (pricing) return pricing
+		const mine = generation
 		pricing = readMaxFees()
 			.then((predicted) => {
+				// A read the wallet or account outran is nobody's price now.
+				if (mine !== generation) return false
 				const maxFees = { feePerDaGas: predicted.feePerDaGas, feePerL2Gas: predicted.feePerL2Gas }
 				const same =
 					fees.value?.maxFees.feePerDaGas === maxFees.feePerDaGas && fees.value?.maxFees.feePerL2Gas === maxFees.feePerL2Gas
@@ -111,12 +115,12 @@ export function useGasShare(deps: GasShareDeps = {}): UseGasShareHandle {
 				// Unpriced is a visible state (the slice reads "pricing", the error names why), never a
 				// silently wrong slice; a still-fresh price keeps serving while a background refresh
 				// failed — a caller that needs the price to be fresh NOW reads the false instead.
-				if (priced() === null)
+				if (mine === generation && priced() === null)
 					pricingError.value = `Couldn't read Aztec's network fees to size the gas slice - ${e instanceof Error ? e.message : String(e)}`
 				return false
 			})
 			.finally(() => {
-				pricing = null
+				if (mine === generation) pricing = null
 			})
 		return pricing
 	}
@@ -177,8 +181,11 @@ export function useGasShare(deps: GasShareDeps = {}): UseGasShareHandle {
 		txTarget.value = DEFAULT_TX_TARGET
 	}
 
-	/** Another wallet or account prices from scratch: its policy is not the last one's. */
+	/** Another wallet or account prices from scratch: its policy is not the last one's, and a read
+	 *  still running for the last one is dropped rather than adopted. */
 	function invalidate(): void {
+		generation++
+		pricing = null
 		fees.value = null
 		void prime()
 	}

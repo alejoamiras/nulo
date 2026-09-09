@@ -8,7 +8,22 @@ import { join } from "node:path"
 import { readHandle } from "@nulo/bridge-core/sandbox"
 import { runEnv } from "./env"
 
-const canonical = (json: string) => JSON.stringify(JSON.parse(json), Object.keys(JSON.parse(json)).sort())
+/** Key order made irrelevant at EVERY depth (a replacer array would whitelist the root's keys
+ *  recursively and empty every nested object — two different records would compare equal). */
+function canonical(json: string): string {
+	const sortKeys = (v: unknown): unknown => {
+		if (Array.isArray(v)) return v.map(sortKeys)
+		if (v && typeof v === "object") {
+			return Object.fromEntries(
+				Object.keys(v as Record<string, unknown>)
+					.sort()
+					.map((k) => [k, sortKeys((v as Record<string, unknown>)[k])]),
+			)
+		}
+		return v
+	}
+	return JSON.stringify(sortKeys(JSON.parse(json)))
+}
 
 export default function globalSetup(): void {
 	const env = runEnv()

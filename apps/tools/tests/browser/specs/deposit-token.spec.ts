@@ -16,7 +16,7 @@ import { walletCeiling } from "../pages/fees"
 import { depositRecords } from "../pages/journal"
 import { confirmReview, connectL1, newSend, openSend, reviewDeposit, waitForReceipt } from "../pages/send"
 
-test.use({ cells: 6, l1Index: 2 })
+test.use({ family: "deposit-token", cells: 6, l1Index: 2 })
 
 const USDC = 10n ** 6n
 const FJ = 10n ** 18n
@@ -105,6 +105,11 @@ test("cell 3 — plain, public, first-time token from credit: register + claim, 
 	const fpc = await privateFpc(actor.s)
 	const afterFirst = await privateCreditOf(actor.s, fpc)
 	expect(afterFirst, "the FPC kept the register + claim ceiling").toBe(creditBefore - first)
+	// The block the send read back from the factory names the token it registered: its L2 balance is
+	// the exact amount, twice over.
+	expect(record?.token?.erc20.toLowerCase()).toBe(erc20.toLowerCase())
+	const freshL2 = await actor.s.l2TokenOf(record?.token as never)
+	expect(await balanceOf(freshL2, actor.actor.address, "public"), "the whole amount arrived").toBe(10n * USDC)
 
 	await newSend(page)
 	await reviewDeposit(page, { l1ChainId: L1, erc20, amount: "10", intent: "token", isPrivate: false })
@@ -112,6 +117,7 @@ test("cell 3 — plain, public, first-time token from credit: register + claim, 
 	await confirmReview(page)
 	await waitForReceipt(page)
 	expect(await privateCreditOf(actor.s, fpc), "the second send is a plain claim at the smaller ceiling").toBe(afterFirst - second)
+	expect(await balanceOf(freshL2, actor.actor.address, "public")).toBe(20n * USDC)
 })
 
 test("cell 4 — plain, private, first-time token from credit: a registration of its own, then the claim", async ({

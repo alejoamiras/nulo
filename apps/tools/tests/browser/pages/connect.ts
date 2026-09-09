@@ -119,6 +119,11 @@ export function walletFrame(page: Page, walletOrigin: string, profile: TestWalle
 	return frame
 }
 
+/** What the connected wallet was asked, by method — `sendTx`, `createAuthWit` — since its frame loaded. */
+export function walletCalls(page: Page, walletOrigin: string, profile: TestWalletProfile): Promise<Record<string, number>> {
+	return walletFrame(page, walletOrigin, profile).evaluate(() => window.__nuloTestWallet!.calls())
+}
+
 /** Every address the grant carried, as the switcher menu lists them. */
 export async function grantedAccounts(page: Page): Promise<string[]> {
 	await page.locator(tid(TESTIDS.accountChip)).first().click()

@@ -31,6 +31,8 @@ type SimulatedGasSettings = {
 }
 
 const quotes = new Map<string, { maxFees: MaxFees; at: number; pending?: Promise<MaxFees> }>()
+/** Bumped by every forget: a probe still in flight from before it must not repopulate the cache. */
+let epoch = 0
 let networkMax: GasLimits | null = null
 
 /** The most a single transaction may declare on this network, read once; limits above it are refused
@@ -65,32 +67,44 @@ export async function walletMaxFees(aztec: unknown, account: AztecAddress, gas: 
 	const cached = quotes.get(key)
 	if (cached?.pending) return cached.pending
 	if (cached && Date.now() - cached.at <= QUOTE_FRESH_MS) return cached.maxFees
+	const mine = epoch
 	const pending = probe(wallet, account, gas)
 		.then((maxFees) => {
-			quotes.set(key, { maxFees, at: Date.now() })
+			if (mine === epoch) quotes.set(key, { maxFees, at: Date.now() })
 			return maxFees
 		})
 		.catch((e) => {
-			quotes.delete(key)
+			if (mine === epoch) quotes.delete(key)
 			throw e
 		})
 	quotes.set(key, { maxFees: cached?.maxFees ?? { feePerDaGas: 0n, feePerL2Gas: 0n }, at: cached?.at ?? 0, pending })
 	return pending
 }
 
-/** Forget every quote: a new account or wallet prices from scratch. */
+/** Forget every quote: a new account or wallet prices from scratch, and a probe still running for
+ *  the old one lands nowhere. */
 export function forgetWalletFees(): void {
 	quotes.clear()
+	epoch++
 }
 
+/**
+ * The probe PROPOSES the app's own cap — the node's worst predicted min fees, no padding — in
+ * both spellings of the option. A wallet that honors a dApp's cap (Nulo's extension) answers with
+ * exactly that, so its users keep a ceiling of `limits × 1×`; a wallet that ignores it answers with
+ * whatever it will really submit under. Probing without a proposal would make a cap-honoring
+ * wallet answer with its own padded default, and the app would then bind it to that.
+ */
 async function probe(wallet: SimulatingWallet, account: AztecAddress, gas: GasLimits): Promise<MaxFees> {
 	await readNetworkMax()
 	const limits = clampGas(gas)
+	const proposed = await predictedWorstMinFees(createAztecNodeClient(NETWORK.nodeUrl))
+	const cap = { feePerDaGas: proposed.feePerDaGas, feePerL2Gas: proposed.feePerL2Gas }
 	const noop = await SetPublicAuthwitContractInteraction.create(wallet as never, account, Fr.random(), false)
 	const payload = await noop.request()
 	const result = (await wallet.simulateTx?.(payload, {
 		from: account,
-		fee: { gasSettings: { gasLimits: limits, teardownGasLimits: { daGas: 0, l2Gas: 0 } } },
+		fee: { gasSettings: { gasLimits: limits, teardownGasLimits: { daGas: 0, l2Gas: 0 }, maxFeesPerGas: cap, maxFeePerGas: cap } },
 		skipTxValidation: true,
 		skipFeeEnforcement: true,
 	})) as { publicInputs?: { constants?: { txContext?: { gasSettings?: SimulatedGasSettings } } } } | undefined

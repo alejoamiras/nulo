@@ -7,7 +7,7 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { SetPublicAuthwitContractInteraction } from "@aztec/aztec.js/authorization"
 import { Fr } from "@aztec/aztec.js/fields"
-import { ownGasTxs, PRIVATE_HUB_EXIT_GAS, privateFpcFeeLimit } from "@nulo/bridge-core"
+import { ownGasTxs, PRIVATE_FUEL_CLAIM_GAS, PRIVATE_HUB_EXIT_GAS, privateFpcFeeLimit } from "@nulo/bridge-core"
 import type { ActorHandle } from "../fixtures/test"
 
 type MaxFees = { feePerDaGas: bigint; feePerL2Gas: bigint }
@@ -20,7 +20,11 @@ async function networkMax(actor: ActorHandle): Promise<Limits> {
 
 const clamp = (gas: Limits, max: Limits): Limits => ({ daGas: Math.min(gas.daGas, max.daGas), l2Gas: Math.min(gas.l2Gas, max.l2Gas) })
 
-/** The max fees per gas a stock wallet applies to this actor's transactions right now. */
+/**
+ * The max fees per gas a stock wallet applies to this actor's transactions right now. No cap is
+ * proposed here, on purpose: the app proposes one, but the wallet-sdk transport strips it before a
+ * stock wallet reads its options, so the question the wallet ends up answering is this one.
+ */
 export async function walletMaxFees(actor: ActorHandle, gas: Limits): Promise<MaxFees> {
 	const wallet = actor.s.l2.wallet as unknown as { simulateTx: (payload: unknown, opts: unknown) => Promise<unknown> }
 	const from = AztecAddress.fromStringUnsafe(actor.address)
@@ -34,6 +38,12 @@ export async function walletMaxFees(actor: ActorHandle, gas: Limits): Promise<Ma
 	})) as { publicInputs: { constants: { txContext: { gasSettings: { maxFeesPerGas: MaxFees } } } } }
 	const applied = result.publicInputs.constants.txContext.gasSettings.maxFeesPerGas
 	return { feePerDaGas: BigInt(applied.feePerDaGas), feePerL2Gas: BigInt(applied.feePerL2Gas) }
+}
+
+/** What the FPC keeps of a private gas-only bridge's own claim: the credit it leaves is the fuel minus this. */
+export async function walletFuelClaimCeiling(actor: ActorHandle): Promise<bigint> {
+	const max = await networkMax(actor)
+	return privateFpcFeeLimit(clamp(PRIVATE_FUEL_CLAIM_GAS, max), await walletMaxFees(actor, PRIVATE_FUEL_CLAIM_GAS))
 }
 
 /** The Fee Juice a private exit sets aside from credit, as the wallet will price it. */

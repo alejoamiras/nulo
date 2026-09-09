@@ -10,6 +10,16 @@ export interface JournalDeposit {
 	claimTxHash?: string
 	registerTxHash?: string
 	fuel?: { received?: string; claimTxHash?: string }
+	/** The token block the send read back from the factory — what the harness derives the L2 token from. */
+	token?: {
+		erc20: string
+		portal: string
+		l2Token: string
+		nameWord: string
+		symbolWord: string
+		decimals: number
+		displaySymbol: string
+	}
 }
 
 /** Every deposit record the journal holds, newest last. */

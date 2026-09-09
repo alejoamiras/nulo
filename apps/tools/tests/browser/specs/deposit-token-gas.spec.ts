@@ -12,10 +12,11 @@ import {
 import { TESTIDS } from "../../../src/lib/testids"
 import { expect, test } from "../fixtures/test"
 import { connectAztec, tid } from "../pages/connect"
+import { walletCeiling } from "../pages/fees"
 import { depositRecords, fuelConservation } from "../pages/journal"
 import { confirmReview, connectL1, openSend, reviewDeposit, setVisibility, startDeposit, waitForReceipt } from "../pages/send"
 
-test.use({ cells: 7, l1Index: 4 })
+test.use({ family: "deposit-token-gas", cells: 7, l1Index: 4 })
 
 const USDC = 10n ** 6n
 const FJ = 10n ** 18n
@@ -110,10 +111,15 @@ test("cell 15 — plain, private: the fuel becomes credit at the FPC, which pays
 	const receipt = await waitForReceipt(page)
 	expect(receipt.gas).not.toBeNull()
 
-	expect((await balanceOf(usdtL2, actor.actor.address, "private")) - before, "the token leg arrived privately").toBeGreaterThan(0n)
+	const gained = (await balanceOf(usdtL2, actor.actor.address, "private")) - before
+	expect(gained, "the token leg arrived privately, minus the slice that became gas").toBeGreaterThan(0n)
+	expect(gained).toBeLessThan(100n * USDC)
 	expect(await balanceOf(actor.s.feeJuiceL2, actor.actor.address, "public"), "nothing public was touched").toBe(fjBefore)
-	const credit = await privateCreditOf(actor.s, await privateFpc(actor.s))
-	expect(credit, "the fuel minus the ceiling the FPC kept remains as credit").toBeGreaterThan(0n)
+	const { received } = await fuelConservation(page, actor.s.l2.node)
+	const kept = await walletCeiling(actor, { isPrivate: true, registers: false })
+	expect(await privateCreditOf(actor.s, await privateFpc(actor.s)), "credit = the fuel minus exactly the claim's ceiling").toBe(
+		received - kept,
+	)
 })
 
 test("cell 15b — selfpay, private, public FJ held: the private fence leaves it untouched", async ({ page, sandbox, actor, l1 }) => {
@@ -133,7 +139,9 @@ test("cell 15b — selfpay, private, public FJ held: the private fence leaves it
 	expect(await balanceOf(actor.s.feeJuiceL2, actor.actor.address, "public"), "a private claim never pays from public Fee Juice").toBe(
 		fjBefore,
 	)
-	expect(await privateCreditOf(actor.s, await privateFpc(actor.s))).toBeGreaterThan(0n)
+	const { received } = await fuelConservation(page, actor.s.l2.node)
+	const kept = await walletCeiling(actor, { isPrivate: true, registers: false })
+	expect(await privateCreditOf(actor.s, await privateFpc(actor.s))).toBe(received - kept)
 })
 
 test("cell 16 — plain, private, first-time token: registration, then the credit-paid claim", async ({ page, sandbox, actor, l1 }) => {
@@ -151,7 +159,11 @@ test("cell 16 — plain, private, first-time token: registration, then the credi
 	const record = (await depositRecords(page)).at(-1)
 	expect(record?.registerTxHash, "a private first-time token registers in a transaction of its own").toBeTruthy()
 	expect(record?.claimTxHash, "then claims").toBeTruthy()
-	expect(await privateCreditOf(actor.s, await privateFpc(actor.s))).toBeGreaterThan(0n)
+	const { received } = await fuelConservation(page, actor.s.l2.node)
+	const kept = await walletCeiling(actor, { isPrivate: true, registers: true })
+	expect(await privateCreditOf(actor.s, await privateFpc(actor.s)), "credit = the fuel minus the register + claim ceilings").toBe(
+		received - kept,
+	)
 })
 
 test("cell 17 — the slice under the claim minimum is refused at the amount step, nothing signed", async ({ page, sandbox, actor, l1 }) => {

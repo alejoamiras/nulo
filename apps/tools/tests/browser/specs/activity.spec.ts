@@ -6,7 +6,7 @@ import { connectAztec, tid } from "../pages/connect"
 import { depositRecords } from "../pages/journal"
 import { confirmReview, connectL1, openSend, reviewDeposit, waitForReceipt } from "../pages/send"
 
-test.use({ cells: 2, l1Index: 5 })
+test.use({ family: "activity", cells: 2, l1Index: 5 })
 
 const USDC = 10n ** 6n
 const L1 = 31337

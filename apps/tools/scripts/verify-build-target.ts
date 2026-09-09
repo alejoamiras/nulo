@@ -20,8 +20,10 @@ const appRoot = join(here, "..")
 
 const args = process.argv.slice(2)
 const distFlag = args.indexOf("--dist")
-const dist = distFlag >= 0 ? resolve(args[distFlag + 1] ?? "") : join(appRoot, "dist")
-const key = (args.find((a) => !a.startsWith("--") && a !== args[distFlag + 1]) || process.env.TOOLS_TARGET || "testnet") as ToolsTargetKey
+const distValue = distFlag >= 0 ? args[distFlag + 1] : undefined
+const dist = distValue !== undefined ? resolve(distValue) : join(appRoot, "dist")
+// Only the value that follows `--dist` is not the target; without the flag every positional is.
+const key = (args.find((a) => !a.startsWith("--") && a !== distValue) || process.env.TOOLS_TARGET || "testnet") as ToolsTargetKey
 
 let target: ToolsTarget
 let manifest: string

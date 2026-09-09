@@ -5,7 +5,7 @@ import { expect, test } from "../fixtures/test"
 import { connectAztec, tid } from "../pages/connect"
 import { connectL1, openSend, reviewDeposit } from "../pages/send"
 
-test.use({ cells: 3, l1Index: 7 })
+test.use({ family: "l1-wallet", cells: 3, l1Index: 7 })
 
 const USDC = 10n ** 6n
 const L1 = 31337

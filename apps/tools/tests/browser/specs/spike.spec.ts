@@ -21,7 +21,7 @@ import { drip } from "../pages/drip"
 import { confirmReview, connectL1, openSend, reviewDeposit, stepperPhases, waitForReceipt } from "../pages/send"
 import { TESTIDS } from "../../../src/lib/testids"
 
-test.use({ cells: 4, l1Index: 1 })
+test.use({ family: "spike", cells: 4, l1Index: 1 })
 
 const FJ = 10n ** 18n
 const USDC = 10n ** 6n
