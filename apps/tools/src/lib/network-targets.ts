@@ -1,13 +1,17 @@
 /**
- * The two build targets, selected at BUILD TIME by which vite config is used — never at runtime and
+ * The build targets, selected at BUILD TIME by which vite config is used — never at runtime and
  * never from a Cloudflare dashboard var (the `chain-constants` incident). This is the "config factory"
  * spine: each `vite.<target>.config.mts` imports one `ToolsTarget` and threads it into (a) a `define`
  * that the app reads via `resolveToolsTarget()` and (b) `buildMetaPlugin(target)` for `build.json`.
  *
- * Node-safe (imports only the plain-number `chain-constants`, no `viem`/`@aztec`), so `vite.config.ts`
- * can import it in Node scope — the same reason a vite `resolve.alias` can't carry chain identity into
- * `build.json`. The app ALSO imports it (for the type + the testnet fallback);
- * that's fine because it pulls in no browser-hostile deps.
+ * Node-safe (imports only the plain-number `chain-constants`, no `viem`/`@aztec`, no `fs`), so
+ * `vite.config.ts` can import it in Node scope — the same reason a vite `resolve.alias` can't carry
+ * chain identity into `build.json`. The app ALSO imports it (for the type + the testnet fallback).
+ *
+ * The `local` target is the sandbox one: chain 31337, a node and a bridge generation the harness
+ * booted for this run, and the web wallets the browser suite hosts. It has no constants — its
+ * identity is read from the run's artifacts by `local-target-loader.ts` (Node) and `define`d into
+ * the bundle as `__NULO_LOCAL_TARGET__`, so a testnet or mainnet build never carries it.
  */
 import {
 	MAINNET_L1_CHAIN_ID,
@@ -18,7 +22,7 @@ import {
 	TESTNET_WALLET_CHAIN_ID,
 } from "./chain-constants"
 
-export type ToolsTargetKey = "testnet" | "mainnet"
+export type ToolsTargetKey = "testnet" | "mainnet" | "local"
 
 export interface ToolsTarget {
 	key: ToolsTargetKey
@@ -28,7 +32,7 @@ export interface ToolsTarget {
 	rollupVersion: number
 	/** `(l1 ^ rollupVersion) >>> 0` — the wallet-handshake chain id + `build.json` chainId. */
 	walletChainId: number
-	/** Bridge manifest bundled for this target (relative to `public/`). */
+	/** Bridge manifest bundled for this target (relative to `public/`, or the run's artifact for `local`). */
 	manifestFile: string
 	/** The hostname this build belongs at — integrity layer 5 asserts `location.hostname` matches. */
 	host: string
@@ -38,6 +42,41 @@ export interface ToolsTarget {
 	l1ExplorerBaseUrl: string
 	/** CSP `connect-src` for this target — the node host MUST be listed or the app can't reach it. */
 	cspConnectSrc: string
+	/** Web (iframe) wallets discovery probes besides browser extensions. Only the local target lists any. */
+	webWalletUrls?: readonly string[]
+}
+
+export const LOCAL_L1_CHAIN_ID = 31337
+
+/** Everything the local target needs that only a booted sandbox knows. */
+export interface LocalTargetConfig {
+	nodeUrl: string
+	rollupVersion: number
+	walletChainId: number
+	/** The origin the browser suite navigates to — integrity layer 5 compares the exact hostname. */
+	host: string
+	webWalletUrls: readonly string[]
+}
+
+const loopback = (protocol: string) => `${protocol}://127.0.0.1:* ${protocol}://localhost:*`
+
+/** Pure: the local target for one sandbox run. */
+export function localTarget(cfg: LocalTargetConfig): ToolsTarget {
+	const walletOrigins = cfg.webWalletUrls.map((u) => new URL(u).origin)
+	return {
+		key: "local",
+		l1ChainId: LOCAL_L1_CHAIN_ID,
+		rollupVersion: cfg.rollupVersion,
+		walletChainId: cfg.walletChainId,
+		manifestFile: "local-bridge.json",
+		host: cfg.host,
+		nodeUrl: cfg.nodeUrl,
+		l1ExplorerBaseUrl: "http://127.0.0.1",
+		// Loopback only, plus the token-list origin so the browser suite can answer it from a fixture
+		// (a CSP-blocked request never reaches a route handler).
+		cspConnectSrc: `'self' data: blob: ${loopback("http")} ${loopback("ws")} ${walletOrigins.join(" ")} https://tokens.uniswap.org`,
+		webWalletUrls: cfg.webWalletUrls,
+	}
 }
 
 export const TESTNET_TARGET: ToolsTarget = {
@@ -71,7 +110,17 @@ export const MAINNET_TARGET: ToolsTarget = {
 	cspConnectSrc: "'self' data: blob:",
 }
 
-export const TARGETS: Record<ToolsTargetKey, ToolsTarget> = {
+/** The bundle-time local config, present only in a `vite.local.config.mts` build. */
+declare const __NULO_LOCAL_TARGET__: LocalTargetConfig | undefined
+
+function definedLocalTarget(): ToolsTarget | undefined {
+	// A bare identifier the local build `define`s; every other build (and vitest) leaves it undefined,
+	// so the local branch — node URL, wallet URLs, the 31337 chain — is dead code there.
+	if (typeof __NULO_LOCAL_TARGET__ === "undefined") return undefined
+	return localTarget(__NULO_LOCAL_TARGET__)
+}
+
+export const TARGETS: Record<"testnet" | "mainnet", ToolsTarget> = {
 	testnet: TESTNET_TARGET,
 	mainnet: MAINNET_TARGET,
 }
@@ -83,5 +132,6 @@ export const TARGETS: Record<ToolsTargetKey, ToolsTarget> = {
  */
 export function resolveToolsTarget(): ToolsTarget {
 	const key = import.meta.env.VITE_TOOLS_TARGET as ToolsTargetKey | undefined
+	if (key === "local") return definedLocalTarget() ?? TESTNET_TARGET
 	return (key && TARGETS[key]) || TESTNET_TARGET
 }

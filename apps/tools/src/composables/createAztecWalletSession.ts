@@ -8,6 +8,7 @@ import { WalletManager } from "@aztec/wallet-sdk/manager"
 import type { PendingConnection, WalletProvider } from "@aztec/wallet-sdk/manager"
 import { ref, shallowRef } from "vue"
 import { readChainInfo } from "@/lib/chain-info"
+import { resolveToolsTarget } from "@/lib/network-targets"
 import { hashToEmoji } from "@/lib/emoji"
 import { type NormalizedError, normalizeError } from "@/lib/errors"
 
@@ -474,7 +475,13 @@ async function connectImpl(s: SessionState, forcePicker: boolean): Promise<void>
 	const { flowEpoch, preferred } = openFlow(s, forcePicker)
 
 	try {
-		const manager = WalletManager.configure({ extensions: { enabled: true } })
+		// Web (iframe) wallets exist only on the local target: the browser suite's test wallets. Every
+		// shipped target lists none, so the iframe transport is never probed there.
+		const webWalletUrls = resolveToolsTarget().webWalletUrls
+		const manager = WalletManager.configure({
+			extensions: { enabled: true },
+			...(webWalletUrls?.length ? { webWallets: { urls: [...webWalletUrls] } } : {}),
+		})
 		const discovery = manager.getAvailableWallets({
 			chainInfo: readChainInfo(),
 			appId: s.config.appId,

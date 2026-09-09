@@ -11,7 +11,7 @@
  * app bundle. The Chain object is target-driven (Sepolia for the testnet build, mainnet otherwise).
  */
 import type { Chain } from "viem"
-import { mainnet, sepolia } from "viem/chains"
+import { foundry, mainnet, sepolia } from "viem/chains"
 import { resolveToolsTarget } from "./network-targets"
 
 export interface NetworkConfig {
@@ -31,7 +31,11 @@ const target = resolveToolsTarget()
 
 // The only place viem/chains is allowed. Map the target's L1 chain id to its viem Chain — the lookup
 // is what guarantees viemChain.id === l1ChainId (so viem clients + the Permit2 domain agree).
-const VIEM_CHAINS: Record<number, Chain> = { [sepolia.id]: sepolia, [mainnet.id]: mainnet }
+// `foundry` (31337) is the sandbox the local target runs on. viem's Chain for it names no multicall3,
+// and the L1 balance reads are multicalls (`ChainDoesNotSupportContract` otherwise); the sandbox
+// installs the canonical, chain-invariant Multicall3, so the local chain declares that address.
+const local: Chain = { ...foundry, contracts: { multicall3: { address: "0xcA11bde05977b3631167028862bE2a173976CA11" } } }
+const VIEM_CHAINS: Record<number, Chain> = { [sepolia.id]: sepolia, [mainnet.id]: mainnet, [foundry.id]: local }
 const viemChain = VIEM_CHAINS[target.l1ChainId]
 if (!viemChain) {
 	throw new Error(`network.ts: no viem Chain for l1ChainId ${target.l1ChainId} (target ${target.key})`)

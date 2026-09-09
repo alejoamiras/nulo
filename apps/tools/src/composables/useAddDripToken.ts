@@ -57,7 +57,8 @@ export function useAddDripToken() {
 				return
 			}
 
-			if (msg.toLowerCase().includes("unsupported wallet method")) {
+			const lowered = msg.toLowerCase()
+			if (lowered.includes("unsupported wallet method") || lowered.includes("unknown wallet method")) {
 				// Schema patch not in place on this wallet (or wallet too old).
 				// Distinct from a network failure: tell the user to update the
 				// wallet rather than retry blindly.

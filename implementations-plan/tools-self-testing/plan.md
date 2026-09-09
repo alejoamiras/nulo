@@ -288,11 +288,11 @@ Fast layers on every gate: `bun run lint` + `bun run typecheck:all` + the touche
 
 ### Arc 3 — Tools browser e2e
 
-#### Phase 6: `local` ToolsTarget, loader, local build, local drip record, transport-compat fix
+#### Phase 6 ✓: `local` ToolsTarget, loader, local build, local drip record, transport-compat fix
 - `localTarget(cfg)` factory; `local-target-loader.ts`; `TARGETS.local` behind the define guard; `VIEM_CHAINS[31337]`; `vite.config.ts` (loader → `define`, per-run manifest path + `--outDir`, preview serves the CSP with `frame-src` for local), `vite.local.config.mts`, `build:local`, `dev:local`, `verify-build-target --dist`, target-aware `deployments.ts`, `webWallets` keyed on `target.key === "local"`, `useAddDripToken` recognizes `Unknown wallet method`, README target text.
 - **Validation gate**: `bun run --cwd apps/tools typecheck && bun run --cwd apps/tools test && bun run --cwd apps/tools test:e2e` exit 0 (a unit test covers the `unknown`→`unsupported` mapping); with a sandbox artifacts dir, `NULO_SANDBOX_ARTIFACTS=<dir> bun run --cwd apps/tools build:local --outDir <dir>/dist && NULO_SANDBOX_ARTIFACTS=<dir> bun run --cwd apps/tools verify:build-target local --dist <dir>/dist` exit 0 and the bundle contains the node URL + wallet URL; `bun run --cwd apps/tools build:testnet` AND `build:mainnet` contain neither string, no local manifest, no test-wallet asset. Layers: typecheck · unit · jsdom smoke · build.
 
-#### Phase 7: Spike — embedded wallet behind the iframe handler connects to the local tools build
+#### Phase 7 ✓: Spike — embedded wallet behind the iframe handler connects to the local tools build
 - Timeboxed half day. The test-wallet page (`start()` first, lazy ephemeral wallet, schema-valid `requestCapabilities`, COEP + CORP, `allowedOrigins`, appId/chain guard, `addAccount` hook, `selfpay` wrapper) + the Phase 6 local build served with the CSP. Drive by hand or a throwaway Playwright script.
 - Checks, each recorded in `lessons/phase-7.md`: discovery lists the wallet within 10 s; emoji modal → confirm; capability grant round-trips; `addAccount` → the account appears in the tools switcher; one public drip lands (receipt testid + balance via the harness); `crossOriginIsolated` true in both frames; the floating panel's position and whether a shrink fixture suffices; the `selfpay` wrapper: a held-public-FJ send simulates AND sends, and a genuine fueled claim still routes as a claim.
 - **Validation gate**: transcript shows the drip receipt and balance move; `lessons/phase-7.md` records go / no-go per check. No-go fallback recorded there: the test wallet speaks the extension transport through an `addInitScript` relay shim (re-plan as its own phase). Layers: manual e2e.

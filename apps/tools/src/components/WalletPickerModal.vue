@@ -133,6 +133,7 @@ watch(open, async (isOpen) => {
 						class="row"
 						:data-testid="TESTIDS.walletPickerRow"
 						:data-wallet-key="w.key"
+						:data-wallet-id="w.id"
 					>
 						<img
 							v-if="safeIcon(w.icon) && !failedIcons.has(w.key)"
