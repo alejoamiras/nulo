@@ -104,6 +104,8 @@ payer and reads its postconditions from the chain through the harness.
 
 **Round 3** (same session, `high`, on the round-2 fixes) — verdict **"Not ready for PR"**, 2 findings, both adopted: the registry was created before its lock was taken (two first runs could both create it — now created under the lock); the reaper released a run's browser ports by the state directory's name, which a hand-chosen `NULO_E2E_STATE_DIR` breaks (`ports.json` now records its owner and `--release` reads it). Confirmed sound: the hold (the SDK's iframe transport has no per-request timeout and keeps answering heartbeats, so the page-side simulation stays pending and the gate never reaches its send); the wallet-keyed cache; both cap spellings; the private-gain assertions. Noted for the record: the hold is right for a REGISTERED token's claim; an unregistered token's send substitutes a fee-only simulation (`useSend.ts`), so the pattern must stay on a registered-token cell.
 
+**Round 4** (same session, `high`, on `37c2babe`) — verdict: **"Ready for PR — for these two fixes. no new material findings (high confidence)."** The arc-3 loop converged here. One operational caveat it raised: a `ports.json` written before the owner field was added releases nothing — the rows of the runs that were in flight at that moment were removed by hand.
+
 ## Durations
 
 _(filled from the sharded full runs — the shard count in `pr-tools-e2e.yml` follows them)_
