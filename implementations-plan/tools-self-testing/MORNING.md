@@ -1,11 +1,12 @@
 # Morning — tools-self-testing
 
-The stack is three PRs, lowest first. Everything below was decided without you, per plan § Autonomy;
-each decision points at the consult that settled it.
+The stack is three PRs (GitHub stack #578), lowest first, opened ready for review once every codex
+loop and the cross-arc pass had converged. Everything below was decided without you, per plan
+§ Autonomy; each decision points at the consult that settled it.
 
 ## Merge sequence
 
-1. **Arc 1 — `worktree-tools-self-testing` (CI names say the app).** Merge it FIRST and, right
+1. **Arc 1 — `worktree-tools-self-testing`, PR #575 (CI names say the app).** Merge it FIRST and, right
    before you do, repoint the branch protection — the renamed aggregators block every merge until the
    protection names them:
    ```bash
@@ -18,9 +19,9 @@ each decision points at the consult that settled it.
    The snapshot this branch was written against is committed as
    `implementations-plan/tools-self-testing/required-checks.dev.snapshot.json`. `main` gets the same
    two steps at its next promote.
-2. **Arc 2 — `tools-self-testing/bridge-integration`.** `gh stack sync` after arc 1 lands, then merge.
+2. **Arc 2 — `tools-self-testing/bridge-integration`, PR #576.** `gh stack sync` after arc 1 lands, then merge.
    Adds `bridge-contracts-status`'s `integration` job (the sandbox suite) — advisory until you promote it.
-3. **Arc 3 — `tools-self-testing/tools-browser-e2e`.** `gh stack sync`, then merge. Adds
+3. **Arc 3 — `tools-self-testing/tools-browser-e2e`, PR #577.** `gh stack sync`, then merge. Adds
    `tools-e2e-status` (6 shards) — advisory until you promote it.
 
 `gh stack merge` lands the named PR and everything below it; the three are ordered for that.
@@ -64,6 +65,24 @@ each decision points at the consult that settled it.
   (reload after the Ethereum leg, the claim's arrival gate held) is. Cell 25's "grant for a left
   selection discarded" half is not staged either — the test wallet answers prompts synchronously;
   its declined half is. The plan's matrix rows say so.
+
+## What shipped, what is open
+
+Shipped, all ten phases green at retry 0 (`plan.md`, `lessons/`): the per-product check names + the
+protection runbook (arc 1); `@nulo/bridge-core/sandbox` + the 35-test integration suite in
+`bridge-contracts-status` (arc 2); the `local` ToolsTarget, the 51-cell Playwright suite (embedded
+wallet-sdk test wallet, injected Ethereum wallet, egress fence) and `tools-e2e-status` in six shards
+(arc 3), plus the two product fixes the suite found (the wallet-priced FPC ceiling, the refused
+signature that stranded a send). Local gates at delivery: `bun run test:all`, `bun run lint &&
+bun run lint:actions`, both exit 0.
+
+Open:
+
+- **The CI proof on the PRs** — the first runs of `integration`/`txe` (PR #576) and of the six
+  tools shards (PR #577) on GitHub runners. A red there is fixed on its arc branch and re-pushed
+  (plan § Delivery); a run that is merely slow is the 30-minute cap's business, not a failure.
+- **The `dapp-fee-cap` follow-up** (above) — yours, in the extension.
+- **Promotion** of the two advisory aggregators — below.
 
 ## What to promote, and when
 
