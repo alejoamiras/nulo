@@ -32,6 +32,7 @@ import {
 	privateCreditOf,
 	privateFpc,
 	send,
+	settled,
 	type SmokeContext,
 } from "./context"
 import { erc20BalanceOf, freshToken, mint, mintFeeAsset, setRoutable } from "./l1"
@@ -55,9 +56,16 @@ export async function fundPublicFeeJuice(s: SmokeContext, amount: bigint): Promi
 		gas: { fuelAmount: amount, fuelRecipient: s.l2.from.toString() as Hex, minFuelOutput: amount, path: [], zeroForOnes: [] },
 	})
 	await waitForL1ToL2Message(s.l2.node, res.fuelMessageHashHex as string, { forceBlock: s.l2.forceBlock })
+	const before = await balanceOf(s.feeJuiceL2, s.l2.from, "public")
 	await s.feeJuiceL2.methods
 		.claim(s.l2.from, amount, Fr.fromHexString(res.fuelSecretHex as string), new Fr(res.fuelLeafIndex as bigint))
 		.send(s.l2.sendOpts as never)
+	// A caller reads this balance next: it must already show the funding.
+	await settled(
+		() => balanceOf(s.feeJuiceL2, s.l2.from, "public"),
+		(v) => v >= before + amount,
+		"the public Fee Juice after the claim",
+	)
 }
 
 /** Cell 5: a token-only claim whose fee comes from Fee Juice the account already holds — no fee
