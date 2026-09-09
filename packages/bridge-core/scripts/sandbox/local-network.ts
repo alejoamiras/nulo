@@ -7,7 +7,7 @@
  * `SANDBOX_L1_RPC` + `SANDBOX_NODE_URL` together attach to an already-running network instead
  * (a no-op `stop()`), which is how `--keep` is re-entered.
  */
-import { type ChildProcess, spawn } from "node:child_process"
+import { type ChildProcess, execFileSync, spawn } from "node:child_process"
 import {
 	accessSync,
 	closeSync,
@@ -216,6 +216,24 @@ function resolveToolchain(root: string): Toolchain {
 	return tool
 }
 
+// ─── Listening sockets ───────────────────────────────────────────────────────
+
+/** `aztec start` has no bind-host option: its JSON-RPC server listens on every interface. The
+ *  sockets are logged at boot so a run's exposure is visible in its log, never assumed. */
+function listeningSockets(pids: number[]): string {
+	try {
+		const out = execFileSync("ss", ["-ltnpH"], { encoding: "utf8" })
+		const mine = out
+			.split("\n")
+			.filter((l) => pids.some((pid) => l.includes(`pid=${pid},`)))
+			.map((l) => l.trim().split(/\s+/)[3] ?? "")
+			.filter(Boolean)
+		return mine.length > 0 ? mine.join(" ") : "(none found — ss reported no socket for the spawned pids)"
+	} catch {
+		return "(ss unavailable)"
+	}
+}
+
 // ─── Health ──────────────────────────────────────────────────────────────────
 
 async function rpcResponds(url: string, method: string): Promise<boolean> {
@@ -352,7 +370,6 @@ function spawnNode(tool: Toolchain, p: { ports: SandboxPorts; anvilUrl: string; 
 			p.anvilUrl,
 			"--data-directory",
 			p.dataDir,
-			"--disable-admin-api-key",
 		],
 		{ stdio: "pipe", detached: true, env: nodeEnv(tool, p.anvilUrl) },
 	)
@@ -434,6 +451,7 @@ export async function startLocalNetwork(opts: StartLocalNetworkOptions): Promise
 		await stop()
 		throw e
 	}
-	console.log("[sandbox] local network ready")
+	const pids = spawned.map((o) => o.child.pid).filter((p): p is number => p !== undefined)
+	console.log(`[sandbox] local network ready — listening on ${listeningSockets(pids)}`)
 	return { anvilUrl, nodeUrl, stop }
 }
