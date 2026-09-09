@@ -420,6 +420,8 @@ describe("useHubExit", () => {
 			gasLimits: { daGas: 50_000, l2Gas: 1_900_000 },
 			teardownGasLimits: { daGas: 0, l2Gas: 0 },
 			maxFeesPerGas: { feePerDaGas: 10n, feePerL2Gas: 20n },
+			// The wallet-sdk option schema's own spelling of the cap rides along for wallets that read it.
+			maxFeePerGas: { feePerDaGas: 10n, feePerL2Gas: 20n },
 		})
 		// The simulate that proves the witness carries the same payer: it must not dry-run under a public one.
 		const sim = h.preflightHubExit.mock.calls[0][3] as { fee?: unknown }

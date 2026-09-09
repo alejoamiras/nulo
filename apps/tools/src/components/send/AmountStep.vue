@@ -137,7 +137,12 @@ function onUseAll(): void {
 </script>
 
 <template>
-	<section class="step" :data-testid="TESTIDS.sendStepAmount" :data-direction="direction">
+	<section
+		class="step"
+		:data-testid="TESTIDS.sendStepAmount"
+		:data-direction="direction"
+		:data-route-loading="routeLoading || undefined"
+	>
 		<ChoiceCards
 			:intent="intent"
 			:exit-only="isExit"

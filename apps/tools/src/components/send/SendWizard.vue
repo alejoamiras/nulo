@@ -52,6 +52,7 @@ import { stepperPhases } from "@/lib/bridge-steps"
 import { formatBigInt, formatCompact, parseAmountStrict, toDecimalString } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
 import { safeDisplay } from "@/lib/token-display"
+import { forgetWalletFees } from "@/lib/wallet-fee-budget"
 import type { AmountToken, Direction, ExitPlan, GasLegPlan, ResolvedToken, SelectableToken, SendIntent, SendPlan } from "@/lib/send-model"
 import { type OwnGasSource, decideOwnGasSource } from "@/lib/fuel-claim-state"
 
@@ -130,9 +131,14 @@ const selection = useTokenSelection({
 const grant = useTokenGrant()
 const gasHeld = useGasHeld({ aztec: () => bridge.wallet.value, account: () => bridge.selectedAccount.value ?? undefined })
 const routeQuote = useRouteQuote({ pub: () => l1.publicClient as unknown as PublicClient })
-const gasShare = useGasShare()
+const gasShare = useGasShare({ aztec: () => bridge.wallet.value, account: () => bridge.selectedAccount.value ?? undefined })
 // A private slice is sized from live fees: price them now so the amount step never waits on them.
 void gasShare.prime()
+// The price is the connected wallet's own: a new account (or the first one) re-asks it.
+watch(
+	() => bridge.selectedAccount.value,
+	() => gasShare.invalidate(),
+)
 const sendFlow = useSend({ epoch: selection.epoch })
 const exitFlow = useHubExit()
 
@@ -203,6 +209,17 @@ const activeRecord = computed(() => (activeId.value ? journal.records.value.find
 
 const busy = computed(() => preflighting.value || submitting.value || sendFlow.busy.value || exitFlow.busy.value)
 const flowError = computed(() => sendFlow.error.value ?? exitFlow.error.value)
+const log = (...args: unknown[]) => console.log("[bridge:send]", ...args)
+// Which hold has the buttons: a review that stays "sending" with nothing sent is otherwise opaque.
+watch(busy, (held) =>
+	log("busy", {
+		held,
+		preflighting: preflighting.value,
+		submitting: submitting.value,
+		send: sendFlow.busy.value,
+		exit: exitFlow.busy.value,
+	}),
+)
 
 /** ---- amount ------------------------------------------------------------------------------- */
 
@@ -659,6 +676,7 @@ function goToStep(index: 0 | 1 | 2): void {
 function invalidateReview(why?: string): void {
 	const signingThisReview = submitting.value && backgroundedId.value === null
 	if (step.value !== 2 || stage.value !== "wizard" || signingThisReview) return
+	log("review stood down", { why: why ?? "(a watched input changed)", preflighting: preflighting.value })
 	reviewed.value = null
 	step.value = 1
 	reviewStale.value = true
@@ -774,11 +792,15 @@ function privateExitStoodDown(state: TokenState, repriced: boolean, shown: bigin
  *  neither is trusted from the review. Returns whether the fees were re-read. */
 async function preflightReads(tokenOnly: boolean, privateSlice: boolean): Promise<boolean> {
 	preflighting.value = true
+	const started = Date.now()
 	try {
+		// The confirm prices from the wallet afresh: a quote the review was built on is not one to sign on.
+		forgetWalletFees()
 		if (tokenOnly) await gasHeld.refresh()
 		return privateSlice || tokenOnly ? await gasShare.prime() : true
 	} finally {
 		preflighting.value = false
+		log("preflight reads", { tokenOnly, privateSlice, ms: Date.now() - started })
 	}
 }
 
@@ -955,8 +977,9 @@ watch(
 	(broken) => {
 		if (!broken) return
 		if (ownedRecord.value === undefined) {
+			// Only the row OURS was renamed into: another surface's foreground is not this send.
 			const adoptable = activeRecord.value
-			if (adoptable && isSendRecord(adoptable)) {
+			if (adoptable && isSendRecord(adoptable) && adoptable.id === journal.canonicalRecordId(ownedId.value ?? "")) {
 				ownedId.value = adoptable.id
 				return
 			}

@@ -30,6 +30,7 @@ import {
 	publicFeeJuicePayment,
 } from "@nulo/bridge-core"
 import { isPrivateFuelInsufficiency } from "@/lib/fuel-claim-state"
+import { clampGas } from "@/lib/wallet-fee-budget"
 
 export interface FuelClaimInteraction {
 	simulate: () => Promise<unknown>
@@ -165,7 +166,7 @@ function buildPrivateFuelClaim(
 	simulateViaPayload: PayloadSimulator,
 ): FuelClaimInteraction {
 	const { aztec, recipient } = deps
-	const budgetStop = checkClaimBudget(received, PRIVATE_CLAIM_GAS, deps)
+	const budgetStop = checkClaimBudget(received, clampGas(PRIVATE_CLAIM_GAS), deps)
 	if (budgetStop) return budgetStop
 	// FPC version-drift kill-switch — never claim to a drifted FPC, never downgrade to public (L11/L15).
 	if (fuel.fpc && fuel.fpc !== PRIVATE_FPC_ADDRESS) {
@@ -192,7 +193,7 @@ function buildPrivateFuelClaim(
 			// (suggestGasLimits), so size it to the 2-call setup ({@link PRIVATE_CLAIM_GAS}). The fee is
 			// billed on ACTUAL gas, not the limit, so a generous limit does not overpay — but it IS the
 			// balance-check bound (getFeeLimit), so {@link clearsFeeLimit} above fail-closes on it.
-			gasLimits: Gas.from(PRIVATE_CLAIM_GAS),
+			gasLimits: Gas.from(clampGas(PRIVATE_CLAIM_GAS)),
 			teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
 			...(deps.maxFeesPerGas ? { maxFeesPerGas: deps.maxFeesPerGas } : {}),
 		},
@@ -234,7 +235,7 @@ function buildPublicFuelClaim(
 	simulateViaPayload: PayloadSimulator,
 ): FuelClaimInteraction {
 	const { aztec, recipient } = deps
-	const budgetStop = checkClaimBudget(received, PUBLIC_CLAIM_GAS, deps)
+	const budgetStop = checkClaimBudget(received, clampGas(PUBLIC_CLAIM_GAS), deps)
 	if (budgetStop) return budgetStop
 	// Authoritative-first: the engine-gated `rec.secret` wins over the `fuel.secret` display copy so the
 	// gate and the claim can never read divergent secrets (codex LOW). Plaintext is a fallback only.
@@ -250,7 +251,7 @@ function buildPublicFuelClaim(
 		// nothing). teardownGas=0; maxFeesPerGas is the caller's predicted-worst snapshot (NO padding),
 		// since this self-pays and the bridged amount is the whole budget.
 		gasSettings: {
-			gasLimits: Gas.from(PUBLIC_CLAIM_GAS),
+			gasLimits: Gas.from(clampGas(PUBLIC_CLAIM_GAS)),
 			teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
 			...(deps.maxFeesPerGas ? { maxFeesPerGas: deps.maxFeesPerGas } : {}),
 		},

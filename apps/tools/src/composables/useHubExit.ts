@@ -42,6 +42,7 @@ import {
 import { decodeFunctionData } from "viem"
 import { type Ref, ref } from "vue"
 import { HUB, SEND_GENERATION } from "@/contracts/bridge-generation"
+import { clampGas, walletMaxFees } from "@/lib/wallet-fee-budget"
 import { NETWORK } from "@/lib/network"
 import type { ExitPlan } from "@/lib/send-model"
 import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
@@ -92,9 +93,11 @@ export function buildExitSendOpts(from: AztecAddress) {
 export async function privateExitFee(aztec: unknown, from: AztecAddress, approvedCeiling?: bigint) {
 	const [credit, maxFees] = await Promise.all([
 		readFeeJuiceOrNull("private FJ", () => readPrivateFeeJuiceBalance(aztec, from)),
-		predictedWorstMinFees(createAztecNodeClient(NODE_URL)),
+		walletMaxFees(aztec, from, PRIVATE_HUB_EXIT_GAS).catch(() => null),
 	])
-	const ceiling = privateFpcFeeLimit(PRIVATE_HUB_EXIT_GAS, maxFees)
+	if (maxFees === null) throw new ExitNeedsPrivateGasError("unverifiable")
+	const limits = clampGas(PRIVATE_HUB_EXIT_GAS)
+	const ceiling = privateFpcFeeLimit(limits, maxFees)
 	// The FPC keeps the whole ceiling: a price above what the review showed is a fee nobody approved.
 	if (approvedCeiling !== undefined && ceiling > approvedCeiling) throw new ExitNeedsPrivateGasError("repriced")
 	if (credit === null) throw new ExitNeedsPrivateGasError("unverifiable")
@@ -102,9 +105,10 @@ export async function privateExitFee(aztec: unknown, from: AztecAddress, approve
 	return {
 		paymentMethod: privateFeeJuicePayment(AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)),
 		gasSettings: {
-			gasLimits: PRIVATE_HUB_EXIT_GAS,
+			gasLimits: limits,
 			teardownGasLimits: { daGas: 0, l2Gas: 0 },
 			maxFeesPerGas: { feePerDaGas: maxFees.feePerDaGas, feePerL2Gas: maxFees.feePerL2Gas },
+			maxFeePerGas: { feePerDaGas: maxFees.feePerDaGas, feePerL2Gas: maxFees.feePerL2Gas },
 		},
 	}
 }

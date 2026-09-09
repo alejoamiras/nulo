@@ -689,6 +689,30 @@ describe("useSend", () => {
 		expect(h.runSend).not.toHaveBeenCalled()
 	})
 
+	it("a witness the user refuses discards the row the send had already named, and the review hears the refusal", async () => {
+		h.runSend.mockImplementation(async (_l1: unknown, _gen: unknown, p: FakeParams, _s?: unknown, recovery?: FakeRecovery) => {
+			recovery?.onSecrets?.(await fakeSecrets(p))
+			throw Object.assign(new Error("User rejected the request.\n\nDetails: MetaMask Tx Signature: User denied"), { code: 4001 })
+		})
+		const send = useSend()
+		expect(await send.send(plan())).toBe("")
+		expect(send.error.value).toBe("Rejected in wallet.")
+		expect(useBridgeJournal().records.value).toHaveLength(0)
+	})
+
+	it("a failure the chain may hold keeps the named row and names it on the rail", async () => {
+		h.runSend.mockImplementation(async (_l1: unknown, _gen: unknown, p: FakeParams, _s?: unknown, recovery?: FakeRecovery) => {
+			recovery?.onSecrets?.(await fakeSecrets(p))
+			throw new Error("HTTP request failed: fetch failed")
+		})
+		const send = useSend()
+		expect(await send.send(plan())).toBe("")
+		expect(send.error.value).toMatch(/fetch failed/)
+		expect(recordOf("0xtokenhash")).toBeDefined()
+		expect(useBridgeJournal().runtime.value["0xtokenhash"]?.attention).toBe("error")
+		expect(useBridgeJournal().runtime.value["0xtokenhash"]?.note).toMatch(/fetch failed/)
+	})
+
 	it("an L1 wallet on another chain refuses before the approval, so nothing is signed and no row survives", async () => {
 		h.chainId.value = 1
 		const send = useSend()

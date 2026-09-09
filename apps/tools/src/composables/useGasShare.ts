@@ -18,9 +18,11 @@ import {
 	signedMinFuelOutput,
 	type TokenState,
 } from "@nulo/bridge-core"
+import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { ref, type Ref } from "vue"
 import { SWAP } from "@/contracts/bridge-generation"
 import { NETWORK } from "@/lib/network"
+import { walletMaxFees } from "@/lib/wallet-fee-budget"
 
 /** Enough for a first session on L2 without over-diverting the deposit. */
 const DEFAULT_TX_TARGET = 20
@@ -58,6 +60,8 @@ export interface UseGasShareHandle {
 	/** Price the ceilings from the network's predicted fees; true when a fresh price landed from THIS
 	 *  call. Concurrent calls share one read. */
 	prime: () => Promise<boolean>
+	/** Drop the price and ask again — the wallet or account behind it changed. */
+	invalidate: () => void
 	/** Why the last pricing failed, while no usable price exists; null once one lands. */
 	readonly pricingError: Ref<string | null>
 	/** Back to the default target: a new send is sized from it, never from the last one's. */
@@ -67,16 +71,31 @@ export interface UseGasShareHandle {
 
 type MaxFees = { feePerDaGas: bigint; feePerL2Gas: bigint }
 
+export interface GasShareDeps {
+	/** The connected wallet and account: the ceilings are priced the way THAT wallet will submit
+	 *  them, not from the network's prediction, which no stock wallet honors verbatim. */
+	aztec?: () => unknown
+	account?: () => string | undefined
+}
+
 /** `null` from `propose` (and a throw from `floorFor`) means this network has no swap venue. */
-export function useGasShare(): UseGasShareHandle {
+export function useGasShare(deps: GasShareDeps = {}): UseGasShareHandle {
 	const txTarget = ref(DEFAULT_TX_TARGET)
 	const fees = ref<{ maxFees: MaxFees; at: number } | null>(null)
 	const pricingError = ref<string | null>(null)
 	let pricing: Promise<boolean> | null = null
 
+	/** The wallet's figure when an account is connected, the node's prediction before that. */
+	function readMaxFees(): Promise<MaxFees> {
+		const aztec = deps.aztec?.()
+		const account = deps.account?.()
+		if (aztec && account) return walletMaxFees(aztec, AztecAddress.fromStringUnsafe(account), PRIVATE_HUB_CLAIM_GAS)
+		return predictedWorstMinFees(createAztecNodeClient(NETWORK.nodeUrl))
+	}
+
 	function prime(): Promise<boolean> {
 		if (pricing) return pricing
-		pricing = predictedWorstMinFees(createAztecNodeClient(NETWORK.nodeUrl))
+		pricing = readMaxFees()
 			.then((predicted) => {
 				const maxFees = { feePerDaGas: predicted.feePerDaGas, feePerL2Gas: predicted.feePerL2Gas }
 				const same =
@@ -158,8 +177,14 @@ export function useGasShare(): UseGasShareHandle {
 		txTarget.value = DEFAULT_TX_TARGET
 	}
 
+	/** Another wallet or account prices from scratch: its policy is not the last one's. */
+	function invalidate(): void {
+		fees.value = null
+		void prime()
+	}
+
 	// A re-entered wizard proposes from the default, never from the last session's target.
 	const dispose = reset
 
-	return { txTarget, propose, floorFor, ceilingsFor, ownGasCeilingFor, prime, pricingError, reset, dispose }
+	return { txTarget, propose, floorFor, ceilingsFor, ownGasCeilingFor, prime, invalidate, pricingError, reset, dispose }
 }
