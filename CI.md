@@ -14,9 +14,10 @@ Contributor-facing reference for what runs when, how to opt in to slow gates, ho
 | Trigger | Workflow(s) | Wall time |
 |---|---|---|
 | Push to a feature branch (no PR) | local pre-commit hook only (biome + commitlint) | <1 s |
-| Open / sync PR to `dev` | `pr-quick` always; `pr-smoke-e2e` + `pr-network-e2e` when their filters trip or their label is set | 3–10 min (`pr-quick`); +5–10 min each if smoke / network triggers |
+| Open / sync PR to `dev` | `pr-quick` always; `pr-extension-smoke-e2e` + `pr-extension-network-e2e` when their filters trip or their label is set | 3–10 min (`pr-quick`); +5–10 min each if smoke / network triggers |
 | Open / sync PR to `main` | all three workflows above run unconditionally | 15–25 min total |
-| Add the `e2e:smoke` or `e2e:network` label | the corresponding workflow runs (removing the label re-evaluates) | as above |
+| PR touching `contracts/bridge/**` | `bridge-contracts` (`bridge-contracts-status`, advisory today) | 5–10 min |
+| Add the `e2e:extension-smoke` or `e2e:extension-network` label | the corresponding workflow runs (removing the label re-evaluates) | as above |
 | Push to `main` | `release.yml` (release-please opens or updates a Release PR; merging it tags + creates the GitHub Release + attaches built artifacts) | 1–2 min for the PR refresh; 15–25 min for the publish run after merge |
 | Click "Run workflow" on `release.yml` | re-publish artifacts for an existing tag (escape hatch) | 15–25 min |
 
@@ -31,20 +32,20 @@ Always runs on every PR. Lightweight gates:
 
 The `quality-status` aggregator at the end is the required check on `main` / `dev` branch protection (the bare job/check-run name; the old required context `Quality / Status` was a phantom that never matched a produced check — see [CLAUDE.md § Branching](./CLAUDE.md#branching--merging) and `implementations-plan/required-check-mismatch/`).
 
-### `pr-smoke-e2e.yml`
+### `pr-extension-smoke-e2e.yml`
 
 Runs the smoke e2e suite (`vitest.e2e.config.ts`, 18 files / 67 tests, 7 currently quarantined for known flakes). No Aztec sandbox; just puppeteer driving the popup UI.
 
 Triggers:
 - **Always** on PRs to `main`
-- **Auto** on PRs to `dev` whose diff touches the `smoke-surface` paths-filter (popup, components, manifest, the wallet services smoke exercises, build inputs, the harness, etc. — see [`pr-smoke-e2e.yml`](./.github/workflows/pr-smoke-e2e.yml) `filters:`)
-- **Manual** by adding the `e2e:smoke` label
+- **Auto** on PRs to `dev` whose diff touches the `smoke-surface` paths-filter (popup, components, manifest, the wallet services smoke exercises, build inputs, the harness, etc. — see [`pr-extension-smoke-e2e.yml`](./.github/workflows/pr-extension-smoke-e2e.yml) `filters:`)
+- **Manual** by adding the `e2e:extension-smoke` label
 
-`smoke-e2e-status` emits `pass` when the suite is skipped (no relevant changes / no label), so branch protection sees a green check either way. It is a **required** check on both `dev` and `main`.
+`extension-smoke-e2e-status` emits `pass` when the suite is skipped (no relevant changes / no label), so branch protection sees a green check either way. It is a **required** check on both `dev` and `main` once each branch's cut-over has run (see "Check names and the protection runbook"); until then the branch still requires the legacy `smoke-e2e-status`.
 
-### `pr-network-e2e.yml`
+### `pr-extension-network-e2e.yml`
 
-Runs the network e2e suite (anvil + Aztec sandbox + playground + the extension build) as a **5-shard parallel matrix** — each shard owns its own sandbox + ~9 of the 45 test files (deterministic SHA-1-of-filename distribution). Wall time ~10–15 min (vs ~35–45 min unsharded). Same trigger shape as `pr-smoke-e2e`, but with the `extension-network` filter (network-touching wallet code, runtime, bridge, playground, etc.) and the `e2e:network` label. See [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md#ci-sharding-5-way-matrix) for the shard-design rationale + the 2 quarantined slow tests.
+Runs the network e2e suite (anvil + Aztec sandbox + playground + the extension build) as a **5-shard parallel matrix** — each shard owns its own sandbox + ~9 of the 45 test files (deterministic SHA-1-of-filename distribution). Wall time ~10–15 min (vs ~35–45 min unsharded). Same trigger shape as `pr-extension-smoke-e2e`, but with the `extension-network` filter (network-touching wallet code, runtime, bridge, playground, etc.) and the `e2e:extension-network` label. See [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md#ci-sharding-5-way-matrix) for the shard-design rationale + the 2 quarantined slow tests.
 
 #### Accelerator in CI
 
@@ -54,23 +55,31 @@ Each network-e2e shard installs and starts the headless **`accelerator-server`**
 - **Layer 2** (wallet) — `chain-runtime.ts` does an eager `checkAcceleratorStatus()` at PXE creation + installs an `onPhase` callback that throws on `"fallback"` / `"denied"` phases. This is the per-test authority.
 - **Layer 3** (workflow, advisory) — post-test step counts `Received /prove request` log lines in `/tmp/accelerator-server.log` and emits a notice + step-summary table. Does NOT gate.
 
-**Production behavior is unchanged.** `VITE_NULO_ACCELERATOR_REQUIRED` is only set in `_network-e2e.yml`. Production builds get the default (`false`) → factory constructed without `onPhase` callback or preflight → SDK's silent WASM fallback path is preserved for end users without **Aztec Accelerator** (the desktop app) installed.
+**Production behavior is unchanged.** `VITE_NULO_ACCELERATOR_REQUIRED` is only set in `_extension-network-e2e.yml`. Production builds get the default (`false`) → factory constructed without `onPhase` callback or preflight → SDK's silent WASM fallback path is preserved for end users without **Aztec Accelerator** (the desktop app) installed.
 
 **Rollback flags** (both require repo write access; PR authors cannot toggle):
 - `vars.NULO_E2E_DISABLE_ACCELERATOR=1` (Settings → Variables) — the emergency kill switch, affects all PR + dispatch runs until cleared.
 - `workflow_dispatch` input `disable_accelerator: true` — single-run override for investigation.
 
-**Bumping accelerator-server**: update `version` + `expected_sha256` in `.github/workflows/_network-e2e.yml`'s `setup-accelerator-server` step together. SHA-256 must be computed locally (`shasum -a 256` on a freshly downloaded tarball); the `.sha256` sidecar from the same release is a sanity check, not a security boundary. See [SECURITY.md](./SECURITY.md#binary-dependencies).
+**Bumping accelerator-server**: update `version` + `expected_sha256` in `.github/workflows/_extension-network-e2e.yml`'s `setup-accelerator-server` step together. SHA-256 must be computed locally (`shasum -a 256` on a freshly downloaded tarball); the `.sha256` sidecar from the same release is a sanity check, not a security boundary. See [SECURITY.md](./SECURITY.md#binary-dependencies).
 
 #### Proverless network e2e (the two-build split)
 
-Most network-e2e files run against a **proverless** wallet build (`_network-e2e.yml` input `proverless: true` → `NULO_E2E_PROVERLESS=1`): [`chain-runtime.ts`](./packages/aztec-runtime/src/pxe/chain-runtime.ts) sets `proverEnabled:false`, so the PXE skips BB-SNARK generation — kernel simulation + on-chain submission stay real, and the local node accepts the fake `ChonkProof.random()` proof. This makes the shard pool fast and CDP-stable. Accelerator is forced OFF for proverless jobs (`proverless` ⊥ `VITE_NULO_ACCELERATOR_REQUIRED`).
+Most network-e2e files run against a **proverless** wallet build (`_extension-network-e2e.yml` input `proverless: true` → `NULO_E2E_PROVERLESS=1`): [`chain-runtime.ts`](./packages/aztec-runtime/src/pxe/chain-runtime.ts) sets `proverEnabled:false`, so the PXE skips BB-SNARK generation — kernel simulation + on-chain submission stay real, and the local node accepts the fake `ChonkProof.random()` proof. This makes the shard pool fast and CDP-stable. Accelerator is forced OFF for proverless jobs (`proverless` ⊥ `VITE_NULO_ACCELERATOR_REQUIRED`).
 
 A few **STUB** tests (`cancel-mid-prove`, `concurrent-sendtx-{approve,confirm}`) need a controllable prove window — proverless prove collapses to sub-second, too fast to observe sequencing/cancel. They run proverless and drive a `ProofGate` (a `chrome.storage.session` barrier, key `nulo:e2e:proof-gate`, injected into the **SW** `ExecutionCoordinator.proveTxTask` — the offscreen document has no `chrome.storage`) to hold the tx at `proving` deterministically, then release.
 
 **Real BB proving stays covered** by the `network-e2e-canary` job (prover-ON, accelerator): `transfers` (wallet UI, waits through real prove → mine) + `tx-sendTx-default` (dApp, waits through real prove → submit — the node validates a real proof at `node.sendTx`; playground hard-codes `wait: "NO_WAIT"` so block-mine isn't awaited).
 
 **Production safety.** `NULO_E2E_PROVERLESS` is a **double-opt-in** build flag (`VITE_NULO_E2E_PROVERLESS` + `VITE_NULO_E2E_PROVERLESS_CONFIRM`; fail-closed throw if exactly one is set). The proverless branch + barrier are dead-code-eliminated from prod (referenced only inside `if (E2E_PROVERLESS)`); [`_build-extension.yml`](./.github/workflows/_build-extension.yml) asserts the build stamp + `nulo:e2e:proof-gate` key are ABSENT from every shipped `dist/{chrome,firefox}`. See [`implementations-plan/e2e-proverless-stub/`](./implementations-plan/e2e-proverless-stub/plan.md).
+
+### `bridge-contracts.yml`
+
+The any-ERC-20 bridge's PR gate: `contracts` paths-filter → `_bridge-contracts.yml` (forge hermetic suite, halmos proofs, keystone nargo vectors, hub artifact parity, the sole-consumer static guard) → `bridge-contracts-status`. Same exact-state aggregator shape as the extension gates. Not in the required set yet.
+
+### Check names and the protection runbook
+
+Every aggregator check is named after the product it gates — `quality-status` (repo-wide), `extension-smoke-e2e-status`, `extension-network-e2e-status`, `bridge-contracts-status`. Branch protection matches those names literally, so a rename is a two-step owner action per branch, scripted in `scripts/ci-cd/required-checks.sh`: `print --branch <b> --json > <file>` (read-only; review the file), then `--apply --branch <b> --expect <file>` right before merging the rename (it refuses if the live protection drifted since the review, touches only `required_status_checks`, keeps `strict` and unrelated checks, verifies the write and prints the rollback). `--add a,b` appends new required checks the same way. `scripts/ci-cd/behavior-gating.test.ts` pins each PR workflow's aggregator name. The legacy labels `e2e:smoke` / `e2e:network` are still honored alongside `e2e:extension-smoke` / `e2e:extension-network` until the next stable cut.
 
 ### `actionlint.yml`
 
@@ -106,8 +115,8 @@ The repo's only scheduled workflow: every night at 03:23 UTC it builds current `
 
 | Label | Effect |
 |---|---|
-| `e2e:smoke` | Force-run smoke e2e on this PR. |
-| `e2e:network` | Force-run network e2e on this PR. |
+| `e2e:extension-smoke` | Force-run smoke e2e on this PR. |
+| `e2e:extension-network` | Force-run network e2e on this PR. |
 
 Adding the label triggers a fresh run; removing it re-evaluates the gate (so a stale failing check goes green if the filter doesn't trip).
 
@@ -165,7 +174,7 @@ For smoke / network e2e specifically: failure artifacts (vitest output, `.e2e-st
 
 ## CI gating — derived from the dependency graph
 
-The `pr-quick` / `pr-smoke-e2e` / `pr-network-e2e` `changes` jobs use `dorny/paths-filter` to skip work on PRs that can't affect a given target. **These filters are derived from the workspace dependency graph, not hand-curated** — a suite/build runs whenever any package its target is built from changes:
+The `pr-quick` / `pr-extension-smoke-e2e` / `pr-extension-network-e2e` `changes` jobs use `dorny/paths-filter` to skip work on PRs that can't affect a given target. **These filters are derived from the workspace dependency graph, not hand-curated** — a suite/build runs whenever any package its target is built from changes:
 
 - **Built targets** (`extension`, `tools`, `playground`) → gated on the **whole package** (`apps/<target>/**`), so no build input (manifest, vite/tsconfig configs, `public/` assets, scripts, the e2e harness) can ever be silently missed.
 - **Dependency libraries** (`wallet-core`, `wallet-crypto`, `extension-messaging`, `aztec-runtime`, `wallet-bridge`, `design`, `bridge-core`) → gated on their consumed surface (`packages/<dep>/src/**` + `package.json`); their own README/docs stay out of the gate.
@@ -189,8 +198,8 @@ The reusables today are:
 - `_lint-and-typecheck.yml` — biome + typecheck
 - `_unit-tests.yml` — vitest workspace-wide
 - `_build-extension.yml` — chrome + firefox (with optional version override)
-- `_smoke-e2e.yml` — puppeteer smoke against `EXTENSION_PATH` or downloaded artifact
-- `_network-e2e.yml` — Aztec sandbox + agent runner
+- `_extension-smoke-e2e.yml` — puppeteer smoke against `EXTENSION_PATH` or downloaded artifact
+- `_extension-network-e2e.yml` — Aztec sandbox + agent runner
 
 Composite actions (step-level reuse):
 - `setup-bun` — checkout + bun + lockfile cache + `bun install --frozen-lockfile`
@@ -199,8 +208,8 @@ Composite actions (step-level reuse):
 
 ## Known limitations
 
-- **Smoke e2e is required on both `dev` and `main`** (as `smoke-e2e-status`). Its fixtures can still flake (cross-file Chrome teardown — see [`implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md`](./implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md) §5); treat a red smoke like any gate — flake → re-run, breakage → fix — never neutralize it.
-- **Network e2e has 18 quarantined tests** via co-located `test.skip` / `describe.skip`. See [`implementations-plan/network-test-triage/plan.md`](./implementations-plan/network-test-triage/plan.md) for the cluster grid + un-skip criteria.
+- **Extension smoke e2e is required on both `dev` and `main`** (as `extension-smoke-e2e-status`). Its fixtures can still flake (cross-file Chrome teardown — see [`implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md`](./implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md) §5); treat a red smoke like any gate — flake → re-run, breakage → fix — never neutralize it.
+- **Extension network e2e has 18 quarantined tests** via co-located `test.skip` / `describe.skip`. See [`implementations-plan/network-test-triage/plan.md`](./implementations-plan/network-test-triage/plan.md) for the cluster grid + un-skip criteria.
 - **Marketplace publishing (Chrome Web Store, Firefox AMO)** is stubbed in `release.yml`. Enabling it requires wiring `CWS_*` + `AMO_JWT_*` secrets and replacing the Firefox `gecko.id` placeholder.
 
 ## See also

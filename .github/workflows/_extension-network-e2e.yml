@@ -1,4 +1,4 @@
-name: _Network e2e (reusable)
+name: _Extension network e2e (reusable)
 
 on:
   workflow_call:

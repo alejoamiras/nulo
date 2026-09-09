@@ -37,7 +37,7 @@ test("fixture-arming contract: unarmed runs are allowed ONLY against a release a
 		expect(
 			IS_RELEASE_ARTIFACT_RUN,
 			"NULO_E2E_MIGRATION_FIXTURE is unset on a repo-build run — the backup-migration smoke would silently skip. " +
-				"Build with VITE_NULO_E2E_MIGRATION_FIXTURE=1 and set NULO_E2E_MIGRATION_FIXTURE=1 (see _smoke-e2e.yml).",
+				"Build with VITE_NULO_E2E_MIGRATION_FIXTURE=1 and set NULO_E2E_MIGRATION_FIXTURE=1 (see _extension-smoke-e2e.yml).",
 		).toBe(true)
 	}
 })

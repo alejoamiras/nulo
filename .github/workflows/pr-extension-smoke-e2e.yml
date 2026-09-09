@@ -1,18 +1,18 @@
-name: Smoke e2e
+name: Extension smoke e2e
 
 on:
   workflow_dispatch:
   pull_request:
     # NO `branches:` filter — see pr-quick.yml: that key filters on the PR's BASE,
     # so a stacked PR targeting its parent feature branch got no CI whatsoever.
-    # `labeled` so adding `e2e:smoke` after open triggers a fresh run;
+    # `labeled` so adding `e2e:extension-smoke` (or the legacy `e2e:smoke`, honored until the next stable cut) after open triggers a fresh run;
     # `unlabeled` so removing it re-evaluates the gate instead of leaving
     # a stale failing result; `ready_for_review` so a draft marked ready
     # (without a new push) re-runs CI instead of hanging the required check.
     types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review]
 
 concurrency:
-  group: pr-smoke-e2e-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  group: pr-extension-smoke-e2e-${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -74,9 +74,9 @@ jobs:
               - 'tsconfig.json'
               - 'patches/**'
               # Smoke workflow + composite actions:
-              - '.github/workflows/_smoke-e2e.yml'
+              - '.github/workflows/_extension-smoke-e2e.yml'
               - '.github/workflows/_build-extension.yml'
-              - '.github/workflows/pr-smoke-e2e.yml'
+              - '.github/workflows/pr-extension-smoke-e2e.yml'
               - '.github/actions/setup-bun/**'
               - '.github/actions/setup-puppeteer/**'
       - name: Override for manual dispatch
@@ -97,7 +97,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.base_ref }}
           SMOKE: ${{ needs.changes.outputs.smoke-surface }}
-          LABEL_HIT: ${{ contains(github.event.pull_request.labels.*.name, 'e2e:smoke') }}
+          LABEL_HIT: ${{ contains(github.event.pull_request.labels.*.name, 'e2e:extension-smoke') || contains(github.event.pull_request.labels.*.name, 'e2e:smoke') }}
         run: |
           # The paths filter already answers "does this diff touch the surface?" — gating it on
           # the base branch as well only creates a hole, because a stacked PR's `github.base_ref`
@@ -123,12 +123,12 @@ jobs:
     name: Run
     needs: [decide]
     if: needs.decide.outputs.run == 'true'
-    uses: ./.github/workflows/_smoke-e2e.yml
+    uses: ./.github/workflows/_extension-smoke-e2e.yml
     with:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
   status:
-    name: smoke-e2e-status
+    name: extension-smoke-e2e-status
     if: always()
     needs: [changes, decide, smoke]
     runs-on: ubuntu-latest
@@ -153,4 +153,4 @@ jobs:
             echo "::error::gate said run=$RUN, so the smoke suite must be '$want' — got '${{ needs.smoke.result }}'"
             exit 1
           fi
-          echo "Smoke e2e gate passed (or was skipped — no relevant changes / not labeled)."
+          echo "Extension smoke e2e gate passed (or was skipped — no relevant changes / not labeled)."

@@ -39,7 +39,7 @@ Internally `scripts/e2e/agent.sh`:
 
 There is no `VITE_NULO_ACCELERATOR_REQUIRED` enforcement locally. This matches production behavior — end users without Aztec Accelerator installed get WASM proving without any error.
 
-**In CI** (`pr-network-e2e.yml`), the workflow:
+**In CI** (`pr-extension-network-e2e.yml`), the workflow:
 
 1. Installs the headless **`accelerator-server`** binary (Linux x86_64 release from `alejoamiras/aztec-accelerator`, SHA-256 pinned).
 2. Starts it on the runner's `127.0.0.1:59833`.
@@ -54,7 +54,7 @@ The terminology gap matters: **Aztec Accelerator** is the desktop app a user ins
 
 `NULO_E2E_PROVERLESS=1 bun run e2e:agent <file>` builds the wallet with `proverEnabled:false` (skips BB-SNARK generation; kernel simulation + on-chain submission stay real — the local node accepts the fake proof). Much faster than real proving, and accelerator-independent (it's forced off). The agent arms the double-opt-in flags + asserts the proverless build stamp. Most CI shards run this way.
 
-The **default-token seeding** spec (`network/default-token-seeding.test.ts`) needs a seed entry for the sandbox, which mints a fresh token address every run — so no build-time list can name it. `VITE_NULO_E2E_TOKEN_SEEDS` + `VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM` (double opt-in, fail-closed; set by `agent.sh`) swap `TokenSeederDeps.getSeeds()` for a `chrome.storage.session` reader on key `nulo:e2e:token-seeds`, written via `seedSandboxDefaultToken` in `fixtures/token-seeds.ts`. The reader **replaces** the shipped seed list and accepts exactly one `chainId: 0` entry with canonical hex fields, pinning `expectedSymbol` to `"TST"` itself. Replacement is deliberate: Testnet carries a real seed and every profile registration now triggers a seed pass, so an augmenting list would have each e2e profile calling the public dRPC endpoint. `_smoke-e2e.yml` arms the same pair with **no** key (empty list) on its source build for that reason; artifact-mode smoke instead blocks `lb.drpc.live` at the browser (see `NULO_E2E_ARTIFACT_RUN` in `fixtures/extension.ts`). Both literals are in the `_build-extension.yml` negative grep, and `agent.sh` + `_smoke-e2e.yml` grep for them positively — an unused export can tree-shake away even in an armed build, which would make the release guard a false negative.
+The **default-token seeding** spec (`network/default-token-seeding.test.ts`) needs a seed entry for the sandbox, which mints a fresh token address every run — so no build-time list can name it. `VITE_NULO_E2E_TOKEN_SEEDS` + `VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM` (double opt-in, fail-closed; set by `agent.sh`) swap `TokenSeederDeps.getSeeds()` for a `chrome.storage.session` reader on key `nulo:e2e:token-seeds`, written via `seedSandboxDefaultToken` in `fixtures/token-seeds.ts`. The reader **replaces** the shipped seed list and accepts exactly one `chainId: 0` entry with canonical hex fields, pinning `expectedSymbol` to `"TST"` itself. Replacement is deliberate: Testnet carries a real seed and every profile registration now triggers a seed pass, so an augmenting list would have each e2e profile calling the public dRPC endpoint. `_extension-smoke-e2e.yml` arms the same pair with **no** key (empty list) on its source build for that reason; artifact-mode smoke instead blocks `lb.drpc.live` at the browser (see `NULO_E2E_ARTIFACT_RUN` in `fixtures/extension.ts`). Both literals are in the `_build-extension.yml` negative grep, and `agent.sh` + `_extension-smoke-e2e.yml` grep for them positively — an unused export can tree-shake away even in an armed build, which would make the release guard a false negative.
 
 The **STUB** tests (`cancel-mid-prove`, `concurrent-sendtx-{approve,confirm}`) hold the tx at `proving` via a `ProofGate` barrier (`holdProofGate`/`releaseProofGate` in `fixtures/proof-gate.ts`, backed by `chrome.storage.session` key `nulo:e2e:proof-gate`) so the sub-second proverless prove still gives a deterministic window. Real BB proving is guarded by the prover-ON `network-e2e-canary` CI job (`transfers` + `tx-sendTx-default`); see [CI.md § Proverless network e2e](../../../../CI.md). Full design: [`implementations-plan/e2e-proverless-stub/`](../../../../implementations-plan/e2e-proverless-stub/plan.md).
 
@@ -102,7 +102,7 @@ If any check fails, setup reaps the stale children and cold-starts a fresh stack
 
 ## CI sharding (5-way matrix)
 
-CI runs the network suite as a **5-shard GitHub Actions matrix** (`.github/workflows/pr-network-e2e.yml`). Each shard:
+CI runs the network suite as a **5-shard GitHub Actions matrix** (`.github/workflows/pr-extension-network-e2e.yml`). Each shard:
 
 - Is its own ubuntu-latest VM — own anvil, own aztec node, own playground vite, own Chrome
 - Gets roughly a fifth of the network test files (80 files today, 1 of them an env-gated probe skipped by default), assigned deterministically by vitest's `--shard=N/M` (SHA-1 hash of filename); the six files with a dedicated lane (`fee-methods`, `selfpay-phase`, `concurrent-sendtx-confirm`, `transfers`, `tx-sendTx-default`, `frozen-account-canary`) are excluded from the pool — `scripts/ci-cd/behavior-gating.test.ts` pins that list against the lanes
@@ -126,7 +126,7 @@ Vitest's deterministic SHA-1-of-filename sharder picks the same files locally as
 
 **Previously quarantined**: `tx-sendTx-default`, `multi-account-from`, `tx-sendTx-multicall` (both #32 + #33) were previously skipped on CI via `NULO_E2E_SKIP_DEFERRED_SLOW=1` (now removed) due to the WASM kernel-prove tail exceeding puppeteer's 300s `protocolTimeout` on slow runners. Resolved by restructuring those tests + the `tx-sendTx-{noFrom,feePayer,sponsoredFpc}` siblings to assert on the wallet's journal `proving` stage via `waitForSendTxActiveStage()` instead of waiting on the dApp's full sendTx promise. See `implementations-plan/journal-stage-restructure/`.
 
-**Known limitation: cold-shard rotation.** Each shard starts with a fresh anvil + aztec + playground + Chrome + extension. The FIRST capability-popup-driven test in shard 1 (whichever file the SHA-1 sharder puts first) pays a cold-SW penalty — `chrome.windows.create` + bb.js init + PXE warmup can push that test past its budget. Quarantining the offender just exposes the next file as the new "first" victim. The structural fix is a fixture-level warm-up tap or pre-grant-capability fixture; tracked in [Issue #59](https://github.com/alejoamiras/nulo/issues/59). Until then: Network e2e is treated as advisory on `dev` (only `Quality / Status` is the required check); single-shard re-runs (or local repro via `--shard=N/5`) usually pass green once the SW is warm.
+**Known limitation: cold-shard rotation.** Each shard starts with a fresh anvil + aztec + playground + Chrome + extension. The FIRST capability-popup-driven test in shard 1 (whichever file the SHA-1 sharder puts first) pays a cold-SW penalty — `chrome.windows.create` + bb.js init + PXE warmup can push that test past its budget. Quarantining the offender just exposes the next file as the new "first" victim. The structural fix is a fixture-level warm-up tap or pre-grant-capability fixture; tracked in [Issue #59](https://github.com/alejoamiras/nulo/issues/59). Single-shard re-runs (or local repro via `--shard=N/5`) usually pass green once the SW is warm; `extension-network-e2e-status` is a required check on `dev` and `main`, so a cold-shard red is re-run, never neutralized.
 
 ## Troubleshooting
 
@@ -175,7 +175,7 @@ Anti-throttle Chrome flags live in `launchExtension` (`extension.ts`):
 
 ## Known failures + triage
 
-The network suite is a required PR gate at retry 0 (`network-e2e-status`); there is no standing list of failing files. Open flake fingerprints, their sanctioned responses, and the history of every root-caused one live in the flake ledger of the `e2e-testing` skill (`.claude/skills/e2e-testing/SKILL.md` § Flake ledger). A red gate is a known fingerprint → rerun once, or breakage → fix; never a neutralised check.
+The network suite is a required PR gate at retry 0 (`extension-network-e2e-status`); there is no standing list of failing files. Open flake fingerprints, their sanctioned responses, and the history of every root-caused one live in the flake ledger of the `e2e-testing` skill (`.claude/skills/e2e-testing/SKILL.md` § Flake ledger). A red gate is a known fingerprint → rerun once, or breakage → fix; never a neutralised check.
 
 ## What's owned per worktree (parallel-safety summary)
 

@@ -217,7 +217,7 @@ jobs:
       always() &&
       needs.resolve.result == 'success' &&
       github.event.inputs.run_network_e2e == 'true'
-    uses: ./.github/workflows/_network-e2e.yml
+    uses: ./.github/workflows/_extension-network-e2e.yml
     with:
       ref: ${{ needs.resolve.outputs.sha }}
     secrets:
@@ -246,7 +246,7 @@ jobs:
   smoke-against-artifact:
     needs: [resolve, build-chrome]
     if: always() && needs.resolve.result == 'success' && needs.build-chrome.result == 'success'
-    uses: ./.github/workflows/_smoke-e2e.yml
+    uses: ./.github/workflows/_extension-smoke-e2e.yml
     with:
       ref: ${{ needs.resolve.outputs.sha }}
       artifact_name: extension-chrome

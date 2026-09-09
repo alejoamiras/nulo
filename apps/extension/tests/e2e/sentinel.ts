@@ -7,7 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 /**
  * Boot-sentinel state dir — `apps/extension/.e2e-state`. Shared with
  * `scripts/e2e/agent.sh`, the boot classifier, and the failure-artifact upload
- * glob in `_network-e2e.yml`. Resolved from this file's location so it is
+ * glob in `_extension-network-e2e.yml`. Resolved from this file's location so it is
  * identical no matter which process (global-setup, a test worker, or the
  * classifier CLI) writes or reads it.
  */

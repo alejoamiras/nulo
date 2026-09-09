@@ -4,7 +4,7 @@
 
 ## What a composition test is
 
-Drive the REAL wallet service graph (`ServiceCollection.start()` + the real service under test + its real cheap collaborators) in-process against DUMB fakes for the process boundaries only (the PXE-over-RPC client, `chrome.storage`, `AztecNode`). **No** Aztec sandbox, offscreen worker, BB proving, or browser. It sits between unit tests (one class, all deps stubbed) and Network e2e (real sandbox + real proving). Reference implementations:
+Drive the REAL wallet service graph (`ServiceCollection.start()` + the real service under test + its real cheap collaborators) in-process against DUMB fakes for the process boundaries only (the PXE-over-RPC client, `chrome.storage`, `AztecNode`). **No** Aztec sandbox, offscreen worker, BB proving, or browser. It sits between unit tests (one class, all deps stubbed) and Extension network e2e (real sandbox + real proving). Reference implementations:
 
 - `services/dapp-session/service.composition.test.ts` — pure storage lifecycle (no PXE, no bb). The cleanest shape.
 - `services/token/service.composition.test.ts` — shallow PXE + bb-free ABI parsing.
@@ -16,7 +16,7 @@ Drive the REAL wallet service graph (`ServiceCollection.start()` + the real serv
 2. Every boundary you cross fakes with **canned, semantics-free values**.
 3. Correctness needs **no proving, no simulation, no real contract/selector derivation, no real chain state**.
 
-## When NOT to — escalate to Network e2e (any ONE triggers)
+## When NOT to — escalate to Extension network e2e (any ONE triggers)
 
 > **D1 — surface cap (the shared shallow-PXE fake).** The SHARED fake (`shallow-port.fake.ts`) may implement `getPXE` + at most the **4** `ShallowPxe` registry methods (`getContractInstance`, `getContractArtifact`, `getContracts`, `registerContract`). Need a 5th? STOP — wrong layer. **Carve-out:** the execution cancel spike (`execution/service.composition.test.ts`) uses a separate inline fake with `proveTx` — allowed ONLY because the test asserts `proveTx` was-or-wasn't-CALLED, never its output (D2), to prove the post-prove cancel checkpoint.
 
@@ -44,7 +44,7 @@ Drive the REAL wallet service graph (`ServiceCollection.start()` + the real serv
 
 - **Theatre** — the test asserts the fake's scripted state, not the real service's transitions/outputs. Tell: deleting the real service would not change the assertions.
 - **Second wallet** — the fake grew until it re-implements Aztec semantics (tx-request building, proving, contract resolution). Tell: the fake file is longer than the service, or imports account-contract machinery.
-- **Drift** — the dumb fake's shape diverges from the real client. Guard: the under-`src/` `Pick<IPXE,…>` conformance (compile-time) + the Network e2e backstop.
+- **Drift** — the dumb fake's shape diverges from the real client. Guard: the under-`src/` `Pick<IPXE,…>` conformance (compile-time) + the Extension network e2e backstop.
 - **bb-bound** — the orchestration looks composition-able (shallow PXE surface) but internally derives via the Barretenberg WASM → it belongs in e2e. This is the subtlest one (see Fpc).
 
 ## Worked examples (from this repo)
@@ -54,7 +54,7 @@ Drive the REAL wallet service graph (`ServiceCollection.start()` + the real serv
 | `DappSessionService` lifecycle | ✅ yes | Pure storage + profile scoping. No PXE, no bb. The cleanest. |
 | `TokenService.parseTokenInterface` | ✅ yes | Shallow PXE (registry reads) + bb-FREE candidate extraction (filters `artifact.functions` by name). |
 | `TokenService.addToken` / `fetchTokenMetadata` | ❌ no → e2e | Calls `simulate(...)` (D2) + selector derivation (D6). Same service, deep path. |
-| `FpcService` (all of it) | ❌ no → e2e | **The pure counter-example.** Shallow PXE *surface*, BUT every interesting path (`getFpcs` discovery, `addFpc`, update/delete) routes through `getOrComputeProtocolAddresses` → `getContractInstanceFromInstantiationParams` → poseidon/bb (D6). The bb-free remainder (a chainless list, a guard-clause throw) was too thin to be worth a composition test — so Fpc has NONE; it lives entirely in Network e2e. Its value here is the lesson, not a test. |
+| `FpcService` (all of it) | ❌ no → e2e | **The pure counter-example.** Shallow PXE *surface*, BUT every interesting path (`getFpcs` discovery, `addFpc`, update/delete) routes through `getOrComputeProtocolAddresses` → `getContractInstanceFromInstantiationParams` → poseidon/bb (D6). The bb-free remainder (a chainless list, a guard-clause throw) was too thin to be worth a composition test — so Fpc has NONE; it lives entirely in Extension network e2e. Its value here is the lesson, not a test. |
 | `ExecutionService.executeTransfer` cancel | ✅ via reuse fast-path | The shallow path (seeded prepared tx) is testable; the fresh-build (`buildStandard`) is the "second wallet" the spike avoided (D3). |
 
 **The lesson Fpc teaches:** "shallow PXE surface" is necessary but NOT sufficient. Check the orchestration for bb derivation and simulation BEFORE assuming a service is a composition target.
@@ -69,4 +69,4 @@ Drive the REAL wallet service graph (`ServiceCollection.start()` + the real serv
 - [ ] ≥ 1 assertion on real-collaborator state, not the fake's return.
 - [ ] Fake lives under `src/` with its marker; CI marker-grep is green.
 
-**When in doubt → Network e2e.** Composition tests are a scalpel; e2e remains the source of truth for everything crypto-, proving-, or network-shaped.
+**When in doubt → Extension network e2e.** Composition tests are a scalpel; e2e remains the source of truth for everything crypto-, proving-, or network-shaped.

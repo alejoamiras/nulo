@@ -1,4 +1,4 @@
-name: _Smoke e2e (reusable)
+name: _Extension smoke e2e (reusable)
 
 on:
   workflow_call:

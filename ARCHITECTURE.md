@@ -231,8 +231,8 @@ Vite env propagation: e2e network suites pass `VITE_LOCAL_NETWORK_RPC_URL=http:/
 | Unit | Per-package `vitest.config.ts` in every workspace (`wallet-core`, `wallet-crypto`, `extension-messaging`, `design`, `bridge-core`, `extension`, `tools`, and minimal explicit-`node` configs for `wallet-bridge`, `aztec-runtime`, `wallet-sdk-schema-patch`, `landing`); all spread `sharedTest` from the root `vitest.base.ts`. | Colocated `*.test.ts`. Pure logic, mocks via `@webext-core/fake-browser`, `FakeBrowserApi` from `wallet-core/testing`. | Bun (`bun --bun vitest run`) | No. |
 | Component | `apps/extension/vitest.config.ts` (filtered via `bun run test:components`) | Vue SFC tests via `@vue/test-utils`. `chrome.*` stubbed by `tests/vitest.setup.ts:88-113`. | Bun | No. |
 | Tools jsdom smoke | `apps/tools/vitest.e2e.config.ts` (`bun run --cwd apps/tools test:e2e`) | In-process `App.vue` mount with a fake wallet provider — no browser. | Bun | No. |
-| Smoke e2e | `apps/extension/vitest.e2e.config.ts` | `tests/e2e/*.test.ts` — popup UI flows. | Node (Puppeteer) | No. |
-| Network e2e | `apps/extension/vitest.e2e.network.config.ts` | `tests/e2e/network/**` — drives the playground dApp against a real anvil + aztec sandbox. | Node (Puppeteer) | Yes (per worktree). |
+| Extension smoke e2e | `apps/extension/vitest.e2e.config.ts` | `tests/e2e/*.test.ts` — popup UI flows. | Node (Puppeteer) | No. |
+| Extension network e2e | `apps/extension/vitest.e2e.network.config.ts` | `tests/e2e/network/**` — drives the playground dApp against a real anvil + aztec sandbox. | Node (Puppeteer) | Yes (per worktree). |
 | Full e2e | `apps/extension/vitest.e2e.all.config.ts` | Smoke + network. | Node (Puppeteer) | Yes. |
 
 Run commands:
@@ -244,6 +244,6 @@ bun run e2e:agent             # Network — parallel-safe per worktree
 bun run audit:vue             # One-shot pre-PR: typecheck → test → lint → build
 ```
 
-`bun run audit:vue` deliberately **excludes** e2e tests — that gate is for fast, isolated correctness. Smoke e2e is a separate command; network e2e is its own infrastructure (see [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md) for the parallel-safe agent runner, port allocation, and reuse-vs-cold-start logic).
+`bun run audit:vue` deliberately **excludes** e2e tests — that gate is for fast, isolated correctness. Extension smoke e2e is a separate command; network e2e is its own infrastructure (see [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md) for the parallel-safe agent runner, port allocation, and reuse-vs-cold-start logic).
 
 Coverage minimums for component / composable tests, the `chrome.*` stubbing, and the e2e helper conventions all live in [`CLAUDE.md`](./CLAUDE.md).

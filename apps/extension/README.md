@@ -50,7 +50,7 @@ For the L0–L6 component model and the C0/C1 composable rules, read [`../../CLA
 | `bun run build:firefox` | Firefox build → `dist/firefox/`. |
 | `bun run test` | Unit + component tests (vitest). |
 | `bun run test:components` | Components only (filtered to `src/components/`). |
-| `bun run test:e2e` | Smoke e2e (no Aztec sandbox). |
+| `bun run test:e2e` | Extension smoke e2e (no Aztec sandbox). |
 | `bun run test:e2e:all` | Smoke + network e2e (full sandbox). |
 | `bun run lint` | `biome check src/`. |
 | `bun run typecheck` | `vue-tsc --noEmit`. |
@@ -63,8 +63,8 @@ For the L0–L6 component model and the C0/C1 composable rules, read [`../../CLA
 Three test surfaces:
 
 1. **Unit + component** (`vitest.config.ts`): colocated `*.test.ts` next to source. `chrome.*` is stubbed by `tests/vitest.setup.ts:88-113`. Component tests mount via `@vue/test-utils`. Coverage minimums per layer live in [`../../CLAUDE.md`](../../CLAUDE.md).
-2. **Smoke e2e** (`vitest.e2e.config.ts`): `tests/e2e/*.test.ts` drives popup UI flows with no Aztec sandbox.
-3. **Network e2e** (`vitest.e2e.network.config.ts`): `tests/e2e/network/**` drives the playground dApp against a per-worktree anvil + aztec sandbox. The agent runner (`bun run e2e:agent`) handles port allocation, builds, and isolation — see [`tests/e2e/README.md`](./tests/e2e/README.md).
+2. **Extension smoke e2e** (`vitest.e2e.config.ts`): `tests/e2e/*.test.ts` drives popup UI flows with no Aztec sandbox.
+3. **Extension network e2e** (`vitest.e2e.network.config.ts`): `tests/e2e/network/**` drives the playground dApp against a per-worktree anvil + aztec sandbox. The agent runner (`bun run e2e:agent`) handles port allocation, builds, and isolation — see [`tests/e2e/README.md`](./tests/e2e/README.md).
 
 `audit:vue` (run from repo root) sweeps typecheck + unit + lint + build, but **excludes** e2e tests. Run e2e separately when changes touch those surfaces.
 

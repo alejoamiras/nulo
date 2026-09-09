@@ -107,7 +107,7 @@ runtime env var can never arm a build-time flag.
 - Smoke needs its fixtures armed AND the migration one declared: build with
   `VITE_NULO_E2E_MIGRATION_FIXTURE=1 VITE_NULO_E2E_DEFAULT_NET=testnet VITE_NULO_E2E_TOKEN_SEEDS=1
   VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 bun run build:chrome` (the seed pair keeps the fresh wallet off
-  the live seed RPC — `_smoke-e2e.yml` says why), run with `NULO_E2E_MIGRATION_FIXTURE=1`.
+  the live seed RPC — `_extension-smoke-e2e.yml` says why), run with `NULO_E2E_MIGRATION_FIXTURE=1`.
   `migration.test.ts` skips without the declaration; `backup-migration.test.ts` throws with the
   remedy.
 - A file that depends on the PROVERLESS build carries the `@requires-proverless` marker (the only
@@ -137,7 +137,7 @@ runtime env var can never arm a build-time flag.
 
 ### Retry policy is a per-class decision
 
-- PR gates run `retry: 0` (`pr-network-e2e.yml` passes it on every lane; smoke's config keeps 2).
+- PR gates run `retry: 0` (`pr-extension-network-e2e.yml` passes it on every lane; smoke's config keeps 2).
   A masked flake in a required gate is worse than a visible one.
 - Nightly omits the input, so the config default (2) plus the exit-86 boot retry applies: absorb,
   then ship.
@@ -150,24 +150,24 @@ runtime env var can never arm a build-time flag.
 
 ### CI topology
 
-- **Smoke** — `pr-smoke-e2e.yml` → `_smoke-e2e.yml`. Runs when the diff trips the `smoke-surface`
-  paths filter, when the PR targets `main`, on the `e2e:smoke` label, or on dispatch; 20-minute job; in-job
+- **Smoke** — `pr-extension-smoke-e2e.yml` → `_extension-smoke-e2e.yml`. Runs when the diff trips the `smoke-surface`
+  paths filter, when the PR targets `main`, on the `e2e:extension-smoke` label, or on dispatch; 20-minute job; in-job
   armed build by default, or an artifact (`artifact_name` / `extension_path`) for nightly/release.
-  Required check `smoke-e2e-status` on both branches.
-- **Network** — `pr-network-e2e.yml` → `_network-e2e.yml`. Filter `extension-network`, label
-  `e2e:network`. Lanes: 5 vitest shards (`--shard=N/5`, SHA-1 of the file path, proverless, retry 0,
+  Required check `extension-smoke-e2e-status` on both branches.
+- **Network** — `pr-extension-network-e2e.yml` → `_extension-network-e2e.yml`. Filter `extension-network`, label
+  `e2e:extension-network`. Lanes: 5 vitest shards (`--shard=N/5`, SHA-1 of the file path, proverless, retry 0,
   the 6 dedicated files excluded); two heavy lanes (`fee-methods` + `selfpay-phase`, and
   `concurrent-sendtx-confirm`, proverless); the **canary** lane prover-ON with the SHA-256-pinned
   `accelerator-server` and `VITE_NULO_ACCELERATOR_REQUIRED=1` (`transfers`, `tx-sendTx-default`,
   `frozen-account-canary`) — a canary run with zero `Proving succeeded` lines fails; the
   `disable_accelerator` dispatch input (or the `NULO_E2E_DISABLE_ACCELERATOR` variable) is the
   rollback to WASM. Exit 86 retries the agent once. After every run the built bundle is grepped for
-  `(PROBE|nulo:probe:|VITE_E2E_PROBE)` and any hit fails the workflow (`_network-e2e.yml` skips the
+  `(PROBE|nulo:probe:|VITE_E2E_PROBE)` and any hit fails the workflow (`_extension-network-e2e.yml` skips the
   grep only when its `probe` input is `"1"`, a caller-set investigation mode, not a dispatch option):
   string constants shipped in `dist/` must not contain `PROBE`.
   `scripts/ci-cd/behavior-gating.test.ts` pins the filters and the exclude list against the lanes.
 - **Nightly** (`nightly.yml`, the only scheduled workflow) mirrors the lanes with config-default
-  retries and publishes a prerelease on full green. **Soak** (`network-e2e-soak.yml`) is manual,
+  retries and publishes a prerelease on full green. **Soak** (`extension-network-e2e-soak.yml`) is manual,
   N iterations at retry 0.
 - A red required gate is a flake → rerun once, or breakage → fix. Never advisory, never
   `continue-on-error`, never removed from the required set (CLAUDE.md § Quality gates).
@@ -576,8 +576,8 @@ coordinator's pre-prove `checkCancelled` and before the post-prove one).
 
 - `apps/extension/tests/e2e/README.md` — layout, per-file purposes, helper table, what each
   worktree owns.
-- `CI.md` § e2e, `.github/workflows/{pr-smoke-e2e,_smoke-e2e,pr-network-e2e,_network-e2e,nightly,
-  network-e2e-soak}.yml`.
+- `CI.md` § e2e, `.github/workflows/{pr-extension-smoke-e2e,_extension-smoke-e2e,pr-extension-network-e2e,_extension-network-e2e,nightly,
+  extension-network-e2e-soak}.yml`.
 - Plans (`implementations-plan/`): `e2e-flake-fixes` (the parked-host mechanism, five codex rounds),
   `e2e-deflake` (+ `flake-ledger.md`), `deflake-round-2`, `deflake-round-3` (the kill primitive
   measured), `deflake-round-4` (crash-truth suite), `import-stage-deadlines`, `mac-identity-binding`

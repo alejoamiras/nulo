@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Verify one certification trigger against the Phase-6 qualifying criteria.
+# Verify one certification trigger against the qualifying criteria below.
 #
 # A run QUALIFIES when, for the given head SHA:
-#   - ALL THREE required workflows ran (Quality, Smoke e2e, Network e2e);
+#   - ALL THREE required workflows ran (Quality, Extension smoke e2e, Extension network e2e);
 #   - each completed successfully, at attempt 1 (a re-run means the first
 #     attempt was not green);
 #   - no job in them failed or was cancelled;
@@ -30,7 +30,7 @@
 # at all.
 set -uo pipefail
 
-REQUIRED_WORKFLOWS=("Quality" "Smoke e2e" "Network e2e")
+REQUIRED_WORKFLOWS=("Quality" "Extension smoke e2e" "Extension network e2e")
 
 # The exact network agent set: 5 sharded jobs + 2 heavies + the prover-ON
 # canary. Checking names rather than a count means a missing shard cannot be
@@ -42,7 +42,7 @@ REQUIRED_WORKFLOWS=("Quality" "Smoke e2e" "Network e2e")
 # green, so label the PR to force them rather than accepting a skip.
 declare -A REQUIRED_JOBS=(
 	["Quality"]="Unit tests / Vitest|Lint + Typecheck / Biome + vue-tsc"
-	["Smoke e2e"]="Run / Vitest + Puppeteer"
+	["Extension smoke e2e"]="Run / Vitest + Puppeteer"
 )
 
 EXPECTED_AGENTS=(
@@ -51,7 +51,7 @@ EXPECTED_AGENTS=(
 	"Run / shard 3/5 / Aztec agent (shard 3/5)"
 	"Run / shard 4/5 / Aztec agent (shard 4/5)"
 	"Run / shard 5/5 / Aztec agent (shard 5/5)"
-	"Run / heavy / fee-methods / Aztec agent"
+	"Run / heavy / fee-methods + selfpay-phase / Aztec agent"
 	"Run / heavy / concurrent-confirm / Aztec agent"
 	"Run / canary / real-proving / Aztec agent"
 )
@@ -173,7 +173,7 @@ for WF in "${REQUIRED_WORKFLOWS[@]}"; do
 			[ "$REBOOTS" = "0" ] || violation "job $JOB_ID ($JOB_NAME) has $REBOOTS exit-86/infra-reboot warnings"
 		done <<<"$JOB_ROWS"
 
-		if [ "$WF" = "Network e2e" ]; then
+		if [ "$WF" = "Extension network e2e" ]; then
 			for AGENT in "${EXPECTED_AGENTS[@]}"; do
 				OK=$(jq -r --arg n "$AGENT" '[.[].jobs[]? | select(.name==$n and .conclusion=="success")] | length' "$JOBS")
 				[ "${OK:-0}" -gt 0 ] || violation "network agent job did not run green: $AGENT"

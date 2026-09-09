@@ -1,7 +1,7 @@
-name: Network e2e soak
+name: Extension network e2e soak
 
-# Manual-only repeat-runner for proving the network suite is genuinely stable
-# before flipping it to a required check (Phase 5 acceptance gate) and for
+# Manual-only repeat-runner for proving the extension network suite is genuinely stable
+# (the evidence for keeping it a required check) and for
 # validating Class B / Mode 3-4 fixes on the REAL runner without spamming PR CI.
 #
 # Runs the chosen workload `repeats` times SEQUENTIALLY (max-parallel: 1) on
@@ -44,7 +44,7 @@ on:
         default: "0"
 
 concurrency:
-  group: network-e2e-soak-${{ github.ref }}
+  group: extension-network-e2e-soak-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -80,7 +80,7 @@ jobs:
       max-parallel: 1
       matrix:
         iteration: ${{ fromJSON(needs.prep.outputs.iterations) }}
-    uses: ./.github/workflows/_network-e2e.yml
+    uses: ./.github/workflows/_extension-network-e2e.yml
     with:
       ref: ${{ github.ref }}
       shard: ${{ inputs.mode == 'shard' && inputs.shard || '' }}

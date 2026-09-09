@@ -1,6 +1,6 @@
 # apps/tools/tests/e2e
 
-Smoke e2e for the tools app — jsdom, no browser, no real wallet, no network:
+Tools jsdom smoke — jsdom, no browser, no real wallet, no network. Not the extension's smoke e2e (Puppeteer): this one mocks the wallet and chain seams and mounts the app:
 
 ```bash
 bun run --cwd apps/tools test:e2e

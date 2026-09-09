@@ -94,10 +94,10 @@ CLAUDE.md "Account-address freeze").
 LOCALLY, `e2e:agent` has NO accelerator enforcement — it silently falls back to in-browser WASM if
 no prover is up, which would pass the canary WITHOUT proving anything about native proving. To
 actually run it prover-ON locally: start `accelerator-server` on `127.0.0.1:59833` (the SHA-pinned
-binary from `_network-e2e.yml`), build the wallet with `VITE_NULO_ACCELERATOR_REQUIRED=1`, and
+binary from `_extension-network-e2e.yml`), build the wallet with `VITE_NULO_ACCELERATOR_REQUIRED=1`, and
 confirm at least one `Received /prove request` in the accelerator log during the run. In CI this is
-automatic: the canary is a named file in the prover-ON `network-e2e-canary` job (`pr-network-e2e.yml`),
-so the required `network-e2e-status` check enforces it — that is the authoritative gate; the local
+automatic: the canary is a named file in the prover-ON `network-e2e-canary` job (`pr-extension-network-e2e.yml`),
+so the required `extension-network-e2e-status` check enforces it — that is the authoritative gate; the local
 run is a pre-flight. It proves the frozen 5.0.1 account bytecode still simulates, proves natively,
 and is accepted by the bumped node/toolchain across the full arc (frozen-ctor multicall deploy →
 init-nullifier flip → authwit consume → SW-restart re-derive + tx). The address KAT cannot see
@@ -107,7 +107,7 @@ is the deliberate alternative — never a casual fix.
 
 ## Branch A — bump-only (no reset, detectors green)
 
-Normal delivery: `test:all` + `lint` + 5 builds + **the prover-ON frozen-account canary (above)** → PR labeled **`e2e:network` + `e2e:smoke`** (forces both suites — the dep diff warrants it) → all three required checks green → merge. Done.
+Normal delivery: `test:all` + `lint` + 5 builds + **the prover-ON frozen-account canary (above)** → PR labeled **`e2e:extension-network` + `e2e:extension-smoke`** (forces both suites — the dep diff warrants it) → all three required checks green → merge. Done.
 
 ## Branch B — network reset (the coupled redeploy)
 

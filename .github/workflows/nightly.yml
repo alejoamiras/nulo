@@ -162,7 +162,7 @@ jobs:
     with:
       ref: ${{ needs.resolve.outputs.sha }}
 
-  # The network suite mirrors pr-network-e2e.yml's job shape exactly (5
+  # The network suite mirrors pr-extension-network-e2e.yml's job shape exactly (5
   # proverless shards + two dedicated heavy jobs + the real-proving canary),
   # minus its paths-filter/decide plumbing — a nightly always runs everything.
   # Keep the shard count / exclude lists in sync with that file.
@@ -180,7 +180,7 @@ jobs:
           - { id: "3/5", label: "3-of-5" }
           - { id: "4/5", label: "4-of-5" }
           - { id: "5/5", label: "5-of-5" }
-    uses: ./.github/workflows/_network-e2e.yml
+    uses: ./.github/workflows/_extension-network-e2e.yml
     with:
       ref: ${{ needs.resolve.outputs.sha }}
       shard: ${{ matrix.shard.id }}
@@ -195,7 +195,7 @@ jobs:
     name: Run / heavy / fee-methods
     needs: resolve
     if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip != 'true'
-    uses: ./.github/workflows/_network-e2e.yml
+    uses: ./.github/workflows/_extension-network-e2e.yml
     with:
       ref: ${{ needs.resolve.outputs.sha }}
       shard_label: "heavy"
@@ -208,7 +208,7 @@ jobs:
     name: Run / heavy / concurrent-confirm
     needs: resolve
     if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip != 'true'
-    uses: ./.github/workflows/_network-e2e.yml
+    uses: ./.github/workflows/_extension-network-e2e.yml
     with:
       ref: ${{ needs.resolve.outputs.sha }}
       shard_label: "heavy-concurrent"
@@ -221,7 +221,7 @@ jobs:
     name: Run / canary / real-proving
     needs: resolve
     if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip != 'true'
-    uses: ./.github/workflows/_network-e2e.yml
+    uses: ./.github/workflows/_extension-network-e2e.yml
     with:
       ref: ${{ needs.resolve.outputs.sha }}
       shard_label: "canary"
@@ -287,7 +287,7 @@ jobs:
       needs.resolve.result == 'success' &&
       needs.resolve.outputs.skip != 'true' &&
       needs.build-chrome.result == 'success'
-    uses: ./.github/workflows/_smoke-e2e.yml
+    uses: ./.github/workflows/_extension-smoke-e2e.yml
     with:
       ref: ${{ needs.resolve.outputs.sha }}
       artifact_name: extension-chrome

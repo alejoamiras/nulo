@@ -40,7 +40,7 @@ jobs:
           BRIDGE_MANIFEST: public/${{ inputs.target }}-bridge.json
         run: bun run --cwd apps/tools verify:deployments
 
-      - name: Smoke e2e (mock wallet, jsdom)
+      - name: Tools jsdom smoke (mock wallet, no browser)
         run: bun run --cwd apps/tools test:e2e
 
       - name: Build (${{ inputs.target }})

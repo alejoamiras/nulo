@@ -5,7 +5,7 @@ import { sharedTest } from "../../vitest.base"
 import { nuloComponentsPlugin } from "./scripts/components-plugin"
 
 /*
- * Smoke e2e config. Separate from the unit/component config because:
+ * jsdom smoke config (mock wallet, no browser). Separate from the unit/component config because:
  *   1. Smokes don't run in `bun run test` (the everyday loop) — they
  *      run via `bun run test:e2e`.
  *   2. The smoke mounts App.vue and exercises the page end-to-end with
