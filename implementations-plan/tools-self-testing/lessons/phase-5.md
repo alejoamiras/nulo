@@ -28,10 +28,23 @@
 | 9 | cell 32 cannot claim negative coverage on an automine network | real → positive-only `flowOutboxRoundTrip`; plan row + ledger updated |
 | 10 | race test assumes the winner | real → unordered regex |
 | 11 | forge artifacts never rebuilt | real → incremental `forge build` every boot |
-| 12 | uploaded logs never written | real → `SANDBOX_LOG_DIR` files, CI path updated; "printed admin key" not real (nothing prints one) |
+| 12 | uploaded logs never written | real → `SANDBOX_LOG_DIR` files, CI path updated; the "printed admin key" was dismissed here and turned out real in round 2 (below) |
 | 13 | workflow-history comments | real → three headers rewritten |
 
 Decisions taken without the owner (plan § Autonomy): cell 32's scope (positive-only) and the nonce-manager-instead-of-mutex call — both logged here and in the ledger.
+
+**Round 2** (same session, `high`, on `33568d4d` after `sandbox:smoke` 14.7 min green and `test:integration` 35/35) — verdict **"Not ready yet"**, 6 findings. Verified:
+
+| # | Finding | Call |
+|---|---|---|
+| 1 | the node PRINTS its admin API key on a fresh data directory (`aztec_start_action.js:139`, `userLog`, unfiltered) and the harness now persists that output — three log files under `~/.cache/nulo-bridge-sandbox/logs/` carried the "ADMIN API KEY (save this…)" block | real → the node runs with `AZTEC_DISABLE_ADMIN_API_KEY=true` (nothing here calls the admin API); no key is minted, so nothing to redact across chunk boundaries |
+| 2 | the log sink ends on the child's `exit`, which can precede the streams' last chunks | real → ends on `close` |
+| 3 | the handle advertises keys 1–12 but anvil funds its default ten accounts (indices 0–9) | real (indices 10–12 were unfunded; the browser files use 1–7 today) → anvil starts with `--accounts 16` |
+| 4 | the tampered registration counted ANY exception as the rejection | real → only `No L1 to L2 message found` counts; anything else rethrows with its message |
+| 5 | the unpaused witness assertion accepted a successful simulation (`portalRefuses` → `null`) and any unrelated failure | real → the refusal must be an identified Outbox error (by name or selector, `OUTBOX_ERRORS`); the note names it |
+| 6 | plan row 32 + the arc-2 ledger entry were uncommitted, mixed with arc-3 hunks | real → only those hunks staged (`git apply --cached` of the filtered diff), committed with the fixes |
+
+Accepted by codex as fine: `claimPayment`'s deduction check, the `payer: "own"` fee sum, the fresh actors, the private variants, the alias, the forge rebuild, the race regex, the single-writer restriction and positive-only cell 32.
 
 ## TXE attempt
 

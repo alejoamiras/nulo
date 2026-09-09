@@ -504,7 +504,10 @@ async function rejectTamperedRegistration(s: SmokeContext, block: JournalTokenBl
 	try {
 		await s.hub.methods.register_token(...registerArgsOf(block, tampered)).send(opts as never)
 	} catch (e) {
-		return e instanceof Error ? e.message : String(e)
+		const message = e instanceof Error ? e.message : String(e)
+		// Only the missing witness counts as the rejection; a wallet, fee or RPC failure is not it.
+		if (!/no l1 to l2 message found/i.test(message)) throw new Error(`the tampered registration failed for another reason: ${message}`)
+		return message
 	}
 	throw new Error("a registration with tampered metadata was accepted")
 }
@@ -605,6 +608,21 @@ async function portalRefuses(
 const refusesWith = (refusal: string | null, which: keyof typeof PAUSED_ERRORS) =>
 	refusal !== null && (refusal.includes(PAUSED_ERRORS[which].name) || refusal.includes(PAUSED_ERRORS[which].selector))
 
+/** What the Outbox answers a witness it never carried with (`Epoch` is a uint256 in the ABI). */
+const OUTBOX_ERRORS = [
+	"Outbox__NothingToConsumeAtEpoch(uint256)",
+	"Outbox__NothingToConsume(bytes32)",
+	"Outbox__InvalidRecipient(address,address)",
+	"Outbox__LeafIndexOutOfBounds(uint256,uint256)",
+	"Outbox__PathTooLong()",
+	"Outbox__AlreadyNullified(uint256,uint256)",
+	"Outbox__InvalidChainId()",
+	"Outbox__VersionMismatch(uint256,uint256)",
+	"Outbox__InvalidNumCheckpointsInEpoch(uint256)",
+].map((signature) => ({ name: signature.slice(0, signature.indexOf("(")), selector: toFunctionSelector(signature) }))
+const outboxErrorIn = (refusal: string | null): string | null =>
+	refusal === null ? null : (OUTBOX_ERRORS.find((e) => refusal.includes(e.name) || refusal.includes(e.selector))?.name ?? null)
+
 async function readPaused(s: SmokeContext): Promise<{ deposits: boolean; withdraws: boolean }> {
 	const factory = s.bridge.l1.factory as Address
 	const read = (functionName: "depositsPaused" | "withdrawsPaused") =>
@@ -636,7 +654,13 @@ export async function flowL1Pause(s: SmokeContext, token: ManifestToken): Promis
 	}
 	const after = await readPaused(s)
 	if (after.deposits || after.withdraws) throw new Error(`setPaused(false, false) read back as ${JSON.stringify(after)}`)
-	const withdrawRefusal = await portalRefuses(s, portal, "withdraw", withdraw)
-	if (refusesWith(withdrawRefusal, "withdraws")) throw new Error("the portal still refuses withdraws as paused after the unpause")
-	return "factory paused both ways: the portal refused a deposit (DepositsPaused) and a withdraw (WithdrawsPaused) first; unpaused, the witness is what fails"
+	// Unpaused, the same bogus witness must reach the Outbox and be refused THERE — a null (accepted)
+	// or an unrelated failure would let this pass on nothing.
+	const witnessRefusal = await portalRefuses(s, portal, "withdraw", withdraw)
+	const outboxError = outboxErrorIn(witnessRefusal)
+	if (outboxError === null) {
+		const what = witnessRefusal === null ? "accepted" : `refused with "${witnessRefusal.slice(0, 120)}"`
+		throw new Error(`unpaused, the bogus witness was ${what} — not an Outbox refusal`)
+	}
+	return `factory paused both ways: the portal refused a deposit (DepositsPaused) and a withdraw (WithdrawsPaused) first; unpaused, the Outbox refused the witness (${outboxError})`
 }

@@ -333,13 +333,15 @@ function drainOutput(child: ChildProcess, label: string, logFile: string): void 
 	}
 	child.stdout?.on("data", report)
 	child.stderr?.on("data", report)
-	child.once("exit", () => sink.end())
+	// `close` follows the stdio streams' end; `exit` can precede their last chunks.
+	child.once("close", () => sink.end())
 }
 
 function spawnAnvil(tool: Toolchain, port: number, logFile: string): ChildProcess {
 	const child = spawn(
 		tool.anvilBin,
-		["--host", "127.0.0.1", "--port", String(port), "--chain-id", "31337", "--slots-in-an-epoch", "1", "--silent"],
+		// Every key the handle advertises (`deploy.ts` funds none itself) must be one anvil pre-funds.
+		["--host", "127.0.0.1", "--port", String(port), "--chain-id", "31337", "--slots-in-an-epoch", "1", "--accounts", "16", "--silent"],
 		{ stdio: "pipe", detached: true },
 	)
 	drainOutput(child, "anvil", logFile)
@@ -357,6 +359,9 @@ function nodeEnv(tool: Toolchain, anvilUrl: string): NodeJS.ProcessEnv {
 		// arrives, which is why the L1→L2 waits carry a `forceBlock`.
 		SEQ_MIN_TX_PER_BLOCK: "0",
 		ETHEREUM_HOSTS: anvilUrl,
+		// A fresh data directory makes the node mint an admin API key and PRINT it — into the log
+		// file this run keeps and CI uploads. Nothing here calls the admin API; no key, no leak.
+		AZTEC_DISABLE_ADMIN_API_KEY: "true",
 		// `@aztec/ethereum`'s resolver reads `~/.aztec/current/internal-bin/forge` ahead of PATH; these
 		// overrides are its highest-priority source and the only way to pin the L1 deploy to this version.
 		...(isExecutable(forge) ? { FORGE_BIN: forge } : {}),
