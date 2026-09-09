@@ -40,4 +40,12 @@ Confirmed sound by round 1: the `@nulo/bridge-core/sandbox` surface the browser 
 
 ## Gate
 
-_(`bun run lint:actions` + `bun run test:ci-gating` + `bun run --cwd apps/extension test:e2e`)_
+`bun run lint:actions` → actionlint clean, exit 0. `bun run test:ci-gating` → 100 pass, 0 fail (the
+aggregator truth table, `behavior-gating` with the tools graph, `required-checks`, the complexity
+baseline). `bun run --cwd apps/extension test:e2e`, run alone against a build armed exactly as
+`_extension-smoke-e2e.yml` arms a source build (`VITE_NULO_E2E_MIGRATION_FIXTURE=1`, the testnet
+default net, the empty token-seed source; `NULO_E2E_MIGRATION_FIXTURE=1` on the runner) → **31 files
+passed, 1 skipped; 116 tests passed, 6 skipped**, `EXIT=0` (569 s). A first attempt on a plain
+`bun run build` failed only the suite's arming contract — an unarmed repo build is refused by design,
+so the local gate has to build the way CI does. CI proof at Delivery: the arc-3 PR's six shards +
+`tools-e2e-status` at retry 0.
