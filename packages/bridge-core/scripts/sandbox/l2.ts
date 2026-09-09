@@ -71,12 +71,22 @@ export interface L2Base {
 	fee: Record<string, unknown>
 	relayer: AztecAddress
 	relayerOpts: Record<string, unknown>
+	/** Sends as the base actor, the hub's guardian; set once the wallet holds that account. */
+	guardianOpts: Record<string, unknown>
+}
+
+/** Registers the base actor in this wallet and makes it the guardian sender. */
+export async function adoptGuardian(base: L2Base, secret: Hex, salt: bigint): Promise<AztecAddress> {
+	const guardian = await actorAddress(base.wallet, secret, salt)
+	base.guardianOpts = { from: guardian, fee: base.fee, wait: { waitForStatus: TxStatus.PROPOSED } }
+	return guardian
 }
 
 export async function connectL2(nodeUrl: string): Promise<L2Base> {
 	const node = createNode(nodeUrl)
-	// Proving off: this is a local correctness loop, not a proof-system gate.
-	const wallet = await createL2Wallet({ nodeUrl, proverEnabled: false })
+	// Proving off: this is a local correctness loop, not a proof-system gate. Ephemeral: every fresh
+	// local network has the same store identity, so a persistent store would be shared across runs.
+	const wallet = await createL2Wallet({ nodeUrl, proverEnabled: false, ephemeral: true })
 	// A local network pre-deploys its funded accounts at genesis; the relayer is one of them.
 	const accounts = await registerInitialLocalNetworkAccountsInWallet(wallet as never)
 	const relayer = accounts[1]
@@ -89,6 +99,7 @@ export async function connectL2(nodeUrl: string): Promise<L2Base> {
 		fee: paid,
 		relayer,
 		relayerOpts: { from: relayer, fee: paid, wait: { waitForStatus: TxStatus.PROPOSED } },
+		guardianOpts: {},
 	}
 }
 

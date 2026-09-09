@@ -106,6 +106,8 @@ export interface SmokeContext {
 	l2: L2Ctx
 	relayer: AztecAddress
 	relayerOpts: Record<string, unknown>
+	/** Sends as the hub's guardian — the base actor that deployed the generation. */
+	guardianOpts: Record<string, unknown>
 	manifest: ManifestV2
 	bridge: BridgeBlock
 	hub: ContractBase
@@ -130,6 +132,7 @@ export async function buildContext(clients: SandboxClients, manifest: ManifestV2
 		l2: l2CtxFor(clients.l2, from),
 		relayer: clients.l2.relayer,
 		relayerOpts: clients.l2.relayerOpts,
+		guardianOpts: clients.l2.guardianOpts,
 		manifest,
 		bridge,
 		hub,
@@ -228,6 +231,11 @@ export interface ClaimPlan {
 	recipient: AztecAddress
 	submitter?: "relayer"
 	fee?: unknown
+	/** A private first claim registers in a transaction of its own: `registerFee` pays that
+	 *  registration (else `fee` does), `registeredClaimFee` the claim that follows (else `fee` again
+	 *  — which re-spends a fuel message, so a fueled first claim must name it). */
+	registerFee?: unknown
+	registeredClaimFee?: unknown
 	/** Which fee mode paid; a paid claim's landed fee becomes a calibration sample. */
 	feeMode?: CalibrationSample["feeMode"]
 }
@@ -261,7 +269,12 @@ function claimInputs(s: SmokeContext, res: SendResult, p: ClaimPlan) {
 			isPrivate: p.isPrivate,
 			from: (sendOpts.from as AztecAddress).toString(),
 		},
-		sendOpts: p.fee ? { ...sendOpts, fee: p.fee } : sendOpts,
+		sendOpts: {
+			...sendOpts,
+			...(p.fee ? { fee: p.fee } : {}),
+			...(p.registerFee ? { registerFee: p.registerFee } : {}),
+			...(p.registeredClaimFee ? { registeredClaimFee: p.registeredClaimFee } : {}),
+		},
 	}
 }
 
@@ -321,19 +334,24 @@ export async function fpcClaimFee(s: SmokeContext, res: SendResult, bridgeSalt: 
 
 /** The canonical PrivateFPC has no initializer and no owner, so a fresh chain just needs the
  *  universal deploy at its pinned salt before anything can pay through it. */
-export async function ensurePrivateFpc(s: SmokeContext): Promise<void> {
+export async function ensurePrivateFpc(l2: L2Ctx): Promise<void> {
 	const pinned = AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)
-	if (await s.l2.node.getContract(pinned)) return
-	await PrivateFPCContract.deploy(
-		s.l2.wallet as never,
-		{ salt: Fr.fromHexString(PRIVATE_FPC_SALT), universalDeploy: true } as never,
-	).send(s.l2.deployOpts as never)
-	if (!(await s.l2.node.getContract(pinned))) throw new Error(`a deploy at the canonical salt did not land at ${PRIVATE_FPC_ADDRESS}`)
+	const existing = await l2.node.getContract(pinned)
+	if (existing) {
+		// Deployed through another wallet (an earlier file, a kept network): this one still has to
+		// hold the instance and artifact before it can simulate against it.
+		await l2.wallet.registerContract(existing, PrivateFPCContract.artifact as never)
+		return
+	}
+	await PrivateFPCContract.deploy(l2.wallet as never, { salt: Fr.fromHexString(PRIVATE_FPC_SALT), universalDeploy: true } as never).send(
+		l2.deployOpts as never,
+	)
+	if (!(await l2.node.getContract(pinned))) throw new Error(`a deploy at the canonical salt did not land at ${PRIVATE_FPC_ADDRESS}`)
 }
 
 /** The pinned PrivateFPC as this wallet sees it, deployed at the canonical salt when the chain has none. */
 export async function privateFpc(s: SmokeContext): Promise<ContractBase> {
-	await ensurePrivateFpc(s)
+	await ensurePrivateFpc(s.l2)
 	const at = await PrivateFPCContract.at(AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS), s.l2.wallet as never)
 	return at as unknown as ContractBase
 }
@@ -384,21 +402,27 @@ export async function exitCeiling(s: SmokeContext): Promise<bigint> {
 	return privateFpcFeeLimit(PRIVATE_HUB_EXIT_GAS, await predictedWorstMinFees(s.l2.node))
 }
 
-/** What the app names for a private exit: the FPC's `pay_fee` from held credit under the exit's
- *  limits at the predicted worst fee — the ceiling the FPC keeps in full. The limits are clamped to
- *  what this network admits per transaction (a local network caps DA gas far below testnet's
- *  117,668): a no-op at the app's limits, and where it ever binds the report shows the declared
- *  limits beside the constant, since a lower ceiling is a different deduction and note selection. */
-export async function privateExitFee(s: SmokeContext): Promise<{ fee: Record<string, unknown>; ceiling: bigint; limits: HubGasLimits }> {
+/** What the app names for a transaction paid from held credit: the FPC's `pay_fee` under the
+ *  transaction's limits at the predicted worst fee — the ceiling the FPC keeps in full. The limits
+ *  are clamped to what this network admits per transaction (a local network caps DA gas far below
+ *  testnet's 117,668): a no-op at the app's limits, and where it ever binds the report shows the
+ *  declared limits beside the constant, since a lower ceiling is a different deduction and note
+ *  selection. */
+export async function privateCreditFee(
+	s: SmokeContext,
+	gas: HubGasLimits,
+): Promise<{ fee: Record<string, unknown>; ceiling: bigint; limits: HubGasLimits }> {
 	const [maxFeesPerGas, info] = await Promise.all([predictedWorstMinFees(s.l2.node), s.l2.node.getNodeInfo()])
 	const max = info.txsLimits.gas
-	const limits = { daGas: Math.min(PRIVATE_HUB_EXIT_GAS.daGas, max.daGas), l2Gas: Math.min(PRIVATE_HUB_EXIT_GAS.l2Gas, max.l2Gas) }
+	const limits = { daGas: Math.min(gas.daGas, max.daGas), l2Gas: Math.min(gas.l2Gas, max.l2Gas) }
 	const fee = {
 		paymentMethod: privateFeeJuicePayment(AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)),
 		gasSettings: { gasLimits: Gas.from(limits), teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }), maxFeesPerGas },
 	}
 	return { fee, ceiling: privateFpcFeeLimit(limits, maxFeesPerGas), limits }
 }
+
+export const privateExitFee = (s: SmokeContext) => privateCreditFee(s, PRIVATE_HUB_EXIT_GAS)
 
 /** The landed exit's bill beside its simulation, and what the FPC took from the credit. Fails the
  *  flow rather than record a hole: missing evidence, a landed fee that is not the simulated gas at

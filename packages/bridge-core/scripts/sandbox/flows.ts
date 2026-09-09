@@ -106,12 +106,15 @@ export async function flowRelayedPrivateDeposit(s: SmokeContext, token: Manifest
 	return `wrong recipient rejected, then ${outcome.path} submitted by the relayer credited the actor`
 }
 
+/** The slice has to buy enough Fee Juice to pay the claim it funds, which the mock's fixed rate
+ *  makes exact: 40 whole 6-decimal units → 4×10^19 FJ-wei. */
+export const TOKEN_PLUS_GAS_FUEL_UNITS = 40n
+export const GAS_ONLY_AMOUNT = 20n * MIN_FJ
+
 export async function flowTokenPlusGas(s: SmokeContext, token: ManifestToken, l2Token: ContractBase): Promise<string> {
 	const unit = 10n ** BigInt(token.decimals)
 	const total = 100n * unit
-	// The slice has to buy enough Fee Juice to pay the claim it funds, which the mock's fixed rate
-	// makes exact: 40 whole 6-decimal units → 4×10^19 FJ-wei.
-	const fuelAmount = 40n * unit
+	const fuelAmount = TOKEN_PLUS_GAS_FUEL_UNITS * unit
 	await mint(s.l1, token.erc20 as Address, s.l1.account.address, total)
 	const route = mockRoute(token.erc20 as Address, s.clients.deployment.feeJuice, s.clients.deployment.tokens.weth)
 	const res = await send(s, s.l1, {
@@ -144,7 +147,7 @@ export async function flowTokenPlusGas(s: SmokeContext, token: ManifestToken, l2
 }
 
 export async function flowGasOnly(s: SmokeContext): Promise<string> {
-	const amount = 20n * MIN_FJ
+	const amount = GAS_ONLY_AMOUNT
 	const feeAsset = s.clients.deployment.feeJuice
 	await mintFeeAsset(s.l1, feeAsset, s.l1.account.address, amount)
 	await ensureRouterPermit2(s.l1, { usdc: feeAsset, usdcAbi: TestERC20Abi, permit2: PERMIT2, needed: amount, mins: s.mins })
@@ -445,7 +448,7 @@ async function rejectTamperedRegistration(s: SmokeContext, block: JournalTokenBl
 }
 
 export async function flowRejectedRegistration(s: SmokeContext, mode: FeeMode): Promise<string> {
-	if (mode === "private-fpc") await ensurePrivateFpc(s)
+	if (mode === "private-fpc") await ensurePrivateFpc(s.l2)
 	const unit = 10n ** 6n
 	const total = 100n * unit
 	const fuelAmount = mode === "sponsored" ? 0n : 40n * unit
@@ -487,7 +490,7 @@ export async function flowGuardianPause(s: SmokeContext, token: ManifestToken): 
 		authwitNonce: Fr.random(),
 		isPrivate: false,
 	}
-	await s.hub.methods.set_exits_paused(true).send(s.l2.sendOpts as never)
+	await s.hub.methods.set_exits_paused(true).send(s.guardianOpts as never)
 	let claimed: string
 	try {
 		if (!(await hubExitsPaused(s.hub, s.l2.from.toString()))) throw new Error("exits_paused() stayed false after the pause")
@@ -502,7 +505,7 @@ export async function flowGuardianPause(s: SmokeContext, token: ManifestToken): 
 		// Claims are deliberately NOT pausable: a deposit already made must always be claimable.
 		claimed = await flowPublicDeposit(s, token, await s.l2TokenOf(tokenBlockOf(token)))
 	} finally {
-		await s.hub.methods.set_exits_paused(false).send(s.l2.sendOpts as never)
+		await s.hub.methods.set_exits_paused(false).send(s.guardianOpts as never)
 	}
 	if (await hubExitsPaused(s.hub, s.l2.from.toString())) throw new Error("exits_paused() stayed true after the unpause")
 	return `exit preflight refused with "exits paused" while a claim still landed (${claimed}); unpaused`

@@ -14,10 +14,11 @@ import { signedMinFuelOutput } from "../../src/gas-share"
 import { exitViaHub, type HubExitParams, preflightHubExit } from "../../src/hub-l2"
 import type { JournalTokenBlock } from "../../src/journal"
 import type { ManifestToken } from "../../src/manifest-v2"
-import { deriveBridgeSecret, PRIVATE_FPC_ADDRESS } from "../../src/private-fuel"
+import { deriveBridgeSecret, ownGasTxs, PRIVATE_FPC_ADDRESS, PRIVATE_HUB_CLAIM_GAS } from "../../src/private-fuel"
 import { discoverFuelRoute } from "../../src/route-discovery"
 import { waitForL1ToL2Message } from "../generation"
 import { ensureRouterPermit2 } from "../script-l1"
+import { flowGasOnly, flowTokenPlusGas, GAS_ONLY_AMOUNT, TOKEN_PLUS_GAS_FUEL_UNITS } from "./flows"
 import { MIN_FJ, MOCK_RATE_NUM, MULTICALL3, PERMIT2, SANDBOX_ETH_FJ, SANDBOX_TIER, ZERO_L1 } from "./constants"
 import {
 	balanceOf,
@@ -27,6 +28,7 @@ import {
 	fuelClaimFee,
 	mintPrivateGasNote,
 	mockRoute,
+	privateCreditFee,
 	privateCreditOf,
 	privateFpc,
 	send,
@@ -162,17 +164,22 @@ export async function flowTokenPlusGasPrivate(
 	if (!base) await waitForL1ToL2Message(s.l2.node, block.registerKey as string, { forceBlock: s.l2.forceBlock })
 	await waitForL1ToL2Message(s.l2.node, res.fuelMessageHashHex as string, { forceBlock: s.l2.forceBlock })
 	const l2Token = await l2TokenOf(block)
-	const before = await balanceOf(l2Token, s.l2.from, "private")
+	// A fresh token's instance does not exist until the registration deploys it: nothing to read.
+	const before = base ? await balanceOf(l2Token, s.l2.from, "private") : 0n
+	// A private first claim registers in a transaction of its own, which is what spends the fuel;
+	// the claim behind it pays from the credit the FPC kept — the app's split exactly.
+	const registeredClaimFee = base ? undefined : (await privateCreditFee(s, PRIVATE_HUB_CLAIM_GAS)).fee
 	const outcome = await claim(s, res, {
 		amount: total - fuelAmount,
 		isPrivate: true,
 		recipient: s.l2.from,
 		fee: await fpcClaimFee(s, res, bridgeSalt),
+		registeredClaimFee,
 		feeMode: "private-fpc",
 	})
 	const gained = (await balanceOf(l2Token, s.l2.from, "private")) - before
 	if (gained < total - fuelAmount) throw new Error(`private token leg credited ${gained}, expected ${total - fuelAmount}`)
-	const expected = base ? "claim" : "register+claim"
+	const expected = base ? "claim" : "register,claim"
 	if (outcome.path !== expected) throw new Error(`expected ${expected}, got ${outcome.path}`)
 	return `${outcome.path} privately, its fee paid by the PrivateFPC from the fuel the same send minted`
 }
@@ -220,9 +227,11 @@ export async function flowGasOnlyPrivate(s: SmokeContext): Promise<string> {
 	return `fee asset → PrivateFPC credit, +${gained} FJ-wei private gas`
 }
 
+export const GAS_ONLY_SWAPPED_UNITS = 30n
+
 /** Cell 20: gas only through a SWAPPED token (USDC → FJ via the venue), public. */
 export async function flowGasOnlySwapped(s: SmokeContext, token: ManifestToken): Promise<string> {
-	const amount = toWei(token, 30n)
+	const amount = toWei(token, GAS_ONLY_SWAPPED_UNITS)
 	await mint(s.l1, token.erc20 as Address, s.l1.account.address, amount)
 	const route = mockRoute(token.erc20 as Address, s.clients.deployment.feeJuice, s.clients.deployment.tokens.weth)
 	const res = await send(s, s.l1, {
@@ -252,7 +261,9 @@ export async function flowGasOnlySwapped(s: SmokeContext, token: ManifestToken):
 /** Cell 21: a WETH deposit takes the single-hop route (native → FeeJuice). */
 export async function flowGasOnlyWethSingleHop(s: SmokeContext): Promise<string> {
 	const weth = s.clients.deployment.tokens.weth
-	const amount = 2n * 10n ** 18n
+	// The venue sells one UNIT of anything for MOCK_RATE_NUM FJ-wei, decimals ignored: an 18-decimal
+	// input is sized in units, or the quote outruns the venue's funding.
+	const amount = 2n * 10n ** 6n
 	await mint(s.l1, weth, s.l1.account.address, amount)
 	const outcome = await discoverFuelRoute({
 		client: s.l1.pub as never,
@@ -350,9 +361,56 @@ export async function flowDiscoveredRouteSend(s: SmokeContext, token: ManifestTo
 // ─── The Outbox ──────────────────────────────────────────────────────────────
 
 /** Cell 32: an exit's L2→L1 message is not consumable before its checkpoint is proven — the Outbox
- *  has no root yet — and reads as NOT consumed either way; after finalization the consume lands. */
+ *  has no root yet — and reads as NOT consumed either way; after finalization the consume lands.
+ *  The automine local network proves a block as soon as it is proposed, so the unproven window is
+ *  usually gone before any check can run: the refusal is asserted whenever an exit IS caught unproven
+ *  (three are tried), and every exit sent is finished the normal way regardless. */
 export async function flowOutboxBeforeProven(s: SmokeContext, token: ManifestToken, l2Token: ContractBase): Promise<string> {
 	const amount = toWei(token, 1n)
+	const seen: string[] = []
+	for (let attempt = 1; attempt <= 3; attempt++) {
+		const receipt = await sendPublicExit(s, token, l2Token, amount)
+		if (await isOutboxMessageConsumed(s.l1, s.l2.node as never, receipt))
+			throw new Error("a just-proposed exit read as already consumed")
+		const status = String((await s.l2.node.getTxReceipt(receipt.txHash as never)).status ?? "")
+		if (!/proven|finalized/i.test(status)) {
+			const witness = await assertConsumeRefused(s, token, receipt, amount)
+			const released = await finishExit(s, token, receipt, amount)
+			return `unproven exit (${status}, attempt ${attempt}): not consumed, consume refused (witness ${witness}); after finalization the consume released ${released}`
+		}
+		seen.push(status)
+		const released = await finishExit(s, token, receipt, amount)
+		if (attempt === 3) {
+			return `no unproven window: ${seen.join(", ")} at the first read (immediate proofs); not consumed before the consume; after finalization the consume released ${released}`
+		}
+	}
+	throw new Error("unreachable: every attempt returns")
+}
+
+/** The witness is computed from the node's own checkpoint data and can exist before the Outbox holds
+ *  the epoch's root; the Outbox is the only judge, so the negative is the consume reverting. */
+async function assertConsumeRefused(
+	s: SmokeContext,
+	token: ManifestToken,
+	receipt: { txHash: unknown },
+	amount: bigint,
+): Promise<"computable" | "absent"> {
+	const eff = await s.l2.node.getTxEffect(receipt.txHash as never)
+	const messageHash = eff?.data.l2ToL1Msgs[0]
+	if (!messageHash) throw new Error("the exit produced no L2→L1 message")
+	const { l1ContractAddresses } = await s.l2.node.getNodeInfo()
+	const outbox = new OutboxContract(s.l1.pub as never, l1ContractAddresses.outboxAddress)
+	const wit = await computeL2ToL1MembershipWitness(s.l2.node as never, outbox, messageHash, receipt.txHash as never, 0).catch(
+		() => undefined,
+	)
+	if (wit !== undefined && !(await withdrawRefused(s, token, amount, wit))) {
+		throw new Error("the portal accepted a consume before the checkpoint was proven")
+	}
+	return wit ? "computable" : "absent"
+}
+
+/** The public burn's authwit, then the exit itself — PROPOSED when this returns. */
+async function sendPublicExit(s: SmokeContext, token: ManifestToken, l2Token: ContractBase, amount: bigint): Promise<{ txHash: unknown }> {
 	const authwitNonce = Fr.random()
 	const exit: HubExitParams = {
 		l2Token: token.l2Token,
@@ -362,8 +420,6 @@ export async function flowOutboxBeforeProven(s: SmokeContext, token: ManifestTok
 		authwitNonce,
 		isPrivate: false,
 	}
-	const from = s.l2.from.toString()
-	// The public burn's authwit, then the exit itself — PROPOSED, not yet proven.
 	const burn = l2Token.methods.burn_public(s.l2.from, amount, authwitNonce)
 	const authwit = await SetPublicAuthwitContractInteraction.create(
 		s.l2.wallet as never,
@@ -372,21 +428,13 @@ export async function flowOutboxBeforeProven(s: SmokeContext, token: ManifestTok
 		true,
 	)
 	await authwit.send(s.l2.sendOpts as never)
-	await preflightHubExit(s.hub, exit, from)
+	await preflightHubExit(s.hub, exit, s.l2.from.toString())
 	const { receipt } = (await exitViaHub(s.hub, exit, s.l2.sendOpts)) as unknown as { receipt: { txHash: unknown } }
-	if (await isOutboxMessageConsumed(s.l1, s.l2.node as never, receipt)) throw new Error("a just-proposed exit read as already consumed")
-	const eff = await s.l2.node.getTxEffect(receipt.txHash as never)
-	const messageHash = eff?.data.l2ToL1Msgs[0]
-	if (!messageHash) throw new Error("the exit produced no L2→L1 message")
-	const { l1ContractAddresses } = await s.l2.node.getNodeInfo()
-	const outbox = new OutboxContract(s.l1.pub as never, l1ContractAddresses.outboxAddress)
-	let witnessed = false
-	try {
-		witnessed =
-			(await computeL2ToL1MembershipWitness(s.l2.node as never, outbox, messageHash, receipt.txHash as never, 0)) !== undefined
-	} catch {}
-	if (witnessed) throw new Error("a witness existed before the checkpoint was proven")
-	// Now finish it the normal way: prove, witness, consume.
+	return receipt
+}
+
+/** Prove, witness, consume — the normal path — and return what L1 released. */
+async function finishExit(s: SmokeContext, token: ManifestToken, receipt: { txHash: unknown }, amount: bigint): Promise<bigint> {
 	const before = await erc20BalanceOf(s.l1, token.erc20 as Address, s.l1.account.address)
 	await withBlockHeartbeat(s.l2, () =>
 		consumeWithdrawal(s.l1, s.l2.node as never, receipt, {
@@ -399,5 +447,144 @@ export async function flowOutboxBeforeProven(s: SmokeContext, token: ManifestTok
 	)
 	const released = (await erc20BalanceOf(s.l1, token.erc20 as Address, s.l1.account.address)) - before
 	if (released < amount) throw new Error(`L1 released ${released}, expected ${amount}`)
-	return `unproven exit: not consumed, no witness; after finalization the consume released ${released}`
+	return released
+}
+
+type Witness = NonNullable<Awaited<ReturnType<typeof computeL2ToL1MembershipWitness>>>
+
+/** Whether the portal refuses the consume the witness describes — the same call `consumeWithdrawal` makes. */
+async function withdrawRefused(s: SmokeContext, token: ManifestToken, amount: bigint, wit: Witness): Promise<boolean> {
+	const path = wit.siblingPath.toBufferArray().map((b: Buffer) => `0x${b.toString("hex")}` as Hex)
+	try {
+		await s.l1.pub.simulateContract({
+			address: token.portal as Address,
+			abi: TOKEN_PORTAL_ABI as never,
+			functionName: "withdraw",
+			args: [
+				s.l1.account.address,
+				amount,
+				false,
+				BigInt(wit.epochNumber),
+				BigInt(wit.numCheckpointsInEpoch),
+				wit.leafIndex,
+				path,
+			] as never,
+			account: s.l1.account,
+		})
+		return false
+	} catch {
+		return true
+	}
+}
+
+// ─── First-time tokens paid from held credit (cells 3 + 4) ───────────────────
+
+/** A first-time token whose registration and claim are paid from private credit the actor already
+ *  holds — public: one `register_and_claim_public`; private: a registration of its own, then the
+ *  claim — followed by a second deposit of the same token that pays only a claim. `pay_fee` keeps
+ *  each transaction's committed ceiling, so the deductions are exact and the second is smaller. */
+export async function flowFirstTimeFromCredit(s: SmokeContext, isPrivate: boolean): Promise<string> {
+	const fpc = await privateFpc(s)
+	const amount = 10n * 10n ** 6n
+	const kind = isPrivate ? "private" : "public"
+	const erc20 = await freshToken(
+		s.l1,
+		{ name: `Credit First ${kind}`, symbol: isPrivate ? "CFP" : "CFU", decimals: 6 },
+		[s.l1.account.address],
+		amount * 2n,
+	)
+	const first = ownGasTxs({ isPrivate, registers: true })
+	const claimFee = await privateCreditFee(s, first.claim)
+	const registerFee = first.register ? await privateCreditFee(s, first.register) : undefined
+	const againFee = await privateCreditFee(s, ownGasTxs({ isPrivate, registers: false }).claim)
+	const firstCeiling = claimFee.ceiling + (registerFee?.ceiling ?? 0n)
+	await mintPrivateGasNote(s, fpc, firstCeiling + againFee.ceiling)
+
+	const deposit = () =>
+		send(s, s.l1, {
+			intent: "token",
+			erc20,
+			amount,
+			aztecRecipient: s.l2.from.toString() as Hex,
+			isPrivate,
+			...(isPrivate ? { claimSalt: Fr.random() } : {}),
+		})
+	const creditStart = await privateCreditOf(s, fpc)
+	const res = await deposit()
+	const one = await claim(s, res, {
+		amount,
+		isPrivate,
+		recipient: s.l2.from,
+		fee: claimFee.fee,
+		registerFee: registerFee?.fee,
+		registeredClaimFee: registerFee ? claimFee.fee : undefined,
+		feeMode: "private-fpc",
+	})
+	const expected = isPrivate ? "register,claim" : "register+claim"
+	if (one.path !== expected) throw new Error(`expected ${expected}, got ${one.path}`)
+	const afterFirst = await privateCreditOf(s, fpc)
+	if (creditStart - afterFirst !== firstCeiling) {
+		throw new Error(`the first-time send deducted ${creditStart - afterFirst}, not its ceiling ${firstCeiling}`)
+	}
+	const two = await claim(s, await deposit(), { amount, isPrivate, recipient: s.l2.from, fee: againFee.fee, feeMode: "private-fpc" })
+	if (two.path !== "claim") throw new Error(`expected a plain claim the second time, got ${two.path}`)
+	const afterSecond = await privateCreditOf(s, fpc)
+	if (afterFirst - afterSecond !== againFee.ceiling) {
+		throw new Error(`the second send deducted ${afterFirst - afterSecond}, not its ceiling ${againFee.ceiling}`)
+	}
+	if (againFee.ceiling >= firstCeiling)
+		throw new Error(`the second send (${againFee.ceiling}) was not cheaper than the first (${firstCeiling})`)
+	const balance = await balanceOf(await s.l2TokenOf(res.token as JournalTokenBlock), s.l2.from, kind)
+	if (balance < amount * 2n) throw new Error(`${kind} balance ${balance} < ${amount * 2n}`)
+	return `${one.path} then ${two.path} from credit: ${firstCeiling} then ${againFee.ceiling} FJ-wei kept by the FPC`
+}
+
+// ─── Held public Fee Juice beside each fueled shape (cells 13b, 15b, 18b, 20b) ─
+
+const HELD_FJ = 5n * MIN_FJ
+
+async function withPublicFjHeld(s: SmokeContext, run: () => Promise<string>): Promise<{ line: string; before: bigint; after: bigint }> {
+	await fundPublicFeeJuice(s, HELD_FJ)
+	const before = await balanceOf(s.feeJuiceL2, s.l2.from, "public")
+	const line = await run()
+	return { line, before, after: await balanceOf(s.feeJuiceL2, s.l2.from, "public") }
+}
+
+function conserved(label: string, r: { before: bigint; after: bigint }, claimed: bigint, fee: bigint): string {
+	if (r.after !== r.before + claimed - fee) {
+		throw new Error(
+			`${label}: public FJ ${r.before} → ${r.after}, expected ${r.before + claimed - fee} (+${claimed} claimed, −${fee} fee)`,
+		)
+	}
+	return `held public FJ conserved: ${r.before} + ${claimed} − ${fee} = ${r.after}`
+}
+
+/** Cell 13b: the fueled claim lands its Fee Juice in the sender's own transaction — the held
+ *  balance grows by what was bridged less the fee that transaction charged. */
+export async function flowFueledClaimWithPublicFjHeld(s: SmokeContext, token: ManifestToken, l2Token: ContractBase): Promise<string> {
+	const r = await withPublicFjHeld(s, () => flowTokenPlusGas(s, token, l2Token))
+	const fee = s.samples.fees.at(-1)?.transactionFee ?? 0n
+	return `${r.line}; ${conserved("fueled claim", r, TOKEN_PLUS_GAS_FUEL_UNITS * toWei(token, 1n) * MOCK_RATE_NUM, fee)}`
+}
+
+/** Cell 15b: a private fueled deposit never touches the held PUBLIC balance (the private fence). */
+export async function flowPrivateFuelWithPublicFjHeld(
+	s: SmokeContext,
+	token: ManifestToken,
+	l2TokenOf: (b: JournalTokenBlock) => Promise<ContractBase>,
+): Promise<string> {
+	const r = await withPublicFjHeld(s, () => flowTokenPlusGasPrivate(s, token, l2TokenOf))
+	return `${r.line}; ${conserved("private fuel", r, 0n, 0n)}`
+}
+
+/** Cell 18b: the identity route adds to what is already held. */
+export async function flowGasOnlyWithPublicFjHeld(s: SmokeContext): Promise<string> {
+	const r = await withPublicFjHeld(s, () => flowGasOnly(s))
+	return `${r.line}; ${conserved("identity route", r, GAS_ONLY_AMOUNT, 0n)}`
+}
+
+/** Cell 20b: the swapped route adds exactly its quote to what is already held. */
+export async function flowGasOnlySwappedWithPublicFjHeld(s: SmokeContext, token: ManifestToken): Promise<string> {
+	const r = await withPublicFjHeld(s, () => flowGasOnlySwapped(s, token))
+	return `${r.line}; ${conserved("swapped route", r, toWei(token, GAS_ONLY_SWAPPED_UNITS) * MOCK_RATE_NUM, 0n)}`
 }

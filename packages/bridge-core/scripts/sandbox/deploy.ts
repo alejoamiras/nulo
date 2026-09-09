@@ -8,11 +8,12 @@ import { openDeployJournal, writeCandidateAtomically } from "../deploy-manifest"
 import { deployGeneration, preCreateToken } from "../generation"
 import { createL1Clients, stopwatch } from "../script-bootstrap"
 import { anvilKey, CHAIN_ID, KEY_0, lc, PERMIT2, sandboxChain } from "./constants"
+import { ensurePrivateFpc } from "./context"
 import { deployDripFixture } from "./drip"
 import { ensureForgeArtifacts } from "./forge"
 import type { SandboxClients, SandboxHandle } from "./handle"
 import { copyCanonicalCode, deployL1Fixtures } from "./l1"
-import { type Actor, connectL2, createActor, l2CtxFor, SANDBOX_ACTOR_SALT, SANDBOX_ACTOR_SECRET } from "./l2"
+import { type Actor, adoptGuardian, connectL2, createActor, l2CtxFor, SANDBOX_ACTOR_SALT, SANDBOX_ACTOR_SECRET } from "./l2"
 import { buildManifest, sandboxSwapBlock, type SwapBlock, writeArtifacts } from "./manifest"
 
 export interface DeployedSandbox {
@@ -46,7 +47,11 @@ export async function deployEverything(net: { anvilUrl: string; nodeUrl: string 
 
 	const l2base = await connectL2(net.nodeUrl)
 	const actor = await createActor(l2base.wallet, l2base.node, l2base.fee, SANDBOX_ACTOR_SECRET, SANDBOX_ACTOR_SALT)
+	await adoptGuardian(l2base, SANDBOX_ACTOR_SECRET, SANDBOX_ACTOR_SALT)
 	const l2 = l2CtxFor(l2base, actor.address)
+	// Part of the network like the sponsor is: tools pre-registers the pinned PrivateFPC at connect
+	// and a wallet syncs it from the node, so it must be published before any browser reads it.
+	await ensurePrivateFpc(l2)
 	const info = await l2.node.getNodeInfo()
 	const addrs = {
 		feeJuice: lc(info.l1ContractAddresses.feeJuiceAddress.toString()),

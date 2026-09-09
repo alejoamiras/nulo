@@ -31,7 +31,7 @@ describe.skipIf(!INTEGRATION)("the gas leg", () => {
 
 	it("token + gas, private, first-time token: registration then credit (cell 16)", async () => {
 		const a = await freshActor()
-		expect(await flowTokenPlusGasPrivate(a.s, undefined, a.s.l2TokenOf)).toContain("register+claim privately")
+		expect(await flowTokenPlusGasPrivate(a.s, undefined, a.s.l2TokenOf)).toContain("register,claim privately")
 	})
 
 	it("a floor above the venue's output is refused at settlement (cell 17)", async () => {

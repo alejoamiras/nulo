@@ -1,5 +1,12 @@
 import { beforeAll, describe, expect, it } from "vitest"
-import { flowGuardianPause, flowPrivateGasFragmented, flowPrivateGasOneNote, flowPublicDeposit, runExit } from "../../scripts/sandbox/flows"
+import {
+	flowGuardianPause,
+	flowPrivateDeposit,
+	flowPrivateGasFragmented,
+	flowPrivateGasOneNote,
+	flowPublicDeposit,
+	runExit,
+} from "../../scripts/sandbox/flows"
 import { flowOutboxBeforeProven } from "../../scripts/sandbox/flows-matrix"
 import { type ActorContext, freshActor, INTEGRATION, sandbox } from "./sandbox"
 
@@ -7,9 +14,11 @@ describe.skipIf(!INTEGRATION)("exits", () => {
 	let a: ActorContext
 	beforeAll(async () => {
 		a = await freshActor()
-		// Something to exit: the actor starts empty.
+		// Something to exit on both sides: the actor starts empty.
 		const { usdc } = await sandbox()
-		await flowPublicDeposit(a.s, usdc, await a.l2TokenOf(usdc))
+		const l2Token = await a.l2TokenOf(usdc)
+		await flowPublicDeposit(a.s, usdc, l2Token)
+		await flowPrivateDeposit(a.s, usdc, l2Token)
 	})
 
 	it("public exit → Outbox consume releases on L1 (cell 27)", async () => {

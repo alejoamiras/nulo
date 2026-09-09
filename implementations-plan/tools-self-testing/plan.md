@@ -265,24 +265,24 @@ Fast layers on every gate: `bun run lint` + `bun run typecheck:all` + the touche
 
 ### Arc 2 — Bridge integration suite
 
-#### Phase 2: Extract the harness; vendor canonical bytecode; make flows stateless; measure
+#### Phase 2 ✓: Extract the harness; vendor canonical bytecode; make flows stateless; measure
 - `scripts/sandbox/{index,fixtures,manifest,actors,flows,handle,cli}.ts`; `deploy-sandbox.ts` becomes an alias. Flows take `SandboxClients` + an actor and return their samples; no module state; `optionalFlow` removed. `local-network.ts`: drop `--disable-admin-api-key`, log listeners at boot.
 - `exports["./sandbox"]`; `tsconfig.scripts.json` includes `test/**`; unit `vitest.config.ts` excludes `test/integration/**`.
 - `bytecode/permit2.json`, `multicall3.json`: runtime code + keccak pinned from an independent source (two public RPCs must agree AND match the published canonical code hash, recorded in the file); `copyCanonicalCode` reads the file and re-checks; `refresh-canonical-bytecode.ts` re-fetches and diffs.
 - `cli.ts up` builds `forge out/` when absent (same pins as `_bridge-contracts.yml`). `smoke` prints per-flow durations.
 - **Validation gate**: `bun run --cwd packages/bridge-core typecheck && bun run --cwd packages/bridge-core test` exit 0; `bun run --cwd packages/bridge-core sandbox:smoke` completes with `✅`, no `SEPOLIA_RPC_URL` fetch in its log, listeners logged; the per-flow duration table is pasted into `lessons/phase-2.md`. Layers: typecheck · unit · live-sandbox smoke.
 
-#### Phase 3: `MockV4Quoter` + real `swap` block + the missing seam-level cells
+#### Phase 3 ✓: `MockV4Quoter` + real `swap` block + the missing seam-level cells
 - `MockV4Quoter.sol is IV4Quoter` + `MockV4Quoter.t.sol` (composition == `MockSwapTarget.swap` for dust, half-cap, both currency orderings, rate change; allow-list revert); `src/quoter-abi.test.ts`; `_bridge-contracts.yml` ABI-pins step adds `quoter-abi`.
 - `manifest.ts` emits the `swap` block + `rollupVersion` + permissionless-mint token sources; `flows.ts` gains the "I" cells 5, 14–21, 23, 32 (fee-method validity, fueled variants, identity/WETH/swapped gas-only, `minFuelFj` revert, facade-quoted send, outbox-before-proven).
 - **Validation gate**: `cd contracts/bridge/evm && forge test --no-match-contract Fork` exit 0; `bun run --cwd packages/bridge-core test -- quoter-abi` exit 0 (with `out/` present); `bun run --cwd packages/bridge-core sandbox:smoke` green including the new flows. Layers: unit (forge, vitest) · live-sandbox smoke.
 
-#### Phase 4: Vitest integration suite + Dripper fixture
+#### Phase 4 ✓: Vitest integration suite + Dripper fixture
 - `vitest.integration.config.ts` (`fileParallelism: false`, `testTimeout` 300 s, `globalSetup` boots via `startLocalNetwork` + fixtures and `provide()`s the JSON handle; `BRIDGE_INTEGRATION=1` set by the script and asserted by `describe.skipIf(!process.env.BRIDGE_INTEGRATION)`). Each test `openSandbox(inject("handle"))` → `newActor` → `fundFeeFixture` → flow → postconditions.
 - Dripper + NULO/OLUN deployed in `fixtures.ts`; `deployments.json` written; `drip.integration.test.ts`.
 - **Validation gate**: `bun run --cwd packages/bridge-core test:integration` exit 0 with every matrix "I" cell present as a named test; `bun run --cwd packages/bridge-core test` still exit 0 and does not collect `test/integration/**`. Layers: typecheck · unit · integration (live sandbox).
 
-#### Phase 5: CI job for the suite (+ TXE attempt)
+#### Phase 5 ✓: CI job for the suite (+ TXE attempt)
 - `_bridge-contracts.yml` gains `integration` (setup-bun → `setup-aztec` at the bridge-core pin, own cache key → the `forge` job's install/remappings/build steps → `test:integration`, `timeout-minutes: 30`, logs artifact on failure) and `txe` (`setup-aztec` at the `Nargo.toml` pin → `run-txe-tests.sh`). `bridge-contracts.yml` filter (literal per-dep entries per the guard): `contracts/bridge/**`, `packages/bridge-core/**`, `packages/wallet-crypto/src/**` + `package.json`, `packages/wallet-core/src/**` + `package.json`, `packages/resolve-asset/src/**` + `package.json`, `apps/tools/public/*-bridge.json`, `patches/**`, `bun.lock`, `package.json`, `bunfig.toml`, the two workflow files, `.github/actions/setup-aztec/**`, `.github/actions/setup-bun/**`; guard extended with a bridge-graph assertion.
 - **Validation gate**: `bun run lint:actions` + `bun run test:ci-gating` exit 0. Layers: lint · unit. CI proof at Delivery: `integration` success on the arc-2 PR; `txe` failing for toolchain reasons → log + drop the job in the fix loop.
 

@@ -426,21 +426,37 @@ export async function startLocalNetwork(opts: StartLocalNetworkOptions): Promise
 	await registerPorts(opts.runId, ports, process.pid)
 
 	const spawned: OwnedChild[] = []
-	const stop = async (): Promise<void> => {
-		for (const owned of spawned.reverse()) await killGroup(owned)
-		spawned.length = 0
-		await releasePorts(opts.runId, ports)
-		// The store belongs to this network and nothing outlives it; removing it only after the
-		// holders are gone is what keeps the pages from staying pinned.
-		rmSync(dataDir, { recursive: true, force: true })
+	let stopping: Promise<void> | undefined
+	// Idempotent: a second signal while the first stop runs must not re-walk (and re-reverse) the list.
+	const stop = (): Promise<void> => {
+		stopping ??= (async () => {
+			for (const owned of [...spawned].reverse()) await killGroup(owned)
+			await releasePorts(opts.runId, ports)
+			// The store belongs to this network and nothing outlives it; removing it only after the
+			// holders are gone is what keeps the pages from staying pinned.
+			rmSync(dataDir, { recursive: true, force: true })
+		})()
+		return stopping
 	}
 	// Each child is its own process-group leader, so an interrupt delivered to THIS group leaves them
-	// running with the registry still claiming their ports. Reap them on the way out instead.
+	// running with the registry still claiming their ports. Reap them on the way out instead — and
+	// on SIGHUP too, which a closing terminal or tmux window sends while the graceful stop is running.
 	const onSignal = () => {
 		void stop().then(() => process.exit(130))
 	}
 	process.once("SIGINT", onSignal)
 	process.once("SIGTERM", onSignal)
+	process.once("SIGHUP", onSignal)
+	// A host that exits without waiting (vitest's own signal handling, an uncaught error) still must
+	// not orphan a node holding a multi-GB store: the last-resort reap is synchronous.
+	process.once("exit", () => {
+		for (const owned of spawned) {
+			try {
+				if (owned.child.pid) process.kill(-owned.child.pid, "SIGKILL")
+			} catch {}
+		}
+		rmSync(dataDir, { recursive: true, force: true })
+	})
 	try {
 		console.log(`[sandbox] anvil ${anvilUrl}, aztec ${nodeUrl}, data ${dataDir}`)
 		spawned.push(own(spawnAnvil(tool, ports.anvil)))

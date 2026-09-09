@@ -11,7 +11,7 @@ import { join } from "node:path"
 import { ARTIFACT_FILES } from "./manifest"
 import { CHAIN_ID, sandboxChain } from "./constants"
 import type { L1Deployment } from "./l1"
-import { connectL2, type L2Base } from "./l2"
+import { adoptGuardian, connectL2, type L2Base } from "./l2"
 import { stopwatch } from "../script-bootstrap"
 
 const hex = z.string().regex(/^0x[0-9a-fA-F]+$/)
@@ -76,6 +76,7 @@ export async function openSandbox(handle: SandboxHandle): Promise<SandboxClients
 	const l1: L1Ctx = { ...createL1Clients({ chain, rpcUrl: handle.anvilUrl, account }), account }
 	const l1b: L1Ctx = { ...createL1Clients({ chain, rpcUrl: handle.anvilUrl, account: second }), account: second }
 	const l2 = await connectL2(handle.nodeUrl)
+	await adoptGuardian(l2, handle.l2.actorSecret as `0x${string}`, BigInt(handle.l2.actorSalt))
 	return {
 		handle,
 		l1,
