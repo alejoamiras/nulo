@@ -67,4 +67,6 @@ stricter reconnect driver, with a slow-frame regression cell.
 **Run 4** (`80e0a380`, both harness fixes): **`tools-e2e-status` green — all six shards at retry 0**;
 #575 and #576 fully green. The plan's CI proof stands here. Run 5 carries the submission-based FPC
 accounting (`lessons/phase-9.md` § Delivery, cell 1), a change to what the suite asserts, not to what
-it drives.
+it drives. Run 5: five of six shards green; shard 4 lost cell 12 to the generic stand-down under the
+confirm's own reads (`lessons/phase-9.md` § Delivery), the same shape as run 3's cell 2 — the
+wizard's log names the input from run 6 on.

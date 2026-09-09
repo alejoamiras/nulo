@@ -676,7 +676,7 @@ function goToStep(index: 0 | 1 | 2): void {
 function invalidateReview(why?: string, changed?: string[]): void {
 	const signingThisReview = submitting.value && backgroundedId.value === null
 	if (step.value !== 2 || stage.value !== "wizard" || signingThisReview) return
-	log("review stood down", { why: why ?? "(a watched input changed)", changed, preflighting: preflighting.value })
+	log("review stood down", { why: why ?? "(a watched input changed)", changed: changed?.join(","), preflighting: preflighting.value })
 	reviewed.value = null
 	step.value = 1
 	reviewStale.value = true

@@ -149,7 +149,10 @@ the host never produces:
   now names the inputs that moved (`changed: [...]`), and `confirmReview` waits for the enabled
   button OR the stale notice, so a stand-down that lands before the button is pressed is one more
   re-review, not a timeout. Which of the confirm's own re-read outputs moves on a slow runner is
-  the next CI log's to say — an owner follow-up in `MORNING.md`.
+  the next CI log's to say — an owner follow-up in `MORNING.md`. Run 5 added cell 12 to the same
+  file: the confirm's injected read failure should end in the named "could not be read just now"
+  verdict and did locally, twice; on the runner the generic watcher stand-down fired first, with one
+  input changed — the log had serialised the names as `Array(1)`, so it now joins them.
 
 - **Cell 1 (deposit-token, the FPC kept less than the predicted ceiling — found locally).** The
   harness prices a claim's ceiling through its scripting wallet, funds the credit, then drives the UI;

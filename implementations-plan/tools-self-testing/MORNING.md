@@ -96,11 +96,13 @@ Open:
   any more. Codex asked for the boundary — credit equal to the ceiling lands, one unit short is
   refused — to live where prices are fixed: the in-process integration suite, which supplies its own
   cap. A short flow there; your call whether before or after the clean week.
-- **A review stood down by the confirm's own preflight** (`lessons/phase-9.md` § Delivery, cell 2):
-  on a slow runner a watched input moved twice under one confirm's re-reads and stood the review
-  down twice. The wizard's log now names the input; when the next CI log shows which one, decide
-  whether the confirm's own re-read outputs (`tokenOnlyBlocked`, `gasShare.txTarget`) should stand a
-  review down through the watcher at all, or only through the preflight's tolerant verdict.
+- **A review stood down by the confirm's own preflight** (`lessons/phase-9.md` § Delivery, cells 2
+  and 12): on a slow runner a watched input moves under the confirm's re-reads and the generic
+  stand-down fires before the preflight's named verdict (cell 12 saw "Something changed" where it
+  expects "could not be read just now"; cell 2 was stood down twice). The wizard's log now names
+  the input (`changed:`); the next CI log that shows it decides the fix — most likely that the
+  confirm's own re-read outputs (`tokenOnlyBlocked`, the intent auto-move, `gasShare.txTarget`)
+  should defer to the preflight's verdict while it is reading, as the account and chain do not.
 - **Promotion** of the two advisory aggregators — below.
 
 ## What to promote, and when
