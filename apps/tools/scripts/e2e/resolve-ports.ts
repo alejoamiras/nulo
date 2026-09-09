@@ -11,7 +11,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { createServer } from "node:net"
 import { join } from "node:path"
-import { registerHostPorts, releaseHostPorts } from "@nulo/bridge-core/sandbox"
+import { PortClaimConflict, registerHostPorts, registeredPorts, releaseHostPorts } from "@nulo/bridge-core/sandbox"
 
 const STATIC_LO = 10_000
 const FLOOR_GUARD = 512
@@ -55,10 +55,23 @@ if (process.argv[2] === "--release") {
 } else {
 	const [stateDir, runId, pid] = process.argv.slice(2)
 	if (!stateDir || !runId) throw new Error("resolve-ports: <state-dir> <run-id> [pid] required")
-	const taken = new Set<number>()
-	const ports = { tools: await reserve(taken), testWallet: await reserve(taken), resolvedAt: new Date().toISOString() }
-	await registerHostPorts(runId, "tools-e2e", { tools: ports.tools, testWallet: ports.testWallet }, Number(pid) || process.pid)
+	const ports = await claim(runId, Number(pid) || process.pid)
 	mkdirSync(stateDir, { recursive: true })
-	writeFileSync(join(stateDir, "ports.json"), `${JSON.stringify(ports, null, 2)}\n`)
+	writeFileSync(join(stateDir, "ports.json"), `${JSON.stringify({ ...ports, resolvedAt: new Date().toISOString() }, null, 2)}\n`)
 	console.log(`[e2e:tools] tools=:${ports.tools} test-wallet=:${ports.testWallet}`)
+}
+
+/** Bind-test around every port the registry lists, then claim under its lock; a claim another run
+ *  beat this one to is picked again. */
+async function claim(runId: string, pid: number): Promise<{ tools: number; testWallet: number }> {
+	for (let attempt = 0; ; attempt++) {
+		const taken = registeredPorts()
+		const ports = { tools: await reserve(taken), testWallet: await reserve(taken) }
+		try {
+			await registerHostPorts(runId, "tools-e2e", ports, pid)
+			return ports
+		} catch (e) {
+			if (!(e instanceof PortClaimConflict) || attempt >= 4) throw e
+		}
+	}
 }

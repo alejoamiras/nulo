@@ -145,6 +145,9 @@ test("cell 4 — plain, private, first-time token from credit: a registration of
 	expect(await privateCreditOf(actor.s, await privateFpc(actor.s)), "the FPC kept the register + claim ceiling").toBe(
 		creditBefore - ceiling,
 	)
+	expect(record?.token?.erc20.toLowerCase()).toBe(erc20.toLowerCase())
+	const freshL2 = await actor.s.l2TokenOf(record?.token as never)
+	expect(await balanceOf(freshL2, actor.actor.address, "private"), "the whole amount arrived, privately").toBe(10n * USDC)
 })
 
 test("cell 5 — selfpay, public, registered token: the claim is paid from held public Fee Juice", async ({ page, sandbox, actor, l1 }) => {

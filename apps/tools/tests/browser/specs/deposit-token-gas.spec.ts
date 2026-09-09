@@ -164,6 +164,13 @@ test("cell 16 — plain, private, first-time token: registration, then the credi
 	expect(await privateCreditOf(actor.s, await privateFpc(actor.s)), "credit = the fuel minus the register + claim ceilings").toBe(
 		received - kept,
 	)
+	// The token leg is the record's amount (the send minus the slice that became gas), delivered whole.
+	expect(record?.token?.erc20.toLowerCase()).toBe(erc20.toLowerCase())
+	const freshL2 = await actor.s.l2TokenOf(record?.token as never)
+	expect(await balanceOf(freshL2, actor.actor.address, "private"), "the token leg arrived privately, whole").toBe(
+		BigInt(record?.amount ?? "0"),
+	)
+	expect(BigInt(record?.amount ?? "0")).toBeGreaterThan(0n)
 })
 
 test("cell 17 — the slice under the claim minimum is refused at the amount step, nothing signed", async ({ page, sandbox, actor, l1 }) => {

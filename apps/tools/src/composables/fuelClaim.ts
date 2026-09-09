@@ -181,7 +181,8 @@ function buildPrivateFuelClaim(
 			// balance-check bound (getFeeLimit), so {@link clearsFeeLimit} above fail-closes on it.
 			gasLimits: Gas.from(clampGas(PRIVATE_CLAIM_GAS)),
 			teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
-			...(deps.maxFeesPerGas ? { maxFeesPerGas: deps.maxFeesPerGas } : {}),
+			// Both spellings: the wallet-sdk option schema names the cap `maxFeePerGas`, the wallets read `maxFeesPerGas`.
+			...(deps.maxFeesPerGas ? { maxFeesPerGas: deps.maxFeesPerGas, maxFeePerGas: deps.maxFeesPerGas } : {}),
 		},
 	}
 	const carrier = () => new BatchCall(aztec as never, [])
@@ -239,7 +240,7 @@ function buildPublicFuelClaim(
 		gasSettings: {
 			gasLimits: Gas.from(clampGas(PUBLIC_CLAIM_GAS)),
 			teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
-			...(deps.maxFeesPerGas ? { maxFeesPerGas: deps.maxFeesPerGas } : {}),
+			...(deps.maxFeesPerGas ? { maxFeesPerGas: deps.maxFeesPerGas, maxFeePerGas: deps.maxFeesPerGas } : {}),
 		},
 	}
 	const carrier = () => new BatchCall(aztec as never, [])

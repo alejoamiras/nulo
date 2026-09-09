@@ -10,7 +10,9 @@ export * from "./l2"
 export {
 	type LocalNetwork,
 	type StartLocalNetworkOptions,
+	PortClaimConflict,
 	registerHostPorts,
+	registeredPorts,
 	releaseHostPorts,
 	startLocalNetwork,
 } from "./local-network"

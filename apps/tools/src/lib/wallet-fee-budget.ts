@@ -30,8 +30,11 @@ type SimulatedGasSettings = {
 	maxFeesPerGas?: { feePerDaGas: bigint | number | string; feePerL2Gas: bigint | number | string }
 }
 
-const quotes = new Map<string, { maxFees: MaxFees; at: number; pending?: Promise<MaxFees> }>()
-/** Bumped by every forget: a probe still in flight from before it must not repopulate the cache. */
+type Quote = { maxFees: MaxFees; at: number; epoch: number; pending?: Promise<MaxFees> }
+/** Quotes live with the WALLET that gave them: the same address reconnected through another wallet
+ *  is another policy, and a replaced wallet object takes its quotes with it. */
+const quotesByWallet = new WeakMap<object, Map<string, Quote>>()
+/** Bumped by every forget: a quote from before it, cached or still in flight, no longer counts. */
 let epoch = 0
 let networkMax: GasLimits | null = null
 
@@ -63,28 +66,33 @@ const keyOf = (account: AztecAddress) => account.toString()
 export async function walletMaxFees(aztec: unknown, account: AztecAddress, gas: GasLimits): Promise<MaxFees> {
 	const wallet = aztec as SimulatingWallet | null | undefined
 	if (!wallet || typeof wallet.simulateTx !== "function") return predictedWorstMinFees(createAztecNodeClient(NETWORK.nodeUrl))
+	let quotes = quotesByWallet.get(wallet)
+	if (!quotes) {
+		quotes = new Map()
+		quotesByWallet.set(wallet, quotes)
+	}
 	const key = keyOf(account)
 	const cached = quotes.get(key)
-	if (cached?.pending) return cached.pending
-	if (cached && Date.now() - cached.at <= QUOTE_FRESH_MS) return cached.maxFees
+	const current = cached?.epoch === epoch ? cached : undefined
+	if (current?.pending) return current.pending
+	if (current && Date.now() - current.at <= QUOTE_FRESH_MS) return current.maxFees
 	const mine = epoch
 	const pending = probe(wallet, account, gas)
 		.then((maxFees) => {
-			if (mine === epoch) quotes.set(key, { maxFees, at: Date.now() })
+			if (mine === epoch) quotes.set(key, { maxFees, at: Date.now(), epoch: mine })
 			return maxFees
 		})
 		.catch((e) => {
 			if (mine === epoch) quotes.delete(key)
 			throw e
 		})
-	quotes.set(key, { maxFees: cached?.maxFees ?? { feePerDaGas: 0n, feePerL2Gas: 0n }, at: cached?.at ?? 0, pending })
+	quotes.set(key, { maxFees: current?.maxFees ?? { feePerDaGas: 0n, feePerL2Gas: 0n }, at: current?.at ?? 0, epoch: mine, pending })
 	return pending
 }
 
 /** Forget every quote: a new account or wallet prices from scratch, and a probe still running for
  *  the old one lands nowhere. */
 export function forgetWalletFees(): void {
-	quotes.clear()
 	epoch++
 }
 

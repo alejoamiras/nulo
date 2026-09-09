@@ -30,6 +30,11 @@ if [ "${1:-}" = "reap" ]; then
       kill -KILL -- "-$pgid" 2>/dev/null || true
     fi
     rm -f "$pidfile"
+    # The run's browser ports were claimed under the state dir's name (its run id); release them too.
+    statedir=$(dirname "$pidfile")
+    if [ -f "$statedir/ports.json" ]; then
+      bun scripts/e2e/resolve-ports.ts --release "$statedir" "$(basename "$statedir")" 2>/dev/null || true
+    fi
   done
   [ "$found" = 1 ] || echo "[e2e:tools] nothing to reap"
   exit 0
@@ -57,8 +62,9 @@ reap() {
     for _ in $(seq 1 60); do kill -0 "$SANDBOX_PID" 2>/dev/null || break; sleep 1; done
     kill -KILL -- "-$SANDBOX_PID" 2>/dev/null || true
   fi
-  # A pid file that outlives its group would let a later `reap` mistake a recycled pgid for ours.
-  [ "${NULO_E2E_KEEP:-}" = "1" ] || rm -f "$STATE_DIR/sandbox.pid"
+  # A pid file that outlives its group would let a later `reap` mistake a recycled pgid for ours —
+  # ours alone: an attached run never booted the sandbox it used and leaves the keeper's file be.
+  if [ -n "$SANDBOX_PID" ] && [ "${NULO_E2E_KEEP:-}" != "1" ]; then rm -f "$STATE_DIR/sandbox.pid"; fi
   # The browser ports' registry rows belong to this run alone; a kept run keeps them claimed.
   if [ "${NULO_E2E_KEEP:-}" != "1" ] && [ -z "${NULO_E2E_ATTACH:-}" ] && [ -f "$STATE_DIR/ports.json" ]; then
     bun scripts/e2e/resolve-ports.ts --release "$STATE_DIR" "$RUN_ID" 2>/dev/null || true

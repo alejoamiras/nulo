@@ -86,6 +86,15 @@ describe("walletMaxFees", () => {
 		expect(fresh.simulateTx).toHaveBeenCalledTimes(1)
 	})
 
+	it("the same address through another wallet is another policy: each wallet is asked itself", async () => {
+		const honors = wallet("honors")
+		const ignores = wallet("ignores")
+		expect(await walletMaxFees(honors, account, { daGas: 1, l2Gas: 1 })).toEqual({ feePerDaGas: 10n, feePerL2Gas: 20n })
+		expect(await walletMaxFees(ignores, account, { daGas: 1, l2Gas: 1 })).toEqual({ feePerDaGas: 15n, feePerL2Gas: 30n })
+		expect(honors.simulateTx).toHaveBeenCalledTimes(1)
+		expect(ignores.simulateTx).toHaveBeenCalledTimes(1)
+	})
+
 	it("a wallet with no simulation is priced from the node's prediction", async () => {
 		expect(await walletMaxFees({}, account, { daGas: 1, l2Gas: 1 })).toEqual({ feePerDaGas: 10n, feePerL2Gas: 20n })
 	})

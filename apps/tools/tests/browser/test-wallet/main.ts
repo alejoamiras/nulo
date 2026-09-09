@@ -40,16 +40,23 @@ function boot(): Promise<TestWallet> {
  *  otherwise invisible from the page. Methods are bound to the real wallet so its private fields
  *  keep working; the proxy only observes. */
 let callSeq = 0
-let fault: { method: string; pattern?: string; message: string } | undefined
-/** The one-shot fault, consumed by the first matching call; `undefined` when this call is not it. */
-function faultFor(method: string, args: unknown[]): Error | undefined {
+type Fault = { method: string; pattern?: string } & ({ kind: "reject"; message: string } | { kind: "hold" })
+let fault: Fault | undefined
+/** The one-shot fault, consumed by the first matching call; `undefined` when this call is not it.
+ *  A rejection answers the call with an error; a hold never answers it at all (the page that made
+ *  it must be reloaded to get past it — the shape of a wallet that went away mid-call). */
+function faultFor(method: string, args: unknown[]): Promise<never> | undefined {
 	if (!fault || fault.method !== method) return undefined
 	if (fault.pattern !== undefined && !JSON.stringify(args, (_, v) => (typeof v === "bigint" ? v.toString() : v)).includes(fault.pattern))
 		return undefined
-	const { message } = fault
+	const taken = fault
 	fault = undefined
-	line("warn", `injected fault on ${method}: ${message}`)
-	return new Error(message)
+	if (taken.kind === "hold") {
+		line("warn", `injected hold on ${method}: this call never answers`)
+		return new Promise<never>(() => {})
+	}
+	line("warn", `injected fault on ${method}: ${taken.message}`)
+	return Promise.reject(new Error(taken.message))
 }
 /** How often each wallet method was asked, since this frame loaded — what "nothing was submitted" is read from. */
 const calls: Record<string, number> = {}
@@ -68,7 +75,7 @@ function traced(wallet: TestWallet): TestWallet {
 				const injected = faultFor(prop, args)
 				if (injected) {
 					settle("✗")
-					return Promise.reject(injected)
+					return injected
 				}
 				const out: unknown = value.apply(target, args)
 				if (out instanceof Promise) {
@@ -118,7 +125,10 @@ window.__nuloTestWallet = {
 	accounts: async () => (await boot()).getAccounts().then((list) => list.map((a) => a.item.toString())),
 	calls: () => ({ ...calls }),
 	failNext: (method, pattern, message = `test wallet: injected failure of ${method}`) => {
-		fault = { method, pattern, message }
+		fault = { kind: "reject", method, pattern, message }
+	},
+	holdNext: (method, pattern) => {
+		fault = { kind: "hold", method, pattern }
 	},
 	declineNextGrant: async () => {
 		;(await boot()).declineNextGrant = true

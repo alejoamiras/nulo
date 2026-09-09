@@ -91,6 +91,17 @@ payer and reads its postconditions from the chain through the harness.
 | 12 | cells 20/21 lacked private variants; 24b and 25's second half claimed in the matrix | real → 20p/21p added (credit = fuel − the fuel claim's ceiling, `PRIVATE_FUEL_CLAIM_GAS` now a bridge-core constant); matrix rows 24b/25 say what is staged |
 | 13 | the aggregator read an empty filter verdict as "skipped" | real → `scripts/ci-cd/aggregate-status.sh` with a truth-table test; an empty verdict is an error |
 
+**Round 2** (same session, `high`, on the round-1 fixes) — verdict **"Not ready for PR"**, 6 findings, all verified and adopted:
+
+| # | Finding | Call |
+|---|---|---|
+| 1 | 24a refused the claim's SEND, but the attempt latches before the send: a latched attempt with no hash is an outcome the journal waits on, never retries — the cell could not recover | real → the test wallet gains `holdNext` (a call that never answers); the cell holds the claim's first simulation against the hub (its arrival gate, before any latch), asserts no `sendTx` left that page, and the reloaded page's wallet sends the claim |
+| 2 | the standalone fuel claims emitted only `maxFeesPerGas`, so a wallet reading the schema's singular spelling got no cap at submission | real → both spellings in both builders |
+| 3 | the browser ports were registered without a conflict check, after the bind test; the sandbox's rows were appended blind; a missing registry (CI) meant no claims at all | real → `withRegistry` creates the registry (with its header) and throws when the lock never frees; `registerHostPorts` checks conflicts under the lock and throws `PortClaimConflict`; both allocators skip registered ports and pick again on a conflict |
+| 4 | an attached run deleted the keeper's `sandbox.pid`; the standalone reaper never released a run's browser ports | real → only the run that booted the sandbox removes the file; the reaper releases the state dir's claims |
+| 5 | quotes keyed by address alone: the same address reconnected through another wallet reused the first wallet's policy | real → quotes live in a `WeakMap` keyed by the wallet object, each stamped with the epoch of its forget; pinned by a two-wallets-one-address test |
+| 6 | cells 4 and 16 proved hashes and fees but not that the recipient got the token | real → exact private balance gains from the record's read-back block (10 USDC; the record's token amount) |
+
 ## Durations
 
 _(filled from the sharded full runs — the shard count in `pr-tools-e2e.yml` follows them)_

@@ -31,13 +31,24 @@ test("cell 24a — a fueled deposit interrupted by a reload after the Ethereum l
 	await connectL1(page)
 	await connectAztec(page, { profile: "plain", account: actor.address })
 	await reviewDeposit(page, { l1ChainId: L1, erc20: usdt.erc20, amount: "100", intent: "token+gas", isPrivate: false })
-	// The interruption is made deterministic: the first transaction this page's wallet is asked to
-	// send — the claim — is refused, so the Ethereum leg lands and the claim provably never left.
-	const frame = walletFrame(page, run.testWalletOrigin, "plain")
-	await frame.evaluate(() => window.__nuloTestWallet!.failNext("sendTx", undefined, "test wallet: the claim is held"))
+	// The interruption is made deterministic, and BEFORE the attempt is latched: the claim's first
+	// simulation against the hub (its arrival gate) never answers, so the Ethereum leg lands, no
+	// claim is ever sent, and the record stays a plain "claim me" for the page that comes next. (A
+	// refused SEND would not do: the attempt latches first, and a latched attempt with no hash is
+	// an outcome the journal must wait on, not retry.)
+	const hub = sandbox.manifest.bridge?.l2.hub.address ?? ""
+	expect(hub).not.toBe("")
+	await walletFrame(page, run.testWalletOrigin, "plain").evaluate(
+		(hubAddress) => window.__nuloTestWallet!.holdNext("simulateTx", hubAddress),
+		hub,
+	)
 	await confirmReview(page)
 	await expect.poll(async () => (await depositRecords(page)).at(-1)?.depositTxHash, { timeout: 180_000 }).toBeTruthy()
-	await expect.poll(async () => (await walletCalls(page, run.testWalletOrigin, "plain")).sendTx ?? 0, { timeout: 180_000 }).toBe(1)
+	await expect
+		.poll(async () => (await walletCalls(page, run.testWalletOrigin, "plain")).simulateTx ?? 0, { timeout: 180_000 })
+		.toBeGreaterThan(0)
+	const calls = await walletCalls(page, run.testWalletOrigin, "plain")
+	expect(calls.sendTx ?? 0, "no transaction left this page's wallet").toBe(0)
 	expect((await depositRecords(page)).at(-1)?.claimTxHash, "interrupted before the claim").toBeUndefined()
 
 	await page.reload()

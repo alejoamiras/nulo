@@ -11,6 +11,8 @@ export interface TestWalletControl {
 	/** Fault injection: the next `method` call whose serialized arguments contain `pattern` (any
 	 *  call when omitted) rejects with `message` instead of running — one shot. */
 	failNext: (method: string, pattern?: string, message?: string) => void
+	/** The next matching call never answers — a wallet gone mid-call; only a reload gets past it. One shot. */
+	holdNext: (method: string, pattern?: string) => void
 	/** The next capability prompt grants no contract scope — a declined token grant. One shot. */
 	declineNextGrant: () => Promise<void>
 }

@@ -6,6 +6,8 @@ export interface JournalDeposit {
 	id: string
 	direction: string
 	intent?: string
+	/** The token leg's base units — what a token+gas send delivers as the token, the whole amount otherwise. */
+	amount?: string
 	depositTxHash?: string
 	claimTxHash?: string
 	registerTxHash?: string
