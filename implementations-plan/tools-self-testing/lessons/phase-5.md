@@ -88,3 +88,11 @@ index 0 is the node's; actors stay 1..n with n below the harness index, enforced
 `--accounts` and the reserved index share one constant; `ensureFeeAssetMinter` stops impersonating
 in a `finally`, refuses a reverted grant and re-reads `minters` before continuing. A kept sandbox's
 handle still names the key it was deployed with; a fresh boot uses the new one.
+
+**Second CI run, the TXE job**: on the harness-key push the `txe` job aborted after 35 of 65 tests
+(`Aborted (core dumped)` from the server's node process; every test still in flight then failed
+with "Failed calling external resolver") — the exact failure mode `run-txe-tests.sh` documents for
+thread counts above the store's two readers. Its "bounded" default of four threads equals
+ubuntu-latest's four cores, so CI was never bounded and the first green run was luck. The default is
+two threads now (the suite takes a few minutes either way; the job's cap is 30). Local run at two
+threads before the push: below.

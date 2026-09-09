@@ -125,13 +125,15 @@ fi
 # ── 3. Run the suite ────────────────────────────────────────────────────────────────
 export NARGO_FOREIGN_CALL_TIMEOUT=1200000
 cd "$tb"
-# One TXE server, bounded concurrency. The server's lmdb store opens with maxReaders 2, and
-# nargo defaults to one test thread per core: past roughly two dozen tests the reader limit is
-# exceeded and the native binding aborts the whole process with an uncaught Napi::Error. Every
-# test still in flight then fails with "Failed calling external resolver", which reads like a
-# suite-wide breakage rather than a capacity limit — and any bare `should_fail` test passes
-# vacuously on that connect error. Override with TXE_TEST_THREADS if the server gains headroom.
-TEST_THREADS="${TXE_TEST_THREADS:-4}"
+# One TXE server, concurrency bounded by its store: the server's lmdb store opens with
+# maxReaders 2, and nargo defaults to one test thread per core. Any thread count above the
+# reader limit is a gamble — past a few dozen tests the limit is exceeded and the native binding
+# aborts the whole process with an uncaught Napi::Error (four threads passed one CI run and
+# aborted the next, after 35 tests). Every test still in flight then fails with "Failed calling
+# external resolver", which reads like a suite-wide breakage rather than a capacity limit — and
+# any bare `should_fail` test passes vacuously on that connect error. Two threads finish the hub's
+# suite in a few minutes; override with TXE_TEST_THREADS only if the server gains readers.
+TEST_THREADS="${TXE_TEST_THREADS:-2}"
 # Not exec: that would replace this shell and skip the EXIT trap, orphaning the TXE server.
 # tee, and assert a POSITIVE count afterwards: nargo exits 0 when it discovers no tests at all,
 # so dropping `mod test;` would otherwise read as a clean pass.
