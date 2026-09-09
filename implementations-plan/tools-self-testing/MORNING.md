@@ -4,27 +4,21 @@ The stack is three PRs (GitHub stack #578), lowest first, opened ready for revie
 loop and the cross-arc pass had converged. Everything below was decided without you, per plan
 § Autonomy; each decision points at the consult that settled it.
 
-## Merge sequence
+## Merge sequence — executed 2026-09-09, on your say-so
 
-1. **Arc 1 — `worktree-tools-self-testing`, PR #575 (CI names say the app).** Merge it FIRST and, right
-   before you do, repoint the branch protection — the renamed aggregators block every merge until the
-   protection names them:
-   ```bash
-   scripts/ci-cd/required-checks.sh labels                                              # the e2e:* force-run labels, idempotent
-   scripts/ci-cd/required-checks.sh print --branch dev --json > /tmp/dev-checks.json   # review it
-   scripts/ci-cd/required-checks.sh --apply --branch dev --expect /tmp/dev-checks.json
-   ```
-   `labels` creates `e2e:extension-smoke`, `e2e:extension-network` and `e2e:tools` — the labels the
-   three filtered gates honor as "run anyway"; without it a PR cannot carry them.
-   The snapshot this branch was written against is committed as
-   `implementations-plan/tools-self-testing/required-checks.dev.snapshot.json`. `main` gets the same
-   two steps at its next promote.
-2. **Arc 2 — `tools-self-testing/bridge-integration`, PR #576.** `gh stack sync` after arc 1 lands, then merge.
-   Adds `bridge-contracts-status`'s `integration` job (the sandbox suite) — advisory until you promote it.
-3. **Arc 3 — `tools-self-testing/tools-browser-e2e`, PR #577.** `gh stack sync`, then merge. Adds
-   `tools-e2e-status` (6 shards) — advisory until you promote it.
+1. **Arc 1 — PR #575 (CI names say the app).** The protection on `dev` was repointed right before the
+   merge with the runbook — `required-checks.sh labels` (the three `e2e:*` labels were already
+   present), `print --branch dev --json` (equal to the committed
+   `required-checks.dev.snapshot.json`), `--apply --branch dev --expect <it>` — and the PR landed as
+   `96f01c1e` through `gh stack merge --squash`. The rollback file `--apply` wrote is named in that
+   session's transcript. **`main` still gets the same `print` + `--apply` at its next promote.**
+2. **Arc 2 — PR #576.** `gh stack sync` rebased it onto the new `dev`; merged the same way once its
+   rebased head was green. Adds `bridge-contracts-status`'s `integration` job — advisory until you
+   promote it.
+3. **Arc 3 — PR #577.** Synced onto the merged arc 2 and merged the same way. Adds `tools-e2e-status`
+   (6 shards) — advisory until you promote it.
 
-`gh stack merge` lands the named PR and everything below it; the three are ordered for that.
+`git log dev --first-parent` carries the three squash commits.
 
 ## Decisions you should know about (all logged in `lessons/`)
 
