@@ -11,7 +11,7 @@ import {
 	type GasShareResult,
 	PRIVATE_HUB_CLAIM_GAS,
 	PRIVATE_HUB_REGISTER_GAS,
-	ownGasCeiling,
+	ownGasTxs,
 	predictedWorstMinFees,
 	privateFpcFeeLimit,
 	proposeGasShare,
@@ -22,7 +22,7 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { ref, type Ref } from "vue"
 import { SWAP } from "@/contracts/bridge-generation"
 import { NETWORK } from "@/lib/network"
-import { walletMaxFees } from "@/lib/wallet-fee-budget"
+import { clampGas, walletMaxFees } from "@/lib/wallet-fee-budget"
 
 /** Enough for a first session on L2 without over-diverting the deposit. */
 const DEFAULT_TX_TARGET = 20
@@ -131,17 +131,22 @@ export function useGasShare(deps: GasShareDeps = {}): UseGasShareHandle {
 		return snap && Date.now() - snap.at <= FEES_STALE_MS ? snap.maxFees : null
 	}
 
+	// Every ceiling is priced from the CLAMPED limits the transactions are submitted under — what the
+	// FPC actually keeps — never from the declared constants a smaller network cuts down.
 	function ceilingsFor(state: TokenState): bigint | null {
 		const maxFees = priced()
 		if (!maxFees) return null
-		const claim = privateFpcFeeLimit(PRIVATE_HUB_CLAIM_GAS, maxFees)
-		return state.kind === "registered" ? claim : claim + privateFpcFeeLimit(PRIVATE_HUB_REGISTER_GAS, maxFees)
+		const claim = privateFpcFeeLimit(clampGas(PRIVATE_HUB_CLAIM_GAS), maxFees)
+		return state.kind === "registered" ? claim : claim + privateFpcFeeLimit(clampGas(PRIVATE_HUB_REGISTER_GAS), maxFees)
 	}
 
 	function ownGasCeilingFor(state: TokenState, isPrivate: boolean): bigint | null {
 		if (!fees.value || Date.now() - fees.value.at > FEES_FRESH_MS) void prime()
 		const maxFees = priced()
-		return maxFees ? ownGasCeiling({ isPrivate, registers: state.kind !== "registered" }, maxFees) : null
+		if (!maxFees) return null
+		const txs = ownGasTxs({ isPrivate, registers: state.kind !== "registered" })
+		const claim = privateFpcFeeLimit(clampGas(txs.claim), maxFees)
+		return txs.register ? claim + privateFpcFeeLimit(clampGas(txs.register), maxFees) : claim
 	}
 
 	/** A private slice's ceilings, or "pricing" while the fees are still on their way. */

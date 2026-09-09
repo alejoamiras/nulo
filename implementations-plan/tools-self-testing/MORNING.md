@@ -9,9 +9,12 @@ each decision points at the consult that settled it.
    before you do, repoint the branch protection — the renamed aggregators block every merge until the
    protection names them:
    ```bash
+   scripts/ci-cd/required-checks.sh labels                                              # the e2e:* force-run labels, idempotent
    scripts/ci-cd/required-checks.sh print --branch dev --json > /tmp/dev-checks.json   # review it
    scripts/ci-cd/required-checks.sh --apply --branch dev --expect /tmp/dev-checks.json
    ```
+   `labels` creates `e2e:extension-smoke`, `e2e:extension-network` and `e2e:tools` — the labels the
+   three filtered gates honor as "run anyway"; without it a PR cannot carry them.
    The snapshot this branch was written against is committed as
    `implementations-plan/tools-self-testing/required-checks.dev.snapshot.json`. `main` gets the same
    two steps at its next promote.
@@ -65,5 +68,10 @@ each decision points at the consult that settled it.
 ## What to promote, and when
 
 `bridge-contracts-status` and `tools-e2e-status` are produced on every relevant PR but required by
-neither branch. Promote each by adding it to the protection with `required-checks.sh` once you have
-watched it green on a few PRs at retry 0.
+neither branch. Promote each after a clean week — 7 days of retry-0 green on every PR that tripped
+its filter (plan § Phase 10) — with the runbook's `--add`:
+
+```bash
+scripts/ci-cd/required-checks.sh print --branch dev --json > /tmp/dev-checks.json
+scripts/ci-cd/required-checks.sh --add bridge-contracts-status,tools-e2e-status --branch dev --expect /tmp/dev-checks.json
+```

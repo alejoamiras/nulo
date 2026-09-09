@@ -76,7 +76,7 @@ A few **STUB** tests (`cancel-mid-prove`, `concurrent-sendtx-{approve,confirm}`)
 
 ### `bridge-contracts.yml`
 
-The any-ERC-20 bridge's PR gate: `contracts` paths-filter → `_bridge-contracts.yml` (forge hermetic suite, halmos proofs, keystone nargo vectors, hub artifact parity, the sole-consumer static guard) → `bridge-contracts-status`. Same exact-state aggregator shape as the extension gates. Not in the required set yet.
+The any-ERC-20 bridge's PR gate: `contracts` paths-filter → `_bridge-contracts.yml` (forge hermetic suite, halmos proofs, keystone nargo vectors, hub artifact parity, the sole-consumer static guard, the `integration` job — `packages/bridge-core`'s sandbox suite on a fresh anvil + local network, its node and anvil logs uploaded on failure — and the `txe` job, the hub's Noir tests under the TXE oracle) → `bridge-contracts-status`. Same exact-state aggregator shape as the extension gates. Not in the required set yet.
 
 ### `pr-tools-e2e.yml`
 

@@ -35,7 +35,9 @@ async function fundCredit(actor: ActorHandle, amount: bigint): Promise<bigint> {
 test("cell 1 — plain, public, registered token: the claim is paid from one private credit note", async ({ page, sandbox, actor, l1 }) => {
 	const { usdc } = sandbox.tokens
 	const ceiling = await ceilingOf(actor, { isPrivate: false, registers: false })
-	const creditBefore = await fundCredit(actor, (ceiling * 14n) / 10n)
+	// Funded to the ceiling EXACTLY: the wizard's gate must price the claim from the same clamped
+	// limits the claim is submitted under, or a claim the FPC would accept is refused on screen.
+	const creditBefore = await fundCredit(actor, ceiling)
 	await mint(sandbox.clients.l1, usdc.erc20 as `0x${string}`, l1.address, 100n * USDC)
 	const usdcL2 = await actor.l2TokenOf(usdc)
 	const usdcBefore = await balanceOf(usdcL2, actor.actor.address, "public")

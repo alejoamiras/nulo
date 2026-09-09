@@ -27,7 +27,6 @@ import {
 	isSealTrusted,
 	isSendRecord,
 	markSealTrusted,
-	ownGasCeiling,
 	ownGasTxs,
 	privateFeeJuicePayment,
 	privateFpcFeeLimit,
@@ -468,6 +467,14 @@ async function walletFeesOrNull(aztec: unknown, account: AztecAddress, gas: { da
 	}
 }
 
+/** What a claim from held gas sets aside, priced from the CLAMPED limits it is submitted under —
+ *  what the FPC actually keeps — never from the declared constants a smaller network cuts down. */
+function clampedOwnGasCeiling(shape: { isPrivate: boolean; registers: boolean }, maxFees: MaxFees): bigint {
+	const txs = ownGasTxs(shape)
+	const claim = privateFpcFeeLimit(clampGas(txs.claim), maxFees)
+	return txs.register ? claim + privateFpcFeeLimit(clampGas(txs.register), maxFees) : claim
+}
+
 /** A transaction paid from the private Fee Juice this account already holds at the FPC (`pay_fee`),
  *  at the ceiling its limits commit to. */
 function fpcCreditFee(fpcAddr: AztecAddress, maxFees: MaxFees, gas: { daGas: number; l2Gas: number } = PRIVATE_HUB_CLAIM_GAS): FpcFee {
@@ -488,8 +495,10 @@ async function privateCreditFee(fb: FuelBlock, recipientAddr: AztecAddress, azte
 	])
 	if (credit === null) return { kind: "stop", why: "Couldn't check your private gas at the fee contract - please try again in a moment." }
 	if (maxFees === null) return { kind: "stop", why: UNPRICED_BY_WALLET }
+	// Priced from the CLAMPED limits the transactions are submitted under: the FPC keeps exactly that.
 	const needed =
-		privateFpcFeeLimit(PRIVATE_HUB_CLAIM_GAS, maxFees) + (registers ? privateFpcFeeLimit(PRIVATE_HUB_REGISTER_GAS, maxFees) : 0n)
+		privateFpcFeeLimit(clampGas(PRIVATE_HUB_CLAIM_GAS), maxFees) +
+		(registers ? privateFpcFeeLimit(clampGas(PRIVATE_HUB_REGISTER_GAS), maxFees) : 0n)
 	if (credit < needed) {
 		return {
 			kind: "stop",
@@ -537,7 +546,8 @@ async function privateFpcFee(
 	// that remainder must still cover the claim's own ceiling. A short amount is refused here rather
 	// than reverted there; fees are re-priced on every retry.
 	const spentBy = registers ? PRIVATE_HUB_REGISTER_GAS : PRIVATE_HUB_CLAIM_GAS
-	const ceiling = privateFpcFeeLimit(spentBy, maxFees) + (registers ? privateFpcFeeLimit(PRIVATE_HUB_CLAIM_GAS, maxFees) : 0n)
+	const ceiling =
+		privateFpcFeeLimit(clampGas(spentBy), maxFees) + (registers ? privateFpcFeeLimit(clampGas(PRIVATE_HUB_CLAIM_GAS), maxFees) : 0n)
 	if (fuelReceived < ceiling) {
 		return {
 			kind: "stop",
@@ -636,7 +646,7 @@ export async function ownGasFee(
 	])
 	if (maxFees === null) return { kind: "stop", why: UNPRICED_BY_WALLET }
 	const shape = { isPrivate: rec.isPrivate, registers }
-	const ceiling = ownGasCeiling(shape, maxFees)
+	const ceiling = clampedOwnGasCeiling(shape, maxFees)
 	const source = decideOwnGasSource({
 		publicFeeJuice: pub,
 		privateFeeJuice: credit,

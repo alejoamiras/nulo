@@ -34,6 +34,7 @@ export const RENAMES: Readonly<Record<string, string>> = {
 export const LABELS: readonly { name: string; description: string; color: string }[] = [
 	{ name: "e2e:extension-smoke", description: "Force the extension smoke e2e suite on this PR", color: "0e8a16" },
 	{ name: "e2e:extension-network", description: "Force the extension network e2e suite on this PR", color: "0e8a16" },
+	{ name: "e2e:tools", description: "Force the tools browser e2e suite on this PR", color: "0e8a16" },
 ]
 
 const byContext = (a: Check, b: Check) => a.context.localeCompare(b.context) || a.app_id - b.app_id
