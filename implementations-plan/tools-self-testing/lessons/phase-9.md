@@ -66,6 +66,12 @@ payer and reads its postconditions from the chain through the harness.
   the burn note. **A token the wallet reports registered loses its add-to-wallet button**, so cell
   36 asserts the button is gone. **The generation's own tokens are granted at connect**, so cell
   25's declined grant needs a fresh (routable) token pasted in.
+- **A harness read right after a harness send can trail the block.** The full gate's first pass
+  caught cell 20b's conservation check exactly the funded 2 FJ short: `fundPublicFeeJuice` resolved
+  when the node had the claim's block, but the cell's "before" balance — read through the wallet's
+  own PXE — had not synced it yet. Reads a transaction is expected to move (`settled` in
+  `context.ts`: the public fuel claim, the private mint's credit, the smoke's own fuel flow) now
+  poll until they have, bounded, so a transaction that never landed still fails with the figure read.
 - **The first held-gas read can race the wallet's contract registration** on a plain profile
   ("No artifact registered for contract class …" → fail-closed `null`); later reads succeed. It
   never decided a cell, but it is the first place to look if a token-only card is greyed as
