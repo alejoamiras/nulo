@@ -34,7 +34,6 @@ import {
 	hubTokenFor,
 	isOutboxMessageConsumed,
 	makeProvisionalWithdrawId,
-	predictedWorstMinFees,
 	preflightHubExit,
 	privateFeeJuicePayment,
 	privateFpcFeeLimit,
