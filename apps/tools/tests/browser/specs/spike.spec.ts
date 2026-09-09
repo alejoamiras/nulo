@@ -18,6 +18,7 @@ import {
 import { expect, test } from "../fixtures/test"
 import { connectAztec, grantedAccounts, tid, walletIdOf } from "../pages/connect"
 import { drip } from "../pages/drip"
+import { PROFILES } from "../test-wallet/profile"
 import { confirmReview, connectL1, openSend, reviewDeposit, stepperPhases, waitForReceipt } from "../pages/send"
 import { TESTIDS } from "../../../src/lib/testids"
 
@@ -39,7 +40,9 @@ test("plain: discovery, verification, a whole-pool grant, isolation in both fram
 	for (const a of pool.all) expect(granted.map((x) => x.toLowerCase())).toContain(a.address.toLowerCase())
 
 	expect(await page.evaluate(() => crossOriginIsolated)).toBe(true)
-	const frame = page.frames().find((f) => f.url().startsWith(run.testWalletOrigin) && f.url().includes(walletIdOf("plain").slice(-5)))
+	const frame = page
+		.frames()
+		.find((f) => f.url().startsWith(run.testWalletOrigins.plain) && f.url().includes(walletIdOf("plain").slice(-5)))
 	expect(frame, "the session frame for the plain wallet").toBeTruthy()
 	expect(await frame!.evaluate(() => crossOriginIsolated)).toBe(true)
 	expect(await page.locator("[data-nulo-parked]").count()).toBe(1)
@@ -49,6 +52,28 @@ test("plain: discovery, verification, a whole-pool grant, isolation in both fram
 	const expected = (await actorAddress(sandbox.clients.l2.wallet, secret)).toString()
 	const added = await frame!.evaluate((s) => window.__nuloTestWallet!.addAccount(s), secret)
 	expect(added.toLowerCase()).toBe(expected.toLowerCase())
+})
+
+test("a wallet whose frame loads late is still discovered", async ({ page, run }) => {
+	// The SDK probes every listed wallet in parallel and tells frames apart by origin; a frame
+	// that is slower than its siblings must still be listed, which is why each profile has its
+	// own origin. Every response from the full profile's origin is held for 4 s here, well past
+	// the others' READY and inside the probe's 10 s budget.
+	await page.route(
+		(url) => url.origin === run.testWalletOrigins.full,
+		async (route) => {
+			await new Promise((r) => setTimeout(r, 4_000))
+			await route.continue()
+		},
+	)
+	await page.goto("/")
+	await openSend(page)
+	await page.locator(tid(TESTIDS.bridgeL2Connect)).first().click()
+	for (const profile of PROFILES) {
+		await expect(page.locator(`${tid(TESTIDS.walletPickerRow)}[data-wallet-id="${walletIdOf(profile)}"]`)).toBeVisible({
+			timeout: 15_000,
+		})
+	}
 })
 
 test("plain: a public drip lands on the selected actor", async ({ page, run, sandbox, actor }) => {

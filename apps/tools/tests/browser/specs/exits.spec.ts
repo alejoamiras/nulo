@@ -13,6 +13,7 @@ import {
 } from "@nulo/bridge-core/sandbox"
 import { parseAbi } from "viem"
 import { TESTIDS } from "../../../src/lib/testids"
+import type { RunEnv } from "../env"
 import { type ActorHandle, expect, test } from "../fixtures/test"
 import { connectAztec, tid, walletCalls } from "../pages/connect"
 import { reviewExit, startExit } from "../pages/exit"
@@ -112,8 +113,8 @@ test("cell 28 — a private exit from one credit note, then from three notes non
 
 /** "Nothing authorized" is read from the wallet itself: an exit's authwit and its transaction are
  *  Aztec calls, which no count of Ethereum signatures can exclude. */
-async function nothingSubmitted(page: import("@playwright/test").Page, walletOrigin: string): Promise<void> {
-	const calls = await walletCalls(page, walletOrigin, "plain")
+async function nothingSubmitted(page: import("@playwright/test").Page, run: Pick<RunEnv, "testWalletOrigins">): Promise<void> {
+	const calls = await walletCalls(page, run, "plain")
 	expect(calls.createAuthWit ?? 0, "no authwit was created").toBe(0)
 	expect(calls.sendTx ?? 0, "no transaction was sent").toBe(0)
 }
@@ -133,7 +134,7 @@ test("cell 29 — a private exit with no credit is refused on the amount step, b
 	await expect(blocked).toContainText("holds none at the fee contract")
 	await expect(page.locator(tid(TESTIDS.sendAmountNext))).toBeDisabled()
 	expect(l1.signatures).toBe(0)
-	await nothingSubmitted(page, run.testWalletOrigin)
+	await nothingSubmitted(page, run)
 })
 
 test("cell 30 — fees that rise between the review and the confirm stand the private exit down; nothing authorized", async ({
@@ -180,7 +181,7 @@ test("cell 30 — fees that rise between the review and the confirm stand the pr
 	await expect(stale).toContainText(/fees moved|sets aside more/)
 	expect(await privateCreditOf(actor.s, fpc), "nothing was spent").toBe(creditBefore)
 	expect(l1.signatures).toBe(0)
-	await nothingSubmitted(page, run.testWalletOrigin)
+	await nothingSubmitted(page, run)
 })
 
 test("cell 31 — a paused hub (L2) and paused withdrawals (L1) each stop the exit at confirm with a notice; nothing burned", async ({
@@ -218,5 +219,5 @@ test("cell 31 — a paused hub (L2) and paused withdrawals (L1) each stop the ex
 	}
 	expect(await balanceOf(l2Token, actor.actor.address, "public"), "nothing was burned").toBe(l2Before)
 	expect(l1.signatures).toBe(0)
-	await nothingSubmitted(page, run.testWalletOrigin)
+	await nothingSubmitted(page, run)
 })

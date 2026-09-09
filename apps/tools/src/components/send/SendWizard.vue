@@ -673,10 +673,10 @@ function goToStep(index: 0 | 1 | 2): void {
  *  the wizard stands the review down and says why instead of signing a plan nobody read. The one
  *  review that must NOT move is the one being signed; a review built while a backgrounded send is
  *  still running is a different review and moves like any other. */
-function invalidateReview(why?: string): void {
+function invalidateReview(why?: string, changed?: string[]): void {
 	const signingThisReview = submitting.value && backgroundedId.value === null
 	if (step.value !== 2 || stage.value !== "wizard" || signingThisReview) return
-	log("review stood down", { why: why ?? "(a watched input changed)", preflighting: preflighting.value })
+	log("review stood down", { why: why ?? "(a watched input changed)", changed, preflighting: preflighting.value })
 	reviewed.value = null
 	step.value = 1
 	reviewStale.value = true
@@ -706,8 +706,24 @@ watch(
 		() => l1.address.value,
 		() => l1.chainId.value,
 	],
-	() => invalidateReview(),
+	(next, prev) => invalidateReview(undefined, changedInputs(next, prev)),
 )
+const WATCHED_INPUTS = [
+	"token",
+	"amount",
+	"intent",
+	"isPrivate",
+	"route",
+	"txTarget",
+	"tokenOnlyBlocked",
+	"account",
+	"l1Address",
+	"l1ChainId",
+]
+/** Which of the watched inputs moved — the stand-down's log names them, since the generic line cannot. */
+function changedInputs(next: readonly unknown[], prev: readonly unknown[] | undefined): string[] {
+	return WATCHED_INPUTS.filter((_, i) => !prev || !Object.is(next[i], prev[i]))
+}
 // The grant window closes the moment the send starts signing: from there the prompt is the wallet's.
 watch(
 	() => sendFlow.busy.value,

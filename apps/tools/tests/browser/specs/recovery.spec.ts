@@ -38,16 +38,11 @@ test("cell 24a — a fueled deposit interrupted by a reload after the Ethereum l
 	// an outcome the journal must wait on, not retry.)
 	const hub = sandbox.manifest.bridge?.l2.hub.address ?? ""
 	expect(hub).not.toBe("")
-	await walletFrame(page, run.testWalletOrigin, "plain").evaluate(
-		(hubAddress) => window.__nuloTestWallet!.holdNext("simulateTx", hubAddress),
-		hub,
-	)
+	await walletFrame(page, run, "plain").evaluate((hubAddress) => window.__nuloTestWallet!.holdNext("simulateTx", hubAddress), hub)
 	await confirmReview(page)
 	await expect.poll(async () => (await depositRecords(page)).at(-1)?.depositTxHash, { timeout: 180_000 }).toBeTruthy()
-	await expect
-		.poll(async () => (await walletCalls(page, run.testWalletOrigin, "plain")).simulateTx ?? 0, { timeout: 180_000 })
-		.toBeGreaterThan(0)
-	const calls = await walletCalls(page, run.testWalletOrigin, "plain")
+	await expect.poll(async () => (await walletCalls(page, run, "plain")).simulateTx ?? 0, { timeout: 180_000 }).toBeGreaterThan(0)
+	const calls = await walletCalls(page, run, "plain")
 	expect(calls.sendTx ?? 0, "no transaction left this page's wallet").toBe(0)
 	expect((await depositRecords(page)).at(-1)?.claimTxHash, "interrupted before the claim").toBeUndefined()
 
@@ -67,10 +62,7 @@ test("cell 24a — a fueled deposit interrupted by a reload after the Ethereum l
 	await expect(card).toHaveAttribute("data-stage", "done", { timeout: 8 * 60_000 })
 
 	expect((await depositRecords(page)).at(-1)?.claimTxHash, "the claim landed from the journal").toBeTruthy()
-	expect(
-		(await walletCalls(page, run.testWalletOrigin, "plain")).sendTx ?? 0,
-		"sent by the reloaded page's wallet",
-	).toBeGreaterThanOrEqual(1)
+	expect((await walletCalls(page, run, "plain")).sendTx ?? 0, "sent by the reloaded page's wallet").toBeGreaterThanOrEqual(1)
 	expect((await balanceOf(usdtL2, actor.actor.address, "public")) - before).toBeGreaterThan(0n)
 })
 
@@ -91,7 +83,7 @@ test("cell 25 — a declined token grant ends on the review with the refusal; no
 	await connectAztec(page, { profile: "plain", account: actor.address })
 	await reviewDeposit(page, { l1ChainId: L1, erc20, amount: "100", intent: "token+gas", isPrivate: false, viaLookup: true })
 
-	await walletFrame(page, run.testWalletOrigin, "plain").evaluate(() => window.__nuloTestWallet!.declineNextGrant())
+	await walletFrame(page, run, "plain").evaluate(() => window.__nuloTestWallet!.declineNextGrant())
 	const confirm = page.locator(tid(TESTIDS.sendReviewConfirm))
 	await expect(confirm).toBeEnabled({ timeout: 60_000 })
 	await confirm.click()

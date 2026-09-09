@@ -52,6 +52,10 @@ Fee fixtures (public Fee Juice, private credit) are funded on-chain from the act
   and friends answer `Unsupported wallet method`.
 - `full` — `selfpay` plus a working `registerToken`/`isTokenRegistered`.
 
+Each profile is served on its own loopback origin (one port each, the same build): the SDK's
+discovery probe tells wallet frames apart by origin alone, so same-origin profiles answer each
+other's probe and the slowest frame is never listed.
+
 The wallet accepts only tools' app id and the sandbox's chain, is framed only by the tools origin
 (CSP `frame-ancestors` + the handler's `allowedOrigins`), and is listed by no shipped build — the
 `build:testnet`/`build:mainnet` bundles contain neither its URL nor the node's.

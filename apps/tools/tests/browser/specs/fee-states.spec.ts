@@ -106,7 +106,7 @@ test("cell 12 — plain, the confirm's gas re-read fails: `unverifiable` stands 
 	await connectAztec(page, { profile: "plain", account: actor.address })
 	await reviewDeposit(page, { l1ChainId: L1, erc20: usdc.erc20, amount: "10", intent: "token", isPrivate: false })
 	// The confirm re-reads the credit at the FPC; that one read is made to fail.
-	await walletFrame(page, run.testWalletOrigin, "plain").evaluate(
+	await walletFrame(page, run, "plain").evaluate(
 		(fpc) => window.__nuloTestWallet!.failNext("executeUtility", fpc, "node read aborted"),
 		PRIVATE_FPC_ADDRESS.toLowerCase(),
 	)

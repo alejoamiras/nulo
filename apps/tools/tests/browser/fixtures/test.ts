@@ -119,12 +119,13 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
 		const handle = readHandle(run.artifactsDir)
 		const key = handle.l1.actorKeys[l1Index]
 		if (!key) throw new Error(`no anvil actor key at index ${l1Index}`)
+		const walletOrigins = Object.values(run.testWalletOrigins)
 		await installSeeds(
 			context,
-			run.testWalletOrigin,
+			walletOrigins,
 			pool.all.map((a) => a.seed),
 		)
-		await parkWalletPanel(context, run.testWalletOrigin)
+		await parkWalletPanel(context, walletOrigins)
 		await installL1WalletControl(context, { rpcUrl: handle.anvilUrl, privateKey: key as `0x${string}`, chainId: handle.l1ChainId })
 		await use(context)
 	},
@@ -164,13 +165,13 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
 export { expect }
 export type { ActorHandle, SandboxAccess }
 
-/** The seeds reach the wallet ORIGIN's documents only — the tools page never sees them. */
-async function installSeeds(context: BrowserContext, walletOrigin: string, seeds: Seed[]): Promise<void> {
+/** The seeds reach the wallet ORIGINS' documents only — the tools page never sees them. */
+async function installSeeds(context: BrowserContext, walletOrigins: string[], seeds: Seed[]): Promise<void> {
 	await context.addInitScript(
-		([origin, list]) => {
-			if (location.origin === origin) window.__nuloTestWalletSeeds = list
+		([origins, list]) => {
+			if (origins.includes(location.origin)) window.__nuloTestWalletSeeds = list
 		},
-		[walletOrigin, seeds] as const,
+		[walletOrigins, seeds] as const,
 	)
 }
 

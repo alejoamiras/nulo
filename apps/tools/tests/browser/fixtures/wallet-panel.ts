@@ -5,12 +5,19 @@
  */
 import type { BrowserContext } from "@playwright/test"
 
-export async function parkWalletPanel(context: BrowserContext, walletOrigin: string): Promise<void> {
-	await context.addInitScript((origin: string) => {
+export async function parkWalletPanel(context: BrowserContext, walletOrigins: string[]): Promise<void> {
+	await context.addInitScript((origins: string[]) => {
 		const park = (node: Node) => {
 			if (!(node instanceof HTMLElement) || node.tagName !== "DIV") return
 			const frame = node.querySelector("iframe")
-			if (!frame?.src.startsWith(origin) || node.style.position !== "fixed") return
+			if (!frame || node.style.position !== "fixed") return
+			let origin = ""
+			try {
+				origin = new URL(frame.src).origin
+			} catch {
+				return
+			}
+			if (!origins.includes(origin)) return
 			node.style.left = "0px"
 			node.style.top = "0px"
 			node.style.width = "160px"
@@ -22,5 +29,5 @@ export async function parkWalletPanel(context: BrowserContext, walletOrigin: str
 		new MutationObserver((records) => {
 			for (const r of records) for (const n of r.addedNodes) park(n)
 		}).observe(document, { childList: true, subtree: true })
-	}, walletOrigin)
+	}, walletOrigins)
 }

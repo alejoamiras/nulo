@@ -81,17 +81,26 @@ async function goToReview(page: Page): Promise<void> {
  * Confirm the review; the grant (if any) is auto-approved by the test wallet. A read that lands
  * after the review opened (held gas, a re-priced fee) stands the review down with a reason on the
  * amount step — exactly what a user would answer by reviewing again, so the helper does the same,
- * a bounded number of times.
+ * a bounded number of times. A read still in flight from the last confirm can stand the re-opened
+ * review down before its button is even pressed, so the wait for that button is also a wait for
+ * the notice.
  */
 export async function confirmReview(page: Page): Promise<void> {
 	const confirm = page.locator(tid(TESTIDS.sendReviewConfirm))
 	const stale = page.locator(tid(TESTIDS.sendReviewStale))
 	const left = page.locator(`${tid(TESTIDS.stepper)}, ${tid(TESTIDS.receipt)}, ${tid(TESTIDS.sendGrantPending)}`)
 	for (let attempt = 0; attempt < 4; attempt++) {
-		await expect(confirm).toBeEnabled({ timeout: 60_000 })
-		await confirm.click()
-		await expect(left.or(stale).first()).toBeVisible({ timeout: 120_000 })
-		if (!(await stale.isVisible())) return
+		await expect(
+			page
+				.locator(`${tid(TESTIDS.sendReviewConfirm)}:enabled`)
+				.or(stale)
+				.first(),
+		).toBeVisible({ timeout: 60_000 })
+		if (!(await stale.isVisible())) {
+			await confirm.click()
+			await expect(left.or(stale).first()).toBeVisible({ timeout: 120_000 })
+			if (!(await stale.isVisible())) return
+		}
 		console.log(`[send] review stood down: ${(await stale.textContent())?.trim()}`)
 		await goToReview(page)
 	}

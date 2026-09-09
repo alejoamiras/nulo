@@ -52,6 +52,10 @@ loop and the cross-arc pass had converged. Everything below was decided without 
   delivery fix): the local network's block publisher and validator both sign from index 0, and
   sharing it lost a nonce on one CI shard of the first run — the same race can end a generation at
   boot. Codex (one consult) chose the key move over a retry wrapper; actors stay 1..n below it.
+- **Each test-wallet profile has its own origin** (`lessons/phase-9.md` § Delivery): the SDK's
+  discovery probe tells wallet frames apart by origin alone, so same-origin profiles answer each
+  other's probe and the slowest frame is never listed — a race only a slow runner loses. Four ports
+  per run now; the reload-recovery driver never presses Connect while a connection is verifying.
 - **Both suites claim their ports in `~/.agents/ports.md`** under their run id (created, with its
   header, on a host that has none), check-and-write under one lock, and release on teardown; the
   allocators pick around registered ports (`lessons/phase-9.md`, arc-3 rounds 1–4).
@@ -86,6 +90,11 @@ Open:
   tools shards (PR #577) on GitHub runners. A red there is fixed on its arc branch and re-pushed
   (plan § Delivery); a run that is merely slow is the 30-minute cap's business, not a failure.
 - **The `dapp-fee-cap` follow-up** (above) — yours, in the extension.
+- **A review stood down by the confirm's own preflight** (`lessons/phase-9.md` § Delivery, cell 2):
+  on a slow runner a watched input moved twice under one confirm's re-reads and stood the review
+  down twice. The wizard's log now names the input; when the next CI log shows which one, decide
+  whether the confirm's own re-read outputs (`tokenOnlyBlocked`, `gasShare.txTarget`) should stand a
+  review down through the watcher at all, or only through the preflight's tolerant verdict.
 - **Promotion** of the two advisory aggregators — below.
 
 ## What to promote, and when

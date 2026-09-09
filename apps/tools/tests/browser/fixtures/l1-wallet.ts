@@ -191,8 +191,16 @@ export async function installL1Wallet(context: BrowserContext, o: L1WalletOption
 }
 
 /** The frame a page hosts for the test wallet, once the SDK has created it. */
-export function walletFrameOf(page: Page, walletOrigin: string) {
-	return page.frames().find((f) => f.url().startsWith(walletOrigin) && f.url().includes("profile="))
+export function walletFrameOf(page: Page, walletOrigins: readonly string[]) {
+	return page.frames().find((f) => walletOrigins.includes(originOf(f.url())) && f.url().includes("profile="))
+}
+
+function originOf(url: string): string {
+	try {
+		return new URL(url).origin
+	} catch {
+		return ""
+	}
 }
 
 declare global {

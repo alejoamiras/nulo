@@ -100,7 +100,9 @@ build_apps() {
     bun run build:local -- --outDir "$TOOLS_DIST" >"$STATE_DIR/build-tools.log" 2>&1
   NULO_SANDBOX_ARTIFACTS="$ARTIFACTS" bun run verify:build-target local --dist "$TOOLS_DIST"
   grep -rqF -- "$NODE_URL" "$TOOLS_DIST/assets" || { log "FATAL: the tools bundle does not name the node $NODE_URL"; exit 2; }
-  grep -rqF -- "$WALLET_ORIGIN/?profile=plain" "$TOOLS_DIST/assets" || { log "FATAL: the tools bundle does not list the test wallet"; exit 2; }
+  for url in "$WALLET_ORIGIN_PLAIN/?profile=plain" "$WALLET_ORIGIN_SELFPAY/?profile=selfpay" "$WALLET_ORIGIN_FULL/?profile=full"; do
+    grep -rqF -- "$url" "$TOOLS_DIST/assets" || { log "FATAL: the tools bundle does not list the test wallet at $url"; exit 2; }
+  done
 
   log "building the test wallet → $WALLET_DIST"
   NULO_SANDBOX_ARTIFACTS="$ARTIFACTS" NULO_TOOLS_ORIGIN="$TOOLS_ORIGIN" NULO_TEST_WALLET_OUT_DIR="$WALLET_DIST" \
@@ -115,10 +117,19 @@ else
   bun scripts/e2e/resolve-ports.ts "$STATE_DIR" "$RUN_ID" "$$"
 fi
 TOOLS_PORT=$(jq -r .tools "$STATE_DIR/ports.json")
-WALLET_PORT=$(jq -r .testWallet "$STATE_DIR/ports.json")
+WALLET_PORT_PLAIN=$(jq -r .walletPlain "$STATE_DIR/ports.json")
+WALLET_PORT_SELFPAY=$(jq -r .walletSelfpay "$STATE_DIR/ports.json")
+WALLET_PORT_FULL=$(jq -r .walletFull "$STATE_DIR/ports.json")
+case "$WALLET_PORT_PLAIN$WALLET_PORT_SELFPAY$WALLET_PORT_FULL" in
+  *null*) log "FATAL: $STATE_DIR/ports.json predates the per-profile wallet ports — start a fresh run"; exit 2 ;;
+esac
 TOOLS_ORIGIN="http://127.0.0.1:$TOOLS_PORT"
-WALLET_ORIGIN="http://127.0.0.1:$WALLET_PORT"
-WEB_WALLETS="$WALLET_ORIGIN/?profile=plain,$WALLET_ORIGIN/?profile=selfpay,$WALLET_ORIGIN/?profile=full"
+# One origin per profile: the SDK's discovery probe accepts any message from a wallet's ORIGIN, so
+# same-origin profiles cross-talk and the slowest frame is never listed.
+WALLET_ORIGIN_PLAIN="http://127.0.0.1:$WALLET_PORT_PLAIN"
+WALLET_ORIGIN_SELFPAY="http://127.0.0.1:$WALLET_PORT_SELFPAY"
+WALLET_ORIGIN_FULL="http://127.0.0.1:$WALLET_PORT_FULL"
+WEB_WALLETS="$WALLET_ORIGIN_PLAIN/?profile=plain,$WALLET_ORIGIN_SELFPAY/?profile=selfpay,$WALLET_ORIGIN_FULL/?profile=full"
 
 if [ -n "${NULO_E2E_ATTACH:-}" ]; then attach_sandbox; else boot_sandbox; fi
 NODE_URL=$(jq -r .nodeUrl "$ARTIFACTS/handle.json")
@@ -132,7 +143,8 @@ fi
 
 log "running playwright ($*)"
 set +e
-NULO_SANDBOX_ARTIFACTS="$ARTIFACTS" NULO_TOOLS_PORT="$TOOLS_PORT" NULO_TEST_WALLET_PORT="$WALLET_PORT" \
+NULO_SANDBOX_ARTIFACTS="$ARTIFACTS" NULO_TOOLS_PORT="$TOOLS_PORT" \
+NULO_TEST_WALLET_PORT_PLAIN="$WALLET_PORT_PLAIN" NULO_TEST_WALLET_PORT_SELFPAY="$WALLET_PORT_SELFPAY" NULO_TEST_WALLET_PORT_FULL="$WALLET_PORT_FULL" \
 NULO_TOOLS_DIST="$TOOLS_DIST" NULO_TEST_WALLET_DIST="$WALLET_DIST" NULO_TOOLS_WEB_WALLETS="$WEB_WALLETS" NULO_E2E_STATE_DIR="$STATE_DIR" \
 NODE_OPTIONS="--import $APP_DIR/tests/browser/node-json-imports.mjs ${NODE_OPTIONS:-}" \
   ./node_modules/.bin/playwright test --config tests/browser/playwright.config.ts "$@"

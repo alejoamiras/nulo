@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test"
 import { runEnv } from "./env"
+import { PROFILES } from "./test-wallet/profile"
 
 const env = runEnv()
 const here = new URL(".", import.meta.url).pathname
@@ -39,12 +40,13 @@ export default defineConfig({
 			timeout: 60_000,
 			env: { NULO_SANDBOX_ARTIFACTS: env.artifactsDir, NULO_TOOLS_WEB_WALLETS: process.env.NULO_TOOLS_WEB_WALLETS ?? "" },
 		},
-		{
-			command: `bun run --cwd ${appRoot} vite preview --config tests/browser/test-wallet/vite.config.mts --outDir ${env.testWalletDist} --host 127.0.0.1 --port ${env.testWalletPort} --strictPort`,
-			url: `${env.testWalletOrigin}/`,
+		// The one wallet build, served once per profile so each has its own origin.
+		...PROFILES.map((profile) => ({
+			command: `bun run --cwd ${appRoot} vite preview --config tests/browser/test-wallet/vite.config.mts --outDir ${env.testWalletDist} --host 127.0.0.1 --port ${new URL(env.testWalletOrigins[profile]).port} --strictPort`,
+			url: `${env.testWalletOrigins[profile]}/`,
 			reuseExistingServer: false,
 			timeout: 60_000,
 			env: { NULO_SANDBOX_ARTIFACTS: env.artifactsDir, NULO_TOOLS_ORIGIN: env.toolsOrigin },
-		},
+		})),
 	],
 })

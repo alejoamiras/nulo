@@ -57,3 +57,9 @@ race (fixed on arc 2 — `lessons/phase-5.md` § Delivery fix — and arc 3 sync
 extension smoke's `backup-imported-account` timed out once on the runner at its annotated slow wait
 and passed on re-run — a flake by the repo's own rule (the identical suite was green on #575, #576
 and locally on the same commit; arc 3 touches the extension only in the network runner's plumbing).
+
+**Runs 2 and 3.** Run 2 (harness key): shard 6 green; the `txe` job aborted its server after 35 of 65
+tests (four test threads over a two-reader store — `lessons/phase-5.md`; two threads now). Run 3 (both
+fixes): #575 and #576 fully green, the `txe` job green on both; #577 lost two cells to two harness
+races a slow runner exposes (`lessons/phase-9.md` § Delivery) — per-profile wallet origins and a
+stricter reconnect driver, with a slow-frame regression cell.

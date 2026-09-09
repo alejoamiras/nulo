@@ -1,6 +1,7 @@
 /** The Aztec connect flow, testid-only. Which panel drives it depends on the tab (bridge or drip). */
 import { expect, type Frame, type Page } from "@playwright/test"
 import { TESTIDS } from "../../../src/lib/testids"
+import type { RunEnv } from "../env"
 import type { TestWalletProfile } from "../test-wallet/profile"
 
 export const tid = (t: string) => `[data-testid="${t}"]`
@@ -33,10 +34,9 @@ export async function connectAztec(page: Page, o: ConnectOptions): Promise<void>
 }
 
 /**
- * Open the picker until it lists the wanted wallet. Discovery probes every listed wallet URL with a
- * 10 s budget, and a frame that posts READY after the probe left it is missed by that scan — a
- * page connecting right after load sees only the fastest frame. Cancelling and reopening scans
- * again, with every frame ready by then.
+ * Open the picker until it lists the wanted wallet. Discovery probes every listed wallet URL in
+ * parallel with a 10 s budget each; every profile has its own origin because the probe tells
+ * frames apart by origin alone. The reopen is the safety net for a frame that missed its budget.
  */
 async function openPickerWith(page: Page, connect: string, row: ReturnType<Page["locator"]>): Promise<void> {
 	for (let attempt = 0; ; attempt++) {
@@ -60,23 +60,50 @@ async function openPickerWith(page: Page, connect: string, row: ReturnType<Page[
  */
 export async function driveToConnected(page: Page, o: ConnectOptions): Promise<void> {
 	const status = page.locator(tid(TESTIDS.bridgeL2Status))
-	const connect = page.locator(tid(TESTIDS.bridgeL2Connect)).first()
-	const row = page.locator(`${tid(TESTIDS.walletPickerRow)}[data-wallet-id="${walletIdOf(o.profile)}"]`)
-	const confirm = page.locator(tid(TESTIDS.btnVerifyConfirm))
-	const accounts = page.locator(tid(TESTIDS.accountChoice))
+	const stops = connectionStops(page, o.profile)
 	const started = Date.now()
 	let state: string | null = null
 	while (Date.now() < started + 180_000) {
 		state = await status.getAttribute("data-status")
 		if (state === "connected") return
-		if (await confirm.isVisible()) await confirm.click()
-		else if (await accounts.isVisible()) await chooseAccount(page, o.account)
-		else if (await row.isVisible()) await row.locator(tid(TESTIDS.walletPickerConnect)).click()
-		else if (state === "choosing") await rescanIfMissing(page, row)
-		else if (state === "idle" || state === "error" || state === "verifying") await connect.click()
+		await answerStop(page, o, stops, state)
 		await page.waitForTimeout(500)
 	}
 	throw new Error(`the Aztec connection never reached connected (last state: ${state})`)
+}
+
+type Locator = ReturnType<Page["locator"]>
+interface ConnectionStops {
+	connect: Locator
+	row: Locator
+	modal: Locator
+	confirm: Locator
+	accounts: Locator
+}
+
+function connectionStops(page: Page, profile: TestWalletProfile): ConnectionStops {
+	return {
+		connect: page.locator(tid(TESTIDS.bridgeL2Connect)).first(),
+		row: page.locator(`${tid(TESTIDS.walletPickerRow)}[data-wallet-id="${walletIdOf(profile)}"]`),
+		modal: page.locator(tid(TESTIDS.verificationModal)),
+		confirm: page.locator(tid(TESTIDS.btnVerifyConfirm)),
+		accounts: page.locator(tid(TESTIDS.accountChoice)),
+	}
+}
+
+/** One look at the screen, one answer. A click under a modal that opened between the look and the
+ *  click would wait out the whole action timeout, so every click here is short and the next look
+ *  decides again. */
+async function answerStop(page: Page, o: ConnectOptions, s: ConnectionStops, state: string | null): Promise<void> {
+	const tap = (target: Locator) => target.click({ timeout: 5_000 }).catch(() => undefined)
+	if (await s.confirm.isVisible()) return tap(s.confirm)
+	// The emoji check owns the screen; its confirm button is what the next look will find.
+	if (await s.modal.isVisible()) return
+	if (await s.accounts.isVisible()) return chooseAccount(page, o.account).catch(() => undefined)
+	if (await s.row.isVisible()) return tap(s.row.locator(tid(TESTIDS.walletPickerConnect)))
+	if (state === "choosing") return rescanIfMissing(page, s.row).catch(() => undefined)
+	// `verifying` is an active connection's own state: Connect is never pressed under it.
+	if (state === "idle" || state === "error") await tap(s.connect)
 }
 
 /** In the picker with the wanted row absent: give the scan its budget, then cancel so the next
@@ -112,16 +139,29 @@ async function chooseAccount(page: Page, account?: string): Promise<void> {
 
 /** The SESSION frame of a connected profile — the one whose `window.__nuloTestWallet` drives the
  *  wallet the page talks to (the discovery frames are separate documents). */
-export function walletFrame(page: Page, walletOrigin: string, profile: TestWalletProfile): Frame {
-	const frames = page.frames().filter((f) => f.url().startsWith(walletOrigin) && f.url().includes(`profile=${profile}`))
+export function walletFrame(page: Page, run: Pick<RunEnv, "testWalletOrigins">, profile: TestWalletProfile): Frame {
+	const origin = run.testWalletOrigins[profile]
+	const frames = page.frames().filter((f) => originOf(f.url()) === origin && f.url().includes(`profile=${profile}`))
 	const frame = frames.at(-1)
 	if (!frame) throw new Error(`no session frame for the ${profile} wallet`)
 	return frame
 }
 
+function originOf(url: string): string {
+	try {
+		return new URL(url).origin
+	} catch {
+		return ""
+	}
+}
+
 /** What the connected wallet was asked, by method — `sendTx`, `createAuthWit` — since its frame loaded. */
-export function walletCalls(page: Page, walletOrigin: string, profile: TestWalletProfile): Promise<Record<string, number>> {
-	return walletFrame(page, walletOrigin, profile).evaluate(() => window.__nuloTestWallet!.calls())
+export function walletCalls(
+	page: Page,
+	run: Pick<RunEnv, "testWalletOrigins">,
+	profile: TestWalletProfile,
+): Promise<Record<string, number>> {
+	return walletFrame(page, run, profile).evaluate(() => window.__nuloTestWallet!.calls())
 }
 
 /** Every address the grant carried, as the switcher menu lists them. */

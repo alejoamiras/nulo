@@ -112,6 +112,55 @@ payer and reads its postconditions from the chain through the harness.
 
 **Round 4** (same session, `high`, on `37c2babe`) — verdict: **"Ready for PR — for these two fixes. no new material findings (high confidence)."** The arc-3 loop converged here. One operational caveat it raised: a `ports.json` written before the owner field was added releases nothing — the rows of the runs that were in flight at that moment were removed by hand.
 
+## Delivery — two harness races only the runners could find
+
+The third CI run of the stack (harness key fixed) lost two cells, both to the harness, both timing
+the host never produces:
+
+- **Cell 36 (drip, `full` profile never listed).** The SDK's discovery probe
+  (`@aztec/wallet-sdk/dest/iframe/provider/iframe_discovery.js`) opens one hidden frame per listed
+  wallet URL in parallel and filters `message` events by `event.origin` alone — never by
+  `event.source`. All three test-wallet profiles shared one origin (one port, `?profile=`), so the
+  first frame's READY advanced every probe, each posted DISCOVERY to its own frame, and the frame
+  that had not loaded yet lost the message for good (its later READY is ignored, the probe times
+  out). On this host the three frames load within milliseconds and the race is won by luck (51/51
+  twice); on a two-core runner the third frame lags by seconds and lost on every one of three picker
+  opens — the cancel-and-reopen mitigation cannot help when every open re-creates all three frames.
+  Fix: **one origin per profile** — four ports per run (`resolve-ports.ts`, flat keys, released with
+  the run), three `vite preview` servers over the one wallet build, `RunEnv.testWalletOrigins`, frames
+  matched by exact origin, all three built URLs asserted, a `ports.json` from before the change refused
+  on attach. A new spike cell holds every response from the `full` origin for 4 s and asserts all
+  three rows — the regression guard.
+- **Cell 24a (recovery, Connect clicked under the emoji check).** `driveToConnected` looked
+  (`confirm` not visible), then clicked Connect; the verification modal mounted in between (it
+  renders overlay and confirm together under `v-if="emojis"` — there is no loading state) and
+  intercepted the click for the whole 60 s action timeout. Fix: Connect is never pressed while the
+  connection is `verifying` (an active connection owns that state), the modal itself is a stop the
+  next look answers, every click in the driver is short and re-evaluated, and the per-tick dispatch
+  is its own function.
+
+- **Cell 2 (deposit-token, the review stood down twice under one confirm).** Confirm started the
+  wizard's preflight reads; a watched input changed under them and stood the review down
+  (`(a watched input changed)` — the generic line, so the log could not say which); the helper
+  re-reviewed at once, the same preflight moved the input back, the re-opened review stood down
+  again, and the helper — waiting for the confirm button — never saw the second notice. The two
+  green local runs each carried one stand-down, both NAMED (fees moved; gas unreadable) and
+  answered by one re-review; the unnamed double is a slow-runner shape. The wizard's stand-down log
+  now names the inputs that moved (`changed: [...]`), and `confirmReview` waits for the enabled
+  button OR the stale notice, so a stand-down that lands before the button is pressed is one more
+  re-review, not a timeout. Which of the confirm's own re-read outputs moves on a slow runner is
+  the next CI log's to say — an owner follow-up in `MORNING.md`.
+
+**Consult** (codex, GPT-6 Astra, `high`, fresh session over the probe source, the logs and the
+fixtures — plan § Autonomy): "fix A is sound (high confidence); fix 2 needs a stricter driver".
+Adopted from it: seeds and the parked-panel script keyed on all three origins, exact-origin matching
+instead of `startsWith`, all three URLs asserted in the bundle, the stale-`ports.json` refusal, the
+`?profile=` query kept (a port-implied profile would push a mapping into the wallet), dropping
+`verifying` from the Connect branch, bounding the nested actions, and a deterministic slow-frame
+cell before landing. Noted and not taken: identifying session frames through the parked container
+(the origin + profile filter is exact now), and the ActivityDock overlay below 1100 px (outside the
+suite's 1440 px viewport).
+
 ## Durations
 
 The full fresh run on this host (`bun run e2e:tools`, one worker, retry 0, 2026-09-09):
