@@ -16,17 +16,22 @@ export const MIN_FJ = 10n ** 18n
  *  rejects every setup tx with "maxFeesPerGas.feePerL2Gas must be >= gasFees". */
 export const FEE_CEILING = { maxFeesPerGas: new GasFees(10n ** 13n, 10n ** 13n) }
 
-/** Anvil's default mnemonic. Index 0 deploys and is the relayer's L1 side; every other index is an actor. */
+/** Anvil's default mnemonic — the local network's too: its block publisher and validator both sign
+ *  from index 0, so that index belongs to the node. The harness signs from the LAST funded index,
+ *  the actors from the ones between; a key shared with the node's publisher races every L1 write
+ *  on one nonce, and the generation deploy binds the deployer's next CREATE address. */
 export const ANVIL_MNEMONIC = "test test test test test test test test test test test junk"
+/** How many keys anvil is started with; every index the harness or an actor uses must be below it. */
+export const ANVIL_ACCOUNTS = 16
+export const HARNESS_INDEX = ANVIL_ACCOUNTS - 1
 export function anvilKey(index: number): Hex {
 	const hd = mnemonicToAccount(ANVIL_MNEMONIC, { addressIndex: index }).getHdKey()
 	const key = hd.privateKey
 	if (!key) throw new Error(`anvil account ${index} has no private key`)
 	return `0x${Buffer.from(key).toString("hex")}` as Hex
 }
-/** Anvil's first two funded keys, as the smoke has always used them. */
-export const KEY_0 = anvilKey(0)
-export const KEY_1 = anvilKey(1)
+/** Deploys, relays, and is `l1` in every flow. */
+export const HARNESS_KEY = anvilKey(HARNESS_INDEX)
 
 export interface TokenSpec {
 	name: string

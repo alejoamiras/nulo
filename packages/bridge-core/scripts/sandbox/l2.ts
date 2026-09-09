@@ -14,7 +14,7 @@ import { createL2Wallet, createNode } from "../script-bootstrap"
 import { deployAccountIfAbsent, sponsoredFpcFee } from "../script-l2"
 import { FEE_CEILING } from "./constants"
 
-/** The base actor's key material is a fixed sandbox constant of the same kind as anvil's KEY_0 —
+/** The base actor's key material is a fixed sandbox constant of the same kind as anvil's keys —
  *  not a credential — so a `--keep` re-attach finds the deployer that owns the generation. */
 export const SANDBOX_ACTOR_SECRET = "0x00000000000000000000000000000000000000000000000000005a5db0c7a0b1" as Hex
 export const SANDBOX_ACTOR_SALT = 1n

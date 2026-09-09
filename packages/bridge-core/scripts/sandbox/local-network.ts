@@ -27,6 +27,7 @@ import { createServer } from "node:net"
 import { homedir } from "node:os"
 import { delimiter, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { ANVIL_ACCOUNTS } from "./constants"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const PACKAGE_ROOT = resolve(here, "..", "..")
@@ -342,7 +343,19 @@ function spawnAnvil(tool: Toolchain, port: number, logFile: string): ChildProces
 	const child = spawn(
 		tool.anvilBin,
 		// Every key the handle advertises (`deploy.ts` funds none itself) must be one anvil pre-funds.
-		["--host", "127.0.0.1", "--port", String(port), "--chain-id", "31337", "--slots-in-an-epoch", "1", "--accounts", "16", "--silent"],
+		[
+			"--host",
+			"127.0.0.1",
+			"--port",
+			String(port),
+			"--chain-id",
+			"31337",
+			"--slots-in-an-epoch",
+			"1",
+			"--accounts",
+			String(ANVIL_ACCOUNTS),
+			"--silent",
+		],
 		{ stdio: "pipe", detached: true },
 	)
 	drainOutput(child, "anvil", logFile)

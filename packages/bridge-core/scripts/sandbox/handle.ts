@@ -26,7 +26,8 @@ export const sandboxHandleSchema = z
 		walletChainId: z.number().int().nonnegative(),
 		artifactsDir: z.string(),
 		l1: z.object({
-			/** Anvil index 0: deploys, relays, and is `l1` in every flow. */
+			/** Deploys, relays, and is `l1` in every flow — anvil's last funded index, never index 0, which
+			 *  the local network's publisher signs from. */
 			deployerKey: hex,
 			/** Anvil indices 1..: one per browser spec file. */
 			actorKeys: z.array(hex),

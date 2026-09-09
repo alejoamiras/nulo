@@ -61,8 +61,8 @@ export async function erc20BalanceOf(l1: L1Ctx, erc20: Address, owner: Address):
 	})) as bigint
 }
 
-/** The fee asset is a minter-gated TestERC20 whose owner is the L1 deployer; anvil lets us borrow
- *  that owner when this run's key is not it. */
+/** The fee asset is a minter-gated TestERC20 owned by the node's CoinIssuer; anvil lets us borrow
+ *  that owner, so the grant never spends the publisher's nonce. */
 export async function ensureFeeAssetMinter(l1: L1Ctx, feeJuice: Address): Promise<void> {
 	const isMinter = await l1.pub.readContract({
 		address: feeJuice,
@@ -74,16 +74,22 @@ export async function ensureFeeAssetMinter(l1: L1Ctx, feeJuice: Address): Promis
 	const owner = lc(String(await l1.pub.readContract({ address: feeJuice, abi: TestERC20Abi, functionName: "owner", args: [] })))
 	await l1.pub.request({ method: "anvil_impersonateAccount" as never, params: [owner] as never })
 	await l1.pub.request({ method: "anvil_setBalance" as never, params: [owner, "0xde0b6b3a7640000"] as never })
-	const hash = await l1.wallet.writeContract({
-		address: feeJuice,
-		abi: TestERC20Abi,
-		functionName: "addMinter",
-		args: [l1.account.address],
-		account: owner,
-		chain: l1.wallet.chain,
-	} as never)
-	await l1.pub.waitForTransactionReceipt({ hash })
-	await l1.pub.request({ method: "anvil_stopImpersonatingAccount" as never, params: [owner] as never })
+	try {
+		const hash = await l1.wallet.writeContract({
+			address: feeJuice,
+			abi: TestERC20Abi,
+			functionName: "addMinter",
+			args: [l1.account.address],
+			account: owner,
+			chain: l1.wallet.chain,
+		} as never)
+		const receipt = await l1.pub.waitForTransactionReceipt({ hash })
+		if (receipt.status !== "success") throw new Error(`addMinter from the fee asset's owner ${owner} reverted`)
+	} finally {
+		await l1.pub.request({ method: "anvil_stopImpersonatingAccount" as never, params: [owner] as never })
+	}
+	const granted = await l1.pub.readContract({ address: feeJuice, abi: TestERC20Abi, functionName: "minters", args: [l1.account.address] })
+	if (!granted) throw new Error(`the fee asset still refuses ${l1.account.address} as a minter`)
 }
 
 export interface L1Deployment {

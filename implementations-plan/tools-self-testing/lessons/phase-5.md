@@ -60,3 +60,31 @@ Accepted by codex as fine: `claimPayment`'s deduction check, the `payer: "own"` 
 
 - The measured suite: 32 tests in ≈23 min on this host with two other sandboxes running beside it (≈14 min alone for the 26 pre-fee-state tests); the 45-minute job budget covers a slower runner plus the ≈2-minute boot and the forge build.
 - Two Aztec toolchains in one workflow are fine as long as each job's `setup-aztec` cache key carries its own version; the `integration` job must never share the `noir`/`txe` jobs' 5.0.1 install.
+
+## Delivery fix — the harness signed from the node's own key
+
+The first CI run of the tools browser suite (arc 3, PR #577, six shards) failed one cell: shard 6's
+spike deposit died in the harness's own `mint`, before the UI was touched, with viem's
+`NonceTooLowError` (nonce 100 offered, the account already past it) — sender anvil index 0. The Aztec
+5.2.0 local network derives its sequencer publisher AND validator keys from the same mnemonic at
+index 0 (`local-network.js`, `mnemonicToAccount(DefaultMnemonic)`), so every L2 block it publishes
+is an L1 transaction from the harness's deployer/relayer key. The harness reads the pending nonce and
+estimates gas with plain viem; a publish between the two loses the nonce. Locally it never fired
+(102 cells at retry 0); a slower runner found it once. The same key drives `deployFactory`'s
+predicted CREATE address, so the race can end a whole generation at boot, not just one cell.
+
+**Consult** (codex, GPT-6 Astra, `high`, a fresh session over the facts — plan § Autonomy): verdict
+"land a corrected A on arc 2, without broad B" — move the harness off the node's key, no retry
+wrapper. It corrected the brief on two points: the fee asset's ownership is transferred to the node's
+CoinIssuer at deploy (index 0 stays a minter and cannot `addMinter`), and the harness already
+borrows the real owner through `ensureFeeAssetMinter` (anvil impersonation), so the move needs no
+new grant; and a nonce retry alone is inadequate because the factory deploy binds a predicted
+CREATE address that a moved nonce cannot preserve. It asked for the harness index to be reserved
+explicitly, with actor counts that reach it refused, and for the fix to land on this branch with
+arc 3 synced over it.
+
+**Fix**: the harness signs from anvil's last funded index (`HARNESS_INDEX = ANVIL_ACCOUNTS - 1`);
+index 0 is the node's; actors stay 1..n with n below the harness index, enforced at deploy;
+`--accounts` and the reserved index share one constant; `ensureFeeAssetMinter` stops impersonating
+in a `finally`, refuses a reverted grant and re-reads `minters` before continuing. A kept sandbox's
+handle still names the key it was deployed with; a fresh boot uses the new one.

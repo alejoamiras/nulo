@@ -7,7 +7,7 @@ import type { ManifestV2 } from "../../src/manifest-v2"
 import { openDeployJournal, writeCandidateAtomically } from "../deploy-manifest"
 import { deployGeneration, preCreateToken } from "../generation"
 import { createL1Clients, stopwatch } from "../script-bootstrap"
-import { anvilKey, CHAIN_ID, KEY_0, lc, PERMIT2, sandboxChain } from "./constants"
+import { anvilKey, CHAIN_ID, HARNESS_INDEX, HARNESS_KEY, lc, PERMIT2, sandboxChain } from "./constants"
 import { ensurePrivateFpc } from "./context"
 import { deployDripFixture } from "./drip"
 import { ensureForgeArtifacts } from "./forge"
@@ -37,7 +37,11 @@ export async function deployEverything(net: { anvilUrl: string; nodeUrl: string 
 	const mins = opts.mins ?? stopwatch()
 	ensureForgeArtifacts()
 	const chain = sandboxChain(net.anvilUrl)
-	const account = privateKeyToAccount(KEY_0)
+	const actorKeyCount = opts.actorKeys ?? 12
+	if (actorKeyCount >= HARNESS_INDEX) {
+		throw new Error(`actorKeys must stay below ${HARNESS_INDEX} (anvil indices 1..${HARNESS_INDEX - 1}); got ${actorKeyCount}`)
+	}
+	const account = privateKeyToAccount(HARNESS_KEY)
 	const second = privateKeyToAccount(anvilKey(1))
 	const l1: L1Ctx = { ...createL1Clients({ chain, rpcUrl: net.anvilUrl, account }), account }
 	const l1b: L1Ctx = { ...createL1Clients({ chain, rpcUrl: net.anvilUrl, account: second }), account: second }
@@ -111,8 +115,8 @@ export async function deployEverything(net: { anvilUrl: string; nodeUrl: string 
 		rollupVersion: Number(info.rollupVersion),
 		walletChainId: manifest.walletChainId,
 		artifactsDir: opts.artifactsDir,
-		// Keys 1..N of anvil's mnemonic, pre-funded because anvil is started with more accounts than this.
-		l1: { deployerKey: KEY_0, actorKeys: Array.from({ length: opts.actorKeys ?? 12 }, (_, i) => anvilKey(i + 1)) },
+		// Keys 1..N of anvil's mnemonic: funded, below the harness's own index, and never the node's index 0.
+		l1: { deployerKey: HARNESS_KEY, actorKeys: Array.from({ length: actorKeyCount }, (_, i) => anvilKey(i + 1)) },
 		l2: { relayer: l2base.relayer.toString(), actorSecret: SANDBOX_ACTOR_SECRET, actorSalt: SANDBOX_ACTOR_SALT.toString() },
 		deployment,
 	}
