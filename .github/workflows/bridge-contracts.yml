@@ -35,14 +35,31 @@ jobs:
         id: filter
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
-          # Positive-only, no `!` negations — the dorny `some`-quantifier footgun.
-          # gen-remappings is included because the forge project cannot resolve without it.
+          # Positive-only, no `!` negations — the dorny `some`-quantifier footgun. Whole-package for
+          # the contracts and for bridge-core (its scripts ARE the sandbox harness); src + manifest
+          # for bridge-core's dependency libs; the deployed manifests, because the integration suite
+          # is the closest local proof that the frontend's adopted generation still round-trips.
+          # Pinned by scripts/ci-cd/behavior-gating.test.ts.
           filters: |
             contracts:
               - 'contracts/bridge/**'
-              - 'packages/bridge-core/scripts/gen-remappings.ts'
+              - 'packages/bridge-core/**'
+              - 'packages/wallet-crypto/src/**'
+              - 'packages/wallet-crypto/package.json'
+              - 'packages/wallet-core/src/**'
+              - 'packages/wallet-core/package.json'
+              - 'packages/resolve-asset/src/**'
+              - 'packages/resolve-asset/package.json'
+              - 'apps/tools/public/testnet-bridge.json'
+              - 'apps/tools/public/mainnet-bridge.json'
+              - 'package.json'
+              - 'bun.lock'
+              - 'bunfig.toml'
+              - 'patches/**'
               - '.github/workflows/bridge-contracts.yml'
               - '.github/workflows/_bridge-contracts.yml'
+              - '.github/actions/setup-aztec/**'
+              - '.github/actions/setup-bun/**'
       - name: Override for manual dispatch
         if: github.event_name == 'workflow_dispatch'
         id: override

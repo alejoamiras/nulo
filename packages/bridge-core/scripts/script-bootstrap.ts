@@ -83,9 +83,12 @@ export function createNode(nodeUrl: string): ReturnType<typeof createAztecNodeCl
 
 /** Embedded Aztec wallet. `proverEnabled` is REQUIRED — every call site states
  *  its choice visibly (the sandbox's `false` used to be a silent one-file
- *  outlier among nine identical `true`s). */
-export function createL2Wallet(opts: { nodeUrl: string; proverEnabled: boolean }): Promise<EmbeddedWallet> {
-	return EmbeddedWallet.create(opts.nodeUrl, { pxeConfig: { proverEnabled: opts.proverEnabled } })
+ *  outlier among nine identical `true`s). `ephemeral` keeps the PXE store out of
+ *  the shared data directory, whose stores are keyed by chain id + rollup
+ *  address — identical for every fresh local network, so two concurrent
+ *  sandboxes (or a run after a previous one) would otherwise share one store. */
+export function createL2Wallet(opts: { nodeUrl: string; proverEnabled: boolean; ephemeral?: boolean }): Promise<EmbeddedWallet> {
+	return EmbeddedWallet.create(opts.nodeUrl, { pxeConfig: { proverEnabled: opts.proverEnabled }, ephemeral: opts.ephemeral })
 }
 
 /** Elapsed-minutes stopwatch — replaces each hand-rolled `t0`/`mins()` pair. */

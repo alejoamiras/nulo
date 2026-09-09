@@ -7,11 +7,13 @@
  * `SANDBOX_L1_RPC` + `SANDBOX_NODE_URL` together attach to an already-running network instead
  * (a no-op `stop()`), which is how `--keep` is re-entered.
  */
-import { type ChildProcess, spawn } from "node:child_process"
+import { type ChildProcess, execFileSync, spawn } from "node:child_process"
+import { randomBytes } from "node:crypto"
 import {
 	accessSync,
 	closeSync,
 	constants,
+	createWriteStream,
 	existsSync,
 	mkdirSync,
 	openSync,
@@ -25,6 +27,7 @@ import { createServer } from "node:net"
 import { homedir } from "node:os"
 import { delimiter, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { ANVIL_ACCOUNTS } from "./constants"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const PACKAGE_ROOT = resolve(here, "..", "..")
@@ -216,6 +219,24 @@ function resolveToolchain(root: string): Toolchain {
 	return tool
 }
 
+// ─── Listening sockets ───────────────────────────────────────────────────────
+
+/** `aztec start` has no bind-host option: its JSON-RPC server listens on every interface. The
+ *  sockets are logged at boot so a run's exposure is visible in its log, never assumed. */
+function listeningSockets(pids: number[]): string {
+	try {
+		const out = execFileSync("ss", ["-ltnpH"], { encoding: "utf8" })
+		const mine = out
+			.split("\n")
+			.filter((l) => pids.some((pid) => l.includes(`pid=${pid},`)))
+			.map((l) => l.trim().split(/\s+/)[3] ?? "")
+			.filter(Boolean)
+		return mine.length > 0 ? mine.join(" ") : "(none found — ss reported no socket for the spawned pids)"
+	} catch {
+		return "(ss unavailable)"
+	}
+}
+
 // ─── Health ──────────────────────────────────────────────────────────────────
 
 async function rpcResponds(url: string, method: string): Promise<boolean> {
@@ -299,36 +320,66 @@ async function killGroup(owned: OwnedChild): Promise<void> {
  * child blocks on its next write — the aztec node stops sequencing a few blocks in, with no error
  * anywhere. Attaching a listener puts the stream in flowing mode, which is the drain.
  */
-function drainOutput(child: ChildProcess, label: string): void {
+/** Where a run's node and anvil output goes — outside the data directory, which teardown removes,
+ *  so a failed CI run can still upload it. */
+export const SANDBOX_LOG_DIR = join(homedir(), ".cache", "nulo-bridge-sandbox", "logs")
+
+/** The full stream to a per-run file; errors echoed to the console as they happen. */
+function drainOutput(child: ChildProcess, label: string, logFile: string): void {
+	mkdirSync(dirname(logFile), { recursive: true })
+	const sink = createWriteStream(logFile, { flags: "a" })
 	const report = (data: Buffer) => {
+		sink.write(data)
 		const line = data.toString().trim()
 		if (/\bERROR\b|\bFATAL\b|already in use/i.test(line)) console.error(`[${label}]`, line.slice(0, 200))
 	}
 	child.stdout?.on("data", report)
 	child.stderr?.on("data", report)
+	// `close` follows the stdio streams' end; `exit` can precede their last chunks.
+	child.once("close", () => sink.end())
 }
 
-function spawnAnvil(tool: Toolchain, port: number): ChildProcess {
+function spawnAnvil(tool: Toolchain, port: number, logFile: string): ChildProcess {
 	const child = spawn(
 		tool.anvilBin,
-		["--host", "127.0.0.1", "--port", String(port), "--chain-id", "31337", "--slots-in-an-epoch", "1", "--silent"],
+		// Every key the handle advertises (`deploy.ts` funds none itself) must be one anvil pre-funds.
+		[
+			"--host",
+			"127.0.0.1",
+			"--port",
+			String(port),
+			"--chain-id",
+			"31337",
+			"--slots-in-an-epoch",
+			"1",
+			"--accounts",
+			String(ANVIL_ACCOUNTS),
+			"--silent",
+		],
 		{ stdio: "pipe", detached: true },
 	)
-	drainOutput(child, "anvil")
+	drainOutput(child, "anvil", logFile)
 	return child
 }
 
 function nodeEnv(tool: Toolchain, anvilUrl: string): NodeJS.ProcessEnv {
 	const forge = join(tool.internalBin, "forge")
 	const anvil = join(tool.internalBin, "anvil")
+	// A shell that disables or resets the admin key would override the hash below: the node reads
+	// those switches first. The child never inherits them.
+	const { AZTEC_DISABLE_ADMIN_API_KEY: _disable, AZTEC_RESET_ADMIN_API_KEY: _reset, ...inherited } = process.env
 	return {
-		...process.env,
+		...inherited,
 		PATH: `${tool.internalBin}${delimiter}${process.env.PATH ?? ""}`,
 		// Drops the sequencer's per-block transaction floor so a single tx makes a block. It does NOT
 		// make the chain tick on its own — this network still builds a block only when a transaction
 		// arrives, which is why the L1→L2 waits carry a `forceBlock`.
 		SEQ_MIN_TX_PER_BLOCK: "0",
 		ETHEREUM_HOSTS: anvilUrl,
+		// The admin listener stays authenticated, behind a key hash nothing matches: a key the node
+		// mints itself is PRINTED — into the log this run keeps and CI uploads — and disabling the key
+		// would leave the admin API open on every interface. Nothing here needs that API.
+		AZTEC_ADMIN_API_KEY_HASH: randomBytes(32).toString("hex"),
 		// `@aztec/ethereum`'s resolver reads `~/.aztec/current/internal-bin/forge` ahead of PATH; these
 		// overrides are its highest-priority source and the only way to pin the L1 deploy to this version.
 		...(isExecutable(forge) ? { FORGE_BIN: forge } : {}),
@@ -336,7 +387,7 @@ function nodeEnv(tool: Toolchain, anvilUrl: string): NodeJS.ProcessEnv {
 	}
 }
 
-function spawnNode(tool: Toolchain, p: { ports: SandboxPorts; anvilUrl: string; dataDir: string }): ChildProcess {
+function spawnNode(tool: Toolchain, p: { ports: SandboxPorts; anvilUrl: string; dataDir: string; logFile: string }): ChildProcess {
 	const child = spawn(
 		tool.aztecBin,
 		[
@@ -352,11 +403,10 @@ function spawnNode(tool: Toolchain, p: { ports: SandboxPorts; anvilUrl: string; 
 			p.anvilUrl,
 			"--data-directory",
 			p.dataDir,
-			"--disable-admin-api-key",
 		],
 		{ stdio: "pipe", detached: true, env: nodeEnv(tool, p.anvilUrl) },
 	)
-	drainOutput(child, "aztec")
+	drainOutput(child, "aztec", p.logFile)
 	return child
 }
 
@@ -409,31 +459,50 @@ export async function startLocalNetwork(opts: StartLocalNetworkOptions): Promise
 	await registerPorts(opts.runId, ports, process.pid)
 
 	const spawned: OwnedChild[] = []
-	const stop = async (): Promise<void> => {
-		for (const owned of spawned.reverse()) await killGroup(owned)
-		spawned.length = 0
-		await releasePorts(opts.runId, ports)
-		// The store belongs to this network and nothing outlives it; removing it only after the
-		// holders are gone is what keeps the pages from staying pinned.
-		rmSync(dataDir, { recursive: true, force: true })
+	let stopping: Promise<void> | undefined
+	// Idempotent: a second signal while the first stop runs must not re-walk (and re-reverse) the list.
+	const stop = (): Promise<void> => {
+		stopping ??= (async () => {
+			for (const owned of [...spawned].reverse()) await killGroup(owned)
+			await releasePorts(opts.runId, ports)
+			// The store belongs to this network and nothing outlives it; removing it only after the
+			// holders are gone is what keeps the pages from staying pinned.
+			rmSync(dataDir, { recursive: true, force: true })
+		})()
+		return stopping
 	}
 	// Each child is its own process-group leader, so an interrupt delivered to THIS group leaves them
-	// running with the registry still claiming their ports. Reap them on the way out instead.
+	// running with the registry still claiming their ports. Reap them on the way out instead — and
+	// on SIGHUP too, which a closing terminal or tmux window sends while the graceful stop is running.
 	const onSignal = () => {
 		void stop().then(() => process.exit(130))
 	}
 	process.once("SIGINT", onSignal)
 	process.once("SIGTERM", onSignal)
+	process.once("SIGHUP", onSignal)
+	// A host that exits without waiting (vitest's own signal handling, an uncaught error) still must
+	// not orphan a node holding a multi-GB store: the last-resort reap is synchronous.
+	process.once("exit", () => {
+		// Only groups still alive: a pid that already exited may since belong to someone else's process.
+		for (const owned of spawned) {
+			if (owned.hasExited() || owned.child.pid === undefined) continue
+			try {
+				process.kill(-owned.child.pid, "SIGKILL")
+			} catch {}
+		}
+		rmSync(dataDir, { recursive: true, force: true })
+	})
 	try {
 		console.log(`[sandbox] anvil ${anvilUrl}, aztec ${nodeUrl}, data ${dataDir}`)
-		spawned.push(own(spawnAnvil(tool, ports.anvil)))
+		spawned.push(own(spawnAnvil(tool, ports.anvil, join(SANDBOX_LOG_DIR, `${opts.runId}-anvil.log`))))
 		await waitHealthy(`anvil at ${anvilUrl}`, () => rpcResponds(anvilUrl, "eth_chainId"), 60_000)
-		spawned.push(own(spawnNode(tool, { ports, anvilUrl, dataDir })))
+		spawned.push(own(spawnNode(tool, { ports, anvilUrl, dataDir, logFile: join(SANDBOX_LOG_DIR, `${opts.runId}-aztec.log`) })))
 		await waitHealthy(`aztec node at ${nodeUrl}`, () => rpcResponds(nodeUrl, "node_getNodeInfo"), 180_000)
 	} catch (e) {
 		await stop()
 		throw e
 	}
-	console.log("[sandbox] local network ready")
+	const pids = spawned.map((o) => o.child.pid).filter((p): p is number => p !== undefined)
+	console.log(`[sandbox] local network ready — listening on ${listeningSockets(pids)}`)
 	return { anvilUrl, nodeUrl, stop }
 }
