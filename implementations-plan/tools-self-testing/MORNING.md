@@ -48,6 +48,10 @@ loop and the cross-arc pass had converged. Everything below was decided without 
   2–4): a minted key is printed into the log the harness keeps and CI uploads; disabling the key
   would leave the admin listener open on every interface. The child never inherits a shell's
   `AZTEC_DISABLE_ADMIN_API_KEY`.
+- **The harness signs from anvil's last funded index, never index 0** (`lessons/phase-5.md`, the
+  delivery fix): the local network's block publisher and validator both sign from index 0, and
+  sharing it lost a nonce on one CI shard of the first run — the same race can end a generation at
+  boot. Codex (one consult) chose the key move over a retry wrapper; actors stay 1..n below it.
 - **Both suites claim their ports in `~/.agents/ports.md`** under their run id (created, with its
   header, on a host that has none), check-and-write under one lock, and release on teardown; the
   allocators pick around registered ports (`lessons/phase-9.md`, arc-3 rounds 1–4).

@@ -49,3 +49,11 @@ passed, 1 skipped; 116 tests passed, 6 skipped**, `EXIT=0` (569 s). A first atte
 `bun run build` failed only the suite's arming contract — an unarmed repo build is refused by design,
 so the local gate has to build the way CI does. CI proof at Delivery: the arc-3 PR's six shards +
 `tools-e2e-status` at retry 0.
+
+**CI proof, first run (stack #578).** #575 and #576 fully green, including both renamed extension
+aggregators, `bridge-contracts-status` with the new `integration` and `txe` jobs, and every network
+shard. #577: five of six tools shards green; shard 6 lost one cell to the harness's shared-key nonce
+race (fixed on arc 2 — `lessons/phase-5.md` § Delivery fix — and arc 3 synced over it); the
+extension smoke's `backup-imported-account` timed out once on the runner at its annotated slow wait
+and passed on re-run — a flake by the repo's own rule (the identical suite was green on #575, #576
+and locally on the same commit; arc 3 touches the extension only in the network runner's plumbing).
