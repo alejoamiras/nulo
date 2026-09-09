@@ -65,7 +65,14 @@ function assertGraphCovered(patterns: string[], target: string, label: string) {
   }
 }
 
-const FILTER_WORKFLOWS = ["pr-quick.yml", "pr-extension-smoke-e2e.yml", "pr-extension-network-e2e.yml", "bridge-contracts.yml", "actionlint.yml"]
+const FILTER_WORKFLOWS = [
+  "pr-quick.yml",
+  "pr-extension-smoke-e2e.yml",
+  "pr-extension-network-e2e.yml",
+  "bridge-contracts.yml",
+  "pr-tools-e2e.yml",
+  "actionlint.yml",
+]
 
 /**
  * The check-run each PR workflow's aggregator job produces. Branch protection matches these BY
@@ -77,6 +84,7 @@ const AGGREGATOR_CHECKS: Record<string, string> = {
   "pr-extension-smoke-e2e.yml": "extension-smoke-e2e-status",
   "pr-extension-network-e2e.yml": "extension-network-e2e-status",
   "bridge-contracts.yml": "bridge-contracts-status",
+  "pr-tools-e2e.yml": "tools-e2e-status",
 }
 
 describe("CI aggregator check names", () => {
@@ -145,6 +153,26 @@ describe("CI behavior-gating guard", () => {
     }
     for (const p of ["package.json", "bun.lock", "bunfig.toml", "patches/**", ".github/actions/setup-aztec/**", ".github/actions/setup-bun/**"]) {
       expect(contracts, `bridge-contracts must gate ${p}`).toContain(p)
+    }
+  })
+
+  test("tools-e2e covers the tools graph, the bridge contracts, the harness package, and its own pipeline", () => {
+    const filter = filtersOf("pr-tools-e2e.yml")["tools-e2e"]
+    assertGraphCovered(filter, "tools", "tools-e2e")
+    expect(filter, "the sandbox deploys the contracts the UI bridges through").toContain("contracts/bridge/**")
+    expect(filter, "bridge-core's scripts ARE the sandbox harness").toContain("packages/bridge-core/**")
+    for (const p of [
+      "package.json",
+      "bun.lock",
+      "bunfig.toml",
+      "patches/**",
+      ".github/workflows/pr-tools-e2e.yml",
+      ".github/workflows/_tools-e2e.yml",
+      ".github/actions/setup-aztec/**",
+      ".github/actions/setup-bun/**",
+      ".github/actions/setup-playwright/**",
+    ]) {
+      expect(filter, `tools-e2e must gate ${p}`).toContain(p)
     }
   })
 

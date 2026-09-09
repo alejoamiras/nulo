@@ -23,7 +23,7 @@ bun run e2e:agent --shard=5/5                        # reproduce one CI shard (s
 
 Internally `scripts/e2e/agent.sh`:
 
-1. Calls `scripts/e2e/resolve-ports.ts` to allocate six ephemeral TCP ports (anvil, aztec, aztec admin, aztec p2p, playground, tools) and persists them to `.e2e-state/ports.json`.
+1. Calls `scripts/e2e/resolve-ports.ts` to allocate five ephemeral TCP ports (anvil, aztec, aztec admin, aztec p2p, playground) and persists them to `.e2e-state/ports.json`. The tools app is never part of this run — it has its own suite (`bun run e2e:tools`).
 2. Builds the Chrome extension with `VITE_LOCAL_NETWORK_RPC_URL=http://localhost:<aztec port>` so the wallet's "Local Network" preset talks to this run's sandbox.
 3. Greps the bundle for the URL — fails fast if the vite env didn't propagate.
 4. Runs the network suite with `ANVIL_URL` / `ANVIL_PORT` / `AZTEC_NODE_URL` / `AZTEC_PORT` / `AZTEC_ADMIN_PORT` / `AZTEC_P2P_PORT` / `PLAYGROUND_URL` / `PLAYGROUND_PORT` in env.

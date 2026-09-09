@@ -146,6 +146,7 @@ whose chain disagrees with the build target fails the app at boot (`src/lib/buil
 bun run --cwd apps/tools typecheck   # vue-tsc
 bun run --cwd apps/tools test        # vitest unit + component (jsdom)
 bun run --cwd apps/tools test:e2e    # smoke e2e: shell + faucet + send wizard, mock wallets, jsdom
+bun run e2e:tools                    # browser suite: real Chromium, real local network, a wallet-sdk test wallet
 ```
 
 The faucet and shell smokes mount the full app in jsdom against a **mock Aztec wallet** (intercepts
@@ -156,9 +157,15 @@ page's buttons, the foreground record absent). The send smoke mounts the Send vi
 REAL wizard composables and the REAL journal engine, faking only the chain/wallet boundary (the
 manifest, the two wallet sessions, the bridge-core calls that would reach a chain), and drives
 list / paste / grant-at-sign / no-route / first-time / 2-tx private / gas-only /
-exit-with-pause-preflight / placeholder scenarios. No browser, no real wallet, no network. Live
-behaviour is proven by the `packages/bridge-core` sandbox smoke and the testnet canaries, not here.
+exit-with-pause-preflight / placeholder scenarios. No browser, no real wallet, no network.
 See `tests/e2e/README.md`.
+
+Live behaviour is proven by the **browser suite** (`tests/browser/`, `bun run e2e:tools`): the real
+UI in Chromium against a per-run sandbox (anvil + local network + a bridge generation from
+`packages/bridge-core`), an `@aztec/wallets` embedded wallet behind the wallet-sdk iframe handler —
+never the Nulo extension — and an injected EIP-1193 L1 wallet. Every matrix cell asserts its
+payer and its on-chain postconditions through the harness. CI runs it as `pr-tools-e2e.yml`
+(`tools-e2e-status`). See `tests/browser/README.md`.
 
 ## File layout
 

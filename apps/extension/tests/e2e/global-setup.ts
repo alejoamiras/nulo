@@ -20,7 +20,6 @@ import { markBootReady, markBootStarted } from "./sentinel"
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const EXTENSION_PATH = path.resolve(__dirname, "../../dist/chrome")
 const PLAYGROUND_DIR = path.resolve(__dirname, "../../../playground")
-const TOOLS_DIR = path.resolve(__dirname, "../../../tools")
 const CONFIG_PATH = path.resolve(__dirname, ".test-config.json")
 // ── Aztec toolchain resolution ──────────────────────────────────────────
 // Resolve from the repo's `@aztec/aztec.js` pin (the SAME rule CI's
@@ -93,11 +92,6 @@ const AZTEC_ADMIN_PORT = Number(process.env.AZTEC_ADMIN_PORT ?? 8880)
 const AZTEC_P2P_PORT = Number(process.env.AZTEC_P2P_PORT ?? 40400)
 const PLAYGROUND_PORT = Number(process.env.PLAYGROUND_PORT ?? 5174)
 const PLAYGROUND_URL = process.env.PLAYGROUND_URL ?? `http://localhost:${PLAYGROUND_PORT}/`
-/** Tools dev server. Spawned only when TOOLS_DEV_PORT is set (the agent wrapper
- *  always sets it; a bare vitest run does not), so a run without it never pays
- *  the Vite + Vue + Aztec startup. */
-const TOOLS_PORT = process.env.TOOLS_DEV_PORT ? Number(process.env.TOOLS_DEV_PORT) : undefined
-const TOOLS_URL = TOOLS_PORT ? `http://localhost:${TOOLS_PORT}/` : undefined
 
 /** Per-run aztec data directory. Mandatory even for in-memory mode because
  *  some aztec subsystems still write to ~/.aztec/data by default — two
@@ -119,8 +113,6 @@ let nodeProcess: ChildProcess | null = null
 let weStartedNode = false
 let playgroundProcess: ChildProcess | null = null
 let weStartedPlayground = false
-let toolsProcess: ChildProcess | null = null
-let weStartedTools = false
 
 /** Probe a URL with HEAD/GET; returns true on any 2xx/3xx/4xx response. */
 async function probeHttp(url: string, timeoutMs = 1500): Promise<boolean> {
@@ -289,26 +281,6 @@ export async function setup(project: TestProject) {
 		},
 	})
 
-	// ── Tools dev server (opt-in via TOOLS_DEV_PORT) ─────────────────
-	// Only spawned when the test runner pre-allocated a tools port. This
-	// keeps the default network suite lightweight — tools startup adds ~5s
-	// + a Vite + Vue process per worktree.
-	if (TOOLS_PORT && TOOLS_URL) {
-		await ensureDevServer({
-			label: "tools",
-			title: "Tools",
-			cwd: TOOLS_DIR,
-			url: TOOLS_URL,
-			env: { NODE_ENV: "test", TOOLS_DEV_PORT: String(TOOLS_PORT) },
-			setHandle: (child) => {
-				toolsProcess = child
-			},
-			setStarted: (started) => {
-				weStartedTools = started
-			},
-		})
-	}
-
 	await finishBoot(project)
 }
 
@@ -317,7 +289,6 @@ export async function setup(project: TestProject) {
 function provideWithoutSandbox(project: TestProject): void {
 	project.provide("aztecTestConfig", undefined)
 	project.provide("playgroundUrl", PLAYGROUND_URL)
-	project.provide("toolsUrl", TOOLS_URL)
 }
 
 /** The shared tail of the reuse and fresh paths. The dev-server URLs are provided even when a
@@ -325,7 +296,6 @@ function provideWithoutSandbox(project: TestProject): void {
  *  marker. */
 async function finishBoot(project: TestProject): Promise<void> {
 	project.provide("playgroundUrl", PLAYGROUND_URL)
-	project.provide("toolsUrl", TOOLS_URL)
 	await deployContractsAndProvide(project)
 	// Sandbox healthy + contracts deployed, BEFORE any test worker starts —
 	// this closes the boot-failure (exit 86) window. Any failure from here on
@@ -375,12 +345,7 @@ function priorPortsMatch(priorLock: OwnedState): boolean {
 		priorLock.ports.aztec === AZTEC_PORT &&
 		priorLock.ports.aztecAdmin === AZTEC_ADMIN_PORT &&
 		priorLock.ports.aztecP2P === AZTEC_P2P_PORT &&
-		priorLock.ports.playground === PLAYGROUND_PORT &&
-		// Tools port is optional — match only if both sides agree on its
-		// presence and value. Lockfiles written before tools wiring have
-		// `priorLock.ports.tools === undefined`; current runs without
-		// tools have `TOOLS_PORT === undefined`. Both match.
-		priorLock.ports.tools === TOOLS_PORT
+		priorLock.ports.playground === PLAYGROUND_PORT
 	const urlMatch = priorLock.bakedLocalRpcUrl === LOCAL_NODE_URL
 	return portsMatch && urlMatch
 }
@@ -388,23 +353,13 @@ function priorPortsMatch(priorLock: OwnedState): boolean {
 /** Every recorded process alive AND every endpoint answering, probed in the recorded order. */
 async function priorPackHealthy(priorLock: OwnedState): Promise<boolean> {
 	const allCoreAlive = isPidAlive(priorLock.pids.anvil) && isPidAlive(priorLock.pids.aztec) && isPidAlive(priorLock.pids.playground)
-	const toolsAlive = TOOLS_PORT ? isPidAlive(priorLock.pids.tools) : true
-	const toolsHealthy = TOOLS_URL ? await probeHttp(TOOLS_URL) : true
-	return (
-		allCoreAlive &&
-		toolsAlive &&
-		(await probeAnvil(ANVIL_URL)) &&
-		(await checkNodeHealth(LOCAL_NODE_URL)) &&
-		(await probeHttp(PLAYGROUND_URL)) &&
-		toolsHealthy
-	)
+	return allCoreAlive && (await probeAnvil(ANVIL_URL)) && (await checkNodeHealth(LOCAL_NODE_URL)) && (await probeHttp(PLAYGROUND_URL))
 }
 
 function reapPrior(priorLock: OwnedState): void {
 	killOrphanByPid(priorLock.pids.anvil, "anvil")
 	killOrphanByPid(priorLock.pids.aztec, "aztec")
 	killOrphanByPid(priorLock.pids.playground, "playground")
-	killOrphanByPid(priorLock.pids.tools, "tools")
 	try {
 		fs.rmSync(priorLock.aztecDataDir, { recursive: true, force: true })
 	} catch {}
@@ -615,7 +570,7 @@ function spawnAztecNode(): void {
 	})
 }
 
-// ── Vite dev servers (playground; tools opt-in) ───────────────────
+// ── Vite dev server (playground) ─────────────────────────────────
 interface DevServerSpec {
 	/** Log tag + the lower-case name in "Starting … dev server" / "Failed to start …". */
 	label: string
@@ -772,7 +727,6 @@ function buildOwnedState(extra: Partial<OwnedState> = {}): OwnedState {
 			aztecAdmin: AZTEC_ADMIN_PORT,
 			aztecP2P: AZTEC_P2P_PORT,
 			playground: PLAYGROUND_PORT,
-			...(TOOLS_PORT ? { tools: TOOLS_PORT } : {}),
 		},
 		pids: currentPids(),
 		aztecDataDir: AZTEC_DATA_DIR,
@@ -797,7 +751,6 @@ function currentPids(): OwnedState["pids"] {
 		anvil: weStartedAnvil ? anvilProcess?.pid : undefined,
 		aztec: weStartedNode ? nodeProcess?.pid : undefined,
 		playground: weStartedPlayground ? playgroundProcess?.pid : undefined,
-		tools: weStartedTools ? toolsProcess?.pid : undefined,
 	}
 }
 
@@ -847,8 +800,6 @@ export async function teardown() {
 		// ignore
 	}
 
-	await killProcessGroup(toolsProcess, "tools", weStartedTools)
-	toolsProcess = null
 	await killProcessGroup(playgroundProcess, "playground", weStartedPlayground)
 	playgroundProcess = null
 	await killProcessGroup(nodeProcess, "aztec", weStartedNode)
@@ -920,7 +871,6 @@ function bestEffortKill(child: ChildProcess | null, weStarted: boolean): void {
 }
 
 const onExit = () => {
-	bestEffortKill(toolsProcess, weStartedTools)
 	bestEffortKill(playgroundProcess, weStartedPlayground)
 	bestEffortKill(nodeProcess, weStartedNode)
 	bestEffortKill(anvilProcess, weStartedAnvil)
@@ -938,8 +888,5 @@ declare module "vitest" {
 		extensionPath: string
 		aztecTestConfig?: AztecTestConfig
 		playgroundUrl: string
-		/** Defined only when `TOOLS_DEV_PORT` pre-allocated a tools port; tests
-		 *  that drive the tools app consume it, the rest ignore the field. */
-		toolsUrl?: string
 	}
 }

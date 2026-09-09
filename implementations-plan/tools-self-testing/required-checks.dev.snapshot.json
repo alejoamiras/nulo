@@ -1,0 +1,17 @@
+{
+  "strict": false,
+  "checks": [
+    {
+      "context": "network-e2e-status",
+      "app_id": 15368
+    },
+    {
+      "context": "quality-status",
+      "app_id": 15368
+    },
+    {
+      "context": "smoke-e2e-status",
+      "app_id": 15368
+    }
+  ]
+}
