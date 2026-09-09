@@ -8,6 +8,7 @@ import { openDeployJournal, writeCandidateAtomically } from "../deploy-manifest"
 import { deployGeneration, preCreateToken } from "../generation"
 import { createL1Clients, stopwatch } from "../script-bootstrap"
 import { anvilKey, CHAIN_ID, KEY_0, lc, PERMIT2, sandboxChain } from "./constants"
+import { deployDripFixture } from "./drip"
 import { ensureForgeArtifacts } from "./forge"
 import type { SandboxClients, SandboxHandle } from "./handle"
 import { copyCanonicalCode, deployL1Fixtures } from "./l1"
@@ -90,6 +91,8 @@ export async function deployEverything(net: { anvilUrl: string; nodeUrl: string 
 		await preCreateToken(l1, l2, gen, deployment.tokens.usdt, journal, { maxWholePerTx: 1_000_000 }),
 		await preCreateToken(l1, l2, gen, deployment.tokens.pxo, journal, { register: false, maxWholePerTx: 1_000_000 }),
 	]
+	console.log(`\n=== faucet (${mins()}) ===`)
+	const drip = await deployDripFixture(l2)
 	const swap = opts.swap ? await opts.swap(deployment) : sandboxSwapBlock(deployment)
 	const manifest = buildManifest(gen, deployment, tokens, Number(info.rollupVersion), swap)
 	const manifestPath = join(opts.artifactsDir, "manifest.json")
@@ -107,7 +110,7 @@ export async function deployEverything(net: { anvilUrl: string; nodeUrl: string 
 		l2: { relayer: l2base.relayer.toString(), actorSecret: SANDBOX_ACTOR_SECRET, actorSalt: SANDBOX_ACTOR_SALT.toString() },
 		deployment,
 	}
-	writeArtifacts(opts.artifactsDir, { manifest, handle })
+	writeArtifacts(opts.artifactsDir, { manifest, handle, deployments: drip })
 	console.log(`\nwrote ${manifestPath} (${mins()})`)
 
 	const clients: SandboxClients = { handle, l1, l1b, l2: l2base, deployment, mins }
