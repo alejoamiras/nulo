@@ -4,10 +4,29 @@ import { join } from "node:path"
 import type { BridgeBlock, ManifestToken, ManifestV2 } from "../../src/manifest-v2"
 import { walletChainIdOf } from "../../src/wallet-chain-id"
 import type { GenerationRecord } from "../generation"
-import { CHAIN_ID, MIN_FJ } from "./constants"
+import { CHAIN_ID, MIN_FJ, MULTICALL3, SANDBOX_ETH_FJ, SANDBOX_TIER } from "./constants"
 import type { L1Deployment } from "./l1"
 
 export type SwapBlock = NonNullable<BridgeBlock["l1"]["swap"]>
+
+/** The `bridge.l1.swap` block the sandbox ships. `poolManager` is never read off-chain, so it names
+ *  the facade too; the fuel budgets are the smoke's calibration for this network (the mock rate
+ *  makes a claim cost ~3.6 FJ of the 40 whole units a fueled send buys, so they never bind). */
+export function sandboxSwapBlock(d: L1Deployment): SwapBlock {
+	return {
+		poolManager: d.quoter,
+		quoter: d.quoter,
+		multicall3: MULTICALL3,
+		weth: d.tokens.weth,
+		feeJuice: d.feeJuice,
+		tiers: [SANDBOX_TIER],
+		ethFj: SANDBOX_ETH_FJ,
+		slippageBps: 300,
+		minFuelFj: MIN_FJ.toString(),
+		fjPerTx: "3577823745897251607",
+		fjRegister: "1967429819850912960",
+	}
+}
 
 export function buildManifest(
 	gen: GenerationRecord,

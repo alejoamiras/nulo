@@ -144,7 +144,7 @@ jobs:
           test -f contracts/bridge/evm/out/PortalFactory.sol/PortalFactory.json
           test -f contracts/bridge/evm/out/SwapBridgeRouter.sol/SwapBridgeRouter.json
           test -f contracts/bridge/evm/out/TokenPortalImpl.sol/TokenPortalImpl.json
-          bun run --cwd packages/bridge-core test -- factory-abi router-abi
+          bun run --cwd packages/bridge-core test -- factory-abi router-abi quoter-abi
 
   noir:
     name: nargo test (keystone)

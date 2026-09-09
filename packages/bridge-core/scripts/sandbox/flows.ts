@@ -15,7 +15,7 @@ import { discoverFuelRoute } from "../../src/route-discovery"
 import type { SendResult } from "../../src/send-flow"
 import { waitForL1ToL2Message } from "../generation"
 import { ensureRouterPermit2 } from "../script-l1"
-import { FAKE_WETH, MIN_FJ, MOCK_RATE_NUM, MULTICALL3, PERMIT2, ZERO_L1 } from "./constants"
+import { MIN_FJ, MOCK_RATE_NUM, MULTICALL3, PERMIT2, SANDBOX_ETH_FJ, SANDBOX_TIER, ZERO_L1 } from "./constants"
 import {
 	balanceOf,
 	claim,
@@ -113,7 +113,7 @@ export async function flowTokenPlusGas(s: SmokeContext, token: ManifestToken, l2
 	// makes exact: 40 whole 6-decimal units → 4×10^19 FJ-wei.
 	const fuelAmount = 40n * unit
 	await mint(s.l1, token.erc20 as Address, s.l1.account.address, total)
-	const route = mockRoute(token.erc20 as Address, s.clients.deployment.feeJuice)
+	const route = mockRoute(token.erc20 as Address, s.clients.deployment.feeJuice, s.clients.deployment.tokens.weth)
 	const res = await send(s, s.l1, {
 		intent: "token+gas",
 		erc20: token.erc20 as Address,
@@ -361,23 +361,19 @@ export async function flowPortalOnlyToken(s: SmokeContext, pxo: ManifestToken): 
 	return `portal existed, hub did not know it; the claim took ${outcome.path}`
 }
 
-/** Discovery pointed at a contract without the quoter selector makes every candidate hop revert —
- *  exactly the shape a token with no pool produces. */
-export async function flowNoRoute(
-	s: SmokeContext,
-	nort: Address,
-	quoterWithoutSelector: Address = s.clients.deployment.swapTarget,
-): Promise<string> {
+/** NORT is never allow-listed on the facade, so every candidate hop reverts — exactly the shape a
+ *  token with no pool produces on the real quoter. */
+export async function flowNoRoute(s: SmokeContext, nort: Address, quoter: Address = s.clients.deployment.quoter): Promise<string> {
 	const outcome = await discoverFuelRoute({
 		client: s.l1.pub as never,
-		quoter: quoterWithoutSelector,
+		quoter,
 		multicall3: MULTICALL3,
 		token: nort,
 		feeAsset: s.clients.deployment.feeJuice,
-		weth: FAKE_WETH,
+		weth: s.clients.deployment.tokens.weth,
 		feeJuice: s.clients.deployment.feeJuice,
-		tiers: [{ fee: 3000, tickSpacing: 60 }],
-		ethFj: { fee: 3000, tickSpacing: 60 },
+		tiers: [SANDBOX_TIER],
+		ethFj: SANDBOX_ETH_FJ,
 		probeAmount: 10n ** 18n,
 	})
 	if (outcome.kind !== "no-route") throw new Error(`expected no-route for NORT, got ${outcome.kind}`)
@@ -415,7 +411,7 @@ async function fundedSendFor(
 	if (mode === "sponsored") {
 		return send(s, s.l1, { intent: "token", erc20, amount: total, aztecRecipient: s.l2.from.toString() as Hex, isPrivate: false })
 	}
-	const route = mockRoute(erc20, s.clients.deployment.feeJuice)
+	const route = mockRoute(erc20, s.clients.deployment.feeJuice, s.clients.deployment.tokens.weth)
 	const toFpc = mode === "private-fpc"
 	return send(s, s.l1, {
 		intent: "token+gas",

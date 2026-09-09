@@ -12,7 +12,7 @@ import { ensureForgeArtifacts } from "./forge"
 import type { SandboxClients, SandboxHandle } from "./handle"
 import { copyCanonicalCode, deployL1Fixtures } from "./l1"
 import { type Actor, connectL2, createActor, l2CtxFor, SANDBOX_ACTOR_SALT, SANDBOX_ACTOR_SECRET } from "./l2"
-import { buildManifest, type SwapBlock, writeArtifacts } from "./manifest"
+import { buildManifest, sandboxSwapBlock, type SwapBlock, writeArtifacts } from "./manifest"
 
 export interface DeployedSandbox {
 	clients: SandboxClients
@@ -90,7 +90,7 @@ export async function deployEverything(net: { anvilUrl: string; nodeUrl: string 
 		await preCreateToken(l1, l2, gen, deployment.tokens.usdt, journal, { maxWholePerTx: 1_000_000 }),
 		await preCreateToken(l1, l2, gen, deployment.tokens.pxo, journal, { register: false, maxWholePerTx: 1_000_000 }),
 	]
-	const swap = opts.swap ? await opts.swap(deployment) : undefined
+	const swap = opts.swap ? await opts.swap(deployment) : sandboxSwapBlock(deployment)
 	const manifest = buildManifest(gen, deployment, tokens, Number(info.rollupVersion), swap)
 	const manifestPath = join(opts.artifactsDir, "manifest.json")
 	writeCandidateAtomically(manifestPath, manifest)
@@ -105,7 +105,7 @@ export async function deployEverything(net: { anvilUrl: string; nodeUrl: string 
 		artifactsDir: opts.artifactsDir,
 		l1: { deployerKey: KEY_0, actorKeys: Array.from({ length: opts.actorKeys ?? 8 }, (_, i) => anvilKey(i + 1)) },
 		l2: { relayer: l2base.relayer.toString(), actorSecret: SANDBOX_ACTOR_SECRET, actorSalt: SANDBOX_ACTOR_SALT.toString() },
-		deployment: { ...deployment, quoter: swap?.quoter },
+		deployment,
 	}
 	writeArtifacts(opts.artifactsDir, { manifest, handle })
 	console.log(`\nwrote ${manifestPath} (${mins()})`)

@@ -21,6 +21,17 @@ import {
 	flowTokenPlusGas,
 	runExit,
 } from "./flows"
+import {
+	flowDiscoveredRouteSend,
+	flowGasOnlyPrivate,
+	flowGasOnlySwapped,
+	flowGasOnlyWethSingleHop,
+	flowMinFuelFloorBinds,
+	flowOutboxBeforeProven,
+	flowTokenOnlyHeldPublicFj,
+	flowTokenPlusGasPrivate,
+	flowTokenPlusGasWithCreditHeld,
+} from "./flows-matrix"
 import type { SandboxClients } from "./handle"
 import type { Actor } from "./l2"
 
@@ -113,6 +124,17 @@ export async function runSmoke(clients: SandboxClients, manifest: ManifestV2, ac
 	await step("(g) rejected registration, fee-juice-with-claim", () => flowRejectedRegistration(s, "fee-juice-claim"))
 	await step("(g) rejected registration, private FPC", () => flowRejectedRegistration(s, "private-fpc"))
 	await step("(h) guardian pause blocks exits, not claims", () => flowGuardianPause(s, usdc))
+	// The matrix cells the battery gained with the Quoter facade.
+	await step("(i) token-only claim paid from held public Fee Juice", () => flowTokenOnlyHeldPublicFj(s, usdc, usdcL2))
+	await step("(i) discovered route → send → self-paying claim", () => flowDiscoveredRouteSend(s, usdt, usdtL2))
+	await step("(i) fueled public claim leaves private credit untouched", () => flowTokenPlusGasWithCreditHeld(s, usdt, usdtL2))
+	await step("(i) token+gas private, registered token", () => flowTokenPlusGasPrivate(s, usdt, s.l2TokenOf))
+	await step("(i) token+gas private, first-time token", () => flowTokenPlusGasPrivate(s, undefined, s.l2TokenOf))
+	await step("(i) floor above the venue's output refused", () => flowMinFuelFloorBinds(s, usdt))
+	await step("(i) gas only, private credit", () => flowGasOnlyPrivate(s))
+	await step("(i) gas only, swapped token", () => flowGasOnlySwapped(s, usdt))
+	await step("(i) gas only, WETH single hop", () => flowGasOnlyWethSingleHop(s))
+	await step("(i) outbox refuses an unproven exit, then consumes", () => flowOutboxBeforeProven(s, usdc, usdcL2))
 	const notes = [fuelBudgetNote(s.samples), ...exitGasNotes(s.samples)]
 	for (const n of notes) console.log(n)
 	return { results, samples: s.samples, notes }

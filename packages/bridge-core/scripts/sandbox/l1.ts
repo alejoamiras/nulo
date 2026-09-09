@@ -91,7 +91,14 @@ export interface L1Deployment {
 	feeJuicePortal: Address
 	registry: Address
 	swapTarget: Address
+	/** MockV4Quoter — answers discovery for the routable tokens with quotes the swap target settles exactly. */
+	quoter: Address
 	tokens: Record<SpecKey, Address>
+}
+
+/** Lets discovery find a route for `token` through the facade (NORT is deliberately never listed). */
+export async function setRoutable(l1: L1Ctx, quoter: Address, token: Address, ok = true): Promise<void> {
+	await writeL1(l1, quoter, evmArtifact("MockV4Quoter").abi, "setRoutable", [token, ok])
 }
 
 export async function deployL1Fixtures(
@@ -113,5 +120,9 @@ export async function deployL1Fixtures(
 		console.log(`  ${spec.symbol}: ${address}`)
 		entries.push([key, address])
 	}
-	return { ...addrs, swapTarget, tokens: Object.fromEntries(entries) as L1Deployment["tokens"] }
+	const tokens = Object.fromEntries(entries) as L1Deployment["tokens"]
+	const quoter = await deployEvm(l1, "MockV4Quoter", [swapTarget, tokens.weth, addrs.feeJuice])
+	for (const key of ["usdc", "usdt", "pxo"] as const) await setRoutable(l1, quoter, tokens[key])
+	console.log(`  MockV4Quoter: ${quoter} (routable: USDC, USDT, PXO; WETH ${tokens.weth})`)
+	return { ...addrs, swapTarget, quoter, tokens }
 }

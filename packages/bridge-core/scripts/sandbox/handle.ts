@@ -42,7 +42,7 @@ export const sandboxHandleSchema = z
 			feeJuicePortal: address,
 			registry: address,
 			swapTarget: address,
-			quoter: address.optional(),
+			quoter: address,
 			tokens: z.record(z.string(), address),
 		}),
 	})

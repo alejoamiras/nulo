@@ -32,7 +32,7 @@ import { type L2Ctx, waitForL1ToL2Message } from "../generation"
 import { ensureRouterPermit2 } from "../script-l1"
 import { claimTokensUntilSynced, registerHub, registerHubToken } from "../script-l2"
 import { sendGenerationOf } from "../script-send"
-import { deadline, FAKE_WETH, FEE_CEILING, PERMIT2, rndNonce } from "./constants"
+import { deadline, FEE_CEILING, PERMIT2, rndNonce, SANDBOX_ETH_FJ, SANDBOX_TIER } from "./constants"
 import type { SandboxClients } from "./handle"
 import { mintFeeAsset } from "./l1"
 import { l2CtxFor } from "./l2"
@@ -204,14 +204,8 @@ const generationOf = (s: SmokeContext) => sendGenerationOf(s.manifest, s.bridge)
 
 /** The explicit two-hop shape the mock accepts. The mock ignores the pools entirely, but the router
  *  hashes them into the witness and refuses an empty path for anything but the fee asset. */
-export function mockRoute(erc20: Address, feeJuice: Address) {
-	return buildFuelRoute({
-		token: erc20,
-		weth: FAKE_WETH,
-		feeJuice,
-		tokenWeth: { fee: 3000, tickSpacing: 60 },
-		ethFj: { fee: 3000, tickSpacing: 60 },
-	})
+export function mockRoute(erc20: Address, feeJuice: Address, weth: Address) {
+	return buildFuelRoute({ token: erc20, weth, feeJuice, tokenWeth: SANDBOX_TIER, ethFj: SANDBOX_ETH_FJ })
 }
 
 export async function send(s: SmokeContext, l1: L1Ctx, p: Omit<SendParams, "nonce" | "deadline">): Promise<SendResult> {
