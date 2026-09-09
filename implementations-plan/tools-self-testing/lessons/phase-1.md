@@ -21,9 +21,14 @@
 - `bun run test:ci-gating` → 91 pass / 0 fail (8 files).
 - `rg` for `smoke-e2e-status|network-e2e-status|contracts-status` outside `implementations-plan/`, `audit/`, `wallets-architecture-research/` → only the new names remain.
 - `bun run lint` → 0 errors (33 pre-existing warnings, 5 infos).
-- `bun run test:all` → see the log line pasted below before the first push.
+- `bun run test:all` →  5741 passed, 2 skipped, 7 todo across all workspaces (142 s for the extension workspace), EXIT=0 — the pre-push gate for the arc-1 branch.
 
 ## Not done here (by design)
 
 - The branch-protection `--apply` and the label creation happen at merge time (owner; `MORNING.md`).
 - CI proof of the renamed workflows comes from the arc-1 PR at Delivery (a `workflow_dispatch` cannot target a file that is not yet on `dev`).
+
+## Codex loop (arc 1)
+
+- Round 1 (session `01a0837e-56aa-74d3-ad7b-015ead3dcd12`): findings — producer-collision in the runbook (fixed: refuse two producers per context), inherited-key rename lookup (fixed: `Object.hasOwn`), labels not provisioned (fixed: `labels` subcommand), premature "required on both branches" claims in four docs (fixed: cut-over-conditional wording), five wrong/incomplete substitutions incl. two hidden `.claude/skills` files (fixed; `rg --hidden` from now on), three comment nits (fixed). Verdict: findings.
+- Round 2: no new or unresolved material findings — `ROUND VERDICT: clean`. Arc 1 converged.

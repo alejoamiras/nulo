@@ -254,7 +254,7 @@ Fast layers on every gate: `bun run lint` + `bun run typecheck:all` + the touche
 
 ### Arc 1 — CI names say the app
 
-#### Phase 1: Rename workflows, aggregators, labels, scripts, docs; ship the protection runbook
+#### Phase 1 ✓: Rename workflows, aggregators, labels, scripts, docs; ship the protection runbook
 - Rename files and `name:`s per the change map; aggregator jobs → `extension-smoke-e2e-status`, `extension-network-e2e-status`, `bridge-contracts-status`; `quality-status` stays.
 - `decide` jobs accept both old and new labels for one release; the runbook creates the new labels.
 - `scripts/ci-cd/required-checks.sh`: `print [--json]` / `--apply --branch <dev|main> --expect <file>` / `--add <names> --branch … --expect …`; `checks` + `app_id`; preserves `strict` and unrelated checks; verifies the write; prints rollback; header states the admin-token need. `bash -n` + `shellcheck` clean; a unit test (`scripts/ci-cd/required-checks.test.ts`) covers the JSON transform with fixtures.
