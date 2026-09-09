@@ -124,6 +124,7 @@ window.__nuloTestWallet = {
 	addAccount: async (secret, salt = "1") => (await boot()).importSeed({ secret, salt } as Seed).then((a) => a.toString()),
 	accounts: async () => (await boot()).getAccounts().then((list) => list.map((a) => a.item.toString())),
 	calls: () => ({ ...calls }),
+	submitted: async () => (await boot()).submitted.map((t) => ({ ...t, feeLimit: t.feeLimit.toString() })),
 	failNext: (method, pattern, message = `test wallet: injected failure of ${method}`) => {
 		fault = { kind: "reject", method, pattern, message }
 	},

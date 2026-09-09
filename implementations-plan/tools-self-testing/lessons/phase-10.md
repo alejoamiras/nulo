@@ -63,3 +63,8 @@ tests (four test threads over a two-reader store — `lessons/phase-5.md`; two t
 fixes): #575 and #576 fully green, the `txe` job green on both; #577 lost two cells to two harness
 races a slow runner exposes (`lessons/phase-9.md` § Delivery) — per-profile wallet origins and a
 stricter reconnect driver, with a slow-frame regression cell.
+
+**Run 4** (`80e0a380`, both harness fixes): **`tools-e2e-status` green — all six shards at retry 0**;
+#575 and #576 fully green. The plan's CI proof stands here. Run 5 carries the submission-based FPC
+accounting (`lessons/phase-9.md` § Delivery, cell 1), a change to what the suite asserts, not to what
+it drives.

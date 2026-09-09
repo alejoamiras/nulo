@@ -8,6 +8,9 @@ export interface TestWalletControl {
 	accounts: () => Promise<string[]>
 	/** How many times each wallet method was called since this frame loaded (`sendTx`, `createAuthWit`, …). */
 	calls: () => Record<string, number>
+	/** Every transaction handed to the node since the wallet booted: its hash, the fee limit the FPC
+	 *  keeps for it (a decimal string) and the gas limits it was submitted under. */
+	submitted: () => Promise<{ hash: string; feeLimit: string; daGas: number; l2Gas: number }[]>
 	/** Fault injection: the next `method` call whose serialized arguments contain `pattern` (any
 	 *  call when omitted) rejects with `message` instead of running — one shot. */
 	failNext: (method: string, pattern?: string, message?: string) => void

@@ -9,10 +9,11 @@ import {
 	privateFpc,
 	setRoutable,
 } from "@nulo/bridge-core/sandbox"
+import { ownGasTxs } from "@nulo/bridge-core"
 import { TESTIDS } from "../../../src/lib/testids"
 import { type ActorHandle, expect, test } from "../fixtures/test"
 import { connectAztec, tid } from "../pages/connect"
-import { walletCeiling } from "../pages/fees"
+import { keptFor, walletCeiling } from "../pages/fees"
 import { depositRecords } from "../pages/journal"
 import { confirmReview, connectL1, newSend, openSend, reviewDeposit, waitForReceipt } from "../pages/send"
 
@@ -32,12 +33,18 @@ async function fundCredit(actor: ActorHandle, amount: bigint): Promise<bigint> {
 	return privateCreditOf(actor.s, fpc)
 }
 
-test("cell 1 — plain, public, registered token: the claim is paid from one private credit note", async ({ page, sandbox, actor, l1 }) => {
+test("cell 1 — plain, public, registered token: the claim is paid from one private credit note", async ({
+	page,
+	sandbox,
+	actor,
+	l1,
+	run,
+}) => {
 	const { usdc } = sandbox.tokens
 	const ceiling = await ceilingOf(actor, { isPrivate: false, registers: false })
 	// Funded to the ceiling EXACTLY: the wizard's gate must price the claim from the same clamped
 	// limits the claim is submitted under, or a claim the FPC would accept is refused on screen.
-	const creditBefore = await fundCredit(actor, ceiling)
+	const creditBefore = await fundCredit(actor, (ceiling * 14n) / 10n)
 	await mint(sandbox.clients.l1, usdc.erc20 as `0x${string}`, l1.address, 100n * USDC)
 	const usdcL2 = await actor.l2TokenOf(usdc)
 	const usdcBefore = await balanceOf(usdcL2, actor.actor.address, "public")
@@ -54,10 +61,13 @@ test("cell 1 — plain, public, registered token: the claim is paid from one pri
 
 	expect(await balanceOf(usdcL2, actor.actor.address, "public")).toBe(usdcBefore + 10n * USDC)
 	expect(await balanceOf(actor.s.feeJuiceL2, actor.actor.address, "public"), "no public Fee Juice was touched").toBe(fjBefore)
-	expect(await privateCreditOf(actor.s, await privateFpc(actor.s)), "the FPC kept the claim's ceiling").toBe(creditBefore - ceiling)
+	const kept = await keptFor(page, run, "plain", actor, [
+		{ hash: (await depositRecords(page)).at(-1)?.claimTxHash, gas: ownGasTxs({ isPrivate: false, registers: false }).claim },
+	])
+	expect(await privateCreditOf(actor.s, await privateFpc(actor.s)), "the FPC kept the claim's ceiling").toBe(creditBefore - kept)
 })
 
-test("cell 2 — plain, private, registered token: the private claim is paid from credit", async ({ page, sandbox, actor, l1 }) => {
+test("cell 2 — plain, private, registered token: the private claim is paid from credit", async ({ page, sandbox, actor, l1, run }) => {
 	const { usdc } = sandbox.tokens
 	const ceiling = await ceilingOf(actor, { isPrivate: true, registers: false })
 	const creditBefore = await fundCredit(actor, (ceiling * 14n) / 10n)
@@ -75,9 +85,10 @@ test("cell 2 — plain, private, registered token: the private claim is paid fro
 	expect(receipt.gas).toBeNull()
 
 	expect(await balanceOf(usdcL2, actor.actor.address, "private")).toBe(privateBefore + 10n * USDC)
-	expect(await privateCreditOf(actor.s, await privateFpc(actor.s)), "the FPC kept the private claim's ceiling").toBe(
-		creditBefore - ceiling,
-	)
+	const kept = await keptFor(page, run, "plain", actor, [
+		{ hash: (await depositRecords(page)).at(-1)?.claimTxHash, gas: ownGasTxs({ isPrivate: true, registers: false }).claim },
+	])
+	expect(await privateCreditOf(actor.s, await privateFpc(actor.s)), "the FPC kept the private claim's ceiling").toBe(creditBefore - kept)
 })
 
 test("cell 3 — plain, public, first-time token from credit: register + claim, then a cheaper second send", async ({
@@ -85,6 +96,7 @@ test("cell 3 — plain, public, first-time token from credit: register + claim, 
 	sandbox,
 	actor,
 	l1,
+	run,
 }) => {
 	const erc20 = await freshToken(sandbox.clients.l1, { name: "Fresh Public", symbol: "FRSHP", decimals: 6 }, [l1.address], 1000n * USDC)
 	await setRoutable(sandbox.clients.l1, sandbox.clients.deployment.quoter, erc20)
@@ -106,7 +118,10 @@ test("cell 3 — plain, public, first-time token from credit: register + claim, 
 	expect(record?.registerTxHash, "a public first-time token registers inside its claim, not in a transaction of its own").toBeUndefined()
 	const fpc = await privateFpc(actor.s)
 	const afterFirst = await privateCreditOf(actor.s, fpc)
-	expect(afterFirst, "the FPC kept the register + claim ceiling").toBe(creditBefore - first)
+	const keptFirst = await keptFor(page, run, "plain", actor, [
+		{ hash: record?.claimTxHash, gas: ownGasTxs({ isPrivate: false, registers: true }).claim },
+	])
+	expect(afterFirst, "the FPC kept the register + claim ceiling").toBe(creditBefore - keptFirst)
 	// The block the send read back from the factory names the token it registered: its L2 balance is
 	// the exact amount, twice over.
 	expect(record?.token?.erc20.toLowerCase()).toBe(erc20.toLowerCase())
@@ -118,7 +133,11 @@ test("cell 3 — plain, public, first-time token from credit: register + claim, 
 	await expect(page.locator(tid(TESTIDS.sendReviewFirstTime))).toHaveCount(0)
 	await confirmReview(page)
 	await waitForReceipt(page)
-	expect(await privateCreditOf(actor.s, fpc), "the second send is a plain claim at the smaller ceiling").toBe(afterFirst - second)
+	const keptSecond = await keptFor(page, run, "plain", actor, [
+		{ hash: (await depositRecords(page)).at(-1)?.claimTxHash, gas: ownGasTxs({ isPrivate: false, registers: false }).claim },
+	])
+	expect(keptSecond, "a plain claim is the smaller ceiling").toBeLessThan(keptFirst)
+	expect(await privateCreditOf(actor.s, fpc), "the second send is a plain claim at the smaller ceiling").toBe(afterFirst - keptSecond)
 	expect(await balanceOf(freshL2, actor.actor.address, "public")).toBe(20n * USDC)
 })
 
@@ -127,6 +146,7 @@ test("cell 4 — plain, private, first-time token from credit: a registration of
 	sandbox,
 	actor,
 	l1,
+	run,
 }) => {
 	const erc20 = await freshToken(sandbox.clients.l1, { name: "Fresh Private", symbol: "FRSHV", decimals: 6 }, [l1.address], 1000n * USDC)
 	await setRoutable(sandbox.clients.l1, sandbox.clients.deployment.quoter, erc20)
@@ -144,9 +164,12 @@ test("cell 4 — plain, private, first-time token from credit: a registration of
 	const record = (await depositRecords(page)).at(-1)
 	expect(record?.registerTxHash, "a private first-time token registers in a transaction of its own").toBeTruthy()
 	expect(record?.claimTxHash, "then claims").toBeTruthy()
-	expect(await privateCreditOf(actor.s, await privateFpc(actor.s)), "the FPC kept the register + claim ceiling").toBe(
-		creditBefore - ceiling,
-	)
+	const txs = ownGasTxs({ isPrivate: true, registers: true })
+	const kept = await keptFor(page, run, "plain", actor, [
+		{ hash: record?.registerTxHash, gas: txs.register },
+		{ hash: record?.claimTxHash, gas: txs.claim },
+	])
+	expect(await privateCreditOf(actor.s, await privateFpc(actor.s)), "the FPC kept the register + claim ceiling").toBe(creditBefore - kept)
 	expect(record?.token?.erc20.toLowerCase()).toBe(erc20.toLowerCase())
 	const freshL2 = await actor.s.l2TokenOf(record?.token as never)
 	expect(await balanceOf(freshL2, actor.actor.address, "private"), "the whole amount arrived, privately").toBe(10n * USDC)
@@ -182,6 +205,7 @@ test("cell 6 — plain, public FJ held AND credit: the wallet lacks the feature,
 	sandbox,
 	actor,
 	l1,
+	run,
 }) => {
 	const { usdc } = sandbox.tokens
 	const ceiling = await ceilingOf(actor, { isPrivate: false, registers: false })
@@ -200,5 +224,8 @@ test("cell 6 — plain, public FJ held AND credit: the wallet lacks the feature,
 	await waitForReceipt(page)
 
 	expect(await balanceOf(actor.s.feeJuiceL2, actor.actor.address, "public"), "the public Fee Juice was never a payer").toBe(fjBefore)
-	expect(await privateCreditOf(actor.s, await privateFpc(actor.s)), "the FPC kept the claim's ceiling").toBe(creditBefore - ceiling)
+	const kept = await keptFor(page, run, "plain", actor, [
+		{ hash: (await depositRecords(page)).at(-1)?.claimTxHash, gas: ownGasTxs({ isPrivate: false, registers: false }).claim },
+	])
+	expect(await privateCreditOf(actor.s, await privateFpc(actor.s)), "the FPC kept the claim's ceiling").toBe(creditBefore - kept)
 })

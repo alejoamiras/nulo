@@ -151,6 +151,19 @@ the host never produces:
   re-review, not a timeout. Which of the confirm's own re-read outputs moves on a slow runner is
   the next CI log's to say — an owner follow-up in `MORNING.md`.
 
+- **Cell 1 (deposit-token, the FPC kept less than the predicted ceiling — found locally).** The
+  harness prices a claim's ceiling through its scripting wallet, funds the credit, then drives the UI;
+  the wallet prices again at its send. Between the two the chain's minimum fees move: anvil mines one
+  block per transaction and its EIP-1559 base fee follows every L1 write the harness and the deposit
+  make, and the node's `getPredictedMinFees` follows the base fee. So `credit - ceiling` is exact only
+  while nothing moved — 102 cells of luck locally, then a 2.7e12 remainder on a fresh sandbox. Fix:
+  the test wallet observes the SDK's hand-off to the node (`aztecNode.sendTx`, where the fees are
+  final: hash, `getFeeLimit()`, gas limits) and the suite asserts the FPC kept exactly the fee limits
+  of the transactions the journal says landed (`keptFor`, keyed by hash; a submission under limits
+  other than the app's is an error) — a prediction sizes the fixture, the submission proves the
+  books. Cell 1 funds with the same headroom as its siblings; the equality boundary is the
+  integration suite's to prove deterministically (an owner note in `MORNING.md`).
+
 **Consult** (codex, GPT-6 Astra, `high`, fresh session over the probe source, the logs and the
 fixtures — plan § Autonomy): "fix A is sound (high confidence); fix 2 needs a stricter driver".
 Adopted from it: seeds and the parked-panel script keyed on all three origins, exact-origin matching
@@ -160,6 +173,15 @@ instead of `startsWith`, all three URLs asserted in the bundle, the stale-`ports
 cell before landing. Noted and not taken: identifying session frames through the parked container
 (the origin + profile filter is exact now), and the ActivityDock overlay below 1100 px (outside the
 suite's 1440 px viewport).
+
+**Consult, resumed** (same session, `high`, on cell 1's fee drift): "use exact transaction-based
+accounting, but change the capture point and preserve boundary coverage separately" — the FPC keeps
+`DA_limit × DA_maxFee + L2_limit × L2_maxFee` with no refund (teardown is inside `gasLimits`, priority
+fees are not additive); `sendTx`'s options are too early (the wallet completes fees afterwards, the
+transport strips the plural cap) so observe the node hand-off; record per transaction and assert
+against the hashes the journal says landed; keep the limits assertion independent; do not pin the
+network's fees (`anvil_setNextBlockBaseFeePerGas` is one block, not an oracle). Adopted in full; the
+deterministic equality gate it asks for belongs to the in-process integration suite (fixed cap).
 
 ## Durations
 

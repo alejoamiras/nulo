@@ -9,10 +9,11 @@ import {
 	privateFpc,
 	setRoutable,
 } from "@nulo/bridge-core/sandbox"
+import { ownGasTxs } from "@nulo/bridge-core"
 import { TESTIDS } from "../../../src/lib/testids"
 import { expect, test } from "../fixtures/test"
 import { connectAztec, tid } from "../pages/connect"
-import { walletCeiling } from "../pages/fees"
+import { keptFor } from "../pages/fees"
 import { depositRecords, fuelConservation } from "../pages/journal"
 import { confirmReview, connectL1, openSend, reviewDeposit, setVisibility, startDeposit, waitForReceipt } from "../pages/send"
 
@@ -95,7 +96,13 @@ test("cell 14 — plain, public, credit held: the fueled claim leaves the credit
 	expect(await privateCreditOf(actor.s, fpc), "the credit was never a payer").toBe(creditBefore)
 })
 
-test("cell 15 — plain, private: the fuel becomes credit at the FPC, which pays the private claim", async ({ page, sandbox, actor, l1 }) => {
+test("cell 15 — plain, private: the fuel becomes credit at the FPC, which pays the private claim", async ({
+	page,
+	sandbox,
+	actor,
+	l1,
+	run,
+}) => {
 	const { usdt } = sandbox.tokens
 	await mint(sandbox.clients.l1, usdt.erc20 as `0x${string}`, l1.address, 200n * USDC)
 	const usdtL2 = await actor.l2TokenOf(usdt)
@@ -116,13 +123,15 @@ test("cell 15 — plain, private: the fuel becomes credit at the FPC, which pays
 	expect(gained).toBeLessThan(100n * USDC)
 	expect(await balanceOf(actor.s.feeJuiceL2, actor.actor.address, "public"), "nothing public was touched").toBe(fjBefore)
 	const { received } = await fuelConservation(page, actor.s.l2.node)
-	const kept = await walletCeiling(actor, { isPrivate: true, registers: false })
+	const kept = await keptFor(page, run, "plain", actor, [
+		{ hash: (await depositRecords(page)).at(-1)?.claimTxHash, gas: ownGasTxs({ isPrivate: true, registers: false }).claim },
+	])
 	expect(await privateCreditOf(actor.s, await privateFpc(actor.s)), "credit = the fuel minus exactly the claim's ceiling").toBe(
 		received - kept,
 	)
 })
 
-test("cell 15b — selfpay, private, public FJ held: the private fence leaves it untouched", async ({ page, sandbox, actor, l1 }) => {
+test("cell 15b — selfpay, private, public FJ held: the private fence leaves it untouched", async ({ page, sandbox, actor, l1, run }) => {
 	const { usdt } = sandbox.tokens
 	await fundPublicFeeJuice(actor.s, 5n * FJ)
 	await mint(sandbox.clients.l1, usdt.erc20 as `0x${string}`, l1.address, 200n * USDC)
@@ -140,11 +149,13 @@ test("cell 15b — selfpay, private, public FJ held: the private fence leaves it
 		fjBefore,
 	)
 	const { received } = await fuelConservation(page, actor.s.l2.node)
-	const kept = await walletCeiling(actor, { isPrivate: true, registers: false })
+	const kept = await keptFor(page, run, "selfpay", actor, [
+		{ hash: (await depositRecords(page)).at(-1)?.claimTxHash, gas: ownGasTxs({ isPrivate: true, registers: false }).claim },
+	])
 	expect(await privateCreditOf(actor.s, await privateFpc(actor.s))).toBe(received - kept)
 })
 
-test("cell 16 — plain, private, first-time token: registration, then the credit-paid claim", async ({ page, sandbox, actor, l1 }) => {
+test("cell 16 — plain, private, first-time token: registration, then the credit-paid claim", async ({ page, sandbox, actor, l1, run }) => {
 	const erc20 = await freshToken(sandbox.clients.l1, { name: "Fresh Fueled", symbol: "FRSHG", decimals: 6 }, [l1.address], 1000n * USDC)
 	await setRoutable(sandbox.clients.l1, sandbox.clients.deployment.quoter, erc20)
 
@@ -160,7 +171,11 @@ test("cell 16 — plain, private, first-time token: registration, then the credi
 	expect(record?.registerTxHash, "a private first-time token registers in a transaction of its own").toBeTruthy()
 	expect(record?.claimTxHash, "then claims").toBeTruthy()
 	const { received } = await fuelConservation(page, actor.s.l2.node)
-	const kept = await walletCeiling(actor, { isPrivate: true, registers: true })
+	const txs = ownGasTxs({ isPrivate: true, registers: true })
+	const kept = await keptFor(page, run, "plain", actor, [
+		{ hash: record?.registerTxHash, gas: txs.register },
+		{ hash: record?.claimTxHash, gas: txs.claim },
+	])
 	expect(await privateCreditOf(actor.s, await privateFpc(actor.s)), "credit = the fuel minus the register + claim ceilings").toBe(
 		received - kept,
 	)

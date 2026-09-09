@@ -1,9 +1,10 @@
 /** Gas-only deposits (cells 18–21): every route shape, public and private, and what it adds to. */
+import { PRIVATE_FUEL_CLAIM_GAS } from "@nulo/bridge-core"
 import { balanceOf, fundPublicFeeJuice, mint, mintFeeAsset, privateCreditOf, privateFpc } from "@nulo/bridge-core/sandbox"
 import { expect, test } from "../fixtures/test"
 import { connectAztec } from "../pages/connect"
-import { walletFuelClaimCeiling } from "../pages/fees"
-import { fuelConservation } from "../pages/journal"
+import { keptFor } from "../pages/fees"
+import { depositRecords, fuelConservation } from "../pages/journal"
 import { confirmReview, connectL1, openSend, reviewDeposit, waitForReceipt } from "../pages/send"
 
 test.use({ family: "deposit-gas-only", cells: 6, l1Index: 5 })
@@ -61,14 +62,14 @@ test("cell 18b — selfpay, identity route, public FJ already held: it adds to i
 	expect(await balanceOf(actor.s.feeJuiceL2, actor.actor.address, "public")).toBe(fjBefore + received - fee)
 })
 
-test("cell 19 — plain, identity route, private: the Fee Juice becomes credit at the FPC", async ({ page, sandbox, actor, l1 }) => {
+test("cell 19 — plain, identity route, private: the Fee Juice becomes credit at the FPC", async ({ page, sandbox, actor, l1, run }) => {
 	const feeAsset = sandbox.clients.deployment.feeJuice
 	await mintFeeAsset(sandbox.clients.l1, feeAsset, l1.address, 5n * FJ)
 	const fpc = await privateFpc(actor.s)
 	const creditBefore = await privateCreditOf(actor.s, fpc)
 	const fjBefore = await balanceOf(actor.s.feeJuiceL2, actor.actor.address, "public")
-	const kept = await walletFuelClaimCeiling(actor)
 	await bridgeGas(page, { profile: "plain", account: actor.address, erc20: feeAsset, amount: "5", isPrivate: true, viaLookup: true })
+	const kept = await fuelClaimKept(page, run, actor)
 	expect(await privateCreditOf(actor.s, fpc), "credit = the fuel minus exactly the claim's ceiling").toBe(creditBefore + 5n * FJ - kept)
 	expect(await balanceOf(actor.s.feeJuiceL2, actor.actor.address, "public"), "nothing public was touched").toBe(fjBefore)
 })
@@ -78,14 +79,15 @@ test("cell 20p — plain, a swapped token, private: the venue's Fee Juice become
 	sandbox,
 	actor,
 	l1,
+	run,
 }) => {
 	const { usdt } = sandbox.tokens
 	await mint(sandbox.clients.l1, usdt.erc20 as `0x${string}`, l1.address, 30n * USDC)
 	const fpc = await privateFpc(actor.s)
 	const creditBefore = await privateCreditOf(actor.s, fpc)
 	const fjBefore = await balanceOf(actor.s.feeJuiceL2, actor.actor.address, "public")
-	const kept = await walletFuelClaimCeiling(actor)
 	await bridgeGas(page, { profile: "plain", account: actor.address, erc20: usdt.erc20, amount: "30", isPrivate: true })
+	const kept = await fuelClaimKept(page, run, actor)
 	const { received } = await fuelConservation(page, actor.s.l2.node)
 	expect(received, "the mock venue's fixed rate makes the fuel exact").toBe(30n * USDC * RATE)
 	expect(await privateCreditOf(actor.s, fpc)).toBe(creditBefore + received - kept)
@@ -97,13 +99,13 @@ test("cell 21p — plain, WETH, private: the single-hop route's Fee Juice become
 	sandbox,
 	actor,
 	l1,
+	run,
 }) => {
 	const weth = sandbox.clients.deployment.tokens.weth
 	const units = 2n * 10n ** 6n
 	await mint(sandbox.clients.l1, weth, l1.address, units)
 	const fpc = await privateFpc(actor.s)
 	const creditBefore = await privateCreditOf(actor.s, fpc)
-	const kept = await walletFuelClaimCeiling(actor)
 	await bridgeGas(page, {
 		profile: "plain",
 		account: actor.address,
@@ -112,6 +114,7 @@ test("cell 21p — plain, WETH, private: the single-hop route's Fee Juice become
 		isPrivate: true,
 		viaLookup: true,
 	})
+	const kept = await fuelClaimKept(page, run, actor)
 	const { received } = await fuelConservation(page, actor.s.l2.node)
 	expect(received).toBe(units * RATE)
 	expect(await privateCreditOf(actor.s, fpc)).toBe(creditBefore + received - kept)
@@ -160,3 +163,13 @@ test("cell 21 — plain, WETH, public: the single-hop route is discovered and se
 	expect(received).toBe(units * RATE)
 	expect(await balanceOf(actor.s.feeJuiceL2, actor.actor.address, "public")).toBe(fjBefore + received - fee)
 })
+
+/** What the FPC kept for a gas-only bridge's own claim — the fuel's claim, as the wallet submitted it. */
+async function fuelClaimKept(
+	page: import("@playwright/test").Page,
+	run: Parameters<typeof keptFor>[1],
+	actor: Parameters<typeof keptFor>[3],
+): Promise<bigint> {
+	const rec = (await depositRecords(page)).at(-1)
+	return keptFor(page, run, "plain", actor, [{ hash: rec?.fuel?.claimTxHash ?? rec?.claimTxHash, gas: PRIVATE_FUEL_CLAIM_GAS }])
+}

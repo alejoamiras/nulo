@@ -11,13 +11,15 @@ import {
 	readHandle,
 	writeL1,
 } from "@nulo/bridge-core/sandbox"
+import { PRIVATE_HUB_EXIT_GAS } from "@nulo/bridge-core"
 import { parseAbi } from "viem"
 import { TESTIDS } from "../../../src/lib/testids"
 import type { RunEnv } from "../env"
 import { type ActorHandle, expect, test } from "../fixtures/test"
 import { connectAztec, tid, walletCalls } from "../pages/connect"
 import { reviewExit, startExit } from "../pages/exit"
-import { walletExitCeiling } from "../pages/fees"
+import { keptFor, walletExitCeiling } from "../pages/fees"
+import { exitRecords } from "../pages/journal"
 import { confirmReview, connectL1, openSend, waitForReceipt } from "../pages/send"
 
 test.use({ family: "exits", cells: 6, l1Index: 3 })
@@ -79,6 +81,7 @@ test("cell 28 — a private exit from one credit note, then from three notes non
 	sandbox,
 	actor,
 	l1,
+	run,
 }) => {
 	const { usdc, l2Token } = await holding(actor, sandbox, "private")
 	const fpc = await privateFpc(actor.s)
@@ -92,7 +95,10 @@ test("cell 28 — a private exit from one credit note, then from three notes non
 	await reviewExit(page, { l1ChainId: L1, erc20: usdc.erc20, amount: "5", isPrivate: true })
 	await confirmReview(page)
 	await waitForReceipt(page, 10 * 60_000)
-	expect(await privateCreditOf(actor.s, fpc), "the FPC kept the exit's ceiling from the one note").toBe(creditBefore - ceiling)
+	const keptOne = await keptFor(page, run, "plain", actor, [
+		{ hash: (await exitRecords(page)).at(-1)?.exitTxHash, gas: PRIVATE_HUB_EXIT_GAS },
+	])
+	expect(await privateCreditOf(actor.s, fpc), "the FPC kept the exit's ceiling from the one note").toBe(creditBefore - keptOne)
 	expect(await balanceOf(l2Token, actor.actor.address, "private"), "the burn left the private balance").toBe(l2Before - 5n * USDC)
 	expect(await erc20BalanceOf(sandbox.clients.l1, usdc.erc20 as `0x${string}`, l1.address)).toBe(l1Before + 5n * USDC)
 
@@ -104,7 +110,10 @@ test("cell 28 — a private exit from one credit note, then from three notes non
 	await reviewExit(page, { l1ChainId: L1, erc20: usdc.erc20, amount: "5", isPrivate: true })
 	await confirmReview(page)
 	await waitForReceipt(page, 10 * 60_000)
-	expect(await privateCreditOf(actor.s, fpc), "three notes paid one ceiling").toBe(creditMid - ceiling)
+	const keptThree = await keptFor(page, run, "plain", actor, [
+		{ hash: (await exitRecords(page)).at(-1)?.exitTxHash, gas: PRIVATE_HUB_EXIT_GAS },
+	])
+	expect(await privateCreditOf(actor.s, fpc), "three notes paid one ceiling").toBe(creditMid - keptThree)
 	expect(await balanceOf(l2Token, actor.actor.address, "private"), "a second burn").toBe(l2Before - 10n * USDC)
 	expect(await erc20BalanceOf(sandbox.clients.l1, usdc.erc20 as `0x${string}`, l1.address), "L1 released both").toBe(
 		l1Before + 10n * USDC,

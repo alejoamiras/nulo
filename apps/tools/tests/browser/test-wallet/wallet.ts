@@ -12,7 +12,7 @@ import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { ProtocolContractAddress } from "@aztec/protocol-contracts"
 import { FunctionSelector } from "@aztec/stdlib/abi"
-import { ExecutionPayload } from "@aztec/stdlib/tx"
+import { ExecutionPayload, type Tx } from "@aztec/stdlib/tx"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { DAPP_SELF_PAY_FEATURE, type Seed, type TestWalletIdentity, type TestWalletProfile } from "./profile"
@@ -24,7 +24,17 @@ const unsupported = (method: string) => new Error(`Unsupported wallet method: ${
 
 type Manifest = { capabilities: Array<Record<string, unknown> & { type: string }> }
 
+/** A transaction as this wallet handed it to the node: the FPC keeps exactly its fee limit. */
+export interface SubmittedTx {
+	hash: string
+	feeLimit: bigint
+	daGas: number
+	l2Gas: number
+}
+
 export class TestWallet extends EmbeddedWallet {
+	/** Every transaction handed to the node since this wallet booted, in order. */
+	readonly submitted: SubmittedTx[] = []
 	profile: TestWalletProfile = "plain"
 	private claimSelector = FunctionSelector.empty()
 	private readonly registeredTokens = new Set<string>()
@@ -33,6 +43,7 @@ export class TestWallet extends EmbeddedWallet {
 	static async createFor(profile: TestWalletProfile, identity: TestWalletIdentity): Promise<TestWallet> {
 		// Ephemeral: nothing outlives the page. Proving off: the local network synthesizes proofs.
 		const wallet = await TestWallet.create(identity.nodeUrl, { ephemeral: true, pxe: { proverEnabled: false } })
+		wallet.observeSubmissions()
 		wallet.profile = profile
 		wallet.claimSelector = await FunctionSelector.fromSignature(CLAIM_AND_END_SETUP)
 		// A wallet on a network with a sponsor knows the SponsoredFPC — a dApp names it as payer and
@@ -98,6 +109,28 @@ export class TestWallet extends EmbeddedWallet {
 	 *  public Fee Juice; BaseWallet would read that shape as a claim in setup and build an invalid
 	 *  transaction, so the payer is dropped and the account's own balance pays. A payload carrying
 	 *  `claim_and_end_setup` to the protocol FeeJuice really is a claim and passes through. */
+	/** The hand-off to the node is where the fees are final — the SDK completes them after `sendTx`'s
+	 *  options — so that is where a submission is recorded. Observation only: the call goes through. */
+	private observeSubmissions(): void {
+		const node = this.aztecNode
+		const observed = new Proxy(node, {
+			get: (target, prop, receiver) => {
+				if (prop !== "sendTx") return Reflect.get(target, prop, receiver)
+				return async (tx: Tx) => {
+					const gas = tx.getGasSettings()
+					this.submitted.push({
+						hash: tx.getTxHash().toString(),
+						feeLimit: gas.getFeeLimit().toBigInt(),
+						daGas: Number(gas.gasLimits.daGas),
+						l2Gas: Number(gas.gasLimits.l2Gas),
+					})
+					return (Reflect.get(target, "sendTx", target) as (t: Tx) => Promise<void>)(tx)
+				}
+			},
+		})
+		;(this as unknown as { aztecNode: unknown }).aztecNode = observed
+	}
+
 	private routed(payload: ExecutionPayload, from: unknown): ExecutionPayload {
 		if (this.profile === "plain" || !(from instanceof AztecAddress) || !payload.feePayer?.equals(from)) return payload
 		const claims = payload.calls.some((c) => c.to.equals(ProtocolContractAddress.FeeJuice) && c.selector.equals(this.claimSelector))

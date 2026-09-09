@@ -24,9 +24,25 @@ export interface JournalDeposit {
 	}
 }
 
+export interface JournalExit {
+	id: string
+	direction: string
+	exitTxHash?: string
+	consumeTxHash?: string
+}
+
+/** Every exit record the journal holds, newest last. */
+export async function exitRecords(page: Page): Promise<JournalExit[]> {
+	return collect(await readJournal(page), "withdraw") as unknown as JournalExit[]
+}
+
 /** Every deposit record the journal holds, newest last. */
 export async function depositRecords(page: Page): Promise<JournalDeposit[]> {
-	const raw = await page.evaluate(() => {
+	return collect(await readJournal(page), "deposit") as unknown as JournalDeposit[]
+}
+
+async function readJournal(page: Page): Promise<unknown[]> {
+	return page.evaluate(() => {
 		const out: unknown[] = []
 		for (let i = 0; i < localStorage.length; i++) {
 			const key = localStorage.key(i)
@@ -37,21 +53,18 @@ export async function depositRecords(page: Page): Promise<JournalDeposit[]> {
 		}
 		return out
 	})
-	return collectDeposits(raw)
 }
 
-const isDeposit = (o: Record<string, unknown>): boolean => typeof o.id === "string" && o.direction === "deposit"
-
-/** Deposit records wherever the stored shape nests them (arrays, keyed maps, wrapper objects). */
-function collectDeposits(v: unknown, out: JournalDeposit[] = []): JournalDeposit[] {
+/** Records of one direction wherever the stored shape nests them (arrays, keyed maps, wrapper objects). */
+function collect(v: unknown, direction: string, out: Record<string, unknown>[] = []): Record<string, unknown>[] {
 	if (Array.isArray(v)) {
-		for (const x of v) collectDeposits(x, out)
+		for (const x of v) collect(x, direction, out)
 		return out
 	}
 	if (!v || typeof v !== "object") return out
 	const o = v as Record<string, unknown>
-	if (isDeposit(o)) out.push(o as unknown as JournalDeposit)
-	else for (const x of Object.values(o)) collectDeposits(x, out)
+	if (typeof o.id === "string" && o.direction === direction) out.push(o)
+	else for (const x of Object.values(o)) collect(x, direction, out)
 	return out
 }
 

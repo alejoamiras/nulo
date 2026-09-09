@@ -90,6 +90,12 @@ Open:
   tools shards (PR #577) on GitHub runners. A red there is fixed on its arc branch and re-pushed
   (plan § Delivery); a run that is merely slow is the 30-minute cap's business, not a failure.
 - **The `dapp-fee-cap` follow-up** (above) — yours, in the extension.
+- **A deterministic FPC equality gate in the integration suite** (`lessons/phase-9.md` § Delivery,
+  cell 1): the browser suite now proves the books against the wallet's own submissions (fees move
+  between a fixture's pricing and a send), so no browser cell funds a credit to exactly the ceiling
+  any more. Codex asked for the boundary — credit equal to the ceiling lands, one unit short is
+  refused — to live where prices are fixed: the in-process integration suite, which supplies its own
+  cap. A short flow there; your call whether before or after the clean week.
 - **A review stood down by the confirm's own preflight** (`lessons/phase-9.md` § Delivery, cell 2):
   on a slow runner a watched input moved twice under one confirm's re-reads and stood the review
   down twice. The wizard's log now names the input; when the next CI log shows which one, decide

@@ -7,8 +7,12 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { SetPublicAuthwitContractInteraction } from "@aztec/aztec.js/authorization"
 import { Fr } from "@aztec/aztec.js/fields"
+import type { Page } from "@playwright/test"
 import { ownGasTxs, PRIVATE_FUEL_CLAIM_GAS, PRIVATE_HUB_EXIT_GAS, privateFpcFeeLimit } from "@nulo/bridge-core"
+import type { RunEnv } from "../env"
 import type { ActorHandle } from "../fixtures/test"
+import type { TestWalletProfile } from "../test-wallet/profile"
+import { walletFrame } from "./connect"
 
 type MaxFees = { feePerDaGas: bigint; feePerL2Gas: bigint }
 type Limits = { daGas: number; l2Gas: number }
@@ -59,4 +63,43 @@ export async function walletCeiling(actor: ActorHandle, shape: { isPrivate: bool
 	const fees = await walletMaxFees(actor, txs.claim)
 	const claim = privateFpcFeeLimit(clamp(txs.claim, max), fees)
 	return txs.register ? claim + privateFpcFeeLimit(clamp(txs.register, max), fees) : claim
+}
+
+/** A transaction the journal says landed, with the gas limits the app was to submit it under
+ *  (omitted for the shape that folds a registration into its claim). */
+export interface LandedTx {
+	hash?: string
+	gas?: Limits
+}
+
+/**
+ * What the FPC kept for these transactions: the fee limit of each as the wallet handed it to the
+ * node — `gasLimits × maxFeesPerGas`, no refund — never a prediction. The chain's fees move between a
+ * fixture's pricing and the wallet's send (anvil's base fee follows every L1 write), so equality is
+ * only exact against the submission itself; the limits are checked against the app's so an
+ * over-budget submission cannot balance the books.
+ */
+export async function keptFor(
+	page: Page,
+	run: Pick<RunEnv, "testWalletOrigins">,
+	profile: TestWalletProfile,
+	actor: ActorHandle,
+	txs: LandedTx[],
+): Promise<bigint> {
+	const submitted = await walletFrame(page, run, profile).evaluate(() => window.__nuloTestWallet!.submitted())
+	const max = await networkMax(actor)
+	let kept = 0n
+	for (const tx of txs) {
+		if (!tx.hash) throw new Error("a transaction the journal should have landed has no hash")
+		const hit = submitted.find((s) => s.hash === tx.hash)
+		if (!hit) throw new Error(`the wallet never handed ${tx.hash} to the node`)
+		if (tx.gas) {
+			const want = clamp(tx.gas, max)
+			if (hit.daGas !== want.daGas || hit.l2Gas !== want.l2Gas) {
+				throw new Error(`${tx.hash} went out under ${hit.daGas}/${hit.l2Gas} gas, not the app's ${want.daGas}/${want.l2Gas}`)
+			}
+		}
+		kept += BigInt(hit.feeLimit)
+	}
+	return kept
 }

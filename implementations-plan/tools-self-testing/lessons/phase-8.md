@@ -59,7 +59,9 @@ embedded FPC strategy honors an explicit cap at multiplier 1 — which is why th
 Per the consult: the exact deduction is the wallet's figure — `tests/browser/pages/fees.ts`
 `walletCeiling(actor, shape)` runs the same probe through the harness's scripting wallet (the same
 `EmbeddedWallet` class on the same node) — never a multiple of tools' prediction. Fixtures are sized
-from it too.
+from it. The books themselves are proved against the wallet's own submissions (`keptFor`, the hash the
+journal recorded → the fee limit the wallet handed to the node): the chain's fees move between a
+fixture's pricing and a send (`lessons/phase-9.md` § Delivery, cell 1).
 
 ## Gate
 
