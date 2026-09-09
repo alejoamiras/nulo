@@ -71,6 +71,10 @@ export interface SandboxClients {
  *  the relayer and creates actors; it is never the wallet under test. */
 export async function openSandbox(handle: SandboxHandle): Promise<SandboxClients> {
 	const chain = sandboxChain(handle.anvilUrl)
+	// One writer per key per process, sends in sequence: every flow awaits each L1 write, and the one
+	// concurrent shape (two first-time deposits) uses two keys. viem's nonce manager is deliberately
+	// NOT used — it keeps counting past a send that reverted at gas estimation, and the battery
+	// reverts on purpose. A second process attached to the same handle races these keys on chain.
 	const account = privateKeyToAccount(handle.l1.deployerKey as `0x${string}`)
 	const second = privateKeyToAccount((handle.l1.actorKeys[0] ?? handle.l1.deployerKey) as `0x${string}`)
 	const l1: L1Ctx = { ...createL1Clients({ chain, rpcUrl: handle.anvilUrl, account }), account }

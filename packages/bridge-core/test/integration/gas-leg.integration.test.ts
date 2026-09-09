@@ -37,7 +37,7 @@ describe.skipIf(!INTEGRATION)("the gas leg", () => {
 	it("a floor above the venue's output is refused at settlement (cell 17)", async () => {
 		const a = await freshActor()
 		const { usdt } = await sandbox()
-		expect(await flowMinFuelFloorBinds(a.s, usdt)).toContain("refused")
+		expect(await flowMinFuelFloorBinds(a.s, usdt)).toContain("reverted on the floor")
 	})
 
 	it("gas only through the fee asset's identity route, public (cell 18)", async () => {
@@ -50,15 +50,26 @@ describe.skipIf(!INTEGRATION)("the gas leg", () => {
 		expect(await flowGasOnlyPrivate(a.s)).toContain("private gas")
 	})
 
-	it("gas only through a swapped token (cell 20)", async () => {
+	it("gas only through a swapped token, public (cell 20)", async () => {
 		const a = await freshActor()
 		const { usdt } = await sandbox()
-		expect(await flowGasOnlySwapped(a.s, usdt)).toContain("swapped")
+		expect(await flowGasOnlySwapped(a.s, usdt)).toContain("public gas")
 	})
 
-	it("a WETH deposit discovers and settles the single-hop route (cell 21)", async () => {
+	it("gas only through a swapped token, private credit (cell 20)", async () => {
+		const a = await freshActor()
+		const { usdt } = await sandbox()
+		expect(await flowGasOnlySwapped(a.s, usdt, true)).toContain("private gas")
+	})
+
+	it("a WETH deposit discovers and settles the single-hop route, public (cell 21)", async () => {
 		const a = await freshActor()
 		expect(await flowGasOnlyWethSingleHop(a.s)).toContain("single-hop")
+	})
+
+	it("a WETH deposit discovers and settles the single-hop route, private credit (cell 21)", async () => {
+		const a = await freshActor()
+		expect(await flowGasOnlyWethSingleHop(a.s, true)).toContain("private gas")
 	})
 
 	it("a routeless token is refused before anything is signed (cell 22)", async () => {

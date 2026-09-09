@@ -1,5 +1,6 @@
-/** The sandbox deploys the bridge from Foundry's `out/` artifacts, which are gitignored. A fresh
- *  checkout (CI included) gets them built here, with the same remappings the contract suite uses. */
+/** The sandbox deploys the bridge from Foundry's `out/` artifacts, which are gitignored. Every boot
+ *  runs an incremental `forge build` with the same remappings the contract suite uses — a no-op
+ *  when nothing changed, and the only thing that keeps a stale checkout's mocks current. */
 import { execFileSync } from "node:child_process"
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
@@ -18,13 +19,11 @@ function forgeBin(): string {
 	return existsSync(bundled) ? bundled : "forge"
 }
 
-export function ensureForgeArtifacts(names: string[] = ["MockSwapTarget", "MintableERC20", "PortalFactory", "SwapBridgeRouter"]): void {
-	const missing = names.filter((n) => !existsSync(join(EVM_ROOT, "out", `${n}.sol`, `${n}.json`)))
-	if (missing.length === 0) return
+export function ensureForgeArtifacts(): void {
 	if (!existsSync(join(EVM_ROOT, "lib", "forge-std"))) {
 		throw new Error(`${EVM_ROOT}/lib is missing — run the pinned \`forge install\` from contracts/bridge/evm/README.md first`)
 	}
-	console.log(`[sandbox] building forge artifacts (${missing.join(", ")} missing)`)
+	console.log("[sandbox] forge build (incremental)")
 	execFileSync("bun", ["scripts/gen-remappings.ts"], { cwd: PACKAGE_ROOT, stdio: "inherit" })
 	execFileSync(forgeBin(), ["build", "--root", EVM_ROOT], { stdio: "inherit" })
 }

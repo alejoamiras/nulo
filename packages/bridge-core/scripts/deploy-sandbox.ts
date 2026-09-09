@@ -7,6 +7,7 @@
  *   --keep   leave the network up and print how to re-attach
  * Env: SANDBOX_L1_RPC + SANDBOX_NODE_URL (both) attach to a running network instead of booting one.
  */
+import { main } from "./sandbox/cli"
+
 process.argv.splice(2, 0, "run")
-await import("./sandbox/cli")
-export {}
+main()

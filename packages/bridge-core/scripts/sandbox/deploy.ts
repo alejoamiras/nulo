@@ -111,7 +111,7 @@ export async function deployEverything(net: { anvilUrl: string; nodeUrl: string 
 		rollupVersion: Number(info.rollupVersion),
 		walletChainId: manifest.walletChainId,
 		artifactsDir: opts.artifactsDir,
-		l1: { deployerKey: KEY_0, actorKeys: Array.from({ length: opts.actorKeys ?? 8 }, (_, i) => anvilKey(i + 1)) },
+		l1: { deployerKey: KEY_0, actorKeys: Array.from({ length: opts.actorKeys ?? 12 }, (_, i) => anvilKey(i + 1)) },
 		l2: { relayer: l2base.relayer.toString(), actorSecret: SANDBOX_ACTOR_SECRET, actorSalt: SANDBOX_ACTOR_SALT.toString() },
 		deployment,
 	}

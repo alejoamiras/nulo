@@ -1,6 +1,7 @@
-/** The smoke battery: every flow once, in the order the shared actor's state requires, each timed.
- *  The integration suite runs the same flows as separate tests on separate actors; this is the CLI's
- *  one-shot form and the source of the calibration numbers an operator copies into a manifest. */
+/** The smoke battery: every flow once on the base actor, in the order its state requires, each
+ *  timed, with the sponsor paying whatever a flow does not price itself. The integration suite is
+ *  where each cell runs on a fresh actor with the payer it claims; this is the CLI's one-shot form
+ *  and the source of the calibration numbers an operator copies into a manifest. */
 import type { ManifestV2 } from "../../src/manifest-v2"
 import { PRIVATE_HUB_EXIT_GAS } from "../../src/private-fuel"
 import { calibrateFuelBudgets } from "../calibration"
@@ -9,6 +10,7 @@ import {
 	flowConcurrentFirstClaims,
 	flowGasOnly,
 	flowGuardianPause,
+	flowL1Pause,
 	flowNoRoute,
 	flowPortalOnlyToken,
 	flowPrivateDeposit,
@@ -27,7 +29,7 @@ import {
 	flowGasOnlySwapped,
 	flowGasOnlyWethSingleHop,
 	flowMinFuelFloorBinds,
-	flowOutboxBeforeProven,
+	flowOutboxRoundTrip,
 	flowTokenOnlyHeldPublicFj,
 	flowTokenPlusGasPrivate,
 	flowTokenPlusGasWithCreditHeld,
@@ -124,6 +126,7 @@ export async function runSmoke(clients: SandboxClients, manifest: ManifestV2, ac
 	await step("(g) rejected registration, fee-juice-with-claim", () => flowRejectedRegistration(s, "fee-juice-claim"))
 	await step("(g) rejected registration, private FPC", () => flowRejectedRegistration(s, "private-fpc"))
 	await step("(h) guardian pause blocks exits, not claims", () => flowGuardianPause(s, usdc))
+	await step("(h) factory pause: portals refuse deposits and withdraws first", () => flowL1Pause(s, usdc))
 	// The matrix cells the battery gained with the Quoter facade.
 	await step("(i) token-only claim paid from held public Fee Juice", () => flowTokenOnlyHeldPublicFj(s, usdc, usdcL2))
 	await step("(i) discovered route → send → self-paying claim", () => flowDiscoveredRouteSend(s, usdt, usdtL2))
@@ -133,8 +136,10 @@ export async function runSmoke(clients: SandboxClients, manifest: ManifestV2, ac
 	await step("(i) floor above the venue's output refused", () => flowMinFuelFloorBinds(s, usdt))
 	await step("(i) gas only, private credit", () => flowGasOnlyPrivate(s))
 	await step("(i) gas only, swapped token", () => flowGasOnlySwapped(s, usdt))
+	await step("(i) gas only, swapped token, private", () => flowGasOnlySwapped(s, usdt, true))
 	await step("(i) gas only, WETH single hop", () => flowGasOnlyWethSingleHop(s))
-	await step("(i) outbox refuses an unproven exit, then consumes", () => flowOutboxBeforeProven(s, usdc, usdcL2))
+	await step("(i) gas only, WETH single hop, private", () => flowGasOnlyWethSingleHop(s, true))
+	await step("(i) outbox: not consumed at proposal, consumed after finalization", () => flowOutboxRoundTrip(s, usdc, usdcL2))
 	const notes = [fuelBudgetNote(s.samples), ...exitGasNotes(s.samples)]
 	for (const n of notes) console.log(n)
 	return { results, samples: s.samples, notes }

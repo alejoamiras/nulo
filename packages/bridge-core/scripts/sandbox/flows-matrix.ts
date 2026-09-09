@@ -1,12 +1,10 @@
-/** The matrix cells the original smoke never drove: held-gas claims, the private fuel leg, the
- *  swap floor binding, every gas-only shape, a send that consumes a DISCOVERED route, and the
- *  Outbox refusing an unproven consume. Same contract as `flows.ts`: pure functions of a context. */
+/** Held-gas claims, the private fuel leg, the swap floor binding, every gas-only shape, a send that
+ *  consumes a DISCOVERED route, and the Outbox round trip. Same contract as `flows.ts`: pure
+ *  functions of a context. */
 import { SetPublicAuthwitContractInteraction } from "@aztec/aztec.js/authorization"
 import type { ContractBase } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
-import { OutboxContract } from "@aztec/ethereum/contracts"
 import { TestERC20Abi } from "@aztec/l1-artifacts"
-import { computeL2ToL1MembershipWitness } from "@aztec/stdlib/messaging"
 import type { Address, Hex } from "viem"
 import { TOKEN_PORTAL_ABI } from "../../src/factory-abi"
 import { consumeWithdrawal, isOutboxMessageConsumed } from "../../src/flows"
@@ -27,7 +25,9 @@ import {
 	fpcClaimFee,
 	fuelClaimFee,
 	mintPrivateGasNote,
+	mintPrivateGasVia,
 	mockRoute,
+	type PrivateGasLeg,
 	privateCreditFee,
 	privateCreditOf,
 	privateFpc,
@@ -212,7 +212,11 @@ export async function flowMinFuelFloorBinds(s: SmokeContext, token: ManifestToke
 		refused = e instanceof Error ? e.message : String(e)
 	}
 	if (!refused) throw new Error("a send whose floor exceeds the venue's output settled")
-	return `floor one wei above the venue's output → refused (${refused.slice(0, 60)}…)`
+	// The floor is what reverts — at the venue (`amountOutMinimum`, which the router forwards) or at
+	// the router's own check behind it — not a Permit2 or allowance error on the way there.
+	if (!/insufficient (fuel|output)/i.test(refused))
+		throw new Error(`the floor was refused with "${refused.slice(0, 120)}", not an insufficient-output revert`)
+	return `floor one wei above the venue's output → settlement reverted on the floor (${refused.slice(0, 60)}…)`
 }
 
 // ─── Gas only, every shape ───────────────────────────────────────────────────
@@ -229,11 +233,31 @@ export async function flowGasOnlyPrivate(s: SmokeContext): Promise<string> {
 
 export const GAS_ONLY_SWAPPED_UNITS = 30n
 
-/** Cell 20: gas only through a SWAPPED token (USDC → FJ via the venue), public. */
-export async function flowGasOnlySwapped(s: SmokeContext, token: ManifestToken): Promise<string> {
+/** The private half of a swapped or routed gas-only shape: the same leg, bought into PrivateFPC
+ *  credit, which the fixed rate makes exactly the quote. The note joins the inventory. */
+async function privateGasOnly(s: SmokeContext, leg: PrivateGasLeg, expected: bigint, what: string): Promise<string> {
+	const fpc = await privateFpc(s)
+	const gained = await mintPrivateGasVia(s, fpc, leg)
+	if (gained !== expected) throw new Error(`${what} credited ${gained} FJ-wei of private gas, expected ${expected}`)
+	s.credit.notes.push(gained)
+	return `${what} → +${gained} FJ-wei private gas at the PrivateFPC`
+}
+
+/** Cell 20: gas only through a SWAPPED token (USDC → FJ via the venue), public or private. */
+export async function flowGasOnlySwapped(s: SmokeContext, token: ManifestToken, isPrivate = false): Promise<string> {
 	const amount = toWei(token, GAS_ONLY_SWAPPED_UNITS)
 	await mint(s.l1, token.erc20 as Address, s.l1.account.address, amount)
 	const route = mockRoute(token.erc20 as Address, s.clients.deployment.feeJuice, s.clients.deployment.tokens.weth)
+	if (isPrivate) {
+		const leg = {
+			erc20: token.erc20 as Address,
+			amount,
+			minFuelOutput: amount * MOCK_RATE_NUM,
+			path: route.path,
+			zeroForOnes: route.zeroForOnes,
+		}
+		return privateGasOnly(s, leg, amount * MOCK_RATE_NUM, `${amount} ${token.displaySymbol}-units swapped`)
+	}
 	const res = await send(s, s.l1, {
 		intent: "gas",
 		erc20: token.erc20 as Address,
@@ -258,8 +282,8 @@ export async function flowGasOnlySwapped(s: SmokeContext, token: ManifestToken):
 	return `${amount} ${token.displaySymbol}-units swapped → +${gained} FJ-wei public gas`
 }
 
-/** Cell 21: a WETH deposit takes the single-hop route (native → FeeJuice). */
-export async function flowGasOnlyWethSingleHop(s: SmokeContext): Promise<string> {
+/** Cell 21: a WETH deposit takes the single-hop route (native → FeeJuice), public or private. */
+export async function flowGasOnlyWethSingleHop(s: SmokeContext, isPrivate = false): Promise<string> {
 	const weth = s.clients.deployment.tokens.weth
 	// The venue sells one UNIT of anything for MOCK_RATE_NUM FJ-wei, decimals ignored: an 18-decimal
 	// input is sized in units, or the quote outruns the venue's funding.
@@ -279,6 +303,16 @@ export async function flowGasOnlyWethSingleHop(s: SmokeContext): Promise<string>
 	})
 	if (outcome.kind !== "route" || outcome.route.path.length !== 1)
 		throw new Error(`expected a single-hop route for WETH, got ${outcome.kind}`)
+	if (isPrivate) {
+		const leg = {
+			erc20: weth,
+			amount,
+			minFuelOutput: outcome.quoteOut,
+			path: outcome.route.path,
+			zeroForOnes: outcome.route.zeroForOnes,
+		}
+		return privateGasOnly(s, leg, outcome.quoteOut, "single-hop WETH route discovered and settled at exactly its quote")
+	}
 	const res = await send(s, s.l1, {
 		intent: "gas",
 		erc20: weth,
@@ -360,53 +394,17 @@ export async function flowDiscoveredRouteSend(s: SmokeContext, token: ManifestTo
 
 // ─── The Outbox ──────────────────────────────────────────────────────────────
 
-/** Cell 32: an exit's L2→L1 message is not consumable before its checkpoint is proven — the Outbox
- *  has no root yet — and reads as NOT consumed either way; after finalization the consume lands.
- *  The automine local network proves a block as soon as it is proposed, so the unproven window is
- *  usually gone before any check can run: the refusal is asserted whenever an exit IS caught unproven
- *  (three are tried), and every exit sent is finished the normal way regardless. */
-export async function flowOutboxBeforeProven(s: SmokeContext, token: ManifestToken, l2Token: ContractBase): Promise<string> {
+/** Cell 32: an exit's L2→L1 message reads as NOT consumed the moment it is proposed, and after
+ *  finalization the consume lands. Positive coverage only: the automine local network proves a
+ *  block as soon as it is proposed, so the unproven window — in which the Outbox holds no root and
+ *  refuses the consume — is not observable here. */
+export async function flowOutboxRoundTrip(s: SmokeContext, token: ManifestToken, l2Token: ContractBase): Promise<string> {
 	const amount = toWei(token, 1n)
-	const seen: string[] = []
-	for (let attempt = 1; attempt <= 3; attempt++) {
-		const receipt = await sendPublicExit(s, token, l2Token, amount)
-		if (await isOutboxMessageConsumed(s.l1, s.l2.node as never, receipt))
-			throw new Error("a just-proposed exit read as already consumed")
-		const status = String((await s.l2.node.getTxReceipt(receipt.txHash as never)).status ?? "")
-		if (!/proven|finalized/i.test(status)) {
-			const witness = await assertConsumeRefused(s, token, receipt, amount)
-			const released = await finishExit(s, token, receipt, amount)
-			return `unproven exit (${status}, attempt ${attempt}): not consumed, consume refused (witness ${witness}); after finalization the consume released ${released}`
-		}
-		seen.push(status)
-		const released = await finishExit(s, token, receipt, amount)
-		if (attempt === 3) {
-			return `no unproven window: ${seen.join(", ")} at the first read (immediate proofs); not consumed before the consume; after finalization the consume released ${released}`
-		}
-	}
-	throw new Error("unreachable: every attempt returns")
-}
-
-/** The witness is computed from the node's own checkpoint data and can exist before the Outbox holds
- *  the epoch's root; the Outbox is the only judge, so the negative is the consume reverting. */
-async function assertConsumeRefused(
-	s: SmokeContext,
-	token: ManifestToken,
-	receipt: { txHash: unknown },
-	amount: bigint,
-): Promise<"computable" | "absent"> {
-	const eff = await s.l2.node.getTxEffect(receipt.txHash as never)
-	const messageHash = eff?.data.l2ToL1Msgs[0]
-	if (!messageHash) throw new Error("the exit produced no L2→L1 message")
-	const { l1ContractAddresses } = await s.l2.node.getNodeInfo()
-	const outbox = new OutboxContract(s.l1.pub as never, l1ContractAddresses.outboxAddress)
-	const wit = await computeL2ToL1MembershipWitness(s.l2.node as never, outbox, messageHash, receipt.txHash as never, 0).catch(
-		() => undefined,
-	)
-	if (wit !== undefined && !(await withdrawRefused(s, token, amount, wit))) {
-		throw new Error("the portal accepted a consume before the checkpoint was proven")
-	}
-	return wit ? "computable" : "absent"
+	const receipt = await sendPublicExit(s, token, l2Token, amount)
+	if (await isOutboxMessageConsumed(s.l1, s.l2.node as never, receipt)) throw new Error("a just-proposed exit read as already consumed")
+	const status = String((await s.l2.node.getTxReceipt(receipt.txHash as never)).status ?? "")
+	const released = await finishExit(s, token, receipt, amount)
+	return `exit ${status} at the first read, not consumed; after finalization the consume released ${released}`
 }
 
 /** The public burn's authwit, then the exit itself — PROPOSED when this returns. */
@@ -448,33 +446,6 @@ async function finishExit(s: SmokeContext, token: ManifestToken, receipt: { txHa
 	const released = (await erc20BalanceOf(s.l1, token.erc20 as Address, s.l1.account.address)) - before
 	if (released < amount) throw new Error(`L1 released ${released}, expected ${amount}`)
 	return released
-}
-
-type Witness = NonNullable<Awaited<ReturnType<typeof computeL2ToL1MembershipWitness>>>
-
-/** Whether the portal refuses the consume the witness describes — the same call `consumeWithdrawal` makes. */
-async function withdrawRefused(s: SmokeContext, token: ManifestToken, amount: bigint, wit: Witness): Promise<boolean> {
-	const path = wit.siblingPath.toBufferArray().map((b: Buffer) => `0x${b.toString("hex")}` as Hex)
-	try {
-		await s.l1.pub.simulateContract({
-			address: token.portal as Address,
-			abi: TOKEN_PORTAL_ABI as never,
-			functionName: "withdraw",
-			args: [
-				s.l1.account.address,
-				amount,
-				false,
-				BigInt(wit.epochNumber),
-				BigInt(wit.numCheckpointsInEpoch),
-				wit.leafIndex,
-				path,
-			] as never,
-			account: s.l1.account,
-		})
-		return false
-	} catch {
-		return true
-	}
 }
 
 // ─── First-time tokens paid from held credit (cells 3 + 4) ───────────────────

@@ -316,8 +316,7 @@ jobs:
           name: bridge-integration-logs
           path: |
             /tmp/bridge-integration-*
-            /tmp/aztec-*.log
-            /tmp/anvil-*.log
+            ~/.cache/nulo-bridge-sandbox/logs/*.log
           if-no-files-found: ignore
           retention-days: 7
 

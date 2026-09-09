@@ -12,6 +12,7 @@ import {
 	accessSync,
 	closeSync,
 	constants,
+	createWriteStream,
 	existsSync,
 	mkdirSync,
 	openSync,
@@ -317,22 +318,31 @@ async function killGroup(owned: OwnedChild): Promise<void> {
  * child blocks on its next write — the aztec node stops sequencing a few blocks in, with no error
  * anywhere. Attaching a listener puts the stream in flowing mode, which is the drain.
  */
-function drainOutput(child: ChildProcess, label: string): void {
+/** Where a run's node and anvil output goes — outside the data directory, which teardown removes,
+ *  so a failed CI run can still upload it. */
+export const SANDBOX_LOG_DIR = join(homedir(), ".cache", "nulo-bridge-sandbox", "logs")
+
+/** The full stream to a per-run file; errors echoed to the console as they happen. */
+function drainOutput(child: ChildProcess, label: string, logFile: string): void {
+	mkdirSync(dirname(logFile), { recursive: true })
+	const sink = createWriteStream(logFile, { flags: "a" })
 	const report = (data: Buffer) => {
+		sink.write(data)
 		const line = data.toString().trim()
 		if (/\bERROR\b|\bFATAL\b|already in use/i.test(line)) console.error(`[${label}]`, line.slice(0, 200))
 	}
 	child.stdout?.on("data", report)
 	child.stderr?.on("data", report)
+	child.once("exit", () => sink.end())
 }
 
-function spawnAnvil(tool: Toolchain, port: number): ChildProcess {
+function spawnAnvil(tool: Toolchain, port: number, logFile: string): ChildProcess {
 	const child = spawn(
 		tool.anvilBin,
 		["--host", "127.0.0.1", "--port", String(port), "--chain-id", "31337", "--slots-in-an-epoch", "1", "--silent"],
 		{ stdio: "pipe", detached: true },
 	)
-	drainOutput(child, "anvil")
+	drainOutput(child, "anvil", logFile)
 	return child
 }
 
@@ -354,7 +364,7 @@ function nodeEnv(tool: Toolchain, anvilUrl: string): NodeJS.ProcessEnv {
 	}
 }
 
-function spawnNode(tool: Toolchain, p: { ports: SandboxPorts; anvilUrl: string; dataDir: string }): ChildProcess {
+function spawnNode(tool: Toolchain, p: { ports: SandboxPorts; anvilUrl: string; dataDir: string; logFile: string }): ChildProcess {
 	const child = spawn(
 		tool.aztecBin,
 		[
@@ -373,7 +383,7 @@ function spawnNode(tool: Toolchain, p: { ports: SandboxPorts; anvilUrl: string; 
 		],
 		{ stdio: "pipe", detached: true, env: nodeEnv(tool, p.anvilUrl) },
 	)
-	drainOutput(child, "aztec")
+	drainOutput(child, "aztec", p.logFile)
 	return child
 }
 
@@ -450,18 +460,20 @@ export async function startLocalNetwork(opts: StartLocalNetworkOptions): Promise
 	// A host that exits without waiting (vitest's own signal handling, an uncaught error) still must
 	// not orphan a node holding a multi-GB store: the last-resort reap is synchronous.
 	process.once("exit", () => {
+		// Only groups still alive: a pid that already exited may since belong to someone else's process.
 		for (const owned of spawned) {
+			if (owned.hasExited() || owned.child.pid === undefined) continue
 			try {
-				if (owned.child.pid) process.kill(-owned.child.pid, "SIGKILL")
+				process.kill(-owned.child.pid, "SIGKILL")
 			} catch {}
 		}
 		rmSync(dataDir, { recursive: true, force: true })
 	})
 	try {
 		console.log(`[sandbox] anvil ${anvilUrl}, aztec ${nodeUrl}, data ${dataDir}`)
-		spawned.push(own(spawnAnvil(tool, ports.anvil)))
+		spawned.push(own(spawnAnvil(tool, ports.anvil, join(SANDBOX_LOG_DIR, `${opts.runId}-anvil.log`))))
 		await waitHealthy(`anvil at ${anvilUrl}`, () => rpcResponds(anvilUrl, "eth_chainId"), 60_000)
-		spawned.push(own(spawnNode(tool, { ports, anvilUrl, dataDir })))
+		spawned.push(own(spawnNode(tool, { ports, anvilUrl, dataDir, logFile: join(SANDBOX_LOG_DIR, `${opts.runId}-aztec.log`) })))
 		await waitHealthy(`aztec node at ${nodeUrl}`, () => rpcResponds(nodeUrl, "node_getNodeInfo"), 180_000)
 	} catch (e) {
 		await stop()

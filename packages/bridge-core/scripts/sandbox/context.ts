@@ -26,7 +26,7 @@ import {
 	privateMintAndPayFee,
 } from "../../src/private-fuel"
 import { buildFuelRoute } from "../../src/route"
-import { runSend, type SendParams, type SendResult } from "../../src/send-flow"
+import { runSend, type SendGasLeg, type SendParams, type SendResult } from "../../src/send-flow"
 import type { CalibrationSample } from "../calibration"
 import { type L2Ctx, waitForL1ToL2Message } from "../generation"
 import { ensureRouterPermit2 } from "../script-l1"
@@ -370,30 +370,41 @@ export async function mintPrivateGasNote(s: SmokeContext, fpc: ContractBase, amo
 	const feeAsset = s.clients.deployment.feeJuice
 	await mintFeeAsset(s.l1, feeAsset, s.l1.account.address, amount)
 	await ensureRouterPermit2(s.l1, { usdc: feeAsset, usdcAbi: TestERC20Abi, permit2: PERMIT2, needed: amount, mins: s.mins })
+	return mintPrivateGasVia(s, fpc, { erc20: feeAsset, amount, minFuelOutput: amount, path: [], zeroForOnes: [] })
+}
+
+/** The gas leg of a private gas-only deposit: whatever the venue turns `amount` of `erc20` into. */
+export type PrivateGasLeg = { erc20: Address; amount: bigint } & Pick<SendGasLeg, "minFuelOutput" | "path" | "zeroForOnes">
+
+/** The private half of any gas-only shape: the Fee Juice the leg buys lands at the PrivateFPC under
+ *  a claimer-bound secret, is claimed into the FPC's public balance, then minted into the actor's
+ *  credit. Returns the credit gained, which the mock venue's fixed rate makes exact. */
+export async function mintPrivateGasVia(s: SmokeContext, fpc: ContractBase, leg: PrivateGasLeg): Promise<bigint> {
 	const salt = Fr.random()
 	const res = await send(s, s.l1, {
 		intent: "gas",
-		erc20: feeAsset,
-		amount,
+		erc20: leg.erc20,
+		amount: leg.amount,
 		aztecRecipient: s.l2.from.toString() as Hex,
 		isPrivate: false,
 		gas: {
-			fuelAmount: amount,
+			fuelAmount: leg.amount,
 			fuelRecipient: PRIVATE_FPC_ADDRESS as Hex,
-			minFuelOutput: amount,
-			path: [],
-			zeroForOnes: [],
+			minFuelOutput: leg.minFuelOutput,
+			path: leg.path,
+			zeroForOnes: leg.zeroForOnes,
 			// The FPC rebuilds this secret from the claimer inside `mint`; a random one would strand the Fee Juice.
 			fuelSecret: deriveBridgeSecret(salt, s.l2.from),
 		},
 	})
 	await waitForL1ToL2Message(s.l2.node, res.fuelMessageHashHex as string, { forceBlock: s.l2.forceBlock })
+	const received = res.fuelReceived ?? leg.amount
 	const leafIndex = new Fr(res.fuelLeafIndex as bigint)
 	const before = await privateCreditOf(s, fpc)
-	await s.feeJuiceL2.methods.claim(fpc.address, amount, deriveBridgeSecret(salt, s.l2.from), leafIndex).send(s.l2.sendOpts as never)
-	await fpc.methods.mint(amount, salt, leafIndex).send(s.l2.sendOpts as never)
+	await s.feeJuiceL2.methods.claim(fpc.address, received, deriveBridgeSecret(salt, s.l2.from), leafIndex).send(s.l2.sendOpts as never)
+	await fpc.methods.mint(received, salt, leafIndex).send(s.l2.sendOpts as never)
 	const gained = (await privateCreditOf(s, fpc)) - before
-	if (gained < amount) throw new Error(`private credit rose by ${gained}, expected ${amount}`)
+	if (gained < received) throw new Error(`private credit rose by ${gained}, expected ${received}`)
 	return gained
 }
 

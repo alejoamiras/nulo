@@ -86,7 +86,8 @@ async function commandSmoke(): Promise<void> {
 
 const commands: Record<string, () => Promise<void>> = { run: commandRun, up: commandUp, smoke: commandSmoke }
 
-if (import.meta.main) {
+/** The CLI's entry: `import.meta.main` is false for a module another script imports, so the alias calls this. */
+export function main(): void {
 	const name = process.argv[2] ?? "run"
 	const command = commands[name]
 	if (!command) {
@@ -98,3 +99,5 @@ if (import.meta.main) {
 		process.exit(1)
 	})
 }
+
+if (import.meta.main) main()

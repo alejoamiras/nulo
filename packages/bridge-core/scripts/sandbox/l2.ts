@@ -67,7 +67,8 @@ export const freshActorSecret = (): Hex => Fr.random().toString() as Hex
 export interface L2Base {
 	wallet: Wallet
 	node: L2Ctx["node"]
-	/** The sponsor-paid fee every harness transaction rides — scaffolding, never a bridge path. */
+	/** The sponsor-paid fee the harness's scaffolding rides (actor deploys, standalone claims, the
+	 *  sends a cell does not price); every cell that asserts a payer names its own fee instead. */
 	fee: Record<string, unknown>
 	relayer: AztecAddress
 	relayerOpts: Record<string, unknown>

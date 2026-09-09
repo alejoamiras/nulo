@@ -15,7 +15,8 @@ describe.skipIf(!INTEGRATION)("registration races and tampering (cell 33)", () =
 
 	it("two concurrent first-time deposits settle as one register+claim and one claim", async () => {
 		const a = await freshActor()
-		expect(await flowConcurrentFirstClaims(a.s)).toContain("register+claim + claim")
+		// Either depositor may win the registration; the flow asserts one of each path.
+		expect(await flowConcurrentFirstClaims(a.s)).toMatch(/register\+claim \+ claim|claim \+ register\+claim/)
 	})
 
 	it("a portal-only token registers on its first claim", async () => {
