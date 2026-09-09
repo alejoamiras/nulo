@@ -1,7 +1,7 @@
 name: Extension network e2e soak
 
-# Manual-only repeat-runner for proving the network suite is genuinely stable
-# before flipping it to a required check (Phase 5 acceptance gate) and for
+# Manual-only repeat-runner for proving the extension network suite is genuinely stable
+# (the evidence for keeping it a required check) and for
 # validating Class B / Mode 3-4 fixes on the REAL runner without spamming PR CI.
 #
 # Runs the chosen workload `repeats` times SEQUENTIALLY (max-parallel: 1) on

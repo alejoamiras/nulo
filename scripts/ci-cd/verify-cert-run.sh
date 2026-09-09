@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verify one certification trigger against the Phase-6 qualifying criteria.
+# Verify one certification trigger against the qualifying criteria below.
 #
 # A run QUALIFIES when, for the given head SHA:
 #   - ALL THREE required workflows ran (Quality, Extension smoke e2e, Extension network e2e);

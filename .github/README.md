@@ -9,8 +9,8 @@ These `status` aggregators are what branch protection on `main` / `dev` requires
 | Workflow | Required check-run | Required on | Runs when | What it checks |
 |---|---|---|---|---|
 | `pr-quick.yml` | `quality-status` | dev + main | every PR to `main` / `dev` | commitlint, lint, typecheck, units, chrome+firefox build |
-| `pr-extension-smoke-e2e.yml` | `extension-smoke-e2e-status` | dev + main | PR to `main`, OR `e2e:extension-smoke` label, OR `smoke-surface` paths-filter | chrome build + puppeteer smoke (18 files, 67 tests, 7 quarantined) |
-| `pr-extension-network-e2e.yml` | `extension-network-e2e-status` | dev + main | PR to `main`, OR `e2e:extension-network` label, OR `extension-network` paths-filter | full network e2e (anvil + Aztec sandbox + playground) |
+| `pr-extension-smoke-e2e.yml` | `extension-smoke-e2e-status` | dev + main (after each branch's cut-over; legacy `smoke-e2e-status` until then) | PR to `main`, OR `e2e:extension-smoke` label, OR `smoke-surface` paths-filter | chrome build + puppeteer smoke (18 files, 67 tests, 7 quarantined) |
+| `pr-extension-network-e2e.yml` | `extension-network-e2e-status` | dev + main (after each branch's cut-over; legacy `network-e2e-status` until then) | PR to `main`, OR `e2e:extension-network` label, OR `extension-network` paths-filter | full network e2e (anvil + Aztec sandbox + playground) |
 | `bridge-contracts.yml` | `bridge-contracts-status` (not required yet) | — | when `contracts/bridge/**` or the bridge-core remappings/workflow change | forge hermetic + halmos + keystone nargo + hub artifact parity + sole-consumer guard |
 | `actionlint.yml` | `Status` (not required) | — | when `.github/workflows/**` or shell scripts change | actionlint + shellcheck |
 | `release.yml` | `status` (not required) | — | manual `workflow_dispatch` only | full quality bar + build + smoke against artifact + (optional) tag + GitHub Release |
@@ -27,7 +27,7 @@ Reusables live as `.github/workflows/_*.yml` and are called from top-level workf
 | `_lint-and-typecheck.yml` | `pr-quick`, `release`, `nightly` |
 | `_unit-tests.yml` | `pr-quick`, `release`, `nightly` |
 | `_build-extension.yml` | `pr-quick`, `release`, `nightly` |
-| `_extension-smoke-e2e.yml` | `pr-quick`, `release`, `nightly` |
+| `_extension-smoke-e2e.yml` | `pr-extension-smoke-e2e`, `release`, `nightly` |
 | `_extension-network-e2e.yml` | `pr-extension-network-e2e`, `release` (stable channel only), `nightly` |
 
 Composite actions live in `.github/actions/` and are shared step fragments used inside jobs.

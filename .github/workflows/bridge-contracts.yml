@@ -1,9 +1,6 @@
 name: Bridge contracts
 
-# PR gate for the any-ERC-20 bridge: contracts/bridge/** (Foundry + Noir suites) and, once the
-# integration job lands, packages/bridge-core's sandbox round trips. Follows the repo's
-# per-package convention: a `changes` job with dorny/paths-filter, real jobs gated on it, and a
-# bare-named status aggregator that emits pass when the suites are skipped.
+# PR gate for the any-ERC-20 bridge contracts (contracts/bridge/**).
 #
 # NO `branches:` filter, deliberately — see the long note in pr-quick.yml. That key filters
 # on the PR's BASE, so a stacked arc targeting its parent branch would get zero CI.
@@ -66,8 +63,7 @@ jobs:
     steps:
       - name: Aggregate results
         run: |
-          # Exact state machine (the shape the extension gates use): `changes` must succeed, and
-          # `suites` must be `success` when the filter tripped and `skipped` when it did not.
+          # Exact state machine, not a failure denylist — a suite that never ran must not read as green.
           RUN="${{ needs.changes.outputs.contracts }}"
           if [ "${{ needs.changes.result }}" != "success" ]; then
             echo "::error::Detect changes did not succeed: ${{ needs.changes.result }}"

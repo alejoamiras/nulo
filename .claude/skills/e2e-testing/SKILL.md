@@ -46,7 +46,7 @@ bun run test:e2e:all                                     # smoke + network on on
 bun run e2e:reap                                         # kill leftover sandboxes by owned pid
 ```
 
-`test:e2e:extension-network` at the root runs the config bare: no port pack, no armed build, `global-setup.ts`
+`test:e2e:network` at the root runs the config bare: no port pack, no armed build, `global-setup.ts`
 falls back to `8545/8080/8880/40400/5174`. Use it only against a sandbox you already own.
 
 ### Hazards that mass-fail a run
@@ -576,7 +576,7 @@ coordinator's pre-prove `checkCancelled` and before the post-prove one).
 
 - `apps/extension/tests/e2e/README.md` — layout, per-file purposes, helper table, what each
   worktree owns.
-- `CI.md` § e2e, `.github/workflows/{pr-extension-smoke-e2e,_smoke-e2e,pr-extension-network-e2e,_network-e2e,nightly,
+- `CI.md` § e2e, `.github/workflows/{pr-extension-smoke-e2e,_extension-smoke-e2e,pr-extension-network-e2e,_extension-network-e2e,nightly,
   extension-network-e2e-soak}.yml`.
 - Plans (`implementations-plan/`): `e2e-flake-fixes` (the parked-host mechanism, five codex rounds),
   `e2e-deflake` (+ `flake-ledger.md`), `deflake-round-2`, `deflake-round-3` (the kill primitive
