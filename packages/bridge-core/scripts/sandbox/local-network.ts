@@ -141,16 +141,15 @@ const REGISTRY_HEADER = [
 ]
 
 /** Rewrites the registry under the lock; `false` when the lock never came free. A host without a
- *  registry gets one: the claims are what keep a run's own ports apart from its next allocation. */
+ *  registry gets one — created under that same lock, so two first runs cannot both create it —
+ *  because the claims are what keep a run's own ports apart from its next allocation. */
 async function withRegistry(mutate: (lines: string[]) => string[]): Promise<boolean> {
-	if (!existsSync(REGISTRY)) {
-		mkdirSync(dirname(REGISTRY), { recursive: true })
-		writeFileSync(REGISTRY, `${REGISTRY_HEADER.join("\n")}\n`, { flag: "wx" })
-	}
+	mkdirSync(dirname(REGISTRY), { recursive: true })
 	for (let i = 0; i < 60; i++) {
 		if (tryAcquireLock()) {
 			try {
-				writeFileSync(REGISTRY, `${mutate(readFileSync(REGISTRY, "utf8").split("\n")).join("\n")}`)
+				const current = existsSync(REGISTRY) ? readFileSync(REGISTRY, "utf8") : `${REGISTRY_HEADER.join("\n")}\n`
+				writeFileSync(REGISTRY, `${mutate(current.split("\n")).join("\n")}`)
 			} finally {
 				try {
 					unlinkSync(REGISTRY_LOCK)

@@ -6,7 +6,7 @@
  * around them. The sandbox reserves its own four the same way.
  *
  *   bun scripts/e2e/resolve-ports.ts <state-dir> <run-id> <pid>   → writes <state-dir>/ports.json
- *   bun scripts/e2e/resolve-ports.ts --release <state-dir> <run-id>  → drops the run's registry rows
+ *   bun scripts/e2e/resolve-ports.ts --release <state-dir>         → drops the rows ports.json says it owns
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { createServer } from "node:net"
@@ -47,17 +47,21 @@ async function reserve(taken: Set<number>): Promise<number> {
 	throw new Error("resolve-ports: no free port in the static window")
 }
 
+/** The file names its owner: a state directory chosen by hand is not the run id its rows carry. */
+type PortsFile = { tools: number; testWallet: number; owner: string; resolvedAt: string }
+
 if (process.argv[2] === "--release") {
-	const [stateDir, runId] = process.argv.slice(3)
-	if (!stateDir || !runId) throw new Error("resolve-ports: --release <state-dir> <run-id>")
-	const stored = JSON.parse(readFileSync(join(stateDir, "ports.json"), "utf8")) as { tools: number; testWallet: number }
-	await releaseHostPorts(runId, { tools: stored.tools, testWallet: stored.testWallet })
+	const stateDir = process.argv[3]
+	if (!stateDir) throw new Error("resolve-ports: --release <state-dir>")
+	const stored = JSON.parse(readFileSync(join(stateDir, "ports.json"), "utf8")) as PortsFile
+	if (stored.owner) await releaseHostPorts(stored.owner, { tools: stored.tools, testWallet: stored.testWallet })
 } else {
 	const [stateDir, runId, pid] = process.argv.slice(2)
 	if (!stateDir || !runId) throw new Error("resolve-ports: <state-dir> <run-id> [pid] required")
 	const ports = await claim(runId, Number(pid) || process.pid)
+	const file: PortsFile = { ...ports, owner: runId, resolvedAt: new Date().toISOString() }
 	mkdirSync(stateDir, { recursive: true })
-	writeFileSync(join(stateDir, "ports.json"), `${JSON.stringify({ ...ports, resolvedAt: new Date().toISOString() }, null, 2)}\n`)
+	writeFileSync(join(stateDir, "ports.json"), `${JSON.stringify(file, null, 2)}\n`)
 	console.log(`[e2e:tools] tools=:${ports.tools} test-wallet=:${ports.testWallet}`)
 }
 

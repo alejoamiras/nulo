@@ -102,6 +102,8 @@ payer and reads its postconditions from the chain through the harness.
 | 5 | quotes keyed by address alone: the same address reconnected through another wallet reused the first wallet's policy | real → quotes live in a `WeakMap` keyed by the wallet object, each stamped with the epoch of its forget; pinned by a two-wallets-one-address test |
 | 6 | cells 4 and 16 proved hashes and fees but not that the recipient got the token | real → exact private balance gains from the record's read-back block (10 USDC; the record's token amount) |
 
+**Round 3** (same session, `high`, on the round-2 fixes) — verdict **"Not ready for PR"**, 2 findings, both adopted: the registry was created before its lock was taken (two first runs could both create it — now created under the lock); the reaper released a run's browser ports by the state directory's name, which a hand-chosen `NULO_E2E_STATE_DIR` breaks (`ports.json` now records its owner and `--release` reads it). Confirmed sound: the hold (the SDK's iframe transport has no per-request timeout and keeps answering heartbeats, so the page-side simulation stays pending and the gate never reaches its send); the wallet-keyed cache; both cap spellings; the private-gain assertions. Noted for the record: the hold is right for a REGISTERED token's claim; an unregistered token's send substitutes a fee-only simulation (`useSend.ts`), so the pattern must stay on a registered-token cell.
+
 ## Durations
 
 _(filled from the sharded full runs — the shard count in `pr-tools-e2e.yml` follows them)_

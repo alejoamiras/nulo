@@ -30,10 +30,10 @@ if [ "${1:-}" = "reap" ]; then
       kill -KILL -- "-$pgid" 2>/dev/null || true
     fi
     rm -f "$pidfile"
-    # The run's browser ports were claimed under the state dir's name (its run id); release them too.
+    # The run's browser ports: ports.json names the owner its rows were claimed under.
     statedir=$(dirname "$pidfile")
     if [ -f "$statedir/ports.json" ]; then
-      bun scripts/e2e/resolve-ports.ts --release "$statedir" "$(basename "$statedir")" 2>/dev/null || true
+      bun scripts/e2e/resolve-ports.ts --release "$statedir" 2>/dev/null || true
     fi
   done
   [ "$found" = 1 ] || echo "[e2e:tools] nothing to reap"
@@ -67,7 +67,7 @@ reap() {
   if [ -n "$SANDBOX_PID" ] && [ "${NULO_E2E_KEEP:-}" != "1" ]; then rm -f "$STATE_DIR/sandbox.pid"; fi
   # The browser ports' registry rows belong to this run alone; a kept run keeps them claimed.
   if [ "${NULO_E2E_KEEP:-}" != "1" ] && [ -z "${NULO_E2E_ATTACH:-}" ] && [ -f "$STATE_DIR/ports.json" ]; then
-    bun scripts/e2e/resolve-ports.ts --release "$STATE_DIR" "$RUN_ID" 2>/dev/null || true
+    bun scripts/e2e/resolve-ports.ts --release "$STATE_DIR" 2>/dev/null || true
   fi
 }
 trap reap EXIT
