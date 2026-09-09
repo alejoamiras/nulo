@@ -24,12 +24,15 @@ import { Gas } from "@aztec/stdlib/gas"
 import type { DepositJournalRecord } from "@nulo/bridge-core"
 import {
 	PRIVATE_FPC_ADDRESS,
+	PRIVATE_FUEL_CLAIM_GAS as PRIVATE_CLAIM_GAS,
+	PUBLIC_FUEL_CLAIM_GAS as PUBLIC_CLAIM_GAS,
 	assertFuelClearsFloor,
 	deriveBridgeSecret,
 	privateMintAndPayFee,
 	publicFeeJuicePayment,
 } from "@nulo/bridge-core"
 import { isPrivateFuelInsufficiency } from "@/lib/fuel-claim-state"
+import { clampGas } from "@/lib/wallet-fee-budget"
 
 export interface FuelClaimInteraction {
 	simulate: () => Promise<unknown>
@@ -71,22 +74,6 @@ const stop = (why: string): FuelClaimInteraction => ({
 		throw new Error(why)
 	},
 })
-
-/** Gas LIMITS for the carrier-less self-pay claim: the empty BatchCall([]) gives the estimator nothing, so
- *  gasLimits MUST be explicit (else it defaults to the per-tx MAX and max_gas_cost blows past the bridged
- *  amount). The protocol asserts the claimed balance clears getFeeLimit() = Σ gasLimit[d]*maxFee[d], so these
- *  ALSO drive {@link clearsFeeLimit}. PUBLIC is CALIBRATED from the live fee-juice-canary (a landed
- *  claim_and_end_setup billed l2Gas 659_123 / daGas 224 → a ~2.3x margin); it sits far below the private
- *  2-call limit so an oversized limit can't shrink the fee-spike headroom under the FUEL_MIN_FJ floor (a 2x
- *  spike at 4M would graze the 16e18 floor — codex). PRIVATE covers FeeJuice.claim + mint_and_pay_fee.
- *  KNOWN GAP (fable audit H1, bounded): a wallet whose FIRST-EVER tx is this claim carries account
- *  initialization on top (the extension wraps [ctor, entrypoint] when the init nullifier is absent) —
- *  a shape neither limit was measured against. The fresh-selfpay canary proved the EMBEDDED wallet
- *  can't model it (no init wrap: the undeployed entrypoint fails on its key note before gas matters),
- *  so the extension-shape cost stays unmeasured. Recoverable, not stranding: after ANY other tx
- *  initializes the account, RETRY claims normally. Measure via an extension-driven e2e before mainnet. */
-const PUBLIC_CLAIM_GAS = { daGas: 3_000, l2Gas: 1_500_000 } as const
-const PRIVATE_CLAIM_GAS = { daGas: 100_000, l2Gas: 4_000_000 } as const
 
 /** Fail-CLOSED on the ACTUAL fee LIMIT: the protocol reverts the setup claim when the claimed balance can't
  *  cover getFeeLimit() (Σ gasLimit[d]*maxFee[d]) — the LIMIT, not the actual charge — so a bridge that clears
@@ -165,7 +152,7 @@ function buildPrivateFuelClaim(
 	simulateViaPayload: PayloadSimulator,
 ): FuelClaimInteraction {
 	const { aztec, recipient } = deps
-	const budgetStop = checkClaimBudget(received, PRIVATE_CLAIM_GAS, deps)
+	const budgetStop = checkClaimBudget(received, clampGas(PRIVATE_CLAIM_GAS), deps)
 	if (budgetStop) return budgetStop
 	// FPC version-drift kill-switch — never claim to a drifted FPC, never downgrade to public (L11/L15).
 	if (fuel.fpc && fuel.fpc !== PRIVATE_FPC_ADDRESS) {
@@ -192,9 +179,10 @@ function buildPrivateFuelClaim(
 			// (suggestGasLimits), so size it to the 2-call setup ({@link PRIVATE_CLAIM_GAS}). The fee is
 			// billed on ACTUAL gas, not the limit, so a generous limit does not overpay — but it IS the
 			// balance-check bound (getFeeLimit), so {@link clearsFeeLimit} above fail-closes on it.
-			gasLimits: Gas.from(PRIVATE_CLAIM_GAS),
+			gasLimits: Gas.from(clampGas(PRIVATE_CLAIM_GAS)),
 			teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
-			...(deps.maxFeesPerGas ? { maxFeesPerGas: deps.maxFeesPerGas } : {}),
+			// Both spellings: the wallet-sdk option schema names the cap `maxFeePerGas`, the wallets read `maxFeesPerGas`.
+			...(deps.maxFeesPerGas ? { maxFeesPerGas: deps.maxFeesPerGas, maxFeePerGas: deps.maxFeesPerGas } : {}),
 		},
 	}
 	const carrier = () => new BatchCall(aztec as never, [])
@@ -234,7 +222,7 @@ function buildPublicFuelClaim(
 	simulateViaPayload: PayloadSimulator,
 ): FuelClaimInteraction {
 	const { aztec, recipient } = deps
-	const budgetStop = checkClaimBudget(received, PUBLIC_CLAIM_GAS, deps)
+	const budgetStop = checkClaimBudget(received, clampGas(PUBLIC_CLAIM_GAS), deps)
 	if (budgetStop) return budgetStop
 	// Authoritative-first: the engine-gated `rec.secret` wins over the `fuel.secret` display copy so the
 	// gate and the claim can never read divergent secrets (codex LOW). Plaintext is a fallback only.
@@ -250,9 +238,9 @@ function buildPublicFuelClaim(
 		// nothing). teardownGas=0; maxFeesPerGas is the caller's predicted-worst snapshot (NO padding),
 		// since this self-pays and the bridged amount is the whole budget.
 		gasSettings: {
-			gasLimits: Gas.from(PUBLIC_CLAIM_GAS),
+			gasLimits: Gas.from(clampGas(PUBLIC_CLAIM_GAS)),
 			teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
-			...(deps.maxFeesPerGas ? { maxFeesPerGas: deps.maxFeesPerGas } : {}),
+			...(deps.maxFeesPerGas ? { maxFeesPerGas: deps.maxFeesPerGas, maxFeePerGas: deps.maxFeesPerGas } : {}),
 		},
 	}
 	const carrier = () => new BatchCall(aztec as never, [])

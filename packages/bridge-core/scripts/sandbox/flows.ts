@@ -37,6 +37,7 @@ import {
 	registerArgsOf,
 	sampleExitGas,
 	send,
+	settled,
 	type SmokeContext,
 	tokenBlockOf,
 } from "./context"
@@ -202,8 +203,12 @@ export async function flowGasOnly(s: SmokeContext): Promise<string> {
 	await s.feeJuiceL2.methods
 		.claim(s.l2.from, amount, Fr.fromHexString(res.fuelSecretHex as string), new Fr(res.fuelLeafIndex as bigint))
 		.send(s.l2.sendOpts as never)
-	const gained = (await balanceOf(s.feeJuiceL2, s.l2.from, "public")) - before
-	if (gained < amount) throw new Error(`fee juice balance rose by ${gained}, expected ${amount}`)
+	const after = await settled(
+		() => balanceOf(s.feeJuiceL2, s.l2.from, "public"),
+		(v) => v - before >= amount,
+		"the public Fee Juice after the claim",
+	)
+	const gained = after - before
 	return `bridge() into the FeeJuicePortal, +${gained} FJ-wei claimed as fee juice`
 }
 

@@ -230,8 +230,8 @@ Arc 3 (tools browser e2e): `apps/tools/package.json` (`@playwright/test` devDep 
 | 22 | routeless token → gas choices greyed, token-only still sends | plain | credit ≥ ceiling | ✓ (no-route) | ✓ |
 | 23 | discovered route feeds the send (real facade quote) | plain | none | ✓ | ✓ (route status testid) |
 | 24a | interrupted fueled claim, recovery: pending / dropped branches complete; consumed branch on a plain wallet with no credit ends in the `none` stop (`deposit-flow.ts:700` → `ownGasFee`, public payer feature-gated) | plain | none | – | ✓ (reload mid-claim; `fuel-claim-state.ts:63`) |
-| 24b | consumed branch completes from held public FJ | selfpay | publicFj ≥ ceiling | – | ✓ |
-| 25 | grant declined → nothing signed; grant for a left selection discarded | plain | – | – | ✓ |
+| 24b | consumed branch completes from held public FJ — NOT STAGED: a claim included with its app phase reverted cannot be produced from outside the wallet on the automine network (`lessons/phase-9.md`) | selfpay | publicFj ≥ ceiling | – | – |
+| 25 | grant declined → nothing signed (staged: the wallet's declined grant on a fresh token); the "grant for a left selection discarded" half is NOT STAGED — the test wallet answers prompts synchronously (`lessons/phase-9.md`) | plain | – | – | ✓ (declined half) |
 | 26 | L1 signature rejected; L1 account change; L1 wrong chain → chip + switch | plain | – | – | ✓ |
 | 27 | exit public (authwit tx + exit tx both paid by the wallet default = the actor's public FJ) | plain | publicFj ≥ 2 tx budgets; assert the drop | ✓ | ✓ |
 | 28 | exit private from 1 note / from 3 notes | plain | credit 1 note / 3 notes | ✓ | ✓ |
@@ -288,24 +288,24 @@ Fast layers on every gate: `bun run lint` + `bun run typecheck:all` + the touche
 
 ### Arc 3 — Tools browser e2e
 
-#### Phase 6: `local` ToolsTarget, loader, local build, local drip record, transport-compat fix
+#### Phase 6 ✓: `local` ToolsTarget, loader, local build, local drip record, transport-compat fix
 - `localTarget(cfg)` factory; `local-target-loader.ts`; `TARGETS.local` behind the define guard; `VIEM_CHAINS[31337]`; `vite.config.ts` (loader → `define`, per-run manifest path + `--outDir`, preview serves the CSP with `frame-src` for local), `vite.local.config.mts`, `build:local`, `dev:local`, `verify-build-target --dist`, target-aware `deployments.ts`, `webWallets` keyed on `target.key === "local"`, `useAddDripToken` recognizes `Unknown wallet method`, README target text.
 - **Validation gate**: `bun run --cwd apps/tools typecheck && bun run --cwd apps/tools test && bun run --cwd apps/tools test:e2e` exit 0 (a unit test covers the `unknown`→`unsupported` mapping); with a sandbox artifacts dir, `NULO_SANDBOX_ARTIFACTS=<dir> bun run --cwd apps/tools build:local --outDir <dir>/dist && NULO_SANDBOX_ARTIFACTS=<dir> bun run --cwd apps/tools verify:build-target local --dist <dir>/dist` exit 0 and the bundle contains the node URL + wallet URL; `bun run --cwd apps/tools build:testnet` AND `build:mainnet` contain neither string, no local manifest, no test-wallet asset. Layers: typecheck · unit · jsdom smoke · build.
 
-#### Phase 7: Spike — embedded wallet behind the iframe handler connects to the local tools build
+#### Phase 7 ✓: Spike — embedded wallet behind the iframe handler connects to the local tools build
 - Timeboxed half day. The test-wallet page (`start()` first, lazy ephemeral wallet, schema-valid `requestCapabilities`, COEP + CORP, `allowedOrigins`, appId/chain guard, `addAccount` hook, `selfpay` wrapper) + the Phase 6 local build served with the CSP. Drive by hand or a throwaway Playwright script.
 - Checks, each recorded in `lessons/phase-7.md`: discovery lists the wallet within 10 s; emoji modal → confirm; capability grant round-trips; `addAccount` → the account appears in the tools switcher; one public drip lands (receipt testid + balance via the harness); `crossOriginIsolated` true in both frames; the floating panel's position and whether a shrink fixture suffices; the `selfpay` wrapper: a held-public-FJ send simulates AND sends, and a genuine fueled claim still routes as a claim.
 - **Validation gate**: transcript shows the drip receipt and balance move; `lessons/phase-7.md` records go / no-go per check. No-go fallback recorded there: the test wallet speaks the extension transport through an `addInitScript` relay shim (re-plan as its own phase). Layers: manual e2e.
 
-#### Phase 8: Playwright scaffold, L1 shim, first cell, agent runner
+#### Phase 8 ✓: Playwright scaffold, L1 shim, first cell, agent runner
 - `@playwright/test` (exact pin), `playwright.config.ts`, `tests/browser/tsconfig.json` (+ `typecheck` script), `vitest.config.ts` exclude, `global-setup.ts`, fixtures (`l1-wallet`, `sandbox`, `actor`, `wallet-panel`, `egress`, `isolation`), `pages/*.ts`, `specs/connect-and-deposit.spec.ts` (cell 1), `apps/tools/scripts/e2e/agent.sh` + reap, root scripts `e2e:tools`, `e2e:tools:reap`.
 - **Validation gate**: `bun run e2e:tools` exit 0 with cell 1 green at retry 0; `e2e:tools:reap` afterwards reports nothing to reap; the egress fixture reports zero non-loopback requests; both frames isolated. Layers: e2e (live sandbox, real browser).
 
-#### Phase 9: The matrix
+#### Phase 9 ✓: The matrix
 - Specs by family: `deposit-token`, `deposit-token-gas`, `deposit-gas-only`, `fee-states`, `recovery`, `l1-wallet`, `exits`, `tokens`, `drip`, `activity`; every "B" cell in the table is a named test with its fixture and postconditions; profiles via the wallet URL query.
 - **Validation gate**: `bun run e2e:tools` exit 0 at retry 0; `bun run e2e:tools -- --shard=1/2` and `--shard=2/2` both exit 0; durations pasted into `lessons/phase-9.md` and the CI shard count chosen from them. Layers: e2e.
 
-#### Phase 10: CI for the tools suite; delete the extension's dead tools plumbing; docs
+#### Phase 10 ✓: CI for the tools suite; delete the extension's dead tools plumbing; docs
 - `.github/actions/setup-playwright` (cache keyed on the pinned version), `_tools-e2e.yml` (inputs `ref`, `shard`, `shard_label`; setup-bun → `setup-aztec` at the bridge-core pin → forge build steps → setup-playwright → `bun run e2e:tools -- --shard`; `timeout-minutes: 30`; traces + logs on failure), `pr-tools-e2e.yml` (`name: Tools e2e`; filter `tools-e2e` with literal per-dep entries: `apps/tools/**`, `contracts/bridge/**`, `packages/bridge-core/src/**` + `scripts/**` + `package.json`, `packages/{design,wallet-crypto,wallet-core,wallet-sdk-schema-patch,resolve-asset}/src/**` + `package.json`, root config, `patches/**`, the two workflow files, the three actions; label `e2e:tools`; N shards from Phase 9; `tools-e2e-status` exact-state aggregator; `changes` job `pull-requests: read`, `fetch-depth: 0`).
 - Remove `TOOLS_DEV_PORT`/`toolsUrl`/`ports.tools`/`pids.tools` from the extension runner.
 - Docs: `CI.md` (per-app sections), `CLAUDE.md` quality-gates table + required-checks list (two advisory gates, the promotion rule, the owner as promoter), `apps/tools/README.md`, `tests/browser/README.md`, `.github/README.md`.

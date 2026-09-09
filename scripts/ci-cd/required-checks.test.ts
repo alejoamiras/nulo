@@ -56,6 +56,6 @@ describe("required-checks", () => {
 
 	test("every rename target is the name an aggregator job produces; labels match the gates", () => {
 		expect(Object.values(RENAMES).sort()).toEqual(["bridge-contracts-status", "extension-network-e2e-status", "extension-smoke-e2e-status"])
-		expect(LABELS.map((l) => l.name)).toEqual(["e2e:extension-smoke", "e2e:extension-network"])
+		expect(LABELS.map((l) => l.name)).toEqual(["e2e:extension-smoke", "e2e:extension-network", "e2e:tools"])
 	})
 })

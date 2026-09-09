@@ -11,16 +11,18 @@ import {
 	type GasShareResult,
 	PRIVATE_HUB_CLAIM_GAS,
 	PRIVATE_HUB_REGISTER_GAS,
-	ownGasCeiling,
+	ownGasTxs,
 	predictedWorstMinFees,
 	privateFpcFeeLimit,
 	proposeGasShare,
 	signedMinFuelOutput,
 	type TokenState,
 } from "@nulo/bridge-core"
+import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { ref, type Ref } from "vue"
 import { SWAP } from "@/contracts/bridge-generation"
 import { NETWORK } from "@/lib/network"
+import { clampGas, walletMaxFees } from "@/lib/wallet-fee-budget"
 
 /** Enough for a first session on L2 without over-diverting the deposit. */
 const DEFAULT_TX_TARGET = 20
@@ -58,6 +60,8 @@ export interface UseGasShareHandle {
 	/** Price the ceilings from the network's predicted fees; true when a fresh price landed from THIS
 	 *  call. Concurrent calls share one read. */
 	prime: () => Promise<boolean>
+	/** Drop the price and ask again — the wallet or account behind it changed. */
+	invalidate: () => void
 	/** Why the last pricing failed, while no usable price exists; null once one lands. */
 	readonly pricingError: Ref<string | null>
 	/** Back to the default target: a new send is sized from it, never from the last one's. */
@@ -67,17 +71,36 @@ export interface UseGasShareHandle {
 
 type MaxFees = { feePerDaGas: bigint; feePerL2Gas: bigint }
 
+export interface GasShareDeps {
+	/** The connected wallet and account: the ceilings are priced the way THAT wallet will submit
+	 *  them, not from the network's prediction, which no stock wallet honors verbatim. */
+	aztec?: () => unknown
+	account?: () => string | undefined
+}
+
 /** `null` from `propose` (and a throw from `floorFor`) means this network has no swap venue. */
-export function useGasShare(): UseGasShareHandle {
+export function useGasShare(deps: GasShareDeps = {}): UseGasShareHandle {
 	const txTarget = ref(DEFAULT_TX_TARGET)
 	const fees = ref<{ maxFees: MaxFees; at: number } | null>(null)
 	const pricingError = ref<string | null>(null)
 	let pricing: Promise<boolean> | null = null
+	let generation = 0
+
+	/** The wallet's figure when an account is connected, the node's prediction before that. */
+	function readMaxFees(): Promise<MaxFees> {
+		const aztec = deps.aztec?.()
+		const account = deps.account?.()
+		if (aztec && account) return walletMaxFees(aztec, AztecAddress.fromStringUnsafe(account), PRIVATE_HUB_CLAIM_GAS)
+		return predictedWorstMinFees(createAztecNodeClient(NETWORK.nodeUrl))
+	}
 
 	function prime(): Promise<boolean> {
 		if (pricing) return pricing
-		pricing = predictedWorstMinFees(createAztecNodeClient(NETWORK.nodeUrl))
+		const mine = generation
+		pricing = readMaxFees()
 			.then((predicted) => {
+				// A read the wallet or account outran is nobody's price now.
+				if (mine !== generation) return false
 				const maxFees = { feePerDaGas: predicted.feePerDaGas, feePerL2Gas: predicted.feePerL2Gas }
 				const same =
 					fees.value?.maxFees.feePerDaGas === maxFees.feePerDaGas && fees.value?.maxFees.feePerL2Gas === maxFees.feePerL2Gas
@@ -92,12 +115,12 @@ export function useGasShare(): UseGasShareHandle {
 				// Unpriced is a visible state (the slice reads "pricing", the error names why), never a
 				// silently wrong slice; a still-fresh price keeps serving while a background refresh
 				// failed — a caller that needs the price to be fresh NOW reads the false instead.
-				if (priced() === null)
+				if (mine === generation && priced() === null)
 					pricingError.value = `Couldn't read Aztec's network fees to size the gas slice - ${e instanceof Error ? e.message : String(e)}`
 				return false
 			})
 			.finally(() => {
-				pricing = null
+				if (mine === generation) pricing = null
 			})
 		return pricing
 	}
@@ -108,17 +131,22 @@ export function useGasShare(): UseGasShareHandle {
 		return snap && Date.now() - snap.at <= FEES_STALE_MS ? snap.maxFees : null
 	}
 
+	// Every ceiling is priced from the CLAMPED limits the transactions are submitted under — what the
+	// FPC actually keeps — never from the declared constants a smaller network cuts down.
 	function ceilingsFor(state: TokenState): bigint | null {
 		const maxFees = priced()
 		if (!maxFees) return null
-		const claim = privateFpcFeeLimit(PRIVATE_HUB_CLAIM_GAS, maxFees)
-		return state.kind === "registered" ? claim : claim + privateFpcFeeLimit(PRIVATE_HUB_REGISTER_GAS, maxFees)
+		const claim = privateFpcFeeLimit(clampGas(PRIVATE_HUB_CLAIM_GAS), maxFees)
+		return state.kind === "registered" ? claim : claim + privateFpcFeeLimit(clampGas(PRIVATE_HUB_REGISTER_GAS), maxFees)
 	}
 
 	function ownGasCeilingFor(state: TokenState, isPrivate: boolean): bigint | null {
 		if (!fees.value || Date.now() - fees.value.at > FEES_FRESH_MS) void prime()
 		const maxFees = priced()
-		return maxFees ? ownGasCeiling({ isPrivate, registers: state.kind !== "registered" }, maxFees) : null
+		if (!maxFees) return null
+		const txs = ownGasTxs({ isPrivate, registers: state.kind !== "registered" })
+		const claim = privateFpcFeeLimit(clampGas(txs.claim), maxFees)
+		return txs.register ? claim + privateFpcFeeLimit(clampGas(txs.register), maxFees) : claim
 	}
 
 	/** A private slice's ceilings, or "pricing" while the fees are still on their way. */
@@ -158,8 +186,17 @@ export function useGasShare(): UseGasShareHandle {
 		txTarget.value = DEFAULT_TX_TARGET
 	}
 
+	/** Another wallet or account prices from scratch: its policy is not the last one's, and a read
+	 *  still running for the last one is dropped rather than adopted. */
+	function invalidate(): void {
+		generation++
+		pricing = null
+		fees.value = null
+		void prime()
+	}
+
 	// A re-entered wizard proposes from the default, never from the last session's target.
 	const dispose = reset
 
-	return { txTarget, propose, floorFor, ceilingsFor, ownGasCeilingFor, prime, pricingError, reset, dispose }
+	return { txTarget, propose, floorFor, ceilingsFor, ownGasCeilingFor, prime, invalidate, pricingError, reset, dispose }
 }

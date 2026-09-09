@@ -62,6 +62,16 @@ describe("useAddDripToken", () => {
 		expect(status.value.kind).toBe("unsupported")
 	})
 
+	it("iframe transport answers 'Unknown wallet method' for a schema-less wallet → unsupported, not error", async () => {
+		const wallet = makeWallet(async () => {
+			throw new Error("Unknown wallet method: registerToken")
+		})
+		const { status, addToken } = useAddDripToken()
+		// biome-ignore lint/suspicious/noExplicitAny: typed mock
+		await addToken(wallet as any, ACCOUNT, TOKEN_ADDR)
+		expect(status.value.kind).toBe("unsupported")
+	})
+
 	it("generic error: status becomes error with normalized category", async () => {
 		const wallet = makeWallet(async () => {
 			throw new Error("Network timeout")

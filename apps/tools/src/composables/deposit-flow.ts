@@ -27,9 +27,7 @@ import {
 	isSealTrusted,
 	isSendRecord,
 	markSealTrusted,
-	ownGasCeiling,
 	ownGasTxs,
-	predictedWorstMinFees,
 	privateFeeJuicePayment,
 	privateFpcFeeLimit,
 	privateMintAndPayFee,
@@ -51,6 +49,7 @@ import {
 	isPrivateFuelInsufficiency,
 } from "@/lib/fuel-claim-state"
 import { isWellFormedTxHash } from "@/lib/claim-receipt"
+import { clampGas, walletMaxFees } from "@/lib/wallet-fee-budget"
 import { DAPP_SELF_PAY_FEATURE, walletSupports } from "@/lib/wallet-features"
 import {
 	cacheSecret,
@@ -176,7 +175,8 @@ export async function sendStandaloneFjClaim(
 	fuel: NonNullable<DepositJournalRecord["fuel"]>,
 	id: string,
 ): Promise<void> {
-	const claimMaxFees = await predictedWorstMinFees(createAztecNodeClient(NODE_URL))
+	const claimMaxFees = await walletFeesOrNull(aztec, recipientAddr, PRIVATE_HUB_CLAIM_GAS)
+	if (claimMaxFees === null) throw new Error(UNPRICED_BY_WALLET)
 	const claim = await buildFuelClaimInteraction({ fuel, isPrivate: false } as DepositJournalRecord, {
 		aztec,
 		recipient: recipientAddr,
@@ -336,7 +336,9 @@ export async function buildFeeJuiceClaimDep(
 	// too low to cover gas cost". (The wallet's x1.5 minFeePadding is for refundable txs, not this.)
 	// predicted-worst is already a forward-looking ceiling so it still covers base-fee drift through
 	// the proving window; a rare spike beyond it fails recoverably (the engine reprices on retry).
-	const claimMaxFees = await predictedWorstMinFees(createAztecNodeClient(NODE_URL))
+	// The figure is the WALLET's, though: it submits under its own max fee, not the app's.
+	const claimMaxFees = await walletFeesOrNull(aztec, AztecAddress.fromStringUnsafe(rec.recipient), PRIVATE_HUB_CLAIM_GAS)
+	if (claimMaxFees === null) throw new Error(UNPRICED_BY_WALLET)
 	return buildFuelClaimInteraction(rec, {
 		aztec,
 		recipient: AztecAddress.fromStringUnsafe(rec.recipient),
@@ -433,20 +435,45 @@ export async function resolvePrivateFuelFee(
 	if (decision.action === "consumed") return privateCreditFee(fb, recipientAddr, ctx.aztec, ctx.registers === true)
 	if (decision.action !== "private-fpc")
 		return { kind: "stop", why: "private fuel claim pending - waiting for its receipt before retrying" }
-	return privateFpcFee(fb, fuelReceived, salt, recipientAddr, ctx.registers === true)
+	return privateFpcFee(fb, fuelReceived, salt, recipientAddr, ctx.registers === true, ctx.aztec)
 }
 
 /** The FPC's explicit gas settings: limits sized to the transaction, teardown zero (it keeps
  *  `max_gas_cost` within the bridged amount), fees pinned to the predicted worst case. */
 function fpcGasSettings(gas: { daGas: number; l2Gas: number }, maxFees: { feePerDaGas: bigint; feePerL2Gas: bigint }) {
+	const cap = { feePerDaGas: maxFees.feePerDaGas, feePerL2Gas: maxFees.feePerL2Gas }
 	return {
-		gasLimits: Gas.from(gas),
+		gasLimits: Gas.from(clampGas(gas)),
 		teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
-		maxFeesPerGas: { feePerDaGas: maxFees.feePerDaGas, feePerL2Gas: maxFees.feePerL2Gas },
+		maxFeesPerGas: cap,
+		// The wallet-sdk option schema spells the cap this way; a wallet reading either spelling gets it.
+		maxFeePerGas: cap,
 	}
 }
 
 type MaxFees = { feePerDaGas: bigint; feePerL2Gas: bigint }
+
+const UNPRICED_BY_WALLET = "Your wallet could not price this transaction's fee ceiling just now - please try again in a moment."
+
+/** The max fees the connected wallet will submit under, or null when it cannot say (logged): every
+ *  ceiling below is `limits × this`, kept in full by the FPC, so a figure the wallet did not give
+ *  is not one to fund an irreversible step on. */
+async function walletFeesOrNull(aztec: unknown, account: AztecAddress, gas: { daGas: number; l2Gas: number }): Promise<MaxFees | null> {
+	try {
+		return await walletMaxFees(aztec, account, gas)
+	} catch (e) {
+		log("wallet fee quote failed (fail-closed → null):", e instanceof Error ? e.message : String(e))
+		return null
+	}
+}
+
+/** What a claim from held gas sets aside, priced from the CLAMPED limits it is submitted under —
+ *  what the FPC actually keeps — never from the declared constants a smaller network cuts down. */
+function clampedOwnGasCeiling(shape: { isPrivate: boolean; registers: boolean }, maxFees: MaxFees): bigint {
+	const txs = ownGasTxs(shape)
+	const claim = privateFpcFeeLimit(clampGas(txs.claim), maxFees)
+	return txs.register ? claim + privateFpcFeeLimit(clampGas(txs.register), maxFees) : claim
+}
 
 /** A transaction paid from the private Fee Juice this account already holds at the FPC (`pay_fee`),
  *  at the ceiling its limits commit to. */
@@ -464,11 +491,14 @@ async function privateCreditFee(fb: FuelBlock, recipientAddr: AztecAddress, azte
 	const fpcAddr = AztecAddress.fromStringUnsafe(fb.fpc ?? PRIVATE_FPC_ADDRESS)
 	const [credit, maxFees] = await Promise.all([
 		readFeeJuiceOrNull("private FJ", () => readPrivateFeeJuiceBalance(aztec, recipientAddr)),
-		predictedWorstMinFees(createAztecNodeClient(NODE_URL)),
+		walletFeesOrNull(aztec, recipientAddr, PRIVATE_HUB_CLAIM_GAS),
 	])
 	if (credit === null) return { kind: "stop", why: "Couldn't check your private gas at the fee contract - please try again in a moment." }
+	if (maxFees === null) return { kind: "stop", why: UNPRICED_BY_WALLET }
+	// Priced from the CLAMPED limits the transactions are submitted under: the FPC keeps exactly that.
 	const needed =
-		privateFpcFeeLimit(PRIVATE_HUB_CLAIM_GAS, maxFees) + (registers ? privateFpcFeeLimit(PRIVATE_HUB_REGISTER_GAS, maxFees) : 0n)
+		privateFpcFeeLimit(clampGas(PRIVATE_HUB_CLAIM_GAS), maxFees) +
+		(registers ? privateFpcFeeLimit(clampGas(PRIVATE_HUB_REGISTER_GAS), maxFees) : 0n)
 	if (credit < needed) {
 		return {
 			kind: "stop",
@@ -505,16 +535,19 @@ async function privateFpcFee(
 	salt: Fr,
 	recipientAddr: AztecAddress,
 	registers: boolean,
+	aztec: unknown,
 ): Promise<PrivateFuelFee> {
 	const fpcAddr = AztecAddress.fromStringUnsafe(fb.fpc ?? PRIVATE_FPC_ADDRESS)
 	const fuelLeaf = new Fr(BigInt(fb.leafIndex as string))
-	const maxFees = await predictedWorstMinFees(createAztecNodeClient(NODE_URL))
+	const maxFees = await walletFeesOrNull(aztec, recipientAddr, registers ? PRIVATE_HUB_REGISTER_GAS : PRIVATE_HUB_CLAIM_GAS)
+	if (maxFees === null) return { kind: "stop", why: UNPRICED_BY_WALLET }
 	// The FPC asserts the bridged amount covers the COMMITTED ceiling (limits × capped fees) of the
 	// transaction that spends it, and credits only the remainder: when a registration spends it,
 	// that remainder must still cover the claim's own ceiling. A short amount is refused here rather
 	// than reverted there; fees are re-priced on every retry.
 	const spentBy = registers ? PRIVATE_HUB_REGISTER_GAS : PRIVATE_HUB_CLAIM_GAS
-	const ceiling = privateFpcFeeLimit(spentBy, maxFees) + (registers ? privateFpcFeeLimit(PRIVATE_HUB_CLAIM_GAS, maxFees) : 0n)
+	const ceiling =
+		privateFpcFeeLimit(clampGas(spentBy), maxFees) + (registers ? privateFpcFeeLimit(clampGas(PRIVATE_HUB_CLAIM_GAS), maxFees) : 0n)
 	if (fuelReceived < ceiling) {
 		return {
 			kind: "stop",
@@ -609,10 +642,11 @@ export async function ownGasFee(
 	const [pub, credit, maxFees] = await Promise.all([
 		publicAllowed ? readFeeJuiceOrNull("public FJ", () => readPublicFeeJuiceBalance(aztec, recipientAddr)) : Promise.resolve(0n),
 		readFeeJuiceOrNull("private FJ", () => readPrivateFeeJuiceBalance(aztec, recipientAddr)),
-		predictedWorstMinFees(createAztecNodeClient(NODE_URL)),
+		walletFeesOrNull(aztec, recipientAddr, PRIVATE_HUB_CLAIM_GAS),
 	])
+	if (maxFees === null) return { kind: "stop", why: UNPRICED_BY_WALLET }
 	const shape = { isPrivate: rec.isPrivate, registers }
-	const ceiling = ownGasCeiling(shape, maxFees)
+	const ceiling = clampedOwnGasCeiling(shape, maxFees)
 	const source = decideOwnGasSource({
 		publicFeeJuice: pub,
 		privateFeeJuice: credit,
@@ -862,8 +896,9 @@ export async function sealPrivateRecord(ctx: {
 
 /** Most ERC-20s start at ZERO Permit2 allowance, so a send must do a one-time approve(Permit2, max)
  *  before the witness transfer; a token that pre-grants Permit2 short-circuits with no transaction.
- *  The approval hash is JOURNALED the moment it exists, so a rejection after the approval mines
- *  still shows the standing max allowance instead of "nothing was sent". */
+ *  The approval hash is JOURNALED the moment it exists, so a row that outlives a later failure
+ *  carries the allowance it granted. A refusal of the witness deletes the row instead: the max
+ *  allowance stands, as it does for every Permit2 user, and no deposit was ever sent. */
 export async function ensurePermit2Approval(
 	permit2: `0x${string}`,
 	needed: bigint,

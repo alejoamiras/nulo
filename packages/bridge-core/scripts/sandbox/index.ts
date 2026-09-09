@@ -7,7 +7,15 @@ export * from "./flows"
 export * from "./handle"
 export * from "./l1"
 export * from "./l2"
-export { type LocalNetwork, type StartLocalNetworkOptions, startLocalNetwork } from "./local-network"
+export {
+	type LocalNetwork,
+	type StartLocalNetworkOptions,
+	PortClaimConflict,
+	registerHostPorts,
+	registeredPorts,
+	releaseHostPorts,
+	startLocalNetwork,
+} from "./local-network"
 export * from "./manifest"
 export * from "./smoke"
 export * from "./flows-matrix"

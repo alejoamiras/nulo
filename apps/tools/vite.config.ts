@@ -8,7 +8,7 @@ import { defineConfig, type Plugin, type UserConfig } from "vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 import { resolvePackageAsset } from "@nulo/resolve-asset"
 import { nuloComponentsPlugin } from "./scripts/components-plugin"
-import { type ToolsTarget, TESTNET_TARGET } from "./src/lib/network-targets"
+import { type LocalTargetConfig, type ToolsTarget, TESTNET_TARGET } from "./src/lib/network-targets"
 import { deriveAllowedPreviewHosts } from "./src/lib/preview-hosts"
 
 const COOP_COEP_HEADERS = {
@@ -99,10 +99,10 @@ function readManifest(target: ToolsTarget): string {
  * at all. Generated per build rather than shipped statically so the two deployments can't share one
  * header set, which would hand the placeholder origins it must never be able to reach.
  */
-function headersPlugin(target: ToolsTarget): Plugin {
-	let root = process.cwd()
-	let outDir = "dist"
-	const csp = [
+/** The target's CSP. Only the local target frames anything: the test wallets the browser suite hosts. */
+function cspFor(target: ToolsTarget): string {
+	const frames = target.webWalletUrls?.length ? [`frame-src ${target.webWalletUrls.map((u) => new URL(u).origin).join(" ")}`] : []
+	return [
 		"default-src 'self'",
 		"img-src 'self' data:",
 		"font-src 'self'",
@@ -110,10 +110,17 @@ function headersPlugin(target: ToolsTarget): Plugin {
 		"script-src 'self' 'wasm-unsafe-eval'",
 		"worker-src 'self' blob:",
 		`connect-src ${target.cspConnectSrc}`,
+		...frames,
 		"object-src 'none'",
 		"base-uri 'self'",
 		"frame-ancestors 'none'",
 	].join("; ")
+}
+
+function headersPlugin(target: ToolsTarget): Plugin {
+	let root = process.cwd()
+	let outDir = "dist"
+	const csp = cspFor(target)
 	const body = `/*
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: require-corp
@@ -141,8 +148,20 @@ function headersPlugin(target: ToolsTarget): Plugin {
  * (`resolveToolsTarget`, `bridge-generation`) reads them at runtime; `build.json` gets the target
  * via the plugin arg (Node scope — a vite alias can't reach here).
  */
-export function makeToolsConfig(target: ToolsTarget): UserConfig {
-	const manifestJson = readManifest(target)
+export interface ToolsConfigOptions {
+	/** The manifest bytes to inline, when they are not a committed `public/<manifestFile>` (the local run's). */
+	manifestJson?: string
+	/** The local target's bundle-time identity; `define`d as `__NULO_LOCAL_TARGET__` for that build only. */
+	localConfig?: LocalTargetConfig
+}
+
+export function makeToolsConfig(target: ToolsTarget, opts: ToolsConfigOptions = {}): UserConfig {
+	const manifestJson = opts.manifestJson ?? readManifest(target)
+	if ((target.key === "local") !== Boolean(opts.localConfig)) {
+		throw new Error("makeToolsConfig: the local target and localConfig come together, never one without the other")
+	}
+	// The preview server is what the browser suite drives, so it serves the same CSP Cloudflare would.
+	const previewHeaders = target.key === "local" ? { ...COOP_COEP_HEADERS, "Content-Security-Policy": cspFor(target) } : COOP_COEP_HEADERS
 	// Cloudflare Pages PR previews: a preview is a PROD build served at TWO hostnames — the
 	// per-commit <hash>.<project>.pages.dev (CF_PAGES_URL) AND the branch alias. Both are baked
 	// as EXACT strings (never a *.pages.dev wildcard — codex bug-bash r1), and ONLY for testnet
@@ -161,12 +180,13 @@ export function makeToolsConfig(target: ToolsTarget): UserConfig {
 			headers: COOP_COEP_HEADERS,
 		},
 		preview: {
-			headers: COOP_COEP_HEADERS,
+			headers: previewHeaders,
 		},
 		define: {
 			"import.meta.env.VITE_TOOLS_TARGET": JSON.stringify(target.key),
 			"import.meta.env.VITE_BRIDGE_MANIFEST_JSON": JSON.stringify(manifestJson),
 			"import.meta.env.VITE_ALLOWED_PREVIEW_HOSTS": JSON.stringify(allowedPreviewHosts.join(",")),
+			...(opts.localConfig ? { __NULO_LOCAL_TARGET__: JSON.stringify(opts.localConfig) } : {}),
 		},
 		resolve: {
 			alias: [

@@ -44,6 +44,7 @@ import { classifyClaimReceipt } from "@/lib/claim-receipt"
 import { NETWORK } from "@/lib/network"
 import type { GasLegPlan, GrantOutcome, SendPlan } from "@/lib/send-model"
 import { fuelRecipientFor } from "@/lib/fuel-target"
+import { normalizeError } from "@/lib/errors"
 import { humanizeWalletError } from "@/lib/wallet-errors"
 import {
 	type ClaimRecord,
@@ -51,6 +52,7 @@ import {
 	attestSendTokenBlocks,
 	connectJournalDeps,
 	discard,
+	flagRecordError,
 	markSessionLive,
 	rekeyJournalRecord,
 	resumeSessionWork,
@@ -565,7 +567,7 @@ async function performSend(plan: SendPlan, d: SendDeps): Promise<string> {
 			granted,
 		})
 	} catch (e) {
-		return failWith(d.error, humanizeWalletError(e instanceof Error ? e.message : String(e)))
+		return failWith(d.error, sendFailureCopy(e))
 	} finally {
 		d.busy.value = false
 	}
@@ -686,8 +688,10 @@ async function executeSend(ctx: RunCtx): Promise<string> {
 	await assertL1Chain(actors.l1)
 	const prepared = await prepareSecrets(plan, actors.recipient)
 	let id = prepared.id ?? makeProvisionalDepositId()
-	await openSendRecord(id, ctx, prepared)
 	try {
+		// Inside the failure boundary: a private seal asks the wallet for a signature, and its refusal
+		// must settle the row it was opened for like any later refusal.
+		await openSendRecord(id, ctx, prepared)
 		await ensurePermit2Approval(gen.permit2, plan.amount, id, l1ApprovalCtx(actors), plan.token.address)
 		const res = await runSend(
 			l1Ctx(actors),
@@ -707,11 +711,39 @@ async function executeSend(ctx: RunCtx): Promise<string> {
 		await afterReceipt(id, ctx, res)
 		return id
 	} catch (e) {
-		// A row the send never named holds no claim material at all — there is nothing in it for a
-		// resume or a recovery file to act on, so it dies with the attempt.
-		if (isProvisionalRecordId(id)) discard(id)
+		settleFailedSend(id, ctx, e)
 		throw e
 	}
+}
+
+/**
+ * What a send that threw leaves behind. A row the send never named holds no claim material at all —
+ * nothing in it for a resume or a recovery file to act on — so it dies with the attempt; so does a
+ * named row when the wallet refused the signature that would have deposited: nothing reached the
+ * chain for it to claim, and the row's vanishing is what returns the wizard to the review. Any other
+ * failure keeps the row — a transaction may have been broadcast — and, unless a lane already said
+ * why, names the failure on its active phase so the rail is never left mute. The bookkeeping must
+ * not mask the failure it records.
+ */
+function settleFailedSend(id: string, ctx: RunCtx, e: unknown): void {
+	try {
+		const row = ctx.journal.records.value.find((r) => r.id === id) as SendDepositRecord | undefined
+		const refused = normalizeError(e).category === "user-rejected"
+		if (isProvisionalRecordId(id) || (refused && !row?.depositTxHash)) {
+			discard(id)
+			return
+		}
+		if (row && !ctx.journal.runtime.value[id]?.attention) flagRecordError(id, sendFailureCopy(e))
+	} catch (cleanup) {
+		log("failed-send bookkeeping threw", cleanup instanceof Error ? cleanup.message : String(cleanup))
+	}
+}
+
+/** The wallet's own refusal reads as its one line; anything else keeps its message, humanized. */
+function sendFailureCopy(e: unknown): string {
+	const normalized = normalizeError(e)
+	if (normalized.category === "user-rejected") return normalized.message
+	return humanizeWalletError(e instanceof Error ? e.message : String(e))
 }
 
 const l1ApprovalCtx = (actors: SendActors) => ({ publicClient: actors.l1.publicClient, wallet: actors.wallet, from: actors.from }) as never

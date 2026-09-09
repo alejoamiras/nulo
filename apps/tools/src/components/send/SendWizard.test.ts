@@ -191,6 +191,7 @@ vi.mock("@/composables/useGasShare", () => ({
 		txTarget,
 		propose: proposeFn,
 		prime: primeFn,
+		invalidate: () => {},
 		pricingError: ref(null),
 		ceilingsFor,
 		ownGasCeilingFor,

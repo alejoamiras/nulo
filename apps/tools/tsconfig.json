@@ -17,5 +17,6 @@
 		"isolatedModules": true,
 		"skipLibCheck": true
 	},
-	"include": ["package.json", "vite.config.ts", "scripts/**/*.ts", "src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "tests/**/*.ts"]
+	"include": ["package.json", "vite.config.ts", "scripts/**/*.ts", "src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "tests/**/*.ts"],
+	"exclude": ["tests/browser/**"]
 }

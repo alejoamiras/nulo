@@ -55,3 +55,4 @@ packages/bridge-core/sandbox-deploy/
 # Bridge cutover deploy artifacts (transient; the promoted manifest is testnet-bridge.json)
 apps/tools/public/testnet-bridge.candidate.json
 apps/tools/public/testnet-bridge.journal*.jsonl
+apps/tools/.e2e-state/

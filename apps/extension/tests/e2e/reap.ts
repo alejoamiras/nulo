@@ -26,7 +26,6 @@ function reapOwnedRun(): boolean {
 	killOrphanByPid(lock.pids.anvil, "anvil")
 	killOrphanByPid(lock.pids.aztec, "aztec")
 	killOrphanByPid(lock.pids.playground, "playground")
-	killOrphanByPid(lock.pids.tools, "tools")
 	if (lock.aztecDataDir) {
 		rmSync(lock.aztecDataDir, { recursive: true, force: true })
 		console.log(`[e2e:reap] removed data dir ${lock.aztecDataDir}`)

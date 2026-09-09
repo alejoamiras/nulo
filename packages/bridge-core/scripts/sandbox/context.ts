@@ -195,6 +195,20 @@ export const registerArgsOf = (block: JournalTokenBlock, nameWord: string) =>
 
 // ─── Reads ───────────────────────────────────────────────────────────────────
 
+/** A send resolves when the node has the block; a read through the wallet's own PXE can trail
+ *  that block by a sync tick. A value a transaction is expected to move is polled until it has —
+ *  bounded, so a transaction that never landed still fails loudly with the last figure read. */
+export async function settled<T>(read: () => Promise<T>, done: (v: T) => boolean, what: string, ms = 60_000): Promise<T> {
+	const until = Date.now() + ms
+	let value = await read()
+	while (!done(value)) {
+		if (Date.now() > until) throw new Error(`${what} never settled — last read ${String(value)}`)
+		await new Promise((r) => setTimeout(r, 500))
+		value = await read()
+	}
+	return value
+}
+
 export async function balanceOf(contract: ContractBase, from: AztecAddress, kind: "public" | "private"): Promise<bigint> {
 	const call = kind === "public" ? contract.methods.balance_of_public(from) : contract.methods.balance_of_private(from)
 	const r = (await call.simulate({ from } as never)) as { result?: bigint } | bigint
@@ -403,9 +417,12 @@ export async function mintPrivateGasVia(s: SmokeContext, fpc: ContractBase, leg:
 	const before = await privateCreditOf(s, fpc)
 	await s.feeJuiceL2.methods.claim(fpc.address, received, deriveBridgeSecret(salt, s.l2.from), leafIndex).send(s.l2.sendOpts as never)
 	await fpc.methods.mint(received, salt, leafIndex).send(s.l2.sendOpts as never)
-	const gained = (await privateCreditOf(s, fpc)) - before
-	if (gained < received) throw new Error(`private credit rose by ${gained}, expected ${received}`)
-	return gained
+	const after = await settled(
+		() => privateCreditOf(s, fpc),
+		(v) => v - before >= received,
+		"the private credit after the mint",
+	)
+	return after - before
 }
 
 /** The exit's ceiling at today's predicted worst fees under the app's limits. */

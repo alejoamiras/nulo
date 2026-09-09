@@ -89,14 +89,18 @@ function tryBind(port: number): Promise<PortReservation | null> {
 async function reservePort(): Promise<PortReservation> {
 	const hi = Math.max(STATIC_LO + 256, (await ephemeralFloor()) - FLOOR_GUARD)
 	const span = hi - STATIC_LO
+	// A port another run claimed in the registry is taken even while nothing listens on it yet.
+	const claimed = registeredPorts()
 	for (let i = 0; i < MAX_STATIC_TRIES && span >= 256; i++) {
-		const reservation = await tryBind(STATIC_LO + Math.floor(Math.random() * span))
+		const candidate = STATIC_LO + Math.floor(Math.random() * span)
+		if (claimed.has(candidate)) continue
+		const reservation = await tryBind(candidate)
 		if (reservation) return reservation
 	}
 	throw new Error(`no free loopback port in [${STATIC_LO}, ${hi}) after ${MAX_STATIC_TRIES} probes — the static window is exhausted`)
 }
 
-export interface SandboxPorts {
+export type SandboxPorts = {
 	anvil: number
 	aztec: number
 	aztecAdmin: number
@@ -130,14 +134,22 @@ function tryAcquireLock(): boolean {
 	}
 }
 
-/** Rewrites the registry under the lock; `false` when the lock never came free. A missing registry
- *  means the host does not keep one, so there is nothing to write and nothing left behind. */
+const REGISTRY_HEADER = [
+	"# Ports registry — who is RUNNING what, where (atomic-locked)",
+	"| port | service | owner (run) | worktree | pid-hint | claimed |",
+	"|---|---|---|---|---|---|",
+]
+
+/** Rewrites the registry under the lock; `false` when the lock never came free. A host without a
+ *  registry gets one — created under that same lock, so two first runs cannot both create it —
+ *  because the claims are what keep a run's own ports apart from its next allocation. */
 async function withRegistry(mutate: (lines: string[]) => string[]): Promise<boolean> {
-	if (!existsSync(REGISTRY)) return true
+	mkdirSync(dirname(REGISTRY), { recursive: true })
 	for (let i = 0; i < 60; i++) {
 		if (tryAcquireLock()) {
 			try {
-				writeFileSync(REGISTRY, `${mutate(readFileSync(REGISTRY, "utf8").split("\n")).join("\n")}`)
+				const current = existsSync(REGISTRY) ? readFileSync(REGISTRY, "utf8") : `${REGISTRY_HEADER.join("\n")}\n`
+				writeFileSync(REGISTRY, `${mutate(current.split("\n")).join("\n")}`)
 			} finally {
 				try {
 					unlinkSync(REGISTRY_LOCK)
@@ -152,24 +164,75 @@ async function withRegistry(mutate: (lines: string[]) => string[]): Promise<bool
 
 const ownerCell = (runId: string) => `| ${runId} |`
 
-async function registerPorts(runId: string, ports: SandboxPorts, pidHint: number): Promise<void> {
-	const claimed = new Date().toISOString()
-	const rows = Object.entries(ports).map(
-		([service, port]) => `| ${port} | bridge-sandbox-${service} | ${runId} | ${REPO_ROOT} | ${pidHint} | ${claimed} |`,
-	)
-	await withRegistry((lines) => {
-		const body = lines.filter((l) => l.trim().length > 0)
-		return [...body, ...rows, ""]
-	})
+const portOf = (line: string): number | undefined => {
+	const port = Number.parseInt(line.split("|")[1]?.trim() ?? "", 10)
+	return Number.isInteger(port) ? port : undefined
 }
 
-/** A registry that stayed locked keeps this run's rows forever; the warning is what makes the leak
- *  recoverable by hand. It never throws — a registry hiccup must not fail an otherwise clean run. */
-async function releasePorts(runId: string, ports: SandboxPorts): Promise<void> {
+/** Every port the registry lists, whoever claimed it; empty when the host keeps no registry yet. */
+export function registeredPorts(): Set<number> {
+	const ports = new Set<number>()
+	if (!existsSync(REGISTRY)) return ports
+	for (const line of readFileSync(REGISTRY, "utf8").split("\n")) {
+		const port = portOf(line)
+		if (port !== undefined) ports.add(port)
+	}
+	return ports
+}
+
+/** A claim that found one of its ports already owned by another run: pick again. */
+export class PortClaimConflict extends Error {
+	constructor(readonly ports: number[]) {
+		super(`ports already claimed in ${REGISTRY}: ${ports.join(", ")}`)
+	}
+}
+
+/**
+ * Claim ports in the host registry under `runId`, one row per service (`<label>-<service>`), so
+ * every other run on this host — this package's sandboxes included — picks around them from the
+ * moment they are resolved, not from the moment something listens on them. The check and the
+ * write happen under one lock: a port another run claimed meanwhile throws `PortClaimConflict`,
+ * and a lock that never comes free throws — an unclaimed port is not one to build on.
+ */
+export async function registerHostPorts(runId: string, label: string, ports: Record<string, number>, pidHint: number): Promise<void> {
+	const claimed = new Date().toISOString()
+	const wanted = new Set(Object.values(ports))
+	let conflicts: number[] = []
+	const written = await withRegistry((lines) => {
+		const body = lines.filter((l) => l.trim().length > 0)
+		conflicts = body.map(portOf).filter((p): p is number => p !== undefined && wanted.has(p))
+		if (conflicts.length > 0) return lines
+		const rows = Object.entries(ports).map(
+			([service, port]) => `| ${port} | ${label}-${service} | ${runId} | ${REPO_ROOT} | ${pidHint} | ${claimed} |`,
+		)
+		return [...body, ...rows, ""]
+	})
+	if (!written) throw new Error(`${REGISTRY} stayed locked — could not claim ports ${[...wanted].join(", ")} for ${runId}`)
+	if (conflicts.length > 0) throw new PortClaimConflict(conflicts)
+}
+
+/** Drop every row `runId` owns. A registry that stayed locked keeps them; the warning is what makes
+ *  the leak recoverable by hand. Never throws — a registry hiccup must not fail an otherwise clean run. */
+export async function releaseHostPorts(runId: string, ports: Record<string, number>): Promise<void> {
 	if (await withRegistry((lines) => lines.filter((l) => !l.includes(ownerCell(runId))))) return
 	console.warn(
 		`[sandbox] ${REGISTRY} stayed locked — remove the rows owned by ${runId} (ports ${Object.values(ports).join(", ")}) by hand`,
 	)
+}
+
+const releasePorts = (runId: string, ports: SandboxPorts) => releaseHostPorts(runId, ports)
+
+/** Four ports reserved AND claimed: a pick another run claimed in between is simply picked again. */
+async function claimSandboxPorts(runId: string): Promise<SandboxPorts> {
+	for (let attempt = 0; ; attempt++) {
+		const ports = await reserveSandboxPorts()
+		try {
+			await registerHostPorts(runId, "bridge-sandbox", ports, process.pid)
+			return ports
+		} catch (e) {
+			if (!(e instanceof PortClaimConflict) || attempt >= 4) throw e
+		}
+	}
 }
 
 // ─── Toolchain ───────────────────────────────────────────────────────────────
@@ -451,13 +514,11 @@ export async function startLocalNetwork(opts: StartLocalNetworkOptions): Promise
 		return attached
 	}
 	const tool = resolveToolchain(opts.toolchainRoot ?? join(homedir(), ".aztec", "versions", aztecPin()))
-	const ports = await reserveSandboxPorts()
+	const ports = await claimSandboxPorts(opts.runId)
 	const anvilUrl = `http://127.0.0.1:${ports.anvil}`
 	const nodeUrl = `http://127.0.0.1:${ports.aztec}`
 	const dataDir = join(homedir(), ".cache", "nulo-bridge-sandbox", opts.runId)
 	mkdirSync(dataDir, { recursive: true })
-	await registerPorts(opts.runId, ports, process.pid)
-
 	const spawned: OwnedChild[] = []
 	let stopping: Promise<void> | undefined
 	// Idempotent: a second signal while the first stop runs must not re-walk (and re-reverse) the list.
