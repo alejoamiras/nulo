@@ -131,6 +131,7 @@ test("cell 40 — two tabs, two sends racing: each stepper adopts only its own r
 	// Tab 2 has seen the foreign record — its own journal renders it — and still sits on its prompt.
 	await tab2.locator(tid(TESTIDS.tabActivity)).click()
 	await expect(tab2.locator(`${tid(TESTIDS.journalCard)}[data-id="${first}"]`)).toBeVisible({ timeout: 30_000 })
+	await openSend(tab2)
 	await expect(tab2.locator(tid(TESTIDS.stepper)), "tab 2 stays on its own prompt").toHaveAttribute("data-id", /^dep-pending-permit-/)
 	expect(await walletFrame(tab2, run, "plain").evaluate(() => window.__nuloTestWallet!.release())).toBe(1)
 	await expect.poll(async () => (await depositRecords(page)).length, { timeout: 180_000 }).toBe(2)
