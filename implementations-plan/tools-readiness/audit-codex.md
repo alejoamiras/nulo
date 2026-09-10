@@ -40,4 +40,30 @@ two suites independent.
 
 ## Round 2 — plan v2
 
+**Verdict:** `reject (with blocking findings: unsafe hash-less retries, ambiguous consumed-message
+detection, and incomplete consent/refresh guards)`
+
+Nine findings, all verified against the tree. Two of them shrank the product fixes: the card already
+offers Discard on both hash-less shapes (`BridgeJournalCard.vue:169-186`) and the engine already
+refuses a hash-less withdraw as `unknown-outcome` (`useBridgeJournal.test.ts:701`), so the real gaps
+are reconciliation and attach, never resubmission.
+
+| # | Sev | Finding (codex) | Verified | Call → plan v3 |
+|---|---|---|---|---|
+| 1 | High | A missing hash does not prove nothing was broadcast; re-signing with fresh nonces duplicates a deposit or a burn; keep the engine's `unknown-outcome` protection | yes | adopted — no resubmission anywhere: the deposit fix reconciles by L1 content (`findDepositByContent`), the exit fix attaches an identity-checked tx id; `unknown-outcome` stays; Discard's copy states the unknown outcome; "no resubmission path" added to the hard limits |
+| 2 | High | Records carry no replayable plan (exit: no originating account or authwit nonce, `useHubExit.ts:365-380`); policy pins prove buttons only | yes | adopted — replay dropped so no plan is needed; every fix carries an engine pin (found / attached / refused / never-runs) beside the policy row |
+| 3 | High | A consumed error can come from the fuel setup (`useSend.ts:445-452`); a fee stop returns before probing (`:379`); `completeDeposit` wipes the note (`:707-715`) | yes | adopted — the consumed error is the trigger, `recordMessageConsumed` (the record's own claim) is the proof; the fuel case pinned as NOT completed; the note set after the wipe |
+| 4 | High | `grantedAccounts` was set only on the membership path; a re-prompt after a decline or a flag change already enters the delta and would lose locking; a flag-only approval must not force sharing; keep the concurrent-revocation test | yes | adopted — `grantedAccounts` on every path where the session holds a grant; classification by flags, not delta origin; empty-addition approval on a flag change; revocation re-checked under the lock, pinned |
+| 5 | High | `retryCapabilities` and selection never move `s.epoch` (`:740`); `useWalletConnection` has no dispose (`:158-170`, `:216-220`); reuse the `{alias,item}` entry parser | yes | adopted — completion check by `s.accounts` identity + selection + status; the listener installed once at module init for the page's lifetime; `parseAccountList` extracted from `parseGrantedAccounts` |
+| 6 | Med | Re-check busy inside the shared queue; honour `retryCapabilities() === false` (`:734-739`) | yes | adopted — both; `false` → `busy`, never `unchanged` |
+| 7 | Med | Reload re-applies the remembered account (`chooseGrantedAccount:838-846`), so `reconnectedAs(B)` cannot establish B; SWITCH only selects; a rediscovered hash-less claim is skipped by `resumeActionFor` (`:1449`) | yes | adopted — cell 2 reconnects as A then switches to B; CLAIM clicked in cells 2 and 24b |
+| 8 | Med | Fees are Fee Juice, not the token; the Permit2 approval tx precedes the deposit tx (`useSend.ts:695`) so a generic hold catches it; count per method; specify a private exit for the single-credit charge | yes | adopted — separate balance assertions; allowance pre-established and `holdNext` matched by `to`; per-method counters; 31b private |
+| 9 | Med | `NULO_E2E_RETRY=0` (the network config defaults to 2, `vitest.e2e.network.config.ts:46`); re-run local gates after a rebase; the seed must require passing checks | yes | adopted — retry 0 on every network command; local gates before any re-watch; seed reworded |
+
+Rejected: none. Confirmed sound by codex: the CAIP projection, the pure coverage boundary, the shared
+queue extraction, the corrected feed semantics, actor allocation, staged shard sizing, the Permit2
+calldata comparison, the corrected stack commands.
+
+## Round 3 — plan v3
+
 _pending_
