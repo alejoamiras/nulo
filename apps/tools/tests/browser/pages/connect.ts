@@ -15,6 +15,8 @@ export interface ConnectOptions {
 	panel?: "bridge" | "drip"
 	/** The actor to select when the grant lists several; defaults to the first row. */
 	account?: string
+	/** The chooser must NOT appear (a one-account grant, a remembered account): it is a failure, never answered. */
+	refuseChooser?: boolean
 }
 
 /** Connect tools to a test-wallet profile: picker → emoji verification → grant → account choice. */
@@ -29,7 +31,7 @@ export async function connectAztec(page: Page, o: ConnectOptions): Promise<void>
 	await row.locator(tid(TESTIDS.walletPickerConnect)).click()
 	await expect(page.locator(tid(TESTIDS.verificationModal))).toBeVisible()
 	await page.locator(tid(TESTIDS.btnVerifyConfirm)).click()
-	await chooseAccountIfAsked(page, o.account)
+	await chooseAccountIfAsked(page, o)
 	await expect(page.locator(tid(ids.status))).toHaveAttribute("data-status", "connected", { timeout: 120_000 })
 }
 
@@ -78,19 +80,7 @@ export async function driveToConnected(page: Page, o: ConnectOptions): Promise<v
  * would answer it and hide a lost selection). Ends on the chip showing `address`.
  */
 export async function reconnectedAs(page: Page, profile: TestWalletProfile, address: string): Promise<void> {
-	const status = page.locator(tid(TESTIDS.bridgeL2Status))
-	const stops = connectionStops(page, profile)
-	const started = Date.now()
-	let state: string | null = null
-	while (Date.now() < started + 180_000) {
-		state = await status.getAttribute("data-status")
-		if (state === "connected") break
-		if (await stops.accounts.isVisible())
-			throw new Error("the account chooser appeared on a reconnect that should have remembered its account")
-		await answerStop(page, { profile }, stops, state)
-		await page.waitForTimeout(500)
-	}
-	if (state !== "connected") throw new Error(`the Aztec connection never reached connected (last state: ${state})`)
+	await driveToConnected(page, { profile, refuseChooser: true })
 	await expect(page.locator(tid(TESTIDS.accountChip)).first()).toContainText(address.slice(2, 6), { ignoreCase: true })
 }
 
@@ -121,7 +111,10 @@ async function answerStop(page: Page, o: ConnectOptions, s: ConnectionStops, sta
 	if (await s.confirm.isVisible()) return tap(s.confirm)
 	// The emoji check owns the screen; its confirm button is what the next look will find.
 	if (await s.modal.isVisible()) return
-	if (await s.accounts.isVisible()) return chooseAccount(page, o.account).catch(() => undefined)
+	if (await s.accounts.isVisible()) {
+		if (o.refuseChooser) throw new Error("the account chooser appeared on a connection that should not have asked")
+		return chooseAccount(page, o.account).catch(() => undefined)
+	}
 	if (await s.row.isVisible()) return tap(s.row.locator(tid(TESTIDS.walletPickerConnect)))
 	if (state === "choosing") return rescanIfMissing(page, s.row).catch(() => undefined)
 	// `verifying` is an active connection's own state: Connect is never pressed under it.
@@ -139,7 +132,7 @@ async function rescanIfMissing(page: Page, row: ReturnType<Page["locator"]>): Pr
 }
 
 /** With more than one granted account and none remembered, the choose-account modal pauses the flow. */
-async function chooseAccountIfAsked(page: Page, account?: string): Promise<void> {
+async function chooseAccountIfAsked(page: Page, o: Pick<ConnectOptions, "account" | "refuseChooser">): Promise<void> {
 	const modal = page.locator(tid(TESTIDS.accountChoice))
 	const status = page.locator(`[data-status="connected"]`)
 	await Promise.race([
@@ -147,7 +140,8 @@ async function chooseAccountIfAsked(page: Page, account?: string): Promise<void>
 		status.first().waitFor({ state: "attached", timeout: 120_000 }),
 	])
 	if (!(await modal.isVisible())) return
-	await chooseAccount(page, account)
+	if (o.refuseChooser) throw new Error("the account chooser appeared on a connection that should not have asked")
+	await chooseAccount(page, o.account)
 }
 
 async function chooseAccount(page: Page, account?: string): Promise<void> {

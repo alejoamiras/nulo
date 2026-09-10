@@ -8,6 +8,7 @@ const wallet = vi.hoisted(() => ({
 	status: { value: "connected" as string },
 	error: { value: null as unknown },
 	accounts: { value: [] as Array<{ address: string; alias: string }> },
+	hiddenAccountsCount: { value: 0 },
 	prompts: 0,
 	runs: true,
 	onPrompt: async (): Promise<void> => {},
@@ -19,6 +20,7 @@ vi.mock("@/composables/useWalletConnection", () => ({
 		status: wallet.status,
 		error: wallet.error,
 		accounts: wallet.accounts,
+		hiddenAccountsCount: wallet.hiddenAccountsCount,
 		retryCapabilities: async () => {
 			if (!wallet.runs) return false
 			wallet.prompts++
@@ -44,6 +46,7 @@ describe("useAccountWidening", () => {
 		wallet.status.value = "connected"
 		wallet.error.value = null
 		wallet.accounts.value = [A]
+		wallet.hiddenAccountsCount.value = 0
 		wallet.prompts = 0
 		wallet.runs = true
 		wallet.onPrompt = async () => {}
@@ -58,6 +61,14 @@ describe("useAccountWidening", () => {
 		await expect(w.addAccounts()).resolves.toEqual({ kind: "added", count: 1 })
 		expect(w.outcome.value).toEqual({ kind: "added", count: 1 })
 		expect(wallet.prompts).toBe(1)
+	})
+
+	it("added: an account past the app's cap counts too (the list is capped, the grant is not)", async () => {
+		wallet.onPrompt = async () => {
+			wallet.hiddenAccountsCount.value = 1
+		}
+		const w = useAccountWidening()
+		await expect(w.addAccounts()).resolves.toEqual({ kind: "added", count: 1 })
 	})
 
 	it("unchanged: the wallet answered with the same grant (a decline reads the same way)", async () => {

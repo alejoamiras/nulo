@@ -134,9 +134,10 @@ test("cell 43 — the switch is refused while the Ethereum leg is waiting on the
 	await connectAztec(page, { profile: "plain", account: actor.address })
 	await reviewDeposit(page, { l1ChainId: L1, erc20: usdt.erc20, amount: "100", intent: "token+gas", isPrivate: false })
 	// The router transaction (the deposit itself) never answers; the approval before it goes through.
+	// The row is checked only once the held request has actually arrived and parked.
 	l1.holdNext("transaction", { to: router as `0x${string}` })
 	await confirmReview(page)
-	await expect.poll(() => l1.calls("eth_sendTransaction"), { timeout: 120_000 }).toBeGreaterThanOrEqual(1)
+	await expect.poll(() => l1.holdsArmed(), { timeout: 120_000 }).toBe(0)
 	await expect(page.locator(tid(TESTIDS.stepper))).toBeVisible()
 
 	await page.locator(tid(TESTIDS.accountChip)).first().click()

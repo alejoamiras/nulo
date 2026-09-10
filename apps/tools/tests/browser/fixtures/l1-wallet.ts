@@ -51,6 +51,8 @@ export interface L1WalletControl {
 	/** The next request of that kind (matching `match` when given) never answers — the shape of a
 	 *  wallet whose prompt the user left open; the page that made it must be reloaded to get past it. */
 	holdNext(kind: RejectKind, match?: HoldMatch): void
+	/** How many holds are still armed — zero once the held request has arrived and parked. */
+	holdsArmed(): number
 }
 
 type Rpc = { method: string; params?: unknown[] }
@@ -261,6 +263,7 @@ export async function installL1Wallet(context: BrowserContext, o: L1WalletOption
 		holdNext(kind, match) {
 			holds.push({ kind, match })
 		},
+		holdsArmed: () => holds.length,
 	}
 }
 

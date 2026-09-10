@@ -755,18 +755,13 @@ async function retryCapabilities(s: SessionState): Promise<boolean> {
 
 export type RefreshOutcome = "refreshed" | "skipped" | "dropped"
 
-/** True while a refresh must not touch the accounts: no wallet, not connected, a flow owning the
- *  session, or an operation in flight (it captured the selected account at its start). */
 function refreshBlocked(s: SessionState): boolean {
 	return s.wallet.value === null || s.status.value !== "connected" || s.activeFlowEpoch !== null || Boolean(s.config.isSwitchBlocked?.())
 }
 
-/** Re-read the granted accounts through `getAccounts` — a session-scoped read that never prompts,
- *  so a wallet-side change (an account renamed, hidden, or added through the wallet's own UI)
- *  reaches the app without a click. No flow epoch moves for a retry or a switch, so the completion
- *  check is by state: the result is dropped unless the accounts list is the SAME array captured
- *  before the await (a grant replaces it wholesale), the selection is unchanged and nothing
- *  started meanwhile. An empty or failed read changes nothing. */
+/** Re-read the granted accounts (`getAccounts`, no prompt). A retry or a switch never advances the
+ *  flow epoch, so completion is checked by state: the accounts array identity, the selection and
+ *  the status must be what they were before the await. */
 async function refreshAccounts(s: SessionState): Promise<RefreshOutcome> {
 	if (refreshBlocked(s)) return "skipped"
 	const wallet = s.wallet.value as Wallet
@@ -779,7 +774,7 @@ async function refreshAccounts(s: SessionState): Promise<RefreshOutcome> {
 		return "skipped"
 	}
 	if (refreshBlocked(s) || s.accounts.value !== captured || s.selectedAccount.value !== selected) return "dropped"
-	const { accounts, hiddenCount } = parseAccountList(Array.isArray(raw) ? raw : null)
+	const { accounts, hiddenCount } = parseAccountList(Array.isArray(raw) ? raw : null, { keep: selected ?? undefined })
 	if (accounts.length === 0) return "skipped"
 	s.accounts.value = accounts
 	s.hiddenAccountsCount.value = hiddenCount
@@ -836,7 +831,7 @@ async function requestCapabilities(s: SessionState, flowEpoch: number, quiet = f
 		// Published BEFORE the account step: an approval replaces the stored grant wholesale, so the
 		// answer is authoritative even when the flow then pauses for a choice.
 		s.grantedContracts.value = parseGrantedContracts(manifest, result)
-		if (chooseGrantedAccount(s, granted, hiddenCount, flowWallet, flowProvider, flowEpoch) === "paused") return
+		if (chooseGrantedAccount(s, granted, hiddenCount, flowWallet, flowProvider, flowEpoch, quiet) === "paused") return
 	} catch (err) {
 		if (isStale(s, flowEpoch)) return
 		console.error(`[${s.config.appId}] requestCapabilities failed`, err)
@@ -859,13 +854,23 @@ function chooseGrantedAccount(
 	flowWallet: Wallet,
 	flowProvider: WalletProvider | null,
 	flowEpoch: number,
+	quiet = false,
 ): "paused" | "chosen" {
-	s.accounts.value = granted
-	s.hiddenAccountsCount.value = hiddenCount
-
 	if (granted.length === 0) {
 		throw new Error("No accounts granted by wallet")
 	}
+	// A re-grant on a CONNECTED session (one more token, one more account) is not a fresh connect:
+	// the active account stands if the wallet still grants it — no re-selection, no re-persist, no
+	// chooser — so an operation that captured it at its start can never see it move. Only a grant
+	// that drops the active account falls through to the connect-time choice below.
+	const active = s.selectedAccount.value
+	if (quiet && active !== null && granted.some((a) => a.address === active)) {
+		s.accounts.value = granted
+		s.hiddenAccountsCount.value = hiddenCount
+		return "chosen"
+	}
+	s.accounts.value = granted
+	s.hiddenAccountsCount.value = hiddenCount
 	if (hiddenCount > 0) {
 		pushSelectionNotice(s, { kind: "grant-truncated", hiddenCount })
 	}
@@ -1023,7 +1028,10 @@ export function parseGrantedAccounts(result: unknown): ParsedGrantedAccounts {
 }
 
 /** The same hardening over a bare entry list — what `getAccounts` answers (no grant envelope). */
-export function parseAccountList(entries: NonNullable<GrantedAccountsCap["accounts"]> | null): ParsedGrantedAccounts {
+export function parseAccountList(
+	entries: NonNullable<GrantedAccountsCap["accounts"]> | null,
+	opts: { keep?: string } = {},
+): ParsedGrantedAccounts {
 	if (!entries) return { accounts: [], hiddenCount: 0 }
 
 	const seen = new Set<string>()
@@ -1034,12 +1042,16 @@ export function parseAccountList(entries: NonNullable<GrantedAccountsCap["accoun
 		if (address === null) continue
 		if (seen.has(address)) continue
 		seen.add(address)
-		if (accounts.length >= MAX_GRANTED_ACCOUNTS) {
-			hiddenCount++
+		const rawAlias = typeof entry?.alias === "string" ? entry.alias : ""
+		const account = { address, alias: truncateName(rawAlias.replace(UNSAFE_ALIAS_CHARS, "").trim(), ALIAS_MAX) }
+		if (accounts.length < MAX_GRANTED_ACCOUNTS) {
+			accounts.push(account)
 			continue
 		}
-		const rawAlias = typeof entry?.alias === "string" ? entry.alias : ""
-		accounts.push({ address, alias: truncateName(rawAlias.replace(UNSAFE_ALIAS_CHARS, "").trim(), ALIAS_MAX) })
+		hiddenCount++
+		// The selected account stays listed even when the cap would drop it: the wallet's ordering
+		// must never move the selection out from under the user.
+		if (address === opts.keep && !accounts.some((a) => a.address === address)) accounts[accounts.length - 1] = account
 	}
 	return { accounts, hiddenCount }
 }

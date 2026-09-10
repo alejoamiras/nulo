@@ -1003,6 +1003,74 @@ describe("multi-account: switching (selectAccount)", () => {
 	})
 })
 
+describe("multi-account: a re-grant on a connected session (retryCapabilities)", () => {
+	async function connectedAs(address: string, over: Parameters<typeof makeSessionWith>[0] = {}) {
+		const made = makeMultiProvider()
+		const built = makeSessionWith(over)
+		await driveThroughGrant(built.session, made.provider)
+		await built.session.confirmAccountChoice(address)
+		expect(built.session.status.value).toBe("connected")
+		return { ...made, ...built }
+	}
+
+	it("keeps the active account and never re-persists or asks when the wider grant still lists it", async () => {
+		const { session: s, walletHandle } = await connectedAs(MA_B)
+		const persistedBefore = localStorage.getItem(SELECTED_KEY)
+		walletHandle.requestCapabilities.mockResolvedValueOnce({
+			granted: [
+				{
+					type: "accounts",
+					accounts: [
+						{ alias: "Third", item: MA_C },
+						{ alias: "Main", item: MA_A },
+						{ alias: "Savings", item: MA_B },
+					],
+				},
+			],
+		})
+		await expect(s.retryCapabilities()).resolves.toBe(true)
+		expect(s.status.value).toBe("connected")
+		expect(s.accounts.value.map((a) => a.address)).toEqual([MA_C, MA_A, MA_B])
+		expect(s.selectedAccount.value).toBe(MA_B)
+		expect(localStorage.getItem(SELECTED_KEY)).toBe(persistedBefore)
+	})
+
+	it("keeps the active account even while an operation holds the switch gate", async () => {
+		const { session: s, walletHandle } = await connectedAs(MA_B, { isSwitchBlocked: () => true })
+		walletHandle.requestCapabilities.mockResolvedValueOnce({
+			granted: [
+				{
+					type: "accounts",
+					accounts: [
+						{ alias: "Third", item: MA_C },
+						{ alias: "Savings", item: MA_B },
+					],
+				},
+			],
+		})
+		await expect(s.retryCapabilities()).resolves.toBe(true)
+		expect(s.selectedAccount.value).toBe(MA_B)
+		expect(s.status.value).toBe("connected")
+	})
+
+	it("a re-grant that drops the active account falls through to the connect-time choice (pauses for the user)", async () => {
+		const { session: s, walletHandle } = await connectedAs(MA_B)
+		walletHandle.requestCapabilities.mockResolvedValueOnce({
+			granted: [
+				{
+					type: "accounts",
+					accounts: [
+						{ alias: "Third", item: MA_C },
+						{ alias: "Main", item: MA_A },
+					],
+				},
+			],
+		})
+		await expect(s.retryCapabilities()).resolves.toBe(true)
+		expect(s.status.value).toBe("choosing-account")
+	})
+})
+
 describe("multi-account: refreshAccounts (the visibility re-read)", () => {
 	async function connectedWith(list: () => Promise<unknown>, over: Parameters<typeof makeSessionWith>[0] = {}) {
 		const made = makeMultiProvider({ list })
@@ -1078,6 +1146,25 @@ describe("multi-account: refreshAccounts (the visibility re-read)", () => {
 		await expect(pending).resolves.toBe("dropped")
 		expect(s.accounts.value).toHaveLength(2)
 		expect(s.selectedAccount.value).toBe(MA_B)
+	})
+
+	it("refreshed: the selected account stays listed when the wallet's ordering would push it past the cap", async () => {
+		const many = Array.from({ length: 17 }, (_, i) => ({ alias: `a${i}`, item: addr(i.toString(16).padStart(2, "0")) }))
+		// Granted 16 (the last one selected), then the wallet lists a new account FIRST.
+		const first16 = many.slice(0, 16)
+		const made = makeMultiProvider({ accounts: first16, list: async () => [many[16], ...first16] })
+		const built = makeSessionWith()
+		await driveThroughGrant(built.session, made.provider)
+		const last = first16[15].item as string
+		await built.session.confirmAccountChoice(last)
+		expect(built.session.selectedAccount.value).toBe(last)
+
+		await expect(built.session.refreshAccounts()).resolves.toBe("refreshed")
+		expect(built.session.selectedAccount.value).toBe(last)
+		expect(built.session.accounts.value.map((a) => a.address)).toContain(last)
+		expect(built.session.accounts.value).toHaveLength(16)
+		expect(built.session.hiddenAccountsCount.value).toBe(1)
+		expect(storedMap()).toEqual([["nulo", last]])
 	})
 
 	it("parseAccountList: the grant hardening applies to the bare list (malformed skipped, deduped, capped)", () => {

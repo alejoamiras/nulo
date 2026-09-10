@@ -20,14 +20,17 @@ export interface AccountWidening {
 
 type Session = ReturnType<typeof useWalletConnection>
 
+/** What the wallet granted, hidden ones included: the app caps what it lists, not what it was given. */
+const grantSize = (session: Session) => session.accounts.value.length + session.hiddenAccountsCount.value
+
 /** Runs INSIDE the prompt queue: the state may have moved while the request waited its turn. */
 async function runWidening(session: Session): Promise<WideningOutcome> {
 	if (session.status.value !== "connected" || opsInFlight()) return { kind: "busy" }
-	const before = new Set(session.accounts.value.map((a) => a.address))
+	const before = grantSize(session)
 	// False is the session's own no-op (another flow owns the wallet), never a refusal.
 	if (!(await session.retryCapabilities())) return { kind: "busy" }
 	if (session.status.value !== "connected" || session.error.value !== null) return { kind: "failed" }
-	const added = session.accounts.value.filter((a) => !before.has(a.address)).length
+	const added = grantSize(session) - before
 	return added > 0 ? { kind: "added", count: added } : { kind: "unchanged" }
 }
 
