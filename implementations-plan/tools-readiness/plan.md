@@ -3,6 +3,7 @@ plan: tools-readiness
 tier: light
 driver: claude-code
 eli5_mode: artifact
+eli5: https://claude.ai/code/artifact/2ac9b873-6237-4860-a67c-723e1fa3b074
 code_review: off
 budget: recon 1 agent; codex at high; no /code-review (owner directive 2026-09-03)
 base: dev @ 94e412a6
