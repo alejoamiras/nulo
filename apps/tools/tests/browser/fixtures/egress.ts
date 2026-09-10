@@ -7,7 +7,13 @@ import { readFileSync } from "node:fs"
 import type { BrowserContext } from "@playwright/test"
 import { TOKEN_LIST_ORIGIN } from "@nulo/bridge-core"
 
-const TOKEN_LIST_FIXTURE = new URL("../../e2e/fixtures/token-list.json", import.meta.url)
+/** Which fixture answers the community token list: the well-formed one, or one with hostile entries. */
+export type TokenListFixture = "community" | "hostile"
+
+const TOKEN_LIST_FIXTURES: Record<TokenListFixture, URL> = {
+	community: new URL("../../e2e/fixtures/token-list.json", import.meta.url),
+	hostile: new URL("../../e2e/fixtures/token-list-hostile.json", import.meta.url),
+}
 
 export interface Egress {
 	/** URLs of every non-loopback request the context attempted, in order. */
@@ -16,9 +22,9 @@ export interface Egress {
 
 const isLoopback = (host: string) => host === "127.0.0.1" || host === "localhost" || host === "[::1]"
 
-export async function confineEgress(context: BrowserContext): Promise<Egress> {
+export async function confineEgress(context: BrowserContext, fixture: TokenListFixture = "community"): Promise<Egress> {
 	const blocked: string[] = []
-	const tokenList = readFileSync(TOKEN_LIST_FIXTURE, "utf8")
+	const tokenList = readFileSync(TOKEN_LIST_FIXTURES[fixture], "utf8")
 	await context.route("**/*", (route) => {
 		const url = new URL(route.request().url())
 		if (url.origin === TOKEN_LIST_ORIGIN) return route.fulfill({ status: 200, contentType: "application/json", body: tokenList })

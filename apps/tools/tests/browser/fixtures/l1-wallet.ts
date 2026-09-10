@@ -16,16 +16,41 @@ export interface L1WalletOptions {
 
 export type RejectKind = "signature" | "transaction"
 
+/** Narrows a hold to one transaction target — the deposit's router, not the ERC-20 approval before it. */
+export interface HoldMatch {
+	to?: Address
+}
+
+/** One Permit2 `PermitWitnessTransferFrom` the page asked the wallet to sign, as signed, with the wallet's clock. */
+export interface SignedPermit {
+	signedAt: number
+	domain: { name?: string; chainId?: number; verifyingContract?: string }
+	primaryType: string
+	permitted: { token: string; amount: bigint }
+	spender: string
+	nonce: bigint
+	deadline: bigint
+	witness: Record<string, unknown>
+}
+
 export interface L1WalletControl {
 	address: Address
 	/** Everything the page has had signed so far — typed data, transactions, messages. */
 	readonly signatures: number
+	/** Every Permit2 permit signed so far, in order (other typed data is not a permit and is not listed). */
+	permits(): SignedPermit[]
+	/** How often the page asked for one wallet-side method (`eth_sendTransaction`,
+	 *  `eth_signTypedData_v4`, `personal_sign`), held and refused calls included. */
+	calls(method: string): number
 	/** The chain `eth_chainId` answers; a change emits `chainChanged` in every page of the context. */
 	setChainId(chainId: number): Promise<void>
 	/** Swap the signing key; emits `accountsChanged`. */
 	setAccount(privateKey: Hex): Promise<void>
 	/** The next request of that kind is refused with EIP-1193 code 4001. */
 	rejectNext(kind: RejectKind): void
+	/** The next request of that kind (matching `match` when given) never answers — the shape of a
+	 *  wallet whose prompt the user left open; the page that made it must be reloaded to get past it. */
+	holdNext(kind: RejectKind, match?: HoldMatch): void
 }
 
 type Rpc = { method: string; params?: unknown[] }
@@ -76,8 +101,41 @@ export async function installL1Wallet(context: BrowserContext, o: L1WalletOption
 	let chainId = o.chainId
 	let client = createWalletClient({ account, chain: chain(chainId), transport: http(o.rpcUrl) })
 	const rejections = new Set<RejectKind>()
+	const holds: Array<{ kind: RejectKind; match?: HoldMatch }> = []
+	const counts: Record<string, number> = {}
+	const permits: SignedPermit[] = []
 	let signed = 0
+	const recordPermit = (typed: ReturnType<typeof typedDataOf>) => {
+		if (typed.primaryType !== "PermitWitnessTransferFrom") return
+		const m = typed.message as {
+			permitted: { token: string; amount: bigint }
+			spender: string
+			nonce: bigint
+			deadline: bigint
+			witness: Record<string, unknown>
+		}
+		permits.push({
+			signedAt: Math.floor(Date.now() / 1000),
+			domain: typed.domain as SignedPermit["domain"],
+			primaryType: typed.primaryType,
+			permitted: m.permitted,
+			spender: m.spender,
+			nonce: m.nonce,
+			deadline: m.deadline,
+			witness: m.witness,
+		})
+	}
 	const takeRejection = (kind: RejectKind) => rejections.delete(kind)
+	/** A matching hold is consumed and the call parks forever; a hold for another target stays armed. */
+	const takeHold = (kind: RejectKind, to?: string): Promise<never> | undefined => {
+		const i = holds.findIndex((h) => h.kind === kind && (h.match?.to === undefined || h.match.to.toLowerCase() === to?.toLowerCase()))
+		if (i < 0) return undefined
+		holds.splice(i, 1)
+		return new Promise<never>(() => {})
+	}
+	const count = (method: string) => {
+		counts[method] = (counts[method] ?? 0) + 1
+	}
 
 	const emit = (event: string, payload: unknown) =>
 		Promise.all(
@@ -103,9 +161,12 @@ export async function installL1Wallet(context: BrowserContext, o: L1WalletOption
 			return null
 		},
 		eth_sendTransaction: (params) => {
+			count("eth_sendTransaction")
 			refuse("transaction")
-			signed++
 			const tx = params[0] as { to?: Address; data?: Hex; value?: Hex; gas?: Hex }
+			const held = takeHold("transaction", tx.to)
+			if (held) return held
+			signed++
 			return client.sendTransaction({
 				to: tx.to,
 				data: tx.data,
@@ -114,12 +175,20 @@ export async function installL1Wallet(context: BrowserContext, o: L1WalletOption
 			})
 		},
 		eth_signTypedData_v4: (params) => {
+			count("eth_signTypedData_v4")
 			refuse("signature")
+			const held = takeHold("signature")
+			if (held) return held
 			signed++
-			return account.signTypedData(typedDataOf(params[1] as string))
+			const typed = typedDataOf(params[1] as string)
+			recordPermit(typed)
+			return account.signTypedData(typed)
 		},
 		personal_sign: (params) => {
+			count("personal_sign")
 			refuse("signature")
+			const held = takeHold("signature")
+			if (held) return held
 			signed++
 			return account.signMessage({ message: { raw: params[0] as Hex } })
 		},
@@ -178,6 +247,8 @@ export async function installL1Wallet(context: BrowserContext, o: L1WalletOption
 		get signatures() {
 			return signed
 		},
+		calls: (method) => counts[method] ?? 0,
+		permits: () => [...permits],
 		setChainId: switchChain,
 		async setAccount(privateKey) {
 			account = privateKeyToAccount(privateKey)
@@ -186,6 +257,9 @@ export async function installL1Wallet(context: BrowserContext, o: L1WalletOption
 		},
 		rejectNext(kind) {
 			rejections.add(kind)
+		},
+		holdNext(kind, match) {
+			holds.push({ kind, match })
 		},
 	}
 }

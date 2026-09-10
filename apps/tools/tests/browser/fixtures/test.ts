@@ -11,7 +11,7 @@ import { test as base, type BrowserContext, expect, type Page } from "@playwrigh
 import { l2CtxFor, readHandle } from "@nulo/bridge-core/sandbox"
 import { type RunEnv, runEnv } from "../env"
 import type { Seed } from "../test-wallet/profile"
-import { confineEgress, type Egress } from "./egress"
+import { confineEgress, type Egress, type TokenListFixture } from "./egress"
 import { installL1Wallet, type L1WalletControl } from "./l1-wallet"
 import { type ActorHandle, type SandboxAccess, sandboxAccess } from "./sandbox"
 import { parkWalletPanel } from "./wallet-panel"
@@ -46,6 +46,11 @@ interface WorkerFixtures {
 	/** Which anvil key this file signs with — `test.use({ l1Index: i })`. Files may share one: with
 	 *  a single worker they run in sequence, and a shard runs on a sandbox of its own. */
 	l1Index: number
+	/** Extra actors beyond `cells` (retries take them). A file that must connect a wallet holding
+	 *  EXACTLY `cells` accounts sets 0 — and then has no retry budget. */
+	spares: number
+	/** The fixture the egress fence answers the community token list from — `test.use({ tokenList: "hostile" })`. */
+	tokenList: TokenListFixture
 	run: RunEnv
 	sandbox: SandboxAccess
 	pool: ActorPool
@@ -57,6 +62,8 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
 	family: ["", { option: true, scope: "worker" }],
 	cells: [1, { option: true, scope: "worker" }],
 	l1Index: [0, { option: true, scope: "worker" }],
+	spares: [SPARES, { option: true, scope: "worker" }],
+	tokenList: ["community", { option: true, scope: "worker" }],
 
 	run: [
 		// biome-ignore lint/correctness/noEmptyPattern: Playwright requires the destructuring form even with no dependencies.
@@ -95,9 +102,9 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
 	],
 
 	pool: [
-		async ({ sandbox, cells, family }, use) => {
+		async ({ sandbox, cells, family, spares }, use) => {
 			if (!family) throw new Error("a spec file must name itself: test.use({ family: <its name>, cells, l1Index })")
-			const n = cells + SPARES
+			const n = cells + spares
 			if (n > MAX_POOL)
 				throw new Error(`a file declaring ${cells} cells needs ${n} actors, above the grant cap of ${MAX_POOL} — split it`)
 			const all: ActorHandle[] = []
@@ -137,8 +144,8 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
 	},
 
 	egress: [
-		async ({ context }, use) => {
-			const egress = await confineEgress(context)
+		async ({ context, tokenList }, use) => {
+			const egress = await confineEgress(context, tokenList)
 			await use(egress)
 			expect(egress.blocked, "every request stayed on loopback").toEqual([])
 		},

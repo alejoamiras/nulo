@@ -72,6 +72,28 @@ export async function driveToConnected(page: Page, o: ConnectOptions): Promise<v
 	throw new Error(`the Aztec connection never reached connected (last state: ${state})`)
 }
 
+/**
+ * The reload-side reconnect of a wallet that REMEMBERS its account: every stop but the chooser is
+ * answered, and the chooser appearing is the failure this helper exists to catch (`driveToConnected`
+ * would answer it and hide a lost selection). Ends on the chip showing `address`.
+ */
+export async function reconnectedAs(page: Page, profile: TestWalletProfile, address: string): Promise<void> {
+	const status = page.locator(tid(TESTIDS.bridgeL2Status))
+	const stops = connectionStops(page, profile)
+	const started = Date.now()
+	let state: string | null = null
+	while (Date.now() < started + 180_000) {
+		state = await status.getAttribute("data-status")
+		if (state === "connected") break
+		if (await stops.accounts.isVisible())
+			throw new Error("the account chooser appeared on a reconnect that should have remembered its account")
+		await answerStop(page, { profile }, stops, state)
+		await page.waitForTimeout(500)
+	}
+	if (state !== "connected") throw new Error(`the Aztec connection never reached connected (last state: ${state})`)
+	await expect(page.locator(tid(TESTIDS.accountChip)).first()).toContainText(address.slice(2, 6), { ignoreCase: true })
+}
+
 type Locator = ReturnType<Page["locator"]>
 interface ConnectionStops {
 	connect: Locator
@@ -166,7 +188,8 @@ export function walletCalls(
 
 /** Every address the grant carried, as the switcher menu lists them. */
 export async function grantedAccounts(page: Page): Promise<string[]> {
-	await page.locator(tid(TESTIDS.accountChip)).first().click()
+	// The chip is a toggle: only open the menu when it is not already up.
+	if (!(await page.locator(tid(TESTIDS.accountMenu)).isVisible())) await page.locator(tid(TESTIDS.accountChip)).first().click()
 	const rows = page.locator(tid(TESTIDS.accountMenuRow))
 	await expect(rows.first()).toBeVisible()
 	const addresses = await rows.evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.address ?? ""))
