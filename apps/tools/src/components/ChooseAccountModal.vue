@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Button } from "@nulo/design"
 import { computed, nextTick, ref, watch } from "vue"
+import { useOpsInFlight } from "@/composables/useOpsInFlight"
 import { useWalletConnection } from "@/composables/useWalletConnection"
 import { TESTIDS } from "@/lib/testids"
 
@@ -14,6 +15,9 @@ import { TESTIDS } from "@/lib/testids"
  */
 
 const { status, accounts, hiddenAccountsCount, confirmAccountChoice, cancelAccountChoice } = useWalletConnection()
+// A choice forced by a re-grant that dropped the active account waits for the operation that
+// captured it: the session refuses the confirm until then, so the button says so instead.
+const { busy } = useOpsInFlight()
 
 const open = computed(() => status.value === "choosing-account")
 
@@ -159,9 +163,13 @@ function onKey(evt: KeyboardEvent) {
 					Showing {{ accounts.length }} of {{ accounts.length + hiddenAccountsCount }} granted accounts.
 				</p>
 
+				<p v-if="busy" class="truncation" role="status" :data-testid="TESTIDS.accountChoiceBusy">
+					Finish the current operation, then continue.
+				</p>
+
 				<Button
 					variant="primary"
-					:disabled="!picked"
+					:disabled="!picked || busy"
 					:data-testid="TESTIDS.accountChoiceContinue"
 					@click="onContinue"
 				>

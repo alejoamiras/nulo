@@ -11,6 +11,7 @@ import { readChainInfo } from "@/lib/chain-info"
 import { resolveToolsTarget } from "@/lib/network-targets"
 import { hashToEmoji } from "@/lib/emoji"
 import { type NormalizedError, normalizeError } from "@/lib/errors"
+import { enqueuePrompt } from "@/lib/prompt-queue"
 
 export type ConnectStatus =
 	| "idle"
@@ -169,6 +170,8 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		consumeSelectionNotices: (): SelectionNotice[] => consumeSelectionNotices(s),
 		/** False when it did not run because another flow already owns the wallet — not a refusal. */
 		retryCapabilities: (): Promise<boolean> => retryCapabilities(s),
+		/** Re-read the session's accounts from the wallet (no prompt); see `refreshAccounts`. */
+		refreshAccounts: (): Promise<RefreshOutcome> => enqueuePrompt(() => refreshAccounts(s)),
 		disconnect: (): Promise<void> => disconnect(s),
 		reset: (): void => reset(s),
 	}
@@ -750,6 +753,35 @@ async function retryCapabilities(s: SessionState): Promise<boolean> {
 	return true
 }
 
+export type RefreshOutcome = "refreshed" | "skipped" | "dropped"
+
+function refreshBlocked(s: SessionState): boolean {
+	return s.wallet.value === null || s.status.value !== "connected" || s.activeFlowEpoch !== null || Boolean(s.config.isSwitchBlocked?.())
+}
+
+/** Re-read the granted accounts (`getAccounts`, no prompt). A retry or a switch never advances the
+ *  flow epoch, so completion is checked by state: the accounts array identity, the selection and
+ *  the status must be what they were before the await. */
+async function refreshAccounts(s: SessionState): Promise<RefreshOutcome> {
+	if (refreshBlocked(s)) return "skipped"
+	const wallet = s.wallet.value as Wallet
+	const captured = s.accounts.value
+	const selected = s.selectedAccount.value
+	let raw: unknown
+	try {
+		raw = await wallet.getAccounts()
+	} catch {
+		return "skipped"
+	}
+	if (refreshBlocked(s) || s.accounts.value !== captured || s.selectedAccount.value !== selected) return "dropped"
+	const { accounts, hiddenCount } = parseAccountList(Array.isArray(raw) ? raw : null, { keep: selected ?? undefined })
+	if (accounts.length === 0) return "skipped"
+	s.accounts.value = accounts
+	s.hiddenAccountsCount.value = hiddenCount
+	if (!accounts.some((a) => a.address === selected)) applySelection(s, accounts[0].address, s.provider)
+	return "refreshed"
+}
+
 async function disconnect(s: SessionState): Promise<void> {
 	const staleProvider = s.provider
 	wipeToIdle(s)
@@ -795,11 +827,11 @@ async function requestCapabilities(s: SessionState, flowEpoch: number, quiet = f
 			await disconnectStaleSession(flowProvider)
 			return
 		}
-		const { accounts: granted, hiddenCount } = parseGrantedAccounts(result)
+		const { accounts: granted, hiddenCount } = parseGrantedAccounts(result, quiet ? { keep: s.selectedAccount.value ?? undefined } : {})
 		// Published BEFORE the account step: an approval replaces the stored grant wholesale, so the
 		// answer is authoritative even when the flow then pauses for a choice.
 		s.grantedContracts.value = parseGrantedContracts(manifest, result)
-		if (chooseGrantedAccount(s, granted, hiddenCount, flowWallet, flowProvider, flowEpoch) === "paused") return
+		if (chooseGrantedAccount(s, granted, hiddenCount, flowWallet, flowProvider, flowEpoch, quiet) === "paused") return
 	} catch (err) {
 		if (isStale(s, flowEpoch)) return
 		console.error(`[${s.config.appId}] requestCapabilities failed`, err)
@@ -822,22 +854,34 @@ function chooseGrantedAccount(
 	flowWallet: Wallet,
 	flowProvider: WalletProvider | null,
 	flowEpoch: number,
+	quiet = false,
 ): "paused" | "chosen" {
-	s.accounts.value = granted
-	s.hiddenAccountsCount.value = hiddenCount
-
 	if (granted.length === 0) {
 		throw new Error("No accounts granted by wallet")
 	}
+	// A re-grant on a CONNECTED session is not a fresh connect: the active account stands while the
+	// wallet still grants it (no re-selection, no re-persist, no chooser). A grant that DROPPED it
+	// pauses for a choice like a fresh connect — and while an operation holds the switch gate, only
+	// the user may make that choice, once the gate opens (`confirmAccountChoice` honours the gate),
+	// so the operation keeps the account it captured and nothing new starts under a revoked one.
+	const active = s.selectedAccount.value
+	if (quiet && active !== null && granted.some((a) => a.address === active)) {
+		s.accounts.value = granted
+		s.hiddenAccountsCount.value = hiddenCount
+		return "chosen"
+	}
+	const gateHeld = quiet && Boolean(s.config.isSwitchBlocked?.())
+	s.accounts.value = granted
+	s.hiddenAccountsCount.value = hiddenCount
 	if (hiddenCount > 0) {
 		pushSelectionNotice(s, { kind: "grant-truncated", hiddenCount })
 	}
 
-	if (granted.length === 1) {
+	if (granted.length === 1 && !gateHeld) {
 		applySelection(s, granted[0].address, flowProvider)
 		return "chosen"
 	}
-	const remembered = flowProvider ? readRememberedAccount(s, flowProvider.id) : null
+	const remembered = flowProvider && !gateHeld ? readRememberedAccount(s, flowProvider.id) : null
 	const match = remembered ? granted.find((a) => a.address === remembered) : undefined
 	if (match) {
 		// Remembered choice still in the grant: auto-apply, but SAY so — a visible
@@ -846,9 +890,9 @@ function chooseGrantedAccount(
 		pushSelectionNotice(s, { kind: "auto-remembered", alias: match.alias, address: match.address })
 		return "chosen"
 	}
-	// >1 accounts, nothing (valid) remembered: pause for the user. The flow stays
-	// OWNED (activeFlowEpoch keeps its value), so retryCapabilities stays a no-op
-	// while the modal is up; confirm/cancel resume via the captured token.
+	// Pause for the user. The flow stays OWNED (activeFlowEpoch keeps its value), so
+	// retryCapabilities stays a no-op while the modal is up; confirm/cancel resume via the
+	// captured token. An operation gate also prevents automatic selection.
 	s.pendingAccountChoice = { flowEpoch, wallet: flowWallet, provider: flowProvider }
 	s.status.value = "choosing-account"
 	return "paused"
@@ -904,6 +948,9 @@ async function finishSetup(
  *  auto-applies it instead of re-prompting (plan D-20). */
 async function confirmAccountChoice(s: SessionState, address: string): Promise<void> {
 	if (s.status.value !== "choosing-account") return
+	// The same gate as selectAccount: a choice is a switch, and an operation that started while the
+	// chooser was up still owns the account it captured. The chooser stays up; confirm again later.
+	if (s.selectedAccount.value !== null && s.config.isSwitchBlocked?.()) return
 	const token = s.pendingAccountChoice
 	if (!token || isStale(s, token.flowEpoch)) return
 	if (!s.accounts.value.some((a) => a.address === address)) return
@@ -981,24 +1028,38 @@ export interface ParsedGrantedAccounts {
  * Aliases are sanitized (control/bidi strip) and capped; addresses deduped (first wins); the
  * list is bounded with DISCLOSED truncation.
  */
-export function parseGrantedAccounts(result: unknown): ParsedGrantedAccounts {
-	const entries = findGrantedAccountEntries(result)
+export function parseGrantedAccounts(result: unknown, opts: { keep?: string } = {}): ParsedGrantedAccounts {
+	return parseAccountList(findGrantedAccountEntries(result), opts)
+}
+
+/** The same hardening over a bare entry list — what `getAccounts` answers (no grant envelope). */
+export function parseAccountList(
+	entries: NonNullable<GrantedAccountsCap["accounts"]> | null,
+	opts: { keep?: string } = {},
+): ParsedGrantedAccounts {
 	if (!entries) return { accounts: [], hiddenCount: 0 }
 
 	const seen = new Set<string>()
 	const accounts: GrantedAccount[] = []
 	let hiddenCount = 0
+	// The alias is untrusted text: it is only sanitized for an entry that takes a displayed slot.
+	const displayed = (entry: { alias?: unknown } | null, address: string): GrantedAccount => {
+		const rawAlias = typeof entry?.alias === "string" ? entry.alias : ""
+		return { address, alias: truncateName(rawAlias.replace(UNSAFE_ALIAS_CHARS, "").trim(), ALIAS_MAX) }
+	}
 	for (const entry of entries) {
 		const address = parseEntryAddress(entry)
 		if (address === null) continue
 		if (seen.has(address)) continue
 		seen.add(address)
-		if (accounts.length >= MAX_GRANTED_ACCOUNTS) {
-			hiddenCount++
+		if (accounts.length < MAX_GRANTED_ACCOUNTS) {
+			accounts.push(displayed(entry, address))
 			continue
 		}
-		const rawAlias = typeof entry?.alias === "string" ? entry.alias : ""
-		accounts.push({ address, alias: truncateName(rawAlias.replace(UNSAFE_ALIAS_CHARS, "").trim(), ALIAS_MAX) })
+		hiddenCount++
+		// The selected account stays listed even when the cap would drop it: the wallet's ordering
+		// must never move the selection out from under the user.
+		if (address === opts.keep) accounts[accounts.length - 1] = displayed(entry, address)
 	}
 	return { accounts, hiddenCount }
 }

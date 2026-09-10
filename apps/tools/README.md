@@ -46,7 +46,14 @@ auto-reconnect turns itself off and the picker shows all claimants.
 **Multiple accounts**: if your wallet shares more than one account, the app asks which one to use
 and remembers the answer per wallet. The connected chip shows the active account and opens a menu
 to switch anytime — switching drives every section and is blocked while an operation is running, so
-nothing executes under an account other than the one it started with.
+nothing executes under an account other than the one it started with. The menu's **Add accounts…**
+re-asks the wallet for accounts (a plain `requestCapabilities`, one prompt at a time app-wide) so an
+account created after the connection can join the session; the line under it says what came back
+("Added 1 account", "No accounts were added" — a decline reads the same way — or that the wallet
+could not be reached). Bringing the tab back into view re-reads the granted accounts silently
+(`getAccounts`, no prompt), so a rename or a hide done in the wallet reaches the chip without a click;
+that re-read never runs while an operation is in flight and is dropped if a grant or a switch landed
+meanwhile.
 
 The Bridge section additionally needs an **Ethereum wallet** (EIP-1193, e.g. MetaMask) on the manifest's
 L1 chain; a wallet on another chain is told so before anything is signed.

@@ -199,13 +199,15 @@ run's retry-0 tally and SHA are quoted in the phase's lessons file.
   (a `sendTx`-free `createAuthWit` check).
 - `apps/extension/tests/e2e/network/account-switch-live-session.test.ts`: two accounts granted; the
   popup's active account switched to B (`accounts.test.ts`'s switcher path); `getAccounts()` with no
-  popup returns the same two in the same order; a `sendTx` with `from: A` (`pg-input-simFrom`) is
-  executed by A — two separate assertions: A's token balance drops by the amount (B's unchanged), and
-  A's Fee Juice balance drops (B's unchanged); the fee is never read off the token balance.
+  popup returns the same two in the same order; a `sendTx` with `from: A` (`pg-input-from`, the
+  playground's `simFrom` input) is executed by A — separate assertions: the execute popup names A,
+  A's token balance drops by the amount, the recipient's rises, B's token and Fee Juice never move,
+  and A's Fee Juice does not rise (the execute popup's default fee method may be self-paid or
+  sponsored, so the fee is never asserted as a particular Fee Juice delta).
 - Second-account send: no playground change — `simFrom` already drives `from` (`sections/transactions.ts:59`).
-  `multi-account-from.test.ts` gains the case its docstring calls out: `simFrom` = account 2, `sendTx
-  default` lands, account 2's token balance drops by the amount, its Fee Juice by the fee, account 1's
-  both unchanged, the recipient's rises; the docstring is updated.
+  `multi-account-from.test.ts` gains the case its stale docstring called out: `simFrom` = account 2,
+  `sendTx default` lands, account 2's token balance drops by the amount, account 1's token balance
+  and Fee Juice never move, the recipient's rises; the docstring is rewritten.
 - **Validation gate**: each new/changed file green alone at retry 0 (`NULO_E2E_RETRY=0
   NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/<file>`); `bun run --cwd apps/playground
   typecheck`; the smoke suite whole against the armed build (command above), exit 0; `bun run
@@ -216,7 +218,7 @@ run's retry-0 tally and SHA are quoted in the phase's lessons file.
 
 ### Arc 2 — tools accounts
 
-#### Phase 3: "Add accounts…" and the visibility re-read
+#### Phase 3: "Add accounts…" and the visibility re-read ✓ (`4a5908ef`, lessons/phase-3.md)
 - `apps/tools/src/lib/prompt-queue.ts`: `enqueuePrompt` extracted from `useTokenGrant.ts` (its queue
   is private today; two composables must share one queue, not run two). `useTokenGrant` imports it.
 - `apps/tools/src/composables/useAccountWidening.ts`: `addAccounts()` enqueues on the shared queue; the
@@ -255,7 +257,7 @@ run's retry-0 tally and SHA are quoted in the phase's lessons file.
 - **Validation gate**: `bun run lint`; `bun run --cwd apps/tools typecheck && bun run --cwd apps/tools test`;
   exit 0. Layers: lint · typecheck · unit.
 
-#### Phase 4: The accounts cells
+#### Phase 4: The accounts cells ✓ (`9718f2cf`, lessons/phase-4.md)
 - Fixture additions (arc 2, because these cells need them): `fixtures/l1-wallet.ts` `holdNext(kind,
   match?)` (the next matching call never answers; `match.to` narrows a transaction to its target —
   a deposit's router, not the ERC-20 approval that precedes it, `useSend.ts:695`) and per-method call
@@ -263,28 +265,32 @@ run's retry-0 tally and SHA are quoted in the phase's lessons file.
   total stays); `fixtures/test.ts` a `spares` worker option (default 2) so a file can ask for a pool of
   exactly `cells`; `pages/connect.ts` `reconnectedAs(page, address)` — reload-side reconnect that FAILS
   if the chooser appears (`driveToConnected` answers it, which would hide the bug) and asserts the chip.
-- `apps/tools/tests/browser/specs/accounts.spec.ts`, `test.use({ family: "accounts", cells: 10, l1Index: 8 })`
-  — `cells` counts actors taken: cells 2–5 take two each. Actors come from `pool.take()`.
-  1. **Widening**: connect as A; `window.__nuloTestWallet.addAccount(secret, salt)` for a fresh seed in
-     the wallet frame; "Add accounts…" → the switcher lists the new address (`grantedAccounts`), the
-     status says "Added 1 account"; a second click says "No accounts were added".
-  2. **A record owned by another granted account**: deposit as A with the claim held (24a's `holdNext`);
-     reload — the session remembers A (`chooseGrantedAccount` re-applies the persisted choice, `:838-846`),
-     so `reconnectedAs(A)` then `switchAccount(B)`: the card shows "SWITCH TO <A>" (`BridgeJournalCard.vue`
-     `offerSwitch`) and no claim is sent (`walletCalls(...).sendTx` 0); click it: the chip shows A; the
-     rediscovered hash-less record does not auto-resume (`resumeActionFor`, `useBridgeJournal.ts:1449`),
-     so click CLAIM: it lands from the journal.
-  3. **Switch refused mid-send**: `holdNext("transaction", { to: router })` on the Ethereum leg;
-     confirm as A; open the switcher: B's row is `disabled` (asserted, never clicked) and the chip
-     still shows A.
-  4. **The feed is shared, the switch is offered**: after cell 2's shape, B's feed lists A's record with
-     the SWITCH action and B's own record without it; under A the action is gone.
-  5. **Gas gate re-read**: A holds credit, B nothing: a review opened as A then a switch to B stands
-     down; B's amount step says `none`; back under A it sends.
-  6. **Reload remembers a non-first account**: connect choosing B; reload; `reconnectedAs(B)` — no
+- `apps/tools/tests/browser/specs/accounts.spec.ts`, `test.use({ family: "accounts", cells: 8, l1Index: 8 })`
+  — `cells` counts actors taken: the pair cells take a second actor from `pool.take()`. (Cells 2 and 4
+  of readiness § 5 share one fixture shape — a held-claim deposit as A, reloaded under B — so they are
+  ONE cell here; "B's own record without the action" would cost a second full deposit for a boolean
+  the ownership rule already implies.)
+  41. **Widening**: connect as A; `window.__nuloTestWallet.addAccount(secret)` for a fresh seed in the
+     wallet frame; "Add accounts…" → the switcher lists the new address (`grantedAccounts`), the status
+     says "Added 1 account", the chip never moved; a second click says "No accounts were added".
+  42. **A record owned by another granted account, the feed shared**: deposit as A with the claim held
+     (24a's `holdNext`); reload — the session remembers A (`chooseGrantedAccount` re-applies the
+     persisted choice, `:838-846`), so `reconnectedAs(A)` then `switchAccount(B)`: B's feed lists A's
+     record attributed to the other account with "SWITCH TO <A>" (`BridgeJournalCard.vue` `offerSwitch`)
+     and no CLAIM, and no claim is sent (`walletCalls(...).sendTx` 0); click it: the chip shows A, the
+     action is gone; the rediscovered hash-less record does not auto-resume (`resumeActionFor`,
+     `useBridgeJournal.ts:1449`), so click CLAIM: it lands from the journal.
+  43. **Switch refused mid-send**: `l1.holdNext("transaction", { to: router })` on the Ethereum leg;
+     confirm as A; open the switcher: B's row is `disabled` (asserted, never clicked), the busy hint
+     shows, and the chip still shows A.
+  44. **Gas gate re-read**: A holds credit, B nothing: a token-only review opened as A then a switch to
+     B stands the review down and B's amount step blocks the token alone as `none`; back under A the
+     token-only card is enabled again and the review re-opens (the send itself is `deposit-token`'s).
+  45. **Reload remembers a non-first account**: connect choosing B; reload; `reconnectedAs(B)` — no
      chooser, chip B.
 - `apps/tools/tests/browser/specs/accounts-single.spec.ts`, `test.use({ family: "accounts-single",
-  cells: 1, spares: 0, l1Index: 8 })`: a one-seed wallet connects straight to `connected`, no chooser.
+  cells: 1, spares: 0, l1Index: 8 })`: **46.** a one-seed wallet connects straight to `connected`, the
+  chooser never renders, the switcher lists that one account.
 - Missing testids are added before a cell names them: the card's SWITCH button, the switcher row's
   disabled state is native (`:disabled`), the status line.
 - **Validation gate**: `bun run e2e:tools -- tests/browser/specs/accounts.spec.ts tests/browser/specs/accounts-single.spec.ts`
@@ -295,14 +301,17 @@ run's retry-0 tally and SHA are quoted in the phase's lessons file.
 ### Arc 3 — tools gaps (tests only under Option A)
 
 #### Phase 5: Recovery — dropped and consumed
-- Test wallet: `dropNext("sendTx")` on the node hand-off proxy (`wallet.ts` `observeSubmissions`) —
-  records the submission and returns its hash without forwarding the transaction (one shot).
+- Test wallet: `dropNextSubmission()` on the node hand-off proxy (`wallet.ts` `observeSubmissions`) —
+  records the submission and returns without forwarding the transaction, so the page holds a hash
+  the node only ever reports as dropped (one shot); `swallowNext(method, pattern)` — the call RUNS
+  but never answers (a wallet that sent the transaction and lost the reply; arc 3's 31b).
 - Harness: `pages/relayer.ts` `claimAsRelayer(actor, record)` — `HubClaimParams` from the page's
   journal record (token block, recipient, amount, leaf index, the public claim secret) → `claimViaHub`
   with `actor.s.relayerOpts`, after `waitForL1ToL2Message` for the record's message.
-- `recovery.spec.ts` **24c dropped**: fueled deposit as A with `dropNext` armed for the claim; three
-  straight dropped receipt polls clear the hash, the card says "The claim was dropped - claim again
-  from this card"; claim: it lands; balances as 24a.
+- `recovery.spec.ts` **24c dropped**: fueled deposit as A with `dropNextSubmission` armed for the
+  claim; three straight dropped receipt polls clear the hash (`data-attention="error"`, the card says
+  "The claim was dropped"); CLAIM again: a second, different hash lands; the wallet sent two claims;
+  balances as 24a.
 - `recovery.spec.ts` **24b consumed (today's behaviour)**: public deposit as A with the claim held;
   after the Ethereum leg the harness claims through the relayer; reload; the record is not
   session-live and has no hash, so it does not auto-resume — click CLAIM: `awaitConsumable` rethrows
@@ -325,10 +334,11 @@ run's retry-0 tally and SHA are quoted in the phase's lessons file.
 - `fixtures/egress.ts`: the token-list fixture is a worker option (`tokenList: "community" | "hostile"`);
   `tests/e2e/fixtures/token-list-hostile.json`: `decimals: 300`; a non-address; a syntactically valid
   address with no contract; a duplicate of a manifest token's symbol at another address.
-- `tokens.spec.ts` cell 34b (`tokenList: "hostile"`): the two malformed entries never become tiles
-  (`token-list.ts:141` validates per entry); the no-contract entry is listed but selecting it fails
-  closed at verification (the tile's error state, no route, no send); the duplicate-symbol entry is
-  listed as its own address, never merged into the manifest token.
+- `tokens-hostile.spec.ts` cell 34b (`family: "tokens-hostile", cells: 1, tokenList: "hostile"` — the
+  list is a worker option, so the cell has its own file): the two malformed entries never become
+  tiles (`token-list.ts:141` validates per entry); the no-contract entry is listed but selecting it
+  fails closed at verification (`sendSelectionError` shown, no amount step); the duplicate-symbol
+  entry is listed as its own address, never merged into the manifest token.
 - **Validation gate**: the three spec files green at retry 0. Layers: lint · unit · e2e.
 
 #### Phase 7: Wallet loss mid-flow, two tabs, viewports
@@ -336,17 +346,17 @@ run's retry-0 tally and SHA are quoted in the phase's lessons file.
   the card already offers Discard on both hash-less shapes with "check your wallet activity" copy
   (`BridgeJournalCard.vue:169-186`), the engine refuses a hash-less withdraw as `unknown-outcome`
   (`useBridgeJournal.test.ts:701`). These cells pin exactly that.
-- `l1-wallet.spec.ts` 26d: a first deposit by the actor establishes the Permit2 allowance; then
-  `holdNext("transaction", { to: router })`; the stepper shows the send waiting on the wallet; reload;
-  the `depositing` record shows the "never confirmed on Ethereum" copy with Discard and no CLAIM
-  (`record-policy.ts:92-95`); the per-method counters show one signature and one transaction (the
-  approval) for that deposit; Discard (armed, then confirmed) leaves no record and no second signature
-  is ever requested.
-- `exits.spec.ts` 31b (private exit): the test wallet's `swallowNext("sendTx", <the hub's exit
-  selector>)` forwards the transaction to the node but never answers the page (the pattern targets the
-  exit call, not the authwit); reload; the record is `unknown-outcome` with the "exit was interrupted"
-  copy and Discard; it never auto-runs and RETRY re-runs only the refusal (no second burn: the L2
-  balance dropped once, the credit was charged once, `sendTx` count unchanged after RETRY). Discard
+- `l1-wallet.spec.ts` 26d: `holdNext("transaction", { to: router })` — the hold is narrowed to the
+  router, so the Permit2 signature and the ERC-20 approval before the deposit go through and the
+  record exists with no deposit hash; the stepper shows the send waiting; reload; the `depositing`
+  record shows the "never confirmed on Ethereum" copy with Discard and no CLAIM
+  (`record-policy.ts:92-95`); `permits()` shows one permit; Discard (armed, then confirmed) leaves no
+  record and asks for no further signature.
+- `exits.spec.ts` 31b (private exit, one credit note): the test wallet's `swallowNext("sendTx", <hub
+  address>)` — a private exit's authwit is `createAuthWit`, so the one `sendTx` against the hub IS
+  the exit — forwards the transaction (the burn lands, the FPC keeps one fee) but never answers the
+  page; reload; the record is `exiting` with the "exit was interrupted" copy, Discard, and no FINISH;
+  nothing ran on its own (no second authwit, no second burn, the credit charged once); Discard
   leaves no record. The docstring names the follow-up (`tools-recovery`: attach by recomputed
   commitment).
 - `activity.spec.ts` 40 two tabs: `context.newPage()`; two sends started in two tabs (A and B are two

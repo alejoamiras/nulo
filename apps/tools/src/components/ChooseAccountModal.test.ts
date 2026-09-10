@@ -45,6 +45,7 @@ vi.mock("@/contracts/private-fpc", () => ({
 	getPrivateFpc: async () => ({ instance: { address: { toString: () => "0xprivatefpc" } }, artifact: {} }),
 }))
 
+import { __resetOpsInFlightForTests, withOperation } from "@/composables/useOpsInFlight"
 import { __resetWalletConnectionForTests, useWalletConnection } from "@/composables/useWalletConnection"
 import ChooseAccountModal from "./ChooseAccountModal.vue"
 
@@ -102,6 +103,7 @@ describe("ChooseAccountModal", () => {
 	})
 	afterEach(() => {
 		__resetWalletConnectionForTests()
+		__resetOpsInFlightForTests()
 		vi.clearAllMocks()
 	})
 
@@ -163,6 +165,26 @@ describe("ChooseAccountModal", () => {
 		for (let i = 0; i < 4; i++) await Promise.resolve()
 		expect(c.status.value).toBe("idle")
 		expect(w.find(`[data-testid="${TESTIDS.accountChoice}"]`).exists()).toBe(false)
+	})
+
+	it("Continue waits for an operation in flight: disabled with the hint, live again once it ends", async () => {
+		const w = mountModal()
+		const c = await driveTo([
+			{ alias: "Main", item: ADDR_A },
+			{ alias: "Savings", item: ADDR_B },
+		])
+		let release: () => void = () => {}
+		const span = withOperation(() => new Promise<void>((res) => (release = res)))
+		await w.vm.$nextTick()
+		expect(w.find(`[data-testid="${TESTIDS.accountChoiceContinue}"]`).attributes("disabled")).toBeDefined()
+		expect(w.find(`[data-testid="${TESTIDS.accountChoiceBusy}"]`).exists()).toBe(true)
+		expect(c.status.value).toBe("choosing-account")
+		release()
+		await span
+		await w.vm.$nextTick()
+		expect(w.find(`[data-testid="${TESTIDS.accountChoiceBusy}"]`).exists()).toBe(false)
+		await w.find(`[data-testid="${TESTIDS.accountChoiceContinue}"]`).trigger("click")
+		await vi.waitFor(() => expect(c.status.value).toBe("connected"))
 	})
 
 	it("backdrop click cancels the connect", async () => {

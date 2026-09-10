@@ -27,12 +27,12 @@ artifacts, both `dist`s, logs, traces.
 | `global-setup.ts` | the handle names chain 31337, the build is `local`, the sandbox's drip record equals the committed one |
 | `fixtures/test.ts` | the `test` every spec uses: sandbox access, an actor pool per file, a fresh actor per test, the L1 shim, the egress fence, the parked wallet panel |
 | `fixtures/sandbox.ts` | the Node side: `openSandbox` on the handle, `newActor()` (sponsor-deployed, own flow context) |
-| `fixtures/l1-wallet.ts` | `window.ethereum` → `exposeFunction` → viem over anvil; `setChainId`, `setAccount`, `rejectNext` |
-| `fixtures/egress.ts` | aborts every non-loopback request, answers the token list from `../e2e/fixtures/token-list.json`; the record must be empty at teardown |
+| `fixtures/l1-wallet.ts` | `window.ethereum` → `exposeFunction` → viem over anvil; `setChainId`, `setAccount`, `rejectNext`, `holdNext(kind, { to })` (a request that never answers, narrowable to one transaction target), `calls(method)` per-method counts, `permits()` (every Permit2 permit as signed) |
+| `fixtures/egress.ts` | aborts every non-loopback request, answers the token list from `../e2e/fixtures/token-list.json` (or `token-list-hostile.json` under `test.use({ tokenList: "hostile" })`); the record must be empty at teardown |
 | `fixtures/wallet-panel.ts` | parks the SDK's floating session panel in a corner so it covers no testid |
 | `pages/*.ts` | testid-only page helpers: connect, drip, the Send wizard's deposit and exit directions, the journal (records + the fees their transactions billed), `fees.ts` (the ceiling the wallet will price — see below) |
-| `specs/*.spec.ts` | the cells, one file per family (`deposit-token`, `fee-states`, `deposit-token-gas`, `deposit-gas-only`, `tokens`, `recovery`, `l1-wallet`, `exits`, `drip`, `activity`; `spike` keeps the discovery / grant / isolation checks); `test.use({ cells: N, l1Index: i })` at the top of each file |
-| `test-wallet/` | the wallet page: `profile.ts` (`plain` \| `selfpay` \| `full`), `wallet.ts` (the embedded wallet + grant + Nulo RPCs + self-pay routing), `main.ts` (the handler, the control hook), its own `vite.config.mts` |
+| `specs/*.spec.ts` | the cells, one file per family (`deposit-token`, `fee-states`, `deposit-token-gas`, `deposit-gas-only`, `tokens`, `tokens-hostile` (the community list served from the hostile fixture), `recovery`, `l1-wallet`, `exits`, `drip`, `activity`, `accounts` — the multi-account path, pair cells take a second actor from the pool — and `accounts-single`, a one-seed wallet with `spares: 0`; `spike` keeps the discovery / grant / isolation checks and the narrow-viewport pass); `test.use({ cells: N, l1Index: i })` at the top of each file |
+| `test-wallet/` | the wallet page: `profile.ts` (`plain` \| `selfpay` \| `full`), `wallet.ts` (the embedded wallet + grant + Nulo RPCs + self-pay routing), `main.ts` (the handler, the control hook `window.__nuloTestWallet`: `addAccount`, `calls`, `submitted`, `failNext` / `holdNext` / `swallowNext` — refuse, never answer, or run-but-never-answer the next matching call — `dropNextSubmission` (the next transaction is recorded at the node hand-off and never forwarded), `declineNextGrant`), its own `vite.config.mts` |
 
 ## How a spec gets its accounts
 

@@ -35,12 +35,15 @@ export const TESTIDS = {
 	accountChoiceRow: "tl-account-choice-row",
 	accountChoiceContinue: "tl-account-choice-continue",
 	accountChoiceTruncation: "tl-account-choice-truncation",
+	accountChoiceBusy: "tl-account-choice-busy",
 
 	// Account switcher - connected chip + dropdown menu (both wallet panels)
 	accountChip: "tl-account-chip",
 	accountMenu: "tl-account-menu",
 	accountMenuRow: "tl-account-menu-row",
 	accountMenuCopy: "tl-account-menu-copy",
+	accountMenuAddAccounts: "tl-account-menu-add-accounts",
+	accountMenuAddStatus: "tl-account-menu-add-status",
 
 	// Journal-card account attribution (deposit cards only — withdraws never persist their Aztec sender)
 	journalAccount: "tl-journal-account",

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Icon } from "@nulo/design"
 import { computed, nextTick, onBeforeUnmount, ref } from "vue"
+import { useAccountWidening, type WideningOutcome } from "@/composables/useAccountWidening"
 import { useOpsInFlight } from "@/composables/useOpsInFlight"
 import { switchActiveAccount, useWalletConnection } from "@/composables/useWalletConnection"
 import { TESTIDS } from "@/lib/testids"
@@ -31,6 +32,21 @@ const props = defineProps<{
 
 const { accounts, selectedAccount, hiddenAccountsCount, disconnect } = useWalletConnection()
 const { busy } = useOpsInFlight()
+const widening = useAccountWidening()
+
+// A decline and "nothing new" both come back as the old grant, so they share one line; a request
+// that left the session (the wallet errored or dropped the session) is the only other shape.
+const WIDENING_COPY: Record<WideningOutcome["kind"], (o: WideningOutcome) => string> = {
+	added: (o) => `Added ${o.kind === "added" ? o.count : 0} account${o.kind === "added" && o.count === 1 ? "" : "s"}`,
+	unchanged: () => "No accounts were added",
+	busy: () => "Finish the current operation first",
+	failed: () => "Couldn't reach your wallet",
+}
+const wideningStatus = computed(() => (widening.outcome.value ? WIDENING_COPY[widening.outcome.value.kind](widening.outcome.value) : ""))
+
+async function onAddAccounts() {
+	await widening.addAccounts()
+}
 
 const open = ref(false)
 const chipEl = ref<HTMLElement | null>(null)
@@ -189,7 +205,20 @@ onBeforeUnmount(() => {
 				Showing {{ accounts.length }} of {{ accounts.length + hiddenAccountsCount }} granted accounts.
 			</p>
 
+			<p v-if="wideningStatus" class="add-status" role="status" :data-testid="TESTIDS.accountMenuAddStatus">
+				{{ wideningStatus }}
+			</p>
+
 			<div class="foot">
+				<button
+					type="button"
+					class="add"
+					:disabled="widening.busy.value || busy"
+					:data-testid="TESTIDS.accountMenuAddAccounts"
+					@click="onAddAccounts"
+				>
+					{{ widening.busy.value ? "Asking your wallet…" : "Add accounts…" }}
+				</button>
 				<button
 					type="button"
 					class="disconnect"
@@ -396,11 +425,39 @@ onBeforeUnmount(() => {
 	padding: 6px 14px 2px;
 }
 
+.add-status {
+	color: var(--txt-secondary);
+	font-size: 11px;
+	padding: 4px 14px 2px;
+}
+
 .foot {
 	border-top: 1px solid var(--nulo-border);
 	margin-top: 4px;
 	padding: 7px 14px 3px;
 	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.add {
+	color: var(--txt-secondary);
+	font: 500 11px/1 var(--font-mono);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	background: transparent;
+	border: none;
+	padding: 2px 0;
+	cursor: pointer;
+}
+
+.add:hover:not(:disabled) {
+	color: var(--txt-primary);
+}
+
+.add:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
 }
 
 .disconnect {

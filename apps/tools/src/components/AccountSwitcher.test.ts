@@ -33,6 +33,27 @@ vi.mock("@/contracts/bridge-generation", () => ({
 vi.mock("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Dripper.js", () => ({ DripperContractArtifact: { name: "Dripper" } }))
 vi.mock("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js", () => ({ TokenContractArtifact: { name: "Token" } }))
 
+// The widening composable is unit-tested on its own; here only the wiring is asserted, so its
+// outcome is scripted (reactive refs, so the template re-renders on them).
+vi.mock("@/composables/useAccountWidening", async () => {
+	const { ref } = await import("vue")
+	const busy = ref(false)
+	const outcome = ref<{ kind: string; count?: number } | null>(null)
+	const script = { next: { kind: "unchanged" } as { kind: string; count?: number }, calls: 0 }
+	return {
+		useAccountWidening: () => ({
+			busy,
+			outcome,
+			addAccounts: async () => {
+				script.calls++
+				outcome.value = script.next
+				return script.next
+			},
+		}),
+		__wideningScript: Object.assign(script, { busy, outcome }),
+	}
+})
+import * as wideningModule from "@/composables/useAccountWidening"
 import { __resetOpsInFlightForTests, withOperation } from "@/composables/useOpsInFlight"
 import { __resetToastsForTests, useToast } from "@/composables/useToast"
 import { __resetWalletConnectionForTests, useWalletConnection } from "@/composables/useWalletConnection"
@@ -130,6 +151,47 @@ describe("AccountSwitcher", () => {
 		expect(c.selectedAccount.value).toBe(ADDR_A)
 		expect(toasts.value).toHaveLength(0)
 		expect(w.find(sel(TESTIDS.accountMenu)).exists()).toBe(false)
+	})
+
+	it("Add accounts…: the foot action asks the wallet and reports the outcome on a status line", async () => {
+		const script = (wideningModule as unknown as { __wideningScript: { next: { kind: string; count?: number }; calls: number } })
+			.__wideningScript
+		script.next = { kind: "added", count: 1 }
+		connectSession()
+		const w = mountSwitcher()
+		await w.find(sel(TESTIDS.accountChip)).trigger("click")
+		expect(w.find(sel(TESTIDS.accountMenuAddStatus)).exists()).toBe(false)
+		const add = w.find(sel(TESTIDS.accountMenuAddAccounts))
+		expect(add.text()).toBe("Add accounts…")
+		await add.trigger("click")
+		await w.vm.$nextTick()
+		expect(script.calls).toBe(1)
+		expect(w.find(sel(TESTIDS.accountMenuAddStatus)).text()).toBe("Added 1 account")
+
+		script.next = { kind: "unchanged" }
+		await add.trigger("click")
+		await w.vm.$nextTick()
+		expect(w.find(sel(TESTIDS.accountMenuAddStatus)).text()).toBe("No accounts were added")
+	})
+
+	it("Add accounts… is disabled while an operation is in flight or a request is up", async () => {
+		const script = (wideningModule as unknown as { __wideningScript: { busy: { value: boolean } } }).__wideningScript
+		connectSession()
+		const w = mountSwitcher()
+		let release: () => void = () => {}
+		const span = withOperation(() => new Promise<void>((res) => (release = res)))
+		await w.find(sel(TESTIDS.accountChip)).trigger("click")
+		expect(w.find(sel(TESTIDS.accountMenuAddAccounts)).attributes("disabled")).toBeDefined()
+		release()
+		await span
+		await w.vm.$nextTick()
+		expect(w.find(sel(TESTIDS.accountMenuAddAccounts)).attributes("disabled")).toBeUndefined()
+
+		script.busy.value = true
+		await w.vm.$nextTick()
+		expect(w.find(sel(TESTIDS.accountMenuAddAccounts)).attributes("disabled")).toBeDefined()
+		expect(w.find(sel(TESTIDS.accountMenuAddAccounts)).text()).toBe("Asking your wallet…")
+		script.busy.value = false
 	})
 
 	it("while an operation is in flight: rows disabled, hint shown, click does nothing", async () => {
