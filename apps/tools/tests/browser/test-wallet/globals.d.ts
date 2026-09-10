@@ -16,6 +16,11 @@ export interface TestWalletControl {
 	failNext: (method: string, pattern?: string, message?: string) => void
 	/** The next matching call never answers — a wallet gone mid-call; only a reload gets past it. One shot. */
 	holdNext: (method: string, pattern?: string) => void
+	/** The next matching call RUNS but never answers — the transaction is sent, the reply is lost. One shot. */
+	swallowNext: (method: string, pattern?: string) => void
+	/** The next transaction handed to the node is recorded and thrown away: the page gets its hash,
+	 *  the node never sees it. One shot. */
+	dropNextSubmission: () => Promise<void>
 	/** The next capability prompt grants no contract scope — a declined token grant. One shot. */
 	declineNextGrant: () => Promise<void>
 }

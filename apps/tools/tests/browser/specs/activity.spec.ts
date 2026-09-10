@@ -6,7 +6,7 @@ import { connectAztec, tid } from "../pages/connect"
 import { depositRecords } from "../pages/journal"
 import { confirmReview, connectL1, openSend, reviewDeposit, waitForReceipt } from "../pages/send"
 
-test.use({ family: "activity", cells: 2, l1Index: 5 })
+test.use({ family: "activity", cells: 4, l1Index: 5 })
 
 const USDC = 10n ** 6n
 const L1 = 31337
@@ -86,4 +86,52 @@ test("cell 39 — a send sent to the background keeps running: the strip follows
 	await page.locator(tid(TESTIDS.tabActivity)).click()
 	await expect(page.locator(tid(TESTIDS.journalCard)).first()).toHaveAttribute("data-stage", "done", { timeout: 60_000 })
 	expect((await depositRecords(page)).at(-1)?.claimTxHash).toBeTruthy()
+})
+
+test("cell 40 — two tabs, two sends racing: each stepper adopts only its own record, both land, both feeds list both", async ({
+	page,
+	context,
+	sandbox,
+	actor,
+	pool,
+	l1,
+}) => {
+	const b = pool.take()
+	const { usdt } = sandbox.tokens
+	await mint(sandbox.clients.l1, usdt.erc20 as `0x${string}`, l1.address, 400n * USDC)
+
+	// Tab 1 as A, tab 2 as B: the same origin, so the journal is one localStorage both tabs read.
+	const tab2 = await context.newPage()
+	for (const [tab, who] of [
+		[page, actor],
+		[tab2, b],
+	] as const) {
+		await tab.goto("/")
+		await openSend(tab)
+		await connectL1(tab)
+		await connectAztec(tab, { profile: "plain", account: who.address })
+		await reviewDeposit(tab, { l1ChainId: L1, erc20: usdt.erc20, amount: "100", intent: "token+gas", isPrivate: false })
+	}
+	// Both confirms are pressed before either send has journaled its record, so each wizard sees the
+	// other's record appear mid-send — the provenance rule is exercised, not just the happy path.
+	await Promise.all([confirmReview(page), confirmReview(tab2)])
+	await expect(page.locator(tid(TESTIDS.stepper))).toBeVisible({ timeout: 120_000 })
+	await expect(tab2.locator(tid(TESTIDS.stepper))).toBeVisible({ timeout: 120_000 })
+	await expect.poll(async () => (await depositRecords(page)).length, { timeout: 180_000 }).toBe(2)
+
+	const [r1, r2] = await Promise.all([waitForReceipt(page), waitForReceipt(tab2)])
+	expect(r1.hero).toContain("USDT")
+	expect(r2.hero).toContain("USDT")
+	const records = await depositRecords(page)
+	expect(records).toHaveLength(2)
+	expect(records.every((r) => r.claimTxHash)).toBe(true)
+	const recipients = records.map((r) => (r.recipient ?? "").toLowerCase()).sort()
+	expect(recipients).toEqual([actor.address.toLowerCase(), b.address.toLowerCase()].sort())
+
+	for (const tab of [page, tab2]) {
+		await tab.locator(tid(TESTIDS.tabActivity)).click()
+		await expect(tab.locator(tid(TESTIDS.journalCard))).toHaveCount(2)
+		await expect(tab.locator(`${tid(TESTIDS.journalCard)}[data-stage="done"]`)).toHaveCount(2)
+	}
+	await tab2.close()
 })

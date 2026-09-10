@@ -1,12 +1,17 @@
-/** Recovery (cells 24a, 25): a claim interrupted by a reload completes from the journal; a declined grant signs nothing. */
+/**
+ * Recovery (cells 24a–c, 25): a claim interrupted by a reload completes from the journal; a claim
+ * the node dropped is offered again; a claim another submitter made first is found consumed; a
+ * declined grant signs nothing.
+ */
 import { balanceOf, freshToken, mint, setRoutable } from "@nulo/bridge-core/sandbox"
 import { TESTIDS } from "../../../src/lib/testids"
 import { expect, test } from "../fixtures/test"
 import { connectAztec, driveToConnected, tid, walletCalls, walletFrame } from "../pages/connect"
 import { depositRecords } from "../pages/journal"
+import { claimAsRelayer } from "../pages/relayer"
 import { confirmReview, connectL1, openSend, reviewDeposit } from "../pages/send"
 
-test.use({ family: "recovery", cells: 2, l1Index: 4 })
+test.use({ family: "recovery", cells: 4, l1Index: 4 })
 
 const USDC = 10n ** 6n
 const L1 = 31337
@@ -64,6 +69,98 @@ test("cell 24a — a fueled deposit interrupted by a reload after the Ethereum l
 	expect((await depositRecords(page)).at(-1)?.claimTxHash, "the claim landed from the journal").toBeTruthy()
 	expect((await walletCalls(page, run, "plain")).sendTx ?? 0, "sent by the reloaded page's wallet").toBeGreaterThanOrEqual(1)
 	expect((await balanceOf(usdtL2, actor.actor.address, "public")) - before).toBeGreaterThan(0n)
+})
+
+test("cell 24c — a claim the node dropped is offered again after three dropped polls, and the second claim lands", async ({
+	page,
+	run,
+	sandbox,
+	actor,
+	l1,
+}) => {
+	const { usdt } = sandbox.tokens
+	await mint(sandbox.clients.l1, usdt.erc20 as `0x${string}`, l1.address, 200n * USDC)
+	const usdtL2 = await actor.l2TokenOf(usdt)
+	const before = await balanceOf(usdtL2, actor.actor.address, "public")
+
+	await page.goto("/")
+	await openSend(page)
+	await connectL1(page)
+	await connectAztec(page, { profile: "plain", account: actor.address })
+	await reviewDeposit(page, { l1ChainId: L1, erc20: usdt.erc20, amount: "100", intent: "token+gas", isPrivate: false })
+	// The claim's transaction is recorded at the node hand-off and thrown away: the page holds a hash
+	// the node only ever reports as dropped.
+	await walletFrame(page, run, "plain").evaluate(() => window.__nuloTestWallet!.dropNextSubmission())
+	await confirmReview(page)
+	await expect.poll(async () => (await depositRecords(page)).at(-1)?.claimTxHash, { timeout: 8 * 60_000 }).toBeTruthy()
+	const dropped = (await depositRecords(page)).at(-1)?.claimTxHash
+
+	await page
+		.locator(tid(TESTIDS.tabActivity))
+		.click()
+		.catch(() => undefined)
+	const card = page.locator(`${tid(TESTIDS.journalCard)}[data-id]`).first()
+	await expect(card).toHaveAttribute("data-attention", "error", { timeout: 4 * 60_000 })
+	await expect(card.locator(tid(TESTIDS.journalAttention))).toContainText("The claim was dropped")
+	expect((await depositRecords(page)).at(-1)?.claimTxHash, "the dropped hash was cleared").toBeUndefined()
+
+	await card.locator(tid(TESTIDS.journalClaim)).click()
+	await expect(card).toHaveAttribute("data-stage", "done", { timeout: 8 * 60_000 })
+	const landed = (await depositRecords(page)).at(-1)?.claimTxHash
+	expect(landed, "a second claim landed").toBeTruthy()
+	expect(landed).not.toBe(dropped)
+	expect((await walletCalls(page, run, "plain")).sendTx ?? 0, "two claims were sent, one dropped").toBeGreaterThanOrEqual(2)
+	expect((await balanceOf(usdtL2, actor.actor.address, "public")) - before).toBeGreaterThan(0n)
+})
+
+test("cell 24b — a claim another submitter made first: today the record surfaces the consumed message as an error, sends nothing, and the token was credited once", async ({
+	page,
+	run,
+	sandbox,
+	actor,
+	l1,
+}) => {
+	const { usdt } = sandbox.tokens
+	await mint(sandbox.clients.l1, usdt.erc20 as `0x${string}`, l1.address, 200n * USDC)
+	const usdtL2 = await actor.l2TokenOf(usdt)
+	const before = await balanceOf(usdtL2, actor.actor.address, "public")
+
+	await page.goto("/")
+	await openSend(page)
+	await connectL1(page)
+	await connectAztec(page, { profile: "plain", account: actor.address })
+	await reviewDeposit(page, { l1ChainId: L1, erc20: usdt.erc20, amount: "100", intent: "token", isPrivate: false })
+	const hub = sandbox.manifest.bridge?.l2.hub.address ?? ""
+	expect(hub).not.toBe("")
+	await walletFrame(page, run, "plain").evaluate((hubAddress) => window.__nuloTestWallet!.holdNext("simulateTx", hubAddress), hub)
+	await confirmReview(page)
+	await expect.poll(async () => (await depositRecords(page)).at(-1)?.messageHash, { timeout: 180_000 }).toBeTruthy()
+	await expect.poll(async () => (await walletCalls(page, run, "plain")).simulateTx ?? 0, { timeout: 180_000 }).toBeGreaterThan(0)
+	expect((await walletCalls(page, run, "plain")).sendTx ?? 0, "no claim left this page's wallet").toBe(0)
+
+	// Someone else claims the same message through the hub while this page is stuck on its hold.
+	const record = (await depositRecords(page)).at(-1)
+	if (!record) throw new Error("no deposit record")
+	await claimAsRelayer(actor, record)
+	const credited = (await balanceOf(usdtL2, actor.actor.address, "public")) - before
+	expect(credited, "the relayer's claim credited the recipient").toBeGreaterThan(0n)
+
+	await page.reload()
+	await openSend(page)
+	await connectL1(page)
+	await reconnected(page, actor.address)
+	await page.locator(tid(TESTIDS.tabActivity)).click()
+	const card = page.locator(tid(TESTIDS.journalCard)).first()
+	await expect(card).toBeVisible()
+	// A rediscovered record with no claim hash is not auto-resumed; the click runs the claim, whose
+	// arrival probe finds the message consumed and — today — surfaces that as an error (the follow-up
+	// `tools-recovery` completes it on the message's own nullifier).
+	await card.locator(tid(TESTIDS.journalClaim)).click()
+	await expect(card).toHaveAttribute("data-attention", "error", { timeout: 4 * 60_000 })
+	await expect(card.locator(tid(TESTIDS.journalAttention))).toContainText(/nullified|consumed/i)
+	expect((await walletCalls(page, run, "plain")).sendTx ?? 0, "nothing was sent for a consumed message").toBe(0)
+	expect((await depositRecords(page)).at(-1)?.claimTxHash).toBeUndefined()
+	expect((await balanceOf(usdtL2, actor.actor.address, "public")) - before, "credited exactly once").toBe(credited)
 })
 
 test("cell 25 — a declined token grant ends on the review with the refusal; nothing is signed on Ethereum", async ({

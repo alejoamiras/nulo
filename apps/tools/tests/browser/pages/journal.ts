@@ -1,6 +1,8 @@
 /** The app's bridge journal, read from the page's storage: the exact figures a send recorded. */
 import { TxHash } from "@aztec/aztec.js/tx"
+import { SWAP_BRIDGE_ROUTER_ABI } from "@nulo/bridge-core"
 import type { Page } from "@playwright/test"
+import { decodeFunctionData } from "viem"
 
 export interface JournalDeposit {
 	id: string
@@ -12,6 +14,14 @@ export interface JournalDeposit {
 	claimTxHash?: string
 	registerTxHash?: string
 	fuel?: { received?: string; claimTxHash?: string }
+	/** The Aztec account the deposit claims to. */
+	recipient?: string
+	isPrivate?: boolean
+	/** PUBLIC deposits only: the raw claim secret the record carries (a private one is sealed). */
+	secret?: string
+	leafIndex?: string
+	/** The token message's inbox key, once the deposit receipt was read. */
+	messageHash?: string
 	/** The token block the send read back from the factory — what the harness derives the L2 token from. */
 	token?: {
 		erc20: string
@@ -66,6 +76,34 @@ function collect(v: unknown, direction: string, out: Record<string, unknown>[] =
 	if (typeof o.id === "string" && o.direction === direction) out.push(o)
 	else for (const x of Object.values(o)) collect(x, direction, out)
 	return out
+}
+
+/** The Permit2 fields the deposit transaction carried on-chain — what the signed permit must equal. */
+export interface DepositPermitCalldata {
+	functionName: "bridge" | "bridgeWithFuel"
+	to: string
+	nonce: bigint
+	deadline: bigint
+	bridgeToken: string
+	amount: bigint
+}
+
+type PublicClientLike = { getTransaction: (a: { hash: `0x${string}` }) => Promise<{ to?: string | null; input: `0x${string}` }> }
+
+/** Decode the router call the journal's deposit hash points at: the entry, its token and total, and the permit. */
+export async function depositCalldata(pub: unknown, depositTxHash: string): Promise<DepositPermitCalldata> {
+	const tx = await (pub as PublicClientLike).getTransaction({ hash: depositTxHash as `0x${string}` })
+	const decoded = decodeFunctionData({ abi: SWAP_BRIDGE_ROUTER_ABI, data: tx.input })
+	const [p, permit] = decoded.args as unknown as [Record<string, unknown>, { nonce: bigint; deadline: bigint }]
+	const functionName = decoded.functionName as DepositPermitCalldata["functionName"]
+	return {
+		functionName,
+		to: (tx.to ?? "").toLowerCase(),
+		nonce: permit.nonce,
+		deadline: permit.deadline,
+		bridgeToken: String(p.bridgeToken).toLowerCase(),
+		amount: (functionName === "bridge" ? p.amount : p.totalAmount) as bigint,
+	}
 }
 
 type NodeLike = { getTxReceipt: (hash: TxHash) => Promise<{ transactionFee?: bigint }> }

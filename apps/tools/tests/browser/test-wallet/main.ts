@@ -40,17 +40,22 @@ function boot(): Promise<TestWallet> {
  *  otherwise invisible from the page. Methods are bound to the real wallet so its private fields
  *  keep working; the proxy only observes. */
 let callSeq = 0
-type Fault = { method: string; pattern?: string } & ({ kind: "reject"; message: string } | { kind: "hold" })
+type Fault = { method: string; pattern?: string } & ({ kind: "reject"; message: string } | { kind: "hold" } | { kind: "swallow" })
 let fault: Fault | undefined
 /** The one-shot fault, consumed by the first matching call; `undefined` when this call is not it.
  *  A rejection answers the call with an error; a hold never answers it at all (the page that made
- *  it must be reloaded to get past it — the shape of a wallet that went away mid-call). */
-function faultFor(method: string, args: unknown[]): Promise<never> | undefined {
+ *  it must be reloaded to get past it — the shape of a wallet that went away mid-call); a swallow
+ *  RUNS the call but never answers it — a wallet that sent the transaction and lost the reply. */
+function faultFor(method: string, args: unknown[]): Promise<never> | "swallow" | undefined {
 	if (!fault || fault.method !== method) return undefined
 	if (fault.pattern !== undefined && !JSON.stringify(args, (_, v) => (typeof v === "bigint" ? v.toString() : v)).includes(fault.pattern))
 		return undefined
 	const taken = fault
 	fault = undefined
+	if (taken.kind === "swallow") {
+		line("warn", `injected swallow on ${method}: the call runs, the page never hears back`)
+		return "swallow"
+	}
 	if (taken.kind === "hold") {
 		line("warn", `injected hold on ${method}: this call never answers`)
 		return new Promise<never>(() => {})
@@ -73,6 +78,13 @@ function traced(wallet: TestWallet): TestWallet {
 				line("info", `→ ${prop} #${id}`)
 				const settle = (mark: string) => line("info", `${mark} ${prop} #${id} ${Math.round(performance.now() - t0)}ms`)
 				const injected = faultFor(prop, args)
+				if (injected === "swallow") {
+					void Promise.resolve(value.apply(target, args)).then(
+						() => settle("← (swallowed)"),
+						() => settle("✗ (swallowed)"),
+					)
+					return new Promise<never>(() => {})
+				}
 				if (injected) {
 					settle("✗")
 					return injected
@@ -130,6 +142,12 @@ window.__nuloTestWallet = {
 	},
 	holdNext: (method, pattern) => {
 		fault = { kind: "hold", method, pattern }
+	},
+	swallowNext: (method, pattern) => {
+		fault = { kind: "swallow", method, pattern }
+	},
+	dropNextSubmission: async () => {
+		;(await boot()).dropNextSubmission = true
 	},
 	declineNextGrant: async () => {
 		;(await boot()).declineNextGrant = true

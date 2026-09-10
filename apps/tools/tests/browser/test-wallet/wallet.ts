@@ -67,6 +67,10 @@ export class TestWallet extends EmbeddedWallet {
 	 *  declines the token prompt leaves the dApp with. One shot. */
 	declineNextGrant = false
 
+	/** Armed by the suite: the next transaction handed to the node is recorded and never forwarded —
+	 *  the page holds a hash the node will only ever report as dropped. One shot. */
+	dropNextSubmission = false
+
 	/** Grants exactly what was asked, with every imported account — the suite's whole actor pool. */
 	// biome-ignore lint/suspicious/noExplicitAny: the SDK's manifest/grant types are zod-inferred and not exported usably.
 	override async requestCapabilities(manifest: any): Promise<any> {
@@ -110,7 +114,8 @@ export class TestWallet extends EmbeddedWallet {
 	 *  transaction, so the payer is dropped and the account's own balance pays. A payload carrying
 	 *  `claim_and_end_setup` to the protocol FeeJuice really is a claim and passes through. */
 	/** The hand-off to the node is where the fees are final — the SDK completes them after `sendTx`'s
-	 *  options — so that is where a submission is recorded. Observation only: the call goes through. */
+	 *  options — so that is where a submission is recorded. Observation only, unless the suite armed
+	 *  a drop: then the recorded transaction is not forwarded at all. */
 	private observeSubmissions(): void {
 		const node = this.aztecNode
 		const observed = new Proxy(node, {
@@ -124,6 +129,10 @@ export class TestWallet extends EmbeddedWallet {
 						daGas: Number(gas.gasLimits.daGas),
 						l2Gas: Number(gas.gasLimits.l2Gas),
 					})
+					if (this.dropNextSubmission) {
+						this.dropNextSubmission = false
+						return
+					}
 					return (Reflect.get(target, "sendTx", target) as (t: Tx) => Promise<void>)(tx)
 				}
 			},
