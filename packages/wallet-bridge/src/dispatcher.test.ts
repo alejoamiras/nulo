@@ -2490,15 +2490,19 @@ describe("dispatcher.requestCapabilities — accounts widening", () => {
 		expect(session.accountAliases).toEqual({ [caip(A)]: "first" })
 	})
 
-	test("the grant revoked between popup and decision → CapabilityNotGrantedError, nothing written", async () => {
+	test.each([
+		["membership-only", requestNarrow],
+		["field-diff", requestWide],
+	])("the grant revoked between popup and decision (%s) → CapabilityNotGrantedError, nothing written", async (_shape, request) => {
 		const session = held(narrow)
 		const { writer } = makeSessionWriter(session)
-		let revokedRow = session
+		// The row the service sees at apply time: the grant was revoked while the popup was open.
+		let revokedRow = { ...session, capabilityGrants: [] } as IDappSessionRef
 		const revokingWriter: IDappSessionWriter = {
 			...writer,
-			applyCapabilityDecision: async (id, decision) => {
-				revokedRow = applyDecisionTo({ ...revokedRow, capabilityGrants: [] } as IDappSessionRef, decision)
-				return writer.applyCapabilityDecision(id, decision)
+			applyCapabilityDecision: async (_id, decision) => {
+				revokedRow = applyDecisionTo(revokedRow, decision)
+				return revokedRow
 			},
 		}
 		const account: AccountFake = {
@@ -2514,8 +2518,30 @@ describe("dispatcher.requestCapabilities — accounts widening", () => {
 			requestCapabilities: (async (params: Record<string, unknown>) => approveAll(params)) as never,
 		}
 		const dispatcher = new WalletSdkDispatcher(networkReader, account, stubExecution, interaction, revokingWriter, noopLogger)
-		await expect(dispatcher.dispatch("requestCapabilities", [requestNarrow], ctx)).rejects.toBeInstanceOf(CapabilityNotGrantedError)
-		expect(revokedRow.accounts).toEqual([caip(A)])
+		await expect(dispatcher.dispatch("requestCapabilities", [request], ctx)).rejects.toBeInstanceOf(CapabilityNotGrantedError)
+		const row = revokedRow as IDappSessionRef & { accountAliases?: Record<string, string> }
+		expect(row.accounts).toEqual([caip(A)])
+		expect(row.accountAliases).toEqual({ [caip(A)]: "first" })
+		expect(row.capabilityGrants).toEqual([])
+	})
+
+	test("a hostile popup echo cannot add an account the picker never showed, nor aliases for anything but the additions", async () => {
+		const C = `0x${"cc".repeat(32)}`
+		const answer = (params: Record<string, unknown>): CapabilityResult => ({
+			...approveAll(params),
+			selectedAccounts: [caip(A), caip(B), caip(C)],
+			accountAliases: {
+				[caip(A)]: "overwrite",
+				[caip(B)]: "alias-bb",
+				[caip(C)]: "phantom",
+				[caip(`0x${"dd".repeat(32)}`)]: "stray",
+			},
+		})
+		const { dispatcher, current } = harness({ session: held(narrow), profile: [{ address: A }, { address: B }], answer })
+		await dispatcher.dispatch("requestCapabilities", [requestNarrow], ctx)
+		const session = (await current()) as IDappSessionRef & { accountAliases?: Record<string, string> }
+		expect(session.accounts).toEqual([caip(A), caip(B)])
+		expect(session.accountAliases).toEqual({ [caip(A)]: "first", [caip(B)]: "alias-bb" })
 	})
 
 	test("ungrantedAccounts is chain-blind on case and ignores held addresses", () => {

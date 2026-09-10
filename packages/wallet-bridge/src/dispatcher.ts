@@ -315,6 +315,8 @@ type CapabilityPlan = {
 	existingCaps: Capability[]
 	/** The session's stored accounts, CAIP-10 and raw hex alike (`sessionAccountsOf`). */
 	sessionAccounts: Set<string>
+	/** The rows the picker was given (wallet-derived): the only accounts a decision may add. */
+	availableAccounts?: Array<{ address: string; chainId: number }>
 	/** Set when the popup's picker opens for a session that already holds an accounts grant: the
 	 *  held rows are locked, and the decision only ever ADDS membership — with equal flags the
 	 *  stored grant is never replaced (the popup's echo could otherwise drop the authwit rider). */
@@ -429,13 +431,16 @@ function mergeGrantsAndRejections(result: CapabilityResult, plan: CapabilityPlan
 	}
 }
 
-/** Only accounts the session does not already hold are added, and only their aliases are
- *  written: the popup echoes locked (held) rows as selected, and a stored alias is never
- *  overwritten by the picker's default. */
+/** Only accounts the picker OFFERED and the session does not already hold are added, and only
+ *  their aliases are written. The popup's echo is not trusted for identity: a row the wallet never
+ *  showed cannot be added, a held row's stored alias is never overwritten by the picker's default,
+ *  and an alias for anything but an accepted addition is dropped. */
 function accountsAdditions(result: CapabilityResult, plan: CapabilityPlan): Pick<CapabilityDecisionInput, "addAccounts" | "aliasPatch"> {
 	if ((result.selectedAccounts?.length ?? 0) === 0) return { addAccounts: [], aliasPatch: {} }
-	const addAccounts = (result.selectedAccounts ?? []).filter((caip) => !plan.sessionAccounts.has(caip))
-	const aliasPatch = Object.fromEntries(Object.entries(result.accountAliases ?? {}).filter(([caip]) => !plan.sessionAccounts.has(caip)))
+	const offered = new Set((plan.availableAccounts ?? []).map((a) => formatCaipAccount(a.chainId, a.address).toLowerCase()))
+	const addAccounts = (result.selectedAccounts ?? []).filter((caip) => offered.has(caip.toLowerCase()) && !plan.sessionAccounts.has(caip))
+	const accepted = new Set(addAccounts)
+	const aliasPatch = Object.fromEntries(Object.entries(result.accountAliases ?? {}).filter(([caip]) => accepted.has(caip)))
 	return { addAccounts, aliasPatch }
 }
 
@@ -1138,6 +1143,7 @@ export class WalletSdkDispatcher {
 		const availableAccounts = plan.delta.some((cap) => cap.type === "accounts")
 			? await this.loadAvailableAccountsForPopup(ctx)
 			: undefined
+		plan.availableAccounts = availableAccounts
 
 		let result: CapabilityResult
 		try {
@@ -1177,10 +1183,11 @@ export class WalletSdkDispatcher {
 		}
 	}
 
-	/** A session that already holds accounts is widened, never re-granted: the picker locks the
-	 *  held rows and the decision only adds. Chain-scoped — the session stores CAIP-10 entries and a
-	 *  profile can hold accounts on other chains; hidden accounts are not offered (`getAccounts`
-	 *  lists visible ones). */
+	/** A session that already holds accounts: the picker locks the held rows, and a membership-only
+	 *  request (equal flags) only adds — the stored grant is never replaced; a flag change still
+	 *  takes the replacement path. Chain-scoped — the session stores CAIP-10 entries and a profile
+	 *  can hold accounts on other chains; hidden accounts are not offered (`getAccounts` lists
+	 *  visible ones). */
 	private async applyAccountsWidening(
 		plan: CapabilityPlan,
 		requested: AccountsCapability,

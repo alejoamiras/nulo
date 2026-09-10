@@ -1,7 +1,7 @@
 import { expect, inject } from "vitest"
 import type { Page } from "puppeteer"
 import { clickByTestId, openPopup, test } from "../fixtures/extension"
-import { switchAccountByAddress } from "../fixtures/helpers"
+import { getAccountAddress, switchAccountByAddress } from "../fixtures/helpers"
 import { assertPgOk, callExpectingNoPopup, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import {
@@ -50,6 +50,13 @@ test.skipIf(!hasConfig)(
 
 		await mintPublicTokensForAccount(config, a)
 
+		// The fixture's second account is created (and thereby activated) during setup: make A the
+		// active account explicitly, so the switch below is a real transition.
+		const setup = await openPopup(ctx)
+		await switchAccountByAddress(setup, a)
+		expect(lower(await getAccountAddress(setup))).toBe(lower(a))
+		await setup.close()
+
 		const before = await callExpectingNoPopup(ctx, page, "getAccounts", () => clickByTestId(page, "pg-btn-getAccounts"))
 		await assertPgOk(page, before, "live-session:getAccounts-before")
 		const listedBefore = (before.resultJson as Array<{ item: string }>).map((x) => lower(x.item))
@@ -58,6 +65,7 @@ test.skipIf(!hasConfig)(
 		// The switch happens in the wallet's own UI, with the dApp connected the whole time.
 		const popup = await openPopup(ctx)
 		await switchAccountByAddress(popup, b)
+		expect(lower(await getAccountAddress(popup))).toBe(lower(b))
 		await popup.close()
 
 		const after = await callExpectingNoPopup(ctx, page, "getAccounts", () => clickByTestId(page, "pg-btn-getAccounts"))

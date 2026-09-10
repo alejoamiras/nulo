@@ -39,16 +39,10 @@ export function buildCapabilityItems(
 	const items: UICapabilityItem[] = []
 
 	for (const cap of delta) {
-		// `accounts` is rendered as the dedicated account picker section,
-		// not as a card in the delta list (popup orchestration owns that
-		// split). Its `canCreateAuthWit` sub-permission DOES get a card — a
-		// rider the user can individually deselect (deselection strips the
-		// flag from the accounts grant on approve). Boolean() coercion
-		// mirrors the dispatcher/scope-checker read, so a dApp sending a
-		// truthy non-boolean (`canCreateAuthWit: 1`) can't dodge the card.
-		// A membership-only widening asks for accounts the session already holds the flag for:
-		// the rider is then an existing grant (not deselectable), and the dispatcher keeps the
-		// stored accounts grant untouched whatever the popup echoes.
+		// `accounts` renders as the picker section, not a card; only its `canCreateAuthWit` rider
+		// gets one. Boolean() coercion mirrors enforcement, so a truthy non-boolean cannot dodge
+		// the card. On a membership-only widening the flag is already granted: the rider is an
+		// existing (non-deselectable) card, and the dispatcher keeps the stored grant regardless.
 		if (cap.type === "accounts") {
 			if (Boolean((cap as { canCreateAuthWit?: unknown }).canCreateAuthWit)) {
 				items.push({

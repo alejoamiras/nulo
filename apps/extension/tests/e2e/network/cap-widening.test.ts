@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import type { Page } from "puppeteer"
-import { clickByTestId, grantCapBundle, openPopup, test, type ExtensionContext } from "../fixtures/extension"
+import { clickByTestId, openPopup, test, type ExtensionContext } from "../fixtures/extension"
 import { createAccount } from "../fixtures/helpers"
 import { assertPgOk, callExpectingNoPopup, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveCapabilities, rejectCapabilities, waitForPopup, waitForPopupClosed } from "../fixtures/popups"
@@ -74,15 +74,23 @@ test.skipIf(!hasConfig)(
 		const ctx = dappConnectedExtension
 		const page = ctx.playgroundPage
 
-		const [first] = await grantCapBundle(ctx, page, "accounts", async (accountIds) => {
-			const address = accountIds[0]
-			if (!address) throw new Error("capabilities popup returned no accounts")
-			return [address]
+		// The first grant names the account with a per-dApp alias that is NOT the wallet's default
+		// name, so a widening that rewrote it with the picker's default would be caught.
+		await page.evaluate(() => {
+			const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')!
+			select.value = "accounts"
+			select.dispatchEvent(new Event("change", { bubbles: true }))
 		})
-		const a = lower(first as string)
+		const initialGrant = await requestAccountsAgain(ctx, page)
+		const firstRows = await readPickerRows(initialGrant.popup)
+		const first = firstRows[0]?.id
+		if (!first) throw new Error("capabilities popup returned no accounts")
+		const aliasA = "dapp-alias-A"
+		await approveCapabilities(initialGrant.popup, { accounts: [first], aliases: { [first]: aliasA } })
+		await assertPgOk(page, await waitForPgResult(page, "requestCapabilities", initialGrant.seq, 30_000), "cap-widening:grant")
+		const a = lower(first)
 		const initial = await grantedAccounts(ctx, page, "cap-widening:initial")
-		expect(initial.map((e) => e.item)).toEqual([a])
-		const aliasA = initial[0]!.alias
+		expect(initial).toEqual([{ alias: aliasA, item: a }])
 
 		await addWalletAccount(ctx, "Second")
 
@@ -97,7 +105,7 @@ test.skipIf(!hasConfig)(
 		// A locked row ignores the click: still selected afterwards.
 		await widen.popup.evaluate((id: string) => {
 			document.querySelector<HTMLElement>(`[data-testid="cap-account-item"][data-account-id="${id}"]`)?.click()
-		}, first as string)
+		}, first)
 		expect((await readPickerRows(widen.popup)).find((r) => r.id === a)?.selected).toBe(true)
 
 		await approveCapabilities(widen.popup, { accounts: [fresh!.id] })
