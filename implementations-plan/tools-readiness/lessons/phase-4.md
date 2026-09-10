@@ -25,6 +25,7 @@ Commit `9718f2cf` (arc 2).
 | `bun run e2e:tools -- specs/accounts.spec.ts specs/accounts-single.spec.ts` (own sandbox) | `4a5908ef` + the Phase 4 tree | 6 passed (3.8 min), exit 0 |
 | `bun run --cwd apps/tools typecheck` (app + browser suite) | `9718f2cf` | exit 0 |
 | `bun run lint` | `9718f2cf` | 0 errors |
+| the six cells again after the codex-loop fixes (`holdsArmed`, `refuseChooser`, the paused dropped-account branch): `bun run e2e:tools -- --shard=1/2` (own sandbox, retry 0) | `1d5c7d18` (arc-2 tip `55846712` + arc 3, which touches none of these files) | cells 41–46: 6/6 passed (arc-2 boundary) |
 
 The first run of the file failed cell 41 only, at `grantedAccounts` after "Add accounts…": the
 button is disabled while the wallet answers, focus leaves the menu, and the Escape the helper sent

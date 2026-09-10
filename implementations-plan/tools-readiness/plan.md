@@ -190,7 +190,7 @@ run's retry-0 tally and SHA are quoted in the phase's lessons file.
   test -- src/popup/windows/capabilities src/wallet/services/dapp-session`; exit 0. Layers: lint ·
   typecheck · unit.
 
-#### Phase 2: Extension e2e — widening, the active-account switch, the second-account send
+#### Phase 2: Extension e2e — widening, the active-account switch, the second-account send ✓ (`4cb608f4`, lessons/phase-2.md)
 - `apps/extension/tests/e2e/network/cap-widening.test.ts`: `grantCapBundle` with one account;
   `createAccount(setupPage, "Second")`; the playground re-requests `accounts`
   (`pg-btn-requestCapabilities`): the popup lists two rows, the first `[data-granted="true"]` and
@@ -257,7 +257,7 @@ run's retry-0 tally and SHA are quoted in the phase's lessons file.
 - **Validation gate**: `bun run lint`; `bun run --cwd apps/tools typecheck && bun run --cwd apps/tools test`;
   exit 0. Layers: lint · typecheck · unit.
 
-#### Phase 4: The accounts cells ✓ (`9718f2cf`, lessons/phase-4.md)
+#### Phase 4: The accounts cells ✓ (`9718f2cf`, re-run 6/6 at `1d5c7d18`, lessons/phase-4.md)
 - Fixture additions (arc 2, because these cells need them): `fixtures/l1-wallet.ts` `holdNext(kind,
   match?)` (the next matching call never answers; `match.to` narrows a transaction to its target —
   a deposit's router, not the ERC-20 approval that precedes it, `useSend.ts:695`) and per-method call
@@ -300,7 +300,7 @@ run's retry-0 tally and SHA are quoted in the phase's lessons file.
 
 ### Arc 3 — tools gaps (tests only under Option A)
 
-#### Phase 5: Recovery — dropped and consumed
+#### Phase 5: Recovery — dropped and consumed ✓ (`0d7be4e6`, lessons/phase-5.md)
 - Test wallet: `dropNextSubmission()` on the node hand-off proxy (`wallet.ts` `observeSubmissions`) —
   records the submission and returns without forwarding the transaction, so the page holds a hash
   the node only ever reports as dropped (one shot); `swallowNext(method, pattern)` — the call RUNS
@@ -322,7 +322,7 @@ run's retry-0 tally and SHA are quoted in the phase's lessons file.
 - **Validation gate**: `bun run --cwd apps/tools test`; `bun run e2e:tools -- tests/browser/specs/recovery.spec.ts`
   green at retry 0. Layers: lint · unit · e2e.
 
-#### Phase 6: Permit2 fields, a hostile token list
+#### Phase 6: Permit2 fields, a hostile token list ✓ (`1d5c7d18`, lessons/phase-6.md)
 - `fixtures/l1-wallet.ts`: every `eth_signTypedData_v4` payload recorded with its timestamp; `permits()`
   returns the parsed Permit2 messages (domain, `permitted.token`, `permitted.amount`, `spender`,
   `nonce`, `deadline`, witness).
@@ -341,7 +341,7 @@ run's retry-0 tally and SHA are quoted in the phase's lessons file.
   entry is listed as its own address, never merged into the manifest token.
 - **Validation gate**: the three spec files green at retry 0. Layers: lint · unit · e2e.
 
-#### Phase 7: Wallet loss mid-flow, two tabs, viewports
+#### Phase 7: Wallet loss mid-flow, two tabs, viewports ✓ (`0d7be4e6`, lessons/phase-7.md)
 - **No resubmission, no new recovery** (Option A). A missing hash never proves nothing was broadcast;
   the card already offers Discard on both hash-less shapes with "check your wallet activity" copy
   (`BridgeJournalCard.vue:169-186`), the engine refuses a hash-less withdraw as `unknown-outcome`
