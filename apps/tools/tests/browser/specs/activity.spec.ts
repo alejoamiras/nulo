@@ -112,12 +112,17 @@ test("cell 40 — two tabs, two sends racing: each stepper adopts only its own r
 		await connectAztec(tab, { profile: "plain", account: who.address })
 		await reviewDeposit(tab, { l1ChainId: L1, erc20: usdt.erc20, amount: "100", intent: "token+gas", isPrivate: false })
 	}
-	// Both confirms are pressed before either send has journaled its record, so each wizard sees the
-	// other's record appear mid-send — the provenance rule is exercised, not just the happy path.
-	await Promise.all([confirmReview(page), confirmReview(tab2)])
+	// Tab 2 confirms only once tab 1's record exists: a wizard that adopted a foreign record would
+	// adopt that one, and tab 1's stepper sees tab 2's record appear mid-send.
+	await confirmReview(page)
 	await expect(page.locator(tid(TESTIDS.stepper))).toBeVisible({ timeout: 120_000 })
+	await expect.poll(async () => (await depositRecords(page)).length, { timeout: 180_000 }).toBe(1)
+	await confirmReview(tab2)
 	await expect(tab2.locator(tid(TESTIDS.stepper))).toBeVisible({ timeout: 120_000 })
 	await expect.poll(async () => (await depositRecords(page)).length, { timeout: 180_000 }).toBe(2)
+	const own = async (who: string) => (await depositRecords(page)).find((r) => r.recipient?.toLowerCase() === who.toLowerCase())?.id
+	await expect(page.locator(tid(TESTIDS.stepper))).toHaveAttribute("data-id", (await own(actor.address)) ?? "missing")
+	await expect(tab2.locator(tid(TESTIDS.stepper))).toHaveAttribute("data-id", (await own(b.address)) ?? "missing")
 
 	const [r1, r2] = await Promise.all([waitForReceipt(page), waitForReceipt(tab2)])
 	expect(r1.hero).toContain("USDT")

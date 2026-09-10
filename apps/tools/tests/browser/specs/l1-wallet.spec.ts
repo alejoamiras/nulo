@@ -32,10 +32,12 @@ test("cell 26d — the Ethereum wallet never answers the deposit: today the relo
 	l1.holdNext("transaction", { to: router })
 	await confirmReview(page)
 	await expect(page.locator(tid(TESTIDS.stepper))).toBeVisible({ timeout: 120_000 })
-	await expect.poll(() => l1.permits().length, { timeout: 120_000 }).toBe(1)
-	await expect.poll(() => l1.calls("eth_sendTransaction"), { timeout: 120_000 }).toBeGreaterThanOrEqual(1)
+	await expect.poll(() => l1.holdsArmed(), { timeout: 120_000 }).toBe(0)
+	expect(l1.permits().length).toBe(1)
 	await expect.poll(async () => (await depositRecords(page)).length).toBe(1)
 	expect((await depositRecords(page)).at(-1)?.depositTxHash).toBeUndefined()
+	const signaturesBefore = l1.signatures
+	const transactionsBefore = l1.calls("eth_sendTransaction")
 
 	await page.reload()
 	await openSend(page)
@@ -47,14 +49,13 @@ test("cell 26d — the Ethereum wallet never answers the deposit: today the relo
 	await expect(card).toHaveAttribute("data-stage", "depositing")
 	await expect(card.locator(tid(TESTIDS.journalStage))).toContainText("never confirmed on Ethereum")
 	await expect(card.locator(tid(TESTIDS.journalClaim)), "no CLAIM without a deposit hash").toHaveCount(0)
-	const signaturesBefore = l1.signatures
 
-	// Discard is armed then confirmed; nothing further is asked of the wallet.
 	await card.locator(tid(TESTIDS.journalDiscard)).click()
 	await card.locator(tid(TESTIDS.journalDiscardConfirm)).click()
 	await expect(page.locator(tid(TESTIDS.journalCard))).toHaveCount(0)
 	expect((await depositRecords(page)).length).toBe(0)
-	expect(l1.signatures).toBe(signaturesBefore)
+	expect(l1.signatures, "nothing was signed after the hold").toBe(signaturesBefore)
+	expect(l1.calls("eth_sendTransaction"), "nothing was sent after the hold").toBe(transactionsBefore)
 })
 
 test("cell 26 — a refused signature ends the send on the review with the wallet's reason; nothing was sent", async ({

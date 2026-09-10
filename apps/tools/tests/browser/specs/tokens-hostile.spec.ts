@@ -25,9 +25,12 @@ test("cell 34b — a hostile community list: malformed entries never become tile
 	await connectAztec(page, { profile: "plain", account: actor.address })
 	await page.locator(tid(TESTIDS.sendDirectionDeposit)).click()
 
+	// The community list arrives after the manifest's tiles; its surviving entry marks it merged.
+	await expect(page.locator(`${tid(TESTIDS.sendTokenTile)}[data-key="${L1}:0x1111111111111111111111111111111111111111"]`)).toBeVisible({
+		timeout: 60_000,
+	})
 	const keys = await page.locator(tid(TESTIDS.sendTokenTile)).evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.key ?? ""))
-	// `decimals: 300` and a non-address are dropped entry by entry; the well-formed neighbour survives.
-	expect(keys).toEqual(expect.arrayContaining([`${L1}:0x1111111111111111111111111111111111111111`]))
+	// `decimals: 300` and a non-address are dropped entry by entry.
 	expect(keys).not.toEqual(expect.arrayContaining([`${L1}:0x4444444444444444444444444444444444444444`]))
 	expect(keys.some((k) => k.includes("not-an-address"))).toBe(false)
 	// The fake "USDC" at another address is its own tile, never folded into the manifest's USDC.

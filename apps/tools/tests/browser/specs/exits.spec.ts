@@ -143,7 +143,6 @@ test("cell 31b — the wallet sends the private exit but the page never hears ba
 	await confirmReview(page)
 	await expect.poll(async () => (await walletCalls(page, run, "plain")).sendTx ?? 0, { timeout: 180_000 }).toBe(1)
 	await expect.poll(async () => (await exitRecords(page)).length, { timeout: 60_000 }).toBe(1)
-	// The swallowed transaction still burned: the wallet sent it.
 	await expect.poll(() => balanceOf(l2Token, actor.actor.address, "private"), { timeout: 180_000 }).toBe(l2Before - 5n * USDC)
 	expect((await exitRecords(page)).at(-1)?.exitTxHash, "the page never learned the hash").toBeUndefined()
 	const kept = creditBefore - (await privateCreditOf(actor.s, fpc))

@@ -3,10 +3,11 @@
  * the node dropped is offered again; a claim another submitter made first is found consumed; a
  * declined grant signs nothing.
  */
-import { balanceOf, freshToken, mint, setRoutable } from "@nulo/bridge-core/sandbox"
+import { balanceOf, freshToken, mint, mintPrivateGasNote, privateFpc, setRoutable } from "@nulo/bridge-core/sandbox"
 import { TESTIDS } from "../../../src/lib/testids"
 import { expect, test } from "../fixtures/test"
 import { connectAztec, driveToConnected, tid, walletCalls, walletFrame } from "../pages/connect"
+import { walletCeiling } from "../pages/fees"
 import { depositRecords } from "../pages/journal"
 import { claimAsRelayer } from "../pages/relayer"
 import { confirmReview, connectL1, openSend, reviewDeposit } from "../pages/send"
@@ -122,6 +123,12 @@ test("cell 24b — a claim another submitter made first: today the record surfac
 }) => {
 	const { usdt } = sandbox.tokens
 	await mint(sandbox.clients.l1, usdt.erc20 as `0x${string}`, l1.address, 200n * USDC)
+	// A token-only claim pays from private gas credit; without it the wizard refuses the send.
+	await mintPrivateGasNote(
+		actor.s,
+		await privateFpc(actor.s),
+		((await walletCeiling(actor, { isPrivate: false, registers: false })) * 14n) / 10n,
+	)
 	const usdtL2 = await actor.l2TokenOf(usdt)
 	const before = await balanceOf(usdtL2, actor.actor.address, "public")
 
@@ -143,7 +150,7 @@ test("cell 24b — a claim another submitter made first: today the record surfac
 	if (!record) throw new Error("no deposit record")
 	await claimAsRelayer(actor, record)
 	const credited = (await balanceOf(usdtL2, actor.actor.address, "public")) - before
-	expect(credited, "the relayer's claim credited the recipient").toBeGreaterThan(0n)
+	expect(credited, "the relayer's claim credited the recipient the whole deposit").toBe(BigInt(record.amount ?? "0"))
 
 	await page.reload()
 	await openSend(page)
@@ -152,9 +159,7 @@ test("cell 24b — a claim another submitter made first: today the record surfac
 	await page.locator(tid(TESTIDS.tabActivity)).click()
 	const card = page.locator(tid(TESTIDS.journalCard)).first()
 	await expect(card).toBeVisible()
-	// A rediscovered record with no claim hash is not auto-resumed; the click runs the claim, whose
-	// arrival probe finds the message consumed and — today — surfaces that as an error (the follow-up
-	// `tools-recovery` completes it on the message's own nullifier).
+	// A rediscovered record with no claim hash is not auto-resumed: only the click runs the claim.
 	await card.locator(tid(TESTIDS.journalClaim)).click()
 	await expect(card).toHaveAttribute("data-attention", "error", { timeout: 4 * 60_000 })
 	await expect(card.locator(tid(TESTIDS.journalAttention))).toContainText(/nullified|consumed/i)

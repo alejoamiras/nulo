@@ -1,9 +1,5 @@
-/**
- * Another submitter claiming a deposit the page journaled: the sandbox relayer, through the same
- * hub path the integration suite drives. The page's record supplies exactly what a public claim
- * needs — the token block, the recipient, the amount, the raw secret, the leaf index — so what the
- * cell then proves is the UI's own behaviour on finding its message already consumed.
- */
+/** Another submitter consuming a PUBLIC deposit the page journaled: the sandbox relayer, from the
+ *  record's unsealed claim material (a private record seals its secret, so it cannot be relayed). */
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import type { SendResult } from "@nulo/bridge-core"
 import { claim } from "@nulo/bridge-core/sandbox"
