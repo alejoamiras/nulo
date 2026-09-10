@@ -124,4 +124,18 @@ describe("capabilities/build-items", () => {
 		expect(items[0].label).toBe("Unknown permission")
 		expect(items[0].isUnknown).toBe(true)
 	})
+
+	test("a membership-only widening renders the authwit rider as already granted (not deselectable)", () => {
+		const wide = { type: "accounts" as const, canCreateAuthWit: true, accounts: [] } as unknown as Parameters<
+			typeof buildCapabilityItems
+		>[0][number]
+		const items = buildCapabilityItems([wide], [], new Set(["accounts"]), { accountsMembershipOnly: true })
+		expect(items).toHaveLength(1)
+		expect(items[0].authwitRider).toBe(true)
+		expect(items[0].isNew).toBe(false)
+		expect(items[0].selected).toBe(true)
+		expect(items[0].reRequested).toBe(false)
+		// The stored flag stands whatever the popup echoes: no strip.
+		expect(buildGrantedAccountsCap(wide, items)).toBe(wide)
+	})
 })

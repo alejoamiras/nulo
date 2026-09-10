@@ -4,21 +4,31 @@
  * Shows the account name + chain pill + truncated address. When
  * selected, expands an "Alias" input that the parent persists into a
  * `caip → alias` map (delivered via `formatCaipAccount`).
+ *
+ * A `locked` row is one the session already holds: it renders selected, cannot be toggled by
+ * pointer or keyboard, and hides the alias input (the stored alias is not re-consented here).
  */
 import { getChainName } from "@/components/ui/utils.js"
 import { formatCaipAccount } from "@/wallet/utils/caip"
 import { trimAddress } from "@/utils/string"
 
-defineProps<{
+const props = defineProps<{
 	account: { address: string; name: string; chainId: number }
 	selected: boolean
 	alias?: string
 	disabled?: boolean
+	locked?: boolean
 }>()
 
 const emit = defineEmits(["toggle", "updateAlias"])
 
 const caip = (a: { address: string; chainId: number }) => formatCaipAccount(a.chainId, a.address)
+
+const inert = computed(() => Boolean(props.disabled || props.locked))
+
+const toggle = () => {
+	if (!inert.value) emit("toggle")
+}
 </script>
 
 <template>
@@ -27,11 +37,14 @@ const caip = (a: { address: string; chainId: number }) => formatCaipAccount(a.ch
 		:data-account-id="account.address"
 		:data-account-name="account.name"
 		:data-selected="selected || undefined"
+		:data-granted="locked || undefined"
 		role="button"
-		tabindex="0"
-		@click="emit('toggle')"
-		@keydown.enter="emit('toggle')"
-		:class="[$style.row, disabled && $style.row_disabled]"
+		:tabindex="inert ? -1 : 0"
+		:aria-disabled="inert || undefined"
+		@click="toggle"
+		@keydown.enter.prevent="toggle"
+		@keydown.space.prevent="toggle"
+		:class="[$style.row, disabled && $style.row_disabled, locked && $style.row_locked]"
 	>
 		<Flex align="center" gap="12" wide>
 			<Icon
@@ -46,7 +59,8 @@ const caip = (a: { address: string; chainId: number }) => formatCaipAccount(a.ch
 			<Flex direction="column" gap="2" wide :class="$style.row_text">
 				<Flex align="center" justify="between" gap="8" wide>
 					<span :class="$style.row_name">{{ account.name }}</span>
-					<span :class="$style.chain_label">{{ getChainName(account.chainId).toUpperCase() }}</span>
+					<span v-if="locked" :class="$style.chain_label">SHARED</span>
+					<span v-else :class="$style.chain_label">{{ getChainName(account.chainId).toUpperCase() }}</span>
 				</Flex>
 				<span :class="$style.row_address">
 					{{ trimAddress(account.address, 6, 4, "...") }}
@@ -55,7 +69,7 @@ const caip = (a: { address: string; chainId: number }) => formatCaipAccount(a.ch
 		</Flex>
 
 		<Flex
-			v-if="selected"
+			v-if="selected && !locked"
 			direction="column"
 			gap="4"
 			wide
@@ -130,6 +144,14 @@ const caip = (a: { address: string; chainId: number }) => formatCaipAccount(a.ch
 	cursor: default;
 	pointer-events: none;
 	opacity: 0.5;
+}
+
+.row_locked {
+	cursor: default;
+
+	&:hover {
+		background: transparent;
+	}
 }
 
 .row_check {

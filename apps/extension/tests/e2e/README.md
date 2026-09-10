@@ -162,6 +162,8 @@ Feature helpers in `fixtures/helpers.ts` (all `data-testid`-driven; reuse them r
 | `selectSendToken(page, symbol)` | On the Send page, picks a token in the picker and waits for the trigger to show it. |
 | `pinFromTokenPage(page)` / `readPinState(page)` | Token page "⋯" menu: toggle Pin to Home; read the item's `data-pinned`. |
 | `deployExtraTokensForAccount(config, account, [{ symbol, amount }])` (`fixtures/aztec.ts`) | Deploys and mints extra sandbox tokens for multi-token scenarios. |
+| `readPublicTokenBalance` / `readPublicFeeJuice(wallet, from, …)` (`fixtures/aztec.ts`) | Chain-side balance reads through the script wallet — the postcondition for "executed as account X" (the token moved from X, nobody else's balances moved), since receipts carry no sender. |
+| `grantCapBundle(ctx, page, bundle, pick)` + `approveCapabilities(popup, { accounts })` | Drives the capability popup. On a repeat `accounts` request for a session that already holds accounts, held rows render `data-granted="true"`, pre-selected and locked (a click is ignored); `approveCapabilities` only clicks rows that are not yet selected, so pass the NEW addresses. |
 
 Anti-throttle Chrome flags live in `launchExtension` (`extension.ts`):
 

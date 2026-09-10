@@ -147,6 +147,12 @@ export type CapabilityParams = {
 	existingGrants: unknown[]
 	reRequested?: string[]
 	availableAccounts?: Array<{ address: string; name: string; chainId: number }>
+	/** Raw hex addresses the session already holds on its chain (wallet-derived). Present only
+	 *  when the session has an accounts grant: the popup locks these rows and pre-selects them. */
+	grantedAccounts?: string[]
+	/** The accounts request differs from the stored grant only by membership (same flags): the
+	 *  authwit rider renders as already granted and the decision never replaces the grant. */
+	accountsMembershipOnly?: boolean
 }
 
 export type CapabilityResult = {

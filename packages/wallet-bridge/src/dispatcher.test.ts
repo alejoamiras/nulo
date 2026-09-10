@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll } from "vitest"
 import { CapabilityNotGrantedError, JobCancelledError, UserRejectedError } from "@nulo/extension-messaging/errors"
-import { unwrapOperationResult, WalletSdkDispatcher } from "./dispatcher"
+import { ungrantedAccounts, unwrapOperationResult, WalletSdkDispatcher } from "./dispatcher"
 import type { Capability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
 import type { CapabilityResult } from "./dapp-interaction-protocol"
 import type { Operation } from "./operation"
@@ -19,6 +19,9 @@ import type {
 /** Shared fake of the real DappSessionService.applyCapabilityDecision merge (B-14):
  *  deltas merged against the LATEST row. Returns the new row. */
 function applyDecisionTo(session: IDappSessionRef, decision: CapabilityDecision): IDappSessionRef {
+	const held = new Set((session.capabilityGrants ?? []).map((g) => g.capability.type as string))
+	const revoked = (decision.requiresGrant ?? []).find((type) => !held.has(type))
+	if (revoked !== undefined) throw new CapabilityNotGrantedError(revoked)
 	const next = { ...session } as IDappSessionRef & {
 		accounts: string[]
 		accountAliases?: Record<string, string>
@@ -2329,5 +2332,222 @@ describe("dispatcher.requestCapabilities provisions the dApp chain's default acc
 		await expect(dispatcher.dispatch("requestCapabilities", [manifest], ctx)).rejects.toThrow("unauthorized")
 		expect(popups).toBe(0)
 		expect(calls.setRejections).toEqual([])
+	})
+})
+
+// ---------------------------------------------------------------------------
+// Accounts widening — a session that already holds accounts is widened, never re-granted
+// ---------------------------------------------------------------------------
+
+describe("dispatcher.requestCapabilities — accounts widening", () => {
+	const A = `0x${"aa".repeat(32)}`
+	const B = `0x${"bb".repeat(32)}`
+	const caip = (address: string, chainId = 0) => `aztec:${chainId}:${address}`
+	const narrow: Capability = { type: "accounts", canGet: true, canCreateAuthWit: false, accounts: [] }
+	const wide: Capability = { type: "accounts", canGet: true, canCreateAuthWit: true, accounts: [] }
+	const requestNarrow = { capabilities: [{ type: "accounts", canGet: true, canCreateAuthWit: false }] }
+	const requestWide = { capabilities: [{ type: "accounts", canGet: true, canCreateAuthWit: true }] }
+
+	type Popup = { calls: number; params?: Record<string, unknown> }
+	function harness(opts: {
+		session: IDappSessionRef
+		profile: Array<{ address: string; chainId?: number }>
+		answer?: (params: Record<string, unknown>) => CapabilityResult
+	}) {
+		const popup: Popup = { calls: 0 }
+		const account: AccountFake = {
+			provisionDefaultAccount: declineProvision,
+			getAccounts: async (_profileId, chainId) =>
+				opts.profile
+					.filter((a) => (a.chainId ?? 0) === chainId)
+					.map((a) => ({ address: a.address, name: a.address.slice(0, 6), chainId })),
+		}
+		const networkReader: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] }
+		const { writer } = makeSessionWriter(opts.session)
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async (params: Record<string, unknown>) => {
+				popup.calls++
+				popup.params = params
+				return opts.answer?.(params) ?? { granted: [] }
+			}) as never,
+		}
+		const dispatcher = new WalletSdkDispatcher(networkReader, account, stubExecution, interaction, writer, noopLogger)
+		return { dispatcher, popup, current: () => writer.getDappSession("test-session-id") }
+	}
+	const approveAll = (params: Record<string, unknown>): CapabilityResult => {
+		const available = params.availableAccounts as Array<{ address: string; chainId: number }>
+		const delta = params.delta as Record<string, unknown>[]
+		return {
+			granted: [delta.find((c) => c.type === "accounts") as Record<string, unknown>],
+			selectedAccounts: available.map((a) => caip(a.address, a.chainId)),
+			accountAliases: Object.fromEntries(available.map((a) => [caip(a.address, a.chainId), `alias-${a.address.slice(2, 4)}`])),
+		}
+	}
+	const held = (grant: Capability, extra: Partial<IDappSessionRef> = {}) =>
+		makeSession({
+			accounts: [caip(A)],
+			accountAliases: { [caip(A)]: "first" },
+			capabilityGrants: [{ capability: grant, grantedAt: 1 }],
+			...extra,
+		})
+
+	test("same shape, every visible account held → no popup", async () => {
+		const { dispatcher, popup } = harness({ session: held(narrow), profile: [{ address: A }] })
+		await dispatcher.dispatch("requestCapabilities", [requestNarrow], ctx)
+		expect(popup.calls).toBe(0)
+	})
+
+	test("same shape, one ungranted account → popup carries grantedAccounts + accountsMembershipOnly", async () => {
+		const { dispatcher, popup } = harness({ session: held(narrow), profile: [{ address: A }, { address: B }] })
+		await dispatcher.dispatch("requestCapabilities", [requestNarrow], ctx)
+		expect(popup.calls).toBe(1)
+		expect(popup.params?.grantedAccounts).toEqual([A])
+		expect(popup.params?.accountsMembershipOnly).toBe(true)
+		expect(popup.params?.availableAccounts).toHaveLength(2)
+	})
+
+	test("an account on another chain is not ungranted (chain-scoped membership)", async () => {
+		const { dispatcher, popup } = harness({ session: held(narrow), profile: [{ address: A }, { address: B, chainId: 7 }] })
+		await dispatcher.dispatch("requestCapabilities", [requestNarrow], ctx)
+		expect(popup.calls).toBe(0)
+	})
+
+	test("membership-only approve adds only the new address, keeps the stored grant record and the held alias", async () => {
+		const { dispatcher, current } = harness({ session: held(narrow), profile: [{ address: A }, { address: B }], answer: approveAll })
+		await dispatcher.dispatch("requestCapabilities", [requestNarrow], ctx)
+		const session = (await current()) as IDappSessionRef & { accountAliases?: Record<string, string> }
+		expect(session.accounts).toEqual([caip(A), caip(B)])
+		expect(session.accountAliases).toEqual({ [caip(A)]: "first", [caip(B)]: "alias-bb" })
+		expect(session.capabilityGrants).toEqual([{ capability: narrow, grantedAt: 1 }])
+	})
+
+	test("membership-only approve whose echo drops the rider still keeps the stored flags", async () => {
+		const answer = (params: Record<string, unknown>): CapabilityResult => ({
+			...approveAll(params),
+			granted: [{ type: "accounts", canGet: true, canCreateAuthWit: false }],
+		})
+		const { dispatcher, current } = harness({ session: held(wide), profile: [{ address: A }, { address: B }], answer })
+		await dispatcher.dispatch("requestCapabilities", [requestWide], ctx)
+		const session = await current()
+		expect(session.capabilityGrants).toEqual([{ capability: wide, grantedAt: 1 }])
+		expect(session.accounts).toEqual([caip(A), caip(B)])
+	})
+
+	test("decline keeps the grant, its flags and aliases; the rejection is recorded", async () => {
+		const { dispatcher, current } = harness({ session: held(wide), profile: [{ address: A }, { address: B }] })
+		await dispatcher.dispatch("requestCapabilities", [requestWide], ctx)
+		const session = (await current()) as IDappSessionRef & { accountAliases?: Record<string, string> }
+		expect(session.capabilityGrants).toEqual([{ capability: wide, grantedAt: 1 }])
+		expect(session.accounts).toEqual([caip(A)])
+		expect(session.accountAliases).toEqual({ [caip(A)]: "first" })
+		expect(session.capabilityRejections?.map((r) => r.capabilityType)).toEqual(["accounts"])
+	})
+
+	test("after a declined widening, the same request with nothing left to add does not re-prompt", async () => {
+		const session = held(narrow, { capabilityRejections: [{ capabilityType: "accounts", rejectedAt: 1 }] })
+		const { dispatcher, popup } = harness({ session, profile: [{ address: A }] })
+		const result = (await dispatcher.dispatch("requestCapabilities", [requestNarrow], ctx)) as { granted: Array<{ type: string }> }
+		expect(popup.calls).toBe(0)
+		expect(result.granted.map((c) => c.type)).toEqual(["accounts"])
+	})
+
+	test("a re-prompt after a decline still locks the held rows", async () => {
+		const session = held(narrow, { capabilityRejections: [{ capabilityType: "accounts", rejectedAt: 1 }] })
+		const { dispatcher, popup } = harness({ session, profile: [{ address: A }, { address: B }] })
+		await dispatcher.dispatch("requestCapabilities", [requestNarrow], ctx)
+		expect(popup.calls).toBe(1)
+		expect(popup.params?.grantedAccounts).toEqual([A])
+		expect(popup.params?.reRequested).toEqual(["accounts"])
+	})
+
+	test("field-diff with an ungranted account replaces the flags, adds the address, keeps the held alias", async () => {
+		const { dispatcher, popup, current } = harness({
+			session: held(narrow),
+			profile: [{ address: A }, { address: B }],
+			answer: approveAll,
+		})
+		await dispatcher.dispatch("requestCapabilities", [requestWide], ctx)
+		expect(popup.params?.grantedAccounts).toEqual([A])
+		expect(popup.params?.accountsMembershipOnly).toBe(false)
+		const session = (await current()) as IDappSessionRef & { accountAliases?: Record<string, string> }
+		expect(session.capabilityGrants?.map((g) => g.capability)).toEqual([{ type: "accounts", canGet: true, canCreateAuthWit: true }])
+		expect(session.accounts).toEqual([caip(A), caip(B)])
+		expect(session.accountAliases?.[caip(A)]).toBe("first")
+	})
+
+	test("field-diff approving nothing new changes the flags and keeps membership", async () => {
+		const answer = (params: Record<string, unknown>): CapabilityResult => ({
+			granted: [(params.delta as Record<string, unknown>[])[0]],
+			selectedAccounts: [caip(A)],
+			accountAliases: { [caip(A)]: "renamed" },
+		})
+		const { dispatcher, current } = harness({ session: held(narrow), profile: [{ address: A }], answer })
+		await dispatcher.dispatch("requestCapabilities", [requestWide], ctx)
+		const session = (await current()) as IDappSessionRef & { accountAliases?: Record<string, string> }
+		expect(session.capabilityGrants?.map((g) => g.capability)).toEqual([{ type: "accounts", canGet: true, canCreateAuthWit: true }])
+		expect(session.accounts).toEqual([caip(A)])
+		expect(session.accountAliases).toEqual({ [caip(A)]: "first" })
+	})
+
+	test.each([
+		["membership-only", requestNarrow],
+		["field-diff", requestWide],
+	])("the grant revoked between popup and decision (%s) → CapabilityNotGrantedError, nothing written", async (_shape, request) => {
+		const session = held(narrow)
+		const { writer } = makeSessionWriter(session)
+		// The row the service sees at apply time: the grant was revoked while the popup was open.
+		let revokedRow = { ...session, capabilityGrants: [] } as IDappSessionRef
+		const revokingWriter: IDappSessionWriter = {
+			...writer,
+			applyCapabilityDecision: async (_id, decision) => {
+				revokedRow = applyDecisionTo(revokedRow, decision)
+				return revokedRow
+			},
+		}
+		const account: AccountFake = {
+			provisionDefaultAccount: declineProvision,
+			getAccounts: async () => [
+				{ address: A, name: "A", chainId: 0 },
+				{ address: B, name: "B", chainId: 0 },
+			],
+		}
+		const networkReader: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] }
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async (params: Record<string, unknown>) => approveAll(params)) as never,
+		}
+		const dispatcher = new WalletSdkDispatcher(networkReader, account, stubExecution, interaction, revokingWriter, noopLogger)
+		await expect(dispatcher.dispatch("requestCapabilities", [request], ctx)).rejects.toBeInstanceOf(CapabilityNotGrantedError)
+		const row = revokedRow as IDappSessionRef & { accountAliases?: Record<string, string> }
+		expect(row.accounts).toEqual([caip(A)])
+		expect(row.accountAliases).toEqual({ [caip(A)]: "first" })
+		expect(row.capabilityGrants).toEqual([])
+	})
+
+	test("a hostile popup echo cannot add an account the picker never showed, re-spell a held or new one, nor alias anything but the additions", async () => {
+		const C = `0x${"cc".repeat(32)}`
+		const upper = (s: string) => s.replace(/0x[0-9a-f]+$/i, (hex) => hex.toUpperCase())
+		const answer = (params: Record<string, unknown>): CapabilityResult => ({
+			...approveAll(params),
+			// A held address re-spelled (must not be re-added), a new one re-spelled (must land under
+			// the wallet's spelling), one the picker never showed, and a stray alias key.
+			selectedAccounts: [upper(caip(A)), upper(caip(B)), caip(C)],
+			accountAliases: {
+				[upper(caip(A))]: "overwrite",
+				[upper(caip(B))]: "alias-bb",
+				[caip(C)]: "phantom",
+				[caip(`0x${"dd".repeat(32)}`)]: "stray",
+			},
+		})
+		const { dispatcher, current } = harness({ session: held(narrow), profile: [{ address: A }, { address: B }], answer })
+		await dispatcher.dispatch("requestCapabilities", [requestNarrow], ctx)
+		const session = (await current()) as IDappSessionRef & { accountAliases?: Record<string, string> }
+		expect(session.accounts).toEqual([caip(A), caip(B)])
+		expect(session.accountAliases).toEqual({ [caip(A)]: "first", [caip(B)]: "alias-bb" })
+	})
+
+	test("ungrantedAccounts is chain-blind on case and ignores held addresses", () => {
+		expect(ungrantedAccounts([A.toUpperCase(), B], new Set([A]))).toEqual([B])
 	})
 })

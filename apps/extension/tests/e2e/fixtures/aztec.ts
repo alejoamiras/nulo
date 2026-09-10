@@ -841,6 +841,25 @@ export async function readPublicFeeJuice(
 	const { FeeJuiceArtifact } = await import("@aztec/protocol-contracts/fee-juice")
 	const feeJuice = await Contract.at(ProtocolContractAddress.FeeJuice, FeeJuiceArtifact, wallet)
 	const answer: unknown = await feeJuice.methods.balance_of_public(AztecAddress.fromStringUnsafe(address)).simulate({ from })
+	return unwrapSimulated(answer)
+}
+
+/** The public balance of the fixture token an address holds, read through the script wallet. */
+export async function readPublicTokenBalance(
+	wallet: InstanceType<typeof EmbeddedWallet>,
+	from: AztecAddress,
+	tokenAddress: string,
+	address: string,
+): Promise<bigint> {
+	const token = await TokenContract.at(AztecAddress.fromStringUnsafe(tokenAddress), wallet)
+	const answer: unknown = await token.methods
+		.balance_of_public(AztecAddress.fromStringUnsafe(address))
+		.simulate({ from, fee: { gasSettings: E2E_FEE_GAS } })
+	return unwrapSimulated(answer)
+}
+
+/** A utility simulation answers the bare value or `{ result }` depending on the SDK path. */
+function unwrapSimulated(answer: unknown): bigint {
 	const value = typeof answer === "object" && answer !== null && "result" in answer ? (answer as { result: unknown }).result : answer
 	return BigInt(value as bigint | number | string)
 }

@@ -9,6 +9,7 @@
  *     non-thrower; a locked wallet must decline auto-approve, NOT throw — this
  *     site was EXCLUDED from the sweep and must stay silent).
  */
+import { CapabilityNotGrantedError } from "@nulo/extension-messaging/errors"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { ServiceCollection } from "@/wallet/base"
@@ -117,6 +118,49 @@ describe("DappSessionService active-profile guards (Q19 preservation pins)", () 
 		browserApi.storage.local.get = realGet as typeof browserApi.storage.local.get
 		const raw = await browserApi.storage.local.get(null)
 		expect(Object.keys(raw as Record<string, unknown>).some((k) => k.startsWith("nulo:core:dappSessions@"))).toBe(false)
+	})
+})
+
+describe("applyCapabilityDecision requiresGrant", () => {
+	const accountsGrant = { capability: { type: "accounts" as const, canGet: true, canCreateAuthWit: false, accounts: [] }, grantedAt: 1 }
+	const widen = (requiresGrant?: string[]) => ({
+		addAccounts: ["aztec:1:0xbb"],
+		aliasPatch: { "aztec:1:0xbb": "second" },
+		grantRecords: [],
+		replaceTypes: [],
+		approvedTypes: ["accounts"],
+		rejectedTypes: [],
+		...(requiresGrant ? { requiresGrant } : {}),
+	})
+
+	async function sessionWithGrant() {
+		const { service: svc } = await makeService()
+		await svc.addDappSession({ url: "https://dapp.example" } as never, [], [], 0 as never, "1")
+		const session = await svc.tryGetDappSessionByOriginAndChain("https://dapp.example", "1", "p1")
+		await svc.applyCapabilityDecision(session!.id, {
+			addAccounts: ["aztec:1:0xaa"],
+			aliasPatch: {},
+			grantRecords: [accountsGrant as never],
+			replaceTypes: [],
+			approvedTypes: ["accounts"],
+			rejectedTypes: [],
+		})
+		return { svc, id: session!.id }
+	}
+
+	test("satisfied → the decision applies", async () => {
+		const { svc, id } = await sessionWithGrant()
+		const next = await svc.applyCapabilityDecision(id, widen(["accounts"]))
+		expect(next.accounts).toEqual(["aztec:1:0xaa", "aztec:1:0xbb"])
+	})
+
+	test("the grant is gone → CapabilityNotGrantedError and the row is untouched", async () => {
+		const { svc, id } = await sessionWithGrant()
+		await svc.setCapabilityGrants(id, [])
+		await expect(svc.applyCapabilityDecision(id, widen(["accounts"]))).rejects.toBeInstanceOf(CapabilityNotGrantedError)
+		const row = await svc.getDappSession(id)
+		expect(row.accounts).toEqual(["aztec:1:0xaa"])
+		expect(row.accountAliases ?? {}).toEqual({})
 	})
 })
 

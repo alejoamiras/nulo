@@ -313,6 +313,42 @@ type CapabilityPlan = {
 	reRequested: string[]
 	/** Existing grants shown to the popup — re-requested types are not "existing". */
 	existingCaps: Capability[]
+	/** The session's stored accounts, CAIP-10 and raw hex alike (`sessionAccountsOf`). */
+	sessionAccounts: Set<string>
+	/** The rows the picker was given (wallet-derived): the only accounts a decision may add. */
+	availableAccounts?: Array<{ address: string; chainId: number }>
+	/** Set when the popup's picker opens for a session that already holds an accounts grant: the
+	 *  held rows are locked, and the decision only ever ADDS membership — with equal flags the
+	 *  stored grant is never replaced (the popup's echo could otherwise drop the authwit rider). */
+	accountsWidening?: { granted: string[]; membershipOnly: boolean }
+}
+
+/** Profile accounts (raw hex) the session does not hold on this chain; hex compared case-blind. */
+export function ungrantedAccounts(profileAddresses: readonly string[], sessionAddresses: ReadonlySet<string>): string[] {
+	const held = new Set([...sessionAddresses].map((a) => a.toLowerCase()))
+	return profileAddresses.filter((a) => !held.has(a.toLowerCase()))
+}
+
+/** Widening classification for a session that already holds an accounts grant. Membership-only
+ *  (flags equal) with something to add joins the delta; a re-prompt after a declined widening
+ *  with nothing left to add would be a dead end (every row locked, nothing approvable) and is
+ *  answered from the stored grant instead; a field-diff keeps the replacement path. */
+function planAccountsWidening(
+	plan: CapabilityPlan,
+	requested: AccountsCapability,
+	held: ReadonlySet<string>,
+	ungranted: readonly string[],
+): void {
+	const stored = grantsOfType(plan.existingGrants, "accounts")[0]
+	if (stored === undefined) return
+	const membershipOnly = accountsCapsEqual(stored, requested)
+	const inDelta = plan.delta.some((cap) => cap.type === "accounts")
+	if (membershipOnly && ungranted.length > 0 && !inDelta) plan.delta.push(requested as unknown as Record<string, unknown>)
+	if (membershipOnly && ungranted.length === 0 && inDelta) {
+		plan.delta = plan.delta.filter((cap) => cap.type !== "accounts")
+		plan.reRequested = plan.reRequested.filter((type) => type !== "accounts")
+	}
+	if (plan.delta.some((cap) => cap.type === "accounts")) plan.accountsWidening = { granted: [...held], membershipOnly }
 }
 
 function computeCapabilityDelta(requestedCapabilities: Record<string, unknown>[], dappSession: IDappSessionRef): CapabilityPlan {
@@ -341,7 +377,15 @@ function computeCapabilityDelta(requestedCapabilities: Record<string, unknown>[]
 	})
 	const reRequested = requestedCapabilities.filter((cap) => rejectedTypes.has(cap.type as string)).map((cap) => cap.type as string)
 	const existingCaps = existingGrants.filter((g) => !rejectedTypes.has(g.capability.type)).map((g) => g.capability)
-	return { existingGrants, grantedTypes, rejectedTypes, delta, reRequested, existingCaps }
+	return {
+		existingGrants,
+		grantedTypes,
+		rejectedTypes,
+		delta,
+		reRequested,
+		existingCaps,
+		sessionAccounts: sessionAccountsOf(dappSession),
+	}
 }
 
 type CapabilityDecisionInput = {
@@ -351,6 +395,7 @@ type CapabilityDecisionInput = {
 	replaceTypes: string[]
 	approvedTypes: string[]
 	rejectedTypes: string[]
+	requiresGrant?: string[]
 }
 
 /** Folds the popup's answer into the ONE atomic decision the session row takes. */
@@ -361,23 +406,60 @@ function mergeGrantsAndRejections(result: CapabilityResult, plan: CapabilityPlan
 	const approvedTypes = new Set(grantedResults.map((cap) => cap.type as string))
 	const now = Date.now()
 	const deltaApprovedTypes = new Set(plan.delta.filter((cap) => approvedTypes.has(cap.type as string)).map((cap) => cap.type as string))
-	const newGrants = collectNewGrants(grantedResults, plan, deltaApprovedTypes, now)
+	// A membership-only widening keeps the stored accounts grant: the popup's echo is not a
+	// re-consent of the flags, so it must never replace the record.
+	const keepAccountsGrant = plan.accountsWidening?.membershipOnly === true && deltaApprovedTypes.has("accounts")
+	const newGrants = collectNewGrants(grantedResults, plan, deltaApprovedTypes, now).filter(
+		(g) => !(keepAccountsGrant && g.capability.type === "accounts"),
+	)
 
 	// Delta items NOT approved become rejections.
 	const rejectedDeltaTypes = plan.delta.filter((cap) => !approvedTypes.has(cap.type as string)).map((cap) => cap.type as string)
-	const hasAccountSelection = (result.selectedAccounts?.length ?? 0) > 0
 
 	return {
-		addAccounts: hasAccountSelection ? (result.selectedAccounts ?? []) : [],
-		aliasPatch: hasAccountSelection ? (result.accountAliases ?? {}) : {},
+		...accountsAdditions(result, plan),
 		grantRecords: newGrants,
-		replaceTypes: [...deltaApprovedTypes],
+		replaceTypes: [...deltaApprovedTypes].filter((type) => !(keepAccountsGrant && type === "accounts")),
 		// ONLY the delta types that were approved clear their rejection — NOT the
 		// full grantedResults set (the popup echoes untouched existing caps, and
 		// clearing their rejections would erase a concurrent unrelated rejection).
 		approvedTypes: [...deltaApprovedTypes],
 		rejectedTypes: rejectedDeltaTypes,
+		// The addition was consented against the grant the popup showed; revoked meanwhile, the
+		// writer refuses instead of adding accounts to a session that no longer holds it.
+		...(plan.accountsWidening !== undefined && deltaApprovedTypes.has("accounts") ? { requiresGrant: ["accounts"] } : {}),
 	}
+}
+
+/** Only accounts the picker OFFERED and the session does not already hold are added, and only
+ *  their aliases are written. The popup's echo is not trusted for identity: a row the wallet never
+ *  showed cannot be added, a held row's stored alias is never overwritten by the picker's default,
+ *  and an alias for anything but an accepted addition is dropped. */
+function accountsAdditions(result: CapabilityResult, plan: CapabilityPlan): Pick<CapabilityDecisionInput, "addAccounts" | "aliasPatch"> {
+	if ((result.selectedAccounts?.length ?? 0) === 0) return { addAccounts: [], aliasPatch: {} }
+	// Identities are the wallet's own CAIP spelling, never the echo's: the session stores and
+	// projects them case-sensitively, so a re-spelled echo must map back or be dropped.
+	const offered = new Map<string, string>(
+		(plan.availableAccounts ?? []).map((a) => [
+			formatCaipAccount(a.chainId, a.address).toLowerCase(),
+			formatCaipAccount(a.chainId, a.address),
+		]),
+	)
+	const held = new Set([...plan.sessionAccounts].map((entry) => entry.toLowerCase()))
+	const addAccounts = [
+		...new Set(
+			(result.selectedAccounts ?? [])
+				.map((caip) => offered.get(caip.toLowerCase()))
+				.filter((caip): caip is string => caip !== undefined && !held.has(caip.toLowerCase())),
+		),
+	]
+	const accepted = new Map(addAccounts.map((caip) => [caip.toLowerCase(), caip]))
+	const aliasPatch: Record<string, string> = {}
+	for (const [caip, alias] of Object.entries(result.accountAliases ?? {})) {
+		const canonical = accepted.get(caip.toLowerCase())
+		if (canonical !== undefined) aliasPatch[canonical] = alias
+	}
+	return { addAccounts, aliasPatch }
 }
 
 /** Safety net: ensure accounts capability is in granted when accounts were selected. */
@@ -1054,6 +1136,10 @@ export class WalletSdkDispatcher {
 
 		// Phase 1: existing grants/rejections → the delta to negotiate.
 		const plan = computeCapabilityDelta(requestedCapabilities, dappSession)
+		const requestedAccounts = requestedCapabilities.find((cap) => cap.type === "accounts")
+		if (requestedAccounts !== undefined && grantsOfType(plan.existingGrants, "accounts").length > 0) {
+			await this.applyAccountsWidening(plan, requestedAccounts as unknown as AccountsCapability, ctx, dappSession)
+		}
 
 		// Phase 2: Early return if all types already granted and none re-requested
 		if (plan.delta.length === 0) {
@@ -1075,6 +1161,7 @@ export class WalletSdkDispatcher {
 		const availableAccounts = plan.delta.some((cap) => cap.type === "accounts")
 			? await this.loadAvailableAccountsForPopup(ctx)
 			: undefined
+		plan.availableAccounts = availableAccounts
 
 		let result: CapabilityResult
 		try {
@@ -1085,6 +1172,8 @@ export class WalletSdkDispatcher {
 				existingGrants: plan.existingCaps,
 				reRequested: plan.reRequested,
 				availableAccounts,
+				grantedAccounts: plan.accountsWidening?.granted,
+				accountsMembershipOnly: plan.accountsWidening?.membershipOnly,
 			})
 		} catch (err) {
 			await this.persistRejectionOnPopupFailure(dappSession.id, plan.delta)
@@ -1110,6 +1199,31 @@ export class WalletSdkDispatcher {
 			granted,
 			wallet: { name: "Nulo", version: __VERSION__ },
 		}
+	}
+
+	/** A session that already holds accounts: the picker locks the held rows, and a membership-only
+	 *  request (equal flags) only adds — the stored grant is never replaced; a flag change still
+	 *  takes the replacement path. Chain-scoped — the session stores CAIP-10 entries and a profile
+	 *  can hold accounts on other chains; hidden accounts are not offered (`getAccounts` lists
+	 *  visible ones). */
+	private async applyAccountsWidening(
+		plan: CapabilityPlan,
+		requested: AccountsCapability,
+		ctx: SessionContext,
+		dappSession: IDappSessionRef,
+	): Promise<void> {
+		const network = await this.resolveNetwork(ctx)
+		const profileAccounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
+		const held = this.getSessionAccountAddresses(dappSession, network.chainId)
+		planAccountsWidening(
+			plan,
+			requested,
+			held,
+			ungrantedAccounts(
+				profileAccounts.map((acc) => acc.address),
+				held,
+			),
+		)
 	}
 
 	/** The dApp's chain may be one the user has never activated, so its default account may not
