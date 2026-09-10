@@ -26,6 +26,7 @@ Commit `9718f2cf` (arc 2).
 | `bun run --cwd apps/tools typecheck` (app + browser suite) | `9718f2cf` | exit 0 |
 | `bun run lint` | `9718f2cf` | 0 errors |
 | the six cells again after the codex-loop fixes (`holdsArmed`, `refuseChooser`, the paused dropped-account branch): `bun run e2e:tools -- --shard=1/2` (own sandbox, retry 0) | `1d5c7d18` (arc-2 tip `55846712` + arc 3, which touches none of these files) | cells 41–46: 6/6 passed (arc-2 boundary) |
+| **arc-2 boundary, on arc 2's OWN tip** (the cross-arc codex condition): `bun run e2e:tools -- --shard=1/2` ∥ `--shard=2/2`, own sandboxes, retry 0 | `5da57ede` | shard 1: 29 passed; shard 2: 29 passed — 58/58, exit 0 both |
 
 The first run of the file failed cell 41 only, at `grantedAccounts` after "Add accounts…": the
 button is disabled while the wallet answers, focus leaves the menu, and the Escape the helper sent

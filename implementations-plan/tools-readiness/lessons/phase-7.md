@@ -60,3 +60,11 @@ shipping a cell that could pass for the wrong reason. Transcripts in this sessio
   record exists.
 - A card with `data-attention` set narrates its note in the rail's failed phase (`journalStep`);
   `journalAttention` renders only soft notes and a blocked reason.
+
+## Codex cross-arc pass — converged at round 2
+
+| Round | Verdict | Findings → call |
+|---|---|---|
+| 1 | conditional approve | (1) the arc-2 boundary was evidenced on a tree that included arc 3's test wallet — the full tools suite re-run on arc 2's own tip, 58/58; (2) the forced chooser's Continue stayed enabled while the confirm silently refused under the gate — disabled with a hint, tested; (3) a stale comment on the paused path — replaced. All adopted, `5da57ede` (arc 2). |
+| 2 | **approve** | — |
+
