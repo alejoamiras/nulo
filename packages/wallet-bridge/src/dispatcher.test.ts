@@ -2525,14 +2525,17 @@ describe("dispatcher.requestCapabilities — accounts widening", () => {
 		expect(row.capabilityGrants).toEqual([])
 	})
 
-	test("a hostile popup echo cannot add an account the picker never showed, nor aliases for anything but the additions", async () => {
+	test("a hostile popup echo cannot add an account the picker never showed, re-spell a held or new one, nor alias anything but the additions", async () => {
 		const C = `0x${"cc".repeat(32)}`
+		const upper = (s: string) => s.replace(/0x[0-9a-f]+$/i, (hex) => hex.toUpperCase())
 		const answer = (params: Record<string, unknown>): CapabilityResult => ({
 			...approveAll(params),
-			selectedAccounts: [caip(A), caip(B), caip(C)],
+			// A held address re-spelled (must not be re-added), a new one re-spelled (must land under
+			// the wallet's spelling), one the picker never showed, and a stray alias key.
+			selectedAccounts: [upper(caip(A)), upper(caip(B)), caip(C)],
 			accountAliases: {
-				[caip(A)]: "overwrite",
-				[caip(B)]: "alias-bb",
+				[upper(caip(A))]: "overwrite",
+				[upper(caip(B))]: "alias-bb",
 				[caip(C)]: "phantom",
 				[caip(`0x${"dd".repeat(32)}`)]: "stray",
 			},

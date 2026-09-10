@@ -437,10 +437,28 @@ function mergeGrantsAndRejections(result: CapabilityResult, plan: CapabilityPlan
  *  and an alias for anything but an accepted addition is dropped. */
 function accountsAdditions(result: CapabilityResult, plan: CapabilityPlan): Pick<CapabilityDecisionInput, "addAccounts" | "aliasPatch"> {
 	if ((result.selectedAccounts?.length ?? 0) === 0) return { addAccounts: [], aliasPatch: {} }
-	const offered = new Set((plan.availableAccounts ?? []).map((a) => formatCaipAccount(a.chainId, a.address).toLowerCase()))
-	const addAccounts = (result.selectedAccounts ?? []).filter((caip) => offered.has(caip.toLowerCase()) && !plan.sessionAccounts.has(caip))
-	const accepted = new Set(addAccounts)
-	const aliasPatch = Object.fromEntries(Object.entries(result.accountAliases ?? {}).filter(([caip]) => accepted.has(caip)))
+	// Identities are the wallet's own CAIP spelling, never the echo's: the session stores and
+	// projects them case-sensitively, so a re-spelled echo must map back or be dropped.
+	const offered = new Map<string, string>(
+		(plan.availableAccounts ?? []).map((a) => [
+			formatCaipAccount(a.chainId, a.address).toLowerCase(),
+			formatCaipAccount(a.chainId, a.address),
+		]),
+	)
+	const held = new Set([...plan.sessionAccounts].map((entry) => entry.toLowerCase()))
+	const addAccounts = [
+		...new Set(
+			(result.selectedAccounts ?? [])
+				.map((caip) => offered.get(caip.toLowerCase()))
+				.filter((caip): caip is string => caip !== undefined && !held.has(caip.toLowerCase())),
+		),
+	]
+	const accepted = new Map(addAccounts.map((caip) => [caip.toLowerCase(), caip]))
+	const aliasPatch: Record<string, string> = {}
+	for (const [caip, alias] of Object.entries(result.accountAliases ?? {})) {
+		const canonical = accepted.get(caip.toLowerCase())
+		if (canonical !== undefined) aliasPatch[canonical] = alias
+	}
 	return { addAccounts, aliasPatch }
 }
 
