@@ -4,31 +4,12 @@
  * prompt. This composable owns exactly that decision — is it granted, and if not, raise ONE prompt
  * and report what came back.
  */
+import { __resetPromptQueueForTests, enqueuePrompt, MID_FLOW_STATUSES } from "@/lib/prompt-queue"
 import type { GrantOutcome, ResolvedToken } from "@/lib/send-model"
 import { requestHubToken, useWalletConnection } from "./useWalletConnection"
 
-/**
- * One prompt at a time, app-wide. Two selections racing would otherwise open two capability
- * requests whose approvals each REPLACE the stored grant, so the later approval could drop the
- * earlier token's scopes.
- */
-let promptQueue: Promise<void> = Promise.resolve()
-
-function enqueuePrompt<T>(run: () => Promise<T>): Promise<T> {
-	const next = promptQueue.then(run)
-	// The chain must outlive a rejected prompt: a queue left in a rejected state would fail every
-	// later request without ever reaching the wallet.
-	promptQueue = next.then(
-		() => undefined,
-		() => undefined,
-	)
-	return next
-}
-
-/** Test-only: drop the queue between cases. */
-export function __resetTokenGrantQueueForTests(): void {
-	promptQueue = Promise.resolve()
-}
+/** Test-only: drop the shared prompt queue between cases. */
+export const __resetTokenGrantQueueForTests = __resetPromptQueueForTests
 
 export interface TokenGrant {
 	isGranted(l2Token: string): boolean
@@ -37,10 +18,6 @@ export interface TokenGrant {
 	ensureGranted(token: ResolvedToken, epoch: () => number): Promise<GrantOutcome>
 	dispose(): void
 }
-
-/** Statuses in which the session is mid-flow: `retryCapabilities` no-ops in exactly these, so the
- *  wallet is never asked and never refuses anything. Any OTHER non-connected status is a real one. */
-const MID_FLOW_STATUSES = new Set(["discovering", "choosing", "verifying", "capability-approval", "choosing-account", "setting-up"])
 
 export function useTokenGrant(): TokenGrant {
 	const session = useWalletConnection()

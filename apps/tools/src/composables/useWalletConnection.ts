@@ -169,6 +169,15 @@ const session = createAztecWalletSession({
 	isSwitchBlocked: opsInFlight,
 })
 
+// A wallet-side change (an account added through the wallet's own UI, renamed, hidden) has no
+// event in the SDK; the app re-reads its granted accounts when the tab comes back into view. The
+// listener lives as long as the singleton — the page — so it is never removed.
+if (typeof document !== "undefined") {
+	document.addEventListener("visibilitychange", () => {
+		if (document.visibilityState === "visible") void session.refreshAccounts()
+	})
+}
+
 // Single owner of selection notices → toasts (plan D-25/D-29). The session pushes explicit
 // one-shot notices (auto-remembered selection, grant truncation); this MODULE — one instance,
 // unlike the three always-mounted panels — drains them exactly once. Panels never infer these

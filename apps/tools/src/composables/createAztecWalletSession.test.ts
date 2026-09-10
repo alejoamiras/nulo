@@ -23,7 +23,13 @@ vi.mock("@aztec/wallet-sdk/manager", () => ({
 	},
 }))
 
-import { createAztecWalletSession, type DiscoveredWallet, parseGrantedAccounts, parseGrantedContracts } from "./createAztecWalletSession"
+import {
+	createAztecWalletSession,
+	type DiscoveredWallet,
+	parseAccountList,
+	parseGrantedAccounts,
+	parseGrantedContracts,
+} from "./createAztecWalletSession"
 
 // ── Push-driven discovery stream ─────────────────────────────────────
 
@@ -684,7 +690,7 @@ const SELECTED_KEY = "test-app:selected-accounts"
 
 type GrantEntry = { alias?: unknown; item?: unknown } | null
 
-function makeMultiProvider(opts: { id?: string; accounts?: GrantEntry[] } = {}) {
+function makeMultiProvider(opts: { id?: string; accounts?: GrantEntry[]; list?: () => Promise<unknown> } = {}) {
 	const walletHandle = {
 		requestCapabilities: vi.fn(async () => ({
 			granted: [
@@ -697,6 +703,14 @@ function makeMultiProvider(opts: { id?: string; accounts?: GrantEntry[] } = {}) 
 				},
 			],
 		})),
+		getAccounts: vi.fn(async () =>
+			opts.list
+				? opts.list()
+				: (opts.accounts ?? [
+						{ alias: "Main", item: MA_A },
+						{ alias: "Savings", item: MA_B },
+					]),
+		),
 	}
 	const pending = {
 		verificationHash: "deadbeef",
@@ -986,6 +1000,106 @@ describe("multi-account: switching (selectAccount)", () => {
 		blocked = false
 		expect(s.selectAccount(MA_B)).toBe(true)
 		expect(s.selectedAccount.value).toBe(MA_B)
+	})
+})
+
+describe("multi-account: refreshAccounts (the visibility re-read)", () => {
+	async function connectedWith(list: () => Promise<unknown>, over: Parameters<typeof makeSessionWith>[0] = {}) {
+		const made = makeMultiProvider({ list })
+		const built = makeSessionWith(over)
+		await driveThroughGrant(built.session, made.provider)
+		await built.session.confirmAccountChoice(MA_A)
+		expect(built.session.status.value).toBe("connected")
+		return { ...made, ...built }
+	}
+	const three = async () => [
+		{ alias: "Main", item: MA_A },
+		{ alias: "Savings", item: MA_B },
+		{ alias: "Third", item: MA_C },
+	]
+
+	it("refreshed: a new account appears, the selection is kept", async () => {
+		const { session: s } = await connectedWith(three)
+		await expect(s.refreshAccounts()).resolves.toBe("refreshed")
+		expect(s.accounts.value.map((a) => a.address)).toEqual([MA_A, MA_B, MA_C])
+		expect(s.selectedAccount.value).toBe(MA_A)
+	})
+
+	it("refreshed: the selected account left the grant → the first listed is selected and persisted", async () => {
+		const { session: s } = await connectedWith(async () => [{ alias: "Savings", item: MA_B }])
+		await expect(s.refreshAccounts()).resolves.toBe("refreshed")
+		expect(s.selectedAccount.value).toBe(MA_B)
+		expect(storedMap()).toEqual([["nulo", MA_B]])
+	})
+
+	it("skipped: an empty answer changes nothing", async () => {
+		const { session: s } = await connectedWith(async () => [])
+		await expect(s.refreshAccounts()).resolves.toBe("skipped")
+		expect(s.accounts.value.map((a) => a.address)).toEqual([MA_A, MA_B])
+	})
+
+	it("skipped: a failed read changes nothing", async () => {
+		const { session: s } = await connectedWith(async () => {
+			throw new Error("wallet gone")
+		})
+		await expect(s.refreshAccounts()).resolves.toBe("skipped")
+		expect(s.accounts.value.map((a) => a.address)).toEqual([MA_A, MA_B])
+	})
+
+	it("skipped: not connected, or an operation in flight — the wallet is not even asked", async () => {
+		let blocked = true
+		const { session: s, walletHandle } = await connectedWith(three, { isSwitchBlocked: () => blocked })
+		await expect(s.refreshAccounts()).resolves.toBe("skipped")
+		expect(walletHandle.getAccounts).not.toHaveBeenCalled()
+		blocked = false
+		await s.disconnect()
+		await expect(s.refreshAccounts()).resolves.toBe("skipped")
+		expect(walletHandle.getAccounts).not.toHaveBeenCalled()
+	})
+
+	it("dropped: a grant landed during the read (the accounts array was replaced)", async () => {
+		let release: (v: unknown) => void = () => {}
+		const { session: s } = await connectedWith(() => new Promise<unknown>((r) => (release = r)))
+		const pending = s.refreshAccounts()
+		await flush()
+		s.accounts.value = [{ address: MA_B, alias: "Savings" }]
+		release(await three())
+		await expect(pending).resolves.toBe("dropped")
+		expect(s.accounts.value.map((a) => a.address)).toEqual([MA_B])
+	})
+
+	it("dropped: the selection moved during the read", async () => {
+		let release: (v: unknown) => void = () => {}
+		const { session: s } = await connectedWith(() => new Promise<unknown>((r) => (release = r)))
+		const pending = s.refreshAccounts()
+		await flush()
+		expect(s.selectAccount(MA_B)).toBe(true)
+		release(await three())
+		await expect(pending).resolves.toBe("dropped")
+		expect(s.accounts.value).toHaveLength(2)
+		expect(s.selectedAccount.value).toBe(MA_B)
+	})
+
+	it("parseAccountList: the grant hardening applies to the bare list (malformed skipped, deduped, capped)", () => {
+		const list = [
+			{ alias: "Main", item: MA_A },
+			{ alias: "dup", item: MA_A },
+			{ alias: "bad", item: "not-an-address" },
+			null,
+			{ alias: "Savings", item: MA_B },
+		]
+		expect(parseAccountList(list)).toEqual({
+			accounts: [
+				{ address: MA_A, alias: "Main" },
+				{ address: MA_B, alias: "Savings" },
+			],
+			hiddenCount: 0,
+		})
+		const many = Array.from({ length: 18 }, (_, i) => ({ alias: `a${i}`, item: addr(i.toString(16).padStart(2, "0")) }))
+		const capped = parseAccountList(many)
+		expect(capped.accounts).toHaveLength(16)
+		expect(capped.hiddenCount).toBe(2)
+		expect(parseAccountList(null)).toEqual({ accounts: [], hiddenCount: 0 })
 	})
 })
 

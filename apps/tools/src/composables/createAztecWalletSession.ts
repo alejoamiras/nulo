@@ -11,6 +11,7 @@ import { readChainInfo } from "@/lib/chain-info"
 import { resolveToolsTarget } from "@/lib/network-targets"
 import { hashToEmoji } from "@/lib/emoji"
 import { type NormalizedError, normalizeError } from "@/lib/errors"
+import { enqueuePrompt } from "@/lib/prompt-queue"
 
 export type ConnectStatus =
 	| "idle"
@@ -169,6 +170,8 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		consumeSelectionNotices: (): SelectionNotice[] => consumeSelectionNotices(s),
 		/** False when it did not run because another flow already owns the wallet — not a refusal. */
 		retryCapabilities: (): Promise<boolean> => retryCapabilities(s),
+		/** Re-read the session's accounts from the wallet (no prompt); see `refreshAccounts`. */
+		refreshAccounts: (): Promise<RefreshOutcome> => enqueuePrompt(() => refreshAccounts(s)),
 		disconnect: (): Promise<void> => disconnect(s),
 		reset: (): void => reset(s),
 	}
@@ -750,6 +753,40 @@ async function retryCapabilities(s: SessionState): Promise<boolean> {
 	return true
 }
 
+export type RefreshOutcome = "refreshed" | "skipped" | "dropped"
+
+/** True while a refresh must not touch the accounts: no wallet, not connected, a flow owning the
+ *  session, or an operation in flight (it captured the selected account at its start). */
+function refreshBlocked(s: SessionState): boolean {
+	return s.wallet.value === null || s.status.value !== "connected" || s.activeFlowEpoch !== null || Boolean(s.config.isSwitchBlocked?.())
+}
+
+/** Re-read the granted accounts through `getAccounts` — a session-scoped read that never prompts,
+ *  so a wallet-side change (an account renamed, hidden, or added through the wallet's own UI)
+ *  reaches the app without a click. No flow epoch moves for a retry or a switch, so the completion
+ *  check is by state: the result is dropped unless the accounts list is the SAME array captured
+ *  before the await (a grant replaces it wholesale), the selection is unchanged and nothing
+ *  started meanwhile. An empty or failed read changes nothing. */
+async function refreshAccounts(s: SessionState): Promise<RefreshOutcome> {
+	if (refreshBlocked(s)) return "skipped"
+	const wallet = s.wallet.value as Wallet
+	const captured = s.accounts.value
+	const selected = s.selectedAccount.value
+	let raw: unknown
+	try {
+		raw = await wallet.getAccounts()
+	} catch {
+		return "skipped"
+	}
+	if (refreshBlocked(s) || s.accounts.value !== captured || s.selectedAccount.value !== selected) return "dropped"
+	const { accounts, hiddenCount } = parseAccountList(Array.isArray(raw) ? raw : null)
+	if (accounts.length === 0) return "skipped"
+	s.accounts.value = accounts
+	s.hiddenAccountsCount.value = hiddenCount
+	if (!accounts.some((a) => a.address === selected)) applySelection(s, accounts[0].address, s.provider)
+	return "refreshed"
+}
+
 async function disconnect(s: SessionState): Promise<void> {
 	const staleProvider = s.provider
 	wipeToIdle(s)
@@ -982,7 +1019,11 @@ export interface ParsedGrantedAccounts {
  * list is bounded with DISCLOSED truncation.
  */
 export function parseGrantedAccounts(result: unknown): ParsedGrantedAccounts {
-	const entries = findGrantedAccountEntries(result)
+	return parseAccountList(findGrantedAccountEntries(result))
+}
+
+/** The same hardening over a bare entry list — what `getAccounts` answers (no grant envelope). */
+export function parseAccountList(entries: NonNullable<GrantedAccountsCap["accounts"]> | null): ParsedGrantedAccounts {
 	if (!entries) return { accounts: [], hiddenCount: 0 }
 
 	const seen = new Set<string>()

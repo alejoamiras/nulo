@@ -41,6 +41,8 @@ export const TESTIDS = {
 	accountMenu: "tl-account-menu",
 	accountMenuRow: "tl-account-menu-row",
 	accountMenuCopy: "tl-account-menu-copy",
+	accountMenuAddAccounts: "tl-account-menu-add-accounts",
+	accountMenuAddStatus: "tl-account-menu-add-status",
 
 	// Journal-card account attribution (deposit cards only — withdraws never persist their Aztec sender)
 	journalAccount: "tl-journal-account",
