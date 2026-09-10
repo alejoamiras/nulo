@@ -1,8 +1,8 @@
 /** Activity (cell 39): a bridge's recovery file round-trips, and a backgrounded send reports back. */
-import { mint } from "@nulo/bridge-core/sandbox"
+import { freshToken, mint, setRoutable } from "@nulo/bridge-core/sandbox"
 import { TESTIDS } from "../../../src/lib/testids"
 import { expect, test } from "../fixtures/test"
-import { connectAztec, tid } from "../pages/connect"
+import { connectAztec, tid, walletFrame } from "../pages/connect"
 import { depositRecords } from "../pages/journal"
 import { confirmReview, connectL1, openSend, reviewDeposit, waitForReceipt } from "../pages/send"
 
@@ -91,6 +91,7 @@ test("cell 39 — a send sent to the background keeps running: the strip follows
 test("cell 40 — two tabs, two sends racing: each stepper adopts only its own record, both land, both feeds list both", async ({
 	page,
 	context,
+	run,
 	sandbox,
 	actor,
 	pool,
@@ -98,35 +99,42 @@ test("cell 40 — two tabs, two sends racing: each stepper adopts only its own r
 }) => {
 	const b = pool.take()
 	const { usdt } = sandbox.tokens
-	await mint(sandbox.clients.l1, usdt.erc20 as `0x${string}`, l1.address, 400n * USDC)
+	await mint(sandbox.clients.l1, usdt.erc20 as `0x${string}`, l1.address, 200n * USDC)
+	// Tab 2 sends a token its wallet has not granted, so its send opens with the grant prompt — the
+	// one wallet call that comes before its record exists.
+	const fresh = await freshToken(sandbox.clients.l1, { name: "Fresh Raced", symbol: "FRSHR", decimals: 6 }, [l1.address], 1000n * USDC)
+	await setRoutable(sandbox.clients.l1, sandbox.clients.deployment.quoter, fresh)
 
 	// Tab 1 as A, tab 2 as B: the same origin, so the journal is one localStorage both tabs read.
 	const tab2 = await context.newPage()
-	for (const [tab, who] of [
-		[page, actor],
-		[tab2, b],
+	for (const [tab, who, erc20, viaLookup] of [
+		[page, actor, usdt.erc20, false],
+		[tab2, b, fresh, true],
 	] as const) {
 		await tab.goto("/")
 		await openSend(tab)
 		await connectL1(tab)
 		await connectAztec(tab, { profile: "plain", account: who.address })
-		await reviewDeposit(tab, { l1ChainId: L1, erc20: usdt.erc20, amount: "100", intent: "token+gas", isPrivate: false })
+		await reviewDeposit(tab, { l1ChainId: L1, erc20, amount: "100", intent: "token+gas", isPrivate: false, viaLookup })
 	}
-	// Tab 2 confirms only once tab 1's record exists: a wizard that adopted a foreign record would
-	// adopt that one, and tab 1's stepper sees tab 2's record appear mid-send.
+	// Tab 2 is parked on its grant: its submit baseline is taken, no record of its own exists yet.
+	// Tab 1's record then appears — the exact shape a wizard adopting by recency would take.
+	await walletFrame(tab2, run, "plain").evaluate(() => window.__nuloTestWallet!.holdNext("requestCapabilities"))
+	await confirmReview(tab2)
+	await expect(tab2.locator(tid(TESTIDS.stepper))).toHaveAttribute("data-id", /^dep-pending-permit-/, { timeout: 60_000 })
 	await confirmReview(page)
 	await expect(page.locator(tid(TESTIDS.stepper))).toBeVisible({ timeout: 120_000 })
 	await expect.poll(async () => (await depositRecords(page)).length, { timeout: 180_000 }).toBe(1)
-	await confirmReview(tab2)
-	await expect(tab2.locator(tid(TESTIDS.stepper))).toBeVisible({ timeout: 120_000 })
-	await expect.poll(async () => (await depositRecords(page)).length, { timeout: 180_000 }).toBe(2)
 	const own = async (who: string) => (await depositRecords(page)).find((r) => r.recipient?.toLowerCase() === who.toLowerCase())?.id
 	await expect(page.locator(tid(TESTIDS.stepper))).toHaveAttribute("data-id", (await own(actor.address)) ?? "missing")
+	await expect(tab2.locator(tid(TESTIDS.stepper)), "tab 2 stays on its own prompt").toHaveAttribute("data-id", /^dep-pending-permit-/)
+	expect(await walletFrame(tab2, run, "plain").evaluate(() => window.__nuloTestWallet!.release())).toBe(1)
+	await expect.poll(async () => (await depositRecords(page)).length, { timeout: 180_000 }).toBe(2)
 	await expect(tab2.locator(tid(TESTIDS.stepper))).toHaveAttribute("data-id", (await own(b.address)) ?? "missing")
 
 	const [r1, r2] = await Promise.all([waitForReceipt(page), waitForReceipt(tab2)])
 	expect(r1.hero).toContain("USDT")
-	expect(r2.hero).toContain("USDT")
+	expect(r2.hero).toContain("100")
 	const records = await depositRecords(page)
 	expect(records).toHaveLength(2)
 	expect(records.every((r) => r.claimTxHash)).toBe(true)

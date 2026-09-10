@@ -43,10 +43,10 @@ let callSeq = 0
 type Fault = { method: string; pattern?: string } & ({ kind: "reject"; message: string } | { kind: "hold" } | { kind: "swallow" })
 let fault: Fault | undefined
 /** The one-shot fault, consumed by the first matching call; `undefined` when this call is not it.
- *  A rejection answers the call with an error; a hold never answers it at all (the page that made
- *  it must be reloaded to get past it — the shape of a wallet that went away mid-call); a swallow
- *  RUNS the call but never answers it — a wallet that sent the transaction and lost the reply. */
-function faultFor(method: string, args: unknown[]): Promise<never> | "swallow" | undefined {
+ *  A rejection answers the call with an error; a hold parks it unanswered until `release` runs it
+ *  (or forever — the shape of a wallet that went away mid-call); a swallow RUNS the call but never
+ *  answers it — a wallet that sent the transaction and lost the reply. */
+function faultFor(method: string, args: unknown[]): Promise<never> | "swallow" | "hold" | undefined {
 	if (!fault || fault.method !== method) return undefined
 	if (fault.pattern !== undefined && !JSON.stringify(args, (_, v) => (typeof v === "bigint" ? v.toString() : v)).includes(fault.pattern))
 		return undefined
@@ -57,12 +57,14 @@ function faultFor(method: string, args: unknown[]): Promise<never> | "swallow" |
 		return "swallow"
 	}
 	if (taken.kind === "hold") {
-		line("warn", `injected hold on ${method}: this call never answers`)
-		return new Promise<never>(() => {})
+		line("warn", `injected hold on ${method}: this call parks until released`)
+		return "hold"
 	}
 	line("warn", `injected fault on ${method}: ${taken.message}`)
 	return Promise.reject(new Error(taken.message))
 }
+/** Held calls, each runnable later as if never held. */
+const parked: Array<() => void> = []
 /** How often each wallet method was asked, since this frame loaded — what "nothing was submitted" is read from. */
 const calls: Record<string, number> = {}
 
@@ -84,6 +86,15 @@ function traced(wallet: TestWallet): TestWallet {
 						() => settle("✗ (swallowed)"),
 					)
 					return new Promise<never>(() => {})
+				}
+				if (injected === "hold") {
+					return new Promise<unknown>((resolve, reject) => {
+						parked.push(() =>
+							Promise.resolve(value.apply(target, args))
+								.then(resolve, reject)
+								.finally(() => settle("← (released)")),
+						)
+					})
 				}
 				if (injected) {
 					settle("✗")
@@ -142,6 +153,11 @@ window.__nuloTestWallet = {
 	},
 	holdNext: (method, pattern) => {
 		fault = { kind: "hold", method, pattern }
+	},
+	release: () => {
+		const held = parked.splice(0)
+		for (const run of held) run()
+		return held.length
 	},
 	swallowNext: (method, pattern) => {
 		fault = { kind: "swallow", method, pattern }

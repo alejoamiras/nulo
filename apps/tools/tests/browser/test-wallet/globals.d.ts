@@ -14,8 +14,10 @@ export interface TestWalletControl {
 	/** Fault injection: the next `method` call whose serialized arguments contain `pattern` (any
 	 *  call when omitted) rejects with `message` instead of running — one shot. */
 	failNext: (method: string, pattern?: string, message?: string) => void
-	/** The next matching call never answers — a wallet gone mid-call; only a reload gets past it. One shot. */
+	/** The next matching call parks unanswered — a wallet gone mid-call — until `release` (or a reload). One shot. */
 	holdNext: (method: string, pattern?: string) => void
+	/** Runs every held call as if it had never been held; how many there were. */
+	release: () => number
 	/** The next matching call RUNS but never answers — the transaction is sent, the reply is lost. One shot. */
 	swallowNext: (method: string, pattern?: string) => void
 	/** The next transaction handed to the node is recorded and thrown away: the page gets its hash,
