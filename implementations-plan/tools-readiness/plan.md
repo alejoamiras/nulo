@@ -6,7 +6,7 @@ eli5_mode: artifact
 code_review: off
 budget: recon 1 agent; codex at high; no /code-review (owner directive 2026-09-03)
 base: dev @ 94e412a6
-status: v3 — codex rounds 1–2 folded (25 findings); round 3 pending
+status: v4 — codex rounds 1–3 (30 findings); the three-round stop landed on the recovery fixes → owner decision at the gate (Option A written in)
 ---
 
 # tools-readiness — the account-widening feature and the readiness cells
@@ -14,9 +14,45 @@ status: v3 — codex rounds 1–2 folded (25 findings); round 3 pending
 The follow-up to `tools-self-testing`. Two things ship: a feature that exists on neither side
 today — a dApp session granted some of a wallet's accounts can be widened to a new one without
 forgetting the app — and the test cells `implementations-plan/tools-self-testing/readiness.md`
-lists as the gap between the suites and production evidence, plus the three product recovery fixes
-those cells exposed (owner-authorized at Phase 0). No wallet-sdk patches: both halves use
+lists as the gap between the suites and production evidence. No wallet-sdk patches: both halves use
 `requestCapabilities` and `getAccounts` as the SDK ships them.
+
+## ⚠ Owner decision — the three recovery fixes (three-round stop)
+
+At Phase 0 the owner authorized three "product fixes" in arc 3: a claim consumed by another
+submitter, a deposit whose Ethereum wallet never answered, an exit that lost its transaction id.
+Three codex rounds later each one is a design problem, not a small change, and the protocol's
+three-round stop applies. The verified facts:
+
+- **Consumed.** The only record-tied probe, `recordMessageConsumed`, re-runs the SAME fee-bearing
+  claim build as the trigger (`useBridgeJournal.ts:1318` → `buildClaimHandles:871-880` →
+  `deps.claimSend`), so a consumed FUEL message reads as "token consumed" twice while the token is
+  still unclaimed. A correct proof checks the token message's own nullifier (message hash + secret +
+  leaf index, siloed by the hub) in the nullifier tree, independent of any fee — and for a private
+  deposit the secret is sealed, so the check needs an unseal signature (the journal's prompt-free rule).
+- **Reconcile.** The router's `Bridge` / `BridgeWithFuel` events carry recipient, amount, secret hash
+  and privacy but NO token or portal identity (`contracts/bridge/evm/src/SwapBridgeRouter.sol:84-97`);
+  a public secret hash can be copied into a deposit of another token. A correct match verifies the
+  candidate transaction's calldata (router, token, intent, both legs), bounds the block window by chain
+  time (`createdAt` is wall-clock), and writes conditionally after its awaits (another tab may have
+  discarded or recovered the record).
+- **Attach.** The exit's message comes back as an `Fr` hash (`flows.ts:222`), and the identity check
+  the withdraw tail applies validates an L1 consume transaction against an ALREADY-KNOWN exit witness
+  (`useHubExit.ts:264-283` needs `rec.exitTxHash`) — it cannot establish a missing exit's identity. A
+  correct check recomputes the full L2→L1 commitment (hub, rollup version, portal, chain, content) and
+  still cannot tell two identical historical exits apart.
+
+**Option A (recommended, written into this plan):** defer the three fixes to a follow-up `mid`
+blueprint (`tools-recovery`) that starts from the facts above; arc 3 keeps the three recovery CELLS,
+each asserting what the product does today — no double claim, no double burn, no lost record, the
+existing Discard copy — so the warts are pinned as known follow-ups rather than papered over. The
+plan stays `light`, arc 3 has no product code.
+
+**Option B:** keep the fixes with the designs above. That is a fourth arc (`tools-readiness/tools-recovery`),
+its own recon of the nullifier / commitment helpers in `@aztec/stdlib`, and another audit cycle
+before implementation — effectively `mid`. The plan is re-cut before Phase 5 starts.
+
+Everything else in this plan is unaffected by the choice.
 
 ## Scope (from the Phase 0 answers)
 
@@ -31,27 +67,26 @@ those cells exposed (owner-authorized at Phase 0). No wallet-sdk patches: both h
    to what the product does (a record owned by another granted account offers a SWITCH, the feed is
    shared with that offer, a rediscovered hash-less claim needs a click). Extension: an active-account
    switch under a live dApp session, and a second-account send end to end.
-3. **Readiness § 1 test gaps** and **three recovery fixes** they exposed — each one a recovery the
-   journal does not offer today, and none of them a resubmission: a message consumed by another
-   submitter completes on record-tied evidence; a deposit whose Ethereum wallet never answered is
-   reconciled against the chain; an exit that lost its transaction id can have it attached. Plus
-   dropped claims, Permit2 signature fields, a hostile token-list entry, a two-tab provenance race
-   and two narrower viewports.
+3. **Readiness § 1 test gaps**: dropped and consumed claims, a deposit whose Ethereum wallet never
+   answers, an exit that lost its transaction id (all three pinned at today's behaviour under Option A),
+   Permit2 signature fields, a hostile token-list entry, a two-tab provenance race, two narrower
+   viewports.
 
 **Out** (explicitly): the two wizard warts (preflight-deferred stand-down, value-keyed route watcher)
 and the deterministic FPC equality gate (readiness § 2–3); the testnet nightly canary; any change to
 `@aztec/wallet-sdk`; promoting the advisory aggregators; bounding a dApp's repeat prompts after a
 decline (pre-existing behaviour for every capability type, see Security); re-submitting a deposit or
-an exit from a record (a duplicate is worse than a stuck row — the fixes reconcile, attach or discard).
-Nothing in `apps/extension/**` or the wallet packages is touched from the tools arcs, nothing in
-`apps/tools/**` or `packages/bridge-core/**` from the extension arc (CLAUDE.md § Two products, one repo).
+an exit from a record (a duplicate is worse than a stuck row); under Option A, the three recovery
+fixes themselves. Nothing in `apps/extension/**` or the wallet packages is touched from the tools
+arcs, nothing in `apps/tools/**` or `packages/bridge-core/**` from the extension arc (CLAUDE.md § Two
+products, one repo).
 
 ## Success criterion
 
 Every cell below is a named test passing at retry 0 in its suite's full local run and on the PR's CI;
-the widening feature is proven by an extension e2e (Nulo) and a tools cell (stock wallet); each
-product fix carries an engine-level unit pin (the policy pins prove the button, the engine pins prove
-the run); the three PRs are green and merged in order by the owner.
+the widening feature is proven by an extension e2e (Nulo) and a tools cell (stock wallet); the three
+PRs are green and merged in order by the owner; the follow-up `tools-recovery` is filed in
+`implementations-plan/index.md` with the facts above (Option A).
 
 ## Delivery — three arcs, one stack
 
@@ -74,9 +109,9 @@ only after both. `gh stack merge` is the owner's, lowest PR first.
 
 Every gate includes the fast layers for the touched packages: `bun run lint`, `bun run --cwd <pkg>
 typecheck`, `bun run --cwd <pkg> test` (bridge `packages/wallet-bridge`, extension `apps/extension`,
-playground `apps/playground` when touched, tools `apps/tools`, bridge-core `packages/bridge-core` when
-touched). Heavy layers per phase. Retry 0 everywhere: the extension network config defaults to two
-retries (`apps/extension/vitest.e2e.network.config.ts:46`), so every network command below carries
+playground `apps/playground` when touched, tools `apps/tools`). Heavy layers per phase. Retry 0
+everywhere: the extension network config defaults to two retries
+(`apps/extension/vitest.e2e.network.config.ts:46`), so every network command below carries
 `NULO_E2E_RETRY=0`; the tools suite is retry 0 by config. The owner asked for full suites locally,
 sharded: the tools suite runs as parallel `--shard=i/n` launchers, each on its own sandbox — **two**
 shards first (two sandboxes ran side by side in the previous plan); a third only if a two-shard run
@@ -115,14 +150,22 @@ run's retry-0 tally and SHA are quoted in the phase's lessons file.
   type as approved-without-replacement — `addAccounts` = selected − granted, `aliasPatch` only for new
   addresses, `replaceTypes` excludes `accounts`, `grantRecords` carry no accounts entry, so the stored
   grant stands. Field-diff: the existing replacement path, with granted rows locked and pre-selected
-  (they are re-included in the replaced grant unchanged) and new rows unchecked; the approve gate
-  accepts a selection that adds nothing (a flag-only approval must not force sharing more). A decline
-  is a rejection of the `accounts` type exactly as today: the old grant and its aliases stand
-  (`applyCapabilityDecision`'s invariant), and the next request re-prompts (existing semantics for
-  every declined type — see Security). **Concurrent revocation**: the decision re-reads the session
-  under the service lock; if the accounts grant is gone (revoked from the management UI while the popup
-  was open) a membership-only approval is rejected — `addAccounts` never lands on a session without
-  the grant, and no grant is re-created. Pinned.
+  (they are re-included in the replaced grant unchanged, their aliases untouched — `aliasPatch` only
+  for new addresses here too) and new rows unchecked; the approve gate accepts a selection that adds
+  nothing (a flag-only approval must not force sharing more). A decline is a rejection of the
+  `accounts` type exactly as today: the old grant and its aliases stand (`applyCapabilityDecision`'s
+  invariant), and the next request re-prompts (existing semantics for every declined type — see
+  Security).
+- **Concurrent revocation, enforced where the lock is.** `applyCapabilityDecision`
+  (`apps/extension/src/wallet/services/dapp-session/service.ts:300-334`) holds the service's private
+  lock, so the dispatcher cannot check there; instead `CapabilityDecision`
+  (`packages/wallet-bridge/src/services-contract.ts:96-117`) gains a precondition
+  `requiresGrant?: CapabilityType[]`, and `applyCapabilityDecision` enforces it INSIDE its lock: if
+  any listed type has no stored grant (revoked from the management UI while the popup was open), it
+  throws a typed `GrantRevokedError` and writes nothing — no `addAccounts` on a session without the
+  grant, no grant re-created. Both widening shapes (membership-only and field-diff on a session that
+  had a grant) set `requiresGrant: ["accounts"]`; the dispatcher maps the error to a rejection for the
+  dApp. Pinned in the service's test and in `dispatcher.test.ts`.
 - **Wire + UI.** `dapp-interaction-protocol.ts`: `grantedAccounts?: string[]` on `CapabilityParams`.
   `apps/extension/src/popup/windows/capabilities/index.vue` `init()`: granted rows pre-selected; the
   approve gate accepts an empty addition only when `grantedAccounts` is absent or the request changes
@@ -133,16 +176,18 @@ run's retry-0 tally and SHA are quoted in the phase's lessons file.
   account granted → no popup; same shape, one ungranted → popup with `grantedAccounts`; a hidden
   account is not ungranted; an account on another chain is not ungranted (cross-chain membership);
   membership-only approve adds only the new address, keeps the stored flags and aliases; decline keeps
-  grant, flags, aliases; field-diff with an ungranted account replaces flags and adds the address;
-  field-diff approving nothing new keeps membership and changes flags; a re-prompt after a decline
-  still carries `grantedAccounts`; the grant revoked between popup and decision → rejected, nothing
-  written. `capabilities/index.test.ts` with the REAL `AccountSelectRow` (the harness stubs it at
-  `:223` — the consent tests mount the row): granted rows pre-checked and locked; approve returns
-  granted ∪ picked; a flag-only request approves with no new row. `AccountSelectRow.test.ts`: a locked
-  row ignores click, Enter and Space.
+  grant, flags, aliases; field-diff with an ungranted account replaces flags, adds the address, keeps
+  the granted rows' aliases; field-diff approving nothing new keeps membership and changes flags; a
+  re-prompt after a decline still carries `grantedAccounts`; the grant revoked between popup and
+  decision → `GrantRevokedError`, nothing written, on both shapes. `dapp-session/service.test.ts`:
+  `requiresGrant` satisfied → applied; unsatisfied → throws, storage untouched. `capabilities/index.test.ts`
+  with the REAL `AccountSelectRow` (the harness stubs it at `:223` — the consent tests mount the row):
+  granted rows pre-checked and locked; approve returns granted ∪ picked; a flag-only request approves
+  with no new row. `AccountSelectRow.test.ts`: a locked row ignores click, Enter and Space.
 - **Validation gate**: `bun run lint`; `bun run --cwd packages/wallet-bridge typecheck && bun run --cwd
   packages/wallet-bridge test`; `bun run --cwd apps/extension typecheck && bun run --cwd apps/extension
-  test -- src/popup/windows/capabilities`; exit 0. Layers: lint · typecheck · unit.
+  test -- src/popup/windows/capabilities src/wallet/services/dapp-session`; exit 0. Layers: lint ·
+  typecheck · unit.
 
 #### Phase 2: Extension e2e — widening, the active-account switch, the second-account send
 - `apps/extension/tests/e2e/network/cap-widening.test.ts`: `grantCapBundle` with one account;
@@ -212,13 +257,11 @@ run's retry-0 tally and SHA are quoted in the phase's lessons file.
 #### Phase 4: The accounts cells
 - Fixture additions (arc 2, because these cells need them): `fixtures/l1-wallet.ts` `holdNext(kind,
   match?)` (the next matching call never answers; `match.to` narrows a transaction to its target —
-  a deposit's router, not the ERC-20 approval that precedes it, `useSend.ts:695`), per-method call
+  a deposit's router, not the ERC-20 approval that precedes it, `useSend.ts:695`) and per-method call
   counters (`calls("eth_sendTransaction")`, `calls("eth_signTypedData_v4")` — the single `signatures`
-  total stays), and `releaseHeld()` (broadcast a held transaction from the fixture's own client — the
-  wallet that answers after the tab is gone); `fixtures/test.ts` a `spares` worker option (default 2)
-  so a file can ask for a pool of exactly `cells`; `pages/connect.ts` `reconnectedAs(page, address)` —
-  reload-side reconnect that FAILS if the chooser appears (`driveToConnected` answers it, which would
-  hide the bug) and asserts the chip.
+  total stays); `fixtures/test.ts` a `spares` worker option (default 2) so a file can ask for a pool of
+  exactly `cells`; `pages/connect.ts` `reconnectedAs(page, address)` — reload-side reconnect that FAILS
+  if the chooser appears (`driveToConnected` answers it, which would hide the bug) and asserts the chip.
 - `apps/tools/tests/browser/specs/accounts.spec.ts`, `test.use({ family: "accounts", cells: 10, l1Index: 8 })`
   — `cells` counts actors taken: cells 2–5 take two each. Actors come from `pool.take()`.
   1. **Widening**: connect as A; `window.__nuloTestWallet.addAccount(secret, salt)` for a fresh seed in
@@ -248,33 +291,24 @@ run's retry-0 tally and SHA are quoted in the phase's lessons file.
 - **Arc boundary**: the full tools suite in parallel shards (two, then three if measured), every shard
   green at retry 0 with the tally quoted; the codex loop on the arc-2 diff; `gh stack add tools-readiness/tools-gaps`.
 
-### Arc 3 — tools gaps (tests and the three recovery fixes)
+### Arc 3 — tools gaps (tests only under Option A)
 
 #### Phase 5: Recovery — dropped and consumed
 - Test wallet: `dropNext("sendTx")` on the node hand-off proxy (`wallet.ts` `observeSubmissions`) —
   records the submission and returns its hash without forwarding the transaction (one shot).
-- **Product fix (consumed).** `awaitConsumable` (`useBridgeJournal.ts:1102-1123`) rethrows on a consumed
-  message, and the probe it wraps is not record-specific: for an unregistered token it probes the fee's
-  setup as a whole transaction (`useSend.ts:445-452`), so a consumed FUEL message throws the same
-  shape, and a fee stop returns before any probe (`:379`). Fix: the consumed error is the TRIGGER, the
-  record-tied probe is the PROOF — on `isMsgConsumed`, run `recordMessageConsumed(rec)` (`:1312-1330`,
-  re-simulates the record's own claim; `true` only on that claim's nullifier); `true` and no
-  `claimTxHash` of the record's own → `completeDeposit` with the note "Claimed for you by another
-  submitter" (funds arrived), set AFTER `completeDeposit`'s runtime wipe (`:707-715`); `false` or
-  `null` → rethrow exactly as today. A record WITH its own hash keeps the receipt path. Engine pins in
-  `useBridgeJournal.test.ts`: consumed trigger + proof → `done` with the note, no send; consumed trigger
-  + the record's claim still simulates (the fuel case) → NOT completed, the error surfaces as today;
-  consumed trigger + no secret (`null`) → as today.
 - Harness: `pages/relayer.ts` `claimAsRelayer(actor, record)` — `HubClaimParams` from the page's
   journal record (token block, recipient, amount, leaf index, the public claim secret) → `claimViaHub`
   with `actor.s.relayerOpts`, after `waitForL1ToL2Message` for the record's message.
 - `recovery.spec.ts` **24c dropped**: fueled deposit as A with `dropNext` armed for the claim; three
   straight dropped receipt polls clear the hash, the card says "The claim was dropped - claim again
   from this card"; claim: it lands; balances as 24a.
-- `recovery.spec.ts` **24b consumed**: public deposit as A with the claim held; after the Ethereum leg
-  the harness claims through the relayer; reload; the record is not session-live and has no hash, so
-  it does not auto-resume — click CLAIM: the record ends `done` with the note, no own claim
-  (`walletCalls(...).sendTx` 0, `claimTxHash` undefined), the token credited once.
+- `recovery.spec.ts` **24b consumed (today's behaviour)**: public deposit as A with the claim held;
+  after the Ethereum leg the harness claims through the relayer; reload; the record is not
+  session-live and has no hash, so it does not auto-resume — click CLAIM: `awaitConsumable` rethrows
+  (`useBridgeJournal.ts:1116`), the card shows the error attention, the wallet sent nothing
+  (`walletCalls(...).sendTx` 0, `claimTxHash` undefined), and the token is credited exactly once (the
+  relayer's claim). The cell's docstring names the follow-up (`tools-recovery`: complete on the
+  message's own nullifier).
 - **Validation gate**: `bun run --cwd apps/tools test`; `bun run e2e:tools -- tests/browser/specs/recovery.spec.ts`
   green at retry 0. Layers: lint · unit · e2e.
 
@@ -297,56 +331,31 @@ run's retry-0 tally and SHA are quoted in the phase's lessons file.
 - **Validation gate**: the three spec files green at retry 0. Layers: lint · unit · e2e.
 
 #### Phase 7: Wallet loss mid-flow, two tabs, viewports
-- **Both hash-less fixes reconcile or attach; neither resubmits.** A missing hash never proves nothing
-  was broadcast: an Ethereum wallet can answer after the tab is gone, an Aztec wallet can have sent the
-  exit and lost the reply. Re-signing with fresh nonces would duplicate a deposit or a burn, and the
-  records do not carry a replayable plan (an exit record has no originating account or authwit nonce,
-  `useHubExit.ts:365-380`). The card already offers Discard on both shapes with "check your wallet
-  activity" copy (`BridgeJournalCard.vue:169-186`); what is missing is a way to find out.
-- **Product fix (held Ethereum leg).** `useSend.ts` opens the row before the Permit2 signature
-  (`:668-676`), so a wallet that never answers leaves a `depositing` record with no hash that only
-  Discard can touch (`record-policy.ts:92-95` needs `depositTxHash` for CLAIM). Fix: a `depositing`
-  record with no `depositTxHash` gains **Reconcile** — `packages/bridge-core` `findDepositByContent(l1,
-  router, { recipient, amount, secretHash }, fromBlock)` reads the router's deposit event (the one
-  `runSend` already parses for `tokenMessageHashHex`, `send-flow.ts:78`) over the blocks since the
-  record's `createdAt`, identity-bound by the L1 content (recipient + secret hash + amount, the same
-  binding that makes a tampered claim fail); found → the record takes `depositTxHash`, `leafIndex` and
-  `messageHash` from the event and re-enters the existing recoverable shape (the "stranded L1-timeout"
-  path CLAIM already handles); not found → the note says the outcome is unknown ("Your Ethereum wallet
-  never answered. If it sends this deposit later, reconcile again; otherwise discard.") beside Discard.
-  Reconcile also runs once automatically on reload for such records. Engine pin: found → hash attached,
-  CLAIM offered; not found → unknown, nothing sent; a mismatching event (another deposit to the same
-  recipient) is never attached.
-- **Product fix (exit without its hash).** `useHubExit.ts` opens the row at `exiting` (`:472`); the
-  engine already refuses to run a hash-less withdraw (`unknown-outcome`, `useBridgeJournal.test.ts:701`)
-  — that protection stays — but the policy offers RETRY on `unknown-outcome` (`record-policy.ts:96`),
-  which for this shape re-runs the same refusal. Fix: RETRY is hidden for a withdraw without
-  `exitTxHash`; the card offers **Attach transaction id** (an input, `TESTIDS.journalAttachTx`) — the
-  hash is accepted only when the transaction's L2→L1 message names this record's `recipientL1`,
-  `amount` and portal (the identity check the rediscovered-consume path already applies,
-  `useBridgeJournal.ts:174,205`; `flows.ts:192-230` reads the message from the tx effects); accepted →
-  `exitTxHash` set, the FINISH path takes over; rejected → "That transaction is not this exit". Engine
-  pin: attach with a matching tx → FINISH runs once; a non-matching tx → refused, record unchanged; the
-  hash-less withdraw still never auto-runs.
+- **No resubmission, no new recovery** (Option A). A missing hash never proves nothing was broadcast;
+  the card already offers Discard on both hash-less shapes with "check your wallet activity" copy
+  (`BridgeJournalCard.vue:169-186`), the engine refuses a hash-less withdraw as `unknown-outcome`
+  (`useBridgeJournal.test.ts:701`). These cells pin exactly that.
 - `l1-wallet.spec.ts` 26d: a first deposit by the actor establishes the Permit2 allowance; then
   `holdNext("transaction", { to: router })`; the stepper shows the send waiting on the wallet; reload;
-  the record shows Reconcile + Discard, Reconcile finds nothing (unknown-outcome copy); `releaseHeld()`
-  broadcasts the held transaction; Reconcile again → the hash is attached and CLAIM lands; the
-  per-method counters show one signature and two transactions for that deposit. A Discard variant
-  (never released) leaves no record.
-- `exits.spec.ts` 31b (private exit, single credit charge): the test wallet's `swallowNext("sendTx",
-  <the hub's exit selector>)` forwards the transaction to the node but never answers the page (the
-  pattern targets the exit call, not the authwit); reload; the record shows Attach + Discard, no
-  RETRY; paste the hash from `submitted()`; a wrong hash (another actor's tx) is refused; the right
-  one → FINISH lands; the credit is charged once; the token arrived once on L1. A Discard variant.
+  the `depositing` record shows the "never confirmed on Ethereum" copy with Discard and no CLAIM
+  (`record-policy.ts:92-95`); the per-method counters show one signature and one transaction (the
+  approval) for that deposit; Discard (armed, then confirmed) leaves no record and no second signature
+  is ever requested.
+- `exits.spec.ts` 31b (private exit): the test wallet's `swallowNext("sendTx", <the hub's exit
+  selector>)` forwards the transaction to the node but never answers the page (the pattern targets the
+  exit call, not the authwit); reload; the record is `unknown-outcome` with the "exit was interrupted"
+  copy and Discard; it never auto-runs and RETRY re-runs only the refusal (no second burn: the L2
+  balance dropped once, the credit was charged once, `sendTx` count unchanged after RETRY). Discard
+  leaves no record. The docstring names the follow-up (`tools-recovery`: attach by recomputed
+  commitment).
 - `activity.spec.ts` 40 two tabs: `context.newPage()`; two sends started in two tabs (A and B are two
   actors); each tab's stepper adopts only its own record (`adoptRunRecord`'s provenance rule is only
   exercised while both are submitting); both records land; each feed lists both.
 - `spike.spec.ts` viewports: at 390 px and 1024 px, connect and a public deposit; the ActivityDock
   overlay (below 1100 px) is opened, closed with Escape, and the confirm is clicked afterwards.
-- **Validation gate**: `bun run --cwd apps/tools test`; `bun run --cwd packages/bridge-core test`; the
-  four spec files green at retry 0; then the full tools suite in parallel shards at retry 0; `bun run
-  test:all` and `bun run lint && bun run lint:actions` exit 0. Layers: lint · unit · e2e.
+- **Validation gate**: `bun run --cwd apps/tools test`; the four spec files green at retry 0; then the
+  full tools suite in parallel shards at retry 0; `bun run test:all` and `bun run lint && bun run
+  lint:actions` exit 0. Layers: lint · unit · e2e.
 
 ## Architecture & Implementation
 
@@ -356,13 +365,13 @@ the dispatcher's existing CAIP-10 projection and a new pure helper unit-tested a
 granted" is signalled by wallet-derived `grantedAccounts` on the popup params on every path that
 shows the accounts card for a session that holds a grant, so locking does not depend on why the type
 entered the delta; `reRequested` is not overloaded. The decision builder learns one distinction — a
-membership-only widening adds accounts without replacing the accounts grant — and re-checks the
-grant's presence under the session lock, so `applyCapabilityDecision` (already unions `addAccounts`,
-keeps a rejected type's grant) needs no change. The popup renders granted rows through the existing
-`AccountSelectRow` with a `locked` prop backed by native `disabled`. Alternative not taken: an "add
-this account to app X" screen in the extension's management UI — same storage path, but the dApp
-gets no signal (no accounts-changed event in the SDK) and only learns on a re-read; the re-request
-lets the dApp ask when the user wants it.
+membership-only widening adds accounts without replacing the accounts grant — and both widening
+shapes declare `requiresGrant`, which `applyCapabilityDecision` enforces inside the lock it already
+holds (the one place a check-then-write is sound). The popup renders granted rows through the
+existing `AccountSelectRow` with a `locked` prop backed by native `disabled`. Alternative not taken:
+an "add this account to app X" screen in the extension's management UI — same storage path, but the
+dApp gets no signal (no accounts-changed event in the SDK) and only learns on a re-read; the
+re-request lets the dApp ask when the user wants it.
 
 **Tools (arc 2).** `useAccountWidening` mirrors `useTokenGrant` and shares its queue through an
 extracted `prompt-queue.ts` (one queue, two callers, guards re-checked inside the queue).
@@ -371,36 +380,32 @@ as `parseAccountList` and a state-identity completion check (the flow epoch does
 retries); the visibility listener is installed once for the page's lifetime. Alternative not taken:
 polling `getAccounts` on an interval — a wallet round trip per tick for a rare event.
 
-**Cells and fixes (arcs 2–3).** Every cell reuses the suite's fixtures (`grantedAccounts`,
-`switchAccount`, `walletFrame`, `holdNext`, `keptFor`, the journal readers). Fixture additions: a
-targeted L1 hold with release and per-method counters, typed-data recording, `dropNext` and
-`swallowNext` on the node hand-off proxy, a `spares` option, a strict reconnect helper, a selectable
-token-list fixture, a relayer-claim helper. The three product fixes are each one recovery the journal
-did not offer, added as an explicit affordance with a policy row and an engine pin — consumed proven
-by the record's own claim, a lost deposit found by its content, a lost exit attached by its
-transaction id — and none of them resubmits.
+**Cells (arcs 2–3).** Every cell reuses the suite's fixtures (`grantedAccounts`, `switchAccount`,
+`walletFrame`, `holdNext`, `keptFor`, the journal readers). Fixture additions: a targeted L1 hold with
+per-method counters, typed-data recording, `dropNext` and `swallowNext` on the node hand-off proxy, a
+`spares` option, a strict reconnect helper, a selectable token-list fixture, a relayer-claim helper.
+Arc 3 changes no product code under Option A; the three recovery cells pin the current behaviour and
+name the follow-up in their docstrings.
 
-**File map.** Arc 1: `packages/wallet-bridge/src/{dispatcher.ts,dispatcher.test.ts,dapp-interaction-protocol.ts,README.md}`,
+**File map.** Arc 1: `packages/wallet-bridge/src/{dispatcher.ts,dispatcher.test.ts,dapp-interaction-protocol.ts,services-contract.ts,README.md}`,
+`apps/extension/src/wallet/services/dapp-session/{service.ts,service.test.ts}`,
 `apps/extension/src/popup/windows/capabilities/{index.vue,index.test.ts,AccountSelectRow.vue,AccountSelectRow.test.ts}`,
 `apps/extension/tests/e2e/network/{cap-widening,account-switch-live-session,multi-account-from}.test.ts`,
 `apps/extension/tests/e2e/README.md`. Arc 2: `apps/tools/src/lib/{prompt-queue.ts,testids.ts}`,
 `apps/tools/src/composables/{useAccountWidening.ts,useAccountWidening.test.ts,useTokenGrant.ts,createAztecWalletSession.ts,createAztecWalletSession.test.ts,useWalletConnection.ts}`,
 `apps/tools/src/components/{AccountSwitcher.vue,AccountSwitcher.test.ts,BridgeJournalCard.vue}`,
 `apps/tools/tests/browser/{fixtures/{test.ts,l1-wallet.ts},pages/connect.ts,specs/{accounts,accounts-single}.spec.ts,README.md}`,
-`apps/tools/README.md`. Arc 3: `apps/tools/src/composables/{useBridgeJournal.ts,useBridgeJournal.test.ts,useHubExit.ts}`,
-`apps/tools/src/lib/{record-policy.ts,record-policy.test.ts,testids.ts}`, `apps/tools/src/components/BridgeJournalCard.vue`,
-`packages/bridge-core/src/{flows.ts,flows.test.ts}`,
-`apps/tools/tests/browser/{test-wallet/{main.ts,wallet.ts,globals.d.ts},fixtures/{l1-wallet.ts,egress.ts},pages/relayer.ts,specs/{recovery,deposit-token,deposit-token-gas,tokens,l1-wallet,exits,activity,spike}.spec.ts}`,
+`apps/tools/README.md`. Arc 3: `apps/tools/tests/browser/{test-wallet/{main.ts,wallet.ts,globals.d.ts},fixtures/{l1-wallet.ts,egress.ts},pages/relayer.ts,specs/{recovery,deposit-token,deposit-token-gas,tokens,l1-wallet,exits,activity,spike}.spec.ts}`,
 `apps/tools/tests/e2e/fixtures/token-list-hostile.json`, `implementations-plan/tools-self-testing/readiness.md`
-(rows closed).
+(rows closed), `implementations-plan/index.md` (the `tools-recovery` follow-up filed).
 
 **Critical flow (widening).** dApp `requestCapabilities({accounts})` → dispatcher: session holds an
 accounts grant → profile addresses on the chain − session addresses on the chain ≠ ∅ → delta +=
 accounts (membership-only), `grantedAccounts` set → popup: granted rows locked, new rows unchecked,
-rider locked → approve → `selectedAccounts` → decision: grant still present, `addAccounts` = new
-only, no replacement → `applyCapabilityDecision` unions → response `granted.accounts` re-derived from
-the stored grant → tools `chooseGrantedAccount` replaces `s.accounts` → the switcher lists the new
-account.
+rider locked → approve → `selectedAccounts` → decision: `addAccounts` = new only, no replacement,
+`requiresGrant: ["accounts"]` → `applyCapabilityDecision` checks the grant under its lock, unions →
+response `granted.accounts` re-derived from the stored grant → tools `chooseGrantedAccount` replaces
+`s.accounts` → the switcher lists the new account.
 
 ## Security & Adversarial Considerations
 
@@ -410,25 +415,23 @@ account.
 - **No revocation through the widening prompt.** Locked rows are natively disabled and the handler
   ignores them (keyboard included); the decision only adds and never replaces the accounts grant or
   its flags on a membership-only widening; the rider is locked; a flag change re-includes the granted
-  rows unchanged. A grant revoked while the popup is open is not re-created. Revocation stays in the
-  extension's management UI.
+  rows unchanged with their aliases. A grant revoked while the popup is open is not re-created, on
+  either shape — enforced under the storage lock. Revocation stays in the extension's management UI.
 - **A declined widening keeps the older grant, flags and aliases** — pinned.
 - **Repeat prompts.** A declined type re-prompts on the next request today, for every type; this plan
   keeps that (tools asks only on a click). A dApp looping `requestCapabilities` to nag is a pre-existing
   exposure recorded as a follow-up (a per-session backoff after N declines), out of scope here. The
   response's timing reveals whether ungranted accounts exist (a prompt vs an immediate answer), never
   which; accepted.
-- **No resubmission from a record.** Reconcile attaches only an event whose L1 content matches the
-  record (recipient, secret hash, amount); Attach accepts only a transaction whose L2→L1 message names
-  the record's recipient, amount and portal — the same identity checks the rediscovery paths already
-  apply — so a pasted or planted hash can bind a record only to its own transaction, and a duplicate
-  deposit or burn is impossible from the card. The consumed completion needs the record's own claim
-  to simulate as nullified; a consumed fuel message never completes a token record.
-- **Test-only surfaces.** `dropNext`, `swallowNext`, `holdNext`/`releaseHeld`, `permits()` live on the
-  test wallet and the L1 fixture, served only on loopback; shipped builds list neither. The hostile
-  list is a fixture inside the egress fence.
+- **No resubmission from a record, and no new recovery surface under Option A.** The recovery cells
+  assert that a stuck record never double-claims or double-burns and that Discard is the only exit;
+  the follow-up blueprint owns the identity-bound recoveries (nullifier check, calldata-verified
+  reconciliation, commitment-recomputed attach) with their own threat model.
+- **Test-only surfaces.** `dropNext`, `swallowNext`, `holdNext`, `permits()` live on the test wallet
+  and the L1 fixture, served only on loopback; shipped builds list neither. The hostile list is a
+  fixture inside the egress fence.
 - **The relayer helper** stages external consumption through the real hub path (the integration suite's
-  relayer flow); the cell proves the UI's own recovery after a reload, not the helper.
+  relayer flow); the cell proves the UI's own behaviour after a reload, not the helper.
 - **Supply chain / CI.** No new dependencies; workflow permissions unchanged.
 - **Domain.** The Permit2 cells make `spender` and the nonce/deadline binding asserted invariants —
   the drain shape.
@@ -443,8 +446,9 @@ account.
    `:1396-1400`; `accountService.getAccounts(profileId, chainId)` returns visible accounts only —
    `account/service.ts:166-174`.
 3. The decision builder replaces approved delta types and re-sends aliases for every selected account
-   — `dispatcher.ts:366-425`; `applyCapabilityDecision` unions `addAccounts` unconditionally and keeps
-   a rejected type's grant — `dapp-session/service.ts:300-334`.
+   — `dispatcher.ts:366-425`; `applyCapabilityDecision` unions `addAccounts` unconditionally, keeps a
+   rejected type's grant, and does all of it under the service's private lock —
+   `dapp-session/service.ts:300-334`; `CapabilityDecision` lives in `services-contract.ts:96-117`.
 4. `loadAvailableAccountsForPopup` provisions a default account when the profile has none —
    `dispatcher.ts:1118-1130`. `handleGetAccounts` intersects with the session's addresses — `:736-793`.
 5. `capabilities/index.test.ts` stubs `AccountSelectRow` — `:223`.
@@ -459,9 +463,9 @@ account.
    take a method + pattern — `main.ts:128-133`; the node hand-off proxy exists — `wallet.ts` `observeSubmissions`.
 8. Dropped: three straight `dropped` receipt reads clear the hash with the re-claim note —
    `useBridgeJournal.ts:1238-1275`. Consumed: `awaitConsumable` rethrows on a consumed message —
-   `:1112-1120`; `recordMessageConsumed` re-simulates the record's own claim and answers
-   true/false/null — `:1312-1330`; `completeDeposit` wipes attention and note — `:707-715`; the send
-   probe covers the fee's setup for an unregistered token — `useSend.ts:445-452`, and a fee stop
+   `:1112-1120`; `recordMessageConsumed` rebuilds the record's claim through the same fee-bearing
+   builder — `:1312-1330`, `:871-880`; `completeDeposit` wipes attention and note — `:707-715`; the
+   send probe covers the fee's setup for an unregistered token — `useSend.ts:445-452`, and a fee stop
    returns before it — `:379`.
 9. The feed hides only the foregrounded record — `useBridgeJournal.ts:1466`; a record owned by another
    granted account offers SWITCH — `BridgeJournalCard.vue:70-80`, `record-policy.ts:98-100`; a
@@ -472,8 +476,9 @@ account.
     withdraw is refused as `unknown-outcome` — `useBridgeJournal.test.ts:701`; Discard exists on both
     shapes with "check your wallet activity" copy — `BridgeJournalCard.vue:169-186,237-242`; the exit
     record carries `recipientL1`, amount, portal and no originating account or nonce — `useHubExit.ts:365-380`;
-    the rediscovered-consume identity check — `useBridgeJournal.ts:174,205`; the exit message is read
-    from the tx effects — `flows.ts:222-228`.
+    the consume identity check needs a known `exitTxHash` — `useHubExit.ts:264-283`; the exit message
+    is an `Fr` from the tx effects — `flows.ts:222-228`; the router events carry no token/portal
+    identity — `SwapBridgeRouter.sol:84-97`.
 11. The playground's `simFrom` input drives `from` — `sections/transactions.ts:59`.
 12. The token list validates entries one by one after the chain filter — `token-list.ts:33,141`.
 13. `gh stack init` takes `--base <trunk> <branch>`; no `--adopt`. `gh stack submit --auto` creates
@@ -490,17 +495,13 @@ account.
 - `wallet.getAccounts()` (wallet-sdk `Wallet`) answers entries of the same `{ item, alias }` shape the
   grant's accounts capability carries; confirmed at Phase 3 against the SDK's type before
   `parseAccountList` is shared.
-- The router's deposit event carries the recipient, amount and secret hash as readable (indexed or
-  decoded) arguments, so `findDepositByContent` can filter by them; confirmed at Phase 7 against the
-  ABI before the helper is written — if not, the helper decodes candidate events and compares.
-- After the relayer's claim deploys the derived token, the page's wallet can register the instance
-  and simulate the record's claim (so `recordMessageConsumed` answers `true` for 24b); if the
-  registration still enqueues a constructor for a deployed instance, the cell registers the token
-  through the existing "add to wallet" path first and the plan notes it.
+- 24b's CLAIM click under Option A reaches `awaitConsumable`'s rethrow (the probe for a token the
+  relayer's claim has deployed simulates the real claim and throws the consumed shape); if the fee
+  setup stops first (`useSend.ts:379`), the cell asserts that stop instead and says so.
 
-**Asks** — none open. Settled at Phase 0: scope (items 1–3), heavy suites locally and sharded, a
-three-arc stack, `code_review: off`, the three recovery product fixes authorized in arc 3 (now
-specified as reconcile / attach / record-tied completion, never resubmission). `/harden`: not scheduled.
+**Asks** — **one open**: Option A or B for the three recovery fixes (the block at the top). Settled at
+Phase 0: scope (items 1–3), heavy suites locally and sharded, a three-arc stack, `code_review: off`.
+`/harden`: not scheduled.
 
 ## Decision log
 
@@ -514,8 +515,8 @@ specified as reconcile / attach / record-tied completion, never resubmission). `
 | 4 | keep coverage pure; don't overload `reRequested`; resolve the loader contradiction; cover flag+membership | adopted — `grantedAccounts` presence is the signal; `accountService.getAccounts` direct; the combined case takes the field-diff path |
 | 5 | `getAccounts` returns a list, not a grant; guard the refresh; teardown ownership | adopted — shared entry parser, state guards, listener ownership (revised in round 2) |
 | 6 | `useTokenGrant`'s queue is private; outcomes need distinguishing | adopted — `prompt-queue.ts` shared; `added / unchanged / busy / failed` with honest copy |
-| 7 | 24b cannot end `done`: `awaitConsumable` rethrows | adopted — owner-authorized product fix + the cell (proof tightened in round 2) |
-| 8 | 26d and 31b assert recovery the product lacks; target the exit's second tx | adopted — owner-authorized fixes (mechanism replaced in round 2); the hold targets the exit selector |
+| 7 | 24b cannot end `done`: `awaitConsumable` rethrows | adopted then superseded — the fix moved to the follow-up (round 3); the cell pins today's behaviour |
+| 8 | 26d and 31b assert recovery the product lacks; target the exit's second tx | adopted then superseded — the fixes moved to the follow-up (round 3); the cells pin today's behaviour; the hold targets the exit selector |
 | 9 | the feed is shared; another granted account gets SWITCH, not a mismatch note; assert `disabled` without clicking | adopted — cells 2 and 4 rewritten; cell 3 asserts the disabled row under a held Ethereum leg |
 | 10 | duplicate symbols and no-contract addresses pass the schema; permit nonce unverified | adopted — cell 34b asserts fail-closed selection and no merge; permits compared with the deposit calldata |
 | 11 | `simFrom` already controls `from`; receipts carry no sender | adopted — no playground change; balance-based assertions |
@@ -529,15 +530,25 @@ specified as reconcile / attach / record-tied completion, never resubmission). `
 
 | # | Finding | Call |
 |---|---|---|
-| 1 | a missing hash does not prove nothing was broadcast; a retry with fresh nonces duplicates; keep the engine's `unknown-outcome` protection | adopted — no resubmission anywhere; the deposit fix reconciles by content, the exit fix attaches an identity-checked tx id; `unknown-outcome` stays; Discard's copy states the unknown outcome |
-| 2 | records carry no replayable plan; policy pins prove buttons only | adopted — replay dropped, so no plan is needed; every fix carries an engine pin (found/attached/refused/never-runs) beside the policy row |
-| 3 | a consumed error can come from the fuel setup; a fee stop prevents probing; `completeDeposit` wipes the note | adopted — trigger + record-tied proof via `recordMessageConsumed`; the fuel case pinned as NOT completed; the note set after the wipe |
-| 4 | `grantedAccounts` only on the membership path; rejected/flag-change paths lose locking; flag-only approval must not force sharing; keep the concurrent-revocation test | adopted — `grantedAccounts` on every path with a stored grant; classification by flags, not delta origin; empty-addition approval on a flag change; revocation re-checked under the lock, pinned |
-| 5 | retries and selection never move `s.epoch`; no singleton disposal exists; reuse the entry parser | adopted — completion check by `s.accounts` identity + selection + status; the listener installed once for the page's lifetime; `parseAccountList` shared with `parseGrantedAccounts` |
+| 1 | a missing hash does not prove nothing was broadcast; a retry with fresh nonces duplicates; keep the engine's `unknown-outcome` protection | adopted — no resubmission anywhere; reconcile/attach designs (superseded in round 3 → follow-up) |
+| 2 | records carry no replayable plan; policy pins prove buttons only | adopted — replay dropped; engine pins (now the follow-up's) |
+| 3 | a consumed error can come from the fuel setup; a fee stop prevents probing; `completeDeposit` wipes the note | adopted — trigger + record-tied proof (shown circular in round 3 → follow-up) |
+| 4 | `grantedAccounts` only on the membership path; rejected/flag-change paths lose locking; flag-only approval must not force sharing; keep the concurrent-revocation test | adopted — `grantedAccounts` on every path with a stored grant; classification by flags; empty-addition approval on a flag change; revocation pinned (mechanism fixed in round 3) |
+| 5 | retries and selection never move `s.epoch`; no singleton disposal exists; reuse the entry parser | adopted — completion check by `s.accounts` identity + selection + status; the listener installed once for the page's lifetime; `parseAccountList` shared |
 | 6 | re-check busy inside the queue; honour `retryCapabilities() === false` | adopted — both, `false` → `busy` |
 | 7 | reload remembers A, so `reconnectedAs(B)` cannot establish B; SWITCH only selects; hash-less claims need a click | adopted — cell 2 reconnects as A then switches; CLAIM clicked in cells 2 and 24b |
 | 8 | fees are Fee Juice, not the token; the Permit2 approval precedes the deposit tx; count per method; private exit for the single charge | adopted — separate balance assertions; allowance pre-established + `holdNext` matched by `to`; per-method counters; 31b private |
 | 9 | `NULO_E2E_RETRY=0`; re-run local gates after a rebase; the seed must require passing checks | adopted — retry 0 on every network command; local gates before re-watching; seed reworded |
+
+### Codex round 3 (reject, 5 findings) → v4 and the three-round stop
+
+| # | Finding | Call |
+|---|---|---|
+| 1 | the consumed proof is circular: `recordMessageConsumed` reuses the fee-bearing claim build; a consumed fuel message reads as consumed token twice | verified — **surfaced** (Option A: follow-up; the cell pins today's behaviour) |
+| 2 | the router events omit token/portal identity; a copied secret hash binds the wrong deposit; block window by chain time; both legs; conditional writes | verified — **surfaced** (Option A: follow-up) |
+| 3 | `flows.ts:222` yields `Fr` hashes; the consume identity check needs a known exit witness; recompute the full commitment; identical exits are indistinguishable | verified — **surfaced** (Option A: follow-up) |
+| 4 | the dispatcher cannot check under the service's private lock; add a decision precondition enforced inside `applyCapabilityDecision`; cover field-diff after revocation; preserve aliases | adopted — `requiresGrant` on `CapabilityDecision`, enforced in the lock, both shapes, aliases untouched on the field-diff path |
+| 5 | Reconcile/Attach need conditional writes after awaits; these are substantive features — surface at the three-round stop | adopted as the stop itself — Option A written in, Option B described |
 
 ## Post-implementation
 
@@ -557,8 +568,9 @@ run at any point.
    net diff from `94e412a6` asking for cross-arc issues (seams, duplication across arcs, drift from this
    plan), same loop until clean.
 4. **Delivery**: the FIRST time any PR is opened — the Delivery section's commands, bodies, the
-   local-gates-then-re-watch rule. Update `implementations-plan/index.md` and close the matching rows
-   of `implementations-plan/tools-self-testing/readiness.md`. Never merge.
+   local-gates-then-re-watch rule. Update `implementations-plan/index.md` (this plan's status; the
+   `tools-recovery` follow-up filed with the facts from the decision block) and close the matching
+   rows of `implementations-plan/tools-self-testing/readiness.md`. Never merge.
 
 **The no-over-engineering rule** (verbatim in every codex prompt): *"Report bugs and small, targeted
 improvements only. Do not propose speculative abstractions, extra configuration surface, new layers,
@@ -575,13 +587,13 @@ exact."*
 **Autonomy**: decisions the plan leaves open are settled by a logged `/codex high` consult; a loop
 still material after three rounds, or a decision outside this plan's scope, is surfaced to the owner
 and the session holds there. Hard limits: no merge, no publish, no history rewrite on branches others
-touch, no scope beyond this plan, no secrets, no resubmission path added to any record. Pushing the
-arc branches after `<test>` + `<lint>` pass is authorized.
+touch, no scope beyond this plan, no secrets, no resubmission or new recovery path added to any
+record. Pushing the arc branches after `<test>` + `<lint>` pass is authorized.
 
 ## Seeds
 
 Recommended: `/goal` (completion is transcript-observable). The `/loop` alternative is in the ELI5.
 
 ```
-/goal All 7 phases marked ✓ in implementations-plan/tools-readiness/plan.md (the per-phase headers in the file — not the chat, not the task list), each ✓ backed by its phase's validation gate as written in plan.md reported passing in the transcript (each local suite run quoted with its retry-0 tally and the SHA it ran on); for each phase the agent has printed `LESSONS_FILE=implementations-plan/tools-readiness/lessons/phase-N.md`; `/code-review` was NOT run (plan.md says code_review: off); the codex fix loop converged for each of the three arcs at its boundary AND for the final cross-arc pass, each convergence evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; the three-PR stack exists on GitHub, created only after all loops converged (`gh stack view` output in the transcript), each PR's checks watched to a settled PASSING state with the result quoted, and after any sync or rebase the affected arcs' local gates re-run on the new SHA before the re-watch; `bun run test:all` and `bun run lint && bun run lint:actions` both report exit 0 in the transcript on the final SHA; every decision point was settled by a logged codex consult or surfaced per plan.md § Autonomy. Merging is the owner's and is not part of this goal.
+/goal All 7 phases marked ✓ in implementations-plan/tools-readiness/plan.md (the per-phase headers in the file — not the chat, not the task list), each ✓ backed by its phase's validation gate as written in plan.md reported passing in the transcript (each local suite run quoted with its retry-0 tally and the SHA it ran on); for each phase the agent has printed `LESSONS_FILE=implementations-plan/tools-readiness/lessons/phase-N.md`; `/code-review` was NOT run (plan.md says code_review: off); the codex fix loop converged for each of the three arcs at its boundary AND for the final cross-arc pass, each convergence evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; the three-PR stack exists on GitHub, created only after all loops converged (`gh stack view` output in the transcript), each PR's checks watched to a settled PASSING state with the result quoted, and after any sync or rebase the affected arcs' local gates re-run on the new SHA before the re-watch; `bun run test:all` and `bun run lint && bun run lint:actions` both report exit 0 in the transcript on the final SHA; implementations-plan/index.md lists the tools-recovery follow-up; every decision point was settled by a logged codex consult or surfaced per plan.md § Autonomy. Merging is the owner's and is not part of this goal.
 ```

@@ -64,6 +64,25 @@ Rejected: none. Confirmed sound by codex: the CAIP projection, the pure coverage
 queue extraction, the corrected feed semantics, actor allocation, staged shard sizing, the Permit2
 calldata comparison, the corrected stack commands.
 
-## Round 3 — plan v3
+## Round 3 — plan v3 (the three-round stop)
 
-_pending_
+**Verdict:** `reject (with blocking findings: consumed proof remains circular, reconciliation omits
+identity fields, and exit attachment assumes decoded data that is unavailable)`
+
+Five findings, all verified. Three of them show the owner-authorized recovery fixes are each a design
+problem; per the protocol the loop stops here and the decision goes to the owner (plan.md's decision
+block, Option A written in).
+
+| # | Sev | Finding (codex) | Verified | Call → plan v4 |
+|---|---|---|---|---|
+| 1 | High | `recordMessageConsumed` re-runs the same fee-bearing claim build as the trigger (`useBridgeJournal.ts:1318` → `buildClaimHandles:871-880` → `deps.claimSend`), so a consumed fuel message reads as "token consumed" twice; a message-specific nullifier check is needed, independent of fee setup | yes | **surfaced** — Option A: follow-up `tools-recovery`; 24b pins today's behaviour (error state, no send, token credited once) |
+| 2 | High | The router's `Bridge`/`BridgeWithFuel` events carry recipient, amount, secret hash, privacy but no token/portal (`SwapBridgeRouter.sol:84-97`); a copied secret hash binds the wrong deposit; verify calldata; block window by chain time; both legs; conditional writes | yes | **surfaced** — Option A: follow-up; 26d pins Discard-only |
+| 3 | High | `flows.ts:222` yields `Fr` message hashes; the consume identity check validates an L1 consume tx against a KNOWN exit witness (`useHubExit.ts:264-283` needs `exitTxHash`); recompute the full commitment; identical exits indistinguishable | yes | **surfaced** — Option A: follow-up; 31b pins `unknown-outcome` + Discard, no second burn |
+| 4 | High | The dispatcher cannot check under the service's private lock with `applyCapabilityDecision` unchanged; add a precondition enforced inside that lock; cover field-diff after revocation; preserve aliases | yes | adopted — `requiresGrant` on `CapabilityDecision`, enforced inside `applyCapabilityDecision`; both shapes; aliases untouched on field-diff; service + contract files and tests in arc 1 |
+| 5 | Med | Reconcile/Attach need conditional writes after awaits; these are substantive recovery features — surface the remaining design work at the three-round stop | yes | adopted as the stop — Option A written in, Option B described |
+
+Rejected: none. Confirmed sound by codex: the no-resubmission scope, shared account parsing and
+queue, the corrected SWITCH/CLAIM cells, the retry-zero gates, the delivery seed.
+
+**Outcome:** no explicit `approve` after three rounds. The plan is presented to the owner with the
+three recovery fixes as an open decision; arcs 1–2 and the rest of arc 3 carry no open findings.
