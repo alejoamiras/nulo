@@ -128,7 +128,7 @@ run's retry-0 tally and SHA are quoted in the phase's lessons file.
 
 ### Arc 1 — extension
 
-#### Phase 1: The wallet widens a session on a repeat `accounts` request
+#### Phase 1: The wallet widens a session on a repeat `accounts` request ✓ (`c1993c2f`, lessons/phase-1.md)
 - **Membership, chain-scoped, independent of why the type is in the delta.** `packages/wallet-bridge/src/dispatcher.ts`
   `handleRequestCapabilities`: whenever the manifest asks for `accounts` AND the session already
   holds an accounts grant, compute the ungranted set — the profile's visible accounts on the session's
@@ -163,16 +163,16 @@ run's retry-0 tally and SHA are quoted in the phase's lessons file.
   (`packages/wallet-bridge/src/services-contract.ts:96-117`) gains a precondition
   `requiresGrant?: CapabilityType[]`, and `applyCapabilityDecision` enforces it INSIDE its lock: if
   any listed type has no stored grant (revoked from the management UI while the popup was open), it
-  throws a typed `GrantRevokedError` and writes nothing — no `addAccounts` on a session without the
-  grant, no grant re-created. Both widening shapes (membership-only and field-diff on a session that
+  throws `CapabilityNotGrantedError(type)` (already wire-registered; no new error class) and writes
+  nothing — no `addAccounts` on a session without the grant, no grant re-created. Both widening shapes (membership-only and field-diff on a session that
   had a grant) set `requiresGrant: ["accounts"]`; the dispatcher maps the error to a rejection for the
   dApp. Pinned in the service's test and in `dispatcher.test.ts`.
 - **Wire + UI.** `dapp-interaction-protocol.ts`: `grantedAccounts?: string[]` on `CapabilityParams`.
   `apps/extension/src/popup/windows/capabilities/index.vue` `init()`: granted rows pre-selected; the
   approve gate accepts an empty addition only when `grantedAccounts` is absent or the request changes
-  flags. `AccountSelectRow.vue`: a `locked` prop → native `disabled` on the control, `aria-disabled`,
-  `data-granted="true"`, and the toggle handler ignores locked rows (keyboard included). Copy names
-  what the app already has and what it asks to add.
+  flags. `AccountSelectRow.vue`: a `locked` prop → the row (a `div role="button"`) renders
+  `aria-disabled`, leaves the tab order, `data-granted="true"`, and the toggle handler ignores locked
+  rows (click, Enter, Space). Copy names what the app already has and what it asks to add.
 - **Unit tests.** `dispatcher.test.ts` — the `:543` same-shape pin becomes: same shape, every visible
   account granted → no popup; same shape, one ungranted → popup with `grantedAccounts`; a hidden
   account is not ungranted; an account on another chain is not ungranted (cross-chain membership);
