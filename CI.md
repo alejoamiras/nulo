@@ -42,7 +42,7 @@ Triggers:
 - **Auto** on PRs to `dev` whose diff touches the `smoke-surface` paths-filter (popup, components, manifest, the wallet services smoke exercises, build inputs, the harness, etc. — see [`pr-extension-smoke-e2e.yml`](./.github/workflows/pr-extension-smoke-e2e.yml) `filters:`)
 - **Manual** by adding the `e2e:extension-smoke` label
 
-`extension-smoke-e2e-status` emits `pass` when the suite is skipped (no relevant changes / no label), so branch protection sees a green check either way. It is a **required** check on both `dev` and `main` once each branch's cut-over has run (see "Check names and the protection runbook"); until then the branch still requires the legacy `smoke-e2e-status`.
+`extension-smoke-e2e-status` emits `pass` when the suite is skipped (no relevant changes / no label), so branch protection sees a green check either way. It is a **required** check on both `dev` and `main` once each branch's cut-over has run (see "Check names and the protection runbook"). `dev` was cut over on 2026-09-09; **`main`'s cut-over is still pending** and must run right before the next promote merges — until then `main` requires the legacy `smoke-e2e-status`, which nothing produces.
 
 ### `pr-extension-network-e2e.yml`
 
