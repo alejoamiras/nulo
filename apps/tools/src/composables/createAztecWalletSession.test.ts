@@ -1053,6 +1053,66 @@ describe("multi-account: a re-grant on a connected session (retryCapabilities)",
 		expect(s.status.value).toBe("connected")
 	})
 
+	it("a re-grant that drops the active account while an operation holds the gate keeps it (deferred, not moved)", async () => {
+		let blocked = false
+		const { session: s, walletHandle } = await connectedAs(MA_B, { isSwitchBlocked: () => blocked })
+		const persistedBefore = localStorage.getItem(SELECTED_KEY)
+		let answer: (v: never) => void = () => {}
+		walletHandle.requestCapabilities.mockImplementationOnce(() => new Promise((r) => (answer = r as never)))
+		const pending = s.retryCapabilities()
+		await flush()
+		// The operation starts while the wallet is deciding; the reply then drops B.
+		blocked = true
+		answer({ granted: [{ type: "accounts", accounts: [{ alias: "Third", item: MA_C }] }] } as never)
+		await expect(pending).resolves.toBe(true)
+		expect(s.status.value).toBe("connected")
+		expect(s.selectedAccount.value).toBe(MA_B)
+		expect(s.accounts.value.map((a) => a.address)).toEqual([MA_C])
+		expect(localStorage.getItem(SELECTED_KEY)).toBe(persistedBefore)
+	})
+
+	it("a chooser opened by a re-grant cannot be confirmed while an operation holds the gate", async () => {
+		let blocked = false
+		const { session: s, walletHandle } = await connectedAs(MA_B, { isSwitchBlocked: () => blocked })
+		walletHandle.requestCapabilities.mockResolvedValueOnce({
+			granted: [
+				{
+					type: "accounts",
+					accounts: [
+						{ alias: "Third", item: MA_C },
+						{ alias: "Main", item: MA_A },
+					],
+				},
+			],
+		})
+		await expect(s.retryCapabilities()).resolves.toBe(true)
+		expect(s.status.value).toBe("choosing-account")
+		blocked = true
+		await s.confirmAccountChoice(MA_C)
+		expect(s.status.value).toBe("choosing-account")
+		expect(s.selectedAccount.value).toBe(MA_B)
+		blocked = false
+		await s.confirmAccountChoice(MA_C)
+		expect(s.status.value).toBe("connected")
+		expect(s.selectedAccount.value).toBe(MA_C)
+	})
+
+	it("a quiet re-grant keeps the active account listed when the wallet's ordering would push it past the cap", async () => {
+		const many = Array.from({ length: 17 }, (_, i) => ({ alias: `a${i}`, item: addr(i.toString(16).padStart(2, "0")) }))
+		const first16 = many.slice(0, 16)
+		const made = makeMultiProvider({ accounts: first16 })
+		const built = makeSessionWith()
+		await driveThroughGrant(built.session, made.provider)
+		const last = first16[15].item as string
+		await built.session.confirmAccountChoice(last)
+		made.walletHandle.requestCapabilities.mockResolvedValueOnce({ granted: [{ type: "accounts", accounts: [many[16], ...first16] }] })
+		await expect(built.session.retryCapabilities()).resolves.toBe(true)
+		expect(built.session.status.value).toBe("connected")
+		expect(built.session.selectedAccount.value).toBe(last)
+		expect(built.session.accounts.value.map((a) => a.address)).toContain(last)
+		expect(built.session.hiddenAccountsCount.value).toBe(1)
+	})
+
 	it("a re-grant that drops the active account falls through to the connect-time choice (pauses for the user)", async () => {
 		const { session: s, walletHandle } = await connectedAs(MA_B)
 		walletHandle.requestCapabilities.mockResolvedValueOnce({
