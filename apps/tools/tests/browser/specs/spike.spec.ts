@@ -152,6 +152,10 @@ test("viewports: at 390 px and 1024 px the flow connects and deposits; the activ
 	] as const) {
 		await page.setViewportSize({ width, height: 900 })
 		await page.goto("/")
+		// Each width starts clean: the first pass remembered its wallet, and a remembered wallet
+		// reconnects on its own instead of opening the picker.
+		await page.evaluate(() => localStorage.clear())
+		await page.reload()
 		await openSend(page)
 		await connectL1(page)
 		await connectAztec(page, { profile: "plain", account: who.address })

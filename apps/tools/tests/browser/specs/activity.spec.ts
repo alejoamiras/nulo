@@ -2,7 +2,7 @@
 import { freshToken, mint, setRoutable } from "@nulo/bridge-core/sandbox"
 import { TESTIDS } from "../../../src/lib/testids"
 import { expect, test } from "../fixtures/test"
-import { connectAztec, tid, walletFrame } from "../pages/connect"
+import { connectAztec, driveToConnected, switchAccount, tid, walletFrame } from "../pages/connect"
 import { depositRecords } from "../pages/journal"
 import { confirmReview, connectL1, openSend, reviewDeposit, waitForReceipt } from "../pages/send"
 
@@ -105,18 +105,20 @@ test("cell 40 — two tabs, two sends racing: each stepper adopts only its own r
 	const fresh = await freshToken(sandbox.clients.l1, { name: "Fresh Raced", symbol: "FRSHR", decimals: 6 }, [l1.address], 1000n * USDC)
 	await setRoutable(sandbox.clients.l1, sandbox.clients.deployment.quoter, fresh)
 
-	// Tab 1 as A, tab 2 as B: the same origin, so the journal is one localStorage both tabs read.
+	// Tab 1 as A, tab 2 as B: the same origin, so the journal is one localStorage both tabs read —
+	// and so is the remembered wallet, which tab 2 reconnects to (as A) and then switches to B.
+	await page.goto("/")
+	await openSend(page)
+	await connectL1(page)
+	await connectAztec(page, { profile: "plain", account: actor.address })
+	await reviewDeposit(page, { l1ChainId: L1, erc20: usdt.erc20, amount: "100", intent: "token+gas", isPrivate: false })
 	const tab2 = await context.newPage()
-	for (const [tab, who, erc20, viaLookup] of [
-		[page, actor, usdt.erc20, false],
-		[tab2, b, fresh, true],
-	] as const) {
-		await tab.goto("/")
-		await openSend(tab)
-		await connectL1(tab)
-		await connectAztec(tab, { profile: "plain", account: who.address })
-		await reviewDeposit(tab, { l1ChainId: L1, erc20, amount: "100", intent: "token+gas", isPrivate: false, viaLookup })
-	}
+	await tab2.goto("/")
+	await openSend(tab2)
+	await connectL1(tab2)
+	await driveToConnected(tab2, { profile: "plain", account: actor.address })
+	await switchAccount(tab2, b.address)
+	await reviewDeposit(tab2, { l1ChainId: L1, erc20: fresh, amount: "100", intent: "token+gas", isPrivate: false, viaLookup: true })
 	// Tab 2 is parked on its grant: its submit baseline is taken, no record of its own exists yet.
 	// Tab 1's record then appears — the exact shape a wizard adopting by recency would take.
 	await walletFrame(tab2, run, "plain").evaluate(() => window.__nuloTestWallet!.holdNext("requestCapabilities"))

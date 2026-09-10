@@ -102,7 +102,7 @@ test("cell 24c — a claim the node dropped is offered again after three dropped
 		.catch(() => undefined)
 	const card = page.locator(`${tid(TESTIDS.journalCard)}[data-id]`).first()
 	await expect(card).toHaveAttribute("data-attention", "error", { timeout: 4 * 60_000 })
-	await expect(card.locator(tid(TESTIDS.journalAttention))).toContainText("The claim was dropped")
+	await expect(card.locator(tid(TESTIDS.journalStep))).toContainText("The claim was dropped")
 	expect((await depositRecords(page)).at(-1)?.claimTxHash, "the dropped hash was cleared").toBeUndefined()
 
 	await card.locator(tid(TESTIDS.journalClaim)).click()
@@ -139,8 +139,11 @@ test("cell 24b — a claim another submitter made first: today the record surfac
 	await reviewDeposit(page, { l1ChainId: L1, erc20: usdt.erc20, amount: "100", intent: "token", isPrivate: false })
 	const hub = sandbox.manifest.bridge?.l2.hub.address ?? ""
 	expect(hub).not.toBe("")
-	await walletFrame(page, run, "plain").evaluate((hubAddress) => window.__nuloTestWallet!.holdNext("simulateTx", hubAddress), hub)
+	// A token-only confirm prices its claim against the hub in preflight, so the hold on the claim's
+	// arrival gate is armed only once the record exists — after preflight, before any claim.
 	await confirmReview(page)
+	await expect.poll(async () => (await depositRecords(page)).length, { timeout: 120_000 }).toBe(1)
+	await walletFrame(page, run, "plain").evaluate((hubAddress) => window.__nuloTestWallet!.holdNext("simulateTx", hubAddress), hub)
 	await expect.poll(async () => (await depositRecords(page)).at(-1)?.messageHash, { timeout: 180_000 }).toBeTruthy()
 	await expect.poll(async () => (await walletCalls(page, run, "plain")).simulateTx ?? 0, { timeout: 180_000 }).toBeGreaterThan(0)
 	expect((await walletCalls(page, run, "plain")).sendTx ?? 0, "no claim left this page's wallet").toBe(0)
@@ -162,7 +165,7 @@ test("cell 24b — a claim another submitter made first: today the record surfac
 	// A rediscovered record with no claim hash is not auto-resumed: only the click runs the claim.
 	await card.locator(tid(TESTIDS.journalClaim)).click()
 	await expect(card).toHaveAttribute("data-attention", "error", { timeout: 4 * 60_000 })
-	await expect(card.locator(tid(TESTIDS.journalAttention))).toContainText(/nullified|consumed/i)
+	await expect(card.locator(tid(TESTIDS.journalStep))).toContainText(/nullified|consumed/i)
 	expect((await walletCalls(page, run, "plain")).sendTx ?? 0, "nothing was sent for a consumed message").toBe(0)
 	expect((await depositRecords(page)).at(-1)?.claimTxHash).toBeUndefined()
 	expect((await balanceOf(usdtL2, actor.actor.address, "public")) - before, "credited exactly once").toBe(credited)
