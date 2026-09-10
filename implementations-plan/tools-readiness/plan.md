@@ -7,7 +7,7 @@ eli5: https://claude.ai/code/artifact/2ac9b873-6237-4860-a67c-723e1fa3b074
 code_review: off
 budget: recon 1 agent; codex at high; no /code-review (owner directive 2026-09-03)
 base: dev @ 94e412a6
-status: v4 — codex rounds 1–3 (30 findings); the three-round stop landed on the recovery fixes → owner decision at the gate (Option A written in)
+status: approved 2026-09-10 — Option A (codex rounds 1–3, 30 findings: 27 folded, 3 deferred to the tools-recovery follow-up); implementing
 ---
 
 # tools-readiness — the account-widening feature and the readiness cells
@@ -18,7 +18,7 @@ forgetting the app — and the test cells `implementations-plan/tools-self-testi
 lists as the gap between the suites and production evidence. No wallet-sdk patches: both halves use
 `requestCapabilities` and `getAccounts` as the SDK ships them.
 
-## ⚠ Owner decision — the three recovery fixes (three-round stop)
+## Owner decision — the three recovery fixes (three-round stop) — DECIDED: Option A (2026-09-10)
 
 At Phase 0 the owner authorized three "product fixes" in arc 3: a claim consumed by another
 submitter, a deposit whose Ethereum wallet never answered, an exit that lost its transaction id.
@@ -500,8 +500,8 @@ response `granted.accounts` re-derived from the stored grant → tools `chooseGr
   relayer's claim has deployed simulates the real claim and throws the consumed shape); if the fee
   setup stops first (`useSend.ts:379`), the cell asserts that stop instead and says so.
 
-**Asks** — **one open**: Option A or B for the three recovery fixes (the block at the top). Settled at
-Phase 0: scope (items 1–3), heavy suites locally and sharded, a three-arc stack, `code_review: off`.
+**Asks** — none open. Settled at Phase 0: scope (items 1–3), heavy suites locally and sharded, a
+three-arc stack, `code_review: off`; settled at the gate: Option A for the three recovery fixes.
 `/harden`: not scheduled.
 
 ## Decision log
