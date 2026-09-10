@@ -139,7 +139,7 @@ test("cell 40 — two tabs, two sends racing: each stepper adopts only its own r
 	await tab2.locator(tid(TESTIDS.tabActivity)).click()
 	await expect(tab2.locator(`${tid(TESTIDS.journalCard)}[data-id="${first}"]`)).toBeVisible({ timeout: 30_000 })
 	// The held grant keeps tab 2's wallet frame raised over the rail, so the tab switch is forced.
-	await tab2.locator(tid(TESTIDS.tabSend)).click({ force: true })
+	await tab2.locator(tid(TESTIDS.tabSend)).dispatchEvent("click")
 	await expect(tab2.locator(tid(TESTIDS.sendView))).toBeVisible()
 	await expect(tab2.locator(tid(TESTIDS.stepper)), "tab 2 stays on its own prompt").toHaveAttribute("data-id", /^dep-pending-permit-/)
 	expect(await walletFrame(tab2, run, "selfpay").evaluate(() => window.__nuloTestWallet!.release())).toBe(1)
