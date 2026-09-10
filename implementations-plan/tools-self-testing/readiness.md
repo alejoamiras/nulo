@@ -76,3 +76,45 @@ interrupted between them and reloaded. Three things can be true of the claim at 
 
 Plan row 24b names the consumed branch's expected end state on a plain wallet with no credit — the
 `none` stop — which is what that cell would assert once staged.
+
+## 5. The multi-account path (added 2026-09-10)
+
+**Extension — covered more than it looks, with two holes.** Smoke `accounts.test.ts` creates a second
+account, switches, renames, hides and restores, and opens the switcher from the header. The network
+suite drives `account-switch-isolation` (A's incoming and settled transactions never render in B's
+feed; the incoming-poll gate), `multi-account-from` (a send from the session's first account),
+`cap-request-accounts` (the dApp grant selects an account and the alias persists),
+`meta-getAccounts` / `-pregrant`, `session-profileSwitch` (a profile switch disconnects the dApp,
+reconnect under B works), `in-flight-send-guard` (an account switch is refused while a send is in
+flight), the imported-account lifecycle and execution, and `account-balance-orphans`. Missing:
+
+- **An ACCOUNT switch under a live dApp session** (not a profile switch): the popup moves from A to
+  B while the playground is connected — what `getAccounts` returns, whether the session's `from`
+  follows, and that the dApp's next `sendTx` is signed by the account the chip shows.
+- **A second-account send end to end** with the receiver's balance and feed asserted, on a derived
+  (not imported) second account, plus the fee picker read under the switched account.
+
+**Tools — the real gap.** The suite grants the whole actor pool to the page (the spike asserts every
+pool address is in the grant) and each cell picks ONE actor in the choose-account modal, then never
+switches. The product has the machinery and none of it is driven: `selectAccount` in
+`createAztecWalletSession.ts` (refused through `isSwitchBlocked` while an operation is in flight), the
+journal's recipient guard in `useBridgeJournal.ts` (a claim for A must never run while B is active:
+the record shows a mismatch card, "Switch to that Aztec account to claim", and auto-resume waits), the
+feed keyed on the selected account, `useGasShare.reset()` on a switch, the wizard's stand-down when
+the account moves under a review (unit-pinned). So the answer to "can it keep claiming after a
+switch?" is: by design it refuses under B and resumes under A — and nothing proves it. Cells to add,
+each with two funded actors from the same pool:
+
+1. **Interrupted deposit, wrong account.** Deposit as A, hold the claim, reload, connect as B: the
+   record shows the mismatch card and no claim is sent; switch to A: the claim lands from the journal.
+2. **Switch refused mid-send.** Start a deposit as A; during the Ethereum leg open the switcher and
+   pick B: the switch is refused and the send completes for A.
+3. **The feed is per account.** A's records absent from B's feed after a switch, present again under A.
+4. **The gas gate re-reads on a switch.** A holds credit, B holds nothing: a review opened as A and
+   switched to B stands down; B's amount step says `none`; back under A it sends.
+5. **Reload remembers the selected account** when it is not the first of the grant.
+6. **A one-account grant** (a profile with one seed): no choose-account modal, straight to connected.
+
+These reuse `chooseAccount`, `grantedAccounts`, the account chip and menu testids, and the journal
+reader; the pool already funds distinct actors per cell. Estimated at one file, `accounts.spec.ts`,
+six cells, in the drip family's shard budget.
