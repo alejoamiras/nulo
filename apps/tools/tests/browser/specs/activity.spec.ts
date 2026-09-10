@@ -126,7 +126,11 @@ test("cell 40 — two tabs, two sends racing: each stepper adopts only its own r
 	await expect(page.locator(tid(TESTIDS.stepper))).toBeVisible({ timeout: 120_000 })
 	await expect.poll(async () => (await depositRecords(page)).length, { timeout: 180_000 }).toBe(1)
 	const own = async (who: string) => (await depositRecords(page)).find((r) => r.recipient?.toLowerCase() === who.toLowerCase())?.id
-	await expect(page.locator(tid(TESTIDS.stepper))).toHaveAttribute("data-id", (await own(actor.address)) ?? "missing")
+	const first = (await own(actor.address)) ?? "missing"
+	await expect(page.locator(tid(TESTIDS.stepper))).toHaveAttribute("data-id", first)
+	// Tab 2 has seen the foreign record — its own journal renders it — and still sits on its prompt.
+	await tab2.locator(tid(TESTIDS.tabActivity)).click()
+	await expect(tab2.locator(`${tid(TESTIDS.journalCard)}[data-id="${first}"]`)).toBeVisible({ timeout: 30_000 })
 	await expect(tab2.locator(tid(TESTIDS.stepper)), "tab 2 stays on its own prompt").toHaveAttribute("data-id", /^dep-pending-permit-/)
 	expect(await walletFrame(tab2, run, "plain").evaluate(() => window.__nuloTestWallet!.release())).toBe(1)
 	await expect.poll(async () => (await depositRecords(page)).length, { timeout: 180_000 }).toBe(2)
@@ -134,7 +138,7 @@ test("cell 40 — two tabs, two sends racing: each stepper adopts only its own r
 
 	const [r1, r2] = await Promise.all([waitForReceipt(page), waitForReceipt(tab2)])
 	expect(r1.hero).toContain("USDT")
-	expect(r2.hero).toContain("100")
+	expect(r2.hero).toContain("FRSHR")
 	const records = await depositRecords(page)
 	expect(records).toHaveLength(2)
 	expect(records.every((r) => r.claimTxHash)).toBe(true)
