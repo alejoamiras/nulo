@@ -35,6 +35,7 @@ export const TESTIDS = {
 	accountChoiceRow: "tl-account-choice-row",
 	accountChoiceContinue: "tl-account-choice-continue",
 	accountChoiceTruncation: "tl-account-choice-truncation",
+	accountChoiceBusy: "tl-account-choice-busy",
 
 	// Account switcher - connected chip + dropdown menu (both wallet panels)
 	accountChip: "tl-account-chip",

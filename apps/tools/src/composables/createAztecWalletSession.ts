@@ -890,9 +890,9 @@ function chooseGrantedAccount(
 		pushSelectionNotice(s, { kind: "auto-remembered", alias: match.alias, address: match.address })
 		return "chosen"
 	}
-	// >1 accounts, nothing (valid) remembered: pause for the user. The flow stays
-	// OWNED (activeFlowEpoch keeps its value), so retryCapabilities stays a no-op
-	// while the modal is up; confirm/cancel resume via the captured token.
+	// Pause for the user. The flow stays OWNED (activeFlowEpoch keeps its value), so
+	// retryCapabilities stays a no-op while the modal is up; confirm/cancel resume via the
+	// captured token. An operation gate also prevents automatic selection.
 	s.pendingAccountChoice = { flowEpoch, wallet: flowWallet, provider: flowProvider }
 	s.status.value = "choosing-account"
 	return "paused"
