@@ -1,5 +1,6 @@
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
+import { CapabilityNotGrantedError } from "@nulo/extension-messaging/errors"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService } from "@/wallet/services/profile/service"
 import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
@@ -302,6 +303,12 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 			const session = await this.storage.get(sessionId)
 			if (!session) throw new Error("Invalid id")
 			const now = Date.now()
+
+			// A widening adds accounts to a grant the popup was opened against; revoked meanwhile,
+			// the addition would land on a session without the grant — refuse before any write.
+			const held = new Set((session.capabilityGrants ?? []).map((g) => g.capability.type))
+			const revoked = (decision.requiresGrant ?? []).find((type) => !held.has(type as never))
+			if (revoked !== undefined) throw new CapabilityNotGrantedError(revoked)
 
 			if (decision.addAccounts.length > 0) {
 				session.accounts = [...new Set([...(session.accounts ?? []), ...decision.addAccounts])]

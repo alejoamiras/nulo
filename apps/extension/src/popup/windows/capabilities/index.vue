@@ -48,6 +48,13 @@ const availableAccounts = ref<UIAccount[]>([])
 const selectedAccounts = ref<UIAccount[]>([])
 const accountAliases = ref<Record<string, string>>({})
 
+// Accounts the session already holds (lowercase hex): rendered locked and pre-selected, never
+// toggled here, their aliases untouched. Wallet-derived, like `availableAccounts`.
+const grantedAccountSet = ref<Set<string>>(new Set())
+// The request adds membership only (same flags as the stored grant): approving with nothing new
+// selected would be a no-op consent, so the gate asks for an account to add.
+const accountsMembershipOnly = ref(false)
+
 // True when the dApp asked for accounts but the wallet lists none on the session's chain: the
 // wallet already tried to provision the chain's default account and declined (a user-added
 // network, or a chain whose accounts are all hidden). Approving would grant a session with
@@ -143,16 +150,7 @@ const init = async () => {
 		const hasAccountsInDelta = delta.some((cap) => cap.type === "accounts")
 		if (hasAccountsInDelta) {
 			if (payload.value.params.availableAccounts?.length) {
-				needsAccountSelection.value = true
-				availableAccounts.value = payload.value.params.availableAccounts
-				// If exactly one account is available, pre-select it. The user
-				// still sees the row and must Approve; this just removes the
-				// extra click. `availableAccounts` is wallet-derived (not
-				// dApp-supplied), so there's no path for a malicious dApp to
-				// inject a phantom account here.
-				if (availableAccounts.value.length === 1) {
-					selectedAccounts.value = [...availableAccounts.value]
-				}
+				initAccountPicker(payload.value.params)
 			} else {
 				const chain = dappChain.value?.name ?? "this chain"
 				noAccountsAvailable.value = true
@@ -168,7 +166,9 @@ const init = async () => {
 		const reRequestedTypes = new Set(payload.value.params.reRequested ?? [])
 		const existingGrants = payload.value.params.existingGrants as Capability[]
 
-		capabilities.value = buildCapabilityItems(delta, existingGrants, reRequestedTypes)
+		capabilities.value = buildCapabilityItems(delta, existingGrants, reRequestedTypes, {
+			accountsMembershipOnly: accountsMembershipOnly.value,
+		})
 		// Only flip after capabilities are committed to state. If init throws
 		// or the popup is cancelled mid-flight, the approve gate stays closed.
 		initComplete.value = true
@@ -178,12 +178,29 @@ const init = async () => {
 	}
 }
 
+/** `availableAccounts` and `grantedAccounts` are both wallet-derived (never dApp-supplied), so
+ *  there is no path for a malicious dApp to inject a phantom account or a phantom lock here. */
+const initAccountPicker = (params: CapabilityPayload["params"]) => {
+	needsAccountSelection.value = true
+	availableAccounts.value = params.availableAccounts ?? []
+	grantedAccountSet.value = new Set((params.grantedAccounts ?? []).map((address) => address.toLowerCase()))
+	accountsMembershipOnly.value = params.accountsMembershipOnly === true
+	const held = availableAccounts.value.filter(isAccountGranted)
+	// Held rows are pre-selected and locked. Otherwise, exactly one available account is
+	// pre-selected: the user still sees the row and must Approve; this only removes a click.
+	if (held.length > 0) selectedAccounts.value = held
+	else if (availableAccounts.value.length === 1) selectedAccounts.value = [...availableAccounts.value]
+}
+
+const isAccountGranted = (account: UIAccount) => grantedAccountSet.value.has(account.address.toLowerCase())
+
 const toggleCapability = (index: number) => {
 	const cap = capabilities.value[index]
 	if (cap.isNew) cap.selected = !cap.selected
 }
 
 const selectAccount = (account: UIAccount) => {
+	if (isAccountGranted(account)) return
 	if (processingError.value?.type === "warning") clearError()
 	const idx = selectedAccounts.value.findIndex((acc) => acc.address === account.address)
 	if (idx < 0) selectedAccounts.value.push(account)
@@ -197,7 +214,7 @@ const isAccountSelected = (account: UIAccount) => selectedAccounts.value.some((a
  *  accounts twice (and bypass the account picker's own selected-accounts gate). */
 const buildGrantedCaps = (): Capability[] => {
 	const approvedNew = capabilities.value.filter((c) => c.isNew && c.selected && !c.authwitRider).map((c) => c.capability)
-	const existing = capabilities.value.filter((c) => !c.isNew).map((c) => c.capability)
+	const existing = capabilities.value.filter((c) => !c.isNew && !c.authwitRider).map((c) => c.capability)
 
 	const granted: Capability[] = [...approvedNew, ...existing]
 	if (needsAccountSelection.value && selectedAccounts.value.length > 0) {
@@ -239,6 +256,10 @@ const approve = async () => {
 	}
 	if (needsAccountSelection.value && selectedAccounts.value.length === 0) {
 		setError("Select at least one account", "You must select at least one account to share with the dApp", "warning")
+		return
+	}
+	if (needsAccountSelection.value && accountsMembershipOnly.value && !selectedAccounts.value.some((acc) => !isAccountGranted(acc))) {
+		setError("Select an account to add", "This app already has the accounts marked SHARED. Pick one to add, or reject.", "warning")
 		return
 	}
 	try {
@@ -338,7 +359,10 @@ onUnmounted(disposeWindow)
 				</Banner>
 
 				<Flex v-if="needsAccountSelection" direction="column" gap="10" wide>
-					<SectionLabel label="Select accounts to share" :count="availableAccounts.length" />
+					<SectionLabel
+						:label="grantedAccountSet.size > 0 ? 'Add accounts to share' : 'Select accounts to share'"
+						:count="availableAccounts.length"
+					/>
 
 					<ItemsContainer>
 						<AccountSelectRow
@@ -346,6 +370,7 @@ onUnmounted(disposeWindow)
 							:key="acc.address"
 							:account="acc"
 							:selected="isAccountSelected(acc)"
+							:locked="isAccountGranted(acc)"
 							:alias="accountAliases[formatCaipAccount(acc.chainId, acc.address)]"
 							:disabled="isLoading || processingError?.type === 'error'"
 							@toggle="selectAccount(acc)"

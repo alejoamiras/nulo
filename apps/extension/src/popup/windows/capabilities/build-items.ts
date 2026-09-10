@@ -34,6 +34,7 @@ export function buildCapabilityItems(
 	delta: Capability[],
 	existingGrants: Capability[],
 	reRequestedTypes: ReadonlySet<string>,
+	opts: { accountsMembershipOnly?: boolean } = {},
 ): UICapabilityItem[] {
 	const items: UICapabilityItem[] = []
 
@@ -45,17 +46,20 @@ export function buildCapabilityItems(
 		// flag from the accounts grant on approve). Boolean() coercion
 		// mirrors the dispatcher/scope-checker read, so a dApp sending a
 		// truthy non-boolean (`canCreateAuthWit: 1`) can't dodge the card.
+		// A membership-only widening asks for accounts the session already holds the flag for:
+		// the rider is then an existing grant (not deselectable), and the dispatcher keeps the
+		// stored accounts grant untouched whatever the popup echoes.
 		if (cap.type === "accounts") {
 			if (Boolean((cap as { canCreateAuthWit?: unknown }).canCreateAuthWit)) {
 				items.push({
 					capability: cap,
 					label: AUTHWIT_RIDER_INFO.label,
 					description: AUTHWIT_RIDER_INFO.description,
-					isNew: true,
+					isNew: !opts.accountsMembershipOnly,
 					isUnknown: false,
 					selected: true,
 					risk: AUTHWIT_RIDER_INFO.risk,
-					reRequested: reRequestedTypes.has(cap.type),
+					reRequested: !opts.accountsMembershipOnly && reRequestedTypes.has(cap.type),
 					authwitRider: true,
 				})
 			}

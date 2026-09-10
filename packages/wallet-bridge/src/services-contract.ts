@@ -112,8 +112,12 @@ export interface CapabilityDecision {
 	replaceTypes: string[]
 	/** Types approved in this decision — their prior rejection is cleared. */
 	approvedTypes: string[]
-	/** Types rejected in this decision — recorded as rejections and removed from grants. */
+	/** Types rejected in this decision — recorded as rejections; their stored grant stays. */
 	rejectedTypes: string[]
+	/** Types whose stored grant must still exist when the decision applies. A widening adds
+	 *  accounts to a grant the popup saw; if that grant was revoked meanwhile, the writer throws
+	 *  `CapabilityNotGrantedError` for the type and writes nothing. */
+	requiresGrant?: string[]
 }
 
 export interface IDappSessionWriter {
