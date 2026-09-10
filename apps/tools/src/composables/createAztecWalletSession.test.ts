@@ -1053,7 +1053,7 @@ describe("multi-account: a re-grant on a connected session (retryCapabilities)",
 		expect(s.status.value).toBe("connected")
 	})
 
-	it("a re-grant that drops the active account while an operation holds the gate keeps it (deferred, not moved)", async () => {
+	it("a re-grant that drops the active account while an operation holds the gate pauses; only the user resolves it, after the gate", async () => {
 		let blocked = false
 		const { session: s, walletHandle } = await connectedAs(MA_B, { isSwitchBlocked: () => blocked })
 		const persistedBefore = localStorage.getItem(SELECTED_KEY)
@@ -1061,14 +1061,24 @@ describe("multi-account: a re-grant on a connected session (retryCapabilities)",
 		walletHandle.requestCapabilities.mockImplementationOnce(() => new Promise((r) => (answer = r as never)))
 		const pending = s.retryCapabilities()
 		await flush()
-		// The operation starts while the wallet is deciding; the reply then drops B.
+		// The operation starts while the wallet is deciding; the reply then drops B for a single C —
+		// which a fresh connect would auto-select. Under the gate it must not.
 		blocked = true
 		answer({ granted: [{ type: "accounts", accounts: [{ alias: "Third", item: MA_C }] }] } as never)
 		await expect(pending).resolves.toBe(true)
-		expect(s.status.value).toBe("connected")
-		expect(s.selectedAccount.value).toBe(MA_B)
+		expect(s.status.value).toBe("choosing-account")
+		expect(s.selectedAccount.value, "the running operation's account stands").toBe(MA_B)
 		expect(s.accounts.value.map((a) => a.address)).toEqual([MA_C])
 		expect(localStorage.getItem(SELECTED_KEY)).toBe(persistedBefore)
+		// Nothing new starts under the revoked account: the session is not connected, and a switch is refused.
+		expect(s.selectAccount(MA_C)).toBe(false)
+		await s.confirmAccountChoice(MA_C)
+		expect(s.status.value, "the confirm is refused while the gate is held").toBe("choosing-account")
+		blocked = false
+		await s.confirmAccountChoice(MA_C)
+		expect(s.status.value).toBe("connected")
+		expect(s.selectedAccount.value).toBe(MA_C)
+		expect(storedMap()).toEqual([["nulo", MA_C]])
 	})
 
 	it("a chooser opened by a re-grant cannot be confirmed while an operation holds the gate", async () => {

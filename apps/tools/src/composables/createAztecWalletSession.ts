@@ -860,27 +860,28 @@ function chooseGrantedAccount(
 		throw new Error("No accounts granted by wallet")
 	}
 	// A re-grant on a CONNECTED session is not a fresh connect: the active account stands while the
-	// wallet still grants it (no re-selection, no re-persist, no chooser), and while an operation
-	// holds the switch gate it stands even if the grant dropped it — the operation captured it, and
-	// the selection is the user's to move once the gate opens. Only an unblocked grant that dropped
-	// the active account falls through to the connect-time choice below.
+	// wallet still grants it (no re-selection, no re-persist, no chooser). A grant that DROPPED it
+	// pauses for a choice like a fresh connect — and while an operation holds the switch gate, only
+	// the user may make that choice, once the gate opens (`confirmAccountChoice` honours the gate),
+	// so the operation keeps the account it captured and nothing new starts under a revoked one.
 	const active = s.selectedAccount.value
-	if (quiet && active !== null && (granted.some((a) => a.address === active) || s.config.isSwitchBlocked?.())) {
+	if (quiet && active !== null && granted.some((a) => a.address === active)) {
 		s.accounts.value = granted
 		s.hiddenAccountsCount.value = hiddenCount
 		return "chosen"
 	}
+	const gateHeld = quiet && Boolean(s.config.isSwitchBlocked?.())
 	s.accounts.value = granted
 	s.hiddenAccountsCount.value = hiddenCount
 	if (hiddenCount > 0) {
 		pushSelectionNotice(s, { kind: "grant-truncated", hiddenCount })
 	}
 
-	if (granted.length === 1) {
+	if (granted.length === 1 && !gateHeld) {
 		applySelection(s, granted[0].address, flowProvider)
 		return "chosen"
 	}
-	const remembered = flowProvider ? readRememberedAccount(s, flowProvider.id) : null
+	const remembered = flowProvider && !gateHeld ? readRememberedAccount(s, flowProvider.id) : null
 	const match = remembered ? granted.find((a) => a.address === remembered) : undefined
 	if (match) {
 		// Remembered choice still in the grant: auto-apply, but SAY so — a visible
