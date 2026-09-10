@@ -39,3 +39,16 @@ the rerun was 6/6 at retry 0.
   worktree at the same pins) is a setup step, not a test failure.
 - The `[bridge:deposit] private FJ balance read failed (fail-closed → null)` page log under the
   `plain` profile is pre-existing noise, not a cell failure.
+
+## Codex loop (arc 2) — converged at round 4 (one past the three-round stop; surfaced to the owner)
+
+| Round | Verdict | Findings → call |
+|---|---|---|
+| 1 | reject | (1) a re-grant answered while an operation ran reached `applySelection` past the switch gate — completion re-checks the gate; (2) the cap truncated before the selection check — `parseAccountList(…, { keep })`; (3) additions past the cap reported "No accounts were added" — outcome counts hidden accounts; (4) cell 43 waited for one `eth_sendTransaction` (could be the approval) — waits for the router hold to be consumed (`holdsArmed`); (5) cell 46 / `reconnectedAs` answered an unexpected chooser — `refuseChooser` inside the driving helper; (6) two narrating comments — compressed. All adopted, `91d8231b`. |
+| 2 | reject | (1) a deferred reply that DROPPED the active account still moved the selection under the gate, and a multi-account chooser's confirm bypassed it — quiet path keeps the selection, `confirmAccountChoice` gated; (2) `keep` protected refreshes only — the quiet re-grant passes the active account too, tested via `retryCapabilities`; (3) hidden aliases were sanitized — count first, sanitize displayed slots only. All adopted, `da1213b0`. |
+| 3 | reject | the kept-but-dropped selection stayed `connected` after the gate opened, so a later send could capture a revoked account — the drop now enters the PAUSED chooser (single/remembered auto-apply skipped under the gate), `selectAccount` refused, confirm refused until the gate opens; the test runs through release and the confirm. Adopted, `878f7d2a`. |
+| 4 | **approve** | — |
+
+Round 3 was still material at the protocol's stop, so the loop ran one more round rather than
+shipping a known-open blocking finding; the owner is told in the final report. Transcripts in this
+session's CODEX_DIR (`response.md` … `response-3.md`).
