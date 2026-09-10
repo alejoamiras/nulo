@@ -29,7 +29,8 @@ Commits `a0b80872` (the three files + `readPublicTokenBalance`), then the arc-1 
 | `bun run --cwd apps/playground typecheck` | `a0b80872` | exit 0 |
 | armed smoke: `VITE_NULO_E2E_MIGRATION_FIXTURE=1 VITE_NULO_E2E_DEFAULT_NET=testnet VITE_NULO_E2E_TOKEN_SEEDS=1 VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 bun run --cwd apps/extension build:chrome` + `NULO_E2E_MIGRATION_FIXTURE=1 bun run --cwd apps/extension test:e2e` | `a0b80872` | 31 files passed, 1 skipped; 116 tests passed, 6 skipped; exit 0 |
 | `bun run test:ci-gating` | `a0b80872` | 100 pass, 0 fail |
-| **arc-1 boundary**: `NULO_E2E_RETRY=0 NULO_E2E_PROVERLESS=1 bun run e2e:agent` (whole, alone) | `4cb608f4` | _pending — recorded below when it lands_ |
+| the three files after the codex fixes (`4d353925`, `4cb608f4`) | `4cb608f4` | green inside the full-suite run below (each file ✓ at retry 0) |
+| **arc-1 boundary**: `NULO_E2E_RETRY=0 NULO_E2E_PROVERLESS=1 bun run e2e:agent` (whole, alone) | `4cb608f4` (checkout `9718f2cf`; the extension tree is byte-identical to `4cb608f4` — arcs 2–3 touch only `apps/tools`) | 84 files passed, 2 skipped; 116 tests passed, 2 skipped; 2567 s; exit 0 |
 
 ## Codex loop (arc 1) — converged at round 3
 

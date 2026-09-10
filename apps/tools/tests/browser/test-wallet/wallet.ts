@@ -5,14 +5,19 @@
  * the stock `BaseWallet` path, which is what the suite is testing tools against.
  */
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { getContractInstanceFromInstantiationParams, type InteractionWaitOptions, type SendReturn } from "@aztec/aztec.js/contracts"
+import {
+	getContractInstanceFromInstantiationParams,
+	type InteractionWaitOptions,
+	NO_WAIT,
+	type SendReturn,
+} from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
 import type { SendOptions, SimulateOptions } from "@aztec/aztec.js/wallet"
 import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { ProtocolContractAddress } from "@aztec/protocol-contracts"
 import { FunctionSelector } from "@aztec/stdlib/abi"
-import { ExecutionPayload, type Tx } from "@aztec/stdlib/tx"
+import { ExecutionPayload, PendingTxReceipt, type Tx } from "@aztec/stdlib/tx"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { DAPP_SELF_PAY_FEATURE, type Seed, type TestWalletIdentity, type TestWalletProfile } from "./profile"
@@ -67,6 +72,11 @@ export class TestWallet extends EmbeddedWallet {
 	 *  declines the token prompt leaves the dApp with. One shot. */
 	declineNextGrant = false
 
+	/** Armed by the suite: the next transaction handed to the node is recorded and never forwarded,
+	 *  and the wallet answers a pending receipt instead of waiting on a node that never saw it — the
+	 *  page holds a hash the node will only ever report as dropped. One shot. */
+	dropNextSubmission = false
+
 	/** Grants exactly what was asked, with every imported account — the suite's whole actor pool. */
 	// biome-ignore lint/suspicious/noExplicitAny: the SDK's manifest/grant types are zod-inferred and not exported usably.
 	override async requestCapabilities(manifest: any): Promise<any> {
@@ -110,7 +120,8 @@ export class TestWallet extends EmbeddedWallet {
 	 *  transaction, so the payer is dropped and the account's own balance pays. A payload carrying
 	 *  `claim_and_end_setup` to the protocol FeeJuice really is a claim and passes through. */
 	/** The hand-off to the node is where the fees are final — the SDK completes them after `sendTx`'s
-	 *  options — so that is where a submission is recorded. Observation only: the call goes through. */
+	 *  options — so that is where a submission is recorded. Observation only, unless the suite armed
+	 *  a drop: then the recorded transaction is not forwarded at all. */
 	private observeSubmissions(): void {
 		const node = this.aztecNode
 		const observed = new Proxy(node, {
@@ -124,6 +135,10 @@ export class TestWallet extends EmbeddedWallet {
 						daGas: Number(gas.gasLimits.daGas),
 						l2Gas: Number(gas.gasLimits.l2Gas),
 					})
+					if (this.dropNextSubmission) {
+						this.dropNextSubmission = false
+						return
+					}
 					return (Reflect.get(target, "sendTx", target) as (t: Tx) => Promise<void>)(tx)
 				}
 			},
@@ -138,8 +153,13 @@ export class TestWallet extends EmbeddedWallet {
 		return new ExecutionPayload(payload.calls, payload.authWitnesses, payload.capsules, payload.extraHashedArgs, undefined)
 	}
 
-	override sendTx<W extends InteractionWaitOptions = undefined>(payload: ExecutionPayload, opts: SendOptions<W>): Promise<SendReturn<W>> {
-		return super.sendTx(this.routed(payload, opts.from), opts)
+	override async sendTx<W extends InteractionWaitOptions = undefined>(
+		payload: ExecutionPayload,
+		opts: SendOptions<W>,
+	): Promise<SendReturn<W>> {
+		if (!this.dropNextSubmission || opts.wait === NO_WAIT) return super.sendTx(this.routed(payload, opts.from), opts)
+		const { txHash, ...offchain } = await super.sendTx(this.routed(payload, opts.from), { ...opts, wait: NO_WAIT })
+		return { receipt: new PendingTxReceipt(txHash, undefined), ...offchain } as unknown as SendReturn<W>
 	}
 
 	override simulateTx(payload: ExecutionPayload, opts: SimulateOptions) {

@@ -16,13 +16,13 @@ import { parseAbi } from "viem"
 import { TESTIDS } from "../../../src/lib/testids"
 import type { RunEnv } from "../env"
 import { type ActorHandle, expect, test } from "../fixtures/test"
-import { connectAztec, tid, walletCalls } from "../pages/connect"
+import { connectAztec, driveToConnected, tid, walletCalls, walletFrame } from "../pages/connect"
 import { reviewExit, startExit } from "../pages/exit"
 import { keptFor, walletExitCeiling } from "../pages/fees"
 import { exitRecords } from "../pages/journal"
 import { confirmReview, connectL1, openSend, waitForReceipt } from "../pages/send"
 
-test.use({ family: "exits", cells: 6, l1Index: 3 })
+test.use({ family: "exits", cells: 7, l1Index: 3 })
 
 const USDC = 10n ** 6n
 const FJ = 10n ** 18n
@@ -118,6 +118,57 @@ test("cell 28 — a private exit from one credit note, then from three notes non
 	expect(await erc20BalanceOf(sandbox.clients.l1, usdc.erc20 as `0x${string}`, l1.address), "L1 released both").toBe(
 		l1Before + 10n * USDC,
 	)
+})
+
+test("cell 31b — the wallet sends the private exit but the page never hears back: today the reloaded row is unknown-outcome with Discard, never a second burn", async ({
+	page,
+	sandbox,
+	actor,
+	run,
+}) => {
+	const { usdc, l2Token } = await holding(actor, sandbox, "private")
+	const fpc = await privateFpc(actor.s)
+	const ceiling = await walletExitCeiling(actor)
+	await mintPrivateGasNote(actor.s, fpc, (ceiling * 14n) / 10n)
+	const creditBefore = await privateCreditOf(actor.s, fpc)
+	const l2Before = await balanceOf(l2Token, actor.actor.address, "private")
+	const hub = sandbox.manifest.bridge?.l2.hub.address ?? ""
+	expect(hub).not.toBe("")
+
+	await connect(page, actor)
+	await reviewExit(page, { l1ChainId: L1, erc20: usdc.erc20, amount: "5", isPrivate: true })
+	// A private exit's authwit is `createAuthWit`, so the one `sendTx` against the hub IS the exit: it
+	// runs, the transaction lands, and the page never gets its hash.
+	await walletFrame(page, run, "plain").evaluate((hubAddress) => window.__nuloTestWallet!.swallowNext("sendTx", hubAddress), hub)
+	await confirmReview(page)
+	await expect.poll(async () => (await walletCalls(page, run, "plain")).sendTx ?? 0, { timeout: 180_000 }).toBe(1)
+	await expect.poll(async () => (await exitRecords(page)).length, { timeout: 60_000 }).toBe(1)
+	await expect.poll(() => balanceOf(l2Token, actor.actor.address, "private"), { timeout: 180_000 }).toBe(l2Before - 5n * USDC)
+	expect((await exitRecords(page)).at(-1)?.exitTxHash, "the page never learned the hash").toBeUndefined()
+	const kept = creditBefore - (await privateCreditOf(actor.s, fpc))
+	expect(kept, "the FPC kept one exit's fee").toBeGreaterThan(0n)
+
+	await page.reload()
+	await openSend(page)
+	await connectL1(page)
+	await driveToConnected(page, { profile: "plain", account: actor.address })
+	await page.locator(tid(TESTIDS.tabActivity)).click()
+	const card = page.locator(tid(TESTIDS.journalCard)).first()
+	await expect(card).toBeVisible()
+	await expect(card).toHaveAttribute("data-stage", "exiting")
+	await expect(card.locator(tid(TESTIDS.journalStage))).toContainText("The exit was interrupted")
+	await expect(card.locator(tid(TESTIDS.journalFinish)), "no FINISH without an exit hash").toHaveCount(0)
+	await expect(card.locator(tid(TESTIDS.journalDiscard))).toBeVisible()
+	// Nothing ran on its own after the reload: no second authwit, no second burn, the credit charged once.
+	const calls = await walletCalls(page, run, "plain")
+	expect(calls.sendTx ?? 0).toBe(0)
+	expect(calls.createAuthWit ?? 0).toBe(0)
+	expect(await balanceOf(l2Token, actor.actor.address, "private")).toBe(l2Before - 5n * USDC)
+	expect(creditBefore - (await privateCreditOf(actor.s, fpc))).toBe(kept)
+
+	await card.locator(tid(TESTIDS.journalDiscard)).click()
+	await card.locator(tid(TESTIDS.journalDiscardConfirm)).click()
+	await expect(page.locator(tid(TESTIDS.journalCard))).toHaveCount(0)
 })
 
 /** "Nothing authorized" is read from the wallet itself: an exit's authwit and its transaction are

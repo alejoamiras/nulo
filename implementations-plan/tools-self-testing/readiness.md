@@ -9,12 +9,12 @@ extension-over-tools smoke stays a separate, deliberate step.
 | Gap | Why it matters | What closes it |
 |---|---|---|
 | **Only the `local` target is driven.** | Production runs `testnet`/`mainnet`: real RPCs, the deployed generation (`apps/tools/public/*-bridge.json`), the pinned PrivateFPC, chain-identity mirrors, the CSP for real origins. `verify:deployments` and `verify:build-target` check identity at build time; nothing drives the built bundle. | A nightly (not PR-gated) canary: the `build:testnet` bundle in Chromium against a funded wallet-sdk account on testnet — one public deposit + claim, one exit — asserting the same chain postconditions the local cells do. Minutes of real proving, so nightly only. |
-| **No second tab, no second device.** | The journal's provenance rule ("a second tab writing a record mid-send is not this wizard's transfer", `SendWizard.vue` `adoptRunRecord`) is unit-tested, never driven. | One cell with two pages on one context: a send in tab A, a claim in tab B, each stepper adopts only its own record. |
-| **Recovery: the dropped and consumed branches** (§ 4). | Two of cell 24's three branches are asserted nowhere. | Both are stageable now, see § 4. |
-| **The Permit2 signature's fields.** | The Ethereum wallet fixture signs typed data blind; no cell asserts `spender`, `amount`, `deadline`, `nonce` are the review's. A wrong spender is the classic bridge-drain shape. | Record the typed data in `fixtures/l1-wallet.ts` and assert it in cells 1 and 13. |
-| **A hostile token list.** | Cell 34 serves a well-formed fixture. A list entry with a wrong `decimals`, a non-checksummed or non-contract address, or a duplicate symbol is what a poisoned list looks like. | One cell per malformed entry; the expected outcome is a refused or clearly-flagged tile, never a send. |
-| **Mid-flow wallet loss.** | `holdNext` proves a claim whose wallet went away; nothing does the same for the Ethereum leg (`eth_sendTransaction` never answering) or a wallet closed between the authwit and the exit. | Two cells using the L1 fixture's hold and the test wallet's `holdNext("sendTx")`. |
-| **Viewport is 1440 px only.** | The ActivityDock overlays the wizard below 1100 px; nothing runs there. | The spike's connect + one deposit at 390 px and 1024 px. |
+| ~~**No second tab, no second device.**~~ closed by `tools-readiness` cell 40 (two tabs, two profiles, the provenance rule driven) | The journal's provenance rule ("a second tab writing a record mid-send is not this wizard's transfer", `SendWizard.vue` `adoptRunRecord`) is unit-tested, never driven. | One cell with two pages on one context: a send in tab A, a claim in tab B, each stepper adopts only its own record. |
+| **Recovery: the dropped and consumed branches** (§ 4) — staged and PINNED to today's behaviour by `tools-readiness` cells 24c/24b; the completing fixes are `tools-recovery`'s. | Two of cell 24's three branches are asserted nowhere. | Both are stageable now, see § 4. |
+| ~~**The Permit2 signature's fields.**~~ closed by `tools-readiness` (cells 1 and 13 assert spender, token, amount, deadline, nonce against the router calldata) | The Ethereum wallet fixture signs typed data blind; no cell asserts `spender`, `amount`, `deadline`, `nonce` are the review's. A wrong spender is the classic bridge-drain shape. | Record the typed data in `fixtures/l1-wallet.ts` and assert it in cells 1 and 13. |
+| ~~**A hostile token list.**~~ closed by `tools-readiness` cell 34b | Cell 34 serves a well-formed fixture. A list entry with a wrong `decimals`, a non-checksummed or non-contract address, or a duplicate symbol is what a poisoned list looks like. | One cell per malformed entry; the expected outcome is a refused or clearly-flagged tile, never a send. |
+| ~~**Mid-flow wallet loss.**~~ closed by `tools-readiness` cells 26d (the Ethereum leg) and 31b (the exit's `sendTx` swallowed) — today's Discard-only behaviour pinned; recovery designs in `tools-recovery` | `holdNext` proves a claim whose wallet went away; nothing does the same for the Ethereum leg (`eth_sendTransaction` never answering) or a wallet closed between the authwit and the exit. | Two cells using the L1 fixture's hold and the test wallet's `holdNext("sendTx")`. |
+| ~~**Viewport is 1440 px only.**~~ closed by `tools-readiness` (the spike's viewports cell, 390 and 1024 px) | The ActivityDock overlays the wizard below 1100 px; nothing runs there. | The spike's connect + one deposit at 390 px and 1024 px. |
 | **The suite is advisory.** | A gate that does not block cannot be production evidence. | The plan's clean week at retry 0, then `required-checks.sh --add tools-e2e-status`. Two product warts (§ 2) should land first or the week will not be clean. |
 | **The SDK's discovery probe is origin-only.** | Upstream weakness, worked around by one origin per profile. Any dApp listing two wallets on one origin is bitten. | A one-line patch in `patches/` (`event.source === iframe.contentWindow`) and an upstream issue. |
 
@@ -64,15 +64,17 @@ interrupted between them and reloaded. Three things can be true of the claim at 
 - **Dropped** — sent, hash recorded, never mined (the network dropped it: a nonce/fee edge, a node
   restart). The record carries a claim hash that will never land; the app must notice and let the user
   claim again rather than wait forever. **Not staged**: the local network mines every valid submission
-  at once, so nothing outside the wallet could produce a hash that never lands. It is stageable now:
-  the test wallet observes the node hand-off (`TestWallet.observeSubmissions`), so a `dropNext("sendTx")`
-  fault can return the hash and swallow the transaction.
+  at once, so nothing outside the wallet could produce a hash that never lands. **Staged** (cell 24c,
+  `tools-readiness`): the test wallet's `dropNextSubmission` records the transaction at the node
+  hand-off, never forwards it and answers a pending receipt; three dropped polls clear the hash and
+  a second CLAIM lands.
 - **Consumed** — the L1→L2 message was claimed by someone else before the page's claim: a relayer
   claimed on the user's behalf, or another tab did. The page's claim then fails on a nullified message
   and the record must finish as done (the funds arrived) instead of erroring. **Not staged**: the
   harness could not claim the message for the page's account deterministically at the right instant.
-  It is stageable now: the sandbox's relayer key can claim the deposit's message right after the
-  Ethereum leg (the harness's `claimViaHub` from the relayer), before the page resumes.
+  **Staged** (cell 24b, `tools-readiness`): the sandbox relayer claims from the record's unsealed
+  claim material while the page's claim is held; today the reloaded record surfaces the consumed
+  message as an error and sends nothing — finishing it as done is `tools-recovery`'s fix.
 
 Plan row 24b names the consumed branch's expected end state on a plain wallet with no credit — the
 `none` stop — which is what that cell would assert once staged.

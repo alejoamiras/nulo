@@ -22,7 +22,7 @@ import { PROFILES } from "../test-wallet/profile"
 import { confirmReview, connectL1, openSend, reviewDeposit, stepperPhases, waitForReceipt } from "../pages/send"
 import { TESTIDS } from "../../../src/lib/testids"
 
-test.use({ family: "spike", cells: 4, l1Index: 1 })
+test.use({ family: "spike", cells: 6, l1Index: 1 })
 
 const FJ = 10n ** 18n
 const USDC = 10n ** 6n
@@ -135,4 +135,43 @@ test("selfpay: a fueled deposit still routes its claim as a claim (Fee Juice bri
 
 	const fjAfter = await balanceOf(actor.s.feeJuiceL2, actor.actor.address, "public")
 	expect(fjAfter, "the bridged fuel minus the claim's fee remains").toBeGreaterThan(fjBefore)
+})
+
+test("viewports: at 390 px and 1024 px the flow connects and deposits; the activity dock overlays, opens, closes on Escape, and the confirm still lands", async ({
+	page,
+	sandbox,
+	actor,
+	pool,
+	l1,
+}) => {
+	const { usdt } = sandbox.tokens
+	await mint(sandbox.clients.l1, usdt.erc20 as `0x${string}`, l1.address, 400n * USDC)
+	for (const [width, who] of [
+		[390, actor],
+		[1024, pool.take()],
+	] as const) {
+		await page.setViewportSize({ width, height: 900 })
+		await page.goto("/")
+		// Each width starts clean: the first pass remembered its wallet, and a remembered wallet
+		// reconnects on its own instead of opening the picker.
+		await page.evaluate(() => localStorage.clear())
+		await page.reload()
+		await openSend(page)
+		await connectL1(page)
+		await connectAztec(page, { profile: "plain", account: who.address })
+		await reviewDeposit(page, { l1ChainId: 31337, erc20: usdt.erc20, amount: "100", intent: "token+gas", isPrivate: false })
+
+		// Under 1100 px the dock floats over the page as a dialog: open it from the strip, then Escape.
+		await page.locator(tid(TESTIDS.dockOpen)).click()
+		const dock = page.locator(tid(TESTIDS.dock))
+		await expect(dock).toBeVisible()
+		await expect(dock).toHaveAttribute("aria-modal", "true")
+		await page.keyboard.press("Escape")
+		await expect(dock).toBeHidden()
+
+		await confirmReview(page)
+		await expect(page.locator(tid(TESTIDS.stepper))).toBeVisible({ timeout: 120_000 })
+		const receipt = await waitForReceipt(page)
+		expect(receipt.hero, `the ${width} px deposit landed`).toContain("USDT")
+	}
 })

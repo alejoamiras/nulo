@@ -1,12 +1,12 @@
 /** Activity (cell 39): a bridge's recovery file round-trips, and a backgrounded send reports back. */
-import { mint } from "@nulo/bridge-core/sandbox"
+import { freshToken, mint, setRoutable } from "@nulo/bridge-core/sandbox"
 import { TESTIDS } from "../../../src/lib/testids"
 import { expect, test } from "../fixtures/test"
-import { connectAztec, tid } from "../pages/connect"
+import { connectAztec, tid, walletFrame } from "../pages/connect"
 import { depositRecords } from "../pages/journal"
 import { confirmReview, connectL1, openSend, reviewDeposit, waitForReceipt } from "../pages/send"
 
-test.use({ family: "activity", cells: 2, l1Index: 5 })
+test.use({ family: "activity", cells: 4, l1Index: 5 })
 
 const USDC = 10n ** 6n
 const L1 = 31337
@@ -86,4 +86,79 @@ test("cell 39 — a send sent to the background keeps running: the strip follows
 	await page.locator(tid(TESTIDS.tabActivity)).click()
 	await expect(page.locator(tid(TESTIDS.journalCard)).first()).toHaveAttribute("data-stage", "done", { timeout: 60_000 })
 	expect((await depositRecords(page)).at(-1)?.claimTxHash).toBeTruthy()
+})
+
+test("cell 40 — two tabs, two sends racing: each stepper adopts only its own record, both land, both feeds list both", async ({
+	page,
+	context,
+	run,
+	sandbox,
+	actor,
+	pool,
+	l1,
+}) => {
+	const b = pool.take()
+	const { usdt } = sandbox.tokens
+	await mint(sandbox.clients.l1, usdt.erc20 as `0x${string}`, l1.address, 200n * USDC)
+	// Tab 2 sends a token its wallet has not granted, so its send opens with the grant prompt — the
+	// one wallet call that comes before its record exists.
+	const fresh = await freshToken(sandbox.clients.l1, { name: "Fresh Raced", symbol: "FRSHR", decimals: 6 }, [l1.address], 1000n * USDC)
+	await setRoutable(sandbox.clients.l1, sandbox.clients.deployment.quoter, fresh)
+
+	// Tab 1 as A, tab 2 as B: the same origin, so the journal is one localStorage both tabs read —
+	// and so is the remembered wallet, which tab 2 forgets so it connects on its own. Tab 2 takes
+	// another wallet profile: a profile's origin holds one embedded-wallet store, so a second frame
+	// of the SAME profile cannot open it.
+	await page.goto("/")
+	await openSend(page)
+	await connectL1(page)
+	await connectAztec(page, { profile: "plain", account: actor.address })
+	await reviewDeposit(page, { l1ChainId: L1, erc20: usdt.erc20, amount: "100", intent: "token+gas", isPrivate: false })
+	const tab2 = await context.newPage()
+	await tab2.goto("/")
+	await tab2.evaluate(() => {
+		for (const key of Object.keys(localStorage)) if (key.endsWith(":preferred-wallet")) localStorage.removeItem(key)
+	})
+	await tab2.reload()
+	await openSend(tab2)
+	await connectL1(tab2)
+	await connectAztec(tab2, { profile: "selfpay", account: b.address })
+	await reviewDeposit(tab2, { l1ChainId: L1, erc20: fresh, amount: "100", intent: "token+gas", isPrivate: false, viaLookup: true })
+	// Tab 2 is parked on its grant: its submit baseline is taken, no record of its own exists yet.
+	// Tab 1's record then appears — the exact shape a wizard adopting by recency would take.
+	await walletFrame(tab2, run, "selfpay").evaluate(() => window.__nuloTestWallet!.holdNext("requestCapabilities"))
+	await confirmReview(tab2)
+	await expect(tab2.locator(tid(TESTIDS.stepper))).toHaveAttribute("data-id", /^dep-pending-permit-/, { timeout: 60_000 })
+	await confirmReview(page)
+	await expect(page.locator(tid(TESTIDS.stepper))).toBeVisible({ timeout: 120_000 })
+	await expect.poll(async () => (await depositRecords(page)).length, { timeout: 180_000 }).toBe(1)
+	const own = async (who: string) => (await depositRecords(page)).find((r) => r.recipient?.toLowerCase() === who.toLowerCase())?.id
+	const first = (await own(actor.address)) ?? "missing"
+	await expect(page.locator(tid(TESTIDS.stepper))).toHaveAttribute("data-id", first)
+	// Tab 2 has seen the foreign record — its own journal renders it — and still sits on its prompt.
+	await tab2.locator(tid(TESTIDS.tabActivity)).click()
+	await expect(tab2.locator(`${tid(TESTIDS.journalCard)}[data-id="${first}"]`)).toBeVisible({ timeout: 30_000 })
+	// The held grant keeps tab 2's wallet frame raised over the rail, so the tab switch is forced.
+	await tab2.locator(tid(TESTIDS.tabSend)).dispatchEvent("click")
+	await expect(tab2.locator(tid(TESTIDS.sendView))).toBeVisible()
+	await expect(tab2.locator(tid(TESTIDS.stepper)), "tab 2 stays on its own prompt").toHaveAttribute("data-id", /^dep-pending-permit-/)
+	expect(await walletFrame(tab2, run, "selfpay").evaluate(() => window.__nuloTestWallet!.release())).toBe(1)
+	await expect.poll(async () => (await depositRecords(page)).length, { timeout: 180_000 }).toBe(2)
+	await expect(tab2.locator(tid(TESTIDS.stepper))).toHaveAttribute("data-id", (await own(b.address)) ?? "missing")
+
+	const [r1, r2] = await Promise.all([waitForReceipt(page), waitForReceipt(tab2)])
+	expect(r1.hero).toContain("USDT")
+	expect(r2.hero).toContain("FRSHR")
+	const records = await depositRecords(page)
+	expect(records).toHaveLength(2)
+	expect(records.every((r) => r.claimTxHash)).toBe(true)
+	const recipients = records.map((r) => (r.recipient ?? "").toLowerCase()).sort()
+	expect(recipients).toEqual([actor.address.toLowerCase(), b.address.toLowerCase()].sort())
+
+	for (const tab of [page, tab2]) {
+		await tab.locator(tid(TESTIDS.tabActivity)).click()
+		await expect(tab.locator(tid(TESTIDS.journalCard))).toHaveCount(2)
+		await expect(tab.locator(`${tid(TESTIDS.journalCard)}[data-stage="done"]`)).toHaveCount(2)
+	}
+	await tab2.close()
 })

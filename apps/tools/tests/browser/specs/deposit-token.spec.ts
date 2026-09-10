@@ -14,7 +14,7 @@ import { TESTIDS } from "../../../src/lib/testids"
 import { type ActorHandle, expect, test } from "../fixtures/test"
 import { connectAztec, tid } from "../pages/connect"
 import { keptFor, walletCeiling } from "../pages/fees"
-import { depositRecords } from "../pages/journal"
+import { depositCalldata, depositRecords } from "../pages/journal"
 import { confirmReview, connectL1, newSend, openSend, reviewDeposit, waitForReceipt } from "../pages/send"
 
 test.use({ family: "deposit-token", cells: 6, l1Index: 2 })
@@ -61,10 +61,29 @@ test("cell 1 — plain, public, registered token: the claim is paid from one pri
 
 	expect(await balanceOf(usdcL2, actor.actor.address, "public")).toBe(usdcBefore + 10n * USDC)
 	expect(await balanceOf(actor.s.feeJuiceL2, actor.actor.address, "public"), "no public Fee Juice was touched").toBe(fjBefore)
+	const record = (await depositRecords(page)).at(-1)
 	const kept = await keptFor(page, run, "plain", actor, [
-		{ hash: (await depositRecords(page)).at(-1)?.claimTxHash, gas: ownGasTxs({ isPrivate: false, registers: false }).claim },
+		{ hash: record?.claimTxHash, gas: ownGasTxs({ isPrivate: false, registers: false }).claim },
 	])
 	expect(await privateCreditOf(actor.s, await privateFpc(actor.s)), "the FPC kept the claim's ceiling").toBe(creditBefore - kept)
+
+	// The one Permit2 signature names the router as spender, the ERC-20 and the whole amount, and
+	// the nonce + deadline the deposit transaction then carried — the drain shape, pinned.
+	const permits = l1.permits()
+	expect(permits, "exactly one permit was signed").toHaveLength(1)
+	const permit = permits[0]
+	const router = (sandbox.manifest.bridge?.l1.router ?? "").toLowerCase()
+	expect(permit.spender.toLowerCase()).toBe(router)
+	expect(permit.permitted.token.toLowerCase()).toBe(usdc.erc20.toLowerCase())
+	expect(permit.permitted.amount).toBe(10n * USDC)
+	expect(permit.deadline).toBeGreaterThan(BigInt(permit.signedAt))
+	const calldata = await depositCalldata(sandbox.clients.l1.pub, record?.depositTxHash ?? "")
+	expect(calldata.functionName).toBe("bridge")
+	expect(calldata.to).toBe(router)
+	expect(calldata.nonce).toBe(permit.nonce)
+	expect(calldata.deadline).toBe(permit.deadline)
+	expect(calldata.bridgeToken).toBe(usdc.erc20.toLowerCase())
+	expect(calldata.amount).toBe(10n * USDC)
 })
 
 test("cell 2 — plain, private, registered token: the private claim is paid from credit", async ({ page, sandbox, actor, l1, run }) => {

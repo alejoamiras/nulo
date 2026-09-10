@@ -14,7 +14,7 @@ import { TESTIDS } from "../../../src/lib/testids"
 import { expect, test } from "../fixtures/test"
 import { connectAztec, tid } from "../pages/connect"
 import { keptFor } from "../pages/fees"
-import { depositRecords, fuelConservation } from "../pages/journal"
+import { depositCalldata, depositRecords, fuelConservation } from "../pages/journal"
 import { confirmReview, connectL1, openSend, reviewDeposit, setVisibility, startDeposit, waitForReceipt } from "../pages/send"
 
 test.use({ family: "deposit-token-gas", cells: 7, l1Index: 4 })
@@ -48,6 +48,23 @@ test("cell 13 — plain, public, nothing held: the claim pays from the fuel the 
 		fjBefore + received - fee,
 	)
 	expect(await privateCreditOf(actor.s, await privateFpc(actor.s)), "no credit was minted or spent").toBe(0n)
+
+	// One permit for the WHOLE amount (token leg + the slice that became gas), bound to the router
+	// and to the exact nonce + deadline the bridgeWithFuel call then carried.
+	const permits = l1.permits()
+	expect(permits, "exactly one permit was signed").toHaveLength(1)
+	const permit = permits[0]
+	const router = (sandbox.manifest.bridge?.l1.router ?? "").toLowerCase()
+	expect(permit.spender.toLowerCase()).toBe(router)
+	expect(permit.permitted.token.toLowerCase()).toBe(usdt.erc20.toLowerCase())
+	expect(permit.permitted.amount).toBe(100n * USDC)
+	expect(permit.deadline).toBeGreaterThan(BigInt(permit.signedAt))
+	const calldata = await depositCalldata(sandbox.clients.l1.pub, (await depositRecords(page)).at(-1)?.depositTxHash ?? "")
+	expect(calldata.functionName).toBe("bridgeWithFuel")
+	expect(calldata.to).toBe(router)
+	expect(calldata.nonce).toBe(permit.nonce)
+	expect(calldata.deadline).toBe(permit.deadline)
+	expect(calldata.amount).toBe(100n * USDC)
 })
 
 test("cell 13b — selfpay, public FJ held: conservation, after = before + claimed − the fee charged", async ({
