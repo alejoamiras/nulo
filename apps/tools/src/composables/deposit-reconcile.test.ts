@@ -302,6 +302,17 @@ describe("findDepositTx — the router transaction behind a hash-less deposit", 
 			}
 			await expect(findDepositTx(record(), flapping.client, opts({ chainEpoch: () => epoch }))).resolves.toBe("incomplete")
 
+			// A switch reported while the LAST read is still pending must count too.
+			let lateEpoch = 0
+			const late = fakeChain([bridgeTx("0xaa", 520n)])
+			const block = late.client.getBlock
+			late.client.getBlock = async (args) => {
+				const answer = await block(args)
+				if (late.reads.filter((r) => r.startsWith("block:")).length > 3) lateEpoch = 1
+				return answer
+			}
+			await expect(findDepositTx(record(), late.client, opts({ chainEpoch: () => lateEpoch }))).resolves.toBe("incomplete")
+
 			// The tip's hash differs between the first read (before the scan) and the last (after it).
 			const reorged = fakeChain([bridgeTx("0xaa", 520n)], {
 				blockHash: (n, read) =>

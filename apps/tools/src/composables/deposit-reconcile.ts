@@ -105,9 +105,10 @@ export async function findDepositTx(rec: SendDepositRecord, l1: ReconcileL1Clien
 		for (const hash of hashes) if (await verifyCandidate(rec, l1, o.router, hash, read)) verified.push(hash)
 		// The scan is only as good as the chain it read: a wallet switched away and back, or a reorg
 		// past the tip that was scanned, may have answered some reads from a chain that is not this one.
+		// The epoch is compared LAST, after the final awaited read, so a switch during that read counts.
+		if (!hexEq((await read(() => l1.getBlock({ blockNumber: latest }))).hash, tip)) throw new Incomplete("reorg")
 		await assertChain(l1, o.chainId, read)
 		if (o.chainEpoch?.() !== epoch) throw new Incomplete("chain changed")
-		if (!hexEq((await read(() => l1.getBlock({ blockNumber: latest }))).hash, tip)) throw new Incomplete("reorg")
 		if (verified.length === 0) return "none"
 		if (verified.length > 1) return "ambiguous"
 		return { txHash: verified[0] }
