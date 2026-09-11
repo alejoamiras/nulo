@@ -66,3 +66,22 @@ Verified against the code, all accepted and fixed in one commit:
   the live exit's comment no longer claims a refusal proves a duplicate.
 - Not addressed: "two independent journal instances" (one module instance per test process; the
   browser cell 31c is the two-instance proof).
+
+**Round 2** — resumed, verdict `request-changes` (2 medium, one test-only). Both accepted and fixed
+(`63fbd65e`):
+- M4 during the re-read: `scanExit` hands `{ pick, assertTipUnchanged }` to its callers; the attach
+  compares the tip after the `getTxEffect` re-read, the plain search right after the scan. Pinned with
+  a fake whose tip hash flips once an `effect:` read has happened.
+- The H1 pin now runs through `useHubExit().exit()` with the hash's runner held in the in-memory lock
+  table: the provisional record survives, the hash is not a record, nothing is consumed. Lesson: the
+  composable re-wires `locks` from its own (node-absent) adapter, so a test's lock table must be
+  connected AFTER `useHubExit()`.
+
+## Cells
+
+- `exits.spec.ts` in full at `cb34fe55`/`4868cb57` (pre-fix build): 27, 28, 29, 30, 31 ✓; 31b and 31c ✘ —
+  **"More than one matching exit was found"**: cell 28's two 5-unit private exits to the same L1
+  address (one L1 account per spec file) sat inside 31b's window, exactly the documented limitation.
+  The attach cells now exit amounts no other cell in the file uses (7 and 9). 31b + 31c alone at
+  `f4593d94`+: **2 passed** (3.9 min) — 31b attached, consumed and finished (1.4 min); 31c's second tab
+  was told a tab is finishing it, one portal transaction across both (1.7 min).
