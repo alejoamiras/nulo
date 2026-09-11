@@ -54,6 +54,20 @@ describe("recordState — the gates the card and the dock share", () => {
 		expect(stranded.showClaim).toBe(true)
 	})
 
+	it("a hash-less send exit offers FINISH (Aztec is searched); a legacy one does not", () => {
+		const sendExit = {
+			schema: 3,
+			intent: "token",
+			token: { erc20: "0xerc20" },
+			exitTxHash: undefined,
+		} as unknown as Partial<WithdrawJournalRecord>
+		expect(state(wd(sendExit)).exitAttachable).toBe(true)
+		expect(state(wd(sendExit)).showFinish).toBe(true)
+		expect(state(wd({ exitTxHash: undefined })).exitAttachable).toBe(false)
+		expect(state(wd({ exitTxHash: undefined })).showFinish).toBe(false)
+		expect(state(wd()).exitAttachable).toBe(false)
+	})
+
 	it("a hash-less hub token send offers CLAIM (Ethereum is searched); a gas-only or legacy one does not", () => {
 		const hubSend = { schema: 3, intent: "token", token: { erc20: "0xerc20" } } as unknown as Partial<DepositJournalRecord>
 		expect(state(dep(hubSend)).depositLegRecoverable).toBe(true)

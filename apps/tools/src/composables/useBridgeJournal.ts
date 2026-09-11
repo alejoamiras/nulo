@@ -23,6 +23,7 @@ import {
 	recoveryKeyFromSignature,
 	recoveryKeyMessage,
 	rekeyRecord,
+	rekeyRecordWhen,
 	removeRecord,
 	revokeSealTrust,
 	upsertRecord,
@@ -37,6 +38,7 @@ import { isWellFormedTxHash } from "@/lib/claim-receipt"
 import { isReceiptRecordMismatch } from "@/lib/fuel-claim-state"
 import { HELD_ELSEWHERE, type JournalLocks } from "@/lib/journal-locks"
 import type { DepositSearch } from "./deposit-reconcile"
+import type { ExitSearch } from "./exit-attach"
 import { dropPhaseClock } from "@/lib/phase-clock"
 import { safeAddressText, safeSentence } from "@/lib/token-display"
 import { withOperation } from "./useOpsInFlight"
@@ -237,6 +239,10 @@ export interface JournalEngineDeps {
 	/** Find the router transaction of a hub token deposit that never recorded its hash, verified
 	 *  against calldata and receipt on L1. Absent ⇒ a hash-less record stays where it is, as before. */
 	findDepositTx?: (rec: SendDepositRecord) => Promise<DepositSearch>
+	/** Find (and re-read) the exit transaction of a send exit that never recorded its hash: the one
+	 *  transaction in the window whose FIRST L2→L1 message is the record's, excluding `taken` (every
+	 *  hash and id the journal already holds). Absent ⇒ the record keeps today's note. */
+	findExitTx?: (rec: SendWithdrawRecord, taken: ReadonlySet<string>) => Promise<ExitSearch>
 	/** The cross-tab locks: a record's runner and the guarded journal writes. Absent ⇒ process-local
 	 *  dedup and synchronous best-effort writes, as before. */
 	locks?: JournalLocks
@@ -402,12 +408,49 @@ export function canonicalRecordId(id: string): string {
  *  does the runtime - the narration and the approve outcome describe the same attempt. */
 export function rekeyJournalRecord(oldId: string, next: BridgeJournalRecord): void {
 	rekeyRecord(deps.kv, oldId, next)
-	if (sessionLive.delete(oldId)) sessionLive.add(next.id)
-	if (activeFlowId.value === oldId) activeFlowId.value = next.id
-	rekeyed.value = { ...rekeyed.value, [oldId]: next.id }
+	adoptRekey(oldId, next.id)
+}
+
+/** The in-memory side of a re-key: session liveness, the foreground, the id map and the runtime
+ *  entry all follow the record to its new id. */
+function adoptRekey(oldId: string, nextId: string): void {
+	if (sessionLive.delete(oldId)) sessionLive.add(nextId)
+	if (activeFlowId.value === oldId) activeFlowId.value = nextId
+	rekeyed.value = { ...rekeyed.value, [oldId]: nextId }
 	const { [oldId]: carried, ...rest } = runtime.value
-	if (carried) runtime.value = { ...rest, [next.id]: { ...carried, ...rest[next.id] } }
+	if (carried) runtime.value = { ...rest, [nextId]: { ...carried, ...rest[nextId] } }
 	reload()
+}
+
+/**
+ * Re-key a withdraw record onto its exit transaction hash and run the consume for that id, as ONE
+ * handoff: the destination's record lock is taken first, the guarded re-key runs under the journal
+ * lock inside it, and the consume body follows without re-acquiring anything. A throw after the
+ * re-key is reported against the new id — the old id's runtime went with the record — so a caller
+ * that started under the old id never sees a failure for a record that no longer exists.
+ * "moved": the guard refused (the source changed, or the destination id is already a record).
+ */
+export async function attachAndConsume(
+	oldId: string,
+	next: SendWithdrawRecord,
+	guard: (live: BridgeJournalRecord, all: BridgeJournalRecord[]) => boolean,
+): Promise<"attached" | "moved" | "held-elsewhere"> {
+	let outcome: "attached" | "moved" = "moved"
+	const ran = await withRecordLock(next.id, async () => {
+		const rekeyed = await underJournalLock(() => rekeyRecordWhen(deps.kv, oldId, guard, next))
+		if (!rekeyed) {
+			reload()
+			return
+		}
+		adoptRekey(oldId, next.id)
+		outcome = "attached"
+		try {
+			await runWithdrawConsumeLocked(next.id)
+		} catch (e) {
+			surfaceRunFailure(next.id, e)
+		}
+	})
+	return ran === "held" ? "held-elsewhere" : outcome
 }
 
 export function discard(id: string): void {
@@ -649,14 +692,19 @@ async function resolvePrivateSecret(rec: ClaimRecord): Promise<{ secretHex: stri
 
 /** Per-record dedup wrapper: process-local first, then the cross-tab record lock when one is wired —
  *  a runner another tab holds is skipped exactly like an in-flight duplicate here. */
-async function withRecordLock(id: string, fn: () => Promise<void>): Promise<void> {
+async function withRecordLock(id: string, fn: () => Promise<void>): Promise<"ran" | "held"> {
 	if (inFlight.has(id)) {
 		log("already in flight - skipping duplicate", id)
-		return
+		return "held"
 	}
-	if (!deps.locks) return runRecordBody(id, fn)
+	if (!deps.locks) {
+		await runRecordBody(id, fn)
+		return "ran"
+	}
 	const outcome = await deps.locks.record(id, () => runRecordBody(id, fn))
-	if (outcome === HELD_ELSEWHERE) log("already in flight in another tab - skipping duplicate", id)
+	if (outcome !== HELD_ELSEWHERE) return "ran"
+	log("already in flight in another tab - skipping duplicate", id)
+	return "held"
 }
 
 async function runRecordBody(id: string, fn: () => Promise<void>): Promise<void> {
@@ -1736,6 +1784,116 @@ async function finishSubmittedConsume(rec: ExitRecord, id: string): Promise<void
 	})
 }
 
+/** A send exit can be found on Aztec; a pre-generation one only keeps today's note. */
+function recoverExitHash(rec: ExitRecord, id: string): Promise<void> | void {
+	return isSendRecord(rec) ? attachExit(rec, id) : reportExitNotRecorded(id)
+}
+
+function reportExitNotRecorded(id: string): void {
+	setRuntime(id, {
+		attention: "unknown-outcome",
+		note: "The exit was started but its transaction was never recorded (tab closed mid-send). Check your wallet activity, then discard.",
+	})
+}
+
+/** Every exit hash and record id the journal holds: an identical earlier exit this browser
+ *  recorded is never attached a second time. */
+function takenExitHashes(): ReadonlySet<string> {
+	const taken = new Set<string>()
+	for (const r of records.value) {
+		taken.add(r.id)
+		if (r.direction === "withdraw" && (r as WithdrawJournalRecord).exitTxHash)
+			taken.add((r as WithdrawJournalRecord).exitTxHash as string)
+	}
+	return taken
+}
+
+const EXIT_SNAPSHOT_FIELDS = [
+	"id",
+	"direction",
+	"schema",
+	"intent",
+	"isPrivate",
+	"amount",
+	"recipientL1",
+	"chainId",
+	"portal",
+	"bridge",
+	"createdAt",
+] as const
+
+/** The fields the exit search was verified against; a same-id record another tab rewrote meanwhile
+ *  is a different record for the re-key. */
+function sameExitSnapshot(live: BridgeJournalRecord, verified: SendWithdrawRecord): boolean {
+	const a = live as unknown as Record<string, unknown>
+	const b = verified as unknown as Record<string, unknown>
+	return EXIT_SNAPSHOT_FIELDS.every((k) => a[k] === b[k]) && (live as SendWithdrawRecord).token?.erc20 === verified.token.erc20
+}
+
+/**
+ * A send exit that never recorded its transaction: Aztec is searched for the one transaction whose
+ * first L2→L1 message is this record's, then the record is re-keyed onto it and consumed inside that
+ * hash's lock (`attachAndConsume`). Without a lock API the attach fails closed — two tabs could
+ * otherwise both re-key and both consume.
+ */
+async function attachExit(rec: SendWithdrawRecord, id: string): Promise<void> {
+	if (!deps.findExitTx) return reportExitNotRecorded(id)
+	if (!deps.locks) {
+		setRuntime(id, { attention: "unknown-outcome", note: "Another tab may be finishing this exit - try again in a moment." })
+		return
+	}
+	setStep(id, "verifying", "looking for the exit on Aztec")
+	const gen = genOf(id)
+	let found: ExitSearch
+	try {
+		found = await deps.findExitTx(rec, takenExitHashes())
+	} catch (e) {
+		log("exit search failed", { id, error: e instanceof Error ? e.message : String(e) })
+		found = "incomplete"
+	}
+	if (genOf(id) !== gen) return
+	if (typeof found === "string") return reportExitSearch(id, found)
+	const next: SendWithdrawRecord = {
+		...rec,
+		id: found.exitTxHash,
+		exitTxHash: found.exitTxHash,
+		exitBlock: found.exitBlock,
+		updatedAt: Date.now(),
+	}
+	const outcome = await attachAndConsume(
+		id,
+		next,
+		(live, all) =>
+			genOf(id) === gen &&
+			sameExitSnapshot(live, rec) &&
+			!(live as WithdrawJournalRecord).exitTxHash &&
+			!(live as WithdrawJournalRecord).consumeTxHash &&
+			!live.completedAt &&
+			!all.some((r) => r.id === next.id),
+	)
+	if (outcome === "held-elsewhere") {
+		setRuntime(id, { attention: "unknown-outcome", note: "Another tab is finishing this exit - try again in a moment." })
+	} else if (outcome === "moved") {
+		log("exit attach skipped - the record moved or the hash is already a record", id)
+	}
+}
+
+function reportExitSearch(id: string, outcome: "none" | "ambiguous" | "incomplete"): void {
+	if (outcome === "none") {
+		setRuntime(id, {
+			attention: "error",
+			note: "No exit for this record was found on Aztec since it was started. If you never confirmed it in your wallet, discard this record.",
+		})
+	} else if (outcome === "ambiguous") {
+		setRuntime(id, {
+			attention: "unknown-outcome",
+			note: "More than one matching exit was found - not guessing. Keep this record; it can be finished by hand.",
+		})
+	} else {
+		setRuntime(id, { attention: "error", note: "Aztec could not be searched far enough back - try again later." })
+	}
+}
+
 /** A message someone else consumed is DONE, not failed: it named this record's L1 recipient, so the
  *  funds landed where the burn said they would. Recorded as its own fact — no consume transaction of
  *  ours exists to show — and terminal, because retrying can only ever fail the same way. */
@@ -1757,13 +1915,7 @@ async function runWithdrawConsumeLocked(id: string): Promise<void> {
 	// agrees with must never reach the Outbox consume.
 	if (isSendRecord(rec) && (await checkTokenBlock(rec.token, id)) === "stop") return
 
-	if (!rec.exitTxHash) {
-		setRuntime(id, {
-			attention: "unknown-outcome",
-			note: "The exit was started but its transaction was never recorded (tab closed mid-send). Check your wallet activity, then discard.",
-		})
-		return
-	}
+	if (!rec.exitTxHash) return recoverExitHash(rec, id)
 
 	if (rec.consumeTxHash) return finishSubmittedConsume(rec, id)
 

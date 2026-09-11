@@ -21,6 +21,7 @@ import { stepperPhases } from "@/lib/bridge-steps"
 import { memoryJournalLocks } from "@/lib/journal-locks"
 import { recordState } from "@/lib/record-policy"
 import type { DepositSearch } from "./deposit-reconcile"
+import type { ExitSearch } from "./exit-attach"
 
 vi.mock("@/contracts/bridge-generation", () => ({ FUEL_PORTAL: "0xfd05ee8687d4ca828ba3d26ef04b80dd1348e5bd" }))
 
@@ -41,6 +42,7 @@ import {
 	rekeyJournalRecord,
 	releaseForeground,
 	resumeSessionWork,
+	attachAndConsume,
 	runDepositClaim,
 	runOnLane,
 	runWithdrawConsume,
@@ -2091,5 +2093,203 @@ describe("useBridgeJournal - a hash-less deposit reconciled from Ethereum", () =
 		await runDepositClaim("0xlegacyless")
 		expect(deps.findDepositTx).not.toHaveBeenCalled()
 		expect(recordOf("0xgasless")?.depositTxHash).toBeUndefined()
+	})
+})
+
+describe("useBridgeJournal - a hash-less exit attached by its recomputed message", () => {
+	let kv: KV
+
+	beforeEach(() => {
+		__resetJournalForTests()
+		kv = memKV()
+	})
+
+	const H = "0x00180000000000000000000000000000000000000000000000000000657869"
+	const recordOf = (id: string) => useBridgeJournal().records.value.find((r) => r.id === id) as SendWithdrawRecord | undefined
+	const pending = (id = "wd-pending-1", over: Record<string, unknown> = {}) => mkSendExit(id, { exitTxHash: undefined, ...over })
+	const found: ExitSearch = { exitTxHash: H, exitBlock: 42, messageHash: "0xmsg" }
+
+	function attachDeps(kvv: KV, result: ExitSearch | (() => Promise<ExitSearch>), over: Record<string, unknown> = {}) {
+		const findExitTx = vi.fn(typeof result === "function" ? result : async () => result)
+		return { ...baseDeps(kvv), ...sendDeps(), locks: memoryJournalLocks(), findExitTx, ...over }
+	}
+
+	it("attached ⇒ re-keyed onto the hash, consumed under it, done; the old id holds no runtime", async () => {
+		const deps = attachDeps(kv, found)
+		connectJournalDeps(deps)
+		addRecord(pending())
+		await runWithdrawConsume("wd-pending-1")
+		expect(deps.findExitTx).toHaveBeenCalledWith(expect.objectContaining({ id: "wd-pending-1" }), expect.any(Set))
+		expect(recordOf("wd-pending-1")).toBeUndefined()
+		const rec = recordOf(H) as SendWithdrawRecord
+		expect(rec.exitTxHash).toBe(H)
+		expect(rec.exitBlock).toBe(42)
+		expect(rec.consumeTxHash).toBe("0xhubconsume")
+		expect(rec.completedAt).toBe(999)
+		expect(deps.consumeSend).toHaveBeenCalledTimes(1)
+		expect(useBridgeJournal().runtime.value["wd-pending-1"]).toBeUndefined()
+		expect(useBridgeJournal().runtime.value[H]?.busy).toBeFalsy()
+	})
+
+	it("a throw after the re-key is reported against the new id; the old id's runtime is gone", async () => {
+		const deps = attachDeps(kv, found, {
+			consumeSend: vi.fn(async () => {
+				throw new Error("portal reverted")
+			}),
+		})
+		connectJournalDeps(deps)
+		addRecord(pending())
+		await runWithdrawConsume("wd-pending-1")
+		expect(recordOf(H)?.exitTxHash).toBe(H)
+		expect(recordOf(H)?.completedAt).toBeUndefined()
+		expect(useBridgeJournal().runtime.value[H]?.attention).toBe("error")
+		expect(useBridgeJournal().runtime.value["wd-pending-1"]).toBeUndefined()
+	})
+
+	it("a second FINISH during the consume is refused by the hash's lock", async () => {
+		let release: () => void = () => {}
+		const deps = attachDeps(kv, found, {
+			consumeSend: vi.fn(() => new Promise<{ consumeTxHash: string }>((r) => (release = () => r({ consumeTxHash: "0xhubconsume" })))),
+		})
+		connectJournalDeps(deps)
+		addRecord(pending())
+		const first = runWithdrawConsume("wd-pending-1")
+		await new Promise((r) => setTimeout(r, 0))
+		await runWithdrawConsume(H)
+		expect(deps.consumeSend).toHaveBeenCalledTimes(1)
+		release()
+		await first
+		expect(recordOf(H)?.completedAt).toBe(999)
+	})
+
+	it("a live exit vs an attach of the same hash: the attach finds the lock held and says so", async () => {
+		const locks = memoryJournalLocks()
+		const deps = attachDeps(kv, found, { locks })
+		connectJournalDeps(deps)
+		addRecord(pending())
+		let release: () => void = () => {}
+		const holder = locks.record(H, () => new Promise<void>((r) => (release = r)))
+		await runWithdrawConsume("wd-pending-1")
+		expect(recordOf("wd-pending-1")).toBeDefined()
+		expect(recordOf(H)).toBeUndefined()
+		expect(useBridgeJournal().runtime.value["wd-pending-1"]?.note).toMatch(/another tab/i)
+		expect(deps.consumeSend).not.toHaveBeenCalled()
+		release()
+		await holder
+	})
+
+	it("attached but already finished on L1 ⇒ done as consumed by another", async () => {
+		const deps = attachDeps(kv, found, { consumeSend: vi.fn(async () => ({ consumedByOther: true as const })) })
+		connectJournalDeps(deps)
+		addRecord(pending())
+		await runWithdrawConsume("wd-pending-1")
+		expect(recordOf(H)?.consumedByOther).toBe(true)
+		expect(recordOf(H)?.completedAt).toBe(999)
+	})
+
+	it.each([
+		["none", "error", /No exit for this record was found/],
+		["ambiguous", "unknown-outcome", /More than one matching exit/],
+		["incomplete", "error", /could not be searched far enough/],
+	] as const)("%s ⇒ its note, no re-key, no consume", async (outcome, attention, note) => {
+		const deps = attachDeps(kv, outcome)
+		connectJournalDeps(deps)
+		addRecord(pending())
+		await runWithdrawConsume("wd-pending-1")
+		const rt = useBridgeJournal().runtime.value["wd-pending-1"]
+		expect(rt?.attention).toBe(attention)
+		expect(rt?.note).toMatch(note)
+		expect(recordOf("wd-pending-1")?.exitTxHash).toBeUndefined()
+		expect(deps.consumeSend).not.toHaveBeenCalled()
+	})
+
+	it("a search that throws reads as incomplete", async () => {
+		const deps = attachDeps(kv, async () => {
+			throw new Error("node down")
+		})
+		connectJournalDeps(deps)
+		addRecord(pending())
+		await runWithdrawConsume("wd-pending-1")
+		expect(useBridgeJournal().runtime.value["wd-pending-1"]?.note).toMatch(/could not be searched/)
+	})
+
+	it("a record discarded, or whose identity changed, while the search ran is never re-keyed", async () => {
+		const gone = attachDeps(kv, async () => {
+			discard("wd-pending-1")
+			return found
+		})
+		connectJournalDeps(gone)
+		addRecord(pending())
+		await runWithdrawConsume("wd-pending-1")
+		expect(recordOf(H)).toBeUndefined()
+		expect(gone.consumeSend).not.toHaveBeenCalled()
+
+		const moved = attachDeps(kv, async () => {
+			upsertRecord(kv, { ...pending("wd-pending-2"), amount: "1" })
+			return found
+		})
+		connectJournalDeps(moved)
+		addRecord(pending("wd-pending-2"))
+		await runWithdrawConsume("wd-pending-2")
+		expect(recordOf("wd-pending-2")?.amount).toBe("1")
+		expect(recordOf("wd-pending-2")?.exitTxHash).toBeUndefined()
+		expect(recordOf(H)).toBeUndefined()
+		expect(moved.consumeSend).not.toHaveBeenCalled()
+	})
+
+	it("a hash that is already a record (the other tab re-keyed first) is refused: no second runner", async () => {
+		const deps = attachDeps(kv, async () => {
+			// The other tab, loaded before either wrote, attached its copy onto H already.
+			upsertRecord(kv, mkSendExit(H, { exitBlock: 42 }))
+			return found
+		})
+		connectJournalDeps(deps)
+		addRecord(pending())
+		await runWithdrawConsume("wd-pending-1")
+		expect(recordOf("wd-pending-1")).toBeDefined()
+		expect(recordOf(H)?.consumeTxHash).toBeUndefined()
+		expect(deps.consumeSend).not.toHaveBeenCalled()
+	})
+
+	it("without a lock API the attach fails closed with its note, while a plain consume still runs", async () => {
+		const deps = { ...baseDeps(kv), ...sendDeps(), findExitTx: vi.fn(async () => found) }
+		connectJournalDeps(deps)
+		addRecord(pending())
+		addRecord(mkSendExit("0xplain"))
+		await runWithdrawConsume("wd-pending-1")
+		expect(deps.findExitTx).not.toHaveBeenCalled()
+		expect(useBridgeJournal().runtime.value["wd-pending-1"]?.note).toMatch(/another tab may be finishing/i)
+		await runWithdrawConsume("0xplain")
+		expect(recordOf("0xplain")?.completedAt).toBe(999)
+	})
+
+	it("an unwired finder keeps today's note", async () => {
+		connectJournalDeps({ ...baseDeps(kv), ...sendDeps(), locks: memoryJournalLocks() })
+		addRecord(pending())
+		await runWithdrawConsume("wd-pending-1")
+		expect(useBridgeJournal().runtime.value["wd-pending-1"]?.note).toMatch(/never recorded/)
+		expect(recordOf("wd-pending-1")?.exitTxHash).toBeUndefined()
+	})
+
+	it("the live exit's handoff: re-keys the provisional record and consumes it under the hash's lock", async () => {
+		const deps = attachDeps(kv, "none")
+		connectJournalDeps(deps)
+		addRecord(pending())
+		const outcome = await attachAndConsume(
+			"wd-pending-1",
+			{ ...pending(), id: H, exitTxHash: H, exitBlock: 7 },
+			(_l, all) => !all.some((r) => r.id === H),
+		)
+		expect(outcome).toBe("attached")
+		expect(recordOf(H)?.completedAt).toBe(999)
+		// A second handoff onto an id that is now a record is refused.
+		addRecord(pending("wd-pending-2"))
+		expect(
+			await attachAndConsume(
+				"wd-pending-2",
+				{ ...pending(), id: H, exitTxHash: H, exitBlock: 7 },
+				(_l, all) => !all.some((r) => r.id === H),
+			),
+		).toBe("moved")
 	})
 })

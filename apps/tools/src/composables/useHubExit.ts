@@ -44,6 +44,8 @@ import { HUB, SEND_GENERATION } from "@/contracts/bridge-generation"
 import { clampGas, walletMaxFees } from "@/lib/wallet-fee-budget"
 import { NETWORK } from "@/lib/network"
 import { webJournalLocks } from "@/lib/journal-locks"
+import { resolveToolsTarget } from "@/lib/network-targets"
+import { findVerifiedExitTx } from "./exit-attach"
 import type { ExitPlan } from "@/lib/send-model"
 import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
 import {
@@ -53,9 +55,8 @@ import {
 	discard,
 	flagRecordError,
 	markSessionLive,
-	rekeyJournalRecord,
+	attachAndConsume,
 	runOnLane,
-	runWithdrawConsume,
 	setRecordStep,
 	updateRecord,
 	useBridgeJournal,
@@ -181,6 +182,23 @@ export function __resetHubExitDepsForTests(): void {
 	depsWired = false
 }
 
+/** The attach's search over a node adapter: `getTxEffect` takes a parsed hash, the finder speaks strings. */
+function findExitCandidate(rec: SendWithdrawRecord, taken: ReadonlySet<string>) {
+	const node = createAztecNodeClient(NODE_URL)
+	const target = resolveToolsTarget()
+	return findVerifiedExitTx(
+		rec,
+		{
+			getNodeInfo: () => node.getNodeInfo(),
+			getBlockNumber: async () => Number(await node.getBlockNumber()),
+			getBlocks: (from, limit, options) => node.getBlocks(from as never, limit, options) as never,
+			getTxEffect: (hash) => node.getTxEffect(TxHash.fromString(hash)) as never,
+		},
+		taken,
+		{ chainId: target.l1ChainId, rollupVersion: target.rollupVersion },
+	)
+}
+
 /** Recompute THIS exit's witness - the identity anchor a finish transaction must match. */
 async function expectedWitness(l1: ReturnType<typeof useL1Wallet>, exitTxHash: string) {
 	const node = createAztecNodeClient(NODE_URL)
@@ -296,6 +314,7 @@ export function ensureHubExitDeps(): void {
 		// session that never opened the deposit side still validates against the factory.
 		sendBinding: sendBindingOf,
 		locks: webJournalLocks(),
+		findExitTx: (rec, taken) => findExitCandidate(rec, taken),
 		validateTokenBlock: (token) => validateTokenBlock(token, l1),
 		consumeSend: (rec, onProgress) => runSendConsume(l1, rec, onProgress),
 		verifyConsumeIdentitySend: (rec, txHash) => verifySendConsume(l1, rec, txHash),
@@ -511,15 +530,19 @@ async function performExit(plan: ExitPlan, d: ExitDeps, approvedCeiling?: bigint
 		const auth = await authorizeExit(ctx, () => openExitRecord(base, plan.isPrivate))
 		const receipt = await submitExit(ctx, auth)
 		finalId = String(receipt.txHash)
-		rekeyJournalRecord(provisionalId, {
-			...base,
-			id: finalId,
-			exitTxHash: finalId,
-			exitBlock: receipt.blockNumber,
-			updatedAt: Date.now(),
-		})
-		setRecordStep(finalId, undefined, undefined) // the engine narrates from here
-		await runWithdrawConsume(finalId)
+		setRecordStep(provisionalId, undefined, undefined) // the engine narrates from here
+		// The same handoff an attach uses, so a live exit and a concurrent attach of this hash contend
+		// on the hash's lock and exactly one consumes. A refused re-key means another tab already
+		// holds this exit under its hash: the provisional copy is the duplicate.
+		const outcome = await attachAndConsume(
+			provisionalId,
+			{ ...base, id: finalId, exitTxHash: finalId, exitBlock: receipt.blockNumber, updatedAt: Date.now() },
+			(_live, all) => !all.some((r) => r.id === finalId),
+		)
+		if (outcome !== "attached") {
+			log("exit handoff refused - the hash is already a record elsewhere:", outcome)
+			discard(provisionalId)
+		}
 	} catch (e) {
 		handleExitFailure(e, { provisionalId, finalId }, d)
 	} finally {

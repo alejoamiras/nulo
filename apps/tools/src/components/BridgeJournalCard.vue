@@ -197,7 +197,9 @@ const stageLabel = computed(() => {
 	if (r.direction === "deposit") return depositGuidance(r as DepositJournalRecord, stage.value, state.value.depositLegRecoverable)
 	switch (stage.value) {
 		case "exiting":
-			return "The exit was interrupted. Check your wallet activity, then discard if nothing was sent."
+			return state.value.exitAttachable
+				? "The exit was interrupted before its transaction was recorded. Press FINISH to look for it on Aztec; discard if nothing was sent."
+				: "The exit was interrupted. Check your wallet activity, then discard if nothing was sent."
 		case "proving":
 			return "Press FINISH to resume - proving lands in epoch batches and can take a while."
 		case "consumable":
