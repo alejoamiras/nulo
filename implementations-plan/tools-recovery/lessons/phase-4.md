@@ -39,3 +39,24 @@ commands green again; `src/composables/useBridgeJournal src/lib/record-policy sr
 
 - `l1-wallet.spec.ts` full file at `f24bb67c`: 26d ✓ (36.0 s), 26 ×3 ✓, 26e ✘ (the testid); 26e alone at
   `c0355dae`: ✓ (30.8 s). The spec is re-run in full inside the arc-2 shards.
+
+## Arc-2 codex loop (post-implementation, `/codex high`, read-only)
+
+**Round 1** — session `01a090bd-4d05-7c11-8467-f87340c4b380`, verdict `request-changes` (4 medium, 1 low).
+Verified against the code, all accepted and fixed in one commit:
+- M1 *a chain switch away and back between the two chain assertions* — `chainEpoch` option (the
+  provider's `chainChanged` count, `useL1Wallet.chainChanges`), captured before and compared after.
+- M2 *scan-wide canonicality: a reorg after `getLogs` can add a match the finder never saw* — the tip's
+  block hash is read before the scan and re-read after; a change is `"incomplete"`.
+- M3 *a hash another tab wrote is used unverified; the leg recovery reads a receipt without checking
+  whose call it was* — only the verified hash proceeds; a different one is kept for that tab's run.
+- M4 *no generation check after the journal-lock wait* — added; a discard + restore during the wait
+  no longer continues.
+- L5 *`fuel.fpc` missing from the snapshot guard* — added.
+- Comments: the finder's header and the engine's doc rewritten to the identity / uniqueness / guarded
+  write contracts; the policy comment de-contradicted; the mock's comment rewritten; the fixture's
+  narrating line cut.
+- Tests: chain flap; tip reorg; each fueled calldata field independently; chunk boundary (549|550
+  with 100-block chunks); the fake's `getLogs` no longer filters on `to`, so the foreign-`to` case now
+  exercises production's check; discard-and-restore while the lock waits; fuel recipient swap; cell
+  26d asserts the L2 credit equals the record's amount exactly once.
