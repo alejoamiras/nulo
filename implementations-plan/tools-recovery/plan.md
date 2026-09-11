@@ -595,7 +595,7 @@ Three arcs, one per fix, stacked. Unit tests are inline with each change.
 
 ### Arc 2 — reconcile a hash-less deposit (`tools-recovery/deposit-reconcile`)
 
-#### Phase 3: The L1 finder
+#### Phase 3: The L1 finder ✓ (`315ded87`, lessons/phase-3.md)
 - `deposit-reconcile.ts`: `findDepositTx` over a narrow client interface (the fake encodes viem's real
   signatures: one `event` per `getLogs`, `getTransaction`, `getTransactionReceipt`, `getBlock`); tests:
   window search over sparse timestamps; a chain switch mid-scan ⇒ `"incomplete"`; a matching `bridge` tx; a `bridgeWithFuel` tx for a token+gas
