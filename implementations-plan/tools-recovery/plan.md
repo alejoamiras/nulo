@@ -606,7 +606,7 @@ Three arcs, one per fix, stacked. Unit tests are inline with each change.
 - **Validation gate**: `bun run --cwd apps/tools test -- src/composables/deposit-reconcile` green;
   typecheck; lint. Layers: lint · unit.
 
-#### Phase 4: Engine branch, affordance, copy, cell 26d flipped
+#### Phase 4: Engine branch, affordance, copy, cell 26d flipped ✓ (`f24bb67c` + `c0355dae`, 26d/26e green, lessons/phase-4.md)
 - `useBridgeJournal.ts`: `findDepositTx` dep; `reconcileDepositLeg` from `recoverLegIfNeeded`;
   tests: found ⇒ hash written once (`patchRecordWhen`), then leg recovered and the claim proceeds;
   a record discarded meanwhile ⇒ no write; a hash written by another tab meanwhile ⇒ no overwrite;
