@@ -48,11 +48,14 @@ export interface RecordState {
 	ownedByOther: boolean
 	switchTarget: string | null
 	depositLegRecoverable: boolean
+	/** A send exit with no transaction hash: FINISH searches Aztec for it. */
+	exitAttachable: boolean
 	isFuel: boolean
 	fuelRecovery: StandaloneFuelRecovery
 	fuelRecoverable: boolean
 	showClaimWithoutFuel: boolean
-	/** The token was claimed by another submitter: never CLAIM again; the fuel is what may be left. */
+	/** The token was claimed by another submitter. CLAIM, where still shown, verifies that on-chain
+	 *  and finishes the record (or restores the ordinary claim if the marker was wrong). */
 	claimedByOther: boolean
 }
 
@@ -79,16 +82,28 @@ export function stageOf(rec: BridgeJournalRecord, rt: RecordRuntime): RecordStag
 	return deriveWithdrawStage(rec as WithdrawJournalRecord, { proven: rt.proven ?? false })
 }
 
-/** A marked, unfinished record keeps CLAIM as the verification that completes it — or, if the marker
- *  was wrong, restores the ordinary claim. A public record with open fuel already has CLAIM YOUR
- *  GAS and verifies itself on resume; a private one needs the click to unseal, whatever its fuel. */
-function claimedByOtherFacts(
-	rec: BridgeJournalRecord,
-	fuel: DepositJournalRecord["fuel"],
-): { claimedByOther: boolean; verifiable: boolean } {
-	const claimedByOther = rec.direction === "deposit" && (rec as DepositJournalRecord).claimedByOther === true
-	const fuelSettled = fuel === undefined || fuel.consumed === true || fuel.standaloneClaimed === true
-	return { claimedByOther, verifiable: claimedByOther && rec.completedAt === undefined && (fuelSettled || rec.isPrivate) }
+/** A marker counts only on the shape the completion writes it on (a claimable record with no claim
+ *  of its own); a marked, unfinished record keeps CLAIM as the verification that completes it — or,
+ *  if the marker was wrong, restores the ordinary claim — whatever its fuel says. */
+function claimedByOtherFacts(rec: BridgeJournalRecord): { claimedByOther: boolean; verifiable: boolean } {
+	const d = rec as DepositJournalRecord
+	const claimedByOther = rec.direction === "deposit" && d.claimedByOther === true && !!d.leafIndex && !!d.messageHash && !d.claimTxHash
+	return { claimedByOther, verifiable: claimedByOther && rec.completedAt === undefined }
+}
+
+/** A "depositing" record is recoverable with a deposit hash (the engine re-derives the leg from the
+ *  mined receipt) or, for a hub token send, without one (Ethereum is searched for the router call).
+ *  A hash-less gas-only or pre-generation record is not: nothing can find it. */
+function depositLegRecoverableOf(rec: BridgeJournalRecord, stage: RecordStage): boolean {
+	if (rec.direction !== "deposit" || stage !== "depositing") return false
+	const hashless = rec.schema === 3 && "token" in rec && !!rec.token
+	return !!(rec as DepositJournalRecord).depositTxHash || hashless
+}
+
+/** A send exit with no transaction hash can be found on Aztec; a pre-generation one cannot. */
+function exitAttachableOf(rec: BridgeJournalRecord, stage: RecordStage): boolean {
+	if (rec.direction !== "withdraw" || stage !== "exiting" || rec.schema !== 3) return false
+	return "token" in rec && !!rec.token && !(rec as { exitTxHash?: string }).exitTxHash
 }
 
 export function recordState(rec: BridgeJournalRecord, rt: RecordRuntime, wallet: WalletView): RecordState {
@@ -101,20 +116,17 @@ export function recordState(rec: BridgeJournalRecord, rt: RecordRuntime, wallet:
 	const actionable = !blocked && !isTerminalAttention(attention)
 	const isFuel = assetKindOf(rec) === "fee-juice"
 	const fuel = rec.direction === "deposit" ? (rec as DepositJournalRecord).fuel : undefined
-	// A "depositing" record is recoverable with a deposit hash (the receipt re-derives the leg) or,
-	// for a hub token send, without one (Ethereum is searched for the router call).
-	const hashless = rec.schema === 3 && "token" in rec && !!rec.token
-	const depositLegRecoverable =
-		rec.direction === "deposit" && stage === "depositing" && (!!(rec as DepositJournalRecord).depositTxHash || hashless)
-	const { claimedByOther, verifiable: claimedByOtherVerifiable } = claimedByOtherFacts(rec, fuel)
+	const depositLegRecoverable = depositLegRecoverableOf(rec, stage)
+	const { claimedByOther, verifiable: claimedByOtherVerifiable } = claimedByOtherFacts(rec)
+	const idle = actionable && !busy
 	const showClaim =
 		rec.direction === "deposit" &&
 		stage !== "done" &&
 		(stage !== "depositing" || depositLegRecoverable) &&
-		actionable &&
-		!busy &&
+		idle &&
 		(!claimedByOther || claimedByOtherVerifiable)
-	const showFinish = rec.direction === "withdraw" && stage !== "done" && stage !== "exiting" && actionable && !busy
+	const exitAttachable = exitAttachableOf(rec, stage)
+	const showFinish = rec.direction === "withdraw" && stage !== "done" && (stage !== "exiting" || exitAttachable) && idle
 	const retry = attention === "error" || attention === "unknown-outcome"
 	const account = accountOf(rec, wallet)
 	// selectAccount() rejects unless connected — a switch offered earlier would be an enabled no-op.
@@ -140,6 +152,7 @@ export function recordState(rec: BridgeJournalRecord, rt: RecordRuntime, wallet:
 		ownedByOther,
 		switchTarget: ownedByOther ? (account?.canonical ?? null) : null,
 		depositLegRecoverable,
+		exitAttachable,
 		isFuel,
 		fuelRecovery,
 		fuelRecoverable: fuelRecovery === "offer",

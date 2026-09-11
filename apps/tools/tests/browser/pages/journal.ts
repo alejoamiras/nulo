@@ -42,6 +42,8 @@ export interface JournalExit {
 	direction: string
 	exitTxHash?: string
 	consumeTxHash?: string
+	/** The token's portal clone the finish transaction goes to. */
+	portal?: string
 }
 
 /** Every exit record the journal holds, newest last. */
