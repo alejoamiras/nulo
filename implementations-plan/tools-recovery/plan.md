@@ -6,7 +6,7 @@ eli5_mode: artifact
 code_review: off
 codex_effort: high
 recon_budget: 2 agents (batched reuse sweep + journal mapper), default
-status: draft v6 (2026-09-11) — codex rounds 1–3 (14 + 6 + 1), fable round 1 (4), fresh passes #1 (7) and #2 (6) folded; awaiting fresh pass #3 — the owner sees the full trail at the gate
+status: draft v7 (2026-09-11) — codex rounds 1–3 (14 + 6 + 1), fable round 1 (4), fresh passes #1 (7), #2 (6), #3 (5) folded; codex's last explicit verdict is `reject` on v6 — presented at the gate with the whole trail; recommended condition: a fourth fresh pass approves before Phase 1
 worktree: .claude/worktrees/tools-recovery (branch worktree-tools-recovery, from origin/dev @ 62f3456a)
 ---
 
@@ -133,9 +133,26 @@ apps/tools/tests/browser/{specs,fixtures}        cells 24b/26d/31b flipped; L1 f
   probe unchanged (`handleSuccessReceipt` `:1293-1310` semantics preserved for gas-only and legacy).
   Extracted helpers: `classifyConsumable`, `probeClaimedElsewhere`, `completeClaimedByOther`, the
   probe dispatcher — the runner functions gain one call each.
+- **Completion is guarded and fuel-aware**: `completeClaimedByOther(id, verified)` writes
+  `{ claimedByOther: true, completedAt }` TOGETHER through `patchRecordWhen` with the same snapshot
+  guard B/C use (identity fields, no `claimTxHash`, not completed, the runner's `gen` unchanged) —
+  `completeDeposit` (`useBridgeJournal.ts:707`) checks existence, not identity, and another tab can
+  replace a same-id record while the nullifier read awaits. **Private fuel is not proven by the token's
+  nullifier**: a relayer can claim the token with its own fees and leave the record's private fuel
+  unclaimed, yet `fuel-claim-state.ts:323` would read a completed private record as `private-settled`
+  and the prune would remove its sealed material. So for a `token+gas` record whose fuel is not yet
+  settled (`fuel.standaloneClaimed`/`fuel.consumed` unset), the branch persists `claimedByOther: true`
+  WITHOUT `completedAt` and routes the card to the existing standalone fuel recovery:
+  `decideStandaloneFuelRecovery` (`fuel-claim-state.ts:316-326`) today returns `"none"` while
+  `completedAt` is unset ("an unfinished claim retries via the normal action"), so it gains the
+  `claimedByOther` input and treats it as a finished token leg; the fuel then settles through today's
+  `claimFuelStandalone`/`reconcileFuelConsumed` path, and the engine completes the record once
+  `fuel.standaloneClaimed` or `fuel.consumed` lands on a `claimedByOther` record (one guarded
+  completion, unit-tested). Card: "Your tokens were claimed by another submitter. Your private
+  gas is still yours to claim — press CLAIM YOUR GAS." A token-only record completes at once.
 - **Fact + copy**: `claimedByOther?: boolean` on deposit records (additive, like `consumedByOther`;
-  no migration — loaders never gate on it). Card: "Claimed by another submitter — your tokens
-  arrived." Stage stays derived (`done`).
+  no migration — loaders never gate on it). Card (token-only, or fuel settled): "Claimed by another
+  submitter — your tokens arrived." Stage stays derived.
 - **Prompts**: A adds none. The unseal stays where it is (the CLAIM click's
   `resolvePrivateClaimMaterial`); a non-interactive run with no cached secret makes the dep answer
   `null` and the record keeps today's note. (The pre-existing same-session resume — `resumeActionFor`
@@ -384,14 +401,16 @@ draft prefers the scan, and keeps the paste as a possible later fallback UI (out
   chain data; `taken` removes what this journal owns, anything still plural is refused, and a single
   survivor is attached because the destination is the same either way. The residual is bookkeeping (a
   real exit left untracked while a twin is attached), not loss.
-- **Write safety across tabs**: the journal is one localStorage array rewritten whole on every
-  mutation, and localStorage has no mutex, so a same-origin Web Lock (`nulo-bridge:journal`) wraps
-  every load → guard → write — including discard and import, which are not runner-driven — and a
-  per-record run lock (with a correct `ifAvailable` adapter) keeps two tabs from running the same
-  record's claim/consume; the attach's re-key and the consume body run under the destination's lock
-  in one sequence, so a twin attach and a live exit cannot both proceed. Guards compare the live
-  record to the verified snapshot. A lost race loses the attempt, never the facts. Without a lock
-  API the attach fails closed.
+- **Write safety across tabs — scoped, not blanket**: the journal is one localStorage array
+  rewritten whole on every mutation and localStorage has no mutex. This plan's NEW writes (the
+  reconcile's hash, the attach's re-key, A's completion) run under a same-origin Web Lock and a
+  snapshot guard, and a per-record run lock (correct `ifAvailable` adapter) keeps two tabs from
+  running the same record's claim/consume; the attach's re-key and consume run under the
+  destination's lock in one sequence. Web Locks coordinate cooperating callers only: the journal's
+  EXISTING unlocked whole-array writers (the send flow's own persistence, discard, import, pruning)
+  can still overwrite a guarded write or restore a provisional source in a lost-update race — a
+  pre-existing property this plan neither widens nor fixes (follow-up `journal cross-tab writes`).
+  Without a lock API the attach fails closed.
 - **Ambiguity never tells the user to discard**: an ambiguous result is positive evidence that a
   deposit or exit exists; the copy says keep the record and export its recovery file (discarding a
   private deposit destroys its only secret — `BridgeJournalCard.vue:394`).
@@ -484,9 +503,10 @@ draft prefers the scan, and keeps the paste as a possible later fallback UI (out
   `swallowNext`; it is what makes 26d's flip a real reconcile.
 
 **Asks** — two decisions the approval gate settles explicitly (both recommended "accept"; neither
-proves finality or provenance — an honest checkpoint re-org is the same residual today's completion
-has, and a twin exit can be finished while the intended one stays untracked; both residuals are
-bookkeeping, not loss):
+proves finality or provenance). Consequences stated plainly: a false "done" from a lying node or an
+honest checkpoint re-org is followed, after 7 days, by the prune of the record — for a private
+deposit that is its only sealed secret, i.e. a possible loss, at exactly today's floor and
+probability; the exit residual (a twin finished, the intended one untracked) is bookkeeping.
 - **Trusted node / finality**: A reads the nullifier at `checkpointed` from the app's existing node —
   the same settlement floor today's receipt completion uses — with no second source. A `latest`
   (proposed) read was rejected: a done from a block that later drops would be permanent and the
@@ -520,7 +540,10 @@ Three arcs, one per fix, stacked. Unit tests are inline with each change.
   from its facts ⇒ `"invalid"` ⇒ `tampered`, no lookup, no completion — fresh and resumed; (h) gas-only
   and schema-2 records never reach the nullifier probe and keep today's claim-build probe (their
   `handleSuccessReceipt` outcomes unchanged); (i) the resumed hub claim with a success receipt uses the
-  nullifier, not the claim build (`smartClaimFake` re-pinned: `"live"` keeps polling).
+  nullifier, not the claim build (`smartClaimFake` re-pinned: `"live"` keeps polling); (j) the record is
+  replaced by another tab while the read awaits ⇒ no completion; (k) token+gas private: TOKEN
+  nullified, FUEL live ⇒ `claimedByOther` without `completedAt`, the fuel recovery offered, the sealed
+  material kept; (l) token+gas with settled fuel ⇒ done.
 - `useSend.ts`: wire the dep (node client + hub address, the active target's identity).
 - **The two locks** (shared prerequisite, separable from A so reverting A keeps B/C): `locks` dep +
   the Web Locks adapter (`ifAvailable` null-branch tested against a fake `navigator.locks`), the
@@ -690,7 +713,7 @@ new persisted field beyond `claimedByOther`, any resubmission path, a third code
 | codex | 3 on v3 | **reject** — 1 finding: the synchronous re-key guard still permits concurrent attachment across tabs | `audit-codex.md` (adopted: Web Lock record runner) — the three-round stop |
 | codex (fresh session #1) | final on v4 + ledger | **reject** — 7 findings, all on v4's lock design and its copy: the journal array is the storage unit (journal-wide lock), the `ifAvailable` adapter, the non-reentrant handoff (+ the live re-key path), scan deadlines, "discard" in ambiguous copy, the local target's rollup version, lock scheduling in arc 1 | `audit-codex.md` (all seven adopted) |
 | codex (fresh session #2) | final on v5 + ledger | **reject** — 6 findings: async journal lock vs synchronous persistence callers; `latest` = proposed vs the checkpointed settlement floor (a strandable private deposit); stale Phase 6 / diagram / interface; the error boundary after re-key; C's export copy on provisional ids; the two-tab cell's contention window | `audit-codex.md` (all six adopted) |
-| codex (fresh session #3) | final on v6 + ledger | _pending_ | |
+| codex (fresh session #3) | final on v6 + ledger | **reject** — 5 findings: A's completion lacks the snapshot guard; a token nullifier does not prove private-fuel settlement (strandable); stale blanket lock claims; the trusted-node consequence understated; stale ledger rows | `audit-codex.md` (all five adopted in v7; NOT re-audited — surfaced at the gate) |
 | codex (fresh session) | final on the consolidated plan + ledger | _pending_ | |
 
 ### Decision ledger
@@ -709,8 +732,9 @@ new persisted field beyond `claimedByOther`, any resubmission path, a third code
 | Trusted node | keep the app's existing single-node boundary; surface as a decision | a second source / finality wait | no second source exists in the app; a lying node already controls every stage (codex #11) |
 | Prompt rule on automatic resume | leave as is (pre-existing) | gate `ensureTokenGrant`/`resolvePrivateClaimMaterial` on `interactive` everywhere (codex #5) | `resumeActionFor` auto-continues what this page session started AND prompt-free receipt waits (rediscovered records with a `claimTxHash`); on the latter `claimGuards` may still raise a grant prompt before `resumeSentClaim`'s gate — a pre-existing wart the journal owns, out of this plan's scope and recorded for a follow-up; the new branches add no prompt (the probe is asserted prompt-free on its fake) |
 
-| Cross-tab exclusion (codex round 3 = the three-round stop; refined by fresh pass #1) | two same-origin Web Locks, injectable, introduced in arc 1: a journal-wide mutation lock around every load → guard → write (the array is the storage unit) and a per-record run lock with a correct `ifAvailable` adapter; one executable attach handoff (acquire the destination's lock first, re-key and run the consume body inside it; the live exit uses the same helper); attach fails closed without a lock API | process-local `inFlight` + synchronous guards (v3); a record-only lock with a re-acquiring handoff (v4) | two tabs can both pass a synchronous guard (round 3); a record lock does not protect the whole-array write, and a re-acquiring handoff skips itself (fresh pass #1) |
-| Ambiguous-result copy | keep the record, export its recovery file, finish by hand | "check your wallet activity, then discard" (v1–v4) | ambiguity is positive evidence of a deposit/exit; discarding a private deposit destroys its only secret (fresh pass #1) |
+| Cross-tab exclusion (codex round 3 = the three-round stop; refined by fresh passes #1–#3) | two same-origin Web Locks, injectable, introduced in arc 1: a journal lock around the plan's NEW guarded writes only, and a per-record run lock with a correct `ifAvailable` adapter; one internal attach handoff (acquire the destination's lock first, re-key, run the consume body inside it with its own error boundary — no outer re-entry; the live exit uses the same helper); attach fails closed without a lock API; existing unlocked writers remain a stated residual | process-local `inFlight` + synchronous guards (v3); a record-only lock with a re-acquiring handoff (v4); locking every mutation (v5) | two tabs pass a synchronous guard (round 3); a record lock does not protect the whole-array write and a re-acquiring handoff skips itself (fresh #1); async acquisition breaks synchronous persistence callers (fresh #2); Web Locks cannot exclude non-cooperating writers (fresh #3) |
+| Ambiguous-result copy | deposits: keep the record and export its recovery file; exits: keep the record — provisional ids have no recovery file — and finish with the burn id from the wallet | "check your wallet activity, then discard" (v1–v4); "export" for exits (v5) | ambiguity is positive evidence; discarding a private deposit destroys its only secret; provisional exits cannot export (fresh #1, #2) |
+| A's completion | guarded `{ claimedByOther, completedAt }` write on the verified snapshot; token+gas records with unsettled private fuel do NOT complete — they route to the existing standalone fuel recovery | complete on existence (v1–v6) | a same-id replacement during the read could be completed; a relayer's token claim leaves private fuel unclaimed and the prune would strand it (fresh #3) |
 | Journal lock scope | only the plan's NEW guarded writes run under the journal lock; existing synchronous writes untouched (follow-up `journal cross-tab writes`) | wrap every mutation (v5) | acquisition is async; `addRecordVerified`/`persistPreTx`/the un-awaited send-flow hooks depend on synchronous persistence (fresh pass #2) |
 | Nullifier read block | `checkpointed` | `latest` (v1–v5) | `latest` is the proposed tip; a done from a dropped block is permanent and the prune removes the sealed secret (fresh pass #2) |
 | Scan bounds | a total deadline + read/candidate budgets → `"incomplete"`; late results dropped by the runner's `gen` | block caps only (v1–v4) | the L1 client has no transport deadline; a hung read could pin a lock or latch a stale fact (fresh pass #1) |
@@ -718,9 +742,11 @@ new persisted field beyond `claimedByOther`, any resubmission path, a third code
 **Still disputed**: codex's hybrid (scan + verified-hash fallback) vs the plan's scan-only. Fresh
 pass #1 now agrees: ship scan-only, the fallback can follow. **Three-round stop**: round 3 still
 produced one material finding (cross-tab exclusion); it was folded, and the first fresh final pass
-then found seven defects in THAT fold (v5), and a second fresh pass six more (v6: the lock's scope,
-the read block, the handoff's error boundary, copy, the cell's contention window). The owner sees the
-whole trail here and at the gate decides whether the third fresh pass closes it.
+then found seven defects in THAT fold (v5), a second fresh pass six more (v6), and a third five more
+(v7: A's completion guard and the private-fuel gap, honest lock wording, the trusted-node consequence).
+Every finding was verified and folded; codex's LAST explicit verdict is `reject` (on v6). The
+blueprint stops here and surfaces: the recommended approval condition is a fourth fresh pass that
+returns `approve` before Phase 1 starts (the implementing session runs it first).
 
 ## Seeds
 

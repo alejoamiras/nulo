@@ -121,3 +121,17 @@ Confirmed sound: hub hashes/siloing, private-secret derivation, calldata mapping
 Confirmed sound: commitment formulas, private derivation/siloing, calldata mappings, index-zero matching, bounded scans, null-lock handling, the attach's unavailable-API refusal, reuse boundaries, helper placement.
 
 ### Triage — all six verified (`BlockTag` doc, `claim-receipt.ts:7-13`, `pruneCompleted` `journal.ts:403`, the sync callers, `exportable` `BridgeJournalCard.vue:31-34`) and **adopted** in v6: the journal lock scoped to the plan's new guarded writes only (existing sync writes untouched, follow-up filed); `checkpointed`; Phase 6 / diagram / `locks` interface aligned to the handoff with its own error boundary; truthful C copy; cell 31c with a parked L1 portal transaction (L1 fixture `release()`) as the contention window.
+
+## Fresh final pass #3 — new session, on plan v6 + the decision ledger
+
+**Verdict: reject** (with blocking findings: A can complete a replaced record and strand unclaimed private fuel).
+
+1. **High** — A lacks B/C's snapshot guard; `completeDeposit` (`:707`) checks existence, not identity; a same-id replacement during the read gets completed. Pass the verified snapshot; persist `claimedByOther` + `completedAt` together; regression.
+2. **High** — token nullification does not prove fuel consumption: a relayer can claim the token with its own fees; `fuel-claim-state.ts:323` reads a completed private record as settled and the prune (`journal.ts:405`) removes the recovery material. Withhold completion while private fuel is unsettled; inverse regression (TOKEN nullified, FUEL live).
+3. **Medium** — the security section still claims discard/import participate and "never loses facts"; Web Locks coordinate cooperating callers only. State the residual.
+4. **Medium** — "bookkeeping, not loss" understates the trusted-node decision: a false completion + prune can destroy a private deposit's only secret. State it.
+5. **Low** — stale ledger rows (outer re-entry, universal locking, export advice for exits).
+
+Confirmed sound: commitment formulas, private derivation/siloing, calldata mappings, index-zero matching, bounded scans, null-callback adapter, the canonical error boundary shared with live exits, unavailable-lock refusal, the parked-transaction 31c design, separable arc-1 locks, helper placement.
+
+### Triage — all five verified (`completeDeposit` `:707-731`, `fuel-claim-state.ts:318-326`, `decideStandaloneFuelRecovery` in `record-policy.ts`) and **adopted** in v7. Not re-audited: this was the third fresh pass after the three-round stop; the plan is surfaced to the owner with the recommended condition that a fourth fresh pass returns `approve` before Phase 1 starts.
