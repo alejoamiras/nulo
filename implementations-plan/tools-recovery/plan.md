@@ -6,7 +6,7 @@ eli5_mode: artifact
 code_review: off
 codex_effort: high
 recon_budget: 2 agents (batched reuse sweep + journal mapper), default
-status: draft v7 (2026-09-11) — codex rounds 1–3 (14 + 6 + 1), fable round 1 (4), fresh passes #1 (7), #2 (6), #3 (5) folded; codex's last explicit verdict is `reject` on v6 — presented at the gate with the whole trail; recommended condition: a fourth fresh pass approves before Phase 1
+status: approved 2026-09-11 (the owner set the /goal seed) — condition: a fresh codex pass on v7 returns approve before Phase 1; implementing
 worktree: .claude/worktrees/tools-recovery (branch worktree-tools-recovery, from origin/dev @ 62f3456a)
 ---
 
@@ -750,7 +750,7 @@ returns `approve` before Phase 1 starts (the implementing session runs it first)
 
 ## Seeds
 
-_(drafts until approval; finalized after)_
+_(finalized 2026-09-11 — approved as drafted; the /goal seed below is the one the owner set)_
 
 eli5: https://claude.ai/code/artifact/05bf4647-0783-4f52-8a5c-40a26f3cc580 (source: implementations-plan/tools-recovery/eli5.html)
 
