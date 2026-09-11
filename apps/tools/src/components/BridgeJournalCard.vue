@@ -162,6 +162,28 @@ const attention = computed(() => state.value.attention)
 const blocked = computed(() => (state.value.blocked === undefined ? undefined : safeSentence(state.value.blocked)))
 const actionable = computed(() => state.value.actionable)
 
+function depositGuidance(r: DepositJournalRecord, stage: string, legRecoverable: boolean): string | null {
+	switch (stage) {
+		case "depositing":
+			// With a recorded tx hash the leg is chain-recoverable (the engine re-derives it from the
+			// mined receipt); without one, a hub token send can still be found on Ethereum.
+			if (r.depositTxHash)
+				return "The Ethereum deposit was sent but its confirmation was interrupted. Press CLAIM to check it on-chain and continue."
+			return legRecoverable
+				? "The deposit was never confirmed here. Press CLAIM to look for it on Ethereum; discard if you never sent it."
+				: "The deposit never confirmed on Ethereum. Check your wallet activity, then discard if it never landed."
+		case "syncing":
+		case "claimable":
+			return r.isPrivate
+				? "Press CLAIM: one Ethereum signature unseals the recovery secret, then your Aztec wallet confirms."
+				: "Press CLAIM, then confirm in your Aztec wallet."
+		case "claiming":
+			return "Claim sent - press CLAIM to keep watching it confirm."
+		default:
+			return null
+	}
+}
+
 /** Guidance for an IDLE card only: while the engine drives (busy) the rail narrates live, and a
  *  done card's stamp says everything - a parallel stage line would just repeat them. */
 const stageLabel = computed(() => {
@@ -172,25 +194,7 @@ const stageLabel = computed(() => {
 		return state.value.showClaim ? "Another submitter claimed this. Press CLAIM to verify it on-chain and finish." : null
 	}
 	const r = props.record
-	if (r.direction === "deposit") {
-		switch (stage.value) {
-			case "depositing":
-				// With a recorded tx hash the leg is chain-recoverable (the engine re-derives it from
-				// the mined receipt) - offer the action instead of the discard guidance.
-				return (r as DepositJournalRecord).depositTxHash
-					? "The Ethereum deposit was sent but its confirmation was interrupted. Press CLAIM to check it on-chain and continue."
-					: "The deposit never confirmed on Ethereum. Check your wallet activity, then discard if it never landed."
-			case "syncing":
-			case "claimable":
-				return r.isPrivate
-					? "Press CLAIM: one Ethereum signature unseals the recovery secret, then your Aztec wallet confirms."
-					: "Press CLAIM, then confirm in your Aztec wallet."
-			case "claiming":
-				return "Claim sent - press CLAIM to keep watching it confirm."
-			default:
-				return null
-		}
-	}
+	if (r.direction === "deposit") return depositGuidance(r as DepositJournalRecord, stage.value, state.value.depositLegRecoverable)
 	switch (stage.value) {
 		case "exiting":
 			return "The exit was interrupted. Check your wallet activity, then discard if nothing was sent."

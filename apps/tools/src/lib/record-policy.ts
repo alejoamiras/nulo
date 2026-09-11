@@ -103,7 +103,10 @@ export function recordState(rec: BridgeJournalRecord, rt: RecordRuntime, wallet:
 	const fuel = rec.direction === "deposit" ? (rec as DepositJournalRecord).fuel : undefined
 	// A "depositing" record WITH a deposit hash is the stranded L1-timeout shape: the engine re-derives
 	// the leg from the mined receipt, so CLAIM is meaningful there; a pre-send record keeps it hidden.
-	const depositLegRecoverable = rec.direction === "deposit" && stage === "depositing" && !!(rec as DepositJournalRecord).depositTxHash
+	// A hash-less hub token send is recoverable too: Ethereum is searched for the router call.
+	const hashless = rec.schema === 3 && "token" in rec && !!rec.token
+	const depositLegRecoverable =
+		rec.direction === "deposit" && stage === "depositing" && (!!(rec as DepositJournalRecord).depositTxHash || hashless)
 	const { claimedByOther, verifiable: claimedByOtherVerifiable } = claimedByOtherFacts(rec, fuel)
 	const showClaim =
 		rec.direction === "deposit" &&

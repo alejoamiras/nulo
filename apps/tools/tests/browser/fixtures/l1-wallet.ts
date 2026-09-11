@@ -51,7 +51,10 @@ export interface L1WalletControl {
 	/** The next request of that kind (matching `match` when given) never answers — the shape of a
 	 *  wallet whose prompt the user left open; the page that made it must be reloaded to get past it. */
 	holdNext(kind: RejectKind, match?: HoldMatch): void
-	/** How many holds are still armed — zero once the held request has arrived and parked. */
+	/** The next transaction (matching `match` when given) is BROADCAST through the wallet and then
+	 *  never answered — the shape of a wallet that sent but whose reply the page never received. */
+	swallowNext(match?: HoldMatch): void
+	/** How many holds and swallows are still armed — zero once the request has arrived and parked. */
 	holdsArmed(): number
 }
 
@@ -104,6 +107,7 @@ export async function installL1Wallet(context: BrowserContext, o: L1WalletOption
 	let client = createWalletClient({ account, chain: chain(chainId), transport: http(o.rpcUrl) })
 	const rejections = new Set<RejectKind>()
 	const holds: Array<{ kind: RejectKind; match?: HoldMatch }> = []
+	const swallows: Array<{ match?: HoldMatch }> = []
 	const counts: Record<string, number> = {}
 	const permits: SignedPermit[] = []
 	let signed = 0
@@ -134,6 +138,12 @@ export async function installL1Wallet(context: BrowserContext, o: L1WalletOption
 		if (i < 0) return undefined
 		holds.splice(i, 1)
 		return new Promise<never>(() => {})
+	}
+	const takeSwallow = (to?: string): boolean => {
+		const i = swallows.findIndex((h) => h.match?.to === undefined || h.match.to.toLowerCase() === to?.toLowerCase())
+		if (i < 0) return false
+		swallows.splice(i, 1)
+		return true
 	}
 	const count = (method: string) => {
 		counts[method] = (counts[method] ?? 0) + 1
@@ -169,12 +179,15 @@ export async function installL1Wallet(context: BrowserContext, o: L1WalletOption
 			const held = takeHold("transaction", tx.to)
 			if (held) return held
 			signed++
-			return client.sendTransaction({
+			const sent = client.sendTransaction({
 				to: tx.to,
 				data: tx.data,
 				value: tx.value ? BigInt(tx.value) : undefined,
 				gas: tx.gas ? BigInt(tx.gas) : undefined,
 			})
+			// A swallowed transaction is broadcast for real; only the page's promise parks.
+			if (takeSwallow(tx.to)) return sent.then(() => new Promise<never>(() => {}))
+			return sent
 		},
 		eth_signTypedData_v4: (params) => {
 			count("eth_signTypedData_v4")
@@ -263,7 +276,10 @@ export async function installL1Wallet(context: BrowserContext, o: L1WalletOption
 		holdNext(kind, match) {
 			holds.push({ kind, match })
 		},
-		holdsArmed: () => holds.length,
+		swallowNext(match) {
+			swallows.push({ match })
+		},
+		holdsArmed: () => holds.length + swallows.length,
 	}
 }
 
