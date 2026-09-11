@@ -47,6 +47,7 @@ import { fuelRecipientFor } from "@/lib/fuel-target"
 import { normalizeError } from "@/lib/errors"
 import { humanizeWalletError } from "@/lib/wallet-errors"
 import { webJournalLocks } from "@/lib/journal-locks"
+import { findDepositTx } from "./deposit-reconcile"
 import { reconcileFuelConsumed } from "./fuel-recovery"
 import { hubMessageState } from "@/lib/message-nullifier"
 import { resolveToolsTarget } from "@/lib/network-targets"
@@ -250,6 +251,14 @@ export function ensureSendJournalDeps(): void {
 			return buildFeeJuiceClaimDep(rec, secretHex, envelope, aztec)
 		},
 		recoverDepositLeg: (rec) => recoverDepositLeg(rec, l1.publicClient as never, SEND_GENERATION),
+		findDepositTx: (rec) =>
+			SEND_GENERATION
+				? findDepositTx(rec, l1.publicClient as never, {
+						chainId: MANIFEST_CHAIN.l1ChainId,
+						router: SEND_GENERATION.router,
+						chainEpoch: () => l1.chainChanges.value,
+					})
+				: Promise.resolve("incomplete" as const),
 		retainPinnedTokens: (needed) => retainPinnedHubTokens(needed),
 		l2BlockNumber: async () => Number(await createAztecNodeClient(NODE_URL).getBlockNumber()),
 		messageReadiness: (messageHash) => messageReadiness(messageHash),
