@@ -106,3 +106,18 @@ Asks: the trusted-node and destination-only attribution decisions are explicit a
 Confirmed sound: hub hashes/siloing, private-secret derivation, calldata mappings, index-zero matching, helper boundaries and complexity gates; ship scan-only after these fixes.
 
 ### Triage — all seven verified (the whole-array `write`, the spec's null callback, the un-locked live re-key, the local target's `define`d identity, the deadline-less L1 client) and **adopted** in v5: two injectable locks introduced in arc 1 (journal-wide mutation lock + record run lock with the null-branch adapter), one executable handoff shared with the live exit, scan deadline/budgets with late-result drops, keep/export copy, active-target identity, and a two-tab browser cell (31c).
+
+## Fresh final pass #2 — new session, on plan v5 + the decision ledger
+
+**Verdict: reject** (with blocking findings: async persistence is not carried through callers; the finality decision understates potential loss).
+
+1. **High** — the journal lock makes mutations asynchronous, but `addRecordVerified`, `persistPreTx` and the recovery hooks depend on synchronous persistence (`send-flow.ts:240,298,304` invoke hooks without awaiting); wrapping could send before recovery material is durable.
+2. **High** (Facts/Asks) — `latest` means proposed (`block_parameter.d.ts:8`); the existing completion floor is checkpointed (`claim-receipt.ts:9-12`); an orphaned claim becomes permanently done and `journal.ts:403` prunes its sealed secret — a strandable private deposit. Use `checkpointed`; correct the approval decision.
+3. **Medium** — Phase 6 still instructs outer-runner re-entry; the diagram and `exclusive` interface are stale.
+4. **Medium** — calling the consume body directly bypasses its canonical-id error boundary (`useBridgeJournal.ts:1337`); catch/report against `H` inside the handoff.
+5. **Medium** — provisional exits cannot export a recovery file (`BridgeJournalCard.vue:32`, `backup.ts:293`); C's ambiguous copy must not say so.
+6. **Medium** — simultaneous clicks do not guarantee contention; specify two pages in one context and a controlled pause after lock acquisition.
+
+Confirmed sound: commitment formulas, private derivation/siloing, calldata mappings, index-zero matching, bounded scans, null-lock handling, the attach's unavailable-API refusal, reuse boundaries, helper placement.
+
+### Triage — all six verified (`BlockTag` doc, `claim-receipt.ts:7-13`, `pruneCompleted` `journal.ts:403`, the sync callers, `exportable` `BridgeJournalCard.vue:31-34`) and **adopted** in v6: the journal lock scoped to the plan's new guarded writes only (existing sync writes untouched, follow-up filed); `checkpointed`; Phase 6 / diagram / `locks` interface aligned to the handoff with its own error boundary; truthful C copy; cell 31c with a parked L1 portal transaction (L1 fixture `release()`) as the contention window.
