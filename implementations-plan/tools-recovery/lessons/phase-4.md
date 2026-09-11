@@ -71,3 +71,13 @@ findings.
 the epoch during the window's binary search, not inside the final tip read, so it passed with the old
 ordering. **Fixed**: the flip happens inside the second read of the tip block. No production findings
 remain — the arc-2 loop converged.
+
+## Arc-2 boundary
+
+- Full tools suite in two shards on their own sandboxes, retry 0, at `392d79f3`: shard 1/2 **34 passed**
+  (29.7 min), shard 2/2 **32 passed** (25.8 min) — `l1-wallet.spec.ts` (26d/26e) inside them. The
+  three codex-loop commits (`56534495`, `f47d9eee`, `a5910e37`) landed after that build; they change
+  the finder's chain/tip checks, the engine's foreign-hash fallback and the guard, and cell 26d's
+  credit assertion — all pinned by the unit suites (whole tools suite 101 files / 1377 green after
+  round 1); the final cross-arc gates re-run the whole suite in two shards on the final stack.
+- Stack: `gh stack add tools-recovery/exit-attach` (arc 3 re-stacked onto each arc-2 fix by rebase).
