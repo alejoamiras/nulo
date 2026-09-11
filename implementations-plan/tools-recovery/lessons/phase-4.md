@@ -60,3 +60,9 @@ Verified against the code, all accepted and fixed in one commit:
   with 100-block chunks); the fake's `getLogs` no longer filters on `to`, so the foreign-`to` case now
   exercises production's check; discard-and-restore while the lock waits; fuel recipient swap; cell
   26d asserts the L2 credit equals the record's amount exactly once.
+
+**Round 2** — resumed, verdict `request-changes` (1 medium): M1 remained partially open — the epoch
+comparison ran before the final awaited `getBlock`, so a switch during that read could still pass.
+**Accepted, fixed** (`f47d9eee`): tip re-read → chain assertion → epoch comparison last, with no await
+after it; pinned by "a switch reported while the LAST read is still pending must count too". No other
+findings.
