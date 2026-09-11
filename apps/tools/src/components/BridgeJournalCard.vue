@@ -120,6 +120,16 @@ const fuelRecoverable = computed(() => state.value.fuelRecoverable)
  *  advertises no action: this renders only on COMPLETED records, which re-run no claim, so any
  *  "retry" advice here would be false. */
 const privateFuelUnknown = computed(() => fuelRecovery.value === "private-unknown")
+/** The token leg ended with another submitter's claim: the tokens arrived; what the line says is
+ *  whether anything of THIS record's is still open — nothing, public gas (CLAIM YOUR GAS), or private
+ *  gas that only this account's own private claim could ever spend. */
+const claimedByOtherLine = computed(() => {
+	if (!state.value.claimedByOther) return null
+	if (props.record.completedAt !== undefined) return "Claimed by another submitter - your tokens arrived."
+	return props.record.isPrivate
+		? "Your tokens were claimed by another submitter. Your private gas is still sealed in this record - keep it. Claiming private gas on its own is not available yet."
+		: "Your tokens were claimed by another submitter. Your gas is still yours to claim - press CLAIM YOUR GAS."
+})
 const fuelRecovering = ref(false)
 const fuelRecoverError = ref<string | null>(null)
 
@@ -160,7 +170,7 @@ const actionable = computed(() => state.value.actionable)
 const stageLabel = computed(() => {
 	// A terminal record has no CLAIM/FINISH button, so guidance telling the user to press one would
 	// point at something that isn't there.
-	if (rt.value.busy || stage.value === "done" || !actionable.value) return null
+	if (rt.value.busy || stage.value === "done" || !actionable.value || state.value.claimedByOther) return null
 	const r = props.record
 	if (r.direction === "deposit") {
 		switch (stage.value) {
@@ -322,6 +332,8 @@ function onDiscard() {
 			This private bridge's gas data is incomplete, so its gas state can't be confirmed. Your tokens
 			arrived. Public gas recovery doesn't apply to private bridges.
 		</p>
+
+		<p v-if="claimedByOtherLine" class="claimed-by-other" :data-testid="TESTIDS.journalClaimedByOther">{{ claimedByOtherLine }}</p>
 
 		<BridgePhaseRail v-if="stage !== 'done'" :record="record" compact />
 
@@ -515,7 +527,8 @@ function onDiscard() {
 	color: var(--txt-secondary);
 }
 
-.private-fuel-unknown {
+.private-fuel-unknown,
+.claimed-by-other {
 	margin: 0;
 	color: var(--yellow);
 	font: 500 11.5px/1.5 var(--font-mono);

@@ -127,6 +127,8 @@ export const TESTIDS = {
 	journalClaimGas: "tl-journal-claim-gas",
 	// Private bridge whose gas state can't be confirmed (incomplete private-claim metadata)
 	journalPrivateFuelUnknown: "tl-journal-private-fuel-unknown",
+	// The token was claimed by another submitter: the line that says what is left (nothing, gas, kept private gas).
+	journalClaimedByOther: "tl-journal-claimed-by-other",
 	stepperBackup: "tl-stepper-backup",
 	journalRestore: "tl-journal-restore",
 	journalRestoreLink: "tl-journal-restore-link",

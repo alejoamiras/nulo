@@ -114,7 +114,7 @@ test("cell 24c — a claim the node dropped is offered again after three dropped
 	expect((await balanceOf(usdtL2, actor.actor.address, "public")) - before).toBeGreaterThan(0n)
 })
 
-test("cell 24b — a claim another submitter made first: today the record surfaces the consumed message as an error, sends nothing, and the token was credited once", async ({
+test("cell 24b — a claim another submitter made first: the record completes as claimed-by-another on the message's own nullifier, sends nothing, and the token was credited once", async ({
 	page,
 	run,
 	sandbox,
@@ -164,10 +164,13 @@ test("cell 24b — a claim another submitter made first: today the record surfac
 	await expect(card).toBeVisible()
 	// A rediscovered record with no claim hash is not auto-resumed: only the click runs the claim.
 	await card.locator(tid(TESTIDS.journalClaim)).click()
-	await expect(card).toHaveAttribute("data-attention", "error", { timeout: 4 * 60_000 })
-	await expect(card.locator(tid(TESTIDS.journalStep))).toContainText(/nullified|consumed/i)
+	await expect(card).toHaveAttribute("data-stage", "done", { timeout: 4 * 60_000 })
+	await expect(card.locator(tid(TESTIDS.journalClaimedByOther))).toContainText(/another submitter/i)
+	const done = (await depositRecords(page)).at(-1)
+	expect(done?.claimedByOther, "the fact is persisted with the completion").toBe(true)
+	expect(done?.completedAt).toBeTruthy()
+	expect(done?.claimTxHash).toBeUndefined()
 	expect((await walletCalls(page, run, "plain")).sendTx ?? 0, "nothing was sent for a consumed message").toBe(0)
-	expect((await depositRecords(page)).at(-1)?.claimTxHash).toBeUndefined()
 	expect((await balanceOf(usdtL2, actor.actor.address, "public")) - before, "credited exactly once").toBe(credited)
 })
 
