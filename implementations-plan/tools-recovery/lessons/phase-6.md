@@ -91,3 +91,28 @@ finding (the attach's `none`/`ambiguous` outcomes returned before the tip check,
 the scan could say "no exit was found") is a two-line fix, applied and pinned ("a zero-match scan
 that crosses a reorg is incomplete, never none"). Per plan § Post-implementation the per-arc loop stops
 here; the fresh cross-arc pass reviews the whole stack, and the residue is surfaced to the owner.
+
+## Cross-arc codex pass (fresh session over the whole stack, `/codex high`, read-only)
+
+**Round 1** — session `01a090f4-8f05-7bc2-b490-12a271e51b3c`, verdict `request-changes` (5 medium,
+1 low, 1 test-only). All accepted and fixed on the top of the stack (arc 3), since every finding cuts
+across arcs:
+- 1 *a discard/replacement during the nullifier read still reached the claim build* — the claim start
+  re-checks generation, existence and the claim snapshot after the read.
+- 2 *a forged `claimedByOther` preempts the hash-less reconciliation and the receipt round* —
+  `markerApplies` (leaf known, no claim hash) scopes the marker branch, the resume rule and the
+  policy; elsewhere the marker is ignored and the ordinary recovery runs.
+- 3 *a public false marker with open fuel hides CLAIM, and resume was gated on a fuel transaction* —
+  a marked, unfinished record is verifiable on the click and on resume whatever its fuel (CLAIM and
+  CLAIM YOUR GAS coexist on a public open-fuel record; the card says which does what).
+- 4 *a refused live handoff returned the absent hash to the wizard* — `performExit` returns the
+  provisional record's id and flags it ("Another tab is finishing this exit…" / "This exit's record
+  changed…").
+- 5 *local ownership taken only inside the asynchronous lock grant* — `withRecordLock` reserves
+  `inFlight` before requesting the lock and releases it on every outcome.
+- 6 *the late-switch pin regressed when arc 3 added the pre-scan tip read* — the switch is now reported
+  in the closing chain assertion, with the read count asserted.
+- Comments per the audit. Not addressed: a browser cell where two preloaded tabs race the attachment
+  before either re-keys (the unit pin covers the refused second re-key; cell 31c proves the lock).
+- Tests: discard during the probe; forged marker on a hash-less record and on a sent one; public false
+  marker with open fuel; the refused handoff's returned id; two immediate local starts.
