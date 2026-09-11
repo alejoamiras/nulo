@@ -130,6 +130,9 @@ async function windowStart(l1: ReconcileL1Client, latest: bigint, targetTs: bigi
 	const floor = latest > maxBlocks ? latest - maxBlocks : 0n
 	const tsOf = async (n: bigint) => (await read(() => l1.getBlock({ blockNumber: n }))).timestamp
 	if ((await tsOf(floor)) >= targetTs && floor > 0n) throw new Incomplete("window capped")
+	// A chain whose tip predates the window cannot answer for it (a stale node, or a clock ahead of
+	// the chain by more than the slack): its latest block is not the window.
+	if ((await tsOf(latest)) < targetTs) throw new Incomplete("chain behind the window")
 	let lo = floor
 	let hi = latest
 	while (lo < hi) {

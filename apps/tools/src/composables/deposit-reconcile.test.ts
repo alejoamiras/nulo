@@ -259,6 +259,11 @@ describe("findDepositTx — the router transaction behind a hash-less deposit", 
 			)
 		})
 
+		it("a chain whose tip predates the window", async () => {
+			const ahead = record({ createdAt: Number(GENESIS_TS + 100_000n * 12n) * 1000 })
+			await expect(findDepositTx(ahead, fakeChain([bridgeTx("0xlate", 1_000n)]).client, opts())).resolves.toBe("incomplete")
+		})
+
 		it("a chain that is not the record's, before or after the scan", async () => {
 			await expect(findDepositTx(record(), fakeChain([bridgeTx("0xaa", 520n)], { chainId: () => 1 }).client, opts())).resolves.toBe(
 				"incomplete",
