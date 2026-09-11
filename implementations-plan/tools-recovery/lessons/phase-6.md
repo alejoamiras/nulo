@@ -126,3 +126,6 @@ across arcs:
   the hub-send fixture now carries one, as every real marked record does; pinned by the fall-through;
 - the same-tab duplicate pin runs under a delayed lock grant and inspects the loser while the winner
   is parked; the contradicted test comment cut.
+
+**Round 3** — resumed, verdict **`approve`**: "No new or remaining material findings in the fix diff.
+All four round-2 findings are addressed." The cross-arc loop converged at `de6bef29`.
