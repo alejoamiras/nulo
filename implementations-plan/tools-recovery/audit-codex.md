@@ -48,3 +48,27 @@ Confirmed sound: hub/private-secret formula and node-client membership API; addi
 | 12 | yes | **adopted** — `messageNullified(rec, secretHex)` |
 | 13 | yes | **adopted** — helpers + regressions listed per phase |
 | 14 | design choice | **partly** — scan ships; paste fallback stays out of scope (fable agrees); ledger records the disagreement |
+
+## Round 2 — on plan v2 (resumed session)
+
+**Verdict: reject** (with blocking findings: cross-tab attachment remains unserialized, and explicit identity mismatches can still complete records).
+
+1. **High** — presence/hashlessness guards do not establish that the live record still matches the verified snapshot; check identity fields, `completedAt` and submission hashes after awaits. C's destination check + re-key are non-atomic across tabs (`withRecordLock` is process-local); serialize and recheck destination ownership inside that lock.
+2. **High** — A maps a proven commitment mismatch to `null`, and `handleSuccessReceipt` treats `null` as permission to complete (`useBridgeJournal.ts:1308`). Distinguish invalid identity from unavailable evidence; stop on invalid in both paths.
+3. **Medium** — `getBlocks(from, limit)` does not include bodies by default (`BlocksIncludeOptions.includeTransactions`); specify the option in the contract and the fake.
+4. **Medium** — `BridgeWithFuel` exposes `tokenSecretHash`, not `secretHash` (`router-abi.ts:60`); pin both event shapes.
+5. **Medium** — replacing `recordMessageConsumed` universally changes gas/legacy receipt completion; keep the existing probe for excluded shapes.
+6. **Medium** — the whole-run "non-interactive ⇒ no prompt" test cannot pass with unchanged material resolution (`:808`); scope it to the new probe; `resumeActionFor` also admits rediscovered receipt-wait records.
+
+Confirmed sound: recomputed commitments, probe ordering, index-zero matching, canonical-id handoff, explicit trust/attribution decisions, scan-only scope.
+
+### Triage (driver, verified)
+
+| # | Verified? | Call |
+|---|---|---|
+| 1 | yes (`withRecordLock` `:625-642`; localStorage has no mutex — `journal.ts:372`) | **adopted** — snapshot-equality guards; new synchronous `rekeyRecordWhen` with a destination check in the same block; documented as the journal's best-effort guard |
+| 2 | yes (`:1308`) | **adopted** — the dep answers `nullified / live / invalid / unknown`; `invalid` stops as `tampered` in both paths |
+| 3 | yes (`block_response.d.ts:13-21`, `aztec-node.d.ts:189`) | **adopted** |
+| 4 | yes (`router-abi.ts:55-66`) | **adopted** |
+| 5 | yes | **adopted** — the probe dispatches by shape; excluded shapes keep today's probe |
+| 6 | yes (`resumeActionFor` `:1446-1448`) | **adopted** — test scoped to the probe; ledger corrected; the grant-on-rediscovered-receipt wart recorded as a follow-up |

@@ -6,7 +6,7 @@ eli5_mode: artifact
 code_review: off
 codex_effort: high
 recon_budget: 2 agents (batched reuse sweep + journal mapper), default
-status: draft v2 (2026-09-11) — codex round 1 reject (14) + fable conditional (4) folded; awaiting codex round 2, then the fresh final pass
+status: draft v3 (2026-09-11) — codex rounds 1–2 (14 + 6) and fable round 1 (4) folded; awaiting codex round 3, then the fresh final pass
 worktree: .claude/worktrees/tools-recovery (branch worktree-tools-recovery, from origin/dev @ 62f3456a)
 ---
 
@@ -82,7 +82,7 @@ apps/tools/src/composables/useSend.ts            wires A + B deps (node + L1 pub
 apps/tools/src/composables/useHubExit.ts         wires C dep (node)                                  [modified]
 apps/tools/src/lib/record-policy.ts              CLAIM for a hash-less send, FINISH for a hash-less exit [modified]
 apps/tools/src/components/BridgeJournalCard.vue  copy for the three shapes + done-by-another        [modified]
-packages/bridge-core/src/journal.ts              DepositJournalRecord.claimedByOther?: true          [modified, additive]
+packages/bridge-core/src/journal.ts              claimedByOther?: boolean; rekeyRecordWhen (sync guard) [modified, additive]
 apps/tools/tests/browser/{specs,fixtures}        cells 24b/26d/31b flipped; L1 fixture swallowNext   [modified]
 ```
 
@@ -107,21 +107,26 @@ apps/tools/tests/browser/{specs,fixtures}        cells 24b/26d/31b flipped; L1 f
   with `DOM_SEP__MESSAGE_NULLIFIER`; siloed by the consuming contract (kernel-siloed in private,
   `private_context.nr:395`; AVM-siloed in public, `public_context.nr:257`). The leaf index is an input
   of the message hash, not of the nullifier.
-- **Dep** `messageNullified?(rec: SendDepositRecord, material: { secretHex; envelope? }): Promise<boolean | null>`
+- **Dep** `messageNullified?(rec: SendDepositRecord, material: { secretHex; envelope? }): Promise<"nullified" | "live" | "invalid" | "unknown">`
   — the engine passes the material it already resolved (public: `publicClaimSecretOf`; private: the
-  `secretCache` entry — the dep is wired outside the module and cannot read the cache). Then
-  `node.getNullifierMembershipWitness("latest", n)`: a witness ⇒ `true`; `undefined` ⇒ `false`;
-  missing material / `messageHash` / `leafIndex`, a recompute mismatch, or an RPC throw ⇒ `null`.
+  `secretCache` entry — the dep is wired outside the module and cannot read the cache). A recompute
+  mismatch is **`"invalid"`** (proven wrong identity: the engine STOPS with `attention: "tampered"` and
+  the sealed-values note, in the fresh AND the resumed path — never a completion); missing material /
+  `messageHash` / `leafIndex` or an RPC throw is `"unknown"` (unavailable evidence: today's behaviour);
+  `node.getNullifierMembershipWitness("latest", n)` present ⇒ `"nullified"`, absent ⇒ `"live"`.
 - **Engine, the read comes before any fee construction**: (1) `probeClaimedElsewhere(rec, material)`
-  runs right after the material resolves and BEFORE `buildClaimHandles`: `true` ⇒
+  runs right after the material resolves and BEFORE `buildClaimHandles`: `"nullified"` ⇒
   `completeClaimedByOther(id)` (persist `claimedByOther: true`, `completeDeposit`) — no fee ladder, no
-  simulate; `false`/`null` ⇒ continue as today. (2) `awaitConsumable` returns a tri-state
-  `"ready" | "claimed-elsewhere" | "timeout"`: a consumed-shaped simulate error (both wordings —
-  `isMsgConsumed` gains `L1-to-L2 message is already nullified`, `public_context.nr:259`) re-asks the
-  dep; `true` ⇒ claimed elsewhere; otherwise today's error. (3) `recordMessageConsumed` (the probe after
-  a success receipt on a resumed claim) reads the nullifier instead of rebuilding the fee-bearing claim.
-  Extracted helpers: `classifyConsumable`, `probeClaimedElsewhere`, `completeClaimedByOther` — the
-  runner functions gain one call each.
+  simulate; `"invalid"` ⇒ stop (`tampered`); `"live"`/`"unknown"` ⇒ continue as today. (2)
+  `awaitConsumable` returns a tri-state `"ready" | "claimed-elsewhere" | "timeout"`: a consumed-shaped
+  simulate error (both wordings — `isMsgConsumed` gains `L1-to-L2 message is already nullified`,
+  `public_context.nr:259`) re-asks the dep; `"nullified"` ⇒ claimed elsewhere; `"invalid"` ⇒ stop;
+  otherwise today's error. (3) `recordMessageConsumed` (the probe after a success receipt on a resumed
+  claim) dispatches: hub token sends read the nullifier (`"nullified"` ⇒ done, `"live"` ⇒ keep polling,
+  `"invalid"` ⇒ stop, `"unknown"` ⇒ today's completion); every other shape keeps today's claim-build
+  probe unchanged (`handleSuccessReceipt` `:1293-1310` semantics preserved for gas-only and legacy).
+  Extracted helpers: `classifyConsumable`, `probeClaimedElsewhere`, `completeClaimedByOther`, the
+  probe dispatcher — the runner functions gain one call each.
 - **Fact + copy**: `claimedByOther?: boolean` on deposit records (additive, like `consumedByOther`;
   no migration — loaders never gate on it). Card: "Claimed by another submitter — your tokens
   arrived." Stage stays derived (`done`).
@@ -145,8 +150,9 @@ apps/tools/tests/browser/{specs,fixtures}        cells 24b/26d/31b flipped; L1 f
   2. **Candidates**: ONE event per call (viem drops `args` when `events` is used — `getLogs.js:35`):
      `getLogs({ address: gen.router, event: Bridge, fromBlock, toBlock })` for `intent === "token"`,
      `BridgeWithFuel` for `token+gas`. No recipient filter: a private token deposit publishes a ZERO
-     recipient (`send-flow.ts:150-154`). Post-filter on the DECODED event args: `secretHash === rec.secretHashHex`
-     (and `fuelSecretHash === rec.fuel.secretHashHex`).
+     recipient (`send-flow.ts:150-154`). Post-filter on the DECODED event args — `Bridge.secretHash`,
+     or `BridgeWithFuel.tokenSecretHash` + `fuelSecretHash` (`router-abi.ts:55-66`) — against
+     `rec.secretHashHex` and `rec.fuel.secretHashHex`; both event shapes pinned in the unit tests.
   3. **Verify calldata** for each survivor: `getTransaction(hash)` → `decodeFunctionData(SWAP_BRIDGE_ROUTER_ABI, input)`;
      require `tx.to === router`, the entrypoint by intent (`sendEntrypoint`, `send-flow.ts:112-116`),
      `bridgeToken === rec.token.erc20`, `tokenPortal === rec.portal`, `isPrivate === rec.isPrivate`,
@@ -163,7 +169,10 @@ apps/tools/tests/browser/{specs,fixtures}        cells 24b/26d/31b flipped; L1 f
   `useSend.ts` with the app's viem public client and `SEND_GENERATION`.
 - **Engine**: `recoverLegIfNeeded`'s early bail becomes one call, `reconcileDepositLeg(rec, id)`:
   narrate "looking for the deposit on Ethereum"; on `{ txHash }` write it with
-  `patchRecordWhen(id, (live) => !live.depositTxHash, { depositTxHash })` and continue into
+  `patchRecordWhen(id, (live) => sameSnapshot(live, verified) && !live.depositTxHash && !live.completedAt, { depositTxHash })`
+  — `sameSnapshot` compares the identity fields the match was verified against (recipient, amount,
+  token block, secret hashes, privacy, `createdAt`) so a record another tab rewrote meanwhile is never
+  patched — and continue into
   `attemptLegRecovery` on the re-read record (its receipt-log read then recovers the leaves as today);
   `"none"` → `attention: "error"`, "No deposit for this record was found on Ethereum since it was
   started. If you never confirmed it in your wallet, discard this record."; `"ambiguous"` →
@@ -183,8 +192,8 @@ apps/tools/tests/browser/{specs,fixtures}        cells 24b/26d/31b flipped; L1 f
      — `rollupVersion`/`l1ChainId` from `getNodeInfo()`, asserted equal to the record's `chainId` and
      the build's `chain-constants`.
   2. **Window**: L2 blocks with `timestamp ≥ createdAt/1000 − slack`, located by binary search over
-     block timestamps, read with `getBlocks(from, limit)` (batched; bodies included); capped; pruned or
-     unreadable history ⇒ `"incomplete"`.
+     block timestamps, read with `getBlocks(from, limit, { includeTransactions: true })` (bodies are
+     off by default — `block_response.d.ts:13-21`); capped; pruned or unreadable history ⇒ `"incomplete"`.
   3. **Scan**: a tx is a candidate only if `l2ToL1Msgs[0] === hash` — index zero, because every reader
      of the exit (`consumeWithdrawal` `flows.ts:222`, `expectedWitness` `useHubExit.ts:189`,
      `consumedElsewhere`) takes index zero; a match elsewhere in the tx is not this app's exit shape.
@@ -198,10 +207,15 @@ apps/tools/tests/browser/{specs,fixtures}        cells 24b/26d/31b flipped; L1 f
   wired in `useHubExit.ts` with the node client.
 - **Engine**: the dead `!rec.exitTxHash` branch in `runWithdrawConsumeLocked` becomes one call,
   `attachExit(rec, id)`, which RETURNS instead of continuing: on a match it re-verifies
-  (`getTxEffect(exitTxHash).data.l2ToL1Msgs[0] === hash`), re-reads the live record (still present, still
-  hash-less), refuses if a record with id `exitTxHash` already exists (`rekeyRecord` would overwrite it,
-  `journal.ts:389-393`), then `rekeyJournalRecord(id, { ...live, id: exitTxHash, exitTxHash, exitBlock })`
-  and returns `{ rekeyedTo: exitTxHash }`. `runWithdrawConsumeInner` releases the OLD id's lock and calls
+  (`getTxEffect(exitTxHash).data.l2ToL1Msgs[0] === hash`), then re-keys through a NEW synchronous
+  primitive `rekeyRecordWhen(kv, oldId, guard, next)` in `journal.ts`: one synchronous load → guard →
+  write with no await inside — the guard requires the live source to equal the verified snapshot
+  (identity fields, no `exitTxHash`, no `consumeTxHash`, no `completedAt`) AND no record with id
+  `exitTxHash` to exist (`rekeyRecord` would overwrite it, `journal.ts:389-393`). Like `patchRecordWhen`
+  this is the journal's best-effort guard, not a cross-tab mutex (localStorage has none — the primitive's
+  own comment); the synchronous window is the smallest the platform allows, and a lost race can only
+  lose the re-key (the record stays hash-less and the next click re-finds), never double-attach, because
+  the destination-id check runs inside the same synchronous block. It returns `{ rekeyedTo: exitTxHash }`. `runWithdrawConsumeInner` releases the OLD id's lock and calls
   `runWithdrawConsume(rekeyedTo)` — the consume runs under the canonical id's lock, so runtime writes,
   `inFlight` and a second FINISH click all key on the live record (the live-path precedent:
   `useHubExit.ts:512-520` re-keys, then `runWithdrawConsume(finalId)`). `"none"` → `attention: "error"`,
@@ -239,12 +253,13 @@ C  FINISH click → runWithdrawConsumeLocked: no exitTxHash → attachExit
 
 ```ts
 // useBridgeJournal.ts — JournalEngineDeps additions
-messageNullified?: (rec: SendDepositRecord, material: { secretHex: string; envelope?: DepositEnvelopeV2 }) => Promise<boolean | null>
+messageNullified?: (rec: SendDepositRecord, material: { secretHex: string; envelope?: DepositEnvelopeV2 }) => Promise<"nullified" | "live" | "invalid" | "unknown">
 findDepositTx?: (rec: SendDepositRecord) => Promise<{ txHash: string } | "none" | "ambiguous" | "incomplete">
 findExitTx?: (rec: SendWithdrawRecord, taken: ReadonlySet<string>) => Promise<{ exitTxHash: string; exitBlock: number } | "none" | "ambiguous" | "incomplete">
 
-// journal.ts (bridge-core) — additive fact
+// journal.ts (bridge-core) — additive fact + one synchronous guarded re-key
 DepositJournalRecord.claimedByOther?: boolean
+rekeyRecordWhen(kv: KV, oldId: string, guard: (live: BridgeJournalRecord, all: BridgeJournalRecord[]) => boolean, next: BridgeJournalRecord): boolean
 
 // lib/message-nullifier.ts (pure)
 recomputeTokenMessageHash(i: { portal; chainId; hub; rollupVersion; recipient; amount; isPrivate; secretHashHex; leafIndex }): Promise<Fr>
@@ -324,10 +339,15 @@ draft prefers the scan, and keeps the paste as a possible later fallback UI (out
   chain data; `taken` removes what this journal owns, anything still plural is refused, and a single
   survivor is attached because the destination is the same either way. The residual is bookkeeping (a
   real exit left untracked while a twin is attached), not loss.
-- **Re-key safety**: attach refuses when a record with id `exitTxHash` already exists (the primitive
-  overwrites destinations), re-reads the live record before writing, and hands execution to the new
-  id's lock; the old id's `inFlight` entry is released, so no duplicate runner and no permanently busy
-  card.
+- **Re-key and write safety across tabs**: `withRecordLock` is process-local and localStorage has no
+  mutex, so every write after an await is a synchronous load → guard → write (`patchRecordWhen`,
+  the new `rekeyRecordWhen`) whose guard compares the live record to the verified snapshot (identity
+  fields, completion, submission hashes) and, for the re-key, requires the destination id to be free.
+  A lost race loses the write (the next click re-finds), never double-attaches or overwrites; the
+  consume then runs under the new id's lock, the old id's `inFlight` entry released.
+- **Proven-wrong identity stops**: a stored `messageHash` that does not recompute from the record's
+  facts is `"invalid"`, surfaced as `tampered` in both the fresh and the resumed path — never
+  completed on the "unknown" branch.
 - **No new prompts**: the only signature in any path stays the existing unseal on CLAIM; the
   same-session auto-resume that may raise a grant prompt (`resumeActionFor`) is pre-existing and not
   widened; the new branches have no prompting call and a unit test pins the non-interactive `null`.
@@ -435,11 +455,13 @@ Three arcs, one per fix, stacked. Unit tests are inline with each change.
   claim, witness present ⇒ done with the fact, no fee build, no `claimTxHash`, `sendTx` never called;
   (b) private record, secret cached ⇒ the derived secret's nullifier, done; (c) witness absent ⇒ the
   claim proceeds as today; (d) the simulate throws either consumed wording, witness present ⇒ done;
-  witness absent ⇒ error as today; (e) private, non-interactive, no cached secret ⇒ `null`, no prompt,
-  today's note; (f) a token+gas record whose FUEL message is nullified but the TOKEN message is not ⇒
+  witness absent ⇒ error as today; (e) the new probe with no material ⇒ `"unknown"`, it calls nothing that could prompt (asserted on the
+  dep fake), and the record keeps today's note; (f) a token+gas record whose FUEL message is nullified but the TOKEN message is not ⇒
   not done (the readiness wart, pinned); (g) a record whose stored `messageHash` does not recompute
-  from its facts ⇒ `null`, never a lookup; (h) gas-only and schema-2 records ⇒ `null`; (i) the resumed
-  claim with a success receipt uses the nullifier, not the claim build (`smartClaimFake` re-pinned).
+  from its facts ⇒ `"invalid"` ⇒ `tampered`, no lookup, no completion — fresh and resumed; (h) gas-only
+  and schema-2 records never reach the nullifier probe and keep today's claim-build probe (their
+  `handleSuccessReceipt` outcomes unchanged); (i) the resumed hub claim with a success receipt uses the
+  nullifier, not the claim build (`smartClaimFake` re-pinned: `"live"` keeps polling).
 - `useSend.ts`: wire the dep (node client + hub address).
 - **Validation gate**: `bun run --cwd apps/tools test -- src/lib/message-nullifier src/composables/useBridgeJournal`
   green; `bun run --cwd packages/bridge-core test -- src/journal` green; `bun run --cwd apps/tools typecheck`
@@ -472,6 +494,7 @@ Three arcs, one per fix, stacked. Unit tests are inline with each change.
 - `useBridgeJournal.ts`: `findDepositTx` dep; `reconcileDepositLeg` from `recoverLegIfNeeded`;
   tests: found ⇒ hash written once (`patchRecordWhen`), then leg recovered and the claim proceeds;
   a record discarded meanwhile ⇒ no write; a hash written by another tab meanwhile ⇒ no overwrite;
+  a record whose identity fields changed meanwhile ⇒ no write;
   none / ambiguous / incomplete ⇒ their notes; a gas-only or schema-2 record ⇒ today's bail.
 - `useSend.ts`: wire with the viem public client + `SEND_GENERATION`. `record-policy.ts`:
   `depositLegRecoverable` for hash-less `schema === 3` token records only (+ tests for both sides).
@@ -494,7 +517,8 @@ Three arcs, one per fix, stacked. Unit tests are inline with each change.
   `withdrawContentHash` + `computeL2ToL1MessageHash`; one index-zero match ⇒ `{ exitTxHash, exitBlock }`;
   a match at index 1 ignored; a taken hash excluded; two ⇒ `"ambiguous"`; none; the cap / a pruned
   block ⇒ `"incomplete"`; a chain-id/version mismatch ⇒ `"incomplete"`.
-- **Validation gate**: `bun run --cwd apps/tools test -- src/composables/exit-attach`; typecheck; lint.
+- **Validation gate**: `bun run --cwd apps/tools test -- src/composables/exit-attach`;
+  `bun run --cwd packages/bridge-core test -- src/journal` (`rekeyRecordWhen`); typecheck; lint.
 
 #### Phase 6: Engine branch, affordance, copy, cell 31b flipped
 - `useBridgeJournal.ts`: `findExitTx` dep; `attachExit` replaces the dead `unknown-outcome` branch and
@@ -502,8 +526,9 @@ Three arcs, one per fix, stacked. Unit tests are inline with each change.
   consume runs under the NEW id's lock ⇒ done, the old id holds no runtime/busy state; a second FINISH
   click during the consume is refused by the new id's lock; attached but already finished on L1 ⇒
   `consumedByOther`; none/ambiguous/incomplete notes; a record discarded meanwhile ⇒ no re-key; a
-  record whose id equals the found hash already exists ⇒ refused; the re-verify of the tx effect
-  failing ⇒ `"incomplete"`.
+  record whose identity fields changed meanwhile ⇒ no re-key; a record whose id equals the found hash
+  already exists ⇒ refused (`journal.ts` `rekeyRecordWhen` tests cover the guard and the destination
+  check); the re-verify of the tx effect failing ⇒ `"incomplete"`.
 - `useHubExit.ts`: wire with the node client. `record-policy.ts`: `exitAttachable` → FINISH shown
   (+ test). Card copy.
 - `exits.spec.ts`: 31b → the swallowed private exit → reload → FINISH → attached → consume → done;
@@ -582,7 +607,8 @@ new persisted field beyond `claimedByOther`, any resubmission path, a third code
 |---|---|---|---|
 | codex (Astra, high) | 1 on v1 | **reject** — 14 findings (5 High security, 2 Facts, 3 Inferences, 1 Ask, 3 Implementation) | `audit-codex.md` (transcript + triage: 12 adopted, 1 rejected as pre-existing by design, 1 partly) |
 | fable (Plan subagent) | 1 on v1 | **conditional approve** — S1 silo/secret by record shape, S2 `getLogs` args, I1 re-key outside the old-id lock, fact corrections | `audit-fable.md` (all four conditions adopted) |
-| codex | 2 on v2 | _pending_ | |
+| codex | 2 on v2 | **reject** — 6 findings (cross-tab guards, invalid vs unknown identity, `getBlocks` bodies, `tokenSecretHash`, the probe dispatch for excluded shapes, the scoped prompt test + ledger wording) | `audit-codex.md` (all six adopted) |
+| codex | 3 on v3 | _pending_ | |
 | codex (fresh session) | final on the consolidated plan + ledger | _pending_ | |
 
 ### Decision ledger
@@ -599,7 +625,7 @@ new persisted field beyond `claimedByOther`, any resubmission path, a third code
 | C's attribution | refuse anything plural; attach a single survivor; residual accepted | treat window uniqueness as provenance (v1 wording) | identical exits are indistinguishable; the destination is the same (codex #3, fable S3) → explicit approval decision |
 | Attach + lock | `attachExit` returns `{ rekeyedTo }`; re-run under the new id | continue under the old id (v1) | `inFlight` and runtime keyed by the dead id; the live exit already re-keys then re-runs (codex #4, fable I1) |
 | Trusted node | keep the app's existing single-node boundary; surface as a decision | a second source / finality wait | no second source exists in the app; a lying node already controls every stage (codex #11) |
-| Prompt rule on same-session resume | leave as is (pre-existing, session-scoped by `resumeActionFor`) | gate `ensureTokenGrant`/`resolvePrivateClaimMaterial` on `interactive` everywhere (codex #5) | the journal's stated exception ("auto-continue ONLY what this page session initiated"); out of scope; the new branches add no prompt and a test pins the non-interactive `null` |
+| Prompt rule on automatic resume | leave as is (pre-existing) | gate `ensureTokenGrant`/`resolvePrivateClaimMaterial` on `interactive` everywhere (codex #5) | `resumeActionFor` auto-continues what this page session started AND prompt-free receipt waits (rediscovered records with a `claimTxHash`); on the latter `claimGuards` may still raise a grant prompt before `resumeSentClaim`'s gate — a pre-existing wart the journal owns, out of this plan's scope and recorded for a follow-up; the new branches add no prompt (the probe is asserted prompt-free on its fake) |
 
 **Still disputed**: codex's hybrid (scan + verified-hash fallback) vs the plan's scan-only. The plan
 ships scan-only; the owner can add the paste fallback as a follow-up.
