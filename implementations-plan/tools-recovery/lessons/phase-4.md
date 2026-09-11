@@ -66,3 +66,8 @@ comparison ran before the final awaited `getBlock`, so a switch during that read
 **Accepted, fixed** (`f47d9eee`): tip re-read → chain assertion → epoch comparison last, with no await
 after it; pinned by "a switch reported while the LAST read is still pending must count too". No other
 findings.
+
+**Round 3** — resumed, verdict `approve-with-fixes` (1 medium, test-only): the late-switch pin flipped
+the epoch during the window's binary search, not inside the final tip read, so it passed with the old
+ordering. **Fixed**: the flip happens inside the second read of the tip block. No production findings
+remain — the arc-2 loop converged.

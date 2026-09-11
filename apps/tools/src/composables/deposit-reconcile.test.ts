@@ -308,7 +308,8 @@ describe("findDepositTx — the router transaction behind a hash-less deposit", 
 			const block = late.client.getBlock
 			late.client.getBlock = async (args) => {
 				const answer = await block(args)
-				if (late.reads.filter((r) => r.startsWith("block:")).length > 3) lateEpoch = 1
+				// The tip is read twice: before the scan and as the very last read. Flip inside the second.
+				if (args.blockNumber === 1_000n && late.reads.filter((r) => r === "block:1000").length === 2) lateEpoch = 1
 				return answer
 			}
 			await expect(findDepositTx(record(), late.client, opts({ chainEpoch: () => lateEpoch }))).resolves.toBe("incomplete")
