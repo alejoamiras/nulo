@@ -1346,9 +1346,8 @@ async function reconciledForCompletion(captured: SendDepositRecord): Promise<Sen
  * A persisted `claimedByOther` is a claim about the chain, and journal data alone never completes a
  * record: the fuel is reconciled first (no material needed), then the marker is re-read from the
  * nullifier. Automatic resumes use only the material at hand; an explicit click on a private record
- * whose fuel has settled unseals it (one signature), because that record has nothing else left to
- * do. Nullified ⇒ the completion; still live ⇒ the marker was wrong and is dropped; no material or
- * no evidence ⇒ the record waits.
+ * unseals it (one signature). Nullified ⇒ the completion; still live ⇒ the marker was wrong and is
+ * dropped, and the ordinary claim is back; no material or no evidence ⇒ the record waits.
  */
 async function revalidateClaimedByOther(captured: SendDepositRecord, gen: number, interactive: boolean): Promise<"stop"> {
 	const rec = await reconciledForCompletion(captured)
@@ -1369,8 +1368,10 @@ async function revalidateClaimedByOther(captured: SendDepositRecord, gen: number
 	return "stop"
 }
 
+/** The explicit click on a marked private record unseals it for the verification whatever its
+ *  fuel says: a false marker would otherwise hide the ordinary claim that spends that fuel. */
 async function unsealForVerification(rec: SendDepositRecord, interactive: boolean): Promise<ClaimMaterial | undefined> {
-	if (!interactive || !rec.isPrivate || !rec.sealedEnvelope || !fuelSettledFor(rec)) return undefined
+	if (!interactive || !rec.isPrivate || !rec.sealedEnvelope) return undefined
 	return (await resolvePrivateClaimMaterial(rec, rec.id)) ?? undefined
 }
 

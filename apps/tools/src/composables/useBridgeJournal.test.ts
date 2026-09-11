@@ -1668,7 +1668,7 @@ describe("useBridgeJournal - consumed → done on the message's own nullifier", 
 		expect(after.sealedEnvelope).toBe(rec.sealedEnvelope)
 		const wallet = WALLET
 		expect(recordState(after, {}, wallet).fuelRecovery).toBe("none")
-		expect(recordState(after, {}, wallet).showClaim).toBe(false)
+		expect(recordState(after, {}, wallet).showClaim).toBe(true) // CLAIM = verify the marker; never a gas claim
 		expect(recordState(after, {}, wallet).claimedByOther).toBe(true)
 
 		__resetJournalForTests()
@@ -1717,6 +1717,19 @@ describe("useBridgeJournal - consumed → done on the message's own nullifier", 
 		expect(deps.signL1).toHaveBeenCalledTimes(1)
 		expect(recordOf("0xforgedpriv")?.claimedByOther).toBeUndefined()
 		expect(recordOf("0xforgedpriv")?.completedAt).toBeUndefined()
+	})
+
+	it("a false marker on a private token+gas record: the click unseals, the live message drops it, the claim is back", async () => {
+		const deps = baseDeps(kv)
+		const send = sendDeps()
+		connectJournalDeps({ ...deps, ...send, messageNullified: vi.fn(async () => "live" as const) })
+		const priv = mkFueled("0xfalsepriv", { isPrivate: true, secret: undefined, sealerL1: SEALER, claimedByOther: true })
+		priv.sealedEnvelope = await sealEnvelopeFor(priv)
+		addRecord(priv)
+		await runDepositClaim("0xfalsepriv", { interactive: true })
+		expect(deps.signL1).toHaveBeenCalledTimes(1)
+		expect(recordOf("0xfalsepriv")?.claimedByOther).toBeUndefined()
+		expect(send.claimSend).not.toHaveBeenCalled() // the verification never claims; the next click does
 	})
 
 	it("a fuel block swapped in while the reconciliation awaits inherits nothing: no completion", async () => {

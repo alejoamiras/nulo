@@ -79,15 +79,16 @@ export function stageOf(rec: BridgeJournalRecord, rt: RecordRuntime): RecordStag
 	return deriveWithdrawStage(rec as WithdrawJournalRecord, { proven: rt.proven ?? false })
 }
 
-/** A marked record whose fuel has settled has one thing left: the verification that completes it.
- *  It needs the claim material (a private record unseals on the click), so the button stays CLAIM. */
+/** A marked, unfinished record keeps CLAIM as the verification that completes it — or, if the marker
+ *  was wrong, restores the ordinary claim. A public record with open fuel already has CLAIM YOUR
+ *  GAS and verifies itself on resume; a private one needs the click to unseal, whatever its fuel. */
 function claimedByOtherFacts(
 	rec: BridgeJournalRecord,
 	fuel: DepositJournalRecord["fuel"],
 ): { claimedByOther: boolean; verifiable: boolean } {
 	const claimedByOther = rec.direction === "deposit" && (rec as DepositJournalRecord).claimedByOther === true
 	const fuelSettled = fuel === undefined || fuel.consumed === true || fuel.standaloneClaimed === true
-	return { claimedByOther, verifiable: claimedByOther && rec.completedAt === undefined && fuelSettled }
+	return { claimedByOther, verifiable: claimedByOther && rec.completedAt === undefined && (fuelSettled || rec.isPrivate) }
 }
 
 export function recordState(rec: BridgeJournalRecord, rt: RecordRuntime, wallet: WalletView): RecordState {

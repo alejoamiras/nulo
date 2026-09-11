@@ -60,6 +60,8 @@ describe("recordState — the gates the card and the dock share", () => {
 		const open = state(dep({ schema: 2, leafIndex: "1", claimedByOther: true, fuel }))
 		expect(open.showClaim).toBe(false)
 		expect(open.claimedByOther).toBe(true)
+		// A PRIVATE record with open fuel still verifies on the click: a false marker must not hide its claim.
+		expect(state(dep({ schema: 2, isPrivate: true, leafIndex: "1", claimedByOther: true, fuel })).showClaim).toBe(true)
 		// Fuel settled but the record not completed (a marker that could not be verified yet) ⇒ CLAIM verifies.
 		expect(state(dep({ schema: 2, leafIndex: "1", claimedByOther: true, fuel: { ...fuel, consumed: true } })).showClaim).toBe(true)
 		expect(state(dep({ leafIndex: "1", claimedByOther: true })).showClaim).toBe(true)

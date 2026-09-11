@@ -108,6 +108,17 @@ describe("reconcileFuelConsumed", () => {
 		expect(updates).toHaveLength(0)
 	})
 
+	it("settles only the block that was probed: a block swapped in during the receipt read inherits nothing", async () => {
+		const f = fueled().fuel as DepositFuelBlock
+		records.value = [fueled({ completedAt: undefined, fuel: { ...f, claimTxHash: "0xtx1", secretHashHex: "0xf1" } })]
+		receiptStatus.mockImplementation(async () => {
+			records.value = [fueled({ completedAt: undefined, fuel: { ...f, secretHashHex: "0xf2" } })]
+			return "included"
+		})
+		await reconcileFuelConsumed("0xrec")
+		expect(updates).toEqual([])
+	})
+
 	it("is a no-op for an unknown id", async () => {
 		await reconcileFuelConsumed("0xmissing")
 		expect(updates).toHaveLength(0)

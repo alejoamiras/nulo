@@ -40,9 +40,12 @@ const recordOf = (id: string): DepositJournalRecord | undefined =>
 export async function reconcileFuelConsumed(id: string): Promise<void> {
 	const fuel = (currentRecord(id) as DepositJournalRecord | undefined)?.fuel
 	if (!fuel?.claimTxHash || fuel.consumed === true) return
-	if ((await fuelReceiptStatus(fuel.claimTxHash)) === "included") {
-		patchFuel(id, fuel, { consumed: true })
-	}
+	if ((await fuelReceiptStatus(fuel.claimTxHash)) !== "included") return
+	// The receipt settles the block that was probed: a block another tab swapped in while the
+	// receipt was read must not inherit it.
+	const live = (currentRecord(id) as DepositJournalRecord | undefined)?.fuel
+	if (live?.claimTxHash !== fuel.claimTxHash || live.secretHashHex !== fuel.secretHashHex) return
+	patchFuel(id, live, { consumed: true })
 }
 
 /**
