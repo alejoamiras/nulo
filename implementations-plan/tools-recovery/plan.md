@@ -548,7 +548,7 @@ Three arcs, one per fix, stacked. Unit tests are inline with each change.
 
 ### Arc 1 — consumed → done (`worktree-tools-recovery`)
 
-#### Phase 1: The nullifier helper, the dep, the two engine branches
+#### Phase 1: The nullifier helper, the dep, the two engine branches ✓ (`d37df3d9`, lessons/phase-1.md)
 - `apps/tools/src/lib/message-nullifier.ts` + test (public and private vectors; the private vector
   derives the secret; a wrong secret yields a different nullifier).
 - `journal.ts`: `claimedByOther?: boolean` (+ the loader's schema test if one enumerates fields).
