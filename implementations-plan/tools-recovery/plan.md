@@ -627,7 +627,7 @@ Three arcs, one per fix, stacked. Unit tests are inline with each change.
 
 ### Arc 3 — attach a hash-less exit (`tools-recovery/exit-attach`)
 
-#### Phase 5: The L2 finder
+#### Phase 5: The L2 finder ✓ (`e4324169`, lessons/phase-5.md)
 - `exit-attach.ts`: `findExitTx` over a narrow node interface (`getNodeInfo`, `getBlockNumber`,
   `getBlocks`, `getTxEffect`); tests with a fake node: the recomputed hash equals a vector from
   `withdrawContentHash` + `computeL2ToL1MessageHash`; one index-zero match ⇒ `{ exitTxHash, exitBlock }`;
