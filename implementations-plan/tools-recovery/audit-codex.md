@@ -88,3 +88,21 @@ Confirmed sound: invalid/unknown separation, excluded-shape probe preservation, 
 | 1 | yes — `withRecordLock` is a process-local set; localStorage has no mutex | **adopted** — `withRecordLock` gains an injectable same-origin exclusive lock (production: `navigator.locks`; tests: an in-memory table shared by the two "tabs"); the attach fails closed without it; guards re-run inside; the old→new id handoff acquires the new lock before releasing the old; the interleaving regression is in Phase 6's tests |
 
 Round 3 was still material, so the loop stopped here per protocol; the finding is folded into v4 and the fresh final pass re-evaluates the whole plan.
+
+## Fresh final pass #1 — new session, on plan v4 + the decision ledger
+
+**Verdict: reject** (with blocking findings: incomplete cross-tab exclusion and an unsafe Web Locks adapter/handoff).
+
+1. **High** — record locks do not protect the storage unit: every mutation rewrites the whole journal array (`journal.ts:351`); tabs holding different record locks overwrite each other; discard/import bypass runner locks. Add one short journal-wide lock around every load–guard–write; keep record locks for running operations; test different-record writes and attach vs discard/import.
+2. **High** — with `ifAvailable: true` the callback is still invoked (with `null`); wrap `lock => lock ? fn() : "held-elsewhere"`; test the null branch.
+3. **Medium** — "then discard" on an ambiguous result directs users to destroy recovery material despite positive evidence; say keep/export instead (`BridgeJournalCard.vue:394`).
+4. **Medium** (Facts) — `chain-constants` does not cover the `local` target used by the browser gates; bind A/C to `resolveToolsTarget()` (`network-targets.ts:11,64`).
+5. **Medium** (Inferences) — caps and batching do not prevent a hang; the L1 client has no transport deadline (`useL1Wallet.ts:29`); specify a total deadline and budgets; drop timed-out continuations.
+6. **High** — the handoff holds `H` and calls `runWithdrawConsume(H)`, which re-acquires `H` — exclusive locks are not reentrant; acquire `H` before the destination check/re-key and run the canonical consume body inside; the live `useHubExit.ts:512` re-key runs outside `withRecordLock` today — same helper.
+7. **Medium** — locking is scheduled only in Phase 6 but promised for all arcs; put it in arc 1; same-thread fakes cannot prove browser exclusion.
+
+Asks: the trusted-node and destination-only attribution decisions are explicit and defensible if approved; neither proves finality or provenance.
+
+Confirmed sound: hub hashes/siloing, private-secret derivation, calldata mappings, index-zero matching, helper boundaries and complexity gates; ship scan-only after these fixes.
+
+### Triage — all seven verified (the whole-array `write`, the spec's null callback, the un-locked live re-key, the local target's `define`d identity, the deadline-less L1 client) and **adopted** in v5: two injectable locks introduced in arc 1 (journal-wide mutation lock + record run lock with the null-branch adapter), one executable handoff shared with the live exit, scan deadline/budgets with late-result drops, keep/export copy, active-target identity, and a two-tab browser cell (31c).

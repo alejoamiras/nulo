@@ -6,7 +6,7 @@ eli5_mode: artifact
 code_review: off
 codex_effort: high
 recon_budget: 2 agents (batched reuse sweep + journal mapper), default
-status: draft v4 (2026-09-11) — codex rounds 1–3 (14 + 6 + 1) and fable round 1 (4) folded; three-round stop reached on round 3's cross-tab finding (folded, surfaced in the ledger); awaiting the fresh final codex pass
+status: draft v5 (2026-09-11) — codex rounds 1–3 (14 + 6 + 1), fable round 1 (4) and the first fresh final pass (7, all on v4's lock design) folded; awaiting a second fresh final pass
 worktree: .claude/worktrees/tools-recovery (branch worktree-tools-recovery, from origin/dev @ 62f3456a)
 ---
 
@@ -93,7 +93,7 @@ apps/tools/tests/browser/{specs,fixtures}        cells 24b/26d/31b flipped; L1 f
   behaviour (their consumer is the Fee Juice contract / the legacy bridge — `useSend.ts:166-167,470-471`
   set `bridge` per intent — and their secret schemes differ; the dep answers `null` for them).
 - **The message is recomputed, never trusted** (`message-nullifier.ts`): from validated record facts —
-  `sender = L1Actor(rec.portal, rec.chainId)`, `recipient = L2Actor(rec.bridge, rollupVersion)`,
+  `sender = L1Actor(rec.portal, rec.chainId)`, `recipient = L2Actor(rec.bridge, rollupVersion)` (the active target's, `resolveToolsTarget()`),
   `content = mintToPublicContentHash(rec.recipient, amount)` or `mintToPrivateContentHash(amount)`
   (`content-hash.ts:49-54`, the hub's `main.nr:243,264`), `secretHash = rec.secretHashHex`,
   `index = rec.leafIndex` — `new L1ToL2Message(...).hash()` (stdlib `l1_to_l2_message.d.ts:24-36`;
@@ -176,9 +176,9 @@ apps/tools/tests/browser/{specs,fixtures}        cells 24b/26d/31b flipped; L1 f
   `attemptLegRecovery` on the re-read record (its receipt-log read then recovers the leaves as today);
   `"none"` → `attention: "error"`, "No deposit for this record was found on Ethereum since it was
   started. If you never confirmed it in your wallet, discard this record."; `"ambiguous"` →
-  `attention: "unknown-outcome"`, "More than one matching deposit was found — not guessing. Check your
-  wallet activity, then discard."; `"incomplete"` → `attention: "error"`, "Ethereum could not be
-  searched far enough back — try again later."
+  `attention: "unknown-outcome"`, "More than one matching deposit was found — not guessing. Keep this
+  record and export its recovery file; it can be finished by hand."; `"incomplete"` → `attention: "error"`,
+  "Ethereum could not be searched far enough back — try again later."
 - **Affordance**: `record-policy.ts` `depositLegRecoverable` = `depositing` && (`depositTxHash` ||
   (`schema === 3` && a token block)); the button stays CLAIM. Card copy for the hash-less shape: "The
   deposit was never confirmed here. Press CLAIM to look for it on Ethereum; discard if you never sent it."
@@ -189,8 +189,8 @@ apps/tools/tests/browser/{specs,fixtures}        cells 24b/26d/31b flipped; L1 f
 - **Helper** (`exit-attach.ts`): `findExitTx(rec, node, taken, opts)` over a narrow node interface
   (`getNodeInfo`, `getBlockNumber`, `getBlocks`, `getTxEffect`):
   1. **Message hash**: `computeL2ToL1MessageHash({ l2Sender: rec.bridge, l1Recipient: rec.token.portal, content: withdrawContentHash(rec.recipientL1, amount, ZERO_L1), rollupVersion, chainId })`
-     — `rollupVersion`/`l1ChainId` from `getNodeInfo()`, asserted equal to the record's `chainId` and
-     the build's `chain-constants`.
+     — `rollupVersion`/`l1ChainId` from the active target (`resolveToolsTarget()`, which carries the
+     sandbox's identity on `local`), asserted equal to the record's `chainId` and to `getNodeInfo()`.
   2. **Window**: L2 blocks with `timestamp ≥ createdAt/1000 − slack`, located by binary search over
      block timestamps, read with `getBlocks(from, limit, { includeTransactions: true })` (bodies are
      off by default — `block_response.d.ts:13-21`); capped; pruned or unreadable history ⇒ `"incomplete"`.
@@ -215,26 +215,38 @@ apps/tools/tests/browser/{specs,fixtures}        cells 24b/26d/31b flipped; L1 f
   inside ONE tab only; across tabs the exclusion is the **record lock below**, which the attach holds
   for the old id, then acquires for `exitTxHash` (the handoff) BEFORE releasing the old one. It returns
   `{ rekeyedTo: exitTxHash }`.
-- **Cross-tab record lock**: `withRecordLock(id, fn)` (`useBridgeJournal.ts:625-642`, today a
-  process-local `inFlight` set) gains a same-origin exclusive lock through a new injectable dep
-  `exclusive?(name, fn, { ifAvailable })` — production wires the Web Locks API
-  (`navigator.locks.request("nulo-bridge:record:" + id, { ifAvailable: true }, fn)`; every modern
-  browser the app supports has it), the unit fakes wire an in-memory lock table shared by the "two
-  tabs" of a test. When the lock is held elsewhere the runner reports "already in flight" (today's
-  dedup message) instead of running; when no lock API exists the runner **fails closed** for the attach
-  path (note: "another tab may be finishing this exit — try again in a moment") and keeps today's
-  process-local behaviour for everything else. The live exit's own re-key + `runWithdrawConsume(finalId)`
-  (`useHubExit.ts:512-520`) and every consume runner go through the same `withRecordLock`, so canonical
-  runners participate. All guards run AGAIN inside the lock. Regression: two callers that both loaded the
-  journal before either wrote — the second one's guard fails inside the lock; only one re-key, one
-  consume runner. `runWithdrawConsumeInner` releases the OLD id's lock and calls
-  `runWithdrawConsume(rekeyedTo)` — the consume runs under the canonical id's lock, so runtime writes,
-  `inFlight` and a second FINISH click all key on the live record (the live-path precedent:
-  `useHubExit.ts:512-520` re-keys, then `runWithdrawConsume(finalId)`). `"none"` → `attention: "error"`,
-  "No exit matching this record was found on Aztec since it was started. If your wallet never sent
-  it, discard this record."; `"ambiguous"` → `attention: "unknown-outcome"`, "More than one matching
-  exit was found — not guessing. Check your wallet activity, then discard."; `"incomplete"` →
-  `attention: "error"`, "Aztec could not be searched far enough back — try again later."
+- **Two same-origin locks, both injectable** (dep `locks?: { journal(fn); record(id, fn) }`;
+  production = the Web Locks API, unit fakes = an in-memory lock table the "two tabs" of a test
+  share; introduced in **arc 1** as the shared prerequisite for every write the three arcs make):
+  1. **Journal mutation lock** `nulo-bridge:journal` — the storage unit is the WHOLE journal array
+     (`journal.ts` `write` rewrites it, `:351`), so every load → guard → write the engine performs
+     (`patchRecord`, `patchRecordWhen`, `rekeyRecordWhen`, discard, import/restore) runs inside one
+     short exclusive lock (`navigator.locks.request(name, fn)`, waiting, body synchronous). Two tabs
+     holding different record locks can no longer overwrite each other's facts.
+  2. **Record run lock** `nulo-bridge:record:<id>` — `withRecordLock(id, fn)` keeps its process-local
+     `inFlight` and adds `navigator.locks.request(name, { ifAvailable: true }, (lock) => lock ? fn() : "held-elsewhere")`
+     — the callback is invoked with `null` under contention (Web Locks § LockManager), so the adapter
+     branches on the lock object, never on the callback running; "held elsewhere" reports today's
+     "already in flight" dedup message. The adapter's null-lock branch has its own unit test.
+  Without a lock API (no `navigator.locks`): the guarded primitives run unlocked as today, and the
+  attach path fails closed ("another tab may be finishing this exit — try again in a moment").
+- **One executable handoff** (locks are not reentrant): `attachExit` finds the candidate `H`, then
+  acquires the record lock for `H` FIRST (held elsewhere → the note above); inside it, under the
+  journal lock, the guard re-checks the source snapshot and that no record with id `H` exists, then
+  re-keys; still inside `H`'s lock it runs the canonical consume body (`runWithdrawConsumeLocked(H)`)
+  without re-acquiring; the old id's lock is released when `attachExit` returns. The live exit uses
+  the same helper — `useHubExit.ts:512-520` re-keys OUTSIDE any record lock today — so a live exit
+  and a concurrent attach of the same hash contend on `H` and exactly one runs. Regressions: two
+  in-memory tabs both loaded before either wrote ⇒ one re-key, one consume, one "held elsewhere";
+  a live exit vs an attach of the same hash ⇒ one runner; canonical runtime cleanup on the old id.
+- **Scan budget**: `findDepositTx`/`findExitTx` take `{ deadlineMs, maxReads, maxCandidates }`
+  (delegated defaults, e.g. 45 s / 200 reads / 8 candidates); a deadline or budget hit is
+  `"incomplete"`; the engine tags each search with its `gen` and drops a result that lands after the
+  runner moved on (no write, no re-key). The L1 client has no transport deadline
+  (`useL1Wallet.ts:29`), so the helper races every read against the deadline.
+- **Chain identity** comes from the active target (`resolveToolsTarget()` — the `local` target's
+  rollup version and chain id are `define`d from the sandbox artifacts, `network-targets.ts:11,64`),
+  never from `chain-constants` alone; a mismatch with `getNodeInfo()` is `"incomplete"`.
 - **Affordance**: `record-policy.ts` gains `exitAttachable = withdraw && stage === "exiting" && schema === 3 && actionable && !busy`,
   and `showFinish` includes it; the label stays FINISH. `resumeActionFor` keeps skipping hash-less
   exits (click-driven). Card copy: "The exit was interrupted. Press FINISH to look for it on Aztec;
@@ -354,13 +366,20 @@ draft prefers the scan, and keeps the paste as a possible later fallback UI (out
   chain data; `taken` removes what this journal owns, anything still plural is refused, and a single
   survivor is attached because the destination is the same either way. The residual is bookkeeping (a
   real exit left untracked while a twin is attached), not loss.
-- **Re-key and write safety across tabs**: localStorage has no mutex and `withRecordLock` was
-  process-local, so two tabs could both pass a synchronous guard and both attach/consume (duplicate
-  prompts, lost facts). The record lock becomes a same-origin Web Lock (injectable; fails closed for the
-  attach when unavailable); every write after an await is a synchronous load → guard → write
-  (`patchRecordWhen`, the new `rekeyRecordWhen`) run INSIDE that lock, comparing the live record to the
-  verified snapshot and, for the re-key, requiring the destination id to be free; the consume then runs
-  under the new id's lock through the handoff. A lost race loses the attempt, never the facts.
+- **Write safety across tabs**: the journal is one localStorage array rewritten whole on every
+  mutation, and localStorage has no mutex, so a same-origin Web Lock (`nulo-bridge:journal`) wraps
+  every load → guard → write — including discard and import, which are not runner-driven — and a
+  per-record run lock (with a correct `ifAvailable` adapter) keeps two tabs from running the same
+  record's claim/consume; the attach's re-key and the consume body run under the destination's lock
+  in one sequence, so a twin attach and a live exit cannot both proceed. Guards compare the live
+  record to the verified snapshot. A lost race loses the attempt, never the facts. Without a lock
+  API the attach fails closed.
+- **Ambiguity never tells the user to discard**: an ambiguous result is positive evidence that a
+  deposit or exit exists; the copy says keep the record and export its recovery file (discarding a
+  private deposit destroys its only secret — `BridgeJournalCard.vue:394`).
+- **Bounded scans**: a total deadline and read/candidate budgets return `"incomplete"`; a result
+  arriving after the runner moved on is dropped (never written), so a hung RPC cannot pin a lock or
+  latch a stale fact.
 - **Proven-wrong identity stops**: a stored `messageHash` that does not recompute from the record's
   facts is `"invalid"`, surfaced as `tampered` in both the fresh and the resumed path — never
   completed on the "unknown" branch.
@@ -446,7 +465,10 @@ draft prefers the scan, and keeps the paste as a possible later fallback UI (out
   page's promise (the transaction is sent, the page never hears back) — the twin of the L2 wallet's
   `swallowNext`; it is what makes 26d's flip a real reconcile.
 
-**Asks** — two decisions the approval gate settles explicitly (both recommended "accept"):
+**Asks** — two decisions the approval gate settles explicitly (both recommended "accept"; neither
+proves finality or provenance — an honest re-org can invalidate a "done" read at `latest`, and a
+twin exit can be finished while the intended one stays untracked; both residuals are bookkeeping,
+not loss):
 - **Trusted node / finality**: A reads the nullifier at `latest` from the app's existing node; no
   second source, no finality wait (the app already trusts this node for receipts and stages).
 - **Exit attribution**: a single surviving candidate is attached even though an identical exit from
@@ -478,7 +500,12 @@ Three arcs, one per fix, stacked. Unit tests are inline with each change.
   and schema-2 records never reach the nullifier probe and keep today's claim-build probe (their
   `handleSuccessReceipt` outcomes unchanged); (i) the resumed hub claim with a success receipt uses the
   nullifier, not the claim build (`smartClaimFake` re-pinned: `"live"` keeps polling).
-- `useSend.ts`: wire the dep (node client + hub address).
+- `useSend.ts`: wire the dep (node client + hub address, the active target's identity).
+- **The two locks** (shared prerequisite for every arc): `locks` dep + the Web Locks adapter
+  (`ifAvailable` null-branch tested against a fake `navigator.locks`), the journal mutation lock around
+  every mutation primitive (incl. discard/import), the record run lock inside `withRecordLock`; the
+  in-memory fake; regressions: two in-memory tabs writing different records keep both writes; attach
+  vs discard/import cannot interleave; no lock API ⇒ today's behaviour for plain writes.
 - **Validation gate**: `bun run --cwd apps/tools test -- src/lib/message-nullifier src/composables/useBridgeJournal`
   green; `bun run --cwd packages/bridge-core test -- src/journal` green; `bun run --cwd apps/tools typecheck`
   exit 0; `bun run lint` exit 0. Layers: lint · unit.
@@ -501,8 +528,8 @@ Three arcs, one per fix, stacked. Unit tests are inline with each change.
   window search over sparse timestamps; a matching `bridge` tx; a `bridgeWithFuel` tx for a token+gas
   record (`totalAmount = amount + fuel`, `minFuelOutput`); a PRIVATE deposit (zero event recipient) found
   by its secret hash; a copied secret hash on another token or amount rejected at calldata; two
-  matches ⇒ `"ambiguous"`; none ⇒ `"none"`; the cap, a failed read, or a non-canonical receipt ⇒
-  `"incomplete"`.
+  matches ⇒ `"ambiguous"`; none ⇒ `"none"`; the cap, a failed read, a never-settling read (the
+  deadline), an excessive candidate count, or a non-canonical receipt ⇒ `"incomplete"`.
 - **Validation gate**: `bun run --cwd apps/tools test -- src/composables/deposit-reconcile` green;
   typecheck; lint. Layers: lint · unit.
 
@@ -532,7 +559,8 @@ Three arcs, one per fix, stacked. Unit tests are inline with each change.
   `getBlocks`, `getTxEffect`); tests with a fake node: the recomputed hash equals a vector from
   `withdrawContentHash` + `computeL2ToL1MessageHash`; one index-zero match ⇒ `{ exitTxHash, exitBlock }`;
   a match at index 1 ignored; a taken hash excluded; two ⇒ `"ambiguous"`; none; the cap / a pruned
-  block ⇒ `"incomplete"`; a chain-id/version mismatch ⇒ `"incomplete"`.
+  block / the deadline ⇒ `"incomplete"`; a chain-id/version mismatch with the active target ⇒
+  `"incomplete"`.
 - **Validation gate**: `bun run --cwd apps/tools test -- src/composables/exit-attach`;
   `bun run --cwd packages/bridge-core test -- src/journal` (`rekeyRecordWhen`); typecheck; lint.
 
@@ -552,7 +580,10 @@ Three arcs, one per fix, stacked. Unit tests are inline with each change.
   (+ test). Card copy.
 - `exits.spec.ts`: 31b → the swallowed private exit → reload → FINISH → attached → consume → done;
   credit charged once; no second burn; `exitTxHash` in storage equals the burn the wallet reported
-  (`walletCalls`/`submitted`).
+  (`walletCalls`/`submitted`). **31c (two tabs)**: the same swallowed exit, two tabs (two wallet
+  profiles, one journal), FINISH pressed in both at once ⇒ one attaches and finishes, the other shows
+  "another tab is finishing"; one consume transaction on L1 — the browser-level proof of the cross-tab
+  lock that same-thread fakes cannot give.
 - **Validation gate**: Phase 5 commands + the journal/policy tests; `bun run e2e:tools -- specs/exits.spec.ts`
   green at retry 0; then the FULL tools suite in two shards (retry 0); `bun run test:all` exit 0;
   `bun run lint && bun run lint:actions` exit 0. Layers: lint · unit · e2e.
@@ -628,7 +659,8 @@ new persisted field beyond `claimedByOther`, any resubmission path, a third code
 | fable (Plan subagent) | 1 on v1 | **conditional approve** — S1 silo/secret by record shape, S2 `getLogs` args, I1 re-key outside the old-id lock, fact corrections | `audit-fable.md` (all four conditions adopted) |
 | codex | 2 on v2 | **reject** — 6 findings (cross-tab guards, invalid vs unknown identity, `getBlocks` bodies, `tokenSecretHash`, the probe dispatch for excluded shapes, the scoped prompt test + ledger wording) | `audit-codex.md` (all six adopted) |
 | codex | 3 on v3 | **reject** — 1 finding: the synchronous re-key guard still permits concurrent attachment across tabs | `audit-codex.md` (adopted: Web Lock record runner) — the three-round stop |
-| codex (fresh session) | final on v4 + ledger | _pending_ | |
+| codex (fresh session #1) | final on v4 + ledger | **reject** — 7 findings, all on v4's lock design and its copy: the journal array is the storage unit (journal-wide lock), the `ifAvailable` adapter, the non-reentrant handoff (+ the live re-key path), scan deadlines, "discard" in ambiguous copy, the local target's rollup version, lock scheduling in arc 1 | `audit-codex.md` (all seven adopted) |
+| codex (fresh session #2) | final on v5 + ledger | _pending_ | |
 | codex (fresh session) | final on the consolidated plan + ledger | _pending_ | |
 
 ### Decision ledger
@@ -647,12 +679,15 @@ new persisted field beyond `claimedByOther`, any resubmission path, a third code
 | Trusted node | keep the app's existing single-node boundary; surface as a decision | a second source / finality wait | no second source exists in the app; a lying node already controls every stage (codex #11) |
 | Prompt rule on automatic resume | leave as is (pre-existing) | gate `ensureTokenGrant`/`resolvePrivateClaimMaterial` on `interactive` everywhere (codex #5) | `resumeActionFor` auto-continues what this page session started AND prompt-free receipt waits (rediscovered records with a `claimTxHash`); on the latter `claimGuards` may still raise a grant prompt before `resumeSentClaim`'s gate — a pre-existing wart the journal owns, out of this plan's scope and recorded for a follow-up; the new branches add no prompt (the probe is asserted prompt-free on its fake) |
 
-| Cross-tab exclusion (codex round 3, the three-round stop) | a same-origin Web Lock around the record runner (injectable; attach fails closed without it), guards re-run inside it, the old→new id handoff under both locks | keep process-local `inFlight` + synchronous guards (v3) | two tabs can both pass a synchronous guard; the Outbox stops double payment but duplicate prompts/transactions and lost facts remain (codex #R3-1) — folded rather than shipped open; the owner sees the three-round history here |
+| Cross-tab exclusion (codex round 3 = the three-round stop; refined by fresh pass #1) | two same-origin Web Locks, injectable, introduced in arc 1: a journal-wide mutation lock around every load → guard → write (the array is the storage unit) and a per-record run lock with a correct `ifAvailable` adapter; one executable attach handoff (acquire the destination's lock first, re-key and run the consume body inside it; the live exit uses the same helper); attach fails closed without a lock API | process-local `inFlight` + synchronous guards (v3); a record-only lock with a re-acquiring handoff (v4) | two tabs can both pass a synchronous guard (round 3); a record lock does not protect the whole-array write, and a re-acquiring handoff skips itself (fresh pass #1) |
+| Ambiguous-result copy | keep the record, export its recovery file, finish by hand | "check your wallet activity, then discard" (v1–v4) | ambiguity is positive evidence of a deposit/exit; discarding a private deposit destroys its only secret (fresh pass #1) |
+| Scan bounds | a total deadline + read/candidate budgets → `"incomplete"`; late results dropped by the runner's `gen` | block caps only (v1–v4) | the L1 client has no transport deadline; a hung read could pin a lock or latch a stale fact (fresh pass #1) |
 
-**Still disputed**: codex's hybrid (scan + verified-hash fallback) vs the plan's scan-only. The plan
-ships scan-only; the owner can add the paste fallback as a follow-up. **Three-round stop**: round 3
-still produced one material finding (cross-tab exclusion); it was verified, folded as above, and the
-fresh final pass re-evaluates the whole plan — the owner decides at the gate whether that suffices.
+**Still disputed**: codex's hybrid (scan + verified-hash fallback) vs the plan's scan-only. Fresh
+pass #1 now agrees: ship scan-only, the fallback can follow. **Three-round stop**: round 3 still
+produced one material finding (cross-tab exclusion); it was folded, and the first fresh final pass
+then found seven defects in THAT fold — all folded as v5. The owner sees the whole trail here and at
+the gate decides whether the second fresh pass closes it.
 
 ## Seeds
 
