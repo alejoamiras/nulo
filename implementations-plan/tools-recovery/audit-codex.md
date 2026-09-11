@@ -149,3 +149,9 @@ Asks: the checkpointed single-node boundary and single-candidate attribution are
 Confirmed sound: commitment formulas, private derivation/siloing, calldata mappings, index-zero matching, bounded scans, scoped Web Locks semantics, the canonical handoff, separable arcs, Biome limits.
 
 ### Triage — all three verified (`claimFuelStandaloneOnce` refuses private, `resolvePrivateFuelFee`/`privateFpcFee` is the only private fuel spend, `assertL1Chain` at `useSend.ts:105`) and **adopted** in v8: public token+gas routes to the existing public standalone recovery and completes on settlement; private token+gas stays open with its sealed material (follow-up `private-fuel-standalone`, no new fee surface); the L1 chain is asserted before and after the scan; Phase 1 owns A's locked completion and both policy callers; the diagram is corrected.
+
+## Fresh pass #5 — new session, on plan v8 (the approval condition)
+
+**Verdict: approve.** No new blocking findings; three low corrections: (1) `backup.ts:107` — add `isOptionalBoolean(d.claimedByOther)` to `assertDepositFacts` with a malformed-value regression; (2) the remaining `latest` inference → `checkpointed`, `null` → `unknown`; (3) editorial alignment of the seed's re-entry wording, the export advice, "only bridge-core change", the historical summary. Confirmed sound: recomputed identities; invalid/unknown separation; chain-pinned, bounded scans; index-zero attribution; canonical lock handoff; token-only completion, public standalone-fuel recovery, retention of unsettled private fuel's sealed material.
+
+### Triage — all three adopted (the validator check is a Phase 1 task; the plan text aligned).

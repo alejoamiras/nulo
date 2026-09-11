@@ -6,7 +6,7 @@ eli5_mode: artifact
 code_review: off
 codex_effort: high
 recon_budget: 2 agents (batched reuse sweep + journal mapper), default
-status: approved 2026-09-11 (the owner set the /goal seed) — condition: a fresh codex pass returns approve before Phase 1 (v7: reject, 3 — folded as v8; v8: pending); implementing
+status: approved 2026-09-11 (the owner set the /goal seed); the approval condition held — fresh codex pass #5 on v8: approve (3 low editorial items, folded); implementing
 worktree: .claude/worktrees/tools-recovery (branch worktree-tools-recovery, from origin/dev @ 62f3456a)
 ---
 
@@ -379,7 +379,8 @@ tokenMessageNullifier(i: { consumer: string; messageHash: Fr; secretHex: string;
   tools-readiness (a consumed FUEL message reads as token consumed); rejected for the nullifier read.
 - **Putting the helpers in `packages/bridge-core`**: they depend on viem/node clients the app already
   owns and on journal record shapes; kept in `apps/tools` with unit tests over fakes. `journal.ts`'s
-  additive field is the only bridge-core change.
+  additive field, its `assertDepositFacts` check (`backup.ts:107`: `isOptionalBoolean(d.claimedByOther)`)
+  and the synchronous `rekeyRecordWhen` are the bridge-core changes.
 
 ## Competing outline — "verify what the user pastes"
 
@@ -435,7 +436,7 @@ draft prefers the scan, and keeps the paste as a possible later fallback UI (out
   pre-existing property this plan neither widens nor fixes (follow-up `journal cross-tab writes`).
   Without a lock API the attach fails closed.
 - **Ambiguity never tells the user to discard**: an ambiguous result is positive evidence that a
-  deposit or exit exists; the copy says keep the record and export its recovery file (discarding a
+  deposit or exit exists; the copy says keep the record — and, for deposits, export its recovery file (discarding a
   private deposit destroys its only secret — `BridgeJournalCard.vue:394`).
 - **Bounded scans**: a total deadline and read/candidate budgets return `"incomplete"`; a result
   arriving after the runner moved on is dropped (never written), so a hung RPC cannot pin a lock or
@@ -512,7 +513,7 @@ draft prefers the scan, and keeps the paste as a possible later fallback UI (out
   in both the private and the public claim (fable verified the two contexts; cell 24b — a relayer's
   public claim, then the page's CLAIM → done — is the end-to-end proof at retry 0; a unit vector pins
   the formula).
-- `getNullifierMembershipWitness("latest", …)` answers on the sandbox node through the app's node
+- `getNullifierMembershipWitness("checkpointed", …)` answers on the sandbox node through the app's node
   client (no PXE).
 - viem `getLogs` with one `event` over the window sizes involved returns in one call on anvil;
   public testnet RPCs cap ranges (~10k blocks) — the helper chunks.
@@ -741,7 +742,7 @@ new persisted field beyond `claimedByOther`, any resubmission path, a third code
 | codex (fresh session #2) | final on v5 + ledger | **reject** — 6 findings: async journal lock vs synchronous persistence callers; `latest` = proposed vs the checkpointed settlement floor (a strandable private deposit); stale Phase 6 / diagram / interface; the error boundary after re-key; C's export copy on provisional ids; the two-tab cell's contention window | `audit-codex.md` (all six adopted) |
 | codex (fresh session #3) | final on v6 + ledger | **reject** — 5 findings: A's completion lacks the snapshot guard; a token nullifier does not prove private-fuel settlement (strandable); stale blanket lock claims; the trusted-node consequence understated; stale ledger rows | `audit-codex.md` (all five adopted in v7; NOT re-audited — surfaced at the gate) |
 | codex (fresh session #4) | final on v7 (the approval condition) | **reject** — 3 findings: the private-fuel recovery route does not exist (public-only ladder); B's scan must pin the L1 chain; phase text drift | `audit-codex.md` (all three adopted in v8) |
-| codex (fresh session #5) | final on v8 (the approval condition) | _pending_ | |
+| codex (fresh session #5) | final on v8 (the approval condition) | **approve** — 3 low items: `assertDepositFacts` for the new flag, one stale `latest`, editorial alignment | `audit-codex.md` (folded) |
 | codex (fresh session) | final on the consolidated plan + ledger | _pending_ | |
 
 ### Decision ledger
@@ -772,9 +773,9 @@ pass #1 now agrees: ship scan-only, the fallback can follow. **Three-round stop*
 produced one material finding (cross-tab exclusion); it was folded, and the first fresh final pass
 then found seven defects in THAT fold (v5), a second fresh pass six more (v6), and a third five more
 (v7: A's completion guard and the private-fuel gap, honest lock wording, the trusted-node consequence).
-Every finding was verified and folded; codex's LAST explicit verdict is `reject` (on v6). The
-blueprint stops here and surfaces: the recommended approval condition is a fourth fresh pass that
-returns `approve` before Phase 1 starts (the implementing session runs it first).
+Every finding was verified and folded. The owner approved on the condition that a fresh pass
+returns `approve` first: pass #4 on v7 found three more (folded as v8); pass #5 on v8 returned
+**`approve`** with three low editorial items (folded). Phase 1 started on that verdict.
 
 ## Seeds
 
