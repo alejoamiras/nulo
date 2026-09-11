@@ -64,3 +64,19 @@ Verified against the code:
   a marked record with an unsettled fuel transaction resumes; the resume reconciles first.
 - Both rounds: codex could not run vitest in its sandbox (workers timed out); the unit suites were
   run here after each fix (engine 131, policy, card, lib, fuel-recovery all green).
+
+**Round 3** — resumed, verdict `request-changes` (1 high, 1 medium) — the plan's three-round stop.
+Both findings verified and fixed in the same commit; per plan § Post-implementation the loop stops
+here and the residue is **surfaced to the owner** (the cross-arc fresh pass re-reviews arc 1 in full):
+- R3-1 *the reconciliation still writes F1's receipt onto a swapped-in F2 (`patchFuel` merges into
+  the live block); the next CLAIM then sees a "settled" F2* — **accepted, fixed** in
+  `reconcileFuelConsumed`: the write requires the live block to be the probed one (claim hash and
+  secret hash). Pinned in `fuel-recovery.test.ts`.
+- R3-2 *a false marker on a private record with unsettled fuel hides the ordinary claim* — **accepted,
+  fixed**: `unsealForVerification` no longer requires settled fuel, `record-policy` shows CLAIM for any
+  marked, unfinished private record (a public one with open fuel keeps CLAIM YOUR GAS and verifies
+  itself on resume). A live message drops the marker and the next click is the ordinary claim.
+  Two Phase-2 pins re-pinned (card + engine (k′)): the private kept-gas line and CLAIM-as-verify coexist.
+- Not re-submitted to codex (round cap). Residuals for the owner: H1 (`standaloneClaimed` latched
+  from a consumed-shaped send error is pre-existing, not checkpointed evidence) and the `patchFuel`
+  live-merge semantics outside the completion path.
