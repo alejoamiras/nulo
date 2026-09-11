@@ -50,3 +50,17 @@ Verified against the code:
   Skipped: "generation change during the lookup" (a generation only moves through a new runner,
   which the record lock excludes, or a discard — already pinned); "proposed-only fuel consumption"
   (H1, residual).
+
+**Round 2** — resumed, verdict `request-changes` (1 high, 2 medium); H1 accepted as the existing residual.
+- R2-1 *F1→F2 fuel swap across the reconciliation await inherits F1's receipt* — **accepted, fixed**:
+  `sameFuelIdentity` must hold between the captured and the re-read record; only the settlement flags
+  may move. (The mislatched `consumed` on the swapped block is `patchFuel`'s pre-existing merge
+  semantics; the completion refuses it.)
+- R2-2 *a private marker without cached material is a dead end* — **accepted (narrowed)**: a marked,
+  unfinished record whose fuel is settled shows CLAIM as the verification; the interactive click
+  unseals through the existing path; automatic resumes stay prompt-free. Unsettled private fuel keeps
+  no CLAIM (nothing a click could finish; the record stays open with its sealed copy).
+- R2-3 *a fuel receipt pending at first and checkpointed later never reconciles* — **accepted, fixed**:
+  a marked record with an unsettled fuel transaction resumes; the resume reconciles first.
+- Both rounds: codex could not run vitest in its sandbox (workers timed out); the unit suites were
+  run here after each fix (engine 131, policy, card, lib, fuel-recovery all green).
