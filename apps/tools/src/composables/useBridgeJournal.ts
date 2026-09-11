@@ -694,14 +694,21 @@ async function withRecordLock(id: string, fn: () => Promise<void>): Promise<"ran
 		log("already in flight - skipping duplicate", id)
 		return "held-local"
 	}
-	if (!deps.locks) {
-		await runRecordBody(id, fn)
-		return "ran"
+	// Local ownership is taken BEFORE the lock request: the grant is asynchronous, and two immediate
+	// starts in one tab would otherwise both reach it, the loser reading as another tab's runner.
+	inFlight.add(id)
+	try {
+		if (!deps.locks) {
+			await runRecordBody(id, fn)
+			return "ran"
+		}
+		const outcome = await deps.locks.record(id, () => runRecordBody(id, fn))
+		if (outcome !== HELD_ELSEWHERE) return "ran"
+		log("already in flight in another tab - skipping duplicate", id)
+		return "held-elsewhere"
+	} finally {
+		inFlight.delete(id)
 	}
-	const outcome = await deps.locks.record(id, () => runRecordBody(id, fn))
-	if (outcome !== HELD_ELSEWHERE) return "ran"
-	log("already in flight in another tab - skipping duplicate", id)
-	return "held-elsewhere"
 }
 
 /** A runner another tab holds is told so on the card; a local duplicate keeps the running one's
@@ -712,12 +719,10 @@ function noteHeldElsewhere(id: string, what: string): void {
 }
 
 async function runRecordBody(id: string, fn: () => Promise<void>): Promise<void> {
-	inFlight.add(id)
 	setRuntime(id, { busy: true })
 	try {
 		await fn()
 	} finally {
-		inFlight.delete(id)
 		// Structural step cleanup: narration never outlives the runner, success or throw - but never
 		// resurrect a runtime entry for a record that was discarded while we ran.
 		if (records.value.some((r) => r.id === id)) {
@@ -896,7 +901,7 @@ async function runDepositClaimLocked(id: string, gen: number, interactive: boole
 	if (!rec) return "stop"
 
 	if (rec.claimTxHash !== undefined && !isWellFormedTxHash(rec.claimTxHash)) return reportMalformedClaimHash(rec.id)
-	if (claimsThroughHub(rec) && rec.claimedByOther) return revalidateClaimedByOther(rec, gen, interactive)
+	if (claimsThroughHub(rec) && markerApplies(rec)) return revalidateClaimedByOther(rec, gen, interactive)
 	if ((await claimGuards(rec, id)) === "stop") return "stop"
 	if (rec.claimTxHash) return resumeSentClaim(rec, id, gen, interactive)
 	// Caller-side condition so the common has-leaf path stays synchronous (no new await seam).
@@ -940,12 +945,15 @@ async function resolveClaimStart(
 	const fresh = records.value.find((r) => r.id === id) as ClaimRecord | undefined
 	if (!fresh) return "stop" // Cross-tab discard while the unseal signature waited.
 	const probe = await probeClaimedElsewhere(fresh, material)
+	// The read awaited too: the record may have been discarded or replaced meanwhile.
+	if (genOf(id) !== gen) return "stop"
+	const live = records.value.find((r) => r.id === id) as ClaimRecord | undefined
+	if (!live || !sameClaimSnapshot(live, fresh)) return "stop"
 	if (probe === "invalid") return reportTamperedMessage(id)
-	if (probe === "nullified" && claimsThroughHub(fresh)) return completeClaimedByOther(fresh, gen)
-	return { fresh, material }
+	if (probe === "nullified" && claimsThroughHub(live)) return completeClaimedByOther(live, gen)
+	return { fresh: live, material }
 }
 
-/** What the consumability loop's answer means for the run: only "ready" proceeds to the send. */
 async function settleConsumability(
 	ready: Awaited<ReturnType<typeof awaitConsumable>>,
 	fresh: ClaimRecord,
@@ -1042,10 +1050,8 @@ async function resumeSentClaim(rec: ClaimRecord, id: string, gen: number, intera
 
 /**
  * No leafIndex ⇒ the deposit leg hasn't finished. With a recorded depositTxHash the leg is
- * chain-recoverable: the flow may have DIED mid-wait (L1 timeout, closed tab) after the tx
- * was sent — without this recovery every retry would bail here forever while a confirmed
- * L1 deposit sits stranded with no L2 claim (user money). Without a txHash the flow is
- * genuinely still pre-send: bail and let it (or a later click) re-enter.
+ * chain-recoverable from the mined receipt; without one, a hub token send is first looked for
+ * on Ethereum (`reconcileDepositLeg`), and every other shape waits for the flow that owns it.
  * A fueled record whose EVENT-DERIVED fuel fields are missing is chain-recoverable by the same
  * receipt, but the gate above only ever fired on a missing TOKEN leaf — so those records never
  * got rehydrated. They must, because the private ladder now fails closed without them rather
@@ -1956,7 +1962,7 @@ function resumeActionFor(rec: BridgeJournalRecord): "skip" | "deposit" | "withdr
 	// same terminal fault. The first resume after a reload still runs, so the card learns the
 	// fault without a click (runtime attention is empty until then); RETRY always reaches it.
 	if (runtime.value[rec.id]?.attention === "malformed-record") return "skip"
-	if (rec.direction === "deposit" && (rec as DepositJournalRecord).claimedByOther) return claimedByOtherResume(rec as ClaimRecord)
+	if (rec.direction === "deposit" && markerApplies(rec as ClaimRecord)) return claimedByOtherResume(rec as ClaimRecord)
 	const promptFreeWait =
 		(rec.direction === "deposit" && (rec as DepositJournalRecord).claimTxHash) ||
 		(rec.direction === "withdraw" && (rec as WithdrawJournalRecord).consumeTxHash)
@@ -1966,11 +1972,17 @@ function resumeActionFor(rec: BridgeJournalRecord): "skip" | "deposit" | "withdr
 	return rec.direction === "deposit" ? "deposit" : "withdraw"
 }
 
-/** A token another submitter claimed has nothing to claim; it resumes (prompt-free, any session)
- *  when its fuel has settled — the completion is the one write left — or when the fuel has its
- *  own transaction whose receipt may have checkpointed since. */
+/** A `claimedByOther` marker is only meaningful on the shape the completion path writes it on: a
+ *  claimable record (leaf known) with no claim of its own. Anywhere else — a hash-less
+ *  record, one with a claim transaction — it is ignored and the ordinary recovery rules apply. */
+function markerApplies(rec: ClaimRecord): boolean {
+	return rec.claimedByOther === true && !!rec.leafIndex && !rec.claimTxHash
+}
+
+/** A marked, unfinished record resumes (prompt-free, any session) to be verified: the completion,
+ *  the dropped marker, or — without material at hand — nothing. */
 function claimedByOtherResume(rec: ClaimRecord): "skip" | "deposit" {
-	return claimsThroughHub(rec) && (fuelSettledFor(rec) || !!rec.fuel?.claimTxHash) ? "deposit" : "skip"
+	return claimsThroughHub(rec) && rec.completedAt === undefined ? "deposit" : "skip"
 }
 
 /** Auto-continue ONLY what this page session initiated, plus prompt-free receipt waits. */

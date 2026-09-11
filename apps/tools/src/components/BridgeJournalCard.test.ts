@@ -341,12 +341,12 @@ describe("BridgeJournalCard — claimed by another submitter", () => {
 		expect(w.find(sel(TESTIDS.journalStage)).exists()).toBe(false)
 	})
 
-	it("a PUBLIC token+gas record with live fuel hides CLAIM, offers CLAIM YOUR GAS, and says so", () => {
+	it("a PUBLIC token+gas record with live fuel offers CLAIM YOUR GAS and keeps CLAIM as the verification", () => {
 		const w = mountCard(deposit({ schema: 2, leafIndex: "7", claimedByOther: true, fuel }))
 		expect(w.find(sel(TESTIDS.journalClaimedByOther)).text()).toMatch(/press CLAIM YOUR GAS/)
-		expect(w.find(sel(TESTIDS.journalClaim)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.journalClaim)).exists()).toBe(true)
 		expect(w.find(sel(TESTIDS.journalClaimGas)).exists()).toBe(true)
-		expect(w.find(sel(TESTIDS.journalStage)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.journalStage)).text()).toMatch(/Press CLAIM to verify/)
 	})
 
 	it("a PRIVATE token+gas record with live fuel keeps its sealed gas: CLAIM only verifies, no gas claim, the kept line", () => {

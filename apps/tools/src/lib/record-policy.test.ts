@@ -80,15 +80,24 @@ describe("recordState — the gates the card and the dock share", () => {
 	it("a token claimed by another submitter offers CLAIM only as the verification that finishes it", () => {
 		const fuel = { amount: "10", secret: "0xs", secretHashHex: "0xf", minOutput: "9", leafIndex: "8", received: "5" }
 		// Fuel still open (public: CLAIM YOUR GAS is the action; private: nothing) ⇒ no CLAIM.
-		const open = state(dep({ schema: 2, leafIndex: "1", claimedByOther: true, fuel }))
-		expect(open.showClaim).toBe(false)
+		const open = state(dep({ schema: 2, leafIndex: "1", messageHash: "0xm", claimedByOther: true, fuel }))
 		expect(open.claimedByOther).toBe(true)
-		// A PRIVATE record with open fuel still verifies on the click: a false marker must not hide its claim.
-		expect(state(dep({ schema: 2, isPrivate: true, leafIndex: "1", claimedByOther: true, fuel })).showClaim).toBe(true)
+		// Open fuel, public or private: the click still verifies — a false marker must not hide the claim
+		// behind a gas recovery that may never succeed.
+		expect(state(dep({ schema: 2, isPrivate: true, leafIndex: "1", messageHash: "0xm", claimedByOther: true, fuel })).showClaim).toBe(
+			true,
+		)
+		expect(state(dep({ schema: 2, leafIndex: "1", messageHash: "0xm", claimedByOther: true, fuel })).showClaim).toBe(true)
+		// A marker on a shape the completion never writes it on (no leaf, or a claim of its own) is ignored.
+		expect(state(dep({ claimedByOther: true })).claimedByOther).toBe(false)
+		expect(state(dep({ leafIndex: "1", messageHash: "0xm", claimTxHash: "0xc", claimedByOther: true })).claimedByOther).toBe(false)
 		// Fuel settled but the record not completed (a marker that could not be verified yet) ⇒ CLAIM verifies.
-		expect(state(dep({ schema: 2, leafIndex: "1", claimedByOther: true, fuel: { ...fuel, consumed: true } })).showClaim).toBe(true)
-		expect(state(dep({ leafIndex: "1", claimedByOther: true })).showClaim).toBe(true)
-		expect(state(dep({ leafIndex: "1", claimedByOther: true, completedAt: 1 })).showClaim).toBe(false)
+		expect(
+			state(dep({ schema: 2, leafIndex: "1", messageHash: "0xm", claimedByOther: true, fuel: { ...fuel, consumed: true } }))
+				.showClaim,
+		).toBe(true)
+		expect(state(dep({ leafIndex: "1", messageHash: "0xm", claimedByOther: true })).showClaim).toBe(true)
+		expect(state(dep({ leafIndex: "1", messageHash: "0xm", claimedByOther: true, completedAt: 1 })).showClaim).toBe(false)
 		expect(state(dep({ leafIndex: "1" })).claimedByOther).toBe(false)
 	})
 

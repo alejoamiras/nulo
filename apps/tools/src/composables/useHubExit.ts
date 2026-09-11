@@ -543,6 +543,16 @@ async function performExit(plan: ExitPlan, d: ExitDeps, approvedCeiling?: bigint
 		if (outcome !== "attached") {
 			log("exit handoff not taken:", outcome)
 			if (d.journal.records.value.some((r) => r.id === finalId)) discard(provisionalId)
+			else {
+				// The provisional record is what survives; the wizard follows it, not the absent hash.
+				finalId = provisionalId
+				flagRecordError(
+					provisionalId,
+					outcome === "moved"
+						? "This exit's record changed while it was sent - press FINISH to look for it on Aztec."
+						: "Another tab is finishing this exit - try again in a moment.",
+				)
+			}
 		}
 	} catch (e) {
 		handleExitFailure(e, { provisionalId, finalId }, d)

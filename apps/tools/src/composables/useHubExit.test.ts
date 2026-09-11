@@ -244,10 +244,13 @@ describe("useHubExit", () => {
 		connectJournalDeps({ locks })
 		let release: () => void = () => {}
 		const holder = locks.record(EXIT_TX, () => new Promise<void>((r) => (release = r)))
-		await exit.exit(plan())
-		const { records } = useBridgeJournal()
+		const id = await exit.exit(plan())
+		const { records, runtime } = useBridgeJournal()
 		expect(records.value.some((r) => r.id === EXIT_TX)).toBe(false)
-		expect(records.value.some((r) => r.direction === "withdraw" && !(r as SendWithdrawRecord).exitTxHash)).toBe(true)
+		const provisional = records.value.find((r) => r.direction === "withdraw" && !(r as SendWithdrawRecord).exitTxHash)
+		expect(provisional).toBeDefined()
+		expect(id, "the wizard follows the record that survives").toBe(provisional?.id)
+		expect(runtime.value[provisional?.id ?? ""]?.note).toMatch(/another tab is finishing/i)
 		expect(h.consumeWithdrawal).not.toHaveBeenCalled()
 		release()
 		await holder

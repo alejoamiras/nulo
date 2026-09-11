@@ -54,7 +54,8 @@ export interface RecordState {
 	fuelRecovery: StandaloneFuelRecovery
 	fuelRecoverable: boolean
 	showClaimWithoutFuel: boolean
-	/** The token was claimed by another submitter: never CLAIM again; the fuel is what may be left. */
+	/** The token was claimed by another submitter. CLAIM, where still shown, verifies that on-chain
+	 *  and finishes the record (or restores the ordinary claim if the marker was wrong). */
 	claimedByOther: boolean
 }
 
@@ -81,16 +82,13 @@ export function stageOf(rec: BridgeJournalRecord, rt: RecordRuntime): RecordStag
 	return deriveWithdrawStage(rec as WithdrawJournalRecord, { proven: rt.proven ?? false })
 }
 
-/** A marked, unfinished record keeps CLAIM as the verification that completes it — or, if the marker
- *  was wrong, restores the ordinary claim. A public record with open fuel already has CLAIM YOUR
- *  GAS and verifies itself on resume; a private one needs the click to unseal, whatever its fuel. */
-function claimedByOtherFacts(
-	rec: BridgeJournalRecord,
-	fuel: DepositJournalRecord["fuel"],
-): { claimedByOther: boolean; verifiable: boolean } {
-	const claimedByOther = rec.direction === "deposit" && (rec as DepositJournalRecord).claimedByOther === true
-	const fuelSettled = fuel === undefined || fuel.consumed === true || fuel.standaloneClaimed === true
-	return { claimedByOther, verifiable: claimedByOther && rec.completedAt === undefined && (fuelSettled || rec.isPrivate) }
+/** A marker counts only on the shape the completion writes it on (a claimable record with no claim
+ *  of its own); a marked, unfinished record keeps CLAIM as the verification that completes it — or,
+ *  if the marker was wrong, restores the ordinary claim — whatever its fuel says. */
+function claimedByOtherFacts(rec: BridgeJournalRecord): { claimedByOther: boolean; verifiable: boolean } {
+	const d = rec as DepositJournalRecord
+	const claimedByOther = rec.direction === "deposit" && d.claimedByOther === true && !!d.leafIndex && !d.claimTxHash
+	return { claimedByOther, verifiable: claimedByOther && rec.completedAt === undefined }
 }
 
 /** A "depositing" record is recoverable with a deposit hash (the engine re-derives the leg from the
@@ -119,7 +117,7 @@ export function recordState(rec: BridgeJournalRecord, rt: RecordRuntime, wallet:
 	const isFuel = assetKindOf(rec) === "fee-juice"
 	const fuel = rec.direction === "deposit" ? (rec as DepositJournalRecord).fuel : undefined
 	const depositLegRecoverable = depositLegRecoverableOf(rec, stage)
-	const { claimedByOther, verifiable: claimedByOtherVerifiable } = claimedByOtherFacts(rec, fuel)
+	const { claimedByOther, verifiable: claimedByOtherVerifiable } = claimedByOtherFacts(rec)
 	const idle = actionable && !busy
 	const showClaim =
 		rec.direction === "deposit" &&
