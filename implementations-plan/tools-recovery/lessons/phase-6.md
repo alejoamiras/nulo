@@ -137,3 +137,14 @@ All four round-2 findings are addressed." The cross-arc loop converged at `de6be
 - Full tools suite in two shards on their own sandboxes, retry 0, on the final SHA: shard 1/2 **34 passed** (28.4 min); shard 2/2 **33 passed** (27.1 min).
   (The same two shards at `19c3d528`, before the cross-arc fixes: 34 + 33 passed.)
 - Delivery follows: `gh stack submit --auto`, `gh pr ready` ×3, the three bodies, checks watched.
+
+## Delivery
+
+- `gh stack submit --auto` → PRs #586 (`worktree-tools-recovery` → dev), #587
+  (`tools-recovery/deposit-reconcile` → #586), #588 (`tools-recovery/exit-attach` → #587), stack #589;
+  titles set as Conventional Commits, bodies applied, `gh pr ready` ×3 (the draft-time runs are
+  cancelled by the ready re-run — expected, as on tools-readiness).
+- Checks on every branch: Quality, Tools e2e, Bridge contracts, Extension smoke e2e, Extension
+  network e2e, Lint workflows — all **success**; `gh pr checks` PASSING on #586, #587, #588.
+- The index row reads "stack open". Merging is the owner's call (`gh stack merge 589 --squash`),
+  as is the residue surfaced above (the `standaloneClaimed` latch, `patchFuel`'s live merge).
