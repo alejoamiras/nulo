@@ -327,6 +327,12 @@ describe("BridgeJournalCard — claimed by another submitter", () => {
 	})
 	const fuel = { amount: "10", secret: "0xs", secretHashHex: "0xf", minOutput: "9", leafIndex: "8", received: "5" }
 
+	it("a marked record whose fuel has settled but is not yet completed offers CLAIM as the verification", () => {
+		const w = mountCard(deposit({ leafIndex: "7", claimedByOther: true }))
+		expect(w.find(sel(TESTIDS.journalClaim)).exists()).toBe(true)
+		expect(w.find(sel(TESTIDS.journalStage)).text()).toMatch(/Press CLAIM to verify/)
+	})
+
 	it("a completed token-only record says the tokens arrived and offers nothing", () => {
 		const w = mountCard(deposit({ leafIndex: "7", claimedByOther: true, completedAt: 1 }))
 		expect(w.find(sel(TESTIDS.journalClaimedByOther)).text()).toMatch(/another submitter.*tokens arrived/i)

@@ -839,7 +839,7 @@ async function runDepositClaimLocked(id: string, gen: number, interactive: boole
 	if (!rec) return "stop"
 
 	if (rec.claimTxHash !== undefined && !isWellFormedTxHash(rec.claimTxHash)) return reportMalformedClaimHash(rec.id)
-	if (claimsThroughHub(rec) && rec.claimedByOther) return revalidateClaimedByOther(rec, gen)
+	if (claimsThroughHub(rec) && rec.claimedByOther) return revalidateClaimedByOther(rec, gen, interactive)
 	if ((await claimGuards(rec, id)) === "stop") return "stop"
 	if (rec.claimTxHash) return resumeSentClaim(rec, id, gen, interactive)
 	// Caller-side condition so the common has-leaf path stays synchronous (no new await seam).
@@ -1270,15 +1270,23 @@ function fuelSettledFor(rec: SendDepositRecord): boolean {
 	return rec.intent !== "token+gas" || rec.fuel?.consumed === true || rec.fuel?.standaloneClaimed === true
 }
 
-/** The fuel facts a completion decides on; a same-id record whose fuel or sealed copy was replaced
- *  while the read awaited is a different record for this purpose. */
-function sameFuelState(live: BridgeJournalRecord, verified: SendDepositRecord): boolean {
+/** The fuel a completion is about: a same-id record whose fuel block or sealed copy was replaced
+ *  while a read awaited is a different record for this purpose. */
+function sameFuelIdentity(live: BridgeJournalRecord, verified: SendDepositRecord): boolean {
 	const a = live as SendDepositRecord
 	return (
 		a.sealedEnvelope === verified.sealedEnvelope &&
 		a.registerTxHash === verified.registerTxHash &&
 		a.fuel?.secretHashHex === verified.fuel?.secretHashHex &&
-		a.fuel?.claimTxHash === verified.fuel?.claimTxHash &&
+		a.fuel?.claimTxHash === verified.fuel?.claimTxHash
+	)
+}
+
+/** The fuel identity plus the settlement flags the decision was made on. */
+function sameFuelState(live: BridgeJournalRecord, verified: SendDepositRecord): boolean {
+	const a = live as SendDepositRecord
+	return (
+		sameFuelIdentity(live, verified) &&
 		a.fuel?.consumed === verified.fuel?.consumed &&
 		a.fuel?.standaloneClaimed === verified.fuel?.standaloneClaimed
 	)
@@ -1327,17 +1335,25 @@ async function reconciledForCompletion(captured: SendDepositRecord): Promise<Sen
 		await deps.reconcileFuel(captured.id).catch((e) => log("fuel reconciliation failed", { id: captured.id, error: String(e) }))
 		reload()
 	}
+	// Only the settlement flags may have moved: the reconciliation merges into the LIVE fuel block,
+	// so a block another tab swapped in meanwhile would otherwise inherit the captured one's receipt.
 	const live = records.value.find((r) => r.id === captured.id)
-	if (!live || !sameClaimSnapshot(live, captured)) return undefined
+	if (!live || !sameClaimSnapshot(live, captured) || !sameFuelIdentity(live, captured)) return undefined
 	return live as SendDepositRecord
 }
 
-/** A persisted `claimedByOther` is a claim about the chain, and journal data alone never completes
- *  a record: the marker is re-read from the nullifier with whatever material is at hand without a
- *  prompt. Nullified ⇒ the completion (once the fuel is settled); still live ⇒ the marker was
- *  wrong and is dropped; no material or no evidence ⇒ the record waits as it is. */
-async function revalidateClaimedByOther(rec: SendDepositRecord, gen: number): Promise<"stop"> {
-	const material = claimMaterialOf(rec)
+/**
+ * A persisted `claimedByOther` is a claim about the chain, and journal data alone never completes a
+ * record: the fuel is reconciled first (no material needed), then the marker is re-read from the
+ * nullifier. Automatic resumes use only the material at hand; an explicit click on a private record
+ * whose fuel has settled unseals it (one signature), because that record has nothing else left to
+ * do. Nullified ⇒ the completion; still live ⇒ the marker was wrong and is dropped; no material or
+ * no evidence ⇒ the record waits.
+ */
+async function revalidateClaimedByOther(captured: SendDepositRecord, gen: number, interactive: boolean): Promise<"stop"> {
+	const rec = await reconciledForCompletion(captured)
+	if (!rec || genOf(rec.id) !== gen) return "stop"
+	const material = claimMaterialOf(rec) ?? (await unsealForVerification(rec, interactive))
 	if (!material) return "stop"
 	const state = await probeClaimedElsewhere(rec, material)
 	if (genOf(rec.id) !== gen) return "stop"
@@ -1351,6 +1367,11 @@ async function revalidateClaimedByOther(rec: SendDepositRecord, gen: number): Pr
 		log("claimed-by-another marker dropped - the message is still live", rec.id)
 	}
 	return "stop"
+}
+
+async function unsealForVerification(rec: SendDepositRecord, interactive: boolean): Promise<ClaimMaterial | undefined> {
+	if (!interactive || !rec.isPrivate || !rec.sealedEnvelope || !fuelSettledFor(rec)) return undefined
+	return (await resolvePrivateClaimMaterial(rec, rec.id)) ?? undefined
 }
 
 /** The send tail: journal the hash the moment it exists, reset the round budget, record the
@@ -1703,9 +1724,10 @@ function resumeActionFor(rec: BridgeJournalRecord): "skip" | "deposit" | "withdr
 }
 
 /** A token another submitter claimed has nothing to claim; it resumes (prompt-free, any session)
- *  only when its fuel has settled and the completion is the one write left. */
+ *  when its fuel has settled — the completion is the one write left — or when the fuel has its
+ *  own transaction whose receipt may have checkpointed since. */
 function claimedByOtherResume(rec: ClaimRecord): "skip" | "deposit" {
-	return claimsThroughHub(rec) && fuelSettledFor(rec) ? "deposit" : "skip"
+	return claimsThroughHub(rec) && (fuelSettledFor(rec) || !!rec.fuel?.claimTxHash) ? "deposit" : "skip"
 }
 
 /** Auto-continue ONLY what this page session initiated, plus prompt-free receipt waits. */

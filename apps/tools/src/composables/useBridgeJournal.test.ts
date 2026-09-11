@@ -1706,11 +1706,75 @@ describe("useBridgeJournal - consumed → done on the message's own nullifier", 
 		addRecord(priv)
 		resumeSessionWork()
 		await new Promise((r) => setTimeout(r, 0))
-		await runDepositClaim("0xforgedpriv")
+		await runDepositClaim("0xforgedpriv", { interactive: false })
 		expect(probe).not.toHaveBeenCalled()
 		expect(deps.signL1).not.toHaveBeenCalled()
 		expect(recordOf("0xforgedpriv")?.completedAt).toBeUndefined()
 		expect(recordOf("0xforgedpriv")?.sealedEnvelope).toBe(priv.sealedEnvelope)
+		// The explicit click unseals (one signature) and verifies: a live message drops the marker.
+		connectJournalDeps({ ...deps, ...send, messageNullified: vi.fn(async () => "live" as const) })
+		await runDepositClaim("0xforgedpriv", { interactive: true })
+		expect(deps.signL1).toHaveBeenCalledTimes(1)
+		expect(recordOf("0xforgedpriv")?.claimedByOther).toBeUndefined()
+		expect(recordOf("0xforgedpriv")?.completedAt).toBeUndefined()
+	})
+
+	it("a fuel block swapped in while the reconciliation awaits inherits nothing: no completion", async () => {
+		const send = sendDeps()
+		const f1 = {
+			amount: "10",
+			secret: "0xfuelsecret",
+			secretHashHex: "0xf1",
+			minOutput: "9",
+			leafIndex: "8",
+			received: "5",
+			claimTxHash: CLAIM_TX,
+		}
+		const reconcileFuel = vi.fn(async (id: string) => {
+			// Another tab replaced F1 with an unconsumed F2, then this tab's receipt merges into F2.
+			upsertRecord(kv, {
+				...mkFueled("0xf2swap", { fuel: { ...f1, secretHashHex: "0xf2", claimTxHash: undefined, consumed: true } }),
+			})
+			void id
+		})
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified: vi.fn(async () => "nullified" as const), reconcileFuel })
+		addRecord(mkFueled("0xf2swap", { fuel: f1 }))
+		await runDepositClaim("0xf2swap")
+		expect(recordOf("0xf2swap")?.completedAt).toBeUndefined()
+		expect(recordOf("0xf2swap")?.claimedByOther).toBeUndefined()
+	})
+
+	it("a marked record whose fuel receipt was pending resumes, reconciles, and completes once it checkpoints", async () => {
+		const send = sendDeps()
+		const fuel = {
+			amount: "10",
+			secret: "0xfuelsecret",
+			secretHashHex: "0xfh",
+			minOutput: "9",
+			leafIndex: "8",
+			received: "5",
+			claimTxHash: CLAIM_TX,
+		}
+		const pending = vi.fn(async () => {}) // the receipt is not checkpointed yet
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified: vi.fn(async () => "nullified" as const), reconcileFuel: pending })
+		addRecord(mkFueled("0xlater", { fuel }))
+		await runDepositClaim("0xlater")
+		expect(recordOf("0xlater")?.claimedByOther).toBe(true)
+		expect(recordOf("0xlater")?.completedAt).toBeUndefined()
+
+		__resetJournalForTests()
+		const included = vi.fn(async (id: string) => {
+			const rec = recordOf(id) as SendDepositRecord
+			updateRecord(id, { fuel: { ...(rec.fuel as NonNullable<typeof rec.fuel>), consumed: true } } as Partial<SendDepositRecord>)
+		})
+		const messageNullified = vi.fn(async () => "nullified" as const)
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified, reconcileFuel: included })
+		useBridgeJournal()
+		resumeSessionWork() // prompt-free: the public record carries its own material
+		await new Promise((r) => setTimeout(r, 0))
+		expect(included).toHaveBeenCalledWith("0xlater")
+		expect(messageNullified).toHaveBeenCalledTimes(1)
+		expect(recordOf("0xlater")?.completedAt).toBe(999)
 	})
 
 	it("a fuel block replaced while the read awaits refuses the completion", async () => {

@@ -79,6 +79,17 @@ export function stageOf(rec: BridgeJournalRecord, rt: RecordRuntime): RecordStag
 	return deriveWithdrawStage(rec as WithdrawJournalRecord, { proven: rt.proven ?? false })
 }
 
+/** A marked record whose fuel has settled has one thing left: the verification that completes it.
+ *  It needs the claim material (a private record unseals on the click), so the button stays CLAIM. */
+function claimedByOtherFacts(
+	rec: BridgeJournalRecord,
+	fuel: DepositJournalRecord["fuel"],
+): { claimedByOther: boolean; verifiable: boolean } {
+	const claimedByOther = rec.direction === "deposit" && (rec as DepositJournalRecord).claimedByOther === true
+	const fuelSettled = fuel === undefined || fuel.consumed === true || fuel.standaloneClaimed === true
+	return { claimedByOther, verifiable: claimedByOther && rec.completedAt === undefined && fuelSettled }
+}
+
 export function recordState(rec: BridgeJournalRecord, rt: RecordRuntime, wallet: WalletView): RecordState {
 	const stage = stageOf(rec, rt)
 	const attention = rt.attention
@@ -92,14 +103,14 @@ export function recordState(rec: BridgeJournalRecord, rt: RecordRuntime, wallet:
 	// A "depositing" record WITH a deposit hash is the stranded L1-timeout shape: the engine re-derives
 	// the leg from the mined receipt, so CLAIM is meaningful there; a pre-send record keeps it hidden.
 	const depositLegRecoverable = rec.direction === "deposit" && stage === "depositing" && !!(rec as DepositJournalRecord).depositTxHash
-	const claimedByOther = rec.direction === "deposit" && (rec as DepositJournalRecord).claimedByOther === true
+	const { claimedByOther, verifiable: claimedByOtherVerifiable } = claimedByOtherFacts(rec, fuel)
 	const showClaim =
 		rec.direction === "deposit" &&
 		stage !== "done" &&
 		(stage !== "depositing" || depositLegRecoverable) &&
 		actionable &&
 		!busy &&
-		!claimedByOther
+		(!claimedByOther || claimedByOtherVerifiable)
 	const showFinish = rec.direction === "withdraw" && stage !== "done" && stage !== "exiting" && actionable && !busy
 	const retry = attention === "error" || attention === "unknown-outcome"
 	const account = accountOf(rec, wallet)

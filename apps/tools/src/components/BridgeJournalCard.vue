@@ -167,7 +167,10 @@ const actionable = computed(() => state.value.actionable)
 const stageLabel = computed(() => {
 	// A terminal record has no CLAIM/FINISH button, so guidance telling the user to press one would
 	// point at something that isn't there.
-	if (rt.value.busy || stage.value === "done" || !actionable.value || state.value.claimedByOther) return null
+	if (rt.value.busy || stage.value === "done" || !actionable.value) return null
+	if (state.value.claimedByOther) {
+		return state.value.showClaim ? "Another submitter claimed this. Press CLAIM to verify it on-chain and finish." : null
+	}
 	const r = props.record
 	if (r.direction === "deposit") {
 		switch (stage.value) {
