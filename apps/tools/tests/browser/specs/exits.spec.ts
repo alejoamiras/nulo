@@ -136,15 +136,18 @@ test("cell 31b — the wallet sends the private exit but the page never hears ba
 	const hub = sandbox.manifest.bridge?.l2.hub.address ?? ""
 	expect(hub).not.toBe("")
 
+	// The attach matches on the recomputed message alone (hub → portal, recipient, amount): an exit of
+	// the same amount to the same L1 address from ANOTHER cell in this file would be a second match.
+	// Each attach cell exits an amount no other cell uses.
 	await connect(page, actor)
-	await reviewExit(page, { l1ChainId: L1, erc20: usdc.erc20, amount: "5", isPrivate: true })
+	await reviewExit(page, { l1ChainId: L1, erc20: usdc.erc20, amount: "7", isPrivate: true })
 	// A private exit's authwit is `createAuthWit`, so the one `sendTx` against the hub IS the exit: it
 	// runs, the transaction lands, and the page never gets its hash.
 	await walletFrame(page, run, "plain").evaluate((hubAddress) => window.__nuloTestWallet!.swallowNext("sendTx", hubAddress), hub)
 	await confirmReview(page)
 	await expect.poll(async () => (await walletCalls(page, run, "plain")).sendTx ?? 0, { timeout: 180_000 }).toBe(1)
 	await expect.poll(async () => (await exitRecords(page)).length, { timeout: 60_000 }).toBe(1)
-	await expect.poll(() => balanceOf(l2Token, actor.actor.address, "private"), { timeout: 180_000 }).toBe(l2Before - 5n * USDC)
+	await expect.poll(() => balanceOf(l2Token, actor.actor.address, "private"), { timeout: 180_000 }).toBe(l2Before - 7n * USDC)
 	expect((await exitRecords(page)).at(-1)?.exitTxHash, "the page never learned the hash").toBeUndefined()
 	const kept = creditBefore - (await privateCreditOf(actor.s, fpc))
 	expect(kept, "the FPC kept one exit's fee").toBeGreaterThan(0n)
@@ -174,9 +177,9 @@ test("cell 31b — the wallet sends the private exit but the page never hears ba
 	expect(attached?.exitTxHash, "the record carries the burn the wallet reported").toBe(submitted[0].hash)
 	expect(attached?.consumeTxHash).toBeTruthy()
 	expect(await erc20BalanceOf(sandbox.clients.l1, usdc.erc20 as `0x${string}`, l1.address), "L1 released the burn once").toBe(
-		l1Before + 5n * USDC,
+		l1Before + 7n * USDC,
 	)
-	expect(await balanceOf(l2Token, actor.actor.address, "private"), "no second burn").toBe(l2Before - 5n * USDC)
+	expect(await balanceOf(l2Token, actor.actor.address, "private"), "no second burn").toBe(l2Before - 7n * USDC)
 	expect(creditBefore - (await privateCreditOf(actor.s, fpc)), "the credit was charged once").toBe(kept)
 	const after = await walletCalls(page, run, "plain")
 	expect(after.sendTx ?? 0).toBe(0)
@@ -198,12 +201,15 @@ test("cell 31c — two tabs press FINISH on the same swallowed exit: one attache
 	const hub = sandbox.manifest.bridge?.l2.hub.address ?? ""
 	expect(hub).not.toBe("")
 
+	// The attach matches on the recomputed message alone (hub → portal, recipient, amount): an exit of
+	// the same amount to the same L1 address from ANOTHER cell in this file would be a second match.
+	// Each attach cell exits an amount no other cell uses.
 	await connect(page, actor)
-	await reviewExit(page, { l1ChainId: L1, erc20: usdc.erc20, amount: "5", isPrivate: true })
+	await reviewExit(page, { l1ChainId: L1, erc20: usdc.erc20, amount: "9", isPrivate: true })
 	await walletFrame(page, run, "plain").evaluate((hubAddress) => window.__nuloTestWallet!.swallowNext("sendTx", hubAddress), hub)
 	await confirmReview(page)
 	await expect.poll(async () => (await walletCalls(page, run, "plain")).sendTx ?? 0, { timeout: 180_000 }).toBe(1)
-	await expect.poll(() => balanceOf(l2Token, actor.actor.address, "private"), { timeout: 180_000 }).toBe(l2Before - 5n * USDC)
+	await expect.poll(() => balanceOf(l2Token, actor.actor.address, "private"), { timeout: 180_000 }).toBe(l2Before - 9n * USDC)
 	const submitted = await walletFrame(page, run, "plain").evaluate(() => window.__nuloTestWallet!.submitted())
 	const portal = (await exitRecords(page)).at(-1)?.portal ?? ""
 	expect(portal).not.toBe("")
@@ -239,7 +245,7 @@ test("cell 31c — two tabs press FINISH on the same swallowed exit: one attache
 	await l1.release()
 	await expect(card1).toHaveAttribute("data-stage", "done", { timeout: 10 * 60_000 })
 	expect(l1.calls("eth_sendTransaction") - sendsBefore, "exactly one portal transaction across both tabs").toBe(1)
-	expect(await balanceOf(l2Token, actor.actor.address, "private"), "no second burn").toBe(l2Before - 5n * USDC)
+	expect(await balanceOf(l2Token, actor.actor.address, "private"), "no second burn").toBe(l2Before - 9n * USDC)
 	await page2.close()
 })
 
