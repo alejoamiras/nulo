@@ -116,3 +116,13 @@ across arcs:
   before either re-keys (the unit pin covers the refused second re-key; cell 31c proves the lock).
 - Tests: discard during the probe; forged marker on a hash-less record and on a sent one; public false
   marker with open fuel; the refused handoff's returned id; two immediate local starts.
+
+**Round 2** — resumed, verdict `request-changes` (3 medium, 1 test-only). All accepted and fixed:
+- the post-probe check reads storage (`currentRecord`), not the reactive copy that lags another
+  tab's storage event; pinned with a KV-only deletion during the probe;
+- the completion keeps the ORIGINAL snapshot (`fresh`), so its fuel-identity guard still bites when
+  the fuel was swapped during the read; pinned;
+- the marker shape requires `messageHash` (a marker without it would verify forever as `unknown`);
+  the hub-send fixture now carries one, as every real marked record does; pinned by the fall-through;
+- the same-tab duplicate pin runs under a delayed lock grant and inspects the loser while the winner
+  is parked; the contradicted test comment cut.
