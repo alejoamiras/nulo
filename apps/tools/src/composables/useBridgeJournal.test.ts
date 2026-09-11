@@ -2162,6 +2162,42 @@ describe("useBridgeJournal - a hash-less exit attached by its recomputed message
 		expect(recordOf(H)?.completedAt).toBe(999)
 	})
 
+	it("FINISH on an already attached hash that another tab is running reports the contention", async () => {
+		const locks = memoryJournalLocks()
+		const deps = attachDeps(kv, "none", { locks })
+		connectJournalDeps(deps)
+		addRecord(mkSendExit(H, { exitBlock: 42 }))
+		let releaseExit: () => void = () => {}
+		const exitHolder = locks.record(H, () => new Promise<void>((r) => (releaseExit = r)))
+		await runWithdrawConsume(H)
+		expect(useBridgeJournal().runtime.value[H]?.note).toMatch(/another tab is finishing/i)
+		expect(deps.consumeSend).not.toHaveBeenCalled()
+		// The same for a deposit another tab is claiming.
+		addRecord(mkSend("0xheldclaim"))
+		let releaseClaim: () => void = () => {}
+		const claimHolder = locks.record("0xheldclaim", () => new Promise<void>((r) => (releaseClaim = r)))
+		await runDepositClaim("0xheldclaim")
+		expect(useBridgeJournal().runtime.value["0xheldclaim"]?.note).toMatch(/another tab is claiming/i)
+		releaseExit()
+		releaseClaim()
+		await exitHolder
+		await claimHolder
+	})
+
+	it("the live handoff keeps the provisional record while another runner holds the hash", async () => {
+		const locks = memoryJournalLocks()
+		connectJournalDeps(attachDeps(kv, "none", { locks }))
+		addRecord(pending())
+		let release: () => void = () => {}
+		const holder = locks.record(H, () => new Promise<void>((r) => (release = r)))
+		const outcome = await attachAndConsume("wd-pending-1", { ...pending(), id: H, exitTxHash: H, exitBlock: 7 }, () => true)
+		expect(outcome).toBe("held-elsewhere")
+		expect(recordOf("wd-pending-1")).toBeDefined()
+		expect(recordOf(H)).toBeUndefined()
+		release()
+		await holder
+	})
+
 	it("a live exit vs an attach of the same hash: the attach finds the lock held and says so", async () => {
 		const locks = memoryJournalLocks()
 		const deps = attachDeps(kv, found, { locks })

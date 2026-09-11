@@ -532,16 +532,17 @@ async function performExit(plan: ExitPlan, d: ExitDeps, approvedCeiling?: bigint
 		finalId = String(receipt.txHash)
 		setRecordStep(provisionalId, undefined, undefined) // the engine narrates from here
 		// The same handoff an attach uses, so a live exit and a concurrent attach of this hash contend
-		// on the hash's lock and exactly one consumes. A refused re-key means another tab already
-		// holds this exit under its hash: the provisional copy is the duplicate.
+		// on the hash's lock and exactly one consumes. The provisional record is dropped only once the
+		// hash IS a record (another tab attached it first); contention alone proves nothing, and the
+		// provisional copy stays attachable.
 		const outcome = await attachAndConsume(
 			provisionalId,
 			{ ...base, id: finalId, exitTxHash: finalId, exitBlock: receipt.blockNumber, updatedAt: Date.now() },
 			(_live, all) => !all.some((r) => r.id === finalId),
 		)
 		if (outcome !== "attached") {
-			log("exit handoff refused - the hash is already a record elsewhere:", outcome)
-			discard(provisionalId)
+			log("exit handoff not taken:", outcome)
+			if (d.journal.records.value.some((r) => r.id === finalId)) discard(provisionalId)
 		}
 	} catch (e) {
 		handleExitFailure(e, { provisionalId, finalId }, d)

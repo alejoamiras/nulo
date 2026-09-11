@@ -411,8 +411,6 @@ export function rekeyJournalRecord(oldId: string, next: BridgeJournalRecord): vo
 	adoptRekey(oldId, next.id)
 }
 
-/** The in-memory side of a re-key: session liveness, the foreground, the id map and the runtime
- *  entry all follow the record to its new id. */
 function adoptRekey(oldId: string, nextId: string): void {
 	if (sessionLive.delete(oldId)) sessionLive.add(nextId)
 	if (activeFlowId.value === oldId) activeFlowId.value = nextId
@@ -423,18 +421,17 @@ function adoptRekey(oldId: string, nextId: string): void {
 }
 
 /**
- * Re-key a withdraw record onto its exit transaction hash and run the consume for that id, as ONE
- * handoff: the destination's record lock is taken first, the guarded re-key runs under the journal
- * lock inside it, and the consume body follows without re-acquiring anything. A throw after the
- * re-key is reported against the new id — the old id's runtime went with the record — so a caller
- * that started under the old id never sees a failure for a record that no longer exists.
- * "moved": the guard refused (the source changed, or the destination id is already a record).
+ * Re-key a withdraw record onto its exit hash and consume it as ONE handoff. Lock order: the
+ * destination's record lock, then the journal lock for the guarded re-key, then the consume body
+ * with nothing re-acquired (the locks are not reentrant). A throw after the re-key belongs to the
+ * new id: the old id's runtime went with the record. "moved" = the guard refused; "held-*" = the
+ * destination's runner is already someone's (nothing was re-keyed).
  */
 export async function attachAndConsume(
 	oldId: string,
 	next: SendWithdrawRecord,
 	guard: (live: BridgeJournalRecord, all: BridgeJournalRecord[]) => boolean,
-): Promise<"attached" | "moved" | "held-elsewhere"> {
+): Promise<"attached" | "moved" | "held-elsewhere" | "held-local"> {
 	let outcome: "attached" | "moved" = "moved"
 	const ran = await withRecordLock(next.id, async () => {
 		const rekeyed = await underJournalLock(() => rekeyRecordWhen(deps.kv, oldId, guard, next))
@@ -450,7 +447,7 @@ export async function attachAndConsume(
 			surfaceRunFailure(next.id, e)
 		}
 	})
-	return ran === "held" ? "held-elsewhere" : outcome
+	return ran === "ran" ? outcome : ran
 }
 
 export function discard(id: string): void {
@@ -692,10 +689,10 @@ async function resolvePrivateSecret(rec: ClaimRecord): Promise<{ secretHex: stri
 
 /** Per-record dedup wrapper: process-local first, then the cross-tab record lock when one is wired —
  *  a runner another tab holds is skipped exactly like an in-flight duplicate here. */
-async function withRecordLock(id: string, fn: () => Promise<void>): Promise<"ran" | "held"> {
+async function withRecordLock(id: string, fn: () => Promise<void>): Promise<"ran" | "held-local" | "held-elsewhere"> {
 	if (inFlight.has(id)) {
 		log("already in flight - skipping duplicate", id)
-		return "held"
+		return "held-local"
 	}
 	if (!deps.locks) {
 		await runRecordBody(id, fn)
@@ -704,7 +701,14 @@ async function withRecordLock(id: string, fn: () => Promise<void>): Promise<"ran
 	const outcome = await deps.locks.record(id, () => runRecordBody(id, fn))
 	if (outcome !== HELD_ELSEWHERE) return "ran"
 	log("already in flight in another tab - skipping duplicate", id)
-	return "held"
+	return "held-elsewhere"
+}
+
+/** A runner another tab holds is told so on the card; a local duplicate keeps the running one's
+ *  narration untouched. */
+function noteHeldElsewhere(id: string, what: string): void {
+	if (!records.value.some((r) => r.id === id)) return
+	setRuntime(id, { attention: "unknown-outcome", note: `Another tab is ${what} - try again in a moment.` })
 }
 
 async function runRecordBody(id: string, fn: () => Promise<void>): Promise<void> {
@@ -869,11 +873,12 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 	const interactive = opts.interactive !== false
 	let continueRounds = false
 	let gen = 0
-	await withRecordLock(id, async () => {
+	const ran = await withRecordLock(id, async () => {
 		// F11: this runner is now the record's owner - any previously scheduled round dies silently.
 		gen = bumpGen(id)
 		continueRounds = (await runDepositClaimLocked(id, gen, interactive)) === "continue"
 	})
+	if (ran === "held-elsewhere") noteHeldElsewhere(id, "claiming this deposit")
 	// Chunked re-entry happens OUTSIDE the lock so RETRY/DISCARD stay reachable between rounds.
 	if (continueRounds && genOf(id) === gen) {
 		await wait(INTER_ROUND_MS)
@@ -1743,7 +1748,7 @@ export async function runWithdrawConsume(id: string): Promise<void> {
 }
 
 async function runWithdrawConsumeInner(id: string): Promise<void> {
-	await withRecordLock(id, () => runWithdrawConsumeLocked(id))
+	if ((await withRecordLock(id, () => runWithdrawConsumeLocked(id))) === "held-elsewhere") noteHeldElsewhere(id, "finishing this exit")
 }
 
 export type ExitRecord = WithdrawJournalRecord | SendWithdrawRecord
@@ -1827,7 +1832,10 @@ const EXIT_SNAPSHOT_FIELDS = [
 function sameExitSnapshot(live: BridgeJournalRecord, verified: SendWithdrawRecord): boolean {
 	const a = live as unknown as Record<string, unknown>
 	const b = verified as unknown as Record<string, unknown>
-	return EXIT_SNAPSHOT_FIELDS.every((k) => a[k] === b[k]) && (live as SendWithdrawRecord).token?.erc20 === verified.token.erc20
+	const token = (live as SendWithdrawRecord).token
+	return (
+		EXIT_SNAPSHOT_FIELDS.every((k) => a[k] === b[k]) && token?.erc20 === verified.token.erc20 && token?.portal === verified.token.portal
+	)
 }
 
 /**
@@ -1871,11 +1879,8 @@ async function attachExit(rec: SendWithdrawRecord, id: string): Promise<void> {
 			!live.completedAt &&
 			!all.some((r) => r.id === next.id),
 	)
-	if (outcome === "held-elsewhere") {
-		setRuntime(id, { attention: "unknown-outcome", note: "Another tab is finishing this exit - try again in a moment." })
-	} else if (outcome === "moved") {
-		log("exit attach skipped - the record moved or the hash is already a record", id)
-	}
+	if (outcome === "held-elsewhere") noteHeldElsewhere(id, "finishing this exit")
+	else if (outcome !== "attached") log("exit attach skipped:", { id, outcome })
 }
 
 function reportExitSearch(id: string, outcome: "none" | "ambiguous" | "incomplete"): void {

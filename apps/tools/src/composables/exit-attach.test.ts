@@ -61,13 +61,25 @@ interface FakeTx {
 /** A chain of `latest` blocks at 36s each from GENESIS_TS, holding the given transactions. */
 function fakeNode(
 	txs: FakeTx[],
-	over: Partial<{ latest: number; info: { l1ChainId: number; rollupVersion: number }; pruneBelow: number }> = {},
+	over: Partial<{
+		latest: number
+		info: { l1ChainId: number; rollupVersion: number }
+		pruneBelow: number
+		/** The tip's hash as a function of how many reads happened so far — a reorg mid-scan. */
+		tipHash: (reads: number) => string
+	}> = {},
 ) {
 	const latest = over.latest ?? 1_000
 	const info = over.info ?? { l1ChainId: CHAIN, rollupVersion: VERSION }
 	const reads: string[] = []
-	const block = (n: number, withBody: boolean): AttachBlock => ({
+	const block = (n: number, withBody: boolean): AttachBlock => {
+		// The hash is fixed at read time, as a node answer is.
+		const hash = n === latest && over.tipHash ? over.tipHash(reads.length) : `0xblock${n}`
+		return blockAt(n, hash, withBody)
+	}
+	const blockAt = (n: number, hash: string, withBody: boolean): AttachBlock => ({
 		number: n,
+		hash: { toString: () => hash },
 		header: { globalVariables: { timestamp: GENESIS_TS + BigInt(n) * BLOCK_SECONDS } },
 		...(withBody
 			? {
@@ -173,6 +185,19 @@ describe("findExitTx — the exit transaction behind a hash-less exit record", (
 			await expect(findExitTx(record({ chainId: 1 }), fakeNode([tx]).node, new Set(), opts())).resolves.toBe("incomplete")
 		})
 
+		it("a node whose tip predates the window, or a tip reorged while the window was scanned", async () => {
+			const ahead = record({ createdAt: Number(GENESIS_TS + 100_000n * BLOCK_SECONDS) * 1000 })
+			const hash = await exitMessageHash(ahead, identity)
+			await expect(
+				findExitTx(ahead, fakeNode([{ hash: "0xlate", block: 1_000, msgs: [hash] }]).node, new Set(), opts()),
+			).resolves.toBe("incomplete")
+			const mine = await exitMessageHash(record(), identity)
+			const reorged = fakeNode([{ hash: "0xa", block: 520, msgs: [mine] }], {
+				tipHash: (reads) => (reads > 3 ? "0xreorged" : "0xtip"),
+			})
+			await expect(findExitTx(record(), reorged.node, new Set(), opts())).resolves.toBe("incomplete")
+		})
+
 		it("a window the block cap cannot reach back to, or pruned history inside it", async () => {
 			const early = record({ createdAt: Number(GENESIS_TS) * 1000 })
 			await expect(findExitTx(early, fakeNode([], { latest: 50_000 }).node, new Set(), opts({ maxBlocks: 1_000 }))).resolves.toBe(
@@ -226,6 +251,20 @@ describe("verifyExitTx — the re-read before the re-key", () => {
 })
 
 describe("findVerifiedExitTx — the search plus the re-read before the re-key", () => {
+	it("a re-read that never settles is incomplete on the search's own budget", async () => {
+		vi.useFakeTimers()
+		try {
+			const hash = await exitMessageHash(record(), identity)
+			const { node } = fakeNode([{ hash: "0xa", block: 520, msgs: [hash] }])
+			node.getTxEffect = () => new Promise(() => {})
+			const result = findVerifiedExitTx(record(), node, new Set(), opts({ deadlineMs: 1_000, now: () => Date.now() }))
+			await vi.advanceTimersByTimeAsync(1_100)
+			await expect(result).resolves.toBe("incomplete")
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
 	it("returns the match only while its first message still reads as this record's", async () => {
 		const hash = await exitMessageHash(record(), identity)
 		const { node } = fakeNode([{ hash: "0xa", block: 520, msgs: [hash] }])

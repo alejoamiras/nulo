@@ -1,12 +1,10 @@
 /**
- * Find the L2 transaction a hash-less exit record belongs to, from the exit's own L2→L1 message. The
- * message is recomputed from the record's facts (the hub as sender, the token's portal clone as
- * recipient, the withdraw content over the L1 recipient and amount, this target's rollup version and
- * chain), then looked for at index zero of every transaction in the window — the position every
- * reader of an exit in this app takes. Uniqueness inside the window is the best evidence there is,
- * not provenance: an identical exit from another device is indistinguishable, and the message pays
- * the record's own L1 recipient whichever produced it. A window that could not be covered — a cap,
- * pruned or unreadable blocks, a slow read, a node on another chain — is `"incomplete"`, never `"none"`.
+ * The L2 transaction behind a hash-less exit record, by its recomputed L2→L1 message. Only index zero
+ * of a transaction's messages counts — the position every reader of an exit in this app takes.
+ * Uniqueness inside the window is the best evidence there is, not provenance: an identical exit from
+ * another device is indistinguishable, and the message pays the record's own L1 recipient whichever
+ * produced it. A window that could not be covered — a cap, a node behind it, pruned or unreadable
+ * blocks, a slow read, a reorged tip, a node on another chain — is `"incomplete"`, never `"none"`.
  */
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Fr } from "@aztec/aztec.js/fields"
@@ -24,6 +22,7 @@ export interface AttachTxEffect {
 
 export interface AttachBlock {
 	number: number
+	hash: { toString(): string }
 	header: { globalVariables: { timestamp: bigint } }
 	body?: { txEffects: ReadonlyArray<AttachTxEffect> }
 }
@@ -113,24 +112,60 @@ export async function findExitTx(
 	options: ExitSearchOptions,
 ): Promise<ExitSearch> {
 	const o = { ...DEFAULTS, now: Date.now, ...options }
-	if (rec.chainId !== o.chainId) return "incomplete"
 	const read = budgetedReads(o)
 	try {
-		const info = await read(() => node.getNodeInfo())
-		if (info.l1ChainId !== o.chainId || info.rollupVersion !== o.rollupVersion) throw new Incomplete("identity")
-		const hash = await exitMessageHash(rec, o)
-		const latest = await read(() => node.getBlockNumber())
-		const from = await windowStart(node, latest, BigInt(Math.floor(rec.createdAt / 1000) - o.slackSeconds), o.maxBlocks, read)
-		const found = await scanForMessage(node, hash, from, latest, o.chunkBlocks, o.maxCandidates, read)
-		const candidates = [...found].filter(([txHash]) => !taken.has(txHash))
-		if (candidates.length === 0) return "none"
-		if (candidates.length > 1) return "ambiguous"
-		const [exitTxHash, exitBlock] = candidates[0]
-		return { exitTxHash, exitBlock, messageHash: hash }
+		return await searchExit(rec, node, taken, o, read)
 	} catch (e) {
 		if (e instanceof Incomplete) return "incomplete"
 		throw e
 	}
+}
+
+/** The search plus the re-read the attach needs before it re-keys, on ONE budget: the found
+ *  transaction's first message must still be this record's, or the answer is `"incomplete"`. */
+export async function findVerifiedExitTx(
+	rec: SendWithdrawRecord,
+	node: AttachNode,
+	taken: ReadonlySet<string>,
+	options: ExitSearchOptions,
+): Promise<ExitSearch> {
+	const o = { ...DEFAULTS, now: Date.now, ...options }
+	const read = budgetedReads(o)
+	try {
+		const found = await searchExit(rec, node, taken, o, read)
+		if (typeof found === "string") return found
+		const eff = await read(() => node.getTxEffect(found.exitTxHash))
+		return eff?.data.l2ToL1Msgs[0]?.toString() === found.messageHash ? found : "incomplete"
+	} catch (e) {
+		if (e instanceof Incomplete) return "incomplete"
+		throw e
+	}
+}
+
+async function searchExit(
+	rec: SendWithdrawRecord,
+	node: AttachNode,
+	taken: ReadonlySet<string>,
+	o: Required<Omit<ExitSearchOptions, "chainEpoch">> & ExitSearchOptions,
+	read: Read,
+): Promise<ExitSearch> {
+	if (rec.chainId !== o.chainId) throw new Incomplete("chain")
+	const info = await read(() => node.getNodeInfo())
+	if (info.l1ChainId !== o.chainId || info.rollupVersion !== o.rollupVersion) throw new Incomplete("identity")
+	const hash = await exitMessageHash(rec, o)
+	const latest = await read(() => node.getBlockNumber())
+	const [tipBlock] = await read(() => node.getBlocks(latest, 1))
+	if (!tipBlock) throw new Incomplete("unread tip")
+	const from = await windowStart(node, latest, BigInt(Math.floor(rec.createdAt / 1000) - o.slackSeconds), o.maxBlocks, read)
+	const found = await scanForMessage(node, hash, from, latest, o.chunkBlocks, o.maxCandidates, read)
+	// A reorg past the scanned tip can add or drop a match inside blocks already read.
+	const [tipAgain] = await read(() => node.getBlocks(latest, 1))
+	if (tipAgain?.hash.toString() !== tipBlock.hash.toString()) throw new Incomplete("reorg")
+	const candidates = [...found].filter(([txHash]) => !taken.has(txHash))
+	if (candidates.length === 0) return "none"
+	if (candidates.length > 1) return "ambiguous"
+	const [exitTxHash, exitBlock] = candidates[0]
+	return { exitTxHash, exitBlock, messageHash: hash }
 }
 
 /** Every transaction in the window whose FIRST L2→L1 message is `hash`, by block. A range the node
@@ -170,6 +205,9 @@ async function windowStart(node: AttachNode, latest: number, targetTs: bigint, m
 		return block.header.globalVariables.timestamp
 	}
 	if ((await tsOf(floor)) >= targetTs && floor > 1) throw new Incomplete("window capped")
+	// A node whose tip predates the window cannot answer for it: a stale node, or a clock ahead of the
+	// chain by more than the slack, must not scan its latest block as if it were the window.
+	if ((await tsOf(latest)) < targetTs) throw new Incomplete("node behind the window")
 	let lo = floor
 	let hi = latest
 	while (lo < hi) {
@@ -189,17 +227,4 @@ export async function verifyExitTx(node: AttachNode, exitTxHash: string, expecte
 	} catch {
 		return false
 	}
-}
-
-/** The search plus the re-read the attach needs before it re-keys: the found transaction's first
- *  message must still be this record's, or the answer is `"incomplete"`. */
-export async function findVerifiedExitTx(
-	rec: SendWithdrawRecord,
-	node: AttachNode,
-	taken: ReadonlySet<string>,
-	options: ExitSearchOptions,
-): Promise<ExitSearch> {
-	const found = await findExitTx(rec, node, taken, options)
-	if (typeof found === "string") return found
-	return (await verifyExitTx(node, found.exitTxHash, found.messageHash)) ? found : "incomplete"
 }
