@@ -627,7 +627,7 @@ Three arcs, one per fix, stacked. Unit tests are inline with each change.
 
 ### Arc 3 — attach a hash-less exit (`tools-recovery/exit-attach`)
 
-#### Phase 5: The L2 finder ✓ (`e4324169`, lessons/phase-5.md)
+#### Phase 5: The L2 finder ✓ (`a846262b`, lessons/phase-5.md)
 - `exit-attach.ts`: `findExitTx` over a narrow node interface (`getNodeInfo`, `getBlockNumber`,
   `getBlocks`, `getTxEffect`); tests with a fake node: the recomputed hash equals a vector from
   `withdrawContentHash` + `computeL2ToL1MessageHash`; one index-zero match ⇒ `{ exitTxHash, exitBlock }`;
@@ -637,7 +637,7 @@ Three arcs, one per fix, stacked. Unit tests are inline with each change.
 - **Validation gate**: `bun run --cwd apps/tools test -- src/composables/exit-attach`;
   `bun run --cwd packages/bridge-core test -- src/journal` (`rekeyRecordWhen`); typecheck; lint.
 
-#### Phase 6: Engine branch, affordance, copy, cell 31b flipped
+#### Phase 6: Engine branch, affordance, copy, cell 31b flipped ✓ (`d5ba00ef` + the arc-3 and cross-arc loops to `de6bef29`, 31b/31c green, final gates green, lessons/phase-6.md)
 - `useBridgeJournal.ts`: `findExitTx` dep; `attachExit` replaces the dead `unknown-outcome` branch and
   runs the handoff (destination lock → guarded re-key → consume body inside, own error boundary; no
   outer re-entry); the live exit's re-key + consume (`useHubExit.ts:512-520`) goes through the same

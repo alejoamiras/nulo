@@ -129,3 +129,11 @@ across arcs:
 
 **Round 3** — resumed, verdict **`approve`**: "No new or remaining material findings in the fix diff.
 All four round-2 findings are addressed." The cross-arc loop converged at `de6bef29`.
+
+## Final gates (the final stack, `de6bef29` code / `5f144d04` docs)
+
+- `bun run test:all` exit 0 (tools 102 files, bridge-core 49, extension 470 + 2 skipped, every package green).
+- `bun run lint` and `bun run lint:actions` exit 0.
+- Full tools suite in two shards on their own sandboxes, retry 0, on the final SHA: shard 1/2 **34 passed** (28.4 min); shard 2/2 **33 passed** (27.1 min).
+  (The same two shards at `19c3d528`, before the cross-arc fixes: 34 + 33 passed.)
+- Delivery follows: `gh stack submit --auto`, `gh pr ready` ×3, the three bodies, checks watched.

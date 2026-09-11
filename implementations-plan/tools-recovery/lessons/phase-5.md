@@ -1,6 +1,6 @@
 # Phase 5 — the L2 finder (`exit-attach.ts`)
 
-Arc 3 (`tools-recovery/exit-attach`), commit `e4324169` (rebased onto the arc-2 fixes). Gate:
+Arc 3 (`tools-recovery/exit-attach`), commit `a846262b` (rebased onto the arc-2 fixes). Gate:
 `bun run --cwd apps/tools test -- src/composables/exit-attach` 8/8 green;
 `bun run --cwd packages/bridge-core test -- src/journal` (`rekeyRecordWhen`, landed in arc 1) green;
 typecheck exit 0; `bun run lint` exit 0.
