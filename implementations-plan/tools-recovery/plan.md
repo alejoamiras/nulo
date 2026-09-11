@@ -582,7 +582,7 @@ Three arcs, one per fix, stacked. Unit tests are inline with each change.
   green; `bun run --cwd packages/bridge-core test -- src/journal` green; `bun run --cwd apps/tools typecheck`
   exit 0; `bun run lint` exit 0. Layers: lint · unit.
 
-#### Phase 2: Card copy + cell 24b flipped
+#### Phase 2: Card copy + cell 24b flipped ✓ (`d7079a8b`, recovery.spec 4/4, lessons/phase-2.md)
 - `BridgeJournalCard.vue`: the three done-by-another lines (token-only / public fuel to claim /
   private fuel kept); `record-policy` + `fuel-claim-state` were extended in Phase 1.
 - `recovery.spec.ts` 24b: title and assertions → after the relayer's claim, the reloaded record's
