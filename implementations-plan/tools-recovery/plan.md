@@ -658,6 +658,8 @@ fresh final pass re-evaluates the whole plan — the owner decides at the gate w
 
 _(drafts until approval; finalized after)_
 
+eli5: https://claude.ai/code/artifact/05bf4647-0783-4f52-8a5c-40a26f3cc580 (source: implementations-plan/tools-recovery/eli5.html)
+
 ```
 /goal All 6 phases marked ✓ in implementations-plan/tools-recovery/plan.md (the per-phase headers — not the chat, not the task list), each ✓ backed by its phase's validation gate as written in plan.md reported passing in the transcript (each local suite run quoted with its retry-0 tally and the SHA it ran on); for each phase the agent has printed `LESSONS_FILE=implementations-plan/tools-recovery/lessons/phase-N.md`; `/code-review` was NOT run (code_review: off); the codex fix loop converged for each of the three arcs at its boundary AND for the final cross-arc pass, each convergence evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; the three-PR stack exists on GitHub, created only after all loops converged (`gh stack view` output in the transcript), each PR's checks watched to a settled PASSING state with the result quoted, and after any sync or rebase the affected arcs' local gates re-run on the new SHA before the re-watch; `bun run test:all` and `bun run lint && bun run lint:actions` both report exit 0 in the transcript on the final SHA; implementations-plan/index.md's tools-recovery row reads "stack open"; every decision point was settled by a logged codex consult or surfaced per plan.md § Autonomy. Merging is the owner's and is not part of this goal.
 ```
