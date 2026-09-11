@@ -1643,7 +1643,7 @@ describe("useBridgeJournal - consumed → done on the message's own nullifier", 
 		rec = recordOf("0xfueled") as SendDepositRecord
 		expect(rec.completedAt).toBe(999)
 		expect(rec.claimedByOther).toBe(true)
-		expect(messageNullified).not.toHaveBeenCalled() // a claimed-by-another record is never re-probed
+		expect(messageNullified).toHaveBeenCalledTimes(1) // the marker is re-read from the chain, never trusted
 		expect(send.claimSend).not.toHaveBeenCalled()
 	})
 
@@ -1679,6 +1679,84 @@ describe("useBridgeJournal - consumed → done on the message's own nullifier", 
 		await new Promise((r) => setTimeout(r, 0))
 		expect(recordOf("0xprivfueled")?.sealedEnvelope).toBe(rec.sealedEnvelope) // not pruned: never completed
 		expect(messageNullified).not.toHaveBeenCalled()
+	})
+
+	it("a persisted claimedByOther marker is re-read from the nullifier, never trusted: live drops it, nullified completes, no material waits", async () => {
+		const send = sendDeps()
+		const live = vi.fn(async () => "live" as const)
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified: live })
+		addRecord(mkSend("0xforged", { claimedByOther: true }))
+		await runDepositClaim("0xforged")
+		expect(live).toHaveBeenCalledTimes(1)
+		expect(recordOf("0xforged")?.completedAt).toBeUndefined()
+		expect(recordOf("0xforged")?.claimedByOther).toBeUndefined() // the marker was wrong and is gone
+		expect(send.claimSend).not.toHaveBeenCalled()
+
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified: vi.fn(async () => "nullified" as const) })
+		addRecord(mkSend("0xtrue", { claimedByOther: true }))
+		await runDepositClaim("0xtrue")
+		expect(recordOf("0xtrue")?.completedAt).toBe(999)
+
+		// A private record without its secret at hand: nothing is read, nothing prompts, nothing completes.
+		const deps = baseDeps(kv)
+		const probe = vi.fn(async () => "nullified" as const)
+		connectJournalDeps({ ...deps, ...send, messageNullified: probe })
+		const priv = mkSend("0xforgedpriv", { isPrivate: true, secret: undefined, sealerL1: SEALER, claimedByOther: true })
+		priv.sealedEnvelope = await sealEnvelopeFor(priv)
+		addRecord(priv)
+		resumeSessionWork()
+		await new Promise((r) => setTimeout(r, 0))
+		await runDepositClaim("0xforgedpriv")
+		expect(probe).not.toHaveBeenCalled()
+		expect(deps.signL1).not.toHaveBeenCalled()
+		expect(recordOf("0xforgedpriv")?.completedAt).toBeUndefined()
+		expect(recordOf("0xforgedpriv")?.sealedEnvelope).toBe(priv.sealedEnvelope)
+	})
+
+	it("a fuel block replaced while the read awaits refuses the completion", async () => {
+		const send = sendDeps()
+		const settledFuel = {
+			amount: "10",
+			secret: "0xfuelsecret",
+			secretHashHex: "0xfh",
+			minOutput: "9",
+			leafIndex: "8",
+			received: "5",
+			consumed: true,
+		}
+		const messageNullified = vi.fn(async () => {
+			// Another tab swapped the settled fuel for a live one under the same id.
+			upsertRecord(kv, { ...mkFueled("0xswapped", { fuel: settledFuel }), fuel: { ...settledFuel, consumed: undefined } })
+			return "nullified" as const
+		})
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified })
+		addRecord(mkFueled("0xswapped", { fuel: settledFuel }))
+		await runDepositClaim("0xswapped")
+		expect(recordOf("0xswapped")?.completedAt).toBeUndefined()
+		expect(recordOf("0xswapped")?.claimedByOther).toBeUndefined()
+	})
+
+	it("a fuel leg with its own spending transaction is reconciled before the fuel is judged unsettled", async () => {
+		const send = sendDeps()
+		const fuel = {
+			amount: "10",
+			secret: "0xfuelsecret",
+			secretHashHex: "0xfh",
+			minOutput: "9",
+			leafIndex: "8",
+			received: "5",
+			claimTxHash: CLAIM_TX,
+		}
+		const reconcileFuel = vi.fn(async (id: string) => {
+			const rec = recordOf(id) as SendDepositRecord
+			updateRecord(id, { fuel: { ...(rec.fuel as NonNullable<typeof rec.fuel>), consumed: true } } as Partial<SendDepositRecord>)
+		})
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified: vi.fn(async () => "nullified" as const), reconcileFuel })
+		addRecord(mkFueled("0xreconciled", { fuel }))
+		await runDepositClaim("0xreconciled")
+		expect(reconcileFuel).toHaveBeenCalledWith("0xreconciled")
+		expect(recordOf("0xreconciled")?.completedAt).toBe(999)
+		expect(recordOf("0xreconciled")?.claimedByOther).toBe(true)
 	})
 
 	it("(l) token+gas with its fuel already settled completes at once", async () => {

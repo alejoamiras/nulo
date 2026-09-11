@@ -11,7 +11,13 @@ import { Fr } from "@aztec/aztec.js/fields"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { siloNullifier } from "@aztec/stdlib/hash"
 import { computeFeeJuiceMessageNullifier, L1Actor, L1ToL2Message, L2Actor } from "@aztec/stdlib/messaging"
-import { deriveTokenClaimSecret, mintToPrivateContentHash, mintToPublicContentHash } from "@nulo/bridge-core"
+import {
+	type DepositEnvelopeV2,
+	deriveTokenClaimSecret,
+	mintToPrivateContentHash,
+	mintToPublicContentHash,
+	type SendDepositRecord,
+} from "@nulo/bridge-core"
 
 export interface TokenMessageFacts {
 	/** The token's portal (the L1 sender) and the L1 chain it sent on. */
@@ -96,4 +102,40 @@ export async function tokenMessageState(i: {
 	} catch {
 		return "unknown"
 	}
+}
+
+/** A hub token deposit record's message state, from the record's own facts and read at the journal's
+ *  settlement floor. A private record's amount and recipient come from the OPENED envelope (the
+ *  sealed truth), never the display fields; the hub is the record's `bridge`, the rollup version the
+ *  active target's. Unusable facts are `unknown`. */
+export function hubMessageState(
+	rec: SendDepositRecord,
+	material: { secretHex: string; envelope?: DepositEnvelopeV2 },
+	identity: { rollupVersion: number },
+	nullified: (nullifier: Fr) => Promise<boolean>,
+): Promise<TokenMessageState> {
+	if (!rec.messageHash || !rec.leafIndex) return Promise.resolve("unknown")
+	const truth = material.envelope ?? rec
+	let amount: bigint
+	try {
+		amount = BigInt(truth.amount)
+	} catch {
+		return Promise.resolve("unknown")
+	}
+	return tokenMessageState({
+		facts: {
+			portal: rec.portal,
+			chainId: rec.chainId,
+			hub: rec.bridge,
+			rollupVersion: identity.rollupVersion,
+			recipient: truth.recipient,
+			amount,
+			isPrivate: rec.isPrivate,
+			secretHashHex: rec.secretHashHex,
+			leafIndex: rec.leafIndex,
+		},
+		storedMessageHash: rec.messageHash,
+		secretHex: material.secretHex,
+		nullified,
+	})
 }

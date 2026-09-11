@@ -229,6 +229,10 @@ export interface JournalEngineDeps {
 	 *  material it resolved (the dep lives outside this module and cannot read the secret cache).
 	 *  Absent ⇒ "unknown" everywhere: the simulate stays the only consumability authority. */
 	messageNullified?: (rec: SendDepositRecord, material: ClaimMaterial) => Promise<MessageState>
+	/** Latch `fuel.consumed` from the checkpointed receipt of the record's own fuel-spending
+	 *  transaction, when it has one. The claim build does this on its way to the hub; a completion
+	 *  that never builds a claim must ask for it. */
+	reconcileFuel?: (id: string) => Promise<void>
 	/** The cross-tab locks: a record's runner and the guarded journal writes. Absent ⇒ process-local
 	 *  dedup and synchronous best-effort writes, as before. */
 	locks?: JournalLocks
@@ -835,9 +839,7 @@ async function runDepositClaimLocked(id: string, gen: number, interactive: boole
 	if (!rec) return "stop"
 
 	if (rec.claimTxHash !== undefined && !isWellFormedTxHash(rec.claimTxHash)) return reportMalformedClaimHash(rec.id)
-	// A token another submitter claimed is never claimed again: the only thing left to settle is
-	// the fuel, and once it has, the record completes — no guards, no wallet, no prompt.
-	if (claimsThroughHub(rec) && rec.claimedByOther) return completeClaimedByOther(rec, gen)
+	if (claimsThroughHub(rec) && rec.claimedByOther) return revalidateClaimedByOther(rec, gen)
 	if ((await claimGuards(rec, id)) === "stop") return "stop"
 	if (rec.claimTxHash) return resumeSentClaim(rec, id, gen, interactive)
 	// Caller-side condition so the common has-leaf path stays synchronous (no new await seam).
@@ -874,7 +876,6 @@ async function resolveClaimStart(
 	id: string,
 	gen: number,
 ): Promise<{ fresh: ClaimRecord; material: ClaimMaterial } | "stop"> {
-	// Public material resolves synchronously (parity with the original inline branch).
 	const material = rec.isPrivate ? await resolvePrivateClaimMaterial(rec, id) : resolvePublicClaimMaterial(rec, id)
 	if (!material) return "stop"
 	setRuntime(id, { attention: undefined, note: undefined })
@@ -1269,16 +1270,31 @@ function fuelSettledFor(rec: SendDepositRecord): boolean {
 	return rec.intent !== "token+gas" || rec.fuel?.consumed === true || rec.fuel?.standaloneClaimed === true
 }
 
+/** The fuel facts a completion decides on; a same-id record whose fuel or sealed copy was replaced
+ *  while the read awaited is a different record for this purpose. */
+function sameFuelState(live: BridgeJournalRecord, verified: SendDepositRecord): boolean {
+	const a = live as SendDepositRecord
+	return (
+		a.sealedEnvelope === verified.sealedEnvelope &&
+		a.registerTxHash === verified.registerTxHash &&
+		a.fuel?.secretHashHex === verified.fuel?.secretHashHex &&
+		a.fuel?.claimTxHash === verified.fuel?.claimTxHash &&
+		a.fuel?.consumed === verified.fuel?.consumed &&
+		a.fuel?.standaloneClaimed === verified.fuel?.standaloneClaimed
+	)
+}
+
 /**
- * Another submitter's claim is DONE for the token, not failed: the message named this record's
- * recipient, so the tokens arrived where the deposit said. Persisted as its own fact — there is no
- * claim transaction of ours to show. The record completes only once its fuel is settled too: a
- * public fuel leg stays open for the standalone gas claim; a private one stays open (never
- * pruned, its sealed material kept) because private gas is spent only as this account's own
- * claim fee, and no standalone private spend exists. Guarded by snapshot under the journal lock,
- * and by this runner's generation.
+ * Another submitter's claim is DONE for the token: the message named this record's recipient. The
+ * record completes only once its fuel is settled too — a public leg stays open for the standalone
+ * gas claim, a private one stays open with its sealed material (private gas is spent only as this
+ * account's own claim fee). Settlement is decided on the record as re-read after the fuel receipt
+ * reconciliation, and the write requires that exact claim + fuel snapshot, no claim hash, no
+ * completion, and this runner's generation.
  */
-async function completeClaimedByOther(rec: SendDepositRecord, gen: number): Promise<"stop"> {
+async function completeClaimedByOther(captured: SendDepositRecord, gen: number): Promise<"stop"> {
+	const rec = await reconciledForCompletion(captured)
+	if (!rec || genOf(rec.id) !== gen) return "stop"
 	const settled = fuelSettledFor(rec)
 	const patch: Partial<DepositJournalRecord> = settled ? { claimedByOther: true, completedAt: deps.now() } : { claimedByOther: true }
 	const written = await underJournalLock(() =>
@@ -1286,7 +1302,8 @@ async function completeClaimedByOther(rec: SendDepositRecord, gen: number): Prom
 			? journalPatchWhen(
 					deps.kv,
 					rec.id,
-					(live) => sameClaimSnapshot(live, rec) && !(live as ClaimRecord).claimTxHash && !live.completedAt,
+					(live) =>
+						sameClaimSnapshot(live, rec) && sameFuelState(live, rec) && !(live as ClaimRecord).claimTxHash && !live.completedAt,
 					patch,
 				)
 			: undefined,
@@ -1299,6 +1316,40 @@ async function completeClaimedByOther(rec: SendDepositRecord, gen: number): Prom
 	if (settled) finishDeposit(written as ClaimRecord)
 	else setRuntime(rec.id, { attention: undefined, note: undefined, claimable: undefined })
 	log("token claimed by another submitter", { id: rec.id, settled })
+	return "stop"
+}
+
+/** A fuel leg with its own spending transaction (a private registration, a public fjwc claim) may
+ *  be settled on chain with `consumed` not yet latched — the claim build would have caught up on
+ *  its way to the hub. Reconcile it, then re-read; the live record must still be the captured one. */
+async function reconciledForCompletion(captured: SendDepositRecord): Promise<SendDepositRecord | undefined> {
+	if (!fuelSettledFor(captured) && captured.fuel?.claimTxHash && deps.reconcileFuel) {
+		await deps.reconcileFuel(captured.id).catch((e) => log("fuel reconciliation failed", { id: captured.id, error: String(e) }))
+		reload()
+	}
+	const live = records.value.find((r) => r.id === captured.id)
+	if (!live || !sameClaimSnapshot(live, captured)) return undefined
+	return live as SendDepositRecord
+}
+
+/** A persisted `claimedByOther` is a claim about the chain, and journal data alone never completes
+ *  a record: the marker is re-read from the nullifier with whatever material is at hand without a
+ *  prompt. Nullified ⇒ the completion (once the fuel is settled); still live ⇒ the marker was
+ *  wrong and is dropped; no material or no evidence ⇒ the record waits as it is. */
+async function revalidateClaimedByOther(rec: SendDepositRecord, gen: number): Promise<"stop"> {
+	const material = claimMaterialOf(rec)
+	if (!material) return "stop"
+	const state = await probeClaimedElsewhere(rec, material)
+	if (genOf(rec.id) !== gen) return "stop"
+	if (state === "nullified") return completeClaimedByOther(rec, gen)
+	if (state === "invalid") return reportTamperedMessage(rec.id)
+	if (state === "live") {
+		await underJournalLock(() =>
+			journalPatchWhen(deps.kv, rec.id, (live) => sameClaimSnapshot(live, rec), { claimedByOther: undefined }),
+		)
+		reload()
+		log("claimed-by-another marker dropped - the message is still live", rec.id)
+	}
 	return "stop"
 }
 

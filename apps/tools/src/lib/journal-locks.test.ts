@@ -77,6 +77,16 @@ describe("memoryJournalLocks — the in-memory fake two test tabs share", () => 
 		await expect(locks.record("r", async () => "second")).resolves.toBe("second")
 	})
 
+	it("record: a throwing body releases the name for the next runner", async () => {
+		const locks = memoryJournalLocks()
+		await expect(
+			locks.record("r", async () => {
+				throw new Error("boom")
+			}),
+		).rejects.toThrow("boom")
+		await expect(locks.record("r", async () => "next")).resolves.toBe("next")
+	})
+
 	it("journal: writes serialize in order, and a throwing write does not wedge the next", async () => {
 		const locks = memoryJournalLocks()
 		const order: number[] = []

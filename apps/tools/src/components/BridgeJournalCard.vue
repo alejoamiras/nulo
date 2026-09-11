@@ -120,9 +120,6 @@ const fuelRecoverable = computed(() => state.value.fuelRecoverable)
  *  advertises no action: this renders only on COMPLETED records, which re-run no claim, so any
  *  "retry" advice here would be false. */
 const privateFuelUnknown = computed(() => fuelRecovery.value === "private-unknown")
-/** The token leg ended with another submitter's claim: the tokens arrived; what the line says is
- *  whether anything of THIS record's is still open — nothing, public gas (CLAIM YOUR GAS), or private
- *  gas that only this account's own private claim could ever spend. */
 const claimedByOtherLine = computed(() => {
 	if (!state.value.claimedByOther) return null
 	if (props.record.completedAt !== undefined) return "Claimed by another submitter - your tokens arrived."

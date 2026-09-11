@@ -6,7 +6,7 @@ import { siloNullifier } from "@aztec/stdlib/hash"
 import { computeFeeJuiceMessageNullifier, L1Actor, L1ToL2Message, L2Actor } from "@aztec/stdlib/messaging"
 import { deriveTokenClaimSecret, mintToPrivateContentHash, mintToPublicContentHash } from "@nulo/bridge-core"
 import { describe, expect, it, vi } from "vitest"
-import { recomputeTokenMessageHash, tokenMessageNullifier, tokenMessageState } from "./message-nullifier"
+import { hubMessageState, recomputeTokenMessageHash, tokenMessageNullifier, tokenMessageState } from "./message-nullifier"
 
 const PORTAL = "0x8fa7ffaf818b7157823340cbf3e0c5b3f0a5a0c0"
 const HUB = `0x00${"1a".repeat(31)}`
@@ -195,5 +195,57 @@ describe("tokenMessageState — the record's message, checked before it is looke
 				nullified: async () => true,
 			}),
 		).resolves.toBe("unknown")
+	})
+})
+
+describe("hubMessageState — a record's facts, the sealed copy's for a private one", () => {
+	const rec = {
+		schema: 3,
+		id: SECRET_HASH,
+		direction: "deposit",
+		isPrivate: true,
+		intent: "token",
+		amount: "999", // the display copy; the envelope is the truth
+		recipient: `0x00${"5e".repeat(31)}`,
+		secretHashHex: SECRET_HASH,
+		leafIndex: "7",
+		chainId: 31337,
+		portal: PORTAL,
+		bridge: HUB,
+	} as unknown as Parameters<typeof hubMessageState>[0]
+	const envelope = { v: 2, secret: SECRET, recipient: RECIPIENT, amount: "100000000", sealerL1: PORTAL, leafIndex: "7" } as Parameters<
+		typeof hubMessageState
+	>[1]["envelope"]
+
+	it("recomputes the private message from the envelope's amount and recipient, and asks for its nullifier", async () => {
+		const message = await recomputeTokenMessageHash({ ...facts, isPrivate: true })
+		const expected = await tokenMessageNullifier({
+			consumer: HUB,
+			messageHash: message,
+			secretHex: SECRET,
+			isPrivate: true,
+			recipient: RECIPIENT,
+		})
+		const seen: string[] = []
+		const state = await hubMessageState(
+			{ ...rec, messageHash: message.toString() },
+			{ secretHex: SECRET, envelope },
+			{ rollupVersion: 1 },
+			async (n) => {
+				seen.push(n.toString())
+				return true
+			},
+		)
+		expect(state).toBe("nullified")
+		expect(seen).toEqual([expected.toString()])
+	})
+
+	it("a record without its message hash or leaf index is unknown", async () => {
+		const nullified = vi.fn(async () => true)
+		await expect(
+			hubMessageState({ ...rec, leafIndex: undefined }, { secretHex: SECRET, envelope }, { rollupVersion: 1 }, nullified),
+		).resolves.toBe("unknown")
+		await expect(hubMessageState(rec, { secretHex: SECRET, envelope }, { rollupVersion: 1 }, nullified)).resolves.toBe("unknown")
+		expect(nullified).not.toHaveBeenCalled()
 	})
 })
