@@ -93,7 +93,7 @@ test("cell 26e — the Ethereum wallet never answers the deposit: the reloaded r
 	await expect(card.locator(tid(TESTIDS.journalStage))).toContainText("look for it on Ethereum")
 	await card.locator(tid(TESTIDS.journalClaim)).click()
 	await expect(card).toHaveAttribute("data-attention", "error", { timeout: 120_000 })
-	await expect(card.locator(tid(TESTIDS.journalAttention))).toContainText("No deposit for this record was found")
+	await expect(card.locator(tid(TESTIDS.journalStep))).toContainText("No deposit for this record was found")
 	expect((await depositRecords(page)).at(-1)?.depositTxHash).toBeUndefined()
 
 	await card.locator(tid(TESTIDS.journalDiscard)).click()
