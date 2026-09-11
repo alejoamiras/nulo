@@ -148,6 +148,7 @@ vi.mock("@/composables/useSend", () => ({
 }))
 
 import { type SendWithdrawRecord, validateAnyBackupRecord } from "@nulo/bridge-core"
+import { memoryJournalLocks } from "@/lib/journal-locks"
 import { __resetJournalForTests, connectJournalDeps, runWithdrawConsume, useBridgeJournal } from "./useBridgeJournal"
 import { __resetOpsInFlightForTests, useOpsInFlight } from "./useOpsInFlight"
 import { __resetHubExitDepsForTests, buildExitSendOpts, useHubExit } from "./useHubExit"
@@ -234,6 +235,22 @@ describe("useHubExit", () => {
 		h.selectedAccount.value = FROM
 		h.address.value = L1_ACCOUNT
 		connectJournalDeps({ now: () => 999, waitConsumeReceipt: async () => true })
+	})
+
+	it("a live exit whose hash another tab is running keeps its provisional record: contention proves nothing", async () => {
+		const exit = useHubExit()
+		// Wired after the composable's own deps: its browser lock adapter is absent under node.
+		const locks = memoryJournalLocks()
+		connectJournalDeps({ locks })
+		let release: () => void = () => {}
+		const holder = locks.record(EXIT_TX, () => new Promise<void>((r) => (release = r)))
+		await exit.exit(plan())
+		const { records } = useBridgeJournal()
+		expect(records.value.some((r) => r.id === EXIT_TX)).toBe(false)
+		expect(records.value.some((r) => r.direction === "withdraw" && !(r as SendWithdrawRecord).exitTxHash)).toBe(true)
+		expect(h.consumeWithdrawal).not.toHaveBeenCalled()
+		release()
+		await holder
 	})
 
 	it("an L1 withdraw pause refuses by name, before any authwit and with no record written", async () => {

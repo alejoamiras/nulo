@@ -114,7 +114,9 @@ export async function findExitTx(
 	const o = { ...DEFAULTS, now: Date.now, ...options }
 	const read = budgetedReads(o)
 	try {
-		return await searchExit(rec, node, taken, o, read)
+		const scan = await scanExit(rec, node, taken, o, read)
+		await scan.assertTipUnchanged()
+		return scan.pick()
 	} catch (e) {
 		if (e instanceof Incomplete) return "incomplete"
 		throw e
@@ -132,23 +134,29 @@ export async function findVerifiedExitTx(
 	const o = { ...DEFAULTS, now: Date.now, ...options }
 	const read = budgetedReads(o)
 	try {
-		const found = await searchExit(rec, node, taken, o, read)
+		const scan = await scanExit(rec, node, taken, o, read)
+		const found = scan.pick()
 		if (typeof found === "string") return found
 		const eff = await read(() => node.getTxEffect(found.exitTxHash))
-		return eff?.data.l2ToL1Msgs[0]?.toString() === found.messageHash ? found : "incomplete"
+		if (eff?.data.l2ToL1Msgs[0]?.toString() !== found.messageHash) return "incomplete"
+		// The tip is compared LAST: a reorg during the re-read could have added a second match.
+		await scan.assertTipUnchanged()
+		return found
 	} catch (e) {
 		if (e instanceof Incomplete) return "incomplete"
 		throw e
 	}
 }
 
-async function searchExit(
+/** The scan, with the tip check left to the caller: a reorg past the scanned tip can add or drop a
+ *  match inside blocks already read, so the tip must be compared after the LAST read the caller makes. */
+async function scanExit(
 	rec: SendWithdrawRecord,
 	node: AttachNode,
 	taken: ReadonlySet<string>,
 	o: Required<Omit<ExitSearchOptions, "chainEpoch">> & ExitSearchOptions,
 	read: Read,
-): Promise<ExitSearch> {
+): Promise<{ pick: () => ExitSearch; assertTipUnchanged: () => Promise<void> }> {
 	if (rec.chainId !== o.chainId) throw new Incomplete("chain")
 	const info = await read(() => node.getNodeInfo())
 	if (info.l1ChainId !== o.chainId || info.rollupVersion !== o.rollupVersion) throw new Incomplete("identity")
@@ -158,14 +166,19 @@ async function searchExit(
 	if (!tipBlock) throw new Incomplete("unread tip")
 	const from = await windowStart(node, latest, BigInt(Math.floor(rec.createdAt / 1000) - o.slackSeconds), o.maxBlocks, read)
 	const found = await scanForMessage(node, hash, from, latest, o.chunkBlocks, o.maxCandidates, read)
-	// A reorg past the scanned tip can add or drop a match inside blocks already read.
-	const [tipAgain] = await read(() => node.getBlocks(latest, 1))
-	if (tipAgain?.hash.toString() !== tipBlock.hash.toString()) throw new Incomplete("reorg")
 	const candidates = [...found].filter(([txHash]) => !taken.has(txHash))
-	if (candidates.length === 0) return "none"
-	if (candidates.length > 1) return "ambiguous"
-	const [exitTxHash, exitBlock] = candidates[0]
-	return { exitTxHash, exitBlock, messageHash: hash }
+	return {
+		pick: () => {
+			if (candidates.length === 0) return "none"
+			if (candidates.length > 1) return "ambiguous"
+			const [exitTxHash, exitBlock] = candidates[0]
+			return { exitTxHash, exitBlock, messageHash: hash }
+		},
+		assertTipUnchanged: async () => {
+			const [tipAgain] = await read(() => node.getBlocks(latest, 1))
+			if (tipAgain?.hash.toString() !== tipBlock.hash.toString()) throw new Incomplete("reorg")
+		},
+	}
 }
 
 /** Every transaction in the window whose FIRST L2→L1 message is `hash`, by block. A range the node

@@ -65,8 +65,8 @@ function fakeNode(
 		latest: number
 		info: { l1ChainId: number; rollupVersion: number }
 		pruneBelow: number
-		/** The tip's hash as a function of how many reads happened so far — a reorg mid-scan. */
-		tipHash: (reads: number) => string
+		/** The tip's hash as a function of the reads so far — a reorg mid-scan, placed by the caller. */
+		tipHash: (reads: readonly string[]) => string
 	}> = {},
 ) {
 	const latest = over.latest ?? 1_000
@@ -74,7 +74,7 @@ function fakeNode(
 	const reads: string[] = []
 	const block = (n: number, withBody: boolean): AttachBlock => {
 		// The hash is fixed at read time, as a node answer is.
-		const hash = n === latest && over.tipHash ? over.tipHash(reads.length) : `0xblock${n}`
+		const hash = n === latest && over.tipHash ? over.tipHash(reads) : `0xblock${n}`
 		return blockAt(n, hash, withBody)
 	}
 	const blockAt = (n: number, hash: string, withBody: boolean): AttachBlock => ({
@@ -193,7 +193,7 @@ describe("findExitTx — the exit transaction behind a hash-less exit record", (
 			).resolves.toBe("incomplete")
 			const mine = await exitMessageHash(record(), identity)
 			const reorged = fakeNode([{ hash: "0xa", block: 520, msgs: [mine] }], {
-				tipHash: (reads) => (reads > 3 ? "0xreorged" : "0xtip"),
+				tipHash: (reads) => (reads.length > 3 ? "0xreorged" : "0xtip"),
 			})
 			await expect(findExitTx(record(), reorged.node, new Set(), opts())).resolves.toBe("incomplete")
 		})
@@ -263,6 +263,16 @@ describe("findVerifiedExitTx — the search plus the re-read before the re-key",
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+
+	it("a reorg during the re-read is incomplete even when the candidate survives it", async () => {
+		const hash = await exitMessageHash(record(), identity)
+		const { node } = fakeNode([{ hash: "0xa", block: 520, msgs: [hash] }], {
+			tipHash: (reads) => (reads.some((r) => r.startsWith("effect:")) ? "0xreorged" : "0xtip"),
+		})
+		await expect(findVerifiedExitTx(record(), node, new Set(), opts())).resolves.toBe("incomplete")
+		// The plain search never reads the effect, so the same fake sees no reorg there.
+		await expect(findExitTx(record(), node, new Set(), opts())).resolves.toMatchObject({ exitTxHash: "0xa" })
 	})
 
 	it("returns the match only while its first message still reads as this record's", async () => {
