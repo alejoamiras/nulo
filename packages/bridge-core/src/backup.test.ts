@@ -148,6 +148,9 @@ describe("bridge backup files", () => {
 		expect(() => validateBackupRecord(publicDeposit({ schema: 2 } as never))).toThrow(/not a valid bridge record/)
 		// Schema 1 carrying fuel is a contradiction.
 		expect(() => validateBackupRecord(publicDeposit({ fuel } as never))).toThrow(/not a valid bridge record/)
+		// The claimed-by-another flag is a milestone like the others: present ⇒ a boolean, never a string.
+		expect(validateBackupRecord(publicDeposit({ claimedByOther: true }))).toMatchObject({ claimedByOther: true })
+		expect(() => validateBackupRecord(publicDeposit({ claimedByOther: "yes" } as never))).toThrow(/not a valid bridge record/)
 		// Withdraws never carry schema 2.
 		expect(() => validateBackupRecord({ ...withdraw(), schema: 2 })).toThrow(/not a valid bridge record/)
 	})

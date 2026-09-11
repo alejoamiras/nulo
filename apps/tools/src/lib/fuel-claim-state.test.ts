@@ -280,6 +280,15 @@ describe("decideStandaloneFuelRecovery — one source for the card and the actio
 		expect(decideStandaloneFuelRecovery(input)).toBe("none")
 	})
 
+	it("a token another submitter claimed counts as finished for the fuel: PUBLIC offers, PRIVATE stays silent", () => {
+		const claimedByOther = { ...base, completedAt: undefined, claimedByOther: true }
+		expect(decideStandaloneFuelRecovery({ ...claimedByOther, fuel })).toBe("offer")
+		expect(decideStandaloneFuelRecovery({ ...claimedByOther, fuel: { ...fuel, standaloneClaimed: true } })).toBe("none")
+		expect(decideStandaloneFuelRecovery({ ...claimedByOther, isPrivate: true, fuel: { ...fuel, bridgeSecretSalt: "0xsalt" } })).toBe(
+			"none",
+		)
+	})
+
 	it("a well-formed completed PRIVATE record is settled — silence, not an affordance", () => {
 		// Its FJ paid for the tx that completed it, so an unlatched `consumed` is a stale flag.
 		const input = { ...base, isPrivate: true, fuel: { ...fuel, bridgeSecretSalt: "0xsalt" } }

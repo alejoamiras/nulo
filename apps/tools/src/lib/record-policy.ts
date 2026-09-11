@@ -52,6 +52,8 @@ export interface RecordState {
 	fuelRecovery: StandaloneFuelRecovery
 	fuelRecoverable: boolean
 	showClaimWithoutFuel: boolean
+	/** The token was claimed by another submitter: never CLAIM again; the fuel is what may be left. */
+	claimedByOther: boolean
 }
 
 export function accountOf(rec: BridgeJournalRecord, wallet: WalletView): RecordAccount | null {
@@ -77,6 +79,18 @@ export function stageOf(rec: BridgeJournalRecord, rt: RecordRuntime): RecordStag
 	return deriveWithdrawStage(rec as WithdrawJournalRecord, { proven: rt.proven ?? false })
 }
 
+/** A marked, unfinished record keeps CLAIM as the verification that completes it — or, if the marker
+ *  was wrong, restores the ordinary claim. A public record with open fuel already has CLAIM YOUR
+ *  GAS and verifies itself on resume; a private one needs the click to unseal, whatever its fuel. */
+function claimedByOtherFacts(
+	rec: BridgeJournalRecord,
+	fuel: DepositJournalRecord["fuel"],
+): { claimedByOther: boolean; verifiable: boolean } {
+	const claimedByOther = rec.direction === "deposit" && (rec as DepositJournalRecord).claimedByOther === true
+	const fuelSettled = fuel === undefined || fuel.consumed === true || fuel.standaloneClaimed === true
+	return { claimedByOther, verifiable: claimedByOther && rec.completedAt === undefined && (fuelSettled || rec.isPrivate) }
+}
+
 export function recordState(rec: BridgeJournalRecord, rt: RecordRuntime, wallet: WalletView): RecordState {
 	const stage = stageOf(rec, rt)
 	const attention = rt.attention
@@ -90,8 +104,14 @@ export function recordState(rec: BridgeJournalRecord, rt: RecordRuntime, wallet:
 	// A "depositing" record WITH a deposit hash is the stranded L1-timeout shape: the engine re-derives
 	// the leg from the mined receipt, so CLAIM is meaningful there; a pre-send record keeps it hidden.
 	const depositLegRecoverable = rec.direction === "deposit" && stage === "depositing" && !!(rec as DepositJournalRecord).depositTxHash
+	const { claimedByOther, verifiable: claimedByOtherVerifiable } = claimedByOtherFacts(rec, fuel)
 	const showClaim =
-		rec.direction === "deposit" && stage !== "done" && (stage !== "depositing" || depositLegRecoverable) && actionable && !busy
+		rec.direction === "deposit" &&
+		stage !== "done" &&
+		(stage !== "depositing" || depositLegRecoverable) &&
+		actionable &&
+		!busy &&
+		(!claimedByOther || claimedByOtherVerifiable)
 	const showFinish = rec.direction === "withdraw" && stage !== "done" && stage !== "exiting" && actionable && !busy
 	const retry = attention === "error" || attention === "unknown-outcome"
 	const account = accountOf(rec, wallet)
@@ -103,6 +123,7 @@ export function recordState(rec: BridgeJournalRecord, rt: RecordRuntime, wallet:
 		schema: rec.schema,
 		intent: "intent" in rec ? rec.intent : undefined,
 		completedAt: rec.completedAt,
+		claimedByOther,
 		fuel,
 	})
 	return {
@@ -121,5 +142,6 @@ export function recordState(rec: BridgeJournalRecord, rt: RecordRuntime, wallet:
 		fuelRecovery,
 		fuelRecoverable: fuelRecovery === "offer",
 		showClaimWithoutFuel: fuel !== undefined && !isFuel && rec.completedAt === undefined && retry,
+		claimedByOther,
 	}
 }

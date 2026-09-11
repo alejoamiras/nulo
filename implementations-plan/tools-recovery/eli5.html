@@ -1,0 +1,132 @@
+<title>Tools Recovery Blueprint</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #F3F5F4; --surface: #FFFFFF; --ink: #17201C; --muted: #5C6B64; --line: #D6DDD9;
+    --accent: #1F6F5A; --accent-ink: #FFFFFF; --warn: #9A5B12; --warn-bg: #FBF1E3; --note-bg: #E8F1ED;
+    --code-bg: #EEF1F0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121917; --surface: #1A2320; --ink: #E6EDE9; --muted: #97A59E; --line: #2B3733;
+      --accent: #5BC4A3; --accent-ink: #0F1613; --warn: #E0A85A; --warn-bg: #2A2116; --note-bg: #1C2B26;
+      --code-bg: #0F1613;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121917; --surface: #1A2320; --ink: #E6EDE9; --muted: #97A59E; --line: #2B3733;
+    --accent: #5BC4A3; --accent-ink: #0F1613; --warn: #E0A85A; --warn-bg: #2A2116; --note-bg: #1C2B26;
+    --code-bg: #0F1613;
+  }
+  body { background: var(--bg); color: var(--ink); font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif; font-size: 17px; line-height: 1.55; padding-inline: 20px; padding-block: 40px 72px; }
+  main { max-width: 68ch; margin: 0 auto; }
+  h1, h2, h3 { font-family: "Bricolage Grotesque", "Source Sans 3", system-ui, sans-serif; text-wrap: balance; line-height: 1.15; }
+  h1 { font-size: 2.3rem; font-weight: 700; margin: 0 0 .5rem; }
+  h2 { font-size: 1.35rem; font-weight: 700; margin: 2.6rem 0 .8rem; }
+  h3 { font-size: 1.05rem; font-weight: 700; margin: 1.4rem 0 .4rem; }
+  p { margin: 0 0 1rem; }
+  .eyebrow { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: .8rem; }
+  .strip { display: flex; flex-wrap: wrap; gap: 8px 22px; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .8rem; color: var(--muted); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding-block: 10px; margin: 1.4rem 0 1.8rem; }
+  .strip b { color: var(--ink); font-weight: 500; }
+  .ledger { width: 100%; border-collapse: collapse; font-size: .95rem; margin: 0 0 1rem; }
+  .ledger th, .ledger td { text-align: left; vertical-align: top; padding: 10px 10px 10px 0; border-bottom: 1px solid var(--line); }
+  .ledger th { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+  .ledger td:first-child { font-weight: 600; white-space: nowrap; }
+  .tablewrap { overflow-x: auto; }
+  .phase { display: grid; grid-template-columns: 5.5rem 1fr; gap: 0 16px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .phase .k { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .78rem; color: var(--muted); padding-top: .3rem; }
+  .phase h3 { margin: 0 0 .3rem; }
+  .phase p { margin: 0 0 .4rem; }
+  .gate { font-size: .9rem; color: var(--muted); }
+  .gate::before { content: "Proves itself by "; color: var(--accent); font-weight: 600; }
+  .arc { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin: 1.6rem 0 .2rem; }
+  .decide { background: var(--note-bg); border-left: 3px solid var(--accent); padding: 14px 18px; margin: 1.2rem 0; }
+  .decide ul, .open ul { margin: .4rem 0 0; padding-left: 1.2rem; }
+  li { margin-bottom: .45rem; }
+  .callout { background: var(--warn-bg); color: var(--ink); border-left: 3px solid var(--warn); padding: 12px 16px; margin: 1rem 0; font-size: .95rem; }
+  .seed { background: var(--surface); border: 1px solid var(--line); padding: 14px 16px; margin: 1rem 0; }
+  .seed.rec { border-color: var(--accent); }
+  .seed h3 { margin-top: 0; }
+  .tag { display: inline-block; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; background: var(--accent); color: var(--accent-ink); padding: 2px 8px; border-radius: 2px; margin-left: 8px; vertical-align: middle; }
+  pre { background: var(--code-bg); border: 1px solid var(--line); padding: 12px 14px; overflow-x: auto; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .78rem; line-height: 1.5; white-space: pre-wrap; margin: .6rem 0 0; }
+  code { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .86em; background: var(--code-bg); padding: 1px 5px; border-radius: 2px; }
+  .muted { color: var(--muted); font-size: .9rem; }
+  @media (max-width: 480px) { .phase { grid-template-columns: 1fr; } body { font-size: 16px; } h1 { font-size: 1.9rem; } }
+</style>
+<main>
+  <div class="eyebrow">Blueprint · mid · draft for approval</div>
+  <h1>Tools Recovery</h1>
+  <p>The bridge's Activity page keeps a journal row for every deposit and exit. Three kinds of row get stuck today and can only be discarded, even when the money is fine. This plan teaches each row to prove what happened on-chain and finish itself — on your click, never on its own, and never by sending anything twice.</p>
+  <div class="strip">
+    <span>tier <b>mid</b></span><span>arcs <b>3 stacked PRs</b></span><span>codex rounds <b>3 + 3 fresh</b></span><span>fable <b>conditional → folded</b></span><span>code-review <b>off</b></span><span>plan <b>implementations-plan/tools-recovery/plan.md</b></span>
+  </div>
+
+  <h2>The three stuck rows</h2>
+  <div class="tablewrap">
+  <table class="ledger">
+    <tr><th>Row</th><th>Today</th><th>After this plan</th><th>The proof</th></tr>
+    <tr><td>Claimed by someone else</td><td>A relayer (or another tab) claimed your deposit first. The row shows an error, although the tokens arrived.</td><td>The row finishes as done: "Claimed by another submitter — your tokens arrived." If the row also carried gas the relayer did not claim: public gas gets the existing CLAIM YOUR GAS button; private gas stays sealed in the row, which is kept open rather than closed (claiming private gas on its own is a later follow-up).</td><td>The app recomputes the deposit's message from the row's own facts and asks the network whether that exact message was spent. No fee, no simulation, no guessing.</td></tr>
+    <tr><td>Deposit with no Ethereum receipt</td><td>Your wallet never answered, or the tab closed before the id was saved. Discard is the only button.</td><td>CLAIM looks for your deposit on Ethereum and, if it finds exactly one that matches every detail, continues the claim.</td><td>The candidate must carry the row's own secret hash, the same token, amounts, recipient and privacy inside the transaction data, and be confirmed on the canonical chain.</td></tr>
+    <tr><td>Exit with no Aztec id</td><td>The wallet sent the burn but the page never heard back. Discard is the only button.</td><td>FINISH looks for the burn on Aztec, attaches it, and finishes the withdrawal to your Ethereum address.</td><td>The app recomputes the exit's outgoing message and searches recent blocks for the one transaction that emitted it; anything ambiguous is refused.</td></tr>
+  </table>
+  </div>
+  <p class="muted">The pattern is the same three times: add one chain-proven fact to the row, then run the path the app already has. Every unsure case fails closed with a plain note and Discard still available.</p>
+
+  <h2>Why this tier</h2>
+  <p>Six risk dials: novelty low (the network already exposes the reads we need), blast radius moderate (the tools app's journal only), irreversibility low (no on-chain writes, only journal facts), migration cost none (one optional field), external coupling moderate (the L1 RPC and the Aztec node), security sensitivity <strong>high</strong> — these fixes decide when money counts as claimed. One high dial → <code>mid</code>: one plan plus a competing outline, two independent reviewers, a fresh final review.</p>
+
+  <h2>Phases</h2>
+  <div class="arc">Arc 1 · claimed by someone else</div>
+  <div class="phase"><div class="k">Phase 1</div><div><h3>Recompute the message, read its spent-marker; the two locks</h3><p>A small pure helper rebuilds the deposit's message from the row's facts and derives the marker the network keeps once a message is spent. The journal engine asks for it before doing any fee work, and again if the claim's dry run says "already spent". A row whose stored message does not match its own facts is refused as tampered, never completed. This phase also adds the two same-origin locks the later fixes rely on: one around the new saves this plan makes, one per running row.</p><p class="gate">the new helper's unit tests (public, private, a wrong secret, a token-and-gas row whose gas message is spent but the token one is not, a tampered row) plus the journal engine's tests, typecheck and lint, all green.</p></div></div>
+  <div class="phase"><div class="k">Phase 2</div><div><h3>The card's copy and the browser cell</h3><p>The row reads "Claimed by another submitter — your tokens arrived." The end-to-end cell that today pins the error is flipped: a relayer claims first, you press CLAIM, the row ends done, nothing is sent, the balance moved exactly once.</p><p class="gate">the recovery cells in a real browser against a local network, on the first try; then the whole tools suite in two parallel runs before the first PR.</p></div></div>
+  <div class="arc">Arc 2 · deposit with no Ethereum receipt</div>
+  <div class="phase"><div class="k">Phase 3</div><div><h3>Find the deposit on Ethereum</h3><p>A helper narrows the search to blocks since the row was created, lists the router's deposit events, keeps only those carrying this row's secret hash, then checks every detail inside the transaction data and that the transaction is confirmed on the canonical chain. Exactly one match wins; none, several, or an incomplete search each get their own answer.</p><p class="gate">unit tests over a fake Ethereum client: a match, a private deposit, a copied secret hash on another token rejected, two matches refused, a capped search reported as incomplete.</p></div></div>
+  <div class="phase"><div class="k">Phase 4</div><div><h3>Wire CLAIM to it, flip the cell</h3><p>CLAIM appears on the stuck row; the found id is written only if the row is still unchanged and still has no id, then today's claim path continues. The browser cell becomes: the wallet sends but never replies, reload, CLAIM finds it, the claim lands. A sibling cell keeps the honest case: nothing was ever sent, the search says so, Discard.</p><p class="gate">the journal and policy unit tests plus the Ethereum-wallet cells in the browser, first try; then the whole tools suite in two parallel runs.</p></div></div>
+  <div class="arc">Arc 3 · exit with no Aztec id</div>
+  <div class="phase"><div class="k">Phase 5</div><div><h3>Find the burn on Aztec</h3><p>A helper recomputes the exit's outgoing message from the row (destination, amount, the bridge and its portal) and scans recent Aztec blocks for the single transaction that emitted it as its first message, excluding transactions the journal already owns.</p><p class="gate">unit tests over a fake node: the recomputed message matches a known vector, one match, a taken one excluded, two refused, a pruned window reported as incomplete.</p></div></div>
+  <div class="phase"><div class="k">Phase 6</div><div><h3>Wire FINISH to it, lock across tabs, flip the cell</h3><p>FINISH appears on the stuck row; the found id is attached and the finish continues under the row's new identity, all inside one lock hand-off so two tabs cannot both do it. The browser cells become: the burn is sent but the page never hears back, reload, FINISH attaches and finishes (fee charged once, nothing burns twice); and the same with two tabs pressing FINISH at once — one finishes, the other is told another tab is on it.</p><p class="gate">the exit cells in the browser, then the whole tools suite in two parallel runs, then the repo-wide unit tests and lint, all green.</p></div></div>
+
+  <h2>Human context</h2>
+  <p>Money on a bridge is never lost by these fixes — every deposit and exit already sits safely on one chain or the other. What was lost was the app's <em>knowledge</em> of it. The earlier plan (tools-readiness) pinned these three rows exactly as they behave today so the warts were visible; this plan removes them. Two rules from the journal stay untouched: the app never re-sends anything from a saved row, and it never asks your wallet to sign anything on its own — the one signature (unsealing a private deposit's secret) still happens only when you press CLAIM.</p>
+
+  <h2>Decisions surfaced by the reviews</h2>
+  <div class="open"><ul>
+    <li><strong>One trusted node.</strong> The app already trusts its configured Aztec node for every stage and receipt; the "was this message spent?" read comes from the same node, with no second source, and only from blocks that have reached the same settlement level today's completions require (a reviewer caught that reading the very latest block could mark a deposit done from a block that later drops — and the journal would then delete that deposit's only secret). A lying node could already mislead the app; this plan does not widen that, and does not fix it either.</li>
+    <li><strong>Attaching an exit when twins exist.</strong> Two exits of the same amount to the same address look identical on-chain. If exactly one candidate is not already known to this browser's journal, it is attached — the money goes to the same address either way; the residual risk is bookkeeping (a twin exit left untracked), not loss. Anything still ambiguous is refused.</li>
+    <li><strong>Search vs paste.</strong> The competing outline let you paste a transaction id instead of searching. Reviewers split (one preferred a hybrid); the plan ships the search only, because users rarely hold these ids. A paste fallback can be a later follow-up.</li>
+    <li><strong>The three-round stop, and what came after.</strong> The codex reviewer still had one material finding on round three (two tabs could attach the same exit at once). It was folded; a fresh reviewer then found seven defects in that fold (the journal is saved as one block, so a lock per row is not enough; a lock hand-off that re-locks itself; unbounded searches; copy that told users to discard evidence). All seven were folded; a second fresh reviewer then found six more (the lock must not touch the journal's existing saves, the settlement level of the "spent" read, the error handling after a row changes identity, copy, and how the two-tab test provokes the race). Those are folded too: the new writes run under one short lock shared by all your tabs, a second lock keeps two tabs from running the same row, searches have a deadline, and ambiguous results say "keep this record". A third fresh reviewer then found five more, two of them important: a same-row replacement by another tab could have been marked done, and a relayer who claims your tokens with its own gas leaves your private gas unclaimed — the row must not close until that gas is settled (it now routes you to the existing CLAIM YOUR GAS instead). Those are folded as well. The reviewer's last recorded verdict is therefore "reject" on the previous draft; the current draft has not been re-reviewed. You approved on the condition that a fresh review returns "approve" first; that review found three more (private gas has no stand-alone claim today — the row now stays open instead of pretending; the Ethereum search must check the wallet is still on the right chain; text drift). Folded; another fresh review decides whether Phase 1 starts.</li>
+  </ul></div>
+
+  <div class="decide">
+    <h2 style="margin-top:0">Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm the scope: all three rows, in this order, as three stacked PRs; nothing else.</li>
+      <li>Confirm <code>mid</code> and the review budget: codex at high, no code-review pass, no hardening pass scheduled now.</li>
+      <li>Confirm the gates: unit tests per phase, each flipped browser cell in its phase, the whole tools suite in two local runs per arc, repo-wide tests and lint at the end.</li>
+      <li>Accept the two surfaced decisions above (one trusted node; single-candidate exit attachment) or change them.</li>
+      <li>Say whether the review trail is closed: recommended condition — a fresh codex review of the current draft returns "approve" before Phase 1 starts.</li>
+      <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <h2>Implementation seeds <span class="tag">draft</span></h2>
+  <p class="muted">Two ways to run the autonomous implementation session, inside the plan's worktree (<code>agent-worktree resume tools-recovery</code>). Finalized after approval.</p>
+  <div class="callout">Use exactly ONE per session. They don't compose — setting one replaces the other.</div>
+  <div class="seed rec">
+    <h3>Recommended: /goal</h3>
+    <pre>/goal All 6 phases marked ✓ in implementations-plan/tools-recovery/plan.md (the per-phase headers — not the chat, not the task list), each ✓ backed by its phase's validation gate as written in plan.md reported passing in the transcript (each local suite run quoted with its retry-0 tally and the SHA it ran on); for each phase the agent has printed `LESSONS_FILE=implementations-plan/tools-recovery/lessons/phase-N.md`; `/code-review` was NOT run (code_review: off); the codex fix loop converged for each of the three arcs at its boundary AND for the final cross-arc pass, each convergence evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; the three-PR stack exists on GitHub, created only after all loops converged (`gh stack view` output in the transcript), each PR's checks watched to a settled PASSING state with the result quoted, and after any sync or rebase the affected arcs' local gates re-run on the new SHA before the re-watch; `bun run test:all` and `bun run lint && bun run lint:actions` both report exit 0 in the transcript on the final SHA; implementations-plan/index.md's tools-recovery row reads "stack open"; every decision point was settled by a logged codex consult or surfaced per plan.md § Autonomy. Merging is the owner's and is not part of this goal.</pre>
+  </div>
+  <div class="seed">
+    <h3>Alternative: /loop 15m</h3>
+    <pre>/loop 15m Drive implementations-plan/tools-recovery forward. Never idle waiting for my input. Each firing:
+1. Reality check: read implementations-plan/tools-recovery/plan.md and lessons/ (authoritative — not the chat); native task list empty? rebuild it from plan.md, one task per remaining step; `git status`, `git log --oneline -5`; if PRs exist, `gh stack view` and `gh pr checks <n>` (no --watch).
+2. Waiting on CI is fine — confirm it progresses; use the wait to prep the next phase. Local suites: the tools suite on its own sandbox (`bun run e2e:tools -- …`), retry 0; shard the arc-boundary runs (`--shard=1/2` ∥ `--shard=2/2`); never `pkill -f anvil`.
+3. No task in hand? Take the next pending phase from plan.md. After each meaningful edit run `bun run lint` and `bun run --cwd apps/tools test -- <touched files>`; commit (conventional, ≤100-char lower-case header, the Co-Authored-By trailer) → push (`gh stack push` once the stack exists).
+4. Stuck or at a decision you'd bring to me? Call `/codex high` with full context, settle it, act, log consult + verdict in lessons/phase-N.md. Hard limits stay hard: never merge, publish, rewrite shared history, add a resubmission path, change the prompt rule, or touch apps/extension.
+5. Same step failed 5 times? Stop retrying; reassess with codex, then continue on the agreed path.
+6. Phase green = its validation gate in plan.md passes: run it, paste the tally + SHA, mark ✓ in plan.md, write lessons/phase-N.md, print `LESSONS_FILE=implementations-plan/tools-recovery/lessons/phase-N.md`. Arc boundary? codex loop on the arc diff (no /code-review) until a round yields nothing material (3 rounds still material → surface), THEN `gh stack add <next-arc-branch>`.
+7. All 6 phases ✓? Final cross-arc codex pass (fresh session, net diff from origin/dev), then Delivery per plan.md: `gh stack submit --auto`, `gh pr ready` ×3, bodies, `gh pr checks --watch`; then the wrap-up report (what shipped, every contentious decision with ELI5 context, open items). Surface and stop. Merging is mine.
+Keep the native task list current; plan.md stays the source of truth.</pre>
+  </div>
+  <p class="muted">Full plan: implementations-plan/tools-recovery/plan.md · reviews: audit-codex.md, audit-fable.md · reuse map: recon.md</p>
+</main>

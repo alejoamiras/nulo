@@ -54,6 +54,21 @@ describe("recordState — the gates the card and the dock share", () => {
 		expect(stranded.showClaim).toBe(true)
 	})
 
+	it("a token claimed by another submitter offers CLAIM only as the verification that finishes it", () => {
+		const fuel = { amount: "10", secret: "0xs", secretHashHex: "0xf", minOutput: "9", leafIndex: "8", received: "5" }
+		// Fuel still open (public: CLAIM YOUR GAS is the action; private: nothing) ⇒ no CLAIM.
+		const open = state(dep({ schema: 2, leafIndex: "1", claimedByOther: true, fuel }))
+		expect(open.showClaim).toBe(false)
+		expect(open.claimedByOther).toBe(true)
+		// A PRIVATE record with open fuel still verifies on the click: a false marker must not hide its claim.
+		expect(state(dep({ schema: 2, isPrivate: true, leafIndex: "1", claimedByOther: true, fuel })).showClaim).toBe(true)
+		// Fuel settled but the record not completed (a marker that could not be verified yet) ⇒ CLAIM verifies.
+		expect(state(dep({ schema: 2, leafIndex: "1", claimedByOther: true, fuel: { ...fuel, consumed: true } })).showClaim).toBe(true)
+		expect(state(dep({ leafIndex: "1", claimedByOther: true })).showClaim).toBe(true)
+		expect(state(dep({ leafIndex: "1", claimedByOther: true, completedAt: 1 })).showClaim).toBe(false)
+		expect(state(dep({ leafIndex: "1" })).claimedByOther).toBe(false)
+	})
+
 	it("busy hides every button; completion ends the stage", () => {
 		expect(state(dep({ leafIndex: "1" }), { busy: true }).showClaim).toBe(false)
 		expect(state(dep({ leafIndex: "1", completedAt: 5 })).stage).toBe("done")

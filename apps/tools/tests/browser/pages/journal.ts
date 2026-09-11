@@ -13,6 +13,9 @@ export interface JournalDeposit {
 	depositTxHash?: string
 	claimTxHash?: string
 	registerTxHash?: string
+	/** The token was claimed by another submitter; the record completes without a claim hash of its own. */
+	claimedByOther?: boolean
+	completedAt?: number
 	fuel?: { received?: string; claimTxHash?: string }
 	/** The Aztec account the deposit claims to. */
 	recipient?: string

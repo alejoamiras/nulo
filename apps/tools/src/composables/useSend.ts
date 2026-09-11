@@ -46,6 +46,10 @@ import type { GasLegPlan, GrantOutcome, SendPlan } from "@/lib/send-model"
 import { fuelRecipientFor } from "@/lib/fuel-target"
 import { normalizeError } from "@/lib/errors"
 import { humanizeWalletError } from "@/lib/wallet-errors"
+import { webJournalLocks } from "@/lib/journal-locks"
+import { reconcileFuelConsumed } from "./fuel-recovery"
+import { hubMessageState } from "@/lib/message-nullifier"
+import { resolveToolsTarget } from "@/lib/network-targets"
 import {
 	type ClaimRecord,
 	addRecordVerified,
@@ -249,7 +253,17 @@ export function ensureSendJournalDeps(): void {
 		retainPinnedTokens: (needed) => retainPinnedHubTokens(needed),
 		l2BlockNumber: async () => Number(await createAztecNodeClient(NODE_URL).getBlockNumber()),
 		messageReadiness: (messageHash) => messageReadiness(messageHash),
+		messageNullified: (rec, material) =>
+			hubMessageState(
+				rec,
+				material,
+				resolveToolsTarget(),
+				async (nullifier) =>
+					(await createAztecNodeClient(NODE_URL).getNullifierMembershipWitness("checkpointed", nullifier)) !== undefined,
+			),
+		reconcileFuel: (id) => reconcileFuelConsumed(id),
 		claimReceiptStatus: (txHash) => claimReceiptStatus(txHash),
+		locks: webJournalLocks(),
 	})
 }
 

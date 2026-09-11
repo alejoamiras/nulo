@@ -35,6 +35,7 @@ import { SYNC_TARGET_MARGIN_BLOCKS } from "@/lib/bridge-steps"
 import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
 import { isWellFormedTxHash } from "@/lib/claim-receipt"
 import { isReceiptRecordMismatch } from "@/lib/fuel-claim-state"
+import { HELD_ELSEWHERE, type JournalLocks } from "@/lib/journal-locks"
 import { dropPhaseClock } from "@/lib/phase-clock"
 import { safeAddressText, safeSentence } from "@/lib/token-display"
 import { withOperation } from "./useOpsInFlight"
@@ -61,7 +62,7 @@ export const isMsgNotReady = (msg: string): boolean =>
  *  isMsgNotReady — matching that here would (a) treat a not-yet-anchored message as consumed and
  *  latch a false "claimed" [fund-stranding], and (b) never recognise the real consumed shape. */
 export const isMsgConsumed = (msg: string): boolean =>
-	/No non-nullified L1 to L2 message found|message has already been nullified/i.test(msg)
+	/No non-nullified L1 to L2 message found|message has already been nullified|L1-to-L2 message is already nullified/i.test(msg)
 
 /** Every deposit record the claim path drives. The shared helpers read only the facts both
  *  shapes carry; the steps that differ re-narrow with `isSendRecord`. */
@@ -125,6 +126,15 @@ export interface RecordRuntime {
 	 *  claim (any tab) can never inherit a previous claim's mint dot. */
 	confirmLandedTxHash?: string
 }
+
+/** The claim material the engine resolved: the record's claim value, plus the unsealed envelope of
+ *  a private record (its authoritative copy of the deposit's facts). */
+export type ClaimMaterial = { secretHex: string; envelope?: DepositEnvelopeV2 }
+
+/** Where a hub token deposit's L1→L2 message stands on the checkpointed chain. `invalid` is a proven
+ *  wrong identity (the stored message hash is not the one the record's facts describe); `unknown`
+ *  is missing evidence (no material, no hash, a failed read) and always means "as today". */
+export type MessageState = "nullified" | "live" | "invalid" | "unknown"
 
 /** What finishing an exit on L1 can end in: our own consume transaction, or the discovery that
  *  someone else's already spent the message. */
@@ -214,6 +224,18 @@ export interface JournalEngineDeps {
 	/** Re-pin the wallet's grant set from the tokens the journal still holds. Called whenever a
 	 *  record leaves, so a pin never outlives the record that earned it. */
 	retainPinnedTokens?: (needed: string[]) => void
+	/** Whether a hub token deposit's message is already consumed, read from the message's OWN
+	 *  nullifier at `checkpointed` — the journal's settlement floor. The engine hands over the
+	 *  material it resolved (the dep lives outside this module and cannot read the secret cache).
+	 *  Absent ⇒ "unknown" everywhere: the simulate stays the only consumability authority. */
+	messageNullified?: (rec: SendDepositRecord, material: ClaimMaterial) => Promise<MessageState>
+	/** Latch `fuel.consumed` from the checkpointed receipt of the record's own fuel-spending
+	 *  transaction, when it has one. The claim build does this on its way to the hub; a completion
+	 *  that never builds a claim must ask for it. */
+	reconcileFuel?: (id: string) => Promise<void>
+	/** The cross-tab locks: a record's runner and the guarded journal writes. Absent ⇒ process-local
+	 *  dedup and synchronous best-effort writes, as before. */
+	locks?: JournalLocks
 	/** Injectable wait (tests pass a no-op; production uses real timers). */
 	waitMs?: (ms: number) => Promise<void>
 }
@@ -621,12 +643,19 @@ async function resolvePrivateSecret(rec: ClaimRecord): Promise<{ secretHex: stri
 	return resolved
 }
 
-/** Per-record dedup wrapper. */
+/** Per-record dedup wrapper: process-local first, then the cross-tab record lock when one is wired —
+ *  a runner another tab holds is skipped exactly like an in-flight duplicate here. */
 async function withRecordLock(id: string, fn: () => Promise<void>): Promise<void> {
 	if (inFlight.has(id)) {
 		log("already in flight - skipping duplicate", id)
 		return
 	}
+	if (!deps.locks) return runRecordBody(id, fn)
+	const outcome = await deps.locks.record(id, () => runRecordBody(id, fn))
+	if (outcome === HELD_ELSEWHERE) log("already in flight in another tab - skipping duplicate", id)
+}
+
+async function runRecordBody(id: string, fn: () => Promise<void>): Promise<void> {
 	inFlight.add(id)
 	setRuntime(id, { busy: true })
 	try {
@@ -704,6 +733,12 @@ export function releaseForeground(id: string): void {
 	if (activeFlowId.value === id) activeFlowId.value = null
 }
 
+/** One guarded journal write under the cross-tab journal lock (a plain deferred call without one):
+ *  the body is the synchronous load → guard → write span, so nothing interleaves inside it. */
+function underJournalLock<T>(fn: () => T): Promise<T> {
+	return deps.locks ? deps.locks.journal(fn) : Promise.resolve().then(fn)
+}
+
 function completeDeposit(rec: ClaimRecord | undefined): void {
 	// Cross-tab guard: another tab may have discarded (record gone) or completed this record while
 	// we ran - generations are tab-local, so the WRITE must be existence- and idempotency-checked.
@@ -711,6 +746,11 @@ function completeDeposit(rec: ClaimRecord | undefined): void {
 	const current = records.value.find((r) => r.id === rec.id)
 	if (!current || current.completedAt) return
 	patchRecord(rec.id, { completedAt: deps.now() })
+	finishDeposit(rec)
+}
+
+/** The in-memory side of a deposit completion, after its `completedAt` is persisted. */
+function finishDeposit(rec: ClaimRecord): void {
 	setRuntime(rec.id, { attention: undefined, note: undefined })
 	secretCache.delete(rec.id)
 	receiptRounds.delete(rec.id)
@@ -799,18 +839,15 @@ async function runDepositClaimLocked(id: string, gen: number, interactive: boole
 	if (!rec) return "stop"
 
 	if (rec.claimTxHash !== undefined && !isWellFormedTxHash(rec.claimTxHash)) return reportMalformedClaimHash(rec.id)
+	if (claimsThroughHub(rec) && rec.claimedByOther) return revalidateClaimedByOther(rec, gen, interactive)
 	if ((await claimGuards(rec, id)) === "stop") return "stop"
 	if (rec.claimTxHash) return resumeSentClaim(rec, id, gen, interactive)
 	// Caller-side condition so the common has-leaf path stays synchronous (no new await seam).
 	if (legRecoveryNeeded(rec) && (await recoverLegIfNeeded(rec, id)) === "stop") return "stop"
 
-	// Public material resolves synchronously (parity with the original inline branch).
-	const material = rec.isPrivate ? await resolvePrivateClaimMaterial(rec, id) : resolvePublicClaimMaterial(rec, id)
-	if (!material) return "stop"
-	setRuntime(id, { attention: undefined, note: undefined })
-
-	const fresh = records.value.find((r) => r.id === id) as ClaimRecord | undefined
-	if (!fresh) return "stop" // Cross-tab discard while the unseal signature waited.
+	const start = await resolveClaimStart(rec, id, gen)
+	if (start === "stop") return "stop"
+	const { fresh, material } = start
 	// Interaction CONSTRUCTION happens BEFORE all three gates — fee/fuel resolution timing and
 	// any journal mutations the build performs must not move.
 	const interaction = await buildClaimHandles(fresh, material)
@@ -824,11 +861,43 @@ async function runDepositClaimLocked(id: string, gen: number, interactive: boole
 	// flow the original had (no no-op await seams — each gate is guarded independently).
 	if (!preGated && countdownApplies(fresh)) gate = await awaitBlockCountdown(fresh, id, gate)
 	if (!preGated && checkpointApplies(fresh)) gate = await awaitCheckpointGate(fresh, id, gate)
-	const ready = await awaitConsumable(interaction, id, gate)
-	if (!ready) throw new Error("the L1→L2 message never became consumable - claim it again from the journal later")
+	const ready = await awaitConsumable(interaction, fresh, material, gate)
+	if ((await settleConsumability(ready, fresh, gen)) === "stop") return "stop"
 	setRuntime(id, { claimable: true })
 
 	return sendAndWatch(id, gen, interaction)
+}
+
+/** The pre-build stretch: the claim material, the cross-tab reread, and the nullifier read — which
+ *  comes BEFORE any fee construction, because a message someone else already spent needs no fee
+ *  ladder, no simulate and no wallet prompt. "stop" = the run ended here (narrated or completed). */
+async function resolveClaimStart(
+	rec: ClaimRecord,
+	id: string,
+	gen: number,
+): Promise<{ fresh: ClaimRecord; material: ClaimMaterial } | "stop"> {
+	const material = rec.isPrivate ? await resolvePrivateClaimMaterial(rec, id) : resolvePublicClaimMaterial(rec, id)
+	if (!material) return "stop"
+	setRuntime(id, { attention: undefined, note: undefined })
+
+	const fresh = records.value.find((r) => r.id === id) as ClaimRecord | undefined
+	if (!fresh) return "stop" // Cross-tab discard while the unseal signature waited.
+	const probe = await probeClaimedElsewhere(fresh, material)
+	if (probe === "invalid") return reportTamperedMessage(id)
+	if (probe === "nullified" && claimsThroughHub(fresh)) return completeClaimedByOther(fresh, gen)
+	return { fresh, material }
+}
+
+/** What the consumability loop's answer means for the run: only "ready" proceeds to the send. */
+async function settleConsumability(
+	ready: Awaited<ReturnType<typeof awaitConsumable>>,
+	fresh: ClaimRecord,
+	gen: number,
+): Promise<"proceed" | "stop"> {
+	if (ready === "ready") return "proceed"
+	if (ready === "invalid") return reportTamperedMessage(fresh.id)
+	if (ready === "claimed-elsewhere" && claimsThroughHub(fresh)) return completeClaimedByOther(fresh, gen)
+	throw new Error("the L1→L2 message never became consumable - claim it again from the journal later")
 }
 
 /** A persisted claim hash the node cannot be asked about is a RECORD problem (corrupted or
@@ -1100,26 +1169,210 @@ async function sweepMessageCheckpoints(gateHashes: string[]): Promise<{ checkpoi
  *  answer (the "goes back to crossing" bug). Reload of an already-ready record shows one brief
  *  CROSSING tick before CLAIM - forward, and the ready-simulate returns immediately, so no 6s
  *  stall. */
-async function awaitConsumable(interaction: { simulate: () => Promise<unknown> }, id: string, gate: ArrivalGateState): Promise<boolean> {
+async function awaitConsumable(
+	interaction: { simulate: () => Promise<unknown> },
+	rec: ClaimRecord,
+	material: ClaimMaterial,
+	gate: ArrivalGateState,
+): Promise<"ready" | "claimed-elsewhere" | "invalid" | "timeout"> {
+	const id = rec.id
 	for (let i = gate.simulateStart; i < 300; i++) {
-		if (gate.preGated) setStep(id, "sending", "checking the message")
-		else
-			setStep(
-				id,
-				"syncing",
-				gate.counted ? "message arrived - waiting for your wallet to sync it" : "waiting for your wallet to sync the message",
-			)
+		narrateConsumableWait(id, gate)
 		try {
 			await interaction.simulate()
-			return true
+			return "ready"
 		} catch (e) {
-			const msg = e instanceof Error ? e.message : String(e)
-			if (!isMsgNotReady(msg)) throw e
+			const verdict = await classifyConsumable(e, rec, material)
+			if (verdict === "error") throw e
+			if (verdict !== "not-ready") return verdict
 			log(`message not consumable yet (poll ${i + 1}) - waiting 6s`, id)
 			await wait(6000)
 		}
 	}
-	return false
+	return "timeout"
+}
+
+function narrateConsumableWait(id: string, gate: ArrivalGateState): void {
+	if (gate.preGated) setStep(id, "sending", "checking the message")
+	else
+		setStep(
+			id,
+			"syncing",
+			gate.counted ? "message arrived - waiting for your wallet to sync it" : "waiting for your wallet to sync the message",
+		)
+}
+
+/** A simulate failure sorted: not-yet-anchored keeps polling; a consumed-shaped error is "claimed
+ *  elsewhere" only once the chain's nullifier agrees (the simulate speaks for the wallet's view,
+ *  the nullifier for the chain) — every other case is today's error. */
+async function classifyConsumable(
+	e: unknown,
+	rec: ClaimRecord,
+	material: ClaimMaterial,
+): Promise<"not-ready" | "claimed-elsewhere" | "invalid" | "error"> {
+	const msg = e instanceof Error ? e.message : String(e)
+	if (isMsgNotReady(msg)) return "not-ready"
+	if (!isMsgConsumed(msg)) return "error"
+	const probe = await probeClaimedElsewhere(rec, material)
+	if (probe === "nullified") return "claimed-elsewhere"
+	if (probe === "invalid") return "invalid"
+	return "error"
+}
+
+/** The nullifier read for a hub token claim. Any other shape, an unwired dep or a failed read is
+ *  "unknown" — the path the engine took before the read existed. */
+async function probeClaimedElsewhere(rec: ClaimRecord, material: ClaimMaterial): Promise<MessageState> {
+	if (!claimsThroughHub(rec) || !deps.messageNullified) return "unknown"
+	try {
+		return await deps.messageNullified(rec, material)
+	} catch (e) {
+		log("nullifier read failed - treating the message as unknown", { id: rec.id, error: e instanceof Error ? e.message : String(e) })
+		return "unknown"
+	}
+}
+
+function reportTamperedMessage(id: string): "stop" {
+	setRuntime(id, {
+		attention: "tampered",
+		note: "This record's message doesn't match its stored details - nothing was claimed. Restore the record from a backup, or discard it.",
+	})
+	return "stop"
+}
+
+/** The fields a claimed-by-another completion must find unchanged: another tab can replace a
+ *  same-id record while the nullifier read awaits, and `completeDeposit`'s existence check would
+ *  not notice. */
+const CLAIM_SNAPSHOT_FIELDS = [
+	"id",
+	"direction",
+	"schema",
+	"intent",
+	"isPrivate",
+	"amount",
+	"recipient",
+	"secretHashHex",
+	"leafIndex",
+	"messageHash",
+	"chainId",
+	"portal",
+	"bridge",
+] as const
+
+function sameClaimSnapshot(live: BridgeJournalRecord, verified: ClaimRecord): boolean {
+	const a = live as unknown as Record<string, unknown>
+	const b = verified as unknown as Record<string, unknown>
+	return CLAIM_SNAPSHOT_FIELDS.every((k) => a[k] === b[k])
+}
+
+/** The token's nullifier says nothing about the fuel: a relayer can claim the token with its own
+ *  fees and leave this record's fuel unclaimed. */
+function fuelSettledFor(rec: SendDepositRecord): boolean {
+	return rec.intent !== "token+gas" || rec.fuel?.consumed === true || rec.fuel?.standaloneClaimed === true
+}
+
+/** The fuel a completion is about: a same-id record whose fuel block or sealed copy was replaced
+ *  while a read awaited is a different record for this purpose. */
+function sameFuelIdentity(live: BridgeJournalRecord, verified: SendDepositRecord): boolean {
+	const a = live as SendDepositRecord
+	return (
+		a.sealedEnvelope === verified.sealedEnvelope &&
+		a.registerTxHash === verified.registerTxHash &&
+		a.fuel?.secretHashHex === verified.fuel?.secretHashHex &&
+		a.fuel?.claimTxHash === verified.fuel?.claimTxHash
+	)
+}
+
+/** The fuel identity plus the settlement flags the decision was made on. */
+function sameFuelState(live: BridgeJournalRecord, verified: SendDepositRecord): boolean {
+	const a = live as SendDepositRecord
+	return (
+		sameFuelIdentity(live, verified) &&
+		a.fuel?.consumed === verified.fuel?.consumed &&
+		a.fuel?.standaloneClaimed === verified.fuel?.standaloneClaimed
+	)
+}
+
+/**
+ * Another submitter's claim is DONE for the token: the message named this record's recipient. The
+ * record completes only once its fuel is settled too — a public leg stays open for the standalone
+ * gas claim, a private one stays open with its sealed material (private gas is spent only as this
+ * account's own claim fee). Settlement is decided on the record as re-read after the fuel receipt
+ * reconciliation, and the write requires that exact claim + fuel snapshot, no claim hash, no
+ * completion, and this runner's generation.
+ */
+async function completeClaimedByOther(captured: SendDepositRecord, gen: number): Promise<"stop"> {
+	const rec = await reconciledForCompletion(captured)
+	if (!rec || genOf(rec.id) !== gen) return "stop"
+	const settled = fuelSettledFor(rec)
+	const patch: Partial<DepositJournalRecord> = settled ? { claimedByOther: true, completedAt: deps.now() } : { claimedByOther: true }
+	const written = await underJournalLock(() =>
+		genOf(rec.id) === gen
+			? journalPatchWhen(
+					deps.kv,
+					rec.id,
+					(live) =>
+						sameClaimSnapshot(live, rec) && sameFuelState(live, rec) && !(live as ClaimRecord).claimTxHash && !live.completedAt,
+					patch,
+				)
+			: undefined,
+	)
+	reload()
+	if (!written) {
+		log("claimed-by-another completion skipped - the record moved", rec.id)
+		return "stop"
+	}
+	if (settled) finishDeposit(written as ClaimRecord)
+	else setRuntime(rec.id, { attention: undefined, note: undefined, claimable: undefined })
+	log("token claimed by another submitter", { id: rec.id, settled })
+	return "stop"
+}
+
+/** A fuel leg with its own spending transaction (a private registration, a public fjwc claim) may
+ *  be settled on chain with `consumed` not yet latched — the claim build would have caught up on
+ *  its way to the hub. Reconcile it, then re-read; the live record must still be the captured one. */
+async function reconciledForCompletion(captured: SendDepositRecord): Promise<SendDepositRecord | undefined> {
+	if (!fuelSettledFor(captured) && captured.fuel?.claimTxHash && deps.reconcileFuel) {
+		await deps.reconcileFuel(captured.id).catch((e) => log("fuel reconciliation failed", { id: captured.id, error: String(e) }))
+		reload()
+	}
+	// Only the settlement flags may have moved: the reconciliation merges into the LIVE fuel block,
+	// so a block another tab swapped in meanwhile would otherwise inherit the captured one's receipt.
+	const live = records.value.find((r) => r.id === captured.id)
+	if (!live || !sameClaimSnapshot(live, captured) || !sameFuelIdentity(live, captured)) return undefined
+	return live as SendDepositRecord
+}
+
+/**
+ * A persisted `claimedByOther` is a claim about the chain, and journal data alone never completes a
+ * record: the fuel is reconciled first (no material needed), then the marker is re-read from the
+ * nullifier. Automatic resumes use only the material at hand; an explicit click on a private record
+ * unseals it (one signature). Nullified ⇒ the completion; still live ⇒ the marker was wrong and is
+ * dropped, and the ordinary claim is back; no material or no evidence ⇒ the record waits.
+ */
+async function revalidateClaimedByOther(captured: SendDepositRecord, gen: number, interactive: boolean): Promise<"stop"> {
+	const rec = await reconciledForCompletion(captured)
+	if (!rec || genOf(rec.id) !== gen) return "stop"
+	const material = claimMaterialOf(rec) ?? (await unsealForVerification(rec, interactive))
+	if (!material) return "stop"
+	const state = await probeClaimedElsewhere(rec, material)
+	if (genOf(rec.id) !== gen) return "stop"
+	if (state === "nullified") return completeClaimedByOther(rec, gen)
+	if (state === "invalid") return reportTamperedMessage(rec.id)
+	if (state === "live") {
+		await underJournalLock(() =>
+			journalPatchWhen(deps.kv, rec.id, (live) => sameClaimSnapshot(live, rec), { claimedByOther: undefined }),
+		)
+		reload()
+		log("claimed-by-another marker dropped - the message is still live", rec.id)
+	}
+	return "stop"
+}
+
+/** The explicit click on a marked private record unseals it for the verification whatever its
+ *  fuel says: a false marker would otherwise hide the ordinary claim that spends that fuel. */
+async function unsealForVerification(rec: SendDepositRecord, interactive: boolean): Promise<ClaimMaterial | undefined> {
+	if (!interactive || !rec.isPrivate || !rec.sealedEnvelope) return undefined
+	return (await resolvePrivateClaimMaterial(rec, rec.id)) ?? undefined
 }
 
 /** The send tail: journal the hash the moment it exists, reset the round budget, record the
@@ -1298,6 +1551,7 @@ async function handleSuccessReceipt(rec: ClaimRecord, gen: number): Promise<"don
 	setStep(rec.id, "verifying", "checking the claim against this record")
 	const consumed = await recordMessageConsumed(rec)
 	if (genOf(rec.id) !== gen) return "stop"
+	if (consumed === "invalid") return reportTamperedMessage(rec.id)
 	if (consumed === false) {
 		// The PXE still sees the message - lag right after the checkpoint, or a receipt that
 		// wasn't ours. Keep polling instead of completing; the next pass re-probes.
@@ -1309,14 +1563,17 @@ async function handleSuccessReceipt(rec: ClaimRecord, gen: number): Promise<"don
 	return "done"
 }
 
-/** True/false when determinable; null when the secret isn't available for the probe (prompt-free rule). */
-async function recordMessageConsumed(rec: ClaimRecord): Promise<boolean | null> {
-	const secretHex = rec.isPrivate ? secretCache.get(rec.id)?.secretHex : publicClaimSecretOf(rec)
-	if (!secretHex) return null
+/** True/false when determinable; null when the secret isn't available for the probe (prompt-free
+ *  rule); "invalid" when the record's message is provably not its own. A hub token send is read
+ *  from its nullifier; every other shape keeps the claim-build probe. */
+async function recordMessageConsumed(rec: ClaimRecord): Promise<boolean | null | "invalid"> {
+	const material = claimMaterialOf(rec)
+	if (!material) return null
+	if (claimsThroughHub(rec) && deps.messageNullified) return nullifierSaysConsumed(rec, material)
 	try {
 		// The probe rebuilds the SAME claim the record would send, so a send record re-simulates
 		// against the hub; an unwired dep throws here and reads as "unknown", never as consumed.
-		const interaction = await buildClaimHandles(rec, { secretHex })
+		const interaction = await buildClaimHandles(rec, { secretHex: material.secretHex })
 		await interaction.simulate()
 		return false // Still claimable ⇒ that successful receipt was NOT this record's claim.
 	} catch (e) {
@@ -1326,6 +1583,20 @@ async function recordMessageConsumed(rec: ClaimRecord): Promise<boolean | null> 
 		if (isMsgConsumed(msg)) return true // The message is gone - consumed by the claim we waited on.
 		return null
 	}
+}
+
+function claimMaterialOf(rec: ClaimRecord): ClaimMaterial | undefined {
+	if (rec.isPrivate) return secretCache.get(rec.id)
+	const secretHex = publicClaimSecretOf(rec)
+	return secretHex ? { secretHex } : undefined
+}
+
+async function nullifierSaysConsumed(rec: ClaimRecord, material: ClaimMaterial): Promise<boolean | null | "invalid"> {
+	const state = await probeClaimedElsewhere(rec, material)
+	if (state === "nullified") return true
+	if (state === "live") return false
+	if (state === "invalid") return "invalid"
+	return null
 }
 
 /** The withdraw consume tail: rediscovered consumeTxHash waits (with identity check) instead of
@@ -1443,6 +1714,7 @@ function resumeActionFor(rec: BridgeJournalRecord): "skip" | "deposit" | "withdr
 	// same terminal fault. The first resume after a reload still runs, so the card learns the
 	// fault without a click (runtime attention is empty until then); RETRY always reaches it.
 	if (runtime.value[rec.id]?.attention === "malformed-record") return "skip"
+	if (rec.direction === "deposit" && (rec as DepositJournalRecord).claimedByOther) return claimedByOtherResume(rec as ClaimRecord)
 	const promptFreeWait =
 		(rec.direction === "deposit" && (rec as DepositJournalRecord).claimTxHash) ||
 		(rec.direction === "withdraw" && (rec as WithdrawJournalRecord).consumeTxHash)
@@ -1450,6 +1722,13 @@ function resumeActionFor(rec: BridgeJournalRecord): "skip" | "deposit" | "withdr
 	if (rec.direction === "deposit" && !(rec as DepositJournalRecord).leafIndex && !(rec as DepositJournalRecord).claimTxHash) return "skip"
 	if (rec.direction === "withdraw" && !(rec as WithdrawJournalRecord).exitTxHash) return "skip"
 	return rec.direction === "deposit" ? "deposit" : "withdraw"
+}
+
+/** A token another submitter claimed has nothing to claim; it resumes (prompt-free, any session)
+ *  when its fuel has settled — the completion is the one write left — or when the fuel has its
+ *  own transaction whose receipt may have checkpointed since. */
+function claimedByOtherResume(rec: ClaimRecord): "skip" | "deposit" {
+	return claimsThroughHub(rec) && (fuelSettledFor(rec) || !!rec.fuel?.claimTxHash) ? "deposit" : "skip"
 }
 
 /** Auto-continue ONLY what this page session initiated, plus prompt-free receipt waits. */

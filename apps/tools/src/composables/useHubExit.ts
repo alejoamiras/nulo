@@ -43,6 +43,7 @@ import { type Ref, ref } from "vue"
 import { HUB, SEND_GENERATION } from "@/contracts/bridge-generation"
 import { clampGas, walletMaxFees } from "@/lib/wallet-fee-budget"
 import { NETWORK } from "@/lib/network"
+import { webJournalLocks } from "@/lib/journal-locks"
 import type { ExitPlan } from "@/lib/send-model"
 import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
 import {
@@ -294,6 +295,7 @@ export function ensureHubExitDeps(): void {
 		// The generation binding + block check are the same on both lanes: an exit resumed from a
 		// session that never opened the deposit side still validates against the factory.
 		sendBinding: sendBindingOf,
+		locks: webJournalLocks(),
 		validateTokenBlock: (token) => validateTokenBlock(token, l1),
 		consumeSend: (rec, onProgress) => runSendConsume(l1, rec, onProgress),
 		verifyConsumeIdentitySend: (rec, txHash) => verifySendConsume(l1, rec, txHash),
