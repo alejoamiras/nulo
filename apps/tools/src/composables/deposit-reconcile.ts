@@ -1,11 +1,9 @@
 /**
- * Find the router transaction a hash-less deposit record belongs to, from Ethereum alone. The record
- * knows what the send was about to submit (token, portal, amounts, secret hashes, privacy) but not
- * whether the wallet ever broadcast it: the router's events are only the first sieve (they carry no
- * token or portal), so every candidate is verified against its own calldata and its receipt before it
- * counts. Exactly one verified transaction is the answer; two is `"ambiguous"` (a replayed router
- * call made two deposits with one secret — both need a hand); a search that could not cover the
- * window — a capped range, a failed or slow read, a chain switch, a non-canonical receipt — is
+ * The router transaction behind a hash-less deposit record, from Ethereum alone. Identity: the
+ * router's events are only a sieve (they carry no token or portal); a candidate counts only when its
+ * own calldata is the call this record's send would have made and its receipt is a success on the
+ * canonical chain. Uniqueness: one verified transaction is the answer, two is `"ambiguous"`, and any
+ * search that could not cover the window — cap, failed or slow read, chain switch, reorg — is
  * `"incomplete"`, never `"none"`.
  */
 import { PRIVATE_FPC_ADDRESS, type SendDepositRecord, SWAP_BRIDGE_ROUTER_ABI } from "@nulo/bridge-core"
@@ -45,6 +43,9 @@ export interface DepositSearchOptions {
 	maxReads?: number
 	maxCandidates?: number
 	now?: () => number
+	/** How many chain changes the provider has reported so far: a change during the scan — even
+	 *  away and back — means some reads answered from another chain. */
+	chainEpoch?: () => number
 }
 
 const DEFAULTS = {
@@ -92,17 +93,21 @@ export async function findDepositTx(rec: SendDepositRecord, l1: ReconcileL1Clien
 	if (rec.intent === "gas" || !rec.token) return "none"
 	if (rec.chainId !== o.chainId) return "incomplete"
 	const read = budgetedReads(o)
+	const epoch = o.chainEpoch?.()
 	try {
 		await assertChain(l1, o.chainId, read)
 		const latest = await read(() => l1.getBlockNumber())
+		const tip = (await read(() => l1.getBlock({ blockNumber: latest }))).hash
 		const from = await windowStart(l1, latest, BigInt(Math.floor(rec.createdAt / 1000) - o.slackSeconds), BigInt(o.maxBlocks), read)
 		const hashes = await candidateHashes(rec, l1, o.router, from, latest, BigInt(o.chunkBlocks), read)
 		if (hashes.length > o.maxCandidates) return "incomplete"
 		const verified: Hex[] = []
 		for (const hash of hashes) if (await verifyCandidate(rec, l1, o.router, hash, read)) verified.push(hash)
-		// The chain is asserted on both sides of the scan: a wallet switched in between answered from
-		// another chain for some of the reads above.
+		// The scan is only as good as the chain it read: a wallet switched away and back, or a reorg
+		// past the tip that was scanned, may have answered some reads from a chain that is not this one.
 		await assertChain(l1, o.chainId, read)
+		if (o.chainEpoch?.() !== epoch) throw new Incomplete("chain changed")
+		if (!hexEq((await read(() => l1.getBlock({ blockNumber: latest }))).hash, tip)) throw new Incomplete("reorg")
 		if (verified.length === 0) return "none"
 		if (verified.length > 1) return "ambiguous"
 		return { txHash: verified[0] }

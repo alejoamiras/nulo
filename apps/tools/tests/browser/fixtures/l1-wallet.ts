@@ -185,7 +185,6 @@ export async function installL1Wallet(context: BrowserContext, o: L1WalletOption
 				value: tx.value ? BigInt(tx.value) : undefined,
 				gas: tx.gas ? BigInt(tx.gas) : undefined,
 			})
-			// A swallowed transaction is broadcast for real; only the page's promise parks.
 			if (takeSwallow(tx.to)) return sent.then(() => new Promise<never>(() => {}))
 			return sent
 		},

@@ -99,11 +99,14 @@ interface FakeTx {
 /** A chain: blocks 0..latest at 12s each from GENESIS_TS, the given router transactions, and the
  *  reads counted so a budget can be asserted. `getLogs` decodes nothing — it answers with the args the
  *  fake was given, one event name per call, as viem does. */
-function fakeChain(txs: FakeTx[], over: Partial<{ latest: bigint; chainId: () => number; blockHash: (n: bigint) => Hex }> = {}) {
+function fakeChain(
+	txs: FakeTx[],
+	over: Partial<{ latest: bigint; chainId: () => number; blockHash: (n: bigint, read: number) => Hex }> = {},
+) {
 	const latest = over.latest ?? 1_000n
 	const reads: string[] = []
 	const chainIdOf = over.chainId ?? (() => CHAIN)
-	const blockHash = over.blockHash ?? ((n: bigint) => `0x${n.toString(16).padStart(64, "0")}` as Hex)
+	const blockHash = (n: bigint) => (over.blockHash ?? ((k: bigint) => `0x${k.toString(16).padStart(64, "0")}` as Hex))(n, reads.length)
 	const client: ReconcileL1Client = {
 		getChainId: async () => {
 			reads.push("chainId")
@@ -120,14 +123,11 @@ function fakeChain(txs: FakeTx[], over: Partial<{ latest: bigint; chainId: () =>
 		getLogs: async ({ address, event, fromBlock, toBlock }) => {
 			reads.push(`logs:${fromBlock}-${toBlock}`)
 			const name = (event as { name: string }).name
+			// Every fake transaction emits from the router: a foreign `to` is caught by the calldata
+			// check in production, never by this filter.
+			void address
 			return txs
-				.filter(
-					(t) =>
-						(t.to ?? ROUTER).toLowerCase() === address.toLowerCase() &&
-						t.event.name === name &&
-						t.block >= fromBlock &&
-						t.block <= toBlock,
-				)
+				.filter((t) => t.event.name === name && t.block >= fromBlock && t.block <= toBlock)
 				.map((t) => ({ transactionHash: t.hash, args: t.event.args }))
 		},
 		getTransaction: async ({ hash }) => {
@@ -200,6 +200,30 @@ describe("findDepositTx — the router transaction behind a hash-less deposit", 
 	})
 
 	it.each([
+		["another fuel amount", bridgeWithFuelCalldata({ fuelAmount: 11n })],
+		["another minimum fuel output", bridgeWithFuelCalldata({ minFuelOutput: 8n })],
+		["another token secret hash in the calldata", bridgeWithFuelCalldata({ tokenSecretHash: ZERO32 })],
+		["another fuel recipient", bridgeWithFuelCalldata({ fuelRecipient: ZERO32 })],
+		["another fuel secret hash in the calldata", bridgeWithFuelCalldata({ fuelSecretHash: ZERO32 })],
+		["the plain entrypoint", bridgeCalldata()],
+	])("a fueled record rejects a candidate with %s at the calldata", async (_label, input) => {
+		const rec = record({ intent: "token+gas", fuel: FUEL } as Partial<SendDepositRecord>)
+		const tx: FakeTx = {
+			hash: "0xff",
+			block: 600n,
+			input,
+			event: { name: "BridgeWithFuel", args: { tokenSecretHash: SECRET_HASH, fuelSecretHash: FUEL_SECRET_HASH } },
+		}
+		await expect(findDepositTx(rec, fakeChain([tx]).client, opts())).resolves.toBe("none")
+	})
+
+	it("scans every chunk without a gap: matches on both sides of a chunk boundary are both seen", async () => {
+		// The window starts at 450; with 100-block chunks the boundaries fall on 549|550.
+		const { client } = fakeChain([bridgeTx("0xleft", 549n), bridgeTx("0xright", 550n)])
+		await expect(findDepositTx(record(), client, opts({ chunkBlocks: 100 }))).resolves.toBe("ambiguous")
+	})
+
+	it.each([
 		["another token", bridgeCalldata({ bridgeToken: "0x3333333333333333333333333333333333333333" })],
 		["another portal", bridgeCalldata({ tokenPortal: "0x4444444444444444444444444444444444444444" })],
 		["another amount", bridgeCalldata({ amount: 1n })],
@@ -266,6 +290,24 @@ describe("findDepositTx — the router transaction behind a hash-less deposit", 
 			await expect(findDepositTx(record(), fakeChain([bridgeTx("0xaa", 520n)]).client, opts({ maxReads: 3 }))).resolves.toBe(
 				"incomplete",
 			)
+		})
+
+		it("a chain switched away and back during the scan, or a tip reorged past what was scanned", async () => {
+			let epoch = 0
+			const flapping = fakeChain([bridgeTx("0xaa", 520n)])
+			const logs = flapping.client.getLogs
+			flapping.client.getLogs = async (args) => {
+				epoch++ // the wallet switched away and back while the logs were read: both chain checks still agree
+				return logs(args)
+			}
+			await expect(findDepositTx(record(), flapping.client, opts({ chainEpoch: () => epoch }))).resolves.toBe("incomplete")
+
+			// The tip's hash differs between the first read (before the scan) and the last (after it).
+			const reorged = fakeChain([bridgeTx("0xaa", 520n)], {
+				blockHash: (n, read) =>
+					n === 1_000n && read > 3 ? (`0x${"e".repeat(64)}` as Hex) : (`0x${n.toString(16).padStart(64, "0")}` as Hex),
+			})
+			await expect(findDepositTx(record(), reorged.client, opts())).resolves.toBe("incomplete")
 		})
 
 		it("too many candidates, or a receipt the canonical chain no longer holds", async () => {

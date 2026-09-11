@@ -1024,13 +1024,10 @@ async function recoverLegIfNeeded(rec: ClaimRecord, id: string): Promise<"procee
 	return "proceed"
 }
 
-/**
- * A hub token record with no deposit hash is either a send the wallet never broadcast or one whose
- * page died between the broadcast and the write. Ethereum decides: the finder returns exactly one
- * verified router transaction or a reason it cannot. The hash is written once, under the journal
- * lock, only if the record is still the one the search verified and still has no hash — a hash
- * another tab wrote meanwhile is kept, never overwritten.
- */
+/** Ethereum decides what a hash-less hub token record's deposit is. The verified hash is written
+ *  once, under the journal lock, only onto the record the search verified and only while it has no
+ *  hash; a different hash another tab wrote meanwhile is kept for that tab's own run — the leg
+ *  recovery reads a receipt without checking whose call it was, so only the verified hash proceeds. */
 async function reconcileDepositLeg(rec: ClaimRecord, id: string): Promise<"proceed" | "stop"> {
 	if (!claimsThroughHub(rec) || !deps.findDepositTx) {
 		log("no leafIndex yet - the deposit leg is still running", id)
@@ -1056,13 +1053,14 @@ async function reconcileDepositLeg(rec: ClaimRecord, id: string): Promise<"proce
 			: undefined,
 	)
 	reload()
+	if (genOf(id) !== gen) return "stop"
 	if (written) {
 		log("deposit found on Ethereum", { id, txHash })
 		return "proceed"
 	}
 	const live = records.value.find((r) => r.id === id) as ClaimRecord | undefined
-	if (live?.depositTxHash && sameDepositSnapshot(live, rec)) return "proceed" // another tab wrote it first
-	log("reconcile write skipped - the record moved", id)
+	if (live?.depositTxHash === txHash && sameDepositSnapshot(live, rec)) return "proceed" // another tab wrote the same hash first
+	log("reconcile write skipped - the record moved or carries another hash", id)
 	return "stop"
 }
 
@@ -1094,7 +1092,8 @@ function sameDepositSnapshot(live: BridgeJournalRecord, verified: ClaimRecord): 
 		a.token?.erc20 === b.token?.erc20 &&
 		a.fuel?.amount === b.fuel?.amount &&
 		a.fuel?.minOutput === b.fuel?.minOutput &&
-		a.fuel?.secretHashHex === b.fuel?.secretHashHex
+		a.fuel?.secretHashHex === b.fuel?.secretHashHex &&
+		a.fuel?.fpc === b.fuel?.fpc
 	)
 }
 

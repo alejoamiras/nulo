@@ -1,5 +1,5 @@
 /** The Ethereum side (cell 26): a refused signature, an account change, the wrong chain, a wallet that never answers. */
-import { anvilKey, mint } from "@nulo/bridge-core/sandbox"
+import { anvilKey, balanceOf, mint } from "@nulo/bridge-core/sandbox"
 import { TESTIDS } from "../../../src/lib/testids"
 import { expect, test } from "../fixtures/test"
 import { connectAztec, driveToConnected, tid } from "../pages/connect"
@@ -25,6 +25,8 @@ test("cell 26d — the wallet sends the deposit but the page never hears back: t
 	await openSend(page)
 	await connectL1(page)
 	await connectAztec(page, { profile: "plain", account: actor.address })
+	const usdtL2 = await actor.l2TokenOf(usdt)
+	const before = await balanceOf(usdtL2, actor.actor.address, "public")
 	await reviewDeposit(page, { l1ChainId: L1, erc20: usdt.erc20, amount: "100", intent: "token+gas", isPrivate: false })
 
 	// The router transaction (the deposit itself) is broadcast but its hash never reaches the page;
@@ -52,6 +54,8 @@ test("cell 26d — the wallet sends the deposit but the page never hears back: t
 	await expect.poll(async () => (await depositRecords(page)).at(-1)?.depositTxHash, { timeout: 120_000 }).toBeTruthy()
 	await expect(card).toHaveAttribute("data-stage", "done", { timeout: 5 * 60_000 })
 	expect(l1.calls("eth_sendTransaction"), "the found deposit was never sent again").toBe(transactionsBefore)
+	const done = (await depositRecords(page)).at(-1)
+	expect((await balanceOf(usdtL2, actor.actor.address, "public")) - before, "credited exactly once").toBe(BigInt(done?.amount ?? "0"))
 })
 
 test("cell 26e — the Ethereum wallet never answers the deposit: the reloaded row's CLAIM finds nothing on Ethereum, and Discard leaves no record", async ({

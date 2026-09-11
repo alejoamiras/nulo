@@ -1948,7 +1948,7 @@ describe("useBridgeJournal - a hash-less deposit reconciled from Ethereum", () =
 
 	function reconcileDeps(kvv: KV, result: DepositSearch | (() => Promise<DepositSearch>)) {
 		const findDepositTx = vi.fn(typeof result === "function" ? result : async () => result)
-		// The leg recovery reads the receipt of the hash the reconcile wrote and patches the leaves.
+		// The leg recovery, reduced to its effect: the leaf lands on the record it was called with.
 		const recoverDepositLeg = vi.fn(async (rec: DepositJournalRecord) => {
 			updateRecord(rec.id, { leafIndex: "7" })
 			return "recovered" as const
@@ -2008,17 +2008,61 @@ describe("useBridgeJournal - a hash-less deposit reconciled from Ethereum", () =
 		expect(deps.recoverDepositLeg).not.toHaveBeenCalled()
 	})
 
-	it("a hash another tab wrote meanwhile is kept and used, never overwritten", async () => {
+	it("a hash another tab wrote meanwhile is kept, never overwritten: the same hash proceeds, a different one stops", async () => {
 		const OTHER = "0x00170000000000000000000000000000000000000000000000000000006f7468" as const
-		const deps = reconcileDeps(kv, async () => {
+		const foreign = reconcileDeps(kv, async () => {
 			upsertRecord(kv, { ...hashless("0xraced"), depositTxHash: OTHER })
 			return { txHash: FOUND }
 		})
-		connectJournalDeps(deps)
+		connectJournalDeps(foreign)
 		addRecord(hashless("0xraced"))
 		await runDepositClaim("0xraced")
 		expect(recordOf("0xraced")?.depositTxHash).toBe(OTHER)
-		expect(deps.recoverDepositLeg).toHaveBeenCalledWith(expect.objectContaining({ depositTxHash: OTHER }))
+		expect(foreign.recoverDepositLeg).not.toHaveBeenCalled() // whose receipt that is, this run never verified
+
+		const same = reconcileDeps(kv, async () => {
+			upsertRecord(kv, { ...hashless("0xsame"), depositTxHash: FOUND })
+			return { txHash: FOUND }
+		})
+		connectJournalDeps(same)
+		addRecord(hashless("0xsame"))
+		await runDepositClaim("0xsame")
+		expect(same.recoverDepositLeg).toHaveBeenCalledWith(expect.objectContaining({ depositTxHash: FOUND }))
+		expect(recordOf("0xsame")?.completedAt).toBe(999)
+	})
+
+	it("a record discarded and restored with a hash while the journal lock waits never continues", async () => {
+		const locks = memoryJournalLocks()
+		const deps = { ...reconcileDeps(kv, { txHash: FOUND }), locks }
+		connectJournalDeps(deps)
+		addRecord(hashless("0xrestored"))
+		let release: () => void = () => {}
+		const holder = locks.journal(() => new Promise<void>((r) => (release = r)))
+		const run = runDepositClaim("0xrestored")
+		await new Promise((r) => setTimeout(r, 0))
+		discard("0xrestored")
+		addRecord({ ...hashless("0xrestored"), depositTxHash: FOUND })
+		release()
+		await holder
+		await run
+		expect(deps.recoverDepositLeg).not.toHaveBeenCalled()
+		expect(recordOf("0xrestored")?.completedAt).toBeUndefined()
+	})
+
+	it("a fuel recipient replaced while the search ran is not written", async () => {
+		const fuel = { amount: "10", secret: "0xfuelsecret", secretHashHex: "0xfh", minOutput: "9", fpc: `0x${"a".repeat(64)}` }
+		const deps = reconcileDeps(kv, async () => {
+			upsertRecord(kv, {
+				...hashless("0xfpc", { intent: "token+gas", isPrivate: true, fuel }),
+				fuel: { ...fuel, fpc: `0x${"b".repeat(64)}` },
+			})
+			return { txHash: FOUND }
+		})
+		connectJournalDeps(deps)
+		addRecord(hashless("0xfpc", { intent: "token+gas", isPrivate: true, secret: undefined, sealedEnvelope: "blob", fuel }))
+		await runDepositClaim("0xfpc")
+		expect(recordOf("0xfpc")?.depositTxHash).toBeUndefined()
+		expect(deps.recoverDepositLeg).not.toHaveBeenCalled()
 	})
 
 	it("a record whose identity changed meanwhile is not written", async () => {

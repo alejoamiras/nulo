@@ -253,7 +253,11 @@ export function ensureSendJournalDeps(): void {
 		recoverDepositLeg: (rec) => recoverDepositLeg(rec, l1.publicClient as never, SEND_GENERATION),
 		findDepositTx: (rec) =>
 			SEND_GENERATION
-				? findDepositTx(rec, l1.publicClient as never, { chainId: MANIFEST_CHAIN.l1ChainId, router: SEND_GENERATION.router })
+				? findDepositTx(rec, l1.publicClient as never, {
+						chainId: MANIFEST_CHAIN.l1ChainId,
+						router: SEND_GENERATION.router,
+						chainEpoch: () => l1.chainChanges.value,
+					})
 				: Promise.resolve("incomplete" as const),
 		retainPinnedTokens: (needed) => retainPinnedHubTokens(needed),
 		l2BlockNumber: async () => Number(await createAztecNodeClient(NODE_URL).getBlockNumber()),
