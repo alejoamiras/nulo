@@ -80,3 +80,16 @@ here and the residue is **surfaced to the owner** (the cross-arc fresh pass re-r
 - Not re-submitted to codex (round cap). Residuals for the owner: H1 (`standaloneClaimed` latched
   from a consumed-shaped send error is pre-existing, not checkpointed evidence) and the `patchFuel`
   live-merge semantics outside the completion path.
+
+## Arc-1 boundary
+
+- Full tools suite in two shards on their own sandboxes, retry 0, at `d7079a8b`: shard 1/2 **34 passed**
+  (29.9 min), shard 2/2 **31 passed** (25.4 min). The three codex-loop fix commits landed after that
+  build; `recovery.spec.ts` was re-run on the final arc-1 SHA (see below) — the fixes are confined to
+  the marker/reconciliation paths the unit suites pin.
+- **Lesson — `git add <dir>` sweeps drafts.** The arc-2/3 finder drafts (untracked, written early while
+  the shards ran) were swept into the round-1 fix commit by `git add apps/tools/src`; the unpushed
+  branch was rewritten (reset + cherry-pick, identical content minus the four files) before any push.
+  Stage by explicit path on a branch that carries drafts for a later arc.
+- `recovery.spec.ts` re-run on the final arc-1 SHA (`68b431d3`) at retry 0: **4 passed** (3.5 min).
+- Stack: `gh stack init --base dev worktree-tools-recovery`, then `gh stack add tools-recovery/deposit-reconcile`.
