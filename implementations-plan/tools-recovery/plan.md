@@ -6,7 +6,7 @@ eli5_mode: artifact
 code_review: off
 codex_effort: high
 recon_budget: 2 agents (batched reuse sweep + journal mapper), default
-status: draft v3 (2026-09-11) — codex rounds 1–2 (14 + 6) and fable round 1 (4) folded; awaiting codex round 3, then the fresh final pass
+status: draft v4 (2026-09-11) — codex rounds 1–3 (14 + 6 + 1) and fable round 1 (4) folded; three-round stop reached on round 3's cross-tab finding (folded, surfaced in the ledger); awaiting the fresh final codex pass
 worktree: .claude/worktrees/tools-recovery (branch worktree-tools-recovery, from origin/dev @ 62f3456a)
 ---
 
@@ -77,7 +77,7 @@ journal engine, one new persisted fact, and the affordances that let a click rea
 apps/tools/src/lib/message-nullifier.ts      A: nullifier from (messageHash, secret[, recipient])   [new, pure]
 apps/tools/src/composables/deposit-reconcile.ts  B: L1 window + log scan + calldata match           [new]
 apps/tools/src/composables/exit-attach.ts        C: L2→L1 hash recompute + block scan               [new]
-apps/tools/src/composables/useBridgeJournal.ts   3 deps, 3 branches, the claimedByOther completion  [modified]
+apps/tools/src/composables/useBridgeJournal.ts   3 deps + the cross-tab record lock, 3 branches, claimedByOther [modified]
 apps/tools/src/composables/useSend.ts            wires A + B deps (node + L1 public client)          [modified]
 apps/tools/src/composables/useHubExit.ts         wires C dep (node)                                  [modified]
 apps/tools/src/lib/record-policy.ts              CLAIM for a hash-less send, FINISH for a hash-less exit [modified]
@@ -209,13 +209,25 @@ apps/tools/tests/browser/{specs,fixtures}        cells 24b/26d/31b flipped; L1 f
   `attachExit(rec, id)`, which RETURNS instead of continuing: on a match it re-verifies
   (`getTxEffect(exitTxHash).data.l2ToL1Msgs[0] === hash`), then re-keys through a NEW synchronous
   primitive `rekeyRecordWhen(kv, oldId, guard, next)` in `journal.ts`: one synchronous load → guard →
-  write with no await inside — the guard requires the live source to equal the verified snapshot
-  (identity fields, no `exitTxHash`, no `consumeTxHash`, no `completedAt`) AND no record with id
-  `exitTxHash` to exist (`rekeyRecord` would overwrite it, `journal.ts:389-393`). Like `patchRecordWhen`
-  this is the journal's best-effort guard, not a cross-tab mutex (localStorage has none — the primitive's
-  own comment); the synchronous window is the smallest the platform allows, and a lost race can only
-  lose the re-key (the record stays hash-less and the next click re-finds), never double-attach, because
-  the destination-id check runs inside the same synchronous block. It returns `{ rekeyedTo: exitTxHash }`. `runWithdrawConsumeInner` releases the OLD id's lock and calls
+  write — the guard requires the live source to equal the verified snapshot (identity fields, no
+  `exitTxHash`, no `consumeTxHash`, no `completedAt`) AND no record with id `exitTxHash` to exist
+  (`rekeyRecord` would overwrite it, `journal.ts:389-393`). Synchronous execution excludes interleaving
+  inside ONE tab only; across tabs the exclusion is the **record lock below**, which the attach holds
+  for the old id, then acquires for `exitTxHash` (the handoff) BEFORE releasing the old one. It returns
+  `{ rekeyedTo: exitTxHash }`.
+- **Cross-tab record lock**: `withRecordLock(id, fn)` (`useBridgeJournal.ts:625-642`, today a
+  process-local `inFlight` set) gains a same-origin exclusive lock through a new injectable dep
+  `exclusive?(name, fn, { ifAvailable })` — production wires the Web Locks API
+  (`navigator.locks.request("nulo-bridge:record:" + id, { ifAvailable: true }, fn)`; every modern
+  browser the app supports has it), the unit fakes wire an in-memory lock table shared by the "two
+  tabs" of a test. When the lock is held elsewhere the runner reports "already in flight" (today's
+  dedup message) instead of running; when no lock API exists the runner **fails closed** for the attach
+  path (note: "another tab may be finishing this exit — try again in a moment") and keeps today's
+  process-local behaviour for everything else. The live exit's own re-key + `runWithdrawConsume(finalId)`
+  (`useHubExit.ts:512-520`) and every consume runner go through the same `withRecordLock`, so canonical
+  runners participate. All guards run AGAIN inside the lock. Regression: two callers that both loaded the
+  journal before either wrote — the second one's guard fails inside the lock; only one re-key, one
+  consume runner. `runWithdrawConsumeInner` releases the OLD id's lock and calls
   `runWithdrawConsume(rekeyedTo)` — the consume runs under the canonical id's lock, so runtime writes,
   `inFlight` and a second FINISH click all key on the live record (the live-path precedent:
   `useHubExit.ts:512-520` re-keys, then `runWithdrawConsume(finalId)`). `"none"` → `attention: "error"`,
@@ -260,6 +272,9 @@ findExitTx?: (rec: SendWithdrawRecord, taken: ReadonlySet<string>) => Promise<{ 
 // journal.ts (bridge-core) — additive fact + one synchronous guarded re-key
 DepositJournalRecord.claimedByOther?: boolean
 rekeyRecordWhen(kv: KV, oldId: string, guard: (live: BridgeJournalRecord, all: BridgeJournalRecord[]) => boolean, next: BridgeJournalRecord): boolean
+
+// useBridgeJournal.ts — the cross-tab record lock (production: navigator.locks; tests: in-memory)
+exclusive?: <T>(name: string, fn: () => Promise<T>, opts: { ifAvailable: true }) => Promise<T | "held-elsewhere">
 
 // lib/message-nullifier.ts (pure)
 recomputeTokenMessageHash(i: { portal; chainId; hub; rollupVersion; recipient; amount; isPrivate; secretHashHex; leafIndex }): Promise<Fr>
@@ -339,12 +354,13 @@ draft prefers the scan, and keeps the paste as a possible later fallback UI (out
   chain data; `taken` removes what this journal owns, anything still plural is refused, and a single
   survivor is attached because the destination is the same either way. The residual is bookkeeping (a
   real exit left untracked while a twin is attached), not loss.
-- **Re-key and write safety across tabs**: `withRecordLock` is process-local and localStorage has no
-  mutex, so every write after an await is a synchronous load → guard → write (`patchRecordWhen`,
-  the new `rekeyRecordWhen`) whose guard compares the live record to the verified snapshot (identity
-  fields, completion, submission hashes) and, for the re-key, requires the destination id to be free.
-  A lost race loses the write (the next click re-finds), never double-attaches or overwrites; the
-  consume then runs under the new id's lock, the old id's `inFlight` entry released.
+- **Re-key and write safety across tabs**: localStorage has no mutex and `withRecordLock` was
+  process-local, so two tabs could both pass a synchronous guard and both attach/consume (duplicate
+  prompts, lost facts). The record lock becomes a same-origin Web Lock (injectable; fails closed for the
+  attach when unavailable); every write after an await is a synchronous load → guard → write
+  (`patchRecordWhen`, the new `rekeyRecordWhen`) run INSIDE that lock, comparing the live record to the
+  verified snapshot and, for the re-key, requiring the destination id to be free; the consume then runs
+  under the new id's lock through the handoff. A lost race loses the attempt, never the facts.
 - **Proven-wrong identity stops**: a stored `messageHash` that does not recompute from the record's
   facts is `"invalid"`, surfaced as `tampered` in both the fresh and the resumed path — never
   completed on the "unknown" branch.
@@ -528,7 +544,10 @@ Three arcs, one per fix, stacked. Unit tests are inline with each change.
   `consumedByOther`; none/ambiguous/incomplete notes; a record discarded meanwhile ⇒ no re-key; a
   record whose identity fields changed meanwhile ⇒ no re-key; a record whose id equals the found hash
   already exists ⇒ refused (`journal.ts` `rekeyRecordWhen` tests cover the guard and the destination
-  check); the re-verify of the tx effect failing ⇒ `"incomplete"`.
+  check); the re-verify of the tx effect failing ⇒ `"incomplete"`; **two tabs** (two runners over one
+  shared KV and one in-memory lock table, both loaded before either wrote) ⇒ exactly one re-key, one
+  consume runner, the other reports "held elsewhere"; no lock API ⇒ the attach fails closed with its
+  note while a plain consume still runs.
 - `useHubExit.ts`: wire with the node client. `record-policy.ts`: `exitAttachable` → FINISH shown
   (+ test). Card copy.
 - `exits.spec.ts`: 31b → the swallowed private exit → reload → FINISH → attached → consume → done;
@@ -608,7 +627,8 @@ new persisted field beyond `claimedByOther`, any resubmission path, a third code
 | codex (Astra, high) | 1 on v1 | **reject** — 14 findings (5 High security, 2 Facts, 3 Inferences, 1 Ask, 3 Implementation) | `audit-codex.md` (transcript + triage: 12 adopted, 1 rejected as pre-existing by design, 1 partly) |
 | fable (Plan subagent) | 1 on v1 | **conditional approve** — S1 silo/secret by record shape, S2 `getLogs` args, I1 re-key outside the old-id lock, fact corrections | `audit-fable.md` (all four conditions adopted) |
 | codex | 2 on v2 | **reject** — 6 findings (cross-tab guards, invalid vs unknown identity, `getBlocks` bodies, `tokenSecretHash`, the probe dispatch for excluded shapes, the scoped prompt test + ledger wording) | `audit-codex.md` (all six adopted) |
-| codex | 3 on v3 | _pending_ | |
+| codex | 3 on v3 | **reject** — 1 finding: the synchronous re-key guard still permits concurrent attachment across tabs | `audit-codex.md` (adopted: Web Lock record runner) — the three-round stop |
+| codex (fresh session) | final on v4 + ledger | _pending_ | |
 | codex (fresh session) | final on the consolidated plan + ledger | _pending_ | |
 
 ### Decision ledger
@@ -627,8 +647,12 @@ new persisted field beyond `claimedByOther`, any resubmission path, a third code
 | Trusted node | keep the app's existing single-node boundary; surface as a decision | a second source / finality wait | no second source exists in the app; a lying node already controls every stage (codex #11) |
 | Prompt rule on automatic resume | leave as is (pre-existing) | gate `ensureTokenGrant`/`resolvePrivateClaimMaterial` on `interactive` everywhere (codex #5) | `resumeActionFor` auto-continues what this page session started AND prompt-free receipt waits (rediscovered records with a `claimTxHash`); on the latter `claimGuards` may still raise a grant prompt before `resumeSentClaim`'s gate — a pre-existing wart the journal owns, out of this plan's scope and recorded for a follow-up; the new branches add no prompt (the probe is asserted prompt-free on its fake) |
 
+| Cross-tab exclusion (codex round 3, the three-round stop) | a same-origin Web Lock around the record runner (injectable; attach fails closed without it), guards re-run inside it, the old→new id handoff under both locks | keep process-local `inFlight` + synchronous guards (v3) | two tabs can both pass a synchronous guard; the Outbox stops double payment but duplicate prompts/transactions and lost facts remain (codex #R3-1) — folded rather than shipped open; the owner sees the three-round history here |
+
 **Still disputed**: codex's hybrid (scan + verified-hash fallback) vs the plan's scan-only. The plan
-ships scan-only; the owner can add the paste fallback as a follow-up.
+ships scan-only; the owner can add the paste fallback as a follow-up. **Three-round stop**: round 3
+still produced one material finding (cross-tab exclusion); it was verified, folded as above, and the
+fresh final pass re-evaluates the whole plan — the owner decides at the gate whether that suffices.
 
 ## Seeds
 

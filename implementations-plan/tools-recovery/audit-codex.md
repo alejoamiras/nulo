@@ -72,3 +72,19 @@ Confirmed sound: recomputed commitments, probe ordering, index-zero matching, ca
 | 4 | yes (`router-abi.ts:55-66`) | **adopted** |
 | 5 | yes | **adopted** — the probe dispatches by shape; excluded shapes keep today's probe |
 | 6 | yes (`resumeActionFor` `:1446-1448`) | **adopted** — test scoped to the probe; ledger corrected; the grant-on-rediscovered-receipt wart recorded as a follow-up |
+
+## Round 3 — on plan v3 (resumed session) — the three-round stop
+
+**Verdict: reject** (with blocking findings: the synchronous re-key guard still permits concurrent attachment and duplicate consume attempts).
+
+1. **High** — "a lost race never double-attaches" is false: synchronous execution prevents interleaving within one tab, not between tabs. Both tabs load a journal where destination `H` is absent, both guards pass, both write, both enter `runWithdrawConsume(H)` under process-local locks. The Outbox prevents double payment, but duplicate prompts, submitted transactions and lost journal facts remain. Use cross-tab exclusion (a shared Web Lock covering destination ownership and the consume handoff, canonical runners participating), recheck guards inside it, fail closed if unavailable; add an interleaving regression (both loads before either write).
+
+Confirmed sound: invalid/unknown separation, excluded-shape probe preservation, explicit block-body requests, event-field matching, snapshot checks, scoped prompt tests.
+
+### Triage
+
+| # | Verified? | Call |
+|---|---|---|
+| 1 | yes — `withRecordLock` is a process-local set; localStorage has no mutex | **adopted** — `withRecordLock` gains an injectable same-origin exclusive lock (production: `navigator.locks`; tests: an in-memory table shared by the two "tabs"); the attach fails closed without it; guards re-run inside; the old→new id handoff acquires the new lock before releasing the old; the interleaving regression is in Phase 6's tests |
+
+Round 3 was still material, so the loop stopped here per protocol; the finding is folded into v4 and the fresh final pass re-evaluates the whole plan.
