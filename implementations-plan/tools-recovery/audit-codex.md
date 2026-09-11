@@ -135,3 +135,17 @@ Confirmed sound: commitment formulas, private derivation/siloing, calldata mappi
 Confirmed sound: commitment formulas, private derivation/siloing, calldata mappings, index-zero matching, bounded scans, null-callback adapter, the canonical error boundary shared with live exits, unavailable-lock refusal, the parked-transaction 31c design, separable arc-1 locks, helper placement.
 
 ### Triage — all five verified (`completeDeposit` `:707-731`, `fuel-claim-state.ts:318-326`, `decideStandaloneFuelRecovery` in `record-policy.ts`) and **adopted** in v7. Not re-audited: this was the third fresh pass after the three-round stop; the plan is surfaced to the owner with the recommended condition that a fourth fresh pass returns `approve` before Phase 1 starts.
+
+## Fresh pass #4 — new session, on plan v7 (the approval condition)
+
+**Verdict: reject** (with blocking findings: v7 routes unsettled private fuel into a public-only recovery action).
+
+1. **High** — the promised private-fuel recovery cannot execute: `fuel-claim-state.ts:323` classifies private fuel as settled, `fuel-recovery.ts:99` rejects private standalone recovery, `deposit-flow.ts:180` builds with `isPrivate: false`; private fuel belongs to the PrivateFPC.
+2. **Medium** — B's L1 client delegates reads to the injected provider (`useL1Wallet.ts:29`); a chain switch mid-scan yields a false `none`. Reuse `assertL1Chain` around the scan; `incomplete` on change.
+3. **Medium** — phase text drift: the journal lock "used by arcs 2/3 only", `record-policy` "untouched for A", the unconditional A-completion diagram.
+
+Asks: the checkpointed single-node boundary and single-candidate attribution are explicit, approved trade-offs.
+
+Confirmed sound: commitment formulas, private derivation/siloing, calldata mappings, index-zero matching, bounded scans, scoped Web Locks semantics, the canonical handoff, separable arcs, Biome limits.
+
+### Triage — all three verified (`claimFuelStandaloneOnce` refuses private, `resolvePrivateFuelFee`/`privateFpcFee` is the only private fuel spend, `assertL1Chain` at `useSend.ts:105`) and **adopted** in v8: public token+gas routes to the existing public standalone recovery and completes on settlement; private token+gas stays open with its sealed material (follow-up `private-fuel-standalone`, no new fee surface); the L1 chain is asserted before and after the scan; Phase 1 owns A's locked completion and both policy callers; the diagram is corrected.
