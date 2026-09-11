@@ -79,7 +79,6 @@ describe("recordState — the gates the card and the dock share", () => {
 
 	it("a token claimed by another submitter offers CLAIM only as the verification that finishes it", () => {
 		const fuel = { amount: "10", secret: "0xs", secretHashHex: "0xf", minOutput: "9", leafIndex: "8", received: "5" }
-		// Fuel still open (public: CLAIM YOUR GAS is the action; private: nothing) ⇒ no CLAIM.
 		const open = state(dep({ schema: 2, leafIndex: "1", messageHash: "0xm", claimedByOther: true, fuel }))
 		expect(open.claimedByOther).toBe(true)
 		// Open fuel, public or private: the click still verifies — a false marker must not hide the claim

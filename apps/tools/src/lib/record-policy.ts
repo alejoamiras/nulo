@@ -87,7 +87,7 @@ export function stageOf(rec: BridgeJournalRecord, rt: RecordRuntime): RecordStag
  *  if the marker was wrong, restores the ordinary claim — whatever its fuel says. */
 function claimedByOtherFacts(rec: BridgeJournalRecord): { claimedByOther: boolean; verifiable: boolean } {
 	const d = rec as DepositJournalRecord
-	const claimedByOther = rec.direction === "deposit" && d.claimedByOther === true && !!d.leafIndex && !d.claimTxHash
+	const claimedByOther = rec.direction === "deposit" && d.claimedByOther === true && !!d.leafIndex && !!d.messageHash && !d.claimTxHash
 	return { claimedByOther, verifiable: claimedByOther && rec.completedAt === undefined }
 }
 

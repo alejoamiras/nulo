@@ -945,13 +945,14 @@ async function resolveClaimStart(
 	const fresh = records.value.find((r) => r.id === id) as ClaimRecord | undefined
 	if (!fresh) return "stop" // Cross-tab discard while the unseal signature waited.
 	const probe = await probeClaimedElsewhere(fresh, material)
-	// The read awaited too: the record may have been discarded or replaced meanwhile.
+	// The read awaited too: the record may have been discarded or replaced meanwhile — read from
+	// storage, since another tab's write reaches the reactive copy only with its storage event.
 	if (genOf(id) !== gen) return "stop"
-	const live = records.value.find((r) => r.id === id) as ClaimRecord | undefined
-	if (!live || !sameClaimSnapshot(live, fresh)) return "stop"
+	const stored = currentRecord(id)
+	if (!stored || !sameClaimSnapshot(stored, fresh)) return "stop"
 	if (probe === "invalid") return reportTamperedMessage(id)
-	if (probe === "nullified" && claimsThroughHub(live)) return completeClaimedByOther(live, gen)
-	return { fresh: live, material }
+	if (probe === "nullified" && claimsThroughHub(fresh)) return completeClaimedByOther(fresh, gen)
+	return { fresh, material }
 }
 
 async function settleConsumability(
@@ -1973,10 +1974,11 @@ function resumeActionFor(rec: BridgeJournalRecord): "skip" | "deposit" | "withdr
 }
 
 /** A `claimedByOther` marker is only meaningful on the shape the completion path writes it on: a
- *  claimable record (leaf known) with no claim of its own. Anywhere else — a hash-less
- *  record, one with a claim transaction — it is ignored and the ordinary recovery rules apply. */
+ *  claimable record (leaf and message hash known — the verification needs both) with no claim of
+ *  its own. Anywhere else — a hash-less record, one with a claim transaction — it is ignored and
+ *  the ordinary recovery rules apply. */
 function markerApplies(rec: ClaimRecord): boolean {
-	return rec.claimedByOther === true && !!rec.leafIndex && !rec.claimTxHash
+	return rec.claimedByOther === true && !!rec.leafIndex && !!rec.messageHash && !rec.claimTxHash
 }
 
 /** A marked, unfinished record resumes (prompt-free, any session) to be verified: the completion,
