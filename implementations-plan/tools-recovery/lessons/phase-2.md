@@ -23,3 +23,30 @@ Commit `d7079a8b` (arc 1, branch `worktree-tools-recovery`). Gate: the Phase 1 c
   fails silently (the log holds one `Permission denied` line).
 - The "No artifact registered … private FJ balance read failed (fail-closed → null)" console lines
   the run prints are the existing fail-closed balance probe, not a regression.
+
+## Arc-1 codex loop (post-implementation, `/codex high`, read-only)
+
+**Round 1** — session `01a09092-2eb1-7b00-8177-b528a464c2bb`, verdict `request-changes` (3 high, 1 medium).
+Verified against the code:
+- H1 *`standaloneClaimed` latched from a consumed-shaped send error is not checkpointed evidence* —
+  **pre-existing latch semantics** (`deposit-flow.ts:193-199`, with its own rationale) that the plan
+  lists as "settled fuel"; the exposure (a proposed-only consumption that later drops ⇒ a completed
+  record's fuel affordance hidden ⇒ 7-day prune) is the same for every completed public token+gas
+  record today. Not changed in this arc; recorded as a residual for the owner (`standalone-latch-checkpointed`).
+- H2 *settlement decided on the captured record while the guard ignored the fuel block* — **accepted,
+  fixed**: `sameFuelState` (sealed copy, register hash, fuel secret hash / claim hash / consumed /
+  standaloneClaimed) joins the guard; settlement is decided on the re-read record.
+- H3 *a persisted `claimedByOther` bypasses the probe* — **accepted, fixed**: `revalidateClaimedByOther`
+  re-reads the nullifier with the material at hand (no prompt): nullified ⇒ completion, live ⇒ the
+  marker is dropped, no material ⇒ the record waits. Test (k) re-pinned (one probe on resume).
+- M4 *the early completion skips the fuel receipt reconciliation the claim build performs* —
+  **accepted, fixed**: `reconcileFuel` dep (wired to `reconcileFuelConsumed`), run before settlement
+  when the fuel has its own `claimTxHash`.
+- Comments: three cuts/rewrites applied (`parity` line, the completion doc, the card's line doc);
+  `journal-locks.ts` null-callback comment kept.
+- Tests added: forged marker (public live / public nullified / private without material), fuel swap
+  while the read awaits, fuel reconciliation before settlement, a throwing record body releases the
+  lock, `hubMessageState` reads the envelope's facts, the standalone gas claim's hand-back.
+  Skipped: "generation change during the lookup" (a generation only moves through a new runner,
+  which the record lock excludes, or a discard — already pinned); "proposed-only fuel consumption"
+  (H1, residual).
