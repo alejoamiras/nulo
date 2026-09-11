@@ -21,6 +21,7 @@ import {
 	pruneCompleted,
 	quarantineInvalid,
 	rekeyRecord,
+	rekeyRecordWhen,
 	removeRecord,
 	upsertRecord,
 } from "./journal"
@@ -155,6 +156,26 @@ describe("journal CRUD", () => {
 		const records = loadJournal(kv)
 		expect(records).toHaveLength(1)
 		expect(records[0].id).toBe("0xexit1")
+	})
+
+	it("rekeyRecordWhen re-keys only a source that passes its guard and only onto a free id", () => {
+		const kv = memKV()
+		upsertRecord(kv, withdraw("wd-pending-x", { exitTxHash: undefined }))
+		// The guard sees the live source and the whole journal.
+		expect(rekeyRecordWhen(kv, "wd-pending-x", (cur) => !!(cur as WithdrawJournalRecord).exitTxHash, withdraw("0xexit1"))).toBe(false)
+		expect(loadJournal(kv).map((r) => r.id)).toEqual(["wd-pending-x"])
+		expect(rekeyRecordWhen(kv, "wd-pending-x", (cur, all) => all.length === 1 && !cur.completedAt, withdraw("0xexit1"))).toBe(true)
+		expect(loadJournal(kv).map((r) => r.id)).toEqual(["0xexit1"])
+		// A destination already held by another record is never overwritten.
+		upsertRecord(kv, withdraw("wd-pending-y", { exitTxHash: undefined }))
+		expect(rekeyRecordWhen(kv, "wd-pending-y", () => true, withdraw("0xexit1"))).toBe(false)
+		expect(
+			loadJournal(kv)
+				.map((r) => r.id)
+				.sort(),
+		).toEqual(["0xexit1", "wd-pending-y"])
+		// A vanished source is a no-op.
+		expect(rekeyRecordWhen(kv, "gone", () => true, withdraw("0xexit2"))).toBe(false)
 	})
 
 	it("remove deletes only the targeted record", () => {

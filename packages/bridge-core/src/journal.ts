@@ -139,6 +139,10 @@ export interface DepositJournalRecord extends JournalBase {
 	 *  event. The 5.0 readiness gate polls `getL1ToL2MessageCheckpoint` on this before simulating the claim. */
 	messageHash?: string
 	claimTxHash?: string
+	/** The token message was consumed by another submitter (a relayer, another tab): proven by the
+	 *  message's own nullifier, so the tokens arrived without a claim of ours. Recorded as its own fact
+	 *  — there is no `claimTxHash` to show. */
+	claimedByOther?: boolean
 	/** The Aztec block height when the L1 deposit confirmed - anchors the sync countdown
 	 *  (display pacing only; the claim-simulate gate stays the consumability authority). */
 	depositL2Block?: number
@@ -390,6 +394,22 @@ export function rekeyRecord(kv: KV, oldId: string, next: BridgeJournalRecord): v
 	const records = loadJournal(kv).filter((r) => r.id !== oldId && r.id !== next.id)
 	records.push({ ...next, updatedAt: Date.now() })
 	write(kv, records)
+}
+
+/** `rekeyRecord` guarded the way `patchRecordWhen` is: the source must still exist and pass `when`
+ *  (which also sees the whole journal), and no record may already hold the new id — unlike the
+ *  unguarded form, this never overwrites a destination. One synchronous load → guard → write. */
+export function rekeyRecordWhen(
+	kv: KV,
+	oldId: string,
+	when: (current: BridgeJournalRecord, all: BridgeJournalRecord[]) => boolean,
+	next: BridgeJournalRecord,
+): boolean {
+	const records = loadJournal(kv)
+	const current = records.find((r) => r.id === oldId)
+	if (!current || records.some((r) => r.id === next.id) || !when(current, records)) return false
+	write(kv, [...records.filter((r) => r.id !== oldId), { ...next, updatedAt: Date.now() }])
+	return true
 }
 
 export function removeRecord(kv: KV, id: string): void {

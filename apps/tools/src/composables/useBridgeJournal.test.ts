@@ -12,10 +12,13 @@ import {
 	predictPortal,
 	recoveryKeyFromSignature,
 	sealDepositEnvelope,
+	upsertRecord,
 } from "@nulo/bridge-core"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { GrantOutcome } from "@/lib/send-model"
 import { stepperPhases } from "@/lib/bridge-steps"
+import { memoryJournalLocks } from "@/lib/journal-locks"
+import { recordState } from "@/lib/record-policy"
 
 vi.mock("@/contracts/bridge-generation", () => ({ FUEL_PORTAL: "0xfd05ee8687d4ca828ba3d26ef04b80dd1348e5bd" }))
 
@@ -154,7 +157,10 @@ function baseDeps(kv: KV) {
 	}
 }
 
-async function sealEnvelopeFor(rec: DepositJournalRecord, over: Partial<{ recipient: string; amount: string; sealerL1: string }> = {}) {
+async function sealEnvelopeFor(
+	rec: DepositJournalRecord | SendDepositRecord,
+	over: Partial<{ recipient: string; amount: string; sealerL1: string }> = {},
+) {
 	const key = await recoveryKeyFromSignature(SIG)
 	return sealDepositEnvelope(key, {
 		secret: "0xprivatesecret",
@@ -1424,5 +1430,348 @@ describe("useBridgeJournal - send (schema 3) records", () => {
 			discard("0xa")
 			expect(retainPinnedTokens).toHaveBeenLastCalledWith([TOKEN_BLOCK.l2Token])
 		})
+	})
+})
+
+/** A fueled hub send: the token leg plus a public gas slice, both messages' facts on the record. */
+function mkFueled(id: string, over: Record<string, unknown> = {}): SendDepositRecord {
+	return mkSend(id, {
+		intent: "token+gas",
+		fuel: { amount: "10", secret: "0xfuelsecret", secretHashHex: `${id}fuel`, minOutput: "9", leafIndex: "8", received: "5" },
+		...over,
+	})
+}
+
+const WALLET = { status: "connected", selectedAccount: RECIPIENT, accounts: [{ address: RECIPIENT }] }
+const CLAIM_TX = "0x00140000000000000000000000000000000000000000000000636c61696d7478"
+
+describe("useBridgeJournal - consumed → done on the message's own nullifier", () => {
+	let kv: KV
+
+	beforeEach(() => {
+		__resetJournalForTests()
+		kv = memKV()
+	})
+
+	const recordOf = (id: string) => useBridgeJournal().records.value.find((r) => r.id === id) as SendDepositRecord | undefined
+
+	it("(a) a public hub claim whose message is already nullified completes as claimed-by-another: no build, no send", async () => {
+		const send = sendDeps()
+		const messageNullified = vi.fn(async () => "nullified" as const)
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified })
+		addRecord(mkSend("0xother"))
+		await runDepositClaim("0xother")
+		const rec = recordOf("0xother") as SendDepositRecord
+		expect(rec.claimedByOther).toBe(true)
+		expect(rec.completedAt).toBe(999)
+		expect(rec.claimTxHash).toBeUndefined()
+		expect(send.claimSend).not.toHaveBeenCalled()
+		expect(messageNullified).toHaveBeenCalledWith(expect.objectContaining({ id: "0xother" }), { secretHex: "0xpublicsecret" })
+		expect(useBridgeJournal().runtime.value["0xother"]?.attention).toBeUndefined()
+	})
+
+	it("(b) a private record with its secret cached hands the dep the unsealed material, then completes", async () => {
+		const send = sendDeps()
+		const messageNullified = vi.fn(async () => "nullified" as const)
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified })
+		const rec = mkSend("0xprivother", { isPrivate: true, secret: undefined, sealerL1: SEALER })
+		rec.sealedEnvelope = await sealEnvelopeFor(rec)
+		addRecord(rec)
+		cacheSecret("0xprivother", "0xprivatesecret", {
+			v: 2,
+			secret: "0xprivatesecret",
+			recipient: rec.recipient,
+			amount: rec.amount,
+			sealerL1: SEALER,
+			leafIndex: rec.leafIndex,
+		})
+		await runDepositClaim("0xprivother")
+		expect(messageNullified).toHaveBeenCalledWith(
+			expect.objectContaining({ id: "0xprivother" }),
+			expect.objectContaining({ secretHex: "0xprivatesecret", envelope: expect.objectContaining({ secret: "0xprivatesecret" }) }),
+		)
+		expect(recordOf("0xprivother")?.claimedByOther).toBe(true)
+		expect(recordOf("0xprivother")?.completedAt).toBe(999)
+		expect(send.claimSend).not.toHaveBeenCalled()
+	})
+
+	it("(c) a live message claims exactly as before: the hub build, the send, the receipt", async () => {
+		const send = sendDeps()
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified: vi.fn(async () => "live" as const) })
+		addRecord(mkSend("0xlive"))
+		await runDepositClaim("0xlive")
+		expect(send.claimSend).toHaveBeenCalledTimes(1)
+		expect(recordOf("0xlive")?.claimTxHash).toBe("0xhubclaim")
+		expect(recordOf("0xlive")?.completedAt).toBe(999)
+		expect(recordOf("0xlive")?.claimedByOther).toBeUndefined()
+	})
+
+	it.each([
+		["the private-context wording", "No non-nullified L1 to L2 message found"],
+		["the public-context wording", "L1-to-L2 message is already nullified"],
+	])("(d) the simulate throws %s: nullified ⇒ claimed by another; still live ⇒ today's error", async (_label, wording) => {
+		const consumedSimulate = () => ({
+			simulate: async () => {
+				throw new Error(wording)
+			},
+			send: async () => ({ txHash: "0xnever" }),
+		})
+		const send = { ...sendDeps(), claimSend: vi.fn(async () => consumedSimulate()) }
+		const messageNullified = vi
+			.fn<() => Promise<"nullified" | "live">>()
+			.mockResolvedValueOnce("live")
+			.mockResolvedValueOnce("nullified")
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified })
+		addRecord(mkSend("0xsim"))
+		await runDepositClaim("0xsim")
+		expect(recordOf("0xsim")?.claimedByOther).toBe(true)
+		expect(recordOf("0xsim")?.completedAt).toBe(999)
+		expect(recordOf("0xsim")?.claimTxHash).toBeUndefined()
+
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified: vi.fn(async () => "live" as const) })
+		addRecord(mkSend("0xsimlive"))
+		await runDepositClaim("0xsimlive")
+		expect(recordOf("0xsimlive")?.claimedByOther).toBeUndefined()
+		expect(recordOf("0xsimlive")?.completedAt).toBeUndefined()
+		expect(useBridgeJournal().runtime.value["0xsimlive"]?.attention).toBe("error")
+	})
+
+	it("(e) a prompt-free resume with no material asks the dep nothing, prompts for nothing, and keeps today's outcome", async () => {
+		const deps = baseDeps(kv)
+		const messageNullified = vi.fn(async () => "nullified" as const)
+		connectJournalDeps({ ...deps, ...sendDeps(), messageNullified })
+		const rec = mkSend("0xnomaterial", { isPrivate: true, secret: undefined, sealerL1: SEALER, claimTxHash: CLAIM_TX })
+		rec.sealedEnvelope = await sealEnvelopeFor(rec)
+		addRecord(rec)
+		resumeSessionWork()
+		await new Promise((r) => setTimeout(r, 0))
+		expect(messageNullified).not.toHaveBeenCalled()
+		expect(deps.signL1).not.toHaveBeenCalled()
+		expect(recordOf("0xnomaterial")?.completedAt).toBe(999)
+		expect(recordOf("0xnomaterial")?.claimedByOther).toBeUndefined()
+	})
+
+	it("(g) an invalid message identity stops with tampered, builds nothing and completes nothing - fresh and resumed", async () => {
+		const send = sendDeps()
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified: vi.fn(async () => "invalid" as const) })
+		addRecord(mkSend("0xbadid"))
+		await runDepositClaim("0xbadid")
+		expect(useBridgeJournal().runtime.value["0xbadid"]?.attention).toBe("tampered")
+		expect(send.claimSend).not.toHaveBeenCalled()
+		expect(recordOf("0xbadid")?.completedAt).toBeUndefined()
+		expect(recordOf("0xbadid")?.claimedByOther).toBeUndefined()
+
+		addRecord(mkSend("0xbadresume", { claimTxHash: CLAIM_TX }))
+		await runDepositClaim("0xbadresume")
+		expect(useBridgeJournal().runtime.value["0xbadresume"]?.attention).toBe("tampered")
+		expect(recordOf("0xbadresume")?.completedAt).toBeUndefined()
+		expect(send.claimSend).not.toHaveBeenCalled()
+	})
+
+	it("(h) gas-only and pre-generation records never reach the nullifier: their claim-build probe decides as before", async () => {
+		const messageNullified = vi.fn(async () => "nullified" as const)
+		// The claim-build probe's own consumed answer: the message is gone ⇒ the awaited claim landed.
+		const claim = vi.fn(async () => ({
+			simulate: async () => {
+				throw new Error("No non-nullified L1 to L2 message found")
+			},
+			send: async () => ({ txHash: "0xnever" }),
+		}))
+		connectJournalDeps({ ...baseDeps(kv), ...sendDeps(), claim, messageNullified })
+		addRecord(mkGasOnly("0xgasresume", { claimTxHash: CLAIM_TX }))
+		addRecord(mkDeposit("0xlegacyresume", { claimTxHash: CLAIM_TX }))
+		await runDepositClaim("0xgasresume")
+		await runDepositClaim("0xlegacyresume")
+		expect(messageNullified).not.toHaveBeenCalled()
+		expect(claim).toHaveBeenCalledTimes(2) // the probe rebuilt the claim for each, as today
+		expect(recordOf("0xgasresume")?.completedAt).toBe(999)
+		expect(recordOf("0xlegacyresume")?.completedAt).toBe(999)
+		expect(recordOf("0xgasresume")?.claimedByOther).toBeUndefined()
+	})
+
+	it("(i) a resumed hub claim with a success receipt reads the nullifier, never the claim build: live keeps polling, nullified completes", async () => {
+		const send = sendDeps()
+		const messageNullified = vi
+			.fn<() => Promise<"nullified" | "live">>()
+			.mockResolvedValueOnce("live")
+			.mockResolvedValueOnce("live")
+			.mockResolvedValue("nullified")
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified })
+		addRecord(mkSend("0xresumed", { claimTxHash: CLAIM_TX }))
+		await runDepositClaim("0xresumed")
+		expect(send.claimSend).not.toHaveBeenCalled()
+		expect(messageNullified).toHaveBeenCalledTimes(3)
+		expect(recordOf("0xresumed")?.completedAt).toBe(999)
+		expect(recordOf("0xresumed")?.claimedByOther).toBeUndefined() // our own claim landed; not another's
+	})
+
+	it("(j) a record another tab replaced while the read awaited is never completed", async () => {
+		const send = sendDeps()
+		const messageNullified = vi.fn(async () => {
+			upsertRecord(kv, { ...mkSend("0xreplaced"), amount: "1" })
+			return "nullified" as const
+		})
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified })
+		addRecord(mkSend("0xreplaced"))
+		await runDepositClaim("0xreplaced")
+		expect(recordOf("0xreplaced")?.amount).toBe("1")
+		expect(recordOf("0xreplaced")?.completedAt).toBeUndefined()
+		expect(recordOf("0xreplaced")?.claimedByOther).toBeUndefined()
+		expect(send.claimSend).not.toHaveBeenCalled()
+	})
+
+	it("(k) token+gas PUBLIC, token gone and fuel live: the fact without completion, the gas claim stays offered, and the settled fuel completes it after a reload", async () => {
+		const send = sendDeps()
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified: vi.fn(async () => "nullified" as const) })
+		addRecord(mkFueled("0xfueled"))
+		await runDepositClaim("0xfueled")
+		let rec = recordOf("0xfueled") as SendDepositRecord
+		expect(rec.claimedByOther).toBe(true)
+		expect(rec.completedAt).toBeUndefined()
+		expect(recordState(rec, {}, WALLET).fuelRecoverable).toBe(true)
+		expect(recordState(rec, {}, WALLET).showClaim).toBe(false)
+		// The standalone gas claim lands, then the tab dies before the engine sees it.
+		updateRecord("0xfueled", {
+			fuel: { ...(rec.fuel as NonNullable<typeof rec.fuel>), standaloneClaimed: true },
+		} as Partial<SendDepositRecord>)
+		__resetJournalForTests()
+		const messageNullified = vi.fn(async () => "nullified" as const)
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified })
+		useBridgeJournal()
+		resumeSessionWork()
+		await new Promise((r) => setTimeout(r, 0))
+		rec = recordOf("0xfueled") as SendDepositRecord
+		expect(rec.completedAt).toBe(999)
+		expect(rec.claimedByOther).toBe(true)
+		expect(messageNullified).not.toHaveBeenCalled() // a claimed-by-another record is never re-probed
+		expect(send.claimSend).not.toHaveBeenCalled()
+	})
+
+	it("(k′) token+gas PRIVATE, token gone and fuel live: the fact without completion, no fuel affordance, the sealed copy kept, never resumed", async () => {
+		const send = sendDeps()
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified: vi.fn(async () => "nullified" as const) })
+		const rec = mkFueled("0xprivfueled", { isPrivate: true, secret: undefined, sealerL1: SEALER })
+		rec.sealedEnvelope = await sealEnvelopeFor(rec)
+		addRecord(rec)
+		cacheSecret("0xprivfueled", "0xprivatesecret", {
+			v: 2,
+			secret: "0xprivatesecret",
+			recipient: rec.recipient,
+			amount: rec.amount,
+			sealerL1: SEALER,
+			leafIndex: rec.leafIndex,
+		})
+		await runDepositClaim("0xprivfueled")
+		const after = recordOf("0xprivfueled") as SendDepositRecord
+		expect(after.claimedByOther).toBe(true)
+		expect(after.completedAt).toBeUndefined()
+		expect(after.sealedEnvelope).toBe(rec.sealedEnvelope)
+		const wallet = WALLET
+		expect(recordState(after, {}, wallet).fuelRecovery).toBe("none")
+		expect(recordState(after, {}, wallet).showClaim).toBe(false)
+		expect(recordState(after, {}, wallet).claimedByOther).toBe(true)
+
+		__resetJournalForTests()
+		const messageNullified = vi.fn(async () => "nullified" as const)
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified, now: () => 999 + 30 * 24 * 60 * 60 * 1000 })
+		useBridgeJournal()
+		resumeSessionWork()
+		await new Promise((r) => setTimeout(r, 0))
+		expect(recordOf("0xprivfueled")?.sealedEnvelope).toBe(rec.sealedEnvelope) // not pruned: never completed
+		expect(messageNullified).not.toHaveBeenCalled()
+	})
+
+	it("(l) token+gas with its fuel already settled completes at once", async () => {
+		const send = sendDeps()
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified: vi.fn(async () => "nullified" as const) })
+		addRecord(
+			mkFueled("0xsettled", {
+				fuel: {
+					amount: "10",
+					secret: "0xfuelsecret",
+					secretHashHex: "0xfh",
+					minOutput: "9",
+					leafIndex: "8",
+					received: "5",
+					consumed: true,
+				},
+			}),
+		)
+		await runDepositClaim("0xsettled")
+		expect(recordOf("0xsettled")?.completedAt).toBe(999)
+		expect(recordOf("0xsettled")?.claimedByOther).toBe(true)
+		expect(send.claimSend).not.toHaveBeenCalled()
+	})
+
+	it("a dep that throws reads as unknown: the claim proceeds as today", async () => {
+		const send = sendDeps()
+		connectJournalDeps({
+			...baseDeps(kv),
+			...send,
+			messageNullified: vi.fn(async () => {
+				throw new Error("rpc down")
+			}),
+		})
+		addRecord(mkSend("0xthrows"))
+		await runDepositClaim("0xthrows")
+		expect(send.claimSend).toHaveBeenCalledTimes(1)
+		expect(recordOf("0xthrows")?.completedAt).toBe(999)
+	})
+})
+
+describe("useBridgeJournal - the two cross-tab locks", () => {
+	let kv: KV
+
+	beforeEach(() => {
+		__resetJournalForTests()
+		kv = memKV()
+	})
+
+	it("a record another tab holds is skipped (held elsewhere) and runs once the holder releases", async () => {
+		const locks = memoryJournalLocks()
+		const send = sendDeps()
+		connectJournalDeps({ ...baseDeps(kv), ...send, locks })
+		addRecord(mkSend("0xheld"))
+		let release: () => void = () => {}
+		const holder = locks.record("0xheld", () => new Promise<void>((r) => (release = r)))
+		await runDepositClaim("0xheld")
+		expect(send.claimSend).not.toHaveBeenCalled()
+		expect(useBridgeJournal().runtime.value["0xheld"]?.busy).toBeFalsy()
+		release()
+		await holder
+		await runDepositClaim("0xheld")
+		expect(send.claimSend).toHaveBeenCalledTimes(1)
+		expect(useBridgeJournal().records.value.find((r) => r.id === "0xheld")?.completedAt).toBe(999)
+	})
+
+	it("a held journal lock delays the guarded completion, and the guard re-reads after the release", async () => {
+		const locks = memoryJournalLocks()
+		const send = sendDeps()
+		connectJournalDeps({ ...baseDeps(kv), ...send, locks, messageNullified: vi.fn(async () => "nullified" as const) })
+		addRecord(mkSend("0xdelayed"))
+		let release: () => void = () => {}
+		const holder = locks.journal(() => new Promise<void>((r) => (release = r)))
+		const run = runDepositClaim("0xdelayed")
+		await new Promise((r) => setTimeout(r, 0))
+		expect((useBridgeJournal().records.value.find((r) => r.id === "0xdelayed") as SendDepositRecord).claimedByOther).toBeUndefined()
+		// Another tab moved the record while the write waited: the re-read guard must refuse it.
+		upsertRecord(kv, { ...mkSend("0xdelayed"), amount: "2" })
+		release()
+		await holder
+		await run
+		const rec = useBridgeJournal().records.value.find((r) => r.id === "0xdelayed") as SendDepositRecord
+		expect(rec.amount).toBe("2")
+		expect(rec.claimedByOther).toBeUndefined()
+		expect(rec.completedAt).toBeUndefined()
+	})
+
+	it("without a lock API the record lock is the process-local dedup and the guarded write is synchronous best effort", async () => {
+		const send = sendDeps()
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified: vi.fn(async () => "nullified" as const) })
+		addRecord(mkSend("0xnolocks"))
+		const first = runDepositClaim("0xnolocks")
+		const second = runDepositClaim("0xnolocks")
+		await Promise.all([first, second])
+		expect(useBridgeJournal().records.value.find((r) => r.id === "0xnolocks")?.completedAt).toBe(999)
 	})
 })

@@ -54,6 +54,13 @@ describe("recordState — the gates the card and the dock share", () => {
 		expect(stranded.showClaim).toBe(true)
 	})
 
+	it("a token claimed by another submitter never offers CLAIM again, and says so", () => {
+		const s = state(dep({ leafIndex: "1", claimedByOther: true }))
+		expect(s.showClaim).toBe(false)
+		expect(s.claimedByOther).toBe(true)
+		expect(state(dep({ leafIndex: "1" })).claimedByOther).toBe(false)
+	})
+
 	it("busy hides every button; completion ends the stage", () => {
 		expect(state(dep({ leafIndex: "1" }), { busy: true }).showClaim).toBe(false)
 		expect(state(dep({ leafIndex: "1", completedAt: 5 })).stage).toBe("done")

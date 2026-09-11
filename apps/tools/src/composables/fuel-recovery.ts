@@ -9,7 +9,7 @@ import { decideStandaloneFuelRecovery } from "@/lib/fuel-claim-state"
 import { safeAddressText } from "@/lib/token-display"
 import { humanizeWalletError } from "@/lib/wallet-errors"
 import { fuelReceiptStatus, patchFuel, sendStandaloneFjClaim } from "./deposit-flow"
-import { currentRecord, flagRecordError, updateRecord, useBridgeJournal } from "./useBridgeJournal"
+import { currentRecord, flagRecordError, useBridgeJournal } from "./useBridgeJournal"
 import { useBridgeWallet } from "./useBridgeWallet"
 import { withOperation } from "./useOpsInFlight"
 
@@ -101,6 +101,7 @@ async function claimFuelStandaloneOnce(id: string): Promise<void> {
 			isFeeJuiceAsset: assetKindOf(rec) === "fee-juice",
 			schema: rec.schema,
 			completedAt: rec.completedAt,
+			claimedByOther: rec.claimedByOther,
 			fuel,
 		}) !== "offer"
 	) {
@@ -114,4 +115,7 @@ async function claimFuelStandaloneOnce(id: string): Promise<void> {
 		throw new Error(`This gas claim belongs to ${shown.slice(0, 6)}…${shown.slice(-4)}. Switch to that account to claim.`)
 	}
 	await withOperation(() => sendStandaloneFjClaim(aztec, AztecAddress.fromStringUnsafe(rec.recipient), fuel, id))
+	// A token another submitter claimed had only its fuel left open: with the fuel settled, the
+	// engine's guarded completion is the one write left, and it prompts for nothing.
+	if (rec.claimedByOther && rec.completedAt === undefined) await useBridgeJournal().runDepositClaim(id, { interactive: false })
 }

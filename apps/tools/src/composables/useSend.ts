@@ -46,8 +46,13 @@ import type { GasLegPlan, GrantOutcome, SendPlan } from "@/lib/send-model"
 import { fuelRecipientFor } from "@/lib/fuel-target"
 import { normalizeError } from "@/lib/errors"
 import { humanizeWalletError } from "@/lib/wallet-errors"
+import { webJournalLocks } from "@/lib/journal-locks"
+import { tokenMessageState } from "@/lib/message-nullifier"
+import { resolveToolsTarget } from "@/lib/network-targets"
 import {
+	type ClaimMaterial,
 	type ClaimRecord,
+	type MessageState,
 	addRecordVerified,
 	attestSendTokenBlocks,
 	connectJournalDeps,
@@ -249,7 +254,40 @@ export function ensureSendJournalDeps(): void {
 		retainPinnedTokens: (needed) => retainPinnedHubTokens(needed),
 		l2BlockNumber: async () => Number(await createAztecNodeClient(NODE_URL).getBlockNumber()),
 		messageReadiness: (messageHash) => messageReadiness(messageHash),
+		messageNullified: (rec, material) => hubMessageNullified(rec, material),
 		claimReceiptStatus: (txHash) => claimReceiptStatus(txHash),
+		locks: webJournalLocks(),
+	})
+}
+
+/** The hub token deposit's message, recomputed from the record's own facts and read at the
+ *  journal's settlement floor. A private record's amount and recipient come from the OPENED envelope
+ *  (the sealed truth), never the display fields; the hub and rollup version are this target's. */
+async function hubMessageNullified(rec: SendDepositRecord, material: ClaimMaterial): Promise<MessageState> {
+	if (!rec.messageHash || !rec.leafIndex) return "unknown"
+	const truth = material.envelope ?? rec
+	let amount: bigint
+	try {
+		amount = BigInt(truth.amount)
+	} catch {
+		return "unknown"
+	}
+	return tokenMessageState({
+		facts: {
+			portal: rec.portal,
+			chainId: rec.chainId,
+			hub: rec.bridge,
+			rollupVersion: resolveToolsTarget().rollupVersion,
+			recipient: truth.recipient,
+			amount,
+			isPrivate: rec.isPrivate,
+			secretHashHex: rec.secretHashHex,
+			leafIndex: rec.leafIndex,
+		},
+		storedMessageHash: rec.messageHash,
+		secretHex: material.secretHex,
+		nullified: async (nullifier) =>
+			(await createAztecNodeClient(NODE_URL).getNullifierMembershipWitness("checkpointed", nullifier)) !== undefined,
 	})
 }
 
