@@ -85,3 +85,9 @@ Verified against the code, all accepted and fixed in one commit:
   The attach cells now exit amounts no other cell in the file uses (7 and 9). 31b + 31c alone at
   `f4593d94`+: **2 passed** (3.9 min) — 31b attached, consumed and finished (1.4 min); 31c's second tab
   was told a tab is finishing it, one portal transaction across both (1.7 min).
+
+**Round 3** — resumed, verdict `request-changes` (1 medium) — the plan's three-round stop. The
+finding (the attach's `none`/`ambiguous` outcomes returned before the tip check, so a reorg during
+the scan could say "no exit was found") is a two-line fix, applied and pinned ("a zero-match scan
+that crosses a reorg is incomplete, never none"). Per plan § Post-implementation the per-arc loop stops
+here; the fresh cross-arc pass reviews the whole stack, and the residue is surfaced to the owner.
