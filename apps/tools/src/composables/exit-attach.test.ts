@@ -275,6 +275,11 @@ describe("findVerifiedExitTx — the search plus the re-read before the re-key",
 		await expect(findExitTx(record(), node, new Set(), opts())).resolves.toMatchObject({ exitTxHash: "0xa" })
 	})
 
+	it("a zero-match scan that crosses a reorg is incomplete, never none", async () => {
+		const { node } = fakeNode([], { tipHash: (reads) => (reads.length > 3 ? "0xreorged" : "0xtip") })
+		await expect(findVerifiedExitTx(record(), node, new Set(), opts())).resolves.toBe("incomplete")
+	})
+
 	it("returns the match only while its first message still reads as this record's", async () => {
 		const hash = await exitMessageHash(record(), identity)
 		const { node } = fakeNode([{ hash: "0xa", block: 520, msgs: [hash] }])

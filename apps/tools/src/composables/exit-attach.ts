@@ -136,7 +136,10 @@ export async function findVerifiedExitTx(
 	try {
 		const scan = await scanExit(rec, node, taken, o, read)
 		const found = scan.pick()
-		if (typeof found === "string") return found
+		if (typeof found === "string") {
+			await scan.assertTipUnchanged()
+			return found
+		}
 		const eff = await read(() => node.getTxEffect(found.exitTxHash))
 		if (eff?.data.l2ToL1Msgs[0]?.toString() !== found.messageHash) return "incomplete"
 		// The tip is compared LAST: a reorg during the re-read could have added a second match.
