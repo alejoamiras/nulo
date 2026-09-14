@@ -169,6 +169,7 @@
     "buildIncomingCardProps": true,
     "buildJournalTerminalCardProps": true,
     "buildRestoreSecret": true,
+    "capRecords": true,
     "capTokenRows": true,
     "capitalize": true,
     "categoricalLabel": true,
