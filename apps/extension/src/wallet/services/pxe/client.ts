@@ -3,7 +3,7 @@
  * in `@nulo/aztec-runtime/pxe` and is Chrome-agnostic; this subclass
  * adds the MV3 offscreen-document bootstrap via `onReady`.
  */
-import { ensureOffscreenRunning } from "@/wallet/utils/offscreen"
+import { ensureOffscreenRunning, isOffscreenDocumentSender } from "@/wallet/utils/offscreen"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { RecoveryModeError } from "@nulo/extension-messaging/errors"
 import { type Methods, PxeServiceClientBase, type StoreKeyProvision } from "@nulo/aztec-runtime/pxe"
@@ -61,6 +61,11 @@ export class PxeServiceClient extends PxeServiceClientBase {
 	 */
 	protected override async onReady(): Promise<void> {
 		await ensureOffscreenRunning()
+	}
+
+	/** Responses and events settle only from the offscreen document itself (exact URL). */
+	protected override isAcceptedSender(sender: chrome.runtime.MessageSender | undefined): boolean {
+		return isOffscreenDocumentSender(sender)
 	}
 
 	protected override async request<T extends keyof Methods>(

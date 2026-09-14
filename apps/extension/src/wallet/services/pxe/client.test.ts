@@ -11,7 +11,10 @@ import { RecoveryModeError } from "@nulo/extension-messaging/errors"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import type { NetworkInfo } from "@nulo/aztec-runtime/pxe"
 
-vi.mock("@/wallet/utils/offscreen", () => ({ ensureOffscreenRunning: vi.fn(async () => undefined) }))
+vi.mock("@/wallet/utils/offscreen", async (importOriginal) => ({
+	...(await importOriginal<Record<string, unknown>>()),
+	ensureOffscreenRunning: vi.fn(async () => undefined),
+}))
 
 import { PxeServiceClient, registerPxeGenerationProvider, registerPxeRecoveryGuard } from "./client"
 
@@ -73,5 +76,23 @@ describe("PxeServiceClient recovery-mode admission", () => {
 		await client.clearChainState("p1", 31337)
 		await client.clearProfileState("p1", "gen-A")
 		expect(wire).toEqual(["clearChainState", "clearProfileState"])
+	})
+})
+
+describe("PxeServiceClient.isAcceptedSender — responses only from the offscreen document", () => {
+	const sender = (v: object) => v as unknown as chrome.runtime.MessageSender
+	test("exact offscreen URL (bare, ?instance=, tab-hosted) accepted; popup URL, url-less SW and foreign id rejected", () => {
+		vi.stubGlobal("chrome", {
+			runtime: { id: "nulo", getURL: (p: string) => `chrome-extension://nulo/${p}`, onMessage: { addListener: () => {} } },
+		})
+		const accepts = (s: chrome.runtime.MessageSender | undefined) =>
+			(new PxeServiceClient(noopLogger) as unknown as { isAcceptedSender: (x: unknown) => boolean }).isAcceptedSender(s)
+		const doc = "chrome-extension://nulo/src/offscreen/index.html"
+		expect(accepts(sender({ id: "nulo", url: doc }))).toBe(true)
+		expect(accepts(sender({ id: "nulo", url: `${doc}?instance=abc`, tab: { id: 4 } }))).toBe(true)
+		expect(accepts(sender({ id: "nulo", url: "chrome-extension://nulo/src/popup/index.html" }))).toBe(false)
+		expect(accepts(sender({ id: "nulo" }))).toBe(false)
+		expect(accepts(sender({ id: "other", url: doc }))).toBe(false)
+		expect(accepts(undefined)).toBe(false)
 	})
 })

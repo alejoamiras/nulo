@@ -13,7 +13,7 @@ import { LoggerStore } from "@/wallet/logger"
 import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/spec"
 import { svc } from "../composition-harness"
 import { OperationJournalService } from "./service"
-import type { OperationRecord } from "./spec"
+import type { OperationKind, OperationRecord } from "./spec"
 
 type Port = {
 	name: string
@@ -60,7 +60,7 @@ async function started(withProfileService = true) {
 			.find((m) => m.type === MessageType.Response && m.content.requestId === requestId)
 		return reply?.content
 	}
-	const seed = (profileId: string, kind = "transfer") =>
+	const seed = (profileId: string, kind: OperationKind = "transfer") =>
 		service.createOperation({ kind, origin: "popup", profileId, accountAddress: "0xshared" })
 	return { service, port, call, seed }
 }

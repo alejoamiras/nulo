@@ -1,7 +1,7 @@
 import type { ILogger } from "@nulo/wallet-core/logger"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { BaseService } from "../core/base-service"
-import { isTrustedInternalSender } from "../core/sender-auth"
+import { isBackgroundSender } from "../core/sender-auth"
 import { summarizeMessage } from "../core/envelope-summary"
 import type { ResponseContentLike } from "../core/base-client"
 import { MessageType } from "../messages"
@@ -36,9 +36,11 @@ export abstract class Service<TRequests extends MethodsMap, TEvents extends Even
 	}
 
 	private readonly onMessageListener = (message: RequestMessage<TRequests>, sender: chrome.runtime.MessageSender): boolean => {
-		// F-09: only same-extension SW / popup / offscreen senders may drive the
-		// offscreen listener — reject foreign extensions and any tab-bound sender.
-		if (!isTrustedInternalSender(sender)) return false
+		// Only the wallet's BACKGROUND context may drive the offscreen: a request from any other
+		// same-extension page (a compromised popup) that carries a victim's `{from, requestId}`
+		// would otherwise have the genuine offscreen settle the victim's pending call with a
+		// reflected response. Foreign extensions and tab-bound senders are out by the same test.
+		if (!isBackgroundSender(sender)) return false
 		if (typeof message === "object" && message !== null && message.to === this.name) {
 			this.onMessage(message) // fire and forget
 		}

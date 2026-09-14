@@ -10,6 +10,9 @@ import {
 } from "./offscreen"
 
 const sw = { id: "nulo-ext-id" } as chrome.runtime.MessageSender
+const OFFSCREEN_URL = "chrome-extension://test/src/offscreen/index.html"
+const offscreenDoc = { id: "nulo-ext-id", url: OFFSCREEN_URL } as chrome.runtime.MessageSender
+const popupDoc = { id: "nulo-ext-id", url: "chrome-extension://test/src/popup/index.html" } as chrome.runtime.MessageSender
 const tabSender = { id: "nulo-ext-id", tab: { id: 1 } } as unknown as chrome.runtime.MessageSender
 const foreign = { id: "other-ext" } as chrome.runtime.MessageSender
 const adopt = (token: string) => ({ type: OFFSCREEN_ADOPT_INSTANCE, token })
@@ -47,26 +50,33 @@ describe("isSupersededByAdopt (F-10 stale-offscreen self-close)", () => {
 
 describe("shouldRespondPong (B-17 readiness gate)", () => {
 	test("withholds PONG until services are ready", () => {
-		expect(shouldRespondPong(OFFSCREEN_PING, false)).toBe(false) // document loaded, PXE still initializing
-		expect(shouldRespondPong(OFFSCREEN_PING, true)).toBe(true) // PXE up → adoptable
+		expect(shouldRespondPong(OFFSCREEN_PING, false, sw)).toBe(false) // document loaded, PXE still initializing
+		expect(shouldRespondPong(OFFSCREEN_PING, true, sw)).toBe(true) // PXE up → adoptable
 	})
 
 	test("only PING triggers a PONG, even once ready", () => {
-		expect(shouldRespondPong(OFFSCREEN_READY_MESSAGE, true)).toBe(false)
-		expect(shouldRespondPong("SOMETHING_ELSE", true)).toBe(false)
-		expect(shouldRespondPong(null, true)).toBe(false)
+		expect(shouldRespondPong(OFFSCREEN_READY_MESSAGE, true, sw)).toBe(false)
+		expect(shouldRespondPong("SOMETHING_ELSE", true, sw)).toBe(false)
+		expect(shouldRespondPong(null, true, sw)).toBe(false)
+	})
+
+	test("a PING from a foreign extension gets no PONG", () => {
+		// biome-ignore lint/suspicious/noExplicitAny: the predicate reads getURL for the same-extension check
+		;(globalThis as any).chrome.runtime.getURL = (p: string) => `chrome-extension://test/${p}`
+		expect(shouldRespondPong(OFFSCREEN_PING, true, foreign)).toBe(false)
+		expect(shouldRespondPong(OFFSCREEN_PING, true, undefined)).toBe(false)
 	})
 })
 
 describe("ensureOffscreenRunning (cold-start single-flight)", () => {
-	let listeners: Array<(m: unknown) => void>
+	let listeners: Array<(m: unknown, sender?: chrome.runtime.MessageSender) => void>
 	let getContexts: Mock
 	let createDocument: Mock
 	let closeDocument: Mock
 	let sendMessage: Mock
 
-	const deliver = (message: unknown) => {
-		for (const l of [...listeners]) l(message)
+	const deliver = (message: unknown, sender: chrome.runtime.MessageSender = offscreenDoc) => {
+		for (const l of [...listeners]) l(message, sender)
 	}
 	const settleMicrotasks = () => new Promise((r) => setTimeout(r, 0))
 
@@ -119,6 +129,44 @@ describe("ensureOffscreenRunning (cold-start single-flight)", () => {
 
 		expect(createDocument).toHaveBeenCalledTimes(2)
 		expect(closeDocument).toHaveBeenCalledTimes(1)
+	})
+
+	test("READY from a foreign sender or a same-extension POPUP url does not resolve the pass; the offscreen document does", async () => {
+		const p = ensureOffscreenRunning()
+		await settleMicrotasks()
+		let resolved = false
+		p.then(() => (resolved = true))
+		deliver(OFFSCREEN_READY_MESSAGE, foreign)
+		deliver(OFFSCREEN_READY_MESSAGE, popupDoc)
+		deliver(OFFSCREEN_READY_MESSAGE, sw)
+		await settleMicrotasks()
+		expect(resolved).toBe(false)
+		// The legitimate Firefox hidden-window shape: exact URL WITH ?instance= and a tab.
+		deliver(OFFSCREEN_READY_MESSAGE, { id: "nulo-ext-id", url: `${OFFSCREEN_URL}?instance=t`, tab: { id: 2 } } as never)
+		await p
+		expect(resolved).toBe(true)
+	})
+
+	test("PONG from a foreign sender or a popup url does not mark the document healthy (zombie path recreates)", async () => {
+		getContexts.mockResolvedValue([{}])
+		sendMessage.mockImplementation(async (m: unknown) => {
+			if (m === OFFSCREEN_PING) {
+				queueMicrotask(() => deliver(OFFSCREEN_PONG, foreign))
+				queueMicrotask(() => deliver(OFFSCREEN_PONG, popupDoc))
+			}
+		})
+		vi.useFakeTimers()
+		try {
+			const p = ensureOffscreenRunning()
+			await vi.advanceTimersByTimeAsync(3_100)
+			// Health check timed out → zombie close → create; READY from the document completes it.
+			expect(closeDocument).toHaveBeenCalledTimes(1)
+			expect(createDocument).toHaveBeenCalledTimes(1)
+			deliver(OFFSCREEN_READY_MESSAGE)
+			await p
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	test("a later call runs a fresh pass: healthy existing document short-circuits without create", async () => {

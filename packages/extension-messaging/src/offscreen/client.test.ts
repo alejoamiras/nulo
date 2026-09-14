@@ -616,3 +616,50 @@ describe("requestAlreadyReady (internal readiness bypass)", () => {
 		await expect(b).resolves.toBe("second")
 	})
 })
+
+describe("response sender authentication", () => {
+	const OFFSCREEN = "chrome-extension://nulo/src/offscreen/index.html"
+	class ExactUrlClient extends TestClient {
+		protected override isAcceptedSender(sender: chrome.runtime.MessageSender | undefined): boolean {
+			return sender?.id === chrome.runtime.id && sender.url?.split(/[?#]/, 1)[0] === OFFSCREEN
+		}
+	}
+	const sender = (v: object) => v as unknown as chrome.runtime.MessageSender
+
+	test("a well-formed response from a FOREIGN extension id leaves the request pending (default policy)", async () => {
+		// biome-ignore lint/suspicious/noExplicitAny: stub
+		;(globalThis as any).chrome.runtime.id = "nulo"
+		const client = new TestClient()
+		const promise = client.echo("hi")
+		await flush()
+		const { requestId, fromUid } = getLastRequest()
+		let settled = false
+		promise.then(() => (settled = true))
+		emitMessage(makeResponse(requestId, fromUid, "forged"), sender({ id: "other-ext", url: OFFSCREEN }))
+		await flush()
+		expect(settled).toBe(false)
+		emitMessage(makeResponse(requestId, fromUid, "echo:hi"), sender({ id: "nulo" }))
+		await expect(promise).resolves.toBe("echo:hi")
+	})
+
+	test("exact-URL override: a same-extension POPUP url is ignored; the offscreen document (bare, ?instance=, tab-hosted) settles", async () => {
+		// biome-ignore lint/suspicious/noExplicitAny: stub
+		;(globalThis as any).chrome.runtime.id = "nulo"
+		const client = new ExactUrlClient()
+		const results: string[] = []
+		for (const url of [OFFSCREEN, `${OFFSCREEN}?instance=t1`]) {
+			const promise = client.echo("hi")
+			await flush()
+			const { requestId, fromUid } = getLastRequest()
+			emitMessage(
+				makeResponse(requestId, fromUid, "forged"),
+				sender({ id: "nulo", url: "chrome-extension://nulo/src/popup/index.html" }),
+			)
+			emitMessage(makeResponse(requestId, fromUid, "forged"), sender({ id: "nulo" }))
+			await flush()
+			emitMessage(makeResponse(requestId, fromUid, "echo:hi"), sender({ id: "nulo", url, tab: { id: 9 } }))
+			results.push(await promise)
+		}
+		expect(results).toEqual(["echo:hi", "echo:hi"])
+	})
+})
