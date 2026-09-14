@@ -16,7 +16,6 @@
  */
 
 import type { ILogger } from "@/wallet/logger"
-import { type LocalTxOrigin, OriginType } from "@/wallet/services/transaction/service"
 import type { WindowManager } from "@/wallet/services/window-manager/window-manager"
 import { describe, expect, test, vi } from "vitest"
 import { JobCancelledError, UserRejectedError } from "@nulo/extension-messaging/errors"
@@ -91,7 +90,6 @@ const seedQueued = (internals: Internals, id: string, journalId: string) => {
 		hooks: { queuedJournalId: journalId },
 	})
 }
-const origin: LocalTxOrigin = { type: OriginType.DAPP, name: "test-dapp" }
 
 describe("DappInteractionService forwards execution hooks (does not fire the baton release)", () => {
 	test("approveInteraction (popup path) forwards the stored hooks to executeOperations", async () => {

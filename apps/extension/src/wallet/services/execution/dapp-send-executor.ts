@@ -519,12 +519,9 @@ export class DappSendExecutor {
 		fence?: ExecutionFence,
 		hooks?: ExecutionHooks,
 	): Promise<string> {
-		// JS-context trust boundary: approveInteraction() at
-		// dapp-interaction/service.ts ships popup-built operations through
-		// without further validation. If the popup leaks a draft op with
-		// feeSettings undefined, surface a clear error here BEFORE
-		// downstream code dereferences feeSettings.priorityLevel /
-		// paymentMethod.kind and surfaces a confusing TypeError to the user.
+		// The SW materializes every operation it executes, so a missing
+		// feeSettings here is a materializer or fee-delta bug — fail before the
+		// build dereferences it.
 		if (!op.feeSettings) {
 			throw new Error("send_transaction: feeSettings is required")
 		}
