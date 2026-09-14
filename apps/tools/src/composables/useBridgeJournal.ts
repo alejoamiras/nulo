@@ -390,7 +390,9 @@ export function updateRecordWhen(
 	when: (current: BridgeJournalRecord) => boolean,
 	patch: Partial<BridgeJournalRecord> | ((current: BridgeJournalRecord) => Partial<BridgeJournalRecord>),
 ): BridgeJournalRecord | undefined {
-	return journalPatchWhen(deps.kv, id, when, patch)
+	const written = journalPatchWhen(deps.kv, id, when, patch)
+	reload()
+	return written
 }
 
 /** The PERSISTED record, read straight from kv — not this tab's reactive copy, which lags other
