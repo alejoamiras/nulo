@@ -32,6 +32,28 @@
 | Hygiene (B1) | Zeroize the password buffer in `getPasshash` (`encryption-key.ts:122-125`) + the two extra copies Codex noted (c01 NF-12/13); `autocomplete` on every secret input (`create.vue`, `ImportSecretForm.vue`, `SecretUnlockSection.vue`, `change-password.vue`; mirror `auth.vue:257`); neutralize `= + - @` cell prefixes in `logs-csv.ts`; fix the two write-before-check orderings (`pxe/service.ts:449-450` registerContract, `tx-request-builder.ts:381-407` buildNoFrom); **show the full address on the account-import preview** (`import.vue:227`, July residual re-opened). |
 | July residual (envelope swap) | **Stays accepted** as adjudicated in `implementations-plan/mac-identity-binding/plan.md`; re-checked 2026-09-13. Record, do not touch. |
 
+## July 2026 lineage (what this arc inherits)
+
+The previous whole-scope pass was `audit/security/2026-07-06-max/` (14 findings), remediated as units A–L in `implementations-plan/harden-findings-remediation/plan.md` (PR #272; unit L = PR #271). The 2026-09-13 run re-checked every unit at source: all are still in place, but three have coverage gaps and one regressed in vocabulary. Each gap is a finding in this arc; nothing from July is re-implemented, only completed.
+
+| July unit | July finding(s) → band | What it fixed | Status 2026-09-13 | Closed by this arc |
+|---|---|---|---|---|
+| A | F-01 Critical, F-02 High, F-08 Medium | raw-hash authwit rejected; name↔selector bound at every signing sink; dispatcher arg-shape validation | intact; the later `simulateTx` fast path never got the bind | F-08 (B1) |
+| B | F-02 (display) High, F-07 Medium | truthful approval display; bidi/zero-width sanitizer | sanitizer intact; transfer-recognition vocabulary drifted from the token model | F-02 (B4) |
+| C | F-03 High | one validated `getNodeInfo` threaded, no re-fetch | threading intact; the July HELD XOR collision was never closed | F-01 (B1) |
+| D | F-04 Medium | discovery flood caps 32/4 | caps intact, bypassed on the reconnect branch; verify window uncapped | F-18 (B4) |
+| E | F-06 Medium | restore cannot flip `strictSecurityMode` or restore the passhash | intact | — |
+| F | F-05 Low | `img-src` CSP for dApp logos | intact; the logo is still web-accessible to every origin | F-17 (B1) |
+| G | F-09, F-10 Low | sender auth on the offscreen service listeners; Firefox instance token | intact service-side; SW-side client, READY/PONG, and the broadcast primitive never covered | F-14 (B3) |
+| I | F-12 Low | per-row DappSession HMAC | intact; key derivation does not separate same-phrase siblings | F-06 (B3) |
+| J | F-13 Low | ValueStorage parse containment | intact | — |
+| K | F-14 Low | clipboard scrub on secret copies | intact | — |
+| L | F-11 Low | session-only wrapped-secret bearer (`SessionSecretBox`) | intact (both families, c01) | adjacent: F-15 (B1) |
+
+July's two explicitly HELD items (the XOR collision, High; a simulation-only `getNodeInfo` re-fetch in `batched-view-simulation.ts`, Medium) are both inside F-01's instance list and close with it. The two July-era accepted residuals are adjudicated in the decision table above (envelope swap stays accepted; truncated import address re-opened in B1).
+
+Before July, the `2026-06-08-ultra-e6759a` run (12 findings, 8 High / 4 Medium) was remediated in code; its controls carry `F-00x` markers (`F-001` subframe rejection, `F-003`–`F-006` scope enforcement, `F-011` RPC-URL allowlist, `F-012` chain check) and were all re-verified intact on 2026-09-13. F-01 is what completes `F-012`.
+
 ## Batches
 
 ### B1 — `harden-b1-mechanical` (light)
