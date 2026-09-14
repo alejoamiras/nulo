@@ -1,7 +1,7 @@
 # harden-b4-approval — plan (blueprint mid)
 
 **Status:** REVISED 2026-09-14 after the dual audit (codex round 1 `reject` × fable round 1 `reject`, reconciled in `ledger.md`) and codex round 2 (`reject`, six findings, all adopted: reservation release only for unopened windows, the fresh-branch admission contract, a NO_FROM preview, snapshot eviction on cancel, split admission expectations, `AddressDisplay full`) — awaiting codex round 3. Owner approval pre-granted by `../seed.md` (decisions locked 2026-09-14).
-**driver:** claude-code · **eli5_mode:** artifact · **code_review:** off (owner directive) · **tier:** mid (owner-set) · **budget:** recon 2 agents (F-02 sweep + F-16/F-18 mapper); competing outline by the fable leg (`outline-fable.md`); codex at `high`.
+**driver:** claude-code · **eli5_mode:** artifact · **code_review:** off (owner directive) · **tier:** mid (owner-set) · **budget:** recon 2 agents (F-02 sweep + F-16/F-18 mapper); competing outline by the fable leg (`outline-fable.md`); codex at `high`. · **eli5:** https://claude.ai/code/artifact/cc1ae07f-ea9a-472e-8536-b021596376fe (private Artifact; `eli5.html` is the fallback copy).
 **Batch:** B4 of 4 — see `../seed.md` for the decision table and the stack. Findings: `audit/security/2026-09-13-high-prerelease/findings/verified.md` (F-02, F-18), `findings/consolidated.md` (F-16; coupled group 4 "Approval binding — F-02 + F-16").
 **Branch:** `harden-b4-approval`, stacked on `harden-b3-isolation` (PR #595). Recon: `recon.md`. Competing outline: `outline-fable.md` (merged: non-blocking verify-window reservation over `WindowPort`, `send_transaction` list suppression, field-by-field delta merge, the richer discovered record).
 
