@@ -3,6 +3,7 @@ import { MAX_BACKUP_FILE_BYTES } from "@/utils/full-backup-helpers"
 import { createTestingPinia } from "@pinia/testing"
 import { flushPromises, mount } from "@vue/test-utils"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { useAppStore } from "@/stores/app.store"
 import FullExportPage from "./full.vue"
 
 /**
@@ -151,7 +152,7 @@ function mountPage() {
 			plugins: [
 				createTestingPinia({
 					initialState: {
-						app: { profile: { id: "p1", type: "password", name: "Test Profile" }, network: { id: "net1" } },
+						app: { profile: { id: "p1", type: "password", name: "Test Profile" }, network: { id: "net1", chainId: 7 } },
 					},
 					stubActions: false,
 				}),
@@ -333,5 +334,23 @@ describe("export/full.vue — sealed artifact", () => {
 		// The imported-keys slice key must be the registry's real literal — an
 		// unknown key rejects the whole import.
 		expect(Object.keys(parsed.data as Record<string, unknown>)).toContain("imported-account-keys")
+		// The retired slices never leave the wallet; the active-network preference is a chain id.
+		const sliceKeys = Object.keys(parsed.data as Record<string, unknown>)
+		expect(sliceKeys).not.toContain("network")
+		expect(sliceKeys).not.toContain("fpc")
+		expect("active-network-id" in parsed).toBe(false)
+		expect(parsed["active-chain-id"]).toBe(7)
+	})
+
+	it("the active-network preference survives as chain 0 for the local network (no falsy drop)", async () => {
+		profileClient.backup.mockResolvedValue([{ id: "p1", type: "password" }])
+		const wrapper = mountPage()
+		useAppStore().network = { id: "local", chainId: 0 } as never
+		await reachUnlockAndSubmit(wrapper)
+		await vi.waitFor(() => expect(wrapper.find("[data-testid='protect-password-btn']").exists()).toBe(true))
+		await wrapper.find("[data-testid='download-backup-btn']").trigger("click")
+		await vi.waitFor(() => expect(downloadFile).toHaveBeenCalledTimes(1))
+		const parsed = JSON.parse(downloadFile.mock.calls[0][0].data) as Record<string, unknown>
+		expect(parsed["active-chain-id"]).toBe(0)
 	})
 })

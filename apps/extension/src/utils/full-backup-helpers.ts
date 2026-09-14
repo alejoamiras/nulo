@@ -310,7 +310,7 @@ function projectFailedChildren(children: unknown): Array<Record<string, unknown>
 }
 
 /** Trim to the cap, replacing the tail with one constant marker rather than silently dropping. */
-function capRecords(records: unknown[]): unknown[] {
+export function capRecords(records: unknown[]): unknown[] {
 	if (records.length <= MAX_RECORDED_RESTORE_ERRORS) return records
 	return [
 		...records.slice(0, MAX_RECORDED_RESTORE_ERRORS),
@@ -442,28 +442,28 @@ function seededIdFor(byChain: ReadonlyMap<number, string>, row: unknown): string
  * Bind every row of the named slices to the seeded network of its `chainId`, overwriting
  * `networkId` — the exported id is never consulted, so a backup can choose among the seeded
  * networks but cannot define one. A row whose chain is missing, non-numeric or unseeded is
- * removed from its slice and returned so the caller can report it.
+ * removed from its slice; only its ORDINAL is returned (the row is attacker-authored payload
+ * and must not reach the error log).
  */
 export function remapNetworkIdByChain(
 	data: Record<string, unknown>,
 	seeded: ReadonlyArray<SeededNetwork>,
 	slices: readonly string[],
-): Record<string, unknown[]> {
+): Record<string, number[]> {
 	const byChain = new Map<number, string>()
 	for (const n of seeded) if (!byChain.has(n.chainId)) byChain.set(n.chainId, n.id)
-	const dropped: Record<string, unknown[]> = {}
+	const dropped: Record<string, number[]> = {}
 	for (const key of slices) {
 		const rows = data[key]
 		if (!Array.isArray(rows)) continue
 		const kept: unknown[] = []
-		for (const row of rows) {
+		const droppedHere: number[] = []
+		rows.forEach((row, index) => {
 			const id = seededIdFor(byChain, row)
-			if (id === undefined) {
-				dropped[key] = [...(dropped[key] ?? []), row]
-				continue
-			}
-			kept.push({ ...(row as Record<string, unknown>), networkId: id })
-		}
+			if (id === undefined) droppedHere.push(index)
+			else kept.push({ ...(row as Record<string, unknown>), networkId: id })
+		})
+		if (droppedHere.length) dropped[key] = droppedHere
 		data[key] = kept
 	}
 	return dropped

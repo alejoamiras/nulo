@@ -70,3 +70,21 @@ Prompt: the dead-RPC fixture redesigned to CDP `Fetch` interception on the servi
 ### Response
 
 approve
+
+## Post-implementation round 1 — 2026-09-14, GPT-6 Astra `high`, session `01a0a150-617b-7651-add1-68ca5f808689`
+
+Prompt: the B2 diff, plan, recon, lessons, arc map, adversarial ask, the two verbatim rules.
+
+### Response (paths made repo-relative)
+
+1. **[full-backup-restore.ts:278](apps/extension/src/composables/full-backup-restore.ts:278) — should-fix; confidence: high.** Dropped rows bypass `collectRestoreErrors`: spreading them into `appendErrors` retains sender addresses, transaction payloads, contract artifacts, and arbitrary backup properties. “View Errors” exposes these verbatim; onboarding also sends them through the captured console. Confirmed with synthetic input. **Smallest fix:** record bounded, payload-free skip records containing only the source ordinal and constant reason, following the dropped-balances implementation. Test that sensitive and arbitrary fields never reach either error surface.
+
+2. **[full-backup-helpers.ts:462](apps/extension/src/utils/full-backup-helpers.ts:462) — should-fix; confidence: high.** Copying the entire accumulated array for every rejected row makes rejection quadratic, before account-state normalization applies its caps. An isolated execution of this source took approximately **6 seconds for 80,000 rows totaling 1.28 MB**, well below the 64 MiB file limit. The subsequent report also retains every rejected row. **Smallest fix:** append in place and cap recorded failures with an omitted-count marker. Add an oversized malformed-slice regression.
+
+3. **[rpc-intercept.ts:45](apps/extension/tests/e2e/helpers/rpc-intercept.ts:45) — should-fix; confidence: high.** Interception setup failures are swallowed. The REFUSED test asserts only the errors screen, so failed interception against an already-unreachable compiled endpoint can pass without exercising `Fetch.failRequest`; against a running endpoint it can contact another run’s service. BLACKHOLE and STATEFUL have stub-method evidence; REFUSED has none. **Smallest fix:** surface setup failures for required extension targets/workers and assert that REFUSED intercepted at least one matching request.
+
+4. **[export/full.test.ts:316](apps/extension/src/popup/pages/settings/security/export/full.test.ts:316), [networks/index.test.ts:123](apps/extension/src/popup/pages/settings/networks/index.test.ts:123) — should-fix; confidence: high.** **Phase 2 and Phase 3 gates are weaker than specified.** The exported-artifact test never asserts `active-chain-id` or the absence of `network`, `fpc`, and `active-network-id`. The Developer Mode tests contain only built-in rows; counting those rows does not prove existing custom-network management survives. **Smallest fix:** extend the artifact assertion, including chain `0`, and add one existing custom-row case exercising rename, endpoint management, and deletion with Developer Mode off.
+
+5. **[full-backup-restore.ts:430](apps/extension/src/composables/full-backup-restore.ts:430) — nit; confidence: high.** The comment still says the backup controls `rpcUrl`, contradicting B2’s central invariant. Line 305 also says pointer-write failure leaves the pointer unset, although reseeding has already written it. **Smallest fix:** describe compiled-seed endpoints and preservation of the seeded pointer; retain only the ordering and deadline constraints that explain non-obvious behavior.
+
+**fix — payload disclosure, quadratic rejection/unbounded reporting, unverifiable REFUSED interception, and missing Phase 2/3 assertions.**

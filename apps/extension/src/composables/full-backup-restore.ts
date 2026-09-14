@@ -12,7 +12,7 @@ import { asBase64CredentialId, asBase64MasterSecret } from "@nulo/wallet-crypto"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
 import { isClientDisconnectRejection, RpcDisconnectedError, UserRejectedError } from "@nulo/extension-messaging/errors"
 import { awaitLivenessAdvance, readLiveness } from "@/utils/background-liveness"
-import { remapNetworkIdByChain, resolveRestoredActiveNetworkIdByChain } from "@/utils/full-backup-helpers"
+import { capRecords, remapNetworkIdByChain, resolveRestoredActiveNetworkIdByChain } from "@/utils/full-backup-helpers"
 import type { PasskeyRequest } from "@/wallet/services/passkey/spec"
 import type { RestoreSecret } from "@/wallet/services/profile/client"
 import { IMPORTED_KEYS_SERVICE_NAME } from "@/wallet/services/account/spec"
@@ -273,14 +273,13 @@ export async function reseedNetworksStage(
 			message: "Couldn't seed the default networks for this backup",
 		})
 	}
+	// Ordinal-only records: the dropped rows are backup payload (senders, artifacts, tx bodies)
+	// and the error log is user-visible and exportable.
 	const dropped = remapNetworkIdByChain(data, seeded, [ACCOUNT_STATE_SERVICE_NAME, TRANSACTION_SERVICE_NAME])
-	for (const [slice, rows] of Object.entries(dropped)) {
+	for (const [slice, ordinals] of Object.entries(dropped)) {
 		io.appendErrors(
 			slice,
-			rows.map((row) => ({
-				...(row && typeof row === "object" ? (row as Record<string, unknown>) : {}),
-				restoreError: "Skipped — its network is not one of the built-in networks",
-			})),
+			capRecords(ordinals.map((row) => ({ row, restoreError: "Skipped — its network is not one of the built-in networks" }))),
 		)
 	}
 	return { kind: "proceed", seeded }
@@ -302,8 +301,8 @@ export async function restoreActiveNetworkPointer(
 	try {
 		await networkService.setActiveForProfile(profileId, restoredActiveId)
 	} catch (activeErr) {
-		// `requireOwnedRow` rejection or a write hiccup — leave the pointer unset; the bootstrap
-		// picks the primary network. Never fail the whole import over the active-network pointer.
+		// `requireOwnedRow` rejection or a write hiccup — the primary seed the reseed already
+		// pointed at stays active. Never fail the whole import over the active-network pointer.
 		console.warn("[full-backup] could not restore active-network selection:", activeErr)
 	}
 }
@@ -426,9 +425,9 @@ export async function restoreServiceSlices(
  * `registerContract` needs the per-profile PXE store key, which the client's
  * PXE_STORE_KEY_MISSING retry-once provisions via `getProfileSecret` — and that only yields
  * the master once the session is OPEN (finalizeRestore opens it). BOUNDED: this is the one
- * import leg that dials the network (the PXE boot for a restored network fetches L1
- * addresses from its rpcUrl — a URL the BACKUP controls); the tail runs on one shared
- * wall-clock budget through the SAME errors screen. Present-but-malformed slices (a hostile
+ * import leg that dials the network (the PXE boot fetches L1 addresses from the compiled-in
+ * seed endpoint of the chain the item names — never from anything the backup carries); the
+ * tail runs on one shared wall-clock budget through the SAME errors screen. Present-but-malformed slices (a hostile
  * `{}`/`null`) MUST still enter the chain-sync: the normalizer converts them into a
  * violation record — gating on Array.isArray here would let a malformed slice auto-route
  * past the Continue gate unrecorded.

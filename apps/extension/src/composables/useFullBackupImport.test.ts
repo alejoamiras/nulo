@@ -963,11 +963,11 @@ describe("useFullBackupImport — rows bind to the seeded network of their chain
 		expect(transactionClient.restore).toHaveBeenCalledWith([], "new-id")
 		expect(networkClient.probeNodeStatus).not.toHaveBeenCalled()
 		expect(c.isRestoreHasErrors.value).toBe(true)
-		const asRecords = c.restoreErrorLog.value["account-state"] as Array<{ restoreError?: unknown }>
-		expect(asRecords).toHaveLength(3)
-		const txRecords = c.restoreErrorLog.value.transaction as Array<{ restoreError?: unknown }>
-		expect(txRecords).toHaveLength(1)
-		expect(String(asRecords[0].restoreError)).toMatch(/built-in networks/)
+		// Ordinal-only records: the dropped rows are backup payload and the log is user-visible.
+		const reason = "Skipped — its network is not one of the built-in networks"
+		expect(c.restoreErrorLog.value["account-state"]).toEqual([0, 1, 2].map((row) => ({ row, restoreError: reason })))
+		expect(c.restoreErrorLog.value.transaction).toEqual([{ row: 0, restoreError: reason }])
+		expect(JSON.stringify(c.restoreErrorLog.value)).not.toMatch(/0xabab|h1|senders|0xaaaa/)
 	})
 })
 

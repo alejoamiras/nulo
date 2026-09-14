@@ -136,6 +136,18 @@ describe("Settings › Networks list — Add network is a Developer-Mode surface
 		expect(wrapper.find('[data-testid="network-new-btn"]').exists()).toBe(false)
 	})
 
+	test("an existing custom network stays listed and reachable with Developer Mode off", async () => {
+		const { wrapper, appStore } = mountList("alpha")
+		appStore.networks = [
+			...NETS,
+			{ id: "mine", name: "My Chain", chainId: 4242, kind: "custom", endpoints: [], primaryEndpointId: "" },
+		] as never
+		await flushPromises()
+		const custom = wrapper.findAll('[data-testid="network-row"]').find((r) => r.attributes("data-network-id") === "mine")
+		expect(custom?.attributes("data-to")).toBe("/popup/settings/networks/mine")
+		expect(wrapper.find('[data-testid="network-new-btn"]').exists()).toBe(false)
+	})
+
 	test("mounts visible when Developer Mode is already on", async () => {
 		configState.developerMode = true
 		const { wrapper } = mountList("alpha")

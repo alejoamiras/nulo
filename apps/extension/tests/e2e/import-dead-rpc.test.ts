@@ -247,15 +247,18 @@ async function continueThroughErrorsScreen(page: Page, errorsScreenBudgetMs: num
 	await waitForHash(page, "#/popup/general", postClickBudgetMs)
 }
 
-async function withFreshExtension(mode: RpcInterception, fn: (page: Page, ctx: ExtensionContext) => Promise<void>): Promise<void> {
+async function withFreshExtension(
+	mode: RpcInterception,
+	fn: (page: Page, ctx: ExtensionContext, intercepted: () => number) => Promise<void>,
+): Promise<void> {
 	const profileDir = mkdtempSync(join(tmpdir(), "nulo-dead-rpc-"))
 	const ctx = await launchExtension({ userDataDir: profileDir })
-	const stop = await interceptRpc(ctx.browser, ctx.extensionId, LOCAL_RPC, mode)
+	const intercept = await interceptRpc(ctx.browser, ctx.extensionId, LOCAL_RPC, mode)
 	try {
 		const page = await gotoPopupImport(ctx)
-		await fn(page, ctx)
+		await fn(page, ctx, intercept.hits)
 	} finally {
-		await stop()
+		await intercept.stop()
 		await ctx.browser.close()
 		rmSync(profileDir, { recursive: true, force: true })
 	}
@@ -266,9 +269,11 @@ test("REFUSED rpc: import lands on the errors screen fast; Continue enters the w
 	// classifies in ~ms, so the whole leg costs ≈6s of backoff waits. Budget: slow-runner
 	// storage restore (≤15s) + ≈6s + margin.
 	const backup = await deadRpcBackup()
-	await withFreshExtension({ kind: "refuse" }, async (page) => {
+	await withFreshExtension({ kind: "refuse" }, async (page, _ctx, intercepted) => {
 		await submitBackup(page, writeBackupToTemp(backup, "refused.json"))
 		await continueThroughErrorsScreen(page, 60_000)
+		// The refusal must be the interception's, not whatever happens to listen on the seed's port.
+		expect(intercepted()).toBeGreaterThan(0)
 	})
 })
 

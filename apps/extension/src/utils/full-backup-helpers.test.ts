@@ -13,6 +13,7 @@ import {
 	remapByMap,
 	resolveRestoredActiveNetworkIdByChain,
 	remapNetworkIdByChain,
+	capRecords,
 } from "./full-backup-helpers"
 
 describe("assembleFullBackup", () => {
@@ -563,7 +564,7 @@ describe("remapNetworkIdByChain — rows bind to the seeded network of their cha
 		remapNetworkIdByChain(data, seeded, ["transaction"])
 		expect((data.transaction as Array<{ networkId: string }>)[0].networkId).toBe("main")
 	})
-	it("drops and returns rows whose chain is missing, non-numeric, non-integer or unseeded — and non-object rows", () => {
+	it("drops rows whose chain is missing, non-numeric, non-integer or unseeded — and non-object rows — returning ordinals only", () => {
 		const bad = [
 			{ networkId: "x" },
 			{ networkId: "x", chainId: "0" },
@@ -574,8 +575,20 @@ describe("remapNetworkIdByChain — rows bind to the seeded network of their cha
 		]
 		const data: Record<string, unknown> = { "account-state": [...bad, { networkId: "x", chainId: 0 }] }
 		const dropped = remapNetworkIdByChain(data, seeded, ["account-state"])
-		expect(dropped["account-state"]).toEqual(bad)
+		expect(dropped).toEqual({ "account-state": [0, 1, 2, 3, 4, 5] })
 		expect(data["account-state"]).toEqual([{ networkId: "local", chainId: 0 }])
+	})
+	it("an oversized malformed slice is rejected in linear time and reported capped", () => {
+		const rows = Array.from({ length: 80_000 }, (_, i) => ({ networkId: "x", chainId: 99, senders: [{ address: `0x${i}` }] }))
+		const data: Record<string, unknown> = { "account-state": rows }
+		const started = performance.now()
+		const dropped = remapNetworkIdByChain(data, seeded, ["account-state"])
+		expect(performance.now() - started).toBeLessThan(1_000)
+		expect(dropped["account-state"]).toHaveLength(80_000)
+		expect(data["account-state"]).toEqual([])
+		const records = capRecords(dropped["account-state"].map((row) => ({ row, restoreError: "x" })))
+		expect(records).toHaveLength(201)
+		expect(records[200]).toEqual({ restoreError: "79800 further error(s) not recorded" })
 	})
 	it("leaves slices it was not asked about, and non-array slices, untouched", () => {
 		const data: Record<string, unknown> = { token: [{ chainId: 0, networkId: "keep" }], transaction: "nope" }

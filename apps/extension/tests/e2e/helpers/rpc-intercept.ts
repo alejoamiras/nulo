@@ -17,18 +17,20 @@ export async function interceptRpc(
 	extensionId: string,
 	fromOrigin: string,
 	mode: RpcInterception,
-): Promise<() => Promise<void>> {
+): Promise<{ stop: () => Promise<void>; hits: () => number }> {
 	const origin = new URL(fromOrigin).origin
 	const sessions = new Set<CDPSession>()
+	let hits = 0
 	const debug = process.env.NULO_E2E_INTERCEPT_LOG === "1"
 	const log = (msg: string) => {
 		if (debug) console.log(`[rpc-intercept] ${msg}`)
 	}
 
-	const arm = async (session: CDPSession, label: string) => {
+	const arm = async (session: CDPSession, label: string, required = false) => {
 		sessions.add(session)
 		session.on("Fetch.requestPaused", (event: PausedRequest) => {
 			const url = new URL(event.request.url)
+			hits++
 			log(`${label}: ${mode.kind} ${url.pathname}`)
 			const reply =
 				mode.kind === "refuse"
@@ -42,9 +44,14 @@ export async function interceptRpc(
 				.then(() => child.send("Runtime.runIfWaitingForDebugger").catch(() => {}))
 				.catch(() => {})
 		})
-		await session
-			.send("Fetch.enable", { patterns: [{ urlPattern: `${origin}/*`, requestStage: "Request" }] })
-			.catch((e) => log(`${label}: Fetch.enable failed: ${e}`))
+		try {
+			await session.send("Fetch.enable", { patterns: [{ urlPattern: `${origin}/*`, requestStage: "Request" }] })
+		} catch (e) {
+			// The service worker issues the preflight probe: without interception there the test would
+			// dial the real seed endpoint — possibly another run's node — and prove nothing.
+			if (required) throw new Error(`rpc-intercept: Fetch.enable failed on ${label}: ${e}`)
+			log(`${label}: Fetch.enable failed: ${e}`)
+		}
 		await session
 			.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true })
 			.catch((e) => log(`${label}: setAutoAttach failed: ${e}`))
@@ -61,23 +68,31 @@ export async function interceptRpc(
 		if (type !== "service_worker" && type !== "other" && type !== "page") return
 		if (type === "service_worker" && !url.startsWith(`chrome-extension://${extensionId}/`)) return
 		attached.add(target)
+		const required = type === "service_worker"
 		let session: CDPSession
 		try {
 			session = await target.createCDPSession()
 		} catch (e) {
+			if (required) throw new Error(`rpc-intercept: cannot attach to the service worker: ${e}`)
 			log(`attach ${type} ${url} failed: ${e}`)
 			return
 		}
 		log(`attached ${type} ${url}`)
-		await arm(session, `${type}:${url.split("/").slice(-2).join("/")}`)
+		await arm(session, `${type}:${url.split("/").slice(-2).join("/")}`, required)
 	}
 	const onCreated = (target: Target) => {
 		attach(target).catch(() => {})
 	}
 	browser.on("targetcreated", onCreated)
 	await Promise.all(browser.targets().map(attach))
-	return async () => {
-		browser.off("targetcreated", onCreated)
-		for (const session of sessions) await session.detach().catch(() => {})
+	if (!browser.targets().some((t) => t.type() === "service_worker" && t.url().startsWith(`chrome-extension://${extensionId}/`))) {
+		throw new Error("rpc-intercept: the extension's service worker target is not present")
+	}
+	return {
+		hits: () => hits,
+		stop: async () => {
+			browser.off("targetcreated", onCreated)
+			for (const session of sessions) await session.detach().catch(() => {})
+		},
 	}
 }
