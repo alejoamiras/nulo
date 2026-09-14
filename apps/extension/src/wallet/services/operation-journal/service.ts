@@ -44,15 +44,7 @@ export * from "./spec"
  *   #6  attempts counter defaults to 0; consumers increment on retry
  */
 export class OperationJournalService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
-	protected readonly rpcMethods = defineRpcMethods<Methods>()(
-		"createOperation",
-		"transitionOperation",
-		"setOperationMeta",
-		"getOperation",
-		"getOperations",
-		"countOperations",
-		"deleteOperation",
-	)
+	protected readonly rpcMethods = defineRpcMethods<Methods>()("getOperation", "getOperations")
 	public static name = OPERATION_JOURNAL_SERVICE_NAME
 
 	public readonly onOperationAdded = new EventHandler<OperationRecord>()
@@ -113,6 +105,48 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		// Service stores on `this`. See class field comment above for the
 		// mutex contract.
 		this.transitionLock = new Lock("operation-journal:transition", logger)
+	}
+
+	/**
+	 * The RPC boundary's ownership gate. Reached ONLY from the Port path (`handleRequest`); the
+	 * in-process callers — the reaper's cross-profile sweep, the GC, the claim and dApp paths
+	 * whose record's profile may not be active — call the method bodies directly and stay
+	 * unfiltered. A popup sees only the ACTIVE profile's records: a foreign id reads as absent
+	 * and a foreign filter yields `[]` (existence non-disclosing, like `cancelJob`); locked, or
+	 * no `ProfileService` wired, is fail-closed. The framework methods (`backup`/`restore`) keep
+	 * their defaults.
+	 */
+	protected override async invoke(method: string, params: unknown[]): Promise<unknown> {
+		if (method !== "getOperation" && method !== "getOperations") return super.invoke(method, params)
+		const active = await this.activeProfileId()
+		if (method === "getOperation") {
+			if (!active) return undefined
+			const record = await this.getOperation(params[0] as string)
+			return record?.profileId === active ? record : undefined
+		}
+		if (!active) return []
+		const filter = (params[0] ?? undefined) as OperationFilter | undefined
+		if (filter?.profileId !== undefined && filter.profileId !== active) return []
+		return this.getOperations({ ...filter, profileId: active })
+	}
+
+	/** Wire events carry a record's ids, metadata, errors and timing to EVERY connected popup —
+	 *  so a background operation of a switched-away profile is filtered here, the same gate as
+	 *  the reads. In-process listeners (`emit`'s second leg) are untouched. The active-profile
+	 *  read is async, so the fan-out is deferred a tick; a Port event is best-effort already. */
+	protected override sendEvent(content: { event: keyof Events; payload: Events[keyof Events] }): void {
+		void this.activeProfileId().then((active) => {
+			if (active && content.payload.profileId === active) super.sendEvent(content)
+		})
+	}
+
+	private async activeProfileId(): Promise<string | undefined> {
+		if (!this.profileService) return undefined
+		try {
+			return (await this.profileService.getActiveProfile())?.id
+		} catch {
+			return undefined
+		}
 	}
 
 	protected async init(services: ServiceCollection): Promise<void> {

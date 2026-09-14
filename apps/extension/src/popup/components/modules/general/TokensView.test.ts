@@ -401,6 +401,27 @@ describe("TokensView — Home order and cap", () => {
 		expect(wrapper.find('[data-testid="tokens-view-all"]').exists()).toBe(false)
 	})
 
+	test("a token_import op stamped with ANOTHER profile's id for the active address is hidden; the active profile's shows", async () => {
+		const op = (id: string, profileId: string) => ({
+			id,
+			kind: "token_import",
+			profileId,
+			accountAddress: H.store.current.account?.address,
+			terminalAt: null,
+			progress: { stage: "pending" },
+		})
+		H.getOperations.mockResolvedValue([op("mine", "p1"), op("theirs", "p2")])
+		const wrapper = mount(TokensView, { shallow: true })
+		await flushPromises()
+		const rows = () => wrapper.findAllComponents({ name: "TokenImportRow" }).map((c) => (c.props("op") as { id: string }).id)
+		expect(rows()).toEqual(["mine"])
+
+		H.journalAdded.emit(op("late-theirs", "p2"))
+		H.journalAdded.emit(op("late-mine", "p1"))
+		await nextTick()
+		expect(rows()).toEqual(["mine", "late-mine"])
+	})
+
 	test("a same-address row from ANOTHER chain is not rendered (fetch and live add)", async () => {
 		H.getTokenBalances.mockResolvedValue([namedRow(1, "A", { chainId: MAINNET }), namedRow(2, "FOREIGN", { chainId: 1 })])
 		const wrapper = mount(TokensView, { shallow: true })
