@@ -22,10 +22,11 @@
  * tamper. Both fields are non-secret; binding them costs nothing and removes the last
  * unauthenticated inputs a storage writer could steer.
  *
- * A mismatch never profile-blocks: it opens a session WITHOUT the DEK — recovery mode: derived
- * accounts stay reachable and export stays open as the repair, but nothing keyed by the DEK
- * (imported keys, the PXE store key, the dApp-session key) is available and no bearer is
- * persisted — so a storage writer can't DoS the user's main funds.
+ * A mismatch never profile-blocks: it opens a session WITHOUT the DEK — recovery mode. Nothing
+ * keyed by the DEK is available (imported keys, the PXE store key, the dApp-session key — so
+ * chain operations wait for the repair) and no bearer is persisted, but the derived keys stay
+ * exportable and the backup export stays open: a storage writer cannot lock the user out of
+ * the funds their phrase controls.
  *
  * Uses `globalThis.crypto` for the same cross-env reason as `mnemonic-master.ts`.
  */

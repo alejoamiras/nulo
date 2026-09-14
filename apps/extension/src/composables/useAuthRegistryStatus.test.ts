@@ -15,11 +15,11 @@ function fakeService() {
 			add: (fn: (scope: Scope) => void) => disabled.add(fn),
 			remove: (fn: (scope: Scope) => void) => disabled.delete(fn),
 		},
-		emitEnabled: (account: string, chainId = CHAIN) => {
-			for (const fn of enabled) fn({ profileId: "p1", chainId, account })
+		emitEnabled: (account: string, chainId = CHAIN, profileId = "p1") => {
+			for (const fn of enabled) fn({ profileId, chainId, account })
 		},
-		emitDisabled: (account: string, chainId = CHAIN) => {
-			for (const fn of disabled) fn({ profileId: "p1", chainId, account })
+		emitDisabled: (account: string, chainId = CHAIN, profileId = "p1") => {
+			for (const fn of disabled) fn({ profileId, chainId, account })
 		},
 		handlerCount: () => enabled.size + disabled.size,
 	}
@@ -29,7 +29,7 @@ const ACTIVE = "0xactive"
 const CHAIN = 7
 const setup = (account: string | undefined = ACTIVE) => {
 	const service = fakeService()
-	const status = useAuthRegistryStatus(service as never, () => (account ? { chainId: CHAIN, account } : undefined))
+	const status = useAuthRegistryStatus(service as never, () => (account ? { profileId: "p1", chainId: CHAIN, account } : undefined))
 	return { service, status }
 }
 
@@ -72,7 +72,7 @@ describe("useAuthRegistryStatus", () => {
 		expect(status.isRegistryEnabled.value).toBe(false)
 	})
 
-	test("events for another account, or the same account on another chain, are ignored", () => {
+	test("events for another account, the same account on another chain, or a sibling profile's same (chain, account), are ignored", () => {
 		const { service, status } = setup()
 		service.emitEnabled("0xother")
 		expect(status.isRegistryEnabled.value).toBeUndefined()
@@ -80,6 +80,8 @@ describe("useAuthRegistryStatus", () => {
 		service.emitDisabled("0xother")
 		expect(status.isRegistryEnabled.value).toBe(true)
 		service.emitDisabled(ACTIVE, CHAIN + 1)
+		expect(status.isRegistryEnabled.value).toBe(true)
+		service.emitDisabled(ACTIVE, CHAIN, "p2")
 		expect(status.isRegistryEnabled.value).toBe(true)
 	})
 

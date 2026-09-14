@@ -124,10 +124,13 @@ const isWrongPassword = ref(false)
 const isPasswordMismatch = ref(false)
 
 const showRecommendation = ref(false)
-// The file carries a FRESH imported-keys DEK (the stored slot no longer opens) or was assembled
-// in recovery mode: imported keys and local chain state are not in it, and the user must know
-// before trusting the download.
-const keysLost = ref(false)
+// Two distinct losses the user must know about before trusting the download. `dekReplaced`: the
+// stored imported-keys key no longer opens, so the file carries a FRESH one and every imported
+// account must be re-imported. `chainStateOmitted`: the profile is in recovery mode, so the PXE
+// contract/sender state was left out — the imported-key ciphertext itself may still be intact
+// (a corrupt envelope MAC alone lands here) and travels in the file.
+const dekReplaced = ref(false)
+const chainStateOmitted = ref(false)
 
 const isAgreed = ref(false)
 const handleAgree = () => {
@@ -282,7 +285,8 @@ async function handleBackup() {
 
 		const material = await exportKeyMaterial(gen, credentialData)
 		if (material === "handled" || gen !== generation) return
-		keysLost.value = !!material.dekReplaced || !!appStore.profile.recoveryMode
+		dekReplaced.value = !!material.dekReplaced
+		chainStateOmitted.value = !!appStore.profile.recoveryMode
 		const envelope = buildBackupEnvelope(material)
 
 		runClients = buildBackupServices()
@@ -520,12 +524,29 @@ onBeforeUnmount(() => {
 
 				<div v-else class="export_section">
 					<span class="export_section_label">Backup</span>
-					<Banner v-if="keysLost" variant="warning" direction="vertical" data-testid="backup-keys-lost-banner">
-						<template #title> Imported keys and local chain data are not in this backup </template>
+					<Banner v-if="dekReplaced" variant="warning" direction="vertical" data-testid="backup-keys-lost-banner">
+						<template #title> Imported keys are not in this backup </template>
 						<template #description>
 							<Text color="secondary" height="140">
-								This profile's imported-keys key could not be recovered, so the file carries a fresh one.
-								Restore it into a new profile to repair the wallet, then re-import any imported accounts.
+								This profile's imported-keys key could not be recovered, so the file carries a fresh one:
+								any imported account must be imported again after the restore.
+								<template v-if="isPasskeyProfile">
+									To repair: keep this file and your passkey, delete this profile from the wallet, then
+									restore the file with that passkey.
+								</template>
+								<template v-else>
+									To repair: restore this file (or your recovery phrase) into a new profile, then delete
+									this one.
+								</template>
+							</Text>
+						</template>
+					</Banner>
+					<Banner v-if="chainStateOmitted" variant="warning" direction="vertical" data-testid="backup-chain-state-omitted-banner">
+						<template #title> Local chain data is not in this backup </template>
+						<template #description>
+							<Text color="secondary" height="140">
+								This profile is in recovery mode, so its registered contracts and senders were left out.
+								Restore the file to repair the wallet; the chain re-syncs from the network.
 							</Text>
 						</template>
 					</Banner>

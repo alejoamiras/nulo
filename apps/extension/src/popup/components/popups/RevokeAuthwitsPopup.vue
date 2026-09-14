@@ -31,7 +31,9 @@ const props = defineProps({
 
 const authwitsService = new AuthRegistryServiceClient()
 const registry = useAuthRegistryStatus(authwitsService, () =>
-	appStore.network && appStore.account ? { chainId: appStore.network.chainId, account: appStore.account.address } : undefined,
+	appStore.profile && appStore.network && appStore.account
+		? { profileId: appStore.profile.id, chainId: appStore.network.chainId, account: appStore.account.address }
+		: undefined,
 )
 const { isRegistryEnabled, isLoading, error } = registry
 onBeforeUnmount(() => registry.dispose())

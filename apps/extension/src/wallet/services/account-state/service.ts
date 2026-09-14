@@ -217,11 +217,9 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 		})
 		for (const n of uniqueNetworks) {
 			if ((await this.networkService.getNodeStatus(n.id)) !== NodeStatus.Active) {
-				// A backup captures PXE recovery material (contracts/senders) ONLY for networks
-				// whose node is reachable at export time. A down endpoint silently drops a
-				// network's custom-contract artifacts from an otherwise-successful backup, so a
-				// later fresh restore can't rediscover those private notes (codex audit MED).
-				// Surface the omission rather than dropping it silently.
+				// PXE recovery material (contracts/senders) is captured only from a reachable node;
+				// a down endpoint would otherwise drop a network's custom-contract artifacts from an
+				// otherwise-successful backup, so the omission is logged, never silent.
 				this.logWarn(
 					`backup: network ${n.id} (chain ${n.chainId}) is not Active — its contract/sender state is OMITTED from this backup`,
 				)

@@ -131,13 +131,26 @@ async function makeHarness(opts: { node?: unknown; activeProfile?: { id: string 
 	const deletionState = new ProfileDeletionState()
 	const txUpdated = new EventHandler<unknown>()
 	let active: { id: string } | undefined = "activeProfile" in opts ? opts.activeProfile : { id: "p1" }
-	const network = { id: "net-1", profileId: "p1", chainId: 1, l1ChainId: 1, name: "N", endpoints: [], primaryEndpointId: "e" }
+	const network = {
+		id: "net-1",
+		profileId: "p1",
+		chainId: 1,
+		l1ChainId: 1,
+		name: "N",
+		endpoints: [{ id: "e", rpcUrl: "http://n/1" }],
+		primaryEndpointId: "e",
+	}
+	const nodeForUrl = vi.fn(async (_url: string) => opts.node)
 	const services = new ServiceCollection()
 	services.add(svc(PROFILE_SERVICE_NAME, { getDeletionState: () => deletionState, getActiveProfile: async () => active }))
 	services.add(
 		svc(NETWORK_SERVICE_NAME, {
 			getNetwork: async () => network,
-			getNode: async () => opts.node,
+			// The node is resolved by the network's OWN endpoint, never the active profile's chain.
+			getNodeForUrl: nodeForUrl,
+			getNode: async () => {
+				throw new Error("getNode(chainId) resolves the ACTIVE profile's endpoint — the registry must pin the owned network's URL")
+			},
 			registerChainPurgeSubscriber: () => {},
 		}),
 	)
@@ -149,7 +162,7 @@ async function makeHarness(opts: { node?: unknown; activeProfile?: { id: string 
 	const service = new AuthRegistryService(new LoggerStore(new ConfigStore()) as never, api)
 	services.add(service)
 	await services.start()
-	return { api, deletionState, service, txUpdated, setActive: (p: { id: string } | undefined) => (active = p) }
+	return { api, deletionState, service, txUpdated, nodeForUrl, setActive: (p: { id: string } | undefined) => (active = p) }
 }
 
 describe("AuthRegistryService.reconcileFromTx — scoped by the tx's provenance; dropped is non-destructive", () => {
@@ -211,6 +224,7 @@ describe("AuthRegistryService.syncRegistry — scoped sync with a re-read under 
 
 		await h.service.syncRegistry("net-1", A)
 
+		expect(h.nodeForUrl).toHaveBeenCalledWith("http://n/1")
 		expect((await h.service.getAuthwits(1, A)).map((r) => r.hash)).toEqual(["0xpending"])
 		expect((await h.service.getAuthwits(2, A)).map((r) => r.hash)).toEqual(["0xother-chain"])
 		h.setActive({ id: "p2" })

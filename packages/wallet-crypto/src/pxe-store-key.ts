@@ -6,8 +6,10 @@
  * page cipher, we never roll our own). The key derives from the profile MASTER secret AND its
  * imported-keys DEK via HKDF-SHA256 with a dedicated domain label, so:
  *
- *  - it exists only while the profile is unlocked with a verified DEK (both are in-memory-only;
- *    a degraded session — no DEK — cannot open the store at all);
+ *  - it is derived only from an unlocked session with a verified DEK (both inputs are
+ *    in-memory-only; a degraded session — no DEK — cannot derive it). The offscreen keeps a
+ *    provisioned key warm across lock and profile switch, which is why admission is gated on
+ *    the service-worker side rather than by the derivation alone;
  *  - it is NOT the master (HKDF is one-way — a store-key leak does not expose the master);
  *  - a same-phrase sibling profile, which shares the master, cannot derive it: the DEK is the
  *    one secret the sibling never holds;

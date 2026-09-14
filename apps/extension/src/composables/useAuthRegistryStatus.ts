@@ -2,19 +2,19 @@ import { ref } from "vue"
 import type { AuthRegistryServiceClient, AuthwitRegistryScope } from "@/wallet/services/auth-registry/client"
 
 /**
- * The authwit-registry flag a popup shows for the active (chain, account): fetched on demand, kept live by
- * the service's enabled/disabled events (only those naming that exact scope — the same address on another
- * chain is a different registry), reset on hide. The parent owns the client's connection; `isLoading` and
+ * The authwit-registry flag a popup shows for the active (profile, chain, account): fetched on demand, kept
+ * live by the service's enabled/disabled events (only those naming that exact scope — the same address on
+ * another chain or a sibling profile is a different registry), reset on hide. The parent owns the client's connection; `isLoading` and
  * `error` are the popup's own — its submit path writes them too.
  */
-export function useAuthRegistryStatus(service: AuthRegistryServiceClient, scope: () => { chainId: number; account: string } | undefined) {
+export function useAuthRegistryStatus(service: AuthRegistryServiceClient, scope: () => AuthwitRegistryScope | undefined) {
 	const isRegistryEnabled = ref<boolean | undefined>(undefined)
 	const isLoading = ref(false)
 	const error = ref<unknown>()
 
 	const matches = (s: AuthwitRegistryScope) => {
 		const shown = scope()
-		return !!shown && shown.chainId === s.chainId && shown.account === s.account
+		return !!shown && shown.profileId === s.profileId && shown.chainId === s.chainId && shown.account === s.account
 	}
 	const onEnabled = (s: AuthwitRegistryScope) => {
 		if (matches(s)) isRegistryEnabled.value = true

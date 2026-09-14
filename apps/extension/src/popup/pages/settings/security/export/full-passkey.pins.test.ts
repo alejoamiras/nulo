@@ -199,7 +199,10 @@ describe("export/full.vue — passkey acquisition + wrong-password pins", () => 
 		expect(exportPasskeyBackupMaterial).toHaveBeenCalledWith("p1", { id: "cred-1" })
 		// The local Banner stub drops attrs, so assert on the copy the loss banner renders once
 		// the assembly settles (real assembleFullBackup runs over the stubbed slice clients).
-		await vi.waitFor(() => expect(wrapper.text()).toContain("Imported keys and local chain data are not in this backup"))
+		await vi.waitFor(() => expect(wrapper.text()).toContain("Imported keys are not in this backup"))
+		// The passkey sequence: the damaged profile must go before the same credential can restore.
+		expect(wrapper.text()).toContain("delete this profile from the wallet, then restore the file with that passkey")
+		expect(wrapper.text()).not.toContain("Local chain data is not in this backup")
 		expect(openToast).not.toHaveBeenCalled()
 
 		// A healthy slot: no loss banner.
@@ -208,16 +211,17 @@ describe("export/full.vue — passkey acquisition + wrong-password pins", () => 
 		const healthy = mountPage("passkey")
 		await healthy.find("[data-testid='agree-continue-btn']").trigger("click")
 		await vi.waitFor(() => expect(healthy.find("[data-testid='protect-password-btn']").exists()).toBe(true))
-		expect(healthy.text()).not.toContain("Imported keys and local chain data are not in this backup")
+		expect(healthy.text()).not.toContain("are not in this backup")
 	})
 
-	it("a password export assembled in recovery mode names the loss even when the slot exported intact", async () => {
+	it("a password export in recovery mode with an INTACT slot names only the omitted chain state — never a key loss", async () => {
 		exportBackupMaterial.mockResolvedValueOnce({ masterKey: "mk", entropy: "en", importedKeysDek: "dk", dekReplaced: false })
 		const wrapper = mountPage("password", true)
 		await wrapper.find("[data-testid='agree-continue-btn']").trigger("click")
 		await wrapper.find("[data-testid='unlock-password-input']").setValue("pass1234")
 		await wrapper.find("[data-testid='unlock-submit-btn']").trigger("click")
-		await vi.waitFor(() => expect(wrapper.text()).toContain("Imported keys and local chain data are not in this backup"))
+		await vi.waitFor(() => expect(wrapper.text()).toContain("Local chain data is not in this backup"))
+		expect(wrapper.text()).not.toContain("Imported keys are not in this backup")
 	})
 
 	it("a failed discriminated export on a password profile flags wrong-password, no toast/navigation", async () => {

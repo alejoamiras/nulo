@@ -485,14 +485,7 @@ function registerServices(services: ServiceCollection, deps: WalletRuntimeDeps):
 	// service.integration.test.ts "Q10 composition seam".
 	const profileService = new ProfileService(config, logger, browserApi)
 	services.add(profileService)
-	registerPxeStoreKeyProvider((profileId) => providePxeStoreKey(profileService, profileId))
-	// The offscreen keeps store keys and chain runtimes warm across lock and profile switch, so a
-	// degraded re-unlock never reaches the provider — admission is decided here, from the SW's
-	// own session state, before any request is sent.
-	registerPxeRecoveryGuard((profileId) => profileService.isRecoveryMode(profileId))
-	// Generation-only capture for outgoing ops (no HKDF per op) — stamps
-	// pxeGeneration onto each op's NetworkInfo; a retry reuses its capture.
-	registerPxeGenerationProvider((profileId) => profileService.getPxeGeneration(profileId))
+	wirePxeProviders(profileService)
 	services.add(new TaskService(logger))
 	// E2E_TOKEN_SEEDS swaps the seeder's seed list for a chrome.storage-backed
 	// one the running test writes — the sandbox mints a token address per run,
@@ -528,6 +521,18 @@ function registerServices(services: ServiceCollection, deps: WalletRuntimeDeps):
 	// operation-time mismatch sink (the address-freeze runtime guard).
 	services.add(new AccountIntegrityCoordinator(logger, browserApi))
 	return { deletionCoordinator }
+}
+
+/** The three SW-side hooks every `PxeServiceClient` consults, bound to the live ProfileService:
+ *  the store-key derivation, the recovery-mode admission guard (the offscreen keeps store keys
+ *  and chain runtimes warm across lock and profile switch, so a degraded re-unlock never reaches
+ *  the provider — admission is decided from the SW's own session state before any send) and the
+ *  generation-only capture for outgoing ops (no HKDF per op). Exported as a test seam so the
+ *  production wiring, not a re-registration, is what a real-session test exercises. */
+export function wirePxeProviders(profileService: ProfileService): void {
+	registerPxeStoreKeyProvider((profileId) => providePxeStoreKey(profileService, profileId))
+	registerPxeRecoveryGuard((profileId) => profileService.isRecoveryMode(profileId))
+	registerPxeGenerationProvider((profileId) => profileService.getPxeGeneration(profileId))
 }
 
 /** The per-profile PXE store encryption key: derived on demand from the
@@ -572,7 +577,13 @@ export async function providePxeStoreKey(
 	// provision that crosses a restart would otherwise be accepted by a fresh `unseen`
 	// offscreen and resurrect the erased store (concurrency audit HIGH #1). This SW-side
 	// re-check closes the read→HKDF→send gap regardless of offscreen reincarnation.
-	const generationNow = await profileService.getPxeGeneration(profileId)
+	let generationNow: string | undefined
+	try {
+		generationNow = await profileService.getPxeGeneration(profileId)
+	} finally {
+		// Ownership transfers to the caller only on the success return below.
+		if (generationNow !== generation) zeroize(key)
+	}
 	if (generationNow !== generation) return undefined
 	return { key, generation }
 }

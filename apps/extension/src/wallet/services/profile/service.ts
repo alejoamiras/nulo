@@ -1678,13 +1678,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	}
 
 	/**
-	 * The passkey arm of `exportPlain` / `exportPasskeyBackupMaterial` — the credentialId plus
-	 * the sealed DEK blob the backup carries. Path A only: the caller (popup) ran the in-page
-	 * WebAuthn ceremony via the `PasskeyCeremonyDialog` modal and hands us the credential data;
-	 * the previous Path B (SW opens a window via confirmProfileOperation) is gone for this entry
-	 * point. Materialize the credential SW-side and verify it actually belongs to this profile —
-	 * without the credentialId binding check, a popup bug could supply data for a different key
-	 * and we'd happily export the wrong one.
+	 * The passkey arm of `exportPlain` / `exportPasskeyBackupMaterial`: the credentialId plus the
+	 * sealed DEK blob the backup carries. The popup ran the in-page WebAuthn ceremony and hands
+	 * over the credential data; it is materialized SW-side and bound to THIS profile's
+	 * credentialId — without that check a popup bug could supply data for a different key and
+	 * the wrong credential would be exported.
 	 */
 	private async exportPasskeyCredential(
 		id: string,

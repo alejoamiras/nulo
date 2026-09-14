@@ -43,6 +43,10 @@ import {
 	unsealDekUnderWrapKey,
 } from "@nulo/wallet-crypto"
 import { PasskeyService } from "@/wallet/services/passkey/service"
+import { ServiceClient as OffscreenServiceClient } from "@nulo/extension-messaging/offscreen"
+import { DappSessionService } from "@/wallet/services/dapp-session/service"
+import { PxeServiceClient } from "@/wallet/services/pxe/client"
+import { wirePxeProviders } from "@/wallet/runtime"
 import { flushPromises } from "@vue/test-utils"
 import { ProfileService } from "./service"
 import { RESTORE_PENDING_ROOT, RestorePendingRepository } from "./restore-pending-repository"
@@ -3027,4 +3031,143 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			await expect(unlock).rejects.toThrow(/Invalid profile id/)
 		}, 30_000)
 	})
+})
+
+// ── F-06 real-session pins: the production PXE wiring and the real dApp-session derivation ──
+
+const profileRowKey = (id: string) => `nulo:core:profiles@${id}`
+const readRawRow = async (api: FakeBrowserApi, id: string) =>
+	JSON.parse((await api.storage.local.get(profileRowKey(id)))[profileRowKey(id)] as string)
+const writeRawRow = (api: FakeBrowserApi, id: string, row: unknown) => api.storage.local.set({ [profileRowKey(id)]: JSON.stringify(row) })
+
+describe("F-06 warm PXE runtime — admission is decided in the SW by the PRODUCTION wiring", () => {
+	test("healthy unlock admits; after a degraded re-unlock an IMMEDIATE request against the warm chain is rejected with no wire traffic; an admitted in-flight job completes; a healthy re-unlock admits again", async () => {
+		const { api, service } = await makeService()
+		vi.stubGlobal("self", globalThis)
+		const wire: string[] = []
+		let parked: Promise<void> | undefined
+		const impl = async function (method: unknown) {
+			wire.push(method as string)
+			if (parked) await parked
+			return []
+		}
+		vi.spyOn(
+			OffscreenServiceClient.prototype as unknown as { request: (...a: unknown[]) => Promise<unknown> },
+			"request",
+		).mockImplementation(impl)
+		vi.spyOn(
+			Object.getPrototypeOf(OffscreenServiceClient.prototype) as { request: (...a: unknown[]) => Promise<unknown> },
+			"request",
+		).mockImplementation(impl)
+		try {
+			// The same call `createWalletRuntime` makes — a deleted guard registration reds this test.
+			wirePxeProviders(service)
+			const p = await service.createProfile("P", "pass1234")
+			const healthyRow = await readRawRow(api, p.id)
+			const client = new PxeServiceClient({ log: () => {} } as never)
+			const net = { profileId: p.id, chainId: 31337, rpcUrl: "http://n/1" }
+
+			await client.getSenders(net)
+			expect(wire).toEqual(["getSenders"])
+
+			// A job admitted while healthy is still on the wire when the lock lands.
+			let release!: () => void
+			parked = new Promise<void>((r) => (release = r))
+			const inflight = client.getSenders(net)
+			await new Promise((r) => setTimeout(r, 0))
+			expect(wire).toEqual(["getSenders", "getSenders"])
+			parked = undefined
+
+			await service.lockActiveProfile()
+			await writeRawRow(api, p.id, { ...healthyRow, dekSealed: "AAAAAAAAAAAAAAAAAAAAAAAAAAAA" })
+			await service.unlockProfile(p.id, "pass1234")
+			expect(service.isRecoveryMode(p.id)).toBe(true)
+			// The offscreen still holds the store key and the open chain runtime: only the SW-side
+			// guard stands between the degraded session and it.
+			await expect(client.getSenders(net)).rejects.toBeInstanceOf(RecoveryModeError)
+			expect(wire).toEqual(["getSenders", "getSenders"])
+			// Cleanup stays admitted for a profile in recovery mode.
+			await client.clearChainState(p.id, 31337)
+			expect(wire.at(-1)).toBe("clearChainState")
+
+			release()
+			await inflight
+
+			await service.lockActiveProfile()
+			await writeRawRow(api, p.id, healthyRow)
+			await service.unlockProfile(p.id, "pass1234")
+			expect(service.isRecoveryMode(p.id)).toBe(false)
+			await client.getSenders(net)
+			expect(wire.at(-1)).toBe("getSenders")
+		} finally {
+			vi.restoreAllMocks()
+			vi.unstubAllGlobals()
+		}
+	}, 30_000)
+})
+
+describe("F-06 dApp-session rows under same-phrase SIBLINGS — the real ProfileService derivation", () => {
+	async function makeSiblings() {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const config = fakeConfig()
+		const logger = new LoggerStore(config)
+		const services = new ServiceCollection()
+		services.add(new FakePasskeyService(logger))
+		const profiles = new ProfileService(config, logger, api)
+		services.add(profiles)
+		const sessions = new DappSessionService(logger, api)
+		services.add(sessions)
+		await services.start()
+		profiles.setDeletionDelegate({ snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }), runFor: async () => {} })
+		const words = await wordsForFill(0x53)
+		const p1 = await profiles.importMnemonic("A", words, "pass1234")
+		const p2 = await profiles.importMnemonic("B", words, "pass1234", true)
+		return { api, profiles, sessions, p1, p2 }
+	}
+	const rowKeys = async (api: FakeBrowserApi) =>
+		Object.keys((await api.storage.local.get(null)) as Record<string, unknown>).filter((k) => k.startsWith("nulo:core:dappSessions@"))
+	const settle = () => new Promise((r) => setTimeout(r, 0))
+
+	test("a row p1 signed, re-targeted at p2 (same master), is REJECTED and dropped under p2; p1's authentic row is hidden under p2 and re-read by p1; a degraded p1 hides without deleting", async () => {
+		const { api, profiles, sessions, p1, p2 } = await makeSiblings()
+		await profiles.lockActiveProfile()
+		await profiles.unlockProfile(p1.id, "pass1234")
+		const row = await sessions.addDappSession({ name: "dApp", url: "https://dapp.example" }, [], [], 0 as never, "1")
+		const [key] = await rowKeys(api)
+		const authentic = (await api.storage.local.get(key))[key] as string
+		expect(JSON.parse(authentic).profileId).toBe(p1.id)
+
+		// The forgery: a sibling holding the SAME master signs a row for p2 — p1's real key stands in
+		// for it (master shared, DEK not). Under p2 the MAC must fail: dropped as tampered.
+		await api.storage.local.set({ [key]: JSON.stringify({ ...JSON.parse(authentic), profileId: p2.id }) })
+		await profiles.lockActiveProfile()
+		await profiles.unlockProfile(p2.id, "pass1234")
+		expect(await sessions.getDappSessions()).toEqual([])
+		await settle()
+		expect(await rowKeys(api)).toEqual([])
+
+		// p1's authentic row, read while p2 is active: hidden (p1 is locked), never deleted.
+		await api.storage.local.set({ [key]: authentic })
+		expect(await sessions.getDappSessions()).toEqual([])
+		await settle()
+		expect(await rowKeys(api)).toEqual([key])
+		await profiles.lockActiveProfile()
+		await profiles.unlockProfile(p1.id, "pass1234")
+		expect((await sessions.getDappSessions()).map((r) => r.id)).toEqual([row.id])
+
+		// p1 in recovery mode: no DEK → no key → hidden, never deleted; a healthy re-unlock re-reads it.
+		const healthy = await readRawRow(api, p1.id)
+		await profiles.lockActiveProfile()
+		await writeRawRow(api, p1.id, { ...healthy, dekSealed: "AAAAAAAAAAAAAAAAAAAAAAAAAAAA" })
+		await profiles.unlockProfile(p1.id, "pass1234")
+		expect(profiles.isRecoveryMode(p1.id)).toBe(true)
+		expect(await sessions.getDappSessions()).toEqual([])
+		await settle()
+		expect(await rowKeys(api)).toEqual([key])
+		await profiles.lockActiveProfile()
+		await writeRawRow(api, p1.id, healthy)
+		await profiles.unlockProfile(p1.id, "pass1234")
+		expect((await sessions.getDappSessions()).map((r) => r.id)).toEqual([row.id])
+	}, 60_000)
 })
