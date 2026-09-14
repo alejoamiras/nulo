@@ -1,6 +1,6 @@
 # harden-b2-backup-passkey — plan (blueprint light)
 
-**Status:** APPROVED 2026-09-14 — codex round 3 `approve` (round 1 `reject`: node-cache contamination + five should-fix, adopted in full; round 2 `reject`: dead-RPC fixture port ownership, adopted). Owner approval pre-granted by `../seed.md` (decisions locked 2026-09-14). Implementing.
+**Status:** implemented, PR open (2026-09-14) — three phases green, post-implementation codex loop converged in three rounds (fix → fix → approve; `../lessons/b2.md`), stacked PR into `dev` via `gh stack submit` (on B1 PR #592 → #591 → `dev`; stack #593). Blueprint: codex round 3 `approve` (rounds 1–2 `reject`, adopted in full); owner approval pre-granted by `../seed.md`.
 **driver:** claude-code · **eli5_mode:** artifact · **code_review:** off (owner directive) · **tier:** light (owner-set) · **budget:** recon 1 agent; codex at `high`. · **eli5:** https://claude.ai/code/artifact/ff7def35-3c55-4848-a2f3-349b2cf07c70 (private Artifact; `eli5.html` is the fallback copy).
 **Batch:** B2 of 4 — see `../seed.md` for the decision table and the stack. Findings: `audit/security/2026-09-13-high-prerelease/findings/verified.md` (F-03, F-04, F-05).
 **Branch:** `harden-b2-backup-passkey`, stacked on `harden-b1-mechanical` (PR #592). Recon: `recon.md`.
