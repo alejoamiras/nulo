@@ -124,3 +124,30 @@ Prompt: the ledger and the revised plan; re-verify.
    **Smallest change:** make READY/PONG tests reject wrong URLs while explicitly accepting the legitimate Firefox sender with `sender.tab`; replace the stale assumptions with exact-path matching and physical-key occupancy preservation.
 
 **reject — blocking: passkey export remains gated; recovery-mode PXE rejection aborts backup assembly; recovery admission ordering and warm-runtime coverage remain incomplete.**
+
+## Round 3 — 2026-09-14 (same session)
+
+Prompt: round 2's items adopted (tolerant passkey export, recovery-mode assembly, SW-side admission guard, text fixes).
+
+### Response (paths made repo-relative)
+
+1. **Blocking — the recovery error is erased before the new backup catch. Confidence: high.**  
+   `apps/extension/src/wallet/services/account-state/service.ts:140–145,175`.
+
+   `backup()` calls `getSenders()`/`getContracts()` through `viaPxe`, which replaces every exception with `Error("PXE request failed")`. The proposed `catch (RecoveryModeError)` therefore never matches, and export still aborts.
+
+   **Smallest change:** explicitly preserve `RecoveryModeError` through `viaPxe`. Inject the test failure at the PXE client, exercising the real wrapper; mocking `getSenders()` to throw the typed error would miss this.
+
+2. **Should-fix — specify how the fresh passkey export blob reaches the file without changing the profile. Confidence: high.**  
+   `apps/extension/src/popup/pages/settings/security/export/full.vue:177–180`.
+
+   Currently `exportPlain()` returns only the credential ID, and the popup separately fetches the original stored `dekSealed`. State that the authenticated export returns the replacement blob and the popup consumes it directly. Never persist the fresh DEK into the source profile. The round-trip test should also assert that the source row remains unchanged.
+
+3. **Should-fix — exempt cleanup from “every profile-bound method.” Confidence: high.**  
+   `packages/aztec-runtime/src/pxe/client.ts:360–367`; `plan.md:15`.
+
+   `clearChainState` and `clearProfileState` also pass through `request`. Gating them would prevent chain cleanup while the affected profile is active in recovery mode.
+
+   **Smallest change:** scope the guard to operational PXE access and explicitly preserve cleanup calls. Add a recovery-mode cleanup positive control.
+
+**reject — blocking: `viaPxe` erases the error required by the recovery-export catch.**
