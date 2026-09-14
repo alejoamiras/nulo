@@ -428,8 +428,15 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		const profile = await requireActiveProfile(this.profileService)
 		const fpcInfo = requireOwnedRow(await this.storage.get(id), profile.id)
 		const fpcHandler = getFpcHandler(fpcInfo.type)
-		const protocols = this.protocolAddresses.get(fpcInfo.chainId)
-		return new Fpc(this.decorate(fpcInfo, protocols), fpcHandler)
+		// Derive (not just read the cache): after a worker restart the cache is empty and the
+		// genuine row would otherwise look non-protocol.
+		const decorated = this.decorate(fpcInfo, await this.getOrComputeProtocolAddresses(fpcInfo.chainId))
+		// A PrivateFPC row that is not the protocol-derived one can never be a payer — its
+		// `pay_fee` would run inside the user's private execution against a foreign contract.
+		if (decorated.type === FpcType.PrivateFpc && !decorated.isProtocol) {
+			throw new Error("PrivateFPC row is not the protocol contract")
+		}
+		return new Fpc(decorated, fpcHandler)
 	}
 
 	/**

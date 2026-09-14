@@ -34,7 +34,7 @@ Files: `execution/fast-path.ts` (+`fast-path.test.ts`), `execution/view-executor
 Tests: fast-path mismatch case (name matches grant, selector belongs to another public static fn → throws before `simulateViaNode`, which is never called); forged `isStatic` on a non-static ABI function → `runFastPath` returns `null` and, exercised through `ViewExecutor`, the standard arm receives every call in order and a later mismatched call is still rejected there (binding never mutates the original call names, so the standard path keeps its evidence); a registered-contract happy path still simulates; registerContract mismatch leaves NEITHER the class nor the instance registered (fake PXE records calls).
 Gate: `bun run --cwd apps/extension test src/wallet/services/execution` · `bun run --cwd packages/aztec-runtime test` · `bun run lint && bun run typecheck`. Layers: typecheck/lint + unit.
 
-**Phase 3 — FPC picker (F-03 half)**
+**Phase 3 — FPC picker (F-03 half)** ✓ 2026-09-14
 Files: `popup/components/modules/send/fee-helpers.ts` (+test), `execution/gas-balance-reader.ts`, `fpc/service.ts` `getFpcImpl` (+test).
 Tests: poisoned `PrivateFpc` row first, canonical second → the canonical row is the single `private_fpc` option; `getFpcImpl` refuses a non-protocol `PrivateFpc`; `getFpcImpl` accepts the genuine `PrivateFpc` on a cold protocol-address cache (fresh service, no prior `getFpcs`); a custom `DefaultSponsoredFpc` still resolves.
 Gate: `bun run --cwd apps/extension test src/popup/components/modules/send src/wallet/services/fpc src/wallet/services/execution` · `bun run lint && bun run typecheck`. Layers: typecheck/lint + unit.

@@ -114,7 +114,40 @@ describe("GasBalanceReader cache contract", () => {
 			return calls[0]?.method === "balance_of_public" ? impl.public() : impl.private()
 		})
 	}
-	const PRIVATE_FPC_DEPS = { getFpcs: async () => [{ type: FpcType.PrivateFpc, address: "0xfpc" } as never] }
+	const PRIVATE_FPC_DEPS = { getFpcs: async () => [{ type: FpcType.PrivateFpc, address: "0xfpc", isProtocol: true } as never] }
+
+	test("a non-protocol PrivateFpc row sorted first is skipped: the private leg reads the protocol contract", async () => {
+		const contracts: string[] = []
+		bvsMock.mockReset().mockImplementation((calls: Array<{ method: string; contract: string }>) => {
+			contracts.push(calls[0].contract)
+			return encodedResult(7n)
+		})
+		const reader = new GasBalanceReader(
+			makeDeps({
+				getFpcs: async () =>
+					[
+						{ type: FpcType.PrivateFpc, address: "0xpoisoned", isProtocol: false },
+						{ type: FpcType.PrivateFpc, address: "0xfpc", isProtocol: true },
+					] as never,
+			}),
+		)
+		await reader.get("net-1", "0xacc")
+		expect(contracts).toContain("0xfpc")
+		expect(contracts).not.toContain("0xpoisoned")
+	})
+
+	test("only a non-protocol PrivateFpc row → the private leg is null, no balance read against it", async () => {
+		const contracts: string[] = []
+		bvsMock.mockReset().mockImplementation((calls: Array<{ method: string; contract: string }>) => {
+			contracts.push(calls[0].contract)
+			return encodedResult(7n)
+		})
+		const reader = new GasBalanceReader(
+			makeDeps({ getFpcs: async () => [{ type: FpcType.PrivateFpc, address: "0xpoisoned", isProtocol: false }] as never }),
+		)
+		expect((await reader.get("net-1", "0xacc")).privateFeeJuice).toBeNull()
+		expect(contracts).not.toContain("0xpoisoned")
+	})
 
 	test("PrivateFPC present → both legs read, result assembled from both", async () => {
 		perMethodBvs({ public: async () => encodedResult(100n), private: async () => encodedResult(55n) })

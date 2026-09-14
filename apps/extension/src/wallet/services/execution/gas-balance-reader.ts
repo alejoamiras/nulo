@@ -178,7 +178,7 @@ export class GasBalanceReader {
 		}
 		const readPrivate = async (): Promise<string | null> => {
 			const fpcs = await this.deps.getFpcs(chainId)
-			const bridgedFpc = fpcs.find((f) => f.type === FpcType.PrivateFpc)
+			const bridgedFpc = fpcs.find((f) => f.type === FpcType.PrivateFpc && f.isProtocol === true)
 			if (!bridgedFpc) return null
 			const result = await batchedViewSimulation(
 				[{ kind: "call", contract: bridgedFpc.address, method: "balance_of", args: [accountAddress] }],
