@@ -33,7 +33,7 @@
  * expressible by upstream's flat `appCallOffset` model.
  */
 import { Fr } from "@aztec/foundation/curves/bn254"
-import { FunctionCall, FunctionType } from "@aztec/stdlib/abi"
+import { FunctionCall, FunctionType, type FunctionAbi } from "@aztec/stdlib/abi"
 import type { TxSimulationResult } from "@aztec/stdlib/tx"
 import { SimulationError } from "@aztec/stdlib/errors"
 import type { AztecAddress } from "@aztec/stdlib/aztec-address"
@@ -46,6 +46,7 @@ import { buildMergedSimulationResult, simulateViaNode } from "@aztec/wallet-sdk/
 import { completeFeeOptions, type PartialGasSettingsRPC } from "@nulo/aztec-runtime/account"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
 import { assertLiveChainIdentity, type SelectedNetworkChainInfo } from "@nulo/aztec-runtime/utils"
+import { type ContractResolver, findFunctionBySelector } from "./contract-resolver"
 import { getBlockHeaderAnchor } from "./helpers/block-header-anchor"
 
 /**
@@ -114,6 +115,50 @@ export function rehydrateOptimizablePrefix(
 }
 
 /**
+ * Bind every optimizable call to ABI truth before node-side simulation. The wire `name`
+ * is what scope enforcement authorized and the wire `selector` is what would execute; a
+ * found artifact whose selector resolves to a different function is a scope violation.
+ * The rebuilt calls take `type`/`isStatic` from the ABI, never from the wire flags; if any
+ * call is then not public+static the whole prefix is ineligible and the caller takes the
+ * standard path for every call, which re-validates each one. A contract PXE cannot resolve
+ * is likewise left to the standard path (which registers, then validates). The input array
+ * is never mutated, so the standard path keeps the original names as evidence.
+ */
+export async function bindOptimizableCalls(pxe: IPXE, resolver: ContractResolver, calls: FunctionCall[]): Promise<FunctionCall[] | null> {
+	const bound: FunctionCall[] = []
+	for (const call of calls) {
+		let fn: FunctionAbi | undefined
+		try {
+			const [, instance] = await resolver.resolveInstance(pxe, call.to.toString())
+			const [, artifact] = await resolver.resolveArtifact(pxe, instance.currentContractClassId.toString())
+			fn = await findFunctionBySelector(artifact, call.selector.toString())
+		} catch {
+			return null
+		}
+		if (!fn) {
+			throw new Error("Method not found")
+		}
+		if (call.name !== fn.name) {
+			throw new Error(`Scope violation: call name "${call.name}" does not match selector's function "${fn.name}" on ${call.to}`)
+		}
+		if (fn.functionType !== FunctionType.PUBLIC || !fn.isStatic) return null
+		bound.push(
+			new FunctionCall(
+				fn.name,
+				call.to,
+				call.selector,
+				fn.functionType,
+				call.hideMsgSender,
+				fn.isStatic,
+				call.args,
+				fn.returnTypes ?? [],
+			),
+		)
+	}
+	return bound
+}
+
+/**
  * Wrap a standard-path `TxSimulationResult` into the
  * `TxSimulationResultWithAppOffset` shape upstream's
  * `buildMergedSimulationResult` expects. Offset is 1 — see
@@ -129,6 +174,7 @@ export function wrapStandardArmForMixedMerge(result: TxSimulationResult): TxSimu
 export interface FastPathDeps {
 	node: AztecNode
 	pxe: IPXE
+	resolver: ContractResolver
 	/** Stored chain identity for the user-selected network. Used to rebind
 	 *  the live node's `getNodeInfo()` before deriving `chainInfo`
 	 *  (F-012 / A-01 V-01). */
@@ -170,13 +216,17 @@ export interface FastPathDeps {
  * needs the same node) and our own post-sim merge are NOT caught.
  */
 export async function runFastPath(deps: FastPathDeps): Promise<TxSimulationResult | null> {
-	const { node, pxe, network, fromAddr, opts, optimizableCalls, remainingRaw, runStandardArm, getContractName, logError } = deps
+	const { node, pxe, resolver, network, fromAddr, opts, optimizableCalls, remainingRaw, runStandardArm, getContractName, logError } = deps
 
 	// `getNodeInfo` shares fate with the standard PXE path — let it propagate.
 	const nodeInfo = await node.getNodeInfo()
 	// F-012 / A-01 V-01: refuse to sim against a drifted RPC. Mirrors the
 	// rebind already present in `tx-request-builder.ts`.
 	assertLiveChainIdentity(network, nodeInfo)
+	// Outside the infrastructure `try` below on purpose: a scope violation must reach the dApp,
+	// not be swallowed into the standard-path fallback.
+	const boundCalls = await bindOptimizableCalls(pxe, resolver, optimizableCalls)
+	if (boundCalls === null) return null
 	const chainInfo: ChainInfo = {
 		chainId: new Fr(nodeInfo.l1ChainId),
 		version: new Fr(nodeInfo.rollupVersion),
@@ -201,7 +251,7 @@ export async function runFastPath(deps: FastPathDeps): Promise<TxSimulationResul
 			optimizableCalls.length > 0
 				? simulateViaNode(
 						node,
-						optimizableCalls,
+						boundCalls,
 						fromAddr,
 						chainInfo,
 						gasSettings,

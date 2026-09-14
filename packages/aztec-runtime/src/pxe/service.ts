@@ -10,6 +10,7 @@ import {
 	getContractClassFromArtifact,
 	type CompleteAddress,
 	type PartialAddress,
+	computeContractAddressFromInstance,
 } from "@aztec/stdlib/contract"
 import { BlockParameterSchema } from "@aztec/stdlib/block"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
@@ -443,15 +444,18 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		return this.withPxeWrite("registerContract", network, async (pxe) => {
 			const instance = await ContractInstanceWithAddressSchema.parseAsync(contract.instance)
 			const artifact = await ContractArtifactSchema.optional().parseAsync(contract.artifact)
-			if (artifact) {
-				await pxe.registerContractClass(artifact)
-			}
-			const derived = await pxe.registerContract(instance)
+			// Derive before any write: the upstream `registerContract` call itself persists the
+			// instance, so a preimage/address mismatch must be rejected while the store is untouched.
+			const derived = await computeContractAddressFromInstance(instance)
 			if (!derived.equals(instance.address)) {
 				throw new Error(
 					`registerContract address mismatch: PXE derived ${derived.toString()} from the preimage, expected ${instance.address.toString()}`,
 				)
 			}
+			if (artifact) {
+				await pxe.registerContractClass(artifact)
+			}
+			await pxe.registerContract(instance)
 		})
 	}
 

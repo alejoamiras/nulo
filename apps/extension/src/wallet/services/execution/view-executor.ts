@@ -275,6 +275,7 @@ export class ViewExecutor {
 		const result = await runFastPath({
 			node,
 			pxe,
+			resolver: this.deps.resolver,
 			network,
 			fromAddr: AztecAddress.fromStringUnsafe(op.accountAddress),
 			opts: op.opts,
