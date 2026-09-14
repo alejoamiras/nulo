@@ -21,7 +21,7 @@ Three owner-locked reductions of surface: the full backup stops carrying fee-pay
 
 ## Phases (each ends with its gate; a phase is ✓ only when the gate passes)
 
-**Phase 1 — RP ID (F-05)**
+**Phase 1 — RP ID (F-05)** ✓ 2026-09-14
 Files: `wallet/services/passkey/spec.ts`, `manifest/manifest.config.ts` (`host_permissions`, `content_scripts[0].exclude_matches`), `SECURITY.md`, `src/manifest.test.ts`.
 Tests: literal pin `RP_ID === "passkey.nulo.sh"`; host permission equals `https://${RP_ID}/`; effective content-script matching excludes the RP host and its descendants and still covers `nulo.sh`; no in-repo Pages target names the RP host; `check-rp-id` gate passes in `bun run build:chrome`; the built `dist/chrome/manifest.json` carries the exclusion (post-build read).
 Gate: `bun run --cwd apps/extension build:chrome` (runs `check:rp-id`) · `bun run --cwd apps/extension test src/wallet/services/passkey src/manifest.test.ts` · `bun run lint && bun run typecheck`. Layers: typecheck/lint + unit + build gate.
