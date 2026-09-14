@@ -45,3 +45,28 @@ Read-only review; no tests run or files modified. Confidence: **high** on the co
 **F. Registry removal — no migration acknowledgement is required now.** `IMPORT_BLOCKING_ACK` records migration versions; the real migration list is empty. Update registry entries, export/import callers, fixtures and compatibility documentation, then run footprint coverage. Future migrations touching these now-unmapped roots will already trigger the coverage guard. CI’s network specs additionally prove real PXE registration, fresh post-import balances, the build-stamped local endpoint and service-worker restart persistence. Local unit/composition tests must prove hostile remap cases and deterministic deletion/cache races; successful network roundtrips do not cover those. Phase 2 is currently missing those proofs; Phase 3’s principal gate is sound.
 
 **reject — blocking item 1: restore-time seeding contaminates the active profile’s node cache.**
+
+## Round 2 — 2026-09-14 (same session)
+
+Prompt: the plan revised per round 1 (per-item summary), re-verify.
+
+### Response (paths made repo-relative)
+
+The original cache-isolation blocker is resolved. One new blocker remains; confidence: **high**.
+
+1. **Blocking — the dead-RPC fixture assumes ownership of the compiled seed’s port.**  
+   [`plan.md:30`](implementations-plan/harden-2026-09-remediation/b2-backup-passkey/plan.md:30) says the stub binds that port. The default is `localhost:8080`; network builds instead stamp the running sandbox’s port. Neither belongs to this stub. Concurrent runs can therefore get `EADDRINUSE`, and the REFUSED case can contact a real node rather than observe refusal. Serializing tests within one Vitest process does not isolate other agents.
+
+   **Smallest plan change:** retain ephemeral, run-owned stub ports and redirect the seeded URL within this test’s browser, covering the service-worker/offscreen requests. Alternatively, reserve a dedicated stub port and stamp it through the existing `VITE_LOCAL_NETWORK_RPC_URL` into an isolated test build. Never bind the sandbox’s port or assume an unreserved port is unused. Preserve the three failure-class assertions.
+
+The other round-1 revisions adequately address the findings at plan level. No additional should-fix items. No tests run or files modified.
+
+**reject — blocking: dead-RPC stub port ownership and run isolation.**
+
+## Round 3 — 2026-09-14 (same session)
+
+Prompt: the dead-RPC fixture redesigned to CDP `Fetch` interception on the service-worker and offscreen targets with ephemeral run-owned stub ports.
+
+### Response
+
+approve
