@@ -21,8 +21,6 @@ import { ACCOUNT_STATE_SERVICE_NAME, AccountStateServiceClient } from "@/wallet/
 import { AUTH_REGISTRY_SERVICE_NAME, AuthRegistryServiceClient } from "@/wallet/services/auth-registry/client"
 import { CONFIG_SERVICE_NAME, ConfigServiceClient } from "@/wallet/services/config/client"
 import { CONTACT_SERVICE_NAME, ContactServiceClient } from "@/wallet/services/contact/client"
-import { FPC_SERVICE_NAME, FpcServiceClient } from "@/wallet/services/fpc/client"
-import { NETWORK_SERVICE_NAME, NetworkServiceClient } from "@/wallet/services/network/client"
 import { PROFILE_SERVICE_NAME, ProfileServiceClient } from "@/wallet/services/profile/client"
 import { TOKEN_SERVICE_NAME, TokenServiceClient } from "@/wallet/services/token/client"
 import { TOKEN_BALANCE_SERVICE_NAME, TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
@@ -97,7 +95,6 @@ const buildBackupServices = () => {
 	const importedKeysBackupClient = new AccountServiceClient()
 	return [
 		{ name: PROFILE_SERVICE_NAME, client: new ProfileServiceClient() },
-		{ name: NETWORK_SERVICE_NAME, client: new NetworkServiceClient() },
 		{ name: ACCOUNT_SERVICE_NAME, client: new AccountServiceClient() },
 		// The imported-keys slice shares AccountService but has its OWN backup name/root — a thin
 		// adapter routes `.backup()` to `backupImportedKeys()`.
@@ -113,7 +110,6 @@ const buildBackupServices = () => {
 		{ name: TOKEN_BALANCE_SERVICE_NAME, client: new TokenBalanceServiceClient() },
 		{ name: ACCOUNT_STATE_SERVICE_NAME, client: new AccountStateServiceClient() },
 		{ name: AUTH_REGISTRY_SERVICE_NAME, client: new AuthRegistryServiceClient() },
-		{ name: FPC_SERVICE_NAME, client: new FpcServiceClient() },
 		{ name: CONTACT_SERVICE_NAME, client: new ContactServiceClient() },
 		{ name: CONFIG_SERVICE_NAME, client: new ConfigServiceClient() },
 	]
@@ -227,11 +223,10 @@ function buildBackupEnvelope({ key, entropyB64, dekB64, dekSealedB64 }) {
 		// ONLY into the rewrap context (the restored row mints a FRESH dek — clone divergence).
 		"imported-keys-dek": dekB64,
 		"imported-keys-dek-sealed": dekSealedB64,
-		// Item 1b: preserve the user's ACTIVE-network selection (a top-level raw network id, like
-		// `master-key` — NOT a slice). Restore resolves it against the restored rows; absent (older
-		// backups / no active network) → the import falls back to the primary network. `undefined`
-		// is dropped by JSON.stringify, so the field is simply absent when there's no active network.
-		"active-network-id": appStore.network?.id,
+		// The active-network preference names a CHAIN (row ids are per install and the backup
+		// carries no network rows); restore honours it only for a seeded chain, else the primary
+		// seed stays active. `undefined` is dropped by JSON.stringify when there is no active network.
+		"active-chain-id": appStore.network?.chainId,
 	}
 }
 

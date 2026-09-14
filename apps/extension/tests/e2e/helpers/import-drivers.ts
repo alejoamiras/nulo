@@ -403,23 +403,7 @@ export function buildSyntheticBackup({
 		"imported-keys-dek": Buffer.from(new Uint8Array(32).fill(0x33)).toString("base64"),
 		data: {
 			profile: { id: "syn-profile-id", name: profileName, type: "password" },
-			network: [
-				{
-					id: "syn-network-id",
-					profileId: "syn-profile-id",
-					name: "Local Network",
-					rpcUrl: process.env.AZTEC_NODE_URL ?? "http://localhost:8080",
-					// Composite LOCAL chain id is 0 (storage scoping); the view-simulation identity
-					// guard exempts ONLY chain 0. l1ChainId is the SEPARATE derivation input (anvil
-					// 31337) — it must match what the account rows derive under, and what a restored
-					// Local Network row validates against the DEFAULT_SEEDS constant.
-					chainId: 0,
-					l1ChainId,
-					kind: "local",
-					endpoints: [{ id: "syn-endpoint-id", rpcUrl: process.env.AZTEC_NODE_URL ?? "http://localhost:8080" }],
-					primaryEndpointId: "syn-endpoint-id",
-				},
-			],
+			// No network slice: the import reseeds the built-in networks and binds rows by chainId.
 			account: [
 				{
 					address: accountAddress ?? `0x${"01".repeat(32)}`,

@@ -97,8 +97,8 @@ test.skipIf(!hasConfig)(
 		// (chainId, address) tuple — network[0] would be a different chain and the
 		// tx would be (correctly) dropped as cross-chain.
 		const backupAccounts = exported.data.account as Array<{ address: string; chainId: number }>
-		const chainId =
-			backupAccounts.find((a) => a.address === funded)?.chainId ?? (exported.data.network as Array<{ chainId: number }>)[0].chainId
+		const chainId = backupAccounts.find((a) => a.address === funded)?.chainId
+		if (chainId === undefined) throw new Error("the funded account is missing from the exported backup")
 		const mkTx = (hash: string, account: string) => ({
 			chainId,
 			account,

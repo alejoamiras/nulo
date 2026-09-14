@@ -131,6 +131,84 @@ describe("NetworkService — addNetwork creation fence", () => {
 	})
 })
 
+describe("NetworkService — seedDefaultsForProfile (full-backup import reseeds a NOT-yet-active profile)", () => {
+	function withProfiles(h: ReturnType<typeof harness>, ids: string[]) {
+		const internals = h.service as unknown as {
+			initialized: boolean
+			profileService: { getProfiles: () => Promise<unknown[]> }
+			storage: { set: (id: string, row: unknown) => Promise<void> }
+		}
+		internals.initialized = true
+		internals.profileService.getProfiles = async () => ids.map((id) => ({ id, name: id, type: "password" }))
+		return { ...h, internals }
+	}
+	const rowsOf = async (h: ReturnType<typeof harness>, profileId: string) =>
+		(await h.service.getNetworksRaw(profileId)).sort((a, b) => a.chainId - b.chainId)
+
+	test("seeds every default for the target profile and writes ITS active pointer, never touching the active profile's node cache", async () => {
+		const h = withProfiles(harness({}), ["p1", "p2"])
+		const p1 = await h.service.getOrInitNetworks()
+		const mainnet = p1.find((n) => n.chainId === CHAIN_IDS.MAINNET)!
+		const p1NodeBefore = await h.service.getNode(mainnet.chainId)
+		const nodesBefore = new Map((h.service as unknown as { nodes: Map<number, unknown> }).nodes)
+
+		const seeded = await h.service.seedDefaultsForProfile("p2")
+
+		expect(seeded.map((n) => n.chainId).sort((a, b) => a - b)).toEqual(p1.map((n) => n.chainId).sort((a, b) => a - b))
+		expect(seeded.every((n) => n.profileId === "p2")).toBe(true)
+		expect(new Set(seeded.map((n) => n.id)).size).toBe(seeded.length)
+		expect(seeded.some((n) => p1.some((m) => m.id === n.id))).toBe(false)
+		// The cache is keyed by chainId alone: p1 keeps exactly the node objects it had.
+		const nodesAfter = (h.service as unknown as { nodes: Map<number, unknown> }).nodes
+		expect(nodesAfter.size).toBe(nodesBefore.size)
+		for (const [chainId, node] of nodesBefore) expect(nodesAfter.get(chainId)).toBe(node)
+		expect(await h.service.getNode(mainnet.chainId)).toBe(p1NodeBefore)
+		// p2's pointer names p2's primary seed; p1's pointer is untouched.
+		const raw = (await h.browserApi.storage.local.get(null)) as Record<string, unknown>
+		const p2Primary = seeded.find((n) => n.chainId === CHAIN_IDS.MAINNET)!
+		expect(Object.entries(raw).some(([k, v]) => k.includes("p2") && v === p2Primary.id)).toBe(true)
+		expect(Object.entries(raw).some(([k, v]) => k.includes("p1") && v === mainnet.id)).toBe(true)
+	})
+
+	test("a repeat call returns the stored rows untouched — no duplicate (profileId, chainId), no endpoint reset", async () => {
+		const h = withProfiles(harness({}), ["p2"])
+		const first = await h.service.seedDefaultsForProfile("p2")
+		const edited = { ...first[0], endpoints: [{ ...first[0].endpoints[0], rpcUrl: "https://edited.example/" }] }
+		await h.internals.storage.set(edited.id, edited)
+
+		const again = await h.service.seedDefaultsForProfile("p2")
+
+		expect(again.map((n) => n.id).sort()).toEqual(first.map((n) => n.id).sort())
+		expect((await rowsOf(h, "p2")).length).toBe(first.length)
+		expect((await h.service.getNetworksRaw("p2")).find((n) => n.id === edited.id)?.endpoints[0].rpcUrl).toBe("https://edited.example/")
+	})
+
+	test("rejects a profile that does not exist, and one already under deletion, without writing a row", async () => {
+		const h = withProfiles(harness({}), ["p1"])
+		await expect(h.service.seedDefaultsForProfile("ghost")).rejects.toThrow(/does not exist/)
+		h.deletionState.beginDeletion("p1")
+		await expect(h.service.seedDefaultsForProfile("p1")).rejects.toThrow(/deleted|not captured|write rejected/i)
+		const raw = (await h.browserApi.storage.local.get(null)) as Record<string, unknown>
+		expect(Object.keys(raw).some((k) => k.startsWith("nulo:core:networks@"))).toBe(false)
+	})
+
+	test("a deletion landing mid-seed rejects and leaves no orphan rows", async () => {
+		const h = withProfiles(harness({}), ["p2"])
+		const realSet = h.browserApi.storage.local.set.bind(h.browserApi.storage.local)
+		let fired = false
+		h.browserApi.storage.local.set = (async (items: Record<string, unknown>) => {
+			await realSet(items)
+			if (!fired && Object.keys(items).some((k) => k.startsWith("nulo:core:networks@"))) {
+				fired = true
+				h.deletionState.beginDeletion("p2")
+				h.deletionState.release("p2")
+			}
+		}) as typeof h.browserApi.storage.local.set
+		await expect(h.service.seedDefaultsForProfile("p2")).rejects.toThrow(/deleted|not current/i)
+		expect(await rowsOf(h, "p2")).toEqual([])
+	})
+})
+
 describe("NetworkService — resolveVerifiedL1ChainId single-snapshot", () => {
 	test("the probe target and the returned l1ChainId come from one row read", async () => {
 		// Two-faced storage: the row is swapped between reads. A split-read
@@ -1118,166 +1196,6 @@ describe("NetworkService public API (M4.10)", () => {
 			expect(deleted.map((n) => n.id)).toEqual([a.id])
 			// Row really gone.
 			await expect(service.getNetwork(a.id)).rejects.toThrow(/Invalid id/)
-		})
-	})
-
-	describe("backup / restore", () => {
-		test("backup returns the current network array", async () => {
-			const { service } = setupServiceWithStorage({
-				"https://rpc.test/1": nodeInfoForChain(1),
-				"https://rpc.test/2": nodeInfoForChain(2),
-			})
-			await service.addNetwork("A", "https://rpc.test/1")
-			await service.addNetwork("B", "https://rpc.test/2")
-			const snapshot = await service.backup()
-			expect(snapshot).toHaveLength(2)
-			for (const n of snapshot) {
-				expect(n.endpoints.length).toBeGreaterThan(0)
-				expect(typeof n.primaryEndpointId).toBe("string")
-			}
-		})
-
-		test("restore rejects old-shape entries (no `endpoints` field) with BACKUP_TOO_OLD", async () => {
-			const { service } = setupServiceWithStorage({})
-			const oldShape = [
-				{
-					id: "legacy-1",
-					profileId: "p1",
-					name: "Legacy",
-					rpcUrl: "https://legacy.example",
-					chainId: 7,
-					isDefault: true,
-				},
-			]
-			const result = await service.restore(oldShape)
-			expect(result).toHaveLength(1)
-			expect(result[0]!.restoreError).toMatch(/BACKUP_TOO_OLD/)
-		})
-
-		test("(N-14) a deleteProfile beginning DURING the restore rejects every later row write", async () => {
-			const { service, local, deletionState } = setupServiceWithStorage({})
-			const mkNet = (id: string, chainId: number): Network => ({
-				id,
-				profileId: "p1",
-				chainId,
-				l1ChainId: chainId,
-				name: `N${chainId}`,
-				primaryEndpointId: "e1",
-				endpoints: [{ id: "e1", rpcUrl: `https://rpc.test/${chainId}` }],
-			})
-			const origSet = local.set.bind(local)
-			let fired = false
-			local.set = async (items: Record<string, unknown>) => {
-				await origSet(items)
-				if (!fired) {
-					fired = true
-					deletionState.beginDeletion("p1")
-				}
-			}
-			const result = await service.restore([mkNet("n1", 1), mkNet("n2", 2)])
-			expect(result[0]!.restoreError).toBeUndefined()
-			expect(result[1]!.restoreError).toMatch(/deleted/)
-			await expect(service.getNetwork("n2")).rejects.toThrow()
-		})
-
-		test("(N-14) a deletion that begins AND completes mid-restore still rejects later rows (entry-capture pin)", async () => {
-			// After begin+release the profile is unreserved and the epoch settled —
-			// a lazy per-row capture would pass; the entry-captured epoch has moved.
-			const { service, local, deletionState } = setupServiceWithStorage({})
-			const mkNet = (id: string, chainId: number): Network => ({
-				id,
-				profileId: "p1",
-				chainId,
-				l1ChainId: chainId,
-				name: `N${chainId}`,
-				primaryEndpointId: "e1",
-				endpoints: [{ id: "e1", rpcUrl: `https://rpc.test/${chainId}` }],
-			})
-			const origSet = local.set.bind(local)
-			let fired = false
-			local.set = async (items: Record<string, unknown>) => {
-				await origSet(items)
-				if (!fired) {
-					fired = true
-					deletionState.beginDeletion("p1")
-					deletionState.release("p1")
-				}
-			}
-			const result = await service.restore([mkNet("n1", 1), mkNet("n2", 2)])
-			expect(result[0]!.restoreError).toBeUndefined()
-			expect(result[1]!.restoreError).toMatch(/deleted/)
-		})
-
-		test("restore accepts new-shape entries", async () => {
-			const { service } = setupServiceWithStorage({})
-			const newShape: Network[] = [
-				{
-					id: "n1",
-					profileId: "p1",
-					chainId: 1,
-					l1ChainId: 1,
-					name: "Imported",
-					primaryEndpointId: "e1",
-					endpoints: [{ id: "e1", rpcUrl: "https://rpc.test/1" }],
-				},
-			]
-			const result = await service.restore(newShape)
-			expect(result).toHaveLength(1)
-			expect(result[0]!.restoreError).toBeUndefined()
-			const fetched = await service.getNetwork("n1")
-			expect(fetched.name).toBe("Imported")
-		})
-
-		test("restore rejects entries with disallowed RPC schemes (A-04)", async () => {
-			// Codex post-impl A-04: pre-fix, restore() only ran a shape check
-			// and wrote directly to storage. A malicious backup could re-introduce
-			// `javascript:`/`data:`/non-loopback `http:` URLs that the adapter
-			// would later reject. Now: NetworkSchema runs on each entry.
-			const { service } = setupServiceWithStorage({})
-			const evil = [
-				{
-					id: "n1",
-					profileId: "p1",
-					chainId: 1,
-					l1ChainId: 1,
-					name: "Phishing",
-					primaryEndpointId: "e1",
-					endpoints: [{ id: "e1", rpcUrl: "javascript:alert(1)" }],
-				},
-				{
-					id: "n2",
-					profileId: "p1",
-					chainId: 2,
-					l1ChainId: 2,
-					name: "Plain HTTP",
-					primaryEndpointId: "e1",
-					endpoints: [{ id: "e1", rpcUrl: "http://evil.com" }],
-				},
-			] as Network[]
-			const result = await service.restore(evil)
-			expect(result).toHaveLength(2)
-			expect(result[0]!.restoreError).toBeDefined()
-			expect(result[1]!.restoreError).toBeDefined()
-		})
-
-		test("restore rejects entries with userinfo URLs (A-04)", async () => {
-			// `https://user@evil.com@safe.com` parses to host=safe.com but the
-			// userinfo is the visible part of the URL and a known phishing vector.
-			const { service } = setupServiceWithStorage({})
-			const evil = [
-				{
-					id: "n1",
-					profileId: "p1",
-					chainId: 1,
-					l1ChainId: 1,
-					name: "Userinfo Phish",
-					primaryEndpointId: "e1",
-					endpoints: [{ id: "e1", rpcUrl: "https://user@evil.com@safe.com" }],
-				},
-			] as Network[]
-			const result = await service.restore(evil)
-			expect(result).toHaveLength(1)
-			expect(result[0]!.restoreError).toBeDefined()
 		})
 	})
 })

@@ -30,6 +30,7 @@ vi.mock("@aztec/stdlib/contract", async (importOriginal) => ({
 }))
 
 import { FpcService, FpcType } from "./service"
+import { FPC_STORAGE_ROOT } from "./spec"
 
 function _deferred<T>() {
 	let resolve!: (v: T) => void
@@ -140,22 +141,28 @@ describe("FpcService.getFpcImpl — only the protocol PrivateFPC can pay", () =>
 		isProtocol: false,
 	})
 
+	/** A row already on disk (the backup slice that used to carry these is gone). */
+	async function plant(h: Awaited<ReturnType<typeof makeHarness>>, fpc: ReturnType<typeof row>) {
+		const { isProtocol: _isProtocol, ...stored } = fpc
+		await h.api.storage.local.set({ [`${FPC_STORAGE_ROOT}@${stored.id}`]: JSON.stringify(stored) })
+	}
+
 	test("genuine PrivateFPC resolves on a COLD protocol-address cache (no prior getFpcs)", async () => {
 		const h = await makeHarness()
-		await h.service.restore([row("f-ok", FpcType.PrivateFpc, "0xprivate")])
+		await plant(h, row("f-ok", FpcType.PrivateFpc, "0xprivate"))
 		const fpc = await h.service.getFpcImpl("f-ok")
 		expect(fpc.infoData.isProtocol).toBe(true)
 	})
 
 	test("a PrivateFPC row at any other address is refused", async () => {
 		const h = await makeHarness()
-		await h.service.restore([row("f-bad", FpcType.PrivateFpc, "0xdead")])
+		await plant(h, row("f-bad", FpcType.PrivateFpc, "0xdead"))
 		await expect(h.service.getFpcImpl("f-bad")).rejects.toThrow(/not the protocol contract/)
 	})
 
 	test("a custom sponsored FPC still resolves", async () => {
 		const h = await makeHarness()
-		await h.service.restore([row("f-custom", FpcType.DefaultSponsoredFpc, "0xcafe")])
+		await plant(h, row("f-custom", FpcType.DefaultSponsoredFpc, "0xcafe"))
 		const fpc = await h.service.getFpcImpl("f-custom")
 		expect(fpc.infoData.isProtocol).toBe(false)
 	})

@@ -12,12 +12,12 @@ import { asBase64CredentialId, asBase64MasterSecret } from "@nulo/wallet-crypto"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
 import { isClientDisconnectRejection, RpcDisconnectedError, UserRejectedError } from "@nulo/extension-messaging/errors"
 import { awaitLivenessAdvance, readLiveness } from "@/utils/background-liveness"
-import { remapByMap, resolveRestoredActiveNetworkId } from "@/utils/full-backup-helpers"
+import { remapNetworkIdByChain, resolveRestoredActiveNetworkIdByChain } from "@/utils/full-backup-helpers"
 import type { PasskeyRequest } from "@/wallet/services/passkey/spec"
 import type { RestoreSecret } from "@/wallet/services/profile/client"
 import { IMPORTED_KEYS_SERVICE_NAME } from "@/wallet/services/account/spec"
 import { ACCOUNT_STATE_SERVICE_NAME } from "@/wallet/services/account-state/spec"
-import { NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
+import { TRANSACTION_SERVICE_NAME } from "@/wallet/services/transaction/spec"
 import { TOKEN_SERVICE_NAME } from "@/wallet/services/token/spec"
 import { TokenServiceClient } from "@/wallet/services/token/client"
 import { AccountStateServiceClient } from "@/wallet/services/account-state/client"
@@ -118,7 +118,7 @@ export interface ProfileRestoreClient {
 	disconnect(): void
 }
 export interface NetworkRestoreClient {
-	restore(rows: unknown): Promise<unknown>
+	seedDefaultsForProfile(profileId: string): Promise<unknown>
 	setActiveForProfile(profileId: string, networkId: string): Promise<unknown>
 	probeNodeStatus(networkId: string, timeoutMs: number): Promise<unknown>
 	disconnect(): void
@@ -249,68 +249,55 @@ export interface RestoredNetwork {
 }
 
 /**
- * Networks stage: restore, index-paired remap, error recording, and the no-networks
- * rollback. Pair each restored network to its source by RESULT INDEX, not a field-match:
- * `NetworkService.restore` returns exactly one result per input, in order, and spreads a
- * FAILED input's raw fields back into its result — so a field-match (name/rpcUrl/chainId)
- * is attacker-ambiguous (an invalid net A + a valid net B sharing those fields could pair
- * B with A and graft A's account-state onto B's PXE target). Index-pairing is unforgeable.
- * Only remap for a SUCCESSFUL restore whose id actually changed.
+ * Networks stage: the backup carries no network rows — the built-in networks are seeded for the
+ * restored profile and every row that names a chain is bound to the seed of that chain. Rows on
+ * a chain no seed serves (a custom network's state) are dropped and reported; nothing in the
+ * backup can choose an endpoint.
  */
-export async function restoreNetworksStage(
+export async function reseedNetworksStage(
 	data: Record<string, unknown>,
 	networkService: NetworkRestoreClient,
 	profileService: ProfileRestoreClient,
 	profileId: string,
 	io: RestoreIo,
-): Promise<({ kind: "proceed"; newNetworks: RestoredNetwork[]; createdNetworks: RestoredNetwork[] } & Record<never, never>) | StageFail> {
-	const newNetworks = (await networkService.restore(data.network)) as RestoredNetwork[]
-	const createdNetworks = newNetworks.filter((n) => !n.restoreError)
-
-	if (!createdNetworks.length) {
+): Promise<({ kind: "proceed"; seeded: RestoredNetwork[] } & Record<never, never>) | StageFail> {
+	let seeded: RestoredNetwork[] = []
+	try {
+		seeded = ((await networkService.seedDefaultsForProfile(profileId)) as RestoredNetwork[]).filter((n) => !n.restoreError)
+	} catch (error) {
+		console.warn("[full-backup] seeding the default networks failed:", error)
+	}
+	if (!seeded.length) {
 		return rollbackAndFail(profileService, profileId, {
 			title: "Can't import",
-			message: "Couldn't restore any networks from this backup",
+			message: "Couldn't seed the default networks for this backup",
 		})
 	}
-
-	const oldNetworks = data.network as Array<{ id: string }>
-	// A duplicated source id can't form an unambiguous old→new map, so skip
-	// it (its networkId rows stay un-remapped → account-state finds no
-	// matching created network and ignores them). Backup normalization already
-	// rejects duplicate root ids; this is a defensive backstop.
-	const sourceIdCounts = new Map<string, number>()
-	for (const n of oldNetworks) sourceIdCounts.set(n.id, (sourceIdCounts.get(n.id) ?? 0) + 1)
-	const oldToNew = new Map<string, string>()
-	for (let i = 0; i < newNetworks.length; i++) {
-		const restored = newNetworks[i]
-		const old = oldNetworks[i]
-		if (restored.restoreError || !old || old.id === restored.id || (sourceIdCounts.get(old.id) ?? 0) > 1) continue
-		oldToNew.set(old.id, restored.id)
+	const dropped = remapNetworkIdByChain(data, seeded, [ACCOUNT_STATE_SERVICE_NAME, TRANSACTION_SERVICE_NAME])
+	for (const [slice, rows] of Object.entries(dropped)) {
+		io.appendErrors(
+			slice,
+			rows.map((row) => ({
+				...(row && typeof row === "object" ? (row as Record<string, unknown>) : {}),
+				restoreError: "Skipped — its network is not one of the built-in networks",
+			})),
+		)
 	}
-	// ONE pass over the COMPLETE map — each row's original networkId is looked
-	// up exactly once, so a freshly-random new id colliding with a later source
-	// id can't cascade-rewrite already-remapped rows (finding E).
-	remapByMap(data, "networkId", oldToNew)
-	io.recordRestoreErrors(NETWORK_SERVICE_NAME, newNetworks)
-	return { kind: "proceed", newNetworks, createdNetworks }
+	return { kind: "proceed", seeded }
 }
 
 /**
- * Item 1b: restore the user's ACTIVE-network selection. The exported `active-network-id` is
- * a RAW old id resolved through the COMPLETE source→successful-result pairing (identity for
- * unchanged ids — the changed-only remap map above can't be reused). Write it for the NEW
- * profile via the profileId-parameterized setter BEFORE `finalizeRestore` (the profile isn't
- * active yet). Absent / hostile / unmatched → skip; the bootstrap primary fallback applies.
+ * The exported `active-chain-id` is a preference among the seeded networks; anything that does
+ * not name a seeded chain leaves the primary seed active. Written for the NEW profile via the
+ * profileId-parameterized setter BEFORE `finalizeRestore` (the profile is not active yet).
  */
 export async function restoreActiveNetworkPointer(
-	activeNetworkId: unknown,
-	newNetworks: RestoredNetwork[],
-	oldNetworks: Array<{ id: string }>,
+	activeChainId: unknown,
+	seeded: RestoredNetwork[],
 	networkService: NetworkRestoreClient,
 	profileId: string,
 ): Promise<void> {
-	const restoredActiveId = resolveRestoredActiveNetworkId(activeNetworkId, newNetworks, oldNetworks)
+	const restoredActiveId = resolveRestoredActiveNetworkIdByChain(activeChainId, seeded as Array<{ id: string; chainId: number }>)
 	if (!restoredActiveId) return
 	try {
 		await networkService.setActiveForProfile(profileId, restoredActiveId)

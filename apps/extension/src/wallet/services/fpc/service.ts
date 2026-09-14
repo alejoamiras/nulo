@@ -1,15 +1,13 @@
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import type { ILogger } from "@/wallet/logger"
-import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
+import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
-import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
-import { restoreRows } from "@/wallet/services/restore-rows"
-import { nextRandomId, preferOrReallocId } from "@/wallet/services/id-allocators"
+import { nextRandomId } from "@/wallet/services/id-allocators"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
 import { ensureRegistered } from "@/wallet/services/execution/contract-resolver"
 import { EntityStorage } from "@/wallet/storage"
@@ -481,56 +479,6 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 				(raw) => raw.profileId === profileId,
 				(id) => this.logDebug(`purged malformed fpc row ${id}`),
 			)
-		})
-	}
-
-	public async backup(): Promise<FpcInfo[]> {
-		// Strip in-memory `isProtocol` (and any leftover legacy fields) so
-		// exports don't carry trust signals across wallet boundaries.
-		const fpcs = await this.getFpcs()
-		return fpcs.map(({ isProtocol: _isProtocol, ...rest }) => rest)
-	}
-
-	public async restore(fpcs: FpcInfo[]): Promise<Restored<FpcInfo>[]> {
-		await this.ensureInitialized()
-		// Deletion fence captured at entry (see restore-fence.ts): rows written
-		// after a mid-restore deleteProfile must reject, not orphan.
-		const deletion = this.profileService.getDeletionState()
-		const epochs = captureRestoreEpochs(
-			deletion,
-			fpcs.map((f) => (f as { profileId?: unknown } | null)?.profileId),
-		)
-
-		return await this.lock.withLock(async () => {
-			return await restoreRows(fpcs, async (fpc) => {
-				// Reject legacy DefaultFpc (Token FPC) entries explicitly —
-				// post-deprecation they have no handler and would crash the
-				// wallet on next read. Also reject any unknown numeric type. The
-				// throw is caught by restoreRows into the same `restoreError` row.
-				if (fpc.type !== FpcType.DefaultSponsoredFpc && fpc.type !== FpcType.PrivateFpc) {
-					throw new Error("Token FPC deprecated and no longer supported")
-				}
-
-				const id = await preferOrReallocId(this.storage, fpc.id)
-
-				// Strip `isProtocol` (recomputed at read time) and any
-				// legacy decoration fields a v3 backup might carry.
-				const { isProtocol: _isProtocol, ...rest } = fpc as FpcInfo & { [k: string]: unknown }
-				const stored: StoredFpc = {
-					id,
-					profileId: rest.profileId,
-					chainId: rest.chainId,
-					type: rest.type,
-					address: rest.address,
-					name: rest.name,
-				}
-				// Parse the persisted shape so a malformed backup fpc is recorded as
-				// restoreError, not silently written + codec-hidden on read.
-				StoredFpcSchema.parse(stored)
-				assertRestoreEpoch(deletion, epochs, stored.profileId)
-				await this.storage.set(id, stored)
-				return { ...stored, isProtocol: false }
-			})
 		})
 	}
 }

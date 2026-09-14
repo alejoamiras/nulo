@@ -27,14 +27,12 @@ function sliceClient() {
 	return { backup: vi.fn(async (): Promise<unknown> => []), disconnect: vi.fn() }
 }
 let profileClient = sliceClient()
-let networkClient = sliceClient()
 let accountClient = { ...sliceClient(), backupImportedKeys: vi.fn(async (): Promise<unknown> => []) }
 let transactionClient = sliceClient()
 let tokenClient = sliceClient()
 let tokenBalanceClient = sliceClient()
 let accountStateClient = sliceClient()
 let authRegistryClient = sliceClient()
-let fpcClient = sliceClient()
 let contactClient = sliceClient()
 let configClient = sliceClient()
 
@@ -43,12 +41,6 @@ vi.mock("@/wallet/services/profile/client", () => ({
 	PROFILE_SERVICE_NAME: "profile",
 	ProfileServiceClient: vi.fn(function () {
 		return profileClient
-	}),
-}))
-vi.mock("@/wallet/services/network/client", () => ({
-	NETWORK_SERVICE_NAME: "network",
-	NetworkServiceClient: vi.fn(function () {
-		return networkClient
 	}),
 }))
 vi.mock("@/wallet/services/account/client", () => ({
@@ -86,12 +78,6 @@ vi.mock("@/wallet/services/auth-registry/client", () => ({
 	AUTH_REGISTRY_SERVICE_NAME: "auth-registry",
 	AuthRegistryServiceClient: vi.fn(function () {
 		return authRegistryClient
-	}),
-}))
-vi.mock("@/wallet/services/fpc/client", () => ({
-	FPC_SERVICE_NAME: "fpc",
-	FpcServiceClient: vi.fn(function () {
-		return fpcClient
 	}),
 }))
 vi.mock("@/wallet/services/contact/client", () => ({
@@ -149,14 +135,12 @@ vi.mock("vue-router", () => ({
 
 const allClients = () => [
 	profileClient,
-	networkClient,
 	accountClient,
 	transactionClient,
 	tokenClient,
 	tokenBalanceClient,
 	accountStateClient,
 	authRegistryClient,
-	fpcClient,
 	contactClient,
 	configClient,
 ]
@@ -205,14 +189,12 @@ const material = { masterKey: "mk", entropy: "ent", importedKeysDek: "dek" }
 beforeEach(() => {
 	vi.clearAllMocks()
 	profileClient = sliceClient()
-	networkClient = sliceClient()
 	accountClient = { ...sliceClient(), backupImportedKeys: vi.fn(async (): Promise<unknown> => []) }
 	transactionClient = sliceClient()
 	tokenClient = sliceClient()
 	tokenBalanceClient = sliceClient()
 	accountStateClient = sliceClient()
 	authRegistryClient = sliceClient()
-	fpcClient = sliceClient()
 	contactClient = sliceClient()
 	configClient = sliceClient()
 	exportBackupMaterial.mockReset()
@@ -314,10 +296,10 @@ describe("export/full.vue — error boundary", () => {
 
 	it("unmount mid-run disconnects the run's clients and suppresses all late writes", async () => {
 		const slice = deferred<unknown>()
-		networkClient.backup.mockReturnValue(slice.promise)
+		tokenClient.backup.mockReturnValue(slice.promise)
 		const wrapper = mountPage()
 		await reachUnlockAndSubmit(wrapper)
-		await vi.waitFor(() => expect(networkClient.backup).toHaveBeenCalledTimes(1))
+		await vi.waitFor(() => expect(tokenClient.backup).toHaveBeenCalledTimes(1))
 
 		wrapper.unmount()
 		for (const c of allClients()) expect(c.disconnect).toHaveBeenCalled()

@@ -9,8 +9,6 @@ import { ConfigServiceClient } from "@/wallet/services/config/client"
 import { CONFIG_SERVICE_NAME } from "@/wallet/services/config/spec"
 import { ContactServiceClient } from "@/wallet/services/contact/client"
 import { CONTACT_SERVICE_NAME } from "@/wallet/services/contact/spec"
-import { FpcServiceClient } from "@/wallet/services/fpc/client"
-import { FPC_SERVICE_NAME } from "@/wallet/services/fpc/spec"
 import { NetworkServiceClient } from "@/wallet/services/network/client"
 import { ProfileServiceClient, type RestoreSecret } from "@/wallet/services/profile/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
@@ -31,7 +29,7 @@ import {
 	restoreAccountStateStage,
 	restoreAccountsStage,
 	restoreActiveNetworkPointer,
-	restoreNetworksStage,
+	reseedNetworksStage,
 	restoreServiceSlices,
 	restoreTokensStage,
 	runRestoreFailurePath,
@@ -53,7 +51,7 @@ export type FullBackupEnvelope = {
 	"compat-epoch"?: unknown
 	"backup-schema-version"?: unknown
 	"master-key"?: string
-	"active-network-id"?: string
+	"active-chain-id"?: number
 	data: Record<string, unknown>
 }
 
@@ -399,13 +397,12 @@ async function openEncryptedBackup(
 	return { kind: "ok", backupObject: JSON.parse(decodedJson) as { data?: { profile?: { type?: string; name?: string } } } }
 }
 
-/** The six post-token slice clients, constructed up-front for the whole-loop finally. */
+/** The post-token slice clients, constructed up-front for the whole-loop finally. */
 function buildSliceClients() {
 	return [
 		{ name: TRANSACTION_SERVICE_NAME, client: new TransactionServiceClient() as never },
 		{ name: TOKEN_BALANCE_SERVICE_NAME, client: new TokenBalanceServiceClient() as never },
 		{ name: AUTH_REGISTRY_SERVICE_NAME, client: new AuthRegistryServiceClient() as never },
-		{ name: FPC_SERVICE_NAME, client: new FpcServiceClient() as never },
 		{ name: CONTACT_SERVICE_NAME, client: new ContactServiceClient() as never },
 		{ name: CONFIG_SERVICE_NAME, client: new ConfigServiceClient() as never },
 	] as Array<{ name: string; client: { restore: (rows: unknown[], profileId: string) => Promise<unknown>; disconnect: () => void } }>
@@ -485,18 +482,12 @@ async function executeRestore(
 	normalizeAllIds(data, "profileId", newProfile.id)
 
 	io.setStage("restoring:networks")
-	const nets = await restoreNetworksStage(data, networkService, profileService, newProfile.id, io)
+	const nets = await reseedNetworksStage(data, networkService, profileService, newProfile.id, io)
 	if (nets.kind !== "proceed") {
 		applyOutcome(io, nets)
 		return null
 	}
-	await restoreActiveNetworkPointer(
-		backup["active-network-id"],
-		nets.newNetworks,
-		data.network as Array<{ id: string }>,
-		networkService,
-		newProfile.id,
-	)
+	await restoreActiveNetworkPointer(backup["active-chain-id"], nets.seeded, networkService, newProfile.id)
 
 	const accountService = new AccountServiceClient()
 	const accounts = await restoreAccountsStage(data, {
@@ -554,7 +545,7 @@ async function executeRestore(
 	}
 
 	io.setStage("restoring:account-state")
-	await restoreAccountStateStage(data, nets.createdNetworks, networkService, io)
+	await restoreAccountStateStage(data, nets.seeded, networkService, io)
 	return newProfile
 }
 
