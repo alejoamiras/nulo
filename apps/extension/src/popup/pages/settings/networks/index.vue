@@ -7,6 +7,9 @@
 </route>
 
 <script setup>
+/** Services */
+import { ConfigServiceClient } from "@/wallet/services/config/client"
+
 /** Utils */
 import { getChainPosition } from "@/components/ui/utils"
 import { stringCompare } from "@/utils/string"
@@ -17,12 +20,29 @@ import { usePopupStore } from "@/stores/popup.store"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 
+// Custom chains are a developer surface: "Add network" is offered only under Developer Mode.
+// Endpoints on the built-in networks, and rows that already exist, stay manageable for everyone.
+const isDeveloperModeEnabled = ref(false)
+const configService = new ConfigServiceClient()
+configService.onUpdate.add(onSettingUpdate)
+function onSettingUpdate(setting) {
+	if (setting.key === "developerMode") isDeveloperModeEnabled.value = setting.value === true
+}
+
 const networks = computed(() =>
 	[...appStore.networks].sort((a, b) => {
 		const chainPos = getChainPosition(a.chainId) - getChainPosition(b.chainId)
 		return chainPos ? chainPos : stringCompare(a.name, b.name)
 	}),
 )
+
+onBeforeMount(async () => {
+	isDeveloperModeEnabled.value = (await configService.getValue("developerMode")) === true
+})
+
+onBeforeUnmount(() => {
+	configService.disconnect()
+})
 </script>
 
 <template>
@@ -51,7 +71,14 @@ const networks = computed(() =>
 			</SettingItem>
 		</ItemsContainer>
 
-		<Button @click="popupStore.open('new_network')" wide variant="primary" size="large" data-testid="network-new-btn">
+		<Button
+			v-if="isDeveloperModeEnabled"
+			@click="popupStore.open('new_network')"
+			wide
+			variant="primary"
+			size="large"
+			data-testid="network-new-btn"
+		>
 			Add network
 		</Button>
 	</SettingsPageShell>
