@@ -655,6 +655,13 @@ export class SessionManager {
 		return this.activeSession?.session.profile === profileId
 	}
 
+	/** `true` iff `profileId`'s session is open WITHOUT its DEK (recovery mode). Synchronous on
+	 *  purpose: the state is committed before `open` resolves, so whoever observed the unlock
+	 *  observes this too — no RPC or event ordering to race. */
+	public isRecoveryMode(profileId: string): boolean {
+		return this.activeSession?.session.profile === profileId && this.activeSession.dek === undefined
+	}
+
 	private isExpired(session: Session): boolean {
 		return this.sessionTtl !== 0 && this.deriveLockedAt(session) <= Date.now()
 	}
@@ -687,7 +694,9 @@ export class SessionManager {
 	}
 
 	private toInfo(profile: Profile): ProfileInfo {
-		return { id: profile.id, name: profile.name, type: profile.type }
+		const info: ProfileInfo = { id: profile.id, name: profile.name, type: profile.type }
+		if (this.isRecoveryMode(profile.id)) info.recoveryMode = true
+		return info
 	}
 
 	/**

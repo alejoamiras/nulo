@@ -13,6 +13,7 @@ import type { IService, ServiceCollection as ServiceCollectionType } from "@/wal
 import { ServiceCollection } from "@/wallet/base"
 import { LoggerStore } from "@/wallet/logger"
 import { ConfigStore } from "@/wallet/config"
+import { RecoveryModeError } from "@nulo/extension-messaging/errors"
 import { NETWORK_SERVICE_NAME, type Network, NodeStatus } from "@/wallet/services/network/spec"
 import { AccountStateService } from "./service"
 
@@ -64,6 +65,39 @@ describe("AccountStateService.backup", () => {
 		const items = await accountStateService.backup()
 
 		expect(items).toEqual([{ networkId: "net-a", chainId: 7, senders: [{ address: "0xalice" }], contracts: [] }])
+	})
+
+	test("recovery mode OMITS the network's PXE state (injected at the PXE client, through the real viaPxe wrapper); any other PXE failure still aborts", async () => {
+		const networkService = new FakeNetworkService()
+		const services = new ServiceCollection()
+		services.add(networkService)
+		const accountStateService = new AccountStateService(new LoggerStore(new ConfigStore()))
+		services.add(accountStateService)
+		await services.start()
+		const live = (id: string, chainId: number) =>
+			({ ...makeNetwork(id, chainId), endpoints: [{ id: "primary", rpcUrl: `https://${id}.example/` }] }) as Network
+		networkService.networks = [live("net-a", 7), live("net-b", 9)]
+		networkService.statuses.set("net-a", NodeStatus.Active)
+		networkService.statuses.set("net-b", NodeStatus.Active)
+		// `getNetwork` is what getSenders/getContracts resolve the NetworkInfo through.
+		;(networkService as unknown as { getNetwork: (id: string) => Promise<Network> }).getNetwork = async (id) =>
+			networkService.networks.find((n) => n.id === id) as Network
+		const pxe = {
+			// The SW-side admission gate rejects BEFORE any offscreen round-trip; net-b is healthy.
+			getSenders: vi.fn(async (info: { profileId: string; chainId: number }) => {
+				if (info.chainId === 7) throw new RecoveryModeError()
+				return [{ toString: () => "0xbob" }]
+			}),
+			getContracts: vi.fn(async () => []),
+		}
+		;(accountStateService as unknown as { pxeService: typeof pxe }).pxeService = pxe
+
+		const items = await accountStateService.backup()
+		expect(items).toEqual([{ networkId: "net-b", chainId: 9, senders: [{ address: "0xbob" }], contracts: [] }])
+
+		// An unrelated failure is NOT swallowed — the export aborts with the opaque wrapper error.
+		pxe.getContracts.mockRejectedValueOnce(new Error("boom"))
+		await expect(accountStateService.backup()).rejects.toThrow("PXE request failed")
 	})
 })
 

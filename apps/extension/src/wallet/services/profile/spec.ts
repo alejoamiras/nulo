@@ -50,9 +50,14 @@ export type ProfileInfo = {
 	name: string
 	/** Profile type. */
 	type: ProfileType
+	/** `true` while THIS profile's session is open WITHOUT its imported-keys DEK — recovery mode:
+	 *  the PXE store key and the dApp-session key take `HKDF(master ‖ dek)` and cannot be derived,
+	 *  so chain data and dApp sessions are unavailable until export + restore. A projection of the
+	 *  live session: never persisted on the row, never carried by a backup. */
+	recoveryMode?: boolean
 }
 
-export type Profile = ProfileInfo & {
+export type Profile = Omit<ProfileInfo, "recoveryMode"> & {
 	/** 128-bit random incarnation generation (hex), minted fresh at EVERY row
 	 *  creation — including a same-id backup re-import. The PXE layer fences
 	 *  provisions/ops/clears on it so a deleted incarnation can never be
@@ -302,13 +307,30 @@ export type Methods = {
 	/**
 	 * Atomic discriminated export for the Full-Backup builder: master key, recovery-phrase
 	 * entropy, AND the imported-keys DEK from ONE authenticated pass, so the backup fields can
-	 * never come from different row states (no cross-call races). Password profiles only. Fails
-	 * loudly on an unrecoverable DEK slot (the epoch-4 backup shape requires it; a password
-	 * change self-heals the slot first).
+	 * never come from different row states (no cross-call races). Password profiles only. An
+	 * unrecoverable DEK slot exports a FRESH DEK (`dekReplaced: true`): imported keys and local
+	 * chain state are lost, but the backup stays the repair path for a profile in recovery mode.
 	 * @param id Profile id.
 	 * @param password Password to decrypt the secrets.
 	 */
-	exportBackupMaterial(id: string, password: string): { masterKey: string; entropy: string; importedKeysDek: string }
+	exportBackupMaterial(
+		id: string,
+		password: string,
+	): { masterKey: string; entropy: string; importedKeysDek: string; dekReplaced: boolean }
+
+	/**
+	 * Passkey counterpart of `exportBackupMaterial`: the credentialId (the backup's `master-key`)
+	 * and the SEALED imported-keys DEK blob the backup carries verbatim, from ONE authenticated
+	 * ceremony. When the stored slot no longer opens under the ceremony's wrap key, a FRESH DEK
+	 * is sealed under that key and carried instead (`dekReplaced: true`); the stored row is never
+	 * modified.
+	 * @param id Profile id.
+	 * @param credentialData The in-page WebAuthn ceremony's result for this profile's credential.
+	 */
+	exportPasskeyBackupMaterial(
+		id: string,
+		credentialData: PasskeyCredentialData,
+	): { credentialId: string; dekSealed: string; dekReplaced: boolean }
 
 	/**
 	 * The profile's SEALED imported-keys DEK blob, verbatim (ciphertext — safe to hand out).

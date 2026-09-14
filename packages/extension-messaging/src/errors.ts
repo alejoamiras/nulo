@@ -317,6 +317,23 @@ export class DuplicateWalletError extends WalletError {
 }
 
 /**
+ * The active session opened WITHOUT its imported-keys DEK (the sealed slot or the envelope MAC
+ * failed at unlock): the profile is in recovery mode — its PXE store key and dApp-session MAC key
+ * take `HKDF(master ‖ dek)` and cannot be derived, so chain data and dApp sessions are unavailable
+ * until the profile is exported and restored. Consumers `instanceof` this to keep the recovery
+ * sentence intact instead of folding it into a generic lock / PXE failure. NEVER surfaced
+ * verbatim to dApps.
+ */
+export class RecoveryModeError extends WalletError {
+	public static readonly CODE = "RECOVERY_MODE"
+	public static readonly MESSAGE = "Wallet keys need recovery — export a backup and restore it"
+
+	public constructor(message: string = RecoveryModeError.MESSAGE, details?: unknown) {
+		super(RecoveryModeError.CODE, message, details, "RecoveryModeError")
+	}
+}
+
+/**
  * Closed, code-keyed view of {@link WalletErrorPayload} for the reconstruction
  * switch below. The WIRE type stays the permissive `WalletErrorPayload` (so
  * `toPayload`, `messages.ts`, and the `errorPayload?: unknown` transport boundary
@@ -335,6 +352,7 @@ type KnownWalletErrorPayload =
 	| { code: typeof InvalidPasswordError.CODE; message: string; details?: unknown }
 	| { code: typeof AccountAddressInconsistencyError.CODE; message: string; details?: unknown }
 	| { code: typeof RestoreTornError.CODE; message: string; details?: unknown }
+	| { code: typeof RecoveryModeError.CODE; message: string; details?: unknown }
 	| { code: typeof ProfileIdConflictError.CODE; message: string; details?: unknown }
 	| { code: typeof DuplicateWalletError.CODE; message: string; details?: { existingProfileName?: string } }
 	| { code: typeof DuplicateInitializationError.CODE; message: string; details?: unknown }
@@ -372,6 +390,8 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 			return new AccountAddressInconsistencyError(known.message, known.details)
 		case RestoreTornError.CODE:
 			return new RestoreTornError(known.message, known.details)
+		case RecoveryModeError.CODE:
+			return new RecoveryModeError(known.message, known.details)
 		case ProfileIdConflictError.CODE:
 			return new ProfileIdConflictError(known.message, known.details)
 		case DuplicateWalletError.CODE:

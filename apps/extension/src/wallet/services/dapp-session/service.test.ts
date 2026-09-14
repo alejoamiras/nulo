@@ -19,13 +19,26 @@ import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/service"
 import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { DappSessionService } from "./service"
+import { RecoveryModeError } from "@nulo/extension-messaging/errors"
+import { asImportedKeysDek, asMasterSecretBytes, deriveDappSessionMacKey } from "@nulo/wallet-crypto"
+import { signDappSession } from "./integrity"
+import type { DappSession } from "./spec"
 
 let activeProfile: { id: string } | undefined
 
+/** The REAL wallet-crypto derivation over one SHARED master (a same-phrase sibling pair) and a
+ *  per-profile DEK — the exact inputs the isolation property is about. A profile listed in
+ *  `recoveryProfiles` derives nothing (open session, no DEK). */
+const SHARED_MASTER = asMasterSecretBytes(new Uint8Array(32).fill(7) as Uint8Array<ArrayBuffer>)
+const DEK_BY_PROFILE: Record<string, number> = { p1: 0x11, p2: 0x22 }
+const recoveryProfiles = new Set<string>()
+const realMacKey = (profileId: string) =>
+	deriveDappSessionMacKey(
+		SHARED_MASTER,
+		asImportedKeysDek(new Uint8Array(32).fill(DEK_BY_PROFILE[profileId] ?? 0x33) as Uint8Array<ArrayBuffer>),
+	)
+
 function makeProfileStub() {
-	// One deterministic HMAC key per profile so MAC-storage writes/reads verify
-	// within a test without a real key hierarchy.
-	const keys = new Map<string, Promise<CryptoKey>>()
 	const deletionState = new ProfileDeletionState()
 	return {
 		name: PROFILE_SERVICE_NAME,
@@ -39,12 +52,8 @@ function makeProfileStub() {
 			return { profileId: activeProfile.id, epoch: deletionState.capture(activeProfile.id) }
 		}),
 		deriveDappSessionMacKey: vi.fn(async (profileId: string) => {
-			let key = keys.get(profileId)
-			if (!key) {
-				key = crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]) as Promise<CryptoKey>
-				keys.set(profileId, key)
-			}
-			return key
+			if (recoveryProfiles.has(profileId)) throw new RecoveryModeError()
+			return realMacKey(profileId)
 		}),
 		async start() {},
 	}
@@ -69,6 +78,65 @@ async function makeService(): Promise<{
 
 beforeEach(() => {
 	activeProfile = { id: "p1" }
+	recoveryProfiles.clear()
+})
+
+const ROW_ROOT = "nulo:core:dappSessions"
+const rowFor = (profileId: string): DappSession =>
+	({
+		id: `${profileId}-row`,
+		profileId,
+		chainId: "1",
+		dappMetadata: { name: "dApp", url: "https://dapp.example" },
+		permissions: [],
+		accounts: [],
+		confirmationLevel: 0,
+		expiry: Date.now() + 60_000,
+	}) as unknown as DappSession
+
+/** Plant a row signed under `signerProfileId`'s REAL key, exactly as a sibling holding the shared
+ *  master would (it derives ITS key; only the DEK differs). */
+async function plantRowSignedBy(browserApi: FakeBrowserApi, row: DappSession, signerProfileId: string) {
+	const { mac: _drop, ...signable } = row
+	const mac = await signDappSession(await realMacKey(signerProfileId), signable)
+	await browserApi.storage.local.set({ [`${ROW_ROOT}@${row.id}`]: JSON.stringify({ ...signable, mac }) })
+}
+
+describe("DEK-keyed row integrity (same-master siblings, recovery mode)", () => {
+	test("a p2-targeted row signed under p1's real key (same master, other DEK) is REJECTED and dropped under p2; p2's own row verifies", async () => {
+		const { service: svc, browserApi } = await makeService()
+		await plantRowSignedBy(browserApi, rowFor("p2"), "p1")
+		await plantRowSignedBy(browserApi, { ...rowFor("p2"), id: "p2-own" }, "p2")
+		activeProfile = { id: "p2" }
+		const rows = await svc.getDappSessions()
+		expect(rows.map((r) => r.id)).toEqual(["p2-own"])
+		// The forgery is quarantine-deleted (tampered), the authentic row stays.
+		const raw = (await browserApi.storage.local.get(null)) as Record<string, unknown>
+		expect(`${ROW_ROOT}@p2-row` in raw).toBe(false)
+		expect(`${ROW_ROOT}@p2-own` in raw).toBe(true)
+	})
+
+	test("an authentic p1 row read while p2 is active is HIDDEN, not deleted; p1 re-reads it", async () => {
+		const { service: svc, browserApi } = await makeService()
+		await plantRowSignedBy(browserApi, rowFor("p1"), "p1")
+		activeProfile = { id: "p2" }
+		expect(await svc.getDappSessions()).toEqual([])
+		expect(`${ROW_ROOT}@p1-row` in ((await browserApi.storage.local.get(null)) as Record<string, unknown>)).toBe(true)
+		activeProfile = { id: "p1" }
+		expect((await svc.getDappSessions()).map((r) => r.id)).toEqual(["p1-row"])
+	})
+
+	test("an OPEN session with no DEK (recovery mode) throws RecoveryModeError from the derivation: rows are hidden, never deleted", async () => {
+		const { service: svc, browserApi, profileStub } = await makeService()
+		await plantRowSignedBy(browserApi, rowFor("p1"), "p1")
+		recoveryProfiles.add("p1")
+		expect(await svc.getDappSessions()).toEqual([])
+		await expect(profileStub.deriveDappSessionMacKey("p1")).rejects.toBeInstanceOf(RecoveryModeError)
+		expect(`${ROW_ROOT}@p1-row` in ((await browserApi.storage.local.get(null)) as Record<string, unknown>)).toBe(true)
+		// A healthy re-unlock verifies the surviving row again.
+		recoveryProfiles.delete("p1")
+		expect((await svc.getDappSessions()).map((r) => r.id)).toEqual(["p1-row"])
+	})
 })
 
 describe("DappSessionService active-profile guards (Q19 preservation pins)", () => {

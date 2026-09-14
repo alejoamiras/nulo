@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest"
 import {
 	AccountAddressInconsistencyError,
 	DuplicateWalletError,
+	RecoveryModeError,
 	RestoreTornError,
 	CapabilityNotGrantedError,
 	CLIENT_DISCONNECTED_MESSAGE,
@@ -69,6 +70,15 @@ describe("walletErrorFromPayload", () => {
 		expect(rebuilt.code).toBe(RestoreTornError.CODE)
 		expect(rebuilt.message).toBe("This profile's import didn't finish")
 		expect((rebuilt.details as { profileId?: string })?.profileId).toBe("p1")
+	})
+
+	test("RecoveryModeError round-trips with its recovery sentence intact", () => {
+		// The PXE client and the profile service throw it in the SW; the popup keys the recovery
+		// banner and the export flow's loss warning on `instanceof`, and the sentence IS the surface.
+		const rebuilt = walletErrorFromPayload(new RecoveryModeError().toPayload())
+		expect(rebuilt).toBeInstanceOf(RecoveryModeError)
+		expect(rebuilt.code).toBe(RecoveryModeError.CODE)
+		expect(rebuilt.message).toBe("Wallet keys need recovery — export a backup and restore it")
 	})
 
 	test("CapabilityNotGrantedError round-trips with capabilityType + exact stable message", () => {

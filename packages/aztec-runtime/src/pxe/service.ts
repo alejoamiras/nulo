@@ -790,6 +790,8 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		//  - deleted(same gen):    a stale replay of the erased incarnation — rejected forever.
 		//  - live(different gen):  a successor key while the predecessor is live — the SW
 		//    must clear first; failing loudly beats silently swapping keys under a runtime.
+		//  - live(same gen, different bytes): a derivation that disagrees with the installed
+		//    key — never swap a key under a running incarnation; the caller's inputs are wrong.
 		//  - unseen / live(same) / deleted(different gen): install (fresh incarnation,
 		//    idempotent re-provision, or a re-imported profile going live over a dead one).
 		const current = this.profileLifecycles.get(profileId)
@@ -801,6 +803,12 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		}
 		if (current?.kind === "live" && current.gen !== generation) {
 			throw new Error(`provisionChainStoreKey: profile ${profileId} is live under a different generation — clear it first`)
+		}
+		const installed = this.storeKeys.get(profileId)
+		if (current?.kind === "live" && installed && !installed.every((b, i) => b === key[i])) {
+			throw new Error(
+				`provisionChainStoreKey: profile ${profileId} is live under a different key for this generation — provision rejected`,
+			)
 		}
 		this.profileLifecycles.set(profileId, { kind: "live", gen: generation })
 		this.storeKeys.set(profileId, key)

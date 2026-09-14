@@ -124,6 +124,10 @@ const isWrongPassword = ref(false)
 const isPasswordMismatch = ref(false)
 
 const showRecommendation = ref(false)
+// The file carries a FRESH imported-keys DEK (the stored slot no longer opens) or was assembled
+// in recovery mode: imported keys and local chain state are not in it, and the user must know
+// before trusting the download.
+const keysLost = ref(false)
 
 const isAgreed = ref(false)
 const handleAgree = () => {
@@ -173,17 +177,22 @@ async function exportKeyMaterial(gen, credentialData) {
 		if (isPasskeyProfile.value) {
 			// Passkey blobs carry the credentialId as `master-key` and NEVER an entropy field —
 			// the master re-derives from the passkey PRF at restore. The imported-keys DEK travels
-			// as the SEALED row blob verbatim (the restore ceremony's wrap key opens it).
-			const key = await managers.profile.exportPlain(appStore.profile.id, password.value, credentialData)
+			// as a SEALED blob (the restore ceremony's wrap key opens it) — the stored one, or a
+			// fresh one when the stored slot no longer opens.
+			const passkeyMaterial = await managers.profile.exportPasskeyBackupMaterial(appStore.profile.id, credentialData)
 			if (gen !== generation) return "handled"
-			const dekSealedB64 = await managers.profile.getProfileDekSealed(appStore.profile.id)
-			return { key, dekSealedB64 }
+			return { key: passkeyMaterial.credentialId, dekSealedB64: passkeyMaterial.dekSealed, dekReplaced: passkeyMaterial.dekReplaced }
 		}
 		// Atomic discriminated export: master + recovery-phrase entropy + imported-keys DEK
 		// from ONE authenticated pass, so the backup fields can never come from different
 		// row states.
 		const material = await managers.profile.exportBackupMaterial(appStore.profile.id, password.value)
-		return { key: material.masterKey, entropyB64: material.entropy, dekB64: material.importedKeysDek }
+		return {
+			key: material.masterKey,
+			entropyB64: material.entropy,
+			dekB64: material.importedKeysDek,
+			dekReplaced: material.dekReplaced,
+		}
 	} catch (error) {
 		if (gen !== generation) return "handled"
 		backupStatus.value = ""
@@ -192,7 +201,7 @@ async function exportKeyMaterial(gen, credentialData) {
 		} else {
 			// See the acquisition catch above — stage-tagged so the two failure points are
 			// distinguishable in the console while the user-facing copy stays generic.
-			console.error("[export/full] passkey exportPlain failed:", error)
+			console.error("[export/full] passkey export failed:", error)
 			openToast({ label: "Failed to authenticate by passkey", icon: "warning" }, TOAST_DURATION.LONG)
 			router.go(-1)
 		}
@@ -273,6 +282,7 @@ async function handleBackup() {
 
 		const material = await exportKeyMaterial(gen, credentialData)
 		if (material === "handled" || gen !== generation) return
+		keysLost.value = !!material.dekReplaced || !!appStore.profile.recoveryMode
 		const envelope = buildBackupEnvelope(material)
 
 		runClients = buildBackupServices()
@@ -510,6 +520,15 @@ onBeforeUnmount(() => {
 
 				<div v-else class="export_section">
 					<span class="export_section_label">Backup</span>
+					<Banner v-if="keysLost" variant="warning" direction="vertical" data-testid="backup-keys-lost-banner">
+						<template #title> Imported keys and local chain data are not in this backup </template>
+						<template #description>
+							<Text color="secondary" height="140">
+								This profile's imported-keys key could not be recovered, so the file carries a fresh one.
+								Restore it into a new profile to repair the wallet, then re-import any imported accounts.
+							</Text>
+						</template>
+					</Banner>
 					<Banner v-if="showRecommendation" variant="info" direction="vertical">
 						<template #title> Backup is ready </template>
 						<template #description>

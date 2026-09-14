@@ -91,15 +91,17 @@ vi.mock("@/wallet/services/config/client", () => ({
 
 const exportBackupMaterial = vi.fn<(profileId: string, password: string) => Promise<unknown>>()
 const getPasskeyCredentialId = vi.fn(async (_id: string) => "cred-1")
-const exportPlain = vi.fn(async (..._args: unknown[]) => "mk")
-const getProfileDekSealed = vi.fn(async (_id: string) => "sealed")
+const exportPasskeyBackupMaterial = vi.fn(async (_id: string, _credentialData: unknown) => ({
+	credentialId: "cred-1",
+	dekSealed: "sealed",
+	dekReplaced: false,
+}))
 vi.mock("@/utils/core", () => ({
 	managers: {
 		profile: {
 			exportBackupMaterial: (profileId: string, password: string) => exportBackupMaterial(profileId, password),
 			getPasskeyCredentialId: (id: string) => getPasskeyCredentialId(id),
-			exportPlain: (...args: unknown[]) => exportPlain(...(args as [])),
-			getProfileDekSealed: (id: string) => getProfileDekSealed(id),
+			exportPasskeyBackupMaterial: (id: string, credentialData: unknown) => exportPasskeyBackupMaterial(id, credentialData),
 		},
 	},
 }))
@@ -134,13 +136,13 @@ beforeEach(() => {
 	vi.clearAllMocks()
 })
 
-function mountPage(profileType: "passkey" | "password") {
+function mountPage(profileType: "passkey" | "password", recoveryMode = false) {
 	return mount(FullExportPage, {
 		global: {
 			plugins: [
 				createTestingPinia({
 					initialState: {
-						app: { profile: { id: "p1", type: profileType, name: "Test Profile" }, network: { id: "net1" } },
+						app: { profile: { id: "p1", type: profileType, name: "Test Profile", recoveryMode }, network: { id: "net1" } },
 					},
 					stubActions: false,
 				}),
@@ -175,7 +177,7 @@ describe("export/full.vue — passkey acquisition + wrong-password pins", () => 
 		expect(wrapper.find("[data-testid='agree-continue-btn']").exists()).toBe(true)
 		expect(openToast).not.toHaveBeenCalled()
 		expect(routerGo).not.toHaveBeenCalled()
-		expect(exportPlain).not.toHaveBeenCalled()
+		expect(exportPasskeyBackupMaterial).not.toHaveBeenCalled()
 	})
 
 	it("ceremony failure toasts the generic passkey copy and navigates back", async () => {
@@ -185,7 +187,37 @@ describe("export/full.vue — passkey acquisition + wrong-password pins", () => 
 		await flushPromises()
 		expect(openToast).toHaveBeenCalledWith({ label: "Failed to authenticate by passkey", icon: "warning" }, expect.anything())
 		expect(routerGo).toHaveBeenCalledWith(-1)
-		expect(exportPlain).not.toHaveBeenCalled()
+		expect(exportPasskeyBackupMaterial).not.toHaveBeenCalled()
+	})
+
+	it("a passkey export carries the service's sealed DEK (fresh or stored) into the file and names the loss only when it was replaced", async () => {
+		runCeremony.mockResolvedValueOnce({ id: "cred-1" })
+		exportPasskeyBackupMaterial.mockResolvedValueOnce({ credentialId: "cred-1", dekSealed: "fresh-sealed", dekReplaced: true })
+		const wrapper = mountPage("passkey")
+		await wrapper.find("[data-testid='agree-continue-btn']").trigger("click")
+		await flushPromises()
+		expect(exportPasskeyBackupMaterial).toHaveBeenCalledWith("p1", { id: "cred-1" })
+		// The local Banner stub drops attrs, so assert on the copy the loss banner renders once
+		// the assembly settles (real assembleFullBackup runs over the stubbed slice clients).
+		await vi.waitFor(() => expect(wrapper.text()).toContain("Imported keys and local chain data are not in this backup"))
+		expect(openToast).not.toHaveBeenCalled()
+
+		// A healthy slot: no loss banner.
+		runCeremony.mockResolvedValueOnce({ id: "cred-1" })
+		exportPasskeyBackupMaterial.mockResolvedValueOnce({ credentialId: "cred-1", dekSealed: "stored-sealed", dekReplaced: false })
+		const healthy = mountPage("passkey")
+		await healthy.find("[data-testid='agree-continue-btn']").trigger("click")
+		await vi.waitFor(() => expect(healthy.find("[data-testid='protect-password-btn']").exists()).toBe(true))
+		expect(healthy.text()).not.toContain("Imported keys and local chain data are not in this backup")
+	})
+
+	it("a password export assembled in recovery mode names the loss even when the slot exported intact", async () => {
+		exportBackupMaterial.mockResolvedValueOnce({ masterKey: "mk", entropy: "en", importedKeysDek: "dk", dekReplaced: false })
+		const wrapper = mountPage("password", true)
+		await wrapper.find("[data-testid='agree-continue-btn']").trigger("click")
+		await wrapper.find("[data-testid='unlock-password-input']").setValue("pass1234")
+		await wrapper.find("[data-testid='unlock-submit-btn']").trigger("click")
+		await vi.waitFor(() => expect(wrapper.text()).toContain("Imported keys and local chain data are not in this backup"))
 	})
 
 	it("a failed discriminated export on a password profile flags wrong-password, no toast/navigation", async () => {

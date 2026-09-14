@@ -113,6 +113,7 @@ definePassthroughsExhaustive<Methods>()(ProfileServiceClient.prototype, [
 	"importPasskey",
 	"exportPlain",
 	"exportBackupMaterial",
+	"exportPasskeyBackupMaterial",
 	"getProfileDekSealed",
 	"exportMnemonic",
 	"restore",

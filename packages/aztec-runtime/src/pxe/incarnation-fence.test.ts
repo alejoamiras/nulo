@@ -87,6 +87,18 @@ describe("incarnation fence (#281 D4)", () => {
 		await expect(service.provisionChainStoreKey("p1", KEY_B64, GEN_2)).rejects.toThrow(/different generation/)
 	})
 
+	test("a same-gen re-provision with DIFFERENT bytes is rejected — a key is never swapped under a live incarnation", async () => {
+		const { service } = makeService()
+		await service.provisionChainStoreKey("p1", KEY_B64, GEN_1)
+		const otherKey = btoa(String.fromCharCode(...new Uint8Array(32).fill(9)))
+		await expect(service.provisionChainStoreKey("p1", otherKey, GEN_1)).rejects.toThrow(/different key for this generation/)
+		// The installed key is untouched: the identical bytes still re-provision idempotently.
+		await service.provisionChainStoreKey("p1", KEY_B64, GEN_1)
+		// After a clear, a successor generation may install any key.
+		await service.clearProfileState("p1", GEN_1)
+		await service.provisionChainStoreKey("p1", otherKey, GEN_2)
+	})
+
 	test("successful clear → same-gen provision replay is rejected forever; a fresh gen goes live over it", async () => {
 		const { service } = makeService()
 		await service.provisionChainStoreKey("p1", KEY_B64, GEN_1)
