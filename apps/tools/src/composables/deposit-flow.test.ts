@@ -50,6 +50,10 @@ const h = vi.hoisted(() => {
 		publicFj: undefined as bigint | undefined,
 		/** Whether the connected wallet routes a dApp-named public payer. */
 		selfPay: false,
+		/** What the claim's `send` throws; unset = it lands. */
+		sendThrows: undefined as string | undefined,
+		/** The checkpointed nullifier witness; undefined = absent, "throw" = the node cannot answer. */
+		witness: undefined as unknown,
 	}
 })
 
@@ -93,7 +97,13 @@ vi.mock("./useBridgeJournal", async (importOriginal) => {
 vi.mock("./fuelClaim", () => ({
 	buildFuelClaimInteraction: (_rec: unknown, opts: Record<string, unknown>) => {
 		h.t("builderOpts", opts)
-		return { simulate: async () => ({}), send: async () => ({ txHash: "0x1" }) }
+		return {
+			simulate: async () => ({}),
+			send: async () => {
+				if (h.sendThrows) throw new Error(h.sendThrows)
+				return { txHash: "0x1" }
+			},
+		}
 	},
 }))
 
@@ -103,6 +113,10 @@ vi.mock("@aztec/aztec.js/node", () => ({
 		getTxReceipt: async () => {
 			if (h.receiptStatus === undefined) throw new Error("node unreachable")
 			return { status: h.receiptStatus }
+		},
+		getNullifierMembershipWitness: async () => {
+			if (h.witness === "throw") throw new Error("node unreachable")
+			return h.witness
 		},
 	}),
 }))
@@ -125,7 +139,15 @@ vi.mock("@nulo/bridge-core", async (importOriginal) => ({
 	},
 }))
 
-import { buildFeeJuiceClaimDep, recoverDepositLeg, resolveHubClaimSendOpts, resolvePrivateFuelFee } from "./deposit-flow"
+import {
+	buildFeeJuiceClaimDep,
+	fuelMessageCheckpointed,
+	patchFuel,
+	recoverDepositLeg,
+	resolveHubClaimSendOpts,
+	resolvePrivateFuelFee,
+	sendStandaloneFjClaim,
+} from "./deposit-flow"
 
 const RECIPIENT = "0x1018808f2c17794badb361c02c945582b8198b495a7e8d01154f7eeb7d719c0d"
 
@@ -156,6 +178,8 @@ beforeEach(() => {
 	h.publicFj = undefined
 	h.selfPay = false
 	h.persisted = undefined
+	h.sendThrows = undefined
+	h.witness = undefined
 	vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000)
 })
 
@@ -244,6 +268,18 @@ describe("fee-juice claim builder — a prior claim on the PERSISTED block gates
 	test("a malformed persisted hash is a record fault, not a receipt to wait on", async () => {
 		expect(await stopWhy(mkRec({ fuel: { ...mkRec().fuel, claimTxHash: "0xnothex" } as never }))).toMatch(/malformed/)
 		expect(built()).toBe(false)
+	})
+
+	test("a patch computed for a fuel block the journal has since swapped out is refused", () => {
+		h.persisted = mkRec({ fuel: { ...mkRec().fuel, secretHashHex: "0xanother-deposit" } as never })
+		expect(patchFuel("0xspec1", mkRec().fuel, { consumed: true })).toBe(false)
+		expect(h.calls.some(([n]) => n === "updateRecord")).toBe(false)
+		// The same block under the same id merges as before; no live copy falls back to the captured one.
+		h.persisted = mkRec({ fuel: { ...mkRec().fuel, leafIndex: "7" } as never })
+		expect(patchFuel("0xspec1", mkRec().fuel, { consumed: true })).toBe(true)
+		h.persisted = undefined
+		expect(patchFuel("0xspec1", mkRec().fuel, { consumed: true })).toBe(true)
+		expect(patchFuel("0xspec1", undefined, { consumed: true })).toBe(false)
 	})
 
 	test("the gate reads the PERSISTED block over the captured one, and latches merge into it", async () => {
@@ -571,5 +607,48 @@ describe("own gas - a claim with no Fee Juice message of its own pays from the p
 		h.privateFj = 0n
 		expect(await resolve(noFuel(false), false)).toMatchObject({ kind: "stop", why: expect.stringMatching(/No gas/) })
 		expect(h.calls.some(([n]) => n === "selfPaidFeeJuicePayment")).toBe(false)
+	})
+})
+
+describe("standalone gas claim — a consumed-shaped refusal settles only on the CHECKPOINTED nullifier", () => {
+	const MESSAGE = `0x00${"7d".repeat(31)}`
+	const fuel = () =>
+		({ ...mkRec().fuel, messageHash: MESSAGE, received: "10", leafIndex: "3" }) as NonNullable<DepositJournalRecord["fuel"]>
+	const latched = () =>
+		h.calls.some(
+			([n, d]) =>
+				n === "updateRecord" && (d as { patch: { fuel?: { standaloneClaimed?: boolean } } }).patch.fuel?.standaloneClaimed === true,
+		)
+	const claim = () => sendStandaloneFjClaim({}, AztecAddress.fromStringUnsafe(RECIPIENT), fuel(), "0xspec1")
+
+	test("a checkpointed nullifier latches the claim as done", async () => {
+		h.sendThrows = "L1-to-L2 message is already nullified"
+		h.witness = { leafIndex: 1n }
+		await claim()
+		expect(latched()).toBe(true)
+	})
+
+	test("a node that cannot answer, or a record without its message key, leaves the affordance", async () => {
+		h.sendThrows = "message has already been nullified"
+		h.witness = "throw"
+		await expect(claim()).rejects.toThrow(/could not be read/)
+		h.witness = { leafIndex: 1n }
+		await expect(
+			sendStandaloneFjClaim({}, AztecAddress.fromStringUnsafe(RECIPIENT), { ...fuel(), messageHash: undefined }, "0xspec1"),
+		).rejects.toThrow(/could not be read/)
+		expect(latched()).toBe(false)
+	})
+
+	test("a consumption the chain has not checkpointed is not a latch", async () => {
+		h.witness = undefined
+		expect(await fuelMessageCheckpointed(fuel(), 1)).toBe(false)
+		h.witness = { leafIndex: 1n }
+		expect(await fuelMessageCheckpointed(fuel(), 1)).toBe(true)
+	})
+
+	test("any other refusal is the caller's, unchanged", async () => {
+		h.sendThrows = "Amount too low to cover gas cost"
+		await expect(claim()).rejects.toThrow(/too low/)
+		expect(latched()).toBe(false)
 	})
 })
