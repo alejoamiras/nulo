@@ -709,6 +709,10 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 				// blob can never override them.
 				const row = TokenBalanceRawSchema.parse({
 					...tb,
+					// A restored balance is stale by definition: clear both freshness signals so the
+					// reconcile pass re-projects it instead of trusting a backup-supplied timestamp.
+					updatedAt: 0,
+					syncFailure: undefined,
 					id,
 					profileId,
 					chainId: token.chainId,

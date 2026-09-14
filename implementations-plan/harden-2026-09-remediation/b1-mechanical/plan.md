@@ -39,7 +39,7 @@ Files: `popup/components/modules/send/fee-helpers.ts` (+test), `execution/gas-ba
 Tests: poisoned `PrivateFpc` row first, canonical second → the canonical row is the single `private_fpc` option; `getFpcImpl` refuses a non-protocol `PrivateFpc`; `getFpcImpl` accepts the genuine `PrivateFpc` on a cold protocol-address cache (fresh service, no prior `getFpcs`); a custom `DefaultSponsoredFpc` still resolves.
 Gate: `bun run --cwd apps/extension test src/popup/components/modules/send src/wallet/services/fpc src/wallet/services/execution` · `bun run lint && bun run typecheck`. Layers: typecheck/lint + unit.
 
-**Phase 4 — restore and storage reads (F-12, F-13)**
+**Phase 4 — restore and storage reads (F-12, F-13)** ✓ 2026-09-14
 Files: `contact/service.ts` (+test), `token-balance/service.ts` (+test), `account/service.ts` (+`service.test.ts`).
 Tests: restore writes a sanitized contact name; restore forces `updatedAt: 0` and clears `syncFailure` so `reconcile-pairs` marks the row stale; `getAccountContract(P, C, A)` with B's row under A's key throws instead of returning B's signer.
 Gate: `bun run --cwd apps/extension test src/wallet/services/contact src/wallet/services/token-balance src/wallet/services/account` · `bun run lint && bun run typecheck`. Layers: typecheck/lint + unit.

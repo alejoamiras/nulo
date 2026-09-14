@@ -278,6 +278,17 @@ describe("ContactService (port-migrated)", () => {
 			expect(all).toHaveLength(2)
 		})
 
+		test("restore sanitizes the name exactly like the plaintext import does (bidi override stripped)", async () => {
+			await contactService.addContact("Alice", "0xa")
+			const [genuine] = await contactService.backup()
+			const doctored = [{ ...genuine, id: "c-bidi", name: "\u202EAlice" }]
+			const restored = await contactService.restore(doctored)
+			expect(restored[0].restoreError).toBeUndefined()
+			expect(restored[0].name).toBe("Alice")
+			const all = await contactService.getContacts()
+			expect(all.map((c) => c.name)).toEqual(["Alice", "Alice"])
+		})
+
 		test("(R3) a failed item stores the normalized error MESSAGE string, not the raw error", async () => {
 			// Before Q14, contact stored the raw `err` here while every other
 			// service stored `.message`. R3 normalized it through `toRestoreError`,

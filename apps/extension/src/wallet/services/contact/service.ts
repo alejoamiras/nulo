@@ -297,7 +297,8 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 		return await this.lock.withLock(async () => {
 			return await restoreRows(contacts, async (contact) => {
 				const id = await preferOrReallocId(this.storage, contact.id)
-				const written = { ...contact, id }
+				// Same sanitizer the plaintext import applies: a backup name is untrusted display text.
+				const written = { ...contact, id, name: sanitizeString(contact.name, 20) }
 				// Parse the persisted shape so a malformed backup contact is recorded as
 				// restoreError, not silently written + codec-hidden on read.
 				ContactSchema.parse(written)

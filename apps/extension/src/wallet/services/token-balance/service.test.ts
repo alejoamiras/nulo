@@ -261,6 +261,15 @@ describe("TokenBalanceService.restore — hostile-row validation (P1)", () => {
 		expect(await seedRepo.getAll()).toEqual([])
 	})
 
+	test("restore clears both freshness signals: a future-dated updatedAt and a carried syncFailure are dropped", async () => {
+		const stale = balance(999, 1, { updatedAt: 9_999_999_999_999, syncFailure: { at: 1, message: "planted" } })
+		const [restored] = await service.restore([stale], "p1")
+		expect(restored.restoreError).toBeUndefined()
+		const [row] = await seedRepo.getAll()
+		expect(row.updatedAt).toBe(0)
+		expect(row.syncFailure).toBeUndefined()
+	})
+
 	test("writes a valid row under a freshly allocated id (input id is ignored)", async () => {
 		const [restored] = await service.restore([balance(999, 1)], "p1")
 
