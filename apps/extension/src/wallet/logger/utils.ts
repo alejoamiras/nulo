@@ -174,6 +174,9 @@ function projectError(error: Error): Record<string, unknown> {
 	}
 }
 
+/** A pre-flattened string is opaque to the key-name walker; scrub endpoint URLs at least. */
+const scrubPrimitive = (value: unknown): unknown => (typeof value === "string" ? scrubUrls(value) : value)
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 45 — the ordered recursive shape walker IS the redaction policy; extraction would scatter security precedence
 export const trim = (value: unknown, depth: number = 0): unknown => {
 	if (Array.isArray(value)) {
@@ -260,8 +263,7 @@ export const trim = (value: unknown, depth: number = 0): unknown => {
 			return acc
 		}, {})
 	}
-	// A pre-flattened string is opaque to the key-name walker; scrub endpoint URLs at least.
-	return typeof value === "string" ? scrubUrls(value) : value
+	return scrubPrimitive(value)
 }
 
 export const print = (log: Log) => {
