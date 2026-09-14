@@ -3142,7 +3142,8 @@ describe("F-06 dApp-session rows under same-phrase SIBLINGS — the real Profile
 		// The forgery: a sibling holding the SAME master builds a p2-targeted row and signs it with
 		// ITS key (master shared, DEK not) — p1's real derivation stands in for the attacker's. A
 		// master-only derivation would make this tag verify under p2; the DEK-keyed one must not.
-		const { mac: _authenticMac, ...forgedBody } = { ...(JSON.parse(authentic) as Record<string, unknown>), profileId: p2.id }
+		const authenticRow = JSON.parse(authentic) as Record<string, unknown> & { mac: string }
+		const { mac: _authenticMac, ...forgedBody } = { ...authenticRow, profileId: p2.id }
 		const forgedMac = await signDappSession(await profiles.deriveDappSessionMacKey(p1.id), forgedBody as never)
 		await api.storage.local.set({ [key]: JSON.stringify({ ...forgedBody, mac: forgedMac }) })
 		await profiles.lockActiveProfile()
