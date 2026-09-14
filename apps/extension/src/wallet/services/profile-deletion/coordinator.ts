@@ -117,7 +117,7 @@ export class ProfileDeletionCoordinator implements IService, ProfileDeletionDele
 		// Scoped to the profile being deleted: another profile can share these
 		// addresses, and its history must survive.
 		await this.txs.purgeForAccounts(s.addresses, profileId)
-		await this.auth.purgeForAccounts(s.addresses)
+		await this.auth.purgeForProfile(profileId)
 		await this.balances.purgeForTokens(s.tokenIds, profileId)
 		await this.incoming.clearProfile(profileId)
 		await this.contacts.purgeForProfile(profileId)

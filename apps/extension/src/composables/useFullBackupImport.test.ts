@@ -298,7 +298,11 @@ describe("restoreAccountsAndFilterOwnedSlices — stage 2a contract (Q-02)", () 
 				{ account: "0xa", chainId: 2, hash: "wrong-chain" },
 				{ account: "0xevil", chainId: 1, hash: "foreign" },
 			],
-			"auth-registry": [{ account: "0xa" }, { account: "0xevil" }],
+			"auth-registry": [
+				{ account: "0xa", chainId: 1, hash: "keep" },
+				{ account: "0xa", chainId: 2, hash: "wrong-chain" },
+				{ account: "0xevil", chainId: 1, hash: "foreign" },
+			],
 			"token-balance": [
 				{ account: "0xa", id: 1 },
 				{ account: "0xevil", id: 2 },
@@ -318,7 +322,9 @@ describe("restoreAccountsAndFilterOwnedSlices — stage 2a contract (Q-02)", () 
 		expect([...set]).toEqual(["1:0xa"]) // failed accounts never enter the allow-set
 		const d = data as Record<string, Array<Record<string, unknown>>>
 		expect(d.transaction.map((t) => t.hash)).toEqual(["keep"])
-		expect(d["auth-registry"].map((a) => a.account)).toEqual(["0xa"])
+		// authwits are keyed by the (chainId, account) tuple like txs: the same address on a
+		// non-imported chain is dropped, not just a foreign address.
+		expect(d["auth-registry"].map((a) => a.hash)).toEqual(["keep"])
 		expect(d["token-balance"].map((b) => b.id)).toEqual([1])
 		expect(recorder).toHaveBeenCalledWith("account", expect.anything())
 	})
@@ -812,8 +818,9 @@ describe("useFullBackupImport — account-owned-slice provenance (P3)", () => {
 			data: {
 				account: [{ profileId: "src-profile-id", chainId: 1, address: "0xMINE" }],
 				"auth-registry": [
-					{ id: 1, account: "0xMINE", hash: "0xh1" },
-					{ id: 2, account: "0xVICTIM", hash: "0xh2" },
+					{ id: 1, chainId: 1, account: "0xMINE", hash: "0xh1" },
+					{ id: 2, chainId: 1, account: "0xVICTIM", hash: "0xh2" },
+					{ id: 3, chainId: 2, account: "0xMINE", hash: "0xh3" },
 				],
 			},
 		})
@@ -827,7 +834,7 @@ describe("useFullBackupImport — account-owned-slice provenance (P3)", () => {
 
 		// Only the imported-account authwit reaches restore; the foreign one is
 		// dropped before it can graft into the victim's revocation index.
-		expect(authRegistryClient.restore).toHaveBeenCalledWith([{ id: 1, account: "0xMINE", hash: "0xh1" }], "new-id")
+		expect(authRegistryClient.restore).toHaveBeenCalledWith([{ id: 1, chainId: 1, account: "0xMINE", hash: "0xh1" }], "new-id")
 		warn.mockRestore()
 	})
 

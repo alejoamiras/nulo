@@ -24,17 +24,24 @@ import {
 	AUTH_REGISTRY_SERVICE_NAME,
 	AUTH_REGISTRY_STORAGE_ROOT,
 	type Authwit,
+	type AuthwitRegistryScope,
+	authwitStatusRowId,
 	type Events,
 	MAX_REVOKES_PER_TX,
 	MAX_TRACKED_AUTHWITS_PER_ACCOUNT,
 	type Methods,
 	AuthwitSchema,
 	AuthwitStatusSchema,
+	parseAuthwitStatusRowId,
 } from "./spec"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { TxHash } from "@aztec/stdlib/tx"
 
 export * from "./spec"
+
+/** The `(profileId, chainId, account)` scope every authwit read/write is bound to. `profileId` is
+ *  never a popup parameter — it is always the active profile, resolved SW-side. */
+type AuthwitScope = { profileId: string; chainId: number; account: string }
 
 export class AuthRegistryService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()(
@@ -48,8 +55,8 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 
 	public readonly onAuthwitAdded = new EventHandler<Authwit>()
 	public readonly onAuthwitDeleted = new EventHandler<Authwit>()
-	public readonly onRegistryEnabled = new EventHandler<string>()
-	public readonly onRegistryDisabled = new EventHandler<string>()
+	public readonly onRegistryEnabled = new EventHandler<AuthwitRegistryScope>()
+	public readonly onRegistryDisabled = new EventHandler<AuthwitRegistryScope>()
 
 	private readonly authwits: EntityStorage<Authwit>
 	private readonly statuses: EntityStorage<boolean>
@@ -90,13 +97,13 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		this.transactionService = services.get(TransactionService.name)
 		this.taskService = services.get(TaskService.name)
 
-		// Authwits + registry-enabled flags are keyed per-account. When an
-		// account is deleted (e.g. as part of a chain purge), wipe its
-		// records here so we don't leak stale state. Fire-and-forget against
-		// the EventHandler — best-effort cleanup.
-		this.accountService.onAccountDeleted.add((account) => {
-			void this.purgeForAccounts([account.address])
-		})
+		// Authwit rows + registry-enabled flags are scoped by (profileId, chainId, account). Two
+		// awaited purge subscribers, NOT the address-only onAccountDeleted listener (which could
+		// delete a sibling profile's rows for a shared address, and never fires on deleteNetwork):
+		//   - account purge (reconcileImportedAccounts): the exact (chainId, address) scopes.
+		//   - chain purge (deleteNetwork / profile delete): every row on (profileId, chainId).
+		this.accountService.registerAccountPurgeSubscriber(async (profileId, scopes) => this.purgeForAccounts(scopes, profileId))
+		this.networkService.registerChainPurgeSubscriber(async (profileId, chainId) => this.purgeChain(profileId, chainId))
 
 		// Reconcile pending public-authwit rows by their tx's on-chain outcome: a row is
 		// written `pending` at the post-send tail, then confirmed here once its tx is proven
@@ -108,75 +115,118 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		})
 	}
 
-	/** Map a tx's settled on-chain outcome to a pending-authwit reconcile. Proven/Finalized
-	 *  + Success ⇒ confirm; settled non-success (reverted) ⇒ remove. A Dropped status
-	 *  deliberately does NOTHING: the transaction service may still resurrect a dropped tx
-	 *  on a late mine (transient DROPPED answers happen behind load-balanced RPCs), and a
-	 *  row removed here can never be reconfirmed — authwit hashes aren't enumerable from
-	 *  chain. ACCEPTED RESIDUAL: a genuinely dropped tx's row then lingers as pending —
-	 *  `syncAuthwit` skips pending rows on purpose, so nothing prunes it. That is the safe
-	 *  direction (over-claiming; revoking a never-landed grant is a no-op); it stays
-	 *  user-visible/revocable and only costs headroom against the tracked-authwit cap. */
+	/** Map a tx's settled on-chain outcome to a pending-authwit reconcile, scoped to the tx's own
+	 *  `(profileId, chainId, account)` — a tx without provenance (`profileId` absent) is skipped
+	 *  so it can never reconcile another profile's rows. Proven/Finalized + Success ⇒ confirm;
+	 *  settled non-success (reverted) ⇒ remove. A Dropped status deliberately does NOTHING: the
+	 *  transaction service may still resurrect a dropped tx on a late mine (transient DROPPED
+	 *  answers happen behind load-balanced RPCs), and a row removed here can never be reconfirmed —
+	 *  authwit hashes aren't enumerable from chain. ACCEPTED RESIDUAL: a genuinely dropped tx's row
+	 *  then lingers as pending — `syncAuthwit` skips pending rows on purpose, so nothing prunes it.
+	 *  That is the safe direction (over-claiming; revoking a never-landed grant is a no-op); it
+	 *  stays user-visible/revocable and only costs headroom against the tracked-authwit cap. */
 	private async reconcileFromTx(tx: Tx): Promise<void> {
+		if (!tx.profileId) return
+		const scope: AuthwitScope = { profileId: tx.profileId, chainId: tx.chainId, account: tx.account }
 		const settled = tx.status === TxStatus.Proven || tx.status === TxStatus.Finalized
 		if (settled && tx.executionResult === TxExecutionResult.Success) {
-			await this.reconcileAuthwits(tx.hash, "mined")
+			await this.reconcileAuthwits(scope, tx.hash, "mined")
 			return
 		}
 		const reverted = settled && tx.executionResult !== undefined && tx.executionResult !== TxExecutionResult.Success
 		if (reverted) {
-			await this.reconcileAuthwits(tx.hash, "dropped")
+			await this.reconcileAuthwits(scope, tx.hash, "dropped")
 		}
 	}
 
-	public async getAuthwits(account: string): Promise<Authwit[]> {
-		return (await this.authwits.getValues()).filter((x) => x.account === account)
+	/** Every tracked row for `(profileId, chainId, account)`. */
+	private async rowsForScope(scope: AuthwitScope): Promise<Authwit[]> {
+		return (await this.authwits.getValues()).filter(
+			(x) => x.profileId === scope.profileId && x.chainId === scope.chainId && x.account === scope.account,
+		)
 	}
 
-	/** PRE-send cap gate: throw if granting `newHashes` would push `account` past the
-	 *  tracked-authwit ceiling. Counts existing tracked rows (incl. pending) PLUS the unique
-	 *  NEW hashes not already tracked — a per-action check would let e.g. 255 existing + 2 new
-	 *  slip through and miscount intra-tx duplicates. Never auto-evict (that destroys the
-	 *  only local revocation index). Called by `buildStandard` for each `add_public_authwit`. */
-	public async assertWithinCap(account: string, newHashes: string[]): Promise<void> {
-		const existing = (await this.authwits.getValues()).filter((x) => x.account === account)
+	public async getAuthwits(chainId: number, account: string): Promise<Authwit[]> {
+		await this.ensureInitialized()
+		const profile = await requireActiveProfile(this.profileService)
+		return this.rowsForScope({ profileId: profile.id, chainId, account })
+	}
+
+	/** PRE-send cap gate: throw if granting `newHashes` would push the scope past the
+	 *  tracked-authwit ceiling. Counts existing tracked rows for THIS `(profileId, chainId,
+	 *  account)` (incl. pending) PLUS the unique NEW hashes not already tracked — a per-action
+	 *  check would let e.g. 255 existing + 2 new slip through and miscount intra-tx duplicates.
+	 *  Never auto-evict (that destroys the only local revocation index). Called by `buildStandard`
+	 *  for each `add_public_authwit`, with the owned network's profile + chain. */
+	public async assertWithinCap(scope: AuthwitScope, newHashes: string[]): Promise<void> {
+		const existing = await this.rowsForScope(scope)
 		const existingHashes = new Set(existing.map((a) => a.hash))
 		const newUnique = new Set(newHashes.filter((h) => !existingHashes.has(h)))
 		if (existing.length + newUnique.size > MAX_TRACKED_AUTHWITS_PER_ACCOUNT) {
 			throw new Error(
-				`Cannot grant: account ${account} would exceed the ${MAX_TRACKED_AUTHWITS_PER_ACCOUNT} tracked public-authwit limit. Revoke some first.`,
+				`Cannot grant: account ${scope.account} would exceed the ${MAX_TRACKED_AUTHWITS_PER_ACCOUNT} tracked public-authwit limit. Revoke some first.`,
 			)
 		}
 	}
 
-	/** Record public authwits at the POST-send tail as `pending`, tx-linked rows.
-	 *  Acceptance of `sendTx` is NOT mining — these stay pending until
-	 *  `reconcileAuthwits` confirms (mined) or removes (dropped) them. Idempotent:
-	 *  an account+hash already tracked (pending or confirmed) is skipped, so a
-	 *  retry after a partial write does not duplicate. */
-	public async recordPendingAuthwits(account: string, items: { hash: string; content: AuthwitContent }[], txHash: string): Promise<void> {
+	/** Record public authwits at the POST-send tail as `pending`, tx-linked rows, stamped with the
+	 *  sending tx's `(profileId, chainId, account)`. Acceptance of `sendTx` is NOT mining — these
+	 *  stay pending until `reconcileAuthwits` confirms (mined) or removes (dropped) them.
+	 *  Idempotent: a hash already tracked in this scope (pending or confirmed) is skipped, so a
+	 *  retry after a partial write does not duplicate. Ids are allocated over the PHYSICAL key
+	 *  space so a codec-hidden row (a damaged current-format row) can't be overwritten. */
+	public async recordPendingAuthwits(
+		scope: AuthwitScope,
+		items: { hash: string; content: AuthwitContent }[],
+		txHash: string,
+	): Promise<void> {
 		if (items.length === 0) return
 		await this.lock.withLock(async () => {
-			const existing = await this.authwits.getValues()
-			const seen = new Set(existing.filter((x) => x.account === account).map((x) => x.hash))
-			let nextId = array_max(existing.map((x) => x.id)) + 1
+			const all = await this.authwits.getValues()
+			const seen = new Set(
+				all
+					.filter((x) => x.profileId === scope.profileId && x.chainId === scope.chainId && x.account === scope.account)
+					.map((x) => x.hash),
+			)
+			const occupied = new Set(await this.authwits.getKeys())
+			let nextId = array_max(all.map((x) => x.id)) + 1
 			for (const { hash, content } of items) {
 				if (seen.has(hash)) continue
 				seen.add(hash)
-				const authwit: Authwit = { id: nextId++, account, hash, content, pending: true, txHash }
+				while (Number.isSafeInteger(nextId) && occupied.has(`${nextId}`)) nextId++
+				if (!Number.isSafeInteger(nextId)) throw new Error("authwit id space exhausted")
+				const authwit: Authwit = {
+					id: nextId,
+					profileId: scope.profileId,
+					chainId: scope.chainId,
+					account: scope.account,
+					hash,
+					content,
+					pending: true,
+					txHash,
+				}
 				await this.authwits.set(`${authwit.id}`, authwit)
+				occupied.add(`${authwit.id}`)
+				nextId++
 				this.emit("onAuthwitAdded", authwit)
 			}
 		})
 	}
 
-	/** Reconcile pending rows for a tx once its outcome is known: `mined` clears
-	 *  the pending flag (the grant is durable + revocable); `dropped` removes the
-	 *  rows (the grant never landed, so the local index must not claim it exists).
-	 *  Confirmed (non-pending) rows are untouched. */
-	public async reconcileAuthwits(txHash: string, outcome: "mined" | "dropped"): Promise<void> {
+	/** Reconcile pending rows for a tx once its outcome is known, scoped to the tx's own
+	 *  `(profileId, chainId, account)` AND its hash: `mined` clears the pending flag (the grant is
+	 *  durable + revocable); `dropped` removes the rows (the grant never landed, so the local index
+	 *  must not claim it exists). Confirmed (non-pending) rows are untouched. */
+	public async reconcileAuthwits(scope: AuthwitScope, txHash: string, outcome: "mined" | "dropped"): Promise<void> {
 		await this.lock.withLock(async () => {
-			const rows = (await this.authwits.getValues()).filter((x) => x.pending && x.txHash === txHash)
+			const rows = (await this.authwits.getValues()).filter(
+				(x) =>
+					x.pending &&
+					x.txHash === txHash &&
+					x.profileId === scope.profileId &&
+					x.chainId === scope.chainId &&
+					x.account === scope.account,
+			)
 			for (const row of rows) {
 				if (outcome === "mined") {
 					await this.authwits.set(`${row.id}`, { ...row, pending: false })
@@ -193,15 +243,22 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		if (ids.length > MAX_REVOKES_PER_TX) {
 			throw new Error(`Cannot revoke more than ${MAX_REVOKES_PER_TX} authwits per single tx`)
 		}
+		const network = await this.networkService.getNetwork(networkId)
+		const scope: AuthwitScope = { profileId: network.profileId, chainId: network.chainId, account }
 
 		const authwits: Authwit[] = []
 		for (const id of ids) {
 			const authwit = await this.authwits.get(`${id}`)
-			// Reject an authwit id owned by a DIFFERENT account: authwits are FK-scoped
-			// by account (no profileId), so without this a caller could revoke another
-			// account's authwits by supplying its ids. Treat a foreign id as "doesn't
-			// exist" — there is deliberately no cross-account existence oracle.
-			if (!authwit || authwit.account !== account) {
+			// Reject an id owned by a DIFFERENT (profileId, chainId, account) tuple: without this a
+			// caller could revoke another profile's / chain's / account's authwits by supplying its
+			// ids. Treat a foreign id as "doesn't exist" — there is deliberately no cross-scope
+			// existence oracle.
+			if (
+				!authwit ||
+				authwit.profileId !== scope.profileId ||
+				authwit.chainId !== scope.chainId ||
+				authwit.account !== scope.account
+			) {
 				throw new Error(`Authwit #${id} doesn't exist`)
 			}
 			authwits.push(authwit)
@@ -229,14 +286,13 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 
 			await this.transactionService.waitForTx(txHash, task)
 
-			const network = await this.networkService.getNetwork(networkId)
 			const node = await this.networkService.getNode(network.chainId)
 			// `waitForTx` only confirms the tx left the pending queue (submitted),
 			// not that its PUBLIC effect is mined + visible. Poll the on-chain state
 			// so a fast (proverless) follow-up consume can't race a not-yet-mined
 			// revoke. See waitForOnChainState.
 			await this.waitForTxProven(node, txHash)
-			await this.syncAuthwits(node, account, task, authwits)
+			await this.syncAuthwits(node, scope, task, authwits)
 
 			task.complete()
 		} catch (error) {
@@ -249,12 +305,16 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		}
 	}
 
-	public async getRegistryEnabled(account: string): Promise<boolean> {
-		return (await this.statuses.get(account)) ?? true
+	public async getRegistryEnabled(chainId: number, account: string): Promise<boolean> {
+		await this.ensureInitialized()
+		const profile = await requireActiveProfile(this.profileService)
+		return (await this.statuses.get(authwitStatusRowId(profile.id, chainId, account))) ?? true
 	}
 
 	public async setRegistryEnabled(networkId: string, account: string, enabled: boolean, feeSettings: FeeSettings): Promise<void> {
 		await this.ensureInitialized()
+		const network = await this.networkService.getNetwork(networkId)
+		const scope: AuthwitScope = { profileId: network.profileId, chainId: network.chainId, account }
 		const task = this.taskService.startNewTask(new StepContent(`${enabled ? "Enable" : "Disable"} auth registry`))
 		try {
 			const txHash = await this.executionService.executeSendTransaction(
@@ -278,12 +338,11 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 
 			await this.transactionService.waitForTx(txHash, task)
 
-			const network = await this.networkService.getNetwork(networkId)
 			const node = await this.networkService.getNode(network.chainId)
 			// Ensure the registry toggle is mined + visible before returning, so a
 			// fast follow-up consume reads the new state (see waitForOnChainState).
 			await this.waitForTxProven(node, txHash)
-			await this.syncStatus(node, account, task)
+			await this.syncStatus(node, scope, task)
 
 			task.complete()
 		} catch (error) {
@@ -298,11 +357,12 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 
 	public async syncRegistry(networkId: string, account: string): Promise<void> {
 		await this.ensureInitialized()
+		const network = await this.networkService.getNetwork(networkId)
+		const scope: AuthwitScope = { profileId: network.profileId, chainId: network.chainId, account }
 		const task = this.taskService.startNewTask(new StepContent("Sync auth registry"))
 		try {
-			const network = await this.networkService.getNetwork(networkId)
 			const node = await this.networkService.getNode(network.chainId)
-			await Promise.all([this.syncAuthwits(node, account, task), this.syncStatus(node, account, task)])
+			await Promise.all([this.syncAuthwits(node, scope, task), this.syncStatus(node, scope, task)])
 			task.complete()
 		} catch (error) {
 			task.fail(error)
@@ -310,17 +370,6 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		}
 	}
 
-	/** Poll an on-chain predicate until it holds (the just-submitted settings
-	 *  tx's public effect is mined + visible) or the timeout elapses.
-	 *
-	 *  `transactionService.waitForTx` only blocks while the tx is in the local
-	 *  `pending` queue (i.e. until it's submitted), NOT until its public state
-	 *  is mined — so a one-shot read right after it can observe stale state. The
-	 *  gap is masked under real proving (the prove duration absorbs it) but
-	 *  exposed under proverless e2e, where a follow-up `consume` would race the
-	 *  registry. Polling the actual on-chain predicate closes the race for both.
-	 *  On timeout we proceed (the caller's sync reads whatever is current) rather
-	 *  than fail the settings op. */
 	/**
 	 * Wait until the mutation tx's block is PROVEN, not merely at the proposed
 	 * `latest` tip. The sequencer executes public functions — e.g. a follow-up
@@ -343,11 +392,11 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		throw new Error(`waitForTxProven: tx ${txHash} (block ${target}) not proven within ${timeoutMs}ms`)
 	}
 
-	private async syncAuthwits(node: AztecNode, account: string, parentTask: WrappedTask, authwits?: Authwit[]) {
+	private async syncAuthwits(node: AztecNode, scope: AuthwitScope, parentTask: WrappedTask, authwits?: Authwit[]) {
 		const task = parentTask.startSubtask(new StepContent("Sync authwits"))
 		try {
-			const _authwits = authwits ?? (await this.getAuthwits(account))
-			await Promise.all(_authwits.map((authwit) => this.syncAuthwit(node, authwit, task)))
+			const _authwits = authwits ?? (await this.rowsForScope(scope))
+			await Promise.all(_authwits.map((authwit) => this.syncAuthwit(node, scope, authwit, task)))
 			task.complete()
 		} catch (error) {
 			task.fail(error)
@@ -355,7 +404,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		}
 	}
 
-	private async syncAuthwit(node: AztecNode, authwit: Authwit, parentTask: WrappedTask) {
+	private async syncAuthwit(node: AztecNode, scope: AuthwitScope, authwit: Authwit, parentTask: WrappedTask) {
 		// Skip no-op syncs BEFORE starting a subtask: a started-but-unfinished subtask blocks
 		// the PARENT task from completing (TaskService refuses a parent with open children),
 		// which is exactly what wedged `revokeAuthwits`' syncAuthwits when the revoked grants
@@ -367,9 +416,21 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		const task = parentTask.startSubtask(new StepContent(`Sync authwit #${authwit.id}`))
 		try {
 			await this.lock.withLock(async () => {
-				if (await this.authwits.get(`${authwit.id}`)) {
+				// Re-read UNDER the lock and delete only if the row still holds the SAME
+				// scope + hash + pending state the sync captured: a purge + restore during
+				// the (lock-free) node await can hand this numeric id to a different tuple,
+				// and an id-keyed delete would then destroy the wrong row.
+				const current = await this.authwits.get(`${authwit.id}`)
+				if (
+					current &&
+					!current.pending &&
+					current.profileId === scope.profileId &&
+					current.chainId === scope.chainId &&
+					current.account === scope.account &&
+					current.hash === authwit.hash
+				) {
 					await this.authwits.delete(`${authwit.id}`)
-					this.emit("onAuthwitDeleted", authwit)
+					this.emit("onAuthwitDeleted", current)
 				}
 			})
 			task.complete()
@@ -379,19 +440,20 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		}
 	}
 
-	private async syncStatus(node: AztecNode, account: string, parentTask: WrappedTask): Promise<void> {
+	private async syncStatus(node: AztecNode, scope: AuthwitScope, parentTask: WrappedTask): Promise<void> {
 		const task = parentTask.startSubtask(new StepContent("Sync status"))
+		const rowId = authwitStatusRowId(scope.profileId, scope.chainId, scope.account)
 		try {
-			const isEnabled = await isAuthRegistryEnabled(node, account)
+			const isEnabled = await isAuthRegistryEnabled(node, scope.account)
 			await this.lock.withLock(async () => {
-				const enabled = await this.statuses.get(account)
+				const enabled = (await this.statuses.get(rowId)) ?? true
 				if (enabled !== isEnabled) {
 					if (isEnabled) {
-						await this.statuses.delete(account)
-						this.emit("onRegistryEnabled", account)
+						await this.statuses.delete(rowId)
+						this.emit("onRegistryEnabled", scope)
 					} else {
-						await this.statuses.set(account, isEnabled)
-						this.emit("onRegistryDisabled", account)
+						await this.statuses.set(rowId, isEnabled)
+						this.emit("onRegistryDisabled", scope)
 					}
 				}
 			})
@@ -415,45 +477,99 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		for (const n of networks) {
 			const accounts = await this.accountService.getAccounts(profile.id, n.chainId)
 			for (const acc of accounts) {
-				authwits.push(...(await this.getAuthwits(acc.address)))
+				authwits.push(...(await this.rowsForScope({ profileId: profile.id, chainId: n.chainId, account: acc.address })))
 			}
 		}
 
 		return authwits
 	}
 
-	/** Awaited authwit + status purge for a SET of accounts — called by the
-	 *  deletion coordinator with the tombstone's address snapshot (finding D).
-	 *  `onAccountDeleted` delegates here (single-account deleteNetwork path). */
-	public async purgeForAccounts(addresses: readonly string[]): Promise<void> {
+	/** Awaited authwit + status purge for a SET of `(chainId, address)` scopes within ONE profile —
+	 *  registered with AccountService and invoked BEFORE the Account rows are deleted (finding D).
+	 *  Scope is the full tuple: a bare-address match would destroy a sibling profile's rows (shared
+	 *  addresses are a supported state), and an address+profile match would destroy this profile's
+	 *  rows on ANOTHER chain. Idempotent. */
+	public async purgeForAccounts(scopes: ReadonlyArray<{ chainId: number; address: string }>, profileId: string): Promise<void> {
 		await this.ensureInitialized()
-		const set = new Set(addresses)
+		if (scopes.length === 0) return
+		const keys = new Set(scopes.map((s) => `${s.chainId}:${s.address}`))
 		await this.lock.withLock(async () => {
-			const authwits = (await this.authwits.getValues()).filter((a) => set.has(a.account))
+			const authwits = (await this.authwits.getValues()).filter(
+				(a) => a.profileId === profileId && keys.has(`${a.chainId}:${a.account}`),
+			)
 			await purgeRows(
 				authwits,
 				(authwit) => this.authwits.delete(`${authwit.id}`),
 				(authwit) => this.emit("onAuthwitDeleted", authwit),
 			)
-			// F-B23: raw second pass — a validation-failed row for a purged account
+			// F-B23: raw second pass — a validation-failed row for a purged scope
 			// is invisible to getValues() and would otherwise survive forever.
 			await purgeMalformedRows(
 				this.authwits,
-				(raw) => typeof raw.account === "string" && set.has(raw.account),
+				(raw) =>
+					raw.profileId === profileId &&
+					typeof raw.chainId === "number" &&
+					typeof raw.account === "string" &&
+					keys.has(`${raw.chainId}:${raw.account}`),
 				(id) => this.logDebug(`purged malformed authwit row ${id}`),
 			)
-			for (const addr of set) {
-				if (await this.statuses.contains(addr)) await this.statuses.delete(addr)
-			}
+			await this.purgeStatuses((s) => s.profileId === profileId && keys.has(`${s.chainId}:${s.account}`))
 		})
+	}
+
+	/** Awaited authwit + status purge for one whole profile (profile-delete cascade). */
+	public async purgeForProfile(profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		await this.lock.withLock(async () => {
+			const authwits = (await this.authwits.getValues()).filter((a) => a.profileId === profileId)
+			await purgeRows(
+				authwits,
+				(authwit) => this.authwits.delete(`${authwit.id}`),
+				(authwit) => this.emit("onAuthwitDeleted", authwit),
+			)
+			await purgeMalformedRows(
+				this.authwits,
+				(raw) => raw.profileId === profileId,
+				(id) => this.logDebug(`purged malformed authwit row ${id}`),
+			)
+			await this.purgeStatuses((s) => s.profileId === profileId)
+		})
+	}
+
+	/** Awaited authwit + status purge for one `(profileId, chainId)` — the chain-purge subscriber
+	 *  (deleteNetwork and the profile-delete network cascade both reach it). */
+	public async purgeChain(profileId: string, chainId: number): Promise<void> {
+		await this.ensureInitialized()
+		await this.lock.withLock(async () => {
+			const authwits = (await this.authwits.getValues()).filter((a) => a.profileId === profileId && a.chainId === chainId)
+			await purgeRows(
+				authwits,
+				(authwit) => this.authwits.delete(`${authwit.id}`),
+				(authwit) => this.emit("onAuthwitDeleted", authwit),
+			)
+			await purgeMalformedRows(
+				this.authwits,
+				(raw) => raw.profileId === profileId && raw.chainId === chainId,
+				(id) => this.logDebug(`purged malformed authwit row ${id}`),
+			)
+			await this.purgeStatuses((s) => s.profileId === profileId && s.chainId === chainId)
+		})
+	}
+
+	/** Delete every registry-enabled row whose canonical tuple key matches `keep`. Attribution is
+	 *  off the byte-canonical KEY, never a value (a status row's value is a bare boolean with no
+	 *  identity), so a non-canonical/foreign key is left untouched. Caller holds the lock. */
+	private async purgeStatuses(keep: (scope: { profileId: string; chainId: number; account: string }) => boolean): Promise<void> {
+		for (const key of await this.statuses.getKeys()) {
+			const scope = parseAuthwitStatusRowId(key)
+			if (scope && keep(scope)) await this.statuses.delete(key)
+		}
 	}
 
 	public async restore(authwits: Authwit[], profileId: string): Promise<Restored<Authwit>[]> {
 		await this.ensureInitialized()
-		// Deletion fence keyed on the composable's authoritative created-profile
-		// id — authwit rows carry NO profileId (unscoped numeric keys), so only
-		// the threaded id can anchor it. Fail closed: dispatch has no schema
-		// validation.
+		// Deletion fence keyed on the composable's authoritative created-profile id. Fail closed:
+		// dispatch has no schema validation.
 		if (typeof profileId !== "string" || profileId.length === 0) {
 			throw new Error("restore requires the created profile id")
 		}
@@ -461,22 +577,27 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		const epochs = captureRestoreEpochs(deletion, [profileId])
 
 		return await this.lock.withLock(async () => {
-			// Duplicate identity is the compound (account, hash) — hashes are
-			// legitimately shared ACROSS accounts, so a bare-hash check would
-			// false-reject. Encoded injectively (JSON array): accounts/hashes are
-			// attacker-shaped strings, so any in-band delimiter is forgeable.
-			// The seed comes from RAW payloads — decoded reads hide malformed
-			// rows whose pairs must still block duplicates; a row too corrupt to
-			// yield both strings has no identity to collide with. NO cap check
-			// here: these are already-granted authorizations, and rejecting a
-			// unique row would destroy the only revocation index.
-			const pairKeyOf = (account: string, hash: string) => JSON.stringify([account, hash])
+			// Duplicate identity is the compound (profileId, chainId, account, hash): the restored
+			// rows are all forced to THIS profile, so a same-address sibling's existing row (a
+			// different profileId) no longer false-blocks the restore, while a genuine in-profile
+			// duplicate still does. Encoded injectively (JSON array): the strings are
+			// attacker-shaped, so any in-band delimiter is forgeable. The seed comes from RAW
+			// payloads — decoded reads hide malformed rows whose tuples must still block
+			// duplicates; a row too corrupt to yield its fields has no identity to collide with.
+			// NO cap check: these are already-granted authorizations, and rejecting a unique row
+			// would destroy the only revocation index.
+			const pairKeyOf = (chainId: number, account: string, hash: string) => JSON.stringify([profileId, chainId, account, hash])
 			const seen = new Set<string>()
 			for (const [, raw] of await this.authwits.rawStringEntries()) {
 				try {
-					const v = JSON.parse(raw) as { account?: unknown; hash?: unknown }
-					if (typeof v.account === "string" && typeof v.hash === "string") {
-						seen.add(pairKeyOf(v.account, v.hash))
+					const v = JSON.parse(raw) as { profileId?: unknown; chainId?: unknown; account?: unknown; hash?: unknown }
+					if (
+						v.profileId === profileId &&
+						typeof v.chainId === "number" &&
+						typeof v.account === "string" &&
+						typeof v.hash === "string"
+					) {
+						seen.add(pairKeyOf(v.chainId, v.account, v.hash))
 					}
 				} catch {
 					// No extractable identity — nothing to dedupe against.
@@ -505,12 +626,13 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 				if (!Number.isSafeInteger(id)) {
 					throw new Error("authwit id space exhausted (hostile id boundary)")
 				}
-				// Parse the persisted shape so a malformed backup authwit is recorded
-				// as restoreError, not silently written + codec-hidden on read.
-				const row = AuthwitSchema.parse({ ...authwit, id })
-				const pairKey = pairKeyOf(row.account, row.hash)
+				// Parse the persisted shape, FORCING profileId to the threaded id — a hostile
+				// backup's foreign profileId is overwritten, never trusted — so a malformed backup
+				// authwit is recorded as restoreError, not silently written + codec-hidden on read.
+				const row = AuthwitSchema.parse({ ...authwit, id, profileId })
+				const pairKey = pairKeyOf(row.chainId, row.account, row.hash)
 				if (seen.has(pairKey)) {
-					throw new Error("authwit already exists (account+hash)")
+					throw new Error("authwit already exists (profile+chain+account+hash)")
 				}
 				assertRestoreEpoch(deletion, epochs, profileId)
 				await this.authwits.set(`${id}`, row)

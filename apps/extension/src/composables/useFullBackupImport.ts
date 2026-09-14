@@ -213,7 +213,13 @@ export async function restoreAccountsAndFilterOwnedSlices(
 	// fields, but those are DERIVED service-side at restore — address membership
 	// here is a pre-filter, with token-ownership + chain-equality in the re-link
 	// step below.
-	filterByAccount(AUTH_REGISTRY_SERVICE_NAME, (aw) => typeof aw.account === "string" && importedAddresses.has(aw.account), "authwit(s)")
+	// auth-registry rows now carry their own chainId → key by the (chainId, account) tuple so a
+	// backup authwit can't reference an imported address on a DIFFERENT chain (F-07, mirrors tx).
+	filterByAccount(
+		AUTH_REGISTRY_SERVICE_NAME,
+		(aw) => typeof aw.account === "string" && typeof aw.chainId === "number" && importedChainAddress.has(`${aw.chainId}:${aw.account}`),
+		"authwit(s)",
+	)
 	filterByAccount(
 		TOKEN_BALANCE_SERVICE_NAME,
 		(tb) => typeof tb.account === "string" && importedAddresses.has(tb.account),
