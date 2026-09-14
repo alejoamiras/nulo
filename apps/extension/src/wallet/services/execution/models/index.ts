@@ -28,6 +28,8 @@ export type {
 	GasBalances,
 	PriorityLevel,
 	TransferFeeEstimate,
+	DiscoveredAuthwit,
+	OperationAuthwitPreview,
 } from "@nulo/wallet-bridge"
 export { PRIORITY_MULTIPLIERS } from "@nulo/wallet-bridge"
 export type {
@@ -61,19 +63,18 @@ export type {
 	SkippedOperationResult,
 } from "@nulo/wallet-bridge"
 
-import type { RegisterTokenOperation } from "@nulo/wallet-bridge"
-import type { TokenInterface } from "@/wallet/services/token/spec"
-
-/**
- * Materialized form of `RegisterTokenOperation` carrying the optional
- * `previewedInterface` hint that the popup attaches in its approve mapper
- * after `previewTokenMetadata` resolves. The wire `RegisterTokenOperation`
- * in `@nulo/wallet-bridge` stays clean of any `TokenInterface` import
- * (wallet-bridge has no dependency on extension types — layer hierarchy
- * forbids it). The executor accepts this extended type, validates
- * `previewedInterface.contract === op.address` + `chainId === network.chainId`
- * before trusting the hint, and falls back to `parseTokenInterface` on mismatch.
- */
-export type MaterializedRegisterTokenOperation = RegisterTokenOperation & {
-	readonly previewedInterface?: TokenInterface
+/** Where a popup approval binds one operation's execution: the stored dApp
+ *  interaction and the operation's index in it, plus the SW-minted ids the
+ *  popup handed back. The silent path carries none — its executions are not
+ *  held to a preview. */
+export type OperationApprovalEnvelope = {
+	readonly interactionId: string
+	readonly index: number
+	/** Estimate→confirm reuse id (standard-mode `aztec_sendTx`). */
+	readonly estimateId?: string
+	/** Preview-snapshot key: the discovered authorizations the card showed. */
+	readonly previewId?: string
 }
+
+/** The `(interactionId, index)` a preview or estimate is written under. */
+export type PreviewContext = Pick<OperationApprovalEnvelope, "interactionId" | "index">

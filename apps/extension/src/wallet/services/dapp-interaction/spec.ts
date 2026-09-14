@@ -1,6 +1,5 @@
 import type { DappSession, DappMetadata } from "@/wallet/services/dapp-session/spec"
-import type { Operation } from "@/wallet/services/execution/spec"
-import type { LocalTxOrigin } from "@/wallet/services/transaction/spec"
+import type { OperationApprovalDelta } from "./approval-delta"
 import type { CapabilityParams, CapabilityResult, ExecutionParams, ExecutionResult, IExecutionHooks } from "@nulo/wallet-bridge"
 
 /** Protocol-shape types (`ExecutionParams`, `ExecutionResult`,
@@ -8,6 +7,7 @@ import type { CapabilityParams, CapabilityResult, ExecutionParams, ExecutionResu
  *  variants, `CaipChain`, `CaipAccount`) live in `@nulo/wallet-bridge`.
  *  Re-exported here so extension consumers can keep importing them via
  *  this path. */
+export type { OperationApprovalDelta } from "./approval-delta"
 export type {
 	AztecCreateAuthWitRequest,
 	AztecExecuteUtilityRequest,
@@ -104,15 +104,14 @@ export type DiscoveryResult = {
 
 export type Methods = {
 	getInteractionPayload(id: string): ExecutionPayload | CapabilityPayload | DiscoveryPayload
-	approveInteraction(
-		id: string,
-		operations: Operation[],
-		origin: LocalTxOrigin,
-		/** Popup-privileged estimate→confirm reuse ids, index-aligned with
-		 *  `operations`. Deliberately NOT a field on the shared `Operation`
-		 *  wire shape — a dApp payload can never carry one. */
-		estimateIds?: (string | undefined)[],
-	): void
+	/**
+	 * Execute the stored request of a live execution interaction. The SW
+	 * materializes every operation from the dApp's own payload; `deltas` is
+	 * index-aligned with it and carries only the popup's fee choice and the
+	 * SW-minted estimate/preview ids. Rejected with "Invalid id" before any
+	 * claim when the interaction is not an executable one or the lengths differ.
+	 */
+	approveInteraction(id: string, deltas: OperationApprovalDelta[]): void
 	resolveInteraction(id: string, result: ExecutionResult | CapabilityResult | DiscoveryResult): void
 	rejectInteraction(id: string, reason: string): void
 	/** Replay read for popups that mount after the cancel broadcast fired. */

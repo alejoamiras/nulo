@@ -47,6 +47,7 @@ function makeEntry(overrides: Partial<OperationEstimateReuseEntry> = {}): Operat
 		feePaymentMethod: 1 as never,
 		txCalls: [{ contract: "0xc", method: "m", args: [] }] as never,
 		pendingPublicAuthwits: [{ account: "0xacc", hash: "0xh", content: { kind: "message_hash", messageHash: "0xm" } }] as never,
+		discoveredHashes: [],
 		builtAt: Date.now(),
 		...overrides,
 	}

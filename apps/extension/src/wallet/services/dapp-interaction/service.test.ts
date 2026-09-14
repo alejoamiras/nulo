@@ -76,7 +76,10 @@ function makeService(overrides: {
 
 // session.profileId matches makeService's default getActiveProfile ({ id: "p1" })
 // so the executeAndResolve active-profile guard passes.
-const emptyPayload = { params: { operations: [] }, session: { profileId: "p1" } } as unknown as DappInteraction["payload"]
+const emptyPayload = {
+	params: { operations: [] },
+	session: { profileId: "p1", dappMetadata: { name: "test-dapp" } },
+} as unknown as DappInteraction["payload"]
 
 /** A live popup interaction for a queued dApp request whose journal record is `journalId`. */
 const seedQueued = (internals: Internals, id: string, journalId: string) => {
@@ -109,7 +112,7 @@ describe("DappInteractionService forwards execution hooks (does not fire the bat
 			hooks: { onExecutionEnqueued: releaseSpy, queuedJournalId: "q-1", originKey: "https://dapp.example" },
 		})
 
-		await svc.approveInteraction(id, [], origin)
+		await svc.approveInteraction(id, [])
 		await flush()
 
 		expect(executeOperations).toHaveBeenCalledTimes(1)
@@ -140,7 +143,7 @@ describe("DappInteractionService forwards execution hooks (does not fire the bat
 			cancellationToken: id,
 		} as unknown as DappInteraction)
 
-		await svc.approveInteraction(id, [], origin)
+		await svc.approveInteraction(id, [])
 		await flush()
 
 		expect(executeOperations).toHaveBeenCalledTimes(1)
@@ -162,7 +165,7 @@ describe("DappInteractionService forwards execution hooks (does not fire the bat
 			cancellationToken: id,
 		} as unknown as DappInteraction)
 
-		await svc.approveInteraction(id, [], origin)
+		await svc.approveInteraction(id, [])
 		await flush()
 
 		expect(executeOperations).not.toHaveBeenCalled()
@@ -179,7 +182,7 @@ describe("DappInteractionService forwards execution hooks (does not fire the bat
 			cancellationToken: id,
 		} as unknown as DappInteraction)
 
-		await svc.approveInteraction(id, [], origin)
+		await svc.approveInteraction(id, [])
 		await flush()
 
 		expect(executeOperations).not.toHaveBeenCalled()
@@ -234,7 +237,7 @@ describe("DappInteractionService forwards execution hooks (does not fire the bat
 		const { svc, internals } = makeService({ executeOperations: async () => [] })
 		const id = "interaction-3"
 		internals.storage.set(id, { id, payload: emptyPayload, handleId: "handle-3", cancellationToken: id })
-		await expect(svc.approveInteraction(id, [], origin)).resolves.toBeUndefined()
+		await expect(svc.approveInteraction(id, [])).resolves.toBeUndefined()
 	})
 })
 
@@ -254,7 +257,7 @@ describe("DappInteractionService cancellation linearization (first service claim
 		seed(internals, "i-1")
 
 		svc.cancelInteraction("i-1")
-		await expect(svc.approveInteraction("i-1", [], origin)).rejects.toBeInstanceOf(JobCancelledError)
+		await expect(svc.approveInteraction("i-1", [])).rejects.toBeInstanceOf(JobCancelledError)
 		await flush()
 		expect(executeOperations).not.toHaveBeenCalled()
 		// The record survives until window dismissal — overlay + cleanup rely on it.
@@ -284,7 +287,7 @@ describe("DappInteractionService cancellation linearization (first service claim
 		const cancelled: string[] = []
 		svc.onInteractionCancelled.add((id) => cancelled.push(id))
 
-		await svc.approveInteraction("i-2", [], origin)
+		await svc.approveInteraction("i-2", [])
 		svc.cancelInteraction("i-2")
 		await flush()
 		expect(executeOperations).toHaveBeenCalledTimes(1)
@@ -345,7 +348,7 @@ describe("DappInteractionService journal-driven cancel (a feed cancel closes the
 		const { svc, internals } = makeService({ executeOperations })
 		seedQueued(internals, "i-1", "j-1")
 
-		await svc.approveInteraction("i-1", [], origin)
+		await svc.approveInteraction("i-1", [])
 		internals.cancelInteractionForJournal("j-1")
 		await flush()
 
@@ -369,7 +372,7 @@ describe("DappInteractionService journal-driven cancel (a feed cancel closes the
 		seedQueued(internals, "i-1", "j-1")
 
 		internals.cancelInteractionForJournal("j-1")
-		await expect(svc.approveInteraction("i-1", [], origin)).rejects.toBeInstanceOf(JobCancelledError)
+		await expect(svc.approveInteraction("i-1", [])).rejects.toBeInstanceOf(JobCancelledError)
 		await flush()
 		expect(executeOperations).not.toHaveBeenCalled()
 	})
@@ -410,7 +413,7 @@ describe("DappInteractionService journal-driven cancel (a feed cancel closes the
 		}
 
 		const reconcile = internals.reconcileCancelledJournal("j-1")
-		await svc.approveInteraction("i-1", [], origin)
+		await svc.approveInteraction("i-1", [])
 		release({ progress: { stage: "cancelled" } })
 		await reconcile
 		await flush()

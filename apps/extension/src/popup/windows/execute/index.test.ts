@@ -172,6 +172,8 @@ vi.mock("@/wallet/services/execution/client", () => ({
 			connect: executionServiceConnectMock,
 			disconnect: executionServiceDisconnectMock,
 			estimateOperationFee: vi.fn(async () => undefined),
+			previewOperationAuthwits: vi.fn(async () => undefined),
+			cancelEstimate: vi.fn(async () => undefined),
 		}
 	}),
 }))

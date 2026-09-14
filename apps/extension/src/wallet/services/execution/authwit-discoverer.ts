@@ -40,6 +40,15 @@ import { findFunctionByName, findFunctionBySelector, requireArtifact } from "./c
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
 import { assertLiveChainIdentity, type SelectedNetworkChainInfo } from "@nulo/aztec-runtime/utils"
 import type { Action, AddPrivateAuthwitAction, CallAuthwitContent, EncodedCallAuthwitContent, IntentAuthwitContent } from "./spec"
+import type { DiscoveredAuthwit } from "@nulo/wallet-bridge"
+import { toDiscoveredAuthwit } from "./discovered-authwit"
+
+/** What one discovery simulation found: the wire actions to splice into the
+ *  build, and the decoded authorization behind each (same order). */
+export type DiscoveredPrivateAuthwits = {
+	actions: AddPrivateAuthwitAction[]
+	discovered: DiscoveredAuthwit[]
+}
 
 /** Minimal build-context the discoverer needs from `buildTxRequest`.
  *  Callers produce this by calling either the facade's legacy
@@ -73,7 +82,7 @@ export class AuthwitDiscoverer {
 	public async discoverPrivateAuthwits(
 		op: { networkId: string; accountAddress: string; actions: Action[] },
 		buildTxRequest: BuildTxRequestFn,
-	): Promise<AddPrivateAuthwitAction[]> {
+	): Promise<DiscoveredPrivateAuthwits> {
 		const { txRequest, node, pxe, account, network } = await buildTxRequest(op, AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
 
 		// Kernelless simulation: stub the caller's account contract so its
@@ -100,7 +109,7 @@ export class AuthwitDiscoverer {
 
 		const effects = collectOffchainEffects(simulationResult.privateExecutionResult)
 		if (!effects.length) {
-			return []
+			return { actions: [], discovered: [] }
 		}
 
 		const nodeInfo = await node.getNodeInfo()
@@ -109,6 +118,7 @@ export class AuthwitDiscoverer {
 		assertLiveChainIdentity(network, nodeInfo)
 		const chainInfo = { chainId: new Fr(nodeInfo.l1ChainId), version: new Fr(nodeInfo.rollupVersion) }
 		const actions: AddPrivateAuthwitAction[] = []
+		const discovered: DiscoveredAuthwit[] = []
 
 		for (const effect of effects) {
 			try {
@@ -117,16 +127,18 @@ export class AuthwitDiscoverer {
 					{ consumer: effect.contractAddress, innerHash: authRequest.innerHash },
 					chainInfo,
 				)
+				const record = toDiscoveredAuthwit(effect.contractAddress, authRequest, messageHash)
 				actions.push({
 					kind: "add_private_authwit",
 					content: { kind: "message_hash", messageHash: messageHash.toString() },
 				})
+				discovered.push(record)
 			} catch {
 				// Effect is not a CallAuthorizationRequest — skip.
 			}
 		}
 
-		return actions
+		return { actions, discovered }
 	}
 
 	/** Compute the authwit message hash for a `call`-kind content.

@@ -21,6 +21,7 @@ import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { OriginType, type LocalTxOrigin } from "@/wallet/services/transaction/spec"
 import { DappSendExecutor, type DappSendExecutorDeps } from "./dapp-send-executor"
 import { DiscoveryAwareEstimator } from "./discovery-aware-estimator"
+import { PreviewSnapshots } from "./preview-snapshots"
 
 const collectOffchainEffectsMock = vi.hoisted(() => vi.fn(() => [] as Array<{ data: unknown[]; contractAddress: unknown }>))
 vi.mock("@aztec/stdlib/tx", async (importOriginal) => ({
@@ -44,6 +45,8 @@ vi.mock("./fee/fee-strategy", async (importOriginal) => ({
 vi.mock("./fee/embedded-fpc-cap", () => ({ applyEmbeddedFpcGasCap: vi.fn(async () => {}) }))
 
 const ORIGIN: LocalTxOrigin = { type: OriginType.DAPP, name: "test-dapp" }
+/** A popup approval envelope with a reuse id and no preview (nothing discovered ⇒ passes the guard). */
+const APPROVAL = (estimateId: string) => ({ interactionId: "i-1", index: 0, estimateId })
 
 function makeTxRequest() {
 	return {
@@ -100,7 +103,9 @@ function makeHarness(
 		await ctx.recordTransaction("0xhash")
 		return { txHash: { toString: () => "0xhash" }, offchainOutput: {} }
 	})
-	const authwit = overrides.authwit ?? { discoverPrivateAuthwits: vi.fn(async () => [] as unknown[]) }
+	const authwit = overrides.authwit ?? {
+		discoverPrivateAuthwits: vi.fn(async () => ({ actions: [] as unknown[], discovered: [] as unknown[] })),
+	}
 	const buildAndEstimateValidated = overrides.buildAndEstimateValidated ?? vi.fn(async () => built as never)
 	const buildAndEstimateFolded = overrides.buildAndEstimateFolded ?? vi.fn(async () => built as never)
 	const estimateWithDiscovery = new DiscoveryAwareEstimator({
@@ -132,6 +137,7 @@ function makeHarness(
 			markJournal: vi.fn(async () => {}),
 		},
 		operationEstimateReuse: { tryConsume: vi.fn(async () => undefined), stash: vi.fn(), evict: vi.fn() } as never,
+		previewSnapshots: new PreviewSnapshots(),
 		getActiveProfile: vi.fn(async () => ({ id: "p1" })),
 		getNetwork: vi.fn(async () => network),
 		getNode: vi.fn(async () => node as never),
@@ -499,7 +505,7 @@ describe("DappSendExecutor.estimateOperationFee", () => {
 	test("send_transaction (fjwc, CLASSIC): discovered authwits appended to the validated build's clone", async () => {
 		const extraAction = { kind: "call", method: "authwit_action" }
 		const { executor, deps } = makeHarness({
-			authwit: { discoverPrivateAuthwits: vi.fn(async () => [extraAction]) },
+			authwit: { discoverPrivateAuthwits: vi.fn(async () => ({ actions: [extraAction], discovered: [] })) },
 		})
 		const originalActions = [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }]
 		const op = {
@@ -805,12 +811,13 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 			feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL,
 			txCalls: [{ contract: "0xc", method: "reused_method", args: [] }],
 			pendingPublicAuthwits,
+			discoveredHashes: [],
 		}
 		const { executor, deps, authwit, proveAndSend } = makeHarness({
 			operationEstimateReuse: { tryConsume: vi.fn(async () => entry), stash: vi.fn(), evict: vi.fn() } as never,
 		})
 
-		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, "est-1")
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, APPROVAL("est-1"))
 
 		expect(deps.operationEstimateReuse.tryConsume).toHaveBeenCalledWith("est-1", expect.objectContaining({ accountAddress: "0xacct" }))
 		expect(authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
@@ -835,7 +842,7 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 
 	test("consume miss (forged/stale/drifted id) falls back to the FULL pipeline (fj ⇒ folded)", async () => {
 		const { executor, deps, authwit, buildAndEstimateFolded } = makeHarness()
-		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, "est-forged")
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, APPROVAL("est-forged"))
 		expect(deps.operationEstimateReuse.tryConsume).toHaveBeenCalledTimes(1)
 		expect(authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
 		expect(buildAndEstimateFolded).toHaveBeenCalledTimes(1)

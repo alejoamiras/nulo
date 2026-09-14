@@ -65,4 +65,36 @@ export type TransferFeeEstimate = {
 	 *  the estimator path doesn't support reuse (e.g., embedded fee
 	 *  payments, default_entrypoint dApp txs). See plan-v4 Branch 5. */
 	readonly estimateId?: string
+	/** Key of the SW-owned preview snapshot this estimate wrote (equals `estimateId`
+	 *  when both exist). Confirm refuses to sign an authorization the snapshot
+	 *  under this id never listed. */
+	readonly previewId?: string
+	/** Private authorizations the wallet found it must sign while estimating a
+	 *  dApp `aztec_sendTx`. Omitted where confirm adds none (`send_transaction`,
+	 *  the Send page). */
+	readonly discoveredAuthwits?: readonly DiscoveredAuthwit[]
+}
+
+/** One private authorization discovered by simulation: the call it authorizes,
+ *  decoded from the `CallAuthorizationRequest` the contract emitted, with the
+ *  message hash the wallet would sign. Every field is stringified — the record
+ *  crosses the RPC boundary as JSON. */
+export type DiscoveredAuthwit = {
+	/** Contract that will consume the witness. */
+	readonly consumer: string
+	/** Address performing the authorized call (the delegate). */
+	readonly caller: string
+	/** Selector of the authorized function. */
+	readonly selector: string
+	/** Arguments of the authorized call, as field strings. */
+	readonly args: readonly string[]
+	readonly innerHash: string
+	readonly messageHash: string
+}
+
+/** Result of a NO_FROM (`default_entrypoint`) authorization preview: the
+ *  discovered set the wallet would sign at confirm, without signing. */
+export type OperationAuthwitPreview = {
+	readonly previewId: string
+	readonly discoveredAuthwits: readonly DiscoveredAuthwit[]
 }

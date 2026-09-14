@@ -31,11 +31,13 @@ import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import type { DiscoveryProbe } from "./discovery-aware-estimator"
 import type { FeeEstimate } from "./fee/fee-strategy"
 import type { AddPrivateAuthwitAction } from "./spec"
+import type { DiscoveredAuthwit } from "@nulo/wallet-bridge"
+import { type DecodedAuthRequest, toDiscoveredAuthwit } from "./discovered-authwit"
 
 /** Hash seams injectable for unit tests — the real ones run Barretenberg WASM
  *  (poseidon2), which is e2e-only. Production uses the module defaults. */
 export interface DiscoveryProbeCrypto {
-	fromFields(data: Fr[]): Promise<{ innerHash: Fr }>
+	fromFields(data: Fr[]): Promise<DecodedAuthRequest>
 	computeMessageHash(intent: { consumer: AztecAddress; innerHash: Fr }, chainInfo: { chainId: Fr; version: Fr }): Promise<Fr>
 }
 
@@ -47,6 +49,8 @@ const realCrypto: DiscoveryProbeCrypto = {
 export class CollectingDiscoveryProbe implements DiscoveryProbe {
 	/** Actions this probe's one extraction produced — executor bookkeeping. */
 	public readonly collected: AddPrivateAuthwitAction[] = []
+	/** The decoded authorization behind each collected action, same order. */
+	public readonly discovered: DiscoveredAuthwit[] = []
 	private used = false
 
 	public constructor(
@@ -79,15 +83,17 @@ export class CollectingDiscoveryProbe implements DiscoveryProbe {
 			try {
 				const authRequest = await this.crypto.fromFields(effect.data)
 				const messageHash = await this.crypto.computeMessageHash(
-					{ consumer: effect.contractAddress, innerHash: authRequest.innerHash },
+					{ consumer: effect.contractAddress, innerHash: authRequest.innerHash as Fr },
 					chainInfo,
 				)
 				const key = messageHash.toString()
 				if (seen.has(key)) {
 					continue
 				}
+				const record = toDiscoveredAuthwit(effect.contractAddress, authRequest, messageHash)
 				seen.add(key)
 				this.collected.push({ kind: "add_private_authwit", content: { kind: "message_hash", messageHash: key } })
+				this.discovered.push(record)
 			} catch {
 				// Effect is not a CallAuthorizationRequest — skip (discoverer-verbatim).
 			}

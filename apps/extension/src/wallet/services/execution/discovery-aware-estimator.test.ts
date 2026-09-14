@@ -11,7 +11,7 @@ const FEE_SETTINGS = { paymentMethod: { kind: "fjwc" } } as never
 const BUILT = { txRequest: { marker: "req" }, nonce: { toString: () => "1" } } as never
 
 function makeEstimator(discovered: unknown[] = []) {
-	const authwit = { discoverPrivateAuthwits: vi.fn(async () => discovered) }
+	const authwit = { discoverPrivateAuthwits: vi.fn(async () => ({ actions: discovered, discovered: [] })) }
 	const buildAndEstimateValidated = vi.fn(async () => BUILT)
 	const buildAndEstimateFolded = vi.fn(async () => BUILT)
 	const buildForDiscovery = vi.fn(async () => ({}) as never)

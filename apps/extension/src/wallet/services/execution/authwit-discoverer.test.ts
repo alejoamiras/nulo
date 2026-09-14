@@ -74,7 +74,7 @@ describe("AuthwitDiscoverer.discoverPrivateAuthwits", () => {
 			skipTxValidation: true,
 			skipFeeEnforcement: true,
 		})
-		expect(result).toEqual([])
+		expect(result).toEqual({ actions: [], discovered: [] })
 	})
 
 	test("returns [] on empty effects without touching getNodeInfo", async () => {
@@ -84,7 +84,7 @@ describe("AuthwitDiscoverer.discoverPrivateAuthwits", () => {
 			{ networkId: "n", accountAddress: "0xa", actions: [] as Action[] },
 			async () => ctx as never,
 		)
-		expect(result).toEqual([])
+		expect(result).toEqual({ actions: [], discovered: [] })
 		expect(getNodeInfo).not.toHaveBeenCalled()
 	})
 

@@ -41,6 +41,7 @@ function makeExecutor(): DappSendExecutor {
 			markJournal: unreachable as never,
 		},
 		operationEstimateReuse: { tryConsume: unreachable, stash: unreachable, evict: unreachable } as never,
+		previewSnapshots: { stash: unreachable, evict: unreachable, take: unreachable } as never,
 		getActiveProfile: unreachable as never,
 		getNetwork: unreachable as never,
 		getNode: unreachable as never,

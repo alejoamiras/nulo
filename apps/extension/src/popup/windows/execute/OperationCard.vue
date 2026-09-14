@@ -18,7 +18,7 @@
 import FeeSettingsCard from "@/popup/components/modules/send/FeeSettingsCard.vue"
 import { isSelfPay } from "@nulo/wallet-bridge"
 import type { ProfileInfo } from "@/wallet/services/profile/client"
-import type { FeeSettings } from "@/wallet/services/execution/client"
+import type { DiscoveredAuthwit, FeeSettings, OperationAuthwitPreview, TransferFeeEstimate } from "@/wallet/services/execution/client"
 import type { DappMetadata } from "@/wallet/services/dapp-session/client"
 import type { Account } from "@/wallet/services/account/client"
 import type { Network } from "@/wallet/services/network/client"
@@ -45,8 +45,12 @@ defineProps<{
 	index: number
 	profile?: ProfileInfo
 	dapp?: DappMetadata & { logoBlobUrl?: string }
-	feeEstimate?: unknown
+	feeEstimate?: TransferFeeEstimate
 	isEstimating?: boolean
+	/** The wallet-signed authorizations a `default_entrypoint` operation would
+	 *  need at send, discovered without signing (no fee estimate exists for it). */
+	authwitPreview?: OperationAuthwitPreview
+	isPreviewing?: boolean
 	/**
 	 * Pre-fetched token metadata for `register_token` operations. Resolved by
 	 * the parent before the card renders so the user can see name / symbol /
@@ -73,6 +77,31 @@ const isSendTx = (op: UIOperation): op is SendLikeUIOp => op.kind === "send_tran
  *  locks to it, so the sponsored FPC is never on offer for a transaction the app expects the
  *  account's own Fee Juice to pay. */
 const requestedMethod = (op: SendLikeUIOp): "fj" | null => (op.kind === "aztec_sendTx" && isSelfPay(op.exec, op.opts?.from) ? "fj" : null)
+
+const isNoFrom = (op: SendLikeUIOp): boolean => op.kind === "aztec_sendTx" && op.executionMode === "default_entrypoint"
+
+/** Which surface lists what the wallet will sign for this operation: the preview for a
+ *  NO_FROM operation, the fee estimate for a standard one; `send_transaction` adds none
+ *  at confirm, and an embedded-fee standard operation skips discovery there too. */
+type AuthwitSurface =
+	| { kind: "list"; authwits: readonly DiscoveredAuthwit[] }
+	| { kind: "none-added" }
+	| { kind: "pending" }
+	| { kind: "hidden" }
+const authwitSurface = (
+	op: SendLikeUIOp,
+	estimate: TransferFeeEstimate | undefined,
+	preview: OperationAuthwitPreview | undefined,
+	previewing: boolean | undefined,
+): AuthwitSurface => {
+	if (op.kind !== "aztec_sendTx") return { kind: "hidden" }
+	if (isNoFrom(op)) {
+		if (preview) return { kind: "list", authwits: preview.discoveredAuthwits }
+		return previewing ? { kind: "pending" } : { kind: "hidden" }
+	}
+	if (isEmbeddedFeePayment(op)) return { kind: "none-added" }
+	return estimate?.discoveredAuthwits ? { kind: "list", authwits: estimate.discoveredAuthwits } : { kind: "hidden" }
+}
 </script>
 
 <template>
@@ -156,6 +185,53 @@ const requestedMethod = (op: SendLikeUIOp): "fj" | null => (op.kind === "aztec_s
 						</template>
 					</template>
 				</Flex>
+			</Flex>
+			<template v-if="authwitSurface(op, feeEstimate, authwitPreview, isPreviewing).kind === 'list'">
+				<Flex
+					v-if="(authwitSurface(op, feeEstimate, authwitPreview, isPreviewing) as { authwits: readonly DiscoveredAuthwit[] }).authwits.length"
+					data-testid="execute-op-discovered-authwits"
+					direction="column"
+					gap="4"
+					:class="$style.prop"
+				>
+					<Text size="12" color="secondary">Authorizations the wallet will sign (found during estimation):</Text>
+					<Flex
+						v-for="(a, k) in (authwitSurface(op, feeEstimate, authwitPreview, isPreviewing) as { authwits: readonly DiscoveredAuthwit[] }).authwits"
+						:key="`${index}:authwit:${k}`"
+						data-testid="execute-op-discovered-authwit"
+						:data-message-hash="a.messageHash"
+						direction="column"
+						gap="2"
+						:class="$style.structured_args"
+					>
+						<Flex gap="6">
+							<Text size="11" color="secondary">Consumer:</Text>
+							<AddressDisplay :address="a.consumer" />
+						</Flex>
+						<Flex gap="6">
+							<Text size="11" color="secondary">Authorizes:</Text>
+							<AddressDisplay :address="a.caller" />
+						</Flex>
+						<Flex gap="6">
+							<Text size="11" color="secondary">Function:</Text>
+							<Text size="11" color="primary">{{ safeWire(a.selector, 64) }}</Text>
+						</Flex>
+						<Flex v-for="(arg, m) in a.args" :key="`${index}:authwit:${k}:${m}`" gap="6">
+							<Text size="11" color="secondary">#{{ m }}:</Text>
+							<Text size="11" color="primary">{{ safeWire(arg, 128) }}</Text>
+						</Flex>
+						<Flex gap="6">
+							<Text size="11" color="secondary">Inner hash:</Text>
+							<Text size="11" color="primary">{{ trimAddress(safeWire(a.innerHash, 80)) }}</Text>
+						</Flex>
+					</Flex>
+				</Flex>
+			</template>
+			<Flex v-else-if="authwitSurface(op, feeEstimate, authwitPreview, isPreviewing).kind === 'none-added'" :class="$style.prop">
+				<Text size="12" color="secondary" data-testid="execute-op-no-wallet-authwits">No wallet-added authorizations</Text>
+			</Flex>
+			<Flex v-else-if="authwitSurface(op, feeEstimate, authwitPreview, isPreviewing).kind === 'pending'" :class="$style.prop">
+				<Text size="12" color="secondary" data-testid="execute-op-authwits-pending">Checking authorizations…</Text>
 			</Flex>
 		</Flex>
 

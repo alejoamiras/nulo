@@ -94,7 +94,7 @@ function encodeAuthwitContent(content: (Action & { kind: "add_private_authwit" |
 				: `call(${str(content.caller)}|${str(content.contract)}|${str(content.method)}|${args}|${content.hideSender ?? false})`
 		}
 		case "encoded_call":
-			return `enc(${str(content.caller)}|${str(content.to)}|${str(content.selector)}|${encodeStringArray(content.args)}|${content.hideMsgSender ?? false})`
+			return `enc(${str(content.caller)}|${str(content.to)}|${str(content.selector)}|${optStr(content.name)}|${encodeStringArray(content.args)}|${content.hideMsgSender ?? false})`
 		case "intent":
 			return `intent(${str(content.consumer)}|${encodeStringArray(content.intent)})`
 		case "message_hash":
@@ -126,8 +126,10 @@ function encodeAction(action: Action): string | null {
 			if (args === null) return null
 			return `call(${str(action.contract)}|${str(action.method)}|${args}|${action.hideSender ?? false})`
 		}
+		// `name` is bound even though the selector already identifies the function: the
+		// builder verifies name↔selector, so a name-only difference must never reuse a build.
 		case "encoded_call":
-			return `enc(${str(action.to)}|${str(action.selector)}|${encodeStringArray(action.args)}|${action.hideMsgSender ?? false}|${action.isStatic ?? false})`
+			return `enc(${str(action.to)}|${str(action.selector)}|${optStr(action.name)}|${encodeStringArray(action.args)}|${action.hideMsgSender ?? false}|${action.isStatic ?? false})`
 		default: {
 			const _exhaustive: never = action
 			void _exhaustive
@@ -181,5 +183,60 @@ export function fingerprintOperation(input: OperationFingerprintInput): string |
 		`fee=${str(encodeFeeOptions(input.fee))}`,
 		`fs=${str(fingerprintFeeSettings(input.feeSettings))}`,
 		`actions=${actionParts.length}[${actionParts.join(";")}]`,
+	].join("&")
+}
+
+/** The identity inputs of a NO_FROM (`default_entrypoint`) `aztec_sendTx`, read
+ *  straight off the request: construction reads live fee defaults and mints a
+ *  fresh salt, so two honest builds of one request differ while their
+ *  authorization hashes (consumer, inner hash, chain identity) do not. */
+export type NoFromFingerprintInput = {
+	networkId: string
+	accountAddress: string
+	from: string
+	calls: readonly {
+		to?: { toString(): string }
+		selector?: { toString(): string }
+		name?: string
+		args?: readonly { toString(): string }[]
+		isStatic?: boolean
+		hideMsgSender?: boolean
+	}[]
+	authWitnesses: readonly { toString(): string }[]
+	capsules: readonly { toString(): string }[]
+	extraHashedArgs: readonly { toString(): string }[]
+	/** Explicit dApp gas constraints only — never the resolved defaults. */
+	gasSettings: unknown
+	additionalScopes: readonly { toString(): string }[]
+}
+
+const strs = (values: readonly { toString(): string }[] | undefined): string => encodeStringArray((values ?? []).map((v) => String(v)))
+
+/** JSON round-trip first: the same value arrives as a class instance in-process
+ *  and as a plain object over the RPC, and both must encode identically. */
+const jsonEnc = (value: unknown): string | null => encodeValue(value === undefined ? undefined : JSON.parse(JSON.stringify(value)), 0)
+
+/** Null ⇒ an input carries a shape the encoder refuses. */
+export function fingerprintNoFromInputs(input: NoFromFingerprintInput): string | null {
+	const gas = jsonEnc(input.gasSettings)
+	const authwits = jsonEnc(input.authWitnesses)
+	const capsules = jsonEnc(input.capsules)
+	const extras = jsonEnc(input.extraHashedArgs)
+	if (gas === null || authwits === null || capsules === null || extras === null) return null
+	const calls = input.calls.map(
+		(c) =>
+			`call(${optStr(c.to?.toString())}|${optStr(c.selector?.toString())}|${optStr(c.name)}|${strs(c.args)}|${c.hideMsgSender ?? false}|${c.isStatic ?? false})`,
+	)
+	return [
+		`net=${str(input.networkId)}`,
+		`acct=${str(input.accountAddress)}`,
+		"mode=default_entrypoint",
+		`from=${str(input.from)}`,
+		`gas=${gas}`,
+		`calls=${calls.length}[${calls.join(";")}]`,
+		`authwits=${authwits}`,
+		`capsules=${capsules}`,
+		`extras=${extras}`,
+		`scopes=${encodeStringArray([...new Set(input.additionalScopes.map((s) => String(s)))].sort())}`,
 	].join("&")
 }

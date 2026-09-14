@@ -48,7 +48,9 @@ import type { DiscoveryAwareEstimator } from "./discovery-aware-estimator"
 import type { ExecutionCoordinator } from "./execution-coordinator"
 import type { ExecutionMutexRelease } from "./execution-mutex"
 import type { OperationEstimateReuse, OperationEstimateReuseEntry } from "./operation-estimate-reuse"
-import { fingerprintOperation, type OperationFingerprintInput } from "./operation-fingerprint"
+import { fingerprintNoFromInputs, fingerprintOperation, type OperationFingerprintInput } from "./operation-fingerprint"
+import { type PreviewSnapshots, assertWithinPreview } from "./preview-snapshots"
+import { toDiscoveredAuthwit } from "./discovered-authwit"
 import { fingerprintBaseFee } from "./transfer-estimate-reuse"
 import { applyEmbeddedFpcGasCap } from "./fee/embedded-fpc-cap"
 import { type FeeEstimate, finalizeGasLimits, suggestGasLimits } from "./fee/fee-strategy"
@@ -56,9 +58,13 @@ import type { OperationPlanner } from "./operation-planner"
 import type {
 	Action,
 	AztecSendTxOperation,
+	DiscoveredAuthwit,
 	FeeOptions,
 	FeeSettings,
 	Operation,
+	OperationApprovalEnvelope,
+	OperationAuthwitPreview,
+	PreviewContext,
 	SendTransactionOperation,
 	TransferFeeEstimate,
 } from "./spec"
@@ -140,6 +146,9 @@ export interface DappSendExecutorDeps {
 	estimateWithDiscovery: DiscoveryAwareEstimator
 	/** Estimate→confirm reuse for standard-mode aztec_sendTx (fj/fpc). */
 	operationEstimateReuse: OperationEstimateReuse
+	/** What the approval card showed per `(interactionId, index)` — confirm
+	 *  refuses to sign an authorization outside it. */
+	previewSnapshots: PreviewSnapshots
 	getActiveProfile(): Promise<{ id: string } | undefined>
 	getNetwork(networkId: string): Promise<Network>
 	getNode(chainId: number): Promise<FeeEstimate["node"]>
@@ -258,7 +267,15 @@ export class DappSendExecutor {
 		}
 	}
 
-	public async estimateOperationFee(operation: Operation, feeSettings: FeeSettings, signal?: AbortSignal): Promise<TransferFeeEstimate> {
+	/** `preview` names the popup interaction this estimate belongs to; when set,
+	 *  the discovered authorizations are snapshotted under the returned
+	 *  `previewId` so the confirm of THAT operation can be held to them. */
+	public async estimateOperationFee(
+		operation: Operation,
+		feeSettings: FeeSettings,
+		signal?: AbortSignal,
+		preview?: PreviewContext,
+	): Promise<TransferFeeEstimate> {
 		if (operation.kind !== "send_transaction" && operation.kind !== "aztec_sendTx") {
 			throw new Error("Only send_transaction and aztec_sendTx operations support fee estimation")
 		}
@@ -289,11 +306,25 @@ export class DappSendExecutor {
 		// choreography for dApp sends; stage-boundary cancellation preserved
 		// inside it).
 		checkCancelled()
-		const { built } = await this.deps.estimateWithDiscovery.estimate(operation, actions, detectedFee, feeSettings, undefined, signal)
+		const { built, discovered } = await this.deps.estimateWithDiscovery.estimate(
+			operation,
+			actions,
+			detectedFee,
+			feeSettings,
+			undefined,
+			signal,
+		)
 		const { txRequest } = built
 		checkCancelled()
 
-		const estimateId = await this.stashOperationEstimate(operation, feeSettings, detectedFee, preDiscoveryActions, built)
+		const identity = fingerprintInputFor(operation, feeSettings, detectedFee, preDiscoveryActions)
+		const discoveredHashes = discovered.map((d) => d.messageHash)
+		const estimateId = await this.stashOperationEstimate(operation, identity, detectedFee, built, discoveredHashes)
+		// `send_transaction`'s confirm skips discovery, so listing what THIS estimate
+		// found would show authorizations confirm never adds.
+		const bound = operation.kind === "aztec_sendTx"
+		const previewId =
+			bound && preview ? this.writePreview(preview, fingerprintOperation(identity), discoveredHashes, estimateId) : undefined
 
 		const maxFeeRaw = BigInt(getEstimatedFee(txRequest))
 		return {
@@ -301,7 +332,64 @@ export class DappSendExecutor {
 			maxFeeFormatted: formatFeeJuice(maxFeeRaw),
 			gasDetails: getGasDetails(txRequest),
 			estimateId,
+			previewId,
+			...(bound ? { discoveredAuthwits: discovered } : {}),
 		}
+	}
+
+	/**
+	 * Discover, without signing, the private authorizations a NO_FROM
+	 * (`default_entrypoint`) operation would need — the confirm path signs at
+	 * send and has no estimate, so this is the only preview it gets. Built from
+	 * the same canonical inputs and pre-discovery preparation confirm uses.
+	 */
+	public async previewOperationAuthwits(op: Operation, preview: PreviewContext, signal?: AbortSignal): Promise<OperationAuthwitPreview> {
+		if (op.kind !== "aztec_sendTx" || op.executionMode !== "default_entrypoint") {
+			throw new Error("Only default_entrypoint aztec_sendTx operations support an authorization preview")
+		}
+		const checkCancelled = (): void => {
+			if (signal?.aborted) throw new JobCancelledSentinel("")
+		}
+		checkCancelled()
+		const prepared = await this.prepareNoFrom(op)
+		checkCancelled()
+		const discovered = await this.discoverNoFromAuthwits(prepared)
+		checkCancelled()
+		const records = discovered.map((d) => d.record)
+		const previewId = this.writePreview(
+			preview,
+			noFromFingerprint(op),
+			records.map((r) => r.messageHash),
+			undefined,
+		)
+		return { previewId, discoveredAuthwits: records }
+	}
+
+	private writePreview(
+		preview: PreviewContext,
+		fingerprint: string | null,
+		discoveredHashes: readonly string[],
+		estimateId: string | undefined,
+	): string {
+		const previewId = estimateId ?? crypto.randomUUID()
+		this.deps.previewSnapshots.stash(previewId, { ...preview, fingerprint, discoveredHashes })
+		return previewId
+	}
+
+	/** Popup approvals only: hold what confirm is about to sign to the snapshot
+	 *  the card showed. A silent execution carries no envelope and is not held. */
+	private enforcePreview(
+		approval: OperationApprovalEnvelope | undefined,
+		fingerprint: string | null,
+		recomputedHashes: readonly string[],
+	): void {
+		if (!approval) return
+		const lookup = this.deps.previewSnapshots.take(approval.previewId, {
+			interactionId: approval.interactionId,
+			index: approval.index,
+			fingerprint,
+		})
+		assertWithinPreview(lookup, recomputedHashes)
 	}
 
 	/** Best-effort reuse stash. Eligibility mirrors the Send-page cache's
@@ -313,11 +401,12 @@ export class DappSendExecutor {
 	 *  values) is silently ineligible — the estimate itself still returns. */
 	private async stashOperationEstimate(
 		operation: Operation,
-		feeSettings: FeeSettings,
+		identity: OperationFingerprintInput,
 		detectedFee: FeeOptions | undefined,
-		preDiscoveryActions: readonly Action[],
 		built: FeeEstimate,
+		discoveredHashes: readonly string[],
 	): Promise<string | undefined> {
+		const { feeSettings } = identity
 		const kind = feeSettings.paymentMethod.kind
 		const eligible =
 			operation.kind === "aztec_sendTx" &&
@@ -331,16 +420,7 @@ export class DappSendExecutor {
 			(kind === "fj" || kind === "fpc")
 		if (!eligible) return undefined
 		try {
-			const input: OperationFingerprintInput = {
-				networkId: operation.networkId,
-				accountAddress: operation.accountAddress,
-				executionMode: (operation as AztecSendTxOperation).executionMode ?? "standard",
-				from: (operation as AztecSendTxOperation).opts?.from?.toString() ?? "",
-				actions: preDiscoveryActions,
-				fee: detectedFee,
-				feeSettings,
-			}
-			const fingerprint = fingerprintOperation(input)
+			const fingerprint = fingerprintOperation(identity)
 			if (fingerprint === null) return undefined
 			const primary = built.network.endpoints.find((e) => e.id === built.network.primaryEndpointId)
 			if (!primary) return undefined
@@ -383,6 +463,7 @@ export class DappSendExecutor {
 				feePaymentMethod: built.feePaymentMethod,
 				txCalls: built.txCalls,
 				pendingPublicAuthwits: built.pendingPublicAuthwits,
+				discoveredHashes,
 				builtAt: Date.now(),
 			})
 			return estimateId
@@ -517,29 +598,28 @@ export class DappSendExecutor {
 		)
 	}
 
+	/** `approval` is present only for popup-approved executions; it carries the
+	 *  reuse and preview ids the popup handed back and binds them to the
+	 *  interaction the SW materialized this operation from. */
 	public async executeAztecSendTx(
 		op: AztecSendTxOperation,
 		origin: LocalTxOrigin,
 		parentTask?: WrappedTask,
 		hooks?: ExecutionHooks,
 		fence?: ExecutionFence,
-		estimateId?: string,
+		approval?: OperationApprovalEnvelope,
 	): Promise<SendReturn<InteractionWaitOptions>> {
-		// `default_entrypoint` is a special dApp path that bypasses the
-		// standard tx-build pipeline and runs its own kernelless discovery.
-		// Forward hooks so concurrent NO_FROM sendTx still get the FIFO baton
-		// release at the right point (and benefit from the queued-record
-		// claim if one was pre-allocated).
+		// `default_entrypoint` bypasses the standard tx-build pipeline and runs
+		// its own kernelless discovery; hooks and the approval envelope travel
+		// with it so the FIFO baton and the preview guard apply there too.
 		if (op.executionMode === "default_entrypoint") {
-			return this.executeNoFromSendTx(op, origin, parentTask, hooks, fence)
+			return this.executeNoFromSendTx(op, origin, parentTask, hooks, fence, approval)
 		}
 
-		// JS-context trust boundary: approveInteraction() ships popup-built
-		// operations through without further validation. If the popup leaks
-		// a draft op with feeSettings undefined, surface a clear error here
-		// BEFORE the build dereferences feeSettings.priorityLevel /
-		// paymentMethod.kind. (executeNoFromSendTx tolerates missing
-		// feeSettings by design — the dApp handles fee payment.)
+		// The SW materializes every operation it executes, so a missing
+		// feeSettings here is a materializer or fee-delta bug — fail before the
+		// build dereferences it. (NO_FROM tolerates missing feeSettings by
+		// design — the dApp handles fee payment.)
 		if (!op.feeSettings) {
 			throw new Error("aztec_sendTx: feeSettings is required for the standard execution path")
 		}
@@ -578,6 +658,7 @@ export class DappSendExecutor {
 				await markJournal({ stage: "simulating" })
 				checkCancelled()
 
+				const identity = fingerprintInputFor(op, op.feeSettings, fee, actions)
 				const {
 					txRequest,
 					node,
@@ -589,7 +670,10 @@ export class DappSendExecutor {
 					feePaymentMethod,
 					pendingPublicAuthwits,
 					initializesAccount,
-				} = await this.resolveStandardBuild(op, actions, fee, estimateId, parentTask, checkCancelled)
+					discoveredHashes,
+				} = await this.resolveStandardBuild(op, identity, approval?.estimateId, parentTask, checkCancelled)
+				this.enforcePreview(approval, fingerprintOperation(identity), discoveredHashes)
+				checkCancelled()
 
 				const sendAdditionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
 				const { txHash, offchainOutput } = await this.deps.coordinator.proveAndSend({
@@ -638,8 +722,7 @@ export class DappSendExecutor {
 	 */
 	private async resolveStandardBuild(
 		op: AztecSendTxOperation,
-		actions: Awaited<ReturnType<DappSendExecutorDeps["planner"]["processAztecJsPayload"]>>["actions"],
-		fee: Awaited<ReturnType<DappSendExecutorDeps["planner"]["processAztecJsPayload"]>>["feeOptions"],
+		identity: OperationFingerprintInput,
 		estimateId: string | undefined,
 		parentTask: WrappedTask | undefined,
 		checkCancelled: () => void,
@@ -654,18 +737,11 @@ export class DappSendExecutor {
 		feePaymentMethod: FeeEstimate["feePaymentMethod"]
 		pendingPublicAuthwits: FeeEstimate["pendingPublicAuthwits"]
 		initializesAccount: boolean | undefined
+		/** Message hashes of the private authwits this build signs. */
+		discoveredHashes: readonly string[]
 	}> {
-		const reused = estimateId
-			? await this.deps.operationEstimateReuse.tryConsume(estimateId, {
-					networkId: op.networkId,
-					accountAddress: op.accountAddress,
-					executionMode: op.executionMode ?? "standard",
-					from: op.opts?.from?.toString() ?? "",
-					actions,
-					fee,
-					feeSettings: op.feeSettings,
-				})
-			: undefined
+		const { actions, fee } = identity
+		const reused = estimateId ? await this.deps.operationEstimateReuse.tryConsume(estimateId, identity) : undefined
 
 		if (reused) {
 			this.deps.logDebug(`[executeAztecSendTx] reusing precomputed estimate ${estimateId}`)
@@ -689,20 +765,22 @@ export class DappSendExecutor {
 				txCalls: reused.txCalls,
 				feePaymentMethod: reused.feePaymentMethod,
 				pendingPublicAuthwits: [...reused.pendingPublicAuthwits],
+				discoveredHashes: reused.discoveredHashes,
 			}
 		}
-		if (fee.embeddedFeePayment) {
+		if (fee?.embeddedFeePayment) {
 			// Embedded fee payments skip discovery entirely. Probe-free validated
 			// pipeline, as always.
 			checkCancelled()
-			return await this.deps.buildAndEstimateValidated({ ...op, actions, fee }, op.feeSettings, parentTask)
+			const built = await this.deps.buildAndEstimateValidated({ ...op, actions: [...actions], fee }, op.feeSettings, parentTask)
+			return { ...built, discoveredHashes: [] }
 		}
-		const { built, discoveredActions } = await this.deps.estimateWithDiscovery.estimate(op, actions, fee, op.feeSettings, parentTask)
-		if (discoveredActions.length) {
-			this.deps.logDebug(`[executeAztecSendTx] Discovered ${discoveredActions.length} auth witness(es) via offchain effects`)
+		const { built, discovered } = await this.deps.estimateWithDiscovery.estimate(op, actions, fee, op.feeSettings, parentTask)
+		if (discovered.length) {
+			this.deps.logDebug(`[executeAztecSendTx] Discovered ${discovered.length} auth witness(es) via offchain effects`)
 		}
 		checkCancelled()
-		return built
+		return { ...built, discoveredHashes: discovered.map((d) => d.messageHash) }
 	}
 
 	/**
@@ -716,6 +794,7 @@ export class DappSendExecutor {
 		parentTask?: WrappedTask,
 		hooks?: ExecutionHooks,
 		fence?: ExecutionFence,
+		approval?: OperationApprovalEnvelope,
 	): Promise<SendReturn<InteractionWaitOptions>> {
 		this.deps.logDebug(
 			`executeNoFromSendTx: starting, accountAddress=${op.accountAddress}, calls=${op.exec?.calls?.length}, additionalScopes=${JSON.stringify(op.opts?.additionalScopes)}`,
@@ -748,41 +827,10 @@ export class DappSendExecutor {
 			async ({ checkCancelled, markJournal }) => {
 				await markJournal({ stage: "simulating" })
 
-				const { txRequest, node, pxe, account, network, txCalls, txsLimits } = await this.deps.txBuilder.buildNoFrom(op, parentTask)
-				this.deps.logDebug(
-					`executeNoFromSendTx: buildNoFromTxRequest completed, txCalls=${txCalls.length}, account=${account.address.toString()}`,
-				)
+				const prepared = await this.prepareNoFrom(op, parentTask)
+				const { txRequest, node, pxe, account, network, txCalls, txsLimits, feeOpts, scopesWithAccount } = prepared
 
-				// NO_FROM is enforced (above) to use embedded payment, so we mark
-				// `embeddedFeePayment` explicitly here (the planner-built path infers
-				// it; this code path constructs `feeOpts` inline so it must set it).
-				// That gates `applyEmbeddedFpcGasCap` to fire as expected — see the
-				// helper's JSDoc for the cap rationale.
-				const maxFeesUpstream = op.opts.fee?.gasSettings?.maxFeesPerGas
-				const feeOpts: FeeOptions = {
-					embeddedFeePayment: detectEmbeddedFeePayment(op.exec?.feePayer, op.opts.from, op.exec?.calls) ?? "fpc",
-					gasLimits: op.opts.fee?.gasSettings?.gasLimits,
-					teardownGasLimits: op.opts.fee?.gasSettings?.teardownGasLimits,
-					maxFeesPerGas: maxFeesUpstream
-						? { feePerDaGas: maxFeesUpstream.feePerDaGas.toString(), feePerL2Gas: maxFeesUpstream.feePerL2Gas.toString() }
-						: undefined,
-					gasPadding: 1,
-				}
-				suggestGasLimits(txRequest, feeOpts)
-				await applyEmbeddedFpcGasCap(txRequest, feeOpts, node)
-
-				const { dappScopesCount, additionalScopes, scopesWithAccount } = dedupNoFromScopes(
-					op.opts.additionalScopes,
-					account.address,
-				)
-				// Counts, not the arrays: these are viewing-key scopes — the set of addresses whose
-				// private state this dApp can see — and pre-stringifying them would put them beyond
-				// the logger's reach.
-				this.deps.logDebug(
-					`executeNoFromSendTx: dappScopes=${dappScopesCount}, additionalScopes=${additionalScopes.length}, scopesWithAccount=${scopesWithAccount.length}`,
-				)
-
-				await this.addDiscoveredNoFromAuthwits({ pxe, node, network, account, txRequest, additionalScopes })
+				await this.addDiscoveredNoFromAuthwits(prepared, approval, noFromFingerprint(op))
 
 				this.deps.logDebug(`executeNoFromSendTx: authwits added: ${txRequest.authWitnesses.length}, starting real simulation`)
 				// Real simulation with actual auth witnesses and real account contract
@@ -834,22 +882,53 @@ export class DappSendExecutor {
 	}
 
 	/**
+	 * The pre-discovery NO_FROM build: the request, its fee options and the
+	 * de-duplicated scope sets — shared by the authorization preview and the
+	 * confirm so both discover against the same request.
+	 */
+	private async prepareNoFrom(op: AztecSendTxOperation, parentTask?: WrappedTask): Promise<PreparedNoFrom> {
+		const { txRequest, node, pxe, account, network, txCalls, txsLimits } = await this.deps.txBuilder.buildNoFrom(op, parentTask)
+		this.deps.logDebug(
+			`executeNoFromSendTx: buildNoFromTxRequest completed, txCalls=${txCalls.length}, account=${account.address.toString()}`,
+		)
+
+		// NO_FROM is enforced to use embedded payment, so `embeddedFeePayment` is
+		// set explicitly here (the planner-built path infers it) — that is what
+		// gates `applyEmbeddedFpcGasCap`; see the helper's JSDoc for the cap rationale.
+		const maxFeesUpstream = op.opts.fee?.gasSettings?.maxFeesPerGas
+		const feeOpts: FeeOptions = {
+			embeddedFeePayment: detectEmbeddedFeePayment(op.exec?.feePayer, op.opts.from, op.exec?.calls) ?? "fpc",
+			gasLimits: op.opts.fee?.gasSettings?.gasLimits,
+			teardownGasLimits: op.opts.fee?.gasSettings?.teardownGasLimits,
+			maxFeesPerGas: maxFeesUpstream
+				? { feePerDaGas: maxFeesUpstream.feePerDaGas.toString(), feePerL2Gas: maxFeesUpstream.feePerL2Gas.toString() }
+				: undefined,
+			gasPadding: 1,
+		}
+		suggestGasLimits(txRequest, feeOpts)
+		await applyEmbeddedFpcGasCap(txRequest, feeOpts, node)
+
+		const { dappScopesCount, additionalScopes, scopesWithAccount } = dedupNoFromScopes(op.opts.additionalScopes, account.address)
+		// Counts, not the arrays: these are viewing-key scopes — the set of addresses whose
+		// private state this dApp can see — and pre-stringifying them would put them beyond
+		// the logger's reach.
+		this.deps.logDebug(
+			`executeNoFromSendTx: dappScopes=${dappScopesCount}, additionalScopes=${additionalScopes.length}, scopesWithAccount=${scopesWithAccount.length}`,
+		)
+		return { txRequest, node, pxe, account, network, txCalls, txsLimits, feeOpts, additionalScopes, scopesWithAccount }
+	}
+
+	/**
 	 * Kernelless auth witness discovery for the NO_FROM path: stub the user's account so
 	 * verify_private_authwit doesn't fail on missing witnesses (the stub accepts any
-	 * authwit during simulation), then sign each discovered CallAuthorizationRequest into
-	 * `txRequest.authWitnesses`. The discovery result is ONLY used to read offchain
-	 * effects — never for proving or gas estimation. F-012 / A-01 V-01: chainInfo derives
-	 * from the LIVE node, rebound to the selected network, before constructing the
-	 * authwit message hash.
+	 * authwit during simulation) and decode each CallAuthorizationRequest the run
+	 * emitted. The discovery result is ONLY used to read offchain effects — never for
+	 * proving or gas estimation. F-012 / A-01 V-01: chainInfo derives from the LIVE
+	 * node, rebound to the selected network, before constructing the authwit message hash.
 	 */
-	private async addDiscoveredNoFromAuthwits(d: {
-		pxe: FeeEstimate["pxe"]
-		node: FeeEstimate["node"]
-		network: Network
-		account: FeeEstimate["account"]
-		txRequest: FeeEstimate["txRequest"]
-		additionalScopes: AztecAddress[]
-	}): Promise<void> {
+	private async discoverNoFromAuthwits(
+		d: Pick<PreparedNoFrom, "pxe" | "node" | "network" | "account" | "txRequest" | "additionalScopes">,
+	): Promise<{ record: DiscoveredAuthwit; messageHash: Fr }[]> {
 		this.deps.logDebug(`executeNoFromSendTx: starting kernelless discovery simulation`)
 		const discoveryResult = await d.pxe.simulateTx(
 			d.txRequest,
@@ -860,10 +939,11 @@ export class DappSendExecutor {
 		this.deps.logDebug(`executeNoFromSendTx: kernelless discovery completed`)
 		const effects = collectOffchainEffects(discoveryResult.privateExecutionResult)
 		this.deps.logDebug(`executeNoFromSendTx: offchain effects found: ${effects.length}`)
-		if (!effects.length) return
+		if (!effects.length) return []
 		const nodeInfo2 = await d.node.getNodeInfo()
 		assertLiveChainIdentity(d.network, nodeInfo2)
 		const chainInfo = { chainId: new Fr(nodeInfo2.l1ChainId), version: new Fr(nodeInfo2.rollupVersion) }
+		const discovered: { record: DiscoveredAuthwit; messageHash: Fr }[] = []
 		for (const effect of effects) {
 			try {
 				const authRequest = await CallAuthorizationRequest.fromFields(effect.data)
@@ -871,13 +951,80 @@ export class DappSendExecutor {
 					{ consumer: effect.contractAddress, innerHash: authRequest.innerHash },
 					chainInfo,
 				)
-				const authWitness = await d.account.createAuthWit(messageHash)
-				d.txRequest.authWitnesses.push(authWitness)
+				discovered.push({ record: toDiscoveredAuthwit(effect.contractAddress, authRequest, messageHash), messageHash })
 			} catch {
 				// Not a CallAuthorizationRequest — skip
 			}
 		}
+		return discovered
 	}
+
+	/** Sign every discovered authorization into `txRequest.authWitnesses` — after
+	 *  the whole set has been held to the preview, so no witness is created for
+	 *  a request the user never saw. */
+	private async addDiscoveredNoFromAuthwits(
+		d: PreparedNoFrom,
+		approval: OperationApprovalEnvelope | undefined,
+		fingerprint: string | null,
+	): Promise<void> {
+		const discovered = await this.discoverNoFromAuthwits(d)
+		this.enforcePreview(
+			approval,
+			fingerprint,
+			discovered.map((x) => x.record.messageHash),
+		)
+		for (const { messageHash } of discovered) {
+			d.txRequest.authWitnesses.push(await d.account.createAuthWit(messageHash))
+		}
+	}
+}
+
+/** Everything the NO_FROM path holds between its build and its discovery. */
+interface PreparedNoFrom {
+	txRequest: FeeEstimate["txRequest"]
+	node: FeeEstimate["node"]
+	pxe: FeeEstimate["pxe"]
+	account: FeeEstimate["account"]
+	network: Network
+	txCalls: FeeEstimate["txCalls"]
+	txsLimits: Awaited<ReturnType<TxRequestBuilder["buildNoFrom"]>>["txsLimits"]
+	feeOpts: FeeOptions
+	additionalScopes: AztecAddress[]
+	scopesWithAccount: AztecAddress[]
+}
+
+/** The reuse-fingerprint identity of a standard-mode dApp send: post-planner,
+ *  pre-discovery actions with the wallet fee settings. Stash and consume MUST
+ *  derive it at this same normalization point. */
+function fingerprintInputFor(
+	operation: SendTransactionOperation | AztecSendTxOperation,
+	feeSettings: FeeSettings,
+	detectedFee: FeeOptions | undefined,
+	preDiscoveryActions: readonly Action[],
+): OperationFingerprintInput {
+	return {
+		networkId: operation.networkId,
+		accountAddress: operation.accountAddress,
+		executionMode: (operation as AztecSendTxOperation).executionMode ?? "standard",
+		from: (operation as AztecSendTxOperation).opts?.from?.toString() ?? "",
+		actions: preDiscoveryActions,
+		fee: detectedFee,
+		feeSettings,
+	}
+}
+
+function noFromFingerprint(op: AztecSendTxOperation): string | null {
+	return fingerprintNoFromInputs({
+		networkId: op.networkId,
+		accountAddress: op.accountAddress,
+		from: op.opts?.from?.toString() ?? "",
+		calls: op.exec?.calls ?? [],
+		authWitnesses: [...(op.exec?.authWitnesses ?? []), ...(op.opts?.authWitnesses ?? [])],
+		capsules: [...(op.exec?.capsules ?? []), ...(op.opts?.capsules ?? [])],
+		extraHashedArgs: op.exec?.extraHashedArgs ?? [],
+		gasSettings: op.opts?.fee?.gasSettings,
+		additionalScopes: op.opts?.additionalScopes ?? [],
+	})
 }
 
 /** Viewing-key scope sets for the NO_FROM path, de-duped by hex (AztecAddress is a

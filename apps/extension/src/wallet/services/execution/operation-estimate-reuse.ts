@@ -77,6 +77,9 @@ export type OperationEstimateReuseEntry = {
 	readonly feePaymentMethod: AccountFeePaymentMethodOptions
 	readonly txCalls: BuiltStandardTx["txCalls"]
 	readonly pendingPublicAuthwits: BuiltStandardTx["pendingPublicAuthwits"]
+	/** Message hashes of the private authwits discovery signed into `txRequest` —
+	 *  what a reuse hit would sign, checked against the preview at confirm. */
+	readonly discoveredHashes: readonly string[]
 	/** Cache lifecycle. */
 	readonly builtAt: number
 }
