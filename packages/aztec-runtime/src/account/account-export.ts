@@ -20,7 +20,7 @@
  * (AES-GCM authenticates under the password) and for non-self-consistent plaintext mutations.
  */
 import { fromBase64, toBase64 } from "@nulo/wallet-core/utils"
-import { EncryptionKey } from "@nulo/wallet-crypto"
+import { EncryptionKey, zeroize } from "@nulo/wallet-crypto"
 import { Fq } from "@aztec/foundation/curves/bn254"
 import { sha256 } from "@aztec/foundation/crypto/sha256"
 import { NULO_KDF_DIGEST, V5_REGIME } from "./address-freeze"
@@ -146,13 +146,21 @@ export function parseAccountExport(json: string): { signingKey: Fq; l1ChainId: n
 export async function encryptAccountExport(exp: AccountExportV1, password: string): Promise<string> {
 	const key = await EncryptionKey.fromPassword(password)
 	const payload = new TextEncoder().encode(serializeAccountExport(exp)) as Uint8Array<ArrayBuffer>
-	const ct = await key.encrypt(payload, ACCOUNT_EXPORT_AAD)
-	return toBase64(new Uint8Array(ct.buffer))
+	try {
+		const ct = await key.encrypt(payload, ACCOUNT_EXPORT_AAD)
+		return toBase64(new Uint8Array(ct.buffer))
+	} finally {
+		zeroize(payload)
+	}
 }
 
 /** Decrypt an encrypted export; wrong password / corruption / AAD mismatch all throw. */
 export async function decryptAccountExport(base64: string, password: string): Promise<string> {
 	const key = await EncryptionKey.fromPassword(password)
 	const pt = await key.decrypt(fromBase64(base64) as Uint8Array<ArrayBuffer>, ACCOUNT_EXPORT_AAD)
-	return new TextDecoder().decode(pt)
+	try {
+		return new TextDecoder().decode(pt)
+	} finally {
+		zeroize(pt)
+	}
 }

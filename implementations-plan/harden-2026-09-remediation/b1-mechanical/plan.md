@@ -44,7 +44,7 @@ Files: `contact/service.ts` (+test), `token-balance/service.ts` (+test), `accoun
 Tests: restore writes a sanitized contact name; restore forces `updatedAt: 0` and clears `syncFailure` so `reconcile-pairs` marks the row stale; `getAccountContract(P, C, A)` with B's row under A's key throws instead of returning B's signer.
 Gate: `bun run --cwd apps/extension test src/wallet/services/contact src/wallet/services/token-balance src/wallet/services/account` · `bun run lint && bun run typecheck`. Layers: typecheck/lint + unit.
 
-**Phase 5 — profile/session and crypto hygiene (F-15, getPasshash/getHashHex)**
+**Phase 5 — profile/session and crypto hygiene (F-15, getPasshash/getHashHex)** ✓ 2026-09-14
 Files: `profile/service.ts` (+`service.integration.test.ts`), `packages/wallet-crypto/src/{encryption-key.ts,session-secret-box.ts}` (+tests), `packages/aztec-runtime/src/account/account-export.ts` (+test).
 Tests: a pending restore exactly at and past the TTL is refused at finalize and the entry is gone afterwards; a fresh restore still finalizes; lock clears both pending maps even when session closure throws; `key-vectors.test.ts` stays byte-identical (zeroize does not change outputs); rejection-path cleanup: a failing digest/decrypt still wipes the owned buffer (spy on `zeroize`).
 Gate: `bun run --cwd apps/extension test src/wallet/services/profile src/wallet/crypto` · `bun run --cwd packages/wallet-crypto test` · `bun run lint && bun run typecheck`. Layers: typecheck/lint + unit.

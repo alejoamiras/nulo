@@ -120,8 +120,12 @@ export class EncryptionKey {
 	 * @returns Hash of the password
 	 */
 	public static async getPasshash(password: string): Promise<Passhash> {
-		const utf8 = new TextEncoder()
-		return asPasshash(await globalThis.crypto.subtle.digest("SHA-256", utf8.encode(password)))
+		const bytes = new TextEncoder().encode(password)
+		try {
+			return asPasshash(await globalThis.crypto.subtle.digest("SHA-256", bytes))
+		} finally {
+			zeroize(bytes)
+		}
 	}
 
 	/**
@@ -130,11 +134,12 @@ export class EncryptionKey {
 	 * @returns hex representation of the SHA-256 hash
 	 */
 	public static async getHashHex(input: string): Promise<string> {
-		const encoder = new TextEncoder()
-		const data = encoder.encode(input)
-		const hashBuffer = await globalThis.crypto.subtle.digest("SHA-256", data)
-		const hashArray = new Uint8Array(hashBuffer)
-
-		return bytesToHex(hashArray)
+		// The input is not always public: the full-backup checksum hashes plaintext key material.
+		const data = new TextEncoder().encode(input)
+		try {
+			return bytesToHex(new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", data)))
+		} finally {
+			zeroize(data)
+		}
 	}
 }

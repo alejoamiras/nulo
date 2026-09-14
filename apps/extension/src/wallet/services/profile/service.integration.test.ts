@@ -1192,6 +1192,48 @@ describe("ProfileService integration", () => {
 			expect((await service.getActiveProfile())?.id).toBe(out.id)
 		}, 30_000)
 
+		test("passkey: a pending restore secret older than PENDING_RESTORE_TTL_MS is refused at finalize and dropped", async () => {
+			const { service } = await makeService()
+			const original = await service.createPasskeyProfile("PK")
+			const credentialId = await service.getPasskeyCredentialId(original.id)
+			await service.lockActiveProfile()
+			await service.deleteProfile(original.id)
+			const out = await service.restore(
+				{ id: "ignored", name: "PK", type: "passkey" },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId), dekSealed: await fakeDekSealedFor(credentialId) },
+				undefined,
+				fakeCredentialData(credentialId, original.id),
+			)
+			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
+			// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to age the stash
+			const internals = service as any
+			const ttl = internals.constructor.PENDING_RESTORE_TTL_MS as number
+			internals.pendingRestoreSecrets.get(out.id).capturedAt -= ttl
+			await expect(service.finalizeRestore(out.id)).rejects.toThrow(/No pending restore secret/)
+			expect(internals.pendingRestoreSecrets.has(out.id)).toBe(false)
+			expect(internals.pendingDekRewraps.has(out.id)).toBe(false)
+			expect(await service.getActiveProfile()).toBeUndefined()
+		}, 30_000)
+
+		test("passkey: an explicit lock drops every pending restore secret, so a later finalize cannot open", async () => {
+			const { service } = await makeService()
+			const original = await service.createPasskeyProfile("PK")
+			const credentialId = await service.getPasskeyCredentialId(original.id)
+			await service.lockActiveProfile()
+			await service.deleteProfile(original.id)
+			const out = await service.restore(
+				{ id: "ignored", name: "PK", type: "passkey" },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId), dekSealed: await fakeDekSealedFor(credentialId) },
+				undefined,
+				fakeCredentialData(credentialId, original.id),
+			)
+			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
+			await service.lockActiveProfile()
+			// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+			expect((service as any).pendingRestoreSecrets.size).toBe(0)
+			await expect(service.finalizeRestore(out.id)).rejects.toThrow(/No pending restore secret/)
+		}, 30_000)
+
 		test("passkey: restore() requires credentialData (no Path B fallback)", async () => {
 			// The previous Path B behavior — SW opens a window via
 			// `recoverByCredentialId` — was removed because the popup-side

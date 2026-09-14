@@ -853,6 +853,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	public async lockActiveProfile(): Promise<void> {
 		await this.ensureInitialized()
 		return this.runExclusive(async () => {
+			// An explicit lock also ends every pending restore, before the close can fail: a
+			// stashed restore secret must not outlive the user's intent to lock.
+			this.sweepStalePendingRestore(Number.POSITIVE_INFINITY)
 			const emitted = await this.sessionManager.close()
 			// B-01 post-close read-back: `close()` is memory-first and swallows a
 			// storage-delete failure (so clearLockAlarm always runs), but an
@@ -2657,6 +2660,14 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			throw new Error("Profile type changed between restore and finalizeRestore")
 		}
 		this.pendingRestoreSecrets.delete(id)
+		// The sweep excludes the id being finalized, so the TTL must be enforced here (as
+		// `consumeDekRewrapContext` does) or an abandoned restore stays openable for the SW lifetime.
+		if (Date.now() - pending.capturedAt >= ProfileService.PENDING_RESTORE_TTL_MS) {
+			zeroize(pending.secret)
+			zeroize(pending.dek)
+			this.dropPendingDekRewrap(id)
+			throw new Error("No pending restore secret for passkey profile")
+		}
 		let dek: ImportedKeysDek | null = pending.dek
 		try {
 			const intact =
