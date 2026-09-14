@@ -56,6 +56,8 @@ export interface L1WalletControl {
 	swallowNext(match?: HoldMatch): void
 	/** How many holds and swallows are still armed — zero once the request has arrived and parked. */
 	holdsArmed(): number
+	/** Answer every parked request: the wallet performs it now, as if its prompt had been confirmed. */
+	release(): Promise<void>
 }
 
 type Rpc = { method: string; params?: unknown[] }
@@ -108,6 +110,7 @@ export async function installL1Wallet(context: BrowserContext, o: L1WalletOption
 	const rejections = new Set<RejectKind>()
 	const holds: Array<{ kind: RejectKind; match?: HoldMatch }> = []
 	const swallows: Array<{ match?: HoldMatch }> = []
+	const parked: Array<{ perform: () => Promise<unknown>; resolve: (v: unknown) => void; reject: (e: unknown) => void }> = []
 	const counts: Record<string, number> = {}
 	const permits: SignedPermit[] = []
 	let signed = 0
@@ -132,12 +135,13 @@ export async function installL1Wallet(context: BrowserContext, o: L1WalletOption
 		})
 	}
 	const takeRejection = (kind: RejectKind) => rejections.delete(kind)
-	/** A matching hold is consumed and the call parks forever; a hold for another target stays armed. */
-	const takeHold = (kind: RejectKind, to?: string): Promise<never> | undefined => {
+	/** A matching hold is consumed and the call parks until `release()` (or forever); a hold for
+	 *  another target stays armed. */
+	const takeHold = (kind: RejectKind, to: string | undefined, perform: () => Promise<unknown>): Promise<unknown> | undefined => {
 		const i = holds.findIndex((h) => h.kind === kind && (h.match?.to === undefined || h.match.to.toLowerCase() === to?.toLowerCase()))
 		if (i < 0) return undefined
 		holds.splice(i, 1)
-		return new Promise<never>(() => {})
+		return new Promise<unknown>((resolve, reject) => parked.push({ perform, resolve, reject }))
 	}
 	const takeSwallow = (to?: string): boolean => {
 		const i = swallows.findIndex((h) => h.match?.to === undefined || h.match.to.toLowerCase() === to?.toLowerCase())
@@ -176,35 +180,44 @@ export async function installL1Wallet(context: BrowserContext, o: L1WalletOption
 			count("eth_sendTransaction")
 			refuse("transaction")
 			const tx = params[0] as { to?: Address; data?: Hex; value?: Hex; gas?: Hex }
-			const held = takeHold("transaction", tx.to)
+			const send = () => {
+				signed++
+				return client.sendTransaction({
+					to: tx.to,
+					data: tx.data,
+					value: tx.value ? BigInt(tx.value) : undefined,
+					gas: tx.gas ? BigInt(tx.gas) : undefined,
+				})
+			}
+			const held = takeHold("transaction", tx.to, send)
 			if (held) return held
-			signed++
-			const sent = client.sendTransaction({
-				to: tx.to,
-				data: tx.data,
-				value: tx.value ? BigInt(tx.value) : undefined,
-				gas: tx.gas ? BigInt(tx.gas) : undefined,
-			})
+			const sent = send()
 			if (takeSwallow(tx.to)) return sent.then(() => new Promise<never>(() => {}))
 			return sent
 		},
 		eth_signTypedData_v4: (params) => {
 			count("eth_signTypedData_v4")
 			refuse("signature")
-			const held = takeHold("signature")
+			const sign = () => {
+				signed++
+				const typed = typedDataOf(params[1] as string)
+				recordPermit(typed)
+				return account.signTypedData(typed)
+			}
+			const held = takeHold("signature", undefined, sign)
 			if (held) return held
-			signed++
-			const typed = typedDataOf(params[1] as string)
-			recordPermit(typed)
-			return account.signTypedData(typed)
+			return sign()
 		},
 		personal_sign: (params) => {
 			count("personal_sign")
 			refuse("signature")
-			const held = takeHold("signature")
+			const sign = () => {
+				signed++
+				return account.signMessage({ message: { raw: params[0] as Hex } })
+			}
+			const held = takeHold("signature", undefined, sign)
 			if (held) return held
-			signed++
-			return account.signMessage({ message: { raw: params[0] as Hex } })
+			return sign()
 		},
 	}
 	const handle = (rpc: Rpc) => {
@@ -279,6 +292,10 @@ export async function installL1Wallet(context: BrowserContext, o: L1WalletOption
 			swallows.push({ match })
 		},
 		holdsArmed: () => holds.length + swallows.length,
+		async release() {
+			const waiting = parked.splice(0)
+			for (const p of waiting) await p.perform().then(p.resolve, p.reject)
+		},
 	}
 }
 

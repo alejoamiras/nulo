@@ -10,6 +10,7 @@ import {
 	isSealTrusted,
 	loadJournal,
 	markSealTrusted,
+	removeRecord,
 	predictPortal,
 	recoveryKeyFromSignature,
 	sealDepositEnvelope,
@@ -21,6 +22,7 @@ import { stepperPhases } from "@/lib/bridge-steps"
 import { memoryJournalLocks } from "@/lib/journal-locks"
 import { recordState } from "@/lib/record-policy"
 import type { DepositSearch } from "./deposit-reconcile"
+import type { ExitSearch } from "./exit-attach"
 
 vi.mock("@/contracts/bridge-generation", () => ({ FUEL_PORTAL: "0xfd05ee8687d4ca828ba3d26ef04b80dd1348e5bd" }))
 
@@ -41,6 +43,7 @@ import {
 	rekeyJournalRecord,
 	releaseForeground,
 	resumeSessionWork,
+	attachAndConsume,
 	runDepositClaim,
 	runOnLane,
 	runWithdrawConsume,
@@ -1183,6 +1186,7 @@ function mkSend(id: string, over: Record<string, unknown> = {}): SendDepositReco
 		secret: "0xpublicsecret",
 		secretHashHex: id,
 		leafIndex: "7",
+		messageHash: `0x00${"7d".repeat(31)}`,
 		chainId: 11155111,
 		portal: CLONE,
 		bridge: HUB,
@@ -1631,7 +1635,7 @@ describe("useBridgeJournal - consumed → done on the message's own nullifier", 
 		expect(rec.claimedByOther).toBe(true)
 		expect(rec.completedAt).toBeUndefined()
 		expect(recordState(rec, {}, WALLET).fuelRecoverable).toBe(true)
-		expect(recordState(rec, {}, WALLET).showClaim).toBe(false)
+		expect(recordState(rec, {}, WALLET).showClaim).toBe(true) // CLAIM verifies the marker; CLAIM YOUR GAS claims the gas
 		// The standalone gas claim lands, then the tab dies before the engine sees it.
 		updateRecord("0xfueled", {
 			fuel: { ...(rec.fuel as NonNullable<typeof rec.fuel>), standaloneClaimed: true },
@@ -1687,7 +1691,7 @@ describe("useBridgeJournal - consumed → done on the message's own nullifier", 
 		const send = sendDeps()
 		const live = vi.fn(async () => "live" as const)
 		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified: live })
-		addRecord(mkSend("0xforged", { claimedByOther: true }))
+		addRecord(mkSend("0xforged", { messageHash: "0xm", claimedByOther: true }))
 		await runDepositClaim("0xforged")
 		expect(live).toHaveBeenCalledTimes(1)
 		expect(recordOf("0xforged")?.completedAt).toBeUndefined()
@@ -1695,7 +1699,7 @@ describe("useBridgeJournal - consumed → done on the message's own nullifier", 
 		expect(send.claimSend).not.toHaveBeenCalled()
 
 		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified: vi.fn(async () => "nullified" as const) })
-		addRecord(mkSend("0xtrue", { claimedByOther: true }))
+		addRecord(mkSend("0xtrue", { messageHash: "0xm", claimedByOther: true }))
 		await runDepositClaim("0xtrue")
 		expect(recordOf("0xtrue")?.completedAt).toBe(999)
 
@@ -1703,7 +1707,13 @@ describe("useBridgeJournal - consumed → done on the message's own nullifier", 
 		const deps = baseDeps(kv)
 		const probe = vi.fn(async () => "nullified" as const)
 		connectJournalDeps({ ...deps, ...send, messageNullified: probe })
-		const priv = mkSend("0xforgedpriv", { isPrivate: true, secret: undefined, sealerL1: SEALER, claimedByOther: true })
+		const priv = mkSend("0xforgedpriv", {
+			isPrivate: true,
+			secret: undefined,
+			sealerL1: SEALER,
+			messageHash: "0xm",
+			claimedByOther: true,
+		})
 		priv.sealedEnvelope = await sealEnvelopeFor(priv)
 		addRecord(priv)
 		resumeSessionWork()
@@ -1725,7 +1735,13 @@ describe("useBridgeJournal - consumed → done on the message's own nullifier", 
 		const deps = baseDeps(kv)
 		const send = sendDeps()
 		connectJournalDeps({ ...deps, ...send, messageNullified: vi.fn(async () => "live" as const) })
-		const priv = mkFueled("0xfalsepriv", { isPrivate: true, secret: undefined, sealerL1: SEALER, claimedByOther: true })
+		const priv = mkFueled("0xfalsepriv", {
+			isPrivate: true,
+			secret: undefined,
+			sealerL1: SEALER,
+			messageHash: "0xm",
+			claimedByOther: true,
+		})
 		priv.sealedEnvelope = await sealEnvelopeFor(priv)
 		addRecord(priv)
 		await runDepositClaim("0xfalsepriv", { interactive: true })
@@ -1836,6 +1852,115 @@ describe("useBridgeJournal - consumed → done on the message's own nullifier", 
 		expect(reconcileFuel).toHaveBeenCalledWith("0xreconciled")
 		expect(recordOf("0xreconciled")?.completedAt).toBe(999)
 		expect(recordOf("0xreconciled")?.claimedByOther).toBe(true)
+	})
+
+	it("a record discarded while the nullifier read awaited is never built or sent — even a remote deletion this tab has not yet heard of", async () => {
+		const send = sendDeps()
+		const messageNullified = vi.fn(async () => {
+			removeRecord(kv, "0xgoneprobe") // another tab's write: storage only, no storage event here
+			return "live" as const
+		})
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified })
+		addRecord(mkSend("0xgoneprobe"))
+		await runDepositClaim("0xgoneprobe")
+		expect(send.claimSend).not.toHaveBeenCalled()
+	})
+
+	it("a fuel identity replaced during the nullifier read cannot inherit the verification", async () => {
+		const send = sendDeps()
+		const settled = {
+			amount: "10",
+			secret: "0xfuelsecret",
+			secretHashHex: "0xfh",
+			minOutput: "9",
+			leafIndex: "8",
+			received: "5",
+			consumed: true,
+		}
+		const messageNullified = vi.fn(async () => {
+			updateRecord("0xfuelswap", { fuel: { ...settled, secretHashHex: "0xother" } } as Partial<SendDepositRecord>)
+			return "nullified" as const
+		})
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified })
+		addRecord(mkFueled("0xfuelswap", { fuel: settled }))
+		await runDepositClaim("0xfuelswap")
+		expect(recordOf("0xfuelswap")?.completedAt).toBeUndefined()
+		expect(recordOf("0xfuelswap")?.claimedByOther).toBeUndefined()
+	})
+
+	it("a marker on a record without its message hash is ignored: the ordinary claim runs", async () => {
+		const send = sendDeps()
+		const messageNullified = vi.fn(async () => "unknown" as const)
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified })
+		addRecord(mkSend("0xnohash", { messageHash: undefined, claimedByOther: true }))
+		await runDepositClaim("0xnohash")
+		expect(send.claimSend).toHaveBeenCalledTimes(1)
+		expect(recordOf("0xnohash")?.completedAt).toBe(999)
+	})
+
+	it("a forged marker never preempts hash-less reconciliation or receipt polling", async () => {
+		const send = sendDeps()
+		const findDepositTx = vi.fn(async () => "none" as const)
+		const messageNullified = vi.fn(async () => "nullified" as const)
+		connectJournalDeps({ ...baseDeps(kv), ...send, findDepositTx, messageNullified })
+		addRecord(mkSend("0xhashlessmarker", { leafIndex: undefined, claimedByOther: true }))
+		await runDepositClaim("0xhashlessmarker")
+		expect(findDepositTx).toHaveBeenCalledTimes(1) // the finder ran; the marker was ignored
+		expect(recordOf("0xhashlessmarker")?.completedAt).toBeUndefined()
+
+		addRecord(mkSend("0xsentmarker", { claimTxHash: CLAIM_TX, messageHash: "0xm", claimedByOther: true }))
+		await runDepositClaim("0xsentmarker")
+		expect(recordOf("0xsentmarker")?.completedAt).toBe(999) // the receipt round decided, as for any sent claim
+		expect(send.claimSend).not.toHaveBeenCalled()
+	})
+
+	it("a public false marker with open fuel is verified on resume and on the click, whatever the gas recovery does", async () => {
+		const send = sendDeps()
+		const messageNullified = vi.fn(async () => "live" as const)
+		connectJournalDeps({ ...baseDeps(kv), ...send, messageNullified })
+		const rec = mkFueled("0xfalsepublic", { messageHash: "0xm", claimedByOther: true })
+		addRecord(rec)
+		const wallet = { status: "connected", selectedAccount: RECIPIENT, accounts: [{ address: RECIPIENT }] }
+		expect(recordState(rec, {}, wallet).showClaim).toBe(true)
+		resumeSessionWork()
+		await new Promise((r) => setTimeout(r, 0))
+		expect(messageNullified).toHaveBeenCalledTimes(1)
+		expect(recordOf("0xfalsepublic")?.claimedByOther).toBeUndefined() // dropped: the ordinary claim is back
+	})
+
+	it("two immediate starts in one tab under a delayed lock grant: the second is a local duplicate, never a cross-tab note", async () => {
+		// A lock table that grants only when told to, so both starts are pending together.
+		let grant: () => void = () => {}
+		const granted = new Promise<void>((r) => (grant = r))
+		const locks = {
+			...memoryJournalLocks(),
+			record: async <T>(_id: string, fn: () => Promise<T>) => {
+				await granted
+				return fn()
+			},
+		}
+		let releaseClaim: () => void = () => {}
+		const send = {
+			...sendDeps(),
+			claimSend: vi.fn(async () => ({
+				simulate: () => new Promise<unknown>((r) => (releaseClaim = () => r({}))),
+				send: async () => ({ txHash: "0xhubclaim" }),
+			})),
+		}
+		connectJournalDeps({ ...baseDeps(kv), ...send, locks })
+		addRecord(mkSend("0xtwice"))
+		const first = runDepositClaim("0xtwice")
+		const second = runDepositClaim("0xtwice")
+		grant()
+		await new Promise((r) => setTimeout(r, 0))
+		await second
+		// While the first runner still waits on its simulate, the loser left no cross-tab note.
+		expect(useBridgeJournal().runtime.value["0xtwice"]?.note).toBeUndefined()
+		expect(useBridgeJournal().runtime.value["0xtwice"]?.busy).toBe(true)
+		releaseClaim()
+		await first
+		expect(send.claimSend).toHaveBeenCalledTimes(1)
+		expect(recordOf("0xtwice")?.completedAt).toBe(999)
 	})
 
 	it("(l) token+gas with its fuel already settled completes at once", async () => {
@@ -2091,5 +2216,239 @@ describe("useBridgeJournal - a hash-less deposit reconciled from Ethereum", () =
 		await runDepositClaim("0xlegacyless")
 		expect(deps.findDepositTx).not.toHaveBeenCalled()
 		expect(recordOf("0xgasless")?.depositTxHash).toBeUndefined()
+	})
+})
+
+describe("useBridgeJournal - a hash-less exit attached by its recomputed message", () => {
+	let kv: KV
+
+	beforeEach(() => {
+		__resetJournalForTests()
+		kv = memKV()
+	})
+
+	const H = "0x00180000000000000000000000000000000000000000000000000000657869"
+	const recordOf = (id: string) => useBridgeJournal().records.value.find((r) => r.id === id) as SendWithdrawRecord | undefined
+	const pending = (id = "wd-pending-1", over: Record<string, unknown> = {}) => mkSendExit(id, { exitTxHash: undefined, ...over })
+	const found: ExitSearch = { exitTxHash: H, exitBlock: 42, messageHash: "0xmsg" }
+
+	function attachDeps(kvv: KV, result: ExitSearch | (() => Promise<ExitSearch>), over: Record<string, unknown> = {}) {
+		const findExitTx = vi.fn(typeof result === "function" ? result : async () => result)
+		return { ...baseDeps(kvv), ...sendDeps(), locks: memoryJournalLocks(), findExitTx, ...over }
+	}
+
+	it("attached ⇒ re-keyed onto the hash, consumed under it, done; the old id holds no runtime", async () => {
+		const deps = attachDeps(kv, found)
+		connectJournalDeps(deps)
+		addRecord(pending())
+		await runWithdrawConsume("wd-pending-1")
+		expect(deps.findExitTx).toHaveBeenCalledWith(expect.objectContaining({ id: "wd-pending-1" }), expect.any(Set))
+		expect(recordOf("wd-pending-1")).toBeUndefined()
+		const rec = recordOf(H) as SendWithdrawRecord
+		expect(rec.exitTxHash).toBe(H)
+		expect(rec.exitBlock).toBe(42)
+		expect(rec.consumeTxHash).toBe("0xhubconsume")
+		expect(rec.completedAt).toBe(999)
+		expect(deps.consumeSend).toHaveBeenCalledTimes(1)
+		expect(useBridgeJournal().runtime.value["wd-pending-1"]).toBeUndefined()
+		expect(useBridgeJournal().runtime.value[H]?.busy).toBeFalsy()
+	})
+
+	it("a throw after the re-key is reported against the new id; the old id's runtime is gone", async () => {
+		const deps = attachDeps(kv, found, {
+			consumeSend: vi.fn(async () => {
+				throw new Error("portal reverted")
+			}),
+		})
+		connectJournalDeps(deps)
+		addRecord(pending())
+		await runWithdrawConsume("wd-pending-1")
+		expect(recordOf(H)?.exitTxHash).toBe(H)
+		expect(recordOf(H)?.completedAt).toBeUndefined()
+		expect(useBridgeJournal().runtime.value[H]?.attention).toBe("error")
+		expect(useBridgeJournal().runtime.value["wd-pending-1"]).toBeUndefined()
+	})
+
+	it("a second FINISH during the consume is refused by the hash's lock", async () => {
+		let release: () => void = () => {}
+		const deps = attachDeps(kv, found, {
+			consumeSend: vi.fn(() => new Promise<{ consumeTxHash: string }>((r) => (release = () => r({ consumeTxHash: "0xhubconsume" })))),
+		})
+		connectJournalDeps(deps)
+		addRecord(pending())
+		const first = runWithdrawConsume("wd-pending-1")
+		await new Promise((r) => setTimeout(r, 0))
+		await runWithdrawConsume(H)
+		expect(deps.consumeSend).toHaveBeenCalledTimes(1)
+		release()
+		await first
+		expect(recordOf(H)?.completedAt).toBe(999)
+	})
+
+	it("FINISH on an already attached hash that another tab is running reports the contention", async () => {
+		const locks = memoryJournalLocks()
+		const deps = attachDeps(kv, "none", { locks })
+		connectJournalDeps(deps)
+		addRecord(mkSendExit(H, { exitBlock: 42 }))
+		let releaseExit: () => void = () => {}
+		const exitHolder = locks.record(H, () => new Promise<void>((r) => (releaseExit = r)))
+		await runWithdrawConsume(H)
+		expect(useBridgeJournal().runtime.value[H]?.note).toMatch(/another tab is finishing/i)
+		expect(deps.consumeSend).not.toHaveBeenCalled()
+		// The same for a deposit another tab is claiming.
+		addRecord(mkSend("0xheldclaim"))
+		let releaseClaim: () => void = () => {}
+		const claimHolder = locks.record("0xheldclaim", () => new Promise<void>((r) => (releaseClaim = r)))
+		await runDepositClaim("0xheldclaim")
+		expect(useBridgeJournal().runtime.value["0xheldclaim"]?.note).toMatch(/another tab is claiming/i)
+		releaseExit()
+		releaseClaim()
+		await exitHolder
+		await claimHolder
+	})
+
+	it("the live handoff keeps the provisional record while another runner holds the hash", async () => {
+		const locks = memoryJournalLocks()
+		connectJournalDeps(attachDeps(kv, "none", { locks }))
+		addRecord(pending())
+		let release: () => void = () => {}
+		const holder = locks.record(H, () => new Promise<void>((r) => (release = r)))
+		const outcome = await attachAndConsume("wd-pending-1", { ...pending(), id: H, exitTxHash: H, exitBlock: 7 }, () => true)
+		expect(outcome).toBe("held-elsewhere")
+		expect(recordOf("wd-pending-1")).toBeDefined()
+		expect(recordOf(H)).toBeUndefined()
+		release()
+		await holder
+	})
+
+	it("a live exit vs an attach of the same hash: the attach finds the lock held and says so", async () => {
+		const locks = memoryJournalLocks()
+		const deps = attachDeps(kv, found, { locks })
+		connectJournalDeps(deps)
+		addRecord(pending())
+		let release: () => void = () => {}
+		const holder = locks.record(H, () => new Promise<void>((r) => (release = r)))
+		await runWithdrawConsume("wd-pending-1")
+		expect(recordOf("wd-pending-1")).toBeDefined()
+		expect(recordOf(H)).toBeUndefined()
+		expect(useBridgeJournal().runtime.value["wd-pending-1"]?.note).toMatch(/another tab/i)
+		expect(deps.consumeSend).not.toHaveBeenCalled()
+		release()
+		await holder
+	})
+
+	it("attached but already finished on L1 ⇒ done as consumed by another", async () => {
+		const deps = attachDeps(kv, found, { consumeSend: vi.fn(async () => ({ consumedByOther: true as const })) })
+		connectJournalDeps(deps)
+		addRecord(pending())
+		await runWithdrawConsume("wd-pending-1")
+		expect(recordOf(H)?.consumedByOther).toBe(true)
+		expect(recordOf(H)?.completedAt).toBe(999)
+	})
+
+	it.each([
+		["none", "error", /No exit for this record was found/],
+		["ambiguous", "unknown-outcome", /More than one matching exit/],
+		["incomplete", "error", /could not be searched far enough/],
+	] as const)("%s ⇒ its note, no re-key, no consume", async (outcome, attention, note) => {
+		const deps = attachDeps(kv, outcome)
+		connectJournalDeps(deps)
+		addRecord(pending())
+		await runWithdrawConsume("wd-pending-1")
+		const rt = useBridgeJournal().runtime.value["wd-pending-1"]
+		expect(rt?.attention).toBe(attention)
+		expect(rt?.note).toMatch(note)
+		expect(recordOf("wd-pending-1")?.exitTxHash).toBeUndefined()
+		expect(deps.consumeSend).not.toHaveBeenCalled()
+	})
+
+	it("a search that throws reads as incomplete", async () => {
+		const deps = attachDeps(kv, async () => {
+			throw new Error("node down")
+		})
+		connectJournalDeps(deps)
+		addRecord(pending())
+		await runWithdrawConsume("wd-pending-1")
+		expect(useBridgeJournal().runtime.value["wd-pending-1"]?.note).toMatch(/could not be searched/)
+	})
+
+	it("a record discarded, or whose identity changed, while the search ran is never re-keyed", async () => {
+		const gone = attachDeps(kv, async () => {
+			discard("wd-pending-1")
+			return found
+		})
+		connectJournalDeps(gone)
+		addRecord(pending())
+		await runWithdrawConsume("wd-pending-1")
+		expect(recordOf(H)).toBeUndefined()
+		expect(gone.consumeSend).not.toHaveBeenCalled()
+
+		const moved = attachDeps(kv, async () => {
+			upsertRecord(kv, { ...pending("wd-pending-2"), amount: "1" })
+			return found
+		})
+		connectJournalDeps(moved)
+		addRecord(pending("wd-pending-2"))
+		await runWithdrawConsume("wd-pending-2")
+		expect(recordOf("wd-pending-2")?.amount).toBe("1")
+		expect(recordOf("wd-pending-2")?.exitTxHash).toBeUndefined()
+		expect(recordOf(H)).toBeUndefined()
+		expect(moved.consumeSend).not.toHaveBeenCalled()
+	})
+
+	it("a hash that is already a record (the other tab re-keyed first) is refused: no second runner", async () => {
+		const deps = attachDeps(kv, async () => {
+			// The other tab, loaded before either wrote, attached its copy onto H already.
+			upsertRecord(kv, mkSendExit(H, { exitBlock: 42 }))
+			return found
+		})
+		connectJournalDeps(deps)
+		addRecord(pending())
+		await runWithdrawConsume("wd-pending-1")
+		expect(recordOf("wd-pending-1")).toBeDefined()
+		expect(recordOf(H)?.consumeTxHash).toBeUndefined()
+		expect(deps.consumeSend).not.toHaveBeenCalled()
+	})
+
+	it("without a lock API the attach fails closed with its note, while a plain consume still runs", async () => {
+		const deps = { ...baseDeps(kv), ...sendDeps(), findExitTx: vi.fn(async () => found) }
+		connectJournalDeps(deps)
+		addRecord(pending())
+		addRecord(mkSendExit("0xplain"))
+		await runWithdrawConsume("wd-pending-1")
+		expect(deps.findExitTx).not.toHaveBeenCalled()
+		expect(useBridgeJournal().runtime.value["wd-pending-1"]?.note).toMatch(/another tab may be finishing/i)
+		await runWithdrawConsume("0xplain")
+		expect(recordOf("0xplain")?.completedAt).toBe(999)
+	})
+
+	it("an unwired finder keeps today's note", async () => {
+		connectJournalDeps({ ...baseDeps(kv), ...sendDeps(), locks: memoryJournalLocks() })
+		addRecord(pending())
+		await runWithdrawConsume("wd-pending-1")
+		expect(useBridgeJournal().runtime.value["wd-pending-1"]?.note).toMatch(/never recorded/)
+		expect(recordOf("wd-pending-1")?.exitTxHash).toBeUndefined()
+	})
+
+	it("the live exit's handoff: re-keys the provisional record and consumes it under the hash's lock", async () => {
+		const deps = attachDeps(kv, "none")
+		connectJournalDeps(deps)
+		addRecord(pending())
+		const outcome = await attachAndConsume(
+			"wd-pending-1",
+			{ ...pending(), id: H, exitTxHash: H, exitBlock: 7 },
+			(_l, all) => !all.some((r) => r.id === H),
+		)
+		expect(outcome).toBe("attached")
+		expect(recordOf(H)?.completedAt).toBe(999)
+		// A second handoff onto an id that is now a record is refused.
+		addRecord(pending("wd-pending-2"))
+		expect(
+			await attachAndConsume(
+				"wd-pending-2",
+				{ ...pending(), id: H, exitTxHash: H, exitBlock: 7 },
+				(_l, all) => !all.some((r) => r.id === H),
+			),
+		).toBe("moved")
 	})
 })
