@@ -478,6 +478,16 @@ describe("log-payload ban (static)", () => {
 		expect(offenders[0]).toContain("password")
 	})
 
+	test("catches an error flattened by getErrorMessage/errorMessageFromUnknown as a log argument", () => {
+		const offenders = findLoggedSecrets([
+			{ path: "apps/extension/src/wallet/services/foo/service.ts", content: 'this.logError("x", getErrorMessage(e))' },
+			{ path: "packages/aztec-runtime/src/pxe/bar.ts", content: 'log?.("warn", `failed: ${errorMessageFromUnknown(err)}`)' },
+		])
+		expect(offenders).toHaveLength(2)
+		expect(offenders[0]).toContain("getErrorMessage")
+		expect(offenders[1]).toContain("errorMessageFromUnknown")
+	})
+
 	test("catches the dominant package idiom, `this.logger.log` on any receiver", () => {
 		const offenders = findLoggedSecrets([
 			{

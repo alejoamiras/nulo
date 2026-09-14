@@ -25,9 +25,9 @@
 
 // Patch WalletSchema before wallet-sdk reads it (Nulo-custom `registerToken`).
 // Must be the first import in this module — see @nulo/wallet-sdk-schema-patch.
-import logoDataUri from "@/assets/logo.png?inline"
 import "@nulo/wallet-sdk-schema-patch/register"
 
+import logoDataUri from "@/assets/logo.png?inline"
 import { BackgroundConnectionHandler, type PendingDiscovery, type ActiveSession } from "@aztec/wallet-sdk/extension/handlers"
 import { NOOP_LOGGER, type WalletMessage, type WalletResponse } from "@aztec/wallet-sdk/types"
 import { attachContentListener } from "./content-message-relay"

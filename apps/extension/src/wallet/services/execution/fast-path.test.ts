@@ -29,6 +29,9 @@ vi.mock("@aztec/wallet-sdk/base-wallet", () => ({
 
 import { buildMergedSimulationResult, simulateViaNode } from "@aztec/wallet-sdk/base-wallet"
 import { bindOptimizableCalls, rehydrateOptimizablePrefix, runFastPath, wrapStandardArmForMixedMerge } from "./fast-path"
+import { ContractResolver } from "./contract-resolver"
+import { TxRequestBuilder } from "./tx-request-builder"
+import { ViewExecutor } from "./view-executor"
 
 const simulateViaNodeMock = simulateViaNode as unknown as ReturnType<typeof vi.fn>
 const buildMergedMock = buildMergedSimulationResult as unknown as ReturnType<typeof vi.fn>
@@ -474,5 +477,117 @@ describe("wrapStandardArmForMixedMerge", () => {
 		expect(wrapped.privateExecutionResult).toBe(result.privateExecutionResult)
 		expect(wrapped.publicInputs).toBe(result.publicInputs)
 		expect(wrapped.publicOutput).toBe(result.publicOutput)
+	})
+})
+
+describe("fallback chain: real binder → ViewExecutor standard path → real TxRequestBuilder validator", () => {
+	const CONTRACT = AztecAddress.fromBigIntUnsafe(0xc0den).toString()
+	const ACCOUNT = AztecAddress.fromBigIntUnsafe(0xacc7n)
+	// chainId must equal (l1ChainId ^ rollupVersion) >>> 0 for the live drift assert.
+	const NODE_INFO = { l1ChainId: 0, rollupVersion: 31337, txsLimits: { gas: { daGas: 111n, l2Gas: 222n } } }
+	const NETWORK = {
+		id: "net-1",
+		profileId: "p1",
+		chainId: 31337,
+		l1ChainId: 0,
+		name: "N",
+		endpoints: [{ id: "e1", rpcUrl: "http://n:1" }],
+		primaryEndpointId: "e1",
+	}
+
+	function makeExecutor() {
+		const instance = { currentContractClassId: { toString: () => "0xfakeclass" } }
+		const resolver = {
+			...fakeResolver(),
+			extractContracts: vi.fn(() => [CONTRACT]),
+			resolveInstances: vi.fn(async () => new Map([[CONTRACT, instance]])),
+			resolveArtifacts: vi.fn(async () => new Map([["0xfakeclass", FAKE_ARTIFACT]])),
+			ensureContractsRegistered: vi.fn(async () => undefined),
+		}
+		const node = { getNodeInfo: vi.fn(async () => NODE_INFO) }
+		const account = {
+			address: ACCOUNT,
+			ensureRegistered: vi.fn(async () => {}),
+			requiresInitialization: vi.fn(async () => false),
+			buildTxExecutionRequest: vi.fn(async () => ({ fake: "txRequest" })),
+		}
+		const pxe = { simulateTx: vi.fn(), getContracts: vi.fn(async () => []), registerContract: vi.fn(async () => {}) }
+		const pxeService = { getPXE: vi.fn(() => pxe) }
+		const profileService = { getActiveProfile: vi.fn(async () => ({ id: "p1", name: "P", type: "password" })) }
+		const networkService = { getNetwork: vi.fn(async () => NETWORK), getNode: vi.fn(async () => node) }
+		const accountService = { getAccountContract: vi.fn(async () => account) }
+		const txBuilder = new TxRequestBuilder(
+			pxeService as never,
+			profileService as never,
+			networkService as never,
+			accountService as never,
+			{ assertWithinCap: vi.fn(async () => {}) } as never,
+			{ startNewTask: vi.fn(() => ({ complete: vi.fn(), fail: vi.fn(), startSubtask: vi.fn() })) } as never,
+			resolver as never,
+			{} as never,
+			{ log: vi.fn() } as never,
+		)
+		const planner = {
+			processAztecJsPayload: vi.fn(async (exec: { calls: Record<string, unknown>[] }) => ({
+				actions: exec.calls.map((c) => ({ kind: "encoded_call", to: c.to, selector: c.selector, name: c.name, args: c.args })),
+				feePaymentMethod: { fake: "fee" },
+				feeOptions: {},
+			})),
+		}
+		const executor = new ViewExecutor({
+			planner: planner as never,
+			resolver: resolver as never,
+			txBuilder,
+			pxeService: pxeService as never,
+			profileService: profileService as never,
+			networkService: networkService as never,
+			accountService: accountService as never,
+			contactService: { getContacts: vi.fn(async () => []) } as never,
+			logDebug: vi.fn(),
+			logError: vi.fn(),
+		})
+		return { executor, planner, pxe }
+	}
+
+	test("a forged-static first call sends every call to the standard path, where a later name/selector mismatch is rejected before any simulation", async () => {
+		const { executor, planner, pxe } = makeExecutor()
+		const calls = [
+			// The wire claims a public static view; the ABI says `transfer` is private.
+			rpcShapedPublicStaticCall({ name: "transfer", to: CONTRACT, selector: (await selectorOf(ABI_TRANSFER)).toString() }),
+			// The authorized name belongs to another function than the selector.
+			rpcShapedPublicStaticCall({ name: "balance_of_public", to: CONTRACT, selector: TOTAL_SUPPLY_SELECTOR, args: [] }),
+		]
+		const op = {
+			kind: "aztec_simulateTx",
+			networkId: "net-1",
+			accountAddress: ACCOUNT.toString(),
+			exec: { calls },
+			opts: { from: ACCOUNT, additionalScopes: [] },
+		}
+		await expect(executor.executeAztecSimulateTx(op as never)).rejects.toThrow(
+			/Scope violation: call name "balance_of_public" does not match selector's function "total_supply"/,
+		)
+		expect(simulateViaNodeMock).not.toHaveBeenCalled()
+		expect(pxe.simulateTx).not.toHaveBeenCalled()
+		const planned = planner.processAztecJsPayload.mock.calls[0][0] as { calls: { name: string }[] }
+		expect(planned.calls.map((c) => c.name)).toEqual(["transfer", "balance_of_public"])
+	})
+})
+
+describe("bindOptimizableCalls through the real ContractResolver", () => {
+	test("a registered contract's instance and artifact come from PXE and the call binds to ABI truth", async () => {
+		const to = AztecAddress.fromBigIntUnsafe(0xbeefn)
+		const pxe = {
+			getContractInstance: vi.fn(async (a: AztecAddress) =>
+				a.equals(to) ? { address: a, currentContractClassId: new Fr(0x1234n) } : undefined,
+			),
+			getContractArtifact: vi.fn(async (id: Fr) => (id.equals(new Fr(0x1234n)) ? FAKE_ARTIFACT : undefined)),
+		}
+		const resolver = new ContractResolver({ log: vi.fn() })
+		const call = FunctionCall.schema.parse(rpcShapedPublicStaticCall({ to: to.toString() }))
+		const bound = await bindOptimizableCalls(pxe as never, resolver, [call])
+		expect(bound?.map((c) => [c.name, c.type, c.isStatic])).toEqual([["balance_of_public", FunctionType.PUBLIC, true]])
+		expect(pxe.getContractInstance).toHaveBeenCalledTimes(1)
+		expect(pxe.getContractArtifact).toHaveBeenCalledTimes(1)
 	})
 })

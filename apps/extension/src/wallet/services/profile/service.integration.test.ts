@@ -1208,11 +1208,48 @@ describe("ProfileService integration", () => {
 			// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to age the stash
 			const internals = service as any
 			const ttl = internals.constructor.PENDING_RESTORE_TTL_MS as number
-			internals.pendingRestoreSecrets.get(out.id).capturedAt -= ttl
-			await expect(service.finalizeRestore(out.id)).rejects.toThrow(/No pending restore secret/)
+			const entry = internals.pendingRestoreSecrets.get(out.id)
+			const { secret, dek } = entry
+			// Frozen clock: exactly AT the boundary is already refused (`>=`), not one tick past it.
+			const now = Date.now()
+			vi.spyOn(Date, "now").mockReturnValue(now)
+			entry.capturedAt = now - ttl
+			try {
+				await expect(service.finalizeRestore(out.id)).rejects.toThrow(/No pending restore secret/)
+			} finally {
+				vi.mocked(Date.now).mockRestore()
+			}
 			expect(internals.pendingRestoreSecrets.has(out.id)).toBe(false)
 			expect(internals.pendingDekRewraps.has(out.id)).toBe(false)
+			expect(secret.every((x: number) => x === 0) && dek.every((x: number) => x === 0)).toBe(true)
 			expect(await service.getActiveProfile()).toBeUndefined()
+		}, 30_000)
+
+		test("passkey: a pending restore secret one tick inside PENDING_RESTORE_TTL_MS still finalizes", async () => {
+			const { service } = await makeService()
+			const original = await service.createPasskeyProfile("PK")
+			const credentialId = await service.getPasskeyCredentialId(original.id)
+			await service.lockActiveProfile()
+			await service.deleteProfile(original.id)
+			const out = await service.restore(
+				{ id: "ignored", name: "PK", type: "passkey" },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId), dekSealed: await fakeDekSealedFor(credentialId) },
+				undefined,
+				fakeCredentialData(credentialId, original.id),
+			)
+			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
+			// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to age the stash
+			const internals = service as any
+			const ttl = internals.constructor.PENDING_RESTORE_TTL_MS as number
+			const now = Date.now()
+			vi.spyOn(Date, "now").mockReturnValue(now)
+			internals.pendingRestoreSecrets.get(out.id).capturedAt = now - ttl + 1
+			try {
+				await service.finalizeRestore(out.id)
+			} finally {
+				vi.mocked(Date.now).mockRestore()
+			}
+			expect((await service.getActiveProfile())?.id).toBe(out.id)
 		}, 30_000)
 
 		test("passkey: an explicit lock drops every pending restore secret, so a later finalize cannot open", async () => {
@@ -1228,9 +1265,18 @@ describe("ProfileService integration", () => {
 				fakeCredentialData(credentialId, original.id),
 			)
 			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
-			await service.lockActiveProfile()
 			// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
-			expect((service as any).pendingRestoreSecrets.size).toBe(0)
+			const internals = service as any
+			const buffers: Uint8Array[] = []
+			for (const e of internals.pendingRestoreSecrets.values()) buffers.push(e.secret, e.dek)
+			for (const e of internals.pendingDekRewraps.values()) buffers.push(e.sourceDek, e.destinationDek)
+			expect(buffers.length).toBeGreaterThanOrEqual(2)
+			// The sweep runs before the close, so a close that fails cannot leave the stash alive.
+			vi.spyOn(internals.sessionManager, "close").mockRejectedValue(new Error("close failed"))
+			await expect(service.lockActiveProfile()).rejects.toThrow("close failed")
+			expect(internals.pendingRestoreSecrets.size).toBe(0)
+			expect(internals.pendingDekRewraps.size).toBe(0)
+			expect(buffers.every((b) => b.every((x) => x === 0))).toBe(true)
 			await expect(service.finalizeRestore(out.id)).rejects.toThrow(/No pending restore secret/)
 		}, 30_000)
 

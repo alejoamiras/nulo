@@ -1,7 +1,7 @@
 # harden-b1-mechanical — plan (blueprint light)
 
 **Status:** APPROVED 2026-09-14 — codex round 2 `approve` (round 1 `reject` adopted in full); owner approval pre-granted by `../seed.md`. Implementing. Owner approval is pre-granted by `../seed.md` (decisions locked 2026-09-14); the gate here is the codex verdict.
-**driver:** claude-code · **eli5_mode:** artifact · **code_review:** off (owner directive) · **tier:** light (owner-set) · **budget:** recon 1 agent; codex at `high`.
+**driver:** claude-code · **eli5_mode:** artifact · **code_review:** off (owner directive) · **tier:** light (owner-set) · **budget:** recon 1 agent; codex at `high`. · **eli5:** https://claude.ai/code/artifact/cc6455a7-f5e1-454b-889d-d9258aeeb3a4 (private Artifact; `eli5.html` is the fallback copy).
 **Batch:** B1 of 4 — see `../seed.md` for the decision table, the July lineage, and the stack. Findings: `audit/security/2026-09-13-high-prerelease/findings/verified.md` (F-01, F-03, F-08), `findings/consolidated.md` (F-10, F-12, F-13, F-15, F-17, dropped items).
 **Branch:** `harden-b1-mechanical`, stacked on `worktree-harden-security-prerelease` (dev + audit + seed). Recon: `recon.md`.
 

@@ -21,6 +21,20 @@ describe("transient secret buffers are wiped after the crypto call settles", () 
 		expect(isZeroed(encoded[0])).toBe(true)
 	})
 
+	test("a failing digest still wipes the encoded password bytes", async () => {
+		const encoded: Uint8Array[] = []
+		const orig = TextEncoder.prototype.encode
+		vi.spyOn(TextEncoder.prototype, "encode").mockImplementation(function (this: TextEncoder, s?: string) {
+			const out = orig.call(this, s)
+			encoded.push(out)
+			return out
+		})
+		vi.spyOn(globalThis.crypto.subtle, "digest").mockRejectedValue(new Error("digest failed"))
+		await expect(EncryptionKey.getPasshash("correct horse battery staple")).rejects.toThrow("digest failed")
+		expect(encoded).toHaveLength(1)
+		expect(isZeroed(encoded[0])).toBe(true)
+	})
+
 	test("getHashHex wipes the encoded input bytes and still hashes correctly", async () => {
 		const expected = await EncryptionKey.getHashHex("abc")
 		const encoded: Uint8Array[] = []

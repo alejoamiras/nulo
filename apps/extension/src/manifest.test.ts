@@ -3,9 +3,10 @@ import logoDataUri from "@/assets/logo.png?inline"
 import manifest from "../manifest/manifest.config"
 
 /**
- * Nothing the extension ships is web-accessible: a `web_accessible_resources` entry lets every
- * page fetch the listed file and so fingerprint the install. The wallet-sdk discovery icon, the
- * one asset a page legitimately needs, travels inline instead.
+ * The source manifest declares no web-accessible resources: the logo entry let every page fetch
+ * it and so fingerprint the install, and the wallet-sdk discovery icon — the one asset a page
+ * legitimately needs — travels inline instead. (The build plugin still emits entries for the
+ * content-script chunks; that is a separate, tracked exposure.)
  */
 describe("manifest surface", () => {
 	test("declares no web-accessible resources", () => {

@@ -115,14 +115,11 @@ export function rehydrateOptimizablePrefix(
 }
 
 /**
- * Bind every optimizable call to ABI truth before node-side simulation. The wire `name`
- * is what scope enforcement authorized and the wire `selector` is what would execute; a
- * found artifact whose selector resolves to a different function is a scope violation.
- * The rebuilt calls take `type`/`isStatic` from the ABI, never from the wire flags; if any
- * call is then not public+static the whole prefix is ineligible and the caller takes the
- * standard path for every call, which re-validates each one. A contract PXE cannot resolve
- * is likewise left to the standard path (which registers, then validates). The input array
- * is never mutated, so the standard path keeps the original names as evidence.
+ * The wire `name` is what scope enforcement authorized; the wire `selector` is what would run.
+ * A selector that resolves to a different function is a scope violation. `type`/`isStatic`
+ * come from the ABI, never the wire: one ineligible or unresolvable call sends the WHOLE
+ * prefix down the standard path (`null`), which re-validates every call, so the input is
+ * never mutated — the original names are that path's evidence.
  */
 export async function bindOptimizableCalls(pxe: IPXE, resolver: ContractResolver, calls: FunctionCall[]): Promise<FunctionCall[] | null> {
 	const bound: FunctionCall[] = []
