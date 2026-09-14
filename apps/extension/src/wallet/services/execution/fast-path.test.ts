@@ -236,7 +236,7 @@ describe("runFastPath", () => {
 				pxe: pxe as never,
 				// chainId=0 means assertLiveChainIdentity skips its check (local
 				// substrate); tests don't exercise chain-identity drift here.
-				network: { chainId: 0 },
+				network: { chainId: 0, l1ChainId: 11155111 },
 				fromAddr: AztecAddress.ZERO,
 				opts: opts as never,
 				optimizableCalls,

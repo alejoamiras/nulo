@@ -6,7 +6,7 @@ import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
-import { chainInfoFrom } from "@nulo/aztec-runtime/utils"
+import { assertLiveChainIdentity, chainInfoFrom, type SelectedNetworkChainInfo } from "@nulo/aztec-runtime/utils"
 
 export class FnImpl {
 	constructor(
@@ -56,6 +56,7 @@ export abstract class ViewFn extends Fn {
 export async function simulate(
 	node: AztecNode,
 	pxe: IPXE,
+	network: SelectedNetworkChainInfo,
 	account: IAccountContract,
 	contract: string,
 	viewFn: ViewFn,
@@ -82,6 +83,8 @@ export async function simulate(
 	}
 
 	const payload = new ExecutionPayload([call], [], [], [])
+	const nodeInfo = await node.getNodeInfo()
+	assertLiveChainIdentity(network, nodeInfo)
 	const txRequest = await account.buildTxExecutionRequest(
 		node,
 		pxe,
@@ -91,7 +94,7 @@ export async function simulate(
 			txNonce: Fr.random(),
 			feePaymentMethodOptions: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
 		},
-		chainInfoFrom(await node.getNodeInfo()),
+		chainInfoFrom(nodeInfo),
 	)
 
 	const tx = await pxe.simulateTx(txRequest, {

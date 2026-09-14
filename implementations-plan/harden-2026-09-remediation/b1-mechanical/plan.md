@@ -24,7 +24,7 @@ Eight mechanical fixes plus five hygiene ride-alongs, every one hours-scale and 
 
 ## Phases (each ends with its gate; a phase is ✓ only when the gate passes)
 
-**Phase 1 — chain identity (F-01, buildNoFrom ordering, fn.ts)**  
+**Phase 1 — chain identity (F-01, buildNoFrom ordering, fn.ts)** ✓ 2026-09-14
 Files: `packages/aztec-runtime/src/utils/chain-identity.ts` (+test), `apps/extension/src/wallet/services/execution/{fast-path.ts,tx-request-builder.ts}`, `apps/extension/src/wallet/utils/fn.ts`, `apps/extension/src/wallet/services/token/service.ts` (pass `network`).
 Tests: chain-identity KAT for the worked collision `(2, 4248422644)` vs stored mainnet — must throw; the rollup-version alias `(1, 8543389943)` vs stored mainnet — must throw; `l1ChainId` or `rollupVersion` out of u32 range must throw; local row with matching `l1ChainId` passes and a local row with a different live `l1ChainId` throws; `buildNoFrom` ordering pin asserts the rejection fires BEFORE `account.ensureRegistered` (fake account records the call); `buildNoFrom` ordering pin (assert before `resolveInstances`, via the existing builder test's fake resolver).
 Gate: `bun run --cwd packages/aztec-runtime test` · `bun run --cwd apps/extension test src/wallet/services/execution src/wallet/utils` · `bun run lint && bun run typecheck` — all exit 0. Layers: typecheck/lint + unit.

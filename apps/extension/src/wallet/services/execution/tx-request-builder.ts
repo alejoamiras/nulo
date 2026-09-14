@@ -377,6 +377,11 @@ export class TxRequestBuilder {
 			const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
 			this.log(`buildNoFrom: account resolved, address=${account.address.toString()}`)
 
+			// Same order as `resolveBuildContext`: refuse a drifted endpoint before any PXE
+			// registration or resolver work runs against it.
+			const nodeInfo = await node.getNodeInfo()
+			assertLiveChainIdentity(network, nodeInfo)
+
 			// Register account in PXE (needed for scopes)
 			await account.ensureRegistered(pxe)
 			this.log("buildNoFrom: account registered in PXE")
@@ -401,10 +406,6 @@ export class TxRequestBuilder {
 			const { parsedAuthWits, parsedCapsules, parsedExtraArgs } = await this.parseNoFromExtras(op)
 
 			const hashedArguments = [await HashedValues.fromArgs(call.args)]
-			const nodeInfo = await node.getNodeInfo()
-			// F-012 / Phase 5: refuse to sign/prove if the live node's chain
-			// identity has drifted from the network the user selected.
-			assertLiveChainIdentity(network, nodeInfo)
 			const currentMinFees = await node.getCurrentMinFees()
 			// 5.0: `fallback` requires explicit gasLimits — fill the network's per-tx admission limit.
 			const gasSettings = GasSettings.fallback({

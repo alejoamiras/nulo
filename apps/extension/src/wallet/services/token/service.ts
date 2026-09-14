@@ -708,16 +708,18 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 
 		return [
 			getNameFn
-				? ((await simulate(node, pxe, account, ti.contract, getNameFn, getNameFn.buildArgs())) as string)
+				? ((await simulate(node, pxe, network, account, ti.contract, getNameFn, getNameFn.buildArgs())) as string)
 				: ti.contract === feeJuiceAddress
 					? feeJuiceName
 					: "<name>",
 			getSymbolFn
-				? ((await simulate(node, pxe, account, ti.contract, getSymbolFn, getSymbolFn.buildArgs())) as string)
+				? ((await simulate(node, pxe, network, account, ti.contract, getSymbolFn, getSymbolFn.buildArgs())) as string)
 				: ti.contract === feeJuiceAddress
 					? feeJuiceSymbol
 					: "<symbol>",
-			getDecimalsFn ? ((await simulate(node, pxe, account, ti.contract, getDecimalsFn, getDecimalsFn.buildArgs())) as number) : 0,
+			getDecimalsFn
+				? ((await simulate(node, pxe, network, account, ti.contract, getDecimalsFn, getDecimalsFn.buildArgs())) as number)
+				: 0,
 		]
 	}
 

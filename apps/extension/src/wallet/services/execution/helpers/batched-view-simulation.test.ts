@@ -246,7 +246,7 @@ function makeDeps(opts: {
 
 	// chainId=0 → assertLiveChainIdentity is a noop (local substrate); tests
 	// don't exercise drift here.
-	return { pxe, node, network: { chainId: 0 }, account, contractResolver, logger: { log: () => {} } }
+	return { pxe, node, network: { chainId: 0, l1ChainId: 11155111 }, account, contractResolver, logger: { log: () => {} } }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────

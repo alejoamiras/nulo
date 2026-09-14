@@ -20,7 +20,14 @@ const ACCOUNT_ADDR = AztecAddress.fromBigIntUnsafe(0xacc7n)
 const CONTRACT = AztecAddress.fromBigIntUnsafe(0xc0den).toString()
 // chainId must equal (l1ChainId ^ rollupVersion) >>> 0 for the drift assert.
 const NODE_INFO = { l1ChainId: 0, rollupVersion: 31337, txsLimits: { gas: { daGas: 111n, l2Gas: 222n } } }
-const NETWORK = { id: "net-1", chainId: 31337, name: "N", endpoints: [{ id: "e1", rpcUrl: "http://n:1" }], primaryEndpointId: "e1" }
+const NETWORK = {
+	id: "net-1",
+	chainId: 31337,
+	l1ChainId: 0,
+	name: "N",
+	endpoints: [{ id: "e1", rpcUrl: "http://n:1" }],
+	primaryEndpointId: "e1",
+}
 
 /** A minimal private fn with zero parameters so encodeArguments is trivial. */
 const FN = {
@@ -38,6 +45,9 @@ function makeHarness() {
 	const flags = { initializesAccount: false }
 	const account = {
 		address: ACCOUNT_ADDR,
+		ensureRegistered: vi.fn(async () => {
+			calls.push("ensureRegistered")
+		}),
 		createAuthWit: vi.fn(async (h: Fr) => new AuthWitness(h, [Fr.fromString("0x77")])),
 		buildTxExecutionRequest: vi.fn(async (...args: unknown[]) => {
 			calls.push("buildTxExecutionRequest")
@@ -298,5 +308,21 @@ describe("buildStandard pins", () => {
 		const chainInfo = args[4] as { chainId: Fr; version: Fr }
 		expect(chainInfo.chainId.toBigInt()).toBe(0n)
 		expect(chainInfo.version.toBigInt()).toBe(31337n)
+	})
+})
+
+describe("buildNoFrom pins", () => {
+	test("drift assert runs BEFORE account registration and any resolver work; a drifted node rejects", async () => {
+		h.deps.networkService.getNode.mockResolvedValueOnce({
+			getNodeInfo: vi.fn(async () => {
+				h.calls.push("getNodeInfo")
+				return { ...NODE_INFO, rollupVersion: 999 }
+			}),
+		} as never)
+		const op = { networkId: "net-1", accountAddress: ACCOUNT_ADDR.toString(), exec: { calls: [] }, opts: {} }
+		await expect(h.builder.buildNoFrom(op as never)).rejects.toThrowError(/Chain identity mismatch/)
+		expect(h.calls).toEqual(["getNetwork", "getNodeInfo"])
+		expect(h.account.ensureRegistered).not.toHaveBeenCalled()
+		expect(h.deps.resolver.resolveInstances).not.toHaveBeenCalled()
 	})
 })

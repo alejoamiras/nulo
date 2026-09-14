@@ -45,7 +45,7 @@ import type { ContractNameResolver } from "@aztec/pxe/client/lazy"
 import { buildMergedSimulationResult, simulateViaNode } from "@aztec/wallet-sdk/base-wallet"
 import { completeFeeOptions, type PartialGasSettingsRPC } from "@nulo/aztec-runtime/account"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
-import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
+import { assertLiveChainIdentity, type SelectedNetworkChainInfo } from "@nulo/aztec-runtime/utils"
 import { getBlockHeaderAnchor } from "./helpers/block-header-anchor"
 
 /**
@@ -132,7 +132,7 @@ export interface FastPathDeps {
 	/** Stored chain identity for the user-selected network. Used to rebind
 	 *  the live node's `getNodeInfo()` before deriving `chainInfo`
 	 *  (F-012 / A-01 V-01). */
-	network: { chainId: number }
+	network: SelectedNetworkChainInfo
 	fromAddr: AztecAddress
 	opts: SimulateOptions
 	optimizableCalls: FunctionCall[]

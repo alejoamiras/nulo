@@ -133,7 +133,7 @@ import { simulateViaNode } from "@aztec/wallet-sdk/base-wallet"
 import { completeFeeOptions } from "@nulo/aztec-runtime/account"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
-import { assertLiveChainIdentity, chainInfoFrom } from "@nulo/aztec-runtime/utils"
+import { assertLiveChainIdentity, chainInfoFrom, type SelectedNetworkChainInfo } from "@nulo/aztec-runtime/utils"
 import type { CallAction, EncodedCallAction } from "@nulo/wallet-bridge"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { type ILogger, LogLevel } from "@/wallet/logger"
@@ -148,7 +148,7 @@ export interface BatchedViewSimulationDeps {
 	/** Stored chain identity for the user-selected network. Passed so the
 	 *  caller's `node.getNodeInfo()` consumption can rebind via
 	 *  `assertLiveChainIdentity` before deriving `chainInfo` (F-012 / A-01). */
-	readonly network: { chainId: number }
+	readonly network: SelectedNetworkChainInfo
 	readonly account: IAccountContract
 	readonly contractResolver: ContractResolver
 	readonly logger?: ILogger

@@ -8,7 +8,7 @@
 import { describe, expect, test, vi } from "vitest"
 import { CollectingDiscoveryProbe, type DiscoveryProbeCrypto } from "./discovery-probe"
 
-const NETWORK = { chainId: 0 } as never // chainId 0 = local → assertLiveChainIdentity noop
+const NETWORK = { chainId: 0, l1ChainId: 31337 } as never // local: only the exact l1ChainId binds
 
 function fakeSim(effects: { contractAddress: unknown; data: unknown[] }[]) {
 	return {
@@ -118,7 +118,7 @@ describe("CollectingDiscoveryProbe", () => {
 		)
 		const getNodeInfo = vi.fn(async () => ({ l1ChainId: 999, rollupVersion: 1 }))
 		// A real (non-local) stored chain identity that the live node contradicts.
-		const network = { chainId: 31337 } as never
+		const network = { chainId: 31337, l1ChainId: 31337 } as never
 
 		await expect(probe.extractEffects(fakeSim([effect("a")]), { node: { getNodeInfo } as never, network })).rejects.toThrow()
 		expect(probe.collected).toEqual([])
