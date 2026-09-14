@@ -130,7 +130,7 @@ test("imported account survives lock/unlock, a REAL SW kill, and a password chan
 	await clickByTestId(page2, "auth-submit")
 	// The degradation warning is the ONLY user-visible signal before an imported account
 	// fails at use time — it must fire on this unlock (subscription: popup app.vue).
-	await waitForToast(page2, "Imported accounts unavailable", 30_000)
+	await waitForToast(page2, "Wallet keys need recovery", 30_000)
 	await waitForHash(page2, "#/popup/general", 30_000)
 
 	// Derived-account operation still works: the degraded session is derived-only, not dead.

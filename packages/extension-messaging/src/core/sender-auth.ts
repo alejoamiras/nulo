@@ -41,19 +41,35 @@ export function isSenderAtUrl(sender: chrome.runtime.MessageSender | undefined, 
 	return senderPath(sender) === documentUrl
 }
 
+type ManifestBackground = { background?: { service_worker?: string; page?: string; scripts?: string[] } }
+
 /** The URLs this extension's background context reports as `sender.url`: the MV3 service-worker
  *  script (Chrome) or the background page (Firefox). Read from the LIVE manifest so a bundler's
- *  rewritten path is what is compared. Empty when no manifest is reachable (unit tests). */
-function backgroundContextUrls(): Set<string> {
-	const out = new Set<string>()
-	const manifest = (chrome.runtime.getManifest?.() ?? {}) as {
-		background?: { service_worker?: string; page?: string; scripts?: string[] }
-	}
-	const bg = manifest.background
-	if (bg?.service_worker) out.add(chrome.runtime.getURL(bg.service_worker))
-	if (bg?.page) out.add(chrome.runtime.getURL(bg.page))
-	if (bg?.scripts?.length) out.add(chrome.runtime.getURL("_generated_background_page.html"))
-	return out
+ *  rewritten path is what is compared. A Chrome offscreen document has no
+ *  `chrome.runtime.getManifest`, so the manifest is fetched by URL there; the result is cached
+ *  for the context's lifetime. Empty when no manifest is reachable (unit tests). */
+let backgroundUrls: Promise<Set<string>> | undefined
+export function backgroundContextUrls(): Promise<Set<string>> {
+	backgroundUrls ??= (async () => {
+		const out = new Set<string>()
+		let manifest: ManifestBackground = {}
+		try {
+			manifest = chrome.runtime.getManifest?.() ?? (await (await fetch(chrome.runtime.getURL("manifest.json"))).json())
+		} catch {
+			return out
+		}
+		const bg = manifest.background
+		if (bg?.service_worker) out.add(chrome.runtime.getURL(bg.service_worker))
+		if (bg?.page) out.add(chrome.runtime.getURL(bg.page))
+		if (bg?.scripts?.length) out.add(chrome.runtime.getURL("_generated_background_page.html"))
+		return out
+	})()
+	return backgroundUrls
+}
+
+/** Test seam: forget the cached manifest lookup. */
+export function resetBackgroundContextUrls(): void {
+	backgroundUrls = undefined
 }
 
 /**
@@ -63,9 +79,9 @@ function backgroundContextUrls(): Set<string> {
  * at all (a worker has no document), so a same-extension, tab-less, URL-less sender is the
  * worker. Anything with a document URL must be the manifest's background entry exactly.
  */
-export function isBackgroundSender(sender: chrome.runtime.MessageSender | undefined): boolean {
+export async function isBackgroundSender(sender: chrome.runtime.MessageSender | undefined): Promise<boolean> {
 	if (sender?.id !== chrome.runtime.id || sender.tab !== undefined) return false
 	if (sender.url === undefined) return true
 	const path = senderPath(sender)
-	return path !== undefined && backgroundContextUrls().has(path)
+	return path !== undefined && (await backgroundContextUrls()).has(path)
 }

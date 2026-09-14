@@ -24,6 +24,7 @@ import { wrapParams } from "../utils"
 import { captureMessage, emitMessage, silentLogger } from "../testing/transport-harness"
 import { Service } from "./service"
 import { ServiceClient } from "./client"
+import { resetBackgroundContextUrls } from "../core/sender-auth"
 
 const SERVICE = "offscreen-svc"
 const CLIENT = "client-uid"
@@ -309,6 +310,7 @@ describe("ensureInitialized", () => {
 describe("request sender authentication — only the background context drives the offscreen", () => {
 	const sender = (v: object) => v as unknown as chrome.runtime.MessageSender
 	const arm = () => {
+		resetBackgroundContextUrls()
 		// biome-ignore lint/suspicious/noExplicitAny: stub
 		const c = (globalThis as any).chrome
 		c.runtime.id = "nulo"
@@ -331,6 +333,7 @@ describe("request sender authentication — only the background context drives t
 		arm()
 		// biome-ignore lint/suspicious/noExplicitAny: stub
 		const c = (globalThis as any).chrome
+		resetBackgroundContextUrls()
 		c.runtime.getURL = (p: string) => `moz-extension://nulo/${p}`
 		c.runtime.getManifest = () => ({ background: { scripts: ["bg.js"] } })
 		new TestService()

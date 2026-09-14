@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, test } from "vitest"
-import { isBackgroundSender, isSenderAtUrl, isTrustedInternalSender } from "./sender-auth"
+import { beforeEach, describe, expect, test, vi } from "vitest"
+import { isBackgroundSender, isSenderAtUrl, isTrustedInternalSender, resetBackgroundContextUrls } from "./sender-auth"
 
 const s = (v: object | undefined) => v as unknown as chrome.runtime.MessageSender | undefined
 
 beforeEach(() => {
+	resetBackgroundContextUrls()
 	// biome-ignore lint/suspicious/noExplicitAny: minimal chrome stub for the test
 	;(globalThis as any).chrome = {
 		runtime: { id: "nulo-ext-id", getURL: (p: string) => `chrome-extension://nulo-ext-id/${p}` },
@@ -62,30 +63,57 @@ describe("isSenderAtUrl (exact-document peer)", () => {
 })
 
 describe("isBackgroundSender (the only sender an offscreen request may come from)", () => {
-	test("Chrome: the manifest's service-worker script URL, or a url-less same-extension worker sender", () => {
+	test("Chrome: the manifest's service-worker script URL, or a url-less same-extension worker sender", async () => {
 		// biome-ignore lint/suspicious/noExplicitAny: minimal chrome stub for the test
 		;(globalThis as any).chrome.runtime.getManifest = () => ({ background: { service_worker: "sw.js" } })
-		expect(isBackgroundSender(s({ id: "nulo-ext-id", url: "chrome-extension://nulo-ext-id/sw.js" }))).toBe(true)
-		expect(isBackgroundSender(s({ id: "nulo-ext-id" }))).toBe(true)
+		expect(await isBackgroundSender(s({ id: "nulo-ext-id", url: "chrome-extension://nulo-ext-id/sw.js" }))).toBe(true)
+		expect(await isBackgroundSender(s({ id: "nulo-ext-id" }))).toBe(true)
 	})
-	test("Firefox: the generated background page for `scripts`, or an explicit `page`", () => {
+	test("Firefox: the generated background page for `scripts`, or an explicit `page`", async () => {
 		// biome-ignore lint/suspicious/noExplicitAny: minimal chrome stub for the test
 		const c = (globalThis as any).chrome
 		c.runtime.getURL = (p: string) => `moz-extension://nulo-ext-id/${p}`
 		c.runtime.getManifest = () => ({ background: { scripts: ["bg.js"] } })
-		expect(isBackgroundSender(s({ id: "nulo-ext-id", url: "moz-extension://nulo-ext-id/_generated_background_page.html" }))).toBe(true)
+		expect(await isBackgroundSender(s({ id: "nulo-ext-id", url: "moz-extension://nulo-ext-id/_generated_background_page.html" }))).toBe(
+			true,
+		)
+		resetBackgroundContextUrls()
 		c.runtime.getManifest = () => ({ background: { page: "bg.html" } })
-		expect(isBackgroundSender(s({ id: "nulo-ext-id", url: "moz-extension://nulo-ext-id/bg.html" }))).toBe(true)
+		expect(await isBackgroundSender(s({ id: "nulo-ext-id", url: "moz-extension://nulo-ext-id/bg.html" }))).toBe(true)
 	})
-	test("rejects a popup / offscreen / options page, a tab-bound sender, a foreign id and a content script", () => {
+	test("Chrome OFFSCREEN document (no getManifest): the manifest is fetched by URL and cached", async () => {
+		// biome-ignore lint/suspicious/noExplicitAny: minimal chrome stub for the test
+		const c = (globalThis as any).chrome
+		c.runtime.getManifest = undefined
+		const fetched: string[] = []
+		vi.stubGlobal("fetch", async (url: string) => {
+			fetched.push(url)
+			return { json: async () => ({ background: { service_worker: "service-worker-loader.js", type: "module" } }) }
+		})
+		try {
+			expect(await isBackgroundSender(s({ id: "nulo-ext-id", url: "chrome-extension://nulo-ext-id/service-worker-loader.js" }))).toBe(
+				true,
+			)
+			expect(await isBackgroundSender(s({ id: "nulo-ext-id", url: "chrome-extension://nulo-ext-id/src/popup/index.html" }))).toBe(
+				false,
+			)
+			expect(fetched).toEqual(["chrome-extension://nulo-ext-id/manifest.json"])
+		} finally {
+			vi.unstubAllGlobals()
+		}
+	})
+
+	test("rejects a popup / offscreen / options page, a tab-bound sender, a foreign id and a content script", async () => {
 		// biome-ignore lint/suspicious/noExplicitAny: minimal chrome stub for the test
 		;(globalThis as any).chrome.runtime.getManifest = () => ({ background: { service_worker: "sw.js" } })
-		expect(isBackgroundSender(s({ id: "nulo-ext-id", url: "chrome-extension://nulo-ext-id/src/popup/index.html" }))).toBe(false)
-		expect(isBackgroundSender(s({ id: "nulo-ext-id", url: "chrome-extension://nulo-ext-id/src/offscreen/index.html" }))).toBe(false)
-		expect(isBackgroundSender(s({ id: "nulo-ext-id", url: "chrome-extension://nulo-ext-id/sw.js", tab: { id: 1 } }))).toBe(false)
-		expect(isBackgroundSender(s({ id: "nulo-ext-id", tab: { id: 1 } }))).toBe(false)
-		expect(isBackgroundSender(s({ id: "other-ext" }))).toBe(false)
-		expect(isBackgroundSender(s({ id: "nulo-ext-id", url: "https://evil.example/x", tab: { id: 5 } }))).toBe(false)
-		expect(isBackgroundSender(undefined)).toBe(false)
+		expect(await isBackgroundSender(s({ id: "nulo-ext-id", url: "chrome-extension://nulo-ext-id/src/popup/index.html" }))).toBe(false)
+		expect(await isBackgroundSender(s({ id: "nulo-ext-id", url: "chrome-extension://nulo-ext-id/src/offscreen/index.html" }))).toBe(
+			false,
+		)
+		expect(await isBackgroundSender(s({ id: "nulo-ext-id", url: "chrome-extension://nulo-ext-id/sw.js", tab: { id: 1 } }))).toBe(false)
+		expect(await isBackgroundSender(s({ id: "nulo-ext-id", tab: { id: 1 } }))).toBe(false)
+		expect(await isBackgroundSender(s({ id: "other-ext" }))).toBe(false)
+		expect(await isBackgroundSender(s({ id: "nulo-ext-id", url: "https://evil.example/x", tab: { id: 5 } }))).toBe(false)
+		expect(await isBackgroundSender(undefined)).toBe(false)
 	})
 })
