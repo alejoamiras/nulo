@@ -294,6 +294,6 @@ const collapsingLabel = "Import Account"
 	display: block;
 	white-space: normal;
 	word-break: break-all;
-	font-family: var(--nulo-font-mono, ui-monospace, monospace);
+	font-family: var(--font-mono);
 }
 </style>
