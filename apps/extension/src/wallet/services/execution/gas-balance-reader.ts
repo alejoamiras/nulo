@@ -19,7 +19,6 @@
  * it dimmed instead of a skeleton (stale-while-revalidate).
  */
 
-import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { FpcType, type FpcInfo } from "@/wallet/services/fpc/service"
 import { feeJuiceAddress } from "@/wallet/utils/fee-juice"
 import { batchedViewSimulation, type BatchedViewSimulationDeps } from "./helpers/batched-view-simulation"
@@ -220,13 +219,13 @@ export class GasBalanceReader {
 		try {
 			return { value: await read(), failed: false }
 		} catch (err) {
-			this.deps.logDebug(`getGasBalances: ${label} FeeJuice leg failed, retrying once:`, getErrorMessage(err))
+			this.deps.logDebug(`getGasBalances: ${label} FeeJuice leg failed, retrying once:`, err)
 		}
 		await new Promise((r) => setTimeout(r, this.deps.failedLegRetryDelayMs ?? GAS_BALANCE_FAILED_LEG_RETRY_DELAY_MS))
 		try {
 			return { value: await read(), failed: false }
 		} catch (err) {
-			this.deps.logError(`Failed to get ${label} FeeJuice balance`, getErrorMessage(err))
+			this.deps.logError(`Failed to get ${label} FeeJuice balance`, err)
 			return { value: null, failed: true }
 		}
 	}

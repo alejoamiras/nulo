@@ -260,7 +260,8 @@ export const trim = (value: unknown, depth: number = 0): unknown => {
 			return acc
 		}, {})
 	}
-	return value
+	// A pre-flattened string is opaque to the key-name walker; scrub endpoint URLs at least.
+	return typeof value === "string" ? scrubUrls(value) : value
 }
 
 export const print = (log: Log) => {

@@ -1,3 +1,4 @@
+import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { Fr } from "@aztec/foundation/curves/bn254"
 import { toRestoreError } from "@/utils/restore-error"
 import type { BrowserApi, StorageArea } from "@nulo/wallet-core/ports"
@@ -14,7 +15,6 @@ import {
 } from "@nulo/extension-messaging/errors"
 import { Lock } from "@/wallet/utils"
 import { ProfileRepository } from "./repository"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { array_equals, canonicalizeMnemonic, getEntropy, getMnemonic } from "@nulo/wallet-core/utils"
 import {
@@ -1176,7 +1176,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			})
 			return true
 		} catch (error) {
-			this.logError("Failed to confirm operation", getErrorMessage(error))
+			this.logError("Failed to confirm operation", error)
 			throw new Error(getErrorMessage(error))
 		}
 	}
@@ -1539,7 +1539,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					this.deletionState.release(t.profileId)
 				})
 			} catch (err) {
-				this.logError(`resume deletion failed for ${t.profileId}`, getErrorMessage(err))
+				this.logError(`resume deletion failed for ${t.profileId}`, err)
 			}
 		}
 	}
@@ -1601,7 +1601,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				this.logError(`torn-import sweep: completing compensating delete for ${marker.profileId}`)
 				await this.deleteProfile(marker.profileId, { pxeGeneration: marker.pxeGeneration, markerAt: marker.at })
 			} catch (err) {
-				this.logError(`torn-import sweep failed for ${marker.profileId}`, getErrorMessage(err))
+				this.logError(`torn-import sweep failed for ${marker.profileId}`, err)
 			}
 		}
 	}
@@ -1666,7 +1666,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				}
 			}
 		} catch (error) {
-			this.logError("Failed to confirm operation", getErrorMessage(error))
+			this.logError("Failed to confirm operation", error)
 			throw new Error(getErrorMessage(error))
 		}
 	}

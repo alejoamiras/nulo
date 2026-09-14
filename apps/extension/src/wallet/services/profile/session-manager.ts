@@ -54,7 +54,7 @@ import type { ConfigProp, IConfig } from "@/wallet/config"
 import { type ILogger, LogLevel } from "@/wallet/logger"
 import { ValueStorage } from "@/wallet/storage"
 import type { AlarmEvent, AlarmsPort, BrowserApi } from "@nulo/wallet-core/ports"
-import { AlarmDispatcher, getErrorMessage, Lock } from "@nulo/wallet-core/utils"
+import { AlarmDispatcher, Lock } from "@nulo/wallet-core/utils"
 import {
 	asImportedKeysDek,
 	type ImportedKeysDek,
@@ -300,7 +300,7 @@ export class SessionManager {
 				try {
 					await this.session.set(session)
 				} catch (error) {
-					this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to persist opened session (in-memory only)", getErrorMessage(error))
+					this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to persist opened session (in-memory only)", error)
 					// The write failed, so the persisted record is now indeterminate — it
 					// may still hold a PRIOR profile's session that restore() would
 					// reactivate on the next SW start (wrong profile). Best-effort clear it.
@@ -336,7 +336,7 @@ export class SessionManager {
 				this.sessionGeneration++
 			})
 		} catch (error) {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to open profile session", getErrorMessage(error))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to open profile session", error)
 		}
 	}
 
@@ -388,7 +388,7 @@ export class SessionManager {
 				try {
 					await this.session.delete()
 				} catch (error) {
-					this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to delete persisted session on close", getErrorMessage(error))
+					this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to delete persisted session on close", error)
 				}
 				// Cancel any pending lock alarm. Idempotent — `clear()` returns
 				// `false` if no alarm exists. Run after state-clear so a racing
@@ -398,7 +398,7 @@ export class SessionManager {
 				await this.clearLockAlarm()
 			})
 		} catch (error) {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to close profile session", getErrorMessage(error))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to close profile session", error)
 		}
 		return emitted
 	}
@@ -446,7 +446,7 @@ export class SessionManager {
 				})
 			}
 		} catch (error) {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to refresh profile session", getErrorMessage(error))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to refresh profile session", error)
 		}
 	}
 
@@ -494,7 +494,7 @@ export class SessionManager {
 			})
 			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Cleared passhash bearer (strict mode)")
 		} catch (error) {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to clear passhash bearer", getErrorMessage(error))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to clear passhash bearer", error)
 		}
 	}
 
@@ -521,7 +521,7 @@ export class SessionManager {
 			// `nulo:core:session` must NOT abort service init (this runs under
 			// `ServiceCollection.start()`) — treat it as "no restorable session"
 			// so the user simply re-unlocks. The bad record stays for diagnosis.
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "Undecodable persisted session; skipping restore", getErrorMessage(error))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Undecodable persisted session; skipping restore", error)
 			return
 		}
 		if (!session) {
@@ -615,12 +615,7 @@ export class SessionManager {
 				// (verified by zeroize.test.ts). Safe to zero the pair after.
 				secret = Fr.fromBuffer(masterCopy)
 			} catch (err) {
-				this.logger.log(
-					LOG_SOURCE,
-					LogLevel.Debug,
-					"Bearer decrypted to an out-of-range secret → silentClose",
-					getErrorMessage(err),
-				)
+				this.logger.log(LOG_SOURCE, LogLevel.Debug, "Bearer decrypted to an out-of-range secret → silentClose", err)
 				await this.silentClose()
 				return
 			} finally {
@@ -687,7 +682,7 @@ export class SessionManager {
 			this.activeSession = undefined
 			await this.clearLockAlarm()
 		} catch (error) {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to close profile session", getErrorMessage(error))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to close profile session", error)
 		}
 	}
 
@@ -778,7 +773,7 @@ export class SessionManager {
 				await this.scheduleLockAlarm(newLockedAt)
 			})
 		} catch (error) {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to apply TTL change", getErrorMessage(error))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to apply TTL change", error)
 		}
 	}
 
@@ -840,7 +835,7 @@ export class SessionManager {
 		try {
 			await this.dispatcher.create({ when: lockedAt })
 		} catch (error) {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to schedule TTL alarm", getErrorMessage(error))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to schedule TTL alarm", error)
 		}
 	}
 
@@ -853,7 +848,7 @@ export class SessionManager {
 		try {
 			await this.dispatcher.clear()
 		} catch (error) {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to clear TTL alarm", getErrorMessage(error))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to clear TTL alarm", error)
 		}
 	}
 }

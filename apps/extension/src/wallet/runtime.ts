@@ -165,11 +165,11 @@ export function stopRuntime(state: RuntimeState, clock: WalletRuntimeDeps["clock
 		state.heartbeatHandle = undefined
 	}
 	if (state.reaper !== undefined) {
-		state.reaper.stop().catch((error) => logger.log("wallet", LogLevel.Error, "JournalReaper stop failed", getErrorMessage(error)))
+		state.reaper.stop().catch((error) => logger.log("wallet", LogLevel.Error, "JournalReaper stop failed", error))
 		state.reaper = undefined
 	}
 	if (state.journalGc !== undefined) {
-		state.journalGc.stop().catch((error) => logger.log("wallet", LogLevel.Error, "JournalGC stop failed", getErrorMessage(error)))
+		state.journalGc.stop().catch((error) => logger.log("wallet", LogLevel.Error, "JournalGC stop failed", error))
 		state.journalGc = undefined
 	}
 }
@@ -186,7 +186,7 @@ async function bootRuntime(deps: WalletRuntimeDeps, services: ServiceCollection,
 	try {
 		await browserApi.runtime.setUninstallURL(UNINSTALL_URL)
 	} catch (error) {
-		logger.log("wallet", LogLevel.Warn, "Failed to set uninstall URL", getErrorMessage(error))
+		logger.log("wallet", LogLevel.Warn, "Failed to set uninstall URL", error)
 	}
 
 	let gateDecision: MigrationGateDecision
@@ -254,7 +254,7 @@ async function bootRuntime(deps: WalletRuntimeDeps, services: ServiceCollection,
 	state.heartbeatHandle = clock.setInterval(() => {
 		browserApi.storage.session
 			.set({ "nulo:liveness": clock.now() })
-			.catch((error) => logger.log("wallet", LogLevel.Error, "Heartbeat failed", getErrorMessage(error)))
+			.catch((error) => logger.log("wallet", LogLevel.Error, "Heartbeat failed", error))
 	}, HEARTBEAT_INTERVAL_MS)
 }
 
@@ -570,14 +570,14 @@ export function armPostStartWork(
 	const { browserApi, logger } = deps
 	void deletionCoordinator
 		.resumePending(journalBootCutoff)
-		.catch((error) => logger.log("wallet", LogLevel.Error, "resumePendingDeletions failed", getErrorMessage(error)))
+		.catch((error) => logger.log("wallet", LogLevel.Error, "resumePendingDeletions failed", error))
 
 	const journalService = services.get(OperationJournalService.name) as OperationJournalService
 	const reaper = new JournalReaper(journalService, browserApi.alarms, logger, undefined, journalBootCutoff)
-	reaper.start().catch((error) => logger.log("wallet", LogLevel.Error, "JournalReaper start failed", getErrorMessage(error)))
+	reaper.start().catch((error) => logger.log("wallet", LogLevel.Error, "JournalReaper start failed", error))
 
 	const journalGc = new JournalGC(journalService, browserApi.alarms, logger)
-	journalGc.start().catch((error) => logger.log("wallet", LogLevel.Error, "JournalGC start failed", getErrorMessage(error)))
+	journalGc.start().catch((error) => logger.log("wallet", LogLevel.Error, "JournalGC start failed", error))
 
 	void (async () => {
 		try {
@@ -589,7 +589,7 @@ export function armPostStartWork(
 			const journalCount = Object.keys(all).filter((k) => k.startsWith("nulo:journal@")).length
 			logger.log("wallet", LogLevel.Info, `local storage: ${journalCount} journal records`)
 		} catch (error) {
-			logger.log("wallet", LogLevel.Debug, "local-storage probe skipped", getErrorMessage(error))
+			logger.log("wallet", LogLevel.Debug, "local-storage probe skipped", error)
 		}
 	})()
 	return { reaper, journalGc }
@@ -608,5 +608,5 @@ function writeInitialLiveness(
 ): void {
 	browserApi.storage.session
 		.set({ "nulo:liveness": clock.now() })
-		.catch((error) => logger.log("wallet", LogLevel.Error, "Initial liveness write failed", getErrorMessage(error)))
+		.catch((error) => logger.log("wallet", LogLevel.Error, "Initial liveness write failed", error))
 }

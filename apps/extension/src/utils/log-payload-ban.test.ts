@@ -56,7 +56,8 @@ const SCANNED_EXT = /\.(ts|js|vue)$/
  * Deliberately excludes `secret` and `token`: both are ambiguous in this codebase (ciphertext on
  * `Profile`, a token contract nearly everywhere) and would fire constantly on safe lines.
  */
-const EXTRA_NAMES = ["masterSecret", "rawContent", "privateBalance", "publicBalance"]
+// The two flatteners turn an Error into a string the walker cannot scrub — pass the Error.
+const EXTRA_NAMES = ["masterSecret", "rawContent", "privateBalance", "publicBalance", "getErrorMessage", "errorMessageFromUnknown"]
 
 /**
  * Every denied name, taken FROM the runtime denylists rather than restated beside them.

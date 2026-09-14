@@ -143,7 +143,7 @@ const {
 	},
 	debounceMs: 500,
 	onError: (key, err) => {
-		console.error(`[Execute] Fee estimation failed for op ${key}:`, getErrorMessage(err), getErrorData(err))
+		console.error(`[Execute] Fee estimation failed for op ${key}:`, err, getErrorData(err))
 		openToast({ label: "Couldn't estimate fee — retry.", icon: "warning", color: "red" }, TOAST_DURATION.LONG)
 	},
 })

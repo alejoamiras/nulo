@@ -1,5 +1,4 @@
 import type { ILogger } from "@nulo/wallet-core/logger"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { BaseService } from "../core/base-service"
 import { isTrustedInternalSender } from "../core/sender-auth"
@@ -88,13 +87,13 @@ export abstract class Service<TRequests extends MethodsMap, TEvents extends Even
 			try {
 				client.postMessage(message)
 			} catch (error) {
-				if (this.clients.includes(client)) this.logError("Failed to send event", getErrorMessage(error))
+				if (this.clients.includes(client)) this.logError("Failed to send event", error)
 			}
 		}
 	}
 
 	protected onSendDropped(error: unknown, client: chrome.runtime.Port): void {
-		if (this.clients.includes(client)) this.logError("Failed to send message", getErrorMessage(error))
+		if (this.clients.includes(client)) this.logError("Failed to send message", error)
 	}
 
 	// Overridable convenience defaults (subclasses may override).

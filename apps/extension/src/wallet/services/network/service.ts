@@ -249,7 +249,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 					seeded.push(network)
 					if (seed.isPrimaryActive) activeId = network.id
 				} catch (error) {
-					this.logError(`Failed to seed default '${seed.name}'`, getErrorMessage(error))
+					this.logError(`Failed to seed default '${seed.name}'`, error)
 				}
 			}
 			// The per-seed catch above (soft-fail is right for one bad seed) also
@@ -819,14 +819,14 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			try {
 				await subscriber(profileId, chainId, networkId)
 			} catch (error) {
-				this.logError(`purgeChain subscriber failed for (${profileId}, ${chainId})`, getErrorMessage(error))
+				this.logError(`purgeChain subscriber failed for (${profileId}, ${chainId})`, error)
 				errors.push(error)
 			}
 		}
 		try {
 			await this.pxeServiceClient.clearChainState(profileId, chainId)
 		} catch (error) {
-			this.logError(`PxeServiceClient.clearChainState failed`, getErrorMessage(error))
+			this.logError("PxeServiceClient.clearChainState failed", error)
 			errors.push(error)
 		}
 		this.emit("onChainPurged", { profileId, chainId })
@@ -1000,7 +1000,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			if (sameLocalNetworkUrl(rpcUrl, LOCAL_NETWORK_RPC_URL)) return { chainId: 0, l1ChainId }
 			return { chainId: (info.l1ChainId ^ info.rollupVersion) >>> 0, l1ChainId }
 		} catch (error) {
-			this.logError("Failed to fetch node info", getErrorMessage(error))
+			this.logError("Failed to fetch node info", error)
 			throw new Error("Failed to fetch node info")
 		}
 	}

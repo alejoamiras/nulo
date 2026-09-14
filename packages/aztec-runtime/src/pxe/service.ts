@@ -205,7 +205,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		// would deadlock the reset flow. The deferred sweep is race-safe against that in-flight
 		// deletion: the profile row still exists while its purge runs (the coordinator deletes
 		// the row LAST), so the sweep skips it; every removal is idempotent + NotFound-swallowed.
-		void this.sweepOrphanStores().catch((err) => this.logWarn("deferred orphan-store sweep failed", errorMessageFromUnknown(err)))
+		void this.sweepOrphanStores().catch((err) => this.logWarn("deferred orphan-store sweep failed", err))
 
 		// NOTE: PXE cleanup on profile deletion is NO LONGER a fire-and-forget
 		// `onProfileDeleted` subscriber (it raced the cascade + unconditionally
@@ -350,10 +350,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			if (!opts?.nodeBestEffort) throw err
 			// Node hiccup on a best-effort lookup: degrade to "not found"
 			// and continue the cascade so the local known-bundle still has a chance.
-			this.logWarn(
-				`getContractInstance: node lookup failed for ${address.toString()}, continuing cascade`,
-				errorMessageFromUnknown(err),
-			)
+			this.logWarn(`getContractInstance: node lookup failed for ${address.toString()}, continuing cascade`, err)
 			instance = undefined
 		}
 		if (instance) return instance

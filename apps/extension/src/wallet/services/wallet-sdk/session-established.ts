@@ -4,7 +4,6 @@
  * graph. See `session-established.test.ts` for the B-06 / B-13 pins.
  */
 import type { Fr } from "@aztec/foundation/curves/bn254"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { ILogger } from "../../logger"
 import { LogLevel } from "../../logger"
 import { isPendingVerificationStale, type PendingVerificationEntry } from "./pending-verification"
@@ -159,7 +158,8 @@ export async function handleSessionEstablished(
 		deps.logger.log(
 			"wallet-sdk-bg",
 			LogLevel.Warn,
-			`onSessionEstablished failed for session ${describeExternalId(session.sessionId)} on chain ${chainId} — terminating: ${getErrorMessage(err)}`,
+			`onSessionEstablished failed for session ${describeExternalId(session.sessionId)} on chain ${chainId} — terminating`,
+			err,
 		)
 		deps.terminateSession(session.sessionId)
 		return false

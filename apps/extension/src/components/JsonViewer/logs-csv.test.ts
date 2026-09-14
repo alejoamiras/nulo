@@ -55,4 +55,26 @@ describe("JsonViewer/logs-csv", () => {
 		const csv = buildLogsCsv([{ timestamp: T, source: "x", level: LogLevel.Info, data: null }])
 		expect(csv).toContain('"INFO",""')
 	})
+
+	test("neutralizes every spreadsheet formula trigger with a leading apostrophe", () => {
+		for (const trigger of ["=", "+", "-", "@", "\t", "\r"]) {
+			const csv = buildLogsCsv([{ timestamp: T, source: "x", level: LogLevel.Info, data: [`${trigger}cmd|' /C calc'!A0`] }])
+			const dataCell = csv.split("\n")[1].split('","')[3]
+			expect(dataCell.startsWith("'")).toBe(true)
+			expect(dataCell.startsWith(`'${trigger}`)).toBe(true)
+		}
+	})
+
+	test("a trigger hiding behind a quote or a line break is still inside a quoted cell, never a new one", () => {
+		const csv = buildLogsCsv([{ timestamp: T, source: "x", level: LogLevel.Info, data: ['"=1+1\n=2+2'] }])
+		const line = csv.split("\n")[1]
+		expect(line.endsWith('"""=1+1')).toBe(true)
+		expect(csv.split("\n")[2]).toBe('=2+2"')
+		expect(csv).not.toMatch(/,"=/)
+	})
+
+	test("leaves a cell that starts with an ordinary character untouched", () => {
+		const csv = buildLogsCsv([{ timestamp: T, source: "x", level: LogLevel.Info, data: ["ok = 1"] }])
+		expect(csv).toContain('"ok = 1"')
+	})
 })

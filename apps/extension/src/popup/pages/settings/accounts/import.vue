@@ -17,7 +17,6 @@ import { managers } from "@/utils/core"
 
 /** Utils */
 import { FileTooLargeError, pickFile } from "@/utils"
-import { trimAddress } from "@/utils/string"
 import { storageLocalSet } from "@/utils/storage"
 
 /** Composables */
@@ -224,7 +223,7 @@ const collapsingLabel = "Import Account"
 					<SettingItem
 						size="large"
 						:title="accountName.trim() || 'Account'"
-						:description="trimAddress(previewAddress, 8, 6, '...')"
+						:description="previewAddress"
 						icon="user"
 						raw
 						data-testid="import-account-preview"

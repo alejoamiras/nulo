@@ -5,7 +5,7 @@ import type { ILogger } from "@/wallet/logger"
 import { ConfigService } from "@/wallet/services/config/service"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { ValueStorage } from "@/wallet/storage"
-import { AlarmDispatcher, EventHandler, getErrorMessage } from "@nulo/wallet-core/utils"
+import { AlarmDispatcher, EventHandler } from "@nulo/wallet-core/utils"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import { allCoingeckoIds, getSanityBand } from "./price-map"
 import {
@@ -207,7 +207,7 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 			} else {
 				await this.dispatcher.clear()
 			}
-		})().catch((err) => this.log(LogLevel.Warn, "profile-change handling failed", getErrorMessage(err)))
+		})().catch((err) => this.log(LogLevel.Warn, "profile-change handling failed", err))
 	}
 
 	private readonly onConfigUpdated = (prop: { key: string; value: unknown }): void => {
@@ -245,7 +245,7 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 					}
 				}
 			})
-			.catch((err) => this.log(LogLevel.Warn, "config-change handling failed", getErrorMessage(err)))
+			.catch((err) => this.log(LogLevel.Warn, "config-change handling failed", err))
 	}
 
 	// ── Internals ───────────────────────────────────────────────────────
@@ -371,7 +371,7 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 			const backoff = Math.min(BACKOFF_BASE_MS * 2 ** (this.consecutiveFailures - 1), BACKOFF_CAP_MS)
 			const jitter = 0.75 + Math.random() * 0.5
 			this.nextAllowedFetchAt = this.now() + Math.round(backoff * jitter)
-			this.log(LogLevel.Warn, `refresh failed (attempt ${this.consecutiveFailures})`, getErrorMessage(error))
+			this.log(LogLevel.Warn, `refresh failed (attempt ${this.consecutiveFailures})`, error)
 			return this.readUsable()
 		} finally {
 			clearTimeout(timeout)

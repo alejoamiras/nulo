@@ -116,6 +116,7 @@ onBeforeUnmount(() => {
 					:type="isPasswordType ? 'password' : 'text'"
 					@input="handlePasswordInput"
 					placeholder="Enter current password"
+					autocomplete="current-password"
 					autofocus
 					data-testid="current-password-input"
 				>
@@ -158,6 +159,7 @@ onBeforeUnmount(() => {
 					@input="handlePasswordInput"
 					:maxLength="maxPasswordLength"
 					placeholder="Enter new password"
+					autocomplete="new-password"
 					data-testid="new-password-input"
 				>
 					<template #suffix>
@@ -189,6 +191,7 @@ onBeforeUnmount(() => {
 					@input="handlePasswordInput"
 					:maxLength="maxPasswordLength"
 					placeholder="Repeat new password"
+					autocomplete="new-password"
 				/>
 			</Flex>
 

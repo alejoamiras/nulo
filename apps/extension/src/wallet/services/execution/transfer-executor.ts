@@ -22,7 +22,6 @@ import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { TxExecutionRequest } from "@aztec/stdlib/tx"
 import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
 import { DuplicateInitializationError } from "@nulo/extension-messaging/errors"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import { formatFeeJuice } from "@/utils/fee-estimation"
 import type { Network } from "@/wallet/services/network/service"
@@ -89,7 +88,7 @@ export interface TransferExecutorDeps {
 	): Promise<FeeEstimate>
 	createJournalOperation(input: NewOperationInput): Promise<OperationRecord>
 	transitionJournal(journalId: string, progress: JobProgress, error?: JobError | null): Promise<unknown>
-	logDebug(msg: string): void
+	logDebug(msg: string, ...rest: unknown[]): void
 	logError(msg: string, ...rest: unknown[]): void
 }
 
@@ -108,7 +107,7 @@ export class TransferExecutor {
 			try {
 				await this.deps.transitionJournal(journalId, progress, error)
 			} catch (err) {
-				this.deps.logError("Failed to update journal operation", getErrorMessage(err))
+				this.deps.logError("Failed to update journal operation", err)
 			}
 		}
 
@@ -246,7 +245,7 @@ export class TransferExecutor {
 				})
 			}
 		} catch (error) {
-			this.deps.logError("Failed to create journal operation", getErrorMessage(error))
+			this.deps.logError("Failed to create journal operation", error)
 		}
 		const journalId = journalOp?.id
 		const controller = journalId ? new AbortController() : undefined
@@ -379,7 +378,7 @@ export class TransferExecutor {
 			} catch (error) {
 				// Cache write is best-effort. The estimate result still goes
 				// out — the popup just won't get a reuse token.
-				this.deps.logDebug(`estimateTransferFee: cache write skipped: ${getErrorMessage(error)}`)
+				this.deps.logDebug("estimateTransferFee: cache write skipped", error)
 				estimateId = undefined
 			}
 		}

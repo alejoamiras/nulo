@@ -272,6 +272,12 @@ describe("trim — endpoint URLs", () => {
 	test("does not throw on a malformed url", () => {
 		expect((trim({ rpcUrl: "not a url" }) as Record<string, unknown>).rpcUrl).toBe("[url]")
 	})
+
+	test("scrubs an endpoint out of a pre-flattened string — the branch the key walker cannot reach", () => {
+		const flat = `RPC failed: https://rpc.example.com/v2/${SECRET}?apiKey=${SECRET}`
+		expect(trim(flat)).toBe("RPC failed: https://rpc.example.com")
+		expect(JSON.stringify(trim(["prefix", flat]))).not.toContain(SECRET)
+	})
 })
 
 describe("trim — structural guards retained", () => {
