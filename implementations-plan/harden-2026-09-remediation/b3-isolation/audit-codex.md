@@ -159,3 +159,42 @@ Prompt: round 3's three items adopted (viaPxe rethrows the recovery error by typ
 ### Response
 
 approve
+
+## Post-implementation fix loop (GPT-6 Astra `high`, session `01a0a1dd-60e7-7da2-942d-506590b00f58`)
+
+### Round 1 — reject (7 findings, all adopted in `d6fc01bd`)
+
+1. **Should-fix · high confidence — `apps/extension/src/wallet/services/auth-registry/service.ts:289`**  
+   A profile switch during `waitForTx` clears the node cache; `getNode(network.chainId)` then resolves the newly active profile’s endpoint. Consequently, p1’s transaction hash reaches p2’s RPC, and p1’s revoke confirmation uses a provider p1 never selected. The same lookup appears at lines 341 and 364. **Smallest fix:** resolve the node from the captured network’s endpoint using `primaryEndpointUrl(network)` and `getNodeForUrl`, preserving that endpoint throughout the operation.
+
+2. **Should-fix · high confidence — `apps/extension/src/composables/useAuthRegistryStatus.ts:17`**  
+   Event matching omits `profileId`. I reproduced a p2 disabled event changing p1’s displayed status when chain and account match. Both registry popups use this composable; the change popup also derives its submitted toggle from this value. **Smallest fix:** include `profileId` in the supplied scope and compare all three fields, updating both callers and adding a foreign-profile event test.
+
+3. **Should-fix · high confidence — `apps/extension/src/popup/pages/settings/security/export/full.vue:528`**  
+   “Restore it into a new profile” does not work for a passkey profile while the damaged profile exists: `profile/service.ts:2523` rejects the existing ID, and line 2528 independently rejects duplicate credentials. The round-trip test succeeds because it explicitly deletes the source first. **Smallest fix:** make the passkey recovery instructions state the required sequence: save the backup, remove the damaged local profile while retaining the authenticator passkey, then restore using that passkey. Keep the duplicate-credential restriction.
+
+4. **Should-fix · high confidence — `apps/extension/src/popup/pages/settings/security/export/full.vue:285`**  
+   `recoveryMode` and `dekReplaced` are conflated. Corrupting only `envelopeMac` opens recovery mode, but export retains the genuine DEK and imported-key ciphertext remains recoverable. Nevertheless, lines 524–528 say the keys are absent, a fresh DEK was exported, and accounts must be re-imported. **Smallest fix:** distinguish omitted PXE state from replaced DEK material; show imported-key loss only when `dekReplaced` is true. Correct the component test that currently expects the inaccurate warning.
+
+5. **Should-fix · high confidence — `packages/aztec-runtime/src/pxe/service.ts:808`**  
+   The new differing-key rejection abandons the decoded key buffer without wiping it. Likewise, `apps/extension/src/wallet/runtime.ts:575` abandons the derived key if generation revalidation throws or returns a different generation; the client never receives that buffer, so its cleanup cannot run. **Smallest fix:** wipe buffers on every exit that does not transfer ownership. For an identical re-provision, retain the installed buffer and wipe the redundant decoded copy.
+
+6. **Should-fix · high confidence — `apps/extension/src/wallet/services/pxe/client.test.ts:49`**  
+   The required warm-runtime regression is replaced by a manually populated recovery `Set`. Removing production guard registration would leave these tests green. Similarly, `dapp-session/service.test.ts:54` substitutes a key-provider stub instead of exercising the required real `ProfileService` derivation. **Smallest fix:** add the planned real-session lifecycle test—healthy unlock, warm runtime, lock, corrupt slot, degraded unlock, immediate request rejected—and connect the sibling-session test to the real profile service.
+
+7. **Nit · high confidence — stale and excessive comments**  
+   `useFullBackupImport.ts:211` still says authwits carry only `account`, immediately contradicting the new tuple filter. `packages/wallet-crypto/src/entropy-mac.ts:25` still claims corruption cannot deny access to main funds; recovery mode now blocks PXE operations. `packages/wallet-crypto/src/pxe-store-key.ts:9` says the key exists only while unlocked, despite retained offscreen keys. **Smallest fix:** correct those invariants. Also shorten `profile/service.ts:1680` to the credential-binding and export contract, removing obsolete “Path A/Path B” history; remove the review reference and compress the omission explanation at `account-state/service.ts:220`.
+
+reject — Cross-profile registry handling remains incomplete, recovery instructions misstate the repair path, and the required isolation tests do not exercise production wiring.
+### Round 2 — reject (2 findings, adopted in `3ee52baf`)
+
+1. **Should-fix · high confidence — `apps/extension/src/wallet/services/profile/service.integration.test.ts:3143`**  
+   The sibling forgery changes `profileId` without recomputing the MAC. Because `profileId` is signed, this fails verification even when both profiles share the same vulnerable master-only key. The comment claiming p1 “signs a row for p2” is therefore inaccurate. **Smallest fix:** construct the p2-targeted payload first, sign it using `await profiles.deriveDappSessionMacKey(p1.id)` while p1 is unlocked, then verify rejection under p2. This must fail if the production derivation ignores the DEK.
+
+2. **Should-fix · high confidence — `apps/extension/src/popup/pages/settings/security/export/full.vue:549`**  
+   “The chain re-syncs from the network” implies that syncing repairs the omitted state. Custom-contract artifacts and sender registrations are omitted from this backup; syncing alone cannot reconstruct them. A restore can finish with affected private notes still undiscovered. **Smallest fix:** say that custom contracts and senders must be re-registered and their notes may remain unavailable until that recovery material is supplied.
+
+reject — The sibling regression test still misses the shared-key vulnerability, and the recovery warning overstates what network syncing restores.
+### Round 3 — approve
+
+approve
