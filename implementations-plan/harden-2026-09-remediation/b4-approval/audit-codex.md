@@ -263,3 +263,17 @@ Prompt: re-audit the round-2 adoptions (NO_FROM preview, guard scope, release ru
 No files changed; no tests run.
 
 **Verdict: `reject`.**
+
+## Round 4 — 2026-09-14 (resumed session, `high`)
+
+The revisions close the five round-3 issues. No blocking or should-fix findings in the changed design. **Confidence: high.**
+
+1. **Nit — remove superseded wording.** [plan.md:16](implementations-plan/harden-2026-09-remediation/b4-approval/plan.md:16) still initially says NO_FROM shows "Authorizations resolved at send" and the popup sends only `estimateId`, contradicting the revised rules later in that paragraph. [plan.md:25](implementations-plan/harden-2026-09-remediation/b4-approval/plan.md:25) also retains "builds the same request."
+
+   **Smallest change:** delete those superseded disclosure/envelope sentences; replace "same request" with "same canonical inputs and pre-discovery preparation."
+
+Read-only review; no tests run.
+
+**Verdict: `approve`.**
+
+**Disposition:** nit adopted (three sentences edited in `plan.md` §F-02 and §Tests). Plan status set to APPROVED.
