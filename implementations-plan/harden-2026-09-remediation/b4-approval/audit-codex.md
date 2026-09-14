@@ -220,3 +220,46 @@ The flood e2e asserts completion within approximately 30 seconds. Removing the t
 **Smallest fix:** explicitly pass `full` for raw-address arguments and test the real component, not an address-echoing stub. For NO_FROM, use “Caller: none” rather than suggesting the transaction entrypoint is a sender.
 
 **Verdict: `reject`.**
+
+## Round 3 — 2026-09-14 (resumed session)
+
+Prompt: re-audit the round-2 adoptions (NO_FROM preview, guard scope, release rules, fresh-branch contract, tests).
+
+### Response (paths made repo-relative)
+
+### Findings
+
+1. **Blocking — an in-flight window creation must still consume capacity. Confidence: high.**  
+   [plan.md:18](implementations-plan/harden-2026-09-remediation/b4-approval/plan.md:18) releases an “unopened” reservation on termination/deadline, but creation is asynchronous ([session-established.ts:144](apps/extension/src/wallet/services/wallet-sdk/session-established.ts:144)). With one window open and another creation pending, termination frees the pending slot; a replacement opens; the original creation then produces a third window. Removing it afterward does not preserve the cap.
+
+   **Smallest fix:** once `create` starts, retain its slot until creation fails or the returned window is removed. Termination **and deadline expiry** mark that attempt cancelled; neither releases capacity prematurely. Extend the race test to admit a replacement while creation/removal remains deferred and assert the peak count.
+
+2. **Should-fix — immediate release still omits unsuccessful returning/dedupe approvals and a no-window outcome. Confidence: high.**  
+   [plan.md:18](implementations-plan/harden-2026-09-remediation/b4-approval/plan.md:18) explicitly handles failed *fresh* approval. Returning and dedupe sites currently ignore `approveDiscovery`’s boolean ([background.ts:706](apps/extension/src/wallet/services/wallet-sdk/background.ts:706), [background.ts:731](apps/extension/src/wallet/services/wallet-sdk/background.ts:731)). A queued request whose tab disappeared can therefore acquire capacity, fail approval, and strand the slot until its deadline. Also, establishment recomputes `trustedVerification`; an admitted window can become unnecessary ([session-established.ts:142](apps/extension/src/wallet/services/wallet-sdk/session-established.ts:142)).
+
+   **Smallest fix:** release an unstarted reservation on unsuccessful approval at **every** site, on successful establishment needing no window, and on exceptions anywhere after acquisition—including fresh profile validation/session writes.
+
+   The revised fresh ordering otherwise works: awaiting admission inside the existing `try` keeps dedupe pending until its [finally](apps/extension/src/wallet/services/wallet-sdk/background.ts:836); releasing on `approveOrRollbackDiscoverySession` false/throw is correct.
+
+3. **Should-fix — the new preview RPC cannot use the promised cancellation lifecycle as specified. Confidence: high.**  
+   [plan.md:16](implementations-plan/harden-2026-09-remediation/b4-approval/plan.md:16) defines `previewOperationAuthwits(interactionId,index)` returning `previewId`, but promises eviction through estimate cancellation. Existing admission skips tokenless calls and settles using `result.estimateId` ([service.ts:453](apps/extension/src/wallet/services/execution/service.ts:453), [service.ts:464](apps/extension/src/wallet/services/execution/service.ts:464)). Merely extending `evictStash` cannot connect this preview to cancellation, admission limits, or approval handoff.
+
+   **Smallest fix:** pass the existing attempt token/flow key to the preview RPC, settle its `previewId` through that registry, and include previews in popup cancel/handoff/rearm. Make the cancellation tests exercise this RPC; standard-estimate cancellation tests would remain green with NO_FROM cleanup deleted.
+
+4. **Should-fix — define stable NO_FROM identity rather than literal request equality. Confidence: high.**  
+   The “same request” requirement/test ([plan.md:16](implementations-plan/harden-2026-09-remediation/b4-approval/plan.md:16), [plan.md:25](implementations-plan/harden-2026-09-remediation/b4-approval/plan.md:25)) cannot mean byte equality: construction reads live fee defaults ([tx-request-builder.ts:409](apps/extension/src/wallet/services/execution/tx-request-builder.ts:409)) and generates a fresh [salt](apps/extension/node_modules/@aztec/stdlib/src/tx/tx_execution_request.ts:62).
+
+   **Smallest fix:** fingerprint canonical materialized **inputs**, excluding generated salt/transaction hash, resolved fee defaults, simulation-derived gas and newly generated witnesses. Retain explicit fee constraints, call arguments—including any `authwit_nonce`—extras, account/chain/mode and canonical scopes. Use the same pre-discovery fee preparation and `additionalScopes` in both builds; confirm’s later `scopesWithAccount` belongs to real simulation ([dapp-send-executor.ts:774](apps/extension/src/wallet/services/execution/dapp-send-executor.ts:774)).
+
+   Fresh salt does **not itself** change the authorization message hash, which uses consumer, inner hash and chain identity ([dapp-send-executor.ts:870](apps/extension/src/wallet/services/execution/dapp-send-executor.ts:870)). Thus honest confirms need not universally abort. Test independent builds with different salt/live defaults but equal input identity.
+
+5. **Should-fix — two test expectations contradict the revision; envelope forwarding needs a negative route test. Confidence: high.**  
+   [plan.md:25](implementations-plan/harden-2026-09-remediation/b4-approval/plan.md:25) still expects “Authorizations resolved at send” and pins a delta without `previewId`.
+
+   **Smallest fix:** replace those expectations with the revised disclosure and delta shape. Exercise popup approval through dispatch into NO_FROM with a discovered hash **and no preview**. The current early branch drops the estimate parameter ([dapp-send-executor.ts:534](apps/extension/src/wallet/services/execution/dapp-send-executor.ts:534)); an executor-only negative test would miss deletion of the new forwarding.
+
+   I found no additional legitimate popup-approved route outside the proposed envelope. Generate its interaction/index context unconditionally, even when both IDs are absent. Matching-preview and silent-path positive controls intentionally remain green if the guard is deleted; the routed negative case must catch that deletion.
+
+No files changed; no tests run.
+
+**Verdict: `reject`.**
