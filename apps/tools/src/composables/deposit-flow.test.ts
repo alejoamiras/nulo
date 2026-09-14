@@ -50,6 +50,11 @@ const h = vi.hoisted(() => {
 		publicFj: undefined as bigint | undefined,
 		/** Whether the connected wallet routes a dApp-named public payer. */
 		selfPay: false,
+		/** What the claim's `send` throws; unset = it lands. */
+		sendThrows: undefined as string | undefined,
+		/** The checkpointed nullifier witness per read, consumed in order (the last answer repeats);
+		 *  undefined = absent, "throw" = the node cannot answer, "hang" = it never answers. */
+		witness: [] as unknown[],
 	}
 })
 
@@ -85,6 +90,15 @@ vi.mock("./useBridgeJournal", async (importOriginal) => {
 			h.t("updateRecord", { id, patch })
 		},
 		currentRecord: () => h.persisted,
+		updateRecordWhen: (id: string, when: (r: unknown) => boolean, patch: unknown) => {
+			if (h.updateRecordThrows) throw new Error("storage full")
+			// A missing fixture stands for a record without a fuel block, so the captured fallback is exercised.
+			const live = h.persisted ?? { id }
+			if (!when(live)) return undefined
+			const fields = typeof patch === "function" ? patch(live) : patch
+			h.t("updateRecord", { id, patch: fields })
+			return { ...(live as object), ...(fields as object) }
+		},
 		discard: (id: string) => h.t("discard", id),
 		flagRecordError: (id: string, msg: string) => h.t("flagRecordError", { id, msg }),
 	}
@@ -93,7 +107,13 @@ vi.mock("./useBridgeJournal", async (importOriginal) => {
 vi.mock("./fuelClaim", () => ({
 	buildFuelClaimInteraction: (_rec: unknown, opts: Record<string, unknown>) => {
 		h.t("builderOpts", opts)
-		return { simulate: async () => ({}), send: async () => ({ txHash: "0x1" }) }
+		return {
+			simulate: async () => ({}),
+			send: async () => {
+				if (h.sendThrows) throw new Error(h.sendThrows)
+				return { txHash: "0x1" }
+			},
+		}
 	},
 }))
 
@@ -103,6 +123,13 @@ vi.mock("@aztec/aztec.js/node", () => ({
 		getTxReceipt: async () => {
 			if (h.receiptStatus === undefined) throw new Error("node unreachable")
 			return { status: h.receiptStatus }
+		},
+		getNullifierMembershipWitness: (tag: string, nullifier: { toString(): string }) => {
+			h.t("witness", { tag, nullifier: nullifier.toString() })
+			const answer = h.witness.length > 1 ? h.witness.shift() : h.witness[0]
+			if (answer === "throw") return Promise.reject(new Error("node unreachable"))
+			if (answer === "hang") return new Promise(() => {})
+			return Promise.resolve(answer)
 		},
 	}),
 }))
@@ -125,7 +152,15 @@ vi.mock("@nulo/bridge-core", async (importOriginal) => ({
 	},
 }))
 
-import { buildFeeJuiceClaimDep, recoverDepositLeg, resolveHubClaimSendOpts, resolvePrivateFuelFee } from "./deposit-flow"
+import { feeJuiceMessageNullifier } from "@/lib/message-nullifier"
+import {
+	buildFeeJuiceClaimDep,
+	patchFuel,
+	recoverDepositLeg,
+	resolveHubClaimSendOpts,
+	resolvePrivateFuelFee,
+	sendStandaloneFjClaim,
+} from "./deposit-flow"
 
 const RECIPIENT = "0x1018808f2c17794badb361c02c945582b8198b495a7e8d01154f7eeb7d719c0d"
 
@@ -156,6 +191,8 @@ beforeEach(() => {
 	h.publicFj = undefined
 	h.selfPay = false
 	h.persisted = undefined
+	h.sendThrows = undefined
+	h.witness = []
 	vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000)
 })
 
@@ -244,6 +281,20 @@ describe("fee-juice claim builder — a prior claim on the PERSISTED block gates
 	test("a malformed persisted hash is a record fault, not a receipt to wait on", async () => {
 		expect(await stopWhy(mkRec({ fuel: { ...mkRec().fuel, claimTxHash: "0xnothex" } as never }))).toMatch(/malformed/)
 		expect(built()).toBe(false)
+	})
+
+	test("a patch computed for a fuel block the journal has since swapped out is refused", () => {
+		h.persisted = mkRec({ fuel: { ...mkRec().fuel, secretHashHex: "0xanother-deposit" } as never })
+		expect(patchFuel("0xspec1", mkRec().fuel, { consumed: true })).toBe(false)
+		expect(h.calls.some(([n]) => n === "updateRecord")).toBe(false)
+		// A block that has since learnt its message key is still the same block; a different key is not.
+		h.persisted = mkRec({ fuel: { ...mkRec().fuel, messageHash: "0xkey-a", leafIndex: "7" } as never })
+		expect(patchFuel("0xspec1", mkRec().fuel, { consumed: true })).toBe(true)
+		expect(patchFuel("0xspec1", { ...mkRec().fuel, messageHash: "0xkey-b" } as never, { consumed: true })).toBe(false)
+		// A record without a fuel block falls back to the captured one; nothing captured, nothing to merge.
+		h.persisted = mkRec({ fuel: undefined })
+		expect(patchFuel("0xspec1", mkRec().fuel, { consumed: true })).toBe(true)
+		expect(patchFuel("0xspec1", undefined, { consumed: true })).toBe(false)
 	})
 
 	test("the gate reads the PERSISTED block over the captured one, and latches merge into it", async () => {
@@ -482,6 +533,37 @@ describe("recoverDepositLeg — send records", () => {
 		expect(h.calls.at(-1)).toEqual(["updateRecord", { id: "send-1", patch: { leafIndex: "41", messageHash: `0x${"b".repeat(64)}` } }])
 	})
 
+	test("a fueled send whose fuel block was swapped out meanwhile is a fault, never 'recovered'", async () => {
+		const fuelLog = {
+			...bridgeLog(ROUTER, 41n, 0),
+			topics: [
+				keccak256(toHex("BridgeWithFuel(bytes32,bytes32,uint256,uint256,bytes32,bytes32,uint256,uint256,bytes32,bool)")),
+				zero32,
+			],
+			data: encodeAbiParameters(
+				[
+					{ type: "bytes32" },
+					{ type: "uint256" },
+					{ type: "uint256" },
+					{ type: "bytes32" },
+					{ type: "bytes32" },
+					{ type: "uint256" },
+					{ type: "uint256" },
+					{ type: "bytes32" },
+					{ type: "bool" },
+				],
+				[`0x${"b".repeat(64)}`, 41n, 5n, zero32, `0x${"c".repeat(64)}`, 42n, 7n, zero32, false],
+			),
+		}
+		const client = { getTransactionReceipt: async () => ({ status: "success", logs: [fuelLog] }) }
+		const fueled = { ...record, intent: "token+gas", fuel: mkRec().fuel } as unknown as SendDepositRecord
+		h.persisted = { ...fueled, fuel: { ...mkRec().fuel, secretHashHex: "0xanother-deposit" } }
+		await expect(recoverDepositLeg(fueled, client, generation as never)).rejects.toThrow(/changed while/)
+		expect(h.calls.some(([n]) => n === "updateRecord")).toBe(false)
+		h.persisted = fueled
+		await expect(recoverDepositLeg(fueled, client, generation as never)).resolves.toBe("recovered")
+	})
+
 	test("a send record without a generation cannot recover", async () => {
 		const client = { getTransactionReceipt: async () => ({ status: "success", logs: [] }) }
 		await expect(recoverDepositLeg(record, client)).rejects.toThrow(/no bridge/)
@@ -571,5 +653,56 @@ describe("own gas - a claim with no Fee Juice message of its own pays from the p
 		h.privateFj = 0n
 		expect(await resolve(noFuel(false), false)).toMatchObject({ kind: "stop", why: expect.stringMatching(/No gas/) })
 		expect(h.calls.some(([n]) => n === "selfPaidFeeJuicePayment")).toBe(false)
+	})
+})
+
+describe("standalone gas claim — a consumed-shaped refusal settles only on the CHECKPOINTED nullifier", () => {
+	const MESSAGE = `0x00${"7d".repeat(31)}`
+	const fuel = () =>
+		({ ...mkRec().fuel, messageHash: MESSAGE, received: "10", leafIndex: "3" }) as NonNullable<DepositJournalRecord["fuel"]>
+	const latched = () =>
+		h.calls.some(
+			([n, d]) =>
+				n === "updateRecord" && (d as { patch: { fuel?: { standaloneClaimed?: boolean } } }).patch.fuel?.standaloneClaimed === true,
+		)
+	const quick = { tries: 2, pollMs: 0, readMs: 20 }
+	const claim = (f = fuel()) => sendStandaloneFjClaim({}, AztecAddress.fromStringUnsafe(RECIPIENT), f, "0xspec1", quick)
+
+	test("the read is the fuel message's own nullifier at the checkpointed floor", async () => {
+		h.sendThrows = "L1-to-L2 message is already nullified"
+		h.witness = [{ leafIndex: 1n }]
+		await claim()
+		expect(latched()).toBe(true)
+		const expected = (await feeJuiceMessageNullifier({ messageHash: MESSAGE, secret: fuel().secret })).toString()
+		expect(h.calls.find(([n]) => n === "witness")?.[1]).toEqual({ tag: "checkpointed", nullifier: expected })
+	})
+
+	test("a checkpoint that lands during the poll latches; one that never lands leaves the affordance", async () => {
+		h.sendThrows = "L1-to-L2 message is already nullified"
+		h.witness = [undefined, { leafIndex: 1n }]
+		await claim()
+		expect(latched()).toBe(true)
+		h.calls.length = 0
+		h.witness = [undefined]
+		await expect(claim()).rejects.toThrow(/could not be confirmed/)
+		expect(h.calls.filter(([n]) => n === "witness")).toHaveLength(2)
+		expect(latched()).toBe(false)
+	})
+
+	test("a node that cannot or never answers, or a record without its message key, leaves the affordance", async () => {
+		h.sendThrows = "message has already been nullified"
+		h.witness = ["throw"]
+		await expect(claim()).rejects.toThrow(/could not be read/)
+		h.witness = ["hang"]
+		await expect(claim()).rejects.toThrow(/could not be read/)
+		h.witness = [{ leafIndex: 1n }]
+		await expect(claim({ ...fuel(), messageHash: undefined })).rejects.toThrow(/could not be read/)
+		expect(latched()).toBe(false)
+	})
+
+	test("any other refusal is the caller's, unchanged", async () => {
+		h.sendThrows = "Amount too low to cover gas cost"
+		await expect(claim()).rejects.toThrow(/too low/)
+		expect(latched()).toBe(false)
 	})
 })

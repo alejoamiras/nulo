@@ -14,6 +14,7 @@ import { computeFeeJuiceMessageNullifier, L1Actor, L1ToL2Message, L2Actor } from
 import {
 	type DepositEnvelopeV2,
 	deriveTokenClaimSecret,
+	feeJuiceAddress,
 	mintToPrivateContentHash,
 	mintToPublicContentHash,
 	type SendDepositRecord,
@@ -49,10 +50,16 @@ export async function recomputeTokenMessageHash(f: TokenMessageFacts): Promise<F
 	return message.hash()
 }
 
+/** The siloed nullifier `consumer` inserts when it consumes `messageHash` with `secret`. */
+export async function consumedMessageNullifier(consumer: string, messageHash: Fr, secret: Fr): Promise<Fr> {
+	const inner = await computeFeeJuiceMessageNullifier(messageHash, secret)
+	return siloNullifier(AztecAddress.fromStringUnsafe(consumer), inner)
+}
+
 /** The siloed nullifier the hub inserts when it consumes `messageHash`. `secretHex` is the record's
  *  claim value: the raw secret of a public deposit, the claim salt of a private one — the private
  *  consumer derives `derive_claim_secret(salt, recipient)` in-circuit, as `claim_private` does. */
-export async function tokenMessageNullifier(i: {
+export function tokenMessageNullifier(i: {
 	consumer: string
 	messageHash: Fr
 	secretHex: string
@@ -62,8 +69,13 @@ export async function tokenMessageNullifier(i: {
 	const secret = i.isPrivate
 		? deriveTokenClaimSecret(Fr.fromString(i.secretHex), AztecAddress.fromStringUnsafe(i.recipient))
 		: Fr.fromString(i.secretHex)
-	const inner = await computeFeeJuiceMessageNullifier(i.messageHash, secret)
-	return siloNullifier(AztecAddress.fromStringUnsafe(i.consumer), inner)
+	return consumedMessageNullifier(i.consumer, i.messageHash, secret)
+}
+
+/** The nullifier the Fee Juice contract inserts when it claims a public fuel message: the message
+ *  key the `BridgeWithFuel` event carried, consumed with the fuel's plaintext secret. */
+export function feeJuiceMessageNullifier(fuel: { messageHash: string; secret: string }): Promise<Fr> {
+	return consumedMessageNullifier(feeJuiceAddress, Fr.fromString(fuel.messageHash), Fr.fromString(fuel.secret))
 }
 
 export type TokenMessageState = "nullified" | "live" | "invalid" | "unknown"

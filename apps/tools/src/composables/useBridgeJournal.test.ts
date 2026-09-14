@@ -34,6 +34,7 @@ import {
 	cacheSecret,
 	claimForeground,
 	connectJournalDeps,
+	currentRecord,
 	deploymentMatches,
 	discard,
 	isMsgConsumed,
@@ -50,6 +51,7 @@ import {
 	sendTokenBlocks,
 	setRecordStep,
 	updateRecord,
+	updateRecordWhen,
 	useBridgeJournal,
 } from "./useBridgeJournal"
 
@@ -210,6 +212,22 @@ describe("useBridgeJournal engine", () => {
 		expect(claim).toHaveBeenCalled()
 		const { records } = useBridgeJournal()
 		expect(records.value.find((r) => r.id === "0xstranded")?.completedAt).toBe(999)
+	})
+
+	it("a guarded update lands in storage AND this tab's reactive copy; a rejected guard touches neither", () => {
+		connectJournalDeps(baseDeps(kv))
+		addRecord(mkDeposit("0xguarded", { leafIndex: undefined }))
+		const written = updateRecordWhen(
+			"0xguarded",
+			(live) => (live as DepositJournalRecord).leafIndex === undefined,
+			(live) => ({ leafIndex: `${live.id.length}` }),
+		)
+		expect((written as DepositJournalRecord | undefined)?.leafIndex).toBe("9")
+		const { records } = useBridgeJournal()
+		expect((currentRecord("0xguarded") as DepositJournalRecord).leafIndex).toBe("9")
+		expect((records.value.find((r) => r.id === "0xguarded") as DepositJournalRecord).leafIndex).toBe("9")
+		expect(updateRecordWhen("0xguarded", () => false, { leafIndex: "no" })).toBeUndefined()
+		expect((records.value.find((r) => r.id === "0xguarded") as DepositJournalRecord).leafIndex).toBe("9")
 	})
 
 	it("recovery 'pending' (L1 not mined yet) bails softly with a retry note - no claim attempt", async () => {

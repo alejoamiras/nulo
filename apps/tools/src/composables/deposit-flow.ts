@@ -11,6 +11,7 @@ import { TxHash, TxStatus } from "@aztec/aztec.js/tx"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { Gas } from "@aztec/stdlib/gas"
 import {
+	type BridgeJournalRecord,
 	type DepositJournalRecord,
 	type EncryptionKey,
 	type SendDepositRecord,
@@ -49,6 +50,7 @@ import {
 	isPrivateFuelInsufficiency,
 } from "@/lib/fuel-claim-state"
 import { isWellFormedTxHash } from "@/lib/claim-receipt"
+import { feeJuiceMessageNullifier } from "@/lib/message-nullifier"
 import { clampGas, walletMaxFees } from "@/lib/wallet-fee-budget"
 import { DAPP_SELF_PAY_FEATURE, walletSupports } from "@/lib/wallet-features"
 import {
@@ -60,6 +62,7 @@ import {
 	runOnLane,
 	setRecordStep,
 	updateRecord,
+	updateRecordWhen,
 } from "./useBridgeJournal"
 import { buildFuelClaimInteraction } from "./fuelClaim"
 import { readBalance } from "./useTokenBalance"
@@ -113,26 +116,93 @@ export async function bestEffortL2Block(): Promise<number | undefined> {
 
 type FuelBlock = NonNullable<DepositJournalRecord["fuel"]>
 
+/** Whether `live` is the fuel block `captured` describes: the same secret commitment and, once
+ *  both know it, the same message key. A re-send under the same id swaps in a block with neither. */
+function sameFuelBlock(live: FuelBlock, captured: FuelBlock): boolean {
+	if (live.secretHashHex !== captured.secretHashHex) return false
+	return !live.messageHash || !captured.messageHash || live.messageHash === captured.messageHash
+}
+
 /** Merge explicit fields into the record's PERSISTED fuel block (never a captured copy: the
  *  journal's merge is shallow, so a nested `fuel` write replaces the block, and every claim-path
  *  write runs long after its builder captured the record). The captured block is the fallback when
- *  the journal holds no live copy (unit fixtures, a wiped block). `topLevel` rides in the same write
- *  so a site that also patches record fields keeps its one-write shape. */
+ *  the record holds no live copy (unit fixtures, a wiped block). A live block that is not the
+ *  captured one is another deposit's fuel (a re-send swapped it in under the same id): a patch
+ *  computed for the captured block would settle a message nobody consumed, so the write is refused
+ *  and `false` says so. Guard, merge and write share one synchronous load. `topLevel` rides in the
+ *  same write so a site that also patches record fields keeps its one-write shape. */
 export function patchFuel(
 	id: string,
 	captured: FuelBlock | undefined,
 	patch: Partial<FuelBlock>,
 	topLevel: Partial<DepositJournalRecord & Pick<SendDepositRecord, "registerTxHash">> = {},
-): void {
-	const base = (currentRecord(id) as { fuel?: FuelBlock } | undefined)?.fuel ?? captured
-	if (!base) return
-	updateRecord(id, { ...topLevel, fuel: { ...base, ...patch } } as never)
+): boolean {
+	const liveOf = (rec: BridgeJournalRecord) => (rec as { fuel?: FuelBlock }).fuel
+	const written = updateRecordWhen(
+		id,
+		(rec) => {
+			const live = liveOf(rec)
+			return !!(live ?? captured) && !(live && captured && !sameFuelBlock(live, captured))
+		},
+		(rec) => ({ ...topLevel, fuel: { ...(liveOf(rec) ?? captured), ...patch } }) as never,
+	)
+	if (!written) log("fuel patch refused: the record is gone or holds a different fuel block", id)
+	return written !== undefined
 }
 
 // The probes read a `TxHash.fromString` throw as "pending" — a corrupted or hand-edited record
 // would wait forever with no diagnostic, so the ladders check the shape first and say so.
 const MALFORMED_FUEL_HASH =
 	"This bridge's recorded gas-claim transaction hash is malformed - restore the record from a backup, or discard it."
+const FUEL_CONSUMED_UNCHECKPOINTED =
+	"An earlier gas claim could not be confirmed as checkpointed just now - try CLAIM YOUR GAS again in a moment."
+const FUEL_CONSUMED_UNREADABLE = "The gas claim's state could not be read just now - try CLAIM YOUR GAS again in a moment."
+
+const FUEL_POLL_MS = 6000
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/** How long a settlement poll may run: `tries` reads, `pollMs` apart, each given `readMs` before
+ *  a node that accepted the request but never answers counts as unreadable. */
+export interface PollBudget {
+	tries?: number
+	pollMs?: number
+	readMs?: number
+}
+
+/** `read` raced against `ms`: a transport with no deadline of its own must not hold the caller's
+ *  operation span open forever. */
+function withDeadline<T>(read: Promise<T>, ms: number): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined
+	const expiry = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(new Error("read timed out")), ms)
+	})
+	return Promise.race([read, expiry]).finally(() => clearTimeout(timer))
+}
+
+/** Whether the fuel message's own nullifier is CHECKPOINTED, polled at the inclusion cadence. A
+ *  consumed-shaped send error proves only a PROPOSED consumption; a block that later drops leaves
+ *  the Fee Juice unclaimed, so the latch waits for the checkpoint. `"unknown"` when the record
+ *  holds no message key or the node cannot answer — never a latch. */
+export async function fuelMessageCheckpointed(fuel: FuelBlock, budget: PollBudget = {}): Promise<boolean | "unknown"> {
+	const { tries = 40, pollMs = FUEL_POLL_MS, readMs = 30_000 } = budget
+	if (!fuel.messageHash) return "unknown"
+	let nullifier: Fr
+	try {
+		nullifier = await feeJuiceMessageNullifier({ messageHash: fuel.messageHash, secret: fuel.secret })
+	} catch {
+		return "unknown"
+	}
+	const node = createAztecNodeClient(NODE_URL)
+	for (let i = 0; i < tries; i++) {
+		try {
+			if ((await withDeadline(node.getNullifierMembershipWitness("checkpointed", nullifier), readMs)) !== undefined) return true
+		} catch {
+			return "unknown"
+		}
+		if (i + 1 < tries) await pause(pollMs)
+	}
+	return false
+}
 
 export async function fuelReceiptStatus(txHash: string): Promise<"included" | "dropped" | "pending"> {
 	try {
@@ -156,7 +226,7 @@ export async function waitForFuelInclusion(txHash: string, tries = 40): Promise<
 	for (let i = 0; i < tries; i++) {
 		const s = await fuelReceiptStatus(txHash)
 		if (s !== "pending") return s
-		await new Promise((r) => setTimeout(r, 6000))
+		await pause(FUEL_POLL_MS)
 	}
 	return "pending"
 }
@@ -174,6 +244,7 @@ export async function sendStandaloneFjClaim(
 	recipientAddr: AztecAddress,
 	fuel: NonNullable<DepositJournalRecord["fuel"]>,
 	id: string,
+	budget: PollBudget = {},
 ): Promise<void> {
 	const claimMaxFees = await walletFeesOrNull(aztec, recipientAddr, PRIVATE_HUB_CLAIM_GAS)
 	if (claimMaxFees === null) throw new Error(UNPRICED_BY_WALLET)
@@ -188,16 +259,16 @@ export async function sendStandaloneFjClaim(
 	try {
 		receiptTxHash = (await claim.send()).txHash
 	} catch (e) {
-		// The FJ message is already CONSUMED (nullified) ⇒ the gas is already in the wallet. Self-correct:
-		// settle rather than error, so a false-positive CLAIM YOUR GAS click resolves cleanly. Must be the
-		// consumed shape, NOT not-ready: latching standaloneClaimed on a not-yet-anchored message would
-		// permanently hide the recovery affordance for FJ that was never claimed (fund-stranding).
-		if (isMsgConsumed(e instanceof Error ? e.message : String(e))) {
-			patchFuel(id, fuel, { standaloneClaimed: true })
-			log("standalone FJ claim: message already consumed - gas already in wallet", id)
-			return
-		}
-		throw e
+		// A consumed-shaped refusal says an earlier claim spent the message — but only as far as a
+		// PROPOSED block; the latch needs the nullifier checkpointed, or a dropped block would hide
+		// the recovery affordance for Fee Juice that was never claimed (fund-stranding). Must be the
+		// consumed shape, NOT not-ready: a not-yet-anchored message has no nullifier to read.
+		if (!isMsgConsumed(e instanceof Error ? e.message : String(e))) throw e
+		const settled = await fuelMessageCheckpointed(fuel, budget)
+		if (settled !== true) throw new Error(settled === false ? FUEL_CONSUMED_UNCHECKPOINTED : FUEL_CONSUMED_UNREADABLE)
+		patchFuel(id, fuel, { standaloneClaimed: true })
+		log("standalone FJ claim: message already consumed and checkpointed - gas already in wallet", id)
+		return
 	}
 	if ((await waitForFuelInclusion(receiptTxHash)) !== "included") {
 		throw new Error("The gas claim was sent but hasn't confirmed yet - try CLAIM YOUR GAS again in a moment.")
@@ -255,7 +326,7 @@ function recoverSendLeg(rec: SendDepositRecord, generation: SendGeneration, logs
 	}
 	if (leaves.fuelLeafIndex !== undefined && rec.fuel) {
 		if (rec.intent === "gas") patch.leafIndex = leaves.fuelLeafIndex.toString()
-		patchFuel(
+		const written = patchFuel(
 			rec.id,
 			rec.fuel,
 			{
@@ -265,6 +336,7 @@ function recoverSendLeg(rec: SendDepositRecord, generation: SendGeneration, logs
 			},
 			patch as Partial<DepositJournalRecord>,
 		)
+		if (!written) throw new Error("This bridge record changed while its deposit was being checked - reload and retry.")
 		return "recovered"
 	}
 	updateRecord(rec.id, patch)
