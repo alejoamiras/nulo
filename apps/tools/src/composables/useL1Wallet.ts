@@ -55,8 +55,12 @@ function onAccountsChanged(accounts: readonly string[]) {
 			? createWalletClient({ account: address.value, chain: NETWORK.viemChain, transport: custom(provider) })
 			: null
 }
+/** Counts every `chainChanged` the provider reported — a scan that spans one, even away and back,
+ *  read from more than one chain. */
+const chainChanges = ref(0)
 function onChainChanged(hexChainId: string) {
 	chainId.value = Number.parseInt(hexChainId, 16)
+	chainChanges.value++
 }
 
 async function connect() {
@@ -118,6 +122,7 @@ export function useL1Wallet() {
 	return {
 		address,
 		chainId,
+		chainChanges,
 		isConnected,
 		wrongChain,
 		isConnecting,

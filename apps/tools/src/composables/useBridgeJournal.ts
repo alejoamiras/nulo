@@ -36,6 +36,7 @@ import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
 import { isWellFormedTxHash } from "@/lib/claim-receipt"
 import { isReceiptRecordMismatch } from "@/lib/fuel-claim-state"
 import { HELD_ELSEWHERE, type JournalLocks } from "@/lib/journal-locks"
+import type { DepositSearch } from "./deposit-reconcile"
 import { dropPhaseClock } from "@/lib/phase-clock"
 import { safeAddressText, safeSentence } from "@/lib/token-display"
 import { withOperation } from "./useOpsInFlight"
@@ -233,6 +234,9 @@ export interface JournalEngineDeps {
 	 *  transaction, when it has one. The claim build does this on its way to the hub; a completion
 	 *  that never builds a claim must ask for it. */
 	reconcileFuel?: (id: string) => Promise<void>
+	/** Find the router transaction of a hub token deposit that never recorded its hash, verified
+	 *  against calldata and receipt on L1. Absent ⇒ a hash-less record stays where it is, as before. */
+	findDepositTx?: (rec: SendDepositRecord) => Promise<DepositSearch>
 	/** The cross-tab locks: a record's runner and the guarded journal writes. Absent ⇒ process-local
 	 *  dedup and synchronous best-effort writes, as before. */
 	locks?: JournalLocks
@@ -1004,12 +1008,93 @@ function legRecoveryNeeded(rec: ClaimRecord): boolean {
 }
 
 async function recoverLegIfNeeded(rec: ClaimRecord, id: string): Promise<"proceed" | "stop"> {
-	if (!rec.depositTxHash || !deps.recoverDepositLeg) {
+	let target = rec
+	if (!target.depositTxHash) {
+		if ((await reconcileDepositLeg(target, id)) === "stop") return "stop"
+		// The hash was just written (by this tab or another): the leg recovery reads the live record.
+		const live = records.value.find((r) => r.id === id) as ClaimRecord | undefined
+		if (!live?.depositTxHash) return "stop"
+		target = live
+	}
+	if (!deps.recoverDepositLeg) {
 		log("no leafIndex yet - the deposit leg is still running", id)
 		return "stop"
 	}
-	if ((await attemptLegRecovery(rec, id)) === "stop") return "stop"
+	if ((await attemptLegRecovery(target, id)) === "stop") return "stop"
 	return "proceed"
+}
+
+/** Ethereum decides what a hash-less hub token record's deposit is. The verified hash is written
+ *  once, under the journal lock, only onto the record the search verified and only while it has no
+ *  hash; a different hash another tab wrote meanwhile is kept for that tab's own run — the leg
+ *  recovery reads a receipt without checking whose call it was, so only the verified hash proceeds. */
+async function reconcileDepositLeg(rec: ClaimRecord, id: string): Promise<"proceed" | "stop"> {
+	if (!claimsThroughHub(rec) || !deps.findDepositTx) {
+		log("no leafIndex yet - the deposit leg is still running", id)
+		return "stop"
+	}
+	setStep(id, "depositing", "looking for the deposit on Ethereum")
+	const gen = genOf(id)
+	let result: DepositSearch
+	try {
+		result = await deps.findDepositTx(rec)
+	} catch (e) {
+		log("deposit search failed", { id, error: e instanceof Error ? e.message : String(e) })
+		result = "incomplete"
+	}
+	if (genOf(id) !== gen) return "stop"
+	if (typeof result === "string") return reportDepositSearch(id, result)
+	const { txHash } = result
+	const written = await underJournalLock(() =>
+		genOf(id) === gen
+			? journalPatchWhen(deps.kv, id, (live) => sameDepositSnapshot(live, rec) && !(live as ClaimRecord).depositTxHash, {
+					depositTxHash: txHash,
+				})
+			: undefined,
+	)
+	reload()
+	if (genOf(id) !== gen) return "stop"
+	if (written) {
+		log("deposit found on Ethereum", { id, txHash })
+		return "proceed"
+	}
+	const live = records.value.find((r) => r.id === id) as ClaimRecord | undefined
+	if (live?.depositTxHash === txHash && sameDepositSnapshot(live, rec)) return "proceed" // another tab wrote the same hash first
+	log("reconcile write skipped - the record moved or carries another hash", id)
+	return "stop"
+}
+
+function reportDepositSearch(id: string, outcome: "none" | "ambiguous" | "incomplete"): "stop" {
+	if (outcome === "none") {
+		setRuntime(id, {
+			attention: "error",
+			note: "No deposit for this record was found on Ethereum since it was started. If you never confirmed it in your wallet, discard this record.",
+		})
+	} else if (outcome === "ambiguous") {
+		setRuntime(id, {
+			attention: "unknown-outcome",
+			note: "More than one matching deposit was found - not guessing. Keep this record and export its recovery file; it can be finished by hand.",
+		})
+	} else {
+		setRuntime(id, { attention: "error", note: "Ethereum could not be searched far enough back - try again later." })
+	}
+	return "stop"
+}
+
+/** The claim snapshot plus everything the L1 match was verified against: the token, the fuel's
+ *  amounts and secret hash, and the record's own start time (the search window). */
+function sameDepositSnapshot(live: BridgeJournalRecord, verified: ClaimRecord): boolean {
+	if (!sameClaimSnapshot(live, verified) || live.completedAt) return false
+	const a = live as SendDepositRecord
+	const b = verified as SendDepositRecord
+	return (
+		a.createdAt === b.createdAt &&
+		a.token?.erc20 === b.token?.erc20 &&
+		a.fuel?.amount === b.fuel?.amount &&
+		a.fuel?.minOutput === b.fuel?.minOutput &&
+		a.fuel?.secretHashHex === b.fuel?.secretHashHex &&
+		a.fuel?.fpc === b.fuel?.fpc
+	)
 }
 
 /** One recovery attempt against the recorded L1 receipt: terminal receipt-mismatch vs
