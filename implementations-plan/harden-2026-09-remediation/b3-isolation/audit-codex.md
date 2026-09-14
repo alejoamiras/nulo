@@ -86,3 +86,41 @@ Read-only audit; no tests were run and no files were modified. Confidence is **h
 The network cells exercise real DEK handoff, OPFS opening, same-ID reimport, passkey execution, dApp disconnect/reconnect, and mined authwit grant/revoke/toggle behavior. Local gates can deterministically exercise hostile rows, missing DEKs, replacement races and forged messages that those existing network cells do not generate. Neither substitutes for the other; the selected network cells also do not prove Firefox sender semantics. These changes need no B4 approval-card work or later reversal.
 
 **reject — blocking items 1–5: recovery dead end, warm-PXE bypass, reflected offscreen responses, journal event disclosure, and stale-sync cross-tuple deletion.**
+
+## Round 2 — 2026-09-14 (same session; the final pass on the ledger)
+
+Prompt: the ledger and the revised plan; re-verify.
+
+### Response (paths made repo-relative)
+
+1. **Blocking — passkey export still prevents reaching the tolerant restore. Confidence: high.**  
+   `plan.md:16`; `apps/extension/src/wallet/services/profile/service.ts:1708–1715`; `apps/extension/src/popup/pages/settings/security/export/full.vue:177`.
+
+   The adopted fix changes password export and passkey **restore**, but passkey **export** still calls `exportPlain` → `exportPasskeyCredential`, which rejects an undecryptable DEK. A user without an existing backup cannot create the file the repair instructions require. The new restore-only test stays green.
+
+   **Smallest change:** explicitly include this export gate in the tolerant recovery path, preserving credential/fingerprint checks and displaying the loss warning. Test corrupt passkey profile → actual backup export → restore → healthy session.
+
+2. **Blocking — the PXE gate breaks full-backup assembly for either profile type. Confidence: high.**  
+   `plan.md:15–17`; `apps/extension/src/popup/pages/settings/security/export/full.vue:111,281`; `apps/extension/src/wallet/services/account-state/service.ts:175–176`; `apps/extension/src/utils/full-backup-helpers.ts:139`.
+
+   Full export always includes `AccountStateService.backup()`. For an active network, that calls PXE for senders/contracts. Recovery mode rejects those calls; `viaPxe` converts the error to `"PXE request failed"`, and the assembler propagates it, aborting the entire backup. Successfully returning a fresh DEK from `exportBackupMaterial` does not prove that a downloadable backup exists.
+
+   **Smallest change:** deliberately omit the unavailable account-state slice during recovery export and visibly report that omission. Do not blanket-swallow unrelated backup failures. Add a full-assembly test with an active network and recovery-mode PXE rejection; include the export component/account-state tests in Phase 1’s gate.
+
+3. **Blocking — recovery toggling lacks an admission-order guarantee, and its test misses the warm-runtime bypass. Confidence: high.**  
+   `plan.md:15,27`; `packages/extension-messaging/src/core/base-service.ts:129–131`; `packages/wallet-core/src/utils/event-handler.ts` (`invoke`); `packages/aztec-runtime/src/pxe/service.ts:890–892`.
+
+   “The runtime calls it on each unlock” does not establish that recovery is enforced before new requests are admitted. Existing profile events publish to clients before invoking local subscribers, and subscribers are not awaited. An asynchronous toggle can therefore arrive after a new request has entered the warm runtime.
+
+   Also, the specified **second-chain** test can pass with the admission check deleted: dropping the cached key forces a missing-key retry, whose provider already rejects. An existing matching runtime bypasses that provider.
+
+   **Smallest change:** specify how authoritative recovery state blocks new requests before unlock publication/admission, including delayed or failed toggle delivery. Test an immediate request against the **already-open chain**, with toggle delivery delayed, plus a successful healthy re-unlock. Preserve already-admitted work.
+
+4. **Should-fix — contradictory leftovers still prescribe rejected behavior. Confidence: high.**  
+   `plan.md:42,54`.
+
+   Phase 4 still says READY/PONG from a “tab-bound” sender must be rejected, contradicting the legitimate Firefox hidden-window case. Assumptions still endorse prefix matching and describe overwriting hidden keys as harmless, although both decisions were reversed.
+
+   **Smallest change:** make READY/PONG tests reject wrong URLs while explicitly accepting the legitimate Firefox sender with `sender.tab`; replace the stale assumptions with exact-path matching and physical-key occupancy preservation.
+
+**reject — blocking: passkey export remains gated; recovery-mode PXE rejection aborts backup assembly; recovery admission ordering and warm-runtime coverage remain incomplete.**
