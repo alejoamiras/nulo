@@ -382,6 +382,17 @@ export function updateRecord(id: string, patch: Partial<BridgeJournalRecord>): v
 	patchRecord(id, patch)
 }
 
+/** `updateRecord` guarded by a predicate over the freshly loaded record, the patch computed from
+ *  that same load: guard, merge and write in one synchronous span. Undefined when the id is gone
+ *  or the guard rejects. */
+export function updateRecordWhen(
+	id: string,
+	when: (current: BridgeJournalRecord) => boolean,
+	patch: Partial<BridgeJournalRecord> | ((current: BridgeJournalRecord) => Partial<BridgeJournalRecord>),
+): BridgeJournalRecord | undefined {
+	return journalPatchWhen(deps.kv, id, when, patch)
+}
+
 /** The PERSISTED record, read straight from kv — not this tab's reactive copy, which lags other
  *  tabs' writes until their storage event lands. For read-then-patch sites; touches no ref. */
 export function currentRecord(id: string): BridgeJournalRecord | undefined {

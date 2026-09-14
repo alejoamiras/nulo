@@ -373,17 +373,20 @@ export function patchRecord(kv: KV, id: string, patch: Partial<BridgeJournalReco
 
 /** `patchRecord` guarded by a predicate over the freshly loaded record: a no-op (undefined) when
  *  the id is gone or the guard rejects. Load, guard and write are one synchronous span — the
- *  closest thing to a compare-and-set that localStorage offers, not an atomic one. */
+ *  closest thing to a compare-and-set that localStorage offers, not an atomic one. A patch given
+ *  as a function is computed from that same loaded record, so a nested block can be merged onto
+ *  the copy the guard just accepted rather than one captured earlier. */
 export function patchRecordWhen(
 	kv: KV,
 	id: string,
 	when: (current: BridgeJournalRecord) => boolean,
-	patch: Partial<BridgeJournalRecord>,
+	patch: Partial<BridgeJournalRecord> | ((current: BridgeJournalRecord) => Partial<BridgeJournalRecord>),
 ): BridgeJournalRecord | undefined {
 	const records = loadJournal(kv)
 	const i = records.findIndex((r) => r.id === id)
 	if (i < 0 || !when(records[i])) return undefined
-	const next = { ...records[i], ...patch, id: records[i].id, updatedAt: Date.now() } as BridgeJournalRecord
+	const fields = typeof patch === "function" ? patch(records[i]) : patch
+	const next = { ...records[i], ...fields, id: records[i].id, updatedAt: Date.now() } as BridgeJournalRecord
 	records[i] = next
 	write(kv, records)
 	return next

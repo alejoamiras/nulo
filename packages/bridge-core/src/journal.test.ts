@@ -147,6 +147,14 @@ describe("journal CRUD", () => {
 		expect((applied as DepositJournalRecord).claimTxHash).toBeUndefined()
 		expect((loadJournal(kv)[0] as DepositJournalRecord).claimTxHash).toBeUndefined()
 		expect(patchRecordWhen(kv, "0xnope", () => true, { leafIndex: "1" })).toBeUndefined()
+		// A functional patch reads the record the guard accepted, not a copy taken earlier.
+		const merged = patchRecordWhen(
+			kv,
+			"0xaaa",
+			() => true,
+			(cur) => ({ leafIndex: `${cur.id}-leaf` }),
+		)
+		expect(merged).toMatchObject({ leafIndex: "0xaaa-leaf" })
 	})
 
 	it("rekey upgrades a provisional withdraw to its exitTxHash id", () => {
