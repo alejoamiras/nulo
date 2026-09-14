@@ -88,3 +88,15 @@ Prompt: the B2 diff, plan, recon, lessons, arc map, adversarial ask, the two ver
 5. **[full-backup-restore.ts:430](apps/extension/src/composables/full-backup-restore.ts:430) — nit; confidence: high.** The comment still says the backup controls `rpcUrl`, contradicting B2’s central invariant. Line 305 also says pointer-write failure leaves the pointer unset, although reseeding has already written it. **Smallest fix:** describe compiled-seed endpoints and preservation of the seeded pointer; retain only the ordering and deadline constraints that explain non-obvious behavior.
 
 **fix — payload disclosure, quadratic rejection/unbounded reporting, unverifiable REFUSED interception, and missing Phase 2/3 assertions.**
+
+## Post-implementation round 2 — 2026-09-14 (same session)
+
+Prompt: the round-1 fix commit, per-item summary, re-verify.
+
+### Response (paths made repo-relative)
+
+- **[import-dead-rpc.test.ts:256](apps/extension/tests/e2e/import-dead-rpc.test.ts:256) — should-fix; confidence: high.** `interceptRpc()` now deliberately throws on setup failure, but runs before the cleanup `try/finally`. Such failures leave Chrome running and its profile directory behind. Confirmed by executing the fixture function with a synthetic interception rejection: neither cleanup action ran. **Smallest fix:** move interception setup inside the cleanup scope, retain an optional interception handle, and always close the browser and remove its directory. Add a setup-rejection cleanup assertion.
+
+The five original findings are resolved; no additional production-code findings.
+
+**fix — cleanup after interception setup failure.**

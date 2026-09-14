@@ -24,7 +24,7 @@
  * under test is the compiled-in LOCAL seed. Its origin is rerouted per test through CDP `Fetch`
  * interception to a stub on an ephemeral, run-owned port — the seed's port is never bound.
  */
-import { mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, rmSync } from "node:fs"
 import { createServer, type Server } from "node:http"
 import type { AddressInfo, Socket } from "node:net"
 import { tmpdir } from "node:os"
@@ -250,18 +250,23 @@ async function continueThroughErrorsScreen(page: Page, errorsScreenBudgetMs: num
 async function withFreshExtension(
 	mode: RpcInterception,
 	fn: (page: Page, ctx: ExtensionContext, intercepted: () => number) => Promise<void>,
-): Promise<void> {
+	intercept: typeof interceptRpc = interceptRpc,
+): Promise<{ profileDir: string }> {
 	const profileDir = mkdtempSync(join(tmpdir(), "nulo-dead-rpc-"))
 	const ctx = await launchExtension({ userDataDir: profileDir })
-	const intercept = await interceptRpc(ctx.browser, ctx.extensionId, LOCAL_RPC, mode)
+	// The interception is armed inside the cleanup scope: a setup failure must still close the
+	// browser and remove its profile directory.
+	let armed: Awaited<ReturnType<typeof interceptRpc>> | undefined
 	try {
+		armed = await intercept(ctx.browser, ctx.extensionId, LOCAL_RPC, mode)
 		const page = await gotoPopupImport(ctx)
-		await fn(page, ctx, intercept.hits)
+		await fn(page, ctx, armed.hits)
 	} finally {
-		await intercept.stop()
+		await armed?.stop()
 		await ctx.browser.close()
 		rmSync(profileDir, { recursive: true, force: true })
 	}
+	return { profileDir }
 }
 
 test("REFUSED rpc: import lands on the errors screen fast; Continue enters the wallet", { timeout: 180_000, retry: 0 }, async () => {
@@ -315,4 +320,32 @@ test("STATEFUL rpc (probe passes, then blackholes): the registration deadline bo
 	} finally {
 		await stub.close()
 	}
+})
+
+test("an interception setup failure still closes the browser and removes its profile directory", {
+	timeout: 120_000,
+	retry: 0,
+}, async () => {
+	const failing: typeof interceptRpc = async () => {
+		throw new Error("synthetic interception failure")
+	}
+	let dir = ""
+	await expect(
+		withFreshExtension(
+			{ kind: "refuse" },
+			async () => {
+				throw new Error("must not run")
+			},
+			async (browser, id, from, mode) => {
+				dir =
+					(browser as unknown as { process(): { spawnargs: string[] } })
+						.process()
+						.spawnargs.find((a) => a.startsWith("--user-data-dir="))
+						?.slice("--user-data-dir=".length) ?? ""
+				return failing(browser, id, from, mode)
+			},
+		),
+	).rejects.toThrow(/synthetic interception failure/)
+	expect(dir).toMatch(/nulo-dead-rpc-/)
+	expect(existsSync(dir)).toBe(false)
 })
