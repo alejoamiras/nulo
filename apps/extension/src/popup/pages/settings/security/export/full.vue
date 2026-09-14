@@ -545,8 +545,9 @@ onBeforeUnmount(() => {
 						<template #title> Local chain data is not in this backup </template>
 						<template #description>
 							<Text color="secondary" height="140">
-								This profile is in recovery mode, so its registered contracts and senders were left out.
-								Restore the file to repair the wallet; the chain re-syncs from the network.
+								This profile is in recovery mode, so its registered custom contracts and senders were
+								left out. After the restore, register them again — until then their private notes
+								stay undiscovered, since a network sync cannot rebuild that material.
 							</Text>
 						</template>
 					</Banner>

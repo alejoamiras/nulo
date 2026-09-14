@@ -45,6 +45,7 @@ import {
 import { PasskeyService } from "@/wallet/services/passkey/service"
 import { ServiceClient as OffscreenServiceClient } from "@nulo/extension-messaging/offscreen"
 import { DappSessionService } from "@/wallet/services/dapp-session/service"
+import { signDappSession } from "@/wallet/services/dapp-session/integrity"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { wirePxeProviders } from "@/wallet/runtime"
 import { flushPromises } from "@vue/test-utils"
@@ -3138,9 +3139,12 @@ describe("F-06 dApp-session rows under same-phrase SIBLINGS — the real Profile
 		const authentic = (await api.storage.local.get(key))[key] as string
 		expect(JSON.parse(authentic).profileId).toBe(p1.id)
 
-		// The forgery: a sibling holding the SAME master signs a row for p2 — p1's real key stands in
-		// for it (master shared, DEK not). Under p2 the MAC must fail: dropped as tampered.
-		await api.storage.local.set({ [key]: JSON.stringify({ ...JSON.parse(authentic), profileId: p2.id }) })
+		// The forgery: a sibling holding the SAME master builds a p2-targeted row and signs it with
+		// ITS key (master shared, DEK not) — p1's real derivation stands in for the attacker's. A
+		// master-only derivation would make this tag verify under p2; the DEK-keyed one must not.
+		const { mac: _authenticMac, ...forgedBody } = { ...(JSON.parse(authentic) as Record<string, unknown>), profileId: p2.id }
+		const forgedMac = await signDappSession(await profiles.deriveDappSessionMacKey(p1.id), forgedBody as never)
+		await api.storage.local.set({ [key]: JSON.stringify({ ...forgedBody, mac: forgedMac }) })
 		await profiles.lockActiveProfile()
 		await profiles.unlockProfile(p2.id, "pass1234")
 		expect(await sessions.getDappSessions()).toEqual([])
