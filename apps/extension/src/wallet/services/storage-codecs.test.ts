@@ -85,14 +85,17 @@ const CORPUS = [
 		parse: (raw: unknown) => AuthwitSchema.parse(raw),
 		full: {
 			id: 1,
+			profileId: "p1",
+			chainId: 1,
 			account: "0xa",
 			hash: "0xh",
 			content: { kind: "intent", consumer: "0xc", intent: ["i1"] },
 			pending: true,
 			txHash: "0xt",
 		} as Authwit,
-		minimal: { id: 2, account: "0xa", hash: "0xh2", content: { kind: "message_hash" } } as Authwit,
-		drifted: { id: 3, account: "0xa", hash: "0xh3", content: "not-an-object" },
+		minimal: { id: 2, profileId: "p1", chainId: 1, account: "0xa", hash: "0xh2", content: { kind: "message_hash" } } as Authwit,
+		// A legacy row without provenance is drifted too: the scope tuple is required, never defaulted.
+		drifted: { id: 3, account: "0xa", hash: "0xh3", content: { kind: "message_hash" } },
 	},
 	{
 		name: "token-balance",
