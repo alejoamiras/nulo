@@ -304,6 +304,9 @@ export interface StandaloneFuelRecoveryInputs {
 	schema: 1 | 2 | 3
 	intent?: FuelLadderInputs["intent"]
 	completedAt?: number
+	/** The token leg ended with another submitter's claim: finished for the fuel's purposes, even
+	 *  while the record stays open for the fuel itself. */
+	claimedByOther?: boolean
 	fuel?: {
 		received?: string
 		leafIndex?: string
@@ -317,9 +320,12 @@ export function decideStandaloneFuelRecovery(i: StandaloneFuelRecoveryInputs): S
 	const f = i.fuel
 	if (i.isFeeJuiceAsset) return "none"
 	if (!f?.received && !(i.isPrivate && boughtFuel(i))) return "none"
-	if (i.completedAt === undefined) return "none" // an unfinished claim retries via the normal action.
+	if (i.completedAt === undefined && !i.claimedByOther) return "none" // an unfinished claim retries via the normal action.
 	if (f?.consumed === true || f?.standaloneClaimed === true) return "none"
 	if (!i.isPrivate) return f?.received ? "offer" : "none"
+	// Another submitter's token claim never spent this record's private fuel, so neither private
+	// verdict below is true of it; the card states the open fuel itself.
+	if (i.claimedByOther && i.completedAt === undefined) return "none"
 	return decideFuelLadder({ isPrivate: true, schema: i.schema, intent: i.intent, fuel: f }) === "private"
 		? "private-settled"
 		: "private-unknown"

@@ -19,8 +19,9 @@ vi.mock("./deposit-flow", () => ({
 		if (live) updates.push({ id, patch: { fuel: { ...live, ...patch } } })
 	},
 }))
+const runDepositClaim = vi.fn(async (_id: string, _opts?: unknown) => {})
 vi.mock("./useBridgeJournal", () => ({
-	useBridgeJournal: () => ({ records }),
+	useBridgeJournal: () => ({ records, runDepositClaim }),
 	currentRecord: (id: string) => records.value.find((r) => r.id === id),
 	updateRecord: (id: string, patch: unknown) => void updates.push({ id, patch }),
 }))
@@ -107,6 +108,17 @@ describe("reconcileFuelConsumed", () => {
 		expect(updates).toHaveLength(0)
 	})
 
+	it("settles only the block that was probed: a block swapped in during the receipt read inherits nothing", async () => {
+		const f = fueled().fuel as DepositFuelBlock
+		records.value = [fueled({ completedAt: undefined, fuel: { ...f, claimTxHash: "0xtx1", secretHashHex: "0xf1" } })]
+		receiptStatus.mockImplementation(async () => {
+			records.value = [fueled({ completedAt: undefined, fuel: { ...f, secretHashHex: "0xf2" } })]
+			return "included"
+		})
+		await reconcileFuelConsumed("0xrec")
+		expect(updates).toEqual([])
+	})
+
 	it("is a no-op for an unknown id", async () => {
 		await reconcileFuelConsumed("0xmissing")
 		expect(updates).toHaveLength(0)
@@ -136,6 +148,17 @@ describe("claimFuelStandalone", () => {
 		selectedAccount.value = null
 		await expect(claimFuelStandalone("0xrec")).rejects.toThrow(/Switch to that account/)
 		expect(standaloneClaim).not.toHaveBeenCalled()
+	})
+
+	it("a token another submitter claimed hands its completion back to the engine once the gas is claimed", async () => {
+		records.value = [fueled({ completedAt: undefined, claimedByOther: true })]
+		await claimFuelStandalone("0xrec")
+		expect(standaloneClaim).toHaveBeenCalledTimes(1)
+		expect(runDepositClaim).toHaveBeenCalledWith("0xrec", { interactive: false })
+		runDepositClaim.mockClear()
+		records.value = [fueled()]
+		await claimFuelStandalone("0xrec")
+		expect(runDepositClaim).not.toHaveBeenCalled() // an ordinary completed record has nothing to hand back
 	})
 
 	it("claims the stranded message for the record's own recipient", async () => {
