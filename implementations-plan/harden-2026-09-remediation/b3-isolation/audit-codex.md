@@ -151,3 +151,11 @@ Prompt: round 2's items adopted (tolerant passkey export, recovery-mode assembly
    **Smallest change:** scope the guard to operational PXE access and explicitly preserve cleanup calls. Add a recovery-mode cleanup positive control.
 
 **reject — blocking: `viaPxe` erases the error required by the recovery-export catch.**
+
+## Round 4 — 2026-09-14 (same session)
+
+Prompt: round 3's three items adopted (viaPxe rethrows the recovery error by type; the export result carries the replacement blob, source row untouched; cleanup calls exempt from the admission guard).
+
+### Response
+
+approve

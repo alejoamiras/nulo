@@ -1,7 +1,7 @@
 # harden-b3-isolation — plan (blueprint mid)
 
-**Status:** DRAFT 2026-09-14 — dual audit done (codex round 1 `reject`, fable round 1 `reject`; reconciled in `ledger.md`, every item adopted); codex round 2 `reject` (passkey export gate, recovery-mode backup assembly, admission ordering — adopted: tolerant passkey export, account-state omission, SW-side admission guard replacing the toggle RPC); codex round 3 `reject` (viaPxe erases the error type; the passkey export blob's path to the file; cleanup calls exempt from the guard — all adopted); awaiting codex round 4. Owner approval is pre-granted by `../seed.md` (decisions locked 2026-09-14); the gate here is the codex verdict.
-**driver:** claude-code · **eli5_mode:** artifact · **code_review:** off (owner directive) · **tier:** mid (owner-set) · **budget:** recon 2 agents (sweep + DEK/session mapper); competing outline by the fable leg (`outline-fable.md`); codex at `high`.
+**Status:** APPROVED 2026-09-14 — codex round 4 `approve` (round 1 `reject` × dual audit with the fable leg, reconciled in `ledger.md`; rounds 2–3 `reject` on recovery-path follow-throughs, adopted in full). Owner approval pre-granted by `../seed.md` (decisions locked 2026-09-14). Implementing.
+**driver:** claude-code · **eli5_mode:** artifact · **code_review:** off (owner directive) · **tier:** mid (owner-set) · **budget:** recon 2 agents (sweep + DEK/session mapper); competing outline by the fable leg (`outline-fable.md`); codex at `high`. · **eli5:** https://claude.ai/code/artifact/e8c3646f-3a72-4cf0-9775-685a8d55bab5 (private Artifact; `eli5.html` is the fallback copy).
 **Batch:** B3 of 4 — see `../seed.md` for the decision table and the stack. Findings: `audit/security/2026-09-13-high-prerelease/findings/verified.md` (F-06, F-07), `findings/consolidated.md` (F-11, F-14).
 **Branch:** `harden-b3-isolation`, stacked on `harden-b2-backup-passkey` (PR #594). Recon: `recon.md`.
 
