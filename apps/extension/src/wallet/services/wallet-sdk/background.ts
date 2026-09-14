@@ -58,13 +58,16 @@ import { OperationJournalService } from "@/wallet/services/operation-journal/ser
 import {
 	describeExternalId,
 	describeWireMethod,
+	DISCOVERY_STALE_MS,
 	type DispatchHooks,
 	DiscoveryQueue,
 	isDiscoveryExpired,
 	type SessionContext,
 	WalletSdkDispatcher,
 } from "@nulo/wallet-bridge"
+import type { ClockPort, WindowPort } from "@nulo/wallet-core/ports"
 import { getErrorMessage, KeyedLock, deferred } from "@nulo/wallet-core/utils"
+import { admitAsync, VerifyAdmissionGate, type WindowReservation } from "./verify-admission"
 import { approveOrRollbackDiscoverySession } from "./discovery-approval"
 import { failQueuedIfUnclaimed, tryCreateQueuedJournal } from "./queued-journal"
 import { chainSendTxWithVouching } from "./queued-wait-vouching"
@@ -95,9 +98,13 @@ const NULO_ALLOW_IFRAME_DAPPS: boolean = import.meta.env?.VITE_NULO_ALLOW_IFRAME
  *
  * Call this after `services.start()` in the service worker entry point.
  */
-export function initWalletSdkHandler(services: ServiceCollection, logger: ILogger): BackgroundConnectionHandler {
+export function initWalletSdkHandler(
+	services: ServiceCollection,
+	logger: ILogger,
+	ports: { windows: WindowPort; clock: ClockPort },
+): BackgroundConnectionHandler {
 	const deps = resolveSdkDeps(services, logger)
-	const state = createSdkHandlerState()
+	const state = createSdkHandlerState(ports.clock)
 
 	const handler = new BackgroundConnectionHandler(
 		{
@@ -112,10 +119,12 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 			logger: NOOP_LOGGER,
 		},
 		buildContentTransport(logger),
-		buildHandlerCallbacks(deps, state),
+		buildHandlerCallbacks(deps, state, ports.windows),
 	)
 	state.late.handler = handler
 	state.late.discoveryQueue = new DiscoveryQueue(handler, logger)
+	// A verify window's slot is freed only when the window itself is gone.
+	ports.windows.onRemoved((windowId) => state.admission.windowRemoved(windowId))
 
 	serializeDecryption(handler, state.decryptLocks)
 	wireSessionTeardown(handler, deps.dappSessionService, logger)
@@ -250,6 +259,10 @@ type SdkHandlerState = {
 	establishmentStatus: Map<string, Promise<boolean>>
 	/** Per-session decryption serializer (see `serializeDecryption`). */
 	decryptLocks: KeyedLock
+	/** Per-origin reconnect throttle and verify-window budget (see `verify-admission.ts`). */
+	admission: VerifyAdmissionGate
+	/** Handshakes currently waiting on another popup for the same `(origin, chainId)`, bounded. */
+	dedupeWaiters: Map<string, number>
 	/**
 	 * Bound right after the handler is constructed, before `initialize()`
 	 * attaches any listener; callbacks read these at call time, never earlier.
@@ -257,7 +270,7 @@ type SdkHandlerState = {
 	late: { handler?: BackgroundConnectionHandler; discoveryQueue?: DiscoveryQueue; switchEpoch?: ProfileSwitchEpoch }
 }
 
-function createSdkHandlerState(): SdkHandlerState {
+function createSdkHandlerState(clock: ClockPort): SdkHandlerState {
 	return {
 		pendingVerification: new Map(),
 		sessionProfiles: new Map(),
@@ -266,6 +279,8 @@ function createSdkHandlerState(): SdkHandlerState {
 		establishmentStatus: new Map(),
 		// maxHoldMs: null — the prior hand-rolled decrypt chain had no watchdog (Q-08).
 		decryptLocks: new KeyedLock({ maxHoldMs: null }),
+		admission: new VerifyAdmissionGate(clock),
+		dedupeWaiters: new Map(),
 		late: {},
 	}
 }
@@ -334,7 +349,11 @@ function buildContentTransport(logger: ILogger): ConstructorParameters<typeof Ba
 	}
 }
 
-function buildHandlerCallbacks(deps: SdkDeps, state: SdkHandlerState): ConstructorParameters<typeof BackgroundConnectionHandler>[2] {
+function buildHandlerCallbacks(
+	deps: SdkDeps,
+	state: SdkHandlerState,
+	windows: WindowPort,
+): ConstructorParameters<typeof BackgroundConnectionHandler>[2] {
 	return {
 		onPendingDiscovery: (discovery) => {
 			handleDiscovery(discovery, discoveryDeps(deps, state))
@@ -354,6 +373,8 @@ function buildHandlerCallbacks(deps: SdkDeps, state: SdkHandlerState): Construct
 						handler.getActiveSessions().some((s) => s.sessionId === id),
 					),
 				isSessionLive: (sessionId) => handler.getActiveSessions().some((s) => s.sessionId === sessionId),
+				windows,
+				reservations: state.admission,
 				logger: deps.logger,
 			})
 			state.establishmentStatus.set(session.sessionId, validated)
@@ -361,6 +382,7 @@ function buildHandlerCallbacks(deps: SdkDeps, state: SdkHandlerState): Construct
 		},
 
 		onSessionTerminated: (sessionId) => {
+			state.admission.onSessionGone(sessionId)
 			state.sessionProfiles.delete(sessionId)
 			state.sessionQueues.delete(sessionId)
 			state.decryptLocks.delete(sessionId)
@@ -586,6 +608,8 @@ type DiscoveryDeps = {
 	pendingVerification: Map<string, PendingVerificationEntry>
 	pendingDiscoveryPromises: Map<string, Promise<void>>
 	discoveryQueue: DiscoveryQueue
+	admission: VerifyAdmissionGate
+	dedupeWaiters: Map<string, number>
 	logger: ILogger
 }
 
@@ -598,6 +622,8 @@ function discoveryDeps(deps: SdkDeps, state: SdkHandlerState): DiscoveryDeps {
 		pendingVerification: state.pendingVerification,
 		pendingDiscoveryPromises: state.pendingDiscoveryPromises,
 		discoveryQueue: state.late.discoveryQueue!,
+		admission: state.admission,
+		dedupeWaiters: state.dedupeWaiters,
 		logger: deps.logger,
 	}
 }
@@ -608,6 +634,10 @@ function discoveryDeps(deps: SdkDeps, state: SdkHandlerState): DiscoveryDeps {
 // requests are rejected before any popup work.
 const DISCOVERY_PENDING_GLOBAL_CAP = 32
 const DISCOVERY_PENDING_PER_ORIGIN_CAP = 4
+/** Handshakes allowed to wait on one connect popup: past this a same-tuple flood is rejected, never parked. */
+const DEDUPE_WAITERS_CAP = 8
+
+const discoveryDeadline = (discovery: PendingDiscovery): number => discovery.timestamp + DISCOVERY_STALE_MS
 
 /**
  * Handle a new discovery request from a dApp.
@@ -649,7 +679,7 @@ async function handleDiscovery(discovery: PendingDiscovery, deps: DiscoveryDeps)
 		// no yield, so two same-key discoveries can never both miss the dedupe map.
 		const existingSession = await deps.dappSessionService.tryGetDappSessionByOriginAndChain(discovery.origin, chainId)
 		if (existingSession) {
-			autoApproveExistingSession(discovery, chainId, deps)
+			autoApproveExistingSession(discovery, chainId, deps, existingSession.trustedVerification === true)
 			return
 		}
 
@@ -666,13 +696,13 @@ async function handleDiscovery(discovery: PendingDiscovery, deps: DiscoveryDeps)
 		const dedupeKey = `${discovery.origin}|${chainId}`
 		const pendingPopup = deps.pendingDiscoveryPromises.get(dedupeKey)
 		if (pendingPopup) {
-			await awaitPendingPopupDedupe(pendingPopup, discovery, chainId, deps)
+			await awaitPendingPopupDedupe(pendingPopup, discovery, chainId, dedupeKey, deps)
 			return
 		}
 
 		if (checkDiscoveryPopupCaps(discovery, deps)) return
 
-		await runDiscoveryPopup(discovery, chainId, dedupeKey, deps)
+		await runDiscoveryPopup(discovery, chainId, dedupeKey, profile.id, deps)
 	} catch {
 		// User rejected or popup was closed
 		handler.rejectDiscovery(discovery.requestId)
@@ -700,25 +730,88 @@ function rejectIfExpired(discovery: PendingDiscovery, deps: DiscoveryDeps): bool
 	return false
 }
 
-/** Returning user on this chain: approve unless the request already expired. Synchronous. */
-function autoApproveExistingSession(discovery: PendingDiscovery, chainId: string, deps: DiscoveryDeps): void {
-	if (rejectIfExpired(discovery, deps)) return
-	deps.handler.approveDiscovery(discovery.requestId)
+/** Approve an admitted handshake, or give its window slot back when the approval cannot land. */
+function approveAdmitted(
+	discovery: PendingDiscovery,
+	chainId: string,
+	deps: DiscoveryDeps,
+	reservation: WindowReservation | undefined,
+	why: string,
+): void {
+	if (rejectIfExpired(discovery, deps)) {
+		reservation?.releaseIfUnstarted()
+		return
+	}
+	if (!deps.handler.approveDiscovery(discovery.requestId)) {
+		reservation?.releaseIfUnstarted()
+		deps.logger.log(
+			"wallet-sdk",
+			LogLevel.Warn,
+			`Discovery approve did not land (already gone): request ${describeExternalId(discovery.requestId)}`,
+		)
+		return
+	}
 	deps.logger.log(
 		"wallet-sdk",
 		LogLevel.Info,
-		`Discovery auto-approved (existing session): request ${describeExternalId(discovery.requestId)} chain=${chainId}`,
+		`Discovery auto-approved (${why}): request ${describeExternalId(discovery.requestId)} chain=${chainId}`,
 	)
+}
+
+function rejectThrottled(discovery: PendingDiscovery, deps: DiscoveryDeps, why: string): void {
+	deps.handler.rejectDiscovery(discovery.requestId)
+	deps.logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (${why}): request ${describeExternalId(discovery.requestId)}`)
+}
+
+/** Returning user on this chain: approve through the origin's reconnect budget. A remembered
+ *  handshake is the one a reload loop repeats, so it always spends a token; only an untrusted
+ *  session needs a verify window and so a slot. Synchronous when admitted at once. */
+function autoApproveExistingSession(discovery: PendingDiscovery, chainId: string, deps: DiscoveryDeps, trusted: boolean): void {
+	const outcome = deps.admission.admit(
+		{
+			id: discovery.requestId,
+			origin: discovery.origin,
+			deadline: discoveryDeadline(discovery),
+			needsWindow: !trusted,
+			consumesToken: true,
+		},
+		(reservation) => approveAdmitted(discovery, chainId, deps, reservation, "existing session"),
+		() => rejectThrottled(discovery, deps, "expired while queued"),
+	)
+	if (outcome === "rejected") rejectThrottled(discovery, deps, "reconnect queue full")
+	else if (outcome === "queued") {
+		deps.logger.log(
+			"wallet-sdk",
+			LogLevel.Info,
+			`Discovery queued behind the origin's reconnect budget: request ${describeExternalId(discovery.requestId)}`,
+		)
+	}
 }
 
 async function awaitPendingPopupDedupe(
 	pendingPopup: Promise<void>,
 	discovery: PendingDiscovery,
 	chainId: string,
+	dedupeKey: string,
 	deps: DiscoveryDeps,
 ): Promise<void> {
-	const { handler, logger } = deps
-	await pendingPopup
+	const waiting = deps.dedupeWaiters.get(dedupeKey) ?? 0
+	if (waiting >= DEDUPE_WAITERS_CAP) {
+		rejectThrottled(discovery, deps, "too many handshakes waiting on one popup")
+		return
+	}
+	deps.dedupeWaiters.set(dedupeKey, waiting + 1)
+	try {
+		await pendingPopup
+		await approveAfterPopup(discovery, chainId, deps)
+	} finally {
+		const left = (deps.dedupeWaiters.get(dedupeKey) ?? 1) - 1
+		if (left > 0) deps.dedupeWaiters.set(dedupeKey, left)
+		else deps.dedupeWaiters.delete(dedupeKey)
+	}
+}
+
+async function approveAfterPopup(discovery: PendingDiscovery, chainId: string, deps: DiscoveryDeps): Promise<void> {
 	// The popup may have resolved with rejection (or with approval
 	// for a different chain — impossible under tuple keying, but
 	// defense in depth): re-check the session exists for THIS
@@ -726,22 +819,29 @@ async function awaitPendingPopupDedupe(
 	// declined, reject this duplicate too instead of inheriting an
 	// approval the user never gave.
 	const settledSession = await deps.dappSessionService.tryGetDappSessionByOriginAndChain(discovery.origin, chainId)
-	if (settledSession) {
-		if (rejectIfExpired(discovery, deps)) return
-		handler.approveDiscovery(discovery.requestId)
-		logger.log(
-			"wallet-sdk",
-			LogLevel.Info,
-			`Discovery auto-approved (pending popup resolved): request ${describeExternalId(discovery.requestId)} chain=${chainId}`,
-		)
-	} else {
-		handler.rejectDiscovery(discovery.requestId)
-		logger.log(
+	if (!settledSession) {
+		deps.handler.rejectDiscovery(discovery.requestId)
+		deps.logger.log(
 			"wallet-sdk",
 			LogLevel.Info,
 			`Discovery rejected (pending popup resolved without session): request ${describeExternalId(discovery.requestId)} chain=${chainId}`,
 		)
+		return
 	}
+	// A duplicate of a fresh connection verifies like one: it needs a window slot, but the
+	// user's Allow on the twin popup covers it, so it spends no reconnect token.
+	const admitted = await admitAsync(deps.admission, {
+		id: discovery.requestId,
+		origin: discovery.origin,
+		deadline: discoveryDeadline(discovery),
+		needsWindow: true,
+		consumesToken: false,
+	})
+	if (admitted === "rejected" || admitted === "expired") {
+		rejectThrottled(discovery, deps, admitted === "expired" ? "expired while queued" : "verify-window queue full")
+		return
+	}
+	approveAdmitted(discovery, chainId, deps, admitted, "pending popup resolved")
 }
 
 /** F-04: cap concurrent connect popups per-origin and globally. The
@@ -766,8 +866,14 @@ function checkDiscoveryPopupCaps(discovery: PendingDiscovery, deps: DiscoveryDep
 /** New dApp → show discovery popup (Allow/Deny), then persist + approve. The
  *  dedupe registration, the durable writes and the `finally` release are one
  *  unit: no await separates registering the popup promise from creating it. */
-async function runDiscoveryPopup(discovery: PendingDiscovery, chainId: string, dedupeKey: string, deps: DiscoveryDeps): Promise<void> {
-	const { handler, dappSessionService, pendingDiscoveryPromises, logger } = deps
+async function runDiscoveryPopup(
+	discovery: PendingDiscovery,
+	chainId: string,
+	dedupeKey: string,
+	profileId: string,
+	deps: DiscoveryDeps,
+): Promise<void> {
+	const { handler, pendingDiscoveryPromises, logger } = deps
 	// Sanitize dApp-controlled strings at the persistence boundary so downstream
 	// render sites never see raw bidi / zero-width / mixed-direction payloads (F-009 A-03).
 	const rawAppName = discovery.appName ?? discovery.appId
@@ -796,6 +902,49 @@ async function runDiscoveryPopup(discovery: PendingDiscovery, chainId: string, d
 		// persist a session the dApp has already stopped waiting for.
 		if (rejectIfExpired(discovery, deps)) return
 
+		// The verify window this connection will open is reserved BEFORE the session is written,
+		// while the dedupe promise stays pending, so waiters cannot be released against a session
+		// that is still queued for its slot.
+		const admitted = await admitAsync(deps.admission, {
+			id: discovery.requestId,
+			origin: discovery.origin,
+			deadline: discoveryDeadline(discovery),
+			needsWindow: true,
+			consumesToken: false,
+		})
+		if (admitted === "rejected" || admitted === "expired") {
+			rejectThrottled(discovery, deps, admitted === "expired" ? "expired while queued" : "verify-window queue full")
+			return
+		}
+		await persistAndApprove(discovery, chainId, params, profileId, admitted, deps)
+	} finally {
+		resolvePopup()
+		pendingDiscoveryPromises.delete(dedupeKey)
+	}
+}
+
+/** Write the approved session and approve the discovery. The window reservation is owned by the
+ *  session only once the approval lands; every other exit gives it back. */
+async function persistAndApprove(
+	discovery: PendingDiscovery,
+	chainId: string,
+	params: DiscoveryParams,
+	profileId: string,
+	reservation: WindowReservation | undefined,
+	deps: DiscoveryDeps,
+): Promise<void> {
+	const { handler, dappSessionService, logger } = deps
+	let approved = false
+	try {
+		// The Allow was given under `profileId`; a switch during the admission wait must not bind
+		// that approval to a session row written under another profile.
+		const active = await deps.profileService.getActiveProfile()
+		if (active?.id !== profileId) {
+			rejectThrottled(discovery, deps, "profile changed while waiting for a verify-window slot")
+			return
+		}
+		if (rejectIfExpired(discovery, deps)) return
+
 		// User approved — create a DappSession with empty accounts.
 		// Accounts will be shared later via the getAccounts authorization
 		// popup. Sessions are per-`(origin, chainId, profileId)`; the
@@ -816,7 +965,7 @@ async function runDiscoveryPopup(discovery: PendingDiscovery, chainId: string, d
 
 		// B-16: re-check freshness AFTER the durable writes (which can
 		// themselves cross the deadline) and approve, or roll back + reject.
-		const approved = await approveOrRollbackDiscoverySession({
+		approved = await approveOrRollbackDiscoverySession({
 			discovery,
 			sessionId: newSession.id,
 			approverProfileId: newSession.profileId,
@@ -834,8 +983,7 @@ async function runDiscoveryPopup(discovery: PendingDiscovery, chainId: string, d
 			)
 		}
 	} finally {
-		resolvePopup()
-		pendingDiscoveryPromises.delete(dedupeKey)
+		if (!approved) reservation?.releaseIfUnstarted()
 	}
 }
 

@@ -419,3 +419,8 @@ export async function getCapItems(page: Page): Promise<Array<{ id: string; grant
 		})),
 	)
 }
+
+/** Verify windows currently open in this browser (closed windows drop out of `targets()`). */
+export function countVerifyWindows(ctx: ExtensionContext): number {
+	return ctx.browser.targets().filter((t) => t.type() === "page" && t.url().includes("#/windows/verify")).length
+}
