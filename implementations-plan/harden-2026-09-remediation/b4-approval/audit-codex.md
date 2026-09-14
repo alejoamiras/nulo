@@ -118,3 +118,105 @@ The coverage in [plan.md:25](implementations-plan/harden-2026-09-remediation/b4-
 **Smallest fix:** replace “continue to delivery” with “stop, reassess, and record unresolved findings.”
 
 **Verdict: `reject`.**
+
+## Round 2 — 2026-09-14 (resumed session)
+
+Prompt: the ledger, the revised plan, the four change areas, questions (a)–(f).
+
+### Response (paths made repo-relative)
+
+**The revision closes the main substitution paths, but reservation cleanup and NO_FROM previewing still block approval. Confidence: high.** No tests were run.
+
+## Answers (a)–(f)
+
+**(a)** Reserving before approval is sound. The fresh branch must retain its dedupe promise until admission finishes, recheck its approving profile after waiting, and release the reservation immediately if `approveOrRollbackDiscoverySession` returns `false` or throws. These transitions are not yet specified.
+
+**(b)** The revised design includes dedupe waiters, so they cannot bypass admission **if implemented literally**. The existing direct approval at [background.ts:731](apps/extension/src/wallet/services/wallet-sdk/background.ts:731) must go through that gate. “The dedupe pin survives” does not test this replacement.
+
+**(c)** Estimate-by-reference supports fee changes: rematerialize the immutable request and apply the new validated settings each time. Preserve the attempt’s `estimateToken`, existing per-window `flowKey`, and `withEstimateAdmission`. The map currently does **not** pass its index to the estimator callback ([useFeeEstimationMap.ts:69](apps/extension/src/composables/useFeeEstimationMap.ts:69)); the smallest change is to include `index` in scheduled params. No change to the single-slot composable is necessary.
+
+**(d)** Through the revised approval/estimate endpoints, no other arbitrary transaction input remains apparent. Globally, a compromised popup can still call RPC-exposed `executeOperations` and `executeTransfer` ([service.ts:83](apps/extension/src/wallet/services/execution/service.ts:83)). Describe F-16 as binding these interaction endpoints, not confining every compromised extension context.
+
+**(e)** Interaction A’s snapshot must fail for B even with an identical fingerprint; the revised identity check and listed test correctly require this. TTL-only retention after rejection is not an authorization bypass when the interaction is unapprovable, but cancellation should evict snapshots through the existing cancellation hook. Do not evict handed-off snapshots merely because approval deletes the interaction record.
+
+**(f)** Several negative controls remain missing; see findings 3–5. Existing compatibility tests are useful regression coverage, not evidence that the new security controls work.
+
+**Ledger row 15:** I withdraw the request to extend plain action rows in this batch. The traced dApp producer constructs `add_public_authwit`, not a plain `call` action ([dispatcher.ts:1082](packages/wallet-bridge/src/dispatcher.ts:1082)).
+
+## Findings
+
+### 1. Blocking — Session termination can release capacity while its window remains open
+
+[plan.md:18](implementations-plan/harden-2026-09-remediation/b4-approval/plan.md:18) releases the reservation on `onSessionTerminated`, including after window creation. Closing a dApp tab terminates its transport ([tab-lifecycle.ts:52](apps/extension/src/wallet/services/wallet-sdk/tab-lifecycle.ts:52)); that does not close its separate verify window.
+
+An origin can connect, leave verification open, close its tab, and reconnect. Each termination frees the counter while retaining the OS window. The bucket slows accumulation but does not enforce the window cap.
+
+**Smallest fix:** termination releases an **unopened** reservation only. An opened window retains its slot until `onRemoved`, or is explicitly closed before releasing capacity. If termination happens during `create`, remove the returned stale window instead of adopting it.
+
+**Test:** leave verification open, terminate its transport, then reconnect. Assert actual open-window count remains within the cap.
+
+### 2. Blocking — Fresh admission lacks an explicit completion and rollback contract
+
+The enum-returning callback gate in [plan.md:18](implementations-plan/harden-2026-09-remediation/b4-approval/plan.md:18) does not specify how asynchronous fresh-session creation stays attached to admission.
+
+Today:
+
+- Durable session writes precede final approval ([background.ts:805](apps/extension/src/wallet/services/wallet-sdk/background.ts:805)).
+- The enclosing `finally` releases dedupe waiters ([background.ts:836](apps/extension/src/wallet/services/wallet-sdk/background.ts:836)).
+- `approveOrRollbackDiscoverySession` returns `false` both for expiry and an SDK approval that did not land ([discovery-approval.ts:38](apps/extension/src/wallet/services/wallet-sdk/discovery-approval.ts:38), [discovery-approval.ts:62](apps/extension/src/wallet/services/wallet-sdk/discovery-approval.ts:62)). Neither produces a transport termination callback.
+
+Returning from `runDiscoveryPopup` merely because admission returned `"queued"` releases its dedupe guard prematurely. Reserving and then ignoring the helper’s `false` result strands capacity until the deadline.
+
+**Smallest fix:** specify this ordering:
+
+1. After popup approval, await admission **before durable session creation**.
+2. Revalidate the approving profile after the wait.
+3. Keep the existing dedupe promise pending through creation and final approval.
+4. Immediately release the reservation on false/throw; transfer ownership only after successful `approveDiscovery`.
+
+Test expiry during writes, SDK approval returning false, and a queued fresh request with duplicate waiters.
+
+### 3. Blocking — NO_FROM still has no working route to produce its preview
+
+[plan.md:16](implementations-plan/harden-2026-09-remediation/b4-approval/plan.md:16) simultaneously says NO_FROM displays “Authorizations resolved at send” and requires a preview snapshot before creating discovered witnesses.
+
+The source resolves the deferred question:
+
+- Embedded operations suppress the fee card ([OperationCard.vue:165](apps/extension/src/popup/windows/execute/OperationCard.vue:165)).
+- The only estimate scheduling call is in the fee-update handler ([index.vue:386](apps/extension/src/popup/windows/execute/index.vue:386)).
+- NO_FROM discovers and signs during confirmation ([dapp-send-executor.ts:785](apps/extension/src/wallet/services/execution/dapp-send-executor.ts:785)).
+
+Consequently, the proposed guard rejects every popup-approved NO_FROM operation that needs a discovered witness. Retrying unchanged cannot help.
+
+**Smallest fix:** explicitly schedule a NO_FROM preview after popup initialization, using its actual discovery path, and render that result. Remove the contradictory placeholder for this path. State how already-authorized silent NO_FROM execution is distinguished from popup approval; do not accidentally require an interaction snapshot on a path with no interaction.
+
+**Test:** a positive NO_FROM preview→approval case. The listed unseen-hash rejection test stays green with all NO_FROM preview wiring deleted.
+
+### 4. Should-fix — Snapshot cancellation is disconnected from the existing lifecycle
+
+The new map in [plan.md:16](implementations-plan/harden-2026-09-remediation/b4-approval/plan.md:16) has TTL retention but no cancellation integration. Existing `evictStash` removes only the two transaction caches ([service.ts:239](apps/extension/src/wallet/services/execution/service.ts:239)). The registry deliberately invokes it even when cancellation races a successful stash ([estimate-cancel-registry.ts:171](apps/extension/src/wallet/services/execution/estimate-cancel-registry.ts:171)).
+
+**Smallest fix:** add snapshot eviction to that callback; return the snapshot’s ID through the existing settlement flow even when transaction reuse is ineligible. Explicitly compare snapshot fingerprint as well as interaction/index. Preserve completed-estimate handoff.
+
+**Tests:** cancelled-after-stash and cancelled-during-estimation cases must remove the snapshot; successful approval handoff must retain it until validation finishes. Existing cancellation tests could pass while the new snapshot leaks.
+
+### 5. Should-fix — Admission tests contradict the two-window limit and do not prove throttling
+
+[plan.md:35](implementations-plan/harden-2026-09-remediation/b4-approval/plan.md:35) expects **three immediate approvals** for remembered untrusted sessions, despite only **two open-or-reserved slots**. With no closes, the expected outcome is two admitted, four queued, six rejected—not 3/4/5. Refilling tokens cannot admit requests while window capacity remains exhausted.
+
+The flood e2e asserts completion within approximately 30 seconds. Removing the token bucket would make completion faster and still satisfy that assertion.
+
+**Smallest fix:** separate expectations:
+
+- Trusted reconnects exercise token-only admission.
+- Untrusted reconnects exercise the combined gate.
+- After freeing both windows promptly, assert the fourth reconnect remains pending before the refill and completes after it.
+- Add a dedupe-waiter case with occupied capacity; deleting its gate must fail the test.
+
+### 6. Should-fix — `AddressDisplay` does not show full addresses by default
+
+[plan.md:15](implementations-plan/harden-2026-09-remediation/b4-approval/plan.md:15) assumes using `AddressDisplay` preserves the visible full value. Its `full` prop defaults to false, and it otherwise calls `trimAddress` ([AddressDisplay.vue:17](apps/extension/src/components/AddressDisplay.vue:17), [AddressDisplay.vue:81](apps/extension/src/components/AddressDisplay.vue:81)).
+
+**Smallest fix:** explicitly pass `full` for raw-address arguments and test the real component, not an address-echoing stub. For NO_FROM, use “Caller: none” rather than suggesting the transaction entrypoint is a sender.
+
+**Verdict: `reject`.**
