@@ -30,8 +30,10 @@
 | unit (wallet-core) | `bun run --cwd packages/wallet-core test` | 21 files / 247 tests passed |
 | unit (extension-messaging) | `bun run --cwd packages/extension-messaging test` | 12 files / 206 tests passed |
 | unit (aztec-runtime) | `bun run --cwd packages/aztec-runtime test` | 28 files / 221 tests passed (+2 files after the codec test: see below) |
-| unit + component (extension) | `bun run test` | 479 files: 476 passed, 2 skipped, 1 failed → the jsdom trap above; the file passes under both configs after the environment pin (re-run recorded below) |
+| unit + component (extension) | `bun run test` | 479 files: 476 passed, 2 skipped, 1 failed → the jsdom trap above; after the `// @vitest-environment node` pin the file passes under both the extension config and the runtime's own (2/2) |
 | typecheck | `bun run typecheck:all` | 0 errors |
 | lint | `bun run lint` | exit 0 (warnings only; the one new `useOptionalChain` warning fixed) |
-| network e2e (local, WASM) | `bun run e2e:agent tests/e2e/network/tx-sendTx-default.test.ts` | PENDING |
-| network e2e (CI, Presto) | soak dispatch, prover-ON | PENDING |
+| network e2e (local, WASM) | `bun run e2e:agent tests/e2e/network/tx-sendTx-default.test.ts` (no Presto listening, `NULO_E2E_PROVERLESS` unset) | `Test Files 1 passed (1)`, `Tests 1 passed (1)`, 37.3 s; the in-test wait reached the awaiting card at `data-stage="proving"` + `data-backend="browser"` with the subtitle `Proving in browser…`; `E2E_EXIT=0` |
+| network e2e (CI, Presto) | `gh workflow run extension-network-e2e-soak.yml --ref worktree-presto-migration -f mode=files -f test_files="tests/e2e/network/tx-sendTx-default.test.ts tests/e2e/network/frozen-account-canary.test.ts" -f repeats=1 -f proverless=false -f disable_presto=false` | run 34981243186 — **success** (`iter 1 / Aztec agent` 14:23:05Z → 14:27:10Z); log: `Cache restored from key: Linux-presto-server-1.1.1-7c866bac…`, `Binary SHA-256 verified: 7c866bac4023d480de7a0d6a5ad2069ba23979d01fe248a780daad2f369eecdb`, `Presto ready: {… "bb_available":true …}`, `[e2e:agent] bundle contains NULO_PRESTO_REQUIRED_BUILD_STAMP ✓`, `Test Files 2 passed (2)`, `Tests 3 passed (3)`, `PROVE_SUCCESS=4`; the build carries `VITE_NULO_PRESTO_REQUIRED=1`, so the canary's in-test wait asserted `data-backend="presto"` / `Proving with Presto ✦` |
+
+The two e2e rows together are the end-to-end proof of the chain in both directions: the same test, the same code, `browser` locally and `presto` in CI, decided by evidence the prover emitted and nothing the UI inferred.

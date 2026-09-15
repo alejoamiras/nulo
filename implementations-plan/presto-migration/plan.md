@@ -676,7 +676,7 @@ phase's typecheck is green on its own.
 - **Validation gate**: `bun run lint:actions` exit 0; `bun run test:ci-gating` green (its aggregator-name pin reads `extension-network-e2e-status`); push the branch, then
   `gh workflow run extension-network-e2e-soak.yml --ref worktree-presto-migration -f mode=files -f test_files="tests/e2e/network/tx-sendTx-default.test.ts tests/e2e/network/frozen-account-canary.test.ts" -f repeats=1 -f proverless=false` → run green, its log shows `bundle contains NULO_PRESTO_REQUIRED_BUILD_STAMP ✓`, `presto-server` health `bb_available: true`, and the activity step prints `PROVE_SUCCESS=<n>` with n ≥ 1 (observable on the soak; enforced on the PR's `canary` shard — §B). Layers: actions lint, ci-gating unit, network e2e prover-ON.
 
-#### P4 — prove-phase event, journal seam, subtitle, last outcome
+#### P4 ✓ — prove-phase event, journal seam, subtitle, last outcome (2026-09-15; local WASM e2e `browser` + soak run 34981243186 `presto`, PROVE_SUCCESS=4 — lessons/phase-4.md)
 
 - `wallet-core` `JobProgress` + fsm test; `operation-journal/spec.ts` Zod `backend` + round-trip test; `updateProvingBackend` seam (+ tests: applies in `proving`, no-op in any other stage, preserves `enteredProveAt`, serialised under `transitionLock`).
 - `proveId` on `spec.ts`/`ipxe.ts`/`client.ts` (+ a codec round-trip test for the new argument — I8); `PxeService<Methods, PxeEvents>` + `activeProve` set/cleared inside the write lock + sink subscription; `createPxeOffscreen` takes `provePhaseSink`; `offscreen/index.ts` sink + factory wiring.
