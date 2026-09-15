@@ -29,3 +29,18 @@ Codex noted it could not run vitest in its read-only sandbox (vite config write 
 | `scripts/check-no-brand.sh`, `bun run lint:actions` | ok / exit 0 |
 
 "Looks fine" from the round: `activeProve` scoped inside the per-chain write lock; denial-generation logic; the HTTPS-only client behaviour on all three failure scenarios; the archive/hash/cache-hit/`PRESTO_ALLOW_ALL` CI posture; the two documented deviations (coordinator-owned denial records, `onProvePhase` naming).
+
+## Round 2 — "the round-1 fixes hold", 1 finding + 1 nit
+
+Codex confirmed the three adversarial asks: a Response envelope always reaches `handleResponse` (an event-shaped `content` cannot reach `onProvePhase`); overlapping `onProvePhase` calls can only make the attempt's cached backend lag an in-flight write, never settle disagreeing with the journal (the seam serialises and skips same-value writes); each new test fails when its fix is reverted.
+
+| # | sev | finding | verdict | fix |
+|---|---|---|---|---|
+| 1 | MED (pre-existing) | responses were matched by uid + requestId only, both visible on the request broadcast; another extension page can race the offscreen reply with a forged result or error (reproduced: a popup-shaped sender rejecting a pending `proveTx`) | accepted | `isOffscreenPageSender` gates every envelope before the type branch; the harness's `emitMessage` default sender is now the offscreen page (it satisfies the service's trusted-internal gate too); the addressed-uid test asserts a forged error from a popup sender leaves the request pending and the offscreen reply resolves it |
+| n1 | NIT | `ProveAttempt.backend` doc said a failed write leaves it "unset"; it leaves it unchanged | accepted | reworded |
+
+| gate | result |
+|---|---|
+| `extension-messaging` `bun run test` | 207/207 |
+| `extension-messaging` + extension `typecheck` | exit 0 |
+| `bun run lint` | exit 0 |

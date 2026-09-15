@@ -79,7 +79,7 @@ interface ProveAttempt {
 	journalId: string
 	/** Highest sequence number accepted so far; lower or equal → stale, dropped. */
 	lastSeq: number
-	/** Last backend the journal confirmed — the same evidence is not rewritten; a failed write leaves it unset so the next event retries. */
+	/** Last backend the journal confirmed — the same evidence is not rewritten; a failed write leaves it unchanged so the next event retries. */
 	backend?: ProveBackend
 	/** `denialGeneration` at dispatch: only an attempt from the current generation may clear a denial. */
 	denialGeneration: number

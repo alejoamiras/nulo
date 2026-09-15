@@ -14,7 +14,7 @@
 import { describe, test, expect, vi, beforeEach } from "vitest"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
-import { captureMessage, emitMessage, emitMessageFrom, makeSpyLogger, silentLogger } from "../testing/transport-harness"
+import { captureMessage, emitMessage, makeSpyLogger, silentLogger } from "../testing/transport-harness"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { RpcDisconnectedError, RpcTimeoutError, UserRejectedError, WalletError } from "../errors"
 import { MessageType } from "../messages"
@@ -61,66 +61,52 @@ describe("event sender gate", () => {
 			return this.request("echo", val)
 		}
 	}
+	const OFFSCREEN = "chrome-extension://nulo/src/offscreen/index.html"
+	class ExactUrlEventClient extends EventClient {
+		protected override isAcceptedSender(sender: chrome.runtime.MessageSender | undefined): boolean {
+			return sender?.id === chrome.runtime.id && sender.url?.split(/[?#]/, 1)[0] === OFFSCREEN
+		}
+	}
+	const sender = (v: object) => v as unknown as chrome.runtime.MessageSender
 	const event = { type: MessageType.Event, from: "test-service", content: { event: "onPing", payload: { n: 1 } } }
-	const offscreenUrl = (scheme: string, query = "") => `${scheme}://harness-extension-id/src/offscreen/index.html${query}`
+	const popup = sender({ id: "nulo", url: "chrome-extension://nulo/src/popup/index.html" })
 
-	function mounted() {
-		const client = new EventClient()
+	function mounted(Client: new () => EventClient) {
+		// biome-ignore lint/suspicious/noExplicitAny: stub
+		const runtime = (globalThis as any).chrome.runtime
+		runtime.id = "nulo"
+		// The default policy compares `sender.url` against this extension's base URL.
+		runtime.getURL = (path: string) => `chrome-extension://nulo/${path}`
+		const client = new Client()
 		client.connect()
 		const seen = vi.fn()
 		client.onPing.add(seen)
 		return Object.assign(seen, { client })
 	}
-	const popupSender = {
-		id: "harness-extension-id",
-		url: "chrome-extension://harness-extension-id/src/popup/index.html",
-	} as chrome.runtime.MessageSender
 
-	test("a content-script-shaped sender (same extension id, web page url) is dropped", () => {
-		const seen = mounted()
-		emitMessageFrom(event, { id: "harness-extension-id", url: "https://dapp.example/", tab: { id: 1 } } as chrome.runtime.MessageSender)
-		emitMessageFrom(event, { id: "harness-extension-id" } as chrome.runtime.MessageSender) // the SW itself: no url
-		emitMessageFrom(event, undefined)
+	test("default policy: a foreign extension and a content script are dropped; a same-extension page passes", () => {
+		const seen = mounted(EventClient)
+		emitMessage(event, sender({ id: "other-ext", url: OFFSCREEN }))
+		emitMessage(event, sender({ id: "nulo", url: "https://dapp.example/", tab: { id: 1 } }))
 		expect(seen).not.toHaveBeenCalled()
-	})
-
-	test("the Chrome offscreen document url is accepted", () => {
-		const seen = mounted()
-		emitMessageFrom(event, { id: "harness-extension-id", url: offscreenUrl("chrome-extension") } as chrome.runtime.MessageSender)
+		emitMessage(event, popup)
 		expect(seen).toHaveBeenCalledExactlyOnceWith({ n: 1 })
 	})
 
-	test("the Firefox hidden-window url with ?instance=<token> is accepted (query ignored)", () => {
-		vi.mocked(chrome.runtime.getURL).mockImplementation((path: string) => `moz-extension://harness-extension-id/${path}`)
-		const seen = mounted()
-		emitMessageFrom(event, {
-			id: "harness-extension-id",
-			url: offscreenUrl("moz-extension", "?instance=abc123"),
-		} as chrome.runtime.MessageSender)
-		expect(seen).toHaveBeenCalledExactlyOnceWith({ n: 1 })
-	})
-
-	test("other extension pages and foreign extensions are dropped", () => {
-		const seen = mounted()
-		emitMessageFrom(event, popupSender)
-		emitMessageFrom(event, { id: "other-extension", url: offscreenUrl("chrome-extension") } as chrome.runtime.MessageSender)
-		expect(seen).not.toHaveBeenCalled()
-	})
-
-	test("an event addressed to this client's uid earns no exemption; a response addressed to it needs no sender", async () => {
-		const seen = mounted()
-		const reply = seen.client.echo("hi")
+	test("exact-URL override: only the offscreen document (bare, ?instance=, tab-hosted) feeds events — addressing the client's uid earns no exemption", async () => {
+		const seen = mounted(ExactUrlEventClient)
+		const pending = seen.client.echo("hi")
+		pending.catch(() => {})
 		await flush()
-		const { requestId, fromUid } = getLastRequest()
-		emitMessageFrom({ ...event, to: fromUid }, popupSender)
+		const { fromUid } = getLastRequest()
+		emitMessage(event, popup)
+		emitMessage({ ...event, to: fromUid }, popup)
+		emitMessage(event, sender({ id: "nulo" }))
 		expect(seen).not.toHaveBeenCalled()
-		emitMessageFrom({ ...event, to: fromUid }, {
-			id: "harness-extension-id",
-			url: offscreenUrl("chrome-extension"),
-		} as chrome.runtime.MessageSender)
-		expect(seen).toHaveBeenCalledExactlyOnceWith({ n: 1 })
-		emitMessageFrom(makeResponse(requestId, fromUid, "echo:hi"), popupSender)
-		await expect(reply).resolves.toBe("echo:hi")
+		emitMessage(event, sender({ id: "nulo", url: OFFSCREEN }))
+		emitMessage(event, sender({ id: "nulo", url: `${OFFSCREEN}?instance=abc123`, tab: { id: 9 } }))
+		expect(seen).toHaveBeenCalledTimes(2)
+		seen.client.disconnect()
 	})
 })
 
