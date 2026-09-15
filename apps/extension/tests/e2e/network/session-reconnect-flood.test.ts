@@ -52,9 +52,11 @@ test.skipIf(!hasConfig)(
 
 		// Approve every verify window as it appears; the waiting handshakes are served (on window
 		// close and the token refill) rather than rejected, and the cap is never exceeded meanwhile.
-		// A tab reports connected the moment its window opens (dispatch is released then), so the
-		// exit condition is BOTH every tab connected AND no window left open — otherwise the loop
-		// could break with the last batch's windows unapproved.
+		// The SDK sends its key-exchange response BEFORE it runs the async establishment callback, so
+		// a tab can report connected while its verify window has not appeared yet — meaning
+		// `countVerifyWindows === 0` is transiently true before the last window opens. Exit only once
+		// every tab is connected AND every tab's window has been approved (one approval per tab), so
+		// the loop can never break with a window still unapproved.
 		let approvals = 0
 		const deadline = Date.now() + 120_000
 		while (Date.now() < deadline) {
@@ -65,14 +67,14 @@ test.skipIf(!hasConfig)(
 				approvals++
 			}
 			const statuses = await Promise.all(tabs.map(statusOf))
-			if (statuses.every((s) => s === "connected") && countVerifyWindows(ctx) === 0) break
+			if (statuses.every((s) => s === "connected") && approvals >= tabs.length && countVerifyWindows(ctx) === 0) break
 			await new Promise((r) => setTimeout(r, 2_000))
 		}
 
 		for (const tab of tabs) await connected(tab, 5_000)
 		expect(countVerifyWindows(ctx)).toBe(0)
-		// A tab connects only once its verify window opens (the session terminates if it cannot), so
-		// four connections prove four windows were shown; four approvals prove none was left dangling.
+		// The loop already gated its exit on four approvals; asserting it here documents the invariant
+		// the flood must satisfy — four windows shown and approved, never more than two open at once.
 		expect(approvals).toBeGreaterThanOrEqual(4)
 
 		for (const tab of tabs) await tab.close()

@@ -119,13 +119,6 @@ export class WindowReservation {
 		return false
 	}
 
-	/** Release an opened slot whose window the caller has confirmed is already gone — the backstop
-	 *  for a removal event that was buffered then evicted before this reservation could adopt, so
-	 *  no `onRemoved` will arrive to free it. */
-	public releaseIfWindowGone(): void {
-		if (this.state === "opened") this.finish()
-	}
-
 	/** Only an unstarted reservation is reclaimed on a timer; an in-flight or open one settles on
 	 *  its own creation/removal, so the drain never re-selects it (which would spin the timer). */
 	public expiredWhileUnstarted(now: number): boolean {
@@ -269,7 +262,6 @@ export class VerifyAdmissionGate {
 		this.serve()
 	}
 
-	/** Serve every origin's queue as far as budgets allow, reclaim stale reservations, re-arm. */
 	private serve(): void {
 		const now = this.clock.now()
 		for (const r of [...this.reservations.values()]) if (r.expiredWhileUnstarted(now)) r.releaseIfUnstarted()
