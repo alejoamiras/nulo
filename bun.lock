@@ -15,6 +15,9 @@
       "version": "0.27.0",
       "dependencies": {
         "@alejoamiras/aztec-accelerator": "5.2.0",
+        "@alejoamiras/presto": "5.2.0-revision.2",
+        "@alejoamiras/presto-banners": "1.0.0",
+        "@alejoamiras/presto-core": "1.0.1",
         "@alejoamiras/private-fee-juice": "5.0.1",
         "@aztec-foundation/aztec-standards": "5.0.1",
         "@aztec/accounts": "5.2.0",
@@ -192,6 +195,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@alejoamiras/aztec-accelerator": "5.2.0",
+        "@alejoamiras/presto": "5.2.0-revision.2",
         "@alejoamiras/private-fee-juice": "5.0.1",
         "@aztec-foundation/aztec-standards": "5.0.1",
         "@aztec/accounts": "5.2.0",
@@ -367,6 +371,12 @@
     "@adraffy/ens-normalize": ["@adraffy/ens-normalize@1.11.1", "", {}, "sha512-nhCBV3quEgesuf7c7KYfperqSS14T8bYuvJ8PcLJp6znkZpFc0AuW4qBtr8eKVyPPe/8RSr7sglCWPU5eaxwKQ=="],
 
     "@alejoamiras/aztec-accelerator": ["@alejoamiras/aztec-accelerator@5.2.0", "", { "dependencies": { "@aztec/bb-prover": "5.2.0", "@aztec/foundation": "5.2.0", "@aztec/noir-acvm_js": "5.2.0", "@aztec/noir-noirc_abi": "5.2.0", "@aztec/stdlib": "5.2.0", "@logtape/logtape": "^2.0", "ms": "^2.1.3" } }, "sha512-SjgdAEFcllcrbl0U6kZnbr3e16rHqjlAWoOXw1oUx0sLa5+1hiVylpeZn3/l0nMdtTso1ouGuDVF5ywLh1xOsQ=="],
+
+    "@alejoamiras/presto": ["@alejoamiras/presto@5.2.0-revision.2", "", { "dependencies": { "@alejoamiras/presto-core": "1.0.1", "@aztec/bb-prover": "5.2.0", "@aztec/foundation": "5.2.0", "@aztec/noir-acvm_js": "5.2.0", "@aztec/noir-noirc_abi": "5.2.0", "@aztec/stdlib": "5.2.0", "@logtape/logtape": "^2.3.2" } }, "sha512-z1mpWZ6bIWKchrZHN2b0LavhW7w5837NLUkjcpn2oqNPVrBx9pTTZgwhj7MKAQjq761PacN/JoW10rHOo5FvNg=="],
+
+    "@alejoamiras/presto-banners": ["@alejoamiras/presto-banners@1.0.0", "", {}, "sha512-0igchxgggtYb1NBEtYV/epOsNLKBQ5WlInHj21kC9drrjZnzaMyvFApxSdgF3ZXovXb8VxSI13LvcR4OzP9nLg=="],
+
+    "@alejoamiras/presto-core": ["@alejoamiras/presto-core@1.0.1", "", { "dependencies": { "@logtape/logtape": "^2.3.2", "ms": "^2.1.3" } }, "sha512-9WCqrEzpS7B5CNFDese3tBLk6+gf3GHmtb+rZqLWvoLY5IIGvbWV2btqeMYL0kgClqDTJ1rry+Ev8wD/lqoE4A=="],
 
     "@alejoamiras/private-fee-juice": ["@alejoamiras/private-fee-juice@5.0.1", "", { "peerDependencies": { "@aztec/aztec.js": "5.0.1", "@aztec/protocol-contracts": "5.0.1", "@aztec/stdlib": "5.0.1" } }, "sha512-3a7pDk1yeWS/xTghcqvYcg8IexJLto08PsesG6wS9aHwB6iZD0lIvhaW6ADp9CIYLurViGhq/AIa9IKaKRKOzQ=="],
 
@@ -2457,6 +2467,10 @@
     "youch-core": ["youch-core@0.3.3", "", { "dependencies": { "@poppinss/exception": "^1.2.2", "error-stack-parser-es": "^1.0.5" } }, "sha512-ho7XuGjLaJ2hWHoK8yFnsUGy2Y5uDpqSTq1FkHLK4/oqKtyUU1AFbOOxY4IpC9f0fTLjwYbslUz0Po5BpD1wrA=="],
 
     "zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
+
+    "@alejoamiras/presto/@logtape/logtape": ["@logtape/logtape@2.3.3", "", {}, "sha512-H8AqgCq6M6Wu97FVPyfE5UT4w6H+Wdt9iGzLKPgtJRI/jrG9HbzzNUw9JL1LarkZD8xeKx9FqKfcLaXr0hGJuw=="],
+
+    "@alejoamiras/presto-core/@logtape/logtape": ["@logtape/logtape@2.3.3", "", {}, "sha512-H8AqgCq6M6Wu97FVPyfE5UT4w6H+Wdt9iGzLKPgtJRI/jrG9HbzzNUw9JL1LarkZD8xeKx9FqKfcLaXr0hGJuw=="],
 
     "@alejoamiras/private-fee-juice/@aztec/aztec.js": ["@aztec/aztec.js@5.0.1", "", { "dependencies": { "@aztec/constants": "5.0.1", "@aztec/entrypoints": "5.0.1", "@aztec/ethereum": "5.0.1", "@aztec/foundation": "5.0.1", "@aztec/l1-artifacts": "5.0.1", "@aztec/protocol-contracts": "5.0.1", "@aztec/standard-contracts": "5.0.1", "@aztec/stdlib": "5.0.1", "axios": "^1.15.1", "tslib": "^2.4.0", "viem": "npm:@aztec/viem@2.38.2", "zod": "^4" } }, "sha512-aEAhMDhfYwLmpht1AlWuXrYUbgwZgSrXoTsT0NIVb3ACM3ksTJvhy1WFkdaNe2odgkU8nBGxWYnWQxX4WACZ7g=="],
 

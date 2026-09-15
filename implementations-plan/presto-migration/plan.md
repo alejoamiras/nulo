@@ -646,7 +646,7 @@ phase's typecheck is green on its own.
 
 ### Arc 1 — runtime truth: SDK, manifest, CI, prove-phase event (`worktree-presto-migration`)
 
-#### P1 — dependencies, gate exemptions, aliases, version lockstep
+#### P1 ✓ — dependencies, gate exemptions, aliases (2026-09-15; residue check: the Presto closure is clean, exit 1 is a pre-existing playground failure — lessons/phase-1.md)
 
 - **Add** `@alejoamiras/presto@5.2.0-revision.2` next to the existing accelerator pin in `packages/aztec-runtime/package.json` and `apps/extension/package.json` (the accelerator pin is removed in P2 together with its imports, so every phase typechecks); add `@alejoamiras/presto-core@1.0.1` and `@alejoamiras/presto-banners@1.0.0` to `apps/extension`.
 - `bunfig.toml`: delete the expired accelerator exclude; re-read publish times (`npm view … time`); add a dated exclude (`remove on/after 2026-09-16T14:49Z`) **only** for each Presto package still inside the 7-day window at install time (F16 — likely just `presto-banners`); verify npm provenance first (the isolated `npm audit signatures` fixture from the Security section) and record the output + tarball digests in `lessons/phase-1.md`.
