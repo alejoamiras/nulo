@@ -683,9 +683,7 @@ export class DappSendExecutor {
 				// Refuse a forged estimateId/previewId pairing before the reuse cache is touched.
 				this.assertEstimateBinding(approval)
 				const identity = fingerprintInputFor(op, op.feeSettings, fee, actions)
-				// The owned snapshot gates reuse: only a `found` result lets a precomputed estimate be
-				// reused; missing forces a rebuild, foreign already threw. Taken once, here, so the
-				// single-shot pop can never be raced by a separate `enforcePreview` take.
+				// Pop the snapshot before any reuse, and keep that one lookup to reconcile the build after.
 				const preview = approval ? this.takeStandardPreview(approval, fingerprintOperation(identity)) : undefined
 				const reuseId = preview?.kind === "found" ? approval?.estimateId : undefined
 				const {
