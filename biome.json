@@ -5,6 +5,7 @@
 		"ignoreUnknown": false,
 		"includes": [
 			"apps/**",
+			"infra/**",
 			"packages/**",
 			"vitest.base.ts",
 			"scripts/ci-cd/test-soak/**",
