@@ -1,9 +1,10 @@
 import type { HTTPRequest, Page } from "puppeteer"
+import { PRESTO_HOST, PRESTO_HTTPS_PORT, PRESTO_PORT } from "@/presto/config"
 
 // The wallet probes Presto HTTPS-first; after an HTTPS failure the SDK runs one witness-free HTTP
 // diagnostic. Both are intercepted below the TLS handshake, so no certificate is needed.
-export const PRESTO_HTTPS_HEALTH_URL = "https://127.0.0.1:59834/health"
-export const PRESTO_HTTP_HEALTH_URL = "http://127.0.0.1:59833/health"
+export const PRESTO_HTTPS_HEALTH_URL = `https://${PRESTO_HOST}:${PRESTO_HTTPS_PORT}/health`
+export const PRESTO_HTTP_HEALTH_URL = `http://${PRESTO_HOST}:${PRESTO_PORT}/health`
 
 /** What Presto serves an origin it has approved: versions, the prover flag and the HTTPS port. */
 export const PRESTO_DETAILED_HEALTH = {
@@ -13,7 +14,7 @@ export const PRESTO_DETAILED_HEALTH = {
 	aztec_version: "5.2.0",
 	available_versions: ["5.2.0"],
 	bb_available: true,
-	https_port: 59834,
+	https_port: PRESTO_HTTPS_PORT,
 }
 /** What Presto serves an origin it has not approved yet. */
 export const PRESTO_MINIMAL_HEALTH = { status: "ok", api_version: 1 }

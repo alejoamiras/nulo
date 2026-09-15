@@ -11,6 +11,8 @@
 export const PRESTO_HOST = "127.0.0.1"
 export const PRESTO_PORT = 59833
 export const PRESTO_HTTPS_PORT = 59834
+/** Presto's download site: the pitch card's link and the settings "Get Presto" row. */
+export const PRESTO_SITE_URL = "https://presto.build"
 
 export const PRESTO_REQUIRED = (import.meta.env.VITE_NULO_PRESTO_REQUIRED ?? "") === "1"
 

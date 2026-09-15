@@ -14,9 +14,8 @@ import { ExecutionServiceClient } from "@/wallet/services/execution/client"
 import { usePrestoStatus } from "@/composables/usePrestoStatus"
 
 /** Utils */
+import { PRESTO_SITE_URL } from "@/presto/config"
 import { copyFor, detailRowsFor } from "@/utils/presto-ui-state"
-
-const PRESTO_URL = "https://presto.build"
 
 const { state, detect, dispose } = usePrestoStatus()
 
@@ -60,7 +59,7 @@ onBeforeUnmount(() => {
 
 		<ItemsContainer v-if="state.kind === 'offline'" title="Presto">
 			<SettingItem
-				:to="PRESTO_URL"
+				:to="PRESTO_SITE_URL"
 				title="Get Presto"
 				description="presto.build · free, open source"
 				materialIcon="download"

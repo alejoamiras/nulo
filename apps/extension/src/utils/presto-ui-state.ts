@@ -10,8 +10,9 @@ import { type BannerState, STRINGS, stateFromStatus } from "@alejoamiras/presto-
 import type { PrestoStatus, SecureConnectionDiagnosis } from "@alejoamiras/presto-core"
 import type { LastProveOutcome } from "@/wallet/services/execution/models"
 
-/** Facts the detailed health body carries; every field is absent on the minimal body
- *  Presto serves an origin it has not approved yet. */
+/** Facts the health body carries. The version fields are absent on the minimal body Presto
+ *  serves an origin it has not approved yet; `protocol` is the scheme that answered, so it is
+ *  known whenever anything answered. */
 export interface PrestoInfo {
 	appVersion?: string
 	nativeAztecVersion?: string

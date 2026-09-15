@@ -1,9 +1,7 @@
 /**
- * Presto detection for a page (onboarding, settings). C1 shape: the client is
- * injected — the default is the page's shared `getPrestoClient()`, so every
- * consumer in one page context shares the SDK's 10 s status cache — and the
- * parent calls `dispose()`. `PrestoClient` has no abort API, so `dispose()`
- * (and a newer `detect()`) can only drop a late result.
+ * Presto detection for a page. The client is injected (default: the page's shared
+ * `getPrestoClient()`) and the parent calls `dispose()`. `PrestoClient` has no abort API, so
+ * `dispose()` (and a newer `detect()`) can only drop a late result, never cancel the probe.
  */
 import type { PrestoStatus } from "@alejoamiras/presto-core"
 import { onMounted, ref } from "vue"

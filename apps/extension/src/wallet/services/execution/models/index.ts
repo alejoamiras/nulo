@@ -78,21 +78,11 @@ export type OperationApprovalEnvelope = {
 
 /** The `(interactionId, index)` a preview or estimate is written under. */
 export type PreviewContext = Pick<OperationApprovalEnvelope, "interactionId" | "index">
+import type { PrestoPhase } from "@alejoamiras/presto"
 import type { ProveBackend } from "@nulo/wallet-core/jobs"
 
-/** Every phase the Presto SDK emits; the coordinator drops anything else at the wire. */
-export type ProvePhaseName =
-	| "detect"
-	| "secure-connection-unavailable"
-	| "serialize"
-	| "transmit"
-	| "proving"
-	| "proved"
-	| "receive"
-	| "fallback"
-	| "downloading"
-	| "denied"
-	| "version-mismatch"
+/** The Presto SDK's phase vocabulary; the coordinator's wire schema pins the members it accepts. */
+export type ProvePhaseName = PrestoPhase
 
 /** The latest accepted prove-phase event, as a hint for the UI. */
 export interface ProveOutcomeHint {

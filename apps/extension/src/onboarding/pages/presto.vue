@@ -10,9 +10,9 @@ import { BANNER_EVENTS, clearDismissal } from "@alejoamiras/presto-banners"
 import { usePrestoStatus } from "@/composables/usePrestoStatus"
 
 /** Utils */
+import { PRESTO_SITE_URL } from "@/presto/config"
 import { copyFor } from "@/utils/presto-ui-state"
 
-const PRESTO_URL = "https://presto.build"
 /** The card pitch's dismissal record: `persist-key`:variant:state (`PrestoBanner.persistKey`). */
 const PITCH_DISMISSAL_KEY = "presto:banner:card:offline"
 
@@ -72,7 +72,7 @@ onBeforeUnmount(() => {
 		<!-- The wrapper stays mounted so the banner's bubbling events have one stable listener
 			and the pb-* overrides apply the moment the pitch renders. -->
 		<div v-show="isPitch" ref="pitchRef" :class="$style.pitch" data-testid="onboarding-presto-pitch">
-			<presto-banner v-if="isPitch" variant="card" fonts="none" :theme="bannerTheme" :href="PRESTO_URL" :status.prop="bannerStatus" />
+			<presto-banner v-if="isPitch" variant="card" fonts="none" :theme="bannerTheme" :href="PRESTO_SITE_URL" :status.prop="bannerStatus" />
 		</div>
 
 		<Flex v-if="isPitch" align="center" justify="center" gap="10">
