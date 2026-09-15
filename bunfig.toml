@@ -51,7 +51,7 @@ minimumReleaseAge = 604800
 # TEMPORARY — remove on/after 2026-09-16T14:49Z, when the youngest of the three clears the gate
 # on its own (presto-core clears 2026-09-15T21:28Z, presto 2026-09-15T22:58Z, presto-banners
 # 2026-09-16T14:49Z). The Presto packages are first-party (published by this repo's owner) and
-# replace @alejoamiras/aztec-accelerator, which is being retired. Verified before exempting, in
+# replace the retired accelerator SDK. Verified before exempting, in
 # an isolated fixture after a real `npm install --ignore-scripts` of the exact versions:
 # `npm audit signatures --include-attestations` reports every tarball registry-signed with a
 # verified SLSA provenance statement binding it to alejoamiras/presto's publish workflow at the
