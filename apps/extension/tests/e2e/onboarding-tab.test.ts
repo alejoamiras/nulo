@@ -1,4 +1,4 @@
-import type { Page } from "puppeteer"
+import type { HTTPRequest, Page } from "puppeteer"
 import { afterEach, beforeEach, describe, expect } from "vitest"
 import { withTimeoutMessage, clickByTestId, openOnboarding, replaceInputValue, test, waitForHash } from "./fixtures/extension"
 
@@ -15,8 +15,35 @@ const PRESTO_DETAILED_HEALTH = {
 	bb_available: true,
 	https_port: 59834,
 }
+/** What Presto serves an origin it has not approved yet. */
+const PRESTO_MINIMAL_HEALTH = { status: "ok", api_version: 1 }
 const TEST_PASSWORD = "OnboardingTest_!23"
 const TEST_PROFILE_NAME = "Onboarding Test"
+
+type HealthAnswer = { status: number; body: unknown } | "refused"
+
+/** Answer the two health probes per scheme; every other request passes through. */
+async function interceptHealth(page: Page, answers: { https: HealthAnswer; http: HealthAnswer }): Promise<void> {
+	await page.setRequestInterception(true)
+	const answer = (req: HTTPRequest, how: HealthAnswer) => {
+		if (how === "refused") return req.abort("connectionrefused")
+		return req.respond({ status: how.status, contentType: "application/json", body: JSON.stringify(how.body) })
+	}
+	page.on("request", (req) => {
+		if (req.url() === PRESTO_HTTPS_HEALTH_URL) return answer(req, answers.https)
+		if (req.url() === PRESTO_HTTP_HEALTH_URL) return answer(req, answers.http)
+		return req.continue()
+	})
+}
+
+async function gotoPrestoStep(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		window.location.hash = "#/onboarding/presto"
+	})
+	await waitForHash(page, "#/onboarding/presto", 10_000)
+}
+
+const statusCardSelector = (status: string) => `[data-testid="onboarding-presto-status"][data-status="${status}"]`
 
 describe("onboarding tab", () => {
 	test("welcome screen renders both CTAs", async ({ freshExtensionPerTest: extension }) => {
@@ -50,27 +77,28 @@ describe("onboarding tab", () => {
 		// Wait for the bootstrap to finish + route to /learn
 		await waitForHash(page, "#/onboarding/learn", 30_000)
 
-		// Continue from learn now routes into the fee-juice explainer step
-		// (was direct-to-accelerator pre-arc). Skip on learn still routes
-		// straight to /accelerator — covered by the dedicated skip test below.
+		// Continue from learn routes into the fee-juice explainer step. Skip on
+		// learn routes straight to /presto — covered by the dedicated skip test below.
 		await clickByTestId(page, "onboarding-learn-continue")
 		await waitForHash(page, "#/onboarding/fees", 10_000)
 
-		// Continue from /fees → /accelerator. Skip on /fees routes to the
-		// same destination (the explainer is short; no value in a dedicated
+		// Continue from /fees → /presto. Skip on /fees routes to the same
+		// destination (the explainer is short; no value in a dedicated
 		// skip-to-done shortcut).
 		await clickByTestId(page, "onboarding-fees-continue")
-		await waitForHash(page, "#/onboarding/accelerator", 10_000)
+		await waitForHash(page, "#/onboarding/presto", 10_000)
 
-		// Wait for the status card to settle (any terminal state). If 'active'
-		// (real accelerator is installed on the dev box), click Continue.
-		// Otherwise click Skip — which now routes directly to /done.
-		const status = await withTimeoutMessage(
+		// Wait for the step to settle: the install pitch (no Presto on the box) or a
+		// status card in a terminal state. Continue only renders when proving can go
+		// native; otherwise Skip routes directly to /done.
+		const settled = await withTimeoutMessage(
 			page
 				.waitForFunction(
 					() => {
-						const s = document.querySelector('[data-testid="onboarding-accelerator-status"]')?.getAttribute("data-status")
-						return s === "active" || s === "no-bb" || s === "not-detected" ? s : null
+						const pitch = document.querySelector<HTMLElement>('[data-testid="onboarding-presto-pitch"]')
+						if (pitch && pitch.style.display !== "none") return "pitch"
+						const s = document.querySelector('[data-testid="onboarding-presto-status"]')?.getAttribute("data-status")
+						return s && s !== "idle" && s !== "detecting" ? s : null
 					},
 					{ timeout: 20_000, polling: 200 },
 				)
@@ -78,18 +106,16 @@ describe("onboarding tab", () => {
 			async () => {
 				const seen = await page
 					.evaluate(
-						() =>
-							document.querySelector('[data-testid="onboarding-accelerator-status"]')?.getAttribute("data-status") ??
-							"<absent>",
+						() => document.querySelector('[data-testid="onboarding-presto-status"]')?.getAttribute("data-status") ?? "<absent>",
 					)
 					.catch(() => "<unreadable>")
-				return `onboarding accelerator status never reached a terminal value within 20s (last: ${seen})`
+				return `onboarding presto step never settled within 20s (last: ${seen})`
 			},
 		)
-		if (status === "active") {
-			await clickByTestId(page, "onboarding-accelerator-continue")
+		if (settled === "available" || settled === "downloading") {
+			await clickByTestId(page, "onboarding-presto-continue")
 		} else {
-			await clickByTestId(page, "onboarding-accelerator-skip")
+			await clickByTestId(page, "onboarding-presto-skip")
 		}
 		await waitForHash(page, "#/onboarding/done", 10_000)
 
@@ -132,122 +158,110 @@ describe("onboarding tab", () => {
 
 	test("the harness can answer the HTTPS health probe before any TLS handshake", async ({ freshExtensionPerTest: extension }) => {
 		const page = await openOnboarding(extension)
-		await page.setRequestInterception(true)
-		page.on("request", (req) => {
-			if (req.url() === PRESTO_HTTPS_HEALTH_URL) {
-				req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok", api_version: 1 }) })
-				return
-			}
-			req.continue()
-		})
+		await interceptHealth(page, { https: { status: 200, body: PRESTO_MINIMAL_HEALTH }, http: "refused" })
 		const body = await page.evaluate(async (url) => (await fetch(url)).json(), PRESTO_HTTPS_HEALTH_URL)
-		expect(body).toEqual({ status: "ok", api_version: 1 })
+		expect(body).toEqual(PRESTO_MINIMAL_HEALTH)
 		await page.close()
 	})
 
-	test("accelerator mock-active renders enabled Continue button", async ({ freshExtensionPerTest: extension }) => {
+	test("presto available renders the connected card and an enabled Continue", async ({ freshExtensionPerTest: extension }) => {
 		const page = await openOnboarding(extension)
-
 		// A healthy HTTPS Presto whose cached versions include the wallet's Aztec line.
-		await page.setRequestInterception(true)
-		page.on("request", (req) => {
-			if (req.url() === PRESTO_HTTPS_HEALTH_URL) {
-				req.respond({ status: 200, contentType: "application/json", body: JSON.stringify(PRESTO_DETAILED_HEALTH) })
-				return
-			}
-			req.continue()
-		})
+		await interceptHealth(page, { https: { status: 200, body: PRESTO_DETAILED_HEALTH }, http: "refused" })
+		await gotoPrestoStep(page)
 
-		// Navigate to /accelerator directly (skip create flow for this case).
-		await page.evaluate(() => {
-			window.location.hash = "#/onboarding/accelerator"
-		})
-		await waitForHash(page, "#/onboarding/accelerator", 10_000)
-
-		// Wait for the status card to flip to 'active'
-		await page.waitForFunction(
-			() => {
-				const el = document.querySelector('[data-testid="onboarding-accelerator-status"]')
-				return !!el && el.getAttribute("data-status") === "active"
-			},
-			{ timeout: 10_000, polling: 200 },
-		)
-
-		// Continue button is rendered + enabled (only renders when status==active).
+		await page.waitForSelector(statusCardSelector("available"), { visible: true, timeout: 10_000 })
 		const state = await page.evaluate(() => {
-			const btn = document.querySelector<HTMLButtonElement>('[data-testid="onboarding-accelerator-continue"]')
-			return { rendered: !!btn, disabled: btn?.disabled ?? null }
+			const btn = document.querySelector<HTMLButtonElement>('[data-testid="onboarding-presto-continue"]')
+			return {
+				rendered: !!btn,
+				disabled: btn?.disabled ?? null,
+				skip: !!document.querySelector('[data-testid="onboarding-presto-skip"]'),
+			}
 		})
-		expect(state.rendered).toBe(true)
-		expect(state.disabled).toBe(false)
+		expect(state).toEqual({ rendered: true, disabled: false, skip: false })
 
 		await page.close()
 	})
 
-	test("skip links on /learn and /fees both route to /accelerator (split-handler pin)", async ({ freshExtensionPerTest: extension }) => {
-		// Drive the two skip buttons directly. The arc redesigned the
-		// happy-path into learn → fees → accelerator; each skip is its own
-		// handler routing to /accelerator (not /done). Without this pin, a
-		// future refactor that consolidates handlers could silently fan one
-		// of them to the wrong target.
+	test("skip links on /learn and /fees both route to /presto (split-handler pin)", async ({ freshExtensionPerTest: extension }) => {
+		// Drive the two skip buttons directly: each skip is its own handler routing to
+		// /presto (not /done). Without this pin, a future refactor that consolidates
+		// handlers could silently fan one of them to the wrong target.
 		const page = await openOnboarding(extension)
 
-		// /learn skip → /accelerator
 		await page.evaluate(() => {
 			window.location.hash = "#/onboarding/learn"
 		})
 		await waitForHash(page, "#/onboarding/learn", 10_000)
 		await clickByTestId(page, "onboarding-learn-skip")
-		await waitForHash(page, "#/onboarding/accelerator", 10_000)
+		await waitForHash(page, "#/onboarding/presto", 10_000)
 
-		// /fees skip → /accelerator
 		await page.evaluate(() => {
 			window.location.hash = "#/onboarding/fees"
 		})
 		await waitForHash(page, "#/onboarding/fees", 10_000)
 		await clickByTestId(page, "onboarding-fees-skip")
-		await waitForHash(page, "#/onboarding/accelerator", 10_000)
+		await waitForHash(page, "#/onboarding/presto", 10_000)
 
 		await page.close()
 	})
 
-	test("accelerator not-detected hides Continue and shows Skip link", async ({ freshExtensionPerTest: extension }) => {
+	test("nothing listening on either port renders the install pitch; Skip routes to /done", async ({
+		freshExtensionPerTest: extension,
+	}) => {
 		const page = await openOnboarding(extension)
+		// Both probes refused is what an uninstalled Presto looks like to the page.
+		await interceptHealth(page, { https: "refused", http: "refused" })
+		await gotoPrestoStep(page)
 
-		// Nothing listens on either port: the HTTPS probe and the HTTP diagnostic are both refused,
-		// which is what an uninstalled Presto looks like to the page.
-		await page.setRequestInterception(true)
-		page.on("request", (req) => {
-			if (req.url() === PRESTO_HTTPS_HEALTH_URL || req.url() === PRESTO_HTTP_HEALTH_URL) {
-				req.abort("connectionrefused")
-				return
-			}
-			req.continue()
-		})
+		await page.waitForSelector('[data-testid="onboarding-presto-pitch"]', { visible: true, timeout: 10_000 })
+		const state = await page.evaluate(() => ({
+			card: !!document.querySelector('[data-testid="onboarding-presto-status"]'),
+			continue: !!document.querySelector('[data-testid="onboarding-presto-continue"]'),
+			retry: !!document.querySelector('[data-testid="onboarding-presto-retry"]'),
+		}))
+		expect(state).toEqual({ card: false, continue: false, retry: true })
 
-		await page.evaluate(() => {
-			window.location.hash = "#/onboarding/accelerator"
-		})
-		await waitForHash(page, "#/onboarding/accelerator", 10_000)
-		await page.waitForFunction(
-			() => {
-				const el = document.querySelector('[data-testid="onboarding-accelerator-status"]')
-				return !!el && el.getAttribute("data-status") === "not-detected"
-			},
-			{ timeout: 10_000, polling: 200 },
-		)
-
-		// Continue is NOT rendered (only renders on status=active). Skip
-		// link is the bypass affordance, vertically centered in a
-		// Continue-sized slot so the visual position is stable.
-		const noContinue = await page.evaluate(() => {
-			return !document.querySelector('[data-testid="onboarding-accelerator-continue"]')
-		})
-		expect(noContinue).toBe(true)
-
-		// Click Skip → routes immediately to /done (no two-click gate).
-		await clickByTestId(page, "onboarding-accelerator-skip")
+		await clickByTestId(page, "onboarding-presto-skip")
 		await waitForHash(page, "#/onboarding/done", 5_000)
+
+		await page.close()
+	})
+
+	test("HTTPS refused + a detailed HTTP body without https_port is the encrypted-connection card (https-disabled)", async ({
+		freshExtensionPerTest: extension,
+	}) => {
+		const page = await openOnboarding(extension)
+		const { https_port: _omitted, ...withoutHttpsPort } = PRESTO_DETAILED_HEALTH
+		await interceptHealth(page, { https: "refused", http: { status: 200, body: withoutHttpsPort } })
+		await gotoPrestoStep(page)
+
+		await page.waitForSelector(statusCardSelector("secure-connection-unavailable"), { visible: true, timeout: 10_000 })
+		const state = await page.evaluate(() => {
+			const card = document.querySelector('[data-testid="onboarding-presto-status"]')
+			return {
+				diagnosis: card?.getAttribute("data-diagnosis"),
+				steps: card?.querySelectorAll("li").length,
+				continue: !!document.querySelector('[data-testid="onboarding-presto-continue"]'),
+				skip: !!document.querySelector('[data-testid="onboarding-presto-skip"]'),
+			}
+		})
+		expect(state).toEqual({ diagnosis: "https-disabled", steps: 3, continue: false, skip: true })
+
+		await page.close()
+	})
+
+	test("HTTPS refused + the minimal HTTP body is the presto-reachable copy", async ({ freshExtensionPerTest: extension }) => {
+		const page = await openOnboarding(extension)
+		await interceptHealth(page, { https: "refused", http: { status: 200, body: PRESTO_MINIMAL_HEALTH } })
+		await gotoPrestoStep(page)
+
+		await page.waitForSelector(statusCardSelector("secure-connection-unavailable"), { visible: true, timeout: 10_000 })
+		const diagnosis = await page.evaluate(
+			() => document.querySelector('[data-testid="onboarding-presto-status"]')?.getAttribute("data-diagnosis") ?? null,
+		)
+		expect(diagnosis).toBe("presto-reachable")
 
 		await page.close()
 	})
@@ -260,7 +274,6 @@ describe("onboarding tab", () => {
 			await chrome.storage.local.set({ "nulo:onboarding:completed": false })
 		})
 		await setupPage.close()
-
 		// Open the popup explicitly — should trigger redirect to onboarding tab.
 		const popup = await extension.browser.newPage()
 		const tabPromise = extension.browser.waitForTarget(

@@ -233,7 +233,6 @@ declare global {
   const uiStateFromStatus: typeof import('../utils/presto-ui-state').uiStateFromStatus
   const unref: typeof import('vue').unref
   const usdThresholdToMicro: typeof import('../utils/incoming-dust').usdThresholdToMicro
-  const useAcceleratorStatus: typeof import('../onboarding/composables/useAcceleratorStatus').useAcceleratorStatus
   const useActivityStore: typeof import('../stores/activity.store').useActivityStore
   const useAppStore: typeof import('../stores/app.store').useAppStore
   const useAttrs: typeof import('vue').useAttrs
@@ -428,9 +427,6 @@ declare global {
   // @ts-ignore
   export type { TransferIntent, ProjectedArgument } from '../utils/transfer-intent'
   import('../utils/transfer-intent')
-  // @ts-ignore
-  export type { AcceleratorStatus } from '../onboarding/composables/useAcceleratorStatus'
-  import('../onboarding/composables/useAcceleratorStatus')
 }
 
 // for vue template auto import
@@ -661,7 +657,6 @@ declare module 'vue' {
     readonly uiStateFromStatus: UnwrapRef<typeof import('../utils/presto-ui-state')['uiStateFromStatus']>
     readonly unref: UnwrapRef<typeof import('vue')['unref']>
     readonly usdThresholdToMicro: UnwrapRef<typeof import('../utils/incoming-dust')['usdThresholdToMicro']>
-    readonly useAcceleratorStatus: UnwrapRef<typeof import('../onboarding/composables/useAcceleratorStatus')['useAcceleratorStatus']>
     readonly useActivityStore: UnwrapRef<typeof import('../stores/activity.store')['useActivityStore']>
     readonly useAppStore: UnwrapRef<typeof import('../stores/app.store')['useAppStore']>
     readonly useAttrs: UnwrapRef<typeof import('vue')['useAttrs']>

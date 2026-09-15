@@ -702,7 +702,7 @@ phase's typecheck is green on its own.
 - `vite.config.ts`: `isCustomElement`.
 - **Validation gate**: `bun run test` green (new tests included); `bun run typecheck:all`; `bun run lint`; `bun run build` exit 0. Layers: unit, typecheck, lint, build. (A4 is measured in P7, once the code is actually reachable.)
 
-#### P7 — onboarding `presto.vue`
+#### P7 ✓ — onboarding `presto.vue` (2026-09-15; onboarding smoke 9/9, full smoke green across the plain + armed runs, residue 0, A4 +0.1 kB gz; build sent to the Mac — the manual walk is owner-pending, see lessons/phase-7.md)
 
 - Page per §D and the approved artboards; `learn.vue`/`fees.vue` routes; `app.store.ts` + `reset.vue` comments; delete `accelerator.vue` and `useAcceleratorStatus.*` (last consumer replaced here).
 - `tests/e2e/onboarding-tab.test.ts`: intercept both `https://127.0.0.1:59834/health` and `http://127.0.0.1:59833/health`; bodies satisfy `isDetailedHealthBody` where a specific diagnosis is expected; cases: available → Continue; both refused → card banner + Skip; HTTPS refused + detailed HTTP body without `https_port` → the encrypted-connection card with the `https-disabled` steps; HTTPS refused + minimal HTTP body → the `presto-reachable` copy.

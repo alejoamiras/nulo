@@ -1,7 +1,6 @@
 {
   "globals": {
     "ACTIVITY_FEED_KINDS": true,
-    "AcceleratorStatus": true,
     "AccessLevel": true,
     "AccountRestoreClient": true,
     "ActivityRow": true,
@@ -356,7 +355,6 @@
     "uiStateFromStatus": true,
     "unref": true,
     "usdThresholdToMicro": true,
-    "useAcceleratorStatus": true,
     "useActivityStore": true,
     "useAppStore": true,
     "useAttrs": true,

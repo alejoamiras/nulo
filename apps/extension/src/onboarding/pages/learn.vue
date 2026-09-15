@@ -24,13 +24,13 @@ const cards = [
 ]
 
 // Continue advances into the fee-juice explainer step. Skip is intentionally a
-// SEPARATE handler that goes straight to /accelerator — the accelerator gate
-// still applies, same constraint that pre-dated the fees step.
+// SEPARATE handler that goes straight to /presto — the Presto step still
+// applies, same constraint that pre-dated the fees step.
 function goContinue() {
 	router.push("/onboarding/fees")
 }
 function goSkip() {
-	router.push("/onboarding/accelerator")
+	router.push("/onboarding/presto")
 }
 </script>
 

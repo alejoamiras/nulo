@@ -23,15 +23,15 @@ const cards = [
 	},
 ]
 
-// Continue routes onward into the accelerator detection. Skip lands at the
-// same place; the explainer is short enough that "Skip" just means "I've
-// read enough", and the user can revisit fee details from the wallet's fee
+// Continue routes onward into the Presto detection. Skip lands at the same
+// place; the explainer is short enough that "Skip" just means "I've read
+// enough", and the user can revisit fee details from the wallet's fee
 // settings panel later.
 function goContinue() {
-	router.push("/onboarding/accelerator")
+	router.push("/onboarding/presto")
 }
 function goSkip() {
-	router.push("/onboarding/accelerator")
+	router.push("/onboarding/presto")
 }
 </script>
 

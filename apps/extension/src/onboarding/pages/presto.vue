@@ -1,0 +1,183 @@
+<route lang="json">
+{ "meta": { "title": "Presto" } }
+</route>
+
+<script setup lang="ts">
+import "@alejoamiras/presto-banners/register"
+import { BANNER_EVENTS, clearDismissal } from "@alejoamiras/presto-banners"
+
+/** Composables */
+import { usePrestoStatus } from "@/composables/usePrestoStatus"
+
+/** Utils */
+import { copyFor } from "@/utils/presto-ui-state"
+
+const PRESTO_URL = "https://presto.build"
+/** The card pitch's dismissal record: `persist-key`:variant:state (`PrestoBanner.persistKey`). */
+const PITCH_DISMISSAL_KEY = "presto:banner:card:offline"
+
+const router = useRouter()
+const { state, bannerStatus, detect, dispose } = usePrestoStatus()
+
+const copy = computed(() => copyFor(state.value))
+const isPitch = computed(() => state.value.kind === "offline")
+const isSettled = computed(() => state.value.kind !== "idle" && state.value.kind !== "detecting")
+const canContinue = computed(() => state.value.kind === "available" || state.value.kind === "downloading")
+const diagnosis = computed(() => (state.value.kind === "secure-connection-unavailable" ? state.value.diagnosis : undefined))
+// app.vue resolves the config's theme (system → light/dark) onto `<html theme>` before any page mounts.
+const bannerTheme = document.documentElement.getAttribute("theme") === "light" ? "light" : "dark"
+
+const pitchRef = useTemplateRef<HTMLDivElement>("pitchRef")
+
+function retry() {
+	void detect({ forceRefresh: true })
+}
+
+function skip() {
+	router.push("/onboarding/done")
+}
+
+function goNext() {
+	router.push("/onboarding/done")
+}
+
+onMounted(() => {
+	// A reset clears chrome.storage, not this page's localStorage: a pitch dismissed during an
+	// earlier onboarding must not stay hidden from a re-onboarding user.
+	clearDismissal(PITCH_DISMISSAL_KEY)
+	pitchRef.value?.addEventListener(BANNER_EVENTS.retry, retry)
+	pitchRef.value?.addEventListener(BANNER_EVENTS.dismiss, skip)
+})
+
+onBeforeUnmount(() => {
+	pitchRef.value?.removeEventListener(BANNER_EVENTS.retry, retry)
+	pitchRef.value?.removeEventListener(BANNER_EVENTS.dismiss, skip)
+	dispose()
+})
+</script>
+
+<template>
+	<OnboardingPage>
+		<StepIndicator :current="4" />
+		<Flex direction="column" gap="16" :class="$style.hero">
+			<BrutalistTitle main="Speed up" sub="Proving" />
+			<div :class="$style.hero_bar" />
+			<Text size="14" color="secondary" height="150">
+				Presto is a free menu-bar app that proves transactions natively, using every
+				CPU core your machine has. Browser proofs that take 30 seconds drop to a few.
+				Optional, but strongly recommended.
+			</Text>
+		</Flex>
+
+		<!-- The wrapper stays mounted so the banner's bubbling events have one stable listener
+			and the pb-* overrides apply the moment the pitch renders. -->
+		<div v-show="isPitch" ref="pitchRef" :class="$style.pitch" data-testid="onboarding-presto-pitch">
+			<presto-banner v-if="isPitch" variant="card" fonts="none" :theme="bannerTheme" :href="PRESTO_URL" :status.prop="bannerStatus" />
+		</div>
+
+		<Flex v-if="isPitch" align="center" justify="center" gap="10">
+			<Text size="13" color="secondary">Installed it already?</Text>
+			<button type="button" :class="$style.retest" data-testid="onboarding-presto-retry" @click="retry">Test again</button>
+		</Flex>
+		<PrestoStatusCard
+			v-else
+			:copy="copy"
+			:status="state.kind"
+			:diagnosis="diagnosis"
+			testid="onboarding-presto-status"
+			retryTestid="onboarding-presto-retry"
+			@retry="retry"
+		/>
+		<Text v-if="state.kind === 'available'" size="12" color="support" height="150">
+			Presto will ask you to allow Nulo the first time you send.
+		</Text>
+
+		<!-- A Continue-sized slot, so Skip sits where Continue would and the page never jumps. -->
+		<div :class="$style.ctaSlot">
+			<Button v-if="canContinue" variant="cta" size="large" data-testid="onboarding-presto-continue" @click="goNext">
+				Continue
+			</Button>
+			<OnboardingSkipLink v-else-if="isSettled" testid="onboarding-presto-skip" @click="skip">
+				Skip. Proving will run in your browser.
+			</OnboardingSkipLink>
+		</div>
+	</OnboardingPage>
+</template>
+
+<style module>
+.hero {
+	padding: 8px 0;
+}
+
+.hero_bar {
+	width: 40px;
+	height: 2px;
+	background: var(--nulo-accent);
+	margin-top: 12px;
+}
+
+/* The banner's tokens follow Nulo's, so the card reads as part of the page in both themes. */
+.pitch {
+	--pb-bg: var(--app-bg);
+	--pb-surface: var(--nulo-surface);
+	--pb-wash: var(--nulo-surface-low);
+	--pb-border: var(--nulo-border);
+	--pb-text: var(--txt-primary);
+	--pb-muted: var(--txt-secondary);
+	--pb-accent: var(--nulo-accent);
+	--pb-accent-dim: var(--txt-primary);
+	--pb-accent-on: var(--txt-inverse);
+	--pb-gold: var(--yellow);
+	--pb-gold-text: var(--yellow);
+	--pb-go: var(--green);
+	--pb-go-text: var(--green);
+	--pb-shadow: none;
+	--pb-shadow-big: none;
+	--pb-font-body: var(--font-body);
+	--pb-font-display: var(--font-headline);
+	display: flex;
+	justify-content: center;
+}
+
+.pitch presto-banner {
+	display: block;
+	width: 100%;
+}
+
+.retest {
+	background: transparent;
+	border: 1px solid var(--nulo-outline);
+	color: var(--txt-secondary);
+	font-family: var(--font-headline);
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	padding: 8px 14px;
+	cursor: pointer;
+	transition:
+		background 0.15s var(--bezier),
+		color 0.15s var(--bezier),
+		border-color 0.15s var(--bezier);
+}
+
+.retest:hover {
+	background: var(--nulo-surface-low);
+	color: var(--txt-primary);
+	border-color: var(--nulo-secondary);
+}
+
+.retest:focus-visible {
+	outline: 2px dotted var(--nulo-accent);
+	outline-offset: 2px;
+}
+
+.ctaSlot {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	min-height: 48px;
+	margin-top: 8px;
+}
+</style>
