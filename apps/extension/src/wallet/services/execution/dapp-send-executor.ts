@@ -49,7 +49,7 @@ import type { ExecutionCoordinator } from "./execution-coordinator"
 import type { ExecutionMutexRelease } from "./execution-mutex"
 import type { OperationEstimateReuse, OperationEstimateReuseEntry } from "./operation-estimate-reuse"
 import { fingerprintNoFromInputs, fingerprintOperation, type OperationFingerprintInput } from "./operation-fingerprint"
-import { type PreviewSnapshots, assertWithinPreview } from "./preview-snapshots"
+import { PREVIEW_FOREIGN_MESSAGE, type PreviewSnapshots, assertWithinPreview } from "./preview-snapshots"
 import { toDiscoveredAuthwit } from "./discovered-authwit"
 import { fingerprintBaseFee } from "./transfer-estimate-reuse"
 import { applyEmbeddedFpcGasCap } from "./fee/embedded-fpc-cap"
@@ -384,6 +384,12 @@ export class DappSendExecutor {
 		recomputedHashes: readonly string[],
 	): void {
 		if (!approval) return
+		// The producer sets previewId = estimateId for a standard bound estimate, so a popup that
+		// pairs interaction A's estimateId with interaction B's previewId is forging a cross-request
+		// approval — refuse it before either id is consumed.
+		if (approval.estimateId !== undefined && approval.previewId !== undefined && approval.estimateId !== approval.previewId) {
+			throw new Error(PREVIEW_FOREIGN_MESSAGE)
+		}
 		const lookup = this.deps.previewSnapshots.take(approval.previewId, {
 			interactionId: approval.interactionId,
 			index: approval.index,

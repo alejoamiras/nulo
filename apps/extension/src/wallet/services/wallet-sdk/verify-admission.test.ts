@@ -102,8 +102,8 @@ describe("VerifyAdmissionGate — verify-window capacity", () => {
 		vi.advanceTimersByTime(RECONNECT_REFILL_MS)
 		expect(served).toEqual(["w1", "w2"])
 		const w1 = reservations.get("w1")!
-		w1.markInFlight()
-		expect(w1.adopt(11)).toBe(true)
+		expect(w1.markInFlight()).toBe(true)
+		expect(w1.adopt(11)).toBe("live")
 		gate.windowRemoved(11)
 		expect(served).toEqual(["w1", "w2", "w3"])
 		expect(gate.windowsHeld(ORIGIN)).toBe(VERIFY_WINDOWS_PER_ORIGIN)
@@ -121,7 +121,12 @@ describe("VerifyAdmissionGate — verify-window capacity", () => {
 		// Still held: releasing here would let w3 open before w1's window exists.
 		expect(served).toEqual(["w1", "w2"])
 		expect(gate.windowsHeld(ORIGIN)).toBe(2)
-		expect(w1.adopt(11)).toBe(false)
+		// The cancelled attempt keeps its slot on adoption; the caller closes the window it got.
+		expect(w1.adopt(11)).toBe("abort")
+		expect(served).toEqual(["w1", "w2"])
+		expect(gate.windowsHeld(ORIGIN)).toBe(2)
+		// w3 is served only once that window is actually removed.
+		gate.windowRemoved(11)
 		expect(served).toEqual(["w1", "w2", "w3"])
 	})
 
@@ -140,6 +145,59 @@ describe("VerifyAdmissionGate — verify-window capacity", () => {
 		vi.advanceTimersByTime(55_000 + RESERVATION_GRACE_MS + 1)
 		expect(served).toEqual(["w1", "w2", "w3", "w4"])
 		expect(reservations.get("w2")!.status).toBe("released")
+	})
+
+	test("a duplicate discovery id (dApp-controlled) is rejected, never a second slot", () => {
+		const { gate, admit } = harness()
+		const needs = { needsWindow: true, consumesToken: false }
+		expect(admit("dup", needs)).toBe("now")
+		expect(admit("dup", needs)).toBe("rejected")
+		expect(gate.windowsHeld(ORIGIN)).toBe(1)
+	})
+
+	test("the global cap bounds windows across origins", () => {
+		const { gate } = harness()
+		const at = (origin: string, id: string) =>
+			gate.admit(
+				{ id, origin, deadline: Date.now() + 55_000, needsWindow: true, consumesToken: false },
+				() => {},
+				() => {},
+			)
+		// Four origins, two each = eight; the ninth is queued on its own origin, not opened.
+		for (let o = 0; o < 4; o++) for (let i = 0; i < 2; i++) expect(at(`o${o}`, `o${o}-${i}`)).toBe("now")
+		expect(at("o4", "o4-0")).toBe("queued")
+	})
+
+	test("a removal arriving before its creation resolves releases the slot on adoption", () => {
+		const { gate, admit, reservations } = harness()
+		const needs = { needsWindow: true, consumesToken: false }
+		admit("w1", needs)
+		const w1 = reservations.get("w1")!
+		w1.markInFlight()
+		// onRemoved fires while the create() promise is still pending: no reservation owns id 7 yet.
+		gate.windowRemoved(7)
+		expect(w1.adopt(7)).toBe("abort")
+		expect(w1.status).toBe("released")
+		expect(gate.windowsHeld(ORIGIN)).toBe(0)
+	})
+
+	test("an in-flight creation past its deadline does not spin the drain timer", () => {
+		const { gate, admit, reservations } = harness()
+		const needs = { needsWindow: true, consumesToken: false }
+		admit("w1", needs)
+		reservations.get("w1")!.markInFlight()
+		vi.advanceTimersByTime(55_000 + RESERVATION_GRACE_MS + 1)
+		// The reservation is in-flight, not timer-reclaimed, so no wake is armed for it.
+		expect(gate.hasTimer).toBe(false)
+		expect(gate.windowsHeld(ORIGIN)).toBe(1)
+	})
+
+	test("a reservation backs exactly one creation: a second markInFlight is refused", () => {
+		const { admit, reservations } = harness()
+		admit("w1", { needsWindow: true, consumesToken: false })
+		const w1 = reservations.get("w1")!
+		expect(w1.markInFlight()).toBe(true)
+		expect(w1.markInFlight()).toBe(false)
 	})
 
 	test("an opened window keeps its slot through termination until it is removed", () => {

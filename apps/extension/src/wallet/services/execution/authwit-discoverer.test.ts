@@ -17,6 +17,24 @@
  */
 
 import { describe, expect, test, vi } from "vitest"
+
+// The real hash path hits Barretenberg WASM (e2e-only). Mock the authwit primitives + effect
+// collection so the discovered-record branch is exercised without WASM: this guards that a
+// non-empty simulation yields a `DiscoveredAuthwit`, which the empty-effects cases cannot.
+vi.mock("@aztec/aztec.js/authorization", () => ({
+	CallAuthorizationRequest: {
+		fromFields: vi.fn(async () => ({
+			innerHash: { toString: (): string => "0xinner" },
+			msgSender: { toString: (): string => "0xcaller" },
+			functionSelector: { toString: (): string => "0xselector" },
+			args: [{ toString: (): string => "0xarg" }],
+		})),
+	},
+	computeAuthWitMessageHash: vi.fn(async () => ({ toString: (): string => "0xmsghash" })),
+	computeInnerAuthWitHash: vi.fn(async () => ({ toString: (): string => "0xinner" })),
+}))
+let mockEffects: Array<{ contractAddress: { toString(): string }; data: unknown }> = []
+vi.mock("@aztec/stdlib/tx", async (orig) => ({ ...(await orig<Record<string, unknown>>()), collectOffchainEffects: () => mockEffects }))
 import type { ConfigProp, IConfig } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { EventHandler } from "@nulo/wallet-core/utils"
@@ -53,6 +71,7 @@ function fakeBuildCtx() {
 			node: { getNodeInfo },
 			pxe: { simulateTx },
 			account: { address: { toString: () => "0xacc" } },
+			network: { chainId: 0, l1ChainId: 31337, rollupVersion: 1 },
 		},
 	}
 }
@@ -96,6 +115,22 @@ describe("AuthwitDiscoverer.discoverPrivateAuthwits", () => {
 		await expect(disc.discoverPrivateAuthwits({ networkId: "n", accountAddress: "0xa", actions: [] }, buildTxRequest)).rejects.toThrow(
 			/simulation failed/,
 		)
+	})
+})
+
+describe("AuthwitDiscoverer.discoverPrivateAuthwits — discovered records", () => {
+	test("a simulated authorization yields both a wire action and a DiscoveredAuthwit", async () => {
+		mockEffects = [{ contractAddress: { toString: () => "0xconsumer" }, data: [] }]
+		const disc = new AuthwitDiscoverer(fakeLogger())
+		const { ctx } = fakeBuildCtx()
+		const result = await disc.discoverPrivateAuthwits(
+			{ networkId: "n", accountAddress: "0xa", actions: [] as Action[] },
+			async () => ctx as never,
+		)
+		expect(result.actions).toEqual([{ kind: "add_private_authwit", content: { kind: "message_hash", messageHash: "0xmsghash" } }])
+		expect(result.discovered).toHaveLength(1)
+		expect(result.discovered[0]).toMatchObject({ consumer: "0xconsumer", caller: "0xcaller", messageHash: "0xmsghash" })
+		mockEffects = []
 	})
 })
 

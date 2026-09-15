@@ -95,11 +95,16 @@ type TransferSender = { kind: "explicit" | "account"; address: string } | { kind
 type CallSurface =
 	| { kind: "transfer"; intent: Extract<TransferIntent, { kind: "transfer" }>; sender: TransferSender; nonce?: string }
 	| ({ kind: "unverified" } & ArgumentRows)
-type WireCall = { name?: string; to?: unknown; selector?: unknown; args?: unknown }
+type WireCall = { name?: string; to?: unknown; selector?: unknown; args?: unknown; hideMsgSender?: boolean }
 const isZero = (n: string): boolean => /^(0x0+|0)$/.test(n)
 const callSurface = (op: SendLikeUIOp, call: WireCall): CallSurface => {
 	const intent = parseTransferIntent(call as { name?: string; args?: unknown[] })
-	if (intent.kind !== "transfer") return { kind: "unverified", ...argumentRows(call.args) }
+	// A 2-argument transfer has no explicit sender, so the card would name the account — but a call
+	// that hides its msg_sender executes with a null caller, and claiming "this account" there would
+	// be a confident lie. Fall back to the raw arguments instead of guessing a sender.
+	if (intent.kind !== "transfer" || (intent.from === undefined && call.hideMsgSender === true)) {
+		return { kind: "unverified", ...argumentRows(call.args) }
+	}
 	const sender: TransferSender =
 		intent.from !== undefined
 			? { kind: "explicit", address: intent.from }

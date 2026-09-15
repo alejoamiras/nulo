@@ -180,6 +180,11 @@ describe("handleSessionEstablished — verify-window reservation", () => {
 		expect(await establishing).toBe(false)
 		expect(remove).toHaveBeenCalledWith(42)
 		expect(terminate).toHaveBeenCalledWith("sess-1")
+		// The cancelled attempt keeps its slot until its window is actually removed — no replacement
+		// opens meanwhile, so a third window can never appear beside the two still counted.
+		expect(third).toBeUndefined()
+		expect(gate.windowsHeld(ORIGIN)).toBe(2)
+		gate.windowRemoved(42)
 		expect(third).toBeDefined()
 		expect(gate.windowsHeld(ORIGIN)).toBe(2)
 	})

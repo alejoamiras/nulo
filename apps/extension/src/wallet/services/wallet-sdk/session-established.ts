@@ -182,7 +182,9 @@ async function openVerifyWindow(
 	reservation: WindowReservation,
 	deps: SessionEstablishedDeps,
 ): Promise<void> {
-	reservation.markInFlight()
+	// Claim the slot for exactly one creation: a reservation released or already spent while this
+	// handler awaited must not open a second window against the same slot.
+	if (!reservation.markInFlight()) throw new Error("verify window slot was not claimable")
 	let windowId: number | undefined
 	try {
 		const win = await deps.windows.create({
@@ -202,7 +204,10 @@ async function openVerifyWindow(
 		reservation.creationFailed()
 		throw new Error("verify window creation returned no window id")
 	}
-	if (!reservation.adopt(windowId)) {
+	if (reservation.adopt(windowId) === "abort") {
+		// The session ended (or the window closed) while this was opening: close the window we got.
+		// Its slot is released by the reservation — on adoption when the window was already gone,
+		// otherwise when this remove() makes `onRemoved` fire.
 		await deps.windows.remove(windowId).catch(() => undefined)
 		throw new Error("session ended while its verify window was opening")
 	}

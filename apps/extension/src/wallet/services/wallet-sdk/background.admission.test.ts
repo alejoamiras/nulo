@@ -17,6 +17,7 @@ type Callbacks = {
 let captured: Callbacks | undefined
 const handlerCalls: string[] = []
 const live = new Set<string>()
+let approveReturns = true
 
 vi.mock("@aztec/wallet-sdk/extension/handlers", () => ({
 	BackgroundConnectionHandler: class {
@@ -31,7 +32,7 @@ vi.mock("@aztec/wallet-sdk/extension/handlers", () => ({
 		}
 		approveDiscovery(id: string) {
 			handlerCalls.push(`approve:${id}`)
-			return true
+			return approveReturns
 		}
 		rejectDiscovery(id: string) {
 			handlerCalls.push(`reject:${id}`)
@@ -146,6 +147,7 @@ beforeEach(() => {
 	vi.useFakeTimers()
 	handlerCalls.length = 0
 	live.clear()
+	approveReturns = true
 	captured = undefined
 	// biome-ignore lint/suspicious/noExplicitAny: chrome stub
 	;(globalThis as any).chrome = {
@@ -206,6 +208,21 @@ describe("handleDiscovery — remembered origin, untrusted (token + verify-windo
 		expect(approved()).toEqual(["r1", "r2", "r3"])
 		await vi.advanceTimersByTimeAsync(2)
 		expect(approved()).toEqual(["r1", "r2", "r3", "r4"])
+	})
+
+	test("a returning approval that does not land releases the reserved slot", async () => {
+		const { discover } = boot({ remembered: { trusted: false } })
+		approveReturns = false
+		discover("r1")
+		await flush()
+		// The reservation was acquired, then approveDiscovery returned false: the slot must come back.
+		approveReturns = true
+		discover("r2")
+		discover("r3")
+		await flush()
+		// r1's approve was called and returned false, releasing its slot. Both windows are free, so
+		// r2 AND r3 each open one; a leaked r1 slot would leave only one free and queue r3.
+		expect(approved()).toEqual(["r1", "r2", "r3"])
 	})
 
 	test("a terminated transport keeps its open window's slot: the reconnect waits until the window closes", async () => {

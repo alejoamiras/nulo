@@ -85,6 +85,14 @@ describe("OperationCard — transfer sender and the raw-argument fallback", () =
 		expect(nonces[0].text()).toContain("9")
 	})
 
+	test("a 2-arg transfer that hides its msg_sender falls back to unverified, never 'From: this account'", async () => {
+		const w = await mountCard(sendTx([{ name: "transfer", to: TOKEN, args: [TO, 5n], hideMsgSender: true }]))
+		expect(w.find('[data-testid="execute-op-payload-row"]').attributes("data-intent-kind")).toBe("unverified")
+		expect(w.find('[data-testid="execute-op-transfer-sender"]').exists()).toBe(false)
+		expect(w.find('[data-testid="execute-op-unverified-args"]').exists()).toBe(true)
+		expect(w.text()).not.toContain("this account")
+	})
+
 	test("an unrecognized call renders the warning and one row per argument, no structured block", async () => {
 		const w = await mountCard(sendTx([{ name: "mint_to_private", to: TOKEN, args: [TO, 500n] }]))
 		expect(w.find('[data-testid="execute-op-payload-row"]').attributes("data-intent-kind")).toBe("unverified")

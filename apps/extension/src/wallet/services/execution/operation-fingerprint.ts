@@ -2,7 +2,7 @@
  * Canonical, byte-stable fingerprint for a dApp operation's estimate-reuse
  * identity — the input-match gate of `OperationEstimateReuse`.
  *
- * Contract (audit-pinned, plan architecture §2):
+ * Contract:
  * - Covers the **post-planner, pre-discovery, pre-payload** `Action[]` set;
  *   stash and consume MUST fingerprint the same normalization point.
  * - Explicit exhaustive switch per action kind — a new `Action` kind fails

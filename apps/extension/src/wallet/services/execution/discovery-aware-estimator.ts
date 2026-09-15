@@ -17,8 +17,7 @@
  * `DiscoveryProbe` is deliberately CHAIN-BOUND (this exact one-argument
  * "pure extractor" was proven impossible twice — message hashing needs live
  * `nodeInfo` behind `assertLiveChainIdentity`, fetched lazily ONLY when
- * effects exist; see the fee-estimation-speedup ledger #11 and this plan's
- * audit round 1). Dropping the live-chain assert would weaken authwit-hash
+ * effects exist). Dropping the live-chain assert would weaken authwit-hash
  * derivation against a drifted RPC — it is pinned as preserved.
  */
 

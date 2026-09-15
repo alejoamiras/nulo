@@ -988,6 +988,22 @@ describe("DappSendExecutor — discovered authwits, the preview snapshot and the
 		expect(changed.proveAndSend).not.toHaveBeenCalled()
 	})
 
+	test("a popup pairing one interaction's estimateId with another's previewId is refused before either id is consumed", async () => {
+		const { executor, deps, proveAndSend } = harnessDiscovering(["a"])
+		// A valid snapshot exists under previewId "pv"; the reuse cache would accept "est-A".
+		snapshots(deps).stash("pv", { ...identity, discoveredHashes: ["mh:ih:a"] })
+		await expect(
+			executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, {
+				...CTX,
+				estimateId: "est-A",
+				previewId: "pv",
+			}),
+		).rejects.toThrow(PREVIEW_FOREIGN_MESSAGE)
+		expect(proveAndSend).not.toHaveBeenCalled()
+		// The snapshot was NOT consumed by the refused attempt: a well-formed retry still finds it.
+		expect(snapshots(deps).take("pv", identity).kind).toBe("found")
+	})
+
 	test("confirm with NO snapshot: a discovered hash asks for a retry; nothing discovered executes", async () => {
 		const withHash = harnessDiscovering(["a"])
 		await expect(withHash.executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, CTX)).rejects.toThrow(
