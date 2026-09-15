@@ -24,17 +24,30 @@ export function getLogLevelName(level: number): string {
 	}
 }
 
-export function formatArg(arg: unknown): unknown {
+/** One `seen` set spans the array recursion and the object branch, so a reference back into an
+ *  enclosing array cannot recurse forever and a revisited object renders as `[circular]`. Never
+ *  `String(obj)`: that is where "[object Object]" came from. */
+export function formatArg(arg: unknown, seen = new WeakSet<object>()): unknown {
 	if (Array.isArray(arg)) {
 		if (!arg.length) return ""
-		return arg.map(formatArg)
+		if (seen.has(arg)) return "[circular]"
+		seen.add(arg)
+		return arg.map((item) => formatArg(item, seen))
 	}
 
 	if (typeof arg === "object" && arg !== null) {
+		if (seen.has(arg)) return "[circular]"
 		try {
-			return JSON.stringify(arg)
+			return JSON.stringify(arg, (_key, value: unknown) => {
+				if (typeof value === "bigint") return value.toString()
+				if (typeof value === "object" && value !== null) {
+					if (seen.has(value)) return "[circular]"
+					seen.add(value)
+				}
+				return value
+			})
 		} catch {
-			return String(arg)
+			return `[unserializable ${(arg as object).constructor?.name ?? "object"}]`
 		}
 	}
 
@@ -45,7 +58,7 @@ export function formatLogData(data: unknown): string {
 	if (!data) return ""
 	if (Array.isArray(data) && data.length) {
 		return data
-			.map(formatArg)
+			.map((x) => formatArg(x))
 			.filter((x) => x !== undefined)
 			.join(" ")
 	}
