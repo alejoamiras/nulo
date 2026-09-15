@@ -1,15 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import worker, { POLICY } from "../src/worker"
-
-// Mirrors `RP_ID` in apps/extension/src/wallet/services/passkey/spec.ts; the extension's own
-// build gate pins that constant, this file pins the host that serves it.
-const RP_HOST = "passkey.nulo.sh"
+import worker from "../src/worker"
+import { EXPECTED_POLICY, INERT_HTML, RP_HOST } from "./policy"
 
 const request = (path: string, init?: RequestInit) => worker.fetch(new Request(`https://${RP_HOST}${path}`, init))
 const expectPolicy = (res: Response) => {
-	for (const [name, value] of Object.entries(POLICY)) expect(res.headers.get(name)).toBe(value)
+	for (const [name, value] of Object.entries(EXPECTED_POLICY)) expect(res.headers.get(name)).toBe(value)
 }
 
 describe("the RP host serves one static, script-free page", () => {
@@ -19,7 +16,7 @@ describe("the RP host serves one static, script-free page", () => {
 		expectPolicy(res)
 		expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8")
 		const body = await res.text()
-		expect(body).not.toMatch(/<script|<iframe|<link|<object|<embed|\ssrc=|\shref=|\son[a-z]+=|javascript:/i)
+		expect(body).not.toMatch(INERT_HTML)
 		expect(body).toContain('<meta name="robots" content="noindex">')
 	})
 

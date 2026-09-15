@@ -250,9 +250,10 @@ jobs:
   # The passkey RP host is a live deployment the repo cannot pin; probe it from outside every
   # night so a zone-level change (a challenge rule, a rewriter, a wildcard record) surfaces here.
   # ADVISORY: reports red without failing the nightly; the fix is in the Cloudflare zone, not the tree.
+  # Runs on quiet days too — the zone can change without a commit — so it ignores `resolve.skip`.
   rp-host-live:
     needs: resolve
-    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip != 'true'
+    if: always() && needs.resolve.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     continue-on-error: true
