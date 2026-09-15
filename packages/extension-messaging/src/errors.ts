@@ -94,6 +94,19 @@ export function isClientDisconnectRejection(reason: unknown): boolean {
 	return reason instanceof Error && reason.message === CLIENT_DISCONNECTED_MESSAGE
 }
 
+/**
+ * Chrome's exact rejection text when a `chrome.tabs.sendMessage` / `chrome.runtime.sendMessage`
+ * finds no listener: the tab navigated away, its content script is gone, the offscreen document
+ * closed. Matched exactly, not by prefix — Chrome reports other conditions under the same
+ * "Could not establish connection" opener, and those are actionable.
+ */
+export const RECEIVER_GONE_MESSAGE = "Could not establish connection. Receiving end does not exist."
+
+/** True for the expected rejection of a message whose receiver is already gone. */
+export function isReceiverGoneRejection(reason: unknown): boolean {
+	return reason instanceof Error && reason.message === RECEIVER_GONE_MESSAGE
+}
+
 /** User explicitly rejected a prompt (approval, passkey, etc). */
 export class UserRejectedError extends WalletError {
 	public static readonly CODE = "USER_REJECTED"

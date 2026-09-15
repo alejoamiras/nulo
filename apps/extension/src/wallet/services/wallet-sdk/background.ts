@@ -66,6 +66,7 @@ import {
 	WalletSdkDispatcher,
 } from "@nulo/wallet-bridge"
 import type { ClockPort, WindowPort } from "@nulo/wallet-core/ports"
+import { isReceiverGoneRejection } from "@nulo/extension-messaging/errors"
 import { getErrorMessage, KeyedLock, deferred } from "@nulo/wallet-core/utils"
 import { admitAsync, VerifyAdmissionGate, type WindowReservation } from "./verify-admission"
 import { approveOrRollbackDiscoverySession } from "./discovery-approval"
@@ -287,7 +288,14 @@ function createSdkHandlerState(clock: ClockPort): SdkHandlerState {
 
 function buildContentTransport(logger: ILogger): ConstructorParameters<typeof BackgroundConnectionHandler>[1] {
 	return {
-		sendToTab: (tabId, message) => chrome.tabs.sendMessage(tabId, message),
+		// The handler's `sendToTab` returns void, so the send's rejection is nobody's to observe. A
+		// tab that navigated away (or lost its content script) has nowhere to deliver to; every
+		// other failure still surfaces as an unhandled rejection.
+		sendToTab: (tabId, message) => {
+			chrome.tabs.sendMessage(tabId, message).catch((err: unknown) => {
+				if (!isReceiverGoneRejection(err)) throw err
+			})
+		},
 		addContentListener: (listener) => {
 			// The chrome.runtime.onMessage registration lives in the module-scope
 			// content-message-relay (cold-wake fix): registering a SECOND chrome

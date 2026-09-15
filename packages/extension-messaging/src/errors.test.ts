@@ -9,6 +9,8 @@ import {
 	ContractNotRegisteredError,
 	InvalidPasswordError,
 	isClientDisconnectRejection,
+	isReceiverGoneRejection,
+	RECEIVER_GONE_MESSAGE,
 	JobCancelledError,
 	ProfileIdConflictError,
 	PxeStaleAnchorError,
@@ -269,5 +271,19 @@ describe("isClientDisconnectRejection", () => {
 		expect(isClientDisconnectRejection(CLIENT_DISCONNECTED_MESSAGE)).toBe(false)
 		expect(isClientDisconnectRejection(undefined)).toBe(false)
 		expect(isClientDisconnectRejection({ message: CLIENT_DISCONNECTED_MESSAGE })).toBe(false)
+	})
+})
+
+describe("isReceiverGoneRejection", () => {
+	test("matches Chrome's exact receiver-gone text", () => {
+		expect(isReceiverGoneRejection(new Error(RECEIVER_GONE_MESSAGE))).toBe(true)
+	})
+
+	test("does not match a prefix, another connection error, a non-Error, or a message-shaped object", () => {
+		expect(isReceiverGoneRejection(new Error("Could not establish connection."))).toBe(false)
+		expect(isReceiverGoneRejection(new Error(`${RECEIVER_GONE_MESSAGE} (tab 4)`))).toBe(false)
+		expect(isReceiverGoneRejection(new Error("Could not establish connection. The message port closed."))).toBe(false)
+		expect(isReceiverGoneRejection(RECEIVER_GONE_MESSAGE)).toBe(false)
+		expect(isReceiverGoneRejection({ message: RECEIVER_GONE_MESSAGE })).toBe(false)
 	})
 })
