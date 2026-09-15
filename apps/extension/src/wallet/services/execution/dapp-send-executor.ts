@@ -570,7 +570,7 @@ export class DappSendExecutor {
 				fence,
 				getCalls: () => (primaryMethod ? [{ method: primaryMethod }] : undefined),
 			},
-			async ({ checkCancelled, markJournal }) => {
+			async ({ checkCancelled, markJournal, journalId }) => {
 				// Enter `simulating` BEFORE the build/estimate work — fee
 				// strategies inside the build run real simulateTx calls (can be
 				// several seconds), and leaving the journal at `pending` would
@@ -598,6 +598,7 @@ export class DappSendExecutor {
 					initializesAccount,
 					scopes: [account.address],
 					parentTask,
+					journalId,
 					checkCancelled,
 					markJournal,
 					// grantPublicAuthwit routes here (kind: send_transaction), so this is where a granted
@@ -665,7 +666,7 @@ export class DappSendExecutor {
 					return primaryMethod ? [{ method: primaryMethod }] : undefined
 				},
 			},
-			async ({ checkCancelled, markJournal }) => {
+			async ({ checkCancelled, markJournal, journalId }) => {
 				if (op.accountAddress !== op.opts?.from?.toString()) {
 					throw new Error("Invalid `opts.from`")
 				}
@@ -710,6 +711,7 @@ export class DappSendExecutor {
 					initializesAccount,
 					scopes: [account.address, ...sendAdditionalScopes],
 					parentTask,
+					journalId,
 					checkCancelled,
 					markJournal,
 					wantOffchainOutput: (provedTx) => {
@@ -851,7 +853,7 @@ export class DappSendExecutor {
 					return primaryMethod ? [{ method: primaryMethod }] : undefined
 				},
 			},
-			async ({ checkCancelled, markJournal }) => {
+			async ({ checkCancelled, markJournal, journalId }) => {
 				await markJournal({ stage: "simulating" })
 
 				const prepared = await this.prepareNoFrom(op, parentTask)
@@ -876,6 +878,7 @@ export class DappSendExecutor {
 					txRequest,
 					scopes: scopesWithAccount,
 					parentTask,
+					journalId,
 					checkCancelled,
 					markJournal,
 					wantOffchainOutput: (provedTx) => {

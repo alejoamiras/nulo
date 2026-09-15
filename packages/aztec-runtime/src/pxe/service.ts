@@ -34,8 +34,8 @@ const AccessScopesSchema = z.array(AztecAddress.schema)
 import type { ServiceSpec } from "@nulo/wallet-core/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/offscreen"
 import type { ILogger } from "@nulo/wallet-core/logger"
-import { ReadWriteGuard, errorMessageFromUnknown } from "@nulo/wallet-core/utils"
-import type { NetworkInfo } from "./chain-runtime"
+import { EventHandler, ReadWriteGuard, errorMessageFromUnknown } from "@nulo/wallet-core/utils"
+import type { ChainRuntime, NetworkInfo, ProvePhaseEvent } from "./chain-runtime"
 import { ChainRuntimeRegistry, ProductionPxeFactory, PXE_STORE_KEY_MISSING, type PxeFactory } from "./chain-runtime"
 import { PXE_DATA_DIR_ROOT, chainDataDir, chainDataDirPrefix, chainRegistryKey, chainRegistryKeyPrefix } from "./chain-coordinates"
 import { listChainStoreDirs, removeChainStoreDir, removeProfileStoreDirs } from "./opfs-store"
@@ -43,7 +43,8 @@ import { ArtifactRegistry } from "./artifact-registry"
 import { PxeLifecycleCoordinator } from "./lifecycle-coordinator"
 import { loadProductionKnownArtifacts } from "./known-artifacts"
 import { loadProductionNoteSchemas, type NoteSchema } from "./note-schemas"
-import { type Methods, PXE_SERVICE_NAME } from "./spec"
+import { type Methods, PXE_SERVICE_NAME, type PxeEvents } from "./spec"
+import type { ProvePhaseSink } from "./prove-phase-sink"
 import { type PrivateEventFilter, PrivateEventFilterSchema } from "@aztec/aztec.js/wallet"
 import { NotesFilterSchema } from "./schemas"
 import {
@@ -71,8 +72,9 @@ export interface IProfileReader {
 	onActiveProfileChanged: { add(handler: (profile: unknown) => void): void }
 }
 
-export class PxeService extends Service<Methods> implements ServiceSpec<Methods> {
+export class PxeService extends Service<Methods, PxeEvents> implements ServiceSpec<Methods, PxeEvents> {
 	public static name = PXE_SERVICE_NAME
+	public readonly onProvePhase = new EventHandler<ProvePhaseEvent>()
 
 	protected readonly rpcMethods = defineRpcMethods<Methods>()(
 		"getContractInstance",
@@ -159,12 +161,15 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 */
 	private readonly profileLifecycles = new Map<string, { kind: "live" | "deleting" | "deleted"; gen: string }>()
 
-	public constructor(profiles: IProfileReader, logger: ILogger, factory?: PxeFactory) {
+	public constructor(profiles: IProfileReader, logger: ILogger, factory?: PxeFactory, provePhaseSink?: ProvePhaseSink) {
 		super(PXE_SERVICE_NAME, logger)
 		this.profiles = profiles
 		this.guardLogger = logger
 		this.artifacts = new ArtifactRegistry(loadProductionKnownArtifacts, { logger, logSource: PXE_SERVICE_NAME })
 		this.registry = new ChainRuntimeRegistry(factory ?? new ProductionPxeFactory())
+		// A dead SW loses the event (the transport swallows the rejection); the
+		// journal only ever goes stale, never wrong, so no retry.
+		provePhaseSink?.subscribe((payload) => this.emit("onProvePhase", payload))
 	}
 
 	private chainKey(profileId: string, chainId: number): string {
@@ -464,8 +469,13 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		return this.withPxeWrite("getNotes", network, async (pxe) => pxe.debug.getNotes(await NotesFilterSchema.parseAsync(filter)))
 	}
 
-	public async proveTx(network: NetworkInfo, txRequest: TxExecutionRequest, scopes: AztecAddress[]): Promise<TxProvingResult> {
-		return this.withPxeWrite("proveTx", network, async (pxe) => {
+	public async proveTx(
+		network: NetworkInfo,
+		txRequest: TxExecutionRequest,
+		scopes: AztecAddress[],
+		proveId?: string,
+	): Promise<TxProvingResult> {
+		return this.withPxeWrite("proveTx", network, async (pxe, _node, runtime) => {
 			// 5.0 tags private-log messages with the sender; PXE throws "Sender for tags is not set"
 			// during private execution (before proving) when it is absent — so any private-note-emitting
 			// tx (e.g. public→private shield) fails in witness-gen. The SDK's BaseWallet derives this from
@@ -478,10 +488,16 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// today; a private-log-emitting NO_FROM flow must plumb an explicit sender first (codex
 			// post-impl audit MEDIUM — tracked for a follow-up).
 			const provedScopes = await z.array(AztecAddress.schema).parseAsync(scopes)
-			return pxe.proveTx(await TxExecutionRequest.schema.parseAsync(txRequest), {
-				scopes: provedScopes,
-				senderForTags: provedScopes[0],
-			})
+			const parsed = await TxExecutionRequest.schema.parseAsync(txRequest)
+			// One attempt at a time per runtime (we hold its write lock), so the prover's
+			// phase observer attributes every phase of this call to `proveId`. A JSON
+			// round-trip turns an omitted id into `null`; only a string correlates.
+			runtime.activeProve = typeof proveId === "string" && proveId.length > 0 ? { proveId, seq: 0 } : undefined
+			try {
+				return await pxe.proveTx(parsed, { scopes: provedScopes, senderForTags: provedScopes[0] })
+			} finally {
+				runtime.activeProve = undefined
+			}
 		})
 	}
 
@@ -945,7 +961,11 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		}
 	}
 
-	private async withPxeWrite<T>(label: string, network: NetworkInfo, fn: (pxe: PXE, node: AztecNode) => Promise<T>): Promise<T> {
+	private async withPxeWrite<T>(
+		label: string,
+		network: NetworkInfo,
+		fn: (pxe: PXE, node: AztecNode, runtime: ChainRuntime) => Promise<T>,
+	): Promise<T> {
 		const start = Date.now()
 		const barrier = this.getProfileBarrier(network.profileId)
 		const chainGuard = this.getChainGuard(network.profileId, network.chainId)
@@ -964,7 +984,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 					// Already under the chain WRITE guard — `ensure` may rebind here.
 					const runtime = await this.registry.ensure(network, this.storeKeys.get(network.profileId))
 					this.logDebug(`[DEBUG] [WRITE] ${label} lock acquired, executing`)
-					const result = await fn(runtime.pxe, runtime.node)
+					const result = await fn(runtime.pxe, runtime.node, runtime)
 					this.logDebug(`[DEBUG] [WRITE] ${label} completed (${Date.now() - start}ms)`)
 					return result
 				})

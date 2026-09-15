@@ -15,6 +15,7 @@
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { ServiceCollection } from "@nulo/wallet-core/base"
 import type { PxeFactory } from "../pxe/chain-runtime"
+import type { ProvePhaseSink } from "../pxe/prove-phase-sink"
 import { PxeService, type IProfileReader } from "../pxe/service"
 
 export interface PxeOffscreenDeps {
@@ -33,6 +34,9 @@ export interface PxeOffscreenDeps {
 	 * `@/presto/config` module.
 	 */
 	factory?: PxeFactory
+	/** The sink whose `emit` the factory's `onProvePhase` was given; the service
+	 *  forwards everything it carries to the SW as `onProvePhase` events. */
+	provePhaseSink?: ProvePhaseSink
 }
 
 /**
@@ -42,6 +46,6 @@ export interface PxeOffscreenDeps {
  */
 export async function createPxeOffscreen(deps: PxeOffscreenDeps): Promise<void> {
 	const services = new ServiceCollection()
-	services.add(new PxeService(deps.profiles, deps.logger, deps.factory))
+	services.add(new PxeService(deps.profiles, deps.logger, deps.factory, deps.provePhaseSink))
 	await services.start()
 }

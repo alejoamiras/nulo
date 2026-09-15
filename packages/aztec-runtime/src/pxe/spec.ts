@@ -17,7 +17,7 @@ import type {
 	TxSimulationResult,
 	UtilityExecutionResult,
 } from "@aztec/stdlib/tx"
-import type { NetworkInfo } from "./chain-runtime"
+import type { NetworkInfo, ProvePhaseEvent } from "./chain-runtime"
 import type { PublicScanTips, PublicTokenClassStatus, PublicTransferFetchArgs, PublicTransferPage } from "./public-events"
 export type {
 	PublicEventCursor,
@@ -29,6 +29,12 @@ export type {
 } from "./public-events"
 
 export const PXE_SERVICE_NAME = "pxe"
+
+/** Offscreen → SW events. The phase stream of the prove attempt identified by
+ *  `proveId`; `seq` and `backend` are stamped at the source (chain-runtime). */
+export type PxeEvents = {
+	onProvePhase: ProvePhaseEvent
+}
 
 export type Methods = {
 	/**
@@ -57,7 +63,9 @@ export type Methods = {
 	registerContract(network: NetworkInfo, contract: { instance: ContractInstanceWithAddress; artifact?: ContractArtifact }): void
 	getContracts(network: NetworkInfo): AztecAddress[]
 	getNotes(network: NetworkInfo, filter: NotesFilter): NoteDao[]
-	proveTx(network: NetworkInfo, txRequest: TxExecutionRequest, scopes: AztecAddress[]): TxProvingResult
+	/** `proveId` correlates this attempt's prove-phase events (`PxeEvents.onProvePhase`)
+	 *  with the caller's journal row; omitted → the attempt emits nothing attributable. */
+	proveTx(network: NetworkInfo, txRequest: TxExecutionRequest, scopes: AztecAddress[], proveId?: string): TxProvingResult
 	profileTx(network: NetworkInfo, txRequest: TxExecutionRequest, opts: ProfileTxOpts): TxProfileResult
 	simulateTx(
 		network: NetworkInfo,

@@ -20,8 +20,12 @@ describe("stageSubtitle", () => {
 		expect(stageSubtitle("simulating")).toBe("Simulating...")
 	})
 
-	test("proving → 'Generating proof...'", () => {
+	test("proving → 'Generating proof...' until the prover says where; then the backend copy", () => {
 		expect(stageSubtitle("proving")).toBe("Generating proof...")
+		expect(stageSubtitle("proving", "presto")).toBe("Proving with Presto ✦")
+		expect(stageSubtitle("proving", "browser")).toBe("Proving in browser…")
+		// The backend only ever qualifies `proving`.
+		expect(stageSubtitle("submitting", "presto")).toBe("Submitting...")
 	})
 
 	test("submitting → 'Submitting...'", () => {
@@ -46,7 +50,7 @@ describe("stageSubtitle", () => {
 		// future refactor reorders the FSM, this verbal sequence becomes the
 		// failing reminder to update the UX too.
 		const pipeline = ["queued", "pending", "simulating", "proving", "submitting"] as const
-		const labels = pipeline.map(stageSubtitle)
+		const labels = pipeline.map((stage) => stageSubtitle(stage))
 		expect(labels).toEqual(["Queued...", "Preparing...", "Simulating...", "Generating proof...", "Submitting..."])
 	})
 })

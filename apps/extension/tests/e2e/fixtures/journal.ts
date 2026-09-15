@@ -475,6 +475,33 @@ export async function waitForDappExecuteStagesPresent(page: Page, stages: string
  * watched the `tx-awaiting-card` DOM and raced both the popup render and the
  * proverless fast-completion (the card is gone once the op terminalizes).
  */
+/**
+ * Wait for an awaiting card in `proving` to carry the given backend evidence
+ * (`data-backend`) and the exact subtitle. The card is the popup's projection
+ * of the journal row's `progress.backend`, which the prover's phase stream
+ * fills in a few seconds into the prove — this is the one end-to-end check
+ * that the offscreen → SW → journal → popup chain delivers it.
+ */
+export async function waitForAwaitingCardBackend(
+	page: Page,
+	expected: { backend: "presto" | "browser"; subtitle: string },
+	options: { timeout?: number } = {},
+): Promise<void> {
+	const { timeout = 120_000 } = options
+	const wait = page.waitForFunction(
+		({ backend, subtitle }: { backend: string; subtitle: string }) => {
+			const card = document.querySelector<HTMLElement>(
+				`[data-testid="tx-awaiting-card"][data-stage="proving"][data-backend="${backend}"]`,
+			)
+			if (!card) return false
+			return card.querySelector<HTMLElement>('[data-testid="tx-awaiting-subtitle"]')?.textContent?.trim() === subtitle
+		},
+		{ timeout, polling: 250 },
+		expected,
+	)
+	await awaitOrDump(page, "waitForAwaitingCardBackend", wait)
+}
+
 export async function waitForDappExecuteWorked(page: Page, options: { timeout?: number } = {}): Promise<void> {
 	const { timeout = 30_000 } = options
 	const wait = page.waitForFunction(

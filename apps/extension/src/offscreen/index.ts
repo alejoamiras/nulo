@@ -4,7 +4,7 @@ import { consoleMethods, LogLevel } from "@/wallet/logger"
 import { LoggerServiceClient } from "@/wallet/services/logger/client"
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
 import { createPxeOffscreen } from "@nulo/aztec-runtime/offscreen/entry"
-import { ProductionPxeFactory } from "@nulo/aztec-runtime/pxe"
+import { ProductionPxeFactory, createProvePhaseSink } from "@nulo/aztec-runtime/pxe"
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { isSupersededByAdopt, OFFSCREEN_READY_MESSAGE, OFFSCREEN_PONG, shouldRespondPong } from "@/wallet/utils/offscreen"
 import { isBenignSwDisconnect } from "./is-benign-sw-disconnect"
@@ -92,10 +92,9 @@ if (E2E_PROVERLESS_BUILD_STAMP) {
 // wires the concrete Chrome-backed clients and keeps the READY send
 // so aztec-runtime stays chrome-free.
 const t0 = Date.now()
-// `factory` is only customized when PRESTO_REQUIRED (CI builds). For
-// production builds the field is omitted; PxeService defaults to a vanilla
-// ProductionPxeFactory (HTTPS-only Presto, silent WASM fallback for users
-// without Presto installed).
+// The prover reports each attempt's phases through this sink; PxeService
+// forwards them to the SW, where the coordinator attributes them by proveId.
+const provePhases = createProvePhaseSink()
 await createPxeOffscreen({
 	profiles: new ProfileServiceClient(),
 	logger: new LoggerServiceClient(),
@@ -103,6 +102,8 @@ await createPxeOffscreen({
 	// PrestoProver) — referenced only in this flag-gated branch so DCE
 	// strips it from prod. The controllable barrier lives SW-side (the
 	// offscreen has no chrome.storage); see ExecutionCoordinator's ProofGate.
+	// PRESTO_REQUIRED (CI builds) adds the plaintext endpoint + the preflight;
+	// production is HTTPS-only Presto with the silent WASM fallback.
 	factory: E2E_PROVERLESS
 		? new ProductionPxeFactory(undefined, { provingMode: "proverless" })
 		: PRESTO_REQUIRED
@@ -111,8 +112,10 @@ await createPxeOffscreen({
 					host: PRESTO_HOST,
 					port: PRESTO_PORT,
 					httpsPort: PRESTO_HTTPS_PORT,
+					onProvePhase: provePhases.emit,
 				})
-			: undefined,
+			: new ProductionPxeFactory(undefined, { provingMode: "default", onProvePhase: provePhases.emit }),
+	provePhaseSink: provePhases,
 })
 // B-17: PXE services are now up — start answering health PINGs with PONG.
 servicesReady = true

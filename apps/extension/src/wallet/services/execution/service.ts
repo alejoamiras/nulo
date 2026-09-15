@@ -55,6 +55,7 @@ import {
 	type RegisterTokenOperation,
 	type TransferFeeEstimate,
 } from "./spec"
+import type { LastProveOutcome } from "./models"
 import { coerceAmount } from "./coerce-amount"
 import { OperationPlanner } from "./operation-planner"
 import { TransferEstimateReuse } from "./transfer-estimate-reuse"
@@ -101,6 +102,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		"previewOperationAuthwits",
 		"cancelJob",
 		"cancelEstimate",
+		"getLastProveOutcome",
 	)
 	public static name = EXECUTION_SERVICE_NAME
 
@@ -192,7 +194,10 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		this.planner = new OperationPlanner(this.profileService, this.tokenService)
 		this.resolver = new ContractResolver(this.logger)
 		this.authwit = new AuthwitDiscoverer(this.logger)
-		this.coordinator = new ExecutionCoordinator(this.taskService, this.logger, this.proofGate)
+		this.coordinator = new ExecutionCoordinator(this.taskService, this.logger, this.proofGate, {
+			updateProvingBackend: (journalId, backend) => this.operationJournal.updateProvingBackend(journalId, backend),
+		})
+		this.pxeService.onProvePhase.add((event) => void this.coordinator.onProvePhase(event))
 		this.wireGasBalancesAndEstimateCaches()
 		this.wireExecutors()
 		// The deps literal stays HERE (Q-04 pilot): every eager `this.*` read and
@@ -502,6 +507,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		const profile = await this.profileService.getActiveProfile()
 		if (!profile) return
 		this.estimateCancel.cancel(estimateToken, profile.id)
+	}
+
+	public async getLastProveOutcome(): Promise<LastProveOutcome> {
+		await this.ensureInitialized()
+		return this.coordinator.getLastProveOutcome()
 	}
 
 	/** Cancel an in-flight job. Semantics live on {@link ExecutionLane.cancelJob}

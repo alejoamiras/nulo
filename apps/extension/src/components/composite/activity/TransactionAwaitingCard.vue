@@ -18,7 +18,7 @@
  * `focus` button is the accessible control.
  */
 import { computed, type PropType } from "vue"
-import type { JobStage } from "@nulo/wallet-core/jobs"
+import type { JobStage, ProveBackend } from "@nulo/wallet-core/jobs"
 import TransactionCardLayout from "./TransactionCardLayout.vue"
 
 const props = defineProps({
@@ -55,6 +55,8 @@ const props = defineProps({
 	 *  Typed via `JobStage` so e2e selectors that key off `data-stage` can
 	 *  rely on the literal set defined in `@nulo/wallet-core/jobs`. */
 	stage: { type: String as PropType<JobStage | null>, default: null },
+	/** Proving backend once the prover reported it; threads to `data-backend`. */
+	backend: { type: String as PropType<ProveBackend | null>, default: null },
 })
 
 const emit = defineEmits(["cancel", "focus"])
@@ -76,6 +78,7 @@ function onCardClick() {
 			:amount="amount"
 			:amountSymbol="amountSymbol"
 			:stage="stage"
+			:backend="backend"
 			:actionCount="(focusable ? 1 : 0) + (showCancel ? 1 : 0)"
 			testId="tx-awaiting-card"
 		>
@@ -89,7 +92,7 @@ function onCardClick() {
 			</template>
 
 			<template #secondary>
-				<span :class="$style.subtitle" role="status" aria-live="polite" aria-atomic="true">{{ subtitle }}</span>
+				<span :class="$style.subtitle" role="status" aria-live="polite" aria-atomic="true" data-testid="tx-awaiting-subtitle">{{ subtitle }}</span>
 			</template>
 
 			<template v-if="focusable || showCancel" #actions>

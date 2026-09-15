@@ -36,12 +36,54 @@ import type { AztecAddress } from "@aztec/stdlib/aztec-address"
 import type { SimulateTxOpts } from "@aztec/pxe/client/bundle"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { Tx, TxExecutionRequest, TxHash, TxProvingResult, TxSimulationResult } from "@aztec/stdlib/tx"
-import type { ILogger } from "@/wallet/logger"
+import z from "zod"
+import { type ILogger, LogLevel } from "@/wallet/logger"
 import type { IPXE } from "@/wallet/services/pxe/client"
 import { StepContent, type TaskService, type WrappedTask } from "@/wallet/services/task/service"
 import { type ProofGate, NOOP_PROOF_GATE } from "@/e2e/proof-gate"
 import { DuplicateInitializationError } from "@nulo/extension-messaging/errors"
+import type { ProveBackend } from "@nulo/wallet-core/jobs"
 import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
+import type { LastProveOutcome, ProveOutcomeHint, ProvePhaseName } from "./models"
+
+const PROVE_PHASES = [
+	"detect",
+	"secure-connection-unavailable",
+	"serialize",
+	"transmit",
+	"proving",
+	"proved",
+	"receive",
+	"fallback",
+	"downloading",
+	"denied",
+	"version-mismatch",
+] as const satisfies readonly ProvePhaseName[]
+
+/** The offscreen event is sender-gated by the transport but its payload is
+ *  still untyped bytes until this parse: `seq` drives the ordering check and
+ *  `backend` is written to the journal verbatim. */
+export const ProvePhaseEventSchema = z.object({
+	proveId: z.string().uuid(),
+	seq: z.number().int().nonnegative(),
+	phase: z.enum(PROVE_PHASES),
+	backend: z.enum(["presto", "browser"]).optional(),
+})
+
+/** The journal seam the coordinator writes backend evidence through. */
+export interface ProveEvidenceSink {
+	updateProvingBackend(journalId: string, backend: ProveBackend): Promise<unknown>
+}
+
+interface ProveAttempt {
+	journalId: string
+	/** Highest sequence number accepted so far; lower or equal → stale, dropped. */
+	lastSeq: number
+	/** Last backend written to the journal — the same evidence is not rewritten. */
+	backend?: ProveBackend
+	/** `denialGeneration` at dispatch: only an attempt from the current generation may clear a denial. */
+	denialGeneration: number
+}
 
 /** Journal patches the shared pipeline tail emits. Structural subset of
  *  the operation-journal patch shape — callers bind their own journal id
@@ -63,6 +105,9 @@ export interface ProveAndSendContext<TOffchain = unknown> {
 	 *  the coordinator NEVER computes scopes itself. */
 	scopes: AztecAddress[]
 	parentTask?: WrappedTask
+	/** The op's journal row. The prove attempt's phase events are attributed to
+	 *  it; `undefined` (no row) means the attempt emits nothing attributable. */
+	journalId?: string
 	/** Cancel checkpoint — throws (JobCancelledSentinel) when the op's
 	 *  controller aborted. Checked before prove, before toTx, before send. */
 	checkCancelled: () => void
@@ -99,13 +144,59 @@ function isExistingNullifierError(error: unknown): boolean {
 }
 
 export class ExecutionCoordinator {
+	/** In-flight prove attempts by `proveId`; an entry lives exactly as long as its `pxe.proveTx` call. */
+	private readonly attempts = new Map<string, ProveAttempt>()
+	private lastProveOutcome: ProveOutcomeHint | null = null
+	private lastDenial: { at: number } | null = null
+	/** Bumped on every `denied`; attempts record it at dispatch (see {@link ProveAttempt}). */
+	private denialGeneration = 0
+
 	public constructor(
 		private readonly tasks: TaskService,
 		readonly _logger: ILogger,
 		/** E2E-only proving hold-point. The no-op default never blocks, so
 		 *  production proving is unimpeded. See {@link ProofGate}. */
 		private readonly proofGate: ProofGate = NOOP_PROOF_GATE,
+		private readonly evidence?: ProveEvidenceSink,
 	) {}
+
+	public getLastProveOutcome(): LastProveOutcome {
+		return { outcome: this.lastProveOutcome, denial: this.lastDenial }
+	}
+
+	/**
+	 * Receive one prove-phase event from the offscreen prover. Memory records and
+	 * the ordering check update synchronously; the journal write is awaited
+	 * afterwards and never throws into the event path. Unknown or finished
+	 * attempts and out-of-order sequence numbers are ignored: the source stamps
+	 * both `seq` and `backend`, so a lost or reordered event can only leave the
+	 * evidence stale, never make it wrong.
+	 */
+	public async onProvePhase(raw: unknown): Promise<void> {
+		const parsed = ProvePhaseEventSchema.safeParse(raw)
+		if (!parsed.success) return
+		const event = parsed.data
+		const attempt = this.attempts.get(event.proveId)
+		if (!attempt || event.seq <= attempt.lastSeq) return
+		attempt.lastSeq = event.seq
+		const at = Date.now()
+		this.lastProveOutcome = { at, phase: event.phase, backend: event.backend }
+		if (event.phase === "denied") {
+			this.denialGeneration += 1
+			this.lastDenial = { at }
+		} else if (event.phase === "proved" && event.backend === "presto" && attempt.denialGeneration >= this.denialGeneration) {
+			// Presto produced this proof, so approval exists now — unless a newer
+			// attempt was denied after this one was dispatched.
+			this.lastDenial = null
+		}
+		if (event.backend === undefined || event.backend === attempt.backend) return
+		attempt.backend = event.backend
+		try {
+			await this.evidence?.updateProvingBackend(attempt.journalId, event.backend)
+		} catch (error) {
+			this._logger.log("execution", LogLevel.Warn, "prove backend not journaled", { error: errorMessageFromUnknown(error) })
+		}
+	}
 
 	/** Wrap `pxe.simulateTx` in a TaskService step. Fee strategies pass
 	 *  this as a callback so they stay decoupled from TaskService. */
@@ -131,27 +222,34 @@ export class ExecutionCoordinator {
 		}
 	}
 
-	/** Wrap `pxe.proveTx` in a TaskService step. */
+	/** Wrap `pxe.proveTx` in a TaskService step. Each call is one prove attempt
+	 *  with a fresh `proveId`, registered before dispatch so no phase event can
+	 *  arrive unmapped and removed in `finally` so a late one is ignored. */
 	public async proveTxTask(
 		pxe: IPXE,
 		txRequest: TxExecutionRequest,
 		scopes: AztecAddress[],
 		parentTask?: WrappedTask,
+		journalId?: string,
 	): Promise<TxProvingResult> {
 		const step = new StepContent("Generating proof")
 		const task = parentTask ? parentTask.startSubtask(step) : this.tasks.startNewTask(step)
+		const proveId = crypto.randomUUID()
+		if (journalId !== undefined) this.attempts.set(proveId, { journalId, lastSeq: 0, denialGeneration: this.denialGeneration })
 		try {
 			// E2E-only hold-point. No-op in production. Awaited HERE — after the
 			// coordinator journaled `proving`, immediately before `pxe.proveTx`,
 			// between the existing pre-/post-prove cancel checkpoints — so the
 			// hold replaces prove duration without adding a cancel checkpoint.
 			await this.proofGate.wait()
-			const provedTx = await pxe.proveTx(txRequest, scopes)
+			const provedTx = await pxe.proveTx(txRequest, scopes, proveId)
 			task.complete()
 			return provedTx
 		} catch (error) {
 			task.fail(error)
 			throw error
+		} finally {
+			this.attempts.delete(proveId)
 		}
 	}
 
@@ -194,7 +292,7 @@ export class ExecutionCoordinator {
 	): Promise<{ txHash: TxHash; offchainOutput?: TOffchain }> {
 		ctx.checkCancelled()
 		await ctx.markJournal({ stage: "proving", enteredProveAt: Date.now() })
-		const provedTx = await this.proveTxTask(ctx.pxe, ctx.txRequest, ctx.scopes, ctx.parentTask)
+		const provedTx = await this.proveTxTask(ctx.pxe, ctx.txRequest, ctx.scopes, ctx.parentTask, ctx.journalId)
 		// Key checkpoint: if cancel fired during prove, this prevents
 		// submission. The proof artifact is dropped silently when this throws.
 		ctx.checkCancelled()

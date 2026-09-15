@@ -527,6 +527,30 @@ describe("RecentActivityView — one feed block for token and account views", ()
 		expect(awaitingCards(w)).toHaveLength(1)
 	})
 
+	test("a proving op's backend subtitle outranks the executing task's label and stamps the card", async () => {
+		const proving = (backend?: string) => ({
+			...inFlightTransferOp(ACCT_A),
+			progress: { stage: "proving", enteredProveAt: 1, backend },
+		})
+		const generating = {
+			...uiTransferTask(ACCT_A),
+			subtasks: [{ status: H.TaskStatus.Processing, content: { label: "Generating proof" } }],
+		}
+		H.getTasks.mockResolvedValue([generating])
+
+		H.getOperations.mockResolvedValue([proving()])
+		let w = mountFeed()
+		await flushPromises()
+		expect(awaitingCards(w)[0].props("subtitle")).toBe("Generating proof...") // no evidence yet → the task label
+		expect(awaitingCards(w)[0].props("backend")).toBeNull()
+
+		H.getOperations.mockResolvedValue([proving("presto")])
+		w = mountFeed()
+		await flushPromises()
+		expect(awaitingCards(w)[0].props("subtitle")).toBe("Proving with Presto ✦")
+		expect(awaitingCards(w)[0].props("backend")).toBe("presto")
+	})
+
 	test("empty states: a token feed says NOTHING HERE YET with the symbol, an account feed renders nothing", async () => {
 		const withToken = mountFeed({ token: TOKEN })
 		await flushPromises()

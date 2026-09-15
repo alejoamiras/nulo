@@ -14,7 +14,8 @@
 import { describe, test, expect, vi, beforeEach } from "vitest"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
-import { captureMessage, emitMessage, makeSpyLogger, silentLogger } from "../testing/transport-harness"
+import { captureMessage, emitMessage, emitMessageFrom, makeSpyLogger, silentLogger } from "../testing/transport-harness"
+import { EventHandler } from "@nulo/wallet-core/utils"
 import { RpcDisconnectedError, RpcTimeoutError, UserRejectedError, WalletError } from "../errors"
 import { MessageType } from "../messages"
 import { LoggingTelemetrySink, MemoryTelemetrySink, type RequestTelemetry, type TelemetrySink } from "./telemetry"
@@ -48,6 +49,59 @@ class TestClient extends ServiceClient<Methods> {
 		return this.request("multiply", a, b)
 	}
 }
+
+describe("event sender gate", () => {
+	type Events = { onPing: { n: number } }
+	class EventClient extends ServiceClient<Methods, Events> {
+		public readonly onPing = new EventHandler<{ n: number }>()
+		public constructor() {
+			super("test-service", silentLogger, "event-client", new MemoryTelemetrySink())
+		}
+	}
+	const event = { type: MessageType.Event, from: "test-service", content: { event: "onPing", payload: { n: 1 } } }
+	const offscreenUrl = (scheme: string, query = "") => `${scheme}://harness-extension-id/src/offscreen/index.html${query}`
+
+	function mounted() {
+		const client = new EventClient()
+		client.connect()
+		const seen = vi.fn()
+		client.onPing.add(seen)
+		return seen
+	}
+
+	test("a content-script-shaped sender (same extension id, web page url) is dropped", () => {
+		const seen = mounted()
+		emitMessageFrom(event, { id: "harness-extension-id", url: "https://dapp.example/", tab: { id: 1 } } as chrome.runtime.MessageSender)
+		emitMessageFrom(event, { id: "harness-extension-id" } as chrome.runtime.MessageSender) // the SW itself: no url
+		emitMessageFrom(event, undefined)
+		expect(seen).not.toHaveBeenCalled()
+	})
+
+	test("the Chrome offscreen document url is accepted", () => {
+		const seen = mounted()
+		emitMessageFrom(event, { id: "harness-extension-id", url: offscreenUrl("chrome-extension") } as chrome.runtime.MessageSender)
+		expect(seen).toHaveBeenCalledExactlyOnceWith({ n: 1 })
+	})
+
+	test("the Firefox hidden-window url with ?instance=<token> is accepted (query ignored)", () => {
+		const seen = mounted()
+		emitMessageFrom(event, {
+			id: "harness-extension-id",
+			url: offscreenUrl("chrome-extension", "?instance=abc123"),
+		} as chrome.runtime.MessageSender)
+		expect(seen).toHaveBeenCalledExactlyOnceWith({ n: 1 })
+	})
+
+	test("other extension pages and foreign extensions are dropped; responses are unaffected by the gate", async () => {
+		const seen = mounted()
+		emitMessageFrom(event, {
+			id: "harness-extension-id",
+			url: "chrome-extension://harness-extension-id/src/popup/index.html",
+		} as chrome.runtime.MessageSender)
+		emitMessageFrom(event, { id: "other-extension", url: offscreenUrl("chrome-extension") } as chrome.runtime.MessageSender)
+		expect(seen).not.toHaveBeenCalled()
+	})
+})
 
 describe("frozen transport error contract", () => {
 	// Mirror of the background transport's pin suite: same base-built VALUES

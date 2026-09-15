@@ -9,7 +9,7 @@ const STUBS = {
 	Spinner: { template: '<span data-testid="stub-spinner" />' },
 	TransactionCardLayout: {
 		template: `
-			<div :data-testid="testId" :data-stage="stage">
+			<div :data-testid="testId" :data-stage="stage" :data-backend="backend">
 				<span class="title">{{ title }}</span>
 				<slot name="title-trailing" />
 				<slot name="badge" />
@@ -19,7 +19,7 @@ const STUBS = {
 				<span class="symbol">{{ amountSymbol }}</span>
 			</div>
 		`,
-		props: ["title", "icon", "amount", "amountSymbol", "testId", "stage"],
+		props: ["title", "icon", "amount", "amountSymbol", "testId", "stage", "backend"],
 	},
 }
 
@@ -73,6 +73,15 @@ describe("composite/TransactionAwaitingCard", () => {
 			const w = mountCard({ stage: s })
 			expect(w.find("[data-testid='tx-awaiting-card']").attributes("data-stage")).toBe(s)
 		}
+	})
+
+	test("backend threads to data-backend next to data-stage; the subtitle carries its testid", () => {
+		const w = mountCard({ stage: "proving", backend: "browser", subtitle: "Proving in browser…" })
+		const card = w.find("[data-testid='tx-awaiting-card']")
+		expect(card.attributes("data-stage")).toBe("proving")
+		expect(card.attributes("data-backend")).toBe("browser")
+		expect(w.find("[data-testid='tx-awaiting-subtitle']").text()).toBe("Proving in browser…")
+		expect(mountCard({ stage: "proving" }).find("[data-testid='tx-awaiting-card']").attributes("data-backend")).toBeUndefined()
 	})
 
 	test("data-stage is omitted when stage prop is null/default (no in-flight journal binding)", () => {
