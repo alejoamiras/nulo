@@ -695,7 +695,7 @@ phase's typecheck is green on its own.
 
 ### Arc 2 — the surfaces: status client, onboarding, settings (`presto-migration/ux`)
 
-#### P6 — status client, UI-state mapper, custom element
+#### P6 ✓ — status client, UI-state mapper, custom element (2026-09-15; 59 new unit cases, `bun run test` 5864 green, build exit 0 — lessons/phase-6.md)
 
 - `src/utils/presto-ui-state.ts` (+ ≥ 10-case test: each `BannerState` via `stateFromStatus`, the `unconfirmed` pitch rule, unknown reason → `error`, `needsDownload`, minimal-body degradation (`info` empty, `presto-reachable`), copy/steps per state, the denied overlay from `lastProveOutcome`).
 - `src/composables/usePrestoStatus.ts` over the arc-1 `getPrestoClient()` (+ ≥ 10-case test with an injected fake client: idle → detecting → each state; `forceRefresh` passthrough; a late result after `dispose` is dropped; `bannerStatus` mirrors the raw status; two composables share one injected client); `presto-ui-state.test.ts` exercises `copyFor(state, { outcome, denial })`.

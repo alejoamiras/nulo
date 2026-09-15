@@ -101,7 +101,8 @@ export default defineConfig({
 				}
 			},
 		},
-		vue(),
+		// `<presto-banner>` is a custom element from @alejoamiras/presto-banners, not a Vue component.
+		vue({ template: { compilerOptions: { isCustomElement: (tag) => tag.startsWith("presto-") } } }),
 
 		usePages({
 			dirs: [
