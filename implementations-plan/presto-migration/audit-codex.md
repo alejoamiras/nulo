@@ -101,3 +101,84 @@ Every claim above was checked against the worktree at `323380f6` + plan v1 and t
 - `e2e:agent` — root `package.json:22` only.
 - `PrestoClient` — no abort/dispose API (`sdk-core/src/lib/presto-client.ts`).
 - Health tiering (raised by Fable, relevant to "state semantics") — `presto/core/src/server.rs:415-445`.
+
+
+---
+
+# Fresh-context final pass, round 1 (on plan v2 + ledger) — 2026-09-15
+
+New session, no memory of round 1. Prompt: the ledger-soundness, adversarial, assumptions, phases/gates and simplicity asks over v2, `audit-fable.md` and this file. Response verbatim (paths repo-relative). Verification notes and the v3 disposition follow.
+
+reject (with blocking findings: denial state is overwritten, proving subtitles remain hidden, Firefox events fail the sender gate, correlation plumbing is incomplete, and phase gates contradict the claimed sequencing)
+
+**Confidence: high** for source-backed findings; **moderate** for browser acceptance risks. Reviewed sources and both audits; no builds or tests executed.
+
+## Ledger
+
+- **D2 — independent shipment is asserted, not established.** Arc 1 retains onboarding’s HTTP probe, Accelerator download link, and old recovery instructions while production requires HTTPS. An HTTP-healthy installation can appear active while proving falls back. Move the minimum transport-aware onboarding compatibility changes into arc 1, or deliver one arc.
+- **D3 — journal choice is reasonable, but rendering is unresolved.** [`cardSubtitleFor`](apps/extension/src/popup/components/modules/general/RecentActivityView.vue:429) returns the active task’s `"Generating proof..."` before calling `stageSubtitle`. Passing `backend` only to the latter leaves the ordinary single-operation case unchanged. Give a known proving backend priority over task decoration.
+- **D5 — correct security principle, incorrect Firefox predicate.** Firefox opens the offscreen page with `?instance=<token>`; exact equality against the query-free URL rejects legitimate events. See Security.
+- **D6 — identifier strategy is sound; the implementation path is incomplete.** `proveTxTask` receives no journal ID; the four callers retain it behind `markJournal` closures. Neither executor appears in the change map. Also, the factory observer receives only `{proveId, phase}`, insufficient for the proposed forwarder to add runtime coordinates. Specify the ID handoff, coordinate capture, client event generic, and bootstrap wiring: `createPxeOffscreen()` currently returns `void`.
+- **D17 — does not resolve either audit’s denial finding.** §F overwrites `lastProveOutcome` on **every phase**. Actual denial proceeds `denied → fallback → proving → proved → receive`; Settings therefore sees `receive`, not `denied`. Preserve denial independently of progress; retain it through cooldown attempts, and clear it only after confirmed native success. Test that entire sequence.
+- **D19 — budget is concrete, measurement is premature.** P6 adds unused modules; P7 introduces their onboarding consumers. A green P6 measurement can measure zero added code. Measure after P7, using the actual reachable module/chunk graph; string-grepping `@aztec/` cannot establish dependency absence.
+
+Thus the ledger’s “all resolved” disposition is premature. D2’s claimed concession depended on compatibility fixes that remain incomplete.
+
+## Security
+
+- **Medium — sender authentication breaks legitimate delivery.** [`offscreen.ts:279`](apps/extension/src/wallet/utils/offscreen.ts:279) appends Firefox’s instance token. Validate the extension identity and exact page path while explicitly handling that query parameter; test the real URL shape and stale-instance behavior. Keep the web-content-script rejection. Add runtime payload validation; TypeScript event types do not validate messages.
+- **Medium — D13 still trusts archive/cache structure.** Rejecting “other regular files” does not reject a symlink, hardlink, or duplicate named `presto-server`. Require one regular executable member and reject links/duplicates before extraction. Cache only the intended executable, or reject unexpected restored entries before adding its directory to `PATH`. Initial hashes calculated beside a same-origin sidecar establish a pin, not independent source provenance.
+- **Medium — P1 names an unestablished provenance mechanism.** Presto publishes npm provenance and verifies it with `scripts/verify-sdk-package-signatures.ts`; its workflow does not show GitHub artifact-attestation publication. Bare `gh attestation verify --owner …` searches GitHub’s attestation API, not npm’s registry. Use an isolated npm signature/provenance verification fixture and bind the verified digest to the expected repository/workflow/commit. [GitHub CLI documentation](https://cli.github.com/manual/gh_attestation_verify)
+- **Medium — the requested production-policy test remains missing.** P2 checks constructor arguments, but round 1 explicitly requested a real-client test showing HTTPS failure causes **no HTTP `/prove`**, including after an HTTPS endpoint previously succeeded. Add it; required-mode HTTP canaries cannot prove production policy.
+
+The explicit production `httpsOnly:true` does defeat the environment override. The required-only type is useful compile-time protection; runtime construction must still derive policy from the mode. The bounded squatting statement is now accurate. `PRESTO_ALLOW_ALL` scoping is acceptable under the stated ephemeral-runner restriction.
+
+## Assumptions
+
+### Facts
+
+- **F1–F3, F7, F9–F14, F18–F22:** the principal source-backed claims hold, subject to qualifications below. **F5/F6** agree with the headless source/tag; I did not independently retrieve release assets.
+- **F4:** not every version mismatch emits `version-mismatch`. A legacy health-version mismatch reaches the generic unavailable fallback. D10 provides more precise errors only on paths that emit that phase.
+- **F8:** behavior holds, but several line citations are stale at `6051b11`. **F21’s certificate source is `packages/presto/src-tauri/src/certs.rs`**, not `core/src/certs.rs`.
+- **F15:** the host-permission exemption is supported by the [Chromium discussion](https://groups.google.com/a/chromium.org/g/chromium-extensions/c/pUDh8RiTjJk). It does not establish that address-bar permission recovery works in extension pages or defeats managed policy.
+- **F16:** the clearance times are reversed relative to the listed packages: Presto clears at **22:58Z**, core at **22:29Z**. Publication timestamps and **F17’s unset variable** remain recorded snapshots, not freshly verified facts.
+- **F19:** minimal-body handling is correct **when an unapproved Origin is present**. Verify actual GET and POST headers separately; source authorization logic cannot establish browser header behavior.
+
+### Inferences
+
+- **I2:** appropriately deferred to published-package inspection.
+- **I4/I5:** remain acceptance risks; Mac validation establishes neither Firefox nor Linux coverage.
+- **I7:** a registry establishes attribution and lifetime, not delivery or ordering. State the tolerated event-loss behavior, serialize asynchronous journal updates, and test delayed delivery relative to RPC completion.
+- **I8:** plausible, but `service.pxe-seam.test.ts` only checks construction and explicitly makes no RPC. Add a real codec round-trip assertion for `proveId`.
+- **I9:** its fallback weakens P7’s required validation. Resolve interception feasibility before promising those gates, or provide an equivalent browser test mechanism.
+
+### Asks
+
+A1/A2/A3/A7 have sensible recommendations. A4 needs the corrected measurement above.
+
+**A5** overstates reinstall instability: unpacked Chrome IDs are path-derived unless a key is supplied. A stable dev key remains useful across worktrees, but has no assigned implementation phase/gate.
+
+**A6’s “off by default” premise is outdated:** Firefox grants requested MV3 host permissions through installation from version 127; users can revoke them. Distinguish installation, added permissions on update, and revocation. Best-effort support must not promise `permission-blocked` when the SDK may return `unconfirmed`. [Mozilla’s explanation](https://blog.mozilla.org/addons/2024/05/14/manifest-v3-updates/)
+
+## Phases & gates
+
+- **P1 explicitly allows red typechecking**, contradicting the sequencing rule and audit disposition. Combine dependency replacement with import conversion, or temporarily retain the old dependency.
+- **P2/P7** correctly preserve the old composable until its consumer is replaced.
+- **P3/P4:** commands exist, but soak produces `soak-N`, never a “canary lane.” Assert native subtitles inside the selected test regardless of shard label when required mode is armed. Use the actual aggregator name, `extension-network-e2e-status`.
+- **P5’s residue check conflicts with required coexistence documentation** naming Aztec Accelerator. Define intentional documentation exceptions.
+- **P7’s manual denial-surface check precedes P8’s Settings implementation.** Move that acceptance check after P8.
+- Root/per-package test, lint, build, and actionlint scripts exist. Passing them has not been demonstrated.
+
+## Simplicity
+
+Keep the journal seam, correlated event, and small registry. Cut proving additions to `ShallowPxe`: it deliberately excludes proving. A coordinator-owned `Map` is sufficient unless the registry has substantive behavior. Derive CI plaintext policy from `provingMode`; the extra `httpsOnly:false` option is redundant.
+
+## Looks fine
+
+D1/D4/D7/D9–D12/D14/D16/D18/D20 are defensible. I could not break the SDK’s HTTPS-only downgrade refusal, witness-free diagnostic, or the banner’s constant-link/static-template rendering boundary. Journal timestamp preservation, late-stage no-ops, shared page caching, and dated min-age removal are appropriate.
+
+---
+
+## Driver verification (before folding into v3)
+
+Every source-backed claim held: `cardSubtitleFor` returns the task label before `stageSubtitle` (`RecentActivityView.vue:429-444`); Firefox opens the offscreen page as `<getURL(path)>?instance=<token>` (`apps/extension/src/wallet/utils/offscreen.ts:279`); `proveTxTask` has one call site (`proveAndSend`, `execution-coordinator.ts:197`) whose `ProveAndSendContext` carries a `markJournal` closure and no journal id (`:57-72`; the lane holds `queuedJournalId`); `createPxeOffscreen` returns `Promise<void>` (`packages/aztec-runtime/src/offscreen/entry.ts:43`); the SDK's WASM fallback emits `fallback → proving → proved → receive` after `denied` (`presto-prover.ts:186-215`, `presto-client.ts:538`), so an every-phase `lastProveOutcome` loses the denial; the native path is `detect → serialize → transmit → proving → proved → receive`; `certs.rs` is under `packages/presto/src-tauri/src/`; Presto publishes with `npm publish --provenance` and verifies via `scripts/verify-sdk-package-signatures.ts` (`npm audit signatures` in an isolated fixture), not GitHub artifact attestations; F16's clearance times were reversed in v2. Firefox ≥ 127 grants MV3 host permissions at install (Mozilla add-ons blog, 2024-05-14).
