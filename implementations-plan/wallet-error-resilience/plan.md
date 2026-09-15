@@ -165,7 +165,7 @@ bun run typecheck:all && bun run lint
 ```
 Pass: all exit 0, the new cases listed above green. Layers: typecheck/lint · unit.
 
-#### Phase 2 — resync-and-retry once on the stale-anchor family (offscreen side)
+#### Phase 2 ✓ — resync-and-retry once on the stale-anchor family (offscreen side)
 
 **What.** New file `packages/aztec-runtime/src/pxe/stale-anchor.ts`:
 
@@ -266,6 +266,15 @@ ANVIL_URL=<from ports.json> AZTEC_NODE_URL=<from ports.json> bun run --cwd packa
 Pass: exit 0; cases (a)–(h) + the sources test green; the real test's control case throws the
 stale-anchor message and the helper case recovers with a moved anchor (or the documented skip with
 its reason in lessons). Layers: typecheck/lint · unit · integration (real PXE + sandbox).
+
+**Implementation note (2026-09-15, gate green).** The real test reproduced the failure and the
+recovery on a reorged sandbox — and surfaced a second node wording for the same condition
+(`Reference block … not found when querying contract …`, next to the logged `Block hash … not found
+when resolving query`). `isStaleAnchorMessage` keys on their shared tail, `possibly a reorg has
+occurred`, instead of the first half + `reorg`. The test PXE runs `autoSync: false` to freeze the
+"synced before the prune" half of the production race, which a single-node sandbox cannot land
+inside the window on its own; the account is one of the sandbox's initializerless test accounts and
+the op is its `lookup_validity` utility. Details in `lessons/phase-2.md`.
 
 #### Phase 3 — the balance queue reschedules transient failures (bounded, in-memory)
 
