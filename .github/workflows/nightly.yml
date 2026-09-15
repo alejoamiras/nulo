@@ -247,6 +247,23 @@ jobs:
       - name: Duplication report → step summary
         run: bun scripts/dup-trend/report.ts >> "$GITHUB_STEP_SUMMARY"
 
+  # The passkey RP host is a live deployment the repo cannot pin; probe it from outside every
+  # night so a zone-level change (a challenge rule, a rewriter, a wildcard record) surfaces here.
+  # ADVISORY: reports red without failing the nightly; the fix is in the Cloudflare zone, not the tree.
+  rp-host-live:
+    needs: resolve
+    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+      - uses: ./.github/actions/setup-bun
+      - name: Probe passkey.nulo.sh
+        run: bun run --cwd infra/passkey-rp test:live
+
   # Builds gate on lint+unit only (not network) — same wall-time overlap as
   # release.yml; the publish job waits for everything.
 
