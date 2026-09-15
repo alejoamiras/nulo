@@ -32,6 +32,18 @@ export interface ExtensionContext {
  *  unrevivable zombie SW — see migration.test.ts). `waitForLiveness: false`
  *  skips the liveness gate for boots expected to park or fail before the
  *  heartbeat starts (a held or failing storage migration). */
+/**
+ * Chrome reports a refused loopback probe as a "Failed to load resource" console error. The
+ * wallet probes Presto on the onboarding step and on every settings open, and a box without
+ * Presto (every smoke runner, the plaintext-only CI prover on the HTTPS port) refuses it by
+ * design — that is the browser's report of a probe the wallet expects to fail, not an
+ * extension error. Only the two health URLs are exempt; a refused RPC or asset still counts.
+ */
+function isPrestoProbeNoise(msg: ConsoleMessage): boolean {
+	if (!msg.text().startsWith("Failed to load resource")) return false
+	return /^https?:\/\/127\.0\.0\.1:5983[34]\/health/.test(msg.location().url ?? "")
+}
+
 export async function launchExtension(opts: { userDataDir?: string; waitForLiveness?: boolean } = {}): Promise<ExtensionContext> {
 	const { userDataDir, waitForLiveness = true } = opts
 	const extensionPath = inject("extensionPath")
@@ -235,7 +247,7 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 		// catches and merely logs is invisible to BOTH fixture arrays
 		// (`consoleErrors` AND `pageErrors`; it does reach the SW log ring);
 		// prefer DOM/storage/stage evidence for app-level failures.
-		if (msg.type() === "error" && !msg.text().includes("Client disconnected")) {
+		if (msg.type() === "error" && !msg.text().includes("Client disconnected") && !isPrestoProbeNoise(msg)) {
 			ctx.consoleErrors.push(msg.text())
 		}
 	})
@@ -1202,7 +1214,7 @@ async function setUpPopupPage(ctx: ExtensionContext, page: Page): Promise<Page> 
 		// catches and merely logs is invisible to BOTH fixture arrays
 		// (`consoleErrors` AND `pageErrors`; it does reach the SW log ring);
 		// prefer DOM/storage/stage evidence for app-level failures.
-		if (msg.type() === "error" && !msg.text().includes("Client disconnected")) {
+		if (msg.type() === "error" && !msg.text().includes("Client disconnected") && !isPrestoProbeNoise(msg)) {
 			ctx.consoleErrors.push(msg.text())
 		}
 	})

@@ -1,5 +1,5 @@
 import type { HTTPRequest, Page } from "puppeteer"
-import { afterEach, beforeEach, describe, expect } from "vitest"
+import { describe, expect } from "vitest"
 import { withTimeoutMessage, clickByTestId, openOnboarding, replaceInputValue, test, waitForHash } from "./fixtures/extension"
 
 // The page probes Presto HTTPS-first; after an HTTPS failure the SDK runs one witness-free HTTP
