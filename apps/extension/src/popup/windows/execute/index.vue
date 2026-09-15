@@ -18,6 +18,7 @@ import { humanizeOperationKind } from "./humanize"
 import { uniqueSignerAccounts, uniqueSignerNetworks } from "./signers"
 import { isSelfPay } from "@nulo/wallet-bridge"
 import { isEmbeddedFeePayment, requiresFeeSelection } from "./operation-validation"
+import { authwitDisplayCall, displayCallsOf, pendingAuthwitDecodes, undecodedAll } from "./display-calls"
 import type { DraftUIOperation } from "./types"
 
 /** Services */
@@ -25,12 +26,14 @@ import { type ProfileInfo, ProfileServiceClient } from "@/wallet/services/profil
 import { type Network, NetworkServiceClient } from "@/wallet/services/network/client"
 import { type Account, AccountServiceClient } from "@/wallet/services/account/client"
 import {
+	type DecodedCall,
+	type DiscoveredAuthwit,
 	ExecutionServiceClient,
 	type FeeSettings,
 	type OperationAuthwitPreview,
 	type TransferFeeEstimate,
 } from "@/wallet/services/execution/client"
-import { TokenServiceClient } from "@/wallet/services/token/client"
+import { type TokenInfo, TokenServiceClient } from "@/wallet/services/token/client"
 import {
 	type CaipAccount,
 	type CaipChain,
@@ -99,6 +102,18 @@ const tokenService = new TokenServiceClient()
 const tokenMetadata = ref<Map<string, { name: string; symbol: string; decimals: number }>>(new Map())
 const tokenMetadataLoading = ref(false)
 const tokenMetadataError = ref<Map<string, string>>(new Map())
+
+/**
+ * Display-only decodings the card renders: per operation index for its calls,
+ * per message hash for a discovered authorization. An entry is absent while
+ * the wallet is still decoding; nothing here gates approval or reaches the SW's
+ * execution path, which reads the stored request.
+ */
+const decodedCalls = ref<Map<number, readonly DecodedCall[]>>(new Map())
+const decodedAuthwits = ref<Map<string, DecodedCall>>(new Map())
+const authwitDecodesInFlight = new Set<string>()
+/** The wallet's registered tokens on the operations' chains, so amounts render in token units. */
+const knownTokens = ref<TokenInfo[]>([])
 
 const {
 	requestId,
@@ -226,6 +241,10 @@ const init = async () => {
 		for (const [index, op] of resolved.operations.entries()) {
 			if (op.kind === "aztec_sendTx" && op.executionMode === "default_entrypoint") scheduleAuthwitPreview(index, { index })
 		}
+		// Neither is awaited by the approve gate: a slow decode leaves the card on its vocabulary
+		// reading or "Reading arguments…", and a failed one falls back to the raw fields.
+		void decodeOperationArguments(resolved.operations)
+		void loadKnownTokens(resolved.operations, profile.value!.id)
 
 		// Pre-fetch token metadata for any `register_token` ops so the
 		// OperationCard renders name/symbol/decimals before Allow. The Allow
@@ -385,6 +404,60 @@ async function prefetchTokenMetadata(
 	}
 }
 
+/** Per operation, one batch decode of its calls; a failed batch reads as unavailable so the card
+ *  falls back to raw fields instead of waiting forever. */
+async function decodeOperationArguments(ops: UIOperation[]): Promise<void> {
+	await Promise.all(
+		ops.map(async (op, index) => {
+			const calls = displayCallsOf(op)
+			if (!calls.length) return
+			try {
+				decodedCalls.value.set(index, await executionService.decodeCallsForDisplay(op.networkId, calls))
+			} catch (error) {
+				console.warn("[Execute] Argument decode failed", { index, error })
+				decodedCalls.value.set(index, undecodedAll(calls.length))
+			}
+		}),
+	)
+}
+
+/** A failed read just leaves amounts in base units. */
+async function loadKnownTokens(ops: UIOperation[], profileId: string): Promise<void> {
+	const chainIds = [...new Set(ops.map((op) => op.network.chainId))]
+	try {
+		const lists = await Promise.all(chainIds.map((chainId) => tokenService.getTokens(profileId, chainId)))
+		knownTokens.value = lists.flat()
+	} catch (error) {
+		console.warn("[Execute] Token list unavailable", { error })
+	}
+}
+
+/** Every discovered authorization an estimate or preview lists gets one decode on its consumer. */
+function decodeDiscoveredAuthwits(): void {
+	for (const [index, op] of operations.value.entries()) {
+		if (op.kind !== "aztec_sendTx") continue
+		const listed = feeEstimates.value[index]?.discoveredAuthwits ?? authwitPreviews.value[index]?.discoveredAuthwits ?? []
+		const fresh = pendingAuthwitDecodes(listed, decodedAuthwits.value, authwitDecodesInFlight)
+		if (!fresh.length) continue
+		for (const a of fresh) authwitDecodesInFlight.add(a.messageHash)
+		void decodeAuthwitBatch(op.networkId, fresh)
+	}
+}
+
+async function decodeAuthwitBatch(networkId: string, fresh: DiscoveredAuthwit[]): Promise<void> {
+	let decoded: DecodedCall[]
+	try {
+		decoded = await executionService.decodeCallsForDisplay(networkId, fresh.map(authwitDisplayCall))
+	} catch (error) {
+		console.warn("[Execute] Authorization decode failed", { error })
+		decoded = undecodedAll(fresh.length)
+	}
+	for (const [i, a] of fresh.entries()) {
+		decodedAuthwits.value.set(a.messageHash, decoded[i] ?? { kind: "undecoded", reason: "unavailable" })
+		authwitDecodesInFlight.delete(a.messageHash)
+	}
+}
+
 const handleFeeUpdate = (index: number, value: FeeSettings | undefined) => {
 	const op = operations.value[index]
 	// `feeSettings` only exists on send-like draft kinds. Discriminant guard
@@ -488,6 +561,8 @@ const showJson = () => {
 const profileService = new ProfileServiceClient()
 profileService.onActiveProfileChanged.add(onActiveProfileChanged)
 
+watch([feeEstimates, authwitPreviews], decodeDiscoveredAuthwits, { deep: true })
+
 onMounted(startWindow)
 
 onUnmounted(disposeWindow)
@@ -530,6 +605,9 @@ onUnmounted(disposeWindow)
 						:isEstimating="!!estimatingOps[i]"
 						:authwitPreview="authwitPreviews[i] ?? undefined"
 						:isPreviewing="!!previewingOps[i]"
+						:decodedCalls="decodedCalls.get(i)"
+						:decodedAuthwits="decodedAuthwits"
+						:tokens="knownTokens"
 						:tokenMetadata="op.kind === 'register_token' ? tokenMetadata.get((op as { address: string }).address) : undefined"
 						:tokenMetadataError="op.kind === 'register_token' ? tokenMetadataError.get((op as { address: string }).address) : undefined"
 						:tokenMetadataLoading="op.kind === 'register_token' && tokenMetadataLoading"

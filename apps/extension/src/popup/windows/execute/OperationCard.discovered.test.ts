@@ -3,7 +3,8 @@
  * `aztec_sendTx` — from the fee estimate for a standard operation, from the
  * authorization preview for a `default_entrypoint` one — and says so when an
  * embedded-fee standard operation adds none. `send_transaction` never lists any:
- * its confirm adds none.
+ * its confirm adds none. Each entry is a summary row; its arguments and inner
+ * hash sit behind a toggle.
  */
 
 import { mount } from "@vue/test-utils"
@@ -13,13 +14,14 @@ import OperationCard from "./OperationCard.vue"
 const OWNER = "0xowner0000000000000000000000000000000000000000000000000000000cc"
 const CALLER = "0xcaller000000000000000000000000000000000000000000000000000000dd"
 const CONSUMER = "0xconsumer00000000000000000000000000000000000000000000000000000ee"
+const INNER = `0x${"f".repeat(64)}`
 
 const authwit = (tag: string) => ({
 	consumer: CONSUMER,
 	caller: CALLER,
 	selector: "0x1234abcd",
-	args: [`arg-${tag}`, "\u202eevil"],
-	innerHash: `0xinner${tag}`,
+	args: [`arg-${tag}`, "‮evil"],
+	innerHash: INNER,
 	messageHash: `0xmsg${tag}`,
 })
 const estimate = (discoveredAuthwits?: unknown[]) => ({
@@ -47,28 +49,54 @@ const stubs = {
 	Icon: true,
 	FeeSettingsCard: true,
 }
-const mocks = {
-	trimAddress: (a: string) => a,
-	humanizeMethodName: (m: string) => m,
-	humanizeOperationKind: (k: string) => k,
-}
 const mountCard = (op: unknown, props: Record<string, unknown> = {}) =>
-	mount(OperationCard, { props: { op: op as never, index: 0, ...props }, global: { stubs, mocks } })
+	mount(OperationCard, { props: { op: op as never, index: 0, ...props }, global: { stubs } })
 
 describe("OperationCard — discovered authorizations", () => {
-	test("a standard aztec_sendTx lists what the estimate found: consumer, delegate, function, args, inner hash", () => {
+	test("a standard aztec_sendTx lists what the estimate found: consumer, delegate and function; args and inner hash behind the toggle", async () => {
 		const w = mountCard(sendTx({ calls: [] }), { feeEstimate: estimate([authwit("a"), authwit("b")]) })
 		const rows = w.findAll('[data-testid="execute-op-discovered-authwit"]')
 		expect(rows).toHaveLength(2)
 		expect(rows[0]!.attributes("data-message-hash")).toBe("0xmsga")
-		const html = rows[0]!.html()
-		expect(html).toContain(CONSUMER)
-		expect(html).toContain(CALLER)
-		expect(html).toContain("0x1234abcd")
-		expect(html).toContain("arg-a")
-		expect(html).toContain("0xinnera")
-		// A bidi override in an argument is sanitized, never rendered raw.
-		expect(html).not.toContain("\u202e")
+		const summary = rows[0]!.html()
+		expect(summary).toContain(CONSUMER)
+		expect(summary).toContain(CALLER)
+		expect(summary).toContain("0x1234abcd")
+		expect(summary).not.toContain("arg-a")
+		expect(summary).not.toContain(INNER)
+		await rows[0]!.find('[data-testid="execute-discovered-authwit-toggle"]').trigger("click")
+		const details = rows[0]!.find('[data-testid="execute-discovered-authwit-details"]')
+		expect(details.exists()).toBe(true)
+		expect(details.text()).toContain("Reading arguments…")
+		expect(details.find("[title]").attributes("title")).toBe(INNER)
+		expect(details.text()).not.toContain(INNER)
+	})
+
+	test("a decoded authorization names its function and parameters; an undecoded one shows the raw values, bidi sanitized", async () => {
+		const decodedAuthwits = new Map([
+			[
+				"0xmsga",
+				{
+					kind: "decoded",
+					contract: "Token",
+					fn: "transfer_in_private",
+					params: [{ name: "amount", value: { kind: "integer", value: "5" } }],
+				},
+			],
+			["0xmsgb", { kind: "undecoded", reason: "unknown-contract" }],
+		])
+		const w = mountCard(sendTx({ calls: [] }), { feeEstimate: estimate([authwit("a"), authwit("b")]), decodedAuthwits })
+		const [a, b] = w.findAll('[data-testid="execute-op-discovered-authwit"]')
+		expect(a!.find('[data-testid="execute-discovered-authwit-function"]').text()).not.toContain("0x1234abcd")
+		expect(b!.find('[data-testid="execute-discovered-authwit-function"]').text()).toContain("0x1234abcd")
+		await a!.find('[data-testid="execute-discovered-authwit-toggle"]').trigger("click")
+		expect(a!.findAll('[data-testid="execute-discovered-authwit-decoded-param"]')).toHaveLength(1)
+		await b!.find('[data-testid="execute-discovered-authwit-toggle"]').trigger("click")
+		expect(b!.find('[data-testid="execute-discovered-authwit-unverified-warning"]').exists()).toBe(true)
+		await b!.find('[data-testid="execute-discovered-authwit-raw-toggle"]').trigger("click")
+		const html = b!.html()
+		expect(html).toContain("arg-b")
+		expect(html).not.toContain("‮")
 	})
 
 	test("zero entries render nothing; without an estimate nothing renders either", () => {

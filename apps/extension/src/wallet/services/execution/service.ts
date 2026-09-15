@@ -52,6 +52,8 @@ import {
 	type GasBalances,
 	type OperationApprovalEnvelope,
 	type OperationAuthwitPreview,
+	type DecodedCall,
+	type DisplayCallInput,
 	type RegisterTokenOperation,
 	type TransferFeeEstimate,
 } from "./spec"
@@ -67,6 +69,7 @@ import { ViewExecutor } from "./view-executor"
 import { ExecutionLane } from "./execution-lane"
 import { GasBalanceReader } from "./gas-balance-reader"
 import { ContractResolver, findFunctionBySelector } from "./contract-resolver"
+import { type ArtifactLookup, decodeCallForDisplay } from "./call-decoder"
 import { getViewSimulationDeps } from "./helpers/get-view-simulation-deps"
 import { AuthwitDiscoverer } from "./authwit-discoverer"
 import { TxRequestBuilder } from "./tx-request-builder"
@@ -90,6 +93,9 @@ export interface InteractionOperationSource {
  *  without spinning up `init()` + a full ServiceCollection. */
 export const DEFAULT_PXE_CLIENT_FACTORY = (logger: ILogger): PxeServiceClient => new PxeServiceClient(logger)
 
+/** A popup decodes one approval window at a time; anything past this is not a display request. */
+const MAX_DISPLAY_CALLS = 64
+
 export class ExecutionService extends Service<Methods> implements ServiceSpec<Methods> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()(
 		"executeTransfer",
@@ -99,6 +105,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		"estimateTransferFee",
 		"estimateOperationFee",
 		"previewOperationAuthwits",
+		"decodeCallsForDisplay",
 		"cancelJob",
 		"cancelEstimate",
 	)
@@ -553,6 +560,29 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 	private interactionOperations(): InteractionOperationSource {
 		return this.services.get<InteractionOperationSource & { name: string; start(): Promise<void> }>(DAPP_INTERACTION_SERVICE_NAME)
+	}
+
+	public async decodeCallsForDisplay(networkId: string, calls: DisplayCallInput[]): Promise<DecodedCall[]> {
+		await this.ensureInitialized()
+		if (!Array.isArray(calls) || calls.length > MAX_DISPLAY_CALLS) throw new Error("Invalid calls")
+		const profile = await this.profileService.getActiveProfile()
+		const network = await this.networkService.getNetwork(networkId)
+		if (!profile || network.profileId !== profile.id) throw new Error("unauthorized profile")
+		const info = networkInfoFrom(network)
+		// One artifact fetch per contract for the whole batch: a multicall usually targets one contract.
+		const artifacts = new Map<string, Promise<ContractArtifact | undefined>>()
+		const lookup: ArtifactLookup = (address) => {
+			const pending = artifacts.get(address)
+			if (pending) return pending
+			const fresh = (async () => {
+				const instance = await this.pxeService.getContractInstance(info, AztecAddress.fromStringUnsafe(address))
+				if (!instance) return undefined
+				return (await this.pxeService.getContractArtifact(info, instance.currentContractClassId)) ?? undefined
+			})()
+			artifacts.set(address, fresh)
+			return fresh
+		}
+		return Promise.all(calls.map((call) => decodeCallForDisplay(lookup, call)))
 	}
 
 	public async executeOperations(

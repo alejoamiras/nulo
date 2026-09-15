@@ -30,6 +30,11 @@ export type {
 	TransferFeeEstimate,
 	DiscoveredAuthwit,
 	OperationAuthwitPreview,
+	DecodedCall,
+	DecodedParam,
+	DecodedValue,
+	DisplayCallInput,
+	UndecodedReason,
 } from "@nulo/wallet-bridge"
 export { PRIORITY_MULTIPLIERS } from "@nulo/wallet-bridge"
 export type {

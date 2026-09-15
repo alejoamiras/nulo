@@ -10,6 +10,10 @@
  * - All other read-only / register / simulate variants — header +
  *   from account (when present) + per-kind detail rows.
  *
+ * A call's arguments render through `CallArguments` in the first shape
+ * that applies: the wallet's transfer/mint vocabulary, the ABI decode the
+ * parent fetched, or the raw fields behind a toggle.
+ *
  * The parent owns the operation list + fee estimation map. The card
  * just emits `update:feeSettings` (forwarded from FeeSettingsCard) so
  * the parent can drive `op.feeSettings` and trigger the keyed fee
@@ -18,14 +22,24 @@
 import FeeSettingsCard from "@/popup/components/modules/send/FeeSettingsCard.vue"
 import { isSelfPay } from "@nulo/wallet-bridge"
 import type { ProfileInfo } from "@/wallet/services/profile/client"
-import type { DiscoveredAuthwit, FeeSettings, OperationAuthwitPreview, TransferFeeEstimate } from "@/wallet/services/execution/client"
+import type {
+	DecodedCall,
+	DiscoveredAuthwit,
+	FeeSettings,
+	OperationAuthwitPreview,
+	TransferFeeEstimate,
+} from "@/wallet/services/execution/client"
 import type { DappMetadata } from "@/wallet/services/dapp-session/client"
 import type { Account } from "@/wallet/services/account/client"
 import type { Network } from "@/wallet/services/network/client"
+import type { TokenInfo } from "@/wallet/services/token/client"
+import CallArguments from "./CallArguments.vue"
 import OperationActionRow from "./OperationActionRow.vue"
 import { humanizeOperationKind, safeWire } from "./humanize"
 import type { DraftAztecSendTxOperation, DraftSendTransactionOperation, DraftUIOperation } from "./types"
-import { parseTransferIntent, projectArgument, type ProjectedArgument, type TransferIntent } from "@/utils/transfer-intent"
+import { type CallSurface, type CallerContext, type WireCall, callName, callSurface, wire } from "./call-surface"
+import { trimAddress } from "@/utils/string"
+import { humanizeMethodName } from "@/utils/tx-enrichment"
 import { isEmbeddedFeePayment } from "./operation-validation"
 
 // `DraftUIOperation` is the shared honest type (Phase 2 follow-up). Send-like
@@ -40,7 +54,7 @@ type SendLikeUIOp = (DraftAztecSendTxOperation | DraftSendTransactionOperation) 
 	account?: Account
 }
 
-defineProps<{
+const props = defineProps<{
 	op: UIOperation
 	index: number
 	profile?: ProfileInfo
@@ -51,6 +65,14 @@ defineProps<{
 	 *  need at send, discovered without signing (no fee estimate exists for it). */
 	authwitPreview?: OperationAuthwitPreview
 	isPreviewing?: boolean
+	/** Display-only ABI decodings of this operation's calls, index-aligned with
+	 *  `exec.calls` (or the single `createAuthWit` intent call); `undefined`
+	 *  while the wallet is still decoding. */
+	decodedCalls?: readonly DecodedCall[]
+	/** Display-only decodings of the discovered authorizations, by message hash. */
+	decodedAuthwits?: ReadonlyMap<string, DecodedCall>
+	/** The wallet's registered tokens, so an amount can carry its symbol and decimals. */
+	tokens?: readonly TokenInfo[]
 	/**
 	 * Pre-fetched token metadata for `register_token` operations. Resolved by
 	 * the parent before the card renders so the user can see name / symbol /
@@ -80,47 +102,19 @@ const requestedMethod = (op: SendLikeUIOp): "fj" | null => (op.kind === "aztec_s
 
 const isNoFrom = (op: SendLikeUIOp): boolean => op.kind === "aztec_sendTx" && op.executionMode === "default_entrypoint"
 
-/** Raw-argument rows are capped: past this the JSON view is the disclosure, not a 200-row card. */
-const MAX_ARG_ROWS = 32
-type ArgumentRows = { rows: ProjectedArgument[]; hidden: number }
-const argumentRows = (args: unknown): ArgumentRows => {
-	const list = Array.isArray(args) ? args : []
-	return { rows: list.slice(0, MAX_ARG_ROWS).map(projectArgument), hidden: Math.max(0, list.length - MAX_ARG_ROWS) }
-}
+/** The decoding for call `j`, or `unavailable` when the parent's batch came back short. */
+const decodedAt = (j: number): DecodedCall | undefined =>
+	props.decodedCalls ? (props.decodedCalls[j] ?? { kind: "undecoded", reason: "unavailable" }) : undefined
 
-/** Who spends in a transfer: the explicit `from` argument, the account contract as `msg_sender` when
- *  the wallet executes from the account, or nobody when the transaction runs through the entrypoint
- *  with no sender at all. */
-type TransferSender = { kind: "explicit" | "account"; address: string } | { kind: "none" }
-type CallSurface =
-	| { kind: "transfer"; intent: Extract<TransferIntent, { kind: "transfer" }>; sender: TransferSender; nonce?: string }
-	| ({ kind: "unverified" } & ArgumentRows)
-type WireCall = { name?: string; to?: unknown; selector?: unknown; args?: unknown; hideMsgSender?: boolean }
-const isZero = (n: string): boolean => /^(0x0+|0)$/.test(n)
-const callSurface = (op: SendLikeUIOp, call: WireCall): CallSurface => {
-	const intent = parseTransferIntent(call as { name?: string; args?: unknown[] })
-	// A 2-argument transfer has no explicit sender, so the card would name the account — but a call
-	// that hides its msg_sender executes with a null caller, and claiming "this account" there would
-	// be a confident lie. Fall back to the raw arguments instead of guessing a sender.
-	if (intent.kind !== "transfer" || (intent.from === undefined && call.hideMsgSender === true)) {
-		return { kind: "unverified", ...argumentRows(call.args) }
-	}
-	const sender: TransferSender =
-		intent.from !== undefined
-			? { kind: "explicit", address: intent.from }
-			: isNoFrom(op)
-				? { kind: "none" }
-				: { kind: "account", address: op.accountAddress }
-	return { kind: "transfer", intent, sender, ...(intent.nonce !== undefined && !isZero(intent.nonce) ? { nonce: intent.nonce } : {}) }
+const sendTxCalls = (op: DraftAztecSendTxOperation): { call: WireCall; surface: CallSurface }[] => {
+	const ctx: CallerContext = { accountAddress: op.accountAddress, noFrom: isNoFrom(op as SendLikeUIOp) }
+	return (op.exec.calls as WireCall[]).map((call, j) => ({ call, surface: callSurface(ctx, call, decodedAt(j)) }))
 }
-const sendTxCalls = (op: DraftAztecSendTxOperation): { call: WireCall; surface: CallSurface }[] =>
-	(op.exec.calls as WireCall[]).map((call) => ({ call, surface: callSurface(op as SendLikeUIOp, call) }))
 
 /** What an `aztec_createAuthWit` asks the wallet to sign: a call it can show, or a hash it cannot. */
 type CreateAuthwitSurface =
-	| ({ kind: "call"; caller: string; to: string; fn: string } & ArgumentRows)
+	| { kind: "call"; caller: string; to: string; call: WireCall; args: CallSurface }
 	| { kind: "hash"; consumer: string; innerHash: string }
-const wire = (v: unknown, max: number): string => safeWire(v === undefined || v === null ? "" : String(v), max)
 const createAuthwitSurface = (m: unknown): CreateAuthwitSurface => {
 	const intent = m as { innerHash?: unknown; consumer?: unknown; caller?: unknown; call?: WireCall }
 	if (intent.call) {
@@ -129,8 +123,8 @@ const createAuthwitSurface = (m: unknown): CreateAuthwitSurface => {
 			kind: "call",
 			caller: wire(intent.caller, 80),
 			to: wire(call.to, 80),
-			fn: wire(call.name ?? call.selector, 64),
-			...argumentRows(call.args),
+			call,
+			args: callSurface(undefined, call, decodedAt(0)),
 		}
 	}
 	return { kind: "hash", consumer: wire(intent.consumer, 80), innerHash: wire(intent.innerHash, 80) }
@@ -144,19 +138,34 @@ type AuthwitSurface =
 	| { kind: "none-added" }
 	| { kind: "pending" }
 	| { kind: "hidden" }
-const authwitSurface = (
-	op: SendLikeUIOp,
-	estimate: TransferFeeEstimate | undefined,
-	preview: OperationAuthwitPreview | undefined,
-	previewing: boolean | undefined,
-): AuthwitSurface => {
+const authwitSurface = (op: UIOperation): AuthwitSurface => {
 	if (op.kind !== "aztec_sendTx") return { kind: "hidden" }
-	if (isNoFrom(op)) {
-		if (preview) return { kind: "list", authwits: preview.discoveredAuthwits }
-		return previewing ? { kind: "pending" } : { kind: "hidden" }
+	if (isNoFrom(op as SendLikeUIOp)) {
+		if (props.authwitPreview) return { kind: "list", authwits: props.authwitPreview.discoveredAuthwits }
+		return props.isPreviewing ? { kind: "pending" } : { kind: "hidden" }
 	}
 	if (isEmbeddedFeePayment(op)) return { kind: "none-added" }
-	return estimate?.discoveredAuthwits ? { kind: "list", authwits: estimate.discoveredAuthwits } : { kind: "hidden" }
+	return props.feeEstimate?.discoveredAuthwits ? { kind: "list", authwits: props.feeEstimate.discoveredAuthwits } : { kind: "hidden" }
+}
+const authwits = computed(() => authwitSurface(props.op))
+
+/** A discovered authorization decodes on its consumer; the selector stands in until it does. */
+const authwitDecode = (a: DiscoveredAuthwit): DecodedCall | undefined => props.decodedAuthwits?.get(a.messageHash)
+const authwitFunction = (a: DiscoveredAuthwit): string => {
+	const decoded = authwitDecode(a)
+	return decoded?.kind === "decoded" ? humanizeMethodName(decoded.fn) : safeWire(a.selector, 64)
+}
+const authwitArgs = (a: DiscoveredAuthwit): CallSurface =>
+	callSurface(undefined, { selector: a.selector, to: a.consumer, args: a.args }, authwitDecode(a))
+
+/** Which discovered authorizations the user expanded; collapsed by default, the summary row is the review. */
+const openAuthwits = ref(new Set<string>())
+const isAuthwitOpen = (a: DiscoveredAuthwit): boolean => openAuthwits.value.has(a.messageHash)
+const toggleAuthwit = (a: DiscoveredAuthwit): void => {
+	const next = new Set(openAuthwits.value)
+	if (next.has(a.messageHash)) next.delete(a.messageHash)
+	else next.add(a.messageHash)
+	openAuthwits.value = next
 }
 </script>
 
@@ -193,9 +202,6 @@ const authwitSurface = (
 						<OperationActionRow v-for="(action, j) in op.actions" :key="`${index}:${j}`" :action="action" />
 					</template>
 					<template v-else-if="op.kind === 'aztec_sendTx'">
-						<!-- A call is a transfer only when its name AND arity match the wallet's own
-						     vocabulary; anything else shows its raw arguments under a warning, so no
-						     call is ever summarized by a guess. -->
 						<template v-for="({ call, surface }, j) in sendTxCalls(op)" :key="`${index}:${j}`">
 							<Text
 								data-testid="execute-op-payload-row"
@@ -205,106 +211,67 @@ const authwitSurface = (
 								size="12"
 								color="primary"
 							>
-								<Text weight="600">{{ humanizeMethodName(wire(call.name ?? call.selector, 64)) }}</Text>
+								<Text weight="600">{{ callName(call, surface) }}</Text>
 								<Text color="secondary"> on </Text>
 								<AddressDisplay :address="call.to" />
 							</Text>
-							<Flex
-								v-if="surface.kind === 'transfer'"
-								data-testid="execute-op-structured-args"
-								direction="column"
-								gap="2"
-								:class="$style.structured_args"
-							>
-								<!-- The sender is rendered even when the call carries none: a dApp can
-								     spend from another account it names, and the entrypoint spends from
-								     nobody. -->
-								<Flex data-testid="execute-op-transfer-sender" :data-sender-kind="surface.sender.kind" gap="6">
-									<template v-if="surface.sender.kind === 'none'">
-										<Text size="11" color="secondary">Caller:</Text>
-										<Text size="11" color="primary">none</Text>
-									</template>
-									<template v-else-if="surface.sender.kind === 'account'">
-										<Text size="11" color="secondary">From:</Text>
-										<Text size="11" color="primary">this account <Text color="secondary">(<AddressDisplay :address="surface.sender.address" size="11" />)</Text></Text>
-									</template>
-									<template v-else>
-										<Text size="11" color="secondary">From:</Text>
-										<AddressDisplay :address="surface.sender.address" />
-									</template>
-								</Flex>
-								<Flex gap="6">
-									<Text size="11" color="secondary">To:</Text>
-									<AddressDisplay :address="surface.intent.to" />
-								</Flex>
-								<Flex gap="6">
-									<Text size="11" color="secondary">Amount:</Text>
-									<Text size="11" color="primary">{{ surface.intent.amount }}</Text>
-								</Flex>
-								<Flex v-if="surface.nonce !== undefined" data-testid="execute-op-transfer-nonce" gap="6">
-									<Text size="11" color="secondary">Authwit nonce:</Text>
-									<Text size="11" color="primary">{{ safeWire(surface.nonce, 80) }}</Text>
-								</Flex>
-							</Flex>
-							<Flex v-else data-testid="execute-op-unverified-args" direction="column" gap="2" :class="$style.structured_args">
-								<Text size="11" color="orange" data-testid="execute-op-unverified-warning">Unverified call — review the arguments</Text>
-								<Flex v-for="(row, m) in surface.rows" :key="`${index}:${j}:arg:${m}`" data-testid="execute-op-arg" :data-arg-kind="row.kind" gap="6">
-									<Text size="11" color="secondary">#{{ m }}:</Text>
-									<AddressDisplay v-if="row.kind === 'address'" :address="row.value" full size="11" />
-									<Text v-else-if="row.kind === 'text'" size="11" color="primary">{{ safeWire(row.value, 128) }}</Text>
-									<Text v-else size="11" color="tertiary">(opaque value)</Text>
-								</Flex>
-								<Text v-if="surface.hidden" size="11" color="tertiary" data-testid="execute-op-args-more">+{{ surface.hidden }} more (see JSON)</Text>
-							</Flex>
+							<CallArguments :surface="surface" :contract="call.to" :chainId="op.network?.chainId" :tokens="tokens" prefix="execute-op" />
 						</template>
 					</template>
 				</Flex>
 			</Flex>
-			<template v-if="authwitSurface(op, feeEstimate, authwitPreview, isPreviewing).kind === 'list'">
+			<Flex
+				v-if="authwits.kind === 'list' && authwits.authwits.length"
+				data-testid="execute-op-discovered-authwits"
+				direction="column"
+				gap="4"
+				:class="$style.prop"
+			>
+				<Text size="12" color="secondary">Authorizations the wallet will sign (found during estimation):</Text>
 				<Flex
-					v-if="(authwitSurface(op, feeEstimate, authwitPreview, isPreviewing) as { authwits: readonly DiscoveredAuthwit[] }).authwits.length"
-					data-testid="execute-op-discovered-authwits"
+					v-for="(a, k) in authwits.authwits"
+					:key="`${index}:authwit:${k}`"
+					data-testid="execute-op-discovered-authwit"
+					:data-message-hash="a.messageHash"
 					direction="column"
-					gap="4"
-					:class="$style.prop"
+					gap="2"
+					:class="$style.structured_args"
 				>
-					<Text size="12" color="secondary">Authorizations the wallet will sign (found during estimation):</Text>
-					<Flex
-						v-for="(a, k) in (authwitSurface(op, feeEstimate, authwitPreview, isPreviewing) as { authwits: readonly DiscoveredAuthwit[] }).authwits"
-						:key="`${index}:authwit:${k}`"
-						data-testid="execute-op-discovered-authwit"
-						:data-message-hash="a.messageHash"
-						direction="column"
-						gap="2"
-						:class="$style.structured_args"
+					<Flex gap="6">
+						<Text size="11" color="secondary">Consumer:</Text>
+						<AddressDisplay :address="a.consumer" size="11" />
+					</Flex>
+					<Flex gap="6">
+						<Text size="11" color="secondary">Authorizes:</Text>
+						<AddressDisplay :address="a.caller" size="11" />
+					</Flex>
+					<Flex gap="6">
+						<Text size="11" color="secondary">Function:</Text>
+						<Text size="11" color="primary" data-testid="execute-discovered-authwit-function">{{ authwitFunction(a) }}</Text>
+					</Flex>
+					<button
+						type="button"
+						data-testid="execute-discovered-authwit-toggle"
+						:aria-expanded="isAuthwitOpen(a)"
+						:class="$style.details_toggle"
+						@click="toggleAuthwit(a)"
 					>
-						<Flex gap="6">
-							<Text size="11" color="secondary">Consumer:</Text>
-							<AddressDisplay :address="a.consumer" />
-						</Flex>
-						<Flex gap="6">
-							<Text size="11" color="secondary">Authorizes:</Text>
-							<AddressDisplay :address="a.caller" />
-						</Flex>
-						<Flex gap="6">
-							<Text size="11" color="secondary">Function:</Text>
-							<Text size="11" color="primary">{{ safeWire(a.selector, 64) }}</Text>
-						</Flex>
-						<Flex v-for="(arg, m) in a.args" :key="`${index}:authwit:${k}:${m}`" gap="6">
-							<Text size="11" color="secondary">#{{ m }}:</Text>
-							<Text size="11" color="primary">{{ safeWire(arg, 128) }}</Text>
-						</Flex>
+						<Icon name="chevron-right" size="10" color="secondary" :class="[$style.chevron, isAuthwitOpen(a) && $style.chevron_open]" />
+						<Text size="11" color="secondary">{{ isAuthwitOpen(a) ? "Hide details" : "Show details" }}</Text>
+					</button>
+					<Flex v-if="isAuthwitOpen(a)" data-testid="execute-discovered-authwit-details" direction="column" gap="2">
+						<CallArguments :surface="authwitArgs(a)" :contract="a.consumer" :chainId="op.network?.chainId" :tokens="tokens" prefix="execute-discovered-authwit" />
 						<Flex gap="6">
 							<Text size="11" color="secondary">Inner hash:</Text>
-							<Text size="11" color="primary">{{ trimAddress(safeWire(a.innerHash, 80)) }}</Text>
+							<Text size="11" color="primary" mono :title="safeWire(a.innerHash, 80)">{{ trimAddress(safeWire(a.innerHash, 80), 10, 6) }}</Text>
 						</Flex>
 					</Flex>
 				</Flex>
-			</template>
-			<Flex v-else-if="authwitSurface(op, feeEstimate, authwitPreview, isPreviewing).kind === 'none-added'" :class="$style.prop">
+			</Flex>
+			<Flex v-else-if="authwits.kind === 'none-added'" :class="$style.prop">
 				<Text size="12" color="secondary" data-testid="execute-op-no-wallet-authwits">No wallet-added authorizations</Text>
 			</Flex>
-			<Flex v-else-if="authwitSurface(op, feeEstimate, authwitPreview, isPreviewing).kind === 'pending'" :class="$style.prop">
+			<Flex v-else-if="authwits.kind === 'pending'" :class="$style.prop">
 				<Text size="12" color="secondary" data-testid="execute-op-authwits-pending">Checking authorizations…</Text>
 			</Flex>
 		</Flex>
@@ -523,17 +490,11 @@ const authwitSurface = (
 					</Flex>
 					<Flex :class="$style.prop">
 						<Text size="12" color="secondary">Function:</Text>
-						<Text size="12" weight="600" color="primary">{{ humanizeMethodName(s.fn) }}</Text>
+						<Text size="12" weight="600" color="primary" data-testid="execute-authwit-function">{{ callName(s.call, s.args) }}</Text>
 					</Flex>
 					<Flex data-testid="execute-authwit-args" direction="column" gap="2" :class="[$style.prop, $style.args_block]">
 						<Text size="12" color="secondary">Arguments:</Text>
-						<Flex v-for="(row, m) in s.rows" :key="`${index}:authwit-arg:${m}`" data-testid="execute-authwit-arg" :data-arg-kind="row.kind" gap="6">
-							<Text size="11" color="secondary">#{{ m }}:</Text>
-							<AddressDisplay v-if="row.kind === 'address'" :address="row.value" full size="11" />
-							<Text v-else-if="row.kind === 'text'" size="11" color="primary">{{ safeWire(row.value, 128) }}</Text>
-							<Text v-else size="11" color="tertiary">(opaque value)</Text>
-						</Flex>
-						<Text v-if="s.hidden" size="11" color="tertiary">+{{ s.hidden }} more (see JSON)</Text>
+						<CallArguments :surface="s.args" :contract="s.to" :chainId="op.network?.chainId" :tokens="tokens" prefix="execute-authwit" />
 					</Flex>
 				</template>
 				<template v-else>
@@ -543,7 +504,7 @@ const authwitSurface = (
 					</Flex>
 					<Flex data-testid="execute-authwit-inner-hash" :class="$style.prop">
 						<Text size="12" color="secondary">Inner hash:</Text>
-						<Text size="11" color="primary">{{ s.innerHash }}</Text>
+						<Text size="11" color="primary" mono :title="s.innerHash">{{ trimAddress(s.innerHash, 10, 6) }}</Text>
 					</Flex>
 					<Flex :class="$style.prop">
 						<Text size="11" color="orange" data-testid="execute-authwit-opaque-warning">
@@ -591,11 +552,31 @@ const authwitSurface = (
 	}
 }
 
-/* The per-call detail block: indented under its call row so it reads as that call's own data. */
+/* The per-authorization detail block: indented under its list so it reads as that entry's own data. */
 .structured_args {
 	padding: 4px 0 4px 12px;
 	border-left: 2px solid var(--nulo-border);
 	margin-left: 4px;
+}
+
+.details_toggle {
+	display: inline-flex;
+	align-items: center;
+	align-self: flex-start;
+	gap: 4px;
+	padding: 2px 0;
+	border: 0;
+	background: none;
+	cursor: pointer;
+	font: inherit;
+}
+
+.chevron {
+	transition: transform 120ms ease;
+}
+
+.chevron_open {
+	transform: rotate(90deg);
 }
 
 .prop {
