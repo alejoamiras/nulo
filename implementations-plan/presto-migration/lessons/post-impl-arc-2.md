@@ -22,3 +22,7 @@ Gates after the fixes:
 | `usePrestoStatus.test.ts` + `presto-ui-state.test.ts` + `PrestoStatusCard.test.ts` | 60/60 |
 | armed build | exit 0 |
 | smoke: `onboarding-tab`, `settings-proving`, `accounts`, `navigation` | 4 files, 23 tests, exit 0 |
+
+## Round 2 — converged
+
+Resumed the round-1 session with the fix summary (finding 1 declined with the repo-wide analysis, 2 and 3 fixed, the nits). Codex, verbatim: "Verified at `899ac355`. **High confidence:** findings 2 and 3 are fixed; the fixture extraction and copy/comment changes introduce no material regression. […] Logger leak: remains unresolved, but the documented shared-lifecycle follow-up is reasonable. No clean page-local fix exists through the current public API. […] No new material findings". Two rounds; the arc-2 loop is closed.
