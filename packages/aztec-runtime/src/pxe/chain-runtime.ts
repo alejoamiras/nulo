@@ -5,6 +5,7 @@ import type { AztecSQLiteOPFSStore } from "@aztec/kv-store/sqlite-opfs"
 import { WASMSimulator } from "@aztec/simulator/client"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { PrestoProver, type PrestoPhase } from "@alejoamiras/presto"
+import type { ProveBackend } from "@nulo/wallet-core/jobs"
 import { AztecNodeFactoryAdapter } from "../adapters/aztec-node-factory-adapter"
 import type { NodeFactory } from "../ports/node-factory-port"
 import { chainDataDir, chainRegistryKey, chainRegistryKeyPrefix } from "./chain-coordinates"
@@ -24,8 +25,7 @@ export interface PrestoEndpoint {
 	httpsPort?: number
 }
 
-/** Where a proof ran, as concluded by the runtime's own phase observer. */
-export type ProveBackend = "presto" | "browser"
+export type { ProveBackend }
 
 /** The attempt currently proving on a runtime. `PxeService` sets and clears it inside the
  *  `proveTx` write lock; the runtime's `onPhase` advances `seq` and derives `backend`. */

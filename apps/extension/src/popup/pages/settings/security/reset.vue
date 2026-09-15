@@ -88,7 +88,7 @@ const handleReset = async () => {
 
 	// Note: onboardingCompleted intentionally persists across profile resets.
 	// A user who has gone through onboarding once already knows about Aztec
-	// and the accelerator; making them re-learn after a reset would be
+	// and Presto; making them re-learn after a reset would be
 	// patronizing. To restart onboarding, the user uninstalls + reinstalls
 	// the extension (which wipes chrome.storage.local).
 

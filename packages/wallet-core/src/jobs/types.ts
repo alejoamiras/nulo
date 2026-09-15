@@ -49,8 +49,9 @@ export type ProveBackend = "presto" | "browser"
  * inside BB.wasm prove are not feasible — the prover blocks the JS turn).
  *
  * `proving.backend` is evidence copied from the prover's own phase stream —
- * `presto` once the witness left for the native server, `browser` once it
- * fell back to WASM — and absent until a phase decides it. It changes inside
+ * `presto` once the prover committed the witness to the native server (announced
+ * at `transmit`, before the POST), `browser` once it fell back to WASM — and
+ * absent until a phase decides it. It changes inside
  * the stage (the FSM has no `proving → proving` edge), through the journal's
  * `updateProvingBackend` seam only.
  */

@@ -695,20 +695,20 @@ phase's typecheck is green on its own.
 
 ### Arc 2 — the surfaces: status client, onboarding, settings (`presto-migration/ux`)
 
-#### P6 — status client, UI-state mapper, custom element
+#### P6 ✓ — status client, UI-state mapper, custom element (2026-09-15; 59 new unit cases, `bun run test` 5864 green, build exit 0 — lessons/phase-6.md)
 
 - `src/utils/presto-ui-state.ts` (+ ≥ 10-case test: each `BannerState` via `stateFromStatus`, the `unconfirmed` pitch rule, unknown reason → `error`, `needsDownload`, minimal-body degradation (`info` empty, `presto-reachable`), copy/steps per state, the denied overlay from `lastProveOutcome`).
 - `src/composables/usePrestoStatus.ts` over the arc-1 `getPrestoClient()` (+ ≥ 10-case test with an injected fake client: idle → detecting → each state; `forceRefresh` passthrough; a late result after `dispose` is dropped; `bannerStatus` mirrors the raw status; two composables share one injected client); `presto-ui-state.test.ts` exercises `copyFor(state, { outcome, denial })`.
 - `vite.config.ts`: `isCustomElement`.
 - **Validation gate**: `bun run test` green (new tests included); `bun run typecheck:all`; `bun run lint`; `bun run build` exit 0. Layers: unit, typecheck, lint, build. (A4 is measured in P7, once the code is actually reachable.)
 
-#### P7 — onboarding `presto.vue`
+#### P7 ✓ — onboarding `presto.vue` (2026-09-15; onboarding smoke 9/9, full smoke green across the plain + armed runs, residue 0, A4 +0.1 kB gz; build sent to the Mac — the manual walk is owner-pending, see lessons/phase-7.md)
 
 - Page per §D and the approved artboards; `learn.vue`/`fees.vue` routes; `app.store.ts` + `reset.vue` comments; delete `accelerator.vue` and `useAcceleratorStatus.*` (last consumer replaced here).
 - `tests/e2e/onboarding-tab.test.ts`: intercept both `https://127.0.0.1:59834/health` and `http://127.0.0.1:59833/health`; bodies satisfy `isDetailedHealthBody` where a specific diagnosis is expected; cases: available → Continue; both refused → card banner + Skip; HTTPS refused + detailed HTTP body without `https_port` → the encrypted-connection card with the `https-disabled` steps; HTTPS refused + minimal HTTP body → the `presto-reachable` copy.
 - **Validation gate** (`bun run build` first — smoke tests the artifact on disk): `bun run lint` + `bun run typecheck:all`; `bun run build` exit 0; `cd apps/extension && bun run test:e2e -- tests/e2e/onboarding-tab.test.ts` green; then the full smoke `cd apps/extension && bun run test:e2e` green; zero-residue: `grep -rn "aztec-accelerator\|AcceleratorProver\|ACCELERATOR_\|useAcceleratorStatus\|onboarding-accelerator" packages apps --include=*.ts --include=*.vue --include=*.mts` → 0 hits; **A4 measured here** (the consumers now exist): one measurement build with `build.manifest: true` and `build.sourcemap: true` (a local, uncommitted config flip), walk the onboarding entry's **static** import closure from the manifest (what the page loads eagerly), sum gzip sizes for the **pre-migration** build at `origin/dev @ 323380f6` and for P7 → delta ≤ 60 kB (A8 as approved: no closure diff; the `presto-core-deps.test.ts` from P1 is the Aztec check) — recorded in lessons; manual: `bun run build && send-to-mac apps/extension/dist/chrome`, load unpacked, walk the onboarding states with the real tray app (Presto quit → pitch; Encrypted Connection off; on; approval prompt approved at first send) — screenshots + the observed `Origin` header (Presto's log) in lessons. Layers: lint, typecheck, smoke e2e, grep, build measurement, manual.
 
-#### P8 — settings Proving page + index row
+#### P8 ✓ — settings Proving page + index row (2026-09-15; settings-proving smoke green, full armed smoke 32 files green, `audit:vue` exit 0; the Mac denial check is owner-pending, see lessons/phase-8.md)
 
 - Per §E and the artboards; `data-testid="setting-nav-proving"`, `settings-proving-status`, `settings-proving-retry`, `settings-proving-get`.
 - New smoke e2e `tests/e2e/settings-proving.test.ts`: navigate from settings, mocked health for `available` and `offline`, assert the status testid's `data-status` and the Get Presto row visibility; a unit test covers the denied overlay (no automated e2e can drive a real denial — the Mac check does).

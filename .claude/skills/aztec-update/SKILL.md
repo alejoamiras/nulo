@@ -93,9 +93,11 @@ CLAUDE.md "Account-address freeze").
 `bun run e2e:agent tests/e2e/network/frozen-account-canary.test.ts` **prover-ON** before merge.
 LOCALLY, `e2e:agent` has NO Presto enforcement — it silently falls back to in-browser WASM if
 no prover is up, which would pass the canary WITHOUT proving anything about native proving. To
-actually run it prover-ON locally: start `presto-server` on `127.0.0.1:59833` (the SHA-pinned
-binary from `_extension-network-e2e.yml`), build the wallet with `VITE_NULO_PRESTO_REQUIRED=1`, and
-confirm at least one `Received /prove request` in the presto log during the run. In CI this is
+actually run it prover-ON locally: start `PRESTO_ALLOW_ALL=1 presto-server` on `127.0.0.1:59833` (the
+SHA-pinned binary from `_extension-network-e2e.yml`; the variable is scoped to that one process and
+auto-approves the wallet's origin), build the wallet with `VITE_NULO_PRESTO_REQUIRED=1`, and confirm at
+least one `Proving succeeded` in the presto log during the run (`Received /prove request` is logged
+before authorization, so a denied request prints it too). In CI this is
 automatic: the canary is a named file in the prover-ON `network-e2e-canary` job (`pr-extension-network-e2e.yml`),
 so the required `extension-network-e2e-status` check enforces it — that is the authoritative gate; the local
 run is a pre-flight. It proves the frozen 5.0.1 account bytecode still simulates, proves natively,

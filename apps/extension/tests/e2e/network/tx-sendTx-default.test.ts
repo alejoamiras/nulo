@@ -2,7 +2,7 @@ import { expect, inject } from "vitest"
 import { clickByTestId, openPopup, test } from "../fixtures/extension"
 import { snapshotResultSeq, waitForPgResult, assertPgOk } from "../fixtures/playground"
 import { approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
-import { waitForAwaitingCardBackend, waitForDappExecuteWorked } from "../fixtures/journal"
+import { BROWSER_AWAITING_CARD, PRESTO_AWAITING_CARD, waitForAwaitingCardBackend, waitForDappExecuteWorked } from "../fixtures/journal"
 import { mintPublicTokensForAccount, type AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -80,11 +80,11 @@ test.skipIf(!hasConfig)(
 		await waitForDappExecuteWorked(walletPopup)
 
 		if (process.env.NULO_E2E_PROVERLESS !== "1") {
+			// The required-mode build (CI's prover-ON lanes) may only prove natively. A plain build
+			// proves wherever the box allows: natively when a healthy Presto answers, in the browser
+			// otherwise — either way the card must name the backend the journal recorded.
 			const native = process.env.VITE_NULO_PRESTO_REQUIRED === "1"
-			await waitForAwaitingCardBackend(
-				walletPopup,
-				native ? { backend: "presto", subtitle: "Proving with Presto ✦" } : { backend: "browser", subtitle: "Proving in browser…" },
-			)
+			await waitForAwaitingCardBackend(walletPopup, native ? [PRESTO_AWAITING_CARD] : [PRESTO_AWAITING_CARD, BROWSER_AWAITING_CARD])
 		}
 
 		// Prover-ON canary (this file runs in the real-proving canary job, NOT the
