@@ -276,7 +276,7 @@ occurred`, instead of the first half + `reorg`. The test PXE runs `autoSync: fal
 inside the window on its own; the account is one of the sandbox's initializerless test accounts and
 the op is its `lookup_validity` utility. Details in `lessons/phase-2.md`.
 
-#### Phase 3 — the balance queue reschedules transient failures (bounded, in-memory)
+#### Phase 3 ✓ — the balance queue reschedules transient failures (bounded, in-memory)
 
 **What.** `ProjectedBalance`'s error variant gains `transient: boolean`
 (`balance-projector.ts:31`); `projectChunk` sets it to `err instanceof PxeStaleAnchorError`
