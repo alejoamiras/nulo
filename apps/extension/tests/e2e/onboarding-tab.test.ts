@@ -1,40 +1,10 @@
-import type { HTTPRequest, Page } from "puppeteer"
+import type { Page } from "puppeteer"
 import { describe, expect } from "vitest"
 import { withTimeoutMessage, clickByTestId, openOnboarding, replaceInputValue, test, waitForHash } from "./fixtures/extension"
+import { interceptHealth, PRESTO_DETAILED_HEALTH, PRESTO_HTTPS_HEALTH_URL, PRESTO_MINIMAL_HEALTH } from "./fixtures/presto"
 
-// The page probes Presto HTTPS-first; after an HTTPS failure the SDK runs one witness-free HTTP
-// diagnostic. Both are intercepted below the TLS handshake, so no certificate is needed.
-const PRESTO_HTTPS_HEALTH_URL = "https://127.0.0.1:59834/health"
-const PRESTO_HTTP_HEALTH_URL = "http://127.0.0.1:59833/health"
-const PRESTO_DETAILED_HEALTH = {
-	status: "ok",
-	api_version: 1,
-	version: "1.1.1",
-	aztec_version: "5.2.0",
-	available_versions: ["5.2.0"],
-	bb_available: true,
-	https_port: 59834,
-}
-/** What Presto serves an origin it has not approved yet. */
-const PRESTO_MINIMAL_HEALTH = { status: "ok", api_version: 1 }
 const TEST_PASSWORD = "OnboardingTest_!23"
 const TEST_PROFILE_NAME = "Onboarding Test"
-
-type HealthAnswer = { status: number; body: unknown } | "refused"
-
-/** Answer the two health probes per scheme; every other request passes through. */
-async function interceptHealth(page: Page, answers: { https: HealthAnswer; http: HealthAnswer }): Promise<void> {
-	await page.setRequestInterception(true)
-	const answer = (req: HTTPRequest, how: HealthAnswer) => {
-		if (how === "refused") return req.abort("connectionrefused")
-		return req.respond({ status: how.status, contentType: "application/json", body: JSON.stringify(how.body) })
-	}
-	page.on("request", (req) => {
-		if (req.url() === PRESTO_HTTPS_HEALTH_URL) return answer(req, answers.https)
-		if (req.url() === PRESTO_HTTP_HEALTH_URL) return answer(req, answers.http)
-		return req.continue()
-	})
-}
 
 async function gotoPrestoStep(page: Page): Promise<void> {
 	await page.evaluate(() => {

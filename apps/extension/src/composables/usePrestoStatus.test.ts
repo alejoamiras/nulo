@@ -1,5 +1,6 @@
 import type { PrestoStatus } from "@alejoamiras/presto-core"
-import { effectScope } from "vue"
+import { mount } from "@vue/test-utils"
+import { defineComponent, effectScope, h } from "vue"
 import { describe, expect, test, vi } from "vitest"
 import { usePrestoStatus } from "./usePrestoStatus"
 
@@ -138,10 +139,27 @@ describe("usePrestoStatus", () => {
 		b.scope.stop()
 	})
 
-	test("autoDetect=false never probes on its own", () => {
+	// `onMounted` is a no-op outside a component instance, so only a mounted host can
+	// tell the auto-probe apart from its absence.
+	const host = (client: ReturnType<typeof fakeClient>, autoDetect?: boolean) =>
+		mount(
+			defineComponent({
+				setup: () => usePrestoStatus({ client, autoDetect }),
+				render: () => h("div"),
+			}),
+		)
+
+	test("a mounted page probes once on its own by default", () => {
 		const client = fakeClient()
-		const s = run(client)
+		const wrapper = host(client)
+		expect(client.checkStatus).toHaveBeenCalledTimes(1)
+		wrapper.unmount()
+	})
+
+	test("autoDetect=false never probes on its own, mounted or not", () => {
+		const client = fakeClient()
+		const wrapper = host(client, false)
 		expect(client.checkStatus).not.toHaveBeenCalled()
-		s.scope.stop()
+		wrapper.unmount()
 	})
 })

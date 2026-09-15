@@ -1,10 +1,5 @@
 <script setup lang="ts">
-/**
- * The Presto status card both shells render: a tone-coloured dot, the title and
- * detail from `copyFor`, the retry button named by the copy, and the numbered
- * recovery steps when a state has them. Presentation only — the page owns the
- * probe and passes the copy in.
- */
+/** Presentation only — the page owns the probe and passes the copy in. */
 import type { PrestoCopy } from "@/utils/presto-ui-state"
 
 const props = defineProps<{

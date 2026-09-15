@@ -168,7 +168,7 @@ describe("rowDescriptionFor", () => {
 		[{ kind: "downloading", info: {} } as const, null, "Presto · one-time download pending"],
 		[{ kind: "offline", info: {} } as const, null, "In browser · Presto not detected"],
 		[{ kind: "permission-blocked", info: {} } as const, null, "Browser blocked local access"],
-		[{ kind: "secure-connection-unavailable", info: {} } as const, null, "Presto · encrypted connection off"],
+		[{ kind: "secure-connection-unavailable", info: {} } as const, null, "Presto · encrypted connection unavailable"],
 		[{ kind: "version-mismatch", info: {} } as const, null, "Presto · update needed"],
 		[{ kind: "error", info: {} } as const, null, "Presto · not responding"],
 	])("%o → %s", (state, last, expected) => {

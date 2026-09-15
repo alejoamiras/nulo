@@ -138,7 +138,7 @@ export function copyFor(state: PrestoUiState, last?: LastProveOutcome | null, su
 			return {
 				tone: "accent",
 				title: STRINGS.available.title,
-				detail: "It needs a one-time download for this Aztec version. It runs on your first proof, then every proof is native.",
+				detail: "It needs a one-time download for this Aztec version, which starts with your next proof.",
 				retry: "Re-test",
 			}
 		case "offline":
@@ -178,7 +178,7 @@ export function rowDescriptionFor(state: PrestoUiState, last?: LastProveOutcome 
 		case "permission-blocked":
 			return "Browser blocked local access"
 		case "secure-connection-unavailable":
-			return "Presto · encrypted connection off"
+			return "Presto · encrypted connection unavailable"
 		case "version-mismatch":
 			return "Presto · update needed"
 		default:
@@ -201,7 +201,7 @@ function connectionLabel(state: PrestoUiState): string {
 	return "—"
 }
 
-/** The settings page's Details rows; every value degrades to `—` on the minimal health body. */
+/** The settings page's Details rows; the version rows read `—` on the minimal health body. */
 export function detailRowsFor(state: PrestoUiState): PrestoDetailRow[] {
 	const info = "info" in state ? state.info : {}
 	return [
