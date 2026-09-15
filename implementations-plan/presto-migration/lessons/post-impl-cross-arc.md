@@ -27,3 +27,7 @@ Gates after the fixes:
 | armed build | exit 0 |
 | smoke: `onboarding-tab`, `settings-proving` | 2 files, exit 0 |
 | local network canary `bun run e2e:agent tests/e2e/network/tx-sendTx-default.test.ts` (plain build, no Presto on this box → browser backend) | 1 file passed, exit 0 |
+
+## Round 2 — converged
+
+Resumed the round-1 session with the fix summary. Codex, verbatim: "Verified at `ab67d5ca`. **High confidence:** the material finding and all six nits are addressed. Eight in-memory checks against the actual helper callback passed: required mode rejects browser proving; plain mode accepts either backend; incorrect subtitles, missing evidence, and wrong stages fail. Type imports add no runtime dependency, and the config reuse preserves transport policy. […] No new material findings". Two rounds; the cross-arc pass is closed.
