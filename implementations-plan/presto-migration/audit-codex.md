@@ -182,3 +182,102 @@ D1/D4/D7/D9–D12/D14/D16/D18/D20 are defensible. I could not break the SDK’s 
 ## Driver verification (before folding into v3)
 
 Every source-backed claim held: `cardSubtitleFor` returns the task label before `stageSubtitle` (`RecentActivityView.vue:429-444`); Firefox opens the offscreen page as `<getURL(path)>?instance=<token>` (`apps/extension/src/wallet/utils/offscreen.ts:279`); `proveTxTask` has one call site (`proveAndSend`, `execution-coordinator.ts:197`) whose `ProveAndSendContext` carries a `markJournal` closure and no journal id (`:57-72`; the lane holds `queuedJournalId`); `createPxeOffscreen` returns `Promise<void>` (`packages/aztec-runtime/src/offscreen/entry.ts:43`); the SDK's WASM fallback emits `fallback → proving → proved → receive` after `denied` (`presto-prover.ts:186-215`, `presto-client.ts:538`), so an every-phase `lastProveOutcome` loses the denial; the native path is `detect → serialize → transmit → proving → proved → receive`; `certs.rs` is under `packages/presto/src-tauri/src/`; Presto publishes with `npm publish --provenance` and verifies via `scripts/verify-sdk-package-signatures.ts` (`npm audit signatures` in an isolated fixture), not GitHub artifact attestations; F16's clearance times were reversed in v2. Firefox ≥ 127 grants MV3 host permissions at install (Mozilla add-ons blog, 2024-05-14).
+
+
+---
+
+# Fresh-context final pass, round 2 (on plan v3 + ledger) — 2026-09-15
+
+New session again. Prompt: per-finding resolution check of r1, ledger soundness of the primed decisions, adversarial pass on v3's mechanisms, assumptions, phases/gates, simplicity. Response verbatim (paths repo-relative; Presto files prefixed `presto:`). Verification notes and the v4 disposition follow.
+
+reject (with blocking findings: incomplete journal-ID plumbing, an incompatible arc-1 onboarding shim, incorrect event-loss semantics, and an unworkable npm provenance gate)
+
+**Confidence: high** for source-backed findings; **moderate** for browser acceptance risks. This was a read-only review; builds and tests were not executed. References below use [plan.md](implementations-plan/presto-migration/plan.md).
+
+## r1 findings
+
+- **Denial overwritten — partially resolved.** Separate `lastDenial` fixes the ordinary sequence (§F:333–343), but dropped/reordered phases can falsely establish “native success.”
+- **Subtitle hidden — resolved.** Known backend explicitly precedes the task label, with a component assertion (§F:344–349).
+- **Firefox `?instance=` — partially resolved.** Origin/path comparison accepts legitimate URLs; the claimed stale-instance filtering is incorrect (§F:318–328).
+- **Correlation: journal ID — not resolved.** §F:301–303 names the wrong context builder and assumes `queuedJournalId` is the actual journal ID.
+- **Correlation: sink — resolved.** Factory observer → sink → service subscription is explicit (§F:310–317).
+- **Correlation: client generic — resolved.** Both service and client receive `PxeEvents` (Interfaces:373–375).
+- **Correlation: bootstrap — resolved.** `createPxeOffscreen` receives the sink as a dependency; no return-value fiction remains (§F:310–314).
+- **P1 red typecheck — resolved narrowly.** Dependencies coexist until P2 (P1:597); its provenance gate remains broken.
+- **Arc 1 independently shippable — partially resolved.** HTTPS probing and download destination move forward, but the shim’s stated contract is incompatible with its consumer (P2:608).
+- **Archive member rules — resolved.** Exactly one regular member, no links/duplicates/extras, and restricted cache contents (§B:184–194).
+- **npm provenance mechanism — partially resolved.** Correct verifier family; incorrect lockfile-only fixture (Security:509–515).
+- **Production-policy test — resolved at plan level.** Real client, failed HTTPS, and previously successful HTTPS are required (P2:611).
+- **P3/P4 gate semantics — mostly resolved.** §B:208–214 correctly distinguishes soak from canary; P4:630 still incorrectly says “canary lane’s console capture.”
+- **P5 residue exceptions — resolved.** Identifier-only pattern permits the coexistence product name (P5:635).
+- **P7/P8 manual sequencing — resolved.** Settings denial/recovery is now P8 (P8:659).
+- **A4 measurement — partially resolved.** P7 measures reachable chunks, but its arc-1 baseline already includes the newly introduced client (P7:653).
+- **A5/A6 wording — resolved.** Path-derived IDs and install/update/revocation distinctions are corrected (Asks:582–583).
+- **I7 — not resolved.** Serializing writes does not recover missing phases or restore emission order (§F; I7:572).
+- **I8 — resolved at plan level.** A genuine codec round-trip test is required (P4:625).
+- **I9 — partially resolved.** Browser fallback remains required, but feasibility is checked in P6 after P2 already depends on HTTPS interception (P2:608–612; P6:646).
+
+## Ledger
+
+- **D2′:** Two arcs remain defensible, but independence is still asserted prematurely. P2 calls `getPrestoClient()`, introduced in P6. More seriously, the existing [composable](apps/extension/src/onboarding/composables/useAcceleratorStatus.ts:21) uses `idle | detecting | not-detected | no-bb | active`, not the proposed `checking`/`not-installed`. Returning `not-installed` leaves the existing page without its terminal Skip/download controls. Move the factory into P2, retain the exact contract, force-refresh explicit retries, and remove the false Windows-unavailable statement in arc 1. One arc avoids this temporary compatibility work; it is not inherently worse.
+
+- **D5′:** The predicate is sound, but “stale Firefox instance … excluded by the `from`/service handshake” is unsupported. Events use the constant service name, not an instance token. Existing `OFFSCREEN_ADOPT_INSTANCE` self-closing behavior is a separate mechanism. Correct the claim and test stale-instance delivery against the active-attempt map.
+
+- **D6′:** Contexts are built in [transfer-executor.ts:147](apps/extension/src/wallet/services/execution/transfer-executor.ts:147) and `dapp-send-executor.ts:480,584,787`, not `execution-lane.ts`. Thread the actual created/claimed `journalId` through all four callers, including the existing undefined-ID case. Also explicitly wire the coordinator’s journal callback and event subscription from `ExecutionService`; the coordinator currently owns neither dependency.
+
+- **D17′:** Separate denial memory is justified, but “native `proved`” is inferred from potentially incomplete received history. That is insufficient; see Security. Also update `copyFor`’s contract and P6’s denial tests to consume `{outcome, denial}`, rather than the old single outcome argument.
+
+- **D19′:** Correct measurement mechanism, wrong baseline for the total migration cost. Compare against the pre-migration build, include static and dynamic reachable imports, and enable the build manifest explicitly. A4 itself still contains the superseded P6/string-grep wording.
+
+- **D23:** Correct alternative rejection, incomplete replacement: Presto’s verifier actually installs packages before auditing.
+
+## Security
+
+- **High — false backend/approval evidence under the promised loss model.** Start with a remembered denial. A cooldown attempt emits `transmit`, then `fallback` **without another `denied`**. Lose `fallback`: the subsequent WASM `proved` clears `lastDenial` because the receiver still believes the backend is Presto. A reordered `transmit` can similarly overwrite browser attribution. `transitionLock` only serializes arrival-order writes. Carry source-derived backend evidence and an emission sequence, reject stale updates, and test missing/reordered fallback explicitly. If delivery guarantees are required instead, establish and test them; do not claim loss always produces a generic subtitle.
+
+- **Medium — provenance fixture cannot verify its targets.** Local npm 11.16’s `auditSignatures()` calls `arb.loadActual()`. A fresh `--package-lock-only` fixture has no installed dependencies to audit. Match [Presto’s verifier](presto: scripts/verify-sdk-package-signatures.ts:88): actual `npm install --ignore-scripts`, then `npm audit signatures --json --include-attestations`; require verified provenance for every exact target and bind its statement to the expected repository/workflow/commit. [npm documentation](https://docs.npmjs.com/cli/v11/commands/npm-audit/)
+
+- **Low — cache validation should state file type explicitly.** Apply the regular-file/no-symlink requirement to cache hits too, before hashing or modifying permissions.
+
+The mode-derived plaintext policy holds. Preserve its constructor assertions and real-client test; exercise `prove()`, including failure of a POST after cached HTTPS success, rather than merely checking health.
+
+## Assumptions
+
+**Facts**
+
+- F1–F4, F7–F14, F18–F22, F24–F25 broadly match the inspected source.
+- F5/F6 match the headless source and packaging workflow; I did not independently retrieve release assets.
+- F15’s host-permission exemption is supported by the [Chromium discussion](https://groups.google.com/a/chromium.org/g/chromium-extensions/c/pUDh8RiTjJk). It does not establish usable address-bar recovery for extension popups or managed restrictions; Algorithms:421 still overclaims.
+- F16/F17 remain dated snapshots requiring the specified rechecks.
+- **F23 is materially wrong about who constructs the context.**
+- F24 needs a qualification: native `proved` precedes response-body reading/decoding ([client:486](presto: packages/sdk-core/src/lib/presto-client.ts:486)); it does not establish a completed usable native proof.
+
+**Inferences**
+
+I2 is appropriately deferred. I4/I5 are honestly identified acceptance risks; Mac success cannot establish Firefox/Linux support. I8 has a concrete resolving test. I7 remains false as described; I9 must move before P2’s dependent gate.
+
+**Asks**
+
+A1/A2/A3/A7 are sensible. A4 needs the baseline and wording correction. A5 is useful but requires explicit development-build presence and production-build absence checks. A6’s revised best-effort recommendation is reasonable and consistent with [Mozilla’s installation-permission change](https://blog.mozilla.org/addons/2024/05/14/manifest-v3-updates/).
+
+## Phases & gates
+
+The named package scripts, actionlint, CI-gating command and soak inputs exist. Every phase is **not yet independently passable as specified**: P1’s provenance procedure fails; P2 depends on P6 and misstates its retained contract; P4 omits the actual context callers.
+
+P3’s observed native-proof count is acceptable as a manually inspected phase criterion. P4 must assert native subtitles in the selected soak test, without referring to a nonexistent canary shard. Move I9’s probe/fallback into P2. A5 needs an actual development-build command.
+
+Arc 1 is not approval-ready until those compatibility and correlation fixes are explicit.
+
+## Simplicity
+
+The typed event, narrow journal seam, sink and coordinator-owned map are appropriate. Cut the unused profile/chain event coordinates unless they are actually checked. Keep backend/ordering evidence that correctness requires; no registry class or general event framework is needed.
+
+## Looks fine
+
+D3′, D13′, D21, D22 and D24 are defensible. I could not break explicit HTTPS-only enforcement, witness-free diagnosis, required-mode fallback rejection, constant-link banner rendering, journal timestamp preservation, or late-stage no-ops. Shared page caching, dismissal reset, deferred denial acceptance testing and dated exemption removal remain sound.
+
+---
+
+## Driver verification (before folding into v4)
+
+Every source-backed claim held: the legacy composable's contract is `idle | detecting | not-detected | no-bb | active` (`useAcceleratorStatus.ts:21`) and `accelerator.vue` gates the download on `isWindows` (`:116,125`); `ProveAndSendContext` is built at `transfer-executor.ts:147` and `dapp-send-executor.ts:480,584,787`, each closing over a possibly-undefined `journalId` (`dapp-send-executor.ts:244`), not in `execution-lane.ts`; `ExecutionCoordinator` is constructed with `(tasks, logger, proofGate)` and `ExecutionService` owns both the `PxeServiceClient` and the `OperationJournalService` (`execution/service.ts:95,178`); events carry the constant service name, so v3's stale-instance sentence was unsupported; a lost `fallback` with receiver-side inference would indeed clear a denial on the WASM `proved` — fixed in v4 by deriving `backend` and a `seq` at the source (the runtime observer sees every phase in order) so the receiver only copies; the native `proved` precedes body decoding (`presto-client.ts:486-497`); Presto's verifier installs before auditing (`scripts/verify-sdk-package-signatures.ts:88`); `vite build --mode development` exists (`apps/extension/package.json:16` uses it for Firefox). One point not adopted: Codex's suggestion that a single arc "avoids the compatibility work" — kept as an owner choice at the gate (the shim is small, two PRs review better), recorded in the ledger.

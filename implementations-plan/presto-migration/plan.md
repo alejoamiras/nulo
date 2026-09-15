@@ -6,7 +6,7 @@ eli5_mode: artifact
 code_review: off
 codex_effort: high
 recon_budget: 2 agents (batched reuse sweep + CI/e2e mapper), default
-status: draft v3 — dual audit folded (v2); fresh-context codex pass r1 on v2 = reject → folded (v3); fresh-context pass r2 pending, then the approval gate
+status: draft v4 — dual audit folded (v2); fresh-context codex r1 on v2 = reject → v3; r2 on v3 = reject → v4; r3 pending — if r3 still rejects, the residuals go to the owner at the gate instead of a v5
 worktree: .claude/worktrees/presto-migration (branch worktree-presto-migration, from origin/dev @ 323380f6)
 ux_approval: https://claude.ai/artifact/JEc6b2wZ5GyfM7itVYFiDi (owner approved 2026-09-15: Option B card, no popup banner, plain secondary subtitle)
 ---
@@ -70,15 +70,17 @@ This plan does three things:
   `VITE_NULO_PRESTO_REQUIRED`, the production negative-grep gains the new stamp, `agent.sh` in
   lockstep.
 - Prove-phase correlation: `proveId` through the `proveTx` RPC; `PxeService` typed `provePhase`
-  event `{ profileId, chainId, proveId, phase }` validated on receipt; SW-side sender gate that
-  understands Firefox's `?instance=` offscreen URL; journal `updateProvingBackend` seam under the
-  transition lock + the Zod schema; `stageSubtitle(stage, backend)` rendered ahead of the task
-  label; `lastProveOutcome` + a separately held `lastDenial` in SW memory exposed by an
-  `ExecutionService` RPC.
+  event `{ proveId, seq, phase, backend? }` — the backend is derived **at the source** (the runtime
+  observer sees every phase in order) and `seq` lets the receiver reject stale or reordered events;
+  validated on receipt; SW-side sender gate that understands Firefox's `?instance=` offscreen URL;
+  journal `updateProvingBackend` seam under the transition lock + the Zod schema;
+  `stageSubtitle(stage, backend)` rendered ahead of the task label; `lastProveOutcome` + a
+  separately held `lastDenial` in SW memory exposed by an `ExecutionService` RPC.
 - Arc 1 keeps the *old* onboarding page transport-honest until arc 2 replaces it: its composable
-  probes through `presto-core`'s client (HTTPS-first, like production) instead of a bare HTTP
-  `/health`, and the download link points at Presto. Copy, layout and testids stay; only the truth
-  changes.
+  keeps its exact contract (`idle | detecting | not-detected | no-bb | active`) but probes through
+  `presto-core`'s client (HTTPS-first, like production) instead of a bare HTTP `/health`; the
+  download link points at Presto; the false "not available on Windows" note goes. Layout and testids
+  stay; only the truth changes. The shared client factory (`src/presto/client.ts`) lands with it.
 - `usePrestoStatus` on `presto-core`'s `PrestoClient` (injected, shared per page context),
   `presto-ui-state.ts` wrapping the banner kit's `stateFromStatus`.
 - Onboarding page `presto.vue` (route `/onboarding/presto`, testids `onboarding-presto-*`) per the
@@ -109,19 +111,22 @@ This plan does three things:
 apps/extension
   src/presto/config.ts                 PRESTO_HOST/PORT/HTTPS_PORT, PRESTO_REQUIRED, PRESTO_REQUIRED_BUILD_STAMP
   src/offscreen/index.ts               provePhaseSink → ProductionPxeFactory({ provingMode, onProvePhase: sink.emit }); createPxeOffscreen({ …, provePhaseSink })
+  src/presto/client.ts                 getPrestoClient() — one memoized PrestoClient per page context (arc 1)
   src/composables/usePrestoStatus.ts   (client = getPrestoClient()) → PrestoUiState; detect({forceRefresh}); bannerStatus
   src/utils/presto-ui-state.ts         pure: wraps banners' stateFromStatus → PrestoUiState + copy + steps (unit-tested)
   src/utils/card-subtitle.ts           stageSubtitle(stage, backend)
   src/onboarding/pages/presto.vue      card banner (offline) | status card (every other state)
   src/popup/pages/settings/proving.vue status card + Details + link rows; reads lastProveOutcome
-  src/wallet/services/execution/execution-coordinator.ts   proveId per attempt; Map<proveId, journalId>; provePhase → journal backend + lastProveOutcome/lastDenial
+  src/wallet/services/execution/execution-coordinator.ts   proveId per attempt; Map<proveId, {journalId, lastSeq}>; onProvePhase → journal backend + lastProveOutcome/lastDenial
+  src/wallet/services/execution/service.ts                 wires coordinator ← journal seam + PxeServiceClient.on("provePhase")
+  src/wallet/services/execution/{transfer,dapp-send}-executor.ts   pass journalId into ProveAndSendContext (4 call sites)
   src/wallet/services/execution/{spec,service,client}.ts    getLastProveOutcome RPC
   src/wallet/services/operation-journal/{service,spec}.ts   updateProvingBackend seam; Zod proving schema gains backend
   src/wallet/services/pxe/client.ts    proveTx(…, proveId) passthrough (the shallow port is untouched — it excludes proving)
   src/onboarding/composables/useAcceleratorStatus.ts   arc-1 shim over PrestoClient (deleted in P7)
 packages/aztec-runtime
-  src/pxe/chain-runtime.ts             PrestoProver; PrestoEndpoint {host, port, httpsPort?}; per-runtime onPhase → observer({...runtime.activeProve, phase}); ChainRuntime.activeProve
-  src/pxe/service.ts                   PxeService<Methods, PxeEvents>: proveTx(network, req, scopes, proveId?) sets runtime.activeProve inside the write lock; subscribes the sink → sendEvent("provePhase")
+  src/pxe/chain-runtime.ts             PrestoProver; PrestoEndpoint {host, port, httpsPort?}; per-runtime onPhase derives backend + seq → observer({proveId, seq, phase, backend}); ChainRuntime.activeProve
+  src/pxe/service.ts                   PxeService<Methods, PxeEvents>: proveTx(network, req, scopes, proveId?) sets runtime.activeProve = {proveId, seq: 0} inside the write lock; subscribes the sink → sendEvent("provePhase")
   src/pxe/client.ts                    PxeServiceClientBase<Methods, PxeEvents>; src/offscreen/entry.ts accepts the sink
   src/pxe/{spec,ipxe}.ts               proveId on the RPC / port
 packages/extension-messaging
@@ -149,8 +154,9 @@ Two bundles, two clients, one vocabulary, one truth channel:
 import { PrestoProver, type PrestoPhase } from "@alejoamiras/presto"
 
 export interface PrestoEndpoint { host?: string; port?: number; httpsPort?: number }
-export interface ActiveProve { proveId: string; profileId: string; chainId: number }
-export interface ProvePhaseEvent extends ActiveProve { phase: PrestoPhase }
+export type ProveBackend = "presto" | "browser"
+export interface ActiveProve { proveId: string; seq: number; backend?: ProveBackend }   // mutated only by the runtime's own onPhase
+export interface ProvePhaseEvent { proveId: string; seq: number; phase: PrestoPhase; backend?: ProveBackend }
 export type ProvePhaseObserver = (event: ProvePhaseEvent) => void
 export type ProductionPxeFactoryOptions =
 	| (PrestoEndpoint & { provingMode?: "default"; onProvePhase?: ProvePhaseObserver })
@@ -169,13 +175,16 @@ export type ProductionPxeFactoryOptions =
   fails with the arm spelled out: `[presto-required] presto-server unavailable: reason=<reason>
   diagnosis=<diagnosis?>`.
 - `proverless`: unchanged.
-- **Observer isolation.** `onPhase` runs the required guard first (may throw — that is its job),
-  then the observer inside `try/catch` with the error logged: a broken observer can never abort or
-  alter a proof. The observer receives `{ ...runtime.activeProve, phase }` and is skipped when
-  `activeProve` is unset (a phase outside a correlated attempt is not reportable) — the prover is
-  per `ChainRuntime`, so the closure is bound per runtime and cannot mix profiles or chains.
-- `ChainRuntime` gains `activeProve: ActiveProve | undefined`, set and cleared only by `PxeService`
-  inside the `proveTx` write lock (§F).
+- **Observer isolation and source-derived evidence.** `onPhase` runs the required guard first (may
+  throw — that is its job), then, inside `try/catch` with the error logged, updates the runtime's
+  `activeProve` (`seq += 1`; `transmit → backend = "presto"`; `fallback | denied → backend =
+  "browser"`) and calls the observer with `{ proveId, seq, phase, backend }`. The evidence is
+  computed here, where every phase is seen in order, so a lost or reordered event downstream can
+  never manufacture "native" — the receiver only ever copies what the source concluded. The
+  observer is skipped when `activeProve` is unset (a phase outside a correlated attempt is not
+  reportable). The prover is per `ChainRuntime`, so the closure cannot mix profiles or chains.
+- `ChainRuntime` gains `activeProve: ActiveProve | undefined`, created (`{ proveId, seq: 0 }`) and
+  cleared only by `PxeService` inside the `proveTx` write lock (§F).
 - The `[accelerator-required]` prefix becomes `[presto-required]`; the env name inside the error
   text becomes `VITE_NULO_PRESTO_REQUIRED`.
 
@@ -190,8 +199,8 @@ export type ProductionPxeFactoryOptions =
   corruption — the action comment says so) → list the archive and require **exactly one** member
   named `presto-server`, a regular file (`tar -tvf` type `-`; any link, duplicate or extra entry
   fails the step) → extract only that member into the tool dir → verify the binary → `chmod +x`.
-  The cache stores that single file; on a cache hit any other restored entry fails the step before
-  the directory joins `PATH`. Cache key `${{ runner.os }}-presto-server-${version}-${expected_sha256}`.
+  The cache stores that single file; on a cache hit the step re-checks that the restored entry is a
+  regular file (not a link) and that nothing else was restored, before hashing, `chmod` or `PATH`. Cache key `${{ runner.os }}-presto-server-${version}-${expected_sha256}`.
 - `_extension-network-e2e.yml`: `PRESTO_ALLOW_ALL=1` and `RUST_LOG=info` are set **on the server
   process only** (`env` of the start step's shell line), never at job level; start
   `nohup presto-server > /tmp/presto-server.log`; health poll unchanged
@@ -222,7 +231,7 @@ export type PrestoUiState =
 	| { kind: BannerState; diagnosis?: SecureConnectionDiagnosis; info?: PrestoInfo }  // offline | permission-blocked | secure-connection-unavailable | version-mismatch | error | downloading | available
 export interface PrestoInfo { appVersion?: string; nativeAztecVersion?: string; protocol?: "http" | "https" }
 export function uiStateFromStatus(status: PrestoStatus): PrestoUiState   // kind = stateFromStatus(status); keeps diagnosis + info
-export function copyFor(state: PrestoUiState, lastOutcome?: LastProveOutcome): { title: string; detail: string; steps?: string[]; retry?: "Test" | "Retry" | "Re-test" }
+export function copyFor(state: PrestoUiState, last?: { outcome: LastProveOutcome | null; denial: { at: number } | null }): { title: string; detail: string; steps?: string[]; retry?: "Test" | "Retry" | "Re-test" }
 ```
 
 - `usePrestoStatus(client: PrestoStatusClient = getPrestoClient(), { autoDetect })` — C1 shape: the
@@ -298,49 +307,65 @@ export function copyFor(state: PrestoUiState, lastOutcome?: LastProveOutcome): {
   journal gets one narrow seam: `updateProvingBackend(opId, backend)` runs under `transitionLock`,
   applies only when the op's current stage is `proving`, preserves `enteredProveAt`, and is a no-op
   (logged at debug) otherwise — late events after completion/cancellation cannot resurrect a stage.
-- **Correlation.** `ProveAndSendContext` gains `journalId` (the executors already hold the
-  `queuedJournalId` they bind into `markJournal`; `execution-lane.ts` passes it through when it
-  builds the context). `execution-coordinator.proveTxTask` mints `proveId = crypto.randomUUID()` per
-  attempt, records `proveId → journalId` in a coordinator-owned `Map` **before** dispatch, calls
+- **Correlation.** `ProveAndSendContext` gains `journalId?: string`. The four builders pass the id
+  they already close over for `markJournal`: `transfer-executor.ts:147` and
+  `dapp-send-executor.ts:480,584,787` (the `journalId` variable those closures capture; when it is
+  `undefined` — an op with no journal row — no map entry is made and nothing is attributed).
+  `execution-coordinator.proveTxTask` mints `proveId = crypto.randomUUID()` per attempt, records
+  `proveId → { journalId, lastSeq: 0 }` in a coordinator-owned `Map` **before** dispatch, calls
   `pxe.proveTx(txRequest, scopes, proveId)` (new optional trailing param on `IPXE`,
   `PxeServiceClientBase`, and the `spec.ts` method; the shallow port is untouched because it
-  excludes proving by design), and deletes the entry in `finally`. Locks are per
+  excludes proving by design), and deletes the entry in `finally`. The coordinator owns neither the
+  journal nor the PXE client, so `ExecutionService` (which owns both, `service.ts:95,178`) injects
+  `updateProvingBackend` and `recordDenial` callbacks into the coordinator's constructor and
+  subscribes `this.pxeService.on("provePhase", e => this.coordinator.onProvePhase(e))` at start. Locks are per
   `(profileId, chainId)` and the SW marks `proving` before the offscreen lock, so two ops can be
   `proving` on one chain — only the mapped `proveId` attributes an event, never the chain.
 - **Offscreen wiring.** `offscreen/index.ts` creates a two-function sink
   (`{ emit, subscribe }`), passes `onProvePhase: sink.emit` to the factory and `provePhaseSink` to
   `createPxeOffscreen` (new dep; `entry.ts` hands it to `PxeService`). `PxeService` declares
   `PxeEvents = { provePhase: ProvePhaseEvent }`, subscribes the sink and forwards each event with
-  `sendEvent`. Inside the `proveTx` write lock it sets `runtime.activeProve = { proveId, profileId,
-  chainId }` (all three known there: the lock key is the profile/chain pair) before `pxe.proveTx`
-  and clears it in `finally`; the runtime's observer (§A) reads that record, so the event already
-  carries its coordinates. `sendEvent` swallows a dead-SW rejection; the observer is wrapped per §A.
+  `sendEvent`. Inside the `proveTx` write lock it sets `runtime.activeProve = { proveId, seq: 0 }`
+  before `pxe.proveTx` and clears it in `finally`; the runtime's own `onPhase` (§A) advances `seq`
+  and derives `backend` on that record, so each event carries source-side evidence. Profile and
+  chain are not in the event: the receiver keys on `proveId` alone and nothing checks them.
+  `sendEvent` swallows a dead-SW rejection; the observer is wrapped per §A.
 - **SW receiving gate.** `packages/extension-messaging/src/offscreen/client.ts` today filters events
   by `message.from === this.service` and never reads `sender`. The listener gains the `sender`
   argument and drops any event failing `isTrustedInternalSender(sender)` or whose `sender.url`,
   parsed, does not have the origin and pathname of `chrome.runtime.getURL("src/offscreen/index.html")`
   — the query is ignored because Firefox opens the page as `…/index.html?instance=<token>`
-  (`wallet/utils/offscreen.ts:279`); a stale Firefox instance is already excluded by the
-  `from`/service handshake and is not this gate's job. The content script (`*://*/*`, all frames)
-  shares `sender.id` and must not be able to spoof a phase. The coordinator validates the payload
-  with a Zod schema (`proveId` uuid, `profileId` string, `chainId` number, `phase` enum) before
-  use — TypeScript types validate nothing at runtime. Unit tests: content-script-shaped sender
-  dropped; Chrome URL accepted; Firefox URL with `?instance=` accepted; malformed payload dropped.
-- **Coordinator handler.** `PxeServiceClient.on("provePhase")` → `Map` lookup by `proveId`
-  (unknown or deleted → ignore) → apply **across the whole attempt**, not first-wins: `transmit →
-  backend: "presto"`; `fallback | denied → backend: "browser"`; `proved` changes nothing about
-  the backend (it neither identifies it nor ends the op). Two memory records: `lastProveOutcome =
-  { at, phase, backend? }` updated on every phase (a hint), and `lastDenial: { at } | null` set on
-  `denied` and cleared **only** when a `proved` arrives for an attempt whose backend is `presto`
-  (native success proves the approval) — the SDK's post-denial sequence is `denied → fallback →
-  proving → proved → receive`, so an every-phase record would erase the denial within a second.
-  Journal updates are serialised by the seam's `transitionLock`; an event that arrives after the RPC
-  returned is a no-op by stage. Event loss is tolerated by design: the subtitle stays generic and
-  nothing else depends on the channel. Tests: `transmit → fallback` ends as `browser`; a late
-  `transmit` after the op left `proving` is a no-op; a deleted attempt's events are ignored; two
-  profiles proving on one chain attribute independently; a throwing observer does not fail the
-  prove; `denied → fallback → proving → proved → receive` leaves `lastDenial` set; `transmit →
-  proving → proved` clears it; an event delivered after `proveTx` resolved is harmless.
+  (`wallet/utils/offscreen.ts:279`). Identity of a *stale* Firefox instance is not this gate's job
+  and not the service name's either (events carry the constant service name): a stale instance's
+  events carry either a `proveId` the map does not hold (ignored) or the live attempt's (harmless,
+  same evidence). The content script (`*://*/*`, all frames) shares `sender.id` and must not be
+  able to spoof a phase. The coordinator validates the payload with a Zod schema (`proveId` uuid,
+  `seq` non-negative integer, `phase` enum, `backend` optional enum) before use — TypeScript types
+  validate nothing at runtime. Unit tests: content-script-shaped sender dropped; Chrome URL
+  accepted; Firefox URL with `?instance=` accepted; malformed payload dropped; a stale-instance
+  event with an unknown `proveId` ignored.
+- **Coordinator handler.** `onProvePhase(e)` → `Map` lookup by `proveId` (unknown or deleted →
+  ignore) → `e.seq <= entry.lastSeq` → ignore (stale or reordered), else `entry.lastSeq = e.seq` and
+  apply the **source's** evidence: `updateProvingBackend(journalId, e.backend)` when `e.backend` is
+  set (the journal copies, it never infers). Two memory records: `lastProveOutcome = { at, phase,
+  backend? }` from the latest accepted event (a hint), and `lastDenial: { at } | null` set when
+  `e.phase === "denied"` and cleared **only** when `e.phase === "proved" && e.backend === "presto"`
+  (Presto produced a proof, so the approval exists; F24: the native `proved` precedes body decoding,
+  and a malformed body then falls back with `backend: "browser"` on its own later `proved`, which
+  does not clear anything — correct, since the server did approve). **Loss model, stated
+  honestly:** because backend and denial evidence are derived at the source and every event carries
+  the full current evidence plus a sequence number, a dropped or reordered event can at worst
+  leave the subtitle or the hint *stale* — it cannot fabricate "native" or clear a denial: the
+  r2 counter-example (`transmit` seen, `fallback` lost, WASM `proved` arrives) now carries
+  `backend: "browser"` on that `proved`. No delivery guarantee is claimed or needed. Journal
+  updates are serialised by the seam's `transitionLock`; an event that arrives after the RPC
+  returned is a no-op by stage. Tests: `transmit → fallback` ends as `browser`; `transmit` seen,
+  `fallback` dropped, then `proved{backend:"browser"}` → journal `browser`, denial untouched; a
+  reordered lower-`seq` `transmit` after `fallback` is rejected; a late event after the op left
+  `proving` is a no-op; a deleted attempt's events are ignored; two ops proving concurrently
+  attribute independently; a throwing observer does not fail the prove; `denied → fallback →
+  proving → proved → receive` leaves `lastDenial` set; `transmit → proving → proved` clears it; an
+  event delivered after `proveTx` resolved is harmless.
 - **Subtitle.** `stageSubtitle(stage, backend)`: `proving` → `"Proving with Presto ✦"` /
   `"Proving in browser…"` / `"Generating proof..."` when unknown. In `RecentActivityView`'s
   `cardSubtitleFor`, a `proving` stage with a known backend is returned **before** the executing
@@ -349,7 +374,7 @@ export function copyFor(state: PrestoUiState, lastOutcome?: LastProveOutcome): {
   exhaustiveness pin extended; a component test pins the priority.
 - **`getLastProveOutcome()`** RPC on `ExecutionService` (spec + service + client) returns
   `{ outcome, denial }` from SW memory (both reset on SW restart — acceptable; they are hints, the
-  journal is the record).
+  journal is the record). `copyFor` (§C) takes that pair; P6's denial tests use it.
 
 ### Data & control flow (critical paths)
 
@@ -358,7 +383,7 @@ export function copyFor(state: PrestoUiState, lastOutcome?: LastProveOutcome): {
    `PrestoProver.proveTx` → `detect` (HTTPS probe `https://127.0.0.1:59834/health`; on failure one
    witness-free HTTP `GET /health` for diagnosis) → `transmit`/`proving`/`proved` OR
    `denied`/`secure-connection-unavailable`/`fallback` → WASM. Each phase → observer → `provePhase`
-   event → SW gate + payload schema → map → `updateProvingBackend` + `lastProveOutcome`/`lastDenial` → subtitle.
+   event `{proveId, seq, phase, backend}` → SW gate + payload schema → map (seq check) → `updateProvingBackend` + `lastProveOutcome`/`lastDenial` → subtitle.
 2. **Prove (CI required)**: same, with `httpsOnly:false` → dual probe prefers HTTPS, uses HTTP
    `59833`; the guard throws on any fallback-class phase; the workflow asserts `Proving succeeded`
    count > 0 on the canary lane.
@@ -369,7 +394,7 @@ export function copyFor(state: PrestoUiState, lastOutcome?: LastProveOutcome): {
 
 ### Interfaces (new / changed)
 
-- `@nulo/aztec-runtime`: `PrestoEndpoint`, `ActiveProve`, `ProvePhaseEvent`, `ProvePhaseObserver`,
+- `@nulo/aztec-runtime`: `PrestoEndpoint`, `ProveBackend`, `ActiveProve`, `ProvePhaseEvent`, `ProvePhaseObserver`,
   `ProductionPxeFactoryOptions` (above); `ChainRuntime.activeProve`; `PxeService<Methods, PxeEvents>`
   and `PxeServiceClientBase<Methods, PxeEvents>` with `provePhase`; `createPxeOffscreen(deps)` takes
   `provePhaseSink`; `proveTx(network, txRequest, scopes, proveId?)` on the spec, `IPXE`, the client
@@ -377,12 +402,13 @@ export function copyFor(state: PrestoUiState, lastOutcome?: LastProveOutcome): {
 - `@nulo/extension-messaging`: `OffscreenClient` event sender gate (behavioural, no signature change).
 - `@nulo/wallet-core/jobs`: `JobProgress` proving arm gains `backend?`.
 - `apps/extension`: `PrestoUiState`, `PrestoInfo`, `uiStateFromStatus`, `copyFor`, `usePrestoStatus`,
-  `getPrestoClient`; journal `updateProvingBackend`; `ProveAndSendContext.journalId`;
-  `ExecutionService.getLastProveOutcome`.
+  `getPrestoClient` (`src/presto/client.ts`, arc 1); journal `updateProvingBackend`;
+  `ProveAndSendContext.journalId`; `ExecutionCoordinator` constructor deps `updateProvingBackend` +
+  `recordDenial` and its `onProvePhase(e)`; `ExecutionService.getLastProveOutcome`.
 
 ### File-level change map
 
-Added: `src/presto/config.ts` (renamed from `src/accelerator/config.ts`),
+Added: `src/presto/config.ts` (renamed from `src/accelerator/config.ts`), `src/presto/client.ts` (+test),
 `src/composables/usePrestoStatus.ts` (+test), `src/utils/presto-ui-state.ts` (+test),
 `src/onboarding/pages/presto.vue`, `src/popup/pages/settings/proving.vue`,
 `.github/actions/setup-presto-server/action.yml`, `tests/e2e/settings-proving.test.ts` (smoke),
@@ -392,7 +418,7 @@ Added: `src/presto/config.ts` (renamed from `src/accelerator/config.ts`),
 Modified: `packages/aztec-runtime/{package.json, src/pxe/chain-runtime.ts (+test), service.ts (+test), spec.ts, ipxe.ts, client.ts, src/offscreen/entry.ts}`,
 `packages/extension-messaging/src/offscreen/client.ts` (+test),
 `packages/wallet-core/src/jobs/types.ts` (+fsm test), `apps/extension/{package.json, vite.config.ts, manifest/manifest.config.ts, scripts/e2e/agent.sh}`,
-`src/offscreen/index.ts`, `src/wallet/services/execution/{execution-coordinator.ts, execution-lane.ts, spec.ts, service.ts, client.ts}` (+tests),
+`src/offscreen/index.ts`, `src/wallet/services/execution/{execution-coordinator.ts, transfer-executor.ts, dapp-send-executor.ts, spec.ts, service.ts, client.ts}` (+tests),
 `src/wallet/services/operation-journal/{service.ts, spec.ts}` (+tests), `src/wallet/services/pxe/client.ts`,
 `src/utils/card-subtitle.ts` (+test), `src/popup/components/modules/general/RecentActivityView.vue`,
 `src/popup/pages/settings/index.vue`, `src/onboarding/pages/{learn,fees}.vue`,
@@ -417,8 +443,11 @@ Deleted: `src/accelerator/`, `src/onboarding/composables/useAcceleratorStatus.{t
 - **LNA in an extension.** Chrome does not prompt extension pages that hold host permissions for the
   target; the manifest gains `https://127.0.0.1/*` in the same phase production switches to HTTPS,
   so the offscreen probe (which has no UI to answer a prompt) is covered. `permission-blocked`
-  still exists for the Chrome 142–143 window, Firefox 153+, and managed policies; the recovery
-  steps say "site permissions beside the address bar" because that is the only user-operable fix.
+  still exists for the Chrome 142–143 window, Firefox 153+, and managed policies. The recovery steps
+  name the site-permissions control because it is the only user-operable path known; whether it is
+  reachable for an extension page is confirmed on the Mac check (Chrome) and not claimed for
+  Firefox, and a managed-policy block has no user recovery — that copy says "ask your
+  administrator" and offers Skip.
 - **Presto approval popup.** The desktop app prompts once per origin on `/prove`; the wallet's
   origin is an opaque `chrome-extension://<id>`. Denial surfaces as phase `denied` → WASM
   (production, remembered as `lastProveOutcome` and shown in Settings) and `denied` → throw (CI).
@@ -488,9 +517,10 @@ gate.
   server. Those are residual risks of the loopback model, stated in `SECURITY.md`, not solved here.
   The wallet never offers the session-only HTTP downgrade; required-mode HTTP is derived from the
   CI proving mode inside the factory and exists only in CI builds (negative-grep), and
-  `presto-policy.test.ts` drives the real `presto-core` client with a stubbed `fetch` to prove that
-  a production configuration never issues an HTTP `/prove` after an HTTPS failure — including when
-  HTTPS succeeded earlier in the same session.
+  `presto-policy.test.ts` drives the real `presto-core` client's `prove()` with a stubbed `fetch` to
+  prove that a production configuration never issues an HTTP `/prove`: HTTPS health refused; HTTPS
+  health cached as good, then the HTTPS `POST /prove` fails; HTTPS succeeded earlier in the session,
+  then refused — in every case the only HTTP request is the witness-free `GET /health`.
 - **Extension ↔ prover authorization.** Presto's desktop app gates `/prove` per origin with a user
   prompt; the wallet's origin is opaque, so the first-send copy names Nulo. Recommend (Ask A3)
   listing Nulo's store extension ID in Presto's verified-sites registry so the prompt shows a
@@ -509,11 +539,12 @@ gate.
 - **Supply chain.** npm: only the Presto packages still inside the 7-day window at install time are
   exempted, for ≤ 2 days, with **npm provenance** verified before exempting: Presto publishes with
   `npm publish --provenance` (not GitHub artifact attestations), so verification is `npm audit
-  signatures` in an isolated fixture directory (a scratch `package.json` pinning the exact
-  versions + `npm install --package-lock-only --ignore-scripts`), reading the SLSA statement to bind
-  each tarball digest to the `alejoamiras/presto` repository, its release workflow and the tagged
-  commit — the same mechanism as Presto's own `scripts/verify-sdk-package-signatures.ts`; recorded
-  in lessons with the digests. A dated removal PR is a named deliverable in Delivery. Binary: the
+  signatures --json --include-attestations` in an isolated fixture directory after a **real**
+  `npm install --ignore-scripts` of the exact versions (npm's signature audit walks the installed
+  tree — a lock-only fixture has nothing to audit), requiring a verified provenance statement for
+  every target and binding each tarball digest to the `alejoamiras/presto` repository, its release
+  workflow and the tagged commit — the same procedure as Presto's own
+  `scripts/verify-sdk-package-signatures.ts:88`; recorded in lessons with the digests. A dated removal PR is a named deliverable in Delivery. Binary: the
   repo pins both the tarball and the extracted `presto-server` SHA-256, requires exactly one regular
   `presto-server` member (no links, duplicates or extras), extracts only it, and re-verifies the
   binary on every run (cache hits included); the upstream sidecar is same-origin and only detects
@@ -560,8 +591,8 @@ gate.
 - F20 — Presto prompts per origin on `/prove`; 60 s auto-deny, 30 s deny cooldown (`presto/core/src/authorization.rs:228,239`); `chrome-extension://` ids are canonicalized.
 - F21 — Presto desktop ships `https_enabled: false` on a clean install; the wizard enables it (`packages/presto/core/src/config.rs:96-101,134`); the leaf TLS key is persisted on disk in an owner-only directory, the CA key stays in memory (`packages/presto/src-tauri/src/certs.rs`).
 - F22 — The journal FSM has no `proving → proving` edge (`packages/wallet-core/src/jobs/fsm.ts:46`) and `_transitionLocked` asserts every transition (`operation-journal/service.ts:316`); locks are per `(profileId, chainId)` (`execution-mutex.ts`).
-- F23 — `cardSubtitleFor` returns the executing task's label (`"Generating proof..."`) before consulting `stageSubtitle` whenever the task matches one card (`RecentActivityView.vue:429-444`); `proveTxTask` has one call site (`proveAndSend`, `execution-coordinator.ts:197`) and `ProveAndSendContext` carries a `markJournal` closure but no journal id (`:57-72`; the lane holds `queuedJournalId`); `createPxeOffscreen` returns `Promise<void>` (`aztec-runtime/src/offscreen/entry.ts:43`); Firefox opens the offscreen page as `<getURL(path)>?instance=<token>` (`wallet/utils/offscreen.ts:279`).
-- F24 — SDK phase sequences: native `detect → serialize → transmit → proving → proved → receive`; after denial `denied → fallback → proving → proved → receive` (`presto-prover.ts:186-215`, `presto-client.ts:321-538`).
+- F23 — `cardSubtitleFor` returns the executing task's label (`"Generating proof..."`) before consulting `stageSubtitle` whenever the task matches one card (`RecentActivityView.vue:429-444`); `proveTxTask` has one call site (`proveAndSend`, `execution-coordinator.ts:197`); `ProveAndSendContext` carries a `markJournal` closure but no journal id (`:57-72`) and is built at four sites — `transfer-executor.ts:147` and `dapp-send-executor.ts:480,584,787` — each closing over a `journalId` that may be `undefined`; the coordinator is constructed with `(tasks, logger, proofGate)` and owns neither the journal nor the PXE client (`execution/service.ts:95,178`); `createPxeOffscreen` returns `Promise<void>` (`aztec-runtime/src/offscreen/entry.ts:43`); Firefox opens the offscreen page as `<getURL(path)>?instance=<token>` (`wallet/utils/offscreen.ts:279`); the legacy composable's contract is `idle | detecting | not-detected | no-bb | active` (`useAcceleratorStatus.ts:21`) and `accelerator.vue` hides the download on Windows (`:116,125`).
+- F24 — SDK phase sequences: native `detect → serialize → transmit → proving → proved → receive`, where the native `proved` (`presto-client.ts:497`) precedes body decoding — a malformed body then runs `fallback → proving → proved → receive` in WASM; after denial `denied → fallback → proving → proved → receive` (`presto-prover.ts:186-215`, `presto-client.ts:321-538`).
 - F25 — Presto publishes its npm packages with `npm publish --provenance` and verifies them with `npm audit signatures` over the SLSA statement (`presto/.github/workflows/_publish-npm.yml:282`, `scripts/verify-sdk-package-signatures.ts`); no GitHub artifact attestation is published.
 
 ### Inferences (unverified — attack these)
@@ -569,17 +600,17 @@ gate.
 - I2 — The published `@alejoamiras/presto` tarball resolves `dist/index.js` the way the accelerator did, so the vite alias is a rename — or unnecessary. Verify after install (P1) and drop the alias if exports resolve cleanly.
 - I4 — Firefox 153's LNA applies to `moz-extension://` pages; no exemption statement found. The state machine covers it; nothing Firefox-specific is planned (Ask A6).
 - I5 — Presto's HTTPS probe from the offscreen document succeeds once the user completed Presto's certificate setup (Presto installs its CA into the user NSS DB on Linux and the login keychain on macOS). Users who declined the wizard step land in `https-disabled` (after approval) or `presto-reachable` (before) — handled, not silent. The Mac check does not establish Linux trust-store coverage; that stays an accepted acceptance risk.
-- I7 — A `provePhase` event emitted mid-prove reaches the SW while it awaits the same prove (`sendEvent` is fire-and-forget; READY proves reachability only). Delivery and ordering are NOT assumed: attribution and lifetime come from the map + seam, journal writes are serialised by `transitionLock`, loss degrades to the generic subtitle, and P4 tests an event delivered after the RPC resolved.
+- I7 — A `provePhase` event emitted mid-prove reaches the SW while it awaits the same prove (`sendEvent` is fire-and-forget; READY proves reachability only). Delivery and ordering are NOT assumed and NOT needed: evidence is derived at the source and every event carries the full current evidence plus `seq`, so loss or reordering can only leave the subtitle/hint stale, never wrong (§F); P4 tests the dropped-`fallback` and reordered-`transmit` cases and an event delivered after the RPC resolved.
 - I8 — Adding a trailing optional `proveId` to `proveTx` on the spec/client is wire-compatible with the existing RPC codec (positional args). `service.pxe-seam.test.ts` only checks construction, so P4 adds a real codec round-trip test for the new argument.
-- I9 — Puppeteer request interception answers `https://127.0.0.1:59834/health` before any TLS handshake, so the smoke e2e can stub both probes without a certificate. Resolved in **P6** by a ten-line probe in the existing onboarding harness before P7 promises its gate; if it fails, P7's HTTPS-failure cases move to a page-level `window.__nuloPrestoHealthBase` override that only the smoke build sets (same negative-grep discipline as the other e2e stamps), never to "unit tests only".
+- I9 — Puppeteer request interception answers `https://127.0.0.1:59834/health` before any TLS handshake, so the smoke e2e can stub both probes without a certificate. Resolved in **P2** (the first phase whose gate depends on it) by a ten-line probe in the existing onboarding harness; if it fails, the shim's and P7's HTTPS cases move to a page-level `window.__nuloPrestoHealthBase` override that only the smoke build sets (same negative-grep discipline as the other e2e stamps), never to "unit tests only".
 
 ### Asks (owner decisions — resolved at approval)
 
 - A1 — Rename the workflow input `disable_accelerator` → `disable_presto` and the repo var `NULO_E2E_DISABLE_ACCELERATOR` → `NULO_E2E_DISABLE_PRESTO`? **Recommended: yes** (var unset; docs/rollback runbook updated).
 - A2 — Route + testids: `/onboarding/accelerator` → `/onboarding/presto`, `onboarding-accelerator-*` → `onboarding-presto-*`? **Recommended: yes** (the page is rebuilt; e2e updated in the same phase).
 - A3 — Add Nulo's store extension ID to Presto's `verified-sites.json` (Presto repo, out of scope)? **Recommended: yes, after the ID is known** — recognition UX only, not a launch prerequisite; verify the actual `Origin` header and prompt display during the Mac check.
-- A4 — Bundle budget for the page-side client: the onboarding entry chunk plus any new shared chunk it imports grows by **≤ 60 kB gzip**, and no onboarding-reachable chunk contains an `@aztec/` marker (`grep -l "@aztec/" apps/extension/dist/chrome/assets/onboarding*.js` → none). Measured before/after in P6's gate. **Recommended: accept the budget.**
-- A5 — Add a manifest `key` (Chrome only) so unpacked/dev builds get one stable extension ID? Unpacked IDs are derived from the load path, so they are stable per checkout but differ per worktree and per machine — each is a separate origin for Presto (its own prompt) and none can be filed for A3. **Recommended: yes, dev-only via the existing manifest config branch, in P2 with its build assertion; the store ID is already stable.**
+- A4 — Bundle budget for the page-side client: the onboarding entry's reachable chunk closure (static **and** dynamic imports, from an explicitly enabled `build.manifest`) grows by **≤ 60 kB gzip** against the **pre-migration** build (`origin/dev @ 323380f6`, not the arc-1 tip, which already carries the client via the shim), and no chunk in that closure lists an `@aztec/` module in its sourcemap `sources`. Measured in P7. **Recommended: accept the budget.**
+- A5 — Add a manifest `key` (Chrome only) so unpacked/dev builds get one stable extension ID? Unpacked IDs are derived from the load path, so they are stable per checkout but differ per worktree and per machine — each is a separate origin for Presto (its own prompt) and none can be filed for A3. **Recommended: yes, dev-only via the existing manifest config branch, in P2 with two build assertions — present under `vite build --mode development`, absent under `bun run build`; the store ID is already stable.**
 - A6 — Firefox: since Firefox 127 MV3 host permissions requested in the manifest are granted at install, but users can revoke them and permissions added on update are not auto-granted; a revoked permission surfaces as `unconfirmed` or `permission-blocked` depending on how the request fails. Add a `permissions.request` "Grant access" step to `presto.vue` on Firefox, or stay best-effort? **Recommended: best-effort now, follow-up plan** — the copy for those states says "check the extension's permissions" without promising which state Firefox produces; the request step needs a user gesture and its own e2e.
 - A7 — `__AZTEC_VERSION__` (from `@aztec/pxe`) is what the page-side client sends; the offscreen prover sends the SDK's own `@aztec/*` pin. Pin equality with `presto-version-lockstep.test.ts` (reads `@alejoamiras/presto`'s dependency pin and the workspace's `@aztec/pxe`)? **Recommended: yes; the `aztec-update` skill gains the drift line.**
 
@@ -605,11 +636,13 @@ phase's typecheck is green on its own.
 
 - `chain-runtime.ts` per §A (types, prover, guard, preflight, per-runtime observer with isolation, `activeProve`, mode-derived plaintext, error prefix); remove the accelerator dependency from both `package.json`s and the lockfile.
 - `src/accelerator/config.ts` → `src/presto/config.ts` (`PRESTO_HOST`, `PRESTO_PORT`, `PRESTO_HTTPS_PORT`, `PRESTO_REQUIRED`, `PRESTO_REQUIRED_BUILD_STAMP`); `offscreen/index.ts` selects the mode only; `entry.ts` comments.
-- **Arc-1 onboarding shim** (deleted in P7): `useAcceleratorStatus.ts` keeps its name and its `active | no-bb | not-installed | checking` contract but implements it over `getPrestoClient().checkStatus()` (`available` → `active`, `available && needsDownload` → `no-bb`, anything else → `not-installed`) — HTTPS-first like production, so the page can no longer say "active" over plain HTTP while proofs fall back; `accelerator.vue` download link → `https://presto.build`, the words "Aztec Accelerator" → "Presto", testids unchanged; `tests/e2e/onboarding-tab.test.ts` intercepts the HTTPS probe (and the HTTP diagnostic) instead of the HTTP health URL.
+- `src/presto/client.ts`: `getPrestoClient()` — a memoized `new PrestoClient({ aztecVersion: __AZTEC_VERSION__ })` per page context (+ test: one instance per module, injectable for tests).
+- **Arc-1 onboarding shim** (deleted in P7): `useAcceleratorStatus.ts` keeps its name and its **exact** contract (`idle | detecting | not-detected | no-bb | active`, `detect()`, `info`) but implements it over `getPrestoClient().checkStatus({ forceRefresh })` (`available && needsDownload` → `no-bb`, `available` → `active`, anything else → `not-detected`; an explicit retry passes `forceRefresh: true`) — HTTPS-first like production, so the page can no longer say "active" over plain HTTP while proofs fall back; `accelerator.vue` download link → `https://presto.build`, the words "Aztec Accelerator" → "Presto", the Windows-unavailable note and `isWindows` gating removed (Presto ships Windows), testids unchanged so the existing Skip/download controls keep their terminal states.
+- **I9 probe** (moved here — this is the first gate that depends on it): a ten-line smoke case that intercepts `https://127.0.0.1:59834/health` with `request.respond(...)` and asserts the page received the stubbed body; then `tests/e2e/onboarding-tab.test.ts` intercepts the HTTPS probe (and the HTTP diagnostic) instead of the HTTP health URL. If the probe fails, the override fallback from I9 is adopted here and recorded.
 - `manifest.config.ts`: add `https://127.0.0.1/*` (the HTTPS switch and its permission land together); A5 dev `key` if approved.
 - `chain-runtime.test.ts`: renamed mock; new cases — default mode passes `presto.httpsOnly === true`; required mode passes `false` with no option involved; preflight error names `reason`/`diagnosis` for `permission-blocked` and `secure-connection-unavailable`; guard throws on `fallback`, `denied`, `secure-connection-unavailable`, `version-mismatch` (the last two documented as redundant-but-precise, and F4's uncovered legacy path noted); a throwing observer does not propagate in default mode; every phase reaches the observer carrying the runtime's `activeProve` and none reaches it when unset.
-- `presto-policy.test.ts`: the real `presto-core` client with a stubbed `fetch`, production options — HTTPS refused → the only HTTP request is the witness-free `GET /health`, never a `/prove`; HTTPS succeeded earlier, then refused → same.
-- **Validation gate**: `bun run --cwd packages/aztec-runtime test` green; `bun run typecheck:all`; `bun run lint`; `bun run test` (extension unit) green; `bun run build` exit 0 and `jq '.host_permissions' apps/extension/dist/chrome/manifest.json` lists both `127.0.0.1` schemes (and `.key` when A5 is on, dev build only); `cd apps/extension && bun run test:e2e -- tests/e2e/onboarding-tab.test.ts` green on the shim; `grep -rn "aztec-accelerator\|AcceleratorProver\|ACCELERATOR_" packages apps --include=*.ts --include=*.vue --include=*.mts` → 0 hits (the shim keeps only the composable/page/testid *names*, which P7 removes). Layers: unit, typecheck, lint, build, smoke e2e.
+- `presto-policy.test.ts`: the real `presto-core` client's `prove()` with a stubbed `fetch`, production options — HTTPS health refused; HTTPS health cached good then the HTTPS `POST /prove` fails; HTTPS succeeded earlier then refused — in each case the only HTTP request is the witness-free `GET /health`, never a `/prove`.
+- **Validation gate**: `bun run --cwd packages/aztec-runtime test` green; `bun run typecheck:all`; `bun run lint`; `bun run test` (extension unit) green; `bun run build` exit 0 and `jq '.host_permissions' apps/extension/dist/chrome/manifest.json` lists both `127.0.0.1` schemes and `jq '.key'` is `null`; when A5 is on, `cd apps/extension && bunx vite build --mode development -c vite.chrome.config.mts` then `jq '.key'` is a string; `cd apps/extension && bun run test:e2e -- tests/e2e/onboarding-tab.test.ts` green on the shim (I9 probe included); `grep -rn "aztec-accelerator\|AcceleratorProver\|ACCELERATOR_" packages apps --include=*.ts --include=*.vue --include=*.mts` → 0 hits (the shim keeps only the composable/page/testid *names*, which P7 removes). Layers: unit, typecheck, lint, build, smoke e2e.
 
 #### P3 — CI headless Presto + CI docs
 
@@ -624,10 +657,10 @@ phase's typecheck is green on its own.
 - `wallet-core` `JobProgress` + fsm test; `operation-journal/spec.ts` Zod `backend` + round-trip test; `updateProvingBackend` seam (+ tests: applies in `proving`, no-op in any other stage, preserves `enteredProveAt`, serialised under `transitionLock`).
 - `proveId` on `spec.ts`/`ipxe.ts`/`client.ts` (+ a codec round-trip test for the new argument — I8); `PxeService<Methods, PxeEvents>` + `activeProve` set/cleared inside the write lock + sink subscription; `createPxeOffscreen` takes `provePhaseSink`; `offscreen/index.ts` sink + factory wiring.
 - `extension-messaging` `OffscreenClient` sender gate (+ tests: content-script-shaped sender dropped; Chrome offscreen URL accepted; Firefox `moz-extension://…/index.html?instance=<token>` accepted; other extension pages dropped).
-- Coordinator: `ProveAndSendContext.journalId` (+ `execution-lane.ts` passes it), `proveTxTask` mint/map/delete, the Zod event schema, the `provePhase` handler with the across-the-attempt rules, `lastProveOutcome` + `lastDenial` (+ every test listed in §F, including the post-denial sequence and the delivered-after-RPC case); `ExecutionService.getLastProveOutcome` spec/service/client.
+- Coordinator: `ProveAndSendContext.journalId` passed at the four builders (`transfer-executor.ts`, `dapp-send-executor.ts` ×3, `undefined` allowed), `proveTxTask` mint/map/delete, the Zod event schema, `onProvePhase` with the seq check and source-copied evidence, `lastProveOutcome` + `lastDenial`; `ExecutionService` injects the journal + denial callbacks into the coordinator and subscribes the client event at start (+ every test listed in §F, including dropped-`fallback`, reordered-`transmit`, the post-denial sequence and the delivered-after-RPC case); `ExecutionService.getLastProveOutcome` spec/service/client.
 - `stageSubtitle(stage, backend)` + test; `RecentActivityView` returns the backend subtitle ahead of the task label (+ component test pinning the priority), stamps `data-backend`.
 - `ARCHITECTURE.md` one paragraph on the event; `UPDATE.md`; codex-notes `05` (fix the stale `packages/extension` path while there) and `10`.
-- **Validation gate**: `bun run --cwd packages/wallet-core test`, `bun run --cwd packages/extension-messaging test`, `bun run --cwd packages/aztec-runtime test`, `bun run test` all green; `bun run typecheck:all` + `bun run lint`; local network e2e from the root, WASM build (Presto absent → `fallback`): `bun run e2e:agent tests/e2e/network/tx-sendTx-default.test.ts` green with the awaiting card reaching `data-stage="proving"` and **`data-backend="browser"`** with the exact subtitle `Proving in browser…` asserted; CI: the P3 soak dispatch repeated → green with `PROVE_SUCCESS ≥ 1` and, in the canary lane's console capture, `data-backend="presto"` / `Proving with Presto ✦` (assert added to `tx-sendTx-default.test.ts`, keyed on `VITE_NULO_PRESTO_REQUIRED`). Layers: unit, typecheck, lint, network e2e (local + CI).
+- **Validation gate**: `bun run --cwd packages/wallet-core test`, `bun run --cwd packages/extension-messaging test`, `bun run --cwd packages/aztec-runtime test`, `bun run test` all green; `bun run typecheck:all` + `bun run lint`; local network e2e from the root, WASM build (Presto absent → `fallback`): `bun run e2e:agent tests/e2e/network/tx-sendTx-default.test.ts` green with the awaiting card reaching `data-stage="proving"` and **`data-backend="browser"`** with the exact subtitle `Proving in browser…` asserted; CI: the P3 soak dispatch repeated → green with the printed `PROVE_SUCCESS ≥ 1` and the selected test itself asserting `data-backend="presto"` / `Proving with Presto ✦` (assert added to `tx-sendTx-default.test.ts`, keyed on `VITE_NULO_PRESTO_REQUIRED`, independent of shard label). Layers: unit, typecheck, lint, network e2e (local + CI).
 
 #### P5 — arc-1 docs + residue
 
@@ -641,16 +674,15 @@ phase's typecheck is green on its own.
 #### P6 — status client, UI-state mapper, custom element
 
 - `src/utils/presto-ui-state.ts` (+ ≥ 10-case test: each `BannerState` via `stateFromStatus`, the `unconfirmed` pitch rule, unknown reason → `error`, `needsDownload`, minimal-body degradation (`info` empty, `presto-reachable`), copy/steps per state, the denied overlay from `lastProveOutcome`).
-- `src/composables/usePrestoStatus.ts` + `getPrestoClient()` (+ ≥ 10-case test with an injected fake client: idle → detecting → each state; `forceRefresh` passthrough; a late result after `dispose` is dropped; `bannerStatus` mirrors the raw status; two composables share one injected client).
+- `src/composables/usePrestoStatus.ts` over the arc-1 `getPrestoClient()` (+ ≥ 10-case test with an injected fake client: idle → detecting → each state; `forceRefresh` passthrough; a late result after `dispose` is dropped; `bannerStatus` mirrors the raw status; two composables share one injected client); `presto-ui-state.test.ts` exercises `copyFor(state, { outcome, denial })`.
 - `vite.config.ts`: `isCustomElement`.
-- **I9 probe**: a ten-line smoke case in the existing onboarding harness that intercepts `https://127.0.0.1:59834/health` with `request.respond(...)` and asserts the page received the stubbed body — decides P7's mechanism before P7 promises it.
-- **Validation gate**: `bun run test` green (new tests included); `bun run typecheck:all`; `bun run lint`; `bun run build` exit 0; the I9 probe green (or the override fallback chosen and recorded in lessons). Layers: unit, typecheck, lint, build, smoke e2e. (A4 is measured in P7, once the code is actually reachable.)
+- **Validation gate**: `bun run test` green (new tests included); `bun run typecheck:all`; `bun run lint`; `bun run build` exit 0. Layers: unit, typecheck, lint, build. (A4 is measured in P7, once the code is actually reachable.)
 
 #### P7 — onboarding `presto.vue`
 
 - Page per §D and the approved artboards; `learn.vue`/`fees.vue` routes; `app.store.ts` + `reset.vue` comments; delete `accelerator.vue` and `useAcceleratorStatus.*` (last consumer replaced here).
 - `tests/e2e/onboarding-tab.test.ts`: intercept both `https://127.0.0.1:59834/health` and `http://127.0.0.1:59833/health`; bodies satisfy `isDetailedHealthBody` where a specific diagnosis is expected; cases: available → Continue; both refused → card banner + Skip; HTTPS refused + detailed HTTP body without `https_port` → the encrypted-connection card with the `https-disabled` steps; HTTPS refused + minimal HTTP body → the `presto-reachable` copy.
-- **Validation gate**: `bun run lint` + `bun run typecheck:all`; `cd apps/extension && bun run test:e2e -- tests/e2e/onboarding-tab.test.ts` green; then the full smoke `cd apps/extension && bun run test:e2e` green; zero-residue: `grep -rn "aztec-accelerator\|AcceleratorProver\|ACCELERATOR_\|useAcceleratorStatus\|onboarding-accelerator" packages apps --include=*.ts --include=*.vue --include=*.mts` → 0 hits; **A4 measured here** (the consumers now exist): one measurement build with `build.sourcemap: true`, walk the onboarding entry's import closure from Vite's build manifest, sum gzip sizes before (arc-1 tip) and after → delta ≤ 60 kB, and every `.map` in that closure has no `sources` entry under `@aztec/` (module-level evidence, not a string grep) — recorded in lessons; manual: `bun run build && send-to-mac apps/extension/dist/chrome`, load unpacked, walk the onboarding states with the real tray app (Presto quit → pitch; Encrypted Connection off; on; approval prompt approved at first send) — screenshots + the observed `Origin` header (Presto's log) in lessons. Layers: lint, typecheck, smoke e2e, grep, build measurement, manual.
+- **Validation gate**: `bun run lint` + `bun run typecheck:all`; `cd apps/extension && bun run test:e2e -- tests/e2e/onboarding-tab.test.ts` green; then the full smoke `cd apps/extension && bun run test:e2e` green; zero-residue: `grep -rn "aztec-accelerator\|AcceleratorProver\|ACCELERATOR_\|useAcceleratorStatus\|onboarding-accelerator" packages apps --include=*.ts --include=*.vue --include=*.mts` → 0 hits; **A4 measured here** (the consumers now exist): one measurement build with `build.manifest: true` and `build.sourcemap: true` (a local, uncommitted config flip), walk the onboarding entry's chunk closure over static **and** dynamic imports from the manifest, sum gzip sizes for the **pre-migration** build at `origin/dev @ 323380f6` and for P7 → delta ≤ 60 kB, and every `.map` in the closure has no `sources` entry under `@aztec/` (module-level evidence, not a string grep) — recorded in lessons; manual: `bun run build && send-to-mac apps/extension/dist/chrome`, load unpacked, walk the onboarding states with the real tray app (Presto quit → pitch; Encrypted Connection off; on; approval prompt approved at first send) — screenshots + the observed `Origin` header (Presto's log) in lessons. Layers: lint, typecheck, smoke e2e, grep, build measurement, manual.
 
 #### P8 — settings Proving page + index row
 
@@ -729,7 +761,8 @@ health in CI is investigated (download URL, pins, `bb` download on first prove),
 | Codex (GPT-6 Astra, high) — `audit-codex.md` | **reject** | uncorrelated proving events; journal Zod schema; overstated transport guarantees; gates unpassable as sequenced | all four resolved: `proveId` registry + across-the-attempt rules (§F); Zod `backend` + round-trip (P4); explicit `httpsOnly:true`, required-arm-only type, bounded squatting guarantee (§A, Security); phases resequenced with per-phase typecheck green, root `e2e:agent`, exact subtitles (P2/P4/P7) |
 | Fable 5.1 (Plan subagent) — `audit-fable.md` | **conditional approve** | manifest in arc 1; journal seam; per-prove id; drop LNA short-circuit; `httpsOnly` on required arm; banner dismissal; `denied` surface; health-tier copy | all eight met: P2 manifest; `updateProvingBackend`; `proveId`; §C no probe; §A type; §D `clearDismissal` + dismiss→Skip; §E/§F `lastProveOutcome`; §C/§E tiering copy |
 | Codex fresh-context pass r1 (on v2 + ledger) — `audit-codex.md` §2 | **reject** | denial overwritten by later phases; subtitle hidden behind the task label; Firefox events fail the URL gate; correlation plumbing incomplete (no journal id in the context, sink wiring, client generic); P1 red typecheck; arc 1 not honestly shippable (old onboarding probes HTTP) | all folded in v3: `lastDenial` (D17′); subtitle priority (D3′); path-only URL gate + payload schema (D5′); `journalId` on the context, sink, `PxeServiceClientBase<…, PxeEvents>`, `createPxeOffscreen` dep (D6′); P1 adds before P2 removes; arc-1 onboarding shim (D2′); plus the Medium security items (archive member rules, npm provenance mechanism, production-policy test), F4/F8/F16/F19/F21 corrections, I7/I8/I9 rewrites, A5/A6 rewording, P3 aggregator name + in-test native assertion, P5 residue exceptions, A4 measured in P7 by sourcemap closure, denial manual check moved to P8, registry → `Map`, plaintext derived from mode, shallow port untouched |
-| Codex fresh-context pass r2 (on v3) | _pending_ | | |
+| Codex fresh-context pass r2 (on v3) — `audit-codex.md` §3 | **reject** | evidence inferred from possibly incomplete event history (a lost `fallback` clears a denial); journal-id plumbing named the wrong builder; the shim's contract did not match its consumer; P2 used a P6 factory; provenance fixture had nothing to audit; I9 probe after its first dependent gate; A4 baseline wrong; stale-instance claim unsupported; "canary lane" wording | all folded in v4: backend + `seq` derived at the source, receiver copies (D17″, D6″); the four real builders + `ExecutionService` injection (D6″); exact shim contract, Windows note removed, factory + probe moved to P2 (D2″); real-install `npm audit signatures --include-attestations` (D23′); pre-migration baseline, manifest on, dynamic imports (D19″); stale-instance sentence corrected (D5″); `copyFor` pair; cache-hit type check; `prove()`-level policy test; F23/F24 corrected; I7/I9 rewritten; A4/A5 reworded; LNA recovery copy softened; profile/chain cut from the event |
+| Codex fresh-context pass r3 (on v4) | _pending_ — a third reject sends the residuals to the owner at the gate rather than a v5 | | |
 
 ### Decision ledger
 
@@ -744,11 +777,11 @@ must not depend on a PXE).
 | # | Decision | Alternative rejected | Why | Source |
 |---|---|---|---|---|
 | D1 | Page-side `PrestoClient` for status | status routed through the offscreen PXE | onboarding precedes any PXE; popup must render Settings without the offscreen | both |
-| D2′ | Two arcs; arc 1 = SDK + manifest + CI + prove-phase event + journal seam + subtitle **+ a transport-honest shim on the old onboarding page**; arc 2 = the new onboarding + settings | one arc (Codex's preference twice) / v2's arc 1 that left the old page probing HTTP | arc 1 must be shippable alone without an onboarding page that says "active" over HTTP while production proves HTTPS-only; the shim is ~40 lines and dies in P7 | Codex final r1; driver |
+| D2″ | Two arcs; arc 1 = SDK + manifest + CI + prove-phase event + journal seam + subtitle + the shared client factory + a transport-honest shim on the old onboarding page that keeps its **exact** contract; arc 2 = the new onboarding + settings | one arc (Codex's preference three times — conceded as "not inherently worse") / v3's shim with an invented `checking`/`not-installed` contract and a P6 dependency | arc 1 must be shippable alone; the shim keeps the page's terminal Skip/download states working; the factory is 10 lines and belongs to arc 1 anyway; the owner gets two reviewable PRs instead of one very large one | Codex final r1 + r2; driver |
 | D3′ | Journal `updateProvingBackend` seam under `transitionLock`, **rendered ahead of the task label** in `cardSubtitleFor` | `proveTxTask` `StepContent` label / v2's helper-only change (which the task label would have hidden in the ordinary case) | the card renders from the persisted journal after a popup reopen; the label is task-scoped and ambiguous under concurrency; the priority fix is what makes the subtitle visible at all | Fable offered both; Codex final r1 caught the priority; driver |
 | D4 | Typed `PxeService` `provePhase` event via `sendEvent` | raw `chrome.runtime.sendMessage` string | the typed channel exists and routes through the client the coordinator already holds | Fable |
-| D5′ | SW-side sender gate on `OffscreenClient`: `isTrustedInternalSender` + the offscreen page's **origin + pathname** (query ignored) + a Zod payload schema | v2's exact-URL equality (rejects Firefox's `?instance=` token); assuming the existing gate covers events (Fable's F13 claim) | the client filters by `message.from` only — verified; the content script shares `sender.id`; Firefox appends an instance token; types validate nothing at runtime | Codex r1 + final r1; driver correction of Fable |
-| D6′ | `proveId` minted in `proveTxTask`, mapped to the `journalId` the context now carries, set on the runtime as `activeProve` (with profile + chain) inside the write lock, cleared in `finally`; sink-based wiring through `createPxeOffscreen`; the client base gains the events generic | attribute by `chainId` (v1); v2's under-specified handoff (no journal id in the context, forwarder without coordinates, `void` bootstrap) | locks are per profile+chain and the SW marks `proving` before the lock; the plumbing must exist end to end or the rest is fiction | both; Codex final r1 for the gaps |
+| D5″ | SW-side sender gate on `OffscreenClient`: `isTrustedInternalSender` + the offscreen page's **origin + pathname** (query ignored) + a Zod payload schema; stale Firefox instances are handled by the `proveId` map, not the gate | v2's exact-URL equality; v3's claim that the service-name handshake excludes stale instances (it does not — the name is constant) | the client filters by `message.from` only — verified; the content script shares `sender.id`; Firefox appends an instance token; types validate nothing at runtime | Codex r1 + final r1 + r2; driver correction of Fable |
+| D6″ | `proveId` minted in `proveTxTask`, mapped to the `journalId` passed by the four real context builders (two executors), set on the runtime as `activeProve { proveId, seq }` inside the write lock, cleared in `finally`; sink-based wiring through `createPxeOffscreen`; the client base gains the events generic; `ExecutionService` injects the journal/denial callbacks and subscribes the event | attribute by `chainId` (v1); v2/v3's under-specified handoff (wrong builder named, coordinator dependencies unwired, coordinates nobody checked) | the plumbing must exist end to end or the rest is fiction; profile/chain were dead weight | both; Codex final r1 + r2 |
 | D7 | Backend applied across the attempt (`transmit → presto`, `fallback/denied → browser`, `proved` no-op) | first message wins (v1) | `transmit` can be followed by `fallback`; `proved` identifies nothing | Codex |
 | D8 | `httpsOnly: true` passed explicitly in default mode; `httpsOnly: false` only on the `required` arm's type | shared optional `httpsOnly?` on `PrestoEndpoint` (v1) | the SDK honours `PRESTO_HTTPS_ONLY`; the type, not the grep, is the first line | Codex + Fable |
 | D9 | No page-side LNA `permissions.query` short-circuit | v1's pre-probe short-circuit | the SDK transport already queries and caches; a page probe diverges | both |
@@ -759,13 +792,13 @@ must not depend on a PXE).
 | D14 | `PRESTO_ALLOW_ALL=1` scoped to the server process; production authorization exercised by the Mac check | job-level env | least privilege; CI cannot exercise the prompt | Codex |
 | D15 | Min-age excludes only for packages still gated at install; removal PR is a dated deliverable | three excludes (v1) | presto/presto-core clear the gate on 2026-09-15; comments never expire an exclude | Fable + Codex |
 | D16 | `clearDismissal` on mount; `presto-banner:dismiss` → Skip | ignore the close button (v1) | a 7-day localStorage dismissal survives a wallet reset | Fable |
-| D17′ | `lastDenial` held separately from `lastProveOutcome`: set on `denied`, cleared only by a native `proved`; one RPC returns both; Settings shows "Presto declined Nulo" | denial invisible (v1); v2's every-phase record (erased within a second by `fallback → proving → proved → receive`) | Presto prompts on `/prove`, health stays green; Retry cannot confirm approval; the SDK's post-denial sequence overwrites a single slot | Fable + Codex ask; Codex final r1 |
+| D17″ | `lastDenial` held separately: set on `denied`, cleared only by a `proved` whose **source-derived** `backend` is `presto`; backend evidence and `seq` computed in the runtime observer, the receiver copies and rejects stale seqs | denial invisible (v1); v2's every-phase slot; v3's receiver-side inference (a lost `fallback` would clear the denial on the WASM `proved`) | the source sees every phase in order; the receiver may not; evidence must travel with each event | Fable + Codex ask; Codex final r1 + r2 |
 | D18 | `presto-reachable` is the primary encrypted-connection arm; Details degrade to `—`; `downloading` only after approval | v1 copy assumed the detailed body | `/health` is origin-tiered | Fable (new fact), Codex ("state semantics") |
-| D19′ | A4 measured in **P7** (after the consumers exist) over the onboarding entry's import closure from the build manifest, gzip delta ≤ 60 kB, and `@aztec/` absence proven from sourcemap `sources` | "small; recorded" (v1); v2's P6 measurement (unused modules → zero delta) and string grep | unmeasurable is unauditable; a measurement before the code is reachable measures nothing | Codex r1 + final r1 |
+| D19″ | A4 measured in **P7** over the onboarding entry's static + dynamic chunk closure from an explicitly enabled build manifest, gzip delta ≤ 60 kB against the **pre-migration** build, `@aztec/` absence proven from sourcemap `sources` | "small; recorded" (v1); v2's P6 measurement and string grep; v3's arc-1-tip baseline (already carries the client via the shim) | the budget is the migration's total cost, so the baseline predates it | Codex r1 + final r1 + r2 |
 | D20 | Bounded squatting guarantee stated; residuals named | "HTTPS-only is the mitigation" (v1) | no CA pinning; leaf key on disk | Codex |
 | D21 | Plaintext derived from `provingMode === "required"` inside the factory; no `httpsOnly` option at all | v2's `httpsOnly: false` literal on the required arm | one fewer thing to set wrongly; the mode is the policy | Codex final r1 |
 | D22 | Coordinator-owned `Map<proveId, journalId>` | a `ProveAttemptRegistry` class (v2) | no behaviour beyond set/get/delete | Codex final r1 |
-| D23 | npm provenance verified with `npm audit signatures` in an isolated fixture, bound to repo/workflow/commit | `gh attestation verify` (v2 — wrong mechanism: Presto publishes npm provenance, not GitHub artifact attestations) | verify what is actually published | Codex final r1 |
+| D23′ | npm provenance verified with `npm audit signatures --json --include-attestations` after a real `npm install --ignore-scripts` in an isolated fixture, bound to repo/workflow/commit | `gh attestation verify` (v2 — wrong mechanism); v3's lock-only fixture (npm audits the installed tree, so it had nothing to audit) | verify what is actually published, the way its publisher verifies it | Codex final r1 + r2 |
 | D24 | `presto-policy.test.ts` drives the real `presto-core` client with a stubbed `fetch` | constructor-argument assertions only (v2) | the round-1 ask was "no HTTP `/prove` after an HTTPS failure", which only a client-level test shows | Codex r1 + final r1 |
 
 **Disputes and how they were resolved**
@@ -782,10 +815,18 @@ must not depend on a PXE).
   phase.
 - *"All resolved" was premature (final pass r1).* The v2 ledger claimed every round-1 finding
   resolved; the fresh pass showed seven decisions resolved by assertion (D2, D3, D5, D6, D13, D17,
-  D19). Each is re-decided above with a prime mark and the concrete mechanism; the r2 pass judges
-  v3 on those.
+  D19). Each was re-decided in v3 with a prime mark.
+- *Still short in r2.* Five of those seven (D2′, D5′, D6′, D17′, D19′) and D23 were partial on
+  inspection — the mechanisms were named but their premises were wrong (which builder holds the
+  journal id; which contract the shim must keep; where evidence must be derived; what npm audits).
+  v4 re-decides them with a double prime. The pattern across rounds is consistent: the shape holds,
+  the plumbing details were under-verified; r3 judges v4 on the plumbing.
+- *One arc.* Codex has preferred a single arc in all three passes and now calls two arcs "not
+  inherently worse". The driver keeps two for reviewability; if the owner prefers one PR, drop the
+  shim and merge P6–P8 into arc 1 — nothing else changes. Surfaced at the gate.
 
-**Open for the owner at the gate:** A1–A7 above (recommendations given for each).
+**Open for the owner at the gate:** A1–A7 above (recommendations given for each), and the one-arc
+vs two-arc delivery choice (recommended: two, with the shim).
 
 ## Seeds
 
