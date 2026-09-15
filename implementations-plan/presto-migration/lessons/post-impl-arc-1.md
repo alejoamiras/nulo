@@ -44,3 +44,9 @@ Codex confirmed the three adversarial asks: a Response envelope always reaches `
 | `extension-messaging` `bun run test` | 207/207 |
 | `extension-messaging` + extension `typecheck` | exit 0 |
 | `bun run lint` | exit 0 |
+
+## Round 3 — converged
+
+Codex, resumed with the round-2 fix: **"No new material findings"** — "all production responses to this client originate in the offscreen document. Normal replies, errors, and serialization fallbacks use `Service.rawSend`; there is no service-worker relay. Firefox's `?instance=` query remains accepted. In-memory round trips using the actual client/service classes passed for both URL schemes: SW requests accepted, forged popup replies rejected, offscreen replies delivered. The harness change masks no identified producer mismatch. The explicit forged-response test bypasses its default sender and would fail if authentication were reverted." Browser-level Firefox verification stays the A6 follow-up.
+
+Arc 1 loop: 3 rounds, 2 fix commits (`a452a9a2`, `adf86e5e`), converged at the boundary.
