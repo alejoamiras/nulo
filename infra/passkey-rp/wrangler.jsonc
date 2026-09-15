@@ -1,12 +1,12 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "nulo-passkey-rp",
-  "main": "src/worker.ts",
-  "compatibility_date": "2026-08-01",
-  "account_id": "0f1688fc6a4b6acf3fa55cf71e1bed26",
-  // The RP host is reachable ONLY at its own name: no workers.dev origin, no preview URLs.
-  "workers_dev": false,
-  "preview_urls": false,
-  // One custom domain and no wildcard: every `*.passkey.nulo.sh` descendant stays unregistered.
-  "routes": [{ "pattern": "passkey.nulo.sh", "custom_domain": true }]
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "nulo-passkey-rp",
+	"main": "src/worker.ts",
+	"compatibility_date": "2026-08-01",
+	"account_id": "0f1688fc6a4b6acf3fa55cf71e1bed26",
+	// The RP host is reachable ONLY at its own name: no workers.dev origin, no preview URLs.
+	"workers_dev": false,
+	"preview_urls": false,
+	// One custom domain and no wildcard: every `*.passkey.nulo.sh` descendant stays unregistered.
+	"routes": [{ "pattern": "passkey.nulo.sh", "custom_domain": true }]
 }

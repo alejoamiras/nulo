@@ -35,7 +35,12 @@ existing keys and profiles.
   descendant stays unregistered in DNS, and the extension's own content
   script is excluded from them (`manifest.config.ts`
   `content_scripts[].exclude_matches`). The apex `nulo.sh` and the
-  application subdomains are therefore not eligible.
+  application subdomains are therefore not eligible. What remains on the
+  hostname is Cloudflare's own (`/cdn-cgi/*`, a challenge page if a rule
+  ever challenges it) — the edge that already terminates the host's TLS,
+  so no new trust root, and the page's CSP refuses any script a zone
+  feature would inject; the README lists the dashboard settings to keep
+  off.
   - **M4.9 build-time gate** (`scripts/check-rp-id.ts`): single source
     of truth is `RP_ID` exported from
     `src/wallet/services/passkey/spec.ts`. The gate fails the build if

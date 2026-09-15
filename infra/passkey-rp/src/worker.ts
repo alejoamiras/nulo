@@ -18,8 +18,7 @@ const PAGE = `<!doctype html>
 `
 
 const HEADERS: Record<string, string> = {
-	"content-security-policy":
-		"default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; sandbox",
+	"content-security-policy": "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; sandbox",
 	"permissions-policy": "publickey-credentials-create=(), publickey-credentials-get=()",
 	"strict-transport-security": "max-age=31536000; includeSubDomains",
 	"x-content-type-options": "nosniff",
