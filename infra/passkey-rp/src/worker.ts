@@ -17,16 +17,18 @@ const PAGE = `<!doctype html>
 </html>
 `
 
-const HEADERS: Record<string, string> = {
+// Every response carries the full policy; the live probe asserts the same map against the edge.
+export const POLICY: Record<string, string> = {
 	"content-security-policy": "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; sandbox",
 	"permissions-policy": "publickey-credentials-create=(), publickey-credentials-get=()",
 	"strict-transport-security": "max-age=31536000; includeSubDomains",
 	"x-content-type-options": "nosniff",
 	"x-frame-options": "DENY",
 	"referrer-policy": "no-referrer",
-	"cache-control": "public, max-age=3600",
 	"x-robots-tag": "noindex",
 }
+
+const HEADERS: Record<string, string> = { ...POLICY, "cache-control": "public, max-age=3600" }
 
 function respond(status: number, body: string | null, extra: Record<string, string> = {}): Response {
 	return new Response(body, { status, headers: { ...HEADERS, ...extra } })

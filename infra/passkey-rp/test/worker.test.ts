@@ -2,26 +2,11 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import worker from "../src/worker"
-
-// Mirrors `RP_ID` in apps/extension/src/wallet/services/passkey/spec.ts; the extension's own
-// build gate pins that constant, this file pins the host that serves it.
-const RP_HOST = "passkey.nulo.sh"
-
-// The exact policy every response carries, whatever its status. A relaxed `sandbox`, an added
-// `script-src` or a zeroed HSTS max-age must fail here, not pass a substring check.
-const POLICY: Record<string, string> = {
-	"content-security-policy": "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; sandbox",
-	"permissions-policy": "publickey-credentials-create=(), publickey-credentials-get=()",
-	"strict-transport-security": "max-age=31536000; includeSubDomains",
-	"x-content-type-options": "nosniff",
-	"x-frame-options": "DENY",
-	"referrer-policy": "no-referrer",
-	"x-robots-tag": "noindex",
-}
+import { EXPECTED_POLICY, INERT_HTML, RP_HOST } from "./policy"
 
 const request = (path: string, init?: RequestInit) => worker.fetch(new Request(`https://${RP_HOST}${path}`, init))
 const expectPolicy = (res: Response) => {
-	for (const [name, value] of Object.entries(POLICY)) expect(res.headers.get(name)).toBe(value)
+	for (const [name, value] of Object.entries(EXPECTED_POLICY)) expect(res.headers.get(name)).toBe(value)
 }
 
 describe("the RP host serves one static, script-free page", () => {
@@ -31,7 +16,7 @@ describe("the RP host serves one static, script-free page", () => {
 		expectPolicy(res)
 		expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8")
 		const body = await res.text()
-		expect(body).not.toMatch(/<script|<iframe|<link|<object|<embed|\ssrc=|\shref=|\son[a-z]+=|javascript:/i)
+		expect(body).not.toMatch(INERT_HTML)
 		expect(body).toContain('<meta name="robots" content="noindex">')
 	})
 
