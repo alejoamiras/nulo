@@ -1,6 +1,6 @@
 import { inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
-import { assertPgOk, callExpectingNoPopup, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { assertPgOk, callExpectingNoPopup, setPgTextarea, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { waitForPopup, approveCapabilities } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -49,12 +49,7 @@ test.skipIf(!hasConfig)(
 			}
 			return v
 		})
-		await page.evaluate((json: string) => {
-			const input = document.querySelector<HTMLTextAreaElement>('[data-testid="pg-input-contractInstance"]')!
-			const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set
-			setter?.call(input, json)
-			input.dispatchEvent(new Event("input", { bubbles: true }))
-		}, instanceJson)
+		await setPgTextarea(page, "contractInstance", instanceJson)
 
 		const result = await callExpectingNoPopup(dappConnectedExtension, page, "registerContract", async () => {
 			await clickByTestId(page, "pg-btn-registerContract")

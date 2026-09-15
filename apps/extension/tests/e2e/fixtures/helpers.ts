@@ -1927,12 +1927,22 @@ export async function waitForWorkerLiveness(page: Page, afterTs: number, opts: {
 /** Set Developer Mode from Settings → Advanced, wait for the write to land, and return to the
  *  general tab (the settings subpages hide the nav tabs the other helpers click). */
 export async function setDeveloperMode(page: Page, on: boolean): Promise<void> {
+	await setAdvancedToggle(page, "developerMode", on)
+}
+
+/** Set Debug Mode (the log LEVEL — debug lines are dropped without it, whatever Developer Mode
+ *  says). The toggle only renders while Developer Mode is on. */
+export async function setDebugMode(page: Page, on: boolean): Promise<void> {
+	await setAdvancedToggle(page, "debugMode", on)
+}
+
+async function setAdvancedToggle(page: Page, key: "developerMode" | "debugMode", on: boolean): Promise<void> {
 	await navigateByHash(page, "#/popup/settings/advanced")
-	const toggle = '[data-testid="settings-toggle-developerMode"]'
+	const toggle = `[data-testid="settings-toggle-${key}"]`
 	await page.waitForSelector(toggle, { visible: true, timeout: 30_000 })
 	const isOn = async () => (await page.$eval(toggle, (el) => el.getAttribute("aria-checked"))) === "true"
 	if ((await isOn()) !== on) {
-		await clickByTestId(page, "settings-toggle-developerMode")
+		await clickByTestId(page, `settings-toggle-${key}`)
 		await page.waitForFunction(
 			(sel: string, want: string) => document.querySelector(sel)?.getAttribute("aria-checked") === want,
 			{ timeout: 10_000, polling: 200 },
