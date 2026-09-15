@@ -29,6 +29,7 @@ vi.mock("@aztec/wallet-sdk/extension/handlers", () => ({
 		}
 		approveDiscovery(id: string) {
 			handlerCalls.push(`approve:${id}`)
+			return true
 		}
 		rejectDiscovery(id: string) {
 			handlerCalls.push(`reject:${id}`)
@@ -43,6 +44,7 @@ vi.mock("./tab-lifecycle", () => ({ wireTabLifecycle: () => {} }))
 vi.mock("@nulo/wallet-sdk-schema-patch/register", () => ({}))
 
 import { initWalletSdkHandler } from "./background"
+import { fakeSdkPorts } from "./test-ports"
 
 function deferred<T>() {
 	let resolve!: (v: T) => void
@@ -118,7 +120,7 @@ describe("handleDiscovery dedupe window", () => {
 		const popupA = deferred<{ approved: boolean }>()
 		const lookupB = deferred<undefined>()
 		const { services, timedLookupRequested } = makeServices(popupA.promise, lookupB.promise)
-		initWalletSdkHandler(services, noopLogger)
+		initWalletSdkHandler(services, noopLogger, fakeSdkPorts())
 
 		captured?.onPendingDiscovery(discovery("a"))
 		await vi.waitFor(() => expect(log).toContain("discover"))

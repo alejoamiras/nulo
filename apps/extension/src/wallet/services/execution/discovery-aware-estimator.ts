@@ -17,8 +17,7 @@
  * `DiscoveryProbe` is deliberately CHAIN-BOUND (this exact one-argument
  * "pure extractor" was proven impossible twice — message hashing needs live
  * `nodeInfo` behind `assertLiveChainIdentity`, fetched lazily ONLY when
- * effects exist; see the fee-estimation-speedup ledger #11 and this plan's
- * audit round 1). Dropping the live-chain assert would weaken authwit-hash
+ * effects exist). Dropping the live-chain assert would weaken authwit-hash
  * derivation against a drifted RPC — it is pinned as preserved.
  */
 
@@ -28,6 +27,7 @@ import type { AuthwitDiscoverer } from "./authwit-discoverer"
 import { CollectingDiscoveryProbe } from "./discovery-probe"
 import type { FeeEstimate } from "./fee/fee-strategy"
 import type { Action, AddPrivateAuthwitAction, FeeOptions, FeeSettings, Operation, SendTransactionOperation } from "./spec"
+import type { DiscoveredAuthwit } from "@nulo/wallet-bridge"
 
 /** Chain-bound extraction capability handed to folded strategies (unused by
  *  any strategy in the inert shape). `built` carries the live node + network
@@ -65,6 +65,8 @@ export interface DiscoveryEstimateResult {
 	/** Actions discovery added — surfaced so the executor keeps its existing
 	 *  splice/record bookkeeping unchanged. */
 	discoveredActions: AddPrivateAuthwitAction[]
+	/** The decoded authorization behind each discovered action, same order. */
+	discovered: DiscoveredAuthwit[]
 }
 
 export class DiscoveryAwareEstimator {
@@ -106,10 +108,10 @@ export class DiscoveryAwareEstimator {
 				...(detectedFee ? { fee: detectedFee } : {}),
 			} as SendTransactionOperation
 			const built = await this.deps.buildAndEstimateFolded(op, feeSettings, probe, parentTask, signal)
-			return { built, discoveredActions: [...probe.collected] }
+			return { built, discoveredActions: [...probe.collected], discovered: [...probe.discovered] }
 		}
 
-		const discoveredActions = await this.deps.authwit.discoverPrivateAuthwits(
+		const { actions: discoveredActions, discovered } = await this.deps.authwit.discoverPrivateAuthwits(
 			{ ...operation, actions: [...actions] } as SendTransactionOperation,
 			this.deps.buildForDiscovery,
 		)
@@ -123,6 +125,6 @@ export class DiscoveryAwareEstimator {
 			...(detectedFee ? { fee: detectedFee } : {}),
 		} as SendTransactionOperation
 		const built = await this.deps.buildAndEstimateValidated(op, feeSettings, parentTask, signal)
-		return { built, discoveredActions }
+		return { built, discoveredActions, discovered }
 	}
 }

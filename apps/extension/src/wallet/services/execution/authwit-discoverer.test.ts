@@ -1,22 +1,14 @@
 /**
- * Unit tests for `AuthwitDiscoverer`.
- *
- * `discoverPrivateAuthwits` runs real Aztec authwit simulation + hash
- * computation; that path exercises Barretenberg WASM (poseidon2) and is
- * e2e-only. This suite covers:
- *   - The callback plumbing contract: `discoverPrivateAuthwits` invokes
- *     the provided `buildTxRequest` and feeds its output into
- *     `pxe.simulateTx` with the correct flags.
- *   - Empty-effects fast path: returns `[]` without doing hash work.
- *
- * The three `compute*MessageHash` methods call
- * `computeAuthWitMessageHash` from `@aztec/aztec.js/authorization` which
- * hits WASM. Unit-testing them here would reproduce the Barretenberg
- * error encountered with poseidon2; those paths are covered by the
- * network e2e (transfers + authwit flows).
+ * `AuthwitDiscoverer` plumbing under the default jsdom environment: the callback contract
+ * (`buildTxRequest` → `pxe.simulateTx` with the discovery flags), the empty-effects fast path, and
+ * error propagation. None of these hash anything, so nothing is mocked. The real decode + hash
+ * path (a genuine `CallAuthorizationRequest` preimage through `fromFields` validation and the
+ * outer message hash) lives in `authwit-discoverer.real.test.ts` under a node environment — the
+ * poseidon binding this needs fails under jsdom.
  */
 
 import { describe, expect, test, vi } from "vitest"
+
 import type { ConfigProp, IConfig } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { EventHandler } from "@nulo/wallet-core/utils"
@@ -53,6 +45,7 @@ function fakeBuildCtx() {
 			node: { getNodeInfo },
 			pxe: { simulateTx },
 			account: { address: { toString: () => "0xacc" } },
+			network: { chainId: 0, l1ChainId: 31337, rollupVersion: 1 },
 		},
 	}
 }
@@ -74,7 +67,7 @@ describe("AuthwitDiscoverer.discoverPrivateAuthwits", () => {
 			skipTxValidation: true,
 			skipFeeEnforcement: true,
 		})
-		expect(result).toEqual([])
+		expect(result).toEqual({ actions: [], discovered: [] })
 	})
 
 	test("returns [] on empty effects without touching getNodeInfo", async () => {
@@ -84,7 +77,7 @@ describe("AuthwitDiscoverer.discoverPrivateAuthwits", () => {
 			{ networkId: "n", accountAddress: "0xa", actions: [] as Action[] },
 			async () => ctx as never,
 		)
-		expect(result).toEqual([])
+		expect(result).toEqual({ actions: [], discovered: [] })
 		expect(getNodeInfo).not.toHaveBeenCalled()
 	})
 

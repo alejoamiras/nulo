@@ -31,6 +31,7 @@ vi.mock("@aztec/wallet-sdk/extension/handlers", () => ({
 		}
 		approveDiscovery(id: string) {
 			handlerCalls.push(`approve:${id}`)
+			return true
 		}
 		rejectDiscovery(id: string) {
 			handlerCalls.push(`reject:${id}`)
@@ -55,6 +56,7 @@ vi.mock("./tab-lifecycle", () => ({
 vi.mock("@nulo/wallet-sdk-schema-patch/register", () => ({}))
 
 import { initWalletSdkHandler } from "./background"
+import { fakeSdkPorts } from "./test-ports"
 
 function makeServices(discoverImpl: () => Promise<{ approved: boolean }>) {
 	const onActiveProfileChanged = new EventHandler<unknown>()
@@ -122,7 +124,7 @@ beforeEach(() => {
 describe("initWalletSdkHandler install order", () => {
 	test("handler → decrypt patch → session-deleted → profile subscriptions → tab lifecycle → initialize (once, last)", () => {
 		const { services } = makeServices(async () => ({ approved: true }))
-		initWalletSdkHandler(services, noopLogger)
+		initWalletSdkHandler(services, noopLogger, fakeSdkPorts())
 		expect(log.indexOf("handler:new")).toBe(0)
 		expect(log.filter((l) => l === "handler:initialize")).toHaveLength(1)
 		expect(log.at(-1)).toBe("handler:initialize")
@@ -146,7 +148,7 @@ describe("handleDiscovery cleanup", () => {
 
 	test("a denied popup rejects the request AND releases the dedupe slot", async () => {
 		const { services } = makeServices(async () => ({ approved: false }))
-		initWalletSdkHandler(services, noopLogger)
+		initWalletSdkHandler(services, noopLogger, fakeSdkPorts())
 		captured?.onPendingDiscovery(discovery("r1"))
 		await vi.waitFor(() => expect(handlerCalls).toContain("reject:r1"))
 		// Same (origin, chainId) again: the slot was released, so a NEW popup runs
@@ -158,7 +160,7 @@ describe("handleDiscovery cleanup", () => {
 
 	test("an approval past the freshness cutoff is rejected before the session write, slot still released", async () => {
 		const { services, sessions } = makeServices(async () => ({ approved: true }))
-		initWalletSdkHandler(services, noopLogger)
+		initWalletSdkHandler(services, noopLogger, fakeSdkPorts())
 		// A discovery already older than Nulo's cutoff when the popup resolves.
 		captured?.onPendingDiscovery(discovery("r3", -10 * 60_000))
 		await vi.waitFor(() => expect(handlerCalls).toContain("reject:r3"))

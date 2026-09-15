@@ -39,6 +39,8 @@ declare global {
   const TESTNET_ROLLUP_VERSION: typeof import('../utils/chain-ids').TESTNET_ROLLUP_VERSION
   const THEME_HINT_KEY: typeof import('../utils/general').THEME_HINT_KEY
   const TOAST_DURATION: typeof import('../composables/toast.js').TOAST_DURATION
+  const TRANSFER_LABELS: typeof import('../utils/token-transfer-vocabulary').TRANSFER_LABELS
+  const TRANSFER_SIGNATURES: typeof import('../utils/token-transfer-vocabulary').TRANSFER_SIGNATURES
   const UnlockTimeoutError: typeof import('../composables/unlockWait').UnlockTimeoutError
   const activateNetworkGuarded: typeof import('../utils/guarded-network-activation').activateNetworkGuarded
   const aggregateFiat: typeof import('../utils/token-aggregate').aggregateFiat
@@ -81,6 +83,7 @@ declare global {
   const effectScope: typeof import('vue').effectScope
   const feeJuicePricingFromUsd: typeof import('../utils/fee-estimation').feeJuicePricingFromUsd
   const feeToUsd: typeof import('../utils/fee-estimation').feeToUsd
+  const findTransferSignature: typeof import('../utils/token-transfer-vocabulary').findTransferSignature
   const foldLabel: typeof import('../utils/token-fold').foldLabel
   const forChain: typeof import('../utils/token-order').forChain
   const formatBaseUnits: typeof import('../utils/amount').formatBaseUnits
@@ -166,6 +169,7 @@ declare global {
   const pickPrimaryMethod: typeof import('../utils/tx-enrichment').pickPrimaryMethod
   const pinScopeOf: typeof import('../composables/usePinnedTokens').pinScopeOf
   const preflightNetworkConnectivity: typeof import('../composables/importPreflight').preflightNetworkConnectivity
+  const projectArgument: typeof import('../utils/transfer-intent').projectArgument
   const provide: typeof import('vue').provide
   const purgeNumber: typeof import('../utils/amount').purgeNumber
   const reactive: typeof import('vue').reactive
@@ -218,6 +222,7 @@ declare global {
   const toRefs: typeof import('vue').toRefs
   const toRestoreError: typeof import('../utils/restore-error').toRestoreError
   const toValue: typeof import('vue').toValue
+  const transferLabel: typeof import('../utils/token-transfer-vocabulary').transferLabel
   const triggerRef: typeof import('vue').triggerRef
   const trimAddress: typeof import('../utils/string').trimAddress
   const txBelongsToScope: typeof import('../stores/activity.store').txBelongsToScope
@@ -410,7 +415,10 @@ declare global {
   export type { OrderableRow, OrderCtx, RowClass } from '../utils/token-order'
   import('../utils/token-order')
   // @ts-ignore
-  export type { TransferIntent } from '../utils/transfer-intent'
+  export type { TransferKind, TransferSignature } from '../utils/token-transfer-vocabulary'
+  import('../utils/token-transfer-vocabulary')
+  // @ts-ignore
+  export type { TransferIntent, ProjectedArgument } from '../utils/transfer-intent'
   import('../utils/transfer-intent')
   // @ts-ignore
   export type { AcceleratorStatus } from '../onboarding/composables/useAcceleratorStatus'
@@ -453,6 +461,8 @@ declare module 'vue' {
     readonly TESTNET_ROLLUP_VERSION: UnwrapRef<typeof import('../utils/chain-ids')['TESTNET_ROLLUP_VERSION']>
     readonly THEME_HINT_KEY: UnwrapRef<typeof import('../utils/general')['THEME_HINT_KEY']>
     readonly TOAST_DURATION: UnwrapRef<typeof import('../composables/toast.js')['TOAST_DURATION']>
+    readonly TRANSFER_LABELS: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['TRANSFER_LABELS']>
+    readonly TRANSFER_SIGNATURES: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['TRANSFER_SIGNATURES']>
     readonly UnlockTimeoutError: UnwrapRef<typeof import('../composables/unlockWait')['UnlockTimeoutError']>
     readonly activateNetworkGuarded: UnwrapRef<typeof import('../utils/guarded-network-activation')['activateNetworkGuarded']>
     readonly aggregateFiat: UnwrapRef<typeof import('../utils/token-aggregate')['aggregateFiat']>
@@ -495,6 +505,7 @@ declare module 'vue' {
     readonly effectScope: UnwrapRef<typeof import('vue')['effectScope']>
     readonly feeJuicePricingFromUsd: UnwrapRef<typeof import('../utils/fee-estimation')['feeJuicePricingFromUsd']>
     readonly feeToUsd: UnwrapRef<typeof import('../utils/fee-estimation')['feeToUsd']>
+    readonly findTransferSignature: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['findTransferSignature']>
     readonly foldLabel: UnwrapRef<typeof import('../utils/token-fold')['foldLabel']>
     readonly forChain: UnwrapRef<typeof import('../utils/token-order')['forChain']>
     readonly formatBaseUnits: UnwrapRef<typeof import('../utils/amount')['formatBaseUnits']>
@@ -580,6 +591,7 @@ declare module 'vue' {
     readonly pickPrimaryMethod: UnwrapRef<typeof import('../utils/tx-enrichment')['pickPrimaryMethod']>
     readonly pinScopeOf: UnwrapRef<typeof import('../composables/usePinnedTokens')['pinScopeOf']>
     readonly preflightNetworkConnectivity: UnwrapRef<typeof import('../composables/importPreflight')['preflightNetworkConnectivity']>
+    readonly projectArgument: UnwrapRef<typeof import('../utils/transfer-intent')['projectArgument']>
     readonly provide: UnwrapRef<typeof import('vue')['provide']>
     readonly purgeNumber: UnwrapRef<typeof import('../utils/amount')['purgeNumber']>
     readonly reactive: UnwrapRef<typeof import('vue')['reactive']>
@@ -630,6 +642,7 @@ declare module 'vue' {
     readonly toRefs: UnwrapRef<typeof import('vue')['toRefs']>
     readonly toRestoreError: UnwrapRef<typeof import('../utils/restore-error')['toRestoreError']>
     readonly toValue: UnwrapRef<typeof import('vue')['toValue']>
+    readonly transferLabel: UnwrapRef<typeof import('../utils/token-transfer-vocabulary')['transferLabel']>
     readonly triggerRef: UnwrapRef<typeof import('vue')['triggerRef']>
     readonly trimAddress: UnwrapRef<typeof import('../utils/string')['trimAddress']>
     readonly txBelongsToScope: UnwrapRef<typeof import('../stores/activity.store')['txBelongsToScope']>

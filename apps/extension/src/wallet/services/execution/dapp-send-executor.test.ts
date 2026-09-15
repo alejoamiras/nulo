@@ -17,15 +17,31 @@
 
 import { describe, expect, test, vi } from "vitest"
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import { JobCancelledError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { OriginType, type LocalTxOrigin } from "@/wallet/services/transaction/spec"
 import { DappSendExecutor, type DappSendExecutorDeps } from "./dapp-send-executor"
 import { DiscoveryAwareEstimator } from "./discovery-aware-estimator"
+import { AUTHWITS_CHANGED_MESSAGE, ESTIMATE_INCOMPLETE_MESSAGE, PREVIEW_FOREIGN_MESSAGE, PreviewSnapshots } from "./preview-snapshots"
+import { ExecutionService } from "./service"
 
 const collectOffchainEffectsMock = vi.hoisted(() => vi.fn(() => [] as Array<{ data: unknown[]; contractAddress: unknown }>))
 vi.mock("@aztec/stdlib/tx", async (importOriginal) => ({
 	...(await importOriginal<object>()),
 	collectOffchainEffects: collectOffchainEffectsMock,
+}))
+
+// Real authwit decoding + hashing run Barretenberg WASM (e2e-only); the seam
+// decodes a request from its first field and hashes deterministically.
+vi.mock("@aztec/aztec.js/authorization", async (importOriginal) => ({
+	...(await importOriginal<object>()),
+	CallAuthorizationRequest: {
+		fromFields: async (data: unknown[]) => {
+			if (!data.length) throw new Error("not a CallAuthorizationRequest")
+			return { innerHash: `ih:${data[0]}`, msgSender: `caller:${data[0]}`, functionSelector: "0xsel", args: [`arg:${data[0]}`] }
+		},
+	},
+	computeAuthWitMessageHash: async (intent: { innerHash: string }) => ({ toString: () => `mh:${intent.innerHash}` }),
 }))
 
 const assertLiveChainIdentityMock = vi.hoisted(() => vi.fn())
@@ -44,6 +60,9 @@ vi.mock("./fee/fee-strategy", async (importOriginal) => ({
 vi.mock("./fee/embedded-fpc-cap", () => ({ applyEmbeddedFpcGasCap: vi.fn(async () => {}) }))
 
 const ORIGIN: LocalTxOrigin = { type: OriginType.DAPP, name: "test-dapp" }
+/** A popup approval envelope carrying a reuse id; the producer mints `previewId = estimateId`
+ *  for a bound standard estimate, so a real approval always pairs the two equal. */
+const APPROVAL = (estimateId: string) => ({ interactionId: "i-1", index: 0, estimateId, previewId: estimateId })
 
 function makeTxRequest() {
 	return {
@@ -100,7 +119,9 @@ function makeHarness(
 		await ctx.recordTransaction("0xhash")
 		return { txHash: { toString: () => "0xhash" }, offchainOutput: {} }
 	})
-	const authwit = overrides.authwit ?? { discoverPrivateAuthwits: vi.fn(async () => [] as unknown[]) }
+	const authwit = overrides.authwit ?? {
+		discoverPrivateAuthwits: vi.fn(async () => ({ actions: [] as unknown[], discovered: [] as unknown[] })),
+	}
 	const buildAndEstimateValidated = overrides.buildAndEstimateValidated ?? vi.fn(async () => built as never)
 	const buildAndEstimateFolded = overrides.buildAndEstimateFolded ?? vi.fn(async () => built as never)
 	const estimateWithDiscovery = new DiscoveryAwareEstimator({
@@ -132,6 +153,7 @@ function makeHarness(
 			markJournal: vi.fn(async () => {}),
 		},
 		operationEstimateReuse: { tryConsume: vi.fn(async () => undefined), stash: vi.fn(), evict: vi.fn() } as never,
+		previewSnapshots: new PreviewSnapshots(),
 		getActiveProfile: vi.fn(async () => ({ id: "p1" })),
 		getNetwork: vi.fn(async () => network),
 		getNode: vi.fn(async () => node as never),
@@ -499,7 +521,7 @@ describe("DappSendExecutor.estimateOperationFee", () => {
 	test("send_transaction (fjwc, CLASSIC): discovered authwits appended to the validated build's clone", async () => {
 		const extraAction = { kind: "call", method: "authwit_action" }
 		const { executor, deps } = makeHarness({
-			authwit: { discoverPrivateAuthwits: vi.fn(async () => [extraAction]) },
+			authwit: { discoverPrivateAuthwits: vi.fn(async () => ({ actions: [extraAction], discovered: [] })) },
 		})
 		const originalActions = [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }]
 		const op = {
@@ -805,12 +827,16 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 			feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL,
 			txCalls: [{ contract: "0xc", method: "reused_method", args: [] }],
 			pendingPublicAuthwits,
+			discoveredHashes: [],
 		}
 		const { executor, deps, authwit, proveAndSend } = makeHarness({
 			operationEstimateReuse: { tryConsume: vi.fn(async () => entry), stash: vi.fn(), evict: vi.fn() } as never,
 		})
+		// Reuse is licensed only by an owned snapshot: the estimate that produced this reuse entry
+		// stashed one under the same previewId (= estimateId). Its empty hash set ⊇ the reused build's.
+		deps.previewSnapshots.stash("est-1", { interactionId: "i-1", index: 0, fingerprint: null, discoveredHashes: [] })
 
-		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, "est-1")
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, APPROVAL("est-1"))
 
 		expect(deps.operationEstimateReuse.tryConsume).toHaveBeenCalledWith("est-1", expect.objectContaining({ accountAddress: "0xacct" }))
 		expect(authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
@@ -833,11 +859,58 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 		expect(reuseCtx.initializesAccount).toBe(true)
 	})
 
-	test("consume miss (forged/stale/drifted id) falls back to the FULL pipeline (fj ⇒ folded)", async () => {
+	test("owned snapshot but the reuse entry is gone (stale/drifted id): tryConsume misses, FULL pipeline (fj ⇒ folded)", async () => {
 		const { executor, deps, authwit, buildAndEstimateFolded } = makeHarness()
-		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, "est-forged")
+		deps.previewSnapshots.stash("est-stale", { interactionId: "i-1", index: 0, fingerprint: null, discoveredHashes: [] })
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, APPROVAL("est-stale"))
 		expect(deps.operationEstimateReuse.tryConsume).toHaveBeenCalledTimes(1)
 		expect(authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
+		expect(buildAndEstimateFolded).toHaveBeenCalledTimes(1)
+	})
+
+	test("no owned snapshot (forged id): reuse is never attempted — tryConsume untouched, FULL pipeline", async () => {
+		const { executor, deps, buildAndEstimateFolded } = makeHarness()
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, APPROVAL("est-forged"))
+		expect(deps.operationEstimateReuse.tryConsume).not.toHaveBeenCalled()
+		expect(buildAndEstimateFolded).toHaveBeenCalledTimes(1)
+	})
+
+	test("two attempts: a foreign take pops A's snapshot, then estimateId = previewId = A cannot reuse A's build", async () => {
+		const entry = {
+			txRequest: makeTxRequest(),
+			initializesAccount: false,
+			nonce: { toString: () => "1" },
+			feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL,
+			txCalls: [{ contract: "0xc", method: "reused_method", args: [] }],
+			pendingPublicAuthwits: [],
+			discoveredHashes: [],
+		}
+		// tryConsume WOULD hit — the only thing standing between B and A's cached build is ownership.
+		const { executor, deps, buildAndEstimateFolded } = makeHarness({
+			operationEstimateReuse: { tryConsume: vi.fn(async () => entry), stash: vi.fn(), evict: vi.fn() } as never,
+		})
+		deps.previewSnapshots.stash("A", { interactionId: "i-A", index: 0, fingerprint: null, discoveredHashes: [] })
+
+		// Attempt 1 — interaction C names A's previewId with no estimateId: refused as foreign, and
+		// the single-shot take has consumed A's snapshot.
+		await expect(
+			executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, {
+				interactionId: "i-C",
+				index: 0,
+				previewId: "A",
+			}),
+		).rejects.toThrow(PREVIEW_FOREIGN_MESSAGE)
+		expect(deps.operationEstimateReuse.tryConsume).not.toHaveBeenCalled()
+
+		// Attempt 2 — A's owner (equal ids, matching fingerprint) no longer holds a snapshot, so the
+		// build is recomputed: the cached one is never consumed, whatever tryConsume would say.
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, {
+			interactionId: "i-A",
+			index: 0,
+			estimateId: "A",
+			previewId: "A",
+		})
+		expect(deps.operationEstimateReuse.tryConsume).not.toHaveBeenCalled()
 		expect(buildAndEstimateFolded).toHaveBeenCalledTimes(1)
 	})
 
@@ -846,5 +919,332 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN)
 		expect(deps.operationEstimateReuse.tryConsume).not.toHaveBeenCalled()
 		expect(buildAndEstimateFolded).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("DappSendExecutor — discovered authwits, the preview snapshot and the confirm guard", () => {
+	const CTX = { interactionId: "i-1", index: 0 }
+	const identity = { ...CTX, fingerprint: null }
+	const effect = (tag: string) => ({ data: [tag], contractAddress: addr("0xconsumer") })
+	const record = (tag: string) => ({
+		consumer: "0xconsumer",
+		caller: `caller:${tag}`,
+		selector: "0xsel",
+		args: [`arg:${tag}`],
+		innerHash: `ih:${tag}`,
+		messageHash: `mh:ih:${tag}`,
+	})
+	/** A folded pipeline whose probe reports `tags` as discovered. */
+	const foldedDiscovering = (tags: string[], built: unknown) =>
+		vi.fn(async (...args: unknown[]) => {
+			const probe = args[2] as { collected: unknown[]; discovered: unknown[] }
+			for (const tag of tags) {
+				probe.collected.push({ kind: "add_private_authwit", content: { kind: "message_hash", messageHash: `mh:ih:${tag}` } })
+				probe.discovered.push(record(tag))
+			}
+			return built
+		})
+	const harnessDiscovering = (tags: string[], overrides: Parameters<typeof makeHarness>[0] = {}) => {
+		const base = makeHarness()
+		return makeHarness({ buildAndEstimateFolded: foldedDiscovering(tags, base.built), ...overrides })
+	}
+	const snapshots = (deps: DappSendExecutorDeps) => deps.previewSnapshots
+
+	test("estimate (aztec_sendTx): returns the discovered list, previewId = estimateId, snapshot + stash carry the hashes", async () => {
+		const { executor, deps } = harnessDiscovering(["a"])
+		const result = await executor.estimateOperationFee(makeAztecOp(), { paymentMethod: { kind: "fj" } } as never, undefined, CTX)
+
+		expect(result.discoveredAuthwits).toEqual([record("a")])
+		expect(result.previewId).toBe(result.estimateId)
+		expect(snapshots(deps).take(result.previewId, identity)).toEqual({
+			kind: "found",
+			snapshot: expect.objectContaining({ ...CTX, discoveredHashes: ["mh:ih:a"] }),
+		})
+		const stash = (deps.operationEstimateReuse.stash as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
+		expect(stash[1]).toMatchObject({ discoveredHashes: ["mh:ih:a"] })
+	})
+
+	test("estimate without an interaction context writes no snapshot and mints no preview id", async () => {
+		const { executor } = harnessDiscovering(["a"])
+		const result = await executor.estimateOperationFee(makeAztecOp(), { paymentMethod: { kind: "fj" } } as never)
+		expect(result.previewId).toBeUndefined()
+		expect(result.discoveredAuthwits).toEqual([record("a")])
+	})
+
+	test("estimate (send_transaction): NEVER lists discovered authwits nor a preview id — confirm adds none", async () => {
+		const { executor } = harnessDiscovering(["a"])
+		const op = {
+			kind: "send_transaction",
+			networkId: "net-1",
+			accountAddress: "0xacct",
+			feeSettings: { paymentMethod: { kind: "fj" } },
+			actions: [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }],
+		} as never
+		const result = await executor.estimateOperationFee(op, { paymentMethod: { kind: "fj" } } as never, undefined, CTX)
+		expect("discoveredAuthwits" in result).toBe(false)
+		expect(result.previewId).toBeUndefined()
+	})
+
+	test("a reuse-INELIGIBLE estimate (embedded) still writes the snapshot under its own preview id", async () => {
+		const { executor, deps } = makeHarness({
+			planner: {
+				processAztecJsPayload: vi.fn(async () => ({
+					actions: [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }],
+					feePaymentMethod: undefined,
+					feeOptions: { embeddedFeePayment: "fpc" },
+				})),
+			} as never,
+			authwit: { discoverPrivateAuthwits: vi.fn(async () => ({ actions: [], discovered: [record("e")] })) },
+		})
+		const result = await executor.estimateOperationFee(makeAztecOp(), { paymentMethod: { kind: "embedded" } } as never, undefined, CTX)
+		expect(result.estimateId).toBeUndefined()
+		expect(result.previewId).toBeDefined()
+		expect(deps.operationEstimateReuse.stash).not.toHaveBeenCalled()
+		expect(snapshots(deps).take(result.previewId, identity).kind).toBe("found")
+	})
+
+	test("confirm, reused estimate: the entry's hashes within the snapshot execute without re-discovery", async () => {
+		const entry = {
+			txRequest: makeTxRequest(),
+			initializesAccount: true,
+			nonce: { toString: () => "77" },
+			feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL,
+			txCalls: [],
+			pendingPublicAuthwits: [],
+			discoveredHashes: ["mh:ih:a"],
+		}
+		const { executor, deps, proveAndSend, buildAndEstimateFolded } = makeHarness({
+			operationEstimateReuse: { tryConsume: vi.fn(async () => entry), stash: vi.fn(), evict: vi.fn() } as never,
+		})
+		snapshots(deps).stash("est-1", { ...identity, discoveredHashes: ["mh:ih:a"] })
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, {
+			...CTX,
+			estimateId: "est-1",
+			previewId: "est-1",
+		})
+		expect(proveAndSend).toHaveBeenCalledTimes(1)
+		expect(buildAndEstimateFolded).not.toHaveBeenCalled()
+	})
+
+	test("confirm, rebuilt: a set within the snapshot executes; a new hash aborts before the prove", async () => {
+		const ok = harnessDiscovering(["a"])
+		snapshots(ok.deps).stash("pv", { ...identity, discoveredHashes: ["mh:ih:a", "mh:ih:z"] })
+		await ok.executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, { ...CTX, previewId: "pv" })
+		expect(ok.proveAndSend).toHaveBeenCalledTimes(1)
+
+		const changed = harnessDiscovering(["b"])
+		snapshots(changed.deps).stash("pv", { ...identity, discoveredHashes: ["mh:ih:a"] })
+		await expect(
+			changed.executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, { ...CTX, previewId: "pv" }),
+		).rejects.toThrow(AUTHWITS_CHANGED_MESSAGE)
+		expect(changed.proveAndSend).not.toHaveBeenCalled()
+	})
+
+	test("a popup pairing one interaction's estimateId with another's previewId is refused before either id is consumed", async () => {
+		const { executor, deps, proveAndSend } = harnessDiscovering(["a"])
+		// A valid snapshot exists under previewId "pv"; the reuse cache would accept "est-A".
+		snapshots(deps).stash("pv", { ...identity, discoveredHashes: ["mh:ih:a"] })
+		await expect(
+			executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, {
+				...CTX,
+				estimateId: "est-A",
+				previewId: "pv",
+			}),
+		).rejects.toThrow(PREVIEW_FOREIGN_MESSAGE)
+		expect(proveAndSend).not.toHaveBeenCalled()
+		// The snapshot was NOT consumed by the refused attempt: a well-formed retry still finds it.
+		expect(snapshots(deps).take("pv", identity).kind).toBe("found")
+	})
+
+	test("confirm with NO snapshot: a discovered hash asks for a retry; nothing discovered executes", async () => {
+		const withHash = harnessDiscovering(["a"])
+		await expect(withHash.executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, CTX)).rejects.toThrow(
+			ESTIMATE_INCOMPLETE_MESSAGE,
+		)
+		expect(withHash.proveAndSend).not.toHaveBeenCalled()
+
+		const clean = harnessDiscovering([])
+		await clean.executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, CTX)
+		expect(clean.proveAndSend).toHaveBeenCalledTimes(1)
+	})
+
+	test("a preview id minted for another (interactionId, index) is refused even with nothing discovered", async () => {
+		const { executor, deps, proveAndSend } = harnessDiscovering([])
+		snapshots(deps).stash("pv", { interactionId: "i-2", index: 0, fingerprint: null, discoveredHashes: [] })
+		await expect(
+			executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, { ...CTX, previewId: "pv" }),
+		).rejects.toThrow(PREVIEW_FOREIGN_MESSAGE)
+		expect(proveAndSend).not.toHaveBeenCalled()
+	})
+
+	test("the silent path (no envelope) is never held to a preview", async () => {
+		const { executor, proveAndSend } = harnessDiscovering(["a"])
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN)
+		expect(proveAndSend).toHaveBeenCalledTimes(1)
+	})
+
+	describe("NO_FROM", () => {
+		const noFromOp = () => makeAztecOp({ executionMode: "default_entrypoint", feeSettings: { paymentMethod: { kind: "embedded" } } })
+
+		test("preview discovers through the confirm's own path, returns the records, signs nothing, writes the snapshot", async () => {
+			collectOffchainEffectsMock.mockReturnValue([effect("n"), effect("n")])
+			const { executor, deps, account, pxe } = makeHarness()
+			const preview = await executor.previewOperationAuthwits(noFromOp(), CTX)
+			expect(preview.discoveredAuthwits).toEqual([record("n"), record("n")])
+			expect(account.createAuthWit).not.toHaveBeenCalled()
+			expect(pxe.simulateTx).toHaveBeenCalledTimes(1)
+			expect(deps.coordinator.simulateTxTask).not.toHaveBeenCalled()
+			expect(snapshots(deps).take(preview.previewId, identity)).toEqual({
+				kind: "found",
+				snapshot: expect.objectContaining({ ...CTX, discoveredHashes: ["mh:ih:n", "mh:ih:n"] }),
+			})
+			await expect(executor.previewOperationAuthwits(makeAztecOp(), CTX)).rejects.toThrow("default_entrypoint")
+		})
+
+		test("preview and confirm agree on the fingerprint: an unchanged request matches, a changed argument does not", async () => {
+			collectOffchainEffectsMock.mockReturnValue([effect("n")])
+			const same = makeHarness()
+			const op = noFromOp()
+			const preview = await same.executor.previewOperationAuthwits(op, CTX)
+			await same.executor.executeAztecSendTx(op, ORIGIN, undefined, undefined, undefined, { ...CTX, previewId: preview.previewId })
+			expect(same.account.createAuthWit).toHaveBeenCalledTimes(1)
+			expect(same.proveAndSend).toHaveBeenCalledTimes(1)
+
+			const drifted = makeHarness()
+			const previewed = await drifted.executor.previewOperationAuthwits(noFromOp(), CTX)
+			const changed = makeAztecOp({
+				executionMode: "default_entrypoint",
+				feeSettings: { paymentMethod: { kind: "embedded" } },
+				exec: { calls: [{ name: "dapp_method", args: ["0x1"] }] },
+			})
+			await expect(
+				drifted.executor.executeAztecSendTx(changed, ORIGIN, undefined, undefined, undefined, {
+					...CTX,
+					previewId: previewed.previewId,
+				}),
+			).rejects.toThrow(PREVIEW_FOREIGN_MESSAGE)
+			expect(drifted.account.createAuthWit).not.toHaveBeenCalled()
+		})
+
+		test("an unseen hash aborts BEFORE any witness is created; the silent NO_FROM path still signs", async () => {
+			collectOffchainEffectsMock.mockReturnValue([effect("n")])
+			const guarded = makeHarness()
+			snapshots(guarded.deps).stash("pv", { ...identity, discoveredHashes: ["mh:ih:other"] })
+			await expect(
+				guarded.executor.executeAztecSendTx(noFromOp(), ORIGIN, undefined, undefined, undefined, { ...CTX, previewId: "pv" }),
+			).rejects.toThrow(AUTHWITS_CHANGED_MESSAGE)
+			expect(guarded.account.createAuthWit).not.toHaveBeenCalled()
+			expect(guarded.proveAndSend).not.toHaveBeenCalled()
+
+			const silent = makeHarness()
+			await silent.executor.executeAztecSendTx(noFromOp(), ORIGIN)
+			expect(silent.account.createAuthWit).toHaveBeenCalledTimes(1)
+		})
+
+		test("ROUTED: a popup approval dispatched through executeOperations reaches the NO_FROM guard (no preview ⇒ retry)", async () => {
+			collectOffchainEffectsMock.mockReturnValue([effect("n")])
+			const { executor, account } = makeHarness()
+			const task = { startSubtask: vi.fn(), complete: vi.fn(), fail: vi.fn(), cancel: vi.fn() }
+			// The real dispatch chain on a bare prototype instance: a dropped
+			// envelope forwarding anywhere in it would execute instead of refusing.
+			const self = Object.assign(Object.create(ExecutionService.prototype), {
+				ensureInitialized: async () => {},
+				planner: { extractPrimaryMethod: () => "dapp_method" },
+				taskService: { startNewTask: () => task },
+				profileService: { captureExecutionFence: async () => ({ profileId: "p1", epoch: 0 }) },
+				dappSendExecutor: executor,
+				logDebug: () => {},
+				logInfo: () => {},
+				logError: () => {},
+			}) as { executeOperations: (...args: unknown[]) => Promise<{ status: string; error?: unknown }[]> }
+			const results = await self.executeOperations([noFromOp()], ORIGIN, undefined, undefined, [CTX], { profileId: "p1", epoch: 0 })
+			expect(results[0]?.status).toBe("failed")
+			expect(JSON.stringify(results[0])).toContain(ESTIMATE_INCOMPLETE_MESSAGE)
+			expect(account.createAuthWit).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("NO_FROM preview cancellation through the service RPC (previewOperationAuthwits + cancelEstimate)", () => {
+		const noFromOp = () => makeAztecOp({ executionMode: "default_entrypoint", feeSettings: { paymentMethod: { kind: "embedded" } } })
+		type Rpc = {
+			previewOperationAuthwits(
+				i: string,
+				n: number,
+				tok?: string,
+				flow?: string,
+			): Promise<{ previewId?: string; discoveredAuthwits?: unknown[] }>
+			cancelEstimate(tok: string): Promise<void>
+			previewSnapshots: PreviewSnapshots
+			estimateCancel: { unsettledCount(p: string): number }
+		}
+		/** The real service methods on a bare prototype, over the real cancel registry + snapshot
+		 *  wiring (`wireGasBalancesAndEstimateCaches`) and the harness's real executor. The executor
+		 *  writes previews into the store the registry evicts from — one store, so an eviction the
+		 *  RPC chain drops would be visible here. */
+		const rpc = () => {
+			const h = makeHarness()
+			const self = Object.assign(Object.create(ExecutionService.prototype), {
+				profileService: { getActiveProfile: async () => ({ id: "p1" }) },
+				networkService: {},
+				accountService: {},
+				transactionService: {},
+				fpcService: {},
+				pxeService: {},
+				resolver: {},
+				logger: {},
+				ensureInitialized: async () => {},
+				services: { get: () => ({ materializeStoredOperation: async () => noFromOp() }) },
+				dappSendExecutor: h.executor,
+				logDebug: () => {},
+				logError: () => {},
+			})
+			;(
+				ExecutionService.prototype as unknown as { wireGasBalancesAndEstimateCaches: () => void }
+			).wireGasBalancesAndEstimateCaches.call(self)
+			// Point the service at the executor's store so the registry's `evictStash` reaches what the
+			// RPC actually wrote (production wires both from the same field).
+			;(self as { previewSnapshots: PreviewSnapshots }).previewSnapshots = h.deps.previewSnapshots
+			return { self: self as unknown as Rpc, ...h }
+		}
+
+		test("a successful handoff preserves the snapshot the popup will confirm against", async () => {
+			collectOffchainEffectsMock.mockReturnValue([effect("n")])
+			const { self } = rpc()
+			const result = await self.previewOperationAuthwits("i-1", 0, "tok-ok", "op")
+			expect(result.discoveredAuthwits).toHaveLength(1)
+			expect(self.estimateCancel.unsettledCount("p1")).toBe(0)
+			expect(self.previewSnapshots.take(result.previewId, identity)).toMatchObject({
+				kind: "found",
+				snapshot: { interactionId: "i-1", index: 0, discoveredHashes: ["mh:ih:n"] },
+			})
+		})
+
+		test("cancelling after the stash evicts the snapshot through the settled-token path", async () => {
+			collectOffchainEffectsMock.mockReturnValue([effect("n")])
+			const { self } = rpc()
+			const result = await self.previewOperationAuthwits("i-1", 0, "tok-late", "op")
+			await self.cancelEstimate("tok-late")
+			expect(self.previewSnapshots.take(result.previewId, identity)).toEqual({ kind: "missing" })
+		})
+
+		test("cancelling during discovery aborts the RPC with the structured error and stashes nothing", async () => {
+			collectOffchainEffectsMock.mockReturnValue([effect("n")])
+			const { self, pxe, deps } = rpc()
+			const stash = vi.spyOn(deps.previewSnapshots, "stash")
+			let release: (v: { privateExecutionResult: object }) => void = () => {}
+			pxe.simulateTx.mockImplementationOnce(() => new Promise((r) => (release = r)))
+			const pending = self.previewOperationAuthwits("i-1", 0, "tok-mid", "op")
+			// Let admission + prepare run up to the stalled discovery simulation.
+			for (let i = 0; i < 50 && pxe.simulateTx.mock.calls.length === 0; i++) await new Promise((r) => setTimeout(r, 1))
+			expect(pxe.simulateTx).toHaveBeenCalledTimes(1)
+			expect(self.estimateCancel.unsettledCount("p1")).toBe(1)
+			await self.cancelEstimate("tok-mid")
+			release({ privateExecutionResult: {} })
+			await expect(pending).rejects.toBeInstanceOf(JobCancelledError)
+			expect(self.estimateCancel.unsettledCount("p1")).toBe(0)
+			// The abort lands at the checkpoint after discovery returns and before the preview is
+			// written: the store never receives a snapshot for this attempt.
+			expect(stash).not.toHaveBeenCalled()
+		})
 	})
 })

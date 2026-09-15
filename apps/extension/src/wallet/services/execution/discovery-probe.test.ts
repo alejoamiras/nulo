@@ -27,7 +27,7 @@ function fakeCrypto(hashByEffect: (data: unknown[]) => string | Error): Discover
 		fromFields: async (data) => {
 			const h = hashByEffect(data as unknown[])
 			if (h instanceof Error) throw h
-			return { innerHash: h as never }
+			return { innerHash: h as never, msgSender: `caller:${h}`, functionSelector: "0xsel", args: [`arg:${h}`] }
 		},
 		computeMessageHash: async (intent) => ({ toString: () => `mh:${intent.innerHash}` }) as never,
 	}
@@ -69,6 +69,11 @@ describe("CollectingDiscoveryProbe", () => {
 			{ kind: "add_private_authwit", content: { kind: "message_hash", messageHash: "mh:b" } },
 		])
 		expect(probe.collected).toEqual(out)
+		// The decoded call rides beside each hash, deduped in step with it.
+		expect(probe.discovered).toEqual([
+			{ consumer: "0xentry", caller: "caller:a", selector: "0xsel", args: ["arg:a"], innerHash: "a", messageHash: "mh:a" },
+			{ consumer: "0xentry", caller: "caller:b", selector: "0xsel", args: ["arg:b"], innerHash: "b", messageHash: "mh:b" },
+		])
 	})
 
 	test("hashes already covered by pre-attached actions are dropped", async () => {

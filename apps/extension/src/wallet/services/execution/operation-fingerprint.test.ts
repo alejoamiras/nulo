@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest"
 import type { Action } from "@nulo/wallet-bridge"
-import { fingerprintOperation, type OperationFingerprintInput } from "./operation-fingerprint"
+import {
+	fingerprintNoFromInputs,
+	fingerprintOperation,
+	type NoFromFingerprintInput,
+	type OperationFingerprintInput,
+} from "./operation-fingerprint"
 
 const CALL: Action = { kind: "call", contract: "0xtoken", method: "transfer", args: ["0xme", "0xyou", 5] }
 
@@ -104,5 +109,69 @@ describe("fingerprintOperation", () => {
 		const a: Action = { kind: "call", contract: "0xc", method: "m", args: [{ b: 1n, a: [true, null] }] } as unknown as Action
 		const b: Action = { kind: "call", contract: "0xc", method: "m", args: [{ a: [true, null], b: 1n }] } as unknown as Action
 		expect(fingerprintOperation(makeInput({ actions: [a] }))).toBe(fingerprintOperation(makeInput({ actions: [b] })))
+	})
+})
+
+describe("fingerprintOperation — call names", () => {
+	test("two encoded calls differing ONLY in name fingerprint differently", () => {
+		const enc = (name: string | undefined) =>
+			fingerprintOperation(makeInput({ actions: [{ kind: "encoded_call", to: "0xt", selector: "0xsel", name, args: ["0x1"] }] }))
+		expect(enc("transfer")).not.toBe(enc("transfer_to_public"))
+		expect(enc("transfer")).not.toBe(enc(undefined))
+	})
+
+	test("two encoded-call authwits differing ONLY in name fingerprint differently", () => {
+		const enc = (name: string | undefined) =>
+			fingerprintOperation(
+				makeInput({
+					actions: [
+						{
+							kind: "add_public_authwit",
+							content: { kind: "encoded_call", caller: "0xc", to: "0xt", selector: "0xsel", name, args: [] },
+						},
+					],
+				}),
+			)
+		expect(enc("transfer")).not.toBe(enc("burn"))
+	})
+})
+
+describe("fingerprintNoFromInputs", () => {
+	const hex = (s: string) => ({ toString: () => s })
+	const makeNoFrom = (overrides: Partial<NoFromFingerprintInput> = {}): NoFromFingerprintInput => ({
+		networkId: "net-1",
+		accountAddress: "0xacc",
+		from: "0xacc",
+		calls: [
+			{ to: hex("0xt"), selector: hex("0xsel"), name: "swap", args: [hex("0x1"), hex("0x2")], isStatic: false, hideMsgSender: false },
+		],
+		authWitnesses: [],
+		capsules: [],
+		extraHashedArgs: [],
+		gasSettings: undefined,
+		additionalScopes: [hex("0xb"), hex("0xa")],
+		...overrides,
+	})
+
+	test("independent builds with equal inputs match; scopes are order- and dup-insensitive", () => {
+		expect(fingerprintNoFromInputs(makeNoFrom())).toBe(fingerprintNoFromInputs(makeNoFrom()))
+		expect(fingerprintNoFromInputs(makeNoFrom({ additionalScopes: [hex("0xa"), hex("0xb"), hex("0xa")] }))).toBe(
+			fingerprintNoFromInputs(makeNoFrom()),
+		)
+	})
+
+	test("a changed argument (an authwit_nonce), a scope, an explicit gas constraint or an extra changes it", () => {
+		const base = fingerprintNoFromInputs(makeNoFrom())
+		expect(
+			fingerprintNoFromInputs(
+				makeNoFrom({ calls: [{ to: hex("0xt"), selector: hex("0xsel"), name: "swap", args: [hex("0x1"), hex("0x3")] }] }),
+			),
+		).not.toBe(base)
+		expect(fingerprintNoFromInputs(makeNoFrom({ additionalScopes: [hex("0xa")] }))).not.toBe(base)
+		expect(fingerprintNoFromInputs(makeNoFrom({ gasSettings: { maxFeesPerGas: { feePerDaGas: "1", feePerL2Gas: "2" } } }))).not.toBe(
+			base,
+		)
+		expect(fingerprintNoFromInputs(makeNoFrom({ extraHashedArgs: [hex("0xe")] }))).not.toBe(base)
+		expect(fingerprintNoFromInputs(makeNoFrom({ authWitnesses: [hex("0xw")] }))).not.toBe(base)
 	})
 })

@@ -23,7 +23,7 @@ import { FpcService, FpcType } from "@/wallet/services/fpc/service"
 import { TransactionService, OriginType, type TransferType, type LocalTxOrigin, TxStatus } from "@/wallet/services/transaction/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import type { OperationContext } from "@/wallet/services/operation-journal/spec"
-import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
+import { DAPP_INTERACTION_SERVICE_NAME, type ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
 import { TaskService, type WrappedTask, ExecuteOperationContent } from "@/wallet/services/task/service"
 import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
@@ -50,12 +50,16 @@ import {
 	type AztecCreateAuthWitOperation,
 	type FeeOptions,
 	type GasBalances,
+	type OperationApprovalEnvelope,
+	type OperationAuthwitPreview,
+	type RegisterTokenOperation,
 	type TransferFeeEstimate,
 } from "./spec"
 import { coerceAmount } from "./coerce-amount"
 import { OperationPlanner } from "./operation-planner"
 import { TransferEstimateReuse } from "./transfer-estimate-reuse"
 import { OperationEstimateReuse } from "./operation-estimate-reuse"
+import { PreviewSnapshots } from "./preview-snapshots"
 import { TransferExecutor } from "./transfer-executor"
 import { DappSendExecutor } from "./dapp-send-executor"
 import { DiscoveryAwareEstimator, type DiscoveryProbe } from "./discovery-aware-estimator"
@@ -64,7 +68,6 @@ import { ExecutionLane } from "./execution-lane"
 import { GasBalanceReader } from "./gas-balance-reader"
 import { ContractResolver, findFunctionBySelector } from "./contract-resolver"
 import { getViewSimulationDeps } from "./helpers/get-view-simulation-deps"
-import type { MaterializedRegisterTokenOperation } from "./models"
 import { AuthwitDiscoverer } from "./authwit-discoverer"
 import { TxRequestBuilder } from "./tx-request-builder"
 import type { FeeEstimate, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee/fee-strategy"
@@ -73,6 +76,14 @@ import { ExecutionCoordinator } from "./execution-coordinator"
 import { type ProofGate, NOOP_PROOF_GATE } from "@/e2e/proof-gate"
 
 export * from "./spec"
+
+/** The dApp-interaction service's SW-internal view of a stored request: the
+ *  operation at `(interactionId, index)`, materialized and — when fee settings
+ *  are given — completed with a validated fee path. The estimate and preview
+ *  entry points read the operation THROUGH this, never from their caller. */
+export interface InteractionOperationSource {
+	materializeStoredOperation(interactionId: string, index: number, feeSettings?: FeeSettings): Promise<Operation>
+}
 
 /** Default PXE-client factory: the real RPC-backed client. Exported so the
  *  construction seam (real client vs the composition-test fake) is unit-testable
@@ -87,6 +98,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		"peekGasBalances",
 		"estimateTransferFee",
 		"estimateOperationFee",
+		"previewOperationAuthwits",
 		"cancelJob",
 		"cancelEstimate",
 	)
@@ -140,6 +152,10 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	private estimateReuse: TransferEstimateReuse = null!
 	private operationEstimateReuse: OperationEstimateReuse = null!
 	private estimateCancel: EstimateCancelRegistry = null!
+	private previewSnapshots: PreviewSnapshots = null!
+	/** Resolved lazily: the dApp-interaction service registers after this one
+	 *  and depends on it, so the lookup happens at first use, not at init. */
+	private services: ServiceCollection = null!
 	private transferExecutor: TransferExecutor = null!
 	private dappSendExecutor: DappSendExecutor = null!
 	private viewExecutor: ViewExecutor = null!
@@ -161,6 +177,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	}
 
 	protected async init(services: ServiceCollection) {
+		this.services = services
 		this.pxeService = this.pxeClientFactory(this.logger)
 		this.profileService = services.get(ProfileService.name)
 		this.networkService = services.get(NetworkService.name)
@@ -234,11 +251,13 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			getPendingForAccount: (account) => this.transactionService.getPendingForAccount(account),
 			logDebug: (msg) => this.logDebug(msg),
 		})
+		this.previewSnapshots = new PreviewSnapshots()
 		this.estimateCancel = new EstimateCancelRegistry({
-			// Ids are UUID-unique across both caches — evict from each.
+			// Ids are UUID-unique across the caches — evict from each.
 			evictStash: (estimateId) => {
 				this.estimateReuse.evict(estimateId)
 				this.operationEstimateReuse.evict(estimateId)
+				this.previewSnapshots.evict(estimateId)
 			},
 			logDebug: (msg) => this.logDebug(msg),
 		})
@@ -315,6 +334,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			coordinator: this.coordinator,
 			estimateWithDiscovery,
 			operationEstimateReuse: this.operationEstimateReuse,
+			previewSnapshots: this.previewSnapshots,
 			getActiveProfile: () => this.profileService.getActiveProfile(),
 			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
 			getNode: (chainId) => this.networkService.getNode(chainId),
@@ -445,11 +465,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	 *  stashed estimateId so a post-completion `cancelEstimate` can still
 	 *  evict the cached signed request. The internal sentinel converts to the
 	 *  structured `JobCancelledError` at this RPC boundary. */
-	private async withEstimateAdmission(
+	private async withEstimateAdmission<T extends { estimateId?: string; previewId?: string }>(
 		estimateToken: string | undefined,
 		flowKey: string,
-		run: (signal?: AbortSignal) => Promise<TransferFeeEstimate>,
-	): Promise<TransferFeeEstimate> {
+		run: (signal?: AbortSignal) => Promise<T>,
+	): Promise<T> {
 		if (!estimateToken) return run()
 		const profile = await requireActiveProfile(this.profileService, "Wallet locked")
 		let admitted = false
@@ -461,7 +481,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			const signal = await this.estimateCancel.admit(estimateToken, profile.id, flowKey)
 			admitted = true
 			const result = await run(signal)
-			estimateId = result.estimateId
+			// One id evicts every cache: a standard estimate's preview id IS its
+			// estimate id, and a preview-only result has nothing else stashed.
+			estimateId = result.previewId ?? result.estimateId
 			return result
 		} catch (error) {
 			if (error instanceof JobCancelledSentinel) {
@@ -503,15 +525,34 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	}
 
 	public async estimateOperationFee(
-		operation: Operation,
+		interactionId: string,
+		index: number,
 		feeSettings: FeeSettings,
 		estimateToken?: string,
 		flowKey?: string,
 	): Promise<TransferFeeEstimate> {
 		await this.ensureInitialized()
+		const operation = await this.interactionOperations().materializeStoredOperation(interactionId, index, feeSettings)
 		return this.withEstimateAdmission(estimateToken, flowKey ?? "op", (signal) =>
-			this.dappSendExecutor.estimateOperationFee(operation, feeSettings, signal),
+			this.dappSendExecutor.estimateOperationFee(operation, feeSettings, signal, { interactionId, index }),
 		)
+	}
+
+	public async previewOperationAuthwits(
+		interactionId: string,
+		index: number,
+		estimateToken?: string,
+		flowKey?: string,
+	): Promise<OperationAuthwitPreview> {
+		await this.ensureInitialized()
+		const operation = await this.interactionOperations().materializeStoredOperation(interactionId, index)
+		return this.withEstimateAdmission(estimateToken, flowKey ?? "op", (signal) =>
+			this.dappSendExecutor.previewOperationAuthwits(operation, { interactionId, index }, signal),
+		)
+	}
+
+	private interactionOperations(): InteractionOperationSource {
+		return this.services.get<InteractionOperationSource & { name: string; start(): Promise<void> }>(DAPP_INTERACTION_SERVICE_NAME)
 	}
 
 	public async executeOperations(
@@ -519,10 +560,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		origin: LocalTxOrigin,
 		parentTask?: WrappedTask,
 		hooks?: ExecutionHooks,
-		/** Popup-privileged estimate→confirm reuse ids, index-aligned with
-		 *  `operations` (never part of the shared `Operation` wire shape — a
-		 *  dApp cannot reach this parameter). */
-		estimateIds?: readonly (string | undefined)[],
+		/** Popup approval envelopes, index-aligned with `operations`: the
+		 *  interaction each operation was materialized from plus the SW-minted
+		 *  estimate/preview ids the popup handed back. Never part of the shared
+		 *  `Operation` wire shape — a dApp cannot reach this parameter. */
+		approvals?: readonly (OperationApprovalEnvelope | undefined)[],
 		/** TRUSTED-INTERNAL parameter (like `estimateIds`): the deletion fence
 		 *  captured at the dApp interaction's session re-validation — the
 		 *  authorization moment. Ops whose commit asserts an entry capture
@@ -557,7 +599,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 					operationTask,
 					hooks,
 					authorizedFence,
-					estimateIds?.[operationIndex],
+					approvals?.[operationIndex],
 				)
 				operationTask.complete()
 				this.logDebug(`[${traceId}] executeOperations: ${operation.kind} completed`)
@@ -586,7 +628,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		operationTask: WrappedTask,
 		hooks: ExecutionHooks | undefined,
 		authorizedFence: ExecutionFence | undefined,
-		estimateId: string | undefined,
+		approval: OperationApprovalEnvelope | undefined,
 	): Promise<unknown> {
 		switch (operation.kind) {
 			case "register_contract": {
@@ -647,7 +689,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				// not at the batch top — read-only ops must not trip the
 				// unlock check, and this is still before the prove (D13).
 				const fence = await this.captureFence()
-				return this.dappSendExecutor.executeAztecSendTx(operation, origin, operationTask, hooks, fence, estimateId)
+				return this.dappSendExecutor.executeAztecSendTx(operation, origin, operationTask, hooks, fence, approval)
 			}
 			case "aztec_createAuthWit": {
 				return this.executeAztecCreateAuthWit(operation)
@@ -704,7 +746,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	}
 
 	private async executeRegisterToken(
-		op: MaterializedRegisterTokenOperation,
+		op: RegisterTokenOperation,
 		origin: LocalTxOrigin,
 		parentTask?: WrappedTask,
 		authorizedFence?: ExecutionFence,
@@ -734,32 +776,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// fence makes the write identity and the commit assert one chain.
 		if (network.profileId !== fence.profileId) throw new Error("unauthorized profile")
 
-		// Honor the popup's pre-fetched interface (`previewedInterface`) if it
-		// passes the contract+chainId sanity check (Opus F4). Otherwise fall back
-		// to a fresh `parseTokenInterface`. The previewed interface is set by
-		// the popup's approve mapper AFTER `previewTokenMetadata` resolves, so
-		// it's extension-internal data — but we still validate it identifies
-		// the same on-chain contract the dApp asked us to register, in case of
-		// popup-side bugs.
-		let ti: Awaited<ReturnType<TokenService["parseTokenInterface"]>>
-		if (
-			op.previewedInterface &&
-			op.previewedInterface.contract.toLowerCase() === op.address.toLowerCase() &&
-			op.previewedInterface.chainId === network.chainId
-		) {
-			ti = op.previewedInterface
-		} else {
-			if (op.previewedInterface) {
-				this.logError(
-					"executeRegisterToken: discarding previewedInterface — contract/chainId mismatch",
-					op.previewedInterface.contract,
-					op.previewedInterface.chainId,
-					op.address,
-					network.chainId,
-				)
-			}
-			ti = await this.tokenService.parseTokenInterface(op.networkId, op.address, parentTask)
-		}
+		// Always parsed here: a popup-supplied interface would carry function
+		// mappings nothing authenticated, and they are what gets persisted.
+		const ti = await this.tokenService.parseTokenInterface(op.networkId, op.address, parentTask)
 
 		if (
 			ti.getNameFn === undefined ||

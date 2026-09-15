@@ -247,7 +247,7 @@ async function bootRuntime(deps: WalletRuntimeDeps, services: ServiceCollection,
 	// Wallet-sdk protocol handler (discovery, key exchange, encrypted channel).
 	// Still reaches for chrome.runtime.onMessage internally; will be
 	// port-migrated alongside its own refactor.
-	initWalletSdkHandler(services, logger)
+	initWalletSdkHandler(services, logger, { windows: browserApi.windows, clock })
 
 	writeInitialLiveness(browserApi, clock, logger)
 	// Heartbeat — keeps MV3 service worker alive long enough for cross-SW

@@ -24,6 +24,7 @@ definePassthroughsExhaustive<Methods>()(ExecutionServiceClient.prototype, [
 	"peekGasBalances",
 	"estimateTransferFee",
 	"estimateOperationFee",
+	"previewOperationAuthwits",
 	"cancelJob",
 	"cancelEstimate",
 ])

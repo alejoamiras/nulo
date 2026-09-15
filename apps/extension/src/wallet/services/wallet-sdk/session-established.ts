@@ -4,9 +4,11 @@
  * graph. See `session-established.test.ts` for the B-06 / B-13 pins.
  */
 import type { Fr } from "@aztec/foundation/curves/bn254"
+import type { WindowPort } from "@nulo/wallet-core/ports"
 import type { ILogger } from "../../logger"
 import { LogLevel } from "../../logger"
 import { isPendingVerificationStale, type PendingVerificationEntry } from "./pending-verification"
+import type { WindowReservation } from "./verify-admission"
 import { describeExternalId } from "@nulo/wallet-bridge"
 
 /** The Nulo chain id derived from a session/discovery's `chainInfo` (chainId ^ version). */
@@ -37,6 +39,10 @@ export interface SessionEstablishedDeps {
 	/** Bind the established transport session to the profile that owns it —
 	 *  the dispatch guard and the switch-teardown listener consume this. */
 	stampSessionProfile: (sessionId: string, profileId: string) => void
+	/** The port the verify window is created on; its `onRemoved` is what frees the slot. */
+	windows: Pick<WindowPort, "create" | "remove">
+	/** The verify-window slot admission reserved for this session id, if the handshake needed one. */
+	reservations: { reservation(sessionId: string): WindowReservation | undefined }
 	logger: ILogger
 }
 
@@ -69,6 +75,7 @@ export async function handleSessionEstablished(
 	// including the missing-row early return that previously leaked (B-13).
 	const marker = deps.pendingVerification.get(session.sessionId)
 	const isNewConnection = marker !== undefined
+	const reservation = deps.reservations.reservation(session.sessionId)
 	const terminateWith = (message: string): false => {
 		deps.logger.log("wallet-sdk-bg", LogLevel.Warn, message)
 		deps.terminateSession(session.sessionId)
@@ -141,15 +148,10 @@ export async function handleSessionEstablished(
 
 		const needsVerification = isNewConnection || !dappSession.trustedVerification
 		if (needsVerification) {
-			const win = await chrome.windows.create({
-				type: "popup",
-				url: chrome.runtime.getURL(
-					`src/popup/index.html#/windows/verify?sessionId=${dappSession.id}&verificationHash=${encodeURIComponent(session.verificationHash)}&isReconnect=${!isNewConnection}`,
-				),
-				height: 800,
-				width: 400,
-			})
-			if (!win?.id) throw new Error("verify window creation returned no window id")
+			// A window without a reserved slot would be one the origin's budget never counted:
+			// admission at discovery is the only place the cap is enforced, so fail closed.
+			if (!reservation) throw new Error("verify window has no reserved slot")
+			await openVerifyWindow(session, dappSession.id, isNewConnection, reservation, deps)
 		}
 		return true
 	} catch (err) {
@@ -165,5 +167,49 @@ export async function handleSessionEstablished(
 		return false
 	} finally {
 		if (isNewConnection) deps.pendingVerification.delete(session.sessionId)
+		// Every exit that opened no window gives the slot back; an issued creation keeps it.
+		reservation?.releaseIfUnstarted()
+	}
+}
+
+/** Open the verify window against its reservation. The slot is held from the moment `create` is
+ *  issued: a termination that lands mid-creation cancels the attempt, and the window that then
+ *  arrives is closed instead of adopted (releasing earlier would let a replacement open first). */
+async function openVerifyWindow(
+	session: { sessionId: string; verificationHash: string },
+	dappSessionId: string,
+	isNewConnection: boolean,
+	reservation: WindowReservation,
+	deps: SessionEstablishedDeps,
+): Promise<void> {
+	// Claim the slot for exactly one creation: a reservation released or already spent while this
+	// handler awaited must not open a second window against the same slot.
+	if (!reservation.markInFlight()) throw new Error("verify window slot was not claimable")
+	let windowId: number | undefined
+	try {
+		const win = await deps.windows.create({
+			type: "popup",
+			url: chrome.runtime.getURL(
+				`src/popup/index.html#/windows/verify?sessionId=${dappSessionId}&verificationHash=${encodeURIComponent(session.verificationHash)}&isReconnect=${!isNewConnection}`,
+			),
+			height: 800,
+			width: 400,
+		})
+		windowId = win?.id
+	} catch (err) {
+		reservation.creationFailed()
+		throw err
+	}
+	if (windowId === undefined) {
+		reservation.creationFailed()
+		throw new Error("verify window creation returned no window id")
+	}
+	if (reservation.adopt(windowId) === "abort") {
+		// The session ended (or the window closed) while this was opening: close the window we got.
+		// Its slot is released when `onRemoved` fires for this id — either from the close below, or
+		// (if the window had already closed) when the reservation adopted and drained the buffered
+		// removal.
+		await deps.windows.remove(windowId).catch(() => undefined)
+		throw new Error("session ended while its verify window was opening")
 	}
 }

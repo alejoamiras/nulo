@@ -17,7 +17,7 @@ const previewed = {
 	getDecimalsFn: { name: "get_decimals" },
 	balanceOfPublicFn: { name: "balance_of_public" },
 }
-const op = { networkId: "net1", address: "0xabc", accountAddress: "0xacc", previewedInterface: previewed } as never
+const op = { networkId: "net1", address: "0xabc", accountAddress: "0xacc" } as never
 const origin = { type: OriginType.DAPP, name: "https://dapp.x" } as LocalTxOrigin
 
 function makeSelf(networkProfileId: string) {
@@ -26,7 +26,7 @@ function makeSelf(networkProfileId: string) {
 	const self = {
 		profileService: { captureExecutionFence: vi.fn(async () => fence) },
 		networkService: { getNetwork: vi.fn(async () => ({ id: "net1", profileId: networkProfileId, chainId: 1 })) },
-		tokenService: { addTokenAuthorized, parseTokenInterface: vi.fn() },
+		tokenService: { addTokenAuthorized, parseTokenInterface: vi.fn(async () => previewed) },
 		logError: () => {},
 	}
 	return { self, fence, addTokenAuthorized }

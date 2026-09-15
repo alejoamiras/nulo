@@ -1,5 +1,5 @@
 import type { TransferType, LocalTxOrigin } from "@/wallet/services/transaction/spec"
-import type { FeeSettings, GasBalances, TransferFeeEstimate, Operation, OperationResult } from "./models"
+import type { FeeSettings, GasBalances, OperationAuthwitPreview, TransferFeeEstimate, Operation, OperationResult } from "./models"
 
 export const EXECUTION_SERVICE_NAME = "execution"
 
@@ -66,9 +66,27 @@ export type Methods = {
 	): TransferFeeEstimate
 
 	/**
-	 * Estimates the fee for a pre-built operation (send_transaction or aztec_sendTx).
+	 * Estimates the fee for one send-like operation of a stored dApp interaction,
+	 * by reference: the SW re-materializes the request at `(interactionId,
+	 * index)` and applies `feeSettings` after validating its fee path. The
+	 * result's `previewId` names the snapshot of discovered authorizations the
+	 * confirm of that operation is held to.
 	 */
-	estimateOperationFee(operation: Operation, feeSettings: FeeSettings, estimateToken?: string, flowKey?: string): TransferFeeEstimate
+	estimateOperationFee(
+		interactionId: string,
+		index: number,
+		feeSettings: FeeSettings,
+		estimateToken?: string,
+		flowKey?: string,
+	): TransferFeeEstimate
+
+	/**
+	 * Discovers, without signing, the private authorizations a stored
+	 * `default_entrypoint` operation would need at send. Same by-reference,
+	 * token and flow-key contract as {@link estimateOperationFee}; its
+	 * `previewId` participates in {@link cancelEstimate} the same way.
+	 */
+	previewOperationAuthwits(interactionId: string, index: number, estimateToken?: string, flowKey?: string): OperationAuthwitPreview
 
 	/**
 	 * Cancel an in-flight fee estimate by its caller-minted token.

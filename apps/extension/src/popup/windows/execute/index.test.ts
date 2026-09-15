@@ -125,18 +125,30 @@ vi.mock("@/composables/useDappHostname", () => ({
 	})),
 }))
 
+/** One entry per composable instance the window creates, in creation order:
+ *  [0] fee estimates, [1] authorization previews. */
+const feeMapInstances: Array<{
+	opts: { estimate: (params: unknown, token: string, flowKey: string) => Promise<unknown> }
+	api: { results: Ref<Record<number, unknown>>; estimate: ReturnType<typeof vi.fn>; handoffAll: ReturnType<typeof vi.fn> }
+}> = []
 vi.mock("@/composables/useFeeEstimationMap", () => ({
-	useFeeEstimationMap: vi.fn(() => ({
-		results: ref({}),
-		estimating: ref({}),
-		estimate: vi.fn(),
-		cancel: vi.fn(),
-		cancelAll: vi.fn(),
-		handoffAll: vi.fn(() => ({})),
-		rearm: vi.fn(),
-		dispose: vi.fn(),
-	})),
+	useFeeEstimationMap: vi.fn((opts: unknown) => {
+		const api = {
+			results: ref({}),
+			estimating: ref({}),
+			estimate: vi.fn(),
+			cancel: vi.fn(),
+			cancelAll: vi.fn(),
+			handoffAll: vi.fn(() => ({})),
+			rearm: vi.fn(),
+			dispose: vi.fn(),
+		}
+		feeMapInstances.push({ opts: opts as never, api: api as never })
+		return api
+	}),
 }))
+const estimateOperationFeeMock = vi.fn(async () => undefined)
+const previewOperationAuthwitsMock = vi.fn(async () => undefined)
 
 vi.mock("@/composables/toast", () => ({
 	useToast: () => ({ openToast: vi.fn() }),
@@ -171,7 +183,9 @@ vi.mock("@/wallet/services/execution/client", () => ({
 		return {
 			connect: executionServiceConnectMock,
 			disconnect: executionServiceDisconnectMock,
-			estimateOperationFee: vi.fn(async () => undefined),
+			estimateOperationFee: estimateOperationFeeMock,
+			previewOperationAuthwits: previewOperationAuthwitsMock,
+			cancelEstimate: vi.fn(async () => undefined),
 		}
 	}),
 }))
@@ -263,6 +277,7 @@ afterEach(() => {
 	_loadPromiseReject = undefined
 	getActiveProfilePromiseResolve = undefined
 	getActiveProfilePromiseReject = undefined
+	feeMapInstances.length = 0
 	vi.clearAllMocks()
 })
 
@@ -694,5 +709,79 @@ describe("execute window — a dApp-requested self-pay", () => {
 		await completeInit()
 		const vm = w.vm as unknown as ExecVm
 		expect((vm.operations[0] as { feeSettings?: unknown }).feeSettings).toEqual({ paymentMethod: { kind: "embedded" } })
+	})
+})
+
+// ── Approval binding: the popup sends per-index deltas (fee choice + the SW's own
+//    ids), never operations, an origin, a token interface or a hash list; estimates
+//    and previews run BY REFERENCE to the stored request. ──
+describe("execute window — approval envelope", () => {
+	const NETWORK = { id: "n1", chainId: 1, name: "TestNet" }
+	const OWNER = "0xabc"
+	const resolvable = () => {
+		accountServiceCtorMock.mockImplementationOnce(function () {
+			return {
+				getAccount: vi.fn(async (_p: string, _c: number, address: string) => ({ address, chainId: 1, name: `acct-${address}` })),
+				connect: vi.fn(),
+				disconnect: vi.fn(),
+			}
+		})
+		networkServiceCtorMock.mockImplementationOnce(function () {
+			return { getNetworks: vi.fn(async () => [NETWORK]), connect: vi.fn(), disconnect: vi.fn() }
+		} as never)
+	}
+	const payload = () => ({
+		session: { profileId: "p1", dappMetadata: { name: "Test DApp", url: "https://example.com" } },
+		params: {
+			operations: [
+				{ kind: "aztec_sendTx", account: `aztec:1:${OWNER}`, exec: { calls: [] }, opts: { from: OWNER } },
+				{
+					kind: "aztec_sendTx",
+					account: `aztec:1:${OWNER}`,
+					exec: { calls: [] },
+					opts: { from: OWNER },
+					executionMode: "default_entrypoint",
+				},
+				{ kind: "register_token", account: `aztec:1:${OWNER}`, address: "0xtok" },
+			],
+		},
+	})
+
+	test("approve sends deltas only: feeSettings for send-likes, the SW's estimate/preview ids, nothing else", async () => {
+		resolvable()
+		payloadToLoad = payload()
+		w = factory()
+		await completeInit()
+		const vm = w.vm as unknown as ExecVm & { handleFeeUpdate: (index: number, value: unknown) => void }
+		vm.handleFeeUpdate(0, { paymentMethod: { kind: "fj" } })
+		feeMapInstances[0]!.api.results.value = { 0: { estimateId: "est-0", previewId: "est-0" } }
+		feeMapInstances[1]!.api.results.value = { 1: { previewId: "pv-1", discoveredAuthwits: [] } }
+		await vm.approve()
+		expect(approveInteractionMock).toHaveBeenCalledTimes(1)
+		const [id, deltas] = (approveInteractionMock.mock.calls[0] as unknown[]) ?? []
+		expect(id).toBe("req-123")
+		expect(deltas).toEqual([
+			{ feeSettings: { paymentMethod: { kind: "fj" } }, estimateId: "est-0", previewId: "est-0" },
+			{ feeSettings: { paymentMethod: { kind: "embedded" } }, estimateId: undefined, previewId: "pv-1" },
+			{ feeSettings: undefined, estimateId: undefined, previewId: undefined },
+		])
+		expect((approveInteractionMock.mock.calls[0] as unknown[]).length).toBe(2)
+		expect(feeMapInstances[0]!.api.handoffAll).toHaveBeenCalledTimes(1)
+		expect(feeMapInstances[1]!.api.handoffAll).toHaveBeenCalledTimes(1)
+	})
+
+	test("the preview is scheduled at init for default_entrypoint operations only, and both slots estimate by reference", async () => {
+		resolvable()
+		payloadToLoad = payload()
+		w = factory()
+		await completeInit()
+		const [fees, previews] = feeMapInstances
+		expect(previews!.api.estimate).toHaveBeenCalledExactlyOnceWith(1, { index: 1 })
+		expect(fees!.api.estimate).not.toHaveBeenCalled()
+
+		await fees!.opts.estimate({ index: 0, feeSettings: { paymentMethod: { kind: "fj" } } }, "tok-a", "flow-a")
+		expect(estimateOperationFeeMock).toHaveBeenCalledExactlyOnceWith("req-123", 0, { paymentMethod: { kind: "fj" } }, "tok-a", "flow-a")
+		await previews!.opts.estimate({ index: 1 }, "tok-b", "flow-b")
+		expect(previewOperationAuthwitsMock).toHaveBeenCalledExactlyOnceWith("req-123", 1, "tok-b", "flow-b")
 	})
 })

@@ -193,12 +193,9 @@ export type Methods = {
 	 * adding the token to storage. Used by the dApp `register_token` popup so
 	 * the user can see what they're about to add before clicking Allow.
 	 *
-	 * Also returns the parsed `TokenInterface` so the popup can thread it into
-	 * the operation via `previewedInterface`, letting `executeRegisterToken`
-	 * skip a redundant `parseTokenInterface` round-trip after Allow. The
-	 * executor validates `contract === op.address` + `chainId === network.chainId`
-	 * before trusting the threaded interface; on mismatch it falls back to the
-	 * canonical `parseTokenInterface` fetch.
+	 * Also returns the parsed `TokenInterface` for display. It is never handed
+	 * back to the executor: what `executeRegisterToken` persists is always its
+	 * own `parseTokenInterface` result.
 	 *
 	 * Returns `{ name: "<name>", symbol: "<symbol>", decimals: 0 }` placeholder
 	 * strings when the contract's interface is incomplete. Callers must NOT

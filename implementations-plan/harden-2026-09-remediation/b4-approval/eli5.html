@@ -1,0 +1,43 @@
+<title>Harden B4 Approval</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{--bg:#f6f4ef;--fg:#1c1a17;--muted:#6b655c;--hairline:#dcd6ca;--surface:#fbfaf7;--code:#eeeae1;--accent:#175e63;--green:#2b6b3f;--green-bg:#e3efe6;--med:#9a5b07;--med-bg:#f9ecd6;--display:"Fraunces",Georgia,serif;--body:"IBM Plex Sans","Helvetica Neue",Arial,sans-serif;--mono:"IBM Plex Mono",Menlo,Consolas,monospace}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#131416;--fg:#e9e5dc;--muted:#9b958a;--hairline:#2a2c30;--surface:#1a1c1f;--code:#202226;--accent:#5fb3b6;--green:#7fc08f;--green-bg:#1d3324;--med:#e0a04a;--med-bg:#3a2c14}}
+:root[data-theme="dark"]{--bg:#131416;--fg:#e9e5dc;--muted:#9b958a;--hairline:#2a2c30;--surface:#1a1c1f;--code:#202226;--accent:#5fb3b6;--green:#7fc08f;--green-bg:#1d3324;--med:#e0a04a;--med-bg:#3a2c14}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 var(--body);padding-block:2.5rem 4rem;padding-inline:clamp(16px,4vw,40px)}
+.page{max-width:760px;margin:0 auto}h1,h2,h3{font-family:var(--display);font-weight:600;text-wrap:balance;margin:0}
+h1{font-size:clamp(1.9rem,5vw,2.5rem);line-height:1.1}h2{font-size:1.4rem;margin-block:2.4rem .8rem;padding-top:1.2rem;border-top:1px solid var(--hairline)}h3{font-size:1.05rem;margin-block:1.2rem .3rem}
+p{margin:0 0 .8rem;max-width:66ch}code{font-family:var(--mono);font-size:.86em;background:var(--code);padding:.08em .35em;border-radius:3px}
+.eyebrow{font-family:var(--mono);font-size:.74rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}.lede{color:var(--muted);font-size:1.05rem;margin-top:.5rem}
+.phase{background:var(--surface);border:1px solid var(--hairline);border-radius:8px;padding:1rem 1.2rem;margin:.8rem 0}.phase p{margin-bottom:.5rem}.gate{font-family:var(--mono);font-size:.8rem;color:var(--muted)}
+.callout{border-left:4px solid var(--green);background:var(--green-bg);padding:.9rem 1.1rem;border-radius:0 6px 6px 0;margin:1.2rem 0}.callout.amber{border-color:var(--med);background:var(--med-bg)}.callout h3{margin-top:0}
+ul{margin:.3rem 0 .8rem;padding-left:1.2rem}li{margin:.25rem 0}.foot{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--hairline);color:var(--muted);font-size:.86rem}
+</style>
+<div class="page">
+<div class="eyebrow">Blueprint · mid · batch 4 of 4 · 2026-09-14</div>
+<h1>Harden B4 Approval</h1>
+<p class="lede">The last of four batches fixing the 2026-09-13 security audit. Three fixes, all about the moment a dApp asks the wallet for something: what the approval window shows, what the wallet actually executes once you click Approve, and how many of those windows a connected site can make appear.</p>
+
+<h2>What this batch fixes</h2>
+<ul>
+  <li><strong>F-02.</strong> The approval card recognized four transfer function names at exactly three arguments; the wallet's own token model recognizes nine names at two or four arguments. For the common shapes the card showed a confident "Transfer" label and no recipient, no amount. Now the recognized names and their argument positions come from the one table the wallet already maintains; anything else shows a warning plus every raw argument, and approving stays allowed. The authorization card shows who is being authorized and the raw hash with an "opaque authorization" warning. Authorizations the wallet discovers while estimating are listed on the card and pinned: the transaction cannot sign one you were not shown.</li>
+  <li><strong>F-16.</strong> The popup used to hand the service worker a full list of operations to execute, and the service worker executed that list. A buggy or compromised popup could substitute anything. Now the service worker rebuilds the operations from what the dApp originally requested and accepts from the popup only two things per operation: the fee choice (checked against the fee path the dApp asked for) and an estimate id it minted itself. The fee estimate is computed the same way, by reference to the stored request.</li>
+  <li><strong>F-18.</strong> A site you connected once could re-run its handshake in a loop and open a verification window per handshake, without limit. Now each reconnect is admitted through a per-site gate: a small token bucket slows a reload loop, at most two verification windows per site are open at once, extra handshakes wait their turn (bounded, expiring with the site's own timeout) and are approved only when a slot frees, and duplicate waiters on one connect popup are capped.</li>
+</ul>
+
+<div class="callout amber"><h3>What changes for a dApp</h3><p>Nothing in the protocol. A transfer the card could not name is still approvable, it just shows its arguments. A site that reconnects politely never sees the gate; a site that reconnects in a loop sees its extra handshakes time out on its own side, one at a time.</p></div>
+
+<div class="callout"><h3>What the audits changed</h3><p>Two independent reviews (Codex and a same-family audit) rejected the first draft; Codex rejected the second and third, then approved the fourth. The first draft's name-keyed vocabulary would have dropped one of the two shapes of <code>transfer</code> and re-created the bug; "From: this account" was false for entrypoint-mode transactions; the discovered-authorization list the popup echoed back could not bound the popup; a verification window queued after a session went live would leave that session unverified; NO_FROM transactions never get an estimate, so a guard alone would have blocked every one that needed a witness. Each was traced at source and adopted: a per-variant vocabulary, a service-worker-owned preview snapshot, admission before approval, a preview call for entrypoint transactions. The full reconciliation is in <code>ledger.md</code>.</p></div>
+
+<h2>Phases and how each proves itself</h2>
+<div class="phase"><h3>1 · Approval envelope and discovered authorizations</h3><p>Materialize from the stored request; fee path validated; estimate and preview by reference; the preview snapshot; the NO_FROM preview; the confirm-time guard on every path.</p><p class="gate">Gate: dapp-interaction, execution and execute-window suites; wallet-bridge; lint + typecheck.</p></div>
+<div class="phase"><h3>2 · Vocabulary, fallback, authorization card</h3><p>Nine names from the descriptor table with an independent pin; raw-argument fallback; caller, arguments and inner hash on the authwit card.</p><p class="gate">Gate: utils and execute-window suites; lint + typecheck.</p></div>
+<div class="phase"><h3>3 · Admission gate and full sweep</h3><p>The per-site gate at discovery, the reservation held through the window's life, the waiter bound, one flood cell, then everything.</p><p class="gate">Gate: wallet-sdk suite, audit:vue, ci-gating, smoke on two shards, ten network cells in one sandbox.</p></div>
+
+<h2>Why mid</h2>
+<p>Owner-set. Two dimensions are high: security sensitivity (the consent surface and the execution binding) and blast radius (every dApp approval and every reconnect). Dual audit plus a final Codex pass.</p>
+
+<div class="callout"><h3>Approval</h3><p>Pre-granted by the owner's decision table in <code>implementations-plan/harden-2026-09-remediation/seed.md</code> (2026-09-14). The F-18 design was the seed's mandatory Codex consult; it took three rounds. Implementation starts on <code>harden-b4-approval</code>, stacked on B3 (PR #595); the owner merges the stack.</p></div>
+
+<div class="foot"><p>Repo: <code>implementations-plan/harden-2026-09-remediation/b4-approval/plan.md</code> · <code>recon.md</code> · <code>outline-fable.md</code> · <code>ledger.md</code> · <code>audit-codex.md</code> · <code>audit-fable.md</code> · lessons in <code>../lessons/b4.md</code>.</p></div>
+</div>

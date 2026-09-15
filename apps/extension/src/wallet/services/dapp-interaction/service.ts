@@ -7,7 +7,14 @@ import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-
 import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
 import { DappSessionService, AccessLevel, type DappSession } from "@/wallet/services/dapp-session/service"
-import { ExecutionService, type Operation, type OperationKind } from "@/wallet/services/execution/service"
+import {
+	ExecutionService,
+	type FeeSettings,
+	type InteractionOperationSource,
+	type Operation,
+	type OperationApprovalEnvelope,
+	type OperationKind,
+} from "@/wallet/services/execution/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { JobCancelledError, UserRejectedError } from "@nulo/extension-messaging/errors"
 import { OriginType, type LocalTxOrigin } from "@/wallet/services/transaction/service"
@@ -18,6 +25,7 @@ import { parseCaipAccount, parseCaipChain, resolveNetworkByChainId } from "@/wal
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { isSelfPay } from "@nulo/wallet-bridge"
 import { assertSilentExecutable, materializeRequest, type MaterializeDeps } from "./materialize"
+import { applyFeeSelection, type OperationApprovalDelta } from "./approval-delta"
 import {
 	DAPP_INTERACTION_SERVICE_NAME,
 	type ExecutionPayload,
@@ -50,6 +58,11 @@ const CANCELLED_BEFORE_APPROVAL = "Request was cancelled before approval"
 
 const INTERACTION_TIMEOUT_MS = 10 * 60 * 1000
 
+/** A capability payload also carries a session; only an execution payload has operations to run. */
+function isExecutionPayload(payload: DappInteraction["payload"]): payload is ExecutionPayload {
+	return "session" in payload && Array.isArray((payload as { params?: { operations?: unknown } }).params?.operations)
+}
+
 /** The confirmation gate keys off the strongest level in a batch; a kind missing here is a
  *  compile error, never a silent AccessLevel.None. */
 const OPERATION_ACCESS_LEVEL: Record<OperationKind, AccessLevel> = {
@@ -75,7 +88,7 @@ const OPERATION_ACCESS_LEVEL: Record<OperationKind, AccessLevel> = {
 	aztec_createAuthWit: AccessLevel.Transactions,
 }
 
-export class DappInteractionService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+export class DappInteractionService extends Service<Methods, Events> implements ServiceSpec<Methods, Events>, InteractionOperationSource {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()(
 		"getInteractionPayload",
 		"approveInteraction",
@@ -154,14 +167,12 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		return interactionRequest.payload
 	}
 
-	public async approveInteraction(
-		id: string,
-		operations: Operation[],
-		origin: LocalTxOrigin,
-		estimateIds?: (string | undefined)[],
-	): Promise<void> {
+	public async approveInteraction(id: string, deltas: OperationApprovalDelta[]): Promise<void> {
 		const interaction = this.storage.get(id)
-		if (!interaction) {
+		// Only an execution interaction is approvable through this route; a
+		// capability or discovery id must not be claimable here, and the record
+		// survives so `resolveInteraction` can still settle it. Non-disclosing.
+		if (!interaction || !isExecutionPayload(interaction.payload) || deltas.length !== interaction.payload.params.operations.length) {
 			throw new Error("Invalid id")
 		}
 		// First service claim wins — service acceptance is the commit point, not
@@ -182,7 +193,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		// the request enqueues on the execution mutex) via the hooks carried on
 		// `interaction`, NOT here — releasing at approval would let a later
 		// request overtake this one in the execution FIFO.
-		this.executeAndResolve(interaction, operations, origin, estimateIds)
+		this.executeAndResolve(interaction, interaction.payload, deltas)
 	}
 
 	public async resolveInteraction(id: string, result: ExecutionResult | CapabilityResult | DiscoveryResult): Promise<void> {
@@ -217,11 +228,13 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 
 	private async executeAndResolve(
 		interaction: DappInteraction,
-		operations: Operation[],
-		origin: LocalTxOrigin,
-		estimateIds?: (string | undefined)[],
+		payload: ExecutionPayload,
+		deltas: OperationApprovalDelta[],
 	): Promise<void> {
-		const kinds = operations.map((o) => o.kind).join(", ")
+		const kinds = payload.params.operations.map((o) => o.kind).join(", ")
+		// The dApp name was sanitized when the session was persisted; the popup
+		// no longer supplies an origin of its own.
+		const origin: LocalTxOrigin = { type: OriginType.DAPP, name: payload.session.dappMetadata.name }
 		this.logInfo(`executeAndResolve: starting [${kinds}] for ${origin.name}`)
 		try {
 			// Re-validate the active profile still matches the session this popup
@@ -241,29 +254,36 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			// dispatch so entry-asserting ops (register_token) commit against the
 			// AUTHORIZATION-time incarnation. The capture's only throw is the
 			// locked gate — same abort as an id mismatch.
-			const payload = interaction.payload
-			let authorizedFence: ExecutionFence | undefined
-			if ("session" in payload) {
-				try {
-					authorizedFence = await this.profileService.captureExecutionFence()
-				} catch {
-					throw new Error("Active profile changed since approval; aborting to avoid executing against the wrong profile")
-				}
-				if (authorizedFence.profileId !== payload.session.profileId) {
-					throw new Error("Active profile changed since approval; aborting to avoid executing against the wrong profile")
-				}
-				// The session in the payload is a snapshot from interaction CREATION,
-				// and the approval popup can sit open for minutes — long enough for a
-				// delete + same-id re-import to settle, which the capture above cannot
-				// see (it observes the successor's epoch). The session ROW is the
-				// discriminator: the deletion cascade purges it and a re-import never
-				// resurrects it, so requiring it live (and owned by the captured
-				// profile) closes the creation→click window; the fence covers
-				// click→commit.
-				const liveSession = await this.dappSessionService.tryGetDappSession(payload.session.id)
-				if (!liveSession || liveSession.profileId !== authorizedFence.profileId) {
-					throw new Error("Session no longer valid; aborting")
-				}
+			let authorizedFence: ExecutionFence
+			try {
+				authorizedFence = await this.profileService.captureExecutionFence()
+			} catch {
+				throw new Error("Active profile changed since approval; aborting to avoid executing against the wrong profile")
+			}
+			if (authorizedFence.profileId !== payload.session.profileId) {
+				throw new Error("Active profile changed since approval; aborting to avoid executing against the wrong profile")
+			}
+			// The session in the payload is a snapshot from interaction CREATION,
+			// and the approval popup can sit open for minutes — long enough for a
+			// delete + same-id re-import to settle, which the capture above cannot
+			// see (it observes the successor's epoch). The session ROW is the
+			// discriminator: the deletion cascade purges it and a re-import never
+			// resurrects it, so requiring it live (and owned by the captured
+			// profile) closes the creation→click window; the fence covers
+			// click→commit.
+			const liveSession = await this.dappSessionService.tryGetDappSession(payload.session.id)
+			if (!liveSession || liveSession.profileId !== authorizedFence.profileId) {
+				throw new Error("Session no longer valid; aborting")
+			}
+			// What executes is the dApp's stored request, completed with the popup's
+			// fee choice — never an operation the popup built.
+			const deps = this.materializeDepsFor(authorizedFence.profileId)
+			const operations: Operation[] = []
+			const approvals: OperationApprovalEnvelope[] = []
+			for (const [index, request] of payload.params.operations.entries()) {
+				const delta = deltas[index] ?? {}
+				operations.push(applyFeeSelection(await materializeRequest(request, deps), delta.feeSettings))
+				approvals.push({ interactionId: interaction.id, index, estimateId: delta.estimateId, previewId: delta.previewId })
 			}
 			await this.profileService.refreshSession()
 			// Forward hooks captured at interaction-creation time. Survives the
@@ -273,7 +293,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 				origin,
 				undefined,
 				interaction.hooks,
-				estimateIds,
+				approvals,
 				authorizedFence,
 			)
 			this.logInfo(`executeAndResolve: resolved [${kinds}]`)
@@ -281,6 +301,41 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		} catch (error) {
 			this.logError(`executeAndResolve: failed [${kinds}]`, error)
 			this.windowManager.cancel(interaction.handleId, error instanceof Error ? error.message : "Execution failed")
+		}
+	}
+
+	/**
+	 * The stored request at `(interactionId, index)`, materialized for the
+	 * popup's estimate or preview of that operation — the popup names the
+	 * operation, the SW reads it. Fee settings, when given, are validated
+	 * against the requested fee path exactly as at approval.
+	 */
+	public async materializeStoredOperation(interactionId: string, index: number, feeSettings?: FeeSettings): Promise<Operation> {
+		const interaction = this.storage.get(interactionId)
+		if (!interaction || !isExecutionPayload(interaction.payload)) throw new Error("Invalid id")
+		const request = interaction.payload.params.operations[index]
+		if (!request) throw new Error("Invalid id")
+		const profile = await this.profileService.getActiveProfile()
+		if (profile?.id !== interaction.payload.session.profileId) throw new Error("Wallet locked")
+		return applyFeeSelection(await materializeRequest(request, this.materializeDepsFor(profile.id)), feeSettings)
+	}
+
+	/** CAIP → row resolution against `profileId` for the shared materializer. */
+	private materializeDepsFor(profileId: string): MaterializeDeps {
+		return {
+			resolveNetwork: async (caipChain: string) => {
+				const { chainId } = parseCaipChain(caipChain as CaipChain)
+				return resolveNetworkByChainId(this.networkService, chainId)
+			},
+			resolveNetworkAndAccount: async (caipAccount: string) => {
+				const { chainId, address } = parseCaipAccount(caipAccount as CaipAccount)
+				const network = await resolveNetworkByChainId(this.networkService, chainId)
+				const account = await this.accountService.getAccount(profileId, network.chainId, address)
+				if (!account) {
+					throw new Error("Account no longer exists")
+				}
+				return [network, account]
+			},
 		}
 	}
 
@@ -404,26 +459,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		if (profile?.id !== payload.session.profileId) {
 			throw new Error("Wallet locked")
 		}
-		// Phase 2 follow-up: request→operation logic lives in the shared
-		// materializer. Pre-followup this path and the popup Execute window
-		// each had their own switch; they diverged on the send-like feeSettings
-		// rule, which is exactly how the goswap aztec_sendTx priorityLevel
-		// crash came about. Same shared path now means same shape.
-		const deps: MaterializeDeps = {
-			resolveNetwork: async (caipChain: string) => {
-				const { chainId } = parseCaipChain(caipChain as CaipChain)
-				return resolveNetworkByChainId(this.networkService, chainId)
-			},
-			resolveNetworkAndAccount: async (caipAccount: string) => {
-				const { chainId, address } = parseCaipAccount(caipAccount as CaipAccount)
-				const network = await resolveNetworkByChainId(this.networkService, chainId)
-				const account = await this.accountService.getAccount(profile!.id, network.chainId, address)
-				if (!account) {
-					throw new Error("Account no longer exists")
-				}
-				return [network, account]
-			},
-		}
+		const deps = this.materializeDepsFor(profile.id)
 		const operations: Operation[] = []
 		for (const op of payload.params.operations) {
 			const materialized = await materializeRequest(op, deps)

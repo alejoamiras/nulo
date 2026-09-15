@@ -17,23 +17,28 @@ import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { humanizeOperationKind } from "./humanize"
 import { uniqueSignerAccounts, uniqueSignerNetworks } from "./signers"
 import { isSelfPay } from "@nulo/wallet-bridge"
-import { assertExecutableOperation, isEmbeddedFeePayment, requiresFeeSelection } from "./operation-validation"
+import { isEmbeddedFeePayment, requiresFeeSelection } from "./operation-validation"
 import type { DraftUIOperation } from "./types"
 
 /** Services */
 import { type ProfileInfo, ProfileServiceClient } from "@/wallet/services/profile/client"
 import { type Network, NetworkServiceClient } from "@/wallet/services/network/client"
 import { type Account, AccountServiceClient } from "@/wallet/services/account/client"
-import { ExecutionServiceClient, type FeeSettings, type Operation } from "@/wallet/services/execution/client"
-import { TokenServiceClient, type TokenInterface } from "@/wallet/services/token/client"
+import {
+	ExecutionServiceClient,
+	type FeeSettings,
+	type OperationAuthwitPreview,
+	type TransferFeeEstimate,
+} from "@/wallet/services/execution/client"
+import { TokenServiceClient } from "@/wallet/services/token/client"
 import {
 	type CaipAccount,
 	type CaipChain,
 	DappInteractionServiceClient,
 	type ExecutionPayload,
+	type OperationApprovalDelta,
 } from "@/wallet/services/dapp-interaction/client"
 import type { DappMetadata } from "@/wallet/services/dapp-session/client"
-import { OriginType } from "@/wallet/services/transaction/client"
 import { parseCaipAccount, parseCaipChain, resolveNetworkByChainId } from "@/wallet/utils/caip"
 
 /** Composables */
@@ -92,19 +97,6 @@ const tokenService = new TokenServiceClient()
  * surface the user has — the popup must not be approvable while it's loading.
  */
 const tokenMetadata = ref<Map<string, { name: string; symbol: string; decimals: number }>>(new Map())
-/**
- * Parallel map carrying the parsed `TokenInterface` from the same
- * `previewTokenMetadata` call that populates `tokenMetadata`. Used by the
- * approve mapper to thread the interface into `register_token` ops as
- * `previewedInterface`, letting `executeRegisterToken` skip a redundant
- * `parseTokenInterface` round-trip after Allow. Populated alongside
- * `tokenMetadata.set(...)` during the prefetch loop in `init()`.
- *
- * Race-safety: the Confirm button is gated on `tokenMetadataLoading` (see
- * line :312 and disabled-state at :481), so by the time `approveInteraction`
- * runs, this map has been fully populated (or the user can't approve).
- */
-const tokenInterfaces = ref<Map<string, TokenInterface>>(new Map())
 const tokenMetadataLoading = ref(false)
 const tokenMetadataError = ref<Map<string, string>>(new Map())
 
@@ -130,14 +122,11 @@ const {
 	handoffAll: handoffFeeEstimates,
 	rearm: rearmFeeEstimates,
 	cancelAll: cancelAllFeeEstimates,
-} = useFeeEstimationMap<number, { op: UIOperation; feeSettings: FeeSettings }, unknown>({
-	// Cast op → Operation (strict): the estimate is only scheduled AFTER the
-	// user picks a fee, so feeSettings is set on the op by the time we get here.
-	// The wallet-bridge Operation type carries a slightly different AztecAddress/
-	// Fr surface than the popup-resolved DraftUIOperation; the cast bridges that
-	// pre-existing mismatch.
-	estimate: ({ op, feeSettings }, estimateToken, flowKey) =>
-		executionService.estimateOperationFee(op as unknown as Operation, feeSettings, estimateToken, flowKey),
+} = useFeeEstimationMap<number, { index: number; feeSettings: FeeSettings }, TransferFeeEstimate>({
+	// By reference: the SW re-materializes the stored request at this index and
+	// applies the fee choice itself — the popup never hands it an operation.
+	estimate: ({ index, feeSettings }, estimateToken, flowKey) =>
+		executionService.estimateOperationFee(requestId.value!, index, feeSettings, estimateToken, flowKey),
 	cancelRemote: (estimateToken) => {
 		executionService.cancelEstimate(estimateToken).catch(() => {})
 	},
@@ -145,6 +134,29 @@ const {
 	onError: (key, err) => {
 		console.error(`[Execute] Fee estimation failed for op ${key}:`, err)
 		openToast({ label: "Couldn't estimate fee — retry.", icon: "warning", color: "red" }, TOAST_DURATION.LONG)
+	},
+})
+
+// A `default_entrypoint` operation never gets a fee estimate (the dApp pays), so
+// the authorizations the wallet would sign are previewed through their own slot
+// of the same engine: same attempt token, flow key, cancel and handoff rules.
+const {
+	results: authwitPreviews,
+	estimating: previewingOps,
+	estimate: scheduleAuthwitPreview,
+	handoffAll: handoffAuthwitPreviews,
+	rearm: rearmAuthwitPreviews,
+	cancelAll: cancelAllAuthwitPreviews,
+} = useFeeEstimationMap<number, { index: number }, OperationAuthwitPreview>({
+	estimate: ({ index }, estimateToken, flowKey) =>
+		executionService.previewOperationAuthwits(requestId.value!, index, estimateToken, flowKey),
+	cancelRemote: (estimateToken) => {
+		executionService.cancelEstimate(estimateToken).catch(() => {})
+	},
+	debounceMs: 0,
+	onError: (key, err) => {
+		console.error(`[Execute] Authorization preview failed for op ${key}:`, err)
+		openToast({ label: "Couldn't preview authorizations — retry.", icon: "warning", color: "red" }, TOAST_DURATION.LONG)
 	},
 })
 
@@ -211,6 +223,9 @@ const init = async () => {
 		// is dismissed mid-init (cancel from another window) we want the
 		// approve gate to stay closed.
 		initComplete.value = resolved.operations.length > 0
+		for (const [index, op] of resolved.operations.entries()) {
+			if (op.kind === "aztec_sendTx" && op.executionMode === "default_entrypoint") scheduleAuthwitPreview(index, { index })
+		}
 
 		// Pre-fetch token metadata for any `register_token` ops so the
 		// OperationCard renders name/symbol/decimals before Allow. The Allow
@@ -219,7 +234,6 @@ const init = async () => {
 		if (registerOps.length > 0) {
 			await prefetchTokenMetadata(registerOps, tokenService, {
 				metadata: tokenMetadata,
-				interfaces: tokenInterfaces,
 				errors: tokenMetadataError,
 				loading: tokenMetadataLoading,
 			})
@@ -348,7 +362,6 @@ async function prefetchTokenMetadata(
 	tokenClient: TokenServiceClient,
 	refs: {
 		metadata: typeof tokenMetadata
-		interfaces: typeof tokenInterfaces
 		errors: typeof tokenMetadataError
 		loading: typeof tokenMetadataLoading
 	},
@@ -360,7 +373,6 @@ async function prefetchTokenMetadata(
 				try {
 					const meta = await tokenClient.previewTokenMetadata(op.networkId, op.accountAddress, op.address)
 					refs.metadata.value.set(op.address, { name: meta.name, symbol: meta.symbol, decimals: meta.decimals })
-					refs.interfaces.value.set(op.address, meta.interface)
 				} catch (err) {
 					const msg = getErrorMessage(err)
 					refs.errors.value.set(op.address, msg)
@@ -383,7 +395,7 @@ const handleFeeUpdate = (index: number, value: FeeSettings | undefined) => {
 	if (op.kind !== "send_transaction" && op.kind !== "aztec_sendTx") return
 	;(op as { feeSettings?: FeeSettings }).feeSettings = value
 	clearError()
-	if (value) scheduleFeeEstimate(index, { op: op as unknown as UIOperation, feeSettings: value })
+	if (value) scheduleFeeEstimate(index, { index, feeSettings: value })
 }
 
 const approve = async () => {
@@ -405,53 +417,30 @@ const approve = async () => {
 	}
 	try {
 		isLoading.value = true
-		// Narrow Draft → executable Operation via TS assertion. After the
-		// `requiresFeeSelection` gate above, all rows are ready; the assertion
-		// makes that promise compile-time-enforced (and validates at runtime
-		// as a safety net against any popup-side regression).
-		const executable: Operation[] = operations.value.map(({ network: _n, account: _a, ...rest }) => {
-			const draft = rest as unknown as import("./types").DraftOperation
-			assertExecutableOperation(draft)
-			// Approve-mapper threading: for `register_token` ops, attach the
-			// `previewedInterface` from the popup's prefetched map so the
-			// executor can skip a redundant `parseTokenInterface` round-trip.
-			// Safe because by the time we get here `tokenMetadataLoading` is
-			// false (Confirm button gated), so the map is fully populated.
-			// Executor still validates `contract === op.address` + chainId.
-			if (draft.kind === "register_token") {
-				const previewed = tokenInterfaces.value.get(draft.address)
-				if (previewed) {
-					// Extension-local extended type; not part of the wire shape.
-					return { ...draft, previewedInterface: previewed } as unknown as Operation
-				}
-			}
-			return draft
-		})
-		// Ownership handoff: approval transfers the estimates to the execution
-		// path — the window's unmount cleanup must NOT remote-cancel them, or
-		// the eviction would race the fire-and-forget executeOperations out of
-		// its reuse hits and needlessly abort still-running estimates.
+		// Ownership handoff: approval transfers the estimates and previews to the
+		// execution path — the window's unmount cleanup must NOT remote-cancel
+		// them, or the eviction would race the fire-and-forget execution out of
+		// its reuse hits and its preview snapshots.
 		handoffFeeEstimates()
-		// Estimate→confirm reuse ids, index-aligned with `executable`. Rides
-		// this popup-privileged RPC as an envelope — never the shared
-		// Operation wire shape, so a dApp payload can't forge one.
-		const estimateIds = operations.value.map(
-			(_op, index) => (feeEstimates.value[index] as { estimateId?: string } | null | undefined)?.estimateId,
-		)
-		await interactionService.approveInteraction(
-			requestId.value!,
-			executable,
-			{
-				type: OriginType.DAPP,
-				name: dapp.value?.name ?? "Unknown app",
-			},
-			estimateIds,
-		)
+		handoffAuthwitPreviews()
+		// The SW executes the dApp's stored request; per operation the popup
+		// contributes only its fee choice and the ids the SW minted for it.
+		const deltas: OperationApprovalDelta[] = operations.value.map((op, index) => {
+			const estimate = feeEstimates.value[index] ?? undefined
+			const feeSettings = op.kind === "aztec_sendTx" || op.kind === "send_transaction" ? op.feeSettings : undefined
+			return {
+				feeSettings,
+				estimateId: estimate?.estimateId,
+				previewId: estimate?.previewId ?? authwitPreviews.value[index]?.previewId,
+			}
+		})
+		await interactionService.approveInteraction(requestId.value!, deltas)
 		closeWindow(true)
 	} catch (error) {
 		// The execution path never took ownership — re-arm so a later
 		// reject/unmount can still cancel + evict the handed-off estimates.
 		rearmFeeEstimates()
+		rearmAuthwitPreviews()
 		if (error instanceof JobCancelledError) {
 			// A raced approve refused service-side (the dApp cancelled first):
 			// the refusal IS the cancelled state — render the overlay, never an
@@ -472,6 +461,7 @@ const reject = async () => {
 	// signed requests NOW — window teardown alone isn't guaranteed to run
 	// dispose before the window dies.
 	cancelAllFeeEstimates()
+	cancelAllAuthwitPreviews()
 	rejectViaInteractionService("User rejected")
 	closeWindow(true)
 }
@@ -536,8 +526,10 @@ onUnmounted(disposeWindow)
 						:index="i"
 						:profile="profile"
 						:dapp="dapp ?? undefined"
-						:feeEstimate="feeEstimates[i]"
+						:feeEstimate="feeEstimates[i] ?? undefined"
 						:isEstimating="!!estimatingOps[i]"
+						:authwitPreview="authwitPreviews[i] ?? undefined"
+						:isPreviewing="!!previewingOps[i]"
 						:tokenMetadata="op.kind === 'register_token' ? tokenMetadata.get((op as { address: string }).address) : undefined"
 						:tokenMetadataError="op.kind === 'register_token' ? tokenMetadataError.get((op as { address: string }).address) : undefined"
 						:tokenMetadataLoading="op.kind === 'register_token' && tokenMetadataLoading"
