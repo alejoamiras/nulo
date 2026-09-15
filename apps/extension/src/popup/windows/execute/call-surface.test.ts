@@ -169,3 +169,33 @@ describe("rawRows, tokenAt, amountLabel, valueText, valueTitle", () => {
 		expect(valueTitle({ kind: "struct", fields: [{ name: "list", value: ten }] })).toContain("10]")
 	})
 })
+
+describe("a wire alias cannot outrank the decoded name; hover text is complete", () => {
+	test("a `method` alias on the call is ignored: the vocabulary entry is the decoded function's", () => {
+		const call = { name: "transfer", method: "mint_to_public", to: TOKEN, args: [TO, field(5n)] } as Parameters<typeof callSurface>[1]
+		expect(callSurface(ctx, call, abi("transfer", ["to", "amount"]), true)).toEqual({
+			kind: "transfer",
+			to: TO,
+			amount: "5",
+			sender: { kind: "account", address: OWNER },
+		})
+	})
+
+	test("full mode prints whole addresses, fields and strings, so a title never collapses distinct values", () => {
+		const other = `0x${"d".repeat(64)}`
+		const pair: DecodedValue = {
+			kind: "array",
+			items: [
+				{ kind: "address", value: TO },
+				{ kind: "address", value: other },
+			],
+		}
+		expect(valueText(pair)).toBe(`[${trimAddress(TO)}, ${trimAddress(other)}]`)
+		expect(valueTitle(pair)).toBe(`[${TO}, ${other}]`)
+		const nested: DecodedValue = { kind: "struct", fields: [{ name: "secret", value: { kind: "field", value: TO } }] }
+		expect(valueTitle(nested)).toBe(`{ secret: ${TO} }`)
+		const long = "x".repeat(100)
+		expect(valueText({ kind: "string", value: long }).length).toBeLessThan(100)
+		expect(valueTitle({ kind: "string", value: long })).toBe(long)
+	})
+})

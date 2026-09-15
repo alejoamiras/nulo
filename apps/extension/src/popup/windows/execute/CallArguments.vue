@@ -15,8 +15,7 @@ const props = defineProps<{
 	tokens?: readonly TokenInfo[]
 	/** Prefix for every `data-testid` in the block, so each host surface stays addressable. */
 	prefix: string
-	/** Whether the request's JSON view carries this call, so capped rows can point there; a discovered
-	 *  authorization is not in the request, so its overflow is simply not shown. */
+	/** Whether the request's JSON view carries this call, so capped rows can point there. */
 	jsonView?: boolean
 }>()
 

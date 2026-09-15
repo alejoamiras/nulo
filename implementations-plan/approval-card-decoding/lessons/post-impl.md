@@ -41,4 +41,19 @@ Comment audit: three applied ("never renders as a payment" replaced by the corro
 constraint; the token-load comment in `index.vue` says the vocabulary is lost too; the `tokenAt`
 comment deleted).
 
-Round-1 status per codex: #2–#7 closed; #1 and #8 closed by this round's fixes.
+Round-1 status per codex: #2–#7 closed; #1 and #8 closed by this round's fixes. Commit `b0fba3aa`.
+
+## Round 3 — reject, 2 findings (the three-round stop)
+
+| # | Sev | Claim | Verified | Fix |
+|---|---|---|---|---|
+| 1 | high | `{ ...call, name: decoded.fn }` kept a wire `method` alias, which `parseTransferIntent` prefers over `name`: a decoded `transfer(to, amount)` with `method: "mint_to_public"` read as a mint | yes | the corroborated reading is built from `{ name: decoded.fn, args, hideMsgSender }` only; test with the alias |
+| 2 | med | `valueText(v, true)` still trimmed addresses/fields and capped strings, so a title could collapse distinct addresses and small arrays had no title | yes | `full` prints addresses and fields whole and strings up to the sanitizer's 4096; `valueTitle` therefore appears whenever the line trimmed anything; tests: an address pair, a nested field, a long string |
+
+Comment audit: both applied (`ROLE_KIND` comment deleted; the `jsonView` prop comment no longer
+claims discovered overflow is "not shown" — those rows are uncapped). plan.md's Input bounds
+paragraph updated.
+
+**Stop.** Three rounds, all `reject`, findings 8 → 3 → 2 with the last two folded as ten-line
+fixes. The plan's post-implementation rule stops the loop here: the round-3 fixes are unreviewed by
+codex. Surfaced to the owner with the two open asks; a fourth round is the owner's call.

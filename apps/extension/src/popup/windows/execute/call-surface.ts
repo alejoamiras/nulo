@@ -81,7 +81,6 @@ const vocabularySurface = (ctx: CallerContext | undefined, call: WireCall): Call
 	return { kind: "transfer", to: intent.to, amount: intent.amount, sender, ...nonce }
 }
 
-/** The decoded kind each vocabulary role must carry. */
 const ROLE_KIND: Readonly<Record<string, DecodedValue["kind"]>> = {
 	from: "address",
 	to: "address",
@@ -94,7 +93,8 @@ const vocabularyRoles = (name: string, arity: number): readonly string[] | undef
 
 /** The vocabulary reads arguments by position, so the contract's ABI must spell the signature —
  *  the same roles, in the same order, of the same kinds. Registration says a contract is a token,
- *  not that its `transfer` takes `(to, amount)`. */
+ *  not that its `transfer` takes `(to, amount)`. The reading is then keyed by the decoded name alone:
+ *  a `method` alias on the wire must not pick a different vocabulary entry. */
 const corroborates = (decoded: Extract<DecodedCall, { kind: "decoded" }>): boolean => {
 	const roles = vocabularyRoles(decoded.fn, decoded.params.length)
 	return roles !== undefined && decoded.params.every((p, i) => p.name === roles[i] && p.value.kind === ROLE_KIND[p.name])
@@ -112,7 +112,10 @@ export const callSurface = (
 ): CallSurface => {
 	if (decoded === undefined) return { kind: "pending" }
 	if (decoded.kind === "decoded") {
-		const known = tokenKnown && corroborates(decoded) ? vocabularySurface(ctx, { ...call, name: decoded.fn }) : undefined
+		const known =
+			tokenKnown && corroborates(decoded)
+				? vocabularySurface(ctx, { name: decoded.fn, args: call.args, hideMsgSender: call.hideMsgSender })
+				: undefined
 		return known ?? { kind: "decoded", fn: decoded.fn, params: decoded.params }
 	}
 	return { kind: "raw", reason: decoded.reason, ...rawRows(call.args, maxRows) }
@@ -142,21 +145,21 @@ export const amountLabel = (
 	return { text: formatBaseUnits(BigInt(amount), token.decimals), symbol }
 }
 
-/** A one-line reading of a decoded value; nested shapes are summarized unless `full`, an address is
- *  left to `AddressDisplay`. */
+/** A one-line reading of a decoded value. Trimmed and summarized for the row; `full` prints every
+ *  value whole, for the hover text. An address on its own row is left to `AddressDisplay`. */
 export const valueText = (v: DecodedValue, full = false): string => {
 	switch (v.kind) {
 		case "integer":
 		case "selector":
 			return v.value
 		case "string":
-			return safeWire(v.value, 64)
+			return safeWire(v.value, full ? 4096 : 64)
 		case "boolean":
 			return v.value ? "true" : "false"
 		case "field":
-			return trimAddress(v.value, 10, 6)
+			return full ? v.value : trimAddress(v.value, 10, 6)
 		case "address":
-			return trimAddress(v.value)
+			return full ? v.value : trimAddress(v.value)
 		case "none":
 			return "none"
 		case "array": {

@@ -174,9 +174,11 @@ Each phase's gate is what "✓" means. Commands are the repo's real scripts.
   shows its own parameter names, integers unscaled, no symbol. Registration proves the contract
   answers the token metadata and balance calls, not that its `transfer` is honest — that residual is
   the user's trust in the tokens they registered.
-- **Input bounds**: ≤ 64 calls per RPC, ≤ 256 args per call, 66-char hex only (else `opaque`), ≤ 8
-  array items projected, ≤ 32 raw rows rendered, `safeWire` caps + strips control characters and
-  bidi overrides from any string that reaches the DOM; `title` attributes carry the full field only.
+- **Input bounds**: ≤ 64 calls per RPC, ≤ 256 args per call, 66-char hex only (else `opaque`),
+  ≤ 1024 decoded leaves per call (bounded on the ABI before decoding), ≤ 32 raw rows on a requested
+  call (the JSON view has the rest) and every row on a discovered authorization (nothing else has
+  them), `safeWire` caps + strips control characters and bidi overrides from any string that reaches
+  the DOM; a row's `title` carries the whole field, list or string when the line trimmed it.
 - **Authorization**: `decodeCallsForDisplay` runs `ensureInitialized`, rejects non-arrays, checks the
   network belongs to the active profile. `AztecAddress.fromStringUnsafe` on the app's `to` is inside
   the lookup's try/catch → `unknown-contract`.
