@@ -5,7 +5,7 @@
  */
 import type { TokenInfo } from "@/wallet/services/token/client"
 import { safeWire } from "./humanize"
-import { type CallSurface, RAW_NOTICE, amountLabel, paramText, rawToggleLabel } from "./call-surface"
+import { type CallSurface, RAW_NOTICE, amountLabel, rawToggleLabel, valueText } from "./call-surface"
 
 const props = defineProps<{
 	surface: CallSurface
@@ -15,6 +15,9 @@ const props = defineProps<{
 	tokens?: readonly TokenInfo[]
 	/** Prefix for every `data-testid` in the block, so each host surface stays addressable. */
 	prefix: string
+	/** Whether the request's JSON view carries this call, so capped rows can point there; a discovered
+	 *  authorization is not in the request, so its overflow is simply not shown. */
+	jsonView?: boolean
 }>()
 
 const rawOpen = ref(false)
@@ -87,7 +90,7 @@ const amount = computed(() =>
 				:mono="p.value.kind === 'field'"
 				:title="p.value.kind === 'field' ? p.value.value : undefined"
 			>
-				{{ paramText(tokens, chainId, contract, p) }}
+				{{ valueText(p.value) }}
 			</Text>
 		</Flex>
 	</Flex>
@@ -122,13 +125,14 @@ const amount = computed(() =>
 				<Text v-else-if="row.kind === 'text'" size="11" color="primary">{{ row.value }}</Text>
 				<Text v-else size="11" color="tertiary">(unreadable)</Text>
 			</Flex>
-			<Text v-if="surface.hidden" :data-testid="`${prefix}-args-more`" size="11" color="tertiary">+{{ surface.hidden }} more in the JSON view</Text>
+			<Text v-if="surface.hidden" :data-testid="`${prefix}-args-more`" size="11" color="tertiary">
+				+{{ surface.hidden }} more{{ jsonView ? " in the JSON view" : " not shown" }}
+			</Text>
 		</Flex>
 	</Flex>
 </template>
 
 <style module>
-/* Full width, in the card's own key-left / value-right rhythm. */
 .block {
 	width: 100%;
 }

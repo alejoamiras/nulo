@@ -96,6 +96,17 @@ describe("decodeCallForDisplay", () => {
 		})
 	})
 
+	test("an interface that would decode into thousands of values is refused before decoding", async () => {
+		const empty: AbiType = { kind: "struct", path: "Empty", fields: [] }
+		const flood = fn("flood", [{ name: "items", type: { kind: "array", length: 10_000, type: empty } }])
+		const hostile = { name: "Flood", functions: [flood], nonDispatchPublicFunctions: [] } as unknown as ContractArtifact
+		// Zero fields encode ten thousand empty structs: the argument count cannot bound this.
+		expect(await decodeCallForDisplay(lookup({ [TOKEN]: hostile }), { to: TOKEN, name: "flood", args: [] })).toEqual({
+			kind: "undecoded",
+			reason: "unavailable",
+		})
+	})
+
 	test("a selector is the truth: a dApp-supplied name cannot pick a different function", async () => {
 		const bySelector = await decodeCallForDisplay(lookup({ [TOKEN]: artifact }), {
 			to: TOKEN,

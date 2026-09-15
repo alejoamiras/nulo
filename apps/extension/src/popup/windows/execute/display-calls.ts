@@ -8,7 +8,17 @@ import type { DraftUIOperation } from "./types"
 
 type WireCall = { to?: unknown; name?: unknown; selector?: unknown; args?: unknown }
 
-const asText = (v: unknown): string | undefined => (typeof v === "string" ? v : v === undefined || v === null ? undefined : String(v))
+/** A hostile `toString` must not throw here: the decode request still has to be built, and the
+ *  decoder rejects the argument as a non-field. */
+const asText = (v: unknown): string | undefined => {
+	if (typeof v === "string") return v
+	if (v === undefined || v === null) return undefined
+	try {
+		return String(v)
+	} catch {
+		return undefined
+	}
+}
 
 const toDisplayCall = (call: WireCall): DisplayCallInput => ({
 	to: asText(call.to) ?? "",

@@ -9,10 +9,15 @@ describe("displayCallsOf", () => {
 		const op = {
 			...base,
 			kind: "aztec_sendTx",
-			exec: { calls: [{ to: TOKEN, name: "transfer", selector: "0x11223344", args: ["0x01", { toString: () => "0x02" }] }] },
+			exec: {
+				calls: [
+					{ to: TOKEN, name: "transfer", selector: "0x11223344", args: ["0x01", { toString: () => "0x02" }, { toString: null }] },
+				],
+			},
 			opts: {},
 		}
-		expect(displayCallsOf(op as never)).toEqual([{ to: TOKEN, name: "transfer", selector: "0x11223344", args: ["0x01", "0x02"] }])
+		// A `toString` that throws yields an empty argument, which the decoder rejects; it never throws here.
+		expect(displayCallsOf(op as never)).toEqual([{ to: TOKEN, name: "transfer", selector: "0x11223344", args: ["0x01", "0x02", ""] }])
 	})
 
 	test("a createAuthWit call intent is one call; an inner-hash intent and other kinds are none", () => {

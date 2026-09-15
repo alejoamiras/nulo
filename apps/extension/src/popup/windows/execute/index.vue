@@ -409,9 +409,10 @@ async function prefetchTokenMetadata(
 async function decodeOperationArguments(ops: UIOperation[]): Promise<void> {
 	await Promise.all(
 		ops.map(async (op, index) => {
-			const calls = displayCallsOf(op)
-			if (!calls.length) return
+			let calls: ReturnType<typeof displayCallsOf> = []
 			try {
+				calls = displayCallsOf(op)
+				if (!calls.length) return
 				decodedCalls.value.set(index, await executionService.decodeCallsForDisplay(op.networkId, calls))
 			} catch (error) {
 				console.warn("[Execute] Argument decode failed", { index, error })

@@ -9,6 +9,7 @@ import { flushPromises, mount } from "@vue/test-utils"
 import { describe, expect, test, vi } from "vitest"
 import AddressDisplay from "@/components/AddressDisplay.vue"
 import { trimAddress } from "@/utils/string"
+import type { TokenInfo } from "@/wallet/services/token/client"
 import OperationCard from "./OperationCard.vue"
 
 vi.mock("@/utils/core", () => ({ managers: { contact: { getContactByAddress: vi.fn(async () => null) } } }))
@@ -20,7 +21,7 @@ const TO = `0x${"b".repeat(64)}`
 const TOKEN = `0x${"c".repeat(64)}`
 /** An `Fr` as the wire carries it. */
 const field = (n: bigint): string => `0x${n.toString(16).padStart(64, "0")}`
-const USDC = { id: 1, chainId: 1, contract: TOKEN, name: "USD Coin", symbol: "USDC", decimals: 6 }
+const USDC = { id: 1, chainId: 1, contract: TOKEN, name: "USD Coin", symbol: "USDC", decimals: 6 } as TokenInfo
 
 const sendTx = (calls: unknown[], extra: Record<string, unknown> = {}) => ({
 	kind: "aztec_sendTx" as const,
@@ -44,7 +45,7 @@ const stubs = {
 }
 const mountCard = async (op: unknown, props: Record<string, unknown> = {}) => {
 	const w = mount(OperationCard, {
-		props: { op: op as never, index: 0, ...props },
+		props: { op: op as never, index: 0, tokens: [USDC], ...props },
 		global: { stubs, components: { AddressDisplay } },
 	})
 	await flushPromises()
@@ -54,18 +55,32 @@ const all = (w: ReturnType<typeof mount>, testid: string) => w.findAll(`[data-te
 const one = (w: ReturnType<typeof mount>, testid: string) => w.find(`[data-testid="${testid}"]`)
 
 describe("OperationCard — the vocabulary reading", () => {
-	test("transfer(to, amount) from the account: 'From: this account', a trimmed recipient, a decimal amount", async () => {
-		const w = await mountCard(sendTx([{ name: "transfer", to: TOKEN, args: [TO, field(5n)] }]))
+	test("transfer(to, amount) on a registered token from the account: 'From: this account', a trimmed recipient, the amount in token units", async () => {
+		const w = await mountCard(sendTx([{ name: "transfer", to: TOKEN, args: [TO, field(5_000_000n)] }]))
 		expect(one(w, "execute-op-payload-row").attributes("data-intent-kind")).toBe("transfer")
 		const sender = one(w, "execute-op-transfer-sender")
 		expect(sender.attributes("data-sender-kind")).toBe("account")
 		expect(sender.text()).toContain("this account")
 		expect(sender.text()).toContain(trimAddress(OWNER))
-		expect(one(w, "execute-op-amount").text()).toContain("5")
-		expect(one(w, "execute-op-amount").text()).toContain("base units")
-		expect(w.text()).not.toContain(field(5n))
+		expect(one(w, "execute-op-amount").text()).toContain("5 USDC")
+		expect(w.text()).not.toContain(field(5_000_000n))
 		expect(w.text()).not.toContain(TO)
 		expect(w.text()).toContain(trimAddress(TO))
+	})
+
+	test("the same call on a contract the wallet has not registered as a token takes the decode, never the vocabulary", async () => {
+		const w = await mountCard(sendTx([{ name: "transfer", to: TO, args: [OWNER, field(5n)] }]), {
+			tokens: [],
+			decodedCalls: [
+				decoded("transfer", [
+					{ name: "admin", value: { kind: "address", value: OWNER } },
+					{ name: "role", value: { kind: "integer", value: "5" } },
+				]),
+			],
+		})
+		expect(one(w, "execute-op-payload-row").attributes("data-intent-kind")).toBe("decoded")
+		expect(one(w, "execute-op-structured-args").exists()).toBe(false)
+		expect(all(w, "execute-op-decoded-param").map((p) => p.attributes("data-param"))).toEqual(["admin", "role"])
 	})
 
 	test("the same call under default_entrypoint renders 'Caller: none'", async () => {
@@ -94,11 +109,11 @@ describe("OperationCard — the vocabulary reading", () => {
 	})
 
 	test("mint_to_private(to, amount) is a mint: recipient and amount, no sender row", async () => {
-		const w = await mountCard(sendTx([{ name: "mint_to_private", to: TOKEN, args: [TO, field(500n)] }]))
+		const w = await mountCard(sendTx([{ name: "mint_to_private", to: TOKEN, args: [TO, field(500_000_000n)] }]))
 		expect(one(w, "execute-op-payload-row").attributes("data-intent-kind")).toBe("mint")
 		expect(one(w, "execute-op-structured-args").text()).toContain("Mint to:")
 		expect(one(w, "execute-op-transfer-sender").exists()).toBe(false)
-		expect(one(w, "execute-op-amount").text()).toContain("500")
+		expect(one(w, "execute-op-amount").text()).toContain("500 USDC")
 		expect(one(w, "execute-op-unverified-args").exists()).toBe(false)
 	})
 
@@ -122,7 +137,7 @@ describe("OperationCard — the ABI decode and the raw fallback", () => {
 	const claimArgs = [TO, field(5_000_000n), field(7n), field(1n)]
 	const claim = { name: "claim_lie", to: TOKEN, selector: "0x11223344", args: claimArgs }
 
-	test("a decoded call names its parameters by ABI truth, trims addresses and fields, and labels an amount", async () => {
+	test("a decoded call names its parameters as the ABI does, trims addresses and fields, and keeps an integer as given", async () => {
 		const w = await mountCard(sendTx([claim]), {
 			tokens: [USDC],
 			decodedCalls: [
@@ -141,7 +156,9 @@ describe("OperationCard — the ABI decode and the raw fallback", () => {
 		expect(params.map((p) => p.attributes("data-param"))).toEqual(["to", "amount", "secret", "shielded"])
 		expect(params[0]!.text()).toContain(trimAddress(TO))
 		expect(params[0]!.text()).not.toContain(TO)
-		expect(params[1]!.text()).toContain("5 USDC")
+		// The wallet's units apply to its own vocabulary only: a decoded `amount` is whatever the contract says.
+		expect(params[1]!.text()).toContain("5000000")
+		expect(params[1]!.text()).not.toContain("USDC")
 		expect(params[2]!.text()).not.toContain(field(7n))
 		expect(params[2]!.find("[title]").attributes("title")).toBe(field(7n))
 		expect(params[3]!.text()).toContain("true")

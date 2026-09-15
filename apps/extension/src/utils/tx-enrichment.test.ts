@@ -55,6 +55,10 @@ describe("humanizeMethodName — fallback when no label exists", () => {
 		// future METHOD_LABELS edit doesn't silently regress.
 		expect(humanizeMethodName("claim_and_end_setup")).toBe("Claim Fee Juice")
 	})
+	test("a protocol label stays on its contract: a third-party claim is just Claim", () => {
+		expect(humanizeMethodName("claim", "0x1234")).toBe("Claim")
+		expect(humanizeMethodName("claim_and_end_setup", "0x1234")).toBe("Claim And End Setup")
+	})
 	test("empty / falsy input → Unknown", () => {
 		expect(humanizeMethodName("")).toBe("Unknown")
 	})

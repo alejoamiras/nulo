@@ -37,15 +37,14 @@ import CallArguments from "./CallArguments.vue"
 import OperationActionRow from "./OperationActionRow.vue"
 import { humanizeOperationKind, safeWire } from "./humanize"
 import type { DraftAztecSendTxOperation, DraftSendTransactionOperation, DraftUIOperation } from "./types"
-import { type CallSurface, type CallerContext, type WireCall, callName, callSurface, wire } from "./call-surface"
+import { type CallSurface, type CallerContext, type WireCall, callName, callSurface, tokenAt, wire } from "./call-surface"
 import { trimAddress } from "@/utils/string"
 import { humanizeMethodName } from "@/utils/tx-enrichment"
 import { isEmbeddedFeePayment } from "./operation-validation"
 
-// `DraftUIOperation` is the shared honest type (Phase 2 follow-up). Send-like
-// `feeSettings` is optional during user editing — the card v-models it via
-// the FeeSettingsCard emit, the parent's `requiresFeeSelection` gate
-// validates before approve.
+// `DraftUIOperation` is the shared honest type. Send-like `feeSettings` is optional during user
+// editing — the card v-models it via the FeeSettingsCard emit, the parent's `requiresFeeSelection`
+// gate validates before approve.
 type UIOperation = DraftUIOperation
 
 /** The send-like UI op subset (where feeSettings + fee + exec fields exist). */
@@ -108,8 +107,11 @@ const decodedAt = (j: number): DecodedCall | undefined =>
 
 const sendTxCalls = (op: DraftAztecSendTxOperation): { call: WireCall; surface: CallSurface }[] => {
 	const ctx: CallerContext = { accountAddress: op.accountAddress, noFrom: isNoFrom(op as SendLikeUIOp) }
-	return (op.exec.calls as WireCall[]).map((call, j) => ({ call, surface: callSurface(ctx, call, decodedAt(j)) }))
+	return (op.exec.calls as WireCall[]).map((call, j) => ({ call, surface: callSurface(ctx, call, decodedAt(j), isToken(call.to)) }))
 }
+
+/** Only a contract the wallet registered as a token gets the transfer/mint vocabulary. */
+const isToken = (contract: unknown): boolean => tokenAt(props.tokens, props.op.network?.chainId, contract) !== undefined
 
 /** What an `aztec_createAuthWit` asks the wallet to sign: a call it can show, or a hash it cannot. */
 type CreateAuthwitSurface =
@@ -124,7 +126,7 @@ const createAuthwitSurface = (m: unknown): CreateAuthwitSurface => {
 			caller: wire(intent.caller, 80),
 			to: wire(call.to, 80),
 			call,
-			args: callSurface(undefined, call, decodedAt(0)),
+			args: callSurface(undefined, call, decodedAt(0), isToken(call.to)),
 		}
 	}
 	return { kind: "hash", consumer: wire(intent.consumer, 80), innerHash: wire(intent.innerHash, 80) }
@@ -153,10 +155,10 @@ const authwits = computed(() => authwitSurface(props.op))
 const authwitDecode = (a: DiscoveredAuthwit): DecodedCall | undefined => props.decodedAuthwits?.get(a.messageHash)
 const authwitFunction = (a: DiscoveredAuthwit): string => {
 	const decoded = authwitDecode(a)
-	return decoded?.kind === "decoded" ? humanizeMethodName(decoded.fn) : safeWire(a.selector, 64)
+	return decoded?.kind === "decoded" ? humanizeMethodName(safeWire(decoded.fn, 64), a.consumer) : safeWire(a.selector, 64)
 }
 const authwitArgs = (a: DiscoveredAuthwit): CallSurface =>
-	callSurface(undefined, { selector: a.selector, to: a.consumer, args: a.args }, authwitDecode(a))
+	callSurface(undefined, { selector: a.selector, to: a.consumer, args: a.args }, authwitDecode(a), isToken(a.consumer))
 
 /** Which discovered authorizations the user expanded; collapsed by default, the summary row is the review. */
 const openAuthwits = ref(new Set<string>())
@@ -216,7 +218,7 @@ const toggleAuthwit = (a: DiscoveredAuthwit): void => {
 						<Text size="12" weight="600" color="primary">{{ callName(call, surface) }}</Text>
 						<Text size="11" color="secondary">on <AddressDisplay :address="call.to" size="11" /></Text>
 					</Flex>
-					<CallArguments :surface="surface" :contract="call.to" :chainId="op.network?.chainId" :tokens="tokens" prefix="execute-op" />
+					<CallArguments :surface="surface" :contract="call.to" :chainId="op.network?.chainId" :tokens="tokens" prefix="execute-op" json-view />
 				</Flex>
 			</template>
 			<Flex
@@ -441,7 +443,7 @@ const toggleAuthwit = (a: DiscoveredAuthwit): void => {
 						size="12"
 						color="primary"
 					>
-						<Text weight="600">{{ humanizeMethodName(safeWire(call.name ?? call.selector, 64)) }}</Text>
+						<Text weight="600">{{ humanizeMethodName(safeWire(call.name ?? call.selector, 64), wire(call.to, 80)) }}</Text>
 						<Text color="secondary"> on </Text>
 						<AddressDisplay :address="call.to" />
 					</Text>
@@ -493,7 +495,7 @@ const toggleAuthwit = (a: DiscoveredAuthwit): void => {
 					</Flex>
 					<Flex data-testid="execute-authwit-args" direction="column" gap="4" :class="$style.group">
 						<Text size="12" color="secondary">Arguments</Text>
-						<CallArguments :surface="s.args" :contract="s.to" :chainId="op.network?.chainId" :tokens="tokens" prefix="execute-authwit" />
+						<CallArguments :surface="s.args" :contract="s.to" :chainId="op.network?.chainId" :tokens="tokens" prefix="execute-authwit" json-view />
 					</Flex>
 				</template>
 				<template v-else>

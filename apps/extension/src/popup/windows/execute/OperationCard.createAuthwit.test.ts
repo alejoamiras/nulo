@@ -7,11 +7,13 @@
 import { mount } from "@vue/test-utils"
 import { describe, expect, test } from "vitest"
 import { trimAddress } from "@/utils/string"
+import type { TokenInfo } from "@/wallet/services/token/client"
 import OperationCard from "./OperationCard.vue"
 
 const OWNER = `0x${"a".repeat(64)}`
 const DELEGATE = `0x${"d".repeat(64)}`
 const TOKEN = `0x${"c".repeat(64)}`
+const USDC = { id: 1, chainId: 1, contract: TOKEN, name: "USD Coin", symbol: "USDC", decimals: 6 } as TokenInfo
 const CONSUMER = `0x${"e".repeat(64)}`
 const INNER = `0x${"f".repeat(64)}`
 const field = (n: bigint): string => `0x${n.toString(16).padStart(64, "0")}`
@@ -36,12 +38,13 @@ const mountCard = (op: unknown, props: Record<string, unknown> = {}) =>
 	mount(OperationCard, { props: { op: op as never, index: 0, ...props }, global: { stubs } })
 
 describe("OperationCard — aztec_createAuthWit", () => {
-	test("a transfer intent with an explicit sender renders the delegate, the target and the structured arguments", () => {
+	test("a transfer intent on a registered token with an explicit sender renders the delegate, the target and the structured arguments", () => {
 		const w = mountCard(
 			createAuthWit({
 				caller: DELEGATE,
 				call: { to: TOKEN, name: "transfer_in_private", args: [OWNER, DELEGATE, field(5n), field(1n)] },
 			}),
+			{ tokens: [USDC] },
 		)
 		expect(w.text()).toContain("Call intent")
 		const caller = w.find('[data-testid="execute-authwit-caller"]')

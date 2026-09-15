@@ -1,7 +1,8 @@
 /**
  * How the approval card reads one call's arguments, in the first shape that applies: the wallet's
- * transfer/mint vocabulary (structured, immediate), the ABI decode the wallet fetched (named
- * parameters), or the raw wire fields — 32-byte hex nobody can review, so never the default view.
+ * transfer/mint vocabulary (structured, immediate, only on a contract the wallet registered as a
+ * token), the ABI decode the wallet fetched (named parameters, in the contract's own words), or the
+ * raw wire fields — 32-byte hex nobody can review, so never the default view.
  */
 
 import type { DecodedCall, DecodedParam, DecodedValue, UndecodedReason } from "@/wallet/services/execution/client"
@@ -52,6 +53,16 @@ export const rawRows = (args: unknown): RawRows => {
 	return { rows: list.slice(0, MAX_ARG_ROWS).map(rawRow), hidden: Math.max(0, list.length - MAX_ARG_ROWS) }
 }
 
+/** The token the wallet registered at `contract` on `chainId`, if any. */
+export const tokenAt = (
+	tokens: readonly TokenInfo[] | undefined,
+	chainId: number | undefined,
+	contract: unknown,
+): TokenInfo | undefined => {
+	const address = wire(contract, 80).toLowerCase()
+	return tokens?.find((t) => t.chainId === chainId && t.contract.toLowerCase() === address)
+}
+
 const isZero = (n: string): boolean => /^(0x0+|0)$/.test(n)
 
 const senderOf = (ctx: CallerContext): TransferSender => (ctx.noFrom ? { kind: "none" } : { kind: "account", address: ctx.accountAddress })
@@ -68,32 +79,44 @@ const vocabularySurface = (ctx: CallerContext | undefined, call: WireCall): Call
 	return { kind: "transfer", to: intent.to, amount: intent.amount, sender, ...nonce }
 }
 
-/** `decoded` is `undefined` while the wallet is still decoding. */
-export const callSurface = (ctx: CallerContext | undefined, call: WireCall, decoded: DecodedCall | undefined): CallSurface => {
-	const known = vocabularySurface(ctx, call)
+/** `decoded` is `undefined` while the wallet is still decoding. The vocabulary applies only when the
+ *  call targets a registered token (`tokenKnown`): a same-named function on any other contract keeps
+ *  the contract's own reading, so a `transfer(admin, role)` never renders as a payment. */
+export const callSurface = (
+	ctx: CallerContext | undefined,
+	call: WireCall,
+	decoded: DecodedCall | undefined,
+	tokenKnown = false,
+): CallSurface => {
+	const known = tokenKnown ? vocabularySurface(ctx, call) : undefined
 	if (known) return known
 	if (decoded === undefined) return { kind: "pending" }
 	if (decoded.kind === "decoded") return { kind: "decoded", fn: decoded.fn, params: decoded.params }
 	return { kind: "raw", reason: decoded.reason, ...rawRows(call.args) }
 }
 
-/** The header names the function by ABI truth when the wallet decoded it; the dApp's own label otherwise. */
-export const callName = (call: WireCall, surface: CallSurface): string =>
-	humanizeMethodName(surface.kind === "decoded" ? surface.fn : wire(call.name ?? call.selector, 64))
+/** The header names the function by its ABI name once decoded, by the dApp's label otherwise. Both are
+ *  untrusted strings, and a curated label applies only on the contract it belongs to. */
+export const callName = (call: WireCall, surface: CallSurface): string => {
+	const name = surface.kind === "decoded" ? safeWire(surface.fn, 64) : wire(call.name ?? call.selector, 64)
+	return humanizeMethodName(name, wire(call.to, 80))
+}
 
 export type AmountLabel = { text: string; symbol?: string }
 
-/** An amount in the token's own units when the wallet knows the token at `contract`; the raw integer otherwise. */
+/** An amount in the token's own units when the wallet knows the token at `contract`; the raw integer
+ *  otherwise — including a token whose symbol sanitizes to nothing, where a scaled number under a
+ *  "base units" label would be a lie. */
 export const amountLabel = (
 	tokens: readonly TokenInfo[] | undefined,
 	chainId: number | undefined,
 	contract: unknown,
 	amount: string,
 ): AmountLabel => {
-	const address = wire(contract, 80).toLowerCase()
-	const token = tokens?.find((t) => t.chainId === chainId && t.contract.toLowerCase() === address)
-	if (!token) return { text: amount }
-	return { text: formatBaseUnits(BigInt(amount), token.decimals), symbol: safeWire(token.symbol, 16) }
+	const token = tokenAt(tokens, chainId, contract)
+	const symbol = token ? safeWire(token.symbol, 16) : ""
+	if (!token || !symbol) return { text: amount }
+	return { text: formatBaseUnits(BigInt(amount), token.decimals), symbol }
 }
 
 /** A one-line reading of a decoded value; nested shapes are summarized, an address is left to `AddressDisplay`. */
@@ -117,20 +140,6 @@ export const valueText = (v: DecodedValue): string => {
 		case "struct":
 			return `{ ${v.fields.map((f) => `${safeWire(f.name, 32)}: ${valueText(f.value)}`).join(", ")} }`
 	}
-}
-
-/** A decoded `amount` carries its token when the wallet knows one; every other value reads as itself. */
-export const paramText = (
-	tokens: readonly TokenInfo[] | undefined,
-	chainId: number | undefined,
-	contract: unknown,
-	p: DecodedParam,
-): string => {
-	if (p.value.kind === "integer" && p.name === "amount") {
-		const a = amountLabel(tokens, chainId, contract, p.value.value)
-		return a.symbol ? `${a.text} ${a.symbol}` : a.text
-	}
-	return valueText(p.value)
 }
 
 export const RAW_NOTICE: Readonly<Record<UndecodedReason, string>> = {

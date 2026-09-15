@@ -20,9 +20,6 @@ export type DecodedField = { readonly name: string; readonly value: DecodedValue
 
 export type DecodedParam = { readonly name: string; readonly value: DecodedValue }
 
-/** Why a call stayed undecoded: the wallet holds no artifact for the contract, the artifact has no
- *  such function, the arguments do not fit the function's parameters, or the decoder itself could
- *  not be reached. */
 export type UndecodedReason = "unknown-contract" | "unknown-function" | "arguments" | "unavailable"
 
 export type DecodedCall =

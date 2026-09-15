@@ -54,14 +54,15 @@ export function getMethodLabel(method: string, contract?: string): string | null
 
 /**
  * Maps a method name/selector to a human-readable label.
- * - Known Aztec methods get friendly labels
+ * - Known Aztec methods get friendly labels; given `contract`, a label that belongs to one protocol
+ *   contract (the fee-juice `claim`) applies only there
  * - Hex selectors get truncated
  * - Generic snake_case gets title-cased
  */
-export function humanizeMethodName(method: string): string {
+export function humanizeMethodName(method: string, contract?: string): string {
 	if (!method) return "Unknown"
 
-	const label = curatedLabel(method)
+	const label = getMethodLabel(method, contract)
 	if (label) return label
 
 	// Hex selector — truncate
