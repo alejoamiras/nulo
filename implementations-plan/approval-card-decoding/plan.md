@@ -191,31 +191,45 @@ Facts (verified):
    `ad130aea^` vs `ad130aea`).
 4. `Fr.fromString` throws for values ≥ the field modulus (a `0xbbb…` fixture failed; addresses in
    tests now start with `0x00`).
-5. The e2e suite touches this card only through `execute-op-payload-row` counts
-   (`tests/e2e/network/tx-sendTx-multicall.test.ts:66`); every other new testid is unused by e2e.
+5. The e2e suite touches the *argument presentation* only through `execute-op-payload-row` counts
+   (`tests/e2e/network/tx-sendTx-multicall.test.ts:66`). Other execute-card testids the suite reads
+   (`execute-op-from-account` in `multi-account-from.test.ts:67`, the fee badges) are untouched here.
 6. `ExecutionService` reaches artifacts through `pxeService.getContractInstance(info, address)` →
    `getContractArtifact(info, instance.currentContractClassId)` (both already used by execution).
-7. `aztec_sendTx` arguments arrive in the popup as `0x` + 64 hex strings — the dispatcher forwards
-   raw JSON-RPC args (the regression's trigger; the old component tests fed `5n`).
+7. `aztec_sendTx` arguments arrive in the popup as `0x` + 64 hex strings in normal SDK use. The
+   dispatcher validates each call's target and string name (`dispatcher.ts:580`) and leaves the
+   arguments unparsed, so the popup treats every argument as hostile (a throwing `toString` is
+   pinned in `display-calls.test.ts`).
 
 Inferences:
 
-- A dApp that never registered its contract with the PXE decodes as `unknown-contract`; that is
-  the intended fallback, not a bug.
-- A discovered authwit decodes against its consumer's ABI by selector; if the consumer is not the
-  contract whose ABI the selector belongs to, the decode falls to `unknown-function` (safe, not wrong).
-- The discovered-authorization "Show details" toggle survives the owner's "flat" decision: the
-  decision was about the main call's arguments; the authorization record duplicates its summary rows.
-  Flip on request.
+- A contract the dApp never registered with the PXE may still decode: the instance lookup falls
+  through to the node and the known-contract bundle (`packages/aztec-runtime/src/pxe/service.ts:327`).
+  `unknown-contract` means the whole cascade missed.
+- A discovered authwit decodes on the consumer the discoverer bound from the emitting effect
+  (`authwit-discoverer.ts:130`); that binding, not selector uniqueness, is what keeps the decode on
+  the right contract (selectors collide across contracts).
+- The vocabulary is gated on the wallet's token registry (codex round 1); a transfer on a token the
+  wallet has not registered shows the decoded parameters (or raw fields), never the wallet's labels.
 
-Asks: none open. The fold-vs-flat ask was answered (UI impact).
+Asks (surfaced by codex round 1; current behaviour stays until the owner decides):
+
+- **Discovered-authorization arguments stay behind "Show details".** The flat-layout sign-off was
+  about the main call; the owner has not ruled on this fold. Default kept: collapsed.
+- **Confirm is not gated on the decode.** `index.vue` lets the user approve while a card still says
+  "Reading arguments…" (a slow decode never blocks; the RPC has its 60 s timeout). Default kept:
+  not gated.
 
 ## Decision log
 
 - 2026-09-15 owner: "open a fix branch off dev and fix all of it" + hide undecodable payloads behind
   a UX-conscious toggle + a CLAUDE.md sign-off rule + an artifact mockup.
 - 2026-09-15 owner, on revision 2: flat rows, no folded headline (quoted under UI impact).
-- Codex rounds: see `lessons/post-impl.md`.
+- Codex round 1 (reject, 8 findings, all folded): the vocabulary is gated on the token registry;
+  the decoder bounds the ABI's decoded leaves before decoding; decoded names are sanitized and
+  curated labels stay on their contract; a decoded integer is never scaled; an empty symbol keeps
+  the raw integer; a throwing `toString` cannot leave the card pending; the row-cap notice names the
+  JSON view only for requested calls. Details in `lessons/post-impl.md`.
 
 ## Post-implementation
 
