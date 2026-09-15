@@ -19,7 +19,9 @@
 import {
 	AccountAddressInconsistencyError,
 	CapabilityNotGrantedError,
+	ContractNotRegisteredError,
 	JobCancelledError,
+	PxeStaleAnchorError,
 	RpcDisconnectedError,
 	RpcTimeoutError,
 	TooManyPendingError,
@@ -124,6 +126,29 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 			code: -32603,
 			message: error.message,
 			data: { walletErrorCode: DuplicateInitializationError.CODE },
+		}
+	}
+	if (error instanceof PxeStaleAnchorError) {
+		// The PXE's anchor block fell out of the node's view (a reorg, or nodes behind one endpoint
+		// disagreeing) and one resync + retry did not clear it. Transient from the dApp's side —
+		// the same -32603 + discriminator shape as DuplicateInitializationError. Constant message:
+		// the node's own text never crosses.
+		return {
+			code: -32603,
+			message: "The wallet's view of the chain was behind the node. Retry the request.",
+			data: { walletErrorCode: PxeStaleAnchorError.CODE },
+		}
+	}
+	if (error instanceof ContractNotRegisteredError) {
+		// -32602 = JSON-RPC "Invalid params": the request named a contract the wallet was never
+		// given. Raised only while resolving contracts — before proving, before any broadcast — so
+		// a dApp may register it and retry the same call safely. Constant message ("not registered"
+		// is the phrase dApp-side classifiers key on); no class id, since instance lookup can be
+		// served from wallet-local data and is therefore not established as public.
+		return {
+			code: -32602,
+			message: "Contract not registered with the wallet. Register it and retry.",
+			data: { walletErrorCode: ContractNotRegisteredError.CODE },
 		}
 	}
 	// This value crosses the trust boundary INTO an arbitrary dApp — the one path here that leaves

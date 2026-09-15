@@ -224,6 +224,34 @@ export class UnsupportedMethodError extends WalletError {
 	}
 }
 
+/**
+ * A PXE operation kept failing on a chain anchor the node no longer agrees with — a reorg, or
+ * nodes behind one endpoint disagreeing on the tip — after one resync and retry. The message is
+ * wallet-authored and constant per operation so upstream node text never rides it; that text lives
+ * in `details.cause`, which stops at the operation-result boundary.
+ */
+export class PxeStaleAnchorError extends WalletError {
+	public static readonly CODE = "PXE_STALE_ANCHOR"
+
+	public constructor(message: string, details?: unknown) {
+		super(PxeStaleAnchorError.CODE, message, details, "PxeStaleAnchorError")
+	}
+}
+
+/**
+ * A request named a contract instance or class the wallet's PXE does not hold. Raised while
+ * resolving contracts — before proving, before any broadcast — so a dApp may register the contract
+ * and retry the same call without risking a double submission. Each throw site freezes its own
+ * message text; downstream matchers key on it.
+ */
+export class ContractNotRegisteredError extends WalletError {
+	public static readonly CODE = "CONTRACT_NOT_REGISTERED"
+
+	public constructor(message: string, details?: unknown) {
+		super(ContractNotRegisteredError.CODE, message, details, "ContractNotRegisteredError")
+	}
+}
+
 /** Request payload failed validation at the RPC boundary. */
 export class ValidationError extends WalletError {
 	public static readonly CODE = "VALIDATION"
@@ -357,6 +385,8 @@ type KnownWalletErrorPayload =
 	| { code: typeof DuplicateWalletError.CODE; message: string; details?: { existingProfileName?: string } }
 	| { code: typeof DuplicateInitializationError.CODE; message: string; details?: unknown }
 	| { code: typeof UnsupportedMethodError.CODE; message: string; details?: unknown }
+	| { code: typeof PxeStaleAnchorError.CODE; message: string; details?: unknown }
+	| { code: typeof ContractNotRegisteredError.CODE; message: string; details?: unknown }
 
 /**
  * Reconstruct a WalletError (concrete subclass if the code is recognised)
@@ -400,6 +430,10 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 			return new DuplicateInitializationError(known.message, known.details)
 		case UnsupportedMethodError.CODE:
 			return new UnsupportedMethodError(known.message, known.details)
+		case PxeStaleAnchorError.CODE:
+			return new PxeStaleAnchorError(known.message, known.details)
+		case ContractNotRegisteredError.CODE:
+			return new ContractNotRegisteredError(known.message, known.details)
 		default:
 			return new WalletError(payload.code, payload.message, payload.details)
 	}

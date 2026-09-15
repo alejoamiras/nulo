@@ -31,6 +31,7 @@ import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { type ILogger, LogLevel } from "@/wallet/logger"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
+import { ContractNotRegisteredError } from "@nulo/extension-messaging/errors"
 import type { Action, AddPrivateAuthwitAction, AddPublicAuthwitAction, CallAuthwitContent, EncodedCallAuthwitContent } from "./spec"
 
 const LOG_SOURCE = "ContractResolver"
@@ -42,9 +43,9 @@ export function requireArtifact(
 	address: string,
 ): ContractArtifact {
 	const instance = instances.get(address)
-	if (!instance) throw new Error("Contract not found")
+	if (!instance) throw new ContractNotRegisteredError("Contract not found")
 	const artifact = artifacts.get(instance.currentContractClassId.toString())
-	if (!artifact) throw new Error("Contract artifact not found")
+	if (!artifact) throw new ContractNotRegisteredError("Contract artifact not found")
 	return artifact
 }
 
@@ -127,7 +128,7 @@ export class ContractResolver {
 	public async resolveInstance(pxe: IPXE, contract: string): Promise<[string, ContractInstanceWithAddress]> {
 		const instance = await pxe.getContractInstance(AztecAddress.fromStringUnsafe(contract))
 		if (!instance) {
-			throw new Error("Contract instance not found")
+			throw new ContractNotRegisteredError("Contract instance not found")
 		}
 		return [contract, instance]
 	}
@@ -152,7 +153,7 @@ export class ContractResolver {
 	public async resolveArtifact(pxe: IPXE, classId: string): Promise<[string, ContractArtifact]> {
 		const artifact = await pxe.getContractArtifact(Fr.fromString(classId))
 		if (!artifact) {
-			throw new Error(`Contract artifact not found for class ${classId}`)
+			throw new ContractNotRegisteredError(`Contract artifact not found for class ${classId}`)
 		}
 		return [classId, artifact]
 	}

@@ -1,5 +1,11 @@
 import { describe, expect, test, vi } from "vitest"
-import { DuplicateInitializationError, JobCancelledError, TooManyPendingError } from "@nulo/extension-messaging/errors"
+import {
+	ContractNotRegisteredError,
+	DuplicateInitializationError,
+	JobCancelledError,
+	PxeStaleAnchorError,
+	TooManyPendingError,
+} from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { classifyOperationCatch, maybeRethrowAsRpcCancel } from "./rpc-cancel"
 
@@ -60,6 +66,19 @@ describe("classifyOperationCatch", () => {
 		const result = classifyOperationCatch(new DuplicateInitializationError(), task, errorMessage)
 		expect(result.status).toBe("failed")
 		expect((result as { code?: string }).code).toBe("DUPLICATE_INITIALIZATION")
+	})
+
+	test("PxeStaleAnchorError and ContractNotRegisteredError ride the code channel (message-only reconstructible)", () => {
+		const task = { cancel: vi.fn(), fail: vi.fn() }
+		const stale = classifyOperationCatch(
+			new PxeStaleAnchorError("proveTx: stale chain anchor persisted after a resync"),
+			task,
+			errorMessage,
+		)
+		expect(stale).toMatchObject({ status: "failed", code: "PXE_STALE_ANCHOR" })
+		const unregistered = classifyOperationCatch(new ContractNotRegisteredError("Contract not found"), task, errorMessage)
+		expect(unregistered).toMatchObject({ status: "failed", code: "CONTRACT_NOT_REGISTERED", error: "Contract not found" })
+		expect(task.fail).toHaveBeenCalledTimes(2)
 	})
 
 	test("(N-15) OTHER WalletError subclasses do NOT ride the code channel (unsound reconstruction guard)", () => {

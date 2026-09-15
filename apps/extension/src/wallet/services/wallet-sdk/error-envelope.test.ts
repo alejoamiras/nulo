@@ -8,7 +8,12 @@ import {
 	TooManyPendingError,
 	UserRejectedError,
 } from "@nulo/extension-messaging/errors"
-import { DuplicateInitializationError, UnsupportedMethodError } from "@nulo/extension-messaging/errors"
+import {
+	ContractNotRegisteredError,
+	DuplicateInitializationError,
+	PxeStaleAnchorError,
+	UnsupportedMethodError,
+} from "@nulo/extension-messaging/errors"
 import { unwrapOperationResult } from "@nulo/wallet-bridge"
 import { classifyOperationCatch } from "@/wallet/services/execution/rpc-cancel"
 import { toWalletResponseError, UNCLASSIFIED_ERROR_MESSAGE } from "./error-envelope"
@@ -136,6 +141,62 @@ describe("toWalletResponseError", () => {
 		const message = (env as { message: string }).message
 		expect(message.length).toBeLessThan(120)
 		expect(message).toContain("…")
+	})
+})
+
+describe("stale-anchor and unregistered-contract arms", () => {
+	test("PxeStaleAnchorError → {code:-32603, walletErrorCode} with a constant message; the node's text stays behind", () => {
+		const nodeText =
+			"Block hash 0x12dc not found when resolving query. If the node API has been queried with anchor block hash possibly a reorg has occurred."
+		const env = toWalletResponseError(
+			new PxeStaleAnchorError("proveTx: stale chain anchor persisted after a resync", {
+				op: "proveTx",
+				phase: "op",
+				cause: nodeText,
+			}),
+		)
+		expect(env).toEqual({
+			code: -32603,
+			message: "The wallet's view of the chain was behind the node. Retry the request.",
+			data: { walletErrorCode: "PXE_STALE_ANCHOR" },
+		})
+		expect(JSON.stringify(env)).not.toContain("0x12dc")
+	})
+
+	test("ContractNotRegisteredError → {code:-32602, walletErrorCode} with a constant message and no class id", () => {
+		const env = toWalletResponseError(new ContractNotRegisteredError("Contract artifact not found for class 0x2015e1c6"))
+		expect(env).toEqual({
+			code: -32602,
+			message: "Contract not registered with the wallet. Register it and retry.",
+			data: { walletErrorCode: "CONTRACT_NOT_REGISTERED" },
+		})
+		expect(JSON.stringify(env)).not.toContain("0x2015")
+		// The phrase dApp-side substring classifiers key on.
+		expect((env as { message: string }).message.toLowerCase()).toContain("not registered")
+	})
+
+	test("both survive the REAL production chain: classify → unwrap → envelope", () => {
+		const task = { cancel: () => {}, fail: () => {} }
+		const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
+		const rethrown = (thrown: unknown) => {
+			const result = classifyOperationCatch(thrown, task, errorMessage)
+			try {
+				unwrapOperationResult(result as never)
+				return undefined
+			} catch (e) {
+				return e
+			}
+		}
+		const stale = rethrown(
+			new PxeStaleAnchorError("executeUtility: stale chain anchor persisted after a resync", { cause: "secret node text" }),
+		)
+		expect(stale).toBeInstanceOf(PxeStaleAnchorError)
+		expect(toWalletResponseError(stale)).toMatchObject({ code: -32603, data: { walletErrorCode: "PXE_STALE_ANCHOR" } })
+		expect(JSON.stringify(toWalletResponseError(stale))).not.toContain("secret node text")
+
+		const unregistered = rethrown(new ContractNotRegisteredError("Contract instance not found"))
+		expect(unregistered).toBeInstanceOf(ContractNotRegisteredError)
+		expect(toWalletResponseError(unregistered)).toMatchObject({ code: -32602, data: { walletErrorCode: "CONTRACT_NOT_REGISTERED" } })
 	})
 })
 

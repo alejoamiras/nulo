@@ -34,7 +34,12 @@
  * wrong-toast UX bug.
  */
 
-import { DuplicateInitializationError, JobCancelledError } from "@nulo/extension-messaging/errors"
+import {
+	ContractNotRegisteredError,
+	DuplicateInitializationError,
+	JobCancelledError,
+	PxeStaleAnchorError,
+} from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 
 /** Minimal task surface needed for the cancel conversion. Avoids importing
@@ -72,15 +77,17 @@ export function classifyOperationCatch(error: unknown, task: CancellableTask, er
 		return { status: "cancelled", jobId: error.jobId, reason: "user" }
 	}
 	task.fail(error)
-	// ONLY DuplicateInitializationError rides the code channel: it is the one
-	// executor failure whose dApp discrimination is a ratified contract, and
-	// its reconstruction is lossless (message-only). A blanket WalletError
-	// pass-through would be unsound — e.g. TooManyPendingError deliberately
-	// reconstructs as base WalletError, and detail-dependent classes lose
-	// their details through this message-only channel.
+	// Only failures whose dApp discrimination is a ratified contract AND whose
+	// reconstruction is lossless from the message alone ride the code channel.
+	// A blanket WalletError pass-through would be unsound — e.g.
+	// TooManyPendingError deliberately reconstructs as base WalletError, and
+	// detail-dependent classes lose their details through this message-only
+	// channel.
+	const ridesCodeChannel =
+		error instanceof DuplicateInitializationError || error instanceof PxeStaleAnchorError || error instanceof ContractNotRegisteredError
 	return {
 		status: "failed",
 		error: errorMessage(error),
-		code: error instanceof DuplicateInitializationError ? error.code : undefined,
+		code: ridesCodeChannel ? error.code : undefined,
 	}
 }
