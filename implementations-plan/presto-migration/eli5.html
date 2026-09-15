@@ -1,0 +1,229 @@
+<title>Presto Migration</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #f7f4ee; --surface: #ffffff; --surface-low: #f1ede5; --border: #e3ddd2; --outline: #cfc7ba;
+    --text: #1a1816; --text-2: #655e55; --accent: #1a1816; --accent-on: #f7f4ee;
+    --presto: #3446cf; --presto-soft: #e7eaff; --gold: #b8960a; --go: #128a4b; --warn: #b5541c;
+    --font-head: "Space Grotesk", "Inter", system-ui, sans-serif;
+    --font-body: "Inter", system-ui, -apple-system, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0a0908; --surface: #141312; --surface-low: #1d1b1a; --border: #231f1c; --outline: #4a463f;
+      --text: #f5f0e6; --text-2: #999187; --accent: #f8f1e7; --accent-on: #0a0908;
+      --presto: #8b99ff; --presto-soft: #1b1d33; --gold: #e6c525; --go: #14ae5c; --warn: #e0864a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0a0908; --surface: #141312; --surface-low: #1d1b1a; --border: #231f1c; --outline: #4a463f;
+    --text: #f5f0e6; --text-2: #999187; --accent: #f8f1e7; --accent-on: #0a0908;
+    --presto: #8b99ff; --presto-soft: #1b1d33; --gold: #e6c525; --go: #14ae5c; --warn: #e0864a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--text); font-family: var(--font-body); font-size: 15.5px; line-height: 1.6; padding-inline: 20px; padding-block: 0 80px; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  header.top { padding-block: 48px 28px; border-bottom: 1px solid var(--border); }
+  .eyebrow { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-2); display: flex; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 14px; }
+  .eyebrow b { color: var(--text); font-weight: 500; }
+  h1 { font-family: var(--font-head); font-weight: 700; font-size: clamp(30px, 5vw, 42px); line-height: 1.08; letter-spacing: -.02em; margin: 0 0 14px; text-wrap: balance; }
+  h1 .presto { color: var(--presto); }
+  .lede { font-size: 17px; color: var(--text-2); margin: 0; max-width: 62ch; }
+  h2 { font-family: var(--font-head); font-weight: 700; font-size: 22px; letter-spacing: -.01em; margin: 44px 0 12px; text-wrap: balance; }
+  h3 { font-family: var(--font-head); font-weight: 700; font-size: 16px; margin: 22px 0 6px; }
+  p { margin: 0 0 12px; max-width: 68ch; }
+  ul, ol { padding-left: 22px; margin: 0 0 12px; max-width: 68ch; }
+  li { margin-bottom: 6px; }
+  strong { font-weight: 600; }
+  .verdict { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin: 20px 0 0; }
+  .verdict > div { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .verdict .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-2); margin-bottom: 4px; }
+  .verdict .v { font-weight: 600; }
+  .v.go { color: var(--go); } .v.warn { color: var(--warn); } .v.presto { color: var(--presto); }
+  .pill { display: inline-block; font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--outline); color: var(--text-2); vertical-align: middle; }
+  .pill.go { color: var(--go); border-color: color-mix(in srgb, var(--go) 50%, transparent); }
+  .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+  .pill.presto { color: var(--presto); border-color: color-mix(in srgb, var(--presto) 50%, transparent); }
+  .three { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 16px 0 8px; }
+  .three > div { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .three h3 { margin: 0 0 6px; font-size: 15px; }
+  .three p { font-size: 14px; color: var(--text-2); margin: 0; }
+  .rubric { width: 100%; border-collapse: collapse; font-size: 14px; margin: 12px 0 8px; }
+  .rubric th, .rubric td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .rubric th { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-2); font-weight: 500; }
+  .rubric td:first-child { font-weight: 600; white-space: nowrap; }
+  .arc { margin: 18px 0 6px; padding-left: 14px; border-left: 3px solid var(--presto); }
+  .arc .label { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--presto); }
+  .arc h3 { margin: 2px 0 4px; }
+  .arc p { color: var(--text-2); font-size: 14px; margin: 0; }
+  .phase { display: grid; grid-template-columns: 44px 1fr; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .phase .n { font-family: var(--font-mono); font-size: 13px; color: var(--text-2); padding-top: 3px; }
+  .phase h3 { margin: 0 0 4px; }
+  .phase p { margin: 0 0 6px; font-size: 14.5px; }
+  .proof { font-size: 13.5px; color: var(--text-2); }
+  .proof b { font-family: var(--font-mono); font-weight: 500; font-size: 11.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--go); margin-right: 6px; }
+  .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; margin: 10px 0 14px; }
+  .state { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; font-size: 13.5px; }
+  .state .t { font-weight: 600; display: block; margin-bottom: 2px; }
+  .state .d { color: var(--text-2); }
+  .ask { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin: 0 0 10px; }
+  .ask .q { font-weight: 600; margin: 0 0 4px; }
+  .ask .r { margin: 0; font-size: 14px; color: var(--text-2); }
+  .ask .r b { color: var(--text); font-weight: 600; }
+  .approve { background: var(--surface-low); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
+  .approve ol { margin: 0; }
+  .seed { margin: 14px 0 22px; }
+  .seed .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+  .seed .head h3 { margin: 0; }
+  .seed .rec { font-family: var(--font-mono); font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--go); }
+  .seed .fb { font-family: var(--font-mono); font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-2); }
+  .seed .box { position: relative; }
+  pre { margin: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; color: var(--text); max-height: 420px; overflow: auto; }
+  button.copy { position: absolute; top: 8px; right: 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; background: var(--accent); color: var(--accent-on); border: 0; border-radius: 6px; padding: 5px 9px; cursor: pointer; }
+  button.copy:focus-visible { outline: 2px solid var(--presto); outline-offset: 2px; }
+  .note { border-left: 3px solid var(--gold); padding: 6px 12px; margin: 12px 0; color: var(--text-2); font-size: 14px; background: var(--surface); border-radius: 0 8px 8px 0; }
+  .note b { color: var(--text); }
+  .foot { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--border); font-size: 13px; color: var(--text-2); font-family: var(--font-mono); }
+  code { font-family: var(--font-mono); font-size: 13px; background: var(--surface-low); padding: 1px 5px; border-radius: 4px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow">
+      <span>plan <b>presto-migration</b></span>
+      <span>tier <b>mid</b></span>
+      <span>draft <b>v2</b></span>
+      <span>2026-09-15</span>
+    </div>
+    <h1>Nulo moves from Aztec Accelerator to <span class="presto">Presto</span>, and starts telling you where each proof runs</h1>
+    <p class="lede">Presto is the successor of the Aztec Accelerator app: same author, same job (prove transactions natively instead of in the browser), a cleaner story for the two ways it can fail on a modern browser, and a ready-made install pitch. This plan swaps the engine, teaches the wallet to say honestly whether Presto or the browser did the work, and rebuilds the onboarding step and a new Settings page on that honesty.</p>
+    <div class="verdict">
+      <div><div class="k">Codex round 1</div><div class="v warn">reject → all findings folded</div></div>
+      <div><div class="k">Fable round 1</div><div class="v warn">conditional approve → conditions met</div></div>
+      <div><div class="k">Codex final pass</div><div class="v presto" id="final-verdict">running…</div></div>
+      <div><div class="k">UX</div><div class="v go">approved by you (design canvas)</div></div>
+    </div>
+  </header>
+
+  <h2>What changes, in three sentences</h2>
+  <div class="three">
+    <div><h3>1 · The engine</h3><p>The wallet talks to Presto instead of Accelerator, and the CI proving gate runs Presto's headless server. Nothing about how proofs look changes; the app behind them does.</p></div>
+    <div><h3>2 · The truth</h3><p>Every proof gets a tag saying who did it. The activity card reads "Proving with Presto ✦" or "Proving in browser…" instead of a generic line, and a declined Presto approval is remembered so Settings can explain it.</p></div>
+    <div><h3>3 · The surfaces</h3><p>The onboarding "Speed" step becomes Presto's own install card in Nulo's clothes when Presto is missing, and a clear status card with recovery steps for every other situation. Settings gains a Proving page.</p></div>
+  </div>
+
+  <h2>Human context</h2>
+  <p><strong>Why the browser can now block Presto.</strong> Chrome 142+ asks a page before it may talk to anything on your own machine ("Local Network Access"). Presto answers on your computer, so a wallet page can be blocked — a case Accelerator never had a word for. Extensions that declare the address in their manifest are exempt, and the plan adds that declaration, but the blocked state still exists for older Chrome, Firefox, and managed machines, so the onboarding gets a card that explains the fix.</p>
+  <p><strong>Why "encrypted connection" matters.</strong> The wallet sends private transaction data to Presto. Presto's browser policy is encrypted-only by default so that a stray program squatting Presto's port cannot receive that data. The wallet keeps that default with no escape hatch: if the encrypted connection is not working, the wallet proves in the browser and tells you how to turn encryption on in Presto. The reviewers made us state this guarantee precisely: it stops a squatter without a trusted certificate; it does not stop malware running as your own user. That is Presto's documented boundary, not something this plan can fix.</p>
+  <p><strong>Why "not detected" instead of "not installed".</strong> Under encrypted-only, an uninstalled Presto and a Presto whose first-time prompt was dismissed look identical from the wallet. The copy says what we know.</p>
+  <p><strong>Why the wallet cannot see a declined approval by asking Presto.</strong> Presto asks you to allow Nulo the first time a proof is sent, not when the wallet checks whether Presto is running. A declined prompt leaves the health check green while every proof silently falls back to the browser. The plan closes that gap: the proving engine reports each proof's outcome to the wallet's background worker, which remembers the last one, so Settings → Proving can say "Presto declined Nulo — open Presto → Sites → allow Nulo".</p>
+  <p><strong>Why the reviewers rejected the first draft.</strong> Two independent reviews (Codex and Fable) found the same core hole: the first draft matched a proof's outcome to an activity card by chain, but two operations can be "proving" on the same chain at once, so the subtitle could lie. Version 2 gives every proof attempt its own id, threads it through, and applies the outcome across the whole attempt (Presto can start and then fall back mid-way). The same round moved the browser permission into the first delivery so it cannot ship a build that silently disables native proving, pinned the CI binary's archive as well as the binary, and dropped a duplicate browser-permission probe the Presto library already performs.</p>
+
+  <h2>The states the onboarding and Settings can show</h2>
+  <div class="states">
+    <div class="state"><span class="t">Presto ready</span><span class="d">Continue. Presto will ask you to allow Nulo at your first send.</span></div>
+    <div class="state"><span class="t">Not detected</span><span class="d">Presto's install card, re-styled to Nulo. Skip is always available.</span></div>
+    <div class="state"><span class="t">Browser blocked local access</span><span class="d">Steps: site permissions beside the address bar → allow → retry.</span></div>
+    <div class="state"><span class="t">Encrypted connection off / not reachable</span><span class="d">Steps in Presto's menu-bar app; retry.</span></div>
+    <div class="state"><span class="t">Version mismatch</span><span class="d">Update Presto (or the wallet); proofs run in the browser meanwhile.</span></div>
+    <div class="state"><span class="t">Presto declined Nulo</span><span class="d">Settings only, after a real send: Presto → Sites → allow Nulo.</span></div>
+  </div>
+
+  <h2>Why <span class="pill">mid</span></h2>
+  <p>The rubric counts how many risk dimensions are high. One is: the work depends on an external app and its browser policy. Everything else is contained — same author's library, a rename at the code level, no stored-data changes, and a CI gate that already exists for the old engine.</p>
+  <table class="rubric">
+    <tr><th>Dimension</th><th>Score</th><th>Why</th></tr>
+    <tr><td>Novelty</td><td>low</td><td>Same wire protocol, renamed library, the CI gate already exists.</td></tr>
+    <tr><td>Blast radius</td><td>medium</td><td>Every proof path and the CI proving gate; a silent fallback would be user-invisible, which is why the truth channel exists.</td></tr>
+    <tr><td>Irreversibility</td><td>low</td><td>No stored-data migration; a revert is a dependency swap.</td></tr>
+    <tr><td>Migration cost</td><td>low</td><td>Users install a new app; the wallet needs nothing migrated.</td></tr>
+    <tr><td>External coupling</td><td><span class="pill warn">high</span></td><td>Presto desktop + headless server, Chrome's local-network policy, Firefox's optional permissions.</td></tr>
+    <tr><td>Security sensitivity</td><td>medium</td><td>Private witness data crosses a loopback boundary; the plan bounds the guarantee and names residual risks.</td></tr>
+  </table>
+
+  <h2>Phases</h2>
+  <p>Eight phases in two deliveries. The first delivery is everything the wallet must get right underneath; the second is what you see. Each delivery builds and passes its own checks alone, so the first can land without the second.</p>
+
+  <div class="arc">
+    <div class="label">Delivery 1 · runtime truth</div>
+    <h3>Engine swap, browser permission, CI gate, and the proof-outcome channel</h3>
+    <p>One pull request. When it lands, native proving works through Presto in production and CI, and the activity card already tells the truth.</p>
+  </div>
+  <div class="phase"><div class="n">P1</div><div><h3>Dependencies and the 7-day gate</h3><p>Swap the library, add Presto's small status client and banner kit, verify each package's publishing provenance, and exempt from the 7-day age gate only what is still too fresh on install day (a dated follow-up removes the exemption). Adds a test pinning the wallet's Aztec version to the library's.</p><div class="proof"><b>proves itself by</b>a clean locked install, the residue check, lint, and the version-lockstep test.</div></div></div>
+  <div class="phase"><div class="n">P2</div><div><h3>Engine swap and the browser permission</h3><p>The proving engine becomes Presto with encryption explicitly required in production; only the CI build type can even express plaintext. The manifest declares the encrypted local address so the browser never blocks the wallet's own proof. A reviewer-required sequencing fix: the old onboarding keeps compiling until its replacement exists.</p><div class="proof"><b>proves itself by</b>the engine unit tests (both modes, every failure phase, observer isolation), typecheck, lint, a build whose manifest lists both local addresses.</div></div></div>
+  <div class="phase"><div class="n">P3</div><div><h3>CI proves with headless Presto</h3><p>The CI runners install Presto's headless server with both the archive and the binary pinned by hash, extract only the binary, and fail the network suite if any proof falls back to the browser. CI docs updated in the same step.</p><div class="proof"><b>proves itself by</b>workflow lint, the CI-gating unit tests, and one real prover-on run of the two canary tests showing at least one native proof.</div></div></div>
+  <div class="phase"><div class="n">P4</div><div><h3>Every proof carries its outcome</h3><p>Each attempt gets an id; the engine reports "Presto took it", "fell back to the browser", or "Presto declined" against that id; the background worker records it on the operation and remembers the last outcome for Settings. Only the wallet's own proving page may send these reports. The activity subtitle reads it.</p><div class="proof"><b>proves itself by</b>unit tests across three packages (late, cancelled, mixed-order, spoofed reports), a local network run asserting "Proving in browser…", and a CI run asserting "Proving with Presto ✦".</div></div></div>
+  <div class="phase"><div class="n">P5</div><div><h3>Docs and residue</h3><p>Rewrite the remaining docs and skills; grep the repo for the old name until nothing is left outside the history.</p><div class="proof"><b>proves itself by</b>lint, the brand/path guard, and a zero-hit grep.</div></div></div>
+
+  <div class="arc">
+    <div class="label">Delivery 2 · the surfaces</div>
+    <h3>Status client, onboarding page, Settings → Proving</h3>
+    <p>A second pull request stacked on the first. Pure UI on top of the truth channel.</p>
+  </div>
+  <div class="phase"><div class="n">P6</div><div><h3>The status client and state mapper</h3><p>Pages ask Presto's lightweight client and map its answer to the states above, reusing Presto's own rule for "not detected". One shared client per page so two views never disagree. Bundle growth measured against a budget.</p><div class="proof"><b>proves itself by</b>unit tests for every state, typecheck, lint, a build within the size budget with no Aztec code in the onboarding bundle.</div></div></div>
+  <div class="phase"><div class="n">P7</div><div><h3>The onboarding page you approved</h3><p>Presto's install card in Nulo's tokens when Presto is missing; Nulo's status card with numbered steps otherwise. The old page and its helper are deleted here, last.</p><div class="proof"><b>proves itself by</b>the onboarding smoke test across four stubbed situations, the full smoke suite, a zero-residue grep, and a walk-through on the Mac with the real app (quit, encryption off/on, approve, decline, recover).</div></div></div>
+  <div class="phase"><div class="n">P8</div><div><h3>Settings → Proving</h3><p>A row in Settings with a live one-line status and a page with the status card, details, recovery steps, retry, and a Get Presto link when it is missing.</p><div class="proof"><b>proves itself by</b>a new smoke test, the full smoke suite, and the repo's pre-PR audit script.</div></div></div>
+
+  <div class="note"><b>After both deliveries:</b> a codex review loop runs at each delivery boundary and once more across both; pull requests open only after those converge. Merging is yours. A dated follow-up PR removes the temporary age-gate exemptions after 2026-09-16.</div>
+
+  <h2>Open questions for you</h2>
+  <p>Each has a recommendation; answering "all as recommended" is enough.</p>
+  <div class="ask"><p class="q">A1 · Rename the CI kill-switch from "disable accelerator" to "disable presto"?</p><p class="r"><b>Recommended: yes.</b> The variable is not set anywhere, so nothing to migrate; leaving the old name invites the stale-name drift this plan is cleaning up.</p></div>
+  <div class="ask"><p class="q">A2 · Rename the onboarding route and test ids from "accelerator" to "presto"?</p><p class="r"><b>Recommended: yes.</b> The page is rebuilt anyway and the tests move with it.</p></div>
+  <div class="ask"><p class="q">A3 · Ask Presto to list Nulo's store extension id as a recognised site?</p><p class="r"><b>Recommended: yes, later.</b> It only adds a "verified" badge to Presto's approval prompt; not needed to ship. Done in the Presto repo once the id is confirmed.</p></div>
+  <div class="ask"><p class="q">A4 · Accept the onboarding bundle growing by up to 60 kB (compressed) for the status client?</p><p class="r"><b>Recommended: yes.</b> Measured in P6; the plan also checks that none of the heavy Aztec code leaks into onboarding.</p></div>
+  <div class="ask"><p class="q">A5 · Give development builds a fixed extension id?</p><p class="r"><b>Recommended: yes, dev builds only.</b> Without it every reinstall is a new stranger to Presto and re-prompts. The store id is already stable.</p></div>
+  <div class="ask"><p class="q">A6 · Firefox: add a "grant access" step, or leave it best-effort?</p><p class="r"><b>Recommended: best-effort now, follow-up plan.</b> Firefox treats these permissions as optional; the state card explains it. A proper grant step needs its own tests.</p></div>
+  <div class="ask"><p class="q">A7 · Pin the wallet's Aztec version to the Presto library's with a test?</p><p class="r"><b>Recommended: yes.</b> Both are 5.2.0 today; a test catches drift on the next Aztec bump.</p></div>
+
+  <h2>Approval decision needed from you</h2>
+  <div class="approve">
+    <ol>
+      <li><strong>Scope</strong> as described: engine + CI swap, the proof-outcome channel, onboarding rework, Settings → Proving. Not the playground/tools apps, not a "prefer native" toggle, no plaintext proving for users.</li>
+      <li><strong>Tier</strong> <code>mid</code> with the dual audit already done and the final Codex pass above.</li>
+      <li><strong>Deliverables</strong>: two stacked pull requests into <code>dev</code> (you merge), plus the dated exemption-removal PR.</li>
+      <li><strong>Review loops</strong>: codex fix loops only; <code>/code-review</code> off, as you chose. No <code>/harden</code> scheduled; the Presto threats are folded into the existing remediation.</li>
+      <li><strong>Open questions</strong> A1–A7 above, or "all as recommended".</li>
+    </ol>
+  </div>
+
+  <h2>Implementation seeds</h2>
+  <p>Draft until you approve; finalized right after. <strong>Use exactly one per session — they don't compose.</strong> Paste it into a Claude Code session sitting inside the plan's worktree (<code>agent-worktree resume presto-migration</code>).</p>
+
+  <div class="seed">
+    <div class="head"><h3>/goal</h3><span class="rec">Recommended for this plan</span></div>
+    <p style="font-size:14px;color:var(--text-2)">Completion is observable in the transcript (phase ticks, gate output, codex convergence quotes, the stack view), so the goal primitive fits and survives a resumed session.</p>
+    <div class="box"><button class="copy" data-copy="goal" type="button">Copy</button><pre id="goal">/goal All eight phases marked ✓ in implementations-plan/presto-migration/plan.md (the per-phase headers in the file — not the chat, not the task list), each ✓ backed by its phase's validation gate as written in plan.md reported passing in the transcript, including the P3 and P4 soak dispatches green with the printed PROVE_SUCCESS ≥ 1 and the P4 local network e2e asserting data-backend="browser" with the exact subtitle; for each phase the agent has printed `LESSONS_FILE=implementations-plan/presto-migration/lessons/phase-N.md`; `/code-review` was NOT run (code_review is off); the codex fix loop converged for arc 1 at its boundary (after P5), for arc 2 at its boundary (after P8), and for the final cross-arc pass — each convergence evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; the two stacked PRs exist on GitHub, created only after all loops converged (`gh stack view` output in the transcript); `bun run audit:vue` and `bun run lint:actions` both report exit 0 in the transcript; the wrap-up report names the min-age exclude removal PR (after 2026-09-16T14:49Z) and Asks A3/A5/A6 as open items.</pre></div>
+  </div>
+
+  <div class="seed">
+    <div class="head"><h3>/loop 15m</h3><span class="fb">Fallback</span></div>
+    <p style="font-size:14px;color:var(--text-2)">Interval-driven; use it if you want cron-style firing regardless of what the transcript shows.</p>
+    <div class="box"><button class="copy" data-copy="loop" type="button">Copy</button><pre id="loop">/loop 15m Drive implementations-plan/presto-migration forward. Never idle waiting for my input. Each firing:
+1. **Reality check**: read implementations-plan/presto-migration/plan.md and lessons/ (authoritative state — not the chat); native task list empty (fresh session)? rebuild it from plan.md, one task per remaining phase and loop; run `git status` and `git log --oneline -5`. If a PR exists, `gh pr view --json statusCheckRollup` (no --watch; `gh stack view` for the stack). Without a PR, `gh run list --branch $(git branch --show-current) --limit 1 --json status,databaseId`.
+2. **Waiting on CI is fine** — confirm it's progressing (`gh run watch &lt;run-id&gt;` up to 10 minutes; stuck past that → inspect logs, log it as blocked in lessons). Use the wait productively: review the diff, prep the next phase, strengthen tests. Don't start work that would conflict with the in-flight change.
+3. **No task in hand?** Pick the next pending phase from plan.md and start it. After each meaningful edit run `bun run lint` + `bun run typecheck:all` + the touched package's `test` — catch mistakes in-step. Then commit → `gh stack push` (`gh stack sync` if dev or arc 1 moved).
+4. **Stuck, or facing a decision you'd normally bring to me?** Don't wait. Call `/codex high` with full context and go back and forth until you two reach a defensible decision, then act on it. Log every consult + verdict in lessons/phase-N.md. Hard limits stay hard: never merge to dev/main, never publish or deploy, never change anything in the Presto repo, never expand scope beyond plan.md; if a decision requires crossing one, surface it and hold.
+5. **Same step failed 5 times?** Stop retrying; reassess with codex, then continue down the agreed path.
+6. **Phase green?** "Green" means THE PHASE'S VALIDATION GATE as written in plan.md passes (commands + pass criteria). Run the full gate, paste the result, mark ✓ in plan.md, file the lessons entry, print `LESSONS_FILE=implementations-plan/presto-migration/lessons/phase-N.md`, `agent-worktree status presto-migration "phase N green: &lt;next&gt;"`, advance. Arc boundary crossed (after P5, after P8)? Run the arc's codex loop FIRST (code_review is off — no /code-review): `/codex high` with the arc diff, the arc map, plan.md + ledger, the adversarial ask and the plan's no-over-engineering + comment-quality rules, resume until a round yields nothing material — THEN `gh stack add presto-migration/ux` (after arc 1) or proceed to step 7 (after arc 2).
+7. **All phases ✓?** Final cross-arc pass: FRESH `/codex high` over the net diff from origin/dev @ 323380f6 + cross-arc ask + both rules, loop until clean. Then Delivery per plan.md — the FIRST time any PR is opened: `gh stack sync`, `gh stack submit --auto`, `gh pr edit` bodies, `gh pr checks --watch`. Then the wrap-up report: what shipped, every contentious decision codex and I debated with ELI5 context, open items (the min-age exclude removal PR after 2026-09-16T14:49Z; Asks A3/A5/A6). Surface and stop.
+
+Keep the native task list current (`TaskUpdate` as steps start/finish; plan.md stays the source of truth).</pre></div>
+  </div>
+
+  <div class="foot">source of truth: implementations-plan/presto-migration/plan.md · audits: audit-codex.md, audit-fable.md · recon: recon.md · UX approval: the "Nulo × Presto screens" design canvas</div>
+</div>
+
+<script>
+  for (const b of document.querySelectorAll("button.copy")) {
+    b.addEventListener("click", async () => {
+      const pre = document.getElementById(b.dataset.copy);
+      const text = pre.textContent;
+      try { await navigator.clipboard.writeText(text); b.textContent = "Copied"; }
+      catch { const r = document.createRange(); r.selectNodeContents(pre); const s = getSelection(); s.removeAllRanges(); s.addRange(r); b.textContent = "Selected — press ⌘C"; }
+      setTimeout(() => { b.textContent = "Copy"; }, 1800);
+    });
+  }
+</script>
