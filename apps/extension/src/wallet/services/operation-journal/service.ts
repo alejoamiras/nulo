@@ -416,7 +416,7 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		await this.ensureInitialized()
 		return await this.transitionLock.withLock(async () => {
 			const existing = await this._loadValidated(id)
-			if (!existing || existing.progress.stage !== "proving") {
+			if (existing?.progress.stage !== "proving") {
 				this.logDebug("updateProvingBackend skipped", { stage: existing?.progress.stage ?? "missing" })
 				return false
 			}
