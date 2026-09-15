@@ -281,3 +281,107 @@ D3′, D13′, D21, D22 and D24 are defensible. I could not break explicit HTTPS
 ## Driver verification (before folding into v4)
 
 Every source-backed claim held: the legacy composable's contract is `idle | detecting | not-detected | no-bb | active` (`useAcceleratorStatus.ts:21`) and `accelerator.vue` gates the download on `isWindows` (`:116,125`); `ProveAndSendContext` is built at `transfer-executor.ts:147` and `dapp-send-executor.ts:480,584,787`, each closing over a possibly-undefined `journalId` (`dapp-send-executor.ts:244`), not in `execution-lane.ts`; `ExecutionCoordinator` is constructed with `(tasks, logger, proofGate)` and `ExecutionService` owns both the `PxeServiceClient` and the `OperationJournalService` (`execution/service.ts:95,178`); events carry the constant service name, so v3's stale-instance sentence was unsupported; a lost `fallback` with receiver-side inference would indeed clear a denial on the WASM `proved` — fixed in v4 by deriving `backend` and a `seq` at the source (the runtime observer sees every phase in order) so the receiver only copies; the native `proved` precedes body decoding (`presto-client.ts:486-497`); Presto's verifier installs before auditing (`scripts/verify-sdk-package-signatures.ts:88`); `vite build --mode development` exists (`apps/extension/package.json:16` uses it for Firefox). One point not adopted: Codex's suggestion that a single arc "avoids the compatibility work" — kept as an owner choice at the gate (the shim is small, two PRs review better), recorded in the ledger.
+
+
+---
+
+# Fresh-context final pass, round 3 (on plan v4 + ledger) — 2026-09-15 — FINAL
+
+New session again; told that a third reject sends residuals to the owner rather than producing a v5. Response verbatim (paths repo-relative; Presto files prefixed `presto:`). Verification notes and the disposition follow.
+
+reject (with blocking findings: A4’s zero-Aztec gate conflicts with the existing router graph; P8 prescribes an unavailable denial-recovery action)
+
+**Confidence: high** for source findings; **moderate** for browser acceptance. Read-only review; no builds or tests executed.
+
+## r2 findings
+
+References below refer to [plan.md](implementations-plan/presto-migration/plan.md).
+
+- **Source-derived backend + sequence — partial.** §A/§F fixes the dropped-`fallback` and reordered-`transmit` counterexamples. The shared denial hint still has a cross-attempt ordering hole.
+- **Four context builders — resolved.** §F/P4 correctly names `transfer-executor.ts:147` and `dapp-send-executor.ts:480,584,787`, preserving undefined IDs.
+- **ExecutionService wiring — resolved.** §F/P4 explicitly injects callbacks and subscribes the owned PXE client.
+- **Exact shim contract — resolved.** P2 preserves `idle | detecting | not-detected | no-bb | active`, `detect`, and `info`.
+- **Windows note — resolved.** P2 removes both the false note and `isWindows` gating.
+- **Factory timing — resolved.** `getPrestoClient()` now lands in P2.
+- **Real-install provenance fixture — resolved.** Security/P1/D23′ requires actual installation, ignored scripts, verified attestations, and repository/workflow/commit binding.
+- **I9 timing — resolved.** Probe and fallback now precede the dependent P2 smoke gate.
+- **A4 baseline/manifest/dynamic imports — partial.** All three corrections are present; the expanded closure exposes an existing Aztec dependency that makes the absolute prohibition unachievable within the listed changes.
+- **Stale-instance claim — partial.** §F removes the service-name fiction, but replaces it with another unsupported assertion: matching `proveId` does not establish “same evidence.”
+- **Canary wording — resolved.** §B/P3/P4 distinguish observed soak counts from enforced canary counts and require in-test native subtitles.
+- **`copyFor` pair — resolved.** §C/P6 consumes `{ outcome, denial }`.
+- **Cache-hit file type — resolved.** §B explicitly checks regular file, no link, and no extra restored entries before hashing/chmod/PATH.
+- **`prove()` policy test — resolved at design level.** Security/P2 includes failed POST after cached HTTPS success.
+- **A5 build assertions — resolved.** P2 names development presence and production absence checks.
+- **F23/F24 — resolved.** Builders and construction ownership match source; native `proved` is correctly qualified as preceding body decoding.
+- **LNA recovery — resolved with acceptance condition.** Algorithms/A6 acknowledge extension permissions, managed restrictions, and platform uncertainty; actual operability remains manually gated.
+- **Profile/chain fields — resolved.** §F removes unused coordinates.
+
+## Ledger
+
+- **D2″:** Two arcs are defensible; one arc is not technically worse. The final owner-choice paragraph is honest, but “No live dispute” earlier contradicts it. Preserve this as a reviewability preference.
+- **D5″:** The sender predicate is sound. The map rejects **unknown attempts**, not stale documents independently. A matching ID requires the separate invariant that only one offscreen execution owns that attempt.
+- **D6″:** The corrected builders and injection follow the source. One implementation detail remains: `withPxeWrite` currently supplies only `(pxe, node)` ([service.ts:935](packages/aztec-runtime/src/pxe/service.ts:935)); expose the locked runtime narrowly when setting `activeProve`.
+- **D17″:** Correct within one attempt; insufficient for the global denial record across attempts. See Security.
+- **D19″ — blocking:** Onboarding imports the shared `~pages` table ([index.ts:16](apps/extension/src/onboarding/index.ts:16)). Its generator includes popup pages ([vite.config.ts:110](apps/extension/vite.config.ts:110)), including a live `@aztec/wallet-sdk/crypto` import ([connected-app page:17](apps/extension/src/popup/pages/settings/connected-apps/[id].vue:17)). Walking **all dynamic imports** therefore includes existing Aztec modules. The rejected measurement alternatives are weaker, but the chosen acceptance premise remains false.
+- **D23′:** Sound; matches Presto’s actual verifier. No remaining mechanism objection.
+
+## Security
+
+- **Medium — cross-attempt denial clearing.** Attempt A emits native `proved`, delayed in transit. A newer attempt B emits `denied`, which arrives first. A’s delayed event then clears B’s denial because sequence checks are per attempt. Both maps can remain live because native `proved` precedes body reading. Small conservative fix: capture a denial generation at attempt dispatch and clear only if no newer denial was observed; test this interleaving.
+- **Medium — nonexistent recovery, blocking P8.** Presto’s Settings lists approved origins and offers **Remove**, not Allow ([settings.js:90](presto: packages/presto/src-tauri/frontend-src/settings.js:90)). Denial saves no approval. Change §E/P8 to: wait out the 30-second cooldown, send another transaction, then choose Allow in the new prompt. Health Retry cannot perform this recovery.
+- **Low — overclaimed evidence.** Events carry cumulative **backend**, not cumulative denial evidence. Losing `denied`, or receiving a higher sequence first, can hide that denial. State this explicitly. Likewise, native `proved` is historical evidence of an accepted response, not proof that approval remains current.
+- **Implementation condition:** Keep sequence acceptance and in-memory hint changes synchronous before awaiting journal writes; catch rejected journal updates. Source-side observer isolation alone does not handle receiver-side promise rejection.
+
+The sender gate, Zod validation, restricted archive extraction, cache verification, provenance fixture, and HTTPS policy are otherwise appropriately bounded. Remaining trust includes the authenticated extension context, SDK phase semantics, certificate store, publisher identity, and initially accepted binary pins.
+
+## Assumptions
+
+**Facts**
+
+- F2–F4, F7–F14, F18–F22, and F25 broadly match the inspected source.
+- F1’s rename table holds, but “migration is a rename” understates additional behavior: `MIGRATION.md` also documents newly thrown `PrestoHttpError` cases.
+- F5/F6 match source and packaging descriptions; release asset bytes were not independently retrieved.
+- F15’s host-permission exemption is supported by the [Chromium discussion](https://groups.google.com/a/chromium.org/g/chromium-extensions/c/pUDh8RiTjJk).
+- F16/F17 remain dated snapshots, correctly scheduled for rechecking.
+- F23/F24 are corrected. F24’s unusable-response qualification matters.
+- Recon’s “onboarding imports no Aztec code” must distinguish direct imports from the complete reachable graph.
+
+**Inferences**
+
+- I2 is appropriately deferred.
+- I4/I5 remain explicit Firefox/Linux acceptance risks.
+- I7 overstates both cross-attempt ordering and cumulative denial evidence.
+- I8 has a concrete codec test; the generated `PXEProxy` already forwards trailing arguments.
+- I9 now has the right sequencing and a browser-level fallback.
+
+**Asks**
+
+A1/A2/A3/A5/A7 are sensible. A6’s installation/update/revocation distinction agrees with [Mozilla’s explanation](https://blog.mozilla.org/addons/2024/05/14/manifest-v3-updates/).
+
+**A4 requires an owner decision:** fund isolation of the onboarding dependency graph, or approve a migration-specific “no newly introduced Aztec modules” criterion alongside the total gzip budget. The implementer must not silently weaken the existing gate.
+
+## Phases & gates
+
+The named package scripts, actionlint, CI-gating command, and soak inputs exist. **Every phase is not independently passable as written:**
+
+- **P2:** The policy test imports `PrestoClient` inside `aztec-runtime`, which does not directly declare `presto-core`; the SDK does not re-export that class. Add an explicit test dependency or relocate the test to the extension workspace.
+- **P7/P8:** Build **before** smoke tests. The smoke setup only checks an existing `dist/chrome/manifest.json`; it does not rebuild. Current ordering tests the preceding phase’s artifact.
+- **P7:** A4 blocks as described above.
+- **P8:** Replace the unavailable Settings→Allow recovery action.
+- **Arc 1:** Its dependency/permission/status-contract ordering now works. Carry two copy fixes: `active` must not promise native proving before approval, and `no-bb` must not imply merely waiting downloads the binary. Native usability still needs real-tray acceptance if arc 1 ships separately.
+
+## Simplicity
+
+§F is close to minimal: typed event, source backend, sequence, small map, and narrow journal seam. Keep those. Add only the conservative denial-generation guard; no general event framework is warranted.
+
+## Looks fine
+
+I could not break per-attempt backend attribution with lost fallback or reordered transmit, unknown-attempt rejection, journal timestamp preservation, late-stage no-ops, explicit HTTPS-only proving, required-mode fallback rejection, or the revised provenance procedure. The remaining blockers concern concrete acceptance and recovery behavior; surface them to the owner under the third-pass rule.
+
+---
+
+## Driver verification and disposition (v4.1 — the gate version)
+
+Both blockers verified: `apps/extension/src/onboarding/index.ts:16` imports the shared `~pages` table, whose generator (`vite.config.ts:110`) includes the popup pages, and `popup/pages/settings/connected-apps/[id].vue:17` imports `@aztec/wallet-sdk/crypto` — so the onboarding entry's dynamic closure reaches Aztec code before this plan touches anything; Presto's Settings renders approved origins with a Remove control only (`presto: packages/presto/src-tauri/frontend-src/settings.js:80-110`), and a denial stores nothing, so the only recovery is the next prompt after the 30 s cooldown. Also verified: `withPxeWrite`'s callback receives `(pxe, node)` (`packages/aztec-runtime/src/pxe/service.ts:935`); `aztec-runtime` does not declare `presto-core`; the smoke global setup only checks that `dist/chrome/manifest.json` exists (`tests/e2e/global-setup-smoke.ts:38-40`); `MIGRATION.md` §B7 documents the typed `PrestoHttpError`.
+
+Disposition: the two blockers are acceptance criteria, not designs, and both need the owner — filed as **A8** (Aztec criterion for the onboarding closure: migration-scoped "no newly reachable Aztec module" vs funding an isolated onboarding router) and **A9** (acknowledge wait-and-resend as the only denial recovery). The Medium (cross-attempt denial clearing) is fixed with a denial generation captured at dispatch (D17‴). Every stated condition is folded: policy test relocated to the extension workspace, build before smoke in P2/P7/P8, the two shim copy lines, the locked runtime exposed for `activeProve`, synchronous receiver updates with caught journal writes, the non-cumulative-denial statement, the "no live dispute" wording. No fourth pass: Codex's own closing line asks for exactly this.
