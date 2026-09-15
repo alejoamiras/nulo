@@ -16,7 +16,10 @@ export default defineManifest((_env) => ({
 	...ManifestConfig,
 	browser_specific_settings: {
 		gecko: {
-			id: "{}",
+			// Firefox validates the id shape at install (a GUID in braces or an email-shaped
+			// string) and rejects the whole add-on as invalid otherwise. It is the add-on's
+			// permanent identity on AMO: never change it once a Firefox build has shipped.
+			id: "wallet@nulo.sh",
 		},
 	},
 	background: {

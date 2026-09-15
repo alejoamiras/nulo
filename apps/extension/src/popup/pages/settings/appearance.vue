@@ -38,11 +38,16 @@ const settings = {
 		description: "",
 		model: theme,
 	},
-	sidePanel: {
-		title: "Open as Side Panel",
-		description: "Open as side panel instead of popup",
-		model: isSidePanelEnabled,
-	},
+	// Chrome-only: Firefox has no side panel, so the row is not offered there.
+	...(chrome.sidePanel
+		? {
+				sidePanel: {
+					title: "Open as Side Panel",
+					description: "Open as side panel instead of popup",
+					model: isSidePanelEnabled,
+				},
+			}
+		: {}),
 	showNode: {
 		title: "Show network name",
 		description: "Always show network name in the header",

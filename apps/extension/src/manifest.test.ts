@@ -3,6 +3,7 @@ import { join, resolve } from "node:path"
 import { describe, expect, test } from "vitest"
 import logoDataUri from "@/assets/logo.png?inline"
 import manifest from "../manifest/manifest.config"
+import firefoxManifest from "../manifest/manifest.firefox.config"
 import { RP_ID } from "@/wallet/services/passkey/spec"
 
 type ContentScript = { matches: string[]; exclude_matches?: string[] }
@@ -86,5 +87,17 @@ describe("passkey relying party", () => {
 		expect(injectsInto(cs, "https://nulo.sh/")).toBe(true)
 		expect(injectsInto(cs, "https://tools.nulo.sh/app")).toBe(true)
 		expect(injectsInto(cs, "https://example.com/")).toBe(true)
+	})
+})
+
+describe("firefox manifest", () => {
+	test("gecko id is well-formed and frozen — Firefox rejects the add-on as invalid otherwise", () => {
+		const build = firefoxManifest as unknown as (env: { command: string; mode: string }) => {
+			browser_specific_settings: { gecko: { id: string } }
+		}
+		const { id } = build({ command: "build", mode: "production" }).browser_specific_settings.gecko
+		expect(id).toMatch(/^(\{[0-9a-f-]{36}\}|[a-z0-9._-]+@[a-z0-9._-]+)$/i)
+		// The AMO identity of the add-on: changing it orphans every installed Firefox copy.
+		expect(id).toBe("wallet@nulo.sh")
 	})
 })

@@ -1,6 +1,6 @@
 ---
 name: chrome-extension-debug
-description: Debug and test the Nulo Chrome extension using Chrome DevTools MCP. Use when Chrome MCP tools are available and need to test popup UI, debug user flows, monitor network/console, or automate repetitive browser tasks.
+description: Debug and test the Nulo Chrome extension using Chrome DevTools MCP. Use when Chrome MCP tools are available and need to test popup UI, debug user flows, monitor network/console, automate repetitive browser tasks, or run the Firefox build headless.
 ---
 
 # Chrome Extension Debugging
@@ -40,3 +40,29 @@ The logger captures service worker logs that are otherwise not directly visible.
 | Main | `#/popup/general` |
 | Logger | `#/windows/logger` |
 | Advanced Settings | `#/popup/settings/advanced` |
+
+## Firefox
+
+Playwright cannot load extensions into Firefox; Puppeteer over WebDriver BiDi can
+(`puppeteer.launch({ browser: "firefox", protocol: "webDriverBiDi" })` then
+`browser.installExtension("dist/firefox")`). `bun run --cwd apps/extension smoke:firefox` walks
+install → create profile → home → offscreen window → lock → unlock. It needs `bun run build:firefox`
+and a Firefox Puppeteer can find (`bunx puppeteer browsers install firefox`, or `FIREFOX_PATH`).
+
+What differs from Chrome when probing by hand:
+
+- Only the first-run onboarding tab is reachable over BiDi. Tabs the extension opens later
+  (`tabs.create`, `window.open`, the hidden offscreen window) answer "no such frame", and a web tab
+  may not navigate to `moz-extension://`. Navigate the onboarding tab with `location.assign(...)`
+  and reuse it as the popup.
+- `page.evaluateOnNewDocument` monkeypatching is a no-op (Xray wrappers), and page consoles stay
+  empty because the extension routes `console.*` into the logger. The oracle is the logger ring
+  buffer: turn on Developer Mode (Settings → Advanced) so it persists, then read
+  `chrome.storage.session.get("nulo:logs")` from any extension page.
+- No `chrome.offscreen`: the PXE host is a minimized window at
+  `src/offscreen/index.html?instance=<token>` (`chrome.windows.getAll({ populate: true })` lists it).
+- No `chrome.sidePanel`: guard every use. An unguarded call at popup boot aborted the popup's
+  settings apply loop, so the handlers after it (`disableAnimations`, `defaultExplorer`) silently
+  kept their defaults on Firefox.
+- The Firefox manifest needs a well-formed `browser_specific_settings.gecko.id`; a placeholder
+  makes the whole add-on "invalid" at install time, before any code runs.
