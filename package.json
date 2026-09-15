@@ -3,7 +3,7 @@
   "private": true,
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*", "infra/*"
   ],
   "scripts": {
     "dev": "bun run --cwd apps/extension dev",

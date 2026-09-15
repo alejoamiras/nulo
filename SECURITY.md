@@ -29,9 +29,11 @@ existing keys and profiles.
   The host is deliberately content-less: WebAuthn lets every origin whose
   registrable domain suffix-matches the RP ID assert with the credential
   and evaluate its PRF, which is how the wallet master is derived — so the
-  RP host and every `*.passkey.nulo.sh` descendant serve a static page with
-  a strict CSP and no scripts, never application code, and the extension's
-  own content script is excluded from them (`manifest.config.ts`
+  RP host serves one static page with a strict CSP and no scripts, never
+  application code (`infra/passkey-rp/`: a Cloudflare Worker on a single
+  custom domain, no `workers.dev` origin), every `*.passkey.nulo.sh`
+  descendant stays unregistered in DNS, and the extension's own content
+  script is excluded from them (`manifest.config.ts`
   `content_scripts[].exclude_matches`). The apex `nulo.sh` and the
   application subdomains are therefore not eligible.
   - **M4.9 build-time gate** (`scripts/check-rp-id.ts`): single source

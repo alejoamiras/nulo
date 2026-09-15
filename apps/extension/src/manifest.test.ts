@@ -72,6 +72,11 @@ describe("passkey relying party", () => {
 		expect(hits).toEqual([])
 	})
 
+	test("the RP host is served by the content-less Worker, on that one name", () => {
+		const config = readFileSync(resolve(__dirname, "../../../infra/passkey-rp/wrangler.jsonc"), "utf8")
+		expect(JSON.parse(config.replace(/^\s*\/\/.*$/gm, "")).routes).toEqual([{ pattern: RP_ID, custom_domain: true }])
+	})
+
 	test("the content script never injects into the RP host or its descendants, and still does elsewhere", () => {
 		const [cs] = m.content_scripts
 		expect(injectsInto(cs, `https://${RP_ID}/`)).toBe(false)
