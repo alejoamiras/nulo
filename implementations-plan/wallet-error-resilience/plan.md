@@ -108,7 +108,7 @@ pass converge — never during implementation.
 
 ### Arc 1 — extension
 
-#### Phase 1 — two typed errors, through BOTH boundaries
+#### Phase 1 ✓ — two typed errors, through BOTH boundaries
 
 **What.** Add `PxeStaleAnchorError` (`CODE = "PXE_STALE_ANCHOR"`) and `ContractNotRegisteredError`
 (`CODE = "CONTRACT_NOT_REGISTERED"`) to `packages/extension-messaging/src/errors.ts`, following the
