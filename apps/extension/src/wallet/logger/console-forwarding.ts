@@ -15,8 +15,10 @@ export function installConsoleForwarding(client: string): LoggerServiceClient {
 		hooks[`nuloOn${method}`] = (...args: unknown[]) => logger.log("ui", level, ...args)
 	}
 	self.onunhandledrejection = (e: PromiseRejectionEvent) => {
-		const level = isClientDisconnectRejection(e.reason) ? LogLevel.Debug : LogLevel.Error
-		logger.log("ui", level, getErrorData(e.reason))
+		const disconnect = isClientDisconnectRejection(e.reason)
+		// Only preventDefault() keeps DevTools from printing the rejection; the level sets the ring's.
+		if (disconnect) e.preventDefault()
+		logger.log("ui", disconnect ? LogLevel.Debug : LogLevel.Error, getErrorData(e.reason))
 	}
 	return logger
 }

@@ -232,8 +232,8 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 	page.on("console", (msg: ConsoleMessage) => {
 		// "Client disconnected" is the benign SW-port-close cascade — pending
 		// background-port RPCs reject en-masse when the SW restarts (e.g. during
-		// account switch). Prod already treats it as benign (offscreen
-		// `isBenignSwDisconnect`); filter it here too so the `consoleErrors`
+		// account switch). Prod already treats it as benign (the shared
+		// `isClientDisconnectRejection`); filter it here too so the `consoleErrors`
 		// assertions only catch UNEXPECTED errors, not this known noise.
 		// STRUCTURAL BLIND SPOT — root-caused + probe-verified (flake-ledger:
 		// consoleErrors entry, closed permanent-by-design): the console-sniffer
@@ -1199,8 +1199,8 @@ async function setUpPopupPage(ctx: ExtensionContext, page: Page): Promise<Page> 
 	page.on("console", (msg: ConsoleMessage) => {
 		// "Client disconnected" is the benign SW-port-close cascade — pending
 		// background-port RPCs reject en-masse when the SW restarts (e.g. during
-		// account switch). Prod already treats it as benign (offscreen
-		// `isBenignSwDisconnect`); filter it here too so the `consoleErrors`
+		// account switch). Prod already treats it as benign (the shared
+		// `isClientDisconnectRejection`); filter it here too so the `consoleErrors`
 		// assertions only catch UNEXPECTED errors, not this known noise.
 		// STRUCTURAL BLIND SPOT — root-caused + probe-verified (flake-ledger:
 		// consoleErrors entry, closed permanent-by-design): the console-sniffer

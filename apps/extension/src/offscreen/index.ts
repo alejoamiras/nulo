@@ -7,7 +7,7 @@ import { createPxeOffscreen } from "@nulo/aztec-runtime/offscreen/entry"
 import { ProductionPxeFactory, createProvePhaseSink } from "@nulo/aztec-runtime/pxe"
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { isSupersededByAdopt, OFFSCREEN_READY_MESSAGE, OFFSCREEN_PONG, shouldRespondPong } from "@/wallet/utils/offscreen"
-import { isBenignSwDisconnect } from "./is-benign-sw-disconnect"
+import { isClientDisconnectRejection } from "@nulo/extension-messaging/errors"
 
 // B-17: a PONG must mean "PXE services are up", not just "document loaded". The
 // listener is registered early (so a ping is never dropped for lack of a
@@ -56,7 +56,9 @@ self.onunhandledrejection = (e: PromiseRejectionEvent) => {
 		// each rejection fires here. That's expected unwind, not failure
 		// — demote to Debug + one summary line so the activity log isn't
 		// flooded with 14× identical errors per SW boot.
-		if (isBenignSwDisconnect(e.reason)) {
+		if (isClientDisconnectRejection(e.reason)) {
+			// Only preventDefault() keeps DevTools from printing the rejection; the demotion never did.
+			e.preventDefault()
 			logger.log("pxe", LogLevel.Debug, "background port closed; pending RPC rejected (benign cascade)")
 			return
 		}
