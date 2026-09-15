@@ -8,7 +8,7 @@ code_review: off
 budget: no recon agents (the regression was bisected by hand); codex at xhigh; no /code-review (owner directive 2026-09-03)
 base: dev @ e01e416e
 branch: worktree-approval-card-decoding
-status: implemented 2026-09-15 (`ec297815` fix, `8c00f9ae` docs, `600c99ba` flat layout); post-implementation loop + e2e gates running
+status: implemented 2026-09-15 (`ec297815` fix, `8c00f9ae` docs, `600c99ba` flat layout, `ec6089dd` / `b0fba3aa` / `baf85f93` codex rounds 1–3); all 5 phases ✓; codex loop STOPPED at the three-round rule (reject ×3, findings 8 → 3 → 2, all folded — the round-3 fixes are unreviewed); gates green on `baf85f93` (smoke 118, network subset 6, audit:vue 6000); branch pushed, no PR yet — two owner asks open (§ Assumptions)
 ---
 
 # approval-card-decoding — read a dApp's call arguments on the approval card again
@@ -122,7 +122,7 @@ Each phase's gate is what "✓" means. Commands are the repo's real scripts.
 - Assumptions: sign-off quoted under UI impact.
 - **Validation gate**: `cd apps/extension && bunx vitest run src/popup/windows/execute && bun run typecheck && cd ../.. && bun run lint && bun run --cwd apps/extension build` — exit 0 (ran: 12 files / 90 tests; lint + build exit 0). Layers: typecheck · lint · component · build.
 
-#### Phase 5: e2e evidence (lessons/phase-5.md)
+#### Phase 5: e2e evidence ✓ (`baf85f93`, lessons/phase-5.md)
 
 - Smoke: `bun run test:e2e` (solo — its global setup kills this worktree's dist Chromes).
 - Network subset that opens the execute popup on a dApp `aztec_sendTx` / authwit:
