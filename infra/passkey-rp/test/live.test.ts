@@ -35,6 +35,13 @@ describe.skipIf(process.env.RP_HOST_LIVE !== "1")("the deployed RP host", () => 
 		expect(post.headers.get("content-security-policy")).toBe(POLICY["content-security-policy"])
 	})
 
+	test("the AI-crawler block is a plain-text refusal, not a page with script", async () => {
+		const res = await get("/", { headers: { "user-agent": "GPTBot/1.0" } })
+		expect([200, 403]).toContain(res.status)
+		if (res.status === 403) expect(res.headers.get("content-type")).toMatch(/^text\/plain/)
+		expect(await res.text()).not.toMatch(/<script|javascript:/i)
+	})
+
 	test("plain http is a 301 to https, not served", async () => {
 		const res = await fetch(url("/x?y=1", "http"), { redirect: "manual", headers: { "user-agent": BOT_UA } })
 		expect(res.status).toBe(301)
