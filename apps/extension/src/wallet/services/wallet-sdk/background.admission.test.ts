@@ -285,6 +285,27 @@ describe("handleDiscovery — fresh connection and dedupe waiters", () => {
 		expect(approved()).toEqual(["f1", "f2", "f3", "f3dup"])
 	})
 
+	test("a fresh approval that does not land after acquisition releases the reservation", async () => {
+		const popup = deferred<{ approved: boolean }>()
+		const { discover, windowsCreated } = boot({ popup: () => popup.promise })
+		approveReturns = false
+		discover("f1", chain(1))
+		await flush()
+		popup.resolve({ approved: true })
+		await flush()
+		// The popup approved and the session was written, but approveDiscovery returned false — the
+		// reserved slot must come back, not linger until the worker dies.
+		expect(windowsCreated()).toBe(0)
+		approveReturns = true
+		discover("f2", chain(5))
+		discover("f3", chain(6))
+		await flush()
+		// f1's approve was called and returned false, releasing its slot. Both verify-window slots
+		// are free, so f2 AND f3 each acquire one; a leaked f1 slot would leave only one free and
+		// queue f3 behind the cap.
+		expect(approved()).toEqual(["f1", "f2", "f3"])
+	})
+
 	test("a rolled-back approval releases the reservation", async () => {
 		const popup = deferred<{ approved: boolean }>()
 		const { discover, windowsCreated } = boot({ popup: () => popup.promise })

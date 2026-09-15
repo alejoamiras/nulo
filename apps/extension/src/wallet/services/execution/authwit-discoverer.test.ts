@@ -128,8 +128,16 @@ describe("AuthwitDiscoverer.discoverPrivateAuthwits — discovered records", () 
 			async () => ctx as never,
 		)
 		expect(result.actions).toEqual([{ kind: "add_private_authwit", content: { kind: "message_hash", messageHash: "0xmsghash" } }])
-		expect(result.discovered).toHaveLength(1)
-		expect(result.discovered[0]).toMatchObject({ consumer: "0xconsumer", caller: "0xcaller", messageHash: "0xmsghash" })
+		expect(result.discovered).toEqual([
+			{
+				consumer: "0xconsumer",
+				caller: "0xcaller",
+				selector: "0xselector",
+				args: ["0xarg"],
+				innerHash: "0xinner",
+				messageHash: "0xmsghash",
+			},
+		])
 		mockEffects = []
 	})
 })

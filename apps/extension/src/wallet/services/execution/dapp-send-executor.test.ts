@@ -59,8 +59,9 @@ vi.mock("./fee/fee-strategy", async (importOriginal) => ({
 vi.mock("./fee/embedded-fpc-cap", () => ({ applyEmbeddedFpcGasCap: vi.fn(async () => {}) }))
 
 const ORIGIN: LocalTxOrigin = { type: OriginType.DAPP, name: "test-dapp" }
-/** A popup approval envelope with a reuse id and no preview (nothing discovered ⇒ passes the guard). */
-const APPROVAL = (estimateId: string) => ({ interactionId: "i-1", index: 0, estimateId })
+/** A popup approval envelope carrying a reuse id; the producer mints `previewId = estimateId`
+ *  for a bound standard estimate, so a real approval always pairs the two equal. */
+const APPROVAL = (estimateId: string) => ({ interactionId: "i-1", index: 0, estimateId, previewId: estimateId })
 
 function makeTxRequest() {
 	return {

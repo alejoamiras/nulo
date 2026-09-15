@@ -206,9 +206,14 @@ async function openVerifyWindow(
 	}
 	if (reservation.adopt(windowId) === "abort") {
 		// The session ended (or the window closed) while this was opening: close the window we got.
-		// Its slot is released by the reservation — on adoption when the window was already gone,
-		// otherwise when this remove() makes `onRemoved` fire.
-		await deps.windows.remove(windowId).catch(() => undefined)
+		// remove() resolving means `onRemoved` will fire and free the slot; remove() rejecting means
+		// the window is already gone and no event will come, so release the held slot directly (the
+		// case a lost removal event would otherwise leak).
+		const removed = await deps.windows
+			.remove(windowId)
+			.then(() => true)
+			.catch(() => false)
+		if (!removed) reservation.releaseIfWindowGone()
 		throw new Error("session ended while its verify window was opening")
 	}
 }

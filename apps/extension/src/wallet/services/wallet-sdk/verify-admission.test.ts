@@ -192,6 +192,28 @@ describe("VerifyAdmissionGate — verify-window capacity", () => {
 		expect(gate.windowsHeld(ORIGIN)).toBe(1)
 	})
 
+	test("a removal lost to buffer overflow is reclaimed by the confirmed-gone backstop", () => {
+		const { gate, admit, served, reservations } = harness()
+		const needs = { needsWindow: true, consumesToken: false }
+		admit("w1", needs)
+		admit("w2", needs)
+		admit("w3", needs)
+		const w1 = reservations.get("w1")!
+		w1.markInFlight()
+		gate.onSessionGone("w1")
+		// w1's own window removal arrives, then 65 unrelated removals evict it from the buffer.
+		gate.windowRemoved(11)
+		for (let i = 100; i < 165; i++) gate.windowRemoved(i)
+		// adopt no longer finds the removal in the buffer, so the slot stays held on adopt alone...
+		expect(w1.adopt(11)).toBe("abort")
+		expect(gate.windowsHeld(ORIGIN)).toBe(2)
+		expect(served).toEqual(["w1", "w2"])
+		// ...but the caller confirms the window is gone and releases it directly.
+		w1.releaseIfWindowGone()
+		expect(gate.windowsHeld(ORIGIN)).toBe(2)
+		expect(served).toEqual(["w1", "w2", "w3"])
+	})
+
 	test("a reservation backs exactly one creation: a second markInFlight is refused", () => {
 		const { admit, reservations } = harness()
 		admit("w1", { needsWindow: true, consumesToken: false })

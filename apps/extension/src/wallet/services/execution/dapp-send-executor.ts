@@ -376,6 +376,15 @@ export class DappSendExecutor {
 		return previewId
 	}
 
+	/** The producer mints `previewId = estimateId` for a standard bound estimate, so a popup that
+	 *  carries an `estimateId` must carry the equal `previewId`. Anything else is a forged
+	 *  cross-request approval (interaction A's reuse id with interaction B's snapshot id) and is
+	 *  refused BEFORE the reuse cache is consumed, so a foreign id never even pops an entry. */
+	private assertEstimateBinding(approval: OperationApprovalEnvelope | undefined): void {
+		if (!approval || approval.estimateId === undefined) return
+		if (approval.previewId !== approval.estimateId) throw new Error(PREVIEW_FOREIGN_MESSAGE)
+	}
+
 	/** Popup approvals only: hold what confirm is about to sign to the snapshot
 	 *  the card showed. A silent execution carries no envelope and is not held. */
 	private enforcePreview(
@@ -384,12 +393,7 @@ export class DappSendExecutor {
 		recomputedHashes: readonly string[],
 	): void {
 		if (!approval) return
-		// The producer sets previewId = estimateId for a standard bound estimate, so a popup that
-		// pairs interaction A's estimateId with interaction B's previewId is forging a cross-request
-		// approval — refuse it before either id is consumed.
-		if (approval.estimateId !== undefined && approval.previewId !== undefined && approval.estimateId !== approval.previewId) {
-			throw new Error(PREVIEW_FOREIGN_MESSAGE)
-		}
+		this.assertEstimateBinding(approval)
 		const lookup = this.deps.previewSnapshots.take(approval.previewId, {
 			interactionId: approval.interactionId,
 			index: approval.index,
@@ -661,6 +665,8 @@ export class DappSendExecutor {
 				await markJournal({ stage: "simulating" })
 				checkCancelled()
 
+				// Refuse a forged estimateId/previewId pairing before the reuse cache is touched.
+				this.assertEstimateBinding(approval)
 				const identity = fingerprintInputFor(op, op.feeSettings, fee, actions)
 				const {
 					txRequest,

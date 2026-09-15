@@ -50,8 +50,11 @@ test.skipIf(!hasConfig)(
 		const stillWaiting = (await Promise.all([statusOf(tabs[2]), statusOf(tabs[3])])).filter((s) => s !== "connected")
 		expect(stillWaiting.length).toBeGreaterThanOrEqual(1)
 
-		// Approve every open verify window; the waiting handshakes are served (on window close and
-		// the token refill) rather than rejected, and the cap is never exceeded meanwhile.
+		// Approve every verify window as it appears; the waiting handshakes are served (on window
+		// close and the token refill) rather than rejected, and the cap is never exceeded meanwhile.
+		// A tab reports connected the moment its window opens (dispatch is released then), so the
+		// exit condition is BOTH every tab connected AND no window left open — otherwise the loop
+		// could break with the last batch's windows unapproved.
 		let approvals = 0
 		const deadline = Date.now() + 120_000
 		while (Date.now() < deadline) {
@@ -62,12 +65,14 @@ test.skipIf(!hasConfig)(
 				approvals++
 			}
 			const statuses = await Promise.all(tabs.map(statusOf))
-			if (statuses.every((s) => s === "connected")) break
+			if (statuses.every((s) => s === "connected") && countVerifyWindows(ctx) === 0) break
 			await new Promise((r) => setTimeout(r, 2_000))
 		}
 
 		for (const tab of tabs) await connected(tab, 5_000)
-		// Four reconnects each needed a verify window; every one was shown, none silently dropped.
+		expect(countVerifyWindows(ctx)).toBe(0)
+		// A tab connects only once its verify window opens (the session terminates if it cannot), so
+		// four connections prove four windows were shown; four approvals prove none was left dangling.
 		expect(approvals).toBeGreaterThanOrEqual(4)
 
 		for (const tab of tabs) await tab.close()
