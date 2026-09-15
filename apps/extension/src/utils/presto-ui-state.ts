@@ -105,11 +105,12 @@ const PERMISSION_BLOCKED_COPY: Record<PrestoSurface, Omit<PrestoCopy, "tone" | "
 }
 
 function connectedDetail(info: PrestoInfo, surface: PrestoSurface): string {
+	// The settings page lists the versions and the connection in its Details rows.
+	if (surface === "settings") return "Proving natively"
 	const parts = ["Proving natively"]
 	if (info.appVersion) parts.push(`Presto ${info.appVersion}`)
-	// The settings page lists the runtime and the connection in its Details rows.
-	if (surface === "onboarding" && info.nativeAztecVersion) parts.push(`Aztec ${info.nativeAztecVersion}`)
-	if (surface === "onboarding" && info.protocol === "https") parts.push("encrypted")
+	if (info.nativeAztecVersion) parts.push(`Aztec ${info.nativeAztecVersion}`)
+	if (info.protocol === "https") parts.push("encrypted")
 	return parts.join(" · ")
 }
 

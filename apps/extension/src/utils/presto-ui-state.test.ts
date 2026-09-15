@@ -88,8 +88,8 @@ describe("copyFor", () => {
 		expect(copyFor({ kind: "available", info: {} }).detail).toBe("Proving natively")
 	})
 
-	test("the settings surface keeps only the app version on the connected line", () => {
-		expect(copyFor(uiStateFromStatus(available), null, "settings").detail).toBe("Proving natively · Presto 1.1.1")
+	test("the settings surface leaves the versions to the Details rows", () => {
+		expect(copyFor(uiStateFromStatus(available), null, "settings").detail).toBe("Proving natively")
 	})
 
 	test("available + a remembered denial → the declined-earlier overlay with the wait-and-resend step", () => {

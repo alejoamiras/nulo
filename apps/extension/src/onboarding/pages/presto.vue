@@ -69,10 +69,18 @@ onBeforeUnmount(() => {
 			</Text>
 		</Flex>
 
-		<!-- The wrapper stays mounted so the banner's bubbling events have one stable listener
-			and the pb-* overrides apply the moment the pitch renders. -->
+		<!-- The wrapper stays mounted so the banner's bubbling events have one stable listener.
+			`variant` and `href` are getter-only properties on the element, so a plain binding would
+			be assigned as a property and silently dropped; `.attr` writes the attribute it reads. -->
 		<div v-show="isPitch" ref="pitchRef" :class="$style.pitch" data-testid="onboarding-presto-pitch">
-			<presto-banner v-if="isPitch" variant="card" fonts="none" :theme="bannerTheme" :href="PRESTO_SITE_URL" :status.prop="bannerStatus" />
+			<presto-banner
+				v-if="isPitch"
+				:variant.attr="'card'"
+				:href.attr="PRESTO_SITE_URL"
+				fonts="none"
+				:theme="bannerTheme"
+				:status.prop="bannerStatus"
+			/>
 		</div>
 
 		<Flex v-if="isPitch" align="center" justify="center" gap="10">
@@ -116,8 +124,17 @@ onBeforeUnmount(() => {
 	margin-top: 12px;
 }
 
-/* The banner's tokens follow Nulo's, so the card reads as part of the page in both themes. */
 .pitch {
+	display: flex;
+	justify-content: center;
+}
+
+/* The banner's tokens follow Nulo's, so the card reads as part of the page in both themes. The
+   variables sit on the element itself: a rule on the host beats the shadow sheet's `:host`
+   defaults, whereas an inherited value from a wrapper does not. */
+.pitch presto-banner {
+	display: block;
+	width: 100%;
 	--pb-bg: var(--app-bg);
 	--pb-surface: var(--nulo-surface);
 	--pb-wash: var(--nulo-surface-low);
@@ -135,13 +152,6 @@ onBeforeUnmount(() => {
 	--pb-shadow-big: none;
 	--pb-font-body: var(--font-body);
 	--pb-font-display: var(--font-headline);
-	display: flex;
-	justify-content: center;
-}
-
-.pitch presto-banner {
-	display: block;
-	width: 100%;
 }
 
 .retest {

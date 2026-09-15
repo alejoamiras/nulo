@@ -186,12 +186,18 @@ describe("onboarding tab", () => {
 		await gotoPrestoStep(page)
 
 		await page.waitForSelector('[data-testid="onboarding-presto-pitch"]', { visible: true, timeout: 10_000 })
-		const state = await page.evaluate(() => ({
-			card: !!document.querySelector('[data-testid="onboarding-presto-status"]'),
-			continue: !!document.querySelector('[data-testid="onboarding-presto-continue"]'),
-			retry: !!document.querySelector('[data-testid="onboarding-presto-retry"]'),
-		}))
-		expect(state).toEqual({ card: false, continue: false, retry: true })
+		const state = await page.evaluate(() => {
+			const banner = document.querySelector('[data-testid="onboarding-presto-pitch"] presto-banner')
+			return {
+				// The element renders its default ribbon whenever the variant attribute is missing.
+				variant: banner?.getAttribute("variant"),
+				cardRendered: !!banner?.shadowRoot?.querySelector(".root-card .card"),
+				card: !!document.querySelector('[data-testid="onboarding-presto-status"]'),
+				continue: !!document.querySelector('[data-testid="onboarding-presto-continue"]'),
+				retry: !!document.querySelector('[data-testid="onboarding-presto-retry"]'),
+			}
+		})
+		expect(state).toEqual({ variant: "card", cardRendered: true, card: false, continue: false, retry: true })
 
 		await clickByTestId(page, "onboarding-presto-skip")
 		await waitForHash(page, "#/onboarding/done", 5_000)
