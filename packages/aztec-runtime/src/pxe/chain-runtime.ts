@@ -6,15 +6,15 @@ import { WASMSimulator } from "@aztec/simulator/client"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { PrestoProver, type PrestoPhase } from "@alejoamiras/presto"
 import type { ProveBackend } from "@nulo/wallet-core/jobs"
+import { PxeStoreKeyMissingError } from "@nulo/extension-messaging/errors"
 import { AztecNodeFactoryAdapter } from "../adapters/aztec-node-factory-adapter"
 import type { NodeFactory } from "../ports/node-factory-port"
 import { chainDataDir, chainRegistryKey, chainRegistryKeyPrefix } from "./chain-coordinates"
 import { openChainStore } from "./opfs-store"
 
-/** Typed marker for "the per-profile store key was never provisioned to this offscreen" — the
- *  SW-side client recognizes it, re-provisions via its key provider, and retries once (covers
- *  offscreen-document restarts, which drop all in-memory state including the key map). */
-export const PXE_STORE_KEY_MISSING = "PXE_STORE_KEY_MISSING"
+/** Message marker of `PxeStoreKeyMissingError` — the service's failure logger demotes it to debug;
+ *  the client's recovery keys on the class, never on this text. */
+export const PXE_STORE_KEY_MISSING = PxeStoreKeyMissingError.CODE
 
 /** Optional Presto endpoint. Orthogonal to the proving mode — meaningful only in
  *  non-proverless modes; ignored under `proverless`. Stays primitive (no `presto/config`
@@ -170,9 +170,11 @@ export class ProductionPxeFactory implements PxeFactory {
 	public async createChainRuntime(network: NetworkInfo, storeKey?: Uint8Array): Promise<ChainRuntime> {
 		// Fail-closed: PXE state is encrypted at rest, so a chain runtime cannot boot without the
 		// profile's store key (provisioned by the SW after unlock; re-provisioned on demand when
-		// the offscreen restarts — the client recognizes this marker and retries once).
+		// the offscreen restarts — the client recognizes this class and retries once). This is the
+		// ONLY site that may throw it: it runs before any PXE op, which is what lets the client
+		// trust the class as proof the failure was pre-op.
 		if (!storeKey) {
-			throw new Error(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile ${network.profileId}`)
+			throw new PxeStoreKeyMissingError(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile ${network.profileId}`)
 		}
 		const node = this.nodeFactory.createNode(network.rpcUrl)
 		const config = {

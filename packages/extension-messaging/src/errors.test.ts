@@ -12,6 +12,7 @@ import {
 	JobCancelledError,
 	ProfileIdConflictError,
 	PxeStaleAnchorError,
+	PxeStoreKeyMissingError,
 	remoteErrorFromResponseContent,
 	RpcDisconnectedError,
 	RpcTimeoutError,
@@ -184,6 +185,12 @@ describe("constructor identity ritual (owned by the WalletError base)", () => {
 		},
 		{ err: new PxeStaleAnchorError("s"), ctor: PxeStaleAnchorError, name: "PxeStaleAnchorError", code: PxeStaleAnchorError.CODE },
 		{
+			err: new PxeStoreKeyMissingError("PXE_STORE_KEY_MISSING: p1"),
+			ctor: PxeStoreKeyMissingError,
+			name: "PxeStoreKeyMissingError",
+			code: PxeStoreKeyMissingError.CODE,
+		},
+		{
 			err: new ContractNotRegisteredError("Contract not found"),
 			ctor: ContractNotRegisteredError,
 			name: "ContractNotRegisteredError",
@@ -191,7 +198,7 @@ describe("constructor identity ritual (owned by the WalletError base)", () => {
 		},
 	]
 
-	test("all 13 subclasses: exact prototype, literal name, and code on direct construction", () => {
+	test("all 14 subclasses: exact prototype, literal name, and code on direct construction", () => {
 		for (const { err, ctor, name, code } of instances) {
 			expect(Object.getPrototypeOf(err)).toBe(ctor.prototype)
 			expect(err).toBeInstanceOf(WalletError)
@@ -200,7 +207,7 @@ describe("constructor identity ritual (owned by the WalletError base)", () => {
 		}
 	})
 
-	test("the 12 switch-covered codes round-trip to the exact subclass with name intact", () => {
+	test("the 13 switch-covered codes round-trip to the exact subclass with name intact", () => {
 		for (const { err, ctor, name } of instances) {
 			if (ctor === TooManyPendingError) continue // see BUG PIN below
 			const rebuilt = walletErrorFromPayload(err.toPayload())

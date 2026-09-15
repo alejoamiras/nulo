@@ -252,6 +252,21 @@ export class ContractNotRegisteredError extends WalletError {
 	}
 }
 
+/**
+ * The offscreen document holds no store key for the profile — a designed cold-start step, not an
+ * incident: the client derives the key, provisions it, and retries once. Only the chain-runtime
+ * bind throws this, BEFORE any PXE operation runs, so the client trusts the class rather than the
+ * message text: an error raised inside a PXE op that merely contains the marker can never trigger
+ * a re-provision.
+ */
+export class PxeStoreKeyMissingError extends WalletError {
+	public static readonly CODE = "PXE_STORE_KEY_MISSING"
+
+	public constructor(message: string, details?: unknown) {
+		super(PxeStoreKeyMissingError.CODE, message, details, "PxeStoreKeyMissingError")
+	}
+}
+
 /** Request payload failed validation at the RPC boundary. */
 export class ValidationError extends WalletError {
 	public static readonly CODE = "VALIDATION"
@@ -387,6 +402,7 @@ type KnownWalletErrorPayload =
 	| { code: typeof UnsupportedMethodError.CODE; message: string; details?: unknown }
 	| { code: typeof PxeStaleAnchorError.CODE; message: string; details?: unknown }
 	| { code: typeof ContractNotRegisteredError.CODE; message: string; details?: unknown }
+	| { code: typeof PxeStoreKeyMissingError.CODE; message: string; details?: unknown }
 
 /**
  * Reconstruct a WalletError (concrete subclass if the code is recognised)
@@ -434,6 +450,8 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 			return new PxeStaleAnchorError(known.message, known.details)
 		case ContractNotRegisteredError.CODE:
 			return new ContractNotRegisteredError(known.message, known.details)
+		case PxeStoreKeyMissingError.CODE:
+			return new PxeStoreKeyMissingError(known.message, known.details)
 		default:
 			return new WalletError(payload.code, payload.message, payload.details)
 	}

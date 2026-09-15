@@ -41,7 +41,7 @@ import {
 	PublicTransferPageSchema,
 } from "./public-events"
 import { PXEProxy } from "./proxy"
-import { errorMessageFromUnknown } from "@nulo/wallet-core/utils"
+import { PxeStoreKeyMissingError } from "@nulo/extension-messaging/errors"
 
 /**
  * Base PXE service client. Chrome-agnostic: does no offscreen
@@ -112,8 +112,8 @@ export class PxeServiceClientBase extends ServiceClient<Methods, PxeEvents> impl
 	 * Register the SW-side store-key derivation hook (typically `derivePxeStoreKey(master,
 	 * profileId)` against the in-memory session, paired with the row's `pxeGeneration`, all
 	 * under the facade lock). The offscreen holds provisioned keys in memory only, so an
-	 * offscreen-document restart drops them; when a request then fails with the
-	 * `PXE_STORE_KEY_MISSING` marker, this client derives + re-provisions + retries ONCE. The
+	 * offscreen-document restart drops them; when a request then fails with a
+	 * `PxeStoreKeyMissingError`, this client derives + re-provisions + retries ONCE. The
 	 * provider returning `undefined` (profile locked / row gone / tombstoned) lets the original
 	 * error propagate — a locked or deleted profile cannot open its encrypted PXE store.
 	 */
@@ -152,9 +152,12 @@ export class PxeServiceClientBase extends ServiceClient<Methods, PxeEvents> impl
 		try {
 			return await super.request(method, ...args)
 		} catch (err) {
-			const message = errorMessageFromUnknown(err)
+			// The class, not the message: the service attaches a typed payload only to errors it
+			// throws itself, and the one legitimate site runs before any PXE op — so an op-internal
+			// error whose text happens to carry the marker (a hostile node can put anything in a
+			// message) arrives as a plain Error and can never start a re-provision.
 			const profileId = (args[0] as NetworkInfo | undefined)?.profileId
-			if (method === "provisionChainStoreKey" || !message.includes("PXE_STORE_KEY_MISSING") || !profileId || !this.storeKeyProvider) {
+			if (method === "provisionChainStoreKey" || !(err instanceof PxeStoreKeyMissingError) || !profileId || !this.storeKeyProvider) {
 				throw err
 			}
 			// Tail-returned: the recovery helper owns the ENTIRE D4-hardened

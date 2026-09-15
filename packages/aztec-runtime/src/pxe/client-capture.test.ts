@@ -6,6 +6,7 @@
  */
 
 import { beforeEach, describe, expect, test, vi } from "vitest"
+import { PxeStoreKeyMissingError } from "@nulo/extension-messaging/errors"
 import { ServiceClient } from "@nulo/extension-messaging/offscreen"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { PXE_STORE_KEY_MISSING, type NetworkInfo } from "./chain-runtime"
@@ -71,7 +72,7 @@ describe("PxeServiceClientBase generation capture (#281 D4)", () => {
 	test("the missing-key retry: matching generations provision + retry with the ORIGINAL capture", async () => {
 		// First send fails with the missing-key marker; provision + retry follow.
 		behaviors.push(() => {
-			throw new Error(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile p1`)
+			throw new PxeStoreKeyMissingError(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile p1`)
 		})
 		const key = new Uint8Array(32).fill(7)
 		const client = new PxeServiceClientBase(noopLogger)
@@ -93,7 +94,7 @@ describe("PxeServiceClientBase generation capture (#281 D4)", () => {
 		// durable row to gen-B by retry time. A doomed op's error path must not
 		// side-effect-install the newer key, and unrelated provisioning can
 		// never rescue a stale capture.
-		const marker = new Error(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile p1`)
+		const marker = new PxeStoreKeyMissingError(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile p1`)
 		behaviors.push(() => {
 			throw marker
 		})
@@ -113,7 +114,7 @@ describe("PxeServiceClientBase generation capture (#281 D4)", () => {
 		// fakes / legacy path); the equality guard is capture-conditional and
 		// must not apply.
 		behaviors.push(() => {
-			throw new Error(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile p1`)
+			throw new PxeStoreKeyMissingError(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile p1`)
 		})
 		const client = new PxeServiceClientBase(noopLogger)
 		client.setStoreKeyProvider(async () => ({ key: new Uint8Array(32).fill(7), generation: "gen-B" }))
@@ -129,7 +130,7 @@ describe("PxeServiceClientBase generation capture (#281 D4)", () => {
 		// recovery sequence, BEFORE the provider's authority read — never
 		// between the read and the wire sends.
 		behaviors.push(() => {
-			throw new Error(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile p1`)
+			throw new PxeStoreKeyMissingError(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile p1`)
 		})
 		const events: string[] = []
 		class ProbeClient extends PxeServiceClientBase {
@@ -157,7 +158,7 @@ describe("PxeServiceClientBase generation capture (#281 D4)", () => {
 
 	test("a provision send failure propagates AS ITSELF, and the key is still zeroized", async () => {
 		behaviors.push(() => {
-			throw new Error(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile p1`)
+			throw new PxeStoreKeyMissingError(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile p1`)
 		})
 		const transportDown = new Error("provision transport down")
 		behaviors.push(() => {
@@ -185,7 +186,7 @@ describe("PxeServiceClientBase generation capture (#281 D4)", () => {
 		// document knows nothing — sending this provision would resurrect the
 		// erased generation as live. The live-row re-read right before the wire
 		// must abort instead: provider says the row is gone (or reminted).
-		const marker = new Error(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile p1`)
+		const marker = new PxeStoreKeyMissingError(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile p1`)
 		behaviors.push(() => {
 			throw marker
 		})
