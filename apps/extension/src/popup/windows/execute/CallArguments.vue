@@ -36,7 +36,7 @@ const amount = computed(() =>
 	>
 		<!-- The sender is rendered even when the call carries none: a dApp can spend from another
 		     account it names, and the entrypoint spends from nobody. -->
-		<Flex v-if="surface.kind === 'transfer'" :data-testid="`${prefix}-transfer-sender`" :data-sender-kind="surface.sender.kind" gap="6">
+		<Flex v-if="surface.kind === 'transfer'" :data-testid="`${prefix}-transfer-sender`" :data-sender-kind="surface.sender.kind" justify="between" :class="$style.row">
 			<template v-if="surface.sender.kind === 'none'">
 				<Text size="11" color="secondary">Caller:</Text>
 				<Text size="11" color="primary">none</Text>
@@ -50,11 +50,11 @@ const amount = computed(() =>
 				<AddressDisplay :address="surface.sender.address" size="11" />
 			</template>
 		</Flex>
-		<Flex gap="6">
+		<Flex justify="between" :class="$style.row">
 			<Text size="11" color="secondary">{{ surface.kind === "mint" ? "Mint to:" : "To:" }}</Text>
 			<AddressDisplay :address="surface.to" size="11" />
 		</Flex>
-		<Flex gap="6">
+		<Flex justify="between" :class="$style.row">
 			<Text size="11" color="secondary">Amount:</Text>
 			<Text :data-testid="`${prefix}-amount`" size="11" color="primary">
 				{{ amount?.text }}
@@ -62,7 +62,7 @@ const amount = computed(() =>
 				<Text v-else color="tertiary">base units</Text>
 			</Text>
 		</Flex>
-		<Flex v-if="surface.kind === 'transfer' && surface.nonce !== undefined" :data-testid="`${prefix}-transfer-nonce`" gap="6">
+		<Flex v-if="surface.kind === 'transfer' && surface.nonce !== undefined" :data-testid="`${prefix}-transfer-nonce`" justify="between" :class="$style.row">
 			<Text size="11" color="secondary">Authwit nonce:</Text>
 			<Text size="11" color="primary">{{ surface.nonce }}</Text>
 		</Flex>
@@ -75,7 +75,8 @@ const amount = computed(() =>
 			:data-testid="`${prefix}-decoded-param`"
 			:data-param="p.name"
 			:data-value-kind="p.value.kind"
-			gap="6"
+			justify="between"
+			:class="$style.row"
 		>
 			<Text size="11" color="secondary">{{ safeWire(p.name, 32) }}:</Text>
 			<AddressDisplay v-if="p.value.kind === 'address'" :address="p.value.value" size="11" />
@@ -113,7 +114,7 @@ const amount = computed(() =>
 			<Text size="11" color="secondary">{{ rawToggleLabel(surface.rows.length + surface.hidden, rawOpen) }}</Text>
 		</button>
 		<Flex v-if="rawOpen" :data-testid="`${prefix}-raw-args`" direction="column" gap="2">
-			<Flex v-for="(row, m) in surface.rows" :key="m" :data-testid="`${prefix}-arg`" :data-arg-kind="row.kind" gap="6">
+			<Flex v-for="(row, m) in surface.rows" :key="m" :data-testid="`${prefix}-arg`" :data-arg-kind="row.kind" justify="between" :class="$style.row">
 				<Text size="11" color="secondary">#{{ m }}</Text>
 				<Text v-if="row.kind === 'field'" size="11" color="primary" mono :title="row.full">
 					{{ row.short }}<Text v-if="row.decimal !== undefined" color="tertiary"> = {{ row.decimal }}</Text>
@@ -127,11 +128,19 @@ const amount = computed(() =>
 </template>
 
 <style module>
-/* Indented under its call row so it reads as that call's own data. */
+/* Full width, in the card's own key-left / value-right rhythm. */
 .block {
-	padding: 4px 0 4px 12px;
-	border-left: 2px solid var(--nulo-border);
-	margin-left: 4px;
+	width: 100%;
+}
+
+.row {
+	width: 100%;
+	gap: 12px;
+
+	> :last-child {
+		min-width: 0;
+		text-align: right;
+	}
 }
 
 .toggle {

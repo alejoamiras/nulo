@@ -194,40 +194,39 @@ const toggleAuthwit = (a: DiscoveredAuthwit): void => {
 					<Text color="secondary">({{ trimAddress(op.account!.address) }})</Text>
 				</Text>
 			</Flex>
-			<Flex :class="$style.prop">
+			<!-- send_transaction has actions[]; aztec_sendTx has exec.calls[] -->
+			<Flex v-if="op.kind === 'send_transaction'" :class="$style.prop">
 				<Text size="12" color="secondary">Payload:</Text>
 				<Flex direction="column" gap="4">
-					<!-- send_transaction has actions[]; aztec_sendTx has exec.calls[] -->
-					<template v-if="op.kind === 'send_transaction'">
-						<OperationActionRow v-for="(action, j) in op.actions" :key="`${index}:${j}`" :action="action" />
-					</template>
-					<template v-else-if="op.kind === 'aztec_sendTx'">
-						<template v-for="({ call, surface }, j) in sendTxCalls(op)" :key="`${index}:${j}`">
-							<Text
-								data-testid="execute-op-payload-row"
-								:data-call-name="call.name ?? ''"
-								:data-call-to="call.to?.toString() ?? ''"
-								:data-intent-kind="surface.kind"
-								size="12"
-								color="primary"
-							>
-								<Text weight="600">{{ callName(call, surface) }}</Text>
-								<Text color="secondary"> on </Text>
-								<AddressDisplay :address="call.to" />
-							</Text>
-							<CallArguments :surface="surface" :contract="call.to" :chainId="op.network?.chainId" :tokens="tokens" prefix="execute-op" />
-						</template>
-					</template>
+					<OperationActionRow v-for="(action, j) in op.actions" :key="`${index}:${j}`" :action="action" />
 				</Flex>
 			</Flex>
+			<template v-else-if="op.kind === 'aztec_sendTx'">
+				<Flex :class="$style.group"><Text size="12" color="secondary">Payload</Text></Flex>
+				<Flex v-for="({ call, surface }, j) in sendTxCalls(op)" :key="`${index}:${j}`" direction="column" gap="4" :class="$style.call">
+					<Flex
+						data-testid="execute-op-payload-row"
+						:data-call-name="call.name ?? ''"
+						:data-call-to="call.to?.toString() ?? ''"
+						:data-intent-kind="surface.kind"
+						justify="between"
+						align="center"
+						:class="$style.row"
+					>
+						<Text size="12" weight="600" color="primary">{{ callName(call, surface) }}</Text>
+						<Text size="11" color="secondary">on <AddressDisplay :address="call.to" size="11" /></Text>
+					</Flex>
+					<CallArguments :surface="surface" :contract="call.to" :chainId="op.network?.chainId" :tokens="tokens" prefix="execute-op" />
+				</Flex>
+			</template>
 			<Flex
 				v-if="authwits.kind === 'list' && authwits.authwits.length"
 				data-testid="execute-op-discovered-authwits"
 				direction="column"
 				gap="4"
-				:class="$style.prop"
+				:class="$style.group"
 			>
-				<Text size="12" color="secondary">Authorizations the wallet will sign (found during estimation):</Text>
+				<Text size="12" color="secondary">Authorizations the wallet will sign (found during estimation)</Text>
 				<Flex
 					v-for="(a, k) in authwits.authwits"
 					:key="`${index}:authwit:${k}`"
@@ -237,15 +236,15 @@ const toggleAuthwit = (a: DiscoveredAuthwit): void => {
 					gap="2"
 					:class="$style.structured_args"
 				>
-					<Flex gap="6">
+					<Flex justify="between" :class="$style.row">
 						<Text size="11" color="secondary">Consumer:</Text>
 						<AddressDisplay :address="a.consumer" size="11" />
 					</Flex>
-					<Flex gap="6">
+					<Flex justify="between" :class="$style.row">
 						<Text size="11" color="secondary">Authorizes:</Text>
 						<AddressDisplay :address="a.caller" size="11" />
 					</Flex>
-					<Flex gap="6">
+					<Flex justify="between" :class="$style.row">
 						<Text size="11" color="secondary">Function:</Text>
 						<Text size="11" color="primary" data-testid="execute-discovered-authwit-function">{{ authwitFunction(a) }}</Text>
 					</Flex>
@@ -261,7 +260,7 @@ const toggleAuthwit = (a: DiscoveredAuthwit): void => {
 					</button>
 					<Flex v-if="isAuthwitOpen(a)" data-testid="execute-discovered-authwit-details" direction="column" gap="2">
 						<CallArguments :surface="authwitArgs(a)" :contract="a.consumer" :chainId="op.network?.chainId" :tokens="tokens" prefix="execute-discovered-authwit" />
-						<Flex gap="6">
+						<Flex justify="between" :class="$style.row">
 							<Text size="11" color="secondary">Inner hash:</Text>
 							<Text size="11" color="primary" mono :title="safeWire(a.innerHash, 80)">{{ trimAddress(safeWire(a.innerHash, 80), 10, 6) }}</Text>
 						</Flex>
@@ -355,7 +354,7 @@ const toggleAuthwit = (a: DiscoveredAuthwit): void => {
 				     attacker-controllable. Name is hidden when it duplicates
 				     the symbol (e.g. test USDC where both equal "USDC"). -->
 				<Flex :class="$style.prop">
-					<Flex gap="6">
+					<Flex justify="between" :class="$style.row">
 						<Text size="14" weight="600" color="primary" data-testid="register-token-symbol">
 							{{ safeWire(tokenMetadata.symbol, 32) }}
 						</Text>
@@ -492,8 +491,8 @@ const toggleAuthwit = (a: DiscoveredAuthwit): void => {
 						<Text size="12" color="secondary">Function:</Text>
 						<Text size="12" weight="600" color="primary" data-testid="execute-authwit-function">{{ callName(s.call, s.args) }}</Text>
 					</Flex>
-					<Flex data-testid="execute-authwit-args" direction="column" gap="2" :class="[$style.prop, $style.args_block]">
-						<Text size="12" color="secondary">Arguments:</Text>
+					<Flex data-testid="execute-authwit-args" direction="column" gap="4" :class="$style.group">
+						<Text size="12" color="secondary">Arguments</Text>
 						<CallArguments :surface="s.args" :contract="s.to" :chainId="op.network?.chainId" :tokens="tokens" prefix="execute-authwit" />
 					</Flex>
 				</template>
@@ -544,19 +543,34 @@ const toggleAuthwit = (a: DiscoveredAuthwit): void => {
 	background: var(--nulo-surface-low);
 }
 
-.args_block {
-	justify-content: flex-start;
+/* A label on its own line above a full-width stack, so nothing hangs off the right-aligned value column. */
+.group {
+	width: 100%;
+	padding-top: 12px;
+}
 
-	:last-child {
-		text-align: left;
+.call {
+	width: 100%;
+	padding-top: 8px;
+}
+
+.call + .call {
+	margin-top: 8px;
+	border-top: 1px solid var(--nulo-border);
+}
+
+.row {
+	width: 100%;
+	gap: 12px;
+
+	> :last-child {
+		min-width: 0;
+		text-align: right;
 	}
 }
 
-/* The per-authorization detail block: indented under its list so it reads as that entry's own data. */
 .structured_args {
-	padding: 4px 0 4px 12px;
-	border-left: 2px solid var(--nulo-border);
-	margin-left: 4px;
+	width: 100%;
 }
 
 .details_toggle {
