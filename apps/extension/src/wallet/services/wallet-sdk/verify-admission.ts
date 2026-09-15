@@ -191,6 +191,10 @@ export class VerifyAdmissionGate {
 		for (const r of this.reservations.values()) if (r.windowRemoved(windowId)) return
 		// No reservation owns this id yet — an in-flight creation may adopt it next. Buffer it so
 		// `adopt` releases immediately instead of holding a slot for a window that is already gone.
+		// The bound only matters for removals that fire while ONE create() is awaited (adopt runs
+		// synchronously after it resolves); overflow is fail-closed — the affected slot stays held
+		// until the worker restarts, never exceeding the cap — because `WindowPort` cannot confirm
+		// a window's absence and a wrong release would.
 		this.recentRemovals.add(windowId)
 		if (this.recentRemovals.size > 64) this.recentRemovals.delete(this.recentRemovals.values().next().value as number)
 	}

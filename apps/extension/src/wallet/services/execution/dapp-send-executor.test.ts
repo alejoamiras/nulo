@@ -17,6 +17,7 @@
 
 import { describe, expect, test, vi } from "vitest"
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import { JobCancelledError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { OriginType, type LocalTxOrigin } from "@/wallet/services/transaction/spec"
 import { DappSendExecutor, type DappSendExecutorDeps } from "./dapp-send-executor"
@@ -831,6 +832,9 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 		const { executor, deps, authwit, proveAndSend } = makeHarness({
 			operationEstimateReuse: { tryConsume: vi.fn(async () => entry), stash: vi.fn(), evict: vi.fn() } as never,
 		})
+		// Reuse is licensed only by an owned snapshot: the estimate that produced this reuse entry
+		// stashed one under the same previewId (= estimateId). Its empty hash set ⊇ the reused build's.
+		deps.previewSnapshots.stash("est-1", { interactionId: "i-1", index: 0, fingerprint: null, discoveredHashes: [] })
 
 		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, APPROVAL("est-1"))
 
@@ -855,11 +859,58 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 		expect(reuseCtx.initializesAccount).toBe(true)
 	})
 
-	test("consume miss (forged/stale/drifted id) falls back to the FULL pipeline (fj ⇒ folded)", async () => {
+	test("owned snapshot but the reuse entry is gone (stale/drifted id): tryConsume misses, FULL pipeline (fj ⇒ folded)", async () => {
 		const { executor, deps, authwit, buildAndEstimateFolded } = makeHarness()
-		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, APPROVAL("est-forged"))
+		deps.previewSnapshots.stash("est-stale", { interactionId: "i-1", index: 0, fingerprint: null, discoveredHashes: [] })
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, APPROVAL("est-stale"))
 		expect(deps.operationEstimateReuse.tryConsume).toHaveBeenCalledTimes(1)
 		expect(authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
+		expect(buildAndEstimateFolded).toHaveBeenCalledTimes(1)
+	})
+
+	test("no owned snapshot (forged id): reuse is never attempted — tryConsume untouched, FULL pipeline", async () => {
+		const { executor, deps, buildAndEstimateFolded } = makeHarness()
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, APPROVAL("est-forged"))
+		expect(deps.operationEstimateReuse.tryConsume).not.toHaveBeenCalled()
+		expect(buildAndEstimateFolded).toHaveBeenCalledTimes(1)
+	})
+
+	test("two attempts: a foreign take pops A's snapshot, then estimateId = previewId = A cannot reuse A's build", async () => {
+		const entry = {
+			txRequest: makeTxRequest(),
+			initializesAccount: false,
+			nonce: { toString: () => "1" },
+			feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL,
+			txCalls: [{ contract: "0xc", method: "reused_method", args: [] }],
+			pendingPublicAuthwits: [],
+			discoveredHashes: [],
+		}
+		// tryConsume WOULD hit — the only thing standing between B and A's cached build is ownership.
+		const { executor, deps, buildAndEstimateFolded } = makeHarness({
+			operationEstimateReuse: { tryConsume: vi.fn(async () => entry), stash: vi.fn(), evict: vi.fn() } as never,
+		})
+		deps.previewSnapshots.stash("A", { interactionId: "i-A", index: 0, fingerprint: null, discoveredHashes: [] })
+
+		// Attempt 1 — interaction C names A's previewId with no estimateId: refused as foreign, and
+		// the single-shot take has consumed A's snapshot.
+		await expect(
+			executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, {
+				interactionId: "i-C",
+				index: 0,
+				previewId: "A",
+			}),
+		).rejects.toThrow(PREVIEW_FOREIGN_MESSAGE)
+		expect(deps.operationEstimateReuse.tryConsume).not.toHaveBeenCalled()
+
+		// Attempt 2 — A's owner (equal ids, matching fingerprint) no longer holds a snapshot, so the
+		// build is recomputed: the cached one is never consumed, whatever tryConsume would say.
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, {
+			interactionId: "i-A",
+			index: 0,
+			estimateId: "A",
+			previewId: "A",
+		})
+		expect(deps.operationEstimateReuse.tryConsume).not.toHaveBeenCalled()
 		expect(buildAndEstimateFolded).toHaveBeenCalledTimes(1)
 	})
 
@@ -1113,33 +1164,87 @@ describe("DappSendExecutor — discovered authwits, the preview snapshot and the
 		})
 	})
 
-	test("cancelling a settled attempt evicts its preview snapshot through the registry wiring", async () => {
-		const self = {
-			profileService: {},
-			networkService: {},
-			accountService: {},
-			transactionService: {},
-			fpcService: {},
-			pxeService: {},
-			resolver: {},
-			logger: {},
-			logDebug: () => {},
-			logError: () => {},
-		} as unknown as {
+	describe("NO_FROM preview cancellation through the service RPC (previewOperationAuthwits + cancelEstimate)", () => {
+		const noFromOp = () => makeAztecOp({ executionMode: "default_entrypoint", feeSettings: { paymentMethod: { kind: "embedded" } } })
+		type Rpc = {
+			previewOperationAuthwits(
+				i: string,
+				n: number,
+				tok?: string,
+				flow?: string,
+			): Promise<{ previewId?: string; discoveredAuthwits?: unknown[] }>
+			cancelEstimate(tok: string): Promise<void>
 			previewSnapshots: PreviewSnapshots
-			estimateCancel: {
-				admit(t: string, p: string, f: string): Promise<AbortSignal>
-				settle(t: string, id?: string): void
-				cancel(t: string, p: string): void
-			}
+			estimateCancel: { unsettledCount(p: string): number }
 		}
-		;(ExecutionService.prototype as unknown as { wireGasBalancesAndEstimateCaches: () => void }).wireGasBalancesAndEstimateCaches.call(
-			self,
-		)
-		self.previewSnapshots.stash("pv", { ...identity, discoveredHashes: [] })
-		await self.estimateCancel.admit("tok", "p1", "op")
-		self.estimateCancel.settle("tok", "pv")
-		self.estimateCancel.cancel("tok", "p1")
-		expect(self.previewSnapshots.take("pv", identity)).toEqual({ kind: "missing" })
+		/** The real service methods on a bare prototype, over the real cancel registry + snapshot
+		 *  wiring (`wireGasBalancesAndEstimateCaches`) and the harness's real executor. The executor
+		 *  writes previews into the store the registry evicts from — one store, so an eviction the
+		 *  RPC chain drops would be visible here. */
+		const rpc = () => {
+			const h = makeHarness()
+			const self = Object.assign(Object.create(ExecutionService.prototype), {
+				profileService: { getActiveProfile: async () => ({ id: "p1" }) },
+				networkService: {},
+				accountService: {},
+				transactionService: {},
+				fpcService: {},
+				pxeService: {},
+				resolver: {},
+				logger: {},
+				ensureInitialized: async () => {},
+				services: { get: () => ({ materializeStoredOperation: async () => noFromOp() }) },
+				dappSendExecutor: h.executor,
+				logDebug: () => {},
+				logError: () => {},
+			})
+			;(
+				ExecutionService.prototype as unknown as { wireGasBalancesAndEstimateCaches: () => void }
+			).wireGasBalancesAndEstimateCaches.call(self)
+			// Point the service at the executor's store so the registry's `evictStash` reaches what the
+			// RPC actually wrote (production wires both from the same field).
+			;(self as { previewSnapshots: PreviewSnapshots }).previewSnapshots = h.deps.previewSnapshots
+			return { self: self as unknown as Rpc, ...h }
+		}
+
+		test("a successful handoff preserves the snapshot the popup will confirm against", async () => {
+			collectOffchainEffectsMock.mockReturnValue([effect("n")])
+			const { self } = rpc()
+			const result = await self.previewOperationAuthwits("i-1", 0, "tok-ok", "op")
+			expect(result.discoveredAuthwits).toHaveLength(1)
+			expect(self.estimateCancel.unsettledCount("p1")).toBe(0)
+			expect(self.previewSnapshots.take(result.previewId, identity)).toMatchObject({
+				kind: "found",
+				snapshot: { interactionId: "i-1", index: 0, discoveredHashes: ["mh:ih:n"] },
+			})
+		})
+
+		test("cancelling after the stash evicts the snapshot through the settled-token path", async () => {
+			collectOffchainEffectsMock.mockReturnValue([effect("n")])
+			const { self } = rpc()
+			const result = await self.previewOperationAuthwits("i-1", 0, "tok-late", "op")
+			await self.cancelEstimate("tok-late")
+			expect(self.previewSnapshots.take(result.previewId, identity)).toEqual({ kind: "missing" })
+		})
+
+		test("cancelling during discovery aborts the RPC with the structured error and stashes nothing", async () => {
+			collectOffchainEffectsMock.mockReturnValue([effect("n")])
+			const { self, pxe, deps } = rpc()
+			const stash = vi.spyOn(deps.previewSnapshots, "stash")
+			let release: (v: { privateExecutionResult: object }) => void = () => {}
+			pxe.simulateTx.mockImplementationOnce(() => new Promise((r) => (release = r)))
+			const pending = self.previewOperationAuthwits("i-1", 0, "tok-mid", "op")
+			// Let admission + prepare run up to the stalled discovery simulation.
+			for (let i = 0; i < 50 && pxe.simulateTx.mock.calls.length === 0; i++) await new Promise((r) => setTimeout(r, 1))
+			expect(pxe.simulateTx).toHaveBeenCalledTimes(1)
+			expect(self.estimateCancel.unsettledCount("p1")).toBe(1)
+			await self.cancelEstimate("tok-mid")
+			release({ privateExecutionResult: {} })
+			await expect(pending).rejects.toBeInstanceOf(JobCancelledError)
+			expect(self.estimateCancel.unsettledCount("p1")).toBe(0)
+			// The abort lands at the checkpoint after discovery returns and before the preview is
+			// written: the store never receives a snapshot for this attempt.
+			expect(stash).not.toHaveBeenCalled()
+		})
 	})
 })

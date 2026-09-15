@@ -181,6 +181,29 @@ describe("VerifyAdmissionGate — verify-window capacity", () => {
 		expect(gate.windowsHeld(ORIGIN)).toBe(0)
 	})
 
+	test("a removal evicted from the buffer before adoption leaves that slot held — fail-closed, never over the cap", () => {
+		const { gate, admit, served, reservations } = harness()
+		const needs = { needsWindow: true, consumesToken: false }
+		admit("w1", needs)
+		admit("w2", needs)
+		const w1 = reservations.get("w1")!
+		w1.markInFlight()
+		// w1's window closes before create() resolves, then 65 unrelated removals evict that event.
+		gate.windowRemoved(11)
+		for (let i = 100; i < 165; i++) gate.windowRemoved(i)
+		// The port cannot confirm absence, so adoption must trust the window is live: the slot stays
+		// held (a third handshake queues) and the origin never gets a window past the cap.
+		expect(w1.adopt(11)).toBe("live")
+		expect(w1.status).toBe("opened")
+		admit("w3", needs)
+		expect(served).toEqual(["w1", "w2"])
+		expect(gate.windowsHeld(ORIGIN)).toBe(VERIFY_WINDOWS_PER_ORIGIN)
+		// Termination does not free an opened slot either — only the (already lost) removal would.
+		gate.onSessionGone("w1")
+		expect(gate.windowsHeld(ORIGIN)).toBe(VERIFY_WINDOWS_PER_ORIGIN)
+		expect(served).toEqual(["w1", "w2"])
+	})
+
 	test("an in-flight creation past its deadline does not spin the drain timer", () => {
 		const { gate, admit, reservations } = harness()
 		const needs = { needsWindow: true, consumesToken: false }

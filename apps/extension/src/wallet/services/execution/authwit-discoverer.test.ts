@@ -1,40 +1,14 @@
 /**
- * Unit tests for `AuthwitDiscoverer`.
- *
- * `discoverPrivateAuthwits` runs real Aztec authwit simulation + hash
- * computation; that path exercises Barretenberg WASM (poseidon2) and is
- * e2e-only. This suite covers:
- *   - The callback plumbing contract: `discoverPrivateAuthwits` invokes
- *     the provided `buildTxRequest` and feeds its output into
- *     `pxe.simulateTx` with the correct flags.
- *   - Empty-effects fast path: returns `[]` without doing hash work.
- *
- * The three `compute*MessageHash` methods call
- * `computeAuthWitMessageHash` from `@aztec/aztec.js/authorization` which
- * hits WASM. Unit-testing them here would reproduce the Barretenberg
- * error encountered with poseidon2; those paths are covered by the
- * network e2e (transfers + authwit flows).
+ * `AuthwitDiscoverer` plumbing under the default jsdom environment: the callback contract
+ * (`buildTxRequest` → `pxe.simulateTx` with the discovery flags), the empty-effects fast path, and
+ * error propagation. None of these hash anything, so nothing is mocked. The real decode + hash
+ * path (a genuine `CallAuthorizationRequest` preimage through `fromFields` validation and the
+ * outer message hash) lives in `authwit-discoverer.real.test.ts` under a node environment — the
+ * poseidon binding this needs fails under jsdom.
  */
 
 import { describe, expect, test, vi } from "vitest"
 
-// The real hash path hits Barretenberg WASM (e2e-only). Mock the authwit primitives + effect
-// collection so the discovered-record branch is exercised without WASM: this guards that a
-// non-empty simulation yields a `DiscoveredAuthwit`, which the empty-effects cases cannot.
-vi.mock("@aztec/aztec.js/authorization", () => ({
-	CallAuthorizationRequest: {
-		fromFields: vi.fn(async () => ({
-			innerHash: { toString: (): string => "0xinner" },
-			msgSender: { toString: (): string => "0xcaller" },
-			functionSelector: { toString: (): string => "0xselector" },
-			args: [{ toString: (): string => "0xarg" }],
-		})),
-	},
-	computeAuthWitMessageHash: vi.fn(async () => ({ toString: (): string => "0xmsghash" })),
-	computeInnerAuthWitHash: vi.fn(async () => ({ toString: (): string => "0xinner" })),
-}))
-let mockEffects: Array<{ contractAddress: { toString(): string }; data: unknown }> = []
-vi.mock("@aztec/stdlib/tx", async (orig) => ({ ...(await orig<Record<string, unknown>>()), collectOffchainEffects: () => mockEffects }))
 import type { ConfigProp, IConfig } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { EventHandler } from "@nulo/wallet-core/utils"
@@ -115,30 +89,6 @@ describe("AuthwitDiscoverer.discoverPrivateAuthwits", () => {
 		await expect(disc.discoverPrivateAuthwits({ networkId: "n", accountAddress: "0xa", actions: [] }, buildTxRequest)).rejects.toThrow(
 			/simulation failed/,
 		)
-	})
-})
-
-describe("AuthwitDiscoverer.discoverPrivateAuthwits — discovered records", () => {
-	test("a simulated authorization yields both a wire action and a DiscoveredAuthwit", async () => {
-		mockEffects = [{ contractAddress: { toString: () => "0xconsumer" }, data: [] }]
-		const disc = new AuthwitDiscoverer(fakeLogger())
-		const { ctx } = fakeBuildCtx()
-		const result = await disc.discoverPrivateAuthwits(
-			{ networkId: "n", accountAddress: "0xa", actions: [] as Action[] },
-			async () => ctx as never,
-		)
-		expect(result.actions).toEqual([{ kind: "add_private_authwit", content: { kind: "message_hash", messageHash: "0xmsghash" } }])
-		expect(result.discovered).toEqual([
-			{
-				consumer: "0xconsumer",
-				caller: "0xcaller",
-				selector: "0xselector",
-				args: ["0xarg"],
-				innerHash: "0xinner",
-				messageHash: "0xmsghash",
-			},
-		])
-		mockEffects = []
 	})
 })
 

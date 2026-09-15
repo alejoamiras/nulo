@@ -49,7 +49,7 @@ import type { ExecutionCoordinator } from "./execution-coordinator"
 import type { ExecutionMutexRelease } from "./execution-mutex"
 import type { OperationEstimateReuse, OperationEstimateReuseEntry } from "./operation-estimate-reuse"
 import { fingerprintNoFromInputs, fingerprintOperation, type OperationFingerprintInput } from "./operation-fingerprint"
-import { PREVIEW_FOREIGN_MESSAGE, type PreviewSnapshots, assertWithinPreview } from "./preview-snapshots"
+import { PREVIEW_FOREIGN_MESSAGE, type PreviewLookup, type PreviewSnapshots, assertWithinPreview } from "./preview-snapshots"
 import { toDiscoveredAuthwit } from "./discovered-authwit"
 import { fingerprintBaseFee } from "./transfer-estimate-reuse"
 import { applyEmbeddedFpcGasCap } from "./fee/embedded-fpc-cap"
@@ -385,6 +385,21 @@ export class DappSendExecutor {
 		if (approval.previewId !== approval.estimateId) throw new Error(PREVIEW_FOREIGN_MESSAGE)
 	}
 
+	/** Pop the preview snapshot the popup owns, up front — BEFORE the reuse cache is consumed, so a
+	 *  `found` result is what licenses reuse. A `foreign` id (naming another interaction / index /
+	 *  fingerprint) is refused here; `missing` (no owned snapshot) forces a fresh rebuild rather than
+	 *  reusing a fingerprint-identical build the popup never previewed. The silent path carries no
+	 *  envelope, is never reuse-eligible, and is not held — the caller passes `undefined` then. */
+	private takeStandardPreview(approval: OperationApprovalEnvelope, fingerprint: string | null): PreviewLookup {
+		const lookup = this.deps.previewSnapshots.take(approval.previewId, {
+			interactionId: approval.interactionId,
+			index: approval.index,
+			fingerprint,
+		})
+		if (lookup.kind === "foreign") throw new Error(PREVIEW_FOREIGN_MESSAGE)
+		return lookup
+	}
+
 	/** Popup approvals only: hold what confirm is about to sign to the snapshot
 	 *  the card showed. A silent execution carries no envelope and is not held. */
 	private enforcePreview(
@@ -668,6 +683,11 @@ export class DappSendExecutor {
 				// Refuse a forged estimateId/previewId pairing before the reuse cache is touched.
 				this.assertEstimateBinding(approval)
 				const identity = fingerprintInputFor(op, op.feeSettings, fee, actions)
+				// The owned snapshot gates reuse: only a `found` result lets a precomputed estimate be
+				// reused; missing forces a rebuild, foreign already threw. Taken once, here, so the
+				// single-shot pop can never be raced by a separate `enforcePreview` take.
+				const preview = approval ? this.takeStandardPreview(approval, fingerprintOperation(identity)) : undefined
+				const reuseId = preview?.kind === "found" ? approval?.estimateId : undefined
 				const {
 					txRequest,
 					node,
@@ -680,8 +700,8 @@ export class DappSendExecutor {
 					pendingPublicAuthwits,
 					initializesAccount,
 					discoveredHashes,
-				} = await this.resolveStandardBuild(op, identity, approval?.estimateId, parentTask, checkCancelled)
-				this.enforcePreview(approval, fingerprintOperation(identity), discoveredHashes)
+				} = await this.resolveStandardBuild(op, identity, reuseId, parentTask, checkCancelled)
+				if (preview) assertWithinPreview(preview, discoveredHashes)
 				checkCancelled()
 
 				const sendAdditionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
