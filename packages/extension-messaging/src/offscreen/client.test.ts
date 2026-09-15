@@ -57,6 +57,9 @@ describe("event sender gate", () => {
 		public constructor() {
 			super("test-service", silentLogger, "event-client", new MemoryTelemetrySink())
 		}
+		public echo(val: string): Promise<string> {
+			return this.request("echo", val)
+		}
 	}
 	const event = { type: MessageType.Event, from: "test-service", content: { event: "onPing", payload: { n: 1 } } }
 	const offscreenUrl = (scheme: string, query = "") => `${scheme}://harness-extension-id/src/offscreen/index.html${query}`
@@ -66,8 +69,12 @@ describe("event sender gate", () => {
 		client.connect()
 		const seen = vi.fn()
 		client.onPing.add(seen)
-		return seen
+		return Object.assign(seen, { client })
 	}
+	const popupSender = {
+		id: "harness-extension-id",
+		url: "chrome-extension://harness-extension-id/src/popup/index.html",
+	} as chrome.runtime.MessageSender
 
 	test("a content-script-shaped sender (same extension id, web page url) is dropped", () => {
 		const seen = mounted()
@@ -84,22 +91,36 @@ describe("event sender gate", () => {
 	})
 
 	test("the Firefox hidden-window url with ?instance=<token> is accepted (query ignored)", () => {
+		vi.mocked(chrome.runtime.getURL).mockImplementation((path: string) => `moz-extension://harness-extension-id/${path}`)
 		const seen = mounted()
 		emitMessageFrom(event, {
 			id: "harness-extension-id",
-			url: offscreenUrl("chrome-extension", "?instance=abc123"),
+			url: offscreenUrl("moz-extension", "?instance=abc123"),
 		} as chrome.runtime.MessageSender)
 		expect(seen).toHaveBeenCalledExactlyOnceWith({ n: 1 })
 	})
 
-	test("other extension pages and foreign extensions are dropped; responses are unaffected by the gate", async () => {
+	test("other extension pages and foreign extensions are dropped", () => {
 		const seen = mounted()
-		emitMessageFrom(event, {
-			id: "harness-extension-id",
-			url: "chrome-extension://harness-extension-id/src/popup/index.html",
-		} as chrome.runtime.MessageSender)
+		emitMessageFrom(event, popupSender)
 		emitMessageFrom(event, { id: "other-extension", url: offscreenUrl("chrome-extension") } as chrome.runtime.MessageSender)
 		expect(seen).not.toHaveBeenCalled()
+	})
+
+	test("an event addressed to this client's uid earns no exemption; a response addressed to it needs no sender", async () => {
+		const seen = mounted()
+		const reply = seen.client.echo("hi")
+		await flush()
+		const { requestId, fromUid } = getLastRequest()
+		emitMessageFrom({ ...event, to: fromUid }, popupSender)
+		expect(seen).not.toHaveBeenCalled()
+		emitMessageFrom({ ...event, to: fromUid }, {
+			id: "harness-extension-id",
+			url: offscreenUrl("chrome-extension"),
+		} as chrome.runtime.MessageSender)
+		expect(seen).toHaveBeenCalledExactlyOnceWith({ n: 1 })
+		emitMessageFrom(makeResponse(requestId, fromUid, "echo:hi"), popupSender)
+		await expect(reply).resolves.toBe("echo:hi")
 	})
 })
 

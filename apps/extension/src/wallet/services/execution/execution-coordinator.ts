@@ -79,7 +79,7 @@ interface ProveAttempt {
 	journalId: string
 	/** Highest sequence number accepted so far; lower or equal → stale, dropped. */
 	lastSeq: number
-	/** Last backend written to the journal — the same evidence is not rewritten. */
+	/** Last backend the journal confirmed — the same evidence is not rewritten; a failed write leaves it unset so the next event retries. */
 	backend?: ProveBackend
 	/** `denialGeneration` at dispatch: only an attempt from the current generation may clear a denial. */
 	denialGeneration: number
@@ -190,9 +190,9 @@ export class ExecutionCoordinator {
 			this.lastDenial = null
 		}
 		if (event.backend === undefined || event.backend === attempt.backend) return
-		attempt.backend = event.backend
 		try {
 			await this.evidence?.updateProvingBackend(attempt.journalId, event.backend)
+			attempt.backend = event.backend
 		} catch (error) {
 			this._logger.log("execution", LogLevel.Warn, "prove backend not journaled", { error: errorMessageFromUnknown(error) })
 		}

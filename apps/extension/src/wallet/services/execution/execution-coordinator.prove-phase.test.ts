@@ -21,8 +21,12 @@ type Backend = "presto" | "browser"
 /** A coordinator plus a fake PXE whose `proveTx` parks until `finish()`, exposing the minted proveId. */
 function harness(opts: { journalRejects?: boolean } = {}) {
 	const journal: Array<[string, Backend]> = []
+	let journalRejects = opts.journalRejects === true
+	const setJournalRejects = (rejects: boolean) => {
+		journalRejects = rejects
+	}
 	const updateProvingBackend = vi.fn(async (id: string, backend: Backend) => {
-		if (opts.journalRejects) throw new Error("journal closed")
+		if (journalRejects) throw new Error("journal closed")
 		journal.push([id, backend])
 	})
 	const coordinator = new ExecutionCoordinator(tasks, new LoggerStore(new ConfigStore()), undefined, { updateProvingBackend })
@@ -44,7 +48,7 @@ function harness(opts: { journalRejects?: boolean } = {}) {
 	}
 	const emit = (proveId: string, seq: number, phase: Phase, backend?: Backend) =>
 		coordinator.onProvePhase({ proveId, seq, phase, backend })
-	return { coordinator, journal, updateProvingBackend, dispatch, emit }
+	return { coordinator, journal, updateProvingBackend, setJournalRejects, dispatch, emit }
 }
 
 describe("ExecutionCoordinator prove-phase attribution", () => {
@@ -100,6 +104,41 @@ describe("ExecutionCoordinator prove-phase attribution", () => {
 		await h.coordinator.onProvePhase("garbage")
 		expect(h.journal).toEqual([])
 		expect(h.coordinator.getLastProveOutcome()).toEqual({ outcome: null, denial: null })
+	})
+
+	test("malformed events for a live attempt change nothing and do not consume the sequence number", async () => {
+		const h = harness()
+		const a = await h.dispatch("op-1")
+		await h.emit(a.proveId, 1, "detect")
+		await h.coordinator.onProvePhase({ proveId: a.proveId, seq: 2, phase: "teleport" })
+		await h.coordinator.onProvePhase({ proveId: a.proveId, seq: 2, phase: "transmit", backend: "native" })
+		await h.coordinator.onProvePhase({ proveId: a.proveId, seq: 2.5, phase: "transmit", backend: "presto" })
+		await h.coordinator.onProvePhase({ proveId: a.proveId, seq: -1, phase: "transmit", backend: "presto" })
+		expect(h.journal).toEqual([])
+		expect(h.coordinator.getLastProveOutcome().outcome?.phase).toBe("detect")
+		await h.emit(a.proveId, 2, "transmit", "presto")
+		expect(h.journal).toEqual([["op-1", "presto"]])
+		a.finish()
+		await a.done
+	})
+
+	test("a journal write that fails once is retried by the next event carrying that backend", async () => {
+		const h = harness()
+		const a = await h.dispatch("op-1")
+		await h.emit(a.proveId, 3, "transmit", "presto")
+		h.setJournalRejects(true)
+		await h.emit(a.proveId, 5, "fallback", "browser")
+		expect(h.journal).toEqual([["op-1", "presto"]])
+		h.setJournalRejects(false)
+		await h.emit(a.proveId, 6, "proving", "browser")
+		await h.emit(a.proveId, 7, "proved", "browser")
+		expect(h.journal).toEqual([
+			["op-1", "presto"],
+			["op-1", "browser"],
+		])
+		expect(h.updateProvingBackend).toHaveBeenCalledTimes(3)
+		a.finish()
+		await a.done
 	})
 
 	test("two concurrent attempts attribute independently; an attempt without a journal row is not mapped", async () => {

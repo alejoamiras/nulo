@@ -55,7 +55,7 @@ minimumReleaseAge = 604800
 # an isolated fixture after a real `npm install --ignore-scripts` of the exact versions:
 # `npm audit signatures --include-attestations` reports every tarball registry-signed with a
 # verified SLSA provenance statement binding it to alejoamiras/presto's publish workflow at the
-# tagged commit (digests + output: implementations-plan/presto-migration/lessons/phase-1.md).
+# tagged commit.
 # Provenance only proves origin — it does not review the code.
 minimumReleaseAgeExcludes = [
 	"@alejoamiras/presto",

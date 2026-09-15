@@ -475,6 +475,28 @@ export async function waitForDappExecuteStagesPresent(page: Page, stages: string
  * watched the `tx-awaiting-card` DOM and raced both the popup render and the
  * proverless fast-completion (the card is gone once the op terminalizes).
  */
+export async function waitForDappExecuteWorked(page: Page, options: { timeout?: number } = {}): Promise<void> {
+	const { timeout = 30_000 } = options
+	const wait = page.waitForFunction(
+		async () => {
+			const workedOrDone = new Set(["simulating", "proving", "submitting", "succeeded"])
+			const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
+			for (const [k, raw] of Object.entries(all)) {
+				if (!k.startsWith("nulo:journal@")) continue
+				try {
+					const r = (typeof raw === "string" ? JSON.parse(raw) : raw) as { kind?: string; progress?: { stage?: string } }
+					if (r?.kind === "dapp_execute" && r.progress?.stage && workedOrDone.has(r.progress.stage)) return true
+				} catch {
+					// Skip unparseable entries.
+				}
+			}
+			return false
+		},
+		{ timeout, polling: 250 },
+	)
+	await awaitOrDump(page, "waitForDappExecuteWorked", wait)
+}
+
 /**
  * Wait for an awaiting card in `proving` to carry the given backend evidence
  * (`data-backend`) and the exact subtitle. The card is the popup's projection
@@ -500,26 +522,4 @@ export async function waitForAwaitingCardBackend(
 		expected,
 	)
 	await awaitOrDump(page, "waitForAwaitingCardBackend", wait)
-}
-
-export async function waitForDappExecuteWorked(page: Page, options: { timeout?: number } = {}): Promise<void> {
-	const { timeout = 30_000 } = options
-	const wait = page.waitForFunction(
-		async () => {
-			const workedOrDone = new Set(["simulating", "proving", "submitting", "succeeded"])
-			const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
-			for (const [k, raw] of Object.entries(all)) {
-				if (!k.startsWith("nulo:journal@")) continue
-				try {
-					const r = (typeof raw === "string" ? JSON.parse(raw) : raw) as { kind?: string; progress?: { stage?: string } }
-					if (r?.kind === "dapp_execute" && r.progress?.stage && workedOrDone.has(r.progress.stage)) return true
-				} catch {
-					// Skip unparseable entries.
-				}
-			}
-			return false
-		},
-		{ timeout, polling: 250 },
-	)
-	await awaitOrDump(page, "waitForDappExecuteWorked", wait)
 }

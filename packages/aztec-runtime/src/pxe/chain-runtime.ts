@@ -300,8 +300,9 @@ async function assertPrestoReady(prover: PrestoProver): Promise<void> {
 	}
 }
 
-/** Advance an attempt's evidence by one phase. `transmit` means the witness reached Presto;
- *  `fallback`/`denied` mean the proof runs in the browser. Later phases never undo either. */
+/** Advance an attempt's evidence by one phase. `transmit` selects Presto (the SDK emits it
+ *  before the POST, so it is intent, not delivery); `fallback`/`denied` override it with the
+ *  browser; completion phases preserve whichever was chosen. */
 export function advanceProve(active: ActiveProve, phase: PrestoPhase): ProvePhaseEvent {
 	active.seq += 1
 	if (phase === "transmit") active.backend = "presto"

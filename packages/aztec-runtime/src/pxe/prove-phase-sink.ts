@@ -1,11 +1,6 @@
 import type { ProvePhaseEvent, ProvePhaseObserver } from "./chain-runtime"
 
-/**
- * The seam between the prover factory (which emits phases) and `PxeService`
- * (which forwards them to the service worker). The factory is built before
- * the service exists, so neither can hold the other directly: the shell
- * creates the sink, hands `emit` to the factory and the sink to the service.
- */
+/** Connects the prover factory's phase observer to the `PxeService` created after it. */
 export interface ProvePhaseSink {
 	emit: ProvePhaseObserver
 	subscribe(observer: ProvePhaseObserver): void

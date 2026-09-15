@@ -38,6 +38,8 @@ export function isTerminal(stage: JobStage): boolean {
 	return TERMINAL_STAGES.has(stage)
 }
 
+export type ProveBackend = "presto" | "browser"
+
 /**
  * Progress payload, discriminated by stage. Adding fields per stage variant
  * does NOT require a schema migration — consumers ignore unknown keys.
@@ -52,8 +54,6 @@ export function isTerminal(stage: JobStage): boolean {
  * the stage (the FSM has no `proving → proving` edge), through the journal's
  * `updateProvingBackend` seam only.
  */
-export type ProveBackend = "presto" | "browser"
-
 export type JobProgress =
 	| { stage: "queued" }
 	| { stage: "pending" }

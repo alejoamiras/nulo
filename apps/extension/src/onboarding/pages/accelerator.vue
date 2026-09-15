@@ -41,7 +41,7 @@ const statusDetail = computed(() => {
 		case "active":
 			return "Presto will ask you to allow Nulo at your first send."
 		case "no-bb":
-			return "Presto is fetching its prover — open the Presto app to let it finish."
+			return "Presto downloads its prover at your first send — nothing to do now. Skip to continue."
 		case "not-detected":
 			return "Proofs will run in your browser (slower)."
 		default:

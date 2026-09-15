@@ -139,14 +139,13 @@ for marker in "NULO_E2E_TOKEN_SEEDS_BUILD_STAMP" "nulo:e2e:token-seeds"; do
 done
 echo "[e2e:agent] bundle contains the e2e token-seed source ✓"
 
-# Parallel bundle assertion for VITE_NULO_PRESTO_REQUIRED. Codex post-impl
-# audit (finding #3): without this check, if the env var ever stops propagating
-# from the workflow into the build, Layer 2 (chain-runtime.ts onPhase throw)
-# silently disappears and tests can pass on WASM even when the server is up but
-# unhealthy mid-test. The stamp is emitted by apps/extension/src/presto/config.ts
-# and pinned into the bundle by offscreen/index.ts. Only enforced when the env
-# var is set (i.e. CI required-mode); locally the var is unset and the assertion
-# is skipped.
+# Parallel bundle assertion for VITE_NULO_PRESTO_REQUIRED: if the env var ever
+# stops propagating from the workflow into the build, the chain-runtime
+# required-mode throw silently disappears and tests can pass on WASM even when
+# the server is up but unhealthy mid-test. The stamp is emitted by
+# apps/extension/src/presto/config.ts and pinned into the bundle by
+# offscreen/index.ts. Only enforced when the env var is set (CI required-mode);
+# locally the var is unset and the assertion is skipped.
 if [ "${VITE_NULO_PRESTO_REQUIRED:-}" = "1" ]; then
   if ! grep -rq "NULO_PRESTO_REQUIRED_BUILD_STAMP" dist/chrome 2>/dev/null; then
     echo "[e2e:agent] FATAL: VITE_NULO_PRESTO_REQUIRED=1 but build stamp absent from dist/chrome" >&2
