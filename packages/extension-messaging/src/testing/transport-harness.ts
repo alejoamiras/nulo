@@ -168,12 +168,12 @@ const sendMessageMock: Mock<Fn> = vi.fn()
 
 /** Invoke every `chrome.runtime.onMessage` listener — drives offscreen client
  *  responses AND offscreen service requests, depending on which is mounted. */
-export const emitMessage = (message: unknown) => {
-	// F-09: the offscreen listener authenticates its sender. Drive it with a
-	// same-extension sender (matching `runtime.id`, no `tab`) so contract tests
-	// exercise the message path rather than tripping the sender gate.
-	const sender = { id: chrome.runtime.id } as chrome.runtime.MessageSender
-	for (const listener of [...messageListeners.items]) listener(message, sender)
+export const emitMessage = (message: unknown, sender?: chrome.runtime.MessageSender) => {
+	// The offscreen listeners authenticate their sender. Default to the same-extension
+	// background context (matching `runtime.id`, no `tab`, no url) so contract tests exercise
+	// the message path; a test that targets the sender gate passes its own.
+	const from = sender ?? ({ id: chrome.runtime.id } as chrome.runtime.MessageSender)
+	for (const listener of [...messageListeners.items]) listener(message, from)
 }
 
 /** The `vi.fn` backing `chrome.runtime.sendMessage`. */

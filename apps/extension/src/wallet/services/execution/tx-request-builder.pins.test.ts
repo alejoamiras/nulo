@@ -22,6 +22,7 @@ const CONTRACT = AztecAddress.fromBigIntUnsafe(0xc0den).toString()
 const NODE_INFO = { l1ChainId: 0, rollupVersion: 31337, txsLimits: { gas: { daGas: 111n, l2Gas: 222n } } }
 const NETWORK = {
 	id: "net-1",
+	profileId: "p1",
 	chainId: 31337,
 	l1ChainId: 0,
 	name: "N",
@@ -224,10 +225,10 @@ describe("buildStandard pins", () => {
 			{ account: ACCOUNT_ADDR.toString(), hash: Fr.fromString("0x21").toString(), content: c1 },
 			{ account: ACCOUNT_ADDR.toString(), hash: Fr.fromString("0x1447").toString(), content: c2 },
 		])
-		expect(h.deps.authRegistryService.assertWithinCap).toHaveBeenCalledWith(ACCOUNT_ADDR.toString(), [
-			Fr.fromString("0x21").toString(),
-			Fr.fromString("0x1447").toString(),
-		])
+		expect(h.deps.authRegistryService.assertWithinCap).toHaveBeenCalledWith(
+			{ profileId: "p1", chainId: 31337, account: ACCOUNT_ADDR.toString() },
+			[Fr.fromString("0x21").toString(), Fr.fromString("0x1447").toString()],
+		)
 		// Each public authwit enqueues a set_authorized registry call + txCall,
 		// index-paired: call[i]'s encoded args carry hash[i], and txCall[i]
 		// mirrors it as raw [hash, true].

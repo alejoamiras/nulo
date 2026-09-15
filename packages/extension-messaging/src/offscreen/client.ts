@@ -4,6 +4,7 @@ import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { BaseServiceClient, type RequestErrorMeta, type TerminalRecord } from "../core/base-client"
 import { summarizeMessage } from "../core/envelope-summary"
 import { MessageType } from "../messages"
+import { isTrustedInternalSender } from "../core/sender-auth"
 import type { EventMessage, ResponseMessage } from "./messages"
 import { type RequestTelemetry, type TelemetrySink, LoggingTelemetrySink } from "./telemetry"
 
@@ -57,12 +58,25 @@ export abstract class ServiceClient<
 		this.logDebug("Disconnected")
 	}
 
-	private readonly onMessageListener = (message: ResponseMessage<TRequests> | EventMessage<TEvents>): boolean => {
-		if (!message) return false
+	private readonly onMessageListener = (
+		message: ResponseMessage<TRequests> | EventMessage<TEvents>,
+		sender: chrome.runtime.MessageSender | undefined,
+	): boolean => {
+		if (!message || !this.isAcceptedSender(sender)) return false
 		if (message.to === this.uid || (message.type === MessageType.Event && message.from === this.service && message.to === undefined)) {
 			this.onMessage(message) // fire and forget
 		}
 		return false
+	}
+
+	/**
+	 * Who may settle this client's pending requests or feed it events. Default: any same-extension
+	 * context. An embedder that knows the offscreen document's URL narrows it to exactly that
+	 * document (`isSenderAtUrl`) — otherwise a compromised same-extension page that observed a
+	 * request's `{from, requestId}` can reply with a reflected response.
+	 */
+	protected isAcceptedSender(sender: chrome.runtime.MessageSender | undefined): boolean {
+		return isTrustedInternalSender(sender)
 	}
 
 	private readonly onMessage = (message: ResponseMessage<TRequests> | EventMessage<TEvents>) => {

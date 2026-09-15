@@ -11,6 +11,7 @@ import {
 	DuplicateWalletError,
 	InvalidPasswordError,
 	ProfileIdConflictError,
+	RecoveryModeError,
 	RestoreTornError,
 } from "@nulo/extension-messaging/errors"
 import { Lock } from "@/wallet/utils"
@@ -23,6 +24,7 @@ import {
 	asMasterSecretBytes,
 	computeEnvelopeMacV3,
 	computeWalletFingerprint,
+	deriveDappSessionMacKey as deriveDappSessionMacKeyFromSecrets,
 	deriveMasterFromMnemonic,
 	EncryptionKey,
 	generateImportedKeysDek,
@@ -66,6 +68,11 @@ export * from "./spec"
 type PasswordRestoreScratch = { passhash?: Passhash; destinationDek?: ImportedKeysDek; storedContext: boolean }
 type PasskeyRestoreScratch = { stashDek?: ImportedKeysDek; storedPending: boolean; storedContext: boolean }
 
+/** The refusal at password change once the DEK slot no longer unseals: the DEK keys the PXE store
+ *  and every dApp-session tag, so the only non-destructive repair is export + restore. */
+const DEK_UNRECOVERABLE_MESSAGE =
+	"Imported-keys key unrecoverable — imported keys and local chain state are lost. Export a full backup (or the recovery phrase) and restore it to repair."
+
 export class ProfileService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()(
 		"getActiveProfile",
@@ -86,6 +93,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		"importMnemonic",
 		"exportPlain",
 		"exportBackupMaterial",
+		"exportPasskeyBackupMaterial",
 		"getProfileDekSealed",
 		"exportMnemonic",
 		"restore",
@@ -519,7 +527,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	public async getProfiles(): Promise<ProfileInfo[]> {
 		await this.ensureInitialized()
 		// A tombstoned (deletion-pending) profile is ABSENT to every read (finding D).
-		return (await this.repo.getAll()).filter((p) => !this.deletionState.isReserved(p.id)).map(this.getProfileInfo)
+		return (await this.repo.getAll()).filter((p) => !this.deletionState.isReserved(p.id)).map((p) => this.getProfileInfo(p))
 	}
 
 	public async createProfile(name: string, password: string): Promise<ProfileInfo> {
@@ -907,32 +915,33 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 	/**
 	 * F-12: derive the per-profile, NON-EXTRACTABLE HMAC key that signs
-	 * DappSession rows. The raw master secret never leaves this service — only
-	 * the derived (non-exportable) key is handed out. Propagates the "Profile
-	 * locked" throw from `getSecret`, which the DappSession read path treats as
-	 * "drop rows until unlock". Key is per-profile (IKM = the profile master
-	 * secret), so a row signed under one profile can't verify under another.
+	 * DappSession rows: `HKDF(master ‖ dek)` (wallet-crypto `dapp-session-mac-key.ts`). Neither
+	 * secret leaves this service — only the derived (non-exportable) key is handed out. Propagates
+	 * the "Profile locked" throw from `getSecret`, which the DappSession read path treats as
+	 * "hide rows until unlock"; an OPEN session without its DEK (recovery mode) throws
+	 * `RecoveryModeError` — the same hide-not-delete branch, and the message is the surface for
+	 * signing sites. Two same-phrase profiles share the master, so the DEK is what keeps a
+	 * sibling from forging a row that verifies under the victim.
 	 */
 	public async deriveDappSessionMacKey(profileId: string): Promise<CryptoKey> {
 		const secret = await this.sessionManager.getSecret(profileId)
-		const ikm = new Uint8Array(secret.toBuffer())
+		const dek = await this.sessionManager.getDek(profileId)
+		if (!dek) throw new RecoveryModeError()
+		// `toBuffer` is a fresh copy of the session's master; both copies are wiped after the HKDF.
+		const master = asMasterSecretBytes(secret.toBuffer() as Uint8Array<ArrayBuffer>)
 		try {
-			const baseKey = await crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveKey"])
-			return await crypto.subtle.deriveKey(
-				{
-					name: "HKDF",
-					hash: "SHA-256",
-					salt: new TextEncoder().encode("nulo:dappsession-mac:salt:v1"),
-					info: new TextEncoder().encode("nulo:dappsession-mac:v1"),
-				},
-				baseKey,
-				{ name: "HMAC", hash: "SHA-256" },
-				false,
-				["sign", "verify"],
-			)
+			return await deriveDappSessionMacKeyFromSecrets(master, dek)
 		} finally {
-			zeroize(ikm)
+			zeroize(master)
+			zeroize(dek)
 		}
+	}
+
+	/** Synchronous: `true` iff `id`'s session is open WITHOUT its DEK (recovery mode). The PXE
+	 *  admission guard reads it before every profile-bound request — no lock, no await: the
+	 *  session state is committed before the unlock resolves. */
+	public isRecoveryMode(id: string): boolean {
+		return this.sessionManager.isRecoveryMode(id)
 	}
 
 	public async refreshSession(): Promise<void> {
@@ -998,18 +1007,15 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		return { secret, entropy }
 	}
 
-	/** Recover the DEK under the RETIRED password and re-key it for the new one. Failure
-	 *  to unseal the old slot SELF-HEALS with a fresh mint (a lost DEK already means
-	 *  every imported key is dead — A4 repair is delete+re-import — so a fresh mint
-	 *  restores forward function without masking anything). But a recovered DEK whose
-	 *  envelope MAC does not cover the row is REFUSED, not healed: re-MACing would
-	 *  launder a transplanted `dekSealed` that unlock had quarantined into a
-	 *  freshly-valid envelope, and a MAC failure cannot distinguish that from
-	 *  corruption of the MAC field alone (DEK intact, keys recoverable) — minting fresh
-	 *  would silently destroy recoverable keys in the second case. The non-destructive
-	 *  repair is export a full backup (deliberately still works — see
-	 *  `exportBackupMaterial`) and restore it. Caller MUST hold the facade lock and OWNS
-	 *  the returned dek + oldPasshash; on a throw after allocation they are zeroized
+	/** Recover the DEK under the RETIRED password and re-key it for the new one. A slot that
+	 *  does not unseal, or one whose envelope MAC does not cover the row, is REFUSED — never
+	 *  healed by minting: the DEK keys the PXE store and every dApp-session tag, so a fresh
+	 *  mint would silently orphan them all; and a MAC failure cannot distinguish a
+	 *  transplanted `dekSealed` (re-MACing would launder it into a freshly-valid envelope)
+	 *  from corruption of the MAC field alone (DEK intact, keys recoverable). The
+	 *  non-destructive repair is export a full backup (deliberately still works in recovery
+	 *  mode — see `exportBackupMaterial`) and restore it. Caller MUST hold the facade lock
+	 *  and OWNS the returned dek + oldPasshash; on a throw after allocation they are zeroized
 	 *  here before the rethrow. */
 	private async rekeyedDekForPasswordChangeHoldingLock(
 		id: string,
@@ -1028,8 +1034,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				throw new Error("Profile integrity check failed — export a full backup and restore it before changing the password")
 			}
 			if (!dek) {
-				this.logger.log(this.name, LogLevel.Error, "imported-keys DEK unrecoverable at password change — minting fresh", id)
-				dek = generateImportedKeysDek()
+				this.logger.log(this.name, LogLevel.Error, "imported-keys DEK unrecoverable at password change — refusing", id)
+				throw new Error(DEK_UNRECOVERABLE_MESSAGE)
 			}
 			const newDekSealed = await this.sealDekWithPasshash(newPasshash, dek)
 			return { dek, oldPasshash, newDekSealed }
@@ -1628,7 +1634,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		const { profile, capturedEpoch } = await this.captureRowFence(id)
 
 		if (profile.type === "passkey") {
-			return this.exportPasskeyCredential(id, profile, capturedEpoch, credentialData)
+			return (await this.exportPasskeyCredential(id, profile, capturedEpoch, credentialData)).credentialId
 		}
 
 		if (!password) {
@@ -1672,24 +1678,24 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	}
 
 	/**
-	 * The passkey arm of `exportPlain` — the credentialId IS the exported material.
-	 * Path A only: the caller (popup) ran the in-page WebAuthn ceremony via the
-	 * `PasskeyCeremonyDialog` modal and hands us the credential data; the previous
-	 * Path B (SW opens a window via confirmProfileOperation) is gone for this entry
-	 * point. Materialize the credential SW-side and verify it actually belongs to
-	 * this profile — without the credentialId binding check, a popup bug could
-	 * supply data for a different key and we'd happily export the wrong one.
+	 * The passkey arm of `exportPlain` / `exportPasskeyBackupMaterial`: the credentialId plus the
+	 * sealed DEK blob the backup carries. The popup ran the in-page WebAuthn ceremony and hands
+	 * over the credential data; it is materialized SW-side and bound to THIS profile's
+	 * credentialId — without that check a popup bug could supply data for a different key and
+	 * the wrong credential would be exported.
 	 */
 	private async exportPasskeyCredential(
 		id: string,
 		profile: Extract<Profile, { type: "passkey" }>,
 		capturedEpoch: number,
 		credentialData?: PasskeyCredentialData,
-	): Promise<string> {
+	): Promise<{ credentialId: string; dekSealed: string; dekReplaced: boolean }> {
 		if (!credentialData) {
 			throw new Error("credentialData is required for passkey profile")
 		}
 		const recovery = await this.passkeyCoordinator.recoverFromCredentialData(credentialData)
+		let dekSealed = profile.dekSealed
+		let dekReplaced = false
 		try {
 			if (recovery.credentialId !== profile.credentialId) {
 				throw new Error("Invalid profile id")
@@ -1701,8 +1707,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			}
 			// A passkey full backup carries `dekSealed` VERBATIM (the ceremony's wrap key opens
 			// it at restore), so nothing downstream ever proves it opens. Prove it here, where
-			// the wrap key is already in hand: otherwise a corrupt slot yields a backup that
-			// reports success and only fails at restore, when the source may be long gone.
+			// the wrap key is already in hand. An unopenable slot is carried as a FRESH DEK sealed
+			// under that same key: a passkey profile has no recovery phrase, so this backup IS its
+			// repair path in recovery mode. The stored row is never touched; the caller names the
+			// loss (imported keys, local chain state).
 			let probe: ImportedKeysDek | null = null
 			try {
 				probe = await unsealDekUnderWrapKey(recovery.dekWrapKey, profile.dekSealed)
@@ -1712,7 +1720,14 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				zeroize(probe)
 			}
 			if (!probe) {
-				throw new Error("Imported-keys key unrecoverable — this profile cannot produce a complete backup")
+				this.logger.log(this.name, LogLevel.Warn, "imported-keys DEK unrecoverable at passkey export — exporting a fresh one", id)
+				const fresh = generateImportedKeysDek()
+				try {
+					dekSealed = await sealDekUnderWrapKey(recovery.dekWrapKey, fresh)
+				} finally {
+					zeroize(fresh)
+				}
+				dekReplaced = true
 			}
 		} finally {
 			// Export doesn't need the derived master — security
@@ -1737,7 +1752,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		) {
 			throw new Error("Invalid profile id")
 		}
-		return current.credentialId
+		return { credentialId: current.credentialId, dekSealed, dekReplaced }
 	}
 
 	/**
@@ -1749,7 +1764,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	public async exportBackupMaterial(
 		id: string,
 		password: string,
-	): Promise<{ masterKey: string; entropy: string; importedKeysDek: string }> {
+	): Promise<{ masterKey: string; entropy: string; importedKeysDek: string; dekReplaced: boolean }> {
 		await this.ensureInitialized()
 		const { profile, capturedEpoch } = await this.captureRowFence(id)
 		if (profile.type === "passkey") {
@@ -1769,9 +1784,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			// transplanted row would otherwise report success with an unrestorable pair.
 			await this.assertEntropyMasterPair(unsealed.secret, unsealed.entropy)
 			// The DEK travels plaintext beside the already-plaintext master (same trust envelope;
-			// any backup already carries jointly-sufficient material). An unrecoverable slot fails
-			// the export LOUDLY — the epoch-4 shape requires the field, and a password change
-			// self-heals the slot for a retry.
+			// any backup already carries jointly-sufficient material). An unrecoverable slot
+			// exports a FRESH DEK (below) — with the DEK keying the PXE store and every session
+			// tag, a password change can no longer mint one, so this export is the repair path.
 			//
 			// KNOWN LIMITATION, accepted: this is the LONG-LIVED profile DEK, not a per-backup
 			// transfer key, and a password change rewraps rather than rotates it. So a backup
@@ -1799,13 +1814,16 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			// + restore is precisely the repair `changeProfilePassword` points at). If the DEK
 			// does turn out to be foreign, its rows simply fail into the restore-side orphan
 			// taxonomy, which is a handled, visible outcome rather than a silent one.
+			const dekReplaced = dek === null
 			if (!dek) {
-				throw new Error("Imported-keys key unrecoverable — change the profile password to repair, then retry the backup")
+				this.logger.log(this.name, LogLevel.Warn, "imported-keys DEK unrecoverable at export — exporting a fresh one", id)
+				dek = generateImportedKeysDek()
 			}
 			return {
 				masterKey: Buffer.from(unsealed.secret).toString("base64"),
 				entropy: Buffer.from(unsealed.entropy).toString("base64"),
 				importedKeysDek: Buffer.from(dek).toString("base64"),
+				dekReplaced,
 			}
 		} finally {
 			if (unsealed) {
@@ -1815,6 +1833,18 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			zeroize(dek)
 			zeroize(passhash)
 		}
+	}
+
+	public async exportPasskeyBackupMaterial(
+		id: string,
+		credentialData: PasskeyCredentialData,
+	): Promise<{ credentialId: string; dekSealed: string; dekReplaced: boolean }> {
+		await this.ensureInitialized()
+		const { profile, capturedEpoch } = await this.captureRowFence(id)
+		if (profile.type !== "passkey") {
+			throw new Error("Operation not supported for password profile")
+		}
+		return this.exportPasskeyCredential(id, profile, capturedEpoch, credentialData)
 	}
 
 	/** The SEALED imported-keys DEK blob, verbatim — ciphertext, safe to hand out. Passkey full
@@ -2157,11 +2187,15 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	}
 
 	private getProfileInfo(profile: Profile): ProfileInfo {
-		return { id: profile.id, name: profile.name, type: profile.type }
+		const info: ProfileInfo = { id: profile.id, name: profile.name, type: profile.type }
+		if (this.sessionManager.isRecoveryMode(profile.id)) info.recoveryMode = true
+		return info
 	}
 
+	/** The persisted identity only: `recoveryMode` is a live-session projection and never travels. */
 	public async backup(): Promise<ProfileInfo | undefined> {
-		return await this.getActiveProfile()
+		const active = await this.getActiveProfile()
+		return active && { id: active.id, name: active.name, type: active.type }
 	}
 
 	public async restore(
@@ -2416,8 +2450,14 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			recoverySecret = recovery.secret
 			// The SOURCE DEK travels as the sealed blob (passkey backups carry no plaintext
 			// secrets); the ceremony's wrap key — same credential ⇒ same key — opens it here,
-			// feeding the rewrap context only.
-			sourceDek = await unsealDekUnderWrapKey(recovery.dekWrapKey, secret.dekSealed ?? "")
+			// feeding the rewrap context only. An unopenable blob does not block the restore: the
+			// row mints its fresh DEK below and the imported-key rows, with no rewrap context, fall
+			// into the orphan taxonomy — a visible outcome, and the only way a passkey profile
+			// whose slot was corrupt can be repaired.
+			sourceDek = await unsealDekUnderWrapKey(recovery.dekWrapKey, secret.dekSealed ?? "").catch(() => undefined)
+			if (!sourceDek) {
+				this.logger.log(this.name, LogLevel.Warn, "passkey restore: source imported-keys DEK unopenable — no rewrap context")
+			}
 			// CLONE DIVERGENCE: fresh destination DEK for the restored row (see the
 			// password branch). Local consts so the narrowed types survive into the
 			// locked closure below.
@@ -2470,7 +2510,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	private async commitRestoredPasskeyProfileHoldingLock(
 		name: string,
 		recovery: PasskeyRecovery,
-		sourceDek: ImportedKeysDek,
+		sourceDek: ImportedKeysDek | undefined,
 		destinationDek: ImportedKeysDek,
 		dekSealed: string,
 		initialId: string | undefined,
@@ -2530,8 +2570,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			},
 		})
 		scratch.storedPending = true
-		this.pendingDekRewraps.set(id, { sourceDek, destinationDek, capturedAt: Date.now() })
-		scratch.storedContext = true
+		if (sourceDek) {
+			this.pendingDekRewraps.set(id, { sourceDek, destinationDek, capturedAt: Date.now() })
+			scratch.storedContext = true
+		}
 
 		return this.getProfileInfo(newProfile)
 	}

@@ -45,8 +45,9 @@ import { ProfileDeletionCoordinator } from "./services/profile-deletion/coordina
 import { AccountIntegrityCoordinator } from "./services/account-integrity/coordinator"
 import { PriceService } from "./services/price/service"
 import { ProfileService } from "./services/profile/service"
-import { registerPxeGenerationProvider, registerPxeStoreKeyProvider } from "./services/pxe/client"
-import { derivePxeStoreKey } from "@nulo/wallet-crypto"
+import { registerPxeGenerationProvider, registerPxeRecoveryGuard, registerPxeStoreKeyProvider } from "./services/pxe/client"
+import { asMasterSecretBytes, derivePxeStoreKey, type ImportedKeysDek, zeroize } from "@nulo/wallet-crypto"
+import { RecoveryModeError } from "@nulo/extension-messaging/errors"
 import { TaskService } from "./services/task/service"
 import { TokenService } from "./services/token/service"
 import { TokenBalanceService } from "./services/token-balance/service"
@@ -484,10 +485,7 @@ function registerServices(services: ServiceCollection, deps: WalletRuntimeDeps):
 	// service.integration.test.ts "Q10 composition seam".
 	const profileService = new ProfileService(config, logger, browserApi)
 	services.add(profileService)
-	registerPxeStoreKeyProvider((profileId) => providePxeStoreKey(profileService, profileId))
-	// Generation-only capture for outgoing ops (no HKDF per op) — stamps
-	// pxeGeneration onto each op's NetworkInfo; a retry reuses its capture.
-	registerPxeGenerationProvider((profileId) => profileService.getPxeGeneration(profileId))
+	wirePxeProviders(profileService)
 	services.add(new TaskService(logger))
 	// E2E_TOKEN_SEEDS swaps the seeder's seed list for a chrome.storage-backed
 	// one the running test writes — the sandbox mints a token address per run,
@@ -525,15 +523,30 @@ function registerServices(services: ServiceCollection, deps: WalletRuntimeDeps):
 	return { deletionCoordinator }
 }
 
+/** The three SW-side hooks every `PxeServiceClient` consults, bound to the live ProfileService:
+ *  the store-key derivation, the recovery-mode admission guard (the offscreen keeps store keys
+ *  and chain runtimes warm across lock and profile switch, so a degraded re-unlock never reaches
+ *  the provider — admission is decided from the SW's own session state before any send) and the
+ *  generation-only capture for outgoing ops (no HKDF per op). Exported as a test seam so the
+ *  production wiring, not a re-registration, is what a real-session test exercises. */
+export function wirePxeProviders(profileService: ProfileService): void {
+	registerPxeStoreKeyProvider((profileId) => providePxeStoreKey(profileService, profileId))
+	registerPxeRecoveryGuard((profileId) => profileService.isRecoveryMode(profileId))
+	registerPxeGenerationProvider((profileId) => profileService.getPxeGeneration(profileId))
+}
+
 /** The per-profile PXE store encryption key: derived on demand from the
- *  in-memory master (HKDF, wallet-crypto) and provisioned to the offscreen by
- *  the PXE clients' missing-key retry path. The master never crosses the seam;
- *  a locked profile yields undefined and the PXE op fails as it should. The
- *  provision pairs the key with the row's CURRENT pxeGeneration — read fresh
- *  under the facade lock (row-exists + not-tombstoned), so a provider that
- *  captured the master before a deletion cannot re-provision the erased
- *  incarnation afterwards (#281 D4). */
-async function providePxeStoreKey(
+ *  in-memory master AND imported-keys DEK (HKDF, wallet-crypto) and provisioned
+ *  to the offscreen by the PXE clients' missing-key retry path. Neither secret
+ *  crosses the seam. A locked profile yields undefined and the PXE op fails as
+ *  it should; an OPEN session without its DEK (recovery mode) rejects with the
+ *  recovery sentence instead — the key cannot exist without both secrets, and
+ *  a silent undefined would read as "locked" to the caller. The provision pairs
+ *  the key with the row's CURRENT pxeGeneration — read fresh under the facade
+ *  lock (row-exists + not-tombstoned), so a provider that captured the master
+ *  before a deletion cannot re-provision the erased incarnation afterwards
+ *  (#281 D4). Exported as a test seam. */
+export async function providePxeStoreKey(
 	profileService: ProfileService,
 	profileId: string,
 ): ReturnType<Parameters<typeof registerPxeStoreKeyProvider>[0]> {
@@ -541,14 +554,36 @@ async function providePxeStoreKey(
 	if (!generation) return undefined
 	const master = await profileService.getProfileSecret(profileId).catch(() => undefined)
 	if (!master) return undefined
-	const key = await derivePxeStoreKey(new Uint8Array(master.toBuffer()), profileId)
+	let dek: ImportedKeysDek | undefined
+	try {
+		dek = await profileService.getProfileDek(profileId)
+	} catch {
+		// Locked or reserved between the two reads: the locked contract applies.
+		return undefined
+	}
+	if (!dek) throw new RecoveryModeError()
+	// `toBuffer` is a fresh copy of the session's master; both copies are wiped after the HKDF.
+	const masterBytes = asMasterSecretBytes(master.toBuffer() as Uint8Array<ArrayBuffer>)
+	let key: Uint8Array<ArrayBuffer>
+	try {
+		key = await derivePxeStoreKey(masterBytes, dek, profileId)
+	} finally {
+		zeroize(masterBytes)
+		zeroize(dek)
+	}
 	// Re-read the generation AFTER the slow HKDF and require it unchanged: a deletion
 	// (+ possible same-id re-import) can land during derivation, and the offscreen's
 	// in-memory `deleted(gen)` fence does NOT survive an offscreen restart — a stale
 	// provision that crosses a restart would otherwise be accepted by a fresh `unseen`
 	// offscreen and resurrect the erased store (concurrency audit HIGH #1). This SW-side
 	// re-check closes the read→HKDF→send gap regardless of offscreen reincarnation.
-	const generationNow = await profileService.getPxeGeneration(profileId)
+	let generationNow: string | undefined
+	try {
+		generationNow = await profileService.getPxeGeneration(profileId)
+	} finally {
+		// Ownership transfers to the caller only on the success return below.
+		if (generationNow !== generation) zeroize(key)
+	}
 	if (generationNow !== generation) return undefined
 	return { key, generation }
 }

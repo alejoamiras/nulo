@@ -4,6 +4,7 @@ import { toRestoreError } from "@/utils/restore-error"
 import type { ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
+import { RecoveryModeError } from "@nulo/extension-messaging/errors"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { NetworkService } from "@/wallet/services/network/service"
 import type { Network } from "@/wallet/services/network/spec"
@@ -141,37 +142,20 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 		try {
 			return await fn()
 		} catch (error) {
+			// The recovery sentence is the user's repair instruction and the backup assembler's
+			// per-network omission signal — it must reach the caller by type, not as the opaque error.
+			if (error instanceof RecoveryModeError) throw error
 			this.logError(`Failed to ${action}`, error)
 			throw new Error("PXE request failed")
 		}
 	}
 
-	public async backup(): Promise<BackupAccountState[] | undefined> {
-		const networks = await this.networkService.getNetworks()
-		if (!networks.length) {
-			return undefined
-		}
-
-		const result: BackupAccountState[] = []
-
-		const seenChainIds = new Set<number>()
-		const uniqueNetworks = networks.filter((n) => {
-			if (seenChainIds.has(n.chainId)) return false
-			seenChainIds.add(n.chainId)
-			return true
-		})
-		for (const n of uniqueNetworks) {
-			if ((await this.networkService.getNodeStatus(n.id)) !== NodeStatus.Active) {
-				// A backup captures PXE recovery material (contracts/senders) ONLY for networks
-				// whose node is reachable at export time. A down endpoint silently drops a
-				// network's custom-contract artifacts from an otherwise-successful backup, so a
-				// later fresh restore can't rediscover those private notes (codex audit MED).
-				// Surface the omission rather than dropping it silently.
-				this.logWarn(
-					`backup: network ${n.id} (chain ${n.chainId}) is not Active — its contract/sender state is OMITTED from this backup`,
-				)
-				continue
-			}
+	/** One Active network's PXE recovery material. `undefined` in recovery mode: the store key
+	 *  cannot be derived, so the network's contract/sender state is OMITTED the way a non-Active
+	 *  network's is — the export still completes and the popup names the loss. Any other failure
+	 *  aborts the export as before. */
+	private async backupNetworkState(n: Network): Promise<BackupAccountState | undefined> {
+		try {
 			const senders = await this.getSenders(n.id)
 			const contracts = await this.getContracts(n.id)
 			const contractsFull: BackupContract[] = []
@@ -202,12 +186,47 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 				)
 			}
 
-			result.push({
+			return {
 				networkId: n.id,
 				chainId: n.chainId,
 				senders: senders.map((address) => ({ address })),
 				contracts: contractsFull,
-			})
+			}
+		} catch (error) {
+			if (!(error instanceof RecoveryModeError)) throw error
+			this.logWarn(
+				`backup: network ${n.id} (chain ${n.chainId}) — profile in recovery mode; its contract/sender state is OMITTED from this backup`,
+			)
+			return undefined
+		}
+	}
+
+	public async backup(): Promise<BackupAccountState[] | undefined> {
+		const networks = await this.networkService.getNetworks()
+		if (!networks.length) {
+			return undefined
+		}
+
+		const result: BackupAccountState[] = []
+
+		const seenChainIds = new Set<number>()
+		const uniqueNetworks = networks.filter((n) => {
+			if (seenChainIds.has(n.chainId)) return false
+			seenChainIds.add(n.chainId)
+			return true
+		})
+		for (const n of uniqueNetworks) {
+			if ((await this.networkService.getNodeStatus(n.id)) !== NodeStatus.Active) {
+				// PXE recovery material (contracts/senders) is captured only from a reachable node;
+				// a down endpoint would otherwise drop a network's custom-contract artifacts from an
+				// otherwise-successful backup, so the omission is logged, never silent.
+				this.logWarn(
+					`backup: network ${n.id} (chain ${n.chainId}) is not Active — its contract/sender state is OMITTED from this backup`,
+				)
+				continue
+			}
+			const item = await this.backupNetworkState(n)
+			if (item) result.push(item)
 		}
 
 		// The slice is mostly contract ARTIFACTS, and the restore side rejects it wholesale past

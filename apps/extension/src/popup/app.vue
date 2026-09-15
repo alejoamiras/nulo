@@ -181,12 +181,13 @@ const enterLockedState = (profiles) => {
 	router.push(appStore.profiles.length ? "/popup/auth" : "/popup/register")
 }
 
-/** The profile unlocked DERIVED-ONLY: its imported-keys DEK (or the envelope MAC over it) failed,
- *  so every imported account is unusable until the cause is repaired. The service deliberately does
- *  NOT block the profile — derived funds stay reachable — which means this warning is the only
- *  signal the user gets before an imported account fails at use time. */
-const onImportedKeysDegraded = (profile) => {
-	openToast({ label: `Imported accounts unavailable in "${profile.name}"`, icon: "warning" }, TOAST_DURATION.LONG)
+/** The profile unlocked in RECOVERY MODE: its imported-keys DEK (or the envelope MAC over it)
+ *  failed, so the PXE store key and the dApp-session key cannot be derived — chain data, dApp
+ *  sessions and imported accounts are unavailable until the profile is exported and restored. The
+ *  service deliberately does NOT block the profile (export must stay reachable); this toast and the
+ *  Home banner (`ProfileInfo.recoveryMode`) are the signals. */
+const onImportedKeysDegraded = () => {
+	openToast({ label: "Wallet keys need recovery — export a backup and restore it", icon: "warning" }, TOAST_DURATION.LONG)
 }
 
 /** How the boot-time session check ended when it could NOT decide: "unreachable" (the service

@@ -52,6 +52,9 @@ const visibleTokenImports = computed(() => {
 	return tokenImports.value.filter((op) => {
 		if (op.kind !== TOKENS_VIEW_KIND) return false
 		if (op.accountAddress !== account) return false
+		// Two profiles can hold the SAME address (one mnemonic imported twice): the profile
+		// compare keeps one profile's import from rendering under the other.
+		if (op.profileId && appStore.profile?.id && op.profileId !== appStore.profile.id) return false
 		// In-flight
 		if (op.terminalAt === null) return true
 		// Recently-failed retention window so the user sees the reason.

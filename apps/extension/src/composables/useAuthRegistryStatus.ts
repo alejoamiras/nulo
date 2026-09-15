@@ -1,21 +1,26 @@
 import { ref } from "vue"
-import type { AuthRegistryServiceClient } from "@/wallet/services/auth-registry/client"
+import type { AuthRegistryServiceClient, AuthwitRegistryScope } from "@/wallet/services/auth-registry/client"
 
 /**
- * The authwit-registry flag a popup shows for the active account: fetched on demand, kept live by the
- * service's enabled/disabled events (only those naming that account), reset on hide. The parent owns the
- * client's connection; `isLoading` and `error` are the popup's own — its submit path writes them too.
+ * The authwit-registry flag a popup shows for the active (profile, chain, account): fetched on demand, kept
+ * live by the service's enabled/disabled events (only those naming that exact scope — the same address on
+ * another chain or a sibling profile is a different registry), reset on hide. The parent owns the client's connection; `isLoading` and
+ * `error` are the popup's own — its submit path writes them too.
  */
-export function useAuthRegistryStatus(service: AuthRegistryServiceClient, account: () => string | undefined) {
+export function useAuthRegistryStatus(service: AuthRegistryServiceClient, scope: () => AuthwitRegistryScope | undefined) {
 	const isRegistryEnabled = ref<boolean | undefined>(undefined)
 	const isLoading = ref(false)
 	const error = ref<unknown>()
 
-	const onEnabled = (address: string) => {
-		if (account() === address) isRegistryEnabled.value = true
+	const matches = (s: AuthwitRegistryScope) => {
+		const shown = scope()
+		return !!shown && shown.profileId === s.profileId && shown.chainId === s.chainId && shown.account === s.account
 	}
-	const onDisabled = (address: string) => {
-		if (account() === address) isRegistryEnabled.value = false
+	const onEnabled = (s: AuthwitRegistryScope) => {
+		if (matches(s)) isRegistryEnabled.value = true
+	}
+	const onDisabled = (s: AuthwitRegistryScope) => {
+		if (matches(s)) isRegistryEnabled.value = false
 	}
 	service.onRegistryEnabled.add(onEnabled)
 	service.onRegistryDisabled.add(onDisabled)
@@ -23,7 +28,9 @@ export function useAuthRegistryStatus(service: AuthRegistryServiceClient, accoun
 	async function fetch(): Promise<void> {
 		isLoading.value = true
 		try {
-			isRegistryEnabled.value = await service.getRegistryEnabled(account() as string)
+			const shown = scope()
+			if (!shown) return
+			isRegistryEnabled.value = await service.getRegistryEnabled(shown.chainId, shown.account)
 		} catch (err) {
 			error.value = err
 		} finally {

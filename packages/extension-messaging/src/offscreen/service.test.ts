@@ -23,6 +23,8 @@ import { MessageType } from "../messages"
 import { wrapParams } from "../utils"
 import { captureMessage, emitMessage, silentLogger } from "../testing/transport-harness"
 import { Service } from "./service"
+import { ServiceClient } from "./client"
+import { resetBackgroundContextUrls } from "../core/sender-auth"
 
 const SERVICE = "offscreen-svc"
 const CLIENT = "client-uid"
@@ -302,5 +304,74 @@ describe("ensureInitialized", () => {
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+})
+
+describe("request sender authentication — only the background context drives the offscreen", () => {
+	const sender = (v: object) => v as unknown as chrome.runtime.MessageSender
+	const arm = () => {
+		resetBackgroundContextUrls()
+		// biome-ignore lint/suspicious/noExplicitAny: stub
+		const c = (globalThis as any).chrome
+		c.runtime.id = "nulo"
+		c.runtime.getURL = (p: string) => `chrome-extension://nulo/${p}`
+		c.runtime.getManifest = () => ({ background: { service_worker: "sw.js" } })
+	}
+
+	test("a request from a same-extension POPUP url is ignored; from the service-worker url (Chrome) it is handled", async () => {
+		arm()
+		new TestService()
+		emitMessage(request(1, "echo", ["hi"]), sender({ id: "nulo", url: "chrome-extension://nulo/src/popup/index.html" }))
+		await flush()
+		expect(responses()).toHaveLength(0)
+		emitMessage(request(2, "echo", ["hi"]), sender({ id: "nulo", url: "chrome-extension://nulo/sw.js" }))
+		await flush()
+		expect(responses()).toHaveLength(1)
+	})
+
+	test("Firefox: the background page url is handled", async () => {
+		arm()
+		// biome-ignore lint/suspicious/noExplicitAny: stub
+		const c = (globalThis as any).chrome
+		resetBackgroundContextUrls()
+		c.runtime.getURL = (p: string) => `moz-extension://nulo/${p}`
+		c.runtime.getManifest = () => ({ background: { scripts: ["bg.js"] } })
+		new TestService()
+		emitMessage(request(1, "echo", ["hi"]), sender({ id: "nulo", url: "moz-extension://nulo/_generated_background_page.html" }))
+		await flush()
+		expect(responses()).toHaveLength(1)
+	})
+
+	test("REFLECTED RESPONSE: a popup-sent request carrying the victim's {from, requestId} cannot settle the victim's pending call", async () => {
+		arm()
+		class VictimClient extends ServiceClient<Methods> {
+			public constructor() {
+				super(SERVICE, silentLogger, "victim")
+			}
+			public echo(msg: string): Promise<string> {
+				return this.request("echo", msg)
+			}
+		}
+		new TestService()
+		const victim = new VictimClient()
+		const pending = victim.echo("secret")
+		await flush()
+		const sent = captureMessage().mock.calls.map((c) => c[0] as { type?: MessageType; from?: string; content?: { requestId: number } })
+		const envelope = sent.find((m) => m?.type === MessageType.Request)
+		expect(envelope).toBeTruthy()
+		let settled = false
+		pending.then(() => (settled = true))
+		// The attacker replays the observed envelope from a popup context: the genuine offscreen
+		// must not answer it (it would reply `from: SERVICE, to: victim` and settle the call).
+		emitMessage(envelope, sender({ id: "nulo", url: "chrome-extension://nulo/src/popup/index.html" }))
+		await flush()
+		expect(responses()).toHaveLength(0)
+		expect(settled).toBe(false)
+		// The legitimate path still works: the SW's own send is answered and the reply settles it.
+		emitMessage(envelope, sender({ id: "nulo", url: "chrome-extension://nulo/sw.js" }))
+		await flush()
+		const [reply] = responses()
+		emitMessage(reply, sender({ id: "nulo", url: "chrome-extension://nulo/src/offscreen/index.html" }))
+		await expect(pending).resolves.toBe("echo:secret")
 	})
 })

@@ -22,14 +22,17 @@
  * tamper. Both fields are non-secret; binding them costs nothing and removes the last
  * unauthenticated inputs a storage writer could steer.
  *
- * A mismatch never profile-blocks: it opens a DERIVED-ONLY session (imported accounts
- * quarantine, no bearer is persisted) so a storage writer can't DoS the user's main funds.
+ * A mismatch never profile-blocks: it opens a session WITHOUT the DEK — recovery mode. Nothing
+ * keyed by the DEK is available (imported keys, the PXE store key, the dApp-session key — so
+ * chain operations wait for the repair) and no bearer is persisted, but the derived keys stay
+ * exportable and the backup export stays open: a storage writer cannot lock the user out of
+ * the funds their phrase controls.
  *
  * Uses `globalThis.crypto` for the same cross-env reason as `mnemonic-master.ts`.
  */
 import { fromBase64, toBase64 } from "@nulo/wallet-core/utils"
+import { importDualSecretHkdfKey } from "./dual-secret-hkdf"
 import type { ImportedKeysDek, MasterSecretBytes } from "./secret-types"
-import { zeroize } from "./zeroize"
 
 // The key is HKDF(master || dek) — NOT master-only. The threat model includes an attacker who
 // HOLDS the master (a same-phrase sibling profile), for whom any master-keyed MAC is forgeable;
@@ -59,27 +62,14 @@ function preimageV3(profileId: string, env: MacEnvelopeV3): Uint8Array<ArrayBuff
 }
 
 async function macKeyV3(master: MasterSecretBytes, dek: ImportedKeysDek): Promise<CryptoKey> {
-	// Brands erase at runtime — enforce the fixed 32+32 concat contract, or two distinct
-	// (master, dek) splits of the same bytes would derive the same key (P3 rider Medium).
-	if (master.length !== 32 || dek.length !== 32) {
-		throw new Error("envelope MAC v3 requires 32-byte master and dek")
-	}
-	const ikmBytes = new Uint8Array(master.length + dek.length) as Uint8Array<ArrayBuffer>
-	ikmBytes.set(master, 0)
-	ikmBytes.set(dek, master.length)
-	try {
-		const ikm = await globalThis.crypto.subtle.importKey("raw", ikmBytes, "HKDF", false, ["deriveKey"])
-		return await globalThis.crypto.subtle.deriveKey(
-			{ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info: MAC_INFO_V3 },
-			ikm,
-			{ name: "HMAC", hash: "SHA-256" },
-			false,
-			["sign", "verify"],
-		)
-	} finally {
-		// The concatenated IKM copy is secret material; the engine holds it inside `ikm`.
-		zeroize(ikmBytes)
-	}
+	const ikm = await importDualSecretHkdfKey(master, dek, ["deriveKey"])
+	return await globalThis.crypto.subtle.deriveKey(
+		{ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info: MAC_INFO_V3 },
+		ikm,
+		{ name: "HMAC", hash: "SHA-256" },
+		false,
+		["sign", "verify"],
+	)
 }
 
 /** v3 tag over `(profileId, four-slot envelope, fingerprint)`, keyed by HKDF(master||dek).

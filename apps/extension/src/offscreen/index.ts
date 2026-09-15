@@ -15,8 +15,8 @@ import { isBenignSwDisconnect } from "./is-benign-sw-disconnect"
 // `createPxeOffscreen` below. A PONG during init previously let the SW adopt a
 // still-initializing document and dispatch a PXE RPC before PxeService existed.
 let servicesReady = false
-chrome.runtime.onMessage.addListener((message) => {
-	if (shouldRespondPong(message, servicesReady)) {
+chrome.runtime.onMessage.addListener((message, sender) => {
+	if (shouldRespondPong(message, servicesReady, sender)) {
 		chrome.runtime.sendMessage(OFFSCREEN_PONG).catch(() => {})
 	}
 	return false

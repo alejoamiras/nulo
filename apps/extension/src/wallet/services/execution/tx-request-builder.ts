@@ -267,7 +267,7 @@ export class TxRequestBuilder {
 		// existing+pending+unique-new ceiling logic is unit-testable in isolation.
 		if (pendingPublicAuthwits.length > 0) {
 			await this.authRegistryService.assertWithinCap(
-				account.address.toString(),
+				{ profileId: network.profileId, chainId: network.chainId, account: account.address.toString() },
 				pendingPublicAuthwits.map((p) => p.hash),
 			)
 		}

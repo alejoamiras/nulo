@@ -1,3 +1,5 @@
+import { isSenderAtUrl, isTrustedInternalSender } from "@nulo/extension-messaging/offscreen"
+
 export const OFFSCREEN_READY_MESSAGE = "OFFSCREEN_READY"
 export const OFFSCREEN_PING = "OFFSCREEN_PING"
 export const OFFSCREEN_PONG = "OFFSCREEN_PONG"
@@ -20,9 +22,17 @@ const path = "src/offscreen/index.html"
  *  imported under vitest's node env. Computing on-demand keeps the import
  *  graph clean for tests that pull NetworkService → PxeServiceClient. */
 let _offscreenUrl: string | undefined
-function offscreenUrl(): string {
+export function offscreenUrl(): string {
 	if (_offscreenUrl === undefined) _offscreenUrl = chrome.runtime.getURL(path)
 	return _offscreenUrl
+}
+
+/** True iff `sender` is the offscreen document itself — the only legitimate source of a PXE
+ *  response, READY or PONG. Exact document URL; the Firefox hidden window's `?instance=` query
+ *  and its `sender.tab` are allowed. A same-extension page that opens or embeds the offscreen URL
+ *  still passes: that is the transport's documented boundary, not a hole these checks close. */
+export function isOffscreenDocumentSender(sender: chrome.runtime.MessageSender | undefined): boolean {
+	return isSenderAtUrl(sender, offscreenUrl())
 }
 
 /**
@@ -90,12 +100,12 @@ export function isSupersededByAdopt(
  * are ready, so `isOffscreenHealthy` treats a still-initializing document as
  * not-yet-adoptable and the caller recreates + waits for READY.
  */
-export function shouldRespondPong(message: unknown, servicesReady: boolean): boolean {
-	return message === OFFSCREEN_PING && servicesReady
+export function shouldRespondPong(message: unknown, servicesReady: boolean, sender: chrome.runtime.MessageSender | undefined): boolean {
+	return message === OFFSCREEN_PING && servicesReady && isTrustedInternalSender(sender)
 }
 
-const onOffscreenReady = (message: unknown) => {
-	if (message === OFFSCREEN_READY_MESSAGE) {
+const onOffscreenReady = (message: unknown, sender: chrome.runtime.MessageSender | undefined) => {
+	if (message === OFFSCREEN_READY_MESSAGE && isOffscreenDocumentSender(sender)) {
 		chrome.runtime.onMessage.removeListener(onOffscreenReady)
 		clearTimeout(offscreenTimeout)
 		resolveOffscreenPromise()
@@ -167,8 +177,8 @@ async function isOffscreenHealthy(): Promise<boolean> {
 			resolve(false)
 		}, HEALTH_CHECK_TIMEOUT_MS)
 
-		const onPong = (message: unknown) => {
-			if (message === OFFSCREEN_PONG) {
+		const onPong = (message: unknown, sender: chrome.runtime.MessageSender | undefined) => {
+			if (message === OFFSCREEN_PONG && isOffscreenDocumentSender(sender)) {
 				chrome.runtime.onMessage.removeListener(onPong)
 				clearTimeout(timer)
 				resolve(true)

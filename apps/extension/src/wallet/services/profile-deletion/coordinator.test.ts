@@ -35,7 +35,7 @@ const build = async (order: string[]) => {
 	const services = new ServiceCollection()
 	services.add(svc(ProfileService.name, { setDeletionDelegate: () => {}, resumePendingDeletions: rec("profiles") }))
 	services.add(svc(TransactionService.name, { purgeForAccounts: rec("txs") }))
-	services.add(svc(AuthRegistryService.name, { purgeForAccounts: rec("auth") }))
+	services.add(svc(AuthRegistryService.name, { purgeForProfile: rec("auth") }))
 	services.add(svc(TokenBalanceService.name, { purgeForTokens: rec("balances") }))
 	services.add(svc(IncomingTransferService.name, { clearProfile: rec("incoming") }))
 	services.add(svc(ContactService.name, { purgeForProfile: rec("contacts") }))

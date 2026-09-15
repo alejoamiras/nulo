@@ -44,15 +44,16 @@ const {
 	refresh: refreshAuthwits,
 } = useEntityCrud({
 	fetch: async () => {
-		const list = await authwitsService.getAuthwits(appStore.account.address)
+		const list = await authwitsService.getAuthwits(appStore.network.chainId, appStore.account.address)
 		return list?.map(decorateAuthwit) ?? []
 	},
 	added: authwitsService.onAuthwitAdded,
 	deleted: authwitsService.onAuthwitDeleted,
 	identity: (aw) => aw.id,
-	// Events are global; the list is account-scoped — another account's
-	// authwit must not splice in mid-switch.
-	accept: (aw) => aw.account === appStore.account?.address,
+	// The list is (profile, chain, account)-scoped: the same address on another chain or profile
+	// must not splice in mid-switch.
+	accept: (aw) =>
+		aw.profileId === appStore.profile?.id && aw.chainId === appStore.network?.chainId && aw.account === appStore.account?.address,
 })
 
 const filteredAuthwits = computed(() => {
@@ -64,11 +65,13 @@ const filteredAuthwits = computed(() => {
 
 const isErrorOccurred = computed(() => !!error.value)
 
-function onRegistryEnabled(account) {
-	if (appStore.account?.address === account) isRegistryEnabled.value = true
+const isShownScope = (scope) =>
+	scope.profileId === appStore.profile?.id && scope.chainId === appStore.network?.chainId && scope.account === appStore.account?.address
+function onRegistryEnabled(scope) {
+	if (isShownScope(scope)) isRegistryEnabled.value = true
 }
-function onRegistryDisabled(account) {
-	if (appStore.account?.address === account) isRegistryEnabled.value = false
+function onRegistryDisabled(scope) {
+	if (isShownScope(scope)) isRegistryEnabled.value = false
 }
 authwitsService.onRegistryEnabled.add(onRegistryEnabled)
 authwitsService.onRegistryDisabled.add(onRegistryDisabled)
@@ -76,7 +79,7 @@ authwitsService.onRegistryDisabled.add(onRegistryDisabled)
 async function fetchRegistryStatus() {
 	isFetchingRegistryStatus.value = true
 	try {
-		isRegistryEnabled.value = await authwitsService.getRegistryEnabled(appStore.account.address)
+		isRegistryEnabled.value = await authwitsService.getRegistryEnabled(appStore.network.chainId, appStore.account.address)
 	} catch {
 		// surfaced via the entity-crud error ref already
 	} finally {
@@ -108,7 +111,7 @@ const handleOpenAuthwit = (aw) => {
 // synchronously so a failed refetch cannot leave them rendered; the
 // composable's fetch sequence retires any in-flight stale fetch.
 watch(
-	() => [appStore.profile?.id, appStore.account?.address],
+	() => [appStore.profile?.id, appStore.network?.chainId, appStore.account?.address],
 	() => {
 		void refreshAuthwits({ clear: true })
 		void fetchRegistryStatus()

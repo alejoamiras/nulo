@@ -116,10 +116,20 @@ test.skipIf(!hasConfig)(
 		exported.data.transaction = [mkTx(VALID_HASH, funded), mkTx(FOREIGN_HASH, FOREIGN_ACCOUNT)]
 
 		// A funded-account authwit must survive; a foreign-account one must be
-		// dropped — auth-registry rows are address-scoped in the provenance filter.
+		// dropped — auth-registry rows are (chainId, account)-scoped in the provenance
+		// filter. `profileId` is re-stamped to the created profile by restore, so any
+		// value the exporter could have written is fine here.
+		const mkAuthwit = (id: number, account: string, hash: string) => ({
+			id,
+			profileId: "exported-profile",
+			chainId,
+			account,
+			hash,
+			content: { kind: "call" },
+		})
 		exported.data["auth-registry"] = [
-			{ id: 1, account: funded, hash: `0x${"b2".repeat(32)}`, content: { kind: "call" } },
-			{ id: 2, account: FOREIGN_ACCOUNT, hash: `0x${"c3".repeat(32)}`, content: { kind: "call" } },
+			mkAuthwit(1, funded, `0x${"b2".repeat(32)}`),
+			mkAuthwit(2, FOREIGN_ACCOUNT, `0x${"c3".repeat(32)}`),
 		]
 		// A foreign-account token-balance must be dropped. Append it (don't clobber
 		// the wallet's real funded-account balances the export already carries).

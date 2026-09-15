@@ -775,10 +775,12 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 */
 	public async provisionChainStoreKey(profileId: string, storeKeyBase64: string, generation: string): Promise<void> {
 		const key = Uint8Array.from(atob(storeKeyBase64), (c) => c.charCodeAt(0))
-		if (key.length !== 32) {
-			throw new Error(`provisionChainStoreKey: expected a 32-byte key, got ${key.length}`)
+		const refuse = (why: string): never => {
+			key.fill(0)
+			throw new Error(`provisionChainStoreKey: ${why}`)
 		}
-		if (!generation) throw new Error("provisionChainStoreKey: missing pxe generation")
+		if (key.length !== 32) refuse(`expected a 32-byte key, got ${key.length}`)
+		if (!generation) refuse("missing pxe generation")
 		// The D4 resurrection fence. Atomicity with `clearProfileState` comes from
 		// run-to-completion, NOT the profile barrier: the check+install below is one
 		// synchronous block, and clear marks `deleting` synchronously before its
@@ -790,17 +792,27 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		//  - deleted(same gen):    a stale replay of the erased incarnation — rejected forever.
 		//  - live(different gen):  a successor key while the predecessor is live — the SW
 		//    must clear first; failing loudly beats silently swapping keys under a runtime.
+		//  - live(same gen, different bytes): a derivation that disagrees with the installed
+		//    key — never swap a key under a running incarnation; the caller's inputs are wrong.
 		//  - unseen / live(same) / deleted(different gen): install (fresh incarnation,
 		//    idempotent re-provision, or a re-imported profile going live over a dead one).
 		const current = this.profileLifecycles.get(profileId)
-		if (current?.kind === "deleting") {
-			throw new Error(`provisionChainStoreKey: profile ${profileId} is being deleted — provision rejected`)
-		}
-		if (current?.kind === "deleted" && current.gen === generation) {
-			throw new Error(`provisionChainStoreKey: profile ${profileId} generation was erased — stale provision rejected`)
-		}
-		if (current?.kind === "live" && current.gen !== generation) {
-			throw new Error(`provisionChainStoreKey: profile ${profileId} is live under a different generation — clear it first`)
+		if (current?.kind === "deleting") refuse(`profile ${profileId} is being deleted — provision rejected`)
+		if (current?.kind === "deleted" && current.gen === generation)
+			refuse(`profile ${profileId} generation was erased — stale provision rejected`)
+		if (current?.kind === "live" && current.gen !== generation)
+			refuse(`profile ${profileId} is live under a different generation — clear it first`)
+		const installed = this.storeKeys.get(profileId)
+		if (current?.kind === "live" && installed) {
+			// The decoded copy is secret material either way: wiped when redundant, wiped when refused.
+			const same = installed.every((b, i) => b === key[i])
+			key.fill(0)
+			if (!same) {
+				throw new Error(
+					`provisionChainStoreKey: profile ${profileId} is live under a different key for this generation — provision rejected`,
+				)
+			}
+			return
 		}
 		this.profileLifecycles.set(profileId, { kind: "live", gen: generation })
 		this.storeKeys.set(profileId, key)

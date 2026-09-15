@@ -1,33 +1,35 @@
 import { describe, expect, test, vi } from "vitest"
 import { useAuthRegistryStatus } from "./useAuthRegistryStatus"
 
+type Scope = { profileId: string; chainId: number; account: string }
 function fakeService() {
-	const enabled = new Set<(address: string) => void>()
-	const disabled = new Set<(address: string) => void>()
+	const enabled = new Set<(scope: Scope) => void>()
+	const disabled = new Set<(scope: Scope) => void>()
 	return {
 		getRegistryEnabled: vi.fn(),
 		onRegistryEnabled: {
-			add: (fn: (address: string) => void) => enabled.add(fn),
-			remove: (fn: (address: string) => void) => enabled.delete(fn),
+			add: (fn: (scope: Scope) => void) => enabled.add(fn),
+			remove: (fn: (scope: Scope) => void) => enabled.delete(fn),
 		},
 		onRegistryDisabled: {
-			add: (fn: (address: string) => void) => disabled.add(fn),
-			remove: (fn: (address: string) => void) => disabled.delete(fn),
+			add: (fn: (scope: Scope) => void) => disabled.add(fn),
+			remove: (fn: (scope: Scope) => void) => disabled.delete(fn),
 		},
-		emitEnabled: (address: string) => {
-			for (const fn of enabled) fn(address)
+		emitEnabled: (account: string, chainId = CHAIN, profileId = "p1") => {
+			for (const fn of enabled) fn({ profileId, chainId, account })
 		},
-		emitDisabled: (address: string) => {
-			for (const fn of disabled) fn(address)
+		emitDisabled: (account: string, chainId = CHAIN, profileId = "p1") => {
+			for (const fn of disabled) fn({ profileId, chainId, account })
 		},
 		handlerCount: () => enabled.size + disabled.size,
 	}
 }
 
 const ACTIVE = "0xactive"
+const CHAIN = 7
 const setup = (account: string | undefined = ACTIVE) => {
 	const service = fakeService()
-	const status = useAuthRegistryStatus(service as never, () => account)
+	const status = useAuthRegistryStatus(service as never, () => (account ? { profileId: "p1", chainId: CHAIN, account } : undefined))
 	return { service, status }
 }
 
@@ -45,7 +47,7 @@ describe("useAuthRegistryStatus", () => {
 		service.getRegistryEnabled.mockImplementationOnce(() => new Promise((r) => (resolve = r)))
 		const pending = status.fetch()
 		expect(status.isLoading.value).toBe(true)
-		expect(service.getRegistryEnabled).toHaveBeenCalledWith(ACTIVE)
+		expect(service.getRegistryEnabled).toHaveBeenCalledWith(CHAIN, ACTIVE)
 		resolve(true)
 		await pending
 		expect(status.isRegistryEnabled.value).toBe(true)
@@ -70,12 +72,16 @@ describe("useAuthRegistryStatus", () => {
 		expect(status.isRegistryEnabled.value).toBe(false)
 	})
 
-	test("events for another account are ignored", () => {
+	test("events for another account, the same account on another chain, or a sibling profile's same (chain, account), are ignored", () => {
 		const { service, status } = setup()
 		service.emitEnabled("0xother")
 		expect(status.isRegistryEnabled.value).toBeUndefined()
 		status.isRegistryEnabled.value = true
 		service.emitDisabled("0xother")
+		expect(status.isRegistryEnabled.value).toBe(true)
+		service.emitDisabled(ACTIVE, CHAIN + 1)
+		expect(status.isRegistryEnabled.value).toBe(true)
+		service.emitDisabled(ACTIVE, CHAIN, "p2")
 		expect(status.isRegistryEnabled.value).toBe(true)
 	})
 

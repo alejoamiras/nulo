@@ -11,6 +11,7 @@
 /** Components */
 import BalanceView from "../components/modules/general/BalanceView.vue"
 import RecentActivityView from "../components/modules/general/RecentActivityView.vue"
+import RecoveryModeBanner from "../components/modules/general/RecoveryModeBanner.vue"
 import TokensView from "../components/modules/general/TokensView.vue"
 
 /** Store */
@@ -23,6 +24,7 @@ const appStore = useAppStore()
 		<BalanceView />
 
 		<Flex direction="column" gap="16" :class="$style.content">
+			<RecoveryModeBanner />
 			<TokensView />
 			<RecentActivityView />
 		</Flex>

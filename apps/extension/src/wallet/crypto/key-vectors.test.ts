@@ -73,7 +73,7 @@ import { Fr } from "@aztec/foundation/curves/bn254"
 import { deriveSigningKeyFromSeed } from "@nulo/wallet-crypto"
 import { EncryptionKey } from "@nulo/wallet-crypto"
 import { PasskeyCredential } from "@nulo/wallet-crypto"
-import { PASSKEY_PRF_LABEL, PXE_STORE_KDF_LABEL, derivePxeStoreKey } from "@nulo/wallet-crypto"
+import { PASSKEY_PRF_LABEL, PXE_STORE_KDF_LABEL, asImportedKeysDek, asMasterSecretBytes, derivePxeStoreKey } from "@nulo/wallet-crypto"
 import { AccountType } from "@/wallet/services/account/spec"
 
 /** Reusable hex helper — keeps fixture constants readable. */
@@ -210,25 +210,35 @@ describe("M2.6 — cryptographic derivation vectors", () => {
 		expect(AccountType.Nulo_v1).toBe(0)
 	})
 
-	// ── V11: derivePxeStoreKey(master, profileId) — NULO-PXE-STORE-KDF v1 ──
+	// ── V11: derivePxeStoreKey(master, dek, profileId) — NULO-PXE-STORE-KDF v2 ──
 	//
 	// The per-profile ChaCha20 key for the encrypted SQLite-OPFS PXE stores
-	// (HKDF-SHA256, label "nulo:pxe-store:v1", salt bound to the profileId).
-	// A Nulo-novel construction, so this is a DRIFT PIN (like V8): it locks
-	// what we ship — changing the label, salt shape, or HKDF params orphans
-	// every encrypted PXE store on disk (state resets, not data loss: the
-	// PXE re-syncs — but never change it casually).
-	test("V11 — derivePxeStoreKey(fixedMaster, fixture profileId) matches fixture + is not the master", async () => {
-		expect(PXE_STORE_KDF_LABEL).toBe("nulo:pxe-store:v1")
-		const master = new Uint8Array(32)
+	// (HKDF-SHA256 over master ‖ dek, label "nulo:pxe-store:v2", salt bound to
+	// the profileId). A Nulo-novel construction, so this is a DRIFT PIN (like
+	// V8): it locks what we ship — changing the label, the IKM shape, the salt
+	// shape, or the HKDF params orphans every encrypted PXE store on disk
+	// (state resets, not data loss: the PXE re-syncs — but never change it
+	// casually). v2 mixed the DEK in so a same-phrase sibling (same master)
+	// cannot derive a victim profile's store key.
+	test("V11 — derivePxeStoreKey(fixedMaster, fixedDek, fixture profileId) matches fixture + is bound to both secrets", async () => {
+		expect(PXE_STORE_KDF_LABEL).toBe("nulo:pxe-store:v2")
+		const master = asMasterSecretBytes(new Uint8Array(32) as Uint8Array<ArrayBuffer>)
 		master[31] = 0x42
-		const key = await derivePxeStoreKey(master, "profile-fixture-1")
+		const dek = asImportedKeysDek(new Uint8Array(32).fill(0x5a) as Uint8Array<ArrayBuffer>)
+		const key = await derivePxeStoreKey(master, dek, "profile-fixture-1")
 		expect(key).toHaveLength(32)
-		expect(toHex(key)).toBe("7bc1e3d33de01d8650471666c8daa55436a18c77644bfcfd683aba02465018d4")
+		expect(toHex(key)).toBe("d8061cc5a312e5c1a623385dab782405f2e1f1edaeef884cbd380944edca9ff7")
+		// The retired master-only v1 value for the same master + profile must not come back.
+		expect(toHex(key)).not.toBe("7bc1e3d33de01d8650471666c8daa55436a18c77644bfcfd683aba02465018d4")
 		expect(toHex(key)).not.toBe(toHex(master))
-		// Distinct profiles derive distinct keys from the same master.
-		const other = await derivePxeStoreKey(master, "profile-fixture-2")
+		// Distinct profiles AND distinct DEKs derive distinct keys from the same master.
+		const other = await derivePxeStoreKey(master, dek, "profile-fixture-2")
 		expect(toHex(other)).not.toBe(toHex(key))
+		const otherDek = asImportedKeysDek(new Uint8Array(32).fill(0x5b) as Uint8Array<ArrayBuffer>)
+		expect(toHex(await derivePxeStoreKey(master, otherDek, "profile-fixture-1"))).not.toBe(toHex(key))
+		// A short DEK is refused before any derivation (the 32+32 IKM split is the contract).
+		const shortDek = asImportedKeysDek(new Uint8Array(31).fill(0x5a) as Uint8Array<ArrayBuffer>)
+		await expect(derivePxeStoreKey(master, shortDek, "profile-fixture-1")).rejects.toThrow(/32-byte/)
 	})
 
 	// ── P1: HKDF-SHA256 RFC 5869 Appendix A.1 ────────────────────────

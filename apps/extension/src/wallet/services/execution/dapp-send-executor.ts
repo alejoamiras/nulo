@@ -414,7 +414,19 @@ export class DappSendExecutor {
 				sent.networkId,
 			)
 			if (sent.pendingPublicAuthwits.length > 0) {
-				await this.deps.recordPendingAuthwits(account, sent.pendingPublicAuthwits, hash)
+				// Scope the pending rows to the SENDING tx's (profileId, chainId, account). The
+				// authorization fence carries the profile; fall back to the active profile only if
+				// a path built the tx without one. No profile ⇒ skip (the row would be unscopable).
+				const profileId = sent.fence?.profileId ?? (await this.deps.getActiveProfile())?.id
+				if (profileId) {
+					await this.deps.recordPendingAuthwits(
+						{ profileId, chainId: sent.network.chainId, account },
+						sent.pendingPublicAuthwits,
+						hash,
+					)
+				} else {
+					this.deps.logDebug("recordPendingAuthwits skipped: no profile scope for the sent tx")
+				}
 			}
 		}
 	}

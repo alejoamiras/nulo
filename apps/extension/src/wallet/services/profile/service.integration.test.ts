@@ -27,6 +27,7 @@ import {
 	InvalidPasswordError,
 	ProfileIdConflictError,
 	RestoreTornError,
+	RecoveryModeError,
 } from "@nulo/extension-messaging/errors"
 import { AccountIntegrityBlockedRepository } from "../account-integrity/blocked-repository"
 import {
@@ -39,8 +40,14 @@ import {
 	type PasskeyCredential,
 	type PasskeyCredentialData,
 	type SessionWrappedSecret,
+	unsealDekUnderWrapKey,
 } from "@nulo/wallet-crypto"
 import { PasskeyService } from "@/wallet/services/passkey/service"
+import { ServiceClient as OffscreenServiceClient } from "@nulo/extension-messaging/offscreen"
+import { DappSessionService } from "@/wallet/services/dapp-session/service"
+import { signDappSession } from "@/wallet/services/dapp-session/integrity"
+import { PxeServiceClient } from "@/wallet/services/pxe/client"
+import { wirePxeProviders } from "@/wallet/runtime"
 import { flushPromises } from "@vue/test-utils"
 import { ProfileService } from "./service"
 import { RESTORE_PENDING_ROOT, RestorePendingRepository } from "./restore-pending-repository"
@@ -2588,6 +2595,147 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			expect(Array.from(dekAfter!)).toEqual(Array.from(dekBefore!))
 		})
 
+		const CORRUPT_SLOT = "AAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+		async function corruptDekSlot(api: FakeBrowserApi, id: string) {
+			const key = `nulo:core:profiles@${id}`
+			await api.storage.local.set({ [key]: JSON.stringify({ ...(await readRow(api, id)), dekSealed: CORRUPT_SLOT }) })
+		}
+
+		test("recovery mode: a degraded unlock projects `recoveryMode` on the live info only, and the DEK-keyed derivation refuses", async () => {
+			const { api, service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			expect(service.isRecoveryMode(p.id)).toBe(false)
+			expect((await service.getActiveProfile())?.recoveryMode).toBeUndefined()
+			await service.lockActiveProfile()
+			await corruptDekSlot(api, p.id)
+
+			await service.unlockProfile(p.id, "pass1234")
+			expect(service.isRecoveryMode(p.id)).toBe(true)
+			expect((await service.getActiveProfile())?.recoveryMode).toBe(true)
+			expect((await service.getProfiles()).find((x) => x.id === p.id)?.recoveryMode).toBe(true)
+			// Never persisted, never in the backup's profile slice.
+			expect("recoveryMode" in (await readRow(api, p.id))).toBe(false)
+			expect(await service.backup()).toEqual({ id: p.id, name: "P", type: "password" })
+			// The dApp-session key takes HKDF(master ‖ dek): no DEK, no key — typed, so the read path hides instead of deleting.
+			await expect(service.deriveDappSessionMacKey(p.id)).rejects.toBeInstanceOf(RecoveryModeError)
+			// Locked keeps the locked contract (not recovery mode).
+			await service.lockActiveProfile()
+			expect(service.isRecoveryMode(p.id)).toBe(false)
+			await expect(service.deriveDappSessionMacKey(p.id)).rejects.toThrow(/locked/)
+		})
+
+		test("changeProfilePassword REFUSES an undecryptable dekSealed (no fresh mint) and leaves the row unchanged", async () => {
+			const { api, service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			await service.lockActiveProfile()
+			await corruptDekSlot(api, p.id)
+			await service.unlockProfile(p.id, "pass1234")
+			const before = await readRow(api, p.id)
+			await expect(service.changeProfilePassword(p.id, "pass1234", "newpass9")).rejects.toThrow(/unrecoverable/)
+			expect(await readRow(api, p.id)).toEqual(before)
+			await service.lockActiveProfile()
+			await service.unlockProfile(p.id, "pass1234")
+			expect(service.isRecoveryMode(p.id)).toBe(true)
+		})
+
+		test("password export tolerates an undecryptable slot with a FRESH dek (dekReplaced), and the export → restore round trip lands healthy", async () => {
+			const { api, service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			const liveDek = await service.getProfileDek(p.id)
+			const intact = await service.exportBackupMaterial(p.id, "pass1234")
+			expect(intact.dekReplaced).toBe(false)
+			expect(intact.importedKeysDek).toBe(Buffer.from(liveDek!).toString("base64"))
+
+			await service.lockActiveProfile()
+			await corruptDekSlot(api, p.id)
+			await service.unlockProfile(p.id, "pass1234")
+			expect(service.isRecoveryMode(p.id)).toBe(true)
+			const material = await service.exportBackupMaterial(p.id, "pass1234")
+			expect(material.dekReplaced).toBe(true)
+			expect(material.masterKey).toBe(intact.masterKey)
+			expect(material.entropy).toBe(intact.entropy)
+			expect(Buffer.from(material.importedKeysDek, "base64")).toHaveLength(32)
+			expect(material.importedKeysDek).not.toBe(intact.importedKeysDek)
+
+			// The repair: restore the export into a fresh profile and finalize — a healthy session.
+			await service.lockActiveProfile()
+			const restored = await service.restore(
+				{ id: "fresh", name: "P2", type: "password" },
+				{
+					type: "password",
+					masterKey: asBase64MasterSecret(material.masterKey),
+					entropy: material.entropy,
+					importedKeysDek: material.importedKeysDek,
+				},
+				"pass1234",
+				undefined,
+				true,
+			)
+			if ("restoreError" in restored && restored.restoreError) throw new Error(String(restored.restoreError))
+			await service.finalizeRestore(restored.id, "pass1234")
+			expect(service.isRecoveryMode(restored.id)).toBe(false)
+			expect(await service.getProfileDek(restored.id)).toBeDefined()
+			expect((await service.getActiveProfile())?.recoveryMode).toBeUndefined()
+		}, 30_000)
+
+		test("passkey export tolerates an undecryptable slot with a fresh dek sealed under the ceremony wrap key; the stored row is untouched; the round trip lands healthy", async () => {
+			const { api, service } = await makeService()
+			const p = await service.createPasskeyProfile("PK")
+			const credentialId = await service.getPasskeyCredentialId(p.id)
+			const credData = fakeCredentialData(credentialId, p.id)
+			const intact = await service.exportPasskeyBackupMaterial(p.id, credData)
+			expect(intact).toEqual({ credentialId, dekSealed: (await readRow(api, p.id)).dekSealed, dekReplaced: false })
+
+			await service.lockActiveProfile()
+			await corruptDekSlot(api, p.id)
+			const before = await readRow(api, p.id)
+			// Credential and fingerprint checks still reject BEFORE any tolerance applies.
+			await expect(service.exportPasskeyBackupMaterial(p.id, fakeCredentialData("cred-other", p.id))).rejects.toThrow(
+				/Invalid profile id/,
+			)
+			const material = await service.exportPasskeyBackupMaterial(p.id, credData)
+			expect(material.credentialId).toBe(credentialId)
+			expect(material.dekReplaced).toBe(true)
+			expect(material.dekSealed).not.toBe(CORRUPT_SLOT)
+			// The fresh blob opens under the SAME wrap key the restore ceremony re-derives.
+			expect(await unsealDekUnderWrapKey(await fakeWrapKey(credentialId), material.dekSealed)).toHaveLength(32)
+			expect(await readRow(api, p.id)).toEqual(before)
+
+			await service.deleteProfile(p.id)
+			const restored = await service.restore(
+				{ id: "ignored", name: "PK", type: "passkey" },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId), dekSealed: material.dekSealed },
+				undefined,
+				credData,
+			)
+			if ("restoreError" in restored && restored.restoreError) throw new Error(String(restored.restoreError))
+			await service.finalizeRestore(restored.id)
+			expect(service.isRecoveryMode(restored.id)).toBe(false)
+			expect(await service.getProfileDek(restored.id)).toBeDefined()
+		}, 30_000)
+
+		test("passkey restore tolerates an UNOPENABLE dekSealed: the row mints a fresh dek, no rewrap context, finalize is non-degraded", async () => {
+			const { service } = await makeService()
+			const original = await service.createPasskeyProfile("PK")
+			const credentialId = await service.getPasskeyCredentialId(original.id)
+			await service.lockActiveProfile()
+			await service.deleteProfile(original.id)
+			const out = await service.restore(
+				{ id: "ignored", name: "PK", type: "passkey" },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId), dekSealed: CORRUPT_SLOT },
+				undefined,
+				fakeCredentialData(credentialId, original.id),
+			)
+			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
+			expect(await service.consumeDekRewrapContext(out.id)).toBeUndefined()
+			const degraded: string[] = []
+			service.onImportedKeysDegraded.add((info) => degraded.push(info.id))
+			await service.finalizeRestore(out.id)
+			expect(degraded).toEqual([])
+			expect(service.isRecoveryMode(out.id)).toBe(false)
+			expect(await service.getProfileDek(out.id)).toBeDefined()
+		}, 30_000)
+
 		// (g) the duplicate-phrase guard: same phrase → DuplicateWalletError unless allowDuplicate.
 		test("(g) importMnemonic rejects a duplicate phrase, then accepts it with allowDuplicate", async () => {
 			const { service } = await makeService()
@@ -2724,7 +2872,7 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 		// Post-impl codex round 2: a passkey backup carries `dekSealed` verbatim, so nothing
 		// downstream ever proves it opens — a corrupt slot would yield a backup that reports
 		// success and only fails at restore, when the source profile may be long gone.
-		test("exportPlain refuses a passkey profile whose dekSealed slot does not open", async () => {
+		test("exportPlain (credentialId path) still succeeds for a passkey profile whose dekSealed slot does not open — a passkey profile has no phrase, so the backup is its only repair", async () => {
 			const { api, service } = await makeService()
 			const p = await service.createPasskeyProfile("PK", fakeCredentialData("cred-x", "uh-x"))
 			const credentialId = await service.getPasskeyCredentialId(p.id)
@@ -2734,7 +2882,9 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			row.dekSealed = "AAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 			await api.storage.local.set({ [key]: JSON.stringify(row) })
 
-			await expect(service.exportPlain(p.id, undefined, fakeCredentialData(credentialId, "uh-x"))).rejects.toThrow(/unrecoverable/)
+			// The credentialId export never touched the DEK, so it is unaffected; the sealed-blob
+			// tolerance lives in `exportPasskeyBackupMaterial` (covered in the DEK-lifecycle block).
+			expect(await service.exportPlain(p.id, undefined, fakeCredentialData(credentialId, "uh-x"))).toBe(credentialId)
 		})
 
 		// Post-impl codex MEDIUM: the stale sweep EXCLUDES the id being consumed, so the TTL has to
@@ -2882,4 +3032,147 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			await expect(unlock).rejects.toThrow(/Invalid profile id/)
 		}, 30_000)
 	})
+})
+
+// ── F-06 real-session pins: the production PXE wiring and the real dApp-session derivation ──
+
+const profileRowKey = (id: string) => `nulo:core:profiles@${id}`
+const readRawRow = async (api: FakeBrowserApi, id: string) =>
+	JSON.parse((await api.storage.local.get(profileRowKey(id)))[profileRowKey(id)] as string)
+const writeRawRow = (api: FakeBrowserApi, id: string, row: unknown) => api.storage.local.set({ [profileRowKey(id)]: JSON.stringify(row) })
+
+describe("F-06 warm PXE runtime — admission is decided in the SW by the PRODUCTION wiring", () => {
+	test("healthy unlock admits; after a degraded re-unlock an IMMEDIATE request against the warm chain is rejected with no wire traffic; an admitted in-flight job completes; a healthy re-unlock admits again", async () => {
+		const { api, service } = await makeService()
+		vi.stubGlobal("self", globalThis)
+		const wire: string[] = []
+		let parked: Promise<void> | undefined
+		const impl = async function (method: unknown) {
+			wire.push(method as string)
+			if (parked) await parked
+			return []
+		}
+		vi.spyOn(
+			OffscreenServiceClient.prototype as unknown as { request: (...a: unknown[]) => Promise<unknown> },
+			"request",
+		).mockImplementation(impl)
+		vi.spyOn(
+			Object.getPrototypeOf(OffscreenServiceClient.prototype) as { request: (...a: unknown[]) => Promise<unknown> },
+			"request",
+		).mockImplementation(impl)
+		try {
+			// The same call `createWalletRuntime` makes — a deleted guard registration reds this test.
+			wirePxeProviders(service)
+			const p = await service.createProfile("P", "pass1234")
+			const healthyRow = await readRawRow(api, p.id)
+			const client = new PxeServiceClient({ log: () => {} } as never)
+			const net = { profileId: p.id, chainId: 31337, rpcUrl: "http://n/1" }
+
+			await client.getSenders(net)
+			expect(wire).toEqual(["getSenders"])
+
+			// A job admitted while healthy is still on the wire when the lock lands.
+			let release!: () => void
+			parked = new Promise<void>((r) => (release = r))
+			const inflight = client.getSenders(net)
+			await new Promise((r) => setTimeout(r, 0))
+			expect(wire).toEqual(["getSenders", "getSenders"])
+			parked = undefined
+
+			await service.lockActiveProfile()
+			await writeRawRow(api, p.id, { ...healthyRow, dekSealed: "AAAAAAAAAAAAAAAAAAAAAAAAAAAA" })
+			await service.unlockProfile(p.id, "pass1234")
+			expect(service.isRecoveryMode(p.id)).toBe(true)
+			// The offscreen still holds the store key and the open chain runtime: only the SW-side
+			// guard stands between the degraded session and it.
+			await expect(client.getSenders(net)).rejects.toBeInstanceOf(RecoveryModeError)
+			expect(wire).toEqual(["getSenders", "getSenders"])
+			// Cleanup stays admitted for a profile in recovery mode.
+			await client.clearChainState(p.id, 31337)
+			expect(wire.at(-1)).toBe("clearChainState")
+
+			release()
+			await inflight
+
+			await service.lockActiveProfile()
+			await writeRawRow(api, p.id, healthyRow)
+			await service.unlockProfile(p.id, "pass1234")
+			expect(service.isRecoveryMode(p.id)).toBe(false)
+			await client.getSenders(net)
+			expect(wire.at(-1)).toBe("getSenders")
+		} finally {
+			vi.restoreAllMocks()
+			vi.unstubAllGlobals()
+		}
+	}, 30_000)
+})
+
+describe("F-06 dApp-session rows under same-phrase SIBLINGS — the real ProfileService derivation", () => {
+	async function makeSiblings() {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const config = fakeConfig()
+		const logger = new LoggerStore(config)
+		const services = new ServiceCollection()
+		services.add(new FakePasskeyService(logger))
+		const profiles = new ProfileService(config, logger, api)
+		services.add(profiles)
+		const sessions = new DappSessionService(logger, api)
+		services.add(sessions)
+		await services.start()
+		profiles.setDeletionDelegate({ snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }), runFor: async () => {} })
+		const words = await wordsForFill(0x53)
+		const p1 = await profiles.importMnemonic("A", words, "pass1234")
+		const p2 = await profiles.importMnemonic("B", words, "pass1234", true)
+		return { api, profiles, sessions, p1, p2 }
+	}
+	const rowKeys = async (api: FakeBrowserApi) =>
+		Object.keys((await api.storage.local.get(null)) as Record<string, unknown>).filter((k) => k.startsWith("nulo:core:dappSessions@"))
+	const settle = () => new Promise((r) => setTimeout(r, 0))
+
+	test("a row p1 signed, re-targeted at p2 (same master), is REJECTED and dropped under p2; p1's authentic row is hidden under p2 and re-read by p1; a degraded p1 hides without deleting", async () => {
+		const { api, profiles, sessions, p1, p2 } = await makeSiblings()
+		await profiles.lockActiveProfile()
+		await profiles.unlockProfile(p1.id, "pass1234")
+		const row = await sessions.addDappSession({ name: "dApp", url: "https://dapp.example" }, [], [], 0 as never, "1")
+		const [key] = await rowKeys(api)
+		const authentic = (await api.storage.local.get(key))[key] as string
+		expect(JSON.parse(authentic).profileId).toBe(p1.id)
+
+		// The forgery: a sibling holding the SAME master builds a p2-targeted row and signs it with
+		// ITS key (master shared, DEK not) — p1's real derivation stands in for the attacker's. A
+		// master-only derivation would make this tag verify under p2; the DEK-keyed one must not.
+		const authenticRow = JSON.parse(authentic) as Record<string, unknown> & { mac: string }
+		const { mac: _authenticMac, ...forgedBody } = { ...authenticRow, profileId: p2.id }
+		const forgedMac = await signDappSession(await profiles.deriveDappSessionMacKey(p1.id), forgedBody as never)
+		await api.storage.local.set({ [key]: JSON.stringify({ ...forgedBody, mac: forgedMac }) })
+		await profiles.lockActiveProfile()
+		await profiles.unlockProfile(p2.id, "pass1234")
+		expect(await sessions.getDappSessions()).toEqual([])
+		await settle()
+		expect(await rowKeys(api)).toEqual([])
+
+		// p1's authentic row, read while p2 is active: hidden (p1 is locked), never deleted.
+		await api.storage.local.set({ [key]: authentic })
+		expect(await sessions.getDappSessions()).toEqual([])
+		await settle()
+		expect(await rowKeys(api)).toEqual([key])
+		await profiles.lockActiveProfile()
+		await profiles.unlockProfile(p1.id, "pass1234")
+		expect((await sessions.getDappSessions()).map((r) => r.id)).toEqual([row.id])
+
+		// p1 in recovery mode: no DEK → no key → hidden, never deleted; a healthy re-unlock re-reads it.
+		const healthy = await readRawRow(api, p1.id)
+		await profiles.lockActiveProfile()
+		await writeRawRow(api, p1.id, { ...healthy, dekSealed: "AAAAAAAAAAAAAAAAAAAAAAAAAAAA" })
+		await profiles.unlockProfile(p1.id, "pass1234")
+		expect(profiles.isRecoveryMode(p1.id)).toBe(true)
+		expect(await sessions.getDappSessions()).toEqual([])
+		await settle()
+		expect(await rowKeys(api)).toEqual([key])
+		await profiles.lockActiveProfile()
+		await writeRawRow(api, p1.id, healthy)
+		await profiles.unlockProfile(p1.id, "pass1234")
+		expect((await sessions.getDappSessions()).map((r) => r.id)).toEqual([row.id])
+	}, 60_000)
 })

@@ -284,6 +284,8 @@ describe("DappSendExecutor — public-authwit recording (Phase 5 trust-point)", 
 		const rec = deps.recordPendingAuthwits as ReturnType<typeof vi.fn>
 		expect(rec).toHaveBeenCalledTimes(1)
 		const args = rec.mock.calls[0] as unknown[]
+		// Scoped to the sending tx's (profileId, chainId, account) — never a bare account.
+		expect(args[0]).toEqual({ profileId: "p1", chainId: 7, account: expect.any(String) })
 		expect(args[1]).toEqual([grant]) // the pending items
 		expect(args[2]).toBe("0xhash") // keyed by the tx that wrote them
 	})
@@ -816,7 +818,11 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 		// The auth-registry row must exist on a reuse hit — the silent-break
 		// scenario: a missing auth-registry row after a reuse-hit grant.
 		expect(deps.addTransaction).toHaveBeenCalledTimes(1)
-		expect(deps.recordPendingAuthwits).toHaveBeenCalledWith("0xacct", pendingPublicAuthwits, "0xhash")
+		expect(deps.recordPendingAuthwits).toHaveBeenCalledWith(
+			{ profileId: "p1", chainId: 7, account: "0xacct" },
+			pendingPublicAuthwits,
+			"0xhash",
+		)
 		// The reused nonce + payment method flow into the activity record.
 		const txArgs = (deps.addTransaction as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
 		expect(txArgs[4]).toBe("77")
