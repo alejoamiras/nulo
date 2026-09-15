@@ -142,17 +142,23 @@ Each phase's gate is what "✓" means. Commands are the repo's real scripts.
   `decodeCallsForDisplay` per operation (and per settled authwit batch) → the card computes a
   `CallSurface` per call from `(vocabulary, decoded, caller context)` → `CallArguments` renders.
   `decoded === undefined` is `pending`; a short batch is `unavailable`.
-- **Reading order is a precedence, not a merge**: vocabulary wins even when a decode exists,
-  because the vocabulary carries the wallet's own labels (From/To/Amount, token symbol) and the ABI
-  carries the contract's. A hidden `msg_sender` or a missing caller context never claims a sender:
-  the surface falls through rather than lie.
+- **Reading order is a precedence, not a merge**: the vocabulary applies only on a contract the
+  wallet registered as a token AND whose decode spells the signature (the same roles, order and
+  kinds — `transfer(amount, to)` on a token is read by the ABI, never by position); it then carries
+  the wallet's own labels (From/To/Amount, token symbol). Every other decoded call shows the
+  contract's parameters as given, integers unscaled. A hidden `msg_sender` or a missing caller
+  context never claims a sender: the surface falls through rather than lie.
 - **Selector is truth**: `findFunctionBySelector` first; the app's `name` is consulted only when
   the wire carries no selector. The header uses the ABI name once decoded.
 - **Simpler alternative considered**: decode in the popup with the artifact fetched over RPC.
   Rejected: artifacts are large, the popup would need the ABI codec bundle, and the SW already holds
   the PXE. The display-only RPC returns a small projected tree instead.
-- **Trade-off**: token labeling for decoded params keys only on a parameter named `amount` on a
-  contract the wallet has registered as a token; other integers stay raw. Cheap, no false symbols.
+- **Trade-off**: token units apply to the wallet's vocabulary only. A decoded integer, even one a
+  registered token names `amount`, stays raw: the wallet cannot know what a non-vocabulary function
+  denominates, and a wrong symbol is worse than none.
+- **Disclosure is complete per host**: a requested call's overflow lives in the JSON view (32-row
+  cap on the card); a discovered authorization is not in the request, so its card list is uncapped
+  and a long decoded array is complete in the row's title.
 
 ## Security & Adversarial Considerations
 
@@ -161,10 +167,13 @@ Each phase's gate is what "✓" means. Commands are the repo's real scripts.
   from what executes. The decode path is display-only; execution reads the stored request, so the
   worst outcome is a misleading card, never a different transaction.
 - **Name spoofing**: the app's `name` cannot rename a call once the selector resolves in the
-  contract's ABI. Residual: the ABI is the contract's own — a malicious contract can name its
-  function `transfer`. The vocabulary + the wallet's token registry keep the "Transfer (private) ·
-  5 USDC" reading to contracts the wallet registered as tokens; a decoded-but-hostile contract shows
-  its own parameter names with no token symbol.
+  contract's ABI, and decoded names are sanitized like any wire string. Residual: the ABI is the
+  contract's own — a malicious contract can name its function `transfer` and its parameters `to` /
+  `amount`. The "Transfer (private) · 5 USDC" reading needs both the wallet's token registry (the
+  user registered that contract as a token) and an ABI that spells the signature; any other contract
+  shows its own parameter names, integers unscaled, no symbol. Registration proves the contract
+  answers the token metadata and balance calls, not that its `transfer` is honest — that residual is
+  the user's trust in the tokens they registered.
 - **Input bounds**: ≤ 64 calls per RPC, ≤ 256 args per call, 66-char hex only (else `opaque`), ≤ 8
   array items projected, ≤ 32 raw rows rendered, `safeWire` caps + strips control characters and
   bidi overrides from any string that reaches the DOM; `title` attributes carry the full field only.
@@ -230,6 +239,11 @@ Asks (surfaced by codex round 1; current behaviour stays until the owner decides
   curated labels stay on their contract; a decoded integer is never scaled; an empty symbol keeps
   the raw integer; a throwing `toString` cannot leave the card pending; the row-cap notice names the
   JSON view only for requested calls. Details in `lessons/post-impl.md`.
+- Codex round 2 (reject, 3 findings, all folded): the vocabulary also requires the decode to spell
+  the signature (roles, order, kinds), so it now waits for the decode instead of reading by position
+  on registration alone; discovered authorizations list every raw row and every decoded array item
+  (title) since the JSON view cannot show them; the architecture text no longer describes the
+  removed amount scaling.
 
 ## Post-implementation
 

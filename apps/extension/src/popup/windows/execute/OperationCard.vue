@@ -157,8 +157,15 @@ const authwitFunction = (a: DiscoveredAuthwit): string => {
 	const decoded = authwitDecode(a)
 	return decoded?.kind === "decoded" ? humanizeMethodName(safeWire(decoded.fn, 64), a.consumer) : safeWire(a.selector, 64)
 }
+// A discovered authorization is not in the request's JSON view, so its own row list is the whole disclosure.
 const authwitArgs = (a: DiscoveredAuthwit): CallSurface =>
-	callSurface(undefined, { selector: a.selector, to: a.consumer, args: a.args }, authwitDecode(a), isToken(a.consumer))
+	callSurface(
+		undefined,
+		{ selector: a.selector, to: a.consumer, args: a.args },
+		authwitDecode(a),
+		isToken(a.consumer),
+		Number.POSITIVE_INFINITY,
+	)
 
 /** Which discovered authorizations the user expanded; collapsed by default, the summary row is the review. */
 const openAuthwits = ref(new Set<string>())

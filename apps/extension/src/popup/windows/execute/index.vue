@@ -422,7 +422,8 @@ async function decodeOperationArguments(ops: UIOperation[]): Promise<void> {
 	)
 }
 
-/** A failed read just leaves amounts in base units. */
+/** A failed read leaves the card without the vocabulary: transfers on the wallet's own tokens read as
+ *  decoded parameters, amounts in base units. */
 async function loadKnownTokens(ops: UIOperation[], profileId: string): Promise<void> {
 	const chainIds = [...new Set(ops.map((op) => op.network.chainId))]
 	try {

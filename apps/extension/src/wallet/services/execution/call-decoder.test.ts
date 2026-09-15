@@ -58,7 +58,6 @@ describe("decodeCallForDisplay", () => {
 							{ kind: "integer", value: "1" },
 							{ kind: "integer", value: "2" },
 						],
-						hidden: 0,
 					},
 				},
 			],

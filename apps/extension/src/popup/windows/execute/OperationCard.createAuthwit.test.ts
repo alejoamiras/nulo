@@ -44,7 +44,22 @@ describe("OperationCard — aztec_createAuthWit", () => {
 				caller: DELEGATE,
 				call: { to: TOKEN, name: "transfer_in_private", args: [OWNER, DELEGATE, field(5n), field(1n)] },
 			}),
-			{ tokens: [USDC] },
+			{
+				tokens: [USDC],
+				decodedCalls: [
+					{
+						kind: "decoded",
+						contract: "Token",
+						fn: "transfer_in_private",
+						params: [
+							{ name: "from", value: { kind: "address", value: OWNER } },
+							{ name: "to", value: { kind: "address", value: DELEGATE } },
+							{ name: "amount", value: { kind: "integer", value: "5" } },
+							{ name: "authwit_nonce", value: { kind: "field", value: field(1n) } },
+						],
+					},
+				],
+			},
 		)
 		expect(w.text()).toContain("Call intent")
 		const caller = w.find('[data-testid="execute-authwit-caller"]')

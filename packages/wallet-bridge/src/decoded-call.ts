@@ -13,7 +13,7 @@ export type DecodedValue =
 	| { readonly kind: "string"; readonly value: string }
 	| { readonly kind: "selector"; readonly value: string }
 	| { readonly kind: "none" }
-	| { readonly kind: "array"; readonly items: readonly DecodedValue[]; readonly hidden: number }
+	| { readonly kind: "array"; readonly items: readonly DecodedValue[] }
 	| { readonly kind: "struct"; readonly fields: readonly DecodedField[] }
 
 export type DecodedField = { readonly name: string; readonly value: DecodedValue }

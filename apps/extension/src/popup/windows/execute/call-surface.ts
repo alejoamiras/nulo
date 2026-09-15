@@ -1,14 +1,15 @@
 /**
  * How the approval card reads one call's arguments, in the first shape that applies: the wallet's
- * transfer/mint vocabulary (structured, immediate, only on a contract the wallet registered as a
- * token), the ABI decode the wallet fetched (named parameters, in the contract's own words), or the
- * raw wire fields — 32-byte hex nobody can review, so never the default view.
+ * transfer/mint vocabulary (structured, on a registered token whose ABI spells the signature), the
+ * ABI decode the wallet fetched (named parameters, in the contract's own words), or the raw wire
+ * fields — 32-byte hex nobody can review, so never the default view.
  */
 
 import type { DecodedCall, DecodedParam, DecodedValue, UndecodedReason } from "@/wallet/services/execution/client"
 import type { TokenInfo } from "@/wallet/services/token/client"
 import { formatBaseUnits } from "@/utils/amount"
 import { trimAddress } from "@/utils/string"
+import { findMintSignature, findTransferSignature } from "@/utils/token-transfer-vocabulary"
 import { humanizeMethodName } from "@/utils/tx-enrichment"
 import { parseTransferIntent, projectArgument, smallFieldDecimal } from "@/utils/transfer-intent"
 import { safeWire } from "./humanize"
@@ -40,6 +41,8 @@ export const wire = (v: unknown, max: number): string => safeWire(v === undefine
 
 /** Raw-field rows are capped: past this the JSON view is the disclosure, not a 200-row card. */
 export const MAX_ARG_ROWS = 32
+/** Array items shown inline; the full list stays available as the row's title. */
+const MAX_INLINE_ITEMS = 8
 
 const rawRow = (arg: unknown): RawRow => {
 	const p = projectArgument(arg)
@@ -48,12 +51,11 @@ const rawRow = (arg: unknown): RawRow => {
 	return { kind: "opaque" }
 }
 
-export const rawRows = (args: unknown): RawRows => {
+export const rawRows = (args: unknown, maxRows = MAX_ARG_ROWS): RawRows => {
 	const list = Array.isArray(args) ? args : []
-	return { rows: list.slice(0, MAX_ARG_ROWS).map(rawRow), hidden: Math.max(0, list.length - MAX_ARG_ROWS) }
+	return { rows: list.slice(0, maxRows).map(rawRow), hidden: Math.max(0, list.length - maxRows) }
 }
 
-/** The token the wallet registered at `contract` on `chainId`, if any. */
 export const tokenAt = (
 	tokens: readonly TokenInfo[] | undefined,
 	chainId: number | undefined,
@@ -79,20 +81,41 @@ const vocabularySurface = (ctx: CallerContext | undefined, call: WireCall): Call
 	return { kind: "transfer", to: intent.to, amount: intent.amount, sender, ...nonce }
 }
 
-/** `decoded` is `undefined` while the wallet is still decoding. The vocabulary applies only when the
- *  call targets a registered token (`tokenKnown`): a same-named function on any other contract keeps
- *  the contract's own reading, so a `transfer(admin, role)` never renders as a payment. */
+/** The decoded kind each vocabulary role must carry. */
+const ROLE_KIND: Readonly<Record<string, DecodedValue["kind"]>> = {
+	from: "address",
+	to: "address",
+	amount: "integer",
+	authwit_nonce: "field",
+}
+
+const vocabularyRoles = (name: string, arity: number): readonly string[] | undefined =>
+	findTransferSignature(name, arity)?.params ?? findMintSignature(name, arity)?.params
+
+/** The vocabulary reads arguments by position, so the contract's ABI must spell the signature —
+ *  the same roles, in the same order, of the same kinds. Registration says a contract is a token,
+ *  not that its `transfer` takes `(to, amount)`. */
+const corroborates = (decoded: Extract<DecodedCall, { kind: "decoded" }>): boolean => {
+	const roles = vocabularyRoles(decoded.fn, decoded.params.length)
+	return roles !== undefined && decoded.params.every((p, i) => p.name === roles[i] && p.value.kind === ROLE_KIND[p.name])
+}
+
+/** `decoded` is `undefined` while the wallet is still decoding. The vocabulary applies only on a
+ *  registered token (`tokenKnown`) whose decode corroborates the signature; every other call reads
+ *  as the contract's own parameters, or as raw fields (`maxRows` of them) with the reason. */
 export const callSurface = (
 	ctx: CallerContext | undefined,
 	call: WireCall,
 	decoded: DecodedCall | undefined,
 	tokenKnown = false,
+	maxRows = MAX_ARG_ROWS,
 ): CallSurface => {
-	const known = tokenKnown ? vocabularySurface(ctx, call) : undefined
-	if (known) return known
 	if (decoded === undefined) return { kind: "pending" }
-	if (decoded.kind === "decoded") return { kind: "decoded", fn: decoded.fn, params: decoded.params }
-	return { kind: "raw", reason: decoded.reason, ...rawRows(call.args) }
+	if (decoded.kind === "decoded") {
+		const known = tokenKnown && corroborates(decoded) ? vocabularySurface(ctx, { ...call, name: decoded.fn }) : undefined
+		return known ?? { kind: "decoded", fn: decoded.fn, params: decoded.params }
+	}
+	return { kind: "raw", reason: decoded.reason, ...rawRows(call.args, maxRows) }
 }
 
 /** The header names the function by its ABI name once decoded, by the dApp's label otherwise. Both are
@@ -119,8 +142,9 @@ export const amountLabel = (
 	return { text: formatBaseUnits(BigInt(amount), token.decimals), symbol }
 }
 
-/** A one-line reading of a decoded value; nested shapes are summarized, an address is left to `AddressDisplay`. */
-export const valueText = (v: DecodedValue): string => {
+/** A one-line reading of a decoded value; nested shapes are summarized unless `full`, an address is
+ *  left to `AddressDisplay`. */
+export const valueText = (v: DecodedValue, full = false): string => {
 	switch (v.kind) {
 		case "integer":
 		case "selector":
@@ -135,11 +159,21 @@ export const valueText = (v: DecodedValue): string => {
 			return trimAddress(v.value)
 		case "none":
 			return "none"
-		case "array":
-			return `[${[...v.items.map(valueText), ...(v.hidden ? [`+${v.hidden} more`] : [])].join(", ")}]`
+		case "array": {
+			const shown = full ? v.items : v.items.slice(0, MAX_INLINE_ITEMS)
+			const more = v.items.length - shown.length
+			return `[${[...shown.map((item) => valueText(item, full)), ...(more ? [`+${more} more`] : [])].join(", ")}]`
+		}
 		case "struct":
-			return `{ ${v.fields.map((f) => `${safeWire(f.name, 32)}: ${valueText(f.value)}`).join(", ")} }`
+			return `{ ${v.fields.map((f) => `${safeWire(f.name, 32)}: ${valueText(f.value, full)}`).join(", ")} }`
 	}
+}
+
+/** What the row reveals on hover: the whole field, or the whole list when the line summarized it. */
+export const valueTitle = (v: DecodedValue): string | undefined => {
+	if (v.kind === "field") return v.value
+	const full = valueText(v, true)
+	return full === valueText(v) ? undefined : full
 }
 
 export const RAW_NOTICE: Readonly<Record<UndecodedReason, string>> = {

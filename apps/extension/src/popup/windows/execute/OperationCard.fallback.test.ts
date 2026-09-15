@@ -36,6 +36,20 @@ const sendTx = (calls: unknown[], extra: Record<string, unknown> = {}) => ({
 })
 const decoded = (fn: string, params: { name: string; value: unknown }[]) => ({ kind: "decoded" as const, contract: "Token", fn, params })
 const undecoded = (reason: string) => ({ kind: "undecoded" as const, reason })
+/** A token ABI that spells the vocabulary's signature: the values are irrelevant, the roles and kinds are the corroboration. */
+const abi = (fn: string, roles: string[]) =>
+	decoded(
+		fn,
+		roles.map((name) => ({
+			name,
+			value:
+				name === "amount"
+					? { kind: "integer", value: "0" }
+					: name === "authwit_nonce"
+						? { kind: "field", value: field(0n) }
+						: { kind: "address", value: TO },
+		})),
+	)
 
 const stubs = {
 	Flex: { inheritAttrs: false, template: '<div v-bind="$attrs"><slot /></div>' },
@@ -56,7 +70,9 @@ const one = (w: ReturnType<typeof mount>, testid: string) => w.find(`[data-testi
 
 describe("OperationCard — the vocabulary reading", () => {
 	test("transfer(to, amount) on a registered token from the account: 'From: this account', a trimmed recipient, the amount in token units", async () => {
-		const w = await mountCard(sendTx([{ name: "transfer", to: TOKEN, args: [TO, field(5_000_000n)] }]))
+		const w = await mountCard(sendTx([{ name: "transfer", to: TOKEN, args: [TO, field(5_000_000n)] }]), {
+			decodedCalls: [abi("transfer", ["to", "amount"])],
+		})
 		expect(one(w, "execute-op-payload-row").attributes("data-intent-kind")).toBe("transfer")
 		const sender = one(w, "execute-op-transfer-sender")
 		expect(sender.attributes("data-sender-kind")).toBe("account")
@@ -83,9 +99,24 @@ describe("OperationCard — the vocabulary reading", () => {
 		expect(all(w, "execute-op-decoded-param").map((p) => p.attributes("data-param"))).toEqual(["admin", "role"])
 	})
 
+	test("a registered token whose ABI orders transfer(amount, to) is read by the ABI, never by position", async () => {
+		const w = await mountCard(sendTx([{ name: "transfer", to: TOKEN, args: [field(1n), TO] }]), {
+			decodedCalls: [
+				decoded("transfer", [
+					{ name: "amount", value: { kind: "integer", value: "1" } },
+					{ name: "to", value: { kind: "address", value: TO } },
+				]),
+			],
+		})
+		expect(one(w, "execute-op-payload-row").attributes("data-intent-kind")).toBe("decoded")
+		expect(all(w, "execute-op-decoded-param").map((p) => p.attributes("data-param"))).toEqual(["amount", "to"])
+		expect(all(w, "execute-op-decoded-param")[1]!.text()).toContain(trimAddress(TO))
+	})
+
 	test("the same call under default_entrypoint renders 'Caller: none'", async () => {
 		const w = await mountCard(
 			sendTx([{ name: "transfer", to: TOKEN, args: [TO, field(5n)] }], { executionMode: "default_entrypoint", opts: {} }),
+			{ decodedCalls: [abi("transfer", ["to", "amount"])] },
 		)
 		const sender = one(w, "execute-op-transfer-sender")
 		expect(sender.attributes("data-sender-kind")).toBe("none")
@@ -99,7 +130,13 @@ describe("OperationCard — the vocabulary reading", () => {
 				{ name: "transfer_in_private", to: TOKEN, args: [OWNER, TO, field(5_000_000n), field(9n)] },
 				{ name: "transfer_in_private", to: TOKEN, args: [OWNER, TO, field(5_000_000n), field(0n)] },
 			]),
-			{ tokens: [USDC] },
+			{
+				tokens: [USDC],
+				decodedCalls: [
+					abi("transfer_in_private", ["from", "to", "amount", "authwit_nonce"]),
+					abi("transfer_in_private", ["from", "to", "amount", "authwit_nonce"]),
+				],
+			},
 		)
 		expect(all(w, "execute-op-transfer-sender").map((s) => s.attributes("data-sender-kind"))).toEqual(["explicit", "explicit"])
 		const nonces = all(w, "execute-op-transfer-nonce")
@@ -109,7 +146,9 @@ describe("OperationCard — the vocabulary reading", () => {
 	})
 
 	test("mint_to_private(to, amount) is a mint: recipient and amount, no sender row", async () => {
-		const w = await mountCard(sendTx([{ name: "mint_to_private", to: TOKEN, args: [TO, field(500_000_000n)] }]))
+		const w = await mountCard(sendTx([{ name: "mint_to_private", to: TOKEN, args: [TO, field(500_000_000n)] }]), {
+			decodedCalls: [abi("mint_to_private", ["to", "amount"])],
+		})
 		expect(one(w, "execute-op-payload-row").attributes("data-intent-kind")).toBe("mint")
 		expect(one(w, "execute-op-structured-args").text()).toContain("Mint to:")
 		expect(one(w, "execute-op-transfer-sender").exists()).toBe(false)

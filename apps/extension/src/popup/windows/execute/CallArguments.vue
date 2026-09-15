@@ -5,7 +5,7 @@
  */
 import type { TokenInfo } from "@/wallet/services/token/client"
 import { safeWire } from "./humanize"
-import { type CallSurface, RAW_NOTICE, amountLabel, rawToggleLabel, valueText } from "./call-surface"
+import { type CallSurface, RAW_NOTICE, amountLabel, rawToggleLabel, valueText, valueTitle } from "./call-surface"
 
 const props = defineProps<{
 	surface: CallSurface
@@ -88,7 +88,7 @@ const amount = computed(() =>
 				size="11"
 				color="primary"
 				:mono="p.value.kind === 'field'"
-				:title="p.value.kind === 'field' ? p.value.value : undefined"
+				:title="valueTitle(p.value)"
 			>
 				{{ valueText(p.value) }}
 			</Text>

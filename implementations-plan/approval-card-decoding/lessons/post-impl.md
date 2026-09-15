@@ -27,4 +27,18 @@ narration removed, the inherited "Phase 2 follow-up" tag dropped, the decoder he
 "ABI truth", the single-type unwrap has its sentence).
 
 Gate after the fixes: typecheck clean; 16 files / 154 tests green (`vitest run` over the execute
-window, decoder, tx-enrichment, transfer-intent, vocabulary); biome clean.
+window, decoder, tx-enrichment, transfer-intent, vocabulary); biome clean. Commit `ec6089dd`.
+
+## Round 2 — reject, 3 findings (all verified, all folded)
+
+| # | Sev | Claim | Verified | Fix |
+|---|---|---|---|---|
+| 1 | high | Registration still let the vocabulary read by position: a registered token with `transfer(amount, to)` showed amount 2 / recipient 1 | yes (reproduced with the decoder) | `corroborates(decoded)`: the vocabulary applies only when the decode's parameters are the signature's roles, in order, with the expected kinds (`from`/`to` address, `amount` integer, `nonce` field); the vocabulary entry is picked by the decoded function name, not the app's. The vocabulary therefore waits for the decode (no more instant reading). Tests: swapped roles, wrong kind, app-name vs ABI-name |
+| 2 | med | Discovered-authorization tails (raw rows past 32, array items past 8) had no disclosure at all | yes | `callSurface(…, maxRows)`: the discovered host lists every raw row; the decoder no longer truncates arrays (the 1024-leaf bound already limits them) and the popup summarizes at 8 inline with the full list in the row's `title` (`valueTitle`) |
+| 3 | low | plan.md still described decoded `amount` scaling | yes | Architecture rewritten |
+
+Comment audit: three applied ("never renders as a payment" replaced by the corroboration
+constraint; the token-load comment in `index.vue` says the vocabulary is lost too; the `tokenAt`
+comment deleted).
+
+Round-1 status per codex: #2–#7 closed; #1 and #8 closed by this round's fixes.

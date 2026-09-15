@@ -25,8 +25,6 @@ import { findFunctionByName, findFunctionBySelector } from "./contract-resolver"
 
 export type ArtifactLookup = (contractAddress: string) => Promise<ContractArtifact | undefined>
 
-/** Arrays past this many items are summarized: the card is a review surface, not a data viewer. */
-const MAX_ARRAY_ITEMS = 8
 /** A call past this many fields is not something a popup should decode row by row. */
 const MAX_ARGS = 256
 /** Leaves the card would have to hold for one call; an interface past this is not rendered. */
@@ -115,11 +113,7 @@ function projectStruct(value: AbiDecoded, type: Extract<AbiType, { kind: "struct
 function projectList(value: AbiDecoded, type: Extract<AbiType, { kind: "array" | "tuple" }>): DecodedValue {
 	const list = Array.isArray(value) ? value : []
 	const typeAt = (i: number): AbiType => (type.kind === "array" ? type.type : (type.fields[i] ?? FIELD_TYPE))
-	return {
-		kind: "array",
-		items: list.slice(0, MAX_ARRAY_ITEMS).map((v, i) => project(v, typeAt(i))),
-		hidden: Math.max(0, list.length - MAX_ARRAY_ITEMS),
-	}
+	return { kind: "array", items: list.map((v, i) => project(v, typeAt(i))) }
 }
 
 /** A field prints as the 32-byte hex the wire carries, whether the decoder handed back a `bigint` or an `Fr`. */
