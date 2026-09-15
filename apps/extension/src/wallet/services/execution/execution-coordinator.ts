@@ -194,7 +194,7 @@ export class ExecutionCoordinator {
 			await this.evidence?.updateProvingBackend(attempt.journalId, event.backend)
 			attempt.backend = event.backend
 		} catch (error) {
-			this._logger.log("execution", LogLevel.Warn, "prove backend not journaled", { error: errorMessageFromUnknown(error) })
+			this._logger.log("execution", LogLevel.Warn, "prove backend not journaled", { error })
 		}
 	}
 
