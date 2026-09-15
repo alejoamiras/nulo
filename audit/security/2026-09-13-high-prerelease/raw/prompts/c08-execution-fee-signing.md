@@ -1,0 +1,27 @@
+You are a Phase 2 cluster auditor in a map-reduce security audit. Working directory is the repo root (a git worktree of origin/dev). READ FIRST, in this order: `audit/security/2026-09-13-high-prerelease/raw/CONTEXT.md`, then `audit/security/2026-09-13-high-prerelease/raw/SECURITY-PROMPT.md` (the exact audit prompt + negative list + output format — follow it exactly), then the repo-map files named below for orientation. Then read the cluster source files IN FULL (not excerpts). Verify every claim against the code; cite file:line. Do not modify any file except your output file.
+
+# Cluster c08-execution-fee-signing — tx build/sign/prove/send pipeline, fee strategies + caps, FPC, authwits, chain identity at signing
+
+Repo maps: `raw/repo-map/extension-services-dapp-exec.md` (§0 step 9, §3c), `raw/repo-map/aztec-runtime.md` (§3, §8 chain-identity gap).
+
+Source files (read all, in full):
+- `apps/extension/src/wallet/services/execution/*.ts` (all non-test — service, execution-lane, execution-coordinator, tx-request-builder, fast-path, dapp-send-executor, transfer-executor, view-executor, contract-resolver, authwit-discoverer, discovery-probe, discovery-aware-estimator, operation-planner, operation-fingerprint, operation-estimate-reuse, transfer-estimate-reuse, rpc-cancel, register-*, README.md), `execution/fee/*.ts`, `execution/helpers/*.ts`, `execution/utils/*.ts`, `execution/models/*`
+- `apps/extension/src/wallet/services/fpc/**` (service, spec, handlers)
+- `packages/aztec-runtime/src/account/{nulo-account.ts, fee-options.ts}`, `packages/aztec-runtime/src/utils/chain-identity.ts`
+- `packages/wallet-bridge/src/{operation.ts, action.ts, authwit-content.ts, fee.ts, fee-payer.ts, operation-validation.ts, transaction-origin.ts}`
+- `apps/extension/src/wallet/services/auth-registry/service.ts` (recordPendingAuthwits/reconcile) and `wallet/utils/auth-registry.ts`
+- `apps/extension/src/wallet/services/transaction/service.ts`, `operation-journal/service.ts` (as sinks)
+- bridge-core call sites only: the 4 import sites of `predictedWorstMinFees` — read the function's signature/JSDoc in `packages/bridge-core/src/fee-juice*.ts` to understand what it trusts, but do not audit bridge-core bodies.
+- Tests: `execution/service.composition.test.ts`, `fee/*.test.ts` (skim), `tx-request-builder*.test.ts`.
+
+Specific questions:
+1. Chain identity at signing: `assertLiveChainIdentity` is called in `discovery-probe.ts` and `tx-request-builder.ts` but NOT inside `NuloAccount.buildTxExecutionRequest` (documented gap). Trace EVERY path that produces a signed `TxExecutionRequest` (transfer, dApp sendTx, fast-path, authwit creation, register-token/contract flows, fee-juice claim) and show whether a validated `chainInfo` from the SAME node response is threaded into the request's `chainId`/`version`. Any path that re-fetches `getNodeInfo` or uses a cached/stored chainId at signing is a finding (July F-03 regression check). Also: the XOR-composite collision — is the exact `(l1ChainId, rollupVersion)` tuple compared at signing, or only the composite?
+2. Authwits: enumerate every place a private/public authwit is created (`add_private_authwit`, `add_public_authwit`, `createAuthWit` silent route, `authwit-discoverer`). For each: who chooses the `caller`, `contract`, `selector`, `args`, chainId, version; is the signed intent exactly the displayed one; can an authwit be minted with a wildcard/unbounded intent; can `authwit-discoverer` be steered by simulation output (the dApp's contract) to create an authwit the user never saw?
+3. Fee model: for each `FeeStrategy` (fee-juice, fee-juice-with-claim, fpc, embedded, sponsored?) — who pays, what is the maximum the user can lose (gas limits × maxFeesPerGas, plus FPC deposit/refund logic), and whether a dApp or a lying node can inflate it: `predictedWorstMinFees` trust in node data; `applyEmbeddedFpcGasCap` honouring a dApp-supplied `maxFeesPerGas` verbatim; `admissionCap` from node `txsLimits`; `DEFAULT_FEE_MULTIPLIER`; estimate reuse caches (can a stale/poisoned estimate be reused for a different operation — check the fingerprint/basis validation).
+4. FPC: address derivation (deterministic, from vendored artifact + salt), user-added FPCs (validation of the address/class), the "private fences" rule (private claims/exits pay only via PrivateFPC credit — verify it is a hard block), what a hostile FPC contract could do to a user's funds, and the drift hazard vs bridge-core's salt.
+5. Execution lane/mutex: no timeout by design; can a dApp wedge the lane (DoS) with a never-resolving operation, and does cancel actually abort proving; nullifier double-spend protection across concurrent operations.
+6. Simulation vs execution divergence: `simulateTx`/`profileTx`/`executeUtility` results returned to dApps — do they leak private state beyond the granted scopes (notes of other accounts, other contracts)? Does the view-executor bind `from`/scopes properly? Can simulation side effects (registering contracts/senders in PXE) be triggered without approval?
+7. Register-contract/register-sender/register-token executors: artifact class-id verification enforced on the dApp-supplied artifact; sender registration scope; can a dApp register a contract instance whose address ≠ derived address.
+8. Transaction/journal sinks: what is persisted about a tx (any secret? authwit contents? full args?) and whether cross-profile isolation holds on those rows.
+
+Write your report to `audit/security/2026-09-13-high-prerelease/raw/c08-execution-fee-signing-claude.md`.

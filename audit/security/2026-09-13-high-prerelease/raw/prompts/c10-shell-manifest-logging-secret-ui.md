@@ -1,0 +1,27 @@
+You are a Phase 2 cluster auditor in a map-reduce security audit. Working directory is the repo root (a git worktree of origin/dev). READ FIRST, in this order: `audit/security/2026-09-13-high-prerelease/raw/CONTEXT.md`, then `audit/security/2026-09-13-high-prerelease/raw/SECURITY-PROMPT.md` (the exact audit prompt + negative list + output format — follow it exactly), then the repo-map files named below for orientation. Then read the cluster source files IN FULL (not excerpts). Verify every claim against the code; cite file:line. Do not modify any file except your output file.
+
+# Cluster c10-shell-manifest-logging-secret-ui — manifest/CSP/build posture, accelerator client, e2e flags, logging redaction, clipboard, seed display, external links
+
+Repo maps: `raw/repo-map/extension-shell.md`, `raw/repo-map/00-workspace.md` (§3).
+
+Source files (read all, in full):
+- `apps/extension/manifest/*.ts`, `apps/extension/vite.config.ts`, `vite.shared.ts`, `vite.chrome.config.mts`, `vite.firefox.config.mts`, `apps/extension/public/**` (list), `.github/workflows/_build-extension.yml` (the negative bundle-grep guard)
+- `apps/extension/src/accelerator/*.ts`, `apps/extension/src/e2e/*.ts` (all — determine exact production reachability of each flag)
+- `apps/extension/src/wallet/logger/*.ts` (store, utils, console-forwarding), `apps/extension/src/utils/log-payload-ban.test.ts` (the policy), `apps/extension/src/popup/windows/logger/*`
+- `apps/extension/src/utils/*.ts` (clipboard, external links, string/format, storage facade, full-backup-helpers), `apps/extension/src/composables/{useSecretCountdown,*clipboard*,*secret*,*external*}.ts`
+- `apps/extension/src/onboarding/**` (create/import/reveal seed pages + composables), `apps/extension/src/popup/pages/settings/security/**` (reveal phrase, export, delete), `apps/extension/src/components/composite/SecretRevealCard*`
+- `apps/extension/src/stores/*.ts`, `apps/extension/src/setup/**` (dead? confirm), `apps/extension/src/shims/*`, `apps/extension/src/pages/*`
+- Every `window.open`, `chrome.tabs.create`, `location.href`, `<a :href` built from data (grep) — aztecscan links etc.
+
+Specific questions:
+1. Manifest: permissions vs need (`downloads`, `unlimitedStorage`, `sidePanel`), `host_permissions` (`https://nulo.sh/` — why? what does the extension do with it: fetch? passkey RP? could nulo.sh compromise the wallet?), `http://127.0.0.1/*` (accelerator), `web_accessible_resources` (logo — fingerprinting only?), CSP (`wasm-unsafe-eval`, `img-src data: blob:`; no `connect-src`/`frame-src`/`object-src` → what does that allow: arbitrary `fetch` to any origin from extension pages, framing of remote content?), COOP/COEP, side panel exposure, Firefox differences.
+2. Accelerator client: plain HTTP to `127.0.0.1:59833`, no auth. What exactly is sent (private inputs/witness? the full circuit witness includes secrets like note preimages and signing material?) and what is trusted back. A local unprivileged process (another user, a malicious app) can bind that port first: model the consequences (secret exfiltration, forged proofs accepted?, DoS). Is there any identity check of the server (version handshake? nonce?), and is `VITE_NULO_ACCELERATOR_REQUIRED` off in release builds (WASM fallback)?
+3. e2e flags: for EACH `VITE_NULO_E2E_*` / proverless / token-seeds / migration-fixture / price-map / default-net / `VITE_NULO_ALLOW_IFRAME_DAPPS` / `VITE_NULO_FEE_MULTIPLIER` — verify the release build path cannot enable it (define-time constant + DCE + grep guard) and that the grep guard actually matches the compiled output shape. Is `src/e2e/config.ts` reading `import.meta.env` at runtime anywhere that survives DCE?
+4. Logging: the redactor is key-name based; find production log call sites that pass pre-interpolated strings or bare values containing: addresses, note contents, tx args, RPC URLs with API keys, dApp origins, error messages from node responses (attacker-controlled), backup rows. The persisted log is CSV-exportable — CSV injection (`=cmd`, `+`, `-`, `@` prefixes)? Log viewer rendering of attacker strings.
+5. Clipboard: every secret copy path (seed, private key export, address) — the "honest copy + scrub" helper: does it actually clear the clipboard, on what timer, and does the warning reflect reality; does any path copy silently.
+6. Seed/recovery-phrase display: how the words are held in the popup/onboarding (Vue refs, pinia store, sessionStorage?), when they are cleared (route leave, window blur, timeout), whether they can persist in a pinia store across pages, screenshots/print CSS, autocomplete on import inputs, paste handling.
+7. External links: how aztecscan/explorer URLs are built (address/txHash interpolation — validated hex? could a dApp-supplied string reach a URL?), `noopener`, any `javascript:`/`data:` sink, the fee-juice bridge URL (`VITE_FEE_JUICE_BRIDGE_URL` default `https://tools.nulo.sh`) — what is opened and with what params (does the wallet pass an address/amount in the URL to a web app that then… ?).
+8. `src/setup/` dead page shipped in dist — reachable by URL (`chrome-extension://id/src/setup/index.html`)? What does it do if opened?
+9. Side panel: same popup bundle in a side panel — any assumption in the approval windows that breaks (e.g. window-id based focus) when the popup is docked?
+
+Write your report to `audit/security/2026-09-13-high-prerelease/raw/c10-shell-manifest-logging-secret-ui-claude.md`.
