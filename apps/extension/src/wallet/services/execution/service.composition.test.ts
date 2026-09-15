@@ -98,7 +98,7 @@ async function makeHarness() {
 	const toTx = vi.fn(async () => ({ getTxHash: () => ({ toString: () => "0xhash" }) }))
 	const fakeNode = { getCurrentMinFees: async () => MIN_FEES, sendTx } as unknown as never
 	const fakeIPXE = { proveTx: vi.fn(async () => ({ toTx })) } as unknown as ReturnType<PxeServiceClient["getPXE"]>
-	const fakePxeClient = { getPXE: () => fakeIPXE } as unknown as PxeServiceClient
+	const fakePxeClient = { getPXE: () => fakeIPXE, onProvePhase: { add: () => {} } } as unknown as PxeServiceClient
 
 	const logger = new LoggerStore(new ConfigStore())
 	const ctrl = makeControllableGate()

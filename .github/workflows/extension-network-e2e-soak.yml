@@ -31,11 +31,11 @@ on:
         type: string
         default: "5"
       proverless:
-        description: "proverless build (fast; accelerator OFF)"
+        description: "proverless build (fast; Presto OFF)"
         type: boolean
         default: true
-      disable_accelerator:
-        description: "skip accelerator-server (no-op under proverless)"
+      disable_presto:
+        description: "skip presto-server (no-op under proverless)"
         type: boolean
         default: false
       retry:
@@ -87,7 +87,7 @@ jobs:
       shard_label: soak-${{ matrix.iteration }}
       test_files: ${{ inputs.mode == 'files' && inputs.test_files || '' }}
       proverless: ${{ inputs.proverless }}
-      disable_accelerator: ${{ inputs.disable_accelerator }}
+      disable_presto: ${{ inputs.disable_presto }}
       retry: ${{ inputs.retry }}
     secrets:
       SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}

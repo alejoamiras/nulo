@@ -63,7 +63,7 @@
 			"description": "Aztec line: class-id stability per SECURITY.md. Manual via Aztec milestone. LAST so no later rule re-enables.",
 			"matchPackageNames": [
 				"/^@aztec\\//",
-				"@alejoamiras/aztec-accelerator",
+				"@alejoamiras/presto",
 				"@aztec-foundation/aztec-standards",
 				"@alejoamiras/private-fee-juice"
 			],

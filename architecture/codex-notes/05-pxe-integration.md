@@ -64,19 +64,18 @@ That is specifically there to prevent Chrome from killing the service worker dur
 - `rpcs: Map<chainId, rpcUrl>`
 - `chainInitPromises: Map<chainId, Promise<void>>`
 
-See [`packages/extension/src/wallet/services/pxe/service.ts:67`](../../packages/extension/src/wallet/services/pxe/service.ts#L67) through [`pxe/service.ts:76`](../../packages/extension/src/wallet/services/pxe/service.ts#L76).
+See [`packages/aztec-runtime/src/pxe/service.ts`](../../packages/aztec-runtime/src/pxe/service.ts) (the service moved out of the extension into `@nulo/aztec-runtime`; per-chain state now lives in `ChainRuntimeRegistry`, [`chain-runtime.ts`](../../packages/aztec-runtime/src/pxe/chain-runtime.ts)).
 
 ### Initialization path
 
 On first use of a chain:
 
-- `ensureChain(network)` de-duplicates concurrent initialization per `chainId` in [`pxe/service.ts:344`](../../packages/extension/src/wallet/services/pxe/service.ts#L344)
-- `initChain(network)` creates:
+- `ChainRuntimeRegistry.ensure(network)` de-duplicates concurrent initialization per `(profileId, chainId)` ([`chain-runtime.ts`](../../packages/aztec-runtime/src/pxe/chain-runtime.ts))
+- `ProductionPxeFactory.createChainRuntime(network)` creates:
   - `AztecNode` client against `network.rpcUrl`
-  - PXE with `dataDirectory: pxe/${profileId}/${chainId}`
+  - PXE over the per-`(profileId, chainId)` encrypted OPFS store
   - `proverEnabled: true`
-  - `AcceleratorProver`
-  in [`pxe/service.ts:397`](../../packages/extension/src/wallet/services/pxe/service.ts#L397)
+  - `PrestoProver` (`@alejoamiras/presto`, HTTPS-only in production; its `onPhase` stream is stamped with a per-attempt `seq` + backend and forwarded to the SW as `onProvePhase` — see `ARCHITECTURE.md` "Prove-phase event")
 
 The specific PXE configuration is:
 

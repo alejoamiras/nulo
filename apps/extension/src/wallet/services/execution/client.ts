@@ -27,4 +27,5 @@ definePassthroughsExhaustive<Methods>()(ExecutionServiceClient.prototype, [
 	"previewOperationAuthwits",
 	"cancelJob",
 	"cancelEstimate",
+	"getLastProveOutcome",
 ])

@@ -68,7 +68,7 @@ echo "[e2e:agent] building wallet with VITE_LOCAL_NETWORK_RPC_URL=$AZTEC_NODE_UR
 # NULO_E2E_PROVERLESS=1 builds a proverless wallet (skips BB-SNARK generation;
 # kernel simulation + on-chain submission stay real). Arms the double-opt-in
 # flags so apps/extension/src/e2e/config.ts enables the proverless PXE +
-# ChromeStorageProofGate. Mutually exclusive with accelerator-required.
+# ChromeStorageProofGate. Mutually exclusive with presto-required.
 # The migration-fixture stamp arms the e2e-only fixture migrations (live 9001
 # + the declarative BACKUP 9001) so backup-migration-roundtrip.test.ts can
 # drive a vN backup through the whole import path on a live sandbox. Inert for
@@ -76,8 +76,8 @@ echo "[e2e:agent] building wallet with VITE_LOCAL_NETWORK_RPC_URL=$AZTEC_NODE_UR
 # backup fixture only runs on backup import). Never ships: prod builds omit
 # the env and _build-extension.yml greps release bundles for the markers.
 if [ "${NULO_E2E_PROVERLESS:-}" = "1" ]; then
-  if [ "${VITE_NULO_ACCELERATOR_REQUIRED:-}" = "1" ]; then
-    echo "[e2e:agent] FATAL: NULO_E2E_PROVERLESS and VITE_NULO_ACCELERATOR_REQUIRED are mutually exclusive" >&2
+  if [ "${VITE_NULO_PRESTO_REQUIRED:-}" = "1" ]; then
+    echo "[e2e:agent] FATAL: NULO_E2E_PROVERLESS and VITE_NULO_PRESTO_REQUIRED are mutually exclusive" >&2
     exit 2
   fi
   echo "[e2e:agent] PROVERLESS build — BB-SNARK generation skipped (double opt-in)"
@@ -139,24 +139,23 @@ for marker in "NULO_E2E_TOKEN_SEEDS_BUILD_STAMP" "nulo:e2e:token-seeds"; do
 done
 echo "[e2e:agent] bundle contains the e2e token-seed source ✓"
 
-# Parallel bundle assertion for VITE_NULO_ACCELERATOR_REQUIRED. Codex post-impl
-# audit (finding #3): without this check, if the env var ever stops propagating
-# from the workflow into the build, Layer 2 (chain-runtime.ts onPhase throw)
-# silently disappears and tests can pass on WASM even when the server is up but
-# unhealthy mid-test. The stamp is emitted by apps/extension/src/accelerator/config.ts
-# and pinned into the bundle by offscreen/index.ts. Only enforced when the env
-# var is set (i.e. CI required-mode); locally the var is unset and the assertion
-# is skipped.
-if [ "${VITE_NULO_ACCELERATOR_REQUIRED:-}" = "1" ]; then
-  if ! grep -rq "NULO_ACCELERATOR_REQUIRED_BUILD_STAMP" dist/chrome 2>/dev/null; then
-    echo "[e2e:agent] FATAL: VITE_NULO_ACCELERATOR_REQUIRED=1 but build stamp absent from dist/chrome" >&2
+# Parallel bundle assertion for VITE_NULO_PRESTO_REQUIRED: if the env var ever
+# stops propagating from the workflow into the build, the chain-runtime
+# required-mode throw silently disappears and tests can pass on WASM even when
+# the server is up but unhealthy mid-test. The stamp is emitted by
+# apps/extension/src/presto/config.ts and pinned into the bundle by
+# offscreen/index.ts. Only enforced when the env var is set (CI required-mode);
+# locally the var is unset and the assertion is skipped.
+if [ "${VITE_NULO_PRESTO_REQUIRED:-}" = "1" ]; then
+  if ! grep -rq "NULO_PRESTO_REQUIRED_BUILD_STAMP" dist/chrome 2>/dev/null; then
+    echo "[e2e:agent] FATAL: VITE_NULO_PRESTO_REQUIRED=1 but build stamp absent from dist/chrome" >&2
     echo "[e2e:agent] env didn't propagate; Layer 2 enforcement would silently disappear" >&2
     exit 2
   fi
-  echo "[e2e:agent] bundle contains NULO_ACCELERATOR_REQUIRED_BUILD_STAMP ✓"
+  echo "[e2e:agent] bundle contains NULO_PRESTO_REQUIRED_BUILD_STAMP ✓"
 fi
 
-# Positive proverless stamp assertion (mirror the accelerator stamp). If the
+# Positive proverless stamp assertion (mirror the presto stamp). If the
 # double-opt-in flags didn't propagate into the build, the suite would
 # silently run with REAL proving — defeating the speed/CDP-stability goal and
 # masking the proverless path entirely. Emitted by src/e2e/config.ts, pinned

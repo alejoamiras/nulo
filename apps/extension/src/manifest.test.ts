@@ -55,9 +55,11 @@ describe("passkey relying party", () => {
 		expect(RP_ID).toBe("passkey.nulo.sh")
 	})
 
-	test("the host permission names exactly the RP host", () => {
+	test("the host permission names exactly the RP host; the only other https origin is Presto's loopback", () => {
 		expect(m.host_permissions).toContain(`https://${RP_ID}/`)
-		expect(m.host_permissions.filter((p) => p.startsWith("https://"))).toEqual([`https://${RP_ID}/`])
+		const remote = m.host_permissions.filter((p) => p.startsWith("https://") && !p.startsWith("https://127.0.0.1/"))
+		expect(remote).toEqual([`https://${RP_ID}/`])
+		expect(m.host_permissions).toContain("https://127.0.0.1/*")
 	})
 
 	test("no in-repo deployable names the RP host (dashboard-managed hosting is out of this test's sight)", () => {

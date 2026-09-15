@@ -1,10 +1,10 @@
-import { ACCELERATOR_HOST, ACCELERATOR_PORT, ACCELERATOR_REQUIRED, ACCELERATOR_REQUIRED_BUILD_STAMP } from "@/accelerator/config"
+import { PRESTO_HOST, PRESTO_HTTPS_PORT, PRESTO_PORT, PRESTO_REQUIRED, PRESTO_REQUIRED_BUILD_STAMP } from "@/presto/config"
 import { E2E_PROVERLESS, E2E_PROVERLESS_BUILD_STAMP } from "@/e2e/config"
 import { consoleMethods, LogLevel } from "@/wallet/logger"
 import { LoggerServiceClient } from "@/wallet/services/logger/client"
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
 import { createPxeOffscreen } from "@nulo/aztec-runtime/offscreen/entry"
-import { ProductionPxeFactory } from "@nulo/aztec-runtime/pxe"
+import { ProductionPxeFactory, createProvePhaseSink } from "@nulo/aztec-runtime/pxe"
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { isSupersededByAdopt, OFFSCREEN_READY_MESSAGE, OFFSCREEN_PONG, shouldRespondPong } from "@/wallet/utils/offscreen"
 import { isBenignSwDisconnect } from "./is-benign-sw-disconnect"
@@ -66,19 +66,18 @@ self.onunhandledrejection = (e: PromiseRejectionEvent) => {
 	}
 }
 
-// Pin the accelerator-required build stamp into the bundle so vite
-// cannot tree-shake the import. The CI agent greps dist/chrome for the
-// literal value as a propagation assertion. No-op at runtime.
-// See apps/extension/src/accelerator/config.ts for full context.
-if (ACCELERATOR_REQUIRED_BUILD_STAMP) {
-	;(globalThis as { __NULO_ACCELERATOR_REQUIRED_BUILD_STAMP__?: string }).__NULO_ACCELERATOR_REQUIRED_BUILD_STAMP__ =
-		ACCELERATOR_REQUIRED_BUILD_STAMP
+// Pin the presto-required build stamp into the bundle so vite cannot
+// tree-shake the import. The CI agent greps dist/chrome for the literal
+// value as a propagation assertion. No-op at runtime.
+// See apps/extension/src/presto/config.ts for full context.
+if (PRESTO_REQUIRED_BUILD_STAMP) {
+	;(globalThis as { __NULO_PRESTO_REQUIRED_BUILD_STAMP__?: string }).__NULO_PRESTO_REQUIRED_BUILD_STAMP__ = PRESTO_REQUIRED_BUILD_STAMP
 }
 
 // Mutually exclusive: a build cannot be both proverless (skip proving) and
-// accelerator-required (enforce native proving). Fail fast if misbuilt.
-if (E2E_PROVERLESS && ACCELERATOR_REQUIRED) {
-	throw new Error("[e2e] VITE_NULO_E2E_PROVERLESS and VITE_NULO_ACCELERATOR_REQUIRED are mutually exclusive.")
+// presto-required (enforce native proving). Fail fast if misbuilt.
+if (E2E_PROVERLESS && PRESTO_REQUIRED) {
+	throw new Error("[e2e] VITE_NULO_E2E_PROVERLESS and VITE_NULO_PRESTO_REQUIRED are mutually exclusive.")
 }
 
 // Pin the proverless build stamp (same anti-tree-shake reason as above).
@@ -93,26 +92,30 @@ if (E2E_PROVERLESS_BUILD_STAMP) {
 // wires the concrete Chrome-backed clients and keeps the READY send
 // so aztec-runtime stays chrome-free.
 const t0 = Date.now()
-// `factory` is only customized when ACCELERATOR_REQUIRED (CI builds). For
-// production builds the field is omitted; PxeService defaults to a vanilla
-// ProductionPxeFactory with no accelerator policy, preserving the SDK's
-// silent WASM fallback for users without Aztec Accelerator installed.
+// The prover reports each attempt's phases through this sink; PxeService
+// forwards them to the SW, where the coordinator attributes them by proveId.
+const provePhases = createProvePhaseSink()
 await createPxeOffscreen({
 	profiles: new ProfileServiceClient(),
 	logger: new LoggerServiceClient(),
 	// E2E_PROVERLESS builds the proverless PXE (proverEnabled:false, no
-	// AcceleratorProver) — referenced only in this flag-gated branch so DCE
+	// PrestoProver) — referenced only in this flag-gated branch so DCE
 	// strips it from prod. The controllable barrier lives SW-side (the
 	// offscreen has no chrome.storage); see ExecutionCoordinator's ProofGate.
+	// PRESTO_REQUIRED (CI builds) adds the plaintext endpoint + the preflight;
+	// production is HTTPS-only Presto with the silent WASM fallback.
 	factory: E2E_PROVERLESS
 		? new ProductionPxeFactory(undefined, { provingMode: "proverless" })
-		: ACCELERATOR_REQUIRED
+		: PRESTO_REQUIRED
 			? new ProductionPxeFactory(undefined, {
 					provingMode: "required",
-					host: ACCELERATOR_HOST,
-					port: ACCELERATOR_PORT,
+					host: PRESTO_HOST,
+					port: PRESTO_PORT,
+					httpsPort: PRESTO_HTTPS_PORT,
+					onProvePhase: provePhases.emit,
 				})
-			: undefined,
+			: new ProductionPxeFactory(undefined, { provingMode: "default", onProvePhase: provePhases.emit }),
+	provePhaseSink: provePhases,
 })
 // B-17: PXE services are now up — start answering health PINGs with PONG.
 servicesReady = true

@@ -133,7 +133,7 @@ Aliases map:
 
 - `@`, `~`, `src`, `@assets`
 - selected Aztec/noir artifact JSON files
-- `@alejoamiras/aztec-accelerator` to its built `dist/index.js`
+- (no prover alias: `@alejoamiras/presto` resolves through its own `exports`)
 - `detect-node` to a local shim
 
 in [`vite.config.ts:39`](../../packages/extension/vite.config.ts#L39) through [`vite.config.ts:58`](../../packages/extension/vite.config.ts#L58).

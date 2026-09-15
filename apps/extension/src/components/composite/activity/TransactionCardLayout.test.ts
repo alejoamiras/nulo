@@ -108,6 +108,17 @@ describe("composite/TransactionCardLayout", () => {
 		}
 	})
 
+	test("backend prop renders as data-backend on the root; omitted when unknown", () => {
+		expect(
+			mountLayout({ testId: "tx-card", stage: "proving", backend: "presto" })
+				.find("[data-testid='tx-card']")
+				.attributes("data-backend"),
+		).toBe("presto")
+		expect(
+			mountLayout({ testId: "tx-card", stage: "proving" }).find("[data-testid='tx-card']").attributes("data-backend"),
+		).toBeUndefined()
+	})
+
 	test("data-stage is omitted when stage prop is undefined (settled phase)", () => {
 		const w = mountLayout({ testId: "tx-card" })
 		expect(w.find("[data-testid='tx-card']").attributes("data-stage")).toBeUndefined()

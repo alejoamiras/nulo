@@ -428,6 +428,9 @@ function journalTerminalCardProps(op) {
  *  which op the subtask belongs to. */
 function cardSubtitleFor(op) {
 	if (!op) return "Processing..."
+	// Backend evidence outranks the task label: the label only says a proof is
+	// being generated, the journal says where.
+	if (op.progress?.stage === "proving" && op.progress.backend) return stageSubtitle("proving", op.progress.backend)
 	if (executingTask.value) {
 		const account = appStore.account?.address
 		if (isMatchingTask(executingTask.value, op, account)) {
@@ -821,6 +824,7 @@ onBeforeUnmount(() => {
 				:cancellable="true"
 				:jobId="op.id"
 				:stage="op.progress?.stage ?? null"
+				:backend="op.progress?.backend ?? null"
 				@cancel="onCancelInFlight"
 				@focus="onFocusInFlight"
 			/>

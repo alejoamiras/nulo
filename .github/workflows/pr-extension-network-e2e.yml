@@ -3,8 +3,8 @@ name: Extension network e2e
 on:
   workflow_dispatch:
     inputs:
-      disable_accelerator:
-        description: "Skip accelerator-server for this manual run (investigation override)"
+      disable_presto:
+        description: "Skip presto-server for this manual run (investigation override)"
         required: false
         type: boolean
         default: false
@@ -83,7 +83,7 @@ jobs:
               - '.github/workflows/_extension-network-e2e.yml'
               - '.github/workflows/pr-extension-network-e2e.yml'
               - '.github/actions/setup-aztec/**'
-              - '.github/actions/setup-accelerator-server/**'
+              - '.github/actions/setup-presto-server/**'
               - '.github/actions/setup-bun/**'
               - '.github/actions/setup-puppeteer/**'
       - name: Override for manual dispatch
@@ -161,7 +161,7 @@ jobs:
       # retry would re-mask app flakes; pure infra-boot flakes are handled by the
       # agent's exit-86 sentinel (one infra-retry in _extension-network-e2e.yml).
       retry: "0"
-      # Proverless shard pool (fast, accelerator OFF). Exclude, on top of the
+      # Proverless shard pool (fast, Presto OFF). Exclude, on top of the
       # fee-methods + concurrent-confirm heavy jobs (which run proverless too),
       # the prover-ON canary files transfers + tx-sendTx-default +
       # frozen-account-canary — they run with REAL proving in
@@ -191,7 +191,7 @@ jobs:
       retry: "0"
       test_files: "tests/e2e/network/fee-methods.test.ts tests/e2e/network/selfpay-phase.test.ts"
       # fee-methods is PLAIN proverless (no barrier; the fee flows don't depend
-      # on prove duration). Proverless implies accelerator OFF.
+      # on prove duration). Proverless implies Presto OFF.
       proverless: true
     secrets:
       SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
@@ -232,15 +232,15 @@ jobs:
     #     re-derive), which MUST see real proving — a fake proof would green a
     #     frozen artifact the prover can no longer prove (CLAUDE.md
     #     "Account-address freeze").
-    # Dedicated runner with accelerator-server (proverless: false default).
+    # Dedicated runner with presto-server (proverless: false default).
     uses: ./.github/workflows/_extension-network-e2e.yml
     with:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
       shard_label: "canary"
       retry: "0"
       test_files: "tests/e2e/network/transfers.test.ts tests/e2e/network/tx-sendTx-default.test.ts tests/e2e/network/frozen-account-canary.test.ts"
-      # Real proving — accelerator ON unless the emergency kill switch is set.
-      disable_accelerator: ${{ github.event.inputs.disable_accelerator == 'true' || vars.NULO_E2E_DISABLE_ACCELERATOR == '1' }}
+      # Real proving — Presto ON unless the emergency kill switch is set.
+      disable_presto: ${{ github.event.inputs.disable_presto == 'true' || vars.NULO_E2E_DISABLE_PRESTO == '1' }}
     secrets:
       SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
 

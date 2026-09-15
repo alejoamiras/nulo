@@ -1,7 +1,7 @@
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { ValidationError } from "@nulo/extension-messaging/errors"
 import { validateParams } from "@nulo/extension-messaging/zod"
-import { type JobError, type JobProgress, assertCanTransition, isTerminal } from "@nulo/wallet-core/jobs"
+import { type JobError, type JobProgress, assertCanTransition, isTerminal, type ProveBackend } from "@nulo/wallet-core/jobs"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { Lock, EventHandler } from "@nulo/wallet-core/utils"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
@@ -400,6 +400,35 @@ export class OperationJournalService extends Service<Methods, Events> implements
 			await this.storage.set(id, updated)
 			this.emit("onOperationUpdated", updated)
 			return updated
+		})
+	}
+
+	/**
+	 * Copy the prover's backend evidence onto a record that is CURRENTLY
+	 * `proving`. SW-internal (the execution coordinator calls it from the
+	 * prove-phase event path); never an RPC. Runs under the same lock as
+	 * `transitionOperation` and re-reads the row inside it, so a stage change
+	 * that lands first wins: a late event after the op left `proving` is a
+	 * no-op, never a resurrection. `enteredProveAt` is preserved — the stuck-
+	 * prove reaper keys on it. Returns whether the row was written.
+	 */
+	public async updateProvingBackend(id: string, backend: ProveBackend): Promise<boolean> {
+		await this.ensureInitialized()
+		return await this.transitionLock.withLock(async () => {
+			const existing = await this._loadValidated(id)
+			if (existing?.progress.stage !== "proving") {
+				this.logDebug("updateProvingBackend skipped", { stage: existing?.progress.stage ?? "missing" })
+				return false
+			}
+			if (existing.progress.backend === backend) return false
+			const updated: OperationRecord = {
+				...existing,
+				progress: { ...existing.progress, backend },
+				updatedAt: Date.now(),
+			}
+			await this.storage.set(id, updated)
+			this.emit("onOperationUpdated", updated)
+			return true
 		})
 	}
 

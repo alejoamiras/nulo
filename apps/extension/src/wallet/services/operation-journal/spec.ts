@@ -181,7 +181,7 @@ export const JobProgressSchema: z.ZodType<JobProgress> = z.discriminatedUnion("s
 	z.object({ stage: z.literal("queued") }),
 	z.object({ stage: z.literal("pending") }),
 	z.object({ stage: z.literal("simulating") }),
-	z.object({ stage: z.literal("proving"), enteredProveAt: z.number() }),
+	z.object({ stage: z.literal("proving"), enteredProveAt: z.number(), backend: z.enum(["presto", "browser"]).optional() }),
 	z.object({ stage: z.literal("submitting"), txHash: z.string().optional() }),
 	z.object({ stage: z.literal("succeeded"), txHash: z.string().optional() }),
 	z.object({ stage: z.literal("failed") }),

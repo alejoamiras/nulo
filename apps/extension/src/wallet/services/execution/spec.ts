@@ -1,5 +1,13 @@
 import type { TransferType, LocalTxOrigin } from "@/wallet/services/transaction/spec"
-import type { FeeSettings, GasBalances, OperationAuthwitPreview, TransferFeeEstimate, Operation, OperationResult } from "./models"
+import type {
+	FeeSettings,
+	GasBalances,
+	LastProveOutcome,
+	OperationAuthwitPreview,
+	TransferFeeEstimate,
+	Operation,
+	OperationResult,
+} from "./models"
 
 export const EXECUTION_SERVICE_NAME = "execution"
 
@@ -123,4 +131,9 @@ export type Methods = {
 	 * No-op for unknown jobIds or jobs that already terminated.
 	 */
 	cancelJob(jobId: string): void
+
+	/** The SW's memory of the latest prove attempt (`outcome`) and of a Presto
+	 *  approval denial (`denial`, cleared by the next native proof). Hints only:
+	 *  both reset on SW restart; the journal is the record. */
+	getLastProveOutcome(): LastProveOutcome
 }

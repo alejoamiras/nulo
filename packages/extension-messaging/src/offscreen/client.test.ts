@@ -15,6 +15,7 @@ import { describe, test, expect, vi, beforeEach } from "vitest"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import { captureMessage, emitMessage, makeSpyLogger, silentLogger } from "../testing/transport-harness"
+import { EventHandler } from "@nulo/wallet-core/utils"
 import { RpcDisconnectedError, RpcTimeoutError, UserRejectedError, WalletError } from "../errors"
 import { MessageType } from "../messages"
 import { LoggingTelemetrySink, MemoryTelemetrySink, type RequestTelemetry, type TelemetrySink } from "./telemetry"
@@ -48,6 +49,66 @@ class TestClient extends ServiceClient<Methods> {
 		return this.request("multiply", a, b)
 	}
 }
+
+describe("event sender gate", () => {
+	type Events = { onPing: { n: number } }
+	class EventClient extends ServiceClient<Methods, Events> {
+		public readonly onPing = new EventHandler<{ n: number }>()
+		public constructor() {
+			super("test-service", silentLogger, "event-client", new MemoryTelemetrySink())
+		}
+		public echo(val: string): Promise<string> {
+			return this.request("echo", val)
+		}
+	}
+	const OFFSCREEN = "chrome-extension://nulo/src/offscreen/index.html"
+	class ExactUrlEventClient extends EventClient {
+		protected override isAcceptedSender(sender: chrome.runtime.MessageSender | undefined): boolean {
+			return sender?.id === chrome.runtime.id && sender.url?.split(/[?#]/, 1)[0] === OFFSCREEN
+		}
+	}
+	const sender = (v: object) => v as unknown as chrome.runtime.MessageSender
+	const event = { type: MessageType.Event, from: "test-service", content: { event: "onPing", payload: { n: 1 } } }
+	const popup = sender({ id: "nulo", url: "chrome-extension://nulo/src/popup/index.html" })
+
+	function mounted(Client: new () => EventClient) {
+		// biome-ignore lint/suspicious/noExplicitAny: stub
+		const runtime = (globalThis as any).chrome.runtime
+		runtime.id = "nulo"
+		// The default policy compares `sender.url` against this extension's base URL.
+		runtime.getURL = (path: string) => `chrome-extension://nulo/${path}`
+		const client = new Client()
+		client.connect()
+		const seen = vi.fn()
+		client.onPing.add(seen)
+		return Object.assign(seen, { client })
+	}
+
+	test("default policy: a foreign extension and a content script are dropped; a same-extension page passes", () => {
+		const seen = mounted(EventClient)
+		emitMessage(event, sender({ id: "other-ext", url: OFFSCREEN }))
+		emitMessage(event, sender({ id: "nulo", url: "https://dapp.example/", tab: { id: 1 } }))
+		expect(seen).not.toHaveBeenCalled()
+		emitMessage(event, popup)
+		expect(seen).toHaveBeenCalledExactlyOnceWith({ n: 1 })
+	})
+
+	test("exact-URL override: only the offscreen document (bare, ?instance=, tab-hosted) feeds events — addressing the client's uid earns no exemption", async () => {
+		const seen = mounted(ExactUrlEventClient)
+		const pending = seen.client.echo("hi")
+		pending.catch(() => {})
+		await flush()
+		const { fromUid } = getLastRequest()
+		emitMessage(event, popup)
+		emitMessage({ ...event, to: fromUid }, popup)
+		emitMessage(event, sender({ id: "nulo" }))
+		expect(seen).not.toHaveBeenCalled()
+		emitMessage(event, sender({ id: "nulo", url: OFFSCREEN }))
+		emitMessage(event, sender({ id: "nulo", url: `${OFFSCREEN}?instance=abc123`, tab: { id: 9 } }))
+		expect(seen).toHaveBeenCalledTimes(2)
+		seen.client.disconnect()
+	})
+})
 
 describe("frozen transport error contract", () => {
 	// Mirror of the background transport's pin suite: same base-built VALUES

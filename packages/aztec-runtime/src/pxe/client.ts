@@ -26,7 +26,9 @@ import type { ServiceSpec } from "@nulo/wallet-core/base"
 import { ServiceClient } from "@nulo/extension-messaging/offscreen"
 import type { NetworkInfo } from "./chain-runtime"
 import type { IPXE } from "./ipxe"
-import type { Methods, NotesFilter, NoteSchema } from "./spec"
+import type { Methods, NotesFilter, NoteSchema, PxeEvents } from "./spec"
+import type { ProvePhaseEvent } from "./chain-runtime"
+import { EventHandler } from "@nulo/wallet-core/utils"
 import { PXE_SERVICE_NAME } from "./spec"
 import { NoteDaoSchema, PackedPrivateEventSchema } from "./schemas"
 import {
@@ -79,7 +81,10 @@ export interface StoreKeyProvision {
 	generation: string
 }
 
-export class PxeServiceClientBase extends ServiceClient<Methods> implements ServiceSpec<Methods> {
+export class PxeServiceClientBase extends ServiceClient<Methods, PxeEvents> implements ServiceSpec<Methods, PxeEvents> {
+	/** Prove-phase events from the offscreen prover, already sender-gated by the
+	 *  transport; the payload is still untrusted until the consumer validates it. */
+	public readonly onProvePhase = new EventHandler<ProvePhaseEvent>()
 	/** SW-side derivation hook for the per-profile store encryption key (see
 	 *  `setStoreKeyProvider`). Undefined until the embedder wires it at boot. */
 	private storeKeyProvider?: (profileId: string) => Promise<StoreKeyProvision | undefined>
@@ -279,8 +284,13 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 		return (await z.array(NoteDaoSchema).parseAsync(result)) as unknown as NoteDao[]
 	}
 
-	public async proveTx(network: NetworkInfo, txRequest: TxExecutionRequest, scopes: AztecAddress[]): Promise<TxProvingResult> {
-		const result = await this.request("proveTx", network, txRequest, scopes)
+	public async proveTx(
+		network: NetworkInfo,
+		txRequest: TxExecutionRequest,
+		scopes: AztecAddress[],
+		proveId?: string,
+	): Promise<TxProvingResult> {
+		const result = await this.request("proveTx", network, txRequest, scopes, proveId)
 		return await TxProvingResult.schema.parseAsync(result)
 	}
 
