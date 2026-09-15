@@ -69,7 +69,8 @@ const settingHandlers = {
 		root.classList.toggle("noanimations", Boolean(value))
 	},
 	sidePanel(value) {
-		chrome.sidePanel.setPanelBehavior({
+		// Chrome-only API: Firefox has no side panel.
+		chrome.sidePanel?.setPanelBehavior({
 			openPanelOnActionClick: Boolean(value),
 		})
 	},
@@ -313,7 +314,14 @@ onBeforeMount(async () => {
 	// restart keeps the defaults and must never keep the session check from running.
 	try {
 		const settings = await configService.getProps()
-		settings.forEach(applySetting)
+		for (const setting of settings) {
+			// One handler hitting a browser-specific API must not skip the settings after it.
+			try {
+				applySetting(setting)
+			} catch (error) {
+				console.error("setting failed to apply at boot; default kept", { key: setting.key, error })
+			}
+		}
 	} catch (error) {
 		console.error("settings read failed at boot; defaults kept", { error })
 	}
