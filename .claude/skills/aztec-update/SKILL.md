@@ -36,7 +36,7 @@ Do not start Phase 1 before the answers; on a reset, do not run any `--broadcast
 
 **The pin surface** — miss one and you get a mixed old/new set:
 - `@aztec/*` exact pins across the workspace package.json files (`rg '"@aztec/' apps/*/package.json packages/*/package.json`). `@aztec/viem` is versioned independently — leave it.
-- **`@alejoamiras/aztec-accelerator`** (extension + aztec-runtime) — it exact-depends on `@aztec` transitives; skipping it silently reintroduces the old line.
+- **`@alejoamiras/presto`** (extension + aztec-runtime) — it exact-depends on `@aztec` transitives; skipping it silently reintroduces the old line. Bump it WITH the `@aztec` line: the page-side client sends the workspace `@aztec/pxe` version and the offscreen prover sends the SDK's own pin, and a drift surfaces as the visible `version-mismatch` state.
 - **`@alejoamiras/aztec-standards` + `@alejoamiras/aztec-fee-payment`** (our npm takeover of the Wonderland packages; ~8 pins across 5 packages).
 - The two noir patches: rename `patches/@aztec%2Fnoir-{acvm_js,noirc_abi}@<v>.patch` + the `patchedDependencies` keys in the root package.json.
 - `bunfig.toml` `minimumReleaseAgeExcludes`: fresh publishes are min-age-blocked, and the gate bites TRANSITIVES too — enumerate every `@aztec/*` name from `bun.lock` (~30), plus the three `@alejoamiras/*`. Date the comment; a follow-up PR removes the excludes after they age past 7 days.
@@ -91,11 +91,11 @@ CLAUDE.md "Account-address freeze").
 
 **The frozen-account execution canary (MANDATORY, every `@aztec/*` bump PR)**: run
 `bun run e2e:agent tests/e2e/network/frozen-account-canary.test.ts` **prover-ON** before merge.
-LOCALLY, `e2e:agent` has NO accelerator enforcement — it silently falls back to in-browser WASM if
+LOCALLY, `e2e:agent` has NO Presto enforcement — it silently falls back to in-browser WASM if
 no prover is up, which would pass the canary WITHOUT proving anything about native proving. To
-actually run it prover-ON locally: start `accelerator-server` on `127.0.0.1:59833` (the SHA-pinned
-binary from `_extension-network-e2e.yml`), build the wallet with `VITE_NULO_ACCELERATOR_REQUIRED=1`, and
-confirm at least one `Received /prove request` in the accelerator log during the run. In CI this is
+actually run it prover-ON locally: start `presto-server` on `127.0.0.1:59833` (the SHA-pinned
+binary from `_extension-network-e2e.yml`), build the wallet with `VITE_NULO_PRESTO_REQUIRED=1`, and
+confirm at least one `Received /prove request` in the presto log during the run. In CI this is
 automatic: the canary is a named file in the prover-ON `network-e2e-canary` job (`pr-extension-network-e2e.yml`),
 so the required `extension-network-e2e-status` check enforces it — that is the authoritative gate; the local
 run is a pre-flight. It proves the frozen 5.0.1 account bytecode still simulates, proves natively,
@@ -161,8 +161,8 @@ Then Branch A's delivery gates. Live-deploy discipline: fix forward carefully, n
   (`noir-protocol-circuits-types/artifacts/vks/tree.ts`) discriminates with `instanceof`, so two
   copies of that module make it treat the VK object as its own hash and abort with
   `VK index for [object Object] not found in VK tree` — thrown in-wallet BEFORE any `/prove`
-  request, so the accelerator log is silent and it looks like a proving failure that never
-  reached the prover. Any package that exact-pins its own `@aztec` deps (the accelerator SDK)
+  request, so the presto log is silent and it looks like a proving failure that never
+  reached the prover. Any package that exact-pins its own `@aztec` deps (the Presto SDK)
   must move WITH the line; holding it is not an option. Packages that declare exact-version
   PEERS (private-fee-juice) or nothing at all (standards) re-bind to the workspace line and are
   safe to hold. Gate: `scripts/aztec-hold-residue-check.ts`.
@@ -189,10 +189,10 @@ Then Branch A's delivery gates. Live-deploy discipline: fix forward carefully, n
   Two files carry `@requires-proverless` and the runner hard-fails if they're in a prover-ON set.
   And SHARD the proverless pass locally — `agent.sh` allocates its own ports per run, so 3-4
   concurrent shards are safe (CI runs 5) and cut it from ~25min to under 10. Prover-ON is the
-  exception: every shard would queue on the single accelerator at the hardcoded port 59833.
-- **`BB_BINARY_PATH` is a footgun**: `find_bb` returns the seed unconditionally
-  (alejoamiras/aztec-accelerator#352), so a version-mismatched seed proves everything with the
-  wrong bb while the log shows a download of the right one. Run the server unseeded.
+  exception: every shard would queue on the single presto-server at the hardcoded port 59833.
+- **`BB_BINARY_PATH` is a footgun**: Presto's `find_bb` honours the seed before the versioned
+  cache, so a version-mismatched seed proves everything with the wrong bb while the log shows a
+  download of the right one. Run the server unseeded.
 
 - `aztec compile`'s "thread 'main' has overflowed its stack" can MASK real type errors — run `aztec-nargo compile` raw (with `ulimit -s 65520`) to see them.
 - rc.2+ `DeployMethod.send()` returns `Promise<DeployResultMined>` (no `.deployed()` chain), and codegen'd `Contract.deploy` needs the **EmbeddedWallet itself** as the `Wallet` (the account object lacks `getContractClassMetadata`) with the account as `from`.

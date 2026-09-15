@@ -61,11 +61,11 @@ on:
         required: false
         type: string
         default: ""
-      disable_accelerator:
+      disable_presto:
         description: |
-          Skip accelerator-server install + startup + hard-fail enforcement.
-          Wallet falls back to in-browser WASM proving (pre-PR baseline).
-          Rollback flag for emergencies. See plan §10 + CI.md "Accelerator in CI".
+          Skip presto-server install + startup + hard-fail enforcement.
+          Wallet falls back to in-browser WASM proving.
+          Rollback flag for emergencies. See CI.md "Presto in CI".
         required: false
         type: boolean
         default: false
@@ -73,7 +73,7 @@ on:
         description: |
           Build the wallet with NULO_E2E_PROVERLESS=1 (skip BB-SNARK
           generation; kernel sim + on-chain submission stay real). Implies
-          accelerator OFF (proverless ⊥ accelerator-required). Used by the
+          Presto OFF (proverless ⊥ presto-required). Used by the
           shard pool + STUB barrier jobs; the prover-ON canary jobs leave it
           false. See implementations-plan/e2e-proverless-stub.
         required: false
@@ -103,23 +103,23 @@ jobs:
       AZTEC_NODE_URL: ${{ inputs.aztec_node_url }}
       SPONSORED_FPC_SALT: ${{ !contains(inputs.aztec_node_url, 'localhost') && secrets.SPONSORED_FPC_SALT || '' }}
       # Baked into the wallet build at `bun run build:chrome` time (via the
-      # agent.sh subprocess). When "1", `apps/extension/src/accelerator/config.ts`
-      # sets `ACCELERATOR_REQUIRED=true`, which makes the offscreen factory
-      # construct `ProductionPxeFactory` in required-mode (eager
-      # checkAcceleratorStatus preflight + onPhase throw on
-      # "fallback"/"denied"). When empty, the wallet behaves exactly like
-      # the production build (silent WASM fallback if no accelerator).
+      # agent.sh subprocess). When "1", `apps/extension/src/presto/config.ts`
+      # sets `PRESTO_REQUIRED=true`, which makes the offscreen factory
+      # construct `ProductionPxeFactory` in required-mode (plain HTTP to the
+      # headless server, eager checkPrestoStatus preflight + onPhase throw on
+      # every fallback-class phase). When empty, the wallet behaves exactly
+      # like the production build (HTTPS-only, silent WASM fallback).
       #
-      # Expression shape `disable_accelerator == false && '1' || ''` instead
+      # Expression shape `disable_presto == false && '1' || ''` instead
       # of the inverted form: GitHub Actions short-circuits `&&` such that
       # `true && ''` returns `''` (right operand), and then `'' || '1'`
       # falls through to `'1'` because empty string is falsy. So the inverted
       # form would resolve to `'1'` in BOTH branches, completely defeating
       # the disable flag (codex post-impl audit finding #1).
-      # Accelerator-required ONLY when not disabled AND not proverless (proverless
-      # ⊥ accelerator — the offscreen would FATAL on both). Same short-circuit
+      # Presto-required ONLY when not disabled AND not proverless (proverless
+      # ⊥ presto — the offscreen would FATAL on both). Same short-circuit
       # shape as the disable flag (`(A && B) && '1' || ''` → '1' iff both true).
-      VITE_NULO_ACCELERATOR_REQUIRED: ${{ (inputs.disable_accelerator == false && inputs.proverless == false) && '1' || '' }}
+      VITE_NULO_PRESTO_REQUIRED: ${{ (inputs.disable_presto == false && inputs.proverless == false) && '1' || '' }}
       # Proverless build flag, read by agent.sh (arms the double-opt-in VITE
       # flags + asserts the positive build stamp). '1' iff proverless.
       NULO_E2E_PROVERLESS: ${{ inputs.proverless && '1' || '' }}
@@ -148,73 +148,66 @@ jobs:
 
       - uses: ./.github/actions/setup-puppeteer
 
-      # Install + verify + start accelerator-server. Skipped when the
-      # rollback flag is set; in that case the wallet build's
-      # VITE_NULO_ACCELERATOR_REQUIRED is also empty so chain-runtime.ts
-      # behaves like production (silent WASM fallback).
-      - uses: ./.github/actions/setup-accelerator-server
-        if: '${{ !inputs.disable_accelerator && !inputs.proverless }}'
+      # Install + verify + start presto-server. Skipped when the rollback
+      # flag is set; in that case the wallet build's VITE_NULO_PRESTO_REQUIRED
+      # is also empty so chain-runtime.ts behaves like production (HTTPS-only,
+      # silent WASM fallback).
+      - uses: ./.github/actions/setup-presto-server
+        if: '${{ !inputs.disable_presto && !inputs.proverless }}'
         with:
-          # v2.0.0 headless server; bb is fetched per the SDK-requested version
-          # (x-aztec-version) and cached in ~/.aztec-accelerator/versions/.
-          version: "2.0.0"
-          # SHA-256 of the EXTRACTED binary (not the tarball — different
-          # hashes; the binary is what `actions/cache` restores, so it's
-          # the trust anchor on every run). Computed locally via:
-          #   curl ... | tar -xzO accelerator-server | shasum -a 256
-          # The upstream `.sha256` sidecar in the GH release covers the
-          # tarball; we don't trust the sidecar as a security boundary
-          # anyway (release-origin compromise would replace both).
-          # See SECURITY.md "Binary dependencies" for the bump procedure.
-          expected_sha256: 443d5f7b485d5ec430a4fe0ffc277cbd4cedbb285073ffae9ca3ee83dda10a22
+          # Headless server; bb is fetched per the SDK-requested version
+          # (x-aztec-version) and cached in ~/.presto/versions/.
+          version: "1.1.1"
+          # Both pins, established from the release assets (the tarball is
+          # checked before extraction; the extracted binary on every run,
+          # cache hits included). See SECURITY.md "Binary dependencies".
+          expected_tarball_sha256: 48f524b159fe84947f767ca2903e06c82eb555eec99ab46052cb3d92bd1b33ef
+          expected_sha256: 7c866bac4023d480de7a0d6a5ad2069ba23979d01fe248a780daad2f369eecdb
 
-      - name: Start accelerator-server
-        if: '${{ !inputs.disable_accelerator && !inputs.proverless }}'
+      - name: Start presto-server
+        if: '${{ !inputs.disable_presto && !inputs.proverless }}'
         shell: bash
-        env:
-          # tracing-subscriber filter; info level carries the per-prove lines the
-          # assertion step greps.
-          RUST_LOG: "info"
-          # The server denies non-localhost origins by default (SEC-01c, unchanged at
-          # 2.0.0), and the wallet proves from chrome-extension://<id> — an origin
-          # unknowable before Chrome loads the unpacked build, so an ALLOWED_ORIGINS
-          # allowlist is impossible; allow-all is safe on a loopback-only server on a
-          # single-tenant runner where fork PRs receive no secrets (SECURITY.md).
-          ACCEL_ALLOW_ALL: "1"
         run: |
           set -euo pipefail
-          # Never seed BB_BINARY_PATH: find_bb returns a seed unconditionally
-          # (alejoamiras/aztec-accelerator#352), so a version-mismatched seed would
-          # prove every request with the wrong bb while the log shows a download of
-          # the right one.
-          nohup accelerator-server > /tmp/accelerator-server.log 2>&1 &
-          echo "ACCELERATOR_PID=$!" >> "$GITHUB_ENV"
+          # Both variables are scoped to the server PROCESS, never the job: RUST_LOG=info
+          # carries the per-prove lines the assertion step greps; PRESTO_ALLOW_ALL=1
+          # approves every browser origin because the wallet proves from
+          # chrome-extension://<id>, an origin unknowable before Chrome loads the unpacked
+          # build (the server denies non-localhost origins by default). Safe on a
+          # loopback-only server on a single-tenant runner where fork PRs receive no
+          # secrets (SECURITY.md).
+          # Never seed BB_BINARY_PATH: Presto's find_bb honours it before the versioned
+          # cache, so a mismatched seed would prove every request with the wrong bb while
+          # the log shows a download of the right one.
+          RUST_LOG=info PRESTO_ALLOW_ALL=1 nohup presto-server > /tmp/presto-server.log 2>&1 &
+          echo "PRESTO_PID=$!" >> "$GITHUB_ENV"
 
-      - name: Wait for accelerator-server ready (Layer 1 preflight)
-        if: '${{ !inputs.disable_accelerator && !inputs.proverless }}'
+      - name: Wait for presto-server ready (Layer 1 preflight)
+        if: '${{ !inputs.disable_presto && !inputs.proverless }}'
         shell: bash
         run: |
           set -euo pipefail
           for _i in $(seq 1 30); do
-            if curl -sSfL http://127.0.0.1:59833/health > /tmp/accelerator-health.json 2>/dev/null; then
+            # The origin-tiered /health serves the detailed body (bb_available) to a request
+            # without an Origin header, which curl sends none of.
+            if curl -sSfL http://127.0.0.1:59833/health > /tmp/presto-health.json 2>/dev/null; then
               # bb_available is the authoritative liveness signal. Version-
               # cache matching is enforced later by Layer 2's eager
-              # checkAcceleratorStatus in chain-runtime.ts, where the error
-              # message includes the SDK's expected version (clearer than a
-              # workflow-level jq failure).
-              if jq -e '.bb_available == true' /tmp/accelerator-health.json > /dev/null; then
-                echo "Accelerator ready: $(cat /tmp/accelerator-health.json)"
+              # checkPrestoStatus in chain-runtime.ts, where the error
+              # message names the reason (clearer than a workflow-level jq failure).
+              if jq -e '.bb_available == true' /tmp/presto-health.json > /dev/null; then
+                echo "Presto ready: $(cat /tmp/presto-health.json)"
                 exit 0
               fi
-              echo "::error::accelerator-server alive but bb_available != true"
-              cat /tmp/accelerator-health.json
-              tail -30 /tmp/accelerator-server.log || true
+              echo "::error::presto-server alive but bb_available != true"
+              cat /tmp/presto-health.json
+              tail -30 /tmp/presto-server.log || true
               exit 1
             fi
             sleep 1
           done
-          echo "::error::accelerator-server failed to come up in 30s"
-          tail -50 /tmp/accelerator-server.log || true
+          echo "::error::presto-server failed to come up in 30s"
+          tail -50 /tmp/presto-server.log || true
           exit 1
 
       - name: Run network e2e via agent
@@ -290,47 +283,49 @@ jobs:
       # bypassed — server-side evidence complementing Layer 2's in-page hard-fail.
       # The gate counts "Proving succeeded" ("Received /prove request" logs before
       # authorization or proving) and enforces only canary lanes: soak/dispatch lanes
-      # may legitimately run non-proving file sets with the accelerator up.
-      - name: Assert accelerator activity (enforced in canary lanes)
-        if: ${{ always() && !cancelled() && !inputs.disable_accelerator && !inputs.proverless }}
+      # may legitimately run non-proving file sets with Presto up. The in-test
+      # native assertions (data-backend="presto") hold on every prover-ON lane.
+      - name: Assert presto activity (enforced in canary lanes)
+        if: ${{ always() && !cancelled() && !inputs.disable_presto && !inputs.proverless }}
         shell: bash
         env:
           SHARD_LABEL: ${{ inputs.shard_label }}
         run: |
           set -euo pipefail
-          if [ ! -f /tmp/accelerator-server.log ]; then
-            echo "::error::accelerator-server log missing — startup failure"
+          if [ ! -f /tmp/presto-server.log ]; then
+            echo "::error::presto-server log missing — startup failure"
             exit 1
           fi
-          # Literals from accelerator-server 2.0.0 core/src/server/prove.rs:228,:353.
-          PROVE_COUNT=$(grep -c 'Received /prove request' /tmp/accelerator-server.log || true)
-          PROVE_SUCCESS=$(grep -c 'Proving succeeded' /tmp/accelerator-server.log || true)
-          echo "::notice::accelerator-server log: ${PROVE_COUNT} /prove requests, ${PROVE_SUCCESS} successful proofs"
+          # Literals from presto-v1.1.1 packages/presto/core/src/server/prove.rs:283,:475.
+          PROVE_COUNT=$(grep -c 'Received /prove request' /tmp/presto-server.log || true)
+          PROVE_SUCCESS=$(grep -c 'Proving succeeded' /tmp/presto-server.log || true)
+          echo "::notice::presto-server log: ${PROVE_COUNT} /prove requests, ${PROVE_SUCCESS} successful proofs"
+          echo "PROVE_SUCCESS=${PROVE_SUCCESS}"
           {
-            echo "### accelerator-server activity"
+            echo "### presto-server activity"
             echo "- /prove request lines: ${PROVE_COUNT}"
             echo "- successful proofs: ${PROVE_SUCCESS}"
-            echo "- log size: $(wc -c < /tmp/accelerator-server.log) bytes"
+            echo "- log size: $(wc -c < /tmp/presto-server.log) bytes"
             echo "- last 5 lines:"
             echo '```'
-            tail -5 /tmp/accelerator-server.log
+            tail -5 /tmp/presto-server.log
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "$PROVE_SUCCESS" -eq 0 ] && [ "$SHARD_LABEL" = "canary" ]; then
             echo "::error::canary lane finished with ZERO successful native proofs — the native proving lane was bypassed."
-            tail -30 /tmp/accelerator-server.log || true
+            tail -30 /tmp/presto-server.log || true
             exit 1
           fi
 
-      - name: Shut down accelerator-server
-        if: ${{ always() && !inputs.disable_accelerator && !inputs.proverless }}
+      - name: Shut down presto-server
+        if: ${{ always() && !inputs.disable_presto && !inputs.proverless }}
         shell: bash
         run: |
-          if [ -n "${ACCELERATOR_PID:-}" ]; then
-            kill -TERM "${ACCELERATOR_PID}" 2>/dev/null || true
-            wait "${ACCELERATOR_PID}" 2>/dev/null || true
+          if [ -n "${PRESTO_PID:-}" ]; then
+            kill -TERM "${PRESTO_PID}" 2>/dev/null || true
+            wait "${PRESTO_PID}" 2>/dev/null || true
           fi
-          pkill -TERM accelerator-server 2>/dev/null || true
+          pkill -TERM presto-server 2>/dev/null || true
 
       - name: Upload network e2e logs on failure
         if: failure()
@@ -344,7 +339,7 @@ jobs:
             /tmp/aztec-*.log
             /tmp/anvil-*.log
             /tmp/nulo-probes-*.jsonl
-            /tmp/accelerator-server.log
-            /tmp/accelerator-health.json
+            /tmp/presto-server.log
+            /tmp/presto-health.json
           if-no-files-found: ignore
           retention-days: 7

@@ -48,29 +48,33 @@ Triggers:
 
 Runs the network e2e suite (anvil + Aztec sandbox + playground + the extension build) as a **5-shard parallel matrix** — each shard owns its own sandbox + ~9 of the 45 test files (deterministic SHA-1-of-filename distribution). Wall time ~10–15 min (vs ~35–45 min unsharded). Same trigger shape as `pr-extension-smoke-e2e`, but with the `extension-network` filter (network-touching wallet code, runtime, bridge, playground, etc.) and the `e2e:extension-network` label. See [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md#ci-sharding-5-way-matrix) for the shard-design rationale + the 2 quarantined slow tests.
 
-#### Accelerator in CI
+#### Presto in CI
 
-Each network-e2e shard installs and starts the headless **`accelerator-server`** binary (from the [`alejoamiras/aztec-accelerator`](https://github.com/alejoamiras/aztec-accelerator) repo) before the test agent fires. The wallet build is stamped with `VITE_NULO_ACCELERATOR_REQUIRED=1` so [`chain-runtime.ts`](./packages/aztec-runtime/src/pxe/chain-runtime.ts) constructs `ProductionPxeFactory` in **required-mode** — proving traffic MUST hit accelerator-server natively, never silently fall back to in-browser WASM. Layered enforcement:
+Each prover-ON network-e2e lane installs and starts the headless **`presto-server`** binary (from the [`alejoamiras/presto`](https://github.com/alejoamiras/presto) repo) before the test agent fires. The wallet build is stamped with `VITE_NULO_PRESTO_REQUIRED=1` so [`chain-runtime.ts`](./packages/aztec-runtime/src/pxe/chain-runtime.ts) constructs `ProductionPxeFactory` in **required-mode** — proving traffic MUST hit presto-server natively, never silently fall back to in-browser WASM. Required mode is also the only place plaintext HTTP is representable: the headless server is HTTP-only, so the factory derives `httpsOnly: false` from the mode; production always passes `httpsOnly: true`. Layered enforcement:
 
 - **Layer 1** (workflow) — `/health` preflight gates the run on `bb_available == true`. Server missing or unhealthy → red.
-- **Layer 2** (wallet) — `chain-runtime.ts` does an eager `checkAcceleratorStatus()` at PXE creation + installs an `onPhase` callback that throws on `"fallback"` / `"denied"` phases. This is the per-test authority.
-- **Layer 3** (workflow, advisory) — post-test step counts `Received /prove request` log lines in `/tmp/accelerator-server.log` and emits a notice + step-summary table. Does NOT gate.
+- **Layer 2** (wallet) — `chain-runtime.ts` does an eager `checkPrestoStatus()` at PXE creation (the error names the SDK's `reason` and, for `secure-connection-unavailable`, its `diagnosis`) + installs an `onPhase` guard that throws on `fallback` / `denied` / `secure-connection-unavailable` / `version-mismatch`. This is the per-test authority.
+- **Layer 3** (workflow) — post-test step counts `Received /prove request` and `Proving succeeded` lines in `/tmp/presto-server.log`, prints `PROVE_SUCCESS=<n>` and a step-summary table, and **fails the `canary` lane** when there were zero successful native proofs. On soak/dispatch lanes (`shard_label: soak-N`) it only reports — the in-test assertion in `tx-sendTx-default` (`data-backend="presto"` + the exact subtitle, keyed on the build stamp) is what a prover-ON soak enforces.
 
-**Production behavior is unchanged.** `VITE_NULO_ACCELERATOR_REQUIRED` is only set in `_extension-network-e2e.yml`. Production builds get the default (`false`) → factory constructed without `onPhase` callback or preflight → SDK's silent WASM fallback path is preserved for end users without **Aztec Accelerator** (the desktop app) installed.
+**Production behavior.** `VITE_NULO_PRESTO_REQUIRED` is only set in `_extension-network-e2e.yml`, and [`_build-extension.yml`](./.github/workflows/_build-extension.yml) fails a production build whose bundle carries `NULO_PRESTO_REQUIRED_BUILD_STAMP`. Production builds prove over HTTPS only (Presto's desktop app serves `https://127.0.0.1:59834` once its Encrypted Connection setup is done) with the SDK's silent WASM fallback for users without Presto.
 
 **Rollback flags** (both require repo write access; PR authors cannot toggle):
-- `vars.NULO_E2E_DISABLE_ACCELERATOR=1` (Settings → Variables) — the emergency kill switch, affects all PR + dispatch runs until cleared.
-- `workflow_dispatch` input `disable_accelerator: true` — single-run override for investigation.
+- `vars.NULO_E2E_DISABLE_PRESTO=1` (Settings → Variables) — the emergency kill switch, affects all PR + dispatch runs until cleared.
+- `workflow_dispatch` input `disable_presto: true` — single-run override for investigation.
 
-**Bumping accelerator-server**: update `version` + `expected_sha256` in `.github/workflows/_extension-network-e2e.yml`'s `setup-accelerator-server` step together. SHA-256 must be computed locally (`shasum -a 256` on a freshly downloaded tarball); the `.sha256` sidecar from the same release is a sanity check, not a security boundary. See [SECURITY.md](./SECURITY.md#binary-dependencies).
+**Origin gate.** The server denies non-localhost browser origins by default, and the wallet proves from `chrome-extension://<id>` — unknowable before Chrome loads the unpacked build — so the start step sets `PRESTO_ALLOW_ALL=1` on the **server process only** (never at job level). Safe on a loopback-only server on a single-tenant, ephemeral runner where fork PRs receive no secrets; never on a self-hosted runner. It bypasses Presto's per-origin approval prompt by design — that path is exercised by the manual Mac check, not CI.
+
+**Coexistence.** Presto and the retired Aztec Accelerator desktop app share the wire protocol on the same port: a still-running Accelerator answers a Presto client and the wallet cannot tell them apart. Quit or uninstall Aztec Accelerator before installing Presto.
+
+**Bumping presto-server**: update `version`, `expected_tarball_sha256` and `expected_sha256` in `.github/workflows/_extension-network-e2e.yml`'s `setup-presto-server` step together. Both hashes are computed locally from the release assets; the `.sha256` sidecar from the same release is a transfer-integrity check, not a security boundary. See [SECURITY.md](./SECURITY.md#binary-dependencies).
 
 #### Proverless network e2e (the two-build split)
 
-Most network-e2e files run against a **proverless** wallet build (`_extension-network-e2e.yml` input `proverless: true` → `NULO_E2E_PROVERLESS=1`): [`chain-runtime.ts`](./packages/aztec-runtime/src/pxe/chain-runtime.ts) sets `proverEnabled:false`, so the PXE skips BB-SNARK generation — kernel simulation + on-chain submission stay real, and the local node accepts the fake `ChonkProof.random()` proof. This makes the shard pool fast and CDP-stable. Accelerator is forced OFF for proverless jobs (`proverless` ⊥ `VITE_NULO_ACCELERATOR_REQUIRED`).
+Most network-e2e files run against a **proverless** wallet build (`_extension-network-e2e.yml` input `proverless: true` → `NULO_E2E_PROVERLESS=1`): [`chain-runtime.ts`](./packages/aztec-runtime/src/pxe/chain-runtime.ts) sets `proverEnabled:false`, so the PXE skips BB-SNARK generation — kernel simulation + on-chain submission stay real, and the local node accepts the fake `ChonkProof.random()` proof. This makes the shard pool fast and CDP-stable. Presto is forced OFF for proverless jobs (`proverless` ⊥ `VITE_NULO_PRESTO_REQUIRED`).
 
 A few **STUB** tests (`cancel-mid-prove`, `concurrent-sendtx-{approve,confirm}`) need a controllable prove window — proverless prove collapses to sub-second, too fast to observe sequencing/cancel. They run proverless and drive a `ProofGate` (a `chrome.storage.session` barrier, key `nulo:e2e:proof-gate`, injected into the **SW** `ExecutionCoordinator.proveTxTask` — the offscreen document has no `chrome.storage`) to hold the tx at `proving` deterministically, then release.
 
-**Real BB proving stays covered** by the `network-e2e-canary` job (prover-ON, accelerator): `transfers` (wallet UI, waits through real prove → mine) + `tx-sendTx-default` (dApp, waits through real prove → submit — the node validates a real proof at `node.sendTx`; playground hard-codes `wait: "NO_WAIT"` so block-mine isn't awaited).
+**Real BB proving stays covered** by the `network-e2e-canary` job (prover-ON, presto-server): `transfers` (wallet UI, waits through real prove → mine) + `tx-sendTx-default` (dApp, waits through real prove → submit — the node validates a real proof at `node.sendTx`; playground hard-codes `wait: "NO_WAIT"` so block-mine isn't awaited).
 
 **Production safety.** `NULO_E2E_PROVERLESS` is a **double-opt-in** build flag (`VITE_NULO_E2E_PROVERLESS` + `VITE_NULO_E2E_PROVERLESS_CONFIRM`; fail-closed throw if exactly one is set). The proverless branch + barrier are dead-code-eliminated from prod (referenced only inside `if (E2E_PROVERLESS)`); [`_build-extension.yml`](./.github/workflows/_build-extension.yml) asserts the build stamp + `nulo:e2e:proof-gate` key are ABSENT from every shipped `dist/{chrome,firefox}`. See [`implementations-plan/e2e-proverless-stub/`](./implementations-plan/e2e-proverless-stub/plan.md).
 
@@ -137,7 +141,7 @@ Everything CI runs has a local equivalent:
 | build (chrome) | `bun run --cwd apps/extension build:chrome` |
 | build (firefox) | `bun run --cwd apps/extension build:firefox` |
 | smoke e2e | `bun run --cwd apps/extension test:e2e` |
-| network e2e | `bun run e2e:agent` (NOTE: local runs do NOT use `accelerator-server`. The wallet's `AcceleratorProver` auto-detects the **Aztec Accelerator** desktop app on `127.0.0.1:59833` and uses it if available; otherwise WASM. CI specifically stamps `VITE_NULO_ACCELERATOR_REQUIRED=1` to enforce no-fallback — that's not set locally.) |
+| network e2e | `bun run e2e:agent` (NOTE: local runs do NOT use `presto-server`. The wallet's `PrestoProver` probes the **Presto** desktop app over HTTPS on `127.0.0.1:59834` and uses it if available; otherwise WASM. CI specifically stamps `VITE_NULO_PRESTO_REQUIRED=1` to enforce no-fallback — that's not set locally.) |
 | one-shot pre-PR | `bun run audit:vue` (typecheck + units + lint + build) |
 
 ## Releasing
