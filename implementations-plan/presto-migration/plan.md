@@ -655,7 +655,7 @@ phase's typecheck is green on its own.
 - `apps/extension/src/presto/presto-core-deps.test.ts` (A8): `@alejoamiras/presto-core`'s declared dependencies contain no `@aztec/*` entry.
 - **Validation gate**: `bun install --frozen-lockfile` exit 0; `bun scripts/aztec-hold-residue-check.ts` exit 0; `bun run lint` + `bun run typecheck:all` exit 0; `bun run test` green (the new deps test included). Layers: install, residue check, lint, typecheck, unit.
 
-#### P2 — runtime swap, config, manifest
+#### P2 ✓ — runtime swap, config, manifest (2026-09-15; lessons/phase-2.md)
 
 - `chain-runtime.ts` per §A (types, prover, guard, preflight, per-runtime observer with isolation, `activeProve`, mode-derived plaintext, error prefix); remove the accelerator dependency from both `package.json`s and the lockfile.
 - `src/accelerator/config.ts` → `src/presto/config.ts` (`PRESTO_HOST`, `PRESTO_PORT`, `PRESTO_HTTPS_PORT`, `PRESTO_REQUIRED`, `PRESTO_REQUIRED_BUILD_STAMP`); `offscreen/index.ts` selects the mode only; `entry.ts` comments.

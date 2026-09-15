@@ -22,15 +22,15 @@ export interface PxeOffscreenDeps {
 	logger: ILogger
 	/**
 	 * Optional `PxeFactory` override. When omitted, `PxeService` defaults
-	 * to `new ProductionPxeFactory()` with no accelerator policy (silent
+	 * to `new ProductionPxeFactory()` (HTTPS-only Presto with the silent
 	 * WASM fallback preserved — production behavior).
 	 *
 	 * The extension shell uses this seam to pass a pre-built
-	 * `ProductionPxeFactory(undefined, { provingMode: "required", host, port })` when
+	 * `ProductionPxeFactory(undefined, { provingMode: "required", host, port, httpsPort })` when
 	 * the build is configured for required-mode (CI only). Keeping the
 	 * factory as the seam — rather than threading policy primitives —
 	 * lets this package stay decoupled from the extension's
-	 * `@/accelerator/config` module.
+	 * `@/presto/config` module.
 	 */
 	factory?: PxeFactory
 }

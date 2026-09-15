@@ -2,7 +2,19 @@ import type { Page } from "puppeteer"
 import { afterEach, beforeEach, describe, expect } from "vitest"
 import { withTimeoutMessage, clickByTestId, openOnboarding, replaceInputValue, test, waitForHash } from "./fixtures/extension"
 
-const ONBOARDING_HEALTH_URL = "http://127.0.0.1:59833/health"
+// The page probes Presto HTTPS-first; after an HTTPS failure the SDK runs one witness-free HTTP
+// diagnostic. Both are intercepted below the TLS handshake, so no certificate is needed.
+const PRESTO_HTTPS_HEALTH_URL = "https://127.0.0.1:59834/health"
+const PRESTO_HTTP_HEALTH_URL = "http://127.0.0.1:59833/health"
+const PRESTO_DETAILED_HEALTH = {
+	status: "ok",
+	api_version: 1,
+	version: "1.1.1",
+	aztec_version: "5.2.0",
+	available_versions: ["5.2.0"],
+	bb_available: true,
+	https_port: 59834,
+}
 const TEST_PASSWORD = "OnboardingTest_!23"
 const TEST_PROFILE_NAME = "Onboarding Test"
 
@@ -118,24 +130,29 @@ describe("onboarding tab", () => {
 			})
 	})
 
+	test("the harness can answer the HTTPS health probe before any TLS handshake", async ({ freshExtensionPerTest: extension }) => {
+		const page = await openOnboarding(extension)
+		await page.setRequestInterception(true)
+		page.on("request", (req) => {
+			if (req.url() === PRESTO_HTTPS_HEALTH_URL) {
+				req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok", api_version: 1 }) })
+				return
+			}
+			req.continue()
+		})
+		const body = await page.evaluate(async (url) => (await fetch(url)).json(), PRESTO_HTTPS_HEALTH_URL)
+		expect(body).toEqual({ status: "ok", api_version: 1 })
+		await page.close()
+	})
+
 	test("accelerator mock-active renders enabled Continue button", async ({ freshExtensionPerTest: extension }) => {
 		const page = await openOnboarding(extension)
 
-		// Intercept /health and return an "active" response.
+		// A healthy HTTPS Presto whose cached versions include the wallet's Aztec line.
 		await page.setRequestInterception(true)
 		page.on("request", (req) => {
-			if (req.url() === ONBOARDING_HEALTH_URL) {
-				req.respond({
-					status: 200,
-					contentType: "application/json",
-					body: JSON.stringify({
-						status: "ok",
-						api_version: 1,
-						version: "1.1.0",
-						aztec_version: "0.78.0",
-						bb_available: true,
-					}),
-				})
+			if (req.url() === PRESTO_HTTPS_HEALTH_URL) {
+				req.respond({ status: 200, contentType: "application/json", body: JSON.stringify(PRESTO_DETAILED_HEALTH) })
 				return
 			}
 			req.continue()
@@ -197,11 +214,12 @@ describe("onboarding tab", () => {
 	test("accelerator not-detected hides Continue and shows Skip link", async ({ freshExtensionPerTest: extension }) => {
 		const page = await openOnboarding(extension)
 
-		// Intercept /health and return 502 so detect fails.
+		// Nothing listens on either port: the HTTPS probe and the HTTP diagnostic are both refused,
+		// which is what an uninstalled Presto looks like to the page.
 		await page.setRequestInterception(true)
 		page.on("request", (req) => {
-			if (req.url() === ONBOARDING_HEALTH_URL) {
-				req.respond({ status: 502, contentType: "application/json", body: "{}" })
+			if (req.url() === PRESTO_HTTPS_HEALTH_URL || req.url() === PRESTO_HTTP_HEALTH_URL) {
+				req.abort("connectionrefused")
 				return
 			}
 			req.continue()

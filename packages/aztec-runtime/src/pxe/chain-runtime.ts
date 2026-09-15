@@ -4,7 +4,7 @@ import { createLogger } from "@aztec/foundation/log"
 import type { AztecSQLiteOPFSStore } from "@aztec/kv-store/sqlite-opfs"
 import { WASMSimulator } from "@aztec/simulator/client"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import { AcceleratorProver, type AcceleratorPhase } from "@alejoamiras/aztec-accelerator"
+import { PrestoProver, type PrestoPhase } from "@alejoamiras/presto"
 import { AztecNodeFactoryAdapter } from "../adapters/aztec-node-factory-adapter"
 import type { NodeFactory } from "../ports/node-factory-port"
 import { chainDataDir, chainRegistryKey, chainRegistryKeyPrefix } from "./chain-coordinates"
@@ -15,34 +15,56 @@ import { openChainStore } from "./opfs-store"
  *  offscreen-document restarts, which drop all in-memory state including the key map). */
 export const PXE_STORE_KEY_MISSING = "PXE_STORE_KEY_MISSING"
 
-/** Optional accelerator-server endpoint. Orthogonal to the proving mode —
- *  meaningful only in non-proverless modes; ignored under `proverless`. Stays
- *  primitive (no `accelerator/config` import) so `@nulo/aztec-runtime` remains
- *  decoupled from the extension's `@/` alias. */
-export interface AcceleratorEndpoint {
+/** Optional Presto endpoint. Orthogonal to the proving mode — meaningful only in
+ *  non-proverless modes; ignored under `proverless`. Stays primitive (no `presto/config`
+ *  import) so `@nulo/aztec-runtime` remains decoupled from the extension's `@/` alias. */
+export interface PrestoEndpoint {
 	host?: string
 	port?: number
+	httpsPort?: number
 }
+
+/** Where a proof ran, as concluded by the runtime's own phase observer. */
+export type ProveBackend = "presto" | "browser"
+
+/** The attempt currently proving on a runtime. `PxeService` sets and clears it inside the
+ *  `proveTx` write lock; the runtime's `onPhase` advances `seq` and derives `backend`. */
+export interface ActiveProve {
+	proveId: string
+	seq: number
+	backend?: ProveBackend
+}
+
+/** One phase of a correlated prove attempt. `seq` strictly increases within an attempt, so a
+ *  receiver can drop stale or reordered events; `backend` is the source's conclusion so far. */
+export interface ProvePhaseEvent {
+	proveId: string
+	seq: number
+	phase: PrestoPhase
+	backend?: ProveBackend
+}
+
+export type ProvePhaseObserver = (event: ProvePhaseEvent) => void
 
 /**
  * PXE factory options as a discriminated union over the proving mode, so the
  * previously-illegal `required` + `proverless` combination is unrepresentable
  * (it used to be a runtime throw in the constructor).
  *
- * - `default` (or `provingMode` omitted) — production: real BB proving via
- *   `AcceleratorProver`, silent WASM fallback preserved, no preflight/onPhase.
- * - `required` — CI-only (`VITE_NULO_ACCELERATOR_REQUIRED=1`): same proving
- *   plus an eager `checkAcceleratorStatus()` preflight and an `onPhase` guard
- *   that throws synchronously on a silent fallback ("fallback"/"denied").
+ * - `default` (or `provingMode` omitted) — production: native proving via
+ *   `PrestoProver` over HTTPS only, silent WASM fallback preserved, no preflight.
+ * - `required` — CI-only (`VITE_NULO_PRESTO_REQUIRED=1`): plaintext HTTP to the
+ *   headless server is derived from the mode, plus an eager `checkPrestoStatus()`
+ *   preflight and an `onPhase` guard that throws on any fallback-class phase.
  * - `proverless` — E2E-only (double-opt-in `VITE_NULO_E2E_PROVERLESS`): builds
- *   the PXE with `proverEnabled: false` (no `AcceleratorProver`; the bundle
- *   prover's fakeProofs path emits a chonk proof the local network accepts).
- *   NEVER reaches a production build. `host`/`port` are ignored in this mode.
+ *   the PXE with `proverEnabled: false` (no `PrestoProver`; the bundle prover's
+ *   fakeProofs path emits a chonk proof the local network accepts). NEVER
+ *   reaches a production build. The endpoint is ignored in this mode.
  */
 export type ProductionPxeFactoryOptions =
-	| (AcceleratorEndpoint & { provingMode?: "default" })
-	| (AcceleratorEndpoint & { provingMode: "required" })
-	| (AcceleratorEndpoint & { provingMode: "proverless" })
+	| (PrestoEndpoint & { provingMode?: "default"; onProvePhase?: ProvePhaseObserver })
+	| (PrestoEndpoint & { provingMode: "required"; onProvePhase?: ProvePhaseObserver })
+	| (PrestoEndpoint & { provingMode: "proverless" })
 
 /**
  * Minimal structural shape of the network info required to bootstrap a
@@ -87,6 +109,10 @@ export class ChainRuntime {
 		private readonly store?: AztecSQLiteOPFSStore,
 	) {}
 
+	/** Set by `PxeService` for the duration of one `proveTx`; advanced by the prover's phase
+	 *  observer. Undefined outside a correlated attempt, when phases are not reportable. */
+	public activeProve: ActiveProve | undefined
+
 	/**
 	 * Shut down the PXE, then close the owned store. `pxe.stop()` drains the
 	 * job queue rather than aborting in-flight work (verified against
@@ -124,7 +150,9 @@ export class ProductionPxeFactory implements PxeFactory {
 	private readonly required: boolean
 	private readonly host: string | undefined
 	private readonly port: number | undefined
+	private readonly httpsPort: number | undefined
 	private readonly proverless: boolean
+	private readonly onProvePhase: ProvePhaseObserver | undefined
 
 	public constructor(nodeFactory?: NodeFactory, options?: ProductionPxeFactoryOptions) {
 		this.nodeFactory = nodeFactory ?? new AztecNodeFactoryAdapter()
@@ -135,6 +163,8 @@ export class ProductionPxeFactory implements PxeFactory {
 		this.proverless = provingMode === "proverless"
 		this.host = options?.host
 		this.port = options?.port
+		this.httpsPort = options?.httpsPort
+		this.onProvePhase = options?.provingMode === "proverless" ? undefined : options?.onProvePhase
 	}
 
 	public async createChainRuntime(network: NetworkInfo, storeKey?: Uint8Array): Promise<ChainRuntime> {
@@ -182,7 +212,7 @@ export class ProductionPxeFactory implements PxeFactory {
 		// Pass an explicit WASMSimulator into both the prover AND the PXE
 		// config so neither falls back to dynamic-import
 		// `@aztec/simulator/client` at runtime. The dynamic-import fallback
-		// (via the accelerator's `createLazySimulator`) fails under MV3
+		// (via the SDK's `createLazySimulator`) fails under MV3
 		// offscreen-document conditions even though the chunk is bundled,
 		// throwing "No simulator provided and @aztec/simulator/client
 		// could not be loaded." during `proveTx`. Static import makes the
@@ -192,7 +222,7 @@ export class ProductionPxeFactory implements PxeFactory {
 		// E2E-only proverless: skip the BB SNARK. The PXE still runs kernel
 		// simulation (real public inputs / nullifiers) and emits a random
 		// chonk proof via the default bundle prover's fakeProofs path; the
-		// local network accepts it. No AcceleratorProver, no onPhase, no
+		// local network accepts it. No PrestoProver, no onPhase, no
 		// preflight. The `simulator` is still passed so kernel sim stays on
 		// the bundled WASM path (same MV3 reason as above).
 		if (this.proverless) {
@@ -200,54 +230,83 @@ export class ProductionPxeFactory implements PxeFactory {
 			return new ChainRuntime(network.chainId, node, pxe, network.rpcUrl, store)
 		}
 
-		// Required-mode (CI only): the onPhase callback throws synchronously
-		// when the SDK would silently fall back to WASM. "downloading" is a
-		// warn — the proof still succeeds, just with a cold-start tax. In
-		// non-required (production) mode, onPhase is undefined and the SDK
-		// behaves exactly as before for end users without Aztec Accelerator.
-		const onPhase = this.required
-			? (phase: AcceleratorPhase) => {
-					if (phase === "fallback" || phase === "denied") {
-						throw new Error(
-							`[accelerator-required] SDK emitted phase="${phase}" — proving was about ` +
-								"to fall back to WASM. Forbidden in required-mode " +
-								"(VITE_NULO_ACCELERATOR_REQUIRED=1).",
-						)
-					}
-					if (phase === "downloading") {
-						// First prove on a fresh runner without BB_BINARY_PATH set
-						// pays a multi-minute bb-download tax. Warn so we surface it.
-						console.warn(
-							'[accelerator-required] SDK emitted phase="downloading" — first ' +
-								"prove will be slow. Pre-warm BB_BINARY_PATH to avoid this.",
-						)
-					}
-				}
-			: undefined
-
-		const accelerator = this.host !== undefined || this.port !== undefined ? { host: this.host, port: this.port } : undefined
-		const prover = new AcceleratorProver({ simulator, onPhase, accelerator })
-
-		// Required-mode preflight: fail at PXE-creation time rather than at
-		// first prove, so the failure site is unambiguous. The status cache
-		// inside AcceleratorProver (10s TTL) makes this cheap when called
-		// again from the SDK at first prove.
-		if (this.required) {
-			const status = await prover.checkAcceleratorStatus()
-			if (!status.available) {
-				throw new Error(`[accelerator-required] accelerator-server unavailable. Status: ${JSON.stringify(status)}`)
-			}
-			if (status.needsDownload) {
-				console.warn(
-					"[accelerator-required] accelerator-server reports needsDownload=true " +
-						`for aztec_version=${status.sdkAztecVersion}. First prove will be slow.`,
-				)
+		let runtime: ChainRuntime | undefined
+		const onPhase = (phase: PrestoPhase) => {
+			if (this.required) requiredModeGuard(phase)
+			// Evidence is derived here, where every phase is seen in order; the observer is isolated
+			// so a reporting failure can never fail a proof.
+			const active = runtime?.activeProve
+			if (!active || !this.onProvePhase) return
+			try {
+				this.onProvePhase(advanceProve(active, phase))
+			} catch (error) {
+				console.warn("[presto] prove-phase observer failed", { error })
 			}
 		}
+		const prover = new PrestoProver({
+			simulator,
+			onPhase,
+			presto: {
+				...(this.host !== undefined && { host: this.host }),
+				...(this.port !== undefined && { port: this.port }),
+				...(this.httpsPort !== undefined && { httpsPort: this.httpsPort }),
+				// Explicit on both arms: neither the SDK's runtime detection nor a `PRESTO_HTTPS_ONLY`
+				// env may widen production to plaintext; the headless CI server is HTTP-only, so the
+				// required mode is the one place plaintext is representable.
+				httpsOnly: !this.required,
+			},
+		})
+
+		// Required-mode preflight: fail at PXE-creation time rather than at first prove, so the
+		// failure site is unambiguous. The SDK's 10 s status cache makes the first prove's own
+		// probe free.
+		if (this.required) await assertPrestoReady(prover)
 
 		const pxe = await createPXE(node, config, { proverOrOptions: prover, simulator, store })
-		return new ChainRuntime(network.chainId, node, pxe, network.rpcUrl, store)
+		runtime = new ChainRuntime(network.chainId, node, pxe, network.rpcUrl, store)
+		return runtime
 	}
+}
+
+/** `secure-connection-unavailable` and `version-mismatch` precede `fallback` on the paths that
+ *  detect them (a legacy health-version mismatch reaches `fallback` without its own phase), so
+ *  throwing on them is redundant but names the precise reason. */
+const FALLBACK_CLASS_PHASES: ReadonlySet<PrestoPhase> = new Set(["fallback", "denied", "secure-connection-unavailable", "version-mismatch"])
+
+/** CI guard: WASM proving is forbidden; a first-prove `bb` download is a warning. */
+function requiredModeGuard(phase: PrestoPhase): void {
+	if (FALLBACK_CLASS_PHASES.has(phase)) {
+		throw new Error(
+			`[presto-required] SDK emitted phase="${phase}" — proving was about to fall back to WASM. ` +
+				"Forbidden in required-mode (VITE_NULO_PRESTO_REQUIRED=1).",
+		)
+	}
+	if (phase === "downloading") {
+		console.warn('[presto-required] SDK emitted phase="downloading" — first prove will be slow.')
+	}
+}
+
+async function assertPrestoReady(prover: PrestoProver): Promise<void> {
+	const status = await prover.checkPrestoStatus()
+	if (!status.available) {
+		const diagnosis = status.reason === "secure-connection-unavailable" ? ` diagnosis=${status.diagnosis}` : ""
+		throw new Error(`[presto-required] presto-server unavailable: reason=${status.reason}${diagnosis}`)
+	}
+	if (status.needsDownload) {
+		console.warn(
+			`[presto-required] presto-server reports needsDownload=true for aztec_version=${status.sdkAztecVersion}. ` +
+				"First prove will be slow.",
+		)
+	}
+}
+
+/** Advance an attempt's evidence by one phase. `transmit` means the witness reached Presto;
+ *  `fallback`/`denied` mean the proof runs in the browser. Later phases never undo either. */
+export function advanceProve(active: ActiveProve, phase: PrestoPhase): ProvePhaseEvent {
+	active.seq += 1
+	if (phase === "transmit") active.backend = "presto"
+	else if (phase === "fallback" || phase === "denied") active.backend = "browser"
+	return { proveId: active.proveId, seq: active.seq, phase, backend: active.backend }
 }
 
 /**

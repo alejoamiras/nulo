@@ -17,7 +17,10 @@ export default {
 	version: `${major}.${minor}.${patch}.${label}`,
 	version_name: version,
 	manifest_version: 3,
-	host_permissions: ["https://passkey.nulo.sh/", "http://127.0.0.1/*"],
+	// Presto: HTTPS is the proving transport; plain HTTP carries only the witness-free health
+	// diagnostic and the headless CI server. Holding both keeps extension pages out of Chrome's
+	// local-network-access prompt.
+	host_permissions: ["https://passkey.nulo.sh/", "https://127.0.0.1/*", "http://127.0.0.1/*"],
 	action: {
 		default_popup: "src/popup/index.html#/popup/general",
 	},

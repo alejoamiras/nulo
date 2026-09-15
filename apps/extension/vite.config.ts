@@ -36,10 +36,6 @@ export default defineConfig({
 			{ find: "src", replacement: srcDir },
 			{ find: "@assets", replacement: fileURLToPath(new URL("src/assets", import.meta.url)) },
 			...Object.entries(artifactAliases).map(([find, replacement]) => ({ find, replacement })),
-			{
-				find: "@alejoamiras/aztec-accelerator",
-				replacement: resolvePackageFile("@alejoamiras/aztec-accelerator", "dist/index.js"),
-			},
 			// Resolve the polyfill's Buffer shim to an absolute path. Rollup's
 			// inject (used by `nodePolyfills({ globals: { Buffer: true } })`)
 			// rewrites naked Buffer references into an import from this path;

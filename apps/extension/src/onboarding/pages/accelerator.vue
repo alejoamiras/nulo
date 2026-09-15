@@ -1,33 +1,32 @@
 <route lang="json">
-{ "meta": { "title": "Accelerator" } }
+{ "meta": { "title": "Presto" } }
 </route>
 
 <script setup lang="ts">
 import { useAcceleratorStatus } from "@/onboarding/composables/useAcceleratorStatus"
 
 const router = useRouter()
-const { status, info, detect } = useAcceleratorStatus()
+const { status, detect } = useAcceleratorStatus()
 
 // Continue is only enabled once detection succeeds. Skip is a SEPARATE
 // affordance below that immediately routes onward — no two-click gate.
 const isContinueEnabled = computed(() => status.value === "active")
 
-// Send users to the public landing rather than the raw GitHub releases page.
-// The landing brands the download properly + handles OS detection.
-const LANDING_URL = "https://aztec-accelerator.dev/"
+// The landing brands the download and detects the OS; never the raw releases page.
+const LANDING_URL = "https://presto.build/"
 
 const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : ""
-const isWindows = computed(() => /Windows/.test(userAgent))
 const downloadLabel = computed(() => {
 	if (/Mac/.test(userAgent)) return "Download for macOS"
+	if (/Windows/.test(userAgent)) return "Download for Windows"
 	if (/Linux/.test(userAgent)) return "Download for Linux"
-	return "Download Aztec Accelerator"
+	return "Download Presto"
 })
 
 const statusTitle = computed(() => {
 	switch (status.value) {
 		case "active":
-			return "Active"
+			return "Presto detected"
 		case "no-bb":
 			return "Almost ready"
 		case "not-detected":
@@ -40,9 +39,9 @@ const statusTitle = computed(() => {
 const statusDetail = computed(() => {
 	switch (status.value) {
 		case "active":
-			return info.value?.aztec_version ? `Aztec runtime ${info.value.aztec_version}.` : "Proofs will be generated natively."
+			return "Presto will ask you to allow Nulo at your first send."
 		case "no-bb":
-			return "Open Aztec Accelerator from your menu bar and wait for setup to finish."
+			return "Presto is fetching its prover — open the Presto app to let it finish."
 		case "not-detected":
 			return "Proofs will run in your browser (slower)."
 		default:
@@ -73,8 +72,8 @@ function goNext() {
 			<BrutalistTitle main="Speed up" sub="Proving" />
 			<div :class="$style.hero_bar" />
 			<Text size="14" color="secondary" height="150">
-				A free menu-bar app that proves transactions natively, using every CPU core
-				your machine has. Browser proofs that take 30 seconds drop to a few.
+				Presto is a free menu-bar app that proves transactions natively, using every
+				CPU core your machine has. Browser proofs that take 30 seconds drop to a few.
 				Optional, but strongly recommended.
 			</Text>
 		</Flex>
@@ -102,7 +101,7 @@ function goNext() {
 					type="button"
 					:class="$style.retest"
 					data-testid="onboarding-accelerator-test"
-					@click="detect"
+					@click="detect({ forceRefresh: true })"
 				>
 					{{ status === "active" ? "Re-test" : "Test" }}
 				</button>
@@ -113,7 +112,7 @@ function goNext() {
 			position regardless of whether Download is rendered. -->
 		<Flex direction="column" gap="10" :class="$style.actions">
 			<Button
-				v-if="(status === 'not-detected' || status === 'no-bb') && !isWindows"
+				v-if="status === 'not-detected' || status === 'no-bb'"
 				variant="primary"
 				size="large"
 				wide
@@ -122,11 +121,6 @@ function goNext() {
 			>
 				{{ downloadLabel }}
 			</Button>
-			<div v-if="status === 'not-detected' && isWindows" :class="$style.windowsNote">
-				<Text size="13" color="secondary" height="150">
-					Aztec Accelerator isn't available on Windows yet. Proofs will run in your browser.
-				</Text>
-			</div>
 		</Flex>
 
 		<!-- Bottom CTA slot. Conditionally renders Continue OR Skip, but
@@ -260,12 +254,6 @@ function goNext() {
 	/* Reserve space for the Download CTA even when active, so Continue
 	 * keeps the same vertical position regardless of status. */
 	min-height: 48px;
-}
-
-.windowsNote {
-	padding: 14px 16px;
-	background: var(--nulo-surface);
-	border: 1px solid var(--nulo-border);
 }
 
 .ctaSlot {
