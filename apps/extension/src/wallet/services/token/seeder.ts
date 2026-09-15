@@ -2,7 +2,6 @@ import type { MinimalStorageArea } from "@nulo/wallet-core/storage"
 import { ValueStorage } from "@/wallet/storage"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import type { ILogger } from "@/wallet/logger"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { DefaultTokenSeed } from "./default-tokens"
 import type { TokenInterface } from "./spec"
 
@@ -135,7 +134,7 @@ export class TokenSeeder {
 		}
 		this.inflight = this.doRun()
 			.catch((err) => {
-				this.log(LogLevel.Warn, "seed pass threw", getErrorMessage(err))
+				this.log(LogLevel.Warn, "seed pass threw", err)
 			})
 			.finally(() => {
 				this.inflight = undefined
@@ -301,7 +300,7 @@ export class TokenSeeder {
 		} catch (err) {
 			// Transient failure (network down, RPC error): attempt counted,
 			// retried next trigger until the cap.
-			this.log(LogLevel.Warn, `seed ${key} failed`, getErrorMessage(err))
+			this.log(LogLevel.Warn, `seed ${key} failed`, err)
 		}
 		return "continue"
 	}
@@ -349,7 +348,7 @@ export class TokenSeeder {
 			preview = await this.deps.preview(networkId, accountAddress, seed.contract, seed.expectedClassId)
 		} catch (err) {
 			if (err instanceof PinMismatchError) {
-				this.log(LogLevel.Warn, `seed ${seed.contract}: ${getErrorMessage(err)} — hard skip`)
+				this.log(LogLevel.Warn, `seed ${seed.contract} — hard skip`, err)
 				return undefined
 			}
 			throw err

@@ -15,7 +15,6 @@ import { randomIdNotIn } from "@/wallet/services/id-allocators"
 import { Lock } from "@/wallet/utils"
 import type { WindowManager } from "@/wallet/services/window-manager/window-manager"
 import { parseCaipAccount, parseCaipChain, resolveNetworkByChainId } from "@/wallet/utils/caip"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { isSelfPay } from "@nulo/wallet-bridge"
 import { assertSilentExecutable, materializeRequest, type MaterializeDeps } from "./materialize"
@@ -141,7 +140,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 	 *  on storage, and a failed read leaves the window owned by its handle. */
 	private async reconcileCancelledJournal(journalId: string): Promise<void> {
 		const record = await this.operationJournal.getOperation(journalId).catch((err: unknown) => {
-			this.logDebug(`reconcile: journal read failed for ${journalId}: ${getErrorMessage(err)}`)
+			this.logDebug(`reconcile: journal read failed for ${journalId}`, err)
 			return undefined
 		})
 		if (record && record.progress.stage !== "queued") this.cancelInteractionForJournal(journalId)
@@ -280,7 +279,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			this.logInfo(`executeAndResolve: resolved [${kinds}]`)
 			this.windowManager.settle(interaction.handleId, result)
 		} catch (error) {
-			this.logError(`executeAndResolve: failed [${kinds}]`, getErrorMessage(error))
+			this.logError(`executeAndResolve: failed [${kinds}]`, error)
 			this.windowManager.cancel(interaction.handleId, error instanceof Error ? error.message : "Execution failed")
 		}
 	}
@@ -466,9 +465,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			try {
 				await this.operationJournal.transitionOperation(hooks.queuedJournalId, { stage: "pending" })
 			} catch (err) {
-				this.logDebug(
-					`silent-path fast-forward queued→pending failed (likely cancel race); claim helper will handle: ${getErrorMessage(err)}`,
-				)
+				this.logDebug("silent-path fast-forward queued→pending failed (likely cancel race); claim helper will handle", err)
 			}
 		}
 

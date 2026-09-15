@@ -1,7 +1,7 @@
 import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
-import { EventHandler, Lock, getErrorMessage } from "@nulo/wallet-core/utils"
+import { EventHandler, Lock } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { NetworkService, networkInfoFrom, type Network } from "@/wallet/services/network/service"
@@ -326,7 +326,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 
 		// D4: drain any balance-refresh outbox rows that survived an SW death (pull-based recovery —
 		// re-requests the refresh, no lost or mis-attributed enqueue).
-		await this.drainBalanceOutbox().catch((err) => this.logWarn(`init drain failed: ${getErrorMessage(err)}`))
+		await this.drainBalanceOutbox().catch((err) => this.logWarn("init drain failed", err))
 	}
 
 	private onActiveProfileChanged = async (): Promise<void> => {
@@ -360,7 +360,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 					}
 				})
 			} catch (error) {
-				this.logWarn(`onAccountAdded: public cursor reset failed: ${getErrorMessage(error)}`)
+				this.logWarn("onAccountAdded: public cursor reset failed", error)
 			}
 		}
 		// Lightweight re-hydrate — onAccountAdded is rare (user-driven). Reusing hydrateSchedulers
@@ -384,7 +384,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		try {
 			networks = await this.networkService.getNetworks(account.chainId)
 		} catch (error) {
-			this.logWarn(`onAccountDeleted: failed to resolve networks: ${getErrorMessage(error)}`)
+			this.logWarn("onAccountDeleted: failed to resolve networks", error)
 			return
 		}
 
@@ -513,7 +513,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			if (this.serviceEpoch === epochAtStart) this.feeCache.set(cacheKey, feeJuice)
 			return { feeJuice }
 		} catch (err) {
-			this.logDebug(`getReceiptFee failed for ${record.txHash.slice(0, 10)}: ${getErrorMessage(err)}`)
+			this.logDebug(`getReceiptFee failed for ${record.txHash.slice(0, 10)}`, err)
 			return null
 		}
 	}
@@ -852,10 +852,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		const bornAtEpoch = this.serviceEpoch
 		const interval = setInterval(() => {
 			if (this.serviceEpoch !== bornAtEpoch) return
-			poll().catch((err) => this.logWarn(`${labels.tick}: ${getErrorMessage(err)}`))
+			poll().catch((err) => this.logWarn(labels.tick, err))
 		}, this.pollIntervalMs)
 		schedulers.set(key, interval)
-		poll().catch((err) => this.logWarn(`${labels.initial}: ${getErrorMessage(err)}`))
+		poll().catch((err) => this.logWarn(labels.initial, err))
 	}
 
 	private publicSchedulerKey(networkId: string, contract: string): string {
@@ -895,7 +895,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			await this.scanPublicContract(target.profileId, target.networkId, target.contract)
 			await this.drainBalanceOutbox()
 		} catch (error) {
-			this.logWarn(`Public scan failed for ${key}: ${getErrorMessage(error)}`)
+			this.logWarn(`Public scan failed for ${key}`, error)
 		} finally {
 			this.publicPolling.delete(key)
 		}
@@ -1045,7 +1045,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 					try {
 						await this.scanContract(profileId, networkId, accountAddress, contract)
 					} catch (error) {
-						this.logWarn(`Scan failed for ${contract}: ${getErrorMessage(error)}`)
+						this.logWarn(`Scan failed for ${contract}`, error)
 					}
 				}
 			}
@@ -1071,7 +1071,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		try {
 			notes = await this.noteService.getNotesRaw(networkId, accountAddress, contract)
 		} catch (error) {
-			this.logWarn(`getNotesRaw failed: ${getErrorMessage(error)}`)
+			this.logWarn("getNotesRaw failed", error)
 			return
 		}
 
@@ -1452,7 +1452,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				await this.beginReconciliation(profileId, networkId, contract, network.chainId, cursor, tips, epochAtStart)
 			} else {
 				// No anchor yet (first scan) — nothing to reconcile; retry next tick.
-				this.logWarn(`public forward scan failed (no anchor) for ${contract}: ${getErrorMessage(err)}`)
+				this.logWarn(`public forward scan failed (no anchor) for ${contract}`, err)
 			}
 		}
 	}
@@ -1467,13 +1467,13 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		try {
 			network = await this.networkService.getNetwork(networkId)
 		} catch (error) {
-			this.logWarn(`scanPublicContract: network resolve failed: ${getErrorMessage(error)}`)
+			this.logWarn("scanPublicContract: network resolve failed", error)
 			return undefined
 		}
 		try {
 			return { network, tips: await this.indexer.getTips(networkId) }
 		} catch (error) {
-			this.logWarn(`public tips failed for ${contract}: ${getErrorMessage(error)}`)
+			this.logWarn(`public tips failed for ${contract}`, error)
 			return undefined
 		}
 	}
@@ -1723,7 +1723,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		} catch (err) {
 			// Mid-reconcile reorg (`upperBoundHash` gone) → discard staged seen/progress + RESTART
 			// against a fresh tip so `seen` can never mix two forks (codex final-confirm #1a).
-			this.logWarn(`reconcile restart for ${contract}: ${getErrorMessage(err)}`)
+			this.logWarn(`reconcile restart for ${contract}`, err)
 			let tips: PublicScanTips
 			try {
 				tips = await this.indexer.getTips(networkId)
@@ -2019,7 +2019,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		try {
 			rows = await this.repo.listOutbox()
 		} catch (error) {
-			this.logWarn(`drainBalanceOutbox: listOutbox failed: ${getErrorMessage(error)}`)
+			this.logWarn("drainBalanceOutbox: listOutbox failed", error)
 			return
 		}
 		for (const [key] of rows) {
@@ -2083,7 +2083,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		try {
 			return await this.tokenBalanceService.requestBalanceRefresh(tokenId, accountAddress)
 		} catch (error) {
-			this.logWarn(`drainBalanceOutbox: refresh request failed transiently, keeping row: ${getErrorMessage(error)}`)
+			this.logWarn("drainBalanceOutbox: refresh request failed transiently, keeping row", error)
 			return undefined
 		}
 	}
@@ -2181,7 +2181,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				txs.filter((t) => t.profileId === profileId && t.networkId === networkId && t.chainId === chainId).map((t) => t.hash),
 			)
 		} catch (error) {
-			this.logWarn(`getTransactions failed: ${getErrorMessage(error)}`)
+			this.logWarn("getTransactions failed", error)
 			return new Set()
 		}
 	}
@@ -2198,7 +2198,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			}
 			return hashes
 		} catch (error) {
-			this.logWarn(`getOperations failed: ${getErrorMessage(error)}`)
+			this.logWarn("getOperations failed", error)
 			return new Set()
 		}
 	}

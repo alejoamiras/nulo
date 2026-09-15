@@ -177,7 +177,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	public async getAccount(profileId: string, chainId: number, address: string): Promise<Account | undefined> {
 		await this.ensureInitialized()
 		const account = await this.storage.get(accountRowId(profileId, chainId, address))
-		return account?.profileId === profileId && account.chainId === chainId ? account : undefined
+		return account?.profileId === profileId && account.chainId === chainId && account.address === address ? account : undefined
 	}
 
 	public async createAccount(profileId: string, chainId: number, type: AccountType, name: string): Promise<Account> {
@@ -334,11 +334,13 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	public async getAccountContract(profileId: string, chainId: number, address: string): Promise<IAccountContract> {
 		await this.ensureInitialized()
 		const account = await this.storage.get(accountRowId(profileId, chainId, address))
-		if (account?.profileId !== profileId || account.chainId !== chainId) {
+		// The row body must agree with the key on every identity field, not only profile/chain:
+		// a row transplanted under another address's key must not redirect signing.
+		if (account?.profileId !== profileId || account.chainId !== chainId || account.address !== address) {
 			throw new Error("unknown account address")
 		}
 		if (account.type === AccountType.Imported) {
-			return this.loadImportedAccountContract(profileId, account)
+			return this.loadImportedAccountContract(profileId, account, address)
 		}
 		if (account.type !== AccountType.Nulo_v1) {
 			throw new Error("unknown account type")
@@ -364,7 +366,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	 * error names the account; the UI offers delete + re-import as the repair. No profile block,
 	 * no `raiseRuntimeMismatch`.
 	 */
-	private async loadImportedAccountContract(profileId: string, account: Account): Promise<IAccountContract> {
+	private async loadImportedAccountContract(profileId: string, account: Account, requestedAddress: string): Promise<IAccountContract> {
 		const keyRow = await this.importedKeys.get(profileId, account.chainId, account.address)
 		if (!keyRow) throw new ImportedAccountUnusableError(account.address, "signing key missing")
 		// The imported-key root is the CREDENTIAL-sealed per-profile DEK, never the master (a
@@ -381,7 +383,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			skCopy = Buffer.from(skBytes)
 			const signingKey = GrumpkinScalar.fromBuffer(skCopy)
 			const contract = await NuloAccount.fromSigningKey(signingKey, this.logger)
-			if (contract.address.toString() !== account.address) {
+			if (contract.address.toString() !== requestedAddress) {
 				throw new ImportedAccountUnusableError(account.address, "address mismatch")
 			}
 			return contract
@@ -404,7 +406,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	public async exportAccount(profileId: string, chainId: number, address: string, password: string, encrypt: boolean): Promise<string> {
 		await this.ensureInitialized()
 		const account = await this.storage.get(accountRowId(profileId, chainId, address))
-		if (account?.profileId !== profileId || account.chainId !== chainId) {
+		if (account?.profileId !== profileId || account.chainId !== chainId || account.address !== address) {
 			throw new Error("unknown account address")
 		}
 		// Service-side authentication: unseal via the profile password (throws on wrong password).

@@ -44,6 +44,7 @@ interface RegisteredFpc {
 	id: string
 	type: FpcType
 	name?: string
+	isProtocol?: boolean
 }
 
 /**
@@ -154,7 +155,9 @@ export function buildFeeMethods(
 	options?: { allowSponsored?: boolean },
 ): FeeMethodOption[] {
 	const allowSponsored = options?.allowSponsored ?? true
-	const privateFpc = registeredFpcs.find((f) => f.type === FpcType.PrivateFpc)
+	// Only the protocol-derived PrivateFPC may pay privately; a same-typed row at any other
+	// address (a restored or hand-added one) is never offered, even when it sorts first.
+	const privateFpc = registeredFpcs.find((f) => f.type === FpcType.PrivateFpc && f.isProtocol === true)
 	const base: FeeMethodOption[] = [feeJuiceOption(gasBalances), privateFeeJuiceOption(privateFpc, gasBalances)]
 
 	for (const fpc of registeredFpcs) {

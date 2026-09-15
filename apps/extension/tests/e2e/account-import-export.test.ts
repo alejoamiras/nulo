@@ -156,10 +156,19 @@ test("the file-chooser import path accepts a written export file", { timeout: 18
 		)
 		// Same profile ⇒ the account already exists, so this previews fine and would reject at
 		// write; the point here is that the FILE PATH produced a decodable body.
-		const previewed = await page.evaluate(
-			() => document.querySelector('[data-testid="import-account-preview"]')?.getAttribute("data-account-address") ?? null,
-		)
-		expect(previewed).toBeTruthy()
+		const previewed = await page.evaluate(() => {
+			const row = document.querySelector('[data-testid="import-account-preview"]')
+			const el = document.querySelector('[data-testid="import-account-preview-address"]') as HTMLElement | null
+			return {
+				address: row?.getAttribute("data-account-address") ?? null,
+				text: el?.textContent?.trim() ?? null,
+				clipped: el ? el.scrollWidth > el.clientWidth : null,
+			}
+		})
+		expect(previewed.address).toBeTruthy()
+		// The preview renders the WHOLE address, wrapped, at the popup's width — never an ellipsis.
+		expect(previewed.text).toBe(previewed.address)
+		expect(previewed.clipped).toBe(false)
 	} finally {
 		rmSync(filePath, { force: true })
 	}

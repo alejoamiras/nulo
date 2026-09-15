@@ -128,3 +128,35 @@ describe("FPC creation fences", () => {
 		expect(await fpcRowCount(h.api)).toBe(0)
 	})
 })
+
+describe("FpcService.getFpcImpl — only the protocol PrivateFPC can pay", () => {
+	const row = (id: string, type: FpcType, address: string) => ({
+		id,
+		profileId: "p1",
+		chainId: 1,
+		type,
+		address,
+		name: "F",
+		isProtocol: false,
+	})
+
+	test("genuine PrivateFPC resolves on a COLD protocol-address cache (no prior getFpcs)", async () => {
+		const h = await makeHarness()
+		await h.service.restore([row("f-ok", FpcType.PrivateFpc, "0xprivate")])
+		const fpc = await h.service.getFpcImpl("f-ok")
+		expect(fpc.infoData.isProtocol).toBe(true)
+	})
+
+	test("a PrivateFPC row at any other address is refused", async () => {
+		const h = await makeHarness()
+		await h.service.restore([row("f-bad", FpcType.PrivateFpc, "0xdead")])
+		await expect(h.service.getFpcImpl("f-bad")).rejects.toThrow(/not the protocol contract/)
+	})
+
+	test("a custom sponsored FPC still resolves", async () => {
+		const h = await makeHarness()
+		await h.service.restore([row("f-custom", FpcType.DefaultSponsoredFpc, "0xcafe")])
+		const fpc = await h.service.getFpcImpl("f-custom")
+		expect(fpc.infoData.isProtocol).toBe(false)
+	})
+})

@@ -112,7 +112,7 @@ export abstract class BaseService<TRequests extends MethodsMap, TEvents extends 
 			const result = await this.invoke(methodName, params as unknown[])
 			responseContent = { requestId, result: jsonSanitize(result) }
 		} catch (error) {
-			this.logDebug("Request failed", requestId, getErrorMessage(error))
+			this.logDebug("Request failed", requestId, error)
 			responseContent = { requestId, ...buildErrorResponseContent(error) }
 		} finally {
 			endKeepalive?.()
@@ -149,7 +149,7 @@ export abstract class BaseService<TRequests extends MethodsMap, TEvents extends 
 			try {
 				const stringified = jsonStringify(content.result)
 				await this.rawSend(this.wrapResponse({ ...content, result: stringified as unknown, resultIsJson: true }, ctx), ctx)
-				this.logWarn("send fell back to jsonStringify", `requestId=${content.requestId}`, `originalError=${getErrorMessage(error)}`)
+				this.logWarn("send fell back to jsonStringify", `requestId=${content.requestId}`, error)
 			} catch (fallbackError) {
 				try {
 					const errContent: ResponseContentLike = {

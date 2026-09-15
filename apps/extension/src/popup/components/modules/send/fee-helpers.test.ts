@@ -126,7 +126,7 @@ describe("fee-helpers/buildFeeMethods", () => {
 	})
 
 	test("private_fpc carries the registered PrivateFpc when present", () => {
-		const fpcs = [{ id: "p1", type: FpcType.PrivateFpc, name: "MyPrivate" }]
+		const fpcs = [{ id: "p1", type: FpcType.PrivateFpc, name: "MyPrivate", isProtocol: true }]
 		const m = buildFeeMethods(fpcs)
 		const priv = m.find((x) => x.type === "private_fpc")
 		expect(priv?.title).toBe("MyPrivate")
@@ -147,7 +147,7 @@ describe("fee-helpers/buildFeeMethods", () => {
 	})
 
 	test("PrivateFpc is not duplicated as a regular fpc entry", () => {
-		const fpcs = [{ id: "p1", type: FpcType.PrivateFpc, name: "Private" }]
+		const fpcs = [{ id: "p1", type: FpcType.PrivateFpc, name: "Private", isProtocol: true }]
 		const m = buildFeeMethods(fpcs)
 		const priv = m.filter((x) => x.fpc?.id === "p1")
 		expect(priv).toHaveLength(1)
@@ -155,7 +155,7 @@ describe("fee-helpers/buildFeeMethods", () => {
 	})
 
 	test("without gasBalances, fj + private_fpc are NOT marked disabled (loading state)", () => {
-		const fpcs = [{ id: "p1", type: FpcType.PrivateFpc, name: "Private" }]
+		const fpcs = [{ id: "p1", type: FpcType.PrivateFpc, name: "Private", isProtocol: true }]
 		const m = buildFeeMethods(fpcs)
 		const fj = m.find((x) => x.type === "fj")
 		const priv = m.find((x) => x.type === "private_fpc")
@@ -185,7 +185,7 @@ describe("fee-helpers/buildFeeMethods", () => {
 	})
 
 	test("private_fpc with registered FPC but null private balance is disabled with 'no balance'", () => {
-		const fpcs = [{ id: "p1", type: FpcType.PrivateFpc, name: "Private" }]
+		const fpcs = [{ id: "p1", type: FpcType.PrivateFpc, name: "Private", isProtocol: true }]
 		const m = buildFeeMethods(fpcs, { publicFeeJuice: "1000", privateFeeJuice: null })
 		const priv = m.find((x) => x.type === "private_fpc")
 		expect(priv?.disabled).toBe(true)
@@ -194,7 +194,7 @@ describe("fee-helpers/buildFeeMethods", () => {
 	})
 
 	test("private_fpc with registered FPC but zero private balance is disabled with 'no balance'", () => {
-		const fpcs = [{ id: "p1", type: FpcType.PrivateFpc, name: "Private" }]
+		const fpcs = [{ id: "p1", type: FpcType.PrivateFpc, name: "Private", isProtocol: true }]
 		const m = buildFeeMethods(fpcs, { publicFeeJuice: "1000", privateFeeJuice: "0" })
 		const priv = m.find((x) => x.type === "private_fpc")
 		expect(priv?.disabled).toBe(true)
@@ -202,7 +202,7 @@ describe("fee-helpers/buildFeeMethods", () => {
 	})
 
 	test("private_fpc with registered FPC and non-zero private balance is enabled", () => {
-		const fpcs = [{ id: "p1", type: FpcType.PrivateFpc, name: "Private" }]
+		const fpcs = [{ id: "p1", type: FpcType.PrivateFpc, name: "Private", isProtocol: true }]
 		const m = buildFeeMethods(fpcs, { publicFeeJuice: "1000", privateFeeJuice: "1000" })
 		const priv = m.find((x) => x.type === "private_fpc")
 		expect(priv?.disabled).toBeUndefined()
@@ -246,5 +246,28 @@ describe("fee-helpers - null public balance (unknown wire slot)", () => {
 	test("buildFeeMethods keeps 'no balance' for a CONFIRMED zero", () => {
 		const m = buildFeeMethods([], { publicFeeJuice: "0", privateFeeJuice: null })
 		expect(m.find((x) => x.type === "fj")?.disabledReason).toBe("no balance")
+	})
+})
+
+describe("fee-helpers/buildFeeMethods — only the protocol PrivateFPC is offered", () => {
+	const poisoned = { id: "f-bad", type: FpcType.PrivateFpc, name: "Private Fee Juice", isProtocol: false }
+	const canonical = { id: "f-ok", type: FpcType.PrivateFpc, name: "Private Fee Juice", isProtocol: true }
+	const balances = { publicFeeJuice: "1", privateFeeJuice: "1" }
+
+	test("a non-protocol PrivateFpc row sorted first is skipped; the canonical row is the single private option", () => {
+		const methods = buildFeeMethods([poisoned, canonical], balances)
+		const privateOptions = methods.filter((m) => m.type === "private_fpc")
+		expect(privateOptions).toHaveLength(1)
+		expect(privateOptions[0].fpc?.id).toBe("f-ok")
+		expect(privateOptions[0].disabled).toBeUndefined()
+		expect(methods.some((m) => m.fpc?.id === "f-bad")).toBe(false)
+	})
+
+	test("only a non-protocol PrivateFpc row registered → the private slot is 'not available', never that row", () => {
+		const methods = buildFeeMethods([poisoned], balances)
+		const privateOption = methods.find((m) => m.type === "private_fpc")
+		expect(privateOption?.fpc).toBeNull()
+		expect(privateOption?.disabled).toBe(true)
+		expect(privateOption?.disabledReason).toBe("not available")
 	})
 })

@@ -30,7 +30,7 @@
  */
 
 import type { AlarmsPort } from "@nulo/wallet-core/ports"
-import { AlarmDispatcher, getErrorMessage } from "@nulo/wallet-core/utils"
+import { AlarmDispatcher } from "@nulo/wallet-core/utils"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import type { ILogger } from "@/wallet/logger"
 import type { OperationJournalService } from "./service"
@@ -87,13 +87,13 @@ export class JournalGC {
 		// pre-extraction `sweep().catch(err => log("sweep tick threw", …))`.
 		this.dispatcher.listen(
 			() => this.sweep(),
-			(err) => this.logger.log(LOG_SOURCE, LogLevel.Error, "sweep tick threw", getErrorMessage(err)),
+			(err) => this.logger.log(LOG_SOURCE, LogLevel.Error, "sweep tick threw", err),
 		)
 		await this.dispatcher.create({ periodInMinutes: JOURNAL_GC_PERIOD_MINUTES })
 		try {
 			await this.sweep()
 		} catch (err) {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "boot-sweep threw; continuing", getErrorMessage(err))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "boot-sweep threw; continuing", err)
 		}
 	}
 
@@ -135,7 +135,7 @@ export class JournalGC {
 					await this.journal.deleteOperation(victim.id)
 					evicted++
 				} catch (err) {
-					this.logger.log(LOG_SOURCE, LogLevel.Debug, `evict skipped ${victim.id} (group=${key}): ${getErrorMessage(err)}`)
+					this.logger.log(LOG_SOURCE, LogLevel.Debug, `evict skipped ${victim.id} (group=${key})`, err)
 				}
 			}
 		}

@@ -104,7 +104,7 @@ function makeDeps(storedChainId = STORED_CHAIN_ID) {
 	return {
 		pxe,
 		node,
-		network: { chainId: storedChainId },
+		network: { chainId: storedChainId, l1ChainId: NODE_L1_CHAIN_ID },
 		account,
 		contractResolver,
 		logger: { log: () => {} },

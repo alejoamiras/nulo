@@ -157,6 +157,7 @@ onBeforeUnmount(() => {
 						v-model="password"
 						type="password"
 						placeholder="Strong password"
+						autocomplete="new-password"
 						:maxLength="maxPasswordLength"
 						data-testid="onboarding-password-input"
 					/>
@@ -167,6 +168,7 @@ onBeforeUnmount(() => {
 						v-model="confirm"
 						type="password"
 						placeholder="Repeat password"
+						autocomplete="new-password"
 						:maxLength="maxPasswordLength"
 						data-testid="onboarding-password-confirm"
 					/>

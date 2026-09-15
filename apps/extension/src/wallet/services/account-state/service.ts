@@ -9,7 +9,6 @@ import { NetworkService } from "@/wallet/services/network/service"
 import type { Network } from "@/wallet/services/network/spec"
 import { networkInfoFrom, NetworkSchema, NodeStatus } from "@/wallet/services/network/spec"
 import { EventHandler } from "@nulo/wallet-core/utils"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
 import {
 	ACCOUNT_STATE_SERVICE_NAME,
 	type BackupAccountState,
@@ -100,7 +99,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 				const senders = await this.getSenders(n.id)
 				for (const addr of senders) union.add(addr)
 			} catch (error) {
-				this.logError(`Failed to read senders on network ${n.id}`, getErrorMessage(error))
+				this.logError(`Failed to read senders on network ${n.id}`, error)
 				// Skip this network — don't block the export.
 			}
 		}
@@ -142,7 +141,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 		try {
 			return await fn()
 		} catch (error) {
-			this.logError(`Failed to ${action}`, getErrorMessage(error))
+			this.logError(`Failed to ${action}`, error)
 			throw new Error("PXE request failed")
 		}
 	}

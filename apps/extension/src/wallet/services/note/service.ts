@@ -86,7 +86,7 @@ export class NoteService extends Service<Methods> implements ServiceSpec<Methods
 			const network = await this.networkService.getNetwork(networkId)
 			return await this.pxeService.getBlockTimestamp(networkInfoFrom(network), blockNumber)
 		} catch (error) {
-			this.logWarn(`getBlockTimestamp failed for block ${blockNumber}: ${getErrorMessage(error)}`)
+			this.logWarn(`getBlockTimestamp failed for block ${blockNumber}`, error)
 			return undefined
 		}
 	}
@@ -100,7 +100,7 @@ export class NoteService extends Service<Methods> implements ServiceSpec<Methods
 				? await this.fetchContractNotes(network, account, AztecAddress.fromStringUnsafe(contract))
 				: await this.fetchKnownContractsNotes(network, account)
 		} catch (error) {
-			this.logError("Failed to fetch incoming notes", getErrorMessage(error))
+			this.logError("Failed to fetch incoming notes", error)
 			throw new Error("PXE request failed")
 		}
 
@@ -152,7 +152,7 @@ export class NoteService extends Service<Methods> implements ServiceSpec<Methods
 		try {
 			return await this.pxeService.getNoteSchemas()
 		} catch (error) {
-			this.logWarn("Failed to load note schemas; falling back to raw rendering", getErrorMessage(error))
+			this.logWarn("Failed to load note schemas; falling back to raw rendering", error)
 			return {}
 		}
 	}
@@ -222,7 +222,7 @@ export class NoteService extends Service<Methods> implements ServiceSpec<Methods
 			const instance = await this.pxeService.getContractInstance(networkInfoFrom(network), address)
 			return instance?.currentContractClassId.toString()
 		} catch (error) {
-			this.logWarn("Failed to load contract instance for note schema lookup", address.toString(), getErrorMessage(error))
+			this.logWarn("Failed to load contract instance for note schema lookup", address.toString(), error)
 			return undefined
 		}
 	}

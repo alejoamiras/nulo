@@ -17,7 +17,6 @@ import { managers } from "@/utils/core"
 
 /** Utils */
 import { FileTooLargeError, pickFile } from "@/utils"
-import { trimAddress } from "@/utils/string"
 import { storageLocalSet } from "@/utils/storage"
 
 /** Composables */
@@ -224,12 +223,16 @@ const collapsingLabel = "Import Account"
 					<SettingItem
 						size="large"
 						:title="accountName.trim() || 'Account'"
-						:description="trimAddress(previewAddress, 8, 6, '...')"
 						icon="user"
 						raw
 						data-testid="import-account-preview"
 						:data-account-address="previewAddress"
-					/>
+					>
+						<template #description>
+							<!-- The full address must be readable: a truncated one hides a look-alike behind a shared prefix. -->
+							<span :class="$style.preview_address" data-testid="import-account-preview-address">{{ previewAddress }}</span>
+						</template>
+					</SettingItem>
 				</ItemsContainer>
 			</div>
 
@@ -285,3 +288,12 @@ const collapsingLabel = "Import Account"
 		</template>
 	</CollapsingHeroLayout>
 </template>
+
+<style module>
+.preview_address {
+	display: block;
+	white-space: normal;
+	word-break: break-all;
+	font-family: var(--font-mono);
+}
+</style>

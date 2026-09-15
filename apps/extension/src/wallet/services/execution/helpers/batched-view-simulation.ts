@@ -133,9 +133,8 @@ import { simulateViaNode } from "@aztec/wallet-sdk/base-wallet"
 import { completeFeeOptions } from "@nulo/aztec-runtime/account"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
-import { assertLiveChainIdentity, chainInfoFrom } from "@nulo/aztec-runtime/utils"
+import { assertLiveChainIdentity, chainInfoFrom, type SelectedNetworkChainInfo } from "@nulo/aztec-runtime/utils"
 import type { CallAction, EncodedCallAction } from "@nulo/wallet-bridge"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { type ILogger, LogLevel } from "@/wallet/logger"
 import { type ContractResolver, findFunctionByName, findFunctionBySelector, requireArtifact } from "../contract-resolver"
 import { getBlockHeaderAnchor } from "./block-header-anchor"
@@ -148,7 +147,7 @@ export interface BatchedViewSimulationDeps {
 	/** Stored chain identity for the user-selected network. Passed so the
 	 *  caller's `node.getNodeInfo()` consumption can rebind via
 	 *  `assertLiveChainIdentity` before deriving `chainInfo` (F-012 / A-01). */
-	readonly network: { chainId: number }
+	readonly network: SelectedNetworkChainInfo
 	readonly account: IAccountContract
 	readonly contractResolver: ContractResolver
 	readonly logger?: ILogger
@@ -370,11 +369,7 @@ async function prepareFastArm(
 		const gasSettings = await completeFeeOptions({ node, gasSettings: undefined, forEstimation: true })
 		return { leadingFast, slow, blockHeader, chainInfo, gasSettings }
 	} catch (err) {
-		logger?.log(
-			LOG_SOURCE,
-			LogLevel.Warn,
-			`fast arm: completeFeeOptions failed, falling back to standard path: ${getErrorMessage(err)}`,
-		)
+		logger?.log(LOG_SOURCE, LogLevel.Warn, "fast arm: completeFeeOptions failed, falling back to standard path", err)
 		return demoted
 	}
 }
@@ -417,7 +412,8 @@ function settleFastArm(
 	logger?.log(
 		LOG_SOURCE,
 		LogLevel.Warn,
-		`fast arm rejected (non-SimulationError); rerunning through standard path. chainId=${chainIdLog} firstContract=${fastContract} firstSelector=${fastSelector} reason=${getErrorMessage(fastSettled.reason)}`,
+		`fast arm rejected (non-SimulationError); rerunning through standard path. chainId=${chainIdLog} firstContract=${fastContract} firstSelector=${fastSelector} reason=`,
+		fastSettled.reason,
 	)
 	return null
 }
@@ -442,14 +438,7 @@ function decodeInto(
 	try {
 		decoded[index] = decodeFromAbi(types, values)
 	} catch (error) {
-		logger?.log(
-			LOG_SOURCE,
-			LogLevel.Error,
-			label,
-			types,
-			{ returnValueCount: Array.isArray(values) ? values.length : 0 },
-			getErrorMessage(error),
-		)
+		logger?.log(LOG_SOURCE, LogLevel.Error, label, types, { returnValueCount: Array.isArray(values) ? values.length : 0 }, error)
 	}
 }
 

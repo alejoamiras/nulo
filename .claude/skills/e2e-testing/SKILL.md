@@ -57,6 +57,7 @@ falls back to `8545/8080/8880/40400/5174`. Use it only against a sandbox you alr
 - **Heavy suites run alone on the host.** A concurrent `audit:vue`, a proving run, or a second
   suite starves the sandbox and the browsers; the signature is timeouts across unrelated files.
   Rerun before triage. Shard for wall-clock (`--shard=N/M` across agents), never overlap.
+- **Sharding smoke on one host**: both `global-setup-smoke.ts` hooks `pkill -f "chrome.*--load-extension=<EXTENSION_PATH>"`, a PREFIX match — two `test:e2e --shard` halves need two dist dirs whose paths do not prefix each other (`dist/chrome` + a copy at `dist/smoke2`, NOT `dist/chrome-2`, which the first half's teardown kills mid-run with `ConnectionClosedError` at `openPopup`), each half pointed at its own via `EXTENSION_PATH`, and the armed-build env + `NULO_E2E_MIGRATION_FIXTURE=1` on both.
 - **Reap at session end**, not at the next run: `bun run e2e:reap`. Orphans hold their LMDB store
   open; the data dir is on real disk (`~/.cache/nulo-e2e`, `lockfile.ts` `E2E_DATA_ROOT`), so RAM is
   not pinned, but ports and CPU are.

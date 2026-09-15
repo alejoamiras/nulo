@@ -50,7 +50,6 @@ import type { ExecutionMutexRelease } from "./execution-mutex"
 import type { OperationEstimateReuse, OperationEstimateReuseEntry } from "./operation-estimate-reuse"
 import { fingerprintOperation, type OperationFingerprintInput } from "./operation-fingerprint"
 import { fingerprintBaseFee } from "./transfer-estimate-reuse"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { applyEmbeddedFpcGasCap } from "./fee/embedded-fpc-cap"
 import { type FeeEstimate, finalizeGasLimits, suggestGasLimits } from "./fee/fee-strategy"
 import type { OperationPlanner } from "./operation-planner"
@@ -162,7 +161,7 @@ export interface DappSendExecutorDeps {
 	/** Mirrors `AuthRegistryService.recordPendingAuthwits` — records the build's
 	 *  public authwits at the post-send tail as pending, tx-linked rows. */
 	recordPendingAuthwits: AuthRegistryService["recordPendingAuthwits"]
-	logDebug(msg: string): void
+	logDebug(msg: string, ...rest: unknown[]): void
 }
 
 export class DappSendExecutor {
@@ -389,7 +388,7 @@ export class DappSendExecutor {
 			return estimateId
 		} catch (error) {
 			// Cache write is best-effort — the estimate result still goes out.
-			this.deps.logDebug(`estimateOperationFee: cache write skipped: ${getErrorMessage(error)}`)
+			this.deps.logDebug("estimateOperationFee: cache write skipped", error)
 			return undefined
 		}
 	}

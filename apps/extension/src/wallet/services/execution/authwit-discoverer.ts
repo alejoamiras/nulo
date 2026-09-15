@@ -38,7 +38,7 @@ import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import { findFunctionByName, findFunctionBySelector, requireArtifact } from "./contract-resolver"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
-import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
+import { assertLiveChainIdentity, type SelectedNetworkChainInfo } from "@nulo/aztec-runtime/utils"
 import type { Action, AddPrivateAuthwitAction, CallAuthwitContent, EncodedCallAuthwitContent, IntentAuthwitContent } from "./spec"
 
 /** Minimal build-context the discoverer needs from `buildTxRequest`.
@@ -52,7 +52,7 @@ export type DiscoverContext = {
 	/** Stored chain identity for the user-selected network. Used to rebind
 	 *  the live node's `getNodeInfo()` before deriving the authwit
 	 *  `chainInfo` (F-012 / A-01 V-01). */
-	network: { chainId: number }
+	network: SelectedNetworkChainInfo
 }
 
 /** Callback provided by the caller so the discoverer can run its

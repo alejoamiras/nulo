@@ -14,7 +14,6 @@ import { EntityStorage } from "@/wallet/storage"
 import { Lock } from "@/wallet/utils"
 import { getInitials, sanitizeString } from "@/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { type Contact, CONTACT_SERVICE_NAME, CONTACT_STORAGE_ROOT, ContactSchema, type Events, type Methods } from "./spec"
 
 export * from "./spec"
@@ -225,7 +224,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 
 					results.push(contact!)
 				} catch (error) {
-					this.logError("Failed to import a contact", getErrorMessage(error))
+					this.logError("Failed to import a contact", error)
 				}
 			}
 		}
@@ -297,7 +296,8 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 		return await this.lock.withLock(async () => {
 			return await restoreRows(contacts, async (contact) => {
 				const id = await preferOrReallocId(this.storage, contact.id)
-				const written = { ...contact, id }
+				// Same sanitizer the plaintext import applies: a backup name is untrusted display text.
+				const written = { ...contact, id, name: sanitizeString(contact.name, 20) }
 				// Parse the persisted shape so a malformed backup contact is recorded as
 				// restoreError, not silently written + codec-hidden on read.
 				ContactSchema.parse(written)

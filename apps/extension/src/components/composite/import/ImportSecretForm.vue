@@ -45,6 +45,7 @@ const passwordHint = computed(() => newPasswordHint(password.value ?? "", repeat
 			@input="emit('secretInput')"
 			:type="hideCredentials ? 'password' : 'text'"
 			placeholder="Enter recovery phrase"
+			autocomplete="off"
 		>
 			<template #suffix>
 				<button
@@ -79,6 +80,7 @@ const passwordHint = computed(() => newPasswordHint(password.value ?? "", repeat
 				@input="emit('passwordInput')"
 				:maxLength="maxPasswordLength"
 				placeholder="Enter new password"
+				autocomplete="new-password"
 			>
 				<template #suffix>
 					<button
@@ -108,6 +110,7 @@ const passwordHint = computed(() => newPasswordHint(password.value ?? "", repeat
 				@input="emit('passwordInput')"
 				:maxLength="maxPasswordLength"
 				placeholder="Repeat password"
+				autocomplete="new-password"
 			/>
 		</Flex>
 

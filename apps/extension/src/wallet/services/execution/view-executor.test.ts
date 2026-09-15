@@ -150,11 +150,19 @@ describe("ViewExecutor.executeAztecSimulateTx", () => {
 	test("fast path result=null falls back to the standard path", async () => {
 		fastPathMocks.rehydrateOptimizablePrefix.mockReturnValue({ optimizableCalls: [], remainingRaw: [] })
 		fastPathMocks.runFastPath.mockResolvedValue(null)
-		const { executor, pxe } = makeHarness()
-		await executor.executeAztecSimulateTx(makeSimOp())
+		const { executor, pxe, deps } = makeHarness()
+		const calls = [
+			{ name: "balance_of_public", to: "0x01", selector: "0x11" },
+			{ name: "transfer", to: "0x01", selector: "0x22" },
+		]
+		await executor.executeAztecSimulateTx(makeSimOp({ exec: { calls } }))
 
 		expect(fastPathMocks.runFastPath).toHaveBeenCalledTimes(1)
 		expect(pxe.simulateTx).toHaveBeenCalledTimes(1)
+		// The standard path receives EVERY original call with its wire name intact — that is the
+		// evidence `validateEncodedCallFn` re-checks after a fast-path fallback.
+		const planned = (deps.planner.processAztecJsPayload as ReturnType<typeof vi.fn>).mock.calls[0][0] as { calls: unknown[] }
+		expect(planned.calls).toEqual(calls)
 	})
 
 	test("fast path result returned verbatim when non-null", async () => {

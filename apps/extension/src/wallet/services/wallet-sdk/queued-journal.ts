@@ -20,7 +20,7 @@ import type { WalletMessage } from "@aztec/wallet-sdk/types"
 import type { ActiveSession } from "@aztec/wallet-sdk/extension/handlers"
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@/wallet/logger"
-import { Lock, getErrorMessage } from "@nulo/wallet-core/utils"
+import { Lock } from "@nulo/wallet-core/utils"
 import type { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import type { ProfileService } from "@/wallet/services/profile/service"
 import type { DappSessionService } from "@/wallet/services/dapp-session/service"
@@ -219,7 +219,7 @@ export async function tryCreateQueuedJournal(
 			return record.id
 		})
 	} catch (error) {
-		logger.log("wallet-sdk-bg", LogLevel.Warn, `tryCreateQueuedJournal failed: ${getErrorMessage(error)}`)
+		logger.log("wallet-sdk-bg", LogLevel.Warn, "tryCreateQueuedJournal failed", error)
 		return undefined
 	}
 }
@@ -261,6 +261,6 @@ export async function failQueuedIfUnclaimed(
 			{ kind: "popup_bound", message, normalizedRaw: null },
 		)
 	} catch (transitionError) {
-		logger.log("wallet-sdk", LogLevel.Warn, `Failed to mark queued record ${journalId} as failed: ${getErrorMessage(transitionError)}`)
+		logger.log("wallet-sdk", LogLevel.Warn, `Failed to mark queued record ${journalId} as failed`, transitionError)
 	}
 }

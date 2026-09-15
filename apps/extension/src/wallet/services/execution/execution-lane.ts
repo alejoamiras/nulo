@@ -27,7 +27,6 @@
 
 import { JobCancelledSentinel, type JobError, type JobProgress, normalizeError } from "@nulo/wallet-core/jobs"
 import { TooManyPendingError } from "@nulo/extension-messaging/errors"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { pickPrimaryMethod } from "@/utils/primary-method"
 import type { LocalTxOrigin } from "@/wallet/services/transaction/service"
 import type { OperationJournalService } from "@/wallet/services/operation-journal/service"
@@ -144,7 +143,7 @@ export class ExecutionLane {
 			})
 			return op.id
 		} catch (error) {
-			this.deps.logError("Failed to create dapp_execute journal record", getErrorMessage(error))
+			this.deps.logError("Failed to create dapp_execute journal record", error)
 			return undefined
 		}
 	}
@@ -195,7 +194,7 @@ export class ExecutionLane {
 		try {
 			await this.deps.operationJournal.transitionOperation(jobId, { stage: "cancelled" })
 		} catch (err) {
-			this.deps.logDebug("cancelJob: too late to cancel — dropping signal", getErrorMessage(err))
+			this.deps.logDebug("cancelJob: too late to cancel — dropping signal", err)
 			return
 		}
 
@@ -427,7 +426,7 @@ export class ExecutionLane {
 		try {
 			await this.deps.operationJournal.transitionOperation(journalId, progress, error)
 		} catch (err) {
-			this.deps.logError("Failed to update journal operation", getErrorMessage(err))
+			this.deps.logError("Failed to update journal operation", err)
 		}
 	}
 }

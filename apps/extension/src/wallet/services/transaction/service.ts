@@ -376,7 +376,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 						const end = Date.now()
 						this.logDebug(`Transactions synced in ${end - start}ms`)
 					} catch (error) {
-						this.logError("Failed to sync transaction status.", getErrorMessage(error))
+						this.logError("Failed to sync transaction status.", error)
 					}
 				}
 			}

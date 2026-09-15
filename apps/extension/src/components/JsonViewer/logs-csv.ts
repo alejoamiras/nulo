@@ -21,8 +21,13 @@ export function buildLogsCsv(logs: LogEntry[]): string {
 	}
 
 	return [["time", "source", "level", "data"], ...rows]
-		.map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(","))
+		.map((row) => row.map((value) => `"${neutralizeFormula(String(value)).replace(/"/g, '""')}"`).join(","))
 		.join("\n")
+}
+
+/** A cell starting with a formula trigger opens as code in a spreadsheet; a leading quote keeps it text. */
+function neutralizeFormula(cell: string): string {
+	return /^[=+\-@\t\r]/.test(cell) ? `'${cell}` : cell
 }
 
 /** Split an over-long data value into MAX_CELL_LENGTH-wide cells, ellipsis-marked on the

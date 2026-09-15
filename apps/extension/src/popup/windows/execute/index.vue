@@ -11,7 +11,7 @@ import OperationCard from "./OperationCard.vue"
 import SignerIdentityStrip from "./SignerIdentityStrip.vue"
 
 /** Utils */
-import { getErrorData, getErrorMessage } from "@nulo/wallet-core/utils"
+import { getErrorMessage } from "@nulo/wallet-core/utils"
 
 /** Local utilities */
 import { humanizeOperationKind } from "./humanize"
@@ -143,7 +143,7 @@ const {
 	},
 	debounceMs: 500,
 	onError: (key, err) => {
-		console.error(`[Execute] Fee estimation failed for op ${key}:`, getErrorMessage(err), getErrorData(err))
+		console.error(`[Execute] Fee estimation failed for op ${key}:`, err)
 		openToast({ label: "Couldn't estimate fee — retry.", icon: "warning", color: "red" }, TOAST_DURATION.LONG)
 	},
 })
@@ -225,7 +225,7 @@ const init = async () => {
 			})
 		}
 	} catch (error) {
-		console.error(getErrorData(error))
+		console.error("Failed to initialize execution", error)
 		setError("Something went wrong")
 	} finally {
 		// Both are idle after the ops loop; disconnect on success, throw, or

@@ -1,3 +1,4 @@
+import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { Fr } from "@aztec/foundation/curves/bn254"
 import { toRestoreError } from "@/utils/restore-error"
 import type { BrowserApi, StorageArea } from "@nulo/wallet-core/ports"
@@ -14,7 +15,6 @@ import {
 } from "@nulo/extension-messaging/errors"
 import { Lock } from "@/wallet/utils"
 import { ProfileRepository } from "./repository"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { array_equals, canonicalizeMnemonic, getEntropy, getMnemonic } from "@nulo/wallet-core/utils"
 import {
@@ -853,6 +853,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	public async lockActiveProfile(): Promise<void> {
 		await this.ensureInitialized()
 		return this.runExclusive(async () => {
+			// An explicit lock also ends every pending restore, before the close can fail: a
+			// stashed restore secret must not outlive the user's intent to lock.
+			this.sweepStalePendingRestore(Number.POSITIVE_INFINITY)
 			const emitted = await this.sessionManager.close()
 			// B-01 post-close read-back: `close()` is memory-first and swallows a
 			// storage-delete failure (so clearLockAlarm always runs), but an
@@ -1173,7 +1176,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			})
 			return true
 		} catch (error) {
-			this.logError("Failed to confirm operation", getErrorMessage(error))
+			this.logError("Failed to confirm operation", error)
 			throw new Error(getErrorMessage(error))
 		}
 	}
@@ -1536,7 +1539,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					this.deletionState.release(t.profileId)
 				})
 			} catch (err) {
-				this.logError(`resume deletion failed for ${t.profileId}`, getErrorMessage(err))
+				this.logError(`resume deletion failed for ${t.profileId}`, err)
 			}
 		}
 	}
@@ -1598,7 +1601,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				this.logError(`torn-import sweep: completing compensating delete for ${marker.profileId}`)
 				await this.deleteProfile(marker.profileId, { pxeGeneration: marker.pxeGeneration, markerAt: marker.at })
 			} catch (err) {
-				this.logError(`torn-import sweep failed for ${marker.profileId}`, getErrorMessage(err))
+				this.logError(`torn-import sweep failed for ${marker.profileId}`, err)
 			}
 		}
 	}
@@ -1663,7 +1666,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				}
 			}
 		} catch (error) {
-			this.logError("Failed to confirm operation", getErrorMessage(error))
+			this.logError("Failed to confirm operation", error)
 			throw new Error(getErrorMessage(error))
 		}
 	}
@@ -2657,6 +2660,14 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			throw new Error("Profile type changed between restore and finalizeRestore")
 		}
 		this.pendingRestoreSecrets.delete(id)
+		// The sweep excludes the id being finalized, so the TTL must be enforced here (as
+		// `consumeDekRewrapContext` does) or an abandoned restore stays openable for the SW lifetime.
+		if (Date.now() - pending.capturedAt >= ProfileService.PENDING_RESTORE_TTL_MS) {
+			zeroize(pending.secret)
+			zeroize(pending.dek)
+			this.dropPendingDekRewrap(id)
+			throw new Error("No pending restore secret for passkey profile")
+		}
 		let dek: ImportedKeysDek | null = pending.dek
 		try {
 			const intact =

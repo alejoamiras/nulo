@@ -27,6 +27,7 @@
 // Must be the first import in this module — see @nulo/wallet-sdk-schema-patch.
 import "@nulo/wallet-sdk-schema-patch/register"
 
+import logoDataUri from "@/assets/logo.png?inline"
 import { BackgroundConnectionHandler, type PendingDiscovery, type ActiveSession } from "@aztec/wallet-sdk/extension/handlers"
 import { NOOP_LOGGER, type WalletMessage, type WalletResponse } from "@aztec/wallet-sdk/types"
 import { attachContentListener } from "./content-message-relay"
@@ -103,7 +104,9 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 			walletId: "nulo",
 			walletName: "Nulo",
 			walletVersion: __VERSION__,
-			walletIcon: chrome.runtime.getURL("/src/assets/logo.png"),
+			// Inline so no resource has to be web-accessible: a URL would let every origin probe
+			// for the extension. The SDK forwards the string verbatim.
+			walletIcon: logoDataUri,
 			// 5.0 added a required `logger`; NOOP preserves the prior no-SDK-logging behavior.
 			// (Follow-up: route to the @nulo logger to surface channel/heartbeat diagnostics.)
 			logger: NOOP_LOGGER,

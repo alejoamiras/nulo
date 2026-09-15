@@ -21,7 +21,6 @@ import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
 import type { TxProfileResult, TxSimulationResult, UtilityExecutionResult } from "@aztec/stdlib/tx"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
 import z from "zod"
 import type { AccountService } from "@/wallet/services/account/service"
 import type { ContactService } from "@/wallet/services/contact/service"
@@ -128,7 +127,7 @@ export class ViewExecutor {
 				"Failed to decode simulation results",
 				fn.returnTypes,
 				{ returnValueCount: Array.isArray(result) ? result.length : 0 },
-				getErrorMessage(error),
+				error,
 			)
 			return result as AbiDecoded
 		}
@@ -275,6 +274,7 @@ export class ViewExecutor {
 		const result = await runFastPath({
 			node,
 			pxe,
+			resolver: this.deps.resolver,
 			network,
 			fromAddr: AztecAddress.fromStringUnsafe(op.accountAddress),
 			opts: op.opts,

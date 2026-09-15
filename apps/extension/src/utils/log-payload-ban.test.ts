@@ -56,7 +56,8 @@ const SCANNED_EXT = /\.(ts|js|vue)$/
  * Deliberately excludes `secret` and `token`: both are ambiguous in this codebase (ciphertext on
  * `Profile`, a token contract nearly everywhere) and would fire constantly on safe lines.
  */
-const EXTRA_NAMES = ["masterSecret", "rawContent", "privateBalance", "publicBalance"]
+// The two flatteners turn an Error into a string the walker cannot scrub — pass the Error.
+const EXTRA_NAMES = ["masterSecret", "rawContent", "privateBalance", "publicBalance", "getErrorMessage", "errorMessageFromUnknown"]
 
 /**
  * Every denied name, taken FROM the runtime denylists rather than restated beside them.
@@ -475,6 +476,16 @@ describe("log-payload ban (static)", () => {
 		expect(offenders).toHaveLength(1)
 		expect(offenders[0]).toContain("service.ts:1")
 		expect(offenders[0]).toContain("password")
+	})
+
+	test("catches an error flattened by getErrorMessage/errorMessageFromUnknown as a log argument", () => {
+		const offenders = findLoggedSecrets([
+			{ path: "apps/extension/src/wallet/services/foo/service.ts", content: 'this.logError("x", getErrorMessage(e))' },
+			{ path: "packages/aztec-runtime/src/pxe/bar.ts", content: 'log?.("warn", `failed: ${errorMessageFromUnknown(err)}`)' },
+		])
+		expect(offenders).toHaveLength(2)
+		expect(offenders[0]).toContain("getErrorMessage")
+		expect(offenders[1]).toContain("errorMessageFromUnknown")
 	})
 
 	test("catches the dominant package idiom, `this.logger.log` on any receiver", () => {

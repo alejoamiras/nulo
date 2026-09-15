@@ -35,6 +35,7 @@ const onClick = () => emit("clearError")
 				type="password"
 				label="Password"
 				placeholder="Enter password"
+				autocomplete="current-password"
 				autofocus
 				data-testid="unlock-password-input"
 			/>

@@ -42,7 +42,7 @@
 
 import type { JobStage } from "@nulo/wallet-core/jobs"
 import type { AlarmsPort } from "@nulo/wallet-core/ports"
-import { AlarmDispatcher, getErrorMessage } from "@nulo/wallet-core/utils"
+import { AlarmDispatcher } from "@nulo/wallet-core/utils"
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import type { OperationJournalService, OperationRecord } from "./service"
@@ -136,7 +136,7 @@ export class JournalReaper {
 		// pre-adoption `reap().catch(err => log("reap tick threw", …))`.
 		this.dispatcher.listen(
 			() => this.reap(),
-			(err) => this.logger.log(LOG_SOURCE, LogLevel.Error, "reap tick threw", getErrorMessage(err)),
+			(err) => this.logger.log(LOG_SOURCE, LogLevel.Error, "reap tick threw", err),
 		)
 		await this.dispatcher.create({ periodInMinutes: REAP_PERIOD_MINUTES })
 
@@ -151,7 +151,7 @@ export class JournalReaper {
 		try {
 			await this.reap({ unconditional: true, bootCutoff })
 		} catch (err) {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "boot-reap threw; continuing", getErrorMessage(err))
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "boot-reap threw; continuing", err)
 		}
 	}
 
@@ -212,7 +212,7 @@ export class JournalReaper {
 				// Most common cause: the record was terminated by its
 				// owning flow between getOperations and the transition
 				// (e.g. cancelJob landed first). Log + move on.
-				this.logger.log(LOG_SOURCE, LogLevel.Debug, `reap skipped ${op.id}: ${getErrorMessage(err)}`)
+				this.logger.log(LOG_SOURCE, LogLevel.Debug, `reap skipped ${op.id}`, err)
 			}
 		}
 	}

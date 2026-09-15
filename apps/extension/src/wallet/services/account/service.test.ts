@@ -570,3 +570,33 @@ describe("AccountService.provisionDefaultAccount — unattended rule", () => {
 		await expect(h.service.provisionDefaultAccount("p1", 1)).rejects.toThrow("identity mismatch")
 	})
 })
+
+describe("AccountService keyed reads bind the row body to the requested address", () => {
+	async function makeHarness() {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const deletion = new ProfileDeletionState()
+		const services = new ServiceCollection()
+		services.add(
+			svc(PROFILE_SERVICE_NAME, {
+				onProfileDeleted: new EventHandler(),
+				getDeletionState: () => deletion,
+				getProfileDek: async () => undefined,
+			}),
+		)
+		services.add(svc(NETWORK_SERVICE_NAME, { registerChainPurgeSubscriber: () => {}, getL1ChainIdStored: async () => 1 }))
+		const service = new AccountService(new LoggerStore(new ConfigStore()), api)
+		services.add(service)
+		await services.start()
+		return { api, service }
+	}
+
+	test("account B's row transplanted under account A's key is neither returned nor used as A's signer", async () => {
+		const { api, service } = await makeHarness()
+		const rowB = mkAccount("0xB", { type: 1 })
+		await api.storage.local.set({ [`nulo:core:accounts@${accountRowId("p1", 1, "0xA")}`]: JSON.stringify(rowB) })
+		expect(await service.getAccount("p1", 1, "0xA")).toBeUndefined()
+		await expect(service.getAccountContract("p1", 1, "0xA")).rejects.toThrow("unknown account address")
+		await expect(service.exportAccount("p1", 1, "0xA", "pw", false)).rejects.toThrow("unknown account address")
+	})
+})

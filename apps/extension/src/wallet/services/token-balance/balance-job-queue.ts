@@ -162,7 +162,7 @@ export class BalanceJobQueue {
 				await this.syncBatch(batch)
 			}
 		} catch (err) {
-			this.logger?.log(this.logSource, LogLevel.Error, `Failed to sync token balances: ${getErrorMessage(err)}`)
+			this.logger?.log(this.logSource, LogLevel.Error, "Failed to sync token balances", err)
 		}
 		const end = Date.now()
 		this.logger?.log(this.logSource, LogLevel.Debug, `Token balances synced in ${end - start}ms`)

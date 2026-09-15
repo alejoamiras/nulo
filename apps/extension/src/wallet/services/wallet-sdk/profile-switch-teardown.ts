@@ -23,7 +23,6 @@
  */
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { describeExternalId } from "@nulo/wallet-bridge"
 
 export interface ProfileSwitchTeardownDeps {
@@ -138,7 +137,8 @@ export function wireProfileSwitchTeardown(deps: ProfileSwitchTeardownDeps): void
 				deps.logger.log(
 					"wallet-sdk-bg",
 					LogLevel.Warn,
-					`Profile switch: failed to terminate ${describeExternalId(session.sessionId)}: ${getErrorMessage(err)}`,
+					`Profile switch: failed to terminate ${describeExternalId(session.sessionId)}`,
+					err,
 				)
 			}
 		}

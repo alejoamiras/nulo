@@ -88,11 +88,17 @@ export class SessionSecretBox {
 			const packed = new Uint8Array(iv.length + ct.length)
 			packed.set(iv, 0)
 			packed.set(ct, iv.length)
-			return {
-				v: 2,
-				token: Buffer.from(token).toString("base64"),
-				salt: Buffer.from(salt).toString("base64"),
-				wrappedSecret: Buffer.from(packed).toString("base64"),
+			// `Buffer.from(view)` copies; the copy is a second live bearer token until wiped.
+			const tokenCopy = Buffer.from(token)
+			try {
+				return {
+					v: 2,
+					token: tokenCopy.toString("base64"),
+					salt: Buffer.from(salt).toString("base64"),
+					wrappedSecret: Buffer.from(packed).toString("base64"),
+				}
+			} finally {
+				zeroize(tokenCopy)
 			}
 		} finally {
 			zeroize(pair)
@@ -112,12 +118,16 @@ export class SessionSecretBox {
 	): Promise<{ master: MasterSecretBytes; dek: ImportedKeysDek } | null> {
 		if (wrapped?.v !== 2) return null
 		let token: Uint8Array<ArrayBuffer> | undefined
+		let tokenDecoded: Buffer<ArrayBuffer> | undefined
 		let salt: Uint8Array<ArrayBuffer> | undefined
 		let pt: ArrayBuffer | undefined
 		try {
 			let packed: Uint8Array<ArrayBuffer>
 			try {
-				token = new Uint8Array(Buffer.from(wrapped.token, "base64"))
+				// `new Uint8Array(buffer)` copies; keep the decoded Buffer named so it is wiped too.
+				const decoded = Buffer.from(wrapped.token, "base64")
+				tokenDecoded = decoded
+				token = new Uint8Array(decoded)
 				salt = new Uint8Array(Buffer.from(wrapped.salt, "base64"))
 				packed = new Uint8Array(Buffer.from(wrapped.wrappedSecret, "base64"))
 			} catch {
@@ -145,6 +155,7 @@ export class SessionSecretBox {
 			}
 		} finally {
 			zeroize(token)
+			zeroize(tokenDecoded)
 			zeroize(salt)
 			// Defensive: the reachable paths above already wipe `pt`, but wiping it here too
 			// means a future edit that throws between `decrypt` and those wipes cannot leak the

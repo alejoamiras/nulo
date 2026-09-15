@@ -27,6 +27,7 @@ import { TOKEN_SERVICE_NAME } from "@/wallet/services/token/spec"
 import { TRANSACTION_SERVICE_NAME } from "@/wallet/services/transaction/spec"
 import { svc } from "../composition-harness"
 import { BalanceRepository } from "./balance-repository"
+import { reconcilePlan } from "./reconcile-pairs"
 import { TokenBalanceService } from "./service"
 import type { TokenBalanceRaw } from "./spec"
 
@@ -259,6 +260,23 @@ describe("TokenBalanceService.restore — hostile-row validation (P1)", () => {
 
 		expect(restored.restoreError).toBeTruthy()
 		expect(await seedRepo.getAll()).toEqual([])
+	})
+
+	test("restore clears both freshness signals: a future-dated updatedAt and a carried syncFailure are dropped", async () => {
+		const stale = balance(999, 1, { updatedAt: 9_999_999_999_999, syncFailure: { at: 1, message: "planted" } })
+		const [restored] = await service.restore([stale], "p1")
+		expect(restored.restoreError).toBeUndefined()
+		const [row] = await seedRepo.getAll()
+		expect(row.updatedAt).toBe(0)
+		expect(row.syncFailure).toBeUndefined()
+		// Which is exactly the shape the reconciler schedules for a fresh projection.
+		const plan = reconcilePlan({
+			tokens: [{ id: row.token, profileId: row.profileId, chainId: row.chainId, contract: row.contract }],
+			accounts: [{ address: row.account, chainId: row.chainId, index: 0 }],
+			existing: [row],
+		})
+		expect(plan.staleTokens).toEqual([row])
+		expect(plan.missing).toEqual([])
 	})
 
 	test("writes a valid row under a freshly allocated id (input id is ignored)", async () => {

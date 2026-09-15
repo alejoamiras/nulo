@@ -1,7 +1,6 @@
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { sleep } from "@nulo/wallet-core/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { BaseServiceClient, type RequestErrorMeta } from "../core/base-client"
 import { summarizeMessage } from "../core/envelope-summary"
@@ -58,7 +57,7 @@ export abstract class ServiceClient<
 				this.onConnected.invoke()
 				return
 			} catch (error) {
-				this.logError("Failed to connect", getErrorMessage(error))
+				this.logError("Failed to connect", error)
 				await sleep(1000)
 			}
 		}

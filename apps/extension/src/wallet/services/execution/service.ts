@@ -278,7 +278,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			buildAndEstimate: (op, feeSettings, parentTask, signal) => this.buildAndEstimateTxRequest(op, feeSettings, parentTask, signal),
 			createJournalOperation: (input) => this.operationJournal.createOperation(input),
 			transitionJournal: (journalId, progress, error) => this.operationJournal.transitionOperation(journalId, progress, error),
-			logDebug: (msg) => this.logDebug(msg),
+			logDebug: (msg, ...rest) => this.logDebug(msg, ...rest),
 			logError: (msg, ...rest) => this.logError(msg, ...rest),
 		})
 		this.txBuilder = new TxRequestBuilder(
@@ -337,7 +337,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				this.buildAndEstimateTxRequest(op, feeSettings, parentTask, signal),
 			addTransaction: (...args) => this.transactionService.addTransaction(...args),
 			recordPendingAuthwits: (...args) => this.authRegistryService.recordPendingAuthwits(...args),
-			logDebug: (msg) => this.logDebug(msg),
+			logDebug: (msg, ...rest) => this.logDebug(msg, ...rest),
 		})
 		this.viewExecutor = new ViewExecutor({
 			planner: this.planner,

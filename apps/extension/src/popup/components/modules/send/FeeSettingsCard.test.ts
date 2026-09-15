@@ -239,12 +239,12 @@ describe("FeeSettingsCard — bug pins (init race)", () => {
 				type: "private_fpc",
 				title: "Private Fee Juice",
 				subtitle: "private",
-				fpc: { id: "p1", type: 2, name: "Private FPC" },
+				fpc: { id: "p1", type: 2, name: "Private FPC", isProtocol: true },
 			},
 		}
 		const gas = deferred<{ publicFeeJuice: string; privateFeeJuice: string | null }>()
 		mocks.getGasBalances.mockReturnValueOnce(gas.promise)
-		mocks.getFpcs.mockResolvedValue([{ id: "p1", type: 2, name: "Private FPC" }])
+		mocks.getFpcs.mockResolvedValue([{ id: "p1", type: 2, name: "Private FPC", isProtocol: true }])
 
 		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
 		await flushPromises()
@@ -614,7 +614,7 @@ describe("FeeSettingsCard — per-network defaults + fee-juice nudge", () => {
 
 	test("mainnet: defaults to Private Fee Juice and hides Sponsored FPC", async () => {
 		mocks.getFpcs.mockResolvedValue([
-			{ id: "p1", type: 2, name: "Private FPC" },
+			{ id: "p1", type: 2, name: "Private FPC", isProtocol: true },
 			{ id: "s1", type: 1, name: "Sponsor" },
 		])
 		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: "5000000000000000000" })
@@ -629,7 +629,7 @@ describe("FeeSettingsCard — per-network defaults + fee-juice nudge", () => {
 	})
 
 	test("mainnet with zero private fee juice: no usable settings, emits needsFeeJuice + shows the nudge", async () => {
-		mocks.getFpcs.mockResolvedValue([{ id: "p1", type: 2, name: "Private FPC" }])
+		mocks.getFpcs.mockResolvedValue([{ id: "p1", type: 2, name: "Private FPC", isProtocol: true }])
 		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: "0" })
 
 		const w = mount(FeeSettingsCard, { props: baseProps({ network: mainnet }), global: { stubs: STUBS } })
@@ -663,7 +663,7 @@ describe("FeeSettingsCard — per-network defaults + fee-juice nudge", () => {
 	})
 
 	test("mainnet with NULL private fee juice (read failed / unregistered): no nudge — not a confirmed zero", async () => {
-		mocks.getFpcs.mockResolvedValue([{ id: "p1", type: 2, name: "Private FPC" }])
+		mocks.getFpcs.mockResolvedValue([{ id: "p1", type: 2, name: "Private FPC", isProtocol: true }])
 		// null = the private read failed or the FPC isn't registered — an unknown state,
 		// not a confirmed empty balance. We must NOT tell a possibly-funded user to bridge.
 		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: null })
@@ -685,7 +685,7 @@ describe("FeeSettingsCard — per-network defaults + fee-juice nudge", () => {
 		// The switched-to identity (B) resolves normally.
 		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: "1000000000000000000" })
 		mocks.getFpcs.mockResolvedValue([
-			{ id: "p1", type: 2, name: "Private FPC" },
+			{ id: "p1", type: 2, name: "Private FPC", isProtocol: true },
 			{ id: "s1", type: 1, name: "Sponsor" },
 		])
 
@@ -705,7 +705,7 @@ describe("FeeSettingsCard — per-network defaults + fee-juice nudge", () => {
 
 	test("mainnet detected by chainId even WITHOUT `kind` (legacy/custom row): hides Sponsored, defaults Private", async () => {
 		mocks.getFpcs.mockResolvedValue([
-			{ id: "p1", type: 2, name: "Private FPC" },
+			{ id: "p1", type: 2, name: "Private FPC", isProtocol: true },
 			{ id: "s1", type: 1, name: "Sponsor" },
 		])
 		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: "5000000000000000000" })

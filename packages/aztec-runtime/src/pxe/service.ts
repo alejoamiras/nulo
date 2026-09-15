@@ -10,6 +10,7 @@ import {
 	getContractClassFromArtifact,
 	type CompleteAddress,
 	type PartialAddress,
+	computeContractAddressFromInstance,
 } from "@aztec/stdlib/contract"
 import { BlockParameterSchema } from "@aztec/stdlib/block"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
@@ -204,7 +205,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		// would deadlock the reset flow. The deferred sweep is race-safe against that in-flight
 		// deletion: the profile row still exists while its purge runs (the coordinator deletes
 		// the row LAST), so the sweep skips it; every removal is idempotent + NotFound-swallowed.
-		void this.sweepOrphanStores().catch((err) => this.logWarn("deferred orphan-store sweep failed", errorMessageFromUnknown(err)))
+		void this.sweepOrphanStores().catch((err) => this.logWarn("deferred orphan-store sweep failed", err))
 
 		// NOTE: PXE cleanup on profile deletion is NO LONGER a fire-and-forget
 		// `onProfileDeleted` subscriber (it raced the cascade + unconditionally
@@ -349,10 +350,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			if (!opts?.nodeBestEffort) throw err
 			// Node hiccup on a best-effort lookup: degrade to "not found"
 			// and continue the cascade so the local known-bundle still has a chance.
-			this.logWarn(
-				`getContractInstance: node lookup failed for ${address.toString()}, continuing cascade`,
-				errorMessageFromUnknown(err),
-			)
+			this.logWarn(`getContractInstance: node lookup failed for ${address.toString()}, continuing cascade`, err)
 			instance = undefined
 		}
 		if (instance) return instance
@@ -443,15 +441,18 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		return this.withPxeWrite("registerContract", network, async (pxe) => {
 			const instance = await ContractInstanceWithAddressSchema.parseAsync(contract.instance)
 			const artifact = await ContractArtifactSchema.optional().parseAsync(contract.artifact)
-			if (artifact) {
-				await pxe.registerContractClass(artifact)
-			}
-			const derived = await pxe.registerContract(instance)
+			// Derive before any write: the upstream `registerContract` call itself persists the
+			// instance, so a preimage/address mismatch must be rejected while the store is untouched.
+			const derived = await computeContractAddressFromInstance(instance)
 			if (!derived.equals(instance.address)) {
 				throw new Error(
 					`registerContract address mismatch: PXE derived ${derived.toString()} from the preimage, expected ${instance.address.toString()}`,
 				)
 			}
+			if (artifact) {
+				await pxe.registerContractClass(artifact)
+			}
+			await pxe.registerContract(instance)
 		})
 	}
 

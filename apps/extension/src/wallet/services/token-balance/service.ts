@@ -4,7 +4,7 @@ import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/rest
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { getTokenInfo } from "@/wallet/services/token/utils"
-import { EventHandler, Lock, getErrorMessage } from "@nulo/wallet-core/utils"
+import { EventHandler, Lock } from "@nulo/wallet-core/utils"
 import { reconcilePlan } from "./reconcile-pairs"
 import { isLegacyBalanceRow, rowMatchesToken } from "./balance-identity"
 import { AccountService, type Account } from "@/wallet/services/account/service"
@@ -345,7 +345,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 				}
 			} catch (error) {
 				// One unwritable row must not abandon the rest of the batch.
-				this.logWarn(`balance ensure: ${key} failed`, getErrorMessage(error))
+				this.logWarn(`balance ensure: ${key} failed`, error)
 			}
 		}
 		return created
@@ -709,6 +709,10 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 				// blob can never override them.
 				const row = TokenBalanceRawSchema.parse({
 					...tb,
+					// A restored balance is stale by definition: clear both freshness signals so the
+					// reconcile pass re-projects it instead of trusting a backup-supplied timestamp.
+					updatedAt: 0,
+					syncFailure: undefined,
 					id,
 					profileId,
 					chainId: token.chainId,
