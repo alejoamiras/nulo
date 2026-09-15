@@ -1,7 +1,6 @@
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import { toRestoreError } from "@/utils/restore-error"
 import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
-import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
+import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { validateParams } from "@nulo/extension-messaging/zod"
 import { AztecNodeFactoryAdapter } from "@nulo/aztec-runtime/adapters"
@@ -10,7 +9,7 @@ import type { ILogger } from "@/wallet/logger"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
-import { nextRandomId, preferOrReallocId, randomIdNotIn } from "@/wallet/services/id-allocators"
+import { nextRandomId, randomIdNotIn } from "@/wallet/services/id-allocators"
 import { purgeMalformedRows } from "@/wallet/services/purge-rows"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { EntityStorage } from "@/wallet/storage"
@@ -22,7 +21,6 @@ import { CHAIN_IDS, LOCAL_L1_CHAIN_ID, MAINNET_L1_CHAIN_ID, TESTNET_L1_CHAIN_ID 
 import {
 	type ChainKind,
 	ERR_ACTIVE_NETWORK,
-	ERR_BACKUP_TOO_OLD,
 	ERR_DUPLICATE_CHAIN,
 	ERR_DUPLICATE_ENDPOINT,
 	ERR_ENDPOINT_CHAIN_MISMATCH,
@@ -37,7 +35,6 @@ import {
 	NETWORK_SERVICE_NAME,
 	NETWORK_STORAGE_ROOT,
 	NetworkMethodSchemas,
-	NetworkSchema,
 	NodeStatus,
 	NetworkRowSchema,
 } from "./spec"
@@ -169,6 +166,7 @@ function normalizeRpcUrl(raw: string): string {
 export class NetworkService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()(
 		"getOrInitNetworks",
+		"seedDefaultsForProfile",
 		"getNetworks",
 		"getNetwork",
 		"addNetwork",
@@ -257,6 +255,44 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			// call would return [] as a SUCCESS for a deleted profile.
 			deletion.assertCurrent(fence.profileId, fence.epoch)
 			await this.activateSeededLocked(profile.id, seeded, activeId, fence, deletion)
+			return seeded
+		})
+	}
+
+	/**
+	 * Full-backup import restores into a profile before activating it, so the fresh session
+	 * seeding above cannot serve it. Existence is checked through the profile list — a
+	 * deletion epoch alone would also admit an unknown or already-deleted id — and the fence
+	 * is re-asserted under the lock before every write. Only the target's own active pointer
+	 * is written: `this.nodes` is keyed by `chainId` alone and belongs to the active profile.
+	 */
+	public async seedDefaultsForProfile(profileId: string): Promise<Network[]> {
+		validateParams(NetworkMethodSchemas.seedDefaultsForProfile.params, [profileId], "seedDefaultsForProfile")
+		await this.ensureInitialized()
+		const deletion = this.profileService.getDeletionState()
+		const epochs = captureRestoreEpochs(deletion, [profileId])
+		if (!(await this.profileService.getProfiles()).some((p) => p.id === profileId)) {
+			throw new Error(`profile ${profileId} does not exist`)
+		}
+		return await this.lock.withLock(async () => {
+			assertRestoreEpoch(deletion, epochs, profileId)
+			const existing = (await this.storage.getValues()).filter((n) => n.profileId === profileId)
+			if (existing.length) return existing
+			const fence = { profileId, epoch: epochs.get(profileId) as number }
+			const seeded: Network[] = []
+			let activeId: string | undefined
+			for (const seed of DEFAULT_SEEDS) {
+				try {
+					const network = await this.seedOneNetworkLocked(profileId, seed, fence, deletion)
+					seeded.push(network)
+					if (seed.isPrimaryActive) activeId = network.id
+				} catch (error) {
+					this.logError(`Failed to seed default '${seed.name}'`, error)
+				}
+			}
+			assertRestoreEpoch(deletion, epochs, profileId)
+			const primary = activeId ?? seeded[0]?.id
+			if (primary !== undefined) await this._writeActive(profileId, primary)
 			return seeded
 		})
 	}
@@ -845,61 +881,6 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		this.chainPurgeSubscribers.push(fn)
 	}
 
-	// ── Backup / restore ─────────────────────────────────────────────────
-
-	public async backup(): Promise<Network[]> {
-		return await this.getNetworks()
-	}
-
-	/**
-	 * Restore networks from a backup. Rejects entries lacking the new-shape
-	 * `endpoints[]` field with `BACKUP_TOO_OLD`. Rejects collisions with
-	 * existing `(profileId, chainId)` rows so a partial-merge can't accidentally
-	 * promote a stale RPC.
-	 */
-	public async restore(networks: unknown[]): Promise<Restored<Network>[]> {
-		await this.ensureInitialized()
-		// Deletion fence captured at entry (see restore-fence.ts): rows written
-		// after a mid-restore deleteProfile must reject, not orphan.
-		const deletion = this.profileService.getDeletionState()
-		const epochs = captureRestoreEpochs(
-			deletion,
-			networks.map((n) => (n as { profileId?: unknown } | null)?.profileId),
-		)
-		const result: Restored<Network>[] = []
-		return await this.lock.withLock(async () => {
-			const existing = await this.storage.getValues()
-			// A collision re-roll must avoid every SOURCE id in this batch too, not
-			// just stored ids — a fresh id equal to a LATER source id would alias that
-			// network's remapped child rows (finding E; belt-and-suspenders with the
-			// composable's single-pass map).
-			const sourceIds = new Set<string>()
-			for (const n of networks) {
-				const nid = (n as { id?: unknown } | null)?.id
-				if (typeof nid === "string") sourceIds.add(nid)
-			}
-			for (const raw of networks) {
-				try {
-					// SYNCHRONOUS validation: its throws land in this catch on the
-					// same continuation, exactly as the inline checks did.
-					const candidate = validateRestoredNetwork(raw, existing)
-					const id = await preferOrReallocId(this.storage, candidate.id, sourceIds)
-					const stored: Network = { ...candidate, id }
-					assertRestoreEpoch(deletion, epochs, stored.profileId)
-					await this.storage.set(id, stored)
-					existing.push(stored)
-					result.push(stored)
-				} catch (err) {
-					result.push({
-						...(raw && typeof raw === "object" ? (raw as Partial<Network>) : {}),
-						restoreError: toRestoreError(err),
-					} as Restored<Network>)
-				}
-			}
-			return result
-		})
-	}
-
 	// ── Profile lifecycle ────────────────────────────────────────────────
 
 	private readonly onActiveProfileChanged = async () => {
@@ -1014,46 +995,4 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	private async _writeActive(profileId: string, networkId: string): Promise<void> {
 		await this.browserApi.storage.local.set({ [activeKey(profileId)]: networkId })
 	}
-}
-
-function isNewShapeNetwork(value: unknown): value is Network {
-	if (!value || typeof value !== "object") return false
-	const v = value as Partial<Network>
-	return (
-		typeof v.id === "string" &&
-		typeof v.profileId === "string" &&
-		typeof v.chainId === "number" &&
-		typeof v.l1ChainId === "number" &&
-		Number.isSafeInteger(v.l1ChainId) &&
-		v.l1ChainId >= 0 &&
-		v.l1ChainId <= 0xffffffff &&
-		typeof v.name === "string" &&
-		typeof v.primaryEndpointId === "string" &&
-		Array.isArray(v.endpoints) &&
-		v.endpoints.length > 0
-	)
-}
-
-/** Restore-boundary validation for one backup entry (all throws — the caller's
- * per-entry catch turns them into that entry's `restoreError`):
- * shape gate (`BACKUP_TOO_OLD`), then F-011 / A-04 — enforce the RPC URL
- * allowlist on every endpoint during restore (pre-fix, restore went directly to
- * storage after a shape check, so a malicious backup could re-introduce
- * `javascript:`, `data:`, non-loopback `http:`, or userinfo URLs that the
- * runtime adapter would later reject; validate at the persistence boundary AND
- * at the adapter — defense in depth), then the stored `(profileId, chainId)`
- * collision check so a partial-merge can't promote a stale RPC. */
-function validateRestoredNetwork(raw: unknown, existing: Network[]): Network {
-	if (!isNewShapeNetwork(raw)) {
-		throw new Error(`${ERR_BACKUP_TOO_OLD}: This backup was created with an older version of Nulo.`)
-	}
-	const parsed = NetworkSchema.safeParse(raw)
-	if (!parsed.success) {
-		throw new Error(`Backup rejected: ${parsed.error.issues.map((i) => i.message).join("; ")}`)
-	}
-	const candidate = parsed.data
-	if (existing.some((n) => n.profileId === candidate.profileId && n.chainId === candidate.chainId)) {
-		throw new Error(`A network for chain ${candidate.chainId} already exists in profile ${candidate.profileId}.`)
-	}
-	return candidate
 }

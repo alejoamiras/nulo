@@ -2,13 +2,13 @@
  * Import with a DEAD/degraded RPC must reach an actionable screen fast — the
  * product fix for e2e-deflake ledger entry 1 (the smoke backup-roundtrip
  * flake's root). The import's account-state leg is the ONE step that dials
- * the network (PXE boot against the backup-carried rpcUrl); it is now
+ * the network (PXE boot against the reseeded local endpoint); it is now
  * preflight-gated and deadline-bounded, and skipped registrations surface on
  * the existing finished-with-errors screen whose Continue proceeds into the
  * wallet.
  *
  * Three endpoint shapes, each proving a different bound:
- *  - REFUSED   (`http://localhost:1`)      → preflight classifies in ~ms/attempt.
+ *  - REFUSED   (connection refused at the browser) → preflight classifies in ~ms/attempt.
  *  - BLACKHOLE (accepts, never responds)   → preflight's per-attempt abort + backoff.
  *  - STATEFUL  (answers the probe, then blackholes the PXE boot call) → the
  *    30s registration deadline — the only variant that reaches registration,
@@ -19,16 +19,21 @@
  * registration ≤30s) + slow-runner storage-restore margin — causal bounds,
  * not blind timeouts. Tests run with retry: 0 so a bound that only passes on
  * a vitest retry cannot hide.
+ *
+ * The backup carries no network rows (the import reseeds the built-in networks), so the endpoint
+ * under test is the compiled-in LOCAL seed. Its origin is rerouted per test through CDP `Fetch`
+ * interception to a stub on an ephemeral, run-owned port — the seed's port is never bound.
  */
-import { createHash } from "node:crypto"
-import { mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, rmSync } from "node:fs"
 import { createServer, type Server } from "node:http"
 import type { AddressInfo, Socket } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import type { Page } from "puppeteer"
-import { clickByTestId, launchExtension, test, waitForHash } from "./fixtures/extension"
+import { LOCAL_L1_CHAIN_ID } from "@/utils/chain-ids"
+import { clickByTestId, type ExtensionContext, launchExtension, test, waitForHash } from "./fixtures/extension"
+import { interceptRpc, type RpcInterception } from "./helpers/rpc-intercept"
 import {
 	buildSyntheticBackup,
 	deriveNuloAccountAddress,
@@ -40,21 +45,20 @@ import {
 	writeBackupToTemp,
 } from "./helpers/import-drivers"
 
-/** The synthetic network's chain id — the stateful stub answers for it. */
-const STUB_CHAIN_ID = 4242
+/** The LOCAL seed's compiled-in endpoint (`LOCAL_NETWORK_RPC_URL`'s default and env override). */
+const LOCAL_RPC = process.env.VITE_LOCAL_NETWORK_RPC_URL ?? "http://localhost:8080"
 
 const ZERO_ETH = `0x${"00".repeat(20)}`
 const ZERO_AZTEC = `0x${"00".repeat(32)}`
 
 /** Schema-valid `getNodeInfo` result for the stateful stub (NodeInfoSchema:
- *  @aztec/stdlib contract/interfaces/node-info). `l1ChainId ^ rollupVersion`
- *  composes the wallet's chain id, so `(0, STUB_CHAIN_ID)` answers "I am the
- *  restored network". */
+ *  @aztec/stdlib contract/interfaces/node-info). It answers as the LOCAL seed: the exact
+ *  `l1ChainId` is what the identity check pins for chain 0 (the composite is skipped there). */
 function nodeInfoResult(): Record<string, unknown> {
 	return {
 		nodeVersion: "0.0.0-stub",
-		l1ChainId: 0,
-		rollupVersion: STUB_CHAIN_ID,
+		l1ChainId: LOCAL_L1_CHAIN_ID,
+		rollupVersion: LOCAL_L1_CHAIN_ID,
 		l1ContractAddresses: Object.fromEntries(
 			[
 				"rollupAddress",
@@ -200,39 +204,19 @@ function startStub(answer: (method: string) => unknown | undefined): Promise<Stu
 	})
 }
 
-/** Synthetic backup whose ONE network (kind custom, STUB_CHAIN_ID) points at
- *  `rpcUrl` and carries a senders-only account-state slice — the minimum
- *  registrable work that forces the chain-registration leg to engage. */
-async function deadRpcBackup(rpcUrl: string, withAccountState = true): Promise<string> {
+/** Synthetic backup with a senders-only account-state item on the LOCAL chain — the minimum
+ *  registrable work that forces the chain-registration leg to dial the (rerouted) seed. */
+async function deadRpcBackup(withAccountState = true): Promise<string> {
 	const { masterBase64: master, entropyBase64 } = await makeRecoveryTriple()
-	const address = await deriveNuloAccountAddress(master, STUB_CHAIN_ID)
-	const base = buildSyntheticBackup({
+	const address = await deriveNuloAccountAddress(master, LOCAL_L1_CHAIN_ID)
+	return buildSyntheticBackup({
 		masterBase64: master,
 		entropyBase64,
-		l1ChainId: STUB_CHAIN_ID,
 		accountAddress: address,
-		extraData: withAccountState ? { "account-state": [{ networkId: "syn-network-id", senders: [{ address }], contracts: [] }] } : {},
+		extraData: withAccountState
+			? { "account-state": [{ networkId: "syn-network-id", chainId: 0, senders: [{ address }], contracts: [] }] }
+			: {},
 	})
-	// Retarget the synthetic network at the stub: rpcUrl + a NON-local kind +
-	// the stub's chain id (kind "local" short-circuits chain checks to 0, which
-	// would misclassify the stub as InvalidChain), then re-checksum — the
-	// importer verifies the hash over the parsed-minus-checksum body.
-	const parsed = JSON.parse(base) as {
-		checksum?: string
-		data: { network: Array<Record<string, unknown>>; account: Array<Record<string, unknown>> }
-	} & Record<string, unknown>
-	const { checksum: _drop, ...bodyRest } = parsed
-	const body = bodyRest as typeof parsed
-	for (const n of body.data.network) {
-		n.rpcUrl = rpcUrl
-		n.kind = "custom"
-		n.name = "Stub Net"
-		n.chainId = STUB_CHAIN_ID
-		for (const e of (n.endpoints as Array<Record<string, unknown>>) ?? []) e.rpcUrl = rpcUrl
-	}
-	for (const a of body.data.account) a.chainId = STUB_CHAIN_ID
-	const checksum = createHash("sha256").update(JSON.stringify(body)).digest("hex")
-	return JSON.stringify({ ...body, checksum })
 }
 
 /** Drive pick→fill→submit for the backup file (the shared driver's body minus
@@ -263,26 +247,38 @@ async function continueThroughErrorsScreen(page: Page, errorsScreenBudgetMs: num
 	await waitForHash(page, "#/popup/general", postClickBudgetMs)
 }
 
-async function withFreshExtension(fn: (page: Page) => Promise<void>): Promise<void> {
+async function withFreshExtension(
+	mode: RpcInterception,
+	fn: (page: Page, ctx: ExtensionContext, intercepted: () => number) => Promise<void>,
+	intercept: typeof interceptRpc = interceptRpc,
+): Promise<{ profileDir: string }> {
 	const profileDir = mkdtempSync(join(tmpdir(), "nulo-dead-rpc-"))
 	const ctx = await launchExtension({ userDataDir: profileDir })
+	// The interception is armed inside the cleanup scope: a setup failure must still close the
+	// browser and remove its profile directory.
+	let armed: Awaited<ReturnType<typeof interceptRpc>> | undefined
 	try {
+		armed = await intercept(ctx.browser, ctx.extensionId, LOCAL_RPC, mode)
 		const page = await gotoPopupImport(ctx)
-		await fn(page)
+		await fn(page, ctx, armed.hits)
 	} finally {
+		await armed?.stop()
 		await ctx.browser.close()
 		rmSync(profileDir, { recursive: true, force: true })
 	}
+	return { profileDir }
 }
 
 test("REFUSED rpc: import lands on the errors screen fast; Continue enters the wallet", { timeout: 180_000, retry: 0 }, async () => {
-	// http://localhost:1 refuses cross-platform (endpoints.test.ts precedent):
-	// each preflight attempt classifies in ~ms, so the whole leg costs ≈6s of
-	// backoff waits. Budget: slow-runner storage restore (≤15s) + ≈6s + margin.
-	const backup = await deadRpcBackup("http://localhost:1")
-	await withFreshExtension(async (page) => {
+	// The seed's requests fail at the browser as a refused connection: each preflight attempt
+	// classifies in ~ms, so the whole leg costs ≈6s of backoff waits. Budget: slow-runner
+	// storage restore (≤15s) + ≈6s + margin.
+	const backup = await deadRpcBackup()
+	await withFreshExtension({ kind: "refuse" }, async (page, _ctx, intercepted) => {
 		await submitBackup(page, writeBackupToTemp(backup, "refused.json"))
 		await continueThroughErrorsScreen(page, 60_000)
+		// The refusal must be the interception's, not whatever happens to listen on the seed's port.
+		expect(intercepted()).toBeGreaterThan(0)
 	})
 })
 
@@ -291,8 +287,8 @@ test("BLACKHOLE rpc: the preflight's per-attempt abort bounds a hanging endpoint
 	// preflight, then skip records. Budget: restore ≤15s + 21s + margin.
 	const stub = await startStub(() => undefined)
 	try {
-		const backup = await deadRpcBackup(stub.url)
-		await withFreshExtension(async (page) => {
+		const backup = await deadRpcBackup()
+		await withFreshExtension({ kind: "redirect", to: stub.url }, async (page) => {
 			await submitBackup(page, writeBackupToTemp(backup, "blackhole.json"))
 			await continueThroughErrorsScreen(page, 75_000)
 		})
@@ -312,8 +308,8 @@ test("STATEFUL rpc (probe passes, then blackholes): the registration deadline bo
 	// the boot call arrived). Budget: restore ≤15s + probe ≈0 + 30s + margin.
 	const stub = await startStub((method) => (method === "aztec_getNodeInfo" ? nodeInfoResult() : undefined))
 	try {
-		const backup = await deadRpcBackup(stub.url)
-		await withFreshExtension(async (page) => {
+		const backup = await deadRpcBackup()
+		await withFreshExtension({ kind: "redirect", to: stub.url }, async (page) => {
 			await submitBackup(page, writeBackupToTemp(backup, "stateful.json"))
 			await continueThroughErrorsScreen(page, 90_000)
 		})
@@ -324,4 +320,32 @@ test("STATEFUL rpc (probe passes, then blackholes): the registration deadline bo
 	} finally {
 		await stub.close()
 	}
+})
+
+test("an interception setup failure still closes the browser and removes its profile directory", {
+	timeout: 120_000,
+	retry: 0,
+}, async () => {
+	const failing: typeof interceptRpc = async () => {
+		throw new Error("synthetic interception failure")
+	}
+	let dir = ""
+	await expect(
+		withFreshExtension(
+			{ kind: "refuse" },
+			async () => {
+				throw new Error("must not run")
+			},
+			async (browser, id, from, mode) => {
+				dir =
+					(browser as unknown as { process(): { spawnargs: string[] } })
+						.process()
+						.spawnargs.find((a) => a.startsWith("--user-data-dir="))
+						?.slice("--user-data-dir=".length) ?? ""
+				return failing(browser, id, from, mode)
+			},
+		),
+	).rejects.toThrow(/synthetic interception failure/)
+	expect(dir).toMatch(/nulo-dead-rpc-/)
+	expect(existsSync(dir)).toBe(false)
 })

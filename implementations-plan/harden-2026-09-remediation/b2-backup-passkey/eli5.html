@@ -1,0 +1,44 @@
+<title>Harden B2 Backup and Passkey</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{--bg:#f6f4ef;--fg:#1c1a17;--muted:#6b655c;--hairline:#dcd6ca;--surface:#fbfaf7;--code:#eeeae1;--accent:#175e63;--green:#2b6b3f;--green-bg:#e3efe6;--med:#9a5b07;--med-bg:#f9ecd6;--display:"Fraunces",Georgia,serif;--body:"IBM Plex Sans","Helvetica Neue",Arial,sans-serif;--mono:"IBM Plex Mono",Menlo,Consolas,monospace}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#131416;--fg:#e9e5dc;--muted:#9b958a;--hairline:#2a2c30;--surface:#1a1c1f;--code:#202226;--accent:#5fb3b6;--green:#7fc08f;--green-bg:#1d3324;--med:#e0a04a;--med-bg:#3a2c14}}
+:root[data-theme="dark"]{--bg:#131416;--fg:#e9e5dc;--muted:#9b958a;--hairline:#2a2c30;--surface:#1a1c1f;--code:#202226;--accent:#5fb3b6;--green:#7fc08f;--green-bg:#1d3324;--med:#e0a04a;--med-bg:#3a2c14}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 var(--body);padding-block:2.5rem 4rem;padding-inline:clamp(16px,4vw,40px)}
+.page{max-width:760px;margin:0 auto}h1,h2,h3{font-family:var(--display);font-weight:600;text-wrap:balance;margin:0}
+h1{font-size:clamp(1.9rem,5vw,2.5rem);line-height:1.1}h2{font-size:1.4rem;margin-block:2.4rem .8rem;padding-top:1.2rem;border-top:1px solid var(--hairline)}h3{font-size:1.05rem;margin-block:1.2rem .3rem}
+p{margin:0 0 .8rem;max-width:66ch}code{font-family:var(--mono);font-size:.86em;background:var(--code);padding:.08em .35em;border-radius:3px}
+.eyebrow{font-family:var(--mono);font-size:.74rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}.lede{color:var(--muted);font-size:1.05rem;margin-top:.5rem}
+.phase{background:var(--surface);border:1px solid var(--hairline);border-radius:8px;padding:1rem 1.2rem;margin:.8rem 0}.phase p{margin-bottom:.5rem}.gate{font-family:var(--mono);font-size:.8rem;color:var(--muted)}
+.callout{border-left:4px solid var(--green);background:var(--green-bg);padding:.9rem 1.1rem;border-radius:0 6px 6px 0;margin:1.2rem 0}.callout.amber{border-color:var(--med);background:var(--med-bg)}.callout h3{margin-top:0}
+ul{margin:.3rem 0 .8rem;padding-left:1.2rem}li{margin:.25rem 0}.foot{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--hairline);color:var(--muted);font-size:.86rem}
+</style>
+<div class="page">
+<div class="eyebrow">Blueprint · light · batch 2 of 4 · 2026-09-14</div>
+<h1>Harden B2 Backup and Passkey</h1>
+<p class="lede">The second of four batches fixing the 2026-09-13 security audit. Three surfaces get smaller: a backup file can no longer carry fee-payer or network rows, adding a custom network becomes a Developer-Mode action, and the passkey's Relying Party moves to a subdomain that serves nothing.</p>
+
+<h2>What this batch fixes</h2>
+<ul>
+  <li><strong>F-03, second half.</strong> A doctored backup could plant a fake "Private Fee Juice" payer. The fee-payer rows leave the backup entirely; the wallet re-derives the protocol payers on its own, and a user-added sponsored payer is re-added by hand.</li>
+  <li><strong>F-04.</strong> A doctored backup could bind the restored profile's "mainnet" to an attacker's RPC. Network rows leave the backup too. On import the wallet re-creates its built-in networks (mainnet, testnet, local) for the new profile from constants compiled into the extension, then re-attaches the imported account state and history to those rows by chain id. A backup can still <em>choose</em> among the built-in networks; it can no longer <em>define</em> one.</li>
+  <li><strong>F-04, the gate.</strong> "Add network" shows only with Developer Mode on. Editing endpoints on the built-in networks stays available to everyone, and a profile that already has custom networks keeps managing them.</li>
+  <li><strong>F-05.</strong> Any page on <code>nulo.sh</code> or its application subdomains could run the passkey ceremony and reproduce the wallet's master secret. The Relying Party ID becomes <code>passkey.nulo.sh</code>, the wallet's own content script is kept off that host, and the build gate that pins the value keeps working unchanged.</li>
+</ul>
+
+<div class="callout amber"><h3>Owner action</h3><p>Provision <code>passkey.nulo.sh</code> as a static page with a strict Content-Security-Policy and no scripts, and keep every <code>*.passkey.nulo.sh</code> descendant content-free (subdomains stay eligible for the passkey). The code change is safe to land first; it must land before any real passkey wallet exists, because changing the Relying Party later bricks them.</p></div>
+
+<div class="callout"><h3>What codex changed</h3><p>Round 1 rejected the first reseed design: the seeding routine also refreshes a per-chain node cache, so restoring profile B while profile A is active would have pointed A at B's default endpoint. The reseed now writes only the new profile's rows and its active pointer, and a test pins that A's endpoint survives. Round 2 rejected the dead-RPC test fixture binding the built-in local port (another agent's run may own it); the test now reroutes requests through the browser's own interception instead. Round 3 approved.</p></div>
+
+<h2>Phases and how each proves itself</h2>
+<div class="phase"><h3>1 · Relying Party ID</h3><p>Constant, host permission, content-script exclusion, SECURITY.md.</p><p class="gate">Gate: build (runs the RP-ID check) · passkey + manifest tests · lint · typecheck</p></div>
+<div class="phase"><h3>2 · Drop the two slices, reseed on import</h3><p>Registry, export, import pipeline, the new seeding entry point, chain-id remap, test fixtures that used to carry network rows, the dead-RPC fixture rewire.</p><p class="gate">Gate: backup / composable / network / account-state suites · CI-gating tests · lint · typecheck</p></div>
+<div class="phase"><h3>3 · Developer-Mode gate</h3><p>The networks page and the two smoke cases that click "Add network".</p><p class="gate">Gate: <code>bun run audit:vue</code> · smoke e2e (armed build, two shards) · CI-gating tests. Network suite runs on the PR in CI.</p></div>
+
+<h2>Why light</h2>
+<p>Owner-set. One piece of new control flow (the reseed stage); everything else is deletion or a one-line value change. No storage migration, no crypto change, no new dependency.</p>
+
+<div class="callout"><h3>Approval</h3><p>Pre-granted by the owner's decision table in <code>implementations-plan/harden-2026-09-remediation/seed.md</code> (2026-09-14). The arc-wide <code>/goal</code> in the seed drives implementation; there is no per-batch seed.</p></div>
+
+<div class="foot"><p>Repo: <code>implementations-plan/harden-2026-09-remediation/b2-backup-passkey/plan.md</code> · <code>recon.md</code> · <code>audit-codex.md</code> · lessons in <code>../lessons/b2.md</code>. Stack: <code>dev ← #591 ← #592 (B1) ← harden-b2-backup-passkey</code>.</p></div>
+</div>

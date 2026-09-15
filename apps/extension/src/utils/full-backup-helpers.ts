@@ -310,7 +310,7 @@ function projectFailedChildren(children: unknown): Array<Record<string, unknown>
 }
 
 /** Trim to the cap, replacing the tail with one constant marker rather than silently dropping. */
-function capRecords(records: unknown[]): unknown[] {
+export function capRecords(records: unknown[]): unknown[] {
 	if (records.length <= MAX_RECORDED_RESTORE_ERRORS) return records
 	return [
 		...records.slice(0, MAX_RECORDED_RESTORE_ERRORS),
@@ -418,30 +418,53 @@ export function remapByMap(data: Record<string, unknown>, idKey: string, oldToNe
 }
 
 /**
- * Resolve a backup's exported active-network id (a RAW old network id) to the restored NEW network
- * id, for item 1b (preserve the user's active-network selection across import).
- *
- * Uses a COMPLETE source→successful-result pairing by RESULT INDEX — including IDENTITY mappings for
- * networks whose id didn't change (the `remapByMap` `oldToNew` map above deliberately SKIPS those,
- * so it can't be reused here). Attacker-safe by construction: the exported id must pair, by index,
- * with a network that RESTORED SUCCESSFULLY and whose source id isn't duplicated; anything absent,
- * non-string, failed, duplicated, or unmatched returns `undefined`, and the caller then leaves the
- * active pointer unset so the bootstrap primary fallback applies. NEVER a global-by-value lookup.
+ * The exported active-network preference names a CHAIN, never a row: it is honoured only when a
+ * seeded network serves exactly that chain (chain `0` — the local seed — included), otherwise the
+ * primary seed stays active. Untrusted input: strict numeric equality, no coercion.
  */
-export function resolveRestoredActiveNetworkId(
-	exportedActiveId: unknown,
-	newNetworks: ReadonlyArray<{ id: string; restoreError?: unknown }>,
-	oldNetworks: ReadonlyArray<{ id: string }>,
+export function resolveRestoredActiveNetworkIdByChain(
+	exportedChainId: unknown,
+	seeded: ReadonlyArray<{ id: string; chainId: number }>,
 ): string | undefined {
-	if (typeof exportedActiveId !== "string") return undefined
-	const sourceIdCounts = new Map<string, number>()
-	for (const n of oldNetworks) sourceIdCounts.set(n.id, (sourceIdCounts.get(n.id) ?? 0) + 1)
-	const complete = new Map<string, string>()
-	for (let i = 0; i < newNetworks.length; i++) {
-		const restored = newNetworks[i]
-		const old = oldNetworks[i]
-		if (!restored || restored.restoreError || !old || (sourceIdCounts.get(old.id) ?? 0) > 1) continue
-		complete.set(old.id, restored.id)
+	if (typeof exportedChainId !== "number" || !Number.isInteger(exportedChainId)) return undefined
+	return seeded.find((n) => n.chainId === exportedChainId)?.id
+}
+
+type SeededNetwork = { id: string; chainId: number }
+
+function seededIdFor(byChain: ReadonlyMap<number, string>, row: unknown): string | undefined {
+	if (!row || typeof row !== "object") return undefined
+	const chainId = (row as { chainId?: unknown }).chainId
+	return typeof chainId === "number" && Number.isInteger(chainId) ? byChain.get(chainId) : undefined
+}
+
+/**
+ * Bind every row of the named slices to the seeded network of its `chainId`, overwriting
+ * `networkId` — the exported id is never consulted, so a backup can choose among the seeded
+ * networks but cannot define one. A row whose chain is missing, non-numeric or unseeded is
+ * removed from its slice; only its ORDINAL is returned (the row is attacker-authored payload
+ * and must not reach the error log).
+ */
+export function remapNetworkIdByChain(
+	data: Record<string, unknown>,
+	seeded: ReadonlyArray<SeededNetwork>,
+	slices: readonly string[],
+): Record<string, number[]> {
+	const byChain = new Map<number, string>()
+	for (const n of seeded) if (!byChain.has(n.chainId)) byChain.set(n.chainId, n.id)
+	const dropped: Record<string, number[]> = {}
+	for (const key of slices) {
+		const rows = data[key]
+		if (!Array.isArray(rows)) continue
+		const kept: unknown[] = []
+		const droppedHere: number[] = []
+		rows.forEach((row, index) => {
+			const id = seededIdFor(byChain, row)
+			if (id === undefined) droppedHere.push(index)
+			else kept.push({ ...(row as Record<string, unknown>), networkId: id })
+		})
+		if (droppedHere.length) dropped[key] = droppedHere
+		data[key] = kept
 	}
-	return complete.get(exportedActiveId)
+	return dropped
 }

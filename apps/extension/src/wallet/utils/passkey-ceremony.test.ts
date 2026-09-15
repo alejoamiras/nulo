@@ -42,7 +42,7 @@ describe("buildCreateOptions", () => {
 
 	it("keeps rp, challenge size, credential params, and authenticator selection unchanged", async () => {
 		const opts = await buildCreateOptions(ID, "Alice")
-		expect(opts.rp).toEqual({ name: "Nulo", id: "nulo.sh" })
+		expect(opts.rp).toEqual({ name: "Nulo", id: "passkey.nulo.sh" })
 		expect((opts.challenge as Uint8Array).byteLength).toBe(32)
 		expect(opts.pubKeyCredParams).toEqual([{ type: "public-key", alg: -7 }])
 		expect(opts.authenticatorSelection).toEqual({

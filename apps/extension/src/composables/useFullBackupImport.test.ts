@@ -37,7 +37,7 @@ const profileClient = {
 	disconnect: vi.fn(),
 }
 const networkClient = {
-	restore: vi.fn(),
+	seedDefaultsForProfile: vi.fn(),
 	setActiveForProfile: vi.fn(),
 	probeNodeStatus: vi.fn(),
 	disconnect: vi.fn(),
@@ -64,7 +64,6 @@ let transactionClient = passthroughClient()
 let tokenBalanceClient = passthroughClient()
 let accountStateClient = passthroughClient()
 let authRegistryClient = passthroughClient()
-let fpcClient = passthroughClient()
 let contactClient = passthroughClient()
 let configClient = passthroughClient()
 
@@ -110,11 +109,6 @@ vi.mock("@/wallet/services/auth-registry/client", () => ({
 		return authRegistryClient
 	}),
 }))
-vi.mock("@/wallet/services/fpc/client", () => ({
-	FpcServiceClient: vi.fn(function () {
-		return fpcClient
-	}),
-}))
 vi.mock("@/wallet/services/contact/client", () => ({
 	ContactServiceClient: vi.fn(function () {
 		return contactClient
@@ -148,7 +142,6 @@ vi.mock("@/wallet/services/auth-registry/spec", () => ({
 }))
 vi.mock("@/wallet/services/config/spec", () => ({ CONFIG_SERVICE_NAME: "config" }))
 vi.mock("@/wallet/services/contact/spec", () => ({ CONTACT_SERVICE_NAME: "contact", CONTACT_STORAGE_ROOT: "nulo:core:contacts" }))
-vi.mock("@/wallet/services/fpc/spec", () => ({ FPC_SERVICE_NAME: "fpc", FPC_STORAGE_ROOT: "nulo:core:fpcs" }))
 vi.mock("@/wallet/services/network/spec", () => ({
 	NETWORK_SERVICE_NAME: "network",
 	NETWORK_STORAGE_ROOT: "nulo:core:networks",
@@ -209,22 +202,7 @@ async function buildBackup(overrides: Record<string, unknown> = {}) {
 		"imported-keys-dek": Buffer.from(new Uint8Array(32).fill(2)).toString("base64"),
 		data: {
 			profile: { id: "src-profile-id", name: "Imported", type: "password" },
-			// P6: schema-realistic default fixtures (new-shape network with
-			// endpoints[]; schema-complete account) so the default path mirrors
-			// what the real services accept + the #220 read-codecs validate.
-			network: [
-				{
-					id: "src-net-1",
-					profileId: "src-profile-id",
-					name: "Testnet",
-					rpcUrl: "https://t/",
-					chainId: 1,
-					l1ChainId: 1,
-					kind: "custom",
-					endpoints: [{ id: "src-ep-1", rpcUrl: "https://t/" }],
-					primaryEndpointId: "src-ep-1",
-				},
-			],
+			// Schema-complete account fixture so the default path mirrors what the real services accept.
 			account: [
 				{
 					profileId: "src-profile-id",
@@ -457,7 +435,7 @@ beforeEach(() => {
 	profileClient.finalizeRestore.mockReset().mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
 	profileClient.deleteProfile.mockReset().mockResolvedValue(undefined)
 	profileClient.disconnect.mockReset()
-	networkClient.restore.mockReset()
+	networkClient.seedDefaultsForProfile.mockReset()
 	networkClient.setActiveForProfile.mockReset().mockResolvedValue("new-net-1")
 	networkClient.probeNodeStatus.mockReset().mockResolvedValue(NodeStatus.Active)
 	networkClient.disconnect.mockReset()
@@ -469,7 +447,6 @@ beforeEach(() => {
 	tokenBalanceClient = passthroughClient()
 	accountStateClient = passthroughClient()
 	authRegistryClient = passthroughClient()
-	fpcClient = passthroughClient()
 	contactClient = passthroughClient()
 	configClient = passthroughClient()
 })
@@ -520,7 +497,7 @@ describe("useFullBackupImport — restoreBackup happy path", () => {
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
 
 		await c.restoreBackup()
@@ -534,34 +511,21 @@ describe("useFullBackupImport — restoreBackup happy path", () => {
 		expect(networkClient.disconnect).toHaveBeenCalled()
 	})
 
-	it("item 1b: restores the ACTIVE-network selection (new id) BEFORE finalizeRestore", async () => {
+	it("restores the ACTIVE-network selection by chain BEFORE finalizeRestore", async () => {
 		const opts = makeOpts()
 		const c = useFullBackupImport(opts)
-		const backup = await buildBackup({
-			"active-network-id": "src-net-1",
-			data: {
-				network: [
-					{
-						id: "src-net-1",
-						profileId: "src-profile-id",
-						name: "Testnet",
-						rpcUrl: "https://t/",
-						chainId: 1,
-						kind: "custom",
-						endpoints: [{ id: "src-ep-1", rpcUrl: "https://t/" }],
-						primaryEndpointId: "src-ep-1",
-					},
-				],
-			},
-		})
+		const backup = await buildBackup({ "active-chain-id": 1 })
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		// src-net-1 restored under a NEW id → the resolver must pair by index and write the new id.
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([
+			{ id: "new-net-0", name: "Alpha", rpcUrl: "https://a/", chainId: 0 },
+			{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 },
+		])
 		accountClient.restore.mockResolvedValue([])
 
 		await c.restoreBackup()
 
+		expect(networkClient.seedDefaultsForProfile).toHaveBeenCalledWith("new-id")
 		expect(networkClient.setActiveForProfile).toHaveBeenCalledWith("new-id", "new-net-1")
 		// The setter is profileId-parameterized precisely because the profile isn't active until finalize.
 		expect(networkClient.setActiveForProfile.mock.invocationCallOrder[0]).toBeLessThan(
@@ -569,33 +533,20 @@ describe("useFullBackupImport — restoreBackup happy path", () => {
 		)
 	})
 
-	it("item 1b: a legacy backup with NO active-network-id sets nothing (bootstrap picks the primary)", async () => {
-		const opts = makeOpts()
-		const c = useFullBackupImport(opts)
-		const backup = await buildBackup({
-			data: {
-				network: [
-					{
-						id: "src-net-1",
-						profileId: "src-profile-id",
-						name: "Testnet",
-						rpcUrl: "https://t/",
-						chainId: 1,
-						kind: "custom",
-						endpoints: [{ id: "src-ep-1", rpcUrl: "https://t/" }],
-						primaryEndpointId: "src-ep-1",
-					},
-				],
-			},
-		})
-		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
-		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
-		accountClient.restore.mockResolvedValue([])
-
-		await c.restoreBackup()
-
-		expect(networkClient.setActiveForProfile).not.toHaveBeenCalled()
+	it("a backup with NO active-chain-id, or one naming an unseeded or non-numeric chain, sets nothing (the primary seed stays)", async () => {
+		for (const body of [{}, { "active-chain-id": 99 }, { "active-chain-id": "1" }]) {
+			networkClient.setActiveForProfile.mockClear()
+			const opts = makeOpts()
+			const c = useFullBackupImport(opts)
+			const backup = await buildBackup(body)
+			c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+			profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+			networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+			accountClient.restore.mockResolvedValue([])
+			await c.restoreBackup()
+			expect(c.restoreStatus.value).toBe("finished")
+			expect(networkClient.setActiveForProfile).not.toHaveBeenCalled()
+		}
 	})
 
 	it("restores account-state AFTER finalizeRestore (store key needs an open session; 5.0.1 regression fix)", async () => {
@@ -603,14 +554,13 @@ describe("useFullBackupImport — restoreBackup happy path", () => {
 		const c = useFullBackupImport(opts)
 		const backup = await buildBackup({
 			data: {
-				network: [{ id: "N1", name: "A", chainId: 1 }],
-				"account-state": [{ networkId: "N1", contracts: [], senders: [AS_SENDER] }],
+				"account-state": [{ networkId: "N1", chainId: 1, contracts: [], senders: [AS_SENDER] }],
 			},
 		})
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "M1", name: "A", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "M1", name: "A", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([])
 
 		await c.restoreBackup()
@@ -636,14 +586,13 @@ describe("useFullBackupImport — restoreBackup happy path", () => {
 		const c = useFullBackupImport(opts)
 		const backup = await buildBackup({
 			data: {
-				network: [{ id: "N1", name: "A", chainId: 1 }],
 				"account-state": { evil: true } as never,
 			},
 		})
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "M1", name: "A", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "M1", name: "A", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([])
 
 		await c.restoreBackup()
@@ -657,15 +606,14 @@ describe("useFullBackupImport — restoreBackup happy path", () => {
 	it("does NOT auto-call completeImport when partial errors exist (Continue button shows)", async () => {
 		const opts = makeOpts()
 		const c = useFullBackupImport(opts)
-		const backup = await buildBackup()
+		const backup = await buildBackup({
+			data: { "account-state": [{ networkId: "old", chainId: 2, contracts: [], senders: [AS_SENDER] }] },
+		})
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		// One network failed → recorded as error → isRestoreHasErrors=true
-		networkClient.restore.mockResolvedValue([
-			{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 },
-			{ id: "src-net-2", name: "Devnet", rpcUrl: "https://d/", chainId: 2, restoreError: "rpc unreachable" },
-		])
+		// One account-state item names an unseeded chain → dropped and recorded → isRestoreHasErrors=true
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
 
 		await c.restoreBackup()
@@ -742,7 +690,7 @@ describe("useFullBackupImport — backup migration wiring", () => {
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
 
 		await c.restoreBackup()
@@ -769,7 +717,7 @@ describe("useFullBackupImport — tx-restore provenance filter (P1)", () => {
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xMINE", chainId: 1 }])
 
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
@@ -778,7 +726,10 @@ describe("useFullBackupImport — tx-restore provenance filter (P1)", () => {
 		// Only the imported-account tx reaches restore; the foreign one is dropped
 		// BEFORE it can be written (it would otherwise surface in another profile's
 		// activity and never be purged after the subscriber removal).
-		expect(transactionClient.restore).toHaveBeenCalledWith([{ hash: "h1", account: "0xMINE", chainId: 1 }], "new-id")
+		expect(transactionClient.restore).toHaveBeenCalledWith(
+			[{ hash: "h1", account: "0xMINE", chainId: 1, networkId: "new-net-1" }],
+			"new-id",
+		)
 		// Recorded (console), NOT surfaced as a user-facing restore error — a
 		// dropped foreign/corrupt tx must not flip a clean import to error-mode.
 		expect(warn).toHaveBeenCalledWith(expect.stringContaining("dropped 1 transaction"))
@@ -805,7 +756,7 @@ describe("useFullBackupImport — tx-restore provenance filter (P1)", () => {
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([
 			{ address: "0xA", chainId: 1 },
 			{ address: "0xB", chainId: 1 },
@@ -815,8 +766,8 @@ describe("useFullBackupImport — tx-restore provenance filter (P1)", () => {
 
 		expect(transactionClient.restore).toHaveBeenCalledWith(
 			[
-				{ hash: "h1", account: "0xA", chainId: 1 },
-				{ hash: "h2", account: "0xB", chainId: 1 },
+				{ hash: "h1", account: "0xA", chainId: 1, networkId: "new-net-1" },
+				{ hash: "h2", account: "0xB", chainId: 1, networkId: "new-net-1" },
 			],
 			"new-id",
 		)
@@ -838,7 +789,7 @@ describe("useFullBackupImport — tx-restore provenance filter (P1)", () => {
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xOK" }, { address: "0xBAD", restoreError: "boom" }])
 
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
@@ -868,7 +819,7 @@ describe("useFullBackupImport — account-owned-slice provenance (P3)", () => {
 		})
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xMINE", chainId: 1 }])
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
 
@@ -895,7 +846,7 @@ describe("useFullBackupImport — account-owned-slice provenance (P3)", () => {
 		})
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xMINE", chainId: 1 }])
 		tokenClient.restore.mockResolvedValue([{ id: "n1", chainId: 1, contract: "0xT" }])
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
@@ -920,7 +871,7 @@ describe("useFullBackupImport — account-owned-slice provenance (P3)", () => {
 		})
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xMINE", chainId: 1 }])
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
 
@@ -928,36 +879,36 @@ describe("useFullBackupImport — account-owned-slice provenance (P3)", () => {
 
 		// 0xMINE was imported on chain 1 only → the chain-2 tx is dropped (an
 		// address-only filter would have admitted it).
-		expect(transactionClient.restore).toHaveBeenCalledWith([{ hash: "h1", account: "0xMINE", chainId: 1 }], "new-id")
+		expect(transactionClient.restore).toHaveBeenCalledWith(
+			[{ hash: "h1", account: "0xMINE", chainId: 1, networkId: "new-net-1" }],
+			"new-id",
+		)
 		warn.mockRestore()
 	})
 })
 
-describe("useFullBackupImport — network index-pairing (P2)", () => {
-	it("remaps each network's child rows to ITS new id by index — never cross-grafts", async () => {
+describe("useFullBackupImport — rows bind to the seeded network of their chain", () => {
+	const seeds = [
+		{ id: "M1", name: "A", rpcUrl: "https://a/", chainId: 1 },
+		{ id: "M2", name: "B", rpcUrl: "https://b/", chainId: 2 },
+	]
+
+	it("account-state items and transaction rows take the seeded id of their chainId; the exported networkId is ignored", async () => {
 		const opts = makeOpts()
 		const c = useFullBackupImport(opts)
 		const backup = await buildBackup({
 			data: {
-				network: [
-					{ id: "N1", name: "A", chainId: 1 },
-					{ id: "N2", name: "B", chainId: 2 },
-				],
 				"account-state": [
-					{ networkId: "N1", contracts: [], senders: [AS_SENDER] },
-					{ networkId: "N2", contracts: [], senders: [AS_SENDER] },
+					{ networkId: "evil-1", chainId: 1, contracts: [], senders: [AS_SENDER] },
+					{ networkId: "evil-2", chainId: 2, contracts: [], senders: [AS_SENDER] },
 				],
+				transaction: [{ hash: "h1", account: "0xaaaa", chainId: 1 }],
 			},
 		})
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
-
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		// Both ids collide on restore → new ids, index i ↔ data.network[i].
-		networkClient.restore.mockResolvedValue([
-			{ id: "M1", name: "A", chainId: 1 },
-			{ id: "M2", name: "B", chainId: 2 },
-		])
-		accountClient.restore.mockResolvedValue([])
+		networkClient.seedDefaultsForProfile.mockResolvedValue(seeds)
+		accountClient.restore.mockResolvedValue([{ address: "0xaaaa", chainId: 1 }])
 
 		await c.restoreBackup()
 
@@ -966,101 +917,58 @@ describe("useFullBackupImport — network index-pairing (P2)", () => {
 				{ networkId: "M1", contracts: [], senders: [AS_SENDER] },
 				{ networkId: "M2", contracts: [], senders: [AS_SENDER] },
 			],
-			expect.anything(),
+			seeds,
 			expect.anything(),
 		)
+		expect(transactionClient.restore).toHaveBeenCalledWith([{ hash: "h1", account: "0xaaaa", chainId: 1, networkId: "M1" }], "new-id")
+		expect(c.isRestoreHasErrors.value).toBe(false)
 	})
 
-	it("is unforgeable: a FAILED net A + valid net B sharing name+chainId does NOT graft B's rows onto A", async () => {
+	it("a doctored backup cannot define a network: a `network` slice rejects the whole import before any write", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: { network: [{ id: "N1", profileId: "src-profile-id", name: "Alpha V5", rpcUrl: "https://evil/", chainId: 1 }] },
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+
+		await c.restoreBackup()
+
+		expect(c.restoreStatus.value).toBe("failed")
+		expect(profileClient.restore).not.toHaveBeenCalled()
+		expect(networkClient.seedDefaultsForProfile).not.toHaveBeenCalled()
+	})
+
+	it("rows on an unseeded, missing or non-numeric chain are dropped and reported, never bound by their exported id", async () => {
 		const opts = makeOpts()
 		const c = useFullBackupImport(opts)
 		const backup = await buildBackup({
 			data: {
-				network: [
-					{ id: "NA", name: "Same", chainId: 7 },
-					{ id: "NB", name: "Same", chainId: 7 },
-				],
 				"account-state": [
-					{ networkId: "NA", contracts: [], senders: [AS_SENDER] },
-					{ networkId: "NB", contracts: [], senders: [AS_SENDER] },
+					{ networkId: "M1", chainId: 7, contracts: [], senders: [AS_SENDER] },
+					{ networkId: "M1", contracts: [], senders: [AS_SENDER] },
+					{ networkId: "M1", chainId: "1", contracts: [], senders: [AS_SENDER] },
 				],
-			},
-		})
-		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
-
-		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		// index 0 (NA) FAILED (raw fields spread back); index 1 (NB) succeeded with a new id.
-		networkClient.restore.mockResolvedValue([
-			{ id: "NA", name: "Same", chainId: 7, restoreError: "boom" },
-			{ id: "MB", name: "Same", chainId: 7 },
-		])
-		accountClient.restore.mockResolvedValue([])
-
-		await c.restoreBackup()
-
-		// NB's row → MB (index-paired); NA's row untouched (NA failed → no remap),
-		// NOT grafted to MB. A field-match would have paired MB with NA here.
-		expect(accountStateClient.restore).toHaveBeenCalledWith(
-			[
-				{ networkId: "NA", contracts: [], senders: [AS_SENDER] },
-				{ networkId: "MB", contracts: [], senders: [AS_SENDER] },
-			],
-			expect.anything(),
-			expect.anything(),
-		)
-	})
-
-	it("(3+ matrix) index-pairs a mixed changed/failed/unchanged/changed set correctly", async () => {
-		const opts = makeOpts()
-		const c = useFullBackupImport(opts)
-		const backup = await buildBackup({
-			data: {
-				network: [
-					{ id: "N1", name: "A", chainId: 1 },
-					{ id: "N2", name: "B", chainId: 2 },
-					{ id: "N3", name: "C", chainId: 3 },
-					{ id: "N4", name: "D", chainId: 4 },
-				],
-				"account-state": [
-					{ networkId: "N1", contracts: [], senders: [AS_SENDER] },
-					{ networkId: "N2", contracts: [], senders: [AS_SENDER] },
-					{ networkId: "N3", contracts: [], senders: [AS_SENDER] },
-					{ networkId: "N4", contracts: [], senders: [AS_SENDER] },
-				],
+				transaction: [{ hash: "h1", account: "0xaaaa", chainId: 7 }],
 			},
 		})
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		accountClient.restore.mockResolvedValue([])
-		// index 0 changed (N1→M1); index 1 FAILED (raw fields spread back); index 2
-		// unchanged (N3 kept its id); index 3 changed (N4→M4).
-		networkClient.restore.mockResolvedValue([
-			{ id: "M1", name: "A", chainId: 1 },
-			{ id: "N2", name: "B", chainId: 2, restoreError: "boom" },
-			{ id: "N3", name: "C", chainId: 3 },
-			{ id: "M4", name: "D", chainId: 4 },
-		])
+		networkClient.seedDefaultsForProfile.mockResolvedValue(seeds)
+		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
 
 		await c.restoreBackup()
 
-		expect(accountStateClient.restore).toHaveBeenCalledWith(
-			[
-				{ networkId: "M1", contracts: [], senders: [AS_SENDER] }, // N1 → M1
-				{ networkId: "N2", contracts: [], senders: [AS_SENDER] }, // N2 failed → not remapped
-				{ networkId: "N3", contracts: [], senders: [AS_SENDER] }, // N3 unchanged
-				{ networkId: "M4", contracts: [], senders: [AS_SENDER] }, // N4 → M4
-			],
-			expect.anything(),
-			expect.anything(),
-		)
+		expect(accountStateClient.restore).not.toHaveBeenCalled()
+		expect(transactionClient.restore).toHaveBeenCalledWith([], "new-id")
+		expect(networkClient.probeNodeStatus).not.toHaveBeenCalled()
+		expect(c.isRestoreHasErrors.value).toBe(true)
+		// Ordinal-only records: the dropped rows are backup payload and the log is user-visible.
+		const reason = "Skipped — its network is not one of the built-in networks"
+		expect(c.restoreErrorLog.value["account-state"]).toEqual([0, 1, 2].map((row) => ({ row, restoreError: reason })))
+		expect(c.restoreErrorLog.value.transaction).toEqual([{ row: 0, restoreError: reason }])
+		expect(JSON.stringify(c.restoreErrorLog.value)).not.toMatch(/0xabab|h1|senders|0xaaaa/)
 	})
-
-	// NB: the composable also skips DUPLICATED source ids from the remap map
-	// (sourceIdCounts), but a backup carrying two networks with the same root id
-	// is rejected upstream by backup normalization (backup-migration-registry
-	// duplicate-root-id guard) before restore runs — so that skip is unreachable
-	// defense-in-depth here and is covered by the normalization dup-rejection
-	// test, not this composable path.
 })
 
 describe("useFullBackupImport — profileId normalization (P2 hardening)", () => {
@@ -1069,28 +977,15 @@ describe("useFullBackupImport — profileId normalization (P2 hardening)", () =>
 		const c = useFullBackupImport(opts)
 		// Crafted backup: root profile id "src-profile-id" is unused → restore
 		// KEEPS it (so `newProfile.id === profile.id`, the old guard's skip case),
-		// but a child network row smuggles a DIFFERENT (victim) profileId.
+		// but a child row smuggles a DIFFERENT (victim) profileId.
 		const backup = await buildBackup({
-			data: {
-				network: [
-					{
-						id: "src-net-1",
-						profileId: "victim-profile-id",
-						name: "Testnet",
-						rpcUrl: "https://t/",
-						chainId: 1,
-						kind: "custom",
-						endpoints: [{ id: "src-ep-1", rpcUrl: "https://t/" }],
-						primaryEndpointId: "src-ep-1",
-					},
-				],
-			},
+			data: { contact: [{ id: "c1", profileId: "victim-profile-id", name: "Alice", address: "0xccc", abbr: "A" }] },
 		})
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		// restore returns the SAME id → `newProfile.id !== profile.id` is false.
 		profileClient.restore.mockResolvedValue({ id: "src-profile-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([])
 
 		await c.restoreBackup()
@@ -1098,8 +993,8 @@ describe("useFullBackupImport — profileId normalization (P2 hardening)", () =>
 		// The foreign profileId was rewritten to the created profile's id. Under the
 		// old `if (newProfile.id !== profile.id)` guard it would have been written
 		// verbatim → the row would bind to (graft into) the victim profile.
-		const restoredNetworks = networkClient.restore.mock.calls[0][0] as Array<{ profileId: string }>
-		expect(restoredNetworks[0].profileId).toBe("src-profile-id")
+		const restoredContacts = (contactClient.restore.mock.calls[0] as unknown[])[0] as Array<{ profileId: string }>
+		expect(restoredContacts[0].profileId).toBe("src-profile-id")
 	})
 })
 
@@ -1122,7 +1017,7 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		// 0xa is imported on BOTH chains (chain-distinct accounts) so each chain's
 		// balance passes the token/account chain-equality check.
 		accountClient.restore.mockResolvedValue([
@@ -1162,7 +1057,7 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xa", chainId: 1 }])
 		// Both restore successfully; INDEX-pairing maps old id 1→n1, 2→n2 — the old
 		// composite-key approach used to falsely DROP this balance as "ambiguous".
@@ -1193,7 +1088,7 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xa", chainId: 1 }])
 		tokenClient.restore.mockResolvedValue([{ id: "n2", chainId: 2, contract: "0xT" }])
 
@@ -1219,7 +1114,7 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xa", chainId: 1 }])
 		// token 1 succeeds; token 2 FAILS. The NEW side now sees only ONE
 		// (1,0xDUP) → looks unambiguous. The OLD-side duplicate must still mark
@@ -1250,7 +1145,7 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xa", chainId: 1 }])
 		tokenClient.restore.mockResolvedValue([{ id: "n1", chainId: 1, contract: "0xT" }])
 		// The re-linked balance then FAILS its actual restore. recordRestoreErrors
@@ -1273,7 +1168,7 @@ describe("useFullBackupImport — completeImport + client hygiene (P7)", () => {
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
 
 		await c.restoreBackup()
@@ -1291,7 +1186,7 @@ describe("useFullBackupImport — completeImport + client hygiene (P7)", () => {
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
 		// TRANSACTION is the FIRST client in the backup-services loop; make it throw.
 		transactionClient.restore = vi.fn().mockRejectedValue(new Error("kaboom"))
@@ -1303,7 +1198,6 @@ describe("useFullBackupImport — completeImport + client hygiene (P7)", () => {
 		expect(transactionClient.disconnect).toHaveBeenCalled()
 		expect(tokenBalanceClient.disconnect).toHaveBeenCalled()
 		expect(authRegistryClient.disconnect).toHaveBeenCalled()
-		expect(fpcClient.disconnect).toHaveBeenCalled()
 		expect(contactClient.disconnect).toHaveBeenCalled()
 		expect(configClient.disconnect).toHaveBeenCalled()
 		// account-state is NOT in the loop — it is restored AFTER finalizeRestore, which
@@ -1329,14 +1223,14 @@ describe("useFullBackupImport — failure branches", () => {
 		expect(profileClient.finalizeRestore).not.toHaveBeenCalled()
 	})
 
-	it("rolls back and fails when no networks could be restored", async () => {
+	it("rolls back and fails when the default networks cannot be seeded", async () => {
 		const opts = makeOpts()
 		const c = useFullBackupImport(opts)
 		const backup = await buildBackup()
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "x", restoreError: "boom" }])
+		networkClient.seedDefaultsForProfile.mockRejectedValue(new Error("profile new-id does not exist"))
 
 		await c.restoreBackup()
 
@@ -1353,7 +1247,7 @@ describe("useFullBackupImport — failure branches", () => {
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "x", restoreError: "boom" }]) // no networks → site-1 rollback
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "x", restoreError: "boom" }]) // no networks → site-1 rollback
 		// The compensating delete rejects on every attempt (e.g. its tombstone write fails).
 		profileClient.deleteProfile.mockRejectedValue(new Error("tombstone write failed"))
 
@@ -1374,7 +1268,7 @@ describe("useFullBackupImport — failure branches", () => {
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		// Pre-A11: composable did `if (err === "Duplicate account")`. RPC layer
 		// reconstructs server throws as Error instances, so that check was DEAD.
 		// Post-fix: composable matches on err.message.
@@ -1395,7 +1289,7 @@ describe("useFullBackupImport — failure branches", () => {
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockRejectedValue(new Error("Profile locked"))
 
 		await c.restoreBackup()
@@ -1414,7 +1308,7 @@ describe("useFullBackupImport — failure branches", () => {
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([])
 		accountClient.reconcileImportedAccounts.mockRejectedValueOnce(new Error("dependent purge failed"))
 
@@ -1432,7 +1326,7 @@ describe("useFullBackupImport — failure branches", () => {
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
 		tokenClient.restore.mockRejectedValue(new Error("storage exploded"))
 
@@ -1450,7 +1344,7 @@ describe("useFullBackupImport — failure branches", () => {
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([])
 		profileClient.finalizeRestore.mockRejectedValue(new Error("session storage full"))
 
@@ -1488,7 +1382,6 @@ describe("useFullBackupImport — passkey backup", () => {
 			"imported-keys-dek-sealed": "AZGVrLXNlYWxlZA==",
 			data: {
 				profile: { id: "src-profile-id", name: "PK", type: "passkey" },
-				network: [{ id: "src-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }],
 				account: [{ profileId: "src-profile-id", chainId: 1, address: "0xaaaa" }],
 				token: [],
 			},
@@ -1503,7 +1396,7 @@ describe("useFullBackupImport — passkey backup", () => {
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "passkey" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "PK", type: "passkey" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
 
 		await c.restoreBackup()
@@ -1574,7 +1467,6 @@ describe("useFullBackupImport — parsedBackupName + typed-name override (F3)", 
 		const backupBody = await buildBackup({
 			data: {
 				profile: { id: "src-profile-id", name: "Vault A", type: "password" },
-				network: [{ id: "src-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }],
 				account: [{ profileId: "src-profile-id", chainId: 1, address: "0xaaaa" }],
 				token: [],
 			},
@@ -1597,7 +1489,6 @@ describe("useFullBackupImport — parsedBackupName + typed-name override (F3)", 
 		const backup = await buildBackup({
 			data: {
 				profile: { id: "src-profile-id", name: "FromBackup", type: "password" },
-				network: [{ id: "src-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }],
 				account: [{ profileId: "src-profile-id", chainId: 1, address: "0xaaaa" }],
 				token: [],
 			},
@@ -1605,7 +1496,7 @@ describe("useFullBackupImport — parsedBackupName + typed-name override (F3)", 
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "FromBackup", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
 
 		await c.restoreBackup()
@@ -1621,7 +1512,6 @@ describe("useFullBackupImport — parsedBackupName + typed-name override (F3)", 
 			const backup = await buildBackup({
 				data: {
 					profile: { id: "src-profile-id", name: "FromBackup", type: "password" },
-					network: [{ id: "src-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }],
 					account: [{ profileId: "src-profile-id", chainId: 1, address: "0xaaaa" }],
 					token: [],
 				},
@@ -1629,7 +1519,7 @@ describe("useFullBackupImport — parsedBackupName + typed-name override (F3)", 
 			c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 
 			profileClient.restore.mockResolvedValue({ id: "new-id", name: "Acme", type: "password" })
-			networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+			networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 			accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
 
 			await c.restoreBackup()
@@ -1641,7 +1531,9 @@ describe("useFullBackupImport — parsedBackupName + typed-name override (F3)", 
 
 		// Sub-case 2: whitespace-only override falls back to backup name.
 		profileClient.restore.mockReset().mockResolvedValue({ id: "new-id", name: "FromBackup", type: "password" })
-		networkClient.restore.mockReset().mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile
+			.mockReset()
+			.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockReset().mockResolvedValue([{ address: "0xaaaa" }])
 		{
 			const opts = { ...makeOpts(), profileName: ref("   ") }
@@ -1649,7 +1541,6 @@ describe("useFullBackupImport — parsedBackupName + typed-name override (F3)", 
 			const backup = await buildBackup({
 				data: {
 					profile: { id: "src-profile-id", name: "FromBackup", type: "password" },
-					network: [{ id: "src-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }],
 					account: [{ profileId: "src-profile-id", chainId: 1, address: "0xaaaa" }],
 					token: [],
 				},
@@ -1684,7 +1575,7 @@ describe("restoreStage — phase observability", () => {
 		const backup = await buildBackup()
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
 		const seen = recordStages(c)
 
@@ -1714,7 +1605,7 @@ describe("restoreStage — phase observability", () => {
 		const backup = await buildBackup()
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		// The token restore rejecting is a pre-finalize failure that reaches the
 		// outer catch (unlike per-service loop errors, which are recorded).
 		tokenClient.restore.mockRejectedValue(new Error("boom mid-restore"))
@@ -1737,13 +1628,12 @@ describe("restoreStage — phase observability", () => {
 		// both lenses).
 		const backup = await buildBackup({
 			data: {
-				network: [{ id: "N1", name: "A", chainId: 1 }],
-				"account-state": [{ networkId: "N1", contracts: [], senders: [AS_SENDER] }],
+				"account-state": [{ networkId: "N1", chainId: 1, contracts: [], senders: [AS_SENDER] }],
 			},
 		})
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "M1", name: "A", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "M1", name: "A", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
 		// Post-finalize failures are RETAIN + record, never rollback: the
 		// chain-sync runner contractually converts this rejection into recorded
@@ -1768,7 +1658,7 @@ describe("restoreStage — phase observability", () => {
 		const backup = await buildBackup()
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		tokenClient.restore.mockRejectedValue(new Error("boom mid-restore"))
 		profileClient.deleteProfile.mockRejectedValue(new Error("delete refused"))
 
@@ -1789,7 +1679,7 @@ describe("crash-rollback liveness gate", () => {
 	// BUG-TRANSPORT; fix-plan Decision 1 + ledger row 15).
 	function primeHappyRestore() {
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
 	}
 

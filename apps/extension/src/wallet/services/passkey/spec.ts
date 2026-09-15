@@ -14,11 +14,16 @@ export const PASSKEY_TIMEOUT = 60_000 * 3 // 3 minutes
  * BOTH this constant and the manifest entry, and accept that ALL
  * existing passkey wallets become unrecoverable.
  *
+ * A dedicated content-less host: WebAuthn lets any origin whose registrable
+ * domain suffix-matches the RP ID assert with the credential and evaluate its
+ * PRF, so the apex and the application subdomains must not be eligible. The
+ * host and every `*.passkey.nulo.sh` descendant serve no script, ever.
+ *
  * Single source of truth — every WebAuthn options object that needs an
  * `rpId` imports this constant. The AST drift scanner catches any
- * future literal `"nulo.sh"` in WebAuthn-options-shaped positions.
+ * future literal of this value in WebAuthn-options-shaped positions.
  */
-export const RP_ID = "nulo.sh"
+export const RP_ID = "passkey.nulo.sh"
 
 // `PASSKEY_PRF_LABEL` + `PasskeyCredentialData` live in
 // `@nulo/wallet-crypto`. Re-exported here so call sites importing from

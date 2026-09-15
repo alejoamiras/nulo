@@ -38,9 +38,7 @@ import {
 import type { Contact } from "@/wallet/services/contact/spec"
 import { CONTACT_SERVICE_NAME, CONTACT_STORAGE_ROOT } from "@/wallet/services/contact/spec"
 import type { FpcInfo } from "@/wallet/services/fpc/spec"
-import { FPC_SERVICE_NAME, FPC_STORAGE_ROOT } from "@/wallet/services/fpc/spec"
 import type { Network } from "@/wallet/services/network/spec"
-import { NETWORK_SERVICE_NAME, NETWORK_STORAGE_ROOT } from "@/wallet/services/network/spec"
 import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/spec"
 import { PROFILE_STORAGE_ROOT } from "@/wallet/services/profile/repository"
 import type { TokenBalanceRaw } from "@/wallet/services/token-balance/spec"
@@ -200,15 +198,10 @@ export const BACKUP_SLICE_REGISTRY: Readonly<Record<string, SliceDescriptor>> = 
 	// Imported accounts' encrypted signing keys — own root, own owner. Optional: a backup with no
 	// imported accounts carries no slice, and that must not be a required-slice rejection.
 	[IMPORTED_KEYS_SERVICE_NAME]: { kind: "root", root: IMPORTED_KEYS_STORAGE_ROOT, idOf: accountAnchor, optional: true },
-	[NETWORK_SERVICE_NAME]: { kind: "root", root: NETWORK_STORAGE_ROOT, idOf: stringAnchor("id") },
 	[TOKEN_SERVICE_NAME]: { kind: "root", root: TOKEN_STORAGE_ROOT, idOf: numberAnchor("id") },
 	[TOKEN_BALANCE_SERVICE_NAME]: { kind: "root", root: TOKEN_BALANCE_STORAGE_ROOT, idOf: numberAnchor("id") },
 	[CONTACT_SERVICE_NAME]: { kind: "root", root: CONTACT_STORAGE_ROOT, idOf: stringAnchor("id") },
 	[TRANSACTION_SERVICE_NAME]: { kind: "root", root: TRANSACTION_STORAGE_ROOT, idOf: stringAnchor("hash"), optional: true },
-	// The stored FPC row already omits the read-time `isProtocol` decoration
-	// (`StoredFpc = Omit<FpcInfo, "isProtocol">` and `backup()` strips it), so
-	// the slice element IS the on-disk row — a plain root, NOT a projection.
-	[FPC_SERVICE_NAME]: { kind: "root", root: FPC_STORAGE_ROOT, idOf: stringAnchor("id") },
 	// Per-row the authwit slice IS the stored row; the service-level lossiness
 	// (the second `nulo:core:auth-registry-enabled` root is backup-absent by
 	// design) lives in BACKUP_BLOCKED_ROOTS below.

@@ -17,7 +17,7 @@ export default {
 	version: `${major}.${minor}.${patch}.${label}`,
 	version_name: version,
 	manifest_version: 3,
-	host_permissions: ["https://nulo.sh/", "http://127.0.0.1/*"],
+	host_permissions: ["https://passkey.nulo.sh/", "http://127.0.0.1/*"],
 	action: {
 		default_popup: "src/popup/index.html#/popup/general",
 	},
@@ -33,6 +33,9 @@ export default {
 			all_frames: true,
 			js: ["src/content-script/content.ts"],
 			matches: ["*://*/*"],
+			// The passkey Relying Party host and its descendants must carry no script at all,
+			// the wallet's own included: any script there could run the PRF ceremony.
+			exclude_matches: ["*://passkey.nulo.sh/*", "*://*.passkey.nulo.sh/*"],
 			run_at: "document_start",
 		},
 	],

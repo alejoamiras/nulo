@@ -53,6 +53,7 @@ declare global {
   const buildIncomingCardProps: typeof import('../utils/received-display').buildIncomingCardProps
   const buildJournalTerminalCardProps: typeof import('../utils/journal-state').buildJournalTerminalCardProps
   const buildRestoreSecret: typeof import('../composables/full-backup-restore').buildRestoreSecret
+  const capRecords: typeof import('../utils/full-backup-helpers').capRecords
   const capTokenRows: typeof import('../utils/token-order').capTokenRows
   const capitalize: typeof import('../utils/string').capitalize
   const categoricalLabel: typeof import('../utils/journal-state').categoricalLabel
@@ -177,14 +178,17 @@ declare global {
   const refreshBalances: typeof import('../utils/core').refreshBalances
   const relinkRestoredTokenBalances: typeof import('../composables/useFullBackupImport').relinkRestoredTokenBalances
   const remapByMap: typeof import('../utils/full-backup-helpers').remapByMap
+  const remapNetworkIdByChain: typeof import('../utils/full-backup-helpers').remapNetworkIdByChain
   const requireAccount: typeof import('../utils/core').requireAccount
   const requireNetwork: typeof import('../utils/core').requireNetwork
   const requireTransaction: typeof import('../utils/core').requireTransaction
+  const reseedNetworksStage: typeof import('../composables/full-backup-restore').reseedNetworksStage
   const resolveComponent: typeof import('vue').resolveComponent
   const resolveFromDisplay: typeof import('../utils/received-display').resolveFromDisplay
   const resolvePasskeyCredential: typeof import('../composables/full-backup-restore').resolvePasskeyCredential
   const resolveReceivedType: typeof import('../utils/received-display').resolveReceivedType
   const resolveRestoredActiveNetworkId: typeof import('../utils/full-backup-helpers').resolveRestoredActiveNetworkId
+  const resolveRestoredActiveNetworkIdByChain: typeof import('../utils/full-backup-helpers').resolveRestoredActiveNetworkIdByChain
   const restoreAccountStateStage: typeof import('../composables/full-backup-restore').restoreAccountStateStage
   const restoreAccountsAndFilterOwnedSlices: typeof import('../composables/useFullBackupImport').restoreAccountsAndFilterOwnedSlices
   const restoreAccountsStage: typeof import('../composables/full-backup-restore').restoreAccountsStage
@@ -463,6 +467,7 @@ declare module 'vue' {
     readonly buildIncomingCardProps: UnwrapRef<typeof import('../utils/received-display')['buildIncomingCardProps']>
     readonly buildJournalTerminalCardProps: UnwrapRef<typeof import('../utils/journal-state')['buildJournalTerminalCardProps']>
     readonly buildRestoreSecret: UnwrapRef<typeof import('../composables/full-backup-restore')['buildRestoreSecret']>
+    readonly capRecords: UnwrapRef<typeof import('../utils/full-backup-helpers')['capRecords']>
     readonly capTokenRows: UnwrapRef<typeof import('../utils/token-order')['capTokenRows']>
     readonly capitalize: UnwrapRef<typeof import('../utils/string')['capitalize']>
     readonly categoricalLabel: UnwrapRef<typeof import('../utils/journal-state')['categoricalLabel']>
@@ -587,19 +592,20 @@ declare module 'vue' {
     readonly refreshBalances: UnwrapRef<typeof import('../utils/core')['refreshBalances']>
     readonly relinkRestoredTokenBalances: UnwrapRef<typeof import('../composables/useFullBackupImport')['relinkRestoredTokenBalances']>
     readonly remapByMap: UnwrapRef<typeof import('../utils/full-backup-helpers')['remapByMap']>
+    readonly remapNetworkIdByChain: UnwrapRef<typeof import('../utils/full-backup-helpers')['remapNetworkIdByChain']>
     readonly requireAccount: UnwrapRef<typeof import('../utils/core')['requireAccount']>
     readonly requireNetwork: UnwrapRef<typeof import('../utils/core')['requireNetwork']>
     readonly requireTransaction: UnwrapRef<typeof import('../utils/core')['requireTransaction']>
+    readonly reseedNetworksStage: UnwrapRef<typeof import('../composables/full-backup-restore')['reseedNetworksStage']>
     readonly resolveComponent: UnwrapRef<typeof import('vue')['resolveComponent']>
     readonly resolveFromDisplay: UnwrapRef<typeof import('../utils/received-display')['resolveFromDisplay']>
     readonly resolvePasskeyCredential: UnwrapRef<typeof import('../composables/full-backup-restore')['resolvePasskeyCredential']>
     readonly resolveReceivedType: UnwrapRef<typeof import('../utils/received-display')['resolveReceivedType']>
-    readonly resolveRestoredActiveNetworkId: UnwrapRef<typeof import('../utils/full-backup-helpers')['resolveRestoredActiveNetworkId']>
+    readonly resolveRestoredActiveNetworkIdByChain: UnwrapRef<typeof import('../utils/full-backup-helpers')['resolveRestoredActiveNetworkIdByChain']>
     readonly restoreAccountStateStage: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreAccountStateStage']>
     readonly restoreAccountsAndFilterOwnedSlices: UnwrapRef<typeof import('../composables/useFullBackupImport')['restoreAccountsAndFilterOwnedSlices']>
     readonly restoreAccountsStage: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreAccountsStage']>
     readonly restoreActiveNetworkPointer: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreActiveNetworkPointer']>
-    readonly restoreNetworksStage: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreNetworksStage']>
     readonly restoreServiceSlices: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreServiceSlices']>
     readonly restoreTokensStage: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreTokensStage']>
     readonly rollbackCreatedProfile: UnwrapRef<typeof import('../composables/full-backup-restore')['rollbackCreatedProfile']>

@@ -3,6 +3,7 @@ import { MAX_BACKUP_FILE_BYTES } from "@/utils/full-backup-helpers"
 import { createTestingPinia } from "@pinia/testing"
 import { flushPromises, mount } from "@vue/test-utils"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { useAppStore } from "@/stores/app.store"
 import FullExportPage from "./full.vue"
 
 /**
@@ -27,14 +28,12 @@ function sliceClient() {
 	return { backup: vi.fn(async (): Promise<unknown> => []), disconnect: vi.fn() }
 }
 let profileClient = sliceClient()
-let networkClient = sliceClient()
 let accountClient = { ...sliceClient(), backupImportedKeys: vi.fn(async (): Promise<unknown> => []) }
 let transactionClient = sliceClient()
 let tokenClient = sliceClient()
 let tokenBalanceClient = sliceClient()
 let accountStateClient = sliceClient()
 let authRegistryClient = sliceClient()
-let fpcClient = sliceClient()
 let contactClient = sliceClient()
 let configClient = sliceClient()
 
@@ -43,12 +42,6 @@ vi.mock("@/wallet/services/profile/client", () => ({
 	PROFILE_SERVICE_NAME: "profile",
 	ProfileServiceClient: vi.fn(function () {
 		return profileClient
-	}),
-}))
-vi.mock("@/wallet/services/network/client", () => ({
-	NETWORK_SERVICE_NAME: "network",
-	NetworkServiceClient: vi.fn(function () {
-		return networkClient
 	}),
 }))
 vi.mock("@/wallet/services/account/client", () => ({
@@ -86,12 +79,6 @@ vi.mock("@/wallet/services/auth-registry/client", () => ({
 	AUTH_REGISTRY_SERVICE_NAME: "auth-registry",
 	AuthRegistryServiceClient: vi.fn(function () {
 		return authRegistryClient
-	}),
-}))
-vi.mock("@/wallet/services/fpc/client", () => ({
-	FPC_SERVICE_NAME: "fpc",
-	FpcServiceClient: vi.fn(function () {
-		return fpcClient
 	}),
 }))
 vi.mock("@/wallet/services/contact/client", () => ({
@@ -149,14 +136,12 @@ vi.mock("vue-router", () => ({
 
 const allClients = () => [
 	profileClient,
-	networkClient,
 	accountClient,
 	transactionClient,
 	tokenClient,
 	tokenBalanceClient,
 	accountStateClient,
 	authRegistryClient,
-	fpcClient,
 	contactClient,
 	configClient,
 ]
@@ -167,7 +152,7 @@ function mountPage() {
 			plugins: [
 				createTestingPinia({
 					initialState: {
-						app: { profile: { id: "p1", type: "password", name: "Test Profile" }, network: { id: "net1" } },
+						app: { profile: { id: "p1", type: "password", name: "Test Profile" }, network: { id: "net1", chainId: 7 } },
 					},
 					stubActions: false,
 				}),
@@ -205,14 +190,12 @@ const material = { masterKey: "mk", entropy: "ent", importedKeysDek: "dek" }
 beforeEach(() => {
 	vi.clearAllMocks()
 	profileClient = sliceClient()
-	networkClient = sliceClient()
 	accountClient = { ...sliceClient(), backupImportedKeys: vi.fn(async (): Promise<unknown> => []) }
 	transactionClient = sliceClient()
 	tokenClient = sliceClient()
 	tokenBalanceClient = sliceClient()
 	accountStateClient = sliceClient()
 	authRegistryClient = sliceClient()
-	fpcClient = sliceClient()
 	contactClient = sliceClient()
 	configClient = sliceClient()
 	exportBackupMaterial.mockReset()
@@ -314,10 +297,10 @@ describe("export/full.vue — error boundary", () => {
 
 	it("unmount mid-run disconnects the run's clients and suppresses all late writes", async () => {
 		const slice = deferred<unknown>()
-		networkClient.backup.mockReturnValue(slice.promise)
+		tokenClient.backup.mockReturnValue(slice.promise)
 		const wrapper = mountPage()
 		await reachUnlockAndSubmit(wrapper)
-		await vi.waitFor(() => expect(networkClient.backup).toHaveBeenCalledTimes(1))
+		await vi.waitFor(() => expect(tokenClient.backup).toHaveBeenCalledTimes(1))
 
 		wrapper.unmount()
 		for (const c of allClients()) expect(c.disconnect).toHaveBeenCalled()
@@ -351,5 +334,23 @@ describe("export/full.vue — sealed artifact", () => {
 		// The imported-keys slice key must be the registry's real literal — an
 		// unknown key rejects the whole import.
 		expect(Object.keys(parsed.data as Record<string, unknown>)).toContain("imported-account-keys")
+		// The retired slices never leave the wallet; the active-network preference is a chain id.
+		const sliceKeys = Object.keys(parsed.data as Record<string, unknown>)
+		expect(sliceKeys).not.toContain("network")
+		expect(sliceKeys).not.toContain("fpc")
+		expect("active-network-id" in parsed).toBe(false)
+		expect(parsed["active-chain-id"]).toBe(7)
+	})
+
+	it("the active-network preference survives as chain 0 for the local network (no falsy drop)", async () => {
+		profileClient.backup.mockResolvedValue([{ id: "p1", type: "password" }])
+		const wrapper = mountPage()
+		useAppStore().network = { id: "local", chainId: 0 } as never
+		await reachUnlockAndSubmit(wrapper)
+		await vi.waitFor(() => expect(wrapper.find("[data-testid='protect-password-btn']").exists()).toBe(true))
+		await wrapper.find("[data-testid='download-backup-btn']").trigger("click")
+		await vi.waitFor(() => expect(downloadFile).toHaveBeenCalledTimes(1))
+		const parsed = JSON.parse(downloadFile.mock.calls[0][0].data) as Record<string, unknown>
+		expect(parsed["active-chain-id"]).toBe(0)
 	})
 })

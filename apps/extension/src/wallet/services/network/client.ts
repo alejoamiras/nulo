@@ -49,6 +49,10 @@ export class NetworkServiceClient extends ServiceClient<Methods, Events> impleme
 		return this.call("getOrInitNetworks", [])
 	}
 
+	public async seedDefaultsForProfile(profileId: string): Promise<Network[]> {
+		return this.call("seedDefaultsForProfile", [profileId])
+	}
+
 	public async getNetworks(chainId?: number): Promise<Network[]> {
 		return this.call("getNetworks", [chainId])
 	}

@@ -44,7 +44,7 @@ const profileClient = {
 	disconnect: vi.fn(),
 }
 const networkClient = {
-	restore: vi.fn(),
+	seedDefaultsForProfile: vi.fn(),
 	setActiveForProfile: vi.fn(),
 	probeNodeStatus: vi.fn(),
 	disconnect: vi.fn(),
@@ -71,7 +71,6 @@ let transactionClient = passthroughClient()
 let tokenBalanceClient = passthroughClient()
 let accountStateClient = passthroughClient()
 let authRegistryClient = passthroughClient()
-let fpcClient = passthroughClient()
 let contactClient = passthroughClient()
 let configClient = passthroughClient()
 
@@ -117,11 +116,6 @@ vi.mock("@/wallet/services/auth-registry/client", () => ({
 		return authRegistryClient
 	}),
 }))
-vi.mock("@/wallet/services/fpc/client", () => ({
-	FpcServiceClient: vi.fn(function () {
-		return fpcClient
-	}),
-}))
 vi.mock("@/wallet/services/contact/client", () => ({
 	ContactServiceClient: vi.fn(function () {
 		return contactClient
@@ -155,7 +149,6 @@ vi.mock("@/wallet/services/auth-registry/spec", () => ({
 }))
 vi.mock("@/wallet/services/config/spec", () => ({ CONFIG_SERVICE_NAME: "config" }))
 vi.mock("@/wallet/services/contact/spec", () => ({ CONTACT_SERVICE_NAME: "contact", CONTACT_STORAGE_ROOT: "nulo:core:contacts" }))
-vi.mock("@/wallet/services/fpc/spec", () => ({ FPC_SERVICE_NAME: "fpc", FPC_STORAGE_ROOT: "nulo:core:fpcs" }))
 vi.mock("@/wallet/services/network/spec", () => ({
 	NETWORK_SERVICE_NAME: "network",
 	NETWORK_STORAGE_ROOT: "nulo:core:networks",
@@ -211,22 +204,7 @@ async function buildBackup(overrides: Record<string, unknown> = {}) {
 		"imported-keys-dek": Buffer.from(new Uint8Array(32).fill(2)).toString("base64"),
 		data: {
 			profile: { id: "src-profile-id", name: "Imported", type: "password" },
-			// P6: schema-realistic default fixtures (new-shape network with
-			// endpoints[]; schema-complete account) so the default path mirrors
-			// what the real services accept + the #220 read-codecs validate.
-			network: [
-				{
-					id: "src-net-1",
-					profileId: "src-profile-id",
-					name: "Testnet",
-					rpcUrl: "https://t/",
-					chainId: 1,
-					l1ChainId: 1,
-					kind: "custom",
-					endpoints: [{ id: "src-ep-1", rpcUrl: "https://t/" }],
-					primaryEndpointId: "src-ep-1",
-				},
-			],
+			// Schema-complete account fixture so the default path mirrors what the real services accept.
 			account: [
 				{
 					profileId: "src-profile-id",
@@ -273,7 +251,7 @@ beforeEach(() => {
 	profileClient.finalizeRestore.mockReset().mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
 	profileClient.deleteProfile.mockReset().mockResolvedValue(undefined)
 	profileClient.disconnect.mockReset()
-	networkClient.restore.mockReset()
+	networkClient.seedDefaultsForProfile.mockReset()
 	networkClient.setActiveForProfile.mockReset().mockResolvedValue("new-net-1")
 	networkClient.probeNodeStatus.mockReset().mockResolvedValue(NodeStatus.Active)
 	networkClient.disconnect.mockReset()
@@ -285,7 +263,6 @@ beforeEach(() => {
 	tokenBalanceClient = passthroughClient()
 	accountStateClient = passthroughClient()
 	authRegistryClient = passthroughClient()
-	fpcClient = passthroughClient()
 	contactClient = passthroughClient()
 	configClient = passthroughClient()
 })
@@ -294,7 +271,7 @@ beforeEach(() => {
 
 function happyWiring() {
 	profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
-	networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+	networkClient.seedDefaultsForProfile.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 	accountClient.restore.mockResolvedValue([{ address: "0xaaaa", chainId: 1 }])
 }
 
@@ -317,13 +294,15 @@ describe("stage-order law (real wiring, happy path with every slice)", () => {
 		}
 		happyWiring()
 		track("profile", profileClient as never)
-		track("network", networkClient as never)
+		networkClient.seedDefaultsForProfile.mockImplementation(async () => {
+			order.push("network")
+			return [{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }]
+		})
 		track("account", accountClient as never)
 		track("token", tokenClient as never)
 		track("transaction", transactionClient)
 		track("token-balance", tokenBalanceClient)
 		track("auth-registry", authRegistryClient)
-		track("fpc", fpcClient)
 		track("contact", contactClient)
 		track("config", configClient)
 		track("account-state", accountStateClient)
@@ -353,16 +332,15 @@ describe("stage-order law (real wiring, happy path with every slice)", () => {
 		let cRef: ReturnType<typeof useFullBackupImport> | undefined
 		const { c } = await mountWithBackup(
 			{
-				"active-network-id": "src-net-1",
+				"active-chain-id": 1,
 				data: {
 					"imported-account-keys": [{ profileId: "src-profile-id", chainId: 1, address: "0xaaaa" }],
 					transaction: [{ account: "0xaaaa", chainId: 1, hash: "h1" }],
 					"token-balance": [],
 					"auth-registry": [{ id: 1, account: "0xaaaa" }],
-					fpc: [{ id: "f1" }],
 					contact: [],
 					config: [{ key: "k", value: true }],
-					"account-state": [{ networkId: "src-net-1", contracts: [], senders: [AS_SENDER] }],
+					"account-state": [{ networkId: "src-net-1", chainId: 1, contracts: [], senders: [AS_SENDER] }],
 				},
 			},
 			opts,
@@ -382,7 +360,6 @@ describe("stage-order law (real wiring, happy path with every slice)", () => {
 			"transaction",
 			"token-balance",
 			"auth-registry",
-			"fpc",
 			"contact",
 			"config",
 			"reconcile",
@@ -399,41 +376,18 @@ describe("stage-order law (real wiring, happy path with every slice)", () => {
 		expect(c.importedProfile.value).toBeNull()
 	})
 
-	it("the account-state tail receives the SUCCESSFUL networks subset (not the full index-aligned result)", async () => {
+	it("the account-state tail receives the seeded rows, and work on an unseeded chain is dropped before any probe", async () => {
 		happyWiring()
-		networkClient.restore.mockResolvedValue([
+		networkClient.seedDefaultsForProfile.mockResolvedValue([
 			{ id: "new-net-1", name: "A", rpcUrl: "https://a/", chainId: 1 },
 			{ id: "src-net-2", name: "B", rpcUrl: "https://b/", chainId: 2, restoreError: "nope" },
 		])
 		const { c } = await mountWithBackup({
 			data: {
-				network: [
-					{
-						id: "src-net-1",
-						profileId: "src-profile-id",
-						name: "A",
-						rpcUrl: "https://a/",
-						chainId: 1,
-						kind: "custom",
-						endpoints: [{ id: "e1", rpcUrl: "https://a/" }],
-						primaryEndpointId: "e1",
-					},
-					{
-						id: "src-net-2",
-						profileId: "src-profile-id",
-						name: "B",
-						rpcUrl: "https://b/",
-						chainId: 2,
-						kind: "custom",
-						endpoints: [{ id: "e2", rpcUrl: "https://b/" }],
-						primaryEndpointId: "e2",
-					},
-				],
 				"account-state": [
-					{ networkId: "src-net-1", contracts: [], senders: [AS_SENDER] },
-					// Work targeting the FAILED network: its id never remaps, so the chain-sync
-					// normalizer must record it, never probe it.
-					{ networkId: "src-net-2", contracts: [], senders: [AS_SENDER] },
+					{ networkId: "src-net-1", chainId: 1, contracts: [], senders: [AS_SENDER] },
+					// Work targeting a chain no seed serves: dropped and reported, never probed.
+					{ networkId: "src-net-9", chainId: 9, contracts: [], senders: [AS_SENDER] },
 				],
 			},
 		})
@@ -441,10 +395,9 @@ describe("stage-order law (real wiring, happy path with every slice)", () => {
 		expect(accountStateClient.restore).toHaveBeenCalled()
 		const nets = (accountStateClient.restore.mock.calls[0] as unknown[])[1] as Array<{ id: string }>
 		expect(nets.map((n) => n.id)).toEqual(["new-net-1"])
-		// Failed networks are never probed — even with account-state work pointed at them:
-		// exactly the successful id is probed, nothing else.
 		const probed = networkClient.probeNodeStatus.mock.calls.map((call) => call[0])
 		expect(probed).toEqual(["new-net-1"])
+		expect(c.isRestoreHasErrors.value).toBe(true)
 	})
 })
 
@@ -484,15 +437,15 @@ describe("epoch-4 secret gates — rejections AND permissiveness", () => {
 })
 
 describe("stage/status matrix on the failure paths", () => {
-	it("no-networks rollback keeps the stage at restoring:networks (NO rolling-back emission) with the exact copy", async () => {
+	it("no-seeds rollback keeps the stage at restoring:networks (NO rolling-back emission) with the exact copy", async () => {
 		happyWiring()
-		networkClient.restore.mockResolvedValue([{ id: "x", restoreError: "bad" }])
+		networkClient.seedDefaultsForProfile.mockResolvedValue([])
 		const { c, opts } = await mountWithBackup()
 		await c.restoreBackup()
 		expect(profileClient.deleteProfile).toHaveBeenCalledWith("new-id")
 		expect(c.restoreStage.value).toBe("restoring:networks")
 		expect(c.restoreStatus.value).toBe("failed")
-		expect(opts.fillError).toHaveBeenCalledWith("full_backup", "Can't import", "Couldn't restore any networks from this backup")
+		expect(opts.fillError).toHaveBeenCalledWith("full_backup", "Can't import", "Couldn't seed the default networks for this backup")
 	})
 
 	it("duplicate-account rollback also keeps the pre-accounts stage (historical, preserved)", async () => {
@@ -520,7 +473,7 @@ describe("stage/status matrix on the failure paths", () => {
 	it("a rejected active-pointer write never fails the import", async () => {
 		happyWiring()
 		networkClient.setActiveForProfile.mockRejectedValue(new Error("not owned"))
-		const { c } = await mountWithBackup({ "active-network-id": "src-net-1" })
+		const { c } = await mountWithBackup({ "active-chain-id": 1 })
 		await c.restoreBackup()
 		expect(c.restoreStatus.value).toBe("finished")
 	})

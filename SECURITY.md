@@ -23,9 +23,17 @@ existing keys and profiles.
 - **AES-GCM ciphertext format** — `[1 version byte][12 byte IV][ciphertext]`
   stored base64 in `profile.secret` and `profile.guard`
   (`src/wallet/services/profile/encryption/encryption-key.ts`).
-- **Passkey RP ID** — `nulo.sh`, used at credential creation AND at
+- **Passkey RP ID** — `passkey.nulo.sh`, used at credential creation AND at
   WebAuthn `get` (both literals must match — they're the same crypto
   binding). Changing it invalidates every existing passkey credential.
+  The host is deliberately content-less: WebAuthn lets every origin whose
+  registrable domain suffix-matches the RP ID assert with the credential
+  and evaluate its PRF, which is how the wallet master is derived — so the
+  RP host and every `*.passkey.nulo.sh` descendant serve a static page with
+  a strict CSP and no scripts, never application code, and the extension's
+  own content script is excluded from them (`manifest.config.ts`
+  `content_scripts[].exclude_matches`). The apex `nulo.sh` and the
+  application subdomains are therefore not eligible.
   - **M4.9 build-time gate** (`scripts/check-rp-id.ts`): single source
     of truth is `RP_ID` exported from
     `src/wallet/services/passkey/spec.ts`. The gate fails the build if

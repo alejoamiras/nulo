@@ -204,6 +204,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 
 			result.push({
 				networkId: n.id,
+				chainId: n.chainId,
 				senders: senders.map((address) => ({ address })),
 				contracts: contractsFull,
 			})

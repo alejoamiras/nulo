@@ -117,7 +117,6 @@ export const ERR_ENDPOINT_CHAIN_MISMATCH = "ENDPOINT_CHAIN_MISMATCH"
 export const ERR_LAST_ENDPOINT = "LAST_ENDPOINT"
 export const ERR_PRIMARY_ENDPOINT = "PRIMARY_ENDPOINT"
 export const ERR_ACTIVE_NETWORK = "ACTIVE_NETWORK"
-export const ERR_BACKUP_TOO_OLD = "BACKUP_TOO_OLD"
 /** An unattended caller asked to verify a network whose L1 identity needs a live endpoint probe. */
 export const ERR_UNATTENDED_LIVE_CHECK = "UNATTENDED_LIVE_CHECK"
 
@@ -214,6 +213,10 @@ export const NetworkMethodSchemas = {
 		params: z.tuple([]),
 		result: z.array(NetworkSchema),
 	},
+	seedDefaultsForProfile: {
+		params: z.tuple([z.string().min(1)]),
+		result: z.array(NetworkSchema),
+	},
 	getNetworks: {
 		params: z.tuple([z.number().int().nonnegative().optional()]),
 		result: z.array(NetworkSchema),
@@ -281,6 +284,13 @@ export const NetworkMethodSchemas = {
 export type Methods = {
 	/** Returns existing networks if any, or seeds + returns the 3 defaults. */
 	getOrInitNetworks(): Network[]
+	/**
+	 * Seeds the defaults for a profile that is NOT the active session (full-backup import
+	 * restores into a profile before activating it). The profile must exist and not be under
+	 * deletion; rows already stored for it are returned untouched. Writes that profile's own
+	 * active pointer only — never the shared node cache.
+	 */
+	seedDefaultsForProfile(profileId: string): Network[]
 	/** Returns all networks for the active profile, or filtered by chainId. */
 	getNetworks(chainId?: number): Network[]
 	/** Returns a network by id. */

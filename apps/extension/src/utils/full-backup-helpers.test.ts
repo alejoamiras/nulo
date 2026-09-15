@@ -11,7 +11,9 @@ import {
 	normalizeAllIds,
 	readBackupFile,
 	remapByMap,
-	resolveRestoredActiveNetworkId,
+	resolveRestoredActiveNetworkIdByChain,
+	remapNetworkIdByChain,
+	capRecords,
 } from "./full-backup-helpers"
 
 describe("assembleFullBackup", () => {
@@ -524,39 +526,74 @@ describe("normalizeAllIds + remapByMap", () => {
 	})
 })
 
-describe("resolveRestoredActiveNetworkId (item 1b — preserve active-network across import)", () => {
-	it("maps a CHANGED id through the index pairing", () => {
-		const got = resolveRestoredActiveNetworkId("a", [{ id: "A" }], [{ id: "a" }])
-		expect(got).toBe("A")
+describe("resolveRestoredActiveNetworkIdByChain — the exported preference names a chain", () => {
+	const seeded = [
+		{ id: "main", chainId: 4248422646 },
+		{ id: "local", chainId: 0 },
+	]
+	it("selects the seeded row of that chain, chain 0 included", () => {
+		expect(resolveRestoredActiveNetworkIdByChain(4248422646, seeded)).toBe("main")
+		expect(resolveRestoredActiveNetworkIdByChain(0, seeded)).toBe("local")
 	})
-	it("maps an UNCHANGED id via identity (the changed-only remap map would miss this)", () => {
-		const got = resolveRestoredActiveNetworkId("b", [{ id: "b" }], [{ id: "b" }])
-		expect(got).toBe("b")
+	it("leaves the primary seed active for an absent, non-numeric, non-integer or unseeded chain", () => {
+		expect(resolveRestoredActiveNetworkIdByChain(undefined, seeded)).toBeUndefined()
+		expect(resolveRestoredActiveNetworkIdByChain("0", seeded)).toBeUndefined()
+		expect(resolveRestoredActiveNetworkIdByChain(1.5, seeded)).toBeUndefined()
+		expect(resolveRestoredActiveNetworkIdByChain(7, seeded)).toBeUndefined()
 	})
-	it("picks the correct row among several", () => {
-		const news = [{ id: "A" }, { id: "b" }, { id: "C" }]
-		const olds = [{ id: "a" }, { id: "b" }, { id: "c" }]
-		expect(resolveRestoredActiveNetworkId("a", news, olds)).toBe("A")
-		expect(resolveRestoredActiveNetworkId("b", news, olds)).toBe("b")
-		expect(resolveRestoredActiveNetworkId("c", news, olds)).toBe("C")
+})
+
+describe("remapNetworkIdByChain — rows bind to the seeded network of their chain, never to an exported id", () => {
+	const seeded = [
+		{ id: "main", chainId: 4248422646 },
+		{ id: "local", chainId: 0 },
+		{ id: "main-dup", chainId: 4248422646 },
+	]
+	it("rewrites networkId from chainId (chain 0 included) and ignores the exported id", () => {
+		const data: Record<string, unknown> = {
+			"account-state": [{ networkId: "evil", chainId: 0, senders: [] }],
+			transaction: [{ hash: "h", chainId: 4248422646 }],
+		}
+		const dropped = remapNetworkIdByChain(data, seeded, ["account-state", "transaction"])
+		expect(dropped).toEqual({})
+		expect(data["account-state"]).toEqual([{ networkId: "local", chainId: 0, senders: [] }])
+		expect(data.transaction).toEqual([{ hash: "h", chainId: 4248422646, networkId: "main" }])
 	})
-	it("returns undefined when the selected source FAILED to restore", () => {
-		const news = [{ id: "A" }, { id: "c", restoreError: "boom" }]
-		const olds = [{ id: "a" }, { id: "c" }]
-		expect(resolveRestoredActiveNetworkId("c", news, olds)).toBeUndefined()
+	it("duplicate seeded chains all map to the first seeded row", () => {
+		const data: Record<string, unknown> = { transaction: [{ hash: "h", chainId: 4248422646 }] }
+		remapNetworkIdByChain(data, seeded, ["transaction"])
+		expect((data.transaction as Array<{ networkId: string }>)[0].networkId).toBe("main")
 	})
-	it("returns undefined for a DUPLICATED source id (ambiguous pairing)", () => {
-		const news = [{ id: "D1" }, { id: "D2" }]
-		const olds = [{ id: "d" }, { id: "d" }]
-		expect(resolveRestoredActiveNetworkId("d", news, olds)).toBeUndefined()
+	it("drops rows whose chain is missing, non-numeric, non-integer or unseeded — and non-object rows — returning ordinals only", () => {
+		const bad = [
+			{ networkId: "x" },
+			{ networkId: "x", chainId: "0" },
+			{ networkId: "x", chainId: 1.5 },
+			{ networkId: "x", chainId: 99 },
+			null,
+			3,
+		]
+		const data: Record<string, unknown> = { "account-state": [...bad, { networkId: "x", chainId: 0 }] }
+		const dropped = remapNetworkIdByChain(data, seeded, ["account-state"])
+		expect(dropped).toEqual({ "account-state": [0, 1, 2, 3, 4, 5] })
+		expect(data["account-state"]).toEqual([{ networkId: "local", chainId: 0 }])
 	})
-	it("returns undefined for absent / non-string / foreign ids (hostile-safe)", () => {
-		const news = [{ id: "A" }]
-		const olds = [{ id: "a" }]
-		expect(resolveRestoredActiveNetworkId(undefined, news, olds)).toBeUndefined()
-		expect(resolveRestoredActiveNetworkId(12345 as unknown, news, olds)).toBeUndefined()
-		expect(resolveRestoredActiveNetworkId({} as unknown, news, olds)).toBeUndefined()
-		expect(resolveRestoredActiveNetworkId("does-not-exist", news, olds)).toBeUndefined()
+	it("an oversized malformed slice is rejected in linear time and reported capped", () => {
+		const rows = Array.from({ length: 80_000 }, (_, i) => ({ networkId: "x", chainId: 99, senders: [{ address: `0x${i}` }] }))
+		const data: Record<string, unknown> = { "account-state": rows }
+		const started = performance.now()
+		const dropped = remapNetworkIdByChain(data, seeded, ["account-state"])
+		expect(performance.now() - started).toBeLessThan(1_000)
+		expect(dropped["account-state"]).toHaveLength(80_000)
+		expect(data["account-state"]).toEqual([])
+		const records = capRecords(dropped["account-state"].map((row) => ({ row, restoreError: "x" })))
+		expect(records).toHaveLength(201)
+		expect(records[200]).toEqual({ restoreError: "79800 further error(s) not recorded" })
+	})
+	it("leaves slices it was not asked about, and non-array slices, untouched", () => {
+		const data: Record<string, unknown> = { token: [{ chainId: 0, networkId: "keep" }], transaction: "nope" }
+		expect(remapNetworkIdByChain(data, seeded, ["transaction"])).toEqual({})
+		expect(data).toEqual({ token: [{ chainId: 0, networkId: "keep" }], transaction: "nope" })
 	})
 })
 

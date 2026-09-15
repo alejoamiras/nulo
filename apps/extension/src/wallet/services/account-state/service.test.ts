@@ -46,6 +46,27 @@ function makeNetwork(id: string, chainId: number): Network {
 	} as unknown as Network
 }
 
+describe("AccountStateService.backup", () => {
+	test("each item names its chain beside the network id — the import rebinds by chain, never by the exported id", async () => {
+		const networkService = new FakeNetworkService()
+		const services = new ServiceCollection()
+		services.add(networkService)
+		const accountStateService = new AccountStateService(new LoggerStore(new ConfigStore()))
+		services.add(accountStateService)
+		await services.start()
+		const live = { ...makeNetwork("net-a", 7), endpoints: [{ id: "primary", rpcUrl: "https://a.example/" }] } as Network
+		networkService.networks = [live, makeNetwork("net-b", 9)]
+		networkService.statuses.set("net-a", NodeStatus.Active)
+		networkService.statuses.set("net-b", NodeStatus.Inactive)
+		vi.spyOn(accountStateService, "getSenders").mockResolvedValue(["0xalice"])
+		vi.spyOn(accountStateService, "getContracts").mockResolvedValue([])
+
+		const items = await accountStateService.backup()
+
+		expect(items).toEqual([{ networkId: "net-a", chainId: 7, senders: [{ address: "0xalice" }], contracts: [] }])
+	})
+})
+
 describe("AccountStateService.getSendersAcrossActiveNetworks", () => {
 	let networkService: FakeNetworkService
 	let accountStateService: AccountStateService

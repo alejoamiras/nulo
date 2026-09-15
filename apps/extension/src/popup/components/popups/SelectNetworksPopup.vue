@@ -84,30 +84,6 @@ watch(
 						</Flex>
 					</Flex>
 				</Flex>
-
-				<!-- <Flex direction="column" gap="12">
-					<Button
-						@click="popupStore.open('new_network')"
-						wide
-						variant="secondary"
-						size="medium"
-						leftIcon="plus-circle"
-						leftIconColor="primary"
-					>
-						Add network
-					</Button>
-
-					<Text
-						size="12"
-						weight="500"
-						color="tertiary"
-						height="140"
-						align="center"
-					>
-						To add a new network, come up with a unique name and
-						provide an RPC link
-					</Text>
-				</Flex> -->
 			</Flex>
 		</PopupCard>
 	</Popup>

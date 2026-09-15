@@ -1,6 +1,31 @@
+import { readdirSync, readFileSync, statSync } from "node:fs"
+import { join, resolve } from "node:path"
 import { describe, expect, test } from "vitest"
 import logoDataUri from "@/assets/logo.png?inline"
 import manifest from "../manifest/manifest.config"
+import { RP_ID } from "@/wallet/services/passkey/spec"
+
+type ContentScript = { matches: string[]; exclude_matches?: string[] }
+const m = manifest as unknown as { web_accessible_resources?: unknown; host_permissions: string[]; content_scripts: ContentScript[] }
+
+/** Chrome match-pattern semantics for the subset the manifest uses: `<scheme>://<host>/<path>`,
+ *  where host is `*`, `*.domain` (domain and every subdomain) or an exact domain. */
+function matchesPattern(pattern: string, url: URL): boolean {
+	const parsed = /^(\*|https?):\/\/([^/]+)(\/.*)$/.exec(pattern)
+	if (!parsed) throw new Error(`unsupported pattern ${pattern}`)
+	const [, scheme, host, path] = parsed
+	if (scheme !== "*" && `${scheme}:` !== url.protocol) return false
+	const hostOk =
+		host === "*" ||
+		host === url.hostname ||
+		(host.startsWith("*.") && (url.hostname === host.slice(2) || url.hostname.endsWith(host.slice(1))))
+	if (!hostOk) return false
+	return path === "/*" || path === url.pathname || (path.endsWith("*") && url.pathname.startsWith(path.slice(0, -1)))
+}
+const injectsInto = (cs: ContentScript, href: string) => {
+	const url = new URL(href)
+	return cs.matches.some((p) => matchesPattern(p, url)) && !(cs.exclude_matches ?? []).some((p) => matchesPattern(p, url))
+}
 
 /**
  * The source manifest declares no web-accessible resources: the logo entry let every page fetch
@@ -10,10 +35,51 @@ import manifest from "../manifest/manifest.config"
  */
 describe("manifest surface", () => {
 	test("declares no web-accessible resources", () => {
-		expect((manifest as unknown as Record<string, unknown>).web_accessible_resources).toBeUndefined()
+		expect(m.web_accessible_resources).toBeUndefined()
 	})
 
 	test("the discovery icon is a data URI, so no URL has to be exposed for it", () => {
 		expect(logoDataUri.startsWith("data:image/png;base64,")).toBe(true)
+	})
+})
+
+/**
+ * The Relying Party host is a content-less subdomain: every origin whose registrable domain
+ * suffix-matches the RP ID may run the passkey ceremony and evaluate the PRF the wallet master
+ * derives from, so the apex and the application subdomains must not qualify, and no script —
+ * the wallet's own content script included — may run on the RP host or its descendants.
+ */
+describe("passkey relying party", () => {
+	test("the RP ID is the owner-selected content-less host", () => {
+		expect(RP_ID).toBe("passkey.nulo.sh")
+	})
+
+	test("the host permission names exactly the RP host", () => {
+		expect(m.host_permissions).toContain(`https://${RP_ID}/`)
+		expect(m.host_permissions.filter((p) => p.startsWith("https://"))).toEqual([`https://${RP_ID}/`])
+	})
+
+	test("no in-repo deployable names the RP host (dashboard-managed hosting is out of this test's sight)", () => {
+		const roots = ["apps/landing", "apps/tools"].map((r) => resolve(__dirname, "../../..", r))
+		const skipped = (rel: string) => rel.split("/").some((seg) => seg === "node_modules" || seg === "dist" || seg.startsWith("."))
+		const deployable = (rel: string) => /\.(jsonc?|toml|ts|vue|html)$/.test(rel) && !skipped(rel)
+		const hits = roots.flatMap((root) =>
+			(readdirSync(root, { recursive: true }) as string[])
+				.filter(deployable)
+				.map((rel) => join(root, rel))
+				.filter((full) => statSync(full).isFile() && readFileSync(full, "utf8").includes(RP_ID)),
+		)
+		expect(hits).toEqual([])
+	})
+
+	test("the content script never injects into the RP host or its descendants, and still does elsewhere", () => {
+		const [cs] = m.content_scripts
+		expect(injectsInto(cs, `https://${RP_ID}/`)).toBe(false)
+		expect(injectsInto(cs, `https://${RP_ID}/index.html`)).toBe(false)
+		expect(injectsInto(cs, `http://${RP_ID}/`)).toBe(false)
+		expect(injectsInto(cs, `https://x.${RP_ID}/`)).toBe(false)
+		expect(injectsInto(cs, "https://nulo.sh/")).toBe(true)
+		expect(injectsInto(cs, "https://tools.nulo.sh/app")).toBe(true)
+		expect(injectsInto(cs, "https://example.com/")).toBe(true)
 	})
 })
