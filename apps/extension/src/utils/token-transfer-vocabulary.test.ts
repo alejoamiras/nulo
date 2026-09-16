@@ -1,5 +1,12 @@
 import { describe, expect, test } from "vitest"
-import { TRANSFER_LABELS, TRANSFER_SIGNATURES, findTransferSignature, transferLabel } from "./token-transfer-vocabulary"
+import {
+	MINT_SIGNATURES,
+	TRANSFER_LABELS,
+	TRANSFER_SIGNATURES,
+	findMintSignature,
+	findTransferSignature,
+	transferLabel,
+} from "./token-transfer-vocabulary"
 import { getMethodLabel } from "./tx-enrichment"
 
 // Hand-written, NOT derived from the descriptors: a descriptor edit (a renamed default, a dropped
@@ -57,5 +64,18 @@ describe("token-transfer vocabulary", () => {
 		expect(getMethodLabel("shield")).toBe("Shield")
 		expect(getMethodLabel("claim")).toBe("Claim Fee Juice")
 		expect(getMethodLabel("mint_to_private")).toBe("Mint (private)")
+	})
+})
+
+describe("token-mint vocabulary", () => {
+	test("the two standard mints take (to, amount) and nothing else; a mint is never a transfer", () => {
+		expect(Object.fromEntries(MINT_SIGNATURES)).toEqual({
+			mint_to_private: [{ kind: "mintPrivate", params: TWO }],
+			mint_to_public: [{ kind: "mintPublic", params: TWO }],
+		})
+		expect(findMintSignature("mint_to_private", 2)?.params).toEqual(TWO)
+		expect(findMintSignature("mint_to_public", 3)).toBeUndefined()
+		expect(findMintSignature("transfer", 2)).toBeUndefined()
+		expect(findTransferSignature("mint_to_private", 2)).toBeUndefined()
 	})
 })

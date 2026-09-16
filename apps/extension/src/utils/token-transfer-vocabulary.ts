@@ -1,7 +1,8 @@
 /**
- * The token-transfer vocabulary the approval surfaces recognize, derived from the wallet's own
- * token-function descriptors so a display list can never drift from what the wallet itself
- * calls a transfer.
+ * The token-function vocabulary the approval surfaces recognize. Transfers derive from the wallet's
+ * own token-function descriptors so a display list can never drift from what the wallet itself calls
+ * a transfer. Mints have no descriptor (the wallet never calls one), so the standard token's mint
+ * entry points are a hand-written display vocabulary, pinned by the paired test.
  *
  * Imports the descriptor leaf directly: the `token/functions` barrel pulls the runtime (account
  * + PXE code) into every popup bundle that only needs names and arities.
@@ -11,10 +12,15 @@ import { TOKEN_FN_DESCRIPTORS } from "@/wallet/services/token/functions/descript
 import type { TokenFnKind } from "@/wallet/services/token/functions/types"
 
 export type TransferKind = Extract<TokenFnKind, `transfer${string}`>
+export type MintKind = "mintPrivate" | "mintPublic"
 
-/** One recognized shape of a transfer function: the descriptor kind and its parameter names in ABI order. */
+/** One recognized shape of a token function: its kind and its parameter names in ABI order. */
 export interface TransferSignature {
 	readonly kind: TransferKind
+	readonly params: readonly string[]
+}
+export interface MintSignature {
+	readonly kind: MintKind
 	readonly params: readonly string[]
 }
 
@@ -59,3 +65,13 @@ export const transferLabel = (name: string): string | null => {
 	const signatures = TRANSFER_SIGNATURES.get(name)
 	return signatures?.length ? TRANSFER_LABELS[signatures[0].kind] : null
 }
+
+/** The standard token's mint entry points, both `(to, amount)`. */
+const MINT_PARAMS: readonly string[] = ["to", "amount"]
+export const MINT_SIGNATURES: ReadonlyMap<string, readonly MintSignature[]> = new Map([
+	["mint_to_private", [{ kind: "mintPrivate", params: MINT_PARAMS }]],
+	["mint_to_public", [{ kind: "mintPublic", params: MINT_PARAMS }]],
+])
+
+export const findMintSignature = (name: string, arity: number): MintSignature | undefined =>
+	MINT_SIGNATURES.get(name)?.find((s) => s.params.length === arity)

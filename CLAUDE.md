@@ -51,6 +51,15 @@ Project skills in [`.claude/skills/`](./.claude/skills/) are the source of truth
 - **`bun run audit:vue`** is the one-shot pre-PR gate. It runs `typecheck:all`, `test`, and `lint` CONCURRENTLY (`bun run --parallel`, Foreman-prefixed output), then `build` after all three pass. It does NOT run e2e — those are separate (`test:e2e` for smoke, `e2e:agent` for network).
 - **`noExplicitAny`** is enforced as an error. Use `unknown` and cast at usage sites. Suppress with `// biome-ignore lint/suspicious/noExplicitAny: <reason>` only at genuinely untyped boundaries.
 
+## UI changes need explicit owner sign-off
+
+Any change to what a user sees — a screen's layout, its copy, which rows it shows or hides, how a value is formatted — is a product decision, and only the owner makes it. This holds inside security, refactor and dependency work too: a remediation may *add* information to a screen, but it may not change how the screen reads without the owner seeing it first. (The 2026-09 approval-card regression came from a security batch that replaced the parsed payload with raw 32-byte fields and untruncated addresses; every audit approved it, nobody looked at it.)
+
+- **Plans call it out.** A `/blueprint` plan lists every user-visible surface it touches under a `UI impact` line, with a before/after description or mockup. No line, no UI change.
+- **Sign-off is explicit and recorded** — a message from the owner naming the surface, quoted in the plan or the PR body. A codex/fable audit `approve` is not a sign-off; a passing test is not a sign-off.
+- **Wire-shaped fixtures for dApp-facing surfaces.** A component test for anything that renders dApp data (the execute / connect / sign windows) feeds at least one fixture shaped as the wire carries it — `aztec_sendTx` arguments are `0x` + 64 hex fields, never `5n` — so a rendering that only works on friendly test values cannot pass.
+- **Screenshots close the loop.** A PR that changes a popup surface attaches a screenshot or artifact of the result; the smoke e2e counts rows, it does not read them.
+
 ## Branching + merging
 
 - `dev` is the **default branch** and the integration lane. Feature work happens on short-lived branches off `dev` (named `feat/...`, `fix/...`, `chore/...`, `refactor/...`, `docs/...`, `test/...`, `deps/...`) and lands via **squash-merge** PRs — dev's history stays essentially linear, one commit per merged feature PR. **The one exception is the post-release `chore: sync main → dev` PR, which is MERGE-committed** (not squashed) so `main`'s release commit stays in `dev`'s ancestry — the prerelease version-anchor needs it. So `dev` carries a periodic sync merge commit; everything else is a squash.
