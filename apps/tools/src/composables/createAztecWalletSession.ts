@@ -135,6 +135,9 @@ export interface AztecWalletSessionConfig {
  * may already belong to a newer flow). The controllers below all take the per-session state
  * object; nothing is module-global, so two sessions never share a flow.
  */
+/** The reactive session surface + controllers `createAztecWalletSession` returns. */
+export type AztecWalletSession = ReturnType<typeof createAztecWalletSession>
+
 export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 	const s = createSessionState(config)
 	return {
@@ -145,6 +148,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		selectedAccount: s.selectedAccount,
 		selectionNotices: s.selectionNotices,
 		hiddenAccountsCount: s.hiddenAccountsCount,
+		contractsReady: s.contractsReady,
 		error: s.error,
 		wallet: s.wallet,
 		discoveredWallets: s.discoveredWallets,
@@ -170,6 +174,10 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		consumeSelectionNotices: (): SelectionNotice[] => consumeSelectionNotices(s),
 		/** False when it did not run because another flow already owns the wallet — not a refusal. */
 		retryCapabilities: (): Promise<boolean> => retryCapabilities(s),
+		/** Quietly re-register the app's contracts on the current wallet (Phase 6's retry helper
+		 *  calls it after an unregistered-contract error). False when a flow owns the wallet or the
+		 *  session went stale mid-flight; rethrows a genuine registration failure after publishing it. */
+		reregisterContracts: (): Promise<boolean> => reregisterContracts(s),
 		/** Re-read the session's accounts from the wallet (no prompt); see `refreshAccounts`. */
 		refreshAccounts: (): Promise<RefreshOutcome> => enqueuePrompt(() => refreshAccounts(s)),
 		disconnect: (): Promise<void> => disconnect(s),
@@ -211,6 +219,11 @@ function createSessionState(config: AztecWalletSessionConfig) {
 		 *  owes the user a prompt. */
 		grantedContracts: ref<readonly string[]>([]),
 		selectedAccount: ref<string | null>(null),
+		/** True only while the app's contracts are registered with the connected wallet's PXE. False
+		 *  during the register window (initial setup AND a quiet re-grant's re-registration) and
+		 *  whenever no wallet is set — a send issued before it is true would fail on an unregistered
+		 *  contract, so the send gates read it. */
+		contractsReady: ref(false),
 		/** Valid accounts dropped by the grant cap — drives the persistent "Showing N of M"
 		 *  disclosure rows (the one-shot notice covers only the toast; plan D-24). */
 		hiddenAccountsCount: ref(0),
@@ -411,6 +424,7 @@ function wipeToIdle(s: SessionState): void {
 	s.status.value = "idle"
 	s.error.value = null
 	s.activeFlowEpoch = null
+	s.contractsReady.value = false
 }
 
 function cleanupSession(s: SessionState): void {
@@ -749,8 +763,36 @@ async function retryCapabilities(s: SessionState): Promise<boolean> {
 	// statuses as a fresh connect does.
 	const quiet = s.status.value === "connected"
 	if (!quiet) s.status.value = "capability-approval"
+	// A re-grant re-registers contracts; a send that raced the window would hit an unregistered
+	// contract, so the readiness flag drops now and finishSetup raises it once registration lands.
+	s.contractsReady.value = false
 	await requestCapabilities(s, flowEpoch, quiet)
 	return true
+}
+
+/** Quietly re-register the app's contracts on the current wallet, epoch-fenced exactly like
+ *  `finishSetup`. No-op (`false`) when no wallet is set or another flow owns it. A completion that
+ *  finds the session moved on returns `false` without publishing into the newer wallet; a genuine
+ *  registration failure is published (`status = "error"`) and rethrown for the caller to surface. */
+async function reregisterContracts(s: SessionState): Promise<boolean> {
+	const flowWallet = s.wallet.value
+	if (!flowWallet || s.activeFlowEpoch !== null) return false
+	const flowEpoch = s.epoch
+	s.activeFlowEpoch = flowEpoch
+	s.contractsReady.value = false
+	try {
+		await s.config.registerContracts(flowWallet)
+		if (isStale(s, flowEpoch)) return false
+		s.contractsReady.value = true
+		releaseFlowIfOwner(s, flowEpoch)
+		return true
+	} catch (err) {
+		if (isStale(s, flowEpoch)) return false
+		s.error.value = normalizeError(err)
+		s.status.value = "error"
+		releaseFlowIfOwner(s, flowEpoch)
+		throw err
+	}
 }
 
 export type RefreshOutcome = "refreshed" | "skipped" | "dropped"
@@ -912,6 +954,7 @@ async function finishSetup(
 	/** A re-grant on a session that is already connected: the status stays put throughout. */
 	quiet = false,
 ): Promise<void> {
+	s.contractsReady.value = false
 	try {
 		// The user already clicked Approve - we're now doing post-approval setup (registering
 		// contracts with the wallet's PXE). This can take 2-4s, so a dedicated state keeps the
@@ -923,6 +966,7 @@ async function finishSetup(
 			return
 		}
 
+		s.contractsReady.value = true
 		s.status.value = "connected"
 		// Persist ONLY on full success. The remembered path re-persists solely when the current
 		// key is empty — i.e. the preference was read from the legacy id and is promoted here,

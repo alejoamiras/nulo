@@ -11,6 +11,7 @@ import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import { IS_MAINNET, NETWORK } from "@/lib/network"
 import type { DripToken, TokenSymbol } from "@/constants/tokens"
 import { withOperation } from "./useOpsInFlight"
+import { contractsReadinessRefusal, useWalletConnection } from "./useWalletConnection"
 import { type NormalizedError, normalizeError } from "@/lib/errors"
 
 export type DripTarget = "public" | "private"
@@ -56,6 +57,10 @@ async function drip(
 	if (inflight.value !== null) {
 		return { kind: "error", value: "Another drip is in flight." }
 	}
+	// The view withholds the wallet until connected, but a quiet re-grant can re-register contracts
+	// on an already-connected session; refuse a drip issued in that window rather than fail on-chain.
+	const notReady = contractsReadinessRefusal(useWalletConnection())
+	if (notReady) return { kind: "error", value: notReady }
 	inflight.value = { tokenSymbol: token.symbol, target }
 	const key = `${token.symbol}:${target}`
 	try {

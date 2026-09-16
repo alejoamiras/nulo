@@ -81,7 +81,7 @@ import { simulateFeePayload } from "./fuelClaim"
 import { useBridgeWallet } from "./useBridgeWallet"
 import { useL1Wallet } from "./useL1Wallet"
 import { withOperation } from "./useOpsInFlight"
-import { requestHubToken, retainPinnedHubTokens, useWalletConnection } from "./useWalletConnection"
+import { contractsReadinessRefusal, requestHubToken, retainPinnedHubTokens, useWalletConnection } from "./useWalletConnection"
 import { useTokenGrant } from "./useTokenGrant"
 
 // Ids, stages and tx hashes ONLY - secrets, salts, amounts and addresses never reach this log.
@@ -578,6 +578,9 @@ async function performSend(plan: SendPlan, d: SendDeps): Promise<string> {
 	}
 	const grant = await ensureSendGrant(plan, d)
 	if ("refused" in grant) return failWith(d.error, grant.refused)
+	// After the grant so a quiet re-grant's own re-registration has finished before we read readiness.
+	const notReady = contractsReadinessRefusal(d.bridgeWallet)
+	if (notReady) return failWith(d.error, notReady)
 	const { granted } = grant
 	d.busy.value = true
 	try {

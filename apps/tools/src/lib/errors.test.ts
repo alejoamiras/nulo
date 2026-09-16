@@ -1,5 +1,48 @@
 import { describe, expect, it } from "vitest"
-import { normalizeError, userMessage } from "./errors"
+import { normalizeError, userMessage, walletErrorCodeOf } from "./errors"
+
+/** The extension transport throws `new Error(JSON.stringify(envelope))` — one JSON level. */
+const extensionShape = (code: string) => new Error(JSON.stringify({ code: -32602, message: "x", data: { walletErrorCode: code } }))
+/** The wallet-sdk iframe transport reduces the throw to its message STRING, then JSON-encodes that
+ *  string again — so the dApp sees a JSON string, two levels deep. */
+const iframeShape = (code: string) =>
+	new Error(JSON.stringify(JSON.stringify({ code: -32602, message: "x", data: { walletErrorCode: code } })))
+
+describe("wallet-error envelope", () => {
+	it("maps PXE_STALE_ANCHOR to chain-desync from both transport shapes", () => {
+		expect(normalizeError(extensionShape("PXE_STALE_ANCHOR")).category).toBe("chain-desync")
+		expect(normalizeError(iframeShape("PXE_STALE_ANCHOR")).category).toBe("chain-desync")
+	})
+
+	it("maps CONTRACT_NOT_REGISTERED to contract-not-registered from both shapes", () => {
+		expect(normalizeError(extensionShape("CONTRACT_NOT_REGISTERED")).category).toBe("contract-not-registered")
+		expect(normalizeError(iframeShape("CONTRACT_NOT_REGISTERED")).category).toBe("contract-not-registered")
+	})
+
+	it("a non-JSON message still hits the substring rules", () => {
+		expect(normalizeError(new Error("fetch failed: timeout after 30s")).category).toBe("network")
+	})
+
+	it("a JSON message without a walletErrorCode falls through to the substring rules", () => {
+		expect(normalizeError(new Error(JSON.stringify({ code: -32000, message: "transaction reverted" }))).category).toBe("tx-reverted")
+	})
+
+	it("an unknown walletErrorCode falls through, not to chain-desync", () => {
+		expect(normalizeError(extensionShape("SOMETHING_ELSE")).category).toBe("unknown")
+	})
+
+	it("does not decode a third level of nesting", () => {
+		const tripled = new Error(JSON.stringify(JSON.stringify(JSON.stringify({ data: { walletErrorCode: "PXE_STALE_ANCHOR" } }))))
+		expect(walletErrorCodeOf(tripled)).toBeUndefined()
+	})
+
+	it("walletErrorCodeOf returns the code, or undefined for a plain error", () => {
+		expect(walletErrorCodeOf(extensionShape("PXE_STALE_ANCHOR"))).toBe("PXE_STALE_ANCHOR")
+		expect(walletErrorCodeOf(iframeShape("CONTRACT_NOT_REGISTERED"))).toBe("CONTRACT_NOT_REGISTERED")
+		expect(walletErrorCodeOf(new Error("plain"))).toBeUndefined()
+		expect(walletErrorCodeOf("not an error")).toBeUndefined()
+	})
+})
 
 describe("normalizeError", () => {
 	it("classifies EIP-1193 code=4001 as user-rejected", () => {

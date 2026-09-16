@@ -62,6 +62,7 @@ import {
 	useBridgeJournal,
 } from "./useBridgeJournal"
 import { useBridgeWallet } from "./useBridgeWallet"
+import { contractsReadinessRefusal } from "./useWalletConnection"
 import { useL1Wallet } from "./useL1Wallet"
 import { withOperation } from "./useOpsInFlight"
 import { readBalance } from "./useTokenBalance"
@@ -504,13 +505,21 @@ function openExitRecord(base: SendWithdrawRecord, isPrivate: boolean): void {
  *  that replaced it, must refuse here rather than at the authwit. */
 export const EXIT_NOT_GRANTED = "Your wallet hasn't granted access to this token - pick it again to request access. Nothing was sent."
 
+/** The pre-exit refusals that do not depend on the Aztec wallet handle, in order: L1 connected,
+ *  token granted, then the app's contracts registered (the setup-pending window). */
+function exitGuardRefusal(plan: ExitPlan, d: ExitDeps): string | undefined {
+	if (!d.l1.address.value) return "Connect your Ethereum wallet first."
+	if (!useTokenGrant().isGranted(plan.token.l2Token)) return EXIT_NOT_GRANTED
+	return contractsReadinessRefusal(d.bridgeWallet)
+}
+
 async function performExit(plan: ExitPlan, d: ExitDeps, approvedCeiling?: bigint): Promise<string> {
 	d.error.value = null
 	const aztec = d.bridgeWallet.wallet.value
 	const from = d.bridgeWallet.selectedAccount.value
 	if (!aztec || !from) return failWith(d.error, "Connect your Aztec wallet first.")
-	if (!d.l1.address.value) return failWith(d.error, "Connect your Ethereum wallet first.")
-	if (!useTokenGrant().isGranted(plan.token.l2Token)) return failWith(d.error, EXIT_NOT_GRANTED)
+	const refusal = exitGuardRefusal(plan, d)
+	if (refusal) return failWith(d.error, refusal)
 	d.busy.value = true
 	const provisionalId = makeProvisionalWithdrawId()
 	let finalId = provisionalId

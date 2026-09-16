@@ -963,6 +963,149 @@ describe("multi-account: choose-on-connect", () => {
 	})
 })
 
+describe("contractsReady + reregisterContracts", () => {
+	function deferred() {
+		let resolve: () => void = () => {}
+		let reject: (e: unknown) => void = () => {}
+		const promise = new Promise<void>((res, rej) => {
+			resolve = res
+			reject = rej
+		})
+		return { promise, resolve, reject }
+	}
+
+	/** Connect a single-account wallet to the end (status "connected"), consuming one
+	 *  `registerContracts` call. */
+	async function connectedSingle(registerContracts: Mock<() => Promise<void>> = vi.fn(async () => {})) {
+		const { provider, fireDisconnect } = makeMultiProvider({ accounts: [{ alias: "Only", item: MA_A }] })
+		const { session: s } = makeSessionWith({ registerContracts })
+		await driveThroughGrant(s, provider)
+		expect(s.status.value).toBe("connected")
+		return { s, fireDisconnect, registerContracts }
+	}
+
+	/** Drive to "setting-up" with a registration that is still pending, so mid-flight state is
+	 *  observable; returns the session and the pending registration's resolver/rejecter. */
+	async function driveToSettingUp(registerContracts: Mock<() => Promise<void>>) {
+		const { provider, fireDisconnect } = makeMultiProvider({ accounts: [{ alias: "Only", item: MA_A }] })
+		const { session: s } = makeSessionWith({ registerContracts })
+		void s.connect()
+		await flush()
+		stream.push(provider)
+		await flush()
+		s.selectWallet(s.discoveredWallets.value[0].key)
+		await flush()
+		const confirming = s.confirmVerification()
+		await flush(8)
+		expect(s.status.value).toBe("setting-up")
+		return { s, confirming, fireDisconnect }
+	}
+
+	it("is false while registration is in flight and true once it resolves", async () => {
+		const reg = deferred()
+		const { s, confirming } = await driveToSettingUp(vi.fn(() => reg.promise))
+		expect(s.contractsReady.value).toBe(false)
+		reg.resolve()
+		await confirming
+		expect(s.status.value).toBe("connected")
+		expect(s.contractsReady.value).toBe(true)
+	})
+
+	it("stays false when the wallet disconnects during setup", async () => {
+		const reg = deferred()
+		const { s, confirming, fireDisconnect } = await driveToSettingUp(vi.fn(() => reg.promise))
+		fireDisconnect()
+		expect(s.status.value).toBe("idle")
+		expect(s.contractsReady.value).toBe(false)
+		reg.resolve()
+		await confirming
+		expect(s.contractsReady.value).toBe(false)
+	})
+
+	it("across a quiet re-grant it drops then rises — not continuously true", async () => {
+		const first = deferred()
+		const later = deferred()
+		let call = 0
+		const registerContracts = vi.fn(() => (call++ === 0 ? first.promise : later.promise))
+		const { provider } = makeMultiProvider({ accounts: [{ alias: "Only", item: MA_A }] })
+		const { session: s } = makeSessionWith({ registerContracts })
+		void s.connect()
+		await flush()
+		stream.push(provider)
+		await flush()
+		s.selectWallet(s.discoveredWallets.value[0].key)
+		await flush()
+		const confirming = s.confirmVerification()
+		await flush(8)
+		first.resolve()
+		await confirming
+		expect(s.contractsReady.value).toBe(true)
+
+		const retrying = s.retryCapabilities()
+		await flush(8)
+		expect(s.status.value).toBe("connected") // quiet: the panel never flips
+		expect(s.contractsReady.value).toBe(false) // but the re-registration window is not "ready"
+		later.resolve()
+		await retrying
+		expect(s.contractsReady.value).toBe(true)
+	})
+
+	it("reregisterContracts is a no-op (false) while a flow owns the wallet", async () => {
+		const reg = deferred()
+		const { s, confirming } = await driveToSettingUp(vi.fn(() => reg.promise))
+		await expect(s.reregisterContracts()).resolves.toBe(false)
+		reg.resolve()
+		await confirming
+	})
+
+	it("reregisterContracts re-registers once and returns true on a connected session", async () => {
+		const { s, registerContracts } = await connectedSingle()
+		registerContracts.mockClear()
+		await expect(s.reregisterContracts()).resolves.toBe(true)
+		expect(registerContracts).toHaveBeenCalledTimes(1)
+		expect(s.contractsReady.value).toBe(true)
+	})
+
+	it("a disconnect during reregisterContracts → false, no error published, readiness left to the newer flow", async () => {
+		const reg = deferred()
+		let call = 0
+		const registerContracts = vi.fn(() => {
+			const c = call++
+			return c === 0 ? Promise.resolve() : reg.promise
+		})
+		const { s, fireDisconnect } = await connectedSingle(registerContracts)
+		const p = s.reregisterContracts()
+		await flush()
+		expect(s.contractsReady.value).toBe(false)
+		fireDisconnect()
+		reg.resolve()
+		await expect(p).resolves.toBe(false)
+		expect(s.error.value).toBeNull()
+		expect(s.contractsReady.value).toBe(false)
+	})
+
+	it("a registration failure publishes the error and rethrows; a fresh connect then recovers", async () => {
+		let call = 0
+		const registerContracts = vi.fn(() => {
+			const c = call++
+			return c === 1 ? Promise.reject(new Error("PXE down")) : Promise.resolve()
+		})
+		const { s } = await connectedSingle(registerContracts)
+		await expect(s.reregisterContracts()).rejects.toThrow("PXE down")
+		expect(s.status.value).toBe("error")
+		expect(s.error.value?.message).toBeTruthy()
+		expect(s.contractsReady.value).toBe(false)
+
+		// The "Retry connection" path is a fresh connect(); it needs a fresh discovery stream.
+		stream = makeStream()
+		mockGetAvailableWallets.mockImplementation(() => ({ wallets: stream.wallets, cancel: stream.cancel }))
+		const { provider } = makeMultiProvider({ accounts: [{ alias: "Only", item: MA_A }] })
+		await driveThroughGrant(s, provider)
+		expect(s.status.value).toBe("connected")
+		expect(s.contractsReady.value).toBe(true)
+	})
+})
+
 describe("multi-account: switching (selectAccount)", () => {
 	async function connectedSession(over: Parameters<typeof makeSessionWith>[0] = {}) {
 		const made = makeMultiProvider()

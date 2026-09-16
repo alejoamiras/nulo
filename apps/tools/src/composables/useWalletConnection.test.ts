@@ -109,11 +109,13 @@ vi.mock("@/contracts/private-fpc", () => ({
 }))
 
 import {
+	contractsReadinessRefusal,
 	extractGrantedAccounts,
 	forgetHubToken,
 	requestHubToken,
 	requestedHubTokens,
 	retainPinnedHubTokens,
+	SETUP_PENDING,
 	useWalletConnection,
 	__resetWalletConnectionForTests,
 } from "./useWalletConnection"
@@ -571,5 +573,32 @@ describe("per-token grant surface", () => {
 		expect(c.grantedContracts.value).toContain(HUB_ADDR)
 		await c.disconnect()
 		expect(c.grantedContracts.value).toEqual([])
+	})
+})
+
+describe("contractsReadinessRefusal", () => {
+	const ready = { status: { value: "connected" }, error: { value: null }, contractsReady: { value: true } }
+
+	it("passes (undefined) when connected and contracts are ready", () => {
+		expect(contractsReadinessRefusal(ready)).toBeUndefined()
+	})
+
+	it("returns SETUP_PENDING when connected but contracts are not yet registered", () => {
+		expect(contractsReadinessRefusal({ ...ready, contractsReady: { value: false } })).toBe(SETUP_PENDING)
+	})
+
+	it("returns the session's own error message when it is not connected", () => {
+		const refusal = contractsReadinessRefusal({
+			status: { value: "error" },
+			error: { value: { message: "Alpha-testnet is not responding. Try again." } },
+			contractsReady: { value: false },
+		})
+		expect(refusal).toBe("Alpha-testnet is not responding. Try again.")
+	})
+
+	it("falls back to a connect prompt when disconnected with no error", () => {
+		expect(contractsReadinessRefusal({ status: { value: "idle" }, error: { value: null }, contractsReady: { value: false } })).toBe(
+			"Connect your Aztec wallet first.",
+		)
 	})
 })

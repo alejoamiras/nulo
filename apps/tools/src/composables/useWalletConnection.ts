@@ -221,6 +221,24 @@ export function useWalletConnection() {
 	return session
 }
 
+/** The copy shown when a send is attempted while the wallet is still registering the app's
+ *  contracts — the quiet re-grant window the connected UI cannot otherwise see. */
+export const SETUP_PENDING = "Your wallet is still setting up the app's contracts. Try again in a moment."
+
+/** Why a send must not run yet, or `undefined` when the session is connected AND its contracts are
+ *  registered. The status check comes first: a failed setup keeps `wallet`/`selectedAccount`
+ *  populated, so a bare `!contractsReady` would read as "still setting up" when nothing is running —
+ *  a non-connected session surfaces its own error instead. */
+export function contractsReadinessRefusal(session: {
+	status: { value: string }
+	error: { value: { message: string } | null }
+	contractsReady: { value: boolean }
+}): string | undefined {
+	if (session.status.value !== "connected") return session.error.value?.message ?? "Connect your Aztec wallet first."
+	if (!session.contractsReady.value) return SETUP_PENDING
+	return undefined
+}
+
 /** Test-only: clear state between cases. */
 export function __resetWalletConnectionForTests(): void {
 	requestedTokens.clear()

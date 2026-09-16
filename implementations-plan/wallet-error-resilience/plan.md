@@ -408,7 +408,7 @@ restart; register a passkey profile with Touch ID, lock, unlock via passkey; not
 
 ### Arc 2 — tools
 
-#### Phase 5 — `contractsReady`, envelope-aware errors, send gates
+#### Phase 5 ✓ — `contractsReady`, envelope-aware errors, send gates
 
 **What.**
 
