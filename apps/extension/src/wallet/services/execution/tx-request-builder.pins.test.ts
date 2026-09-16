@@ -67,6 +67,7 @@ function makeHarness() {
 		pxeService: { getPXE: vi.fn(() => ({ fake: "pxe" })) },
 		profileService: {
 			assertFence: vi.fn(async () => {}),
+			isFenceLive: vi.fn(() => true),
 			getActiveProfile: vi.fn(async () => ({ id: "p-active", name: "P", type: "password" })),
 		},
 		networkService: {
@@ -133,6 +134,28 @@ function build(h: Harness, actions: unknown[], gasSettings?: unknown) {
 let h: Harness
 beforeEach(() => {
 	h = makeHarness()
+})
+
+describe("account resolution", () => {
+	test.each([
+		{ entry: "buildStandard", run: (h: Harness) => build(h, []) },
+		{
+			entry: "buildNoFrom",
+			run: (h: Harness) =>
+				h.builder.buildNoFrom(
+					{ networkId: "net-1", accountAddress: ACCOUNT_ADDR.toString(), exec: { calls: [] }, opts: {} } as never,
+					FENCE,
+				),
+		},
+	])("$entry: a session that ends while the account resolves throws before the account is used", async ({ run }) => {
+		h.deps.accountService.getAccountContract.mockImplementationOnce(async () => {
+			h.deps.profileService.isFenceLive.mockReturnValue(false)
+			return h.account
+		})
+		await expect(run(h)).rejects.toBeInstanceOf(SessionEndedError)
+		expect(h.deps.profileService.isFenceLive).toHaveBeenCalledWith(FENCE)
+		expect(h.calls).toEqual(["getNetwork"])
+	})
 })
 
 describe("buildStandard pins", () => {

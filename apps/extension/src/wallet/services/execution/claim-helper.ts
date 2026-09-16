@@ -153,34 +153,11 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 		logger?.debug(`Queued record ${queuedJournalId} already at pending (silent-path pre-claim); registering controller only`)
 	}
 
-	// Register the controller IMMEDIATELY — no await between the stage
-	// write and the registration. cancelJob() reads the registry to find
-	// a controller to abort; if it lands during this microtask window,
-	// it would find no controller. The next sync line closes the gap.
-	//
-	// When a `reuseController` was pre-registered (under queuedJournalId,
-	// before the ExecutionMutex acquire), reuse it. Because queuedJournalId ===
-	// this claimed id, the controller has been in `activeControllers` since
-	// before the acquire wait — so cancelJob always finds it, which is strictly
-	// safer than the original "register only after the transition" timing. The
-	// registration is idempotent in that case (same key, same value).
-	//
-	// The OTHER side of this handshake is cancelJob → transitionOperation →
-	// `_transitionLocked` (operation-journal/service.ts): it transitions the
-	// journal record BEFORE calling `controller.abort()`, and the journal's
-	// transition lock is the arbiter that serializes claim-vs-cancel. Combined
-	// with `reuseController` being registered before the acquire wait (above),
-	// cancelJob always finds a controller to abort on this claim path —
-	// correctness rests on controller-identity-continuity + transition-before-
-	// abort + the journal lock, NOT on microtask luck. The one microtask-
-	// sensitive residual is the LEGACY no-reuse / reaped-record fallback, where a
-	// freshly-created controller is `set()` immediately after the create await
-	// (the same register-immediately discipline, applied at those create sites);
-	// the queued/pending `set()` below is the one the no-await line above covers.
-	// Making the handshake explicit via a small claim/cancel
-	// coordinator seam was evaluated (codex) and deferred to the execution
-	// composition harness in #125/#126 for human review; see
-	// implementations-plan/quality-arc-deferred/lessons/q23.md.
+	// No await between the stage write and the registration: cancelJob() aborts only a controller
+	// it finds. A `reuseController` has been registered under this id since before the mutex wait,
+	// so registering it again is idempotent. cancelJob transitions the journal before it aborts and
+	// the journal's transition lock serializes it against the claim, so claim-vs-cancel rests on
+	// that ordering, not on microtask timing; the create fallbacks register right after their create.
 	const controller = reuseController ?? new AbortController()
 	if (!deps.registerInFlight(queuedJournalId, input.session, controller).live) return refuseEndedSession(deps, queuedJournalId)
 	return { journalId: queuedJournalId, controller }
@@ -209,7 +186,7 @@ async function refuseEndedSession(deps: ClaimHelperDeps, journalId: string): Pro
 	try {
 		await deps.operationJournal.transitionOperation(journalId, { stage: "failed" }, normalizeError(error, "session_ended"))
 	} catch (err) {
-		deps.logger?.error(`Failed to terminalize ${journalId} after its session ended`, err)
+		deps.logger?.error("Failed to terminalize a job whose session ended", { journalId, error: err })
 	}
 	throw error
 }

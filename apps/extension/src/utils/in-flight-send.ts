@@ -17,7 +17,7 @@ import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
 /** Stages where a send is still deciding what to build, or has not yet been broadcast. */
 const IN_FLIGHT_STAGES: ReadonlySet<string> = new Set(["queued", "pending", "simulating", "proving", "submitting"])
 
-/** Stages of a send the user has approved and that has not been broadcast yet. */
+/** Stages between a send starting to execute and its `submitting` write. */
 const APPROVED_UNBROADCAST_STAGES: ReadonlySet<string> = new Set(["pending", "simulating", "proving"])
 
 /** Operation kinds that actually send a transaction. */
@@ -28,8 +28,9 @@ export function isInFlightSend(op: Pick<OperationRecord, "kind" | "progress">): 
 	return SENDING_KINDS.has(op.kind) && IN_FLIGHT_STAGES.has(op.progress?.stage)
 }
 
-/** True when `op` is a send the user approved that has not reached `submitting`: a `queued` request
- *  still awaits approval, and from `submitting` the broadcast is out of the wallet's hands. */
+/** True when `op` is a send that has started executing and has not reached `submitting`: the
+ *  stages that hold an expiring session open. `queued` is excluded, approved or not, so a waiting
+ *  request cannot keep the wallet unlocked. */
 export function isApprovedSendInFlight(op: Pick<OperationRecord, "kind" | "progress">): boolean {
 	return SENDING_KINDS.has(op.kind) && APPROVED_UNBROADCAST_STAGES.has(op.progress?.stage)
 }

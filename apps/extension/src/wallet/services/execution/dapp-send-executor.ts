@@ -784,6 +784,8 @@ export class DappSendExecutor {
 			const pxe = this.deps.getPXE(network)
 			await this.deps.assertFence(fence)
 			const account = await this.deps.getAccountContract(fence.profileId, network.chainId, op.accountAddress)
+			// The lookup reads whichever session is live: re-check the fence before its keys are used.
+			fenceChecks(this.deps, fence).assertLive()
 			return {
 				txRequest: reused.txRequest,
 				node,

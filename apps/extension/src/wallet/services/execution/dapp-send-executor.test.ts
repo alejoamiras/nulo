@@ -988,6 +988,25 @@ describe("DappSendExecutor — the authorizing session", () => {
 		expect(deps.lane.markJournal).toHaveBeenCalledWith("j1", { stage: "failed" }, sessionEnded)
 	})
 
+	test("the session ending while a reused build resolves its account: no send, failed/session_ended", async () => {
+		const isFenceLive = vi.fn(() => true)
+		const { executor, deps, proveAndSend } = makeHarness({
+			operationEstimateReuse: reusing(vi.fn(async () => entry())),
+			isFenceLive,
+			getAccountContract: vi.fn(async () => {
+				isFenceLive.mockReturnValue(false)
+				return {} as never
+			}),
+		})
+		ownSnapshot(deps)
+		await expect(
+			executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE, APPROVAL("est-1")),
+		).rejects.toBeInstanceOf(SessionEndedError)
+		expect(isFenceLive).toHaveBeenCalledWith(FENCE)
+		expect(proveAndSend).not.toHaveBeenCalled()
+		expect(deps.lane.markJournal).toHaveBeenCalledWith("j1", { stage: "failed" }, sessionEnded)
+	})
+
 	test("tryConsume refusing another profile's entry: the fresh build is never attempted, failed/session_ended", async () => {
 		const { executor, deps, proveAndSend, buildAndEstimateFolded } = makeHarness({
 			operationEstimateReuse: reusing(

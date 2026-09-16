@@ -517,6 +517,7 @@ describe("fallback chain: real binder → ViewExecutor standard path → real Tx
 			getActiveProfile: vi.fn(async () => ({ id: "p1", name: "P", type: "password" })),
 			captureExecutionFence: vi.fn(async () => ({ profileId: "p1", epoch: 0, session: 1 })),
 			assertFence: vi.fn(async () => {}),
+			isFenceLive: vi.fn(() => true),
 		}
 		const networkService = { getNetwork: vi.fn(async () => NETWORK), getNode: vi.fn(async () => node) }
 		const accountService = { getAccountContract: vi.fn(async () => account) }

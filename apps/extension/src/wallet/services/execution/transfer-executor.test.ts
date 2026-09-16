@@ -271,6 +271,23 @@ describe("TransferExecutor: the authorizing session", () => {
 		expect(order(deps.assertFence)).toBeLessThan(order(deps.getAccountContract))
 	})
 
+	test("a session that ends while the reused arm resolves its account: no send, failed/session_ended", async () => {
+		const isFenceLive = vi.fn(() => true)
+		const { executor, deps, proveAndSend } = makeHarness({
+			estimateReuse: { tryConsume: vi.fn(async () => snapshot()), stash: vi.fn() } as never,
+			isFenceLive,
+			getAccountContract: vi.fn(async () => {
+				isFenceLive.mockReturnValue(false)
+				return {} as never
+			}),
+		})
+		await expect(executor.execute(makeReq(), "est-1", fence)).rejects.toBeInstanceOf(SessionEndedError)
+
+		expect(isFenceLive).toHaveBeenCalledWith(fence)
+		expect(proveAndSend).not.toHaveBeenCalled()
+		expect(deps.transitionJournal).toHaveBeenCalledWith("j1", { stage: "failed" }, sessionEnded)
+	})
+
 	test("tryConsume refusing another profile's entry: the fresh build is never attempted, failed/session_ended", async () => {
 		const { executor, deps, proveAndSend } = makeHarness({
 			estimateReuse: {

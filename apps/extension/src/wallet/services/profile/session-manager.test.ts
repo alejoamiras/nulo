@@ -28,7 +28,7 @@ import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { SessionSecretBox, type SessionWrappedSecret } from "@nulo/wallet-crypto"
 import type { ConfigProp, IConfig } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
-import { EventHandler, type Lock } from "@nulo/wallet-core/utils"
+import { EventHandler, Lock } from "@nulo/wallet-core/utils"
 import type { ActiveSession, Profile, ProfileInfo, Session } from "./spec"
 import { SESSION_STORAGE_ROOT, SESSION_TTL_ALARM_NAME, SessionManager } from "./session-manager"
 
@@ -138,6 +138,7 @@ async function seedSession(api: FakeBrowserApi, session: Session): Promise<void>
 function setup(
 	initialTtl = 1_800_000,
 	initialStrict = false,
+	runExclusive?: <T>(fn: () => Promise<T>) => Promise<T>,
 ): {
 	api: FakeBrowserApi
 	config: ReturnType<typeof fakeConfig>
@@ -148,7 +149,7 @@ function setup(
 	api.reset()
 	const config = fakeConfig(initialTtl, initialStrict)
 	const emits: Array<ProfileInfo | undefined> = []
-	const manager = new SessionManager(config, new LoggerStore(config), (p) => emits.push(p), api)
+	const manager = new SessionManager(config, new LoggerStore(config), (p) => emits.push(p), api, runExclusive)
 	return { api, config, emits, manager }
 }
 
@@ -1147,10 +1148,10 @@ describe("SessionManager expiry deferral", () => {
 	const queuedOn = (lock: Lock) => (lock as unknown as { queue: unknown[] }).queue.length
 
 	/** An unlocked password session opened at `T0`, with a controllable deferral check registered. */
-	async function openAtT0(ttl = TTL) {
+	async function openAtT0(ttl = TTL, runExclusive?: <T>(fn: () => Promise<T>) => Promise<T>) {
 		vi.useFakeTimers({ toFake: ["Date"] })
 		vi.setSystemTime(T0)
-		const harness = setup(ttl)
+		const harness = setup(ttl, false, runExclusive)
 		const deferral = controllableCheck()
 		harness.manager.setExpiryDeferral(deferral.check)
 		await harness.manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)), dekBuffer())
@@ -1322,6 +1323,24 @@ describe("SessionManager expiry deferral", () => {
 		},
 	)
 
+	test("a refresh that lands while the check is pending keeps the session open when the check refuses", async () => {
+		const h = await openAtT0()
+		const lock = artifactLockOf(h.manager)
+		const ticket = await lock.enter()
+		vi.setSystemTime(T0 + TTL - 1)
+		const refresh = h.manager.refresh()
+		await until(() => queuedOn(lock) === 1)
+		vi.setSystemTime(T0 + TTL)
+		const read = h.manager.getActive()
+		await until(() => h.deferral.waiting() === 1)
+		lock.leave(ticket)
+		await refresh
+		h.deferral.answer(false)
+
+		expect(await read).toBe(activeOf(h.manager))
+		expect((await readRow(h.api))?.lockedAt).toBe(T0 + 2 * TTL)
+	})
+
 	test.each(["the TTL change", "the deferral"])(
 		"a TTL change and a deferral, %s first: the TTL change's deadline is what persists",
 		async (first) => {
@@ -1363,24 +1382,40 @@ describe("SessionManager expiry deferral", () => {
 		expect(await readRow(h.api)).toBeUndefined()
 	})
 
-	test("a read whose decision stood down for a TTL change not yet written decides again instead of reporting the wallet locked", async () => {
-		const h = await openAtT0()
-		const writes = recordRowWrites(h.api)
-		const lock = artifactLockOf(h.manager)
-		const ticket = await lock.enter()
+	test("a TTL change queued behind the facade lock a read holds is applied by that read, never closed by a second decision", async () => {
+		const facade = new Lock()
+		const runExclusive = <T>(fn: () => Promise<T>) => facade.withLock(fn)
+		const h = await openAtT0(TTL, runExclusive)
 		vi.setSystemTime(T0 + TTL)
-		const read = h.manager.getActive()
+		const read = runExclusive(() => h.manager.getActive())
 		await until(() => h.deferral.waiting() === 1)
 		h.config.setTtl(2 * TTL)
-		await until(() => queuedOn(lock) === 1)
+		h.deferral.answerLaterCallsWith(false)
 		h.deferral.answer(false)
-		await until(() => h.deferral.waiting() === 1)
-		h.deferral.answer(true)
-		await until(() => queuedOn(lock) === 2)
-		lock.leave(ticket)
 
 		expect(await read).toBe(activeOf(h.manager))
-		expect(writes.map((row) => row.lockedAt)).toEqual([T0 + 2 * TTL])
+		await runExclusive(async () => {})
+		expect(h.deferral.check).toHaveBeenCalledTimes(1)
+		expect(activeOf(h.manager)).toBeDefined()
+		expect((await readRow(h.api))?.lockedAt).toBe(T0 + 2 * TTL)
+		expect(await alarmTime()).toBe(T0 + 2 * TTL)
+	})
+
+	test("a deferral whose write fails closes the session, since nothing re-arms the alarm that fired", async () => {
+		const h = await openAtT0()
+		const deadline = T0 + TTL
+		h.emits.length = 0
+		vi.setSystemTime(deadline)
+		await fireAlarm(deadline)
+		await until(() => h.deferral.waiting() === 1)
+		const decision = activeOf(h.manager)?.expiryDecision
+		vi.spyOn(h.api.storage.session, "set").mockRejectedValueOnce(new Error("QUOTA_BYTES exceeded"))
+		h.deferral.answer(true)
+		await decision
+
+		expect(activeOf(h.manager)).toBeUndefined()
+		expect(h.emits).toEqual([undefined])
+		expect(await alarmTime()).toBeUndefined()
 	})
 
 	test("clearBearer racing a close never writes the row back", async () => {

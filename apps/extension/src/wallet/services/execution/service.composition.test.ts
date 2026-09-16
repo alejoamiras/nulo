@@ -557,6 +557,28 @@ describe("ExecutionService composition — work runs only while the session that
 		await expectEndedUnder(h, h.getJournalId(), "p1")
 	}, 15_000)
 
+	test("a transfer parked inside its account lookup, then a re-unlock of the same profile: refused before proving", async () => {
+		const h = await makeHarness()
+		let release: () => void = () => {}
+		const gate = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		let entered = false
+		h.getAccountContract.mockImplementationOnce(async () => {
+			entered = true
+			await gate
+			return { address: ACCOUNT }
+		})
+		const run = transfer(h)
+		await waitFor(() => entered)
+		h.session.setActive("p1")
+		release()
+
+		expect(await run).toBeInstanceOf(SessionEndedError)
+		expect(h.proveTx).not.toHaveBeenCalled()
+		await expectEndedUnder(h, h.getJournalId(), "p1")
+	}, 15_000)
+
 	test("a UI send with no fence captures one at entry, and a switch while it waits refuses it the same way", async () => {
 		const h = await makeHarness()
 		const lookup = parkNextNetworkLookup(h)

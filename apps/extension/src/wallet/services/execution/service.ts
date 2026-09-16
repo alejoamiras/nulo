@@ -433,9 +433,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 	/** Capture the {profileId, epoch, session} fence at execution AUTHORIZATION (before the
 	 *  slow prove) so `addTransaction` can reject a completing prove whose profile
-	 *  was deleted meanwhile (D13). Delegates to ProfileService so the active-read +
+	 *  was deleted meanwhile. Delegates to ProfileService so the active-read +
 	 *  reserved-check + epoch-capture are ATOMIC under the facade lock — composing
-	 *  requireActiveProfile + capture here would leave a TOCTOU (codex verify). */
+	 *  requireActiveProfile + capture here would leave a TOCTOU. */
 	private async captureFence(): Promise<ExecutionFence> {
 		return this.profileService.captureExecutionFence()
 	}
@@ -684,7 +684,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	 *  already awaited at this position in the pre-split loop). Without an
 	 *  `authorizedFence` (UI origin) the send arms capture INSIDE the arm, not
 	 *  at the batch top: read-only ops must not trip the unlock check, and the
-	 *  capture still precedes the prove (D13). */
+	 *  capture still precedes the prove. */
 	private async dispatchOperation(
 		operation: Operation,
 		origin: LocalTxOrigin,

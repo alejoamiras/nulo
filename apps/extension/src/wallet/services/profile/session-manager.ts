@@ -83,6 +83,9 @@ const MAX_EXPIRY_DEFERRAL_MS = 10 * 60_000
 /** How far one deferral moves the deadline, capped again by the TTL. */
 const EXPIRY_DEFERRAL_STEP_MS = 60_000
 
+/** The deadline and TTL revision a snapshot-based write was decided on. */
+type CommitExpectation = { lockedAt: number | undefined; configRev: number }
+
 /** Callback the facade passes to `restore()` so SessionManager can fetch
  *  the profile named in the persisted session without reaching into
  *  `ProfileRepository` directly — keeps the dependency arrow one-way
@@ -217,7 +220,7 @@ export class SessionManager {
 		// Decide on the OBSERVED session: this runs off the facade lock (getActive is reached both
 		// inside and outside it), and a concurrent open may replace the session meanwhile.
 		await this.expireOrDefer(active)
-		// A decision stands down only when someone else moved the deadline or the TTL, so the same
+		// A decision leaves the session open only with a deadline it moved or found moved, so the
 		// session is read again rather than reported locked.
 		return this.activeSession === active ? this.getActive() : undefined
 	}
@@ -785,21 +788,7 @@ export class SessionManager {
 				// changed the active session (e.g. bumped `since`, or closed it)
 				// while we waited for the lock.
 				const active = this.activeSession
-				if (!active) return
-				if (newTtl !== 0 && active.session.since + newTtl <= Date.now()) {
-					// New TTL has already elapsed since `since` — lock now,
-					// don't schedule an already-overdue alarm.
-					this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session TTL shortened past elapsed window; locking immediately")
-					await this.close()
-					return
-				}
-				await this.commitSession(active, {
-					mutate: ({ session: row }) => {
-						// `lockedAt: undefined` is dropped by JSON.stringify on
-						// persist, matching the no-TTL write in `open()`.
-						row.lockedAt = newTtl === 0 ? undefined : row.since + newTtl
-					},
-				})
+				if (active) await this.applyTtl(active, newTtl)
 			})
 		} catch (error) {
 			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to apply TTL change", error)
@@ -857,7 +846,7 @@ export class SessionManager {
 	 */
 	private async commitSession(
 		session: ActiveSession,
-		{ mutate, expect }: { mutate: (session: ActiveSession) => void; expect?: { lockedAt: number | undefined; configRev: number } },
+		{ mutate, expect }: { mutate: (session: ActiveSession) => void; expect?: CommitExpectation },
 	): Promise<void> {
 		await this.artifactLock.withLock(async () => {
 			if (this.activeSession !== session) return
@@ -885,18 +874,26 @@ export class SessionManager {
 
 	/**
 	 * Extend an expired session by one step while approved sends are in flight and its budget lasts;
-	 * otherwise close it. The deadline and the TTL revision are read before the check is awaited, and
-	 * neither the extension nor the close happens if either moved meanwhile: whoever moved them had
-	 * fresher information. The budget anchors on the first deferred deadline and nothing refills it.
+	 * otherwise close it. The deadline and the TTL revision are read before the check is awaited: a
+	 * deadline moved meanwhile stands the decision down, and a TTL changed meanwhile is applied here,
+	 * because its writer may be queued behind the facade lock this decision's caller holds. A failed
+	 * write closes the session, since nothing re-arms the alarm that fired. The budget anchors on the
+	 * first deferred deadline and nothing refills it.
 	 */
 	private async decideExpiry(session: ActiveSession): Promise<void> {
 		const lockedAt = session.session.lockedAt
 		const configRev = this.configRev
 		const budgetEnd = session.deferBudgetEnd ?? this.deriveLockedAt(session.session) + Math.min(this.sessionTtl, MAX_EXPIRY_DEFERRAL_MS)
 		const step = Math.min(EXPIRY_DEFERRAL_STEP_MS, this.sessionTtl)
-		if (await this.hasWorkToFinish(session)) {
+		const hasWork = await this.hasWorkToFinish(session)
+		if (session.session.lockedAt !== lockedAt) return
+		try {
+			if (this.configRev !== configRev) {
+				await this.applyTtl(session, this.sessionTtl, { lockedAt, configRev: this.configRev })
+				return
+			}
 			const now = Date.now()
-			if (now < budgetEnd) {
+			if (hasWork && now < budgetEnd) {
 				await this.commitSession(session, {
 					expect: { lockedAt, configRev },
 					mutate: (current) => {
@@ -906,9 +903,27 @@ export class SessionManager {
 				})
 				return
 			}
+		} catch (error) {
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to persist an expiry decision; locking", error)
 		}
-		if (this.activeSession !== session || session.session.lockedAt !== lockedAt || this.configRev !== configRev) return
 		await this.close(session)
+	}
+
+	/** Applies `ttl` to a live session: a `ttl` already elapsed since `since` closes it rather than
+	 *  arming an overdue alarm; otherwise its deadline becomes `since + ttl`, or none for 0. */
+	private async applyTtl(session: ActiveSession, ttl: number, expect?: CommitExpectation): Promise<void> {
+		if (ttl !== 0 && session.session.since + ttl <= Date.now()) {
+			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session TTL already elapsed; locking immediately")
+			await this.close(session)
+			return
+		}
+		await this.commitSession(session, {
+			expect,
+			mutate: ({ session: row }) => {
+				// `lockedAt: undefined` is dropped by JSON.stringify on persist, matching the no-TTL write in `open()`.
+				row.lockedAt = ttl === 0 ? undefined : row.since + ttl
+			},
+		})
 	}
 
 	/** The deferral check's answer; no check registered, or a check that throws, answers false. */

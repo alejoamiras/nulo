@@ -114,3 +114,51 @@ found two survivors, and a test was added for each.
 
 The composition harness and a shared util changed too, so `bun --bun vitest run src/wallet src/utils
 src/stores` also ran: exit 0, 237 files passed, 2 skipped; 3328 tests passed.
+
+## Arc 1 codex loop
+
+Codex (GPT-6 Astra, effort `high`, static review of `c543c18d..423ce8a9`) was told not to run tests.
+
+### Round 1 — reject, six findings, all verified and accepted
+
+| # | Codex finding | Verified | Fix |
+|---|---|---|---|
+| 1 | High: `getAccountContract` reads the secret of whichever session is live, and nothing re-checks the fence after it. A lock and same-profile re-unlock during the lookup hands the build the successor session's keys; only the broadcast check stops it. | Yes. `AccountService.getAccountContract` → `getProfileSecret(profileId)` → `SessionManager.getSecret` compares the profile id only. | The builder resolves the account through `resolveAccount`, which runs `fenceChecks(…).assertLive()` after the lookup (both `buildStandard` and `buildNoFrom`). Both reuse arms (`transfer-executor`, `dapp-send-executor`) run the same check after their lookup. |
+| 2 | Medium: a deferral commit whose `session.set` rejects leaves the in-memory deadline advanced and no alarm, and `expireOrDefer` only logs. | Yes. `commitSession` mutates before it persists; the alarm that fired was the only one. | `decideExpiry` catches a failed write and closes the session. |
+| 3 | Medium: with the real facade lock, a TTL change during the check queues its writer behind the read that holds the lock. The decision stands down, `getActive` reads again, and the second decision takes the new revision with the old deadline, so a refusal closes the session the TTL change would have kept. | Yes. The unit test missed it: its manager had no facade serialization and its second answer was true. | The TTL writer's body became `applyTtl(session, ttl, expect?)`. A decision that sees the revision move applies the current TTL itself through `commitSession`, with `expect` so a writer that already committed wins. |
+| 4 | Low: `claim-helper.ts` interpolated `journalId` into an error message. | Yes. | Constant message, `{ journalId, error }` payload. |
+| 5 | Comment: a 28-line claim/cancel comment with provenance (reviewer, issue numbers, plan link); `(F-012 / Phase 5)` and `(codex verify)` tags. | Yes. | Condensed to the registration-before-await, controller continuity and transition-before-abort invariants; tags removed, with the two `(D13)` tags in comments this arc edited. |
+| 6 | Comment: `isApprovedSendInFlight`'s doc said `queued` "still awaits approval" and `submitting` is "out of the wallet's hands"; an approved request can sit at `queued`, and `submitting` is written before the last checks. | Yes. | Rewritten as the stages that hold an expiring session open, `queued` excluded approved or not. |
+
+Tests added: the builder pin (`test.each` over both entry points, the lookup flips `isFenceLive`), one
+test per reuse arm, one composition case (a transfer parked inside its account lookup, then a
+re-unlock of `p1`: `SessionEndedError`, never proved, `failed/session_ended` under `p1`), a deferral
+whose write rejects (alarm path: the session closes), and a refresh that commits while the check
+is pending followed by a refusal (the session stays open). The old "decides again" test became the
+facade-lock case codex described: a real `Lock` as `runExclusive`, both answers false, one check
+call, the read returns the session, and the row and alarm carry `T0 + 2·TTL` after the writer runs.
+
+Mutation checks (scratch scripts, restored after each run):
+
+| Mutation | Tests that failed |
+|---|---|
+| A failed write does not close | the failing-write case |
+| The TTL change stands down instead of applying | the facade-lock case; TTL change and deferral, TTL change first |
+| The reconcile commits without `expect` | TTL change and deferral, TTL change first (a second write) |
+| The reconcile's `expect` uses the snapshot revision | the facade-lock case |
+| No deadline re-check after the answer | none at first; the refresh-then-refusal case after it was added |
+| No identity re-check after the answer | none: `commitSession` and `close` both check identity, so the check was removed |
+| The builder helper skips the re-check | both builder pins |
+| `buildStandard` / `buildNoFrom` bypass the helper | the matching builder pin |
+| The transfer reuse arm skips the re-check | its executor test and the composition case |
+| The dApp reuse arm skips the re-check | its executor test |
+
+One residual, unchanged from before this arc: a TTL change that lands while a facade-locked
+operation is already under way, before that operation reaches `getActive`, bumps the revision
+before any decision snapshots it. The decision then works from the old deadline. Closing an expired
+session in that window is what the code did before the deferral existed.
+
+Gate: `bun --bun vitest run src/wallet src/utils src/stores` exit 0 (237 files passed, 2 skipped;
+3335 tests passed). `fast-path.test.ts` needed `isFenceLive` on its fake profile service.
+`bun run typecheck:all` exit 0; `bun run lint` exit 0 (30 warnings, all pre-existing elsewhere;
+complexity-baseline check OK).
