@@ -892,7 +892,7 @@ failure during the sweep does not reject the unlock; the handler returns synchro
 - `bun run typecheck:all && bun run lint`
 - Pass: all exit 0. Layers: typecheck · lint · unit · composition
 
-### Phase 4 — auto-lock deferral
+### Phase 4 — auto-lock deferral ✓
 
 `commitSession(session, { mutate, expect? })` as the single artifact-locked live-row writer:
 in-lock identity check for every caller, raw-`lockedAt` / `configRev` expectation for the deferral

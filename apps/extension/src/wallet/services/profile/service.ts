@@ -555,6 +555,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		return this.sessionManager.peekLiveSerial()
 	}
 
+	/** Registers the check an expired session consults before it auto-locks; in-process only. */
+	public setExpiryDeferral(predicate: (profileId: string) => Promise<boolean>): void {
+		this.sessionManager.setExpiryDeferral(predicate)
+	}
+
 	public async getProfiles(): Promise<ProfileInfo[]> {
 		await this.ensureInitialized()
 		// A tombstoned (deletion-pending) profile is ABSENT to every read (finding D).

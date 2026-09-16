@@ -167,6 +167,7 @@ async function makeHarness() {
 		},
 		fireChanged: () => profileChanged.invoke(live ? { id: live.profileId } : undefined),
 	}
+	let expiryDeferral: ((profileId: string) => Promise<boolean>) | undefined
 	collection.add(
 		svc(ProfileService.name, {
 			getActiveProfile: async () => (live ? { id: live.profileId } : undefined),
@@ -184,6 +185,9 @@ async function makeHarness() {
 				live.profileId === fence.profileId &&
 				deletionState.isCurrent(fence.profileId, fence.epoch),
 			peekLiveSerial: () => live?.serial,
+			setExpiryDeferral: (predicate: (profileId: string) => Promise<boolean>) => {
+				expiryDeferral = predicate
+			},
 			onActiveProfileChanged: profileChanged,
 		}),
 	)
@@ -285,6 +289,7 @@ async function makeHarness() {
 		proveTx,
 		parkJournalWrite,
 		lane: (service as unknown as { lane: ExecutionLane }).lane,
+		expiryDeferral: () => expiryDeferral,
 	}
 }
 
@@ -819,6 +824,30 @@ describe("ExecutionService composition — a session change sweeps the work of t
 		expect(await run).toBeInstanceOf(SessionEndedError)
 		await expectEndedUnder(h, h.getJournalId(), "p1")
 		expect(h.sendTx).not.toHaveBeenCalled()
+	}, 15_000)
+})
+
+describe("ExecutionService composition — the auto-lock deferral", () => {
+	test("init registers it over the real journal: an approved send defers its own profile's lock until it settles", async () => {
+		const h = await makeHarness()
+		const shouldDefer = h.expiryDeferral()
+		await h.journal.createOperation({
+			kind: "dapp_execute",
+			origin: "dapp",
+			profileId: "p1",
+			sessionId: "sess-1",
+			initialStage: { stage: "queued" },
+		})
+		expect(await shouldDefer?.("p1")).toBe(false)
+
+		const run = transfer(h)
+		await waitFor(() => h.ctrl.entered && h.stages.includes("proving"))
+		expect(await shouldDefer?.("p1")).toBe(true)
+		expect(await shouldDefer?.("p2")).toBe(false)
+
+		h.ctrl.release()
+		expect(await run).toBe("0xhash")
+		expect(await shouldDefer?.("p1")).toBe(false)
 	}, 15_000)
 })
 

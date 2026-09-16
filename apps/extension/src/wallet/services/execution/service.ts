@@ -23,6 +23,7 @@ import { FpcService, FpcType } from "@/wallet/services/fpc/service"
 import { TransactionService, OriginType, type TransferType, type LocalTxOrigin, TxStatus } from "@/wallet/services/transaction/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import type { OperationContext } from "@/wallet/services/operation-journal/spec"
+import { isApprovedSendInFlight } from "@/utils/in-flight-send"
 import { DAPP_INTERACTION_SERVICE_NAME, type ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
 import { TaskService, type WrappedTask, ExecuteOperationContent } from "@/wallet/services/task/service"
 import type { ILogger } from "@/wallet/logger"
@@ -221,6 +222,13 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// Every session open and close fires this inside the session transition, so the sweep is
 		// started here and never awaited; it logs its own failures.
 		this.profileService.onActiveProfileChanged.add(() => void this.lane.abandonDeadSessions())
+		this.profileService.setExpiryDeferral((profileId) => this.hasApprovedSendsInFlight(profileId))
+	}
+
+	/** Whether `profileId` has a send the user approved that has not been broadcast yet. */
+	private async hasApprovedSendsInFlight(profileId: string): Promise<boolean> {
+		const operations = await this.operationJournal.getOperations({ profileId })
+		return operations.some(isApprovedSendInFlight)
 	}
 
 	/** Wiring only — every lambda reads `this.*` lazily at call time, so

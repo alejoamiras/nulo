@@ -17,12 +17,21 @@ import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
 /** Stages where a send is still deciding what to build, or has not yet been broadcast. */
 const IN_FLIGHT_STAGES: ReadonlySet<string> = new Set(["queued", "pending", "simulating", "proving", "submitting"])
 
+/** Stages of a send the user has approved and that has not been broadcast yet. */
+const APPROVED_UNBROADCAST_STAGES: ReadonlySet<string> = new Set(["pending", "simulating", "proving"])
+
 /** Operation kinds that actually send a transaction. */
 const SENDING_KINDS: ReadonlySet<string> = new Set(["transfer", "dapp_execute"])
 
 /** True when `op` is a send that has not reached a terminal stage. */
 export function isInFlightSend(op: Pick<OperationRecord, "kind" | "progress">): boolean {
 	return SENDING_KINDS.has(op.kind) && IN_FLIGHT_STAGES.has(op.progress?.stage)
+}
+
+/** True when `op` is a send the user approved that has not reached `submitting`: a `queued` request
+ *  still awaits approval, and from `submitting` the broadcast is out of the wallet's hands. */
+export function isApprovedSendInFlight(op: Pick<OperationRecord, "kind" | "progress">): boolean {
+	return SENDING_KINDS.has(op.kind) && APPROVED_UNBROADCAST_STAGES.has(op.progress?.stage)
 }
 
 /** The scope a block applies to — the one the user is looking at. */

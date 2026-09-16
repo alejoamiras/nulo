@@ -20,14 +20,16 @@ import {
 	type ImportedKeysDek,
 	type MasterSecretBytes,
 } from "@nulo/wallet-crypto"
-import { describe, expect, test, vi } from "vitest"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import { afterEach, describe, expect, test, vi } from "vitest"
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { SessionSecretBox, type SessionWrappedSecret } from "@nulo/wallet-crypto"
 import type { ConfigProp, IConfig } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
-import { EventHandler } from "@nulo/wallet-core/utils"
-import type { Profile, ProfileInfo, Session } from "./spec"
+import { EventHandler, type Lock } from "@nulo/wallet-core/utils"
+import type { ActiveSession, Profile, ProfileInfo, Session } from "./spec"
 import { SESSION_STORAGE_ROOT, SESSION_TTL_ALARM_NAME, SessionManager } from "./session-manager"
 
 /** Minimal `IConfig` stand-in. Tests drive `sessionTtl` /
@@ -1071,5 +1073,420 @@ describe("SessionManager", () => {
 			expect(persisted.bearer).toBeUndefined()
 			expect(await manager.getActive()).toBeDefined()
 		})
+	})
+})
+
+describe("SessionManager expiry deferral", () => {
+	const TTL = 5 * 60_000
+	const STEP = 60_000
+	const T0 = new Date("2026-09-16T10:00:00Z").getTime()
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	/** A deferral check the test answers call by call, or answers every later call at once. */
+	function controllableCheck() {
+		const waiting: Array<(answer: boolean | Error) => void> = []
+		let laterAnswer: boolean | undefined
+		const check = vi.fn(
+			(_profileId: string) =>
+				new Promise<boolean>((resolve, reject) => {
+					if (laterAnswer !== undefined) return resolve(laterAnswer)
+					waiting.push((answer) => (answer instanceof Error ? reject(answer) : resolve(answer)))
+				}),
+		)
+		return {
+			check,
+			waiting: () => waiting.length,
+			answer: (answer: boolean | Error) => waiting.shift()?.(answer),
+			answerLaterCallsWith: (answer: boolean) => {
+				laterAnswer = answer
+			},
+		}
+	}
+
+	/** Polls on real timers (only `Date` is faked here), failing instead of hanging. */
+	async function until(predicate: () => boolean | Promise<boolean>): Promise<void> {
+		for (let round = 0; round < 500; round++) {
+			if (await predicate()) return
+			await new Promise((resolve) => setTimeout(resolve, 0))
+		}
+		throw new Error("condition never held")
+	}
+
+	/** Every persisted session row, in write order. */
+	function recordRowWrites(api: FakeBrowserApi): Session[] {
+		const writes: Session[] = []
+		const storage = api.storage.session
+		const set = storage.set.bind(storage)
+		storage.set = async (items: Record<string, unknown>) => {
+			if (SESSION_STORAGE_ROOT in items) writes.push(JSON.parse(items[SESSION_STORAGE_ROOT] as string) as Session)
+			return set(items)
+		}
+		return writes
+	}
+
+	async function readRow(api: FakeBrowserApi): Promise<Session | undefined> {
+		const raw = (await api.storage.session.get(SESSION_STORAGE_ROOT))[SESSION_STORAGE_ROOT]
+		return typeof raw === "string" ? (JSON.parse(raw) as Session) : undefined
+	}
+
+	async function alarmTime(): Promise<number | undefined> {
+		const { fakeBrowser } = await import("@webext-core/fake-browser")
+		return ((await fakeBrowser.alarms.get(SESSION_TTL_ALARM_NAME)) as chrome.alarms.Alarm | undefined)?.scheduledTime
+	}
+
+	async function fireAlarm(scheduledTime: number): Promise<void> {
+		const { fakeBrowser } = await import("@webext-core/fake-browser")
+		await fakeBrowser.alarms.onAlarm.trigger({ name: SESSION_TTL_ALARM_NAME, scheduledTime } as chrome.alarms.Alarm)
+	}
+
+	const activeOf = (manager: SessionManager) => (manager as unknown as { activeSession?: ActiveSession }).activeSession
+	const artifactLockOf = (manager: SessionManager) => (manager as unknown as { artifactLock: Lock }).artifactLock
+	const queuedOn = (lock: Lock) => (lock as unknown as { queue: unknown[] }).queue.length
+
+	/** An unlocked password session opened at `T0`, with a controllable deferral check registered. */
+	async function openAtT0(ttl = TTL) {
+		vi.useFakeTimers({ toFake: ["Date"] })
+		vi.setSystemTime(T0)
+		const harness = setup(ttl)
+		const deferral = controllableCheck()
+		harness.manager.setExpiryDeferral(deferral.check)
+		await harness.manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)), dekBuffer())
+		return { ...harness, deferral }
+	}
+
+	/** Moves the clock to `at`, reads the session lazily and answers the check that read asks. */
+	async function readAt(
+		h: { manager: SessionManager; deferral: ReturnType<typeof controllableCheck> },
+		at: number,
+		answer: boolean | Error,
+	) {
+		vi.setSystemTime(at)
+		const read = h.manager.getActive()
+		await until(() => h.deferral.waiting() === 1)
+		h.deferral.answer(answer)
+		return read
+	}
+
+	test("an alarm with an approved send in flight extends the session one step and re-arms; a later refusal closes it", async () => {
+		const h = await openAtT0()
+		const deadline = T0 + TTL
+		h.emits.length = 0
+		vi.setSystemTime(deadline)
+		await fireAlarm(deadline)
+		await until(() => h.deferral.waiting() === 1)
+		const decision = activeOf(h.manager)?.expiryDecision
+		h.deferral.answer(true)
+		await decision
+
+		expect(h.deferral.check).toHaveBeenCalledWith("pid")
+		expect((await readRow(h.api))?.lockedAt).toBe(deadline + STEP)
+		expect(await alarmTime()).toBe(deadline + STEP)
+		expect(h.emits).toEqual([])
+
+		expect(await readAt(h, deadline + STEP, false)).toBeUndefined()
+		expect(h.emits).toEqual([undefined])
+		expect(await readRow(h.api)).toBeUndefined()
+	})
+
+	test("the lazy path defers too: a read after the deadline returns the session and extends it", async () => {
+		const h = await openAtT0()
+		const session = await readAt(h, T0 + TTL, true)
+		expect(session).toBe(activeOf(h.manager))
+		expect(session?.session.lockedAt).toBe(T0 + TTL + STEP)
+	})
+
+	test("a check that throws closes the session", async () => {
+		const h = await openAtT0()
+		expect(await readAt(h, T0 + TTL, new Error("journal unavailable"))).toBeUndefined()
+		expect(activeOf(h.manager)).toBeUndefined()
+	})
+
+	test("the alarm, two lazy reads and a refresh share one pending decision; the refresh applies after it", async () => {
+		const h = await openAtT0()
+		const writes = recordRowWrites(h.api)
+		const deadline = T0 + TTL
+		vi.setSystemTime(deadline)
+		await fireAlarm(deadline)
+		await until(() => h.deferral.waiting() === 1)
+		const reads = Promise.all([h.manager.getActive(), h.manager.getActive()])
+		const refresh = h.manager.refresh()
+		h.deferral.answer(true)
+		const [first, second] = await reads
+		await refresh
+
+		expect(h.deferral.check).toHaveBeenCalledTimes(1)
+		expect(first).toBeDefined()
+		expect(second).toBe(first)
+		expect(writes.map((row) => row.lockedAt)).toEqual([deadline + STEP, deadline + TTL])
+	})
+
+	test("a TTL change while the check is pending wins: the decision neither writes nor closes", async () => {
+		const h = await openAtT0()
+		const writes = recordRowWrites(h.api)
+		vi.setSystemTime(T0 + TTL)
+		const read = h.manager.getActive()
+		await until(() => h.deferral.waiting() === 1)
+		h.config.setTtl(2 * TTL)
+		await until(() => writes.length === 1)
+		h.deferral.answer(true)
+
+		expect(await read).toBe(activeOf(h.manager))
+		expect(writes.map((row) => row.lockedAt)).toEqual([T0 + 2 * TTL])
+		expect(await alarmTime()).toBe(T0 + 2 * TTL)
+	})
+
+	test.each([true, false])(
+		"turning the TTL off while the check is pending: no write and no close by the decision (check answers %s)",
+		async (answer) => {
+			const h = await openAtT0()
+			const writes = recordRowWrites(h.api)
+			h.emits.length = 0
+			vi.setSystemTime(T0 + TTL)
+			const read = h.manager.getActive()
+			await until(() => h.deferral.waiting() === 1)
+			h.config.setTtl(0)
+			await until(() => writes.length === 1)
+			h.deferral.answer(answer)
+
+			expect(await read).toBe(activeOf(h.manager))
+			expect(writes.map((row) => row.lockedAt)).toEqual([undefined])
+			expect(h.emits).toEqual([])
+		},
+	)
+
+	test.each(["the deferral", "clearBearer"])(
+		"clearBearer and a deferral contending for the artifact lock, %s first: the row ends extended and without a bearer",
+		async (first) => {
+			const h = await openAtT0()
+			const writes = recordRowWrites(h.api)
+			const lock = artifactLockOf(h.manager)
+			const ticket = await lock.enter()
+			vi.setSystemTime(T0 + TTL)
+			const read = h.manager.getActive()
+			await until(() => h.deferral.waiting() === 1)
+			let clear: Promise<void>
+			if (first === "the deferral") {
+				h.deferral.answer(true)
+				await until(() => queuedOn(lock) === 1)
+				clear = h.manager.clearBearer()
+			} else {
+				clear = h.manager.clearBearer()
+				await until(() => queuedOn(lock) === 1)
+				h.deferral.answer(true)
+			}
+			await until(() => queuedOn(lock) === 2)
+			lock.leave(ticket)
+			await Promise.all([read, clear])
+
+			const extended = T0 + TTL + STEP
+			const expected = first === "the deferral" ? [extended, extended] : [T0 + TTL, extended]
+			expect(writes.map((row) => row.lockedAt)).toEqual(expected)
+			expect(writes.map((row) => row.bearer === undefined)).toEqual(first === "the deferral" ? [false, true] : [true, true])
+			expect(await readRow(h.api)).toMatchObject({ lockedAt: extended })
+			expect((await readRow(h.api))?.bearer).toBeUndefined()
+		},
+	)
+
+	test.each(["the refresh", "the deferral"])(
+		"a refresh and a deferral, %s first: the refresh's deadline is what persists",
+		async (first) => {
+			const h = await openAtT0()
+			const writes = recordRowWrites(h.api)
+			const lock = artifactLockOf(h.manager)
+			const ticket = await lock.enter()
+			let refresh: Promise<void>
+			if (first === "the refresh") {
+				vi.setSystemTime(T0 + TTL - 1)
+				refresh = h.manager.refresh()
+				await until(() => queuedOn(lock) === 1)
+				vi.setSystemTime(T0 + TTL)
+			} else {
+				vi.setSystemTime(T0 + TTL)
+				refresh = Promise.resolve()
+			}
+			const read = h.manager.getActive()
+			await until(() => h.deferral.waiting() === 1)
+			h.deferral.answer(true)
+			await until(() => queuedOn(lock) === (first === "the refresh" ? 2 : 1))
+			if (first === "the deferral") refresh = h.manager.refresh()
+			lock.leave(ticket)
+			await Promise.all([read, refresh])
+
+			// The refresh stamps `since` inside the lock, after the clock reached the deadline.
+			const refreshed = T0 + TTL + TTL
+			expect(writes.map((row) => row.lockedAt)).toEqual(first === "the refresh" ? [refreshed] : [T0 + TTL + STEP, refreshed])
+			expect(await alarmTime()).toBe(refreshed)
+		},
+	)
+
+	test.each(["the TTL change", "the deferral"])(
+		"a TTL change and a deferral, %s first: the TTL change's deadline is what persists",
+		async (first) => {
+			const h = await openAtT0()
+			const writes = recordRowWrites(h.api)
+			const lock = artifactLockOf(h.manager)
+			const ticket = await lock.enter()
+			vi.setSystemTime(T0 + TTL)
+			const read = h.manager.getActive()
+			await until(() => h.deferral.waiting() === 1)
+			if (first === "the TTL change") h.config.setTtl(2 * TTL)
+			else h.deferral.answer(true)
+			await until(() => queuedOn(lock) === 1)
+			if (first === "the TTL change") h.deferral.answer(true)
+			else h.config.setTtl(2 * TTL)
+			await until(() => queuedOn(lock) === 2)
+			// A decision that stood down reads the session again, and that read may ask once more.
+			h.deferral.answerLaterCallsWith(true)
+			lock.leave(ticket)
+			await read
+
+			await until(() => writes.length === 1)
+			expect(writes.map((row) => row.lockedAt)).toEqual([T0 + 2 * TTL])
+			expect(await alarmTime()).toBe(T0 + 2 * TTL)
+		},
+	)
+
+	test("a lock while the check is pending: the decision writes nothing back once it answers", async () => {
+		const h = await openAtT0()
+		const writes = recordRowWrites(h.api)
+		vi.setSystemTime(T0 + TTL)
+		const read = h.manager.getActive()
+		await until(() => h.deferral.waiting() === 1)
+		await h.manager.close()
+		h.deferral.answer(true)
+
+		expect(await read).toBeUndefined()
+		expect(writes).toEqual([])
+		expect(await readRow(h.api)).toBeUndefined()
+	})
+
+	test("a read whose decision stood down for a TTL change not yet written decides again instead of reporting the wallet locked", async () => {
+		const h = await openAtT0()
+		const writes = recordRowWrites(h.api)
+		const lock = artifactLockOf(h.manager)
+		const ticket = await lock.enter()
+		vi.setSystemTime(T0 + TTL)
+		const read = h.manager.getActive()
+		await until(() => h.deferral.waiting() === 1)
+		h.config.setTtl(2 * TTL)
+		await until(() => queuedOn(lock) === 1)
+		h.deferral.answer(false)
+		await until(() => h.deferral.waiting() === 1)
+		h.deferral.answer(true)
+		await until(() => queuedOn(lock) === 2)
+		lock.leave(ticket)
+
+		expect(await read).toBe(activeOf(h.manager))
+		expect(writes.map((row) => row.lockedAt)).toEqual([T0 + 2 * TTL])
+	})
+
+	test("clearBearer racing a close never writes the row back", async () => {
+		const h = await openAtT0()
+		const lock = artifactLockOf(h.manager)
+		const ticket = await lock.enter()
+		const clear = h.manager.clearBearer()
+		await until(() => queuedOn(lock) === 1)
+		const close = h.manager.close()
+		await until(() => queuedOn(lock) === 2)
+		lock.leave(ticket)
+		await Promise.all([clear, close])
+
+		expect(await readRow(h.api)).toBeUndefined()
+	})
+
+	test("repeated deferrals stop at the budget, min(TTL, 10 min) past the first deferred deadline, then the session closes", async () => {
+		const h = await openAtT0()
+		const deadline = T0 + TTL
+		const budgetEnd = deadline + TTL
+		for (const at of [deadline, deadline + STEP, deadline + 2 * STEP, deadline + 3 * STEP]) {
+			expect(await readAt(h, at, true)).toBeDefined()
+		}
+		expect(await readAt(h, budgetEnd - STEP / 2, true)).toBeDefined()
+		expect((await readRow(h.api))?.lockedAt).toBe(budgetEnd)
+
+		expect(await readAt(h, budgetEnd, true)).toBeUndefined()
+	})
+
+	test("a refresh after a deferral does not refill the budget", async () => {
+		const h = await openAtT0()
+		const deadline = T0 + TTL
+		await readAt(h, deadline, true)
+		vi.setSystemTime(deadline + STEP / 2)
+		await h.manager.refresh()
+
+		expect(activeOf(h.manager)?.deferBudgetEnd).toBe(deadline + TTL)
+		expect(await readAt(h, deadline + STEP / 2 + TTL, true)).toBeUndefined()
+	})
+
+	test("the budget uses the TTL in force at the first deferral: a session opened with TTL 0 and given one later still defers", async () => {
+		const h = await openAtT0(0)
+		const writes = recordRowWrites(h.api)
+		h.config.setTtl(TTL)
+		await until(() => writes.length === 1)
+
+		expect(await readAt(h, T0 + TTL, true)).toBeDefined()
+		expect(activeOf(h.manager)?.deferBudgetEnd).toBe(T0 + 2 * TTL)
+	})
+
+	test("a restored session without a persisted lockedAt anchors its budget on since + TTL", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] })
+		vi.setSystemTime(T0)
+		const { api, manager } = setup(TTL)
+		const deferral = controllableCheck()
+		manager.setExpiryDeferral(deferral.check)
+		await seedSession(api, { profile: "pid", since: T0, bearer: await makeBearer("pid") })
+		await manager.restore(async () => passwordProfileFor("pid"))
+
+		const session = await readAt({ manager, deferral }, T0 + TTL, true)
+		expect(session?.deferBudgetEnd).toBe(T0 + 2 * TTL)
+		expect(session?.session.lockedAt).toBe(T0 + TTL + STEP)
+	})
+
+	test("a stale alarm is still ignored without asking the check", async () => {
+		const h = await openAtT0()
+		vi.setSystemTime(T0 + TTL)
+		await fireAlarm(T0 + 1)
+		await new Promise((resolve) => setTimeout(resolve, 0))
+
+		expect(h.deferral.check).not.toHaveBeenCalled()
+		expect(activeOf(h.manager)).toBeDefined()
+	})
+
+	test("with TTL 0 nothing expires, nothing is armed and the check is never asked", async () => {
+		const h = await openAtT0(0)
+		vi.setSystemTime(T0 + 24 * 60 * 60_000)
+
+		expect(await h.manager.getActive()).toBeDefined()
+		expect(await alarmTime()).toBeUndefined()
+		expect(h.deferral.check).not.toHaveBeenCalled()
+	})
+
+	test("restore still closes a session that expired while the worker was down, without asking the check", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] })
+		vi.setSystemTime(T0)
+		const { api, manager } = setup(TTL)
+		const deferral = controllableCheck()
+		manager.setExpiryDeferral(deferral.check)
+		await seedSession(api, { profile: "pid", since: T0 - 2 * TTL, lockedAt: T0 - TTL, bearer: await makeBearer("pid") })
+		await manager.restore(async () => passwordProfileFor("pid"))
+
+		expect(await manager.getActive()).toBeUndefined()
+		expect(await readRow(api)).toBeUndefined()
+		expect(deferral.check).not.toHaveBeenCalled()
+	})
+
+	test("the session row is written only by commitSession, open, and clearBearer's locked branch", () => {
+		const source = readFileSync(join(__dirname, "session-manager.ts"), "utf8").split("\n")
+		const writers: string[] = []
+		let member = ""
+		for (const line of source) {
+			const declaration = /^\t(?:public |private |protected )?(?:readonly )?(?:async )?(\w+)[(<=: ]/.exec(line)
+			if (declaration?.[1]) member = declaration[1]
+			if (line.includes("this.session.set(")) writers.push(line.includes("...persisted") ? `${member}:locked` : member)
+		}
+		expect(writers.sort()).toEqual(["clearBearer:locked", "commitSession", "open"])
 	})
 })
