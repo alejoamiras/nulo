@@ -8,7 +8,7 @@ code_review: off
 budget: no recon agents (the regression was bisected by hand); codex at xhigh; no /code-review (owner directive 2026-09-03)
 base: dev @ e01e416e
 branch: worktree-approval-card-decoding
-status: implemented 2026-09-15 (`ec297815` fix, `8c00f9ae` docs, `600c99ba` flat layout, `ec6089dd` / `b0fba3aa` / `baf85f93` codex rounds 1–3); all 5 phases ✓; codex loop STOPPED at the three-round rule (reject ×3, findings 8 → 3 → 2, all folded — the round-3 fixes are unreviewed); gates green on `baf85f93` (smoke 118, network subset 6, audit:vue 6000); branch pushed, no PR yet — two owner asks open (§ Assumptions)
+status: implemented 2026-09-15 (`ec297815` fix, `8c00f9ae` docs, `600c99ba` flat layout, `ec6089dd` / `b0fba3aa` / `baf85f93` codex rounds 1–3); all 5 phases ✓; codex loop CONVERGED at round 4 (reject ×3 with findings 8 → 3 → 2, all folded; round 4 approve, no new material findings); gates green on `baf85f93`, the last code commit (smoke 118, network subset 6, audit:vue 6000); branch pushed; PR into dev open — two owner asks open (§ Assumptions)
 ---
 
 # approval-card-decoding — read a dApp's call arguments on the approval card again
@@ -246,6 +246,11 @@ Asks (surfaced by codex round 1; current behaviour stays until the owner decides
   on registration alone; discovered authorizations list every raw row and every decoded array item
   (title) since the JSON view cannot show them; the architecture text no longer describes the
   removed amount scaling.
+- Codex round 3 (reject, 2 findings, folded): a wire `method` alias could outrank the decoded name
+  (the corroborated reading is now built from the decoded name, args and msg_sender flag only);
+  hover text prints addresses, fields and strings whole. Three-round stop reached and surfaced.
+- Owner `/goal` (2026-09-16) required a converged loop → codex round 4: approve, no new material
+  findings. Loop closed on `baf85f93`.
 
 ## Post-implementation
 

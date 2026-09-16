@@ -54,6 +54,14 @@ Comment audit: both applied (`ROLE_KIND` comment deleted; the `jsonView` prop co
 claims discovered overflow is "not shown" — those rows are uncapped). plan.md's Input bounds
 paragraph updated.
 
-**Stop.** Three rounds, all `reject`, findings 8 → 3 → 2 with the last two folded as ten-line
-fixes. The plan's post-implementation rule stops the loop here: the round-3 fixes are unreviewed by
-codex. Surfaced to the owner with the two open asks; a fourth round is the owner's call.
+**Three-round stop, then the owner's `/goal`.** Findings 8 → 3 → 2, the last two folded as
+ten-line fixes (`baf85f93`). The loop stopped per the plan's rule and was surfaced; the owner then
+set a `/goal` requiring a converged loop, which authorized a fourth round.
+
+## Round 4 — approve (converged)
+
+Resumed on the round-3 fix diff (`b0fba3aa..baf85f93`). Verdict, verbatim: "approve — Round-3 #1
+closed: `call-surface.ts:117` excludes the wire `method` alias. Round-3 #2 closed:
+`call-surface.ts:156` preserves complete nested values in hover text. Confidence: high. Both
+previous counterexamples now pass, including real ABI decoding. No new material findings or
+comment-audit nits." No code changed after `baf85f93`.
