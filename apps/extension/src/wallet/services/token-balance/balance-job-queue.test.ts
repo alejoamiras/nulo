@@ -43,12 +43,13 @@ function makeTaskService(): TaskMock {
 		return { id }
 	})
 	const startTask = vi.fn()
-	const completeTask = vi.fn().mockImplementation((id: string) => {
+	// Mirror the real TaskService: finishing an already-finished task throws, on every finish path.
+	const finish = (id: string) => {
+		if (finishedAt.get(id)) throw new Error(`Cannot finish already finished task ${id}`)
 		finishedAt.set(id, true)
-	})
-	const failTask = vi.fn().mockImplementation((id: string) => {
-		finishedAt.set(id, true)
-	})
+	}
+	const completeTask = vi.fn().mockImplementation(finish)
+	const failTask = vi.fn().mockImplementation(finish)
 	const getTaskSync = vi.fn().mockImplementation((id: string) => ({
 		id,
 		finishedAt: finishedAt.get(id) ? Date.now() : undefined,
@@ -56,11 +57,7 @@ function makeTaskService(): TaskMock {
 	// Real tasks exist by default; a profile-switch test flips this to model the
 	// wiped map (the pre-registered ids no longer resolve).
 	const hasTask = vi.fn().mockReturnValue(true)
-	const cancelTask = vi.fn().mockImplementation((id: string) => {
-		// Mirror the real TaskService: finishing an already-finished task throws.
-		if (finishedAt.get(id)) throw new Error(`Cannot finish already finished task ${id}`)
-		finishedAt.set(id, true)
-	})
+	const cancelTask = vi.fn().mockImplementation(finish)
 	return {
 		service: {
 			createNewTask,
@@ -777,28 +774,50 @@ describe("BalanceJobQueue — bounded transient retry", () => {
 		expect(calls).toHaveLength(1)
 	})
 
-	test("a stale transient completion (generation moved mid-flight) fails its task and schedules nothing", async () => {
+	test("reset() during an in-flight projection: its transient result schedules nothing, and the successor's work survives", async () => {
+		// A profile switch is a generation bump plus reset() while the old batch is still awaiting
+		// its projector; the old result then lands under the departed generation.
 		let generation = 0
 		const repo = makeRepo([raw(1)])
 		const tasks = makeTaskService()
-		const { projector, calls } = makeProjector(() => {
-			generation += 2
-			return [TRANSIENT]
-		})
+		const calls: TokenBalanceRaw[][] = []
+		let releaseFirst: (r: ProjectedBalance[]) => void = () => {}
+		const projector = {
+			project: async (balances: TokenBalanceRaw[]) => {
+				calls.push([...balances])
+				if (calls.length === 1) return new Promise<ProjectedBalance[]>((res) => (releaseFirst = res))
+				return [OK]
+			},
+		} as BalanceProjector
 		const queue = new BalanceJobQueue(new FakeBackgroundTicker(), repo, projector, tasks.service, {
 			getGeneration: () => generation,
 			onBalanceUpdated: vi.fn(),
 		})
 
 		queue.enqueue(raw(1))
-		await queue.tick()
-		expect(tasks.cancelTask).not.toHaveBeenCalled()
-		expect(tasks.failTask).toHaveBeenCalledTimes(1)
+		const oldTick = queue.tick()
+		await vi.waitFor(() => expect(calls).toHaveLength(1))
+		const oldTaskId = tasks.createNewTask.mock.results[0]?.value.id as string
+		generation = 1
+		queue.reset()
+		expect(tasks.cancelTask).toHaveBeenCalledWith(oldTaskId)
+		queue.enqueue(raw(1))
+
+		releaseFirst([TRANSIENT])
+		await oldTick
+		// The successor's batch ran under the new generation and completed its own task.
+		expect(calls).toHaveLength(2)
+		const newTaskId = tasks.createNewTask.mock.results[1]?.value.id as string
+		expect(newTaskId).not.toBe(oldTaskId)
+		expect(tasks.completeTask).toHaveBeenCalledWith(newTaskId)
+		expect(tasks.cancelTask).toHaveBeenCalledTimes(1)
+		expect((await repo.get(1))?.privateBalance).toBe("100")
 		expect((await repo.get(1))?.syncFailure).toBeUndefined()
 
+		// The departed batch's transient result parked no retry: nothing runs when the delay elapses.
 		elapse(RETRY_DELAY_MS)
 		await queue.tick()
-		expect(calls).toHaveLength(1)
+		expect(calls).toHaveLength(2)
 	})
 
 	test("an invalidated row is dropped at scheduling time and at drain time", async () => {

@@ -7,8 +7,9 @@
  * `stale anchor on first attempt — resynced, retrying once`. This spec drives that through the
  * real stack — playground dApp → wallet-sdk → service worker → offscreen PXE → node — and asserts:
  *
- *   1. HARD: every view issued across the reorg succeeds. The wallet survives an L1 reorg, whether
- *      the retry fired or the pre-op sync saw the prune first.
+ *   1. HARD: every view issued across the reorg succeeds, and so does one issued after the node's
+ *      prune has landed. The wallet survives an L1 reorg, whether the retry fired or the pre-op
+ *      sync saw the prune first.
  *   2. SOFT: the retry line is in the service worker's log trail. Landing the prune inside the
  *      sync→query window is a race the test cannot pin from outside (it is exactly the window the
  *      helper exists for), so the spec drives a burst of views per reorg and tries a few reorgs.
@@ -191,17 +192,20 @@ test.skipIf(!hasConfig || !reorgArmed)(
 			const since = Date.now()
 			const { tip, hash } = await reorgPastTip(node, rollupAddress)
 			step(`attempt ${attempt}: reorged L1 past the publish of L2 block ${tip}; driving ${VIEWS_PER_REORG} views`)
-			// The views are issued together and the offscreen serializes them, so while the node's
-			// prune lands there is nearly always a view between its sync and its anchor-bound query.
+			// The views are issued together and the offscreen serializes them, so a view can sit between
+			// its sync and its anchor-bound query while the node's prune lands; whether one does is the race.
 			const fromSeq = await snapshotResultSeq(page)
 			for (let i = 0; i < VIEWS_PER_REORG; i++) await clickByTestId(page, VIEW_BUTTON)
 			const results = await waitForPgResults(page, VIEW_METHOD, fromSeq, VIEWS_PER_REORG, 300_000)
 			expect(results).toHaveLength(VIEWS_PER_REORG)
 			for (const r of results) await assertOkOrDumpTrail(page, popup, r, `stale-anchor-canary:attempt-${attempt}`)
 			await waitForPrune(node, tip, hash, 120_000)
+			// The burst may have finished before the node processed the reorg; this view cannot have.
+			const postPrune = await callExpectingNoPopup(ctx, page, VIEW_METHOD, () => clickByTestId(page, VIEW_BUTTON), 180_000)
+			await assertOkOrDumpTrail(page, popup, postPrune, `stale-anchor-canary:attempt-${attempt}-post-prune`)
 			reproduced = await retryLinesSince(popup, since)
 			attempts.push(
-				`attempt ${attempt}: L2 block ${tip} pruned, ${VIEWS_PER_REORG}/${VIEWS_PER_REORG} views ok, ${reproduced.length} retry line(s)`,
+				`attempt ${attempt}: L2 block ${tip} pruned, ${VIEWS_PER_REORG}/${VIEWS_PER_REORG} views ok, post-prune view ok, ${reproduced.length} retry line(s)`,
 			)
 			step(attempts[attempts.length - 1] as string)
 		}
@@ -209,7 +213,7 @@ test.skipIf(!hasConfig || !reorgArmed)(
 
 		if (reproduced.length === 0) {
 			skip(
-				`stale-anchor recovery NOT reproduced through the extension: every view across ${attempts.length} reorg(s) succeeded, but the node's prune never landed inside a view's sync→query window (${attempts.join("; ")}). The real-PXE integration test (aztec-runtime stale-anchor.real.test.ts) remains the recovery evidence; report this canary as unmet.`,
+				`stale-anchor recovery NOT reproduced through the extension: every view across ${attempts.length} reorg(s) and after the prune succeeded, but no retry line was observed — the prune did not visibly land inside a view's sync→query window (${attempts.join("; ")}). The real-PXE integration test (aztec-runtime stale-anchor.real.test.ts) remains the recovery evidence; report this canary as unmet.`,
 			)
 		}
 		expect(reproduced.join("\n")).toContain(RETRY_LINE)

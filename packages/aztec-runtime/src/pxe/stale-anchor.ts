@@ -22,10 +22,11 @@ export function isStaleAnchorMessage(message: string): boolean {
 
 /**
  * Run `op` once; on a stale-anchor failure resync the PXE and run it exactly once more. A second
- * stale failure becomes `PxeStaleAnchorError` with a constant, wallet-authored message (the
- * upstream text rides `details.cause`, which stops at the operation-result boundary). Any other
- * failure — from `op` or from `sync()` itself — propagates unchanged, so the balance queue's
- * transient path and the client's key recovery never see a stale error dressed as something else.
+ * stale failure — from the retried `op`, or from `sync()` itself failing stale-shaped — becomes
+ * `PxeStaleAnchorError` with a constant, wallet-authored message (the upstream text rides
+ * `details.cause`, which stops at the operation-result boundary). Any non-stale failure, from `op`
+ * or from `sync()`, propagates unchanged, so the balance queue's transient path and the client's
+ * key recovery never see a stale error dressed as something else.
  *
  * Must run under the chain write guard the op already holds: the retry then re-executes against
  * the resynced anchor with no other write interleaved.

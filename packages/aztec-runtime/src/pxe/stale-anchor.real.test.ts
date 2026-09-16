@@ -15,8 +15,10 @@
  * Node environment + the server PXE entrypoint (LMDB on real disk): the production factory opens
  * an OPFS store, which only exists in a browser. The helper is store-agnostic.
  *
- * Needs the sandbox the e2e agent boots (`scripts/e2e/agent.sh` exports both URLs):
- *   ANVIL_URL=… AZTEC_NODE_URL=… bun run --cwd packages/aztec-runtime test src/pxe/stale-anchor.real.test.ts
+ * Needs the sandbox the e2e agent boots (`scripts/e2e/agent.sh` exports both URLs) AND the explicit
+ * arming flag — the reorg leaves that sandbox unable to mine again, so endpoints in the environment
+ * alone must never run it:
+ *   NULO_E2E_REORG=1 ANVIL_URL=… AZTEC_NODE_URL=… bun run --cwd packages/aztec-runtime test src/pxe/stale-anchor.real.test.ts
  */
 import { mkdirSync, rmSync } from "node:fs"
 import { homedir } from "node:os"
@@ -62,7 +64,9 @@ async function waitFor(what: string, predicate: () => Promise<boolean>, timeoutM
 	throw new Error(`timed out after ${timeoutMs}ms waiting for ${what}`)
 }
 
-describe.skipIf(!ANVIL_URL || !AZTEC_NODE_URL)("stale-anchor recovery against a real PXE and a reorged local network", () => {
+const ARMED = Boolean(ANVIL_URL && AZTEC_NODE_URL) && process.env.NULO_E2E_REORG === "1"
+
+describe.skipIf(!ARMED)("stale-anchor recovery against a real PXE and a reorged local network", () => {
 	let node: AztecNode
 	let pxe: PXE
 	let dataDirectory: string

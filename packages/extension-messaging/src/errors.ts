@@ -254,8 +254,8 @@ export class PxeStaleAnchorError extends WalletError {
 /**
  * A request named a contract instance or class the wallet's PXE does not hold. Raised while
  * resolving contracts — before proving, before any broadcast — so a dApp may register the contract
- * and retry the same call without risking a double submission. Each throw site freezes its own
- * message text; downstream matchers key on it.
+ * and retry the same call without risking a double submission. The message names the missing
+ * instance or class for the wallet's own logs; the dApp envelope replaces it with a constant.
  */
 export class ContractNotRegisteredError extends WalletError {
 	public static readonly CODE = "CONTRACT_NOT_REGISTERED"
