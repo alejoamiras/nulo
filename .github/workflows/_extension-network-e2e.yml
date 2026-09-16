@@ -166,10 +166,21 @@ jobs:
 
       - name: Start presto-server
         if: '${{ !inputs.disable_presto && !inputs.proverless }}'
+        env:
+          # The workflow token, renamed so it reaches ONLY the server process below and not
+          # every command in this step. Presto looks up the bb release asset's published
+          # SHA-256 on the GitHub API before downloading it, and an anonymous caller draws on
+          # a 60-request-per-hour budget shared by source address, which runners exhaust
+          # between themselves: the lookup then fails and the shard proves nothing
+          # (`Cannot verify bb v<x>: no digest available from GitHub API`). Read access to a
+          # public repository's releases is all this needs, so the default token suffices and
+          # a fork PR's read-only one works too. Presto refuses redirects on that request, so
+          # the credential reaches api.github.com and nowhere else.
+          PRESTO_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          # Both variables are scoped to the server PROCESS, never the job: RUST_LOG=info
+          # All three variables are scoped to the server PROCESS, never the job: RUST_LOG=info
           # carries the per-prove lines the assertion step greps; PRESTO_ALLOW_ALL=1
           # approves every browser origin because the wallet proves from
           # chrome-extension://<id>, an origin unknowable before Chrome loads the unpacked
@@ -179,7 +190,8 @@ jobs:
           # Never seed BB_BINARY_PATH: Presto's find_bb honours it before the versioned
           # cache, so a mismatched seed would prove every request with the wrong bb while
           # the log shows a download of the right one.
-          RUST_LOG=info PRESTO_ALLOW_ALL=1 nohup presto-server > /tmp/presto-server.log 2>&1 &
+          RUST_LOG=info PRESTO_ALLOW_ALL=1 GITHUB_TOKEN="${PRESTO_GITHUB_API_TOKEN}" \
+            nohup presto-server > /tmp/presto-server.log 2>&1 &
           echo "PRESTO_PID=$!" >> "$GITHUB_ENV"
 
       - name: Wait for presto-server ready (Layer 1 preflight)
