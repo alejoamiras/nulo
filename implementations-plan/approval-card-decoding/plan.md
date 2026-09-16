@@ -33,6 +33,14 @@ is either the wallet's own vocabulary, the contract interface the PXE holds, or 
 - **Owner sign-off (recorded)**: 2026-09-15, on the artifact's revision 2 offering "fold" vs "flat":
   > "Ok, let's do flat, nevermind. […] It's good enough!"
   The folded-headline variant was rejected; the flat layout shipped as `600c99ba`.
+- **Owner sign-off (recorded)**: 2026-09-16, on the "No wallet-added authorizations" line:
+  > "I think I'd remove the "No added contract-authorizations" label, if there is not authwit,
+  > since... why communicate something that is just not there?"
+  The `none-added` surface and its row are gone; an embedded-fee operation now renders no
+  authorization block, matching every other path that has nothing to list. Accepted consequence:
+  where a fee estimate did carry a discovered authorization on that path, the card previously
+  printed a contradicting "none" line and now prints nothing. Listing those entries instead would
+  be a new surface and needs its own sign-off.
 
 ## Scope
 

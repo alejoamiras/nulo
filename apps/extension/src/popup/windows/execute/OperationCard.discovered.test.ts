@@ -1,10 +1,10 @@
 /**
  * The card lists the private authorizations the wallet will sign for a dApp
  * `aztec_sendTx` — from the fee estimate for a standard operation, from the
- * authorization preview for a `default_entrypoint` one — and says so when an
- * embedded-fee standard operation adds none. `send_transaction` never lists any:
- * its confirm adds none. Each entry is a summary row; its arguments and inner
- * hash sit behind a toggle.
+ * authorization preview for a `default_entrypoint` one. An operation with nothing
+ * to list renders no block at all: `send_transaction`, whose confirm adds none, and
+ * an embedded-fee standard one, whose discovery is skipped. Each entry is a summary
+ * row; its arguments and inner hash sit behind a toggle.
  */
 
 import { mount } from "@vue/test-utils"
@@ -112,18 +112,17 @@ describe("OperationCard — discovered authorizations", () => {
 		).toBe(false)
 	})
 
-	test("an embedded-fee standard operation says the wallet adds none", () => {
+	test("an embedded-fee standard operation renders no authorization block at all", () => {
 		const op = sendTx({ calls: [], feePayer: "0xfpc" }, { feeSettings: { paymentMethod: { kind: "embedded" } } })
 		const w = mountCard(op, { feeEstimate: estimate([authwit("x")]) })
-		expect(w.find('[data-testid="execute-op-no-wallet-authwits"]').exists()).toBe(true)
 		expect(w.find('[data-testid="execute-op-discovered-authwits"]').exists()).toBe(false)
+		expect(w.find('[data-testid="execute-op-authwits-pending"]').exists()).toBe(false)
 	})
 
 	test("a default_entrypoint operation lists its preview, and shows the pending state while it runs", () => {
 		const op = sendTx({ calls: [] }, { executionMode: "default_entrypoint", feeSettings: { paymentMethod: { kind: "embedded" } } })
 		const listed = mountCard(op, { authwitPreview: { previewId: "pv", discoveredAuthwits: [authwit("n")] } })
 		expect(listed.findAll('[data-testid="execute-op-discovered-authwit"]')).toHaveLength(1)
-		expect(listed.find('[data-testid="execute-op-no-wallet-authwits"]').exists()).toBe(false)
 		const pending = mountCard(op, { isPreviewing: true })
 		expect(pending.find('[data-testid="execute-op-authwits-pending"]').exists()).toBe(true)
 	})
@@ -140,6 +139,5 @@ describe("OperationCard — discovered authorizations", () => {
 		}
 		const w = mountCard(op, { feeEstimate: estimate([authwit("s")]) })
 		expect(w.find('[data-testid="execute-op-discovered-authwits"]').exists()).toBe(false)
-		expect(w.find('[data-testid="execute-op-no-wallet-authwits"]').exists()).toBe(false)
 	})
 })

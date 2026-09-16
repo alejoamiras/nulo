@@ -134,19 +134,16 @@ const createAuthwitSurface = (m: unknown): CreateAuthwitSurface => {
 
 /** Which surface lists what the wallet will sign for this operation: the preview for a
  *  NO_FROM operation, the fee estimate for a standard one; `send_transaction` adds none
- *  at confirm, and an embedded-fee standard operation skips discovery there too. */
-type AuthwitSurface =
-	| { kind: "list"; authwits: readonly DiscoveredAuthwit[] }
-	| { kind: "none-added" }
-	| { kind: "pending" }
-	| { kind: "hidden" }
+ *  at confirm, and an embedded-fee standard operation skips discovery there too. Nothing is
+ *  rendered when there is nothing to list: an absent row must not read as a claim of absence. */
+type AuthwitSurface = { kind: "list"; authwits: readonly DiscoveredAuthwit[] } | { kind: "pending" } | { kind: "hidden" }
 const authwitSurface = (op: UIOperation): AuthwitSurface => {
 	if (op.kind !== "aztec_sendTx") return { kind: "hidden" }
 	if (isNoFrom(op as SendLikeUIOp)) {
 		if (props.authwitPreview) return { kind: "list", authwits: props.authwitPreview.discoveredAuthwits }
 		return props.isPreviewing ? { kind: "pending" } : { kind: "hidden" }
 	}
-	if (isEmbeddedFeePayment(op)) return { kind: "none-added" }
+	if (isEmbeddedFeePayment(op)) return { kind: "hidden" }
 	return props.feeEstimate?.discoveredAuthwits ? { kind: "list", authwits: props.feeEstimate.discoveredAuthwits } : { kind: "hidden" }
 }
 const authwits = computed(() => authwitSurface(props.op))
@@ -275,9 +272,6 @@ const toggleAuthwit = (a: DiscoveredAuthwit): void => {
 						</Flex>
 					</Flex>
 				</Flex>
-			</Flex>
-			<Flex v-else-if="authwits.kind === 'none-added'" :class="$style.prop">
-				<Text size="12" color="secondary" data-testid="execute-op-no-wallet-authwits">No wallet-added authorizations</Text>
 			</Flex>
 			<Flex v-else-if="authwits.kind === 'pending'" :class="$style.prop">
 				<Text size="12" color="secondary" data-testid="execute-op-authwits-pending">Checking authorizations…</Text>

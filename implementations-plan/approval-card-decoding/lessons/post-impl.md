@@ -65,3 +65,26 @@ closed: `call-surface.ts:117` excludes the wire `method` alias. Round-3 #2 close
 `call-surface.ts:156` preserves complete nested values in hover text. Confidence: high. Both
 previous counterexamples now pass, including real ABI decoding. No new material findings or
 comment-audit nits." No code changed after `baf85f93`.
+
+## Post-convergence change — the "none" line comes out (owner-requested)
+
+After the loop converged and CI went green, the owner asked for the
+"No wallet-added authorizations" row to go: "why communicate something that is just not there?"
+(quoted in plan.md § UI impact).
+
+The row came from `ad130aea` (#596) — the same unsigned-off B4 batch this plan exists to repair —
+and reached only ONE path: `isEmbeddedFeePayment(op)`. Every other zero-authorization path already
+rendered nothing (`{ kind: "hidden" }`, and a `list` of length 0 is `v-if`-ed out), so the row was
+an inconsistency, not a policy. Its own test pinned the sharp edge: it mounted an embedded-fee
+operation whose fee estimate DID carry a discovered authorization and asserted the card printed
+"No wallet-added authorizations" and listed nothing. Literally true (the wallet adds none on that
+path) but it reads as "this transaction has no authorizations", which nothing verified.
+
+`none-added` is gone from `AuthwitSurface`; the embedded-fee branch returns `hidden`. The test now
+asserts no authorization block renders at all. Accepted consequence, recorded in plan.md: a
+discovered authorization on that path is no longer contradicted, but it is still not listed —
+listing it would be a new surface needing its own sign-off.
+
+Gates re-run on the change: `bun run audit:vue` EXIT=0 (500 test files passed, 2 skipped; lint
+clean; build OK). The codex loop was NOT re-opened for it — a two-state deletion with its test
+rewritten, not new logic.
