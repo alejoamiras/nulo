@@ -708,4 +708,22 @@ describe("retryOnUnregistered", () => {
 		expect(op).toHaveBeenCalledTimes(1)
 		expect(session.reregisterContracts).not.toHaveBeenCalled()
 	})
+
+	it("rethrows the original when the wallet is replaced DURING a successful re-registration, before the retry", async () => {
+		const original = walletHandle()
+		const replacement = walletHandle()
+		const session = sessionHolding(original)
+		// A reconnect lands while reregisterContracts is awaiting: it resolves true, but the wallet is
+		// no longer the one the op was bound to, so the post-registration identity check must refuse.
+		session.reregisterContracts = vi.fn(async () => {
+			session.wallet.value = replacement
+			return true
+		})
+		const op = vi.fn(async () => {
+			throw unregistered()
+		})
+		await expect(retryOnUnregistered(session, original, op)).rejects.toThrow(/CONTRACT_NOT_REGISTERED/)
+		expect(op).toHaveBeenCalledTimes(1)
+		expect(session.reregisterContracts).toHaveBeenCalledTimes(1)
+	})
 })

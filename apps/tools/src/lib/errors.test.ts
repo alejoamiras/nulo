@@ -31,6 +31,14 @@ describe("wallet-error envelope", () => {
 		expect(normalizeError(extensionShape("SOMETHING_ELSE")).category).toBe("unknown")
 	})
 
+	it("a code that names an inherited object property does not resolve to a bogus category", () => {
+		for (const evil of ["toString", "constructor", "__proto__", "hasOwnProperty"]) {
+			const out = normalizeError(extensionShape(evil))
+			expect(out.category).toBe("unknown")
+			expect(typeof out.message).toBe("string")
+		}
+	})
+
 	it("does not decode a third level of nesting", () => {
 		const tripled = new Error(JSON.stringify(JSON.stringify(JSON.stringify({ data: { walletErrorCode: "PXE_STALE_ANCHOR" } }))))
 		expect(walletErrorCodeOf(tripled)).toBeUndefined()

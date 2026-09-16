@@ -41,10 +41,13 @@ const TOAST_COPY: Record<ErrorCategory, string> = {
 /** The two Nulo wallet-error codes this dApp acts on, mapped to their categories. The wallet's
  *  structured envelope is authoritative — a text classifier would misread these as `network` or
  *  `unknown`. Any other code (or none) falls through to the substring rules. */
-const ENVELOPE_CATEGORY: Record<string, ErrorCategory> = {
-	PXE_STALE_ANCHOR: "chain-desync",
-	CONTRACT_NOT_REGISTERED: "contract-not-registered",
-}
+// A Map, not a plain object: `walletErrorCode` is attacker-controlled text, and an object lookup on
+// `"toString"`/`"constructor"`/`"__proto__"` would resolve an inherited property and be mistaken for
+// a real category. Map.get returns undefined for any non-key.
+const ENVELOPE_CATEGORY = new Map<string, ErrorCategory>([
+	["PXE_STALE_ANCHOR", "chain-desync"],
+	["CONTRACT_NOT_REGISTERED", "contract-not-registered"],
+])
 
 function tryJsonParse(text: string): unknown {
 	try {
@@ -93,7 +96,7 @@ export function normalizeError(err: unknown): NormalizedError {
 	// The wallet's structured envelope wins over any text heuristic: the two codes it documents as
 	// dApp-actionable map straight to their categories; everything else falls through.
 	const code = walletErrorCodeOf(err)
-	const enveloped = code ? ENVELOPE_CATEGORY[code] : undefined
+	const enveloped = code ? ENVELOPE_CATEGORY.get(code) : undefined
 	if (enveloped) return { category: enveloped, message: TOAST_COPY[enveloped], raw: err }
 
 	const msg = err instanceof Error ? err.message : String(err)
