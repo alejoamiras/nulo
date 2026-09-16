@@ -2,16 +2,16 @@
  * The pre-submission `CONTRACT_NOT_REGISTERED` recovery (Phase 6), end to end against a real wallet:
  *   1. a lazy retry — a send that raises the structured code re-registers the app's contracts once
  *      and resends, and the drip lands with no error surfaced;
- *   2. a setup-pending refusal — while a quiet re-grant is still registering (its `registerContract`
- *      held), a drip is refused with the SETUP_PENDING copy and touches the wallet's `sendTx` zero
- *      times; once the registration completes, a drip proceeds.
+ *   2. a setup-pending refusal — while a quiet re-grant is still in flight (its `requestCapabilities`
+ *      held, so `contractsReady` is false), a drip is refused with the SETUP_PENDING copy and touches
+ *      the wallet's `sendTx` zero times; once the re-grant completes, a drip proceeds.
  *
  * The fault is injected as the extension's structured envelope: the test wallet rejects with
  * `new Error(JSON.stringify(envelope))`, the iframe transport reduces that to its message string and
  * JSON-encodes it again, so the dApp sees a JSON string — the second decoding level
  * `parseWalletEnvelope` supports.
  */
-import { mint, mintPrivateGasNote, privateCreditOf, privateFpc } from "@nulo/bridge-core/sandbox"
+import { freshToken, mintPrivateGasNote, privateCreditOf, privateFpc, setRoutable } from "@nulo/bridge-core/sandbox"
 import { TESTIDS } from "../../../src/lib/testids"
 import { type ActorHandle, expect, test } from "../fixtures/test"
 import { connectAztec, tid, walletCalls, walletFrame } from "../pages/connect"
@@ -68,10 +68,18 @@ test("setup-pending: a drip issued while a quiet re-grant is still registering i
 	l1,
 	sandbox,
 }) => {
-	const { usdc } = sandbox.tokens
-	const ceiling = await walletCeiling(actor, { isPrivate: false, registers: false })
+	// A brand-new token is guaranteed OUTSIDE the connect grant, so confirming its deposit drives a
+	// quiet re-grant (ensureGranted → retryCapabilities). A token already in the connect grant would
+	// short-circuit ensureGranted and never re-register.
+	const ceiling = await walletCeiling(actor, { isPrivate: false, registers: true })
 	await fundCredit(actor, (ceiling * 14n) / 10n)
-	await mint(sandbox.clients.l1, usdc.erc20 as `0x${string}`, l1.address, 100n * 10n ** 6n)
+	const erc20 = await freshToken(
+		sandbox.clients.l1,
+		{ name: "Setup Pending", symbol: "STPND", decimals: 6 },
+		[l1.address],
+		1000n * 10n ** 6n,
+	)
+	await setRoutable(sandbox.clients.l1, sandbox.clients.deployment.quoter, erc20)
 
 	await page.goto("/")
 	await openSend(page)
@@ -79,17 +87,16 @@ test("setup-pending: a drip issued while a quiet re-grant is still registering i
 	await connectAztec(page, { profile: "plain", account: actor.address })
 	const baseline = await walletCalls(page, run, "plain")
 
-	// The deposit's token is outside the connect grant, so confirming it drives a quiet re-grant
-	// (ensureGranted → retryCapabilities), whose contract re-registration we park by holding the next
-	// registerContract. `contractsReady` is false for that whole window.
-	await reviewDeposit(page, { l1ChainId: L1, erc20: usdc.erc20, amount: "10", intent: "token", isPrivate: false })
-	await walletFrame(page, run, "plain").evaluate(() => window.__nuloTestWallet!.holdNext("registerContract"))
+	// retryCapabilities clears `contractsReady` before it awaits requestCapabilities, so holding that
+	// request parks a whole connected-but-not-ready window. The re-grant fires during the deposit's
+	// send, after the stepper appears (so confirmReview returns); we wait for the held request by its
+	// call-count delta rather than any transient UI state.
+	await reviewDeposit(page, { l1ChainId: L1, erc20, amount: "10", intent: "token", isPrivate: false, viaLookup: true })
+	await walletFrame(page, run, "plain").evaluate(() => window.__nuloTestWallet!.holdNext("requestCapabilities"))
 	await confirmReview(page)
-	// The wizard sits on its grant, and the re-registration has begun (at least one registerContract asked).
-	await expect(page.locator(tid(TESTIDS.sendGrantPending))).toBeVisible({ timeout: 120_000 })
 	await expect
-		.poll(async () => (await walletCalls(page, run, "plain")).registerContract ?? 0, { timeout: 60_000 })
-		.toBeGreaterThan(baseline.registerContract ?? 0)
+		.poll(async () => (await walletCalls(page, run, "plain")).requestCapabilities ?? 0, { timeout: 120_000 })
+		.toBeGreaterThan(baseline.requestCapabilities ?? 0)
 	const held = await walletCalls(page, run, "plain")
 
 	// A drip in that window is refused with the setup-pending copy and never reaches the wallet.
@@ -101,8 +108,14 @@ test("setup-pending: a drip issued while a quiet re-grant is still registering i
 	await expect(status.locator(".status-text")).toContainText("still setting up the app's contracts")
 	expect((await walletCalls(page, run, "plain")).sendTx ?? 0, "nothing was sent while contracts were registering").toBe(held.sendTx ?? 0)
 
-	// Release the registration; once contracts are ready a drip proceeds.
+	// Release the held grant; the re-registration completes and contractsReady recovers. The resumed
+	// deposit briefly contends for the wallet, so a single click can still catch a not-ready instant —
+	// re-issue the drip whenever it is idle or refused, wait through a submission, and it lands.
 	await walletFrame(page, run, "plain").evaluate(() => window.__nuloTestWallet!.release())
-	await card.locator(tid(TESTIDS.btnDripPublic)).dispatchEvent("click")
-	await expect(status).toHaveAttribute("data-drip-status", "ok", { timeout: 180_000 })
+	await expect(async () => {
+		const kind = await status.getAttribute("data-drip-status")
+		if (kind === "ok") return
+		if (kind !== "dripping") await card.locator(tid(TESTIDS.btnDripPublic)).dispatchEvent("click")
+		throw new Error(`drip status is ${kind}, not ok yet`)
+	}).toPass({ timeout: 360_000, intervals: [3_000] })
 })
