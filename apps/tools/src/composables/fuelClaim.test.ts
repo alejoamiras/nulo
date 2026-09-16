@@ -186,10 +186,12 @@ describe("buildFuelClaimInteraction — simulate validates the REAL payload, not
 				return op()
 			}
 		}
-		const i = await buildFuelClaimInteraction(rec({}), deps({ aztec: { simulateTx }, retry }))
+		const sendTx = vi.fn(async () => ({ ok: true }))
+		const i = await buildFuelClaimInteraction(rec({}), deps({ aztec: { simulateTx, sendTx }, retry }))
 		await i.simulate()
 		expect(registrations).toBe(1)
 		expect(simulateTx).toHaveBeenCalledTimes(2)
+		expect(sendTx).not.toHaveBeenCalled()
 	})
 
 	it("PUBLIC: simulate() PROPAGATES a message-not-ready throw (so the gate can wait, not no-op past it)", async () => {
