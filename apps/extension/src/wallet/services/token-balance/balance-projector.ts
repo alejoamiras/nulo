@@ -22,15 +22,17 @@ import type { ProfileService } from "@/wallet/services/profile/service"
 import type { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { createViewTokenFn, TOKEN_FN_DESCRIPTORS } from "@/wallet/services/token/functions"
 import type { TokenService, Token } from "@/wallet/services/token/service"
+import { PxeStaleAnchorError } from "@nulo/extension-messaging/errors"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { ViewFn } from "@/wallet/utils/fn"
 import { rowMatchesToken } from "./balance-identity"
 import type { TokenBalanceRaw } from "./spec"
 
-/** Per-balance projection outcome. */
+/** Per-balance projection outcome. `transient` marks a failure the chain state itself may
+ *  clear shortly (the PXE's anchor lagging a reorg) — the queue retries those, bounded. */
 export type ProjectedBalance =
 	| { kind: "ok"; id: number; privateBalance: string; publicBalance: string }
-	| { kind: "error"; id: number; error: string }
+	| { kind: "error"; id: number; error: string; transient: boolean }
 
 /** A chunk-local token lookup: undefined when the active profile doesn't own the row's token. */
 type CachedToken = Awaited<ReturnType<TokenService["getTokenRaw"]>> | undefined
@@ -78,7 +80,7 @@ export class BalanceProjector {
 			// id must not trigger PXE/network work against the id-holder's contract.
 			if (!token || !rowMatchesToken(balance, token)) {
 				this.logger?.log(this.logSource, LogLevel.Error, `Unknown token #${balance.token}`)
-				results.push({ kind: "error", id: balance.id, error: `Unknown token #${balance.token}` })
+				results.push({ kind: "error", id: balance.id, error: `Unknown token #${balance.token}`, transient: false })
 				continue
 			}
 			resolvable.push({ balance, token })
@@ -154,8 +156,11 @@ export class BalanceProjector {
 			}))
 		} catch (err) {
 			const errorMessage = getErrorMessage(err)
+			// The stale-anchor class survives the offscreen port (typed payload), so this is the
+			// one failure the queue may retry: the offscreen already resynced and retried once.
+			const transient = err instanceof PxeStaleAnchorError
 			this.logger?.log(this.logSource, LogLevel.Error, `Failed to sync chunk: ${errorMessage}`)
-			return balances.map((b) => ({ kind: "error" as const, id: b.id, error: errorMessage }))
+			return balances.map((b) => ({ kind: "error" as const, id: b.id, error: errorMessage, transient }))
 		}
 	}
 

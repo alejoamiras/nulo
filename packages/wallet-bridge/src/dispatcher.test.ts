@@ -1,5 +1,11 @@
 import { describe, test, expect, beforeAll } from "vitest"
-import { CapabilityNotGrantedError, JobCancelledError, UserRejectedError } from "@nulo/extension-messaging/errors"
+import {
+	CapabilityNotGrantedError,
+	ContractNotRegisteredError,
+	JobCancelledError,
+	PxeStaleAnchorError,
+	UserRejectedError,
+} from "@nulo/extension-messaging/errors"
 import { ungrantedAccounts, unwrapOperationResult, WalletSdkDispatcher } from "./dispatcher"
 import type { Capability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
 import type { CapabilityResult } from "./dapp-interaction-protocol"
@@ -374,6 +380,23 @@ describe("unwrapOperationResult", () => {
 
 	test("failed throws plain Error with the inner error string", () => {
 		expect(() => unwrapOperationResult({ status: "failed", error: "boom" })).toThrowError(/boom/)
+	})
+
+	test("failed with a code re-materializes the typed subclass (stale anchor, unregistered contract)", () => {
+		const rethrown = (code: string, error: string) => {
+			try {
+				unwrapOperationResult({ status: "failed", error, code })
+				return undefined
+			} catch (e) {
+				return e
+			}
+		}
+		const stale = rethrown("PXE_STALE_ANCHOR", "proveTx: stale chain anchor persisted after a resync")
+		expect(stale).toBeInstanceOf(PxeStaleAnchorError)
+		expect((stale as PxeStaleAnchorError).message).toBe("proveTx: stale chain anchor persisted after a resync")
+		const unregistered = rethrown("CONTRACT_NOT_REGISTERED", "Contract not found")
+		expect(unregistered).toBeInstanceOf(ContractNotRegisteredError)
+		expect((unregistered as ContractNotRegisteredError).message).toBe("Contract not found")
 	})
 
 	test("skipped throws (batch sibling after a non-ok)", () => {

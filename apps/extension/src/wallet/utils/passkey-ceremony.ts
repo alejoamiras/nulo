@@ -54,7 +54,12 @@ export async function buildCreateOptions(userHandle: string, name: string): Prom
 			name: label,
 			displayName: label,
 		},
-		pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+		// ES256 first, RS256 as the fallback the spec asks for. Key material is the PRF output, never
+		// the credential's signature, so the algorithm an authenticator picks changes nothing else.
+		pubKeyCredParams: [
+			{ type: "public-key", alg: -7 },
+			{ type: "public-key", alg: -257 },
+		],
 		authenticatorSelection: {
 			residentKey: "required",
 			userVerification: "required",

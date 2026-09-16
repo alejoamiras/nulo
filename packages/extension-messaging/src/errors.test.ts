@@ -6,10 +6,15 @@ import {
 	RestoreTornError,
 	CapabilityNotGrantedError,
 	CLIENT_DISCONNECTED_MESSAGE,
+	ContractNotRegisteredError,
 	InvalidPasswordError,
 	isClientDisconnectRejection,
+	isReceiverGoneRejection,
+	RECEIVER_GONE_MESSAGE,
 	JobCancelledError,
 	ProfileIdConflictError,
+	PxeStaleAnchorError,
+	PxeStoreKeyMissingError,
 	remoteErrorFromResponseContent,
 	RpcDisconnectedError,
 	RpcTimeoutError,
@@ -108,6 +113,35 @@ describe("walletErrorFromPayload", () => {
 		expect((rebuilt.details as { existingProfileName?: string })?.existingProfileName).toBe("Main Profile")
 	})
 
+	test("PxeStaleAnchorError round-trips as its subclass with code + constant message; details ride the payload", () => {
+		const err = new PxeStaleAnchorError("proveTx: stale chain anchor persisted after a resync", {
+			op: "proveTx",
+			phase: "op",
+			cause: "Block hash 0xab not found when resolving query",
+		})
+		const rebuilt = walletErrorFromPayload(err.toPayload())
+		expect(rebuilt).toBeInstanceOf(PxeStaleAnchorError)
+		expect(rebuilt.code).toBe("PXE_STALE_ANCHOR")
+		expect(rebuilt.message).toBe("proveTx: stale chain anchor persisted after a resync")
+		expect(rebuilt.details).toMatchObject({ op: "proveTx", phase: "op" })
+	})
+
+	test("ContractNotRegisteredError round-trips as its subclass with the site-frozen message intact", () => {
+		const rebuilt = walletErrorFromPayload(new ContractNotRegisteredError("Contract artifact not found for class 0x0a").toPayload())
+		expect(rebuilt).toBeInstanceOf(ContractNotRegisteredError)
+		expect(rebuilt.code).toBe("CONTRACT_NOT_REGISTERED")
+		expect(rebuilt.message).toBe("Contract artifact not found for class 0x0a")
+	})
+
+	test("both new classes rebuild from a message-only payload (no details) — the operation-result channel shape", () => {
+		const stale = walletErrorFromPayload({ code: PxeStaleAnchorError.CODE, message: "m" })
+		expect(stale).toBeInstanceOf(PxeStaleAnchorError)
+		expect(stale.details).toBeUndefined()
+		const unregistered = walletErrorFromPayload({ code: ContractNotRegisteredError.CODE, message: "Contract not found" })
+		expect(unregistered).toBeInstanceOf(ContractNotRegisteredError)
+		expect(unregistered.details).toBeUndefined()
+	})
+
 	test("unknown code → base WalletError, code + message preserved (default arm)", () => {
 		const rebuilt = walletErrorFromPayload({ code: "SOME_FUTURE_CODE", message: "hi", details: { x: 1 } })
 		expect(rebuilt).toBeInstanceOf(WalletError)
@@ -151,9 +185,22 @@ describe("constructor identity ritual (owned by the WalletError base)", () => {
 			name: "ProfileIdConflictError",
 			code: ProfileIdConflictError.CODE,
 		},
+		{ err: new PxeStaleAnchorError("s"), ctor: PxeStaleAnchorError, name: "PxeStaleAnchorError", code: PxeStaleAnchorError.CODE },
+		{
+			err: new PxeStoreKeyMissingError("PXE_STORE_KEY_MISSING: p1"),
+			ctor: PxeStoreKeyMissingError,
+			name: "PxeStoreKeyMissingError",
+			code: PxeStoreKeyMissingError.CODE,
+		},
+		{
+			err: new ContractNotRegisteredError("Contract not found"),
+			ctor: ContractNotRegisteredError,
+			name: "ContractNotRegisteredError",
+			code: ContractNotRegisteredError.CODE,
+		},
 	]
 
-	test("all 11 subclasses: exact prototype, literal name, and code on direct construction", () => {
+	test("all 14 subclasses: exact prototype, literal name, and code on direct construction", () => {
 		for (const { err, ctor, name, code } of instances) {
 			expect(Object.getPrototypeOf(err)).toBe(ctor.prototype)
 			expect(err).toBeInstanceOf(WalletError)
@@ -162,7 +209,7 @@ describe("constructor identity ritual (owned by the WalletError base)", () => {
 		}
 	})
 
-	test("the 10 switch-covered codes round-trip to the exact subclass with name intact", () => {
+	test("the 13 switch-covered codes round-trip to the exact subclass with name intact", () => {
 		for (const { err, ctor, name } of instances) {
 			if (ctor === TooManyPendingError) continue // see BUG PIN below
 			const rebuilt = walletErrorFromPayload(err.toPayload())
@@ -224,5 +271,19 @@ describe("isClientDisconnectRejection", () => {
 		expect(isClientDisconnectRejection(CLIENT_DISCONNECTED_MESSAGE)).toBe(false)
 		expect(isClientDisconnectRejection(undefined)).toBe(false)
 		expect(isClientDisconnectRejection({ message: CLIENT_DISCONNECTED_MESSAGE })).toBe(false)
+	})
+})
+
+describe("isReceiverGoneRejection", () => {
+	test("matches Chrome's exact receiver-gone text", () => {
+		expect(isReceiverGoneRejection(new Error(RECEIVER_GONE_MESSAGE))).toBe(true)
+	})
+
+	test("does not match a prefix, another connection error, a non-Error, or a message-shaped object", () => {
+		expect(isReceiverGoneRejection(new Error("Could not establish connection."))).toBe(false)
+		expect(isReceiverGoneRejection(new Error(`${RECEIVER_GONE_MESSAGE} (tab 4)`))).toBe(false)
+		expect(isReceiverGoneRejection(new Error("Could not establish connection. The message port closed."))).toBe(false)
+		expect(isReceiverGoneRejection(RECEIVER_GONE_MESSAGE)).toBe(false)
+		expect(isReceiverGoneRejection({ message: RECEIVER_GONE_MESSAGE })).toBe(false)
 	})
 })

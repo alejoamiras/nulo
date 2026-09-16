@@ -45,13 +45,17 @@ describe("installConsoleForwarding", () => {
 		expect(typeof (self as unknown as Hooks).nuloOnerror).toBe("function")
 	})
 
-	test("a client-disconnect rejection logs at debug, anything else at error, both as error data", () => {
+	test("a client-disconnect rejection logs at debug and is prevented from reaching the console; anything else logs at error, unprevented", () => {
 		installConsoleForwarding("onboarding")
 		const disconnect = new Error(CLIENT_DISCONNECTED_MESSAGE)
 		const other = new Error("boom")
-		self.onunhandledrejection?.({ reason: disconnect } as PromiseRejectionEvent)
-		self.onunhandledrejection?.({ reason: other } as PromiseRejectionEvent)
+		const disconnectEvent = { reason: disconnect, preventDefault: vi.fn() } as unknown as PromiseRejectionEvent
+		const otherEvent = { reason: other, preventDefault: vi.fn() } as unknown as PromiseRejectionEvent
+		self.onunhandledrejection?.(disconnectEvent)
+		self.onunhandledrejection?.(otherEvent)
 		expect(log).toHaveBeenNthCalledWith(1, "ui", LogLevel.Debug, getErrorData(disconnect))
 		expect(log).toHaveBeenNthCalledWith(2, "ui", LogLevel.Error, getErrorData(other))
+		expect(disconnectEvent.preventDefault).toHaveBeenCalledTimes(1)
+		expect(otherEvent.preventDefault).not.toHaveBeenCalled()
 	})
 })

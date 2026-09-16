@@ -18,6 +18,7 @@ import { consoleMethods, LoggerStore, LogLevel } from "./logger"
 import { createWalletRuntime } from "./runtime"
 import { registerContentMessageRelay } from "./services/wallet-sdk/content-message-relay"
 import { PRICE_REFRESH_ALARM_NAME, PriceService } from "./services/price/service"
+import { isClientDisconnectRejection, isReceiverGoneRejection } from "@nulo/extension-messaging/errors"
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { openOrFocusOnboardingTab } from "./utils/onboarding-tab"
 
@@ -72,9 +73,13 @@ for (const [method, level] of consoleMethods) {
 }
 
 // Unhandled rejections. Routed through the logger so we can see them across
-// SW restarts via log rehydration.
+// SW restarts via log rehydration. A restart's disconnect cascade and a message
+// whose tab already navigated away are expected churn: kept in the ring at
+// debug and, via preventDefault(), out of the DevTools console.
 self.onunhandledrejection = (e: PromiseRejectionEvent) => {
-	logger.log("wallet", LogLevel.Error, getErrorData(e.reason))
+	const expected = isClientDisconnectRejection(e.reason) || isReceiverGoneRejection(e.reason)
+	if (expected) e.preventDefault()
+	logger.log("wallet", expected ? LogLevel.Debug : LogLevel.Error, getErrorData(e.reason))
 }
 
 logger.log("wallet", LogLevel.Info, "Runtime configured")

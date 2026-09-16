@@ -47,6 +47,7 @@ import { type Methods, PXE_SERVICE_NAME, type PxeEvents } from "./spec"
 import type { ProvePhaseSink } from "./prove-phase-sink"
 import { type PrivateEventFilter, PrivateEventFilterSchema } from "@aztec/aztec.js/wallet"
 import { NotesFilterSchema } from "./schemas"
+import { withStaleAnchorRetry } from "./stale-anchor"
 import {
 	type PublicScanTips,
 	type PublicTokenClassStatus,
@@ -491,14 +492,29 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 			const parsed = await TxExecutionRequest.schema.parseAsync(txRequest)
 			// One attempt at a time per runtime (we hold its write lock), so the prover's
 			// phase observer attributes every phase of this call to `proveId`. A JSON
-			// round-trip turns an omitted id into `null`; only a string correlates.
+			// round-trip turns an omitted id into `null`; only a string correlates. A stale-anchor
+			// resync-and-retry re-runs proveTx under the same `activeProve`, so both attempts stay
+			// attributed to this `proveId`.
 			runtime.activeProve = typeof proveId === "string" && proveId.length > 0 ? { proveId, seq: 0 } : undefined
 			try {
-				return await pxe.proveTx(parsed, { scopes: provedScopes, senderForTags: provedScopes[0] })
+				return await this.retryOnceOnStaleAnchor("proveTx", pxe, () =>
+					pxe.proveTx(parsed, { scopes: provedScopes, senderForTags: provedScopes[0] }),
+				)
 			} finally {
 				runtime.activeProve = undefined
 			}
 		})
+	}
+
+	/**
+	 * A stale anchor is retried once after a resync, inside the chain write guard the op holds.
+	 * Only the four chain-reading ops go through here; the retry re-runs the whole op (a second
+	 * full prove for `proveTx`) and never a broadcast — `sendTx` lives on the node client. The
+	 * replay is safe because the PXE awaits its job's staged-write abort before rethrowing the
+	 * op's error, so the retry starts from the store as it was before the first attempt.
+	 */
+	private retryOnceOnStaleAnchor<T>(label: string, pxe: PXE, op: () => Promise<T>): Promise<T> {
+		return withStaleAnchorRetry(label, pxe, op, (line) => this.logInfo(line))
 	}
 
 	public async simulateTx(
@@ -554,17 +570,20 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 			// could flip it and silently break overrides. Pass it
 			// explicitly when we know we need it.
 			const simScopes = await AccessScopesSchema.parseAsync(opts.scopes)
-			return await pxe.simulateTx(await TxExecutionRequest.schema.parseAsync(txRequest), {
-				simulatePublic: opts.simulatePublic,
-				skipTxValidation: opts.skipTxValidation,
-				skipFeeEnforcement: opts.skipFeeEnforcement,
-				overrides,
-				...(overrides ? { skipKernels: true } : {}),
-				scopes: simScopes,
-				// See proveTx: 5.0 requires the private-log sender or PXE throws "Sender for tags is not
-				// set" during private execution. First scope is the tx sender by our convention.
-				senderForTags: simScopes[0],
-			})
+			const request = await TxExecutionRequest.schema.parseAsync(txRequest)
+			return this.retryOnceOnStaleAnchor("simulateTx", pxe, () =>
+				pxe.simulateTx(request, {
+					simulatePublic: opts.simulatePublic,
+					skipTxValidation: opts.skipTxValidation,
+					skipFeeEnforcement: opts.skipFeeEnforcement,
+					overrides,
+					...(overrides ? { skipKernels: true } : {}),
+					scopes: simScopes,
+					// See proveTx: 5.0 requires the private-log sender or PXE throws "Sender for tags is
+					// not set" during private execution. First scope is the tx sender by our convention.
+					senderForTags: simScopes[0],
+				}),
+			)
 		})
 	}
 
@@ -587,20 +606,20 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 
 	public async executeUtility(network: NetworkInfo, call: FunctionCall, opts: ExecuteUtilityOpts): Promise<UtilityExecutionResult> {
 		return this.withPxeWrite("executeUtility", network, async (pxe) => {
-			return await pxe.executeUtility(await FunctionCall.schema.parseAsync(call), {
-				authwits: await z.array(AuthWitness.schema).optional().parseAsync(opts.authwits),
-				scopes: await AccessScopesSchema.parseAsync(opts.scopes),
-			})
+			const parsedCall = await FunctionCall.schema.parseAsync(call)
+			const authwits = await z.array(AuthWitness.schema).optional().parseAsync(opts.authwits)
+			const scopes = await AccessScopesSchema.parseAsync(opts.scopes)
+			return this.retryOnceOnStaleAnchor("executeUtility", pxe, () => pxe.executeUtility(parsedCall, { authwits, scopes }))
 		})
 	}
 
 	public async profileTx(network: NetworkInfo, txRequest: TxExecutionRequest, opts: ProfileTxOpts): Promise<TxProfileResult> {
 		return this.withPxeWrite("profileTx", network, async (pxe) => {
-			return await pxe.profileTx(await TxExecutionRequest.schema.parseAsync(txRequest), {
-				profileMode: opts.profileMode,
-				skipProofGeneration: opts.skipProofGeneration,
-				scopes: await AccessScopesSchema.parseAsync(opts.scopes),
-			})
+			const request = await TxExecutionRequest.schema.parseAsync(txRequest)
+			const scopes = await AccessScopesSchema.parseAsync(opts.scopes)
+			return this.retryOnceOnStaleAnchor("profileTx", pxe, () =>
+				pxe.profileTx(request, { profileMode: opts.profileMode, skipProofGeneration: opts.skipProofGeneration, scopes }),
+			)
 		})
 	}
 

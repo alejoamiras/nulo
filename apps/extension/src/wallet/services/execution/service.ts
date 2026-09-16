@@ -30,7 +30,7 @@ import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { classifyOperationCatch } from "./rpc-cancel"
 import { EstimateCancelRegistry } from "./estimate-cancel-registry"
-import { JobCancelledError } from "@nulo/extension-messaging/errors"
+import { ContractNotRegisteredError, JobCancelledError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
@@ -757,14 +757,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			providedInstance ??
 			(await this.pxeService.getContractInstance(networkInfoFrom(network), AztecAddress.fromStringUnsafe(op.address)))
 		if (!instance) {
-			throw new Error("Contract instance not found")
+			throw new ContractNotRegisteredError("Contract instance not found")
 		}
 
 		const providedArtifact = await ContractArtifactSchema.optional().parseAsync(op.artifact)
 		const artifact =
 			providedArtifact ?? (await this.pxeService.getContractArtifact(networkInfoFrom(network), instance.currentContractClassId))
 		if (!artifact) {
-			throw new Error("Contract artifact not found")
+			throw new ContractNotRegisteredError("Contract artifact not found")
 		}
 
 		const contractClass = await getContractClassFromArtifact(artifact)
@@ -903,7 +903,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		const classId = instance.currentContractClassId
 		const artifact = providedArtifact ?? (await this.pxeService.getContractArtifact(networkInfoFrom(network), classId))
 		if (!artifact) {
-			throw new Error(
+			throw new ContractNotRegisteredError(
 				`Contract artifact not found for class ${classId}. ` +
 					"The wallet only ships artifacts for the standard bundled contracts; " +
 					"pass the artifact in aztec_registerContract({ instance, artifact }) for custom contracts.",
@@ -947,14 +947,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			// first. Build the call from ABI truth; never trust dApp name/type/isStatic.
 			const authwitInstance = await this.pxeService.getContractInstance(networkInfoFrom(network), call.to)
 			if (!authwitInstance) {
-				throw new Error("Contract not found")
+				throw new ContractNotRegisteredError("Contract not found")
 			}
 			const authwitArtifact = await this.pxeService.getContractArtifact(
 				networkInfoFrom(network),
 				authwitInstance.currentContractClassId,
 			)
 			if (!authwitArtifact) {
-				throw new Error("Contract artifact not found")
+				throw new ContractNotRegisteredError("Contract artifact not found")
 			}
 			const authwitFn = await findFunctionBySelector(authwitArtifact, call.selector.toString())
 			if (!authwitFn) {

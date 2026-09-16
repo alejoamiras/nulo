@@ -94,6 +94,19 @@ export function isClientDisconnectRejection(reason: unknown): boolean {
 	return reason instanceof Error && reason.message === CLIENT_DISCONNECTED_MESSAGE
 }
 
+/**
+ * Chrome's exact rejection text when a `chrome.tabs.sendMessage` / `chrome.runtime.sendMessage`
+ * finds no listener: the tab navigated away, its content script is gone, the offscreen document
+ * closed. Matched exactly, not by prefix — Chrome reports other conditions under the same
+ * "Could not establish connection" opener, and those are actionable.
+ */
+export const RECEIVER_GONE_MESSAGE = "Could not establish connection. Receiving end does not exist."
+
+/** True for the expected rejection of a message whose receiver is already gone. */
+export function isReceiverGoneRejection(reason: unknown): boolean {
+	return reason instanceof Error && reason.message === RECEIVER_GONE_MESSAGE
+}
+
 /** User explicitly rejected a prompt (approval, passkey, etc). */
 export class UserRejectedError extends WalletError {
 	public static readonly CODE = "USER_REJECTED"
@@ -221,6 +234,49 @@ export class UnsupportedMethodError extends WalletError {
 				? methodName
 				: `${methodName.slice(0, UnsupportedMethodError.MAX_NAME_CHARS)}…`
 		return new UnsupportedMethodError(`Unsupported wallet method: ${shown}`)
+	}
+}
+
+/**
+ * A PXE operation kept failing on a chain anchor the node no longer agrees with — a reorg, or
+ * nodes behind one endpoint disagreeing on the tip — after one resync and retry. The message is
+ * wallet-authored and constant per operation so upstream node text never rides it; that text lives
+ * in `details.cause`, which stops at the operation-result boundary.
+ */
+export class PxeStaleAnchorError extends WalletError {
+	public static readonly CODE = "PXE_STALE_ANCHOR"
+
+	public constructor(message: string, details?: unknown) {
+		super(PxeStaleAnchorError.CODE, message, details, "PxeStaleAnchorError")
+	}
+}
+
+/**
+ * A request named a contract instance or class the wallet's PXE does not hold. Raised while
+ * resolving contracts — before proving, before any broadcast — so a dApp may register the contract
+ * and retry the same call without risking a double submission. The message names the missing
+ * instance or class for the wallet's own logs; the dApp envelope replaces it with a constant.
+ */
+export class ContractNotRegisteredError extends WalletError {
+	public static readonly CODE = "CONTRACT_NOT_REGISTERED"
+
+	public constructor(message: string, details?: unknown) {
+		super(ContractNotRegisteredError.CODE, message, details, "ContractNotRegisteredError")
+	}
+}
+
+/**
+ * The offscreen document holds no store key for the profile — a designed cold-start step, not an
+ * incident: the client derives the key, provisions it, and retries once. Only the chain-runtime
+ * bind throws this, BEFORE any PXE operation runs, so the client trusts the class rather than the
+ * message text: an error raised inside a PXE op that merely contains the marker can never trigger
+ * a re-provision.
+ */
+export class PxeStoreKeyMissingError extends WalletError {
+	public static readonly CODE = "PXE_STORE_KEY_MISSING"
+
+	public constructor(message: string, details?: unknown) {
+		super(PxeStoreKeyMissingError.CODE, message, details, "PxeStoreKeyMissingError")
 	}
 }
 
@@ -357,6 +413,9 @@ type KnownWalletErrorPayload =
 	| { code: typeof DuplicateWalletError.CODE; message: string; details?: { existingProfileName?: string } }
 	| { code: typeof DuplicateInitializationError.CODE; message: string; details?: unknown }
 	| { code: typeof UnsupportedMethodError.CODE; message: string; details?: unknown }
+	| { code: typeof PxeStaleAnchorError.CODE; message: string; details?: unknown }
+	| { code: typeof ContractNotRegisteredError.CODE; message: string; details?: unknown }
+	| { code: typeof PxeStoreKeyMissingError.CODE; message: string; details?: unknown }
 
 /**
  * Reconstruct a WalletError (concrete subclass if the code is recognised)
@@ -400,6 +459,12 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 			return new DuplicateInitializationError(known.message, known.details)
 		case UnsupportedMethodError.CODE:
 			return new UnsupportedMethodError(known.message, known.details)
+		case PxeStaleAnchorError.CODE:
+			return new PxeStaleAnchorError(known.message, known.details)
+		case ContractNotRegisteredError.CODE:
+			return new ContractNotRegisteredError(known.message, known.details)
+		case PxeStoreKeyMissingError.CODE:
+			return new PxeStoreKeyMissingError(known.message, known.details)
 		default:
 			return new WalletError(payload.code, payload.message, payload.details)
 	}

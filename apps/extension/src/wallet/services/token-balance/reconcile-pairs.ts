@@ -137,9 +137,11 @@ function classifyExistingRows<T extends ReconcileToken, R extends ReconcileRow>(
 		const key = pairKey(row.token, row.account)
 		if (!desired.has(key) || !live || !rowMatchesToken(row, live)) continue
 		seen.add(key)
-		// `syncFailure` set means the projector ran and failed — the queue owns
-		// that retry. Only a row with neither a timestamp nor a failure has no
-		// durable evidence the projection ever started.
+		// `syncFailure` set means the projector ran and failed; the next trigger (an
+		// explicit refresh, a tx, a token add, an account switch) refreshes it like any
+		// other row, and the queue's own retry of a transient failure is in-memory
+		// only. Reconcile re-enqueues just the rows with neither a timestamp nor a
+		// failure — no durable evidence the projection ever started.
 		if (row.updatedAt === 0 && row.syncFailure === undefined) staleTokens.push(row)
 	}
 	return { seen, staleTokens, staleIdentity }

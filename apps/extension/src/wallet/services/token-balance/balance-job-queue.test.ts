@@ -1,4 +1,4 @@
-import { describe, test, expect, vi } from "vitest"
+import { afterEach, beforeEach, describe, test, expect, vi } from "vitest"
 import { FakeBackgroundTicker } from "@nulo/wallet-core/testing"
 import type { TaskService } from "@/wallet/services/task/service"
 import { BalanceJobQueue } from "./balance-job-queue"
@@ -43,12 +43,13 @@ function makeTaskService(): TaskMock {
 		return { id }
 	})
 	const startTask = vi.fn()
-	const completeTask = vi.fn().mockImplementation((id: string) => {
+	// Mirror the real TaskService: finishing an already-finished task throws, on every finish path.
+	const finish = (id: string) => {
+		if (finishedAt.get(id)) throw new Error(`Cannot finish already finished task ${id}`)
 		finishedAt.set(id, true)
-	})
-	const failTask = vi.fn().mockImplementation((id: string) => {
-		finishedAt.set(id, true)
-	})
+	}
+	const completeTask = vi.fn().mockImplementation(finish)
+	const failTask = vi.fn().mockImplementation(finish)
 	const getTaskSync = vi.fn().mockImplementation((id: string) => ({
 		id,
 		finishedAt: finishedAt.get(id) ? Date.now() : undefined,
@@ -56,11 +57,7 @@ function makeTaskService(): TaskMock {
 	// Real tasks exist by default; a profile-switch test flips this to model the
 	// wiped map (the pre-registered ids no longer resolve).
 	const hasTask = vi.fn().mockReturnValue(true)
-	const cancelTask = vi.fn().mockImplementation((id: string) => {
-		// Mirror the real TaskService: finishing an already-finished task throws.
-		if (finishedAt.get(id)) throw new Error(`Cannot finish already finished task ${id}`)
-		finishedAt.set(id, true)
-	})
+	const cancelTask = vi.fn().mockImplementation(finish)
 	return {
 		service: {
 			createNewTask,
@@ -345,13 +342,14 @@ describe("BalanceJobQueue", () => {
 		const repo = makeRepo([original])
 		const tasks = makeTaskService()
 		const onBalanceUpdated = vi.fn()
-		const { projector } = makeProjector([{ kind: "error", id: 1, error: "sim failed" }])
+		const { projector } = makeProjector([{ kind: "error", id: 1, error: "sim failed", transient: false }])
 		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { getGeneration: () => 0, onBalanceUpdated })
 
 		queue.enqueue(raw(1))
 		await queue.tick()
 
 		expect(tasks.failTask).toHaveBeenCalledWith(expect.any(String), "sim failed")
+		expect(tasks.cancelTask).not.toHaveBeenCalled()
 		const row = await repo.get(1)
 		expect(row?.privateBalance).toBe("0") // unchanged
 		expect(row?.updatedAt).toBe(77) // unchanged — the value is NOT fresher
@@ -385,7 +383,7 @@ describe("BalanceJobQueue", () => {
 		const repo = makeRepo([]) // row already deleted
 		const tasks = makeTaskService()
 		const onBalanceUpdated = vi.fn()
-		const { projector } = makeProjector([{ kind: "error", id: 1, error: "sim failed" }])
+		const { projector } = makeProjector([{ kind: "error", id: 1, error: "sim failed", transient: false }])
 		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { getGeneration: () => 0, onBalanceUpdated })
 
 		queue.enqueue(raw(1))
@@ -429,7 +427,7 @@ describe("BalanceJobQueue", () => {
 		const invalidated = new Set<number>()
 		const { projector } = makeProjector(() => {
 			invalidated.add(1)
-			return [{ kind: "error" as const, id: 1, error: "sim failed" }]
+			return [{ kind: "error" as const, id: 1, error: "sim failed", transient: false }]
 		})
 		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, {
 			getGeneration: () => 0,
@@ -491,7 +489,7 @@ describe("BalanceJobQueue", () => {
 		const tasks = makeTaskService()
 		const onBalanceUpdated = vi.fn()
 		const { projector } = makeProjector([
-			{ kind: "error", id: 1, error: "Unknown token #1" },
+			{ kind: "error", id: 1, error: "Unknown token #1", transient: false },
 			{ kind: "ok", id: 2, privateBalance: "9", publicBalance: "0" },
 		])
 		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, {
@@ -514,7 +512,7 @@ describe("BalanceJobQueue", () => {
 		const repo = makeRepo([raw(1)])
 		const tasks = makeTaskService()
 		const onBalanceUpdated = vi.fn()
-		const { projector } = makeProjector([{ kind: "error", id: 1, error: "x".repeat(5000) }])
+		const { projector } = makeProjector([{ kind: "error", id: 1, error: "x".repeat(5000), transient: false }])
 		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { getGeneration: () => 0, onBalanceUpdated })
 
 		queue.enqueue(raw(1))
@@ -607,7 +605,7 @@ describe("BalanceJobQueue", () => {
 		let generation = 0
 		const { projector } = makeProjector(() => {
 			generation += 2
-			return [{ kind: "error" as const, id: 1, error: "sim failed" }]
+			return [{ kind: "error" as const, id: 1, error: "sim failed", transient: false }]
 		})
 		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, {
 			getGeneration: () => generation,
@@ -640,5 +638,210 @@ describe("BalanceJobQueue", () => {
 
 		expect((await repo.get(1))?.privateBalance).toBe("100")
 		expect(onBalanceUpdated).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("BalanceJobQueue — bounded transient retry", () => {
+	const TRANSIENT: ProjectedBalance = { kind: "error", id: 1, error: "stale chain anchor persisted after a resync", transient: true }
+	const OK: ProjectedBalance = { kind: "ok", id: 1, privateBalance: "100", publicBalance: "50" }
+	const RETRY_DELAY_MS = 5_000
+
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["Date"] })
+		vi.setSystemTime(1_000_000)
+	})
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	function elapse(ms: number) {
+		vi.setSystemTime(Date.now() + ms)
+	}
+
+	/** A projector that answers each call from `script` in order, repeating the last entry. */
+	function scripted(script: ProjectedBalance[][]) {
+		let i = 0
+		return makeProjector(() => script[Math.min(i++, script.length - 1)])
+	}
+
+	function setup(
+		script: ProjectedBalance[][],
+		callbacks: Partial<ConstructorParameters<typeof BalanceJobQueue>[4]> = {},
+		seeded: TokenBalanceRaw[] = [raw(1, { privateBalance: "0", updatedAt: 77 })],
+	) {
+		const repo = makeRepo(seeded)
+		const tasks = makeTaskService()
+		const onBalanceUpdated = vi.fn()
+		const { projector, calls } = scripted(script)
+		const queue = new BalanceJobQueue(new FakeBackgroundTicker(), repo, projector, tasks.service, {
+			getGeneration: () => 0,
+			onBalanceUpdated,
+			...callbacks,
+		})
+		return { repo, tasks, onBalanceUpdated, calls, queue }
+	}
+
+	test("a transient failure is cancelled (no failure record), retried once the delay elapses, and a success clears the budget", async () => {
+		const { repo, tasks, onBalanceUpdated, calls, queue } = setup([[TRANSIENT], [OK], [TRANSIENT]])
+
+		queue.enqueue(raw(1))
+		await queue.tick()
+
+		expect(tasks.cancelTask).toHaveBeenCalledTimes(1)
+		expect(tasks.failTask).not.toHaveBeenCalled()
+		expect((await repo.get(1))?.syncFailure).toBeUndefined()
+		expect(onBalanceUpdated).not.toHaveBeenCalled()
+		expect(queue.hasPendingTask(1)).toBe(false)
+
+		// Not due yet: a tick inside the delay does nothing.
+		elapse(RETRY_DELAY_MS - 1)
+		await queue.tick()
+		expect(calls).toHaveLength(1)
+
+		elapse(1)
+		await queue.tick()
+		expect(calls).toHaveLength(2)
+		expect((await repo.get(1))?.privateBalance).toBe("100")
+		expect(tasks.completeTask).toHaveBeenCalledTimes(1)
+		expect(onBalanceUpdated).toHaveBeenCalledTimes(1)
+
+		// The success reset the budget: a later transient failure is retried again, not persisted.
+		queue.enqueue(raw(1))
+		await queue.tick()
+		expect(tasks.cancelTask).toHaveBeenCalledTimes(2)
+		expect(tasks.failTask).not.toHaveBeenCalled()
+	})
+
+	test("the budget is two retries: the third transient failure persists a syncFailure like any other", async () => {
+		const { repo, tasks, onBalanceUpdated, calls, queue } = setup([[TRANSIENT]])
+
+		queue.enqueue(raw(1))
+		await queue.tick()
+		elapse(RETRY_DELAY_MS)
+		await queue.tick()
+		elapse(RETRY_DELAY_MS)
+		await queue.tick()
+
+		expect(calls).toHaveLength(3)
+		expect(tasks.cancelTask).toHaveBeenCalledTimes(2)
+		expect(tasks.failTask).toHaveBeenCalledTimes(1)
+		const row = await repo.get(1)
+		expect(row?.syncFailure?.message).toBe(TRANSIENT.kind === "error" ? TRANSIENT.error : "")
+		expect(row?.updatedAt).toBe(77)
+		expect(onBalanceUpdated).toHaveBeenCalledTimes(1)
+
+		// Terminal: nothing is scheduled behind the persisted failure.
+		elapse(RETRY_DELAY_MS)
+		await queue.tick()
+		expect(calls).toHaveLength(3)
+	})
+
+	test("an explicit enqueue during the delay supersedes the retry: one attempt, and nothing runs when the delay elapses", async () => {
+		const { tasks, calls, queue } = setup([[TRANSIENT], [OK]])
+
+		queue.enqueue(raw(1))
+		await queue.tick()
+		queue.enqueue(raw(1))
+		await queue.tick()
+		expect(calls).toHaveLength(2)
+		expect(tasks.completeTask).toHaveBeenCalledTimes(1)
+
+		elapse(RETRY_DELAY_MS)
+		await queue.tick()
+		expect(calls).toHaveLength(2)
+	})
+
+	test("reset() drops a pending retry with its budget", async () => {
+		const { calls, queue } = setup([[TRANSIENT]])
+
+		queue.enqueue(raw(1))
+		await queue.tick()
+		queue.reset()
+		elapse(RETRY_DELAY_MS)
+		await queue.tick()
+		expect(calls).toHaveLength(1)
+	})
+
+	test("a due retry from an older profile generation is dropped", async () => {
+		let generation = 0
+		const { calls, queue } = setup([[TRANSIENT]], { getGeneration: () => generation })
+
+		queue.enqueue(raw(1))
+		await queue.tick()
+		generation = 1
+		elapse(RETRY_DELAY_MS)
+		await queue.tick()
+		expect(calls).toHaveLength(1)
+	})
+
+	test("reset() during an in-flight projection: its transient result schedules nothing, and the successor's work survives", async () => {
+		// A profile switch is a generation bump plus reset() while the old batch is still awaiting
+		// its projector; the old result then lands under the departed generation.
+		let generation = 0
+		const repo = makeRepo([raw(1)])
+		const tasks = makeTaskService()
+		const calls: TokenBalanceRaw[][] = []
+		let releaseFirst: (r: ProjectedBalance[]) => void = () => {}
+		const projector = {
+			project: async (balances: TokenBalanceRaw[]) => {
+				calls.push([...balances])
+				if (calls.length === 1) return new Promise<ProjectedBalance[]>((res) => (releaseFirst = res))
+				return [OK]
+			},
+		} as BalanceProjector
+		const queue = new BalanceJobQueue(new FakeBackgroundTicker(), repo, projector, tasks.service, {
+			getGeneration: () => generation,
+			onBalanceUpdated: vi.fn(),
+		})
+
+		queue.enqueue(raw(1))
+		const oldTick = queue.tick()
+		await vi.waitFor(() => expect(calls).toHaveLength(1))
+		const oldTaskId = tasks.createNewTask.mock.results[0]?.value.id as string
+		generation = 1
+		queue.reset()
+		expect(tasks.cancelTask).toHaveBeenCalledWith(oldTaskId)
+		queue.enqueue(raw(1))
+
+		releaseFirst([TRANSIENT])
+		await oldTick
+		// The successor's batch ran under the new generation and completed its own task.
+		expect(calls).toHaveLength(2)
+		const newTaskId = tasks.createNewTask.mock.results[1]?.value.id as string
+		expect(newTaskId).not.toBe(oldTaskId)
+		expect(tasks.completeTask).toHaveBeenCalledWith(newTaskId)
+		expect(tasks.cancelTask).toHaveBeenCalledTimes(1)
+		expect((await repo.get(1))?.privateBalance).toBe("100")
+		expect((await repo.get(1))?.syncFailure).toBeUndefined()
+
+		// The departed batch's transient result parked no retry: nothing runs when the delay elapses.
+		elapse(RETRY_DELAY_MS)
+		await queue.tick()
+		expect(calls).toHaveLength(2)
+	})
+
+	test("an invalidated row is dropped at scheduling time and at drain time", async () => {
+		const invalidated = new Set<number>()
+		const { tasks, calls, queue } = setup([[TRANSIENT]], { isBalanceInvalidated: (id) => invalidated.has(id) })
+
+		// Drain time: invalidated while the retry waits.
+		queue.enqueue(raw(1))
+		await queue.tick()
+		expect(tasks.cancelTask).toHaveBeenCalledTimes(1)
+		invalidated.add(1)
+		elapse(RETRY_DELAY_MS)
+		await queue.tick()
+		expect(calls).toHaveLength(1)
+
+		// Scheduling time: already invalidated when the transient result lands — no retry, and the
+		// failure write is fenced like any other.
+		queue.enqueue(raw(1))
+		await queue.tick()
+		expect(calls).toHaveLength(2)
+		expect(tasks.cancelTask).toHaveBeenCalledTimes(1)
+		expect(tasks.failTask).toHaveBeenCalledTimes(1)
+		elapse(RETRY_DELAY_MS)
+		await queue.tick()
+		expect(calls).toHaveLength(2)
 	})
 })

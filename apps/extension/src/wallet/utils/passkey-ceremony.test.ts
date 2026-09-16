@@ -44,7 +44,10 @@ describe("buildCreateOptions", () => {
 		const opts = await buildCreateOptions(ID, "Alice")
 		expect(opts.rp).toEqual({ name: "Nulo", id: "passkey.nulo.sh" })
 		expect((opts.challenge as Uint8Array).byteLength).toBe(32)
-		expect(opts.pubKeyCredParams).toEqual([{ type: "public-key", alg: -7 }])
+		expect(opts.pubKeyCredParams).toEqual([
+			{ type: "public-key", alg: -7 },
+			{ type: "public-key", alg: -257 },
+		])
 		expect(opts.authenticatorSelection).toEqual({
 			residentKey: "required",
 			userVerification: "required",

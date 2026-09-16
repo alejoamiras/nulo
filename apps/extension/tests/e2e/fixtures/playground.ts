@@ -44,6 +44,23 @@ export async function setPgInput(page: Page, name: string, value: string): Promi
 	await replaceInputValue(page, `[data-testid="pg-input-${name}"]`, value)
 }
 
+/** Set a playground textarea (the contract-instance JSON inputs) through the prototype setter,
+ *  so the playground's `input` listener sees the value the way a typed one lands. */
+export async function setPgTextarea(page: Page, name: string, value: string): Promise<void> {
+	const selector = `[data-testid="pg-input-${name}"]`
+	await page.waitForSelector(selector, { visible: true, timeout: 5_000 })
+	await page.evaluate(
+		({ sel, val }: { sel: string; val: string }) => {
+			const el = document.querySelector<HTMLTextAreaElement>(sel)
+			if (!el) throw new Error(`setPgTextarea: ${sel} not present`)
+			const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set
+			setter?.call(el, val)
+			el.dispatchEvent(new Event("input", { bubbles: true }))
+		},
+		{ sel: selector, val: value },
+	)
+}
+
 /** Read the current `data-status` of the playground header pill. */
 export async function getPgStatus(page: Page): Promise<string> {
 	return page.evaluate(() => document.querySelector('[data-testid="pg-status"]')?.getAttribute("data-status") ?? "")

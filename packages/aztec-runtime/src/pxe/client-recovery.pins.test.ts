@@ -5,6 +5,7 @@
  * are zeroized on that exit path too.
  */
 import { beforeEach, describe, expect, test, vi } from "vitest"
+import { PxeStoreKeyMissingError } from "@nulo/extension-messaging/errors"
 import { ServiceClient } from "@nulo/extension-messaging/offscreen"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { PXE_STORE_KEY_MISSING, type NetworkInfo } from "./chain-runtime"
@@ -48,11 +49,11 @@ describe("missing-key recovery terminal-retry pin", () => {
 		const key = new Uint8Array(32).fill(7)
 		// 1: original send → marker. 2: provision → ok. 3: retry → marker AGAIN.
 		behaviors.push(() => {
-			throw new Error(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile p1`)
+			throw new PxeStoreKeyMissingError(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile p1`)
 		})
 		behaviors.push(() => undefined)
 		behaviors.push(() => {
-			throw new Error(`${PXE_STORE_KEY_MISSING}: still missing`)
+			throw new PxeStoreKeyMissingError(`${PXE_STORE_KEY_MISSING}: still missing`)
 		})
 		const client = new PxeServiceClientBase(noopLogger)
 		client.setGenerationProvider(async () => "gen-A")
@@ -62,5 +63,23 @@ describe("missing-key recovery terminal-retry pin", () => {
 		// Exactly three wire calls: send, provision, single retry — never a second recovery.
 		expect(wire.map((w) => w.method)).toEqual(["getSenders", "provisionChainStoreKey", "getSenders"])
 		expect([...key]).toEqual(new Array(32).fill(0))
+	})
+
+	test("the marker TEXT alone never re-provisions: an op-internal plain Error propagates untouched", async () => {
+		// The typed payload is attached only to errors the service throws itself, and the one
+		// legitimate site runs before any PXE op — so a node answer that merely contains the
+		// marker crosses the port as a plain Error. Trusting the text would let a hostile node
+		// compose the key re-provision with the stale-anchor retry.
+		const provider = vi.fn(async () => ({ key: new Uint8Array(32).fill(7), generation: "gen-A" }))
+		behaviors.push(() => {
+			throw new Error(`${PXE_STORE_KEY_MISSING}: text planted by an upstream error`)
+		})
+		const client = new PxeServiceClientBase(noopLogger)
+		client.setGenerationProvider(async () => "gen-A")
+		client.setStoreKeyProvider(provider)
+
+		await expect(client.getSenders(net)).rejects.toThrowError(`${PXE_STORE_KEY_MISSING}: text planted by an upstream error`)
+		expect(wire.map((w) => w.method)).toEqual(["getSenders"])
+		expect(provider).not.toHaveBeenCalled()
 	})
 })

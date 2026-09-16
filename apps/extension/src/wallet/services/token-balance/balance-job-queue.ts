@@ -35,6 +35,13 @@ import { boundSyncFailureMessage, type TokenBalanceRaw } from "./spec"
 
 const TICK_INTERVAL_MS = 1000
 const BATCH_SIZE = 12
+/** A transient projection failure is retried this many times, each after the delay, before it is
+ *  persisted as a failure like any other. Both live in memory only: a retry pending when the SW
+ *  dies is simply not made, and the row waits for its next trigger. */
+const MAX_TRANSIENT_RETRIES = 2
+const TRANSIENT_RETRY_DELAY_MS = 5_000
+
+type DelayedRetry = { at: number; balance: TokenBalanceRaw; gen: number }
 
 export type BalanceJobQueueCallbacks = {
 	/** Called after a successful projection writes a balance to storage. */
@@ -67,6 +74,12 @@ export type BalanceJobQueueCallbacks = {
 export class BalanceJobQueue {
 	private readonly queue = new Queue<number, TokenBalanceRaw>((x) => x.id)
 	private readonly pendingTasks = new Map<number, string>()
+	/** Transient-failure retry budget spent per balance id; cleared by a success or a terminal
+	 *  failure, never by an `enqueue` (an external refresh does not reset it). */
+	private readonly transientRetries = new Map<number, number>()
+	/** Retries waiting for their delay. `enqueue` is the only way into `queue`, so the drain in
+	 *  `tick` goes through it; an explicit `enqueue` for the same id supersedes the entry. */
+	private readonly retryDue = new Map<number, DelayedRetry>()
 	private tickerHandle?: TickerHandle
 
 	public constructor(
@@ -121,12 +134,16 @@ export class BalanceJobQueue {
 			// jam this reset exists to clear can never survive an error above.
 			this.queue.clear()
 			this.pendingTasks.clear()
+			this.retryDue.clear()
+			this.transientRetries.clear()
 		}
 	}
 
 	/** Enqueue a balance for refresh. Creates a TaskService record if
 	 *  no pending one exists for this id. Dedups via `priorityPass`. */
 	public enqueue(balance: TokenBalanceRaw): void {
+		// An external refresh supersedes a delayed retry: one attempt, not two.
+		this.retryDue.delete(balance.id)
 		if (!this.pendingTasks.has(balance.id)) {
 			const task = this.tasks.createNewTask(new BalanceUpdateContent(balance.id, balance.account))
 			this.pendingTasks.set(balance.id, task.id)
@@ -149,6 +166,7 @@ export class BalanceJobQueue {
 	 *  first-queued account's chain, max 12 per batch. Public for tests
 	 *  (the production adapter invokes it via the ticker subscription). */
 	public async tick(): Promise<void> {
+		this.enqueueDueRetries()
 		if (this.queue.length === 0) return
 		this.logger?.log(this.logSource, LogLevel.Debug, `Syncing ${this.queue.length} token balances`)
 		const start = Date.now()
@@ -166,6 +184,22 @@ export class BalanceJobQueue {
 		}
 		const end = Date.now()
 		this.logger?.log(this.logSource, LogLevel.Debug, `Token balances synced in ${end - start}ms`)
+	}
+
+	/** Move due retries into the queue. An entry from another profile generation, or for a row
+	 *  invalidated since it was scheduled, is dropped with its budget: nothing it would refresh
+	 *  still exists in this context. */
+	private enqueueDueRetries(): void {
+		const now = Date.now()
+		for (const [id, entry] of this.retryDue) {
+			if (entry.at > now) continue
+			this.retryDue.delete(id)
+			if (entry.gen !== this.callbacks.getGeneration() || this.callbacks.isBalanceInvalidated?.(id)) {
+				this.transientRetries.delete(id)
+				continue
+			}
+			this.enqueue(entry.balance)
+		}
 	}
 
 	/** Persist a failure record onto the LIVE row (re-read, never the batch's
@@ -214,7 +248,7 @@ export class BalanceJobQueue {
 				const taskId = owned.get(result.id)
 				if (!taskId) continue
 				if (result.kind === "error") {
-					await this.applyProjectedError(result, taskId, now, gen)
+					await this.applyProjectedError(result, taskId, batch, now, gen)
 				} else {
 					await this.applyProjectedOk(result, taskId, batch, now, gen)
 				}
@@ -254,15 +288,54 @@ export class BalanceJobQueue {
 	private async applyProjectedError(
 		result: Extract<ProjectedBalance, { kind: "error" }>,
 		taskId: string,
+		batch: TokenBalanceRaw[],
 		now: number,
 		gen: number,
 	): Promise<void> {
+		// A stale completion (profile switched mid-flight) fails its task like any other but
+		// touches neither retry map: `reset()` already cleared them for the departed context.
+		const current = gen === this.callbacks.getGeneration()
+		if (current && this.scheduleTransientRetry(result, taskId, batch, now, gen)) return
+		if (current) {
+			this.retryDue.delete(result.id)
+			this.transientRetries.delete(result.id)
+		}
 		this.tasks.failTask(taskId, result.error)
 		// Persist the failure onto the row (balances + updatedAt
 		// untouched — the last-known value keeps rendering). Without
 		// this write, "failed" and "still running" are identical in
 		// storage once the in-memory task record dies with the SW.
 		await this.writeSyncFailure(result.id, result.error, now, gen)
+	}
+
+	/** A transient failure with budget left ends this attempt as CANCELLED (no failure record —
+	 *  the row keeps rendering its last-known value) and parks a delayed retry. The abandoned
+	 *  task's pointer is released by the batch's cleanup, so the retry mints a fresh task. */
+	private scheduleTransientRetry(
+		result: Extract<ProjectedBalance, { kind: "error" }>,
+		taskId: string,
+		batch: TokenBalanceRaw[],
+		now: number,
+		gen: number,
+	): boolean {
+		if (!result.transient || this.callbacks.isBalanceInvalidated?.(result.id)) return false
+		const spent = this.transientRetries.get(result.id) ?? 0
+		if (spent >= MAX_TRANSIENT_RETRIES) return false
+		const balance = batch.find((b) => b.id === result.id)
+		if (!balance) return false
+		this.transientRetries.set(result.id, spent + 1)
+		try {
+			this.tasks.cancelTask(taskId)
+		} catch {
+			// Already finished (a concurrent reset cancelled it) — the record is terminal either way.
+		}
+		this.retryDue.set(result.id, { at: now + TRANSIENT_RETRY_DELAY_MS, balance, gen })
+		this.logger?.log(
+			this.logSource,
+			LogLevel.Info,
+			`Balance #${result.id}: transient failure, retry ${spent + 1}/${MAX_TRANSIENT_RETRIES} in ${TRANSIENT_RETRY_DELAY_MS}ms`,
+		)
+		return true
 	}
 
 	/** One successful projection's commit, in the frozen order: re-read → the
@@ -315,6 +388,8 @@ export class BalanceJobQueue {
 		}
 		await this.repo.set(updated)
 		this.tasks.completeTask(taskId)
+		this.retryDue.delete(result.id)
+		this.transientRetries.delete(result.id)
 		// Re-check AFTER the awaited write — same batch-abort hazard as the
 		// failure path's emit.
 		if (this.callbacks.isRowEmittable?.(current) === false) return
