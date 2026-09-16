@@ -1,14 +1,15 @@
 /**
- * Every `aztec_sendTx` call renders either a descriptor-verified transfer (with the sender
- * spelled out, even when the call names none) or its raw arguments under a warning. The real
- * `AddressDisplay` is mounted so the untruncated-address rule is asserted on the component that
- * would otherwise trim it.
+ * Every `aztec_sendTx` call renders the first reading that applies — the wallet's transfer/mint
+ * vocabulary, the ABI decode the parent fetched, or the raw fields behind a toggle — against
+ * arguments shaped exactly as dApps send them: 32-byte hex fields. The real `AddressDisplay` and
+ * `CallArguments` are mounted so trimming and the toggle are asserted on the components that do them.
  */
 
 import { flushPromises, mount } from "@vue/test-utils"
 import { describe, expect, test, vi } from "vitest"
 import AddressDisplay from "@/components/AddressDisplay.vue"
 import { trimAddress } from "@/utils/string"
+import type { TokenInfo } from "@/wallet/services/token/client"
 import OperationCard from "./OperationCard.vue"
 
 vi.mock("@/utils/core", () => ({ managers: { contact: { getContactByAddress: vi.fn(async () => null) } } }))
@@ -18,6 +19,9 @@ vi.mock("@/stores/app.store", () => ({ useAppStore: () => ({ accounts: [] }) }))
 const OWNER = `0x${"a".repeat(64)}`
 const TO = `0x${"b".repeat(64)}`
 const TOKEN = `0x${"c".repeat(64)}`
+/** An `Fr` as the wire carries it. */
+const field = (n: bigint): string => `0x${n.toString(16).padStart(64, "0")}`
+const USDC = { id: 1, chainId: 1, contract: TOKEN, name: "USD Coin", symbol: "USDC", decimals: 6 } as TokenInfo
 
 const sendTx = (calls: unknown[], extra: Record<string, unknown> = {}) => ({
 	kind: "aztec_sendTx" as const,
@@ -30,6 +34,22 @@ const sendTx = (calls: unknown[], extra: Record<string, unknown> = {}) => ({
 	feeSettings: { paymentMethod: { kind: "fj" } },
 	...extra,
 })
+const decoded = (fn: string, params: { name: string; value: unknown }[]) => ({ kind: "decoded" as const, contract: "Token", fn, params })
+const undecoded = (reason: string) => ({ kind: "undecoded" as const, reason })
+/** A token ABI that spells the vocabulary's signature: the values are irrelevant, the roles and kinds are the corroboration. */
+const abi = (fn: string, roles: string[]) =>
+	decoded(
+		fn,
+		roles.map((name) => ({
+			name,
+			value:
+				name === "amount"
+					? { kind: "integer", value: "0" }
+					: name === "authwit_nonce"
+						? { kind: "field", value: field(0n) }
+						: { kind: "address", value: TO },
+		})),
+	)
 
 const stubs = {
 	Flex: { inheritAttrs: false, template: '<div v-bind="$attrs"><slot /></div>' },
@@ -37,89 +57,201 @@ const stubs = {
 	Icon: true,
 	FeeSettingsCard: true,
 }
-const mocks = { trimAddress, humanizeMethodName: (m: string) => m, humanizeOperationKind: (k: string) => k }
-const mountCard = async (op: unknown) => {
+const mountCard = async (op: unknown, props: Record<string, unknown> = {}) => {
 	const w = mount(OperationCard, {
-		props: { op: op as never, index: 0 },
-		global: { stubs, mocks, components: { AddressDisplay } },
+		props: { op: op as never, index: 0, tokens: [USDC], ...props },
+		global: { stubs, components: { AddressDisplay } },
 	})
 	await flushPromises()
 	return w
 }
 const all = (w: ReturnType<typeof mount>, testid: string) => w.findAll(`[data-testid="${testid}"]`)
+const one = (w: ReturnType<typeof mount>, testid: string) => w.find(`[data-testid="${testid}"]`)
 
-describe("OperationCard — transfer sender and the raw-argument fallback", () => {
-	test("transfer(to, amount) from the account renders 'From: this account' with the account address", async () => {
-		const w = await mountCard(sendTx([{ name: "transfer", to: TOKEN, args: [TO, 5n] }]))
-		expect(w.find('[data-testid="execute-op-payload-row"]').attributes("data-intent-kind")).toBe("transfer")
-		const sender = w.find('[data-testid="execute-op-transfer-sender"]')
+describe("OperationCard — the vocabulary reading", () => {
+	test("transfer(to, amount) on a registered token from the account: 'From: this account', a trimmed recipient, the amount in token units", async () => {
+		const w = await mountCard(sendTx([{ name: "transfer", to: TOKEN, args: [TO, field(5_000_000n)] }]), {
+			decodedCalls: [abi("transfer", ["to", "amount"])],
+		})
+		expect(one(w, "execute-op-payload-row").attributes("data-intent-kind")).toBe("transfer")
+		const sender = one(w, "execute-op-transfer-sender")
 		expect(sender.attributes("data-sender-kind")).toBe("account")
-		expect(sender.text()).toContain("From:")
 		expect(sender.text()).toContain("this account")
 		expect(sender.text()).toContain(trimAddress(OWNER))
-		expect(w.find('[data-testid="execute-op-unverified-args"]').exists()).toBe(false)
+		expect(one(w, "execute-op-amount").text()).toContain("5 USDC")
+		expect(w.text()).not.toContain(field(5_000_000n))
+		expect(w.text()).not.toContain(TO)
+		expect(w.text()).toContain(trimAddress(TO))
+	})
+
+	test("the same call on a contract the wallet has not registered as a token takes the decode, never the vocabulary", async () => {
+		const w = await mountCard(sendTx([{ name: "transfer", to: TO, args: [OWNER, field(5n)] }]), {
+			tokens: [],
+			decodedCalls: [
+				decoded("transfer", [
+					{ name: "admin", value: { kind: "address", value: OWNER } },
+					{ name: "role", value: { kind: "integer", value: "5" } },
+				]),
+			],
+		})
+		expect(one(w, "execute-op-payload-row").attributes("data-intent-kind")).toBe("decoded")
+		expect(one(w, "execute-op-structured-args").exists()).toBe(false)
+		expect(all(w, "execute-op-decoded-param").map((p) => p.attributes("data-param"))).toEqual(["admin", "role"])
+	})
+
+	test("a registered token whose ABI orders transfer(amount, to) is read by the ABI, never by position", async () => {
+		const w = await mountCard(sendTx([{ name: "transfer", to: TOKEN, args: [field(1n), TO] }]), {
+			decodedCalls: [
+				decoded("transfer", [
+					{ name: "amount", value: { kind: "integer", value: "1" } },
+					{ name: "to", value: { kind: "address", value: TO } },
+				]),
+			],
+		})
+		expect(one(w, "execute-op-payload-row").attributes("data-intent-kind")).toBe("decoded")
+		expect(all(w, "execute-op-decoded-param").map((p) => p.attributes("data-param"))).toEqual(["amount", "to"])
+		expect(all(w, "execute-op-decoded-param")[1]!.text()).toContain(trimAddress(TO))
 	})
 
 	test("the same call under default_entrypoint renders 'Caller: none'", async () => {
 		const w = await mountCard(
-			sendTx([{ name: "transfer", to: TOKEN, args: [TO, 5n] }], { executionMode: "default_entrypoint", opts: {} }),
+			sendTx([{ name: "transfer", to: TOKEN, args: [TO, field(5n)] }], { executionMode: "default_entrypoint", opts: {} }),
+			{ decodedCalls: [abi("transfer", ["to", "amount"])] },
 		)
-		const sender = w.find('[data-testid="execute-op-transfer-sender"]')
+		const sender = one(w, "execute-op-transfer-sender")
 		expect(sender.attributes("data-sender-kind")).toBe("none")
-		expect(sender.text()).toContain("Caller:")
 		expect(sender.text()).toContain("none")
 		expect(sender.text()).not.toContain(trimAddress(OWNER))
 	})
 
-	test("an explicit from and a non-zero authwit nonce are shown; a zero nonce is not", async () => {
+	test("an explicit from and a non-zero nonce are shown, a zero nonce is not, and a known token labels the amount", async () => {
 		const w = await mountCard(
 			sendTx([
-				{ name: "transfer_in_private", to: TOKEN, args: [OWNER, TO, 5n, 9n] },
-				{ name: "transfer_in_private", to: TOKEN, args: [OWNER, TO, 5n, 0n] },
+				{ name: "transfer_in_private", to: TOKEN, args: [OWNER, TO, field(5_000_000n), field(9n)] },
+				{ name: "transfer_in_private", to: TOKEN, args: [OWNER, TO, field(5_000_000n), field(0n)] },
 			]),
+			{
+				tokens: [USDC],
+				decodedCalls: [
+					abi("transfer_in_private", ["from", "to", "amount", "authwit_nonce"]),
+					abi("transfer_in_private", ["from", "to", "amount", "authwit_nonce"]),
+				],
+			},
 		)
-		const senders = all(w, "execute-op-transfer-sender")
-		expect(senders.map((s) => s.attributes("data-sender-kind"))).toEqual(["explicit", "explicit"])
+		expect(all(w, "execute-op-transfer-sender").map((s) => s.attributes("data-sender-kind"))).toEqual(["explicit", "explicit"])
 		const nonces = all(w, "execute-op-transfer-nonce")
 		expect(nonces).toHaveLength(1)
-		expect(nonces[0].text()).toContain("9")
+		expect(nonces[0]!.text()).toContain("9")
+		expect(all(w, "execute-op-amount")[0]!.text()).toContain("5 USDC")
 	})
 
-	test("a 2-arg transfer that hides its msg_sender falls back to unverified, never 'From: this account'", async () => {
-		const w = await mountCard(sendTx([{ name: "transfer", to: TOKEN, args: [TO, 5n], hideMsgSender: true }]))
-		expect(w.find('[data-testid="execute-op-payload-row"]').attributes("data-intent-kind")).toBe("unverified")
-		expect(w.find('[data-testid="execute-op-transfer-sender"]').exists()).toBe(false)
-		expect(w.find('[data-testid="execute-op-unverified-args"]').exists()).toBe(true)
+	test("mint_to_private(to, amount) is a mint: recipient and amount, no sender row", async () => {
+		const w = await mountCard(sendTx([{ name: "mint_to_private", to: TOKEN, args: [TO, field(500_000_000n)] }]), {
+			decodedCalls: [abi("mint_to_private", ["to", "amount"])],
+		})
+		expect(one(w, "execute-op-payload-row").attributes("data-intent-kind")).toBe("mint")
+		expect(one(w, "execute-op-structured-args").text()).toContain("Mint to:")
+		expect(one(w, "execute-op-transfer-sender").exists()).toBe(false)
+		expect(one(w, "execute-op-amount").text()).toContain("500 USDC")
+		expect(one(w, "execute-op-unverified-args").exists()).toBe(false)
+	})
+
+	test("a 2-arg transfer that hides its msg_sender never claims the account: it takes the ABI decode", async () => {
+		const w = await mountCard(sendTx([{ name: "transfer", to: TOKEN, args: [TO, field(5n)], hideMsgSender: true }]), {
+			decodedCalls: [
+				decoded("transfer", [
+					{ name: "to", value: { kind: "address", value: TO } },
+					{ name: "amount", value: { kind: "integer", value: "5" } },
+				]),
+			],
+		})
+		expect(one(w, "execute-op-payload-row").attributes("data-intent-kind")).toBe("decoded")
+		expect(one(w, "execute-op-transfer-sender").exists()).toBe(false)
 		expect(w.text()).not.toContain("this account")
+		expect(all(w, "execute-op-decoded-param")).toHaveLength(2)
+	})
+})
+
+describe("OperationCard — the ABI decode and the raw fallback", () => {
+	const claimArgs = [TO, field(5_000_000n), field(7n), field(1n)]
+	const claim = { name: "claim_lie", to: TOKEN, selector: "0x11223344", args: claimArgs }
+
+	test("a decoded call names its parameters as the ABI does, trims addresses and fields, and keeps an integer as given", async () => {
+		const w = await mountCard(sendTx([claim]), {
+			tokens: [USDC],
+			decodedCalls: [
+				decoded("claim_private", [
+					{ name: "to", value: { kind: "address", value: TO } },
+					{ name: "amount", value: { kind: "integer", value: "5000000" } },
+					{ name: "secret", value: { kind: "field", value: field(7n) } },
+					{ name: "shielded", value: { kind: "boolean", value: true } },
+				]),
+			],
+		})
+		const row = one(w, "execute-op-payload-row")
+		expect(row.attributes("data-intent-kind")).toBe("decoded")
+		expect(row.text()).not.toContain("claim_lie")
+		const params = all(w, "execute-op-decoded-param")
+		expect(params.map((p) => p.attributes("data-param"))).toEqual(["to", "amount", "secret", "shielded"])
+		expect(params[0]!.text()).toContain(trimAddress(TO))
+		expect(params[0]!.text()).not.toContain(TO)
+		// The wallet's units apply to its own vocabulary only: a decoded `amount` is whatever the contract says.
+		expect(params[1]!.text()).toContain("5000000")
+		expect(params[1]!.text()).not.toContain("USDC")
+		expect(params[2]!.text()).not.toContain(field(7n))
+		expect(params[2]!.find("[title]").attributes("title")).toBe(field(7n))
+		expect(params[3]!.text()).toContain("true")
+		expect(one(w, "execute-op-unverified-args").exists()).toBe(false)
 	})
 
-	test("an unrecognized call renders the warning and one row per argument, no structured block", async () => {
-		const w = await mountCard(sendTx([{ name: "mint_to_private", to: TOKEN, args: [TO, 500n] }]))
-		expect(w.find('[data-testid="execute-op-payload-row"]').attributes("data-intent-kind")).toBe("unverified")
-		expect(w.find('[data-testid="execute-op-structured-args"]').exists()).toBe(false)
-		expect(w.find('[data-testid="execute-op-unverified-warning"]').text()).toContain("Unverified call")
+	test("while the wallet is still decoding, the card says so and shows no field", async () => {
+		const w = await mountCard(sendTx([claim]))
+		expect(one(w, "execute-op-payload-row").attributes("data-intent-kind")).toBe("pending")
+		expect(one(w, "execute-op-args-pending").exists()).toBe(true)
+		expect(w.text()).not.toContain(TO)
+		expect(one(w, "execute-op-unverified-args").exists()).toBe(false)
+	})
+
+	test("an undecodable call shows the notice and keeps its raw fields behind a toggle; fields trim and small ones read as decimals", async () => {
+		const w = await mountCard(sendTx([claim]), { decodedCalls: [undecoded("unknown-contract")] })
+		const block = one(w, "execute-op-unverified-args")
+		expect(block.attributes("data-reason")).toBe("unknown-contract")
+		expect(one(w, "execute-op-unverified-warning").text()).toContain("Can't read the arguments")
+		expect(block.text()).toContain("doesn't have this contract's interface")
+		expect(one(w, "execute-op-raw-args").exists()).toBe(false)
+		expect(w.text()).not.toContain(TO)
+		const toggle = one(w, "execute-op-raw-toggle")
+		expect(toggle.text()).toContain("Show 4 raw values")
+		await toggle.trigger("click")
+		expect(toggle.text()).toContain("Hide raw values")
 		const rows = all(w, "execute-op-arg")
-		expect(rows).toHaveLength(2)
-		expect(rows[0].attributes("data-arg-kind")).toBe("address")
-		expect(rows[0].text()).toContain(TO)
-		expect(rows[0].text()).not.toContain(trimAddress(TO))
-		expect(rows[1].text()).toContain("500")
+		expect(rows).toHaveLength(4)
+		expect(rows.every((r) => r.attributes("data-arg-kind") === "field")).toBe(true)
+		expect(rows[0]!.text()).toContain(trimAddress(TO, 10, 6))
+		expect(rows[0]!.text()).not.toContain(TO)
+		expect(rows[0]!.find("[title]").attributes("title")).toBe(TO)
+		expect(rows[1]!.text()).toContain("= 5000000")
+		expect(rows[0]!.text()).not.toContain("=")
+		await toggle.trigger("click")
+		expect(one(w, "execute-op-raw-args").exists()).toBe(false)
 	})
 
-	test("a 40-argument call renders 32 rows and '+8 more'", async () => {
-		const args = Array.from({ length: 40 }, (_, i) => BigInt(i))
-		const w = await mountCard(sendTx([{ name: "batch", to: TOKEN, args }]))
+	test("a 40-field call renders 32 rows and points at the JSON view for the rest", async () => {
+		const args = Array.from({ length: 40 }, (_, i) => field(BigInt(i)))
+		const w = await mountCard(sendTx([{ name: "batch", to: TOKEN, args }]), { decodedCalls: [undecoded("unknown-function")] })
+		expect(one(w, "execute-op-raw-toggle").text()).toContain("Show 40 raw values")
+		await one(w, "execute-op-raw-toggle").trigger("click")
 		expect(all(w, "execute-op-arg")).toHaveLength(32)
-		expect(w.find('[data-testid="execute-op-args-more"]').text()).toContain("+8 more")
+		expect(one(w, "execute-op-args-more").text()).toContain("+8 more")
 	})
 
-	test("an argument without a usable toString renders '(opaque value)'; a spoofing toString is rendered as text, never as an address", async () => {
-		const w = await mountCard(
-			sendTx([{ name: "batch", to: TOKEN, args: [{ toString: () => ({}) }, {}, { toString: () => `${TO} trust me` }] }]),
-		)
+	test("a hostile toString renders as text or unreadable, never as a field; a short batch reads as unavailable", async () => {
+		const args = [{ toString: () => ({}) }, {}, { toString: () => `${TO} trust me` }]
+		const w = await mountCard(sendTx([{ name: "batch", to: TOKEN, args }]), { decodedCalls: [] })
+		expect(one(w, "execute-op-unverified-args").attributes("data-reason")).toBe("unavailable")
+		await one(w, "execute-op-raw-toggle").trigger("click")
 		const rows = all(w, "execute-op-arg")
-		expect(rows[0].text()).toContain("(opaque value)")
-		expect(rows[1].text()).toContain("(opaque value)")
-		expect(rows[2].attributes("data-arg-kind")).toBe("text")
+		expect(rows.map((r) => r.attributes("data-arg-kind"))).toEqual(["opaque", "opaque", "text"])
+		expect(rows[0]!.text()).toContain("(unreadable)")
 	})
 })

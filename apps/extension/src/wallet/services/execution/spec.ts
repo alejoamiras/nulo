@@ -1,5 +1,7 @@
 import type { TransferType, LocalTxOrigin } from "@/wallet/services/transaction/spec"
 import type {
+	DecodedCall,
+	DisplayCallInput,
 	FeeSettings,
 	GasBalances,
 	LastProveOutcome,
@@ -95,6 +97,15 @@ export type Methods = {
 	 * `previewId` participates in {@link cancelEstimate} the same way.
 	 */
 	previewOperationAuthwits(interactionId: string, index: number, estimateToken?: string, flowKey?: string): OperationAuthwitPreview
+
+	/**
+	 * Decodes calls for the approval card against the artifacts the PXE holds on
+	 * `networkId`, index-aligned with `calls`. Display only: the result names
+	 * parameters and values for the user to read and never feeds execution, so
+	 * the popup may hand over its own copy of the calls. A call the wallet cannot
+	 * decode says why instead of guessing.
+	 */
+	decodeCallsForDisplay(networkId: string, calls: DisplayCallInput[]): DecodedCall[]
 
 	/**
 	 * Cancel an in-flight fee estimate by its caller-minted token.
