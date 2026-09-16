@@ -24,3 +24,15 @@ One non-material correction: the fuel threading test proved 1 registration + 2 s
 not have a send spy to substantiate the "zero sends" claim. **Adopted** (commit `3597c233`): added a
 `sendTx` spy to the retry-recovery case and asserted `not.toHaveBeenCalled()`. `fuelClaim.test.ts`
 22/22. **Loop converged.**
+
+## Validation gap caught at merge — the jsdom `test:e2e`
+The phase-6 gate ran `test:tools` (unit) + `e2e:tools` (browser) but NOT the tools jsdom `test:e2e`
+(`vitest.e2e.config.ts`), which the CI "Build Tools" job runs before the vite build. arc 2 added the
+`contractsReadinessRefusal` + `retryOnUnregistered` exports to `useWalletConnection` and calls both in
+the real send/exit path, and updated its OWN unit mocks — but `tests/e2e/send-smoke.test.ts` (a
+dev-owned jsdom smoke that runs the real `useSend`/`useHubExit`) mocks `useWalletConnection` without
+them, so it threw `No "contractsReadinessRefusal" export is defined on the mock` (9/14 failed). Fix:
+stub both in that mock (`contractsReadinessRefusal: () => undefined` — the fixtures are always
+connected+ready; `retryOnUnregistered` pass-through). Local `test:e2e` 29/29 + `build:mainnet` exit 0
+after. Lesson: when adding an export the send/exit path imports, grep EVERY
+`vi.mock("@/composables/useWalletConnection"` — including `tests/e2e/**`, not just colocated units.
