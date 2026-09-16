@@ -15,6 +15,7 @@
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { ServiceCollection } from "@nulo/wallet-core/base"
 import type { PxeFactory } from "../pxe/chain-runtime"
+import type { ProvePhaseSink } from "../pxe/prove-phase-sink"
 import { PxeService, type IProfileReader } from "../pxe/service"
 
 export interface PxeOffscreenDeps {
@@ -22,17 +23,20 @@ export interface PxeOffscreenDeps {
 	logger: ILogger
 	/**
 	 * Optional `PxeFactory` override. When omitted, `PxeService` defaults
-	 * to `new ProductionPxeFactory()` with no accelerator policy (silent
+	 * to `new ProductionPxeFactory()` (HTTPS-only Presto with the silent
 	 * WASM fallback preserved — production behavior).
 	 *
 	 * The extension shell uses this seam to pass a pre-built
-	 * `ProductionPxeFactory(undefined, { provingMode: "required", host, port })` when
+	 * `ProductionPxeFactory(undefined, { provingMode: "required", host, port, httpsPort })` when
 	 * the build is configured for required-mode (CI only). Keeping the
 	 * factory as the seam — rather than threading policy primitives —
 	 * lets this package stay decoupled from the extension's
-	 * `@/accelerator/config` module.
+	 * `@/presto/config` module.
 	 */
 	factory?: PxeFactory
+	/** The sink whose `emit` the factory's `onProvePhase` was given; the service
+	 *  forwards everything it carries to the SW as `onProvePhase` events. */
+	provePhaseSink?: ProvePhaseSink
 }
 
 /**
@@ -42,6 +46,6 @@ export interface PxeOffscreenDeps {
  */
 export async function createPxeOffscreen(deps: PxeOffscreenDeps): Promise<void> {
 	const services = new ServiceCollection()
-	services.add(new PxeService(deps.profiles, deps.logger, deps.factory))
+	services.add(new PxeService(deps.profiles, deps.logger, deps.factory, deps.provePhaseSink))
 	await services.start()
 }

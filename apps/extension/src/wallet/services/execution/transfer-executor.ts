@@ -150,6 +150,7 @@ export class TransferExecutor {
 				initializesAccount,
 				scopes: [account.address],
 				parentTask: transferTask,
+				journalId,
 				checkCancelled,
 				markJournal: (patch) => markJournal(patch),
 				recordTransaction: (hash) =>

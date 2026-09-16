@@ -375,66 +375,90 @@ behavior was validated against the install + typecheck gates.
 
 ## Binary dependencies
 
-`accelerator-server` (Linux x86_64 binary from
-[`alejoamiras/aztec-accelerator`](https://github.com/alejoamiras/aztec-accelerator))
-is installed on every CI runner that executes the network-e2e suite, via
-the [`setup-accelerator-server`](./.github/actions/setup-accelerator-server/action.yml)
+`presto-server` (Linux x86_64 binary from
+[`alejoamiras/presto`](https://github.com/alejoamiras/presto))
+is installed on every CI runner that executes a prover-ON network-e2e lane, via
+the [`setup-presto-server`](./.github/actions/setup-presto-server/action.yml)
 composite action. Trust posture:
 
-- **Version + SHA-256 pinned in repo.** The composite action requires
-  callers to pass `expected_sha256`; the workflow
-  ([`_extension-network-e2e.yml`](./.github/workflows/_extension-network-e2e.yml)) pins it as
-  a literal. Bumping the version requires updating both fields together
-  in the same PR. Reviewers MUST treat any change to the binary URL,
-  version, or expected hash as security-relevant.
-- **SHA-256 sidecar from the same release is a sanity check, not a
+- **Version + two SHA-256 pins in repo.** The composite action requires
+  callers to pass `expected_tarball_sha256` (the release tarball, checked
+  before anything is extracted) AND `expected_sha256` (the EXTRACTED
+  `presto-server` binary, re-checked on every run, cache hits included,
+  because `actions/cache` restores the binary, not the tarball). The
+  workflow ([`_extension-network-e2e.yml`](./.github/workflows/_extension-network-e2e.yml))
+  pins both as literals. Bumping the version requires updating all three
+  fields together in the same PR. Reviewers MUST treat any change to the
+  binary URL, version, or either hash as security-relevant.
+- **The archive is inspected before extraction.** It must hold exactly one
+  member, a regular file named `presto-server` — a link, a duplicate or an
+  extra entry fails the step — and only that member is extracted. On a
+  cache hit the restored directory must hold exactly that one regular file
+  before it is hashed, made executable or put on PATH.
+- **The upstream `.sha256` sidecar is a transfer-integrity check, not a
   security boundary.** A release-origin compromise would replace the
-  tarball AND the sidecar together. The repo-pinned hash is the
-  authoritative anchor.
-- **Bump procedure** (we pin the EXTRACTED binary hash, not the
-  tarball hash — the binary is what `actions/cache` restores so it
-  must be the trust anchor on every run; verifying only the tarball
-  on download would leave cache-hit runs unverified):
-  1. Compute the binary hash from the upstream tarball in one shot:
+  tarball AND the sidecar together. The two repo pins are pins established
+  once from the release assets — they are not independent provenance.
+- **Bump procedure**:
+  1. Download the release tarball and compute both hashes:
      ```bash
-     curl -sSfL https://github.com/alejoamiras/aztec-accelerator/releases/download/accelerator-v<VER>/accelerator-server-<VER>-linux-x86_64.tar.gz \
-       | tar -xzO accelerator-server | shasum -a 256
+     VER=<VER>
+     curl -sSfLO "https://github.com/alejoamiras/presto/releases/download/presto-v${VER}/presto-server-${VER}-linux-x86_64.tar.gz"
+     sha256sum "presto-server-${VER}-linux-x86_64.tar.gz"            # expected_tarball_sha256
+     tar -tvf "presto-server-${VER}-linux-x86_64.tar.gz"             # exactly one regular member: presto-server
+     tar -xzf "presto-server-${VER}-linux-x86_64.tar.gz" presto-server && sha256sum presto-server   # expected_sha256
      ```
-  2. Update `version` AND `expected_sha256` in `_extension-network-e2e.yml`'s
-     `setup-accelerator-server` step in one commit.
-  3. CI re-hashes the binary on EVERY install (cache-miss + cache-hit);
-     mismatch is loud (workflow goes red).
-- **Single-maintainer trust model.** `alejoamiras/aztec-accelerator` is
-  a single-maintainer repo. The maintainer is the same person who owns
+  2. Update `version`, `expected_tarball_sha256` AND `expected_sha256` in
+     `_extension-network-e2e.yml`'s `setup-presto-server` step in one commit.
+  3. CI re-verifies on EVERY install (cache-miss + cache-hit); a mismatch
+     is loud (workflow goes red).
+- **Single-maintainer trust model.** `alejoamiras/presto` is a
+  single-maintainer repo. The maintainer is the same person who owns
   Nulo, so the trust model is what it is. Defense: pinning + per-bump
   PR review.
 
 **Distribution scope.** We download + execute the binary on ephemeral CI
 runners only. We do NOT vendor it into the repo, ship it with the
 extension, or expose it on a public network. The binary writes to
-`~/.aztec-accelerator/versions/` on the runner (transient — destroyed
-with the VM) and listens on `127.0.0.1:59833` only.
+`~/.presto/versions/` on the runner (transient — destroyed with the VM)
+and listens on `127.0.0.1:59833` only.
 
-**Origin authorization.** accelerator-server v1.0.6 (SEC-01c) is
-deny-by-default: with `ALLOWED_ORIGINS` unset it denies every non-localhost
-browser origin (localhost stays auto-approved). Our offscreen prover calls
-from `chrome-extension://<id>`, whose unpacked-extension id isn't known until
-Chrome loads it, so CI sets `ACCEL_ALLOW_ALL=1` to approve all origins (the
-pre-SEC-01 behavior; mutually exclusive with `ALLOWED_ORIGINS`). Safe in our
-threat model because (a) CI runners are single-tenant, (b) `pull_request`
-workflows from forks do not receive repo secrets, (c) the server is
-loopback-only (`127.0.0.1:59833`) and the only call traffic originates from
-the wallet we built. See
-[`implementations-plan/accelerator-server-ci/lessons/phase-1.md`](./implementations-plan/accelerator-server-ci/lessons/phase-1.md)
-for the original (pre-v1.0.6) source-read.
+**Origin authorization.** presto-server is deny-by-default: with
+`ALLOWED_ORIGINS` unset it denies every non-localhost browser origin
+(localhost stays auto-approved on the headless build). Our offscreen prover
+calls from `chrome-extension://<id>`, whose unpacked-extension id isn't
+known until Chrome loads it, so the start step sets `PRESTO_ALLOW_ALL=1` on
+the server process only (mutually exclusive with `ALLOWED_ORIGINS`). Safe in
+our threat model because (a) CI runners are single-tenant and ephemeral, (b)
+`pull_request` workflows from forks do not receive repo secrets, (c) the
+server is loopback-only (`127.0.0.1:59833`) and the only call traffic
+originates from the wallet we built. It is never set on a self-hosted runner
+or at job level.
 
-**License posture.** The `@alejoamiras/aztec-accelerator` npm SDK is
-AGPL-3.0-only; the server binary inherits the same license. We invoke
-it as a build/test tool — no AGPL §13 (network-access disclosure)
-trigger is obvious in this CI-internal use (no end users reached, no
-public network endpoint). This is not legal advice; if the integration
-scope ever expands (e.g. exposing accelerator-server in a deployed
-Nulo service), redo the analysis.
+**Production transport.** The wallet talks to the Presto desktop app over
+HTTPS only (`httpsOnly: true` is passed explicitly; plaintext is derived from
+the CI proving mode inside the factory and the production build guard greps
+the required-mode stamp out). That is a **bounded** guarantee: HTTPS-only
+defeats a local process squatting the Presto ports without a
+browser-trusted certificate for `127.0.0.1` — TLS fails, the SDK falls back
+to WASM, no witness leaves the browser, and the witness-free HTTP diagnostic
+never POSTs. It does **not** authenticate the Presto application: the
+browser trusts any certificate its store trusts (no CA pinning), and Presto
+persists its leaf TLS key on disk in an owner-only directory (the CA key
+stays in memory), so same-user malware that can read that key, or a
+compromised trust store, can impersonate the server. Those are residual
+risks of the loopback-prover model, not solved here. The wallet never offers
+Presto's session-only HTTP downgrade to users;
+`apps/extension/src/presto/presto-policy.test.ts` drives the real client
+and pins that a production configuration never issues an HTTP `/prove`.
+
+**License posture.** The `@alejoamiras/presto` npm SDK is AGPL-3.0-only
+(same author and license as the retired accelerator SDK); the server
+binary inherits the same license. We invoke it as a build/test tool — no
+AGPL §13 (network-access disclosure) trigger is obvious in this
+CI-internal use (no end users reached, no public network endpoint). This
+is not legal advice; if the integration scope ever expands (e.g. exposing
+presto-server in a deployed Nulo service), redo the analysis.
 
 **CVE-on-Friday runbook.** When an advisory drops for a package newer than
 the 7-day gate window:
@@ -478,7 +502,7 @@ for them — see `renovate.json` `packageRules`.
   Pair with the CVE-on-Friday runbook above.
 - `prConcurrentLimit: 3`, `prHourlyLimit: 2`, weekly Monday schedule
   (Buenos Aires TZ), no auto-merge anywhere.
-- `@aztec/*`, `@alejoamiras/aztec-accelerator`,
+- `@aztec/*`, `@alejoamiras/presto`,
   `@alejoamiras/aztec-standards`, `@alejoamiras/private-fee-juice` —
   all disabled (rule at the bottom of `packageRules`; later rules win
   per Renovate semantics).

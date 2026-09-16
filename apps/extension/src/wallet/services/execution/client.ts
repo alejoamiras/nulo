@@ -28,4 +28,5 @@ definePassthroughsExhaustive<Methods>()(ExecutionServiceClient.prototype, [
 	"decodeCallsForDisplay",
 	"cancelJob",
 	"cancelEstimate",
+	"getLastProveOutcome",
 ])

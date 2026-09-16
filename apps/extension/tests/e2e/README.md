@@ -30,29 +30,29 @@ Internally `scripts/e2e/agent.sh`:
 
 `global-setup.ts` reads those env vars, spawns anvil + aztec + playground (each with the assigned port) and writes an ownership lockfile at `.e2e-state/owned.json`. Its `setup` is a short coordinator whose ORDER is the contract — orphan reap + build guard → `reconcilePriorLock` (reuse a healthy pack, or reap a stale one) → provisional lock → `markBootStarted()` (the exit-86 window opens here, AFTER the build/env checks that must never be retried) → `ensureAnvil` → `ensureAztecNode` → `ensureDevServer` (playground; tools opt-in) → `finishBoot` (provide URLs, deploy, `markBootReady()`). Each stage probes first and adopts an already-running service; a stage detects a permissive failure and returns `"skip"` (the strict-mode `E2E_REQUIRE_SETUP=1` throws stay inside it), and the coordinator owns the exit (`provideWithoutSandbox` + `return`), so a lost or doubled `provide` is visible in one place. Process handles and the `weStarted*` flags stay module-level, shared with `teardown` and the signal hooks.
 
-### Accelerator: local vs CI
+### Presto: local vs CI
 
-**Locally** (`bun run e2e:agent`), the wallet's `AcceleratorProver` (from `@alejoamiras/aztec-accelerator`) auto-detects whichever proving backend is up on `127.0.0.1:59833`:
+**Locally** (`bun run e2e:agent`), the wallet's `PrestoProver` (from `@alejoamiras/presto`) probes `https://127.0.0.1:59834/health` — HTTPS only, exactly like production:
 
-- **Aztec Accelerator** (the user-facing desktop app on macOS) running → native bb proving.
-- Nothing → silent fallback to in-browser WASM (still works, just slower).
+- **Presto** (the desktop app) running with its Encrypted Connection set up → native bb proving.
+- Nothing, or Presto without HTTPS → silent fallback to in-browser WASM (still works, just slower). The activity card says which (`Proving with Presto ✦` / `Proving in browser…`).
 
-There is no `VITE_NULO_ACCELERATOR_REQUIRED` enforcement locally. This matches production behavior — end users without Aztec Accelerator installed get WASM proving without any error.
+There is no `VITE_NULO_PRESTO_REQUIRED` enforcement locally. This matches production behavior — end users without Presto installed get WASM proving without any error.
 
-**In CI** (`pr-extension-network-e2e.yml`), the workflow:
+**In CI** (`pr-extension-network-e2e.yml`), the prover-ON lanes:
 
-1. Installs the headless **`accelerator-server`** binary (Linux x86_64 release from `alejoamiras/aztec-accelerator`, SHA-256 pinned).
-2. Starts it on the runner's `127.0.0.1:59833`.
-3. Builds the wallet with `VITE_NULO_ACCELERATOR_REQUIRED=1` → `chain-runtime.ts` constructs `ProductionPxeFactory` in required-mode (eager preflight + `onPhase` throw on silent-fallback paths).
-4. Any test where the wallet would have fallen back to WASM fails loudly with `[accelerator-required] SDK emitted phase="fallback"`.
+1. Install the headless **`presto-server`** binary (Linux x86_64 release from `alejoamiras/presto`; tarball and extracted binary both SHA-256 pinned, single-member archive).
+2. Start it on the runner's `127.0.0.1:59833` (plain HTTP — the headless server has no TLS).
+3. Build the wallet with `VITE_NULO_PRESTO_REQUIRED=1` → `chain-runtime.ts` constructs `ProductionPxeFactory` in required-mode: plaintext HTTP derived from the mode, eager preflight, `onPhase` throw on every fallback-class phase.
+4. Any test where the wallet would have fallen back to WASM fails loudly with `[presto-required] SDK emitted phase="fallback"` (or the more precise `denied` / `secure-connection-unavailable` / `version-mismatch`).
 
-The terminology gap matters: **Aztec Accelerator** is the desktop app a user installs; **accelerator-server** is the headless binary CI uses. Same HTTP contract, different surface.
+The terminology gap matters: **Presto** is the desktop app a user installs; **presto-server** is the headless binary CI uses. Same HTTP contract, different surface.
 
-**Caveat for local devs running e2e while Aztec Accelerator is running**: both compete on `127.0.0.1:59833`. The wallet probes `/health` and routes to whichever responds first — usually the one that started first. No crash, but proves may be routed to the desktop app instead of being explicitly absent. If this matters for a specific test, quit the desktop app before `bun run e2e:agent`.
+**Caveat for local devs running e2e while Presto is running**: the wallet proves through whatever answers `https://127.0.0.1:59834` — usually the desktop app, which will show its Allow/Deny prompt for the unpacked extension's origin at the first prove (development builds share one extension id via the manifest `key`, so the approval sticks across worktrees). If a test must not touch the native prover, quit the desktop app before `bun run e2e:agent`.
 
 ### Proverless mode
 
-`NULO_E2E_PROVERLESS=1 bun run e2e:agent <file>` builds the wallet with `proverEnabled:false` (skips BB-SNARK generation; kernel simulation + on-chain submission stay real — the local node accepts the fake proof). Much faster than real proving, and accelerator-independent (it's forced off). The agent arms the double-opt-in flags + asserts the proverless build stamp. Most CI shards run this way.
+`NULO_E2E_PROVERLESS=1 bun run e2e:agent <file>` builds the wallet with `proverEnabled:false` (skips BB-SNARK generation; kernel simulation + on-chain submission stay real — the local node accepts the fake proof). Much faster than real proving, and Presto-independent (it's forced off). The agent arms the double-opt-in flags + asserts the proverless build stamp. Most CI shards run this way.
 
 The **default-token seeding** spec (`network/default-token-seeding.test.ts`) needs a seed entry for the sandbox, which mints a fresh token address every run — so no build-time list can name it. `VITE_NULO_E2E_TOKEN_SEEDS` + `VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM` (double opt-in, fail-closed; set by `agent.sh`) swap `TokenSeederDeps.getSeeds()` for a `chrome.storage.session` reader on key `nulo:e2e:token-seeds`, written via `seedSandboxDefaultToken` in `fixtures/token-seeds.ts`. The reader **replaces** the shipped seed list and accepts exactly one `chainId: 0` entry with canonical hex fields, pinning `expectedSymbol` to `"TST"` itself. Replacement is deliberate: Testnet carries a real seed and every profile registration now triggers a seed pass, so an augmenting list would have each e2e profile calling the public dRPC endpoint. `_extension-smoke-e2e.yml` arms the same pair with **no** key (empty list) on its source build for that reason; artifact-mode smoke instead blocks `lb.drpc.live` at the browser (see `NULO_E2E_ARTIFACT_RUN` in `fixtures/extension.ts`). Both literals are in the `_build-extension.yml` negative grep, and `agent.sh` + `_extension-smoke-e2e.yml` grep for them positively — an unused export can tree-shake away even in an armed build, which would make the release guard a false negative.
 
@@ -114,7 +114,7 @@ CI runs the network suite as a **5-shard GitHub Actions matrix** (`.github/workf
 
 **Dedicated heavy jobs**: a few files run OUTSIDE the shard pool on their own runner (`test_files` on a dedicated job, mirrored in the pool's `exclude_files` — `scripts/ci-cd/behavior-gating.test.ts` pins the two lists equal): `fee-methods` + `selfpay-phase` (`Run / heavy`), `concurrent-sendtx-confirm` (`Run / heavy / concurrent-confirm`), and the prover-ON canary files. `selfpay-phase` is the wallet's setup-phase / account-identity gate: `Token.mint_to_private` (the bridge hub claim's inner call — a private call enqueueing a non-allow-listed public finalisation) simulated and sent as each of two granted accounts, never-sent and deployed, self-paid from public Fee Juice and via the PrivateFPC (fuel, then credit), with the node's tx validation ON, plus a negative control that must draw the node's `Setup function not on allow list`. Its cheap sibling `sim-from-selfpay` (one self-paid simulate as the second granted account) stays in the shard pool. Both run at `retry: "0"`; both are driven through the playground's `Simulation` and `Self-pay phase` sections, whose simulate results are projected by `apps/playground/src/lib/simulation-summary.ts` (fee payer, private frames, public calls per phase) because the raw kernel output is not feed-readable.
 
-**Failing shard logs**: each shard uploads its own artifact (`network-e2e-logs-<N>-of-5`) containing `.e2e-state`, `aztec-*.log`, `anvil-*.log`, `accelerator-server.log`, `accelerator-health.json` on failure.
+**Failing shard logs**: each shard uploads its own artifact (`network-e2e-logs-<N>-of-5`) containing `.e2e-state`, `aztec-*.log`, `anvil-*.log`, `presto-server.log`, `presto-health.json` on failure.
 
 **Reproducing a CI shard locally**: pass `--shard=N/5` to `e2e:agent`:
 

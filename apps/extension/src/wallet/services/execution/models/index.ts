@@ -83,3 +83,26 @@ export type OperationApprovalEnvelope = {
 
 /** The `(interactionId, index)` a preview or estimate is written under. */
 export type PreviewContext = Pick<OperationApprovalEnvelope, "interactionId" | "index">
+import type { PrestoPhase } from "@alejoamiras/presto"
+import type { ProveBackend } from "@nulo/wallet-core/jobs"
+
+/** The Presto SDK's phase vocabulary; the coordinator's wire schema pins the members it accepts. */
+export type ProvePhaseName = PrestoPhase
+
+/** The latest accepted prove-phase event, as a hint for the UI. */
+export interface ProveOutcomeHint {
+	at: number
+	phase: ProvePhaseName
+	backend?: ProveBackend
+}
+
+/**
+ * SW-memory records (both reset on SW restart — the journal is the record,
+ * these are hints). `denial` is held apart from `outcome` because later phases
+ * of the same attempt (`fallback`, `proving`, `proved`) would otherwise bury
+ * the one phase Settings needs to explain a WASM proof.
+ */
+export interface LastProveOutcome {
+	outcome: ProveOutcomeHint | null
+	denial: { at: number } | null
+}

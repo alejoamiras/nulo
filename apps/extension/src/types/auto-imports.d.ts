@@ -70,6 +70,7 @@ declare global {
   const computeMaxFee: typeof import('../utils/fee-estimation').computeMaxFee
   const computed: typeof import('vue').computed
   const confirmationPolicies: typeof import('../utils/confirmation-policies').confirmationPolicies
+  const copyFor: typeof import('../utils/presto-ui-state').copyFor
   const copyToClipboard: typeof import('../utils/clipboard').copyToClipboard
   const copyWithToast: typeof import('../utils/clipboard').copyWithToast
   const createApp: typeof import('vue').createApp
@@ -79,6 +80,7 @@ declare global {
   const decompressData: typeof import('../utils/files').decompressData
   const defineAsyncComponent: typeof import('vue').defineAsyncComponent
   const defineComponent: typeof import('vue').defineComponent
+  const detailRowsFor: typeof import('../utils/presto-ui-state').detailRowsFor
   const detectBackupType: typeof import('../utils/full-backup-helpers').detectBackupType
   const downloadFile: typeof import('../utils/files').downloadFile
   const effectScope: typeof import('vue').effectScope
@@ -203,6 +205,7 @@ declare global {
   const restoreServiceSlices: typeof import('../composables/full-backup-restore').restoreServiceSlices
   const restoreTokensStage: typeof import('../composables/full-backup-restore').restoreTokensStage
   const rollbackCreatedProfile: typeof import('../composables/full-backup-restore').rollbackCreatedProfile
+  const rowDescriptionFor: typeof import('../utils/presto-ui-state').rowDescriptionFor
   const runImportChainSync: typeof import('../composables/importChainSync').runImportChainSync
   const runRestoreFailurePath: typeof import('../composables/full-backup-restore').runRestoreFailurePath
   const safeFiatOf: typeof import('../utils/token-amount').safeFiatOf
@@ -230,9 +233,9 @@ declare global {
   const trimAddress: typeof import('../utils/string').trimAddress
   const txBelongsToScope: typeof import('../stores/activity.store').txBelongsToScope
   const txScope: typeof import('../stores/activity.store').txScope
+  const uiStateFromStatus: typeof import('../utils/presto-ui-state').uiStateFromStatus
   const unref: typeof import('vue').unref
   const usdThresholdToMicro: typeof import('../utils/incoming-dust').usdThresholdToMicro
-  const useAcceleratorStatus: typeof import('../onboarding/composables/useAcceleratorStatus').useAcceleratorStatus
   const useActivityStore: typeof import('../stores/activity.store').useActivityStore
   const useAppStore: typeof import('../stores/app.store').useAppStore
   const useAttrs: typeof import('vue').useAttrs
@@ -262,6 +265,7 @@ declare global {
   const usePinnedTokens: typeof import('../composables/usePinnedTokens').usePinnedTokens
   const usePopupEntity: typeof import('../composables/usePopupEntity').usePopupEntity
   const usePopupStore: typeof import('../stores/popup.store').usePopupStore
+  const usePrestoStatus: typeof import('../composables/usePrestoStatus').usePrestoStatus
   const usePrices: typeof import('../composables/usePrices').usePrices
   const useProfileBootstrap: typeof import('../composables/useProfileBootstrap').useProfileBootstrap
   const useProfileCreateFlow: typeof import('../composables/useProfileCreateFlow').useProfileCreateFlow
@@ -403,6 +407,9 @@ declare global {
   export type { JournalTerminalVisualState, JournalTerminalDisplay, CategoricalFailureLabel, TokenForCardProps, JournalTerminalCardCtx, JournalTerminalCardProps } from '../utils/journal-state'
   import('../utils/journal-state')
   // @ts-ignore
+  export type { PrestoInfo, PrestoUiState, PrestoTone, PrestoCopy, PrestoSurface, PrestoDetailRow } from '../utils/presto-ui-state'
+  import('../utils/presto-ui-state')
+  // @ts-ignore
   export type { MethodCarrier } from '../utils/primary-method'
   import('../utils/primary-method')
   // @ts-ignore
@@ -423,9 +430,6 @@ declare global {
   // @ts-ignore
   export type { TransferIntent, ProjectedArgument } from '../utils/transfer-intent'
   import('../utils/transfer-intent')
-  // @ts-ignore
-  export type { AcceleratorStatus } from '../onboarding/composables/useAcceleratorStatus'
-  import('../onboarding/composables/useAcceleratorStatus')
 }
 
 // for vue template auto import
@@ -495,6 +499,7 @@ declare module 'vue' {
     readonly computeMaxFee: UnwrapRef<typeof import('../utils/fee-estimation')['computeMaxFee']>
     readonly computed: UnwrapRef<typeof import('vue')['computed']>
     readonly confirmationPolicies: UnwrapRef<typeof import('../utils/confirmation-policies')['confirmationPolicies']>
+    readonly copyFor: UnwrapRef<typeof import('../utils/presto-ui-state')['copyFor']>
     readonly copyToClipboard: UnwrapRef<typeof import('../utils/clipboard')['copyToClipboard']>
     readonly copyWithToast: UnwrapRef<typeof import('../utils/clipboard')['copyWithToast']>
     readonly createApp: UnwrapRef<typeof import('vue')['createApp']>
@@ -504,6 +509,7 @@ declare module 'vue' {
     readonly decompressData: UnwrapRef<typeof import('../utils/files')['decompressData']>
     readonly defineAsyncComponent: UnwrapRef<typeof import('vue')['defineAsyncComponent']>
     readonly defineComponent: UnwrapRef<typeof import('vue')['defineComponent']>
+    readonly detailRowsFor: UnwrapRef<typeof import('../utils/presto-ui-state')['detailRowsFor']>
     readonly detectBackupType: UnwrapRef<typeof import('../utils/full-backup-helpers')['detectBackupType']>
     readonly downloadFile: UnwrapRef<typeof import('../utils/files')['downloadFile']>
     readonly effectScope: UnwrapRef<typeof import('vue')['effectScope']>
@@ -626,6 +632,7 @@ declare module 'vue' {
     readonly restoreServiceSlices: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreServiceSlices']>
     readonly restoreTokensStage: UnwrapRef<typeof import('../composables/full-backup-restore')['restoreTokensStage']>
     readonly rollbackCreatedProfile: UnwrapRef<typeof import('../composables/full-backup-restore')['rollbackCreatedProfile']>
+    readonly rowDescriptionFor: UnwrapRef<typeof import('../utils/presto-ui-state')['rowDescriptionFor']>
     readonly runImportChainSync: UnwrapRef<typeof import('../composables/importChainSync')['runImportChainSync']>
     readonly runRestoreFailurePath: UnwrapRef<typeof import('../composables/full-backup-restore')['runRestoreFailurePath']>
     readonly safeFiatOf: UnwrapRef<typeof import('../utils/token-amount')['safeFiatOf']>
@@ -653,9 +660,9 @@ declare module 'vue' {
     readonly trimAddress: UnwrapRef<typeof import('../utils/string')['trimAddress']>
     readonly txBelongsToScope: UnwrapRef<typeof import('../stores/activity.store')['txBelongsToScope']>
     readonly txScope: UnwrapRef<typeof import('../stores/activity.store')['txScope']>
+    readonly uiStateFromStatus: UnwrapRef<typeof import('../utils/presto-ui-state')['uiStateFromStatus']>
     readonly unref: UnwrapRef<typeof import('vue')['unref']>
     readonly usdThresholdToMicro: UnwrapRef<typeof import('../utils/incoming-dust')['usdThresholdToMicro']>
-    readonly useAcceleratorStatus: UnwrapRef<typeof import('../onboarding/composables/useAcceleratorStatus')['useAcceleratorStatus']>
     readonly useActivityStore: UnwrapRef<typeof import('../stores/activity.store')['useActivityStore']>
     readonly useAppStore: UnwrapRef<typeof import('../stores/app.store')['useAppStore']>
     readonly useAttrs: UnwrapRef<typeof import('vue')['useAttrs']>
@@ -685,6 +692,7 @@ declare module 'vue' {
     readonly usePinnedTokens: UnwrapRef<typeof import('../composables/usePinnedTokens')['usePinnedTokens']>
     readonly usePopupEntity: UnwrapRef<typeof import('../composables/usePopupEntity')['usePopupEntity']>
     readonly usePopupStore: UnwrapRef<typeof import('../stores/popup.store')['usePopupStore']>
+    readonly usePrestoStatus: UnwrapRef<typeof import('../composables/usePrestoStatus')['usePrestoStatus']>
     readonly usePrices: UnwrapRef<typeof import('../composables/usePrices')['usePrices']>
     readonly useProfileBootstrap: UnwrapRef<typeof import('../composables/useProfileBootstrap')['useProfileBootstrap']>
     readonly useProfileCreateFlow: UnwrapRef<typeof import('../composables/useProfileCreateFlow')['useProfileCreateFlow']>

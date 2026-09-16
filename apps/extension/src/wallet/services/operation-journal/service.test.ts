@@ -119,6 +119,56 @@ describe("OperationJournalService", () => {
 		expect(succeeded.terminalAt).toBeGreaterThan(0)
 	})
 
+	test("proving.backend round-trips through the Zod schema and persistence", async () => {
+		const op = await service.createOperation(VALID_INPUT)
+		await service.transitionOperation(op.id, { stage: "simulating" })
+		const proving = await service.transitionOperation(op.id, { stage: "proving", enteredProveAt: 5, backend: "presto" })
+		expect(proving.progress).toEqual({ stage: "proving", enteredProveAt: 5, backend: "presto" })
+		// A fresh instance re-parses the stored row: a schema that dropped the field would lose it here.
+		const reread = new OperationJournalService(new LoggerStore(new ConfigStore()), api)
+		const services = new ServiceCollection()
+		services.add(reread)
+		await services.start()
+		expect((await reread.getOperation(op.id))?.progress).toEqual({ stage: "proving", enteredProveAt: 5, backend: "presto" })
+	})
+
+	test("updateProvingBackend: applies only in `proving`, preserves enteredProveAt, emits once per change", async () => {
+		const seen = vi.fn()
+		service.onOperationUpdated.add(seen)
+		const op = await service.createOperation(VALID_INPUT)
+		await service.transitionOperation(op.id, { stage: "simulating" })
+		expect(await service.updateProvingBackend(op.id, "presto")).toBe(false) // wrong stage → no-op
+		expect((await service.getOperation(op.id))?.progress).toEqual({ stage: "simulating" })
+
+		await service.transitionOperation(op.id, { stage: "proving", enteredProveAt: 777 })
+		seen.mockClear()
+		expect(await service.updateProvingBackend(op.id, "presto")).toBe(true)
+		expect(await service.updateProvingBackend(op.id, "presto")).toBe(false) // same evidence → no write
+		expect(await service.updateProvingBackend(op.id, "browser")).toBe(true) // fallback after transmit
+		expect(seen).toHaveBeenCalledTimes(2)
+		expect((await service.getOperation(op.id))?.progress).toEqual({ stage: "proving", enteredProveAt: 777, backend: "browser" })
+
+		await service.transitionOperation(op.id, { stage: "submitting", txHash: "0x1" })
+		expect(await service.updateProvingBackend(op.id, "presto")).toBe(false) // left proving → no-op
+		expect((await service.getOperation(op.id))?.progress).toEqual({ stage: "submitting", txHash: "0x1" })
+		expect(await service.updateProvingBackend("missing-id", "presto")).toBe(false)
+	})
+
+	test("updateProvingBackend: serialises with transitionOperation under the transition lock", async () => {
+		const op = await service.createOperation(VALID_INPUT)
+		await service.transitionOperation(op.id, { stage: "simulating" })
+		await service.transitionOperation(op.id, { stage: "proving", enteredProveAt: 1 })
+		// Both take the lock in call order: the backend write lands on the `proving`
+		// row, then the transition moves it on. Interleaving the other way would leave
+		// a backend on a `submitting` row — the round-trip below pins the ordering.
+		const [wrote] = await Promise.all([
+			service.updateProvingBackend(op.id, "presto"),
+			service.transitionOperation(op.id, { stage: "submitting", txHash: "0x2" }),
+		])
+		expect(wrote).toBe(true)
+		expect((await service.getOperation(op.id))?.progress).toEqual({ stage: "submitting", txHash: "0x2" })
+	})
+
 	test("transitionOperation: rejects illegal transitions via FSM", async () => {
 		const op = await service.createOperation(VALID_INPUT)
 

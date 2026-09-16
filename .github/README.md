@@ -38,7 +38,7 @@ Composite actions live in `.github/actions/` and are shared step fragments used 
 | `setup-bun` | checkout + bun + install cache + `bun install --frozen-lockfile` |
 | `setup-aztec` | Foundry + Aztec CLI matching the `@aztec/aztec.js` version |
 | `setup-puppeteer` | warm `~/.cache/puppeteer` |
-| `setup-accelerator-server` | download + SHA-256 verify + install the headless `accelerator-server` binary (Linux x86_64) for CI proving. Used by `_extension-network-e2e.yml`. See [CI.md](../CI.md#accelerator-in-ci). |
+| `setup-presto-server` | download + verify (tarball and extracted-binary SHA-256 pins, single-member archive) + install the headless `presto-server` binary (Linux x86_64) for CI proving. Used by `_extension-network-e2e.yml`. See [CI.md](../CI.md#presto-in-ci). |
 
 ## Triggers cheat-sheet
 

@@ -38,6 +38,8 @@ export function isTerminal(stage: JobStage): boolean {
 	return TERMINAL_STAGES.has(stage)
 }
 
+export type ProveBackend = "presto" | "browser"
+
 /**
  * Progress payload, discriminated by stage. Adding fields per stage variant
  * does NOT require a schema migration — consumers ignore unknown keys.
@@ -45,12 +47,19 @@ export function isTerminal(stage: JobStage): boolean {
  * `proving.enteredProveAt` is the single timestamp used by the resume
  * policy to detect stuck proves (audit found periodic heartbeats from
  * inside BB.wasm prove are not feasible — the prover blocks the JS turn).
+ *
+ * `proving.backend` is evidence copied from the prover's own phase stream —
+ * `presto` once the prover committed the witness to the native server (announced
+ * at `transmit`, before the POST), `browser` once it fell back to WASM — and
+ * absent until a phase decides it. It changes inside
+ * the stage (the FSM has no `proving → proving` edge), through the journal's
+ * `updateProvingBackend` seam only.
  */
 export type JobProgress =
 	| { stage: "queued" }
 	| { stage: "pending" }
 	| { stage: "simulating" }
-	| { stage: "proving"; enteredProveAt: number }
+	| { stage: "proving"; enteredProveAt: number; backend?: ProveBackend }
 	| { stage: "submitting"; txHash?: string }
 	/**
 	 * `txHash` is present for on-chain ops (`transfer`, `dapp_execute`) and

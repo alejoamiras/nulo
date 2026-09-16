@@ -69,7 +69,7 @@ falls back to `8545/8080/8880/40400/5174`. Use it only against a sandbox you alr
    `@requires-proverless`; any hit without `NULO_E2E_PROVERLESS=1` exits 2 with the remedy. A vitest
    name filter is not a path — pass the file. Prover-ON is the default; the proverless build is a double opt-in
    (`VITE_NULO_E2E_PROVERLESS=1` + `_CONFIRM=1`) and mutually exclusive with
-   `VITE_NULO_ACCELERATOR_REQUIRED`.
+   `VITE_NULO_PRESTO_REQUIRED`.
 2. Claims a fresh port pack (`resolve-ports.ts`: bind-and-release in a static window below the
    kernel's ephemeral floor, written to the worktree-local `.e2e-state/ports.json`). There is no
    host-wide registry file; safety is probabilistic plus the bind test.
@@ -77,7 +77,7 @@ falls back to `8545/8080/8880/40400/5174`. Use it only against a sandbox you alr
    testnet`, `VITE_NULO_E2E_PRICE_MAP=1`, `VITE_NULO_E2E_MIGRATION_FIXTURE=1`,
    `VITE_NULO_E2E_TOKEN_SEEDS=1` + `_CONFIRM=1`, plus the proverless pair when asked. Then asserts
    the bundle before spending a sandbox (exit 2 on a miss): the sandbox URL literal, the
-   migration-fixture stamp, the token-seed stamp and key, the accelerator stamp when armed, the
+   migration-fixture stamp, the token-seed stamp and key, the presto stamp when armed, the
    proverless stamp when armed, the fee multiplier when set. The price map has no stamp check.
 4. Runs vitest with `E2E_REQUIRE_SETUP=1` (a sandbox or deploy failure is `FATAL`, never a silent
    `describe.skipIf` — the suite once showed `61 skipped, exit 0` for weeks) and the runtime
@@ -160,9 +160,9 @@ runtime env var can never arm a build-time flag.
   `e2e:extension-network`. Lanes: 5 vitest shards (`--shard=N/5`, SHA-1 of the file path, proverless, retry 0,
   the 6 dedicated files excluded); two heavy lanes (`fee-methods` + `selfpay-phase`, and
   `concurrent-sendtx-confirm`, proverless); the **canary** lane prover-ON with the SHA-256-pinned
-  `accelerator-server` and `VITE_NULO_ACCELERATOR_REQUIRED=1` (`transfers`, `tx-sendTx-default`,
+  `presto-server` and `VITE_NULO_PRESTO_REQUIRED=1` (`transfers`, `tx-sendTx-default`,
   `frozen-account-canary`) — a canary run with zero `Proving succeeded` lines fails; the
-  `disable_accelerator` dispatch input (or the `NULO_E2E_DISABLE_ACCELERATOR` variable) is the
+  `disable_presto` dispatch input (or the `NULO_E2E_DISABLE_PRESTO` variable) is the
   rollback to WASM. Exit 86 retries the agent once. After every run the built bundle is grepped for
   `(PROBE|nulo:probe:|VITE_E2E_PROBE)` and any hit fails the workflow (`_extension-network-e2e.yml` skips the
   grep only when its `probe` input is `"1"`, a caller-set investigation mode, not a dispatch option):

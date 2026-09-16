@@ -18,7 +18,7 @@ const hasConfig = aztecConfig !== undefined
  * test's budget. Mirrors the pattern landed in `register-token.test.ts`
  * (PR #63). Pre-fix, sim-profileTx (#24) was the residual cap-popup-class
  * flake observed during PR #67's first CI run — the fixture migration is
- * the structural fix per accelerator-server-ci/lessons/phase-1.md.
+ * the structural fix.
  */
 const cases: Array<{ id: number; name: string; method: string; btn: string }> = [
 	{ id: 23, name: "simulateTx", method: "simulateTx", btn: "pg-btn-simulateTx-transfer" },

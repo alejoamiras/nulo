@@ -17,7 +17,7 @@ Current line: **`@aztec/* = 5.2.0`** (Noir wasm packages `noir-acvm_js` / `noir-
 3. **On-chain identity invariants** — `packages/aztec-runtime/src/pxe/artifact-class-id.ts` (class-id derivation) + the deferred class-id + address invariant fixture. A protocol-version bump can change contract class ids / addresses for NON-account contracts; re-derive and update THOSE fixtures, and confirm the token artifacts still resolve. **EXCEPTION — the Nulo ACCOUNT artifact + derived account addresses are FROZEN and are NEVER re-derived here** (see coupling #7): the account KAT (`derivation-vectors.test.ts`) + the freeze tests must stay green with ZERO vector/pin edits. A red account KAT means new-major territory, not a re-pin.
 4. **`WalletSchema` runtime patch** — `packages/wallet-sdk-schema-patch/src/{apply,register}.ts` extends `@aztec/wallet-sdk`'s `WalletSchema` with `registerToken` / `isTokenRegistered` / `grantPublicAuthwit`. If upstream changes `WalletSchema`'s shape or those method names, `apply.test.ts` + the wallet-bridge reachability pin (`packages/wallet-bridge/src/dispatcher.test.ts`) will catch it — but re-check the patch still composes.
 5. **PXE seam** — `packages/aztec-runtime` PXE factory + client. PXE method signatures are an `@aztec` coupling surface; see § Types coupled to `@aztec` shape.
-6. **Native proving (accelerator)** — the network-e2e installs `accelerator-server` (SHA-256-pinned in `.github/workflows/_extension-network-e2e.yml`); a proving-backend bump may need a matching accelerator build. `VITE_NULO_ACCELERATOR_REQUIRED=1` makes a silent WASM fallback a hard fail.
+6. **Native proving (Presto)** — the network-e2e installs the headless `presto-server` (tarball + binary SHA-256-pinned in `.github/workflows/_extension-network-e2e.yml`); `@alejoamiras/presto` exact-pins its own `@aztec/*` line, so it moves WITH the bump, and a headless-server bump may follow. `VITE_NULO_PRESTO_REQUIRED=1` makes a silent WASM fallback a hard fail.
 7. **Frozen account surface — NOT bumped with the line** — `packages/aztec-runtime/src/account/artifacts/SchnorrAccount.json` (vendored, digest-pinned), `frozen-artifact.ts` (sha256 + class-id pins), `instantiation-descriptor.ts` (frozen ctor name/args/salt/immutablesHash/deployer + digest), `address-freeze.ts` (append-only regime record + paired hardcoded test). A bump must leave the KAT (`derivation-vectors.test.ts`) and every freeze test green with ZERO vector or pin edits; the **frozen-account execution canary** (`apps/extension/tests/e2e/network/frozen-account-canary.test.ts`, run prover-ON via `bun run e2e:agent`) is a MANDATORY bump gate — a red canary blocks the bump (see the `aztec-update` skill + CLAUDE.md "Account-address freeze").
 
 ## Types coupled to `@aztec` shape
@@ -53,7 +53,7 @@ Current line: **`@aztec/* = 5.2.0`** (Noir wasm packages `noir-acvm_js` / `noir-
   (`noir-protocol-circuits-types/artifacts/vks/tree.ts`) discriminates with `instanceof`; two
   copies of that module make it silently treat the VK object as its own hash and abort with
   `VK index for [object Object] not found in VK tree` — before any proof is attempted. This is
-  why `@alejoamiras/aztec-accelerator` must move WITH the line (it exact-pins its own
+  why `@alejoamiras/presto` must move WITH the line (it exact-pins its own
   `@aztec` deps) rather than being held. `scripts/aztec-hold-residue-check.ts` is the standing
   gate: it walks bun.lock's dependency graph and `realpath`-resolves from every consumer to
   prove the prover path (stdlib + bb-prover + noir-protocol-circuits-types) is single-generation.
@@ -64,10 +64,9 @@ Current line: **`@aztec/* = 5.2.0`** (Noir wasm packages `noir-acvm_js` / `noir-
   `AccountContractsProvider` serves the vendored artifact for schnorr. Production is immune
   (no `createSchnorrAccount` call sites outside tests) — typecheck cannot see this, since
   `tests/e2e` is outside the tsconfig graph.
-- **`BB_BINARY_PATH` is a footgun, not an optimization.** The accelerator's `find_bb` returns a
-  seed unconditionally (alejoamiras/aztec-accelerator#352), so a version-mismatched seed proves
-  every request with the wrong bb while the log shows a download of the right one. CI runs the
-  server unseeded.
+- **`BB_BINARY_PATH` is a footgun, not an optimization.** Presto's `find_bb` honours the
+  variable before its versioned cache, so a version-mismatched seed proves every request with the
+  wrong bb while the health body still says `bb_available: true`. CI runs the server unseeded.
 - **Clear `<app>/node_modules/.vite` after any dependency-line swap** before the first e2e run —
   stale optimizer caches make dev-served apps fail to load with `.vite/deps/*.js does not exist`.
 - `PXE_DATA_SCHEMA_VERSION` stayed 13 across 5.0.1→5.2.0 (no store wipe); `@aztec/viem` is an
@@ -117,5 +116,5 @@ Current line: **`@aztec/* = 5.2.0`** (Noir wasm packages `noir-acvm_js` / `noir-
 ## After you bump — validation gate
 - `bun run typecheck:all` (exit 0 — verify by exit code + grep, not `| tail`).
 - `bun run test:all` (units across ALL workspaces — plain `bun run test` is extension-only and does NOT carry the account KAT + freeze suites) + `bun run build`.
-- `bun run test:e2e` (smoke) + `bun run e2e:agent` (FULL network — includes the frozen-account canary). NOTE: `e2e:agent` LOCALLY does NOT enforce native proving (silent WASM fallback if no accelerator). "A WASM fallback is a hard fail" is true only in CI (`VITE_NULO_ACCELERATOR_REQUIRED=1` in the prover-ON `network-e2e-canary` job) — that CI check is the authoritative gate. To run the canary prover-ON locally, start `accelerator-server`, build with `VITE_NULO_ACCELERATOR_REQUIRED=1`, and confirm a `/prove` request (see the `aztec-update` skill).
+- `bun run test:e2e` (smoke) + `bun run e2e:agent` (FULL network — includes the frozen-account canary). NOTE: `e2e:agent` LOCALLY does NOT enforce native proving (silent WASM fallback if no Presto is listening; the awaiting card then says "Proving in browser…"). "A WASM fallback is a hard fail" is true only in CI (`VITE_NULO_PRESTO_REQUIRED=1` in the prover-ON `canary` shard, which also asserts "Proving with Presto ✦") — that CI check is the authoritative gate. To run the canary prover-ON locally, start `presto-server` with `PRESTO_ALLOW_ALL=1`, build with `VITE_NULO_PRESTO_REQUIRED=1`, and confirm a `Proving succeeded` log line (see the `aztec-update` skill).
 - Confirm the class-id/address fixture still matches (coupling #3).

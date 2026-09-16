@@ -9,9 +9,21 @@
  * Adding a new `JobStage` MUST update this switch — the
  * `card-subtitle.test.ts` pin enforces exhaustiveness at runtime.
  */
-import type { JobStage } from "@nulo/wallet-core/jobs"
+import type { JobStage, ProveBackend } from "@nulo/wallet-core/jobs"
 
-export function stageSubtitle(stage: JobStage | undefined): string {
+/** `proving` says where the proof runs once the prover has told us. */
+function provingSubtitle(backend: ProveBackend | undefined): string {
+	switch (backend) {
+		case "presto":
+			return "Proving with Presto ✦"
+		case "browser":
+			return "Proving in browser…"
+		default:
+			return "Generating proof..."
+	}
+}
+
+export function stageSubtitle(stage: JobStage | undefined, backend?: ProveBackend): string {
 	switch (stage) {
 		case "queued":
 			// Pre-handler state surfaced by the wallet-sdk session FIFO.
@@ -23,7 +35,7 @@ export function stageSubtitle(stage: JobStage | undefined): string {
 		case "simulating":
 			return "Simulating..."
 		case "proving":
-			return "Generating proof..."
+			return provingSubtitle(backend)
 		case "submitting":
 			return "Submitting..."
 		default:

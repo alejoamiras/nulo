@@ -9,9 +9,29 @@
 </route>
 
 <script setup>
+/** Services */
+import { ExecutionServiceClient } from "@/wallet/services/execution/client"
+
+/** Utils */
+import { rowDescriptionFor } from "@/utils/presto-ui-state"
+
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 const appStore = useAppStore()
+
+/** Proving row: Presto's live status plus the SW's memory of the last prove attempt. */
+const { state: prestoState, dispose: disposePresto } = usePrestoStatus()
+const lastProve = ref(null)
+const provingDescription = computed(() => rowDescriptionFor(prestoState.value, lastProve.value))
+const executionService = new ExecutionServiceClient()
+
+onBeforeMount(async () => {
+	try {
+		lastProve.value = await executionService.getLastProveOutcome()
+	} catch {
+		lastProve.value = null
+	}
+})
 
 /** Hero visibility → compact sticky title fade */
 const heroRef = useTemplateRef("heroRef")
@@ -32,6 +52,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
 	heroObserver?.disconnect()
+	executionService.disconnect()
+	disposePresto()
 })
 </script>
 
@@ -130,6 +152,15 @@ onBeforeUnmount(() => {
 					materialIcon="palette"
 					chevron
 					data-testid="setting-nav-appearance"
+				/>
+				<SettingItem
+					to="/popup/settings/proving"
+					title="Proving"
+					:description="provingDescription"
+					materialIcon="speed"
+					chevron
+					data-testid="setting-nav-proving"
+					:data-status="prestoState.kind"
 				/>
 				<SettingItem
 					to="/popup/settings/advanced"

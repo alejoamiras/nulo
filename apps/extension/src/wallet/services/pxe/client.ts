@@ -81,4 +81,13 @@ export class PxeServiceClient extends PxeServiceClientBase {
 // Re-export public surface so existing `@/wallet/services/pxe/client`
 // import paths keep working. When the rest of the extension moves to
 // import from `@nulo/aztec-runtime/pxe` directly, drop the shim.
-export { PXE_SERVICE_NAME, type Methods, type NotesFilter, type IPXE, PXEProxy, type NetworkInfo } from "@nulo/aztec-runtime/pxe"
+export {
+	PXE_SERVICE_NAME,
+	type Methods,
+	type NotesFilter,
+	type IPXE,
+	PXEProxy,
+	type NetworkInfo,
+	type ProveBackend,
+	type ProvePhaseEvent,
+} from "@nulo/aztec-runtime/pxe"

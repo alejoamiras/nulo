@@ -1,9 +1,17 @@
 import { describe, expect, test } from "vitest"
 
 import { IllegalTransitionError, JobCancelledSentinel, assertCanTransition, canTransition } from "./fsm"
-import { TERMINAL_STAGES, isTerminal, type JobStage } from "./types"
+import { TERMINAL_STAGES, isTerminal, type JobProgress, type JobStage } from "./types"
 
 describe("job FSM", () => {
+	test("the proving backend is a field inside the stage, not a transition", () => {
+		// `backend` lands through the journal's in-stage seam; a `proving → proving`
+		// edge must stay illegal so a late backend event can never re-enter the stage.
+		const progress: JobProgress = { stage: "proving", enteredProveAt: 1, backend: "presto" }
+		expect(progress.stage).toBe("proving")
+		expect(canTransition("proving", "proving")).toBe(false)
+	})
+
 	test("legal transitions match the documented graph", () => {
 		const legalEdges: ReadonlyArray<[JobStage, JobStage]> = [
 			// queued is the pre-execution holding stage; claim path is

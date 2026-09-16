@@ -42,15 +42,14 @@ jobs:
         run: bun run lint
 
       # Defensive review-time guard, NOT a security boundary. The
-      # accelerator-required CI mode (chain-runtime.ts onPhase throw) is
+      # presto-required CI mode (chain-runtime.ts onPhase throw) is
       # bypassed by calling `prover.setForceLocal(true)` on the SDK's
-      # AcceleratorProver. We don't expect production code to ever call
+      # PrestoProver. We don't expect production code to ever call
       # this — fail loud if it appears outside test files. Bracket access
       # like `prover["setForceLocal"](true)` bypasses this grep; we accept
       # that because this is review defense, not a hard constraint. Biome
       # has no AST-call matcher in our version (only noRestrictedGlobals
       # / Imports / Types), so a grep is the honest tool here.
-      # See implementations-plan/accelerator-server-ci/plan.md §7.
       - name: Forbid setForceLocal outside test files
         shell: bash
         run: |
@@ -64,7 +63,7 @@ jobs:
             || true
           } )
           if [ -n "$HITS" ]; then
-            echo "::error::setForceLocal called outside test files — would bypass accelerator-required CI enforcement"
+            echo "::error::setForceLocal called outside test files — would bypass presto-required CI enforcement"
             echo "$HITS"
             exit 1
           fi

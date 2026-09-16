@@ -13,12 +13,27 @@ import { snapshotResultSeq, waitForPgResult } from "./playground"
 import { waitForPopup, approveCapabilities } from "./popups"
 import { TEST_PASSWORD } from "./constants"
 import type { AztecTestConfig } from "./aztec"
+import { PRESTO_HTTP_HEALTH_URL, PRESTO_HTTPS_HEALTH_URL } from "./presto"
 
 export interface ExtensionContext {
 	browser: Browser
 	extensionId: string
 	consoleErrors: string[]
 	pageErrors: Error[]
+}
+
+/**
+ * Chrome reports a refused loopback probe as a "Failed to load resource" console error. The
+ * wallet probes Presto on the onboarding step and on every settings open, and a box without
+ * Presto (every smoke runner, the plaintext-only CI prover on the HTTPS port) refuses it by
+ * design — that is the browser's report of a probe the wallet expects to fail, not an
+ * extension error. Only a refused connection to the two exact health URLs is exempt; a 500,
+ * a certificate failure, or any other URL still counts.
+ */
+function isPrestoProbeNoise(msg: ConsoleMessage): boolean {
+	if (!msg.text().startsWith("Failed to load resource") || !msg.text().includes("net::ERR_CONNECTION_REFUSED")) return false
+	const url = msg.location().url
+	return url === PRESTO_HTTPS_HEALTH_URL || url === PRESTO_HTTP_HEALTH_URL
 }
 
 /** Launch a fresh browser with the extension and wait for SW liveness.
@@ -235,7 +250,7 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 		// catches and merely logs is invisible to BOTH fixture arrays
 		// (`consoleErrors` AND `pageErrors`; it does reach the SW log ring);
 		// prefer DOM/storage/stage evidence for app-level failures.
-		if (msg.type() === "error" && !msg.text().includes("Client disconnected")) {
+		if (msg.type() === "error" && !msg.text().includes("Client disconnected") && !isPrestoProbeNoise(msg)) {
 			ctx.consoleErrors.push(msg.text())
 		}
 	})
@@ -1202,7 +1217,7 @@ async function setUpPopupPage(ctx: ExtensionContext, page: Page): Promise<Page> 
 		// catches and merely logs is invisible to BOTH fixture arrays
 		// (`consoleErrors` AND `pageErrors`; it does reach the SW log ring);
 		// prefer DOM/storage/stage evidence for app-level failures.
-		if (msg.type() === "error" && !msg.text().includes("Client disconnected")) {
+		if (msg.type() === "error" && !msg.text().includes("Client disconnected") && !isPrestoProbeNoise(msg)) {
 			ctx.consoleErrors.push(msg.text())
 		}
 	})

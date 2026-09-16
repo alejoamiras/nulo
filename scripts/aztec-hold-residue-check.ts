@@ -11,7 +11,7 @@
  * version (bridge-core hit exactly this with `@aztec/protocol-contracts`), which is why
  * every peer is checked from every consumer rather than a sample.
  *
- * The accelerator SDK is deliberately NOT held: a single `@aztec` generation in the
+ * The Presto SDK is deliberately NOT held: a single `@aztec` generation in the
  * prover path is load-bearing, because upstream's `getVKIndex` discriminates with
  * `instanceof` and silently mis-resolves when two copies of
  * @aztec/noir-protocol-circuits-types coexist in one bundle.
@@ -27,7 +27,7 @@ const WORKSPACE_LINE = "5.2.0"
 const HELD_LINE = "5.0.1"
 const HELD_ROOTS = ["@alejoamiras/private-fee-juice", "@aztec-foundation/aztec-standards"]
 /** Packages whose own `@aztec` deps must resolve to the workspace line, not a private copy. */
-const SINGLE_GENERATION_ROOTS = ["@alejoamiras/aztec-accelerator"]
+const SINGLE_GENERATION_ROOTS = ["@alejoamiras/presto"]
 
 let failures = 0
 const fail = (msg: string) => {
