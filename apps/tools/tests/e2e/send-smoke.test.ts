@@ -133,6 +133,11 @@ vi.mock("@/composables/useWalletConnection", () => ({
 	requestedHubTokens: () => [],
 	retainPinnedHubTokens: () => {},
 	switchActiveAccount: () => true,
+	// The session here is always connected with its contracts ready, so the readiness gate never
+	// refuses; its refusal branches are pinned in useWalletConnection.test.ts and the browser spec.
+	contractsReadinessRefusal: () => undefined,
+	// No case here injects CONTRACT_NOT_REGISTERED; pass through so the send/exit calls are the real ones.
+	retryOnUnregistered: (_s: unknown, _w: unknown, op: () => Promise<unknown>) => op(),
 	__resetWalletConnectionForTests: () => {},
 }))
 vi.mock("@/composables/useTokenBalance", () => ({
