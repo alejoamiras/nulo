@@ -279,6 +279,62 @@ describe("ExecutionLane fence: registration, slot refusal, mutex key", () => {
 	})
 })
 
+describe("ExecutionLane.abandonDeadSessions", () => {
+	test("cancels a dead serial's record before aborting it; a live serial and a record past `submitting` keep running", async () => {
+		const stages: Record<string, string> = { dead: "proving", broadcasting: "submitting", live: "proving" }
+		const dead = new AbortController()
+		const broadcasting = new AbortController()
+		const live = new AbortController()
+		let abortedBeforeTransition: boolean | undefined
+		const transitionIfStage = vi.fn(async (id: string, allowed: readonly string[]) => {
+			if (id === "dead") abortedBeforeTransition = dead.signal.aborted
+			if (!allowed.includes(stages[id] ?? "")) return { outcome: "stage", stage: stages[id] }
+			stages[id] = "cancelled"
+			return { outcome: "transitioned", record: {} }
+		})
+		const session = { serial: 1 }
+		const { lane } = makeLane({
+			operationJournal: { transitionIfStage } as never,
+			peekLiveSerial: vi.fn(() => session.serial),
+		})
+		lane.registerInFlight("dead", 1, dead)
+		lane.registerInFlight("broadcasting", 1, broadcasting)
+		session.serial = 2
+		lane.registerInFlight("live", 2, live)
+
+		await lane.abandonDeadSessions()
+
+		expect(stages).toEqual({ dead: "cancelled", broadcasting: "submitting", live: "proving" })
+		expect(transitionIfStage.mock.calls.map(([id]) => id)).toEqual(["dead", "broadcasting"])
+		expect(abortedBeforeTransition).toBe(false)
+		expect([dead, broadcasting, live].map((c) => c.signal.aborted)).toEqual([true, false, false])
+		expect([...controllers(lane).keys()]).toEqual(["broadcasting", "live"])
+	})
+
+	test("a journal failure on one record is logged by id, and the sweep still cancels the next", async () => {
+		const failure = new Error("storage down")
+		const transitionIfStage = vi.fn(async (id: string) => {
+			if (id === "first") throw failure
+			return { outcome: "transitioned", record: {} }
+		})
+		const session = { serial: 1 as number | undefined }
+		const { lane, deps } = makeLane({
+			operationJournal: { transitionIfStage } as never,
+			peekLiveSerial: vi.fn(() => session.serial),
+		})
+		const first = new AbortController()
+		const second = new AbortController()
+		lane.registerInFlight("first", 1, first)
+		lane.registerInFlight("second", 1, second)
+		session.serial = undefined
+
+		await expect(lane.abandonDeadSessions()).resolves.toBeUndefined()
+
+		expect(deps.logError).toHaveBeenCalledWith(expect.any(String), { journalId: "first", error: failure })
+		expect([first, second].map((c) => c.signal.aborted)).toEqual([false, true])
+	})
+})
+
 describe("ExecutionLane.beginJournal fence threading", () => {
 	test("with a fence: uses the AUTHORIZATION-time profileId+epoch, never re-reads the active profile", async () => {
 		// After the FIFO wait the active profile can be a successor that reused

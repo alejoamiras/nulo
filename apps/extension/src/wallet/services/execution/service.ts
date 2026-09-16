@@ -218,6 +218,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		}
 		this.feeStrategies = buildFeeStrategies(feeDeps)
 		this.wireCacheInvalidation()
+		// Every session open and close fires this inside the session transition, so the sweep is
+		// started here and never awaited; it logs its own failures.
+		this.profileService.onActiveProfileChanged.add(() => void this.lane.abandonDeadSessions())
 	}
 
 	/** Wiring only — every lambda reads `this.*` lazily at call time, so

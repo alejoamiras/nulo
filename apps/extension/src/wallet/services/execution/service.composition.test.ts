@@ -703,6 +703,125 @@ describe("ExecutionService composition — work runs only while the session that
 	}, 15_000)
 })
 
+const stageOf = async (h: Harness, journalId: string) => (await h.journal.getOperation(journalId))?.progress.stage
+
+describe("ExecutionService composition — a session change sweeps the work of the session that ended", () => {
+	test.each([
+		{ label: "A switch to another profile", next: "p2" },
+		{ label: "A lock", next: undefined },
+	])(
+		"$label cancels a transfer parked at prove before the proof returns; it is never sent",
+		async ({ next }) => {
+			const h = await makeHarness()
+			const run = transfer(h)
+			await waitFor(() => h.ctrl.entered && h.stages.includes("proving"))
+			h.session.setActive(next)
+			h.session.fireChanged()
+			await waitFor(() => h.stages.includes("cancelled"))
+
+			h.ctrl.release()
+			expect(await run).toBeInstanceOf(JobCancelledError)
+			expect(await stageOf(h, h.getJournalId())).toBe("cancelled")
+			expect(h.toTx).not.toHaveBeenCalled()
+			expect(h.sendTx).not.toHaveBeenCalled()
+		},
+		15_000,
+	)
+
+	test("a record at `submitting` is left alone: the send completes and the record succeeds", async () => {
+		const h = await makeHarness()
+		let finishSend: () => void = () => {}
+		h.sendTx.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					finishSend = resolve
+				}),
+		)
+		const sweep = vi.spyOn(h.lane, "abandonDeadSessions")
+		const run = transfer(h)
+		await waitFor(() => h.ctrl.entered)
+		h.ctrl.release()
+		await waitFor(() => h.sendTx.mock.calls.length === 1)
+		h.session.setActive(undefined)
+		h.session.fireChanged()
+		await sweep.mock.results[0]?.value
+		expect(await stageOf(h, h.getJournalId())).toBe("submitting")
+		finishSend()
+
+		expect(await run).toBe("0xhash")
+		expect(await stageOf(h, h.getJournalId())).toBe("succeeded")
+	}, 15_000)
+
+	test("a sweep started by a lock spares a job registered by a session that opens before the sweep reaches it", async () => {
+		const h = await makeHarness()
+		const nextJob = await h.journal.createOperation({
+			kind: "dapp_execute",
+			origin: "dapp",
+			profileId: "p1",
+			sessionId: "sess-2",
+			initialStage: { stage: "queued" },
+		})
+		const run = transfer(h)
+		await waitFor(() => h.ctrl.entered && h.stages.includes("proving"))
+		const cancelWrite = h.parkJournalWrite((record) => record.progress.stage === "cancelled")
+		const sweep = vi.spyOn(h.lane, "abandonDeadSessions")
+		h.session.setActive(undefined)
+		h.session.fireChanged()
+		expect(sweep).toHaveBeenCalledTimes(1)
+		// The handler has returned; the sweep is still awaiting the old job's cancel.
+		await waitFor(cancelWrite.isParked)
+
+		h.session.setActive("p1")
+		const nextController = new AbortController()
+		const { session } = await h.captureExecutionFence()
+		expect(h.lane.registerInFlight(nextJob.id, session, nextController)).toEqual({ live: true })
+		cancelWrite.release()
+		await sweep.mock.results[0]?.value
+
+		expect(await stageOf(h, h.getJournalId())).toBe("cancelled")
+		expect(await stageOf(h, nextJob.id)).toBe("queued")
+		expect(nextController.signal.aborted).toBe(false)
+		h.ctrl.release()
+		expect(await run).toBeInstanceOf(JobCancelledError)
+	}, 15_000)
+
+	test("a transfer that registers after the sweep ran is refused at registration: failed/session_ended, never proved", async () => {
+		const h = await makeHarness()
+		// A transfer's first journal write is its create, which precedes its registration.
+		const create = h.parkJournalWrite(() => true)
+		const sweep = vi.spyOn(h.lane, "abandonDeadSessions")
+		const run = transfer(h)
+		await waitFor(create.isParked)
+		h.session.setActive(undefined)
+		h.session.fireChanged()
+		await sweep.mock.results[0]?.value
+		create.release()
+
+		expect(await run).toBeInstanceOf(SessionEndedError)
+		await expectEndedUnder(h, h.getJournalId(), "p1")
+		expect(h.ctrl.entered).toBe(false)
+		expect(h.proveTx).not.toHaveBeenCalled()
+	}, 15_000)
+
+	test("a journal failure during the sweep is logged and settles quietly; the send still stops at its authorization check", async () => {
+		const h = await makeHarness()
+		const run = transfer(h)
+		await waitFor(() => h.ctrl.entered && h.stages.includes("proving"))
+		vi.spyOn(h.journal, "transitionIfStage").mockRejectedValueOnce(new Error("storage down"))
+		const logError = vi.spyOn(h.service as unknown as { logError: (...args: unknown[]) => void }, "logError")
+		const sweep = vi.spyOn(h.lane, "abandonDeadSessions")
+		h.session.setActive("p2")
+		h.session.fireChanged()
+		await expect(sweep.mock.results[0]?.value).resolves.toBeUndefined()
+		expect(logError).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ journalId: h.getJournalId() }))
+
+		h.ctrl.release()
+		expect(await run).toBeInstanceOf(SessionEndedError)
+		await expectEndedUnder(h, h.getJournalId(), "p1")
+		expect(h.sendTx).not.toHaveBeenCalled()
+	}, 15_000)
+})
+
 describe("ExecutionService composition — profile-switch gas-cache invalidation (D12)", () => {
 	test("active-profile change EVICTS cached gas balances: peek goes cold, the next read recomputes", async () => {
 		const h = await makeHarness()

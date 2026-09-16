@@ -58,6 +58,9 @@ export interface ExecutionLaneDeps {
 	logError(msg: string, ...rest: unknown[]): void
 }
 
+/** The stages a cancellation can still pre-empt; from `submitting` the broadcast is issued. */
+const PRE_SUBMIT_STAGES = ["queued", "pending", "simulating", "proving"] as const
+
 export class ExecutionLane {
 	/** Cancel surface: jobId → AbortController, tagged with the serial of the
 	 *  session that authorized the job. SW-internal only, never crosses the
@@ -206,6 +209,33 @@ export class ExecutionLane {
 			return
 		}
 
+		this.abortCancelled(jobId)
+	}
+
+	/**
+	 * Cancel every registered job whose session has ended: `cancelJob`'s journal-first body without
+	 * its principal check, since no live session owns these jobs.
+	 *
+	 * Liveness is read as each record is reached, never passed in, so a session that opens while the
+	 * sweep awaits keeps the jobs it registers. A record at `submitting` or later is left to the
+	 * broadcast tick's own check. A failure on one record is logged and the sweep moves on.
+	 */
+	public async abandonDeadSessions(): Promise<void> {
+		for (const [journalId, { serial }] of this.activeControllers) {
+			try {
+				if (serial === this.deps.peekLiveSerial()) continue
+				const result = await this.deps.operationJournal.transitionIfStage(journalId, PRE_SUBMIT_STAGES, {
+					stage: "cancelled",
+				})
+				if (result.outcome === "transitioned") this.abortCancelled(journalId)
+			} catch (error) {
+				this.deps.logError("Failed to cancel a job whose session ended", { journalId, error })
+			}
+		}
+	}
+
+	/** Abort and forget a job whose record is already `cancelled`. */
+	private abortCancelled(jobId: string): void {
 		const inFlight = this.activeControllers.get(jobId)
 		if (inFlight) {
 			inFlight.controller.abort()

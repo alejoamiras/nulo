@@ -873,7 +873,7 @@ Every case asserts against the real journal and the fake PXE's call log.
   account-contract derivation in a fake) and **D6** (bb-free); any case that would need them is
   moved to e2e, not faked. Layers: typecheck · lint · composition
 
-### Phase 3 — the sweep
+### Phase 3 — the sweep ✓
 
 `abandonDeadSessions()` walks the lane's registry: per record, read `peekLiveSerial()` now; serial
 ≠ live (or no live) and stage pre-`submitting` → `transitionIfStage(…, cancelled)` then abort;
