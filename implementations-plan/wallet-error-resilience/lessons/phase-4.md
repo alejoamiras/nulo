@@ -32,7 +32,7 @@
 
 
 ## Mac manual checks (owner)
-**Unmet — owner-pending.** Both checks need the owner's hands: the DevTools noise check on a service-worker restart (none of the four lines should appear) and the Touch ID passkey register → lock → unlock. A clean prover-on build of arc 1 (`3498e162`, `bun run build` output, no e2e stamps) was snapshotted for `send-to-mac`; the first send failed because the Mac was offline on the tailnet (Taildrop 502), so the shipment is retried at delivery. Record the two results here when done.
+**Unmet — owner-pending.** Both checks need the owner's hands: the DevTools noise check on a service-worker restart (none of the four lines should appear) and the Touch ID passkey register → lock → unlock. A clean prover-on build of arc 1 (`3498e162`, `bun run build` output, no e2e stamps) was snapshotted for `send-to-mac`; the first send failed because the Mac was offline on the tailnet (Taildrop 502), the retry landed it as `nulo-chrome-wer-3498e162.zip` in the Mac's Taildrop inbox (2026-09-16). Record the two results here when done.
 
 
 ## Carry-forward

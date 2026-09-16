@@ -509,7 +509,9 @@ export class PxeService extends Service<Methods, PxeEvents> implements ServiceSp
 	/**
 	 * A stale anchor is retried once after a resync, inside the chain write guard the op holds.
 	 * Only the four chain-reading ops go through here; the retry re-runs the whole op (a second
-	 * full prove for `proveTx`) and never a broadcast — `sendTx` lives on the node client.
+	 * full prove for `proveTx`) and never a broadcast — `sendTx` lives on the node client. The
+	 * replay is safe because the PXE awaits its job's staged-write abort before rethrowing the
+	 * op's error, so the retry starts from the store as it was before the first attempt.
 	 */
 	private retryOnceOnStaleAnchor<T>(label: string, pxe: PXE, op: () => Promise<T>): Promise<T> {
 		return withStaleAnchorRetry(label, pxe, op, (line) => this.logInfo(line))
