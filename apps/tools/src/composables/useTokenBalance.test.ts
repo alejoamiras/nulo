@@ -36,6 +36,14 @@ vi.mock("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js", ()
 	TokenContractArtifact: { name: "Token" },
 }))
 
+// The utility read is wrapped in the session's CONTRACT_NOT_REGISTERED retry; none of these cases
+// injects that code, so pass through (the retry's own branches are pinned in useWalletConnection.test.ts).
+// Mocked to keep this file off the real wallet singleton it would otherwise construct at import.
+vi.mock("./useWalletConnection", () => ({
+	useWalletConnection: () => ({ wallet: { value: null }, reregisterContracts: async () => false }),
+	retryOnUnregistered: (_s: unknown, _w: unknown, op: () => Promise<unknown>) => op(),
+}))
+
 import { useTokenBalance } from "./useTokenBalance"
 
 const TOKEN = { toString: () => "0xtoken" } as unknown as Parameters<typeof useTokenBalance>[1]

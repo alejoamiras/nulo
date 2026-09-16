@@ -15,6 +15,7 @@ import { getPrivateFpc } from "@/contracts/private-fpc"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import { watch } from "vue"
 import { buildCombinedManifest } from "@/lib/capabilities"
+import { walletErrorCodeOf } from "@/lib/errors"
 import type { TokenWords } from "@/lib/send-model"
 import { createAztecWalletSession } from "./createAztecWalletSession"
 import { opsInFlight } from "./useOpsInFlight"
@@ -237,6 +238,32 @@ export function contractsReadinessRefusal(session: {
 	if (session.status.value !== "connected") return session.error.value?.message ?? "Connect your Aztec wallet first."
 	if (!session.contractsReady.value) return SETUP_PENDING
 	return undefined
+}
+
+/** The subset of the session `retryOnUnregistered` binds its recovery to. Structural (not
+ *  `AztecWalletSession`) so a mock session in a unit test satisfies it. */
+type RetrySession = { wallet: { value: Wallet | null }; reregisterContracts: () => Promise<boolean> }
+
+/**
+ * Run a single pre-submission wallet call; if it fails with the STRUCTURED `CONTRACT_NOT_REGISTERED`
+ * code (never the substring category — that accepts arbitrary text from any wallet, and only Nulo
+ * documents this code as raised before proving/broadcast), re-register the app's contracts once and
+ * run it again. The whole recovery is bound to the ORIGINAL session by the `wallet` handle: if the
+ * session was replaced by a reconnect while `op` was in flight (or between the failure and the
+ * retry), the original error propagates and nothing is re-registered — an op that outlived its
+ * session must not mark a newer wallet's contracts or retry against it. A second throw of any kind
+ * propagates untouched.
+ */
+export async function retryOnUnregistered<T>(session: RetrySession, wallet: Wallet, op: () => Promise<T>): Promise<T> {
+	try {
+		return await op()
+	} catch (err) {
+		if (walletErrorCodeOf(err) !== "CONTRACT_NOT_REGISTERED") throw err
+		if (session.wallet.value !== wallet) throw err
+		if (!(await session.reregisterContracts())) throw err
+		if (session.wallet.value !== wallet) throw err
+		return await op()
+	}
 }
 
 /** Test-only: clear state between cases. */

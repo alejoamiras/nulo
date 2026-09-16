@@ -63,7 +63,14 @@ export interface FuelClaimDeps {
 	onAttempt?: () => void
 	onTxHash?: (txHash: string) => void
 	onSetupInsufficiency?: () => void
+	/** Wraps the fee-payload simulate so a `CONTRACT_NOT_REGISTERED` re-registers once and retries.
+	 *  The caller (which owns the session) binds it; absent ⇒ the simulate runs bare. This module
+	 *  stays singleton-free — the wrapper arrives as an argument, exactly like `aztec`. */
+	retry?: FuelClaimRetry
 }
+
+/** Retry-once wrapper for a single pre-submission wallet call, pre-bound to a session by the caller. */
+export type FuelClaimRetry = (op: () => Promise<unknown>) => Promise<unknown>
 
 /** A fail-stop {simulate, send} pair that surfaces `why` (a guard refused before any wallet call). */
 const stop = (why: string): FuelClaimInteraction => ({
@@ -116,17 +123,24 @@ export async function buildFuelClaimInteraction(rec: DepositJournalRecord, deps:
  *  spuriously fail the self-pay budget check (codex round 3). Mirrors BatchCall.simulate's own
  *  non-empty-batch path: [request payload, toSimulateOptions(interaction options)]. */
 function makePayloadSimulator(deps: FuelClaimDeps): PayloadSimulator {
-	return (fee) => simulateFeePayload(deps.aztec, deps.recipient, fee)
+	return (fee) => simulateFeePayload(deps.aztec, deps.recipient, fee, deps.retry)
 }
 
 /** Simulate a fee payment's setup on its own — a carrier-less transaction whose whole body is the
  *  fee's claim — with the fee's explicit gas settings. The one prompt-free probe of whether a bridged
  *  Fee Juice message can be spent yet by a transaction the wallet cannot dry-run itself. */
-export async function simulateFeePayload(aztec: unknown, recipient: AztecAddress, fee: { paymentMethod: unknown }): Promise<unknown> {
+export async function simulateFeePayload(
+	aztec: unknown,
+	recipient: AztecAddress,
+	fee: { paymentMethod: unknown },
+	retry: FuelClaimRetry = (op) => op(),
+): Promise<unknown> {
 	const payload = await new BatchCall(aztec as never, []).request({ fee: { paymentMethod: fee.paymentMethod } } as never)
-	return await (aztec as { simulateTx: (p: unknown, o: unknown) => Promise<unknown> }).simulateTx(
-		payload,
-		toSimulateOptions({ from: recipient, fee } as never),
+	return await retry(() =>
+		(aztec as { simulateTx: (p: unknown, o: unknown) => Promise<unknown> }).simulateTx(
+			payload,
+			toSimulateOptions({ from: recipient, fee } as never),
+		),
 	)
 }
 

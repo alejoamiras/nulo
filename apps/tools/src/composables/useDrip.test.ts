@@ -69,6 +69,9 @@ vi.mock("@/composables/useWalletConnection", () => ({
 		if (!s.contractsReady.value) return "Your wallet is still setting up the app's contracts. Try again in a moment."
 		return undefined
 	},
+	// These cases never inject CONTRACT_NOT_REGISTERED; the retry's own branches are pinned in
+	// useWalletConnection.test.ts. Pass through so the send is the real one.
+	retryOnUnregistered: (_s: unknown, _w: unknown, op: () => Promise<unknown>) => op(),
 }))
 
 vi.mock("@nulo/bridge-core", () => ({

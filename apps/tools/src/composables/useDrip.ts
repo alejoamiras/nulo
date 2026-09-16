@@ -11,7 +11,7 @@ import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import { IS_MAINNET, NETWORK } from "@/lib/network"
 import type { DripToken, TokenSymbol } from "@/constants/tokens"
 import { withOperation } from "./useOpsInFlight"
-import { contractsReadinessRefusal, useWalletConnection } from "./useWalletConnection"
+import { contractsReadinessRefusal, retryOnUnregistered, useWalletConnection } from "./useWalletConnection"
 import { type NormalizedError, normalizeError } from "@/lib/errors"
 
 export type DripTarget = "public" | "private"
@@ -103,8 +103,12 @@ async function drip(
 			}
 		}
 		const sendOpts = paddedMaxFees ? { from: account, fee: { gasSettings: { maxFeesPerGas: paddedMaxFees } } } : { from: account }
-		// biome-ignore lint/suspicious/noExplicitAny: SendOptions structural cast for SDK signature variance across versions
-		const tx = await (wallet as any).sendTx(exec, sendOpts as any)
+		// A first drip against a token the wallet has not registered raises CONTRACT_NOT_REGISTERED
+		// before proving/broadcast; re-register once and resend (bound to this session's wallet).
+		const tx = await retryOnUnregistered(useWalletConnection(), wallet, () =>
+			// biome-ignore lint/suspicious/noExplicitAny: SendOptions structural cast for SDK signature variance across versions
+			(wallet as any).sendTx(exec, sendOpts as any),
+		)
 		const txHash = extractTxHash(tx)
 		const result: DripResult = { kind: "txHash", value: txHash }
 		last[key] = result

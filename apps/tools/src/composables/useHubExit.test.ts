@@ -125,6 +125,9 @@ vi.mock("@/composables/useWalletConnection", () => ({
 		if (!s.contractsReady.value) return "Your wallet is still setting up the app's contracts. Try again in a moment."
 		return undefined
 	},
+	// No case here injects CONTRACT_NOT_REGISTERED; the retry's branches are pinned in
+	// useWalletConnection.test.ts. Pass through so the exit calls are the real ones.
+	retryOnUnregistered: (_s: unknown, _w: unknown, op: () => Promise<unknown>) => op(),
 	__resetWalletConnectionForTests: () => {},
 }))
 
@@ -574,5 +577,32 @@ describe("useHubExit", () => {
 		exit.dispose()
 		expect(await exit.exit(plan())).toBe("")
 		expect(h.exitViaHub).not.toHaveBeenCalled()
+	})
+
+	it("a stale-anchor envelope from the exit shows the chain-desync copy at the display seam", async () => {
+		h.exitViaHub.mockImplementation(async () => {
+			throw new Error(JSON.stringify({ code: -32602, message: "x", data: { walletErrorCode: "PXE_STALE_ANCHOR" } }))
+		})
+		const exit = useHubExit()
+		await exit.exit(plan()) // the burn may have landed, so the record is kept and its id returned
+		expect(exit.error.value).toBe("Your wallet's view of the network was behind. Try again.")
+	})
+
+	it("a contract-not-registered envelope from the exit shows its copy at the display seam", async () => {
+		h.exitViaHub.mockImplementation(async () => {
+			throw new Error(JSON.stringify({ code: -32602, message: "x", data: { walletErrorCode: "CONTRACT_NOT_REGISTERED" } }))
+		})
+		const exit = useHubExit()
+		await exit.exit(plan())
+		expect(exit.error.value).toBe("Couldn't register the app's contracts with your wallet. Reconnect.")
+	})
+
+	it("an ordinary wallet-plumbing failure keeps today's humanized copy, unchanged by the new seam", async () => {
+		h.exitViaHub.mockImplementation(async () => {
+			throw new Error("timed out waiting for window")
+		})
+		const exit = useHubExit()
+		await exit.exit(plan())
+		expect(exit.error.value).toMatch(/confirmation window timed out/)
 	})
 })

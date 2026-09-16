@@ -3,6 +3,7 @@ import { Contract } from "@aztec/aztec.js/contracts"
 import type { Wallet } from "@aztec/aztec.js/wallet"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { ref, type Ref } from "vue"
+import { retryOnUnregistered, useWalletConnection } from "./useWalletConnection"
 
 const POLL_INTERVAL_MS = 15_000
 
@@ -144,8 +145,12 @@ export async function readBalance(
 		extraHashedArgs: [],
 		// biome-ignore lint/suspicious/noExplicitAny: ExecuteUtilityOptions narrower than runtime
 	} as any
-	// biome-ignore lint/suspicious/noExplicitAny: FunctionCall isn't exported through aztec.js root
-	const raw = (await wallet.executeUtility(call as any, opts)) as UtilityExecutionResultShape
+	// A utility read against a token the wallet has not registered raises CONTRACT_NOT_REGISTERED;
+	// re-register once and re-read, bound to the session that still holds this wallet.
+	const raw = (await retryOnUnregistered(useWalletConnection(), wallet, () =>
+		// biome-ignore lint/suspicious/noExplicitAny: FunctionCall isn't exported through aztec.js root
+		wallet.executeUtility(call as any, opts),
+	)) as UtilityExecutionResultShape
 	return extractFirstFr(raw)
 }
 

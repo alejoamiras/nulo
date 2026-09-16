@@ -10,6 +10,7 @@
  * there the authwit comes first and the simulate is what proves it took.
  */
 import { AztecAddress } from "@aztec/aztec.js/addresses"
+import type { Wallet } from "@aztec/aztec.js/wallet"
 import { SetPublicAuthwitContractInteraction } from "@aztec/aztec.js/authorization"
 import { Contract } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
@@ -47,6 +48,7 @@ import { webJournalLocks } from "@/lib/journal-locks"
 import { resolveToolsTarget } from "@/lib/network-targets"
 import { findVerifiedExitTx } from "./exit-attach"
 import type { ExitPlan } from "@/lib/send-model"
+import { normalizeError } from "@/lib/errors"
 import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
 import {
 	type ConsumeOutcome,
@@ -62,7 +64,7 @@ import {
 	useBridgeJournal,
 } from "./useBridgeJournal"
 import { useBridgeWallet } from "./useBridgeWallet"
-import { contractsReadinessRefusal } from "./useWalletConnection"
+import { contractsReadinessRefusal, retryOnUnregistered } from "./useWalletConnection"
 import { useL1Wallet } from "./useL1Wallet"
 import { withOperation } from "./useOpsInFlight"
 import { readBalance } from "./useTokenBalance"
@@ -342,6 +344,9 @@ async function assertExitsOpen(l1: ReturnType<typeof useL1Wallet>, aztec: unknow
 
 interface ExitCtx {
 	aztec: unknown
+	/** The session the wallet came from, so a `CONTRACT_NOT_REGISTERED` retry re-registers against it
+	 *  and never against a wallet a reconnect swapped in mid-exit. */
+	session: ReturnType<typeof useBridgeWallet>
 	from: string
 	fromAddr: AztecAddress
 	plan: ExitPlan
@@ -362,10 +367,12 @@ type ExitAuth = { authWitnesses?: unknown[] }
  *  nothing until a transaction spends it, which is why the simulate may be handed it. */
 async function privateBurnWitness(ctx: ExitCtx): Promise<ExitAuth> {
 	const { aztec, fromAddr, plan, nonce, token } = ctx
-	const burnAuthwit = await (aztec as { createAuthWit: (a: AztecAddress, i: unknown) => Promise<unknown> }).createAuthWit(fromAddr, {
-		caller: HUB as AztecAddress,
-		call: await token.methods.burn_private(fromAddr, plan.amount, nonce).getFunctionCall(),
-	})
+	const burnAuthwit = await retryOnUnregistered(ctx.session, aztec as Wallet, async () =>
+		(aztec as { createAuthWit: (a: AztecAddress, i: unknown) => Promise<unknown> }).createAuthWit(fromAddr, {
+			caller: HUB as AztecAddress,
+			call: await token.methods.burn_private(fromAddr, plan.amount, nonce).getFunctionCall(),
+		}),
+	)
 	return { authWitnesses: [burnAuthwit] }
 }
 
@@ -458,15 +465,19 @@ async function readOnlyPreflight(ctx: ExitCtx, l1: ReturnType<typeof useL1Wallet
  * after it: the same call rejected as unauthorized beforehand is what confirms the authwit took.
  */
 async function authorizeExit(ctx: ExitCtx, open: () => void): Promise<ExitAuth> {
+	// preflightHubExit only simulates (`hub-l2.ts`), so a `CONTRACT_NOT_REGISTERED` from it is safe to
+	// re-register-and-retry once even on the public path, after the authwit transaction has landed.
 	if (ctx.plan.isPrivate) {
 		const auth = await privateBurnWitness(ctx)
-		await preflightHubExit(hubOf(ctx), exitParams(ctx), ctx.from, { ...auth, ...(ctx.fee ? { fee: ctx.fee } : {}) })
+		await retryOnUnregistered(ctx.session, ctx.aztec as Wallet, () =>
+			preflightHubExit(hubOf(ctx), exitParams(ctx), ctx.from, { ...auth, ...(ctx.fee ? { fee: ctx.fee } : {}) }),
+		)
 		open()
 		return auth
 	}
 	open()
 	await sendPublicBurnAuthwit(ctx)
-	await preflightHubExit(hubOf(ctx), exitParams(ctx), ctx.from)
+	await retryOnUnregistered(ctx.session, ctx.aztec as Wallet, () => preflightHubExit(hubOf(ctx), exitParams(ctx), ctx.from))
 	return {}
 }
 
@@ -526,6 +537,7 @@ async function performExit(plan: ExitPlan, d: ExitDeps, approvedCeiling?: bigint
 	try {
 		const ctx: ExitCtx = {
 			aztec,
+			session: d.bridgeWallet,
 			from,
 			fromAddr: AztecAddress.fromStringUnsafe(from),
 			plan,
@@ -576,6 +588,14 @@ const failWith = (error: Ref<string | null>, message: string): string => {
 	return ""
 }
 
+/** The two structured envelope categories get their own copy; everything else keeps today's path
+ *  (a confirmation-window timeout translated, unknowns passed through). */
+function exitFailureCopy(e: unknown): string {
+	const n = normalizeError(e)
+	if (n.category === "contract-not-registered" || n.category === "chain-desync") return n.message
+	return humanizeWalletError(e instanceof Error ? e.message : "Withdraw failed")
+}
+
 /** Only an EXPLICIT rejection before the exit transaction discards the record; every ambiguous
  *  failure keeps it, because a burn that may have landed must stay finishable. */
 function handleExitFailure(e: unknown, ids: { provisionalId: string; finalId: string }, d: ExitDeps): void {
@@ -590,7 +610,7 @@ function handleExitFailure(e: unknown, ids: { provisionalId: string; finalId: st
 		discard(ids.provisionalId)
 		return
 	}
-	const msg = humanizeWalletError(e instanceof Error ? e.message : "Withdraw failed")
+	const msg = exitFailureCopy(e)
 	d.error.value = msg
 	const rec = d.journal.records.value.find((r) => r.id === ids.finalId) as SendWithdrawRecord | undefined
 	if (rec && !rec.exitTxHash && isUserRejection(e)) {

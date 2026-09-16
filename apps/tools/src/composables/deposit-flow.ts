@@ -64,7 +64,7 @@ import {
 	updateRecord,
 	updateRecordWhen,
 } from "./useBridgeJournal"
-import { buildFuelClaimInteraction } from "./fuelClaim"
+import { type FuelClaimRetry, buildFuelClaimInteraction } from "./fuelClaim"
 import { readBalance } from "./useTokenBalance"
 
 // Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
@@ -397,6 +397,7 @@ export async function buildFeeJuiceClaimDep(
 	secretHex: string,
 	envelope: { salt?: string } | undefined,
 	aztec: unknown,
+	retry?: FuelClaimRetry,
 ): Promise<ClaimInteraction> {
 	const prior = await priorFuelClaimStop(rec.id, rec.fuel)
 	if (prior) return prior
@@ -423,6 +424,7 @@ export async function buildFeeJuiceClaimDep(
 		onAttempt: () => latchFuel({ claimAttempt: true, claimAttemptAt: Date.now(), setupInsufficiency: false }),
 		onTxHash: (txHash: string) => latchFuel({ claimAttempt: true, claimAttemptAt: Date.now(), claimTxHash: txHash }),
 		onSetupInsufficiency: () => latchFuel({ setupInsufficiency: true }),
+		retry,
 	}) as unknown as ClaimInteraction
 }
 

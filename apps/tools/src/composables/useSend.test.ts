@@ -754,6 +754,26 @@ describe("useSend", () => {
 		expect(useBridgeJournal().runtime.value["0xtokenhash"]?.note).toMatch(/fetch failed/)
 	})
 
+	it("a stale-anchor envelope from the send shows the chain-desync copy at the display seam", async () => {
+		h.runSend.mockImplementation(async (_l1: unknown, _gen: unknown, p: FakeParams, _s?: unknown, recovery?: FakeRecovery) => {
+			recovery?.onSecrets?.(await fakeSecrets(p))
+			throw new Error(JSON.stringify({ code: -32602, message: "x", data: { walletErrorCode: "PXE_STALE_ANCHOR" } }))
+		})
+		const send = useSend()
+		expect(await send.send(plan())).toBe("")
+		expect(send.error.value).toBe("Your wallet's view of the network was behind. Try again.")
+	})
+
+	it("a contract-not-registered envelope from the send shows its copy at the display seam", async () => {
+		h.runSend.mockImplementation(async (_l1: unknown, _gen: unknown, p: FakeParams, _s?: unknown, recovery?: FakeRecovery) => {
+			recovery?.onSecrets?.(await fakeSecrets(p))
+			throw new Error(JSON.stringify({ code: -32602, message: "x", data: { walletErrorCode: "CONTRACT_NOT_REGISTERED" } }))
+		})
+		const send = useSend()
+		expect(await send.send(plan())).toBe("")
+		expect(send.error.value).toBe("Couldn't register the app's contracts with your wallet. Reconnect.")
+	})
+
 	it("an L1 wallet on another chain refuses before the approval, so nothing is signed and no row survives", async () => {
 		h.chainId.value = 1
 		const send = useSend()

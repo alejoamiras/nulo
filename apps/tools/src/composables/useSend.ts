@@ -77,11 +77,17 @@ import {
 	sealPrivateRecord,
 } from "./deposit-flow"
 import { fuelOverrideActive, launchStandaloneFuelClaim } from "./fuel-recovery"
-import { simulateFeePayload } from "./fuelClaim"
+import { type FuelClaimRetry, simulateFeePayload } from "./fuelClaim"
 import { useBridgeWallet } from "./useBridgeWallet"
 import { useL1Wallet } from "./useL1Wallet"
 import { withOperation } from "./useOpsInFlight"
-import { contractsReadinessRefusal, requestHubToken, retainPinnedHubTokens, useWalletConnection } from "./useWalletConnection"
+import {
+	contractsReadinessRefusal,
+	requestHubToken,
+	retainPinnedHubTokens,
+	retryOnUnregistered,
+	useWalletConnection,
+} from "./useWalletConnection"
 import { useTokenGrant } from "./useTokenGrant"
 
 // Ids, stages and tx hashes ONLY - secrets, salts, amounts and addresses never reach this log.
@@ -248,7 +254,7 @@ export function ensureSendJournalDeps(): void {
 		claim: async (rec, secretHex, envelope) => {
 			const aztec = bridgeWallet.wallet.value
 			if (!aztec) throw new Error("Connect your Aztec wallet first.")
-			return buildFeeJuiceClaimDep(rec, secretHex, envelope, aztec)
+			return buildFeeJuiceClaimDep(rec, secretHex, envelope, aztec, (op) => retryOnUnregistered(bridgeWallet, aztec, op))
 		},
 		recoverDepositLeg: (rec) => recoverDepositLeg(rec, l1.publicClient as never, SEND_GENERATION),
 		findDepositTx: (rec) =>
@@ -409,7 +415,7 @@ async function buildHubClaim(
 		from: rec.recipient,
 	}
 	return {
-		simulate: () => probeHubClaim(hub, params, fee.opts, aztec),
+		simulate: () => probeHubClaim(hub, params, fee.opts, aztec, (op) => retryOnUnregistered(bridgeWallet, aztec, op)),
 		send: async () => {
 			const { seams, fuelOnRegistration } = hubClaimSeams(rec.id, fee)
 			try {
@@ -465,10 +471,16 @@ type ProbeParams = Parameters<typeof claimViaHub>[1]
  * authority. A registered token probes the real claim, which is what makes the engine wait out a
  * message that has not folded into the L2 yet.
  */
-async function probeHubClaim(hub: HubContract, p: ProbeParams, opts: Record<string, unknown>, aztec: unknown): Promise<unknown> {
+async function probeHubClaim(
+	hub: HubContract,
+	p: ProbeParams,
+	opts: Record<string, unknown>,
+	aztec: unknown,
+	retry?: FuelClaimRetry,
+): Promise<unknown> {
 	if (!(await hubTokenFor(hub, p.token.erc20, p.from))) {
 		const registerFee = opts.registerFee as { paymentMethod: unknown } | undefined
-		return registerFee ? simulateFeePayload(aztec, AztecAddress.fromStringUnsafe(p.recipient), registerFee) : {}
+		return registerFee ? simulateFeePayload(aztec, AztecAddress.fromStringUnsafe(p.recipient), registerFee, retry) : {}
 	}
 	const to = AztecAddress.fromStringUnsafe(p.recipient)
 	const l2Token = AztecAddress.fromStringUnsafe(p.token.l2Token)
@@ -765,10 +777,17 @@ function settleFailedSend(id: string, ctx: RunCtx, e: unknown): void {
 	}
 }
 
-/** The wallet's own refusal reads as its one line; anything else keeps its message, humanized. */
+/** The wallet's own refusal reads as its one line, and the two structured envelope categories get
+ *  their own copy; anything else keeps its message, humanized. */
 function sendFailureCopy(e: unknown): string {
 	const normalized = normalizeError(e)
-	if (normalized.category === "user-rejected") return normalized.message
+	if (
+		normalized.category === "user-rejected" ||
+		normalized.category === "contract-not-registered" ||
+		normalized.category === "chain-desync"
+	) {
+		return normalized.message
+	}
 	return humanizeWalletError(e instanceof Error ? e.message : String(e))
 }
 

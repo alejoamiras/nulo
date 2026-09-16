@@ -115,6 +115,7 @@ import {
 	requestHubToken,
 	requestedHubTokens,
 	retainPinnedHubTokens,
+	retryOnUnregistered,
 	SETUP_PENDING,
 	useWalletConnection,
 	__resetWalletConnectionForTests,
@@ -600,5 +601,111 @@ describe("contractsReadinessRefusal", () => {
 		expect(contractsReadinessRefusal({ status: { value: "idle" }, error: { value: null }, contractsReady: { value: false } })).toBe(
 			"Connect your Aztec wallet first.",
 		)
+	})
+})
+
+describe("retryOnUnregistered", () => {
+	// The structured code, wrapped as the extension transport does (one JSON level).
+	const unregistered = () =>
+		new Error(
+			JSON.stringify({
+				code: -32602,
+				message: "Contract not registered with the wallet.",
+				data: { walletErrorCode: "CONTRACT_NOT_REGISTERED" },
+			}),
+		)
+	// The same wording, but as free text with no structured code — must NOT trigger the retry.
+	const substringOnly = () => new Error("Contract not registered with the wallet. Register it and retry.")
+
+	// biome-ignore lint/suspicious/noExplicitAny: opaque wallet handle; identity is all the helper reads
+	const walletHandle = (): any => ({})
+	function sessionHolding(wallet: unknown, reregister = vi.fn(async () => true)) {
+		return { wallet: { value: wallet }, reregisterContracts: reregister } as Parameters<typeof retryOnUnregistered>[0] & {
+			reregisterContracts: ReturnType<typeof vi.fn>
+		}
+	}
+
+	it("returns the value and never re-registers when the op succeeds", async () => {
+		const wallet = walletHandle()
+		const session = sessionHolding(wallet)
+		const op = vi.fn(async () => "ok")
+		await expect(retryOnUnregistered(session, wallet, op)).resolves.toBe("ok")
+		expect(op).toHaveBeenCalledTimes(1)
+		expect(session.reregisterContracts).not.toHaveBeenCalled()
+	})
+
+	it("rethrows an unrelated error without re-registering", async () => {
+		const wallet = walletHandle()
+		const session = sessionHolding(wallet)
+		const op = vi.fn(async () => {
+			throw new Error("network down")
+		})
+		await expect(retryOnUnregistered(session, wallet, op)).rejects.toThrow("network down")
+		expect(op).toHaveBeenCalledTimes(1)
+		expect(session.reregisterContracts).not.toHaveBeenCalled()
+	})
+
+	it("does NOT retry on the substring category without the structured code", async () => {
+		const wallet = walletHandle()
+		const session = sessionHolding(wallet)
+		const op = vi.fn(async () => {
+			throw substringOnly()
+		})
+		await expect(retryOnUnregistered(session, wallet, op)).rejects.toThrow(/Register it and retry/)
+		expect(op).toHaveBeenCalledTimes(1)
+		expect(session.reregisterContracts).not.toHaveBeenCalled()
+	})
+
+	it("re-registers once and re-runs the op on the structured code", async () => {
+		const wallet = walletHandle()
+		const session = sessionHolding(wallet)
+		let calls = 0
+		const op = vi.fn(async () => {
+			calls += 1
+			if (calls === 1) throw unregistered()
+			return "ok-after-register"
+		})
+		await expect(retryOnUnregistered(session, wallet, op)).resolves.toBe("ok-after-register")
+		expect(op).toHaveBeenCalledTimes(2)
+		expect(session.reregisterContracts).toHaveBeenCalledTimes(1)
+	})
+
+	it("rethrows the ORIGINAL error when re-registration reports it could not run", async () => {
+		const wallet = walletHandle()
+		const session = sessionHolding(
+			wallet,
+			vi.fn(async () => false),
+		)
+		const op = vi.fn(async () => {
+			throw unregistered()
+		})
+		await expect(retryOnUnregistered(session, wallet, op)).rejects.toThrow(/CONTRACT_NOT_REGISTERED/)
+		expect(op).toHaveBeenCalledTimes(1)
+	})
+
+	it("propagates a second throw untouched, having run the op exactly twice", async () => {
+		const wallet = walletHandle()
+		const session = sessionHolding(wallet)
+		let calls = 0
+		const op = vi.fn(async () => {
+			calls += 1
+			if (calls === 1) throw unregistered()
+			throw new Error("still broken after re-register")
+		})
+		await expect(retryOnUnregistered(session, wallet, op)).rejects.toThrow("still broken after re-register")
+		expect(op).toHaveBeenCalledTimes(2)
+		expect(session.reregisterContracts).toHaveBeenCalledTimes(1)
+	})
+
+	it("rethrows the original — no re-register, no second attempt — when the session was replaced mid-flight", async () => {
+		const original = walletHandle()
+		const replacement = walletHandle()
+		const session = sessionHolding(replacement) // a reconnect swapped the wallet while op was in flight
+		const op = vi.fn(async () => {
+			throw unregistered()
+		})
+		await expect(retryOnUnregistered(session, original, op)).rejects.toThrow(/CONTRACT_NOT_REGISTERED/)
+		expect(op).toHaveBeenCalledTimes(1)
+		expect(session.reregisterContracts).not.toHaveBeenCalled()
 	})
 })
