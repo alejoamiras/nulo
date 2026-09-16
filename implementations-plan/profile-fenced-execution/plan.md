@@ -837,7 +837,7 @@ Unit pins (the session fake bumps its serial or clears, plus a same-session nega
   (`buildStandard`/`buildNoFrom`, both `tryConsume`, `acquireSlot`, `registerController` →
   `registerInFlight`), listed in the lessons file. Layers: typecheck · lint · unit
 
-### Phase 2 — composition: the real graph, a real session end, the races
+### Phase 2 — composition: the real graph, a real session end, the races ✓
 
 Harness: the session fake gains `setActive(id | undefined)` (new serial per call; drives
 `getActiveProfile`, `captureExecutionFence`, `assertFence`, `isFenceLive`, `peekLiveSerial`), a

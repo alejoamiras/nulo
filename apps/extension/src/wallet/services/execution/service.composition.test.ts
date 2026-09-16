@@ -12,6 +12,10 @@
  * FRESH-build path is NOT covered here; it's the heavy boundary deferred to the
  * rollout — see lessons/phase-2.md.
  *
+ * The session cases run the same graph under a ProfileService fake whose
+ * `setActive` starts a new session, as a lock, a switch or a re-unlock does:
+ * dApp sends park at their slot-key lookup, transfers at the proof gate.
+ *
  * FAKE_IPXE_BUNDLE_MARKER — the fakes live in this `*.test.ts`, so they are
  * never in the production bundle (Phase-2 gate greps `dist/` for this marker;
  * it must be absent).
@@ -19,6 +23,7 @@
 import { describe, expect, test, vi } from "vitest"
 import { Gas } from "@aztec/stdlib/gas"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { JobCancelledError, SessionEndedError } from "@nulo/extension-messaging/errors"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { ConfigStore } from "@/wallet/config"
@@ -45,6 +50,10 @@ import { EmbeddedStrategy } from "./fee/embedded-strategy"
 import { FeeJuiceStrategy } from "./fee/fee-juice-strategy"
 import { FeeJuiceWithClaimStrategy } from "./fee/fee-juice-with-claim-strategy"
 import { FpcStrategy } from "./fee/fpc-strategy"
+import type { OperationEstimateReuse } from "./operation-estimate-reuse"
+import { fingerprintOperation } from "./operation-fingerprint"
+import type { OperationPlanner } from "./operation-planner"
+import type { PreviewSnapshots } from "./preview-snapshots"
 import {
 	fingerprintBaseFee,
 	fingerprintFeeSettings,
@@ -97,7 +106,8 @@ async function makeHarness() {
 	// cancel checkpoint must drop the proof BEFORE `toTx`, so `toTx` proves submission.
 	const toTx = vi.fn(async () => ({ getTxHash: () => ({ toString: () => "0xhash" }) }))
 	const fakeNode = { getCurrentMinFees: async () => MIN_FEES, sendTx } as unknown as never
-	const fakeIPXE = { proveTx: vi.fn(async () => ({ toTx })) } as unknown as ReturnType<PxeServiceClient["getPXE"]>
+	const proveTx = vi.fn(async () => ({ toTx }))
+	const fakeIPXE = { proveTx } as unknown as ReturnType<PxeServiceClient["getPXE"]>
 	const fakePxeClient = { getPXE: () => fakeIPXE, onProvePhase: { add: () => {} } } as unknown as PxeServiceClient
 
 	const logger = new LoggerStore(new ConfigStore())
@@ -112,6 +122,27 @@ async function makeHarness() {
 		journalId = rec.id
 	})
 	journal.onOperationUpdated.add((rec) => stages.push(rec.progress.stage))
+	/** Parks the first journal write that stores a record matching `match`, until released. */
+	const parkJournalWrite = (match: (record: { progress: { stage: string } }) => boolean) => {
+		let release: () => void = () => {}
+		const gate = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		let parked = false
+		const area = api.storage.local
+		const write = area.set.bind(area)
+		vi.spyOn(area, "set").mockImplementation(async (entries) => {
+			const hit = Object.entries(entries).some(
+				([key, value]) => key.startsWith("nulo:journal@") && typeof value === "string" && match(JSON.parse(value)),
+			)
+			if (hit && !parked) {
+				parked = true
+				await gate
+			}
+			return write(entries)
+		})
+		return { isParked: () => parked, release: () => release() }
+	}
 
 	const collection = new ServiceCollection()
 	// One shared ProfileDeletionState so Execution's captureFence + Transaction's
@@ -120,30 +151,51 @@ async function makeHarness() {
 	// Real handler so the facade's profile-switch invalidation (D12) is both
 	// subscribable by the service and firable by tests.
 	const profileChanged = new EventHandler<unknown>()
-	// One live session for the whole harness; the checks answer from the epoch map alone.
-	const SESSION = 1
-	const captureExecutionFence = async (): Promise<ExecutionFence> => ({
-		profileId: "p1",
-		epoch: deletionState.capture("p1"),
-		session: SESSION,
-	})
+	// The published session. Every `setActive` starts a new one with a fresh serial, as a lock, a
+	// switch or a re-unlock does; `fireChanged` is separate so a checkpoint case can run without
+	// the change subscribers.
+	let lastSerial = 1
+	let live: { profileId: string; serial: number } | undefined = { profileId: "p1", serial: lastSerial }
+	const captureExecutionFence = async (): Promise<ExecutionFence> => {
+		if (!live) throw new Error("Wallet locked")
+		return { profileId: live.profileId, epoch: deletionState.capture(live.profileId), session: live.serial }
+	}
+	const session = {
+		setActive: (profileId: string | undefined) => {
+			lastSerial += 1
+			live = profileId ? { profileId, serial: lastSerial } : undefined
+		},
+		fireChanged: () => profileChanged.invoke(live ? { id: live.profileId } : undefined),
+	}
 	collection.add(
 		svc(ProfileService.name, {
-			getActiveProfile: async () => ({ id: "p1" }),
+			getActiveProfile: async () => (live ? { id: live.profileId } : undefined),
 			// The journal's create fence checks membership here — the fake must
 			// list the profile the flow files under or every create is refused.
-			getProfiles: async () => [{ id: "p1" }],
+			getProfiles: async () => [{ id: "p1" }, { id: "p2" }],
 			getDeletionState: () => deletionState,
 			captureExecutionFence,
-			assertFence: async (fence: ExecutionFence) => deletionState.assertCurrent(fence.profileId, fence.epoch),
-			isFenceLive: (fence: ExecutionFence) => fence.session === SESSION && deletionState.isCurrent(fence.profileId, fence.epoch),
-			peekLiveSerial: () => SESSION,
+			assertFence: async (fence: ExecutionFence) => {
+				if (live?.serial !== fence.session || live.profileId !== fence.profileId) throw new SessionEndedError()
+				deletionState.assertCurrent(fence.profileId, fence.epoch)
+			},
+			isFenceLive: (fence: ExecutionFence) =>
+				live?.serial === fence.session &&
+				live.profileId === fence.profileId &&
+				deletionState.isCurrent(fence.profileId, fence.epoch),
+			peekLiveSerial: () => live?.serial,
 			onActiveProfileChanged: profileChanged,
 		}),
 	)
 	const getNetwork = vi.fn(async () => NETWORK)
 	collection.add(svc(NetworkService.name, { getNetwork, getNode: async () => fakeNode }))
-	collection.add(svc(AccountService.name, { getAccountContract: async () => ({ address: ACCOUNT }) }))
+	// The profiles that hold ACCOUNT; a lookup under any other profile misses.
+	const accountOwners = new Set(["p1"])
+	const getAccountContract = vi.fn(async (profileId: string) => {
+		if (!accountOwners.has(profileId)) throw new Error(`no such account under ${profileId}`)
+		return { address: ACCOUNT }
+	})
+	collection.add(svc(AccountService.name, { getAccountContract }))
 	collection.add(
 		svc(TransactionService.name, {
 			getPendingForAccount: () => [],
@@ -195,7 +247,16 @@ async function makeHarness() {
 		primaryEndpointId: "ep1",
 		primaryEndpointUrl: "http://fake",
 		pendingHashes: [],
-		txRequest: { txContext: { gasSettings: { teardownGas: new Gas(1, 1) } } } as never,
+		txRequest: {
+			txContext: {
+				gasSettings: {
+					teardownGas: new Gas(1, 1),
+					gasLimits: { daGas: 100, l2Gas: 200 },
+					teardownGasLimits: { daGas: 10, l2Gas: 20 },
+					maxFeesPerGas: { feePerDaGas: 2n, feePerL2Gas: 3n },
+				},
+			},
+		} as never,
 		nonce: { toString: () => "0" },
 		feePaymentMethod: "EXTERNAL" as never,
 		token: { contract: "0xtok", name: "Tok", symbol: "TOK", decimals: 18 },
@@ -217,10 +278,17 @@ async function makeHarness() {
 		toTx,
 		getJournalId: () => journalId,
 		captureExecutionFence,
-		profileChanged,
+		session,
 		getNetwork,
+		accountOwners,
+		getAccountContract,
+		proveTx,
+		parkJournalWrite,
+		lane: (service as unknown as { lane: ExecutionLane }).lane,
 	}
 }
+
+type Harness = Awaited<ReturnType<typeof makeHarness>>
 
 const waitFor = async (pred: () => boolean, timeoutMs = 2000) => {
 	const deadline = Date.now() + timeoutMs
@@ -382,6 +450,259 @@ describe("ExecutionService composition — cancel during queued-wait (in-process
 	}, 15_000)
 })
 
+const DAPP_ORIGIN = { type: OriginType.DAPP, name: "dapp" } as never
+const dappSend = () =>
+	({
+		kind: "aztec_sendTx",
+		networkId: NETWORK.id,
+		accountAddress: ACCOUNT.toString(),
+		feeSettings: { paymentMethod: { kind: "fpc" } },
+	}) as never
+const transfer = (h: Harness, estimateId: string | undefined = h.estimateId) =>
+	h.service
+		.executeTransfer(
+			h.req.networkId,
+			h.req.accountAddress,
+			h.req.tokenId,
+			h.req.transferType,
+			h.req.recipientAddress,
+			h.req.amount,
+			h.req.feeSettings,
+			estimateId,
+		)
+		.catch((error: unknown) => error)
+
+/** Parks the next `getNetwork`: the slot-key lookup a dApp send awaits before its claim. */
+function parkNextNetworkLookup(h: Harness) {
+	let release: () => void = () => {}
+	const gate = new Promise<void>((resolve) => {
+		release = resolve
+	})
+	let entered = false
+	h.getNetwork.mockImplementationOnce(async () => {
+		entered = true
+		await gate
+		return NETWORK
+	})
+	return { isEntered: () => entered, release: () => release() }
+}
+
+async function expectEndedUnder(h: Harness, journalId: string, profileId: string) {
+	const record = await h.journal.getOperation(journalId)
+	expect(record?.progress.stage).toBe("failed")
+	expect(record?.error?.kind).toBe("session_ended")
+	expect(record?.profileId).toBe(profileId)
+}
+
+describe("ExecutionService composition — work runs only while the session that authorized it lives", () => {
+	test.each([
+		{ label: "a switch to another profile", next: "p2" },
+		{ label: "a lock", next: undefined },
+	])(
+		"a dApp send parked at its slot-key lookup, then $label: refused, failed/session_ended under p1, never proved",
+		async ({ next }) => {
+			const h = await makeHarness()
+			const fence = await h.captureExecutionFence()
+			const lookup = parkNextNetworkLookup(h)
+			const run = h.service.executeOperations([dappSend()], DAPP_ORIGIN, undefined, undefined, undefined, fence)
+			await waitFor(lookup.isEntered)
+			h.session.setActive(next)
+			lookup.release()
+
+			expect(await run).toEqual([expect.objectContaining({ status: "failed", code: "SESSION_ENDED" })])
+			await expectEndedUnder(h, h.getJournalId(), "p1")
+			expect(h.proveTx).not.toHaveBeenCalled()
+		},
+		15_000,
+	)
+
+	test.each([
+		{ label: "a switch to another profile", next: "p2" },
+		{ label: "a lock", next: undefined },
+		{ label: "a re-unlock of the same profile", next: "p1" },
+	])(
+		"a transfer parked at prove, then $label: proved but never sent, failed/session_ended under p1",
+		async ({ next }) => {
+			const h = await makeHarness()
+			const run = transfer(h)
+			await waitFor(() => h.ctrl.entered && h.stages.includes("proving"))
+			h.session.setActive(next)
+			h.ctrl.release()
+
+			expect(await run).toBeInstanceOf(SessionEndedError)
+			expect(h.proveTx).toHaveBeenCalledTimes(1)
+			expect(h.toTx).not.toHaveBeenCalled()
+			expect(h.sendTx).not.toHaveBeenCalled()
+			await expectEndedUnder(h, h.getJournalId(), "p1")
+		},
+		15_000,
+	)
+
+	test("a transfer parked at prove while the next profile holds the same address: the fence stops it, not a lookup miss", async () => {
+		const h = await makeHarness()
+		h.accountOwners.add("p2")
+		const run = transfer(h)
+		await waitFor(() => h.ctrl.entered && h.stages.includes("proving"))
+		h.session.setActive("p2")
+		h.ctrl.release()
+
+		expect(await run).toBeInstanceOf(SessionEndedError)
+		expect(h.sendTx).not.toHaveBeenCalled()
+		expect(h.getAccountContract.mock.calls.map(([profileId]) => profileId)).toEqual(["p1"])
+		await expectEndedUnder(h, h.getJournalId(), "p1")
+	}, 15_000)
+
+	test("a UI send with no fence captures one at entry, and a switch while it waits refuses it the same way", async () => {
+		const h = await makeHarness()
+		const lookup = parkNextNetworkLookup(h)
+		const uiSend = {
+			kind: "send_transaction",
+			networkId: NETWORK.id,
+			accountAddress: ACCOUNT.toString(),
+			feeSettings: { paymentMethod: { kind: "fj" } },
+			actions: [],
+		} as never
+		const run = h.service.executeSendTransaction(uiSend, { type: OriginType.UI }).catch((error: unknown) => error)
+		await waitFor(lookup.isEntered)
+		h.session.setActive("p2")
+		lookup.release()
+
+		expect(await run).toBeInstanceOf(SessionEndedError)
+		await expectEndedUnder(h, h.getJournalId(), "p1")
+		expect(h.proveTx).not.toHaveBeenCalled()
+	}, 15_000)
+
+	test("an operation estimate stashed under p1 and confirmed under p2 is refused before any build", async () => {
+		const h = await makeHarness()
+		const feeSettings = { paymentMethod: { kind: "fj" } } as unknown as FeeSettings
+		const op = {
+			kind: "aztec_sendTx",
+			networkId: NETWORK.id,
+			accountAddress: ACCOUNT.toString(),
+			feeSettings,
+			exec: { calls: [] },
+			opts: { from: ACCOUNT },
+		}
+		const internals = h.service as unknown as {
+			planner: OperationPlanner
+			operationEstimateReuse: OperationEstimateReuse
+			previewSnapshots: PreviewSnapshots
+		}
+		const { actions, feeOptions } = await internals.planner.processAztecJsPayload(op.exec as never, op.opts as never)
+		const fingerprint = fingerprintOperation({
+			networkId: op.networkId,
+			accountAddress: op.accountAddress,
+			executionMode: "standard",
+			from: ACCOUNT.toString(),
+			actions,
+			fee: feeOptions,
+			feeSettings,
+		})
+		internals.operationEstimateReuse.stash("est-op", { fingerprint, profileId: "p1", builtAt: Date.now() } as never)
+		internals.previewSnapshots.stash("est-op", { interactionId: "i-1", index: 0, fingerprint, discoveredHashes: [] })
+
+		h.session.setActive("p2")
+		const approval = { interactionId: "i-1", index: 0, estimateId: "est-op", previewId: "est-op" }
+		const fence = await h.captureExecutionFence()
+		const results = await h.service.executeOperations([op as never], DAPP_ORIGIN, undefined, undefined, [approval], fence)
+
+		expect(results).toEqual([expect.objectContaining({ status: "failed", code: "SESSION_ENDED" })])
+		expect(h.getAccountContract).not.toHaveBeenCalled()
+		expect(h.proveTx).not.toHaveBeenCalled()
+		await expectEndedUnder(h, h.getJournalId(), "p2")
+	}, 15_000)
+
+	test("a transfer estimate stashed under p1 and confirmed under p2 is refused before any build", async () => {
+		const h = await makeHarness()
+		h.session.setActive("p2")
+
+		expect(await transfer(h)).toBeInstanceOf(SessionEndedError)
+		expect(h.getAccountContract).not.toHaveBeenCalled()
+		expect(h.proveTx).not.toHaveBeenCalled()
+		await expectEndedUnder(h, h.getJournalId(), "p2")
+	}, 15_000)
+
+	test("a silent send whose record is already pending is failed at the slot, not stranded, and holds nothing", async () => {
+		const h = await makeHarness()
+		const fence = await h.captureExecutionFence()
+		const queued = await h.journal.createOperation({
+			kind: "dapp_execute",
+			origin: "dapp",
+			profileId: "p1",
+			sessionId: "sess-1",
+			initialStage: { stage: "queued" },
+		})
+		await h.journal.transitionOperation(queued.id, { stage: "pending" })
+		h.session.setActive(undefined)
+		h.getNetwork.mockClear()
+
+		const results = await h.service.executeOperations(
+			[dappSend()],
+			DAPP_ORIGIN,
+			undefined,
+			{ queuedJournalId: queued.id },
+			undefined,
+			fence,
+		)
+
+		expect(results).toEqual([expect.objectContaining({ status: "failed", code: "SESSION_ENDED" })])
+		await expectEndedUnder(h, queued.id, "p1")
+		expect(h.getNetwork).not.toHaveBeenCalled()
+		expect(h.proveTx).not.toHaveBeenCalled()
+		h.session.setActive("p1")
+		const granted = await Promise.race([
+			h.lane.acquireSlot(NETWORK.id, undefined, await h.captureExecutionFence()),
+			new Promise<null>((resolve) => setTimeout(() => resolve(null), 1_000)),
+		])
+		expect(granted).not.toBeNull()
+		granted?.release()
+	}, 15_000)
+
+	test("a cancel holding the journal lock when the send reaches `submitting` commits first; the send stops at its cancel check", async () => {
+		const h = await makeHarness()
+		const cancelWrite = h.parkJournalWrite((record) => record.progress.stage === "cancelled")
+		const transitions = vi.spyOn(h.journal, "transitionOperation")
+		h.toTx.mockImplementationOnce(async () => {
+			void h.service.cancelJob(h.getJournalId())
+			await waitFor(cancelWrite.isParked)
+			return { getTxHash: () => ({ toString: () => "0xhash" }) }
+		})
+		const run = transfer(h)
+		await waitFor(() => h.ctrl.entered)
+		h.ctrl.release()
+		// The `submitting` transition is queued behind the parked cancel on the transition lock.
+		await waitFor(() => transitions.mock.calls.some(([, progress]) => progress.stage === "submitting"))
+		cancelWrite.release()
+
+		expect(await run).toBeInstanceOf(JobCancelledError)
+		expect((await h.journal.getOperation(h.getJournalId()))?.progress.stage).toBe("cancelled")
+		expect(h.stages).not.toContain("submitting")
+		expect(h.proveTx).toHaveBeenCalledTimes(1)
+		expect(h.sendTx).not.toHaveBeenCalled()
+	}, 15_000)
+
+	test("a session that ends while `node.sendTx` is pending does not undo the send: the record succeeds", async () => {
+		const h = await makeHarness()
+		let finishSend: () => void = () => {}
+		h.sendTx.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					finishSend = resolve
+				}),
+		)
+		const run = transfer(h)
+		await waitFor(() => h.ctrl.entered)
+		h.ctrl.release()
+		await waitFor(() => h.sendTx.mock.calls.length === 1)
+		h.session.setActive(undefined)
+		finishSend()
+
+		expect(await run).toBe("0xhash")
+		expect((await h.journal.getOperation(h.getJournalId()))?.progress.stage).toBe("succeeded")
+		expect(h.proveTx).toHaveBeenCalledTimes(1)
+	}, 15_000)
+})
+
 describe("ExecutionService composition — profile-switch gas-cache invalidation (D12)", () => {
 	test("active-profile change EVICTS cached gas balances: peek goes cold, the next read recomputes", async () => {
 		const h = await makeHarness()
@@ -394,7 +715,7 @@ describe("ExecutionService composition — profile-switch gas-cache invalidation
 		const afterPrime = h.getNetwork.mock.calls.length
 		expect(await h.service.peekGasBalances(NETWORK.id, ACCOUNT.toString())).not.toBeNull()
 
-		h.profileChanged.invoke(undefined)
+		h.session.fireChanged()
 
 		// Evicted outright — the new profile must not see the old profile's
 		// figures even dimmed. (Stale-marked entries would still peek here.)
@@ -426,7 +747,7 @@ describe("ExecutionService composition — profile-switch gas-cache invalidation
 		// Yield until the compute reaches the deferred dependency.
 		for (let i = 0; i < 50 && !releaseNet; i++) await new Promise((r) => setTimeout(r, 0))
 		if (!releaseNet) throw new Error("compute never reached its second getNetwork call")
-		h.profileChanged.invoke(undefined) // switch lands while the compute is parked
+		h.session.fireChanged() // switch lands while the compute is parked
 		releaseNet()
 		await inFlight // the pre-switch caller still receives its value
 
