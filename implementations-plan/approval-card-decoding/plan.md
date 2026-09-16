@@ -8,7 +8,7 @@ code_review: off
 budget: no recon agents (the regression was bisected by hand); codex at xhigh; no /code-review (owner directive 2026-09-03)
 base: dev @ e01e416e
 branch: worktree-approval-card-decoding
-status: implemented 2026-09-15 (`ec297815` fix, `8c00f9ae` docs, `600c99ba` flat layout, `ec6089dd` / `b0fba3aa` / `baf85f93` codex rounds 1–3); all 5 phases ✓; codex loop CONVERGED at round 4 (reject ×3 with findings 8 → 3 → 2, all folded; round 4 approve, no new material findings); gates green on `baf85f93`, the last code commit (smoke 118, network subset 6, audit:vue 6000); branch pushed; PR into dev open — two owner asks open (§ Assumptions)
+status: implemented 2026-09-15 (`ec297815` fix, `8c00f9ae` docs, `600c99ba` flat layout, `ec6089dd` / `b0fba3aa` / `baf85f93` codex rounds 1–3); all 5 phases ✓; codex loop CONVERGED at round 4 (reject ×3 with findings 8 → 3 → 2, all folded; round 4 approve, no new material findings); gates green on `baf85f93`, the last code commit (smoke 118, network subset 6, audit:vue 6000); branch pushed; PR #605 into dev open — two owner asks open (§ Assumptions)
 ---
 
 # approval-card-decoding — read a dApp's call arguments on the approval card again
