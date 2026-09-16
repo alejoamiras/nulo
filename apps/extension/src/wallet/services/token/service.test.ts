@@ -52,7 +52,7 @@ async function makeHarness() {
 			onProfileDeleted: { add: () => {} },
 			onActiveProfileChanged: new EventHandler(),
 			getDeletionState: () => deletionState,
-			captureExecutionFence: async () => ({ profileId: "p1", epoch: deletionState.capture("p1") }),
+			captureExecutionFence: async () => ({ profileId: "p1", epoch: deletionState.capture("p1"), session: 1 }),
 		}),
 	)
 	const networkLive = { value: true }
@@ -262,7 +262,7 @@ describe("TokenService.addToken — creation fences", () => {
 		// assert must also beat the idempotent short-circuit, so it fires with
 		// ZERO rows present.
 		const { tokenService, api, deletionState } = await makeHarness()
-		const staleFence = { profileId: "p1", epoch: deletionState.capture("p1") }
+		const staleFence = { profileId: "p1", epoch: deletionState.capture("p1"), session: 1 }
 		deletionState.beginDeletion("p1")
 		deletionState.release("p1")
 
@@ -281,7 +281,7 @@ describe("TokenService.addToken — creation fences", () => {
 		// come before every exit, not just the write.
 		const { tokenService, deletionState } = await makeHarness()
 		await tokenService.addToken("p1", NETWORK.id, "0xacc", ti("0xdead"), { origin: "popup" })
-		const staleFence = { profileId: "p1", epoch: deletionState.capture("p1") }
+		const staleFence = { profileId: "p1", epoch: deletionState.capture("p1"), session: 1 }
 		deletionState.beginDeletion("p1")
 		deletionState.release("p1")
 
@@ -409,7 +409,7 @@ describe("TokenService.addToken — creation fences", () => {
 		// successor's row as its own success.
 		const { tokenService, api, deletionState } = await makeHarness()
 		await tokenService.addToken("p1", NETWORK.id, "0xacc", ti("0xdead"), { origin: "popup" })
-		const fence = { profileId: "p1", epoch: deletionState.capture("p1") }
+		const fence = { profileId: "p1", epoch: deletionState.capture("p1"), session: 1 }
 
 		const realGet = api.storage.local.get.bind(api.storage.local)
 		let armed = true

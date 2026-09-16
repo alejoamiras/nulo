@@ -199,6 +199,7 @@ describe("ExecutionLane.beginJournal fence threading", () => {
 		const id = await lane.beginJournal("net-1", "0xacct", { type: 1, name: "dapp" } as never, undefined, {
 			profileId: "p1",
 			epoch: 0,
+			session: 1,
 		})
 
 		expect(id).toBe("op-1")

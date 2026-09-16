@@ -5,6 +5,7 @@ import {
 	JobCancelledError,
 	RpcDisconnectedError,
 	RpcTimeoutError,
+	SessionEndedError,
 	TooManyPendingError,
 	UserRejectedError,
 } from "@nulo/extension-messaging/errors"
@@ -44,6 +45,16 @@ describe("toWalletResponseError", () => {
 			message: "accounts capability not granted. Call requestCapabilities() first.",
 			data: { walletErrorCode: CapabilityNotGrantedError.CODE, capabilityType: "accounts" },
 		})
+	})
+
+	test("SessionEndedError → {code:4900, walletErrorCode SESSION_ENDED} with the constant message; only the class maps", () => {
+		expect(toWalletResponseError(new SessionEndedError())).toEqual({
+			code: 4900,
+			message: SessionEndedError.MESSAGE,
+			data: { walletErrorCode: SessionEndedError.CODE },
+		})
+		// The same words on a plain Error are not a session end: the fall-through stays constant.
+		expect(toWalletResponseError(new Error(SessionEndedError.MESSAGE))).toBe(UNCLASSIFIED_ERROR_MESSAGE)
 	})
 
 	test("envelope round-trips through new Error(JSON.stringify(env)) — dApp parse recipe works", () => {

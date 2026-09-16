@@ -434,6 +434,73 @@ describe("SessionManager", () => {
 		})
 	})
 
+	describe("session serial", () => {
+		const unlock = (manager: SessionManager, id: string) =>
+			manager.open(passwordProfile(id), secretBuffer(), asPasshash(new ArrayBuffer(8)), dekBuffer())
+
+		test("every open publishes a fresh serial that peekLiveSerial and getActive agree on — a re-unlock too", async () => {
+			const { manager } = setup()
+			expect(manager.peekLiveSerial()).toBeUndefined()
+			await unlock(manager, "A")
+			const first = manager.peekLiveSerial() as number
+			expect((await manager.getActive())?.serial).toBe(first)
+
+			await manager.close()
+			expect(manager.peekLiveSerial()).toBeUndefined()
+			await unlock(manager, "A")
+			expect(manager.peekLiveSerial()).toBeGreaterThan(first)
+			expect((await manager.getActive())?.serial).toBe(manager.peekLiveSerial())
+		})
+
+		test("a memory-only degraded open keeps the serial it published", async () => {
+			const { api, manager } = setup()
+			vi.spyOn(api.storage.session, "set").mockRejectedValueOnce(new Error("QUOTA_BYTES exceeded"))
+			await unlock(manager, "A")
+			expect(manager.peekLiveSerial()).toBeDefined()
+			expect((await manager.getActive())?.serial).toBe(manager.peekLiveSerial())
+		})
+
+		test("a rolled-back publication burns its serial: seen only while publishing, never live after, never reused", async () => {
+			const api = new FakeBrowserApi()
+			api.reset()
+			const config = fakeConfig(1_800_000)
+			const seenAtPublish: Array<number | undefined> = []
+			const manager: SessionManager = new SessionManager(
+				config,
+				new LoggerStore(config),
+				(p) => {
+					if (p) seenAtPublish.push(manager.peekLiveSerial())
+				},
+				api,
+			)
+			// Write fails, the compensating delete fails, the read-back cannot confirm: open rolls back.
+			vi.spyOn(api.storage.session, "set").mockRejectedValueOnce(new Error("write failed"))
+			vi.spyOn(api.storage.session, "remove").mockRejectedValueOnce(new Error("delete failed"))
+			vi.spyOn(api.storage.session, "get").mockRejectedValueOnce(new Error("read failed"))
+			await unlock(manager, "A")
+
+			const burned = seenAtPublish[0] as number
+			expect(burned).toBeDefined()
+			expect(manager.peekLiveSerial()).toBeUndefined()
+			await expect(manager.getActive()).resolves.toBeUndefined()
+
+			await unlock(manager, "A")
+			expect(manager.peekLiveSerial()).toBeGreaterThan(burned)
+		})
+
+		test("restore publishes a serial, and a later open in the same worker gets a larger one", async () => {
+			const { api, manager } = setup()
+			await seedSession(api, { profile: "abc", bearer: await makeBearer("abc"), since: Date.now() })
+			await manager.restore(async () => passwordProfileFor("abc"))
+			const restored = manager.peekLiveSerial() as number
+			expect(restored).toBeDefined()
+			expect((await manager.getActive())?.serial).toBe(restored)
+
+			await unlock(manager, "B")
+			expect(manager.peekLiveSerial()).toBeGreaterThan(restored)
+		})
+	})
+
 	describe("restore (init-only, silent)", () => {
 		test("re-hydrates a valid password session without emitting", async () => {
 			const { api, emits, manager } = setup()

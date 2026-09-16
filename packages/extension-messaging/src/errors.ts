@@ -280,6 +280,20 @@ export class PxeStoreKeyMissingError extends WalletError {
 	}
 }
 
+/**
+ * The session that authorized an operation ended — a lock, an auto-lock, or another unlock, the same
+ * profile's included — before the operation reached the network. Constant message and no details:
+ * it rides the message-only operation-result channel, and names nothing a dApp could probe.
+ */
+export class SessionEndedError extends WalletError {
+	public static readonly CODE = "SESSION_ENDED"
+	public static readonly MESSAGE = "The wallet session that approved this request has ended."
+
+	public constructor() {
+		super(SessionEndedError.CODE, SessionEndedError.MESSAGE, undefined, "SessionEndedError")
+	}
+}
+
 /** Request payload failed validation at the RPC boundary. */
 export class ValidationError extends WalletError {
 	public static readonly CODE = "VALIDATION"
@@ -416,6 +430,7 @@ type KnownWalletErrorPayload =
 	| { code: typeof PxeStaleAnchorError.CODE; message: string; details?: unknown }
 	| { code: typeof ContractNotRegisteredError.CODE; message: string; details?: unknown }
 	| { code: typeof PxeStoreKeyMissingError.CODE; message: string; details?: unknown }
+	| { code: typeof SessionEndedError.CODE; message: string; details?: unknown }
 
 /**
  * Reconstruct a WalletError (concrete subclass if the code is recognised)
@@ -465,6 +480,8 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 			return new ContractNotRegisteredError(known.message, known.details)
 		case PxeStoreKeyMissingError.CODE:
 			return new PxeStoreKeyMissingError(known.message, known.details)
+		case SessionEndedError.CODE:
+			return new SessionEndedError()
 		default:
 			return new WalletError(payload.code, payload.message, payload.details)
 	}

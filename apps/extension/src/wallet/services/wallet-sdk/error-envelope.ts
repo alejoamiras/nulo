@@ -24,6 +24,7 @@ import {
 	PxeStaleAnchorError,
 	RpcDisconnectedError,
 	RpcTimeoutError,
+	SessionEndedError,
 	TooManyPendingError,
 	DuplicateInitializationError,
 	UnsupportedMethodError,
@@ -50,6 +51,17 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 			code: 4001,
 			message: error.message,
 			data: { walletErrorCode: UserRejectedError.CODE },
+		}
+	}
+	if (error instanceof SessionEndedError) {
+		// The wallet session that approved the request ended (lock, auto-lock, another unlock) before
+		// the request reached the network, so nothing was sent. 4900: this provider session cannot
+		// finish it; unlike SESSION_INVALID no teardown follows, so the dApp may re-request after the
+		// user unlocks. A sweep that cancels the same request first answers JOB_CANCELLED instead.
+		return {
+			code: 4900,
+			message: error.message,
+			data: { walletErrorCode: SessionEndedError.CODE },
 		}
 	}
 	if (error instanceof CapabilityNotGrantedError) {

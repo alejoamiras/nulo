@@ -135,6 +135,9 @@ export class SessionManager {
 	 *  committed (safe to delete whatever the row holds — the current
 	 *  session's record or a failed open's debris). */
 	private sessionGeneration = 0
+	/** Last serial handed to a published session. Only ever incremented — a rolled-back publication
+	 *  burns its serial — so a serial names exactly one session for the worker's lifetime. */
+	private lastSerial = 0
 
 	/**
 	 * @param config      Reactive config — SessionManager subscribes to
@@ -205,6 +208,12 @@ export class SessionManager {
 			return undefined
 		}
 		return this.activeSession
+	}
+
+	/** Serial of the in-memory session, or `undefined` when none is published. Synchronous, lock-free
+	 *  and without the lazy expiry close, so it can share a tick with the call it guards. */
+	public peekLiveSerial(): number | undefined {
+		return this.activeSession?.serial
 	}
 
 	/** Returns the master secret for the given profile id. Throws
@@ -295,7 +304,13 @@ export class SessionManager {
 				// Wipe a replaced session's DEK before dropping the reference
 				// (close/replace/expiry discipline); store a COPY of the caller-owned dek.
 				zeroize(this.activeSession?.dek)
-				this.activeSession = { profile, session, secret, dek: dek ? asImportedKeysDek(new Uint8Array(dek)) : undefined }
+				this.activeSession = {
+					profile,
+					session,
+					secret,
+					dek: dek ? asImportedKeysDek(new Uint8Array(dek)) : undefined,
+					serial: ++this.lastSerial,
+				}
 				this.onChange(this.toInfo(profile))
 				try {
 					await this.session.set(session)
@@ -624,7 +639,7 @@ export class SessionManager {
 				zeroize(masterCopy)
 			}
 			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session restored")
-			this.activeSession = { profile, session, secret, dek: asImportedKeysDek(new Uint8Array(pair.dek)) }
+			this.activeSession = { profile, session, secret, dek: asImportedKeysDek(new Uint8Array(pair.dek)), serial: ++this.lastSerial }
 			// Re-schedule the alarm against the persisted `lockedAt`. If
 			// `lockedAt` is absent (older records), fall back to
 			// `since + sessionTtl`.

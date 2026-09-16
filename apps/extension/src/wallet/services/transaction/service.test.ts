@@ -16,7 +16,7 @@ import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { ACCOUNT_SERVICE_NAME } from "@/wallet/services/account/spec"
 import { NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
-import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
+import { type ExecutionFence, ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/spec"
 import { svc } from "../composition-harness"
 import { TaskService } from "@/wallet/services/task/service"
@@ -64,7 +64,7 @@ describe("TransactionService.addTransaction — D13 execution fence", () => {
 		vi.useRealTimers()
 	})
 
-	const add = (hash: string, fence?: { profileId: string; epoch: number }, networkId?: string) =>
+	const add = (hash: string, fence?: ExecutionFence, networkId?: string) =>
 		service.addTransaction(
 			{ type: 0 } as never,
 			1,
@@ -83,8 +83,8 @@ describe("TransactionService.addTransaction — D13 execution fence", () => {
 	test("deleting one profile's transactions spares another profile sharing the address", async () => {
 		// Two profiles built from one mnemonic own the same address. An
 		// address-only purge would take both profiles' history.
-		await add("0xp1-tx", { profileId: "p1", epoch: deletionState.capture("p1") }, "net-1")
-		await add("0xp2-tx", { profileId: "p2", epoch: deletionState.capture("p2") }, "net-2")
+		await add("0xp1-tx", { profileId: "p1", epoch: deletionState.capture("p1"), session: 1 }, "net-1")
+		await add("0xp2-tx", { profileId: "p2", epoch: deletionState.capture("p2"), session: 1 }, "net-2")
 
 		await service.purgeForAccounts([ACCOUNT], "p1")
 
@@ -120,7 +120,7 @@ describe("TransactionService.addTransaction — D13 execution fence", () => {
 	})
 
 	test("a row marked unattributable is not re-armed for polling after a restart", async () => {
-		const fence = { profileId: "p1", epoch: deletionState.capture("p1") }
+		const fence = { profileId: "p1", epoch: deletionState.capture("p1"), session: 1 }
 		await add("0xmarked", fence, "net-1")
 		const row = await service.getTransaction("0xmarked")
 		await api.storage.local.set({ "nulo:core:txs@0xmarked": JSON.stringify({ ...row, ambiguous: true }) })
@@ -138,7 +138,7 @@ describe("TransactionService.addTransaction — D13 execution fence", () => {
 	})
 
 	test("stamps the owning profile and network so history can be scoped", async () => {
-		const fence = { profileId: "p1", epoch: deletionState.capture("p1") }
+		const fence = { profileId: "p1", epoch: deletionState.capture("p1"), session: 1 }
 		const tx = await add("0xscoped", fence, "net-1")
 
 		expect(tx).toMatchObject({ profileId: "p1", networkId: "net-1", chainId: 1, account: ACCOUNT })
@@ -152,13 +152,13 @@ describe("TransactionService.addTransaction — D13 execution fence", () => {
 	})
 
 	test("writes when the captured epoch is still current AND the owning account exists", async () => {
-		const fence = { profileId: "p1", epoch: deletionState.capture("p1") }
+		const fence = { profileId: "p1", epoch: deletionState.capture("p1"), session: 1 }
 		const tx = await add("0xh1", fence)
 		expect(tx.hash).toBe("0xh1")
 	})
 
 	test("REJECTS a stale execution — a deletion bumped the epoch after capture", async () => {
-		const fence = { profileId: "p1", epoch: deletionState.capture("p1") } // epoch 0
+		const fence = { profileId: "p1", epoch: deletionState.capture("p1"), session: 1 } // epoch 0
 		deletionState.beginDeletion("p1") // → epoch 1
 
 		await expect(add("0xh2", fence)).rejects.toThrow(/being deleted/)
@@ -169,7 +169,7 @@ describe("TransactionService.addTransaction — D13 execution fence", () => {
 	test("REJECTS when the owning account no longer exists / was re-owned (bound to captured profileId)", async () => {
 		// Epoch current, but the fence's profile doesn't own ACCOUNT anymore — a
 		// successor that reused the deterministic address owns a different profileId.
-		const fence = { profileId: "pGONE", epoch: deletionState.capture("pGONE") }
+		const fence = { profileId: "pGONE", epoch: deletionState.capture("pGONE"), session: 1 }
 
 		await expect(add("0xh3", fence)).rejects.toThrow(/stale execution owner/)
 		expect(await service.getTransactions(ACCOUNT)).toHaveLength(0)

@@ -754,7 +754,7 @@ commitment point.
 
 ## Phases
 
-### Phase 0 — the error, the serial, the two checks
+### Phase 0 — the error, the serial, the two checks ✓
 
 `SessionEndedError` (messaging package, detail-free), `session_ended` kind + mirror, envelope
 branch (4900 `SESSION_ENDED`), `ExecutionFence.session`, `ActiveSession.serial` allocated inside

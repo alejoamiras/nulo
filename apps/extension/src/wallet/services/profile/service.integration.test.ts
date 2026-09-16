@@ -28,6 +28,7 @@ import {
 	ProfileIdConflictError,
 	RestoreTornError,
 	RecoveryModeError,
+	SessionEndedError,
 } from "@nulo/extension-messaging/errors"
 import { AccountIntegrityBlockedRepository } from "../account-integrity/blocked-repository"
 import {
@@ -507,6 +508,94 @@ describe("ProfileService integration", () => {
 					.catch(() => undefined)
 				expect(exportResult).not.toBe(newCred)
 			}
+		}, 30_000)
+	})
+
+	describe("execution fence: assertFence and isFenceLive", () => {
+		test("the capturing session passes; a lock ends it; re-unlocking the same profile does not revive it", async () => {
+			const { service } = await makeService()
+			const profile = await service.createProfile("P", "pass1234")
+			const fence = await service.captureExecutionFence()
+			await expect(service.assertFence(fence)).resolves.toBeUndefined()
+			expect(service.isFenceLive(fence)).toBe(true)
+
+			await service.lockActiveProfile()
+			await expect(service.assertFence(fence)).rejects.toBeInstanceOf(SessionEndedError)
+			expect(service.isFenceLive(fence)).toBe(false)
+
+			await service.unlockProfile(profile.id, "pass1234")
+			const next = await service.captureExecutionFence()
+			expect(next.profileId).toBe(fence.profileId)
+			expect(next.session).not.toBe(fence.session)
+			await expect(service.assertFence(fence)).rejects.toBeInstanceOf(SessionEndedError)
+			expect(service.isFenceLive(fence)).toBe(false)
+			await expect(service.assertFence(next)).resolves.toBeUndefined()
+			expect(service.isFenceLive(next)).toBe(true)
+		}, 30_000)
+
+		test("another profile's unlock ends the fence; a fence pairing a live serial with another profile never passes", async () => {
+			const { service } = await makeService()
+			await service.createProfile("A", "pass1234")
+			const fenceA = await service.captureExecutionFence()
+			await service.createProfile("B", "pass5678")
+			await expect(service.assertFence(fenceA)).rejects.toBeInstanceOf(SessionEndedError)
+			expect(service.isFenceLive(fenceA)).toBe(false)
+
+			const forged = { ...(await service.captureExecutionFence()), profileId: fenceA.profileId }
+			await expect(service.assertFence(forged)).rejects.toBeInstanceOf(SessionEndedError)
+			expect(service.isFenceLive(forged)).toBe(false)
+		}, 30_000)
+
+		test("a begun deletion keeps its own epoch error, and the synchronous check refuses it too", async () => {
+			const { service } = await makeService()
+			await service.createProfile("P", "pass1234")
+			const fence = await service.captureExecutionFence()
+			service.getDeletionState().beginDeletion(fence.profileId)
+
+			const error = await service.assertFence(fence).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toBeInstanceOf(Error)
+			expect(error).not.toBeInstanceOf(SessionEndedError)
+			expect((error as Error).message).toMatch(/being deleted/)
+			expect(service.isFenceLive(fence)).toBe(false)
+		}, 30_000)
+
+		test("a capture queued behind a rolled-back publication never obtains the burned session", async () => {
+			const { api, service } = await makeService()
+			const profile = await service.createProfile("P", "pass1234")
+			await service.lockActiveProfile()
+
+			let writeReached!: () => void
+			const reached = new Promise<void>((resolve) => {
+				writeReached = resolve
+			})
+			let releaseWrite!: () => void
+			const release = new Promise<void>((resolve) => {
+				releaseWrite = resolve
+			})
+			// The unlock publishes, parks inside its persisted write holding the facade lock, then the
+			// write, the compensating delete and the read-back all fail: the publication rolls back.
+			vi.spyOn(api.storage.session, "set").mockImplementationOnce(async () => {
+				writeReached()
+				await release
+				throw new Error("write failed")
+			})
+			vi.spyOn(api.storage.session, "remove").mockRejectedValueOnce(new Error("delete failed"))
+			vi.spyOn(api.storage.session, "get").mockRejectedValueOnce(new Error("read failed"))
+
+			const unlocking = service.unlockProfile(profile.id, "pass1234").then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			await reached
+			const capturing = service.captureExecutionFence()
+			releaseWrite()
+
+			await expect(capturing).rejects.toThrow(/Wallet locked/)
+			expect(await unlocking).toBeInstanceOf(Error)
+			expect(await service.getActiveProfile()).toBeUndefined()
 		}, 30_000)
 	})
 

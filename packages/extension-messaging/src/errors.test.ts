@@ -18,6 +18,7 @@ import {
 	remoteErrorFromResponseContent,
 	RpcDisconnectedError,
 	RpcTimeoutError,
+	SessionEndedError,
 	TooManyPendingError,
 	UserRejectedError,
 	ValidationError,
@@ -142,6 +143,19 @@ describe("walletErrorFromPayload", () => {
 		expect(unregistered.details).toBeUndefined()
 	})
 
+	test("SessionEndedError round-trips detail-free, and a message-only payload rebuilds the constant message", () => {
+		const rebuilt = walletErrorFromPayload(new SessionEndedError().toPayload())
+		expect(rebuilt).toBeInstanceOf(SessionEndedError)
+		expect(rebuilt.code).toBe("SESSION_ENDED")
+		expect(rebuilt.message).toBe(SessionEndedError.MESSAGE)
+		expect(rebuilt.details).toBeUndefined()
+		// The operation-result channel carries only the message; whatever text it holds, the rebuilt
+		// error says the constant, so nothing but the class crosses.
+		const fromMessageOnly = walletErrorFromPayload({ code: SessionEndedError.CODE, message: "profile p1 serial 7" })
+		expect(fromMessageOnly).toBeInstanceOf(SessionEndedError)
+		expect(fromMessageOnly.message).toBe(SessionEndedError.MESSAGE)
+	})
+
 	test("unknown code → base WalletError, code + message preserved (default arm)", () => {
 		const rebuilt = walletErrorFromPayload({ code: "SOME_FUTURE_CODE", message: "hi", details: { x: 1 } })
 		expect(rebuilt).toBeInstanceOf(WalletError)
@@ -198,9 +212,10 @@ describe("constructor identity ritual (owned by the WalletError base)", () => {
 			name: "ContractNotRegisteredError",
 			code: ContractNotRegisteredError.CODE,
 		},
+		{ err: new SessionEndedError(), ctor: SessionEndedError, name: "SessionEndedError", code: SessionEndedError.CODE },
 	]
 
-	test("all 14 subclasses: exact prototype, literal name, and code on direct construction", () => {
+	test("all 15 subclasses: exact prototype, literal name, and code on direct construction", () => {
 		for (const { err, ctor, name, code } of instances) {
 			expect(Object.getPrototypeOf(err)).toBe(ctor.prototype)
 			expect(err).toBeInstanceOf(WalletError)
@@ -209,7 +224,7 @@ describe("constructor identity ritual (owned by the WalletError base)", () => {
 		}
 	})
 
-	test("the 13 switch-covered codes round-trip to the exact subclass with name intact", () => {
+	test("the 14 switch-covered codes round-trip to the exact subclass with name intact", () => {
 		for (const { err, ctor, name } of instances) {
 			if (ctor === TooManyPendingError) continue // see BUG PIN below
 			const rebuilt = walletErrorFromPayload(err.toPayload())
