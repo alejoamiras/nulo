@@ -34,3 +34,21 @@ and `OperationCard.discovered.test.ts` instead.
 On `baf85f93`: typecheck:all → **491 test files passed, 2 skipped; 6000 tests passed, 2 skipped,
 7 todo** → lint → build (`✓ built`). `AUDIT_EXIT=0`. (The "ESM syntax in a file loaded as CommonJS"
 line for `tests/e2e/retry-error-reporter.ts` is a pre-existing vite warning on dev, not this branch.)
+
+## After merging dev (`7f37fd37`)
+
+PR #605 opened `DIRTY`: dev had moved (`#600`, `#601`, `#604`), and GitHub runs no
+`pull_request` workflow when it cannot compute the merge ref. `origin/dev` merged in with two
+trivial unions (`execution/spec.ts` import list, `implementations-plan/index.md`). Dev's presto
+packages needed a `bun install --frozen-lockfile` before the worktree typechecked again.
+
+`bun run audit:vue` on `7f37fd37`: **500 test files passed, 2 skipped; 6089 tests passed, 2
+skipped, 7 todo**; build OK; `EXIT=0`.
+
+Smoke (armed) on `7f37fd37`, retry 0: **32 files passed, 1 skipped; 123 tests passed, 6 skipped**
+(dev added one smoke file); `SMOKE_EXIT=0`. Network subset on `7f37fd37`, retry 0: **4 files
+passed, 1 skipped; 6 tests passed, 1 skipped** (same self-skip); `NETWORK_EXIT=0`.
+
+PR #605 CI on `7f37fd37`: `quality-status`, `extension-smoke-e2e-status`,
+`extension-network-e2e-status` (5 shards + heavy + real-proving canary), `tools-e2e-status`,
+`bridge-contracts-status`, lint — all `SUCCESS`; `mergeStateStatus: CLEAN`.
