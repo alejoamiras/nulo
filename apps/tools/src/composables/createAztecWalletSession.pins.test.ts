@@ -109,7 +109,7 @@ afterEach(() => {
 })
 
 describe("createAztecWalletSession — seam pins", () => {
-	it("returns exactly the 30-member surface, in order", () => {
+	it("returns exactly the 32-member surface, in order", () => {
 		expect(Object.keys(makeSession())).toEqual([
 			"status",
 			"verificationEmojis",
@@ -118,6 +118,7 @@ describe("createAztecWalletSession — seam pins", () => {
 			"selectedAccount",
 			"selectionNotices",
 			"hiddenAccountsCount",
+			"contractsReady",
 			"error",
 			"wallet",
 			"discoveredWallets",
@@ -138,6 +139,7 @@ describe("createAztecWalletSession — seam pins", () => {
 			"selectAccount",
 			"consumeSelectionNotices",
 			"retryCapabilities",
+			"reregisterContracts",
 			"refreshAccounts",
 			"disconnect",
 			"reset",

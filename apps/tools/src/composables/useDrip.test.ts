@@ -49,6 +49,31 @@ vi.mock("@aztec/aztec.js/node", () => ({
 	createAztecNodeClient: vi.fn(() => ({ _node: true })),
 }))
 
+// The drip reads the shared session's readiness before it touches the wallet. Default connected +
+// ready; cases flip these to exercise the gate. The gate itself is the pure predicate, reproduced
+// here (its live copy is unit-tested in useWalletConnection.test.ts).
+const wc = vi.hoisted(() => ({
+	status: { value: "connected" as string },
+	contractsReady: { value: true },
+	error: { value: null as { message: string } | null },
+}))
+
+vi.mock("@/composables/useWalletConnection", () => ({
+	useWalletConnection: () => ({ status: wc.status, contractsReady: wc.contractsReady, error: wc.error }),
+	contractsReadinessRefusal: (s: {
+		status: { value: string }
+		error: { value: { message: string } | null }
+		contractsReady: { value: boolean }
+	}) => {
+		if (s.status.value !== "connected") return s.error.value?.message ?? "Connect your Aztec wallet first."
+		if (!s.contractsReady.value) return "Your wallet is still setting up the app's contracts. Try again in a moment."
+		return undefined
+	},
+	// These cases never inject CONTRACT_NOT_REGISTERED; the retry's own branches are pinned in
+	// useWalletConnection.test.ts. Pass through so the send is the real one.
+	retryOnUnregistered: (_s: unknown, _w: unknown, op: () => Promise<unknown>) => op(),
+}))
+
 vi.mock("@nulo/bridge-core", () => ({
 	predictedWorstMinFees: vi.fn(async () => ({
 		mul: (scalar: number) => ({ _paddedBy: scalar }),
@@ -99,6 +124,9 @@ beforeEach(() => {
 	mockDripperMethods.drip_to_private.mockReset()
 	mockDripperMethods.drip_to_public.mockImplementation(() => makeInteraction("public"))
 	mockDripperMethods.drip_to_private.mockImplementation(() => makeInteraction("private"))
+	wc.status.value = "connected"
+	wc.contractsReady.value = true
+	wc.error.value = null
 })
 
 afterEach(() => {
@@ -113,6 +141,25 @@ describe("useDrip", () => {
 		await drip.drip(NULO, NULO_ADDR, "public")
 		expect(mockDripperMethods.drip_to_public).toHaveBeenCalledWith(NULO_ADDR, 1_000_000_000n)
 		expect(mockDripperMethods.drip_to_private).not.toHaveBeenCalled()
+	})
+
+	it("refuses with SETUP_PENDING while contracts are still registering - the wallet is never touched", async () => {
+		wc.contractsReady.value = false
+		const w = makeWallet()
+		// biome-ignore lint/suspicious/noExplicitAny: test stub
+		const result = await useDrip(w as any, ACCOUNT).drip(NULO, NULO_ADDR, "public")
+		expect(result).toEqual({ kind: "error", value: "Your wallet is still setting up the app's contracts. Try again in a moment." })
+		expect(mockDripperMethods.drip_to_public).not.toHaveBeenCalled()
+	})
+
+	it("refuses with the session's own message when it is not connected", async () => {
+		wc.status.value = "error"
+		wc.error.value = { message: "Alpha-testnet is not responding. Try again." }
+		const w = makeWallet()
+		// biome-ignore lint/suspicious/noExplicitAny: test stub
+		const result = await useDrip(w as any, ACCOUNT).drip(NULO, NULO_ADDR, "public")
+		expect(result).toEqual({ kind: "error", value: "Alpha-testnet is not responding. Try again." })
+		expect(mockDripperMethods.drip_to_public).not.toHaveBeenCalled()
 	})
 
 	it("drip-private uses the drip_to_private method", async () => {

@@ -32,6 +32,8 @@ const h = vi.hoisted(() => ({
 	ensureGranted: vi.fn(async (_token: unknown, _epoch: () => number) => "granted" as "granted" | "declined" | "stale"),
 	disposeGrant: vi.fn(),
 	status: { value: "connected" as string },
+	contractsReady: { value: true },
+	error: { value: null as { message: string } | null },
 	selectedAccount: { value: "0x1018808f2c17794badb361c02c945582b8198b495a7e8d01154f7eeb7d719c0d" as string | null },
 	wallet: { value: {} as unknown },
 	address: { value: "0xef4d9e1f4e9e2dd9e747b53f4be3d04bfa935f2d" as string | null },
@@ -76,13 +78,26 @@ vi.mock("@/contracts/bridge-generation", async () => {
 	}
 })
 
-vi.mock("@/composables/useWalletConnection", () => ({
-	requestHubToken: h.requestHubToken,
-	requestedHubTokens: () => [],
-	retainPinnedHubTokens: () => {},
-	useWalletConnection: () => ({ status: h.status, selectedAccount: h.selectedAccount, wallet: h.wallet }),
-	__resetWalletConnectionForTests: () => {},
-}))
+vi.mock("@/composables/useWalletConnection", async (importOriginal) => {
+	// The real readiness gate + its copy, over the h-backed session stub — so the send path is
+	// tested against the actual refusal strings, not a reimplementation.
+	const actual = await importOriginal<typeof import("./useWalletConnection")>()
+	return {
+		requestHubToken: h.requestHubToken,
+		requestedHubTokens: () => [],
+		retainPinnedHubTokens: () => {},
+		useWalletConnection: () => ({
+			status: h.status,
+			contractsReady: h.contractsReady,
+			error: h.error,
+			selectedAccount: h.selectedAccount,
+			wallet: h.wallet,
+		}),
+		contractsReadinessRefusal: actual.contractsReadinessRefusal,
+		SETUP_PENDING: actual.SETUP_PENDING,
+		__resetWalletConnectionForTests: () => {},
+	}
+})
 
 vi.mock("@/composables/useTokenGrant", () => ({
 	useTokenGrant: () => ({ isGranted: () => true, ensureGranted: h.ensureGranted, dispose: h.disposeGrant }),
@@ -340,6 +355,8 @@ describe("useSend", () => {
 		// so the engine and anything seeded before `useSend()` must already be reading the same one.
 		connectJournalDeps({ kv: localStorage })
 		h.status.value = "connected"
+		h.contractsReady.value = true
+		h.error.value = null
 		h.selectedAccount.value = RECIPIENT
 		h.address.value = L1_ACCOUNT
 		h.chainId.value = 31337
@@ -365,6 +382,30 @@ describe("useSend", () => {
 		expect(h.runSend).not.toHaveBeenCalled()
 		expect(send.error.value).toContain("wallet unreachable")
 		expect(useBridgeJournal().records.value).toHaveLength(0)
+	})
+
+	it("refuses with SETUP_PENDING while contracts are still registering - grant ran, nothing sent", async () => {
+		h.contractsReady.value = false
+		const send = useSend()
+		expect(await send.send(plan())).toBe("")
+		expect(h.ensureGranted).toHaveBeenCalled()
+		expect(h.runSend).not.toHaveBeenCalled()
+		expect(send.error.value).toMatch(/still setting up the app's contracts/)
+	})
+
+	it("in the error state the refusal is the session's own message, not SETUP_PENDING", async () => {
+		h.status.value = "error"
+		h.error.value = { message: "Alpha-testnet is not responding. Try again." }
+		const send = useSend()
+		expect(await send.send(plan())).toBe("")
+		expect(h.runSend).not.toHaveBeenCalled()
+		expect(send.error.value).toBe("Alpha-testnet is not responding. Try again.")
+	})
+
+	it("proceeds when connected and contracts are ready", async () => {
+		const send = useSend()
+		await send.send(plan())
+		expect(h.runSend).toHaveBeenCalled()
 	})
 
 	it("a DECLINED grant cancels before anything is signed - no approval, no send, no record", async () => {
@@ -711,6 +752,26 @@ describe("useSend", () => {
 		expect(recordOf("0xtokenhash")).toBeDefined()
 		expect(useBridgeJournal().runtime.value["0xtokenhash"]?.attention).toBe("error")
 		expect(useBridgeJournal().runtime.value["0xtokenhash"]?.note).toMatch(/fetch failed/)
+	})
+
+	it("a stale-anchor envelope from the send shows the chain-desync copy at the display seam", async () => {
+		h.runSend.mockImplementation(async (_l1: unknown, _gen: unknown, p: FakeParams, _s?: unknown, recovery?: FakeRecovery) => {
+			recovery?.onSecrets?.(await fakeSecrets(p))
+			throw new Error(JSON.stringify({ code: -32602, message: "x", data: { walletErrorCode: "PXE_STALE_ANCHOR" } }))
+		})
+		const send = useSend()
+		expect(await send.send(plan())).toBe("")
+		expect(send.error.value).toBe("Your wallet's view of the network was behind. Try again.")
+	})
+
+	it("a contract-not-registered envelope from the send shows its copy at the display seam", async () => {
+		h.runSend.mockImplementation(async (_l1: unknown, _gen: unknown, p: FakeParams, _s?: unknown, recovery?: FakeRecovery) => {
+			recovery?.onSecrets?.(await fakeSecrets(p))
+			throw new Error(JSON.stringify({ code: -32602, message: "x", data: { walletErrorCode: "CONTRACT_NOT_REGISTERED" } }))
+		})
+		const send = useSend()
+		expect(await send.send(plan())).toBe("")
+		expect(send.error.value).toBe("Couldn't register the app's contracts with your wallet. Reconnect.")
 	})
 
 	it("an L1 wallet on another chain refuses before the approval, so nothing is signed and no row survives", async () => {

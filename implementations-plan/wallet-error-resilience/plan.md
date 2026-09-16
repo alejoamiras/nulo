@@ -408,7 +408,7 @@ restart; register a passkey profile with Touch ID, lock, unlock via passkey; not
 
 ### Arc 2 — tools
 
-#### Phase 5 — `contractsReady`, envelope-aware errors, send gates
+#### Phase 5 ✓ — `contractsReady`, envelope-aware errors, send gates
 
 **What.**
 
@@ -485,7 +485,7 @@ bun run lint
 ```
 Pass: exit 0. Layers: typecheck/lint · unit.
 
-#### Phase 6 — re-register and retry once, on the structured code, around single pre-submission calls
+#### Phase 6 ✓ — re-register and retry once, on the structured code, around single pre-submission calls
 
 **What.** `apps/tools/src/composables/useWalletConnection.ts`:
 `retryOnUnregistered<T>(session, wallet: Wallet, op: () => Promise<T>): Promise<T>` — `wallet` is the

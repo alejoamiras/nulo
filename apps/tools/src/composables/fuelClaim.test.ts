@@ -34,6 +34,7 @@ vi.mock("@nulo/bridge-core", async (importOriginal) => {
 })
 
 import { privateMintAndPayFee, publicFeeJuicePayment } from "@nulo/bridge-core"
+import { walletErrorCodeOf } from "@/lib/errors"
 import { buildFuelClaimInteraction } from "./fuelClaim"
 
 const saltArgOf = (call = 0): Fr => (privateMintAndPayFee as unknown as Mock).mock.calls[call][3] as Fr
@@ -161,6 +162,36 @@ describe("buildFuelClaimInteraction — simulate validates the REAL payload, not
 		const i = await buildFuelClaimInteraction(rec({}), deps({ aztec: { simulateTx } }))
 		await i.simulate()
 		expect(simulateTx).toHaveBeenCalledTimes(1)
+	})
+
+	it("PUBLIC: simulate() runs through the injected retry, which recovers the unregistered-contract code once", async () => {
+		let simulations = 0
+		const simulateTx = vi.fn(async () => {
+			simulations += 1
+			if (simulations === 1) {
+				throw new Error(JSON.stringify({ code: -32602, message: "x", data: { walletErrorCode: "CONTRACT_NOT_REGISTERED" } }))
+			}
+			return { ok: true }
+		})
+		// The production `retry` is retryOnUnregistered bound to the session; a faithful stand-in re-runs
+		// the simulate once on the structured code, counting the re-registration. If the dep were not
+		// threaded to the simulate, the first (rejecting) call would surface and this test would fail.
+		let registrations = 0
+		const retry = async (op: () => Promise<unknown>) => {
+			try {
+				return await op()
+			} catch (e) {
+				if (walletErrorCodeOf(e) !== "CONTRACT_NOT_REGISTERED") throw e
+				registrations += 1
+				return op()
+			}
+		}
+		const sendTx = vi.fn(async () => ({ ok: true }))
+		const i = await buildFuelClaimInteraction(rec({}), deps({ aztec: { simulateTx, sendTx }, retry }))
+		await i.simulate()
+		expect(registrations).toBe(1)
+		expect(simulateTx).toHaveBeenCalledTimes(2)
+		expect(sendTx).not.toHaveBeenCalled()
 	})
 
 	it("PUBLIC: simulate() PROPAGATES a message-not-ready throw (so the gate can wait, not no-op past it)", async () => {

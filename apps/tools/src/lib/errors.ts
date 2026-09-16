@@ -4,7 +4,7 @@
  *
  * Categories (ordered most-specific first):
  *   user-rejected · capability-rejected · no-wallet · network · tx-reverted
- *   no-fee-asset · account-uninitialized · contract-not-registered · unknown
+ *   no-fee-asset · account-uninitialized · contract-not-registered · chain-desync · unknown
  */
 
 export type ErrorCategory =
@@ -16,6 +16,7 @@ export type ErrorCategory =
 	| "no-fee-asset"
 	| "account-uninitialized"
 	| "contract-not-registered"
+	| "chain-desync"
 	| "unknown"
 
 export interface NormalizedError {
@@ -33,7 +34,49 @@ const TOAST_COPY: Record<ErrorCategory, string> = {
 	"no-fee-asset": "No fee route available. Wait or report.",
 	"account-uninitialized": "Selected account isn't deployed on alpha-testnet. Send any tx from your wallet first.",
 	"contract-not-registered": "Couldn't register the app's contracts with your wallet. Reconnect.",
+	"chain-desync": "Your wallet's view of the network was behind. Try again.",
 	unknown: "Something went wrong. Try again.",
+}
+
+/** The two Nulo wallet-error codes this dApp acts on, mapped to their categories. The wallet's
+ *  structured envelope is authoritative — a text classifier would misread these as `network` or
+ *  `unknown`. Any other code (or none) falls through to the substring rules. */
+// A Map, not a plain object: `walletErrorCode` is attacker-controlled text, and an object lookup on
+// `"toString"`/`"constructor"`/`"__proto__"` would resolve an inherited property and be mistaken for
+// a real category. Map.get returns undefined for any non-key.
+const ENVELOPE_CATEGORY = new Map<string, ErrorCategory>([
+	["PXE_STALE_ANCHOR", "chain-desync"],
+	["CONTRACT_NOT_REGISTERED", "contract-not-registered"],
+])
+
+function tryJsonParse(text: string): unknown {
+	try {
+		return JSON.parse(text)
+	} catch {
+		return undefined
+	}
+}
+
+/** The Nulo `walletErrorCode` carried in a thrown error's message, or undefined. Two transports
+ *  encode it differently and both are decoded, never deeper: the extension wraps the envelope
+ *  OBJECT once (`new Error(JSON.stringify(envelope))`), while the wallet-sdk iframe transport
+ *  reduces the throw to its message STRING and JSON-encodes that again — so the first parse can
+ *  yield a string that must be parsed once more. */
+export function walletErrorCodeOf(err: unknown): string | undefined {
+	const message = err instanceof Error ? err.message : typeof err === "string" ? err : undefined
+	if (message === undefined) return undefined
+	let parsed = tryJsonParse(message)
+	if (typeof parsed === "string") parsed = tryJsonParse(parsed)
+	if (!parsed || typeof parsed !== "object") return undefined
+	const data = (parsed as { data?: unknown }).data
+	const code = (data as { walletErrorCode?: unknown } | undefined)?.walletErrorCode
+	return typeof code === "string" ? code : undefined
+}
+
+/** True for the wallet's "capability denied by user" wording, which must beat the generic
+ *  user-rejection match below (extracted so `normalizeError` stays a flat dispatch). */
+function isCapabilityRejection(lc: string): boolean {
+	return lc.includes("capability") && (lc.includes("denied") || lc.includes("rejected"))
 }
 
 /** The sentence a user can act on. A viem error wraps the underlying cause in prose and a version
@@ -50,6 +93,12 @@ export function userMessage(err: unknown, fallback = "Something went wrong. Try 
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accepted at score 21 — ordered overlapping message predicates are the error-classification precedence policy
 export function normalizeError(err: unknown): NormalizedError {
+	// The wallet's structured envelope wins over any text heuristic: the two codes it documents as
+	// dApp-actionable map straight to their categories; everything else falls through.
+	const code = walletErrorCodeOf(err)
+	const enveloped = code ? ENVELOPE_CATEGORY.get(code) : undefined
+	if (enveloped) return { category: enveloped, message: TOAST_COPY[enveloped], raw: err }
+
 	const msg = err instanceof Error ? err.message : String(err)
 	const lc = msg.toLowerCase()
 
@@ -57,7 +106,7 @@ export function normalizeError(err: unknown): NormalizedError {
 	// the wallet phrases the capability-denied error as "Capability denied by
 	// user" - without this ordering the generic match wins and the UI shows
 	// the wrong toast / hides the retry path.
-	if (lc.includes("capability") && (lc.includes("denied") || lc.includes("rejected"))) {
+	if (isCapabilityRejection(lc)) {
 		return {
 			category: "capability-rejected",
 			message: TOAST_COPY["capability-rejected"],

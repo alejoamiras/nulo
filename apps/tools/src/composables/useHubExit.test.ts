@@ -44,6 +44,9 @@ const h = vi.hoisted(() => ({
 	burnPrivate: vi.fn(() => ({ getFunctionCall: async () => ({ kind: "burn_private" }) })),
 	selectedAccount: { value: "0x1018808f2c17794badb361c02c945582b8198b495a7e8d01154f7eeb7d719c0d" as string | null },
 	address: { value: "0xef4d9e1f4e9e2dd9e747b53f4be3d04bfa935f2d" as string | null },
+	status: { value: "connected" as string },
+	contractsReady: { value: true },
+	error: { value: null as { message: string } | null },
 }))
 
 vi.mock("@/contracts/bridge-generation", () => ({
@@ -100,13 +103,31 @@ vi.mock("@aztec/aztec.js/node", () => ({
 vi.mock("@aztec/stdlib/messaging", () => ({ computeL2ToL1MembershipWitness: async () => undefined }))
 vi.mock("@aztec/ethereum/contracts", () => ({ OutboxContract: class {} }))
 
+// This file runs under `@vitest-environment node`, where importing the real useWalletConnection
+// would touch localStorage at module load; the readiness gate is a pure two-line predicate, so it
+// is reproduced here over the same session stub. Its live copy is unit-tested in jsdom
+// (useWalletConnection.test.ts).
 vi.mock("@/composables/useWalletConnection", () => ({
 	requestHubToken: vi.fn(),
 	useWalletConnection: () => ({
-		status: { value: "connected" },
+		status: h.status,
+		contractsReady: h.contractsReady,
+		error: h.error,
 		selectedAccount: h.selectedAccount,
 		wallet: { value: { createAuthWit: h.createAuthWit, executeUtility: async () => ({ result: [h.privateBalance] }) } },
 	}),
+	contractsReadinessRefusal: (s: {
+		status: { value: string }
+		error: { value: { message: string } | null }
+		contractsReady: { value: boolean }
+	}) => {
+		if (s.status.value !== "connected") return s.error.value?.message ?? "Connect your Aztec wallet first."
+		if (!s.contractsReady.value) return "Your wallet is still setting up the app's contracts. Try again in a moment."
+		return undefined
+	},
+	// No case here injects CONTRACT_NOT_REGISTERED; the retry's branches are pinned in
+	// useWalletConnection.test.ts. Pass through so the exit calls are the real ones.
+	retryOnUnregistered: (_s: unknown, _w: unknown, op: () => Promise<unknown>) => op(),
 	__resetWalletConnectionForTests: () => {},
 }))
 
@@ -234,7 +255,27 @@ describe("useHubExit", () => {
 		})
 		h.selectedAccount.value = FROM
 		h.address.value = L1_ACCOUNT
+		h.status.value = "connected"
+		h.contractsReady.value = true
+		h.error.value = null
 		connectJournalDeps({ now: () => 999, waitConsumeReceipt: async () => true })
+	})
+
+	it("while contracts are still registering the exit refuses with SETUP_PENDING - no authwit, no record", async () => {
+		h.contractsReady.value = false
+		const { exit, error } = useHubExit()
+		expect(await exit(plan())).toBe("")
+		expect(h.order).toEqual([])
+		expect(error.value).toMatch(/still setting up the app's contracts/)
+	})
+
+	it("in the error state the exit refuses with the session's own message, not SETUP_PENDING", async () => {
+		h.status.value = "error"
+		h.error.value = { message: "Alpha-testnet is not responding. Try again." }
+		const { exit, error } = useHubExit()
+		expect(await exit(plan())).toBe("")
+		expect(h.order).toEqual([])
+		expect(error.value).toBe("Alpha-testnet is not responding. Try again.")
 	})
 
 	it("a live exit whose hash another tab is running keeps its provisional record: contention proves nothing", async () => {
@@ -536,5 +577,32 @@ describe("useHubExit", () => {
 		exit.dispose()
 		expect(await exit.exit(plan())).toBe("")
 		expect(h.exitViaHub).not.toHaveBeenCalled()
+	})
+
+	it("a stale-anchor envelope from the exit shows the chain-desync copy at the display seam", async () => {
+		h.exitViaHub.mockImplementation(async () => {
+			throw new Error(JSON.stringify({ code: -32602, message: "x", data: { walletErrorCode: "PXE_STALE_ANCHOR" } }))
+		})
+		const exit = useHubExit()
+		await exit.exit(plan()) // the burn may have landed, so the record is kept and its id returned
+		expect(exit.error.value).toBe("Your wallet's view of the network was behind. Try again.")
+	})
+
+	it("a contract-not-registered envelope from the exit shows its copy at the display seam", async () => {
+		h.exitViaHub.mockImplementation(async () => {
+			throw new Error(JSON.stringify({ code: -32602, message: "x", data: { walletErrorCode: "CONTRACT_NOT_REGISTERED" } }))
+		})
+		const exit = useHubExit()
+		await exit.exit(plan())
+		expect(exit.error.value).toBe("Couldn't register the app's contracts with your wallet. Reconnect.")
+	})
+
+	it("an ordinary wallet-plumbing failure keeps today's humanized copy, unchanged by the new seam", async () => {
+		h.exitViaHub.mockImplementation(async () => {
+			throw new Error("timed out waiting for window")
+		})
+		const exit = useHubExit()
+		await exit.exit(plan())
+		expect(exit.error.value).toMatch(/confirmation window timed out/)
 	})
 })
