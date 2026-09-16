@@ -485,7 +485,7 @@ bun run lint
 ```
 Pass: exit 0. Layers: typecheck/lint · unit.
 
-#### Phase 6 — re-register and retry once, on the structured code, around single pre-submission calls
+#### Phase 6 ✓ — re-register and retry once, on the structured code, around single pre-submission calls
 
 **What.** `apps/tools/src/composables/useWalletConnection.ts`:
 `retryOnUnregistered<T>(session, wallet: Wallet, op: () => Promise<T>): Promise<T>` — `wallet` is the
