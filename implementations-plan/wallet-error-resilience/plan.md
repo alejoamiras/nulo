@@ -334,7 +334,7 @@ bun run typecheck:all && bun run lint
 ```
 Pass: exit 0, the existing order pins untouched and green. Layers: typecheck/lint · unit.
 
-#### Phase 4 — the noise sweep
+#### Phase 4 ✓ — the noise sweep
 
 Four independent, small changes; one commit each.
 
@@ -395,8 +395,8 @@ report carries it as unmet.
 bun run audit:vue                # typecheck:all → extension tests → lint → build
 bun run test:all                 # every @nulo package's unit tests (audit:vue runs only the extension's)
 bun run test:e2e                 # smoke, from apps/extension per the cd rule — includes the passkey specs
-bun run e2e:agent tests/e2e/network/stale-anchor-recovery.test.ts   # the canary, first and alone
-bun run e2e:agent                # full network suite, run ALONE (nothing else on the host)
+NULO_E2E_REORG=1 bun run e2e:agent tests/e2e/network/stale-anchor-recovery.test.ts   # the canary, first and alone (armed; it skips in a pooled run)
+NULO_E2E_PROVERLESS=1 bun run e2e:agent   # full network suite (CI's pool build), run ALONE (nothing else on the host)
 ```
 Pass: every command exit 0; the canary's assertions as written above; a red network shard is re-run
 once before triage (the suite mass-fails under host load). Layers: typecheck/lint · unit · e2e ·
