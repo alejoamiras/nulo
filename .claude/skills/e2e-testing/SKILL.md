@@ -117,6 +117,10 @@ runtime env var can never arm a build-time flag.
   (`account-switch-isolation.test.ts` is the idiom) — the belt for direct vitest invocations. Other
   armed features need their own guard (`backup-migration.test.ts` throws with the remedy;
   `default-token-seeding.test.ts` has none and simply times out unarmed).
+- A file that REORGS the shared sandbox (`stale-anchor-recovery.test.ts`) skips unless
+  `NULO_E2E_REORG=1`: after an `anvil_reorg` prune the local network does not mine again, so in a
+  pooled run every later file that lands a transaction dies at the token-ready fixture's 5-min hook
+  (2026-09-15: five files red in a row at ~309 s behind it). Run it alone, armed, never in the pool.
 
 ### Env vars the suite reads
 

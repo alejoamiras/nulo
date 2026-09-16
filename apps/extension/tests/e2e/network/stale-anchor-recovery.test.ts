@@ -16,10 +16,13 @@
  *      SKIPS with the reason; the delivery report carries the recovery as unmet at this layer
  *      (the real-PXE integration test in aztec-runtime pins it with a frozen anchor).
  *
- * Run it first and alone: `bun run e2e:agent tests/e2e/network/stale-anchor-recovery.test.ts`.
- * The reorg drops the tip L2 block, so a disposable mint lands first: the pruned block then carries
- * nothing the view depends on (pruning the token's own deployment block turns the view into a
- * legitimate "Not initialized" failure, which is not what this spec is about).
+ * Run it first, alone and armed:
+ * `NULO_E2E_REORG=1 bun run e2e:agent tests/e2e/network/stale-anchor-recovery.test.ts`. Unarmed it
+ * skips: the reorg leaves the local network unable to mine again, so inside a pooled run every later
+ * spec that lands a transaction would time out on the shared sandbox. The reorg drops the tip L2
+ * block, so a disposable mint lands first: the pruned block then carries nothing the view depends on
+ * (pruning the token's own deployment block turns the view into a legitimate "Not initialized"
+ * failure, which is not what this spec is about).
  */
 import { expect, inject } from "vitest"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
@@ -41,6 +44,7 @@ import { serializeInstance } from "../fixtures/selfpay-phase"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
+const reorgArmed = process.env.NULO_E2E_REORG === "1"
 const ANVIL_URL = process.env.ANVIL_URL ?? "http://localhost:8545"
 
 const RETRY_LINE = "executeUtility: stale anchor on first attempt — resynced, retrying once"
@@ -139,7 +143,7 @@ async function retryLinesSince(popup: import("puppeteer").Page, since: number): 
 	return []
 }
 
-test.skipIf(!hasConfig)(
+test.skipIf(!hasConfig || !reorgArmed)(
 	"stale-anchor recovery canary — views survive an L1 reorg; the offscreen retry line is asserted when the race lands",
 	// retry: 0 — a retry-masked failure of the hard assertion would defeat the gate.
 	{ timeout: 900_000, retry: 0 },
