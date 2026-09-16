@@ -21,7 +21,7 @@ import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { TxExecutionRequest } from "@aztec/stdlib/tx"
 import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
-import { DuplicateInitializationError } from "@nulo/extension-messaging/errors"
+import { SessionEndedError } from "@nulo/extension-messaging/errors"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import { formatFeeJuice } from "@/utils/fee-estimation"
 import type { Network } from "@/wallet/services/network/service"
@@ -33,8 +33,9 @@ import { requireActiveProfile } from "@/wallet/services/profile/require-active-p
 import { type TaskService, type WrappedTask, TransferContent } from "@/wallet/services/task/service"
 import { OriginType, type LocalTxOrigin, type TransactionService, type Tx } from "@/wallet/services/transaction/service"
 import type { IPXE } from "@/wallet/services/pxe/client"
-import type { ExecutionCoordinator } from "./execution-coordinator"
+import { type ExecutionCoordinator, fenceChecks } from "./execution-coordinator"
 import type { FeeEstimate } from "./fee/fee-strategy"
+import { failureKind } from "./mark-failed-unless-cancelled"
 import type { OperationPlanner, TransferRequest } from "./operation-planner"
 import { maybeRethrowAsRpcCancel } from "./rpc-cancel"
 import type { Action, FeeOptions, FeeSettings, TransferFeeEstimate } from "./spec"
@@ -59,9 +60,9 @@ type TransferBuildInputs = {
 	}
 }
 
-/** Controller-registry subset of the (future) execution lane. */
+/** Controller-registry subset of the execution lane. */
 export interface TransferExecutorLane {
-	registerController(journalId: string, controller: AbortController): void
+	registerInFlight(journalId: string, serial: number, controller: AbortController): { live: boolean }
 	deleteController(journalId: string): void
 }
 
@@ -72,6 +73,9 @@ export interface TransferExecutorDeps {
 	coordinator: ExecutionCoordinator
 	lane: TransferExecutorLane
 	getActiveProfile(): Promise<ProfileInfo | undefined>
+	captureExecutionFence(): Promise<ExecutionFence>
+	assertFence(fence: ExecutionFence): Promise<void>
+	isFenceLive(fence: ExecutionFence): boolean
 	getNetwork(networkId: string): Promise<Network>
 	getNode(chainId: number): Promise<AztecNode>
 	getPXE(network: Network): IPXE
@@ -83,6 +87,7 @@ export interface TransferExecutorDeps {
 	buildAndEstimate(
 		inputOp: { networkId: string; accountAddress: string; actions: Action[]; fee?: FeeOptions },
 		feeSettings: FeeSettings,
+		fence: ExecutionFence,
 		parentTask?: WrappedTask,
 		signal?: AbortSignal,
 	): Promise<FeeEstimate>
@@ -95,13 +100,13 @@ export interface TransferExecutorDeps {
 export class TransferExecutor {
 	public constructor(private readonly deps: TransferExecutorDeps) {}
 
-	public async execute(req: TransferRequest, precomputedEstimateId?: string, fence?: ExecutionFence): Promise<string> {
+	public async execute(req: TransferRequest, precomputedEstimateId: string | undefined, fence: ExecutionFence): Promise<string> {
 		const { networkId, accountAddress, tokenId, transferType, recipientAddress, amount } = req
 		const origin: LocalTxOrigin = { type: OriginType.UI }
 		const transferContent = new TransferContent(tokenId, transferType, accountAddress, recipientAddress, amount, networkId)
 		const transferTask = this.deps.tasks.startNewTask(transferContent, undefined, origin)
 
-		const { journalId, controller } = await this.createTransferJournal(req)
+		const { journalId, controller, live } = await this.createTransferJournal(req, fence)
 		const markJournal = async (progress: JobProgress, error?: JobError | null) => {
 			if (!journalId) return
 			try {
@@ -119,10 +124,11 @@ export class TransferExecutor {
 		}
 
 		try {
+			if (!live) throw new SessionEndedError()
 			// Try the cached-estimate fast path first. Falls back to a fresh
 			// build if the snapshot has drifted (base fee, primary endpoint,
 			// or any input field) — conservative: any mismatch ⇒ rebuild.
-			const reused = precomputedEstimateId ? await this.deps.estimateReuse.tryConsume(precomputedEstimateId, req) : undefined
+			const reused = precomputedEstimateId ? await this.deps.estimateReuse.tryConsume(precomputedEstimateId, req, fence) : undefined
 
 			// Enter `simulating` BEFORE the build — the fee strategies inside
 			// run real `simulateTx` calls which can take several seconds;
@@ -133,8 +139,8 @@ export class TransferExecutor {
 			checkCancelled()
 
 			const { txRequest, node, pxe, account, network, nonce, feePaymentMethod, initializesAccount, activity } = reused
-				? await this.fromReusedEstimate(reused, req, precomputedEstimateId)
-				: await this.buildFresh(req, transferTask)
+				? await this.fromReusedEstimate(reused, req, precomputedEstimateId, fence)
+				: await this.buildFresh(req, fence, transferTask)
 			const { token: activityToken, fnName: activityFnName, args: activityArgs } = activity
 
 			// Activity-feed shape is always transfer-only (no FPC fee payload).
@@ -152,6 +158,7 @@ export class TransferExecutor {
 				parentTask: transferTask,
 				journalId,
 				checkCancelled,
+				...fenceChecks(this.deps, fence),
 				markJournal: (patch) => markJournal(patch),
 				recordTransaction: (hash) =>
 					this.deps.addTransaction(
@@ -194,13 +201,9 @@ export class TransferExecutor {
 			// Journal already in `cancelled` (cancelJob did it); convert the
 			// internal sentinel to the structured RPC-boundary error here.
 			maybeRethrowAsRpcCancel(error, transferTask)
-			// A classified initialization race keeps its own kind on the transfer
-			// path too — the flag was threaded here precisely so a first-tx popup
-			// transfer classifies the same as a dApp send.
-			await markJournal(
-				{ stage: "failed" },
-				normalizeError(error, error instanceof DuplicateInitializationError ? "duplicate_initialization" : "transfer"),
-			)
+			// Classified failures keep their own kind on the transfer path too, so a
+			// popup transfer reads the same as a dApp send.
+			await markJournal({ stage: "failed" }, normalizeError(error, failureKind(error, "transfer")))
 			transferTask.fail(error)
 			throw error
 		} finally {
@@ -214,44 +217,48 @@ export class TransferExecutor {
 	 *  succeeded | failed | cancelled. Creation is best-effort — a journal
 	 *  failure logs and returns an empty result, never blocks the transfer.
 	 *  This helper OWNS the full `await create → new AbortController →
-	 *  registerController` span: the controller must be registered in the SAME
+	 *  registerInFlight` span: the controller must be registered in the SAME
 	 *  continuation that sees the durable row, so `cancelJob(journalId)` can
 	 *  never land in a settlement hop between the row becoming visible and the
 	 *  controller existing (it would transition the row terminal, find nothing
-	 *  to abort, and a later-installed controller would let proving continue). */
+	 *  to abort, and a later-installed controller would let proving continue).
+	 *  `live: false` means the fence's session ended before the registration:
+	 *  nothing is registered and the caller fails the row. */
 	private async createTransferJournal(
 		req: TransferRequest,
-	): Promise<{ journalId: string | undefined; controller: AbortController | undefined }> {
+		fence: ExecutionFence,
+	): Promise<{ journalId: string | undefined; controller: AbortController | undefined; live: boolean }> {
 		let journalOp: OperationRecord | undefined
 		try {
-			const profile = await this.deps.getActiveProfile()
-			if (profile) {
-				journalOp = await this.deps.createJournalOperation({
-					kind: "transfer",
-					origin: "popup",
-					profileId: profile.id,
-					accountAddress: req.accountAddress,
-					networkId: req.networkId,
-					tokenId: req.tokenId,
-					// Persist amount + recipient so terminal cards can render
-					// the same info as awaiting/settled cards. amount is bigint
-					// → string for JSON safety; field name matches
-					// `balanceFormatted(rawAmount, decimals, length)`.
-					amountRaw: req.amount.toString(),
-					recipientAddress: req.recipientAddress,
-					// Persist the privacy direction so the in-flight awaiting
-					// card can render the Private/Public chip the settled card
-					// shows. Resolved via `formatTransferType()` consumer-side.
-					transferType: req.transferType,
-				})
-			}
+			journalOp = await this.deps.createJournalOperation({
+				kind: "transfer",
+				origin: "popup",
+				profileId: fence.profileId,
+				profileEpoch: fence.epoch,
+				accountAddress: req.accountAddress,
+				networkId: req.networkId,
+				tokenId: req.tokenId,
+				// Persist amount + recipient so terminal cards can render
+				// the same info as awaiting/settled cards. amount is bigint
+				// → string for JSON safety; field name matches
+				// `balanceFormatted(rawAmount, decimals, length)`.
+				amountRaw: req.amount.toString(),
+				recipientAddress: req.recipientAddress,
+				// Persist the privacy direction so the in-flight awaiting
+				// card can render the Private/Public chip the settled card
+				// shows. Resolved via `formatTransferType()` consumer-side.
+				transferType: req.transferType,
+			})
 		} catch (error) {
 			this.deps.logError("Failed to create journal operation", error)
 		}
 		const journalId = journalOp?.id
-		const controller = journalId ? new AbortController() : undefined
-		if (journalId && controller) this.deps.lane.registerController(journalId, controller)
-		return { journalId, controller }
+		if (!journalId) return { journalId: undefined, controller: undefined, live: true }
+		const controller = new AbortController()
+		if (!this.deps.lane.registerInFlight(journalId, fence.session, controller).live) {
+			return { journalId, controller: undefined, live: false }
+		}
+		return { journalId, controller, live: true }
 	}
 
 	/** Reused-estimate arm: the entry retains the exact build — its provenance
@@ -260,13 +267,14 @@ export class TransferExecutor {
 		reused: NonNullable<Awaited<ReturnType<TransferEstimateReuse["tryConsume"]>>>,
 		req: TransferRequest,
 		precomputedEstimateId: string | undefined,
+		fence: ExecutionFence,
 	): Promise<TransferBuildInputs> {
 		this.deps.logDebug(`executeTransfer: reusing precomputed estimate ${precomputedEstimateId}`)
 		const network = await this.deps.getNetwork(req.networkId)
 		const node = await this.deps.getNode(network.chainId)
 		const pxe = this.deps.getPXE(network)
-		const profile = await requireActiveProfile(this.deps, "Wallet locked")
-		const account = await this.deps.getAccountContract(profile.id, network.chainId, req.accountAddress)
+		await this.deps.assertFence(fence)
+		const account = await this.deps.getAccountContract(fence.profileId, network.chainId, req.accountAddress)
 		return {
 			txRequest: reused.txRequest,
 			node,
@@ -285,9 +293,9 @@ export class TransferExecutor {
 	 *  `buildAndEstimate` txCalls, so the persisted record stays just the
 	 *  user-intent transfer (no `pay_fee` / `fee_entrypoint_*` fee-payload
 	 *  pollution leaking into the activity card title). */
-	private async buildFresh(req: TransferRequest, transferTask: WrappedTask): Promise<TransferBuildInputs> {
+	private async buildFresh(req: TransferRequest, fence: ExecutionFence, transferTask: WrappedTask): Promise<TransferBuildInputs> {
 		const { op, token, fn, args } = await this.deps.planner.buildTransferOperation(req)
-		const built = await this.deps.buildAndEstimate(op, op.feeSettings, transferTask)
+		const built = await this.deps.buildAndEstimate(op, op.feeSettings, fence, transferTask)
 		return {
 			txRequest: built.txRequest,
 			node: built.node,
@@ -315,6 +323,7 @@ export class TransferExecutor {
 			if (signal?.aborted) throw new JobCancelledSentinel("")
 		}
 		checkCancelled()
+		const fence = await this.deps.captureExecutionFence()
 		const { op, token, fn, args } = await this.deps.planner.buildTransferOperation(req)
 		checkCancelled()
 
@@ -324,7 +333,7 @@ export class TransferExecutor {
 			nonce,
 			feePaymentMethod,
 			initializesAccount: builtInitializes,
-		} = await this.deps.buildAndEstimate(op, op.feeSettings, undefined, signal)
+		} = await this.deps.buildAndEstimate(op, op.feeSettings, fence, undefined, signal)
 		checkCancelled()
 
 		const maxFeeRaw = BigInt(getEstimatedFee(txRequest))

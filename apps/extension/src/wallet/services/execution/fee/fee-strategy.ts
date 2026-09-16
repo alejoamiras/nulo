@@ -48,6 +48,7 @@ import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { FpcService } from "@/wallet/services/fpc/service"
 import type { IPXE } from "@/wallet/services/pxe/client"
 import { StepContent, type TaskService, type WrappedTask } from "@/wallet/services/task/service"
+import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import type { DiscoveryProbe } from "../discovery-aware-estimator"
 import type { Action, FeeOptions, FeeSettings } from "../spec"
 import type { BuiltStandardTx, TxRequestBuilder } from "../tx-request-builder"
@@ -101,6 +102,8 @@ export type FeeStrategyContext = {
 		actions: Action[]
 		fee?: FeeOptions
 	}
+	/** The authorization every build in the strategy runs under. */
+	fence: ExecutionFence
 	feeSettings: FeeSettings
 	/** Pre-computed from feeSettings.priorityLevel. Undefined if the
 	 *  caller didn't set one (falls back to DEFAULT_FEE_MULTIPLIER). */

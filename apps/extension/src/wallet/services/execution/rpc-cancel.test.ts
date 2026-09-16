@@ -4,7 +4,9 @@ import {
 	DuplicateInitializationError,
 	JobCancelledError,
 	PxeStaleAnchorError,
+	SessionEndedError,
 	TooManyPendingError,
+	walletErrorFromPayload,
 } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { classifyOperationCatch, maybeRethrowAsRpcCancel } from "./rpc-cancel"
@@ -79,6 +81,14 @@ describe("classifyOperationCatch", () => {
 		const unregistered = classifyOperationCatch(new ContractNotRegisteredError("Contract not found"), task, errorMessage)
 		expect(unregistered).toMatchObject({ status: "failed", code: "CONTRACT_NOT_REGISTERED", error: "Contract not found" })
 		expect(task.fail).toHaveBeenCalledTimes(2)
+	})
+
+	test("SessionEndedError rides the code channel and rebuilds losslessly from its code and message", () => {
+		const task = { cancel: vi.fn(), fail: vi.fn() }
+		const result = classifyOperationCatch(new SessionEndedError(), task, errorMessage)
+		expect(result).toMatchObject({ status: "failed", code: "SESSION_ENDED", error: SessionEndedError.MESSAGE })
+		const failed = result as { code: string; error: string }
+		expect(walletErrorFromPayload({ code: failed.code, message: failed.error })).toBeInstanceOf(SessionEndedError)
 	})
 
 	test("(N-15) OTHER WalletError subclasses do NOT ride the code channel (unsound reconstruction guard)", () => {

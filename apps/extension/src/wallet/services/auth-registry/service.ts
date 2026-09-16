@@ -253,6 +253,9 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		if (ids.length > MAX_REVOKES_PER_TX) {
 			throw new Error(`Cannot revoke more than ${MAX_REVOKES_PER_TX} authwits per single tx`)
 		}
+		// Bound to the session the user acted in before anything else is awaited:
+		// a lock and re-unlock during the reads below must not authorize the send.
+		const fence = await this.profileService.captureExecutionFence()
 		const network = await this.networkService.getNetwork(networkId)
 		const scope: AuthwitScope = { profileId: network.profileId, chainId: network.chainId, account }
 
@@ -292,6 +295,8 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 				},
 				{ type: OriginType.UI },
 				task,
+				undefined,
+				fence,
 			)
 
 			await this.transactionService.waitForTx(txHash, task)
@@ -323,6 +328,8 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 
 	public async setRegistryEnabled(networkId: string, account: string, enabled: boolean, feeSettings: FeeSettings): Promise<void> {
 		await this.ensureInitialized()
+		// Captured first, for the same reason as `revokeAuthwits`.
+		const fence = await this.profileService.captureExecutionFence()
 		const network = await this.networkService.getNetwork(networkId)
 		const scope: AuthwitScope = { profileId: network.profileId, chainId: network.chainId, account }
 		const task = this.taskService.startNewTask(new StepContent(`${enabled ? "Enable" : "Disable"} auth registry`))
@@ -344,6 +351,8 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 				},
 				{ type: OriginType.UI },
 				task,
+				undefined,
+				fence,
 			)
 
 			await this.transactionService.waitForTx(txHash, task)

@@ -550,6 +550,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		)
 	}
 
+	/** The live session's serial, synchronously; `undefined` when locked. */
+	public peekLiveSerial(): number | undefined {
+		return this.sessionManager.peekLiveSerial()
+	}
+
 	public async getProfiles(): Promise<ProfileInfo[]> {
 		await this.ensureInitialized()
 		// A tombstoned (deletion-pending) profile is ABSENT to every read (finding D).

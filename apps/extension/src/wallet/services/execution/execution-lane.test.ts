@@ -16,9 +16,12 @@
  */
 
 import { describe, expect, test, vi } from "vitest"
-import { TooManyPendingError } from "@nulo/extension-messaging/errors"
+import { SessionEndedError, TooManyPendingError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { ExecutionLane, type ExecutionLaneDeps } from "./execution-lane"
+import type { ExecutionMutex } from "./execution-mutex"
+
+const FENCE = { profileId: "p1", epoch: 0, session: 1 }
 
 function makeLane(overrides: Partial<ExecutionLaneDeps> = {}) {
 	const transitions: unknown[][] = []
@@ -37,6 +40,8 @@ function makeLane(overrides: Partial<ExecutionLaneDeps> = {}) {
 			}),
 		} as never,
 		getActiveProfile: vi.fn(async () => ({ id: "p1" }) as never),
+		assertFence: vi.fn(async () => {}),
+		peekLiveSerial: vi.fn(() => FENCE.session),
 		getNetwork: vi.fn(async () => ({ chainId: 7 }) as never),
 		logDebug: vi.fn(),
 		logInfo: vi.fn(),
@@ -46,8 +51,12 @@ function makeLane(overrides: Partial<ExecutionLaneDeps> = {}) {
 	return { deps, transitions, touches, lane: new ExecutionLane(deps) }
 }
 
-function controllers(lane: ExecutionLane): Map<string, AbortController> {
-	return (lane as unknown as { activeControllers: Map<string, AbortController> }).activeControllers
+function controllers(lane: ExecutionLane): Map<string, { controller: AbortController; serial: number }> {
+	return (lane as unknown as { activeControllers: Map<string, { controller: AbortController; serial: number }> }).activeControllers
+}
+
+function mutex(lane: ExecutionLane): ExecutionMutex {
+	return (lane as unknown as { executionMutex: ExecutionMutex }).executionMutex
 }
 
 async function flushMicrotasks(rounds = 10): Promise<void> {
@@ -59,9 +68,9 @@ async function flushMicrotasks(rounds = 10): Promise<void> {
 describe("ExecutionLane.acquireSlot", () => {
 	test("sync-register invariant + cancel-during-wait → JobCancelledSentinel, controller cleaned", async () => {
 		const { lane } = makeLane()
-		const holder = await lane.acquireSlot("net-1", undefined)
+		const holder = await lane.acquireSlot("net-1", undefined, FENCE)
 
-		const waiting = lane.acquireSlot("net-1", "queued-2")
+		const waiting = lane.acquireSlot("net-1", "queued-2", FENCE)
 		const rejection = expect(waiting).rejects.toBeInstanceOf(JobCancelledSentinel)
 		await flushMicrotasks()
 		// The pre-acquire controller is registered under the queued id BEFORE
@@ -77,17 +86,17 @@ describe("ExecutionLane.acquireSlot", () => {
 		// Lane stays usable: the cancelled waiter left the queue, so release
 		// → next acquire grants normally.
 		holder.release()
-		const next = await lane.acquireSlot("net-1", undefined)
+		const next = await lane.acquireSlot("net-1", undefined, FENCE)
 		next.release()
 	})
 
 	test("FIFO baton release point: onEnqueued fires while still waiting; grants stay ordered", async () => {
 		const { lane } = makeLane()
-		const holder = await lane.acquireSlot("net-1", undefined)
+		const holder = await lane.acquireSlot("net-1", undefined, FENCE)
 
 		const grants: string[] = []
 		const onEnqueuedT2 = vi.fn()
-		const t2 = lane.acquireSlot("net-1", undefined, onEnqueuedT2).then((g) => {
+		const t2 = lane.acquireSlot("net-1", undefined, FENCE, onEnqueuedT2).then((g) => {
 			grants.push("t2")
 			return g
 		})
@@ -96,7 +105,7 @@ describe("ExecutionLane.acquireSlot", () => {
 		expect(onEnqueuedT2).toHaveBeenCalledTimes(1)
 		expect(grants).toEqual([])
 
-		const t3 = lane.acquireSlot("net-1", undefined).then((g) => {
+		const t3 = lane.acquireSlot("net-1", undefined, FENCE).then((g) => {
 			grants.push("t3")
 			return g
 		})
@@ -114,14 +123,14 @@ describe("ExecutionLane.acquireSlot", () => {
 		const { lane, transitions } = makeLane()
 		// Same network + same origin: holder (depth 1) + 7 waiters = origin
 		// depth 8 (the cap). The 9th must capacity-reject.
-		const holder = await lane.acquireSlot("net-1", undefined, undefined, "https://dapp.example")
+		const holder = await lane.acquireSlot("net-1", undefined, FENCE, undefined, "https://dapp.example")
 		const waiters: Promise<unknown>[] = []
 		for (let i = 0; i < 7; i++) {
-			waiters.push(lane.acquireSlot("net-1", undefined, undefined, "https://dapp.example"))
+			waiters.push(lane.acquireSlot("net-1", undefined, FENCE, undefined, "https://dapp.example"))
 		}
 		await flushMicrotasks()
 
-		await expect(lane.acquireSlot("net-1", "q9", undefined, "https://dapp.example")).rejects.toBeInstanceOf(TooManyPendingError)
+		await expect(lane.acquireSlot("net-1", "q9", FENCE, undefined, "https://dapp.example")).rejects.toBeInstanceOf(TooManyPendingError)
 		// The journal record terminalizes HERE (the caller's claim never runs):
 		// same failed shape the silent path would otherwise leave stuck at pending.
 		const failedCall = transitions.find((t) => t[0] === "q9")
@@ -141,9 +150,9 @@ describe("ExecutionLane.acquireSlot", () => {
 		vi.useFakeTimers()
 		try {
 			const { lane, touches, deps } = makeLane()
-			const holder = await lane.acquireSlot("net-1", undefined)
+			const holder = await lane.acquireSlot("net-1", undefined, FENCE)
 
-			const waiting = lane.acquireSlot("net-1", "queued-hb")
+			const waiting = lane.acquireSlot("net-1", "queued-hb", FENCE)
 			// Flush the pre-acquire awaits manually — fake timers don't gate
 			// microtasks, but vi.waitFor would.
 			await Promise.resolve()
@@ -175,12 +184,98 @@ describe("ExecutionLane.acquireSlot", () => {
 		const { lane, deps } = makeLane({
 			getNetwork: vi.fn(async (networkId: string) => ({ chainId: networkId === "net-1" ? 1 : 2 }) as never),
 		})
-		const a = await lane.acquireSlot("net-1", undefined)
+		const a = await lane.acquireSlot("net-1", undefined, FENCE)
 		// Different chainId → different lane → grants immediately (would hang otherwise).
-		const b = await lane.acquireSlot("net-2", undefined)
+		const b = await lane.acquireSlot("net-2", undefined, FENCE)
 		a.release()
 		b.release()
 		expect(deps.getNetwork).toHaveBeenCalledTimes(2)
+	})
+})
+
+describe("ExecutionLane fence: registration, slot refusal, mutex key", () => {
+	test("registerInFlight registers only under the live serial; a dead or absent one reports live: false", () => {
+		const live = { serial: 2 as number | undefined }
+		const { lane } = makeLane({ peekLiveSerial: vi.fn(() => live.serial) })
+		expect(lane.registerInFlight("job-dead", 1, new AbortController())).toEqual({ live: false })
+		live.serial = undefined
+		expect(lane.registerInFlight("job-locked", 2, new AbortController())).toEqual({ live: false })
+		expect(controllers(lane).size).toBe(0)
+		live.serial = 2
+		const controller = new AbortController()
+		expect(lane.registerInFlight("job-live", 2, controller)).toEqual({ live: true })
+		expect(controllers(lane).get("job-live")).toEqual({ controller, serial: 2 })
+	})
+
+	test("acquireSlot registers the pre-acquire controller before its first await, then asserts, then keys", async () => {
+		const order: string[] = []
+		const harness = makeLane({
+			assertFence: vi.fn(async () => {
+				order.push(`assert:registered=${controllers(harness.lane).has("q1")}`)
+			}),
+			getNetwork: vi.fn(async () => {
+				order.push("key")
+				return { chainId: 7 } as never
+			}),
+		})
+		const pending = harness.lane.acquireSlot("net-1", "q1", FENCE)
+		expect(controllers(harness.lane).get("q1")?.serial).toBe(FENCE.session)
+		const { release } = await pending
+		release()
+		expect(order).toEqual(["assert:registered=true", "key"])
+	})
+
+	test("a dead serial fails the queued record as session_ended, then throws; nothing asserted, keyed or acquired", async () => {
+		const { lane, transitions, deps } = makeLane({ peekLiveSerial: vi.fn(() => 2) })
+		const acquire = vi.spyOn(mutex(lane), "acquire")
+		await expect(lane.acquireSlot("net-1", "q-dead", FENCE)).rejects.toBeInstanceOf(SessionEndedError)
+		const failed = transitions.find((t) => t[0] === "q-dead")
+		expect(failed?.[1]).toEqual({ stage: "failed" })
+		expect(failed?.[2]).toMatchObject({ kind: "session_ended" })
+		expect(controllers(lane).has("q-dead")).toBe(false)
+		expect(deps.assertFence).not.toHaveBeenCalled()
+		expect(deps.getNetwork).not.toHaveBeenCalled()
+		expect(acquire).not.toHaveBeenCalled()
+	})
+
+	test("a failed assert fails the queued record as session_ended, drops the controller, never keys or acquires", async () => {
+		const { lane, transitions, deps } = makeLane({
+			assertFence: vi.fn(async () => {
+				throw new SessionEndedError()
+			}),
+		})
+		const acquire = vi.spyOn(mutex(lane), "acquire")
+		await expect(lane.acquireSlot("net-1", "q-ended", FENCE)).rejects.toBeInstanceOf(SessionEndedError)
+		const failed = transitions.find((t) => t[0] === "q-ended")
+		expect(failed?.[1]).toEqual({ stage: "failed" })
+		expect(failed?.[2]).toMatchObject({ kind: "session_ended" })
+		expect(controllers(lane).has("q-ended")).toBe(false)
+		expect(deps.getNetwork).not.toHaveBeenCalled()
+		expect(acquire).not.toHaveBeenCalled()
+	})
+
+	test("the mutex key is the fence's profile even when another profile is active", async () => {
+		const { lane, deps } = makeLane({ getActiveProfile: vi.fn(async () => ({ id: "p2" }) as never) })
+		const acquire = vi.spyOn(mutex(lane), "acquire")
+		const { release } = await lane.acquireSlot("net-1", undefined, FENCE)
+		release()
+		expect(acquire.mock.calls[0]?.[0]).toBe("p1:7")
+		expect(deps.getActiveProfile).not.toHaveBeenCalled()
+	})
+
+	test("claimOrCreateJournal creates under the fence's profile and epoch and registers under its serial", async () => {
+		const createOperation = vi.fn(async (input: unknown) => ({ id: "op-3", ...(input as object) }) as never)
+		const { lane, deps } = makeLane({
+			operationJournal: { createOperation } as never,
+			getActiveProfile: vi.fn(async () => ({ id: "p2-successor" }) as never),
+			captureProfileEpoch: vi.fn(() => 99),
+		})
+		const origin = { type: 1, name: "dapp" } as never
+		const claimed = await lane.claimOrCreateJournal("net-1", "0xacct", origin, undefined, undefined, undefined, FENCE)
+		expect(claimed.journalId).toBe("op-3")
+		expect(createOperation).toHaveBeenCalledWith(expect.objectContaining({ profileId: "p1", profileEpoch: 0 }))
+		expect(controllers(lane).get("op-3")).toEqual({ controller: claimed.controller, serial: FENCE.session })
+		expect(deps.getActiveProfile).not.toHaveBeenCalled()
 	})
 })
 
@@ -244,7 +339,7 @@ describe("ExecutionLane.cancelJob ownership (ledger D6: profile is the sole prin
 	test("matching profile → cancels: transition + abort + controller removed", async () => {
 		const { lane, transitions } = makeOwnershipLane({ activeProfile: "p1", recordProfile: "p1" })
 		const controller = new AbortController()
-		lane.registerController("job-1", controller)
+		lane.registerInFlight("job-1", FENCE.session, controller)
 		await lane.cancelJob("job-1")
 		expect(transitions.find((t) => t[0] === "job-1")?.[1]).toEqual({ stage: "cancelled" })
 		expect(controller.signal.aborted).toBe(true)
@@ -254,7 +349,7 @@ describe("ExecutionLane.cancelJob ownership (ledger D6: profile is the sole prin
 	test("foreign profile → silent drop: no transition, no abort (indistinguishable from unknown id)", async () => {
 		const { lane, transitions } = makeOwnershipLane({ activeProfile: "p1", recordProfile: "p2" })
 		const controller = new AbortController()
-		lane.registerController("job-1", controller)
+		lane.registerInFlight("job-1", FENCE.session, controller)
 		await lane.cancelJob("job-1")
 		expect(transitions).toEqual([])
 		expect(controller.signal.aborted).toBe(false)
@@ -269,7 +364,7 @@ describe("ExecutionLane.cancelJob ownership (ledger D6: profile is the sole prin
 	test("locked wallet (no active profile) → silent drop, even for a real record", async () => {
 		const { lane, transitions } = makeOwnershipLane({ activeProfile: undefined, recordProfile: "p1" })
 		const controller = new AbortController()
-		lane.registerController("job-1", controller)
+		lane.registerInFlight("job-1", FENCE.session, controller)
 		await lane.cancelJob("job-1")
 		expect(transitions).toEqual([])
 		expect(controller.signal.aborted).toBe(false)
@@ -339,8 +434,8 @@ describe("pre-claim wait heartbeat (N-07)", () => {
 		const { lane } = makeLane()
 		lane.beginQueuedWait("mig-1")
 		expect(queuedWaiters(lane).has("mig-1")).toBe(true)
-		const holder = await lane.acquireSlot("net-1", undefined)
-		const waiting = lane.acquireSlot("net-1", "mig-1") // enqueue → migration
+		const holder = await lane.acquireSlot("net-1", undefined, FENCE)
+		const waiting = lane.acquireSlot("net-1", "mig-1", FENCE) // enqueue → migration
 		await flushMicrotasks()
 		expect(queuedWaiters(lane).has("mig-1")).toBe(false) // exactly one owner
 		holder.release()

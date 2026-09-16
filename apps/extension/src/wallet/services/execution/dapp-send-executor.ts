@@ -45,7 +45,7 @@ import type { AuthRegistryService } from "@/wallet/services/auth-registry/servic
 import type { Network } from "@/wallet/services/network/service"
 import type { FpcInfo } from "@/wallet/services/fpc/spec"
 import type { DiscoveryAwareEstimator } from "./discovery-aware-estimator"
-import type { ExecutionCoordinator } from "./execution-coordinator"
+import { type ExecutionCoordinator, fenceChecks } from "./execution-coordinator"
 import type { ExecutionMutexRelease } from "./execution-mutex"
 import type { OperationEstimateReuse, OperationEstimateReuseEntry } from "./operation-estimate-reuse"
 import { fingerprintNoFromInputs, fingerprintOperation, type OperationFingerprintInput } from "./operation-fingerprint"
@@ -91,11 +91,11 @@ function pickActionMethod(actions: readonly Action[] | undefined): string | unde
  *  the queued-record claim, the journal helpers, and the controller
  *  registry. Implementations live on the facade today. */
 export interface DappSendExecutorLane {
-	registerController(journalId: string, controller: AbortController): void
 	deleteController(journalId: string): void
 	acquireSlot(
 		networkId: string,
 		queuedJournalId: string | undefined,
+		fence: ExecutionFence,
 		onEnqueued?: () => void,
 		originKey?: string,
 	): Promise<{ release: ExecutionMutexRelease; preController: AbortController | undefined }>
@@ -105,8 +105,8 @@ export interface DappSendExecutorLane {
 		origin: LocalTxOrigin,
 		calls: { method?: string }[] | undefined,
 		hooks: ExecutionHooks | undefined,
-		reuseController?: AbortController,
-		fence?: ExecutionFence,
+		reuseController: AbortController | undefined,
+		fence: ExecutionFence,
 	): Promise<{ journalId: string | undefined; controller: AbortController | undefined }>
 	beginJournal(
 		networkId: string,
@@ -129,7 +129,7 @@ interface SentTx {
 	nonce: { toString(): string }
 	feePaymentMethod: AddTransactionArgs[5]
 	txRequest: Parameters<typeof getEstimatedFee>[0]
-	fence: AddTransactionArgs[10]
+	fence: ExecutionFence
 	networkId: AddTransactionArgs[11]
 	pendingPublicAuthwits: Parameters<DappSendExecutorDeps["recordPendingAuthwits"]>[1]
 }
@@ -150,6 +150,9 @@ export interface DappSendExecutorDeps {
 	 *  refuses to sign an authorization outside it. */
 	previewSnapshots: PreviewSnapshots
 	getActiveProfile(): Promise<{ id: string } | undefined>
+	captureExecutionFence(): Promise<ExecutionFence>
+	assertFence(fence: ExecutionFence): Promise<void>
+	isFenceLive(fence: ExecutionFence): boolean
 	getNetwork(networkId: string): Promise<Network>
 	getNode(chainId: number): Promise<FeeEstimate["node"]>
 	getPXE(network: Network): FeeEstimate["pxe"]
@@ -161,6 +164,7 @@ export interface DappSendExecutorDeps {
 	buildAndEstimateValidated(
 		inputOp: { networkId: string; accountAddress: string; actions: Action[]; fee?: FeeOptions },
 		feeSettings: FeeSettings,
+		fence: ExecutionFence,
 		parentTask?: WrappedTask,
 		signal?: AbortSignal,
 	): Promise<FeeEstimate>
@@ -202,12 +206,11 @@ export class DappSendExecutor {
 			accountAddress: string
 			origin: LocalTxOrigin
 			hooks: ExecutionHooks | undefined
-			// The AUTHORIZATION-time fence. The journal create must carry THIS
-			// epoch, not one recaptured after the FIFO wait: a profile deleted
-			// and reimported under the same id while the operation queued would
-			// otherwise mint a fresh epoch and file the stale operation into the
-			// successor incarnation.
-			fence: ExecutionFence | undefined
+			// The AUTHORIZATION-time fence. The slot, the journal create and the
+			// build all answer to THIS capture, never one taken after the FIFO
+			// wait: a lock, a switch or a delete + same-id reimport while the
+			// operation queued would otherwise pass for the authorizing session.
+			fence: ExecutionFence
 			// A THUNK, not a value: the primary-method extraction reads the
 			// (potentially large / adversarial) `op.exec.calls`, and must run
 			// AFTER `acquireSlot` — computing it earlier would delay our FIFO
@@ -224,6 +227,7 @@ export class DappSendExecutor {
 		const { release: releaseSlot, preController } = await this.deps.lane.acquireSlot(
 			params.networkId,
 			params.hooks?.queuedJournalId,
+			params.fence,
 			params.hooks?.onExecutionEnqueued,
 			params.hooks?.originKey,
 		)
@@ -284,6 +288,7 @@ export class DappSendExecutor {
 			if (signal?.aborted) throw new JobCancelledSentinel("")
 		}
 		checkCancelled()
+		const fence = await this.deps.captureExecutionFence()
 
 		// Build actions array — clone to prevent mutation side effects
 		let actions: Action[]
@@ -311,6 +316,7 @@ export class DappSendExecutor {
 			actions,
 			detectedFee,
 			feeSettings,
+			fence,
 			undefined,
 			signal,
 		)
@@ -351,7 +357,8 @@ export class DappSendExecutor {
 			if (signal?.aborted) throw new JobCancelledSentinel("")
 		}
 		checkCancelled()
-		const prepared = await this.prepareNoFrom(op)
+		const fence = await this.deps.captureExecutionFence()
+		const prepared = await this.prepareNoFrom(op, fence)
 		checkCancelled()
 		const discovered = await this.discoverNoFromAuthwits(prepared)
 		checkCancelled()
@@ -520,19 +527,12 @@ export class DappSendExecutor {
 				sent.networkId,
 			)
 			if (sent.pendingPublicAuthwits.length > 0) {
-				// Scope the pending rows to the SENDING tx's (profileId, chainId, account). The
-				// authorization fence carries the profile; fall back to the active profile only if
-				// a path built the tx without one. No profile ⇒ skip (the row would be unscopable).
-				const profileId = sent.fence?.profileId ?? (await this.deps.getActiveProfile())?.id
-				if (profileId) {
-					await this.deps.recordPendingAuthwits(
-						{ profileId, chainId: sent.network.chainId, account },
-						sent.pendingPublicAuthwits,
-						hash,
-					)
-				} else {
-					this.deps.logDebug("recordPendingAuthwits skipped: no profile scope for the sent tx")
-				}
+				// Scoped to the SENDING tx's (profileId, chainId, account); the profile is the fence's.
+				await this.deps.recordPendingAuthwits(
+					{ profileId: sent.fence.profileId, chainId: sent.network.chainId, account },
+					sent.pendingPublicAuthwits,
+					hash,
+				)
 			}
 		}
 	}
@@ -540,8 +540,8 @@ export class DappSendExecutor {
 	public async executeSendTransaction(
 		op: SendTransactionOperation,
 		origin: LocalTxOrigin,
-		parentTask?: WrappedTask,
-		fence?: ExecutionFence,
+		parentTask: WrappedTask | undefined,
+		fence: ExecutionFence,
 		hooks?: ExecutionHooks,
 	): Promise<string> {
 		// The SW materializes every operation it executes, so a missing
@@ -589,7 +589,7 @@ export class DappSendExecutor {
 					feePaymentMethod,
 					pendingPublicAuthwits,
 					initializesAccount,
-				} = await this.deps.buildAndEstimateValidated(op, op.feeSettings, parentTask)
+				} = await this.deps.buildAndEstimateValidated(op, op.feeSettings, fence, parentTask)
 
 				const { txHash } = await this.deps.coordinator.proveAndSend({
 					pxe,
@@ -600,6 +600,7 @@ export class DappSendExecutor {
 					parentTask,
 					journalId,
 					checkCancelled,
+					...fenceChecks(this.deps, fence),
 					markJournal,
 					// grantPublicAuthwit routes here (kind: send_transaction), so this is where a granted
 					// authwit is recorded.
@@ -627,9 +628,9 @@ export class DappSendExecutor {
 	public async executeAztecSendTx(
 		op: AztecSendTxOperation,
 		origin: LocalTxOrigin,
-		parentTask?: WrappedTask,
-		hooks?: ExecutionHooks,
-		fence?: ExecutionFence,
+		parentTask: WrappedTask | undefined,
+		hooks: ExecutionHooks | undefined,
+		fence: ExecutionFence,
 		approval?: OperationApprovalEnvelope,
 	): Promise<SendReturn<InteractionWaitOptions>> {
 		// `default_entrypoint` bypasses the standard tx-build pipeline and runs
@@ -699,7 +700,7 @@ export class DappSendExecutor {
 					pendingPublicAuthwits,
 					initializesAccount,
 					discoveredHashes,
-				} = await this.resolveStandardBuild(op, identity, reuseId, parentTask, checkCancelled)
+				} = await this.resolveStandardBuild(op, identity, reuseId, fence, parentTask, checkCancelled)
 				if (preview) assertWithinPreview(preview, discoveredHashes)
 				checkCancelled()
 
@@ -713,6 +714,7 @@ export class DappSendExecutor {
 					parentTask,
 					journalId,
 					checkCancelled,
+					...fenceChecks(this.deps, fence),
 					markJournal,
 					wantOffchainOutput: (provedTx) => {
 						const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
@@ -744,8 +746,9 @@ export class DappSendExecutor {
 	/**
 	 * Resolve the standard path's build: consume a still-valid precomputed estimate
 	 * (tryConsume validates the full drift ladder — fingerprint at the same
-	 * pre-discovery normalization point, profile, endpoint, pending set, chain
-	 * identity, FPC identity, base fee), else fall through to the full build —
+	 * pre-discovery normalization point, endpoint, pending set, chain identity,
+	 * FPC identity, base fee — and refuses another profile's entry outright),
+	 * else fall through to the full build —
 	 * probe-free for embedded fee payments (the dApp's own fee calls conflict with
 	 * the discovery simulation's dummy fee method), discovery-first otherwise.
 	 */
@@ -753,6 +756,7 @@ export class DappSendExecutor {
 		op: AztecSendTxOperation,
 		identity: OperationFingerprintInput,
 		estimateId: string | undefined,
+		fence: ExecutionFence,
 		parentTask: WrappedTask | undefined,
 		checkCancelled: () => void,
 	): Promise<{
@@ -770,18 +774,16 @@ export class DappSendExecutor {
 		discoveredHashes: readonly string[]
 	}> {
 		const { actions, fee } = identity
-		const reused = estimateId ? await this.deps.operationEstimateReuse.tryConsume(estimateId, identity) : undefined
+		const reused = estimateId ? await this.deps.operationEstimateReuse.tryConsume(estimateId, identity, fence) : undefined
 
 		if (reused) {
 			this.deps.logDebug(`[executeAztecSendTx] reusing precomputed estimate ${estimateId}`)
-			// Live handles are re-resolved, never cached — the cross-profile
-			// fail-closed property depends on this.
+			// Live handles are re-resolved, never cached, for the fence's profile.
 			const network = await this.deps.getNetwork(op.networkId)
 			const node = await this.deps.getNode(network.chainId)
 			const pxe = this.deps.getPXE(network)
-			const profile = await this.deps.getActiveProfile()
-			if (!profile) throw new Error("Wallet locked")
-			const account = await this.deps.getAccountContract(profile.id, network.chainId, op.accountAddress)
+			await this.deps.assertFence(fence)
+			const account = await this.deps.getAccountContract(fence.profileId, network.chainId, op.accountAddress)
 			return {
 				txRequest: reused.txRequest,
 				node,
@@ -801,10 +803,15 @@ export class DappSendExecutor {
 			// Embedded fee payments skip discovery entirely. Probe-free validated
 			// pipeline, as always.
 			checkCancelled()
-			const built = await this.deps.buildAndEstimateValidated({ ...op, actions: [...actions], fee }, op.feeSettings, parentTask)
+			const built = await this.deps.buildAndEstimateValidated(
+				{ ...op, actions: [...actions], fee },
+				op.feeSettings,
+				fence,
+				parentTask,
+			)
 			return { ...built, discoveredHashes: [] }
 		}
-		const { built, discovered } = await this.deps.estimateWithDiscovery.estimate(op, actions, fee, op.feeSettings, parentTask)
+		const { built, discovered } = await this.deps.estimateWithDiscovery.estimate(op, actions, fee, op.feeSettings, fence, parentTask)
 		if (discovered.length) {
 			this.deps.logDebug(`[executeAztecSendTx] Discovered ${discovered.length} auth witness(es) via offchain effects`)
 		}
@@ -820,9 +827,9 @@ export class DappSendExecutor {
 	private async executeNoFromSendTx(
 		op: AztecSendTxOperation,
 		origin: LocalTxOrigin,
-		parentTask?: WrappedTask,
-		hooks?: ExecutionHooks,
-		fence?: ExecutionFence,
+		parentTask: WrappedTask | undefined,
+		hooks: ExecutionHooks | undefined,
+		fence: ExecutionFence,
 		approval?: OperationApprovalEnvelope,
 	): Promise<SendReturn<InteractionWaitOptions>> {
 		this.deps.logDebug(
@@ -856,7 +863,7 @@ export class DappSendExecutor {
 			async ({ checkCancelled, markJournal, journalId }) => {
 				await markJournal({ stage: "simulating" })
 
-				const prepared = await this.prepareNoFrom(op, parentTask)
+				const prepared = await this.prepareNoFrom(op, fence, parentTask)
 				const { txRequest, node, pxe, account, network, txCalls, txsLimits, feeOpts, scopesWithAccount } = prepared
 
 				await this.addDiscoveredNoFromAuthwits(prepared, approval, noFromFingerprint(op))
@@ -880,6 +887,7 @@ export class DappSendExecutor {
 					parentTask,
 					journalId,
 					checkCancelled,
+					...fenceChecks(this.deps, fence),
 					markJournal,
 					wantOffchainOutput: (provedTx) => {
 						const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
@@ -916,8 +924,8 @@ export class DappSendExecutor {
 	 * de-duplicated scope sets — shared by the authorization preview and the
 	 * confirm so both discover against the same request.
 	 */
-	private async prepareNoFrom(op: AztecSendTxOperation, parentTask?: WrappedTask): Promise<PreparedNoFrom> {
-		const { txRequest, node, pxe, account, network, txCalls, txsLimits } = await this.deps.txBuilder.buildNoFrom(op, parentTask)
+	private async prepareNoFrom(op: AztecSendTxOperation, fence: ExecutionFence, parentTask?: WrappedTask): Promise<PreparedNoFrom> {
+		const { txRequest, node, pxe, account, network, txCalls, txsLimits } = await this.deps.txBuilder.buildNoFrom(op, fence, parentTask)
 		this.deps.logDebug(
 			`executeNoFromSendTx: buildNoFromTxRequest completed, txCalls=${txCalls.length}, account=${account.address.toString()}`,
 		)

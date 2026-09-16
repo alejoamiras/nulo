@@ -776,7 +776,7 @@ capture and is never reused); `restore` yields a fresh serial.
 - `bun run typecheck:all && bun run lint` (worktree root)
 - Pass: all exit 0. Layers: typecheck · lint · unit
 
-### Phase 1 — capture on both dApp entries, thread everywhere, assert at every read, check in the broadcast tick
+### Phase 1 — capture on both dApp entries, thread everywhere, assert at every read, check in the broadcast tick ✓
 
 `silentInteraction` captures atomically and compares (mirrors `executeAndResolve:257-263`) and
 passes the fence; `executeOperations` throws on DAPP origin without one; dispatch arms forward it;

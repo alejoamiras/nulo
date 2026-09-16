@@ -2,7 +2,7 @@
  * Cancel-publication-window pin: the controller must be registered in the SAME
  * microtask continuation that observes the journal create resolving. A helper
  * that returns only the id adds a promise-settlement hop between the durable
- * `pending` row and `activeControllers.set` — a cancelJob landing there
+ * `pending` row and `registerInFlight` — a cancelJob landing there
  * transitions the row terminal, finds no controller to abort, and the
  * later-installed controller lets proving continue (the rejected `simulating`
  * transition is swallowed by markJournal). Both pins fail against that shape.
@@ -13,6 +13,7 @@ import type { TransferRequest } from "./operation-planner"
 import { TransferExecutor, type TransferExecutorDeps } from "./transfer-executor"
 
 const FEE_SETTINGS = { paymentMethod: { kind: "fj" } } as never
+const FENCE = { profileId: "p1", epoch: 0, session: 1 }
 
 function makeReq(): TransferRequest {
 	return {
@@ -40,8 +41,11 @@ function makeDeps(overrides: Partial<TransferExecutorDeps>): TransferExecutorDep
 		} as never,
 		estimateReuse: { tryConsume: vi.fn(async () => undefined), stash: vi.fn() } as never,
 		coordinator: { proveAndSend: vi.fn(async () => ({ txHash: { toString: () => "0xhash" } })) } as never,
-		lane: { registerController: vi.fn(), deleteController: vi.fn() },
+		lane: { registerInFlight: vi.fn(() => ({ live: true })), deleteController: vi.fn() },
 		getActiveProfile: vi.fn(async () => ({ id: "p1" }) as never),
+		captureExecutionFence: vi.fn(async () => FENCE),
+		assertFence: vi.fn(async () => {}),
+		isFenceLive: vi.fn(() => true),
 		getNetwork: vi.fn(async () => ({}) as never),
 		getNode: vi.fn(async () => ({}) as never),
 		getPXE: vi.fn(() => ({}) as never),
@@ -81,11 +85,11 @@ describe("transfer cancel publication window", () => {
 			) as never,
 		})
 		const executor = new TransferExecutor(deps)
-		const pending = executor.execute(makeReq())
+		const pending = executor.execute(makeReq(), undefined, FENCE)
 
 		// Drain microtasks until execution parks on the create await.
 		while (!resolveCreate) await Promise.resolve()
-		expect(deps.lane.registerController).not.toHaveBeenCalled()
+		expect(deps.lane.registerInFlight).not.toHaveBeenCalled()
 
 		resolveCreate({ id: "j1" })
 		// EXACTLY one microtask: the helper's own await-resumption. The fixed
@@ -93,7 +97,7 @@ describe("transfer cancel publication window", () => {
 		// returns the bare id defers registration to the caller's resumption,
 		// one settlement hop later — and this assertion catches it.
 		await Promise.resolve()
-		expect(deps.lane.registerController).toHaveBeenCalledWith("j1", expect.any(AbortController))
+		expect(deps.lane.registerInFlight).toHaveBeenCalledWith("j1", FENCE.session, expect.any(AbortController))
 
 		await pending
 	})
@@ -107,7 +111,10 @@ describe("transfer cancel publication window", () => {
 		const registered = new Map<string, AbortController>()
 		const deps = makeDeps({
 			lane: {
-				registerController: vi.fn((id: string, c: AbortController) => registered.set(id, c)),
+				registerInFlight: vi.fn((id: string, _serial: number, c: AbortController) => {
+					registered.set(id, c)
+					return { live: true }
+				}),
 				deleteController: vi.fn((id: string) => registered.delete(id)),
 			},
 			transitionJournal: vi.fn(async (_id: string, progress: { stage: string }) => {
@@ -120,7 +127,7 @@ describe("transfer cancel publication window", () => {
 		})
 		const executor = new TransferExecutor(deps)
 
-		await expect(executor.execute(makeReq())).rejects.toThrowError()
+		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toThrowError()
 		// biome-ignore lint/suspicious/noExplicitAny: reading stub call state
 		expect((deps.coordinator as any).proveAndSend).not.toHaveBeenCalled()
 		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")

@@ -25,7 +25,12 @@ export class FeeJuiceWithClaimStrategy implements FeeStrategy {
 		const task = startEstimateTask(this.deps.tasks, ctx.parentTask)
 		try {
 			ctx.op.actions.unshift(...getFeeJuiceClaimPayload(ctx.op.accountAddress, claimAmount, claimSecret, messageLeafIndex))
-			const built = await this.deps.txBuilder.buildStandard(ctx.op, AccountFeePaymentMethodOptions.FEE_JUICE_WITH_CLAIM, task)
+			const built = await this.deps.txBuilder.buildStandard(
+				ctx.op,
+				ctx.fence,
+				AccountFeePaymentMethodOptions.FEE_JUICE_WITH_CLAIM,
+				task,
+			)
 			const { txRequest, node, pxe, account } = built
 			suggestGasLimits(txRequest, ctx.op.fee)
 			const simulatedTx = await this.deps.simulateTxTask(

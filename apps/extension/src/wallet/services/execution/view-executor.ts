@@ -64,8 +64,10 @@ export class ViewExecutor {
 	public constructor(private readonly deps: ViewExecutorDeps) {}
 
 	public async executeSimulateTransaction(op: SimulateTransactionOperation): Promise<unknown> {
+		const fence = await this.deps.profileService.captureExecutionFence()
 		const { txRequest, pxe, account } = await this.deps.txBuilder.buildStandard(
 			op,
+			fence,
 			AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
 		)
 		const simulatedTx = await pxe.simulateTx(txRequest, {
@@ -300,6 +302,7 @@ export class ViewExecutor {
 	 *  synced, or when a fast-path-exclusive operation throws and signals
 	 *  fallback. */
 	private async executeAztecSimulateTxStandard(op: AztecSimulateTxOperation): Promise<TxSimulationResult> {
+		const fence = await this.deps.profileService.captureExecutionFence()
 		const { actions, feePaymentMethod, feeOptions: fee } = await this.deps.planner.processAztecJsPayload(op.exec, op.opts)
 		// Thread the dApp's `opts.fee.gasSettings` (including
 		// `maxPriorityFeesPerGas`) so `nulo-account.ts`'s
@@ -307,6 +310,7 @@ export class ViewExecutor {
 		// than silently defaulting from `node.getCurrentMinFees() * 1.5`.
 		const { txRequest, node, pxe, account } = await this.deps.txBuilder.buildStandard(
 			{ ...op, actions },
+			fence,
 			feePaymentMethod,
 			undefined,
 			op.opts.fee?.gasSettings,
@@ -390,8 +394,9 @@ export class ViewExecutor {
 		if (op.accountAddress !== op.opts?.from?.toString()) {
 			throw new Error("Invalid `opts.from`")
 		}
+		const fence = await this.deps.profileService.captureExecutionFence()
 		const { actions, feePaymentMethod, feeOptions: fee } = await this.deps.planner.processAztecJsPayload(op.exec, op.opts)
-		const { txRequest, node, pxe } = await this.deps.txBuilder.buildStandard({ ...op, actions }, feePaymentMethod)
+		const { txRequest, node, pxe } = await this.deps.txBuilder.buildStandard({ ...op, actions }, fence, feePaymentMethod)
 		suggestGasLimits(txRequest, fee)
 		await applyEmbeddedFpcGasCap(txRequest, fee, node)
 		const additionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []

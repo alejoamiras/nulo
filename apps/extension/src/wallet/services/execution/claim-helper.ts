@@ -27,16 +27,18 @@
  * sentinel.
  */
 
-import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
+import { SessionEndedError } from "@nulo/extension-messaging/errors"
+import { JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
 import type { LocalTxOrigin } from "@/wallet/services/transaction/spec"
 import type { OperationJournalService } from "@/wallet/services/operation-journal/service"
 
 export interface ClaimHelperDeps {
 	operationJournal: OperationJournalService
-	/** Map shared with `ExecutionService.activeControllers`. The helper sets
-	 *  the controller into this map before returning so `cancelJob(id)` can
-	 *  find it. */
-	activeControllers: Map<string, AbortController>
+	/** The lane's controller registry. The helper registers before returning so
+	 *  `cancelJob(id)` can find the controller; `live: false` means the
+	 *  authorizing session ended and nothing was registered. */
+	registerInFlight(journalId: string, serial: number, controller: AbortController): { live: boolean }
+	deleteController(journalId: string): void
 	/** Plain factory that creates a fresh in-flight dapp_execute record (the
 	 *  pre-existing `beginDappExecuteJournal` behaviour). Used for the
 	 *  "no queuedJournalId" and "record reaped" fallback paths. */
@@ -59,6 +61,8 @@ export interface ClaimHelperInput {
 	/** The profile execution resolved. Compared against the queued row's, so a
 	 *  row filed under another profile is never reused. */
 	profileId?: string
+	/** Serial of the session that authorized the execution; every registration carries it. */
+	session: number
 	origin: LocalTxOrigin
 	calls?: { method?: string }[]
 	queuedJournalId?: string
@@ -82,7 +86,7 @@ export interface ClaimHelperResult {
 type JournalRecord = NonNullable<Awaited<ReturnType<OperationJournalService["getOperation"]>>>
 
 export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, input: ClaimHelperInput): Promise<ClaimHelperResult> {
-	const { operationJournal, activeControllers, logger } = deps
+	const { operationJournal, logger } = deps
 	const { queuedJournalId, reuseController } = input
 
 	if (!queuedJournalId) {
@@ -98,7 +102,7 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 		// final-pass edge). cancelJob(queuedJournalId) couldn't have fired (the
 		// record is gone, so its journal transition would have thrown), so the
 		// orphan never aborted.
-		if (reuseController) activeControllers.delete(queuedJournalId)
+		if (reuseController) deps.deleteController(queuedJournalId)
 		logger?.debug(`Queued record ${queuedJournalId} not found; creating new in-flight record`)
 		return createAndRegisterFresh(deps, input)
 	}
@@ -150,7 +154,7 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 	}
 
 	// Register the controller IMMEDIATELY — no await between the stage
-	// write and this set(). cancelJob() reads activeControllers to find
+	// write and the registration. cancelJob() reads the registry to find
 	// a controller to abort; if it lands during this microtask window,
 	// it would find no controller. The next sync line closes the gap.
 	//
@@ -159,7 +163,7 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 	// this claimed id, the controller has been in `activeControllers` since
 	// before the acquire wait — so cancelJob always finds it, which is strictly
 	// safer than the original "register only after the transition" timing. The
-	// `set` is idempotent in that case (same key, same value).
+	// registration is idempotent in that case (same key, same value).
 	//
 	// The OTHER side of this handshake is cancelJob → transitionOperation →
 	// `_transitionLocked` (operation-journal/service.ts): it transitions the
@@ -178,7 +182,7 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 	// composition harness in #125/#126 for human review; see
 	// implementations-plan/quality-arc-deferred/lessons/q23.md.
 	const controller = reuseController ?? new AbortController()
-	activeControllers.set(queuedJournalId, controller)
+	if (!deps.registerInFlight(queuedJournalId, input.session, controller).live) return refuseEndedSession(deps, queuedJournalId)
 	return { journalId: queuedJournalId, controller }
 }
 
@@ -186,16 +190,28 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 
 /** Create a fresh in-flight record and register its controller. Owns the
  *  complete `await createFreshRecord → new AbortController →
- *  activeControllers.set` triplet so the register-immediately-after-create
+ *  registerInFlight` triplet so the register-immediately-after-create
  *  discipline lives in exactly one place; every call site tail-returns this
  *  (no caller-side await), so no hop is added between create and register. */
 async function createAndRegisterFresh(deps: ClaimHelperDeps, input: ClaimHelperInput): Promise<ClaimHelperResult> {
-	const { activeControllers, createFreshRecord } = deps
 	const { networkId, accountAddress, origin, calls } = input
-	const id = await createFreshRecord(networkId, accountAddress, origin, calls)
-	const controller = id ? new AbortController() : undefined
-	if (id && controller) activeControllers.set(id, controller)
+	const id = await deps.createFreshRecord(networkId, accountAddress, origin, calls)
+	if (!id) return { journalId: undefined, controller: undefined }
+	const controller = new AbortController()
+	if (!deps.registerInFlight(id, input.session, controller).live) return refuseEndedSession(deps, id)
 	return { journalId: id, controller }
+}
+
+/** A refused registration's exit. The caller holds no journal id to fail the
+ *  row with, so the helper terminalizes the row it owns before throwing. */
+async function refuseEndedSession(deps: ClaimHelperDeps, journalId: string): Promise<never> {
+	const error = new SessionEndedError()
+	try {
+		await deps.operationJournal.transitionOperation(journalId, { stage: "failed" }, normalizeError(error, "session_ended"))
+	} catch (err) {
+		deps.logger?.error(`Failed to terminalize ${journalId} after its session ended`, err)
+	}
+	throw error
 }
 
 /** True when the queued row's scope matches the scope execution resolved. An
@@ -220,7 +236,7 @@ type RefileOutcome = { kind: "record"; record: JournalRecord } | { kind: "result
  *  normal claim (queued rows re-arbitrate via the journal lock; a pending row
  *  WITH reuseController has been registered since before the mutex acquire). */
 async function refileToExecutingScope(deps: ClaimHelperDeps, input: ClaimHelperInput, record: JournalRecord): Promise<RefileOutcome> {
-	const { operationJournal, activeControllers, logger } = deps
+	const { operationJournal, logger } = deps
 	const { networkId, accountAddress, reuseController } = input
 	const queuedJournalId = input.queuedJournalId as string
 	// A cancel that already landed on the old row must not be undone by
@@ -263,13 +279,13 @@ async function refileToExecutingScope(deps: ClaimHelperDeps, input: ClaimHelperI
 	}
 	if (refile.outcome === "missing") {
 		// Reaped mid-flight — same fallback as the record-not-found branch.
-		if (reuseController) activeControllers.delete(queuedJournalId)
+		if (reuseController) deps.deleteController(queuedJournalId)
 		return { kind: "result", result: await createAndRegisterFresh(deps, input) }
 	}
 	if (refile.record.progress?.stage === "pending" && !reuseController) {
 		logger?.debug(`Queued record ${queuedJournalId} already at pending (silent-path pre-claim); registering controller only`)
 		const controller = new AbortController()
-		activeControllers.set(queuedJournalId, controller)
+		if (!deps.registerInFlight(queuedJournalId, input.session, controller).live) return refuseEndedSession(deps, queuedJournalId)
 		return { kind: "result", result: { journalId: queuedJournalId, controller } }
 	}
 	return { kind: "record", record: refile.record }
@@ -277,7 +293,7 @@ async function refileToExecutingScope(deps: ClaimHelperDeps, input: ClaimHelperI
 
 /** Claim-transition failure disambiguation — the CATCH body only; the happy
  *  transition stays inline at the call site so the register-immediately span
- *  (transition write → `activeControllers.set`) gains no hop. Always throws:
+ *  (transition write → `registerInFlight`) gains no hop. Always throws:
  *  the cancelled-path sentinel when a re-read shows cancelJob won the mutex,
  *  else the original error (genuine journal-storage failure — preserve
  *  observability by re-throwing instead of masking as cancellation). */

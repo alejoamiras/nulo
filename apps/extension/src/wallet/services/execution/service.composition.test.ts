@@ -25,7 +25,7 @@ import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { ServiceCollection } from "@/wallet/base"
 import { ProfileService } from "@/wallet/services/profile/service"
-import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
+import { type ExecutionFence, ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
 import { ContactService } from "@/wallet/services/contact/service"
@@ -120,6 +120,13 @@ async function makeHarness() {
 	// Real handler so the facade's profile-switch invalidation (D12) is both
 	// subscribable by the service and firable by tests.
 	const profileChanged = new EventHandler<unknown>()
+	// One live session for the whole harness; the checks answer from the epoch map alone.
+	const SESSION = 1
+	const captureExecutionFence = async (): Promise<ExecutionFence> => ({
+		profileId: "p1",
+		epoch: deletionState.capture("p1"),
+		session: SESSION,
+	})
 	collection.add(
 		svc(ProfileService.name, {
 			getActiveProfile: async () => ({ id: "p1" }),
@@ -127,7 +134,10 @@ async function makeHarness() {
 			// list the profile the flow files under or every create is refused.
 			getProfiles: async () => [{ id: "p1" }],
 			getDeletionState: () => deletionState,
-			captureExecutionFence: async () => ({ profileId: "p1", epoch: deletionState.capture("p1") }),
+			captureExecutionFence,
+			assertFence: async (fence: ExecutionFence) => deletionState.assertCurrent(fence.profileId, fence.epoch),
+			isFenceLive: (fence: ExecutionFence) => fence.session === SESSION && deletionState.isCurrent(fence.profileId, fence.epoch),
+			peekLiveSerial: () => SESSION,
 			onActiveProfileChanged: profileChanged,
 		}),
 	)
@@ -206,6 +216,7 @@ async function makeHarness() {
 		sendTx,
 		toTx,
 		getJournalId: () => journalId,
+		captureExecutionFence,
 		profileChanged,
 		getNetwork,
 	}
@@ -267,7 +278,8 @@ describe("ExecutionService composition — cancel-mid-prove (in-process, no sand
 // per-(profile, chain) execution mutex, so a transfer never contends this slot.
 describe("ExecutionService composition — cancel during queued-wait (in-process)", () => {
 	test("cancel a queued dapp-send waiting on the held slot → cancelled, never advances, slot not wedged", async () => {
-		const { service, journal } = await makeHarness()
+		const { service, journal, captureExecutionFence } = await makeHarness()
+		const fence = await captureExecutionFence()
 		// executeOperations takes the dapp LocalTxOrigin object; the journal record's
 		// `origin` is the OperationOrigin string enum ("dapp"). Different types.
 		const origin = { type: OriginType.DAPP, name: "test-dapp" } as never
@@ -294,7 +306,7 @@ describe("ExecutionService composition — cancel during queued-wait (in-process
 
 		// Occupy the (p1, net1) execution slot directly — same primitive a live
 		// dapp-send holds while in flight. Job 2 must wait behind this.
-		const held = await lane.acquireSlot(NETWORK.id, undefined)
+		const held = await lane.acquireSlot(NETWORK.id, undefined, fence)
 
 		// Job 2 (dapp-send) with the queued record → acquireSlot pre-registers its
 		// controller under queuedId, then WAITS on the held slot. The minimal op
@@ -309,7 +321,7 @@ describe("ExecutionService composition — cancel during queued-wait (in-process
 		} as never
 		// executeOperations catches JobCancelledSentinel internally (classifyOperationCatch)
 		// and RETURNS a results array — it never throws here, so no .catch is needed.
-		const p2 = service.executeOperations([aztecSendOp], origin, undefined, { queuedJournalId: queuedId })
+		const p2 = service.executeOperations([aztecSendOp], origin, undefined, { queuedJournalId: queuedId }, undefined, fence)
 
 		// Wait until job2 has pre-registered its controller and is parked on the slot.
 		await waitFor(() => controllers.has(queuedId))
@@ -332,7 +344,7 @@ describe("ExecutionService composition — cancel during queued-wait (in-process
 		// The slot is NOT wedged: after releasing the holder, a fresh acquire grants
 		// promptly (would hang past the test timeout if job2's abort corrupted the FIFO).
 		held.release()
-		const held2 = await lane.acquireSlot(NETWORK.id, undefined)
+		const held2 = await lane.acquireSlot(NETWORK.id, undefined, fence)
 		held2.release()
 	}, 15_000)
 
@@ -342,7 +354,7 @@ describe("ExecutionService composition — cancel during queued-wait (in-process
 	// slot bucket. The DappSendExecutor unit test injects hooks directly, so it
 	// can't catch a dropped forward at either ExecutionService hop.
 	test("send_transaction forwards hooks.originKey through executeOperations → executeSendTransaction → DappSendExecutor", async () => {
-		const { service } = await makeHarness()
+		const { service, captureExecutionFence } = await makeHarness()
 		const dse = (service as unknown as { dappSendExecutor: { executeSendTransaction: (...a: unknown[]) => Promise<string> } })
 			.dappSendExecutor
 		const spy = vi.spyOn(dse, "executeSendTransaction").mockResolvedValue("0xhash")
@@ -355,7 +367,14 @@ describe("ExecutionService composition — cancel during queued-wait (in-process
 			actions: [{ kind: "call", contract: "0xc", method: "m", args: [] }],
 		} as never
 		const origin = { type: OriginType.DAPP, name: "dapp" } as never
-		await service.executeOperations([sendTxOp], origin, undefined, { originKey: "https://dapp.example" } as never)
+		await service.executeOperations(
+			[sendTxOp],
+			origin,
+			undefined,
+			{ originKey: "https://dapp.example" } as never,
+			undefined,
+			await captureExecutionFence(),
+		)
 
 		// 5th positional arg of DappSendExecutor.executeSendTransaction is `hooks`.
 		const hooks = spy.mock.calls[0]?.[4] as { originKey?: string } | undefined

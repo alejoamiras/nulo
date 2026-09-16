@@ -1,5 +1,5 @@
-import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
-import { DuplicateInitializationError } from "@nulo/extension-messaging/errors"
+import { type JobError, type JobErrorKind, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
+import { DuplicateInitializationError, SessionEndedError } from "@nulo/extension-messaging/errors"
 
 /**
  * Shared catch-arm disposition for the three dapp-send pipelines
@@ -23,7 +23,7 @@ import { DuplicateInitializationError } from "@nulo/extension-messaging/errors"
  * context). `transfer-executor` deliberately does NOT use this — its catch
  * differs (RPC-cancel conversion via `maybeRethrowAsRpcCancel`, `task.fail`, and
  * a local `markJournal` closure over `transitionJournal` with a `"transfer"`
- * context).
+ * context) — but it shares {@link failureKind}.
  */
 export function markFailedUnlessCancelled(
 	error: unknown,
@@ -33,9 +33,14 @@ export function markFailedUnlessCancelled(
 	if (error instanceof JobCancelledSentinel) {
 		throw error
 	}
-	// A classified initialization-race failure keeps its own kind: retry
-	// policy and observability must distinguish "lost the first-tx race —
-	// wait for sync, retry" from a generic dApp execution failure.
-	const kind = error instanceof DuplicateInitializationError ? "duplicate_initialization" : "dapp_execute"
-	return lane.markJournal(journalId, { stage: "failed" }, normalizeError(error, kind))
+	return lane.markJournal(journalId, { stage: "failed" }, normalizeError(error, failureKind(error, "dapp_execute")))
+}
+
+/** The journal kind of a send failure. Classified failures keep their own kind:
+ *  retry policy and the activity card must tell "lost the first-tx race — wait
+ *  for sync, retry" and "the wallet was locked" from a generic failure. */
+export function failureKind(error: unknown, fallback: JobErrorKind): JobErrorKind {
+	if (error instanceof DuplicateInitializationError) return "duplicate_initialization"
+	if (error instanceof SessionEndedError) return "session_ended"
+	return fallback
 }

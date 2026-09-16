@@ -10,7 +10,7 @@
  */
 import { describe, expect, test, vi } from "vitest"
 import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
-import { DuplicateInitializationError } from "@nulo/extension-messaging/errors"
+import { DuplicateInitializationError, SessionEndedError } from "@nulo/extension-messaging/errors"
 import { markFailedUnlessCancelled } from "./mark-failed-unless-cancelled"
 
 function fakeLane() {
@@ -60,6 +60,14 @@ describe("markFailedUnlessCancelled", () => {
 		const err = (lane.markJournal as ReturnType<typeof vi.fn>).mock.calls[0]?.[2] as { kind: string; message: string }
 		expect(err.kind).toBe("duplicate_initialization")
 		expect(err.message).toMatch(/wait for network sync, then retry/)
+	})
+
+	test("a SessionEndedError carries the session_ended kind, and the helper stays synchronous", () => {
+		const marker = Promise.resolve()
+		const lane = { markJournal: vi.fn(() => marker) }
+		const error = new SessionEndedError()
+		expect(markFailedUnlessCancelled(error, "j1", lane)).toBe(marker)
+		expect(lane.markJournal).toHaveBeenCalledWith("j1", { stage: "failed" }, normalizeError(error, "session_ended"))
 	})
 
 	test("(N-15) any other error keeps the dapp_execute kind", async () => {

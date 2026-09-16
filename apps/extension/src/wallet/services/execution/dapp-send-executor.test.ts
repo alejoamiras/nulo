@@ -10,6 +10,7 @@
  *     real simulation + prove WITH it, both hex-deduped)
  *   - the chain-identity rebind before authwit hash construction (V-01)
  *   - sentinel passthrough vs failed-journal shaping in the catch
+ *   - the authorizing fence: slot, journal, builds, reuse and the send checks
  *
  * The feeSettings trust-boundary invariants live in
  * `feesettings-invariant.test.ts`.
@@ -17,7 +18,7 @@
 
 import { describe, expect, test, vi } from "vitest"
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
-import { JobCancelledError } from "@nulo/extension-messaging/errors"
+import { JobCancelledError, SessionEndedError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { OriginType, type LocalTxOrigin } from "@/wallet/services/transaction/spec"
 import { DappSendExecutor, type DappSendExecutorDeps } from "./dapp-send-executor"
@@ -60,6 +61,7 @@ vi.mock("./fee/fee-strategy", async (importOriginal) => ({
 vi.mock("./fee/embedded-fpc-cap", () => ({ applyEmbeddedFpcGasCap: vi.fn(async () => {}) }))
 
 const ORIGIN: LocalTxOrigin = { type: OriginType.DAPP, name: "test-dapp" }
+const FENCE = { profileId: "p1", epoch: 0, session: 1 }
 /** A popup approval envelope carrying a reuse id; the producer mints `previewId = estimateId`
  *  for a bound standard estimate, so a real approval always pairs the two equal. */
 const APPROVAL = (estimateId: string) => ({ interactionId: "i-1", index: 0, estimateId, previewId: estimateId })
@@ -145,7 +147,6 @@ function makeHarness(
 		} as never,
 		coordinator: { proveAndSend, simulateTxTask: vi.fn(async () => ({})) } as never,
 		lane: {
-			registerController: vi.fn(),
 			deleteController: vi.fn(),
 			acquireSlot: vi.fn(async () => ({ release: releaseSlot, preController: undefined })),
 			claimOrCreateJournal: vi.fn(async () => ({ journalId: "j1", controller: new AbortController() })),
@@ -155,6 +156,9 @@ function makeHarness(
 		operationEstimateReuse: { tryConsume: vi.fn(async () => undefined), stash: vi.fn(), evict: vi.fn() } as never,
 		previewSnapshots: new PreviewSnapshots(),
 		getActiveProfile: vi.fn(async () => ({ id: "p1" })),
+		captureExecutionFence: vi.fn(async () => FENCE),
+		assertFence: vi.fn(async () => {}),
+		isFenceLive: vi.fn(() => true),
 		getNetwork: vi.fn(async () => network),
 		getNode: vi.fn(async () => node as never),
 		getPXE: vi.fn(() => pxe as never),
@@ -204,13 +208,13 @@ describe("DappSendExecutor.executeSendTransaction", () => {
 			feeSettings: { paymentMethod: { kind: "fj" } },
 			actions: [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }],
 		} as never
-		const result = await executor.executeSendTransaction(op, ORIGIN)
+		const result = await executor.executeSendTransaction(op, ORIGIN, undefined, FENCE)
 
 		expect(result).toBe("0xhash")
 		// B-02: send_transaction now takes the execution slot + journal scaffold
 		// (runInSlot) like the other two dApp-send paths — claimOrCreateJournal, NOT
 		// the old un-slotted beginJournal. Args: (networkId, account, origin, calls,
-		// hooks, preController, fence) — all undefined tail in this harness.
+		// hooks, preController, fence).
 		expect(deps.lane.acquireSlot).toHaveBeenCalledTimes(1)
 		expect(deps.lane.claimOrCreateJournal).toHaveBeenCalledWith(
 			"net-1",
@@ -219,7 +223,7 @@ describe("DappSendExecutor.executeSendTransaction", () => {
 			[{ method: "dapp_method" }],
 			undefined,
 			undefined,
-			undefined,
+			FENCE,
 		)
 		expect(deps.lane.beginJournal).not.toHaveBeenCalled()
 		expect(deps.lane.markJournal).toHaveBeenCalledWith("j1", { stage: "simulating" })
@@ -242,12 +246,12 @@ describe("DappSendExecutor.executeSendTransaction", () => {
 			feeSettings: { paymentMethod: { kind: "fj" } },
 			actions: [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }],
 		} as never
-		await executor.executeSendTransaction(op, ORIGIN, undefined, undefined, { originKey: "https://dapp.example" } as never)
+		await executor.executeSendTransaction(op, ORIGIN, undefined, FENCE, { originKey: "https://dapp.example" } as never)
 
-		// acquireSlot(networkId, queuedJournalId, onExecutionEnqueued, originKey) —
-		// the originKey (4th arg) must be the dApp's, not the __no_origin__ default.
+		// acquireSlot(networkId, queuedJournalId, fence, onExecutionEnqueued, originKey) —
+		// the originKey (5th arg) must be the dApp's, not the __no_origin__ default.
 		const call = (deps.lane.acquireSlot as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
-		expect(call[3]).toBe("https://dapp.example")
+		expect(call[4]).toBe("https://dapp.example")
 	})
 
 	test("records the SUBMITTING network's primary endpoint URL (C3 recording-site pin)", async () => {
@@ -263,7 +267,7 @@ describe("DappSendExecutor.executeSendTransaction", () => {
 			feeSettings: { paymentMethod: { kind: "fj" } },
 			actions: [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }],
 		} as never
-		await executor.executeSendTransaction(op, ORIGIN)
+		await executor.executeSendTransaction(op, ORIGIN, undefined, FENCE)
 
 		const txArgs = (deps.addTransaction as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
 		expect(txArgs[7]).toBe("https://rpc.submit")
@@ -278,7 +282,7 @@ describe("DappSendExecutor.executeSendTransaction", () => {
 			feeSettings: { paymentMethod: { kind: "fj" } },
 			actions: [],
 		} as never
-		await expect(executor.executeSendTransaction(op, ORIGIN)).rejects.toThrow("build broke")
+		await expect(executor.executeSendTransaction(op, ORIGIN, undefined, FENCE)).rejects.toThrow("build broke")
 		expect(deps.lane.markJournal).toHaveBeenCalledWith(
 			"j1",
 			{ stage: "failed" },
@@ -302,7 +306,7 @@ describe("DappSendExecutor — public-authwit recording (Phase 5 trust-point)", 
 		const { executor, deps, built } = makeHarness({
 			buildAndEstimateValidated: vi.fn(async () => ({ ...built, pendingPublicAuthwits: [grant] }) as never),
 		})
-		await executor.executeSendTransaction(grantOp, ORIGIN)
+		await executor.executeSendTransaction(grantOp, ORIGIN, undefined, FENCE)
 		const rec = deps.recordPendingAuthwits as ReturnType<typeof vi.fn>
 		expect(rec).toHaveBeenCalledTimes(1)
 		const args = rec.mock.calls[0] as unknown[]
@@ -330,7 +334,7 @@ describe("DappSendExecutor — public-authwit recording (Phase 5 trust-point)", 
 				simulateTxTask: vi.fn(async () => ({})),
 			} as never,
 		})
-		await expect(executor.executeSendTransaction(grantOp, ORIGIN)).rejects.toThrow("send broke")
+		await expect(executor.executeSendTransaction(grantOp, ORIGIN, undefined, FENCE)).rejects.toThrow("send broke")
 		expect(deps.recordPendingAuthwits).not.toHaveBeenCalled()
 	})
 })
@@ -338,7 +342,7 @@ describe("DappSendExecutor — public-authwit recording (Phase 5 trust-point)", 
 describe("DappSendExecutor.executeAztecSendTx (standard path)", () => {
 	test("slot acquired BEFORE journal claim; release fires in finally on success", async () => {
 		const { executor, deps, releaseSlot } = makeHarness()
-		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN)
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE)
 
 		const acquireOrder = (deps.lane.acquireSlot as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
 		const claimOrder = (deps.lane.claimOrCreateJournal as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
@@ -349,7 +353,7 @@ describe("DappSendExecutor.executeAztecSendTx (standard path)", () => {
 	test("opts.from mismatch: frozen error, failed journal, slot still released", async () => {
 		const { executor, deps, releaseSlot } = makeHarness()
 		const op = makeAztecOp({ opts: { from: addr("0xother"), additionalScopes: [], wait: "NO_WAIT" } })
-		await expect(executor.executeAztecSendTx(op, ORIGIN)).rejects.toThrow("Invalid `opts.from`")
+		await expect(executor.executeAztecSendTx(op, ORIGIN, undefined, undefined, FENCE)).rejects.toThrow("Invalid `opts.from`")
 		expect(deps.lane.markJournal).toHaveBeenCalledWith("j1", { stage: "failed" }, expect.anything())
 		expect(releaseSlot).toHaveBeenCalledTimes(1)
 		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
@@ -360,7 +364,6 @@ describe("DappSendExecutor.executeAztecSendTx (standard path)", () => {
 		aborted.abort()
 		const { executor, deps, releaseSlot } = makeHarness({
 			lane: {
-				registerController: vi.fn(),
 				deleteController: vi.fn(),
 				acquireSlot: vi.fn(async () => ({ release: vi.fn(), preController: undefined })),
 				claimOrCreateJournal: vi.fn(async () => ({ journalId: "j1", controller: aborted })),
@@ -368,7 +371,9 @@ describe("DappSendExecutor.executeAztecSendTx (standard path)", () => {
 				markJournal: vi.fn(async () => {}),
 			},
 		})
-		await expect(executor.executeAztecSendTx(makeAztecOp(), ORIGIN)).rejects.toBeInstanceOf(JobCancelledSentinel)
+		await expect(executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE)).rejects.toBeInstanceOf(
+			JobCancelledSentinel,
+		)
 		const stages = (deps.lane.markJournal as ReturnType<typeof vi.fn>).mock.calls.map((c) => (c[1] as { stage: string }).stage)
 		expect(stages).not.toContain("failed")
 		// This harness's release spy is local to the lane override.
@@ -386,11 +391,11 @@ describe("DappSendExecutor.executeAztecSendTx (standard path)", () => {
 				})),
 			} as never,
 		})
-		await embedded.executor.executeAztecSendTx(makeAztecOp(), ORIGIN)
+		await embedded.executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE)
 		expect(embedded.authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
 
 		const standard = makeHarness()
-		await standard.executor.executeAztecSendTx(makeAztecOp(), ORIGIN)
+		await standard.executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE)
 		// fj folds: discovery happens INSIDE the probed pipeline (one stubbed
 		// sim), never as a standalone discoverer call.
 		expect(standard.authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
@@ -403,6 +408,9 @@ describe("DappSendExecutor.executeAztecSendTx (standard path)", () => {
 		const res1 = (await noWait.executor.executeAztecSendTx(
 			makeAztecOp({ opts: { from: addr("0xacct"), additionalScopes: [extra], wait: "NO_WAIT" } }),
 			ORIGIN,
+			undefined,
+			undefined,
+			FENCE,
 		)) as { txHash?: unknown; receipt?: unknown }
 		const ctx = (noWait.proveAndSend.mock.calls[0] as unknown[])[0] as { scopes: unknown[] }
 		expect(ctx.scopes).toEqual([noWait.built.account.address, extra])
@@ -413,6 +421,9 @@ describe("DappSendExecutor.executeAztecSendTx (standard path)", () => {
 		const res2 = (await waits.executor.executeAztecSendTx(
 			makeAztecOp({ opts: { from: addr("0xacct"), additionalScopes: [], wait: undefined } }),
 			ORIGIN,
+			undefined,
+			undefined,
+			FENCE,
 		)) as { receipt?: unknown }
 		expect(waits.node.getTxReceipt).toHaveBeenCalledTimes(1)
 		expect(res2.receipt).toEqual({ status: "success" })
@@ -431,7 +442,7 @@ describe("DappSendExecutor.executeNoFromSendTx (via default_entrypoint)", () => 
 	test("non-embedded fee payment rejected before any slot work", async () => {
 		const { executor, deps } = makeHarness()
 		const op = makeNoFromOp({ feeSettings: { paymentMethod: { kind: "fj" } } })
-		await expect(executor.executeAztecSendTx(op, ORIGIN)).rejects.toThrow(
+		await expect(executor.executeAztecSendTx(op, ORIGIN, undefined, undefined, FENCE)).rejects.toThrow(
 			"DefaultEntrypoint transactions must use embedded fee payment",
 		)
 		expect(deps.lane.acquireSlot).not.toHaveBeenCalled()
@@ -446,6 +457,9 @@ describe("DappSendExecutor.executeNoFromSendTx (via default_entrypoint)", () => 
 		await executor.executeAztecSendTx(
 			makeNoFromOp({ opts: { from: addr("0xacct"), additionalScopes: [scopeA, scopeB, scopeADup], wait: "NO_WAIT" } }),
 			ORIGIN,
+			undefined,
+			undefined,
+			FENCE,
 		)
 
 		// Site 1 — kernelless discovery: dApp scopes only (hex-deduped, the
@@ -467,14 +481,14 @@ describe("DappSendExecutor.executeNoFromSendTx (via default_entrypoint)", () => 
 		assertLiveChainIdentityMock.mockClear()
 		collectOffchainEffectsMock.mockReturnValue([{ data: [], contractAddress: addr("0xconsumer") }])
 		const withEffects = makeHarness()
-		await withEffects.executor.executeAztecSendTx(makeNoFromOp(), ORIGIN)
+		await withEffects.executor.executeAztecSendTx(makeNoFromOp(), ORIGIN, undefined, undefined, FENCE)
 		expect(withEffects.node.getNodeInfo).toHaveBeenCalledTimes(1)
 		expect(assertLiveChainIdentityMock).toHaveBeenCalledWith(withEffects.built.network, { l1ChainId: 1, rollupVersion: 2 })
 
 		assertLiveChainIdentityMock.mockClear()
 		collectOffchainEffectsMock.mockReturnValue([])
 		const noEffects = makeHarness()
-		await noEffects.executor.executeAztecSendTx(makeNoFromOp(), ORIGIN)
+		await noEffects.executor.executeAztecSendTx(makeNoFromOp(), ORIGIN, undefined, undefined, FENCE)
 		expect(noEffects.node.getNodeInfo).not.toHaveBeenCalled()
 		expect(assertLiveChainIdentityMock).not.toHaveBeenCalled()
 	})
@@ -482,7 +496,7 @@ describe("DappSendExecutor.executeNoFromSendTx (via default_entrypoint)", () => 
 	test("history record: nonce Fr.ZERO, feePaymentMethod EXTERNAL", async () => {
 		collectOffchainEffectsMock.mockReturnValue([])
 		const { executor, deps } = makeHarness()
-		await executor.executeAztecSendTx(makeNoFromOp(), ORIGIN)
+		await executor.executeAztecSendTx(makeNoFromOp(), ORIGIN, undefined, undefined, FENCE)
 		const txArgs = (deps.addTransaction as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
 		expect(txArgs[4]).toBe("0x0000000000000000000000000000000000000000000000000000000000000000")
 		expect(txArgs[5]).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
@@ -562,7 +576,7 @@ describe("DappSendExecutor — P17 slot-scaffold oracle (ordering + no-leak on e
 
 	test("standard path order: acquireSlot < claim < markJournal(simulating) < proveAndSend < deleteController < releaseSlot", async () => {
 		const { executor, deps, releaseSlot, proveAndSend } = makeHarness()
-		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN)
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE)
 		expect(order(deps.lane.acquireSlot)).toBeLessThan(order(deps.lane.claimOrCreateJournal))
 		expect(order(deps.lane.claimOrCreateJournal)).toBeLessThan(order(deps.lane.markJournal))
 		expect(order(deps.lane.markJournal)).toBeLessThan(order(proveAndSend))
@@ -575,7 +589,7 @@ describe("DappSendExecutor — P17 slot-scaffold oracle (ordering + no-leak on e
 	test("NO_FROM path order: acquireSlot < claim < markJournal(simulating) < proveAndSend < deleteController < releaseSlot", async () => {
 		collectOffchainEffectsMock.mockReturnValue([])
 		const { executor, deps, releaseSlot, proveAndSend } = makeHarness()
-		await executor.executeAztecSendTx(makeNoFromOp(), ORIGIN)
+		await executor.executeAztecSendTx(makeNoFromOp(), ORIGIN, undefined, undefined, FENCE)
 		expect(order(deps.lane.acquireSlot)).toBeLessThan(order(deps.lane.claimOrCreateJournal))
 		expect(order(deps.lane.claimOrCreateJournal)).toBeLessThan(order(deps.lane.markJournal))
 		expect(order(deps.lane.markJournal)).toBeLessThan(order(proveAndSend))
@@ -593,7 +607,7 @@ describe("DappSendExecutor — P17 slot-scaffold oracle (ordering + no-leak on e
 				simulateTxTask: vi.fn(async () => ({})),
 			} as never,
 		})
-		await expect(executor.executeAztecSendTx(makeAztecOp(), ORIGIN)).rejects.toThrow("prove broke")
+		await expect(executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE)).rejects.toThrow("prove broke")
 		expect(deps.lane.markJournal).toHaveBeenCalledWith("j1", { stage: "failed" }, expect.anything())
 		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
 		expect(releaseSlot).toHaveBeenCalledTimes(1)
@@ -607,7 +621,7 @@ describe("DappSendExecutor — P17 slot-scaffold oracle (ordering + no-leak on e
 				throw new Error("record broke")
 			}) as never,
 		})
-		await expect(executor.executeAztecSendTx(makeAztecOp(), ORIGIN)).rejects.toThrow("record broke")
+		await expect(executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE)).rejects.toThrow("record broke")
 		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
 		expect(releaseSlot).toHaveBeenCalledTimes(1)
 	})
@@ -616,7 +630,6 @@ describe("DappSendExecutor — P17 slot-scaffold oracle (ordering + no-leak on e
 		const releaseLocal = vi.fn()
 		const { executor, deps } = makeHarness({
 			lane: {
-				registerController: vi.fn(),
 				deleteController: vi.fn(),
 				acquireSlot: vi.fn(async () => ({ release: releaseLocal, preController: undefined })),
 				claimOrCreateJournal: vi.fn(async () => {
@@ -626,7 +639,7 @@ describe("DappSendExecutor — P17 slot-scaffold oracle (ordering + no-leak on e
 				markJournal: vi.fn(async () => {}),
 			},
 		})
-		await expect(executor.executeAztecSendTx(makeAztecOp(), ORIGIN)).rejects.toThrow("claim broke")
+		await expect(executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE)).rejects.toThrow("claim broke")
 		expect(releaseLocal).toHaveBeenCalledTimes(1)
 		expect(deps.lane.deleteController).not.toHaveBeenCalled()
 	})
@@ -643,7 +656,6 @@ describe("DappSendExecutor — P17 slot-scaffold oracle (ordering + no-leak on e
 		const releaseLocal = vi.fn()
 		const order: string[] = []
 		const lane = {
-			registerController: vi.fn(),
 			deleteController: vi.fn((id: string) => {
 				order.push(`delete:${id}`)
 				map.delete(id)
@@ -684,7 +696,7 @@ describe("DappSendExecutor — P17 slot-scaffold oracle (ordering + no-leak on e
 				} as never,
 				ORIGIN,
 				undefined,
-				undefined,
+				FENCE,
 				{ queuedJournalId: "q-1" } as never,
 			),
 		).rejects.toBeInstanceOf(JobCancelledSentinel)
@@ -716,7 +728,7 @@ describe("DappSendExecutor — P17 slot-scaffold oracle (ordering + no-leak on e
 			} as never,
 			ORIGIN,
 			undefined,
-			undefined,
+			FENCE,
 			{ queuedJournalId: "q-1" } as never,
 		)
 		expect(deps.lane).toBe(h.lane)
@@ -733,7 +745,7 @@ describe("DappSendExecutor — P17 slot-scaffold oracle (ordering + no-leak on e
 				simulateTxTask: vi.fn(async () => ({})),
 			} as never,
 		})
-		await expect(executor.executeAztecSendTx(makeNoFromOp(), ORIGIN)).rejects.toThrow("prove broke")
+		await expect(executor.executeAztecSendTx(makeNoFromOp(), ORIGIN, undefined, undefined, FENCE)).rejects.toThrow("prove broke")
 		expect(deps.lane.markJournal).toHaveBeenCalledWith("j1", { stage: "failed" }, expect.anything())
 		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
 		expect(releaseSlot).toHaveBeenCalledTimes(1)
@@ -752,7 +764,7 @@ describe("DappSendExecutor — P17 slot-scaffold oracle (ordering + no-leak on e
 				throw new Error("calls boom")
 			},
 		})
-		await expect(executor.executeAztecSendTx(op as never, ORIGIN)).rejects.toThrow("calls boom")
+		await expect(executor.executeAztecSendTx(op as never, ORIGIN, undefined, undefined, FENCE)).rejects.toThrow("calls boom")
 		expect(deps.lane.acquireSlot).toHaveBeenCalledTimes(1)
 		expect(releaseSlot).toHaveBeenCalledTimes(1)
 	})
@@ -836,9 +848,13 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 		// stashed one under the same previewId (= estimateId). Its empty hash set ⊇ the reused build's.
 		deps.previewSnapshots.stash("est-1", { interactionId: "i-1", index: 0, fingerprint: null, discoveredHashes: [] })
 
-		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, APPROVAL("est-1"))
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE, APPROVAL("est-1"))
 
-		expect(deps.operationEstimateReuse.tryConsume).toHaveBeenCalledWith("est-1", expect.objectContaining({ accountAddress: "0xacct" }))
+		expect(deps.operationEstimateReuse.tryConsume).toHaveBeenCalledWith(
+			"est-1",
+			expect.objectContaining({ accountAddress: "0xacct" }),
+			FENCE,
+		)
 		expect(authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
 		expect(deps.buildAndEstimateValidated).not.toHaveBeenCalled()
 		// The auth-registry row must exist on a reuse hit — the silent-break
@@ -862,7 +878,7 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 	test("owned snapshot but the reuse entry is gone (stale/drifted id): tryConsume misses, FULL pipeline (fj ⇒ folded)", async () => {
 		const { executor, deps, authwit, buildAndEstimateFolded } = makeHarness()
 		deps.previewSnapshots.stash("est-stale", { interactionId: "i-1", index: 0, fingerprint: null, discoveredHashes: [] })
-		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, APPROVAL("est-stale"))
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE, APPROVAL("est-stale"))
 		expect(deps.operationEstimateReuse.tryConsume).toHaveBeenCalledTimes(1)
 		expect(authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
 		expect(buildAndEstimateFolded).toHaveBeenCalledTimes(1)
@@ -870,7 +886,7 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 
 	test("no owned snapshot (forged id): reuse is never attempted — tryConsume untouched, FULL pipeline", async () => {
 		const { executor, deps, buildAndEstimateFolded } = makeHarness()
-		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, APPROVAL("est-forged"))
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE, APPROVAL("est-forged"))
 		expect(deps.operationEstimateReuse.tryConsume).not.toHaveBeenCalled()
 		expect(buildAndEstimateFolded).toHaveBeenCalledTimes(1)
 	})
@@ -894,7 +910,7 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 		// Attempt 1 — interaction C names A's previewId with no estimateId: refused as foreign, and
 		// the single-shot take has consumed A's snapshot.
 		await expect(
-			executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, {
+			executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE, {
 				interactionId: "i-C",
 				index: 0,
 				previewId: "A",
@@ -904,7 +920,7 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 
 		// Attempt 2 — A's owner (equal ids, matching fingerprint) no longer holds a snapshot, so the
 		// build is recomputed: the cached one is never consumed, whatever tryConsume would say.
-		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, {
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE, {
 			interactionId: "i-A",
 			index: 0,
 			estimateId: "A",
@@ -916,9 +932,153 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 
 	test("no estimateId: tryConsume never touched (fj ⇒ folded pipeline)", async () => {
 		const { executor, deps, buildAndEstimateFolded } = makeHarness()
-		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN)
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE)
 		expect(deps.operationEstimateReuse.tryConsume).not.toHaveBeenCalled()
 		expect(buildAndEstimateFolded).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("DappSendExecutor — the authorizing session", () => {
+	const order = (fn: unknown) => (fn as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
+	const noFromOp = () => makeAztecOp({ executionMode: "default_entrypoint", feeSettings: { paymentMethod: { kind: "embedded" } } })
+	const reusing = (tryConsume: ReturnType<typeof vi.fn>) =>
+		({ tryConsume, stash: vi.fn(), evict: vi.fn() }) as unknown as DappSendExecutorDeps["operationEstimateReuse"]
+	const entry = () => ({
+		txRequest: makeTxRequest(),
+		initializesAccount: false,
+		nonce: { toString: () => "5" },
+		feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL,
+		txCalls: [],
+		pendingPublicAuthwits: [],
+		discoveredHashes: [],
+	})
+	const ownSnapshot = (deps: DappSendExecutorDeps) =>
+		deps.previewSnapshots.stash("est-1", { interactionId: "i-1", index: 0, fingerprint: null, discoveredHashes: [] })
+	const sessionEnded = expect.objectContaining({ kind: "session_ended" })
+
+	test("a reused estimate asserts the fence, then resolves the fence's account, never the active profile's", async () => {
+		const fence = { profileId: "p-fence", epoch: 0, session: 9 }
+		const { executor, deps, proveAndSend } = makeHarness({
+			operationEstimateReuse: reusing(vi.fn(async () => entry())),
+			getActiveProfile: vi.fn(async () => ({ id: "p-active" })),
+		})
+		ownSnapshot(deps)
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, fence, APPROVAL("est-1"))
+		expect(deps.operationEstimateReuse.tryConsume).toHaveBeenCalledWith("est-1", expect.anything(), fence)
+		expect(deps.assertFence).toHaveBeenCalledWith(fence)
+		expect(deps.getAccountContract).toHaveBeenCalledWith("p-fence", 7, "0xacct")
+		expect(order(deps.assertFence)).toBeLessThan(order(deps.getAccountContract))
+		expect(deps.getActiveProfile).not.toHaveBeenCalled()
+		expect(proveAndSend).toHaveBeenCalledTimes(1)
+	})
+
+	test("the session ending before a reused build resolves its account: no lookup, no send, failed/session_ended", async () => {
+		const { executor, deps, proveAndSend } = makeHarness({
+			operationEstimateReuse: reusing(vi.fn(async () => entry())),
+			assertFence: vi.fn(async () => {
+				throw new SessionEndedError()
+			}),
+		})
+		ownSnapshot(deps)
+		await expect(
+			executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE, APPROVAL("est-1")),
+		).rejects.toBeInstanceOf(SessionEndedError)
+		expect(deps.getAccountContract).not.toHaveBeenCalled()
+		expect(proveAndSend).not.toHaveBeenCalled()
+		expect(deps.lane.markJournal).toHaveBeenCalledWith("j1", { stage: "failed" }, sessionEnded)
+	})
+
+	test("tryConsume refusing another profile's entry: the fresh build is never attempted, failed/session_ended", async () => {
+		const { executor, deps, proveAndSend, buildAndEstimateFolded } = makeHarness({
+			operationEstimateReuse: reusing(
+				vi.fn(async () => {
+					throw new SessionEndedError()
+				}),
+			),
+		})
+		ownSnapshot(deps)
+		await expect(
+			executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE, APPROVAL("est-1")),
+		).rejects.toBeInstanceOf(SessionEndedError)
+		expect(buildAndEstimateFolded).not.toHaveBeenCalled()
+		expect(deps.buildAndEstimateValidated).not.toHaveBeenCalled()
+		expect(proveAndSend).not.toHaveBeenCalled()
+		expect(deps.lane.markJournal).toHaveBeenCalledWith("j1", { stage: "failed" }, sessionEnded)
+	})
+
+	type Harness = ReturnType<typeof makeHarness>
+	const firstCall = (fn: unknown) => (fn as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
+	const arms: Array<{ name: string; run: (h: Harness) => Promise<unknown>; builtUnder: (h: Harness) => unknown }> = [
+		{
+			name: "send_transaction",
+			run: (h) =>
+				h.executor.executeSendTransaction(
+					{
+						kind: "send_transaction",
+						networkId: "net-1",
+						accountAddress: "0xacct",
+						feeSettings: { paymentMethod: { kind: "fj" } },
+						actions: [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }],
+					} as never,
+					ORIGIN,
+					undefined,
+					FENCE,
+				),
+			builtUnder: (h) => firstCall(h.buildAndEstimateValidated)[2],
+		},
+		{
+			name: "aztec_sendTx standard",
+			run: (h) => h.executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE),
+			builtUnder: (h) => firstCall(h.buildAndEstimateFolded)[2],
+		},
+		{
+			name: "aztec_sendTx NO_FROM",
+			run: (h) => h.executor.executeAztecSendTx(noFromOp(), ORIGIN, undefined, undefined, FENCE),
+			builtUnder: (h) => firstCall(h.deps.txBuilder.buildNoFrom)[1],
+		},
+	]
+
+	test.each(arms)(
+		"$name: slot, journal and build answer to the fence, and the send checks are bound to it",
+		async ({ run, builtUnder }) => {
+			collectOffchainEffectsMock.mockReturnValue([])
+			const h = makeHarness()
+			await run(h)
+			expect(firstCall(h.deps.lane.acquireSlot)[2]).toBe(FENCE)
+			expect(firstCall(h.deps.lane.claimOrCreateJournal)[6]).toBe(FENCE)
+			expect(builtUnder(h)).toBe(FENCE)
+			const ctx = firstCall(h.proveAndSend)[0] as { assertAuthorization: () => Promise<void>; assertLive: () => void }
+			await ctx.assertAuthorization()
+			expect(h.deps.assertFence).toHaveBeenLastCalledWith(FENCE)
+			ctx.assertLive()
+			;(h.deps.isFenceLive as ReturnType<typeof vi.fn>).mockReturnValue(false)
+			expect(() => ctx.assertLive()).toThrow(SessionEndedError)
+			expect(h.deps.isFenceLive).toHaveBeenLastCalledWith(FENCE)
+		},
+	)
+
+	test("estimate and preview build under the fence captured at their entry; a locked wallet builds nothing", async () => {
+		collectOffchainEffectsMock.mockReturnValue([])
+		const h = makeHarness()
+		await h.executor.estimateOperationFee(makeAztecOp(), { paymentMethod: { kind: "fj" } } as never)
+		expect(firstCall(h.buildAndEstimateFolded)[2]).toBe(FENCE)
+		await h.executor.previewOperationAuthwits(noFromOp(), { interactionId: "i-1", index: 0 })
+		expect(firstCall(h.deps.txBuilder.buildNoFrom)[1]).toBe(FENCE)
+
+		const locked = makeHarness({
+			captureExecutionFence: vi.fn(async () => {
+				throw new Error("Wallet locked")
+			}),
+		})
+		await expect(locked.executor.estimateOperationFee(makeAztecOp(), { paymentMethod: { kind: "fj" } } as never)).rejects.toThrow(
+			"Wallet locked",
+		)
+		await expect(locked.executor.previewOperationAuthwits(noFromOp(), { interactionId: "i-1", index: 0 })).rejects.toThrow(
+			"Wallet locked",
+		)
+		expect(locked.deps.planner.processAztecJsPayload).not.toHaveBeenCalled()
+		expect(locked.buildAndEstimateFolded).not.toHaveBeenCalled()
+		expect(locked.deps.txBuilder.buildNoFrom).not.toHaveBeenCalled()
 	})
 })
 
@@ -937,7 +1097,7 @@ describe("DappSendExecutor — discovered authwits, the preview snapshot and the
 	/** A folded pipeline whose probe reports `tags` as discovered. */
 	const foldedDiscovering = (tags: string[], built: unknown) =>
 		vi.fn(async (...args: unknown[]) => {
-			const probe = args[2] as { collected: unknown[]; discovered: unknown[] }
+			const probe = args[3] as { collected: unknown[]; discovered: unknown[] }
 			for (const tag of tags) {
 				probe.collected.push({ kind: "add_private_authwit", content: { kind: "message_hash", messageHash: `mh:ih:${tag}` } })
 				probe.discovered.push(record(tag))
@@ -1017,7 +1177,7 @@ describe("DappSendExecutor — discovered authwits, the preview snapshot and the
 			operationEstimateReuse: { tryConsume: vi.fn(async () => entry), stash: vi.fn(), evict: vi.fn() } as never,
 		})
 		snapshots(deps).stash("est-1", { ...identity, discoveredHashes: ["mh:ih:a"] })
-		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, {
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE, {
 			...CTX,
 			estimateId: "est-1",
 			previewId: "est-1",
@@ -1029,13 +1189,13 @@ describe("DappSendExecutor — discovered authwits, the preview snapshot and the
 	test("confirm, rebuilt: a set within the snapshot executes; a new hash aborts before the prove", async () => {
 		const ok = harnessDiscovering(["a"])
 		snapshots(ok.deps).stash("pv", { ...identity, discoveredHashes: ["mh:ih:a", "mh:ih:z"] })
-		await ok.executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, { ...CTX, previewId: "pv" })
+		await ok.executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE, { ...CTX, previewId: "pv" })
 		expect(ok.proveAndSend).toHaveBeenCalledTimes(1)
 
 		const changed = harnessDiscovering(["b"])
 		snapshots(changed.deps).stash("pv", { ...identity, discoveredHashes: ["mh:ih:a"] })
 		await expect(
-			changed.executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, { ...CTX, previewId: "pv" }),
+			changed.executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE, { ...CTX, previewId: "pv" }),
 		).rejects.toThrow(AUTHWITS_CHANGED_MESSAGE)
 		expect(changed.proveAndSend).not.toHaveBeenCalled()
 	})
@@ -1045,7 +1205,7 @@ describe("DappSendExecutor — discovered authwits, the preview snapshot and the
 		// A valid snapshot exists under previewId "pv"; the reuse cache would accept "est-A".
 		snapshots(deps).stash("pv", { ...identity, discoveredHashes: ["mh:ih:a"] })
 		await expect(
-			executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, {
+			executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE, {
 				...CTX,
 				estimateId: "est-A",
 				previewId: "pv",
@@ -1058,13 +1218,13 @@ describe("DappSendExecutor — discovered authwits, the preview snapshot and the
 
 	test("confirm with NO snapshot: a discovered hash asks for a retry; nothing discovered executes", async () => {
 		const withHash = harnessDiscovering(["a"])
-		await expect(withHash.executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, CTX)).rejects.toThrow(
+		await expect(withHash.executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE, CTX)).rejects.toThrow(
 			ESTIMATE_INCOMPLETE_MESSAGE,
 		)
 		expect(withHash.proveAndSend).not.toHaveBeenCalled()
 
 		const clean = harnessDiscovering([])
-		await clean.executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, CTX)
+		await clean.executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE, CTX)
 		expect(clean.proveAndSend).toHaveBeenCalledTimes(1)
 	})
 
@@ -1072,14 +1232,14 @@ describe("DappSendExecutor — discovered authwits, the preview snapshot and the
 		const { executor, deps, proveAndSend } = harnessDiscovering([])
 		snapshots(deps).stash("pv", { interactionId: "i-2", index: 0, fingerprint: null, discoveredHashes: [] })
 		await expect(
-			executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, { ...CTX, previewId: "pv" }),
+			executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE, { ...CTX, previewId: "pv" }),
 		).rejects.toThrow(PREVIEW_FOREIGN_MESSAGE)
 		expect(proveAndSend).not.toHaveBeenCalled()
 	})
 
 	test("the silent path (no envelope) is never held to a preview", async () => {
 		const { executor, proveAndSend } = harnessDiscovering(["a"])
-		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN)
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, FENCE)
 		expect(proveAndSend).toHaveBeenCalledTimes(1)
 	})
 
@@ -1106,7 +1266,7 @@ describe("DappSendExecutor — discovered authwits, the preview snapshot and the
 			const same = makeHarness()
 			const op = noFromOp()
 			const preview = await same.executor.previewOperationAuthwits(op, CTX)
-			await same.executor.executeAztecSendTx(op, ORIGIN, undefined, undefined, undefined, { ...CTX, previewId: preview.previewId })
+			await same.executor.executeAztecSendTx(op, ORIGIN, undefined, undefined, FENCE, { ...CTX, previewId: preview.previewId })
 			expect(same.account.createAuthWit).toHaveBeenCalledTimes(1)
 			expect(same.proveAndSend).toHaveBeenCalledTimes(1)
 
@@ -1118,7 +1278,7 @@ describe("DappSendExecutor — discovered authwits, the preview snapshot and the
 				exec: { calls: [{ name: "dapp_method", args: ["0x1"] }] },
 			})
 			await expect(
-				drifted.executor.executeAztecSendTx(changed, ORIGIN, undefined, undefined, undefined, {
+				drifted.executor.executeAztecSendTx(changed, ORIGIN, undefined, undefined, FENCE, {
 					...CTX,
 					previewId: previewed.previewId,
 				}),
@@ -1131,13 +1291,13 @@ describe("DappSendExecutor — discovered authwits, the preview snapshot and the
 			const guarded = makeHarness()
 			snapshots(guarded.deps).stash("pv", { ...identity, discoveredHashes: ["mh:ih:other"] })
 			await expect(
-				guarded.executor.executeAztecSendTx(noFromOp(), ORIGIN, undefined, undefined, undefined, { ...CTX, previewId: "pv" }),
+				guarded.executor.executeAztecSendTx(noFromOp(), ORIGIN, undefined, undefined, FENCE, { ...CTX, previewId: "pv" }),
 			).rejects.toThrow(AUTHWITS_CHANGED_MESSAGE)
 			expect(guarded.account.createAuthWit).not.toHaveBeenCalled()
 			expect(guarded.proveAndSend).not.toHaveBeenCalled()
 
 			const silent = makeHarness()
-			await silent.executor.executeAztecSendTx(noFromOp(), ORIGIN)
+			await silent.executor.executeAztecSendTx(noFromOp(), ORIGIN, undefined, undefined, FENCE)
 			expect(silent.account.createAuthWit).toHaveBeenCalledTimes(1)
 		})
 
@@ -1151,13 +1311,13 @@ describe("DappSendExecutor — discovered authwits, the preview snapshot and the
 				ensureInitialized: async () => {},
 				planner: { extractPrimaryMethod: () => "dapp_method" },
 				taskService: { startNewTask: () => task },
-				profileService: { captureExecutionFence: async () => ({ profileId: "p1", epoch: 0 }) },
+				profileService: { captureExecutionFence: async () => FENCE },
 				dappSendExecutor: executor,
 				logDebug: () => {},
 				logInfo: () => {},
 				logError: () => {},
 			}) as { executeOperations: (...args: unknown[]) => Promise<{ status: string; error?: unknown }[]> }
-			const results = await self.executeOperations([noFromOp()], ORIGIN, undefined, undefined, [CTX], { profileId: "p1", epoch: 0 })
+			const results = await self.executeOperations([noFromOp()], ORIGIN, undefined, undefined, [CTX], FENCE)
 			expect(results[0]?.status).toBe("failed")
 			expect(JSON.stringify(results[0])).toContain(ESTIMATE_INCOMPLETE_MESSAGE)
 			expect(account.createAuthWit).not.toHaveBeenCalled()

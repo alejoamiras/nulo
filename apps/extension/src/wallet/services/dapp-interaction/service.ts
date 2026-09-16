@@ -455,11 +455,19 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 	}
 
 	private async silentInteraction(payload: ExecutionPayload, hooks?: ExecutionHooks): Promise<ExecutionResult> {
-		const profile = await this.profileService.getActiveProfile()
-		if (profile?.id !== payload.session.profileId) {
+		// An atomic capture, not a bare id read — the same authorization moment
+		// `executeAndResolve` takes. Everything below, the FIFO wait included,
+		// runs under this session: a lock or re-unlock after it fails closed.
+		let authorizedFence: ExecutionFence
+		try {
+			authorizedFence = await this.profileService.captureExecutionFence()
+		} catch {
 			throw new Error("Wallet locked")
 		}
-		const deps = this.materializeDepsFor(profile.id)
+		if (authorizedFence.profileId !== payload.session.profileId) {
+			throw new Error("Wallet locked")
+		}
+		const deps = this.materializeDepsFor(authorizedFence.profileId)
 		const operations: Operation[] = []
 		for (const op of payload.params.operations) {
 			const materialized = await materializeRequest(op, deps)
@@ -517,6 +525,8 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			},
 			undefined,
 			hooks,
+			undefined,
+			authorizedFence,
 		)
 	}
 

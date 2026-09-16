@@ -1,10 +1,10 @@
 /**
  * `ExecutionCoordinator.proveAndSend` contract tests.
  *
- * The frozen sequence (extracted byte-for-byte from the four send paths):
+ * The frozen sequence:
  *   checkCancelled → journal(proving) → prove → checkCancelled →
- *   [offchain hook] → toTx → journal(submitting) → checkCancelled →
- *   send → record → journal(succeeded)
+ *   assertAuthorization → [offchain hook] → toTx → journal(submitting) →
+ *   checkCancelled → assertLive + send → record → journal(succeeded)
  *
  * The cancel-before-send contract ("a cancel during prove drops the
  * proof artifact silently — nothing is broadcast") is the 4001 promise
@@ -17,7 +17,7 @@ import { LoggerStore } from "@/wallet/logger"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { IPXE } from "@/wallet/services/pxe/client"
 import type { TaskService, WrappedTask } from "@/wallet/services/task/service"
-import { DuplicateInitializationError } from "@nulo/extension-messaging/errors"
+import { DuplicateInitializationError, SessionEndedError } from "@nulo/extension-messaging/errors"
 import { ExecutionCoordinator, type ProveAndSendContext } from "./execution-coordinator"
 
 const fakeTask = { complete: vi.fn(), fail: vi.fn(), startSubtask: vi.fn() } as unknown as WrappedTask
@@ -61,6 +61,8 @@ function makeHarness(overrides: Partial<ProveAndSendContext> = {}) {
 		checkCancelled: vi.fn(() => {
 			calls.push("checkCancelled")
 		}),
+		assertAuthorization: vi.fn(async () => {}),
+		assertLive: vi.fn(() => {}),
 		markJournal: vi.fn(async (patch: { stage: string }) => {
 			calls.push(`journal:${patch.stage}`)
 		}),
@@ -158,6 +160,104 @@ describe("proveAndSend: frozen sequence", () => {
 	})
 })
 
+describe("proveAndSend: the session checks", () => {
+	test("ordering: assertAuthorization right after the post-prove cancel check; assertLive right before the send", async () => {
+		const { ctx, calls } = makeHarness({
+			wantOffchainOutput: vi.fn(() => {
+				calls.push("offchain")
+				return {}
+			}) as ProveAndSendContext["wantOffchainOutput"],
+		})
+		ctx.assertAuthorization = vi.fn(async () => {
+			calls.push("assertAuthorization")
+		})
+		ctx.assertLive = vi.fn(() => {
+			calls.push("assertLive")
+		})
+		await makeCoordinator().proveAndSend(ctx)
+		expect(calls).toEqual([
+			"checkCancelled",
+			"journal:proving",
+			"prove",
+			"checkCancelled",
+			"assertAuthorization",
+			"offchain",
+			"toTx",
+			"journal:submitting",
+			"checkCancelled",
+			"assertLive",
+			"send",
+			"record",
+			"journal:succeeded",
+		])
+	})
+
+	test("assertAuthorization rejecting after the proof: no toTx, no submitting, no send", async () => {
+		const { ctx, calls, node, provedTx } = makeHarness({
+			assertAuthorization: vi.fn(async () => {
+				throw new SessionEndedError()
+			}),
+		})
+		await expect(makeCoordinator().proveAndSend(ctx)).rejects.toBeInstanceOf(SessionEndedError)
+		expect(calls).toContain("prove")
+		expect(provedTx.toTx).not.toHaveBeenCalled()
+		expect(calls).not.toContain("journal:submitting")
+		expect(node.sendTx).not.toHaveBeenCalled()
+	})
+
+	test("a cancel committed before the submitting write still stops at its own check; the session check never runs", async () => {
+		let checks = 0
+		const { ctx, node } = makeHarness({
+			checkCancelled: vi.fn(() => {
+				checks += 1
+				if (checks === 3) throw new Error("cancelled-sentinel")
+			}),
+		})
+		await expect(makeCoordinator().proveAndSend(ctx)).rejects.toThrow("cancelled-sentinel")
+		expect(ctx.assertLive).not.toHaveBeenCalled()
+		expect(node.sendTx).not.toHaveBeenCalled()
+	})
+
+	test("assertLive throwing in the send step: the node is never called, the step fails with it, nothing is recorded", async () => {
+		const { ctx, calls, node } = makeHarness({
+			assertLive: vi.fn(() => {
+				throw new SessionEndedError()
+			}),
+		})
+		;(fakeTask.fail as ReturnType<typeof vi.fn>).mockClear()
+		await expect(makeCoordinator().proveAndSend(ctx)).rejects.toBeInstanceOf(SessionEndedError)
+		expect(node.sendTx).not.toHaveBeenCalled()
+		expect((fakeTask.fail as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0]).toBeInstanceOf(SessionEndedError)
+		expect(calls).toContain("journal:submitting")
+		expect(calls).not.toContain("record")
+		expect(calls).not.toContain("journal:succeeded")
+	})
+
+	test("a session end while node.sendTx is pending does not undo the send: record and succeeded follow", async () => {
+		let live = true
+		let finishSend: () => void = () => {}
+		const { ctx, calls } = makeHarness({
+			assertLive: vi.fn(() => {
+				if (!live) throw new SessionEndedError()
+			}),
+		})
+		;(ctx.node.sendTx as ReturnType<typeof vi.fn>).mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					calls.push("send")
+					finishSend = resolve
+				}),
+		)
+		const run = makeCoordinator().proveAndSend(ctx)
+		await vi.waitFor(() => expect(calls).toContain("send"))
+		live = false
+		finishSend()
+		await expect(run).resolves.toMatchObject({})
+		expect(calls.slice(-2)).toEqual(["record", "journal:succeeded"])
+		expect(ctx.assertLive).toHaveBeenCalledTimes(1)
+	})
+})
+
 describe("sendTxTask — duplicate-initialization classification (N-15)", () => {
 	const NULLIFIER_REJECTION = new Error("Invalid tx: Existing nullifier")
 
@@ -170,27 +270,29 @@ describe("sendTxTask — duplicate-initialization classification (N-15)", () => 
 	test("initializing build + existing-nullifier rejection → typed error with the honest copy, task fails with it", async () => {
 		const { coordinator, node } = makeSendHarness(NULLIFIER_REJECTION)
 		;(fakeTask.fail as ReturnType<typeof vi.fn>).mockClear()
-		const run = coordinator.sendTxTask(node, {} as never, fakeTask, true)
+		const run = coordinator.sendTxTask(node, {} as never, () => {}, fakeTask, true)
 		await expect(run).rejects.toBeInstanceOf(DuplicateInitializationError)
-		await expect(coordinator.sendTxTask(node, {} as never, fakeTask, true)).rejects.toThrow(/wait for network sync, then retry/)
+		await expect(coordinator.sendTxTask(node, {} as never, () => {}, fakeTask, true)).rejects.toThrow(
+			/wait for network sync, then retry/,
+		)
 		const failedWith = (fakeTask.fail as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
 		expect(failedWith).toBeInstanceOf(DuplicateInitializationError) // honest text reaches the task, not the raw validator string
 	})
 
 	test("NON-initializing build + the same rejection stays GENERIC (double-spend false-positive guard)", async () => {
 		const { coordinator, node } = makeSendHarness(NULLIFIER_REJECTION)
-		const run = coordinator.sendTxTask(node, {} as never, fakeTask, false)
+		const run = coordinator.sendTxTask(node, {} as never, () => {}, fakeTask, false)
 		await expect(run).rejects.toBe(NULLIFIER_REJECTION)
 	})
 
 	test("unknown provenance (undefined flag) stays GENERIC", async () => {
 		const { coordinator, node } = makeSendHarness(NULLIFIER_REJECTION)
-		await expect(coordinator.sendTxTask(node, {} as never, fakeTask, undefined)).rejects.toBe(NULLIFIER_REJECTION)
+		await expect(coordinator.sendTxTask(node, {} as never, () => {}, fakeTask, undefined)).rejects.toBe(NULLIFIER_REJECTION)
 	})
 
 	test("initializing build + an UNRELATED rejection stays GENERIC", async () => {
 		const other = new Error("Node unreachable")
 		const { coordinator, node } = makeSendHarness(other)
-		await expect(coordinator.sendTxTask(node, {} as never, fakeTask, true)).rejects.toBe(other)
+		await expect(coordinator.sendTxTask(node, {} as never, () => {}, fakeTask, true)).rejects.toBe(other)
 	})
 })

@@ -4,11 +4,12 @@
  * `execution-coordinator.test.ts`); these tests pin the executor's own
  * choreography: journal lifecycle, controller registry usage, the
  * estimate-reuse fast path vs the rebuild path, the transfer-only
- * activity-record shape, and the stash-eligibility ladder.
+ * activity-record shape, the stash-eligibility ladder, and the authorizing
+ * fence every stage answers to.
  */
 
 import { describe, expect, test, vi } from "vitest"
-import { JobCancelledError } from "@nulo/extension-messaging/errors"
+import { JobCancelledError, SessionEndedError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { TransferType } from "@/wallet/services/transaction/service"
 import type { TransferRequest } from "./operation-planner"
@@ -16,6 +17,7 @@ import { TransferExecutor, type TransferExecutorDeps } from "./transfer-executor
 
 const TOKEN = { contract: "0xtoken", name: "Test", symbol: "TST", decimals: 18 }
 const FEE_SETTINGS = { paymentMethod: { kind: "fj" } } as never
+const FENCE = { profileId: "p1", epoch: 0, session: 1 }
 
 function makeTxRequest() {
 	return {
@@ -76,8 +78,11 @@ function makeHarness(overrides: Partial<TransferExecutorDeps> = {}) {
 		} as never,
 		estimateReuse: { tryConsume: vi.fn(async () => undefined), stash: vi.fn() } as never,
 		coordinator: { proveAndSend } as never,
-		lane: { registerController: vi.fn(), deleteController: vi.fn() },
+		lane: { registerInFlight: vi.fn(() => ({ live: true })), deleteController: vi.fn() },
 		getActiveProfile: vi.fn(async () => ({ id: "p1" }) as never),
+		captureExecutionFence: vi.fn(async () => FENCE),
+		assertFence: vi.fn(async () => {}),
+		isFenceLive: vi.fn(() => true),
 		getNetwork: vi.fn(async () => network),
 		getNode: vi.fn(async () => ({ kind: "node" }) as never),
 		getPXE: vi.fn(() => ({ kind: "pxe" }) as never),
@@ -99,7 +104,7 @@ describe("TransferExecutor.execute", () => {
 		// The producer stamp is what lets the activity view scope transfer tasks
 		// per network — a UI test supplying the field manually cannot see it vanish.
 		const { executor, deps } = makeHarness()
-		await executor.execute(makeReq())
+		await executor.execute(makeReq(), undefined, FENCE)
 		const content = (deps.tasks.startNewTask as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
 			networkId?: string
 		}
@@ -108,7 +113,7 @@ describe("TransferExecutor.execute", () => {
 
 	test("rebuild path: planner + buildAndEstimate, transfer-only activity record, scopes = [account.address]", async () => {
 		const { executor, deps, task, proveAndSend } = makeHarness()
-		const result = await executor.execute(makeReq())
+		const result = await executor.execute(makeReq(), undefined, FENCE)
 
 		expect(result).toBe("0xhash")
 		expect(deps.planner.buildTransferOperation).toHaveBeenCalledTimes(1)
@@ -127,7 +132,7 @@ describe("TransferExecutor.execute", () => {
 		expect(txCallArgs[4]).toBe("42")
 		expect(task.complete).toHaveBeenCalledTimes(1)
 		// Controller registered under journalId, removed in finally.
-		expect(deps.lane.registerController).toHaveBeenCalledWith("j1", expect.any(AbortController))
+		expect(deps.lane.registerInFlight).toHaveBeenCalledWith("j1", FENCE.session, expect.any(AbortController))
 		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
 	})
 
@@ -143,7 +148,7 @@ describe("TransferExecutor.execute", () => {
 		const { executor, deps, proveAndSend } = makeHarness({
 			estimateReuse: { tryConsume: vi.fn(async () => ({ ...snapshot, initializesAccount: true })), stash: vi.fn() } as never,
 		})
-		const result = await executor.execute(makeReq(), "est-1")
+		const result = await executor.execute(makeReq(), "est-1", FENCE)
 
 		expect(result).toBe("0xhash")
 		expect(deps.planner.buildTransferOperation).not.toHaveBeenCalled()
@@ -159,13 +164,16 @@ describe("TransferExecutor.execute", () => {
 		expect(txCallArgs[4]).toBe("99")
 	})
 
-	test("wallet locked at journal creation: no journal, no controller, flow still completes", async () => {
-		const { executor, deps, task } = makeHarness({ getActiveProfile: vi.fn(async () => undefined) })
-		const result = await executor.execute(makeReq())
+	test("journal creation failing: no journal, no controller, flow still completes", async () => {
+		const { executor, deps, task } = makeHarness({
+			createJournalOperation: vi.fn(async () => {
+				throw new Error("journal write failed")
+			}),
+		})
+		const result = await executor.execute(makeReq(), undefined, FENCE)
 
 		expect(result).toBe("0xhash")
-		expect(deps.createJournalOperation).not.toHaveBeenCalled()
-		expect(deps.lane.registerController).not.toHaveBeenCalled()
+		expect(deps.lane.registerInFlight).not.toHaveBeenCalled()
 		expect(deps.transitionJournal).not.toHaveBeenCalled()
 		expect(task.complete).toHaveBeenCalledTimes(1)
 	})
@@ -173,7 +181,7 @@ describe("TransferExecutor.execute", () => {
 	test("build failure: journal → failed with normalized error, task.fail, controller cleanup", async () => {
 		const boom = new Error("estimate blew up")
 		const { executor, deps, task } = makeHarness({ buildAndEstimate: vi.fn(async () => Promise.reject(boom)) })
-		await expect(executor.execute(makeReq())).rejects.toThrow("estimate blew up")
+		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toThrow("estimate blew up")
 
 		expect(deps.transitionJournal).toHaveBeenCalledWith(
 			"j1",
@@ -189,17 +197,127 @@ describe("TransferExecutor.execute", () => {
 			lane: {
 				// Abort immediately on registration: the first checkCancelled()
 				// after `simulating` short-circuits with the sentinel.
-				registerController: vi.fn((_id, controller: AbortController) => controller.abort()),
+				registerInFlight: vi.fn((_id: string, _serial: number, controller: AbortController) => {
+					controller.abort()
+					return { live: true }
+				}),
 				deleteController: vi.fn(),
 			},
 		})
-		await expect(executor.execute(makeReq())).rejects.toBeInstanceOf(JobCancelledError)
+		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toBeInstanceOf(JobCancelledError)
 
 		const stages = (deps.transitionJournal as ReturnType<typeof vi.fn>).mock.calls.map((c) => (c[1] as { stage: string }).stage)
 		expect(stages).not.toContain("failed")
 		expect(task.cancel).toHaveBeenCalledTimes(1)
 		expect(task.fail).not.toHaveBeenCalled()
 		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
+	})
+})
+
+describe("TransferExecutor: the authorizing session", () => {
+	const fence = { profileId: "p-fence", epoch: 3, session: 4 }
+	const sessionEnded = expect.objectContaining({ kind: "session_ended" })
+	const firstCall = (fn: unknown) => (fn as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
+	const order = (fn: unknown) => (fn as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
+	const snapshot = () => ({
+		txRequest: makeTxRequest(),
+		initializesAccount: false,
+		nonce: { toString: () => "99" },
+		feePaymentMethod: { kind: "fee_juice" },
+		token: TOKEN,
+		fnName: "transfer_private",
+		args: [],
+	})
+
+	test("journal, controller, build and send checks answer to the fence, never the active profile", async () => {
+		const { executor, deps, proveAndSend } = makeHarness({ getActiveProfile: vi.fn(async () => ({ id: "p-active" }) as never) })
+		await executor.execute(makeReq(), undefined, fence)
+
+		expect(deps.createJournalOperation).toHaveBeenCalledWith(expect.objectContaining({ profileId: "p-fence", profileEpoch: 3 }))
+		expect(deps.lane.registerInFlight).toHaveBeenCalledWith("j1", 4, expect.any(AbortController))
+		expect(firstCall(deps.buildAndEstimate)[2]).toBe(fence)
+		expect(deps.getActiveProfile).not.toHaveBeenCalled()
+		const ctx = firstCall(proveAndSend)[0] as { assertAuthorization: () => Promise<void>; assertLive: () => void }
+		await ctx.assertAuthorization()
+		expect(deps.assertFence).toHaveBeenLastCalledWith(fence)
+		;(deps.isFenceLive as ReturnType<typeof vi.fn>).mockReturnValue(false)
+		expect(() => ctx.assertLive()).toThrow(SessionEndedError)
+		expect(deps.isFenceLive).toHaveBeenLastCalledWith(fence)
+	})
+
+	test("a dead registration: nothing registered, no reuse, no build, no send, failed/session_ended", async () => {
+		const { executor, deps, task, proveAndSend } = makeHarness({
+			lane: { registerInFlight: vi.fn(() => ({ live: false })), deleteController: vi.fn() },
+			estimateReuse: { tryConsume: vi.fn(async () => snapshot()), stash: vi.fn() } as never,
+		})
+		await expect(executor.execute(makeReq(), "est-1", fence)).rejects.toBeInstanceOf(SessionEndedError)
+
+		expect(deps.estimateReuse.tryConsume).not.toHaveBeenCalled()
+		expect(deps.buildAndEstimate).not.toHaveBeenCalled()
+		expect(proveAndSend).not.toHaveBeenCalled()
+		expect(deps.transitionJournal).toHaveBeenCalledWith("j1", { stage: "failed" }, sessionEnded)
+		expect(task.fail).toHaveBeenCalledWith(expect.any(SessionEndedError))
+	})
+
+	test("reuse compares against the fence, and the reused arm asserts it before resolving the fence's account", async () => {
+		const { executor, deps } = makeHarness({
+			estimateReuse: { tryConsume: vi.fn(async () => snapshot()), stash: vi.fn() } as never,
+		})
+		const req = makeReq()
+		await executor.execute(req, "est-1", fence)
+
+		expect(deps.estimateReuse.tryConsume).toHaveBeenCalledWith("est-1", req, fence)
+		expect(deps.getAccountContract).toHaveBeenCalledWith("p-fence", 7, "0xme")
+		expect(order(deps.assertFence)).toBeLessThan(order(deps.getAccountContract))
+	})
+
+	test("tryConsume refusing another profile's entry: the fresh build is never attempted, failed/session_ended", async () => {
+		const { executor, deps, proveAndSend } = makeHarness({
+			estimateReuse: {
+				tryConsume: vi.fn(async () => {
+					throw new SessionEndedError()
+				}),
+				stash: vi.fn(),
+			} as never,
+		})
+		await expect(executor.execute(makeReq(), "est-1", fence)).rejects.toBeInstanceOf(SessionEndedError)
+
+		expect(deps.planner.buildTransferOperation).not.toHaveBeenCalled()
+		expect(deps.buildAndEstimate).not.toHaveBeenCalled()
+		expect(proveAndSend).not.toHaveBeenCalled()
+		expect(deps.transitionJournal).toHaveBeenCalledWith("j1", { stage: "failed" }, sessionEnded)
+	})
+
+	test("without a journal the transfer runs uncancellable, and a session end still stops it at the build's assert", async () => {
+		const { executor, deps, task, proveAndSend } = makeHarness({
+			createJournalOperation: vi.fn(async () => {
+				throw new Error("journal write failed")
+			}),
+			buildAndEstimate: vi.fn(async () => {
+				throw new SessionEndedError()
+			}),
+		})
+		await expect(executor.execute(makeReq(), undefined, fence)).rejects.toBeInstanceOf(SessionEndedError)
+
+		expect(deps.lane.registerInFlight).not.toHaveBeenCalled()
+		expect(proveAndSend).not.toHaveBeenCalled()
+		expect(deps.transitionJournal).not.toHaveBeenCalled()
+		expect(task.fail).toHaveBeenCalledWith(expect.any(SessionEndedError))
+	})
+
+	test("estimateFee builds under the fence captured at its entry; a locked wallet plans nothing", async () => {
+		const { executor, deps } = makeHarness()
+		await executor.estimateFee(makeReq())
+		expect(firstCall(deps.buildAndEstimate)[2]).toBe(FENCE)
+
+		const locked = makeHarness({
+			captureExecutionFence: vi.fn(async () => {
+				throw new Error("Wallet locked")
+			}),
+		})
+		await expect(locked.executor.estimateFee(makeReq())).rejects.toThrow("Wallet locked")
+		expect(locked.deps.planner.buildTransferOperation).not.toHaveBeenCalled()
+		expect(locked.deps.buildAndEstimate).not.toHaveBeenCalled()
 	})
 })
 
@@ -283,6 +401,6 @@ describe("TransferExecutor.estimateFee cancellation", () => {
 		const controller = new AbortController()
 		await executor.estimateFee(makeReq(), controller.signal)
 		const call = (deps.buildAndEstimate as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
-		expect(call[3]).toBe(controller.signal)
+		expect(call[4]).toBe(controller.signal)
 	})
 })
