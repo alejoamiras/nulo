@@ -98,6 +98,10 @@ export const DEFAULT_PXE_CLIENT_FACTORY = (logger: ILogger): PxeServiceClient =>
 /** A popup decodes one approval window at a time; anything past this is not a display request. */
 const MAX_DISPLAY_CALLS = 64
 
+/** The operations that run under the authorizing session's fence. The wallet-sdk dispatcher sends
+ *  a dApp's reads, registrations, simulations and silent authwits with none, and those never read one. */
+const FENCED_OPERATION_KINDS: ReadonlySet<Operation["kind"]> = new Set(["send_transaction", "aztec_sendTx", "register_token"])
+
 export class ExecutionService extends Service<Methods> implements ServiceSpec<Methods> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()(
 		"executeTransfer",
@@ -627,9 +631,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		 *  at the dApp interaction's session re-validation — the authorization
 		 *  moment. Every send and token commit runs under it, so a lock, a
 		 *  switch, a re-unlock or a delete + same-id re-import parked anywhere
-		 *  between approval and commit fails closed. Required for DAPP origin:
-		 *  without it the dispatch would capture whatever session is live when
-		 *  the op finally runs. NOT structurally unreachable over the wire (RPC
+		 *  between approval and commit fails closed. Required for a DAPP-origin
+		 *  send or token commit: without it the dispatch would capture whatever
+		 *  session is live when the op finally runs. NOT structurally unreachable over the wire (RPC
 		 *  dispatch forwards extra positional params) — the boundary is
 		 *  same-extension sender authentication, so only popup/SW code can
 		 *  supply it; dApps route through the wallet-bridge dispatcher, which
@@ -637,8 +641,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		authorizedFence?: ExecutionFence,
 	): Promise<OperationResult[]> {
 		await this.ensureInitialized()
-		if (origin.type === OriginType.DAPP && !authorizedFence) {
-			throw new Error("dApp operations require the fence of the session that authorized them")
+		if (origin.type === OriginType.DAPP && !authorizedFence && operations.some((op) => FENCED_OPERATION_KINDS.has(op.kind))) {
+			throw new Error("a dApp send requires the fence of the session that authorized it")
 		}
 		const results: OperationResult[] = []
 		let operationIndex = -1

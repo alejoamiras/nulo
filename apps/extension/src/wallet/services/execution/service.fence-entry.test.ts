@@ -1,6 +1,6 @@
 /**
  * Where a send's fence comes from at the facade: `executeOperations` refuses a
- * dApp batch that carries none, and `executeSendTransaction` captures one only
+ * dApp send that carries none, and `executeSendTransaction` captures one only
  * when its caller passed none — which no production caller does, because a
  * capture taken after any await can observe a session the user never acted in.
  */
@@ -43,14 +43,36 @@ function makeFacade() {
 }
 
 describe("ExecutionService: a send runs under the fence its caller authorized", () => {
-	test("executeOperations: a dApp batch without a fence throws before any task, capture or dispatch", async () => {
-		const { facade, captureExecutionFence, executeSendTransaction, startNewTask } = makeFacade()
-		await expect(facade.executeOperations([SEND_OP], DAPP)).rejects.toThrow(
-			"dApp operations require the fence of the session that authorized them",
-		)
-		expect(startNewTask).not.toHaveBeenCalled()
+	test.each(["send_transaction", "aztec_sendTx", "register_token"])(
+		"executeOperations: a dApp batch holding a %s without a fence throws before any task, capture or dispatch",
+		async (kind) => {
+			const { facade, captureExecutionFence, executeSendTransaction, startNewTask } = makeFacade()
+			const batch = [
+				{ kind: "aztec_getChainInfo", networkId: "net-1" },
+				{ ...(SEND_OP as object), kind },
+			] as never
+			await expect(facade.executeOperations(batch, DAPP)).rejects.toThrow(
+				"a dApp send requires the fence of the session that authorized it",
+			)
+			expect(startNewTask).not.toHaveBeenCalled()
+			expect(captureExecutionFence).not.toHaveBeenCalled()
+			expect(executeSendTransaction).not.toHaveBeenCalled()
+		},
+	)
+
+	test("executeOperations: the wallet-sdk dispatcher's fence-less reads, registrations and silent authwits run", async () => {
+		const { facade, captureExecutionFence } = makeFacade()
+		const dispatchOperation = vi.fn(async () => "done")
+		Object.assign(facade, { dispatchOperation })
+		const batch = [
+			{ kind: "aztec_registerContract", networkId: "net-1" },
+			{ kind: "aztec_simulateTx", networkId: "net-1", accountAddress: "0xacct" },
+			{ kind: "aztec_createAuthWit", networkId: "net-1", accountAddress: "0xacct" },
+		] as never
+		const done = { status: "ok", result: "done" }
+		expect(await facade.executeOperations(batch, DAPP)).toEqual([done, done, done])
+		expect(dispatchOperation).toHaveBeenCalledTimes(3)
 		expect(captureExecutionFence).not.toHaveBeenCalled()
-		expect(executeSendTransaction).not.toHaveBeenCalled()
 	})
 
 	test("executeOperations: a dApp batch sends under its fence; a UI batch without one captures at dispatch", async () => {
