@@ -294,6 +294,20 @@ export class SessionEndedError extends WalletError {
 	}
 }
 
+/**
+ * A send was refused because its journal record could not be created, before any build, proof or
+ * broadcast: nothing was sent. Constant message and no details, so the popup keys its copy on the
+ * class and the storage fault behind it never reaches a caller.
+ */
+export class OperationNotRecordedError extends WalletError {
+	public static readonly CODE = "OPERATION_NOT_RECORDED"
+	public static readonly MESSAGE = "The operation could not be recorded, so it was not started."
+
+	public constructor() {
+		super(OperationNotRecordedError.CODE, OperationNotRecordedError.MESSAGE, undefined, "OperationNotRecordedError")
+	}
+}
+
 /** Request payload failed validation at the RPC boundary. */
 export class ValidationError extends WalletError {
 	public static readonly CODE = "VALIDATION"
@@ -431,6 +445,7 @@ type KnownWalletErrorPayload =
 	| { code: typeof ContractNotRegisteredError.CODE; message: string; details?: unknown }
 	| { code: typeof PxeStoreKeyMissingError.CODE; message: string; details?: unknown }
 	| { code: typeof SessionEndedError.CODE; message: string; details?: unknown }
+	| { code: typeof OperationNotRecordedError.CODE; message: string; details?: unknown }
 
 /**
  * Reconstruct a WalletError (concrete subclass if the code is recognised)
@@ -482,6 +497,8 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 			return new PxeStoreKeyMissingError(known.message, known.details)
 		case SessionEndedError.CODE:
 			return new SessionEndedError()
+		case OperationNotRecordedError.CODE:
+			return new OperationNotRecordedError()
 		default:
 			return new WalletError(payload.code, payload.message, payload.details)
 	}

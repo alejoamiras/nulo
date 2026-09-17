@@ -21,7 +21,7 @@ import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { TxExecutionRequest } from "@aztec/stdlib/tx"
 import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
-import { SessionEndedError } from "@nulo/extension-messaging/errors"
+import { OperationNotRecordedError, SessionEndedError, WalletError } from "@nulo/extension-messaging/errors"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import { formatFeeJuice } from "@/utils/fee-estimation"
 import type { Network } from "@/wallet/services/network/service"
@@ -237,27 +237,37 @@ export class TransferExecutor {
 		req: TransferRequest,
 		fence: ExecutionFence,
 	): Promise<{ journalId: string; controller: AbortController | undefined; live: boolean }> {
-		const journalOp = await this.deps.createJournalOperation({
-			kind: "transfer",
-			origin: "popup",
-			profileId: fence.profileId,
-			profileEpoch: fence.epoch,
-			accountAddress: req.accountAddress,
-			networkId: req.networkId,
-			tokenId: req.tokenId,
-			// Persist amount + recipient so terminal cards can render
-			// the same info as awaiting/settled cards. amount is bigint
-			// → string for JSON safety; field name matches
-			// `balanceFormatted(rawAmount, decimals, length)`.
-			amountRaw: req.amount.toString(),
-			recipientAddress: req.recipientAddress,
-			// Persist the privacy direction so the in-flight awaiting
-			// card can render the Private/Public chip the settled card
-			// shows. Resolved via `formatTransferType()` consumer-side.
-			transferType: req.transferType,
-		})
+		// Inline, not a helper: an awaited wrapper would add a settlement hop between the row
+		// becoming visible and the controller registering. A storage fault becomes the typed
+		// refusal the Send screen words; a typed wallet error (a session end) keeps its class.
+		let journalOp: OperationRecord | undefined
+		try {
+			journalOp = await this.deps.createJournalOperation({
+				kind: "transfer",
+				origin: "popup",
+				profileId: fence.profileId,
+				profileEpoch: fence.epoch,
+				accountAddress: req.accountAddress,
+				networkId: req.networkId,
+				tokenId: req.tokenId,
+				// Persist amount + recipient so terminal cards can render
+				// the same info as awaiting/settled cards. amount is bigint
+				// → string for JSON safety; field name matches
+				// `balanceFormatted(rawAmount, decimals, length)`.
+				amountRaw: req.amount.toString(),
+				recipientAddress: req.recipientAddress,
+				// Persist the privacy direction so the in-flight awaiting
+				// card can render the Private/Public chip the settled card
+				// shows. Resolved via `formatTransferType()` consumer-side.
+				transferType: req.transferType,
+			})
+		} catch (error) {
+			if (error instanceof WalletError) throw error
+			this.deps.logError("Failed to create journal operation", error)
+			throw new OperationNotRecordedError()
+		}
 		const journalId = journalOp?.id
-		if (!journalId) throw new Error("Transfer refused: the operation could not be recorded")
+		if (!journalId) throw new OperationNotRecordedError()
 		const controller = new AbortController()
 		if (!this.deps.lane.registerInFlight(journalId, fence.session, controller).live) {
 			return { journalId, controller: undefined, live: false }

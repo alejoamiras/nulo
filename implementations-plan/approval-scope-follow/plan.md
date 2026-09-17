@@ -10,7 +10,7 @@ eli5_url: https://claude.ai/artifact/9hbMQqUuJuhmWVzmBgWfYv   # rev 6 republish 
 code_review: off      # owner's standing directive — the codex fix loop is the review
 harden: not scheduled # Phase 0 touches a guard; its own tests + the codex loop cover it
 revision: 6           # rev 1 rejected (codex); rev 2 cond. approved (fable); rev 3 cond. approved (codex r2); rev 4 rejected (codex r3, fresh); rev 5 rejected (codex r4, fresh); rev 6 drafted 2026-09-17 after the prerequisite merged; see §Decision ledger
-status: approved      # rev 6 approved by the owner 2026-09-17 ("approved.") after D7 and the ELI5 republish; Ask 3 (the Send-screen refusal copy) still open — blocks the execution PR only
+status: approved      # rev 6 approved by the owner 2026-09-17 ("approved.") after D7 and the ELI5 republish; Ask 3 (the Send-screen refusal copy) signed off 2026-09-17 ("that proposal is perfect.")
 ```
 
 ## Summary
@@ -203,6 +203,19 @@ banner names the chain only (a hidden account is never named or aimed at).
 When there is no follow account, `chain` names chains only. When no operation sends (`readOnly`), the
 trailing "so you can watch the transaction" is dropped (ledger D3). Names are the rows' own
 `Network.name` / `Account.name` — a user's rename reads back as their own label.
+
+### Copy — Send-screen refusal toast (owner-approved 2026-09-17)
+
+Surface: the Send flow's failure toast (red, warning icon, long duration), shown on Home after the
+popup leaves Send, when the wallet refuses a transfer because its journal record could not be
+created. Nothing was simulated, proved or sent.
+
+> **"Couldn't start this transaction. Nothing was sent — try again."**
+
+Sign-off: the owner asked "When is that toast going to appear? remind me of the UX please.", was
+shown the trigger, the three-step UX and this exact string against today's generic "Simulation
+failed, transaction not sent", and answered **"that proposal is perfect."** (2026-09-17). Every
+other `executeTransfer` failure keeps the generic toast.
 
 ## Architecture & Implementation
 
@@ -705,8 +718,9 @@ One remains, non-blocking for approval and blocking for the execution PR:
 
 3. **The Send screen's refusal copy** (Phase 5, `UI impact`). When the wallet cannot record a
    transfer before starting it, the Send screen shows a toast and nothing is sent. Proposed:
-   **"Couldn't start this transaction. Nothing was sent — try again."** Sign-off is recorded here
-   and quoted in the execution PR before it opens. The dApp side needs no copy: the dApp receives
+   **"Couldn't start this transaction. Nothing was sent — try again."** **Signed off 2026-09-17**
+   — the owner, on this toast and this string: "that proposal is perfect." (quoted in full under
+   §Copy and in the execution PR). The dApp side needs no copy: the dApp receives
    the standard failure envelope.
 
 ## Phases
@@ -941,10 +955,12 @@ no controller.
   before any build, the slot is released and the envelope is failed. Mutation, each failing a
   test: restore either fall-through.
 - `UI impact`: Send screen, failure toast only, copy per Ask 3; no layout or row change. **As
-  delivered**, the refusal ships no new copy: `send.vue` shows its existing fixed toast
-  ("Simulation failed, transaction not sent") on any `executeTransfer` rejection and never renders
-  the error's text, so the user sees the pre-existing generic toast until Ask 3's copy is signed
-  off and wired — which is why the execution PR waits on Ask 3.
+  delivered**: the refusal is a typed `OperationNotRecordedError` (`extension-messaging/errors`,
+  constant message, no details, round-trips the port RPC); `popup/utils/transfer-failure-copy.ts`
+  maps it to the signed-off string and everything else to the existing generic toast, and
+  `send.vue` renders that label. A storage fault is wrapped into the typed refusal (and logged);
+  a typed wallet error from journal creation, such as a session end, keeps its own class. The
+  dApp claim still throws a plain error: the dApp gets the standard failure envelope.
 
 **Validation gate**
 - `cd apps/extension && bun --bun vitest run src/wallet/services/execution src/wallet/services/dapp-interaction src/wallet/services/wallet-sdk`

@@ -30,6 +30,7 @@ import { validateSendAmount } from "@/popup/pages/send-amount"
 import { applyBalanceAdd, applyBalanceUpdate } from "@/popup/pages/send-balance-events"
 import { evaluateFiatGate } from "@/popup/pages/send-fiat-gate"
 import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejection"
+import { transferFailureCopy } from "@/popup/utils/transfer-failure-copy"
 
 /** Composables */
 import { useToast } from "@/composables/toast.js"
@@ -367,7 +368,7 @@ const handleSend = async () => {
 			// shared classifier used by every cancellable popup.
 			if (classifyCancellableRejection(err) === "silent") return
 
-			openToast({ label: "Simulation failed, transaction not sent", icon: "warning", color: "red" }, TOAST_DURATION.LONG)
+			openToast({ label: transferFailureCopy(err), icon: "warning", color: "red" }, TOAST_DURATION.LONG)
 			console.error("[send] executeTransfer failed:", err)
 		})
 		.finally(() => {

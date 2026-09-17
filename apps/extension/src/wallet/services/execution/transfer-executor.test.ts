@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, test, vi } from "vitest"
-import { JobCancelledError, SessionEndedError } from "@nulo/extension-messaging/errors"
+import { JobCancelledError, OperationNotRecordedError, SessionEndedError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { TransferType } from "@/wallet/services/transaction/service"
 import type { TransferRequest } from "./operation-planner"
@@ -170,7 +170,8 @@ describe("TransferExecutor.execute", () => {
 				throw new Error("journal write failed")
 			}),
 		})
-		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toThrow("journal write failed")
+		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toBeInstanceOf(OperationNotRecordedError)
+		expect(deps.logError).toHaveBeenCalledWith("Failed to create journal operation", expect.any(Error))
 
 		expect(deps.lane.registerInFlight).not.toHaveBeenCalled()
 		expect(deps.buildAndEstimate).not.toHaveBeenCalled()
@@ -180,11 +181,21 @@ describe("TransferExecutor.execute", () => {
 		expect(task.fail).toHaveBeenCalledTimes(1)
 	})
 
+	test("a typed wallet error from journal creation keeps its class", async () => {
+		const { executor, proveAndSend } = makeHarness({
+			createJournalOperation: vi.fn(async () => {
+				throw new SessionEndedError()
+			}),
+		})
+		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toBeInstanceOf(SessionEndedError)
+		expect(proveAndSend).not.toHaveBeenCalled()
+	})
+
 	test("a journal record with no id: the transfer is refused before any build", async () => {
 		const { executor, deps, task, proveAndSend } = makeHarness({
 			createJournalOperation: vi.fn(async () => ({}) as never),
 		})
-		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toThrow(/could not be recorded/)
+		await expect(executor.execute(makeReq(), undefined, FENCE)).rejects.toBeInstanceOf(OperationNotRecordedError)
 
 		expect(deps.lane.registerInFlight).not.toHaveBeenCalled()
 		expect(deps.buildAndEstimate).not.toHaveBeenCalled()
