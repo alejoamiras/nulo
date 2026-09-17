@@ -3,6 +3,8 @@ import { flushPromises, mount } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { RestoreTornError } from "@nulo/extension-messaging/errors"
 import { useAppStore } from "@/stores/app.store"
+import { managers } from "@/utils/core"
+import { AccountServiceClient } from "@/wallet/services/account/client"
 import Auth from "./auth.vue"
 
 const unlockProfile = vi.fn()
@@ -300,5 +302,22 @@ describe("auth.vue — bounded activation wait (N-08)", () => {
 		releaseSetLast()
 		await flushPromises()
 		expect(initTransactionServiceMock).not.toHaveBeenCalled() // second check stood down
+	})
+})
+
+describe("auth.vue — the account client survives an unlock", () => {
+	test("a successful unlock keeps the account client the wallet already holds and still runs its continuation", async () => {
+		const existing = { getAccounts: vi.fn() }
+		managers.account = existing as never
+		unlockProfile.mockResolvedValue({ id: "p1", name: "P", type: "password" })
+		const { wrapper, appStore } = mountAuth()
+		await wrapper.find("[data-stub-input]").setValue("pw")
+		await wrapper.find("form").trigger("submit")
+		appStore.isLogined = true
+		await flushPromises()
+
+		expect(AccountServiceClient).not.toHaveBeenCalled()
+		expect(managers.account).toBe(existing)
+		expect(initTransactionServiceMock).toHaveBeenCalled()
 	})
 })

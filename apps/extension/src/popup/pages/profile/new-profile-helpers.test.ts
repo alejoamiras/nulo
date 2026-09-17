@@ -23,8 +23,9 @@ vi.mock("@/wallet/utils", () => ({
 	sleep: vi.fn(async () => undefined),
 }))
 
-import { initTransactionService } from "@/utils/core"
+import { initTransactionService, managers } from "@/utils/core"
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
+import { AccountServiceClient } from "@/wallet/services/account/client"
 import { activateCreatedProfile, makeCreateKeydownHandler, shouldHandleEnter } from "./new-profile-helpers"
 
 type AppStoreLike = Parameters<typeof activateCreatedProfile>[1]["appStore"]
@@ -47,6 +48,7 @@ function makeAppStore(overrides: Partial<Record<string, unknown>> = {}): AppStor
 
 beforeEach(() => {
 	vi.clearAllMocks()
+	managers.account = undefined as never
 	// Promise-form `get` returning no migration marker so the storage facade's
 	// barrier check passes straight through; `onChanged` for its listener path.
 	vi.stubGlobal("chrome", {
@@ -78,6 +80,21 @@ describe("activateCreatedProfile (popup manual sequence)", () => {
 		const pushOrder = (router.push as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
 		expect(setIdOrder).toBeLessThan(getAccountsOrder)
 		expect(storageOrder).toBeLessThan(pushOrder)
+	})
+
+	test("keeps an account client the wallet already holds instead of abandoning it connected", async () => {
+		const existing = { getAccounts: vi.fn(async () => [{ address: "0xEXISTING", index: 0, visible: true }]) }
+		managers.account = existing as never
+		const router = { push: vi.fn() } as unknown as RouterLike
+		const appStore = makeAppStore()
+
+		await activateCreatedProfile({ id: "p1" }, { appStore, router })
+
+		expect(AccountServiceClient).not.toHaveBeenCalled()
+		expect(managers.account).toBe(existing)
+		expect(existing.getAccounts).toHaveBeenCalledWith("p1", "1", true)
+		expect(appStore.accounts).toEqual([{ address: "0xEXISTING", index: 0, visible: true }])
+		expect(router.push).toHaveBeenCalledWith("/popup/general")
 	})
 
 	test("throws 'Network not set' and does not load accounts or route when network is missing", async () => {

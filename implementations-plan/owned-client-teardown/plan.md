@@ -562,7 +562,7 @@ the touched test file; run full unit suites, builds and e2e alone, never beside 
 - Step 6 prints `maps=1`, and that map is not the service worker's.
 - `lessons/phase-2.md` holds step 4's summary and step 6's result.
 
-### Phase 3 — outer account clients (A3 = fold in)
+### Phase 3 — outer account clients (A3 = fold in) ✓
 
 The owner chose fold in (2026-09-17): this phase runs.
 

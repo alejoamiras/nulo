@@ -181,7 +181,9 @@ const handleUnlockWallet = async () => {
 		// Second identity check: the await above is its own drift window — a
 		// resumed continuation must not replace the winner's managers.
 		if (!appStore.isLogined || appStore.profile?.id !== activeProfile.id) return
-		managers.account = new AccountServiceClient()
+		// Keep an existing client: replacing it abandoned a connected port, and disconnecting it
+		// would reject the calls of any flow still holding it (the network-switch handler does).
+		managers.account ??= new AccountServiceClient()
 
 		initTransactionService(appStore.onTxAdded, appStore.onTxUpdated)
 
