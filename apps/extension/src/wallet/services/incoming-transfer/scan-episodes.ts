@@ -65,7 +65,7 @@ export class ScanEpisodeStore {
 	) {}
 
 	/** Load the stored state. Must settle before the first poll reads a gate. A repair is written back
-	 *  at once: a clamp that lived only in memory would be recomputed from every restart's own clock,
+	 *  before this resolves: a clamp that lived only in memory would be recomputed from every restart's own clock,
 	 *  and a worker that restarts more often than the clamp would never reach the gate. */
 	public async hydrate(now: number): Promise<void> {
 		let blob: unknown
@@ -84,7 +84,9 @@ export class ScanEpisodeStore {
 		for (const prefix of Array.isArray(stored.announced) ? stored.announced : []) {
 			if (typeof prefix === "string" && this.hasEpisodeUnder(prefix)) this.announced.add(prefix)
 		}
-		if (JSON.stringify(this.snapshot()) !== JSON.stringify(blob)) this.persist()
+		if (JSON.stringify(this.snapshot()) === JSON.stringify(blob)) return
+		this.persist()
+		await this.writeChain
 	}
 
 	public has(key: string): boolean {

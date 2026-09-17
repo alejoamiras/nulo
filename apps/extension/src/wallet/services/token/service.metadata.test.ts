@@ -161,6 +161,16 @@ describe("TokenService metadata read", () => {
 		for (const [calls] of batched.mock.calls) expect(calls).toEqual([])
 	})
 
+	test.each([
+		["an empty slot (the direct-to-node arm's shape for a missing return)", [compressed("Name"), [], [new Fr(6)]]],
+		["a short result", [compressed("Name"), compressed("SYM")]],
+	])("an incomplete batch is refused, never decoded into partial metadata: %s", async (_label, encoded) => {
+		batched.mockResolvedValue({ encoded, decoded: [] })
+		const fetch = await makeFetch()
+
+		await expect(fetch("p1", NETWORK.id, ACCOUNT.address, ti(PUBLIC))).rejects.toThrow("token metadata read returned no value")
+	})
+
 	test("a failed read propagates — no partial metadata", async () => {
 		batched.mockRejectedValue(new Error("simulation reverted"))
 		const fetch = await makeFetch()

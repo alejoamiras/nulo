@@ -754,7 +754,13 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 			contractResolver: this.contractResolver,
 			logger: this.logger,
 		})
-		const read = (fn: ViewFn): unknown => fn.unpackResult(encoded[fns.indexOf(fn)])
+		// The direct-to-node arm leaves an empty slot for a return the node did not send; decoding it would
+		// fail by accident rather than by rule.
+		const read = (fn: ViewFn): unknown => {
+			const values = encoded[fns.indexOf(fn)]
+			if (!values?.length) throw new Error("token metadata read returned no value")
+			return fn.unpackResult(values)
+		}
 
 		return [
 			getNameFn ? (read(getNameFn) as string) : ti.contract === feeJuiceAddress ? feeJuiceName : "<name>",

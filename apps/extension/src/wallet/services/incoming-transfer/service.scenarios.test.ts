@@ -777,7 +777,8 @@ describe("IncomingTransferService — account lifecycle (P5 carry)", () => {
 		expect(schedulers.has("n2|0xa")).toBe(true)
 		expect(schedulers.has("n1|0xb")).toBe(true)
 
-		// Fire delete for 0xa.
+		// Fire delete for 0xa — the real service removes the row before it emits.
+		account.getAccounts.mockResolvedValue([{ profileId: "p1", chainId: 1, address: "0xb" }])
 		account.onAccountDeleted.invoke({ profileId: "p1", chainId: 1, address: "0xa" })
 		await flushPromises()
 
@@ -1590,12 +1591,14 @@ describe("IncomingTransferService — Path 2 block-timestamp + token-delete wipe
 		expect(firstPersist.blockTimestamp).toBe(1_700_000_000)
 
 		// Delete the token → records + trust wiped.
+		tokenStub.getTokensRaw.mockResolvedValue([])
 		tokenStub.onTokenDeleted.invoke(tokenA as never)
 		await flushPromises()
 		expect(records.size).toBe(0)
 
 		// Simulate re-add: setTrust back to trusted (mimics the popup-add
 		// auto-trust path), then re-scan.
+		tokenStub.getTokensRaw.mockResolvedValue([tokenA])
 		trust.set(trustKey("p1", "n1", tokenA.contract), {
 			profileId: "p1",
 			networkId: "n1",
@@ -4466,6 +4469,7 @@ describe("IncomingTransferService — public-scan health (episodes, backoff, ret
 		nodeDown(reader)
 		await failTwice(service)
 
+		token.getTokensRaw.mockResolvedValue([])
 		await token.onTokenDeleted.invoke({ ...tokenA, profileId: "p1" } as never)
 		await flushPromises()
 
@@ -4526,7 +4530,34 @@ describe("IncomingTransferService — public-scan health (episodes, backoff, ret
 		expect(await storedEpisodes(service)).toBeUndefined()
 	})
 
-	test("deleting one token keeps Retry working for the ones that stay", async () => {
+	test("a Retry during a parked token teardown cannot scan the token being deleted; nothing of it reappears", async () => {
+		const { reader, state } = makePublicReader()
+		const token = makeTokenStub([tokenA])
+		const account = publicAccountStub()
+		const { service } = await bootPublic(reader, state, { token, account })
+		const tips = vi.fn().mockRejectedValue(new Error("node down"))
+		reader.getScanTips = tips
+		await failTwice(service)
+		tips.mockClear()
+
+		// The teardown parks inside the lock, after its epoch bump, with the doomed target still installed.
+		let releaseTeardown: () => void = () => {}
+		account.getAccounts.mockImplementationOnce(() => new Promise((resolve) => (releaseTeardown = () => resolve([]))))
+		token.getTokensRaw.mockResolvedValue([])
+		const deleting = token.onTokenDeleted.invoke({ ...tokenA, profileId: "p1" } as never)
+		await flushPromises()
+
+		await surface(service).retryIncomingScan("n1")
+		expect(tips).not.toHaveBeenCalled()
+
+		releaseTeardown()
+		await deleting
+		await flushPromises()
+		expect(cursorFor()).toBeUndefined()
+		expect(await storedEpisodes(service)).toBeUndefined()
+	})
+
+	test("deleting one token rebuilds the schedulers: the tokens that stay keep polling, and Retry reaches them", async () => {
 		const { reader, state } = makePublicReader()
 		const token = makeTokenStub([tokenA, tokenB])
 		const { service } = await bootPublic(reader, state, { token })
@@ -4534,12 +4565,37 @@ describe("IncomingTransferService — public-scan health (episodes, backoff, ret
 		reader.getScanTips = tips
 		await failTwice(service)
 
+		token.getTokensRaw.mockResolvedValue([tokenA])
 		await token.onTokenDeleted.invoke({ ...tokenB, profileId: "p1" } as never)
 		await flushPromises()
 		tips.mockClear()
 		await surface(service).retryIncomingScan("n1")
 
 		expect(tips).toHaveBeenCalledTimes(1)
+		expect(await storedEpisodes(service)).toMatchObject({ [KEY]: { failures: 3, failingSince: T0 } })
+	})
+
+	test("a health read is ONE snapshot: clock reads that straddle the threshold cannot split the answer from the baseline", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		const events = captureHealthEvents(service)
+		nodeDown(reader)
+		await failTwice(service)
+
+		// First read lands exactly on the threshold (not yet stalled); any later read would be past it.
+		const now = vi
+			.spyOn(Date, "now")
+			.mockReturnValueOnce(T0 + 10 * MIN)
+			.mockReturnValue(T0 + 10 * MIN + 1)
+		const first = await surface(service).getIncomingSyncHealth("n1")
+		now.mockRestore()
+
+		expect(first).toEqual({ stalled: false, since: null })
+		expect(events).toEqual([])
+
+		vi.setSystemTime(T0 + 11 * MIN)
+		expect(await surface(service).getIncomingSyncHealth("n1")).toEqual({ stalled: true, since: T0 })
+		expect(events).toHaveLength(1)
 	})
 
 	test("a stall a reader saw while the recovering scan was still running is taken back with an event", async () => {

@@ -550,6 +550,17 @@ describe("batchedViewSimulation — fast arm (PUBLIC+isStatic leading prefix)", 
 		expect(result.encoded[1]?.[0]?.toBigInt()).toBe(200n)
 	})
 
+	test("a fast-arm result with fewer returns than calls leaves that slot EMPTY — consumers must refuse it", async () => {
+		simulateViaNodeMock.mockResolvedValueOnce([fastSimResult([{ values: [new Fr(100n)] }])])
+		const deps = makeDeps({ functions: { bal_pub: { kind: FunctionType.PUBLIC, isStatic: true } } })
+
+		const result = await batchedViewSimulation([publicStaticCall(), publicStaticCall()], deps)
+
+		expect(simulateViaNodeMock).toHaveBeenCalledOnce()
+		expect(deps.pxe.simulateTx).not.toHaveBeenCalled()
+		expect(result.encoded).toEqual([[new Fr(100n)], []])
+	})
+
 	test("mixed leading prefix + private tail → BOTH arms invoked, results merged by originalIndex", async () => {
 		simulateViaNodeMock.mockResolvedValueOnce([fastSimResult([{ values: [new Fr(1n)] }, { values: [new Fr(2n)] }])])
 		const deps = makeDeps({

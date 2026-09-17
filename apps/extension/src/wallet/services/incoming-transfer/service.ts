@@ -397,8 +397,8 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			}
 			// Invalidate any in-flight scan whose PXE snapshot predates this wipe.
 			this.bumpServiceEpoch()
-			this.restampPublicTargets()
 		})
+		await this.rebuildAfterDelete()
 	}
 
 	/** Per-network wipe for a deleted account. Caller holds the service lock. */
@@ -830,12 +830,6 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		})
 	}
 
-	/** A bump that keeps the scheduler set — it only invalidates in-flight scans — carries the installed
-	 *  targets into the new epoch, or every later poll of a still-valid stream would be refused. */
-	private restampPublicTargets(): void {
-		for (const target of this.publicWatched.values()) target.epoch = this.serviceEpoch
-	}
-
 	/** Tear down the public-event scheduler for `(networkId, contract)`. */
 	private stopPublicScheduler(networkId: string, contract: string): void {
 		const key = this.publicSchedulerKey(networkId, contract)
@@ -891,12 +885,13 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	/** Emit `onIncomingSyncHealthChanged` when the network's health differs from the last announced
 	 *  one. What was announced is persisted with the episodes, so the single `warn` of a failing scan —
 	 *  the transition into stalled — is once per stall, not once per worker wake. */
-	private announceHealth(profileId: string, networkId: string): void {
+	private announceHealth(profileId: string, networkId: string): IncomingSyncHealth {
 		const prefix = scanEpisodeNetworkPrefix(profileId, networkId)
-		const { stalled } = this.episodes.health(prefix, Date.now())
-		if (!this.episodes.setAnnounced(prefix, stalled)) return
-		if (stalled) this.logWarn("incoming public scan stalled", { networkId })
+		const health = this.episodes.health(prefix, Date.now())
+		if (!this.episodes.setAnnounced(prefix, health.stalled)) return health
+		if (health.stalled) this.logWarn("incoming public scan stalled", { networkId })
 		this.emit("onIncomingSyncHealthChanged", { profileId, networkId })
+		return health
 	}
 
 	/** Drop the episodes `matches` selects, then take back every announced stall that no longer holds. */
@@ -912,10 +907,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		await this.ensureInitialized()
 		const profile = await this.profileService.getActiveProfile()
 		if (!profile || typeof networkId !== "string") return { stalled: false, since: null }
-		// A reader is an observer like any other: what it is about to see becomes the announced baseline,
-		// or a recovery that follows a stall only this read saw would be announced to nobody.
-		this.announceHealth(profile.id, networkId)
-		return this.episodes.health(scanEpisodeNetworkPrefix(profile.id, networkId), Date.now())
+		// A reader is an observer like any other: the very snapshot it is handed becomes the announced
+		// baseline — a second clock read could cross the stall threshold in between — or a recovery that
+		// follows a stall only this read saw would be announced to nobody.
+		return this.announceHealth(profile.id, networkId)
 	}
 
 	public async retryIncomingScan(networkId: string): Promise<void> {
@@ -975,7 +970,6 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			// in-flight off-lock scan holding the old epoch can't write rows or a failure episode for the
 			// token we're deleting.
 			this.bumpServiceEpoch()
-			this.restampPublicTargets()
 			// Scheduler teardown + row mutations both inside the lock so a
 			// concurrent scan can't slip a row in between teardown + wipe.
 			await this.detachTokenSchedulersLocked(profileId, network, token.contract)
@@ -989,6 +983,18 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			this.dropEpisodes((key) => key === episodeKey)
 			await this.wipeContractRecordsLocked(profileId, network.id, token.contract)
 		})
+		await this.rebuildAfterDelete()
+	}
+
+	/** The bump that fenced the delete also orphaned every surviving target and interval — each is bound
+	 *  to the epoch it was installed in — so the set is rebuilt from what is left. Outside the lock, and
+	 *  only after the wipe: a target re-authorised any earlier could scan the scope being deleted. */
+	private async rebuildAfterDelete(): Promise<void> {
+		try {
+			await this.hydrateSchedulers()
+		} catch (error) {
+			this.logWarn("scheduler rebuild after a delete failed", error)
+		}
 	}
 
 	/** Remove `contract` from every affected note scheduler; stop schedulers left empty.
