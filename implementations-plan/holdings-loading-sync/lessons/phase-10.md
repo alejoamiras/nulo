@@ -98,3 +98,17 @@ conflict) and the WHOLE gate was run on the rebased arc 2 head:
 Why foreground chunks: the harness killed every long BACKGROUND run of this phase on a system-wide
 memory-pressure signal (PSI `full avg10` near 19 % while this session's own cgroup sat near 1 % and 300 GB
 was available — another tenant of the box). Foreground commands are not subject to it.
+
+## Post-delivery rebase onto `dev` (#614, #615, #617, #618 landed under the stack)
+Textual: one conflict (`implementations-plan/index.md`, both sides appended); `range-diff` shows every code
+commit byte-identical; `audit:vue` green on the rebased head. A fresh codex session reviewed the trunk diff
+against the stack's scope- and messaging-dependent files:
+
+| Sev | Finding | Fix |
+|---|---|---|
+| Med | #618 makes a request reject at once when its port cannot open; `RecentActivityView.loadTokens` had no catch, so a mount-time rejection aborted the rest of mount (the health fetch included) and the fire-and-forget reloads could go unhandled | catch inside `loadTokens`, keep the current map, continue; one component test |
+
+Confirming pass: "Approve. This closes the finding. … No new material findings. Confidence: high". Checked
+and clean: scope keying vs #615's pointer follow (seed status is profile+chain, health is profile+network
+row; generations advance on scope change), #618 rejection paths in both composables, the `helpers.ts`
+auto-merge, #617's execution errors.
