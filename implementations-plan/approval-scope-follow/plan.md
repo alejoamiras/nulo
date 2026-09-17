@@ -811,7 +811,7 @@ toggle directions, no banner while the active scope is unresolved, and no state 
 - `cd <worktree root> && bun run typecheck && bun run lint`
 - Layers: typecheck · lint · unit/component
 
-### Phase 4 — e2e
+### Phase 4 — e2e ✓
 
 `waitForTxCardByHash` in `fixtures/helpers.ts`, then two network tests. **Every post-confirm
 assertion is against `chrome.storage.local` and/or a freshly-opened popup, never a page that was
