@@ -1,6 +1,5 @@
 import { CLIENT_DISCONNECTED_MESSAGE } from "@nulo/extension-messaging/errors"
-import { MessageType } from "@nulo/extension-messaging/messages"
-import { unwrapParams } from "@nulo/extension-messaging/utils"
+import { connectStub, PortRegistry } from "@nulo/extension-messaging/testing"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { AccountServiceClient } from "@/wallet/services/account/client"
@@ -16,115 +15,17 @@ vi.unmock("@/wallet/services/logger/client")
 /**
  * Counts the `logger` ports a document holds. Every service client logs through the document's
  * logger; a logger that each client builds for itself leaks one port per client, because
- * `ServiceClient.disconnect()` closes the client's own port and never the logger's. The global
- * port double cannot count (it refuses a second same-name port), so this file replaces
- * `chrome.runtime.connect` with a stub that mirrors Chrome: a closed port throws on `postMessage`,
- * only the far end's `onDisconnect` fires, and every request is answered on its own port.
+ * `ServiceClient.disconnect()` closes the client's own port and never the logger's. The counts
+ * come from a registry of its own, in answering mode: every request is answered on its own port,
+ * so a line only settles if the port it went out on is still the live one.
  */
-
-type Listener = (...args: unknown[]) => void
-type Envelope = { type: MessageType; content: { requestId: number; method: string; params: unknown } }
-type Posted = { port: FakePort; requestId: number; method: string; params: unknown[] }
-
-class FakePort {
-	public closed = false
-	public readonly message = new Set<Listener>()
-	public readonly disconnectListeners = new Set<Listener>()
-	public readonly onMessage = {
-		addListener: (l: Listener) => this.message.add(l),
-		removeListener: (l: Listener) => this.message.delete(l),
-	}
-	public readonly onDisconnect = {
-		addListener: (l: Listener) => this.disconnectListeners.add(l),
-		removeListener: (l: Listener) => this.disconnectListeners.delete(l),
-	}
-
-	public constructor(
-		public readonly name: string,
-		private readonly registry: PortRegistry,
-	) {}
-
-	public postMessage(message: unknown): void {
-		if (this.closed) throw new Error("Attempting to use a disconnected port object")
-		this.registry.post(this, message as Envelope)
-	}
-
-	public disconnect(): void {
-		this.closed = true
-		this.registry.closedLocally(this)
-	}
-}
-
-class PortRegistry {
-	public readonly live = new Map<string, Set<FakePort>>()
-	public readonly opened = new Map<string, FakePort[]>()
-	public readonly localDisconnects = new Map<string, number>()
-	public readonly posted: Posted[] = []
-	public readonly answered: Posted[] = []
-	public hold = false
-
-	public open(name: string): FakePort {
-		const port = new FakePort(name, this)
-		this.bucket(this.live, name).add(port)
-		this.bucket(this.opened, name).push(port)
-		return port
-	}
-
-	public post(port: FakePort, envelope: Envelope): void {
-		expect(envelope.type).toBe(MessageType.Request)
-		expect(typeof envelope.content.requestId).toBe("number")
-		expect(envelope.content.method).toBe("log")
-		const entry = {
-			port,
-			requestId: envelope.content.requestId,
-			method: envelope.content.method,
-			params: unwrapParams(envelope.content.params as unknown[]),
-		}
-		this.posted.push(entry)
-		if (!this.hold) queueMicrotask(() => this.answer(entry))
-	}
-
-	/** A service-worker restart, as the page sees it: the port closes and its `onDisconnect` fires. */
-	public remoteClose(port: FakePort): void {
-		port.closed = true
-		this.live.get(port.name)?.delete(port)
-		for (const listener of [...port.disconnectListeners]) listener()
-	}
-
-	public closedLocally(port: FakePort): void {
-		this.live.get(port.name)?.delete(port)
-		this.localDisconnects.set(port.name, (this.localDisconnects.get(port.name) ?? 0) + 1)
-	}
-
-	public answerHeld(): void {
-		for (const entry of this.posted) if (!this.answered.includes(entry)) this.answer(entry)
-	}
-
-	private answer(entry: Posted): void {
-		if (entry.port.closed) return
-		this.answered.push(entry)
-		const response = { type: MessageType.Response, content: { requestId: entry.requestId, result: undefined } }
-		for (const listener of [...entry.port.message]) listener(response)
-	}
-
-	private bucket<T>(map: Map<string, T>, name: string): T {
-		let value = map.get(name)
-		if (!value) {
-			value = (map === this.live ? new Set() : []) as T
-			map.set(name, value)
-		}
-		return value
-	}
-}
 
 let registry: PortRegistry
 
 beforeEach(() => {
 	_resetDocumentLoggerForTests()
-	registry = new PortRegistry()
-	;(chrome.runtime.connect as ReturnType<typeof vi.fn>).mockImplementation((_: unknown, options: { name: string }) =>
-		registry.open(options.name),
-	)
+	registry = new PortRegistry({ answer: "microtask" })
+	;(chrome.runtime.connect as ReturnType<typeof vi.fn>).mockImplementation(connectStub(registry))
 })
 
 const drain = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -134,7 +35,11 @@ const loggerPorts = () => ({
 	localDisconnects: registry.localDisconnects.get(LOGGER_SERVICE_NAME) ?? 0,
 })
 /** The `[context, source, level, message]` of every logger line, in wire order. */
-const lines = () => registry.posted.filter((p) => p.port.name === LOGGER_SERVICE_NAME).map((p) => p.params)
+const lines = () => {
+	const posted = registry.posted.filter((p) => p.port.name === LOGGER_SERVICE_NAME)
+	for (const entry of posted) expect(entry.method).toBe("log")
+	return posted.map((p) => p.params)
+}
 
 function expectOneLoggerPort(): void {
 	const opened = registry.opened.get(LOGGER_SERVICE_NAME) ?? []
