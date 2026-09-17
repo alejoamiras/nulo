@@ -152,6 +152,10 @@ interface InFlightState {
 	/** Set by the lock's reset, cleared when the unlock read starts: a journal event from before
 	 *  the lock, delivered after it, would refill the emptied cache. */
 	suspended: boolean
+	/** Counts the events applied to the rows. A read that sees it move was answered from a
+	 *  snapshot older than the cache: the worker snapshots storage, an update lands, its event
+	 *  arrives first on the same port, and the reply would put the older row back. */
+	revision: number
 }
 
 /**
@@ -175,6 +179,7 @@ function createInFlightTracker(scope: ScopeRefs) {
 		connected: false,
 		generation: 0,
 		suspended: false,
+		revision: 0,
 	}
 	const { profile, account, network } = scope
 
@@ -192,14 +197,14 @@ function createInFlightTracker(scope: ScopeRefs) {
 	const approvedSendsInFlight = computed(() => countApprovedSendsInFlight(state.ops.value, profile.value?.id))
 
 	/** Re-read the journal. With `invalidate`, the cache is stale: the guard closes until this
-	 *  read answers, and reads already in flight write nothing. */
+	 *  read answers, reads already in flight write nothing, and a snapshot an event overtook is
+	 *  read again — a `submitting` send outlives the lock and can end during the unlock read. */
 	const refreshInFlight = (options?: { invalidate?: boolean }) => {
-		if (options?.invalidate) {
-			state.generation++
-			state.suspended = false
-			state.ready.value = false
-		}
-		return refreshInFlightOps(state, profile)
+		if (!options?.invalidate) return refreshInFlightOps(state, profile)
+		state.generation++
+		state.suspended = false
+		state.ready.value = false
+		return refreshInFlightOps(state, profile, { settle: true })
 	}
 
 	/** A locked popup has nothing in flight to protect, so the cache empties and stays READY:
@@ -252,7 +257,11 @@ function createInFlightTracker(scope: ScopeRefs) {
 	return { hasInFlightSend, approvedSendsInFlight, refreshInFlight, resetInFlight, commitScopeChange }
 }
 
-async function refreshInFlightOps(state: InFlightState, profile: Ref<ProfileInfo | undefined>): Promise<void> {
+async function refreshInFlightOps(
+	state: InFlightState,
+	profile: Ref<ProfileInfo | undefined>,
+	options?: { settle?: boolean },
+): Promise<void> {
 	const profileId = profile.value?.id
 	if (!profileId) {
 		state.ops.value = []
@@ -261,46 +270,65 @@ async function refreshInFlightOps(state: InFlightState, profile: Ref<ProfileInfo
 		return
 	}
 	const generation = state.generation
-	const answer = (rows: OperationRecord[]) => {
-		// A slow read for a previous profile landing late would replace the live
-		// profile's operations and let a switch through mid-send.
-		if (state.generation !== generation || profile.value?.id !== profileId) return
-		state.ops.value = rows
-		state.ready.value = true
-	}
+	// A slow read for a previous profile landing late would replace the live
+	// profile's operations and let a switch through mid-send.
+	const current = () => state.generation === generation && profile.value?.id === profileId
 	if (!state.connected) {
 		state.connected = true
-		const upsertInFlight = (op: OperationRecord) => {
-			if (state.suspended) return
-			const idx = state.ops.value.findIndex((row) => row.id === op.id)
-			if (idx === -1) state.ops.value.push(op)
-			else state.ops.value.splice(idx, 1, op)
-		}
-		const dropInFlight = (op: OperationRecord) => {
-			if (state.suspended) return
-			state.ops.value = state.ops.value.filter((row) => row.id !== op.id)
-		}
-		state.journal.onOperationAdded.add(upsertInFlight)
-		state.journal.onOperationUpdated.add(upsertInFlight)
-		state.journal.onOperationDeleted.add(dropInFlight)
-		// A reconnect can drop events, so re-read rather than trusting the cache.
-		state.journal.onConnected?.add(() => void refreshInFlightOps(state, profile))
+		subscribeInFlight(state, profile)
 		try {
 			await state.journal.connect()
 		} catch {
-			answer([])
+			if (current()) publishInFlight(state, [])
 			return
 		}
 	}
+	// Three reads bound the work under a busy journal; a send emits a handful of events in total.
+	for (let attempt = 0; ; attempt++) {
+		const revision = state.revision
+		const rows = await readInFlightRows(state, profileId)
+		if (!current()) return
+		if (options?.settle && state.revision !== revision && attempt < 2) continue
+		publishInFlight(state, rows)
+		return
+	}
+}
+
+function publishInFlight(state: InFlightState, rows: OperationRecord[]): void {
+	state.ops.value = rows
+	state.ready.value = true
+}
+
+function subscribeInFlight(state: InFlightState, profile: Ref<ProfileInfo | undefined>): void {
+	const upsertInFlight = (op: OperationRecord) => {
+		if (state.suspended) return
+		state.revision++
+		const idx = state.ops.value.findIndex((row) => row.id === op.id)
+		if (idx === -1) state.ops.value.push(op)
+		else state.ops.value.splice(idx, 1, op)
+	}
+	const dropInFlight = (op: OperationRecord) => {
+		if (state.suspended) return
+		state.revision++
+		state.ops.value = state.ops.value.filter((row) => row.id !== op.id)
+	}
+	state.journal.onOperationAdded.add(upsertInFlight)
+	state.journal.onOperationUpdated.add(upsertInFlight)
+	state.journal.onOperationDeleted.add(dropInFlight)
+	// A reconnect can drop events, so re-read rather than trusting the cache.
+	state.journal.onConnected?.add(() => void refreshInFlightOps(state, profile))
+}
+
+async function readInFlightRows(state: InFlightState, profileId: string): Promise<OperationRecord[]> {
 	try {
-		answer(await state.journal.getOperations({ profileId }))
+		return await state.journal.getOperations({ profileId })
 	} catch {
 		// A journal read can fail transiently (service worker restarting). Not
 		// being able to ask must not make every scope change throw — the caller
 		// would surface that as an outright failure to switch. Treat it as "no
 		// sends known", which is what the pre-guard behavior was; the executor
 		// still binds its own account explicitly.
-		answer([])
+		return []
 	}
 }
 

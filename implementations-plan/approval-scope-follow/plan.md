@@ -136,10 +136,11 @@ which rev 6 absorbs alongside the codex round-4 findings:
   emits its event first (same port, FIFO), and the older snapshot then replaces it. The window is
   the worker's storage latency; the row's next event corrects it, and a snapshot landing after the
   row's terminal event leaves a stale refusal until the next profile change, reconnect or lock
-  (`commitScopeChange` does not re-read past its cached refusal). The unlock read adds no new
-  exposure — the lock cancelled the profile's sends, so nothing is in flight to race — and the
-  boot read had the same window before this plan. Merging by `updatedAt` in the tracker's answer is
-  the fix if it ever bites; out of this plan's scope (codex arc-1 round 2).
+  (`commitScopeChange` does not re-read past its cached refusal). The unlock read is the one
+  refresh this plan adds, and a `submitting` send outlives the lock's sweep, so that read re-reads
+  when an event moved the rows while it was pending (codex arc-1 round 3). The profile-change,
+  reconnect and `commitScopeChange` reads keep the window they always had; merging by `updatedAt`
+  in the tracker's publish is the fix if it ever bites, out of this plan's scope.
 - **Batch padding is dearer, not impossible.** A dApp can no longer force `multi-signer` with a free
   `aztec_createAuthWit` on a second account; it still can with a second *send-like* operation on a
   second account, which costs it a real transaction (and need not succeed). Multi-signer ambiguity is

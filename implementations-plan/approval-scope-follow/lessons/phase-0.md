@@ -75,3 +75,11 @@ Held: the narrowing itself (popup transfers journal `origin: "popup"`; lane/queu
 | 2 | LOW — `suspended` doc: say "cleared when the unlock read starts"; drop the narrating `emitUpdated` doc | yes | **Adopted** |
 
 Held: `suspended` stays set across a lock-screen profile pick (a pick is not an unlock); plain boolean is right; both bootstrap paths clear it.
+
+### Round 3 (resumed, on `89dfdbf3`) → conditional approve
+
+| # | Finding | Verified | Disposition |
+|---|---|---|---|
+| 1 | MEDIUM (inferred) — premise "nothing is in flight at unlock" is false: the sweep excludes `submitting` (`execution-lane.ts:61-64`), so the NEW unlock read can snapshot a `submitting` transfer, the transfer ends and its event lands first, the older snapshot then restores it and the cached short-circuit refuses for good. Before this arc a same-profile unlock issued no read. | yes — the sweep's stage list and the same-port ordering both check out | **Adopted**: `state.revision` counts applied events; the invalidating refresh (`settle`) re-reads when the revision moved during its read (≤ 3 reads). Regression test "the unlock read re-reads when an event overtook its snapshot" (disabling the re-read fails it); "a plain refresh publishes its snapshot even when an event landed meanwhile" pins that the other refreshes are unchanged. Known-limitations text corrected. |
+
+Hard stop reached at three rounds with a condition outstanding; the condition was implemented as prescribed and one verification-only resume asked codex to confirm it (below). Surfaced to the owner in the session report.

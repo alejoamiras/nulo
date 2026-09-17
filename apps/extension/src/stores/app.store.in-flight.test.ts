@@ -32,7 +32,7 @@ vi.mock("@/wallet/services/operation-journal/client", () => ({
 /** A send in the viewed scope (`p1` · `0xa` · `n1`), held at `proving` and never advanced. */
 const send = (origin: "popup" | "dapp", stage = "proving"): OperationRecord =>
 	({
-		id: `${origin}-${stage}`,
+		id: `${origin}-send`,
 		kind: origin === "popup" ? "transfer" : "dapp_execute",
 		origin,
 		profileId: "p1",
@@ -211,6 +211,32 @@ describe("late reads", () => {
 		await pendingFresh
 		expect(store.hasInFlightSend).toBe(false)
 		expect(store.approvedSendsInFlight).toBe(0)
+	})
+
+	test("the unlock read re-reads when an event overtook its snapshot", async () => {
+		// A send at `submitting` outlives the lock's sweep. The unlock read snapshots it, the send
+		// then ends and its event lands first; publishing the snapshot would resurrect the refusal.
+		const store = await viewing([send("popup", "submitting")])
+		store.resetInFlight()
+		const stale = parkNextRead()
+		const unlocked = store.refreshInFlight({ invalidate: true })
+		emitUpdated(send("popup", "succeeded"))
+		mockGetOperations.mockResolvedValueOnce([send("popup", "succeeded")])
+		stale.resolve([send("popup", "submitting")])
+		await unlocked
+		expect(store.hasInFlightSend).toBe(false)
+		expect(readsFor("p1")).toBe(3) // boot, the overtaken read, the re-read
+	})
+
+	test("a plain refresh publishes its snapshot even when an event landed meanwhile", async () => {
+		const store = await viewing([])
+		const read = parkNextRead()
+		const refreshed = store.refreshInFlight()
+		emitUpdated(send("popup", "succeeded"))
+		read.resolve([send("popup")])
+		await refreshed
+		expect(store.hasInFlightSend).toBe(true)
+		expect(readsFor("p1")).toBe(2)
 	})
 
 	test("a journal event from before the lock, delivered after it, does not refill the cache", async () => {
