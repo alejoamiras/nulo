@@ -84,6 +84,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		"unlockProfile",
 		"unlockPasskeyProfile",
 		"getPasskeyCredentialId",
+		"getSessionHandle",
 		"lockActiveProfile",
 		"refreshSession",
 		"changeProfileName",
@@ -240,6 +241,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 *  Shared (via {@link getDeletionState}) with Execution + Transaction so a
 	 *  worker that captured an epoch before a purge is fenced when it persists. */
 	private readonly deletionState = new ProfileDeletionState()
+	/** Session serials restart with the worker; this keeps a handle from naming a later worker's session. */
+	private readonly workerId = crypto.randomUUID()
 	/** Lazily injected by the last-started ProfileDeletionCoordinator — the purge
 	 *  executor. Never a topological dependency (would be a cycle). */
 	private deletionDelegate: ProfileDeletionDelegate | null = null
@@ -507,13 +510,13 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		})
 	}
 
-	/** Capture the {profileId, epoch} execution fence ATOMICALLY under the facade
-	 *  lock (D13). The active-session read, the reserved-id check, and the epoch
+	/** Capture the {profileId, epoch, session} execution fence ATOMICALLY under the
+	 *  facade lock. The active-session read, the reserved-id check, and the epoch
 	 *  read MUST be one critical section — `deleteProfile`'s phase 1 (beginDeletion
 	 *  + reserve) runs under the SAME lock, so this either captures the pre-delete
 	 *  epoch (then the later addTransaction assert fails) or sees the id already
 	 *  reserved and rejects. Composing getActiveProfile + capture across separate
-	 *  lock acquisitions would let a delete slip between them (codex TOCTOU). */
+	 *  lock acquisitions would let a delete slip between them. */
 	public async captureExecutionFence(): Promise<ExecutionFence> {
 		await this.ensureInitialized()
 		return this.runExclusive(async () => {
@@ -553,6 +556,16 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	/** The live session's serial, synchronously; `undefined` when locked. */
 	public peekLiveSerial(): number | undefined {
 		return this.sessionManager.peekLiveSerial()
+	}
+
+	public async getSessionHandle(): Promise<string | undefined> {
+		await this.ensureInitialized()
+		return this.sessionHandle()
+	}
+
+	private sessionHandle(): string | undefined {
+		const serial = this.sessionManager.peekLiveSerial()
+		return serial === undefined ? undefined : `${this.workerId}:${serial}`
 	}
 
 	/** Registers the check an expired session consults before it auto-locks; in-process only. */
@@ -894,9 +907,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		}
 	}
 
-	public async lockActiveProfile(): Promise<void> {
+	public async lockActiveProfile(handle?: string): Promise<void> {
 		await this.ensureInitialized()
 		return this.runExclusive(async () => {
+			// A caller that decided to lock one session must not close the session that replaced it.
+			const live = this.sessionHandle()
+			if (handle !== undefined && live !== undefined && live !== handle) return
 			// An explicit lock also ends every pending restore, before the close can fail: a
 			// stashed restore secret must not outlive the user's intent to lock.
 			this.sweepStalePendingRestore(Number.POSITIVE_INFINITY)

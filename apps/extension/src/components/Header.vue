@@ -21,10 +21,56 @@ const popupStore = usePopupStore()
 const route = useRoute()
 const router = useRouter()
 
-const handleLockWallet = () => {
+const lockWallet = (handle) => {
 	if (!appStore.isLogined) return
 	appStore.isLogined = false
-	managers.profile.lockActiveProfile()
+	managers.profile.lockActiveProfile(handle)
+}
+
+/** Locking is a security action: a read that answers late or never locks without asking. */
+const LOCK_READ_BUDGET_MS = 3_000
+
+const readForLock = () => {
+	let timer
+	const expired = new Promise((resolve) => {
+		timer = setTimeout(() => resolve({ answered: false }), LOCK_READ_BUDGET_MS)
+	})
+	const read = Promise.all([managers.profile.getSessionHandle(), appStore.refreshInFlight()]).then(
+		([handle]) => ({ answered: true, handle }),
+		() => ({ answered: false }),
+	)
+	return Promise.race([read, expired]).finally(() => clearTimeout(timer))
+}
+
+// A lock decided before a session change or a dropped worker connection is abandoned; the worker
+// also refuses to close any session but the one the decision named.
+let sessionChanges = 0
+let confirmLock
+const onSessionChanged = () => {
+	sessionChanges++
+	if (confirmLock && cacheStore.confirm.callback === confirmLock) popupStore.close("confirm")
+}
+managers.profile.onActiveProfileChanged.add(onSessionChanged)
+managers.profile.onDisconnected.add(onSessionChanged)
+
+const handleLockWallet = async () => {
+	if (!appStore.isLogined) return
+	const changesBefore = sessionChanges
+	const { answered, handle } = await readForLock()
+	if (sessionChanges !== changesBefore) return
+	const running = answered ? appStore.approvedSendsInFlight : 0
+	if (running === 0) return lockWallet(handle)
+	confirmLock = () => lockWallet(handle)
+	cacheStore.confirm.pre_title = "Running transactions"
+	cacheStore.confirm.title = "Lock wallet?"
+	cacheStore.confirm.description =
+		running === 1
+			? "1 transaction is still running. Locking cancels it."
+			: `${running} transactions are still running. Locking cancels them.`
+	cacheStore.confirm.confirm_text = "Lock anyway"
+	cacheStore.confirm.confirm_color = "red"
+	cacheStore.confirm.callback = confirmLock
+	popupStore.open("confirm")
 }
 
 const logViewerService = new LogViewerServiceClient()
@@ -209,6 +255,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+	managers.profile.onActiveProfileChanged.remove(onSessionChanged)
+	managers.profile.onDisconnected.remove(onSessionChanged)
 	configService.disconnect()
 	logViewerService.disconnect()
 	taskService.disconnect()

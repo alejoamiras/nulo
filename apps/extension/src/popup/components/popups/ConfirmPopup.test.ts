@@ -98,3 +98,34 @@ describe("ConfirmPopup — single-action mode", () => {
 		expect(callback).toHaveBeenCalledTimes(1)
 	})
 })
+
+describe("ConfirmPopup — pre-title", () => {
+	beforeEach(() => {
+		vi.stubGlobal("managers", { profile: { confirmProfileOperation: vi.fn() } })
+		H.store.current = reactive({ confirm: {} })
+	})
+
+	test.each([
+		{ confirm: { confirm_color: "red" }, shown: "Irreversible" },
+		{ confirm: {}, shown: "Action required" },
+		{ confirm: { confirm_color: "red", pre_title: "Running transactions" }, shown: "Running transactions" },
+	])("shows $shown", async ({ confirm, shown }) => {
+		const wrapper = mount(ConfirmPopup, { props: { show: false }, global: { stubs: STUBS } })
+		await open(wrapper, confirm)
+		expect(wrapper.find('[data-testid="confirm-pre-title"]').text()).toBe(shown)
+	})
+
+	test("the override clears on close, and Cancel closes without running the callback", async () => {
+		const callback = vi.fn()
+		const wrapper = mount(ConfirmPopup, { props: { show: false }, global: { stubs: STUBS } })
+		await open(wrapper, { confirm_color: "red", pre_title: "Running transactions", callback })
+		await wrapper.find('[data-testid="confirm-cancel"]').trigger("click")
+		expect(wrapper.emitted("onClose")).toHaveLength(1)
+		expect(callback).not.toHaveBeenCalled()
+
+		await wrapper.setProps({ show: false })
+		await nextTick()
+		await open(wrapper, { confirm_color: "red" })
+		expect(wrapper.find('[data-testid="confirm-pre-title"]').text()).toBe("Irreversible")
+	})
+})

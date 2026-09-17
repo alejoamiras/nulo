@@ -15,7 +15,7 @@ import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 import { useSyncedRef } from "@/composables/syncedRef.js"
 import type { ActivityScope } from "@nulo/wallet-core/activity"
 import { type AwaitingTx, txBelongsToScope, txScope, useActivityStore } from "@/stores/activity.store"
-import { hasInFlightSend as inFlightHasSend } from "@/utils/in-flight-send"
+import { approvedSendsInFlight as countApprovedSendsInFlight, hasInFlightSend as inFlightHasSend } from "@/utils/in-flight-send"
 import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
 import { OperationJournalServiceClient } from "@/wallet/services/operation-journal/client"
 
@@ -88,6 +88,7 @@ export const useAppStore = defineStore("app", () => {
 		transactions: feed.transactions,
 		activeScope: feed.activeScope,
 		hasInFlightSend: inFlight.hasInFlightSend,
+		approvedSendsInFlight: inFlight.approvedSendsInFlight,
 		refreshInFlight: inFlight.refreshInFlight,
 		commitScopeChange: inFlight.commitScopeChange,
 		/** @deprecated Prefer `commitScopeChange`; an async apply reopens the race. */
@@ -174,6 +175,9 @@ function createInFlightTracker(scope: ScopeRefs) {
 			}),
 	)
 
+	/** Approved sends running on any account of the profile: what a lock would cancel. */
+	const approvedSendsInFlight = computed(() => countApprovedSendsInFlight(state.ops.value, profile.value?.id))
+
 	const refreshInFlight = () => refreshInFlightOps(state, profile)
 
 	// The answer belongs to a profile, so it is invalid the moment that changes.
@@ -214,7 +218,7 @@ function createInFlightTracker(scope: ScopeRefs) {
 		return true
 	}
 
-	return { hasInFlightSend, refreshInFlight, commitScopeChange }
+	return { hasInFlightSend, approvedSendsInFlight, refreshInFlight, commitScopeChange }
 }
 
 async function refreshInFlightOps(state: InFlightState, profile: Ref<ProfileInfo | undefined>): Promise<void> {

@@ -172,6 +172,7 @@
     "activateNetworkGuarded": true,
     "aggregateFiat": true,
     "applyOutcome": true,
+    "approvedSendsInFlight": true,
     "assembleFullBackup": true,
     "awaitLivenessAdvance": true,
     "awaitProfileActivation": true,

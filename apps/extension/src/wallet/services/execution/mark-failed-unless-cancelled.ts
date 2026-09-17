@@ -8,16 +8,9 @@ import { DuplicateInitializationError, SessionEndedError } from "@nulo/extension
  * cancelJob did the transition + abort), and any other error marks the journal
  * `failed` before the caller rethrows it.
  *
- * Deliberately SYNCHRONOUS (not `async`): it throws the sentinel synchronously
- * and hands back `markJournal`'s own promise, so the call site's
- * `await markFailedUnlessCancelled(...); throw error` keeps the EXACT microtask
- * timing of the original inline `if (sentinel) throw; await markJournal; throw`.
- * An `async` wrapper would add one microtask before the `throw` on BOTH paths,
- * delaying each pipeline's `finally` (controller cleanup + slot release) by a
- * microtask — a real ordering change on the load-bearing cancel/slot-release
- * path. (codex post-impl 019ef365 caught this.) The co-located test pins the
- * synchronous-throw + promise-passthrough behavior so the `async` form can't
- * silently return.
+ * Deliberately not `async`: an async wrapper adds a microtask before each pipeline's `finally`
+ * (controller cleanup and slot release), reordering the cancel/slot-release path; the co-located
+ * test pins the synchronous throw and the promise passthrough.
  *
  * Scope: the dapp-send tail only (`lane.markJournal` + the `"dapp_execute"` error
  * context). `transfer-executor` deliberately does NOT use this — its catch

@@ -229,7 +229,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		this.profileService.setExpiryDeferral((profileId) => this.hasApprovedSendsInFlight(profileId))
 	}
 
-	/** Whether `profileId` has a send the user approved that has not been broadcast yet. */
+	/** Reads the journal in-process: its gated RPC read asks for the active profile, which waits on
+	 *  the facade lock the expiry decision's caller may already hold. */
 	private async hasApprovedSendsInFlight(profileId: string): Promise<boolean> {
 		const operations = await this.operationJournal.getOperations({ profileId })
 		return operations.some(isApprovedSendInFlight)

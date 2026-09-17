@@ -119,7 +119,11 @@ Nothing else the user sees changes.
 - **Consent is best-effort.** The popup asks after one fresh journal read, but a send that the
   service worker admits between that read and the lock is cancelled without a warning. Closing the
   gap would mean the popup holding a lock on the worker's admission path; not worth it for a
-  sub-second window.
+  sub-second window. *From the arc 2 review:* a read that does not answer within 3 s locks
+  without asking; a session change or a dropped worker connection closes the dialog and abandons a
+  pending decision; and the button hands the worker the handle of the session it decided on
+  (`getSessionHandle`), so `lockActiveProfile(handle)` never closes a session that replaced it. A
+  lock issued after the 3 s budget carries no handle.
 - **The deferral budget is per session, not per burst of work.** Each unlocked session can push
   its inactivity expiry out by at most the budget in total; the budget does not refill while the
   session lives, because the only observable "no sends left" moment is the one that closes the
@@ -143,6 +147,12 @@ Nothing else the user sees changes.
   holds rows from before the lock (its cached check runs before its refresh, Fact 30). The lock has
   already cancelled those sends, so the toast is stale, not a hold. Fixing it means touching the
   Send freeze helper (D3: out); the parked plan owns that surface.
+  *Measured in Phase 6:* in the popup that locked, the refusal is certain, not occasional. The sweep
+  cancels after the session has closed, and the journal forwards events and answers reads only for
+  the active profile, so that popup never hears of the cancel, and the selector's cached check
+  refuses every pick. Closing and reopening the popup clears it. By the same reading (static, not
+  exercised), an unlock of the same profile in that popup leaves the account/network Send freeze
+  holding the stale row until the popup reopens or the journal reconnects.
 
 ## Architecture & Implementation
 
@@ -939,7 +949,7 @@ starts with TTL 0 and is later given a TTL gets a non-zero budget); **restored s
 - `bun run typecheck:all && bun run lint`
 - Pass: all exit 0. Layers: typecheck · lint · unit
 
-### Phase 5 — the lock dialog and the card copy
+### Phase 5 — the lock dialog and the card copy ✓
 
 `approvedSendsInFlight(ops, profileId)` in `utils/in-flight-send.ts` + the store computed;
 `Header.vue`: `await refreshInFlight()`, then count 0 → `lockActiveProfile()` as today; else
@@ -958,7 +968,7 @@ set, "Irreversible"/"Action required" when absent; `journal-state` subtitle.
 - `bun run typecheck:all && bun run lint`
 - Pass: all exit 0; copy matches §UI impact verbatim. Layers: typecheck · lint · unit · component
 
-### Phase 6 — end to end, live
+### Phase 6 — end to end, live ✓
 
 Helpers: `createAndActivateProfile(page, name, password)` extracted from `session-profileSwitch`;
 `setSessionTtlMs(page, ms)` writes the config value through the config service RPC (the settings
@@ -992,7 +1002,7 @@ session end does not):
 - `NULO_E2E_RETRY=0 NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/lock-cancels-dapp-send.test.ts` (and the other two, one at a time)
 - Pass: all three green at retry 0, run solo; flake vs break per the e2e README. Layers: e2e (live sandbox)
 
-### Phase 7 — close out
+### Phase 7 — close out ✓
 
 `execution/README.md` "Authorization fence" section (what it binds, the serial, where it is
 asserted, the synchronous broadcast check after the cancellation check, the registry and its

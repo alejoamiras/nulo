@@ -88,13 +88,13 @@ watch(
 			<Flex direction="column" gap="32" :class="$style.wrapper" wide>
 				<Flex direction="column" align="center" gap="12" :class="$style.header">
 					<Icon name="warning" size="16" color="primary" />
-					<span :class="$style.pre_title">
-						{{ isDestructive ? 'Irreversible' : 'Action required' }}
+					<span :class="$style.pre_title" data-testid="confirm-pre-title">
+						{{ cacheStore.confirm.pre_title || (isDestructive ? 'Irreversible' : 'Action required') }}
 					</span>
-					<h2 :class="$style.title">
+					<h2 :class="$style.title" data-testid="confirm-title">
 						{{ cacheStore.confirm.title ? cacheStore.confirm.title : "Are you sure?" }}
 					</h2>
-					<Text size="13" weight="500" color="body" height="150" align="center" :class="$style.description">
+					<Text size="13" weight="500" color="body" height="150" align="center" :class="$style.description" data-testid="confirm-description">
 						{{ cacheStore.confirm.description }}
 					</Text>
 				</Flex>

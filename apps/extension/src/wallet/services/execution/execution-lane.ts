@@ -58,7 +58,9 @@ export interface ExecutionLaneDeps {
 	logError(msg: string, ...rest: unknown[]): void
 }
 
-/** The stages a cancellation can still pre-empt; from `submitting` the broadcast is issued. */
+/** The stages the ended-session sweep cancels. After the `submitting` write the broadcast can beat
+ *  the sweep, and a sent transaction must never read `cancelled`, so those sends are left to the
+ *  fence check just before `node.sendTx`. */
 const PRE_SUBMIT_STAGES = ["queued", "pending", "simulating", "proving"] as const
 
 export class ExecutionLane {

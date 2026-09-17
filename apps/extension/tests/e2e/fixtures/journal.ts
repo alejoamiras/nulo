@@ -60,6 +60,49 @@ export async function readDappExecuteRecords(page: Page): Promise<DappExecuteVie
 	})
 }
 
+/** A send's record: its owner and how far it got. `enteredProveAt` is stamped just before a held
+ *  proof gate starts its release timer, so it is a lower bound on that start. */
+export type SendRecordView = { id: string; kind: "transfer" | "dapp_execute"; profileId: string; stage: string; enteredProveAt?: number }
+
+/** Snapshot every send record, popup (`transfer`) and dApp (`dapp_execute`), of every profile. */
+export async function readSendRecords(page: Page): Promise<SendRecordView[]> {
+	const rows = await page.evaluate(async () => {
+		const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
+		return Object.entries(all).flatMap(([key, raw]) => (key.startsWith("nulo:journal@") ? [raw] : []))
+	})
+	return rows.flatMap(toSendRecordView)
+}
+
+function toSendRecordView(raw: unknown): SendRecordView[] {
+	type Stored = { id?: string; kind?: string; profileId?: string; progress?: { stage?: string; enteredProveAt?: number } }
+	let record: Stored | null
+	try {
+		record = (typeof raw === "string" ? JSON.parse(raw) : raw) as Stored | null
+	} catch {
+		return []
+	}
+	if (record?.kind !== "transfer" && record?.kind !== "dapp_execute") return []
+	const { id = "", kind, profileId = "", progress } = record
+	return [{ id, kind, profileId, stage: progress?.stage ?? "?", enteredProveAt: progress?.enteredProveAt }]
+}
+
+/** Wait for a send record `match` accepts, and return it. */
+export async function waitForSendRecord(
+	page: Page,
+	match: (record: SendRecordView) => boolean,
+	timeoutMs = 60_000,
+): Promise<SendRecordView> {
+	const deadline = Date.now() + timeoutMs
+	for (;;) {
+		const records = await readSendRecords(page)
+		const found = records.find(match)
+		if (found) return found
+		if (Date.now() > deadline)
+			throw new Error(`waitForSendRecord: no matching record within ${timeoutMs}ms (records: ${JSON.stringify(records)})`)
+		await new Promise((resolve) => setTimeout(resolve, 250))
+	}
+}
+
 /**
  * Evaluate in the SERVICE-WORKER context (always an extension context, so
  * `chrome.storage` is defined) rather than the passed page. Critical because the
