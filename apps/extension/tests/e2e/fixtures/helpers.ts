@@ -952,6 +952,13 @@ export async function navigateToTokenDetail(page: Page, symbol?: string): Promis
 	await page.waitForSelector('[data-testid="balance-amount"]', { visible: true, timeout: 15_000 })
 }
 
+/** Home holds its total behind a skeleton until the figure is settled (≤ 12 s by design): a read of
+ *  `balance-amount` before this resolves reads an empty slot, not a wrong number. */
+export async function waitForHomeTotal(page: Page): Promise<void> {
+	await page.waitForSelector('[data-testid="balance-amount"]', { visible: true, timeout: 15_000 })
+	await page.waitForFunction(() => !document.querySelector('[data-testid="balance-hero-loading"]'), { timeout: 20_000 })
+}
+
 /** Import a token from Home and wait for its projected balance row to carry `expectedPublicRaw`
  *  and a fresher timestamp than before the import — the discipline every multi-token spec needs so
  *  its assertions never race the balance projector. */

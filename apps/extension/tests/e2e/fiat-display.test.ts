@@ -7,12 +7,12 @@
 
 import { expect } from "vitest"
 import { withTimeoutMessage, test, openPopup, waitForHash, clickByTestId } from "./fixtures/extension"
-import { navigateToSettings } from "./fixtures/helpers"
+import { navigateToSettings, waitForHomeTotal } from "./fixtures/helpers"
 
 test("fresh wallet state matrix: truthful $0.00, zero fiat artifacts", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general")
-	await page.waitForSelector('[data-testid="balance-amount"]', { visible: true, timeout: 10_000 })
+	await waitForHomeTotal(page)
 
 	// S-A matrix: an EMPTY wallet's account value IS $0.00 (true zero) —
 	// never an em-dash, never a stale placeholder.
