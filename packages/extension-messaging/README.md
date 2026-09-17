@@ -27,6 +27,8 @@ Depends on `wallet-core` for ports, error types, and the `ServiceSpec` contract.
 | `src/zod-helpers.ts` | Schema-validation helpers used by services that narrow protocol messages. |
 | `src/utils.ts` | Port lifecycle utilities (waiters, drains). |
 | `src/testing/setup.ts` | Per-package vitest setup. |
+| `src/testing/port-registry.ts` | `PortRegistry` / `FakePort` / `connectStub` — the one `chrome.runtime.connect` fake, exported as `@nulo/extension-messaging/testing`. Any number of ports per name, a closed port throws on `postMessage`, only a far-end close fires `onDisconnect`; `manual` or `microtask` answering. The extension's `tests/vitest.setup.ts` and its logger tests use it too. |
+| `src/testing/transport-harness.ts` | Import-to-install `chrome` stub for this package's contract suites: the port client direction over `PortRegistry`, plus the service side (`connectServiceClient`), the offscreen `sendMessage` broker and logger spies. Not exported — importing it registers vitest hooks. |
 
 ## Scripts
 
@@ -42,7 +44,10 @@ Colocated `*.test.ts`. Most coverage lives across the SW boundary and is exercis
 ## Key invariants
 
 - **Errors are reconstructed across the wire as real `Error` instances.** On the client, compare with `err instanceof Error && err.message === "…"` — never `err === "…"`. The base class restores `Error` (and named subclasses from `errors.ts`) at the deserialization step.
-- **Port reconnects are silent.** Service clients re-establish their port and re-subscribe to events on disconnect; in-flight requests reject with `PortDisconnectedError`. Callers should treat that as a retryable signal, not a fatal error.
+- **A port client fails in three distinct ways; only one of them reconnects.**
+  - *The far end closes the port* (the service worker was recycled): the client re-opens its port at once; requests in flight reject with the plain `Error("Client disconnected")` — deliberately not a `WalletError`; match it with `isClientDisconnectRejection`. Retryable.
+  - *A send hits a torn-down port*: that request rejects with `RpcDisconnectedError`. Retryable once the worker is back.
+  - *The port cannot be opened* (`chrome.runtime.connect` throws synchronously — the page's extension context is gone after an update or reload): the request that needed the port rejects immediately with `RpcConnectError`. Nothing retries, no timer is left behind, and `connect()` itself never rejects. Treated as permanent for that document; a later request simply tries the open again.
 - **Telemetry is best-effort.** The offscreen telemetry sidecar fires one terminal-state event per request (`LoggingTelemetrySink` is the default sink in production). It must not be on the request hot path; lost telemetry never fails an RPC.
 - **No service logic in this package.** This is plumbing only. The shape `Service<Methods, Events>` is generic; concrete services (account, profile, network, …) live in `@nulo/extension`.
 - **Zod helpers are validation, not transformation.** Schemas verify the wire shape; they do not coerce values. Coercion at the service boundary masks bugs in the dispatcher narrowing layer.
