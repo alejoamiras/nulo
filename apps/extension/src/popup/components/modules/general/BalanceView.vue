@@ -1,5 +1,6 @@
 <script setup>
 /** Components */
+import { Skeleton } from "@nulo/design"
 import ActionButtonsView from "./ActionButtonsView.vue"
 import GasBalanceCard from "./GasBalanceCard.vue"
 
@@ -31,6 +32,15 @@ const props = defineProps({
 		type: Object,
 		required: false,
 		default: null,
+	},
+	/** Home only: defaults that are not token rows yet. A mount without them has none to wait for. */
+	seedEntries: {
+		type: Array,
+		default: () => [],
+	},
+	seedReady: {
+		type: Boolean,
+		default: true,
 	},
 })
 
@@ -114,13 +124,40 @@ const handleTokenBalanceClick = async () => {
 // aggregate is over the active chain only.
 const inActiveScope = (tb) => tb.account === appStore.account?.address && tb.token?.chainId === appStore.network?.chainId
 
-/** False while the active scope's snapshot is in flight: the figure is hidden, not shown as $0.00. */
-const isLoaded = ref(false)
+/** `loaded` = a snapshot for the active scope has SUCCEEDED; it then survives a later rejected refetch.
+ *  `loading` and `unavailable` both mean the total is not known — never a reason to print $0.00. */
+const balancesState = ref("loading")
 // A snapshot in flight is older than any event that lands meanwhile; the event marks it stale.
 let fetchDirty = false
 const markDirty = () => {
-	if (!isLoaded.value) fetchDirty = true
+	fetchDirty = true
 }
+
+/** The total is still moving: a snapshot is missing, a row has never been projected, or a default
+ *  token is on its way in. Showing a figure now would show one that is about to change. */
+const isTotalUnsettled = computed(
+	() =>
+		balancesState.value !== "loaded" ||
+		!props.seedReady ||
+		tokenBalances.value.some((tb) => tb.updatedAt === 0 && !tb.syncFailure) ||
+		props.seedEntries.some((entry) => entry.status === "pending" || entry.status === "seeding"),
+)
+/** A skeleton that never resolves is worse than a partial figure: after the cap the hero says what
+ *  it knows. One cap per scope — a row that starts syncing later does not re-hide a shown total. */
+const HERO_PENDING_CAP_MS = 12_000
+const capElapsed = ref(false)
+let capTimer
+function restartCap() {
+	clearTimeout(capTimer)
+	capElapsed.value = false
+	capTimer = setTimeout(() => {
+		capElapsed.value = true
+	}, HERO_PENDING_CAP_MS)
+}
+const heroPending = computed(() => isTotalUnsettled.value && !capElapsed.value)
+/** After the cap one question decides the figure: did ANY snapshot succeed for this scope? A loaded
+ *  empty list is a real $0.00; a list that never loaded is unknown. */
+const isTotalKnown = computed(() => balancesState.value === "loaded")
 
 const tokenBalanceService = new TokenBalanceServiceClient()
 tokenBalanceService.onTokenBalanceAdded.add(onBalanceAdded)
@@ -152,42 +189,60 @@ function onReconnected() {
 	if (connectsSeen > 1) void fetchTokenBalances()
 }
 
+/** A rejected snapshot is retried once on a timer; after that a reconnect or a scope change retries. */
+const BALANCES_RETRY_MS = 2_000
+let retryTimer
 // A fetch for one scope may resolve after the user moved on; only the latest request may land,
-// and a snapshot overtaken by a live event is refetched rather than applied.
+// and a snapshot overtaken by a live event is refetched rather than applied. A refetch inside a
+// scope keeps the rows and the state it has: `enterScope` is what clears them.
 let fetchGeneration = 0
-async function fetchTokenBalances() {
+async function fetchTokenBalances(isTimedRetry = false) {
 	const generation = ++fetchGeneration
+	clearTimeout(retryTimer)
 	const address = appStore.account?.address
 	const chainId = appStore.network?.chainId
-	tokenBalances.value = []
-	isLoaded.value = false
 	fetchDirty = false
 	if (!address) {
-		isLoaded.value = true
+		tokenBalances.value = []
+		balancesState.value = "loaded"
 		return
 	}
 	let rows
 	try {
 		rows = await tokenBalanceService.getTokenBalances(undefined, address)
 	} catch {
+		if (generation !== fetchGeneration) return
+		if (balancesState.value !== "loaded") balancesState.value = "unavailable"
+		if (!isTimedRetry) retryTimer = setTimeout(() => void fetchTokenBalances(true), BALANCES_RETRY_MS)
 		return
 	}
 	if (generation !== fetchGeneration) return
 	if (fetchDirty) return fetchTokenBalances()
 	tokenBalances.value = forChain(rows, chainId)
-	isLoaded.value = true
+	balancesState.value = "loaded"
+}
+
+/** A new scope owes nothing to the previous one: its rows, its loaded state and its cap all restart. */
+function enterScope() {
+	tokenBalances.value = []
+	balancesState.value = "loading"
+	restartCap()
+	return fetchTokenBalances()
 }
 
 watch(
 	() => [appStore.account?.address, appStore.network?.chainId],
 	async () => {
-		await fetchTokenBalances()
+		await enterScope()
 	},
 )
 onMounted(async () => {
-	await fetchTokenBalances()
+	await enterScope()
 })
 onBeforeUnmount(() => {
+	fetchGeneration++
+	clearTimeout(capTimer)
+	clearTimeout(retryTimer)
 	tokenBalanceService.onConnected.remove(onReconnected)
 	tokenBalanceService.disconnect()
 	prices.dispose()
@@ -204,19 +259,27 @@ onBeforeUnmount(() => {
 				v-if="tokenToDisplay || showFiatValues"
 				@click="handleTokenBalanceClick"
 				data-testid="balance-amount"
+				:aria-busy="(!tokenToDisplay && heroPending) || undefined"
 				:class="$style.balance_amount"
 			>
 				<template v-if="tokenToDisplay">
 					{{ totalTokenBalance.value }}
 					<span :class="$style.balance_symbol">{{ tokenToDisplay?.symbol }}</span>
 				</template>
-				<template v-else-if="isLoaded">{{ aggregateFiatDisplay }}</template>
+				<Skeleton v-else-if="heroPending" :width="150" :height="40" data-testid="balance-hero-loading" :class="$style.hero_skeleton" />
+				<template v-else-if="isTotalKnown">{{ aggregateFiatDisplay }}</template>
+				<!-- The balance list could not be read at all: unknown, which is not zero. -->
+				<span v-else data-testid="balance-hero-unknown">—</span>
 			</div>
 
 			<div v-if="tokenToDisplay && displayedTokenFiat" data-testid="balance-fiat" :class="$style.fiat_line">
 				{{ displayedTokenFiat }}
 			</div>
-			<div v-if="!tokenToDisplay && isLoaded && isAggregatePartial" data-testid="balance-fiat-partial" :class="$style.fiat_partial">
+			<div
+				v-if="!tokenToDisplay && !heroPending && isTotalKnown && isAggregatePartial"
+				data-testid="balance-fiat-partial"
+				:class="$style.fiat_partial"
+			>
 				priced assets only
 			</div>
 
@@ -277,6 +340,11 @@ onBeforeUnmount(() => {
 .balance_symbol {
 	font-size: 24px;
 	color: var(--txt-tertiary);
+}
+
+/* Centred on the figure's own line box, so the section does not move when the number lands. */
+.hero_skeleton {
+	vertical-align: middle;
 }
 
 .fiat_line {

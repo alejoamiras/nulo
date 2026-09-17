@@ -190,7 +190,7 @@ All gates run from the repo root. "Fast layers" = `bun run lint && bun run typec
 - Tests: empty state never before both snapshots are `loaded`; balances-before-seed-status ordering; event during an in-flight snapshot refetches; a rejected fetch is `unavailable` (skeleton stays, empty state never), recovers on the timed retry and on reconnect; `ensureSeeding` re-issued on reconnect; dedupe vs real rows and vs `TokenImportRow`; ghost rows only after 300 ms; scope change resets readiness; rejected row has no button; seed row is not a link.
 - Gate: fast layers + `bun run --cwd apps/extension test src/popup src/composables/useSeedStatus` — exit 0. Layers: lint/typecheck, unit/component.
 
-**Phase 4 — hero.** Rule + 12 s cap + snapshot-reject recovery; verify I3.
+**Phase 4 ✓ — hero.** Rule + 12 s cap + snapshot-reject recovery; verify I3.
 - Tests: zero rows with a seeding entry; row at `updatedAt === 0`; failed/rejected seed does not hold; cap releases to the known aggregate; a rejection BEFORE the cap keeps the skeleton; a rejected OR still-unanswered snapshot after the cap renders `—`, never `$0.00`; a successfully loaded empty list renders `$0.00`; token-detail hero untouched.
 - Gate: fast layers + `bun run --cwd apps/extension test src/popup/components/modules/general/BalanceView` — exit 0.
 

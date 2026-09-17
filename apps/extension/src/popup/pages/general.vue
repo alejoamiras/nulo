@@ -48,7 +48,7 @@ onBeforeUnmount(() => {
 
 <template>
 	<Flex v-if="appStore.isLogined" direction="column" :class="$style.wrapper">
-		<BalanceView />
+		<BalanceView :seedEntries="seed.entries.value" :seedReady="seed.ready.value" />
 
 		<Flex direction="column" gap="16" :class="$style.content">
 			<RecoveryModeBanner />
