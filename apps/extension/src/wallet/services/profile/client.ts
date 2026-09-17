@@ -1,6 +1,6 @@
 import type { MethodsSpec, Restored, ServiceSpec } from "@/wallet/base"
 import { ServiceClient, definePassthroughsExhaustive } from "@nulo/extension-messaging/background"
-import { LoggerServiceClient } from "@/wallet/services/logger/client"
+import { documentLogger } from "@/wallet/services/logger/client"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
 import { PROFILE_SERVICE_NAME, type ProfileInfo, type Events, type Methods, type RestoreSecret } from "./spec"
@@ -20,7 +20,7 @@ export class ProfileServiceClient extends ServiceClient<Methods, Events> impleme
 	public readonly onImportedKeysDegraded = new EventHandler<ProfileInfo>()
 
 	public constructor(name?: string) {
-		super(PROFILE_SERVICE_NAME, new LoggerServiceClient(), name)
+		super(PROFILE_SERVICE_NAME, documentLogger(), name)
 	}
 
 	/** Declared here (and re-installed by the exhaustive list below) because the base client's

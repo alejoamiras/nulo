@@ -1,6 +1,6 @@
 import type { MethodsSpec, ServiceSpec } from "@/wallet/base"
 import { ServiceClient, definePassthroughsExhaustive } from "@nulo/extension-messaging/background"
-import { LoggerServiceClient } from "@/wallet/services/logger/client"
+import { documentLogger } from "@/wallet/services/logger/client"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { type Events, type Methods, type Task, TASK_SERVICE_NAME } from "./spec"
 
@@ -17,7 +17,7 @@ export class TaskServiceClient extends ServiceClient<Methods, Events> implements
 	public readonly onTaskDeleted = new EventHandler<Task>()
 
 	public constructor(name?: string) {
-		super(TASK_SERVICE_NAME, new LoggerServiceClient(), name)
+		super(TASK_SERVICE_NAME, documentLogger(), name)
 	}
 }
 // Every client method is a pure request-passthrough; the installer's

@@ -1,5 +1,16 @@
 import { afterEach, beforeEach, type Mock, vi } from "vitest"
 
+// Every service client logs through the document's one logger client, which would outlive each
+// test's `chrome` stub below and keep posting later tests' lines into the first test's fake port
+// (each line holding a timeout timer). The stub also refuses a second port of the same name, and
+// the port client retries a failed connect every second forever — so a second real logger left a
+// retry loop ticking for the rest of the file. A silent logger removes both; the two tests that
+// observe logger traffic `vi.unmock` this module and reset the shared client per test.
+vi.mock("@/wallet/services/logger/client", async (importOriginal) => ({
+	...(await importOriginal<Record<string, unknown>>()),
+	documentLogger: () => ({ log: () => {} }),
+}))
+
 // The wallet logger prints via `console._<level>` (see
 // src/wallet/logger/utils.ts). Those aliases are installed by
 // src/utils/console-sniffer at SW / popup boot; unit tests don't import that

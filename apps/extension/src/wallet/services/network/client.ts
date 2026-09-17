@@ -2,7 +2,7 @@ import type { ServiceSpec } from "@/wallet/base"
 import { ServiceClient } from "@nulo/extension-messaging/background"
 import { validateParams, validateResult } from "@nulo/extension-messaging/zod"
 import type { ZodType } from "zod"
-import { LoggerServiceClient } from "@/wallet/services/logger/client"
+import { documentLogger } from "@/wallet/services/logger/client"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import {
 	type Events,
@@ -30,7 +30,7 @@ export class NetworkServiceClient extends ServiceClient<Methods, Events> impleme
 	public readonly onChainPurged = new EventHandler<{ profileId: string; chainId: number }>()
 
 	public constructor(name?: string) {
-		super(NETWORK_SERVICE_NAME, new LoggerServiceClient(), name)
+		super(NETWORK_SERVICE_NAME, documentLogger(), name)
 	}
 
 	/** Validates outgoing params and the incoming result against the method's schema; the raw

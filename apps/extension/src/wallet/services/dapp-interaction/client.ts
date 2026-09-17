@@ -1,6 +1,6 @@
 import type { MethodsSpec, ServiceSpec } from "@/wallet/base"
 import { ServiceClient, definePassthroughsExhaustive } from "@nulo/extension-messaging/background"
-import { LoggerServiceClient } from "@/wallet/services/logger/client"
+import { documentLogger } from "@/wallet/services/logger/client"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { DAPP_INTERACTION_SERVICE_NAME, type Events, type Methods } from "./spec"
 
@@ -15,7 +15,7 @@ export class DappInteractionServiceClient extends ServiceClient<Methods, Events>
 	public readonly onInteractionCancelled = new EventHandler<string>()
 
 	public constructor(name?: string) {
-		super(DAPP_INTERACTION_SERVICE_NAME, new LoggerServiceClient(), name)
+		super(DAPP_INTERACTION_SERVICE_NAME, documentLogger(), name)
 	}
 }
 // Every client method is a pure request-passthrough; the installer's

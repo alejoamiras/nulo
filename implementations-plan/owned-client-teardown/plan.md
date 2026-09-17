@@ -514,7 +514,7 @@ One arc, one PR. Each phase ends with its validation gate; a phase is ✓ only w
 Run every command from the worktree root. After each step inside a phase, run `bun run lint` and
 the touched test file; run full unit suites, builds and e2e alone, never beside each other or codex.
 
-### Phase 1 — prove the leak
+### Phase 1 — prove the leak ✓
 
 1. Write `apps/extension/src/wallet/services/logger/client.ports.test.ts` with the counting stub and
    S1–S2 (proof mechanics above; they need only today's service clients), asserting the fixed
@@ -531,7 +531,7 @@ the touched test file; run full unit suites, builds and e2e alone, never beside 
 - `bun run lint` exits 0.
 - `lessons/phase-1.md` holds step 2's red output.
 
-### Phase 2 — one logger per document
+### Phase 2 — one logger per document ✓
 
 1. `logger/client.ts` as in Key interface.
 2. The 20 service-client constructors, `console-forwarding.ts` (void return, `"popup" | "onboarding"`),

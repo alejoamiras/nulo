@@ -4,20 +4,19 @@ import { LOGGER_SERVICE_NAME, type Methods } from "./spec"
 
 export * from "./spec"
 
-/** LoggerServiceClient implements the pure `ILogger` port. The transport
- *  `Methods` shape is wider (includes `context`); the client binds its
- *  ctor-provided context inside `log()`. We intentionally don't declare
- *  `implements ServiceSpec<Methods>` because the narrower `log` signature
- *  doesn't satisfy the wider transport spec. */
-export class LoggerServiceClient extends ServiceClient<Methods> implements ILogger {
-	private readonly context?: string
+/** The `context` tags extension documents put on their log lines. */
+export type DocumentLogContext = "popup" | "onboarding" | "offscreen"
 
-	public constructor(context?: string) {
+/** The document's one port to the logger service. Not exported: a client that built its own
+ *  would hold a port nothing closes (`ServiceClient.disconnect()` closes the client's port and
+ *  then logs through the logger), one per client for the document's life. We intentionally
+ *  don't declare `implements ServiceSpec<Methods>`: `log` here takes the context per call. */
+class LoggerServiceClient extends ServiceClient<Methods> {
+	public constructor() {
 		super(LOGGER_SERVICE_NAME, new DummyLogger())
-		this.context = context
 	}
 
-	public log(source: string, level: LogLevel, ...data: unknown[]) {
+	public log(context: DocumentLogContext | undefined, source: string, level: LogLevel, ...data: unknown[]) {
 		// Redact HERE, before the RPC serializes.
 		//
 		// `request()` runs `jsonSanitize` over its params, which flattens an Error to a plain
@@ -31,6 +30,28 @@ export class LoggerServiceClient extends ServiceClient<Methods> implements ILogg
 		// client, and redacting there would rewrite live `RestoreSecret` params and break profile
 		// restore. The SW re-trims on arrival, which is harmless — trim is stable over its own
 		// output.
-		return this.request("log", this.context, source, level, ...(trim(data) as unknown[]))
+		return this.request("log", context, source, level, ...(trim(data) as unknown[]))
 	}
+}
+
+let shared: LoggerServiceClient | undefined
+
+/**
+ * This document's logger, tagging its lines `context`. Every view shares one client whose port
+ * the first line opens and Chrome closes with the document; callers never disconnect it. The
+ * request promise is returned (a rejected line still reaches the page's unhandled-rejection
+ * handler) but no caller is expected to await it.
+ */
+export function documentLogger(context?: DocumentLogContext): ILogger {
+	return {
+		log(source, level, ...data) {
+			shared ??= new LoggerServiceClient()
+			return shared.log(context, source, level, ...data)
+		},
+	}
+}
+
+/** Forgets the shared client without disconnecting it, for tests that assert on logger traffic. */
+export function _resetDocumentLoggerForTests(): void {
+	shared = undefined
 }

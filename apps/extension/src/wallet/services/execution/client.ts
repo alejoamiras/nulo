@@ -1,6 +1,6 @@
 import type { MethodsSpec, ServiceSpec } from "@/wallet/base"
 import { ServiceClient, definePassthroughsExhaustive } from "@nulo/extension-messaging/background"
-import { LoggerServiceClient } from "@/wallet/services/logger/client"
+import { documentLogger } from "@/wallet/services/logger/client"
 import { EXECUTION_SERVICE_NAME, type Methods } from "./spec"
 
 export * from "./spec"
@@ -12,7 +12,7 @@ export interface ExecutionServiceClient extends MethodsSpec<Methods> {}
 // biome-ignore lint/suspicious/noUnsafeDeclarationMerging: the merged interface's methods ARE installed — at runtime by definePassthroughsExhaustive below, whose signature proves the name list covers every Methods key, so no advertised method is missing.
 export class ExecutionServiceClient extends ServiceClient<Methods> implements ServiceSpec<Methods> {
 	public constructor(name?: string) {
-		super(EXECUTION_SERVICE_NAME, new LoggerServiceClient(), name)
+		super(EXECUTION_SERVICE_NAME, documentLogger(), name)
 	}
 }
 // Every client method is a pure request-passthrough; the installer's

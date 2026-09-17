@@ -7,7 +7,7 @@ export * from "./spec"
 
 /** LoggerService implements the RPC surface only (wider signature with `context`).
  *  Callers that want the pure `ILogger` port (narrow `(source, level, ...data) => void`)
- *  should use `LoggerServiceClient`, which binds its ctor-provided context. */
+ *  use `documentLogger(context)`, a view over the document's one logger client. */
 export class LoggerService extends Service<Methods> implements ServiceSpec<Methods> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()("log")
 	public static name = LOGGER_SERVICE_NAME

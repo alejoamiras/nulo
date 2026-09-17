@@ -81,6 +81,8 @@ Base classes:
 - `packages/extension-messaging/src/background/client.ts` — client-side base.
 - `packages/extension-messaging/src/messages.ts` — wire schema.
 
+Every service client in a document logs through that document's one logger client (`documentLogger(context)` in `apps/extension/src/wallet/services/logger/client.ts`, a context-tagged view over a module-private port client): a client that built its own logger would hold a `logger` port nothing closes, since `disconnect()` closes only the client's own port and then logs through the logger.
+
 For the service worker → offscreen direction, the same pattern repeats with `OffscreenService` / its client (`packages/extension-messaging/src/offscreen/`) on top of `chrome.runtime.sendMessage`. The offscreen-side telemetry sidecar tracks per-request lifecycle so terminal-state events fire even when ports drop.
 
 `Error` instances are reconstructed across the wire — comparing error messages on the client must use `err instanceof Error && err.message === "..."`, not `err === "..."`.

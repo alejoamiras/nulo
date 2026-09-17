@@ -1,6 +1,6 @@
 import type { MethodsSpec, ServiceSpec } from "@/wallet/base"
 import { ServiceClient, definePassthroughsExhaustive } from "@nulo/extension-messaging/background"
-import { LoggerServiceClient } from "@/wallet/services/logger/client"
+import { documentLogger } from "@/wallet/services/logger/client"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { type Events, type Methods, TOKEN_SERVICE_NAME, type TokenInfo, type TokenDeleted } from "./spec"
 
@@ -17,7 +17,7 @@ export class TokenServiceClient extends ServiceClient<Methods, Events> implement
 	public readonly onTokenDeleted = new EventHandler<TokenDeleted>()
 
 	public constructor(name?: string) {
-		super(TOKEN_SERVICE_NAME, new LoggerServiceClient(), name)
+		super(TOKEN_SERVICE_NAME, documentLogger(), name)
 	}
 }
 // Every client method is a pure request-passthrough; the installer's

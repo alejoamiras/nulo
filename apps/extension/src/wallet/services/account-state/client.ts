@@ -2,7 +2,7 @@ import type { MethodsSpec, ServiceSpec } from "@/wallet/base"
 import { ServiceClient, definePassthroughsExhaustive } from "@nulo/extension-messaging/background"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { ACCOUNT_STATE_SERVICE_NAME, type Events, type Methods } from "./spec"
-import { LoggerServiceClient } from "../logger/client"
+import { documentLogger } from "../logger/client"
 
 export * from "./spec"
 
@@ -16,7 +16,7 @@ export class AccountStateServiceClient extends ServiceClient<Methods, Events> im
 	public readonly onSenderDeleted = new EventHandler<string>()
 
 	public constructor(name?: string) {
-		super(ACCOUNT_STATE_SERVICE_NAME, new LoggerServiceClient(), name)
+		super(ACCOUNT_STATE_SERVICE_NAME, documentLogger(), name)
 	}
 }
 // Every client method is a pure request-passthrough; the installer's
