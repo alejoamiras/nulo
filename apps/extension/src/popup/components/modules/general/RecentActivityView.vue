@@ -150,7 +150,15 @@ const tokens = ref([])
 const tokenService = new TokenServiceClient()
 async function loadTokens(isCurrent = tokensFence.begin()) {
 	if (!appStore.profile || !appStore.network) return
-	const fetched = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
+	let fetched
+	try {
+		fetched = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
+	} catch (error) {
+		// A port that cannot open rejects at once. The map is a label lookup: keep what we have so a
+		// mount-time failure cannot abort the rest of mount, and a fire-and-forget reload cannot go unhandled.
+		console.debug("recent activity token lookup failed", { error })
+		return
+	}
 	// A deferred fetch for the OLD scope must not overwrite the new scope's map.
 	if (!isCurrent()) return
 	tokens.value = fetched

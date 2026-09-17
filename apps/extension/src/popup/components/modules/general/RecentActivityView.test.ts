@@ -605,6 +605,17 @@ describe("RecentActivityView — stalled incoming scan line", () => {
 		expect(retry(w).text()).toBe("Retry")
 	})
 
+	test("a token lookup that rejects at mount does not abort the rest of mount — the health is still read", async () => {
+		H.getTokens.mockRejectedValue(new Error("port cannot open"))
+		H.getIncomingSyncHealth.mockResolvedValue({ stalled: true, since: 1 })
+
+		const w = mountFeed()
+		await flushPromises()
+
+		expect(H.getIncomingSyncHealth).toHaveBeenCalledWith("net-1")
+		expect(line(w).exists()).toBe(true)
+	})
+
 	test("Retry asks the worker to scan the active network, then the line follows the fresh health", async () => {
 		H.getIncomingSyncHealth.mockResolvedValue({ stalled: true, since: 1 })
 		const w = mountFeed()
