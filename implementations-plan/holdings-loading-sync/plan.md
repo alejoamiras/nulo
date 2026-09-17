@@ -216,7 +216,7 @@ Arc 1 boundary → quality loop → `gh stack add`.
 **Phase 9 ✓ — stalled line.** `useIncomingSyncHealth` (≥ 10 cases), `RecentActivityView`, screenshot.
 - Gate: fast layers + `bun run --cwd apps/extension test src/popup/components/modules/general/RecentActivityView src/composables/useIncomingSyncHealth` — exit 0.
 
-**Phase 10 — e2e + docs.** The stalled line stays pinned at unit/component level (a node outage is not deterministic in e2e); the network suite proves no regression. Docs: `ARCHITECTURE.md` (scan outcomes/health, one metadata read), `implementations-plan/index.md` (+ the proposed `incoming-tip-first-scan` follow-up).
+**Phase 10 ✓ — e2e + docs.** The stalled line stays pinned at unit/component level (a node outage is not deterministic in e2e); the network suite proves no regression. Docs: `ARCHITECTURE.md` (scan outcomes/health, one metadata read), `implementations-plan/index.md` (+ the proposed `incoming-tip-first-scan` follow-up).
 - Gate: `bun run audit:vue` exit 0; `bun run test:e2e` green; `bun run e2e:agent` complete network suite green; `bun run baseline:rescore` unchanged (no new complexity acceptances).
 
 ## Delivery
