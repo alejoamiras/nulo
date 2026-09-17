@@ -32,6 +32,7 @@ export { default as Input } from "./ui/Input.vue"
 export { default as LoadingState } from "./ui/LoadingState.vue"
 export { default as Popover } from "./ui/Popover.vue"
 export { default as SectionLabel } from "./ui/SectionLabel.vue"
+export { default as Skeleton } from "./ui/Skeleton.vue"
 export { default as Spinner } from "./ui/Spinner.vue"
 /** Router-free base; the extension keeps a local <SubPageHeader> wrapper that injects useRouter. */
 export { default as SubPageHeaderBase } from "./ui/SubPageHeaderBase.vue"

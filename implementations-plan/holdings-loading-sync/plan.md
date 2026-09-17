@@ -179,7 +179,7 @@ All gates run from the repo root. "Fast layers" = `bun run lint && bun run typec
 
 ### Arc 1 — loading states + seed status
 
-**Phase 1 — `Skeleton`.** Primitive (≥ 5 cases), resolver entry, `GasBalanceCard` adoption (60×12 parity).
+**Phase 1 ✓ — `Skeleton`.** Primitive (≥ 5 cases), resolver entry, `GasBalanceCard` adoption (60×12 parity).
 - Gate: fast layers + `bun run --cwd packages/design test` + `bun run --cwd apps/extension test src/popup/components/modules/general/GasBalanceCard` — exit 0. Layers: lint/typecheck, unit.
 
 **Phase 2 — seed status surface.** `displayName`; marker hardening + `rejectedAtVersion`; `inFlight`; pure `getSeedStatus`; latched `ensureSeeding`; fenced `retrySeed`; change-only event; log normalization.

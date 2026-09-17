@@ -14,6 +14,7 @@ import Input from "./ui/Input.vue"
 import LoadingState from "./ui/LoadingState.vue"
 import Popover from "./ui/Popover.vue"
 import SectionLabel from "./ui/SectionLabel.vue"
+import Skeleton from "./ui/Skeleton.vue"
 import Spinner from "./ui/Spinner.vue"
 import SubPageHeaderBase from "./ui/SubPageHeaderBase.vue"
 import ToastManagerBase from "./ui/ToastManagerBase.vue"
@@ -37,6 +38,7 @@ const cases: Array<[string, Component, Record<string, unknown>]> = [
 	["SectionLabel", SectionLabel, { label: "X" }],
 	["Toggle", Toggle, {}],
 	["Spinner", Spinner, {}],
+	["Skeleton", Skeleton, {}],
 	// isLoading:true exercises Banner's <Spinner> branch — the missing-import trap mount-all guards.
 	["Banner", Banner, { isLoading: true }],
 	["LoadingState", LoadingState, { label: "Loading" }],
