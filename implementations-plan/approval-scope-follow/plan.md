@@ -955,7 +955,7 @@ no controller.
 - Pass: all exit 0.
 - Layers: typecheck · lint · unit · e2e
 
-### Phase 6 — close out
+### Phase 6 — close out ✓
 
 Regression sweep, not a feature gate — but required before the PR.
 
