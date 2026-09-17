@@ -22,7 +22,7 @@ where they drive a design decision.
 
 ## Facts the planner re-verified
 
-- `apps/extension/src` has 28 explicit `.connect()` calls outside tests; 8 are `await`ed, the rest are bare
+- `apps/extension/src` has 27 executable `.connect()` calls outside tests (a 28th grep hit is prose in `usePopupEntity.ts:58`); 8 are `await`ed, 19 are bare
   floating calls (`git grep '\.connect()'` / `'await .*\.connect()'`). A `connect()` that rejects would turn
   every bare call into an unhandled rejection in the one case it fails.
 - `request()` (`base-client.ts:122-123`) calls `ensureTransportReady()` before creating the pending entry, so
