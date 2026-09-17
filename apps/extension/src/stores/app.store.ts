@@ -90,6 +90,7 @@ export const useAppStore = defineStore("app", () => {
 		hasInFlightSend: inFlight.hasInFlightSend,
 		approvedSendsInFlight: inFlight.approvedSendsInFlight,
 		refreshInFlight: inFlight.refreshInFlight,
+		resetInFlight: inFlight.resetInFlight,
 		commitScopeChange: inFlight.commitScopeChange,
 		/** @deprecated Prefer `commitScopeChange`; an async apply reopens the race. */
 		withScopeChangeAllowed: inFlight.commitScopeChange,
@@ -145,6 +146,16 @@ interface InFlightState {
 	/** One client for the whole app; components read `hasInFlightSend`. */
 	journal: OperationJournalServiceClient
 	connected: boolean
+	/** Bumped when the cache is discarded (a lock, an unlock); a read finishing under an older
+	 *  one writes nothing, success or error. */
+	generation: number
+	/** Set by the lock's reset, cleared when the unlock read starts: a journal event from before
+	 *  the lock, delivered after it, would refill the emptied cache. */
+	suspended: boolean
+	/** Counts the events applied to the rows. A read that sees it move was answered from a
+	 *  snapshot older than the cache: the worker snapshots storage, an update lands, its event
+	 *  arrives first on the same port, and the reply would put the older row back. */
+	revision: number
 }
 
 /**
@@ -155,6 +166,10 @@ interface InFlightState {
  * then never look again — which fails OPEN exactly when a send is running.
  * One subscription, refreshed whenever the profile changes or the service
  * reconnects, and closed until it has an answer.
+ *
+ * A lock cancels the running sends but changes no profile, and its cancel
+ * events never reach the locked popup, so the lock and unlock paths discard
+ * the cache explicitly (`resetInFlight`, the invalidating refresh).
  */
 function createInFlightTracker(scope: ScopeRefs) {
 	const state: InFlightState = {
@@ -162,6 +177,9 @@ function createInFlightTracker(scope: ScopeRefs) {
 		ready: ref(false),
 		journal: new OperationJournalServiceClient(),
 		connected: false,
+		generation: 0,
+		suspended: false,
+		revision: 0,
 	}
 	const { profile, account, network } = scope
 
@@ -178,7 +196,25 @@ function createInFlightTracker(scope: ScopeRefs) {
 	/** Approved sends running on any account of the profile: what a lock would cancel. */
 	const approvedSendsInFlight = computed(() => countApprovedSendsInFlight(state.ops.value, profile.value?.id))
 
-	const refreshInFlight = () => refreshInFlightOps(state, profile)
+	/** Re-read the journal. With `invalidate`, the cache is stale: the guard closes until this
+	 *  read answers, reads already in flight write nothing, and a snapshot an event overtook is
+	 *  read again — a `submitting` send outlives the lock and can end during the unlock read. */
+	const refreshInFlight = (options?: { invalidate?: boolean }) => {
+		if (!options?.invalidate) return refreshInFlightOps(state, profile)
+		state.generation++
+		state.suspended = false
+		state.ready.value = false
+		return refreshInFlightOps(state, profile, { settle: true })
+	}
+
+	/** A locked popup has nothing in flight to protect, so the cache empties and stays READY:
+	 *  closed would refuse the lock screen's profile picker. */
+	const resetInFlight = () => {
+		state.generation++
+		state.suspended = true
+		state.ops.value = []
+		state.ready.value = true
+	}
 
 	// The answer belongs to a profile, so it is invalid the moment that changes.
 	watch(
@@ -218,10 +254,14 @@ function createInFlightTracker(scope: ScopeRefs) {
 		return true
 	}
 
-	return { hasInFlightSend, approvedSendsInFlight, refreshInFlight, commitScopeChange }
+	return { hasInFlightSend, approvedSendsInFlight, refreshInFlight, resetInFlight, commitScopeChange }
 }
 
-async function refreshInFlightOps(state: InFlightState, profile: Ref<ProfileInfo | undefined>): Promise<void> {
+async function refreshInFlightOps(
+	state: InFlightState,
+	profile: Ref<ProfileInfo | undefined>,
+	options?: { settle?: boolean },
+): Promise<void> {
 	const profileId = profile.value?.id
 	if (!profileId) {
 		state.ops.value = []
@@ -229,48 +269,67 @@ async function refreshInFlightOps(state: InFlightState, profile: Ref<ProfileInfo
 		state.ready.value = true
 		return
 	}
+	const generation = state.generation
+	// A slow read for a previous profile landing late would replace the live
+	// profile's operations and let a switch through mid-send.
+	const current = () => state.generation === generation && profile.value?.id === profileId
 	if (!state.connected) {
 		state.connected = true
-		const upsertInFlight = (op: OperationRecord) => {
-			const idx = state.ops.value.findIndex((row) => row.id === op.id)
-			if (idx === -1) state.ops.value.push(op)
-			else state.ops.value.splice(idx, 1, op)
-		}
-		const dropInFlight = (op: OperationRecord) => {
-			state.ops.value = state.ops.value.filter((row) => row.id !== op.id)
-		}
-		state.journal.onOperationAdded.add(upsertInFlight)
-		state.journal.onOperationUpdated.add(upsertInFlight)
-		state.journal.onOperationDeleted.add(dropInFlight)
-		// A reconnect can drop events, so re-read rather than trusting the cache.
-		state.journal.onConnected?.add(() => void refreshInFlightOps(state, profile))
+		subscribeInFlight(state, profile)
 		try {
 			await state.journal.connect()
 		} catch {
-			state.ops.value = []
-			state.ready.value = true
+			if (current()) publishInFlight(state, [])
 			return
 		}
 	}
-	let rows: OperationRecord[]
+	// Each pass is one round trip, so a journal busier than the read is the only way to loop.
+	for (;;) {
+		const revision = state.revision
+		const rows = await readInFlightRows(state, profileId)
+		if (!current()) return
+		if (options?.settle && state.revision !== revision) continue
+		publishInFlight(state, rows)
+		return
+	}
+}
+
+function publishInFlight(state: InFlightState, rows: OperationRecord[]): void {
+	state.ops.value = rows
+	state.ready.value = true
+}
+
+function subscribeInFlight(state: InFlightState, profile: Ref<ProfileInfo | undefined>): void {
+	const upsertInFlight = (op: OperationRecord) => {
+		if (state.suspended) return
+		state.revision++
+		const idx = state.ops.value.findIndex((row) => row.id === op.id)
+		if (idx === -1) state.ops.value.push(op)
+		else state.ops.value.splice(idx, 1, op)
+	}
+	const dropInFlight = (op: OperationRecord) => {
+		if (state.suspended) return
+		state.revision++
+		state.ops.value = state.ops.value.filter((row) => row.id !== op.id)
+	}
+	state.journal.onOperationAdded.add(upsertInFlight)
+	state.journal.onOperationUpdated.add(upsertInFlight)
+	state.journal.onOperationDeleted.add(dropInFlight)
+	// A reconnect can drop events, so re-read rather than trusting the cache.
+	state.journal.onConnected?.add(() => void refreshInFlightOps(state, profile))
+}
+
+async function readInFlightRows(state: InFlightState, profileId: string): Promise<OperationRecord[]> {
 	try {
-		rows = await state.journal.getOperations({ profileId })
+		return await state.journal.getOperations({ profileId })
 	} catch {
 		// A journal read can fail transiently (service worker restarting). Not
 		// being able to ask must not make every scope change throw — the caller
 		// would surface that as an outright failure to switch. Treat it as "no
 		// sends known", which is what the pre-guard behavior was; the executor
 		// still binds its own account explicitly.
-		state.ops.value = []
-		state.ready.value = true
-		return
+		return []
 	}
-	// Discard a response for a profile that is no longer current: a slow read
-	// for the previous one landing late would replace the live profile's
-	// operations and let a switch through mid-send.
-	if (profile.value?.id !== profileId) return
-	state.ops.value = rows
-	state.ready.value = true
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -298,7 +357,7 @@ interface AccountActionDeps extends ScopeRefs {
  * loser's account after the winner's — and instead of poisoning the global
  * `nulo:ui:activeAccount` key, which survives into the next bootstrap.
  * The epoch is the load-bearing half: scope IDs alone are ABA-unsafe (an
- * A→B→A flip makes the parked run's capture match again — codex audit); any
+ * A→B→A flip makes the parked run's capture match again); any
  * LATER entry into this action supersedes every parked one. The id checks
  * still catch a flip whose own activation hasn't re-entered this action yet.
  * `commitScopeChange` cannot express either: it guards in-flight SENDS,
