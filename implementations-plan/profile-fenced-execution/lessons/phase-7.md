@@ -275,3 +275,10 @@ send reaches `executeOperations` without a fence. It qualified one inference, re
 follow-up outside this plan: `aztec_createAuthWit` does not read the fence and signs after awaited
 work, so authwit signing, popup-approved or silent, is not bound to a session serial. That predates
 this change, and putting authwits in the set would only bring the dispatcher failure back.
+
+Round 2, resumed after arc 2 was rebased onto the fix (`c208ae47`). Verdict line: "Approve — no code
+regression found; one nonblocking documentation correction (high confidence)." The range-diff shows
+every arc 2 commit unchanged. `Header.vue`'s lock and `getSessionHandle` dispatch nothing. The
+correction is valid. The README said the dispatcher's calls "carry no fence and read none", but a
+standard `simulateTx` and a `profileTx` capture their own fence at dispatch (`view-executor.ts`).
+The sentence now says those calls omit `authorizedFence` and their dispatch arms never consume it.

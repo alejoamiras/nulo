@@ -61,9 +61,9 @@ profile nor A → B → A matches an older fence.
 - **Two entry contracts.** `executeOperations` throws for a DAPP-origin batch holding a send or a
   token commit without `authorizedFence`, since a capture at dispatch would bind whatever session
   is live when the operation runs. The wallet-sdk dispatcher's reads, registrations, simulations
-  and silent authwits carry no fence and read none. `executeSendTransaction` captures when `fence`
-  is absent, which is correct only for a caller that awaited nothing between the user's action
-  and the call.
+  and silent authwits omit `authorizedFence`, and their dispatch arms never consume it.
+  `executeSendTransaction` captures when `fence` is absent, which is correct only for a caller
+  that awaited nothing between the user's action and the call.
 - **`assertFence`** (`ProfileService`, awaited under the facade lock) throws `SessionEndedError`
   unless the fence's session is the live one, then the deletion error if a delete has begun.
   Sites: `acquireSlot` before the mutex key (built from the fence), both builders, both
