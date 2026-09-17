@@ -182,3 +182,18 @@ makes it worse, and called the workaround (close and reopen the popup) accurate.
 
 Gate: `bunx biome check` on the five files exit 0; `bun --bun vitest run src/wallet/services/execution
 src/utils` exit 0 (92 files, 1321 tests). Comment-only change.
+
+### Round 2 — approve: no new material findings; one comment correction
+
+Codex resumed on `9808944b..a6e8cc31`. Verdict line: "Approve — no material cross-arc problem remains
+identified." followed by "No new material findings." It confirmed each rewritten comment against the
+code, and agreed that leaving the `in-flight-send.ts` header is not material for this change: an
+account or network switch inside one session does not end the session, so the fence does not see
+the switches that guard blocks, and the header's overbroad "never stuck" belongs with the freeze's
+owner.
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | The shortened reaped-row comment in `claim-helper.ts` overstates what the branch knows: `getOperation(...).catch(() => null)` also sends an unreadable row there, so neither "reaped" nor "no cancel could have aborted it" follows | Accepted, verified. The comment now states only the cleanup reason: the fallback files under a new id, so the old id's controller entry would leak |
+
+Resumed once more on the correction, so the last pass reviews the code as delivered.

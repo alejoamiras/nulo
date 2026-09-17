@@ -78,9 +78,8 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 
 	let record = await operationJournal.getOperation(queuedJournalId).catch(() => null)
 	if (!record) {
-		// Reaped (boot sweep or staleness GC). A pre-acquire controller under the gone id is dropped
-		// so it does not leak; no cancel could have aborted it, since a cancel transitions the row before
-		// it aborts.
+		// Reaped or unreadable. The fallback files under a new id, so the pre-acquire controller's
+		// entry under the old id would otherwise leak.
 		if (reuseController) deps.deleteController(queuedJournalId)
 		logger?.debug(`Queued record ${queuedJournalId} not found; creating new in-flight record`)
 		return createAndRegisterFresh(deps, input)
