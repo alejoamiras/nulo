@@ -435,6 +435,23 @@ describe("BalanceView — Home hero while the total is still moving", () => {
 		expect(wrapper.find('[data-testid="balance-hero-unknown"]').exists()).toBe(true)
 	})
 
+	test("a profile-only switch (same address, same chain) restarts the wait too", async () => {
+		const { wrapper, appStore } = await mountView()
+		fetchRows = () => new Promise(() => {})
+		appStore.profile = { id: "p-other" } as never
+		await flushPromises()
+		expect(isSkeleton(wrapper)).toBe(true)
+	})
+
+	test("a default still listed as seeding stops holding the figure once its own row has landed", async () => {
+		const { wrapper } = await mountView({
+			seedEntries: [{ ...seedEntry("seeding"), contract: "0xUNMAPPED" }],
+			seedReady: true,
+		})
+		expect(isSkeleton(wrapper)).toBe(false)
+		expect(amount(wrapper).text()).toContain("$1,249.82")
+	})
+
 	test("the token page's hero never waits on any of this", async () => {
 		const tokenBalance = { ...SEED[0], updatedAt: 0 }
 		const { wrapper } = await mountView({ tokenBalance, seedEntries: [seedEntry("seeding")], seedReady: false })

@@ -7,6 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { fakeBrowser } from "@webext-core/fake-browser"
+import { LogLevel } from "@nulo/wallet-core/logger"
 import { PinMismatchError, SEED_ATTEMPT_CAP, type SeedPreview, deriveSeedStatus } from "./seeder"
 import { CHAIN_ID, CONTRACT, KEY, SEED, disposeSeeders, goodPreview, makeSeeder, readMarker, writeMarker } from "./seeder.harness"
 
@@ -16,7 +17,8 @@ const rpcDown = () =>
 		throw new Error("rpc down")
 	})
 const fakeClock = () => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
-const statusOf = async (seeder: { getStatus(): Promise<{ status: string }[]> }) => (await seeder.getStatus()).map((e) => e.status)
+const entriesOf = async (seeder: { getStatus(): Promise<{ entries: { status: string }[] }> }) => (await seeder.getStatus()).entries
+const statusOf = async (seeder: Parameters<typeof entriesOf>[0]) => (await entriesOf(seeder)).map((e) => e.status)
 
 /** A preview that stays pending until `release` is called. */
 function heldPreview() {
@@ -55,11 +57,11 @@ describe("seed status — derivation", () => {
 
 	test("getStatus carries the compiled-in literals and omits settled defaults", async () => {
 		const { seeder } = makeSeeder()
-		expect(await seeder.getStatus()).toEqual([
+		expect(await entriesOf(seeder)).toEqual([
 			{ chainId: CHAIN_ID, contract: CONTRACT, symbol: "cUSD", displayName: "Compressed USD", status: "pending" },
 		])
 		await seeder.run()
-		expect(await seeder.getStatus()).toEqual([])
+		expect(await entriesOf(seeder)).toEqual([])
 	})
 
 	test("hostile marker fields drop the entry (→ pending) — except a tombstone, which always survives", async () => {
@@ -78,14 +80,26 @@ describe("seed status — derivation", () => {
 			expect(await statusOf(seeder)).toEqual(["pending"])
 		}
 		await writeMarker({ [KEY]: { attempts: "junk", nextAttemptAt: -5, outcome: "deleted" } })
-		expect(await seeder.getStatus()).toEqual([])
+		expect(await entriesOf(seeder)).toEqual([])
 	})
 
-	test("a far-future nextAttemptAt is ignored, so it cannot strand the seed as pending", async () => {
+	test("a far-future nextAttemptAt reads as due now: a fresh service worker's resume alone recovers it", async () => {
+		fakeClock()
 		const { seeder, deps } = makeSeeder()
 		await writeMarker({ [KEY]: { attempts: 1, nextAttemptAt: Date.now() + 10 * 365 * 86_400_000 } })
-		await seeder.run()
-		expect(deps.persist).toHaveBeenCalledTimes(1)
+		await seeder.resume()
+		await vi.advanceTimersByTimeAsync(1_000)
+		await vi.waitFor(() => expect(deps.persist).toHaveBeenCalledTimes(1))
+	})
+
+	test("the snapshot names the scope it was read for, and none without an active profile", async () => {
+		const { seeder } = makeSeeder()
+		expect((await seeder.getStatus()).scope).toEqual({ profileId: "p1", chainId: CHAIN_ID })
+		// The caller may name a chain the active network has not followed to yet.
+		expect(await seeder.getStatus(CHAIN_ID + 1)).toEqual({ scope: { profileId: "p1", chainId: CHAIN_ID + 1 }, entries: [] })
+		expect((await seeder.getStatus(CHAIN_ID)).entries).toHaveLength(1)
+		const locked = makeSeeder({ getActiveProfile: vi.fn(async () => undefined) })
+		expect(await locked.seeder.getStatus()).toEqual({ scope: undefined, entries: [] })
 	})
 
 	test("reading never starts, retries or records anything", async () => {
@@ -183,6 +197,25 @@ describe("continuation — a failed attempt retries by itself", () => {
 		void dead.seeder.run()
 		await vi.waitFor(() => expect(held.preview).toHaveBeenCalledTimes(1))
 		expect((await readMarker())[KEY]).toMatchObject({ attempts: 1, nextAttemptAt: expect.any(Number) })
+	})
+
+	test("a pass that throws before recording an attempt waits a minute, not a second, and logs a bounded category", async () => {
+		fakeClock()
+		const fault = new Error("row 0xabc balance 123")
+		fault.name = "payload: 0xabc"
+		const isTokenPresent = vi.fn(async (): Promise<boolean> => {
+			throw fault
+		})
+		const { seeder, logger } = makeSeeder({ isTokenPresent })
+		const logged = vi.spyOn(logger, "log")
+		await writeMarker({ [KEY]: { attempts: 1, nextAttemptAt: Date.now() - 1 } })
+		await seeder.run()
+		expect(logged).toHaveBeenCalledWith("TokenSeeder", LogLevel.Warn, "seed pass threw", { category: "unknown" })
+
+		await vi.advanceTimersByTimeAsync(59_000)
+		expect(isTokenPresent).toHaveBeenCalledTimes(1)
+		await vi.advanceTimersByTimeAsync(1_000)
+		expect(isTokenPresent).toHaveBeenCalledTimes(2)
 	})
 
 	test("a zero-account pass arms nothing — and neither does a marker that is due with no account", async () => {
@@ -323,6 +356,6 @@ describe("status event — change-only", () => {
 		const { seeder, deps } = makeSeeder()
 		await seeder.markDeletedByUser("p1", CHAIN_ID, CONTRACT)
 		expect(deps.onStatusChanged).toHaveBeenCalledTimes(1)
-		expect(await seeder.getStatus()).toEqual([])
+		expect(await entriesOf(seeder)).toEqual([])
 	})
 })

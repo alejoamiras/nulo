@@ -31,7 +31,7 @@ import {
 	type TokenInfo,
 	type TokenDeleted,
 	type SeedScope,
-	type SeedStatusEntry,
+	type SeedStatusSnapshot,
 	TOKEN_SERVICE_NAME,
 	TOKEN_STORAGE_ROOT,
 	TokenSchema,
@@ -449,9 +449,10 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		return this.seeder.run()
 	}
 
-	public async getSeedStatus(): Promise<SeedStatusEntry[]> {
+	public async getSeedStatus(chainId: number): Promise<SeedStatusSnapshot> {
 		await this.ensureInitialized()
-		return await this.seeder.getStatus()
+		if (!Number.isSafeInteger(chainId)) return { scope: undefined, entries: [] }
+		return await this.seeder.getStatus(chainId)
 	}
 
 	public async ensureSeeding(): Promise<void> {

@@ -154,6 +154,10 @@ export type SeedStatusEntry = {
 
 export type SeedScope = { profileId: string; chainId: number }
 
+/** `scope` is what the service worker read the entries for — `undefined` with no active profile or
+ *  network. An empty list proves nothing about any other scope. */
+export type SeedStatusSnapshot = { scope: SeedScope | undefined; entries: SeedStatusEntry[] }
+
 export type Methods = {
 	/**
 	 * Returns a list of tokens.
@@ -231,11 +235,13 @@ export type Methods = {
 	): { name: string; symbol: string; decimals: number; interface: TokenInterface }
 
 	/**
-	 * Default tokens of the active profile + network that are not token rows yet.
+	 * Default tokens of the active profile on `chainId` that are not token rows yet.
+	 * The caller names the chain (its view switches before the active network
+	 * follows); the profile is always the active one, reported back in `scope`.
 	 * A pure read: it never starts or retries seeding. Seeded and user-deleted
 	 * defaults are omitted.
 	 */
-	getSeedStatus(): SeedStatusEntry[]
+	getSeedStatus(chainId: number): SeedStatusSnapshot
 
 	/**
 	 * Starts a seed pass when a default is still `pending` and nothing is working

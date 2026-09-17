@@ -3,7 +3,7 @@ import { ValueStorage } from "@/wallet/storage"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import type { ILogger } from "@/wallet/logger"
 import type { DefaultTokenSeed } from "./default-tokens"
-import type { SeedScope, SeedStatus, SeedStatusEntry, TokenInterface } from "./spec"
+import type { SeedScope, SeedStatus, SeedStatusEntry, SeedStatusSnapshot, TokenInterface } from "./spec"
 
 const LOG_SOURCE = "TokenSeeder"
 
@@ -112,9 +112,10 @@ function parseMarkerEntry(raw: unknown, now: number): SeedMarkerEntry | undefine
 	if (typeof e.observedDecimals === "number") entry.observedDecimals = e.observedDecimals
 	if (e.nextAttemptAt === undefined) return entry
 	if (typeof e.nextAttemptAt !== "number" || !Number.isFinite(e.nextAttemptAt) || e.nextAttemptAt < 0) return undefined
-	// Beyond the longest wait the seeder ever writes, the value is not the seeder's:
-	// ignored (due now) rather than clamped, since a clamp relative to each read never comes due.
-	if (e.nextAttemptAt <= now + MAX_CONTINUATION_DELAY_MS) entry.nextAttemptAt = e.nextAttemptAt
+	// Beyond the longest wait the seeder ever writes, the value is not the seeder's (or the clock
+	// went back): due now. Not dropped — the wake path resumes only entries that carry a due time —
+	// and not clamped, since a clamp relative to each read never comes due.
+	entry.nextAttemptAt = e.nextAttemptAt <= now + MAX_CONTINUATION_DELAY_MS ? e.nextAttemptAt : 0
 	return entry
 }
 
@@ -198,9 +199,11 @@ export class TokenSeeder {
 			this.rerunRequested = true
 			return this.inflight
 		}
+		let threw = false
 		this.inflight = this.doRun()
 			.catch((err) => {
-				this.log(LogLevel.Warn, "seed pass threw", err)
+				threw = true
+				this.log(LogLevel.Warn, "seed pass threw", { category: errorCategory(err) })
 			})
 			.finally(() => {
 				this.inflight = undefined
@@ -209,18 +212,24 @@ export class TokenSeeder {
 					void this.run()
 					return
 				}
-				void this.armContinuation()
+				// A pass that threw may have consumed no attempt, leaving the same entry overdue:
+				// the longest wait keeps a persistent storage fault from re-running it every second.
+				void this.armContinuation(threw ? MAX_CONTINUATION_DELAY_MS : MIN_CONTINUATION_DELAY_MS)
 			})
 		return this.inflight
 	}
 
-	/** Not-yet-seeded defaults of the active profile + network. Reads only. */
-	public async getStatus(): Promise<SeedStatusEntry[]> {
+	/**
+	 * Not-yet-seeded defaults of the active profile on `chainId` (default: the active network's),
+	 * with the scope they were read for. The popup names the chain because it switches its own view
+	 * BEFORE this worker's active network follows; the profile is always this worker's. Reads only.
+	 */
+	public async getStatus(chainId?: number): Promise<SeedStatusSnapshot> {
 		const profile = await this.deps.getActiveProfile()
-		if (!profile) return []
-		const network = await this.deps.getActiveNetwork()
-		if (!network) return []
-		return await this.statusFor(profile.id, network.chainId)
+		if (!profile) return { scope: undefined, entries: [] }
+		const chain = chainId ?? (await this.deps.getActiveNetwork())?.chainId
+		if (chain === undefined) return { scope: undefined, entries: [] }
+		return { scope: { profileId: profile.id, chainId: chain }, entries: await this.statusFor(profile.id, chain) }
 	}
 
 	/**
@@ -602,14 +611,14 @@ export class TokenSeeder {
 	 * and with no account nothing is armed either — that pass would consume no
 	 * attempt and re-arm an already-due timer forever.
 	 */
-	private async armContinuation(): Promise<void> {
+	private async armContinuation(minDelayMs = MIN_CONTINUATION_DELAY_MS): Promise<void> {
 		this.clearContinuation()
 		if (this.disposed) return
 		const generation = ++this.armGeneration
 		try {
 			const due = await this.earliestDueRetry()
 			if (due === undefined || generation !== this.armGeneration) return
-			const delay = Math.max(MIN_CONTINUATION_DELAY_MS, due - Date.now())
+			const delay = Math.max(minDelayMs, due - Date.now())
 			this.continuation = setTimeout(() => {
 				this.continuation = undefined
 				void this.run()
@@ -703,6 +712,7 @@ function continuationDelay(attempts: number): number {
 	return SEED_CONTINUATION_DELAYS_MS[Math.min(attempts, SEED_CONTINUATION_DELAYS_MS.length) - 1] ?? MAX_CONTINUATION_DELAY_MS
 }
 
+/** An error's class name when it looks like one; `name` is writable, so anything else is "unknown". */
 function errorCategory(err: unknown): string {
-	return err instanceof Error ? err.name : "unknown"
+	return err instanceof Error && /^[A-Za-z]{1,40}$/.test(err.name) ? err.name : "unknown"
 }

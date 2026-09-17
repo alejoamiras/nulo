@@ -45,15 +45,11 @@ const router = useRouter()
 
 const tasks = ref([])
 
-/** Phase 2.5: in-flight + recently-failed token-import journal records.
- *  Renders as TokenImportRow above the existing TokenCard list. Succeeded
- *  records are filtered out — the new TokenCard with its initial-sync
- *  spinner takes over once the watchlist entry lands. */
+/** In-flight + recently-failed token-import journal records, rendered as TokenImportRow above the
+ *  TokenCard list. Succeeded records are filtered out — the new TokenCard, with its initial-sync
+ *  skeleton, takes over once the watchlist entry lands. */
 const FAILED_RETENTION_MS = 30_000
-/** Single source of truth for the kind this view scopes to. Used by both
- *  filters and the journal query so the four references no longer drift
- *  independently — codex caught two duplicate `getOperations({ kind: ... })`
- *  call sites in this file alone. */
+/** The one journal kind this view scopes to: the filters and the query must not drift apart. */
 const TOKENS_VIEW_KIND = "token_import"
 const tokenImports = ref([])
 // 5s tick is a generous fraction of the 30s retention window — the failed
@@ -330,7 +326,6 @@ async function onTaskReconnected() {
 	}
 }
 
-// Anonymous rows appear only once a blank wait has lasted; any row, or a settled list, resets the delay.
 watch(
 	isWaitingBlank,
 	(waiting) => {
@@ -344,10 +339,11 @@ watch(
 	{ immediate: true },
 )
 
-// Account AND network id: a network switch changes the token list. `scopeGen` is bumped SYNCHRONOUSLY
-// (before any await) so every in-flight snapshot from the prior scope is invalidated.
+// Profile, account AND network id: a network switch changes the token list, and one phrase imported
+// twice gives two profiles the same address. `scopeGen` is bumped SYNCHRONOUSLY (before any await)
+// so every in-flight snapshot from the prior scope is invalidated.
 watch(
-	() => [appStore.account?.address, appStore.network?.id],
+	() => [appStore.profile?.id, appStore.account?.address, appStore.network?.id],
 	async () => {
 		scopeGen++
 		// The previous scope's rows go now, before any await, so they are never ordered under the
@@ -364,12 +360,15 @@ watch(
 	},
 )
 onMounted(async () => {
+	const gen = scopeGen
 	// A rejected task snapshot only costs the refresh dot; it must not strand the balances behind it.
 	await fetchTasks().catch(() => undefined)
 	// Seed in-flight + recently-terminal token-import journal records so
 	// the row is visible even if the user opened the popup after submission.
 	await fetchTokenImports()
-
+	// An unmount or a scope change during the awaits owns the balances now; fetching here would
+	// reconnect a disconnected client and could leave a retry timer behind.
+	if (scopeGen !== gen) return
 	await fetchTokenBalances()
 })
 onBeforeUnmount(() => {

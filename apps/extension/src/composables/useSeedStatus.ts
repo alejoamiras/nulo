@@ -1,6 +1,6 @@
 import type { EventHandler } from "@nulo/wallet-core/utils"
 import { type ComputedRef, type Ref, computed, ref } from "vue"
-import type { SeedScope, SeedStatusEntry } from "@/wallet/services/token/spec"
+import type { SeedScope, SeedStatusEntry, SeedStatusSnapshot } from "@/wallet/services/token/spec"
 
 /**
  * A snapshot that has not answered is not an empty one: `unavailable` (the fetch was
@@ -11,12 +11,16 @@ export type SnapshotState = "loading" | "loaded" | "unavailable"
 /** A rejected fetch is retried once on a timer; after that only a reconnect or an event retries. */
 export const SEED_STATUS_RETRY_MS = 2_000
 
+/** How long a seeded default stays listed (as `seeding`) for its balance row to show up. Consumers
+ *  drop it sooner by matching the row's contract; the cap only bounds a row that never comes. */
+export const SEED_HANDOFF_MS = 5_000
+
 type Subscribable<T> = Pick<EventHandler<T>, "add" | "remove">
 
 export interface UseSeedStatusDeps {
 	/** The parent's CONNECTED-on-demand token client; the parent owns disconnect. */
 	client: {
-		getSeedStatus(): Promise<SeedStatusEntry[]>
+		getSeedStatus(chainId: number): Promise<SeedStatusSnapshot>
 		ensureSeeding(): Promise<void>
 		retrySeed(chainId: number, contract: string): Promise<boolean>
 		onSeedStatusChanged: Subscribable<SeedScope>
@@ -66,11 +70,38 @@ export function useSeedStatus(deps: UseSeedStatusDeps): UseSeedStatus {
 		deps.client.ensureSeeding().catch(() => undefined)
 	}
 
+	const departed = new Map<string, { entry: SeedStatusEntry; timer: ReturnType<typeof setTimeout> }>()
+	const clearDeparted = () => {
+		for (const held of departed.values()) clearTimeout(held.timer)
+		departed.clear()
+	}
+	const releaseDeparted = (key: string) => {
+		clearTimeout(departed.get(key)?.timer)
+		departed.delete(key)
+	}
+
+	/** Keeps a default that was being worked on and has now left the list: it was seeded, but its
+	 *  balance row is created after the token row, by another service, and may not be visible yet. */
+	const holdDeparted = (next: SeedStatusEntry[]) => {
+		const present = new Set(next.map((e) => e.contract.toLowerCase()))
+		for (const key of [...departed.keys()]) if (present.has(key)) releaseDeparted(key)
+		for (const entry of entries.value) {
+			const key = entry.contract.toLowerCase()
+			if (present.has(key) || departed.has(key) || (entry.status !== "pending" && entry.status !== "seeding")) continue
+			const timer = setTimeout(() => {
+				departed.delete(key)
+				entries.value = entries.value.filter((e) => e.contract.toLowerCase() !== key)
+			}, SEED_HANDOFF_MS)
+			departed.set(key, { entry: { ...entry, status: "seeding" }, timer })
+		}
+	}
+
 	/** Another scope's rows are never shown under this one, not even while its own are loading. */
 	const enterScope = (scope: SeedScope | undefined) => {
 		const key = scopeKeyOf(scope)
 		if (key === shownScope) return
 		shownScope = key
+		clearDeparted()
 		entries.value = []
 		state.value = scope ? "loading" : "loaded"
 		if (scope) kick()
@@ -89,11 +120,13 @@ export function useSeedStatus(deps: UseSeedStatusDeps): UseSeedStatus {
 		const scope = deps.getScope()
 		enterScope(scope)
 		if (!scope) return
-		const next = await deps.client.getSeedStatus().catch(() => undefined)
+		const next = await deps.client.getSeedStatus(scope.chainId).catch(() => undefined)
 		if (!isLatest()) return
-		if (!next) return onRejected(isTimedRetry)
-		// The RPC answers for the service worker's active scope, read a moment before or after ours.
-		entries.value = next.filter((e) => e.chainId === scope.chainId)
+		// The chain is ours by request; the profile is the service worker's. An answer for another
+		// profile says nothing about this one, least of all "no defaults".
+		if (!next || scopeKeyOf(next.scope) !== scopeKeyOf(scope)) return onRejected(isTimedRetry)
+		holdDeparted(next.entries)
+		entries.value = [...next.entries, ...[...departed.values()].map((held) => held.entry)]
 		state.value = "loaded"
 	}
 
@@ -126,6 +159,7 @@ export function useSeedStatus(deps: UseSeedStatusDeps): UseSeedStatus {
 		disposed = true
 		generation += 1
 		clearRetry()
+		clearDeparted()
 		deps.client.onSeedStatusChanged.remove(onChanged)
 		deps.client.onConnected.remove(onConnected)
 	}

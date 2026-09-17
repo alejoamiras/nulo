@@ -367,6 +367,33 @@ describe("TokensView — Home order and cap", () => {
 		expect(H.getTokenBalances.mock.calls.length).toBe(fetchesBefore)
 	})
 
+	test("an unmount during the MOUNT's own awaits stops the balance fetch too", async () => {
+		const tasksPending = deferred<unknown[]>()
+		H.getTasks.mockReturnValue(tasksPending.promise)
+		const wrapper = mount(TokensView, { shallow: true })
+		await flushPromises()
+		wrapper.unmount()
+		tasksPending.resolve([])
+		await flushPromises()
+		expect(H.getTokenBalances).not.toHaveBeenCalled()
+	})
+
+	test("a profile-only switch (same address, same network) is a new scope: the other profile's rows go at once", async () => {
+		H.getTokenBalances.mockResolvedValue([namedRow(1, "MINE", { chainId: MAINNET })])
+		const wrapper = mount(TokensView, { shallow: true })
+		await flushPromises()
+		expect(cardSymbols(wrapper)).toEqual(["MINE"])
+
+		const pending = deferred<unknown[]>()
+		H.getTokenBalances.mockReturnValue(pending.promise)
+		H.store.current.profile = { ...H.store.current.profile, id: "p-other" } as never
+		await flushPromises()
+		expect(cardSymbols(wrapper)).toEqual([])
+		pending.resolve([])
+		await flushPromises()
+		wrapper.unmount()
+	})
+
 	test("hostile rows reach the REAL card without throwing: a dash for the malformed ones, the good row intact", async () => {
 		H.getTokenBalances.mockResolvedValue([
 			namedRow(1, "GOOD", { chainId: MAINNET }),

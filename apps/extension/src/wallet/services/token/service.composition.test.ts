@@ -379,7 +379,7 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 		}
 	})
 
-	test("a fresh runtime with no popup connected resumes a due default-token retry exactly once", async () => {
+	test("a fresh service graph with no popup connected: resumeSeeding runs a due default-token retry exactly once", async () => {
 		// The previous service worker recorded an attempt and its retry time, then
 		// died. Nothing but the boot-time resume exists in this one: no popup RPC, no
 		// profile/network/account event.
@@ -401,7 +401,9 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 			expect(preview).toHaveBeenCalledTimes(1)
 			const stored = (await fakeBrowser.storage.local.get(markerKey))[markerKey] as string
 			expect(JSON.parse(stored)[seedKey].attempts).toBe(2)
-			expect(await tokenService.getSeedStatus()).toEqual([expect.objectContaining({ contract: seed.contract, status: "pending" })])
+			expect((await tokenService.getSeedStatus(seed.chainId)).entries).toEqual([
+				expect.objectContaining({ contract: seed.contract, status: "pending" }),
+			])
 			const { seeder } = tokenService as unknown as { seeder: TokenSeeder }
 			seeder.dispose()
 		} finally {

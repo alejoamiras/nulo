@@ -59,7 +59,7 @@ export function makeSeeder(overrides?: Partial<TokenSeederDeps> & { version?: st
 	}
 	const getVersion = overrides?.getVersion ?? (() => overrides?.version ?? "1.0.0")
 	const seeder = trackSeeder(new TokenSeeder(deps, api.storage.local, logger, getVersion))
-	return { seeder, deps, api }
+	return { seeder, deps, api, logger }
 }
 
 export async function readMarker(): Promise<Record<string, SeedMarkerEntry>> {

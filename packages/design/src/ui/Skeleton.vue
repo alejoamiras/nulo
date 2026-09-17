@@ -10,7 +10,7 @@ const props = withDefaults(defineProps<{ width?: string | number; height?: strin
 	height: 12,
 })
 
-// A bare number is px; a string passes through so callers can use `%` or `ch`.
+// A template attribute delivers a number as a string: numeric strings are px too, so `width="60"` works.
 const toLength = (v: string | number) => (typeof v === "number" || /^\d+(\.\d+)?$/.test(v) ? `${v}px` : v)
 
 const styles = computed(() => ({ width: toLength(props.width), height: toLength(props.height) }))
