@@ -377,7 +377,7 @@ sharded network + CI.)
 describe and the containment test green, `port onDisconnect → reconnect` green. Layers: lint/typecheck,
 unit.
 
-### Phase 2 — the shared port fake
+### Phase 2 — the shared port fake ✓
 
 1. `src/testing/port-registry.ts` + `index.ts`; `package.json` `./testing` export.
 2. `port-registry.test.ts`, two contract cases (codex D2): (a) two live ports under one name are
