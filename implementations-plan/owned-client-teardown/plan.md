@@ -585,7 +585,7 @@ The owner chose fold in (2026-09-17): this phase runs.
 - `bun run typecheck:all && bun run lint` exits 0.
 - `lessons/phase-3.md` notes each new test's red run before its fix.
 
-### Phase 4 — local smoke; the PR's CI runs the network suite
+### Phase 4 — local smoke; the PR's CI runs the network suite ✓
 
 **Candidate.** `git status --porcelain` prints nothing; record `CANDIDATE=$(git rev-parse HEAD)` in
 `lessons/phase-4.md`.
