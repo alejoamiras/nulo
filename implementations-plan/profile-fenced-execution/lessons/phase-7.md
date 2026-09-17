@@ -197,3 +197,33 @@ owner.
 | 1 | The shortened reaped-row comment in `claim-helper.ts` overstates what the branch knows: `getOperation(...).catch(() => null)` also sends an unreadable row there, so neither "reaped" nor "no cancel could have aborted it" follows | Accepted, verified. The comment now states only the cleanup reason: the fallback files under a new id, so the old id's controller entry would leak |
 
 Resumed once more on the correction, so the last pass reviews the code as delivered.
+
+### Round 3 — approve: converged
+
+Codex resumed on `a6e8cc31..b78780e6`. Verdict line: "Approve at `b78780e6` — no material cross-arc
+problem identified." followed by "No new material findings." It checked that the corrected comment
+covers missing and unreadable rows without claiming anything about an earlier cancel, that the
+commit changes no executable behaviour, and that its earlier cross-arc conclusions still hold.
+
+## Final gates at `b78780e6`
+
+Run one at a time on the delivered code, after the cross-arc pass converged; `origin/dev` was still
+`c543c18d`, the stack's base, so no rebase sits between these runs and the push.
+
+| Gate | Result |
+|---|---|
+| `bun run audit:vue` | exit 0 — typecheck (bridge-core, tools, extension) exit 0; 503 test files, 6251 tests passed; lint 30 warnings, all pre-existing; build passed. No generated-file drift |
+| Smoke, armed build (`VITE_NULO_E2E_MIGRATION_FIXTURE=1 VITE_NULO_E2E_DEFAULT_NET=testnet VITE_NULO_E2E_TOKEN_SEEDS=1 VITE_NULO_E2E_TOKEN_SEEDS_CONFIRM=1 bun run build:chrome`, markers checked, then `NULO_E2E_MIGRATION_FIXTURE=1 bun run test:e2e`) | exit 0 — 32 files, 123 tests passed |
+| `lock-cancels-dapp-send` (`NULO_E2E_RETRY=0 NULO_E2E_PROVERLESS=1 bun run e2e:agent`, alone) | exit 0 (test 22 s) |
+| `auto-lock-defers-while-proving` (same, alone) | exit 0 (test 48 s) |
+| `profile-switch-sweeps-transfer` (same, alone) | exit 0 (test 93 s) |
+
+Screenshots for the PR came from a throwaway test copied into `tests/e2e/network/` for its own run
+and deleted after it (exit 0, never committed): the home screen with a dApp transfer held mid-proof,
+then the dialog in both themes. Compared with the render approved before implementation, the only
+visible change is the pre-title override ("Irreversible" → "Running transactions"). The confirm
+button is not literally red: `confirm_color: "red"` only selects the destructive pre-title, and
+`ConfirmPopup` binds it to the button's `type` attribute, which nothing styles, so every
+destructive dialog in the wallet, this one included, uses the accent fill. That was already true
+of the approved render, so nothing changed there. The screenshots, with the approved render beside
+them, are a private artifact linked from the arc 2 PR: https://claude.ai/artifact/EMFM5h5zd2Ani6rQmab2KM
