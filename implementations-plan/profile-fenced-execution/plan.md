@@ -143,6 +143,12 @@ Nothing else the user sees changes.
   holds rows from before the lock (its cached check runs before its refresh, Fact 30). The lock has
   already cancelled those sends, so the toast is stale, not a hold. Fixing it means touching the
   Send freeze helper (D3: out); the parked plan owns that surface.
+  *Measured in Phase 6:* in the popup that locked, the refusal is certain, not occasional. The sweep
+  cancels after the session has closed, and the journal forwards events and answers reads only for
+  the active profile, so that popup never hears of the cancel, and the selector's cached check
+  refuses every pick. Closing and reopening the popup clears it. By the same reading (static, not
+  exercised), an unlock of the same profile in that popup leaves the account/network Send freeze
+  holding the stale row until the popup reopens or the journal reconnects.
 
 ## Architecture & Implementation
 
@@ -958,7 +964,7 @@ set, "Irreversible"/"Action required" when absent; `journal-state` subtitle.
 - `bun run typecheck:all && bun run lint`
 - Pass: all exit 0; copy matches §UI impact verbatim. Layers: typecheck · lint · unit · component
 
-### Phase 6 — end to end, live
+### Phase 6 — end to end, live ✓
 
 Helpers: `createAndActivateProfile(page, name, password)` extracted from `session-profileSwitch`;
 `setSessionTtlMs(page, ms)` writes the config value through the config service RPC (the settings

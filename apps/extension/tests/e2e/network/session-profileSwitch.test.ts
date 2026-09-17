@@ -1,5 +1,6 @@
 import { expect, inject } from "vitest"
-import { clickByTestId, replaceInputValue, test, waitForHash } from "../fixtures/extension"
+import { clickByTestId, test, waitForHash } from "../fixtures/extension"
+import { createAndActivateProfile } from "../fixtures/helpers"
 import { approveDiscover, approveVerify, waitForPopup } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -34,19 +35,8 @@ test.skipIf(!hasConfig)(
 		const wallet = await ctx.browser.newPage()
 		await wallet.goto(`chrome-extension://${ctx.extensionId}/src/popup/index.html`, { waitUntil: "domcontentloaded" })
 		await waitForHash(wallet, "#/popup/general")
-		await clickByTestId(wallet, "header-lock")
-		await wallet.waitForSelector('[data-testid="auth-profile"]', { visible: true, timeout: 15_000 })
-		await clickByTestId(wallet, "auth-profile")
-		await wallet.waitForSelector('[data-testid="select-profile-new-btn"]', { visible: true, timeout: 10_000 })
-		await clickByTestId(wallet, "select-profile-new-btn")
-
-		await wallet.waitForSelector('[data-testid="register-name-input"]', { visible: true, timeout: 10_000 })
-		await replaceInputValue(wallet, '[data-testid="register-name-input"]', "Profile B")
-		await replaceInputValue(wallet, '[data-testid="register-password-input"]', PROFILE_B_PASSWORD)
-		await replaceInputValue(wallet, '[data-testid="register-password-confirm-input"]', PROFILE_B_PASSWORD)
-		await clickByTestId(wallet, "register-submit-btn")
 		// Creation activates B — this is the switch. The wallet lands home.
-		await waitForHash(wallet, "#/popup/general", 90_000)
+		await createAndActivateProfile(wallet, "Profile B", PROFILE_B_PASSWORD)
 
 		// ── The A-era channel observes the standard disconnect ──
 		await playground.waitForSelector('[data-testid="pg-status"][data-status="disconnected"]', { timeout: 20_000 })

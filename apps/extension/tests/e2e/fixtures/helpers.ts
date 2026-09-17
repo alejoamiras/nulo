@@ -1,6 +1,8 @@
+import { MessageType } from "@nulo/extension-messaging/messages"
+import { wrapParams } from "@nulo/extension-messaging/utils"
 import type { CDPSession, Page, Target } from "puppeteer"
 import { TEST_PASSWORD } from "./constants"
-import { type ExtensionContext, clickByTestId, clickSelector, replaceInputValue, withTimeoutMessage } from "./extension"
+import { type ExtensionContext, clickByTestId, clickSelector, replaceInputValue, waitForHash, withTimeoutMessage } from "./extension"
 
 /**
  * Selector contract for tests in this directory.
@@ -34,6 +36,9 @@ export const PXE_ANCHOR_SYNC_WORKAROUND_MS = 5_000
 
 /** Lock the wallet via the Header lock button. Navigates to auth page.
  *
+ *  Only for a wallet with no approved send running: with one running, the
+ *  button asks first, and the test drives that dialog itself.
+ *
  *  Click is async-fire-and-forget: the handler sets `appStore.isLogined =
  *  false` then kicks off `managers.profile.lockActiveProfile()` (RPC). An
  *  app.vue watcher reacts to the isLogined change and pushes the router.
@@ -47,7 +52,33 @@ export async function lockWallet(page: Page): Promise<void> {
 	await page.evaluate(() => {
 		;(document.querySelector('[data-testid="header-lock"]') as HTMLElement)?.click()
 	})
+	await waitForLockScreen(page)
+}
 
+/** A confirm dialog's copy, as rendered. */
+export type ConfirmDialogCopy = { preTitle: string; title: string; description: string; confirm: string }
+
+/** Lock the wallet while approved sends are running, when the lock button asks first: returns the
+ *  dialog's copy, then confirms and waits for the lock screen. */
+export async function lockThroughConfirmDialog(page: Page): Promise<ConfirmDialogCopy> {
+	await clickByTestId(page, "header-lock")
+	await page.waitForSelector('[data-testid="confirm-submit"]', { visible: true, timeout: 15_000 })
+	const copy = await page.evaluate(() => {
+		const text = (testId: string) => document.querySelector(`[data-testid="${testId}"]`)?.textContent?.trim() ?? ""
+		return {
+			preTitle: text("confirm-pre-title"),
+			title: text("confirm-title"),
+			description: text("confirm-description"),
+			confirm: text("confirm-submit"),
+		}
+	})
+	await clickByTestId(page, "confirm-submit")
+	await waitForLockScreen(page)
+	return copy
+}
+
+/** Wait for a lock, however it was triggered, to land: the session record gone, then the popup on `/popup/auth`. */
+export async function waitForLockScreen(page: Page, timeoutMs = 60_000): Promise<void> {
 	// Assert the AUTHORITATIVE lock — the session record removed from
 	// chrome.storage.session (frozen key SESSION_STORAGE_ROOT) — not the UI
 	// auto-redirect. The redirect is event-driven (onActiveProfileChanged(undefined)
@@ -62,7 +93,7 @@ export async function lockWallet(page: Page): Promise<void> {
 			const r = await chrome.storage.session.get("nulo:core:session")
 			return !r["nulo:core:session"]
 		},
-		{ timeout: 60_000 },
+		{ timeout: timeoutMs },
 	)
 	// If the redirect lost the race, reload: a fresh popup derives the locked
 	// state from storage and routes to /popup/auth (the real reopen path).
@@ -298,6 +329,95 @@ export async function reopenAndRecoverAfterImport(page: Page, password = TEST_PA
 	await lockWallet(page)
 	await ensureUnlocked(page, password)
 	await page.waitForFunction(() => window.location.hash.includes("/popup/general"), { timeout: 30_000 })
+}
+
+/** Create a profile from the lock screen's picker and land on its home screen: creating a profile
+ *  activates it. Starts unlocked with no approved send running, so the lock button locks without
+ *  asking. Returns the new profile's id. */
+export async function createAndActivateProfile(page: Page, name: string, password: string): Promise<string> {
+	const previous = (await readSessionRow(page))?.profile
+	await clickByTestId(page, "header-lock")
+	await page.waitForSelector('[data-testid="auth-profile"]', { visible: true, timeout: 15_000 })
+	await clickByTestId(page, "auth-profile")
+	await page.waitForSelector('[data-testid="select-profile-new-btn"]', { visible: true, timeout: 10_000 })
+	await clickByTestId(page, "select-profile-new-btn")
+
+	await page.waitForSelector('[data-testid="register-name-input"]', { visible: true, timeout: 10_000 })
+	await replaceInputValue(page, '[data-testid="register-name-input"]', name)
+	await replaceInputValue(page, '[data-testid="register-password-input"]', password)
+	await replaceInputValue(page, '[data-testid="register-password-confirm-input"]', password)
+	await clickByTestId(page, "register-submit-btn")
+	await waitForHash(page, "#/popup/general", 90_000)
+	return (await waitForSessionRow(page, (row) => row.profile !== previous)).profile
+}
+
+// ── Session ────────────────────────────────────────────────────────────
+
+/** The persisted session row's public fields: the unlocked profile, the last refresh, and when auto-lock is due. */
+export type SessionRow = { profile: string; since: number; lockedAt?: number }
+
+/** The persisted session row, or `undefined` while the wallet is locked. */
+export async function readSessionRow(page: Page): Promise<SessionRow | undefined> {
+	const raw = await page.evaluate(async () => (await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"])
+	if (typeof raw !== "string") return undefined
+	// Projected so the row's restore secret never reaches an assertion message.
+	const { profile, since, lockedAt } = JSON.parse(raw) as SessionRow
+	return { profile, since, lockedAt }
+}
+
+/** Poll the session row until `predicate` accepts it. */
+export async function waitForSessionRow(page: Page, predicate: (row: SessionRow) => boolean, timeoutMs = 15_000): Promise<SessionRow> {
+	const deadline = Date.now() + timeoutMs
+	let row = await readSessionRow(page)
+	while (!row || !predicate(row)) {
+		if (Date.now() > deadline)
+			throw new Error(`waitForSessionRow: no matching row within ${timeoutMs}ms (last: ${JSON.stringify(row)})`)
+		await new Promise((resolve) => setTimeout(resolve, 200))
+		row = await readSessionRow(page)
+	}
+	return row
+}
+
+/** Call one background service method over a port of its own, as the popup's clients do. Unlike a
+ *  popup interaction, it navigates nowhere, so it never refreshes the session. */
+async function callService<T>(page: Page, service: string, method: string, params: unknown[] = []): Promise<T> {
+	const envelope = { type: MessageType.Request, content: { requestId: 1, method, params: wrapParams(params) } }
+	return (await page.evaluate(
+		(name: string, request: typeof envelope, responseType: number) =>
+			new Promise((resolve, reject) => {
+				const port = chrome.runtime.connect({ name })
+				port.onDisconnect.addListener(() => reject(new Error(`${name}.${request.content.method}: port closed before a response`)))
+				port.onMessage.addListener(
+					(message: { type?: number; content?: { requestId?: number; result?: unknown; error?: string } }) => {
+						if (message?.type !== responseType || message.content?.requestId !== request.content.requestId) return
+						port.disconnect()
+						if (message.content.error === undefined) resolve(message.content.result)
+						else reject(new Error(`${name}.${request.content.method}: ${message.content.error}`))
+					},
+				)
+				port.postMessage(request)
+			}),
+		service,
+		envelope,
+		MessageType.Response,
+	)) as T
+}
+
+/** The active profile as the profile service reports it. A navigation would refresh the session
+ *  first; this read runs only the service's own expiry check, as the popup's periodic poll does. */
+export async function peekSession(page: Page): Promise<{ id: string } | undefined> {
+	return callService(page, "profile", "getActiveProfile")
+}
+
+/** Set the auto-lock TTL in milliseconds through the config service (the settings page offers whole
+ *  minutes only), and return the session row once it carries the new deadline. The deadline is
+ *  recomputed from `since`, and one older than `ms` would lock the wallet on the spot, so the
+ *  session is refreshed first, as any popup navigation would. */
+export async function setSessionTtlMs(page: Page, ms: number): Promise<SessionRow & { lockedAt: number }> {
+	await callService(page, "profile", "refreshSession")
+	await callService(page, "config", "setValue", ["sessionTtl", ms])
+	const row = await waitForSessionRow(page, ({ since, lockedAt }) => lockedAt === since + ms)
+	return { ...row, lockedAt: row.since + ms }
 }
 
 // ── Navigation ─────────────────────────────────────────────────────────
