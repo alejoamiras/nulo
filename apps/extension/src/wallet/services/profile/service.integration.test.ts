@@ -786,6 +786,35 @@ describe("ProfileService integration", () => {
 		}, 30_000)
 	})
 
+	describe("lockActiveProfile given a session handle", () => {
+		test("closes the session the handle names and leaves a session that replaced it open", async () => {
+			const { service } = await makeService()
+			const profile = await service.createProfile("P", "pass1234")
+			const first = await service.getSessionHandle()
+			await service.lockActiveProfile()
+			expect(await service.getSessionHandle()).toBeUndefined()
+			await service.unlockProfile(profile.id, "pass1234")
+			const second = await service.getSessionHandle()
+			expect(second).not.toBe(first)
+
+			await service.lockActiveProfile(first)
+			expect((await service.getActiveProfile())?.id).toBe(profile.id)
+			await service.lockActiveProfile(second)
+			expect(await service.getActiveProfile()).toBeUndefined()
+		}, 30_000)
+
+		test("a handle from before a worker restart does not name the session the restart restored", async () => {
+			const { api, service } = await makeService()
+			const profile = await service.createProfile("P", "pass1234")
+			const before = await service.getSessionHandle()
+			const { service: rebooted } = await makeServiceFromExistingApi(api)
+			expect((await rebooted.getActiveProfile())?.id).toBe(profile.id)
+
+			await rebooted.lockActiveProfile(before)
+			expect((await rebooted.getActiveProfile())?.id).toBe(profile.id)
+		}, 30_000)
+	})
+
 	describe("lockActiveProfile announces the lock exactly once", () => {
 		test("over an in-memory session: close() emits, the service adds nothing", async () => {
 			const { service } = await makeService()

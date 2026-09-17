@@ -102,3 +102,43 @@ Gate: `bun --bun vitest run src/components` exit 0 (49 files, 540 tests); `bun r
 (extension) exit 0; `biome check` on the touched files clean. Network e2e, solo, `NULO_E2E_RETRY=0 NULO_E2E_PROVERLESS=1 bun run e2e:agent`: `lock-cancels-dapp-send`
 exit 0 (23 s), `auto-lock-defers-while-proving` exit 0 (48 s), `profile-switch-sweeps-transfer` exit 0
 (93 s), so B's unlock does land inside the gate's hold.
+
+### Round 2 — reject, two new findings, both accepted
+
+| # | Codex finding | Verified | Disposition |
+|---|---|---|---|
+| 1 | High: restarting a decision whose read spanned a session change carries the click to the next session: click during A, the read stalls, another window locks A and unlocks B, and the restart reads B's journal and can lock B at once. Each restart also grants a new 3 s budget. | Yes. | **Fixed.** A decision whose read saw a session change is abandoned: no second read, no dialog, no lock. A dropped worker connection (`onDisconnected`) counts as a change too, since the worker may have restarted. |
+| 2 | High: the partial rejection of round-1 #2 does not hold. If this popup has not yet received the events when its user confirms, the unqualified `lockActiveProfile()` closes the replacement session. The approved "best-effort" limitation covers work admitted within the session being locked, not a confirmation carried across sessions. | Yes: the popup cannot compare with the worker's session atomically; only the worker can. | **Fixed in the worker.** `ProfileService.getSessionHandle()` returns `<worker id>:<serial>` (the worker id is random per worker, because serials restart with it), and `lockActiveProfile(handle?)` returns without closing anything when a different session is open. With no session open it locks as before, so the read-back and the lock announcement still run. The header reads the handle with the in-flight count, inside the same 3 s budget, and passes it on both lock paths; a lock issued after the budget carries no handle. |
+
+Codex accepted the round-1 disposition of #3 (the auto-lock e2e claim fix) and confirmed the other
+round-1 fixes: the timer is cleared on every settlement, callback identity limits closing to this
+header's dialog, the subscription is removed on unmount, and a late answer has no side effects.
+
+Why the handle is safe to refuse on: the background client rejects every pending request when its
+port drops (`rejectAllPending` in `packages/extension-messaging/src/background/client.ts`) and never
+resends, so no request carries a handle from before a worker restart to the worker after it; and a
+header that saw the drop abandons its decision. A non-strict worker restart restores the session
+under a new handle, so a handle from before it closes nothing (pinned).
+
+Tests: `service.integration.test.ts` "lockActiveProfile given a session handle" (a handle closes its
+session and leaves a replacement open; a handle from before a worker restart does not name the
+restored session). `Header.test.ts`: both lock paths pass the handle; the budget case locks with no
+handle; an event from either source closes the dialog; a session change during the read abandons
+the lock.
+
+Mutation checks (scratch script, files restored after each):
+
+| Mutation | Tests that failed |
+|---|---|
+| The confirm drops the handle | both counts of the dialog case |
+| The immediate lock drops the handle | the nothing-running case |
+| A dropped connection is not watched | the dialog-close case for `onDisconnected` |
+| A changed session restarts the decision | the abandon case (after its listener was made to fire once; firing on every read made the mutation loop until the test timed out) |
+| The worker ignores the handle | both handle cases |
+| The handle is the bare serial | the worker-restart case |
+
+Gate: `bun --bun vitest run src/components src/wallet/services/profile src/stores src/popup` exit 0
+(161 files, 1789 tests); extension `bun run typecheck` exit 0; `bun run lint` exit 0 (30 warnings,
+5 infos, all pre-existing; complexity-baseline check OK). Network e2e, solo at retry 0: `lock-cancels-dapp-send` exit 0 (23 s), `auto-lock-defers-while-proving`
+exit 0 (49 s), `profile-switch-sweeps-transfer` exit 0 (92 s), and `session-profileSwitch` exit 0 (11 s),
+which also locks through the header.

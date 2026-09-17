@@ -119,9 +119,11 @@ Nothing else the user sees changes.
 - **Consent is best-effort.** The popup asks after one fresh journal read, but a send that the
   service worker admits between that read and the lock is cancelled without a warning. Closing the
   gap would mean the popup holding a lock on the worker's admission path; not worth it for a
-  sub-second window. *From the arc 2 review:* a journal that does not answer within 3 s locks
-  without asking, and a session change seen by the popup closes the dialog and restarts a pending
-  decision; a change whose event has not reached the popup when the user confirms is not caught.
+  sub-second window. *From the arc 2 review:* a read that does not answer within 3 s locks
+  without asking; a session change or a dropped worker connection closes the dialog and abandons a
+  pending decision; and the button hands the worker the handle of the session it decided on
+  (`getSessionHandle`), so `lockActiveProfile(handle)` never closes a session that replaced it. A
+  lock issued after the 3 s budget carries no handle.
 - **The deferral budget is per session, not per burst of work.** Each unlocked session can push
   its inactivity expiry out by at most the budget in total; the budget does not refill while the
   session lives, because the only observable "no sends left" moment is the one that closes the

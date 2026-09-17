@@ -13,7 +13,9 @@ const H = vi.hoisted(() => ({
 	openToast: vi.fn(),
 	lockActiveProfile: vi.fn(),
 	noopEvent: { add: vi.fn(), remove: vi.fn() },
-	sessionListeners: new Set<() => void>(),
+	getSessionHandle: vi.fn(),
+	profileListeners: new Set<() => void>(),
+	disconnectListeners: new Set<() => void>(),
 	app: {} as Record<string, unknown>,
 	cache: {} as { confirm: Record<string, unknown> } & Record<string, unknown>,
 }))
@@ -46,9 +48,14 @@ vi.mock("@/utils/core", () => ({
 	managers: {
 		profile: {
 			lockActiveProfile: H.lockActiveProfile,
+			getSessionHandle: H.getSessionHandle,
 			onActiveProfileChanged: {
-				add: (fn: () => void) => H.sessionListeners.add(fn),
-				remove: (fn: () => void) => H.sessionListeners.delete(fn),
+				add: (fn: () => void) => H.profileListeners.add(fn),
+				remove: (fn: () => void) => H.profileListeners.delete(fn),
+			},
+			onDisconnected: {
+				add: (fn: () => void) => H.disconnectListeners.add(fn),
+				remove: (fn: () => void) => H.disconnectListeners.delete(fn),
 			},
 		},
 	},
@@ -79,7 +86,9 @@ beforeEach(() => {
 	H.openPopup.mockClear()
 	H.closePopup.mockClear()
 	H.openToast.mockClear()
-	H.sessionListeners.clear()
+	H.profileListeners.clear()
+	H.disconnectListeners.clear()
+	H.getSessionHandle.mockReset().mockResolvedValue("session-1")
 	H.lockActiveProfile.mockClear()
 	H.app = {
 		isLogined: true,
@@ -128,7 +137,7 @@ describe("Header — lock", () => {
 	test("nothing running after a fresh journal read: it locks at once", async () => {
 		await clickLock()
 		expect(H.app.refreshInFlight).toHaveBeenCalledTimes(1)
-		expect(H.lockActiveProfile).toHaveBeenCalledTimes(1)
+		expect(H.lockActiveProfile).toHaveBeenCalledExactlyOnceWith("session-1")
 		expect(H.app.isLogined).toBe(false)
 		expect(H.openPopup).not.toHaveBeenCalled()
 	})
@@ -156,7 +165,7 @@ describe("Header — lock", () => {
 
 		const confirm = H.cache.confirm.callback as () => void
 		confirm()
-		expect(H.lockActiveProfile).toHaveBeenCalledTimes(1)
+		expect(H.lockActiveProfile).toHaveBeenCalledExactlyOnceWith("session-1")
 		expect(H.app.isLogined).toBe(false)
 	})
 
@@ -179,7 +188,7 @@ describe("Header — lock", () => {
 			expect(H.lockActiveProfile).not.toHaveBeenCalled()
 
 			await vi.advanceTimersByTimeAsync(3_000)
-			expect(H.lockActiveProfile).toHaveBeenCalledTimes(1)
+			expect(H.lockActiveProfile).toHaveBeenCalledExactlyOnceWith(undefined)
 
 			answer()
 			await flushPromises()
@@ -190,28 +199,28 @@ describe("Header — lock", () => {
 		}
 	})
 
-	test("a session change closes the lock dialog it raised", async () => {
+	test.each(["profileListeners", "disconnectListeners"] as const)("an event from %s closes the lock dialog it raised", async (source) => {
 		H.app.refreshInFlight = vi.fn(async () => {
 			H.app.approvedSendsInFlight = 1
 		})
 		await clickLock()
 		expect(H.openPopup).toHaveBeenCalledWith("confirm")
 
-		for (const listener of H.sessionListeners) listener()
+		for (const listener of H[source]) listener()
 		expect(H.closePopup).toHaveBeenCalledWith("confirm")
 		expect(H.lockActiveProfile).not.toHaveBeenCalled()
 	})
 
-	test("a session change during the read discards its count and decides again on a fresh read", async () => {
-		const counts = [2, 0]
+	test("a session change during the read abandons the lock: no second read, no dialog, no lock", async () => {
+		let changed = false
 		H.app.refreshInFlight = vi.fn(async () => {
-			if (counts.length === 2) for (const listener of H.sessionListeners) listener()
-			H.app.approvedSendsInFlight = counts.shift()
+			if (!changed) for (const listener of H.profileListeners) listener()
+			changed = true
 		})
 		await clickLock()
 
-		expect(H.app.refreshInFlight).toHaveBeenCalledTimes(2)
+		expect(H.app.refreshInFlight).toHaveBeenCalledTimes(1)
 		expect(H.openPopup).not.toHaveBeenCalled()
-		expect(H.lockActiveProfile).toHaveBeenCalledTimes(1)
+		expect(H.lockActiveProfile).not.toHaveBeenCalled()
 	})
 })

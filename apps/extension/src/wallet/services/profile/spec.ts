@@ -234,9 +234,15 @@ export type Methods = {
 	getPasskeyCredentialId(id: string): string
 
 	/**
-	 * Locks active profile, closing active session.
+	 * An opaque name for the open session, or `undefined` while locked.
 	 */
-	lockActiveProfile(): void
+	getSessionHandle(): string | undefined
+
+	/**
+	 * Locks active profile, closing active session. Given a `handle`, closes nothing while a
+	 * different session is open.
+	 */
+	lockActiveProfile(handle?: string): void
 
 	/**
 	 * Resets expiration of active session.

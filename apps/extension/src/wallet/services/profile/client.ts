@@ -103,6 +103,7 @@ definePassthroughsExhaustive<Methods>()(ProfileServiceClient.prototype, [
 	"unlockProfile",
 	"unlockPasskeyProfile",
 	"getPasskeyCredentialId",
+	"getSessionHandle",
 	"lockActiveProfile",
 	"refreshSession",
 	"changeProfileName",
