@@ -149,8 +149,8 @@ interface InFlightState {
 	/** Bumped when the cache is discarded (a lock, an unlock); a read finishing under an older
 	 *  one writes nothing, success or error. */
 	generation: number
-	/** Set by the lock's reset, cleared by the unlock's read: a journal event from before the
-	 *  lock, delivered after it, would refill the emptied cache. */
+	/** Set by the lock's reset, cleared when the unlock read starts: a journal event from before
+	 *  the lock, delivered after it, would refill the emptied cache. */
 	suspended: boolean
 }
 

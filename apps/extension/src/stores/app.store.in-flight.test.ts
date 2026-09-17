@@ -67,7 +67,6 @@ const pickProfile = (store: ReturnType<typeof useAppStore>) => () => {
 	store.profile = { id: "p2" } as never
 }
 
-/** Deliver a journal event the way the port would, to every listener the tracker registered. */
 const emitUpdated = (op: OperationRecord) => {
 	for (const fn of journalEvents.updated) fn(op)
 }

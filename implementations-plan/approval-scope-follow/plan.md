@@ -131,6 +131,15 @@ which rev 6 absorbs alongside the codex round-4 findings:
   scope changes *in that popup*, which the lock has already invalidated; the executor never reads
   the popup's cache. The re-read on unlock restores the truthful set before any scope change is
   attempted.
+- **A read's snapshot can overwrite a newer event (pre-existing, every refresh).** `getOperations`
+  answers from a storage read inside the worker; an update landing between that read and the reply
+  emits its event first (same port, FIFO), and the older snapshot then replaces it. The window is
+  the worker's storage latency; the row's next event corrects it, and a snapshot landing after the
+  row's terminal event leaves a stale refusal until the next profile change, reconnect or lock
+  (`commitScopeChange` does not re-read past its cached refusal). The unlock read adds no new
+  exposure — the lock cancelled the profile's sends, so nothing is in flight to race — and the
+  boot read had the same window before this plan. Merging by `updatedAt` in the tracker's answer is
+  the fix if it ever bites; out of this plan's scope (codex arc-1 round 2).
 - **Batch padding is dearer, not impossible.** A dApp can no longer force `multi-signer` with a free
   `aztec_createAuthWit` on a second account; it still can with a second *send-like* operation on a
   second account, which costs it a real transaction (and need not succeed). Multi-signer ambiguity is

@@ -66,3 +66,12 @@
 | 4 | LOW — comments: tracker header overstated ("nothing but a profile change" — reconnects refresh too); app.vue "cancelled every send" (not `submitting`); guard header "a scope change cannot reach them" (a profile change ends the session and the send fails closed); duplicated generation explanation; the `(Codex v2 critique)` / `codex audit` review references in two touched headers | yes | **Adopted** all; the helper doc on `parkNextRead` dropped |
 
 Held: the narrowing itself (popup transfers journal `origin: "popup"`; lane/queued sends `"dapp"`), the generation across reset/unlock, realm separation, `readsFor("p1") === 2`.
+
+### Round 2 (resumed, on `d09dd7bb`) → conditional approve
+
+| # | Finding | Verified | Disposition |
+|---|---|---|---|
+| 1 | MEDIUM (inferred) — a read pending during an event publishes an older snapshot over it (same generation, same profile); codex notes it predates the fix and affects every refresh | yes, as a pre-existing property of the tracker: the worker snapshots storage, an update in between emits first (same port), the reply replaces it | **Declined for this arc, recorded**: out of Phase 0's scope (the plan keeps every existing refresh unchanged); the unlock read has nothing in flight to race (the lock cancelled the profile's sends) and the boot read had the identical window before. Added to plan.md §Known limitations with the `updatedAt` merge as the fix if it bites. |
+| 2 | LOW — `suspended` doc: say "cleared when the unlock read starts"; drop the narrating `emitUpdated` doc | yes | **Adopted** |
+
+Held: `suspended` stays set across a lock-screen profile pick (a pick is not an unlock); plain boolean is right; both bootstrap paths clear it.
