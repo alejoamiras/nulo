@@ -1401,6 +1401,33 @@ describe("SessionManager expiry deferral", () => {
 		expect(await alarmTime()).toBe(T0 + 2 * TTL)
 	})
 
+	test("a refresh issued while a deferral's write is in flight waits for the decision, so a failed write closes without it", async () => {
+		const h = await openAtT0()
+		const writes = recordRowWrites(h.api)
+		let failWrite: (error: Error) => void = () => {}
+		const set = vi.spyOn(h.api.storage.session, "set").mockImplementationOnce(
+			() =>
+				new Promise<void>((_resolve, reject) => {
+					failWrite = reject
+				}),
+		)
+		vi.setSystemTime(T0 + TTL)
+		const read = h.manager.getActive()
+		await until(() => h.deferral.waiting() === 1)
+		h.deferral.answer(true)
+		await until(() => set.mock.calls.length === 1)
+		const refresh = h.manager.refresh()
+		for (let round = 0; round < 5; round++) await new Promise((resolve) => setTimeout(resolve, 0))
+
+		expect(queuedOn(artifactLockOf(h.manager))).toBe(0)
+		failWrite(new Error("QUOTA_BYTES exceeded"))
+		expect(await read).toBeUndefined()
+		await refresh
+		expect(activeOf(h.manager)).toBeUndefined()
+		expect(writes).toEqual([])
+		expect(await readRow(h.api)).toBeUndefined()
+	})
+
 	test("a deferral whose write fails closes the session, since nothing re-arms the alarm that fired", async () => {
 		const h = await openAtT0()
 		const deadline = T0 + TTL

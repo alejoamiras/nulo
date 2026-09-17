@@ -162,3 +162,47 @@ Gate: `bun --bun vitest run src/wallet src/utils src/stores` exit 0 (237 files p
 3335 tests passed). `fast-path.test.ts` needed `isFenceLive` on its fake profile service.
 `bun run typecheck:all` exit 0; `bun run lint` exit 0 (30 warnings, all pre-existing elsewhere;
 complexity-baseline check OK).
+
+### Round 2 — reject, two new findings: one fixed, one rejected
+
+Codex confirmed round-1 fixes 3–6 as correct and complete, fix 1 as complete for the four account
+sites, and fix 2 as incomplete (finding B below). It saw no regression in the accepted
+pre-snapshot TTL residual.
+
+**A. High: PXE store-key recovery can resume an old send with the successor session's secrets —
+rejected.** Verified: when the offscreen lacks a store key, `PxeServiceClientBase.request`
+(`packages/aztec-runtime/src/pxe/client.ts`) runs `recoverMissingStoreKey`, and the registered
+provider (`providePxeStoreKey`, `wallet/runtime.ts`) reads the master and DEK of whichever session
+is open for that profile. A lock and same-profile re-unlock during that wait passes every
+generation check, so the call is provisioned and retried. Rejected because:
+- a re-unlock of the same profile unseals byte-identical master and DEK, so the provisioned key is
+  the key the op was already using, for the same store and generation;
+- the retried call is a PXE op the ended session had already issued, over a request built and
+  signed under that session. The plan accepts that in-flight PXE work is not interrupted by a
+  session end (Inference 1: "fail-closed, though not an immediate termination"); the sweep's
+  cancellation and the post-prove assert stop it, and the broadcast check refuses it. That is
+  what happens to any proof in flight across a lock;
+- the fix needs a per-op session capture in the shared `@nulo/aztec-runtime` PXE transport,
+  which applies to every PXE op and is outside the plan's file map.
+The execution README's fence section (Phase 7) states the limit.
+
+**B. Medium: failed-write cleanup can discard a newer refresh — fixed.** Verified: `commitSession`
+moves the in-memory deadline before `session.set` resolves, so a `refresh()` issued during that
+write saw a future deadline, skipped the pending decision, and queued its write. When the deferral
+write failed, the lock handoff let the refresh write before the decision's close deleted the row.
+Fix: `getActive` joins a pending decision even when the deadline in memory looks future, so every
+read, including `refresh`, waits for the decision to settle; the comment in `refresh` is accurate
+again. Test: the deferral write parked, a refresh issued, nothing queued on the artifact lock, the
+write rejected: the session closes and no refresh write reaches storage. Mutation "reads skip a
+pending decision once the deadline looks future": that test fails; the five round-1 mutations
+still fail their tests.
+
+Not fixed, stated: a TTL writer does not read through `getActive`. When a decision runs outside the
+facade lock and its write fails, a TTL change committed in that handoff window is closed along with
+the session. Closing a session whose extension could not be persisted fails closed, the TTL setting
+itself persists, and no user activity is lost, because `refresh` is the only activity writer and it
+now joins.
+
+Gate: `bun --bun vitest run src/wallet src/utils src/stores` exit 0 (237 files passed, 2 skipped;
+3336 tests passed); `bun run typecheck:all` exit 0; `bun run lint` exit 0 (30 warnings,
+pre-existing; complexity-baseline check OK).

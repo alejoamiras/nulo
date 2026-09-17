@@ -213,7 +213,9 @@ export class SessionManager {
 		if (!active) {
 			return undefined
 		}
-		if (!this.isExpired(active.session)) {
+		// A pending decision is joined even once its deferral has moved the deadline in memory: a
+		// writer that went ahead could land between that write failing and the close it causes.
+		if (!active.expiryDecision && !this.isExpired(active.session)) {
 			return active
 		}
 		this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session expired")
